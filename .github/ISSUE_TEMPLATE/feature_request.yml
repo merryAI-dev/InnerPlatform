@@ -1,0 +1,73 @@
+name: "Feature Request"
+description: "신규 기능 또는 개선 요청을 등록합니다."
+title: "[Feature] "
+labels:
+  - enhancement
+  - triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        구현자가 바로 작업할 수 있도록 목표와 성공 기준을 구체적으로 작성해주세요.
+  - type: textarea
+    id: problem
+    attributes:
+      label: 배경/문제
+      description: 현재 무엇이 불편하거나 위험한가요?
+      placeholder: 예) 수동 인덱스 배포로 누락이 반복됨
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: 목표
+      description: 이 요청이 완료되면 무엇이 가능해져야 하나요?
+    validations:
+      required: true
+  - type: textarea
+    id: success
+    attributes:
+      label: 완료 기준(수용 기준)
+      description: 체크 가능한 항목으로 작성해주세요.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+  - type: dropdown
+    id: priority
+    attributes:
+      label: 우선순위
+      options:
+        - P0 (긴급)
+        - P1 (높음)
+        - P2 (보통)
+        - P3 (낮음)
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: 영향 영역
+      options:
+        - Product UX
+        - API/BFF
+        - Firebase/Firestore
+        - Data Stability
+        - Security
+        - Operations/Runbook
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: non_goals
+    attributes:
+      label: 이번 범위에서 제외할 것
+      description: 범위 과다를 막기 위해 명확히 적어주세요.
+  - type: textarea
+    id: notes
+    attributes:
+      label: 참고 링크/문서
+      description: 관련 이슈, PR, 외부 문서 링크
+
