@@ -44,6 +44,76 @@ npm run dev
 - `npm run pii:setup:vercel`: generate/push Vercel-ready local PII keys (no GCP KMS).
 - `npm run policy:verify`: verify RBAC policy-as-code file integrity.
 
+## Firestore Automation System (비개발자 운영 가이드)
+
+이 프로젝트는 Firebase/Firestore 운영 작업을 "명령 1개" 단위로 실행할 수 있게 자동화했습니다.  
+목표는 개발자가 아니어도, 체크리스트만 따라가면 초기 세팅부터 운영 점검까지 끝내는 것입니다.
+
+### 1) 자동화가 해주는 일
+
+- Firebase 로그인 세션 안정화(daemon 방식).
+- 프로젝트/웹앱 자동 탐지 후 `.env`, `.firebaserc` 자동 생성.
+- Firestore 보안 규칙/복합 인덱스 배포.
+- 로컬 Emulator 준비 및 실행.
+- 백업 스케줄 생성/갱신, 복구 리허설 실행.
+- 운영 알림(5xx/지연/충돌 비율) 정책 생성.
+- Vercel 환경에서 PII 키 생성/배포/로테이션 지원.
+
+### 2) 최초 1회 준비
+
+- Node 24 권장: `nvm use 24`
+- 의존성 설치: `npm install`
+- Firebase 로그인(권장: daemon):
+  - `npm run firebase:login:daemon:start`
+  - 브라우저 코드 발급 후 `npm run firebase:login:daemon:submit -- '<authorization-code>'`
+- 로그인 확인: `npm run firebase:whoami`
+
+### 3) 표준 실행 순서(운영용)
+
+1. 원샷 세팅: `npm run firebase:autosetup`
+2. Google 로그인 활성화(콘솔 이동): `npm run firebase:open:google-auth`
+3. 인덱스만 재배포(스키마/쿼리 변경 시): `npm run firebase:deploy:indexes`
+4. 앱 실행 확인: `npm run dev`
+
+### 4) 자동화 메뉴판 (상황별)
+
+| 상황 | 실행 명령 | 자동 처리 내용 | 성공 기준 |
+| --- | --- | --- | --- |
+| 신규 환경 세팅 | `npm run firebase:autosetup` | 프로젝트 탐지, 웹앱 확인/생성, `.env`/`.firebaserc` 생성, rules/indexes 배포 | `.env` 생성 + deploy 완료 로그 |
+| 이미 `.env` 있음 | `npm run firebase:bootstrap` | `.env` 검증 후 rules/indexes 배포 | missing env 에러 없이 완료 |
+| 인덱스만 반영 | `npm run firebase:deploy:indexes` | Firestore composite indexes만 배포 | indexes deploy 완료 |
+| 콘솔 설정 이동 | `npm run firebase:open:google-auth` | Google provider 설정 페이지 오픈 | Firebase Console 페이지 열림 |
+| 로컬 테스트 | `npm run firebase:emulators:start` | Auth/Firestore/Storage emulator 실행 | emulator listening 로그 확인 |
+| 백업 정책 | `npm run firestore:backup:schedule` | 백업 스케줄 생성/보존기간 업데이트 | schedule list 출력 |
+| 복구 리허설 | `npm run firestore:backup:rehearsal` | 최신 백업을 별도 DB로 restore | restore 요청 성공 로그 |
+
+### 5) 반드시 사람이 해야 하는 것
+
+- Firebase Console에서 Google 로그인 Provider 활성화(보안/정책 승인 이슈로 완전 자동화 불가).
+- 운영 권한 승인(IAM, 결제, 조직 정책)은 관리자 계정에서 수행.
+- Vercel 사용 시 환경변수 반영 후 재배포 실행.
+
+### 6) 자주 나는 오류와 즉시 조치
+
+- `Unable to verify client`
+  - 원인: 로그인 URL/코드 만료 또는 세션 불일치.
+  - 조치: `firebase:login:daemon:start`를 다시 실행하고 새 코드로 즉시 submit.
+- `No authorized accounts`
+  - 원인: Firebase CLI 미로그인.
+  - 조치: `npm run firebase:login` 또는 daemon 로그인 재실행.
+- `Could not resolve Firebase project id`
+  - 원인: `.env`/`.firebaserc`에 project id 없음.
+  - 조치: `npm run firebase:autosetup` 먼저 실행.
+- `Java 21+ is required`
+  - 원인: Firestore emulator 실행 조건 미충족.
+  - 조치: `brew install openjdk@21` 후 재실행.
+
+### 7) 운영 문서(권장 읽기 순서)
+
+- `guidelines/Firestore-Automation-System-Guide.md`: 비개발자용 상세 운영 핸드북.
+- `guidelines/TIL-Firebase-Daemon-Setup.md`: 자동화 메뉴판 + 타 프로젝트 재사용 템플릿.
+- `guidelines/Operational-Hardening-Runbook.md`: 인덱스/백업/알림/PII/정책 운영런북.
+
 ## Firebase Runtime Configuration
 
 Set Firebase runtime values in `.env`:
@@ -87,6 +157,8 @@ npm run firebase:open:google-auth
 
 Reference doc:
 
+- `guidelines/Firestore-Automation-System-Guide.md`
+  - 비개발자용 Firestore 자동화 운영 핸드북
 - `guidelines/TIL-Firebase-Daemon-Setup.md`
   - Firebase 자동화 메뉴판 + 타 프로젝트 재사용 가이드
 - `guidelines/Platform-Foundation-Roadmap.md`
@@ -187,7 +259,8 @@ Container build source:
 - `server/bff/Dockerfile`
 
 GitHub CI workflow:
-- `.github/workflows/bff-ci.yml`
+- This branch intentionally excludes workflow file due GitHub token scope (`workflow`) limitation.
+- Add `.github/workflows/bff-ci.yml` in a follow-up PR with proper token scope.
 
 ## Local Emulator Prerequisite
 
