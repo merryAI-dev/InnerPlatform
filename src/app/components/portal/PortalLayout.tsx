@@ -44,6 +44,14 @@ function PortalContent() {
     }
   }, [isAuthenticated, location.pathname, navigate]);
 
+  useEffect(() => {
+    const role = authUser?.role;
+    if (!isAuthenticated || !role) return;
+    if (role === 'admin' || role === 'finance' || role === 'auditor') {
+      navigate('/', { replace: true });
+    }
+  }, [isAuthenticated, authUser, navigate]);
+
   // 포털 미등록 시 온보딩으로 (인증은 되었지만 포털 사업 미선택)
   useEffect(() => {
     if (isAuthenticated && !isRegistered && !location.pathname.includes('/portal/onboarding')) {

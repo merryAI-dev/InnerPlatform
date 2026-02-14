@@ -136,8 +136,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       uid: currentUser.uid,
       email: currentUser.email,
       role: currentUser.role,
+      idToken: authUser?.idToken,
     }),
-    [currentUser.uid, currentUser.email, currentUser.role],
+    [currentUser.uid, currentUser.email, currentUser.role, authUser?.idToken],
   );
 
   const members = useMemo<OrgMember[]>(() => {

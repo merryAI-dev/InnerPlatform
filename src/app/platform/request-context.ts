@@ -4,6 +4,7 @@ export interface RequestActor {
   id: string;
   email?: string;
   role?: string;
+  idToken?: string;
 }
 
 export interface BuildStandardHeadersInput {
@@ -62,6 +63,10 @@ export function buildStandardHeaders(input: BuildStandardHeadersInput): Headers 
 
   if (input.actor.role && !headers.get('x-actor-role')) {
     headers.set('x-actor-role', input.actor.role);
+  }
+
+  if (input.actor.idToken && !headers.get('authorization')) {
+    headers.set('authorization', `Bearer ${input.actor.idToken}`);
   }
 
   if (isMutationMethod(method) && !headers.get('idempotency-key')) {

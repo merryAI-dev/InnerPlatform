@@ -26,6 +26,14 @@ describe('platform-bff-client', () => {
     });
   });
 
+  it('passes id token when provided', () => {
+    expect(toRequestActor({ uid: 'u001', role: 'admin', idToken: 'token-abc' })).toEqual({
+      id: 'u001',
+      role: 'admin',
+      idToken: 'token-abc',
+    });
+  });
+
   it('calls project upsert endpoint', async () => {
     const client = {
       post: vi.fn(async () => ({ data: { id: 'p001', tenantId: 'mysc', version: 1, updatedAt: '2026-01-01' } })),

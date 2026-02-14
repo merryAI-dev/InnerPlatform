@@ -12,6 +12,7 @@
 - [ ] BFF/API
 - [ ] Firebase/Firestore 설정
 - [ ] 운영 스크립트(scripts)
+- [ ] 워커/스케줄링(outbox/work_queue)
 - [ ] 문서(README/guidelines)
 - [ ] 기타
 
@@ -29,6 +30,8 @@ npm run firebase:whoami
 npm run firebase:autosetup
 npm run firebase:deploy:indexes
 npm run firestore:backup:schedule
+npm run bff:outbox:worker
+npm run bff:work-queue:worker
 ```
 
 - 실행 일시:
@@ -53,6 +56,7 @@ npm run firestore:backup:schedule
 - [ ] Firebase Console에서 Google Provider 활성화 확인
 - [ ] IAM/보안 승인 확인
 - [ ] Vercel 환경변수 반영 후 redeploy
+- [ ] Vercel Cron 또는 외부 워커 런타임 구성(outbox/work_queue)
 - [ ] 기타:
 
 ## 위험도 및 롤백 계획

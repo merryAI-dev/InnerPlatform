@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { onAuthStateChanged, signInWithPopup, signOut, type User as FirebaseUser } from 'firebase/auth';
+import { onIdTokenChanged, signInWithPopup, signOut, type User as FirebaseUser } from 'firebase/auth';
 import type { UserRole } from './types';
 import { ORG_MEMBERS, PROJECTS } from './mock-data';
 import { featureFlags } from '../config/feature-flags';
@@ -28,6 +28,7 @@ export interface AuthUser {
   name: string;
   email: string;
   role: UserRole;
+  idToken?: string;
   avatarUrl?: string;
   projectId?: string;
   tenantId?: string;
@@ -130,6 +131,7 @@ function mapFirebaseUserToAuthUser(
   firebaseUser: FirebaseUser,
   member: Partial<MemberDoc> | undefined,
   tenantId: string,
+  idToken?: string,
 ): AuthUser {
   const role =
     toUserRole(member?.role) ||
@@ -139,6 +141,7 @@ function mapFirebaseUserToAuthUser(
     name: member?.name || firebaseUser.displayName || '사용자',
     email: firebaseUser.email || member?.email || '',
     role,
+    idToken,
     avatarUrl: member?.avatarUrl || firebaseUser.photoURL || undefined,
     projectId: member?.projectId || resolveProjectIdForManager(firebaseUser.uid, PROJECT_OWNERS),
     tenantId,
@@ -209,7 +212,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+    const unsubscribe = onIdTokenChanged(auth, async (firebaseUser) => {
       if (!firebaseUser) {
         setUser(null);
         saveUser(null);
@@ -231,7 +234,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           claimsContext.role,
           claimsContext.department,
         );
-        const mapped = mapFirebaseUserToAuthUser(firebaseUser, member, tenantId);
+        const mapped = mapFirebaseUserToAuthUser(firebaseUser, member, tenantId, token?.token);
         setUser(mapped);
         saveUser(mapped);
       } catch (err) {
@@ -240,7 +243,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           envTenantId: DEFAULT_ORG_ID,
           strict: false,
         });
-        const fallback = mapFirebaseUserToAuthUser(firebaseUser, undefined, fallbackTenantId);
+        const token = await firebaseUser.getIdTokenResult().catch(() => null);
+        const fallback = mapFirebaseUserToAuthUser(firebaseUser, undefined, fallbackTenantId, token?.token);
         setUser(fallback);
         saveUser(fallback);
       } finally {

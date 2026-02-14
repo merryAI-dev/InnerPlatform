@@ -1,0 +1,160 @@
+import { getAuth } from 'firebase-admin/auth';
+import { getOrInitAdminApp } from './firestore.mjs';
+import { assertTenantId, normalizeActorId, normalizeTenantId } from './utils.mjs';
+
+const AUTH_MODES = new Set(['headers', 'firebase_optional', 'firebase_required']);
+const TENANT_CLAIM_KEYS = ['tenantId', 'tenant_id', 'orgId', 'org_id'];
+
+function createAuthError(statusCode, message, code) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  error.code = code || (statusCode === 401 ? 'unauthorized' : 'forbidden');
+  return error;
+}
+
+function normalizeRole(value) {
+  return typeof value === 'string' ? value.trim().toLowerCase() : '';
+}
+
+function normalizeEmail(value) {
+  return typeof value === 'string' ? value.trim().toLowerCase() : '';
+}
+
+function normalizeOptionalActorId(value) {
+  const raw = typeof value === 'string' ? value.trim() : '';
+  if (!raw) return '';
+  return raw.replace(/\s+/g, '_').replace(/[^A-Za-z0-9._-]/g, '_');
+}
+
+function readHeader(readHeaderValue, name) {
+  return String(readHeaderValue(name) || '').trim();
+}
+
+export function resolveAuthMode(env = process.env) {
+  const configured = String(env.BFF_AUTH_MODE || '').trim().toLowerCase();
+  if (AUTH_MODES.has(configured)) {
+    return configured;
+  }
+  return env.NODE_ENV === 'production' ? 'firebase_required' : 'headers';
+}
+
+export function parseAuthorizationBearer(rawAuthorizationHeader) {
+  const headerValue = String(rawAuthorizationHeader || '').trim();
+  if (!headerValue) return '';
+  const match = headerValue.match(/^Bearer\s+(.+)$/i);
+  return match ? match[1].trim() : '';
+}
+
+export function extractTenantIdFromClaims(claims) {
+  if (!claims || typeof claims !== 'object') return '';
+  for (const key of TENANT_CLAIM_KEYS) {
+    const normalized = normalizeTenantId(claims[key]);
+    if (normalized) return normalized;
+  }
+  return '';
+}
+
+export function extractRoleFromClaims(claims) {
+  if (!claims || typeof claims !== 'object') return '';
+  const claimRole = normalizeRole(claims.role);
+  if (claimRole) return claimRole;
+
+  if (Array.isArray(claims.roles)) {
+    for (const role of claims.roles) {
+      const normalized = normalizeRole(role);
+      if (normalized) return normalized;
+    }
+  }
+  return '';
+}
+
+export function createFirebaseTokenVerifier(options = {}) {
+  const app = getOrInitAdminApp({ projectId: options.projectId });
+  const auth = getAuth(app);
+  return async (token) => auth.verifyIdToken(token, true);
+}
+
+function resolveIdentityFromHeaders({ readHeaderValue }) {
+  const tenantId = assertTenantId(readHeader(readHeaderValue, 'x-tenant-id'));
+  const actorId = normalizeActorId(readHeader(readHeaderValue, 'x-actor-id'));
+  const actorRole = normalizeRole(readHeader(readHeaderValue, 'x-actor-role')) || undefined;
+  const actorEmail = normalizeEmail(readHeader(readHeaderValue, 'x-actor-email')) || undefined;
+
+  return {
+    source: 'headers',
+    tenantId,
+    actorId,
+    actorRole,
+    actorEmail,
+  };
+}
+
+export async function resolveRequestIdentity(params) {
+  const {
+    authMode,
+    readHeaderValue,
+    verifyToken,
+  } = params;
+
+  if (authMode === 'headers') {
+    return resolveIdentityFromHeaders({ readHeaderValue });
+  }
+
+  const bearerToken = parseAuthorizationBearer(readHeader(readHeaderValue, 'authorization'));
+  if (!bearerToken && authMode === 'firebase_required') {
+    throw createAuthError(401, 'Authorization Bearer token is required', 'missing_bearer_token');
+  }
+
+  if (!bearerToken && authMode === 'firebase_optional') {
+    return resolveIdentityFromHeaders({ readHeaderValue });
+  }
+
+  if (!verifyToken) {
+    throw createAuthError(500, 'Auth verifier is not configured', 'auth_not_configured');
+  }
+
+  let claims;
+  try {
+    claims = await verifyToken(bearerToken);
+  } catch {
+    throw createAuthError(401, 'Invalid Firebase ID token', 'invalid_token');
+  }
+
+  const claimActorId = normalizeOptionalActorId(claims?.uid || claims?.sub);
+  if (!claimActorId) {
+    throw createAuthError(401, 'Token does not include a valid uid', 'invalid_token');
+  }
+
+  const claimTenantId = extractTenantIdFromClaims(claims);
+  const headerTenantId = normalizeTenantId(readHeader(readHeaderValue, 'x-tenant-id'));
+  if (claimTenantId && headerTenantId && claimTenantId !== headerTenantId) {
+    throw createAuthError(403, 'Header tenant does not match token tenant', 'tenant_mismatch');
+  }
+
+  const headerActorId = normalizeOptionalActorId(readHeader(readHeaderValue, 'x-actor-id'));
+  if (headerActorId && headerActorId !== claimActorId) {
+    throw createAuthError(403, 'Header actor does not match token subject', 'actor_mismatch');
+  }
+
+  const claimRole = extractRoleFromClaims(claims);
+  const headerRole = normalizeRole(readHeader(readHeaderValue, 'x-actor-role'));
+  if (claimRole && headerRole && claimRole !== headerRole) {
+    throw createAuthError(403, 'Header role does not match token role', 'role_mismatch');
+  }
+
+  const claimEmail = normalizeEmail(claims?.email || '');
+  const headerEmail = normalizeEmail(readHeader(readHeaderValue, 'x-actor-email'));
+  if (claimEmail && headerEmail && claimEmail !== headerEmail) {
+    throw createAuthError(403, 'Header email does not match token email', 'email_mismatch');
+  }
+
+  const resolvedTenantId = assertTenantId(claimTenantId || headerTenantId);
+  return {
+    source: 'firebase',
+    tenantId: resolvedTenantId,
+    actorId: claimActorId,
+    actorRole: claimRole || headerRole || undefined,
+    actorEmail: claimEmail || headerEmail || undefined,
+    tokenClaims: claims,
+  };
+}

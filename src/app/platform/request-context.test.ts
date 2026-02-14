@@ -55,4 +55,14 @@ describe('request-context helpers', () => {
     expect(headers.get('x-actor-id')).toBe('u001');
     expect(headers.get('idempotency-key')).toBe('idem-fixed');
   });
+
+  it('adds authorization header when id token exists', () => {
+    const headers = buildStandardHeaders({
+      tenantId: 'mysc',
+      actor: { id: 'u001', idToken: 'token-123' },
+      method: 'GET',
+    });
+
+    expect(headers.get('authorization')).toBe('Bearer token-123');
+  });
 });

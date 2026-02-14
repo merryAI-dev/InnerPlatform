@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "project-default",
+      "enabled": true,
+      "when": {
+        "entityType": "project",
+        "changedFields": "*"
+      },
+      "affects": ["project_financials", "alerts"]
+    },
+    {
+      "id": "ledger-default",
+      "enabled": true,
+      "when": {
+        "entityType": "ledger",
+        "changedFields": "*"
+      },
+      "affects": ["project_financials", "alerts"]
+    },
+    {
+      "id": "transaction-default",
+      "enabled": true,
+      "when": {
+        "entityType": "transaction",
+        "changedFields": "*"
+      },
+      "affects": ["project_financials", "approval_inbox", "member_workload", "alerts"]
+    },
+    {
+      "id": "expense-set-default",
+      "enabled": true,
+      "when": {
+        "entityType": "expense_set",
+        "changedFields": "*"
+      },
+      "affects": ["project_financials", "approval_inbox", "alerts"]
+    },
+    {
+      "id": "change-request-default",
+      "enabled": true,
+      "when": {
+        "entityType": "change_request",
+        "changedFields": "*"
+      },
+      "affects": ["approval_inbox", "member_workload", "alerts"]
+    },
+    {
+      "id": "member-default",
+      "enabled": true,
+      "when": {
+        "entityType": "member",
+        "changedFields": "*"
+      },
+      "affects": ["member_workload", "alerts"]
+    },
+    {
+      "id": "global-fallback",
+      "enabled": true,
+      "when": {
+        "entityType": "*",
+        "changedFields": "*"
+      },
+      "affects": ["alerts"]
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import { createBffApp } from './app.mjs';
 import { createFirestoreDb } from './firestore.mjs';
@@ -44,9 +44,12 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       'evidences',
       'audit_logs',
       'audit_chain',
+      'change_events',
+      'views',
       'members',
       'outbox_deliveries',
       'idempotency_keys',
+      'relation_rules',
     ];
 
     for (const collectionName of collections) {
@@ -54,6 +57,7 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     }
 
     await clearCollection('outbox');
+    await clearCollection('work_queue');
   }
 
   beforeAll(async () => {
@@ -74,6 +78,64 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     expect(response.status).toBe(200);
     expect(response.body.ok).toBe(true);
     expect(response.body.projectId).toBe(projectId);
+  });
+
+  it('rejects disallowed CORS origin', async () => {
+    const corsApi = request(createBffApp({
+      projectId,
+      allowedOrigins: 'http://localhost:5173',
+    }));
+
+    const denied = await corsApi
+      .get('/api/v1/health')
+      .set('origin', 'https://evil.example.com');
+
+    expect(denied.status).toBe(403);
+    expect(denied.body.error).toBe('origin_not_allowed');
+  });
+
+  it('enforces firebase_required auth mode and blocks header spoofing', async () => {
+    const verifier = vi.fn(async (token: string) => {
+      if (token !== 'valid-token') {
+        throw new Error('invalid token');
+      }
+      return {
+        uid: actorId,
+        email: 'admin@mysc.co.kr',
+        role: 'admin',
+        tenantId,
+      };
+    });
+
+    const secureApi = request(createBffApp({
+      projectId,
+      authMode: 'firebase_required',
+      tokenVerifier: verifier,
+    }));
+
+    const missingToken = await secureApi
+      .get('/api/v1/projects')
+      .set(defaultHeaders);
+
+    expect(missingToken.status).toBe(401);
+    expect(missingToken.body.error).toBe('missing_bearer_token');
+
+    const ok = await secureApi
+      .get('/api/v1/projects')
+      .set({ ...defaultHeaders, authorization: 'Bearer valid-token' });
+
+    expect(ok.status).toBe(200);
+
+    const spoofed = await secureApi
+      .get('/api/v1/projects')
+      .set({
+        ...defaultHeaders,
+        'x-actor-id': 'spoofed-user',
+        authorization: 'Bearer valid-token',
+      });
+
+    expect(spoofed.status).toBe(403);
+    expect(spoofed.body.error).toBe('actor_mismatch');
   });
 
   it('handles project upsert idempotency and version conflicts', async () => {
@@ -184,6 +246,42 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
 
     expect(txList.status).toBe(200);
     expect(txList.body.count).toBe(1);
+  });
+
+  it('supports deterministic cursor pagination for project list', async () => {
+    await api
+      .post('/api/v1/projects')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-page-project-1' })
+      .send({ id: 'p-page-001', name: 'Paged Project 1' });
+    await api
+      .post('/api/v1/projects')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-page-project-2' })
+      .send({ id: 'p-page-002', name: 'Paged Project 2' });
+    await api
+      .post('/api/v1/projects')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-page-project-3' })
+      .send({ id: 'p-page-003', name: 'Paged Project 3' });
+
+    const firstPage = await api
+      .get('/api/v1/projects?limit=2')
+      .set(defaultHeaders);
+
+    expect(firstPage.status).toBe(200);
+    expect(firstPage.body.count).toBe(2);
+    expect(firstPage.body.nextCursor).toBeTruthy();
+
+    const secondPage = await api
+      .get(`/api/v1/projects?limit=2&cursor=${encodeURIComponent(firstPage.body.nextCursor)}`)
+      .set(defaultHeaders);
+
+    expect(secondPage.status).toBe(200);
+    expect(secondPage.body.count).toBe(1);
+
+    const seenIds = new Set([
+      ...firstPage.body.items.map((item: any) => item.id),
+      ...secondPage.body.items.map((item: any) => item.id),
+    ]);
+    expect(seenIds.size).toBe(3);
   });
 
   it('enforces deterministic state transitions and version checks', async () => {
@@ -408,5 +506,132 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       .get();
     const roleChangeLog = auditSnap.docs.map((doc) => doc.data()).find((item: any) => item.action === 'ROLE_CHANGE');
     expect(roleChangeLog).toBeTruthy();
+  });
+
+  it('enforces route-level RBAC for audit reads and write APIs', async () => {
+    const deniedAudit = await api
+      .get('/api/v1/audit-logs')
+      .set({ ...defaultHeaders, 'x-actor-role': 'pm' });
+
+    expect(deniedAudit.status).toBe(403);
+    expect(deniedAudit.body.error).toBe('forbidden');
+
+    const deniedWrite = await api
+      .post('/api/v1/projects')
+      .set({ ...defaultHeaders, 'x-actor-role': 'viewer', 'idempotency-key': 'idem-rbac-deny-write' })
+      .send({ id: 'p-rbac-denied', name: 'Denied Project' });
+
+    expect(deniedWrite.status).toBe(403);
+    expect(deniedWrite.body.error).toBe('forbidden');
+  });
+
+  it('writes through generic pipeline and synchronizes projection views', async () => {
+    const createProject = await api
+      .post('/api/v1/write')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-gw-project-001' })
+      .send({
+        entityType: 'project',
+        entityId: 'p-gw-001',
+        patch: {
+          id: 'p-gw-001',
+          name: 'Pipeline Project',
+        },
+      });
+
+    expect(createProject.status).toBe(201);
+    expect(createProject.body.eventId).toBeTruthy();
+    expect(createProject.body.affectedViews).toContain('project_financials');
+
+    const createLedger = await api
+      .post('/api/v1/write')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-gw-ledger-001' })
+      .send({
+        entityType: 'ledger',
+        entityId: 'l-gw-001',
+        patch: {
+          id: 'l-gw-001',
+          projectId: 'p-gw-001',
+          name: 'Pipeline Ledger',
+        },
+      });
+    expect(createLedger.status).toBe(201);
+
+    const createTx = await api
+      .post('/api/v1/write')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-gw-tx-001' })
+      .send({
+        entityType: 'transaction',
+        entityId: 'tx-gw-001',
+        patch: {
+          id: 'tx-gw-001',
+          projectId: 'p-gw-001',
+          ledgerId: 'l-gw-001',
+          counterparty: 'Pipeline Vendor',
+          direction: 'OUT',
+          state: 'SUBMITTED',
+          amounts: {
+            bankAmount: 150000,
+          },
+          submittedBy: actorId,
+          submittedAt: '2026-02-14T12:00:00.000Z',
+        },
+      });
+
+    expect(createTx.status).toBe(201);
+    expect(createTx.body.affectedViews).toContain('approval_inbox');
+
+    const financials = await api
+      .get('/api/v1/views/project_financials?projectId=p-gw-001')
+      .set(defaultHeaders);
+    expect(financials.status).toBe(200);
+    expect(financials.body.item).toBeTruthy();
+    expect(financials.body.item.projectId).toBe('p-gw-001');
+
+    const inbox = await api
+      .get('/api/v1/views/approval_inbox')
+      .set(defaultHeaders);
+    expect(inbox.status).toBe(200);
+    expect(inbox.body.totalPending).toBeGreaterThanOrEqual(1);
+    const hasTx = (inbox.body.items || []).some((item: any) => item.itemId === 'tx-gw-001');
+    expect(hasTx).toBe(true);
+
+    const queueJobs = await api
+      .get('/api/v1/queue/jobs?eventId=' + encodeURIComponent(createTx.body.eventId))
+      .set(defaultHeaders);
+    expect(queueJobs.status).toBe(200);
+    expect(queueJobs.body.count).toBeGreaterThanOrEqual(1);
+  });
+
+  it('replays queue jobs from a change event', async () => {
+    const write = await api
+      .post('/api/v1/write')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-gw-replay-seed' })
+      .send({
+        entityType: 'member',
+        entityId: 'u-replay-001',
+        patch: {
+          id: 'u-replay-001',
+          name: 'Replay User',
+          role: 'pm',
+          email: 'replay@example.com',
+        },
+      });
+
+    expect(write.status).toBe(201);
+    expect(write.body.eventId).toBeTruthy();
+
+    const replay = await api
+      .post(`/api/v1/queue/replay/${write.body.eventId}`)
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-gw-replay-run' })
+      .send({});
+
+    expect(replay.status).toBe(200);
+    expect(replay.body.queued).toBeGreaterThanOrEqual(1);
+
+    const jobs = await api
+      .get('/api/v1/queue/jobs?eventId=' + encodeURIComponent(write.body.eventId))
+      .set(defaultHeaders);
+    expect(jobs.status).toBe(200);
+    expect(jobs.body.count).toBeGreaterThanOrEqual(1);
   });
 });

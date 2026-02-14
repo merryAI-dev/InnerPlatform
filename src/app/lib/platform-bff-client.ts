@@ -12,6 +12,7 @@ export interface ActorLike {
   uid: string;
   email?: string;
   role?: string;
+  idToken?: string;
 }
 
 export interface UpsertProjectPayload {
@@ -94,11 +95,15 @@ export function readPlatformApiRuntimeConfig(
 }
 
 export function toRequestActor(actor: ActorLike): RequestActor {
-  return {
+  const mapped: RequestActor = {
     id: actor.uid,
     email: actor.email,
     role: actor.role,
   };
+  if (actor.idToken) {
+    mapped.idToken = actor.idToken;
+  }
+  return mapped;
 }
 
 export function createPlatformApiClient(

@@ -27,7 +27,53 @@ npm run bff:outbox:worker
 BFF_OUTBOX_LOOP=true npm run bff:outbox:worker
 ```
 
-## 4) Backup/Recovery Drill
+## 4) Projection Work Queue Processing
+
+The generic write pipeline enqueues projection sync jobs into `work_queue/*`.
+
+```bash
+# one-shot processing
+npm run bff:work-queue:worker
+
+# continuous worker
+BFF_WORK_QUEUE_LOOP=true BFF_WORK_QUEUE_INTERVAL_MS=2000 npm run bff:work-queue:worker
+```
+
+### Recommended Production Strategy (Vercel-first)
+
+Use HTTP-triggered one-shot workers from Vercel Cron.
+
+1. Create protected endpoints in BFF:
+   - `POST /api/internal/workers/outbox/run`
+   - `POST /api/internal/workers/work-queue/run`
+2. Verify with a shared secret header (`x-worker-secret`).
+3. Add Vercel Cron schedules:
+   - every minute for work queue
+   - every 1-5 minutes for outbox
+4. Keep each invocation short and idempotent:
+   - process up to N jobs per run
+   - return processed count + remaining estimate
+
+### Alternative Strategy (External Always-on Worker)
+
+Run both workers as long-lived processes on a separate runtime (Cloud Run job/service, Fly.io, Railway, ECS, VM).
+
+- Pros: low queue latency, stable throughput, easier back-pressure tuning.
+- Cons: extra runtime/cost/ops.
+- Recommended env:
+  - `BFF_WORK_QUEUE_LOOP=true`
+  - `BFF_OUTBOX_LOOP=true`
+  - `BFF_WORK_QUEUE_INTERVAL_MS=2000`
+  - `BFF_OUTBOX_INTERVAL_MS=2000`
+
+### Failure Handling Checklist
+
+- Alert on `status=dead` count increase in `work_queue/*` and `outbox/*`.
+- Use replay endpoint for projections: `POST /api/v1/queue/replay/:eventId`.
+- Keep max attempts explicit (`BFF_WORK_QUEUE_MAX_ATTEMPTS`, `BFF_OUTBOX_MAX_ATTEMPTS`).
+- Include dead-letter triage in daily ops routine.
+
+## 5) Backup/Recovery Drill
 
 ```bash
 # schedule backups
@@ -37,7 +83,7 @@ npm run firestore:backup:schedule
 npm run firestore:backup:rehearsal
 ```
 
-## 5) SLO Alerts
+## 6) SLO Alerts
 
 ```bash
 export MONITORING_NOTIFICATION_CHANNELS='projects/<project>/notificationChannels/<channel-id>'
@@ -49,7 +95,7 @@ Creates/updates:
 - p95 latency > 2s
 - version_conflict rate > 5%
 
-## 6) PII Encryption + Rotation
+## 7) PII Encryption + Rotation
 
 - `PII_MODE=local|kms|auto|off`
 - Local mode:
@@ -81,7 +127,7 @@ Optional custom args:
 - `--key-id v2`
 - `--environments production,preview`
 
-## 7) Policy-as-Code
+## 8) Policy-as-Code
 
 ```bash
 npm run policy:verify

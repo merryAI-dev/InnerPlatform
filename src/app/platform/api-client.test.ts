@@ -7,6 +7,7 @@ describe('PlatformApiClient', () => {
       const headers = new Headers(init?.headers);
       expect(headers.get('x-tenant-id')).toBe('mysc');
       expect(headers.get('x-actor-id')).toBe('u001');
+      expect(headers.get('authorization')).toBe('Bearer id-token-1');
       expect(headers.get('idempotency-key')).toMatch(/^idem_POST_u001_/);
       expect(headers.get('content-type')).toBe('application/json');
 
@@ -22,7 +23,7 @@ describe('PlatformApiClient', () => {
     const client = new PlatformApiClient({ baseUrl: 'https://api.example.com', fetchImpl });
     const response = await client.post<{ ok: boolean }>('/api/v1/projects', {
       tenantId: 'mysc',
-      actor: { id: 'u001', role: 'admin' },
+      actor: { id: 'u001', role: 'admin', idToken: 'id-token-1' },
       body: { name: 'test' },
       requestId: 'req-client',
     });

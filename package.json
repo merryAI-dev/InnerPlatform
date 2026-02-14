@@ -13,6 +13,7 @@
     "bff:test:integration": "bash scripts/test_bff_integration.sh",
     "bff:cleanup:idempotency": "node server/bff/cleanup_idempotency.mjs",
     "bff:outbox:worker": "node server/bff/outbox-worker.mjs",
+    "bff:work-queue:worker": "node server/bff/work-queue-worker.mjs",
     "bff:deploy:cloud-run": "bash scripts/deploy_bff_cloud_run.sh",
     "firebase:bootstrap": "bash scripts/firebase_bootstrap.sh",
     "firebase:login": "npx firebase-tools login --no-localhost",

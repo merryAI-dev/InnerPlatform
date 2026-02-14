@@ -1,22 +1,40 @@
 import express from 'express';
 import { randomUUID } from 'node:crypto';
 import { createFirestoreDb, isFirestoreEmulatorEnabled, resolveProjectId } from './firestore.mjs';
+import {
+  createFirebaseTokenVerifier,
+  resolveAuthMode,
+  resolveRequestIdentity,
+} from './auth.mjs';
 import { createIdempotencyService } from './idempotency.mjs';
 import { createAuditChainService } from './audit-chain.mjs';
 import {
   createOutboxEvent,
   enqueueOutboxEventInTransaction,
 } from './outbox.mjs';
+import {
+  createWorkQueueJob,
+  enqueueReplayJobs,
+  enqueueWorkQueueJobsInTransaction,
+  processWorkQueueBatch,
+} from './work-queue.mjs';
+import {
+  listSupportedViews,
+} from './projections.mjs';
+import {
+  resolveAffectedViews,
+  resolveRelationRules,
+  resolveRelationRulesPolicyPath,
+} from './relation-rules.mjs';
 import { createPiiProtector } from './pii-protection.mjs';
 import { canActorAssignRole, loadRbacPolicy } from './rbac-policy.mjs';
 import {
-  assertTenantId,
   createRequestId,
-  normalizeActorId,
 } from './utils.mjs';
 import {
   commentCreateSchema,
   evidenceCreateSchema,
+  genericWriteSchema,
   ledgerUpsertSchema,
   memberRoleUpdateSchema,
   parseWithSchema,
@@ -42,10 +60,138 @@ function parseLimit(raw, fallback = 50, max = 200) {
   return Math.min(n, max);
 }
 
+function parseCursor(raw) {
+  const cursor = typeof raw === 'string' ? raw.trim() : '';
+  return cursor || undefined;
+}
+
+function parseAllowedOrigins(value) {
+  const rawValue = String(value || '');
+  const parsed = rawValue
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  if (parsed.length > 0) {
+    return parsed;
+  }
+
+  return ['http://127.0.0.1:5173', 'http://localhost:5173'];
+}
+
+function buildListResponse(items, limit) {
+  const nextCursor = items.length === limit ? items[items.length - 1]?.id || null : null;
+  return {
+    items,
+    count: items.length,
+    nextCursor,
+  };
+}
+
+function normalizeEntityType(value) {
+  return typeof value === 'string' ? value.trim().toLowerCase() : '';
+}
+
+const ENTITY_COLLECTIONS = {
+  project: 'projects',
+  ledger: 'ledgers',
+  transaction: 'transactions',
+  expense_set: 'expense_sets',
+  expense_sets: 'expense_sets',
+  change_request: 'change_requests',
+  change_requests: 'change_requests',
+  member: 'members',
+};
+
+function resolveEntityCollectionName(entityType) {
+  const normalized = normalizeEntityType(entityType);
+  return ENTITY_COLLECTIONS[normalized] || '';
+}
+
+function resolveEntityDocPath(tenantId, entityType, entityId) {
+  const collectionName = resolveEntityCollectionName(entityType);
+  if (!collectionName) {
+    throw createHttpError(400, `Unsupported entityType: ${entityType}`);
+  }
+  const normalizedId = typeof entityId === 'string' ? entityId.trim() : '';
+  if (!normalizedId) {
+    throw createHttpError(400, 'entityId is required');
+  }
+  return `orgs/${tenantId}/${collectionName}/${normalizedId}`;
+}
+
+function flattenObjectPaths(value, basePath = '') {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return basePath ? [basePath] : [];
+  }
+
+  const keys = Object.keys(value);
+  if (!keys.length) {
+    return basePath ? [basePath] : [];
+  }
+
+  const paths = [];
+  for (const key of keys) {
+    const nextPath = basePath ? `${basePath}.${key}` : key;
+    const nextValue = value[key];
+    if (nextValue && typeof nextValue === 'object' && !Array.isArray(nextValue)) {
+      paths.push(...flattenObjectPaths(nextValue, nextPath));
+    } else {
+      paths.push(nextPath);
+    }
+  }
+  return paths;
+}
+
+function readByPath(obj, path) {
+  if (!obj || !path) return undefined;
+  return path.split('.').reduce((acc, key) => {
+    if (!acc || typeof acc !== 'object') return undefined;
+    return acc[key];
+  }, obj);
+}
+
+function detectChangedFields(current, patch) {
+  const paths = flattenObjectPaths(patch);
+  return paths.filter((path) => {
+    const before = readByPath(current, path);
+    const after = readByPath(patch, path);
+    return JSON.stringify(before) !== JSON.stringify(after);
+  });
+}
+
 function stripExpectedVersion(payload) {
   const cloned = { ...payload };
   delete cloned.expectedVersion;
   return cloned;
+}
+
+const SERVER_MANAGED_FIELDS = new Set([
+  'tenantId',
+  'version',
+  'createdBy',
+  'createdAt',
+  'updatedBy',
+  'updatedAt',
+  'submittedBy',
+  'submittedAt',
+  'approvedBy',
+  'approvedAt',
+  'rejectedReason',
+  'uploadedBy',
+  'uploadedAt',
+  'authorId',
+]);
+
+function stripServerManagedFields(payload) {
+  const sanitized = {};
+  for (const [key, value] of Object.entries(payload || {})) {
+    if (SERVER_MANAGED_FIELDS.has(key)) {
+      continue;
+    }
+    sanitized[key] = value;
+  }
+  return sanitized;
 }
 
 function assertReasonForRejected(state, reason) {
@@ -57,6 +203,14 @@ function assertReasonForRejected(state, reason) {
 function normalizeRole(value) {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
 }
+
+const ROUTE_ROLES = {
+  readCore: ['admin', 'finance', 'pm', 'viewer', 'auditor', 'tenant_admin', 'support', 'security'],
+  writeCore: ['admin', 'finance', 'pm', 'tenant_admin'],
+  writeTransaction: ['admin', 'finance', 'pm', 'tenant_admin'],
+  auditRead: ['admin', 'finance', 'auditor', 'tenant_admin', 'support', 'security'],
+  memberWrite: ['admin', 'tenant_admin'],
+};
 
 async function encryptAuditEmail(piiProtector, email) {
   if (!email) return undefined;
@@ -155,14 +309,20 @@ function asyncHandler(handler) {
   };
 }
 
-function assertApiHeaders(req, res, next) {
-  try {
-    const tenantId = assertTenantId(req.header('x-tenant-id'));
-    const actorId = normalizeActorId(req.header('x-actor-id'));
-    const actorRole = normalizeRole(req.header('x-actor-role')) || undefined;
-    const actorEmail = (req.header('x-actor-email') || '').trim().toLowerCase() || undefined;
-    const requestId = req.header('x-request-id') || createRequestId();
+function assertActorRoleAllowed(req, allowedRoles, action) {
+  const actorRole = normalizeRole(req.context?.actorRole);
+  if (!actorRole || !allowedRoles.includes(actorRole)) {
+    throw createHttpError(
+      403,
+      `Role '${actorRole || 'unknown'}' is not allowed to ${action}`,
+      'forbidden',
+    );
+  }
+}
 
+function createApiContextMiddleware({ authMode, verifyToken }) {
+  return asyncHandler(async (req, res, next) => {
+    const requestId = req.header('x-request-id') || createRequestId();
     const isMutating = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method.toUpperCase());
     const idempotencyKey = req.header('idempotency-key') || '';
 
@@ -170,20 +330,25 @@ function assertApiHeaders(req, res, next) {
       throw createHttpError(400, 'idempotency-key header is required for mutating requests');
     }
 
+    const identity = await resolveRequestIdentity({
+      authMode,
+      verifyToken,
+      readHeaderValue: (name) => req.header(name),
+    });
+
     req.context = {
-      tenantId,
-      actorId,
-      actorRole,
-      actorEmail,
+      tenantId: identity.tenantId,
+      actorId: identity.actorId,
+      actorRole: identity.actorRole,
+      actorEmail: identity.actorEmail,
+      authSource: identity.source,
       requestId,
       idempotencyKey: idempotencyKey.trim() || undefined,
     };
 
     res.setHeader('x-request-id', requestId);
     next();
-  } catch (error) {
-    next(error);
-  }
+  });
 }
 
 function createMutatingRoute(idempotencyService, routeHandler) {
@@ -249,30 +414,42 @@ export function createBffApp(options = {}) {
   const now = options.now || (() => new Date().toISOString());
   const projectId = options.projectId || resolveProjectId();
   const db = options.db || createFirestoreDb({ projectId });
+  const authMode = options.authMode || resolveAuthMode();
+  const verifyToken = options.tokenVerifier || createFirebaseTokenVerifier({ projectId });
   const idempotencyService = createIdempotencyService(db);
   const auditChainService = createAuditChainService(db, { now });
   const piiProtector = options.piiProtector || createPiiProtector();
   const rbacPolicy = options.rbacPolicy || loadRbacPolicy();
-  const allowedOrigins = String(process.env.BFF_ALLOWED_ORIGINS || '*')
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean);
+  const allowedOrigins = parseAllowedOrigins(options.allowedOrigins || process.env.BFF_ALLOWED_ORIGINS);
+  const relationRulesPolicyPath = options.relationRulesPolicyPath || resolveRelationRulesPolicyPath();
+  const workQueueBatchSize = Number.parseInt(process.env.BFF_WORK_QUEUE_BATCH || '100', 10);
+  const workQueueMaxAttempts = Number.parseInt(process.env.BFF_WORK_QUEUE_MAX_ATTEMPTS || '6', 10);
 
   app.disable('x-powered-by');
   app.use(express.json({ limit: '1mb' }));
 
   app.use((req, res, next) => {
     const requestOrigin = req.header('origin') || '';
-    const allowAny = allowedOrigins.includes('*');
-    const isAllowed = allowAny || allowedOrigins.includes(requestOrigin);
-    const chosenOrigin = allowAny ? '*' : (isAllowed ? requestOrigin : '');
+    const allowAnyOrigin = allowedOrigins.includes('*');
+    const isAllowedOrigin = allowAnyOrigin || !requestOrigin || allowedOrigins.includes(requestOrigin);
 
-    if (chosenOrigin) {
-      res.setHeader('Access-Control-Allow-Origin', chosenOrigin);
+    if (!isAllowedOrigin) {
+      res.status(403).json({
+        error: 'origin_not_allowed',
+        message: `Origin is not allowed: ${requestOrigin}`,
+      });
+      return;
+    }
+
+    if (requestOrigin) {
+      res.setHeader('Access-Control-Allow-Origin', allowAnyOrigin ? '*' : requestOrigin);
     }
     res.setHeader('Vary', 'Origin');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-tenant-id, x-actor-id, x-actor-role, x-actor-email, x-request-id, idempotency-key');
+    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, x-tenant-id, x-actor-id, x-actor-role, x-actor-email, x-request-id, idempotency-key');
     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,PUT,DELETE,OPTIONS');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'same-origin');
 
     if (req.method.toUpperCase() === 'OPTIONS') {
       res.status(204).end();
@@ -312,58 +489,363 @@ export function createBffApp(options = {}) {
     next();
   });
 
+  async function loadTenantRules(tenantId) {
+    return resolveRelationRules({
+      db,
+      tenantId,
+      policyPath: relationRulesPolicyPath,
+    });
+  }
+
+  async function processQueueSync(tenantId, eventId) {
+    return processWorkQueueBatch(db, {
+      tenantId,
+      eventId,
+      limit: workQueueBatchSize,
+      maxAttempts: workQueueMaxAttempts,
+      now,
+    });
+  }
+
   app.get('/api/v1/health', (_req, res) => {
     res.status(200).json({
       ok: true,
       service: 'mysc-bff',
       projectId,
+      authMode,
       firestoreEmulator: isFirestoreEmulatorEnabled(),
       timestamp: now(),
     });
   });
 
-  app.use('/api/v1', assertApiHeaders);
+  app.use('/api/v1', createApiContextMiddleware({ authMode, verifyToken }));
+
+  app.post('/api/v1/write', createMutatingRoute(idempotencyService, async (req) => {
+    assertActorRoleAllowed(req, ROUTE_ROLES.writeCore, 'write data');
+    const { tenantId, actorId, actorRole, actorEmail, requestId } = req.context;
+    const timestamp = now();
+    const parsed = parseWithSchema(genericWriteSchema, req.body, 'Invalid write payload');
+
+    const entityType = normalizeEntityType(parsed.entityType);
+    const payloadPatch = stripServerManagedFields(parsed.patch || {});
+    const patchId = typeof payloadPatch.id === 'string' ? payloadPatch.id.trim() : '';
+    const bodyEntityId = typeof parsed.entityId === 'string' ? parsed.entityId.trim() : '';
+    const entityId = bodyEntityId || patchId;
+
+    if (!entityId) {
+      throw createHttpError(400, 'entityId is required (either entityId or patch.id)');
+    }
+    if (bodyEntityId && patchId && bodyEntityId !== patchId) {
+      throw createHttpError(400, 'entityId and patch.id do not match');
+    }
+
+    payloadPatch.id = entityId;
+    const docPath = resolveEntityDocPath(tenantId, entityType, entityId);
+    const rules = await loadTenantRules(tenantId);
+    const eventId = `ce_${timestamp.replace(/[^0-9]/g, '').slice(0, 14)}_${randomUUID().replace(/-/g, '').slice(0, 10)}`;
+
+    const result = await db.runTransaction(async (tx) => {
+      const ref = db.doc(docPath);
+      const snap = await tx.get(ref);
+      const current = snap.exists ? (snap.data() || {}) : {};
+      const currentVersion = Number.isInteger(current.version) && current.version > 0 ? current.version : 0;
+      const expectedVersion = parsed.expectedVersion;
+
+      if (!snap.exists) {
+        if (expectedVersion !== undefined && expectedVersion !== 0) {
+          throw createHttpError(
+            409,
+            `Version mismatch: expected ${expectedVersion}, actual 0`,
+            'version_conflict',
+          );
+        }
+      } else {
+        if (expectedVersion === undefined) {
+          throw createHttpError(
+            409,
+            `expectedVersion is required for update (current=${currentVersion})`,
+            'version_required',
+          );
+        }
+        if (expectedVersion !== currentVersion) {
+          throw createHttpError(
+            409,
+            `Version mismatch: expected ${expectedVersion}, actual ${currentVersion}`,
+            'version_conflict',
+          );
+        }
+      }
+
+      const changedFields = detectChangedFields(current, payloadPatch);
+      const nextVersion = currentVersion + 1;
+      const document = {
+        ...current,
+        ...payloadPatch,
+        id: entityId,
+        tenantId,
+        version: nextVersion,
+        createdBy: current.createdBy || actorId,
+        createdAt: current.createdAt || timestamp,
+        updatedBy: actorId,
+        updatedAt: timestamp,
+      };
+      tx.set(ref, document, { merge: true });
+
+      const changeEvent = {
+        id: eventId,
+        tenantId,
+        requestId,
+        entityType,
+        entityId,
+        version: nextVersion,
+        changedFields,
+        actorId,
+        actorRole: actorRole || null,
+        actorEmail: actorEmail || null,
+        createdAt: timestamp,
+      };
+      tx.set(db.doc(`orgs/${tenantId}/change_events/${eventId}`), changeEvent, { merge: true });
+
+      const affectedViews = resolveAffectedViews(rules, {
+        entityType,
+        changedFields,
+      });
+      const jobs = affectedViews.map((viewName) => createWorkQueueJob({
+        tenantId,
+        eventId,
+        entityType,
+        entityId,
+        viewName,
+        dedupeKey: `${tenantId}:${entityType}:${entityId}:${nextVersion}:${viewName}`,
+        payload: {
+          changedFields,
+          version: nextVersion,
+        },
+        createdAt: timestamp,
+      }));
+      enqueueWorkQueueJobsInTransaction(tx, db, jobs);
+
+      return {
+        created: !snap.exists,
+        version: nextVersion,
+        changedFields,
+        affectedViews,
+      };
+    });
+
+    const actorEmailEnc = await encryptAuditEmail(piiProtector, actorEmail);
+    await auditChainService.append({
+      tenantId,
+      entityType,
+      entityId,
+      action: result.created ? 'CREATE' : 'UPSERT',
+      actorId,
+      actorRole,
+      actorEmailEnc,
+      requestId,
+      details: `Generic write: ${entityType}/${entityId}`,
+      metadata: {
+        source: 'bff.write',
+        version: result.version,
+        changedFields: result.changedFields,
+        affectedViews: result.affectedViews,
+        eventId,
+      },
+      timestamp,
+    });
+
+    let queueResult = null;
+    const syncEnabled = parsed.options?.sync !== false;
+    if (syncEnabled && result.affectedViews.length) {
+      queueResult = await processQueueSync(tenantId, eventId);
+    }
+
+    return {
+      status: result.created ? 201 : 200,
+      body: {
+        eventId,
+        tenantId,
+        entityType,
+        entityId,
+        version: result.version,
+        changedFields: result.changedFields,
+        affectedViews: result.affectedViews,
+        queue: queueResult,
+      },
+    };
+  }));
+
+  app.get('/api/v1/views/:viewName', asyncHandler(async (req, res) => {
+    const { tenantId } = req.context;
+    assertActorRoleAllowed(req, ROUTE_ROLES.readCore, 'read projection views');
+    const viewName = normalizeEntityType(req.params.viewName);
+    const supported = listSupportedViews();
+    if (!supported.includes(viewName)) {
+      throw createHttpError(404, `Unsupported view: ${viewName}`, 'not_found');
+    }
+
+    const snap = await db.doc(`orgs/${tenantId}/views/${viewName}`).get();
+    const data = snap.exists ? (snap.data() || {}) : {
+      tenantId,
+      view: viewName,
+      updatedAt: null,
+    };
+
+    if (viewName === 'project_financials' && typeof req.query.projectId === 'string') {
+      const projects = Array.isArray(data.projects) ? data.projects : [];
+      const projectId = req.query.projectId.trim();
+      const item = projects.find((project) => project.projectId === projectId) || null;
+      res.status(200).json({
+        view: viewName,
+        projectId,
+        item,
+        updatedAt: data.updatedAt || null,
+      });
+      return;
+    }
+
+    if (viewName === 'member_workload' && typeof req.query.memberId === 'string') {
+      const members = Array.isArray(data.members) ? data.members : [];
+      const memberId = req.query.memberId.trim();
+      const item = members.find((member) => member.memberId === memberId) || null;
+      res.status(200).json({
+        view: viewName,
+        memberId,
+        item,
+        updatedAt: data.updatedAt || null,
+      });
+      return;
+    }
+
+    res.status(200).json(data);
+  }));
+
+  app.get('/api/v1/queue/jobs', asyncHandler(async (req, res) => {
+    const { tenantId } = req.context;
+    assertActorRoleAllowed(req, ROUTE_ROLES.auditRead, 'read queue jobs');
+    const limit = parseLimit(req.query.limit, 50, 200);
+    const statusFilter = typeof req.query.status === 'string'
+      ? req.query.status.trim().toUpperCase()
+      : '';
+    const eventIdFilter = typeof req.query.eventId === 'string' ? req.query.eventId.trim() : '';
+
+    const scanLimit = Math.max(limit * 6, 200);
+    const snap = await db.collection('work_queue').limit(scanLimit).get();
+    const items = snap.docs
+      .map((doc) => ({ id: doc.id, ...doc.data() }))
+      .filter((item) => item.tenantId === tenantId)
+      .filter((item) => (statusFilter ? String(item.status || '').toUpperCase() === statusFilter : true))
+      .filter((item) => (eventIdFilter ? item.eventId === eventIdFilter : true))
+      .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))
+      .slice(0, limit);
+
+    res.status(200).json({
+      items,
+      count: items.length,
+    });
+  }));
+
+  app.post('/api/v1/queue/replay/:eventId', createMutatingRoute(idempotencyService, async (req) => {
+    assertActorRoleAllowed(req, ROUTE_ROLES.writeCore, 'replay queue event');
+    const { tenantId } = req.context;
+    const eventId = req.params.eventId;
+    const timestamp = now();
+
+    const eventSnap = await db.doc(`orgs/${tenantId}/change_events/${eventId}`).get();
+    if (!eventSnap.exists) {
+      throw createHttpError(404, `Change event not found: ${eventId}`, 'not_found');
+    }
+
+    const event = eventSnap.data() || {};
+    const rules = await loadTenantRules(tenantId);
+    const affectedViews = resolveAffectedViews(rules, {
+      entityType: event.entityType,
+      changedFields: Array.isArray(event.changedFields) ? event.changedFields : [],
+    });
+
+    const replayViews = affectedViews.length ? affectedViews : ['alerts'];
+    const jobs = await enqueueReplayJobs(db, {
+      tenantId,
+      eventId,
+      entityType: event.entityType,
+      entityId: event.entityId,
+      views: replayViews,
+      createdAt: timestamp,
+    });
+
+    const queueResult = await processQueueSync(tenantId, eventId);
+    return {
+      status: 200,
+      body: {
+        eventId,
+        queued: jobs.length,
+        affectedViews: replayViews,
+        queue: queueResult,
+      },
+    };
+  }));
 
   app.get('/api/v1/projects', asyncHandler(async (req, res) => {
     const { tenantId } = req.context;
+    assertActorRoleAllowed(req, ROUTE_ROLES.readCore, 'read projects');
     const limit = parseLimit(req.query.limit, 50, 200);
-    const snap = await db.collection(`orgs/${tenantId}/projects`).limit(limit).get();
-    const items = snap.docs.map((doc) => doc.data());
-    res.status(200).json({ items, count: items.length });
+    const cursor = parseCursor(req.query.cursor);
+
+    let query = db.collection(`orgs/${tenantId}/projects`).orderBy('__name__').limit(limit);
+    if (cursor) {
+      query = query.startAfter(cursor);
+    }
+
+    const snap = await query.get();
+    const items = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    res.status(200).json(buildListResponse(items, limit));
   }));
 
   app.get('/api/v1/ledgers', asyncHandler(async (req, res) => {
     const { tenantId } = req.context;
+    assertActorRoleAllowed(req, ROUTE_ROLES.readCore, 'read ledgers');
     const limit = parseLimit(req.query.limit, 50, 200);
+    const cursor = parseCursor(req.query.cursor);
     const projectIdFilter = typeof req.query.projectId === 'string' ? req.query.projectId.trim() : '';
 
-    let query = db.collection(`orgs/${tenantId}/ledgers`).limit(limit);
+    let query = db.collection(`orgs/${tenantId}/ledgers`);
     if (projectIdFilter) {
       query = query.where('projectId', '==', projectIdFilter);
     }
+    query = query.orderBy('__name__').limit(limit);
+    if (cursor) {
+      query = query.startAfter(cursor);
+    }
 
     const snap = await query.get();
-    const items = snap.docs.map((doc) => doc.data());
-    res.status(200).json({ items, count: items.length });
+    const items = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    res.status(200).json(buildListResponse(items, limit));
   }));
 
   app.get('/api/v1/transactions', asyncHandler(async (req, res) => {
     const { tenantId } = req.context;
+    assertActorRoleAllowed(req, ROUTE_ROLES.readCore, 'read transactions');
     const limit = parseLimit(req.query.limit, 50, 200);
+    const cursor = parseCursor(req.query.cursor);
     const projectIdFilter = typeof req.query.projectId === 'string' ? req.query.projectId.trim() : '';
     const ledgerIdFilter = typeof req.query.ledgerId === 'string' ? req.query.ledgerId.trim() : '';
 
-    let query = db.collection(`orgs/${tenantId}/transactions`).limit(limit);
+    let query = db.collection(`orgs/${tenantId}/transactions`);
     if (projectIdFilter) query = query.where('projectId', '==', projectIdFilter);
     if (ledgerIdFilter) query = query.where('ledgerId', '==', ledgerIdFilter);
+    query = query.orderBy('__name__').limit(limit);
+    if (cursor) {
+      query = query.startAfter(cursor);
+    }
 
     const snap = await query.get();
-    const items = snap.docs.map((doc) => doc.data());
-    res.status(200).json({ items, count: items.length });
+    const items = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    res.status(200).json(buildListResponse(items, limit));
   }));
 
   app.get('/api/v1/transactions/:txId/comments', asyncHandler(async (req, res) => {
     const { tenantId } = req.context;
+    assertActorRoleAllowed(req, ROUTE_ROLES.readCore, 'read comments');
     const { txId } = req.params;
     const limit = parseLimit(req.query.limit, 100, 500);
 
@@ -372,6 +854,7 @@ export function createBffApp(options = {}) {
     const snap = await db
       .collection(`orgs/${tenantId}/comments`)
       .where('transactionId', '==', txId)
+      .orderBy('createdAt', 'asc')
       .limit(limit)
       .get();
 
@@ -383,16 +866,17 @@ export function createBffApp(options = {}) {
         authorName = await piiProtector.decryptText(raw.authorNameEnc);
       }
       items.push({
+        id: doc.id,
         ...raw,
         authorName: authorName || raw.authorNameMasked || raw.authorId,
       });
     }
-    items.sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
     res.status(200).json({ items, count: items.length });
   }));
 
   app.get('/api/v1/transactions/:txId/evidences', asyncHandler(async (req, res) => {
     const { tenantId } = req.context;
+    assertActorRoleAllowed(req, ROUTE_ROLES.readCore, 'read evidences');
     const { txId } = req.params;
     const limit = parseLimit(req.query.limit, 100, 500);
 
@@ -401,36 +885,47 @@ export function createBffApp(options = {}) {
     const snap = await db
       .collection(`orgs/${tenantId}/evidences`)
       .where('transactionId', '==', txId)
+      .orderBy('uploadedAt', 'asc')
       .limit(limit)
       .get();
 
-    const items = snap.docs.map((doc) => doc.data()).sort((a, b) => (a.uploadedAt || '').localeCompare(b.uploadedAt || ''));
+    const items = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
     res.status(200).json({ items, count: items.length });
   }));
 
   app.get('/api/v1/audit-logs', asyncHandler(async (req, res) => {
     const { tenantId } = req.context;
+    assertActorRoleAllowed(req, ROUTE_ROLES.auditRead, 'read audit logs');
     const limit = parseLimit(req.query.limit, 50, 200);
-    const snap = await db.collection(`orgs/${tenantId}/audit_logs`).limit(limit).get();
-    const items = snap.docs.map((doc) => doc.data()).sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
-    res.status(200).json({ items, count: items.length });
+    const cursor = parseCursor(req.query.cursor);
+
+    let query = db.collection(`orgs/${tenantId}/audit_logs`).orderBy('__name__').limit(limit);
+    if (cursor) {
+      query = query.startAfter(cursor);
+    }
+
+    const snap = await query.get();
+    const items = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    res.status(200).json(buildListResponse(items, limit));
   }));
 
   app.get('/api/v1/audit-logs/verify', asyncHandler(async (req, res) => {
     const { tenantId } = req.context;
+    assertActorRoleAllowed(req, ROUTE_ROLES.auditRead, 'verify audit logs');
     const limit = parseLimit(req.query.limit, 2000, 10000);
     const result = await auditChainService.verify({ tenantId, limit });
     res.status(result.ok ? 200 : 409).json(result);
   }));
 
   app.post('/api/v1/projects', createMutatingRoute(idempotencyService, async (req) => {
+    assertActorRoleAllowed(req, ROUTE_ROLES.writeCore, 'write projects');
     const { tenantId, actorId, actorRole, actorEmail, requestId } = req.context;
     const timestamp = now();
     const parsed = parseWithSchema(projectUpsertSchema, req.body, 'Invalid project payload');
     const expectedVersion = parsed.expectedVersion;
 
     const projectPayload = {
-      ...stripExpectedVersion(parsed),
+      ...stripServerManagedFields(stripExpectedVersion(parsed)),
       id: parsed.id.trim(),
       name: parsed.name.trim(),
       orgId: tenantId,
@@ -487,6 +982,7 @@ export function createBffApp(options = {}) {
   }));
 
   app.post('/api/v1/ledgers', createMutatingRoute(idempotencyService, async (req) => {
+    assertActorRoleAllowed(req, ROUTE_ROLES.writeCore, 'write ledgers');
     const { tenantId, actorId, actorRole, actorEmail, requestId } = req.context;
     const timestamp = now();
     const parsed = parseWithSchema(ledgerUpsertSchema, req.body, 'Invalid ledger payload');
@@ -499,7 +995,7 @@ export function createBffApp(options = {}) {
     );
 
     const ledgerPayload = {
-      ...stripExpectedVersion(parsed),
+      ...stripServerManagedFields(stripExpectedVersion(parsed)),
       id: parsed.id.trim(),
       projectId: parsed.projectId.trim(),
       name: parsed.name.trim(),
@@ -562,6 +1058,7 @@ export function createBffApp(options = {}) {
   }));
 
   app.post('/api/v1/transactions', createMutatingRoute(idempotencyService, async (req) => {
+    assertActorRoleAllowed(req, ROUTE_ROLES.writeCore, 'write transactions');
     const { tenantId, actorId, actorRole, actorEmail, requestId } = req.context;
     const timestamp = now();
     const parsed = parseWithSchema(transactionUpsertSchema, req.body, 'Invalid transaction payload');
@@ -577,7 +1074,7 @@ export function createBffApp(options = {}) {
     }
 
     const txPayload = {
-      ...stripExpectedVersion(parsed),
+      ...stripServerManagedFields(stripExpectedVersion(parsed)),
       id: parsed.id.trim(),
       projectId: parsed.projectId.trim(),
       ledgerId: parsed.ledgerId.trim(),
@@ -646,6 +1143,7 @@ export function createBffApp(options = {}) {
   }));
 
   app.patch('/api/v1/transactions/:txId/state', createMutatingRoute(idempotencyService, async (req) => {
+    assertActorRoleAllowed(req, ROUTE_ROLES.writeTransaction, 'change transaction state');
     const { tenantId, actorId, actorRole, actorEmail, requestId } = req.context;
     const { txId } = req.params;
     const timestamp = now();
@@ -753,6 +1251,7 @@ export function createBffApp(options = {}) {
   }));
 
   app.post('/api/v1/transactions/:txId/comments', createMutatingRoute(idempotencyService, async (req) => {
+    assertActorRoleAllowed(req, ROUTE_ROLES.writeTransaction, 'write comments');
     const { tenantId, actorId, actorRole, actorEmail, requestId } = req.context;
     const { txId } = req.params;
     const timestamp = now();
@@ -777,7 +1276,7 @@ export function createBffApp(options = {}) {
     });
 
     const comment = {
-      ...stripExpectedVersion(parsed),
+      ...stripServerManagedFields(stripExpectedVersion(parsed)),
       id: commentId,
       tenantId,
       transactionId: txId,
@@ -831,6 +1330,7 @@ export function createBffApp(options = {}) {
   }));
 
   app.post('/api/v1/transactions/:txId/evidences', createMutatingRoute(idempotencyService, async (req) => {
+    assertActorRoleAllowed(req, ROUTE_ROLES.writeTransaction, 'write evidences');
     const { tenantId, actorId, actorRole, actorEmail, requestId } = req.context;
     const { txId } = req.params;
     const timestamp = now();
@@ -853,7 +1353,7 @@ export function createBffApp(options = {}) {
     });
 
     const evidence = {
-      ...stripExpectedVersion(parsed),
+      ...stripServerManagedFields(stripExpectedVersion(parsed)),
       id: evidenceId,
       tenantId,
       transactionId: txId,
@@ -905,6 +1405,7 @@ export function createBffApp(options = {}) {
   }));
 
   app.patch('/api/v1/members/:memberId/role', createMutatingRoute(idempotencyService, async (req) => {
+    assertActorRoleAllowed(req, ROUTE_ROLES.memberWrite, 'update member roles');
     const { tenantId, actorId, actorRole, actorEmail, requestId } = req.context;
     const { memberId } = req.params;
     const timestamp = now();
@@ -992,6 +1493,11 @@ export function createBffApp(options = {}) {
     const message = statusCode >= 500 ? 'Internal server error' : (error?.message || 'Request failed');
     const errorCode = error?.code || (statusCode >= 500 ? 'internal_error' : 'request_error');
     res.locals.errorCode = errorCode;
+
+    if (statusCode >= 500) {
+      // eslint-disable-next-line no-console
+      console.error('[bff] unhandled error', error);
+    }
 
     res.status(statusCode).json({
       error: errorCode,

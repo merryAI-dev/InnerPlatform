@@ -22,6 +22,7 @@ npm run dev
 - `npm run bff:test:integration`: run Firestore emulator + BFF integration tests (real writes/reads).
 - `npm run bff:cleanup:idempotency`: delete expired idempotency keys.
 - `npm run bff:outbox:worker`: process outbox events with retry/dead-letter status updates.
+- `npm run bff:work-queue:worker`: process projection work queue jobs (`work_queue/*`).
 - `npm run bff:deploy:cloud-run`: build/push/deploy BFF to Cloud Run (requires gcloud/docker auth).
 - `npm run firebase:whoami`: check Firebase CLI login status.
 - `npm run firebase:login`: login to Firebase CLI.
@@ -169,6 +170,8 @@ Reference doc:
   - 이번 구현에서 실제 반영된 P0 안정성 항목
 - `guidelines/Operational-Hardening-Runbook.md`
   - 인덱스/아웃박스/백업/알림/PII/정책 운영 런북
+- `guidelines/User-Feature-Enhancement-Backlog.md`
+  - 사용자 기능 관점(ServiceNow급) 우선순위 백로그
 
 ## Platform Foundation (Q1)
 
@@ -193,6 +196,10 @@ npm run bff:test:integration
 ## BFF API Surface
 
 - `GET /api/v1/health`
+- `POST /api/v1/write`
+- `GET /api/v1/views/:viewName`
+- `GET /api/v1/queue/jobs`
+- `POST /api/v1/queue/replay/:eventId`
 - `GET /api/v1/projects`
 - `POST /api/v1/projects`
 - `GET /api/v1/ledgers`
@@ -213,11 +220,30 @@ Mutating endpoints require:
 - `x-actor-id`
 - `idempotency-key`
 
+Authentication mode:
+- `BFF_AUTH_MODE=headers`: trust request headers (local/default).
+- `BFF_AUTH_MODE=firebase_optional`: verify `Authorization: Bearer <Firebase ID token>` when present, else fallback to headers.
+- `BFF_AUTH_MODE=firebase_required`: require/verify Firebase ID token and reject header spoofing (`actor_mismatch`, `tenant_mismatch`).
+
 State transitions also require:
 - `expectedVersion` in request body
 
 Role change endpoint requires:
 - `x-actor-role` allowed by policy (`policies/rbac-policy.json`)
+
+List endpoints support deterministic pagination:
+- query: `?limit=50&cursor=<lastDocumentId>`
+- response: `nextCursor` (null when done)
+
+Single write pipeline:
+- `POST /api/v1/write` writes a canonical entity document (`project`, `ledger`, `transaction`, `expense_set`, `change_request`, `member`) with version checks.
+- Same transaction creates `orgs/{tenantId}/change_events/{eventId}` and queue jobs in `work_queue/{jobId}`.
+- Queue jobs rebuild projection views in `orgs/{tenantId}/views/{viewName}`.
+- Manual replay endpoint: `POST /api/v1/queue/replay/:eventId`.
+
+Relation-rule policy (no hardcoded cross-entity wiring in route code):
+- `policies/relation-rules.json`
+- Optional override: `orgs/{tenantId}/relation_rules/*`
 
 BFF runtime env template:
 - `server/bff/.env.example`
@@ -241,6 +267,32 @@ BFF runtime env template:
   - alert setup script provisions 5xx ratio, p95 latency, version-conflict ratio alerts
 - Backup/recovery rehearsal:
   - schedule backups and run restore drills via `firestore:backup:*` scripts
+
+## Worker Strategy (Vercel / External)
+
+For production, keep both asynchronous pipelines alive:
+- outbox worker (`npm run bff:outbox:worker`)
+- projection queue worker (`npm run bff:work-queue:worker`)
+
+### Option A: Vercel Cron + internal worker endpoints (recommended on Vercel)
+
+1. Expose protected internal endpoints in BFF for one-shot processing.
+2. Configure Vercel Cron:
+   - work queue: every minute
+   - outbox: every 1-5 minutes
+3. In each run, process bounded batches and return counts.
+
+### Option B: External always-on worker
+
+Run loop mode in a dedicated runtime:
+
+```bash
+BFF_OUTBOX_LOOP=true BFF_OUTBOX_INTERVAL_MS=2000 npm run bff:outbox:worker
+BFF_WORK_QUEUE_LOOP=true BFF_WORK_QUEUE_INTERVAL_MS=2000 npm run bff:work-queue:worker
+```
+
+Detailed runbook:
+- `guidelines/Operational-Hardening-Runbook.md`
 
 ## Cloud Run Deployment
 

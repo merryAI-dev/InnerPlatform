@@ -81,6 +81,14 @@ function AppLayoutContent() {
     }
   }, [isAuthenticated, navigate]);
 
+  useEffect(() => {
+    const role = (authUser || currentUser)?.role;
+    if (!isAuthenticated || !role) return;
+    if (role === 'pm' || role === 'viewer') {
+      navigate('/portal', { replace: true });
+    }
+  }, [isAuthenticated, authUser, currentUser, navigate]);
+
   // Close mobile sidebar on route change
   useEffect(() => {
     setMobileOpen(false);
