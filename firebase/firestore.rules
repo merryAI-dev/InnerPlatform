@@ -1,0 +1,157 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function hasValidTenant(data, orgId) {
+      return !data.keys().hasAny(['tenantId']) || data.tenantId == orgId;
+    }
+
+    function requestHasValidTenant(orgId) {
+      return request.resource != null
+        && request.resource.data.keys().hasAll(['tenantId'])
+        && request.resource.data.tenantId == orgId;
+    }
+
+    function resourceHasValidTenant(orgId) {
+      return resource != null && hasValidTenant(resource.data, orgId);
+    }
+
+    function memberDoc(orgId) {
+      return get(/databases/$(database)/documents/orgs/$(orgId)/members/$(request.auth.uid));
+    }
+
+    function role(orgId) {
+      return isSignedIn() ? memberDoc(orgId).data.role : null;
+    }
+
+    function isAdmin(orgId) {
+      return role(orgId) == 'admin';
+    }
+
+    function isPrivileged(orgId) {
+      return role(orgId) in ['admin', 'finance', 'auditor'];
+    }
+
+    function selfMemberUpdateWithoutRoleChange(orgId, uid) {
+      return isSignedIn()
+        && request.auth.uid == uid
+        && requestHasValidTenant(orgId)
+        && resourceHasValidTenant(orgId)
+        && request.resource.data.role == resource.data.role;
+    }
+
+    function memberProjectId(orgId) {
+      return memberDoc(orgId).data.projectId;
+    }
+
+    function canReadProjectResource(orgId, projectId) {
+      return isPrivileged(orgId) || (role(orgId) == 'pm' && memberProjectId(orgId) == projectId);
+    }
+
+    function canWriteProjectResource(orgId, projectId) {
+      return role(orgId) in ['admin', 'finance'] || (role(orgId) == 'pm' && memberProjectId(orgId) == projectId);
+    }
+
+    function projectIdFromTransaction(orgId, txId) {
+      return get(/databases/$(database)/documents/orgs/$(orgId)/transactions/$(txId)).data.projectId;
+    }
+
+    function canReadTransactionResource(orgId, txId) {
+      return canReadProjectResource(orgId, projectIdFromTransaction(orgId, txId));
+    }
+
+    function canWriteTransactionResource(orgId, txId) {
+      return canWriteProjectResource(orgId, projectIdFromTransaction(orgId, txId));
+    }
+
+    match /orgs/{orgId}/members/{uid} {
+      allow read: if isSignedIn() && resourceHasValidTenant(orgId);
+      allow create: if isSignedIn() && request.auth.uid == uid && requestHasValidTenant(orgId);
+      allow update: if (isAdmin(orgId) && resourceHasValidTenant(orgId) && requestHasValidTenant(orgId))
+                    || selfMemberUpdateWithoutRoleChange(orgId, uid);
+      allow delete: if isAdmin(orgId) && resourceHasValidTenant(orgId);
+    }
+
+    match /orgs/{orgId}/projects/{projectId} {
+      allow read: if isSignedIn() && resourceHasValidTenant(orgId) && canReadProjectResource(orgId, projectId);
+      allow create: if isSignedIn() && requestHasValidTenant(orgId) && canWriteProjectResource(orgId, projectId);
+      allow update: if isSignedIn() && requestHasValidTenant(orgId) && resourceHasValidTenant(orgId) && canWriteProjectResource(orgId, projectId);
+      allow delete: if isSignedIn() && resourceHasValidTenant(orgId) && canWriteProjectResource(orgId, projectId);
+    }
+
+    match /orgs/{orgId}/ledgers/{ledgerId} {
+      allow read: if isSignedIn() && resourceHasValidTenant(orgId) && canReadProjectResource(orgId, resource.data.projectId);
+      allow create: if isSignedIn() && requestHasValidTenant(orgId) && canWriteProjectResource(orgId, request.resource.data.projectId);
+      allow update: if isSignedIn() && requestHasValidTenant(orgId) && resourceHasValidTenant(orgId) && canWriteProjectResource(orgId, resource.data.projectId);
+      allow delete: if isSignedIn() && resourceHasValidTenant(orgId) && canWriteProjectResource(orgId, resource.data.projectId);
+    }
+
+    match /orgs/{orgId}/transactions/{txId} {
+      allow read: if isSignedIn() && resourceHasValidTenant(orgId) && canReadProjectResource(orgId, resource.data.projectId);
+      allow create: if isSignedIn() && requestHasValidTenant(orgId) && canWriteProjectResource(orgId, request.resource.data.projectId);
+      allow update: if isSignedIn() && requestHasValidTenant(orgId) && resourceHasValidTenant(orgId) && canWriteProjectResource(orgId, resource.data.projectId);
+      allow delete: if isSignedIn() && resourceHasValidTenant(orgId) && canWriteProjectResource(orgId, resource.data.projectId);
+    }
+
+    match /orgs/{orgId}/comments/{commentId} {
+      allow read: if isSignedIn() && resourceHasValidTenant(orgId) && canReadTransactionResource(orgId, resource.data.transactionId);
+      allow create: if isSignedIn() && requestHasValidTenant(orgId) && canWriteTransactionResource(orgId, request.resource.data.transactionId);
+      allow update: if isSignedIn() && requestHasValidTenant(orgId) && resourceHasValidTenant(orgId) && canWriteTransactionResource(orgId, resource.data.transactionId);
+      allow delete: if isSignedIn() && resourceHasValidTenant(orgId) && canWriteTransactionResource(orgId, resource.data.transactionId);
+    }
+
+    match /orgs/{orgId}/evidences/{evidenceId} {
+      allow read: if isSignedIn() && resourceHasValidTenant(orgId) && canReadTransactionResource(orgId, resource.data.transactionId);
+      allow create: if isSignedIn() && requestHasValidTenant(orgId) && canWriteTransactionResource(orgId, request.resource.data.transactionId);
+      allow update: if isSignedIn() && requestHasValidTenant(orgId) && resourceHasValidTenant(orgId) && canWriteTransactionResource(orgId, resource.data.transactionId);
+      allow delete: if isSignedIn() && resourceHasValidTenant(orgId) && canWriteTransactionResource(orgId, resource.data.transactionId);
+    }
+
+    match /orgs/{orgId}/audit_logs/{logId} {
+      allow read: if isSignedIn() && isPrivileged(orgId) && resourceHasValidTenant(orgId);
+      allow create: if isSignedIn()
+                    && requestHasValidTenant(orgId)
+                    && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /orgs/{orgId}/expense_sets/{setId} {
+      allow read: if isSignedIn() && resourceHasValidTenant(orgId) && canReadProjectResource(orgId, resource.data.projectId);
+      allow create: if isSignedIn() && requestHasValidTenant(orgId) && canWriteProjectResource(orgId, request.resource.data.projectId);
+      allow update: if isSignedIn() && requestHasValidTenant(orgId) && resourceHasValidTenant(orgId) && canWriteProjectResource(orgId, resource.data.projectId);
+      allow delete: if isSignedIn() && resourceHasValidTenant(orgId) && canWriteProjectResource(orgId, resource.data.projectId);
+    }
+
+    match /orgs/{orgId}/change_requests/{requestId} {
+      allow read: if isSignedIn() && resourceHasValidTenant(orgId) && canReadProjectResource(orgId, resource.data.projectId);
+      allow create: if isSignedIn() && requestHasValidTenant(orgId) && canWriteProjectResource(orgId, request.resource.data.projectId);
+      allow update: if isSignedIn() && requestHasValidTenant(orgId) && resourceHasValidTenant(orgId) && canWriteProjectResource(orgId, resource.data.projectId);
+      allow delete: if isSignedIn() && resourceHasValidTenant(orgId) && canWriteProjectResource(orgId, resource.data.projectId);
+    }
+
+    match /orgs/{orgId}/hr_announcements/{announcementId} {
+      allow read: if isSignedIn() && resourceHasValidTenant(orgId);
+      allow create, update: if isSignedIn() && isAdmin(orgId) && requestHasValidTenant(orgId);
+      allow delete: if isSignedIn() && isAdmin(orgId) && resourceHasValidTenant(orgId);
+    }
+
+    match /orgs/{orgId}/project_change_alerts/{alertId} {
+      allow read: if isSignedIn() && resourceHasValidTenant(orgId);
+      allow create: if isSignedIn() && isAdmin(orgId) && requestHasValidTenant(orgId);
+      allow delete: if isSignedIn() && isAdmin(orgId) && resourceHasValidTenant(orgId);
+      allow update: if isSignedIn() && requestHasValidTenant(orgId) && resourceHasValidTenant(orgId) && (
+        isAdmin(orgId) ||
+        (role(orgId) == 'pm' && memberProjectId(orgId) == resource.data.projectId)
+      );
+    }
+
+    match /orgs/{orgId}/{document=**} {
+      allow read: if isSignedIn() && resourceHasValidTenant(orgId);
+      allow create: if isSignedIn() && isAdmin(orgId) && requestHasValidTenant(orgId);
+      allow update, delete: if isSignedIn() && isAdmin(orgId) && resourceHasValidTenant(orgId) && requestHasValidTenant(orgId);
+    }
+  }
+}

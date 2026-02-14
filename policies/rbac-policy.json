@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "roles": [
+    "admin",
+    "finance",
+    "pm",
+    "viewer",
+    "auditor",
+    "tenant_admin",
+    "support",
+    "security"
+  ],
+  "permissions": [
+    "project:read",
+    "project:write",
+    "ledger:read",
+    "ledger:write",
+    "transaction:approve",
+    "audit:read",
+    "user:manage",
+    "tenant:manage",
+    "security:manage"
+  ],
+  "roleChangeRules": {
+    "admin": ["admin", "finance", "pm", "viewer", "auditor", "tenant_admin", "support", "security"],
+    "tenant_admin": ["finance", "pm", "viewer", "auditor"],
+    "security": ["viewer", "auditor", "support"]
+  }
+}

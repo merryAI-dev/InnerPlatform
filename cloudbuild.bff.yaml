@@ -1,0 +1,51 @@
+steps:
+  - name: node:24
+    entrypoint: bash
+    args:
+      - -lc
+      - |
+        npm ci
+        npm run policy:verify
+        npm test
+
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - server/bff/Dockerfile
+      - -t
+      - gcr.io/$PROJECT_ID/mysc-bff:$COMMIT_SHA
+      - .
+
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - gcr.io/$PROJECT_ID/mysc-bff:$COMMIT_SHA
+
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - mysc-bff
+      - --image
+      - gcr.io/$PROJECT_ID/mysc-bff:$COMMIT_SHA
+      - --region
+      - ${_REGION}
+      - --platform
+      - managed
+      - --allow-unauthenticated
+      - --set-env-vars
+      - FIREBASE_PROJECT_ID=$PROJECT_ID,BFF_ALLOWED_ORIGINS=${_ALLOWED_ORIGINS},BFF_OUTBOX_BATCH=${_OUTBOX_BATCH},BFF_OUTBOX_MAX_ATTEMPTS=${_OUTBOX_MAX_ATTEMPTS},PII_MODE=${_PII_MODE},PII_KMS_KEYS=${_PII_KMS_KEYS},PII_KMS_CURRENT_KEY=${_PII_KMS_CURRENT_KEY}
+
+substitutions:
+  _REGION: asia-northeast3
+  _ALLOWED_ORIGINS: '*'
+  _OUTBOX_BATCH: '50'
+  _OUTBOX_MAX_ATTEMPTS: '8'
+  _PII_MODE: 'off'
+  _PII_KMS_KEYS: ''
+  _PII_KMS_CURRENT_KEY: ''
+
+images:
+  - gcr.io/$PROJECT_ID/mysc-bff:$COMMIT_SHA
