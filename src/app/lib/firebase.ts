@@ -203,6 +203,7 @@ export const ORG_COLLECTIONS = {
   evidences: 'evidences',
   comments: 'comments',
   auditLogs: 'audit_logs',
+  notifications: 'notifications',
   ledgerTemplates: 'ledger_templates',
   hrAnnouncements: 'hr_announcements',
   projectChangeAlerts: 'project_change_alerts',

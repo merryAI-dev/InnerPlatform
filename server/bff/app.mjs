@@ -1253,19 +1253,21 @@ export function createBffApp(options = {}) {
     }
 
     const txRef = db.doc(`orgs/${tenantId}/transactions/${txId}`);
-    const outboxEvent = createOutboxEvent({
-      tenantId,
-      requestId,
-      eventType: 'transaction.state_changed',
-      entityType: 'transaction',
-      entityId: txId,
-      payload: {
-        nextState,
-        reason: parsed.reason || null,
-        expectedVersion: parsed.expectedVersion,
-      },
-      createdAt: timestamp,
-    });
+	    const outboxEvent = createOutboxEvent({
+	      tenantId,
+	      requestId,
+	      eventType: 'transaction.state_changed',
+	      entityType: 'transaction',
+	      entityId: txId,
+	      payload: {
+	        nextState,
+	        reason: parsed.reason || null,
+	        expectedVersion: parsed.expectedVersion,
+	        actorId,
+	        actorRole: actorRole || null,
+	      },
+	      createdAt: timestamp,
+	    });
 
     const result = await db.runTransaction(async (tx) => {
       const snap = await tx.get(txRef);
