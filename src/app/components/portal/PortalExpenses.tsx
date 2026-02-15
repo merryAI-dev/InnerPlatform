@@ -5,6 +5,7 @@ import {
   Copy, MoreHorizontal, CircleDollarSign, Receipt,
   X, CalendarDays, Table2, ArrowRight,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { Card, CardContent } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -23,6 +24,16 @@ import {
 } from '../ui/dropdown-menu';
 import { PageHeader } from '../layout/PageHeader';
 import { usePortalStore } from '../../data/portal-store';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../ui/alert-dialog';
 import {
   BUDGET_CODE_BOOK,
   EXPENSE_STATUS_LABELS, EXPENSE_STATUS_COLORS,
@@ -94,6 +105,14 @@ export function PortalExpenses() {
   const [newTitle, setNewTitle] = useState('');
   const [newPeriod, setNewPeriod] = useState('');
 
+  const [submitConfirm, setSubmitConfirm] = useState<string | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{
+    setId: string;
+    itemId: string;
+    vendor: string;
+    amountGross: number;
+  } | null>(null);
+
   // 대량 입력 모드
   const [bulkRows, setBulkRows] = useState<ExpenseItem[]>([]);
   const [showBulkMode, setShowBulkMode] = useState(false);
@@ -113,6 +132,7 @@ export function PortalExpenses() {
   });
 
   const currentSet = selectedSet ? mySets.find(s => s.id === selectedSet.id) || null : null;
+  const submitSet = submitConfirm ? mySets.find((s) => s.id === submitConfirm) || null : null;
 
   const kpi = useMemo(() => ({
     total: mySets.length,
@@ -319,7 +339,7 @@ export function PortalExpenses() {
                             <Copy className="w-3.5 h-3.5 mr-2" /> 복제
                           </DropdownMenuItem>
                           {s.status === 'DRAFT' && s.items.length > 0 && (
-                            <DropdownMenuItem onClick={e => { e.stopPropagation(); changeExpenseStatus(s.id, 'SUBMITTED'); }}>
+                            <DropdownMenuItem onClick={e => { e.stopPropagation(); setSubmitConfirm(s.id); }}>
                               <Send className="w-3.5 h-3.5 mr-2" /> 제출하기
                             </DropdownMenuItem>
                           )}
@@ -370,7 +390,7 @@ export function PortalExpenses() {
                     </>
                   )}
                   {currentSet.status === 'DRAFT' && currentSet.items.length > 0 && (
-                    <Button size="sm" className="h-7 text-[11px] gap-1" onClick={() => changeExpenseStatus(currentSet.id, 'SUBMITTED')}>
+                    <Button size="sm" className="h-7 text-[11px] gap-1" onClick={() => setSubmitConfirm(currentSet.id)}>
                       <Send className="w-3 h-3" /> 제출
                     </Button>
                   )}
@@ -439,7 +459,15 @@ export function PortalExpenses() {
                           </td>
                           {isEditable && (
                             <td className="px-3 py-2">
-                              <button className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-rose-600" onClick={() => deleteExpenseItem(currentSet.id, item.id)}>
+                              <button
+                                className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-rose-600"
+                                onClick={() => setDeleteConfirm({
+                                  setId: currentSet.id,
+                                  itemId: item.id,
+                                  vendor: item.vendor,
+                                  amountGross: item.amountGross,
+                                })}
+                              >
                                 <Trash2 className="w-3 h-3" />
                               </button>
                             </td>
@@ -577,6 +605,91 @@ export function PortalExpenses() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* 제출 확인 */}
+      <AlertDialog open={!!submitConfirm} onOpenChange={(open) => { if (!open) setSubmitConfirm(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>사업비 세트를 제출하시겠습니까?</AlertDialogTitle>
+            <AlertDialogDescription>
+              제출 후에는 관리자 승인 전까지 수정할 수 없습니다.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {submitSet && (
+            <div className="text-sm space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">세트명</span>
+                <span className="truncate max-w-[220px]" style={{ fontWeight: 700 }}>{submitSet.title}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">항목 수</span>
+                <span style={{ fontWeight: 700 }}>{submitSet.items.length}건</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">합계</span>
+                <span style={{ fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: '#4f46e5' }}>
+                  {fmtKRW(submitSet.totalGross)}원
+                </span>
+              </div>
+            </div>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel>취소</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                if (!submitSet) return;
+                changeExpenseStatus(submitSet.id, 'SUBMITTED');
+                toast.success('제출했습니다.');
+                setSubmitConfirm(null);
+              }}
+            >
+              제출
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* 삭제 확인 */}
+      <AlertDialog open={!!deleteConfirm} onOpenChange={(open) => { if (!open) setDeleteConfirm(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>지출 항목을 삭제하시겠습니까?</AlertDialogTitle>
+            <AlertDialogDescription>
+              삭제 후에는 복구할 수 없습니다.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {deleteConfirm && (
+            <div className="text-sm space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">거래처</span>
+                <span className="truncate max-w-[220px]" style={{ fontWeight: 700 }}>{deleteConfirm.vendor || '-'}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">금액</span>
+                <span style={{ fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: '#e11d48' }}>
+                  {fmtKRW(deleteConfirm.amountGross)}원
+                </span>
+              </div>
+            </div>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel>취소</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-rose-600 hover:bg-rose-700 focus:ring-rose-600"
+              onClick={(e) => {
+                e.preventDefault();
+                if (!deleteConfirm) return;
+                deleteExpenseItem(deleteConfirm.setId, deleteConfirm.itemId);
+                toast.success('삭제했습니다.');
+                setDeleteConfirm(null);
+              }}
+            >
+              삭제
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

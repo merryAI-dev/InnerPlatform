@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import {
   Wallet, Calculator, Users, ArrowRightLeft, ArrowRight,
@@ -6,6 +6,13 @@ import {
   CheckCircle2, XCircle, FileText, CircleDollarSign,
   ArrowUpRight, ArrowDownRight, BarChart3,
 } from 'lucide-react';
+import {
+  collection,
+  onSnapshot,
+  query,
+  where,
+  type Unsubscribe,
+} from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -19,8 +26,13 @@ import {
 } from '../../data/budget-data';
 import {
   PROJECT_STATUS_LABELS, SETTLEMENT_TYPE_SHORT, BASIS_LABELS,
+  type Ledger,
+  type Transaction,
 } from '../../data/types';
 import { addMonthsToYearMonth, getSeoulTodayIso } from '../../platform/business-days';
+import { useFirebase } from '../../lib/firebase-context';
+import { featureFlags } from '../../config/feature-flags';
+import { getOrgCollectionPath } from '../../lib/firebase';
 
 // ═══════════════════════════════════════════════════════════════
 // PortalDashboard — 내 사업 현황
@@ -31,6 +43,11 @@ export function PortalDashboard() {
   const { portalUser, myProject, expenseSets, changeRequests } = usePortalStore();
   const { getProjectAlerts } = useHrAnnouncements();
   const { runs, monthlyCloses, acknowledgePayrollRun, acknowledgeMonthlyClose } = usePayroll();
+  const { db, isOnline, orgId } = useFirebase();
+  const firestoreEnabled = featureFlags.firestoreCoreEnabled && isOnline && !!db;
+
+  const [liveLedgers, setLiveLedgers] = useState<Ledger[] | null>(null);
+  const [liveTransactions, setLiveTransactions] = useState<Transaction[] | null>(null);
 
   if (!myProject || !portalUser) {
     return (
@@ -44,9 +61,48 @@ export function PortalDashboard() {
     );
   }
 
+  useEffect(() => {
+    if (!firestoreEnabled || !db) {
+      setLiveLedgers(null);
+      setLiveTransactions(null);
+      return;
+    }
+
+    const unsubs: Unsubscribe[] = [];
+
+    const ledgersQuery = query(
+      collection(db, getOrgCollectionPath(orgId, 'ledgers')),
+      where('projectId', '==', myProject.id),
+    );
+    const txQuery = query(
+      collection(db, getOrgCollectionPath(orgId, 'transactions')),
+      where('projectId', '==', myProject.id),
+    );
+
+    unsubs.push(
+      onSnapshot(ledgersQuery, (snap) => {
+        setLiveLedgers(snap.docs.map((d) => d.data() as Ledger));
+      }, (err) => {
+        console.error('[PortalDashboard] ledgers listen error:', err);
+        setLiveLedgers(null);
+      }),
+    );
+
+    unsubs.push(
+      onSnapshot(txQuery, (snap) => {
+        setLiveTransactions(snap.docs.map((d) => d.data() as Transaction));
+      }, (err) => {
+        console.error('[PortalDashboard] transactions listen error:', err);
+        setLiveTransactions(null);
+      }),
+    );
+
+    return () => unsubs.forEach((u) => u());
+  }, [db, firestoreEnabled, orgId, myProject.id]);
+
   const myExpenses = expenseSets.filter(s => s.projectId === myProject.id);
-  const myLedgers = LEDGERS.filter(l => l.projectId === myProject.id);
-  const myTx = TRANSACTIONS.filter(t => t.projectId === myProject.id);
+  const myLedgers = (liveLedgers ?? LEDGERS).filter(l => l.projectId === myProject.id);
+  const myTx = (liveTransactions ?? TRANSACTIONS).filter(t => t.projectId === myProject.id);
   const myChanges = changeRequests.filter(r => r.projectId === myProject.id);
 
   const today = getSeoulTodayIso();

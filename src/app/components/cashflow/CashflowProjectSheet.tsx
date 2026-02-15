@@ -23,6 +23,8 @@ import { getSeoulTodayIso } from '../../platform/business-days';
 import { CASHFLOW_ALL_LINES, CASHFLOW_IN_LINES, CASHFLOW_OUT_LINES } from '../../platform/cashflow-sheet';
 import { getMonthMondayWeeks } from '../../platform/cashflow-weeks';
 import { useAuth } from '../../data/auth-store';
+import { useBlocker } from 'react-router';
+import { hasUnsavedChanges } from './cashflow-unsaved';
 
 function fmt(n: number): string {
   return n.toLocaleString('ko-KR');
@@ -31,7 +33,7 @@ function fmt(n: number): string {
 function parseAmount(raw: string): number {
   const cleaned = String(raw || '').trim().replaceAll(',', '');
   if (!cleaned) return 0;
-const n = Number(cleaned);
+  const n = Number(cleaned);
   if (!Number.isFinite(n)) return 0;
   return Math.trunc(n);
 }
@@ -77,6 +79,31 @@ export function CashflowProjectSheet({ projectId, projectName }: { projectId: st
 
   const [submitConfirm, setSubmitConfirm] = useState<{ weekNo: number; yearMonth: string } | null>(null);
   const [submitBusy, setSubmitBusy] = useState(false);
+
+  const hasDirty = useMemo(
+    () => hasUnsavedChanges(weekSaveState) || Object.keys(drafts).length > 0,
+    [drafts, weekSaveState],
+  );
+  const blocker = useBlocker(hasDirty);
+
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (!hasDirty) return;
+      // Modern browsers ignore custom messages. Setting returnValue triggers the confirmation dialog.
+      e.preventDefault();
+      e.returnValue = '';
+    };
+
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [hasDirty]);
+
+  useEffect(() => {
+    // If autosave clears the dirty state while we're blocked, let the navigation proceed.
+    if (blocker.state === 'blocked' && !hasDirty) {
+      blocker.proceed();
+    }
+  }, [blocker, hasDirty]);
 
   useEffect(() => {
     // Clear drafts when switching month to avoid writing into wrong docs.
@@ -604,6 +631,28 @@ export function CashflowProjectSheet({ projectId, projectName }: { projectId: st
             >
               {submitBusy ? '처리 중…' : '작성완료'}
             </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={blocker.state === 'blocked'}
+        onOpenChange={(open) => {
+          if (!open && blocker.state === 'blocked') {
+            blocker.reset();
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>저장되지 않은 변경사항이 있습니다</AlertDialogTitle>
+            <AlertDialogDescription>
+              페이지를 이동하면 아직 저장되지 않은 캐시플로 입력값이 유실될 수 있습니다.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => blocker.reset()}>계속 편집</AlertDialogCancel>
+            <AlertDialogAction onClick={() => blocker.proceed()}>나가기</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
