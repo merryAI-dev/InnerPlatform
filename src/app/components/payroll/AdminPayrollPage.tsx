@@ -13,12 +13,14 @@ import { PageHeader } from '../layout/PageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { useAppStore } from '../../data/store';
 import { usePayroll } from '../../data/payroll-store';
 import type { PayrollPaidStatus } from '../../data/types';
 import { addDays, addMonthsToYearMonth, getSeoulTodayIso } from '../../platform/business-days';
+import { fmtShort } from '../../data/budget-data';
 
 const PAID_COLORS: Record<PayrollPaidStatus, string> = {
   UNKNOWN: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400',
@@ -44,6 +46,7 @@ export function AdminPayrollPage() {
     markMonthlyCloseDone,
   } = usePayroll();
   const [tab, setTab] = useState<'payroll' | 'monthly'>('payroll');
+  const [txDialogProjectId, setTxDialogProjectId] = useState<string | null>(null);
 
   const today = getSeoulTodayIso();
   const yearMonth = today.slice(0, 7);
@@ -101,6 +104,21 @@ export function AdminPayrollPage() {
       ))
       .map((t) => t.id);
   }
+
+  const txDialog = useMemo(() => {
+    const projectId = txDialogProjectId || '';
+    if (!projectId) return null;
+    const project = projects.find((p) => p.id === projectId) || null;
+    const run = runByProject.get(projectId) || null;
+    const plannedPayDate = run?.plannedPayDate;
+    const candidateIds = run?.matchedTxIds?.length
+      ? run.matchedTxIds
+      : getMatchedPayrollTxIds(projectId, plannedPayDate);
+    const txList = transactions
+      .filter((t) => candidateIds.includes(t.id))
+      .sort((a, b) => a.dateTime.localeCompare(b.dateTime));
+    return { project, run, txList, candidateIds };
+  }, [getMatchedPayrollTxIds, projects, runByProject, transactions, txDialogProjectId]);
 
   async function onConfirmPaid(projectId: string) {
     const run = runByProject.get(projectId);
@@ -251,6 +269,15 @@ export function AdminPayrollPage() {
                             <Button
                               size="sm"
                               variant="outline"
+                              className="h-7 text-[11px]"
+                              disabled={!run?.plannedPayDate}
+                              onClick={() => setTxDialogProjectId(p.id)}
+                            >
+                              내역
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
                               className="h-7 text-[11px] gap-1"
                               disabled={!run || paidStatus === 'CONFIRMED'}
                               onClick={() => onConfirmPaid(p.id)}
@@ -358,6 +385,73 @@ export function AdminPayrollPage() {
           <p>월간정산 완료 후 PM 확인을 받아야 “완료(확인)”으로 마무리됩니다.</p>
         </CardContent>
       </Card>
+
+      <Dialog open={!!txDialogProjectId} onOpenChange={(open) => { if (!open) setTxDialogProjectId(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="text-[14px]">
+              인건비 사용내역 {txDialog?.project?.shortName ? `· ${txDialog.project.shortName}` : ''}
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-2">
+            <div className="text-[11px] text-muted-foreground">
+              지급 예정일: <span className="text-foreground" style={{ fontWeight: 700 }}>{txDialog?.run?.plannedPayDate || '-'}</span>
+              <span className="mx-2">·</span>
+              범위: 지급일 ±2일
+            </div>
+
+            {(!txDialog || txDialog.txList.length === 0) ? (
+              <div className="p-4 rounded-lg bg-muted/30 border border-border/40 text-[12px] text-muted-foreground">
+                후보 거래가 없습니다. (LABOR_COST · OUT · APPROVED · 지급일±2일)
+              </div>
+            ) : (
+              <div className="rounded-lg border border-border/50 overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="text-[11px]">일자</TableHead>
+                      <TableHead className="text-[11px]">메모</TableHead>
+                      <TableHead className="text-[11px] text-right">금액</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {txDialog.txList.map((t) => (
+                      <TableRow key={t.id}>
+                        <TableCell className="text-[11px]">{t.dateTime}</TableCell>
+                        <TableCell className="text-[11px]">
+                          <div style={{ fontWeight: 600 }}>{t.counterparty}</div>
+                          <div className="text-[10px] text-muted-foreground line-clamp-1">{t.memo}</div>
+                        </TableCell>
+                        <TableCell className="text-[11px] text-right" style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                          {fmtShort(t.amounts.bankAmount)}원
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" size="sm" className="h-8 text-[12px]" onClick={() => setTxDialogProjectId(null)}>
+              닫기
+            </Button>
+            <Button
+              size="sm"
+              className="h-8 text-[12px] gap-1.5"
+              disabled={!txDialog?.run || (txDialog.run.paidStatus === 'CONFIRMED')}
+              onClick={() => {
+                if (!txDialog?.project?.id) return;
+                onConfirmPaid(txDialog.project.id).finally(() => setTxDialogProjectId(null));
+              }}
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" /> 지급확정
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
