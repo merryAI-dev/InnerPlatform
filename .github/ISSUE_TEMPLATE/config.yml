@@ -1,0 +1,9 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Firestore Automation Runbook
+    url: https://github.com/merryAI-dev/InnerPlatform/blob/main/guidelines/Firestore-Automation-System-Guide.md
+    about: 비개발자용 Firestore 자동화 운영 가이드를 먼저 확인하세요.
+  - name: Firebase Daemon Login TIL
+    url: https://github.com/merryAI-dev/InnerPlatform/blob/main/guidelines/TIL-Firebase-Daemon-Setup.md
+    about: 로그인/세션 오류가 나면 이 문서를 따라 재시도하세요.
+
