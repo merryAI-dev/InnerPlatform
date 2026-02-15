@@ -7,6 +7,7 @@ const FULL_ACCESS_ROLES = new Set(['admin', 'tenant_admin']);
 const FINANCE_ALLOWED = new Set([
   '/',
   '/projects',
+  '/board',
   '/cashflow',
   '/evidence',
   '/budget-summary',
@@ -19,6 +20,7 @@ const FINANCE_ALLOWED = new Set([
 const AUDITOR_ALLOWED = new Set([
   '/',
   '/projects',
+  '/board',
   '/cashflow',
   '/evidence',
   '/budget-summary',
@@ -30,6 +32,7 @@ const AUDITOR_ALLOWED = new Set([
 const SUPPORT_ALLOWED = new Set([
   '/',
   '/projects',
+  '/board',
   '/evidence',
   '/audit',
   '/portal',
@@ -38,6 +41,7 @@ const SUPPORT_ALLOWED = new Set([
 const SECURITY_ALLOWED = new Set([
   '/',
   '/projects',
+  '/board',
   '/audit',
 ]);
 

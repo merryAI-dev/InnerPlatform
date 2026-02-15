@@ -382,6 +382,62 @@ export interface Comment {
   createdAt: string;
 }
 
+// ── Company Board (전사 게시판) ──
+
+export type BoardChannel = 'general' | 'qna' | 'ideas' | 'help';
+
+export const BOARD_CHANNEL_LABELS: Record<BoardChannel, string> = {
+  general: '일반',
+  qna: '질문',
+  ideas: '아이디어',
+  help: '도움요청',
+};
+
+export interface BoardPost {
+  id: string;
+  tenantId?: string;
+  channel: BoardChannel;
+  title: string;
+  body: string;
+  tags: string[];
+  createdBy: string;
+  createdByName: string;
+  createdByRole?: string;
+  createdByAvatarUrl?: string;
+  createdAt: string;
+  updatedAt: string;
+  lastActivityAt: string;
+  commentCount: number;
+  upvoteCount: number;
+  downvoteCount: number;
+  voteScore: number;
+  deletedAt?: string | null;
+}
+
+export interface BoardComment {
+  id: string;
+  tenantId?: string;
+  postId: string;
+  parentId?: string | null;
+  body: string;
+  createdBy: string;
+  createdByName: string;
+  createdByAvatarUrl?: string;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string | null;
+}
+
+export interface BoardVote {
+  id: string;
+  tenantId?: string;
+  postId: string;
+  voterId: string;
+  value: -1 | 1;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface AuditLog {
   id: string;
   tenantId?: string;

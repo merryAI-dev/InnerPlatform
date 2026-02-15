@@ -28,10 +28,22 @@ import { PortalPersonnel } from './components/portal/PortalPersonnel';
 import { PortalChangeRequests } from './components/portal/PortalChangeRequests';
 import { PortalProjectRegister } from './components/portal/PortalProjectRegister';
 import { LoginPage } from './components/auth/LoginPage';
+import { BoardLayout } from './components/board/BoardLayout';
+import { BoardFeedPage } from './components/board/BoardFeedPage';
+import { BoardPostPage } from './components/board/BoardPostPage';
 
 export const router = createBrowserRouter([
   // ── Login ──
   { path: '/login', Component: LoginPage },
+  // ── Company Board (전사 게시판) ──
+  {
+    path: '/board',
+    Component: BoardLayout,
+    children: [
+      { index: true, Component: BoardFeedPage },
+      { path: ':postId', Component: BoardPostPage },
+    ],
+  },
   // ── Admin (관리자) ──
   {
     path: '/',

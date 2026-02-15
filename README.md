@@ -148,6 +148,18 @@ Security rules/index templates were added under `firebase/`:
 - `firebase/firestore.rules`
 - `firebase/firestore.indexes.json`
 
+## Company Board (전사 게시판)
+
+- 경로: `/board` (관리자/포털 어디서든 접근 가능)
+- 기능: 글 작성, 댓글/답글(1-depth), 추천/비추천(vote)
+- Firestore 컬렉션(테넌트 스코프):
+  - `orgs/{orgId}/board_posts`
+  - `orgs/{orgId}/board_comments`
+  - `orgs/{orgId}/board_votes`
+- 요구 사항:
+  - `VITE_FIRESTORE_CORE_ENABLED=true` (Firestore 기반 데이터 사용)
+  - 로그인 후 사이드바 `전사 게시판`에서 진입
+
 ## Firebase Auth Quick Link
 
 Enable Google login provider:
