@@ -12,6 +12,8 @@ import { Label } from '../ui/label';
 import { Separator } from '../ui/separator';
 import { Badge } from '../ui/badge';
 import { useAuth } from '../../data/auth-store';
+import { featureFlags } from '../../config/feature-flags';
+import { resolveHomePath } from '../../platform/navigation';
 
 // ═══════════════════════════════════════════════════════════════
 // LoginPage — 통합 로그인 페이지
@@ -38,7 +40,7 @@ export function LoginPage() {
   // 이미 인증된 사용자는 역할에 맞는 페이지로 리다이렉트
   useEffect(() => {
     if (isAuthenticated && user) {
-      const target = (user.role === 'admin' || user.role === 'finance' || user.role === 'auditor') ? '/' : '/portal';
+      const target = resolveHomePath(user.role);
       navigate(target, { replace: true });
     }
   }, [isAuthenticated, user, navigate]);
@@ -70,11 +72,7 @@ export function LoginPage() {
 
   const handleDemoLogin = (role: 'admin' | 'pm' | 'finance' | 'auditor') => {
     loginAsDemo(role);
-    if (role === 'admin' || role === 'finance' || role === 'auditor') {
-      navigate('/', { replace: true });
-    } else {
-      navigate('/portal', { replace: true });
-    }
+    navigate(resolveHomePath(role), { replace: true });
   };
 
   return (
@@ -216,7 +214,7 @@ export function LoginPage() {
             <Separator className="my-5" />
 
             {/* Demo Access */}
-            {!isFirebaseAuthEnabled && (
+            {!isFirebaseAuthEnabled && featureFlags.demoLoginEnabled && (
               <div>
               <button
                 onClick={() => setShowDemoPanel(!showDemoPanel)}
@@ -261,7 +259,7 @@ export function LoginPage() {
                   <div className="p-2.5 rounded-lg bg-amber-50/60 dark:bg-amber-950/10 border border-amber-200/40 dark:border-amber-800/30">
                     <p className="text-[10px] text-amber-700 dark:text-amber-400">
                       <AlertCircle className="w-3 h-3 inline mr-0.5" />
-                      데모 계정은 모든 기존 사용자 이메일 + 비밀번호 <code className="bg-amber-200/40 dark:bg-amber-800/30 px-1 py-0.5 rounded text-[9px]">mysc1234</code>로 로그인할 수 있습니다.
+                      데모 로그인은 개발/데모 환경에서만 사용하세요. (프로덕션에서는 비활성화 권장)
                     </p>
                   </div>
                 </div>

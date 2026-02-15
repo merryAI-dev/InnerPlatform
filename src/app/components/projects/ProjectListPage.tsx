@@ -22,6 +22,8 @@ import {
   type ProjectStatus, type ProjectType, type Project,
 } from '../../data/types';
 import { PageHeader } from '../layout/PageHeader';
+import { useAuth } from '../../data/auth-store';
+import { canShowAdminNavItem } from '../../platform/admin-nav';
 
 const statusColor: Record<string, string> = {
   CONTRACT_PENDING: 'bg-amber-100 text-amber-800',
@@ -44,6 +46,7 @@ type SortDir = 'asc' | 'desc';
 
 export function ProjectListPage() {
   const { projects, ledgers, transactions } = useAppStore();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
@@ -62,6 +65,7 @@ export function ProjectListPage() {
   const prospectProjects = useMemo(() => projects.filter(p => p.phase === 'PROSPECT'), [projects]);
 
   const baseProjects = activeTab === 'confirmed' ? confirmedProjects : prospectProjects;
+  const canCreateProject = canShowAdminNavItem(user?.role, '/projects/new');
 
   const filtered = useMemo(() => {
     let result = baseProjects.filter(p => {
@@ -284,7 +288,7 @@ export function ProjectListPage() {
                     {search || statusFilter !== 'ALL' || typeFilter !== 'ALL' || deptFilter !== 'ALL'
                       ? '검색 조건에 맞는 사업이 없습니다'
                       : activeTab === 'prospect'
-                        ? '예정 사업이 없습니다. 새 사업을 등록해보세요.'
+                        ? (canCreateProject ? '예정 사업이 없습니다. 새 사업을 등록해보세요.' : '예정 사업이 없습니다.')
                         : '확정 사업이 없습니다.'}
                   </TableCell>
                 </TableRow>
@@ -305,26 +309,28 @@ export function ProjectListPage() {
         title="사업 통합 관리"
         description={`전체 ${projects.length}개 사업 · 확정 ${confirmedProjects.length} / 예정 ${prospectProjects.length}`}
         actions={
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => navigate('/projects/new?phase=PROSPECT')}
-              className="gap-1.5 h-8 text-[11px]"
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              예정 등록
-            </Button>
-            <Button
-              size="sm"
-              onClick={() => navigate('/projects/new?phase=CONFIRMED')}
-              className="gap-1.5 h-8 text-[11px]"
-              style={{ background: 'linear-gradient(135deg, #4f46e5, #6366f1)' }}
-            >
-              <Plus className="w-3.5 h-3.5" />
-              확정 등록
-            </Button>
-          </div>
+          canCreateProject ? (
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => navigate('/projects/new?phase=PROSPECT')}
+                className="gap-1.5 h-8 text-[11px]"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                예정 등록
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => navigate('/projects/new?phase=CONFIRMED')}
+                className="gap-1.5 h-8 text-[11px]"
+                style={{ background: 'linear-gradient(135deg, #4f46e5, #6366f1)' }}
+              >
+                <Plus className="w-3.5 h-3.5" />
+                확정 등록
+              </Button>
+            </div>
+          ) : undefined
         }
       />
 

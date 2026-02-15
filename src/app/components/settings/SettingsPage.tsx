@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Settings, Users, BookOpen, Shield, Building2, Plus, Database,
 } from 'lucide-react';
+import { useNavigate } from 'react-router';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
@@ -19,26 +20,56 @@ import {
 } from '../../data/types';
 import { FirebaseSetup } from './FirebaseSetup';
 import { PageHeader } from '../layout/PageHeader';
+import { useAuth } from '../../data/auth-store';
+import { resolveHomePath } from '../../platform/navigation';
 
 const roleLabels: Record<string, string> = {
   admin: '관리자',
+  tenant_admin: '테넌트 관리자',
   finance: '재무',
   pm: 'PM',
   viewer: '뷰어',
   auditor: '감사',
+  support: '지원',
+  security: '보안',
 };
 
 const roleColor: Record<string, string> = {
   admin: 'bg-purple-100 text-purple-800',
+  tenant_admin: 'bg-violet-100 text-violet-800',
   finance: 'bg-blue-100 text-blue-800',
   pm: 'bg-green-100 text-green-800',
   viewer: 'bg-gray-100 text-gray-700',
   auditor: 'bg-amber-100 text-amber-800',
+  support: 'bg-slate-100 text-slate-700',
+  security: 'bg-rose-100 text-rose-800',
 };
 
 export function SettingsPage() {
   const { org, members, templates } = useAppStore();
+  const { isAuthenticated, user } = useAuth();
+  const navigate = useNavigate();
   const [tab, setTab] = useState('org');
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      navigate('/login', { replace: true });
+      return;
+    }
+
+    const role = user?.role;
+    if (!role) return;
+
+    // Keep operational settings (Firebase/feature toggles, member management) admin-scoped.
+    const allowed = role === 'admin' || role === 'tenant_admin';
+    if (!allowed) {
+      navigate(resolveHomePath(role), { replace: true });
+    }
+  }, [isAuthenticated, navigate, user?.role]);
+
+  if (!isAuthenticated) return null;
+  if (!user) return null;
+  if (!(user.role === 'admin' || user.role === 'tenant_admin')) return null;
 
   return (
     <div className="space-y-5">

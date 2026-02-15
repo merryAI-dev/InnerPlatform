@@ -55,26 +55,35 @@ interface ManagedUser {
 
 const ROLE_LABELS: Record<UserRole, string> = {
   admin: '관리자',
+  tenant_admin: '테넌트 관리자',
   finance: '재무팀',
   pm: 'PM (사업담당)',
   viewer: '뷰어',
   auditor: '감사',
+  support: '지원',
+  security: '보안',
 };
 
 const ROLE_COLORS: Record<UserRole, string> = {
   admin: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300',
+  tenant_admin: 'bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-300',
   finance: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300',
   pm: 'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300',
   viewer: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400',
   auditor: 'bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300',
+  support: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-400',
+  security: 'bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-300',
 };
 
 const ROLE_ICONS: Record<UserRole, typeof Shield> = {
   admin: ShieldCheck,
+  tenant_admin: ShieldCheck,
   finance: Activity,
   pm: FolderKanban,
   viewer: Eye,
   auditor: ShieldAlert,
+  support: UserCog,
+  security: Key,
 };
 
 const STATUS_LABELS: Record<string, string> = {

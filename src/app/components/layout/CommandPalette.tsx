@@ -7,6 +7,8 @@ import {
 } from 'lucide-react';
 import { Dialog, DialogContent } from '../ui/dialog';
 import { useAppStore } from '../../data/store';
+import { useAuth } from '../../data/auth-store';
+import { canShowAdminNavItem } from '../../platform/admin-nav';
 
 interface CommandItem {
   id: string;
@@ -24,6 +26,7 @@ export function CommandPalette() {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const navigate = useNavigate();
   const { projects, transactions } = useAppStore();
+  const { user } = useAuth();
 
   // ⌘K / Ctrl+K
   useEffect(() => {
@@ -48,16 +51,18 @@ export function CommandPalette() {
 
   const items: CommandItem[] = useMemo(() => {
     const nav: CommandItem[] = [
-      { id: 'nav-dash', icon: LayoutDashboard, label: '대시보드', category: '탐색', action: () => go('/'), keywords: ['dashboard', '홈'] },
-      { id: 'nav-proj', icon: FolderKanban, label: '프로젝트 목록', category: '탐색', action: () => go('/projects'), keywords: ['project', '사업'] },
-      { id: 'nav-new', icon: Plus, label: '새 사업 등록', category: '빠른 작업', action: () => go('/projects/new'), keywords: ['new', '생성', '등록'] },
-      { id: 'nav-cash', icon: BarChart3, label: '캐시플로 분석', category: '탐색', action: () => go('/cashflow'), keywords: ['cashflow', '현금흐름'] },
-      { id: 'nav-evi', icon: FileCheck, label: '증빙/정산 관리', category: '탐색', action: () => go('/evidence'), keywords: ['evidence', '증빙'] },
-      { id: 'nav-part', icon: Shield, label: '참여율 관리 (100-1)', category: '탐색', action: () => go('/participation'), keywords: ['participation', '참여율'] },
-      { id: 'nav-koica', icon: ClipboardList, label: 'KOICA 인력배치', category: '탐색', action: () => go('/koica-personnel'), keywords: ['koica', '인력'] },
-      { id: 'nav-audit', icon: BookOpen, label: '감사 로그', category: '탐색', action: () => go('/audit'), keywords: ['audit', '감사'] },
-      { id: 'nav-set', icon: Settings, label: '설정', category: '탐색', action: () => go('/settings'), keywords: ['settings', '설정'] },
-    ];
+      { id: 'nav-dash', icon: LayoutDashboard, label: '대시보드', path: '/', category: '탐색', action: () => go('/'), keywords: ['dashboard', '홈'] },
+      { id: 'nav-proj', icon: FolderKanban, label: '프로젝트 목록', path: '/projects', category: '탐색', action: () => go('/projects'), keywords: ['project', '사업'] },
+      { id: 'nav-new', icon: Plus, label: '새 사업 등록', path: '/projects/new', category: '빠른 작업', action: () => go('/projects/new'), keywords: ['new', '생성', '등록'] },
+      { id: 'nav-cash', icon: BarChart3, label: '캐시플로 분석', path: '/cashflow', category: '탐색', action: () => go('/cashflow'), keywords: ['cashflow', '현금흐름'] },
+      { id: 'nav-evi', icon: FileCheck, label: '증빙/정산 관리', path: '/evidence', category: '탐색', action: () => go('/evidence'), keywords: ['evidence', '증빙'] },
+      { id: 'nav-part', icon: Shield, label: '참여율 관리 (100-1)', path: '/participation', category: '탐색', action: () => go('/participation'), keywords: ['participation', '참여율'] },
+      { id: 'nav-koica', icon: ClipboardList, label: 'KOICA 인력배치', path: '/koica-personnel', category: '탐색', action: () => go('/koica-personnel'), keywords: ['koica', '인력'] },
+      { id: 'nav-audit', icon: BookOpen, label: '감사 로그', path: '/audit', category: '탐색', action: () => go('/audit'), keywords: ['audit', '감사'] },
+      { id: 'nav-set', icon: Settings, label: '설정', path: '/settings', category: '탐색', action: () => go('/settings'), keywords: ['settings', '설정'] },
+    ]
+      .filter((item) => canShowAdminNavItem(user?.role, (item as any).path))
+      .map(({ path: _path, ...rest }) => rest);
 
     const projItems: CommandItem[] = projects.slice(0, 20).map(p => ({
       id: `proj-${p.id}`,
@@ -84,7 +89,7 @@ export function CommandPalette() {
     }));
 
     return [...nav, ...txItems, ...projItems];
-  }, [projects, transactions, go]);
+  }, [projects, transactions, go, user?.role]);
 
   const filtered = useMemo(() => {
     if (!query.trim()) return items;
