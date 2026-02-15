@@ -33,6 +33,8 @@ import {
   type ProjectStatus, type Basis, type SettlementType, type Ledger,
 } from '../../data/types';
 import { EmptyState } from '../ui/empty-state';
+import { Progress } from '../ui/progress';
+import { computeProjectCompleteness } from '../../data/project-completeness';
 
 const statusColor: Record<string, string> = {
   CONTRACT_PENDING: 'bg-amber-100 text-amber-800',
@@ -99,6 +101,8 @@ export function ProjectDetailPage() {
     });
     return map;
   }, [projectLedgers, transactions]);
+
+  const completeness = useMemo(() => computeProjectCompleteness(project), [project]);
 
   if (!project) {
     return (
@@ -237,6 +241,32 @@ export function ProjectDetailPage() {
       </div>
 
       {/* Project Info Grid */}
+      <Card>
+        <CardContent className="pt-3 pb-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-xs text-muted-foreground mb-1">입력 완성도</p>
+              <p className="text-sm" style={{ fontWeight: 700 }}>
+                {completeness.percent}% ({completeness.filled}/{completeness.total})
+              </p>
+            </div>
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => navigate(`/projects/${project.id}/edit`)}>
+              <Edit className="w-3.5 h-3.5" />
+              정보 보완
+            </Button>
+          </div>
+          <div className="mt-2">
+            <Progress value={completeness.percent} className="h-2" />
+          </div>
+          {completeness.missing.length > 0 && (
+            <p className="text-[11px] text-muted-foreground mt-2">
+              다음 항목을 채우면 좋아요: {completeness.missing.slice(0, 4).map((m) => m.label).join(', ')}
+              {completeness.missing.length > 4 ? ` 외 ${completeness.missing.length - 4}개` : ''}
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Card>
           <CardContent className="pt-3 pb-3">

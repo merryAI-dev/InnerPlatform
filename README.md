@@ -196,8 +196,8 @@ npm run bff:test:integration
 ## BFF API Surface
 
 - `GET /api/v1/health`
-- `POST /api/internal/workers/outbox/run` (protected; worker secret required)
-- `POST /api/internal/workers/work-queue/run` (protected; worker secret required)
+- `GET|POST /api/internal/workers/outbox/run` (protected; worker secret required)
+- `GET|POST /api/internal/workers/work-queue/run` (protected; worker secret required)
 - `POST /api/v1/write`
 - `GET /api/v1/views/:viewName`
 - `GET /api/v1/queue/jobs`

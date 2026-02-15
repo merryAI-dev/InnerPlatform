@@ -724,6 +724,17 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       .send({});
     expect(deniedOutbox.status).toBe(401);
     expect(deniedOutbox.body.error).toBe('unauthorized_worker');
+
+    // Vercel Cron invokes worker endpoints via HTTP GET.
+    const deniedQueueGet = await api
+      .get('/api/internal/workers/work-queue/run');
+    expect(deniedQueueGet.status).toBe(401);
+    expect(deniedQueueGet.body.error).toBe('unauthorized_worker');
+
+    const deniedOutboxGet = await api
+      .get('/api/internal/workers/outbox/run');
+    expect(deniedOutboxGet.status).toBe(401);
+    expect(deniedOutboxGet.body.error).toBe('unauthorized_worker');
   });
 
   it('processes work queue jobs through internal worker endpoint', async () => {
@@ -746,9 +757,9 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     expect(write.body.eventId).toBeTruthy();
 
     const runQueue = await api
-      .post('/api/internal/workers/work-queue/run')
-      .set('x-worker-secret', workerSecret)
-      .send({ tenantId, eventId: write.body.eventId });
+      .get('/api/internal/workers/work-queue/run')
+      .set('authorization', `Bearer ${workerSecret}`)
+      .query({ tenantId, eventId: write.body.eventId });
 
     expect(runQueue.status).toBe(200);
     expect(runQueue.body.ok).toBe(true);
@@ -783,9 +794,8 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     expect(pendingBefore.empty).toBe(false);
 
     const runOutbox = await api
-      .post('/api/internal/workers/outbox/run')
-      .set('x-worker-secret', workerSecret)
-      .send({});
+      .get('/api/internal/workers/outbox/run')
+      .set('authorization', `Bearer ${workerSecret}`);
 
     expect(runOutbox.status).toBe(200);
     expect(runOutbox.body.ok).toBe(true);

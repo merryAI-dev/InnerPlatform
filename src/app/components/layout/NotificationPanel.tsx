@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import {
   Bell, X, Clock, AlertTriangle, CheckCircle2, FileText,
@@ -11,6 +11,10 @@ import { Separator } from '../ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { useAppStore } from '../../data/store';
 import { computeMemberSummaries } from '../../data/participation-data';
+import { useAuth } from '../../data/auth-store';
+import { useFirebase } from '../../lib/firebase-context';
+import { featureFlags } from '../../config/feature-flags';
+import { listenNotificationsForRecipient, type PlatformNotificationDoc } from '../../lib/notifications-service';
 
 interface NotifItem {
   id: string;
@@ -23,13 +27,75 @@ interface NotifItem {
   read: boolean;
 }
 
+const SEEN_STORAGE_KEY = 'mysc-notifications-seen-v1';
+
+function loadSeenIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(SEEN_STORAGE_KEY);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return new Set();
+    return new Set(Object.keys(parsed));
+  } catch {
+    return new Set();
+  }
+}
+
+function markSeen(id: string) {
+  try {
+    const raw = localStorage.getItem(SEEN_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    parsed[id] = new Date().toISOString();
+    localStorage.setItem(SEEN_STORAGE_KEY, JSON.stringify(parsed));
+  } catch {
+    // no-op
+  }
+}
+
 export function NotificationPanel() {
   const navigate = useNavigate();
   const { transactions, projects, participationEntries } = useAppStore();
+  const { user } = useAuth();
+  const { db, isOnline, orgId } = useFirebase();
   const [open, setOpen] = useState(false);
+  const [feed, setFeed] = useState<PlatformNotificationDoc[]>([]);
+  const [seenIds, setSeenIds] = useState<Set<string>>(() => loadSeenIds());
+
+  const firestoreEnabled = featureFlags.firestoreCoreEnabled && isOnline && !!db && !!user?.uid;
+
+  useEffect(() => {
+    if (!firestoreEnabled || !db || !user?.uid) {
+      setFeed([]);
+      return;
+    }
+    return listenNotificationsForRecipient(db, orgId, user.uid, (items) => setFeed(items));
+  }, [firestoreEnabled, db, orgId, user?.uid]);
 
   const notifications = useMemo<NotifItem[]>(() => {
     const items: NotifItem[] = [];
+
+    // Activity feed (outbox-backed notifications)
+    feed.forEach((n) => {
+      const state = String(n.state || '').toUpperCase();
+      const type: NotifItem['type'] = state === 'SUBMITTED' ? 'approval' : 'system';
+      const severity = n.severity || (state === 'REJECTED' ? 'critical' : state === 'SUBMITTED' ? 'warning' : 'info');
+      const link = state === 'SUBMITTED'
+        ? '/approvals'
+        : n.projectId
+          ? `/projects/${n.projectId}`
+          : undefined;
+
+      items.push({
+        id: n.id,
+        type,
+        severity,
+        title: n.title,
+        description: n.description,
+        timestamp: n.createdAt,
+        link,
+        read: seenIds.has(n.id),
+      });
+    });
 
     // Pending approvals
     const pending = transactions.filter(t => t.state === 'SUBMITTED');
@@ -97,9 +163,11 @@ export function NotificationPanel() {
 
     return items.sort((a, b) => {
       const severityOrder = { critical: 0, warning: 1, info: 2 };
-      return severityOrder[a.severity] - severityOrder[b.severity];
+      const sev = severityOrder[a.severity] - severityOrder[b.severity];
+      if (sev !== 0) return sev;
+      return String(b.timestamp || '').localeCompare(String(a.timestamp || ''));
     });
-  }, [transactions, projects, participationEntries]);
+  }, [feed, seenIds, transactions, projects, participationEntries]);
 
   const criticalCount = notifications.filter(n => n.severity === 'critical').length;
   const totalCount = notifications.length;
@@ -118,7 +186,22 @@ export function NotificationPanel() {
   };
 
   const handleGo = (link?: string) => {
-    if (link) { navigate(link); setOpen(false); }
+    if (link) {
+      navigate(link);
+      setOpen(false);
+    }
+  };
+
+  const handleClickItem = (item: NotifItem) => {
+    if (!item.read) {
+      markSeen(item.id);
+      setSeenIds((prev) => {
+        const next = new Set(prev);
+        next.add(item.id);
+        return next;
+      });
+    }
+    handleGo(item.link);
   };
 
   return (
@@ -179,7 +262,7 @@ export function NotificationPanel() {
                 <div
                   key={n.id}
                   className={`flex items-start gap-3 p-3 rounded-lg border-l-[3px] cursor-pointer transition-colors hover:bg-muted/40 ${sev.border} ${sev.bg}`}
-                  onClick={() => handleGo(n.link)}
+                  onClick={() => handleClickItem(n)}
                 >
                   <div className="w-7 h-7 rounded-md bg-white/80 flex items-center justify-center shrink-0 border border-border/40 mt-0.5">
                     <Icon className="w-3.5 h-3.5 text-muted-foreground" />
@@ -187,7 +270,7 @@ export function NotificationPanel() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
                       <span className="text-[12px]" style={{ fontWeight: 600 }}>{n.title}</span>
-                      <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${sev.dot}`} />
+                      {!n.read && <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${sev.dot}`} />}
                     </div>
                     <p className="text-[11px] text-muted-foreground mt-0.5 line-clamp-2">{n.description}</p>
                     <p className="text-[10px] text-muted-foreground/60 mt-1">{n.timestamp.slice(0, 10)}</p>
@@ -208,7 +291,7 @@ export function NotificationPanel() {
                 <div
                   key={n.id}
                   className={`flex items-start gap-3 p-3 rounded-lg border-l-[3px] cursor-pointer transition-colors hover:bg-muted/40 ${sev.border} ${sev.bg}`}
-                  onClick={() => handleGo(n.link)}
+                  onClick={() => handleClickItem(n)}
                 >
                   <div className="w-7 h-7 rounded-md bg-white/80 flex items-center justify-center shrink-0 border border-border/40 mt-0.5">
                     <Icon className="w-3.5 h-3.5 text-rose-500" />
@@ -230,7 +313,7 @@ export function NotificationPanel() {
                 <div
                   key={n.id}
                   className={`flex items-start gap-3 p-3 rounded-lg border-l-[3px] cursor-pointer transition-colors hover:bg-muted/40 ${sev.border} ${sev.bg}`}
-                  onClick={() => handleGo(n.link)}
+                  onClick={() => handleClickItem(n)}
                 >
                   <div className="w-7 h-7 rounded-md bg-white/80 flex items-center justify-center shrink-0 border border-border/40 mt-0.5">
                     <Clock className="w-3.5 h-3.5 text-amber-500" />

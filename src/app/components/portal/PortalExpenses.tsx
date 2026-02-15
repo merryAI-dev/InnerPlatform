@@ -1,4 +1,5 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useSearchParams } from 'react-router';
 import {
   Plus, Search, FileText, Wallet, Send,
   CheckCircle2, XCircle, Edit3, Trash2,
@@ -81,6 +82,7 @@ function emptyRow(setId: string): ExpenseItem {
 }
 
 export function PortalExpenses() {
+  const [searchParams] = useSearchParams();
   const {
     portalUser, myProject, expenseSets,
     addExpenseSet, addExpenseItem, updateExpenseItem, deleteExpenseItem,
@@ -113,6 +115,13 @@ export function PortalExpenses() {
   });
 
   const currentSet = selectedSet ? mySets.find(s => s.id === selectedSet.id) || null : null;
+  const selectedSetIdFromUrl = searchParams.get('set') || '';
+
+  useEffect(() => {
+    if (!selectedSetIdFromUrl) return;
+    const found = mySets.find((s) => s.id === selectedSetIdFromUrl);
+    if (found) setSelectedSet(found);
+  }, [selectedSetIdFromUrl, mySets]);
 
   const kpi = useMemo(() => ({
     total: mySets.length,
