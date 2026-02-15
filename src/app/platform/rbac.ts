@@ -2,7 +2,9 @@ import type { UserRole } from '../data/types';
 import { normalizeTenantId } from './tenant';
 import rbacPolicyJson from '../../../policies/rbac-policy.json';
 
-export type PlatformRole = UserRole | 'tenant_admin' | 'support' | 'security';
+// PlatformRole historically extended UserRole, but UserRole now contains all platform roles.
+// Keep the alias to avoid large ripples while keeping a single source of truth for role names.
+export type PlatformRole = UserRole;
 
 export type PlatformPermission =
   | 'project:read'
@@ -128,10 +130,6 @@ export function hasPermission(
 ): boolean {
   const granted = new Set([...PERMISSIONS_BY_ROLE[role], ...extraPermissions]);
   return granted.has(permission);
-}
-
-export function isPrivilegedPlatformRole(role: PlatformRole): boolean {
-  return role === 'admin' || role === 'finance' || role === 'auditor' || role === 'tenant_admin' || role === 'security';
 }
 
 export function canAccessTenant(options: {

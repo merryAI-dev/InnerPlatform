@@ -18,11 +18,16 @@ export function isPortalRole(role: unknown): boolean {
   return normalized === 'pm' || normalized === 'viewer';
 }
 
+export function isAdminSpaceRole(role: unknown): boolean {
+  const normalized = normalizeRole(role);
+  return ADMIN_SPACE_ROLES.has(normalized);
+}
+
 export function resolveHomePath(role: unknown): HomePath {
   const normalized = normalizeRole(role);
   if (!normalized) return '/portal';
   if (isPortalRole(normalized)) return '/portal';
-  if (ADMIN_SPACE_ROLES.has(normalized)) return '/';
+  if (isAdminSpaceRole(normalized)) return '/';
   // Least privilege: unknown roles land in the portal space.
   return '/portal';
 }

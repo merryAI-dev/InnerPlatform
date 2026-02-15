@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  isPrivilegedRole,
   normalizeEmail,
   resolveProjectIdForManager,
   resolveRoleFromDirectory,
@@ -26,12 +25,5 @@ describe('auth-helpers', () => {
       { id: 'p002', managerId: 'u002' },
     ]);
     expect(projectId).toBe('p002');
-  });
-
-  it('classifies privileged roles', () => {
-    expect(isPrivilegedRole('admin')).toBe(true);
-    expect(isPrivilegedRole('finance')).toBe(true);
-    expect(isPrivilegedRole('auditor')).toBe(true);
-    expect(isPrivilegedRole('pm')).toBe(false);
   });
 });

@@ -8,6 +8,7 @@ import {
   MessagesSquare,
   CircleDollarSign,
   BarChart3,
+  ClipboardList,
 } from 'lucide-react';
 import { PortalProvider, usePortalStore } from '../../data/portal-store';
 import { useAuth } from '../../data/auth-store';
@@ -28,6 +29,7 @@ import { addMonthsToYearMonth, getSeoulTodayIso } from '../../platform/business-
 
 const NAV_ITEMS = [
   { to: '/portal', icon: LayoutDashboard, label: '내 사업 현황', exact: true },
+  { to: '/portal/submissions', icon: ClipboardList, label: '내 제출 현황' },
   { to: '/portal/board', icon: MessagesSquare, label: '전사 게시판' },
   { to: '/portal/payroll', icon: CircleDollarSign, label: '인건비/공지', accent: true },
   { to: '/portal/cashflow', icon: BarChart3, label: '캐시플로(주간)' },

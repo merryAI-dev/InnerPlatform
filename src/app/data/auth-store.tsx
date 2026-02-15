@@ -13,7 +13,6 @@ import {
   initFirebase,
 } from '../lib/firebase';
 import {
-  isPrivilegedRole,
   normalizeEmail,
   resolveProjectIdForManager,
   resolveRoleFromDirectory,
@@ -21,6 +20,7 @@ import {
   type RoleDirectoryEntry,
 } from './auth-helpers';
 import { extractAuthContextFromClaims } from '../platform/rbac';
+import { isAdminSpaceRole } from '../platform/navigation';
 import { resolveTenantId } from '../platform/tenant';
 
 export interface AuthUser {
@@ -471,7 +471,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const isAdmin = useCallback(() => {
-    return !!user && isPrivilegedRole(user.role);
+    return !!user && isAdminSpaceRole(user.role);
   }, [user]);
 
   const isPortalUser = useCallback(() => {

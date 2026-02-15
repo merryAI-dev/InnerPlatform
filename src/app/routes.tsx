@@ -31,6 +31,7 @@ import { PortalChangeRequests } from './components/portal/PortalChangeRequests';
 import { PortalProjectRegister } from './components/portal/PortalProjectRegister';
 import { PortalPayrollPage } from './components/portal/PortalPayrollPage';
 import { PortalCashflowPage } from './components/portal/PortalCashflowPage';
+import { PortalSubmissionsPage } from './components/portal/PortalSubmissionsPage';
 import { LoginPage } from './components/auth/LoginPage';
 import { BoardFeedPage } from './components/board/BoardFeedPage';
 import { BoardPostPage } from './components/board/BoardPostPage';
@@ -90,6 +91,7 @@ export const router = createBrowserRouter([
         ],
       },
       { path: 'onboarding', Component: PortalOnboarding },
+      { path: 'submissions', Component: PortalSubmissionsPage },
       { path: 'payroll', Component: PortalPayrollPage },
       { path: 'cashflow', Component: PortalCashflowPage },
       { path: 'budget', Component: PortalBudget },

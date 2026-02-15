@@ -3,7 +3,6 @@ import {
   canAccessTenant,
   extractAuthContextFromClaims,
   hasPermission,
-  isPrivilegedPlatformRole,
 } from './rbac';
 
 describe('rbac helpers', () => {
@@ -43,12 +42,6 @@ describe('rbac helpers', () => {
   it('grants finance approvals and tenant_admin tenant management based on policy', () => {
     expect(hasPermission('finance', 'transaction:approve')).toBe(true);
     expect(hasPermission('tenant_admin', 'tenant:manage')).toBe(true);
-  });
-
-  it('classifies privileged roles', () => {
-    expect(isPrivilegedPlatformRole('admin')).toBe(true);
-    expect(isPrivilegedPlatformRole('tenant_admin')).toBe(true);
-    expect(isPrivilegedPlatformRole('pm')).toBe(false);
   });
 
   it('enforces tenant access for tenant-scoped roles', () => {
