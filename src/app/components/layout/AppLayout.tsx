@@ -25,6 +25,8 @@ import { KeyboardShortcuts } from './KeyboardShortcuts';
 import { ScrollToTop } from './ScrollToTop';
 import { QuickActionFab } from './QuickActionFab';
 import { PageTransition } from './PageTransition';
+import { resolveHomePath } from '../../platform/navigation';
+import { canAccessAdminPath, canShowAdminNavItem } from '../../platform/admin-nav';
 
 const NAV_GROUPS = [
   {
@@ -84,10 +86,16 @@ function AppLayoutContent() {
   useEffect(() => {
     const role = (authUser || currentUser)?.role;
     if (!isAuthenticated || !role) return;
-    if (role === 'pm' || role === 'viewer') {
+    const home = resolveHomePath(role);
+    if (home === '/portal') {
       navigate('/portal', { replace: true });
+      return;
     }
-  }, [isAuthenticated, authUser, currentUser, navigate]);
+
+    if (!canAccessAdminPath(role, location.pathname)) {
+      navigate(home, { replace: true });
+    }
+  }, [isAuthenticated, authUser, currentUser, location.pathname, navigate]);
 
   // Close mobile sidebar on route change
   useEffect(() => {
@@ -98,6 +106,14 @@ function AppLayoutContent() {
 
   // 인증된 사용자 정보 (authUser 우선, fallback currentUser)
   const displayUser = authUser || currentUser;
+  const navGroups = React.useMemo(() => {
+    return NAV_GROUPS
+      .map((group) => ({
+        ...group,
+        items: group.items.filter((item) => canShowAdminNavItem(displayUser?.role, item.to)),
+      }))
+      .filter((group) => group.items.length > 0);
+  }, [displayUser?.role]);
 
   const pendingCount = transactions.filter(t => t.state === 'SUBMITTED').length;
   const missingEvidenceCount = transactions.filter(t => t.evidenceStatus !== 'COMPLETE' && t.state !== 'REJECTED').length;
@@ -201,7 +217,7 @@ function AppLayoutContent() {
 
           {/* Navigation */}
           <nav className="flex-1 py-1.5 overflow-y-auto">
-            {NAV_GROUPS.map((group, gi) => (
+            {navGroups.map((group, gi) => (
               <div key={group.label} className={gi > 0 ? 'mt-2.5' : ''}>
                 {!collapsed && (
                   <p className="px-4 pb-1 text-[9px] tracking-[0.08em] text-slate-600" style={{ fontWeight: 600, textTransform: 'uppercase' }}>

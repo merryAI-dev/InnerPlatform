@@ -118,12 +118,18 @@ function saveUser(user: AuthUser | null) {
 }
 
 function toUserRole(role: string | undefined): UserRole | undefined {
-  if (role === 'admin' || role === 'finance' || role === 'pm' || role === 'viewer' || role === 'auditor') {
+  if (
+    role === 'admin' ||
+    role === 'tenant_admin' ||
+    role === 'finance' ||
+    role === 'pm' ||
+    role === 'viewer' ||
+    role === 'auditor' ||
+    role === 'support' ||
+    role === 'security'
+  ) {
     return role;
   }
-  if (role === 'tenant_admin') return 'admin';
-  if (role === 'support') return 'viewer';
-  if (role === 'security') return 'auditor';
   return undefined;
 }
 

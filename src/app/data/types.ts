@@ -5,7 +5,7 @@
 
 // ── Enums ──
 
-export type UserRole = 'admin' | 'finance' | 'pm' | 'viewer' | 'auditor';
+export type UserRole = 'admin' | 'tenant_admin' | 'finance' | 'pm' | 'viewer' | 'auditor' | 'support' | 'security';
 
 export type ProjectStatus = 'CONTRACT_PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'COMPLETED_PENDING_PAYMENT';
 export type ProjectType = 'DEV_COOPERATION' | 'CONSULTING' | 'SPACE_BIZ' | 'IMPACT_INVEST' | 'OTHER';

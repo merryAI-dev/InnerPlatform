@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router';
 import {
   LayoutDashboard, Wallet, Calculator, Users,
-  ArrowRightLeft, LogOut, Zap, ChevronRight,
-  FolderKanban, Bell, HelpCircle, Menu, X,
+  ArrowRightLeft, LogOut,
+  FolderKanban, Menu, X,
   Plus,
 } from 'lucide-react';
 import { PortalProvider, usePortalStore } from '../../data/portal-store';
@@ -14,6 +14,7 @@ import { Badge } from '../ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { DarkModeToggle } from '../layout/DarkModeToggle';
 import { PageTransition } from '../layout/PageTransition';
+import { resolveHomePath } from '../../platform/navigation';
 
 // ═══════════════════════════════════════════════════════════════
 // PortalLayout — 사용자(PM) 전용 레이아웃
@@ -47,7 +48,7 @@ function PortalContent() {
   useEffect(() => {
     const role = authUser?.role;
     if (!isAuthenticated || !role) return;
-    if (role === 'admin' || role === 'finance' || role === 'auditor') {
+    if (resolveHomePath(role) === '/') {
       navigate('/', { replace: true });
     }
   }, [isAuthenticated, authUser, navigate]);
@@ -175,17 +176,6 @@ function PortalContent() {
               })}
             </div>
 
-            {/* 관리자 페이지 링크 */}
-            <div className="mt-4 mx-2 pt-3 border-t border-slate-800">
-              <NavLink
-                to="/"
-                className="flex items-center gap-2 px-2.5 py-[6px] rounded-md text-[11px] text-slate-600 hover:text-slate-400 hover:bg-white/[0.04] transition-colors"
-              >
-                <Zap className="w-3.5 h-3.5" />
-                관리자 페이지로 이동
-                <ChevronRight className="w-3 h-3 ml-auto" />
-              </NavLink>
-            </div>
           </nav>
 
           {/* Footer */}
