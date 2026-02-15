@@ -6,6 +6,7 @@ import { ProjectDetailPage } from './components/projects/ProjectDetailPage';
 import { ProjectWizardPage } from './components/projects/ProjectWizardPage';
 import { LedgerDetailPage } from './components/ledgers/LedgerDetailPage';
 import { CashflowPage } from './components/cashflow/CashflowPage';
+import { ProjectCashflowSheetPage } from './components/cashflow/ProjectCashflowSheetPage';
 import { EvidenceQueuePage } from './components/evidence/EvidenceQueuePage';
 import { AuditLogPage } from './components/audit/AuditLogPage';
 import { SettingsPage } from './components/settings/SettingsPage';
@@ -29,6 +30,7 @@ import { PortalPersonnel } from './components/portal/PortalPersonnel';
 import { PortalChangeRequests } from './components/portal/PortalChangeRequests';
 import { PortalProjectRegister } from './components/portal/PortalProjectRegister';
 import { PortalPayrollPage } from './components/portal/PortalPayrollPage';
+import { PortalCashflowPage } from './components/portal/PortalCashflowPage';
 import { LoginPage } from './components/auth/LoginPage';
 import { BoardFeedPage } from './components/board/BoardFeedPage';
 import { BoardPostPage } from './components/board/BoardPostPage';
@@ -56,6 +58,8 @@ export const router = createBrowserRouter([
       { path: 'projects/:projectId/edit', Component: ProjectWizardPage },
       { path: 'projects/:projectId/ledgers/:ledgerId', Component: LedgerDetailPage },
       { path: 'cashflow', Component: CashflowPage },
+      { path: 'cashflow/projects', Component: CashflowPage },
+      { path: 'cashflow/projects/:projectId', Component: ProjectCashflowSheetPage },
       { path: 'evidence', Component: EvidenceQueuePage },
       { path: 'participation', Component: ParticipationPage },
       { path: 'koica-personnel', Component: KoicaPersonnelPage },
@@ -87,6 +91,7 @@ export const router = createBrowserRouter([
       },
       { path: 'onboarding', Component: PortalOnboarding },
       { path: 'payroll', Component: PortalPayrollPage },
+      { path: 'cashflow', Component: PortalCashflowPage },
       { path: 'budget', Component: PortalBudget },
       { path: 'expenses', Component: PortalExpenses },
       { path: 'personnel', Component: PortalPersonnel },

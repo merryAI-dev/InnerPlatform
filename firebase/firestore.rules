@@ -32,7 +32,7 @@ service cloud.firestore {
     }
 
     function isPrivileged(orgId) {
-      return role(orgId) in ['admin', 'finance', 'auditor'];
+      return role(orgId) in ['admin', 'tenant_admin', 'finance', 'auditor'];
     }
 
     function selfMemberUpdateWithoutRoleChange(orgId, uid) {
@@ -48,11 +48,13 @@ service cloud.firestore {
     }
 
     function canReadProjectResource(orgId, projectId) {
-      return isPrivileged(orgId) || (role(orgId) == 'pm' && memberProjectId(orgId) == projectId);
+      return isPrivileged(orgId)
+        || (role(orgId) in ['pm', 'viewer'] && memberProjectId(orgId) == projectId);
     }
 
     function canWriteProjectResource(orgId, projectId) {
-      return role(orgId) in ['admin', 'finance'] || (role(orgId) == 'pm' && memberProjectId(orgId) == projectId);
+      return role(orgId) in ['admin', 'tenant_admin', 'finance']
+        || (role(orgId) == 'pm' && memberProjectId(orgId) == projectId);
     }
 
     function projectIdFromTransaction(orgId, txId) {
@@ -228,6 +230,48 @@ service cloud.firestore {
                       'updatedAt'
                     ]);
       allow delete: if isSignedIn() && resourceHasValidTenant(orgId) && resource.data.voterId == request.auth.uid;
+    }
+
+    // ── Cashflow Weekly Sheet (주간 캐시플로 시트) ──
+
+    match /orgs/{orgId}/cashflow_weeks/{weekId} {
+      allow read: if isSignedIn()
+                  && resourceHasValidTenant(orgId)
+                  && canReadProjectResource(orgId, resource.data.projectId);
+      allow create: if isSignedIn()
+                    && requestHasValidTenant(orgId)
+                    && request.resource.data.id == weekId
+                    && canWriteProjectResource(orgId, request.resource.data.projectId);
+      allow update: if isSignedIn()
+                    && requestHasValidTenant(orgId)
+                    && resourceHasValidTenant(orgId)
+                    && canWriteProjectResource(orgId, resource.data.projectId)
+                    && (
+                      // Admin/finance/tenant_admin can close weeks and edit anything in-scope.
+                      role(orgId) in ['admin', 'finance', 'tenant_admin']
+                      ||
+                      // PM can edit amounts + submit, but cannot close.
+                      (
+                        role(orgId) == 'pm'
+                        && memberProjectId(orgId) == resource.data.projectId
+                        && request.resource.data.projectId == resource.data.projectId
+                        && request.resource.data.yearMonth == resource.data.yearMonth
+                        && request.resource.data.weekNo == resource.data.weekNo
+                        && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+                          'projection',
+                          'actual',
+                          'pmSubmitted',
+                          'pmSubmittedAt',
+                          'pmSubmittedByUid',
+                          'pmSubmittedByName',
+                          'updatedAt',
+                          'updatedByUid',
+                          'updatedByName',
+                          'tenantId'
+                        ])
+                      )
+                    );
+      allow delete: if false;
     }
 
     // ── Payroll (인건비 공지/확인) ──

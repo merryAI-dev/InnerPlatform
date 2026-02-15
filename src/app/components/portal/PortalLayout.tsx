@@ -7,6 +7,7 @@ import {
   Plus,
   MessagesSquare,
   CircleDollarSign,
+  BarChart3,
 } from 'lucide-react';
 import { PortalProvider, usePortalStore } from '../../data/portal-store';
 import { useAuth } from '../../data/auth-store';
@@ -29,6 +30,7 @@ const NAV_ITEMS = [
   { to: '/portal', icon: LayoutDashboard, label: '내 사업 현황', exact: true },
   { to: '/portal/board', icon: MessagesSquare, label: '전사 게시판' },
   { to: '/portal/payroll', icon: CircleDollarSign, label: '인건비/공지', accent: true },
+  { to: '/portal/cashflow', icon: BarChart3, label: '캐시플로(주간)' },
   { to: '/portal/budget', icon: Calculator, label: '예산총괄' },
   { to: '/portal/expenses', icon: Wallet, label: '사업비 입력' },
   { to: '/portal/personnel', icon: Users, label: '인력 현황' },
