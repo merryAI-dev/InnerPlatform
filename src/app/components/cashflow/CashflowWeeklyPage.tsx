@@ -7,6 +7,7 @@ import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { useAppStore } from '../../data/store';
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
+import { chooseCashflowSheetForNet, computeCashflowTotals } from '../../platform/cashflow-sheet';
 import { getMonthMondayWeeks } from '../../platform/cashflow-weeks';
 
 function fmtShort(n: number): string {
@@ -24,26 +25,16 @@ export function CashflowWeeklyPage() {
   const monthWeeks = useMemo(() => getMonthMondayWeeks(yearMonth), [yearMonth]);
 
   const byProjectWeek = useMemo(() => {
-    const map = new Map<string, { pmSubmitted: boolean; adminClosed: boolean; net: number }>();
+    const map = new Map<string, { pmSubmitted: boolean; adminClosed: boolean; net: number; netSource: 'actual' | 'projection' }>();
     for (const w of weeks.filter((x) => x.yearMonth === yearMonth)) {
       const key = `${w.projectId}:${w.weekNo}`;
-      const actual = w.actual || {};
-      const inTotal = Number(actual.MYSC_PREPAY_IN || 0)
-        + Number(actual.SALES_IN || 0)
-        + Number(actual.SALES_VAT_IN || 0)
-        + Number(actual.TEAM_SUPPORT_IN || 0)
-        + Number(actual.BANK_INTEREST_IN || 0);
-      const outTotal = Number(actual.DIRECT_COST_OUT || 0)
-        + Number(actual.INPUT_VAT_OUT || 0)
-        + Number(actual.MYSC_LABOR_OUT || 0)
-        + Number(actual.MYSC_PROFIT_OUT || 0)
-        + Number(actual.SALES_VAT_OUT || 0)
-        + Number(actual.TEAM_SUPPORT_OUT || 0)
-        + Number(actual.BANK_INTEREST_OUT || 0);
+      const { source, sheet } = chooseCashflowSheetForNet({ actual: w.actual, projection: w.projection });
+      const { net } = computeCashflowTotals(sheet);
       map.set(key, {
         pmSubmitted: Boolean(w.pmSubmitted),
         adminClosed: Boolean(w.adminClosed),
-        net: inTotal - outTotal,
+        net,
+        netSource: source,
       });
     }
     return map;
@@ -107,6 +98,7 @@ export function CashflowWeeklyPage() {
                       const pmSubmitted = Boolean(status?.pmSubmitted);
                       const adminClosed = Boolean(status?.adminClosed);
                       const net = status?.net ?? 0;
+                      const netSource = status?.netSource ?? 'actual';
                       const chip = adminClosed
                         ? { bg: 'bg-emerald-500/15', text: 'text-emerald-700 dark:text-emerald-300', label: '결산완료' }
                         : pmSubmitted
@@ -120,7 +112,7 @@ export function CashflowWeeklyPage() {
                               {chip.label}
                             </span>
                             <span className="text-[10px] text-muted-foreground" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                              NET {fmtShort(net)}
+                              NET {fmtShort(net)}{netSource === 'projection' ? ' (예상)' : ''}
                             </span>
                           </div>
                         </td>
@@ -163,4 +155,3 @@ export function CashflowWeeklyPage() {
     </div>
   );
 }
-
