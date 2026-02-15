@@ -195,10 +195,11 @@ async function upsertMemberFromFirebase(
     name: firebaseUser.displayName || existing?.name || '사용자',
     email: normalizedEmail,
     role:
-      toUserRole(roleFromClaims) ||
-      (bootstrapAdmin ? 'admin' : undefined) ||
-      existing?.role ||
-      resolveRoleFromDirectory(firebaseUser.email || '', ROLE_DIRECTORY),
+      bootstrapAdmin
+        ? 'admin'
+        : toUserRole(roleFromClaims) ||
+          existing?.role ||
+          resolveRoleFromDirectory(firebaseUser.email || '', ROLE_DIRECTORY),
     tenantId,
     status: existing?.status || 'ACTIVE',
     projectId: existing?.projectId || resolveProjectIdForManager(firebaseUser.uid, PROJECT_OWNERS),
