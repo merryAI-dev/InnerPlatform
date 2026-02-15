@@ -180,6 +180,20 @@ Security rules/index templates were added under `firebase/`:
 - Bootstrap admin(선택):
   - `VITE_BOOTSTRAP_ADMIN_EMAILS=admin@mysc.co.kr` 처럼 “최초 1회”만 설정해, 해당 이메일 최초 로그인 시 admin role이 자동 부여되게 할 수 있습니다.
 
+## Cashflow Weekly Sheet (Projection/Actual)
+
+구글시트 기반의 주간 캐시플로 입력/결산 UI를 제공합니다.  
+각 주차는 "해당 월의 n번째 월요일(월~일)" 기준으로 계산되며, 라벨은 `26-1-4` 형태(YY-월-주차)로 표시됩니다.
+
+- 경로:
+  - 포털(PM): `/portal/cashflow` (내 사업 Projection/Actual 입력 + 주간 작성완료)
+  - 관리자: `/cashflow` (전사 주간 작성/결산 현황)
+  - 관리자(프로젝트 시트): `/cashflow/projects/:projectId`
+- Firestore 컬렉션(테넌트 스코프):
+  - `orgs/{orgId}/cashflow_weeks`
+    - doc id: `${projectId}-${yearMonth}-w${weekNo}` (예: `p001-2026-01-w4`)
+    - 상태: `pmSubmitted`(작성완료), `adminClosed`(결산완료)
+
 ## Firebase Auth Quick Link
 
 Enable Google login provider:

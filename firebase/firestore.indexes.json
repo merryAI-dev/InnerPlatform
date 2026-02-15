@@ -75,6 +75,24 @@
       ]
     },
     {
+      "collectionGroup": "cashflow_weeks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId", "order": "ASCENDING" },
+        { "fieldPath": "yearMonth", "order": "ASCENDING" },
+        { "fieldPath": "weekNo", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "cashflow_weeks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "yearMonth", "order": "ASCENDING" },
+        { "fieldPath": "projectId", "order": "ASCENDING" },
+        { "fieldPath": "weekNo", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "transactions",
       "queryScope": "COLLECTION",
       "fields": [

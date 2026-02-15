@@ -501,6 +501,64 @@ export interface MonthlyClose {
   updatedAt: string;
 }
 
+// ── Cashflow Weekly Sheet (주간 캐시플로 시트) ──
+
+export type CashflowSheetLineId =
+  // IN
+  | 'MYSC_PREPAY_IN'        // MYSC 선입금(필요 시 - 금액)
+  | 'SALES_IN'              // 매출액(입금)
+  | 'SALES_VAT_IN'          // 매출부가세(입금)
+  | 'TEAM_SUPPORT_IN'       // 팀지원금(입금)
+  | 'BANK_INTEREST_IN'      // 은행이자(입금)
+  // OUT
+  | 'DIRECT_COST_OUT'       // 직접사업비(공급가액/공급대가)
+  | 'INPUT_VAT_OUT'         // 매입부가세(출금)
+  | 'MYSC_LABOR_OUT'        // MYSC 인건비
+  | 'MYSC_PROFIT_OUT'       // MYSC 수익(간접비 등)
+  | 'SALES_VAT_OUT'         // 매출부가세(출금)
+  | 'TEAM_SUPPORT_OUT'      // 팀지원금(출금)
+  | 'BANK_INTEREST_OUT';    // 은행이자(출금)
+
+export const CASHFLOW_SHEET_LINE_LABELS: Record<CashflowSheetLineId, string> = {
+  MYSC_PREPAY_IN: 'MYSC 선입금(잔금 등 입금 필요 시)',
+  SALES_IN: '매출액(입금)',
+  SALES_VAT_IN: '매출부가세(입금)',
+  TEAM_SUPPORT_IN: '팀지원금(입금)',
+  BANK_INTEREST_IN: '은행이자(입금)',
+  DIRECT_COST_OUT: '직접사업비',
+  INPUT_VAT_OUT: '매입부가세',
+  MYSC_LABOR_OUT: 'MYSC 인건비',
+  MYSC_PROFIT_OUT: 'MYSC 수익(간접비 등)',
+  SALES_VAT_OUT: '매출부가세(출금)',
+  TEAM_SUPPORT_OUT: '팀지원금(출금)',
+  BANK_INTEREST_OUT: '은행이자(출금)',
+};
+
+export interface CashflowWeekSheet {
+  /** doc id = `${projectId}-${yearMonth}-w${weekNo}` */
+  id: string;
+  tenantId?: string;
+  projectId: string;
+  yearMonth: string; // "2026-01"
+  weekNo: number; // 1..5 (nth Monday in month)
+  weekStart: string; // "YYYY-MM-DD" (Monday)
+  weekEnd: string; // "YYYY-MM-DD" (Sunday)
+  projection: Partial<Record<CashflowSheetLineId, number>>;
+  actual: Partial<Record<CashflowSheetLineId, number>>;
+  pmSubmitted: boolean;
+  pmSubmittedAt?: string;
+  pmSubmittedByUid?: string;
+  pmSubmittedByName?: string;
+  adminClosed: boolean;
+  adminClosedAt?: string;
+  adminClosedByUid?: string;
+  adminClosedByName?: string;
+  createdAt: string;
+  updatedAt: string;
+  updatedByUid?: string;
+  updatedByName?: string;
+}
+
 export interface AuditLog {
   id: string;
   tenantId?: string;

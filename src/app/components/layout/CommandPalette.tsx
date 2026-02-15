@@ -54,7 +54,7 @@ export function CommandPalette() {
       { id: 'nav-dash', icon: LayoutDashboard, label: '대시보드', path: '/', category: '탐색', action: () => go('/'), keywords: ['dashboard', '홈'] },
       { id: 'nav-proj', icon: FolderKanban, label: '프로젝트 목록', path: '/projects', category: '탐색', action: () => go('/projects'), keywords: ['project', '사업'] },
       { id: 'nav-new', icon: Plus, label: '새 사업 등록', path: '/projects/new', category: '빠른 작업', action: () => go('/projects/new'), keywords: ['new', '생성', '등록'] },
-      { id: 'nav-cash', icon: BarChart3, label: '캐시플로 분석', path: '/cashflow', category: '탐색', action: () => go('/cashflow'), keywords: ['cashflow', '현금흐름'] },
+      { id: 'nav-cash', icon: BarChart3, label: '캐시플로', path: '/cashflow', category: '탐색', action: () => go('/cashflow'), keywords: ['cashflow', '현금흐름', 'projection', 'actual', '주간'] },
       { id: 'nav-evi', icon: FileCheck, label: '증빙/정산 관리', path: '/evidence', category: '탐색', action: () => go('/evidence'), keywords: ['evidence', '증빙'] },
       { id: 'nav-part', icon: Shield, label: '참여율 관리 (100-1)', path: '/participation', category: '탐색', action: () => go('/participation'), keywords: ['participation', '참여율'] },
       { id: 'nav-koica', icon: ClipboardList, label: 'KOICA 인력배치', path: '/koica-personnel', category: '탐색', action: () => go('/koica-personnel'), keywords: ['koica', '인력'] },

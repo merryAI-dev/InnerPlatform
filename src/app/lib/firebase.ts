@@ -205,6 +205,7 @@ export const ORG_COLLECTIONS = {
   boardPosts: 'board_posts',
   boardComments: 'board_comments',
   boardVotes: 'board_votes',
+  cashflowWeeks: 'cashflow_weeks',
   payrollSchedules: 'payroll_schedules',
   payrollRuns: 'payroll_runs',
   monthlyCloses: 'monthly_closes',
