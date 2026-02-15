@@ -26,6 +26,7 @@ import { KeyboardShortcuts } from './KeyboardShortcuts';
 import { ScrollToTop } from './ScrollToTop';
 import { QuickActionFab } from './QuickActionFab';
 import { PageTransition } from './PageTransition';
+import { ErrorBoundary } from './ErrorBoundary';
 import { resolveHomePath } from '../../platform/navigation';
 import { canAccessAdminPath, canShowAdminNavItem } from '../../platform/admin-nav';
 
@@ -422,7 +423,9 @@ function AppLayoutContent() {
           <main className="flex-1 overflow-y-auto">
             <div className="p-5 max-w-[1600px] mx-auto">
               <PageTransition>
-                <Outlet />
+                <ErrorBoundary resetKey={location.pathname}>
+                  <Outlet />
+                </ErrorBoundary>
               </PageTransition>
             </div>
           </main>

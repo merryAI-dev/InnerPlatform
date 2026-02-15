@@ -9,6 +9,8 @@ import {
   CircleDollarSign,
   BarChart3,
   ClipboardList,
+  Loader2,
+  AlertTriangle,
 } from 'lucide-react';
 import { PortalProvider, usePortalStore } from '../../data/portal-store';
 import { useAuth } from '../../data/auth-store';
@@ -19,6 +21,7 @@ import { Badge } from '../ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { DarkModeToggle } from '../layout/DarkModeToggle';
 import { PageTransition } from '../layout/PageTransition';
+import { ErrorBoundary } from '../layout/ErrorBoundary';
 import { resolveHomePath } from '../../platform/navigation';
 import { addMonthsToYearMonth, getSeoulTodayIso } from '../../platform/business-days';
 
@@ -41,8 +44,8 @@ const NAV_ITEMS = [
 ];
 
 function PortalContent() {
-  const { isRegistered, portalUser, myProject, logout: portalLogout, expenseSets, changeRequests } = usePortalStore();
-  const { isAuthenticated, user: authUser, logout: authLogout } = useAuth();
+  const { isRegistered, isLoading: portalLoading, portalUser, myProject, logout: portalLogout, expenseSets, changeRequests } = usePortalStore();
+  const { isAuthenticated, isLoading: authLoading, user: authUser, logout: authLogout } = useAuth();
   const { getUnacknowledgedCount } = useHrAnnouncements();
   const { runs, monthlyCloses } = usePayroll();
   const location = useLocation();
@@ -87,7 +90,60 @@ function PortalContent() {
     return <Outlet />;
   }
 
-  if (!isRegistered || !portalUser) return null;
+  if (authLoading || portalLoading) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-5 h-5 mx-auto animate-spin text-muted-foreground" />
+          <p className="mt-2 text-[12px] text-muted-foreground">포털 데이터를 불러오는 중...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isRegistered || !portalUser) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center px-6">
+        <div className="max-w-md text-center">
+          <AlertTriangle className="w-10 h-10 mx-auto text-muted-foreground/30 mb-3" />
+          <p className="text-[14px]" style={{ fontWeight: 800 }}>사업이 배정되지 않았습니다</p>
+          <p className="text-[12px] text-muted-foreground mt-1">
+            아직 배정된 사업이 없습니다. 관리자에게 사업 배정을 요청하거나, 온보딩에서 사업을 선택해 주세요.
+          </p>
+          <div className="mt-4 flex items-center justify-center gap-2">
+            <Button variant="outline" onClick={() => navigate('/portal/onboarding')}>
+              온보딩으로
+            </Button>
+            <Button variant="ghost" onClick={() => { portalLogout(); authLogout(); navigate('/login'); }}>
+              로그아웃
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!myProject) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center px-6">
+        <div className="max-w-md text-center">
+          <AlertTriangle className="w-10 h-10 mx-auto text-muted-foreground/30 mb-3" />
+          <p className="text-[14px]" style={{ fontWeight: 800 }}>사업 정보를 찾을 수 없습니다</p>
+          <p className="text-[12px] text-muted-foreground mt-1">
+            배정된 사업 정보가 존재하지 않거나 접근 권한이 없습니다. 관리자에게 문의해 주세요.
+          </p>
+          <div className="mt-4 flex items-center justify-center gap-2">
+            <Button variant="outline" onClick={() => navigate('/portal/onboarding')}>
+              사업 선택
+            </Button>
+            <Button variant="ghost" onClick={() => { portalLogout(); authLogout(); navigate('/login'); }}>
+              로그아웃
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // 배지 카운트
   const myExpenses = expenseSets.filter(s => s.projectId === portalUser.projectId);
@@ -258,7 +314,9 @@ function PortalContent() {
           <main className="flex-1 overflow-y-auto">
             <div className="p-5 max-w-[1400px] mx-auto">
               <PageTransition>
-                <Outlet />
+                <ErrorBoundary homePath="/portal" resetKey={location.pathname}>
+                  <Outlet />
+                </ErrorBoundary>
               </PageTransition>
             </div>
           </main>

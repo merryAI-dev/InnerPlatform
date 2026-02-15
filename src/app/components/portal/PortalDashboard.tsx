@@ -13,6 +13,7 @@ import {
   where,
   type Unsubscribe,
 } from 'firebase/firestore';
+import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -114,6 +115,28 @@ export function PortalDashboard() {
   const needsPayrollAck = !!(payrollRun && today >= payrollRun.noticeDate && !payrollRun.acknowledged);
   const needsMonthlyCloseAck = !!(monthlyClosePrev && monthlyClosePrev.status === 'DONE' && !monthlyClosePrev.acknowledged);
 
+  async function onAckPayroll() {
+    if (!payrollRun) return;
+    try {
+      await acknowledgePayrollRun(payrollRun.id);
+      toast.success('공지 확인이 기록되었습니다');
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err?.message || '확인 처리에 실패했습니다');
+    }
+  }
+
+  async function onAckMonthlyClose() {
+    if (!monthlyClosePrev) return;
+    try {
+      await acknowledgeMonthlyClose(monthlyClosePrev.id);
+      toast.success('월간 정산 확인이 기록되었습니다');
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err?.message || '확인 처리에 실패했습니다');
+    }
+  }
+
   // 재무 KPI
   const totalIn = myTx.filter(t => t.direction === 'IN').reduce((s, t) => s + t.amounts.bankAmount, 0);
   const totalOut = myTx.filter(t => t.direction === 'OUT').reduce((s, t) => s + t.amounts.bankAmount, 0);
@@ -171,7 +194,7 @@ export function PortalDashboard() {
                 <Button
                   size="sm"
                   className="h-8 text-[12px] gap-1.5 shrink-0"
-                  onClick={() => acknowledgePayrollRun(payrollRun.id).catch(console.error)}
+                  onClick={onAckPayroll}
                 >
                   <CheckCircle2 className="w-3.5 h-3.5" /> 확인했습니다
                 </Button>
@@ -191,7 +214,7 @@ export function PortalDashboard() {
                 <Button
                   size="sm"
                   className="h-8 text-[12px] gap-1.5 shrink-0"
-                  onClick={() => acknowledgeMonthlyClose(monthlyClosePrev.id).catch(console.error)}
+                  onClick={onAckMonthlyClose}
                 >
                   <CheckCircle2 className="w-3.5 h-3.5" /> 확인했습니다
                 </Button>
