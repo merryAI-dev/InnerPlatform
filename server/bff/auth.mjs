@@ -20,6 +20,28 @@ function normalizeEmail(value) {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
 }
 
+function normalizeDomain(value) {
+  const raw = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  const withoutAt = raw.startsWith('@') ? raw.slice(1) : raw;
+  return withoutAt.replace(/\s+/g, '');
+}
+
+function parseAllowedEmailDomains(raw) {
+  const text = typeof raw === 'string' ? raw.trim() : '';
+  if (!text) return ['mysc.co.kr'];
+  return text
+    .split(',')
+    .map((part) => normalizeDomain(part))
+    .filter(Boolean);
+}
+
+function isAllowedEmail(email, allowedDomains) {
+  const normalized = normalizeEmail(email);
+  if (!normalized || !normalized.includes('@')) return false;
+  const domain = normalized.split('@').pop() || '';
+  return allowedDomains.some((allowed) => domain === normalizeDomain(allowed));
+}
+
 function normalizeOptionalActorId(value) {
   const raw = typeof value === 'string' ? value.trim() : '';
   if (!raw) return '';
@@ -146,6 +168,14 @@ export async function resolveRequestIdentity(params) {
   const headerEmail = normalizeEmail(readHeader(readHeaderValue, 'x-actor-email'));
   if (claimEmail && headerEmail && claimEmail !== headerEmail) {
     throw createAuthError(403, 'Header email does not match token email', 'email_mismatch');
+  }
+
+  const allowedDomains = parseAllowedEmailDomains(process.env.BFF_ALLOWED_EMAIL_DOMAINS);
+  if (!claimEmail) {
+    throw createAuthError(403, 'Token does not include a valid email', 'missing_email');
+  }
+  if (!isAllowedEmail(claimEmail, allowedDomains)) {
+    throw createAuthError(403, 'Email domain is not allowed', 'email_domain_not_allowed');
   }
 
   const resolvedTenantId = assertTenantId(claimTenantId || headerTenantId);

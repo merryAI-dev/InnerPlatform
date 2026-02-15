@@ -202,6 +202,19 @@ Enable Google login provider:
 npm run firebase:open:google-auth
 ```
 
+Authorized domains (to fix `auth/unauthorized-domain`):
+
+- Firebase Console > Authentication > Settings > Authorized domains
+- Add:
+  - `localhost` (local dev)
+  - your Vercel production domain (for example: `inner-platform.vercel.app`)
+  - any Preview domain you want to use for login (Preview URLs change per deploy)
+
+Email domain allowlist (company-only login):
+
+- Default: `@mysc.co.kr` only
+- Optional env: `VITE_ALLOWED_EMAIL_DOMAINS=mysc.co.kr` (comma-separated supported)
+
 Reference doc:
 
 - `guidelines/Firestore-Automation-System-Guide.md`
