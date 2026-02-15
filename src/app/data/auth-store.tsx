@@ -22,6 +22,7 @@ import {
 import { extractAuthContextFromClaims } from '../platform/rbac';
 import { isAdminSpaceRole } from '../platform/navigation';
 import { resolveTenantId } from '../platform/tenant';
+import { formatAllowedDomains, getAllowedEmailDomains, isAllowedEmail } from '../platform/email-allowlist';
 
 export interface AuthUser {
   uid: string;
@@ -79,6 +80,7 @@ const portalPasswords: Record<string, string> = {};
 const AUTH_STORAGE_KEY = 'mysc-auth-user';
 const ACTIVE_TENANT_KEY = 'MYSC_ACTIVE_TENANT';
 const DEFAULT_ORG_ID = getDefaultOrgId();
+const ALLOWED_EMAIL_DOMAINS = getAllowedEmailDomains(import.meta.env);
 
 function parseBootstrapAdminEmails(env: Record<string, unknown> = import.meta.env): string[] {
   const raw = typeof env.VITE_BOOTSTRAP_ADMIN_EMAILS === 'string' ? env.VITE_BOOTSTRAP_ADMIN_EMAILS : '';
@@ -244,6 +246,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
+      if (!isAllowedEmail(firebaseUser.email, ALLOWED_EMAIL_DOMAINS)) {
+        console.warn('[Auth] blocked sign-in for disallowed email:', firebaseUser.email);
+        await signOut(auth).catch(() => {});
+        setUser(null);
+        saveUser(null);
+        setIsLoading(false);
+        return;
+      }
+
       try {
         const token = await firebaseUser.getIdTokenResult().catch(() => null);
         const claimsContext = extractAuthContextFromClaims(token?.claims);
@@ -344,10 +355,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { success: false, error: 'Firebase 인증 구성을 찾을 수 없습니다.' };
       }
 
-      await signInWithPopup(auth, getGoogleAuthProvider());
+      const cred = await signInWithPopup(auth, getGoogleAuthProvider());
+      const email = cred?.user?.email || '';
+      if (!isAllowedEmail(email, ALLOWED_EMAIL_DOMAINS)) {
+        await signOut(auth).catch(() => {});
+        setIsLoading(false);
+        return {
+          success: false,
+          error: `회사 계정(${formatAllowedDomains(ALLOWED_EMAIL_DOMAINS)})만 로그인할 수 있습니다.`,
+        };
+      }
+
       return { success: true };
     } catch (err: any) {
       setIsLoading(false);
+      const code = String(err?.code || '').trim();
+      if (code === 'auth/unauthorized-domain') {
+        const host = typeof window !== 'undefined' ? window.location.hostname : '';
+        return {
+          success: false,
+          error: `Firebase Auth에서 허용되지 않은 도메인입니다. Firebase Console > Authentication > Settings > Authorized domains에 ${host || '현재 도메인'}을 추가해 주세요.`,
+        };
+      }
+      if (code === 'auth/popup-closed-by-user') {
+        return { success: false, error: '로그인을 취소했습니다.' };
+      }
       return { success: false, error: err?.message || 'Google 로그인에 실패했습니다.' };
     }
   }, []);

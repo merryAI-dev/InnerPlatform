@@ -9,6 +9,7 @@ import { connectAuthEmulator, getAuth, GoogleAuthProvider, type Auth } from 'fir
 import { connectStorageEmulator, getStorage, type FirebaseStorage } from 'firebase/storage';
 import { featureFlags, parseFeatureFlag } from '../config/feature-flags';
 import { buildTenantScopedPath, resolveTenantId } from '../platform/tenant';
+import { getAllowedEmailDomains } from '../platform/email-allowlist';
 
 const STORAGE_KEY = 'MYSC_FIREBASE_CONFIG';
 
@@ -184,7 +185,12 @@ export function getStorageInstance(): FirebaseStorage | null {
 export function getGoogleAuthProvider(): GoogleAuthProvider {
   if (_googleProvider) return _googleProvider;
   _googleProvider = new GoogleAuthProvider();
-  _googleProvider.setCustomParameters({ prompt: 'select_account' });
+  const domains = getAllowedEmailDomains(import.meta.env);
+  const hd = domains.length === 1 ? domains[0] : '';
+  _googleProvider.setCustomParameters({
+    prompt: 'select_account',
+    ...(hd ? { hd } : {}),
+  });
   return _googleProvider;
 }
 
