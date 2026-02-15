@@ -15,9 +15,9 @@ describe('auth-helpers', () => {
     expect(normalizeEmail(' Test@Email.COM ')).toBe('test@email.com');
   });
 
-  it('falls back to pm role when no directory match exists', () => {
+  it('falls back to viewer role when no directory match exists', () => {
     const role = resolveRoleFromDirectory('unknown@mysc.co.kr', []);
-    expect(role).toBe('pm');
+    expect(role).toBe('viewer');
   });
 
   it('resolves manager project ownership', () => {
