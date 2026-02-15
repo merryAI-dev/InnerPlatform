@@ -230,6 +230,15 @@ Authentication mode:
 State transitions also require:
 - `expectedVersion` in request body
 
+State transition RBAC (permission-based):
+- `SUBMITTED`: `transaction:submit`
+- `APPROVED`: `transaction:approve`
+- `REJECTED`: `transaction:reject`
+
+Comment/Evidence RBAC (permission-based):
+- comments: `comment:read` / `comment:write`
+- evidences: `evidence:read` / `evidence:write`
+
 Role change endpoint requires:
 - `x-actor-role` allowed by policy (`policies/rbac-policy.json`)
 

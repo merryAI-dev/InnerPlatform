@@ -9,6 +9,10 @@ function normalizeRole(value) {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
 }
 
+function normalizePermission(value) {
+  return typeof value === 'string' ? value.trim().toLowerCase() : '';
+}
+
 export function resolvePolicyPath(env = process.env) {
   const configured = String(env.RBAC_POLICY_PATH || '').trim();
   if (configured) {
@@ -21,14 +25,38 @@ export function loadRbacPolicy(policyPath = resolvePolicyPath()) {
   const raw = fs.readFileSync(policyPath, 'utf8');
   const parsed = JSON.parse(raw);
 
+  const roles = uniqueList((Array.isArray(parsed.roles) ? parsed.roles : []).map(normalizeRole).filter(Boolean));
+  const permissions = uniqueList((Array.isArray(parsed.permissions) ? parsed.permissions : []).map(normalizePermission).filter(Boolean));
+
+  const rolePermissionsRaw = parsed.rolePermissions && typeof parsed.rolePermissions === 'object'
+    ? parsed.rolePermissions
+    : {};
+  const rolePermissions = {};
+  for (const [roleRaw, permsRaw] of Object.entries(rolePermissionsRaw)) {
+    const role = normalizeRole(roleRaw);
+    if (!role) continue;
+    rolePermissions[role] = uniqueList((Array.isArray(permsRaw) ? permsRaw : []).map(normalizePermission).filter(Boolean));
+  }
+
   return {
     version: Number.isInteger(parsed.version) ? parsed.version : 1,
-    roles: uniqueList((Array.isArray(parsed.roles) ? parsed.roles : []).map(normalizeRole).filter(Boolean)),
-    permissions: uniqueList((Array.isArray(parsed.permissions) ? parsed.permissions : []).map((v) => String(v).trim()).filter(Boolean)),
+    defaultRole: normalizeRole(parsed.defaultRole) || undefined,
+    roles,
+    permissions,
+    rolePermissions,
     roleChangeRules: parsed.roleChangeRules && typeof parsed.roleChangeRules === 'object'
       ? parsed.roleChangeRules
       : {},
   };
+}
+
+export function actorHasPermission(policy, { actorRole, permission }) {
+  const role = normalizeRole(actorRole);
+  const normalizedPermission = normalizePermission(permission);
+  if (!role || !normalizedPermission) return false;
+  const rolePermissions = policy?.rolePermissions?.[role];
+  if (!Array.isArray(rolePermissions)) return false;
+  return rolePermissions.includes(normalizedPermission);
 }
 
 export function canActorAssignRole(policy, { actorRole, targetRole }) {

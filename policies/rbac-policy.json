@@ -1,5 +1,6 @@
 {
   "version": 1,
+  "defaultRole": "viewer",
   "roles": [
     "admin",
     "finance",
@@ -15,12 +16,103 @@
     "project:write",
     "ledger:read",
     "ledger:write",
+    "transaction:submit",
     "transaction:approve",
+    "transaction:reject",
+    "comment:read",
+    "comment:write",
+    "evidence:read",
+    "evidence:write",
     "audit:read",
     "user:manage",
     "tenant:manage",
     "security:manage"
   ],
+  "rolePermissions": {
+    "admin": [
+      "project:read",
+      "project:write",
+      "ledger:read",
+      "ledger:write",
+      "transaction:submit",
+      "transaction:approve",
+      "transaction:reject",
+      "comment:read",
+      "comment:write",
+      "evidence:read",
+      "evidence:write",
+      "audit:read",
+      "user:manage",
+      "tenant:manage",
+      "security:manage"
+    ],
+    "finance": [
+      "project:read",
+      "project:write",
+      "ledger:read",
+      "ledger:write",
+      "transaction:submit",
+      "transaction:approve",
+      "transaction:reject",
+      "comment:read",
+      "comment:write",
+      "evidence:read",
+      "evidence:write",
+      "audit:read"
+    ],
+    "pm": [
+      "project:read",
+      "project:write",
+      "ledger:read",
+      "ledger:write",
+      "transaction:submit",
+      "comment:read",
+      "comment:write",
+      "evidence:read",
+      "evidence:write"
+    ],
+    "viewer": [
+      "project:read",
+      "ledger:read",
+      "comment:read",
+      "evidence:read"
+    ],
+    "auditor": [
+      "project:read",
+      "ledger:read",
+      "comment:read",
+      "evidence:read",
+      "audit:read"
+    ],
+    "tenant_admin": [
+      "project:read",
+      "project:write",
+      "ledger:read",
+      "ledger:write",
+      "transaction:submit",
+      "comment:read",
+      "comment:write",
+      "evidence:read",
+      "evidence:write",
+      "audit:read",
+      "user:manage",
+      "tenant:manage"
+    ],
+    "support": [
+      "project:read",
+      "ledger:read",
+      "comment:read",
+      "evidence:read",
+      "audit:read"
+    ],
+    "security": [
+      "project:read",
+      "comment:read",
+      "evidence:read",
+      "audit:read",
+      "security:manage"
+    ]
+  },
   "roleChangeRules": {
     "admin": ["admin", "finance", "pm", "viewer", "auditor", "tenant_admin", "support", "security"],
     "tenant_admin": ["finance", "pm", "viewer", "auditor"],

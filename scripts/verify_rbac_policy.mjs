@@ -36,6 +36,8 @@ try {
 const errors = [];
 const roles = Array.isArray(policy.roles) ? policy.roles.map((v) => String(v).trim().toLowerCase()).filter(Boolean) : [];
 const permissions = Array.isArray(policy.permissions) ? policy.permissions.map((v) => String(v).trim()).filter(Boolean) : [];
+const defaultRole = typeof policy.defaultRole === 'string' ? policy.defaultRole.trim().toLowerCase() : '';
+const rolePermissions = policy.rolePermissions && typeof policy.rolePermissions === 'object' ? policy.rolePermissions : null;
 const roleChangeRules = policy.roleChangeRules && typeof policy.roleChangeRules === 'object' ? policy.roleChangeRules : null;
 
 if (!Number.isInteger(policy.version)) {
@@ -51,6 +53,36 @@ if (permissions.length === 0) {
   errors.push('permissions must include at least one permission');
 }
 ensureUnique(permissions, 'permissions', errors);
+
+if (defaultRole && !roles.includes(defaultRole)) {
+  errors.push(`defaultRole must be one of roles: ${defaultRole}`);
+}
+
+if (!rolePermissions) {
+  errors.push('rolePermissions must be an object');
+} else {
+  for (const roleKey of Object.keys(rolePermissions)) {
+    const role = String(roleKey).trim().toLowerCase();
+    if (!roles.includes(role)) {
+      errors.push(`rolePermissions contains unknown role: ${roleKey}`);
+    }
+  }
+
+  for (const role of roles) {
+    const permsRaw = rolePermissions[role];
+    if (!Array.isArray(permsRaw) || permsRaw.length === 0) {
+      errors.push(`rolePermissions.${role} must be a non-empty array`);
+      continue;
+    }
+    const perms = permsRaw.map((v) => String(v).trim()).filter(Boolean);
+    ensureUnique(perms, `rolePermissions.${role}`, errors);
+    for (const perm of perms) {
+      if (!permissions.includes(perm)) {
+        errors.push(`rolePermissions.${role} includes unknown permission: ${perm}`);
+      }
+    }
+  }
+}
 
 if (!roleChangeRules) {
   errors.push('roleChangeRules must be an object');

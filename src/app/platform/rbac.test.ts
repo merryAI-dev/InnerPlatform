@@ -29,6 +29,22 @@ describe('rbac helpers', () => {
     expect(hasPermission('pm', 'audit:read', ['audit:read'])).toBe(true);
   });
 
+  it('defaults unknown roles to viewer (least privilege)', () => {
+    const context = extractAuthContextFromClaims({
+      role: 'UNKNOWN_ROLE',
+      permissions: ['project:write'],
+    });
+
+    expect(context.role).toBe('viewer');
+    // Extra permissions still get normalized, but the default role stays least-privileged.
+    expect(context.permissions).toEqual(['project:write']);
+  });
+
+  it('grants finance approvals and tenant_admin tenant management based on policy', () => {
+    expect(hasPermission('finance', 'transaction:approve')).toBe(true);
+    expect(hasPermission('tenant_admin', 'tenant:manage')).toBe(true);
+  });
+
   it('classifies privileged roles', () => {
     expect(isPrivilegedPlatformRole('admin')).toBe(true);
     expect(isPrivilegedPlatformRole('tenant_admin')).toBe(true);

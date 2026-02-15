@@ -509,6 +509,82 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     expect(roleChangeLog).toBeTruthy();
   });
 
+  it('blocks demoting the last remaining admin (lockout protection)', async () => {
+    await db.doc(`orgs/${tenantId}/members/u-admin-1`).set({
+      uid: 'u-admin-1',
+      tenantId,
+      role: 'admin',
+      email: 'admin1@example.com',
+      updatedAt: new Date().toISOString(),
+    });
+
+    const denied = await api
+      .patch('/api/v1/members/u-admin-1/role')
+      .set({ ...defaultHeaders, 'x-actor-role': 'admin', 'idempotency-key': 'idem-last-admin-demote' })
+      .send({ role: 'viewer', reason: 'test lockout prevention' });
+
+    expect(denied.status).toBe(409);
+    expect(denied.body.error).toBe('last_admin_lockout');
+
+    await db.doc(`orgs/${tenantId}/members/u-admin-2`).set({
+      uid: 'u-admin-2',
+      tenantId,
+      role: 'admin',
+      email: 'admin2@example.com',
+      updatedAt: new Date().toISOString(),
+    });
+
+    const ok = await api
+      .patch('/api/v1/members/u-admin-2/role')
+      .set({ ...defaultHeaders, 'x-actor-role': 'admin', 'idempotency-key': 'idem-second-admin-demote' })
+      .send({ role: 'viewer', reason: 'leaving one admin' });
+
+    expect(ok.status).toBe(200);
+    expect(ok.body.previousRole).toBe('admin');
+    expect(ok.body.role).toBe('viewer');
+  });
+
+  it('enforces permission-level RBAC for transaction state changes (submit vs approve)', async () => {
+    await api
+      .post('/api/v1/projects')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-perm-project-001' })
+      .send({ id: 'p-perm-001', name: 'Permission Project' });
+
+    await api
+      .post('/api/v1/ledgers')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-perm-ledger-001' })
+      .send({ id: 'l-perm-001', projectId: 'p-perm-001', name: 'Permission Ledger' });
+
+    await api
+      .post('/api/v1/transactions')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-perm-tx-001' })
+      .send({ id: 'tx-perm-001', projectId: 'p-perm-001', ledgerId: 'l-perm-001', counterparty: 'Vendor' });
+
+    const submitted = await api
+      .patch('/api/v1/transactions/tx-perm-001/state')
+      .set({ ...defaultHeaders, 'x-actor-role': 'pm', 'idempotency-key': 'idem-perm-submit-001' })
+      .send({ newState: 'SUBMITTED', expectedVersion: 1 });
+
+    expect(submitted.status).toBe(200);
+    expect(submitted.body.state).toBe('SUBMITTED');
+
+    const deniedApprove = await api
+      .patch('/api/v1/transactions/tx-perm-001/state')
+      .set({ ...defaultHeaders, 'x-actor-role': 'pm', 'idempotency-key': 'idem-perm-approve-deny-001' })
+      .send({ newState: 'APPROVED', expectedVersion: 2 });
+
+    expect(deniedApprove.status).toBe(403);
+    expect(deniedApprove.body.error).toBe('forbidden');
+
+    const approved = await api
+      .patch('/api/v1/transactions/tx-perm-001/state')
+      .set({ ...defaultHeaders, 'x-actor-role': 'finance', 'idempotency-key': 'idem-perm-approve-allow-001' })
+      .send({ newState: 'APPROVED', expectedVersion: 2 });
+
+    expect(approved.status).toBe(200);
+    expect(approved.body.state).toBe('APPROVED');
+  });
+
   it('enforces route-level RBAC for audit reads and write APIs', async () => {
     const deniedAudit = await api
       .get('/api/v1/audit-logs')

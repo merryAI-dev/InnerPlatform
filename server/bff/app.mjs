@@ -28,7 +28,7 @@ import {
   resolveRelationRulesPolicyPath,
 } from './relation-rules.mjs';
 import { createPiiProtector } from './pii-protection.mjs';
-import { canActorAssignRole, loadRbacPolicy } from './rbac-policy.mjs';
+import { actorHasPermission, canActorAssignRole, loadRbacPolicy } from './rbac-policy.mjs';
 import {
   createRequestId,
 } from './utils.mjs';
@@ -327,6 +327,17 @@ function assertActorRoleAllowed(req, allowedRoles, action) {
     throw createHttpError(
       403,
       `Role '${actorRole || 'unknown'}' is not allowed to ${action}`,
+      'forbidden',
+    );
+  }
+}
+
+function assertActorPermissionAllowed(policy, req, requiredPermission, action) {
+  const actorRole = normalizeRole(req.context?.actorRole);
+  if (!actorRole || !actorHasPermission(policy, { actorRole, permission: requiredPermission })) {
+    throw createHttpError(
+      403,
+      `Role '${actorRole || 'unknown'}' lacks permission '${requiredPermission}' to ${action}`,
       'forbidden',
     );
   }
@@ -922,6 +933,7 @@ export function createBffApp(options = {}) {
   app.get('/api/v1/transactions/:txId/comments', asyncHandler(async (req, res) => {
     const { tenantId } = req.context;
     assertActorRoleAllowed(req, ROUTE_ROLES.readCore, 'read comments');
+    assertActorPermissionAllowed(rbacPolicy, req, 'comment:read', 'read comments');
     const { txId } = req.params;
     const limit = parseLimit(req.query.limit, 100, 500);
 
@@ -953,6 +965,7 @@ export function createBffApp(options = {}) {
   app.get('/api/v1/transactions/:txId/evidences', asyncHandler(async (req, res) => {
     const { tenantId } = req.context;
     assertActorRoleAllowed(req, ROUTE_ROLES.readCore, 'read evidences');
+    assertActorPermissionAllowed(rbacPolicy, req, 'evidence:read', 'read evidences');
     const { txId } = req.params;
     const limit = parseLimit(req.query.limit, 100, 500);
 
@@ -1228,6 +1241,17 @@ export function createBffApp(options = {}) {
 
     assertReasonForRejected(nextState, parsed.reason);
 
+    const requiredPermission = nextState === 'SUBMITTED'
+      ? 'transaction:submit'
+      : nextState === 'APPROVED'
+        ? 'transaction:approve'
+        : nextState === 'REJECTED'
+          ? 'transaction:reject'
+          : null;
+    if (requiredPermission) {
+      assertActorPermissionAllowed(rbacPolicy, req, requiredPermission, `change transaction state to ${nextState}`);
+    }
+
     const txRef = db.doc(`orgs/${tenantId}/transactions/${txId}`);
     const outboxEvent = createOutboxEvent({
       tenantId,
@@ -1328,6 +1352,7 @@ export function createBffApp(options = {}) {
 
   app.post('/api/v1/transactions/:txId/comments', createMutatingRoute(idempotencyService, async (req) => {
     assertActorRoleAllowed(req, ROUTE_ROLES.writeTransaction, 'write comments');
+    assertActorPermissionAllowed(rbacPolicy, req, 'comment:write', 'write comments');
     const { tenantId, actorId, actorRole, actorEmail, requestId } = req.context;
     const { txId } = req.params;
     const timestamp = now();
@@ -1407,6 +1432,7 @@ export function createBffApp(options = {}) {
 
   app.post('/api/v1/transactions/:txId/evidences', createMutatingRoute(idempotencyService, async (req) => {
     assertActorRoleAllowed(req, ROUTE_ROLES.writeTransaction, 'write evidences');
+    assertActorPermissionAllowed(rbacPolicy, req, 'evidence:write', 'write evidences');
     const { tenantId, actorId, actorRole, actorEmail, requestId } = req.context;
     const { txId } = req.params;
     const timestamp = now();
@@ -1515,6 +1541,15 @@ export function createBffApp(options = {}) {
 
       const current = snap.data() || {};
       const previousRole = normalizeRole(current.role || 'viewer');
+
+      if (previousRole === 'admin' && targetRole !== 'admin') {
+        const adminsSnap = await tx.get(
+          db.collection(`orgs/${tenantId}/members`).where('role', '==', 'admin').limit(2),
+        );
+        if (adminsSnap.size <= 1) {
+          throw createHttpError(409, 'Cannot remove the last remaining admin', 'last_admin_lockout');
+        }
+      }
 
       tx.set(memberRef, {
         tenantId,
