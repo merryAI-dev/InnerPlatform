@@ -5,6 +5,7 @@ import {
   TrendingUp, TrendingDown, Clock, AlertTriangle,
   CheckCircle2, XCircle, FileText, CircleDollarSign,
   ArrowUpRight, ArrowDownRight, BarChart3,
+  Loader2,
 } from 'lucide-react';
 import {
   collection,
@@ -41,7 +42,7 @@ import { getOrgCollectionPath } from '../../lib/firebase';
 
 export function PortalDashboard() {
   const navigate = useNavigate();
-  const { portalUser, myProject, expenseSets, changeRequests } = usePortalStore();
+  const { isLoading, portalUser, myProject, expenseSets, changeRequests } = usePortalStore();
   const { getProjectAlerts } = useHrAnnouncements();
   const { runs, monthlyCloses, acknowledgePayrollRun, acknowledgeMonthlyClose } = usePayroll();
   const { db, isOnline, orgId } = useFirebase();
@@ -49,6 +50,17 @@ export function PortalDashboard() {
 
   const [liveLedgers, setLiveLedgers] = useState<Ledger[] | null>(null);
   const [liveTransactions, setLiveTransactions] = useState<Transaction[] | null>(null);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-5 h-5 mx-auto animate-spin text-muted-foreground" />
+          <p className="mt-2 text-[12px] text-muted-foreground">사업 데이터를 불러오는 중...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!myProject || !portalUser) {
     return (

@@ -1,9 +1,10 @@
 import { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router';
 import {
   ArrowRightLeft, Plus, Send, Clock, CheckCircle2,
   XCircle, FileText, Users, UserPlus, UserMinus,
   Percent, ArrowUpDown, Calendar, Eye, AlertTriangle,
-  Megaphone, Bell, ChevronRight, X,
+  Megaphone, Bell, ChevronRight, X, Loader2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
@@ -143,7 +144,8 @@ const HR_EVENT_TO_CHANGE_TYPE: Record<string, StaffChangeItem['changeType']> = {
 };
 
 export function PortalChangeRequests() {
-  const { portalUser, myProject, changeRequests, addChangeRequest, submitChangeRequest } = usePortalStore();
+  const navigate = useNavigate();
+  const { isLoading, portalUser, myProject, changeRequests, addChangeRequest, submitChangeRequest } = usePortalStore();
   const {
     getProjectAlerts, acknowledgeAlert, markAlertResolved,
     announcements,
@@ -164,7 +166,28 @@ export function PortalChangeRequests() {
     rateAfter: 0,
   });
 
-  if (!portalUser || !myProject) return null;
+  if (isLoading) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-5 h-5 mx-auto animate-spin text-muted-foreground" />
+          <p className="mt-2 text-[12px] text-muted-foreground">인력변경 데이터를 불러오는 중...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!portalUser || !myProject) {
+    return (
+      <div className="text-center py-16">
+        <AlertTriangle className="w-10 h-10 mx-auto text-muted-foreground/30 mb-3" />
+        <p className="text-[14px] text-muted-foreground">사업이 선택되지 않았습니다.</p>
+        <Button variant="outline" className="mt-4" onClick={() => navigate('/portal/onboarding')}>
+          사업 선택하기
+        </Button>
+      </div>
+    );
+  }
 
   // ── 내 사업의 HR 알림 ──
   // TODO(Firebase): getProjectAlerts를 onSnapshot 구독으로 교체

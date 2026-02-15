@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { BarChart3, CalendarDays, ChevronLeft, ChevronRight, ClipboardList, ExternalLink, FileText, Users } from 'lucide-react';
+import { AlertTriangle, BarChart3, CalendarDays, ChevronLeft, ChevronRight, ClipboardList, ExternalLink, FileText, Loader2, Users } from 'lucide-react';
 import { PageHeader } from '../layout/PageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
@@ -35,7 +35,7 @@ const CHANGE_TABS: Array<{ label: string; value: ChangeRequestState | 'ALL' }> =
 
 export function PortalSubmissionsPage() {
   const navigate = useNavigate();
-  const { portalUser, myProject, expenseSets, changeRequests } = usePortalStore();
+  const { isLoading, portalUser, myProject, expenseSets, changeRequests } = usePortalStore();
   const { yearMonth, goPrevMonth, goNextMonth, getWeeksForProject } = useCashflowWeeks();
 
   const [expenseTab, setExpenseTab] = useState<ExpenseSetStatus | 'ALL'>('SUBMITTED');
@@ -81,7 +81,28 @@ export function PortalSubmissionsPage() {
     return myChanges.filter((c) => c.state === changeTab);
   }, [changeTab, myChanges]);
 
-  if (!portalUser || !myProject) return null;
+  if (isLoading) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-5 h-5 mx-auto animate-spin text-muted-foreground" />
+          <p className="mt-2 text-[12px] text-muted-foreground">제출 현황을 불러오는 중...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!portalUser || !myProject) {
+    return (
+      <div className="text-center py-16">
+        <AlertTriangle className="w-10 h-10 mx-auto text-muted-foreground/30 mb-3" />
+        <p className="text-[14px] text-muted-foreground">사업이 선택되지 않았습니다.</p>
+        <Button variant="outline" className="mt-4" onClick={() => navigate('/portal/onboarding')}>
+          사업 선택하기
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5">
@@ -307,4 +328,3 @@ export function PortalSubmissionsPage() {
     </div>
   );
 }
-
