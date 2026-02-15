@@ -150,7 +150,10 @@ Security rules/index templates were added under `firebase/`:
 
 ## Company Board (전사 게시판)
 
-- 경로: `/board` (관리자/포털 어디서든 접근 가능)
+- 경로:
+  - 관리자(App): `/board`
+  - 포털(Portal): `/portal/board`
+  - 어떤 링크로 들어가도 역할에 맞게 자동 리다이렉트되어 사이드바가 유지됩니다.
 - 기능: 글 작성, 댓글/답글(1-depth), 추천/비추천(vote)
 - Firestore 컬렉션(테넌트 스코프):
   - `orgs/{orgId}/board_posts`
@@ -159,6 +162,23 @@ Security rules/index templates were added under `firebase/`:
 - 요구 사항:
   - `VITE_FIRESTORE_CORE_ENABLED=true` (Firestore 기반 데이터 사용)
   - 로그인 후 사이드바 `전사 게시판`에서 진입
+
+## Payroll (인건비 공지/확인 + 월간정산)
+
+핵심: 사업 담당자가 인건비 지급일을 등록하면, 지급일 3영업일 전에 포털 홈에 공지가 노출되고(PM 확인 필요), Admin은 프로젝트별 지급 여부(거래 자동매칭+확정)와 월간정산 현황을 운영 화면에서 확인합니다.
+
+- 경로:
+  - 포털: `/portal/payroll` (지급일 등록 + 공지 확인)
+  - 관리자: `/payroll` (프로젝트별 인지/지급/정산 현황)
+- Firestore 컬렉션(테넌트 스코프):
+  - `orgs/{orgId}/payroll_schedules` (프로젝트별 지급일: 매월 N일)
+  - `orgs/{orgId}/payroll_runs` (프로젝트-월 단위 공지/인지/지급 상태)
+  - `orgs/{orgId}/monthly_closes` (프로젝트-월 단위 월간정산 완료/인지)
+- 자동화 워커(Vercel Cron):
+  - `GET /api/internal/workers/payroll/run` (run doc 보장 + 인건비 거래 자동매칭)
+  - `GET /api/internal/workers/monthly-close/run` (월간정산 doc 보장)
+- Bootstrap admin(선택):
+  - `VITE_BOOTSTRAP_ADMIN_EMAILS=admin@mysc.co.kr` 처럼 “최초 1회”만 설정해, 해당 이메일 최초 로그인 시 admin role이 자동 부여되게 할 수 있습니다.
 
 ## Firebase Auth Quick Link
 
@@ -210,6 +230,8 @@ npm run bff:test:integration
 - `GET /api/v1/health`
 - `POST /api/internal/workers/outbox/run` (protected; worker secret required)
 - `POST /api/internal/workers/work-queue/run` (protected; worker secret required)
+- `POST /api/internal/workers/payroll/run` (protected; worker secret required)
+- `POST /api/internal/workers/monthly-close/run` (protected; worker secret required)
 - `POST /api/v1/write`
 - `GET /api/v1/views/:viewName`
 - `GET /api/v1/queue/jobs`

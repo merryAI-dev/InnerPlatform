@@ -33,5 +33,18 @@ describe('internal worker endpoints (cron)', () => {
     expect(res.status).toBe(401);
     expect(res.body?.error).toBe('unauthorized_worker');
   });
-});
 
+  it('supports GET for payroll worker route', async () => {
+    const app = createTestApp();
+    const res = await request(app).get('/api/internal/workers/payroll/run');
+    expect(res.status).toBe(401);
+    expect(res.body?.error).toBe('unauthorized_worker');
+  });
+
+  it('supports GET for monthly close worker route', async () => {
+    const app = createTestApp();
+    const res = await request(app).get('/api/internal/workers/monthly-close/run');
+    expect(res.status).toBe(401);
+    expect(res.body?.error).toBe('unauthorized_worker');
+  });
+});

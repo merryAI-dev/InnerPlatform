@@ -10,6 +10,7 @@ const FINANCE_ALLOWED = new Set([
   '/board',
   '/cashflow',
   '/evidence',
+  '/payroll',
   '/budget-summary',
   '/expense-management',
   '/approvals',
@@ -23,6 +24,7 @@ const AUDITOR_ALLOWED = new Set([
   '/board',
   '/cashflow',
   '/evidence',
+  '/payroll',
   '/budget-summary',
   '/expense-management',
   '/audit',
@@ -75,6 +77,7 @@ function canonicalizeAdminPath(pathname: string): string | undefined {
   const prefixes = [
     '/cashflow',
     '/evidence',
+    '/payroll',
     '/budget-summary',
     '/expense-management',
     '/approvals',

@@ -7,6 +7,7 @@ import {
   Search, Zap, HelpCircle, Maximize2, Minimize2,
   Menu, X, Calculator, Wallet, ExternalLink,
   ListChecks, Users, LogOut, Megaphone, MessagesSquare,
+  CircleDollarSign,
 } from 'lucide-react';
 import { useAppStore, AppProvider } from '../../data/store';
 import { useAuth } from '../../data/auth-store';
@@ -43,6 +44,7 @@ const NAV_GROUPS = [
     items: [
       { to: '/cashflow', icon: BarChart3, label: '캐시플로' },
       { to: '/evidence', icon: FileCheck, label: '증빙/정산' },
+      { to: '/payroll', icon: CircleDollarSign, label: '인건비/월간정산', accent: true },
       { to: '/budget-summary', icon: Calculator, label: '예산총괄' },
       { to: '/expense-management', icon: Wallet, label: '사업비 관리' },
     ],
@@ -89,6 +91,11 @@ function AppLayoutContent() {
     if (!isAuthenticated || !role) return;
     const home = resolveHomePath(role);
     if (home === '/portal') {
+      if (location.pathname.startsWith('/board')) {
+        navigate(`/portal${location.pathname}`, { replace: true });
+        return;
+      }
+
       navigate('/portal', { replace: true });
       return;
     }

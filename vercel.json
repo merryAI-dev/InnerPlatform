@@ -16,6 +16,14 @@
     {
       "path": "/api/internal/workers/outbox/run",
       "schedule": "30 2 * * *"
+    },
+    {
+      "path": "/api/internal/workers/payroll/run",
+      "schedule": "45 2 * * *"
+    },
+    {
+      "path": "/api/internal/workers/monthly-close/run",
+      "schedule": "0 3 * * *"
     }
   ],
   "routes": [
@@ -34,6 +42,14 @@
     {
       "src": "^/api/internal/workers/outbox/run$",
       "dest": "/api/bff?__path=/api/internal/workers/outbox/run"
+    },
+    {
+      "src": "^/api/internal/workers/payroll/run$",
+      "dest": "/api/bff?__path=/api/internal/workers/payroll/run"
+    },
+    {
+      "src": "^/api/internal/workers/monthly-close/run$",
+      "dest": "/api/bff?__path=/api/internal/workers/monthly-close/run"
     },
     {
       "handle": "filesystem"

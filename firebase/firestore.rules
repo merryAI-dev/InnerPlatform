@@ -230,6 +230,88 @@ service cloud.firestore {
       allow delete: if isSignedIn() && resourceHasValidTenant(orgId) && resource.data.voterId == request.auth.uid;
     }
 
+    // ── Payroll (인건비 공지/확인) ──
+
+    match /orgs/{orgId}/payroll_schedules/{projectId} {
+      allow read: if isSignedIn() && resourceHasValidTenant(orgId) && canReadProjectResource(orgId, projectId);
+      allow create: if isSignedIn()
+                    && requestHasValidTenant(orgId)
+                    && canWriteProjectResource(orgId, projectId)
+                    && request.resource.data.id == projectId
+                    && request.resource.data.projectId == projectId;
+      allow update: if isSignedIn()
+                    && requestHasValidTenant(orgId)
+                    && resourceHasValidTenant(orgId)
+                    && canWriteProjectResource(orgId, projectId)
+                    && request.resource.data.projectId == resource.data.projectId;
+      allow delete: if isSignedIn() && isAdmin(orgId) && resourceHasValidTenant(orgId);
+    }
+
+    match /orgs/{orgId}/payroll_runs/{runId} {
+      allow read: if isSignedIn() && resourceHasValidTenant(orgId) && canReadProjectResource(orgId, resource.data.projectId);
+      allow create: if isSignedIn()
+                    && requestHasValidTenant(orgId)
+                    && request.resource.data.id == runId
+                    && (
+                      role(orgId) in ['admin', 'finance']
+                      || (role(orgId) == 'pm' && memberProjectId(orgId) == request.resource.data.projectId)
+                    );
+      allow update: if isSignedIn()
+                    && requestHasValidTenant(orgId)
+                    && resourceHasValidTenant(orgId)
+                    && (
+                      // Admin/finance can manage payroll run status for any accessible project.
+                      (
+                        role(orgId) in ['admin', 'finance']
+                        && canWriteProjectResource(orgId, resource.data.projectId)
+                      )
+                      ||
+                      // PM can only acknowledge notices for their own project.
+                      (
+                        role(orgId) == 'pm'
+                        && memberProjectId(orgId) == resource.data.projectId
+                        && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+                          'acknowledged',
+                          'acknowledgedAt',
+                          'acknowledgedByUid',
+                          'acknowledgedByName',
+                          'updatedAt'
+                        ])
+                      )
+                    );
+      allow delete: if false;
+    }
+
+    match /orgs/{orgId}/monthly_closes/{closeId} {
+      allow read: if isSignedIn() && resourceHasValidTenant(orgId) && canReadProjectResource(orgId, resource.data.projectId);
+      allow create: if isSignedIn()
+                    && requestHasValidTenant(orgId)
+                    && request.resource.data.id == closeId
+                    && role(orgId) in ['admin', 'finance'];
+      allow update: if isSignedIn()
+                    && requestHasValidTenant(orgId)
+                    && resourceHasValidTenant(orgId)
+                    && (
+                      (
+                        role(orgId) in ['admin', 'finance']
+                        && canWriteProjectResource(orgId, resource.data.projectId)
+                      )
+                      ||
+                      (
+                        role(orgId) == 'pm'
+                        && memberProjectId(orgId) == resource.data.projectId
+                        && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+                          'acknowledged',
+                          'acknowledgedAt',
+                          'acknowledgedByUid',
+                          'acknowledgedByName',
+                          'updatedAt'
+                        ])
+                      )
+                    );
+      allow delete: if false;
+    }
+
     match /orgs/{orgId}/{document=**} {
       allow read: if isSignedIn() && resourceHasValidTenant(orgId);
       allow create: if isSignedIn() && isAdmin(orgId) && requestHasValidTenant(orgId);

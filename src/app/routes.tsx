@@ -17,6 +17,7 @@ import { ExpenseManagementPage } from './components/expense/ExpenseManagementPag
 import { AdminApprovalPage } from './components/approval/AdminApprovalPage';
 import { UserManagementPage } from './components/users/UserManagementPage';
 import { AdminHrAnnouncementPage } from './components/hr/AdminHrAnnouncementPage';
+import { AdminPayrollPage } from './components/payroll/AdminPayrollPage';
 import { NotFoundPage } from './components/layout/NotFoundPage';
 // Portal (사용자 전용)
 import { PortalLayout } from './components/portal/PortalLayout';
@@ -27,29 +28,28 @@ import { PortalBudget } from './components/portal/PortalBudget';
 import { PortalPersonnel } from './components/portal/PortalPersonnel';
 import { PortalChangeRequests } from './components/portal/PortalChangeRequests';
 import { PortalProjectRegister } from './components/portal/PortalProjectRegister';
+import { PortalPayrollPage } from './components/portal/PortalPayrollPage';
 import { LoginPage } from './components/auth/LoginPage';
-import { BoardLayout } from './components/board/BoardLayout';
 import { BoardFeedPage } from './components/board/BoardFeedPage';
 import { BoardPostPage } from './components/board/BoardPostPage';
 
 export const router = createBrowserRouter([
   // ── Login ──
   { path: '/login', Component: LoginPage },
-  // ── Company Board (전사 게시판) ──
-  {
-    path: '/board',
-    Component: BoardLayout,
-    children: [
-      { index: true, Component: BoardFeedPage },
-      { path: ':postId', Component: BoardPostPage },
-    ],
-  },
   // ── Admin (관리자) ──
   {
     path: '/',
     Component: AppLayout,
     children: [
       { index: true, Component: DashboardPage },
+      // ── Company Board (전사 게시판) ──
+      {
+        path: 'board',
+        children: [
+          { index: true, Component: BoardFeedPage },
+          { path: ':postId', Component: BoardPostPage },
+        ],
+      },
       { path: 'projects', Component: ProjectListPage },
       { path: 'projects/new', Component: ProjectWizardPage },
       { path: 'projects/:projectId', Component: ProjectDetailPage },
@@ -62,6 +62,7 @@ export const router = createBrowserRouter([
       { path: 'personnel-changes', Component: PersonnelChangePage },
       { path: 'budget-summary', Component: BudgetSummaryPage },
       { path: 'expense-management', Component: ExpenseManagementPage },
+      { path: 'payroll', Component: AdminPayrollPage },
       { path: 'approvals', Component: AdminApprovalPage },
       { path: 'users', Component: UserManagementPage },
       { path: 'hr-announcements', Component: AdminHrAnnouncementPage },
@@ -76,7 +77,16 @@ export const router = createBrowserRouter([
     Component: PortalLayout,
     children: [
       { index: true, Component: PortalDashboard },
+      // ── Company Board (전사 게시판) ──
+      {
+        path: 'board',
+        children: [
+          { index: true, Component: BoardFeedPage },
+          { path: ':postId', Component: BoardPostPage },
+        ],
+      },
       { path: 'onboarding', Component: PortalOnboarding },
+      { path: 'payroll', Component: PortalPayrollPage },
       { path: 'budget', Component: PortalBudget },
       { path: 'expenses', Component: PortalExpenses },
       { path: 'personnel', Component: PortalPersonnel },
