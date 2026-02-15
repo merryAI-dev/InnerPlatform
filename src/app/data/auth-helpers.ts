@@ -26,7 +26,3 @@ export function resolveProjectIdForManager(uid: string, projects: ProjectOwnerEn
   const found = projects.find((project) => project.managerId === uid);
   return found?.id;
 }
-
-export function isPrivilegedRole(role: UserRole): boolean {
-  return role === 'admin' || role === 'finance' || role === 'auditor';
-}

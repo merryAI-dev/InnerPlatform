@@ -1,11 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { isPortalRole, resolveHomePath } from './navigation';
+import { isAdminSpaceRole, isPortalRole, resolveHomePath } from './navigation';
 
 describe('navigation helpers', () => {
   it('classifies portal roles', () => {
     expect(isPortalRole('pm')).toBe(true);
     expect(isPortalRole('viewer')).toBe(true);
     expect(isPortalRole('admin')).toBe(false);
+  });
+
+  it('classifies admin space roles', () => {
+    expect(isAdminSpaceRole('admin')).toBe(true);
+    expect(isAdminSpaceRole('security')).toBe(true);
+    expect(isAdminSpaceRole('pm')).toBe(false);
   });
 
   it('normalizes role strings', () => {
