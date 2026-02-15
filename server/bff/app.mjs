@@ -561,7 +561,7 @@ export function createBffApp(options = {}) {
     });
   });
 
-  app.post('/api/internal/workers/outbox/run', asyncHandler(async (req, res) => {
+  const runOutboxWorker = asyncHandler(async (req, res) => {
     assertInternalWorkerAuthorized(req);
     const limit = parseLimit(req.body?.limit ?? req.query?.limit, outboxBatchSize, 500);
     const maxAttempts = parseLimit(req.body?.maxAttempts ?? req.query?.maxAttempts, outboxMaxAttempts, 50);
@@ -578,9 +578,14 @@ export function createBffApp(options = {}) {
       projectId,
       ...result,
     });
-  }));
+  });
 
-  app.post('/api/internal/workers/work-queue/run', asyncHandler(async (req, res) => {
+  // Vercel Cron invokes scheduled paths via HTTP GET and automatically includes
+  // `Authorization: Bearer $CRON_SECRET` when CRON_SECRET is configured.
+  app.get('/api/internal/workers/outbox/run', runOutboxWorker);
+  app.post('/api/internal/workers/outbox/run', runOutboxWorker);
+
+  const runWorkQueueWorker = asyncHandler(async (req, res) => {
     assertInternalWorkerAuthorized(req);
     const limit = parseLimit(req.body?.limit ?? req.query?.limit, workQueueBatchSize, 500);
     const maxAttempts = parseLimit(req.body?.maxAttempts ?? req.query?.maxAttempts, workQueueMaxAttempts, 50);
@@ -603,7 +608,10 @@ export function createBffApp(options = {}) {
       eventId: eventId || null,
       ...result,
     });
-  }));
+  });
+
+  app.get('/api/internal/workers/work-queue/run', runWorkQueueWorker);
+  app.post('/api/internal/workers/work-queue/run', runWorkQueueWorker);
 
   app.use('/api/v1', createApiContextMiddleware({ authMode, verifyToken }));
 
