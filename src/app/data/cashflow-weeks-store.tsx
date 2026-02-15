@@ -21,6 +21,7 @@ import {
 } from 'firebase/firestore';
 import { useAuth } from './auth-store';
 import type { CashflowSheetLineId, CashflowWeekSheet } from './types';
+import { shouldCreateDocOnUpdateError } from './cashflow-weeks.helpers';
 import { featureFlags } from '../config/feature-flags';
 import { useFirebase } from '../lib/firebase-context';
 import { getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
@@ -58,6 +59,13 @@ interface CashflowWeekActions {
   setYearMonth: (yearMonth: string) => void;
   goPrevMonth: () => void;
   goNextMonth: () => void;
+  upsertWeekAmounts: (input: {
+    projectId: string;
+    yearMonth: string;
+    weekNo: number;
+    mode: 'projection' | 'actual';
+    amounts: Partial<Record<CashflowSheetLineId, number>>;
+  }) => Promise<void>;
   upsertLineAmount: (input: {
     projectId: string;
     yearMonth: string;
@@ -152,13 +160,12 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     };
   }, [db, firestoreEnabled, myProjectId, orgId, readAll, yearMonth]);
 
-  const upsertLineAmount = useCallback(async (input: {
+  const upsertWeekAmounts = useCallback(async (input: {
     projectId: string;
     yearMonth: string;
     weekNo: number;
     mode: 'projection' | 'actual';
-    lineId: CashflowSheetLineId;
-    amount: number;
+    amounts: Partial<Record<CashflowSheetLineId, number>>;
   }): Promise<void> => {
     if (!db) return;
     const actor = user;
@@ -176,19 +183,34 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     const id = resolveWeekDocId(projectId, ym, weekNo);
     const now = new Date().toISOString();
     const ref = doc(db, getOrgDocumentPath(orgId, 'cashflowWeeks', id));
+
     const patch: Record<string, unknown> = {
       tenantId: orgId,
       updatedAt: now,
       updatedByUid: actor.uid,
       updatedByName: actor.name,
-      [`${input.mode}.${input.lineId}`]: clampAmount(input.amount),
     };
+    for (const [lineId, amountRaw] of Object.entries(input.amounts || {})) {
+      const lineKey = typeof lineId === 'string' ? lineId.trim() : '';
+      if (!lineKey) continue;
+      const amount = clampAmount(Number(amountRaw));
+      patch[`${input.mode}.${lineKey}`] = amount;
+    }
 
     try {
       await updateDoc(ref, patch as any);
       return;
-    } catch {
-      // First write for this week doc.
+    } catch (error) {
+      if (!shouldCreateDocOnUpdateError(error)) {
+        throw error;
+      }
+    }
+
+    const amounts: Partial<Record<CashflowSheetLineId, number>> = {};
+    for (const [lineId, amountRaw] of Object.entries(input.amounts || {})) {
+      const lineKey = typeof lineId === 'string' ? lineId.trim() : '';
+      if (!lineKey) continue;
+      amounts[lineKey as CashflowSheetLineId] = clampAmount(Number(amountRaw));
     }
 
     const initial: CashflowWeekSheet = {
@@ -199,8 +221,8 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
       weekNo,
       weekStart: def.weekStart,
       weekEnd: def.weekEnd,
-      projection: input.mode === 'projection' ? { [input.lineId]: clampAmount(input.amount) } as any : {},
-      actual: input.mode === 'actual' ? { [input.lineId]: clampAmount(input.amount) } as any : {},
+      projection: input.mode === 'projection' ? amounts : {},
+      actual: input.mode === 'actual' ? amounts : {},
       pmSubmitted: false,
       adminClosed: false,
       createdAt: now,
@@ -208,8 +230,25 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
       updatedByUid: actor.uid,
       updatedByName: actor.name,
     };
-    await setDoc(ref, initial, { merge: true });
+    await setDoc(ref, initial, { merge: false });
   }, [db, orgId, user]);
+
+  const upsertLineAmount = useCallback(async (input: {
+    projectId: string;
+    yearMonth: string;
+    weekNo: number;
+    mode: 'projection' | 'actual';
+    lineId: CashflowSheetLineId;
+    amount: number;
+  }): Promise<void> => {
+    return upsertWeekAmounts({
+      projectId: input.projectId,
+      yearMonth: input.yearMonth,
+      weekNo: input.weekNo,
+      mode: input.mode,
+      amounts: { [input.lineId]: input.amount },
+    });
+  }, [upsertWeekAmounts]);
 
   const submitWeekAsPm = useCallback(async (input: {
     projectId: string;
@@ -244,8 +283,10 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
         tenantId: orgId,
       } as Partial<CashflowWeekSheet> as any);
       return;
-    } catch {
-      // Fallthrough to create.
+    } catch (error) {
+      if (!shouldCreateDocOnUpdateError(error)) {
+        throw error;
+      }
     }
 
     await setDoc(ref, {
@@ -267,7 +308,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
       updatedAt: now,
       updatedByUid: actor.uid,
       updatedByName: actor.name,
-    } as CashflowWeekSheet, { merge: true });
+    } as CashflowWeekSheet, { merge: false });
   }, [db, orgId, user]);
 
   const closeWeekAsAdmin = useCallback(async (input: {
@@ -303,8 +344,10 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
         tenantId: orgId,
       } as Partial<CashflowWeekSheet> as any);
       return;
-    } catch {
-      // Fallthrough to create.
+    } catch (error) {
+      if (!shouldCreateDocOnUpdateError(error)) {
+        throw error;
+      }
     }
 
     await setDoc(ref, {
@@ -326,7 +369,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
       updatedAt: now,
       updatedByUid: actor.uid,
       updatedByName: actor.name,
-    } as CashflowWeekSheet, { merge: true });
+    } as CashflowWeekSheet, { merge: false });
   }, [db, orgId, user]);
 
   const getWeeksForProject = useCallback((projectId: string): CashflowWeekSheet[] => {
@@ -342,6 +385,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     setYearMonth,
     goPrevMonth,
     goNextMonth,
+    upsertWeekAmounts,
     upsertLineAmount,
     submitWeekAsPm,
     closeWeekAsAdmin,
@@ -353,6 +397,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     setYearMonth,
     goPrevMonth,
     goNextMonth,
+    upsertWeekAmounts,
     upsertLineAmount,
     submitWeekAsPm,
     closeWeekAsAdmin,
