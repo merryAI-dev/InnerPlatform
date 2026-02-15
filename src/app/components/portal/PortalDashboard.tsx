@@ -5,6 +5,7 @@ import {
   TrendingUp, TrendingDown, Clock, AlertTriangle,
   CheckCircle2, XCircle, FileText, CircleDollarSign,
   ArrowUpRight, ArrowDownRight, BarChart3,
+  Loader2,
 } from 'lucide-react';
 import {
   collection,
@@ -13,6 +14,7 @@ import {
   where,
   type Unsubscribe,
 } from 'firebase/firestore';
+import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -40,7 +42,7 @@ import { getOrgCollectionPath } from '../../lib/firebase';
 
 export function PortalDashboard() {
   const navigate = useNavigate();
-  const { portalUser, myProject, expenseSets, changeRequests } = usePortalStore();
+  const { isLoading, portalUser, myProject, expenseSets, changeRequests } = usePortalStore();
   const { getProjectAlerts } = useHrAnnouncements();
   const { runs, monthlyCloses, acknowledgePayrollRun, acknowledgeMonthlyClose } = usePayroll();
   const { db, isOnline, orgId } = useFirebase();
@@ -48,6 +50,17 @@ export function PortalDashboard() {
 
   const [liveLedgers, setLiveLedgers] = useState<Ledger[] | null>(null);
   const [liveTransactions, setLiveTransactions] = useState<Transaction[] | null>(null);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-5 h-5 mx-auto animate-spin text-muted-foreground" />
+          <p className="mt-2 text-[12px] text-muted-foreground">사업 데이터를 불러오는 중...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!myProject || !portalUser) {
     return (
@@ -114,6 +127,28 @@ export function PortalDashboard() {
   const needsPayrollAck = !!(payrollRun && today >= payrollRun.noticeDate && !payrollRun.acknowledged);
   const needsMonthlyCloseAck = !!(monthlyClosePrev && monthlyClosePrev.status === 'DONE' && !monthlyClosePrev.acknowledged);
 
+  async function onAckPayroll() {
+    if (!payrollRun) return;
+    try {
+      await acknowledgePayrollRun(payrollRun.id);
+      toast.success('공지 확인이 기록되었습니다');
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err?.message || '확인 처리에 실패했습니다');
+    }
+  }
+
+  async function onAckMonthlyClose() {
+    if (!monthlyClosePrev) return;
+    try {
+      await acknowledgeMonthlyClose(monthlyClosePrev.id);
+      toast.success('월간 정산 확인이 기록되었습니다');
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err?.message || '확인 처리에 실패했습니다');
+    }
+  }
+
   // 재무 KPI
   const totalIn = myTx.filter(t => t.direction === 'IN').reduce((s, t) => s + t.amounts.bankAmount, 0);
   const totalOut = myTx.filter(t => t.direction === 'OUT').reduce((s, t) => s + t.amounts.bankAmount, 0);
@@ -171,7 +206,7 @@ export function PortalDashboard() {
                 <Button
                   size="sm"
                   className="h-8 text-[12px] gap-1.5 shrink-0"
-                  onClick={() => acknowledgePayrollRun(payrollRun.id).catch(console.error)}
+                  onClick={onAckPayroll}
                 >
                   <CheckCircle2 className="w-3.5 h-3.5" /> 확인했습니다
                 </Button>
@@ -191,7 +226,7 @@ export function PortalDashboard() {
                 <Button
                   size="sm"
                   className="h-8 text-[12px] gap-1.5 shrink-0"
-                  onClick={() => acknowledgeMonthlyClose(monthlyClosePrev.id).catch(console.error)}
+                  onClick={onAckMonthlyClose}
                 >
                   <CheckCircle2 className="w-3.5 h-3.5" /> 확인했습니다
                 </Button>

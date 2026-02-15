@@ -24,6 +24,7 @@ import { useFirebase } from '../lib/firebase-context';
 import { featureFlags } from '../config/feature-flags';
 import { getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
 import { duplicateExpenseSetAsDraft, withExpenseItems } from './portal-store.helpers';
+import { toast } from 'sonner';
 
 export interface PortalUser {
   id: string;
@@ -36,6 +37,7 @@ export interface PortalUser {
 
 interface PortalState {
   isRegistered: boolean;
+  isLoading: boolean;
   portalUser: PortalUser | null;
   myProject: Project | null;
   expenseSets: ExpenseSet[];
@@ -78,6 +80,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
 
   const [expenseSets, setExpenseSets] = useState<ExpenseSet[]>(EXPENSE_SETS);
   const [changeRequests, setChangeRequests] = useState<ChangeRequest[]>(CHANGE_REQUESTS);
+  const [isLoading, setIsLoading] = useState(false);
   const unsubsRef = useRef<Unsubscribe[]>([]);
 
   const myProject = useMemo(() => {
@@ -113,8 +116,16 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     if (!firestoreEnabled || !db || !portalUser?.projectId) {
       setExpenseSets(EXPENSE_SETS);
       setChangeRequests(CHANGE_REQUESTS);
+      setIsLoading(false);
       return;
     }
+
+    setIsLoading(true);
+    let expenseReady = false;
+    let changeReady = false;
+    const markReady = () => {
+      if (expenseReady && changeReady) setIsLoading(false);
+    };
 
     const expenseQuery = query(
       collection(db, getOrgCollectionPath(orgId, 'expenseSets')),
@@ -132,8 +143,13 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       onSnapshot(expenseQuery, (snap) => {
         const list = snap.docs.map((docItem) => docItem.data() as ExpenseSet);
         setExpenseSets(list);
+        expenseReady = true;
+        markReady();
       }, (err) => {
         console.error('[PortalStore] expenseSets listen error:', err);
+        toast.error('사업비 데이터를 불러오지 못했습니다');
+        expenseReady = true;
+        markReady();
       }),
     );
 
@@ -141,8 +157,13 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       onSnapshot(changeRequestQuery, (snap) => {
         const list = snap.docs.map((docItem) => docItem.data() as ChangeRequest);
         setChangeRequests(list);
+        changeReady = true;
+        markReady();
       }, (err) => {
         console.error('[PortalStore] changeRequests listen error:', err);
+        toast.error('인력변경 데이터를 불러오지 못했습니다');
+        changeReady = true;
+        markReady();
       }),
     );
 
@@ -181,7 +202,10 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     setExpenseSets((prev) => [set, ...prev]);
 
     if (firestoreEnabled) {
-      persistExpenseSet(set).catch(console.error);
+      persistExpenseSet(set).catch((err) => {
+        console.error('[PortalStore] persistExpenseSet error:', err);
+        toast.error('사업비 세트 저장에 실패했습니다');
+      });
     }
   }, [firestoreEnabled, persistExpenseSet]);
 
@@ -195,7 +219,10 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       updateDoc(doc(db, getOrgDocumentPath(orgId, 'expenseSets', id)), {
         ...updates,
         updatedAt: new Date().toISOString(),
-      }).catch(console.error);
+      }).catch((err) => {
+        console.error('[PortalStore] updateExpenseSet error:', err);
+        toast.error('사업비 세트 저장에 실패했습니다');
+      });
     }
   }, [firestoreEnabled, db, orgId]);
 
@@ -210,7 +237,10 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     }));
 
     if (firestoreEnabled && nextSet) {
-      persistExpenseSet(nextSet).catch(console.error);
+      persistExpenseSet(nextSet).catch((err) => {
+        console.error('[PortalStore] addExpenseItem persist error:', err);
+        toast.error('지출 항목 저장에 실패했습니다');
+      });
     }
   }, [firestoreEnabled, persistExpenseSet]);
 
@@ -229,7 +259,10 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     }));
 
     if (firestoreEnabled && nextSet) {
-      persistExpenseSet(nextSet).catch(console.error);
+      persistExpenseSet(nextSet).catch((err) => {
+        console.error('[PortalStore] updateExpenseItem persist error:', err);
+        toast.error('지출 항목 저장에 실패했습니다');
+      });
     }
   }, [firestoreEnabled, persistExpenseSet]);
 
@@ -248,7 +281,10 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     }));
 
     if (firestoreEnabled && nextSet) {
-      persistExpenseSet(nextSet).catch(console.error);
+      persistExpenseSet(nextSet).catch((err) => {
+        console.error('[PortalStore] deleteExpenseItem persist error:', err);
+        toast.error('지출 항목 삭제에 실패했습니다');
+      });
     }
   }, [firestoreEnabled, persistExpenseSet]);
 
@@ -266,7 +302,10 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     }));
 
     if (firestoreEnabled && nextSet) {
-      persistExpenseSet(nextSet).catch(console.error);
+      persistExpenseSet(nextSet).catch((err) => {
+        console.error('[PortalStore] changeExpenseStatus persist error:', err);
+        toast.error('사업비 상태 변경에 실패했습니다');
+      });
     }
   }, [firestoreEnabled, persistExpenseSet]);
 
@@ -288,7 +327,10 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     });
 
     if (firestoreEnabled && duplicated) {
-      persistExpenseSet(duplicated).catch(console.error);
+      persistExpenseSet(duplicated).catch((err) => {
+        console.error('[PortalStore] duplicateExpenseSet persist error:', err);
+        toast.error('사업비 세트 복제에 실패했습니다');
+      });
     }
   }, [firestoreEnabled, persistExpenseSet]);
 
@@ -296,7 +338,10 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     setChangeRequests((prev) => [req, ...prev]);
 
     if (firestoreEnabled) {
-      persistChangeRequest(req).catch(console.error);
+      persistChangeRequest(req).catch((err) => {
+        console.error('[PortalStore] persistChangeRequest error:', err);
+        toast.error('인력변경 요청 저장에 실패했습니다');
+      });
     }
   }, [firestoreEnabled, persistChangeRequest]);
 
@@ -311,12 +356,16 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       updateDoc(doc(db, getOrgDocumentPath(orgId, 'changeRequests', id)), {
         state: 'SUBMITTED' as ChangeRequestState,
         updatedAt: now,
-      }).catch(console.error);
+      }).catch((err) => {
+        console.error('[PortalStore] submitChangeRequest error:', err);
+        toast.error('인력변경 제출에 실패했습니다');
+      });
     }
   }, [firestoreEnabled, db, orgId]);
 
   const value: PortalState & PortalActions = {
     isRegistered: !!portalUser,
+    isLoading,
     portalUser,
     myProject,
     expenseSets,

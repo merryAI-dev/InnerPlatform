@@ -410,6 +410,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(true);
     await new Promise((r) => setTimeout(r, 300));
 
+    // Admin 계정은 포털 회원가입 불가
+    const emailLower = normalizeEmail(data.email);
+    if (isBootstrapAdminEmail(emailLower)) {
+      setIsLoading(false);
+      return { success: false, error: '관리자 계정은 별도 회원가입 없이 Google 로그인을 이용해주세요.' };
+    }
+
     if (featureFlags.firebaseAuthEnabled && user) {
       const db = getDb();
       if (!db) {
@@ -458,7 +465,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    const emailLower = normalizeEmail(data.email);
     const existsOrg = ORG_MEMBERS.find((m) => normalizeEmail(m.email) === emailLower);
     const existsPortal = portalRegisteredUsers.find((u) => normalizeEmail(u.email) === emailLower);
 

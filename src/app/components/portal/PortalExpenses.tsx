@@ -1,9 +1,10 @@
 import { useState, useMemo, useCallback } from 'react';
+import { useNavigate } from 'react-router';
 import {
   Plus, Search, FileText, Wallet, Send,
   CheckCircle2, XCircle, Edit3, Trash2,
   Copy, MoreHorizontal, CircleDollarSign, Receipt,
-  X, CalendarDays, Table2, ArrowRight,
+  X, CalendarDays, Table2, ArrowRight, Loader2, AlertTriangle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardContent } from '../ui/card';
@@ -92,7 +93,9 @@ function emptyRow(setId: string): ExpenseItem {
 }
 
 export function PortalExpenses() {
+  const navigate = useNavigate();
   const {
+    isLoading,
     portalUser, myProject, expenseSets,
     addExpenseSet, addExpenseItem, updateExpenseItem, deleteExpenseItem,
     changeExpenseStatus, duplicateExpenseSet,
@@ -119,7 +122,28 @@ export function PortalExpenses() {
 
   const weekOptions = useMemo(() => getWeekOptions(), []);
 
-  if (!myProject || !portalUser) return null;
+  if (isLoading) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-5 h-5 mx-auto animate-spin text-muted-foreground" />
+          <p className="mt-2 text-[12px] text-muted-foreground">사업비 데이터를 불러오는 중...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!myProject || !portalUser) {
+    return (
+      <div className="text-center py-16">
+        <AlertTriangle className="w-10 h-10 mx-auto text-muted-foreground/30 mb-3" />
+        <p className="text-[14px] text-muted-foreground">사업이 선택되지 않았습니다.</p>
+        <Button variant="outline" className="mt-4" onClick={() => navigate('/portal/onboarding')}>
+          사업 선택하기
+        </Button>
+      </div>
+    );
+  }
 
   const mySets = expenseSets.filter(s => s.projectId === myProject.id);
   const filteredSets = mySets.filter(s => {
