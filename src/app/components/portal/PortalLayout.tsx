@@ -6,16 +6,19 @@ import {
   FolderKanban, Menu, X,
   Plus,
   MessagesSquare,
+  CircleDollarSign,
 } from 'lucide-react';
 import { PortalProvider, usePortalStore } from '../../data/portal-store';
 import { useAuth } from '../../data/auth-store';
 import { useHrAnnouncements } from '../../data/hr-announcements-store';
+import { usePayroll } from '../../data/payroll-store';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { DarkModeToggle } from '../layout/DarkModeToggle';
 import { PageTransition } from '../layout/PageTransition';
 import { resolveHomePath } from '../../platform/navigation';
+import { addMonthsToYearMonth, getSeoulTodayIso } from '../../platform/business-days';
 
 // ═══════════════════════════════════════════════════════════════
 // PortalLayout — 사용자(PM) 전용 레이아웃
@@ -24,7 +27,8 @@ import { resolveHomePath } from '../../platform/navigation';
 
 const NAV_ITEMS = [
   { to: '/portal', icon: LayoutDashboard, label: '내 사업 현황', exact: true },
-  { to: '/board', icon: MessagesSquare, label: '전사 게시판' },
+  { to: '/portal/board', icon: MessagesSquare, label: '전사 게시판' },
+  { to: '/portal/payroll', icon: CircleDollarSign, label: '인건비/공지', accent: true },
   { to: '/portal/budget', icon: Calculator, label: '예산총괄' },
   { to: '/portal/expenses', icon: Wallet, label: '사업비 입력' },
   { to: '/portal/personnel', icon: Users, label: '인력 현황' },
@@ -36,6 +40,7 @@ function PortalContent() {
   const { isRegistered, portalUser, myProject, logout: portalLogout, expenseSets, changeRequests } = usePortalStore();
   const { isAuthenticated, user: authUser, logout: authLogout } = useAuth();
   const { getUnacknowledgedCount } = useHrAnnouncements();
+  const { runs, monthlyCloses } = usePayroll();
   const location = useLocation();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -51,9 +56,15 @@ function PortalContent() {
     const role = authUser?.role;
     if (!isAuthenticated || !role) return;
     if (resolveHomePath(role) === '/') {
+      if (location.pathname.startsWith('/portal/board')) {
+        const suffix = location.pathname.slice('/portal'.length);
+        navigate(suffix, { replace: true });
+        return;
+      }
+
       navigate('/', { replace: true });
     }
-  }, [isAuthenticated, authUser, navigate]);
+  }, [isAuthenticated, authUser, location.pathname, navigate]);
 
   // 포털 미등록 시 온보딩으로 (인증은 되었지만 포털 사업 미선택)
   useEffect(() => {
@@ -80,6 +91,17 @@ function PortalContent() {
   const rejectedCount = myExpenses.filter(s => s.status === 'REJECTED').length;
   const pendingChanges = changeRequests.filter(r => r.state === 'SUBMITTED').length;
   const hrAlertCount = getUnacknowledgedCount();
+  const payrollPendingCount = (() => {
+    const today = getSeoulTodayIso();
+    const yearMonth = today.slice(0, 7);
+    const prevYearMonth = addMonthsToYearMonth(yearMonth, -1);
+    const projectId = portalUser.projectId;
+    const run = runs.find((r) => r.projectId === projectId && r.yearMonth === yearMonth);
+    const closePrev = monthlyCloses.find((c) => c.projectId === projectId && c.yearMonth === prevYearMonth);
+    const payroll = run && today >= run.noticeDate && !run.acknowledged ? 1 : 0;
+    const monthly = closePrev && closePrev.status === 'DONE' && !closePrev.acknowledged ? 1 : 0;
+    return payroll + monthly;
+  })();
 
   function isActive(to: string, exact?: boolean) {
     if (exact) return location.pathname === to;
@@ -88,6 +110,7 @@ function PortalContent() {
 
   function getBadge(to: string): number | null {
     if (to === '/portal/expenses' && (draftCount + rejectedCount) > 0) return draftCount + rejectedCount;
+    if (to === '/portal/payroll' && payrollPendingCount > 0) return payrollPendingCount;
     if (to === '/portal/change-requests') {
       const total = pendingChanges + hrAlertCount;
       return total > 0 ? total : null;

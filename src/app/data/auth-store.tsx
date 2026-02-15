@@ -80,6 +80,21 @@ const AUTH_STORAGE_KEY = 'mysc-auth-user';
 const ACTIVE_TENANT_KEY = 'MYSC_ACTIVE_TENANT';
 const DEFAULT_ORG_ID = getDefaultOrgId();
 
+function parseBootstrapAdminEmails(env: Record<string, unknown> = import.meta.env): string[] {
+  const raw = typeof env.VITE_BOOTSTRAP_ADMIN_EMAILS === 'string' ? env.VITE_BOOTSTRAP_ADMIN_EMAILS : '';
+  return raw
+    .split(',')
+    .map((v) => normalizeEmail(v))
+    .filter(Boolean);
+}
+
+function isBootstrapAdminEmail(email: string, env: Record<string, unknown> = import.meta.env): boolean {
+  if (!email) return false;
+  const list = parseBootstrapAdminEmails(env);
+  if (!list.length) return false;
+  return list.includes(normalizeEmail(email));
+}
+
 const ROLE_DIRECTORY: RoleDirectoryEntry[] = ORG_MEMBERS.map((member) => ({
   uid: member.uid,
   email: member.email,
@@ -170,13 +185,16 @@ async function upsertMemberFromFirebase(
   const snap = await getDoc(memberRef);
   const existing = snap.exists() ? (snap.data() as MemberDoc) : undefined;
   const now = new Date().toISOString();
+  const normalizedEmail = normalizeEmail(firebaseUser.email || existing?.email || '');
+  const bootstrapAdmin = isBootstrapAdminEmail(normalizedEmail);
 
   const merged: MemberDoc = {
     uid: firebaseUser.uid,
     name: firebaseUser.displayName || existing?.name || '사용자',
-    email: normalizeEmail(firebaseUser.email || existing?.email || ''),
+    email: normalizedEmail,
     role:
       toUserRole(roleFromClaims) ||
+      (bootstrapAdmin ? 'admin' : undefined) ||
       existing?.role ||
       resolveRoleFromDirectory(firebaseUser.email || '', ROLE_DIRECTORY),
     tenantId,

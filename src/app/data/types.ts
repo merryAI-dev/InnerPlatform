@@ -438,6 +438,69 @@ export interface BoardVote {
   updatedAt: string;
 }
 
+// ── Payroll (인건비 공지/확인) ──
+
+export type PayrollPaidStatus = 'UNKNOWN' | 'AUTO_MATCHED' | 'CONFIRMED' | 'MISSING';
+
+export interface PayrollSchedule {
+  /** doc id = projectId */
+  id: string;
+  tenantId?: string;
+  projectId: string;
+  /** 1..31 (없는 날짜면 월 말일로 clamp) */
+  dayOfMonth: number;
+  timezone: string; // e.g. "Asia/Seoul"
+  noticeLeadBusinessDays: number; // default 3
+  active: boolean;
+  updatedAt: string;
+  updatedBy: string;
+  updatedByName?: string;
+  createdAt?: string;
+  createdBy?: string;
+}
+
+export interface PayrollRun {
+  /** doc id = `${projectId}-${yearMonth}` */
+  id: string;
+  tenantId?: string;
+  projectId: string;
+  yearMonth: string; // "2026-02"
+  plannedPayDate: string; // "YYYY-MM-DD"
+  noticeDate: string; // "YYYY-MM-DD"
+  noticeLeadBusinessDays: number;
+  acknowledged: boolean;
+  acknowledgedAt?: string;
+  acknowledgedByUid?: string;
+  acknowledgedByName?: string;
+  paidStatus: PayrollPaidStatus;
+  matchedTxIds?: string[];
+  confirmedAt?: string;
+  confirmedByUid?: string;
+  confirmedByName?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type MonthlyCloseStatus = 'OPEN' | 'DONE';
+
+export interface MonthlyClose {
+  /** doc id = `${projectId}-${yearMonth}` */
+  id: string;
+  tenantId?: string;
+  projectId: string;
+  yearMonth: string; // "2026-02"
+  status: MonthlyCloseStatus;
+  doneAt?: string;
+  doneByUid?: string;
+  doneByName?: string;
+  acknowledged: boolean;
+  acknowledgedAt?: string;
+  acknowledgedByUid?: string;
+  acknowledgedByName?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface AuditLog {
   id: string;
   tenantId?: string;

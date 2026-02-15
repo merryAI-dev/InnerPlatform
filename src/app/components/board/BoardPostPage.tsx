@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router';
+import { useLocation, useNavigate, useParams } from 'react-router';
 import {
   ArrowLeft,
   ArrowBigUp,
@@ -55,10 +55,12 @@ function groupReplies(comments: BoardComment[]) {
 
 export function BoardPostPage() {
   const { postId } = useParams();
+  const location = useLocation();
   const navigate = useNavigate();
   const { user } = useAuth();
   const { posts, votePost, addComment, buildVoteDocId } = useBoard();
   const { db, isOnline, orgId } = useFirebase();
+  const basePath = location.pathname.startsWith('/portal/') ? '/portal/board' : '/board';
 
   const [comments, setComments] = useState<BoardComment[]>([]);
   const [myVote, setMyVote] = useState<-1 | 0 | 1>(0);
@@ -137,7 +139,7 @@ export function BoardPostPage() {
           icon={MessageCircle}
           title="글을 찾을 수 없습니다"
           description="삭제되었거나 접근할 수 없는 글입니다."
-          action={{ label: '게시판으로', onClick: () => navigate('/board'), icon: ArrowLeft }}
+          action={{ label: '게시판으로', onClick: () => navigate(basePath), icon: ArrowLeft }}
           variant="compact"
         />
       </Card>
@@ -146,7 +148,7 @@ export function BoardPostPage() {
 
   return (
     <div className="space-y-3">
-      <Button variant="ghost" size="sm" className="gap-1.5 -ml-2" onClick={() => navigate('/board')}>
+      <Button variant="ghost" size="sm" className="gap-1.5 -ml-2" onClick={() => navigate(basePath)}>
         <ArrowLeft className="w-4 h-4" />
         게시판으로
       </Button>

@@ -23,6 +23,10 @@ import {
   listSupportedViews,
 } from './projections.mjs';
 import {
+  runMonthlyCloseWorker,
+  runPayrollWorker,
+} from './payroll-worker.mjs';
+import {
   resolveAffectedViews,
   resolveRelationRules,
   resolveRelationRulesPolicyPath,
@@ -610,6 +614,56 @@ export function createBffApp(options = {}) {
   // Vercel Cron runs internal worker endpoints via GET.
   app.get('/api/internal/workers/work-queue/run', runWorkQueueWorker);
   app.post('/api/internal/workers/work-queue/run', runWorkQueueWorker);
+
+  const runPayrollWorkerRoute = asyncHandler(async (req, res) => {
+    assertInternalWorkerAuthorized(req);
+    const tenantId = readOptionalText(req.body?.tenantId ?? req.query?.tenantId) || undefined;
+    const monthsAheadRaw = Number.parseInt(String(req.body?.monthsAhead ?? req.query?.monthsAhead ?? '1'), 10);
+    const leadDaysRaw = Number.parseInt(String(req.body?.leadBusinessDays ?? req.query?.leadBusinessDays ?? '3'), 10);
+    const matchWindowRaw = Number.parseInt(String(req.body?.matchWindowDays ?? req.query?.matchWindowDays ?? '2'), 10);
+    const monthsAhead = Number.isFinite(monthsAheadRaw) && monthsAheadRaw >= 0 && monthsAheadRaw <= 6 ? monthsAheadRaw : 1;
+    const leadBusinessDays = Number.isFinite(leadDaysRaw) && leadDaysRaw >= 0 && leadDaysRaw <= 10 ? leadDaysRaw : 3;
+    const matchWindowDays = Number.isFinite(matchWindowRaw) && matchWindowRaw >= 0 && matchWindowRaw <= 10 ? matchWindowRaw : 2;
+
+    const result = await runPayrollWorker(db, {
+      tenantId,
+      nowIso: now(),
+      monthsAhead,
+      leadBusinessDays,
+      matchWindowDays,
+    });
+
+    res.status(200).json({
+      ok: true,
+      worker: 'payroll',
+      projectId,
+      ...result,
+    });
+  });
+  app.get('/api/internal/workers/payroll/run', runPayrollWorkerRoute);
+  app.post('/api/internal/workers/payroll/run', runPayrollWorkerRoute);
+
+  const runMonthlyCloseWorkerRoute = asyncHandler(async (req, res) => {
+    assertInternalWorkerAuthorized(req);
+    const tenantId = readOptionalText(req.body?.tenantId ?? req.query?.tenantId) || undefined;
+    const createMonthsRaw = Number.parseInt(String(req.body?.createMonths ?? req.query?.createMonths ?? '2'), 10);
+    const createMonths = Number.isFinite(createMonthsRaw) && createMonthsRaw >= 1 && createMonthsRaw <= 6 ? createMonthsRaw : 2;
+
+    const result = await runMonthlyCloseWorker(db, {
+      tenantId,
+      nowIso: now(),
+      createMonths,
+    });
+
+    res.status(200).json({
+      ok: true,
+      worker: 'monthly_close',
+      projectId,
+      ...result,
+    });
+  });
+  app.get('/api/internal/workers/monthly-close/run', runMonthlyCloseWorkerRoute);
+  app.post('/api/internal/workers/monthly-close/run', runMonthlyCloseWorkerRoute);
 
   app.use('/api/v1', createApiContextMiddleware({ authMode, verifyToken }));
 

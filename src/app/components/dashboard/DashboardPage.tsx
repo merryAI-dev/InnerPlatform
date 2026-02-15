@@ -10,6 +10,7 @@ import {
   Landmark, PieChart, BarChart3, Sparkles, Shield,
   ArrowUpRight, Banknote, Activity, ChevronRight,
   LayoutDashboard,
+  Megaphone,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
@@ -23,6 +24,8 @@ import {
   AreaChart, Area,
 } from 'recharts';
 import { useAppStore } from '../../data/store';
+import { useHrAnnouncements, HR_EVENT_LABELS, HR_EVENT_COLORS } from '../../data/hr-announcements-store';
+import { usePayroll } from '../../data/payroll-store';
 import {
   PROJECT_STATUS_LABELS, PROJECT_TYPE_SHORT_LABELS,
   TX_STATE_LABELS,
@@ -35,6 +38,7 @@ import {
   UpdateReminderBadge,
   validateProject,
 } from './DashboardGuide';
+import { getSeoulTodayIso } from '../../platform/business-days';
 
 function fmt(n: number) {
   if (Math.abs(n) >= 1e8) return (n / 1e8).toFixed(1) + '억';
@@ -131,6 +135,29 @@ function AlertStrip({ icon: Icon, label, count, color, onClick }: {
 export function DashboardPage() {
   const { projects, transactions, ledgers, participationEntries } = useAppStore();
   const navigate = useNavigate();
+  const { announcements, getUnacknowledgedCount: getHrUnacked } = useHrAnnouncements();
+  const { runs } = usePayroll();
+
+  const today = getSeoulTodayIso();
+  const yearMonth = today.slice(0, 7);
+
+  const payrollSummary = useMemo(() => {
+    const thisMonth = runs.filter((r) => r.yearMonth === yearMonth);
+    const due = thisMonth.filter((r) => today >= r.noticeDate).length;
+    const unacked = thisMonth.filter((r) => today >= r.noticeDate && !r.acknowledged).length;
+    const unconfirmed = thisMonth.filter((r) => today >= r.plannedPayDate && r.paidStatus !== 'CONFIRMED').length;
+    return { due, unacked, unconfirmed };
+  }, [runs, today, yearMonth]);
+
+  const hrSummary = useMemo(() => {
+    const unresolved = announcements.filter((a) => !a.resolved);
+    const resignations = unresolved.filter((a) => a.eventType === 'RESIGNATION');
+    return {
+      unresolved,
+      resignations,
+      unackedAlerts: getHrUnacked(),
+    };
+  }, [announcements, getHrUnacked]);
 
   const participationDanger = useMemo(() => {
     const summaries = computeMemberSummaries(participationEntries);
@@ -284,6 +311,99 @@ export function DashboardPage() {
           onClick={() => navigate('/participation')}
         />
       </div>
+
+      {/* HR + Payroll Highlights */}
+      {(hrSummary.unresolved.length > 0 || payrollSummary.due > 0 || payrollSummary.unacked > 0) && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <Card className="shadow-sm border-border/50">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-[13px] flex items-center justify-between gap-2">
+                <span className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-md bg-rose-50 dark:bg-rose-950/40 flex items-center justify-center">
+                    <Megaphone className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
+                  </div>
+                  인사 공지 (홈)
+                </span>
+                <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => navigate('/hr-announcements')}>
+                  관리
+                </Button>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                <span>미해결 {hrSummary.unresolved.length}건</span>
+                <span>·</span>
+                <span>미확인 알림 {hrSummary.unackedAlerts}건</span>
+              </div>
+
+              {hrSummary.unresolved.length === 0 ? (
+                <p className="text-[12px] text-muted-foreground">현재 미해결 인사 공지가 없습니다.</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {hrSummary.unresolved.slice(0, 3).map((ann) => (
+                    <div key={ann.id} className="p-2.5 rounded-lg bg-muted/30 border border-border/40">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-[12px] truncate" style={{ fontWeight: 700 }}>
+                            {ann.employeeName} ({ann.employeeNickname})
+                          </p>
+                          <p className="text-[10px] text-muted-foreground truncate">
+                            적용일: {ann.effectiveDate} · 영향 사업 {ann.affectedProjectIds.length}개
+                          </p>
+                        </div>
+                        <Badge className={`text-[9px] h-4 px-1.5 shrink-0 ${HR_EVENT_COLORS[ann.eventType]}`}>
+                          {HR_EVENT_LABELS[ann.eventType]}
+                        </Badge>
+                      </div>
+                    </div>
+                  ))}
+                  {hrSummary.unresolved.length > 3 && (
+                    <p className="text-[10px] text-muted-foreground">외 {hrSummary.unresolved.length - 3}건</p>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="shadow-sm border-border/50">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-[13px] flex items-center justify-between gap-2">
+                <span className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-md bg-emerald-50 dark:bg-emerald-950/40 flex items-center justify-center">
+                    <CircleDollarSign className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                  </div>
+                  인건비/월간정산 (요약)
+                </span>
+                <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => navigate('/payroll')}>
+                  운영 보기
+                </Button>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <div className="text-[11px] text-muted-foreground">
+                기준 월: <span style={{ fontWeight: 700 }} className="text-foreground">{yearMonth}</span>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { label: '공지 대상', value: payrollSummary.due, color: '#4f46e5' },
+                  { label: '미인지', value: payrollSummary.unacked, color: '#e11d48' },
+                  { label: '미확정', value: payrollSummary.unconfirmed, color: '#d97706' },
+                ].map((k) => (
+                  <div key={k.label} className="p-2.5 rounded-lg bg-muted/30 border border-border/40 text-center">
+                    <p className="text-[9px] text-muted-foreground">{k.label}</p>
+                    <p className="text-[16px]" style={{ fontWeight: 800, color: k.value > 0 ? k.color : undefined }}>
+                      {k.value}
+                    </p>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                지급일 3영업일 전부터 PM 확인이 필요하며, 거래 자동매칭 후 Admin이 지급을 확정합니다.
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Main Grid: Charts + Health + Activity */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">

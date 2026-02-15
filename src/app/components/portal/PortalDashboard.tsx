@@ -10,6 +10,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { usePortalStore } from '../../data/portal-store';
+import { useHrAnnouncements, HR_EVENT_LABELS, HR_EVENT_COLORS } from '../../data/hr-announcements-store';
+import { usePayroll } from '../../data/payroll-store';
 import { TRANSACTIONS, LEDGERS } from '../../data/mock-data';
 import {
   EXPENSE_STATUS_LABELS, EXPENSE_STATUS_COLORS,
@@ -18,6 +20,7 @@ import {
 import {
   PROJECT_STATUS_LABELS, SETTLEMENT_TYPE_SHORT, BASIS_LABELS,
 } from '../../data/types';
+import { addMonthsToYearMonth, getSeoulTodayIso } from '../../platform/business-days';
 
 // ═══════════════════════════════════════════════════════════════
 // PortalDashboard — 내 사업 현황
@@ -26,6 +29,8 @@ import {
 export function PortalDashboard() {
   const navigate = useNavigate();
   const { portalUser, myProject, expenseSets, changeRequests } = usePortalStore();
+  const { getProjectAlerts } = useHrAnnouncements();
+  const { runs, monthlyCloses, acknowledgePayrollRun, acknowledgeMonthlyClose } = usePayroll();
 
   if (!myProject || !portalUser) {
     return (
@@ -43,6 +48,15 @@ export function PortalDashboard() {
   const myLedgers = LEDGERS.filter(l => l.projectId === myProject.id);
   const myTx = TRANSACTIONS.filter(t => t.projectId === myProject.id);
   const myChanges = changeRequests.filter(r => r.projectId === myProject.id);
+
+  const today = getSeoulTodayIso();
+  const yearMonth = today.slice(0, 7);
+  const prevYearMonth = addMonthsToYearMonth(yearMonth, -1);
+  const payrollRun = runs.find((r) => r.projectId === myProject.id && r.yearMonth === yearMonth) || null;
+  const monthlyClosePrev = monthlyCloses.find((c) => c.projectId === myProject.id && c.yearMonth === prevYearMonth) || null;
+  const hrAlerts = getProjectAlerts(myProject.id).filter((a) => !a.acknowledged);
+  const needsPayrollAck = !!(payrollRun && today >= payrollRun.noticeDate && !payrollRun.acknowledged);
+  const needsMonthlyCloseAck = !!(monthlyClosePrev && monthlyClosePrev.status === 'DONE' && !monthlyClosePrev.acknowledged);
 
   // 재무 KPI
   const totalIn = myTx.filter(t => t.direction === 'IN').reduce((s, t) => s + t.amounts.bankAmount, 0);
@@ -73,6 +87,90 @@ export function PortalDashboard() {
           {PROJECT_STATUS_LABELS[myProject.status]}
         </Badge>
       </div>
+
+      {/* 중요 공지 (인건비 / 월간정산 / 퇴사·전배) */}
+      {(needsPayrollAck || needsMonthlyCloseAck || hrAlerts.length > 0) && (
+        <Card className="border-amber-200/60 dark:border-amber-800/40 bg-amber-50/50 dark:bg-amber-950/10">
+          <CardContent className="p-4 space-y-3">
+            <div className="flex items-start gap-2.5">
+              <Clock className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <div className="min-w-0">
+                <p className="text-[12px]" style={{ fontWeight: 800 }}>중요 공지</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  인건비 지급/월간정산 확인, 인력변경(퇴사·전배 등) 관련 공지를 확인해주세요.
+                </p>
+              </div>
+            </div>
+
+            {needsPayrollAck && payrollRun && (
+              <div className="p-3 rounded-lg bg-background border border-amber-200/50 dark:border-amber-800/40 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[12px]" style={{ fontWeight: 700 }}>
+                    인건비 지급 예정: {payrollRun.plannedPayDate}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground">
+                    공지일: {payrollRun.noticeDate} (지급일 3영업일 전)
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  className="h-8 text-[12px] gap-1.5 shrink-0"
+                  onClick={() => acknowledgePayrollRun(payrollRun.id).catch(console.error)}
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" /> 확인했습니다
+                </Button>
+              </div>
+            )}
+
+            {needsMonthlyCloseAck && monthlyClosePrev && (
+              <div className="p-3 rounded-lg bg-background border border-amber-200/50 dark:border-amber-800/40 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[12px]" style={{ fontWeight: 700 }}>
+                    월간 정산 완료 확인: {monthlyClosePrev.yearMonth}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground">
+                    완료일: {monthlyClosePrev.doneAt ? new Date(monthlyClosePrev.doneAt).toLocaleDateString('ko-KR') : '-'}
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  className="h-8 text-[12px] gap-1.5 shrink-0"
+                  onClick={() => acknowledgeMonthlyClose(monthlyClosePrev.id).catch(console.error)}
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" /> 확인했습니다
+                </Button>
+              </div>
+            )}
+
+            {hrAlerts.length > 0 && (
+              <div className="p-3 rounded-lg bg-background border border-amber-200/50 dark:border-amber-800/40">
+                <div className="flex items-center justify-between gap-3 mb-2">
+                  <p className="text-[12px]" style={{ fontWeight: 700 }}>인사 공지 (미확인)</p>
+                  <Button variant="outline" size="sm" className="h-7 text-[11px]" onClick={() => navigate('/portal/change-requests')}>
+                    확인하러 가기
+                  </Button>
+                </div>
+                <div className="space-y-1.5">
+                  {hrAlerts.slice(0, 3).map((a) => (
+                    <div key={a.id} className="flex items-center justify-between gap-2 text-[11px]">
+                      <div className="min-w-0">
+                        <span className={`text-[9px] h-4 px-1.5 inline-flex items-center rounded ${HR_EVENT_COLORS[a.eventType]}`}>
+                          {HR_EVENT_LABELS[a.eventType]}
+                        </span>
+                        <span className="ml-2 truncate">{a.employeeName} · {a.effectiveDate}</span>
+                      </div>
+                      <Badge variant="outline" className="text-[10px] shrink-0">{a.projectId}</Badge>
+                    </div>
+                  ))}
+                  {hrAlerts.length > 3 && (
+                    <p className="text-[10px] text-muted-foreground">외 {hrAlerts.length - 3}건</p>
+                  )}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* 사업 기본 정보 */}
       <Card>

@@ -9,6 +9,7 @@ describe('admin nav policy', () => {
 
   it('filters finance to core + finance + approvals + audit', () => {
     expect(canShowAdminNavItem('finance', '/cashflow')).toBe(true);
+    expect(canShowAdminNavItem('finance', '/payroll')).toBe(true);
     expect(canShowAdminNavItem('finance', '/approvals')).toBe(true);
     expect(canShowAdminNavItem('finance', '/board')).toBe(true);
     expect(canShowAdminNavItem('finance', '/users')).toBe(false);
@@ -19,6 +20,7 @@ describe('admin nav policy', () => {
   it('filters auditor to read-only surfaces (no approvals/settings/users)', () => {
     expect(canShowAdminNavItem('auditor', '/audit')).toBe(true);
     expect(canShowAdminNavItem('auditor', '/board')).toBe(true);
+    expect(canShowAdminNavItem('auditor', '/payroll')).toBe(true);
     expect(canShowAdminNavItem('auditor', '/approvals')).toBe(false);
     expect(canShowAdminNavItem('auditor', '/settings')).toBe(false);
     expect(canShowAdminNavItem('auditor', '/users')).toBe(false);

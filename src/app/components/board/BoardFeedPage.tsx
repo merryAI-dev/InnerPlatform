@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 import { ArrowBigUp, ArrowBigDown, MessageCircle, MessagesSquare, Plus, Search } from 'lucide-react';
 import { PageHeader } from '../layout/PageHeader';
 import { Card, CardContent } from '../ui/card';
@@ -24,8 +24,10 @@ function fmtTime(iso: string) {
 }
 
 export function BoardFeedPage() {
+  const location = useLocation();
   const navigate = useNavigate();
   const { posts, createPost, votePost } = useBoard();
+  const basePath = location.pathname.startsWith('/portal/') ? '/portal/board' : '/board';
 
   const [sort, setSort] = useState<BoardSort>('hot');
   const [channel, setChannel] = useState<ChannelFilter>('all');
@@ -64,7 +66,7 @@ export function BoardFeedPage() {
     if (!created) return;
     setShowCreate(false);
     setForm({ channel: 'general', title: '', body: '', tags: '' });
-    navigate(`/board/${created.id}`);
+    navigate(`${basePath}/${created.id}`);
   }
 
   return (
@@ -171,7 +173,7 @@ export function BoardFeedPage() {
                   <div className="flex-1 min-w-0">
                     <button
                       className="text-left w-full"
-                      onClick={() => navigate(`/board/${post.id}`)}
+                      onClick={() => navigate(`${basePath}/${post.id}`)}
                     >
                       <div className="flex items-center gap-2 mb-1">
                         <Badge variant="outline" className="text-[10px] h-4 px-1.5 bg-muted/20">
