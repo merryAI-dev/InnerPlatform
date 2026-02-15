@@ -84,17 +84,22 @@ const ALLOWED_EMAIL_DOMAINS = getAllowedEmailDomains(import.meta.env);
 
 function parseBootstrapAdminEmails(env: Record<string, unknown> = import.meta.env): string[] {
   const raw = typeof env.VITE_BOOTSTRAP_ADMIN_EMAILS === 'string' ? env.VITE_BOOTSTRAP_ADMIN_EMAILS : '';
-  return raw
+  const emails = raw
     .split(',')
     .map((v) => normalizeEmail(v))
     .filter(Boolean);
+  console.log('[Auth] Bootstrap admin emails:', emails);
+  return emails;
 }
 
 function isBootstrapAdminEmail(email: string, env: Record<string, unknown> = import.meta.env): boolean {
   if (!email) return false;
   const list = parseBootstrapAdminEmails(env);
   if (!list.length) return false;
-  return list.includes(normalizeEmail(email));
+  const normalized = normalizeEmail(email);
+  const isAdmin = list.includes(normalized);
+  console.log('[Auth] isBootstrapAdminEmail check:', { email, normalized, list, isAdmin });
+  return isAdmin;
 }
 
 const ROLE_DIRECTORY: RoleDirectoryEntry[] = ORG_MEMBERS.map((member) => ({
@@ -190,6 +195,14 @@ async function upsertMemberFromFirebase(
   const normalizedEmail = normalizeEmail(firebaseUser.email || existing?.email || '');
   const bootstrapAdmin = isBootstrapAdminEmail(normalizedEmail);
 
+  console.log('[Auth] upsertMemberFromFirebase:', {
+    uid: firebaseUser.uid,
+    email: normalizedEmail,
+    bootstrapAdmin,
+    roleFromClaims,
+    existingRole: existing?.role,
+  });
+
   const merged: MemberDoc = {
     uid: firebaseUser.uid,
     name: firebaseUser.displayName || existing?.name || '사용자',
@@ -209,6 +222,8 @@ async function upsertMemberFromFirebase(
     lastLoginAt: now,
   };
   if (department) merged.department = department;
+
+  console.log('[Auth] Final merged role:', merged.role);
 
   await setDoc(memberRef, merged, { merge: true });
   return merged;
