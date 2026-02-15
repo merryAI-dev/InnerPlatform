@@ -6,7 +6,7 @@ import {
   Bell, User, Plus, Shield, ClipboardList, ClipboardCheck,
   Search, Zap, HelpCircle, Maximize2, Minimize2,
   Menu, X, Calculator, Wallet, ExternalLink,
-  ListChecks, Users, LogOut, Megaphone,
+  ListChecks, Users, LogOut, Megaphone, MessagesSquare,
 } from 'lucide-react';
 import { useAppStore, AppProvider } from '../../data/store';
 import { useAuth } from '../../data/auth-store';
@@ -34,6 +34,7 @@ const NAV_GROUPS = [
     items: [
       { to: '/', icon: LayoutDashboard, label: '대시보드' },
       { to: '/projects', icon: FolderKanban, label: '프로젝트' },
+      { to: '/board', icon: MessagesSquare, label: '전사 게시판' },
       { to: '/projects/new', icon: Plus, label: '사업 등록', accent: true },
     ],
   },

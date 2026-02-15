@@ -51,6 +51,14 @@
       ]
     },
     {
+      "collectionGroup": "board_comments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "postId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "evidences",
       "queryScope": "COLLECTION",
       "fields": [

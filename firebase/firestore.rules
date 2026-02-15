@@ -148,6 +148,88 @@ service cloud.firestore {
       );
     }
 
+    // ── Company Board (전사 게시판) ──
+
+    match /orgs/{orgId}/board_posts/{postId} {
+      allow read: if isSignedIn() && resourceHasValidTenant(orgId);
+      allow create: if isSignedIn()
+                    && requestHasValidTenant(orgId)
+                    && request.resource.data.id == postId
+                    && request.resource.data.createdBy == request.auth.uid;
+      allow update: if isSignedIn()
+                    && requestHasValidTenant(orgId)
+                    && resourceHasValidTenant(orgId)
+                    && request.resource.data.id == resource.data.id
+                    && request.resource.data.createdBy == resource.data.createdBy
+                    && (
+                      // Author can edit content fields.
+                      (
+                        resource.data.createdBy == request.auth.uid
+                        && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+                          'title',
+                          'body',
+                          'tags',
+                          'channel',
+                          'updatedAt',
+                          'lastActivityAt',
+                          'deletedAt'
+                        ])
+                      )
+                      ||
+                      // Any signed-in user may update counters (vote/comment aggregates) via transactions.
+                      (
+                        request.resource.data.diff(resource.data).changedKeys().hasOnly([
+                          'commentCount',
+                          'upvoteCount',
+                          'downvoteCount',
+                          'voteScore',
+                          'updatedAt',
+                          'lastActivityAt'
+                        ])
+                      )
+                    );
+      allow delete: if false;
+    }
+
+    match /orgs/{orgId}/board_comments/{commentId} {
+      allow read: if isSignedIn() && resourceHasValidTenant(orgId);
+      allow create: if isSignedIn()
+                    && requestHasValidTenant(orgId)
+                    && request.resource.data.id == commentId
+                    && request.resource.data.createdBy == request.auth.uid;
+      allow update: if isSignedIn()
+                    && requestHasValidTenant(orgId)
+                    && resourceHasValidTenant(orgId)
+                    && resource.data.createdBy == request.auth.uid
+                    && request.resource.data.id == resource.data.id
+                    && request.resource.data.createdBy == resource.data.createdBy
+                    && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+                      'body',
+                      'updatedAt',
+                      'deletedAt'
+                    ]);
+      allow delete: if false;
+    }
+
+    match /orgs/{orgId}/board_votes/{voteId} {
+      allow read: if isSignedIn() && resourceHasValidTenant(orgId);
+      allow create: if isSignedIn()
+                    && requestHasValidTenant(orgId)
+                    && request.resource.data.id == voteId
+                    && request.resource.data.voterId == request.auth.uid;
+      allow update: if isSignedIn()
+                    && requestHasValidTenant(orgId)
+                    && resourceHasValidTenant(orgId)
+                    && resource.data.voterId == request.auth.uid
+                    && request.resource.data.id == resource.data.id
+                    && request.resource.data.voterId == resource.data.voterId
+                    && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+                      'value',
+                      'updatedAt'
+                    ]);
+      allow delete: if isSignedIn() && resourceHasValidTenant(orgId) && resource.data.voterId == request.auth.uid;
+    }
+
     match /orgs/{orgId}/{document=**} {
       allow read: if isSignedIn() && resourceHasValidTenant(orgId);
       allow create: if isSignedIn() && isAdmin(orgId) && requestHasValidTenant(orgId);

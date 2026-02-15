@@ -5,6 +5,7 @@ import {
   ArrowRightLeft, LogOut,
   FolderKanban, Menu, X,
   Plus,
+  MessagesSquare,
 } from 'lucide-react';
 import { PortalProvider, usePortalStore } from '../../data/portal-store';
 import { useAuth } from '../../data/auth-store';
@@ -23,6 +24,7 @@ import { resolveHomePath } from '../../platform/navigation';
 
 const NAV_ITEMS = [
   { to: '/portal', icon: LayoutDashboard, label: '내 사업 현황', exact: true },
+  { to: '/board', icon: MessagesSquare, label: '전사 게시판' },
   { to: '/portal/budget', icon: Calculator, label: '예산총괄' },
   { to: '/portal/expenses', icon: Wallet, label: '사업비 입력' },
   { to: '/portal/personnel', icon: Users, label: '인력 현황' },
