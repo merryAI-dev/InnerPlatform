@@ -5,6 +5,7 @@ import {
   Percent, ArrowUpDown, Calendar, Eye, AlertTriangle,
   Megaphone, Bell, ChevronRight, X,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -20,6 +21,16 @@ import {
 } from '../ui/select';
 import { PageHeader } from '../layout/PageHeader';
 import { usePortalStore } from '../../data/portal-store';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../ui/alert-dialog';
 import {
   useHrAnnouncements,
   HR_EVENT_LABELS, HR_EVENT_COLORS,
@@ -140,6 +151,7 @@ export function PortalChangeRequests() {
 
   const [showCreate, setShowCreate] = useState(false);
   const [selectedReq, setSelectedReq] = useState<ChangeRequest | null>(null);
+  const [submitConfirm, setSubmitConfirm] = useState<string | null>(null);
   // HR 알림 배너 닫기 (세션 내 dismiss — Firestore 전환 시 acknowledged 플래그로 영속화)
   const [dismissedAlerts, setDismissedAlerts] = useState<Set<string>>(new Set());
 
@@ -161,6 +173,7 @@ export function PortalChangeRequests() {
   const pendingAlerts = myAlerts.filter(a => !a.changeRequestCreated);
 
   const myRequests = changeRequests.filter(r => r.projectId === myProject.id);
+  const submitReq = submitConfirm ? myRequests.find((r) => r.id === submitConfirm) || null : null;
 
   const kpi = {
     total: myRequests.length,
@@ -466,7 +479,7 @@ export function PortalChangeRequests() {
                           size="sm"
                           variant="outline"
                           className="h-6 text-[10px] gap-1 mt-2"
-                          onClick={e => { e.stopPropagation(); submitChangeRequest(req.id); }}
+                          onClick={e => { e.stopPropagation(); setSubmitConfirm(req.id); }}
                         >
                           <Send className="w-3 h-3" /> 제출하기
                         </Button>
@@ -576,6 +589,44 @@ export function PortalChangeRequests() {
           </div>
         )}
       </div>
+
+      {/* 제출 확인 */}
+      <AlertDialog open={!!submitConfirm} onOpenChange={(open) => { if (!open) setSubmitConfirm(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>인력변경 요청을 제출하시겠습니까?</AlertDialogTitle>
+            <AlertDialogDescription>
+              제출 후 관리자가 검토합니다.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {submitReq && (
+            <div className="text-sm space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">요청명</span>
+                <span className="truncate max-w-[220px]" style={{ fontWeight: 700 }}>{submitReq.title}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">변경 건수</span>
+                <span style={{ fontWeight: 700 }}>{submitReq.changes.length}건</span>
+              </div>
+            </div>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel>취소</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                if (!submitReq) return;
+                submitChangeRequest(submitReq.id);
+                toast.success('제출했습니다.');
+                setSubmitConfirm(null);
+              }}
+            >
+              제출
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* 새 신청 다이얼로그 */}
       <Dialog open={showCreate} onOpenChange={setShowCreate}>
