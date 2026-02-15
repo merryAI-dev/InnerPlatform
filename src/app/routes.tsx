@@ -27,6 +27,7 @@ import { PortalBudget } from './components/portal/PortalBudget';
 import { PortalPersonnel } from './components/portal/PortalPersonnel';
 import { PortalChangeRequests } from './components/portal/PortalChangeRequests';
 import { PortalProjectRegister } from './components/portal/PortalProjectRegister';
+import { PortalSubmissions } from './components/portal/PortalSubmissions';
 import { LoginPage } from './components/auth/LoginPage';
 
 export const router = createBrowserRouter([
@@ -67,6 +68,7 @@ export const router = createBrowserRouter([
       { path: 'onboarding', Component: PortalOnboarding },
       { path: 'budget', Component: PortalBudget },
       { path: 'expenses', Component: PortalExpenses },
+      { path: 'submissions', Component: PortalSubmissions },
       { path: 'personnel', Component: PortalPersonnel },
       { path: 'change-requests', Component: PortalChangeRequests },
       { path: 'register-project', Component: PortalProjectRegister },

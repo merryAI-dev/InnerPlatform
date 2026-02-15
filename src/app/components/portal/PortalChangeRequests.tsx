@@ -1,4 +1,5 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router';
 import {
   ArrowRightLeft, Plus, Send, Clock, CheckCircle2,
   XCircle, FileText, Users, UserPlus, UserMinus,
@@ -132,6 +133,7 @@ const HR_EVENT_TO_CHANGE_TYPE: Record<string, StaffChangeItem['changeType']> = {
 };
 
 export function PortalChangeRequests() {
+  const [searchParams] = useSearchParams();
   const { portalUser, myProject, changeRequests, addChangeRequest, submitChangeRequest } = usePortalStore();
   const {
     getProjectAlerts, acknowledgeAlert, markAlertResolved,
@@ -161,6 +163,13 @@ export function PortalChangeRequests() {
   const pendingAlerts = myAlerts.filter(a => !a.changeRequestCreated);
 
   const myRequests = changeRequests.filter(r => r.projectId === myProject.id);
+  const reqIdFromUrl = searchParams.get('req') || '';
+
+  useEffect(() => {
+    if (!reqIdFromUrl) return;
+    const found = myRequests.find((r) => r.id === reqIdFromUrl);
+    if (found) setSelectedReq(found);
+  }, [reqIdFromUrl, myRequests]);
 
   const kpi = {
     total: myRequests.length,

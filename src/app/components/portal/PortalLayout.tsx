@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Wallet, Calculator, Users,
   ArrowRightLeft, LogOut, Zap, ChevronRight,
   FolderKanban, Bell, HelpCircle, Menu, X,
-  Plus,
+  Plus, ListChecks,
 } from 'lucide-react';
 import { PortalProvider, usePortalStore } from '../../data/portal-store';
 import { useAuth } from '../../data/auth-store';
@@ -24,6 +24,7 @@ const NAV_ITEMS = [
   { to: '/portal', icon: LayoutDashboard, label: '내 사업 현황', exact: true },
   { to: '/portal/budget', icon: Calculator, label: '예산총괄' },
   { to: '/portal/expenses', icon: Wallet, label: '사업비 입력' },
+  { to: '/portal/submissions', icon: ListChecks, label: '내 제출 현황' },
   { to: '/portal/personnel', icon: Users, label: '인력 현황' },
   { to: '/portal/change-requests', icon: ArrowRightLeft, label: '인력변경 신청' },
   { to: '/portal/register-project', icon: Plus, label: '사업 등록 제안', accent: true },
@@ -74,6 +75,7 @@ function PortalContent() {
   // 배지 카운트
   const myExpenses = expenseSets.filter(s => s.projectId === portalUser.projectId);
   const draftCount = myExpenses.filter(s => s.status === 'DRAFT').length;
+  const submittedExpenseCount = myExpenses.filter(s => s.status === 'SUBMITTED').length;
   const rejectedCount = myExpenses.filter(s => s.status === 'REJECTED').length;
   const pendingChanges = changeRequests.filter(r => r.state === 'SUBMITTED').length;
   const hrAlertCount = getUnacknowledgedCount();
@@ -85,6 +87,10 @@ function PortalContent() {
 
   function getBadge(to: string): number | null {
     if (to === '/portal/expenses' && (draftCount + rejectedCount) > 0) return draftCount + rejectedCount;
+    if (to === '/portal/submissions') {
+      const total = submittedExpenseCount + rejectedCount + pendingChanges;
+      return total > 0 ? total : null;
+    }
     if (to === '/portal/change-requests') {
       const total = pendingChanges + hrAlertCount;
       return total > 0 ? total : null;
