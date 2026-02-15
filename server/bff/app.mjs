@@ -11,6 +11,7 @@ import { createAuditChainService } from './audit-chain.mjs';
 import {
   createOutboxEvent,
   enqueueOutboxEventInTransaction,
+  processOutboxBatch,
 } from './outbox.mjs';
 import {
   createWorkQueueJob,
@@ -63,6 +64,17 @@ function parseLimit(raw, fallback = 50, max = 200) {
 function parseCursor(raw) {
   const cursor = typeof raw === 'string' ? raw.trim() : '';
   return cursor || undefined;
+}
+
+function parseBearerToken(rawAuthorization) {
+  const value = typeof rawAuthorization === 'string' ? rawAuthorization.trim() : '';
+  if (!value) return '';
+  const match = value.match(/^Bearer\s+(.+)$/i);
+  return match ? match[1].trim() : '';
+}
+
+function readOptionalText(value) {
+  return typeof value === 'string' ? value.trim() : '';
 }
 
 function parseAllowedOrigins(value) {
@@ -422,8 +434,15 @@ export function createBffApp(options = {}) {
   const rbacPolicy = options.rbacPolicy || loadRbacPolicy();
   const allowedOrigins = parseAllowedOrigins(options.allowedOrigins || process.env.BFF_ALLOWED_ORIGINS);
   const relationRulesPolicyPath = options.relationRulesPolicyPath || resolveRelationRulesPolicyPath();
-  const workQueueBatchSize = Number.parseInt(process.env.BFF_WORK_QUEUE_BATCH || '100', 10);
-  const workQueueMaxAttempts = Number.parseInt(process.env.BFF_WORK_QUEUE_MAX_ATTEMPTS || '6', 10);
+  const workQueueBatchSizeRaw = Number.parseInt(process.env.BFF_WORK_QUEUE_BATCH || '100', 10);
+  const workQueueMaxAttemptsRaw = Number.parseInt(process.env.BFF_WORK_QUEUE_MAX_ATTEMPTS || '6', 10);
+  const outboxBatchSizeRaw = Number.parseInt(process.env.BFF_OUTBOX_BATCH || '50', 10);
+  const outboxMaxAttemptsRaw = Number.parseInt(process.env.BFF_OUTBOX_MAX_ATTEMPTS || '8', 10);
+  const workQueueBatchSize = Number.isFinite(workQueueBatchSizeRaw) && workQueueBatchSizeRaw > 0 ? workQueueBatchSizeRaw : 100;
+  const workQueueMaxAttempts = Number.isFinite(workQueueMaxAttemptsRaw) && workQueueMaxAttemptsRaw > 0 ? workQueueMaxAttemptsRaw : 6;
+  const outboxBatchSize = Number.isFinite(outboxBatchSizeRaw) && outboxBatchSizeRaw > 0 ? outboxBatchSizeRaw : 50;
+  const outboxMaxAttempts = Number.isFinite(outboxMaxAttemptsRaw) && outboxMaxAttemptsRaw > 0 ? outboxMaxAttemptsRaw : 8;
+  const workerSecret = readOptionalText(options.workerSecret || process.env.BFF_WORKER_SECRET || process.env.CRON_SECRET);
 
   app.disable('x-powered-by');
   app.use(express.json({ limit: '1mb' }));
@@ -507,6 +526,19 @@ export function createBffApp(options = {}) {
     });
   }
 
+  function assertInternalWorkerAuthorized(req) {
+    if (!workerSecret) {
+      throw createHttpError(503, 'Worker secret is not configured', 'worker_secret_missing');
+    }
+    const headerSecret = readOptionalText(req.header('x-worker-secret'));
+    const bearerSecret = parseBearerToken(req.header('authorization'));
+    const matched = (headerSecret && headerSecret === workerSecret)
+      || (bearerSecret && bearerSecret === workerSecret);
+    if (!matched) {
+      throw createHttpError(401, 'Worker authorization failed', 'unauthorized_worker');
+    }
+  }
+
   app.get('/api/v1/health', (_req, res) => {
     res.status(200).json({
       ok: true,
@@ -517,6 +549,50 @@ export function createBffApp(options = {}) {
       timestamp: now(),
     });
   });
+
+  app.post('/api/internal/workers/outbox/run', asyncHandler(async (req, res) => {
+    assertInternalWorkerAuthorized(req);
+    const limit = parseLimit(req.body?.limit ?? req.query?.limit, outboxBatchSize, 500);
+    const maxAttempts = parseLimit(req.body?.maxAttempts ?? req.query?.maxAttempts, outboxMaxAttempts, 50);
+
+    const result = await processOutboxBatch(db, {
+      limit,
+      maxAttempts,
+      now,
+    });
+
+    res.status(200).json({
+      ok: true,
+      worker: 'outbox',
+      projectId,
+      ...result,
+    });
+  }));
+
+  app.post('/api/internal/workers/work-queue/run', asyncHandler(async (req, res) => {
+    assertInternalWorkerAuthorized(req);
+    const limit = parseLimit(req.body?.limit ?? req.query?.limit, workQueueBatchSize, 500);
+    const maxAttempts = parseLimit(req.body?.maxAttempts ?? req.query?.maxAttempts, workQueueMaxAttempts, 50);
+    const tenantId = readOptionalText(req.body?.tenantId ?? req.query?.tenantId) || undefined;
+    const eventId = readOptionalText(req.body?.eventId ?? req.query?.eventId) || undefined;
+
+    const result = await processWorkQueueBatch(db, {
+      tenantId,
+      eventId,
+      limit,
+      maxAttempts,
+      now,
+    });
+
+    res.status(200).json({
+      ok: true,
+      worker: 'work_queue',
+      projectId,
+      tenantId: tenantId || null,
+      eventId: eventId || null,
+      ...result,
+    });
+  }));
 
   app.use('/api/v1', createApiContextMiddleware({ authMode, verifyToken }));
 

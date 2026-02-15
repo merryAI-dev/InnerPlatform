@@ -196,6 +196,8 @@ npm run bff:test:integration
 ## BFF API Surface
 
 - `GET /api/v1/health`
+- `POST /api/internal/workers/outbox/run` (protected; worker secret required)
+- `POST /api/internal/workers/work-queue/run` (protected; worker secret required)
 - `POST /api/v1/write`
 - `GET /api/v1/views/:viewName`
 - `GET /api/v1/queue/jobs`
@@ -245,6 +247,12 @@ Relation-rule policy (no hardcoded cross-entity wiring in route code):
 - `policies/relation-rules.json`
 - Optional override: `orgs/{tenantId}/relation_rules/*`
 
+Internal worker auth:
+- `BFF_WORKER_SECRET` or `CRON_SECRET` must be set.
+- Send one of:
+  - `x-worker-secret: <secret>`
+  - `Authorization: Bearer <secret>`
+
 BFF runtime env template:
 - `server/bff/.env.example`
 
@@ -281,6 +289,10 @@ For production, keep both asynchronous pipelines alive:
    - work queue: every minute
    - outbox: every 1-5 minutes
 3. In each run, process bounded batches and return counts.
+4. This repo includes default cron schedules in `vercel.json` (Hobby-safe daily):
+   - `/api/internal/workers/work-queue/run`: `15 2 * * *`
+   - `/api/internal/workers/outbox/run`: `30 2 * * *`
+5. For near-real-time processing (every minute/5 minutes), use Vercel Pro cron or an external always-on worker.
 
 ### Option B: External always-on worker
 
@@ -293,6 +305,39 @@ BFF_WORK_QUEUE_LOOP=true BFF_WORK_QUEUE_INTERVAL_MS=2000 npm run bff:work-queue:
 
 Detailed runbook:
 - `guidelines/Operational-Hardening-Runbook.md`
+
+## Vercel Deployment (TDD Gate)
+
+Deploy only after all gates pass:
+
+```bash
+npm test
+npm run bff:test:integration
+npm run build
+```
+
+Set required runtime envs in Vercel:
+- Firebase/Vite envs (`VITE_FIREBASE_*`, `VITE_PLATFORM_API_ENABLED`, etc.)
+- BFF envs (`BFF_AUTH_MODE`, `BFF_ALLOWED_ORIGINS`)
+- Worker secret (`CRON_SECRET` recommended, or `BFF_WORKER_SECRET`)
+- Firebase Admin credentials for server runtime:
+  - `FIREBASE_SERVICE_ACCOUNT_JSON` (recommended), or
+  - `FIREBASE_SERVICE_ACCOUNT_BASE64`
+
+Deploy:
+
+```bash
+vercel login
+vercel link
+vercel --prod
+```
+
+Post-deploy smoke checks:
+- `GET /api/v1/health`
+- `POST /api/internal/workers/work-queue/run` with worker secret
+- `POST /api/internal/workers/outbox/run` with worker secret
+
+If worker endpoints return `500` with `Could not load the default credentials`, add Firebase Admin credentials envs above and redeploy.
 
 ## Cloud Run Deployment
 

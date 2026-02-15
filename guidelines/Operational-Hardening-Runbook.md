@@ -43,14 +43,18 @@ BFF_WORK_QUEUE_LOOP=true BFF_WORK_QUEUE_INTERVAL_MS=2000 npm run bff:work-queue:
 
 Use HTTP-triggered one-shot workers from Vercel Cron.
 
-1. Create protected endpoints in BFF:
+1. Protected endpoints are implemented:
    - `POST /api/internal/workers/outbox/run`
    - `POST /api/internal/workers/work-queue/run`
-2. Verify with a shared secret header (`x-worker-secret`).
-3. Add Vercel Cron schedules:
-   - every minute for work queue
-   - every 1-5 minutes for outbox
-4. Keep each invocation short and idempotent:
+2. Configure shared secret:
+   - set `CRON_SECRET` (recommended on Vercel) or `BFF_WORKER_SECRET`
+3. Configure Firebase Admin credentials:
+   - `FIREBASE_SERVICE_ACCOUNT_JSON` (recommended) or `FIREBASE_SERVICE_ACCOUNT_BASE64`
+4. Vercel Cron schedules are declared in `vercel.json` (default: Hobby-safe daily):
+   - `15 2 * * *` for work queue
+   - `30 2 * * *` for outbox
+5. For minute-level schedules, upgrade to Pro or move workers to an external runtime.
+6. Keep each invocation short and idempotent:
    - process up to N jobs per run
    - return processed count + remaining estimate
 

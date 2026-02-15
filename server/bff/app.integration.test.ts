@@ -9,6 +9,7 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
   const projectId = 'demo-bff-it';
   const tenantId = 'mysc';
   const actorId = 'u001';
+  const workerSecret = 'it-worker-secret';
   const defaultHeaders = {
     'x-tenant-id': tenantId,
     'x-actor-id': actorId,
@@ -16,7 +17,7 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
   };
 
   const db = createFirestoreDb({ projectId });
-  const app = createBffApp({ projectId });
+  const app = createBffApp({ projectId, workerSecret });
   const api = request(app);
 
   async function clearCollection(path: string): Promise<void> {
@@ -633,5 +634,94 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       .set(defaultHeaders);
     expect(jobs.status).toBe(200);
     expect(jobs.body.count).toBeGreaterThanOrEqual(1);
+  });
+
+  it('rejects internal worker endpoints without a valid secret', async () => {
+    const deniedQueue = await api
+      .post('/api/internal/workers/work-queue/run')
+      .send({});
+    expect(deniedQueue.status).toBe(401);
+    expect(deniedQueue.body.error).toBe('unauthorized_worker');
+
+    const deniedOutbox = await api
+      .post('/api/internal/workers/outbox/run')
+      .send({});
+    expect(deniedOutbox.status).toBe(401);
+    expect(deniedOutbox.body.error).toBe('unauthorized_worker');
+  });
+
+  it('processes work queue jobs through internal worker endpoint', async () => {
+    const write = await api
+      .post('/api/v1/write')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-worker-queue-seed' })
+      .send({
+        entityType: 'project',
+        entityId: 'p-worker-queue-001',
+        patch: {
+          id: 'p-worker-queue-001',
+          name: 'Queue Worker Seed',
+        },
+        options: {
+          sync: false,
+        },
+      });
+
+    expect(write.status).toBe(201);
+    expect(write.body.eventId).toBeTruthy();
+
+    const runQueue = await api
+      .post('/api/internal/workers/work-queue/run')
+      .set('x-worker-secret', workerSecret)
+      .send({ tenantId, eventId: write.body.eventId });
+
+    expect(runQueue.status).toBe(200);
+    expect(runQueue.body.ok).toBe(true);
+    expect(runQueue.body.worker).toBe('work_queue');
+    expect(runQueue.body.processed).toBeGreaterThanOrEqual(1);
+
+    const jobs = await api
+      .get(`/api/v1/queue/jobs?eventId=${encodeURIComponent(write.body.eventId)}`)
+      .set(defaultHeaders);
+
+    expect(jobs.status).toBe(200);
+    expect(jobs.body.count).toBeGreaterThanOrEqual(1);
+    const allDone = (jobs.body.items || []).every((item: any) => item.status === 'DONE');
+    expect(allDone).toBe(true);
+  });
+
+  it('processes outbox events through internal worker endpoint', async () => {
+    const createProject = await api
+      .post('/api/v1/projects')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-worker-outbox-seed' })
+      .send({
+        id: 'p-worker-outbox-001',
+        name: 'Outbox Worker Seed',
+      });
+    expect(createProject.status).toBe(201);
+
+    const pendingBefore = await db
+      .collection('outbox')
+      .where('status', '==', 'PENDING')
+      .limit(5)
+      .get();
+    expect(pendingBefore.empty).toBe(false);
+
+    const runOutbox = await api
+      .post('/api/internal/workers/outbox/run')
+      .set('x-worker-secret', workerSecret)
+      .send({});
+
+    expect(runOutbox.status).toBe(200);
+    expect(runOutbox.body.ok).toBe(true);
+    expect(runOutbox.body.worker).toBe('outbox');
+    expect(runOutbox.body.processed).toBeGreaterThanOrEqual(1);
+    expect(runOutbox.body.succeeded).toBeGreaterThanOrEqual(1);
+
+    const doneAfter = await db
+      .collection('outbox')
+      .where('status', '==', 'DONE')
+      .limit(5)
+      .get();
+    expect(doneAfter.empty).toBe(false);
   });
 });
