@@ -58,7 +58,7 @@ interface PortalActions {
   changeExpenseStatus: (setId: string, status: ExpenseSetStatus, reason?: string) => void;
   duplicateExpenseSet: (setId: string) => void;
   addChangeRequest: (req: ChangeRequest) => void;
-  submitChangeRequest: (id: string) => void;
+  submitChangeRequest: (id: string) => Promise<boolean>;
 }
 
 const _g = globalThis as any;
@@ -407,23 +407,51 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     }
   }, [firestoreEnabled, persistChangeRequest]);
 
-  const submitChangeRequest = useCallback((id: string) => {
+  const submitChangeRequest = useCallback(async (id: string) => {
     const now = new Date().toISOString();
+    let previousRequest: ChangeRequest | null = null;
+    let nextRequest: ChangeRequest | null = null;
 
     setChangeRequests((prev) => prev.map((request) => (
-      request.id === id ? { ...request, state: 'SUBMITTED' as ChangeRequestState } : request
+      request.id === id
+        ? (() => {
+          previousRequest = request;
+          nextRequest = {
+            ...request,
+            state: 'SUBMITTED' as ChangeRequestState,
+            timeline: [
+              ...request.timeline,
+              {
+                id: `tl-${Date.now()}`,
+                action: '요청서 제출',
+                actor: portalUser?.name || request.requestedBy || '사용자',
+                timestamp: now,
+                type: 'SUBMIT',
+              },
+            ],
+          };
+          return nextRequest;
+        })()
+        : request
     )));
 
-    if (firestoreEnabled && db) {
-      updateDoc(doc(db, getOrgDocumentPath(orgId, 'changeRequests', id)), {
-        state: 'SUBMITTED' as ChangeRequestState,
-        updatedAt: now,
-      }).catch((err) => {
-        console.error('[PortalStore] submitChangeRequest error:', err);
-        toast.error('인력변경 제출에 실패했습니다');
-      });
+    if (!firestoreEnabled || !db) return true;
+
+    try {
+      if (!nextRequest) return true;
+      await setDoc(doc(db, getOrgDocumentPath(orgId, 'changeRequests', id)), nextRequest, { merge: true });
+      return true;
+    } catch (err) {
+      console.error('[PortalStore] submitChangeRequest error:', err);
+      toast.error('인력변경 제출에 실패했습니다');
+      if (previousRequest) {
+        setChangeRequests((prev) => prev.map((request) => (
+          request.id === id ? previousRequest as ChangeRequest : request
+        )));
+      }
+      return false;
     }
-  }, [firestoreEnabled, db, orgId]);
+  }, [firestoreEnabled, db, orgId, portalUser?.name]);
 
   const value: PortalState & PortalActions = {
     isRegistered: !!portalUser,

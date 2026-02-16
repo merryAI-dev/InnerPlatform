@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import {
   LayoutDashboard, FolderKanban, BarChart3, FileCheck, Shield,
@@ -10,6 +10,7 @@ import { useAppStore } from '../../data/store';
 import { useAuth } from '../../data/auth-store';
 import { canShowAdminNavItem } from '../../platform/admin-nav';
 import { toast } from 'sonner';
+import { resolveGoShortcutTarget } from '../../platform/go-shortcuts';
 
 interface CommandItem {
   id: string;
@@ -28,27 +29,90 @@ export function CommandPalette() {
   const navigate = useNavigate();
   const { projects, transactions } = useAppStore();
   const { user } = useAuth();
+  const goPrefixTimeoutRef = useRef<number | null>(null);
+  const goPrefixArmedRef = useRef(false);
 
-  // ⌘K / Ctrl+K
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault();
-        setOpen(prev => !prev);
-        setQuery('');
-        setSelectedIndex(0);
-      }
-      if (e.key === 'Escape') setOpen(false);
+  const clearGoPrefix = useCallback(() => {
+    goPrefixArmedRef.current = false;
+    if (goPrefixTimeoutRef.current !== null) {
+      window.clearTimeout(goPrefixTimeoutRef.current);
+      goPrefixTimeoutRef.current = null;
     }
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
   }, []);
+
+  const armGoPrefix = useCallback(() => {
+    clearGoPrefix();
+    goPrefixArmedRef.current = true;
+    goPrefixTimeoutRef.current = window.setTimeout(() => {
+      goPrefixArmedRef.current = false;
+      goPrefixTimeoutRef.current = null;
+    }, 800);
+  }, [clearGoPrefix]);
 
   const go = useCallback((path: string) => {
     navigate(path);
     setOpen(false);
     setQuery('');
   }, [navigate]);
+
+  // ⌘K / Ctrl+K + sequence shortcuts (G then D/P/C/E/A/S)
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      const target = e.target as HTMLElement | null;
+      const isEditable =
+        !!target &&
+        (
+          target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable
+        );
+      if (isEditable) return;
+
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setOpen(prev => !prev);
+        setQuery('');
+        setSelectedIndex(0);
+        clearGoPrefix();
+        return;
+      }
+      if (e.key === 'Escape') {
+        clearGoPrefix();
+        setOpen(false);
+        return;
+      }
+      if (e.altKey || e.ctrlKey || e.metaKey) return;
+
+      const key = e.key.toLowerCase();
+      if (goPrefixArmedRef.current) {
+        clearGoPrefix();
+        const targetPath = resolveGoShortcutTarget(key);
+        if (!targetPath) return;
+        if (!canShowAdminNavItem(user?.role, targetPath)) {
+          toast.warning('해당 메뉴에 접근 권한이 없습니다.');
+          return;
+        }
+        e.preventDefault();
+        go(targetPath);
+        return;
+      }
+
+      if (key === 'g') {
+        armGoPrefix();
+        return;
+      }
+
+      if (key === 'n' && canShowAdminNavItem(user?.role, '/projects/new')) {
+        e.preventDefault();
+        go('/projects/new');
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      clearGoPrefix();
+    };
+  }, [armGoPrefix, clearGoPrefix, go, user?.role]);
 
   const items: CommandItem[] = useMemo(() => {
     const nav: CommandItem[] = [
