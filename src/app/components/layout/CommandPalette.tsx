@@ -9,6 +9,7 @@ import { Dialog, DialogContent } from '../ui/dialog';
 import { useAppStore } from '../../data/store';
 import { useAuth } from '../../data/auth-store';
 import { canShowAdminNavItem } from '../../platform/admin-nav';
+import { toast } from 'sonner';
 
 interface CommandItem {
   id: string;
@@ -83,7 +84,13 @@ export function CommandPalette() {
       category: '승인 대기',
       action: () => {
         const proj = projects.find(p => p.id === t.projectId);
-        if (proj) go(`/projects/${proj.id}`);
+        if (proj) {
+          go(`/projects/${proj.id}`);
+          return;
+        }
+        const fallback = canShowAdminNavItem(user?.role, '/approvals') ? '/approvals' : '/projects';
+        toast.warning('원본 프로젝트를 찾을 수 없어 승인 대기열로 이동합니다.');
+        go(fallback);
       },
       keywords: [t.counterparty, t.id],
     }));

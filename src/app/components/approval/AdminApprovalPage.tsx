@@ -257,9 +257,15 @@ export function AdminApprovalPage() {
                         size="sm"
                         variant="ghost"
                         className="h-7 text-[11px] gap-1"
-                        onClick={() => navigate('/expense-management')}
+                        onClick={() => {
+                          if (s.projectId) {
+                            navigate(`/projects/${s.projectId}`);
+                            return;
+                          }
+                          navigate('/projects');
+                        }}
                       >
-                        <Eye className="w-3 h-3" /> 상세
+                        <Eye className="w-3 h-3" /> 원본 보기
                       </Button>
                     </div>
                   </div>
@@ -338,9 +344,15 @@ export function AdminApprovalPage() {
                         size="sm"
                         variant="ghost"
                         className="h-7 text-[11px] gap-1"
-                        onClick={() => navigate('/personnel-changes')}
+                        onClick={() => {
+                          if (r.projectId) {
+                            navigate(`/projects/${r.projectId}`);
+                            return;
+                          }
+                          navigate('/personnel-changes');
+                        }}
                       >
-                        <Eye className="w-3 h-3" /> 상세
+                        <Eye className="w-3 h-3" /> 원본 보기
                       </Button>
                     </div>
                   </div>

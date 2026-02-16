@@ -10,7 +10,7 @@ import {
   where,
   type Unsubscribe,
 } from 'firebase/firestore';
-import type { Project } from './types';
+import type { Project, ParticipationEntry } from './types';
 import type { ExpenseSet, ExpenseItem, ExpenseSetStatus } from './budget-data';
 import { EXPENSE_SETS } from './budget-data';
 import {
@@ -18,6 +18,7 @@ import {
   type ChangeRequest,
   type ChangeRequestState,
 } from './personnel-change-data';
+import { PARTICIPATION_ENTRIES } from './participation-data';
 import { PROJECTS } from './mock-data';
 import { useAuth } from './auth-store';
 import { useFirebase } from '../lib/firebase-context';
@@ -39,7 +40,9 @@ interface PortalState {
   isRegistered: boolean;
   isLoading: boolean;
   portalUser: PortalUser | null;
+  projects: Project[];
   myProject: Project | null;
+  participationEntries: ParticipationEntry[];
   expenseSets: ExpenseSet[];
   changeRequests: ChangeRequest[];
 }
@@ -80,19 +83,21 @@ export function PortalProvider({ children }: { children: ReactNode }) {
 
   const [expenseSets, setExpenseSets] = useState<ExpenseSet[]>(EXPENSE_SETS);
   const [changeRequests, setChangeRequests] = useState<ChangeRequest[]>(CHANGE_REQUESTS);
+  const [projects, setProjects] = useState<Project[]>(PROJECTS);
+  const [participationEntries, setParticipationEntries] = useState<ParticipationEntry[]>(PARTICIPATION_ENTRIES);
   const [isLoading, setIsLoading] = useState(false);
   const unsubsRef = useRef<Unsubscribe[]>([]);
 
   const myProject = useMemo(() => {
-    return portalUser ? PROJECTS.find((project) => project.id === portalUser.projectId) || null : null;
-  }, [portalUser]);
+    return portalUser ? projects.find((project) => project.id === portalUser.projectId) || null : null;
+  }, [portalUser, projects]);
 
   useEffect(() => {
     if (!isAuthenticated || !authUser || portalUser) return;
     if (authUser.role !== 'pm' && authUser.role !== 'viewer') return;
 
     const projectId =
-      authUser.projectId || PROJECTS.find((project) => project.managerId === authUser.uid)?.id || '';
+      authUser.projectId || projects.find((project) => project.managerId === authUser.uid)?.id || '';
 
     if (!projectId) return;
 
@@ -107,65 +112,122 @@ export function PortalProvider({ children }: { children: ReactNode }) {
 
     setPortalUser(syncedUser);
     localStorage.setItem('mysc-portal-user', JSON.stringify(syncedUser));
-  }, [isAuthenticated, authUser, portalUser]);
+  }, [isAuthenticated, authUser, portalUser, projects]);
 
   useEffect(() => {
     unsubsRef.current.forEach((unsub) => unsub());
     unsubsRef.current = [];
 
-    if (!firestoreEnabled || !db || !portalUser?.projectId) {
+    if (!firestoreEnabled || !db) {
+      setProjects(PROJECTS);
       setExpenseSets(EXPENSE_SETS);
       setChangeRequests(CHANGE_REQUESTS);
+      setParticipationEntries(PARTICIPATION_ENTRIES);
       setIsLoading(false);
       return;
     }
 
     setIsLoading(true);
+    let projectReady = false;
     let expenseReady = false;
     let changeReady = false;
+    let partReady = false;
     const markReady = () => {
-      if (expenseReady && changeReady) setIsLoading(false);
+      if (projectReady && expenseReady && changeReady && partReady) setIsLoading(false);
     };
 
-    const expenseQuery = query(
-      collection(db, getOrgCollectionPath(orgId, 'expenseSets')),
-      where('projectId', '==', portalUser.projectId),
-      orderBy('updatedAt', 'desc'),
-    );
+    if (!portalUser?.projectId) {
+      setProjects(PROJECTS);
+      setExpenseSets(EXPENSE_SETS);
+      setChangeRequests(CHANGE_REQUESTS);
+      setParticipationEntries([]);
+      projectReady = true;
+      expenseReady = true;
+      changeReady = true;
+      partReady = true;
+      markReady();
+    } else {
+      const projectRef = doc(db, getOrgDocumentPath(orgId, 'projects', portalUser.projectId));
+      const expenseQuery = query(
+        collection(db, getOrgCollectionPath(orgId, 'expenseSets')),
+        where('projectId', '==', portalUser.projectId),
+        orderBy('updatedAt', 'desc'),
+      );
 
-    const changeRequestQuery = query(
-      collection(db, getOrgCollectionPath(orgId, 'changeRequests')),
-      where('projectId', '==', portalUser.projectId),
-      orderBy('requestedAt', 'desc'),
-    );
+      const changeRequestQuery = query(
+        collection(db, getOrgCollectionPath(orgId, 'changeRequests')),
+        where('projectId', '==', portalUser.projectId),
+        orderBy('requestedAt', 'desc'),
+      );
 
-    unsubsRef.current.push(
-      onSnapshot(expenseQuery, (snap) => {
-        const list = snap.docs.map((docItem) => docItem.data() as ExpenseSet);
-        setExpenseSets(list);
-        expenseReady = true;
-        markReady();
-      }, (err) => {
-        console.error('[PortalStore] expenseSets listen error:', err);
-        toast.error('사업비 데이터를 불러오지 못했습니다');
-        expenseReady = true;
-        markReady();
-      }),
-    );
+      const participationQuery = query(
+        collection(db, getOrgCollectionPath(orgId, 'partEntries')),
+        where('projectId', '==', portalUser.projectId),
+        orderBy('updatedAt', 'desc'),
+      );
 
-    unsubsRef.current.push(
-      onSnapshot(changeRequestQuery, (snap) => {
-        const list = snap.docs.map((docItem) => docItem.data() as ChangeRequest);
-        setChangeRequests(list);
-        changeReady = true;
-        markReady();
-      }, (err) => {
-        console.error('[PortalStore] changeRequests listen error:', err);
-        toast.error('인력변경 데이터를 불러오지 못했습니다');
-        changeReady = true;
-        markReady();
-      }),
-    );
+      unsubsRef.current.push(
+        onSnapshot(projectRef, (snap) => {
+          if (snap.exists()) {
+            setProjects([snap.data() as Project]);
+          } else {
+            setProjects(PROJECTS.filter((project) => project.id === portalUser.projectId));
+          }
+          projectReady = true;
+          markReady();
+        }, (err) => {
+          console.error('[PortalStore] project listen error:', err);
+          setProjects(PROJECTS.filter((project) => project.id === portalUser.projectId));
+          projectReady = true;
+          markReady();
+        }),
+      );
+
+      unsubsRef.current.push(
+        onSnapshot(expenseQuery, (snap) => {
+          const list = snap.docs.map((docItem) => docItem.data() as ExpenseSet);
+          setExpenseSets(list);
+          expenseReady = true;
+          markReady();
+        }, (err) => {
+          console.error('[PortalStore] expenseSets listen error:', err);
+          toast.error('사업비 데이터를 불러오지 못했습니다');
+          expenseReady = true;
+          markReady();
+        }),
+      );
+
+      unsubsRef.current.push(
+        onSnapshot(changeRequestQuery, (snap) => {
+          const list = snap.docs.map((docItem) => docItem.data() as ChangeRequest);
+          setChangeRequests(list);
+          changeReady = true;
+          markReady();
+        }, (err) => {
+          console.error('[PortalStore] changeRequests listen error:', err);
+          toast.error('인력변경 데이터를 불러오지 못했습니다');
+          changeReady = true;
+          markReady();
+        }),
+      );
+
+      unsubsRef.current.push(
+        onSnapshot(participationQuery, (snap) => {
+          const list = snap.docs.map((docItem) => docItem.data() as ParticipationEntry);
+          setParticipationEntries(list);
+          partReady = true;
+          markReady();
+        }, (err) => {
+          console.error('[PortalStore] participation entries listen error:', err);
+          if ((err as any)?.code !== 'permission-denied') {
+            toast.error('인력 데이터를 불러오지 못했습니다. 기본 데이터를 표시합니다.');
+          }
+          setParticipationEntries(PARTICIPATION_ENTRIES.filter((entry) => entry.projectId === portalUser.projectId));
+          partReady = true;
+          markReady();
+        }),
+      );
+    }
 
     return () => {
       unsubsRef.current.forEach((unsub) => unsub());
@@ -367,7 +429,9 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     isRegistered: !!portalUser,
     isLoading,
     portalUser,
+    projects,
     myProject,
+    participationEntries,
     expenseSets,
     changeRequests,
     register,

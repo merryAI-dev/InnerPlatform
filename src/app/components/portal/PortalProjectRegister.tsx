@@ -17,12 +17,14 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '../ui/select';
 import { usePortalStore } from '../../data/portal-store';
+import { useBoard } from '../../data/board-store';
 import {
   PROJECT_TYPE_LABELS, SETTLEMENT_TYPE_LABELS, ACCOUNT_TYPE_LABELS,
   BASIS_LABELS,
-  type ProjectType, type SettlementType, type AccountType, type Basis,
+  type ProjectType,
 } from '../../data/types';
 import { toast } from 'sonner';
+import { buildProjectProposalPost, type ProjectProposalDraft } from './project-proposal';
 
 // ═══════════════════════════════════════════════════════════════
 // PortalProjectRegister — 포털 사용자의 사업 등록 제안
@@ -38,27 +40,7 @@ const STEPS: { key: Step; label: string; icon: typeof FolderKanban }[] = [
   { key: 'review', label: '검토 및 제출', icon: ClipboardList },
 ];
 
-interface ProjectProposal {
-  name: string;
-  type: ProjectType;
-  description: string;
-  clientOrg: string;
-  department: string;
-  contractAmount: number;
-  contractStart: string;
-  contractEnd: string;
-  settlementType: SettlementType;
-  basis: Basis;
-  accountType: AccountType;
-  paymentPlanDesc: string;
-  managerName: string;
-  teamName: string;
-  teamMembers: string;
-  participantCondition: string;
-  note: string;
-}
-
-const initialProposal: ProjectProposal = {
+const initialProposal: ProjectProposalDraft = {
   name: '',
   type: 'DEV_COOPERATION',
   description: '',
@@ -81,12 +63,15 @@ const initialProposal: ProjectProposal = {
 export function PortalProjectRegister() {
   const navigate = useNavigate();
   const { portalUser } = usePortalStore();
+  const { createPost } = useBoard();
   const [step, setStep] = useState<Step>('basic');
-  const [form, setForm] = useState<ProjectProposal>({
+  const [form, setForm] = useState<ProjectProposalDraft>({
     ...initialProposal,
     managerName: portalUser?.name || '',
   });
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [createdPostId, setCreatedPostId] = useState<string | null>(null);
 
   const currentStepIdx = STEPS.findIndex(s => s.key === step);
   const canProceed = () => {
@@ -96,9 +81,37 @@ export function PortalProjectRegister() {
     return true;
   };
 
-  const handleSubmit = () => {
-    setSubmitted(true);
-    toast.success('사업 등록 제안이 관리자에게 전달되었습니다');
+  const handleSubmit = async () => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+
+    try {
+      const payload = buildProjectProposalPost(
+        form,
+        portalUser?.name || form.managerName || '포털 사용자',
+        portalUser?.email || '',
+      );
+      const created = await createPost({
+        title: payload.title,
+        body: payload.body,
+        channel: 'ideas',
+        tagsInput: payload.tagsInput,
+      });
+
+      if (!created) {
+        toast.error('사업 등록 제안 저장에 실패했습니다. 다시 시도해 주세요.');
+        return;
+      }
+
+      setCreatedPostId(created.id);
+      setSubmitted(true);
+      toast.success('사업 등록 제안이 저장되었습니다. 관리자 검토를 기다려주세요.');
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err?.message || '사업 등록 제안 저장에 실패했습니다');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const fmtKRW = (n: number) => {
@@ -106,7 +119,7 @@ export function PortalProjectRegister() {
     return n.toLocaleString('ko-KR');
   };
 
-  const update = (key: keyof ProjectProposal, value: any) => {
+  const update = (key: keyof ProjectProposalDraft, value: any) => {
     setForm(prev => ({ ...prev, [key]: value }));
   };
 
@@ -128,6 +141,11 @@ export function PortalProjectRegister() {
         </p>
         <div className="flex justify-center gap-2">
           <Button variant="outline" onClick={() => navigate('/portal')}>대시보드로</Button>
+          {createdPostId && (
+            <Button variant="outline" onClick={() => navigate(`/portal/board/${createdPostId}`)}>
+              게시글 보기
+            </Button>
+          )}
           <Button onClick={() => { setSubmitted(false); setForm({ ...initialProposal, managerName: portalUser?.name || '' }); setStep('basic'); }}>
             추가 등록
           </Button>
@@ -500,8 +518,9 @@ export function PortalProjectRegister() {
             className="h-9 text-[12px] gap-1.5"
             style={{ background: 'linear-gradient(135deg, #0d9488, #059669)' }}
             onClick={handleSubmit}
+            disabled={isSubmitting}
           >
-            <Send className="w-3.5 h-3.5" /> 관리자에게 제출
+            <Send className="w-3.5 h-3.5" /> {isSubmitting ? '제출 중...' : '관리자에게 제출'}
           </Button>
         ) : (
           <Button

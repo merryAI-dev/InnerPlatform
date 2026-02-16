@@ -117,8 +117,17 @@ export function NotificationPanel() {
     info: { dot: 'bg-blue-500', bg: 'bg-blue-50/30', border: 'border-l-blue-500' },
   };
 
-  const handleGo = (link?: string) => {
-    if (link) { navigate(link); setOpen(false); }
+  const fallbackByType: Record<NotifItem['type'], string> = {
+    approval: '/approvals',
+    evidence: '/evidence',
+    risk: '/participation',
+    system: '/approvals',
+  };
+
+  const handleGo = (notif: NotifItem) => {
+    const target = notif.link || fallbackByType[notif.type];
+    navigate(target);
+    setOpen(false);
   };
 
   return (
@@ -179,7 +188,7 @@ export function NotificationPanel() {
                 <div
                   key={n.id}
                   className={`flex items-start gap-3 p-3 rounded-lg border-l-[3px] cursor-pointer transition-colors hover:bg-muted/40 ${sev.border} ${sev.bg}`}
-                  onClick={() => handleGo(n.link)}
+                  onClick={() => handleGo(n)}
                 >
                   <div className="w-7 h-7 rounded-md bg-white/80 flex items-center justify-center shrink-0 border border-border/40 mt-0.5">
                     <Icon className="w-3.5 h-3.5 text-muted-foreground" />
@@ -208,7 +217,7 @@ export function NotificationPanel() {
                 <div
                   key={n.id}
                   className={`flex items-start gap-3 p-3 rounded-lg border-l-[3px] cursor-pointer transition-colors hover:bg-muted/40 ${sev.border} ${sev.bg}`}
-                  onClick={() => handleGo(n.link)}
+                  onClick={() => handleGo(n)}
                 >
                   <div className="w-7 h-7 rounded-md bg-white/80 flex items-center justify-center shrink-0 border border-border/40 mt-0.5">
                     <Icon className="w-3.5 h-3.5 text-rose-500" />
@@ -230,7 +239,7 @@ export function NotificationPanel() {
                 <div
                   key={n.id}
                   className={`flex items-start gap-3 p-3 rounded-lg border-l-[3px] cursor-pointer transition-colors hover:bg-muted/40 ${sev.border} ${sev.bg}`}
-                  onClick={() => handleGo(n.link)}
+                  onClick={() => handleGo(n)}
                 >
                   <div className="w-7 h-7 rounded-md bg-white/80 flex items-center justify-center shrink-0 border border-border/40 mt-0.5">
                     <Clock className="w-3.5 h-3.5 text-amber-500" />

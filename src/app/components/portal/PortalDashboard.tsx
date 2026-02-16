@@ -97,6 +97,7 @@ export function PortalDashboard() {
         setLiveLedgers(snap.docs.map((d) => d.data() as Ledger));
       }, (err) => {
         console.error('[PortalDashboard] ledgers listen error:', err);
+        toast.error('장부 데이터를 불러오지 못했습니다');
         setLiveLedgers(null);
       }),
     );
@@ -106,6 +107,7 @@ export function PortalDashboard() {
         setLiveTransactions(snap.docs.map((d) => d.data() as Transaction));
       }, (err) => {
         console.error('[PortalDashboard] transactions listen error:', err);
+        toast.error('거래 데이터를 불러오지 못했습니다');
         setLiveTransactions(null);
       }),
     );

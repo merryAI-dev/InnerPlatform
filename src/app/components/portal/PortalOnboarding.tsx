@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate, Link } from 'react-router';
 import {
   FolderKanban, User, Mail, Briefcase, ArrowRight,
-  CheckCircle2, Building2, Zap, ChevronRight, Lock, LogIn,
+  CheckCircle2, Building2, Zap, ChevronRight, Lock, LogIn, Loader2,
 } from 'lucide-react';
 import { Card, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
@@ -13,8 +13,6 @@ import {
 } from '../ui/select';
 import { Badge } from '../ui/badge';
 import { usePortalStore } from '../../data/portal-store';
-import { useAuth } from '../../data/auth-store';
-import { PROJECTS } from '../../data/mock-data';
 import { PROJECT_STATUS_LABELS, PROJECT_TYPE_SHORT_LABELS } from '../../data/types';
 
 // ═══════════════════════════════════════════════════════════════
@@ -30,8 +28,7 @@ const statusColors: Record<string, string> = {
 
 export function PortalOnboarding() {
   const navigate = useNavigate();
-  const { register, isRegistered } = usePortalStore();
-  const { login, logout } = useAuth();
+  const { register, isRegistered, isLoading, projects } = usePortalStore();
   const [step, setStep] = useState<'info' | 'project' | 'done'>(isRegistered ? 'done' : 'info');
 
   const [form, setForm] = useState({
@@ -41,12 +38,23 @@ export function PortalOnboarding() {
     projectId: '',
   });
 
-  const activeProjects = PROJECTS.filter(p =>
+  const activeProjects = projects.filter(p =>
     p.status === 'IN_PROGRESS' || p.status === 'COMPLETED_PENDING_PAYMENT'
   );
-  const allProjects = PROJECTS;
+  const allProjects = projects;
 
   const selectedProject = allProjects.find(p => p.id === form.projectId);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+        <div className="text-center">
+          <Loader2 className="w-5 h-5 mx-auto animate-spin text-muted-foreground" />
+          <p className="mt-2 text-[12px] text-muted-foreground">사업 목록을 불러오는 중...</p>
+        </div>
+      </div>
+    );
+  }
 
   const handleNext = () => {
     if (step === 'info' && form.name && form.email) {

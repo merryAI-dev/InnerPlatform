@@ -47,7 +47,7 @@ service cloud.firestore {
 
     // Bootstrap admin emails can always update their own member doc (including role change)
     function isBootstrapAdminEmail() {
-      return request.auth.token.email in ['mwbyun1220@mysc.co.kr', 'ai@mysc.co.kr'];
+      return request.auth.token.email in ['mwbyun1220@mysc.co.kr', 'ai@mysc.co.kr', 'admin@mysc.co.kr'];
     }
 
     function memberProjectId(orgId) {

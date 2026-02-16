@@ -43,7 +43,6 @@ export function PortalBudget() {
   const { myProject } = usePortalStore();
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [selectedRow, setSelectedRow] = useState<BudgetRow | null>(null);
-  const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
 
   const rows = BUDGET_ROWS;
   const meta = BUDGET_META;
