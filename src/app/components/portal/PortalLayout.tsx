@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router';
 import {
   LayoutDashboard, Wallet, Calculator, Users,
   ArrowRightLeft, LogOut,
-  FolderKanban, Menu, X,
+  FolderKanban, Menu,
   Plus,
   MessagesSquare,
   CircleDollarSign,
@@ -11,6 +11,7 @@ import {
   ClipboardList,
   Loader2,
   AlertTriangle,
+  Settings2,
 } from 'lucide-react';
 import { PortalProvider, usePortalStore } from '../../data/portal-store';
 import { useAuth } from '../../data/auth-store';
@@ -40,11 +41,22 @@ const NAV_ITEMS = [
   { to: '/portal/expenses', icon: Wallet, label: '사업비 입력' },
   { to: '/portal/personnel', icon: Users, label: '인력 현황' },
   { to: '/portal/change-requests', icon: ArrowRightLeft, label: '인력변경 신청' },
+  { to: '/portal/onboarding', icon: Settings2, label: '내 사업 설정', exact: true },
   { to: '/portal/register-project', icon: Plus, label: '사업 등록 제안', accent: true },
 ];
 
 function PortalContent() {
-  const { isRegistered, isLoading: portalLoading, portalUser, myProject, logout: portalLogout, expenseSets, changeRequests } = usePortalStore();
+  const {
+    isRegistered,
+    isLoading: portalLoading,
+    portalUser,
+    myProject,
+    logout: portalLogout,
+    expenseSets,
+    changeRequests,
+    projects,
+    setActiveProject,
+  } = usePortalStore();
   const { isAuthenticated, isLoading: authLoading, user: authUser, logout: authLogout } = useAuth();
   const { getUnacknowledgedCount } = useHrAnnouncements();
   const { runs, monthlyCloses } = usePayroll();
@@ -85,8 +97,8 @@ function PortalContent() {
     setMobileOpen(false);
   }, [location.pathname]);
 
-  // 온보딩 페이지면 레이아웃 없이 렌더
-  if (location.pathname.includes('/portal/onboarding')) {
+  const standaloneOnboarding = location.pathname.includes('/portal/onboarding') && !isRegistered;
+  if (standaloneOnboarding) {
     return <Outlet />;
   }
 
@@ -162,6 +174,18 @@ function PortalContent() {
     const monthly = closePrev && closePrev.status === 'DONE' && !closePrev.acknowledged ? 1 : 0;
     return payroll + monthly;
   })();
+  const assignedProjects = useMemo(() => {
+    if (!portalUser) return [];
+    if (!Array.isArray(portalUser.projectIds) || portalUser.projectIds.length === 0) {
+      return myProject ? [myProject] : [];
+    }
+    const pool = projects.length ? projects : [];
+    const mapped = portalUser.projectIds
+      .map((id) => pool.find((project) => project.id === id) || null)
+      .filter((project): project is NonNullable<typeof project> => !!project);
+    if (mapped.length > 0) return mapped;
+    return myProject ? [myProject] : [];
+  }, [portalUser, projects, myProject]);
 
   function isActive(to: string, exact?: boolean) {
     if (exact) return location.pathname === to;
@@ -224,6 +248,30 @@ function PortalContent() {
                 </Badge>
                 <span className="text-[9px] text-slate-600">{myProject.department}</span>
               </div>
+              {assignedProjects.length > 1 && (
+                <div className="mt-2">
+                  <p className="text-[9px] text-slate-500 mb-1">주사업 전환</p>
+                  <select
+                    value={portalUser.projectId}
+                    className="w-full h-7 rounded-md border border-slate-700 bg-slate-900 text-slate-200 text-[10px] px-2"
+                    onChange={(e) => { void setActiveProject(e.target.value); }}
+                  >
+                    {assignedProjects.map((project) => (
+                      <option key={project.id} value={project.id}>
+                        {project.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <Button
+                size="sm"
+                variant="outline"
+                className="mt-2 h-6 text-[10px] w-full border-slate-700 bg-slate-900/50 text-slate-200 hover:bg-slate-800"
+                onClick={() => navigate('/portal/onboarding')}
+              >
+                사업 배정 수정
+              </Button>
             </div>
           )}
 
