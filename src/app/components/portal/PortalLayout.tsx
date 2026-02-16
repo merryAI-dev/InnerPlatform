@@ -23,7 +23,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/
 import { DarkModeToggle } from '../layout/DarkModeToggle';
 import { PageTransition } from '../layout/PageTransition';
 import { ErrorBoundary } from '../layout/ErrorBoundary';
-import { resolveHomePath } from '../../platform/navigation';
+import { resolveHomePath, shouldForcePortalOnboarding } from '../../platform/navigation';
 import { addMonthsToYearMonth, getSeoulTodayIso } from '../../platform/business-days';
 
 // ═══════════════════════════════════════════════════════════════
@@ -66,12 +66,14 @@ function PortalContent() {
 
   // 미인증 시 로그인으로
   useEffect(() => {
+    if (authLoading) return;
     if (!isAuthenticated && !location.pathname.includes('/portal/onboarding')) {
       navigate('/login', { replace: true });
     }
-  }, [isAuthenticated, location.pathname, navigate]);
+  }, [authLoading, isAuthenticated, location.pathname, navigate]);
 
   useEffect(() => {
+    if (authLoading) return;
     const role = authUser?.role;
     if (!isAuthenticated || !role) return;
     if (resolveHomePath(role) === '/') {
@@ -83,24 +85,25 @@ function PortalContent() {
 
       navigate('/', { replace: true });
     }
-  }, [isAuthenticated, authUser, location.pathname, navigate]);
+  }, [authLoading, isAuthenticated, authUser, location.pathname, navigate]);
 
   // 포털 미등록 시 온보딩으로 (인증은 되었지만 포털 사업 미선택)
   useEffect(() => {
-    if (isAuthenticated && !isRegistered && !location.pathname.includes('/portal/onboarding')) {
+    if (authLoading) return;
+    if (shouldForcePortalOnboarding({
+      isAuthenticated,
+      role: authUser?.role,
+      isRegistered,
+      pathname: location.pathname,
+    })) {
       navigate('/portal/onboarding', { replace: true });
     }
-  }, [isAuthenticated, isRegistered, location.pathname, navigate]);
+  }, [authLoading, isAuthenticated, authUser?.role, isRegistered, location.pathname, navigate]);
 
   // Close mobile sidebar on navigation
   useEffect(() => {
     setMobileOpen(false);
   }, [location.pathname]);
-
-  const standaloneOnboarding = location.pathname.includes('/portal/onboarding') && !isRegistered;
-  if (standaloneOnboarding) {
-    return <Outlet />;
-  }
 
   if (authLoading || portalLoading) {
     return (
@@ -111,6 +114,15 @@ function PortalContent() {
         </div>
       </div>
     );
+  }
+
+  const standaloneOnboarding = (
+    location.pathname.includes('/portal/onboarding') &&
+    !isRegistered &&
+    resolveHomePath(authUser?.role) === '/portal'
+  );
+  if (standaloneOnboarding) {
+    return <Outlet />;
   }
 
   if (!isRegistered || !portalUser) {
