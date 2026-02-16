@@ -216,10 +216,10 @@ function PortalContent() {
 
   return (
     <TooltipProvider delayDuration={300}>
-      <div className="flex h-screen w-full overflow-hidden">
+      <div className="flex h-screen w-full overflow-hidden relative">
         {/* ── Mobile overlay ── */}
         {mobileOpen && (
-          <div className="fixed inset-0 bg-black/50 z-40 lg:hidden" onClick={() => setMobileOpen(false)} />
+          <div className="fixed inset-0 bg-black/30 backdrop-blur-sm z-40 lg:hidden" onClick={() => setMobileOpen(false)} />
         )}
 
         {/* ── Sidebar ── */}
@@ -228,7 +228,8 @@ function PortalContent() {
           fixed inset-y-0 left-0 lg:relative
           transition-transform duration-200
           ${mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
-        `} style={{ background: '#0f172a' }}>
+          bg-sidebar/90 backdrop-blur-xl border-r border-white/10
+        `}>
           {/* Brand */}
           <div className="flex items-center gap-2.5 h-[48px] px-3">
             <div
@@ -249,7 +250,7 @@ function PortalContent() {
 
           {/* 사업 정보 카드 */}
           {myProject && (
-            <div className="mx-2.5 mb-2 p-2.5 rounded-lg bg-white/[0.05] border border-slate-700/50">
+            <div className="mx-2.5 mb-2 p-2.5 rounded-xl bg-white/8 border border-white/20">
               <p className="text-[10px] text-slate-500 mb-0.5">내 사업</p>
               <p className="text-[11px] text-white truncate" style={{ fontWeight: 600 }}>
                 {myProject.name.length > 28 ? myProject.name.slice(0, 28) + '...' : myProject.name}
@@ -265,7 +266,7 @@ function PortalContent() {
                   <p className="text-[9px] text-slate-500 mb-1">주사업 전환</p>
                   <select
                     value={portalUser.projectId}
-                    className="w-full h-7 rounded-md border border-slate-700 bg-slate-900 text-slate-200 text-[10px] px-2"
+                    className="w-full h-7 rounded-md border border-white/20 bg-white/8 text-slate-200 text-[10px] px-2"
                     onChange={(e) => { void setActiveProject(e.target.value); }}
                   >
                     {assignedProjects.map((project) => (
@@ -279,7 +280,7 @@ function PortalContent() {
               <Button
                 size="sm"
                 variant="outline"
-                className="mt-2 h-6 text-[10px] w-full border-slate-700 bg-slate-900/50 text-slate-200 hover:bg-slate-800"
+                className="mt-2 h-6 text-[10px] w-full border-white/20 bg-white/8 text-slate-200 hover:bg-white/15"
                 onClick={() => navigate('/portal/onboarding')}
               >
                 사업 배정 수정
@@ -301,8 +302,8 @@ function PortalContent() {
                     className={`
                       group relative flex items-center gap-2 rounded-md text-[12px] px-2.5 py-[7px] transition-all duration-100
                       ${active
-                        ? 'bg-teal-500/15 text-white'
-                        : 'text-slate-500 hover:text-slate-300 hover:bg-white/[0.04]'
+                        ? 'bg-teal-500/18 text-white backdrop-blur-sm'
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-white/8'
                       }
                     `}
                   >
@@ -324,9 +325,9 @@ function PortalContent() {
           </nav>
 
           {/* Footer */}
-          <div className="border-t border-slate-800 p-2 space-y-1.5">
+          <div className="border-t border-white/10 p-2 space-y-1.5">
             <DarkModeToggle collapsed={false} />
-            <div className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-white/[0.03]">
+            <div className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-white/8 border border-white/10">
               <div
                 className="w-6 h-6 rounded-md flex items-center justify-center shrink-0 text-[10px] text-white"
                 style={{ fontWeight: 700, background: 'linear-gradient(135deg, #0d9488, #059669)' }}
@@ -341,7 +342,7 @@ function PortalContent() {
                 <TooltipTrigger asChild>
                   <button
                     onClick={() => { portalLogout(); authLogout(); navigate('/login'); }}
-                    className="p-1 rounded hover:bg-white/[0.06] text-slate-600 hover:text-slate-400 transition-colors"
+                    className="p-1 rounded hover:bg-white/15 text-slate-500 hover:text-slate-300 transition-colors"
                   >
                     <LogOut className="w-3.5 h-3.5" />
                   </button>
@@ -355,7 +356,7 @@ function PortalContent() {
         {/* ── Main ── */}
         <div className="flex-1 flex flex-col min-w-0 bg-background">
           {/* Top bar */}
-          <header className="flex items-center justify-between h-[48px] border-b border-border/50 px-5 bg-card shrink-0">
+          <header className="glass sticky top-0 z-30 flex items-center justify-between h-[48px] border-b border-glass-border px-5 shrink-0">
             <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
               <button className="lg:hidden p-1 rounded hover:bg-muted" onClick={() => setMobileOpen(true)}>
                 <Menu className="w-4 h-4" />

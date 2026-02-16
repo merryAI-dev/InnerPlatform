@@ -112,9 +112,9 @@ export function NotificationPanel() {
   };
 
   const severityStyles = {
-    critical: { dot: 'bg-rose-500', bg: 'bg-rose-50/50', border: 'border-l-rose-500' },
-    warning: { dot: 'bg-amber-500', bg: 'bg-amber-50/30', border: 'border-l-amber-500' },
-    info: { dot: 'bg-blue-500', bg: 'bg-blue-50/30', border: 'border-l-blue-500' },
+    critical: { dot: 'bg-rose-500', bg: 'bg-rose-500/10 dark:bg-rose-500/15', border: 'border-l-rose-500' },
+    warning: { dot: 'bg-amber-500', bg: 'bg-amber-500/10 dark:bg-amber-500/15', border: 'border-l-amber-500' },
+    info: { dot: 'bg-blue-500', bg: 'bg-blue-500/10 dark:bg-blue-500/15', border: 'border-l-blue-500' },
   };
 
   const fallbackByType: Record<NotifItem['type'], string> = {
@@ -145,14 +145,14 @@ export function NotificationPanel() {
           )}
         </Button>
       </SheetTrigger>
-      <SheetContent className="w-[420px] p-0 flex flex-col">
+      <SheetContent className="glass-heavy w-[420px] p-0 flex flex-col">
         {/* Header */}
-        <div className="px-5 py-4 border-b border-border/60">
+        <div className="px-5 py-4 border-b border-glass-border">
           <div className="flex items-center justify-between mb-1">
             <SheetTitle className="text-[15px]" style={{ fontWeight: 700 }}>알림 센터</SheetTitle>
             <div className="flex items-center gap-2">
               {criticalCount > 0 && (
-                <Badge className="bg-rose-500 text-white text-[10px]" style={{ fontWeight: 700 }}>
+                <Badge className="border border-rose-300/40 bg-rose-500/30 text-rose-100 text-[10px]" style={{ fontWeight: 700 }}>
                   긴급 {criticalCount}
                 </Badge>
               )}
@@ -187,10 +187,10 @@ export function NotificationPanel() {
               return (
                 <div
                   key={n.id}
-                  className={`flex items-start gap-3 p-3 rounded-lg border-l-[3px] cursor-pointer transition-colors hover:bg-muted/40 ${sev.border} ${sev.bg}`}
+                  className={`flex items-start gap-3 p-3 rounded-lg border-l-[3px] cursor-pointer transition-colors hover:bg-white/10 ${sev.border} ${sev.bg}`}
                   onClick={() => handleGo(n)}
                 >
-                  <div className="w-7 h-7 rounded-md bg-white/80 flex items-center justify-center shrink-0 border border-border/40 mt-0.5">
+                  <div className="w-7 h-7 rounded-md bg-white/40 dark:bg-white/10 backdrop-blur-sm flex items-center justify-center shrink-0 border border-white/20 mt-0.5">
                     <Icon className="w-3.5 h-3.5 text-muted-foreground" />
                   </div>
                   <div className="flex-1 min-w-0">
@@ -216,10 +216,10 @@ export function NotificationPanel() {
               return (
                 <div
                   key={n.id}
-                  className={`flex items-start gap-3 p-3 rounded-lg border-l-[3px] cursor-pointer transition-colors hover:bg-muted/40 ${sev.border} ${sev.bg}`}
+                  className={`flex items-start gap-3 p-3 rounded-lg border-l-[3px] cursor-pointer transition-colors hover:bg-white/10 ${sev.border} ${sev.bg}`}
                   onClick={() => handleGo(n)}
                 >
-                  <div className="w-7 h-7 rounded-md bg-white/80 flex items-center justify-center shrink-0 border border-border/40 mt-0.5">
+                  <div className="w-7 h-7 rounded-md bg-white/40 dark:bg-white/10 backdrop-blur-sm flex items-center justify-center shrink-0 border border-white/20 mt-0.5">
                     <Icon className="w-3.5 h-3.5 text-rose-500" />
                   </div>
                   <div className="flex-1 min-w-0">
@@ -238,10 +238,10 @@ export function NotificationPanel() {
               return (
                 <div
                   key={n.id}
-                  className={`flex items-start gap-3 p-3 rounded-lg border-l-[3px] cursor-pointer transition-colors hover:bg-muted/40 ${sev.border} ${sev.bg}`}
+                  className={`flex items-start gap-3 p-3 rounded-lg border-l-[3px] cursor-pointer transition-colors hover:bg-white/10 ${sev.border} ${sev.bg}`}
                   onClick={() => handleGo(n)}
                 >
-                  <div className="w-7 h-7 rounded-md bg-white/80 flex items-center justify-center shrink-0 border border-border/40 mt-0.5">
+                  <div className="w-7 h-7 rounded-md bg-white/40 dark:bg-white/10 backdrop-blur-sm flex items-center justify-center shrink-0 border border-white/20 mt-0.5">
                     <Clock className="w-3.5 h-3.5 text-amber-500" />
                   </div>
                   <div className="flex-1 min-w-0">

@@ -170,11 +170,11 @@ function AppLayoutContent() {
     <TooltipProvider delayDuration={300}>
       <CommandPalette />
       <KeyboardShortcuts />
-      <div className="flex h-screen w-full overflow-hidden">
+      <div className="flex h-screen w-full overflow-hidden relative">
         {/* ━━━ Mobile Overlay ━━━ */}
         {mobileOpen && (
           <div
-            className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+            className="fixed inset-0 bg-black/30 backdrop-blur-sm z-40 lg:hidden"
             onClick={() => setMobileOpen(false)}
           />
         )}
@@ -185,8 +185,8 @@ function AppLayoutContent() {
             ${collapsed ? 'w-[60px]' : 'w-[240px]'}
             fixed lg:relative inset-y-0 left-0 z-50
             ${mobileOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0
+            bg-sidebar/90 backdrop-blur-xl border-r border-white/10
           `}
-          style={{ background: '#0f172a' }}
         >
           {/* Brand */}
           <div className={`flex items-center gap-2.5 h-[48px] px-3 ${collapsed ? 'justify-center' : ''}`}>
@@ -212,7 +212,7 @@ function AppLayoutContent() {
           {!collapsed && (
             <div className="px-2.5 mb-1">
               <button
-                className="w-full flex items-center gap-2 h-[30px] px-2.5 rounded-md text-[11px] text-slate-500 bg-white/5 hover:bg-white/8 border border-slate-700/50 transition-colors"
+                className="w-full flex items-center gap-2 h-[30px] px-2.5 rounded-md text-[11px] text-slate-400 bg-white/10 hover:bg-white/15 border border-white/20 backdrop-blur-sm transition-colors"
                 onClick={() => {
                   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }));
                 }}
@@ -233,7 +233,7 @@ function AppLayoutContent() {
                     {group.label}
                   </p>
                 )}
-                {collapsed && gi > 0 && <div className="mx-3 my-1.5 border-t border-slate-800" />}
+                {collapsed && gi > 0 && <div className="mx-3 my-1.5 border-t border-white/10" />}
                 <div className="space-y-px px-2">
                   {group.items.map(item => {
                     const active = isActive(item.to);
@@ -248,8 +248,8 @@ function AppLayoutContent() {
                           group relative flex items-center gap-2 rounded-md text-[12px] transition-all duration-100
                           ${collapsed ? 'justify-center h-9 w-full' : 'px-2.5 py-[6px]'}
                           ${active
-                            ? 'bg-indigo-500/15 text-white'
-                            : 'text-slate-500 hover:text-slate-300 hover:bg-white/[0.04]'
+                            ? 'bg-indigo-500/18 text-white backdrop-blur-sm'
+                            : 'text-slate-400 hover:text-slate-200 hover:bg-white/8'
                           }
                         `}
                       >
@@ -293,7 +293,7 @@ function AppLayoutContent() {
           </nav>
 
           {/* Footer */}
-          <div className="border-t border-slate-800 p-2 space-y-1.5">
+          <div className="border-t border-white/10 p-2 space-y-1.5">
             {!collapsed && (
               <div className="px-1 mb-1">
                 <FirebaseStatusBadge />
@@ -301,7 +301,7 @@ function AppLayoutContent() {
             )}
             <DarkModeToggle collapsed={collapsed} />
             {!collapsed && (
-              <div className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-white/[0.03]">
+              <div className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-white/8 border border-white/10">
                 <div
                   className="w-6 h-6 rounded-md flex items-center justify-center shrink-0 text-[10px] text-white"
                   style={{ fontWeight: 700, background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' }}
@@ -316,7 +316,7 @@ function AppLayoutContent() {
                   <TooltipTrigger asChild>
                     <button
                       onClick={() => { logout(); navigate('/login'); }}
-                      className="p-1 rounded hover:bg-white/[0.06] text-slate-600 hover:text-slate-400 transition-colors"
+                      className="p-1 rounded hover:bg-white/15 text-slate-500 hover:text-slate-300 transition-colors"
                     >
                       <LogOut className="w-3.5 h-3.5" />
                     </button>
@@ -327,7 +327,7 @@ function AppLayoutContent() {
             )}
             <button
               onClick={() => setCollapsed(!collapsed)}
-              className="w-full flex items-center justify-center h-7 rounded-md text-slate-600 hover:text-slate-400 hover:bg-white/[0.04] transition-colors"
+              className="w-full flex items-center justify-center h-7 rounded-md text-slate-500 hover:text-slate-300 hover:bg-white/10 transition-colors"
             >
               {collapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronLeft className="w-3.5 h-3.5" />}
             </button>
@@ -337,7 +337,7 @@ function AppLayoutContent() {
         {/* ━━━ Main ━━━ */}
         <div className="flex-1 flex flex-col min-w-0 bg-background">
           {/* Top Header */}
-          <header className="flex items-center justify-between h-[48px] border-b border-border/50 px-5 bg-card shrink-0">
+          <header className="glass sticky top-0 z-30 flex items-center justify-between h-[48px] border-b border-glass-border px-5 shrink-0">
             <div className="flex items-center gap-3">
               {/* Mobile hamburger */}
               <button
@@ -408,7 +408,7 @@ function AppLayoutContent() {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <div
-                    className="w-7 h-7 rounded-md flex items-center justify-center text-white text-[10px] cursor-pointer"
+                    className="w-7 h-7 rounded-md flex items-center justify-center text-white text-[10px] cursor-pointer ring-1 ring-white/20"
                     style={{ fontWeight: 700, background: 'linear-gradient(135deg, #4f46e5, #7c3aed)' }}
                   >
                     {displayUser.name.charAt(0)}
