@@ -161,13 +161,18 @@ function mapFirebaseUserToAuthUser(
   tenantId: string,
   idToken?: string,
 ): AuthUser {
+  const normalizedEmail = normalizeEmail(firebaseUser.email || member?.email || '');
+  // Bootstrap admin은 Firestore 쓰기 실패해도 항상 admin role 부여
   const role =
-    toUserRole(member?.role) ||
-    resolveRoleFromDirectory(firebaseUser.email || '', ROLE_DIRECTORY);
+    isBootstrapAdminEmail(normalizedEmail)
+      ? 'admin'
+      : toUserRole(member?.role) ||
+        resolveRoleFromDirectory(firebaseUser.email || '', ROLE_DIRECTORY);
+  console.log('[Auth] mapFirebaseUserToAuthUser:', { email: normalizedEmail, role, memberRole: member?.role });
   return {
     uid: firebaseUser.uid,
     name: member?.name || firebaseUser.displayName || '사용자',
-    email: firebaseUser.email || member?.email || '',
+    email: normalizedEmail,
     role,
     idToken,
     avatarUrl: member?.avatarUrl || firebaseUser.photoURL || undefined,
