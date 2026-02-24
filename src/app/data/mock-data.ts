@@ -1,6 +1,7 @@
 import type {
   Organization, OrgMember, LedgerTemplate, Project, Ledger,
   Transaction, Comment, AuditLog, Evidence,
+  CareerProfile, TrainingCourse, TrainingEnrollment,
 } from './types';
 
 // ═══════════════════════════════════════════════════════════════
@@ -902,4 +903,132 @@ export const AUDIT_LOGS: AuditLog[] = [
   { id: 'al004', entityType: 'transaction', entityId: 'tx028', action: 'REJECT', userId: 'u001', userName: '관리자', details: '거래 반려: 뷰티풀 커넥트 외주비 - 지출결의서 미첨부', timestamp: '2025-10-16T10:00:00Z' },
   { id: 'al005', entityType: 'project', entityId: 'p006', action: 'CREATE', userId: 'u001', userName: '관리자', details: '프로젝트 생성: KOICA IBS4 (아모레퍼시픽)', timestamp: '2025-07-20T09:00:00Z' },
   { id: 'al006', entityType: 'transaction', entityId: 'tx019', action: 'APPROVE', userId: 'u001', userName: '관리자', details: '거래 승인: IBS4 선금 4,903,500,000원 입금', timestamp: '2025-08-16T11:00:00Z' },
+];
+
+// ── Career Profiles (경력 프로필) ──
+
+export const MOCK_CAREER_PROFILES: CareerProfile[] = [
+  {
+    uid: 'u002',
+    orgId: 'org001',
+    nameKo: '데이나',
+    nameEn: 'Dana Kim',
+    birthDate: '1993-05-12',
+    phone: '010-1234-5678',
+    department: '개발협력팀',
+    title: '선임연구원',
+    joinedAt: '2020-03-01',
+    bio: '국제개발협력 전문가. KOICA 사업 기획 및 운영 경험 5년.',
+    education: [
+      { id: 'edu001', school: '서울대학교', major: '국제대학원 국제협력', degree: '석사', startDate: '2018-03', endDate: '2020-02' },
+      { id: 'edu002', school: '한국외국어대학교', major: '영어통번역', degree: '학사', startDate: '2012-03', endDate: '2016-02' },
+    ],
+    workHistory: [
+      { id: 'wh001', company: '한국국제협력단(KOICA)', title: '인턴', description: '개발협력 사업 기획 및 보고서 작성', startDate: '2019-06', endDate: '2019-12' },
+    ],
+    certifications: [
+      { id: 'cert001', name: 'ODA 전문가 과정 수료', issuedAt: '2019-11-30', issuer: '한국국제협력단(KOICA)' },
+    ],
+    updatedAt: '2026-01-15T09:00:00Z',
+  },
+  {
+    uid: 'u003',
+    orgId: 'org001',
+    nameKo: '베리',
+    nameEn: 'Berry Park',
+    birthDate: '1995-08-22',
+    phone: '010-9876-5432',
+    department: '임팩트투자팀',
+    title: '연구원',
+    joinedAt: '2022-01-01',
+    bio: '사회적 경제 및 임팩트 투자 분야 연구.',
+    education: [
+      { id: 'edu003', school: '연세대학교', major: '경제학', degree: '학사', startDate: '2014-03', endDate: '2018-02' },
+    ],
+    workHistory: [],
+    certifications: [],
+    updatedAt: '2026-01-10T09:00:00Z',
+  },
+];
+
+// ── Training Courses (사내 강의) ──
+
+export const MOCK_TRAINING_COURSES: TrainingCourse[] = [
+  {
+    id: 'tc001',
+    orgId: 'org001',
+    title: '사업관리 기초 교육',
+    description: '사업 예산 관리, 정산 시스템, 증빙 제출 방법 등 사업 담당자가 알아야 할 기본 역량을 다룹니다.',
+    category: 'management',
+    durationHours: 4,
+    instructor: '관리자',
+    instructorId: 'u001',
+    startDate: '2026-03-05',
+    endDate: '2026-03-05',
+    maxParticipants: 20,
+    isRequired: true,
+    status: 'OPEN',
+    createdBy: 'u001',
+    createdAt: '2026-02-01T09:00:00Z',
+    updatedAt: '2026-02-01T09:00:00Z',
+  },
+  {
+    id: 'tc002',
+    orgId: 'org001',
+    title: 'KOICA 정산 시스템 활용법 (e나라도움)',
+    description: 'e나라도움 시스템을 통한 국고보조금 정산 절차와 실무 작성 방법을 배웁니다.',
+    category: 'compliance',
+    durationHours: 3,
+    instructor: '데이나',
+    instructorId: 'u002',
+    startDate: '2026-03-12',
+    endDate: '2026-03-12',
+    maxParticipants: 15,
+    isRequired: false,
+    status: 'OPEN',
+    createdBy: 'u001',
+    createdAt: '2026-02-05T09:00:00Z',
+    updatedAt: '2026-02-05T09:00:00Z',
+  },
+  {
+    id: 'tc003',
+    orgId: 'org001',
+    title: '영어 비즈니스 커뮤니케이션',
+    description: '국제개발협력 사업에서 필요한 영어 이메일 작성, 발표 기술, 협상 커뮤니케이션을 다룹니다.',
+    category: 'language',
+    durationHours: 8,
+    instructor: '외부강사 Sarah Kim',
+    startDate: '2026-04-01',
+    endDate: '2026-04-30',
+    maxParticipants: 10,
+    isRequired: false,
+    status: 'OPEN',
+    createdBy: 'u001',
+    createdAt: '2026-02-10T09:00:00Z',
+    updatedAt: '2026-02-10T09:00:00Z',
+  },
+];
+
+// ── Training Enrollments (수강 신청/이수) ──
+
+export const MOCK_TRAINING_ENROLLMENTS: TrainingEnrollment[] = [
+  {
+    id: 'te001',
+    courseId: 'tc001',
+    courseTitle: '사업관리 기초 교육',
+    memberId: 'u003',
+    memberName: '베리',
+    enrolledAt: '2026-02-12T10:00:00Z',
+    status: 'ENROLLED',
+  },
+  {
+    id: 'te002',
+    courseId: 'tc002',
+    courseTitle: 'KOICA 정산 시스템 활용법 (e나라도움)',
+    memberId: 'u002',
+    memberName: '데이나',
+    enrolledAt: '2026-02-08T09:30:00Z',
+    status: 'COMPLETED',
+    completedAt: '2026-02-15T17:00:00Z',
+  },
 ];

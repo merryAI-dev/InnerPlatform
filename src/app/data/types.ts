@@ -384,13 +384,14 @@ export interface Comment {
 
 // ── Company Board (전사 게시판) ──
 
-export type BoardChannel = 'general' | 'qna' | 'ideas' | 'help';
+export type BoardChannel = 'general' | 'qna' | 'ideas' | 'help' | 'training';
 
 export const BOARD_CHANNEL_LABELS: Record<BoardChannel, string> = {
   general: '일반',
   qna: '질문',
   ideas: '아이디어',
   help: '도움요청',
+  training: '교육',
 };
 
 export interface BoardPost {
@@ -602,6 +603,124 @@ export interface MonthlyRollup {
   totalNet: number;
   totalCount: number;
   byCategory: CategoryRollup[];
+}
+
+// ── 경력 프로필 (Career Profile) ──
+
+export type DegreeType = '학사' | '석사' | '박사' | '전문학사' | '수료' | '기타';
+
+export interface EducationEntry {
+  id: string;
+  school: string;       // 학교명
+  major: string;        // 전공
+  degree: DegreeType;
+  startDate: string;    // YYYY-MM
+  endDate: string;      // YYYY-MM or '재학중'
+}
+
+export interface WorkHistoryEntry {
+  id: string;
+  company: string;      // 기업명
+  title: string;        // 최종직위
+  description: string;  // 담당업무/주요프로젝트
+  startDate: string;    // YYYY-MM
+  endDate: string;      // YYYY-MM or '현재'
+}
+
+export interface CertificationEntry {
+  id: string;
+  name: string;         // 자격증명
+  issuedAt: string;     // YYYY-MM-DD
+  issuer: string;       // 발행기관
+}
+
+/**
+ * 개인 경력 프로필 (Firestore: orgs/{orgId}/careerProfiles/{uid})
+ * 참여경력(ParticipationEntry)과 사내교육(TrainingEnrollment)은 별도 컬렉션에서 join
+ */
+export interface CareerProfile {
+  uid: string;
+  orgId: string;
+  nameKo: string;           // 국문 성명
+  nameEn?: string;          // 영문 성명
+  nameHanja?: string;       // 한자 성명
+  birthDate?: string;       // YYYY-MM-DD
+  phone?: string;           // 핸드폰
+  officePhone?: string;     // 직장 전화
+  department?: string;      // 부서
+  title?: string;           // 직책
+  joinedAt?: string;        // 입사일 YYYY-MM-DD
+  bio?: string;             // 간단 소개
+  education: EducationEntry[];
+  workHistory: WorkHistoryEntry[];
+  certifications: CertificationEntry[];
+  updatedAt: string;
+}
+
+// ── 사내 강의 (Internal Training) ──
+
+export type TrainingCategory = 'technical' | 'compliance' | 'soft-skills' | 'management' | 'language' | 'other';
+export type TrainingStatus = 'DRAFT' | 'OPEN' | 'CLOSED' | 'COMPLETED';
+export type EnrollmentStatus = 'ENROLLED' | 'COMPLETED' | 'DROPPED';
+
+export const TRAINING_CATEGORY_LABELS: Record<TrainingCategory, string> = {
+  technical: '직무/기술',
+  compliance: '컴플라이언스',
+  'soft-skills': '소프트스킬',
+  management: '사업관리',
+  language: '어학',
+  other: '기타',
+};
+
+export const TRAINING_STATUS_LABELS: Record<TrainingStatus, string> = {
+  DRAFT: '준비중',
+  OPEN: '모집중',
+  CLOSED: '모집마감',
+  COMPLETED: '종료',
+};
+
+export const ENROLLMENT_STATUS_LABELS: Record<EnrollmentStatus, string> = {
+  ENROLLED: '수강중',
+  COMPLETED: '이수완료',
+  DROPPED: '수강취소',
+};
+
+/**
+ * 사내 강의 (Firestore: orgs/{orgId}/trainingCourses/{courseId})
+ */
+export interface TrainingCourse {
+  id: string;
+  orgId: string;
+  title: string;
+  description: string;
+  category: TrainingCategory;
+  durationHours: number;      // 수강 시간 (h)
+  instructor: string;         // 강사명
+  instructorId?: string;      // 내부 강사 uid
+  startDate: string;          // YYYY-MM-DD
+  endDate: string;            // YYYY-MM-DD
+  maxParticipants: number;
+  isRequired: boolean;        // 필수 교육 여부
+  status: TrainingStatus;
+  createdBy: string;          // admin uid
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * 수강 신청/이수 (Firestore: orgs/{orgId}/trainingEnrollments/{id})
+ */
+export interface TrainingEnrollment {
+  id: string;
+  courseId: string;
+  courseTitle: string;        // denormalized
+  memberId: string;
+  memberName: string;         // denormalized
+  enrolledAt: string;
+  status: EnrollmentStatus;
+  completedAt?: string;
+  certificate?: string;       // 수료증 Storage URL
+  notes?: string;
 }
 
 // ── Filter ──
