@@ -96,7 +96,7 @@ export function BoardFeedPage() {
           </Tabs>
 
           <div className="hidden md:flex items-center gap-1.5">
-            {(['all', 'general', 'qna', 'ideas', 'help'] as ChannelFilter[]).map((c) => (
+            {(['all', 'general', 'qna', 'ideas', 'help', 'training'] as ChannelFilter[]).map((c) => (
               <Button
                 key={c}
                 variant={channel === c ? 'secondary' : 'ghost'}
@@ -122,7 +122,7 @@ export function BoardFeedPage() {
       </div>
 
       <div className="md:hidden flex flex-wrap gap-1.5">
-        {(['all', 'general', 'qna', 'ideas', 'help'] as ChannelFilter[]).map((c) => (
+        {(['all', 'general', 'qna', 'ideas', 'help', 'training'] as ChannelFilter[]).map((c) => (
           <Button
             key={c}
             variant={channel === c ? 'secondary' : 'outline'}

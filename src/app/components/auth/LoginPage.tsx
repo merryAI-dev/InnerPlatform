@@ -144,7 +144,7 @@ export function LoginPage() {
                     type="email"
                     value={email}
                     onChange={e => { setEmail(e.target.value); setError(''); }}
-                    placeholder="user@mysc.co.kr"
+                    placeholder="user@example.com"
                     className="h-11 text-[13px]"
                     autoComplete="email"
                     autoFocus

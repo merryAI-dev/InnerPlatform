@@ -7,7 +7,7 @@ import {
   Search, Zap, HelpCircle, Maximize2, Minimize2,
   Menu, X, Calculator, Wallet, ExternalLink,
   ListChecks, Users, LogOut, Megaphone, MessagesSquare,
-  CircleDollarSign,
+  CircleDollarSign, GraduationCap,
 } from 'lucide-react';
 import { useAppStore, AppProvider } from '../../data/store';
 import { useAuth } from '../../data/auth-store';
@@ -57,6 +57,7 @@ const NAV_GROUPS = [
       { to: '/koica-personnel', icon: ClipboardList, label: 'KOICA 인력배치' },
       { to: '/personnel-changes', icon: ClipboardCheck, label: '인력변경 관리' },
       { to: '/hr-announcements', icon: Megaphone, label: '인사 공지', accent: true },
+      { to: '/training', icon: GraduationCap, label: '사내 교육 관리' },
     ],
   },
   {

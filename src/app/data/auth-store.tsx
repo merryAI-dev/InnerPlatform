@@ -84,9 +84,11 @@ interface MemberDoc {
 }
 
 const MOCK_PASSWORDS: Record<string, string> = {};
-ORG_MEMBERS.forEach((m) => {
-  MOCK_PASSWORDS[m.email] = 'mysc1234';
-});
+if (!import.meta.env.PROD && featureFlags.demoLoginEnabled) {
+  ORG_MEMBERS.forEach((m) => {
+    MOCK_PASSWORDS[m.email] = 'mysc1234';
+  });
+}
 
 const portalRegisteredUsers: AuthUser[] = [];
 const portalPasswords: Record<string, string> = {};
@@ -538,7 +540,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
 
     portalRegisteredUsers.push(newUser);
-    portalPasswords[emailLower] = data.password || 'mysc1234';
+    portalPasswords[emailLower] = data.password || 'changeme';
 
     setUser(newUser);
     saveUser(newUser);

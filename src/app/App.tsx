@@ -7,6 +7,8 @@ import { BoardProvider } from './data/board-store';
 import { PayrollProvider } from './data/payroll-store';
 import { CashflowWeekProvider } from './data/cashflow-weeks-store';
 import { FirebaseProvider } from './lib/firebase-context';
+import { CareerProfileProvider } from './data/career-profile-store';
+import { TrainingProvider } from './data/training-store';
 
 export default function App() {
   return (
@@ -16,8 +18,12 @@ export default function App() {
           <PayrollProvider>
             <CashflowWeekProvider>
               <BoardProvider>
-                <RouterProvider router={router} />
-                <Toaster position="bottom-right" />
+                <CareerProfileProvider>
+                  <TrainingProvider>
+                    <RouterProvider router={router} />
+                    <Toaster position="bottom-right" />
+                  </TrainingProvider>
+                </CareerProfileProvider>
               </BoardProvider>
             </CashflowWeekProvider>
           </PayrollProvider>

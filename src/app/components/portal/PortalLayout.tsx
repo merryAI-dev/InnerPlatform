@@ -12,6 +12,8 @@ import {
   Loader2,
   AlertTriangle,
   Settings2,
+  BookOpen,
+  Briefcase,
 } from 'lucide-react';
 import { PortalProvider, usePortalStore } from '../../data/portal-store';
 import { useAuth } from '../../data/auth-store';
@@ -41,6 +43,8 @@ const NAV_ITEMS = [
   { to: '/portal/expenses', icon: Wallet, label: '사업비 입력' },
   { to: '/portal/personnel', icon: Users, label: '인력 현황' },
   { to: '/portal/change-requests', icon: ArrowRightLeft, label: '인력변경 신청' },
+  { to: '/portal/training', icon: BookOpen, label: '사내 교육' },
+  { to: '/portal/career-profile', icon: Briefcase, label: '내 경력 프로필' },
   { to: '/portal/onboarding', icon: Settings2, label: '내 사업 설정', exact: true },
   { to: '/portal/register-project', icon: Plus, label: '사업 등록 제안', accent: true },
 ];

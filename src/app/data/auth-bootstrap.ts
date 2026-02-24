@@ -1,10 +1,8 @@
 import { normalizeEmail } from './auth-helpers';
 
-export const DEFAULT_BOOTSTRAP_ADMIN_EMAILS = [
-  'admin@mysc.co.kr',
-  'ai@mysc.co.kr',
-  'mwbyun1220@mysc.co.kr',
-] as const;
+// Bootstrap admin emails are loaded exclusively from VITE_BOOTSTRAP_ADMIN_EMAILS env var.
+// Do NOT hardcode emails here — they end up in the client bundle.
+export const DEFAULT_BOOTSTRAP_ADMIN_EMAILS: readonly string[] = [];
 
 export function parseBootstrapAdminEmails(
   env: Record<string, unknown> = import.meta.env,
