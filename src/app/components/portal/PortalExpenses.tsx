@@ -138,7 +138,7 @@ export function PortalExpenses() {
       <div className="text-center py-16">
         <AlertTriangle className="w-10 h-10 mx-auto text-muted-foreground/30 mb-3" />
         <p className="text-[14px] text-muted-foreground">사업이 선택되지 않았습니다.</p>
-        <Button variant="outline" className="mt-4" onClick={() => navigate('/portal/onboarding')}>
+        <Button variant="outline" className="mt-4" onClick={() => navigate('/portal/project-settings')}>
           사업 선택하기
         </Button>
       </div>

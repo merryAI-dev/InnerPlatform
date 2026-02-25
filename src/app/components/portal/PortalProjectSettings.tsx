@@ -18,7 +18,7 @@ const statusColors: Record<string, string> = {
   COMPLETED_PENDING_PAYMENT: 'bg-teal-100 text-teal-700',
 };
 
-export function PortalOnboarding() {
+export function PortalProjectSettings() {
   const navigate = useNavigate();
   const { register, isRegistered, isLoading, portalUser } = usePortalStore();
   const { user: authUser, isAuthenticated, isLoading: authLoading } = useAuth();
@@ -51,8 +51,8 @@ export function PortalOnboarding() {
 
   useEffect(() => {
     if (authLoading || isLoading) return;
-    if (isRegistered) {
-      navigate('/portal', { replace: true });
+    if (!isRegistered) {
+      navigate('/portal/onboarding', { replace: true });
     }
   }, [authLoading, isLoading, isRegistered, navigate]);
 
@@ -151,9 +151,9 @@ export function PortalOnboarding() {
           <div className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-lg shadow-teal-500/20 bg-teal-600">
             <FolderKanban className="w-7 h-7 text-white" />
           </div>
-          <h1 className="text-[22px]" style={{ fontWeight: 800, letterSpacing: '-0.02em' }}>내 사업 선택</h1>
+          <h1 className="text-[22px]" style={{ fontWeight: 800, letterSpacing: '-0.02em' }}>사업 배정 수정</h1>
           <p className="text-[12px] text-muted-foreground">
-            참여하는 사업을 선택해 주세요. 선택 후 바로 포털로 이동합니다.
+            내 사업 목록과 주사업을 수정할 수 있습니다.
           </p>
         </div>
 
@@ -218,14 +218,14 @@ export function PortalOnboarding() {
 
             <div className="flex items-center justify-between pt-2">
               <p className="text-[11px] text-muted-foreground">
-                {isRegistered ? '선택 정보를 변경하면 바로 반영됩니다.' : '사업을 선택해야 포털을 사용할 수 있습니다.'}
+                변경 사항은 저장 후 즉시 반영됩니다.
               </p>
               <Button
                 className="h-9 text-[12px]"
                 onClick={handleSave}
                 disabled={saving || allProjects.length === 0}
               >
-                {saving ? '저장 중...' : '저장하고 계속'}
+                {saving ? '저장 중...' : '저장'}
               </Button>
             </div>
           </CardContent>

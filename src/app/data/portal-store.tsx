@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useCallback, useEffect, use
 import {
   collection,
   doc,
+  getDoc,
   onSnapshot,
   query,
   setDoc,
@@ -21,7 +22,6 @@ import { PARTICIPATION_ENTRIES } from './participation-data';
 import { LEDGERS, PROJECTS, TRANSACTIONS } from './mock-data';
 import { useAuth } from './auth-store';
 import { useFirebase } from '../lib/firebase-context';
-import { featureFlags } from '../config/feature-flags';
 import { getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
 import { duplicateExpenseSetAsDraft, withExpenseItems } from './portal-store.helpers';
 import { toast } from 'sonner';
@@ -34,6 +34,7 @@ export interface PortalUser {
   role: string;
   projectId: string;
   projectIds: string[];
+  projectNames?: Record<string, string>;
   registeredAt: string;
 }
 
@@ -101,6 +102,7 @@ function normalizePortalUser(candidate: Partial<PortalUser> | null | undefined):
     role: (candidate.role || 'pm').toLowerCase(),
     projectId,
     projectIds,
+    projectNames: candidate.projectNames,
     registeredAt: candidate.registeredAt || new Date().toISOString(),
   };
 }
@@ -108,25 +110,18 @@ function normalizePortalUser(candidate: Partial<PortalUser> | null | undefined):
 export function PortalProvider({ children }: { children: ReactNode }) {
   const { isAuthenticated, user: authUser } = useAuth();
   const { db, isOnline, orgId } = useFirebase();
-  const firestoreEnabled = featureFlags.firestoreCoreEnabled && isOnline && !!db;
+  const firestoreEnabled = isOnline && !!db;
 
-  const [portalUser, setPortalUser] = useState<PortalUser | null>(() => {
-    try {
-      const saved = localStorage.getItem('mysc-portal-user');
-      if (!saved) return null;
-      return normalizePortalUser(JSON.parse(saved) as Partial<PortalUser>);
-    } catch {
-      return null;
-    }
-  });
+  const [portalUser, setPortalUser] = useState<PortalUser | null>(null);
 
   const [expenseSets, setExpenseSets] = useState<ExpenseSet[]>(EXPENSE_SETS);
   const [changeRequests, setChangeRequests] = useState<ChangeRequest[]>(CHANGE_REQUESTS);
-  const [projects, setProjects] = useState<Project[]>(PROJECTS);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [ledgers, setLedgers] = useState<Ledger[]>([]);
   const [participationEntries, setParticipationEntries] = useState<ParticipationEntry[]>(PARTICIPATION_ENTRIES);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isMemberLoading, setIsMemberLoading] = useState(true);
   const unsubsRef = useRef<Unsubscribe[]>([]);
 
   const myProject = useMemo(() => {
@@ -134,61 +129,85 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   }, [portalUser, projects]);
 
   useEffect(() => {
-    if (!isAuthenticated || !authUser) return;
-    if (authUser.role !== 'pm' && authUser.role !== 'viewer') return;
+    if (!isAuthenticated || !authUser) {
+      setIsMemberLoading(false);
+      return;
+    }
+    if (authUser.role !== 'pm' && authUser.role !== 'viewer') {
+      setIsMemberLoading(false);
+      return;
+    }
 
-    const projectIds = normalizeProjectIds([
-      ...(Array.isArray(authUser.projectIds) ? authUser.projectIds : []),
-      authUser.projectId,
-      projects.find((project) => project.managerId === authUser.uid)?.id,
-    ]);
-    const projectId = resolvePrimaryProjectId(projectIds, portalUser?.projectId || authUser.projectId);
+    const loadFromStore = async () => {
+      setIsMemberLoading(true);
+      try {
+        if (!firestoreEnabled || !db) {
+          setPortalUser(null);
+          return;
+        }
+        const memberRef = doc(db, getOrgDocumentPath(orgId, 'members', authUser.uid));
+        const snap = await getDoc(memberRef);
+        if (!snap.exists()) {
+          setPortalUser(null);
+          return;
+        }
+        const member = snap.data() as Partial<PortalUser> & {
+          projectIds?: Array<string | { id?: string; name?: string }>;
+          projectId?: string | { id?: string; name?: string };
+        };
+        const allowedProjectIds = new Set(PROJECTS.map((p) => p.id));
+        const nameMap: Record<string, string> = {};
+        const rawIds = Array.isArray(member.projectIds) ? member.projectIds : [];
+        const coercedIds = rawIds
+          .map((entry) => {
+            if (typeof entry === 'string') return entry;
+            const id = String(entry?.id || '').trim();
+            const name = String(entry?.name || '').trim();
+            if (id && name) nameMap[id] = name;
+            return id;
+          })
+          .filter((id) => allowedProjectIds.has(id))
+          .filter(Boolean);
+        const preferredId = typeof member.projectId === 'string'
+          ? member.projectId
+          : String((member.projectId as any)?.id || '');
+        const normalizedPreferred = allowedProjectIds.has(preferredId) ? preferredId : '';
+        const normalized = normalizePortalUser({
+          id: authUser.uid,
+          name: member.name || authUser.name,
+          email: member.email || authUser.email,
+          role: authUser.role,
+          projectId: normalizedPreferred,
+          projectIds: coercedIds,
+          projectNames: Object.keys(nameMap).length ? nameMap : undefined,
+          registeredAt: member.registeredAt || authUser.registeredAt || new Date().toISOString(),
+        });
+        if (!normalized) {
+          setPortalUser(null);
+          return;
+        }
+        setPortalUser(normalized);
+      } catch (err) {
+        console.error('[PortalStore] member load failed:', err);
+      } finally {
+        setIsMemberLoading(false);
+      }
+    };
 
-    if (!projectId || !projectIds.length) return;
-
-    const syncedUser = normalizePortalUser({
-      id: authUser.uid,
-      name: authUser.name,
-      email: authUser.email,
-      role: authUser.role,
-      projectId,
-      projectIds,
-      registeredAt: authUser.registeredAt || new Date().toISOString(),
-    });
-
-    if (!syncedUser) return;
-
-    const same =
-      portalUser &&
-      portalUser.id === syncedUser.id &&
-      portalUser.projectId === syncedUser.projectId &&
-      portalUser.projectIds.join('|') === syncedUser.projectIds.join('|') &&
-      portalUser.role === syncedUser.role &&
-      portalUser.email === syncedUser.email &&
-      portalUser.name === syncedUser.name;
-    if (same) return;
-
-    setPortalUser(syncedUser);
-    localStorage.setItem('mysc-portal-user', JSON.stringify(syncedUser));
-  }, [isAuthenticated, authUser, portalUser, projects]);
+    loadFromStore();
+  }, [isAuthenticated, authUser?.uid, authUser?.role, firestoreEnabled, db, orgId]);
 
   useEffect(() => {
     unsubsRef.current.forEach((unsub) => unsub());
     unsubsRef.current = [];
 
     if (!firestoreEnabled || !db) {
-      setProjects(PROJECTS);
-      setLedgers(portalUser?.projectId
-        ? LEDGERS.filter((l) => l.projectId === portalUser.projectId)
-        : [],
-      );
-      setExpenseSets(EXPENSE_SETS);
-      setChangeRequests(CHANGE_REQUESTS);
-      setParticipationEntries(PARTICIPATION_ENTRIES);
-      setTransactions(portalUser?.projectId
-        ? TRANSACTIONS.filter((t) => t.projectId === portalUser.projectId)
-        : [],
-      );
+      setProjects([]);
+      setLedgers([]);
+      setExpenseSets([]);
+      setChangeRequests([]);
+      setParticipationEntries([]);
+      setTransactions([]);
       setIsLoading(false);
       return;
     }
@@ -219,7 +238,10 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       txReady = true;
       markReady();
     } else {
-      const projectRef = doc(db, getOrgDocumentPath(orgId, 'projects', portalUser.projectId));
+      setProjects(PROJECTS);
+      projectReady = true;
+      markReady();
+
       const ledgerQuery = query(
         collection(db, getOrgCollectionPath(orgId, 'ledgers')),
         where('projectId', '==', portalUser.projectId),
@@ -237,23 +259,6 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       const participationQuery = query(
         collection(db, getOrgCollectionPath(orgId, 'partEntries')),
         where('projectId', '==', portalUser.projectId),
-      );
-
-      unsubsRef.current.push(
-        onSnapshot(projectRef, (snap) => {
-          if (snap.exists()) {
-            setProjects([snap.data() as Project]);
-          } else {
-            setProjects(PROJECTS.filter((project) => project.id === portalUser.projectId));
-          }
-          projectReady = true;
-          markReady();
-        }, (err) => {
-          console.error('[PortalStore] project listen error:', err);
-          setProjects(PROJECTS.filter((project) => project.id === portalUser.projectId));
-          projectReady = true;
-          markReady();
-        }),
       );
 
       unsubsRef.current.push(
@@ -390,6 +395,10 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       projectIds?: string[];
     },
   ): Promise<boolean> => {
+    if (!firestoreEnabled || !db) {
+      toast.error('Firestore 연결이 필요합니다. 관리자에게 문의해 주세요.');
+      return false;
+    }
     const previousPortalUser = portalUser;
     const now = new Date().toISOString();
     const normalizedProjectIds = normalizeProjectIds([
@@ -417,9 +426,8 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     }
 
     setPortalUser(candidate);
-    localStorage.setItem('mysc-portal-user', JSON.stringify(candidate));
 
-    if (firestoreEnabled && db && authUser) {
+    if (authUser) {
       try {
         await setDoc(doc(db, getOrgDocumentPath(orgId, 'members', authUser.uid)), {
           uid: authUser.uid,
@@ -437,11 +445,6 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       } catch (err) {
         console.error('[PortalStore] register member sync error:', err);
         setPortalUser(previousPortalUser);
-        if (previousPortalUser) {
-          localStorage.setItem('mysc-portal-user', JSON.stringify(previousPortalUser));
-        } else {
-          localStorage.removeItem('mysc-portal-user');
-        }
         toast.error('회원 정보를 저장하지 못했습니다.');
         return false;
       }
@@ -451,10 +454,18 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   }, [authUser, firestoreEnabled, db, orgId, portalUser]);
 
   const setActiveProject = useCallback(async (projectId: string): Promise<boolean> => {
+    if (!firestoreEnabled || !db) {
+      toast.error('Firestore 연결이 필요합니다. 관리자에게 문의해 주세요.');
+      return false;
+    }
     const target = projectId.trim();
     if (!target) return false;
     if (!portalUser) return false;
-    if (!includesProject(portalUser.projectIds, target)) {
+    const allowedIds = normalizeProjectIds([
+      ...(Array.isArray(portalUser.projectIds) ? portalUser.projectIds : []),
+      portalUser.projectId,
+    ]);
+    if (!includesProject(allowedIds, target)) {
       toast.error('배정되지 않은 사업입니다.');
       return false;
     }
@@ -465,9 +476,8 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       projectId: target,
     };
     setPortalUser(nextUser);
-    localStorage.setItem('mysc-portal-user', JSON.stringify(nextUser));
 
-    if (firestoreEnabled && db && authUser) {
+    if (authUser) {
       try {
         await updateDoc(doc(db, getOrgDocumentPath(orgId, 'members', authUser.uid)), {
           projectId: target,
@@ -478,7 +488,6 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       } catch (err) {
         console.error('[PortalStore] setActiveProject member sync error:', err);
         setPortalUser(previousUser);
-        localStorage.setItem('mysc-portal-user', JSON.stringify(previousUser));
         toast.error('주사업 변경을 저장하지 못했습니다.');
         return false;
       }
@@ -489,7 +498,6 @@ export function PortalProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(() => {
     setPortalUser(null);
-    localStorage.removeItem('mysc-portal-user');
   }, []);
 
   const addExpenseSet = useCallback((set: ExpenseSet) => {
@@ -749,7 +757,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
 
   const value: PortalState & PortalActions = {
     isRegistered: !!(portalUser && portalUser.projectIds.length > 0),
-    isLoading,
+    isLoading: isLoading || isMemberLoading,
     portalUser,
     projects,
     ledgers,

@@ -18,11 +18,19 @@ import {
   MessageCircle,
 } from 'lucide-react';
 import { PortalProvider, usePortalStore } from '../../data/portal-store';
+import { PROJECTS } from '../../data/mock-data';
 import { useAuth } from '../../data/auth-store';
 import { useHrAnnouncements } from '../../data/hr-announcements-store';
 import { usePayroll } from '../../data/payroll-store';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../ui/select';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { DarkModeToggle } from '../layout/DarkModeToggle';
 import { PageTransition } from '../layout/PageTransition';
@@ -49,7 +57,7 @@ const NAV_ITEMS = [
   { to: '/portal/training', icon: BookOpen, label: '사내 교육' },
   { to: '/portal/career-profile', icon: Briefcase, label: '내 경력 프로필' },
   { to: '/portal/guide-chat', icon: MessageCircle, label: '사업비 가이드 Q&A' },
-  { to: '/portal/onboarding', icon: Settings2, label: '내 사업 설정', exact: true },
+  { to: '/portal/project-settings', icon: Settings2, label: '사업 배정 수정', exact: true },
   { to: '/portal/register-project', icon: Plus, label: '사업 등록 제안', accent: true },
 ];
 
@@ -86,13 +94,40 @@ function PortalContent() {
     return myProject ? [myProject] : [];
   }, [portalUser, projects, myProject]);
 
+  const projectOptions = useMemo(() => {
+    if (!portalUser) return [];
+    const ids = Array.isArray(portalUser.projectIds) && portalUser.projectIds.length
+      ? portalUser.projectIds
+      : portalUser.projectId ? [portalUser.projectId] : [];
+    return ids.map((id) => {
+      const project =
+        projects.find((p) => p.id === id) ||
+        PROJECTS.find((p) => p.id === id) ||
+        null;
+      const fallbackName = portalUser.projectNames?.[id];
+      return { id, name: project?.name || fallbackName || id };
+    });
+  }, [portalUser, projects]);
+
+  const currentProject = useMemo(() => {
+    if (!portalUser) return myProject;
+    return assignedProjects.find((project) => project.id === portalUser.projectId) || myProject;
+  }, [assignedProjects, portalUser, myProject]);
+
+  const currentProjectName = useMemo(() => {
+    if (!portalUser?.projectId) return myProject?.name;
+    const fromOptions = projectOptions.find((opt) => opt.id === portalUser.projectId)?.name;
+    return fromOptions || myProject?.name;
+  }, [portalUser?.projectId, projectOptions, myProject?.name]);
+
+
   // 미인증 시 로그인으로
   useEffect(() => {
     if (authLoading) return;
-    if (!isAuthenticated && !location.pathname.includes('/portal/onboarding')) {
+    if (!isAuthenticated) {
       navigate('/login', { replace: true });
     }
-  }, [authLoading, isAuthenticated, location.pathname, navigate]);
+  }, [authLoading, isAuthenticated, navigate]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -111,7 +146,7 @@ function PortalContent() {
 
   // 포털 미등록 시 온보딩으로 (인증은 되었지만 포털 사업 미선택)
   useEffect(() => {
-    if (authLoading) return;
+    if (authLoading || portalLoading) return;
     if (shouldForcePortalOnboarding({
       isAuthenticated,
       role: authUser?.role,
@@ -120,7 +155,7 @@ function PortalContent() {
     })) {
       navigate('/portal/onboarding', { replace: true });
     }
-  }, [authLoading, isAuthenticated, authUser?.role, isRegistered, location.pathname, navigate]);
+  }, [authLoading, portalLoading, isAuthenticated, authUser?.role, isRegistered, location.pathname, navigate]);
 
   // Close mobile sidebar on navigation
   useEffect(() => {
@@ -157,8 +192,8 @@ function PortalContent() {
             아직 배정된 사업이 없습니다. 관리자에게 사업 배정을 요청하거나, 온보딩에서 사업을 선택해 주세요.
           </p>
           <div className="mt-4 flex items-center justify-center gap-2">
-            <Button variant="outline" onClick={() => navigate('/portal/onboarding')}>
-              온보딩으로
+            <Button variant="outline" onClick={() => navigate('/portal/project-settings')}>
+              사업 배정 수정
             </Button>
             <Button variant="ghost" onClick={() => { portalLogout(); authLogout(); navigate('/login'); }}>
               로그아웃
@@ -179,8 +214,8 @@ function PortalContent() {
             배정된 사업 정보가 존재하지 않거나 접근 권한이 없습니다. 관리자에게 문의해 주세요.
           </p>
           <div className="mt-4 flex items-center justify-center gap-2">
-            <Button variant="outline" onClick={() => navigate('/portal/onboarding')}>
-              사업 선택
+            <Button variant="outline" onClick={() => navigate('/portal/project-settings')}>
+              사업 배정 수정
             </Button>
             <Button variant="ghost" onClick={() => { portalLogout(); authLogout(); navigate('/login'); }}>
               로그아웃
@@ -261,36 +296,42 @@ function PortalContent() {
           {myProject && (
             <div className="mx-2.5 mb-2 p-2.5 rounded-xl bg-white/8 border border-white/20">
               <p className="text-[10px] text-slate-500 mb-0.5">내 사업</p>
-              <p className="text-[11px] text-white truncate" style={{ fontWeight: 600 }}>
-                {myProject.name.length > 28 ? myProject.name.slice(0, 28) + '...' : myProject.name}
-              </p>
+              {projectOptions.length > 0 ? (
+                <Select
+                  value={portalUser?.projectId || ''}
+                  onValueChange={(value) => {
+                    if (value && value !== portalUser?.projectId) {
+                      setActiveProject(value);
+                    }
+                  }}
+                >
+                  <SelectTrigger className="h-7 text-[10px] px-2 bg-white/8 border-white/20 text-slate-200">
+                    <SelectValue placeholder="사업 선택" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {projectOptions.map((project) => (
+                      <SelectItem key={project.id} value={project.id}>
+                        {project.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <p className="text-[11px] text-white truncate" style={{ fontWeight: 600 }}>
+                  {myProject.name.length > 28 ? myProject.name.slice(0, 28) + '...' : myProject.name}
+                </p>
+              )}
               <div className="flex items-center gap-1.5 mt-1">
                 <Badge className="text-[8px] h-3.5 px-1 bg-teal-500/20 text-teal-300 border-0">
-                  {myProject.clientOrg || ''}
+                  {currentProject?.clientOrg || ''}
                 </Badge>
-                <span className="text-[9px] text-slate-600">{myProject.department}</span>
+                <span className="text-[9px] text-slate-600">{currentProject?.department || ''}</span>
               </div>
-              {assignedProjects.length > 1 && (
-                <div className="mt-2">
-                  <p className="text-[9px] text-slate-500 mb-1">주사업 전환</p>
-                  <select
-                    value={portalUser.projectId}
-                    className="w-full h-7 rounded-md border border-white/20 bg-white/8 text-slate-200 text-[10px] px-2"
-                    onChange={(e) => { void setActiveProject(e.target.value); }}
-                  >
-                    {assignedProjects.map((project) => (
-                      <option key={project.id} value={project.id}>
-                        {project.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
               <Button
                 size="sm"
                 variant="outline"
                 className="mt-2 h-6 text-[10px] w-full border-white/20 bg-white/8 text-slate-200 hover:bg-white/15"
-                onClick={() => navigate('/portal/onboarding')}
+                onClick={() => navigate('/portal/project-settings')}
               >
                 사업 배정 수정
               </Button>
@@ -371,7 +412,7 @@ function PortalContent() {
                 <Menu className="w-4 h-4" />
               </button>
               <FolderKanban className="w-3.5 h-3.5" />
-              <span className="truncate">{myProject?.name || '사업 미선택'}</span>
+              <span className="truncate">{currentProjectName || '사업 미선택'}</span>
             </div>
             <div className="flex items-center gap-1.5">
               <Badge variant="outline" className="text-[10px] h-5 px-2">
