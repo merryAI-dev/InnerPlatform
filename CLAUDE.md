@@ -4,18 +4,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-MYSC 사업관리 통합 플랫폼 — an enterprise business management platform for a Korean social enterprise (MYSC). Manages projects, ledgers, transactions, payroll, cashflow, personnel, budgets, training, and career profiles.
+MYSC 사업관리 통합 플랫폼 — an enterprise business management platform for a Korean social enterprise (MYSC). Manages projects, ledgers, transactions, payroll, cashflow, personnel, budgets, training, and career profiles. **All user-facing UI text is in Korean (한국어).**
 
 ## Commands
 
 ```bash
-npm run dev              # Vite dev server (frontend)
+npm run dev              # Vite dev server (frontend, port 5173)
 npm run build            # Production build
 npm test                 # Unit tests (vitest run)
 npm run test:watch       # Interactive test watch mode
 npm run bff:dev          # Express BFF server on 127.0.0.1:8787
 npm run bff:test:integration  # BFF integration tests (requires Firestore emulator)
 npm run policy:verify    # RBAC policy-as-code verification
+```
+
+**Run a single test file:**
+```bash
+npx vitest run src/app/platform/rbac.test.ts
 ```
 
 **Pre-PR gate:**
@@ -32,6 +37,8 @@ npm run etl:build:staging-json      # Build ETL staging JSON from Excel
 npm run etl:sync:staging            # Sync staging data to Firestore
 ```
 
+**Local dev without Firebase:** No `.env` file is needed. All feature flags default to `false`/off, so the app runs against local mock data (`src/app/data/mock-data.ts`) out of the box.
+
 ## Tech Stack
 
 - **Frontend:** React 18 + TypeScript + Vite 6 + Tailwind CSS v4
@@ -40,11 +47,12 @@ npm run etl:sync:staging            # Sync staging data to Firestore
 - **State:** React Context providers (no Redux/Zustand)
 - **Forms:** react-hook-form + zod
 - **Backend:** Firebase/Firestore + Express BFF (`server/bff/`)
-- **Testing:** Vitest + supertest (BFF integration)
+- **BFF language:** Plain JavaScript (`.mjs` files), not TypeScript
+- **Testing:** Vitest + supertest (BFF integration); tests are co-located with source (`*.test.ts` next to implementation)
 - **Node:** v24 (`.nvmrc`)
 - **Module system:** ESM (`"type": "module"`)
 
-Path alias: `@` → `./src`
+Path alias: `@` → `./src` (configured in both `vite.config.ts` and `vitest.config.ts`)
 
 ## Architecture
 
@@ -78,6 +86,8 @@ Additionally, `etlStagingLocalEnabled` loads data from `/data/etl-staging-ui.jso
 All flags read from `VITE_*` env vars via `import.meta.env`. Defaults are designed for local dev without Firebase:
 - `firebaseAuthEnabled` (default: false)
 - `firestoreCoreEnabled` (default: false)
+- `firebaseUseEnvConfig` (default: true)
+- `firebaseUseEmulators` (default: false)
 - `platformApiEnabled` (default: false)
 - `demoLoginEnabled` (default: false)
 - `etlStagingLocalEnabled` (default: false)
@@ -105,11 +115,21 @@ All Firestore paths scoped under `orgs/{orgId}/...`. Default org: `mysc`. Tenant
 
 Express.js backend-for-frontend with: idempotency keys, outbox pattern with worker, work queue with projection rebuilds, audit chain hashing (append-only, tamper detection), PII encryption/rotation, RBAC policy enforcement, relation rules engine, transaction state machine, payroll auto-matching worker.
 
+### RBAC & Permissions (`src/app/platform/rbac.ts`, `policies/rbac-policy.json`)
+
+Roles: `admin`, `tenant_admin`, `finance`, `pm`, `viewer`, `auditor`, `support`, `security`. Permissions are `resource:action` strings (e.g., `project:write`, `transaction:approve`). The RBAC matrix lives in `policies/rbac-policy.json` and is loaded by both the frontend (`rbac.ts`) and the BFF (`rbac-policy.mjs`). Run `npm run policy:verify` to validate policy consistency.
+
+### Relation Rules (`policies/relation-rules.json`)
+
+Declarative rules that map entity mutations to affected projection views (used by the BFF work queue to rebuild projections after writes).
+
 ## Coding Conventions
 
 - TypeScript, React function components, 2-space indentation
 - Component/page files: `PascalCase.tsx` (e.g., `AdminPayrollPage.tsx`)
 - Route segments/folders: lowercase/kebab (e.g., `expense-management`)
 - Cross-cutting rules go in `src/app/platform/`; feature UI in `src/app/components/<feature>/`
+- Lazy-load pages: use `React.lazy()` with named export unwrapping pattern (`.then(m => ({ default: m.PageName }))`)
+- Each context provider lives in its own `*-store.tsx` file in `src/app/data/`; helper/pure logic goes in `*-helpers.ts` with a co-located `.test.ts`
 - Conventional Commits: `feat(cashflow): ...`, `fix(rbac): ...`, `docs: ...`
 - PRs should include screenshots for UI changes and ops notes when Firestore rules/indexes or Vercel envs change

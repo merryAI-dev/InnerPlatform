@@ -6,6 +6,7 @@ export interface FeatureFlags {
   tenantIsolationStrict: boolean;
   platformApiEnabled: boolean;
   demoLoginEnabled: boolean;
+  etlStagingLocalEnabled: boolean;
 }
 
 const TRUE_SET = new Set(['1', 'true', 'yes', 'on', 'enabled']);
@@ -28,6 +29,7 @@ export function readFeatureFlags(env: Record<string, unknown> = import.meta.env)
     tenantIsolationStrict: parseFeatureFlag(env.VITE_TENANT_ISOLATION_STRICT, true),
     platformApiEnabled: parseFeatureFlag(env.VITE_PLATFORM_API_ENABLED, false),
     demoLoginEnabled: parseFeatureFlag(env.VITE_DEMO_LOGIN_ENABLED, false),
+    etlStagingLocalEnabled: parseFeatureFlag(env.VITE_ETL_STAGING_LOCAL_ENABLED, false),
   };
 }
 

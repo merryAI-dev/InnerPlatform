@@ -14,6 +14,8 @@ import {
   Settings2,
   BookOpen,
   Briefcase,
+  FileSpreadsheet,
+  MessageCircle,
 } from 'lucide-react';
 import { PortalProvider, usePortalStore } from '../../data/portal-store';
 import { useAuth } from '../../data/auth-store';
@@ -41,10 +43,12 @@ const NAV_ITEMS = [
   { to: '/portal/cashflow', icon: BarChart3, label: '캐시플로(주간)' },
   { to: '/portal/budget', icon: Calculator, label: '예산총괄' },
   { to: '/portal/expenses', icon: Wallet, label: '사업비 입력' },
+  { to: '/portal/weekly-expenses', icon: FileSpreadsheet, label: '사업비 입력(주간)' },
   { to: '/portal/personnel', icon: Users, label: '인력 현황' },
   { to: '/portal/change-requests', icon: ArrowRightLeft, label: '인력변경 신청' },
   { to: '/portal/training', icon: BookOpen, label: '사내 교육' },
   { to: '/portal/career-profile', icon: Briefcase, label: '내 경력 프로필' },
+  { to: '/portal/guide-chat', icon: MessageCircle, label: '사업비 가이드 Q&A' },
   { to: '/portal/onboarding', icon: Settings2, label: '내 사업 설정', exact: true },
   { to: '/portal/register-project', icon: Plus, label: '사업 등록 제안', accent: true },
 ];
@@ -67,6 +71,20 @@ function PortalContent() {
   const location = useLocation();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  // ── 모든 hooks는 early return 전에 호출 ──
+  const assignedProjects = useMemo(() => {
+    if (!portalUser) return [];
+    if (!Array.isArray(portalUser.projectIds) || portalUser.projectIds.length === 0) {
+      return myProject ? [myProject] : [];
+    }
+    const pool = projects.length ? projects : [];
+    const mapped = portalUser.projectIds
+      .map((id) => pool.find((project) => project.id === id) || null)
+      .filter((project): project is NonNullable<typeof project> => !!project);
+    if (mapped.length > 0) return mapped;
+    return myProject ? [myProject] : [];
+  }, [portalUser, projects, myProject]);
 
   // 미인증 시 로그인으로
   useEffect(() => {
@@ -190,19 +208,6 @@ function PortalContent() {
     const monthly = closePrev && closePrev.status === 'DONE' && !closePrev.acknowledged ? 1 : 0;
     return payroll + monthly;
   })();
-  const assignedProjects = useMemo(() => {
-    if (!portalUser) return [];
-    if (!Array.isArray(portalUser.projectIds) || portalUser.projectIds.length === 0) {
-      return myProject ? [myProject] : [];
-    }
-    const pool = projects.length ? projects : [];
-    const mapped = portalUser.projectIds
-      .map((id) => pool.find((project) => project.id === id) || null)
-      .filter((project): project is NonNullable<typeof project> => !!project);
-    if (mapped.length > 0) return mapped;
-    return myProject ? [myProject] : [];
-  }, [portalUser, projects, myProject]);
-
   function isActive(to: string, exact?: boolean) {
     if (exact) return location.pathname === to;
     return location.pathname.startsWith(to);

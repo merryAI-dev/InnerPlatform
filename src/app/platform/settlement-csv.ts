@@ -4,7 +4,7 @@ import type { Transaction, CashflowSheetLineId, PaymentMethod, Direction } from 
 import { CASHFLOW_SHEET_LINE_LABELS } from '../data/types';
 import type { MonthMondayWeek } from './cashflow-weeks';
 import { findWeekForDate } from './cashflow-weeks';
-import { pickValue, parseNumber, parseDate, stableHash, normalizeSpace } from './csv-utils';
+import { pickValue, parseNumber, parseDate, stableHash, normalizeSpace, normalizeKey } from './csv-utils';
 
 // ── Cashflow line label ↔ id mapping ──
 
@@ -376,6 +376,181 @@ export function parseSettlementCsv(
 
   return { valid, errors, warnings };
 }
+
+// ── Import Editor helpers ──
+
+export interface ImportRow {
+  tempId: string;
+  /** Cell values aligned to SETTLEMENT_COLUMNS order (string representation). */
+  cells: string[];
+  /** Validation error when trying to parse this row. */
+  error?: string;
+}
+
+/**
+ * Normalize a CSV matrix into editable ImportRow[] aligned with SETTLEMENT_COLUMNS.
+ * Handles different column orders and extra/missing columns via header matching.
+ */
+export function normalizeMatrixToImportRows(matrix: string[][]): ImportRow[] {
+  if (matrix.length < 2) return [];
+
+  // Find the header row
+  let headerRowIdx = -1;
+  for (let i = 0; i < Math.min(5, matrix.length); i++) {
+    const joined = matrix[i].join(',');
+    if (/거래일시|No\.|해당\s*주차/.test(joined)) {
+      headerRowIdx = i;
+      break;
+    }
+  }
+  if (headerRowIdx === -1) headerRowIdx = 0;
+
+  const headers = matrix[headerRowIdx].map((h) => normalizeSpace(h));
+  const dataRows = matrix.slice(headerRowIdx + 1);
+
+  // Build mapping: SETTLEMENT_COLUMNS index → source CSV column index
+  const colMapping: (number | -1)[] = SETTLEMENT_COLUMNS.map((col) => {
+    const target = normalizeKey(col.csvHeader);
+    for (let j = 0; j < headers.length; j++) {
+      const src = normalizeKey(headers[j]);
+      if (src === target || src.includes(target) || target.includes(src)) return j;
+    }
+    return -1;
+  });
+
+  const rows: ImportRow[] = [];
+  for (let i = 0; i < dataRows.length; i++) {
+    const raw = dataRows[i];
+    // Skip fully empty rows
+    if (raw.every((c) => !c.trim())) continue;
+
+    const cells = colMapping.map((srcIdx) =>
+      srcIdx >= 0 ? normalizeSpace(raw[srcIdx] || '') : '',
+    );
+
+    // Auto-fill No. column
+    const noIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === 'No.');
+    if (noIdx >= 0) cells[noIdx] = String(rows.length + 1);
+
+    rows.push({
+      tempId: `imp-${Date.now()}-${i}`,
+      cells,
+    });
+  }
+  return rows;
+}
+
+/**
+ * Create an empty ImportRow for manual row addition.
+ */
+export function createEmptyImportRow(): ImportRow {
+  return {
+    tempId: `imp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    cells: SETTLEMENT_COLUMNS.map(() => ''),
+  };
+}
+
+/**
+ * Convert a single ImportRow to a Transaction.
+ * Returns the transaction on success or an error message.
+ */
+export function importRowToTransaction(
+  row: ImportRow,
+  projectId: string,
+  ledgerId: string,
+  rowIndex: number,
+): { transaction?: Transaction; error?: string } {
+  // Build key-value map from column headers
+  const kv: Record<string, string> = {};
+  for (let j = 0; j < SETTLEMENT_COLUMNS.length; j++) {
+    const header = SETTLEMENT_COLUMNS[j].csvHeader;
+    kv[header] = row.cells[j] || '';
+  }
+
+  const dateRaw = pickValue(kv, ['거래일시', '거래일', 'dateTime']);
+  const amountRaw = pickValue(kv, ['통장에 찍힌 입/출금액', '입출금액', 'bankAmount', '금액']);
+  if (!dateRaw && !amountRaw) return { error: '거래일시 또는 금액이 비어 있습니다' };
+
+  const dateTime = parseDate(dateRaw);
+  if (!dateTime) return { error: '거래일시를 파싱할 수 없습니다' };
+
+  const bankAmount = parseNumber(amountRaw) ?? 0;
+  const methodRaw = pickValue(kv, ['지출구분', '결제수단', 'method']);
+  const method = labelToMethod(methodRaw);
+
+  const budgetCategory = pickValue(kv, ['비목', 'budgetCategory']);
+  const budgetSubCategory = pickValue(kv, ['세목', 'budgetSubCategory']);
+  const budgetSubSubCategory = pickValue(kv, ['세세목', 'budgetSubSubCategory']);
+
+  const cashflowLabelRaw = pickValue(kv, ['cashflow항목', 'cashflowLabel', 'cashflow']);
+  const lineId = parseCashflowLineLabel(cashflowLabelRaw);
+  const direction = inferDirection(lineId);
+  const cashflowLabel = lineId ? getCashflowLineLabelForExport(lineId) : cashflowLabelRaw;
+
+  const balanceAfter = parseNumber(pickValue(kv, ['통장잔액', 'balanceAfter'])) ?? 0;
+  const depositAmount = parseNumber(pickValue(kv, ['입금액', 'depositAmount'])) ?? 0;
+  const vatRefund = parseNumber(pickValue(kv, ['매입부가세 반환', 'vatRefund'])) ?? 0;
+  const expenseAmount = parseNumber(pickValue(kv, ['사업비 사용액', 'expenseAmount'])) ?? 0;
+  const vatIn = parseNumber(pickValue(kv, ['매입부가세', 'vatIn'])) ?? 0;
+
+  const counterparty = pickValue(kv, ['지급처', '거래처', 'counterparty']);
+  const memo = pickValue(kv, ['상세 적요', '적요', 'memo']);
+  const author = pickValue(kv, ['작성자', 'author']);
+
+  const now = new Date().toISOString();
+  const id = `stl-${stableHash(`${projectId}|${dateTime}|${counterparty}|${bankAmount}|${rowIndex}`)}`;
+  const cashflowCategory = inferCashflowCategory(lineId, direction);
+
+  const tx: Transaction = {
+    id,
+    ledgerId,
+    projectId,
+    state: 'DRAFT',
+    dateTime,
+    weekCode: '',
+    direction,
+    method,
+    cashflowCategory,
+    cashflowLabel,
+    budgetCategory: budgetCategory || undefined,
+    counterparty,
+    memo,
+    amounts: {
+      bankAmount,
+      depositAmount,
+      expenseAmount,
+      vatIn,
+      vatOut: 0,
+      vatRefund,
+      balanceAfter,
+    },
+    evidenceRequired: [],
+    evidenceStatus: 'MISSING',
+    evidenceMissing: [],
+    attachmentsCount: 0,
+    createdBy: author || 'csv-import',
+    createdAt: now,
+    updatedBy: 'csv-import',
+    updatedAt: now,
+    author,
+    budgetSubCategory: budgetSubCategory || undefined,
+    budgetSubSubCategory: budgetSubSubCategory || undefined,
+    evidenceRequiredDesc: pickValue(kv, ['필수증빙자료 리스트', 'evidenceRequiredDesc']) || undefined,
+    evidenceCompletedDesc: pickValue(kv, ['실제 구비 완료된 증빙자료 리스트', 'evidenceCompletedDesc']) || undefined,
+    evidencePendingDesc: pickValue(kv, ['준비필요자료', 'evidencePendingDesc']) || undefined,
+    evidenceDriveLink: pickValue(kv, ['증빙자료 드라이브', 'evidenceDriveLink']) || undefined,
+    supportPendingDocs: pickValue(kv, ['준비 필요자료', 'supportPendingDocs']) || undefined,
+    eNaraRegistered: pickValue(kv, ['e나라 등록', 'eNaraRegistered']) || undefined,
+    eNaraExecuted: pickValue(kv, ['e나라 집행', 'eNaraExecuted']) || undefined,
+    vatSettlementDone: /Y|yes|완료|true/i.test(pickValue(kv, ['부가세 지결 완료여부', 'vatSettlementDone'])) || undefined,
+    settlementComplete: /Y|yes|완료|true/i.test(pickValue(kv, ['최종완료', 'settlementComplete'])) || undefined,
+    settlementNote: pickValue(kv, ['비고', 'settlementNote', 'note']) || undefined,
+  };
+
+  return { transaction: tx };
+}
+
+// ── Helpers (internal) ──
 
 // Map CashflowSheetLineId to a CashflowCategory for store compatibility
 function inferCashflowCategory(

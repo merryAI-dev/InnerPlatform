@@ -11,6 +11,9 @@ import { Separator } from '../ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { useAppStore } from '../../data/store';
 import { computeMemberSummaries } from '../../data/participation-data';
+import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
+import { getSeoulTodayIso } from '../../platform/business-days';
+import { findWeekForDate, getMonthMondayWeeks } from '../../platform/cashflow-weeks';
 
 interface NotifItem {
   id: string;
@@ -26,7 +29,11 @@ interface NotifItem {
 export function NotificationPanel() {
   const navigate = useNavigate();
   const { transactions, projects, participationEntries } = useAppStore();
+  const { weeks: cashflowWeeks } = useCashflowWeeks();
   const [open, setOpen] = useState(false);
+
+  const today = getSeoulTodayIso();
+  const dayOfWeek = new Date(today).getDay(); // 0=Sun..6=Sat
 
   const notifications = useMemo<NotifItem[]>(() => {
     const items: NotifItem[] = [];
@@ -95,11 +102,79 @@ export function NotificationPanel() {
       });
     });
 
+    // Weekly deadline reminder (Thu=4, Fri=5)
+    if (dayOfWeek === 4 || dayOfWeek === 5) {
+      const monthWeeks = getMonthMondayWeeks(today.slice(0, 7));
+      const currentWeek = findWeekForDate(today, monthWeeks);
+      if (currentWeek) {
+        const activeProjectIds = projects
+          .filter(p => p.phase === 'CONFIRMED' && p.status === 'IN_PROGRESS')
+          .map(p => p.id);
+        const thisWeekTxProjectIds = new Set(
+          transactions
+            .filter(t => t.dateTime >= currentWeek.weekStart && t.dateTime <= currentWeek.weekEnd)
+            .map(t => t.projectId),
+        );
+        const thisWeekSheetProjectIds = new Set(
+          cashflowWeeks
+            .filter(w => w.yearMonth === today.slice(0, 7) && w.weekNo === currentWeek.weekNo)
+            .map(w => w.projectId),
+        );
+        const missingIds = activeProjectIds.filter(
+          pid => !thisWeekTxProjectIds.has(pid) && !thisWeekSheetProjectIds.has(pid),
+        );
+        if (missingIds.length > 0) {
+          items.push({
+            id: 'deadline-weekly',
+            type: 'system',
+            severity: 'warning',
+            title: '주간 마감 임박',
+            description: `미입력 사업 ${missingIds.length}건 — 금주 사업비 입력을 완료해주세요`,
+            timestamp: today,
+            link: '/cashflow',
+            read: false,
+          });
+        }
+      }
+    }
+
+    // Variance flags (OPEN)
+    const openFlags = cashflowWeeks.filter(w => w.varianceFlag?.status === 'OPEN');
+    openFlags.forEach(w => {
+      const proj = projects.find(p => p.id === w.projectId);
+      items.push({
+        id: `vflag-${w.id}`,
+        type: 'system',
+        severity: 'critical',
+        title: '편차 플래그 확인요청',
+        description: `${proj?.name || w.projectId} — ${w.yearMonth} ${w.weekNo}주: "${w.varianceFlag?.reason || ''}"`,
+        timestamp: w.varianceFlag?.flaggedAt || today,
+        link: '/cashflow',
+        read: false,
+      });
+    });
+
+    // Approved transactions notification (info)
+    const recentApproved = transactions.filter(t => t.state === 'APPROVED' && t.approvedAt);
+    recentApproved.slice(0, 3).forEach(t => {
+      const proj = projects.find(p => p.id === t.projectId);
+      items.push({
+        id: `approved-${t.id}`,
+        type: 'approval',
+        severity: 'info',
+        title: '거래 승인됨',
+        description: `${t.counterparty} — ${t.amounts.bankAmount.toLocaleString()}원 (${proj?.name || ''})`,
+        timestamp: t.approvedAt || t.dateTime,
+        link: '/evidence',
+        read: false,
+      });
+    });
+
     return items.sort((a, b) => {
       const severityOrder = { critical: 0, warning: 1, info: 2 };
       return severityOrder[a.severity] - severityOrder[b.severity];
     });
-  }, [transactions, projects, participationEntries]);
+  }, [transactions, projects, participationEntries, cashflowWeeks, today, dayOfWeek]);
 
   const criticalCount = notifications.filter(n => n.severity === 'critical').length;
   const totalCount = notifications.length;

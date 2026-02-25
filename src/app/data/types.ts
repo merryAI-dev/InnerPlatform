@@ -377,6 +377,14 @@ export interface Transaction {
   vatSettlementDone?: boolean;     // 부가세 지결 완료여부
   settlementComplete?: boolean;    // 최종완료
   settlementNote?: string;         // 비고
+  // 감사 로그 (회계부정 방지)
+  editHistory?: Array<{
+    field: string;
+    before: unknown;
+    after: unknown;
+    editedBy: string;
+    editedAt: string;
+  }>;
 }
 
 export interface Evidence {
@@ -579,6 +587,38 @@ export interface CashflowWeekSheet {
   updatedAt: string;
   updatedByUid?: string;
   updatedByName?: string;
+  // ── 편차 확인 티켓 (Admin ↔ PM) ──
+  varianceFlag?: VarianceFlag;
+  // 편차 확인 영구 이력 — 모든 플래그/답변/해결 기록 (삭제 불가)
+  varianceHistory?: VarianceFlagEvent[];
+}
+
+// 편차 확인 티켓 — 현재 상태
+export type VarianceFlagStatus = 'OPEN' | 'REPLIED' | 'RESOLVED';
+
+export interface VarianceFlag {
+  status: VarianceFlagStatus;
+  reason: string;                // Admin이 작성한 확인 사유
+  flaggedBy: string;             // Admin 이름
+  flaggedByUid?: string;
+  flaggedAt: string;             // ISO
+  pmReply?: string;              // PM 답변
+  pmRepliedBy?: string;
+  pmRepliedByUid?: string;
+  pmRepliedAt?: string;
+  resolvedBy?: string;
+  resolvedByUid?: string;
+  resolvedAt?: string;
+}
+
+// 편차 확인 영구 이력 — 한 번 기록되면 삭제/수정 불가
+export interface VarianceFlagEvent {
+  id: string;
+  action: 'FLAG' | 'REPLY' | 'RESOLVE';
+  actor: string;                 // 이름
+  actorUid?: string;
+  content: string;               // 사유 / 답변 / 해결 코멘트
+  timestamp: string;             // ISO
 }
 
 export interface AuditLog {
@@ -742,6 +782,47 @@ export interface TrainingEnrollment {
   completedAt?: string;
   certificate?: string;       // 수료증 Storage URL
   notes?: string;
+}
+
+// ── 사업비 가이드 Q&A 챗봇 ──
+
+export type GuideStatus = 'CALIBRATING' | 'READY';
+
+export interface GuideMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: string;
+}
+
+export interface GuideDocument {
+  id: string;
+  tenantId?: string;
+  title: string;
+  content: string;                    // 원문 전체 텍스트
+  sourceType: 'pdf' | 'text' | 'markdown';
+  sourceFileName?: string;
+  charCount: number;
+  status: GuideStatus;
+  calibrationMessages: GuideMessage[];  // 캘리브레이션 대화 기록
+  calibrationSummary?: string;          // finalize 시 생성된 요약
+  uploadedBy: string;
+  uploadedByName: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GuideQA {
+  id: string;
+  tenantId?: string;
+  guideId: string;
+  question: string;
+  answer: string;
+  askedBy: string;
+  askedByName: string;
+  askedByRole: string;
+  tokensUsed?: number;
+  modelUsed?: string;
+  createdAt: string;
 }
 
 // ── Filter ──

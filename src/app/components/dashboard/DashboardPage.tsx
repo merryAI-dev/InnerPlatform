@@ -39,6 +39,8 @@ import {
   validateProject,
 } from './DashboardGuide';
 import { getSeoulTodayIso } from '../../platform/business-days';
+import { findWeekForDate, getMonthMondayWeeks } from '../../platform/cashflow-weeks';
+import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 
 function fmt(n: number) {
   if (Math.abs(n) >= 1e8) return (n / 1e8).toFixed(1) + '억';
@@ -66,6 +68,8 @@ const typeColors: Record<ProjectType, string> = {
   CONSULTING: '#8b5cf6',
   SPACE_BIZ: '#f59e0b',
   IMPACT_INVEST: '#10b981',
+  EDUCATION: '#ec4899',
+  AC_GENERAL: '#06b6d4',
   OTHER: '#94a3b8',
 };
 
@@ -163,6 +167,31 @@ export function DashboardPage() {
     const summaries = computeMemberSummaries(participationEntries);
     return summaries.filter(m => m.riskLevel === 'DANGER');
   }, [participationEntries]);
+
+  const { weeks: cashflowWeeks } = useCashflowWeeks();
+
+  const missingPmCount = useMemo(() => {
+    const monthWeeks = getMonthMondayWeeks(today.slice(0, 7));
+    const currentWeek = findWeekForDate(today, monthWeeks);
+    if (!currentWeek) return 0;
+    const activeProjectIds = projects
+      .filter(p => p.phase === 'CONFIRMED' && p.status === 'IN_PROGRESS')
+      .map(p => p.id);
+    if (activeProjectIds.length === 0) return 0;
+    const thisWeekTxProjectIds = new Set(
+      transactions
+        .filter(t => t.dateTime >= currentWeek.weekStart && t.dateTime <= currentWeek.weekEnd)
+        .map(t => t.projectId),
+    );
+    const thisWeekSheetProjectIds = new Set(
+      cashflowWeeks
+        .filter(w => w.yearMonth === today.slice(0, 7) && w.weekNo === currentWeek.weekNo)
+        .map(w => w.projectId),
+    );
+    return activeProjectIds.filter(
+      pid => !thisWeekTxProjectIds.has(pid) && !thisWeekSheetProjectIds.has(pid),
+    ).length;
+  }, [projects, transactions, cashflowWeeks, today]);
 
   const validations = useMemo(() => {
     return projects.map(p => {
@@ -299,10 +328,17 @@ export function DashboardPage() {
       </div>
 
       {/* Alerts Row */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-2.5">
         <AlertStrip icon={Clock} label="승인 대기" count={kpis.pendingApproval} color="#d97706" />
         <AlertStrip icon={AlertTriangle} label="증빙 미완료" count={kpis.missingEvidence} color="#ea580c" />
         <AlertStrip icon={TrendingDown} label="반려 거래" count={kpis.rejectedTx} color="#e11d48" />
+        <AlertStrip
+          icon={Banknote}
+          label="미입력 PM"
+          count={missingPmCount}
+          color={missingPmCount > 0 ? '#ea580c' : '#64748b'}
+          onClick={() => navigate('/cashflow')}
+        />
         <AlertStrip
           icon={Shield}
           label="참여율 위험"

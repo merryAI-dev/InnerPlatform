@@ -27,6 +27,7 @@ const UserManagementPage = lazy(() => import('./components/users/UserManagementP
 const AdminHrAnnouncementPage = lazy(() => import('./components/hr/AdminHrAnnouncementPage').then(m => ({ default: m.AdminHrAnnouncementPage })));
 const AdminPayrollPage = lazy(() => import('./components/payroll/AdminPayrollPage').then(m => ({ default: m.AdminPayrollPage })));
 const TrainingManagePage = lazy(() => import('./components/training/TrainingManagePage').then(m => ({ default: m.TrainingManagePage })));
+const BankReconciliationPage = lazy(() => import('./components/cashflow/BankReconciliationPage').then(m => ({ default: m.BankReconciliationPage })));
 const NotFoundPage = lazy(() => import('./components/layout/NotFoundPage').then(m => ({ default: m.NotFoundPage })));
 
 // Portal pages
@@ -42,6 +43,8 @@ const PortalCashflowPage = lazy(() => import('./components/portal/PortalCashflow
 const PortalSubmissionsPage = lazy(() => import('./components/portal/PortalSubmissionsPage').then(m => ({ default: m.PortalSubmissionsPage })));
 const CareerProfilePage = lazy(() => import('./components/portal/CareerProfilePage').then(m => ({ default: m.CareerProfilePage })));
 const PortalTrainingPage = lazy(() => import('./components/portal/PortalTrainingPage').then(m => ({ default: m.PortalTrainingPage })));
+const PortalWeeklyExpensePage = lazy(() => import('./components/portal/PortalWeeklyExpensePage').then(m => ({ default: m.PortalWeeklyExpensePage })));
+const GuideChatPage = lazy(() => import('./components/guide-chat/GuideChatPage').then(m => ({ default: m.GuideChatPage })));
 
 // Suspense wrapper — layouts already provide visual chrome, so a minimal fallback suffices
 function S({ C }: { C: ComponentType }) {
@@ -78,6 +81,7 @@ export const router = createBrowserRouter([
       { path: 'cashflow/projects', element: <S C={CashflowPage} /> },
       { path: 'cashflow/projects/:projectId', element: <S C={ProjectCashflowSheetPage} /> },
       { path: 'evidence', element: <S C={EvidenceQueuePage} /> },
+      { path: 'bank-reconciliation', element: <S C={BankReconciliationPage} /> },
       { path: 'participation', element: <S C={ParticipationPage} /> },
       { path: 'koica-personnel', element: <S C={KoicaPersonnelPage} /> },
       { path: 'personnel-changes', element: <S C={PersonnelChangePage} /> },
@@ -113,11 +117,13 @@ export const router = createBrowserRouter([
       { path: 'cashflow', element: <S C={PortalCashflowPage} /> },
       { path: 'budget', element: <S C={PortalBudget} /> },
       { path: 'expenses', element: <S C={PortalExpenses} /> },
+      { path: 'weekly-expenses', element: <S C={PortalWeeklyExpensePage} /> },
       { path: 'personnel', element: <S C={PortalPersonnel} /> },
       { path: 'change-requests', element: <S C={PortalChangeRequests} /> },
       { path: 'register-project', element: <S C={PortalProjectRegister} /> },
       { path: 'training', element: <S C={PortalTrainingPage} /> },
       { path: 'career-profile', element: <S C={CareerProfilePage} /> },
+      { path: 'guide-chat', element: <S C={GuideChatPage} /> },
     ],
   },
 ]);

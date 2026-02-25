@@ -51,6 +51,7 @@ import {
   assertTransitionAllowed,
   normalizeState,
 } from './state-policy.mjs';
+import { mountGuideChatRoutes } from './guide-chat.mjs';
 
 function createHttpError(statusCode, message, code = 'request_error') {
   const error = new Error(message);
@@ -1658,6 +1659,11 @@ export function createBffApp(options = {}) {
       },
     };
   }));
+
+  // ── Guide Q&A chatbot ──
+  mountGuideChatRoutes(app, {
+    db, now, idempotencyService, asyncHandler, createMutatingRoute, assertActorRoleAllowed,
+  });
 
   app.use((error, req, res, _next) => {
     const statusCode = Number.isInteger(error?.statusCode) ? error.statusCode : 500;

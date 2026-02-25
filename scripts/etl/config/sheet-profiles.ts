@@ -29,7 +29,7 @@ export const SHEET_PROFILES: SheetProfile[] = [
   { namePattern: '투자KPI', targetCollection: '', skip: true },
   // WIP 시트 — 데이터 미완성으로 스킵
   { namePattern: '서류인력 확정 프로토콜', targetCollection: '', skip: true, hint: 'WIP 프로토콜 시트' },
-  { namePattern: '100-1.참여율(전체)', targetCollection: '', skip: true, hint: '전체 서류 참여율 — WIP, 작성중 상태' },
+  { namePattern: '100-1.참여율(전체)', targetCollection: 'participationEntries', hint: '전체 서류 참여율 매트릭스(프로젝트별 3열 반복: 이름/참여율/기간)', headerStartRow: 9, headerRowCount: 1, dataStartRow: 10 },
   { namePattern: '25년매출_캐쉬플로우', targetCollection: '', skip: true, hint: '25년 매출 분석 — 헤더에 데이터 혼재, 자동매핑 불가' },
   { namePattern: '그룹(센터)별 사업현황', targetCollection: '', skip: true, hint: '빈 시트/대시보드 — 데이터 없음' },
   { namePattern: '참여자별 사업현황', targetCollection: '', skip: true, hint: '작업중 시트 — 데이터 미완성' },

@@ -1,0 +1,88 @@
+flowchart LR
+  subgraph U1["Admin Space (/)"]
+    A0[Dashboard\n- System Health\n- Alerts/Status Bar]
+    A1[Project Management\n- List/Detail\n- Wizard(New/Edit)\n- Ledger Detail]
+    A2[Finance\n- Cashflow\n- Evidence Queue\n- Payroll/Monthly Close\n- Budget Summary\n- Expense Management]
+    A3[People & Participation\n- Participation\n- KOICA Personnel\n- Personnel Changes\n- HR Announcements\n- Training Manage]
+    A4[Governance\n- Approval Queue\n- User Management\n- Audit Log\n- Settings]
+    A5[Company Board\n- Feed\n- Post\n- Comment/Vote]
+  end
+
+  subgraph U2["Portal Space (/portal)"]
+    P0[Portal Dashboard\n- Assigned Project Overview]
+    P1[Onboarding\n- Project Assignment/Selection]
+    P2[Submissions\n- Expense/Change Requests Status]
+    P3[Payroll\n- Notice Acknowledge]
+    P4[Cashflow Weekly\n- Projection/Actual 입력\n- PM Submit]
+    P5[Budget/Expenses\n- Budget View\n- Expense Input]
+    P6[Personnel\n- Team View\n- Change Requests]
+    P7[Training & Career\n- Training\n- Career Profile]
+    P8[Project Register Proposal]
+    P9[Company Board (shared)]
+  end
+
+  subgraph C1["Client Core"]
+    C0[Auth + Role Routing\n- resolveHomePath\n- admin-nav/portal guard]
+    C2[Providers\n- FirebaseProvider\n- AuthProvider\n- Board/HR/Payroll/Cashflow\n- Career/Training Providers]
+    C3[Data Store Layer\n- App Store\n- Portal Store\n- Firestore listeners\n- BFF fallback client]
+    C4[Feature Flags\n- Firestore Core\n- Platform API(BFF)\n- Emulator/Env config]
+  end
+
+  subgraph B1["BFF API (/api/v1)"]
+    B0[Security/Context\n- Firebase token verify\n- tenant/actor headers\n- allowed domain]
+    B2[Write APIs\n- Projects/Ledgers/Transactions upsert\n- Tx State transition\n- Comments/Evidences\n- Member role change]
+    B3[Read APIs\n- Projects/Ledgers/Transactions\n- Comments/Evidences\n- Audit logs/verify\n- Queue jobs]
+    B4[Integrity Controls\n- Idempotency\n- expectedVersion conflict check\n- state policy guard]
+    B5[Audit Chain\n- hash chain append\n- integrity verify endpoint]
+    B6[PII Protection\n- encrypted actor email handling]
+  end
+
+  subgraph W1["Async Processing"]
+    W0[Outbox\n- event enqueue in tx\n- retry/dead-letter]
+    W2[Work Queue\n- projection rebuild jobs\n- replay by event]
+    W3[Workers\n- outbox run\n- work-queue run\n- payroll run\n- monthly-close run]
+    W4[Projections(Views)\n- project_financials\n- approval_inbox\n- member_workload]
+  end
+
+  subgraph D1["Firestore Data Model (orgs/{orgId})"]
+    D0[Core Collections\nprojects, ledgers, transactions, comments, evidences, audit_logs, members]
+    D2[Business Collections\nparticipation_entries, payroll_schedules, payroll_runs, monthly_closes, cashflow_weeks]
+    D3[Infra Collections\noutbox, work_queue, idempotency_keys, views/*]
+  end
+
+  subgraph E1["Excel ETL Pipeline (scripts/etl)"]
+    E0[Step1 Discover\n- sheet profiles\n- header boundary detect]
+    E2[Step2 Map Schema\n- static rules (default)\n- optional LLM mapping]
+    E3[Step3 Extract\n- parser/normalizers\n- low-confidence row drop\n- tx guardrails(date/week+method+amount)]
+    E4[Step4 Validate\n- collection rules\n- error/warning report]
+    E5[Step5 Load\n- dry-run JSON\n- strict commit mode\n- skip sheets with errors]
+    E6[Outputs\n- pipeline-summary-*.json\n- validation-issues-*.json\n- collection JSONs]
+  end
+
+  subgraph O1["Ops & Reliability"]
+    O0[Firebase Automation\n- autosetup/bootstrap\n- rules/index deploy\n- emulator prep/start]
+    O2[Observability/Recovery\n- monitoring alerts\n- backup schedule\n- restore rehearsal]
+    O3[Policy & Security Ops\n- RBAC policy verify\n- PII key setup/rotation]
+  end
+
+  U1 --> C0
+  U2 --> C0
+  C0 --> C2 --> C3
+  C4 --> C3
+
+  C3 -->|Platform API enabled| B1
+  C3 -->|Firestore direct/listen| D1
+
+  B1 --> D1
+  B2 --> B4
+  B2 --> B5
+  B2 --> W0
+  W0 --> W2 --> W4
+  W3 --> W0
+  W3 --> W2
+  W3 --> W4
+
+  E1 --> D1
+  O1 --> D1
+  O2 --> D1
+  O3 --> B1
