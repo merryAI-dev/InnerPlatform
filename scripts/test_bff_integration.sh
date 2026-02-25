@@ -43,7 +43,7 @@ if command -v lsof >/dev/null 2>&1; then
   fi
 fi
 
-TMP_CONFIG="$(mktemp /tmp/firebase-bff-integration-XXXX.json)"
+TMP_CONFIG="$(mktemp "$ROOT_DIR/.firebase-bff-integration-XXXX.json")"
 node -e "const fs=require('fs');const cfg=JSON.parse(fs.readFileSync('firebase.json','utf8'));cfg.emulators=cfg.emulators||{};cfg.emulators.firestore=cfg.emulators.firestore||{};cfg.emulators.firestore.port=Number(process.argv[2]);fs.writeFileSync(process.argv[1], JSON.stringify(cfg, null, 2));" "$TMP_CONFIG" "$FIRESTORE_PORT"
 
 printf "[bff-integration] Running Firestore emulator integration tests (project=%s, port=%s)\n" "$PROJECT_ID" "$FIRESTORE_PORT"
