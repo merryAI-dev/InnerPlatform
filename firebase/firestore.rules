@@ -47,7 +47,7 @@ service cloud.firestore {
 
     // Bootstrap admin emails can always update their own member doc (including role change)
     function isBootstrapAdminEmail() {
-      return request.auth.token.email in ['mwbyun1220@mysc.co.kr', 'ai@mysc.co.kr', 'admin@mysc.co.kr'];
+      return request.auth.token.email in ['ai@mysc.co.kr', 'admin@mysc.co.kr'];
     }
 
     function memberProjectId(orgId) {
@@ -272,6 +272,9 @@ service cloud.firestore {
                           'pmSubmittedAt',
                           'pmSubmittedByUid',
                           'pmSubmittedByName',
+                          // PM ↔ Admin 편차 확인 티켓(답변 포함)
+                          'varianceFlag',
+                          'varianceHistory',
                           'updatedAt',
                           'updatedByUid',
                           'updatedByName',
@@ -397,6 +400,26 @@ service cloud.firestore {
       allow update: if isSignedIn() && isAdmin(orgId);
       allow delete: if isSignedIn()
                     && (isAdmin(orgId) || resource.data.memberId == request.auth.uid);
+    }
+
+    // ── 사업비 가이드 Q&A 챗봇 ──
+
+    match /orgs/{orgId}/guide_documents/{docId} {
+      // 조직 멤버 전원 읽기
+      allow read: if isSignedIn();
+      // admin만 생성/수정
+      allow create, update: if isSignedIn() && isAdmin(orgId);
+      allow delete: if isSignedIn() && isAdmin(orgId);
+    }
+
+    match /orgs/{orgId}/guide_qa/{qaId} {
+      // 조직 멤버 전원 읽기 (공유 Q&A)
+      allow read: if isSignedIn();
+      // 본인 질문만 생성 가능 (append-only)
+      allow create: if isSignedIn()
+                    && request.resource.data.askedBy == request.auth.uid;
+      // 수정/삭제 불가
+      allow update, delete: if false;
     }
 
     match /orgs/{orgId}/{document=**} {

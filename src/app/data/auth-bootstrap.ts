@@ -1,8 +1,10 @@
 import { normalizeEmail } from './auth-helpers';
 
-// Bootstrap admin emails are loaded exclusively from VITE_BOOTSTRAP_ADMIN_EMAILS env var.
-// Do NOT hardcode emails here — they end up in the client bundle.
-export const DEFAULT_BOOTSTRAP_ADMIN_EMAILS: readonly string[] = [];
+// Keep frontend bootstrap defaults aligned with Firestore rules.
+export const DEFAULT_BOOTSTRAP_ADMIN_EMAILS: readonly string[] = [
+  'ai@mysc.co.kr',
+  'admin@mysc.co.kr',
+];
 
 export function parseBootstrapAdminEmails(
   env: Record<string, unknown> = import.meta.env,

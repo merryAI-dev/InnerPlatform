@@ -4,7 +4,7 @@ import {
   Wallet, Calculator, Users, ArrowRightLeft, ArrowRight,
   TrendingUp, TrendingDown, Clock, AlertTriangle,
   CheckCircle2, XCircle, FileText, CircleDollarSign,
-  ArrowUpRight, ArrowDownRight, BarChart3,
+  ArrowUpRight, ArrowDownRight, BarChart3, FileSpreadsheet,
   Loader2,
 } from 'lucide-react';
 import {
@@ -429,6 +429,7 @@ export function PortalDashboard() {
             <div className="pt-1 space-y-1">
               {[
                 { label: '사업비 세트 새로 만들기', icon: Wallet, to: '/portal/expenses', color: '#4f46e5' },
+                { label: '사업비 입력(주간)', icon: FileSpreadsheet, to: '/portal/weekly-expenses', color: '#0ea5e9' },
                 { label: '예산총괄 확인', icon: Calculator, to: '/portal/budget', color: '#0d9488' },
                 { label: '인력변경 신청하기', icon: ArrowRightLeft, to: '/portal/change-requests', color: '#7c3aed' },
                 { label: '인력 현황 보기', icon: Users, to: '/portal/personnel', color: '#059669' },

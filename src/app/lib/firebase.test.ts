@@ -21,6 +21,9 @@ describe('firebase org path builders', () => {
   it('builds org-scoped collection paths', () => {
     expect(getOrgCollectionPath('mysc', 'projects')).toBe('orgs/mysc/projects');
     expect(getOrgCollectionPath('org001', 'transactions')).toBe('orgs/org001/transactions');
+    expect(getOrgCollectionPath('mysc', 'careerProfiles')).toBe('orgs/mysc/careerProfiles');
+    expect(getOrgCollectionPath('mysc', 'trainingCourses')).toBe('orgs/mysc/trainingCourses');
+    expect(getOrgCollectionPath('mysc', 'trainingEnrollments')).toBe('orgs/mysc/trainingEnrollments');
   });
 
   it('builds org-scoped document paths', () => {

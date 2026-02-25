@@ -13,7 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { Textarea } from '../ui/textarea';
 import { useCareerProfile } from '../../data/career-profile-store';
 import { useAuth } from '../../data/auth-store';
-import { useAppStore } from '../../data/store';
+import { usePortalStore } from '../../data/portal-store';
 import { useTraining } from '../../data/training-store';
 import {
   SETTLEMENT_SYSTEM_SHORT,
@@ -382,7 +382,7 @@ function EducationCareerTab() {
 // ── 참여 사업 탭 ──
 
 function ParticipationTab() {
-  const { participationEntries } = useAppStore();
+  const { participationEntries } = usePortalStore();
   const { user: authUser } = useAuth();
   const myEntries = participationEntries.filter((e) => e.memberId === authUser?.uid);
 

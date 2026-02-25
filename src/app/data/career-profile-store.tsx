@@ -64,13 +64,13 @@ function generateId(prefix: string): string {
 
 export function CareerProfileProvider({ children }: { children: ReactNode }) {
   const { authUser } = useAuth();
-  const { db } = useFirebase();
+  const { db, orgId } = useFirebase();
   const [myProfile, setMyProfile] = useState<CareerProfile | null>(null);
   const [viewedProfile, setViewedProfile] = useState<CareerProfile | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  const firestoreEnabled = featureFlags.firestoreEnabled && !!db;
-  const tenantId = authUser?.tenantId || 'org001';
+  const firestoreEnabled = featureFlags.firestoreCoreEnabled && !!db;
+  const tenantId = orgId;
 
   // 로그인 시 내 프로필 로드
   useEffect(() => {
@@ -102,10 +102,10 @@ export function CareerProfileProvider({ children }: { children: ReactNode }) {
     } else {
       // Local fallback
       const fallback = MOCK_CAREER_PROFILES.find((p) => p.uid === authUser.uid) ||
-        createEmptyCareerProfile(authUser.uid, 'org001', authUser.name);
+        createEmptyCareerProfile(authUser.uid, tenantId, authUser.name);
       setMyProfile(fallback);
     }
-  }, [authUser?.uid, firestoreEnabled]);
+  }, [authUser?.uid, authUser?.name, firestoreEnabled, db, tenantId]);
 
   // 프로필 저장 (Firestore 또는 local state)
   const saveMyProfile = useCallback(async (updates: Partial<CareerProfile>): Promise<boolean> => {
@@ -144,7 +144,7 @@ export function CareerProfileProvider({ children }: { children: ReactNode }) {
         return profile;
       } else {
         const profile = MOCK_CAREER_PROFILES.find((p) => p.uid === uid) ||
-          createEmptyCareerProfile(uid, 'org001', uid);
+          createEmptyCareerProfile(uid, tenantId, uid);
         setViewedProfile(profile);
         return profile;
       }

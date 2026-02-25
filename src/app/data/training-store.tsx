@@ -47,14 +47,14 @@ const TrainingContext: React.Context<(TrainingState & TrainingActions) | null> =
 
 export function TrainingProvider({ children }: { children: ReactNode }) {
   const { authUser } = useAuth();
-  const { db } = useFirebase();
+  const { db, orgId } = useFirebase();
   const [courses, setCourses] = useState<TrainingCourse[]>(MOCK_TRAINING_COURSES);
   const [myEnrollments, setMyEnrollments] = useState<TrainingEnrollment[]>([]);
   const [allEnrollments, setAllEnrollments] = useState<TrainingEnrollment[]>(MOCK_TRAINING_ENROLLMENTS);
   const [isLoading, setIsLoading] = useState(false);
 
-  const firestoreEnabled = featureFlags.firestoreEnabled && !!db;
-  const tenantId = authUser?.tenantId || 'org001';
+  const firestoreEnabled = featureFlags.firestoreCoreEnabled && !!db;
+  const tenantId = orgId;
 
   // Firestore 실시간 구독
   useEffect(() => {
@@ -101,7 +101,7 @@ export function TrainingProvider({ children }: { children: ReactNode }) {
     }
 
     return () => unsubs.forEach((u) => u());
-  }, [authUser?.uid, authUser?.role, firestoreEnabled, tenantId]);
+  }, [authUser?.uid, authUser?.role, firestoreEnabled, db, tenantId]);
 
   // Local fallback: 내 수강 초기화
   useEffect(() => {

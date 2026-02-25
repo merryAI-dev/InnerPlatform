@@ -9,7 +9,7 @@ import {
   where,
   type Unsubscribe,
 } from 'firebase/firestore';
-import type { Project, ParticipationEntry } from './types';
+import type { Ledger, Project, ParticipationEntry, Transaction, TransactionState } from './types';
 import type { ExpenseSet, ExpenseItem, ExpenseSetStatus } from './budget-data';
 import { EXPENSE_SETS } from './budget-data';
 import {
@@ -18,7 +18,7 @@ import {
   type ChangeRequestState,
 } from './personnel-change-data';
 import { PARTICIPATION_ENTRIES } from './participation-data';
-import { PROJECTS } from './mock-data';
+import { LEDGERS, PROJECTS, TRANSACTIONS } from './mock-data';
 import { useAuth } from './auth-store';
 import { useFirebase } from '../lib/firebase-context';
 import { featureFlags } from '../config/feature-flags';
@@ -42,10 +42,12 @@ interface PortalState {
   isLoading: boolean;
   portalUser: PortalUser | null;
   projects: Project[];
+  ledgers: Ledger[];
   myProject: Project | null;
   participationEntries: ParticipationEntry[];
   expenseSets: ExpenseSet[];
   changeRequests: ChangeRequest[];
+  transactions: Transaction[];
 }
 
 interface PortalActions {
@@ -66,6 +68,9 @@ interface PortalActions {
   duplicateExpenseSet: (setId: string) => void;
   addChangeRequest: (req: ChangeRequest) => void;
   submitChangeRequest: (id: string) => Promise<boolean>;
+  addTransaction: (tx: Transaction) => void;
+  updateTransaction: (id: string, updates: Partial<Transaction>) => void;
+  changeTransactionState: (id: string, newState: TransactionState, reason?: string) => void;
 }
 
 const _g = globalThis as any;
@@ -111,7 +116,9 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   const [expenseSets, setExpenseSets] = useState<ExpenseSet[]>(EXPENSE_SETS);
   const [changeRequests, setChangeRequests] = useState<ChangeRequest[]>(CHANGE_REQUESTS);
   const [projects, setProjects] = useState<Project[]>(PROJECTS);
+  const [ledgers, setLedgers] = useState<Ledger[]>([]);
   const [participationEntries, setParticipationEntries] = useState<ParticipationEntry[]>(PARTICIPATION_ENTRIES);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const unsubsRef = useRef<Unsubscribe[]>([]);
 
@@ -164,34 +171,52 @@ export function PortalProvider({ children }: { children: ReactNode }) {
 
     if (!firestoreEnabled || !db) {
       setProjects(PROJECTS);
+      setLedgers(portalUser?.projectId
+        ? LEDGERS.filter((l) => l.projectId === portalUser.projectId)
+        : [],
+      );
       setExpenseSets(EXPENSE_SETS);
       setChangeRequests(CHANGE_REQUESTS);
       setParticipationEntries(PARTICIPATION_ENTRIES);
+      setTransactions(portalUser?.projectId
+        ? TRANSACTIONS.filter((t) => t.projectId === portalUser.projectId)
+        : [],
+      );
       setIsLoading(false);
       return;
     }
 
     setIsLoading(true);
     let projectReady = false;
+    let ledgerReady = false;
     let expenseReady = false;
     let changeReady = false;
     let partReady = false;
+    let txReady = false;
     const markReady = () => {
-      if (projectReady && expenseReady && changeReady && partReady) setIsLoading(false);
+      if (projectReady && ledgerReady && expenseReady && changeReady && partReady && txReady) setIsLoading(false);
     };
 
     if (!portalUser?.projectId) {
       setProjects(PROJECTS);
+      setLedgers([]);
       setExpenseSets(EXPENSE_SETS);
       setChangeRequests(CHANGE_REQUESTS);
       setParticipationEntries([]);
+      setTransactions([]);
       projectReady = true;
+      ledgerReady = true;
       expenseReady = true;
       changeReady = true;
       partReady = true;
+      txReady = true;
       markReady();
     } else {
       const projectRef = doc(db, getOrgDocumentPath(orgId, 'projects', portalUser.projectId));
+      const ledgerQuery = query(
+        collection(db, getOrgCollectionPath(orgId, 'ledgers')),
+        where('projectId', '==', portalUser.projectId),
+      );
       const expenseQuery = query(
         collection(db, getOrgCollectionPath(orgId, 'expenseSets')),
         where('projectId', '==', portalUser.projectId),
@@ -220,6 +245,25 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           console.error('[PortalStore] project listen error:', err);
           setProjects(PROJECTS.filter((project) => project.id === portalUser.projectId));
           projectReady = true;
+          markReady();
+        }),
+      );
+
+      unsubsRef.current.push(
+        onSnapshot(ledgerQuery, (snap) => {
+          const list = snap.docs
+            .map((docItem) => docItem.data() as Ledger)
+            .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+          setLedgers(list);
+          ledgerReady = true;
+          markReady();
+        }, (err) => {
+          console.error('[PortalStore] ledgers listen error:', err);
+          if ((err as any)?.code !== 'permission-denied') {
+            toast.error('원장 데이터를 불러오지 못했습니다');
+          }
+          setLedgers(LEDGERS.filter((l) => l.projectId === portalUser.projectId));
+          ledgerReady = true;
           markReady();
         }),
       );
@@ -274,6 +318,30 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           markReady();
         }),
       );
+
+      const txQuery = query(
+        collection(db, getOrgCollectionPath(orgId, 'transactions')),
+        where('projectId', '==', portalUser.projectId),
+      );
+
+      unsubsRef.current.push(
+        onSnapshot(txQuery, (snap) => {
+          const list = snap.docs
+            .map((docItem) => docItem.data() as Transaction)
+            .sort((a, b) => String(b.dateTime || '').localeCompare(String(a.dateTime || '')));
+          setTransactions(list);
+          txReady = true;
+          markReady();
+        }, (err) => {
+          console.error('[PortalStore] transactions listen error:', err);
+          if ((err as any)?.code !== 'permission-denied') {
+            toast.error('거래 데이터를 불러오지 못했습니다');
+          }
+          setTransactions(TRANSACTIONS.filter((t) => t.projectId === portalUser.projectId));
+          txReady = true;
+          markReady();
+        }),
+      );
     }
 
     return () => {
@@ -290,6 +358,11 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   const persistChangeRequest = useCallback(async (request: ChangeRequest) => {
     if (!db) return;
     await setDoc(doc(db, getOrgDocumentPath(orgId, 'changeRequests', request.id)), request, { merge: true });
+  }, [db, orgId]);
+
+  const persistTransaction = useCallback(async (txData: Transaction) => {
+    if (!db) return;
+    await setDoc(doc(db, getOrgDocumentPath(orgId, 'transactions', txData.id)), txData, { merge: true });
   }, [db, orgId]);
 
   const register = useCallback(async (
@@ -592,15 +665,78 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     }
   }, [firestoreEnabled, db, orgId, portalUser?.name]);
 
+  const addTransaction = useCallback((txData: Transaction) => {
+    setTransactions((prev) => [txData, ...prev]);
+
+    if (firestoreEnabled) {
+      persistTransaction(txData).catch((err) => {
+        console.error('[PortalStore] persistTransaction error:', err);
+        toast.error('거래 저장에 실패했습니다');
+      });
+    }
+  }, [firestoreEnabled, persistTransaction]);
+
+  const updateTransaction = useCallback((id: string, updates: Partial<Transaction>) => {
+    const now = new Date().toISOString();
+    let nextTx: Transaction | null = null;
+
+    setTransactions((prev) => prev.map((t) => {
+      if (t.id !== id) return t;
+      nextTx = { ...t, ...updates, updatedAt: now };
+      return nextTx;
+    }));
+
+    if (firestoreEnabled && nextTx) {
+      persistTransaction(nextTx).catch((err) => {
+        console.error('[PortalStore] updateTransaction error:', err);
+        toast.error('거래 수정에 실패했습니다');
+      });
+    }
+  }, [firestoreEnabled, persistTransaction]);
+
+  const changeTransactionState = useCallback((id: string, newState: TransactionState, reason?: string) => {
+    const now = new Date().toISOString();
+    let nextTx: Transaction | null = null;
+
+    setTransactions((prev) => prev.map((t) => {
+      if (t.id !== id) return t;
+      const stateUpdates: Partial<Transaction> = {
+        state: newState,
+        updatedAt: now,
+        updatedBy: portalUser?.id || 'unknown',
+      };
+      if (newState === 'SUBMITTED') {
+        stateUpdates.submittedBy = portalUser?.name || portalUser?.id;
+        stateUpdates.submittedAt = now;
+      } else if (newState === 'APPROVED') {
+        stateUpdates.approvedBy = portalUser?.name || portalUser?.id;
+        stateUpdates.approvedAt = now;
+      } else if (newState === 'REJECTED' && reason) {
+        stateUpdates.rejectedReason = reason;
+      }
+      nextTx = { ...t, ...stateUpdates };
+      return nextTx;
+    }));
+
+    if (firestoreEnabled && nextTx) {
+      persistTransaction(nextTx).catch((err) => {
+        console.error('[PortalStore] changeTransactionState error:', err);
+        toast.error('거래 상태 변경에 실패했습니다');
+      });
+    }
+  }, [firestoreEnabled, persistTransaction, portalUser?.id, portalUser?.name]);
+
   const value: PortalState & PortalActions = {
     isRegistered: !!(portalUser && portalUser.projectIds.length > 0),
     isLoading,
     portalUser,
     projects,
+    ledgers,
     myProject,
     participationEntries,
     expenseSets,
     changeRequests,
+    transactions,
     register,
     setActiveProject,
     logout,
@@ -613,6 +749,9 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     duplicateExpenseSet,
     addChangeRequest,
     submitChangeRequest,
+    addTransaction,
+    updateTransaction,
+    changeTransactionState,
   };
 
   return <PortalContext.Provider value={value}>{children}</PortalContext.Provider>;
