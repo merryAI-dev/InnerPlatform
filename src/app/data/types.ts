@@ -8,7 +8,7 @@
 export type UserRole = 'admin' | 'tenant_admin' | 'finance' | 'pm' | 'viewer' | 'auditor' | 'support' | 'security';
 
 export type ProjectStatus = 'CONTRACT_PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'COMPLETED_PENDING_PAYMENT';
-export type ProjectType = 'DEV_COOPERATION' | 'CONSULTING' | 'SPACE_BIZ' | 'IMPACT_INVEST' | 'OTHER';
+export type ProjectType = 'DEV_COOPERATION' | 'CONSULTING' | 'SPACE_BIZ' | 'IMPACT_INVEST' | 'EDUCATION' | 'AC_GENERAL' | 'OTHER';
 export type ProjectPhase = 'PROSPECT' | 'CONFIRMED';  // 입찰예정 / 확정
 
 export type SettlementType = 'TYPE1' | 'TYPE2' | 'TYPE4';
@@ -76,6 +76,8 @@ export const PROJECT_TYPE_LABELS: Record<ProjectType, string> = {
   CONSULTING: 'C-1. 컨설팅',
   SPACE_BIZ: 'S-1. 공간사업',
   IMPACT_INVEST: 'I-투자/임팩트',
+  EDUCATION: 'E-1. 교육사업 (워크숍 등)',
+  AC_GENERAL: 'A-1. AC(일반)',
   OTHER: 'Z-1. 기타사업',
 };
 
@@ -84,6 +86,8 @@ export const PROJECT_TYPE_SHORT_LABELS: Record<ProjectType, string> = {
   CONSULTING: '컨설팅',
   SPACE_BIZ: '공간사업',
   IMPACT_INVEST: '투자/임팩트',
+  EDUCATION: '교육사업',
+  AC_GENERAL: 'AC(일반)',
   OTHER: '기타',
 };
 
@@ -356,6 +360,23 @@ export interface Transaction {
   createdAt: string;
   updatedBy: string;
   updatedAt: string;
+  // ── 정산 대장 확장 필드 (Settlement Ledger) ──
+  author?: string;                 // 작성자
+  budgetSubCategory?: string;      // 세목
+  budgetSubSubCategory?: string;   // 세세목
+  // 증빙 추적 (사업팀)
+  evidenceRequiredDesc?: string;   // 필수증빙자료 리스트 (텍스트)
+  evidenceCompletedDesc?: string;  // 구비 완료된 증빙자료 리스트
+  evidencePendingDesc?: string;    // 준비필요자료
+  // 정산지원 담당자
+  evidenceDriveLink?: string;      // 증빙자료 드라이브 링크
+  supportPendingDocs?: string;     // 도담/써니 준비 필요자료
+  // 도담 (정부 보고)
+  eNaraRegistered?: string;        // e나라 등록
+  eNaraExecuted?: string;          // e나라 집행
+  vatSettlementDone?: boolean;     // 부가세 지결 완료여부
+  settlementComplete?: boolean;    // 최종완료
+  settlementNote?: string;         // 비고
 }
 
 export interface Evidence {
