@@ -38,37 +38,34 @@
       ]
     }
   ],
-  "routes": [
+  "rewrites": [
     {
-      "src": "^/api/v1$",
-      "dest": "/api/bff?__path=/api/v1"
+      "source": "/api/v1",
+      "destination": "/api/bff?__path=/api/v1"
     },
     {
-      "src": "^/api/v1/(.*)$",
-      "dest": "/api/bff?__path=/api/v1/$1"
+      "source": "/api/v1/:path*",
+      "destination": "/api/bff?__path=/api/v1/:path*"
     },
     {
-      "src": "^/api/internal/workers/work-queue/run$",
-      "dest": "/api/bff?__path=/api/internal/workers/work-queue/run"
+      "source": "/api/internal/workers/work-queue/run",
+      "destination": "/api/bff?__path=/api/internal/workers/work-queue/run"
     },
     {
-      "src": "^/api/internal/workers/outbox/run$",
-      "dest": "/api/bff?__path=/api/internal/workers/outbox/run"
+      "source": "/api/internal/workers/outbox/run",
+      "destination": "/api/bff?__path=/api/internal/workers/outbox/run"
     },
     {
-      "src": "^/api/internal/workers/payroll/run$",
-      "dest": "/api/bff?__path=/api/internal/workers/payroll/run"
+      "source": "/api/internal/workers/payroll/run",
+      "destination": "/api/bff?__path=/api/internal/workers/payroll/run"
     },
     {
-      "src": "^/api/internal/workers/monthly-close/run$",
-      "dest": "/api/bff?__path=/api/internal/workers/monthly-close/run"
+      "source": "/api/internal/workers/monthly-close/run",
+      "destination": "/api/bff?__path=/api/internal/workers/monthly-close/run"
     },
     {
-      "handle": "filesystem"
-    },
-    {
-      "src": "^/(.*)$",
-      "dest": "/index.html"
+      "source": "/(.*)",
+      "destination": "/index.html"
     }
   ]
 }
