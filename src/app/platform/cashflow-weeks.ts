@@ -92,3 +92,22 @@ export function getMonthMondayWeeks(yearMonth: string): MonthMondayWeek[] {
 export function isYearMonth(value: unknown): value is string {
   return isValidYearMonth(value);
 }
+
+/** All Monday-based weeks for an entire year (Jan..Dec), ~48-53 weeks. */
+export function getYearMondayWeeks(year: number): MonthMondayWeek[] {
+  const all: MonthMondayWeek[] = [];
+  for (let m = 1; m <= 12; m++) {
+    const ym = `${year}-${pad2(m)}`;
+    all.push(...getMonthMondayWeeks(ym));
+  }
+  return all;
+}
+
+/** Find which MonthMondayWeek a date (YYYY-MM-DD) falls into. */
+export function findWeekForDate(
+  dateStr: string,
+  weeks: MonthMondayWeek[],
+): MonthMondayWeek | undefined {
+  if (!dateStr) return undefined;
+  return weeks.find((w) => dateStr >= w.weekStart && dateStr <= w.weekEnd);
+}

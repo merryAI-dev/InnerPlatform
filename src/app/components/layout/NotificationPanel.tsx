@@ -11,6 +11,9 @@ import { Separator } from '../ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { useAppStore } from '../../data/store';
 import { computeMemberSummaries } from '../../data/participation-data';
+import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
+import { getSeoulTodayIso } from '../../platform/business-days';
+import { findWeekForDate, getMonthMondayWeeks } from '../../platform/cashflow-weeks';
 
 interface NotifItem {
   id: string;
@@ -26,7 +29,11 @@ interface NotifItem {
 export function NotificationPanel() {
   const navigate = useNavigate();
   const { transactions, projects, participationEntries } = useAppStore();
+  const { weeks: cashflowWeeks } = useCashflowWeeks();
   const [open, setOpen] = useState(false);
+
+  const today = getSeoulTodayIso();
+  const dayOfWeek = new Date(today).getDay(); // 0=Sun..6=Sat
 
   const notifications = useMemo<NotifItem[]>(() => {
     const items: NotifItem[] = [];
@@ -95,11 +102,79 @@ export function NotificationPanel() {
       });
     });
 
+    // Weekly deadline reminder (Thu=4, Fri=5)
+    if (dayOfWeek === 4 || dayOfWeek === 5) {
+      const monthWeeks = getMonthMondayWeeks(today.slice(0, 7));
+      const currentWeek = findWeekForDate(today, monthWeeks);
+      if (currentWeek) {
+        const activeProjectIds = projects
+          .filter(p => p.phase === 'CONFIRMED' && p.status === 'IN_PROGRESS')
+          .map(p => p.id);
+        const thisWeekTxProjectIds = new Set(
+          transactions
+            .filter(t => t.dateTime >= currentWeek.weekStart && t.dateTime <= currentWeek.weekEnd)
+            .map(t => t.projectId),
+        );
+        const thisWeekSheetProjectIds = new Set(
+          cashflowWeeks
+            .filter(w => w.yearMonth === today.slice(0, 7) && w.weekNo === currentWeek.weekNo)
+            .map(w => w.projectId),
+        );
+        const missingIds = activeProjectIds.filter(
+          pid => !thisWeekTxProjectIds.has(pid) && !thisWeekSheetProjectIds.has(pid),
+        );
+        if (missingIds.length > 0) {
+          items.push({
+            id: 'deadline-weekly',
+            type: 'system',
+            severity: 'warning',
+            title: '주간 마감 임박',
+            description: `미입력 사업 ${missingIds.length}건 — 금주 사업비 입력을 완료해주세요`,
+            timestamp: today,
+            link: '/cashflow',
+            read: false,
+          });
+        }
+      }
+    }
+
+    // Variance flags (OPEN)
+    const openFlags = cashflowWeeks.filter(w => w.varianceFlag?.status === 'OPEN');
+    openFlags.forEach(w => {
+      const proj = projects.find(p => p.id === w.projectId);
+      items.push({
+        id: `vflag-${w.id}`,
+        type: 'system',
+        severity: 'critical',
+        title: '편차 플래그 확인요청',
+        description: `${proj?.name || w.projectId} — ${w.yearMonth} ${w.weekNo}주: "${w.varianceFlag?.reason || ''}"`,
+        timestamp: w.varianceFlag?.flaggedAt || today,
+        link: '/cashflow',
+        read: false,
+      });
+    });
+
+    // Approved transactions notification (info)
+    const recentApproved = transactions.filter(t => t.state === 'APPROVED' && t.approvedAt);
+    recentApproved.slice(0, 3).forEach(t => {
+      const proj = projects.find(p => p.id === t.projectId);
+      items.push({
+        id: `approved-${t.id}`,
+        type: 'approval',
+        severity: 'info',
+        title: '거래 승인됨',
+        description: `${t.counterparty} — ${t.amounts.bankAmount.toLocaleString()}원 (${proj?.name || ''})`,
+        timestamp: t.approvedAt || t.dateTime,
+        link: '/evidence',
+        read: false,
+      });
+    });
+
     return items.sort((a, b) => {
       const severityOrder = { critical: 0, warning: 1, info: 2 };
       return severityOrder[a.severity] - severityOrder[b.severity];
     });
-  }, [transactions, projects, participationEntries]);
+  }, [transactions, projects, participationEntries, cashflowWeeks, today, dayOfWeek]);
 
   const criticalCount = notifications.filter(n => n.severity === 'critical').length;
   const totalCount = notifications.length;
@@ -112,13 +187,22 @@ export function NotificationPanel() {
   };
 
   const severityStyles = {
-    critical: { dot: 'bg-rose-500', bg: 'bg-rose-50/50', border: 'border-l-rose-500' },
-    warning: { dot: 'bg-amber-500', bg: 'bg-amber-50/30', border: 'border-l-amber-500' },
-    info: { dot: 'bg-blue-500', bg: 'bg-blue-50/30', border: 'border-l-blue-500' },
+    critical: { dot: 'bg-rose-500', bg: 'bg-rose-500/10 dark:bg-rose-500/15', border: 'border-l-rose-500' },
+    warning: { dot: 'bg-amber-500', bg: 'bg-amber-500/10 dark:bg-amber-500/15', border: 'border-l-amber-500' },
+    info: { dot: 'bg-blue-500', bg: 'bg-blue-500/10 dark:bg-blue-500/15', border: 'border-l-blue-500' },
   };
 
-  const handleGo = (link?: string) => {
-    if (link) { navigate(link); setOpen(false); }
+  const fallbackByType: Record<NotifItem['type'], string> = {
+    approval: '/approvals',
+    evidence: '/evidence',
+    risk: '/participation',
+    system: '/approvals',
+  };
+
+  const handleGo = (notif: NotifItem) => {
+    const target = notif.link || fallbackByType[notif.type];
+    navigate(target);
+    setOpen(false);
   };
 
   return (
@@ -136,14 +220,14 @@ export function NotificationPanel() {
           )}
         </Button>
       </SheetTrigger>
-      <SheetContent className="w-[420px] p-0 flex flex-col">
+      <SheetContent className="glass-heavy w-[420px] p-0 flex flex-col">
         {/* Header */}
-        <div className="px-5 py-4 border-b border-border/60">
+        <div className="px-5 py-4 border-b border-glass-border">
           <div className="flex items-center justify-between mb-1">
             <SheetTitle className="text-[15px]" style={{ fontWeight: 700 }}>알림 센터</SheetTitle>
             <div className="flex items-center gap-2">
               {criticalCount > 0 && (
-                <Badge className="bg-rose-500 text-white text-[10px]" style={{ fontWeight: 700 }}>
+                <Badge className="border border-rose-300/40 bg-rose-500/30 text-rose-100 text-[10px]" style={{ fontWeight: 700 }}>
                   긴급 {criticalCount}
                 </Badge>
               )}
@@ -178,10 +262,10 @@ export function NotificationPanel() {
               return (
                 <div
                   key={n.id}
-                  className={`flex items-start gap-3 p-3 rounded-lg border-l-[3px] cursor-pointer transition-colors hover:bg-muted/40 ${sev.border} ${sev.bg}`}
-                  onClick={() => handleGo(n.link)}
+                  className={`flex items-start gap-3 p-3 rounded-lg border-l-[3px] cursor-pointer transition-colors hover:bg-white/10 ${sev.border} ${sev.bg}`}
+                  onClick={() => handleGo(n)}
                 >
-                  <div className="w-7 h-7 rounded-md bg-white/80 flex items-center justify-center shrink-0 border border-border/40 mt-0.5">
+                  <div className="w-7 h-7 rounded-md bg-white/40 dark:bg-white/10 backdrop-blur-sm flex items-center justify-center shrink-0 border border-white/20 mt-0.5">
                     <Icon className="w-3.5 h-3.5 text-muted-foreground" />
                   </div>
                   <div className="flex-1 min-w-0">
@@ -207,10 +291,10 @@ export function NotificationPanel() {
               return (
                 <div
                   key={n.id}
-                  className={`flex items-start gap-3 p-3 rounded-lg border-l-[3px] cursor-pointer transition-colors hover:bg-muted/40 ${sev.border} ${sev.bg}`}
-                  onClick={() => handleGo(n.link)}
+                  className={`flex items-start gap-3 p-3 rounded-lg border-l-[3px] cursor-pointer transition-colors hover:bg-white/10 ${sev.border} ${sev.bg}`}
+                  onClick={() => handleGo(n)}
                 >
-                  <div className="w-7 h-7 rounded-md bg-white/80 flex items-center justify-center shrink-0 border border-border/40 mt-0.5">
+                  <div className="w-7 h-7 rounded-md bg-white/40 dark:bg-white/10 backdrop-blur-sm flex items-center justify-center shrink-0 border border-white/20 mt-0.5">
                     <Icon className="w-3.5 h-3.5 text-rose-500" />
                   </div>
                   <div className="flex-1 min-w-0">
@@ -229,10 +313,10 @@ export function NotificationPanel() {
               return (
                 <div
                   key={n.id}
-                  className={`flex items-start gap-3 p-3 rounded-lg border-l-[3px] cursor-pointer transition-colors hover:bg-muted/40 ${sev.border} ${sev.bg}`}
-                  onClick={() => handleGo(n.link)}
+                  className={`flex items-start gap-3 p-3 rounded-lg border-l-[3px] cursor-pointer transition-colors hover:bg-white/10 ${sev.border} ${sev.bg}`}
+                  onClick={() => handleGo(n)}
                 >
-                  <div className="w-7 h-7 rounded-md bg-white/80 flex items-center justify-center shrink-0 border border-border/40 mt-0.5">
+                  <div className="w-7 h-7 rounded-md bg-white/40 dark:bg-white/10 backdrop-blur-sm flex items-center justify-center shrink-0 border border-white/20 mt-0.5">
                     <Clock className="w-3.5 h-3.5 text-amber-500" />
                   </div>
                   <div className="flex-1 min-w-0">

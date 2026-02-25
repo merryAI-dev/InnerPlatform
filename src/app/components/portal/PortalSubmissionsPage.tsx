@@ -245,16 +245,16 @@ export function PortalSubmissionsPage() {
         </CardContent>
       </Card>
 
-      {/* Cashflow */}
+      {/* Weekly Expense Input */}
       <Card>
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between gap-3">
             <CardTitle className="text-[13px] flex items-center gap-1.5">
               <BarChart3 className="w-4 h-4 text-teal-600" />
-              캐시플로(주간) 작성/결산
+              사업비 입력(주간) 작성/제출
             </CardTitle>
-            <Button variant="outline" size="sm" className="h-7 text-[11px] gap-1" onClick={() => navigate('/portal/cashflow')}>
-              시트 열기 <ExternalLink className="w-3 h-3" />
+            <Button variant="outline" size="sm" className="h-7 text-[11px] gap-1" onClick={() => navigate('/portal/weekly-expenses')}>
+              입력 열기 <ExternalLink className="w-3 h-3" />
             </Button>
           </div>
         </CardHeader>

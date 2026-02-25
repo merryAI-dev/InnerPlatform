@@ -3,7 +3,7 @@ import { CashflowProjectSheet } from '../cashflow/CashflowProjectSheet';
 import { usePortalStore } from '../../data/portal-store';
 
 export function PortalCashflowPage() {
-  const { portalUser, myProject } = usePortalStore();
+  const { portalUser, myProject, transactions } = usePortalStore();
 
   const projectId = portalUser?.projectId || '';
   const projectName = myProject?.name || '내 사업';
@@ -18,8 +18,5 @@ export function PortalCashflowPage() {
     );
   }
 
-  return (
-    <CashflowProjectSheet projectId={projectId} projectName={projectName} />
-  );
+  return <CashflowProjectSheet projectId={projectId} projectName={projectName} transactions={transactions} />;
 }
-

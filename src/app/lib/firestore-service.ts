@@ -15,7 +15,7 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore';
 import { getOrgCollectionPath, getOrgDocumentPath } from './firebase';
-import type { ParticipationEntry, TransactionState } from '../data/types';
+import type { OrgMember, ParticipationEntry, TransactionState } from '../data/types';
 import type { MyscEmployee, ParticipationProject } from '../data/participation-data';
 import {
   createAuditLogEntry,
@@ -156,6 +156,71 @@ export function listenEmployees(
   }, (err) => {
     console.error('[Firestore] employees listen error:', err);
   });
+}
+
+export function listenMembers(
+  db: Firestore,
+  orgId: string,
+  callback: (members: OrgMember[]) => void,
+): Unsubscribe {
+  return onSnapshot(colRef(db, orgId, 'members'), (snap) => {
+    const list: OrgMember[] = [];
+    snap.forEach((d) => {
+      const raw = d.data() as Partial<OrgMember>;
+      list.push({
+        uid: (raw.uid || d.id).trim(),
+        name: raw.name || '',
+        email: raw.email || '',
+        role: raw.role || 'pm',
+        avatarUrl: raw.avatarUrl,
+      });
+    });
+    list.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'ko'));
+    callback(list);
+  }, (err) => {
+    console.error('[Firestore] members listen error:', err);
+  });
+}
+
+export async function upsertMember(
+  db: Firestore,
+  orgId: string,
+  member: OrgMember & Record<string, unknown>,
+  actor: AuditActorContext = SYSTEM_ACTOR,
+): Promise<void> {
+  await setDoc(docRef(db, orgId, 'members', member.uid), withTenantScope(orgId, {
+    ...member,
+    updatedAt: new Date().toISOString(),
+  }), { merge: true });
+  await writeAuditLog(
+    db,
+    orgId,
+    'member',
+    member.uid,
+    'UPSERT',
+    `구성원 업데이트: ${member.name} (${member.email})`,
+    actor,
+  );
+}
+
+export async function deleteMember(
+  db: Firestore,
+  orgId: string,
+  uid: string,
+  actor: AuditActorContext = SYSTEM_ACTOR,
+): Promise<void> {
+  const snap = await getDoc(docRef(db, orgId, 'members', uid));
+  const data = snap.data() as (OrgMember & { email?: string }) | undefined;
+  await deleteDoc(docRef(db, orgId, 'members', uid));
+  await writeAuditLog(
+    db,
+    orgId,
+    'member',
+    uid,
+    'DELETE',
+    `구성원 삭제: ${data?.name || uid} (${data?.email || '-'})`,
+    actor,
+  );
 }
 
 export async function upsertEmployee(

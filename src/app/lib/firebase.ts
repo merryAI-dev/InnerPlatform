@@ -221,6 +221,11 @@ export const ORG_COLLECTIONS = {
   projectChangeAlerts: 'project_change_alerts',
   expenseSets: 'expense_sets',
   changeRequests: 'change_requests',
+  guideDocuments: 'guide_documents',
+  guideQa: 'guide_qa',
+  careerProfiles: 'careerProfiles',
+  trainingCourses: 'trainingCourses',
+  trainingEnrollments: 'trainingEnrollments',
 } as const;
 
 export type OrgCollectionKey = keyof typeof ORG_COLLECTIONS;

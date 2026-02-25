@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router';
 import {
   LayoutDashboard, Wallet, Calculator, Users,
   ArrowRightLeft, LogOut,
-  FolderKanban, Menu, X,
+  FolderKanban, Menu,
   Plus,
   MessagesSquare,
   CircleDollarSign,
@@ -11,6 +11,11 @@ import {
   ClipboardList,
   Loader2,
   AlertTriangle,
+  Settings2,
+  BookOpen,
+  Briefcase,
+  FileSpreadsheet,
+  MessageCircle,
 } from 'lucide-react';
 import { PortalProvider, usePortalStore } from '../../data/portal-store';
 import { useAuth } from '../../data/auth-store';
@@ -22,7 +27,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/
 import { DarkModeToggle } from '../layout/DarkModeToggle';
 import { PageTransition } from '../layout/PageTransition';
 import { ErrorBoundary } from '../layout/ErrorBoundary';
-import { resolveHomePath } from '../../platform/navigation';
+import { resolveHomePath, shouldForcePortalOnboarding } from '../../platform/navigation';
 import { addMonthsToYearMonth, getSeoulTodayIso } from '../../platform/business-days';
 
 // ═══════════════════════════════════════════════════════════════
@@ -38,13 +43,28 @@ const NAV_ITEMS = [
   { to: '/portal/cashflow', icon: BarChart3, label: '캐시플로(주간)' },
   { to: '/portal/budget', icon: Calculator, label: '예산총괄' },
   { to: '/portal/expenses', icon: Wallet, label: '사업비 입력' },
+  { to: '/portal/weekly-expenses', icon: FileSpreadsheet, label: '사업비 입력(주간)' },
   { to: '/portal/personnel', icon: Users, label: '인력 현황' },
   { to: '/portal/change-requests', icon: ArrowRightLeft, label: '인력변경 신청' },
+  { to: '/portal/training', icon: BookOpen, label: '사내 교육' },
+  { to: '/portal/career-profile', icon: Briefcase, label: '내 경력 프로필' },
+  { to: '/portal/guide-chat', icon: MessageCircle, label: '사업비 가이드 Q&A' },
+  { to: '/portal/onboarding', icon: Settings2, label: '내 사업 설정', exact: true },
   { to: '/portal/register-project', icon: Plus, label: '사업 등록 제안', accent: true },
 ];
 
 function PortalContent() {
-  const { isRegistered, isLoading: portalLoading, portalUser, myProject, logout: portalLogout, expenseSets, changeRequests } = usePortalStore();
+  const {
+    isRegistered,
+    isLoading: portalLoading,
+    portalUser,
+    myProject,
+    logout: portalLogout,
+    expenseSets,
+    changeRequests,
+    projects,
+    setActiveProject,
+  } = usePortalStore();
   const { isAuthenticated, isLoading: authLoading, user: authUser, logout: authLogout } = useAuth();
   const { getUnacknowledgedCount } = useHrAnnouncements();
   const { runs, monthlyCloses } = usePayroll();
@@ -52,14 +72,30 @@ function PortalContent() {
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
 
+  // ── 모든 hooks는 early return 전에 호출 ──
+  const assignedProjects = useMemo(() => {
+    if (!portalUser) return [];
+    if (!Array.isArray(portalUser.projectIds) || portalUser.projectIds.length === 0) {
+      return myProject ? [myProject] : [];
+    }
+    const pool = projects.length ? projects : [];
+    const mapped = portalUser.projectIds
+      .map((id) => pool.find((project) => project.id === id) || null)
+      .filter((project): project is NonNullable<typeof project> => !!project);
+    if (mapped.length > 0) return mapped;
+    return myProject ? [myProject] : [];
+  }, [portalUser, projects, myProject]);
+
   // 미인증 시 로그인으로
   useEffect(() => {
+    if (authLoading) return;
     if (!isAuthenticated && !location.pathname.includes('/portal/onboarding')) {
       navigate('/login', { replace: true });
     }
-  }, [isAuthenticated, location.pathname, navigate]);
+  }, [authLoading, isAuthenticated, location.pathname, navigate]);
 
   useEffect(() => {
+    if (authLoading) return;
     const role = authUser?.role;
     if (!isAuthenticated || !role) return;
     if (resolveHomePath(role) === '/') {
@@ -71,24 +107,25 @@ function PortalContent() {
 
       navigate('/', { replace: true });
     }
-  }, [isAuthenticated, authUser, location.pathname, navigate]);
+  }, [authLoading, isAuthenticated, authUser, location.pathname, navigate]);
 
   // 포털 미등록 시 온보딩으로 (인증은 되었지만 포털 사업 미선택)
   useEffect(() => {
-    if (isAuthenticated && !isRegistered && !location.pathname.includes('/portal/onboarding')) {
+    if (authLoading) return;
+    if (shouldForcePortalOnboarding({
+      isAuthenticated,
+      role: authUser?.role,
+      isRegistered,
+      pathname: location.pathname,
+    })) {
       navigate('/portal/onboarding', { replace: true });
     }
-  }, [isAuthenticated, isRegistered, location.pathname, navigate]);
+  }, [authLoading, isAuthenticated, authUser?.role, isRegistered, location.pathname, navigate]);
 
   // Close mobile sidebar on navigation
   useEffect(() => {
     setMobileOpen(false);
   }, [location.pathname]);
-
-  // 온보딩 페이지면 레이아웃 없이 렌더
-  if (location.pathname.includes('/portal/onboarding')) {
-    return <Outlet />;
-  }
 
   if (authLoading || portalLoading) {
     return (
@@ -99,6 +136,15 @@ function PortalContent() {
         </div>
       </div>
     );
+  }
+
+  const standaloneOnboarding = (
+    location.pathname.includes('/portal/onboarding') &&
+    !isRegistered &&
+    resolveHomePath(authUser?.role) === '/portal'
+  );
+  if (standaloneOnboarding) {
+    return <Outlet />;
   }
 
   if (!isRegistered || !portalUser) {
@@ -162,7 +208,6 @@ function PortalContent() {
     const monthly = closePrev && closePrev.status === 'DONE' && !closePrev.acknowledged ? 1 : 0;
     return payroll + monthly;
   })();
-
   function isActive(to: string, exact?: boolean) {
     if (exact) return location.pathname === to;
     return location.pathname.startsWith(to);
@@ -180,10 +225,10 @@ function PortalContent() {
 
   return (
     <TooltipProvider delayDuration={300}>
-      <div className="flex h-screen w-full overflow-hidden">
+      <div className="flex h-screen w-full overflow-hidden relative">
         {/* ── Mobile overlay ── */}
         {mobileOpen && (
-          <div className="fixed inset-0 bg-black/50 z-40 lg:hidden" onClick={() => setMobileOpen(false)} />
+          <div className="fixed inset-0 bg-black/30 backdrop-blur-sm z-40 lg:hidden" onClick={() => setMobileOpen(false)} />
         )}
 
         {/* ── Sidebar ── */}
@@ -192,7 +237,8 @@ function PortalContent() {
           fixed inset-y-0 left-0 lg:relative
           transition-transform duration-200
           ${mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
-        `} style={{ background: '#0f172a' }}>
+          bg-sidebar/90 backdrop-blur-xl border-r border-white/10
+        `}>
           {/* Brand */}
           <div className="flex items-center gap-2.5 h-[48px] px-3">
             <div
@@ -213,7 +259,7 @@ function PortalContent() {
 
           {/* 사업 정보 카드 */}
           {myProject && (
-            <div className="mx-2.5 mb-2 p-2.5 rounded-lg bg-white/[0.05] border border-slate-700/50">
+            <div className="mx-2.5 mb-2 p-2.5 rounded-xl bg-white/8 border border-white/20">
               <p className="text-[10px] text-slate-500 mb-0.5">내 사업</p>
               <p className="text-[11px] text-white truncate" style={{ fontWeight: 600 }}>
                 {myProject.name.length > 28 ? myProject.name.slice(0, 28) + '...' : myProject.name}
@@ -224,6 +270,30 @@ function PortalContent() {
                 </Badge>
                 <span className="text-[9px] text-slate-600">{myProject.department}</span>
               </div>
+              {assignedProjects.length > 1 && (
+                <div className="mt-2">
+                  <p className="text-[9px] text-slate-500 mb-1">주사업 전환</p>
+                  <select
+                    value={portalUser.projectId}
+                    className="w-full h-7 rounded-md border border-white/20 bg-white/8 text-slate-200 text-[10px] px-2"
+                    onChange={(e) => { void setActiveProject(e.target.value); }}
+                  >
+                    {assignedProjects.map((project) => (
+                      <option key={project.id} value={project.id}>
+                        {project.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <Button
+                size="sm"
+                variant="outline"
+                className="mt-2 h-6 text-[10px] w-full border-white/20 bg-white/8 text-slate-200 hover:bg-white/15"
+                onClick={() => navigate('/portal/onboarding')}
+              >
+                사업 배정 수정
+              </Button>
             </div>
           )}
 
@@ -241,8 +311,8 @@ function PortalContent() {
                     className={`
                       group relative flex items-center gap-2 rounded-md text-[12px] px-2.5 py-[7px] transition-all duration-100
                       ${active
-                        ? 'bg-teal-500/15 text-white'
-                        : 'text-slate-500 hover:text-slate-300 hover:bg-white/[0.04]'
+                        ? 'bg-teal-500/18 text-white backdrop-blur-sm'
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-white/8'
                       }
                     `}
                   >
@@ -264,9 +334,9 @@ function PortalContent() {
           </nav>
 
           {/* Footer */}
-          <div className="border-t border-slate-800 p-2 space-y-1.5">
+          <div className="border-t border-white/10 p-2 space-y-1.5">
             <DarkModeToggle collapsed={false} />
-            <div className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-white/[0.03]">
+            <div className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-white/8 border border-white/10">
               <div
                 className="w-6 h-6 rounded-md flex items-center justify-center shrink-0 text-[10px] text-white"
                 style={{ fontWeight: 700, background: 'linear-gradient(135deg, #0d9488, #059669)' }}
@@ -281,7 +351,7 @@ function PortalContent() {
                 <TooltipTrigger asChild>
                   <button
                     onClick={() => { portalLogout(); authLogout(); navigate('/login'); }}
-                    className="p-1 rounded hover:bg-white/[0.06] text-slate-600 hover:text-slate-400 transition-colors"
+                    className="p-1 rounded hover:bg-white/15 text-slate-500 hover:text-slate-300 transition-colors"
                   >
                     <LogOut className="w-3.5 h-3.5" />
                   </button>
@@ -295,7 +365,7 @@ function PortalContent() {
         {/* ── Main ── */}
         <div className="flex-1 flex flex-col min-w-0 bg-background">
           {/* Top bar */}
-          <header className="flex items-center justify-between h-[48px] border-b border-border/50 px-5 bg-card shrink-0">
+          <header className="glass sticky top-0 z-30 flex items-center justify-between h-[48px] border-b border-glass-border px-5 shrink-0">
             <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
               <button className="lg:hidden p-1 rounded hover:bg-muted" onClick={() => setMobileOpen(true)}>
                 <Menu className="w-4 h-4" />

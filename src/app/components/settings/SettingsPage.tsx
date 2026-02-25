@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
-  Settings, Users, BookOpen, Shield, Building2, Plus, Database,
+  Settings, Users, BookOpen, Shield, Building2, Plus, Database, Upload, MessageCircle,
 } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
@@ -19,6 +19,8 @@ import {
   type CashflowCategory,
 } from '../../data/types';
 import { FirebaseSetup } from './FirebaseSetup';
+import { DataMigrationTab } from './DataMigrationTab';
+import { GuideUploadTab } from '../guide-chat/GuideUploadTab';
 import { PageHeader } from '../layout/PageHeader';
 import { useAuth } from '../../data/auth-store';
 import { resolveHomePath } from '../../platform/navigation';
@@ -94,8 +96,14 @@ export function SettingsPage() {
           <TabsTrigger value="templates" className="gap-1.5">
             <BookOpen className="w-3.5 h-3.5" /> 원장 템플릿
           </TabsTrigger>
+          <TabsTrigger value="migration" className="gap-1.5">
+            <Upload className="w-3.5 h-3.5" /> 데이터 마이그레이션
+          </TabsTrigger>
           <TabsTrigger value="permissions" className="gap-1.5">
             <Shield className="w-3.5 h-3.5" /> 권한 설정
+          </TabsTrigger>
+          <TabsTrigger value="guide" className="gap-1.5">
+            <MessageCircle className="w-3.5 h-3.5" /> 사업비 가이드
           </TabsTrigger>
         </TabsList>
 
@@ -236,6 +244,11 @@ export function SettingsPage() {
           </div>
         </TabsContent>
 
+        {/* Data migration */}
+        <TabsContent value="migration">
+          <DataMigrationTab />
+        </TabsContent>
+
         {/* Permissions */}
         <TabsContent value="permissions">
           <Card>
@@ -287,6 +300,11 @@ export function SettingsPage() {
               </Table>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* Guide Q&A */}
+        <TabsContent value="guide">
+          <GuideUploadTab />
         </TabsContent>
       </Tabs>
     </div>

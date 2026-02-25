@@ -14,4 +14,11 @@ coverage/
 .env.test.local
 .env.production.local
 .env.pii.local
+.env.preview.local
 .vercel
+
+# ETL dry-run output
+scripts/etl/output/
+
+# Large binary files
+*.xlsx

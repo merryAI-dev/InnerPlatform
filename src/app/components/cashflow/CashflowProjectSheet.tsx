@@ -18,9 +18,14 @@ import {
 } from '../ui/alert-dialog';
 import { PageHeader } from '../layout/PageHeader';
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
-import { CASHFLOW_SHEET_LINE_LABELS, type CashflowSheetLineId, type CashflowWeekSheet } from '../../data/types';
+import {
+  CASHFLOW_SHEET_LINE_LABELS,
+  type CashflowSheetLineId,
+  type CashflowWeekSheet,
+  type Transaction,
+} from '../../data/types';
 import { getSeoulTodayIso } from '../../platform/business-days';
-import { CASHFLOW_ALL_LINES, CASHFLOW_IN_LINES, CASHFLOW_OUT_LINES } from '../../platform/cashflow-sheet';
+import { CASHFLOW_ALL_LINES, CASHFLOW_IN_LINES, CASHFLOW_OUT_LINES, aggregateTransactionsToActual } from '../../platform/cashflow-sheet';
 import { getMonthMondayWeeks } from '../../platform/cashflow-weeks';
 import { useAuth } from '../../data/auth-store';
 import { useBlocker } from 'react-router';
@@ -38,7 +43,15 @@ function parseAmount(raw: string): number {
   return Math.trunc(n);
 }
 
-export function CashflowProjectSheet({ projectId, projectName }: { projectId: string; projectName: string }) {
+export function CashflowProjectSheet({
+  projectId,
+  projectName,
+  transactions,
+}: {
+  projectId: string;
+  projectName: string;
+  transactions: Transaction[];
+}) {
   const { user } = useAuth();
   const role = user?.role;
   const isPm = role === 'pm';
@@ -65,6 +78,16 @@ export function CashflowProjectSheet({ projectId, projectName }: { projectId: st
     for (const w of projectWeeks) map.set(w.weekNo, w);
     return map;
   }, [projectWeeks]);
+
+  // ── Actual 자동 집계: 트랜잭션에서 주차별 금액 계산 ──
+  const projectTxForMonth = useMemo(
+    () => transactions.filter((t) => t.projectId === projectId && t.dateTime.startsWith(yearMonth)),
+    [transactions, projectId, yearMonth],
+  );
+  const actualFromTx = useMemo(
+    () => aggregateTransactionsToActual(projectTxForMonth, monthWeeks),
+    [projectTxForMonth, monthWeeks],
+  );
 
   const [mode, setMode] = useState<'projection' | 'actual'>('projection');
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -158,6 +181,12 @@ export function CashflowProjectSheet({ projectId, projectName }: { projectId: st
     weekNo: number;
     lineId: CashflowSheetLineId;
   }): number {
+    // Actual → 트랜잭션 자동 집계값 사용 (수동 입력 X)
+    if (params.mode === 'actual') {
+      const weekBucket = actualFromTx.get(params.weekNo);
+      return weekBucket?.[params.lineId] || 0;
+    }
+    // Projection → 기존 수동 입력 로직
     const doc = byWeekNo.get(params.weekNo);
     const persisted = getPersistedCell({ doc, mode: params.mode, lineId: params.lineId });
     const key = resolveCellKey(params);
@@ -381,7 +410,7 @@ export function CashflowProjectSheet({ projectId, projectName }: { projectId: st
                         </div>
                         <div className="text-[9px] text-muted-foreground mt-0.5">{w.weekStart} ~ {w.weekEnd}</div>
                         <div className="mt-2 flex items-center justify-end gap-1.5">
-                          {canEdit && !weekMeta[w.weekNo]?.adminClosed && (
+                          {canEdit && !weekMeta[w.weekNo]?.adminClosed && tableMode !== 'actual' && (
                             <Button
                               size="sm"
                               variant="outline"
@@ -422,6 +451,13 @@ export function CashflowProjectSheet({ projectId, projectName }: { projectId: st
                 </tr>
               </thead>
               <tbody>
+                {tableMode === 'actual' && (
+                  <tr className="bg-sky-50/50 dark:bg-sky-950/20">
+                    <td className="px-4 py-2 text-[10px] text-sky-700 dark:text-sky-300" colSpan={monthWeeks.length + 2}>
+                      Actual 값은 승인/제출된 사업비 사용내역(트랜잭션)에서 자동 집계됩니다. 사용내역 등록 시 자동 반영됩니다.
+                    </td>
+                  </tr>
+                )}
                 <tr className="bg-emerald-50/40 dark:bg-emerald-950/10">
                   <td className="px-4 py-2" colSpan={monthWeeks.length + 2} style={{ fontWeight: 700 }}>
                     입금 ({tableMode === 'projection' ? 'Projection' : 'Actual'})
@@ -431,13 +467,23 @@ export function CashflowProjectSheet({ projectId, projectName }: { projectId: st
                   <tr key={lineId} className="border-t border-border/30">
                     <td className="px-4 py-2" style={{ fontWeight: 500 }}>{CASHFLOW_SHEET_LINE_LABELS[lineId]}</td>
                     {monthWeeks.map((w) => {
+                      const isThisWeek = todayYearMonth === yearMonth && todayIso >= w.weekStart && todayIso <= w.weekEnd;
+                      const colClass = isThisWeek ? 'bg-teal-50/30 dark:bg-teal-950/10' : '';
+
+                      if (tableMode === 'actual') {
+                        const amount = getEffectiveAmount({ yearMonth, mode: 'actual', weekNo: w.weekNo, lineId });
+                        return (
+                          <td key={w.weekNo} className={`px-3 py-2 text-right ${colClass}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
+                            {fmt(amount)}
+                          </td>
+                        );
+                      }
+
                       const doc = byWeekNo.get(w.weekNo);
                       const persisted = getPersistedCell({ doc, mode: tableMode, lineId });
                       const key = resolveCellKey({ yearMonth, mode: tableMode, weekNo: w.weekNo, lineId });
                       const raw = Object.prototype.hasOwnProperty.call(drafts, key) ? drafts[key] : undefined;
                       const value = raw !== undefined ? raw : (persisted.hasValue ? String(persisted.amount) : '');
-                      const isThisWeek = todayYearMonth === yearMonth && todayIso >= w.weekStart && todayIso <= w.weekEnd;
-                      const colClass = isThisWeek ? 'bg-teal-50/30 dark:bg-teal-950/10' : '';
 
                       return (
                         <td key={w.weekNo} className={`px-3 py-1.5 text-right ${colClass}`}>
@@ -470,13 +516,23 @@ export function CashflowProjectSheet({ projectId, projectName }: { projectId: st
                   <tr key={lineId} className="border-t border-border/30">
                     <td className="px-4 py-2" style={{ fontWeight: 500 }}>{CASHFLOW_SHEET_LINE_LABELS[lineId]}</td>
                     {monthWeeks.map((w) => {
+                      const isThisWeek = todayYearMonth === yearMonth && todayIso >= w.weekStart && todayIso <= w.weekEnd;
+                      const colClass = isThisWeek ? 'bg-teal-50/30 dark:bg-teal-950/10' : '';
+
+                      if (tableMode === 'actual') {
+                        const amount = getEffectiveAmount({ yearMonth, mode: 'actual', weekNo: w.weekNo, lineId });
+                        return (
+                          <td key={w.weekNo} className={`px-3 py-2 text-right ${colClass}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
+                            {fmt(amount)}
+                          </td>
+                        );
+                      }
+
                       const doc = byWeekNo.get(w.weekNo);
                       const persisted = getPersistedCell({ doc, mode: tableMode, lineId });
                       const key = resolveCellKey({ yearMonth, mode: tableMode, weekNo: w.weekNo, lineId });
                       const raw = Object.prototype.hasOwnProperty.call(drafts, key) ? drafts[key] : undefined;
                       const value = raw !== undefined ? raw : (persisted.hasValue ? String(persisted.amount) : '');
-                      const isThisWeek = todayYearMonth === yearMonth && todayIso >= w.weekStart && todayIso <= w.weekEnd;
-                      const colClass = isThisWeek ? 'bg-teal-50/30 dark:bg-teal-950/10' : '';
 
                       return (
                         <td key={w.weekNo} className={`px-3 py-1.5 text-right ${colClass}`}>

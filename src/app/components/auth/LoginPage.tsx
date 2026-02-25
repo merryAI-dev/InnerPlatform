@@ -144,7 +144,7 @@ export function LoginPage() {
                     type="email"
                     value={email}
                     onChange={e => { setEmail(e.target.value); setError(''); }}
-                    placeholder="user@mysc.co.kr"
+                    placeholder="user@example.com"
                     className="h-11 text-[13px]"
                     autoComplete="email"
                     autoFocus
@@ -204,8 +204,8 @@ export function LoginPage() {
                   <UserPlus className="w-4 h-4 text-teal-600 dark:text-teal-400" />
                 </div>
                 <div>
-                  <p className="text-[12px]" style={{ fontWeight: 600 }}>신규 사용자 등록</p>
-                  <p className="text-[10px] text-muted-foreground">사업 담당자로 가입하고 포털을 이용하세요</p>
+                  <p className="text-[12px]" style={{ fontWeight: 600 }}>포털 초기 등록/사업 설정</p>
+                  <p className="text-[10px] text-muted-foreground">최초 1회 등록 후에는 동일 화면에서 사업 배정을 수정할 수 있습니다</p>
                 </div>
               </div>
               <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors" />

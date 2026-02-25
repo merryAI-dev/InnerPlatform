@@ -8,7 +8,7 @@
 export type UserRole = 'admin' | 'tenant_admin' | 'finance' | 'pm' | 'viewer' | 'auditor' | 'support' | 'security';
 
 export type ProjectStatus = 'CONTRACT_PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'COMPLETED_PENDING_PAYMENT';
-export type ProjectType = 'DEV_COOPERATION' | 'CONSULTING' | 'SPACE_BIZ' | 'IMPACT_INVEST' | 'OTHER';
+export type ProjectType = 'DEV_COOPERATION' | 'CONSULTING' | 'SPACE_BIZ' | 'IMPACT_INVEST' | 'EDUCATION' | 'AC_GENERAL' | 'OTHER';
 export type ProjectPhase = 'PROSPECT' | 'CONFIRMED';  // 입찰예정 / 확정
 
 export type SettlementType = 'TYPE1' | 'TYPE2' | 'TYPE4';
@@ -76,6 +76,8 @@ export const PROJECT_TYPE_LABELS: Record<ProjectType, string> = {
   CONSULTING: 'C-1. 컨설팅',
   SPACE_BIZ: 'S-1. 공간사업',
   IMPACT_INVEST: 'I-투자/임팩트',
+  EDUCATION: 'E-1. 교육사업 (워크숍 등)',
+  AC_GENERAL: 'A-1. AC(일반)',
   OTHER: 'Z-1. 기타사업',
 };
 
@@ -84,6 +86,8 @@ export const PROJECT_TYPE_SHORT_LABELS: Record<ProjectType, string> = {
   CONSULTING: '컨설팅',
   SPACE_BIZ: '공간사업',
   IMPACT_INVEST: '투자/임팩트',
+  EDUCATION: '교육사업',
+  AC_GENERAL: 'AC(일반)',
   OTHER: '기타',
 };
 
@@ -356,6 +360,31 @@ export interface Transaction {
   createdAt: string;
   updatedBy: string;
   updatedAt: string;
+  // ── 정산 대장 확장 필드 (Settlement Ledger) ──
+  author?: string;                 // 작성자
+  budgetSubCategory?: string;      // 세목
+  budgetSubSubCategory?: string;   // 세세목
+  // 증빙 추적 (사업팀)
+  evidenceRequiredDesc?: string;   // 필수증빙자료 리스트 (텍스트)
+  evidenceCompletedDesc?: string;  // 구비 완료된 증빙자료 리스트
+  evidencePendingDesc?: string;    // 준비필요자료
+  // 정산지원 담당자
+  evidenceDriveLink?: string;      // 증빙자료 드라이브 링크
+  supportPendingDocs?: string;     // 도담/써니 준비 필요자료
+  // 도담 (정부 보고)
+  eNaraRegistered?: string;        // e나라 등록
+  eNaraExecuted?: string;          // e나라 집행
+  vatSettlementDone?: boolean;     // 부가세 지결 완료여부
+  settlementComplete?: boolean;    // 최종완료
+  settlementNote?: string;         // 비고
+  // 감사 로그 (회계부정 방지)
+  editHistory?: Array<{
+    field: string;
+    before: unknown;
+    after: unknown;
+    editedBy: string;
+    editedAt: string;
+  }>;
 }
 
 export interface Evidence {
@@ -384,13 +413,14 @@ export interface Comment {
 
 // ── Company Board (전사 게시판) ──
 
-export type BoardChannel = 'general' | 'qna' | 'ideas' | 'help';
+export type BoardChannel = 'general' | 'qna' | 'ideas' | 'help' | 'training';
 
 export const BOARD_CHANNEL_LABELS: Record<BoardChannel, string> = {
   general: '일반',
   qna: '질문',
   ideas: '아이디어',
   help: '도움요청',
+  training: '교육',
 };
 
 export interface BoardPost {
@@ -557,6 +587,38 @@ export interface CashflowWeekSheet {
   updatedAt: string;
   updatedByUid?: string;
   updatedByName?: string;
+  // ── 편차 확인 티켓 (Admin ↔ PM) ──
+  varianceFlag?: VarianceFlag;
+  // 편차 확인 영구 이력 — 모든 플래그/답변/해결 기록 (삭제 불가)
+  varianceHistory?: VarianceFlagEvent[];
+}
+
+// 편차 확인 티켓 — 현재 상태
+export type VarianceFlagStatus = 'OPEN' | 'REPLIED' | 'RESOLVED';
+
+export interface VarianceFlag {
+  status: VarianceFlagStatus;
+  reason: string;                // Admin이 작성한 확인 사유
+  flaggedBy: string;             // Admin 이름
+  flaggedByUid?: string;
+  flaggedAt: string;             // ISO
+  pmReply?: string;              // PM 답변
+  pmRepliedBy?: string;
+  pmRepliedByUid?: string;
+  pmRepliedAt?: string;
+  resolvedBy?: string;
+  resolvedByUid?: string;
+  resolvedAt?: string;
+}
+
+// 편차 확인 영구 이력 — 한 번 기록되면 삭제/수정 불가
+export interface VarianceFlagEvent {
+  id: string;
+  action: 'FLAG' | 'REPLY' | 'RESOLVE';
+  actor: string;                 // 이름
+  actorUid?: string;
+  content: string;               // 사유 / 답변 / 해결 코멘트
+  timestamp: string;             // ISO
 }
 
 export interface AuditLog {
@@ -602,6 +664,165 @@ export interface MonthlyRollup {
   totalNet: number;
   totalCount: number;
   byCategory: CategoryRollup[];
+}
+
+// ── 경력 프로필 (Career Profile) ──
+
+export type DegreeType = '학사' | '석사' | '박사' | '전문학사' | '수료' | '기타';
+
+export interface EducationEntry {
+  id: string;
+  school: string;       // 학교명
+  major: string;        // 전공
+  degree: DegreeType;
+  startDate: string;    // YYYY-MM
+  endDate: string;      // YYYY-MM or '재학중'
+}
+
+export interface WorkHistoryEntry {
+  id: string;
+  company: string;      // 기업명
+  title: string;        // 최종직위
+  description: string;  // 담당업무/주요프로젝트
+  startDate: string;    // YYYY-MM
+  endDate: string;      // YYYY-MM or '현재'
+}
+
+export interface CertificationEntry {
+  id: string;
+  name: string;         // 자격증명
+  issuedAt: string;     // YYYY-MM-DD
+  issuer: string;       // 발행기관
+}
+
+/**
+ * 개인 경력 프로필 (Firestore: orgs/{orgId}/careerProfiles/{uid})
+ * 참여경력(ParticipationEntry)과 사내교육(TrainingEnrollment)은 별도 컬렉션에서 join
+ */
+export interface CareerProfile {
+  uid: string;
+  orgId: string;
+  nameKo: string;           // 국문 성명
+  nameEn?: string;          // 영문 성명
+  nameHanja?: string;       // 한자 성명
+  birthDate?: string;       // YYYY-MM-DD
+  phone?: string;           // 핸드폰
+  officePhone?: string;     // 직장 전화
+  department?: string;      // 부서
+  title?: string;           // 직책
+  joinedAt?: string;        // 입사일 YYYY-MM-DD
+  bio?: string;             // 간단 소개
+  education: EducationEntry[];
+  workHistory: WorkHistoryEntry[];
+  certifications: CertificationEntry[];
+  updatedAt: string;
+}
+
+// ── 사내 강의 (Internal Training) ──
+
+export type TrainingCategory = 'technical' | 'compliance' | 'soft-skills' | 'management' | 'language' | 'other';
+export type TrainingStatus = 'DRAFT' | 'OPEN' | 'CLOSED' | 'COMPLETED';
+export type EnrollmentStatus = 'ENROLLED' | 'COMPLETED' | 'DROPPED';
+
+export const TRAINING_CATEGORY_LABELS: Record<TrainingCategory, string> = {
+  technical: '직무/기술',
+  compliance: '컴플라이언스',
+  'soft-skills': '소프트스킬',
+  management: '사업관리',
+  language: '어학',
+  other: '기타',
+};
+
+export const TRAINING_STATUS_LABELS: Record<TrainingStatus, string> = {
+  DRAFT: '준비중',
+  OPEN: '모집중',
+  CLOSED: '모집마감',
+  COMPLETED: '종료',
+};
+
+export const ENROLLMENT_STATUS_LABELS: Record<EnrollmentStatus, string> = {
+  ENROLLED: '수강중',
+  COMPLETED: '이수완료',
+  DROPPED: '수강취소',
+};
+
+/**
+ * 사내 강의 (Firestore: orgs/{orgId}/trainingCourses/{courseId})
+ */
+export interface TrainingCourse {
+  id: string;
+  orgId: string;
+  title: string;
+  description: string;
+  category: TrainingCategory;
+  durationHours: number;      // 수강 시간 (h)
+  instructor: string;         // 강사명
+  instructorId?: string;      // 내부 강사 uid
+  startDate: string;          // YYYY-MM-DD
+  endDate: string;            // YYYY-MM-DD
+  maxParticipants: number;
+  isRequired: boolean;        // 필수 교육 여부
+  status: TrainingStatus;
+  createdBy: string;          // admin uid
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * 수강 신청/이수 (Firestore: orgs/{orgId}/trainingEnrollments/{id})
+ */
+export interface TrainingEnrollment {
+  id: string;
+  courseId: string;
+  courseTitle: string;        // denormalized
+  memberId: string;
+  memberName: string;         // denormalized
+  enrolledAt: string;
+  status: EnrollmentStatus;
+  completedAt?: string;
+  certificate?: string;       // 수료증 Storage URL
+  notes?: string;
+}
+
+// ── 사업비 가이드 Q&A 챗봇 ──
+
+export type GuideStatus = 'CALIBRATING' | 'READY';
+
+export interface GuideMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: string;
+}
+
+export interface GuideDocument {
+  id: string;
+  tenantId?: string;
+  title: string;
+  content: string;                    // 원문 전체 텍스트
+  sourceType: 'pdf' | 'text' | 'markdown';
+  sourceFileName?: string;
+  charCount: number;
+  status: GuideStatus;
+  calibrationMessages: GuideMessage[];  // 캘리브레이션 대화 기록
+  calibrationSummary?: string;          // finalize 시 생성된 요약
+  uploadedBy: string;
+  uploadedByName: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GuideQA {
+  id: string;
+  tenantId?: string;
+  guideId: string;
+  question: string;
+  answer: string;
+  askedBy: string;
+  askedByName: string;
+  askedByRole: string;
+  tokensUsed?: number;
+  modelUsed?: string;
+  createdAt: string;
 }
 
 // ── Filter ──

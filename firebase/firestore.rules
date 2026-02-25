@@ -47,7 +47,7 @@ service cloud.firestore {
 
     // Bootstrap admin emails can always update their own member doc (including role change)
     function isBootstrapAdminEmail() {
-      return request.auth.token.email in ['mwbyun1220@mysc.co.kr', 'ai@mysc.co.kr'];
+      return request.auth.token.email in ['ai@mysc.co.kr', 'admin@mysc.co.kr'];
     }
 
     function memberProjectId(orgId) {
@@ -78,7 +78,9 @@ service cloud.firestore {
 
     match /orgs/{orgId}/members/{uid} {
       allow read: if isSignedIn() && resourceHasValidTenant(orgId);
-      allow create: if isSignedIn() && request.auth.uid == uid && requestHasValidTenant(orgId);
+      allow create: if isSignedIn()
+                    && requestHasValidTenant(orgId)
+                    && (request.auth.uid == uid || isAdmin(orgId));
       allow update: if (isAdmin(orgId) && resourceHasValidTenant(orgId) && requestHasValidTenant(orgId))
                     || selfMemberUpdateWithoutRoleChange(orgId, uid)
                     || (isBootstrapAdminEmail() && request.auth.uid == uid && requestHasValidTenant(orgId));
@@ -272,6 +274,9 @@ service cloud.firestore {
                           'pmSubmittedAt',
                           'pmSubmittedByUid',
                           'pmSubmittedByName',
+                          // PM ↔ Admin 편차 확인 티켓(답변 포함)
+                          'varianceFlag',
+                          'varianceHistory',
                           'updatedAt',
                           'updatedByUid',
                           'updatedByName',
@@ -362,6 +367,61 @@ service cloud.firestore {
                       )
                     );
       allow delete: if false;
+    }
+
+    // ── Career Profiles (경력 프로필) ──
+
+    match /orgs/{orgId}/careerProfiles/{uid} {
+      // 본인 또는 admin만 읽기
+      allow read: if isSignedIn()
+                  && (isAdmin(orgId) || request.auth.uid == uid);
+      // 본인만 쓰기
+      allow write: if isSignedIn()
+                   && request.auth.uid == uid;
+    }
+
+    // ── Training Courses (사내 강의) ──
+
+    match /orgs/{orgId}/trainingCourses/{courseId} {
+      // 조직 멤버 전원 읽기
+      allow read: if isSignedIn();
+      // admin만 생성/수정/삭제
+      allow create, update, delete: if isSignedIn() && isAdmin(orgId);
+    }
+
+    // ── Training Enrollments (수강 신청/이수) ──
+
+    match /orgs/{orgId}/trainingEnrollments/{enrollmentId} {
+      // 본인 수강 또는 admin 읽기
+      allow read: if isSignedIn()
+                  && (isAdmin(orgId) || resource.data.memberId == request.auth.uid);
+      // 본인 신청 (memberId == 자신)
+      allow create: if isSignedIn()
+                    && request.resource.data.memberId == request.auth.uid;
+      // 이수 처리는 admin만 (update)
+      allow update: if isSignedIn() && isAdmin(orgId);
+      allow delete: if isSignedIn()
+                    && (isAdmin(orgId) || resource.data.memberId == request.auth.uid);
+    }
+
+    // ── 사업비 가이드 Q&A 챗봇 ──
+
+    match /orgs/{orgId}/guide_documents/{docId} {
+      // 조직 멤버 전원 읽기
+      allow read: if isSignedIn();
+      // admin만 생성/수정
+      allow create, update: if isSignedIn() && isAdmin(orgId);
+      allow delete: if isSignedIn() && isAdmin(orgId);
+    }
+
+    match /orgs/{orgId}/guide_qa/{qaId} {
+      // 조직 멤버 전원 읽기 (공유 Q&A)
+      allow read: if isSignedIn();
+      // 본인 질문만 생성 가능 (append-only)
+      allow create: if isSignedIn()
+                    && request.resource.data.askedBy == request.auth.uid;
+      // 수정/삭제 불가
+      allow update, delete: if false;
     }
 
     match /orgs/{orgId}/{document=**} {

@@ -2,14 +2,13 @@ import { useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import {
   Users, UserPlus, Percent, ArrowRight,
-  Building2, Briefcase, Clock,
+  Building2, Briefcase, Clock, AlertTriangle, Loader2,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { PageHeader } from '../layout/PageHeader';
 import { usePortalStore } from '../../data/portal-store';
-import { PARTICIPATION_ENTRIES } from '../../data/participation-data';
 import {
   SETTLEMENT_SYSTEM_SHORT,
 } from '../../data/types';
@@ -20,13 +19,35 @@ import {
 
 export function PortalPersonnel() {
   const navigate = useNavigate();
-  const { myProject } = usePortalStore();
+  const { isLoading, myProject, participationEntries } = usePortalStore();
+
+  if (isLoading) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-5 h-5 mx-auto animate-spin text-muted-foreground" />
+          <p className="mt-2 text-[12px] text-muted-foreground">인력 현황을 불러오는 중...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!myProject) {
+    return (
+      <div className="text-center py-16">
+        <AlertTriangle className="w-10 h-10 mx-auto text-muted-foreground/30 mb-3" />
+        <p className="text-[14px] text-muted-foreground">사업이 선택되지 않았습니다.</p>
+        <Button variant="outline" className="mt-4" onClick={() => navigate('/portal/onboarding')}>
+          사업 선택하기
+        </Button>
+      </div>
+    );
+  }
 
   // 내 사업에 배정된 인력
   const myEntries = useMemo(() => {
-    if (!myProject) return [];
-    return PARTICIPATION_ENTRIES.filter(e => e.projectId === myProject.id);
-  }, [myProject]);
+    return participationEntries.filter(e => e.projectId === myProject.id);
+  }, [myProject.id, participationEntries]);
 
   // 멤버별 그룹핑
   const members = useMemo(() => {

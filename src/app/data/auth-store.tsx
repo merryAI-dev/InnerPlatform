@@ -19,6 +19,8 @@ import {
   type ProjectOwnerEntry,
   type RoleDirectoryEntry,
 } from './auth-helpers';
+import { isBootstrapAdminEmail } from './auth-bootstrap';
+import { normalizeProjectIds, resolvePrimaryProjectId } from './project-assignment';
 import { extractAuthContextFromClaims } from '../platform/rbac';
 import { isAdminSpaceRole } from '../platform/navigation';
 import { resolveTenantId } from '../platform/tenant';
@@ -32,6 +34,7 @@ export interface AuthUser {
   idToken?: string;
   avatarUrl?: string;
   projectId?: string;
+  projectIds?: string[];
   tenantId?: string;
   department?: string;
   registeredAt?: string;
@@ -48,7 +51,17 @@ interface AuthActions {
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   loginWithGoogle: () => Promise<{ success: boolean; error?: string }>;
   loginAsDemo: (role: 'admin' | 'pm' | 'finance' | 'auditor') => void;
-  registerPortalUser: (data: { name: string; email: string; password: string; role: string; projectId: string }) => Promise<{ success: boolean; error?: string }>;
+  registerPortalUser: (
+    data: {
+      name: string;
+      email: string;
+      password?: string;
+      role?: string;
+      projectId?: string;
+      projectIds?: string[];
+      primaryProjectId?: string;
+    },
+  ) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   isAdmin: () => boolean;
   isPortalUser: () => boolean;
@@ -63,6 +76,7 @@ interface MemberDoc {
   department?: string;
   status?: 'ACTIVE' | 'INACTIVE' | 'PENDING';
   projectId?: string;
+  projectIds?: string[];
   avatarUrl?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -70,9 +84,11 @@ interface MemberDoc {
 }
 
 const MOCK_PASSWORDS: Record<string, string> = {};
-ORG_MEMBERS.forEach((m) => {
-  MOCK_PASSWORDS[m.email] = 'mysc1234';
-});
+if (!import.meta.env.PROD && featureFlags.demoLoginEnabled) {
+  ORG_MEMBERS.forEach((m) => {
+    MOCK_PASSWORDS[m.email] = 'mysc1234';
+  });
+}
 
 const portalRegisteredUsers: AuthUser[] = [];
 const portalPasswords: Record<string, string> = {};
@@ -81,26 +97,6 @@ const AUTH_STORAGE_KEY = 'mysc-auth-user';
 const ACTIVE_TENANT_KEY = 'MYSC_ACTIVE_TENANT';
 const DEFAULT_ORG_ID = getDefaultOrgId();
 const ALLOWED_EMAIL_DOMAINS = getAllowedEmailDomains(import.meta.env);
-
-function parseBootstrapAdminEmails(env: Record<string, unknown> = import.meta.env): string[] {
-  const raw = typeof env.VITE_BOOTSTRAP_ADMIN_EMAILS === 'string' ? env.VITE_BOOTSTRAP_ADMIN_EMAILS : '';
-  const emails = raw
-    .split(',')
-    .map((v) => normalizeEmail(v))
-    .filter(Boolean);
-  console.log('[Auth] Bootstrap admin emails:', emails);
-  return emails;
-}
-
-function isBootstrapAdminEmail(email: string, env: Record<string, unknown> = import.meta.env): boolean {
-  if (!email) return false;
-  const list = parseBootstrapAdminEmails(env);
-  if (!list.length) return false;
-  const normalized = normalizeEmail(email);
-  const isAdmin = list.includes(normalized);
-  console.log('[Auth] isBootstrapAdminEmail check:', { email, normalized, list, isAdmin });
-  return isAdmin;
-}
 
 const ROLE_DIRECTORY: RoleDirectoryEntry[] = ORG_MEMBERS.map((member) => ({
   uid: member.uid,
@@ -162,13 +158,18 @@ function mapFirebaseUserToAuthUser(
   idToken?: string,
 ): AuthUser {
   const normalizedEmail = normalizeEmail(firebaseUser.email || member?.email || '');
+  const mergedProjectIds = normalizeProjectIds([
+    ...(Array.isArray(member?.projectIds) ? member?.projectIds : []),
+    member?.projectId,
+    resolveProjectIdForManager(firebaseUser.uid, PROJECT_OWNERS),
+  ]);
+  const primaryProjectId = resolvePrimaryProjectId(mergedProjectIds, member?.projectId);
   // Bootstrap admin은 Firestore 쓰기 실패해도 항상 admin role 부여
   const role =
     isBootstrapAdminEmail(normalizedEmail)
       ? 'admin'
       : toUserRole(member?.role) ||
         resolveRoleFromDirectory(firebaseUser.email || '', ROLE_DIRECTORY);
-  console.log('[Auth] mapFirebaseUserToAuthUser:', { email: normalizedEmail, role, memberRole: member?.role });
   return {
     uid: firebaseUser.uid,
     name: member?.name || firebaseUser.displayName || '사용자',
@@ -176,7 +177,8 @@ function mapFirebaseUserToAuthUser(
     role,
     idToken,
     avatarUrl: member?.avatarUrl || firebaseUser.photoURL || undefined,
-    projectId: member?.projectId || resolveProjectIdForManager(firebaseUser.uid, PROJECT_OWNERS),
+    projectId: primaryProjectId,
+    projectIds: mergedProjectIds,
     tenantId,
     department: member?.department,
     registeredAt: member?.createdAt,
@@ -199,14 +201,12 @@ async function upsertMemberFromFirebase(
   const now = new Date().toISOString();
   const normalizedEmail = normalizeEmail(firebaseUser.email || existing?.email || '');
   const bootstrapAdmin = isBootstrapAdminEmail(normalizedEmail);
-
-  console.log('[Auth] upsertMemberFromFirebase:', {
-    uid: firebaseUser.uid,
-    email: normalizedEmail,
-    bootstrapAdmin,
-    roleFromClaims,
-    existingRole: existing?.role,
-  });
+  const mergedProjectIds = normalizeProjectIds([
+    ...(Array.isArray(existing?.projectIds) ? existing?.projectIds : []),
+    existing?.projectId,
+    resolveProjectIdForManager(firebaseUser.uid, PROJECT_OWNERS),
+  ]);
+  const primaryProjectId = resolvePrimaryProjectId(mergedProjectIds, existing?.projectId);
 
   const merged: MemberDoc = {
     uid: firebaseUser.uid,
@@ -220,15 +220,14 @@ async function upsertMemberFromFirebase(
           resolveRoleFromDirectory(firebaseUser.email || '', ROLE_DIRECTORY),
     tenantId,
     status: existing?.status || 'ACTIVE',
-    projectId: existing?.projectId || resolveProjectIdForManager(firebaseUser.uid, PROJECT_OWNERS),
+    projectId: primaryProjectId,
+    projectIds: mergedProjectIds,
     avatarUrl: firebaseUser.photoURL || existing?.avatarUrl,
     createdAt: existing?.createdAt || now,
     updatedAt: now,
     lastLoginAt: now,
   };
   if (department) merged.department = department;
-
-  console.log('[Auth] Final merged role:', merged.role);
 
   await setDoc(memberRef, merged, { merge: true });
   return merged;
@@ -334,6 +333,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           role: orgMember.role,
           avatarUrl: orgMember.avatarUrl,
           projectId: resolveProjectIdForManager(orgMember.uid, PROJECT_OWNERS),
+          projectIds: normalizeProjectIds([resolveProjectIdForManager(orgMember.uid, PROJECT_OWNERS)]),
           tenantId: DEFAULT_ORG_ID,
         };
         setUser(authUser);
@@ -413,9 +413,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         email: 'admin@mysc.co.kr',
         role: 'admin',
         projectId: resolveProjectIdForManager('u001', PROJECT_OWNERS),
+        projectIds: normalizeProjectIds([resolveProjectIdForManager('u001', PROJECT_OWNERS)]),
         tenantId: DEFAULT_ORG_ID,
       },
-      pm: { uid: 'u002', name: '데이나', email: 'dana@mysc.co.kr', role: 'pm', projectId: 'p001', tenantId: DEFAULT_ORG_ID },
+      pm: {
+        uid: 'u002',
+        name: '데이나',
+        email: 'dana@mysc.co.kr',
+        role: 'pm',
+        projectId: 'p001',
+        projectIds: ['p001'],
+        tenantId: DEFAULT_ORG_ID,
+      },
       finance: { uid: 'u019', name: '재무팀', email: 'finance@mysc.co.kr', role: 'finance', tenantId: DEFAULT_ORG_ID },
       auditor: { uid: 'u020', name: '감사팀', email: 'audit@mysc.co.kr', role: 'auditor', tenantId: DEFAULT_ORG_ID },
     };
@@ -426,10 +435,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const registerPortalUser = useCallback(async (
-    data: { name: string; email: string; password: string; role: string; projectId: string },
+    data: {
+      name: string;
+      email: string;
+      password?: string;
+      role?: string;
+      projectId?: string;
+      projectIds?: string[];
+      primaryProjectId?: string;
+    },
   ): Promise<{ success: boolean; error?: string }> => {
     setIsLoading(true);
     await new Promise((r) => setTimeout(r, 300));
+
+    const normalizedProjectIds = normalizeProjectIds([
+      ...(Array.isArray(data.projectIds) ? data.projectIds : []),
+      data.projectId,
+    ]);
+    const primaryProjectId = resolvePrimaryProjectId(normalizedProjectIds, data.primaryProjectId || data.projectId);
+    if (!primaryProjectId || normalizedProjectIds.length === 0) {
+      setIsLoading(false);
+      return { success: false, error: '최소 1개 이상의 사업을 선택해 주세요.' };
+    }
 
     // Admin 계정은 포털 회원가입 불가
     const emailLower = normalizeEmail(data.email);
@@ -439,6 +466,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     if (featureFlags.firebaseAuthEnabled && user) {
+      if (isAdminSpaceRole(user.role)) {
+        setIsLoading(false);
+        return { success: false, error: '관리자 계정은 포털 회원가입 대상이 아닙니다.' };
+      }
+
       const db = getDb();
       if (!db) {
         setIsLoading(false);
@@ -457,10 +489,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           uid: user.uid,
           name: data.name,
           email: normalizeEmail(data.email),
-          role: 'pm',
+          role: user.role === 'viewer' ? 'viewer' : 'pm',
           tenantId,
           status: 'ACTIVE',
-          projectId: data.projectId,
+          projectId: primaryProjectId,
+          projectIds: normalizedProjectIds,
           updatedAt: now,
           createdAt: user.registeredAt || now,
           lastLoginAt: now,
@@ -470,8 +503,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           ...user,
           name: data.name,
           email: normalizeEmail(data.email),
-          role: 'pm',
-          projectId: data.projectId,
+          role: user.role === 'viewer' ? 'viewer' : 'pm',
+          projectId: primaryProjectId,
+          projectIds: normalizedProjectIds,
           tenantId,
           registeredAt: user.registeredAt || now,
         };
@@ -499,13 +533,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       name: data.name,
       email: emailLower,
       role: 'pm',
-      projectId: data.projectId,
+      projectId: primaryProjectId,
+      projectIds: normalizedProjectIds,
       tenantId: DEFAULT_ORG_ID,
       registeredAt: new Date().toISOString(),
     };
 
     portalRegisteredUsers.push(newUser);
-    portalPasswords[emailLower] = data.password;
+    portalPasswords[emailLower] = data.password || 'changeme';
 
     setUser(newUser);
     saveUser(newUser);

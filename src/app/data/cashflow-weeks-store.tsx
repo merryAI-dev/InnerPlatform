@@ -20,7 +20,7 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore';
 import { useAuth } from './auth-store';
-import type { CashflowSheetLineId, CashflowWeekSheet } from './types';
+import type { CashflowSheetLineId, CashflowWeekSheet, VarianceFlag, VarianceFlagEvent } from './types';
 import { shouldCreateDocOnUpdateError } from './cashflow-weeks.helpers';
 import { featureFlags } from '../config/feature-flags';
 import { useFirebase } from '../lib/firebase-context';
@@ -76,6 +76,11 @@ interface CashflowWeekActions {
   }) => Promise<void>;
   submitWeekAsPm: (input: { projectId: string; yearMonth: string; weekNo: number }) => Promise<void>;
   closeWeekAsAdmin: (input: { projectId: string; yearMonth: string; weekNo: number }) => Promise<void>;
+  updateVarianceFlag: (input: {
+    sheetId: string;
+    varianceFlag: VarianceFlag | undefined;
+    varianceHistory: VarianceFlagEvent[];
+  }) => Promise<void>;
   getWeeksForProject: (projectId: string) => CashflowWeekSheet[];
 }
 
@@ -372,6 +377,22 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     } as CashflowWeekSheet, { merge: false });
   }, [db, orgId, user]);
 
+  const updateVarianceFlag = useCallback(async (input: {
+    sheetId: string;
+    varianceFlag: VarianceFlag | undefined;
+    varianceHistory: VarianceFlagEvent[];
+  }): Promise<void> => {
+    if (!db) return;
+    const ref = doc(db, getOrgDocumentPath(orgId, 'cashflowWeeks', input.sheetId));
+    const now = new Date().toISOString();
+    await updateDoc(ref, {
+      varianceFlag: input.varianceFlag ?? null,
+      varianceHistory: input.varianceHistory,
+      updatedAt: now,
+      tenantId: orgId,
+    } as any);
+  }, [db, orgId]);
+
   const getWeeksForProject = useCallback((projectId: string): CashflowWeekSheet[] => {
     const pid = projectId.trim();
     if (!pid) return [];
@@ -389,6 +410,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     upsertLineAmount,
     submitWeekAsPm,
     closeWeekAsAdmin,
+    updateVarianceFlag,
     getWeeksForProject,
   }), [
     yearMonth,
@@ -401,6 +423,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     upsertLineAmount,
     submitWeekAsPm,
     closeWeekAsAdmin,
+    updateVarianceFlag,
     getWeeksForProject,
   ]);
 

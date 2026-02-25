@@ -26,37 +26,46 @@
       "schedule": "0 3 * * *"
     }
   ],
-  "routes": [
+  "headers": [
     {
-      "src": "^/api/v1$",
-      "dest": "/api/bff?__path=/api/v1"
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "X-Frame-Options", "value": "DENY" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+        { "key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=()" },
+        { "key": "X-DNS-Prefetch-Control", "value": "on" }
+      ]
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/api/v1",
+      "destination": "/api/bff?__path=/api/v1"
     },
     {
-      "src": "^/api/v1/(.*)$",
-      "dest": "/api/bff?__path=/api/v1/$1"
+      "source": "/api/v1/:path*",
+      "destination": "/api/bff?__path=/api/v1/:path*"
     },
     {
-      "src": "^/api/internal/workers/work-queue/run$",
-      "dest": "/api/bff?__path=/api/internal/workers/work-queue/run"
+      "source": "/api/internal/workers/work-queue/run",
+      "destination": "/api/bff?__path=/api/internal/workers/work-queue/run"
     },
     {
-      "src": "^/api/internal/workers/outbox/run$",
-      "dest": "/api/bff?__path=/api/internal/workers/outbox/run"
+      "source": "/api/internal/workers/outbox/run",
+      "destination": "/api/bff?__path=/api/internal/workers/outbox/run"
     },
     {
-      "src": "^/api/internal/workers/payroll/run$",
-      "dest": "/api/bff?__path=/api/internal/workers/payroll/run"
+      "source": "/api/internal/workers/payroll/run",
+      "destination": "/api/bff?__path=/api/internal/workers/payroll/run"
     },
     {
-      "src": "^/api/internal/workers/monthly-close/run$",
-      "dest": "/api/bff?__path=/api/internal/workers/monthly-close/run"
+      "source": "/api/internal/workers/monthly-close/run",
+      "destination": "/api/bff?__path=/api/internal/workers/monthly-close/run"
     },
     {
-      "handle": "filesystem"
-    },
-    {
-      "src": "^/(.*)$",
-      "dest": "/index.html"
+      "source": "/(.*)",
+      "destination": "/index.html"
     }
   ]
 }
