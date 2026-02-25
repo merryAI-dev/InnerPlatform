@@ -20,6 +20,7 @@ import {
 } from './personnel-change-data';
 import { PARTICIPATION_ENTRIES } from './participation-data';
 import { LEDGERS, PROJECTS, TRANSACTIONS } from './mock-data';
+import type { ImportRow } from '../platform/settlement-csv';
 import { useAuth } from './auth-store';
 import { useFirebase } from '../lib/firebase-context';
 import { getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
@@ -49,6 +50,8 @@ interface PortalState {
   expenseSets: ExpenseSet[];
   changeRequests: ChangeRequest[];
   transactions: Transaction[];
+  evidenceRequiredMap: Record<string, string>;
+  expenseSheetRows: ImportRow[] | null;
 }
 
 interface PortalActions {
@@ -72,6 +75,8 @@ interface PortalActions {
   addTransaction: (tx: Transaction) => void;
   updateTransaction: (id: string, updates: Partial<Transaction>) => void;
   changeTransactionState: (id: string, newState: TransactionState, reason?: string) => void;
+  saveEvidenceRequiredMap: (map: Record<string, string>) => Promise<void>;
+  saveExpenseSheetRows: (rows: ImportRow[]) => Promise<void>;
 }
 
 const _g = globalThis as any;
@@ -120,6 +125,8 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   const [ledgers, setLedgers] = useState<Ledger[]>([]);
   const [participationEntries, setParticipationEntries] = useState<ParticipationEntry[]>(PARTICIPATION_ENTRIES);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [evidenceRequiredMap, setEvidenceRequiredMap] = useState<Record<string, string>>({});
+  const [expenseSheetRows, setExpenseSheetRows] = useState<ImportRow[] | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isMemberLoading, setIsMemberLoading] = useState(true);
   const unsubsRef = useRef<Unsubscribe[]>([]);
@@ -208,6 +215,8 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       setChangeRequests([]);
       setParticipationEntries([]);
       setTransactions([]);
+      setEvidenceRequiredMap({});
+      setExpenseSheetRows(null);
       setIsLoading(false);
       return;
     }
@@ -336,6 +345,12 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         where('projectId', '==', portalUser.projectId),
       );
 
+      const evidenceMapRef = doc(db, getOrgDocumentPath(orgId, 'budgetEvidenceMaps', portalUser.projectId));
+      const expenseSheetRef = doc(
+        db,
+        `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/expense_sheets/default`,
+      );
+
       unsubsRef.current.push(
         onSnapshot(txQuery, (snap) => {
           const list = snap.docs
@@ -352,6 +367,34 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           setTransactions(TRANSACTIONS.filter((t) => t.projectId === portalUser.projectId));
           txReady = true;
           markReady();
+        }),
+      );
+
+      unsubsRef.current.push(
+        onSnapshot(evidenceMapRef, (snap) => {
+          if (!snap.exists()) {
+            setEvidenceRequiredMap({});
+            return;
+          }
+          const data = snap.data() as { map?: Record<string, string> };
+          setEvidenceRequiredMap(data?.map || {});
+        }, (err) => {
+          console.error('[PortalStore] evidence map listen error:', err);
+          setEvidenceRequiredMap({});
+        }),
+      );
+
+      unsubsRef.current.push(
+        onSnapshot(expenseSheetRef, (snap) => {
+          if (!snap.exists()) {
+            setExpenseSheetRows(null);
+            return;
+          }
+          const data = snap.data() as { rows?: ImportRow[] };
+          setExpenseSheetRows(Array.isArray(data?.rows) ? data.rows : null);
+        }, (err) => {
+          console.error('[PortalStore] expense sheet listen error:', err);
+          setExpenseSheetRows(null);
         }),
       );
     }
@@ -379,6 +422,51 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       { merge: true },
     );
   }, [db, orgId]);
+
+  const saveEvidenceRequiredMap = useCallback(async (map: Record<string, string>) => {
+    if (!db || !portalUser?.projectId) {
+      toast.error('Firestore 연결이 필요합니다. 관리자에게 문의해 주세요.');
+      return;
+    }
+    const now = new Date().toISOString();
+    const payload = withTenantScope(orgId, {
+      projectId: portalUser.projectId,
+      map,
+      updatedAt: now,
+      updatedBy: portalUser.name || authUser?.name || '',
+    });
+    await setDoc(
+      doc(db, getOrgDocumentPath(orgId, 'budgetEvidenceMaps', portalUser.projectId)),
+      payload,
+      { merge: true },
+    );
+    setEvidenceRequiredMap(map);
+  }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name]);
+
+  const saveExpenseSheetRows = useCallback(async (rows: ImportRow[]) => {
+    if (!db || !portalUser?.projectId) {
+      toast.error('Firestore 연결이 필요합니다. 관리자에게 문의해 주세요.');
+      return;
+    }
+    const now = new Date().toISOString();
+    const sanitizedRows = rows.map((row) => ({
+      tempId: row.tempId || `imp-${Date.now()}`,
+      ...(row.sourceTxId ? { sourceTxId: row.sourceTxId } : {}),
+      cells: Array.isArray(row.cells) ? row.cells.map((c) => (c ?? '')) : [],
+    }));
+    const payload = withTenantScope(orgId, {
+      projectId: portalUser.projectId,
+      rows: sanitizedRows,
+      updatedAt: now,
+      updatedBy: portalUser.name || authUser?.name || '',
+    });
+    await setDoc(
+      doc(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/expense_sheets/default`),
+      payload,
+      { merge: true },
+    );
+    setExpenseSheetRows(sanitizedRows as ImportRow[]);
+  }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name]);
 
   const persistTransaction = useCallback(async (txData: Transaction) => {
     if (!db) return;
@@ -766,6 +854,8 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     expenseSets,
     changeRequests,
     transactions,
+    evidenceRequiredMap,
+    expenseSheetRows,
     register,
     setActiveProject,
     logout,
@@ -781,6 +871,8 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     addTransaction,
     updateTransaction,
     changeTransactionState,
+    saveEvidenceRequiredMap,
+    saveExpenseSheetRows,
   };
 
   return <PortalContext.Provider value={value}>{children}</PortalContext.Provider>;

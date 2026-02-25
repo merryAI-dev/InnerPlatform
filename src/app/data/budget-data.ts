@@ -780,6 +780,16 @@ export const BUDGET_CODE_BOOK = [
   { code: '4. 팀지원금', subCodes: ['4. 팀지원금'] },
 ];
 
+// ── 증빙자료 매핑 (사업별) ──
+// key: projectId → (budgetCode|subCode) → evidenceRequiredDesc
+export const EVIDENCE_REQUIRED_MAP: Record<string, Record<string, string>> = {
+  // 예시:
+  // 'p001': {
+  //   '1. 인건비|1.1 참여인력': '근로계약서, 급여명세서, 이체확인증',
+  //   '2. 프로그램 운영비|2.1 전문가 활용비': '용역계약서, 세금계산서, 이체확인증',
+  // },
+};
+
 // ── 결제방법 라벨 ──
 
 export const PAYMENT_METHOD_MAP: Record<string, string> = {

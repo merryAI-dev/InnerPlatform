@@ -221,6 +221,7 @@ export const ORG_COLLECTIONS = {
   projectChangeAlerts: 'project_change_alerts',
   expenseSets: 'expense_sets',
   changeRequests: 'change_requests',
+  budgetEvidenceMaps: 'budget_evidence_maps',
   guideDocuments: 'guide_documents',
   guideQa: 'guide_qa',
   careerProfiles: 'careerProfiles',

@@ -1,19 +1,25 @@
+import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, Download, ExternalLink, Plus, Save, Send, Upload, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, ChevronLeft, ChevronRight, Download, ExternalLink, Plus, Save, Send, Upload, X, AlertTriangle } from 'lucide-react';
-import { Button } from '../ui/button';
-import { Badge } from '../ui/badge';
-import { Checkbox } from '../ui/checkbox';
 import type { Transaction, TransactionState } from '../../data/types';
-import { getYearMondayWeeks, findWeekForDate, type MonthMondayWeek } from '../../platform/cashflow-weeks';
-import {
-  SETTLEMENT_COLUMNS, SETTLEMENT_COLUMN_GROUPS,
-  exportSettlementCsv,
-  CASHFLOW_LINE_OPTIONS,
-  normalizeMatrixToImportRows, createEmptyImportRow, importRowToTransaction,
-  type ImportRow,
-} from '../../platform/settlement-csv';
+import { findWeekForDate, getYearMondayWeeks, type MonthMondayWeek } from '../../platform/cashflow-weeks';
 import { parseCsv, triggerDownload } from '../../platform/csv-utils';
 import { computeEvidenceStatus, computeEvidenceSummary, isValidDriveUrl } from '../../platform/evidence-helpers';
+import {
+  CASHFLOW_LINE_OPTIONS,
+  SETTLEMENT_COLUMNS, SETTLEMENT_COLUMN_GROUPS,
+  createEmptyImportRow,
+  exportImportRowsCsv,
+  exportSettlementCsv,
+  importRowToTransaction,
+  normalizeMatrixToImportRows,
+  transactionsToImportRows,
+  type ImportRow,
+} from '../../platform/settlement-csv';
+import { BUDGET_CODE_BOOK } from '../../data/budget-data';
+import { toast } from 'sonner';
+import { Badge } from '../ui/badge';
+import { Button } from '../ui/button';
+import { Checkbox } from '../ui/checkbox';
 
 // ── Helpers ──
 
@@ -21,15 +27,21 @@ const fmt = (n: number | undefined) =>
   n != null && Number.isFinite(n) ? n.toLocaleString('ko-KR') : '';
 
 const METHOD_LABELS: Record<string, string> = {
-  BANK_TRANSFER: '계좌이체',
-  CARD: '법인카드',
-  CASH: '현금',
-  CHECK: '수표',
+  TRANSFER: '계좌이체',
+  CORP_CARD_1: '법인카드(뒷번호1)',
+  CORP_CARD_2: '법인카드(뒷번호2)',
   OTHER: '기타',
 };
 
 const METHOD_OPTIONS = Object.entries(METHOD_LABELS).map(([v, l]) => ({ value: v, label: l }));
 
+function normalizeMethodValue(value: string | undefined): string {
+  if (!value) return '';
+  if (value === 'BANK_TRANSFER') return 'TRANSFER';
+  if (value === 'CARD') return 'CORP_CARD_1';
+  if (value === 'CASH' || value === 'CHECK') return 'OTHER';
+  return value;
+}
 const TX_STATE_BADGE: Record<TransactionState, { label: string; cls: string }> = {
   DRAFT: { label: '작성중', cls: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300' },
   SUBMITTED: { label: '제출', cls: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300' },
@@ -39,6 +51,15 @@ const TX_STATE_BADGE: Record<TransactionState, { label: string; cls: string }> =
 
 function isEditable(state: TransactionState | undefined): boolean {
   return !state || state === 'DRAFT' || state === 'REJECTED';
+}
+
+function resolveEvidenceRequiredDesc(
+  map: Record<string, string> | undefined,
+  budgetCode: string,
+  subCode: string,
+): string {
+  if (!map) return '';
+  return map[`${budgetCode}|${subCode}`] || map[subCode] || map[budgetCode] || '';
 }
 
 // ── Types ──
@@ -56,6 +77,10 @@ export interface SettlementLedgerProps {
   defaultLedgerId: string;
   onAddTransaction: (tx: Transaction) => void;
   onUpdateTransaction: (id: string, updates: Partial<Transaction>) => void;
+  evidenceRequiredMap?: Record<string, string>;
+  onSaveEvidenceRequiredMap?: (map: Record<string, string>) => void | Promise<void>;
+  sheetRows?: ImportRow[] | null;
+  onSaveSheetRows?: (rows: ImportRow[]) => void | Promise<void>;
   onSubmitWeek?: (input: {
     weekLabel: string;
     yearMonth: string;
@@ -77,6 +102,10 @@ export function SettlementLedgerPage({
   defaultLedgerId,
   onAddTransaction,
   onUpdateTransaction,
+  evidenceRequiredMap,
+  onSaveEvidenceRequiredMap,
+  sheetRows,
+  onSaveSheetRows,
   onSubmitWeek,
   onChangeTransactionState,
   currentUserName = 'PM',
@@ -85,6 +114,7 @@ export function SettlementLedgerPage({
   const [year, setYear] = useState(() => new Date().getFullYear());
   const [collapsedWeeks, setCollapsedWeeks] = useState<Set<string>>(new Set());
   const [importRows, setImportRows] = useState<ImportRow[] | null>(null);
+  const [importDirty, setImportDirty] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // All weeks for the year
@@ -94,30 +124,55 @@ export function SettlementLedgerPage({
   const projectTxs = useMemo(() => {
     const yearStr = String(year);
     return allTransactions.filter(
-      (tx) => tx.projectId === projectId && tx.dateTime.startsWith(yearStr),
+      (tx) => tx.projectId === projectId && (!tx.dateTime || tx.dateTime.startsWith(yearStr)),
     );
   }, [allTransactions, projectId, year]);
+
+  useEffect(() => {
+    if (importDirty) return;
+    if (sheetRows && sheetRows.length > 0) {
+      setImportRows(sheetRows);
+      return;
+    }
+    setImportRows(transactionsToImportRows(projectTxs, yearWeeks));
+  }, [projectTxs, yearWeeks, importDirty, sheetRows]);
 
   // Group transactions by week
   const weekBuckets: WeekBucket[] = useMemo(() => {
     const txByWeek = new Map<string, Transaction[]>();
     for (const w of yearWeeks) txByWeek.set(w.label, []);
+    const unmatchedWeek: MonthMondayWeek = {
+      yearMonth: '',
+      weekNo: 0,
+      weekStart: '',
+      weekEnd: '',
+      label: '미지정',
+    };
+    txByWeek.set(unmatchedWeek.label, []);
 
     for (const tx of projectTxs) {
       const d = tx.dateTime.slice(0, 10);
       const w = findWeekForDate(d, yearWeeks);
-      const key = w?.label || '__unmatched__';
-      if (!txByWeek.has(key)) txByWeek.set(key, []);
+      const key = w?.label || unmatchedWeek.label;
       txByWeek.get(key)!.push(tx);
     }
 
-    return yearWeeks.map((week) => ({
+    const buckets = yearWeeks.map((week) => ({
       week,
       transactions: (txByWeek.get(week.label) || []).sort((a, b) =>
         a.dateTime.localeCompare(b.dateTime),
       ),
       collapsed: collapsedWeeks.has(week.label),
     }));
+    const unmatchedTxs = txByWeek.get(unmatchedWeek.label) || [];
+    if (unmatchedTxs.length > 0) {
+      buckets.push({
+        week: unmatchedWeek,
+        transactions: unmatchedTxs.sort((a, b) => a.dateTime.localeCompare(b.dateTime)),
+        collapsed: collapsedWeeks.has(unmatchedWeek.label),
+      });
+    }
+    return buckets;
   }, [yearWeeks, projectTxs, collapsedWeeks]);
 
   const resolveWeekLabelFromDate = useCallback((dateStr: string): string => {
@@ -154,10 +209,10 @@ export function SettlementLedgerPage({
 
   // ── CSV Download ──
   const handleDownload = useCallback(() => {
-    const csv = exportSettlementCsv(projectTxs, yearWeeks);
+    const csv = importRows ? exportImportRowsCsv(importRows) : exportSettlementCsv(projectTxs, yearWeeks);
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
     triggerDownload(blob, `정산대장_${projectName}_${year}.csv`);
-  }, [projectTxs, yearWeeks, projectName, year]);
+  }, [importRows, projectTxs, yearWeeks, projectName, year]);
 
   // ── CSV Upload ──
   const handleFileUpload = useCallback(async (file: File) => {
@@ -172,31 +227,24 @@ export function SettlementLedgerPage({
     }
 
     setImportRows(rows);
+    setImportDirty(true);
   }, [projectId, defaultLedgerId]);
 
-  const handleImportSave = useCallback(() => {
+  const handleImportSave = useCallback(async () => {
     if (!importRows) return;
-    let savedCount = 0;
-    for (let i = 0; i < importRows.length; i++) {
-      const row = importRows[i];
-      const result = importRowToTransaction(row, projectId, defaultLedgerId, i);
-      if (result.transaction) {
-        const tx = result.transaction;
-        // Assign weekCode
-        const d = tx.dateTime.slice(0, 10);
-        tx.weekCode = resolveWeekLabelFromDate(d);
-        // Check for existing
-        const existing = allTransactions.find((t) => t.id === tx.id);
-        if (existing) {
-          onUpdateTransaction(tx.id, tx);
-        } else {
-          onAddTransaction(tx);
-        }
-        savedCount++;
-      }
+    if (!onSaveSheetRows) {
+      toast.error('저장 기능이 연결되어 있지 않습니다.');
+      return;
     }
-    setImportRows(null);
-  }, [importRows, projectId, defaultLedgerId, allTransactions, onAddTransaction, onUpdateTransaction, resolveWeekLabelFromDate]);
+    try {
+      await onSaveSheetRows(importRows);
+      setImportDirty(false);
+      toast.success('정산대장을 저장했습니다.');
+    } catch (err) {
+      console.error('[SettlementLedger] save sheet failed:', err);
+      toast.error('정산대장 저장에 실패했습니다.');
+    }
+  }, [importRows, onSaveSheetRows]);
 
   // ── Inline edit handler with audit trail ──
   const handleUpdateTx = useCallback(
@@ -250,6 +298,70 @@ export function SettlementLedgerPage({
   let globalRowNum = 0;
 
   const totalCount = projectTxs.length;
+
+  const viewMode: 'sheet' | 'weekly' = 'sheet';
+
+  if (viewMode === 'sheet') {
+    return (
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => setYear((y) => y - 1)}>
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <span className="text-sm font-semibold min-w-[60px] text-center">{year}년</span>
+            <Button variant="outline" size="sm" onClick={() => setYear((y) => y + 1)}>
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+            <Badge variant="secondary" className="ml-2 text-[11px]">
+              {totalCount}건
+            </Badge>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={handleDownload}>
+              <Download className="h-4 w-4 mr-1" />
+              CSV 다운로드
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
+              <Upload className="h-4 w-4 mr-1" />
+              CSV 업로드
+            </Button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void handleFileUpload(file);
+                e.currentTarget.value = '';
+              }}
+            />
+          </div>
+        </div>
+
+        {importRows && (
+          <ImportEditor
+            rows={importRows}
+            onChange={(rows) => {
+              setImportRows(rows);
+              setImportDirty(true);
+            }}
+            onSave={handleImportSave}
+            onCancel={() => {
+              setImportRows(transactionsToImportRows(projectTxs, yearWeeks));
+              setImportDirty(false);
+            }}
+            projectId={projectId}
+            defaultLedgerId={defaultLedgerId}
+            evidenceRequiredMap={evidenceRequiredMap}
+            onSaveEvidenceRequiredMap={onSaveEvidenceRequiredMap}
+            inline
+          />
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-3">
@@ -317,9 +429,8 @@ export function SettlementLedgerPage({
               {SETTLEMENT_COLUMNS.map((col, i) => (
                 <th
                   key={i}
-                  className={`px-2 py-1.5 font-medium border-b border-r whitespace-nowrap text-[10px] ${
-                    col.format === 'number' ? 'text-right' : 'text-left'
-                  }`}
+                  className={`px-2 py-1.5 font-medium border-b border-r whitespace-nowrap text-[10px] ${col.format === 'number' ? 'text-right' : 'text-left'
+                    }`}
                 >
                   {col.csvHeader}
                 </th>
@@ -360,11 +471,19 @@ export function SettlementLedgerPage({
       {importRows !== null && (
         <ImportEditor
           rows={importRows}
-          onChange={setImportRows}
+          onChange={(rows) => {
+            setImportRows(rows);
+            setImportDirty(true);
+          }}
           onSave={handleImportSave}
-          onCancel={() => setImportRows(null)}
+          onCancel={() => {
+            setImportRows(transactionsToImportRows(projectTxs, yearWeeks));
+            setImportDirty(false);
+          }}
           projectId={projectId}
           defaultLedgerId={defaultLedgerId}
+          evidenceRequiredMap={evidenceRequiredMap}
+          onSaveEvidenceRequiredMap={onSaveEvidenceRequiredMap}
         />
       )}
     </div>
@@ -394,7 +513,7 @@ function WeekSection({ week, txRows, collapsed, txCount, onToggle, onUpdateTx, o
   const [submitting, setSubmitting] = useState(false);
   const colCount = SETTLEMENT_COLUMNS.length;
   const draftTxIds = txRows.filter(({ tx }) => tx.state === 'DRAFT').map(({ tx }) => tx.id);
-  const hasDrafts = draftTxIds.length > 0 && userRole === 'pm';
+  const hasDrafts = draftTxIds.length > 0 && userRole === 'pm' && week.weekNo > 0;
   const evSummary = txRows.length > 0 ? computeEvidenceSummary(txRows.map(({ tx }) => tx)) : null;
 
   return (
@@ -415,7 +534,7 @@ function WeekSection({ week, txRows, collapsed, txCount, onToggle, onUpdateTx, o
               {week.label}
             </span>
             <span className="text-[10px] text-muted-foreground">
-              {week.weekStart} ~ {week.weekEnd}
+              {week.weekStart ? `${week.weekStart} ~ ${week.weekEnd}` : '날짜 없음'}
             </span>
             <Badge
               variant={txCount > 0 ? 'default' : 'secondary'}
@@ -615,7 +734,7 @@ function TransactionRow({ tx, rowNum, weekLabel, onUpdate, onChangeState, userRo
       {/* 지출구분 */}
       <td className="px-1 py-0.5 border-b border-r">
         <select
-          defaultValue={tx.method}
+          defaultValue={normalizeMethodValue(tx.method)}
           disabled={locked}
           className={`bg-transparent outline-none text-[11px] w-full cursor-pointer ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
           onChange={(e) => { if (!locked) onUpdate({ method: e.target.value as Transaction['method'] }); }}
@@ -737,6 +856,9 @@ function ImportEditor({
   onCancel,
   projectId,
   defaultLedgerId,
+  evidenceRequiredMap,
+  onSaveEvidenceRequiredMap,
+  inline = false,
 }: {
   rows: ImportRow[];
   onChange: (rows: ImportRow[]) => void;
@@ -744,9 +866,35 @@ function ImportEditor({
   onCancel: () => void;
   projectId: string;
   defaultLedgerId: string;
+  evidenceRequiredMap?: Record<string, string>;
+  onSaveEvidenceRequiredMap?: (map: Record<string, string>) => void | Promise<void>;
+  inline?: boolean;
 }) {
   const errorCount = rows.filter((r) => r.error).length;
   const validCount = rows.length - errorCount;
+  const budgetCodeIdx = useMemo(
+    () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '비목'),
+    [],
+  );
+  const subCodeIdx = useMemo(
+    () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '세목'),
+    [],
+  );
+  const evidenceIdx = useMemo(
+    () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '필수증빙자료 리스트'),
+    [],
+  );
+  const mappingRows = useMemo(
+    () => BUDGET_CODE_BOOK.flatMap((c) => c.subCodes.map((subCode) => ({
+      budgetCode: c.code,
+      subCode,
+      key: `${c.code}|${subCode}`,
+    }))),
+    [],
+  );
+  const [mappingOpen, setMappingOpen] = useState(false);
+  const [mappingDraft, setMappingDraft] = useState<Record<string, string>>({});
+  const [mappingSaving, setMappingSaving] = useState(false);
 
   const updateCell = useCallback(
     (rowIdx: number, colIdx: number, value: string) => {
@@ -765,14 +913,56 @@ function ImportEditor({
     [rows, onChange, projectId, defaultLedgerId],
   );
 
+  const updateRow = useCallback(
+    (rowIdx: number, updater: (row: ImportRow) => ImportRow) => {
+      const next = rows.map((r, i) => {
+        if (i !== rowIdx) return r;
+        let updated = updater(r);
+        if (budgetCodeIdx >= 0 && subCodeIdx >= 0 && evidenceIdx >= 0 && evidenceRequiredMap) {
+          const budgetCode = updated.cells[budgetCodeIdx] || '';
+          const subCode = updated.cells[subCodeIdx] || '';
+          const mapped = resolveEvidenceRequiredDesc(evidenceRequiredMap, budgetCode, subCode);
+          if (mapped) {
+            const cells = [...updated.cells];
+            cells[evidenceIdx] = mapped;
+            updated = { ...updated, cells };
+          }
+        }
+        const result = importRowToTransaction(updated, projectId, defaultLedgerId, i);
+        updated.error = result.error;
+        return updated;
+      });
+      onChange(next);
+    },
+    [rows, onChange, projectId, defaultLedgerId, budgetCodeIdx, subCodeIdx, evidenceIdx, evidenceRequiredMap],
+  );
+
   const addRow = useCallback(() => {
     const newRow = createEmptyImportRow();
     // Set No. column
     const noIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === 'No.');
     if (noIdx >= 0) newRow.cells[noIdx] = String(rows.length + 1);
-    newRow.error = '거래일시 또는 금액이 비어 있습니다';
+    newRow.error = undefined;
     onChange([...rows, newRow]);
   }, [rows, onChange]);
+
+  const addRows = useCallback((count: number) => {
+    if (count <= 0) return;
+    const noIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === 'No.');
+    const nextRows = [...rows];
+    for (let i = 0; i < count; i++) {
+      const newRow = createEmptyImportRow();
+      if (noIdx >= 0) newRow.cells[noIdx] = String(nextRows.length + 1);
+      nextRows.push(newRow);
+    }
+    onChange(nextRows);
+  }, [rows, onChange]);
+
+  useEffect(() => {
+    if (!inline) return;
+    if (rows.length >= 20) return;
+    addRows(20 - rows.length);
+  }, [rows.length, inline, addRows]);
 
   const removeRow = useCallback(
     (rowIdx: number) => {
@@ -781,12 +971,60 @@ function ImportEditor({
     [rows, onChange],
   );
 
+  const applyEvidenceMapping = useCallback((rowIdx?: number) => {
+    if (budgetCodeIdx < 0 || subCodeIdx < 0 || evidenceIdx < 0) return;
+    if (!evidenceRequiredMap || Object.keys(evidenceRequiredMap).length === 0) return;
+    const next = rows.map((r, i) => {
+      if (rowIdx != null && i !== rowIdx) return r;
+      const budgetCode = r.cells[budgetCodeIdx] || '';
+      const subCode = r.cells[subCodeIdx] || '';
+      const mapped = resolveEvidenceRequiredDesc(evidenceRequiredMap, budgetCode, subCode);
+      if (!mapped) return r;
+      const cells = [...r.cells];
+      cells[evidenceIdx] = mapped;
+      const updated: ImportRow = { ...r, cells };
+      const result = importRowToTransaction(updated, projectId, defaultLedgerId, i);
+      updated.error = result.error;
+      return updated;
+    });
+    onChange(next);
+  }, [rows, onChange, projectId, defaultLedgerId, budgetCodeIdx, subCodeIdx, evidenceIdx, evidenceRequiredMap]);
+
+  const openMappingEditor = useCallback(() => {
+    setMappingDraft({ ...(evidenceRequiredMap || {}) });
+    setMappingOpen(true);
+  }, [evidenceRequiredMap]);
+
+  const saveMappingEditor = useCallback(async () => {
+    if (!onSaveEvidenceRequiredMap) {
+      toast.message('증빙 매핑 저장 기능이 없습니다.');
+      return;
+    }
+    const nextMap: Record<string, string> = {};
+    for (const [key, value] of Object.entries(mappingDraft)) {
+      const trimmed = value.trim();
+      if (trimmed) nextMap[key] = trimmed;
+    }
+    setMappingSaving(true);
+    try {
+      await onSaveEvidenceRequiredMap(nextMap);
+      setMappingOpen(false);
+      applyEvidenceMapping();
+      toast.success('증빙 매핑이 저장되었습니다');
+    } catch (err) {
+      console.error('[SettlementLedger] save evidence map failed:', err);
+      toast.error('증빙 매핑 저장에 실패했습니다');
+    } finally {
+      setMappingSaving(false);
+    }
+  }, [mappingDraft, onSaveEvidenceRequiredMap]);
+
   return (
-    <div className="fixed inset-0 z-50 bg-background/95 flex flex-col">
+    <div className={inline ? 'relative border rounded-lg bg-background flex flex-col overflow-visible' : 'fixed inset-0 z-50 bg-background/95 flex flex-col'}>
       {/* Toolbar */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b bg-muted/30 shrink-0">
+      <div className={`flex items-center justify-between px-4 py-2.5 border-b bg-muted/30 shrink-0 ${inline ? 'sticky top-0 z-20' : ''}`}>
         <div className="flex items-center gap-3">
-          <h3 className="text-sm font-bold">CSV 가져오기 편집</h3>
+          <h3 className="text-sm font-bold">정산대장 편집</h3>
           <Badge variant="default" className="text-[10px]">{validCount}건 유효</Badge>
           {errorCount > 0 && (
             <Badge variant="destructive" className="text-[10px]">{errorCount}건 오류</Badge>
@@ -796,6 +1034,9 @@ function ImportEditor({
           </span>
         </div>
         <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" className="h-7 text-[11px]" onClick={openMappingEditor}>
+            증빙 매핑 설정
+          </Button>
           <Button variant="outline" size="sm" className="h-7 text-[11px] gap-1" onClick={addRow}>
             <Plus className="h-3.5 w-3.5" />
             행 추가
@@ -816,7 +1057,7 @@ function ImportEditor({
       </div>
 
       {/* Scrollable table */}
-      <div className="flex-1 overflow-auto">
+        <div className={inline ? 'overflow-auto max-h-[calc(100vh-260px)]' : 'flex-1 overflow-auto'}>
         <table className="w-full text-[11px] border-collapse">
           <thead className="sticky top-0 z-10">
             {/* Group header */}
@@ -852,7 +1093,12 @@ function ImportEditor({
                 row={row}
                 rowIdx={rowIdx}
                 onCellChange={(colIdx, value) => updateCell(rowIdx, colIdx, value)}
+                onRowChange={(updater) => updateRow(rowIdx, updater)}
                 onRemove={() => removeRow(rowIdx)}
+                budgetCodeIdx={budgetCodeIdx}
+                subCodeIdx={subCodeIdx}
+                evidenceIdx={evidenceIdx}
+                evidenceRequiredMap={evidenceRequiredMap}
               />
             ))}
             {rows.length === 0 && (
@@ -861,13 +1107,59 @@ function ImportEditor({
                   colSpan={SETTLEMENT_COLUMNS.length + 1}
                   className="px-4 py-8 text-center text-[12px] text-muted-foreground"
                 >
-                  CSV 데이터가 없습니다. 행을 추가하세요.
+                  데이터가 없습니다. 행을 추가하세요.
                 </td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
+      {mappingOpen && (
+        <div className="fixed inset-0 z-[80] bg-black/40 flex items-center justify-center p-4 pointer-events-auto">
+          <div className="w-full max-w-3xl bg-background rounded-lg border shadow-lg flex flex-col max-h-[80vh] pointer-events-auto">
+            <div className="flex items-center justify-between px-4 py-3 border-b">
+              <h4 className="text-sm font-bold">증빙 매핑 설정</h4>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={() => setMappingOpen(false)}>닫기</Button>
+                <Button size="sm" onClick={saveMappingEditor} disabled={mappingSaving}>
+                  {mappingSaving ? '저장중...' : '저장'}
+                </Button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-auto">
+              <table className="w-full text-[11px] border-collapse">
+                <thead className="sticky top-0 bg-slate-50">
+                  <tr>
+                    <th className="px-2 py-2 border-b text-left">비목</th>
+                    <th className="px-2 py-2 border-b text-left">세목</th>
+                    <th className="px-2 py-2 border-b text-left">필수증빙자료 리스트</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {mappingRows.map((row) => (
+                    <tr key={row.key} className="border-b">
+                      <td className="px-2 py-1.5">{row.budgetCode}</td>
+                      <td className="px-2 py-1.5">{row.subCode}</td>
+                      <td className="px-2 py-1.5">
+                        <input
+                          type="text"
+                          value={mappingDraft[row.key] || ''}
+                          className="w-full bg-transparent outline-none text-[11px] px-2 py-1 border rounded"
+                          placeholder="예: 세금계산서, 이체확인증"
+                          onChange={(e) => {
+                            const next = { ...mappingDraft, [row.key]: e.target.value };
+                            setMappingDraft(next);
+                          }}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -876,14 +1168,38 @@ function ImportEditorRow({
   row,
   rowIdx,
   onCellChange,
+  onRowChange,
   onRemove,
+  budgetCodeIdx,
+  subCodeIdx,
+  evidenceIdx,
+  projectId,
+  evidenceRequiredMap,
 }: {
   row: ImportRow;
   rowIdx: number;
   onCellChange: (colIdx: number, value: string) => void;
+  onRowChange: (updater: (row: ImportRow) => ImportRow) => void;
   onRemove: () => void;
+  budgetCodeIdx: number;
+  subCodeIdx: number;
+  evidenceIdx: number;
+  evidenceRequiredMap?: Record<string, string>;
 }) {
   const hasError = Boolean(row.error);
+  const methodIdx = useMemo(
+    () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '지출구분'),
+    [],
+  );
+  const dateIdx = useMemo(
+    () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '거래일시'),
+    [],
+  );
+  const budgetCode = budgetCodeIdx >= 0 ? row.cells[budgetCodeIdx] : '';
+  const subCodes = useMemo(() => {
+    const entry = BUDGET_CODE_BOOK.find((c) => c.code === budgetCode);
+    return entry ? entry.subCodes : [];
+  }, [budgetCode]);
 
   return (
     <tr className={`${hasError ? 'bg-red-50/60 dark:bg-red-950/20' : 'hover:bg-muted/30'} transition-colors`}>
@@ -908,26 +1224,89 @@ function ImportEditorRow({
       {/* Data cells */}
       {SETTLEMENT_COLUMNS.map((col, colIdx) => {
         const isReadOnly = col.csvHeader === 'No.' || col.csvHeader === '해당 주차';
+        const isBudgetCode = colIdx === budgetCodeIdx;
+        const isSubCode = colIdx === subCodeIdx;
         return (
           <td key={colIdx} className="px-0.5 py-0.5 border-b border-r">
             {isReadOnly ? (
               <span className="text-[10px] text-muted-foreground px-1">
                 {row.cells[colIdx]}
               </span>
-            ) : (
-              <input
-                type="text"
-                defaultValue={row.cells[colIdx]}
-                className={`w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[50px] ${
-                  hasError && colIdx === SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '거래일시') && !row.cells[colIdx]
-                    ? 'ring-1 ring-red-300 rounded'
-                    : ''
-                }`}
-                onBlur={(e) => {
+            ) : colIdx === methodIdx ? (
+              <select
+                value={row.cells[colIdx] || ''}
+                className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[80px]"
+                onChange={(e) => {
                   if (e.target.value !== row.cells[colIdx]) {
                     onCellChange(colIdx, e.target.value);
                   }
                 }}
+              >
+                <option value="">-</option>
+                {METHOD_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.label}>{o.label}</option>
+                ))}
+              </select>
+            ) : isBudgetCode ? (
+              <select
+                value={row.cells[colIdx] || ''}
+                className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[90px]"
+                onChange={(e) => {
+                  const nextCode = e.target.value;
+                  onRowChange((prev) => {
+                    if (budgetCodeIdx < 0) return prev;
+                    const cells = [...prev.cells];
+                    cells[budgetCodeIdx] = nextCode;
+                    if (subCodeIdx >= 0) {
+                      const allowed = BUDGET_CODE_BOOK.find((c) => c.code === nextCode)?.subCodes || [];
+                      if (!allowed.includes(cells[subCodeIdx])) cells[subCodeIdx] = '';
+                    }
+                    if (evidenceIdx >= 0) {
+                      const mapped = resolveEvidenceRequiredDesc(evidenceRequiredMap, nextCode, cells[subCodeIdx] || '');
+                      if (mapped) cells[evidenceIdx] = mapped;
+                    }
+                    return { ...prev, cells };
+                  });
+                }}
+              >
+                <option value="">-</option>
+                {BUDGET_CODE_BOOK.map((c) => (
+                  <option key={c.code} value={c.code}>{c.code}</option>
+                ))}
+              </select>
+            ) : isSubCode ? (
+              <select
+                value={row.cells[colIdx] || ''}
+                disabled={!budgetCode}
+                className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[90px]"
+                onChange={(e) => {
+                  const nextSub = e.target.value;
+                  onRowChange((prev) => {
+                    if (subCodeIdx < 0) return prev;
+                    const cells = [...prev.cells];
+                    cells[subCodeIdx] = nextSub;
+                    if (evidenceIdx >= 0) {
+                      const mapped = resolveEvidenceRequiredDesc(evidenceRequiredMap, budgetCode, nextSub);
+                      if (mapped) cells[evidenceIdx] = mapped;
+                    }
+                    return { ...prev, cells };
+                  });
+                }}
+              >
+                <option value="">-</option>
+                {subCodes.map((sc) => (
+                  <option key={sc} value={sc}>{sc}</option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type="text"
+                value={row.cells[colIdx] || ''}
+                className={`w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[50px] ${hasError && colIdx === dateIdx && !row.cells[colIdx]
+                    ? 'ring-1 ring-red-300 rounded'
+                    : ''
+                  }`}
+                onChange={(e) => onCellChange(colIdx, e.target.value)}
               />
             )}
           </td>
