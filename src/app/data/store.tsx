@@ -29,6 +29,7 @@ import { useFirebase } from '../lib/firebase-context';
 import { featureFlags } from '../config/feature-flags';
 import { useAuth } from './auth-store';
 import {
+  listenMembers,
   listenPartEntries,
   listenProjects,
   listenLedgers,
@@ -45,6 +46,8 @@ import {
   changeTransactionStateFS,
   addCommentFS,
   addEvidenceFS,
+  upsertMember as upsertMemberFS,
+  deleteMember as deleteMemberFS,
 } from '../lib/firestore-service';
 import {
   addCommentViaBff,
@@ -83,6 +86,8 @@ interface AppState {
 }
 
 interface AppActions {
+  upsertMember: (member: OrgMember & Record<string, unknown>) => void;
+  removeMember: (uid: string) => void;
   addProject: (p: Project) => void;
   updateProject: (id: string, updates: Partial<Project>) => void;
   addLedger: (l: Ledger) => void;
@@ -122,7 +127,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [evidences, setEvidences] = useState<Evidence[]>(EVIDENCES);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(AUDIT_LOGS);
   const [participationEntries, setParticipationEntries] = useState<ParticipationEntry[]>(PARTICIPATION_ENTRIES);
-  const [localMembers, setLocalMembers] = useState<OrgMember[]>(ORG_MEMBERS);
+  const [localMembers, setLocalMembers] = useState<Array<OrgMember & Record<string, unknown>>>(ORG_MEMBERS);
   const [dataSource, setDataSource] = useState<'local' | 'firestore'>('local');
 
   const unsubsRef = useRef<Unsubscribe[]>([]);
@@ -154,9 +159,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const members = useMemo<OrgMember[]>(() => {
-    const baseMembers = dataSource === 'local'
-      ? (localMembers.length > 0 ? localMembers : ORG_MEMBERS)
-      : ORG_MEMBERS;
+    const baseMembers = dataSource === 'firestore'
+      ? localMembers
+      : (localMembers.length > 0 ? localMembers : ORG_MEMBERS);
     if (!authUser) return baseMembers;
     if (baseMembers.some((m) => m.uid === authUser.uid)) return baseMembers;
     return [currentUser, ...baseMembers];
@@ -180,6 +185,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
 
     setDataSource('firestore');
+    setLocalMembers([]);
+
+    unsubsRef.current.push(
+      listenMembers(db, orgId, (items) => setLocalMembers(items)),
+    );
 
     unsubsRef.current.push(
       listenPartEntries(db, orgId, (entries) => setParticipationEntries(entries)),
@@ -282,6 +292,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
     setProjects((prev) => [...prev, p]);
   }, [platformApiEnabled, orgId, bffActor, firestoreEnabled, db, auditActor]);
+
+  const upsertMember = useCallback((member: OrgMember & Record<string, unknown>) => {
+    if (firestoreEnabled && db) {
+      upsertMemberFS(db, orgId, member, auditActor).catch(console.error);
+      return;
+    }
+    setLocalMembers((prev) => {
+      const idx = prev.findIndex((m) => m.uid === member.uid);
+      if (idx === -1) return [member, ...prev];
+      const next = [...prev];
+      next[idx] = { ...next[idx], ...member };
+      return next;
+    });
+  }, [firestoreEnabled, db, orgId, auditActor]);
+
+  const removeMember = useCallback((uid: string) => {
+    if (firestoreEnabled && db) {
+      deleteMemberFS(db, orgId, uid, auditActor).catch(console.error);
+      return;
+    }
+    setLocalMembers((prev) => prev.filter((m) => m.uid !== uid));
+  }, [firestoreEnabled, db, orgId, auditActor]);
 
   const updateProject = useCallback((id: string, updates: Partial<Project>) => {
     if (platformApiEnabled) {
@@ -596,6 +628,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     auditLogs,
     participationEntries,
     dataSource,
+    upsertMember,
+    removeMember,
     addProject,
     updateProject,
     addLedger,

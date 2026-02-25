@@ -30,8 +30,8 @@ import {
 import { PageHeader } from '../layout/PageHeader';
 import { ScrollArea } from '../ui/scroll-area';
 import { toast } from 'sonner';
-import type { UserRole } from '../../data/types';
-import { PROJECTS, ORG_MEMBERS } from '../../data/mock-data';
+import type { OrgMember, UserRole } from '../../data/types';
+import { useAppStore } from '../../data/store';
 
 // ═══════════════════════════════════════════════════════════════
 // 사용자 관리 페이지 — Admin
@@ -52,6 +52,8 @@ interface ManagedUser {
   avatarUrl?: string;
   note?: string;
 }
+
+type MemberDoc = OrgMember & Record<string, unknown>;
 
 const ROLE_LABELS: Record<UserRole, string> = {
   admin: '관리자',
@@ -98,23 +100,55 @@ const STATUS_COLORS: Record<string, string> = {
   PENDING: 'bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-400',
 };
 
-// Mock initial data from ORG_MEMBERS
-const INITIAL_USERS: ManagedUser[] = ORG_MEMBERS.map((m, i) => ({
-  uid: m.uid,
-  name: m.name,
-  email: m.email,
-  role: m.role,
-  status: (i === 0 ? 'ACTIVE' : i < 18 ? 'ACTIVE' : 'ACTIVE') as ManagedUser['status'],
-  department: i < 6 ? '임팩트 이노베이션 그룹' : i < 12 ? '소셜벤처 그룹' : i < 17 ? '공간혁신 그룹' : '경영지원실',
-  phone: `010-${String(1000 + i * 111).slice(0, 4)}-${String(5000 + i * 222).slice(0, 4)}`,
-  assignedProjects: PROJECTS.slice(i % PROJECTS.length, (i % PROJECTS.length) + 2).map(p => p.id),
-  createdAt: `2024-${String(1 + (i % 12)).padStart(2, '0')}-15T09:00:00Z`,
-  lastLoginAt: new Date(Date.now() - i * 86400000 * 2).toISOString(),
-  note: '',
-}));
+function normalizeStatus(value: unknown): ManagedUser['status'] {
+  if (value === 'PENDING' || value === 'INACTIVE' || value === 'ACTIVE') return value;
+  return 'ACTIVE';
+}
+
+function toManagedUser(member: MemberDoc, index: number): ManagedUser {
+  const assignedProjects = Array.from(
+    new Set([
+      ...(Array.isArray(member.projectIds) ? member.projectIds : []),
+      typeof member.projectId === 'string' ? member.projectId : '',
+    ].filter((v): v is string => !!v)),
+  );
+
+  return {
+    uid: member.uid,
+    name: member.name,
+    email: member.email,
+    role: member.role,
+    status: normalizeStatus(member.status),
+    department: typeof member.department === 'string' ? member.department : undefined,
+    phone: typeof member.phone === 'string' ? member.phone : undefined,
+    assignedProjects,
+    createdAt: typeof member.createdAt === 'string' ? member.createdAt : `2024-01-${String((index % 28) + 1).padStart(2, '0')}T09:00:00Z`,
+    lastLoginAt: typeof member.lastLoginAt === 'string' ? member.lastLoginAt : '-',
+    avatarUrl: member.avatarUrl,
+    note: typeof member.note === 'string' ? member.note : undefined,
+  };
+}
+
+function toMemberDoc(user: ManagedUser): MemberDoc {
+  return {
+    uid: user.uid,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    avatarUrl: user.avatarUrl,
+    status: user.status,
+    department: user.department || '',
+    phone: user.phone || '',
+    projectIds: user.assignedProjects,
+    projectId: user.assignedProjects[0] || '',
+    createdAt: user.createdAt,
+    lastLoginAt: user.lastLoginAt === '-' ? '' : user.lastLoginAt,
+    note: user.note || '',
+  };
+}
 
 export function UserManagementPage() {
-  const [users, setUsers] = useState<ManagedUser[]>(INITIAL_USERS);
+  const { members: storeMembers, projects, upsertMember, removeMember } = useAppStore();
   const [searchText, setSearchText] = useState('');
   const [filterRole, setFilterRole] = useState<string>('ALL');
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
@@ -124,6 +158,11 @@ export function UserManagementPage() {
   const [editingUser, setEditingUser] = useState<ManagedUser | null>(null);
   const [sortField, setSortField] = useState<'name' | 'role' | 'lastLoginAt'>('name');
   const [sortAsc, setSortAsc] = useState(true);
+
+  const users = useMemo(
+    () => (storeMembers as MemberDoc[]).map((m, i) => toManagedUser(m, i)),
+    [storeMembers],
+  );
 
   // 새 사용자 폼
   const [newForm, setNewForm] = useState({
@@ -170,15 +209,15 @@ export function UserManagementPage() {
 
   const projectMap = useMemo(() => {
     const m = new Map<string, string>();
-    PROJECTS.forEach(p => m.set(p.id, p.name));
+    projects.forEach(p => m.set(p.id, p.name));
     return m;
-  }, []);
+  }, [projects]);
 
   // 사용자 생성
   const handleCreate = () => {
     if (!newForm.name || !newForm.email) return;
     const newUser: ManagedUser = {
-      uid: `u-${Date.now()}`,
+      uid: `u-${Date.now().toString(36)}`,
       name: newForm.name,
       email: newForm.email,
       role: newForm.role,
@@ -190,7 +229,7 @@ export function UserManagementPage() {
       lastLoginAt: '-',
       note: newForm.note,
     };
-    setUsers(prev => [newUser, ...prev]);
+    upsertMember(toMemberDoc(newUser));
     setShowCreateDialog(false);
     setNewForm({ name: '', email: '', role: 'pm', department: '', phone: '', note: '' });
     toast.success(`${newUser.name} 계정이 생성되었습니다`);
@@ -198,29 +237,32 @@ export function UserManagementPage() {
 
   // 역할 변경
   const handleRoleChange = (uid: string, newRole: UserRole) => {
-    setUsers(prev => prev.map(u => u.uid === uid ? { ...u, role: newRole } : u));
+    const target = users.find((u) => u.uid === uid);
+    if (!target) return;
+    upsertMember(toMemberDoc({ ...target, role: newRole }));
     toast.success('역할이 변경되었습니다');
   };
 
   // 상태 변경
   const handleStatusToggle = (uid: string) => {
-    setUsers(prev => prev.map(u => {
-      if (u.uid !== uid) return u;
-      const newStatus = u.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
-      return { ...u, status: newStatus };
-    }));
+    const target = users.find((u) => u.uid === uid);
+    if (!target) return;
+    const newStatus: ManagedUser['status'] = target.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+    upsertMember(toMemberDoc({ ...target, status: newStatus }));
   };
 
   // 승인
   const handleApproveUser = (uid: string) => {
-    setUsers(prev => prev.map(u => u.uid === uid ? { ...u, status: 'ACTIVE' } : u));
+    const target = users.find((u) => u.uid === uid);
+    if (!target) return;
+    upsertMember(toMemberDoc({ ...target, status: 'ACTIVE' }));
     toast.success('사용자가 승인되었습니다');
   };
 
   // 사용자 수정
   const handleSaveEdit = () => {
     if (!editingUser) return;
-    setUsers(prev => prev.map(u => u.uid === editingUser.uid ? editingUser : u));
+    upsertMember(toMemberDoc(editingUser));
     setShowEditDialog(false);
     setEditingUser(null);
     toast.success('사용자 정보가 수정되었습니다');
@@ -228,7 +270,7 @@ export function UserManagementPage() {
 
   // 삭제
   const handleDelete = (uid: string) => {
-    setUsers(prev => prev.filter(u => u.uid !== uid));
+    removeMember(uid);
     if (selectedUser?.uid === uid) setSelectedUser(null);
     toast.success('사용자가 삭제되었습니다');
   };

@@ -78,7 +78,9 @@ service cloud.firestore {
 
     match /orgs/{orgId}/members/{uid} {
       allow read: if isSignedIn() && resourceHasValidTenant(orgId);
-      allow create: if isSignedIn() && request.auth.uid == uid && requestHasValidTenant(orgId);
+      allow create: if isSignedIn()
+                    && requestHasValidTenant(orgId)
+                    && (request.auth.uid == uid || isAdmin(orgId));
       allow update: if (isAdmin(orgId) && resourceHasValidTenant(orgId) && requestHasValidTenant(orgId))
                     || selfMemberUpdateWithoutRoleChange(orgId, uid)
                     || (isBootstrapAdminEmail() && request.auth.uid == uid && requestHasValidTenant(orgId));

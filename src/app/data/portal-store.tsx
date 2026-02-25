@@ -79,6 +79,13 @@ if (!_g.__PORTAL_CTX__) {
 }
 const PortalContext: React.Context<(PortalState & PortalActions) | null> = _g.__PORTAL_CTX__;
 
+function withTenantScope<T extends Record<string, unknown>>(orgId: string, payload: T): T & { tenantId: string } {
+  return {
+    ...payload,
+    tenantId: orgId,
+  };
+}
+
 function normalizePortalUser(candidate: Partial<PortalUser> | null | undefined): PortalUser | null {
   if (!candidate) return null;
   const projectIds = normalizeProjectIds([
@@ -352,17 +359,29 @@ export function PortalProvider({ children }: { children: ReactNode }) {
 
   const persistExpenseSet = useCallback(async (set: ExpenseSet) => {
     if (!db) return;
-    await setDoc(doc(db, getOrgDocumentPath(orgId, 'expenseSets', set.id)), set, { merge: true });
+    await setDoc(
+      doc(db, getOrgDocumentPath(orgId, 'expenseSets', set.id)),
+      withTenantScope(orgId, set),
+      { merge: true },
+    );
   }, [db, orgId]);
 
   const persistChangeRequest = useCallback(async (request: ChangeRequest) => {
     if (!db) return;
-    await setDoc(doc(db, getOrgDocumentPath(orgId, 'changeRequests', request.id)), request, { merge: true });
+    await setDoc(
+      doc(db, getOrgDocumentPath(orgId, 'changeRequests', request.id)),
+      withTenantScope(orgId, request),
+      { merge: true },
+    );
   }, [db, orgId]);
 
   const persistTransaction = useCallback(async (txData: Transaction) => {
     if (!db) return;
-    await setDoc(doc(db, getOrgDocumentPath(orgId, 'transactions', txData.id)), txData, { merge: true });
+    await setDoc(
+      doc(db, getOrgDocumentPath(orgId, 'transactions', txData.id)),
+      withTenantScope(orgId, txData),
+      { merge: true },
+    );
   }, [db, orgId]);
 
   const register = useCallback(async (
@@ -453,6 +472,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         await updateDoc(doc(db, getOrgDocumentPath(orgId, 'members', authUser.uid)), {
           projectId: target,
           projectIds: nextUser.projectIds,
+          tenantId: orgId,
           updatedAt: new Date().toISOString(),
         });
       } catch (err) {
@@ -492,6 +512,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     if (firestoreEnabled && db) {
       updateDoc(doc(db, getOrgDocumentPath(orgId, 'expenseSets', id)), {
         ...updates,
+        tenantId: orgId,
         updatedAt: new Date().toISOString(),
       }).catch((err) => {
         console.error('[PortalStore] updateExpenseSet error:', err);
@@ -651,7 +672,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
 
     try {
       if (!nextRequest) return true;
-      await setDoc(doc(db, getOrgDocumentPath(orgId, 'changeRequests', id)), nextRequest, { merge: true });
+      await persistChangeRequest(nextRequest);
       return true;
     } catch (err) {
       console.error('[PortalStore] submitChangeRequest error:', err);
@@ -663,7 +684,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       }
       return false;
     }
-  }, [firestoreEnabled, db, orgId, portalUser?.name]);
+  }, [firestoreEnabled, db, portalUser?.name, persistChangeRequest]);
 
   const addTransaction = useCallback((txData: Transaction) => {
     setTransactions((prev) => [txData, ...prev]);
