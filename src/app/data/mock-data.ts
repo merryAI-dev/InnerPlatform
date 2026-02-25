@@ -885,7 +885,7 @@ function tx(overrides: Partial<Transaction> & Pick<Transaction, 'id' | 'ledgerId
   return {
     state: 'APPROVED',
     weekCode: '',
-    method: 'BANK_TRANSFER',
+    method: 'TRANSFER',
     cashflowLabel: '',
     budgetCategory: '',
     amounts: {
@@ -925,7 +925,7 @@ export const TRANSACTIONS: Transaction[] = [
   // ── p002 KOICA IBS2 / l003 — 2026-02 사업비 사용내역 ──
   tx({ id: 'tx029', ledgerId: 'l003', projectId: 'p002', dateTime: '2026-02-03', direction: 'OUT', cashflowCategory: 'LABOR_COST', counterparty: '직원급여', memo: '2월 프로젝트 인건비 (베리, 데이나)', weekCode: '2026-W1', state: 'APPROVED', amounts: { bankAmount: 45000000, depositAmount: 0, expenseAmount: 45000000, vatIn: 0, vatOut: 0, vatRefund: 0, balanceAfter: 1315849459 } }),
   tx({ id: 'tx030', ledgerId: 'l003', projectId: 'p002', dateTime: '2026-02-06', direction: 'OUT', cashflowCategory: 'OUTSOURCING', counterparty: '동남아 현지파트너', memo: '현지 스타트업 ESG 컨설팅 비용', weekCode: '2026-W1', state: 'APPROVED', amounts: { bankAmount: 88000000, depositAmount: 0, expenseAmount: 88000000, vatIn: 8000000, vatOut: 0, vatRefund: 0, balanceAfter: 1227849459 } }),
-  tx({ id: 'tx031', ledgerId: 'l003', projectId: 'p002', dateTime: '2026-02-12', direction: 'OUT', cashflowCategory: 'TRAVEL', counterparty: 'Masion Viet (프랑스)', memo: '해외출장 회의비 — MYSC-미식가 미팅 (K-PLUS 프로그램)', weekCode: '2026-W2', state: 'APPROVED', method: 'CARD', amounts: { bankAmount: 11520000, depositAmount: 0, expenseAmount: 11520000, vatIn: 0, vatOut: 0, vatRefund: 0, balanceAfter: 1216329459 } }),
+  tx({ id: 'tx031', ledgerId: 'l003', projectId: 'p002', dateTime: '2026-02-12', direction: 'OUT', cashflowCategory: 'TRAVEL', counterparty: 'Masion Viet (프랑스)', memo: '해외출장 회의비 — MYSC-미식가 미팅 (K-PLUS 프로그램)', weekCode: '2026-W2', state: 'APPROVED', method: 'CORP_CARD_1', amounts: { bankAmount: 11520000, depositAmount: 0, expenseAmount: 11520000, vatIn: 0, vatOut: 0, vatRefund: 0, balanceAfter: 1216329459 } }),
   tx({ id: 'tx032', ledgerId: 'l003', projectId: 'p002', dateTime: '2026-02-16', direction: 'OUT', cashflowCategory: 'TRAVEL', counterparty: '출장비', memo: '베트남 현지 방문 (유한킴벌리 합동)', weekCode: '2026-W3', state: 'APPROVED', amounts: { bankAmount: 6500000, depositAmount: 0, expenseAmount: 6500000, vatIn: 0, vatOut: 0, vatRefund: 0, balanceAfter: 1209829459 } }),
   tx({ id: 'tx033', ledgerId: 'l003', projectId: 'p002', dateTime: '2026-02-18', direction: 'OUT', cashflowCategory: 'SUPPLIES', counterparty: '오피스디포', memo: '사무용품 구매 (현지 사무실)', weekCode: '2026-W3', state: 'APPROVED', amounts: { bankAmount: 2200000, depositAmount: 0, expenseAmount: 2200000, vatIn: 200000, vatOut: 0, vatRefund: 0, balanceAfter: 1207629459 } }),
   tx({ id: 'tx034', ledgerId: 'l003', projectId: 'p002', dateTime: '2026-02-20', direction: 'OUT', cashflowCategory: 'EQUIPMENT', counterparty: '장비업체', memo: '현지 모니터링 장비 구매', weekCode: '2026-W3', state: 'SUBMITTED', amounts: { bankAmount: 15400000, depositAmount: 0, expenseAmount: 15400000, vatIn: 1400000, vatOut: 0, vatRefund: 0, balanceAfter: 1192229459 } }),
