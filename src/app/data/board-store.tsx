@@ -29,8 +29,11 @@ interface BoardState {
 interface BoardActions {
   createPost: (data: { title: string; body: string; channel: BoardChannel; tagsInput?: string }) => Promise<BoardPost | null>;
   updatePost: (postId: string, patch: Partial<Pick<BoardPost, 'title' | 'body' | 'tags' | 'channel'>>) => Promise<boolean>;
+  deletePost: (postId: string) => Promise<boolean>;
   votePost: (postId: string, direction: VoteDirection) => Promise<{ ok: boolean; value: -1 | 0 | 1 }>;
   addComment: (postId: string, body: string, parentId?: string | null) => Promise<BoardComment | null>;
+  updateComment: (commentId: string, body: string) => Promise<boolean>;
+  deleteComment: (postId: string, commentId: string) => Promise<boolean>;
   buildVoteDocId: (postId: string, voterId: string) => string;
 }
 
@@ -215,6 +218,20 @@ export function BoardProvider({ children }: { children: ReactNode }) {
     return true;
   }, [db, firestoreEnabled, orgId]);
 
+  const deletePost = useCallback(async (postId: string): Promise<boolean> => {
+    const now = new Date().toISOString();
+
+    setPosts((prev) => prev.map((p) => (
+      p.id !== postId ? p : { ...p, deletedAt: now, updatedAt: now }
+    )));
+
+    if (firestoreEnabled && db) {
+      const ref = doc(db, getOrgDocumentPath(orgId, 'boardPosts', postId));
+      await updateDoc(ref, { deletedAt: now, updatedAt: now } as any);
+    }
+    return true;
+  }, [db, firestoreEnabled, orgId]);
+
   const votePost = useCallback(async (postId: string, direction: VoteDirection) => {
     const actor = user;
     if (!actor) return { ok: false, value: 0 as const };
@@ -347,14 +364,53 @@ export function BoardProvider({ children }: { children: ReactNode }) {
     return comment;
   }, [db, firestoreEnabled, orgId, user]);
 
+  const updateComment = useCallback(async (commentId: string, bodyInput: string): Promise<boolean> => {
+    const body = safeText(bodyInput, 5000);
+    if (!body) return false;
+    const now = new Date().toISOString();
+
+    if (firestoreEnabled && db) {
+      const ref = doc(db, getOrgDocumentPath(orgId, 'boardComments', commentId));
+      await updateDoc(ref, { body, updatedAt: now } as any);
+    }
+    return true;
+  }, [db, firestoreEnabled, orgId]);
+
+  const deleteComment = useCallback(async (postId: string, commentId: string): Promise<boolean> => {
+    const now = new Date().toISOString();
+
+    if (!firestoreEnabled || !db) {
+      setPosts((prev) => prev.map((p) => (
+        p.id !== postId
+          ? p
+          : { ...p, commentCount: Math.max(0, (p.commentCount || 0) - 1), updatedAt: now }
+      )));
+      return true;
+    }
+
+    const commentRef = doc(db, getOrgDocumentPath(orgId, 'boardComments', commentId));
+    const postRef = doc(db, getOrgDocumentPath(orgId, 'boardPosts', postId));
+    const batch = writeBatch(db);
+    batch.update(commentRef, { deletedAt: now, updatedAt: now });
+    batch.update(postRef, {
+      commentCount: increment(-1),
+      updatedAt: now,
+    });
+    await batch.commit();
+    return true;
+  }, [db, firestoreEnabled, orgId]);
+
   const value = useMemo<BoardState & BoardActions>(() => ({
     posts,
     createPost,
     updatePost,
+    deletePost,
     votePost,
     addComment,
+    updateComment,
+    deleteComment,
     buildVoteDocId,
-  }), [posts, createPost, updatePost, votePost, addComment]);
+  }), [posts, createPost, updatePost, deletePost, votePost, addComment, updateComment, deleteComment]);
 
   return <BoardContext.Provider value={value}>{children}</BoardContext.Provider>;
 }
