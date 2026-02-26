@@ -1,8 +1,10 @@
 import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, Download, ExternalLink, Plus, Save, Send, Upload, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { toast } from 'sonner';
+import { BUDGET_CODE_BOOK } from '../../data/budget-data';
 import type { Transaction, TransactionState } from '../../data/types';
 import { findWeekForDate, getYearMondayWeeks, type MonthMondayWeek } from '../../platform/cashflow-weeks';
-import { parseCsv, triggerDownload } from '../../platform/csv-utils';
+import { parseCsv, parseNumber, triggerDownload } from '../../platform/csv-utils';
 import { computeEvidenceStatus, computeEvidenceSummary, isValidDriveUrl } from '../../platform/evidence-helpers';
 import {
   CASHFLOW_LINE_OPTIONS,
@@ -15,8 +17,6 @@ import {
   transactionsToImportRows,
   type ImportRow,
 } from '../../platform/settlement-csv';
-import { BUDGET_CODE_BOOK } from '../../data/budget-data';
-import { toast } from 'sonner';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Checkbox } from '../ui/checkbox';
@@ -111,6 +111,9 @@ export function SettlementLedgerPage({
   currentUserName = 'PM',
   userRole = 'pm',
 }: SettlementLedgerProps) {
+
+
+  console.log(sheetRows, "sheetRows")
   const [year, setYear] = useState(() => new Date().getFullYear());
   const [collapsedWeeks, setCollapsedWeeks] = useState<Set<string>>(new Set());
   const [importRows, setImportRows] = useState<ImportRow[] | null>(null);
@@ -226,7 +229,23 @@ export function SettlementLedgerPage({
       row.error = result.error;
     }
 
-    setImportRows(rows);
+    const depositIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '입금액(사업비,공급가액,은행이자)');
+    const bankAmountIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '통장에 찍힌 입/출금액');
+    const balanceIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '통장잔액');
+    const withBalances = rows.map((row) => ({ ...row }));
+    if (depositIdx >= 0 && bankAmountIdx >= 0 && balanceIdx >= 0 && withBalances.length > 0) {
+      const base = parseNumber(withBalances[0]?.cells?.[depositIdx]) ?? 0;
+      let cumulative = 0;
+      for (let i = 0; i < withBalances.length; i++) {
+        const bank = parseNumber(withBalances[i].cells[bankAmountIdx]) ?? 0;
+        cumulative += bank;
+        const balance = base - cumulative;
+        const cells = [...withBalances[i].cells];
+        cells[balanceIdx] = Number.isFinite(balance) ? balance.toLocaleString('ko-KR') : '';
+        withBalances[i] = { ...withBalances[i], cells };
+      }
+    }
+    setImportRows(withBalances);
     setImportDirty(true);
   }, [projectId, defaultLedgerId]);
 
@@ -884,6 +903,18 @@ function ImportEditor({
     () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '필수증빙자료 리스트'),
     [],
   );
+  const depositIdx = useMemo(
+    () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '입금액(사업비,공급가액,은행이자)'),
+    [],
+  );
+  const bankAmountIdx = useMemo(
+    () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '통장에 찍힌 입/출금액'),
+    [],
+  );
+  const balanceIdx = useMemo(
+    () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '통장잔액'),
+    [],
+  );
   const mappingRows = useMemo(
     () => BUDGET_CODE_BOOK.flatMap((c) => c.subCodes.map((subCode) => ({
       budgetCode: c.code,
@@ -896,21 +927,45 @@ function ImportEditor({
   const [mappingDraft, setMappingDraft] = useState<Record<string, string>>({});
   const [mappingSaving, setMappingSaving] = useState(false);
 
+  const recomputeBalances = useCallback(
+    (input: ImportRow[]) => {
+      if (depositIdx < 0 || bankAmountIdx < 0 || balanceIdx < 0) return input;
+      const base = parseNumber(input[0]?.cells?.[depositIdx]) ?? 0;
+      let cumulative = 0;
+      return input.map((row, i) => {
+        const bank = parseNumber(row.cells[bankAmountIdx]) ?? 0;
+        cumulative += bank;
+        const balance = base - cumulative;
+        const cells = [...row.cells];
+        cells[balanceIdx] = Number.isFinite(balance) ? balance.toLocaleString('ko-KR') : '';
+        return { ...row, cells };
+      });
+    },
+    [depositIdx, bankAmountIdx, balanceIdx],
+  );
+
+  const applyDerivedRows = useCallback(
+    (input: ImportRow[]) => {
+      const recalced = recomputeBalances(input);
+      return recalced.map((row, i) => {
+        const result = importRowToTransaction(row, projectId, defaultLedgerId, i);
+        return { ...row, error: result.error };
+      });
+    },
+    [recomputeBalances, projectId, defaultLedgerId],
+  );
+
   const updateCell = useCallback(
     (rowIdx: number, colIdx: number, value: string) => {
       const next = rows.map((r, i) => {
         if (i !== rowIdx) return r;
         const cells = [...r.cells];
         cells[colIdx] = value;
-        const updated: ImportRow = { ...r, cells };
-        // Re-validate
-        const result = importRowToTransaction(updated, projectId, defaultLedgerId, i);
-        updated.error = result.error;
-        return updated;
+        return { ...r, cells };
       });
-      onChange(next);
+      onChange(applyDerivedRows(next));
     },
-    [rows, onChange, projectId, defaultLedgerId],
+    [rows, onChange, applyDerivedRows],
   );
 
   const updateRow = useCallback(
@@ -928,13 +983,11 @@ function ImportEditor({
             updated = { ...updated, cells };
           }
         }
-        const result = importRowToTransaction(updated, projectId, defaultLedgerId, i);
-        updated.error = result.error;
         return updated;
       });
-      onChange(next);
+      onChange(applyDerivedRows(next));
     },
-    [rows, onChange, projectId, defaultLedgerId, budgetCodeIdx, subCodeIdx, evidenceIdx, evidenceRequiredMap],
+    [rows, onChange, budgetCodeIdx, subCodeIdx, evidenceIdx, evidenceRequiredMap, applyDerivedRows],
   );
 
   const addRow = useCallback(() => {
@@ -943,8 +996,8 @@ function ImportEditor({
     const noIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === 'No.');
     if (noIdx >= 0) newRow.cells[noIdx] = String(rows.length + 1);
     newRow.error = undefined;
-    onChange([...rows, newRow]);
-  }, [rows, onChange]);
+    onChange(applyDerivedRows([...rows, newRow]));
+  }, [rows, onChange, applyDerivedRows]);
 
   const addRows = useCallback((count: number) => {
     if (count <= 0) return;
@@ -955,8 +1008,8 @@ function ImportEditor({
       if (noIdx >= 0) newRow.cells[noIdx] = String(nextRows.length + 1);
       nextRows.push(newRow);
     }
-    onChange(nextRows);
-  }, [rows, onChange]);
+    onChange(applyDerivedRows(nextRows));
+  }, [rows, onChange, applyDerivedRows]);
 
   useEffect(() => {
     if (!inline) return;
@@ -966,9 +1019,9 @@ function ImportEditor({
 
   const removeRow = useCallback(
     (rowIdx: number) => {
-      onChange(rows.filter((_, i) => i !== rowIdx));
+      onChange(applyDerivedRows(rows.filter((_, i) => i !== rowIdx)));
     },
-    [rows, onChange],
+    [rows, onChange, applyDerivedRows],
   );
 
   const applyEvidenceMapping = useCallback((rowIdx?: number) => {
@@ -1019,6 +1072,8 @@ function ImportEditor({
     }
   }, [mappingDraft, onSaveEvidenceRequiredMap]);
 
+  console.log(mappingRows, "mappingRows")
+
   return (
     <div className={inline ? 'relative border rounded-lg bg-background flex flex-col overflow-visible' : 'fixed inset-0 z-50 bg-background/95 flex flex-col'}>
       {/* Toolbar */}
@@ -1057,7 +1112,7 @@ function ImportEditor({
       </div>
 
       {/* Scrollable table */}
-        <div className={inline ? 'overflow-auto max-h-[calc(100vh-260px)]' : 'flex-1 overflow-auto'}>
+      <div className={inline ? 'overflow-auto max-h-[calc(100vh-260px)]' : 'flex-1 overflow-auto'}>
         <table className="w-full text-[11px] border-collapse">
           <thead className="sticky top-0 z-10">
             {/* Group header */}
@@ -1201,6 +1256,8 @@ function ImportEditorRow({
     return entry ? entry.subCodes : [];
   }, [budgetCode]);
 
+  console.log(row, "")
+
   return (
     <tr className={`${hasError ? 'bg-red-50/60 dark:bg-red-950/20' : 'hover:bg-muted/30'} transition-colors`}>
       {/* Row controls */}
@@ -1303,8 +1360,8 @@ function ImportEditorRow({
                 type="text"
                 value={row.cells[colIdx] || ''}
                 className={`w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[50px] ${hasError && colIdx === dateIdx && !row.cells[colIdx]
-                    ? 'ring-1 ring-red-300 rounded'
-                    : ''
+                  ? 'ring-1 ring-red-300 rounded'
+                  : ''
                   }`}
                 onChange={(e) => onCellChange(colIdx, e.target.value)}
               />

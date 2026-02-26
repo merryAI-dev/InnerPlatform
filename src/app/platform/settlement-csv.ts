@@ -275,6 +275,29 @@ export interface SettlementParseResult {
   warnings: { row: number; message: string }[];
 }
 
+function findHeaderRowIdx(matrix: string[][]): number {
+  if (matrix.length === 0) return 0;
+  let bestIdx = 0;
+  let bestScore = -1;
+  const targetKeys = SETTLEMENT_COLUMNS.map((c) => normalizeKey(c.csvHeader));
+  const scanMax = Math.min(5, matrix.length);
+  for (let i = 0; i < scanMax; i++) {
+    const row = matrix[i];
+    let score = 0;
+    for (const cell of row) {
+      const src = normalizeKey(cell || '');
+      if (!src) continue;
+      if (targetKeys.includes(src)) score += 3;
+      else if (targetKeys.some((t) => src.includes(t) || t.includes(src))) score += 1;
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      bestIdx = i;
+    }
+  }
+  return bestIdx;
+}
+
 export function parseSettlementCsv(
   matrix: string[][],
   projectId: string,
@@ -284,16 +307,7 @@ export function parseSettlementCsv(
     return { valid: [], errors: [{ row: 0, message: '헤더 행이 없습니다' }], warnings: [] };
   }
 
-  // Find the header row (row containing "거래일시" or "No.")
-  let headerRowIdx = -1;
-  for (let i = 0; i < Math.min(5, matrix.length); i++) {
-    const joined = matrix[i].join(',');
-    if (/거래일시|No\.|해당\s*주차/.test(joined)) {
-      headerRowIdx = i;
-      break;
-    }
-  }
-  if (headerRowIdx === -1) headerRowIdx = 0; // fallback to first row
+  const headerRowIdx = findHeaderRowIdx(matrix);
 
   const headers = matrix[headerRowIdx].map((h) => normalizeSpace(h));
   const dataRows = matrix.slice(headerRowIdx + 1);
@@ -423,16 +437,7 @@ export interface ImportRow {
 export function normalizeMatrixToImportRows(matrix: string[][]): ImportRow[] {
   if (matrix.length < 2) return [];
 
-  // Find the header row
-  let headerRowIdx = -1;
-  for (let i = 0; i < Math.min(5, matrix.length); i++) {
-    const joined = matrix[i].join(',');
-    if (/거래일시|No\.|해당\s*주차/.test(joined)) {
-      headerRowIdx = i;
-      break;
-    }
-  }
-  if (headerRowIdx === -1) headerRowIdx = 0;
+  const headerRowIdx = findHeaderRowIdx(matrix);
 
   const headers = matrix[headerRowIdx].map((h) => normalizeSpace(h));
   const dataRows = matrix.slice(headerRowIdx + 1);
