@@ -316,14 +316,13 @@ export function SettlementLedgerPage({
 
 
       let cashflowFailed = false;
-      for (const weekLabel of weekLabels) {
-        const amounts = byWeek.get(weekLabel) || {};
-        const week = resolveWeekFromLabel(weekLabel, yearWeeks);
-        if (!week) continue;
-        const cleared: Partial<Record<string, number>> = {};
-        for (const lineId of CASHFLOW_ALL_LINES) {
-          cleared[lineId] = 0;
-        }
+      const cleared: Partial<Record<string, number>> = {};
+      for (const lineId of CASHFLOW_ALL_LINES) {
+        cleared[lineId] = 0;
+      }
+
+      for (const week of yearWeeks) {
+        const amounts = byWeek.get(week.label) || {};
         const merged = { ...cleared, ...amounts };
         try {
           await upsertWeekAmounts({

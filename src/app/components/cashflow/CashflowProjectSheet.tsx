@@ -26,7 +26,7 @@ import {
   type UserRole,
 } from '../../data/types';
 import { getSeoulTodayIso } from '../../platform/business-days';
-import { CASHFLOW_ALL_LINES, CASHFLOW_IN_LINES, CASHFLOW_OUT_LINES } from '../../platform/cashflow-sheet';
+import { CASHFLOW_ALL_LINES, CASHFLOW_IN_LINES, CASHFLOW_OUT_LINES, computeCashflowTotals } from '../../platform/cashflow-sheet';
 import { getMonthMondayWeeks } from '../../platform/cashflow-weeks';
 import { useAuth } from '../../data/auth-store';
 import { useBlocker } from 'react-router';
@@ -96,6 +96,41 @@ export function CashflowProjectSheet({
     return map;
   }, [projectWeeks]);
 
+  const openingTotalsByMode = useMemo(() => {
+    function ymToNumber(value: string): number | null {
+      const [y, m] = value.split('-');
+      const yy = Number.parseInt(y, 10);
+      const mm = Number.parseInt(m, 10);
+      if (!Number.isFinite(yy) || !Number.isFinite(mm)) return null;
+      return yy * 100 + mm;
+    }
+
+    const currentYmNum = ymToNumber(normalizedYearMonth);
+    const currentYear = currentYmNum ? Math.trunc(currentYmNum / 100) : null;
+    let projectionIn = 0;
+    let projectionOut = 0;
+    let actualIn = 0;
+    let actualOut = 0;
+
+    for (const w of weeks) {
+      if (w.projectId !== projectId) continue;
+      const ymRaw = typeof w.yearMonth === 'string' ? w.yearMonth : '';
+      const ymNum = ymToNumber(ymRaw);
+      if (!ymNum || !currentYear || !currentYmNum) continue;
+      if (Math.trunc(ymNum / 100) !== currentYear) continue;
+      if (ymNum >= currentYmNum) continue;
+      const p = computeCashflowTotals(w.projection);
+      const a = computeCashflowTotals(w.actual);
+      projectionIn += p.totalIn;
+      projectionOut += p.totalOut;
+      actualIn += a.totalIn;
+      actualOut += a.totalOut;
+    }
+
+    return { projectionIn, projectionOut, actualIn, actualOut };
+  }, [normalizedYearMonth, projectId, weeks]);
+
+
   // ── Actual: Firestore cashflow_weeks actual 값 사용 ──
 
   const [mode, setMode] = useState<'projection' | 'actual'>('projection');
@@ -152,6 +187,16 @@ export function CashflowProjectSheet({
     return map;
   }, [byWeekNo, monthWeeks]);
 
+  const weekHasActual = useMemo(() => {
+    const map: Record<number, boolean> = {};
+    for (const def of monthWeeks) {
+      const doc = byWeekNo.get(def.weekNo);
+      const actual = doc?.actual || {};
+      map[def.weekNo] = Object.values(actual).some((v) => Number(v) !== 0);
+    }
+    return map;
+  }, [byWeekNo, monthWeeks]);
+
   function resolveWeekKey(params: { yearMonth: string; mode: 'projection' | 'actual'; weekNo: number }): string {
     return `${params.yearMonth}:${params.mode}:${params.weekNo}`;
   }
@@ -193,10 +238,16 @@ export function CashflowProjectSheet({
   const derivedByMode = useMemo(() => {
     function compute(mode: 'projection' | 'actual') {
       const rowTotals: Record<CashflowSheetLineId, number> = Object.fromEntries(CASHFLOW_ALL_LINES.map((id) => [id, 0])) as any;
+      const openingIn = mode === 'projection' ? openingTotalsByMode.projectionIn : openingTotalsByMode.actualIn;
+      const openingOut = mode === 'projection' ? openingTotalsByMode.projectionOut : openingTotalsByMode.actualOut;
+      let runningIn = openingIn;
+      let runningOut = openingOut;
       const weekTotals = monthWeeks.map((def) => {
-        const totalIn = CASHFLOW_IN_LINES.reduce((acc, id) => acc + getEffectiveAmount({ yearMonth, mode, weekNo: def.weekNo, lineId: id }), 0);
-        const totalOut = CASHFLOW_OUT_LINES.reduce((acc, id) => acc + getEffectiveAmount({ yearMonth, mode, weekNo: def.weekNo, lineId: id }), 0);
-        return { weekNo: def.weekNo, totalIn, totalOut, net: totalIn - totalOut };
+        const weekIn = CASHFLOW_IN_LINES.reduce((acc, id) => acc + getEffectiveAmount({ yearMonth, mode, weekNo: def.weekNo, lineId: id }), 0);
+        const weekOut = CASHFLOW_OUT_LINES.reduce((acc, id) => acc + getEffectiveAmount({ yearMonth, mode, weekNo: def.weekNo, lineId: id }), 0);
+        runningIn += weekIn;
+        runningOut += weekOut;
+        return { weekNo: def.weekNo, totalIn: runningIn, totalOut: runningOut, net: runningIn - runningOut, weekIn, weekOut };
       });
 
       for (const lineId of CASHFLOW_ALL_LINES) {
@@ -205,8 +256,8 @@ export function CashflowProjectSheet({
         }
       }
 
-      const totalIn = weekTotals.reduce((acc, w) => acc + w.totalIn, 0);
-      const totalOut = weekTotals.reduce((acc, w) => acc + w.totalOut, 0);
+      const totalIn = weekTotals.length ? weekTotals[weekTotals.length - 1].totalIn : openingIn;
+      const totalOut = weekTotals.length ? weekTotals[weekTotals.length - 1].totalOut : openingOut;
       return {
         rowTotals,
         weekTotals,
@@ -218,7 +269,7 @@ export function CashflowProjectSheet({
       projection: compute('projection'),
       actual: compute('actual'),
     };
-  }, [drafts, getEffectiveAmount, monthWeeks, yearMonth]);
+  }, [drafts, getEffectiveAmount, monthWeeks, openingTotalsByMode, yearMonth]);
 
   const flushWeek = useCallback(async (input: {
     weekNo: number;
@@ -399,7 +450,7 @@ export function CashflowProjectSheet({
                           <span>{w.label}</span>
                           {weekMeta[w.weekNo]?.adminClosed ? (
                             <Badge className="h-4 px-1 text-[9px] bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-0">결산</Badge>
-                          ) : weekMeta[w.weekNo]?.pmSubmitted ? (
+                          ) : weekMeta[w.weekNo]?.pmSubmitted || weekHasActual[w.weekNo] ? (
                             <Badge className="h-4 px-1 text-[9px] bg-amber-500/15 text-amber-700 dark:text-amber-300 border-0">작성</Badge>
                           ) : (
                             <Badge className="h-4 px-1 text-[9px] bg-slate-500/10 text-slate-600 dark:text-slate-300 border-0">미작성</Badge>
@@ -579,7 +630,7 @@ export function CashflowProjectSheet({
                   {(() => {
                     let running = 0;
                     return derived.weekTotals.map((w) => {
-                      running += w.net;
+                      running = w.net;
                       return (
                         <td key={w.weekNo} className="px-3 py-2 text-right" style={{ fontWeight: 900, color: running >= 0 ? '#059669' : '#e11d48' }}>
                           {fmt(running)}

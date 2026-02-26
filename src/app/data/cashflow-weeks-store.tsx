@@ -136,15 +136,38 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     setIsLoading(true);
 
     const base = collection(db, getOrgCollectionPath(orgId, 'cashflowWeeks'));
+    const year = yearMonth.slice(0, 4);
+    const yearStart = `${year}-01`;
+    const yearEnd = `${year}-12`;
     const q = readAll
-      ? query(base, where('yearMonth', '==', yearMonth), limit(2500))
-      : query(base, where('yearMonth', '==', yearMonth), limit(2500));
-
-    if (!q) {
-      setWeeks([]);
-      setIsLoading(false);
-      return;
-    }
+      ? query(
+        base,
+        where('yearMonth', '>=', yearStart),
+        where('yearMonth', '<=', yearEnd),
+        limit(2500),
+      )
+      : (projectIds.length > 0
+        ? (projectIds.length === 1
+          ? query(
+            base,
+            where('projectId', '==', projectIds[0]),
+            where('yearMonth', '>=', yearStart),
+            where('yearMonth', '<=', yearEnd),
+            limit(2500),
+          )
+          : query(
+            base,
+            where('projectId', 'in', projectIds.slice(0, 10)),
+            where('yearMonth', '>=', yearStart),
+            where('yearMonth', '<=', yearEnd),
+            limit(2500),
+          ))
+        : query(
+          base,
+          where('yearMonth', '>=', yearStart),
+          where('yearMonth', '<=', yearEnd),
+          limit(2500),
+        ));
 
     unsubsRef.current.push(
       onSnapshot(q, (snap) => {
@@ -166,7 +189,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
       unsubsRef.current.forEach((u) => u());
       unsubsRef.current = [];
     };
-  }, [db, firestoreEnabled, myProjectId, orgId, readAll, yearMonth]);
+  }, [db, firestoreEnabled, orgId, projectIds, readAll, yearMonth]);
 
   const upsertWeekAmounts = useCallback(async (input: {
     projectId: string;
