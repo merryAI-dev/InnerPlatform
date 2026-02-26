@@ -53,15 +53,23 @@ service cloud.firestore {
     function memberProjectId(orgId) {
       return memberDoc(orgId).data.projectId;
     }
+    function memberProjectIds(orgId) {
+      return memberDoc(orgId).data.projectIds;
+    }
+
+    function isProjectAssigned(orgId, projectId) {
+      return memberProjectId(orgId) == projectId
+        || (memberProjectIds(orgId) != null && memberProjectIds(orgId).hasAny([projectId]));
+    }
 
     function canReadProjectResource(orgId, projectId) {
       return isPrivileged(orgId)
-        || (role(orgId) in ['pm', 'viewer'] && memberProjectId(orgId) == projectId);
+        || (role(orgId) in ['pm', 'viewer'] && isProjectAssigned(orgId, projectId));
     }
 
     function canWriteProjectResource(orgId, projectId) {
       return role(orgId) in ['admin', 'tenant_admin', 'finance']
-        || (role(orgId) == 'pm' && memberProjectId(orgId) == projectId);
+        || (role(orgId) == 'pm' && isProjectAssigned(orgId, projectId));
     }
 
     function projectIdFromTransaction(orgId, txId) {
@@ -152,7 +160,9 @@ service cloud.firestore {
     }
 
     match /orgs/{orgId}/budget_evidence_maps/{projectId} {
-      allow read: if isSignedIn() && resourceHasValidTenant(orgId) && canReadProjectResource(orgId, resource.data.projectId);
+      allow read: if isSignedIn()
+                  && (resource == null || resourceHasValidTenant(orgId))
+                  && canReadProjectResource(orgId, projectId);
       allow create: if isSignedIn() && requestHasValidTenant(orgId) && canWriteProjectResource(orgId, request.resource.data.projectId);
       allow update: if isSignedIn() && requestHasValidTenant(orgId) && resourceHasValidTenant(orgId) && canWriteProjectResource(orgId, resource.data.projectId);
       allow delete: if isSignedIn() && resourceHasValidTenant(orgId) && canWriteProjectResource(orgId, resource.data.projectId);
@@ -277,7 +287,7 @@ service cloud.firestore {
                       // PM can edit amounts + submit, but cannot close.
                       (
                         role(orgId) == 'pm'
-                        && memberProjectId(orgId) == resource.data.projectId
+                        && isProjectAssigned(orgId, resource.data.projectId)
                         && request.resource.data.projectId == resource.data.projectId
                         && request.resource.data.yearMonth == resource.data.yearMonth
                         && request.resource.data.weekNo == resource.data.weekNo

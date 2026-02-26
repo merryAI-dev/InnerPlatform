@@ -1,9 +1,9 @@
-import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, Download, ExternalLink, Plus, Save, Send, Upload, X } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, Download, ExternalLink, Plus, Save, Send, Upload, X, Loader2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { BUDGET_CODE_BOOK } from '../../data/budget-data';
 import type { Transaction, TransactionState } from '../../data/types';
-import { findWeekForDate, getYearMondayWeeks, type MonthMondayWeek } from '../../platform/cashflow-weeks';
+import { findWeekForDate, getMonthMondayWeeks, getYearMondayWeeks, type MonthMondayWeek } from '../../platform/cashflow-weeks';
 import { parseCsv, parseNumber, triggerDownload } from '../../platform/csv-utils';
 import { computeEvidenceStatus, computeEvidenceSummary, isValidDriveUrl } from '../../platform/evidence-helpers';
 import {
@@ -12,11 +12,14 @@ import {
   createEmptyImportRow,
   exportImportRowsCsv,
   exportSettlementCsv,
+  parseCashflowLineLabel,
   importRowToTransaction,
   normalizeMatrixToImportRows,
   transactionsToImportRows,
   type ImportRow,
 } from '../../platform/settlement-csv';
+import { CASHFLOW_ALL_LINES } from '../../platform/cashflow-sheet';
+import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Checkbox } from '../ui/checkbox';
@@ -34,6 +37,13 @@ const METHOD_LABELS: Record<string, string> = {
 };
 
 const METHOD_OPTIONS = Object.entries(METHOD_LABELS).map(([v, l]) => ({ value: v, label: l }));
+const CASHFLOW_IN_LINE_IDS = new Set([
+  'MYSC_PREPAY_IN',
+  'SALES_IN',
+  'SALES_VAT_IN',
+  'TEAM_SUPPORT_IN',
+  'BANK_INTEREST_IN',
+]);
 
 function normalizeMethodValue(value: string | undefined): string {
   if (!value) return '';
@@ -62,6 +72,19 @@ function resolveEvidenceRequiredDesc(
   return map[`${budgetCode}|${subCode}`] || map[subCode] || map[budgetCode] || '';
 }
 
+function resolveWeekFromLabel(label: string, yearWeeks: MonthMondayWeek[]): MonthMondayWeek | undefined {
+  const fromYear = yearWeeks.find((w) => w.label === label);
+  if (fromYear) return fromYear;
+  const m = label.match(/^(\d{2})-(\d{1,2})-(\d{1,2})$/);
+  if (!m) return undefined;
+  const year = 2000 + Number.parseInt(m[1], 10);
+  const month = Number.parseInt(m[2], 10);
+  const weekNo = Number.parseInt(m[3], 10);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(weekNo)) return undefined;
+  const yearMonth = `${year}-${String(month).padStart(2, '0')}`;
+  return getMonthMondayWeeks(yearMonth).find((w) => w.weekNo === weekNo);
+}
+
 // ── Types ──
 
 interface WeekBucket {
@@ -79,6 +102,7 @@ export interface SettlementLedgerProps {
   onUpdateTransaction: (id: string, updates: Partial<Transaction>) => void;
   evidenceRequiredMap?: Record<string, string>;
   onSaveEvidenceRequiredMap?: (map: Record<string, string>) => void | Promise<void>;
+  saving?: boolean;
   sheetRows?: ImportRow[] | null;
   onSaveSheetRows?: (rows: ImportRow[]) => void | Promise<void>;
   onSubmitWeek?: (input: {
@@ -111,13 +135,12 @@ export function SettlementLedgerPage({
   currentUserName = 'PM',
   userRole = 'pm',
 }: SettlementLedgerProps) {
-
-
-  console.log(sheetRows, "sheetRows")
+  const { upsertWeekAmounts } = useCashflowWeeks();
   const [year, setYear] = useState(() => new Date().getFullYear());
   const [collapsedWeeks, setCollapsedWeeks] = useState<Set<string>>(new Set());
   const [importRows, setImportRows] = useState<ImportRow[] | null>(null);
   const [importDirty, setImportDirty] = useState(false);
+  const [sheetSaving, setSheetSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // All weeks for the year
@@ -230,18 +253,22 @@ export function SettlementLedgerPage({
     }
 
     const depositIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '입금액(사업비,공급가액,은행이자)');
+    const refundIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '매입부가세 반환');
+    const expenseIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '사업비 사용액');
+    const vatInIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '매입부가세');
     const bankAmountIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '통장에 찍힌 입/출금액');
     const balanceIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '통장잔액');
     const withBalances = rows.map((row) => ({ ...row }));
-    if (depositIdx >= 0 && bankAmountIdx >= 0 && balanceIdx >= 0 && withBalances.length > 0) {
-      const base = parseNumber(withBalances[0]?.cells?.[depositIdx]) ?? 0;
-      let cumulative = 0;
+    if (depositIdx >= 0 && refundIdx >= 0 && expenseIdx >= 0 && vatInIdx >= 0 && bankAmountIdx >= 0 && balanceIdx >= 0) {
+      let running = 0;
       for (let i = 0; i < withBalances.length; i++) {
-        const bank = parseNumber(withBalances[i].cells[bankAmountIdx]) ?? 0;
-        cumulative += bank;
-        const balance = base - cumulative;
+        const depositSum = (parseNumber(withBalances[i].cells[depositIdx]) ?? 0) + (parseNumber(withBalances[i].cells[refundIdx]) ?? 0);
+        const expenseSum = (parseNumber(withBalances[i].cells[expenseIdx]) ?? 0) + (parseNumber(withBalances[i].cells[vatInIdx]) ?? 0);
+        const bankAmount = depositSum > 0 ? depositSum : expenseSum;
+        running += depositSum - expenseSum;
         const cells = [...withBalances[i].cells];
-        cells[balanceIdx] = Number.isFinite(balance) ? balance.toLocaleString('ko-KR') : '';
+        cells[bankAmountIdx] = Number.isFinite(bankAmount) && bankAmount !== 0 ? bankAmount.toLocaleString('ko-KR') : '';
+        cells[balanceIdx] = Number.isFinite(running) ? running.toLocaleString('ko-KR') : '';
         withBalances[i] = { ...withBalances[i], cells };
       }
     }
@@ -255,15 +282,76 @@ export function SettlementLedgerPage({
       toast.error('저장 기능이 연결되어 있지 않습니다.');
       return;
     }
+    setSheetSaving(true);
     try {
       await onSaveSheetRows(importRows);
+      const weekIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '해당 주차');
+      const cashflowIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === 'cashflow항목');
+      const depositIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '입금액(사업비,공급가액,은행이자)');
+      const refundIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '매입부가세 반환');
+      const expenseIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '사업비 사용액');
+      const vatInIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '매입부가세');
+
+      const byWeek = new Map<string, Record<string, number>>();
+      const weekLabels = new Set<string>();
+      for (const row of importRows) {
+        const weekLabel = weekIdx >= 0 ? row.cells[weekIdx] || '' : '';
+        if (weekLabel) weekLabels.add(weekLabel);
+        const cashflowLabel = cashflowIdx >= 0 ? row.cells[cashflowIdx] || '' : '';
+        if (!weekLabel || !cashflowLabel) continue;
+        const lineId = parseCashflowLineLabel(cashflowLabel);
+        if (!lineId) continue;
+        if (lineId === 'INPUT_VAT_OUT') continue;
+        const target = byWeek.get(weekLabel) || {};
+        const depositSum = (depositIdx >= 0 ? parseNumber(row.cells[depositIdx]) ?? 0 : 0)
+          + (refundIdx >= 0 ? parseNumber(row.cells[refundIdx]) ?? 0 : 0);
+        const expenseSum = (expenseIdx >= 0 ? parseNumber(row.cells[expenseIdx]) ?? 0 : 0)
+          + (vatInIdx >= 0 ? parseNumber(row.cells[vatInIdx]) ?? 0 : 0);
+        const amount = CASHFLOW_IN_LINE_IDS.has(lineId) ? depositSum : expenseSum;
+        if (amount !== 0) {
+          target[lineId] = (target[lineId] || 0) + amount;
+          byWeek.set(weekLabel, target);
+        }
+      }
+
+
+      let cashflowFailed = false;
+      for (const weekLabel of weekLabels) {
+        const amounts = byWeek.get(weekLabel) || {};
+        const week = resolveWeekFromLabel(weekLabel, yearWeeks);
+        if (!week) continue;
+        const cleared: Partial<Record<string, number>> = {};
+        for (const lineId of CASHFLOW_ALL_LINES) {
+          cleared[lineId] = 0;
+        }
+        const merged = { ...cleared, ...amounts };
+        try {
+          await upsertWeekAmounts({
+            projectId,
+            yearMonth: week.yearMonth,
+            weekNo: week.weekNo,
+            mode: 'actual',
+            amounts: merged as any,
+          });
+        } catch (err) {
+          cashflowFailed = true;
+          console.error('[SettlementLedger] cashflow actual update failed:', err);
+        }
+      }
+
       setImportDirty(false);
-      toast.success('정산대장을 저장했습니다.');
+      if (cashflowFailed) {
+        toast.message('정산대장은 저장되었지만 캐시플로 업데이트에 실패했습니다.');
+      } else {
+        toast.success('정산대장을 저장했습니다.');
+      }
     } catch (err) {
       console.error('[SettlementLedger] save sheet failed:', err);
       toast.error('정산대장 저장에 실패했습니다.');
+    } finally {
+      setSheetSaving(false);
     }
-  }, [importRows, onSaveSheetRows]);
+  }, [importRows, onSaveSheetRows, upsertWeekAmounts, projectId, yearWeeks]);
 
   // ── Inline edit handler with audit trail ──
   const handleUpdateTx = useCallback(
@@ -367,6 +455,7 @@ export function SettlementLedgerPage({
               setImportDirty(true);
             }}
             onSave={handleImportSave}
+            saving={sheetSaving}
             onCancel={() => {
               setImportRows(transactionsToImportRows(projectTxs, yearWeeks));
               setImportDirty(false);
@@ -375,6 +464,10 @@ export function SettlementLedgerPage({
             defaultLedgerId={defaultLedgerId}
             evidenceRequiredMap={evidenceRequiredMap}
             onSaveEvidenceRequiredMap={onSaveEvidenceRequiredMap}
+            weekOptions={yearWeeks.map((w) => ({
+              value: w.label,
+              label: w.label,
+            }))}
             inline
           />
         )}
@@ -495,6 +588,7 @@ export function SettlementLedgerPage({
             setImportDirty(true);
           }}
           onSave={handleImportSave}
+          saving={sheetSaving}
           onCancel={() => {
             setImportRows(transactionsToImportRows(projectTxs, yearWeeks));
             setImportDirty(false);
@@ -503,6 +597,10 @@ export function SettlementLedgerPage({
           defaultLedgerId={defaultLedgerId}
           evidenceRequiredMap={evidenceRequiredMap}
           onSaveEvidenceRequiredMap={onSaveEvidenceRequiredMap}
+          weekOptions={yearWeeks.map((w) => ({
+            value: w.label,
+            label: w.label,
+          }))}
         />
       )}
     </div>
@@ -877,16 +975,19 @@ function ImportEditor({
   defaultLedgerId,
   evidenceRequiredMap,
   onSaveEvidenceRequiredMap,
+  weekOptions,
   inline = false,
 }: {
   rows: ImportRow[];
   onChange: (rows: ImportRow[]) => void;
   onSave: () => void;
+  saving?: boolean;
   onCancel: () => void;
   projectId: string;
   defaultLedgerId: string;
   evidenceRequiredMap?: Record<string, string>;
   onSaveEvidenceRequiredMap?: (map: Record<string, string>) => void | Promise<void>;
+  weekOptions: { value: string; label: string }[];
   inline?: boolean;
 }) {
   const errorCount = rows.filter((r) => r.error).length;
@@ -899,12 +1000,36 @@ function ImportEditor({
     () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '세목'),
     [],
   );
+  const weekIdx = useMemo(
+    () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '해당 주차'),
+    [],
+  );
+  const cashflowIdx = useMemo(
+    () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === 'cashflow항목'),
+    [],
+  );
   const evidenceIdx = useMemo(
     () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '필수증빙자료 리스트'),
     [],
   );
+  const cashflowOptions = useMemo(
+    () => CASHFLOW_LINE_OPTIONS.filter((o) => o.value !== 'INPUT_VAT_OUT'),
+    [],
+  );
   const depositIdx = useMemo(
     () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '입금액(사업비,공급가액,은행이자)'),
+    [],
+  );
+  const refundIdx = useMemo(
+    () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '매입부가세 반환'),
+    [],
+  );
+  const expenseIdx = useMemo(
+    () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '사업비 사용액'),
+    [],
+  );
+  const vatInIdx = useMemo(
+    () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '매입부가세'),
     [],
   );
   const bankAmountIdx = useMemo(
@@ -929,19 +1054,20 @@ function ImportEditor({
 
   const recomputeBalances = useCallback(
     (input: ImportRow[]) => {
-      if (depositIdx < 0 || bankAmountIdx < 0 || balanceIdx < 0) return input;
-      const base = parseNumber(input[0]?.cells?.[depositIdx]) ?? 0;
-      let cumulative = 0;
-      return input.map((row, i) => {
-        const bank = parseNumber(row.cells[bankAmountIdx]) ?? 0;
-        cumulative += bank;
-        const balance = base - cumulative;
+      if (depositIdx < 0 || refundIdx < 0 || expenseIdx < 0 || vatInIdx < 0 || bankAmountIdx < 0 || balanceIdx < 0) return input;
+      let running = 0;
+      return input.map((row) => {
+        const depositSum = (parseNumber(row.cells[depositIdx]) ?? 0) + (parseNumber(row.cells[refundIdx]) ?? 0);
+        const expenseSum = (parseNumber(row.cells[expenseIdx]) ?? 0) + (parseNumber(row.cells[vatInIdx]) ?? 0);
+        const bankAmount = depositSum > 0 ? depositSum : expenseSum;
+        running += depositSum - expenseSum;
         const cells = [...row.cells];
-        cells[balanceIdx] = Number.isFinite(balance) ? balance.toLocaleString('ko-KR') : '';
+        cells[bankAmountIdx] = Number.isFinite(bankAmount) && bankAmount !== 0 ? bankAmount.toLocaleString('ko-KR') : '';
+        cells[balanceIdx] = Number.isFinite(running) ? running.toLocaleString('ko-KR') : '';
         return { ...row, cells };
       });
     },
-    [depositIdx, bankAmountIdx, balanceIdx],
+    [depositIdx, refundIdx, expenseIdx, vatInIdx, bankAmountIdx, balanceIdx],
   );
 
   const applyDerivedRows = useCallback(
@@ -1072,8 +1198,6 @@ function ImportEditor({
     }
   }, [mappingDraft, onSaveEvidenceRequiredMap]);
 
-  console.log(mappingRows, "mappingRows")
-
   return (
     <div className={inline ? 'relative border rounded-lg bg-background flex flex-col overflow-visible' : 'fixed inset-0 z-50 bg-background/95 flex flex-col'}>
       {/* Toolbar */}
@@ -1103,10 +1227,10 @@ function ImportEditor({
             size="sm"
             className="h-7 text-[11px] gap-1"
             onClick={onSave}
-            disabled={validCount === 0}
+            disabled={validCount === 0 || saving}
           >
-            <Save className="h-3.5 w-3.5" />
-            {validCount}건 저장
+            {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+            {saving ? '저장 중...' : `${validCount}건 저장`}
           </Button>
         </div>
       </div>
@@ -1153,6 +1277,10 @@ function ImportEditor({
                 budgetCodeIdx={budgetCodeIdx}
                 subCodeIdx={subCodeIdx}
                 evidenceIdx={evidenceIdx}
+                weekIdx={weekIdx}
+                cashflowIdx={cashflowIdx}
+                weekOptions={weekOptions}
+                cashflowOptions={cashflowOptions}
                 evidenceRequiredMap={evidenceRequiredMap}
               />
             ))}
@@ -1228,7 +1356,10 @@ function ImportEditorRow({
   budgetCodeIdx,
   subCodeIdx,
   evidenceIdx,
-  projectId,
+  weekIdx,
+  cashflowIdx,
+  weekOptions,
+  cashflowOptions,
   evidenceRequiredMap,
 }: {
   row: ImportRow;
@@ -1239,6 +1370,10 @@ function ImportEditorRow({
   budgetCodeIdx: number;
   subCodeIdx: number;
   evidenceIdx: number;
+  weekIdx: number;
+  cashflowIdx: number;
+  weekOptions: { value: string; label: string }[];
+  cashflowOptions: { value: string; label: string }[];
   evidenceRequiredMap?: Record<string, string>;
 }) {
   const hasError = Boolean(row.error);
@@ -1255,8 +1390,12 @@ function ImportEditorRow({
     const entry = BUDGET_CODE_BOOK.find((c) => c.code === budgetCode);
     return entry ? entry.subCodes : [];
   }, [budgetCode]);
-
-  console.log(row, "")
+  const formatNumberInput = useCallback((value: string) => {
+    if (!value) return '';
+    const num = parseNumber(value);
+    if (num == null) return value;
+    return Number.isFinite(num) ? num.toLocaleString('ko-KR') : value;
+  }, []);
 
   return (
     <tr className={`${hasError ? 'bg-red-50/60 dark:bg-red-950/20' : 'hover:bg-muted/30'} transition-colors`}>
@@ -1280,15 +1419,28 @@ function ImportEditorRow({
       </td>
       {/* Data cells */}
       {SETTLEMENT_COLUMNS.map((col, colIdx) => {
-        const isReadOnly = col.csvHeader === 'No.' || col.csvHeader === '해당 주차';
+        const isReadOnly = col.csvHeader === 'No.';
         const isBudgetCode = colIdx === budgetCodeIdx;
         const isSubCode = colIdx === subCodeIdx;
+        const isWeek = colIdx === weekIdx;
+        const isCashflow = colIdx === cashflowIdx;
         return (
           <td key={colIdx} className="px-0.5 py-0.5 border-b border-r">
             {isReadOnly ? (
               <span className="text-[10px] text-muted-foreground px-1">
                 {row.cells[colIdx]}
               </span>
+            ) : isWeek ? (
+              <select
+                value={row.cells[colIdx] || ''}
+                className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[110px]"
+                onChange={(e) => onCellChange(colIdx, e.target.value)}
+              >
+                <option value="">-</option>
+                {weekOptions.map((w) => (
+                  <option key={w.value} value={w.value}>{w.label}</option>
+                ))}
+              </select>
             ) : colIdx === methodIdx ? (
               <select
                 value={row.cells[colIdx] || ''}
@@ -1304,10 +1456,21 @@ function ImportEditorRow({
                   <option key={o.value} value={o.label}>{o.label}</option>
                 ))}
               </select>
+            ) : isCashflow ? (
+              <select
+                value={row.cells[colIdx] || ''}
+                className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[140px]"
+                onChange={(e) => onCellChange(colIdx, e.target.value)}
+              >
+                <option value="">-</option>
+                {cashflowOptions.map((o) => (
+                  <option key={o.value} value={o.label}>{o.label}</option>
+                ))}
+              </select>
             ) : isBudgetCode ? (
               <select
                 value={row.cells[colIdx] || ''}
-                className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[90px]"
+                className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[140px]"
                 onChange={(e) => {
                   const nextCode = e.target.value;
                   onRowChange((prev) => {
@@ -1335,7 +1498,7 @@ function ImportEditorRow({
               <select
                 value={row.cells[colIdx] || ''}
                 disabled={!budgetCode}
-                className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[90px]"
+                className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[140px]"
                 onChange={(e) => {
                   const nextSub = e.target.value;
                   onRowChange((prev) => {
@@ -1359,11 +1522,16 @@ function ImportEditorRow({
               <input
                 type="text"
                 value={row.cells[colIdx] || ''}
-                className={`w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[50px] ${hasError && colIdx === dateIdx && !row.cells[colIdx]
+                className={`w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[80px] ${hasError && colIdx === dateIdx && !row.cells[colIdx]
                   ? 'ring-1 ring-red-300 rounded'
                   : ''
                   }`}
-                onChange={(e) => onCellChange(colIdx, e.target.value)}
+                onChange={(e) => {
+                  const next = col.format === 'number'
+                    ? formatNumberInput(e.target.value)
+                    : e.target.value;
+                  onCellChange(colIdx, next);
+                }}
               />
             )}
           </td>

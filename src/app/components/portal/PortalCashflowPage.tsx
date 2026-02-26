@@ -18,5 +18,12 @@ export function PortalCashflowPage() {
     );
   }
 
-  return <CashflowProjectSheet projectId={projectId} projectName={projectName} transactions={transactions} />;
+  return (
+    <CashflowProjectSheet
+      projectId={projectId}
+      projectName={projectName}
+      transactions={transactions}
+      roleOverride={portalUser?.role}
+    />
+  );
 }

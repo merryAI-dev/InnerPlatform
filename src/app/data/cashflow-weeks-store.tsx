@@ -11,6 +11,7 @@ import React, {
 import {
   collection,
   doc,
+  getDoc,
   limit,
   onSnapshot,
   query,
@@ -22,11 +23,11 @@ import {
 import { useAuth } from './auth-store';
 import type { CashflowSheetLineId, CashflowWeekSheet, VarianceFlag, VarianceFlagEvent } from './types';
 import { shouldCreateDocOnUpdateError } from './cashflow-weeks.helpers';
-import { featureFlags } from '../config/feature-flags';
 import { useFirebase } from '../lib/firebase-context';
 import { getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
 import { addMonthsToYearMonth, getSeoulTodayIso } from '../platform/business-days';
 import { getMonthMondayWeeks } from '../platform/cashflow-weeks';
+import { normalizeProjectIds } from './project-assignment';
 
 function normalizeRole(value: unknown): string {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
@@ -93,10 +94,14 @@ const CashflowWeekContext: React.Context<(CashflowWeekState & CashflowWeekAction
 export function CashflowWeekProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const { db, isOnline, orgId } = useFirebase();
-  const firestoreEnabled = featureFlags.firestoreCoreEnabled && isOnline && !!db;
+  const firestoreEnabled = isOnline && !!db;
 
   const role = user?.role;
   const myProjectId = user?.projectId || '';
+  const projectIds = useMemo(
+    () => normalizeProjectIds([...(Array.isArray(user?.projectIds) ? user?.projectIds : []), myProjectId]),
+    [user?.projectIds, myProjectId],
+  );
   const readAll = canReadAll(role);
 
   const [yearMonth, setYearMonthState] = useState(() => getSeoulTodayIso().slice(0, 7));
@@ -133,9 +138,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     const base = collection(db, getOrgCollectionPath(orgId, 'cashflowWeeks'));
     const q = readAll
       ? query(base, where('yearMonth', '==', yearMonth), limit(2500))
-      : (myProjectId
-        ? query(base, where('projectId', '==', myProjectId), where('yearMonth', '==', yearMonth), limit(80))
-        : null);
+      : query(base, where('yearMonth', '==', yearMonth), limit(2500));
 
     if (!q) {
       setWeeks([]);
@@ -202,13 +205,10 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
       patch[`${input.mode}.${lineKey}`] = amount;
     }
 
-    try {
+    const existingSnap = await getDoc(ref).catch(() => null);
+    if (existingSnap?.exists()) {
       await updateDoc(ref, patch as any);
       return;
-    } catch (error) {
-      if (!shouldCreateDocOnUpdateError(error)) {
-        throw error;
-      }
     }
 
     const amounts: Partial<Record<CashflowSheetLineId, number>> = {};

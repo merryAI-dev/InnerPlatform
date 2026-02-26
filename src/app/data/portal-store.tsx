@@ -193,6 +193,21 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           setPortalUser(null);
           return;
         }
+        // Normalize member projectIds to string array for security rules (one-time fix)
+        try {
+          const rawProjectIds = Array.isArray(member.projectIds) ? member.projectIds : [];
+          const hasObjectIds = rawProjectIds.some((entry) => typeof entry === 'object');
+          if (hasObjectIds || member.projectId !== normalized.projectId) {
+            await updateDoc(doc(db, getOrgDocumentPath(orgId, 'members', authUser.uid)), {
+              projectId: normalized.projectId,
+              projectIds: normalized.projectIds,
+              tenantId: orgId,
+              updatedAt: new Date().toISOString(),
+            });
+          }
+        } catch (err) {
+          console.error('[PortalStore] member projectIds normalize failed:', err);
+        }
         setPortalUser(normalized);
       } catch (err) {
         console.error('[PortalStore] member load failed:', err);
