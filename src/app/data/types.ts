@@ -18,7 +18,7 @@ export type AccountType = 'DEDICATED' | 'OPERATING' | 'NONE'; // 전용통장 / 
 
 export type TransactionState = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED';
 export type Direction = 'IN' | 'OUT';
-export type PaymentMethod = 'BANK_TRANSFER' | 'CARD' | 'CASH' | 'CHECK' | 'OTHER';
+export type PaymentMethod = 'TRANSFER' | 'CORP_CARD_1' | 'CORP_CARD_2' | 'OTHER';
 
 export type EvidenceStatus = 'MISSING' | 'PARTIAL' | 'COMPLETE';
 
@@ -133,10 +133,9 @@ export const EVIDENCE_STATUS_LABELS: Record<EvidenceStatus, string> = {
 };
 
 export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
-  BANK_TRANSFER: '계좌이체',
-  CARD: '카드',
-  CASH: '현금',
-  CHECK: '수표',
+  TRANSFER: '계좌이체',
+  CORP_CARD_1: '법인카드(뒷번호1)',
+  CORP_CARD_2: '법인카드(뒷번호2)',
   OTHER: '기타',
 };
 

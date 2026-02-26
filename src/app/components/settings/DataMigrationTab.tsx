@@ -1222,10 +1222,10 @@ function parseSettlementSystem(raw: string): SettlementSystemCode {
 
 function parsePaymentMethod(raw: string): PaymentMethod {
   const s = normalizeSpace(raw).toLowerCase();
-  if (/카드|card/.test(s)) return 'CARD';
-  if (/현금|cash/.test(s)) return 'CASH';
-  if (/수표|check/.test(s)) return 'CHECK';
-  if (/계좌|이체|bank/.test(s)) return 'BANK_TRANSFER';
+  if (/법인카드.*1|뒷번호1|card.?1/.test(s)) return 'CORP_CARD_1';
+  if (/법인카드.*2|뒷번호2|card.?2/.test(s)) return 'CORP_CARD_2';
+  if (/법인카드|카드|card/.test(s)) return 'CORP_CARD_1';
+  if (/계좌|이체|bank/.test(s)) return 'TRANSFER';
   return 'OTHER';
 }
 

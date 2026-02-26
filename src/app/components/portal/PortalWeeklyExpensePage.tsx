@@ -3,7 +3,6 @@ import { AlertTriangle, Send } from 'lucide-react';
 import { usePortalStore } from '../../data/portal-store';
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { SettlementLedgerPage } from '../cashflow/SettlementLedgerPage';
-import { ProjectionGate } from '../cashflow/ProjectionGate';
 import { Button } from '../ui/button';
 import type { CashflowWeekSheet, TransactionState } from '../../data/types';
 import { toast } from 'sonner';
@@ -17,6 +16,10 @@ export function PortalWeeklyExpensePage() {
     addTransaction,
     updateTransaction,
     changeTransactionState,
+    evidenceRequiredMap,
+    saveEvidenceRequiredMap,
+    expenseSheetRows,
+    saveExpenseSheetRows,
   } = usePortalStore();
   const { submitWeekAsPm } = useCashflowWeeks();
 
@@ -44,29 +47,31 @@ export function PortalWeeklyExpensePage() {
         pmName={portalUser?.name || 'PM'}
         pmUid={portalUser?.id || ''}
       />
-      <ProjectionGate projectId={projectId}>
-        <SettlementLedgerPage
-          projectId={projectId}
-          projectName={projectName}
-          transactions={transactions}
-          defaultLedgerId={defaultLedgerId}
-          onAddTransaction={addTransaction}
-          onUpdateTransaction={updateTransaction}
-          onSubmitWeek={async ({ yearMonth, weekNo, txIds }) => {
-            try {
-              await submitWeekAsPm({ projectId, yearMonth, weekNo });
-              for (const txId of txIds) changeTransactionState(txId, 'SUBMITTED');
-              toast.success(`${yearMonth} ${weekNo}주 제출 처리 완료`);
-            } catch (err) {
-              toast.error('주간 제출 처리에 실패했습니다');
-              throw err;
-            }
-          }}
-          onChangeTransactionState={(txId, newState, reason) => changeTransactionState(txId, newState, reason)}
-          currentUserName={portalUser?.name || 'PM'}
-          userRole="pm"
-        />
-      </ProjectionGate>
+      <SettlementLedgerPage
+        projectId={projectId}
+        projectName={projectName}
+        transactions={transactions}
+        defaultLedgerId={defaultLedgerId}
+        onAddTransaction={addTransaction}
+        onUpdateTransaction={updateTransaction}
+        evidenceRequiredMap={evidenceRequiredMap}
+        onSaveEvidenceRequiredMap={saveEvidenceRequiredMap}
+        sheetRows={expenseSheetRows}
+        onSaveSheetRows={saveExpenseSheetRows}
+        onSubmitWeek={async ({ yearMonth, weekNo, txIds }) => {
+          try {
+            await submitWeekAsPm({ projectId, yearMonth, weekNo });
+            for (const txId of txIds) changeTransactionState(txId, 'SUBMITTED');
+            toast.success(`${yearMonth} ${weekNo}주 제출 처리 완료`);
+          } catch (err) {
+            toast.error('주간 제출 처리에 실패했습니다');
+            throw err;
+          }
+        }}
+        onChangeTransactionState={(txId, newState, reason) => changeTransactionState(txId, newState, reason)}
+        currentUserName={portalUser?.name || 'PM'}
+        userRole="pm"
+      />
     </div>
   );
 }

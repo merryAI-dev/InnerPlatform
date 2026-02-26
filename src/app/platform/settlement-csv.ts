@@ -3,7 +3,7 @@
 import type { Transaction, CashflowSheetLineId, PaymentMethod, Direction } from '../data/types';
 import { CASHFLOW_SHEET_LINE_LABELS } from '../data/types';
 import type { MonthMondayWeek } from './cashflow-weeks';
-import { findWeekForDate } from './cashflow-weeks';
+import { findWeekForDate, getYearMondayWeeks } from './cashflow-weeks';
 import { pickValue, parseNumber, parseDate, stableHash, normalizeSpace, normalizeKey } from './csv-utils';
 
 // ── Cashflow line label ↔ id mapping ──
@@ -122,10 +122,9 @@ export const SETTLEMENT_COLUMN_GROUPS = (() => {
 // ── Payment method display ──
 
 const METHOD_LABELS: Record<string, string> = {
-  BANK_TRANSFER: '계좌이체',
-  CARD: '법인카드',
-  CASH: '현금',
-  CHECK: '수표',
+  TRANSFER: '계좌이체',
+  CORP_CARD_1: '법인카드(뒷번호1)',
+  CORP_CARD_2: '법인카드(뒷번호2)',
   OTHER: '기타',
 };
 
@@ -135,10 +134,10 @@ function methodToLabel(method: string | undefined): string {
 
 function labelToMethod(raw: string): PaymentMethod {
   const s = normalizeSpace(raw).toLowerCase();
-  if (/카드|card/.test(s)) return 'CARD';
-  if (/현금|cash/.test(s)) return 'CASH';
-  if (/수표|check/.test(s)) return 'CHECK';
-  if (/계좌|이체|bank/.test(s)) return 'BANK_TRANSFER';
+  if (/법인카드.*1|뒷번호1|card.?1/.test(s)) return 'CORP_CARD_1';
+  if (/법인카드.*2|뒷번호2|card.?2/.test(s)) return 'CORP_CARD_2';
+  if (/법인카드|카드|card/.test(s)) return 'CORP_CARD_1';
+  if (/계좌|이체|bank/.test(s)) return 'TRANSFER';
   return 'OTHER';
 }
 
@@ -239,12 +238,64 @@ export function exportSettlementCsv(
   }).join(',')).join('\n');
 }
 
+export function exportImportRowsCsv(rows: ImportRow[]): string {
+  const data: string[][] = [];
+  // Group header row
+  data.push(SETTLEMENT_COLUMN_GROUPS.map((g) => g.name).flatMap((name, i) => {
+    const colSpan = SETTLEMENT_COLUMN_GROUPS[i].colSpan;
+    return [name, ...Array(colSpan - 1).fill('')];
+  }));
+  // Column header row
+  data.push(SETTLEMENT_COLUMNS.map((c) => c.csvHeader));
+
+  for (const row of rows) {
+    data.push(row.cells.map((c) => c ?? ''));
+  }
+
+  return data
+    .map((line) =>
+      line
+        .map((cell) => {
+          const s = String(cell ?? '');
+          if (s.includes('"') || s.includes(',') || s.includes('\n')) {
+            return `"${s.replace(/"/g, '""')}"`;
+          }
+          return s;
+        })
+        .join(','),
+    )
+    .join('\n');
+}
+
 // ── Import (CSV matrix → Transaction[]) ──
 
 export interface SettlementParseResult {
   valid: Transaction[];
   errors: { row: number; message: string }[];
   warnings: { row: number; message: string }[];
+}
+
+function findHeaderRowIdx(matrix: string[][]): number {
+  if (matrix.length === 0) return 0;
+  let bestIdx = 0;
+  let bestScore = -1;
+  const targetKeys = SETTLEMENT_COLUMNS.map((c) => normalizeKey(c.csvHeader));
+  const scanMax = Math.min(5, matrix.length);
+  for (let i = 0; i < scanMax; i++) {
+    const row = matrix[i];
+    let score = 0;
+    for (const cell of row) {
+      const src = normalizeKey(cell || '');
+      if (!src) continue;
+      if (targetKeys.includes(src)) score += 3;
+      else if (targetKeys.some((t) => src.includes(t) || t.includes(src))) score += 1;
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      bestIdx = i;
+    }
+  }
+  return bestIdx;
 }
 
 export function parseSettlementCsv(
@@ -256,16 +307,7 @@ export function parseSettlementCsv(
     return { valid: [], errors: [{ row: 0, message: '헤더 행이 없습니다' }], warnings: [] };
   }
 
-  // Find the header row (row containing "거래일시" or "No.")
-  let headerRowIdx = -1;
-  for (let i = 0; i < Math.min(5, matrix.length); i++) {
-    const joined = matrix[i].join(',');
-    if (/거래일시|No\.|해당\s*주차/.test(joined)) {
-      headerRowIdx = i;
-      break;
-    }
-  }
-  if (headerRowIdx === -1) headerRowIdx = 0; // fallback to first row
+  const headerRowIdx = findHeaderRowIdx(matrix);
 
   const headers = matrix[headerRowIdx].map((h) => normalizeSpace(h));
   const dataRows = matrix.slice(headerRowIdx + 1);
@@ -290,8 +332,8 @@ export function parseSettlementCsv(
     const amountRaw = pickValue(kv, ['통장에 찍힌 입/출금액', '입출금액', 'bankAmount', '금액']);
     if (!dateRaw && !amountRaw) continue;
 
-    const dateTime = parseDate(dateRaw);
-    if (!dateTime) {
+    const dateTime = dateRaw ? parseDate(dateRaw) : '';
+    if (dateRaw && !dateTime) {
       errors.push({ row: rowNum, message: '거래일시를 파싱할 수 없습니다' });
       continue;
     }
@@ -381,6 +423,7 @@ export function parseSettlementCsv(
 
 export interface ImportRow {
   tempId: string;
+  sourceTxId?: string;
   /** Cell values aligned to SETTLEMENT_COLUMNS order (string representation). */
   cells: string[];
   /** Validation error when trying to parse this row. */
@@ -394,16 +437,7 @@ export interface ImportRow {
 export function normalizeMatrixToImportRows(matrix: string[][]): ImportRow[] {
   if (matrix.length < 2) return [];
 
-  // Find the header row
-  let headerRowIdx = -1;
-  for (let i = 0; i < Math.min(5, matrix.length); i++) {
-    const joined = matrix[i].join(',');
-    if (/거래일시|No\.|해당\s*주차/.test(joined)) {
-      headerRowIdx = i;
-      break;
-    }
-  }
-  if (headerRowIdx === -1) headerRowIdx = 0;
+  const headerRowIdx = findHeaderRowIdx(matrix);
 
   const headers = matrix[headerRowIdx].map((h) => normalizeSpace(h));
   const dataRows = matrix.slice(headerRowIdx + 1);
@@ -451,6 +485,38 @@ export function createEmptyImportRow(): ImportRow {
 }
 
 /**
+ * Convert existing transactions into ImportRow[] for editable sheet view.
+ */
+export function transactionsToImportRows(
+  transactions: Transaction[],
+  weeks: MonthMondayWeek[],
+): ImportRow[] {
+  const sorted = [...transactions].sort((a, b) => a.dateTime.localeCompare(b.dateTime));
+  let rowNum = 0;
+
+  return sorted.map((tx) => {
+    rowNum++;
+    const dateStr = tx.dateTime?.slice(0, 10) || '';
+    const yearWeeks = dateStr ? getYearMondayWeeks(Number(dateStr.slice(0, 4))) : weeks;
+    const weekLabel = dateStr ? findWeekForDate(dateStr, yearWeeks)?.label || '' : '';
+
+    const cells = SETTLEMENT_COLUMNS.map((col) => {
+      if (col.csvHeader === 'No.') return String(rowNum);
+      if (col.csvHeader === '해당 주차') return weekLabel;
+      if (col.csvHeader === '지출구분') return methodToLabel(tx.method);
+      if (!col.txField) return '';
+      return formatCellValue(getNestedValue(tx, col.txField), col.format);
+    });
+
+    return {
+      tempId: tx.id,
+      sourceTxId: tx.id,
+      cells,
+    };
+  });
+}
+
+/**
  * Convert a single ImportRow to a Transaction.
  * Returns the transaction on success or an error message.
  */
@@ -469,10 +535,14 @@ export function importRowToTransaction(
 
   const dateRaw = pickValue(kv, ['거래일시', '거래일', 'dateTime']);
   const amountRaw = pickValue(kv, ['통장에 찍힌 입/출금액', '입출금액', 'bankAmount', '금액']);
-  if (!dateRaw && !amountRaw) return { error: '거래일시 또는 금액이 비어 있습니다' };
+  const isEffectivelyEmpty = Object.entries(kv).every(([header, value]) => {
+    if (header === 'No.' || header === '해당 주차') return true;
+    return !value;
+  });
+  if (isEffectivelyEmpty) return {};
 
-  const dateTime = parseDate(dateRaw);
-  if (!dateTime) return { error: '거래일시를 파싱할 수 없습니다' };
+  const dateTime = dateRaw ? parseDate(dateRaw) : '';
+  if (dateRaw && !dateTime) return { error: '거래일시를 파싱할 수 없습니다' };
 
   const bankAmount = parseNumber(amountRaw) ?? 0;
   const methodRaw = pickValue(kv, ['지출구분', '결제수단', 'method']);
@@ -498,7 +568,7 @@ export function importRowToTransaction(
   const author = pickValue(kv, ['작성자', 'author']);
 
   const now = new Date().toISOString();
-  const id = `stl-${stableHash(`${projectId}|${dateTime}|${counterparty}|${bankAmount}|${rowIndex}`)}`;
+  const id = row.sourceTxId || `stl-${stableHash(`${projectId}|${dateTime}|${counterparty}|${bankAmount}|${rowIndex}`)}`;
   const cashflowCategory = inferCashflowCategory(lineId, direction);
 
   const tx: Transaction = {

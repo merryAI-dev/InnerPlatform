@@ -94,6 +94,13 @@ service cloud.firestore {
       allow delete: if isSignedIn() && resourceHasValidTenant(orgId) && canWriteProjectResource(orgId, projectId);
     }
 
+    match /orgs/{orgId}/projects/{projectId}/expense_sheets/{sheetId} {
+      allow read: if isSignedIn() && resourceHasValidTenant(orgId) && canReadProjectResource(orgId, projectId);
+      allow create: if isSignedIn() && requestHasValidTenant(orgId) && canWriteProjectResource(orgId, projectId);
+      allow update: if isSignedIn() && requestHasValidTenant(orgId) && resourceHasValidTenant(orgId) && canWriteProjectResource(orgId, projectId);
+      allow delete: if isSignedIn() && resourceHasValidTenant(orgId) && canWriteProjectResource(orgId, projectId);
+    }
+
     match /orgs/{orgId}/ledgers/{ledgerId} {
       allow read: if isSignedIn() && resourceHasValidTenant(orgId) && canReadProjectResource(orgId, resource.data.projectId);
       allow create: if isSignedIn() && requestHasValidTenant(orgId) && canWriteProjectResource(orgId, request.resource.data.projectId);
@@ -138,6 +145,13 @@ service cloud.firestore {
     }
 
     match /orgs/{orgId}/change_requests/{requestId} {
+      allow read: if isSignedIn() && resourceHasValidTenant(orgId) && canReadProjectResource(orgId, resource.data.projectId);
+      allow create: if isSignedIn() && requestHasValidTenant(orgId) && canWriteProjectResource(orgId, request.resource.data.projectId);
+      allow update: if isSignedIn() && requestHasValidTenant(orgId) && resourceHasValidTenant(orgId) && canWriteProjectResource(orgId, resource.data.projectId);
+      allow delete: if isSignedIn() && resourceHasValidTenant(orgId) && canWriteProjectResource(orgId, resource.data.projectId);
+    }
+
+    match /orgs/{orgId}/budget_evidence_maps/{projectId} {
       allow read: if isSignedIn() && resourceHasValidTenant(orgId) && canReadProjectResource(orgId, resource.data.projectId);
       allow create: if isSignedIn() && requestHasValidTenant(orgId) && canWriteProjectResource(orgId, request.resource.data.projectId);
       allow update: if isSignedIn() && requestHasValidTenant(orgId) && resourceHasValidTenant(orgId) && canWriteProjectResource(orgId, resource.data.projectId);

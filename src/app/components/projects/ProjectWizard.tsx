@@ -1,28 +1,47 @@
-import { useState, useMemo, useCallback } from 'react';
-import { useNavigate } from 'react-router';
 import {
-  ChevronLeft, ChevronRight, Check, Save, ArrowLeft,
-  Building2, FileText, Banknote, Users, Calculator, CreditCard, Shield,
-  CheckCircle2, XCircle, AlertCircle, Sparkles,
+  AlertCircle,
+  ArrowLeft,
+  Banknote,
+  Building2,
+  Calculator,
+  Check,
+  CheckCircle2,
+  ChevronLeft, ChevronRight,
+  CreditCard,
+  FileText,
+  Save,
+  Shield,
+  Sparkles,
+  Users,
+  XCircle,
 } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
-import { Button } from '../ui/button';
+import { useCallback, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router';
+import { toast } from 'sonner';
+import { useAppStore } from '../../data/store';
+import type {
+  AccountType,
+  Basis,
+  Project,
+  ProjectPhase,
+  ProjectStatus,
+  ProjectType,
+  SettlementType,
+} from '../../data/types';
+import {
+  ACCOUNT_TYPE_LABELS,
+  BASIS_LABELS,
+  PROJECT_STATUS_LABELS,
+  PROJECT_TYPE_LABELS,
+  SETTLEMENT_TYPE_LABELS
+} from '../../data/types';
 import { Badge } from '../ui/badge';
+import { Button } from '../ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Progress } from '../ui/progress';
 import { Separator } from '../ui/separator';
-import { useAppStore } from '../../data/store';
-import { toast } from 'sonner';
-import type {
-  Project, ProjectType, ProjectStatus, ProjectPhase,
-  SettlementType, Basis, AccountType,
-} from '../../data/types';
-import {
-  PROJECT_TYPE_LABELS, PROJECT_STATUS_LABELS,
-  SETTLEMENT_TYPE_LABELS, BASIS_LABELS, ACCOUNT_TYPE_LABELS,
-  PROJECT_PHASE_LABELS,
-} from '../../data/types';
 
 // ── Step Definitions ──
 
@@ -389,11 +408,10 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
                   <button
                     key={at}
                     onClick={() => update('accountType', at)}
-                    className={`rounded-lg border-2 p-4 text-left transition-all ${
-                      formData.accountType === at
+                    className={`rounded-lg border-2 p-4 text-left transition-all ${formData.accountType === at
                         ? 'border-primary bg-primary/5'
                         : 'border-border hover:border-primary/50'
-                    }`}
+                      }`}
                   >
                     <div className="text-sm" style={{ fontWeight: 600 }}>
                       {ACCOUNT_TYPE_LABELS[at]}
@@ -608,11 +626,10 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
             </div>
             {/* Sum check */}
             {formData.contractAmount > 0 && (
-              <div className={`rounded-lg p-3 text-xs ${
-                (formData.paymentContract + formData.paymentInterim + formData.paymentFinal) === formData.contractAmount
+              <div className={`rounded-lg p-3 text-xs ${(formData.paymentContract + formData.paymentInterim + formData.paymentFinal) === formData.contractAmount
                   ? 'bg-green-50 border border-green-200 text-green-800'
                   : 'bg-amber-50 border border-amber-200 text-amber-800'
-              }`}>
+                }`}>
                 입금계획 합계: {fmtKRW(formData.paymentContract + formData.paymentInterim + formData.paymentFinal)}
                 {' / '}총 사업비: {fmtKRW(formData.contractAmount)}
                 {(formData.paymentContract + formData.paymentInterim + formData.paymentFinal) === formData.contractAmount
@@ -648,11 +665,10 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
               <div className="grid grid-cols-2 gap-3">
                 <button
                   onClick={() => setTargetPhase('PROSPECT')}
-                  className={`rounded-lg border-2 p-4 text-left transition-all ${
-                    targetPhase === 'PROSPECT'
+                  className={`rounded-lg border-2 p-4 text-left transition-all ${targetPhase === 'PROSPECT'
                       ? 'border-amber-500 bg-amber-50'
                       : 'border-border hover:border-amber-300'
-                  }`}
+                    }`}
                 >
                   <div className="flex items-center gap-2 text-sm" style={{ fontWeight: 600 }}>
                     <Sparkles className="w-4 h-4 text-amber-600" />
@@ -664,11 +680,10 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
                 </button>
                 <button
                   onClick={() => setTargetPhase('CONFIRMED')}
-                  className={`rounded-lg border-2 p-4 text-left transition-all ${
-                    targetPhase === 'CONFIRMED'
+                  className={`rounded-lg border-2 p-4 text-left transition-all ${targetPhase === 'CONFIRMED'
                       ? 'border-green-500 bg-green-50'
                       : 'border-border hover:border-green-300'
-                  } ${!canConfirm ? 'opacity-60' : ''}`}
+                    } ${!canConfirm ? 'opacity-60' : ''}`}
                 >
                   <div className="flex items-center gap-2 text-sm" style={{ fontWeight: 600 }}>
                     <CheckCircle2 className="w-4 h-4 text-green-600" />
@@ -796,13 +811,12 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
             <div key={step.id} className="flex items-center">
               <button
                 onClick={() => setCurrentStep(i)}
-                className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs transition-all ${
-                  isActive
+                className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs transition-all ${isActive
                     ? 'bg-primary text-primary-foreground'
                     : isCompleted
-                    ? 'bg-green-100 text-green-800'
-                    : 'bg-muted text-muted-foreground hover:bg-accent'
-                }`}
+                      ? 'bg-green-100 text-green-800'
+                      : 'bg-muted text-muted-foreground hover:bg-accent'
+                  }`}
               >
                 {isCompleted ? (
                   <Check className="w-3 h-3" />
