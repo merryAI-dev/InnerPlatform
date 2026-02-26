@@ -531,12 +531,24 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     setPortalUser(candidate);
 
     if (authUser) {
+      let memberRole = (authUser.role || user.role || 'pm').toLowerCase();
+      try {
+        const memberSnap = await getDoc(doc(db, getOrgDocumentPath(orgId, 'members', authUser.uid)));
+        if (memberSnap.exists()) {
+          const existingRole = (memberSnap.data() as { role?: string }).role;
+          if (typeof existingRole === 'string' && existingRole.trim()) {
+            memberRole = existingRole.trim().toLowerCase();
+          }
+        }
+      } catch (err) {
+        // If role lookup fails, fall back to current auth role
+      }
       try {
         await setDoc(doc(db, getOrgDocumentPath(orgId, 'members', authUser.uid)), {
           uid: authUser.uid,
           name: candidate.name,
           email: candidate.email,
-          role: authUser.role === 'viewer' ? 'viewer' : 'pm',
+          role: memberRole,
           tenantId: orgId,
           status: 'ACTIVE',
           projectId: candidate.projectId,
@@ -545,6 +557,9 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           createdAt: authUser.registeredAt || now,
           lastLoginAt: now,
         }, { merge: true });
+        if (candidate.role !== memberRole) {
+          setPortalUser({ ...candidate, role: memberRole });
+        }
       } catch (err) {
         console.error('[PortalStore] register member sync error:', err);
         setPortalUser(previousPortalUser);

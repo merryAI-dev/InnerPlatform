@@ -970,6 +970,7 @@ function ImportEditor({
   rows,
   onChange,
   onSave,
+  saving = false,
   onCancel,
   projectId,
   defaultLedgerId,
