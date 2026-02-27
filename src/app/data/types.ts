@@ -386,6 +386,21 @@ export interface Transaction {
   }>;
 }
 
+export interface BudgetPlanRow {
+  budgetCode: string;
+  subCode: string;
+  initialBudget: number;
+  revisedBudget?: number;
+  note?: string;
+}
+
+export interface BudgetPlanSnapshot {
+  projectId: string;
+  rows: BudgetPlanRow[];
+  updatedAt: string;
+  updatedBy: string;
+}
+
 export interface Evidence {
   id: string;
   version?: number;

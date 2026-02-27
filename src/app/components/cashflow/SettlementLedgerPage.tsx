@@ -1,5 +1,5 @@
-import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, Download, ExternalLink, Plus, Save, Send, Upload, X, Loader2 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, Download, ExternalLink, Plus, Save, Send, X, Loader2 } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { BUDGET_CODE_BOOK } from '../../data/budget-data';
 import type { Transaction, TransactionState } from '../../data/types';
@@ -12,7 +12,6 @@ import {
   createEmptyImportRow,
   parseCashflowLineLabel,
   importRowToTransaction,
-  normalizeMatrixToImportRows,
   transactionsToImportRows,
   type ImportRow,
 } from '../../platform/settlement-csv';
@@ -139,7 +138,6 @@ export function SettlementLedgerPage({
   const [importRows, setImportRows] = useState<ImportRow[] | null>(null);
   const [importDirty, setImportDirty] = useState(false);
   const [sheetSaving, setSheetSaving] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // All weeks for the year
   const yearWeeks = useMemo(() => getYearMondayWeeks(year), [year]);
@@ -285,94 +283,7 @@ export function SettlementLedgerPage({
     triggerDownload(blob, `정산대장_${projectName}_${year}.xlsx`);
   }, [buildExportMatrix, projectName, year]);
 
-  const buildImportRowsFromMatrix = useCallback((matrix: string[][]): ImportRow[] => {
-    const rows = normalizeMatrixToImportRows(matrix);
-
-    // Validate each row to show errors
-    for (const row of rows) {
-      const result = importRowToTransaction(row, projectId, defaultLedgerId, 0);
-      row.error = result.error;
-    }
-
-    const depositIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '입금액(사업비,공급가액,은행이자)');
-    const refundIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '매입부가세 반환');
-    const expenseIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '사업비 사용액');
-    const vatInIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '매입부가세');
-    const bankAmountIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '통장에 찍힌 입/출금액');
-    const balanceIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '통장잔액');
-    const withBalances = rows.map((row) => ({ ...row }));
-    if (depositIdx >= 0 && refundIdx >= 0 && expenseIdx >= 0 && vatInIdx >= 0 && bankAmountIdx >= 0 && balanceIdx >= 0) {
-      let running = 0;
-      for (let i = 0; i < withBalances.length; i++) {
-        const depositSum = (parseNumber(withBalances[i].cells[depositIdx]) ?? 0) + (parseNumber(withBalances[i].cells[refundIdx]) ?? 0);
-        const expenseSum = (parseNumber(withBalances[i].cells[expenseIdx]) ?? 0) + (parseNumber(withBalances[i].cells[vatInIdx]) ?? 0);
-        const bankAmount = depositSum > 0 ? depositSum : expenseSum;
-        running += depositSum - expenseSum;
-        const cells = [...withBalances[i].cells];
-        cells[bankAmountIdx] = Number.isFinite(bankAmount) && bankAmount !== 0 ? bankAmount.toLocaleString('ko-KR') : '';
-        cells[balanceIdx] = Number.isFinite(running) ? running.toLocaleString('ko-KR') : '';
-        withBalances[i] = { ...withBalances[i], cells };
-      }
-    }
-    return withBalances;
-  }, [projectId, defaultLedgerId]);
-
-  const parseExcelToMatrix = useCallback(async (file: File): Promise<string[][]> => {
-    const ExcelJS = await import('exceljs');
-    const wb = new ExcelJS.Workbook();
-    await wb.xlsx.load(await file.arrayBuffer());
-    const ws = wb.worksheets[0];
-    if (!ws) return [];
-
-    const cellToString = (value: unknown): string => {
-      if (value == null) return '';
-      if (value instanceof Date) return value.toISOString().slice(0, 10);
-      if (typeof value === 'object') {
-        const v = value as Record<string, unknown>;
-        if (Array.isArray((v as any).richText)) {
-          return ((v as any).richText as Array<{ text: string }>).map((x) => x.text).join('');
-        }
-        if ('result' in v) {
-          const result = (v as any).result;
-          if (result == null) return '';
-          return String(result);
-        }
-        if ('text' in v && typeof v.text === 'string') {
-          return v.text;
-        }
-        if ('formula' in v || 'sharedFormula' in v || 'error' in v) {
-          return '';
-        }
-      }
-      return String(value);
-    };
-
-    const matrix: string[][] = [];
-    for (let r = 1; r <= ws.rowCount; r++) {
-      const row: string[] = [];
-      for (let c = 1; c <= ws.columnCount; c++) {
-        row.push(cellToString(ws.getCell(r, c).value));
-      }
-      matrix.push(row);
-    }
-    return matrix;
-  }, []);
-
-  // ── XLSX Upload ──
-  const handleFileUpload = useCallback(async (file: File) => {
-    const name = file.name.toLowerCase();
-    let matrix: string[][] = [];
-    if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
-      matrix = await parseExcelToMatrix(file);
-    } else {
-      toast.error('XLSX 파일만 업로드할 수 있습니다.');
-      return;
-    }
-
-    const withBalances = buildImportRowsFromMatrix(matrix);
-    setImportRows(withBalances);
-    setImportDirty(true);
-  }, [buildImportRowsFromMatrix, parseExcelToMatrix]);
+  
 
   const handleImportSave = useCallback(async () => {
     if (!importRows) return;
@@ -526,11 +437,11 @@ export function SettlementLedgerPage({
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => setYear((y) => y - 1)}>
+            <Button variant="outline" size="sm" className="hover:bg-muted/40 cursor-pointer" onClick={() => setYear((y) => y - 1)}>
               <ChevronLeft className="h-4 w-4" />
             </Button>
             <span className="text-sm font-semibold min-w-[60px] text-center">{year}년</span>
-            <Button variant="outline" size="sm" onClick={() => setYear((y) => y + 1)}>
+            <Button variant="outline" size="sm" className="hover:bg-muted/40 cursor-pointer" onClick={() => setYear((y) => y + 1)}>
               <ChevronRight className="h-4 w-4" />
             </Button>
             <Badge variant="secondary" className="ml-2 text-[11px]">
@@ -538,25 +449,11 @@ export function SettlementLedgerPage({
             </Badge>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={handleDownload}>
+            <Button variant="outline" size="sm" className="hover:bg-muted/40 cursor-pointer" onClick={handleDownload}>
               <Download className="h-4 w-4 mr-1" />
               엑셀 다운로드
             </Button>
-            <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
-              <Upload className="h-4 w-4 mr-1" />
-              엑셀 업로드
-            </Button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".xlsx,.xls"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) void handleFileUpload(file);
-                e.currentTarget.value = '';
-              }}
-            />
+            
           </div>
         </div>
 
@@ -590,11 +487,11 @@ export function SettlementLedgerPage({
       {/* ── Toolbar ── */}
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => setYear((y) => y - 1)}>
+          <Button variant="outline" size="sm" className="hover:bg-muted/40 cursor-pointer" onClick={() => setYear((y) => y - 1)}>
             <ChevronLeft className="h-4 w-4" />
           </Button>
           <span className="text-sm font-semibold min-w-[60px] text-center">{year}년</span>
-          <Button variant="outline" size="sm" onClick={() => setYear((y) => y + 1)}>
+          <Button variant="outline" size="sm" className="hover:bg-muted/40 cursor-pointer" onClick={() => setYear((y) => y + 1)}>
             <ChevronRight className="h-4 w-4" />
           </Button>
           <Badge variant="secondary" className="ml-2 text-[11px]">
@@ -602,31 +499,17 @@ export function SettlementLedgerPage({
           </Badge>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={expandAll}>
+          <Button variant="outline" size="sm" className="hover:bg-muted/40 cursor-pointer" onClick={expandAll}>
             전체 펼치기
           </Button>
-          <Button variant="outline" size="sm" onClick={collapseAll}>
+          <Button variant="outline" size="sm" className="hover:bg-muted/40 cursor-pointer" onClick={collapseAll}>
             전체 접기
           </Button>
-          <Button variant="outline" size="sm" onClick={handleDownload}>
+          <Button variant="outline" size="sm" className="hover:bg-muted/40 cursor-pointer" onClick={handleDownload}>
             <Download className="h-4 w-4 mr-1" />
             엑셀 다운로드
           </Button>
-          <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
-            <Upload className="h-4 w-4 mr-1" />
-            엑셀 업로드
-          </Button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".xlsx,.xls"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) void handleFileUpload(file);
-              e.currentTarget.value = '';
-            }}
-          />
+          
         </div>
       </div>
 
@@ -1389,19 +1272,19 @@ function ImportEditor({
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" className="h-7 text-[11px]" onClick={openMappingEditor}>
+          <Button variant="outline" size="sm" className="h-7 text-[11px] hover:bg-muted/40 cursor-pointer" onClick={openMappingEditor}>
             증빙 매핑 설정
           </Button>
-          <Button variant="outline" size="sm" className="h-7 text-[11px] gap-1" onClick={addRow}>
+          <Button variant="outline" size="sm" className="h-7 text-[11px] gap-1 hover:bg-muted/40 cursor-pointer" onClick={addRow}>
             <Plus className="h-3.5 w-3.5" />
             행 추가
           </Button>
-          <Button variant="outline" size="sm" className="h-7 text-[11px]" onClick={onCancel}>
+          <Button variant="outline" size="sm" className="h-7 text-[11px] hover:bg-muted/40 cursor-pointer" onClick={onCancel}>
             취소
           </Button>
           <Button
             size="sm"
-            className="h-7 text-[11px] gap-1"
+            className="h-7 text-[11px] gap-1 hover:bg-muted/40 cursor-pointer"
             onClick={onSave}
             disabled={validCount === 0 || saving}
           >
@@ -1480,8 +1363,8 @@ function ImportEditor({
             <div className="flex items-center justify-between px-4 py-3 border-b">
               <h4 className="text-sm font-bold">증빙 매핑 설정</h4>
               <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={() => setMappingOpen(false)}>닫기</Button>
-                <Button size="sm" onClick={saveMappingEditor} disabled={mappingSaving}>
+                <Button variant="outline" size="sm" className="hover:bg-muted/40 cursor-pointer" onClick={() => setMappingOpen(false)}>닫기</Button>
+                <Button size="sm" className="hover:bg-muted/40 cursor-pointer" onClick={saveMappingEditor} disabled={mappingSaving}>
                   {mappingSaving ? '저장중...' : '저장'}
                 </Button>
               </div>
@@ -1591,7 +1474,7 @@ function ImportEditorRow({
     } transition-colors`}>
       {/* Row controls */}
       <td className="px-0.5 py-0.5 border-b border-r text-center align-middle w-8">
-        <div className="flex flex-col items-center gap-0.5">
+        <div className="flex items-center justify-center gap-1">
           <span className="text-[9px] text-muted-foreground">{rowIdx + 1}</span>
           {hasError && (
             <span title={row.error} className="text-red-500">

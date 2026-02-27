@@ -10,7 +10,7 @@ import {
   where,
   type Unsubscribe,
 } from 'firebase/firestore';
-import type { Ledger, Project, ParticipationEntry, Transaction, TransactionState } from './types';
+import type { BudgetPlanRow, Ledger, Project, ParticipationEntry, Transaction, TransactionState } from './types';
 import type { ExpenseSet, ExpenseItem, ExpenseSetStatus } from './budget-data';
 import { EXPENSE_SETS } from './budget-data';
 import {
@@ -54,6 +54,7 @@ interface PortalState {
   evidenceRequiredMap: Record<string, string>;
   expenseSheetRows: ImportRow[] | null;
   bankStatementRows: BankStatementRow[] | null;
+  budgetPlanRows: BudgetPlanRow[] | null;
 }
 
 interface PortalActions {
@@ -80,6 +81,7 @@ interface PortalActions {
   saveEvidenceRequiredMap: (map: Record<string, string>) => Promise<void>;
   saveExpenseSheetRows: (rows: ImportRow[]) => Promise<void>;
   saveBankStatementRows: (rows: BankStatementRow[]) => Promise<void>;
+  saveBudgetPlanRows: (rows: BudgetPlanRow[]) => Promise<void>;
 }
 
 const _g = globalThis as any;
@@ -131,6 +133,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   const [evidenceRequiredMap, setEvidenceRequiredMap] = useState<Record<string, string>>({});
   const [expenseSheetRows, setExpenseSheetRows] = useState<ImportRow[] | null>(null);
   const [bankStatementRows, setBankStatementRows] = useState<BankStatementRow[] | null>(null);
+  const [budgetPlanRows, setBudgetPlanRows] = useState<BudgetPlanRow[] | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isMemberLoading, setIsMemberLoading] = useState(true);
   const unsubsRef = useRef<Unsubscribe[]>([]);
@@ -373,6 +376,10 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         db,
         `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/bank_statements/default`,
       );
+      const budgetPlanRef = doc(
+        db,
+        `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/budget_summary/default`,
+      );
 
       unsubsRef.current.push(
         onSnapshot(txQuery, (snap) => {
@@ -432,6 +439,20 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         }, (err) => {
           console.error('[PortalStore] bank statement listen error:', err);
           setBankStatementRows(null);
+        }),
+      );
+
+      unsubsRef.current.push(
+        onSnapshot(budgetPlanRef, (snap) => {
+          if (!snap.exists()) {
+            setBudgetPlanRows(null);
+            return;
+          }
+          const data = snap.data() as { rows?: BudgetPlanRow[] };
+          setBudgetPlanRows(Array.isArray(data?.rows) ? data.rows : null);
+        }, (err) => {
+          console.error('[PortalStore] budget plan listen error:', err);
+          setBudgetPlanRows(null);
         }),
       );
     }
@@ -503,6 +524,33 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       { merge: true },
     );
     setExpenseSheetRows(sanitizedRows as ImportRow[]);
+  }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name]);
+
+  const saveBudgetPlanRows = useCallback(async (rows: BudgetPlanRow[]) => {
+    if (!db || !portalUser?.projectId) {
+      toast.error('Firestore 연결이 필요합니다. 관리자에게 문의해 주세요.');
+      return;
+    }
+    const now = new Date().toISOString();
+    const sanitizedRows = rows.map((row) => ({
+      budgetCode: row.budgetCode || '',
+      subCode: row.subCode || '',
+      initialBudget: Number.isFinite(row.initialBudget) ? row.initialBudget : 0,
+      revisedBudget: Number.isFinite(row.revisedBudget ?? NaN) ? row.revisedBudget : 0,
+      ...(row.note ? { note: row.note } : {}),
+    }));
+    const payload = withTenantScope(orgId, {
+      projectId: portalUser.projectId,
+      rows: sanitizedRows,
+      updatedAt: now,
+      updatedBy: portalUser.name || authUser?.name || '',
+    });
+    await setDoc(
+      doc(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/budget_summary/default`),
+      payload,
+      { merge: true },
+    );
+    setBudgetPlanRows(sanitizedRows as BudgetPlanRow[]);
   }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name]);
 
   const saveBankStatementRows = useCallback(async (rows: BankStatementRow[]) => {
@@ -948,6 +996,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     evidenceRequiredMap,
     expenseSheetRows,
     bankStatementRows,
+    budgetPlanRows,
     register,
     setActiveProject,
     logout,
@@ -966,6 +1015,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     saveEvidenceRequiredMap,
     saveExpenseSheetRows,
     saveBankStatementRows,
+    saveBudgetPlanRows,
   };
 
   return <PortalContext.Provider value={value}>{children}</PortalContext.Provider>;
