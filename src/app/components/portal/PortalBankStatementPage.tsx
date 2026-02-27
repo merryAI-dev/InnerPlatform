@@ -216,7 +216,10 @@ export function PortalBankStatementPage() {
                 {rows.map((row, rowIdx) => (
                   <tr key={row.tempId || rowIdx} className="border-t border-border/30">
                     {BANK_STATEMENT_COLUMNS.map((_, colIdx) => (
-                      <td key={colIdx} className="px-1.5 py-1 border-r border-border/30">
+                      <td
+                        key={colIdx}
+                        className="px-1.5 py-1 border-r border-border/30 focus-within:bg-teal-50/20 focus-within:shadow-[inset_0_0_0_2px_rgba(20,184,166,0.8)]"
+                      >
                         <input
                           type="text"
                           value={row.cells[colIdx] || ''}

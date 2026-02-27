@@ -515,7 +515,7 @@ export function SettlementLedgerPage({
 
       {/* ── Table ── */}
       <div className="relative w-full overflow-x-auto border rounded-lg">
-        <table className="w-full text-[11px] border-collapse">
+        <table className="w-full text-[11px] border-collapse table-fixed">
           {/* Group header row */}
           <thead className="sticky top-0 z-10">
             <tr className="bg-slate-100 dark:bg-slate-800">
@@ -1058,6 +1058,42 @@ function ImportEditor({
   const [mappingOpen, setMappingOpen] = useState(false);
   const [mappingDraft, setMappingDraft] = useState<Record<string, string>>({});
   const [mappingSaving, setMappingSaving] = useState(false);
+  const [colWidths, setColWidths] = useState<number[]>(
+    () => SETTLEMENT_COLUMNS.map((col) => {
+      const byHeader: Record<string, number> = {
+        '작성자': 90,
+        'No.': 60,
+        '거래일시': 140,
+        '해당 주차': 100,
+        '지출구분': 90,
+        '비목': 140,
+        '세목': 140,
+        '세세목': 140,
+        'cashflow항목': 160,
+        '통장잔액': 120,
+        '통장에 찍힌 입/출금액': 140,
+        '입금액(사업비,공급가액,은행이자)': 160,
+        '매입부가세 반환': 120,
+        '사업비 사용액': 120,
+        '매입부가세': 110,
+        '지급처': 140,
+        '상세 적요': 200,
+        '필수증빙자료 리스트': 180,
+        '실제 구비 완료된 증빙자료 리스트': 180,
+        '준비필요자료': 140,
+        '증빙자료 드라이브': 160,
+        '준비 필요자료': 140,
+        'e나라 등록': 100,
+        'e나라 집행': 100,
+        '부가세 지결 완료여부': 140,
+        '최종완료': 90,
+        '비고': 160,
+      };
+      if (byHeader[col.csvHeader]) return byHeader[col.csvHeader];
+      if (col.format === 'number') return 120;
+      return 160;
+    }),
+  );
 
   const recomputeBalances = useCallback(
     (input: ImportRow[]) => {
@@ -1284,7 +1320,7 @@ function ImportEditor({
           </Button>
           <Button
             size="sm"
-            className="h-7 text-[11px] gap-1 hover:bg-muted/40 cursor-pointer"
+            className="h-7 text-[11px] gap-1 hover:bg-primary/90 cursor-pointer"
             onClick={onSave}
             disabled={validCount === 0 || saving}
           >
@@ -1296,11 +1332,17 @@ function ImportEditor({
 
       {/* Scrollable table */}
       <div className={inline ? 'overflow-auto max-h-[calc(100vh-260px)]' : 'flex-1 overflow-auto'}>
-        <table className="w-full text-[11px] border-collapse">
+        <table className="w-full text-[11px] border-collapse table-fixed">
+          <colgroup>
+            <col style={{ width: 44 }} />
+            {SETTLEMENT_COLUMNS.map((_, i) => (
+              <col key={i} style={{ width: colWidths[i] }} />
+            ))}
+          </colgroup>
           <thead className="sticky top-0 z-10">
             {/* Group header */}
             <tr className="bg-slate-100 dark:bg-slate-800">
-              <th className="px-1 py-1 border-b border-r text-center text-[9px] w-8" />
+              <th className="px-1 py-1 border-b border-r text-center text-[9px] w-11" />
               {SETTLEMENT_COLUMN_GROUPS.map((g) => (
                 <th
                   key={g.name}
@@ -1313,13 +1355,49 @@ function ImportEditor({
             </tr>
             {/* Column header */}
             <tr className="bg-slate-50 dark:bg-slate-900">
-              <th className="px-1 py-1 border-b border-r text-[9px] w-8" />
+              <th className="px-1 py-1 border-b border-r text-[9px] w-11" />
               {SETTLEMENT_COLUMNS.map((col, i) => (
                 <th
                   key={i}
-                  className="px-1.5 py-1 font-medium border-b border-r whitespace-nowrap text-[10px] text-left"
+                  className="px-1.5 py-1 font-medium border-b border-r whitespace-nowrap text-[10px] text-left relative select-none pr-3"
+                  style={{ width: colWidths[i], minWidth: 80 }}
                 >
                   {col.csvHeader}
+                  <div
+                    role="separator"
+                    className="absolute -right-1 top-0 h-full w-3 cursor-col-resize z-20 hover:bg-teal-500/10"
+                    style={{ touchAction: 'none' }}
+                    onPointerDown={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const startX = e.clientX;
+                      const startW = colWidths[i] || 120;
+                      const target = e.currentTarget;
+                      target.setPointerCapture(e.pointerId);
+
+                      const onMove = (ev: PointerEvent) => {
+                        const next = Math.max(60, startW + ev.clientX - startX);
+                        setColWidths((prev) => {
+                          const copy = [...prev];
+                          copy[i] = next;
+                          return copy;
+                        });
+                      };
+                      const onUp = (ev: PointerEvent) => {
+                        target.releasePointerCapture(ev.pointerId);
+                        target.removeEventListener('pointermove', onMove);
+                        target.removeEventListener('pointerup', onUp);
+                        target.removeEventListener('pointercancel', onUp);
+                        document.body.style.cursor = '';
+                        document.body.style.userSelect = '';
+                      };
+                      document.body.style.cursor = 'col-resize';
+                      document.body.style.userSelect = 'none';
+                      target.addEventListener('pointermove', onMove);
+                      target.addEventListener('pointerup', onUp);
+                      target.addEventListener('pointercancel', onUp);
+                    }}
+                  />
                 </th>
               ))}
             </tr>
@@ -1342,6 +1420,7 @@ function ImportEditor({
                 cashflowOptions={cashflowOptions}
                 evidenceRequiredMap={evidenceRequiredMap}
                 noIdx={noIdx}
+                colWidths={colWidths}
               />
             ))}
             {rows.length === 0 && (
@@ -1422,6 +1501,7 @@ function ImportEditorRow({
   cashflowOptions,
   evidenceRequiredMap,
   noIdx,
+  colWidths,
 }: {
   row: ImportRow;
   rowIdx: number;
@@ -1437,6 +1517,7 @@ function ImportEditorRow({
   cashflowOptions: { value: string; label: string }[];
   evidenceRequiredMap?: Record<string, string>;
   noIdx: number;
+  colWidths: number[];
 }) {
   const hasError = Boolean(row.error);
   const hasMissingCell = useMemo(() => {
@@ -1473,7 +1554,7 @@ function ImportEditorRow({
         : 'hover:bg-muted/30'
     } transition-colors`}>
       {/* Row controls */}
-      <td className="px-0.5 py-0.5 border-b border-r text-center align-middle w-8">
+      <td className="px-0.5 py-0.5 border-b border-r text-center align-middle w-11">
         <div className="flex items-center justify-center gap-1">
           <span className="text-[9px] text-muted-foreground">{rowIdx + 1}</span>
           {hasError && (
@@ -1503,7 +1584,11 @@ function ImportEditorRow({
         const isWeek = colIdx === weekIdx;
         const isCashflow = colIdx === cashflowIdx;
         return (
-          <td key={colIdx} className="px-0.5 py-0.5 border-b border-r">
+          <td
+            key={colIdx}
+            className="px-0.5 py-0.5 border-b border-r focus-within:bg-teal-50/20 focus-within:shadow-[inset_0_0_0_2px_rgba(20,184,166,0.8)]"
+            style={{ width: colWidths[colIdx], minWidth: 60 }}
+          >
             {isReadOnly ? (
               <span className="text-[10px] text-muted-foreground px-1">
                 {row.cells[colIdx]}
@@ -1511,7 +1596,7 @@ function ImportEditorRow({
             ) : isWeek ? (
               <select
                 value={row.cells[colIdx] || ''}
-                className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[110px]"
+                className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-0"
                 onChange={(e) => onCellChange(colIdx, e.target.value)}
               >
                 <option value="">-</option>
@@ -1522,7 +1607,7 @@ function ImportEditorRow({
             ) : colIdx === methodIdx ? (
               <select
                 value={row.cells[colIdx] || ''}
-                className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[80px]"
+                className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-0"
                 onChange={(e) => {
                   if (e.target.value !== row.cells[colIdx]) {
                     onCellChange(colIdx, e.target.value);
@@ -1537,7 +1622,7 @@ function ImportEditorRow({
             ) : isCashflow ? (
               <select
                 value={row.cells[colIdx] || ''}
-                className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[140px]"
+                className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-0"
                 onChange={(e) => onCellChange(colIdx, e.target.value)}
               >
                 <option value="">-</option>
@@ -1548,7 +1633,7 @@ function ImportEditorRow({
             ) : isBudgetCode ? (
               <select
                 value={row.cells[colIdx] || ''}
-                className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[140px]"
+                className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-0"
                 onChange={(e) => {
                   const nextCode = e.target.value;
                   onRowChange((prev) => {
@@ -1576,7 +1661,7 @@ function ImportEditorRow({
               <select
                 value={row.cells[colIdx] || ''}
                 disabled={!budgetCode}
-                className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[140px]"
+                className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-0"
                 onChange={(e) => {
                   const nextSub = e.target.value;
                   onRowChange((prev) => {
@@ -1600,7 +1685,7 @@ function ImportEditorRow({
               <input
                 type="text"
                 value={row.cells[colIdx] || ''}
-                className={`w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[80px] ${hasError && colIdx === dateIdx && !row.cells[colIdx]
+                className={`w-full bg-transparent outline-none text-[11px] px-1 py-0.5 ${hasError && colIdx === dateIdx && !row.cells[colIdx]
                   ? 'ring-1 ring-red-300 rounded'
                   : ''
                   }`}
