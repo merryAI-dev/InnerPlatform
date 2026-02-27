@@ -44,6 +44,14 @@ function parseAmount(raw: string): number {
   return Math.trunc(n);
 }
 
+function formatAmountInput(raw: string): string {
+  const cleaned = String(raw || '').replace(/[^\d-]/g, '');
+  if (!cleaned) return '';
+  const n = Number(cleaned);
+  if (!Number.isFinite(n)) return '';
+  return Math.trunc(n).toLocaleString('ko-KR');
+}
+
 export function CashflowProjectSheet({
   projectId,
   projectName,
@@ -498,13 +506,6 @@ export function CashflowProjectSheet({
                 </tr>
               </thead>
               <tbody>
-                {tableMode === 'actual' && (
-                  <tr className="bg-sky-50/50 dark:bg-sky-950/20">
-                    <td className="px-4 py-2 text-[10px] text-sky-700 dark:text-sky-300" colSpan={monthWeeks.length + 2}>
-                      Actual 값은 사업비 입력(주간)에서 저장된 값이 반영됩니다.
-                    </td>
-                  </tr>
-                )}
                 <tr className="bg-emerald-50/40 dark:bg-emerald-950/10">
                   <td className="px-4 py-2" colSpan={monthWeeks.length + 2} style={{ fontWeight: 700 }}>
                     입금 ({tableMode === 'projection' ? 'Projection' : 'Actual'})
@@ -512,7 +513,7 @@ export function CashflowProjectSheet({
                 </tr>
                 {CASHFLOW_IN_LINES.map((lineId) => (
                   <tr key={lineId} className="border-t border-border/30">
-                    <td className="px-4 py-2" style={{ fontWeight: 500 }}>{CASHFLOW_SHEET_LINE_LABELS[lineId]}</td>
+                    <td className="px-4 py-1.5 text-[10px] whitespace-nowrap" style={{ fontWeight: 500 }}>{CASHFLOW_SHEET_LINE_LABELS[lineId]}</td>
                     {monthWeeks.map((w) => {
                       const isThisWeek = todayYearMonth === yearMonth && todayIso >= w.weekStart && todayIso <= w.weekEnd;
                       const colClass = isThisWeek ? 'bg-teal-50/30 dark:bg-teal-950/10' : '';
@@ -520,9 +521,9 @@ export function CashflowProjectSheet({
                       if (tableMode === 'actual') {
                         const amount = getEffectiveAmount({ yearMonth, mode: 'actual', weekNo: w.weekNo, lineId });
                         return (
-                          <td key={w.weekNo} className={`px-3 py-2 text-right ${colClass}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
-                            {fmt(amount)}
-                          </td>
+                        <td key={w.weekNo} className={`px-3 py-2 h-9 align-middle text-right ${colClass}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
+                          {fmt(amount)}
+                        </td>
                         );
                       }
 
@@ -533,34 +534,35 @@ export function CashflowProjectSheet({
                       const value = raw !== undefined ? raw : (persisted.hasValue ? String(persisted.amount) : '');
 
                       return (
-                        <td key={w.weekNo} className={`px-3 py-1.5 text-right ${colClass}`}>
+                        <td key={w.weekNo} className={`px-3 h-9 align-middle text-right ${colClass}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
                           <Input
                             value={value}
                             inputMode="numeric"
-                            className="h-8 text-[11px] text-right"
+                            className="h-6 text-[10px] md:text-[10px] leading-[10px] font-normal text-right px-1 py-0 bg-transparent border-transparent focus-visible:ring-0 focus-visible:border-teal-500/60"
                             placeholder="0"
                             disabled={false}
                             onChange={(e) => {
-                              setDrafts((prev) => ({ ...prev, [key]: e.target.value }));
+                              const formatted = formatAmountInput(e.target.value);
+                              setDrafts((prev) => ({ ...prev, [key]: formatted }));
                               markDirty({ weekNo: w.weekNo, mode: tableMode });
                             }}
                           />
                         </td>
                       );
                     })}
-                    <td className="px-3 py-2 text-right" style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                    <td className="px-3 py-1.5 pr-2 h-9 align-middle text-right text-[10px]" style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
                       {fmt(derived.rowTotals[lineId] || 0)}
                     </td>
                   </tr>
                 ))}
                 <tr className="border-t border-border/50 bg-muted/40">
-                  <td className="px-4 py-2" style={{ fontWeight: 800 }}>입금 합계</td>
+                  <td className="px-4 py-1.5 text-[10px]" style={{ fontWeight: 800 }}>입금 합계</td>
                   {derived.weekTotals.map((w) => (
-                    <td key={w.weekNo} className="px-3 py-2 text-right" style={{ fontWeight: 800, color: '#059669' }}>
+                    <td key={w.weekNo} className="px-3 py-1.5 pr-2 h-9 align-middle text-right text-[10px]" style={{ fontWeight: 800, color: '#059669', fontVariantNumeric: 'tabular-nums' }}>
                       {fmt(w.totalIn)}
                     </td>
                   ))}
-                  <td className="px-3 py-2 text-right" style={{ fontWeight: 900, color: '#059669' }}>
+                  <td className="px-3 py-1.5 pr-2 h-9 align-middle text-right text-[10px]" style={{ fontWeight: 900, color: '#059669', fontVariantNumeric: 'tabular-nums' }}>
                     {fmt(derived.monthTotals.totalIn)}
                   </td>
                 </tr>
@@ -572,7 +574,7 @@ export function CashflowProjectSheet({
                 </tr>
                 {CASHFLOW_OUT_LINES.map((lineId) => (
                   <tr key={lineId} className="border-t border-border/30">
-                    <td className="px-4 py-2" style={{ fontWeight: 500 }}>{CASHFLOW_SHEET_LINE_LABELS[lineId]}</td>
+                    <td className="px-4 py-1.5 text-[10px] whitespace-nowrap" style={{ fontWeight: 500 }}>{CASHFLOW_SHEET_LINE_LABELS[lineId]}</td>
                     {monthWeeks.map((w) => {
                       const isThisWeek = todayYearMonth === yearMonth && todayIso >= w.weekStart && todayIso <= w.weekEnd;
                       const colClass = isThisWeek ? 'bg-teal-50/30 dark:bg-teal-950/10' : '';
@@ -580,9 +582,9 @@ export function CashflowProjectSheet({
                       if (tableMode === 'actual') {
                         const amount = getEffectiveAmount({ yearMonth, mode: 'actual', weekNo: w.weekNo, lineId });
                         return (
-                          <td key={w.weekNo} className={`px-3 py-2 text-right ${colClass}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
-                            {fmt(amount)}
-                          </td>
+                        <td key={w.weekNo} className={`px-3 py-2 h-9 align-middle text-right ${colClass}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
+                          {fmt(amount)}
+                        </td>
                         );
                       }
 
@@ -593,35 +595,36 @@ export function CashflowProjectSheet({
                       const value = raw !== undefined ? raw : (persisted.hasValue ? String(persisted.amount) : '');
 
                       return (
-                        <td key={w.weekNo} className={`px-3 py-1.5 text-right ${colClass}`}>
+                        <td key={w.weekNo} className={`px-3 h-9 align-middle text-right ${colClass}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
                           <Input
                             value={value}
                             inputMode="numeric"
-                            className="h-8 text-[11px] text-right"
+                            className="h-6 text-[10px] md:text-[10px] leading-[10px] font-normal text-right px-1 py-0 bg-transparent border-transparent focus-visible:ring-0 focus-visible:border-teal-500/60"
                             placeholder="0"
                             disabled={false}
                             onChange={(e) => {
-                              setDrafts((prev) => ({ ...prev, [key]: e.target.value }));
+                              const formatted = formatAmountInput(e.target.value);
+                              setDrafts((prev) => ({ ...prev, [key]: formatted }));
                               markDirty({ weekNo: w.weekNo, mode: tableMode });
                             }}
                           />
                         </td>
                       );
                     })}
-                    <td className="px-3 py-2 text-right" style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                    <td className="px-3 py-1.5 pr-2 h-9 align-middle text-right text-[10px]" style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
                       {fmt(derived.rowTotals[lineId] || 0)}
                     </td>
                   </tr>
                 ))}
 
                 <tr className="border-t border-border/30 bg-muted/40">
-                  <td className="px-4 py-2" style={{ fontWeight: 800 }}>출금 합계</td>
+                  <td className="px-4 py-1.5 text-[10px]" style={{ fontWeight: 800 }}>출금 합계</td>
                   {derived.weekTotals.map((w) => (
-                    <td key={w.weekNo} className="px-3 py-2 text-right" style={{ fontWeight: 800, color: '#e11d48' }}>
+                    <td key={w.weekNo} className="px-3 py-1.5 pr-2 h-9 align-middle text-right text-[10px]" style={{ fontWeight: 800, color: '#e11d48', fontVariantNumeric: 'tabular-nums' }}>
                       {fmt(w.totalOut)}
                     </td>
                   ))}
-                  <td className="px-3 py-2 text-right" style={{ fontWeight: 900, color: '#e11d48' }}>
+                  <td className="px-3 py-1.5 pr-2 h-9 align-middle text-right text-[10px]" style={{ fontWeight: 900, color: '#e11d48', fontVariantNumeric: 'tabular-nums' }}>
                     {fmt(derived.monthTotals.totalOut)}
                   </td>
                 </tr>
@@ -685,17 +688,17 @@ export function CashflowProjectSheet({
       />
 
       <Tabs value={mode} onValueChange={(v) => (v === 'projection' || v === 'actual') && setMode(v)}>
-        <TabsList className="w-full sm:w-fit bg-muted/40 p-1">
+        <TabsList className="w-full sm:w-fit bg-transparent p-0 border-b border-border/60 rounded-md">
           <TabsTrigger
             value="projection"
-            className="gap-2 data-[state=active]:bg-emerald-600 data-[state=active]:text-white data-[state=active]:shadow-sm"
+            className="gap-2 rounded-md border border-transparent px-3 py-2 -mb-px text-muted-foreground hover:bg-muted/40 data-[state=active]:border-border data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-md data-[state=active]:ring-1 data-[state=active]:ring-foreground/30 data-[state=active]:font-semibold"
           >
             <ClipboardList className="w-4 h-4" />
             Projection
           </TabsTrigger>
           <TabsTrigger
             value="actual"
-            className="gap-2 data-[state=active]:bg-sky-600 data-[state=active]:text-white data-[state=active]:shadow-sm"
+            className="gap-2 rounded-md border border-transparent px-3 py-2 -mb-px text-muted-foreground hover:bg-muted/40 data-[state=active]:border-border data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-md data-[state=active]:ring-1 data-[state=active]:ring-foreground/30 data-[state=active]:font-semibold"
           >
             <ClipboardCheck className="w-4 h-4" />
             Actual

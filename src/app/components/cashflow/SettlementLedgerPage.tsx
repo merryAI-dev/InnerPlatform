@@ -1060,38 +1060,11 @@ function ImportEditor({
   const [mappingSaving, setMappingSaving] = useState(false);
   const [colWidths, setColWidths] = useState<number[]>(
     () => SETTLEMENT_COLUMNS.map((col) => {
-      const byHeader: Record<string, number> = {
-        '작성자': 90,
-        'No.': 60,
-        '거래일시': 140,
-        '해당 주차': 100,
-        '지출구분': 90,
-        '비목': 140,
-        '세목': 140,
-        '세세목': 140,
-        'cashflow항목': 160,
-        '통장잔액': 120,
-        '통장에 찍힌 입/출금액': 140,
-        '입금액(사업비,공급가액,은행이자)': 160,
-        '매입부가세 반환': 120,
-        '사업비 사용액': 120,
-        '매입부가세': 110,
-        '지급처': 140,
-        '상세 적요': 200,
-        '필수증빙자료 리스트': 180,
-        '실제 구비 완료된 증빙자료 리스트': 180,
-        '준비필요자료': 140,
-        '증빙자료 드라이브': 160,
-        '준비 필요자료': 140,
-        'e나라 등록': 100,
-        'e나라 집행': 100,
-        '부가세 지결 완료여부': 140,
-        '최종완료': 90,
-        '비고': 160,
-      };
-      if (byHeader[col.csvHeader]) return byHeader[col.csvHeader];
-      if (col.format === 'number') return 120;
-      return 160;
+      const headerLen = col.csvHeader.length;
+      const base = 60 + headerLen * 10;
+      const min = col.format === 'number' ? 110 : 90;
+      const max = 240;
+      return Math.max(min, Math.min(max, base));
     }),
   );
 
