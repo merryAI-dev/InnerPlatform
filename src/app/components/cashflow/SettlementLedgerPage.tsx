@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 import { BUDGET_CODE_BOOK } from '../../data/budget-data';
 import type { Transaction, TransactionState } from '../../data/types';
 import { findWeekForDate, getMonthMondayWeeks, getYearMondayWeeks, type MonthMondayWeek } from '../../platform/cashflow-weeks';
-import { parseCsv, parseNumber, triggerDownload } from '../../platform/csv-utils';
+import { parseCsv, parseDate, parseNumber, triggerDownload } from '../../platform/csv-utils';
 import { computeEvidenceStatus, computeEvidenceSummary, isValidDriveUrl } from '../../platform/evidence-helpers';
 import {
   CASHFLOW_LINE_OPTIONS,
@@ -31,7 +31,7 @@ const fmt = (n: number | undefined) =>
 
 const METHOD_LABELS: Record<string, string> = {
   TRANSFER: '계좌이체',
-  CORP_CARD_1: '법인카드(뒷번호1)',
+  CORP_CARD_1: '법인카드',
   CORP_CARD_2: '법인카드(뒷번호2)',
   OTHER: '기타',
 };
@@ -209,6 +209,30 @@ export function SettlementLedgerPage({
     return findWeekForDate(dateStr, weeksForYear)?.label || '';
   }, []);
 
+  const weekOptions = useMemo(() => {
+    const dateIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '거래일시');
+    const years = new Set<number>();
+    if (importRows && dateIdx >= 0) {
+      for (const row of importRows) {
+        const raw = String(row.cells[dateIdx] || '').trim();
+        if (!raw) continue;
+        const datePart = raw.split(/\s+/)[0];
+        const iso = parseDate(datePart) || '';
+        const year = Number.parseInt(iso.slice(0, 4), 10);
+        if (Number.isFinite(year)) years.add(year);
+      }
+    }
+    if (years.size === 0) years.add(year);
+    const options: { value: string; label: string }[] = [];
+    Array.from(years).sort().forEach((y) => {
+      const weeks = getYearMondayWeeks(y);
+      weeks.forEach((w) => {
+        options.push({ value: w.label, label: w.label });
+      });
+    });
+    return options;
+  }, [importRows, year]);
+
   // Auto-collapse empty weeks on year change
   useEffect(() => {
     const empty = new Set<string>();
@@ -240,10 +264,7 @@ export function SettlementLedgerPage({
     triggerDownload(blob, `정산대장_${projectName}_${year}.csv`);
   }, [importRows, projectTxs, yearWeeks, projectName, year]);
 
-  // ── CSV Upload ──
-  const handleFileUpload = useCallback(async (file: File) => {
-    const text = await file.text();
-    const matrix = parseCsv(text);
+  const buildImportRowsFromMatrix = useCallback((matrix: string[][]): ImportRow[] => {
     const rows = normalizeMatrixToImportRows(matrix);
 
     // Validate each row to show errors
@@ -272,9 +293,68 @@ export function SettlementLedgerPage({
         withBalances[i] = { ...withBalances[i], cells };
       }
     }
+    return withBalances;
+  }, [projectId, defaultLedgerId]);
+
+  const parseExcelToMatrix = useCallback(async (file: File): Promise<string[][]> => {
+    const ExcelJS = await import('exceljs');
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await file.arrayBuffer());
+    const ws = wb.worksheets[0];
+    if (!ws) return [];
+
+    const cellToString = (value: unknown): string => {
+      if (value == null) return '';
+      if (value instanceof Date) return value.toISOString().slice(0, 10);
+      if (typeof value === 'object') {
+        const v = value as Record<string, unknown>;
+        if (Array.isArray((v as any).richText)) {
+          return ((v as any).richText as Array<{ text: string }>).map((x) => x.text).join('');
+        }
+        if ('result' in v) {
+          const result = (v as any).result;
+          if (result == null) return '';
+          return String(result);
+        }
+        if ('text' in v && typeof v.text === 'string') {
+          return v.text;
+        }
+        if ('formula' in v || 'sharedFormula' in v || 'error' in v) {
+          return '';
+        }
+      }
+      return String(value);
+    };
+
+    const matrix: string[][] = [];
+    for (let r = 1; r <= ws.rowCount; r++) {
+      const row: string[] = [];
+      for (let c = 1; c <= ws.columnCount; c++) {
+        row.push(cellToString(ws.getCell(r, c).value));
+      }
+      matrix.push(row);
+    }
+    return matrix;
+  }, []);
+
+  // ── CSV/XLSX Upload ──
+  const handleFileUpload = useCallback(async (file: File) => {
+    const name = file.name.toLowerCase();
+    let matrix: string[][] = [];
+    if (name.endsWith('.csv')) {
+      const text = await file.text();
+      matrix = parseCsv(text);
+    } else if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
+      matrix = await parseExcelToMatrix(file);
+    } else {
+      toast.error('CSV 또는 XLSX 파일만 업로드할 수 있습니다.');
+      return;
+    }
+
+    const withBalances = buildImportRowsFromMatrix(matrix);
     setImportRows(withBalances);
     setImportDirty(true);
-  }, [projectId, defaultLedgerId]);
+  }, [buildImportRowsFromMatrix, parseExcelToMatrix]);
 
   const handleImportSave = useCallback(async () => {
     if (!importRows) return;
@@ -291,6 +371,7 @@ export function SettlementLedgerPage({
       const refundIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '매입부가세 반환');
       const expenseIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '사업비 사용액');
       const vatInIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '매입부가세');
+      const bankAmountIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '통장에 찍힌 입/출금액');
 
       const byWeek = new Map<string, Record<string, number>>();
       const weekLabels = new Set<string>();
@@ -303,11 +384,8 @@ export function SettlementLedgerPage({
         if (!lineId) continue;
         if (lineId === 'INPUT_VAT_OUT') continue;
         const target = byWeek.get(weekLabel) || {};
-        const depositSum = (depositIdx >= 0 ? parseNumber(row.cells[depositIdx]) ?? 0 : 0)
-          + (refundIdx >= 0 ? parseNumber(row.cells[refundIdx]) ?? 0 : 0);
-        const expenseSum = (expenseIdx >= 0 ? parseNumber(row.cells[expenseIdx]) ?? 0 : 0)
-          + (vatInIdx >= 0 ? parseNumber(row.cells[vatInIdx]) ?? 0 : 0);
-        const amount = CASHFLOW_IN_LINE_IDS.has(lineId) ? depositSum : expenseSum;
+        const bankAmount = bankAmountIdx >= 0 ? (parseNumber(row.cells[bankAmountIdx]) ?? 0) : 0;
+        const amount = bankAmount;
         if (amount !== 0) {
           target[lineId] = (target[lineId] || 0) + amount;
           byWeek.set(weekLabel, target);
@@ -321,7 +399,25 @@ export function SettlementLedgerPage({
         cleared[lineId] = 0;
       }
 
-      for (const week of yearWeeks) {
+      const targetWeeks: MonthMondayWeek[] = [];
+      const seenWeekIds = new Set<string>();
+      const yearMonths = new Set<string>();
+      for (const weekLabel of weekLabels) {
+        const week = resolveWeekFromLabel(weekLabel, yearWeeks);
+        if (!week) continue;
+        yearMonths.add(week.yearMonth);
+      }
+      for (const ym of yearMonths) {
+        const weeks = getMonthMondayWeeks(ym);
+        for (const w of weeks) {
+          const key = `${w.yearMonth}-${w.weekNo}`;
+          if (seenWeekIds.has(key)) continue;
+          seenWeekIds.add(key);
+          targetWeeks.push(w);
+        }
+      }
+
+      for (const week of targetWeeks) {
         const amounts = byWeek.get(week.label) || {};
         const merged = { ...cleared, ...amounts };
         try {
@@ -435,7 +531,7 @@ export function SettlementLedgerPage({
             <input
               ref={fileInputRef}
               type="file"
-              accept=".csv"
+              accept=".csv,.xlsx,.xls"
               className="hidden"
               onChange={(e) => {
                 const file = e.target.files?.[0];
@@ -463,10 +559,7 @@ export function SettlementLedgerPage({
             defaultLedgerId={defaultLedgerId}
             evidenceRequiredMap={evidenceRequiredMap}
             onSaveEvidenceRequiredMap={onSaveEvidenceRequiredMap}
-            weekOptions={yearWeeks.map((w) => ({
-              value: w.label,
-              label: w.label,
-            }))}
+            weekOptions={weekOptions}
             inline
           />
         )}
@@ -508,7 +601,7 @@ export function SettlementLedgerPage({
           <input
             ref={fileInputRef}
             type="file"
-            accept=".csv"
+            accept=".csv,.xlsx,.xls"
             className="hidden"
             onChange={(e) => {
               const file = e.target.files?.[0];
@@ -596,10 +689,7 @@ export function SettlementLedgerPage({
           defaultLedgerId={defaultLedgerId}
           evidenceRequiredMap={evidenceRequiredMap}
           onSaveEvidenceRequiredMap={onSaveEvidenceRequiredMap}
-          weekOptions={yearWeeks.map((w) => ({
-            value: w.label,
-            label: w.label,
-          }))}
+          weekOptions={weekOptions}
         />
       )}
     </div>
@@ -1004,6 +1094,10 @@ function ImportEditor({
     () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '해당 주차'),
     [],
   );
+  const dateIdx = useMemo(
+    () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '거래일시'),
+    [],
+  );
   const cashflowIdx = useMemo(
     () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === 'cashflow항목'),
     [],
@@ -1057,13 +1151,29 @@ function ImportEditor({
       if (depositIdx < 0 || refundIdx < 0 || expenseIdx < 0 || vatInIdx < 0 || bankAmountIdx < 0 || balanceIdx < 0) return input;
       let running = 0;
       return input.map((row) => {
+        const existingBankRaw = String(row.cells[bankAmountIdx] || '').trim();
+        const existingBalanceRaw = String(row.cells[balanceIdx] || '').trim();
+        const hasExistingBank = existingBankRaw !== '';
+        const hasExistingBalance = existingBalanceRaw !== '';
+        const existingBalanceNum = hasExistingBalance ? (parseNumber(existingBalanceRaw) ?? null) : null;
+
         const depositSum = (parseNumber(row.cells[depositIdx]) ?? 0) + (parseNumber(row.cells[refundIdx]) ?? 0);
         const expenseSum = (parseNumber(row.cells[expenseIdx]) ?? 0) + (parseNumber(row.cells[vatInIdx]) ?? 0);
-        const bankAmount = depositSum > 0 ? depositSum : expenseSum;
-        running += depositSum - expenseSum;
+        const derivedBankAmount = depositSum > 0 ? depositSum : expenseSum;
+        const bankAmount = hasExistingBank ? (parseNumber(existingBankRaw) ?? 0) : derivedBankAmount;
+
+        if (existingBalanceNum != null) {
+          running = existingBalanceNum;
+        } else if (depositSum !== 0 || expenseSum !== 0) {
+          running += depositSum - expenseSum;
+        }
         const cells = [...row.cells];
-        cells[bankAmountIdx] = Number.isFinite(bankAmount) && bankAmount !== 0 ? bankAmount.toLocaleString('ko-KR') : '';
-        cells[balanceIdx] = Number.isFinite(running) ? running.toLocaleString('ko-KR') : '';
+        if (!hasExistingBank) {
+          cells[bankAmountIdx] = Number.isFinite(bankAmount) && bankAmount !== 0 ? bankAmount.toLocaleString('ko-KR') : '';
+        }
+        if (!hasExistingBalance && (depositSum !== 0 || expenseSum !== 0)) {
+          cells[balanceIdx] = Number.isFinite(running) ? running.toLocaleString('ko-KR') : '';
+        }
         return { ...row, cells };
       });
     },
@@ -1074,11 +1184,33 @@ function ImportEditor({
     (input: ImportRow[]) => {
       const recalced = recomputeBalances(input);
       return recalced.map((row, i) => {
-        const result = importRowToTransaction(row, projectId, defaultLedgerId, i);
-        return { ...row, error: result.error };
+        let next = row;
+        const weekCell = weekIdx >= 0 ? String(row.cells[weekIdx] || '').trim() : '';
+        if (weekIdx >= 0 && dateIdx >= 0 && (!weekCell || weekCell === '-') && row.cells[dateIdx]) {
+          const rawDate = String(row.cells[dateIdx]).trim();
+          const datePart = rawDate.split(/\s+/)[0];
+          let dateIso = parseDate(datePart);
+          if (!dateIso) {
+            const m = datePart.match(/(\d{4})\D(\d{1,2})\D(\d{1,2})/);
+            if (m) {
+              dateIso = `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+            }
+          }
+          if (dateIso) {
+            const weeks = getYearMondayWeeks(Number.parseInt(dateIso.slice(0, 4), 10));
+            const label = findWeekForDate(dateIso, weeks)?.label || '';
+            if (label) {
+              const cells = [...row.cells];
+              cells[weekIdx] = label;
+              next = { ...row, cells };
+            }
+          }
+        }
+        const result = importRowToTransaction(next, projectId, defaultLedgerId, i);
+        return { ...next, error: result.error };
       });
     },
-    [recomputeBalances, projectId, defaultLedgerId],
+    [recomputeBalances, projectId, defaultLedgerId, weekIdx, dateIdx],
   );
 
   const updateCell = useCallback(
@@ -1089,9 +1221,20 @@ function ImportEditor({
         cells[colIdx] = value;
         return { ...r, cells };
       });
+
+      if (colIdx === cashflowIdx) {
+        const updated = next.map((row, i) => {
+          if (i !== rowIdx) return row;
+          const result = importRowToTransaction(row, projectId, defaultLedgerId, i);
+          return { ...row, error: result.error };
+        });
+        onChange(updated);
+        return;
+      }
+
       onChange(applyDerivedRows(next));
     },
-    [rows, onChange, applyDerivedRows],
+    [rows, onChange, applyDerivedRows, cashflowIdx, projectId, defaultLedgerId],
   );
 
   const updateRow = useCallback(

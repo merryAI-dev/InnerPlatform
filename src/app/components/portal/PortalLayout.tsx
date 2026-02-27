@@ -52,6 +52,7 @@ const NAV_ITEMS = [
   { to: '/portal/budget', icon: Calculator, label: '예산총괄' },
   { to: '/portal/expenses', icon: Wallet, label: '사업비 입력' },
   { to: '/portal/weekly-expenses', icon: FileSpreadsheet, label: '사업비 입력(주간)' },
+  { to: '/portal/bank-statements', icon: FileSpreadsheet, label: '통장내역' },
   { to: '/portal/personnel', icon: Users, label: '인력 현황' },
   { to: '/portal/change-requests', icon: ArrowRightLeft, label: '인력변경 신청' },
   { to: '/portal/training', icon: BookOpen, label: '사내 교육' },

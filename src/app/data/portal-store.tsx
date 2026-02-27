@@ -21,6 +21,7 @@ import {
 import { PARTICIPATION_ENTRIES } from './participation-data';
 import { LEDGERS, PROJECTS, TRANSACTIONS } from './mock-data';
 import type { ImportRow } from '../platform/settlement-csv';
+import { mapBankStatementsToImportRows, type BankStatementRow } from '../platform/bank-statement';
 import { useAuth } from './auth-store';
 import { useFirebase } from '../lib/firebase-context';
 import { getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
@@ -52,6 +53,7 @@ interface PortalState {
   transactions: Transaction[];
   evidenceRequiredMap: Record<string, string>;
   expenseSheetRows: ImportRow[] | null;
+  bankStatementRows: BankStatementRow[] | null;
 }
 
 interface PortalActions {
@@ -77,6 +79,7 @@ interface PortalActions {
   changeTransactionState: (id: string, newState: TransactionState, reason?: string) => void;
   saveEvidenceRequiredMap: (map: Record<string, string>) => Promise<void>;
   saveExpenseSheetRows: (rows: ImportRow[]) => Promise<void>;
+  saveBankStatementRows: (rows: BankStatementRow[]) => Promise<void>;
 }
 
 const _g = globalThis as any;
@@ -127,6 +130,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [evidenceRequiredMap, setEvidenceRequiredMap] = useState<Record<string, string>>({});
   const [expenseSheetRows, setExpenseSheetRows] = useState<ImportRow[] | null>(null);
+  const [bankStatementRows, setBankStatementRows] = useState<BankStatementRow[] | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isMemberLoading, setIsMemberLoading] = useState(true);
   const unsubsRef = useRef<Unsubscribe[]>([]);
@@ -365,6 +369,10 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         db,
         `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/expense_sheets/default`,
       );
+      const bankStatementRef = doc(
+        db,
+        `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/bank_statements/default`,
+      );
 
       unsubsRef.current.push(
         onSnapshot(txQuery, (snap) => {
@@ -412,6 +420,20 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           setExpenseSheetRows(null);
         }),
       );
+
+      unsubsRef.current.push(
+        onSnapshot(bankStatementRef, (snap) => {
+          if (!snap.exists()) {
+            setBankStatementRows(null);
+            return;
+          }
+          const data = snap.data() as { rows?: BankStatementRow[] };
+          setBankStatementRows(Array.isArray(data?.rows) ? data.rows : null);
+        }, (err) => {
+          console.error('[PortalStore] bank statement listen error:', err);
+          setBankStatementRows(null);
+        }),
+      );
     }
 
     return () => {
@@ -456,7 +478,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       { merge: true },
     );
     setEvidenceRequiredMap(map);
-  }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name]);
+  }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name, expenseSheetRows]);
 
   const saveExpenseSheetRows = useCallback(async (rows: ImportRow[]) => {
     if (!db || !portalUser?.projectId) {
@@ -481,6 +503,45 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       { merge: true },
     );
     setExpenseSheetRows(sanitizedRows as ImportRow[]);
+  }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name]);
+
+  const saveBankStatementRows = useCallback(async (rows: BankStatementRow[]) => {
+    if (!db || !portalUser?.projectId) {
+      toast.error('Firestore 연결이 필요합니다. 관리자에게 문의해 주세요.');
+      return;
+    }
+    const now = new Date().toISOString();
+    const sanitizedRows = rows.map((row) => ({
+      tempId: row.tempId || `bank-${Date.now()}`,
+      cells: Array.isArray(row.cells) ? row.cells.map((c) => (c ?? '')) : [],
+    }));
+    const payload = withTenantScope(orgId, {
+      projectId: portalUser.projectId,
+      rows: sanitizedRows,
+      updatedAt: now,
+      updatedBy: portalUser.name || authUser?.name || '',
+    });
+    await setDoc(
+      doc(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/bank_statements/default`),
+      payload,
+      { merge: true },
+    );
+    setBankStatementRows(sanitizedRows as BankStatementRow[]);
+
+    // Sync into expense sheet rows (통장내역 → 사용내역)
+    const nextExpenseRows = mapBankStatementsToImportRows(sanitizedRows as BankStatementRow[]);
+    const expensePayload = withTenantScope(orgId, {
+      projectId: portalUser.projectId,
+      rows: nextExpenseRows,
+      updatedAt: now,
+      updatedBy: portalUser.name || authUser?.name || '',
+    });
+    await setDoc(
+      doc(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/expense_sheets/default`),
+      expensePayload,
+      { merge: true },
+    );
+    setExpenseSheetRows(nextExpenseRows);
   }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name]);
 
   const persistTransaction = useCallback(async (txData: Transaction) => {
@@ -886,6 +947,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     transactions,
     evidenceRequiredMap,
     expenseSheetRows,
+    bankStatementRows,
     register,
     setActiveProject,
     logout,
@@ -903,6 +965,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     changeTransactionState,
     saveEvidenceRequiredMap,
     saveExpenseSheetRows,
+    saveBankStatementRows,
   };
 
   return <PortalContext.Provider value={value}>{children}</PortalContext.Provider>;

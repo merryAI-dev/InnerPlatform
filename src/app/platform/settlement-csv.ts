@@ -123,7 +123,7 @@ export const SETTLEMENT_COLUMN_GROUPS = (() => {
 
 const METHOD_LABELS: Record<string, string> = {
   TRANSFER: '계좌이체',
-  CORP_CARD_1: '법인카드(뒷번호1)',
+  CORP_CARD_1: '법인카드',
   CORP_CARD_2: '법인카드(뒷번호2)',
   OTHER: '기타',
 };
@@ -541,7 +541,8 @@ export function importRowToTransaction(
   });
   if (isEffectivelyEmpty) return {};
 
-  const dateTime = dateRaw ? parseDate(dateRaw) : '';
+  const datePart = dateRaw ? normalizeSpace(dateRaw).split(/\s+/)[0].replace(/\./g, '-') : '';
+  const dateTime = datePart ? parseDate(datePart) : '';
   if (dateRaw && !dateTime) return { error: '거래일시를 파싱할 수 없습니다' };
 
   const bankAmount = parseNumber(amountRaw) ?? 0;

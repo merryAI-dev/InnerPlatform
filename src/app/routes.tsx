@@ -45,6 +45,7 @@ const PortalSubmissionsPage = lazy(() => import('./components/portal/PortalSubmi
 const CareerProfilePage = lazy(() => import('./components/portal/CareerProfilePage').then(m => ({ default: m.CareerProfilePage })));
 const PortalTrainingPage = lazy(() => import('./components/portal/PortalTrainingPage').then(m => ({ default: m.PortalTrainingPage })));
 const PortalWeeklyExpensePage = lazy(() => import('./components/portal/PortalWeeklyExpensePage').then(m => ({ default: m.PortalWeeklyExpensePage })));
+const PortalBankStatementPage = lazy(() => import('./components/portal/PortalBankStatementPage').then(m => ({ default: m.PortalBankStatementPage })));
 const GuideChatPage = lazy(() => import('./components/guide-chat/GuideChatPage').then(m => ({ default: m.GuideChatPage })));
 
 // Suspense wrapper — layouts already provide visual chrome, so a minimal fallback suffices
@@ -120,6 +121,7 @@ export const router = createBrowserRouter([
       { path: 'budget', element: <S C={PortalBudget} /> },
       { path: 'expenses', element: <S C={PortalExpenses} /> },
       { path: 'weekly-expenses', element: <S C={PortalWeeklyExpensePage} /> },
+      { path: 'bank-statements', element: <S C={PortalBankStatementPage} /> },
       { path: 'personnel', element: <S C={PortalPersonnel} /> },
       { path: 'change-requests', element: <S C={PortalChangeRequests} /> },
       { path: 'register-project', element: <S C={PortalProjectRegister} /> },

@@ -46,44 +46,57 @@ export interface MonthMondayWeek {
   label: string; // e.g. "26-1-4"
 }
 
+function daysInMonthUtc(year: number, month: number): number {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+function startOfWeekMonday(isoDate: string): string {
+  const [yRaw, mRaw, dRaw] = isoDate.split('-');
+  const year = Number.parseInt(yRaw, 10);
+  const month = Number.parseInt(mRaw, 10);
+  const day = Number.parseInt(dRaw, 10);
+  const dow = dayOfWeekUtc(year, month, day); // 0..6, Sunday=0
+  const delta = dow === 0 ? -6 : 1 - dow;
+  return addDaysUtc(isoDate, delta);
+}
+
+function countDaysInMonthForWeek(weekStart: string, year: number, month: number): number {
+  let count = 0;
+  for (let i = 0; i < 7; i += 1) {
+    const date = addDaysUtc(weekStart, i);
+    const [yy, mm] = date.split('-');
+    if (Number.parseInt(yy, 10) === year && Number.parseInt(mm, 10) === month) count += 1;
+  }
+  return count;
+}
+
 /**
  * Month week buckets used by the finance sheet:
  * - Weeks are Monday..Sunday.
- * - The week number is "nth Monday in the month".
- *   Example: 2026-01 has Mondays on 01-05/12/19/26 => weekNo 1..4.
+ * - ISO-like month rule: a week belongs to the month if it contains 4+ days of that month.
+ *   (week 1 = week containing the first Thursday of the month)
  */
 export function getMonthMondayWeeks(yearMonth: string): MonthMondayWeek[] {
   const parsed = parseYearMonth(yearMonth);
   if (!parsed) return [];
 
   const { year, month } = parsed;
-
-  let firstMondayDay = 0;
-  for (let d = 1; d <= 7; d += 1) {
-    if (dayOfWeekUtc(year, month, d) === 1) {
-      firstMondayDay = d;
-      break;
-    }
-  }
-
-  if (!firstMondayDay) {
-    // Should be impossible, but guard anyway.
-    return [];
-  }
-
+  const firstDay = formatIsoDate(year, month, 1);
+  const lastDay = formatIsoDate(year, month, daysInMonthUtc(year, month));
+  let weekStart = startOfWeekMonday(firstDay);
   const weeks: MonthMondayWeek[] = [];
   const yy = year % 100;
+  let weekNo = 0;
 
-  for (let i = 0, day = firstMondayDay; i < 6; i += 1, day += 7) {
-    // Stop when we pass the month boundary.
-    const date = new Date(Date.UTC(year, month - 1, day));
-    if (date.getUTCMonth() + 1 !== month) break;
-
-    const weekNo = i + 1;
-    const weekStart = formatIsoDate(year, month, day);
-    const weekEnd = addDaysUtc(weekStart, 6);
-    const label = `${yy}-${month}-${weekNo}`;
-    weeks.push({ yearMonth, weekNo, weekStart, weekEnd, label });
+  while (weekStart <= lastDay) {
+    const daysInMonth = countDaysInMonthForWeek(weekStart, year, month);
+    if (daysInMonth >= 4) {
+      weekNo += 1;
+      const weekEnd = addDaysUtc(weekStart, 6);
+      const label = `${yy}-${month}-${weekNo}`;
+      weeks.push({ yearMonth, weekNo, weekStart, weekEnd, label });
+    }
+    weekStart = addDaysUtc(weekStart, 7);
   }
 
   return weeks;
@@ -109,5 +122,27 @@ export function findWeekForDate(
   weeks: MonthMondayWeek[],
 ): MonthMondayWeek | undefined {
   if (!dateStr) return undefined;
-  return weeks.find((w) => dateStr >= w.weekStart && dateStr <= w.weekEnd);
+  const direct = weeks.find((w) => dateStr >= w.weekStart && dateStr <= w.weekEnd);
+  if (direct) return direct;
+
+  // Fallback: compute week bucket by month rule (handles edge days belonging to prev/next month)
+  const [yRaw, mRaw] = dateStr.split('-');
+  const year = Number.parseInt(yRaw, 10);
+  const month = Number.parseInt(mRaw, 10);
+  if (!Number.isFinite(year) || !Number.isFinite(month)) return undefined;
+
+  const current = getMonthMondayWeeks(`${year}-${pad2(month)}`);
+  const inCurrent = current.find((w) => dateStr >= w.weekStart && dateStr <= w.weekEnd);
+  if (inCurrent) return inCurrent;
+
+  const prevMonth = month === 1 ? 12 : month - 1;
+  const prevYear = month === 1 ? year - 1 : year;
+  const prev = getMonthMondayWeeks(`${prevYear}-${pad2(prevMonth)}`);
+  const inPrev = prev.find((w) => dateStr >= w.weekStart && dateStr <= w.weekEnd);
+  if (inPrev) return inPrev;
+
+  const nextMonth = month === 12 ? 1 : month + 1;
+  const nextYear = month === 12 ? year + 1 : year;
+  const next = getMonthMondayWeeks(`${nextYear}-${pad2(nextMonth)}`);
+  return next.find((w) => dateStr >= w.weekStart && dateStr <= w.weekEnd);
 }
