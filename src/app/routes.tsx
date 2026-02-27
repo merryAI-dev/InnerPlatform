@@ -34,7 +34,6 @@ const NotFoundPage = lazy(() => import('./components/layout/NotFoundPage').then(
 const PortalOnboarding = lazy(() => import('./components/portal/PortalOnboarding').then(m => ({ default: m.PortalOnboarding })));
 const PortalProjectSettings = lazy(() => import('./components/portal/PortalProjectSettings').then(m => ({ default: m.PortalProjectSettings })));
 const PortalDashboard = lazy(() => import('./components/portal/PortalDashboard').then(m => ({ default: m.PortalDashboard })));
-const PortalExpenses = lazy(() => import('./components/portal/PortalExpenses').then(m => ({ default: m.PortalExpenses })));
 const PortalBudget = lazy(() => import('./components/portal/PortalBudget').then(m => ({ default: m.PortalBudget })));
 const PortalPersonnel = lazy(() => import('./components/portal/PortalPersonnel').then(m => ({ default: m.PortalPersonnel })));
 const PortalChangeRequests = lazy(() => import('./components/portal/PortalChangeRequests').then(m => ({ default: m.PortalChangeRequests })));
@@ -119,7 +118,6 @@ export const router = createBrowserRouter([
       { path: 'payroll', element: <S C={PortalPayrollPage} /> },
       { path: 'cashflow', element: <S C={PortalCashflowPage} /> },
       { path: 'budget', element: <S C={PortalBudget} /> },
-      { path: 'expenses', element: <S C={PortalExpenses} /> },
       { path: 'weekly-expenses', element: <S C={PortalWeeklyExpensePage} /> },
       { path: 'bank-statements', element: <S C={PortalBankStatementPage} /> },
       { path: 'personnel', element: <S C={PortalPersonnel} /> },

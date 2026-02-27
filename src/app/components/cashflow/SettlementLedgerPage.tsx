@@ -4,14 +4,12 @@ import { toast } from 'sonner';
 import { BUDGET_CODE_BOOK } from '../../data/budget-data';
 import type { Transaction, TransactionState } from '../../data/types';
 import { findWeekForDate, getMonthMondayWeeks, getYearMondayWeeks, type MonthMondayWeek } from '../../platform/cashflow-weeks';
-import { parseCsv, parseDate, parseNumber, triggerDownload } from '../../platform/csv-utils';
+import { parseDate, parseNumber, triggerDownload } from '../../platform/csv-utils';
 import { computeEvidenceStatus, computeEvidenceSummary, isValidDriveUrl } from '../../platform/evidence-helpers';
 import {
   CASHFLOW_LINE_OPTIONS,
   SETTLEMENT_COLUMNS, SETTLEMENT_COLUMN_GROUPS,
   createEmptyImportRow,
-  exportImportRowsCsv,
-  exportSettlementCsv,
   parseCashflowLineLabel,
   importRowToTransaction,
   normalizeMatrixToImportRows,
@@ -257,12 +255,35 @@ export function SettlementLedgerPage({
     setCollapsedWeeks(new Set(yearWeeks.map((w) => w.label)));
   }, [yearWeeks]);
 
-  // ── CSV Download ──
-  const handleDownload = useCallback(() => {
-    const csv = importRows ? exportImportRowsCsv(importRows) : exportSettlementCsv(projectTxs, yearWeeks);
-    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
-    triggerDownload(blob, `정산대장_${projectName}_${year}.csv`);
-  }, [importRows, projectTxs, yearWeeks, projectName, year]);
+  const buildExportMatrix = useCallback(() => {
+    const headerRow = SETTLEMENT_COLUMN_GROUPS.map((g) => g.name).flatMap((name, i) => {
+      const colSpan = SETTLEMENT_COLUMN_GROUPS[i].colSpan;
+      return [name, ...Array(colSpan - 1).fill('')];
+    });
+    const columnRow = SETTLEMENT_COLUMNS.map((c) => c.csvHeader);
+    const dataRows = importRows
+      ? importRows.map((row) => row.cells.map((c) => c ?? ''))
+      : transactionsToImportRows(projectTxs, yearWeeks).map((row) => row.cells.map((c) => c ?? ''));
+    return [headerRow, columnRow, ...dataRows];
+  }, [importRows, projectTxs, yearWeeks]);
+
+  // ── Excel Download ──
+  const handleDownload = useCallback(async () => {
+    const ExcelJS = await import('exceljs');
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('정산대장');
+    const matrix = buildExportMatrix();
+    matrix.forEach((row) => ws.addRow(row));
+    ws.getRow(1).font = { bold: true };
+    ws.getRow(2).font = { bold: true };
+    ws.views = [{ state: 'frozen', ySplit: 2 }];
+    const buffer = await wb.xlsx.writeBuffer();
+    const blob = new Blob(
+      [buffer],
+      { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+    );
+    triggerDownload(blob, `정산대장_${projectName}_${year}.xlsx`);
+  }, [buildExportMatrix, projectName, year]);
 
   const buildImportRowsFromMatrix = useCallback((matrix: string[][]): ImportRow[] => {
     const rows = normalizeMatrixToImportRows(matrix);
@@ -337,17 +358,14 @@ export function SettlementLedgerPage({
     return matrix;
   }, []);
 
-  // ── CSV/XLSX Upload ──
+  // ── XLSX Upload ──
   const handleFileUpload = useCallback(async (file: File) => {
     const name = file.name.toLowerCase();
     let matrix: string[][] = [];
-    if (name.endsWith('.csv')) {
-      const text = await file.text();
-      matrix = parseCsv(text);
-    } else if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
+    if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
       matrix = await parseExcelToMatrix(file);
     } else {
-      toast.error('CSV 또는 XLSX 파일만 업로드할 수 있습니다.');
+      toast.error('XLSX 파일만 업로드할 수 있습니다.');
       return;
     }
 
@@ -522,16 +540,16 @@ export function SettlementLedgerPage({
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={handleDownload}>
               <Download className="h-4 w-4 mr-1" />
-              CSV 다운로드
+              엑셀 다운로드
             </Button>
             <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
               <Upload className="h-4 w-4 mr-1" />
-              CSV 업로드
+              엑셀 업로드
             </Button>
             <input
               ref={fileInputRef}
               type="file"
-              accept=".csv,.xlsx,.xls"
+              accept=".xlsx,.xls"
               className="hidden"
               onChange={(e) => {
                 const file = e.target.files?.[0];
@@ -592,16 +610,16 @@ export function SettlementLedgerPage({
           </Button>
           <Button variant="outline" size="sm" onClick={handleDownload}>
             <Download className="h-4 w-4 mr-1" />
-            CSV 다운로드
+            엑셀 다운로드
           </Button>
           <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
             <Upload className="h-4 w-4 mr-1" />
-            CSV 업로드
+            엑셀 업로드
           </Button>
           <input
             ref={fileInputRef}
             type="file"
-            accept=".csv,.xlsx,.xls"
+            accept=".xlsx,.xls"
             className="hidden"
             onChange={(e) => {
               const file = e.target.files?.[0];
@@ -1082,6 +1100,18 @@ function ImportEditor({
 }) {
   const errorCount = rows.filter((r) => r.error).length;
   const validCount = rows.length - errorCount;
+  const noIdx = useMemo(
+    () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === 'No.'),
+    [],
+  );
+  const missingCount = useMemo(() => {
+    return rows.filter((row) => {
+      const cells = row.cells || [];
+      const hasAnyValue = cells.some((cell, idx) => idx !== noIdx && String(cell || '').trim() !== '');
+      if (!hasAnyValue) return false;
+      return cells.some((cell, idx) => idx !== noIdx && String(cell || '').trim() === '');
+    }).length;
+  }, [rows, noIdx]);
   const budgetCodeIdx = useMemo(
     () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '비목'),
     [],
@@ -1351,6 +1381,9 @@ function ImportEditor({
           {errorCount > 0 && (
             <Badge variant="destructive" className="text-[10px]">{errorCount}건 오류</Badge>
           )}
+          {missingCount > 0 && (
+            <Badge variant="secondary" className="text-[10px] text-red-600">{missingCount}건 미입력</Badge>
+          )}
           <span className="text-[10px] text-muted-foreground">
             셀을 직접 수정하거나 행을 추가할 수 있습니다
           </span>
@@ -1425,6 +1458,7 @@ function ImportEditor({
                 weekOptions={weekOptions}
                 cashflowOptions={cashflowOptions}
                 evidenceRequiredMap={evidenceRequiredMap}
+                noIdx={noIdx}
               />
             ))}
             {rows.length === 0 && (
@@ -1504,6 +1538,7 @@ function ImportEditorRow({
   weekOptions,
   cashflowOptions,
   evidenceRequiredMap,
+  noIdx,
 }: {
   row: ImportRow;
   rowIdx: number;
@@ -1518,8 +1553,15 @@ function ImportEditorRow({
   weekOptions: { value: string; label: string }[];
   cashflowOptions: { value: string; label: string }[];
   evidenceRequiredMap?: Record<string, string>;
+  noIdx: number;
 }) {
   const hasError = Boolean(row.error);
+  const hasMissingCell = useMemo(() => {
+    const cells = row.cells || [];
+    const hasAnyValue = cells.some((cell, idx) => idx !== noIdx && String(cell || '').trim() !== '');
+    if (!hasAnyValue) return false;
+    return cells.some((cell, idx) => idx !== noIdx && String(cell || '').trim() === '');
+  }, [row.cells, noIdx]);
   const methodIdx = useMemo(
     () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '지출구분'),
     [],
@@ -1541,13 +1583,23 @@ function ImportEditorRow({
   }, []);
 
   return (
-    <tr className={`${hasError ? 'bg-red-50/60 dark:bg-red-950/20' : 'hover:bg-muted/30'} transition-colors`}>
+    <tr className={`${hasError
+      ? 'bg-red-50/60 dark:bg-red-950/20'
+      : hasMissingCell
+        ? 'bg-red-50/40 dark:bg-red-950/10'
+        : 'hover:bg-muted/30'
+    } transition-colors`}>
       {/* Row controls */}
       <td className="px-0.5 py-0.5 border-b border-r text-center align-middle w-8">
         <div className="flex flex-col items-center gap-0.5">
           <span className="text-[9px] text-muted-foreground">{rowIdx + 1}</span>
           {hasError && (
             <span title={row.error} className="text-red-500">
+              <AlertTriangle className="h-3 w-3" />
+            </span>
+          )}
+          {!hasError && hasMissingCell && (
+            <span title="미입력 셀 있음" className="text-red-500">
               <AlertTriangle className="h-3 w-3" />
             </span>
           )}

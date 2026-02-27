@@ -1,14 +1,12 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { AlertTriangle, BarChart3, CalendarDays, ChevronLeft, ChevronRight, ClipboardList, ExternalLink, FileText, Loader2, Users } from 'lucide-react';
+import { AlertTriangle, BarChart3, ChevronLeft, ChevronRight, ClipboardList, ExternalLink, Loader2, Users } from 'lucide-react';
 import { PageHeader } from '../layout/PageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { usePortalStore } from '../../data/portal-store';
-import { EXPENSE_STATUS_COLORS, EXPENSE_STATUS_LABELS, fmtShort } from '../../data/budget-data';
-import type { ExpenseSetStatus } from '../../data/budget-data';
 import { STATE_LABELS, type ChangeRequestState } from '../../data/personnel-change-data';
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { getMonthMondayWeeks } from '../../platform/cashflow-weeks';
@@ -17,13 +15,6 @@ import { getSeoulTodayIso } from '../../platform/business-days';
 function sortIsoDesc(a: string | undefined, b: string | undefined): number {
   return String(b || '').localeCompare(String(a || ''));
 }
-
-const EXPENSE_TABS: Array<{ label: string; value: ExpenseSetStatus | 'ALL' }> = [
-  { label: '전체', value: 'ALL' },
-  { label: '제출', value: 'SUBMITTED' },
-  { label: '승인', value: 'APPROVED' },
-  { label: '반려', value: 'REJECTED' },
-];
 
 const CHANGE_TABS: Array<{ label: string; value: ChangeRequestState | 'ALL' }> = [
   { label: '전체', value: 'ALL' },
@@ -35,23 +26,14 @@ const CHANGE_TABS: Array<{ label: string; value: ChangeRequestState | 'ALL' }> =
 
 export function PortalSubmissionsPage() {
   const navigate = useNavigate();
-  const { isLoading, portalUser, myProject, expenseSets, changeRequests } = usePortalStore();
+  const { isLoading, portalUser, myProject, changeRequests } = usePortalStore();
   const { yearMonth, goPrevMonth, goNextMonth, getWeeksForProject } = useCashflowWeeks();
 
-  const [expenseTab, setExpenseTab] = useState<ExpenseSetStatus | 'ALL'>('SUBMITTED');
   const [changeTab, setChangeTab] = useState<ChangeRequestState | 'ALL'>('SUBMITTED');
 
   const todayIso = getSeoulTodayIso();
   const todayYearMonth = todayIso.slice(0, 7);
   const projectId = portalUser?.projectId || myProject?.id || '';
-
-  const myExpenseSets = useMemo(() => {
-    if (!projectId) return [];
-    return expenseSets
-      .filter((s) => s.projectId === projectId)
-      .slice()
-      .sort((a, b) => sortIsoDesc(a.updatedAt, b.updatedAt));
-  }, [expenseSets, projectId]);
 
   const myChanges = useMemo(() => {
     if (!projectId) return [];
@@ -70,11 +52,6 @@ export function PortalSubmissionsPage() {
     }
     return map;
   }, [myCashflowWeeks]);
-
-  const filteredExpenses = useMemo(() => {
-    if (expenseTab === 'ALL') return myExpenseSets;
-    return myExpenseSets.filter((s) => s.status === expenseTab);
-  }, [expenseTab, myExpenseSets]);
 
   const filteredChanges = useMemo(() => {
     if (changeTab === 'ALL') return myChanges;
@@ -118,76 +95,6 @@ export function PortalSubmissionsPage() {
           </Button>
         )}
       />
-
-      {/* Expense Sets */}
-      <Card>
-        <CardHeader className="pb-2">
-          <div className="flex items-center justify-between gap-3">
-            <CardTitle className="text-[13px] flex items-center gap-1.5">
-              <FileText className="w-4 h-4 text-indigo-500" />
-              사업비 세트
-            </CardTitle>
-            <Button variant="outline" size="sm" className="h-7 text-[11px] gap-1" onClick={() => navigate('/portal/expenses')}>
-              상세 보기 <ExternalLink className="w-3 h-3" />
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="pt-0">
-          <Tabs value={expenseTab} onValueChange={(v) => setExpenseTab(v as any)}>
-            <TabsList className="w-full sm:w-fit">
-              {EXPENSE_TABS.map((t) => (
-                <TabsTrigger key={t.value} value={t.value} className="text-[11px]">
-                  {t.label}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-            <TabsContent value={expenseTab} className="mt-3">
-              <div className="space-y-2">
-                {filteredExpenses.slice(0, 12).map((s) => (
-                  <div key={s.id} className="p-3 rounded-lg border border-border/50 hover:bg-muted/20 transition-colors">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-[12px] truncate" style={{ fontWeight: 700 }}>{s.title}</p>
-                        <p className="text-[10px] text-muted-foreground mt-0.5 flex items-center gap-2">
-                          <span className="inline-flex items-center gap-1">
-                            <CalendarDays className="w-3 h-3" /> {s.period}
-                          </span>
-                          <span style={{ fontVariantNumeric: 'tabular-nums' }}>합계 {fmtShort(s.totalGross)}원</span>
-                        </p>
-                      </div>
-                      <div className="shrink-0 flex flex-col items-end gap-1">
-                        <Badge className={`text-[9px] h-4 px-1.5 ${EXPENSE_STATUS_COLORS[s.status]}`}>
-                          {EXPENSE_STATUS_LABELS[s.status]}
-                        </Badge>
-                        <span className="text-[9px] text-muted-foreground" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                          업데이트 {String(s.updatedAt || '').slice(0, 10)}
-                        </span>
-                      </div>
-                    </div>
-                    {s.status === 'REJECTED' && s.rejectedReason && (
-                      <div className="mt-2 p-2 rounded-md bg-rose-50 dark:bg-rose-950/30 border border-rose-200/60 dark:border-rose-800/40 text-[10px] text-rose-700 dark:text-rose-300">
-                        반려 사유: {s.rejectedReason}
-                      </div>
-                    )}
-                  </div>
-                ))}
-                {filteredExpenses.length === 0 && (
-                  <div className="py-8 text-center text-[12px] text-muted-foreground">
-                    해당 상태의 사업비 세트가 없습니다.
-                  </div>
-                )}
-                {filteredExpenses.length > 12 && (
-                  <div className="pt-2 text-center">
-                    <Button variant="ghost" size="sm" className="h-7 text-[11px]" onClick={() => navigate('/portal/expenses')}>
-                      더 보기 ({filteredExpenses.length - 12}건) <ExternalLink className="w-3 h-3 ml-1" />
-                    </Button>
-                  </div>
-                )}
-              </div>
-            </TabsContent>
-          </Tabs>
-        </CardContent>
-      </Card>
 
       {/* Change Requests */}
       <Card>

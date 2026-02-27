@@ -10,7 +10,7 @@ import {
   normalizeBankStatementMatrix,
   type BankStatementRow,
 } from '../../platform/bank-statement';
-import { parseCsv } from '../../platform/csv-utils';
+import { parseCsv, parseNumber } from '../../platform/csv-utils';
 
 export function PortalBankStatementPage() {
   const { portalUser, myProject, bankStatementRows, saveBankStatementRows } = usePortalStore();
@@ -21,13 +21,33 @@ export function PortalBankStatementPage() {
 
   const projectName = myProject?.name || '내 사업';
   const ready = useMemo(() => Boolean(portalUser?.projectId), [portalUser?.projectId]);
+  const amountColIdxs = useMemo(() => {
+    return new Set(
+      BANK_STATEMENT_COLUMNS.map((col, idx) => ({ col, idx }))
+        .filter(({ col }) => col === '출금금액' || col === '입금금액' || col === '잔액')
+        .map(({ idx }) => idx),
+    );
+  }, []);
+
+  const formatAmount = useCallback((value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) return '';
+    const num = parseNumber(trimmed);
+    if (num == null) return trimmed;
+    return num.toLocaleString('ko-KR');
+  }, []);
+
+  const formatAmountRow = useCallback((row: BankStatementRow) => {
+    const cells = row.cells.map((cell, idx) => (amountColIdxs.has(idx) ? formatAmount(cell) : cell));
+    return { ...row, cells };
+  }, [amountColIdxs, formatAmount]);
 
   useEffect(() => {
     if (dirty) return;
     if (bankStatementRows) {
-      setRows(bankStatementRows);
+      setRows(bankStatementRows.map(formatAmountRow));
     }
-  }, [bankStatementRows, dirty]);
+  }, [bankStatementRows, dirty, formatAmountRow]);
 
   const parseExcelToMatrix = useCallback(async (file: File): Promise<string[][]> => {
     const ExcelJS = await import('exceljs');
@@ -83,9 +103,9 @@ export function PortalBankStatementPage() {
       return;
     }
     const result = normalizeBankStatementMatrix(matrix);
-    setRows(result.rows);
+    setRows(result.rows.map(formatAmountRow));
     setDirty(true);
-  }, [parseExcelToMatrix]);
+  }, [parseExcelToMatrix, formatAmountRow]);
 
   const addRow = useCallback(() => {
     const next = [...rows, { tempId: `bank-${Date.now()}`, cells: BANK_STATEMENT_COLUMNS.map(() => '') }];
@@ -94,14 +114,22 @@ export function PortalBankStatementPage() {
   }, [rows]);
 
   const updateCell = useCallback((rowIdx: number, colIdx: number, value: string) => {
+    const nextValue = amountColIdxs.has(colIdx) ? formatAmount(value) : value;
     setRows((prev) => prev.map((row, i) => {
       if (i !== rowIdx) return row;
       const cells = [...row.cells];
-      cells[colIdx] = value;
+      cells[colIdx] = nextValue;
       return { ...row, cells };
     }));
     setDirty(true);
-  }, []);
+  }, [amountColIdxs, formatAmount]);
+
+  const handleCellBlur = useCallback((rowIdx: number, colIdx: number, value: string) => {
+    if (!amountColIdxs.has(colIdx)) return;
+    const formatted = formatAmount(value);
+    if (formatted === value) return;
+    updateCell(rowIdx, colIdx, formatted);
+  }, [amountColIdxs, formatAmount, updateCell]);
 
   const handleSave = useCallback(async () => {
     if (!saveBankStatementRows) {
@@ -194,6 +222,7 @@ export function PortalBankStatementPage() {
                           value={row.cells[colIdx] || ''}
                           className="w-full bg-transparent outline-none text-[11px]"
                           onChange={(e) => updateCell(rowIdx, colIdx, e.target.value)}
+                          onBlur={(e) => handleCellBlur(rowIdx, colIdx, e.target.value)}
                         />
                       </td>
                     ))}

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router';
 import {
-  LayoutDashboard, Wallet, Calculator, Users,
+  LayoutDashboard, Calculator, Users,
   ArrowRightLeft, LogOut,
   FolderKanban, Menu,
   Plus,
@@ -50,7 +50,6 @@ const NAV_ITEMS = [
   { to: '/portal/payroll', icon: CircleDollarSign, label: '인건비/공지', accent: true },
   { to: '/portal/cashflow', icon: BarChart3, label: '캐시플로(주간)' },
   { to: '/portal/budget', icon: Calculator, label: '예산총괄' },
-  { to: '/portal/expenses', icon: Wallet, label: '사업비 입력' },
   { to: '/portal/weekly-expenses', icon: FileSpreadsheet, label: '사업비 입력(주간)' },
   { to: '/portal/bank-statements', icon: FileSpreadsheet, label: '통장내역' },
   { to: '/portal/personnel', icon: Users, label: '인력 현황' },
@@ -69,7 +68,6 @@ function PortalContent() {
     portalUser,
     myProject,
     logout: portalLogout,
-    expenseSets,
     changeRequests,
     projects,
     setActiveProject,
@@ -228,9 +226,6 @@ function PortalContent() {
   }
 
   // 배지 카운트
-  const myExpenses = expenseSets.filter(s => s.projectId === portalUser.projectId);
-  const draftCount = myExpenses.filter(s => s.status === 'DRAFT').length;
-  const rejectedCount = myExpenses.filter(s => s.status === 'REJECTED').length;
   const pendingChanges = changeRequests.filter(r => r.state === 'SUBMITTED').length;
   const hrAlertCount = getUnacknowledgedCount();
   const payrollPendingCount = (() => {
@@ -250,7 +245,6 @@ function PortalContent() {
   }
 
   function getBadge(to: string): number | null {
-    if (to === '/portal/expenses' && (draftCount + rejectedCount) > 0) return draftCount + rejectedCount;
     if (to === '/portal/payroll' && payrollPendingCount > 0) return payrollPendingCount;
     if (to === '/portal/change-requests') {
       const total = pendingChanges + hrAlertCount;
