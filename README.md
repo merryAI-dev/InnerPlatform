@@ -1,439 +1,531 @@
-# Business Management Platform
-
-Business Management Platform frontend bundle (Vite + React + TypeScript).
-Original design source: https://www.figma.com/design/HUL2PbwDK68w46Nzl5sVCn/Business-Management-Platform.
-
-## Getting Started
-
-```bash
-nvm use 24 # or install Node 24 first
-npm install
-cp .env.example .env
-npm run dev
-```
-
-## Scripts
-
-- `npm run dev`: start local Vite server.
-- `npm run build`: production build.
-- `npm test`: run unit tests (Vitest).
-- `npm run bff:dev`: start local BFF API server (`/api/v1/*`) on `127.0.0.1:8787`.
-- `npm run bff:seed:demo`: seed demo project/transaction documents for BFF validation.
-- `npm run bff:test:integration`: run Firestore emulator + BFF integration tests (real writes/reads).
-- `npm run bff:cleanup:idempotency`: delete expired idempotency keys.
-- `npm run bff:outbox:worker`: process outbox events with retry/dead-letter status updates.
-- `npm run bff:work-queue:worker`: process projection work queue jobs (`work_queue/*`).
-- `npm run bff:deploy:cloud-run`: build/push/deploy BFF to Cloud Run (requires gcloud/docker auth).
-- `npm run firebase:whoami`: check Firebase CLI login status.
-- `npm run firebase:login`: login to Firebase CLI.
-- `npm run firebase:login:daemon:start`: start persistent login flow and auto-open browser URL.
-- `npm run firebase:login:daemon:submit -- '<authorization-code>'`: submit code without needing an active terminal prompt.
-- `npm run firebase:login:daemon:status`: inspect daemon/login state.
-- `npm run firebase:open:google-auth`: open Firebase Console Google provider page for current project.
-- `npm run firebase:autosetup`: auto-detect project/app, write `.env` and `.firebaserc`, deploy Firestore rules/indexes.
-- `npm run firebase:bootstrap`: validate `.env`, generate `.firebaserc`, and deploy Firestore rules/indexes when logged in.
-- `npm run firebase:deploy:firestore`: deploy only Firestore rules/indexes.
-- `npm run firebase:deploy:indexes`: deploy only Firestore composite indexes.
-- `npm run firebase:fill-env -- '<firebaseConfig-json>'`: fill `.env` from copied Firebase web config JSON.
-- `npm run firebase:emulators:prepare`: generate `.env.local` + `.firebaserc` for local emulator mode.
-- `npm run firebase:emulators:start`: run Auth/Firestore/Storage emulators with local overrides.
-  - Requires Java 21+ for Firestore emulator.
-- `npm run firestore:backup:schedule`: create/update managed Firestore backup schedule.
-- `npm run firestore:backup:rehearsal`: restore latest backup into rehearsal database for recovery drill.
-- `npm run monitoring:setup:alerts`: create/update 5xx/latency/version-conflict alert policies.
-- `npm run pii:rotate`: rotate encrypted PII fields to current key.
-- `npm run pii:setup:vercel`: generate/push Vercel-ready local PII keys (no GCP KMS).
-- `npm run policy:verify`: verify RBAC policy-as-code file integrity.
-
-## Firestore Automation System (비개발자 운영 가이드)
-
-이 프로젝트는 Firebase/Firestore 운영 작업을 "명령 1개" 단위로 실행할 수 있게 자동화했습니다.  
-목표는 개발자가 아니어도, 체크리스트만 따라가면 초기 세팅부터 운영 점검까지 끝내는 것입니다.
-
-### 1) 자동화가 해주는 일
-
-- Firebase 로그인 세션 안정화(daemon 방식).
-- 프로젝트/웹앱 자동 탐지 후 `.env`, `.firebaserc` 자동 생성.
-- Firestore 보안 규칙/복합 인덱스 배포.
-- 로컬 Emulator 준비 및 실행.
-- 백업 스케줄 생성/갱신, 복구 리허설 실행.
-- 운영 알림(5xx/지연/충돌 비율) 정책 생성.
-- Vercel 환경에서 PII 키 생성/배포/로테이션 지원.
-
-### 2) 최초 1회 준비
-
-- Node 24 권장: `nvm use 24`
-- 의존성 설치: `npm install`
-- Firebase 로그인(권장: daemon):
-  - `npm run firebase:login:daemon:start`
-  - 브라우저 코드 발급 후 `npm run firebase:login:daemon:submit -- '<authorization-code>'`
-- 로그인 확인: `npm run firebase:whoami`
-
-### 3) 표준 실행 순서(운영용)
-
-1. 원샷 세팅: `npm run firebase:autosetup`
-2. Google 로그인 활성화(콘솔 이동): `npm run firebase:open:google-auth`
-3. 인덱스만 재배포(스키마/쿼리 변경 시): `npm run firebase:deploy:indexes`
-4. 앱 실행 확인: `npm run dev`
-
-### 4) 자동화 메뉴판 (상황별)
-
-| 상황 | 실행 명령 | 자동 처리 내용 | 성공 기준 |
-| --- | --- | --- | --- |
-| 신규 환경 세팅 | `npm run firebase:autosetup` | 프로젝트 탐지, 웹앱 확인/생성, `.env`/`.firebaserc` 생성, rules/indexes 배포 | `.env` 생성 + deploy 완료 로그 |
-| 이미 `.env` 있음 | `npm run firebase:bootstrap` | `.env` 검증 후 rules/indexes 배포 | missing env 에러 없이 완료 |
-| 인덱스만 반영 | `npm run firebase:deploy:indexes` | Firestore composite indexes만 배포 | indexes deploy 완료 |
-| 콘솔 설정 이동 | `npm run firebase:open:google-auth` | Google provider 설정 페이지 오픈 | Firebase Console 페이지 열림 |
-| 로컬 테스트 | `npm run firebase:emulators:start` | Auth/Firestore/Storage emulator 실행 | emulator listening 로그 확인 |
-| 백업 정책 | `npm run firestore:backup:schedule` | 백업 스케줄 생성/보존기간 업데이트 | schedule list 출력 |
-| 복구 리허설 | `npm run firestore:backup:rehearsal` | 최신 백업을 별도 DB로 restore | restore 요청 성공 로그 |
-
-### 5) 반드시 사람이 해야 하는 것
-
-- Firebase Console에서 Google 로그인 Provider 활성화(보안/정책 승인 이슈로 완전 자동화 불가).
-- 운영 권한 승인(IAM, 결제, 조직 정책)은 관리자 계정에서 수행.
-- Vercel 사용 시 환경변수 반영 후 재배포 실행.
-
-### 6) 자주 나는 오류와 즉시 조치
-
-- `Unable to verify client`
-  - 원인: 로그인 URL/코드 만료 또는 세션 불일치.
-  - 조치: `firebase:login:daemon:start`를 다시 실행하고 새 코드로 즉시 submit.
-- `No authorized accounts`
-  - 원인: Firebase CLI 미로그인.
-  - 조치: `npm run firebase:login` 또는 daemon 로그인 재실행.
-- `Could not resolve Firebase project id`
-  - 원인: `.env`/`.firebaserc`에 project id 없음.
-  - 조치: `npm run firebase:autosetup` 먼저 실행.
-- `Java 21+ is required`
-  - 원인: Firestore emulator 실행 조건 미충족.
-  - 조치: `brew install openjdk@21` 후 재실행.
-
-### 7) 운영 문서(권장 읽기 순서)
-
-- `guidelines/Firestore-Automation-System-Guide.md`: 비개발자용 상세 운영 핸드북.
-- `guidelines/TIL-Firebase-Daemon-Setup.md`: 자동화 메뉴판 + 타 프로젝트 재사용 템플릿.
-- `guidelines/Operational-Hardening-Runbook.md`: 인덱스/백업/알림/PII/정책 운영런북.
-
-## Firebase Runtime Configuration
-
-Set Firebase runtime values in `.env`:
-
-- `VITE_FIREBASE_API_KEY`
-- `VITE_FIREBASE_AUTH_DOMAIN`
-- `VITE_FIREBASE_PROJECT_ID`
-- `VITE_FIREBASE_STORAGE_BUCKET`
-- `VITE_FIREBASE_MESSAGING_SENDER_ID`
-- `VITE_FIREBASE_APP_ID`
-
-Feature flags:
-
-- `VITE_FIREBASE_AUTH_ENABLED=true`: enable Google Auth login flow.
-- `VITE_FIRESTORE_CORE_ENABLED=true`: enable Firestore-backed core data store.
-- `VITE_FIREBASE_USE_ENV_CONFIG=true`: prioritize env config over local saved config.
-- `VITE_DEFAULT_ORG_ID=mysc`: default org scope path (`orgs/{orgId}/...`).
-- `VITE_FIREBASE_USE_EMULATORS=false`: when true, app connects to local Firebase emulators.
-- `VITE_TENANT_ISOLATION_STRICT=true`: strict validation for tenant ids and scoped paths.
-- `VITE_FIREBASE_EMULATOR_HOST=127.0.0.1`
-- `VITE_FIRESTORE_EMULATOR_PORT=8080`
-- `VITE_FIREBASE_AUTH_EMULATOR_PORT=9099`
-- `VITE_FIREBASE_STORAGE_EMULATOR_PORT=9199`
-- `VITE_PLATFORM_API_ENABLED=false`: route selected mutations through BFF (`/api/v1`).
-- `VITE_PLATFORM_API_BASE_URL=http://127.0.0.1:8787`
-
-## Firestore Rules
-
-Security rules/index templates were added under `firebase/`:
-
-- `firebase/firestore.rules`
-- `firebase/firestore.indexes.json`
-
-## Company Board (전사 게시판)
-
-- 경로:
-  - 관리자(App): `/board`
-  - 포털(Portal): `/portal/board`
-  - 어떤 링크로 들어가도 역할에 맞게 자동 리다이렉트되어 사이드바가 유지됩니다.
-- 기능: 글 작성, 댓글/답글(1-depth), 추천/비추천(vote)
-- Firestore 컬렉션(테넌트 스코프):
-  - `orgs/{orgId}/board_posts`
-  - `orgs/{orgId}/board_comments`
-  - `orgs/{orgId}/board_votes`
-- 요구 사항:
-  - `VITE_FIRESTORE_CORE_ENABLED=true` (Firestore 기반 데이터 사용)
-  - 로그인 후 사이드바 `전사 게시판`에서 진입
-
-## Payroll (인건비 공지/확인 + 월간정산)
-
-핵심: 사업 담당자가 인건비 지급일을 등록하면, 지급일 3영업일 전에 포털 홈에 공지가 노출되고(PM 확인 필요), Admin은 프로젝트별 지급 여부(거래 자동매칭+확정)와 월간정산 현황을 운영 화면에서 확인합니다.
-
-- 경로:
-  - 포털: `/portal/payroll` (지급일 등록 + 공지 확인)
-  - 관리자: `/payroll` (프로젝트별 인지/지급/정산 현황)
-- Firestore 컬렉션(테넌트 스코프):
-  - `orgs/{orgId}/payroll_schedules` (프로젝트별 지급일: 매월 N일)
-  - `orgs/{orgId}/payroll_runs` (프로젝트-월 단위 공지/인지/지급 상태)
-  - `orgs/{orgId}/monthly_closes` (프로젝트-월 단위 월간정산 완료/인지)
-- 자동화 워커(Vercel Cron):
-  - `GET /api/internal/workers/payroll/run` (run doc 보장 + 인건비 거래 자동매칭)
-  - `GET /api/internal/workers/monthly-close/run` (월간정산 doc 보장)
-- Bootstrap admin(선택):
-  - `VITE_BOOTSTRAP_ADMIN_EMAILS=admin@mysc.co.kr` 처럼 “최초 1회”만 설정해, 해당 이메일 최초 로그인 시 admin role이 자동 부여되게 할 수 있습니다.
-
-## Cashflow Weekly Sheet (Projection/Actual)
-
-구글시트 기반의 주간 캐시플로 입력/결산 UI를 제공합니다.  
-각 주차는 "해당 월의 n번째 월요일(월~일)" 기준으로 계산되며, 라벨은 `26-1-4` 형태(YY-월-주차)로 표시됩니다.
-
-- 경로:
-  - 포털(PM): `/portal/cashflow` (내 사업 Projection/Actual 입력 + 주간 작성완료)
-  - 관리자: `/cashflow` (전사 주간 작성/결산 현황)
-  - 관리자(프로젝트 시트): `/cashflow/projects/:projectId`
-- Firestore 컬렉션(테넌트 스코프):
-  - `orgs/{orgId}/cashflow_weeks`
-    - doc id: `${projectId}-${yearMonth}-w${weekNo}` (예: `p001-2026-01-w4`)
-    - 상태: `pmSubmitted`(작성완료), `adminClosed`(결산완료)
-
-## Firebase Auth Quick Link
-
-Enable Google login provider:
-
-```bash
-npm run firebase:open:google-auth
-```
-
-Authorized domains (to fix `auth/unauthorized-domain`):
-
-- Firebase Console > Authentication > Settings > Authorized domains
-- Add:
-  - `localhost` (local dev)
-  - your Vercel production domain (for example: `inner-platform.vercel.app`)
-  - any Preview domain you want to use for login (Preview URLs change per deploy)
-
-Email domain allowlist (company-only login):
-
-- Default: `@mysc.co.kr` only
-- Optional env: `VITE_ALLOWED_EMAIL_DOMAINS=mysc.co.kr` (comma-separated supported)
-
-Reference doc:
-
-- `guidelines/Firestore-Automation-System-Guide.md`
-  - 비개발자용 Firestore 자동화 운영 핸드북
-- `guidelines/TIL-Firebase-Daemon-Setup.md`
-  - Firebase 자동화 메뉴판 + 타 프로젝트 재사용 가이드
-- `guidelines/Platform-Foundation-Roadmap.md`
-  - 멀티테넌시/RBAC/Audit 기반 구현 현황 + 다음 실행 블록
-- `guidelines/Data-Stability-Backlog.md`
-  - 데이터 안정성 강화 우선순위 백로그(P0~P2)
-- `guidelines/Data-Stability-Implemented.md`
-  - 이번 구현에서 실제 반영된 P0 안정성 항목
-- `guidelines/Operational-Hardening-Runbook.md`
-  - 인덱스/아웃박스/백업/알림/PII/정책 운영 런북
-- `guidelines/User-Feature-Enhancement-Backlog.md`
-  - 사용자 기능 관점(ServiceNow급) 우선순위 백로그
-
-## Platform Foundation (Q1)
-
-Implemented core enterprise foundation modules under `src/app/platform/`:
-
-- `tenant.ts`: tenant ID validation + safe org path helpers.
-- `request-context.ts`: standard request headers (`x-request-id`, `x-tenant-id`, `x-actor-id`) and idempotency key generation.
-- `api-client.ts`: fetch wrapper for API v1-style requests with consistent metadata, retry/backoff, and timeout handling.
-- `rbac.ts`: claim parsing and permission/tenant access helpers.
-- `audit-log.ts`: normalized audit event schema used by Firestore service writes.
-
-## BFF Flow (Option 2 + 1)
-
-Run BFF first, then execute real-data integration tests:
-
-```bash
-npm run bff:dev
-npm run bff:seed:demo
-npm run bff:test:integration
-```
-
-## BFF API Surface
-
-- `GET /api/v1/health`
-- `POST /api/internal/workers/outbox/run` (protected; worker secret required)
-- `POST /api/internal/workers/work-queue/run` (protected; worker secret required)
-- `POST /api/internal/workers/payroll/run` (protected; worker secret required)
-- `POST /api/internal/workers/monthly-close/run` (protected; worker secret required)
-- `POST /api/v1/write`
-- `GET /api/v1/views/:viewName`
-- `GET /api/v1/queue/jobs`
-- `POST /api/v1/queue/replay/:eventId`
-- `GET /api/v1/projects`
-- `POST /api/v1/projects`
-- `GET /api/v1/ledgers`
-- `POST /api/v1/ledgers`
-- `GET /api/v1/transactions`
-- `POST /api/v1/transactions`
-- `PATCH /api/v1/transactions/:txId/state`
-- `GET /api/v1/transactions/:txId/comments`
-- `POST /api/v1/transactions/:txId/comments`
-- `GET /api/v1/transactions/:txId/evidences`
-- `POST /api/v1/transactions/:txId/evidences`
-- `GET /api/v1/audit-logs`
-- `GET /api/v1/audit-logs/verify`
-- `PATCH /api/v1/members/:memberId/role`
-
-Mutating endpoints require:
-- `x-tenant-id`
-- `x-actor-id`
-- `idempotency-key`
-
-Authentication mode:
-- `BFF_AUTH_MODE=headers`: trust request headers (local/default).
-- `BFF_AUTH_MODE=firebase_optional`: verify `Authorization: Bearer <Firebase ID token>` when present, else fallback to headers.
-- `BFF_AUTH_MODE=firebase_required`: require/verify Firebase ID token and reject header spoofing (`actor_mismatch`, `tenant_mismatch`).
-
-State transitions also require:
-- `expectedVersion` in request body
-
-State transition RBAC (permission-based):
-- `SUBMITTED`: `transaction:submit`
-- `APPROVED`: `transaction:approve`
-- `REJECTED`: `transaction:reject`
-
-Comment/Evidence RBAC (permission-based):
-- comments: `comment:read` / `comment:write`
-- evidences: `evidence:read` / `evidence:write`
-
-Role change endpoint requires:
-- `x-actor-role` allowed by policy (`policies/rbac-policy.json`)
-
-List endpoints support deterministic pagination:
-- query: `?limit=50&cursor=<lastDocumentId>`
-- response: `nextCursor` (null when done)
-
-Single write pipeline:
-- `POST /api/v1/write` writes a canonical entity document (`project`, `ledger`, `transaction`, `expense_set`, `change_request`, `member`) with version checks.
-- Same transaction creates `orgs/{tenantId}/change_events/{eventId}` and queue jobs in `work_queue/{jobId}`.
-- Queue jobs rebuild projection views in `orgs/{tenantId}/views/{viewName}`.
-- Manual replay endpoint: `POST /api/v1/queue/replay/:eventId`.
-
-Relation-rule policy (no hardcoded cross-entity wiring in route code):
-- `policies/relation-rules.json`
-- Optional override: `orgs/{tenantId}/relation_rules/*`
-
-Internal worker auth:
-- `BFF_WORKER_SECRET` or `CRON_SECRET` must be set.
-- Send one of:
-  - `x-worker-secret: <secret>`
-  - `Authorization: Bearer <secret>`
-
-BFF runtime env template:
-- `server/bff/.env.example`
-
-## Data Hardening (P0 + Ops)
-
-- Audit log chain hashing:
-  - append-only logs with `chainSeq`, `prevHash`, `hash`
-  - tamper check endpoint: `GET /api/v1/audit-logs/verify`
-- Outbox pattern:
-  - mutation events are persisted to `outbox/*` in the same write transaction/batch
-  - worker retries and moves exhausted events to `DEAD`
-- PII encryption and rotation:
-  - `PII_MODE=local|kms|auto|off`
-  - local keyring (`PII_LOCAL_KEYRING`) or Cloud KMS (`PII_KMS_KEYS`)
-  - rotation script: `npm run pii:rotate`
-- Policy-as-code:
-  - RBAC role-change policy stored at `policies/rbac-policy.json`
-  - verifier in CI: `npm run policy:verify`
-- Monitoring:
-  - alert setup script provisions 5xx ratio, p95 latency, version-conflict ratio alerts
-- Backup/recovery rehearsal:
-  - schedule backups and run restore drills via `firestore:backup:*` scripts
-
-## Worker Strategy (Vercel / External)
-
-For production, keep both asynchronous pipelines alive:
-- outbox worker (`npm run bff:outbox:worker`)
-- projection queue worker (`npm run bff:work-queue:worker`)
-
-### Option A: Vercel Cron + internal worker endpoints (recommended on Vercel)
-
-1. Expose protected internal endpoints in BFF for one-shot processing.
-2. Configure Vercel Cron:
-   - work queue: every minute
-   - outbox: every 1-5 minutes
-3. In each run, process bounded batches and return counts.
-4. This repo includes default cron schedules in `vercel.json` (Hobby-safe daily):
-   - `/api/internal/workers/work-queue/run`: `15 2 * * *`
-   - `/api/internal/workers/outbox/run`: `30 2 * * *`
-5. For near-real-time processing (every minute/5 minutes), use Vercel Pro cron or an external always-on worker.
-
-### Option B: External always-on worker
-
-Run loop mode in a dedicated runtime:
-
-```bash
-BFF_OUTBOX_LOOP=true BFF_OUTBOX_INTERVAL_MS=2000 npm run bff:outbox:worker
-BFF_WORK_QUEUE_LOOP=true BFF_WORK_QUEUE_INTERVAL_MS=2000 npm run bff:work-queue:worker
-```
-
-Detailed runbook:
-- `guidelines/Operational-Hardening-Runbook.md`
-
-## Vercel Deployment (TDD Gate)
-
-Deploy only after all gates pass:
-
-```bash
-npm test
-npm run bff:test:integration
-npm run build
-```
-
-Set required runtime envs in Vercel:
-- Firebase/Vite envs (`VITE_FIREBASE_*`, `VITE_PLATFORM_API_ENABLED`, etc.)
-- BFF envs (`BFF_AUTH_MODE`, `BFF_ALLOWED_ORIGINS`)
-- Worker secret (`CRON_SECRET` recommended, or `BFF_WORKER_SECRET`)
-- Firebase Admin credentials for server runtime:
-  - `FIREBASE_SERVICE_ACCOUNT_JSON` (recommended), or
-  - `FIREBASE_SERVICE_ACCOUNT_BASE64`
-
-Deploy:
-
-```bash
-vercel login
-vercel link
-vercel --prod
-```
-
-Post-deploy smoke checks:
-- `GET /api/v1/health`
-- `POST /api/internal/workers/work-queue/run` with worker secret
-- `POST /api/internal/workers/outbox/run` with worker secret
-
-If worker endpoints return `500` with `Could not load the default credentials`, add Firebase Admin credentials envs above and redeploy.
-
-## Cloud Run Deployment
-
-Local deploy script:
-
-```bash
-export FIREBASE_PROJECT_ID=<gcp-project-id>
-export REGION=asia-northeast3
-npm run bff:deploy:cloud-run
-```
-
-Cloud Build pipeline file:
-- `cloudbuild.bff.yaml`
-
-Container build source:
-- `server/bff/Dockerfile`
-
-GitHub CI workflow:
-- This branch intentionally excludes workflow file due GitHub token scope (`workflow`) limitation.
-- Add `.github/workflows/bff-ci.yml` in a follow-up PR with proper token scope.
-
-## Local Emulator Prerequisite
-
-Install Java before starting emulators:
-
-```bash
-brew install openjdk@21
-java -version
-```
+# MYSC 사업관리 포털 온보딩 가이드
+
+MYSC 사업관리 포털을 처음 사용하는 분이 가장 먼저 익혀야 하는 흐름을 정리했어요.
+로그인부터 사업비 정산 완료 확인까지, 실제로 구현된 화면 기준으로 따라오면 바로 업무를 시작할 수 있어요.
+
+이 가이드는 토스처럼 빠르게 이해되는 문장 톤을 유지하되, 업무용 플랫폼답게 해야 할 행동이 분명하게 보이도록 작성했어요.
+
+먼저 현재 구현 범위를 정확히 이해하는 게 중요해요.
+지금 코드 기준으로 자동화의 중심은 `통장 내역 CSV 업로드 → 정산대장 자동 정렬/검증/저장`이에요.
+즉, “통장 내역을 그대로 붙여넣으면 모든 화면이 자동으로 끝까지 연동된다”기보다는, 사람이 입력해야 할 반복 작업을 크게 줄여 주는 구조에 가까워요.
+
+이 기준을 알고 보면, 어떤 부분이 자동화됐고 어떤 부분은 아직 사람이 판단해야 하는지 더 쉽게 이해할 수 있어요.
+또 한 가지 더 중요해요.
+이 문서에서는 `관리자이면서 동시에 PM 역할을 맡는 사용자`를 기준으로도 읽을 수 있게 정리해요.
+그래서 처음 사업을 맡았을 때는 `운영`보다 먼저 `예산 작성과 기준 설정`이 온다는 점을 흐름 앞쪽에 두는 게 맞아요.
+
+## 1. 로그인
+
+로그인은 모든 작업의 시작점이에요.
+현재 포털은 Google 로그인으로 진입하고, `mysc.co.kr` 계정만 사용할 수 있어요.
+
+자동화된 것
+
+- 로그인 성공 후 역할에 따라 관리자 홈 또는 포털 홈으로 자동 이동해요.
+- 이미 로그인된 사용자는 로그인 화면을 다시 거치지 않아요.
+
+사람이 해야 하는 것
+
+- 올바른 회사 Google 계정을 선택해야 해요.
+- 로그인 실패 시 계정이나 권한 상태를 직접 확인해야 해요.
+
+로그인 화면에서는 아래 순서로 진행해 주세요.
+
+1. `Google 계정으로 로그인` 버튼을 눌러요.
+2. 회사 계정을 선택해 인증을 완료해요.
+3. 로그인에 성공하면 권한에 따라 관리자 화면(`/`) 또는 포털 화면(`/portal`)으로 자동 이동해요.
+
+로그인 화면에서 꼭 알아둘 점이 있어요.
+
+- Firebase 인증이 꺼져 있으면 로그인 버튼이 비활성화될 수 있어요.
+- 이미 로그인된 상태라면, 로그인 화면을 다시 거치지 않고 바로 내 홈 화면으로 이동해요.
+- 포털 권한이 없는 사용자는 포털이 아니라 관리자 영역으로 이동할 수 있어요.
+
+## 2. 처음 들어오면 `내 사업 선택`부터 해요
+
+포털 사용자는 바로 업무를 시작하지 않고, 먼저 내가 관리할 사업을 정해야 해요.
+이 단계는 한 번만 끝나는 설정이 아니라, 배정 사업이 바뀌면 다시 수정할 수 있어요.
+
+자동화된 것
+
+- 여러 사업 ID를 정리하고, 주사업 후보를 자동으로 맞춰 줘요.
+- 사업을 하나도 선택하지 않으면 저장되지 않도록 막아줘요.
+
+사람이 해야 하는 것
+
+- 실제로 내가 관리할 사업을 선택해야 해요.
+- 여러 사업 중 어떤 사업을 주사업으로 둘지 판단해야 해요.
+
+`내 사업 선택` 화면에서는 이렇게 진행해 주세요.
+
+1. 목록에서 내가 참여하는 사업을 하나 이상 선택해요.
+2. 여러 사업이 있다면, 그중 가장 자주 볼 사업을 `주사업`으로 지정해요.
+3. `저장하고 계속` 버튼을 눌러요.
+
+이 단계에서 꼭 지켜야 할 기준이 있어요.
+
+- 최소 1개 이상의 사업을 선택해야 포털을 계속 사용할 수 있어요.
+- 주사업이 정해져야 대시보드, 사업비 입력, 제출 현황이 올바른 기준 사업으로 열려요.
+- 배정된 사업이 보이지 않으면, 먼저 관리자에게 사업 배정을 요청해 주세요.
+
+## 3. `내 사업 현황`에서 오늘 해야 할 일을 먼저 확인해요
+
+대시보드는 포털의 시작 화면이에요.
+지금 내 사업이 어떤 상태인지, 오늘 확인해야 할 공지가 있는지, 제출이 밀려 있는지 가장 먼저 보여줘요.
+
+자동화된 것
+
+- 사업 상태, 미확인 공지, 인건비 안내, 월간 정산 확인 필요 여부를 계산해서 보여줘요.
+- Firestore 데이터가 바뀌면 화면도 다시 반영돼요.
+
+사람이 해야 하는 것
+
+- 어떤 알림을 먼저 처리할지 우선순위를 정해야 해요.
+- 공지를 읽고 실제로 확인 버튼을 눌러 기록해야 해요.
+
+대시보드에서 먼저 확인해야 할 영역은 아래와 같아요.
+
+1. 사업명과 상태 배지
+진행 중인지, 완료 후 정산 대기 상태인지 한 번에 확인할 수 있어요.
+
+2. 중요 공지
+인건비 지급 예정, 월간 정산 완료, 인력변경 안내처럼 놓치면 안 되는 내용을 먼저 보여줘요.
+
+3. 사업비/재무 요약
+작성 중인 사업비 세트 수, 제출 완료 건수, 집행액, 잔액처럼 지금 상태를 빠르게 파악할 수 있어요.
+
+대시보드는 “오늘 무엇부터 해야 하는지”를 정하는 화면이에요.
+따라서 공지 배지나 미확인 안내가 보이면, 먼저 해당 화면으로 이동해 처리하는 게 좋아요.
+
+## 4. 처음 맡은 사업이면 `예산 작성`부터 시작해요
+
+사업을 처음 맡았는데 아직 예산 기준이 없다면, 바로 집행부터 시작하면 안 돼요.
+이때는 `예산총괄` 화면을 “조회 화면”이 아니라 “예산을 만드는 출발점”으로 먼저 써야 해요.
+
+관리자와 PM가 같은 사람이라면, 이 단계가 실무의 첫 단추예요.
+한 번 기준을 잘 잡아 두면, 이후 집행과 정산이 훨씬 안정적으로 흘러가요.
+
+자동화된 것
+
+- 행 추가 후 합계, 소진율, 표시 형식이 바로 반영돼요.
+- 컬럼 구조 변경과 정책 조건이 화면에 즉시 적용돼요.
+- 저장 불가 수준의 정책 위반은 미리 경고하거나 차단할 수 있어요.
+
+사람이 해야 하는 것
+
+- 어떤 비목/세목 구조로 예산을 잡을지 결정해야 해요.
+- 각 항목별 승인 예산 금액을 직접 넣어야 해요.
+- 무엇을 경고 기준으로 삼을지 정책을 정해야 해요.
+
+처음 예산을 만드는 순서는 이렇게 보는 게 좋아요.
+
+1. 편집 모드로 들어가요.
+예산총괄 화면에서 `편집 모드`를 켜요.
+
+2. 예산 행을 만들어요.
+필요한 비목/세목 단위로 행을 추가해요.
+
+3. 승인 예산을 넣어요.
+사업별 기준 금액, 항목별 배정 금액을 먼저 입력해요.
+
+4. 예산 구조를 정리해요.
+필요하면 컬럼 관리에서 표시 항목을 정리하고, 입력 필드를 추가해요.
+
+5. 정책 기준을 세워요.
+예를 들어 소진율 경고, 저장 차단 조건 같은 운영 규칙을 먼저 정할 수 있어요.
+
+6. 기준 예산을 저장해요.
+이제 이 금액이 앞으로 집행과 비교되는 기준선이 돼요.
+
+예산을 먼저 만든다는 건 단순히 숫자를 넣는 게 아니에요.
+앞으로 어떤 지출을 정상으로 볼지, 어디서부터 위험 신호로 볼지 기준을 만드는 일이에요.
+
+## 5. 예산을 만든 뒤 `예산총괄`로 계속 관리해요
+
+사업비를 입력하기 전에, 지금 예산이 얼마나 남았는지 확인해야 해요.
+`예산총괄`은 사업비를 쓰기 전 기준선을 확인하는 화면이에요.
+
+자동화된 것
+
+- 총 예산, 집행액, 잔액, 소진율을 자동 계산해요.
+- 비목/세목별 소계와 경고를 자동으로 보여줘요.
+- 정책 기준을 넘으면 경고나 차단 판단을 계산해요.
+
+사람이 해야 하는 것
+
+- 경고가 보일 때 실제로 지출을 줄일지, 조정할지 판단해야 해요.
+- 예산 구조나 정책 자체를 바꾸는 결정은 사람이 해야 해요.
+
+여기서는 아래 항목을 꼭 봐 주세요.
+
+1. 총 예산
+해당 사업에 배정된 전체 예산이에요.
+
+2. 집행액
+이미 사용한 금액이에요.
+
+3. 잔액
+앞으로 사용할 수 있는 남은 금액이에요.
+
+4. 소진율
+예산 대비 얼마나 사용했는지 비율로 보여줘요.
+
+5. 비목/세목별 집행 현황
+인건비, 활동비, 운영비처럼 묶음별 사용 현황을 펼쳐서 볼 수 있어요.
+
+예산총괄은 단순 조회 화면이 아니에요.
+경고 배지가 보이면, 특정 항목이 빠르게 소진되고 있다는 뜻일 수 있어요.
+이때는 사업비를 계속 입력하기 전에, 해당 세목의 잔액과 정책 경고를 먼저 확인해 주세요.
+
+꼭 알아둘 점이 있어요.
+현재 예산총괄의 집행 집계는 `승인된 사업비 세트` 기준 설명이 더 정확해요.
+즉, 주간 정산대장에 CSV를 올렸다고 해서 예산총괄까지 즉시 완전 자동 반영된다고 보기는 아직 어려워요.
+
+처음엔 예산을 만드는 곳이고, 그다음부터는 같은 화면이 `예산 총괄 + 수정/관리` 화면으로 바뀐다고 이해하면 가장 자연스러워요.
+
+## 6. `사업비 입력`에서 정산 세트를 만들어요
+
+실제 지출을 정리할 때는 먼저 `정산 세트`를 만들어요.
+정산 세트는 특정 주차나 기간의 지출을 한 번에 묶어서 관리하는 단위예요.
+
+자동화된 것
+
+- 정산 세트 상태별 필터링이 돼요.
+- 공급가액 입력 시 부가세와 총액 계산이 자동이에요.
+- 세트 총액이 항목 기준으로 다시 계산돼요.
+- 복제 기능으로 비슷한 세트를 빠르게 만들 수 있어요.
+
+사람이 해야 하는 것
+
+- 어떤 기간을 한 세트로 묶을지 정해야 해요.
+- 거래처, 설명, 예산 코드, 결제 방식 같은 실질 정보는 직접 입력해야 해요.
+- 제출 전에 누락이 없는지 최종 확인해야 해요.
+
+새 정산 세트를 만드는 순서는 아래와 같아요.
+
+1. `새 정산 세트` 버튼을 눌러요.
+2. 세트 제목을 입력해요.
+예: `2026년 3월 1주차 사업비 정산`
+3. 해당 기간 또는 주차를 선택해요.
+4. 저장 후 세트 상세 화면으로 들어가요.
+
+세트 목록에서는 아래 기능을 함께 쓸 수 있어요.
+
+- 검색: 세트명이나 기간으로 빠르게 찾을 수 있어요.
+- 상태 필터: 작성중, 제출완료, 승인, 반려 상태로 나눠 볼 수 있어요.
+- 복제: 이전 주차와 구성이 비슷하면 복사해서 더 빨리 작성할 수 있어요.
+
+정산 세트는 화면 이름보다 중요한 의미가 있어요.
+이 세트 단위로 제출하고, 반려되고, 다시 수정하고, 최종 승인까지 이어지기 때문이에요.
+
+## 7. 세트 안에서 지출 항목을 자세히 입력해요
+
+세트를 만들었으면, 이제 실제 사용한 지출을 항목별로 입력해요.
+이 단계가 사업비 정산의 핵심이에요.
+
+항목별로 입력하는 기본 정보는 아래와 같아요.
+
+1. 사용일자
+언제 지출했는지 입력해요.
+
+2. 예산 코드 / 세목
+어떤 예산 항목으로 처리할 지출인지 선택해요.
+
+3. 거래처
+어디에 비용을 지급했는지 적어요.
+
+4. 사용 내용
+지출 목적을 짧고 분명하게 적어요.
+
+5. 공급가액
+기본 금액이에요.
+
+6. 부가세
+공급가액을 넣으면 자동 계산되는 구조예요.
+
+7. 총액
+공급가액과 부가세가 합쳐진 값이에요.
+
+8. 결제 방식
+계좌이체, 카드 등 실제 결제 수단을 맞춰 입력해요.
+
+9. 증빙 상태
+첨부 완료인지, 아직 누락인지 상태를 확인해요.
+
+여기서 자주 놓치는 포인트가 있어요.
+
+- 공급가액만 입력하고 부가세를 확인하지 않으면 총액이 다르게 보일 수 있어요.
+- 거래처와 금액만 넣고 설명을 비워두면, 나중에 승인 단계에서 이해가 어려워질 수 있어요.
+- 증빙이 없는 상태로 제출하면 반려될 가능성이 높아요.
+
+## 8. 한 번에 많이 넣어야 하면 `대량 입력`을 사용해요
+
+한 주에 지출 건수가 많다면, 항목을 하나씩 추가하는 방식은 오래 걸릴 수 있어요.
+이때는 `대량 입력`으로 여러 줄을 한 번에 입력해요.
+
+대량 입력에서는 이렇게 사용해 주세요.
+
+1. 여러 행이 비어 있는 입력 표를 열어요.
+2. 각 행에 날짜, 거래처, 공급가액을 먼저 채워요.
+3. 공급가액을 넣으면 부가세와 총액이 자동 계산돼요.
+4. 유효한 행만 골라 한 번에 저장해요.
+
+대량 입력은 속도를 높여 주지만, 검수 없이 바로 제출하면 실수가 쌓이기 쉬워요.
+저장한 뒤에는 반드시 세트 합계와 각 항목의 증빙 상태를 다시 확인해 주세요.
+
+## 9. `제출하기` 전에 꼭 마지막 점검을 해요
+
+작성이 끝났다고 바로 제출하면 안 돼요.
+제출 후에는 관리자 검토 단계로 넘어가기 때문에, 미리 확인할수록 수정 비용이 줄어들어요.
+
+제출 전 점검 기준은 아래와 같아요.
+
+1. 세트 제목과 기간이 맞는지 확인해요.
+2. 항목 수와 총액이 실제 지출과 맞는지 확인해요.
+3. 증빙 누락 항목이 없는지 확인해요.
+4. 예산 코드가 잘못 들어간 항목이 없는지 확인해요.
+5. 반려 이력이 있는 세트라면, 이전 반려 사유가 반영됐는지 다시 봐요.
+
+모든 점검이 끝나면 `제출하기`를 눌러요.
+제출이 완료되면 세트 상태가 `제출완료`로 바뀌고, 내 제출 현황에서도 바로 확인할 수 있어요.
+
+## 10. `사업비 입력(주간)`에서는 정산대장 기준으로 더 넓게 관리해요
+
+`사업비 입력`이 세트 중심의 관리 화면이라면, `사업비 입력(주간)`은 정산대장 중심의 화면이에요.
+스프레드시트처럼 넓게 보면서, 주차별 자금 흐름과 제출 상태를 관리할 수 있어요.
+
+자동화된 것
+
+- CSV 헤더를 읽어 정산대장 열에 맞춰 정렬해요.
+- `No.`를 자동으로 채워요.
+- 통장 잔액을 재계산해요.
+- 입력 중 오류를 행 단위로 보여줘요.
+- 비목/세목 기준 증빙 문구를 자동 적용할 수 있어요.
+- 저장한 시트는 프로젝트 문서에 보관돼요.
+
+사람이 해야 하는 것
+
+- 어떤 CSV를 올릴지, 어떤 행이 실제로 유효한지 판단해야 해요.
+- 자동 정렬 후에도 분류, 메모, 증빙 문구가 맞는지 검토해야 해요.
+- 현재는 업로드 결과를 최종 거래 확정 데이터처럼 간주하지 말고, 검토용 정산대장으로 보고 확인해야 해요.
+
+이 화면에서는 아래 기능을 주로 써요.
+
+1. CSV 다운로드
+현재 정산대장을 파일로 내려받아 검토할 수 있어요.
+
+2. CSV 업로드
+외부에서 정리한 표를 다시 올려 반영할 수 있어요.
+
+3. 주차별 입력
+해당 연도의 주차 기준으로 거래 내역을 정리할 수 있어요.
+
+4. 주간 제출
+특정 주차의 거래를 묶어 제출 처리할 수 있어요.
+
+5. 확인요청 대응
+관리자가 편차를 보고 `확인요청`을 남기면, PM이 같은 화면에서 답변할 수 있어요.
+
+다만, 이 부분도 꼭 구분해서 이해해 주세요.
+
+- 현재 코드는 업로드한 CSV를 바로 `거래(Transaction)` 데이터로 확정 저장하는 단계까지는 연결되어 있지 않아요.
+- 즉, 지금은 `정산대장 편집용 시트 저장`이 중심이고, 최종 판단과 제출 흐름은 사람이 이어서 관리하는 구조예요.
+
+이 화면은 특히 아래 상황에서 중요해요.
+
+- 통장 기준 입출금 흐름을 함께 봐야 할 때
+- 단건 지출보다 주차 단위 관리가 더 중요할 때
+- 예상과 실제 금액 차이가 커서 설명이 필요할 때
+
+## 11. 관리자 `확인요청`이 오면 같은 흐름 안에서 답변해요
+
+주간 정산에서 예상 대비 실제 금액 차이가 크면, 관리자가 편차 확인을 요청할 수 있어요.
+이건 반려와는 조금 달라요. 먼저 사유를 확인하고, 설명을 남겨 흐름을 이어가는 단계예요.
+
+자동화된 것
+
+- 편차가 큰 주차에 확인요청 상태를 남기고, 답변 이력을 기록해요.
+
+사람이 해야 하는 것
+
+- 왜 편차가 났는지 설명하는 건 사람이 해야 해요.
+
+확인요청이 오면 이렇게 대응해 주세요.
+
+1. 배너에 표시된 주차와 요청 사유를 읽어요.
+2. 왜 차이가 났는지 간단하고 사실 중심으로 정리해요.
+3. 답변을 입력하고 전송해요.
+4. 필요하면 관련 항목을 다시 수정해요.
+
+확인요청 답변은 기록으로 남아요.
+그래서 감정적인 설명보다, 날짜/거래처/사유 중심으로 짧고 분명하게 적는 게 좋아요.
+
+## 12. `내 제출 현황`에서 승인과 반려를 확인해요
+
+제출 후에는 `내 제출 현황`에서 현재 상태를 계속 확인해 주세요.
+이 화면은 내가 보낸 항목이 지금 어디까지 왔는지 정리해 주는 곳이에요.
+
+자동화된 것
+
+- 제출/승인/반려 상태를 탭별로 정리해 보여줘요.
+- 반려된 항목은 반려 사유를 함께 보여줘요.
+- 월별 주차 상태를 `미작성`, `작성완료`, `결산완료`로 구분해 줘요.
+
+사람이 해야 하는 것
+
+- 반려 사유를 읽고 수정 방향을 정해야 해요.
+- 어떤 항목부터 다시 처리할지 판단해야 해요.
+
+확인할 수 있는 주요 구분은 아래와 같아요.
+
+1. 사업비 세트
+제출, 승인, 반려 상태를 탭으로 나눠서 볼 수 있어요.
+
+2. 인력변경 신청
+사업비 외에 함께 제출한 요청이 있다면 같은 화면에서 볼 수 있어요.
+
+3. 주간 작성/제출 상태
+월 기준 주차별로 `미작성`, `작성완료`, `결산완료` 상태를 볼 수 있어요.
+
+반려 상태가 보이면, 꼭 반려 사유를 먼저 확인해 주세요.
+사유를 확인하지 않고 다시 제출하면 같은 이유로 반복 반려될 수 있어요.
+
+## 13. 반려되면 수정하고 다시 제출해요
+
+반려는 끝이 아니라 수정 요청이에요.
+대부분은 증빙 누락, 설명 부족, 예산 코드 오입력처럼 수정 가능한 이유예요.
+
+자동화된 것
+
+- 반려 상태와 사유를 세트나 거래 상태에 표시해 줘요.
+
+사람이 해야 하는 것
+
+- 반려 사유를 해석하고 무엇을 고칠지 결정하는 것도 사람이 해야 해요.
+
+반려된 세트는 아래 순서로 다시 처리해 주세요.
+
+1. 반려 사유를 읽어요.
+2. 해당 세트를 다시 열어요.
+3. 잘못된 항목을 수정하거나 증빙을 보완해요.
+4. 전체 합계와 상태를 다시 확인해요.
+5. 다시 제출해요.
+
+반려된 세트는 수정 가능한 상태로 남아 있기 때문에, 새로 만들지 말고 기존 세트를 보완하는 방식이 더 좋아요.
+
+## 14. 승인과 월간 정산 완료를 확인하면 한 흐름이 끝나요
+
+세트가 승인되면 사업비 정산의 1차 흐름이 끝나요.
+하지만 포털에서는 여기서 한 번 더 확인할 일이 있어요.
+
+자동화된 것
+
+- 이전 달 마감이 완료됐는지 상태로 보여줘요.
+- 확인 전이면 알림으로 다시 보이게 할 수 있어요.
+
+사람이 해야 하는 것
+
+- 실제로 내용을 읽고 확인 버튼을 눌러야 해요.
+- 정산이 끝났다고 해서 예산이나 증빙까지 모두 문제 없는지 최종 판단하는 건 사람 몫이에요.
+
+대시보드나 관련 알림에서 아래 두 가지를 확인해 주세요.
+
+1. 사업비 세트 승인 여부
+세트가 `승인` 상태로 바뀌었는지 확인해요.
+
+2. 월간 정산 완료 안내
+이전 달 마감이 완료되면, 완료 사실을 확인하는 액션이 따로 보일 수 있어요.
+
+이 단계까지 확인해야 “작성했다”가 아니라 “정산이 마무리됐다”라고 볼 수 있어요.
+
+## 15. 배정 사업이 없거나 새 사업이 필요하면 이렇게 진행해요
+
+업무를 하다 보면 아직 배정되지 않은 사업을 다뤄야 할 수 있어요.
+이때는 우회해서 입력하지 말고, 먼저 사업 기준을 정리해 주세요.
+
+선택지는 두 가지예요.
+
+1. `사업 배정 수정`
+이미 존재하는 사업인데 내 계정에만 연결되지 않은 경우예요.
+
+2. `사업 등록 제안`
+새로운 사업 자체를 등록해야 하는 경우예요.
+
+새 사업 등록 제안은 기본 정보, 재무 정보, 팀 구성, 검토/제출 단계로 나뉘어 있어요.
+관리자 승인 전에는 정식 사업처럼 바로 집행하지 않는 게 맞아요.
+
+## 16. 처음 쓰는 분이 가장 많이 놓치는 부분이에요
+
+아래 항목은 실제 사용 중 자주 빠뜨리는 포인트라서, 시작 전에 꼭 기억해 주세요.
+
+- 대시보드 공지를 읽지 않고 바로 입력부터 시작하면, 이미 마감된 월이나 확인이 필요한 항목을 놓칠 수 있어요.
+- 예산총괄을 보지 않고 지출을 넣으면, 세목 잔액 부족을 늦게 발견할 수 있어요.
+- 정산 세트와 주간 정산대장은 비슷해 보여도 목적이 달라요. 하나는 제출 묶음, 하나는 주차 기반 관리예요.
+- 반려 사유를 확인하지 않고 재제출하면 반복 수정이 생겨요.
+- 확인요청 답변은 기록으로 남기 때문에, 짧고 객관적으로 남기는 게 좋아요.
+
+## 17. 가장 짧은 실무 흐름만 다시 정리할게요
+
+처음 사용할 때는 아래 순서만 기억해도 충분해요.
+
+1. 로그인해요.
+2. 내 사업을 선택해요.
+3. 처음 맡은 사업이면 예산부터 작성해요.
+4. 대시보드에서 오늘 할 일을 확인해요.
+5. 예산총괄에서 잔액과 경고를 확인해요.
+6. 사업비 입력에서 정산 세트를 만들고 항목을 작성해요.
+7. 필요하면 주간 정산대장에서 CSV나 주차 단위로 정리해요.
+8. 제출하고, 내 제출 현황에서 결과를 확인해요.
+9. 반려되면 수정하고, 승인되면 월간 정산 완료까지 확인해요.
+
+이 흐름이 익숙해지면, 포털은 “입력하는 곳”이 아니라 “사업 상태를 놓치지 않게 관리하는 곳”으로 느껴질 거예요.
+
+## 18. 스프레드시트보다 이번 구현이 더 잘 된 지점이에요
+
+기존 스프레드시트 방식은 자유도가 높지만, 그만큼 사람이 계속 확인하고 맞춰야 했어요.
+이번 구현은 “입력 자유도”보다 “업무 흐름이 틀어지지 않게 만드는 것”에 더 강해요.
+
+특히 더 좋아진 지점은 아래와 같아요.
+
+1. 화면이 업무 단계별로 나뉘어 있어요
+스프레드시트는 로그인, 예산 확인, 사업비 입력, 제출 현황이 한 맥락으로 연결되지 않아요.
+지금 포털은 로그인부터 제출 결과 확인까지, 사용자가 어디에 있는지 잃지 않게 해 줘요.
+
+2. 상태가 눈에 보이게 관리돼요
+`작성중`, `제출완료`, `승인`, `반려`, `결산완료`처럼 지금 상태가 분명해요.
+스프레드시트에서는 보통 사람마다 표시 방식이 달라져서, 같은 파일을 봐도 해석이 달라지기 쉬워요.
+
+3. 반복 계산이 자동이에요
+부가세, 합계, 정산 세트 총액, 주간 잔액처럼 반복해서 계산하던 부분이 자동이에요.
+그래서 숫자 자체보다, 숫자가 맞는지 검토하는 데 집중할 수 있어요.
+
+4. 데이터 형식이 맞춰져요
+정산대장 CSV는 열 순서가 조금 달라도 표준 형식으로 정렬해 줘요.
+스프레드시트는 사람마다 열 순서와 이름이 달라지면, 다시 손으로 맞추는 시간이 많이 들어요.
+
+5. 오류를 바로 발견할 수 있어요
+정산대장 행 오류, 예산 경고, 반려 사유, 편차 확인요청이 화면에서 바로 보여요.
+기존 시트는 오류가 생겨도, 누가 먼저 발견하느냐에 따라 늦게 수정될 수 있어요.
+
+6. 실시간 반영과 저장 기준이 있어요
+포털의 주요 데이터는 Firestore 기준으로 저장되고, 화면에서 바로 다시 읽혀요.
+스프레드시트는 파일 버전이 여러 개 생기면 “최신본이 무엇인지”부터 다시 맞춰야 해요.
+
+7. 기록이 남아요
+주간 정산의 편집 이력, 확인요청 답변, 반려 사유처럼 나중에 맥락을 되짚을 수 있는 흔적이 남아요.
+스프레드시트는 수정 사실은 남아도, 왜 그렇게 바뀌었는지 맥락을 잃기 쉬워요.
+
+8. 업무 역할이 분리돼요
+PM이 해야 할 일과 관리자가 확인할 일이 한 화면 안에서 섞이지 않고, 흐름별로 나뉘어 있어요.
+이건 단순히 예쁘다는 장점보다, 책임 구분이 선명해진다는 장점이 더 커요.
+
+9. 예산 작성과 운영이 같은 흐름 안에 있어요
+관리자이면서 PM인 경우에도, 예산을 먼저 만들고 같은 화면에서 계속 수정·관리할 수 있어요.
+스프레드시트에서는 예산 원본, 운영 시트, 정산 시트가 자주 분리돼서 흐름이 끊기기 쉬워요.
+
+
+
+## 19. 한 문장으로 정리하면 이 서비스의 강점은 이거예요
+
+스프레드시트를 없애는 서비스라기보다, 스프레드시트에서 사람이 반복하던 정렬·계산·상태 추적을 시스템으로 옮겨서, 사람은 판단과 검토에 더 집중하게 만드는 서비스예요.
+
