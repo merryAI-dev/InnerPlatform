@@ -69,6 +69,8 @@ export function PortalWeeklyExpensePage() {
         onAddTransaction={addTransaction}
         onUpdateTransaction={updateTransaction}
         authorOptions={authorOptions}
+        hideYearControls
+        hideCountBadge
         evidenceRequiredMap={evidenceRequiredMap}
         onSaveEvidenceRequiredMap={saveEvidenceRequiredMap}
         sheetRows={expenseSheetRows}

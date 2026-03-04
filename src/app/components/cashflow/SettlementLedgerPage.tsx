@@ -105,6 +105,8 @@ export interface SettlementLedgerProps {
   sheetRows?: ImportRow[] | null;
   onSaveSheetRows?: (rows: ImportRow[]) => void | Promise<void>;
   authorOptions?: string[];
+  hideYearControls?: boolean;
+  hideCountBadge?: boolean;
   onSubmitWeek?: (input: {
     weekLabel: string;
     yearMonth: string;
@@ -131,6 +133,8 @@ export function SettlementLedgerPage({
   sheetRows,
   onSaveSheetRows,
   authorOptions,
+  hideYearControls = false,
+  hideCountBadge = false,
   onSubmitWeek,
   onChangeTransactionState,
   currentUserName = 'PM',
@@ -350,22 +354,24 @@ export function SettlementLedgerPage({
         }
       }
 
-      for (const week of targetWeeks) {
-        const amounts = byWeek.get(week.label) || {};
-        const merged = { ...cleared, ...amounts };
-        try {
-          await upsertWeekAmounts({
-            projectId,
-            yearMonth: week.yearMonth,
-            weekNo: week.weekNo,
-            mode: 'actual',
-            amounts: merged as any,
-          });
-        } catch (err) {
-          cashflowFailed = true;
-          console.error('[SettlementLedger] cashflow actual update failed:', err);
-        }
-      }
+      await Promise.all(
+        targetWeeks.map(async (week) => {
+          const amounts = byWeek.get(week.label) || {};
+          const merged = { ...cleared, ...amounts };
+          try {
+            await upsertWeekAmounts({
+              projectId,
+              yearMonth: week.yearMonth,
+              weekNo: week.weekNo,
+              mode: 'actual',
+              amounts: merged as any,
+            });
+          } catch (err) {
+            cashflowFailed = true;
+            console.error('[SettlementLedger] cashflow actual update failed:', err);
+          }
+        }),
+      );
 
       setImportDirty(false);
       if (cashflowFailed) {
@@ -441,16 +447,22 @@ export function SettlementLedgerPage({
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" className="hover:bg-muted/40 cursor-pointer" onClick={() => setYear((y) => y - 1)}>
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <span className="text-sm font-semibold min-w-[60px] text-center">{year}년</span>
-            <Button variant="outline" size="sm" className="hover:bg-muted/40 cursor-pointer" onClick={() => setYear((y) => y + 1)}>
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-            <Badge variant="secondary" className="ml-2 text-[11px]">
-              {totalCount}건
-            </Badge>
+            {!hideYearControls && (
+              <>
+                <Button variant="outline" size="sm" className="hover:bg-muted/40 cursor-pointer" onClick={() => setYear((y) => y - 1)}>
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <span className="text-sm font-semibold min-w-[60px] text-center">{year}년</span>
+                <Button variant="outline" size="sm" className="hover:bg-muted/40 cursor-pointer" onClick={() => setYear((y) => y + 1)}>
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </>
+            )}
+            {!hideCountBadge && (
+              <Badge variant="secondary" className="ml-2 text-[11px]">
+                {totalCount}건
+              </Badge>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" className="hover:bg-muted/40 cursor-pointer" onClick={handleDownload}>
@@ -492,16 +504,22 @@ export function SettlementLedgerPage({
       {/* ── Toolbar ── */}
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" className="hover:bg-muted/40 cursor-pointer" onClick={() => setYear((y) => y - 1)}>
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <span className="text-sm font-semibold min-w-[60px] text-center">{year}년</span>
-          <Button variant="outline" size="sm" className="hover:bg-muted/40 cursor-pointer" onClick={() => setYear((y) => y + 1)}>
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-          <Badge variant="secondary" className="ml-2 text-[11px]">
-            {totalCount}건
-          </Badge>
+          {!hideYearControls && (
+            <>
+              <Button variant="outline" size="sm" className="hover:bg-muted/40 cursor-pointer" onClick={() => setYear((y) => y - 1)}>
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <span className="text-sm font-semibold min-w-[60px] text-center">{year}년</span>
+              <Button variant="outline" size="sm" className="hover:bg-muted/40 cursor-pointer" onClick={() => setYear((y) => y + 1)}>
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </>
+          )}
+          {!hideCountBadge && (
+            <Badge variant="secondary" className="ml-2 text-[11px]">
+              {totalCount}건
+            </Badge>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" className="hover:bg-muted/40 cursor-pointer" onClick={expandAll}>
