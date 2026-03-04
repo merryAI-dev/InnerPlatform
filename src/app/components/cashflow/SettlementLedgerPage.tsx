@@ -1,5 +1,6 @@
 import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, Download, ExternalLink, Plus, Save, Send, X, Loader2 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ClipboardEvent, KeyboardEvent, MouseEvent } from 'react';
 import { toast } from 'sonner';
 import { BUDGET_CODE_BOOK } from '../../data/budget-data';
 import type { Transaction, TransactionState } from '../../data/types';
@@ -1015,6 +1016,10 @@ function ImportEditor({
     () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === 'cashflow항목'),
     [],
   );
+  const methodIdx = useMemo(
+    () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '지출구분'),
+    [],
+  );
   const evidenceIdx = useMemo(
     () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '필수증빙자료 리스트'),
     [],
@@ -1058,6 +1063,12 @@ function ImportEditor({
   const [mappingOpen, setMappingOpen] = useState(false);
   const [mappingDraft, setMappingDraft] = useState<Record<string, string>>({});
   const [mappingSaving, setMappingSaving] = useState(false);
+  const lastFocusedCell = useRef<{ rowIdx: number; colIdx: number } | null>(null);
+  const draggingSelection = useRef(false);
+  const [selection, setSelection] = useState<{ start: { r: number; c: number }; end: { r: number; c: number } } | null>(null);
+  const undoStack = useRef<ImportRow[][]>([]);
+  const tableWrapRef = useRef<HTMLDivElement | null>(null);
+  const [openSelect, setOpenSelect] = useState<{ rowIdx: number; colIdx: number } | null>(null);
   const [colWidths, setColWidths] = useState<number[]>(
     () => SETTLEMENT_COLUMNS.map((col) => {
       const headerLen = col.csvHeader.length;
@@ -1202,6 +1213,226 @@ function ImportEditor({
     onChange(applyDerivedRows(nextRows));
   }, [rows, onChange, applyDerivedRows]);
 
+  const formatNumberCell = useCallback((value: string) => {
+    if (!value) return '';
+    const num = parseNumber(value);
+    if (num == null) return value;
+    return Number.isFinite(num) ? num.toLocaleString('ko-KR') : value;
+  }, []);
+
+  const cloneRows = useCallback((input: ImportRow[]) => {
+    return input.map((row) => ({ ...row, cells: [...row.cells] }));
+  }, []);
+
+  const applyPaste = useCallback(
+    (startRow: number, startCol: number, text: string) => {
+      const normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+      let lines = normalized.split('\n');
+      if (lines.length > 1 && lines[lines.length - 1] === '') lines = lines.slice(0, -1);
+      const grid = lines.map((line) => line.split('\t'));
+      const gridRows = grid.length;
+      const gridCols = Math.max(0, ...grid.map((r) => r.length));
+
+      const bounds = selection
+        ? {
+          r1: Math.min(selection.start.r, selection.end.r),
+          r2: Math.max(selection.start.r, selection.end.r),
+          c1: Math.min(selection.start.c, selection.end.c),
+          c2: Math.max(selection.start.c, selection.end.c),
+        }
+        : {
+          r1: startRow,
+          r2: startRow + Math.max(0, gridRows - 1),
+          c1: startCol,
+          c2: startCol + Math.max(0, gridCols - 1),
+        };
+
+      // Snapshot for undo
+      undoStack.current.push(cloneRows(rows));
+
+      const neededRows = bounds.r2 + 1;
+      const nextRows = [...rows];
+      while (nextRows.length < neededRows) {
+        const newRow = createEmptyImportRow();
+        if (noIdx >= 0) newRow.cells[noIdx] = String(nextRows.length + 1);
+        nextRows.push(newRow);
+      }
+
+      const fillAll = gridRows === 1 && gridCols === 1;
+
+      const normalizeSelectValue = (colIdx: number, raw: string, currentCells: string[]) => {
+        const trimmed = raw.trim();
+        if (!trimmed) return '';
+        if (colIdx === weekIdx) {
+          const match = weekOptions.find((o) => o.value === trimmed || o.label === trimmed);
+          return match ? match.value : trimmed;
+        }
+        if (colIdx === cashflowIdx) {
+          const match = cashflowOptions.find((o) => o.label === trimmed || o.value === trimmed);
+          return match ? match.label : trimmed;
+        }
+        if (colIdx === methodIdx) {
+          const match = METHOD_OPTIONS.find((o) => o.label === trimmed || o.value === trimmed);
+          return match ? match.label : trimmed;
+        }
+        if (colIdx === budgetCodeIdx) {
+          return trimmed;
+        }
+        if (colIdx === subCodeIdx) {
+          const budgetCode = budgetCodeIdx >= 0 ? (currentCells[budgetCodeIdx] || '') : '';
+          const subCodes = BUDGET_CODE_BOOK.find((c) => c.code === budgetCode)?.subCodes || [];
+          return trimmed;
+        }
+        return trimmed;
+      };
+
+      for (let r = bounds.r1; r <= bounds.r2; r++) {
+        const rowIdx = r;
+        const row = nextRows[rowIdx];
+        const cells = [...row.cells];
+        for (let c = bounds.c1; c <= bounds.c2; c++) {
+          const colIdx = c;
+          if (colIdx < 0 || colIdx >= SETTLEMENT_COLUMNS.length) continue;
+          if (colIdx === noIdx) continue;
+          const sr = r - bounds.r1;
+          const sc = c - bounds.c1;
+          if (!fillAll && (sr >= gridRows || sc >= gridCols)) continue;
+          const raw = (fillAll ? (grid[0]?.[0] ?? '') : (grid[sr]?.[sc] ?? '')).trim();
+          const colDef = SETTLEMENT_COLUMNS[colIdx];
+          if ([weekIdx, cashflowIdx, methodIdx, budgetCodeIdx, subCodeIdx].includes(colIdx)) {
+            cells[colIdx] = normalizeSelectValue(colIdx, raw, cells);
+          } else {
+            cells[colIdx] = colDef?.format === 'number' ? formatNumberCell(raw) : raw;
+          }
+        }
+        let updated = { ...row, cells };
+        if (budgetCodeIdx >= 0 && subCodeIdx >= 0 && evidenceIdx >= 0 && evidenceRequiredMap) {
+          const budgetCode = updated.cells[budgetCodeIdx] || '';
+          const subCode = updated.cells[subCodeIdx] || '';
+          const mapped = resolveEvidenceRequiredDesc(evidenceRequiredMap, budgetCode, subCode);
+          if (mapped) {
+            const mappedCells = [...updated.cells];
+            mappedCells[evidenceIdx] = mapped;
+            updated = { ...updated, cells: mappedCells };
+          }
+        }
+        nextRows[rowIdx] = updated;
+      }
+
+      onChange(applyDerivedRows(nextRows));
+    },
+    [
+      rows,
+      onChange,
+      applyDerivedRows,
+      formatNumberCell,
+      noIdx,
+      selection,
+      cloneRows,
+      budgetCodeIdx,
+      subCodeIdx,
+      evidenceIdx,
+      evidenceRequiredMap,
+    ],
+  );
+
+  const handleCellFocus = useCallback((rowIdx: number, colIdx: number) => {
+    lastFocusedCell.current = { rowIdx, colIdx };
+    setSelection({ start: { r: rowIdx, c: colIdx }, end: { r: rowIdx, c: colIdx } });
+  }, []);
+
+  const handleTablePaste = useCallback((e: ClipboardEvent<HTMLDivElement>) => {
+    const text = e.clipboardData.getData('text');
+    if (!text) return;
+    if (!text.includes('\n') && !text.includes('\t')) return;
+    const anchor = selection
+      ? {
+        r: Math.min(selection.start.r, selection.end.r),
+        c: Math.min(selection.start.c, selection.end.c),
+      }
+      : lastFocusedCell.current
+        ? { r: lastFocusedCell.current.rowIdx, c: lastFocusedCell.current.colIdx }
+        : null;
+    if (!anchor) return;
+    e.preventDefault();
+    applyPaste(anchor.r, anchor.c, text);
+  }, [applyPaste, selection]);
+
+  const handleUndo = useCallback((e: KeyboardEvent<HTMLDivElement>) => {
+    const isUndo = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z';
+    if (!isUndo) return;
+    if (undoStack.current.length === 0) return;
+    e.preventDefault();
+    const prev = undoStack.current.pop();
+    if (prev) onChange(prev);
+  }, [onChange]);
+
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      if (!selection) return;
+      const text = e.clipboardData?.getData('text') || '';
+      if (!text.includes('\n') && !text.includes('\t')) return;
+      const anchor = {
+        r: Math.min(selection.start.r, selection.end.r),
+        c: Math.min(selection.start.c, selection.end.c),
+      };
+      const active = document.activeElement;
+      if (active && tableWrapRef.current && !tableWrapRef.current.contains(active)) return;
+      e.preventDefault();
+      applyPaste(anchor.r, anchor.c, text);
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, [selection, applyPaste]);
+
+  useEffect(() => {
+    const onMouseDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      if (target.closest('[data-select-popup]') || target.closest('[data-select-toggle]')) return;
+      setOpenSelect(null);
+    };
+    window.addEventListener('mousedown', onMouseDown);
+    return () => window.removeEventListener('mousedown', onMouseDown);
+  }, []);
+
+  const handleCellMouseDown = useCallback((rowIdx: number, colIdx: number) => {
+    if (colIdx === noIdx) return;
+    draggingSelection.current = true;
+    document.body.style.userSelect = 'none';
+    tableWrapRef.current?.focus();
+    setOpenSelect(null);
+    setSelection({ start: { r: rowIdx, c: colIdx }, end: { r: rowIdx, c: colIdx } });
+  }, [noIdx]);
+
+  const handleCellMouseEnter = useCallback((rowIdx: number, colIdx: number) => {
+    if (!draggingSelection.current) return;
+    if (colIdx === noIdx) return;
+    setSelection((prev) => {
+      if (!prev) return prev;
+      return { ...prev, end: { r: rowIdx, c: colIdx } };
+    });
+  }, [noIdx]);
+
+  const isCellSelected = useCallback((rowIdx: number, colIdx: number) => {
+    if (!selection) return false;
+    if (colIdx === noIdx) return false;
+    const r1 = Math.min(selection.start.r, selection.end.r);
+    const r2 = Math.max(selection.start.r, selection.end.r);
+    const c1 = Math.min(selection.start.c, selection.end.c);
+    const c2 = Math.max(selection.start.c, selection.end.c);
+    return rowIdx >= r1 && rowIdx <= r2 && colIdx >= c1 && colIdx <= c2;
+  }, [selection, noIdx]);
+
+  useEffect(() => {
+    const onUp = () => {
+      draggingSelection.current = false;
+      document.body.style.userSelect = '';
+    };
+    window.addEventListener('mouseup', onUp);
+    return () => window.removeEventListener('mouseup', onUp);
+  }, []);
+
   useEffect(() => {
     if (!inline) return;
     if (rows.length >= 20) return;
@@ -1304,7 +1535,13 @@ function ImportEditor({
       </div>
 
       {/* Scrollable table */}
-      <div className={inline ? 'overflow-auto max-h-[calc(100vh-260px)]' : 'flex-1 overflow-auto'}>
+      <div
+        className={inline ? 'overflow-auto max-h-[calc(100vh-260px)]' : 'flex-1 overflow-auto'}
+        onPaste={handleTablePaste}
+        onKeyDownCapture={handleUndo}
+        tabIndex={0}
+        ref={tableWrapRef}
+      >
         <table className="w-full text-[11px] border-collapse table-fixed">
           <colgroup>
             <col style={{ width: 44 }} />
@@ -1384,6 +1621,14 @@ function ImportEditor({
                 onCellChange={(colIdx, value) => updateCell(rowIdx, colIdx, value)}
                 onRowChange={(updater) => updateRow(rowIdx, updater)}
                 onRemove={() => removeRow(rowIdx)}
+                onPasteRange={applyPaste}
+                onCellFocus={handleCellFocus}
+                onCellMouseDown={handleCellMouseDown}
+                onCellMouseEnter={handleCellMouseEnter}
+                isCellSelected={isCellSelected}
+                openSelect={openSelect}
+                onOpenSelect={(rowIdx, colIdx) => setOpenSelect({ rowIdx, colIdx })}
+                onCloseSelect={() => setOpenSelect(null)}
                 budgetCodeIdx={budgetCodeIdx}
                 subCodeIdx={subCodeIdx}
                 evidenceIdx={evidenceIdx}
@@ -1465,6 +1710,14 @@ function ImportEditorRow({
   onCellChange,
   onRowChange,
   onRemove,
+  onPasteRange,
+  onCellFocus,
+  onCellMouseDown,
+  onCellMouseEnter,
+  isCellSelected,
+  openSelect,
+  onOpenSelect,
+  onCloseSelect,
   budgetCodeIdx,
   subCodeIdx,
   evidenceIdx,
@@ -1481,6 +1734,14 @@ function ImportEditorRow({
   onCellChange: (colIdx: number, value: string) => void;
   onRowChange: (updater: (row: ImportRow) => ImportRow) => void;
   onRemove: () => void;
+  onPasteRange: (rowIdx: number, colIdx: number, text: string) => void;
+  onCellFocus: (rowIdx: number, colIdx: number) => void;
+  onCellMouseDown: (rowIdx: number, colIdx: number) => void;
+  onCellMouseEnter: (rowIdx: number, colIdx: number) => void;
+  isCellSelected: (rowIdx: number, colIdx: number) => boolean;
+  openSelect: { rowIdx: number; colIdx: number } | null;
+  onOpenSelect: (rowIdx: number, colIdx: number) => void;
+  onCloseSelect: () => void;
   budgetCodeIdx: number;
   subCodeIdx: number;
   evidenceIdx: number;
@@ -1518,6 +1779,94 @@ function ImportEditorRow({
     if (num == null) return value;
     return Number.isFinite(num) ? num.toLocaleString('ko-KR') : value;
   }, []);
+
+  const handlePaste = useCallback((
+    colIdx: number,
+    e: ClipboardEvent<HTMLTableCellElement | HTMLInputElement | HTMLSelectElement>,
+  ) => {
+    const text = e.clipboardData.getData('text');
+    if (!text) return;
+    if (!text.includes('\n') && !text.includes('\t')) return;
+    e.preventDefault();
+    onPasteRange(rowIdx, colIdx, text);
+  }, [onPasteRange, rowIdx]);
+
+  const SelectCell = ({
+    value,
+    options,
+    onChange,
+    onFocus,
+    disabled = false,
+    isOpen,
+    onOpen,
+    onClose,
+  }: {
+    value: string;
+    options: { value: string; label: string }[];
+    onChange: (next: string) => void;
+    onFocus: () => void;
+    disabled?: boolean;
+    isOpen: boolean;
+    onOpen: () => void;
+    onClose: () => void;
+  }) => {
+    const openPicker = (e: MouseEvent<HTMLButtonElement>) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (disabled) return;
+      onFocus();
+      onOpen();
+    };
+    const label = options.find((o) => o.value === value)?.label || value || '-';
+    return (
+      <div className="relative w-full">
+        <div className={`flex items-center justify-between gap-1 px-1 py-0.5 text-[11px] ${disabled ? 'text-muted-foreground' : ''}`}>
+          <span className="truncate">{label}</span>
+          <button
+            type="button"
+            className={`shrink-0 h-4 w-4 rounded border border-slate-200/80 dark:border-slate-700 bg-white/50 dark:bg-slate-900/30 text-[9px] leading-none text-slate-500 dark:text-slate-400 ${disabled ? 'opacity-40 cursor-not-allowed' : 'hover:bg-slate-100/80 dark:hover:bg-slate-800/60'}`}
+            onMouseDown={(e) => e.stopPropagation()}
+            onMouseDownCapture={openPicker}
+            data-select-toggle
+            title="옵션 열기"
+          >
+            ▼
+          </button>
+        </div>
+        {isOpen && !disabled && (
+          <div
+            className="absolute right-0 top-[calc(100%+4px)] z-30 w-40 max-h-56 overflow-auto rounded-md border bg-background shadow-lg"
+            onMouseDown={(e) => e.stopPropagation()}
+            data-select-popup
+          >
+            <button
+              type="button"
+              className="w-full text-left px-2 py-1 text-[11px] hover:bg-muted"
+              onClick={() => {
+                onChange('');
+                onClose();
+              }}
+            >
+              -
+            </button>
+            {options.map((o) => (
+              <button
+                key={o.value}
+                type="button"
+                className="w-full text-left px-2 py-1 text-[11px] hover:bg-muted"
+                onClick={() => {
+                  onChange(o.value);
+                  onClose();
+                }}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <tr className={`${hasError
@@ -1559,56 +1908,63 @@ function ImportEditorRow({
         return (
           <td
             key={colIdx}
-            className="px-0.5 py-0.5 border-b border-r focus-within:bg-teal-50/20 focus-within:shadow-[inset_0_0_0_2px_rgba(20,184,166,0.8)]"
+            className={`px-0.5 py-0.5 border-b border-r focus-within:bg-teal-50/20 focus-within:shadow-[inset_0_0_0_2px_rgba(20,184,166,0.8)] ${isCellSelected(rowIdx, colIdx)
+              ? 'bg-teal-50/40 dark:bg-teal-900/20 shadow-[inset_0_0_0_2px_rgba(20,184,166,0.7)]'
+              : ''
+            }`}
             style={{ width: colWidths[colIdx], minWidth: 60 }}
+            onPaste={(e) => {
+              if (isReadOnly) return;
+              handlePaste(colIdx, e);
+            }}
+            onMouseDown={() => onCellMouseDown(rowIdx, colIdx)}
+            onMouseEnter={() => onCellMouseEnter(rowIdx, colIdx)}
           >
             {isReadOnly ? (
               <span className="text-[10px] text-muted-foreground px-1">
                 {row.cells[colIdx]}
               </span>
             ) : isWeek ? (
-              <select
+              <SelectCell
                 value={row.cells[colIdx] || ''}
-                className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-0"
-                onChange={(e) => onCellChange(colIdx, e.target.value)}
-              >
-                <option value="">-</option>
-                {weekOptions.map((w) => (
-                  <option key={w.value} value={w.value}>{w.label}</option>
-                ))}
-              </select>
+                options={weekOptions}
+                onFocus={() => onCellFocus(rowIdx, colIdx)}
+                isOpen={openSelect?.rowIdx === rowIdx && openSelect?.colIdx === colIdx}
+                onOpen={() => onOpenSelect(rowIdx, colIdx)}
+                onClose={onCloseSelect}
+                onChange={(next) => onCellChange(colIdx, next)}
+              />
             ) : colIdx === methodIdx ? (
-              <select
+              <SelectCell
                 value={row.cells[colIdx] || ''}
-                className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-0"
-                onChange={(e) => {
-                  if (e.target.value !== row.cells[colIdx]) {
-                    onCellChange(colIdx, e.target.value);
-                  }
+                options={METHOD_OPTIONS.map((o) => ({ value: o.label, label: o.label }))}
+                onFocus={() => onCellFocus(rowIdx, colIdx)}
+                isOpen={openSelect?.rowIdx === rowIdx && openSelect?.colIdx === colIdx}
+                onOpen={() => onOpenSelect(rowIdx, colIdx)}
+                onClose={onCloseSelect}
+                onChange={(next) => {
+                  if (next !== row.cells[colIdx]) onCellChange(colIdx, next);
                 }}
-              >
-                <option value="">-</option>
-                {METHOD_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.label}>{o.label}</option>
-                ))}
-              </select>
+              />
             ) : isCashflow ? (
-              <select
+              <SelectCell
                 value={row.cells[colIdx] || ''}
-                className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-0"
-                onChange={(e) => onCellChange(colIdx, e.target.value)}
-              >
-                <option value="">-</option>
-                {cashflowOptions.map((o) => (
-                  <option key={o.value} value={o.label}>{o.label}</option>
-                ))}
-              </select>
+                options={cashflowOptions.map((o) => ({ value: o.label, label: o.label }))}
+                onFocus={() => onCellFocus(rowIdx, colIdx)}
+                isOpen={openSelect?.rowIdx === rowIdx && openSelect?.colIdx === colIdx}
+                onOpen={() => onOpenSelect(rowIdx, colIdx)}
+                onClose={onCloseSelect}
+                onChange={(next) => onCellChange(colIdx, next)}
+              />
             ) : isBudgetCode ? (
-              <select
+              <SelectCell
                 value={row.cells[colIdx] || ''}
-                className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-0"
-                onChange={(e) => {
-                  const nextCode = e.target.value;
+                options={BUDGET_CODE_BOOK.map((c) => ({ value: c.code, label: c.code }))}
+                onFocus={() => onCellFocus(rowIdx, colIdx)}
+                isOpen={openSelect?.rowIdx === rowIdx && openSelect?.colIdx === colIdx}
+                onOpen={() => onOpenSelect(rowIdx, colIdx)}
+                onClose={onCloseSelect}
+                onChange={(nextCode) => {
                   onRowChange((prev) => {
                     if (budgetCodeIdx < 0) return prev;
                     const cells = [...prev.cells];
@@ -1624,19 +1980,17 @@ function ImportEditorRow({
                     return { ...prev, cells };
                   });
                 }}
-              >
-                <option value="">-</option>
-                {BUDGET_CODE_BOOK.map((c) => (
-                  <option key={c.code} value={c.code}>{c.code}</option>
-                ))}
-              </select>
+              />
             ) : isSubCode ? (
-              <select
+              <SelectCell
                 value={row.cells[colIdx] || ''}
+                options={subCodes.map((sc) => ({ value: sc, label: sc }))}
+                onFocus={() => onCellFocus(rowIdx, colIdx)}
                 disabled={!budgetCode}
-                className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-0"
-                onChange={(e) => {
-                  const nextSub = e.target.value;
+                isOpen={openSelect?.rowIdx === rowIdx && openSelect?.colIdx === colIdx}
+                onOpen={() => onOpenSelect(rowIdx, colIdx)}
+                onClose={onCloseSelect}
+                onChange={(nextSub) => {
                   onRowChange((prev) => {
                     if (subCodeIdx < 0) return prev;
                     const cells = [...prev.cells];
@@ -1648,12 +2002,7 @@ function ImportEditorRow({
                     return { ...prev, cells };
                   });
                 }}
-              >
-                <option value="">-</option>
-                {subCodes.map((sc) => (
-                  <option key={sc} value={sc}>{sc}</option>
-                ))}
-              </select>
+              />
             ) : (
               <input
                 type="text"
@@ -1662,6 +2011,8 @@ function ImportEditorRow({
                   ? 'ring-1 ring-red-300 rounded'
                   : ''
                   }`}
+                onFocus={() => onCellFocus(rowIdx, colIdx)}
+                onPaste={(e) => handlePaste(colIdx, e)}
                 onChange={(e) => {
                   const next = col.format === 'number'
                     ? formatNumberInput(e.target.value)
