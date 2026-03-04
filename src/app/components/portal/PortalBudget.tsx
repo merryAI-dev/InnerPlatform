@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback } from 'react';
 import {
   Lock, SlidersHorizontal, ChevronDown, ChevronRight,
   Calculator, Wallet, TrendingUp, Info,
-  ArrowUp, ArrowDown,
+  ArrowUp, ArrowDown, Plus, Trash2, Settings,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
@@ -17,11 +17,11 @@ import { PageHeader } from '../layout/PageHeader';
 import { usePortalStore } from '../../data/portal-store';
 import { toast } from 'sonner';
 import {
-  BUDGET_CODE_BOOK, BUDGET_META,
+  BUDGET_META,
   fmtKRW, fmtPercent, fmtShort,
   type BudgetRow,
 } from '../../data/budget-data';
-import type { BudgetPlanRow } from '../../data/types';
+import type { BudgetPlanRow, BudgetCodeEntry, BudgetCodeRename } from '../../data/types';
 import { parseNumber } from '../../platform/csv-utils';
 import { SETTLEMENT_COLUMNS } from '../../platform/settlement-csv';
 
@@ -34,17 +34,39 @@ const GROUP_LABELS: Record<string, string> = {
   g2: '직접사업비',
   g3: '업무추진비',
   g4: '팀지원금',
+  g0: '기타',
 };
 
-const GROUP_CODES: Array<{ id: string; codes: string[] }> = [
-  { id: 'g1', codes: ['1. 인건비'] },
-  { id: 'g2', codes: ['2. 프로그램 운영비'] },
-  { id: 'g3', codes: ['3. 업무 추진비'] },
-  { id: 'g4', codes: ['4. 팀지원금'] },
-];
+function groupIdForEntry(index: number, name: string): string {
+  const raw = normalizeBudgetLabel(name).toLowerCase();
+  if (raw.includes('인건비')) return 'g1';
+  if (raw.includes('프로그램') || raw.includes('운영')) return 'g2';
+  if (raw.includes('업무') || raw.includes('추진') || raw.includes('여비') || raw.includes('회의')) return 'g3';
+  if (raw.includes('팀지원') || raw.includes('지원금')) return 'g4';
+  if (index === 0) return 'g1';
+  if (index === 1) return 'g2';
+  if (index === 2) return 'g3';
+  if (index === 3) return 'g4';
+  return 'g0';
+}
 
-function resolveGroupId(budgetCode: string): string | undefined {
-  return GROUP_CODES.find((g) => g.codes.includes(budgetCode))?.id;
+function normalizeBudgetLabel(value: string): string {
+  return String(value || '')
+    .replace(/^\s*\d+(?:[.\-]\d+)?\s*/, '')
+    .replace(/^[.\-]+\s*/, '')
+    .trim();
+}
+
+function formatBudgetCodeLabel(index: number, name: string): string {
+  const trimmed = String(name || '').trim();
+  if (!trimmed) return `${index + 1}`;
+  return `${index + 1} ${trimmed}`;
+}
+
+function formatSubCodeLabel(codeIndex: number, subIndex: number, name: string): string {
+  const trimmed = String(name || '').trim();
+  if (!trimmed) return `${codeIndex + 1}-${subIndex + 1}`;
+  return `${codeIndex + 1}-${subIndex + 1} ${trimmed}`;
 }
 
 // 소진율 색상
@@ -56,17 +78,27 @@ function burnColor(rate: number): string {
 }
 
 export function PortalBudget() {
-  const { myProject, expenseSheetRows, budgetPlanRows, saveBudgetPlanRows } = usePortalStore();
+  const {
+    myProject,
+    expenseSheetRows,
+    budgetPlanRows,
+    budgetCodeBook,
+    saveBudgetPlanRows,
+    saveBudgetCodeBook,
+  } = usePortalStore();
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [selectedRow, setSelectedRow] = useState<BudgetRow | null>(null);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [editMode, setEditMode] = useState(false);
+  const [codeBookMode, setCodeBookMode] = useState(false);
   const [draftRows, setDraftRows] = useState<Array<{
     budgetCode: string;
     subCode: string;
     initialBudget: string;
     revisedBudget: string;
+    note: string;
   }>>([]);
+  const [draftCodeBook, setDraftCodeBook] = useState<BudgetCodeEntry[]>([]);
 
   const meta = BUDGET_META;
 
@@ -81,7 +113,7 @@ export function PortalBudget() {
   const planMap = useMemo(() => {
     const map = new Map<string, BudgetPlanRow>();
     (budgetPlanRows || []).forEach((row) => {
-      const key = `${row.budgetCode}|${row.subCode}`;
+      const key = `${normalizeBudgetLabel(row.budgetCode)}|${normalizeBudgetLabel(row.subCode)}`;
       map.set(key, row);
     });
     return map;
@@ -95,8 +127,8 @@ export function PortalBudget() {
     const bankAmountIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '통장에 찍힌 입/출금액');
     if (budgetCodeIdx < 0 || subCodeIdx < 0 || bankAmountIdx < 0) return map;
     for (const row of expenseSheetRows) {
-      const budgetCode = String(row.cells[budgetCodeIdx] || '').trim();
-      const subCode = String(row.cells[subCodeIdx] || '').trim();
+      const budgetCode = normalizeBudgetLabel(String(row.cells[budgetCodeIdx] || '').trim());
+      const subCode = normalizeBudgetLabel(String(row.cells[subCodeIdx] || '').trim());
       if (!budgetCode || !subCode) continue;
       const amount = parseNumber(String(row.cells[bankAmountIdx] || '')) ?? 0;
       if (amount === 0) continue;
@@ -105,6 +137,11 @@ export function PortalBudget() {
     }
     return map;
   }, [expenseSheetRows]);
+
+  const activeCodeBook = useMemo(
+    () => budgetCodeBook,
+    [budgetCodeBook],
+  );
 
   const formatInput = useCallback((value: string) => {
     const num = parseNumber(value);
@@ -117,8 +154,97 @@ export function PortalBudget() {
     return formatInput(trimmed);
   }, [formatInput]);
 
+  const syncDraftRowCode = useCallback((prevCode: string, nextCode: string) => {
+    if (!editMode) return;
+    setDraftRows((prev) => prev.map((r) => (
+      r.budgetCode === prevCode ? { ...r, budgetCode: nextCode } : r
+    )));
+  }, [editMode]);
+
+  const syncDraftRowSubCode = useCallback((budgetCode: string, prevSub: string, nextSub: string) => {
+    if (!editMode) return;
+    setDraftRows((prev) => prev.map((r) => (
+      r.budgetCode === budgetCode && r.subCode === prevSub ? { ...r, subCode: nextSub } : r
+    )));
+  }, [editMode]);
+
+  const addDraftRow = useCallback((budgetCode: string, subCode: string) => {
+    setDraftRows((prev) => ([
+      ...prev,
+      { budgetCode, subCode, initialBudget: '', revisedBudget: '', note: '' },
+    ]));
+  }, []);
+
+  const removeDraftRows = useCallback((budgetCode: string, subCode?: string) => {
+    setDraftRows((prev) => prev.filter((r) => {
+      if (r.budgetCode !== budgetCode) return true;
+      if (subCode == null) return false;
+      return r.subCode !== subCode;
+    }));
+  }, []);
+
+  const updateBudgetCode = useCallback((idx: number, nextCode: string) => {
+    setDraftCodeBook((prev) => {
+      const copy = prev.map((c) => ({ code: c.code, subCodes: [...c.subCodes] }));
+      const before = copy[idx];
+      if (!before) return prev;
+      copy[idx] = { ...before, code: nextCode };
+      if (before.code !== nextCode) syncDraftRowCode(before.code, nextCode);
+      return copy;
+    });
+  }, [syncDraftRowCode]);
+
+  const updateSubCode = useCallback((idx: number, subIdx: number, nextSub: string) => {
+    setDraftCodeBook((prev) => {
+      const copy = prev.map((c) => ({ code: c.code, subCodes: [...c.subCodes] }));
+      const entry = copy[idx];
+      if (!entry) return prev;
+      const before = entry.subCodes[subIdx] || '';
+      entry.subCodes[subIdx] = nextSub;
+      if (before !== nextSub) syncDraftRowSubCode(entry.code, before, nextSub);
+      return copy;
+    });
+  }, [syncDraftRowSubCode]);
+
+  const addBudgetCode = useCallback(() => {
+    setDraftCodeBook((prev) => ([...prev, { code: '', subCodes: [''] }]));
+    addDraftRow('', '');
+  }, [addDraftRow]);
+
+  const removeBudgetCode = useCallback((idx: number) => {
+    setDraftCodeBook((prev) => {
+      const entry = prev[idx];
+      const next = prev.filter((_, i) => i !== idx);
+      if (entry?.code) removeDraftRows(entry.code);
+      return next;
+    });
+  }, [removeDraftRows]);
+
+  const addSubCode = useCallback((idx: number) => {
+    setDraftCodeBook((prev) => {
+      const copy = prev.map((c) => ({ code: c.code, subCodes: [...c.subCodes] }));
+      const entry = copy[idx];
+      if (!entry) return prev;
+      entry.subCodes.push('');
+      addDraftRow(entry.code, '');
+      return copy;
+    });
+  }, [addDraftRow]);
+
+  const removeSubCode = useCallback((idx: number, subIdx: number) => {
+    setDraftCodeBook((prev) => {
+      const copy = prev.map((c) => ({ code: c.code, subCodes: [...c.subCodes] }));
+      const entry = copy[idx];
+      if (!entry) return prev;
+      const removed = entry.subCodes[subIdx] || '';
+      entry.subCodes = entry.subCodes.filter((_, i) => i !== subIdx);
+      if (entry.code && removed) removeDraftRows(entry.code, removed);
+      return copy;
+    });
+  }, [removeDraftRows]);
+
   const startEdit = useCallback(() => {
-    const next = BUDGET_CODE_BOOK.flatMap((entry) => (
+    const next = budgetCodeBook.flatMap((entry) => (
       entry.subCodes.map((subCode) => {
         const key = `${entry.code}|${subCode}`;
         const existing = planMap.get(key);
@@ -127,62 +253,110 @@ export function PortalBudget() {
           subCode,
           initialBudget: existing?.initialBudget ? existing.initialBudget.toLocaleString('ko-KR') : '',
           revisedBudget: existing?.revisedBudget ? existing.revisedBudget.toLocaleString('ko-KR') : '',
+          note: existing?.note || '',
         };
       })
     ));
     setDraftRows(next);
     setEditMode(true);
-  }, [planMap]);
+  }, [planMap, budgetCodeBook]);
+
+  const startCodeBookEdit = useCallback(() => {
+    setDraftCodeBook(budgetCodeBook.map((c) => ({ code: c.code, subCodes: [...c.subCodes] })));
+    setCodeBookMode(true);
+  }, [budgetCodeBook]);
 
   const cancelEdit = useCallback(() => {
     setEditMode(false);
+    setCodeBookMode(false);
     setDraftRows([]);
+    setDraftCodeBook([]);
   }, []);
 
+  const buildCodeBookRenames = useCallback((): BudgetCodeRename[] => {
+    if (!codeBookMode) return [];
+    const renames: BudgetCodeRename[] = [];
+    draftCodeBook.forEach((nextEntry, idx) => {
+      const prevEntry = budgetCodeBook[idx];
+      if (!prevEntry) return;
+      const prevCode = normalizeBudgetLabel(prevEntry.code);
+      const nextCode = normalizeBudgetLabel(nextEntry.code);
+      if (!prevCode || !nextCode) return;
+      const prevSubs = prevEntry.subCodes || [];
+      const nextSubs = nextEntry.subCodes || [];
+      const max = Math.min(prevSubs.length, nextSubs.length);
+      for (let sidx = 0; sidx < max; sidx += 1) {
+        const prevSub = normalizeBudgetLabel(prevSubs[sidx]);
+        const nextSub = normalizeBudgetLabel(nextSubs[sidx]);
+        if (!prevSub || !nextSub) continue;
+        if (prevCode !== nextCode || prevSub !== nextSub) {
+          renames.push({ fromCode: prevCode, fromSub: prevSub, toCode: nextCode, toSub: nextSub });
+        }
+      }
+    });
+    return renames;
+  }, [budgetCodeBook, draftCodeBook, codeBookMode]);
+
   const saveSettings = useCallback(async () => {
-    if (!saveBudgetPlanRows) return;
-    const normalized: BudgetPlanRow[] = draftRows.map((row) => {
+    if (!saveBudgetPlanRows && !saveBudgetCodeBook) return;
+    const normalized: BudgetPlanRow[] = editMode ? draftRows.map((row) => {
+      const budgetCode = normalizeBudgetLabel(String(row.budgetCode || '').trim());
+      const subCode = normalizeBudgetLabel(String(row.subCode || '').trim());
       const initial = parseNumber(row.initialBudget) ?? 0;
       const revised = parseNumber(row.revisedBudget) ?? 0;
       return {
-        budgetCode: row.budgetCode,
-        subCode: row.subCode,
+        budgetCode,
+        subCode,
         initialBudget: initial,
         revisedBudget: revised,
+        ...(row.note ? { note: row.note } : {}),
       };
-    }).filter((row) => row.initialBudget > 0 || (row.revisedBudget ?? 0) > 0);
+    }).filter((row) => row.budgetCode && row.subCode)
+      .filter((row) => row.initialBudget > 0 || (row.revisedBudget ?? 0) > 0 || (row.note && row.note.trim() !== ''))
+      : [];
 
     setSettingsSaving(true);
     try {
-      await saveBudgetPlanRows(normalized);
+      if (codeBookMode && saveBudgetCodeBook && draftCodeBook.length > 0) {
+        const renames = buildCodeBookRenames();
+        await saveBudgetCodeBook(draftCodeBook, renames);
+      }
+      if (editMode) {
+        await saveBudgetPlanRows(normalized);
+      }
       setEditMode(false);
+      setCodeBookMode(false);
       setDraftRows([]);
-      toast.success('예산이 저장되었습니다.');
+      setDraftCodeBook([]);
+      toast.success(codeBookMode && !editMode ? '카테고리가 저장되었습니다.' : '예산이 저장되었습니다.');
     } catch (err) {
       console.error('[PortalBudget] save failed:', err);
-      toast.error('예산 저장에 실패했습니다.');
+      toast.error(codeBookMode && !editMode ? '카테고리 저장에 실패했습니다.' : '예산 저장에 실패했습니다.');
     } finally {
       setSettingsSaving(false);
     }
-  }, [draftRows, saveBudgetPlanRows]);
+  }, [draftRows, draftCodeBook, saveBudgetPlanRows, saveBudgetCodeBook, editMode, codeBookMode, buildCodeBookRenames]);
 
   const budgetItems = useMemo(() => {
-    const items: BudgetRow[] = BUDGET_CODE_BOOK.flatMap((entry) => (
-      entry.subCodes.map((subCode) => {
-        const key = `${entry.code}|${subCode}`;
-        const plan = planMap.get(key);
+    const items: BudgetRow[] = activeCodeBook.flatMap((entry, codeIdx) => (
+      entry.subCodes.map((subCode, subIdx) => {
+        const lookupKey = `${normalizeBudgetLabel(entry.code)}|${normalizeBudgetLabel(subCode)}`;
+        const plan = planMap.get(lookupKey);
         const initial = plan?.initialBudget ?? 0;
         const revised = plan?.revisedBudget ?? 0;
         const effective = revised > 0 ? revised : initial;
-        const spent = spentMap.get(key) ?? 0;
+        const spent = spentMap.get(lookupKey) ?? 0;
         const balance = effective - spent;
         const burnRate = effective > 0 ? spent / effective : 0;
+        const codeLabel = formatBudgetCodeLabel(codeIdx, entry.code);
+        const subLabel = formatSubCodeLabel(codeIdx, subIdx, subCode);
+        const groupId = groupIdForEntry(codeIdx, entry.code);
         return {
-          id: key,
+          id: lookupKey,
           projectId: myProject?.id || '',
-          category: GROUP_LABELS[resolveGroupId(entry.code) || ''] || '',
-          budgetCode: entry.code,
-          subCode,
+          category: GROUP_LABELS[groupId] || '',
+          budgetCode: codeLabel,
+          subCode: subLabel,
           calcDesc: '',
           initialBudget: initial,
           lastYearBudget: 0,
@@ -196,10 +370,10 @@ export function PortalBudget() {
           burnRate,
           balance,
           balanceOct: 0,
-          note: '',
+          note: plan?.note || '',
           rowType: 'ITEM',
           fixType: 'NONE',
-          groupId: resolveGroupId(entry.code),
+          groupId,
           order: 0,
         } as BudgetRow;
       })
@@ -217,7 +391,7 @@ export function PortalBudget() {
         composition: totalEffective > 0 ? effective / totalEffective : 0,
       };
     });
-  }, [planMap, spentMap, myProject?.id]);
+  }, [planMap, spentMap, myProject?.id, activeCodeBook]);
 
   const groups = useMemo(() => {
     const groupMap: Record<string, { subtotal: BudgetRow; items: BudgetRow[] }> = {};
@@ -314,14 +488,92 @@ export function PortalBudget() {
                     {settingsSaving ? '저장 중...' : '저장'}
                   </Button>
                 </>
-              ) : (
-                <Button variant="outline" size="sm" className="h-8 text-[12px]" onClick={startEdit}>
-                  예산 편집
-                </Button>
-              )}
+              ) : !codeBookMode ? (
+                <>
+                  <Button variant="outline" size="sm" className="h-8 text-[12px]" onClick={startEdit}>
+                    예산 편집
+                  </Button>
+                  <Button variant="outline" size="sm" className="h-8 text-[12px] gap-1" onClick={startCodeBookEdit}>
+                    <Settings className="w-3.5 h-3.5" />
+                    카테고리 관리
+                  </Button>
+                </>
+              ) : null}
             </div>
           )}
         />
+
+        <Dialog open={codeBookMode} onOpenChange={(open) => !open && cancelEdit()}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle className="text-[14px]">카테고리 관리</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] text-muted-foreground">비목/세목을 추가하세요.</p>
+                <Button variant="outline" size="sm" className="h-7 text-[11px] gap-1" onClick={addBudgetCode}>
+                  <Plus className="w-3.5 h-3.5" />
+                  비목 추가
+                </Button>
+              </div>
+              <div className="space-y-3">
+                {draftCodeBook.map((entry, idx) => (
+                  <div key={`code-${idx}`} className="rounded-md border border-border/60 p-3 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-muted-foreground min-w-[24px]">{idx + 1}</span>
+                      <input
+                        type="text"
+                        value={entry.code}
+                        placeholder="비목명"
+                        className="flex-1 bg-transparent outline-none text-[11px] px-2 py-1 border rounded"
+                        onChange={(e) => updateBudgetCode(idx, e.target.value)}
+                      />
+                      <Button variant="outline" size="sm" className="h-7 text-[10px] gap-1" onClick={() => addSubCode(idx)}>
+                        <Plus className="w-3 h-3" />
+                        세목 추가
+                      </Button>
+                      <Button variant="outline" size="sm" className="h-7 text-[10px] gap-1" onClick={() => removeBudgetCode(idx)}>
+                        <Trash2 className="w-3 h-3" />
+                        비목 삭제
+                      </Button>
+                    </div>
+                    <div className="space-y-1">
+                      {entry.subCodes.map((sub, sidx) => (
+                        <div key={`sub-${idx}-${sidx}`} className="flex items-center gap-2">
+                          <span className="text-[10px] text-muted-foreground min-w-[28px]">{idx + 1}-{sidx + 1}</span>
+                          <input
+                            type="text"
+                            value={sub}
+                            placeholder="세목명"
+                            className="flex-1 bg-transparent outline-none text-[11px] px-2 py-1 border rounded"
+                            onChange={(e) => updateSubCode(idx, sidx, e.target.value)}
+                          />
+                          <Button variant="outline" size="sm" className="h-7 text-[10px]" onClick={() => removeSubCode(idx, sidx)}>
+                            <Trash2 className="w-3 h-3" />
+                          </Button>
+                        </div>
+                      ))}
+                      {entry.subCodes.length === 0 && (
+                        <p className="text-[10px] text-muted-foreground">세목이 없습니다.</p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+                {draftCodeBook.length === 0 && (
+                  <p className="text-[11px] text-muted-foreground">비목을 추가해 주세요.</p>
+                )}
+              </div>
+              <div className="flex justify-end gap-2 pt-2 border-t border-border/60">
+                <Button variant="outline" size="sm" className="h-8 text-[12px]" onClick={cancelEdit}>
+                  취소
+                </Button>
+                <Button size="sm" className="h-8 text-[12px]" onClick={saveSettings} disabled={settingsSaving}>
+                  {settingsSaving ? '저장 중...' : '저장'}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {/* KPI Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -472,7 +724,9 @@ export function PortalBudget() {
                           const deltaUp = delta > 0;
                           const deltaDown = delta < 0;
                           const draft = editMode
-                            ? draftRows.find((r) => r.budgetCode === row.budgetCode && r.subCode === row.subCode)
+                            ? draftRows.find((r) =>
+                              normalizeBudgetLabel(row.budgetCode) === normalizeBudgetLabel(r.budgetCode) &&
+                              normalizeBudgetLabel(row.subCode) === normalizeBudgetLabel(r.subCode))
                             : null;
                           return (
                           <tr
@@ -516,7 +770,8 @@ export function PortalBudget() {
                                   onChange={(e) => {
                                     const value = formatInputLive(e.target.value);
                                     setDraftRows((prev) => prev.map((r) => (
-                                      r.budgetCode === row.budgetCode && r.subCode === row.subCode
+                                      normalizeBudgetLabel(r.budgetCode) === normalizeBudgetLabel(row.budgetCode)
+                                        && normalizeBudgetLabel(r.subCode) === normalizeBudgetLabel(row.subCode)
                                         ? { ...r, initialBudget: value }
                                         : r
                                     )));
@@ -536,7 +791,8 @@ export function PortalBudget() {
                                   onChange={(e) => {
                                     const value = formatInputLive(e.target.value);
                                     setDraftRows((prev) => prev.map((r) => (
-                                      r.budgetCode === row.budgetCode && r.subCode === row.subCode
+                                      normalizeBudgetLabel(r.budgetCode) === normalizeBudgetLabel(row.budgetCode)
+                                        && normalizeBudgetLabel(r.subCode) === normalizeBudgetLabel(row.subCode)
                                         ? { ...r, revisedBudget: value }
                                         : r
                                     )));
@@ -573,8 +829,24 @@ export function PortalBudget() {
                             <td className="px-3 py-2.5 text-right" style={{ fontVariantNumeric: 'tabular-nums', color: '#059669' }}>
                               {fmtKRW(row.balance)}
                             </td>
-                            <td className="px-4 py-2.5 hidden lg:table-cell max-w-[180px]">
-                              {row.note ? (
+                            <td className={`px-4 py-2.5 max-w-[180px] ${editMode ? '' : 'hidden lg:table-cell'}`}>
+                              {editMode ? (
+                                <input
+                                  type="text"
+                                  value={draft?.note || ''}
+                                  className="w-full bg-transparent outline-none text-[11px] px-2 py-1 border rounded"
+                                  placeholder="특이사항"
+                                  onChange={(e) => {
+                                    const value = e.target.value;
+                                    setDraftRows((prev) => prev.map((r) => (
+                                      normalizeBudgetLabel(r.budgetCode) === normalizeBudgetLabel(row.budgetCode)
+                                        && normalizeBudgetLabel(r.subCode) === normalizeBudgetLabel(row.subCode)
+                                        ? { ...r, note: value }
+                                        : r
+                                    )));
+                                  }}
+                                />
+                              ) : row.note ? (
                                 <Tooltip>
                                   <TooltipTrigger>
                                     <span className="text-muted-foreground truncate block text-[10px]">{row.note.slice(0, 40)}{row.note.length > 40 ? '...' : ''}</span>

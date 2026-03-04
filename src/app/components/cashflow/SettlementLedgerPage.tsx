@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import type { ClipboardEvent, KeyboardEvent, MouseEvent } from 'react';
 import { toast } from 'sonner';
 import { BUDGET_CODE_BOOK } from '../../data/budget-data';
-import type { Transaction, TransactionState } from '../../data/types';
+import type { BudgetCodeEntry, Transaction, TransactionState } from '../../data/types';
 import { findWeekForDate, getMonthMondayWeeks, getYearMondayWeeks, type MonthMondayWeek } from '../../platform/cashflow-weeks';
 import { parseDate, parseNumber, triggerDownload } from '../../platform/csv-utils';
 import { computeEvidenceStatus, computeEvidenceSummary, isValidDriveUrl } from '../../platform/evidence-helpers';
@@ -44,6 +44,25 @@ const CASHFLOW_IN_LINE_IDS = new Set([
   'BANK_INTEREST_IN',
 ]);
 
+function normalizeBudgetLabel(value: string): string {
+  return String(value || '')
+    .replace(/^\s*\d+(?:[.\-]\d+)?\s*/, '')
+    .replace(/^[.\-]+\s*/, '')
+    .trim();
+}
+
+function formatBudgetCodeLabel(index: number, name: string): string {
+  const trimmed = String(name || '').trim();
+  if (!trimmed) return `${index + 1}`;
+  return `${index + 1} ${trimmed}`;
+}
+
+function formatSubCodeLabel(codeIndex: number, subIndex: number, name: string): string {
+  const trimmed = String(name || '').trim();
+  if (!trimmed) return `${codeIndex + 1}-${subIndex + 1}`;
+  return `${codeIndex + 1}-${subIndex + 1} ${trimmed}`;
+}
+
 function normalizeMethodValue(value: string | undefined): string {
   if (!value) return '';
   if (value === 'BANK_TRANSFER') return 'TRANSFER';
@@ -68,7 +87,11 @@ function resolveEvidenceRequiredDesc(
   subCode: string,
 ): string {
   if (!map) return '';
-  return map[`${budgetCode}|${subCode}`] || map[subCode] || map[budgetCode] || '';
+  const direct = map[`${budgetCode}|${subCode}`] || map[subCode] || map[budgetCode] || '';
+  if (direct) return direct;
+  const normBudget = normalizeBudgetLabel(budgetCode);
+  const normSub = normalizeBudgetLabel(subCode);
+  return map[`${normBudget}|${normSub}`] || map[normSub] || map[normBudget] || '';
 }
 
 function resolveWeekFromLabel(label: string, yearWeeks: MonthMondayWeek[]): MonthMondayWeek | undefined {
@@ -105,6 +128,7 @@ export interface SettlementLedgerProps {
   sheetRows?: ImportRow[] | null;
   onSaveSheetRows?: (rows: ImportRow[]) => void | Promise<void>;
   authorOptions?: string[];
+  budgetCodeBook?: BudgetCodeEntry[];
   hideYearControls?: boolean;
   hideCountBadge?: boolean;
   onSubmitWeek?: (input: {
@@ -133,6 +157,7 @@ export function SettlementLedgerPage({
   sheetRows,
   onSaveSheetRows,
   authorOptions,
+  budgetCodeBook,
   hideYearControls = false,
   hideCountBadge = false,
   onSubmitWeek,
@@ -146,6 +171,10 @@ export function SettlementLedgerPage({
   const [importRows, setImportRows] = useState<ImportRow[] | null>(null);
   const [importDirty, setImportDirty] = useState(false);
   const [sheetSaving, setSheetSaving] = useState(false);
+  const resolvedBudgetBook = useMemo(
+    () => (budgetCodeBook && budgetCodeBook.length ? budgetCodeBook : BUDGET_CODE_BOOK),
+    [budgetCodeBook],
+  );
 
   // All weeks for the year
   const yearWeeks = useMemo(() => getYearMondayWeeks(year), [year]);
@@ -491,6 +520,7 @@ export function SettlementLedgerPage({
             evidenceRequiredMap={evidenceRequiredMap}
             onSaveEvidenceRequiredMap={onSaveEvidenceRequiredMap}
             authorOptions={authorOptions}
+            budgetCodeBook={resolvedBudgetBook}
             weekOptions={weekOptions}
             inline
           />
@@ -614,6 +644,7 @@ export function SettlementLedgerPage({
           evidenceRequiredMap={evidenceRequiredMap}
           onSaveEvidenceRequiredMap={onSaveEvidenceRequiredMap}
           authorOptions={authorOptions}
+          budgetCodeBook={resolvedBudgetBook}
           weekOptions={weekOptions}
         />
       )}
@@ -991,6 +1022,7 @@ function ImportEditor({
   evidenceRequiredMap,
   onSaveEvidenceRequiredMap,
   authorOptions,
+  budgetCodeBook,
   weekOptions,
   inline = false,
 }: {
@@ -1004,6 +1036,7 @@ function ImportEditor({
   evidenceRequiredMap?: Record<string, string>;
   onSaveEvidenceRequiredMap?: (map: Record<string, string>) => void | Promise<void>;
   authorOptions?: string[];
+  budgetCodeBook?: BudgetCodeEntry[];
   weekOptions: { value: string; label: string }[];
   inline?: boolean;
 }) {
@@ -1081,13 +1114,24 @@ function ImportEditor({
     () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '통장잔액'),
     [],
   );
+  const resolvedBudgetBook = useMemo(
+    () => (budgetCodeBook && budgetCodeBook.length ? budgetCodeBook : BUDGET_CODE_BOOK),
+    [budgetCodeBook],
+  );
   const mappingRows = useMemo(
-    () => BUDGET_CODE_BOOK.flatMap((c) => c.subCodes.map((subCode) => ({
-      budgetCode: c.code,
-      subCode,
-      key: `${c.code}|${subCode}`,
-    }))),
-    [],
+    () => resolvedBudgetBook.flatMap((c, codeIdx) => {
+      if (!c.subCodes.length) return [];
+      return c.subCodes.map((subCode, subIdx) => ({
+        budgetCode: c.code,
+        subCode,
+        key: `${c.code}|${subCode}`,
+        codeLabel: formatBudgetCodeLabel(codeIdx, c.code),
+        subLabel: formatSubCodeLabel(codeIdx, subIdx, subCode),
+        showCode: subIdx === 0,
+        rowSpan: c.subCodes.length,
+      }));
+    }),
+    [resolvedBudgetBook],
   );
   const [mappingOpen, setMappingOpen] = useState(false);
   const [mappingDraft, setMappingDraft] = useState<Record<string, string>>({});
@@ -1309,12 +1353,10 @@ function ImportEditor({
           return match ? match.label : trimmed;
         }
         if (colIdx === budgetCodeIdx) {
-          return trimmed;
+          return normalizeBudgetLabel(trimmed);
         }
         if (colIdx === subCodeIdx) {
-          const budgetCode = budgetCodeIdx >= 0 ? (currentCells[budgetCodeIdx] || '') : '';
-          const subCodes = BUDGET_CODE_BOOK.find((c) => c.code === budgetCode)?.subCodes || [];
-          return trimmed;
+          return normalizeBudgetLabel(trimmed);
         }
         return trimmed;
       };
@@ -1443,15 +1485,17 @@ function ImportEditor({
 
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
-      if (!selection) return;
       const text = e.clipboardData?.getData('text') || '';
       if (!text) return;
-      const anchor = {
-        r: Math.min(selection.start.r, selection.end.r),
-        c: Math.min(selection.start.c, selection.end.c),
-      };
-      const active = document.activeElement;
-      if (active && tableWrapRef.current && !tableWrapRef.current.contains(active)) return;
+      const anchor = selection
+        ? {
+          r: Math.min(selection.start.r, selection.end.r),
+          c: Math.min(selection.start.c, selection.end.c),
+        }
+        : lastFocusedCell.current
+          ? { r: lastFocusedCell.current.rowIdx, c: lastFocusedCell.current.colIdx }
+          : null;
+      if (!anchor) return;
       e.preventDefault();
       applyPaste(anchor.r, anchor.c, text);
     };
@@ -1713,6 +1757,7 @@ function ImportEditor({
                 authorIdx={authorIdx}
                 authorListId={authorListId}
                 authorOptions={authorOptions}
+                budgetCodeBook={resolvedBudgetBook}
                 budgetCodeIdx={budgetCodeIdx}
                 subCodeIdx={subCodeIdx}
                 evidenceIdx={evidenceIdx}
@@ -1760,10 +1805,14 @@ function ImportEditor({
                   </tr>
                 </thead>
                 <tbody>
-                  {mappingRows.map((row) => (
-                    <tr key={row.key} className="border-b">
-                      <td className="px-2 py-1.5">{row.budgetCode}</td>
-                      <td className="px-2 py-1.5">{row.subCode}</td>
+                  {mappingRows.map((row, idx) => (
+                    <tr key={row.key} className={idx === mappingRows.length - 1 ? '' : 'border-b'}>
+                      {row.showCode && (
+                        <td className="px-2 py-1.5 align-top" rowSpan={row.rowSpan}>
+                          {row.codeLabel}
+                        </td>
+                      )}
+                      <td className="px-2 py-1.5">{row.subLabel}</td>
                       <td className="px-2 py-1.5">
                         <input
                           type="text"
@@ -1805,6 +1854,7 @@ function ImportEditorRow({
   authorIdx,
   authorListId,
   authorOptions,
+  budgetCodeBook,
   budgetCodeIdx,
   subCodeIdx,
   evidenceIdx,
@@ -1832,6 +1882,7 @@ function ImportEditorRow({
   authorIdx: number;
   authorListId: string;
   authorOptions?: string[];
+  budgetCodeBook: BudgetCodeEntry[];
   budgetCodeIdx: number;
   subCodeIdx: number;
   evidenceIdx: number;
@@ -1858,11 +1909,12 @@ function ImportEditorRow({
     () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '거래일시'),
     [],
   );
-  const budgetCode = budgetCodeIdx >= 0 ? row.cells[budgetCodeIdx] : '';
+  const budgetCodeRaw = budgetCodeIdx >= 0 ? row.cells[budgetCodeIdx] : '';
+  const budgetCode = normalizeBudgetLabel(String(budgetCodeRaw || ''));
   const subCodes = useMemo(() => {
-    const entry = BUDGET_CODE_BOOK.find((c) => c.code === budgetCode);
+    const entry = budgetCodeBook.find((c) => c.code === budgetCode);
     return entry ? entry.subCodes : [];
-  }, [budgetCode]);
+  }, [budgetCode, budgetCodeBook]);
   const formatNumberInput = useCallback((value: string) => {
     if (!value) return '';
     const num = parseNumber(value);
@@ -2077,8 +2129,8 @@ function ImportEditorRow({
               />
             ) : isBudgetCode ? (
               <SelectCell
-                value={row.cells[colIdx] || ''}
-                options={BUDGET_CODE_BOOK.map((c) => ({ value: c.code, label: c.code }))}
+                value={normalizeBudgetLabel(String(row.cells[colIdx] || ''))}
+                options={budgetCodeBook.map((c, idx) => ({ value: c.code, label: formatBudgetCodeLabel(idx, c.code) }))}
                 onFocus={() => onCellFocus(rowIdx, colIdx)}
                 isOpen={openSelect?.rowIdx === rowIdx && openSelect?.colIdx === colIdx}
                 onOpen={() => onOpenSelect(rowIdx, colIdx)}
@@ -2089,8 +2141,13 @@ function ImportEditorRow({
                     const cells = [...prev.cells];
                     cells[budgetCodeIdx] = nextCode;
                     if (subCodeIdx >= 0) {
-                      const allowed = BUDGET_CODE_BOOK.find((c) => c.code === nextCode)?.subCodes || [];
-                      if (!allowed.includes(cells[subCodeIdx])) cells[subCodeIdx] = '';
+                      const allowed = budgetCodeBook.find((c) => c.code === nextCode)?.subCodes || [];
+                      const currentSub = normalizeBudgetLabel(String(cells[subCodeIdx] || ''));
+                      if (!allowed.includes(currentSub)) {
+                        cells[subCodeIdx] = '';
+                      } else {
+                        cells[subCodeIdx] = currentSub;
+                      }
                     }
                     if (evidenceIdx >= 0) {
                       const mapped = resolveEvidenceRequiredDesc(evidenceRequiredMap, nextCode, cells[subCodeIdx] || '');
@@ -2102,8 +2159,11 @@ function ImportEditorRow({
               />
             ) : isSubCode ? (
               <SelectCell
-                value={row.cells[colIdx] || ''}
-                options={subCodes.map((sc) => ({ value: sc, label: sc }))}
+                value={normalizeBudgetLabel(String(row.cells[colIdx] || ''))}
+                options={subCodes.map((sc, sidx) => {
+                  const codeIdx = Math.max(0, budgetCodeBook.findIndex((c) => c.code === budgetCode));
+                  return { value: sc, label: formatSubCodeLabel(codeIdx, sidx, sc) };
+                })}
                 onFocus={() => onCellFocus(rowIdx, colIdx)}
                 disabled={!budgetCode}
                 isOpen={openSelect?.rowIdx === rowIdx && openSelect?.colIdx === colIdx}

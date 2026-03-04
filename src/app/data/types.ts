@@ -394,6 +394,18 @@ export interface BudgetPlanRow {
   note?: string;
 }
 
+export interface BudgetCodeEntry {
+  code: string;
+  subCodes: string[];
+}
+
+export interface BudgetCodeRename {
+  fromCode: string;
+  fromSub: string;
+  toCode: string;
+  toSub: string;
+}
+
 export interface BudgetPlanSnapshot {
   projectId: string;
   rows: BudgetPlanRow[];

@@ -21,6 +21,7 @@ export function PortalWeeklyExpensePage() {
     expenseSheetRows,
     saveExpenseSheetRows,
     participationEntries,
+    budgetCodeBook,
   } = usePortalStore();
   const { submitWeekAsPm } = useCashflowWeeks();
 
@@ -69,6 +70,7 @@ export function PortalWeeklyExpensePage() {
         onAddTransaction={addTransaction}
         onUpdateTransaction={updateTransaction}
         authorOptions={authorOptions}
+        budgetCodeBook={budgetCodeBook}
         hideYearControls
         hideCountBadge
         evidenceRequiredMap={evidenceRequiredMap}

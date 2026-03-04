@@ -10,9 +10,9 @@ import {
   where,
   type Unsubscribe,
 } from 'firebase/firestore';
-import type { BudgetPlanRow, Ledger, Project, ParticipationEntry, Transaction, TransactionState } from './types';
+import type { BudgetPlanRow, BudgetCodeEntry, BudgetCodeRename, Ledger, Project, ParticipationEntry, Transaction, TransactionState } from './types';
 import type { ExpenseSet, ExpenseItem, ExpenseSetStatus } from './budget-data';
-import { EXPENSE_SETS } from './budget-data';
+import { BUDGET_CODE_BOOK, EXPENSE_SETS } from './budget-data';
 import {
   CHANGE_REQUESTS,
   type ChangeRequest,
@@ -20,6 +20,7 @@ import {
 } from './personnel-change-data';
 import { PARTICIPATION_ENTRIES } from './participation-data';
 import { LEDGERS, PROJECTS, TRANSACTIONS } from './mock-data';
+import { SETTLEMENT_COLUMNS } from '../platform/settlement-csv';
 import type { ImportRow } from '../platform/settlement-csv';
 import { mapBankStatementsToImportRows, type BankStatementRow } from '../platform/bank-statement';
 import { useAuth } from './auth-store';
@@ -55,6 +56,7 @@ interface PortalState {
   expenseSheetRows: ImportRow[] | null;
   bankStatementRows: BankStatementRow[] | null;
   budgetPlanRows: BudgetPlanRow[] | null;
+  budgetCodeBook: BudgetCodeEntry[];
 }
 
 interface PortalActions {
@@ -82,6 +84,7 @@ interface PortalActions {
   saveExpenseSheetRows: (rows: ImportRow[]) => Promise<void>;
   saveBankStatementRows: (rows: BankStatementRow[]) => Promise<void>;
   saveBudgetPlanRows: (rows: BudgetPlanRow[]) => Promise<void>;
+  saveBudgetCodeBook: (rows: BudgetCodeEntry[], renames?: BudgetCodeRename[]) => Promise<void>;
 }
 
 const _g = globalThis as any;
@@ -89,6 +92,22 @@ if (!_g.__PORTAL_CTX__) {
   _g.__PORTAL_CTX__ = createContext<(PortalState & PortalActions) | null>(null);
 }
 const PortalContext: React.Context<(PortalState & PortalActions) | null> = _g.__PORTAL_CTX__;
+
+function normalizeBudgetLabel(value: string): string {
+  return String(value || '')
+    .replace(/^\s*\d+(?:[.\-]\d+)?\s*/, '')
+    .replace(/^[.\-]+\s*/, '')
+    .trim();
+}
+
+function normalizeBudgetCodeBook(input: BudgetCodeEntry[]): BudgetCodeEntry[] {
+  return (input || [])
+    .map((row) => ({
+      code: normalizeBudgetLabel(row.code),
+      subCodes: (row.subCodes || []).map(normalizeBudgetLabel).filter(Boolean),
+    }))
+    .filter((row) => row.code && row.subCodes.length > 0);
+}
 
 function withTenantScope<T extends Record<string, unknown>>(orgId: string, payload: T): T & { tenantId: string } {
   return {
@@ -134,6 +153,9 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   const [expenseSheetRows, setExpenseSheetRows] = useState<ImportRow[] | null>(null);
   const [bankStatementRows, setBankStatementRows] = useState<BankStatementRow[] | null>(null);
   const [budgetPlanRows, setBudgetPlanRows] = useState<BudgetPlanRow[] | null>(null);
+  const [budgetCodeBook, setBudgetCodeBook] = useState<BudgetCodeEntry[]>(
+    normalizeBudgetCodeBook(BUDGET_CODE_BOOK as unknown as BudgetCodeEntry[]),
+  );
   const [isLoading, setIsLoading] = useState(false);
   const [isMemberLoading, setIsMemberLoading] = useState(true);
   const unsubsRef = useRef<Unsubscribe[]>([]);
@@ -380,6 +402,10 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         db,
         `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/budget_summary/default`,
       );
+      const budgetCodeBookRef = doc(
+        db,
+        `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/budget_code_book/default`,
+      );
 
       unsubsRef.current.push(
         onSnapshot(txQuery, (snap) => {
@@ -455,6 +481,24 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           setBudgetPlanRows(null);
         }),
       );
+
+      unsubsRef.current.push(
+        onSnapshot(budgetCodeBookRef, (snap) => {
+          if (!snap.exists()) {
+            setBudgetCodeBook(BUDGET_CODE_BOOK);
+            return;
+          }
+          const data = snap.data() as { codes?: BudgetCodeEntry[] };
+          const source = Array.isArray(data?.codes)
+            ? data.codes
+            : (BUDGET_CODE_BOOK as unknown as BudgetCodeEntry[]);
+          const normalized = normalizeBudgetCodeBook(source);
+          setBudgetCodeBook(normalized.length > 0 ? normalized : normalizeBudgetCodeBook(BUDGET_CODE_BOOK as unknown as BudgetCodeEntry[]));
+        }, (err) => {
+          console.error('[PortalStore] budget code book listen error:', err);
+          setBudgetCodeBook(normalizeBudgetCodeBook(BUDGET_CODE_BOOK as unknown as BudgetCodeEntry[]));
+        }),
+      );
     }
 
     return () => {
@@ -524,7 +568,16 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       { merge: true },
     );
     setExpenseSheetRows(sanitizedRows as ImportRow[]);
-  }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name]);
+  }, [
+    db,
+    orgId,
+    portalUser?.projectId,
+    portalUser?.name,
+    authUser?.name,
+    budgetPlanRows,
+    expenseSheetRows,
+    evidenceRequiredMap,
+  ]);
 
   const saveBudgetPlanRows = useCallback(async (rows: BudgetPlanRow[]) => {
     if (!db || !portalUser?.projectId) {
@@ -551,6 +604,147 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       { merge: true },
     );
     setBudgetPlanRows(sanitizedRows as BudgetPlanRow[]);
+  }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name]);
+
+  const saveBudgetCodeBook = useCallback(async (rows: BudgetCodeEntry[], renames: BudgetCodeRename[] = []) => {
+    if (!db || !portalUser?.projectId) {
+      toast.error('Firestore 연결이 필요합니다. 관리자에게 문의해 주세요.');
+      return;
+    }
+    const now = new Date().toISOString();
+    const sanitized = normalizeBudgetCodeBook(rows);
+    if (sanitized.length === 0) {
+      toast.error('비목/세목이 비어 있습니다.');
+      return;
+    }
+    const payload = withTenantScope(orgId, {
+      projectId: portalUser.projectId,
+      codes: sanitized,
+      updatedAt: now,
+      updatedBy: portalUser.name || authUser?.name || '',
+    });
+    await setDoc(
+      doc(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/budget_code_book/default`),
+      payload,
+      { merge: true },
+    );
+    setBudgetCodeBook(sanitized);
+
+    if (renames.length === 0) return;
+    const renameMap = new Map<string, { code: string; sub: string }>();
+    renames.forEach((r) => {
+      const fromCode = normalizeBudgetLabel(r.fromCode);
+      const fromSub = normalizeBudgetLabel(r.fromSub);
+      const toCode = normalizeBudgetLabel(r.toCode);
+      const toSub = normalizeBudgetLabel(r.toSub);
+      if (!fromCode || !fromSub || !toCode || !toSub) return;
+      renameMap.set(`${fromCode}|${fromSub}`, { code: toCode, sub: toSub });
+    });
+    if (renameMap.size === 0) return;
+
+    const budgetPlanRef = doc(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/budget_summary/default`);
+    const expenseSheetRef = doc(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/expense_sheets/default`);
+    const evidenceMapRef = doc(db, getOrgDocumentPath(orgId, 'budgetEvidenceMaps', portalUser.projectId));
+    const updatedBy = portalUser.name || authUser?.name || '';
+
+    if (budgetPlanRows && budgetPlanRows.length > 0) {
+      let touched = false;
+      const nextRows = budgetPlanRows.map((row) => {
+        const key = `${normalizeBudgetLabel(row.budgetCode)}|${normalizeBudgetLabel(row.subCode)}`;
+        const mapped = renameMap.get(key);
+        if (!mapped) return row;
+        touched = true;
+        return { ...row, budgetCode: mapped.code, subCode: mapped.sub };
+      });
+      if (touched) {
+        await setDoc(
+          budgetPlanRef,
+          withTenantScope(orgId, {
+            projectId: portalUser.projectId,
+            rows: nextRows.map((row) => ({
+              budgetCode: row.budgetCode || '',
+              subCode: row.subCode || '',
+              initialBudget: Number.isFinite(row.initialBudget) ? row.initialBudget : 0,
+              revisedBudget: Number.isFinite(row.revisedBudget ?? NaN) ? row.revisedBudget : 0,
+              ...(row.note ? { note: row.note } : {}),
+            })),
+            updatedAt: now,
+            updatedBy,
+          }),
+          { merge: true },
+        );
+        setBudgetPlanRows(nextRows);
+      }
+    }
+
+    if (expenseSheetRows && expenseSheetRows.length > 0) {
+      const budgetCodeIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '비목');
+      const subCodeIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '세목');
+      if (budgetCodeIdx >= 0 && subCodeIdx >= 0) {
+        let touched = false;
+        const nextRows = expenseSheetRows.map((row) => {
+          const cells = Array.isArray(row.cells) ? [...row.cells] : [];
+          const key = `${normalizeBudgetLabel(cells[budgetCodeIdx] || '')}|${normalizeBudgetLabel(cells[subCodeIdx] || '')}`;
+          const mapped = renameMap.get(key);
+          if (!mapped) return row;
+          cells[budgetCodeIdx] = mapped.code;
+          cells[subCodeIdx] = mapped.sub;
+          touched = true;
+          return { ...row, cells };
+        });
+        if (touched) {
+          await setDoc(
+            expenseSheetRef,
+            withTenantScope(orgId, {
+              projectId: portalUser.projectId,
+              rows: nextRows.map((row) => ({
+                tempId: row.tempId || `imp-${Date.now()}`,
+                ...(row.sourceTxId ? { sourceTxId: row.sourceTxId } : {}),
+                cells: Array.isArray(row.cells) ? row.cells.map((c) => (c ?? '')) : [],
+              })),
+              updatedAt: now,
+              updatedBy,
+            }),
+            { merge: true },
+          );
+          setExpenseSheetRows(nextRows);
+        }
+      }
+    }
+
+    if (evidenceRequiredMap && Object.keys(evidenceRequiredMap).length > 0) {
+      let touched = false;
+      const nextMap: Record<string, string> = {};
+      Object.entries(evidenceRequiredMap).forEach(([key, value]) => {
+        const [rawCode, rawSub] = key.split('|');
+        if (!rawSub) {
+          nextMap[key] = value;
+          return;
+        }
+        const mapKey = `${normalizeBudgetLabel(rawCode)}|${normalizeBudgetLabel(rawSub)}`;
+        const mapped = renameMap.get(mapKey);
+        if (!mapped) {
+          nextMap[key] = value;
+          return;
+        }
+        const nextKey = `${mapped.code}|${mapped.sub}`;
+        if (!nextMap[nextKey]) nextMap[nextKey] = value;
+        touched = true;
+      });
+      if (touched) {
+        await setDoc(
+          evidenceMapRef,
+          withTenantScope(orgId, {
+            projectId: portalUser.projectId,
+            map: nextMap,
+            updatedAt: now,
+            updatedBy,
+          }),
+          { merge: true },
+        );
+        setEvidenceRequiredMap(nextMap);
+      }
+    }
   }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name]);
 
   const saveBankStatementRows = useCallback(async (rows: BankStatementRow[]) => {
@@ -997,6 +1191,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     expenseSheetRows,
     bankStatementRows,
     budgetPlanRows,
+    budgetCodeBook,
     register,
     setActiveProject,
     logout,
@@ -1016,6 +1211,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     saveExpenseSheetRows,
     saveBankStatementRows,
     saveBudgetPlanRows,
+    saveBudgetCodeBook,
   };
 
   return <PortalContext.Provider value={value}>{children}</PortalContext.Provider>;
