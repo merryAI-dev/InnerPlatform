@@ -367,6 +367,24 @@ export function PortalBudget() {
           </CardContent>
         </Card>
 
+        {/* 보조 테이블 */}
+        <Card>
+          <CardHeader className="pb-2"><CardTitle className="text-[12px]">예산 구성</CardTitle></CardHeader>
+          <CardContent className="p-0">
+            <div className="divide-y divide-border/50">
+              {auxRows.map((r, i) => (
+                <div key={i} className="flex items-center justify-between px-4 py-2.5 text-[11px]">
+                  <span>{r.label}</span>
+                  <div className="flex items-center gap-4" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                    <span style={{ fontWeight: 500 }}>{fmtKRW(r.amount)}원</span>
+                    <span className="text-muted-foreground w-[50px] text-right">{fmtPercent(r.ratio)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
         {/* 소진율 바 총괄 */}
         <Card>
           <CardContent className="p-3">
@@ -385,6 +403,14 @@ export function PortalBudget() {
             <div className="flex justify-between mt-1.5 text-[9px] text-muted-foreground" style={{ fontVariantNumeric: 'tabular-nums' }}>
               <span>집행 {fmtKRW(total.spent || 0)}원</span>
               <span>잔액 {fmtKRW(total.balance || 0)}원</span>
+            </div>
+            <div className="mt-2.5 pt-2 border-t border-border/60">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px]" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                <span className="text-muted-foreground">총계</span>
+                <span>예산 <strong>{fmtKRW(total.effectiveBudget || 0)}</strong></span>
+                <span>집행 <strong style={{ color: '#e11d48' }}>{fmtKRW(total.spent || 0)}</strong></span>
+                <span>잔액 <strong style={{ color: '#059669' }}>{fmtKRW(total.balance || 0)}</strong></span>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -578,54 +604,7 @@ export function PortalBudget() {
             );
           })}
 
-          {/* 총계 */}
-          {total && (
-            <Card className="border-indigo-200 dark:border-indigo-800 bg-indigo-50/30 dark:bg-indigo-950/10">
-              <CardContent className="p-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <p className="text-[10px] text-indigo-600 dark:text-indigo-400" style={{ fontWeight: 600 }}>총계</p>
-                    <p className="text-[18px] text-indigo-700 dark:text-indigo-300" style={{ fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>
-                      {fmtKRW(total.effectiveBudget)}원
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-4 text-[11px]" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                    <div className="text-center">
-                      <p className="text-[9px] text-muted-foreground">집행</p>
-                      <p style={{ fontWeight: 700, color: '#e11d48' }}>{fmtKRW(total.spent)}</p>
-                    </div>
-                    <div className="text-center">
-                      <p className="text-[9px] text-muted-foreground">잔액</p>
-                      <p style={{ fontWeight: 700, color: '#059669' }}>{fmtKRW(total.balance)}</p>
-                    </div>
-                    <div className="text-center">
-                      <p className="text-[9px] text-muted-foreground">소진율</p>
-                      <p style={{ fontWeight: 700, color: burnColor(total.burnRate) }}>{fmtPercent(total.burnRate)}</p>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          )}
         </div>
-
-        {/* 보조 테이블 */}
-        <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-[12px]">예산 구성</CardTitle></CardHeader>
-          <CardContent className="p-0">
-            <div className="divide-y divide-border/50">
-              {auxRows.map((r, i) => (
-                <div key={i} className="flex items-center justify-between px-4 py-2.5 text-[11px]">
-                  <span>{r.label}</span>
-                  <div className="flex items-center gap-4" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                    <span style={{ fontWeight: 500 }}>{fmtKRW(r.amount)}원</span>
-                    <span className="text-muted-foreground w-[50px] text-right">{fmtPercent(r.ratio)}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
 
         {/* 행 상세 모달 */}
         <Dialog open={!!selectedRow} onOpenChange={open => !open && setSelectedRow(null)}>
