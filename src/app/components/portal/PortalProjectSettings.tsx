@@ -5,10 +5,9 @@ import { Card, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { usePortalStore } from '../../data/portal-store';
-import { PROJECT_STATUS_LABELS, type Project } from '../../data/types';
+import { PROJECT_STATUS_LABELS } from '../../data/types';
 import { normalizeProjectIds, resolvePrimaryProjectId } from '../../data/project-assignment';
 import { useAuth } from '../../data/auth-store';
-import { PROJECTS } from '../../data/mock-data';
 import { resolveHomePath } from '../../platform/navigation';
 
 const statusColors: Record<string, string> = {
@@ -20,11 +19,10 @@ const statusColors: Record<string, string> = {
 
 export function PortalProjectSettings() {
   const navigate = useNavigate();
-  const { register, isRegistered, isLoading, portalUser } = usePortalStore();
+  const { register, isRegistered, isLoading, portalUser, projects } = usePortalStore();
   const { user: authUser, isAuthenticated, isLoading: authLoading } = useAuth();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [projects] = useState<Project[]>(PROJECTS);
   const [projectIds, setProjectIds] = useState<string[]>(() => normalizeProjectIds([
     ...(Array.isArray(portalUser?.projectIds) ? portalUser?.projectIds : []),
     portalUser?.projectId,
@@ -68,10 +66,10 @@ export function PortalProjectSettings() {
   }, [authUser, portalUser]);
 
   const activeProjects = useMemo(() => (
-    projects.filter((p) => p.status === 'IN_PROGRESS' || p.status === 'COMPLETED_PENDING_PAYMENT')
+    projects.filter((p) => p.status === 'CONTRACT_PENDING')
   ), [projects]);
 
-  const allProjects = projects.length ? projects : activeProjects;
+  const allProjects = activeProjects;
 
   const toggleProject = (projectId: string) => {
     setError('');
@@ -99,8 +97,21 @@ export function PortalProjectSettings() {
     }
 
     const normalized = normalizeProjectIds(projectIds);
+    // NOTE: 테스트용으로 사업 선택 필수 조건을 일시적으로 해제
     if (normalized.length === 0) {
-      setError('최소 1개 이상의 사업을 선택해 주세요.');
+      setSaving(true);
+      const ok = await register({
+        name: authUser.name,
+        email: authUser.email,
+        role: authUser.role || 'pm',
+        projectId: '',
+        projectIds: [],
+        allowEmptyProject: true,
+      });
+      setSaving(false);
+      if (!ok) {
+        setError('저장에 실패했습니다. 잠시 후 다시 시도해 주세요.');
+      }
       return;
     }
 

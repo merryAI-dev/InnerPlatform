@@ -2,7 +2,9 @@ import React, { createContext, useContext, useState, useCallback, useEffect, use
 import {
   collection,
   doc,
+  documentId,
   getDoc,
+  limit,
   onSnapshot,
   query,
   setDoc,
@@ -10,7 +12,19 @@ import {
   where,
   type Unsubscribe,
 } from 'firebase/firestore';
-import type { BudgetPlanRow, BudgetCodeEntry, BudgetCodeRename, Ledger, Project, ParticipationEntry, Transaction, TransactionState } from './types';
+import type {
+  BudgetPlanRow,
+  BudgetCodeEntry,
+  BudgetCodeRename,
+  Ledger,
+  Project,
+  ParticipationEntry,
+  Transaction,
+  TransactionState,
+  WeeklySubmissionStatus,
+  ProjectRequest,
+  ProjectRequestPayload,
+} from './types';
 import type { ExpenseSet, ExpenseItem, ExpenseSetStatus } from './budget-data';
 import { BUDGET_CODE_BOOK, EXPENSE_SETS } from './budget-data';
 import {
@@ -57,6 +71,7 @@ interface PortalState {
   bankStatementRows: BankStatementRow[] | null;
   budgetPlanRows: BudgetPlanRow[] | null;
   budgetCodeBook: BudgetCodeEntry[];
+  weeklySubmissionStatuses: WeeklySubmissionStatus[];
 }
 
 interface PortalActions {
@@ -64,6 +79,7 @@ interface PortalActions {
     user: Omit<PortalUser, 'id' | 'registeredAt' | 'projectId' | 'projectIds'> & {
       projectId?: string;
       projectIds?: string[];
+      allowEmptyProject?: boolean;
     },
   ) => Promise<boolean>;
   setActiveProject: (projectId: string) => Promise<boolean>;
@@ -85,6 +101,14 @@ interface PortalActions {
   saveBankStatementRows: (rows: BankStatementRow[]) => Promise<void>;
   saveBudgetPlanRows: (rows: BudgetPlanRow[]) => Promise<void>;
   saveBudgetCodeBook: (rows: BudgetCodeEntry[], renames?: BudgetCodeRename[]) => Promise<void>;
+  upsertWeeklySubmissionStatus: (input: {
+    projectId: string;
+    yearMonth: string;
+    weekNo: number;
+    projectionUpdated?: boolean;
+    expenseUpdated?: boolean;
+  }) => Promise<void>;
+  createProjectRequest: (payload: ProjectRequestPayload) => Promise<string | null>;
 }
 
 const _g = globalThis as any;
@@ -156,6 +180,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   const [budgetCodeBook, setBudgetCodeBook] = useState<BudgetCodeEntry[]>(
     normalizeBudgetCodeBook(BUDGET_CODE_BOOK as unknown as BudgetCodeEntry[]),
   );
+  const [weeklySubmissionStatuses, setWeeklySubmissionStatuses] = useState<WeeklySubmissionStatus[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isMemberLoading, setIsMemberLoading] = useState(true);
   const unsubsRef = useRef<Unsubscribe[]>([]);
@@ -163,6 +188,11 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   const myProject = useMemo(() => {
     return portalUser ? projects.find((project) => project.id === portalUser.projectId) || null : null;
   }, [portalUser, projects]);
+
+  const scopedProjectIds = useMemo(
+    () => normalizeProjectIds([...(Array.isArray(portalUser?.projectIds) ? portalUser?.projectIds : []), portalUser?.projectId]),
+    [portalUser?.projectIds, portalUser?.projectId],
+  );
 
   useEffect(() => {
     if (!isAuthenticated || !authUser) {
@@ -191,7 +221,6 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           projectIds?: Array<string | { id?: string; name?: string }>;
           projectId?: string | { id?: string; name?: string };
         };
-        const allowedProjectIds = new Set(PROJECTS.map((p) => p.id));
         const nameMap: Record<string, string> = {};
         const rawIds = Array.isArray(member.projectIds) ? member.projectIds : [];
         const coercedIds = rawIds
@@ -202,12 +231,11 @@ export function PortalProvider({ children }: { children: ReactNode }) {
             if (id && name) nameMap[id] = name;
             return id;
           })
-          .filter((id) => allowedProjectIds.has(id))
           .filter(Boolean);
         const preferredId = typeof member.projectId === 'string'
           ? member.projectId
           : String((member.projectId as any)?.id || '');
-        const normalizedPreferred = allowedProjectIds.has(preferredId) ? preferredId : '';
+        const normalizedPreferred = preferredId || '';
         const normalized = normalizePortalUser({
           id: authUser.uid,
           name: member.name || authUser.name,
@@ -261,6 +289,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       setTransactions([]);
       setEvidenceRequiredMap({});
       setExpenseSheetRows(null);
+      setWeeklySubmissionStatuses([]);
       setIsLoading(false);
       return;
     }
@@ -277,13 +306,38 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     };
 
     if (!portalUser?.projectId) {
-      setProjects(PROJECTS);
+      const projectQuery = query(
+        collection(db, getOrgCollectionPath(orgId, 'projects')),
+        where('status', '==', 'CONTRACT_PENDING'),
+        limit(500),
+      );
+      unsubsRef.current.push(
+        onSnapshot(projectQuery, (snap) => {
+          const map = new Map<string, Project>();
+          snap.docs.forEach((docItem) => {
+            const data = docItem.data() as Project;
+            const id = data.id || docItem.id;
+            map.set(id, { ...data, id });
+          });
+          const list = Array.from(map.values()).sort((a, b) =>
+            String(a.name || '').localeCompare(String(b.name || '')),
+          );
+          setProjects(list);
+          projectReady = true;
+          markReady();
+        }, (err) => {
+          console.error('[PortalStore] projects listen error:', err);
+          setProjects([]);
+          projectReady = true;
+          markReady();
+        }),
+      );
       setLedgers([]);
       setExpenseSets(EXPENSE_SETS);
       setChangeRequests(CHANGE_REQUESTS);
       setParticipationEntries([]);
       setTransactions([]);
-      projectReady = true;
+      setWeeklySubmissionStatuses([]);
       ledgerReady = true;
       expenseReady = true;
       changeReady = true;
@@ -291,9 +345,100 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       txReady = true;
       markReady();
     } else {
-      setProjects(PROJECTS);
-      projectReady = true;
-      markReady();
+      const projectCollection = collection(db, getOrgCollectionPath(orgId, 'projects'));
+      const assignedProjectIds = scopedProjectIds.length > 0 ? scopedProjectIds : [portalUser.projectId];
+      const assignedChunks: string[][] = [];
+      for (let i = 0; i < assignedProjectIds.length; i += 10) {
+        assignedChunks.push(assignedProjectIds.slice(i, i + 10));
+      }
+
+      const assignedMaps = assignedChunks.map(() => new Map<string, Project>());
+      const activeMap = new Map<string, Project>();
+      const assignedReadyFlags = assignedChunks.map(() => false);
+      let pendingAssigned = assignedChunks.length;
+      let activeReady = false;
+
+      const refreshProjectList = () => {
+        const merged = new Map<string, Project>();
+        assignedMaps.forEach((chunkMap) => {
+          chunkMap.forEach((project, id) => merged.set(id, project));
+        });
+        activeMap.forEach((project, id) => merged.set(id, project));
+        const list = Array.from(merged.values()).sort((a, b) =>
+          String(a.name || '').localeCompare(String(b.name || '')),
+        );
+        setProjects(list);
+      };
+
+      const markAssignedReady = (index: number) => {
+        if (assignedReadyFlags[index]) return;
+        assignedReadyFlags[index] = true;
+        pendingAssigned = Math.max(0, pendingAssigned - 1);
+      };
+
+      const maybeMarkProjectReady = () => {
+        if (activeReady && pendingAssigned === 0) {
+          projectReady = true;
+          markReady();
+        }
+      };
+
+      const activeProjectQuery = query(
+        projectCollection,
+        where('status', '==', 'CONTRACT_PENDING'),
+        limit(500),
+      );
+
+      unsubsRef.current.push(
+        onSnapshot(activeProjectQuery, (snap) => {
+          activeMap.clear();
+          snap.docs.forEach((docItem) => {
+            const data = docItem.data() as Project;
+            const id = data.id || docItem.id;
+            activeMap.set(id, { ...data, id });
+          });
+          refreshProjectList();
+          activeReady = true;
+          maybeMarkProjectReady();
+        }, (err) => {
+          console.error('[PortalStore] active projects listen error:', err);
+          activeMap.clear();
+          refreshProjectList();
+          activeReady = true;
+          maybeMarkProjectReady();
+        }),
+      );
+
+      assignedChunks.forEach((chunk, index) => {
+        const assignedQuery = chunk.length === 1
+          ? query(projectCollection, where(documentId(), '==', chunk[0]))
+          : query(projectCollection, where(documentId(), 'in', chunk));
+
+        unsubsRef.current.push(
+          onSnapshot(assignedQuery, (snap) => {
+            const chunkMap = assignedMaps[index];
+            chunkMap.clear();
+            snap.docs.forEach((docItem) => {
+              const data = docItem.data() as Project;
+              const id = data.id || docItem.id;
+              chunkMap.set(id, { ...data, id });
+            });
+            refreshProjectList();
+            markAssignedReady(index);
+            maybeMarkProjectReady();
+          }, (err) => {
+            console.error('[PortalStore] assigned projects listen error:', err);
+            assignedMaps[index].clear();
+            refreshProjectList();
+            markAssignedReady(index);
+            maybeMarkProjectReady();
+          }),
+        );
+      });
+
+      if (assignedChunks.length === 0) {
+        maybeMarkProjectReady();
+      }
 
       const ledgerQuery = query(
         collection(db, getOrgCollectionPath(orgId, 'ledgers')),
@@ -406,6 +551,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         db,
         `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/budget_code_book/default`,
       );
+      const weeklySubmissionBase = collection(db, getOrgCollectionPath(orgId, 'weeklySubmissionStatus'));
 
       unsubsRef.current.push(
         onSnapshot(txQuery, (snap) => {
@@ -499,13 +645,39 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           setBudgetCodeBook(normalizeBudgetCodeBook(BUDGET_CODE_BOOK as unknown as BudgetCodeEntry[]));
         }),
       );
+
+      if (scopedProjectIds.length > 0) {
+        const weekQuery = scopedProjectIds.length === 1
+          ? query(weeklySubmissionBase, where('projectId', '==', scopedProjectIds[0]))
+          : query(weeklySubmissionBase, where('projectId', 'in', scopedProjectIds.slice(0, 10)));
+
+        unsubsRef.current.push(
+          onSnapshot(weekQuery, (snap) => {
+            const list = snap.docs.map((d) => {
+              const data = d.data() as WeeklySubmissionStatus;
+              return { ...data, id: data.id || d.id };
+            });
+            list.sort((a, b) => {
+              if (a.projectId !== b.projectId) return String(a.projectId).localeCompare(String(b.projectId));
+              if (a.yearMonth !== b.yearMonth) return String(b.yearMonth || '').localeCompare(String(a.yearMonth || ''));
+              return (a.weekNo || 0) - (b.weekNo || 0);
+            });
+            setWeeklySubmissionStatuses(list);
+          }, (err) => {
+            console.error('[PortalStore] weekly submission listen error:', err);
+            setWeeklySubmissionStatuses([]);
+          }),
+        );
+      } else {
+        setWeeklySubmissionStatuses([]);
+      }
     }
 
     return () => {
       unsubsRef.current.forEach((unsub) => unsub());
       unsubsRef.current = [];
     };
-  }, [firestoreEnabled, db, orgId, portalUser?.projectId]);
+  }, [firestoreEnabled, db, orgId, portalUser?.projectId, scopedProjectIds]);
 
   const persistExpenseSet = useCallback(async (set: ExpenseSet) => {
     if (!db) return;
@@ -747,6 +919,129 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     }
   }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name]);
 
+  const upsertWeeklySubmissionStatus = useCallback(async (input: {
+    projectId: string;
+    yearMonth: string;
+    weekNo: number;
+    projectionUpdated?: boolean;
+    expenseUpdated?: boolean;
+  }) => {
+    if (!db) {
+      toast.error('Firestore 연결이 필요합니다. 관리자에게 문의해 주세요.');
+      return;
+    }
+    const projectId = input.projectId?.trim();
+    const yearMonth = input.yearMonth?.trim();
+    const weekNo = Math.max(1, Math.min(6, Math.trunc(input.weekNo)));
+    if (!projectId || !/^\d{4}-\d{2}$/.test(yearMonth)) return;
+
+    const now = new Date().toISOString();
+    const updatedBy = portalUser?.name || authUser?.name || '';
+    const id = `${projectId}-${yearMonth}-w${weekNo}`;
+    const ref = doc(db, getOrgDocumentPath(orgId, 'weeklySubmissionStatus', id));
+    const patch: WeeklySubmissionStatus = {
+      id,
+      tenantId: orgId,
+      projectId,
+      yearMonth,
+      weekNo,
+      updatedAt: now,
+      updatedByName: updatedBy,
+    };
+    if (typeof input.projectionUpdated === 'boolean') {
+      patch.projectionUpdated = input.projectionUpdated;
+      patch.projectionUpdatedAt = now;
+      patch.projectionUpdatedByName = updatedBy;
+    }
+    if (typeof input.expenseUpdated === 'boolean') {
+      patch.expenseUpdated = input.expenseUpdated;
+      patch.expenseUpdatedAt = now;
+      patch.expenseUpdatedByName = updatedBy;
+    }
+    try {
+      await setDoc(ref, patch, { merge: true });
+    } catch (err) {
+      console.error('[PortalStore] weeklySubmissionStatus save failed:', err);
+      toast.error('주간 제출 상태 저장에 실패했습니다.');
+      throw err;
+    }
+  }, [db, orgId, portalUser?.name, authUser?.name]);
+
+  const createProjectRequest = useCallback(async (payload: ProjectRequestPayload): Promise<string | null> => {
+    if (!db || !authUser) {
+      toast.error('로그인 정보를 확인할 수 없습니다.');
+      return null;
+    }
+    const now = new Date().toISOString();
+    const id = `pr-${Date.now()}`;
+    const request: ProjectRequest = {
+      id,
+      tenantId: orgId,
+      status: 'PENDING',
+      payload,
+      requestedBy: authUser.uid,
+      requestedByName: authUser.name || portalUser?.name || '사용자',
+      requestedByEmail: authUser.email || portalUser?.email || '',
+      requestedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    };
+    // Immediately create project (no admin approval flow)
+    const projectId = `p${Date.now()}`;
+    const slug = String(payload.name || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9가-힣\s-]/g, '')
+      .replace(/\s+/g, '-')
+      .slice(0, 50);
+    const project: Project = {
+      id: projectId,
+      slug,
+      orgId,
+      name: payload.name,
+      status: 'CONTRACT_PENDING',
+      type: payload.type,
+      phase: 'CONFIRMED',
+      contractAmount: payload.contractAmount,
+      contractStart: payload.contractStart,
+      contractEnd: payload.contractEnd,
+      settlementType: payload.settlementType,
+      basis: payload.basis,
+      accountType: payload.accountType,
+      paymentPlan: { contract: 0, interim: 0, final: 0 },
+      paymentPlanDesc: payload.paymentPlanDesc,
+      clientOrg: payload.clientOrg,
+      groupwareName: '',
+      participantCondition: payload.participantCondition,
+      contractType: '계약서(날인)',
+      department: payload.department,
+      teamName: payload.teamName,
+      managerId: authUser.uid,
+      managerName: authUser.name || portalUser?.name || '',
+      budgetCurrentYear: payload.contractAmount || 0,
+      taxInvoiceAmount: 0,
+      profitRate: 0,
+      profitAmount: 0,
+      isSettled: false,
+      finalPaymentNote: '',
+      confirmerName: '',
+      lastCheckedAt: '',
+      cashflowDiffNote: '',
+      description: payload.description,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await setDoc(doc(db, getOrgDocumentPath(orgId, 'projects', projectId)), withTenantScope(orgId, project), { merge: true });
+    await setDoc(doc(db, getOrgDocumentPath(orgId, 'projectRequests', id)), {
+      ...request,
+      status: 'APPROVED',
+      reviewedBy: authUser.uid,
+      reviewedByName: authUser.name || '',
+      reviewedAt: now,
+      approvedProjectId: projectId,
+    }, { merge: true });
+    return id;
+  }, [db, orgId, portalUser, authUser]);
+
   const saveBankStatementRows = useCallback(async (rows: BankStatementRow[]) => {
     if (!db || !portalUser?.projectId) {
       toast.error('Firestore 연결이 필요합니다. 관리자에게 문의해 주세요.');
@@ -799,6 +1094,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     user: Omit<PortalUser, 'id' | 'registeredAt' | 'projectId' | 'projectIds'> & {
       projectId?: string;
       projectIds?: string[];
+      allowEmptyProject?: boolean;
     },
   ): Promise<boolean> => {
     if (!firestoreEnabled || !db) {
@@ -812,19 +1108,31 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       user.projectId,
     ]);
     const primaryProjectId = resolvePrimaryProjectId(normalizedProjectIds, user.projectId);
-    if (!primaryProjectId) {
+    const allowEmpty = Boolean(user.allowEmptyProject);
+    if (!primaryProjectId && !allowEmpty) {
       toast.error('최소 1개 이상의 사업을 선택해 주세요.');
       return false;
     }
 
-    const candidate = normalizePortalUser({
-      ...user,
-      id: authUser?.uid || `pu-${Date.now()}`,
-      role: (authUser?.role || user.role || 'pm').toLowerCase(),
-      projectId: primaryProjectId,
-      projectIds: normalizedProjectIds,
-      registeredAt: now,
-    });
+    const candidate = allowEmpty && !primaryProjectId
+      ? {
+        id: authUser?.uid || `pu-${Date.now()}`,
+        name: user.name || '사용자',
+        email: user.email || '',
+        role: (authUser?.role || user.role || 'pm').toLowerCase(),
+        projectId: '',
+        projectIds: [],
+        projectNames: portalUser?.projectNames,
+        registeredAt: now,
+      }
+      : normalizePortalUser({
+        ...user,
+        id: authUser?.uid || `pu-${Date.now()}`,
+        role: (authUser?.role || user.role || 'pm').toLowerCase(),
+        projectId: primaryProjectId,
+        projectIds: normalizedProjectIds,
+        registeredAt: now,
+      });
 
     if (!candidate) {
       toast.error('사업 정보를 저장하지 못했습니다.');
@@ -1192,6 +1500,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     bankStatementRows,
     budgetPlanRows,
     budgetCodeBook,
+    weeklySubmissionStatuses,
     register,
     setActiveProject,
     logout,
@@ -1212,6 +1521,8 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     saveBankStatementRows,
     saveBudgetPlanRows,
     saveBudgetCodeBook,
+    upsertWeeklySubmissionStatus,
+    createProjectRequest,
   };
 
   return <PortalContext.Provider value={value}>{children}</PortalContext.Provider>;

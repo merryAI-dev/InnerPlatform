@@ -5,10 +5,9 @@ import { Card, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { usePortalStore } from '../../data/portal-store';
-import { PROJECT_STATUS_LABELS, type Project } from '../../data/types';
+import { PROJECT_STATUS_LABELS } from '../../data/types';
 import { normalizeProjectIds, resolvePrimaryProjectId } from '../../data/project-assignment';
 import { useAuth } from '../../data/auth-store';
-import { PROJECTS } from '../../data/mock-data';
 import { resolveHomePath } from '../../platform/navigation';
 
 const statusColors: Record<string, string> = {
@@ -20,11 +19,10 @@ const statusColors: Record<string, string> = {
 
 export function PortalOnboarding() {
   const navigate = useNavigate();
-  const { register, isRegistered, isLoading, portalUser } = usePortalStore();
+  const { register, isRegistered, isLoading, portalUser, projects } = usePortalStore();
   const { user: authUser, isAuthenticated, isLoading: authLoading } = useAuth();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [projects] = useState<Project[]>(PROJECTS);
   const [projectIds, setProjectIds] = useState<string[]>(() => normalizeProjectIds([
     ...(Array.isArray(portalUser?.projectIds) ? portalUser?.projectIds : []),
     portalUser?.projectId,
@@ -68,10 +66,10 @@ export function PortalOnboarding() {
   }, [authUser, portalUser]);
 
   const activeProjects = useMemo(() => (
-    projects.filter((p) => p.status === 'IN_PROGRESS' || p.status === 'COMPLETED_PENDING_PAYMENT')
+    projects.filter((p) => p.status === 'CONTRACT_PENDING')
   ), [projects]);
 
-  const allProjects = projects.length ? projects : activeProjects;
+  const allProjects = activeProjects;
 
   const toggleProject = (projectId: string) => {
     setError('');
@@ -99,8 +97,25 @@ export function PortalOnboarding() {
     }
 
     const normalized = normalizeProjectIds(projectIds);
+    // NOTE: 테스트용으로 사업 선택 필수 조건을 일시적으로 해제
     if (normalized.length === 0) {
-      setError('최소 1개 이상의 사업을 선택해 주세요.');
+      setSaving(true);
+      const ok = await register({
+        name: authUser.name,
+        email: authUser.email,
+        role: authUser.role || 'pm',
+        projectId: '',
+        projectIds: [],
+        allowEmptyProject: true,
+      });
+      setSaving(false);
+
+      if (!ok) {
+        setError('저장에 실패했습니다. 잠시 후 다시 시도해 주세요.');
+        return;
+      }
+
+      navigate('/portal', { replace: true });
       return;
     }
 
@@ -168,7 +183,15 @@ export function PortalOnboarding() {
 
             {allProjects.length === 0 && (
               <div className="p-4 rounded-lg border border-dashed border-border text-center text-[12px] text-muted-foreground">
-                등록된 사업이 없습니다. 관리자에게 사업 등록을 요청해 주세요.
+                <div>등록된 사업이 없습니다. 관리자에게 사업 등록을 요청해 주세요.</div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-3 h-7 text-[11px]"
+                  onClick={() => navigate('/portal/register-project')}
+                >
+                  사업 추가 요청
+                </Button>
               </div>
             )}
 
@@ -216,6 +239,17 @@ export function PortalOnboarding() {
               })}
             </div>
 
+            <div className="pt-2">
+              <Button
+                variant="default"
+                size="sm"
+                className="h-9 text-[12px] w-full"
+                onClick={() => navigate('/portal/register-project')}
+              >
+                사업 추가 요청
+              </Button>
+            </div>
+
             <div className="flex items-center justify-between pt-2">
               <p className="text-[11px] text-muted-foreground">
                 {isRegistered ? '선택 정보를 변경하면 바로 반영됩니다.' : '사업을 선택해야 포털을 사용할 수 있습니다.'}
@@ -223,7 +257,7 @@ export function PortalOnboarding() {
               <Button
                 className="h-9 text-[12px]"
                 onClick={handleSave}
-                disabled={saving || allProjects.length === 0}
+                disabled={saving || projectIds.length === 0}
               >
                 {saving ? '저장 중...' : '저장하고 계속'}
               </Button>

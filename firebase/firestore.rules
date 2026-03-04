@@ -29,6 +29,10 @@ service cloud.firestore {
       return isSignedIn() ? memberDoc(orgId).data.role : null;
     }
 
+    function tokenRole() {
+      return request.auth != null ? request.auth.token.role : null;
+    }
+
     function isAdmin(orgId) {
       return role(orgId) == 'admin';
     }
@@ -69,6 +73,8 @@ service cloud.firestore {
 
     function canWriteProjectResource(orgId, projectId) {
       return role(orgId) in ['admin', 'tenant_admin', 'finance']
+        || tokenRole() in ['admin', 'tenant_admin', 'finance']
+        || isBootstrapAdminEmail()
         || (role(orgId) == 'pm' && isProjectAssigned(orgId, projectId));
     }
 
@@ -87,19 +93,62 @@ service cloud.firestore {
     match /orgs/{orgId}/members/{uid} {
       allow read: if isSignedIn() && resourceHasValidTenant(orgId);
       allow create: if isSignedIn()
-                    && requestHasValidTenant(orgId)
-                    && (request.auth.uid == uid || isAdmin(orgId));
+                    && request.auth.uid == uid
+                    && (requestHasValidTenant(orgId) || !request.resource.data.keys().hasAny(['tenantId']))
+                    || (isSignedIn() && requestHasValidTenant(orgId) && (isAdmin(orgId) || tokenRole() in ['admin', 'tenant_admin', 'finance']))
+                    || (isBootstrapAdminEmail() && request.auth.uid == uid);
       allow update: if (isAdmin(orgId) && resourceHasValidTenant(orgId) && requestHasValidTenant(orgId))
                     || selfMemberUpdateWithoutRoleChange(orgId, uid)
-                    || (isBootstrapAdminEmail() && request.auth.uid == uid && requestHasValidTenant(orgId));
+                    || (isBootstrapAdminEmail() && request.auth.uid == uid)
+                    || (
+                      request.auth.uid == uid
+                      && requestHasValidTenant(orgId)
+                      && resourceHasValidTenant(orgId)
+                      && tokenRole() in ['admin', 'tenant_admin', 'finance']
+                    );
       allow delete: if isAdmin(orgId) && resourceHasValidTenant(orgId);
     }
 
     match /orgs/{orgId}/projects/{projectId} {
-      allow read: if isSignedIn() && resourceHasValidTenant(orgId) && canReadProjectResource(orgId, projectId);
-      allow create: if isSignedIn() && requestHasValidTenant(orgId) && canWriteProjectResource(orgId, projectId);
+      allow read: if isSignedIn()
+                  && (resourceHasValidTenant(orgId) || !resource.data.keys().hasAny(['tenantId']))
+                  && (
+                    canReadProjectResource(orgId, projectId)
+                    || (resource.data.managerId == request.auth.uid)
+                    || (
+                      role(orgId) in ['pm', 'viewer']
+                      && resource.data.status in ['CONTRACT_PENDING', 'IN_PROGRESS', 'COMPLETED_PENDING_PAYMENT']
+                    )
+                  );
+      allow create: if isSignedIn()
+                    && requestHasValidTenant(orgId)
+                    && (
+                      canWriteProjectResource(orgId, projectId)
+                      || request.resource.data.managerId == request.auth.uid
+                    );
       allow update: if isSignedIn() && requestHasValidTenant(orgId) && resourceHasValidTenant(orgId) && canWriteProjectResource(orgId, projectId);
       allow delete: if isSignedIn() && resourceHasValidTenant(orgId) && canWriteProjectResource(orgId, projectId);
+    }
+
+    match /orgs/{orgId}/project_requests/{docId} {
+      allow read: if isSignedIn()
+                  && (
+                    role(orgId) in ['admin', 'tenant_admin', 'finance']
+                    || tokenRole() in ['admin', 'tenant_admin', 'finance']
+                    || (resource.data.requestedBy == request.auth.uid)
+                  )
+                  && resourceHasValidTenant(orgId);
+      allow create: if isSignedIn()
+                    && requestHasValidTenant(orgId)
+                    && request.resource.data.requestedBy == request.auth.uid;
+      allow update: if isSignedIn()
+                    && requestHasValidTenant(orgId)
+                    && resourceHasValidTenant(orgId)
+                    && (role(orgId) in ['admin', 'tenant_admin', 'finance'] || tokenRole() in ['admin', 'tenant_admin', 'finance']);
+      allow delete: if isSignedIn()
+                    && requestHasValidTenant(orgId)
+                    && resourceHasValidTenant(orgId)
+                    && (role(orgId) in ['admin', 'tenant_admin', 'finance'] || tokenRole() in ['admin', 'tenant_admin', 'finance']);
     }
 
     match /orgs/{orgId}/projects/{projectId}/expense_sheets/{sheetId} {
@@ -128,6 +177,13 @@ service cloud.firestore {
       allow create: if isSignedIn() && requestHasValidTenant(orgId) && canWriteProjectResource(orgId, projectId);
       allow update: if isSignedIn() && requestHasValidTenant(orgId) && resourceHasValidTenant(orgId) && canWriteProjectResource(orgId, projectId);
       allow delete: if isSignedIn() && resourceHasValidTenant(orgId) && canWriteProjectResource(orgId, projectId);
+    }
+
+    match /orgs/{orgId}/weekly_submission_status/{docId} {
+      allow read: if isSignedIn() && resourceHasValidTenant(orgId) && canReadProjectResource(orgId, resource.data.projectId);
+      allow create: if isSignedIn() && requestHasValidTenant(orgId) && canWriteProjectResource(orgId, request.resource.data.projectId);
+      allow update: if isSignedIn() && requestHasValidTenant(orgId) && resourceHasValidTenant(orgId) && canWriteProjectResource(orgId, resource.data.projectId);
+      allow delete: if isSignedIn() && resourceHasValidTenant(orgId) && canWriteProjectResource(orgId, resource.data.projectId);
     }
 
     match /orgs/{orgId}/ledgers/{ledgerId} {

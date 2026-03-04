@@ -1,24 +1,19 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router';
 import {
-  LayoutDashboard, Calculator, Users,
-  ArrowRightLeft, LogOut,
+  LayoutDashboard, Calculator,
+  LogOut,
   FolderKanban, Menu,
   Plus,
-  MessagesSquare,
   CircleDollarSign,
   BarChart3,
   ClipboardList,
   Loader2,
   AlertTriangle,
   Settings2,
-  BookOpen,
-  Briefcase,
   FileSpreadsheet,
-  MessageCircle,
 } from 'lucide-react';
 import { PortalProvider, usePortalStore } from '../../data/portal-store';
-import { PROJECTS } from '../../data/mock-data';
 import { useAuth } from '../../data/auth-store';
 import { useHrAnnouncements } from '../../data/hr-announcements-store';
 import { usePayroll } from '../../data/payroll-store';
@@ -46,17 +41,12 @@ import { addMonthsToYearMonth, getSeoulTodayIso } from '../../platform/business-
 const NAV_ITEMS = [
   { to: '/portal', icon: LayoutDashboard, label: '내 사업 현황', exact: true },
   { to: '/portal/submissions', icon: ClipboardList, label: '내 제출 현황' },
-  { to: '/portal/board', icon: MessagesSquare, label: '전사 게시판' },
-  { to: '/portal/payroll', icon: CircleDollarSign, label: '인건비/공지', accent: true },
+  { to: '/portal/payroll', icon: CircleDollarSign, label: '인건비/공지', accent: true, hidden: true },
   { to: '/portal/cashflow', icon: BarChart3, label: '캐시플로(주간)' },
   { to: '/portal/budget', icon: Calculator, label: '예산총괄' },
   { to: '/portal/weekly-expenses', icon: FileSpreadsheet, label: '사업비 입력(주간)' },
   { to: '/portal/bank-statements', icon: FileSpreadsheet, label: '통장내역' },
-  { to: '/portal/personnel', icon: Users, label: '인력 현황' },
-  { to: '/portal/change-requests', icon: ArrowRightLeft, label: '인력변경 신청' },
-  { to: '/portal/training', icon: BookOpen, label: '사내 교육' },
-  { to: '/portal/career-profile', icon: Briefcase, label: '내 경력 프로필' },
-  { to: '/portal/guide-chat', icon: MessageCircle, label: '사업비 가이드 Q&A' },
+  // removed: board, personnel, change-requests, training, career-profile, guide-chat
   { to: '/portal/project-settings', icon: Settings2, label: '사업 배정 수정', exact: true },
   { to: '/portal/register-project', icon: Plus, label: '사업 등록 제안', accent: true },
 ];
@@ -98,15 +88,21 @@ function PortalContent() {
     const ids = Array.isArray(portalUser.projectIds) && portalUser.projectIds.length
       ? portalUser.projectIds
       : portalUser.projectId ? [portalUser.projectId] : [];
-    return ids.map((id) => {
-      const project =
-        projects.find((p) => p.id === id) ||
-        PROJECTS.find((p) => p.id === id) ||
-        null;
-      const fallbackName = portalUser.projectNames?.[id];
-      return { id, name: project?.name || fallbackName || id };
-    });
+    return ids
+      .map((id) => {
+        const project = projects.find((p) => p.id === id) || null;
+        if (project && project.status !== 'CONTRACT_PENDING') return null;
+        const fallbackName = portalUser.projectNames?.[id];
+        if (!project && !fallbackName) return null;
+        return { id, name: project?.name || fallbackName || id };
+      })
+      .filter((item): item is { id: string; name: string } => item !== null);
   }, [portalUser, projects]);
+
+  const selectedProjectOptionValue = useMemo(() => {
+    if (!portalUser?.projectId) return '';
+    return projectOptions.some((item) => item.id === portalUser.projectId) ? portalUser.projectId : '';
+  }, [portalUser?.projectId, projectOptions]);
 
   const currentProject = useMemo(() => {
     if (!portalUser) return myProject;
@@ -173,7 +169,7 @@ function PortalContent() {
   }
 
   const standaloneOnboarding = (
-    location.pathname.includes('/portal/onboarding') &&
+    (location.pathname.includes('/portal/onboarding') || location.pathname.includes('/portal/register-project')) &&
     !isRegistered &&
     resolveHomePath(authUser?.role) === '/portal'
   );
@@ -293,7 +289,7 @@ function PortalContent() {
               <p className="text-[10px] text-slate-500 mb-0.5">내 사업</p>
               {projectOptions.length > 0 ? (
                 <Select
-                  value={portalUser?.projectId || ''}
+                  value={selectedProjectOptionValue}
                   onValueChange={(value) => {
                     if (value && value !== portalUser?.projectId) {
                       setActiveProject(value);
@@ -336,7 +332,7 @@ function PortalContent() {
           {/* Navigation */}
           <nav className="flex-1 py-1 overflow-y-auto">
             <div className="space-y-px px-2">
-              {NAV_ITEMS.map(item => {
+              {NAV_ITEMS.filter((item) => !item.hidden).map(item => {
                 const active = isActive(item.to, item.exact);
                 const badge = getBadge(item.to);
                 return (
