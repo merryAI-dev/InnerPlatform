@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, ClipboardCheck, ClipboardList, CircleDollarSign, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
+import { CheckCircle2, ClipboardCheck, ClipboardList, CircleDollarSign, ChevronLeft, ChevronRight, Download, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
@@ -31,6 +31,7 @@ import { getMonthMondayWeeks } from '../../platform/cashflow-weeks';
 import { useAuth } from '../../data/auth-store';
 import { useBlocker } from 'react-router';
 import { hasUnsavedChanges } from './cashflow-unsaved';
+import { triggerDownload } from '../../platform/csv-utils';
 
 function fmt(n: number): string {
   return n.toLocaleString('ko-KR');
@@ -278,6 +279,51 @@ export function CashflowProjectSheet({
       actual: compute('actual'),
     };
   }, [drafts, getEffectiveAmount, monthWeeks, openingTotalsByMode, yearMonth]);
+
+  const buildExportMatrix = useCallback((tableMode: 'projection' | 'actual') => {
+    const derived = tableMode === 'projection' ? derivedByMode.projection : derivedByMode.actual;
+    const headerRow = ['항목', ...monthWeeks.map((w) => w.label), '월 합계'];
+    const dateRow = ['기간', ...monthWeeks.map((w) => `${w.weekStart} ~ ${w.weekEnd}`), ''];
+
+    const rows: (string | number)[][] = [];
+    rows.push(headerRow, dateRow, []);
+    rows.push([`입금 (${tableMode === 'projection' ? 'Projection' : 'Actual'})`, ...Array(monthWeeks.length + 1).fill('')]);
+    for (const lineId of CASHFLOW_IN_LINES) {
+      const weekValues = monthWeeks.map((w) => getEffectiveAmount({ yearMonth, mode: tableMode, weekNo: w.weekNo, lineId }));
+      rows.push([CASHFLOW_SHEET_LINE_LABELS[lineId], ...weekValues, derived.rowTotals[lineId] || 0]);
+    }
+    rows.push(['입금 합계', ...derived.weekTotals.map((w) => w.totalIn), derived.monthTotals.totalIn]);
+    rows.push([]);
+    rows.push([`출금 (${tableMode === 'projection' ? 'Projection' : 'Actual'})`, ...Array(monthWeeks.length + 1).fill('')]);
+    for (const lineId of CASHFLOW_OUT_LINES) {
+      const weekValues = monthWeeks.map((w) => getEffectiveAmount({ yearMonth, mode: tableMode, weekNo: w.weekNo, lineId }));
+      rows.push([CASHFLOW_SHEET_LINE_LABELS[lineId], ...weekValues, derived.rowTotals[lineId] || 0]);
+    }
+    rows.push(['출금 합계', ...derived.weekTotals.map((w) => w.totalOut), derived.monthTotals.totalOut]);
+    rows.push(['잔액', ...derived.weekTotals.map((w) => w.net), derived.monthTotals.net]);
+    return rows;
+  }, [derivedByMode, getEffectiveAmount, monthWeeks, yearMonth]);
+
+  const handleDownload = useCallback(async () => {
+    const ExcelJS = await import('exceljs');
+    const wb = new ExcelJS.Workbook();
+    const addSheet = (label: string, tableMode: 'projection' | 'actual') => {
+      const ws = wb.addWorksheet(label);
+      const matrix = buildExportMatrix(tableMode);
+      matrix.forEach((row) => ws.addRow(row));
+      ws.getRow(1).font = { bold: true };
+      ws.getRow(2).font = { bold: true };
+      ws.views = [{ state: 'frozen', ySplit: 2 }];
+    };
+    addSheet('Projection', 'projection');
+    addSheet('Actual', 'actual');
+    const buffer = await wb.xlsx.writeBuffer();
+    const blob = new Blob(
+      [buffer],
+      { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+    );
+    triggerDownload(blob, `프로젝트_캐시플로(주간)_${projectName}_${yearMonth}.xlsx`);
+  }, [buildExportMatrix, projectName, yearMonth]);
 
   const flushWeek = useCallback(async (input: {
     weekNo: number;
@@ -665,6 +711,14 @@ export function CashflowProjectSheet({
         description={`${projectName} · ${yearMonth}`}
         actions={(
           <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-[12px] gap-1.5"
+              onClick={handleDownload}
+            >
+              <Download className="w-3.5 h-3.5" /> 엑셀 다운로드
+            </Button>
             {mode === 'projection' && (
               <Button
                 variant="default"
