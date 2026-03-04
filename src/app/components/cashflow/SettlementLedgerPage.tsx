@@ -1,5 +1,6 @@
 import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, Download, ExternalLink, Plus, Save, Send, X, Loader2 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { ClipboardEvent, KeyboardEvent, MouseEvent } from 'react';
 import { toast } from 'sonner';
 import { BUDGET_CODE_BOOK } from '../../data/budget-data';
@@ -103,6 +104,7 @@ export interface SettlementLedgerProps {
   saving?: boolean;
   sheetRows?: ImportRow[] | null;
   onSaveSheetRows?: (rows: ImportRow[]) => void | Promise<void>;
+  authorOptions?: string[];
   onSubmitWeek?: (input: {
     weekLabel: string;
     yearMonth: string;
@@ -128,6 +130,7 @@ export function SettlementLedgerPage({
   onSaveEvidenceRequiredMap,
   sheetRows,
   onSaveSheetRows,
+  authorOptions,
   onSubmitWeek,
   onChangeTransactionState,
   currentUserName = 'PM',
@@ -475,6 +478,7 @@ export function SettlementLedgerPage({
             defaultLedgerId={defaultLedgerId}
             evidenceRequiredMap={evidenceRequiredMap}
             onSaveEvidenceRequiredMap={onSaveEvidenceRequiredMap}
+            authorOptions={authorOptions}
             weekOptions={weekOptions}
             inline
           />
@@ -591,6 +595,7 @@ export function SettlementLedgerPage({
           defaultLedgerId={defaultLedgerId}
           evidenceRequiredMap={evidenceRequiredMap}
           onSaveEvidenceRequiredMap={onSaveEvidenceRequiredMap}
+          authorOptions={authorOptions}
           weekOptions={weekOptions}
         />
       )}
@@ -967,6 +972,7 @@ function ImportEditor({
   defaultLedgerId,
   evidenceRequiredMap,
   onSaveEvidenceRequiredMap,
+  authorOptions,
   weekOptions,
   inline = false,
 }: {
@@ -979,6 +985,7 @@ function ImportEditor({
   defaultLedgerId: string;
   evidenceRequiredMap?: Record<string, string>;
   onSaveEvidenceRequiredMap?: (map: Record<string, string>) => void | Promise<void>;
+  authorOptions?: string[];
   weekOptions: { value: string; label: string }[];
   inline?: boolean;
 }) {
@@ -1006,6 +1013,10 @@ function ImportEditor({
   );
   const weekIdx = useMemo(
     () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '해당 주차'),
+    [],
+  );
+  const authorIdx = useMemo(
+    () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '작성자'),
     [],
   );
   const dateIdx = useMemo(
@@ -1069,6 +1080,10 @@ function ImportEditor({
   const undoStack = useRef<ImportRow[][]>([]);
   const tableWrapRef = useRef<HTMLDivElement | null>(null);
   const [openSelect, setOpenSelect] = useState<{ rowIdx: number; colIdx: number } | null>(null);
+  const authorListId = useMemo(
+    () => (authorOptions && authorOptions.length ? `author-options-${projectId}` : ''),
+    [authorOptions, projectId],
+  );
   const [colWidths, setColWidths] = useState<number[]>(
     () => SETTLEMENT_COLUMNS.map((col) => {
       const headerLen = col.csvHeader.length;
@@ -1344,7 +1359,6 @@ function ImportEditor({
   const handleTablePaste = useCallback((e: ClipboardEvent<HTMLDivElement>) => {
     const text = e.clipboardData.getData('text');
     if (!text) return;
-    if (!text.includes('\n') && !text.includes('\t')) return;
     const anchor = selection
       ? {
         r: Math.min(selection.start.r, selection.end.r),
@@ -1367,11 +1381,53 @@ function ImportEditor({
     if (prev) onChange(prev);
   }, [onChange]);
 
+  const handleCopy = useCallback((e: KeyboardEvent<HTMLDivElement>) => {
+    const isCopy = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c';
+    if (!isCopy) return;
+    if (!selection) return;
+    const r1 = Math.min(selection.start.r, selection.end.r);
+    const r2 = Math.max(selection.start.r, selection.end.r);
+    const c1 = Math.min(selection.start.c, selection.end.c);
+    const c2 = Math.max(selection.start.c, selection.end.c);
+    if (r1 < 0 || c1 < 0) return;
+    const lines: string[] = [];
+    for (let r = r1; r <= r2; r++) {
+      const row = rows[r];
+      if (!row) continue;
+      const cells: string[] = [];
+      for (let c = c1; c <= c2; c++) {
+        if (c === noIdx) continue;
+        cells.push(String(row.cells[c] ?? ''));
+      }
+      lines.push(cells.join('\t'));
+    }
+    const text = lines.join('\n');
+    if (!text) return;
+    e.preventDefault();
+    if (navigator?.clipboard?.writeText) {
+      void navigator.clipboard.writeText(text);
+      return;
+    }
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+  }, [selection, rows, noIdx]);
+
+  const handleTableKeyDown = useCallback((e: KeyboardEvent<HTMLDivElement>) => {
+    handleUndo(e);
+    handleCopy(e);
+  }, [handleUndo, handleCopy]);
+
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
       if (!selection) return;
       const text = e.clipboardData?.getData('text') || '';
-      if (!text.includes('\n') && !text.includes('\t')) return;
+      if (!text) return;
       const anchor = {
         r: Math.min(selection.start.r, selection.end.r),
         c: Math.min(selection.start.c, selection.end.c),
@@ -1495,7 +1551,14 @@ function ImportEditor({
   }, [mappingDraft, onSaveEvidenceRequiredMap]);
 
   return (
-    <div className={inline ? 'relative border rounded-lg bg-background flex flex-col overflow-visible' : 'fixed inset-0 z-50 bg-background/95 flex flex-col'}>
+      <div className={inline ? 'relative border rounded-lg bg-background flex flex-col overflow-visible' : 'fixed inset-0 z-50 bg-background/95 flex flex-col'}>
+      {authorListId && (
+        <datalist id={authorListId}>
+          {(authorOptions || []).map((name) => (
+            <option key={name} value={name} />
+          ))}
+        </datalist>
+      )}
       {/* Toolbar */}
       <div className={`flex items-center justify-between px-4 py-2.5 border-b bg-muted/30 shrink-0 ${inline ? 'sticky top-0 z-20' : ''}`}>
         <div className="flex items-center gap-3">
@@ -1538,7 +1601,7 @@ function ImportEditor({
       <div
         className={inline ? 'overflow-auto max-h-[calc(100vh-260px)]' : 'flex-1 overflow-auto'}
         onPaste={handleTablePaste}
-        onKeyDownCapture={handleUndo}
+        onKeyDownCapture={handleTableKeyDown}
         tabIndex={0}
         ref={tableWrapRef}
       >
@@ -1629,6 +1692,9 @@ function ImportEditor({
                 openSelect={openSelect}
                 onOpenSelect={(rowIdx, colIdx) => setOpenSelect({ rowIdx, colIdx })}
                 onCloseSelect={() => setOpenSelect(null)}
+                authorIdx={authorIdx}
+                authorListId={authorListId}
+                authorOptions={authorOptions}
                 budgetCodeIdx={budgetCodeIdx}
                 subCodeIdx={subCodeIdx}
                 evidenceIdx={evidenceIdx}
@@ -1718,6 +1784,9 @@ function ImportEditorRow({
   openSelect,
   onOpenSelect,
   onCloseSelect,
+  authorIdx,
+  authorListId,
+  authorOptions,
   budgetCodeIdx,
   subCodeIdx,
   evidenceIdx,
@@ -1742,6 +1811,9 @@ function ImportEditorRow({
   openSelect: { rowIdx: number; colIdx: number } | null;
   onOpenSelect: (rowIdx: number, colIdx: number) => void;
   onCloseSelect: () => void;
+  authorIdx: number;
+  authorListId: string;
+  authorOptions?: string[];
   budgetCodeIdx: number;
   subCodeIdx: number;
   evidenceIdx: number;
@@ -1786,7 +1858,6 @@ function ImportEditorRow({
   ) => {
     const text = e.clipboardData.getData('text');
     if (!text) return;
-    if (!text.includes('\n') && !text.includes('\t')) return;
     e.preventDefault();
     onPasteRange(rowIdx, colIdx, text);
   }, [onPasteRange, rowIdx]);
@@ -1810,6 +1881,31 @@ function ImportEditorRow({
     onOpen: () => void;
     onClose: () => void;
   }) => {
+    const btnRef = useRef<HTMLButtonElement | null>(null);
+    const [popupRect, setPopupRect] = useState<{ left: number; top: number } | null>(null);
+
+    useLayoutEffect(() => {
+      if (!isOpen) return;
+      const rect = btnRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      setPopupRect({ left: rect.left, top: rect.bottom + 4 });
+    }, [isOpen]);
+
+    useEffect(() => {
+      if (!isOpen) return;
+      const update = () => {
+        const rect = btnRef.current?.getBoundingClientRect();
+        if (!rect) return;
+        setPopupRect({ left: rect.left, top: rect.bottom + 4 });
+      };
+      window.addEventListener('scroll', update, true);
+      window.addEventListener('resize', update);
+      return () => {
+        window.removeEventListener('scroll', update, true);
+        window.removeEventListener('resize', update);
+      };
+    }, [isOpen]);
+
     const openPicker = (e: MouseEvent<HTMLButtonElement>) => {
       e.preventDefault();
       e.stopPropagation();
@@ -1829,13 +1925,15 @@ function ImportEditorRow({
             onMouseDownCapture={openPicker}
             data-select-toggle
             title="옵션 열기"
+            ref={btnRef}
           >
             ▼
           </button>
         </div>
-        {isOpen && !disabled && (
+        {isOpen && !disabled && popupRect && createPortal(
           <div
-            className="absolute right-0 top-[calc(100%+4px)] z-30 w-40 max-h-56 overflow-auto rounded-md border bg-background shadow-lg"
+            className="fixed z-[120] w-40 max-h-56 overflow-auto rounded-md border bg-background shadow-lg"
+            style={{ left: popupRect.left, top: popupRect.top }}
             onMouseDown={(e) => e.stopPropagation()}
             data-select-popup
           >
@@ -1862,7 +1960,8 @@ function ImportEditorRow({
                 {o.label}
               </button>
             ))}
-          </div>
+          </div>,
+          document.body,
         )}
       </div>
     );
@@ -1905,6 +2004,8 @@ function ImportEditorRow({
         const isSubCode = colIdx === subCodeIdx;
         const isWeek = colIdx === weekIdx;
         const isCashflow = colIdx === cashflowIdx;
+        const isAuthor = colIdx === authorIdx;
+        const hasAuthorOptions = (authorOptions || []).length > 0;
         return (
           <td
             key={colIdx}
@@ -2003,6 +2104,16 @@ function ImportEditorRow({
                   });
                 }}
               />
+            ) : isAuthor && hasAuthorOptions ? (
+              <SelectCell
+                value={row.cells[colIdx] || ''}
+                options={(authorOptions || []).map((name) => ({ value: name, label: name }))}
+                onFocus={() => onCellFocus(rowIdx, colIdx)}
+                isOpen={openSelect?.rowIdx === rowIdx && openSelect?.colIdx === colIdx}
+                onOpen={() => onOpenSelect(rowIdx, colIdx)}
+                onClose={onCloseSelect}
+                onChange={(next) => onCellChange(colIdx, next)}
+              />
             ) : (
               <input
                 type="text"
@@ -2011,6 +2122,7 @@ function ImportEditorRow({
                   ? 'ring-1 ring-red-300 rounded'
                   : ''
                   }`}
+                list={isAuthor && authorListId ? authorListId : undefined}
                 onFocus={() => onCellFocus(rowIdx, colIdx)}
                 onPaste={(e) => handlePaste(colIdx, e)}
                 onChange={(e) => {

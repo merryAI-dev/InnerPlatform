@@ -20,6 +20,7 @@ export function PortalWeeklyExpensePage() {
     saveEvidenceRequiredMap,
     expenseSheetRows,
     saveExpenseSheetRows,
+    participationEntries,
   } = usePortalStore();
   const { submitWeekAsPm } = useCashflowWeeks();
 
@@ -30,6 +31,19 @@ export function PortalWeeklyExpensePage() {
     const ledger = ledgers.find((l) => l.projectId === projectId);
     return ledger?.id || `l-${projectId}`;
   }, [projectId, ledgers]);
+
+  const authorOptions = useMemo(() => {
+    const names = new Set<string>();
+    participationEntries
+      .filter((e) => e.projectId === projectId)
+      .forEach((e) => {
+        if (e.memberName) names.add(e.memberName);
+      });
+    if (portalUser?.name) names.add(portalUser.name);
+    if (myProject?.managerName) names.add(myProject.managerName);
+    if (myProject?.settlementSupportName) names.add(myProject.settlementSupportName);
+    return Array.from(names).filter(Boolean).sort((a, b) => a.localeCompare(b, 'ko'));
+  }, [participationEntries, projectId, portalUser?.name, myProject?.managerName, myProject?.settlementSupportName]);
 
   if (!projectId) {
     return (
@@ -54,6 +68,7 @@ export function PortalWeeklyExpensePage() {
         defaultLedgerId={defaultLedgerId}
         onAddTransaction={addTransaction}
         onUpdateTransaction={updateTransaction}
+        authorOptions={authorOptions}
         evidenceRequiredMap={evidenceRequiredMap}
         onSaveEvidenceRequiredMap={saveEvidenceRequiredMap}
         sheetRows={expenseSheetRows}
