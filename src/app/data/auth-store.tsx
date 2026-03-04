@@ -183,18 +183,20 @@ async function upsertMemberFromFirebase(
     existing?.projectId,
     resolveProjectIdForManager(firebaseUser.uid, PROJECT_OWNERS),
   ]);
-  const primaryProjectId = resolvePrimaryProjectId(mergedProjectIds, existing?.projectId);
+  const primaryProjectId = resolvePrimaryProjectId(mergedProjectIds, existing?.projectId) || '';
+
+  const claimRole = toUserRole(roleFromClaims);
+  const isPrivilegedClaim = claimRole === 'admin' || claimRole === 'tenant_admin' || claimRole === 'finance';
+  const resolvedRole =
+    bootstrapAdmin
+      ? 'admin'
+      : (isPrivilegedClaim ? claimRole : (existing?.role || claimRole || resolveRoleFromDirectory(firebaseUser.email || '', ROLE_DIRECTORY)));
 
   const merged: MemberDoc = {
     uid: firebaseUser.uid,
     name: firebaseUser.displayName || existing?.name || '사용자',
     email: normalizedEmail,
-    role:
-      bootstrapAdmin
-        ? 'admin'
-        : toUserRole(roleFromClaims) ||
-          existing?.role ||
-          resolveRoleFromDirectory(firebaseUser.email || '', ROLE_DIRECTORY),
+    role: resolvedRole,
     tenantId,
     status: existing?.status || 'ACTIVE',
     projectId: primaryProjectId,
@@ -255,10 +257,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const token = await firebaseUser.getIdTokenResult().catch(() => null);
         const claimsContext = extractAuthContextFromClaims(token?.claims);
+        const normalizedEmail = normalizeEmail(firebaseUser.email || '');
+        const forceDefaultTenant = isBootstrapAdminEmail(normalizedEmail);
         const tenantId = resolveTenantId({
-          claimTenantId: claimsContext.tenantId,
+          claimTenantId: forceDefaultTenant ? DEFAULT_ORG_ID : claimsContext.tenantId,
           envTenantId: DEFAULT_ORG_ID,
-          strict: featureFlags.tenantIsolationStrict,
+          strict: forceDefaultTenant ? false : featureFlags.tenantIsolationStrict,
         });
         const member = await upsertMemberFromFirebase(
           firebaseUser,

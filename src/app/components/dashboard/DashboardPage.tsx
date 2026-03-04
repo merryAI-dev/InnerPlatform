@@ -64,13 +64,18 @@ const statusStyles: Record<string, { bg: string; text: string; dot: string }> = 
 };
 
 const typeColors: Record<ProjectType, string> = {
-  DEV_COOPERATION: '#6366f1',
-  CONSULTING: '#8b5cf6',
-  SPACE_BIZ: '#f59e0b',
-  IMPACT_INVEST: '#10b981',
-  EDUCATION: '#ec4899',
-  AC_GENERAL: '#06b6d4',
-  OTHER: '#94a3b8',
+  C1: '#8b5cf6',
+  A1: '#06b6d4',
+  A2: '#0ea5e9',
+  I1: '#10b981',
+  I2: '#16a34a',
+  I3: '#22c55e',
+  D1: '#6366f1',
+  S1: '#f59e0b',
+  S2: '#f97316',
+  E1: '#ec4899',
+  P1: '#a855f7',
+  Z1: '#94a3b8',
 };
 
 const txStateStyles: Record<string, { bg: string; text: string }> = {

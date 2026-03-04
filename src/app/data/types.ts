@@ -8,7 +8,19 @@
 export type UserRole = 'admin' | 'tenant_admin' | 'finance' | 'pm' | 'viewer' | 'auditor' | 'support' | 'security';
 
 export type ProjectStatus = 'CONTRACT_PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'COMPLETED_PENDING_PAYMENT';
-export type ProjectType = 'DEV_COOPERATION' | 'CONSULTING' | 'SPACE_BIZ' | 'IMPACT_INVEST' | 'EDUCATION' | 'AC_GENERAL' | 'OTHER';
+export type ProjectType =
+  | 'C1'  // 컨설팅
+  | 'A1'  // 액셀러레이팅 - 국내일반
+  | 'A2'  // 액셀러레이팅 - 글로벌
+  | 'I1'  // 투자조합운용 - GP성과보수
+  | 'I2'  // 투자조합운용 - GP관리보수
+  | 'I3'  // 투자조합운용 - LP수익
+  | 'D1'  // 개발협력사업 - AVPN 포함
+  | 'S1'  // 공간사업 - 메리히어
+  | 'S2'  // 공간사업 - 공간운영 용역사업
+  | 'E1'  // 교육사업 - 단기 워크숍 등
+  | 'P1'  // 출판사업
+  | 'Z1'; // 기타사업
 export type ProjectPhase = 'PROSPECT' | 'CONFIRMED';  // 입찰예정 / 확정
 
 export type SettlementType = 'TYPE1' | 'TYPE2' | 'TYPE4';
@@ -72,23 +84,33 @@ export const PROJECT_PHASE_LABELS: Record<ProjectPhase, string> = {
 };
 
 export const PROJECT_TYPE_LABELS: Record<ProjectType, string> = {
-  DEV_COOPERATION: 'D-1. 개발협력(KOICA)',
-  CONSULTING: 'C-1. 컨설팅',
-  SPACE_BIZ: 'S-1. 공간사업',
-  IMPACT_INVEST: 'I-투자/임팩트',
-  EDUCATION: 'E-1. 교육사업 (워크숍 등)',
-  AC_GENERAL: 'A-1. AC(일반)',
-  OTHER: 'Z-1. 기타사업',
+  C1: 'C-1 컨설팅',
+  A1: 'A-1 액셀러레이팅 - 국내일반',
+  A2: 'A-2 액셀러레이팅 - 글로벌',
+  I1: 'I-1 투자조합운용 - GP성과보수',
+  I2: 'I-2 투자조합운용 - GP관리보수',
+  I3: 'I-3 투자조합운용 - LP수익',
+  D1: 'D-1 개발협력사업 - AVPN 포함',
+  S1: 'S-1 공간사업 - 메리히어',
+  S2: 'S-2 공간사업 - 공간운영 용역사업',
+  E1: 'E-1 교육사업 - 단기 워크숍 등',
+  P1: 'P-1 출판사업',
+  Z1: 'Z-1 기타사업',
 };
 
 export const PROJECT_TYPE_SHORT_LABELS: Record<ProjectType, string> = {
-  DEV_COOPERATION: '개발협력',
-  CONSULTING: '컨설팅',
-  SPACE_BIZ: '공간사업',
-  IMPACT_INVEST: '투자/임팩트',
-  EDUCATION: '교육사업',
-  AC_GENERAL: 'AC(일반)',
-  OTHER: '기타',
+  C1: '컨설팅',
+  A1: 'AC 국내',
+  A2: 'AC 글로벌',
+  I1: '투자 GP성과',
+  I2: '투자 GP관리',
+  I3: '투자 LP수익',
+  D1: '개발협력',
+  S1: '공간사업(메리히어)',
+  S2: '공간사업(용역)',
+  E1: '교육사업',
+  P1: '출판사업',
+  Z1: '기타',
 };
 
 export const SETTLEMENT_TYPE_LABELS: Record<SettlementType, string> = {
@@ -305,6 +327,46 @@ export interface Project {
   updatedAt: string;
 }
 
+export type ProjectRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+
+export interface ProjectRequestPayload {
+  name: string;
+  type: ProjectType;
+  description: string;
+  clientOrg: string;
+  department: string;
+  contractAmount: number;
+  contractStart: string;
+  contractEnd: string;
+  settlementType: SettlementType;
+  basis: Basis;
+  accountType: AccountType;
+  paymentPlanDesc: string;
+  managerName: string;
+  teamName: string;
+  teamMembers: string;
+  participantCondition: string;
+  note: string;
+}
+
+export interface ProjectRequest {
+  id: string;
+  tenantId?: string;
+  status: ProjectRequestStatus;
+  payload: ProjectRequestPayload;
+  requestedBy: string;
+  requestedByName: string;
+  requestedByEmail: string;
+  requestedAt: string;
+  reviewedBy?: string;
+  reviewedByName?: string;
+  reviewedAt?: string;
+  rejectedReason?: string;
+  approvedProjectId?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface Ledger {
   id: string;
   version?: number;
@@ -404,6 +466,22 @@ export interface BudgetCodeRename {
   fromSub: string;
   toCode: string;
   toSub: string;
+}
+
+export interface WeeklySubmissionStatus {
+  id: string; // `${projectId}-${yearMonth}-w${weekNo}`
+  tenantId?: string;
+  projectId: string;
+  yearMonth: string; // "YYYY-MM"
+  weekNo: number; // 1..6
+  projectionUpdated?: boolean;
+  projectionUpdatedAt?: string;
+  projectionUpdatedByName?: string;
+  expenseUpdated?: boolean;
+  expenseUpdatedAt?: string;
+  expenseUpdatedByName?: string;
+  updatedAt?: string;
+  updatedByName?: string;
 }
 
 export interface BudgetPlanSnapshot {

@@ -47,5 +47,7 @@ export function shouldForcePortalOnboarding(input: PortalOnboardingRedirectInput
   if (!input.isAuthenticated) return false;
   if (resolveHomePath(input.role) !== '/portal') return false;
   if (input.isRegistered) return false;
-  return !input.pathname.includes('/portal/onboarding');
+  if (input.pathname.includes('/portal/onboarding')) return false;
+  if (input.pathname.includes('/portal/register-project')) return false;
+  return true;
 }

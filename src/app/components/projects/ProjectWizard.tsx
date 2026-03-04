@@ -96,7 +96,7 @@ interface WizardFormData {
 }
 
 const INITIAL_DATA: WizardFormData = {
-  name: '', type: 'DEV_COOPERATION', department: '', clientOrg: '', groupwareName: '', description: '',
+  name: '', type: 'D1', department: '', clientOrg: '', groupwareName: '', description: '',
   status: 'CONTRACT_PENDING', contractType: '계약서(날인)', contractStart: '', contractEnd: '', participantCondition: '',
   accountType: 'NONE', settlementType: 'TYPE1', basis: 'SUPPLY_AMOUNT',
   teamName: '', managerName: '', managerId: '',

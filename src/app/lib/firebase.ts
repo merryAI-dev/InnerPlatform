@@ -224,6 +224,8 @@ export const ORG_COLLECTIONS = {
   budgetEvidenceMaps: 'budget_evidence_maps',
   guideDocuments: 'guide_documents',
   guideQa: 'guide_qa',
+  weeklySubmissionStatus: 'weekly_submission_status',
+  projectRequests: 'project_requests',
   careerProfiles: 'careerProfiles',
   trainingCourses: 'trainingCourses',
   trainingEnrollments: 'trainingEnrollments',

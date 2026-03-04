@@ -3,7 +3,7 @@ import { buildProjectProposalPost, type ProjectProposalDraft } from './project-p
 
 const sampleDraft: ProjectProposalDraft = {
   name: 'KOICA 디지털 역량 강화',
-  type: 'DEV_COOPERATION',
+  type: 'D1',
   description: '현지 파트너 역량 강화 사업',
   clientOrg: 'KOICA',
   department: '임팩트 그룹',

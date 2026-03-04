@@ -1198,12 +1198,18 @@ function parseProjectStatus(raw: string): ProjectStatus {
 
 function parseProjectType(raw: string): ProjectType {
   const s = normalizeSpace(raw);
-  if (/개발협력|koica/i.test(s)) return 'DEV_COOPERATION';
-  if (/컨설팅|ac/i.test(s)) return 'CONSULTING';
-  if (/공간/.test(s)) return 'SPACE_BIZ';
-  if (/투자|impact|ibs/i.test(s)) return 'IMPACT_INVEST';
-  if (/교육/.test(s)) return 'EDUCATION';
-  return 'OTHER';
+  if (/개발협력|koica|avpn/i.test(s)) return 'D1';
+  if (/컨설팅/i.test(s)) return 'C1';
+  if (/액셀|accelerat|ac\s*-?1|국내/i.test(s)) return 'A1';
+  if (/글로벌|global|ac\s*-?2/i.test(s)) return 'A2';
+  if (/투자|impact|gp성과|성과보수|ibs/i.test(s)) return 'I1';
+  if (/gp관리|관리보수/i.test(s)) return 'I2';
+  if (/lp수익/i.test(s)) return 'I3';
+  if (/공간.*메리히어|메리히어/i.test(s)) return 'S1';
+  if (/공간.*운영|용역/i.test(s)) return 'S2';
+  if (/교육|워크숍/i.test(s)) return 'E1';
+  if (/출판/i.test(s)) return 'P1';
+  return 'Z1';
 }
 
 function parseProjectPhase(raw: string): ProjectPhase {
@@ -1226,7 +1232,7 @@ function parsePaymentMethod(raw: string): PaymentMethod {
   if (/법인카드.*2|뒷번호2|card.?2/.test(s)) return 'CORP_CARD_2';
   if (/법인카드|카드|card/.test(s)) return 'CORP_CARD_1';
   if (/계좌|이체|bank/.test(s)) return 'TRANSFER';
-  return 'OTHER';
+  return 'Z1';
 }
 
 function parseDirection(raw: string, amount: number): 'IN' | 'OUT' {
