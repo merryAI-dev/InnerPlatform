@@ -145,8 +145,7 @@ function mapFirebaseUserToAuthUser(
   const role =
     isBootstrapAdminEmail(normalizedEmail)
       ? 'admin'
-      : toUserRole(member?.role) ||
-        resolveRoleFromDirectory(firebaseUser.email || '', ROLE_DIRECTORY);
+      : 'pm';
   return {
     uid: firebaseUser.uid,
     name: member?.name || firebaseUser.displayName || '사용자',
@@ -185,12 +184,10 @@ async function upsertMemberFromFirebase(
   ]);
   const primaryProjectId = resolvePrimaryProjectId(mergedProjectIds, existing?.projectId) || '';
 
-  const claimRole = toUserRole(roleFromClaims);
-  const isPrivilegedClaim = claimRole === 'admin' || claimRole === 'tenant_admin' || claimRole === 'finance';
   const resolvedRole =
     bootstrapAdmin
       ? 'admin'
-      : (isPrivilegedClaim ? claimRole : (existing?.role || claimRole || resolveRoleFromDirectory(firebaseUser.email || '', ROLE_DIRECTORY)));
+      : 'pm';
 
   const merged: MemberDoc = {
     uid: firebaseUser.uid,
@@ -258,12 +255,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const token = await firebaseUser.getIdTokenResult().catch(() => null);
         const claimsContext = extractAuthContextFromClaims(token?.claims);
         const normalizedEmail = normalizeEmail(firebaseUser.email || '');
-        const forceDefaultTenant = isBootstrapAdminEmail(normalizedEmail);
-        const tenantId = resolveTenantId({
-          claimTenantId: forceDefaultTenant ? DEFAULT_ORG_ID : claimsContext.tenantId,
-          envTenantId: DEFAULT_ORG_ID,
-          strict: forceDefaultTenant ? false : featureFlags.tenantIsolationStrict,
-        });
+        const tenantId = DEFAULT_ORG_ID;
         const member = await upsertMemberFromFirebase(
           firebaseUser,
           tenantId,
