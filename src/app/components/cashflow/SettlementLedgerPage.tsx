@@ -1,4 +1,4 @@
-import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, Download, ExternalLink, Plus, Save, Send, X, Loader2 } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, Download, ExternalLink, GripVertical, Loader2, Plus, RotateCcw, Save, Send, X } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { ClipboardEvent, KeyboardEvent, MouseEvent } from 'react';
@@ -22,6 +22,23 @@ import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Checkbox } from '../ui/checkbox';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '../ui/dropdown-menu';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../ui/alert-dialog';
 
 // ── Helpers ──
 
@@ -171,6 +188,10 @@ export function SettlementLedgerPage({
   const [importRows, setImportRows] = useState<ImportRow[] | null>(null);
   const [importDirty, setImportDirty] = useState(false);
   const [sheetSaving, setSheetSaving] = useState(false);
+  const [revertConfirmOpen, setRevertConfirmOpen] = useState(false);
+  const cloneImportRows = useCallback((input: ImportRow[]) => (
+    input.map((row) => ({ ...row, cells: [...row.cells] }))
+  ), []);
   const resolvedBudgetBook = useMemo(
     () => (budgetCodeBook && budgetCodeBook.length ? budgetCodeBook : BUDGET_CODE_BOOK),
     [budgetCodeBook],
@@ -190,11 +211,54 @@ export function SettlementLedgerPage({
   useEffect(() => {
     if (importDirty) return;
     if (sheetRows && sheetRows.length > 0) {
-      setImportRows(sheetRows);
+      setImportRows(cloneImportRows(sheetRows));
       return;
     }
     setImportRows(transactionsToImportRows(projectTxs, yearWeeks));
-  }, [projectTxs, yearWeeks, importDirty, sheetRows]);
+  }, [projectTxs, yearWeeks, importDirty, sheetRows, cloneImportRows]);
+
+  const revertToSavedSnapshot = useCallback(() => {
+    if (sheetSaving) return;
+    if (sheetRows && sheetRows.length > 0) {
+      setImportRows(cloneImportRows(sheetRows));
+      setImportDirty(false);
+      toast.message('마지막 저장값으로 되돌렸습니다.');
+      return;
+    }
+    setImportRows(transactionsToImportRows(projectTxs, yearWeeks));
+    setImportDirty(false);
+    toast.message('저장된 사업비 입력이 없어 기본값으로 되돌렸습니다.');
+  }, [sheetSaving, sheetRows, cloneImportRows, projectTxs, yearWeeks]);
+
+  const handleRevertToSaved = useCallback(() => {
+    if (sheetSaving) return;
+    setRevertConfirmOpen(true);
+  }, [sheetSaving]);
+
+  const handleConfirmRevert = useCallback(() => {
+    setRevertConfirmOpen(false);
+    revertToSavedSnapshot();
+  }, [revertToSavedSnapshot]);
+
+  const revertConfirmDialog = (
+    <AlertDialog open={revertConfirmOpen} onOpenChange={setRevertConfirmOpen}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>저장된 값으로 되돌리기</AlertDialogTitle>
+          <AlertDialogDescription>
+            현재 편집 중인 내용은 버리고, 마지막으로 저장된 사업비 입력(주간) 값으로 복원합니다.
+            <span className="mt-1 block font-medium text-rose-600 dark:text-rose-400">
+              저장하지 않은 기존 입력 내용은 되돌리기 시 날아갑니다.
+            </span>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>취소</AlertDialogCancel>
+          <AlertDialogAction onClick={handleConfirmRevert}>되돌리기</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
 
   // Group transactions by week
   const weekBuckets: WeekBucket[] = useMemo(() => {
@@ -524,7 +588,12 @@ export function SettlementLedgerPage({
             )}
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" className="hover:bg-muted/40 cursor-pointer" onClick={handleDownload}>
+            <Button
+              variant="outline"
+              size="sm"
+              className="cursor-pointer shadow-sm hover:bg-muted/40"
+              onClick={handleDownload}
+            >
               <Download className="h-4 w-4 mr-1" />
               엑셀 다운로드
             </Button>
@@ -541,10 +610,7 @@ export function SettlementLedgerPage({
             }}
             onSave={handleImportSave}
             saving={sheetSaving}
-            onCancel={() => {
-              setImportRows(transactionsToImportRows(projectTxs, yearWeeks));
-              setImportDirty(false);
-            }}
+            onCancel={handleRevertToSaved}
             projectId={projectId}
             defaultLedgerId={defaultLedgerId}
             evidenceRequiredMap={evidenceRequiredMap}
@@ -555,6 +621,7 @@ export function SettlementLedgerPage({
             inline
           />
         )}
+        {revertConfirmDialog}
       </div>
     );
   }
@@ -582,13 +649,28 @@ export function SettlementLedgerPage({
           )}
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" className="hover:bg-muted/40 cursor-pointer" onClick={expandAll}>
+          <Button
+            variant="outline"
+            size="sm"
+            className="cursor-pointer shadow-sm hover:bg-muted/40"
+            onClick={expandAll}
+          >
             전체 펼치기
           </Button>
-          <Button variant="outline" size="sm" className="hover:bg-muted/40 cursor-pointer" onClick={collapseAll}>
+          <Button
+            variant="outline"
+            size="sm"
+            className="cursor-pointer shadow-sm hover:bg-muted/40"
+            onClick={collapseAll}
+          >
             전체 접기
           </Button>
-          <Button variant="outline" size="sm" className="hover:bg-muted/40 cursor-pointer" onClick={handleDownload}>
+          <Button
+            variant="outline"
+            size="sm"
+            className="cursor-pointer shadow-sm hover:bg-muted/40"
+            onClick={handleDownload}
+          >
             <Download className="h-4 w-4 mr-1" />
             엑셀 다운로드
           </Button>
@@ -665,10 +747,7 @@ export function SettlementLedgerPage({
           }}
           onSave={handleImportSave}
           saving={sheetSaving}
-          onCancel={() => {
-            setImportRows(transactionsToImportRows(projectTxs, yearWeeks));
-            setImportDirty(false);
-          }}
+          onCancel={handleRevertToSaved}
           projectId={projectId}
           defaultLedgerId={defaultLedgerId}
           evidenceRequiredMap={evidenceRequiredMap}
@@ -678,6 +757,7 @@ export function SettlementLedgerPage({
           weekOptions={weekOptions}
         />
       )}
+      {revertConfirmDialog}
     </div>
   );
 }
@@ -1320,6 +1400,18 @@ function ImportEditor({
     onChange(applyDerivedRows(nextRows));
   }, [rows, onChange, applyDerivedRows]);
 
+  const insertRowAt = useCallback((index: number) => {
+    const boundedIndex = Math.max(0, Math.min(rows.length, index));
+    const newRow = createEmptyImportRow();
+    if (noIdx >= 0) newRow.cells[noIdx] = String(boundedIndex + 1);
+    const nextRows = [
+      ...rows.slice(0, boundedIndex),
+      newRow,
+      ...rows.slice(boundedIndex),
+    ];
+    onChange(applyDerivedRows(nextRows));
+  }, [rows, noIdx, onChange, applyDerivedRows]);
+
   const formatNumberCell = useCallback((value: string) => {
     if (!value) return '';
     const num = parseNumber(value);
@@ -1667,19 +1759,35 @@ function ImportEditor({
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" className="h-7 text-[11px] hover:bg-muted/40 cursor-pointer" onClick={openMappingEditor}>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-[11px] cursor-pointer shadow-sm hover:bg-muted/40"
+            onClick={openMappingEditor}
+          >
             증빙 매핑 설정
           </Button>
-          <Button variant="outline" size="sm" className="h-7 text-[11px] gap-1 hover:bg-muted/40 cursor-pointer" onClick={addRow}>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-[11px] gap-1 cursor-pointer shadow-sm hover:bg-muted/40"
+            onClick={addRow}
+          >
             <Plus className="h-3.5 w-3.5" />
             행 추가
           </Button>
-          <Button variant="outline" size="sm" className="h-7 text-[11px] hover:bg-muted/40 cursor-pointer" onClick={onCancel}>
-            취소
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-[11px] cursor-pointer shadow-sm hover:bg-muted/40"
+            onClick={onCancel}
+          >
+            <RotateCcw className="h-3.5 w-3.5 mr-1" />
+            되돌리기
           </Button>
           <Button
             size="sm"
-            className="h-7 text-[11px] gap-1 hover:bg-primary/90 cursor-pointer"
+            className="h-7 text-[11px] gap-1 cursor-pointer shadow-sm"
             onClick={onSave}
             disabled={validCount === 0 || saving}
           >
@@ -1770,12 +1878,13 @@ function ImportEditor({
           <tbody>
             {rows.map((row, rowIdx) => (
               <ImportEditorRow
-                key={row.tempId}
+                key={`${row.tempId}-${rowIdx}`}
                 row={row}
                 rowIdx={rowIdx}
                 onCellChange={(colIdx, value) => updateCell(rowIdx, colIdx, value)}
                 onRowChange={(updater) => updateRow(rowIdx, updater)}
                 onRemove={() => removeRow(rowIdx)}
+                onInsertBelow={() => insertRowAt(rowIdx + 1)}
                 onPasteRange={applyPaste}
                 onCellFocus={handleCellFocus}
                 onCellMouseDown={handleCellMouseDown}
@@ -1873,6 +1982,7 @@ function ImportEditorRow({
   onCellChange,
   onRowChange,
   onRemove,
+  onInsertBelow,
   onPasteRange,
   onCellFocus,
   onCellMouseDown,
@@ -1901,6 +2011,7 @@ function ImportEditorRow({
   onCellChange: (colIdx: number, value: string) => void;
   onRowChange: (updater: (row: ImportRow) => ImportRow) => void;
   onRemove: () => void;
+  onInsertBelow: () => void;
   onPasteRange: (rowIdx: number, colIdx: number, text: string) => void;
   onCellFocus: (rowIdx: number, colIdx: number) => void;
   onCellMouseDown: (rowIdx: number, colIdx: number) => void;
@@ -2075,27 +2186,49 @@ function ImportEditorRow({
         : 'hover:bg-muted/30'
     } transition-colors`}>
       {/* Row controls */}
-      <td className="px-0.5 py-0.5 border-b border-r text-center align-middle w-11">
-        <div className="flex items-center justify-center gap-1">
-          <span className="text-[9px] text-muted-foreground">{rowIdx + 1}</span>
-          {hasError && (
-            <span title={row.error} className="text-red-500">
-              <AlertTriangle className="h-3 w-3" />
-            </span>
-          )}
-          {!hasError && hasMissingCell && (
-            <span title="미입력 셀 있음" className="text-red-500">
-              <AlertTriangle className="h-3 w-3" />
-            </span>
-          )}
-          <button
-            onClick={onRemove}
-            className="text-muted-foreground/40 hover:text-destructive transition-colors"
-            title="행 삭제"
-          >
-            <X className="h-3 w-3" />
-          </button>
+      <td className="relative px-0.5 py-0.5 border-b border-r align-middle w-11">
+        <div className="flex items-center justify-start gap-1.5 pl-1">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="inline-flex h-3 w-3 items-center justify-center rounded-sm text-muted-foreground/70 hover:bg-muted hover:text-foreground transition-colors"
+                title="행 작업"
+              >
+                <GripVertical className="h-2.5 w-2.5" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="text-[11px]">
+              <DropdownMenuItem
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onInsertBelow();
+                }}
+              >
+                <Plus className="h-3.5 w-3.5" />
+                아래에 행 추가
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                variant="destructive"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRemove();
+                }}
+              >
+                <X className="h-3.5 w-3.5" />
+                행 삭제
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <span className="inline-flex text-[9px] text-muted-foreground">{rowIdx + 1}</span>
         </div>
+        {(hasError || hasMissingCell) && (
+          <span
+            className="absolute right-1 top-1 h-1 w-1 rounded-full bg-rose-500"
+            title={hasError ? (row.error || '행 오류') : '미입력 셀 있음'}
+          />
+        )}
       </td>
       {/* Data cells */}
       {SETTLEMENT_COLUMNS.map((col, colIdx) => {
