@@ -341,9 +341,45 @@ export function SettlementLedgerPage({
 
       const byWeek = new Map<string, Record<string, number>>();
       const weekLabels = new Set<string>();
+      const targetYears = new Set<number>([year]);
+      const dateIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '거래일시');
+      const collectWeekLabels = (rows: ImportRow[] | null | undefined) => {
+        if (!rows) return;
+        for (const row of rows) {
+          const label = weekIdx >= 0 ? (row.cells[weekIdx] || '').trim() : '';
+          if (label) weekLabels.add(label);
+        }
+      };
+      const collectYearsFromRows = (rows: ImportRow[] | null | undefined) => {
+        if (!rows || dateIdx < 0) return;
+        for (const row of rows) {
+          const raw = String(row.cells[dateIdx] || '').trim();
+          if (!raw) continue;
+          const datePart = raw.split(/\s+/)[0];
+          const iso = parseDate(datePart);
+          if (!iso) continue;
+          const y = Number.parseInt(iso.slice(0, 4), 10);
+          if (Number.isFinite(y)) targetYears.add(y);
+        }
+      };
+
+      // Snapshot sync rule:
+      // - Current edited rows define latest truth.
+      // - Previously saved rows are also included as clear targets so removed weeks are zeroed out.
+      collectWeekLabels(importRows);
+      collectWeekLabels(sheetRows || null);
+      collectYearsFromRows(importRows);
+      collectYearsFromRows(sheetRows || null);
+
+      for (const weekLabel of weekLabels) {
+        const week = resolveWeekFromLabel(weekLabel, yearWeeks);
+        if (!week?.yearMonth) continue;
+        const y = Number.parseInt(week.yearMonth.slice(0, 4), 10);
+        if (Number.isFinite(y)) targetYears.add(y);
+      }
+
       for (const row of importRows) {
         const weekLabel = weekIdx >= 0 ? row.cells[weekIdx] || '' : '';
-        if (weekLabel) weekLabels.add(weekLabel);
         const cashflowLabel = cashflowIdx >= 0 ? row.cells[cashflowIdx] || '' : '';
         if (!weekLabel || !cashflowLabel) continue;
         const lineId = parseCashflowLineLabel(cashflowLabel);
@@ -367,14 +403,8 @@ export function SettlementLedgerPage({
 
       const targetWeeks: MonthMondayWeek[] = [];
       const seenWeekIds = new Set<string>();
-      const yearMonths = new Set<string>();
-      for (const weekLabel of weekLabels) {
-        const week = resolveWeekFromLabel(weekLabel, yearWeeks);
-        if (!week) continue;
-        yearMonths.add(week.yearMonth);
-      }
-      for (const ym of yearMonths) {
-        const weeks = getMonthMondayWeeks(ym);
+      for (const targetYear of Array.from(targetYears)) {
+        const weeks = getYearMondayWeeks(targetYear);
         for (const w of weeks) {
           const key = `${w.yearMonth}-${w.weekNo}`;
           if (seenWeekIds.has(key)) continue;
@@ -414,7 +444,7 @@ export function SettlementLedgerPage({
     } finally {
       setSheetSaving(false);
     }
-  }, [importRows, onSaveSheetRows, upsertWeekAmounts, projectId, yearWeeks]);
+  }, [importRows, onSaveSheetRows, upsertWeekAmounts, projectId, yearWeeks, sheetRows]);
 
   // ── Inline edit handler with audit trail ──
   const handleUpdateTx = useCallback(

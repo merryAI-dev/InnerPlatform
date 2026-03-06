@@ -5,16 +5,13 @@ import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { usePortalStore } from '../../data/portal-store';
-import {
-  BANK_STATEMENT_COLUMNS,
-  normalizeBankStatementMatrix,
-  type BankStatementRow,
-} from '../../platform/bank-statement';
-import { parseCsv, parseNumber } from '../../platform/csv-utils';
+import { normalizeBankStatementMatrix, type BankStatementRow } from '../../platform/bank-statement';
+import { normalizeKey, parseCsv, parseNumber } from '../../platform/csv-utils';
 
 export function PortalBankStatementPage() {
   const { portalUser, myProject, bankStatementRows, saveBankStatementRows } = usePortalStore();
-  const [rows, setRows] = useState<BankStatementRow[]>(bankStatementRows || []);
+  const [columns, setColumns] = useState<string[]>(bankStatementRows?.columns || []);
+  const [rows, setRows] = useState<BankStatementRow[]>(bankStatementRows?.rows || []);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -23,11 +20,14 @@ export function PortalBankStatementPage() {
   const ready = useMemo(() => Boolean(portalUser?.projectId), [portalUser?.projectId]);
   const amountColIdxs = useMemo(() => {
     return new Set(
-      BANK_STATEMENT_COLUMNS.map((col, idx) => ({ col, idx }))
-        .filter(({ col }) => col === '출금금액' || col === '입금금액' || col === '잔액')
+      columns.map((col, idx) => ({ col, idx }))
+        .filter(({ col }) => {
+          const key = normalizeKey(col);
+          return key.includes(normalizeKey('입금')) || key.includes(normalizeKey('출금')) || key.includes(normalizeKey('잔액'));
+        })
         .map(({ idx }) => idx),
     );
-  }, []);
+  }, [columns]);
 
   const formatAmount = useCallback((value: string) => {
     const trimmed = value.trim();
@@ -44,74 +44,78 @@ export function PortalBankStatementPage() {
 
   useEffect(() => {
     if (dirty) return;
-    if (bankStatementRows) {
-      setRows(bankStatementRows.map(formatAmountRow));
+    if (bankStatementRows?.rows && bankStatementRows.rows.length > 0) {
+      setColumns(bankStatementRows.columns || []);
+      setRows(bankStatementRows.rows.map(formatAmountRow));
+      return;
     }
+    setColumns([]);
+    setRows([]);
   }, [bankStatementRows, dirty, formatAmountRow]);
 
   const parseExcelToMatrix = useCallback(async (file: File): Promise<string[][]> => {
-    const ExcelJS = await import('exceljs');
-    const wb = new ExcelJS.Workbook();
-    await wb.xlsx.load(await file.arrayBuffer());
-    const ws = wb.worksheets[0];
-    if (!ws) return [];
+    const XLSX = await import('xlsx');
+    const buffer = new Uint8Array(await file.arrayBuffer());
+    const workbook = XLSX.read(buffer, { type: 'array', cellDates: true, raw: false });
 
-    const cellToString = (value: unknown): string => {
-      if (value == null) return '';
-      if (value instanceof Date) return value.toISOString().slice(0, 10);
-      if (typeof value === 'object') {
-        const v = value as Record<string, unknown>;
-        if (Array.isArray((v as any).richText)) {
-          return ((v as any).richText as Array<{ text: string }>).map((x) => x.text).join('');
-        }
-        if ('result' in v) {
-          const result = (v as any).result;
-          if (result == null) return '';
-          return String(result);
-        }
-        if ('text' in v && typeof v.text === 'string') {
-          return v.text;
-        }
-        if ('formula' in v || 'sharedFormula' in v || 'error' in v) {
-          return '';
-        }
-      }
-      return String(value);
-    };
+    const sheetMatrices = workbook.SheetNames.map((sheetName) => {
+      const ws = workbook.Sheets[sheetName];
+      const rawRows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' }) as unknown[][];
+      const matrix = rawRows.map((row) =>
+        (Array.isArray(row) ? row : []).map((cell) => {
+          if (cell == null) return '';
+          if (cell instanceof Date) return cell.toISOString().slice(0, 10);
+          return String(cell);
+        }),
+      );
+      const nonEmpty = matrix.reduce((sum, row) => {
+        return sum + row.filter((cell) => String(cell || '').trim().length > 0).length;
+      }, 0);
+      return { matrix, nonEmpty };
+    });
 
-    const matrix: string[][] = [];
-    for (let r = 1; r <= ws.rowCount; r++) {
-      const row: string[] = [];
-      for (let c = 1; c <= ws.columnCount; c++) {
-        row.push(cellToString(ws.getCell(r, c).value));
-      }
-      matrix.push(row);
-    }
-    return matrix;
+    const best = sheetMatrices
+      .sort((a, b) => b.nonEmpty - a.nonEmpty)[0];
+
+    return best?.matrix || [];
   }, []);
 
   const handleFileUpload = useCallback(async (file: File) => {
-    const name = file.name.toLowerCase();
-    let matrix: string[][] = [];
-    if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
-      matrix = await parseExcelToMatrix(file);
-    } else if (name.endsWith('.csv')) {
-      const text = await file.text();
-      matrix = parseCsv(text);
-    } else {
-      toast.error('CSV 또는 XLSX 파일만 업로드할 수 있습니다.');
-      return;
+    try {
+      const name = file.name.toLowerCase();
+      let matrix: string[][] = [];
+      if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
+        matrix = await parseExcelToMatrix(file);
+      } else if (name.endsWith('.csv')) {
+        const text = await file.text();
+        matrix = parseCsv(text);
+      } else {
+        toast.error('CSV, XLSX 또는 XLS 파일만 업로드할 수 있습니다.');
+        return;
+      }
+      const result = normalizeBankStatementMatrix(matrix);
+      if (!result.columns.length || !result.rows.length) {
+        toast.error('업로드 데이터에서 컬럼/행을 찾지 못했습니다. 파일 형식을 확인해 주세요.');
+        return;
+      }
+      setColumns(result.columns);
+      setRows(result.rows.map(formatAmountRow));
+      setDirty(true);
+    } catch (err) {
+      console.error('[BankStatement] upload parse failed:', err);
+      toast.error('파일을 읽지 못했습니다. `.xls`/`.xlsx`/`.csv` 파일인지 확인해 주세요.');
     }
-    const result = normalizeBankStatementMatrix(matrix);
-    setRows(result.rows.map(formatAmountRow));
-    setDirty(true);
   }, [parseExcelToMatrix, formatAmountRow]);
 
   const addRow = useCallback(() => {
-    const next = [...rows, { tempId: `bank-${Date.now()}`, cells: BANK_STATEMENT_COLUMNS.map(() => '') }];
+    if (columns.length === 0) {
+      toast.message('먼저 통장내역 파일을 업로드해 주세요.');
+      return;
+    }
+    const next = [...rows, { tempId: `bank-${Date.now()}`, cells: columns.map(() => '') }];
     setRows(next);
     setDirty(true);
-  }, [rows]);
+  }, [rows, columns]);
 
   const updateCell = useCallback((rowIdx: number, colIdx: number, value: string) => {
     const nextValue = amountColIdxs.has(colIdx) ? formatAmount(value) : value;
@@ -138,7 +142,7 @@ export function PortalBankStatementPage() {
     }
     setSaving(true);
     try {
-      await saveBankStatementRows(rows);
+      await saveBankStatementRows({ columns, rows });
       setDirty(false);
       toast.success('통장내역을 저장했습니다.');
     } catch (err) {
@@ -147,7 +151,7 @@ export function PortalBankStatementPage() {
     } finally {
       setSaving(false);
     }
-  }, [rows, saveBankStatementRows]);
+  }, [columns, rows, saveBankStatementRows]);
 
   if (!ready) {
     return (
@@ -198,7 +202,7 @@ export function PortalBankStatementPage() {
             <table className="w-full text-[11px] border-collapse">
               <thead className="sticky top-0 z-10 bg-muted/60">
                 <tr>
-                  {BANK_STATEMENT_COLUMNS.map((col, idx) => (
+                  {columns.map((col, idx) => (
                     <th key={idx} className="px-2 py-1 text-left border-b border-r font-medium whitespace-nowrap">
                       {col}
                     </th>
@@ -208,14 +212,14 @@ export function PortalBankStatementPage() {
               <tbody>
                 {rows.length === 0 && (
                   <tr>
-                    <td colSpan={BANK_STATEMENT_COLUMNS.length} className="text-center text-[12px] text-muted-foreground py-10">
-                      엑셀 파일을 업로드하거나 행을 추가하세요.
+                    <td colSpan={Math.max(1, columns.length)} className="text-center text-[12px] text-muted-foreground py-10">
+                      엑셀 파일을 업로드하세요.
                     </td>
                   </tr>
                 )}
                 {rows.map((row, rowIdx) => (
                   <tr key={row.tempId || rowIdx} className="border-t border-border/30">
-                    {BANK_STATEMENT_COLUMNS.map((_, colIdx) => (
+                    {columns.map((_, colIdx) => (
                       <td
                         key={colIdx}
                         className="px-1.5 py-1 border-r border-border/30 focus-within:bg-teal-50/20 focus-within:shadow-[inset_0_0_0_2px_rgba(20,184,166,0.8)]"

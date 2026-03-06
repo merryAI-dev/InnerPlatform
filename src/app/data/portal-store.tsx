@@ -36,7 +36,14 @@ import { PARTICIPATION_ENTRIES } from './participation-data';
 import { LEDGERS, PROJECTS, TRANSACTIONS } from './mock-data';
 import { SETTLEMENT_COLUMNS } from '../platform/settlement-csv';
 import type { ImportRow } from '../platform/settlement-csv';
-import { mapBankStatementsToImportRows, type BankStatementRow } from '../platform/bank-statement';
+import {
+  BANK_STATEMENT_COLUMNS,
+  mergeBankRowsIntoExpenseSheet,
+  mapBankStatementsToImportRows,
+  type BankStatementRow,
+  type BankStatementSheet,
+} from '../platform/bank-statement';
+import { normalizeSpace } from '../platform/csv-utils';
 import { useAuth } from './auth-store';
 import { useFirebase } from '../lib/firebase-context';
 import { getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
@@ -68,7 +75,7 @@ interface PortalState {
   transactions: Transaction[];
   evidenceRequiredMap: Record<string, string>;
   expenseSheetRows: ImportRow[] | null;
-  bankStatementRows: BankStatementRow[] | null;
+  bankStatementRows: BankStatementSheet | null;
   budgetPlanRows: BudgetPlanRow[] | null;
   budgetCodeBook: BudgetCodeEntry[];
   weeklySubmissionStatuses: WeeklySubmissionStatus[];
@@ -98,7 +105,7 @@ interface PortalActions {
   changeTransactionState: (id: string, newState: TransactionState, reason?: string) => void;
   saveEvidenceRequiredMap: (map: Record<string, string>) => Promise<void>;
   saveExpenseSheetRows: (rows: ImportRow[]) => Promise<void>;
-  saveBankStatementRows: (rows: BankStatementRow[]) => Promise<void>;
+  saveBankStatementRows: (sheet: BankStatementSheet) => Promise<void>;
   saveBudgetPlanRows: (rows: BudgetPlanRow[]) => Promise<void>;
   saveBudgetCodeBook: (rows: BudgetCodeEntry[], renames?: BudgetCodeRename[]) => Promise<void>;
   upsertWeeklySubmissionStatus: (input: {
@@ -175,7 +182,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [evidenceRequiredMap, setEvidenceRequiredMap] = useState<Record<string, string>>({});
   const [expenseSheetRows, setExpenseSheetRows] = useState<ImportRow[] | null>(null);
-  const [bankStatementRows, setBankStatementRows] = useState<BankStatementRow[] | null>(null);
+  const [bankStatementRows, setBankStatementRows] = useState<BankStatementSheet | null>(null);
   const [budgetPlanRows, setBudgetPlanRows] = useState<BudgetPlanRow[] | null>(null);
   const [budgetCodeBook, setBudgetCodeBook] = useState<BudgetCodeEntry[]>(
     normalizeBudgetCodeBook(BUDGET_CODE_BOOK as unknown as BudgetCodeEntry[]),
@@ -606,8 +613,26 @@ export function PortalProvider({ children }: { children: ReactNode }) {
             setBankStatementRows(null);
             return;
           }
-          const data = snap.data() as { rows?: BankStatementRow[] };
-          setBankStatementRows(Array.isArray(data?.rows) ? data.rows : null);
+          const data = snap.data() as { rows?: BankStatementRow[]; columns?: string[] };
+          const rawRows = Array.isArray(data?.rows) ? data.rows : [];
+          if (rawRows.length === 0) {
+            setBankStatementRows(null);
+            return;
+          }
+          const fallbackColumnCount = Math.max(...rawRows.map((r) => (Array.isArray(r?.cells) ? r.cells.length : 0)), 0);
+          const fallbackColumns = fallbackColumnCount > 0
+            ? Array.from({ length: fallbackColumnCount }, (_, i) => BANK_STATEMENT_COLUMNS[i] || `컬럼${i + 1}`)
+            : [];
+          const columns = Array.isArray(data?.columns) && data.columns.length > 0
+            ? data.columns.map((c, i) => normalizeSpace(String(c || `컬럼${i + 1}`)))
+            : fallbackColumns;
+          const rows = rawRows.map((row, rowIdx) => ({
+            tempId: row?.tempId || `bank-${Date.now()}-${rowIdx}`,
+            cells: Array.isArray(row?.cells)
+              ? columns.map((_, i) => normalizeSpace(String(row.cells[i] ?? '')))
+              : columns.map(() => ''),
+          }));
+          setBankStatementRows({ columns, rows });
         }, (err) => {
           console.error('[PortalStore] bank statement listen error:', err);
           setBankStatementRows(null);
@@ -1042,18 +1067,38 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     return id;
   }, [db, orgId, portalUser, authUser]);
 
-  const saveBankStatementRows = useCallback(async (rows: BankStatementRow[]) => {
+  const saveBankStatementRows = useCallback(async (sheet: BankStatementSheet) => {
     if (!db || !portalUser?.projectId) {
       toast.error('Firestore 연결이 필요합니다. 관리자에게 문의해 주세요.');
       return;
     }
     const now = new Date().toISOString();
-    const sanitizedRows = rows.map((row) => ({
-      tempId: row.tempId || `bank-${Date.now()}`,
-      cells: Array.isArray(row.cells) ? row.cells.map((c) => (c ?? '')) : [],
+    const incomingColumns = Array.isArray(sheet?.columns) ? sheet.columns : [];
+    const maxLenFromRows = Array.isArray(sheet?.rows)
+      ? sheet.rows.reduce((max, row) => Math.max(max, Array.isArray(row?.cells) ? row.cells.length : 0), 0)
+      : 0;
+    const rawColumns = incomingColumns.length > 0
+      ? incomingColumns
+      : Array.from({ length: maxLenFromRows }, (_, i) => BANK_STATEMENT_COLUMNS[i] || `컬럼${i + 1}`);
+    const seen = new Set<string>();
+    const sanitizedColumns = rawColumns.map((c, i) => {
+      const base = normalizeSpace(String(c || `컬럼${i + 1}`)) || `컬럼${i + 1}`;
+      let next = base;
+      let suffix = 2;
+      while (seen.has(next)) {
+        next = `${base}_${suffix}`;
+        suffix += 1;
+      }
+      seen.add(next);
+      return next;
+    });
+    const sanitizedRows = (Array.isArray(sheet?.rows) ? sheet.rows : []).map((row, i) => ({
+      tempId: row?.tempId || `bank-${Date.now()}-${i}`,
+      cells: sanitizedColumns.map((_, colIdx) => normalizeSpace(String(Array.isArray(row?.cells) ? (row.cells[colIdx] ?? '') : ''))),
     }));
     const payload = withTenantScope(orgId, {
       projectId: portalUser.projectId,
+      columns: sanitizedColumns,
       rows: sanitizedRows,
       updatedAt: now,
       updatedBy: portalUser.name || authUser?.name || '',
@@ -1063,10 +1108,12 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       payload,
       { merge: true },
     );
-    setBankStatementRows(sanitizedRows as BankStatementRow[]);
+    const sanitizedSheet: BankStatementSheet = { columns: sanitizedColumns, rows: sanitizedRows as BankStatementRow[] };
+    setBankStatementRows(sanitizedSheet);
 
     // Sync into expense sheet rows (통장내역 → 사용내역)
-    const nextExpenseRows = mapBankStatementsToImportRows(sanitizedRows as BankStatementRow[]);
+    const mappedExpenseRows = mapBankStatementsToImportRows(sanitizedSheet);
+    const nextExpenseRows = mergeBankRowsIntoExpenseSheet(expenseSheetRows, mappedExpenseRows);
     const expensePayload = withTenantScope(orgId, {
       projectId: portalUser.projectId,
       rows: nextExpenseRows,
@@ -1079,7 +1126,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       { merge: true },
     );
     setExpenseSheetRows(nextExpenseRows);
-  }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name]);
+  }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name, expenseSheetRows]);
 
   const persistTransaction = useCallback(async (txData: Transaction) => {
     if (!db) return;
