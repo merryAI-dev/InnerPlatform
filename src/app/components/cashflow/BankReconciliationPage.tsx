@@ -14,6 +14,11 @@ import {
 import { useAppStore } from '../../data/store';
 import { parseCsv } from '../../platform/csv-utils';
 import {
+  getBankDescriptionView,
+  getBankReconciliationViewPolicy,
+  resolveTransactionMemo,
+} from '../../platform/settlement-ledger.helpers';
+import {
   autoMatchBankTransactions,
   parseBankCsv,
   type BankTransaction,
@@ -34,7 +39,7 @@ const STATUS_STYLE: Record<string, { bg: string; text: string; label: string }> 
 };
 
 export function BankReconciliationPage() {
-  const { transactions, projects } = useAppStore();
+  const { currentUser, transactions, projects } = useAppStore();
   const [bankTxs, setBankTxs] = useState<BankTransaction[]>([]);
   const [projectFilter, setProjectFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState('ALL');
@@ -68,6 +73,10 @@ export function BankReconciliationPage() {
     projects.forEach(p => { m[p.id] = p.name; });
     return m;
   }, [projects]);
+  const viewPolicy = useMemo(
+    () => getBankReconciliationViewPolicy(currentUser.role),
+    [currentUser.role],
+  );
 
   const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -95,6 +104,13 @@ export function BankReconciliationPage() {
         badge={stats.unmatchedBank + stats.unmatchedSystem > 0 ? `${stats.unmatchedBank + stats.unmatchedSystem}건 미매칭` : undefined}
         badgeVariant={stats.unmatchedBank + stats.unmatchedSystem > 0 ? 'default' : 'secondary'}
       />
+
+      {viewPolicy.showRoleNotice && (
+        <div className="rounded-lg border border-border/50 bg-muted/30 px-4 py-3 text-[11px] text-muted-foreground">
+          현재 보기 기준: <span className="font-semibold text-foreground">{viewPolicy.roleLabel}</span>
+          {' '}| 공통 열은 유지하고, 민감한 은행 원문 적요는 권한에 따라 다르게 보입니다.
+        </div>
+      )}
 
       {/* Upload + Filter */}
       <div className="flex flex-wrap items-center gap-3 p-4 rounded-lg border border-border/40 bg-card shadow-sm">
@@ -194,6 +210,15 @@ export function BankReconciliationPage() {
                 <TableBody>
                   {filteredMatches.map((m, idx) => {
                     const st = STATUS_STYLE[m.status];
+                    const bankDescriptionView = getBankDescriptionView(
+                      m.bankTx?.description,
+                      currentUser.role,
+                    );
+                    const memoView = resolveTransactionMemo({
+                      memo: m.systemTx?.memo,
+                      internalMemo: m.systemTx?.internalMemo,
+                      bankMemo: m.systemTx?.bankMemo,
+                    });
                     return (
                       <TableRow key={idx} className="h-9">
                         <TableCell className="py-1">
@@ -204,12 +229,17 @@ export function BankReconciliationPage() {
                         <TableCell className="py-1 text-[10px] text-muted-foreground tabular-nums">
                           {m.confidence > 0 ? `${Math.round(m.confidence * 100)}%` : '-'}
                         </TableCell>
-                        {/* Bank side */}
                         <TableCell className="py-1 text-[10px] text-muted-foreground whitespace-nowrap">
                           {m.bankTx?.date || '-'}
                         </TableCell>
-                        <TableCell className="py-1 text-[11px] max-w-[150px] truncate">
-                          {m.bankTx?.description || '-'}
+                        <TableCell
+                          className="py-1 text-[11px] max-w-[150px] truncate"
+                          data-testid={`bank-description-${idx + 1}`}
+                          title={bankDescriptionView.restricted ? '권한에 따라 은행 원문 적요를 숨깁니다.' : bankDescriptionView.text}
+                        >
+                          <span className={bankDescriptionView.restricted ? 'text-muted-foreground' : ''}>
+                            {bankDescriptionView.text}
+                          </span>
                         </TableCell>
                         <TableCell className="py-1 text-right text-[11px] tabular-nums whitespace-nowrap" style={{ fontWeight: 700 }}>
                           {m.bankTx ? (
@@ -219,15 +249,21 @@ export function BankReconciliationPage() {
                           ) : '-'}
                         </TableCell>
                         <TableCell className="py-1 text-center text-[10px] text-muted-foreground/40">↔</TableCell>
-                        {/* System side */}
                         <TableCell className="py-1 text-[10px] text-muted-foreground whitespace-nowrap">
                           {m.systemTx?.dateTime.slice(0, 10) || '-'}
                         </TableCell>
                         <TableCell className="py-1 text-[11px] max-w-[100px] truncate" style={{ fontWeight: 500 }}>
                           {m.systemTx ? projectMap[m.systemTx.projectId] || '-' : '-'}
                         </TableCell>
-                        <TableCell className="py-1 text-[11px]">
-                          {m.systemTx?.counterparty || '-'}
+                        <TableCell className="py-1 text-[11px]" data-testid={`system-counterparty-${idx + 1}`}>
+                          <div className="flex flex-col">
+                            <span>{m.systemTx?.counterparty || '-'}</span>
+                            {memoView.internalMemo && (
+                              <span className="text-[10px] text-muted-foreground truncate">
+                                내부 메모: {memoView.internalMemo}
+                              </span>
+                            )}
+                          </div>
                         </TableCell>
                         <TableCell className="py-1 text-right text-[11px] tabular-nums whitespace-nowrap" style={{ fontWeight: 700 }}>
                           {m.systemTx ? (
