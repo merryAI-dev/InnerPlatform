@@ -60,7 +60,7 @@ describe('settlement-csv', () => {
 
     const csv = exportSettlementCsv([tx], getYearMondayWeeks(2026));
 
-    expect(csv).toContain('법인카드(뒷번호1)');
+    expect(csv).toContain('사업비카드');
     expect(csv).toContain('매입부가세');
     expect(csv).toContain('1,100');
   });
@@ -135,7 +135,7 @@ describe('settlement-csv', () => {
     const noteIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '비고');
 
     expect(rows[0].cells[memoIdx]).toBe('출장 내부 메모');
-    expect(rows[0].cells[methodIdx]).toBe('법인카드(뒷번호2)');
+    expect(rows[0].cells[methodIdx]).toBe('개인법인카드');
     expect(rows[0].cells[noteIdx]).toBe('');
   });
 

@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  canChooseWorkspace,
+  canEnterPortalWorkspace,
   isAdminSpaceRole,
   isPortalRole,
   resolveHomePath,
+  shouldPromptWorkspaceSelection,
   shouldForcePortalOnboarding,
 } from './navigation';
 
@@ -22,6 +25,7 @@ describe('navigation helpers', () => {
   it('normalizes role strings', () => {
     expect(resolveHomePath(' PM ')).toBe('/portal');
     expect(resolveHomePath('ADMIN')).toBe('/');
+    expect(resolveHomePath('admin', 'portal')).toBe('/portal');
   });
 
   it('defaults unknown roles to portal space (least privilege)', () => {
@@ -40,23 +44,23 @@ describe('navigation helpers', () => {
 
     expect(shouldForcePortalOnboarding({
       isAuthenticated: true,
-      role: 'viewer',
-      isRegistered: false,
-      pathname: '/portal/onboarding',
-    })).toBe(false);
-
-    expect(shouldForcePortalOnboarding({
-      isAuthenticated: true,
       role: 'pm',
       isRegistered: true,
       pathname: '/portal',
     })).toBe(false);
-  });
 
-  it('never forces onboarding for admin-space roles', () => {
     expect(shouldForcePortalOnboarding({
       isAuthenticated: true,
       role: 'admin',
+      isRegistered: false,
+      pathname: '/portal',
+    })).toBe(true);
+  });
+
+  it('never forces onboarding for roles outside portal workspace', () => {
+    expect(shouldForcePortalOnboarding({
+      isAuthenticated: true,
+      role: 'finance',
       isRegistered: false,
       pathname: '/portal',
     })).toBe(false);
@@ -67,5 +71,19 @@ describe('navigation helpers', () => {
       isRegistered: false,
       pathname: '/portal',
     })).toBe(false);
+  });
+
+  it('exposes workspace chooser only for admin roles', () => {
+    expect(canChooseWorkspace('admin')).toBe(true);
+    expect(canChooseWorkspace('tenant_admin')).toBe(true);
+    expect(canChooseWorkspace('finance')).toBe(false);
+    expect(shouldPromptWorkspaceSelection('admin', undefined)).toBe(true);
+    expect(shouldPromptWorkspaceSelection('admin', 'portal')).toBe(false);
+  });
+
+  it('distinguishes portal-capable roles', () => {
+    expect(canEnterPortalWorkspace('pm')).toBe(true);
+    expect(canEnterPortalWorkspace('admin')).toBe(true);
+    expect(canEnterPortalWorkspace('finance')).toBe(false);
   });
 });

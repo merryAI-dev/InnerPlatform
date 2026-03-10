@@ -422,6 +422,8 @@ export interface Comment {
   version?: number;
   transactionId: string;
   projectId?: string;
+  targetType?: 'transaction' | 'expense_sheet_row';
+  sheetRowId?: string;
   authorId: string;
   authorName: string;
   fieldKey?: string;

@@ -190,6 +190,7 @@ function CommentThreadSheet({
   anchor,
   comments,
   open,
+  projectId,
   currentUserId,
   currentUserName,
   onClose,
@@ -198,6 +199,7 @@ function CommentThreadSheet({
   anchor: ActiveCommentAnchor | null;
   comments: Comment[];
   open: boolean;
+  projectId: string;
   currentUserId: string;
   currentUserName: string;
   onClose: () => void;
@@ -217,9 +219,13 @@ function CommentThreadSheet({
 
     setSaving(true);
     try {
+      const isSheetRowComment = anchor.transactionId.startsWith('sheet-row:');
       await onAddComment({
         id: `cmt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         transactionId: anchor.transactionId,
+        projectId,
+        targetType: isSheetRowComment ? 'expense_sheet_row' : 'transaction',
+        ...(isSheetRowComment ? { sheetRowId: anchor.transactionId } : {}),
         authorId: currentUserId || currentUserName,
         authorName: currentUserName,
         fieldKey: anchor.fieldKey,
@@ -235,7 +241,7 @@ function CommentThreadSheet({
     } finally {
       setSaving(false);
     }
-  }, [anchor, currentUserId, currentUserName, draft, onAddComment]);
+  }, [anchor, currentUserId, currentUserName, draft, onAddComment, projectId]);
 
   return (
     <Sheet modal={false} open={open} onOpenChange={(nextOpen) => { if (!nextOpen) onClose(); }}>
@@ -849,6 +855,7 @@ export function SettlementLedgerPage({
         anchor={activeCommentAnchor}
         comments={activeCellComments}
         open={!!activeCommentAnchor}
+        projectId={projectId}
         currentUserId={currentUserId}
         currentUserName={currentUserName}
         onClose={() => setActiveCommentAnchor(null)}

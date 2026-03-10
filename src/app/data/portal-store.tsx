@@ -25,8 +25,10 @@ import { useAuth } from './auth-store';
 import { useFirebase } from '../lib/firebase-context';
 import { getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
 import { duplicateExpenseSetAsDraft, withExpenseItems } from './portal-store.helpers';
+import { buildPortalProfilePatch, readMemberWorkspace } from './member-workspace';
 import { toast } from 'sonner';
 import { includesProject, normalizeProjectIds, resolvePrimaryProjectId } from './project-assignment';
+import { canEnterPortalWorkspace } from '../platform/navigation';
 
 export interface PortalUser {
   id: string;
@@ -141,10 +143,12 @@ export function PortalProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!isAuthenticated || !authUser) {
+      setPortalUser(null);
       setIsMemberLoading(false);
       return;
     }
-    if (authUser.role !== 'pm' && authUser.role !== 'viewer') {
+    if (!canEnterPortalWorkspace(authUser.role)) {
+      setPortalUser(null);
       setIsMemberLoading(false);
       return;
     }
@@ -162,36 +166,30 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           setPortalUser(null);
           return;
         }
-        const member = snap.data() as Partial<PortalUser> & {
-          projectIds?: Array<string | { id?: string; name?: string }>;
-          projectId?: string | { id?: string; name?: string };
-        };
+        const member = snap.data() as Record<string, unknown>;
+        const workspace = readMemberWorkspace(member);
         const allowedProjectIds = new Set(PROJECTS.map((p) => p.id));
-        const nameMap: Record<string, string> = {};
-        const rawIds = Array.isArray(member.projectIds) ? member.projectIds : [];
-        const coercedIds = rawIds
-          .map((entry) => {
-            if (typeof entry === 'string') return entry;
-            const id = String(entry?.id || '').trim();
-            const name = String(entry?.name || '').trim();
-            if (id && name) nameMap[id] = name;
-            return id;
-          })
-          .filter((id) => allowedProjectIds.has(id))
-          .filter(Boolean);
-        const preferredId = typeof member.projectId === 'string'
-          ? member.projectId
-          : String((member.projectId as any)?.id || '');
+        const coercedIds = normalizeProjectIds([
+          ...(workspace.portalProfile?.projectIds || []),
+          ...(Array.isArray(authUser.projectIds) ? authUser.projectIds : []),
+          workspace.portalProfile?.projectId,
+          authUser.projectId,
+        ]).filter((id) => allowedProjectIds.has(id));
+        const preferredId = workspace.portalProfile?.projectId || authUser.projectId || '';
         const normalizedPreferred = allowedProjectIds.has(preferredId) ? preferredId : '';
+        const projectNames = Object.fromEntries(
+          Object.entries(workspace.portalProfile?.projectNames || {})
+            .filter(([projectId, name]) => allowedProjectIds.has(projectId) && typeof name === 'string' && !!name.trim()),
+            );
         const normalized = normalizePortalUser({
           id: authUser.uid,
-          name: member.name || authUser.name,
-          email: member.email || authUser.email,
+          name: String(member.name || authUser.name || '사용자'),
+          email: String(member.email || authUser.email || ''),
           role: authUser.role,
           projectId: normalizedPreferred,
           projectIds: coercedIds,
-          projectNames: Object.keys(nameMap).length ? nameMap : undefined,
-          registeredAt: member.registeredAt || authUser.registeredAt || new Date().toISOString(),
+          projectNames: Object.keys(projectNames).length ? projectNames : undefined,
+          registeredAt: String(member.registeredAt || authUser.registeredAt || new Date().toISOString()),
         });
         if (!normalized) {
           setPortalUser(null);
@@ -206,7 +204,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     };
 
     loadFromStore();
-  }, [isAuthenticated, authUser?.uid, authUser?.role, firestoreEnabled, db, orgId]);
+  }, [isAuthenticated, authUser?.uid, authUser?.role, authUser?.projectId, authUser?.projectIds, firestoreEnabled, db, orgId]);
 
   useEffect(() => {
     unsubsRef.current.forEach((unsub) => unsub());
@@ -515,6 +513,14 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       user.projectId,
     ]);
     const primaryProjectId = resolvePrimaryProjectId(normalizedProjectIds, user.projectId);
+    const projectNames = Object.fromEntries(
+      normalizedProjectIds
+        .map((projectId) => {
+          const project = projects.find((item) => item.id === projectId) || PROJECTS.find((item) => item.id === projectId);
+          return project?.name ? [projectId, project.name] as const : null;
+        })
+        .filter((entry): entry is readonly [string, string] => !!entry),
+    );
     if (!primaryProjectId) {
       toast.error('최소 1개 이상의 사업을 선택해 주세요.');
       return false;
@@ -526,6 +532,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       role: (authUser?.role || user.role || 'pm').toLowerCase(),
       projectId: primaryProjectId,
       projectIds: normalizedProjectIds,
+      projectNames: Object.keys(projectNames).length ? projectNames : undefined,
       registeredAt: now,
     });
 
@@ -542,11 +549,17 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           uid: authUser.uid,
           name: candidate.name,
           email: candidate.email,
-          role: authUser.role === 'viewer' ? 'viewer' : 'pm',
+          role: authUser.role || candidate.role,
           tenantId: orgId,
           status: 'ACTIVE',
-          projectId: candidate.projectId,
-          projectIds: candidate.projectIds,
+          ...buildPortalProfilePatch({
+            projectId: candidate.projectId,
+            projectIds: candidate.projectIds,
+            projectNames: candidate.projectNames,
+            updatedAt: now,
+            updatedByUid: authUser.uid,
+            updatedByName: authUser.name || candidate.name,
+          }),
           updatedAt: now,
           createdAt: authUser.registeredAt || now,
           lastLoginAt: now,
@@ -560,7 +573,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     }
 
     return true;
-  }, [authUser, firestoreEnabled, db, orgId, portalUser]);
+  }, [authUser, firestoreEnabled, db, orgId, portalUser, projects]);
 
   const setActiveProject = useCallback(async (projectId: string): Promise<boolean> => {
     if (!firestoreEnabled || !db) {
@@ -588,11 +601,18 @@ export function PortalProvider({ children }: { children: ReactNode }) {
 
     if (authUser) {
       try {
+        const now = new Date().toISOString();
         await updateDoc(doc(db, getOrgDocumentPath(orgId, 'members', authUser.uid)), {
-          projectId: target,
-          projectIds: nextUser.projectIds,
           tenantId: orgId,
-          updatedAt: new Date().toISOString(),
+          ...buildPortalProfilePatch({
+            projectId: target,
+            projectIds: nextUser.projectIds,
+            projectNames: nextUser.projectNames,
+            updatedAt: now,
+            updatedByUid: authUser.uid,
+            updatedByName: authUser.name || nextUser.name,
+          }),
+          updatedAt: now,
         });
       } catch (err) {
         console.error('[PortalStore] setActiveProject member sync error:', err);
@@ -870,9 +890,14 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    const isSheetRowComment = (comment.targetType === 'expense_sheet_row')
+      || comment.transactionId.startsWith('sheet-row:')
+      || comment.sheetRowId?.startsWith('sheet-row:');
     const payload = withTenantScope(orgId, {
       ...comment,
       projectId: comment.projectId || portalUser.projectId,
+      targetType: isSheetRowComment ? 'expense_sheet_row' : (comment.targetType || 'transaction'),
+      ...(isSheetRowComment ? { sheetRowId: comment.sheetRowId || comment.transactionId } : {}),
     });
 
     if (firestoreEnabled && db) {
