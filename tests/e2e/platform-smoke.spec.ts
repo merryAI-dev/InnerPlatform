@@ -85,6 +85,15 @@ test('settlement smoke keeps headers and exposes enhanced helpers', async ({ pag
   await progressSelect.selectOption('COMPLETE');
   await expect(progressSelect).toHaveValue('COMPLETE');
 
+  const memoButton = page.locator('[data-testid="comment-button-smoke-tx-1-상세-적요"]');
+  await expect(memoButton).toBeVisible();
+  await memoButton.click();
+  await expect(page.getByText('1행 · 상세 적요')).toBeVisible();
+  await expect(page.getByText('이 셀은 영수증 문구와 맞춰서 적어주세요.')).toBeVisible();
+  await page.locator('textarea').fill('정산 메모 추가');
+  await page.getByRole('button', { name: '메모 남기기' }).click();
+  await expect(page.getByText('정산 메모 추가')).toBeVisible();
+
   await page.locator('[data-testid="settlement-1-거래일시"]').focus();
   await page.keyboard.press('Enter');
   await expect(page.locator('[data-testid="settlement-2-거래일시"]')).toBeFocused();
@@ -92,6 +101,13 @@ test('settlement smoke keeps headers and exposes enhanced helpers', async ({ pag
   await page.locator('[data-testid="settlement-row-insert-1"]').click();
   await expect(page.locator('[data-testid="settlement-21-거래일시"]')).toHaveCount(1);
   await expect(page.locator('[data-testid="settlement-2-no"]')).toHaveValue('2');
+  await page.locator('td:has([data-testid="settlement-21-거래일시"]) [aria-label="셀 메모 열기"]').click();
+  await expect(page.getByText('21행 · 거래일시')).toBeVisible();
+  await page.locator('textarea').fill('새 행 메모');
+  await page.getByRole('button', { name: '메모 남기기' }).click();
+  await expect(page.getByText('새 행 메모')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByText('21행 · 거래일시')).toHaveCount(0);
 
   await page.locator('[data-testid="settlement-download-start"]').fill('2026-03-01');
   await page.locator('[data-testid="settlement-download-end"]').fill('2026-03-31');

@@ -4,7 +4,7 @@ import { Toaster } from 'sonner';
 import '../styles/index.css';
 import { SettlementLedgerPage } from '../app/components/cashflow/SettlementLedgerPage';
 import type { ImportRow } from '../app/platform/settlement-csv';
-import type { Transaction } from '../app/data/types';
+import type { Comment, Transaction } from '../app/data/types';
 
 function SettlementSmokeHarness() {
   const [transactions, setTransactions] = useState<Transaction[]>([
@@ -89,6 +89,19 @@ function SettlementSmokeHarness() {
     },
   ]);
   const [sheetRows, setSheetRows] = useState<ImportRow[] | null>(null);
+  const [comments, setComments] = useState<Comment[]>([
+    {
+      id: 'comment-1',
+      transactionId: 'smoke-tx-1',
+      projectId: 'smoke-project',
+      authorId: 'pm-smoke',
+      authorName: 'Smoke PM',
+      fieldKey: '상세-적요',
+      fieldLabel: '상세 적요',
+      content: '이 셀은 영수증 문구와 맞춰서 적어주세요.',
+      createdAt: '2026-03-05T09:00:00Z',
+    },
+  ]);
 
   const evidenceRequiredMap = useMemo(
     () => ({
@@ -124,7 +137,12 @@ function SettlementSmokeHarness() {
             setSheetRows(rows);
           }}
           currentUserName="Smoke PM"
+          currentUserId="pm-smoke"
           userRole="pm"
+          comments={comments}
+          onAddComment={async (comment) => {
+            setComments((prev) => [...prev, { ...comment, projectId: 'smoke-project' }]);
+          }}
         />
       </div>
       <Toaster position="bottom-right" />

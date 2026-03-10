@@ -10,7 +10,7 @@ import {
   where,
   type Unsubscribe,
 } from 'firebase/firestore';
-import type { Ledger, Project, ParticipationEntry, Transaction, TransactionState } from './types';
+import type { Comment, Ledger, Project, ParticipationEntry, Transaction, TransactionState } from './types';
 import type { ExpenseSet, ExpenseItem, ExpenseSetStatus } from './budget-data';
 import { EXPENSE_SETS } from './budget-data';
 import {
@@ -50,6 +50,7 @@ interface PortalState {
   expenseSets: ExpenseSet[];
   changeRequests: ChangeRequest[];
   transactions: Transaction[];
+  comments: Comment[];
   evidenceRequiredMap: Record<string, string>;
   expenseSheetRows: ImportRow[] | null;
 }
@@ -75,6 +76,8 @@ interface PortalActions {
   addTransaction: (tx: Transaction) => void;
   updateTransaction: (id: string, updates: Partial<Transaction>) => void;
   changeTransactionState: (id: string, newState: TransactionState, reason?: string) => void;
+  addComment: (comment: Comment) => Promise<void>;
+  getTransactionComments: (txId: string) => Comment[];
   saveEvidenceRequiredMap: (map: Record<string, string>) => Promise<void>;
   saveExpenseSheetRows: (rows: ImportRow[]) => Promise<void>;
 }
@@ -125,6 +128,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   const [ledgers, setLedgers] = useState<Ledger[]>([]);
   const [participationEntries, setParticipationEntries] = useState<ParticipationEntry[]>(PARTICIPATION_ENTRIES);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [comments, setComments] = useState<Comment[]>([]);
   const [evidenceRequiredMap, setEvidenceRequiredMap] = useState<Record<string, string>>({});
   const [expenseSheetRows, setExpenseSheetRows] = useState<ImportRow[] | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -215,6 +219,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       setChangeRequests([]);
       setParticipationEntries([]);
       setTransactions([]);
+      setComments([]);
       setEvidenceRequiredMap({});
       setExpenseSheetRows(null);
       setIsLoading(false);
@@ -344,6 +349,10 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         collection(db, getOrgCollectionPath(orgId, 'transactions')),
         where('projectId', '==', portalUser.projectId),
       );
+      const commentQuery = query(
+        collection(db, getOrgCollectionPath(orgId, 'comments')),
+        where('projectId', '==', portalUser.projectId),
+      );
 
       const evidenceMapRef = doc(db, getOrgDocumentPath(orgId, 'budgetEvidenceMaps', portalUser.projectId));
       const expenseSheetRef = doc(
@@ -367,6 +376,18 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           setTransactions(TRANSACTIONS.filter((t) => t.projectId === portalUser.projectId));
           txReady = true;
           markReady();
+        }),
+      );
+
+      unsubsRef.current.push(
+        onSnapshot(commentQuery, (snap) => {
+          const list = snap.docs
+            .map((docItem) => docItem.data() as Comment)
+            .sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+          setComments(list);
+        }, (err) => {
+          console.error('[PortalStore] comments listen error:', err);
+          setComments([]);
         }),
       );
 
@@ -843,6 +864,33 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     }
   }, [firestoreEnabled, persistTransaction, portalUser?.id, portalUser?.name]);
 
+  const addComment = useCallback(async (comment: Comment) => {
+    if (!portalUser?.projectId) {
+      toast.error('사업 정보가 없어 메모를 저장할 수 없습니다.');
+      return;
+    }
+
+    const payload = withTenantScope(orgId, {
+      ...comment,
+      projectId: comment.projectId || portalUser.projectId,
+    });
+
+    if (firestoreEnabled && db) {
+      await setDoc(
+        doc(db, getOrgDocumentPath(orgId, 'comments', comment.id)),
+        payload,
+        { merge: true },
+      );
+      return;
+    }
+
+    setComments((prev) => [...prev, payload as Comment]);
+  }, [db, firestoreEnabled, orgId, portalUser?.projectId]);
+
+  const getTransactionComments = useCallback((txId: string) => {
+    return comments.filter((comment) => comment.transactionId === txId);
+  }, [comments]);
+
   const value: PortalState & PortalActions = {
     isRegistered: !!(portalUser && portalUser.projectIds.length > 0),
     isLoading: isLoading || isMemberLoading,
@@ -854,6 +902,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     expenseSets,
     changeRequests,
     transactions,
+    comments,
     evidenceRequiredMap,
     expenseSheetRows,
     register,
@@ -871,6 +920,8 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     addTransaction,
     updateTransaction,
     changeTransactionState,
+    addComment,
+    getTransactionComments,
     saveEvidenceRequiredMap,
     saveExpenseSheetRows,
   };

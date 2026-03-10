@@ -421,8 +421,11 @@ export interface Comment {
   id: string;
   version?: number;
   transactionId: string;
+  projectId?: string;
   authorId: string;
   authorName: string;
+  fieldKey?: string;
+  fieldLabel?: string;
   content: string;
   createdAt: string;
 }

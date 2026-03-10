@@ -1,9 +1,9 @@
-import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, Download, ExternalLink, Plus, Save, Send, Upload, X } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, Download, ExternalLink, MessageSquare, Plus, Save, Send, Upload, X } from 'lucide-react';
 import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { BUDGET_CODE_BOOK } from '../../data/budget-data';
 import { featureFlags } from '../../config/feature-flags';
-import type { Transaction, TransactionState } from '../../data/types';
+import type { Comment, Transaction, TransactionState } from '../../data/types';
 import { findWeekForDate, getYearMondayWeeks, type MonthMondayWeek } from '../../platform/cashflow-weeks';
 import { parseCsv, parseDate, parseNumber, triggerDownload } from '../../platform/csv-utils';
 import { computeEvidenceStatus, computeEvidenceSummary, isValidDriveUrl } from '../../platform/evidence-helpers';
@@ -30,7 +30,9 @@ import {
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Checkbox } from '../ui/checkbox';
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '../ui/sheet';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
+import { Textarea } from '../ui/textarea';
 
 // ── Helpers ──
 
@@ -44,11 +46,26 @@ const SETTLEMENT_PROGRESS_OPTIONS = (['INCOMPLETE', 'COMPLETE'] as const).map((v
 }));
 
 function toCellTestId(rowIdx: number, header: string): string {
-  const slug = header
+  return `settlement-${rowIdx + 1}-${toFieldSlug(header)}`;
+}
+
+function toFieldSlug(value: string): string {
+  return value
     .toLowerCase()
     .replace(/[^a-z0-9가-힣]+/g, '-')
     .replace(/^-+|-+$/g, '');
-  return `settlement-${rowIdx + 1}-${slug}`;
+}
+
+function buildCommentThreadKey(transactionId: string, fieldKey: string): string {
+  return `${transactionId}::${fieldKey}`;
+}
+
+function buildSheetRowCommentId(tempId: string): string {
+  return `sheet-row:${tempId}`;
+}
+
+function formatCommentTime(value: string): string {
+  return value ? value.slice(0, 16).replace('T', ' ') : '';
 }
 
 type GridSlot = 'primary' | 'secondary';
@@ -132,6 +149,150 @@ function normalizeRowDateForFilter(value: string | undefined): string {
   return parseDate(head) || parseDate(raw.slice(0, 10));
 }
 
+function CellCommentButton({
+  count,
+  disabled,
+  onClick,
+  testId,
+}: {
+  count: number;
+  disabled?: boolean;
+  onClick: () => void;
+  testId?: string;
+}) {
+  return (
+    <button
+      type="button"
+      title={disabled ? '저장 후 메모를 남길 수 있습니다' : '셀 메모 열기'}
+      aria-label="셀 메모 열기"
+      data-testid={testId}
+      disabled={disabled}
+      className={`absolute top-1 right-1 inline-flex h-5 w-5 items-center justify-center rounded-md border text-[10px] transition ${count > 0
+        ? 'border-amber-300 bg-amber-50 text-amber-700 opacity-100'
+        : 'border-transparent bg-background/90 text-muted-foreground opacity-0 group-hover:opacity-100'
+        } ${disabled ? 'cursor-not-allowed opacity-40' : 'hover:border-border hover:text-foreground'}`}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
+    >
+      <MessageSquare className="h-3.5 w-3.5" />
+      {count > 0 && (
+        <span className="absolute -top-1 -right-1 inline-flex min-w-4 items-center justify-center rounded-full bg-amber-500 px-1 text-[9px] font-bold leading-none text-white">
+          {count}
+        </span>
+      )}
+    </button>
+  );
+}
+
+function CommentThreadSheet({
+  anchor,
+  comments,
+  open,
+  currentUserId,
+  currentUserName,
+  onClose,
+  onAddComment,
+}: {
+  anchor: ActiveCommentAnchor | null;
+  comments: Comment[];
+  open: boolean;
+  currentUserId: string;
+  currentUserName: string;
+  onClose: () => void;
+  onAddComment?: (comment: Comment) => void | Promise<void>;
+}) {
+  const [draft, setDraft] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!open) setDraft('');
+  }, [open]);
+
+  const handleSubmit = useCallback(async () => {
+    if (!anchor || !onAddComment) return;
+    const content = draft.trim();
+    if (!content) return;
+
+    setSaving(true);
+    try {
+      await onAddComment({
+        id: `cmt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        transactionId: anchor.transactionId,
+        authorId: currentUserId || currentUserName,
+        authorName: currentUserName,
+        fieldKey: anchor.fieldKey,
+        fieldLabel: anchor.fieldLabel,
+        content,
+        createdAt: new Date().toISOString(),
+      });
+      setDraft('');
+      toast.success('메모를 남겼습니다.');
+    } catch (error) {
+      console.error('[SettlementLedger] add comment failed:', error);
+      toast.error('메모 저장에 실패했습니다.');
+    } finally {
+      setSaving(false);
+    }
+  }, [anchor, currentUserId, currentUserName, draft, onAddComment]);
+
+  return (
+    <Sheet modal={false} open={open} onOpenChange={(nextOpen) => { if (!nextOpen) onClose(); }}>
+      <SheetContent side="right" showOverlay={false} className="w-[420px] sm:max-w-[420px] gap-0">
+        <SheetHeader className="border-b">
+          <SheetTitle className="text-[14px]">셀 메모</SheetTitle>
+          <SheetDescription className="text-[11px]">
+            {anchor ? `${anchor.rowLabel} · ${anchor.fieldLabel}` : '메모를 남길 셀을 선택하세요.'}
+          </SheetDescription>
+        </SheetHeader>
+        <div className="flex-1 overflow-y-auto px-4 py-4">
+          {comments.length === 0 ? (
+            <div className="rounded-lg border border-dashed px-4 py-6 text-[12px] text-muted-foreground">
+              아직 메모가 없습니다. 아래 입력창에 첫 메모를 남겨보세요.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {comments.map((comment) => (
+                <div key={comment.id} className="rounded-2xl border bg-background px-3 py-2.5 shadow-sm">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-semibold">{comment.authorName}</span>
+                    <span className="text-[10px] text-muted-foreground">{formatCommentTime(comment.createdAt)}</span>
+                  </div>
+                  {comment.fieldLabel && (
+                    <Badge variant="secondary" className="mt-2 text-[9px]">{comment.fieldLabel}</Badge>
+                  )}
+                  <p className="mt-2 whitespace-pre-wrap text-[12px] leading-5">{comment.content}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="border-t px-4 py-4 space-y-2">
+          <Textarea
+            value={draft}
+            placeholder="이 셀에 남길 메모를 적어주세요"
+            className="min-h-24 text-[12px]"
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                event.preventDefault();
+                void handleSubmit();
+              }
+            }}
+          />
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] text-muted-foreground">Cmd/Ctrl + Enter로 저장</span>
+            <Button size="sm" className="h-8 text-[11px]" disabled={!draft.trim() || saving || !anchor || !onAddComment} onClick={() => void handleSubmit()}>
+              {saving ? '저장중...' : '메모 남기기'}
+            </Button>
+          </div>
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
 const TX_STATE_BADGE: Record<TransactionState, { label: string; cls: string }> = {
   DRAFT: { label: '작성중', cls: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300' },
   SUBMITTED: { label: '제출', cls: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300' },
@@ -160,6 +321,13 @@ interface WeekBucket {
   collapsed: boolean;
 }
 
+interface ActiveCommentAnchor {
+  transactionId: string;
+  fieldKey: string;
+  fieldLabel: string;
+  rowLabel: string;
+}
+
 export interface SettlementLedgerProps {
   projectId: string;
   projectName: string;
@@ -180,7 +348,10 @@ export interface SettlementLedgerProps {
   onChangeTransactionState?: (txId: string, newState: TransactionState, reason?: string) => void;
   /** Current user name for audit trail */
   currentUserName?: string;
+  currentUserId?: string;
   userRole?: 'pm' | 'admin';
+  comments?: Comment[];
+  onAddComment?: (comment: Comment) => void | Promise<void>;
 }
 
 // ── Main Component ──
@@ -199,7 +370,10 @@ export function SettlementLedgerPage({
   onSubmitWeek,
   onChangeTransactionState,
   currentUserName = 'PM',
+  currentUserId = 'pm',
   userRole = 'pm',
+  comments = [],
+  onAddComment,
 }: SettlementLedgerProps) {
   const [year, setYear] = useState(() => new Date().getFullYear());
   const [viewMode, setViewMode] = useState<'sheet' | 'weekly'>('sheet');
@@ -208,6 +382,7 @@ export function SettlementLedgerPage({
   const [importDirty, setImportDirty] = useState(false);
   const [downloadStartDate, setDownloadStartDate] = useState('');
   const [downloadEndDate, setDownloadEndDate] = useState('');
+  const [activeCommentAnchor, setActiveCommentAnchor] = useState<ActiveCommentAnchor | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // All weeks for the year
@@ -484,6 +659,30 @@ export function SettlementLedgerPage({
 
   const totalCount = projectTxs.length;
 
+  const commentCountByCell = useMemo(() => {
+    const buckets = new Map<string, number>();
+    for (const comment of comments) {
+      if (!comment.transactionId || !comment.fieldKey) continue;
+      const key = buildCommentThreadKey(comment.transactionId, comment.fieldKey);
+      buckets.set(key, (buckets.get(key) || 0) + 1);
+    }
+    return buckets;
+  }, [comments]);
+
+  const activeCellComments = useMemo(() => {
+    if (!activeCommentAnchor) return [];
+    return comments
+      .filter((comment) => (
+        comment.transactionId === activeCommentAnchor.transactionId
+        && comment.fieldKey === activeCommentAnchor.fieldKey
+      ))
+      .sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+  }, [activeCommentAnchor, comments]);
+
+  const openCellComments = useCallback((anchor: ActiveCommentAnchor) => {
+    setActiveCommentAnchor(anchor);
+  }, []);
+
   return (
     <Tabs value={viewMode} onValueChange={(value) => setViewMode(value as 'sheet' | 'weekly')} className="flex flex-col gap-3">
       <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -584,6 +783,8 @@ export function SettlementLedgerPage({
             evidenceRequiredMap={evidenceRequiredMap}
             onSaveEvidenceRequiredMap={onSaveEvidenceRequiredMap}
             inline
+            commentCountByCell={commentCountByCell}
+            onOpenCellComments={openCellComments}
           />
         )}
       </TabsContent>
@@ -635,6 +836,8 @@ export function SettlementLedgerPage({
                     onSubmitWeek={onSubmitWeek}
                     onChangeTransactionState={onChangeTransactionState}
                     userRole={userRole}
+                    commentCountByCell={commentCountByCell}
+                    onOpenCellComments={openCellComments}
                   />
                 );
               })}
@@ -642,6 +845,15 @@ export function SettlementLedgerPage({
           </table>
         </div>
       </TabsContent>
+      <CommentThreadSheet
+        anchor={activeCommentAnchor}
+        comments={activeCellComments}
+        open={!!activeCommentAnchor}
+        currentUserId={currentUserId}
+        currentUserName={currentUserName}
+        onClose={() => setActiveCommentAnchor(null)}
+        onAddComment={onAddComment}
+      />
     </Tabs>
   );
 }
@@ -663,9 +875,11 @@ interface WeekSectionProps {
   }) => void | Promise<void>;
   onChangeTransactionState?: (txId: string, newState: TransactionState, reason?: string) => void;
   userRole?: 'pm' | 'admin';
+  commentCountByCell: Map<string, number>;
+  onOpenCellComments: (anchor: ActiveCommentAnchor) => void;
 }
 
-function WeekSection({ week, txRows, collapsed, txCount, onToggle, onUpdateTx, onSubmitWeek, onChangeTransactionState, userRole }: WeekSectionProps) {
+function WeekSection({ week, txRows, collapsed, txCount, onToggle, onUpdateTx, onSubmitWeek, onChangeTransactionState, userRole, commentCountByCell, onOpenCellComments }: WeekSectionProps) {
   const [submitting, setSubmitting] = useState(false);
   const colCount = SETTLEMENT_COLUMNS.length;
   const draftTxIds = txRows.filter(({ tx }) => tx.state === 'DRAFT').map(({ tx }) => tx.id);
@@ -747,6 +961,8 @@ function WeekSection({ week, txRows, collapsed, txCount, onToggle, onUpdateTx, o
             onUpdate={(updates) => onUpdateTx(tx.id, updates)}
             onChangeState={onChangeTransactionState}
             userRole={userRole}
+            commentCountByCell={commentCountByCell}
+            onOpenCellComments={onOpenCellComments}
           />
         ))}
       {!collapsed && txCount === 0 && (
@@ -769,12 +985,15 @@ interface TransactionRowProps {
   onUpdate: (updates: Partial<Transaction>) => void;
   onChangeState?: (txId: string, newState: TransactionState, reason?: string) => void;
   userRole?: 'pm' | 'admin';
+  commentCountByCell: Map<string, number>;
+  onOpenCellComments: (anchor: ActiveCommentAnchor) => void;
 }
 
-function TransactionRow({ tx, rowNum, weekLabel, onUpdate, onChangeState, userRole }: TransactionRowProps) {
+function TransactionRow({ tx, rowNum, weekLabel, onUpdate, onChangeState, userRole, commentCountByCell, onOpenCellComments }: TransactionRowProps) {
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
   const locked = !isEditable(tx.state);
   const parsedSettlementNote = parseSettlementNote(tx.settlementNote, tx.settlementProgress || 'INCOMPLETE');
+  const rowLabel = `${rowNum}행`;
 
   const debouncedUpdate = useCallback(
     (updates: Partial<Transaction>) => {
@@ -791,42 +1010,69 @@ function TransactionRow({ tx, rowNum, weekLabel, onUpdate, onChangeState, userRo
     };
   }, []);
 
+  const renderCommentButton = useCallback((fieldLabel: string) => {
+    const fieldKey = toFieldSlug(fieldLabel);
+    const count = commentCountByCell.get(buildCommentThreadKey(tx.id, fieldKey)) || 0;
+    return (
+      <CellCommentButton
+        count={count}
+        testId={`comment-button-${tx.id}-${fieldKey}`}
+        onClick={() => onOpenCellComments({
+          transactionId: tx.id,
+          fieldKey,
+          fieldLabel,
+          rowLabel,
+        })}
+      />
+    );
+  }, [commentCountByCell, onOpenCellComments, rowLabel, tx.id]);
+
   const textCell = (
     value: string | undefined,
     field: keyof Transaction,
+    fieldLabel: string,
     className?: string,
   ) => (
     <td className={`px-1 py-0.5 border-b border-r ${className || ''}`}>
-      <input
-        type="text"
-        defaultValue={value || ''}
-        disabled={locked}
-        className={`w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[60px] ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
-        onBlur={(e) => {
-          if (!locked && e.target.value !== (value || '')) {
-            debouncedUpdate({ [field]: e.target.value } as Partial<Transaction>);
-          }
-        }}
-      />
+      <div className="group relative min-w-[60px]">
+        <input
+          type="text"
+          defaultValue={value || ''}
+          disabled={locked}
+          className={`w-full bg-transparent outline-none text-[11px] px-1 py-0.5 pr-6 min-w-[60px] ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
+          onBlur={(e) => {
+            if (!locked && e.target.value !== (value || '')) {
+              debouncedUpdate({ [field]: e.target.value } as Partial<Transaction>);
+            }
+          }}
+        />
+        {renderCommentButton(fieldLabel)}
+      </div>
     </td>
   );
 
-  const numberCell = (value: number | undefined) => (
+  const numberCell = (value: number | undefined, fieldLabel: string) => (
     <td className="px-1 py-0.5 border-b border-r text-right tabular-nums">
-      <span className="text-[11px]">{fmt(value)}</span>
+      <div className="group relative pr-6">
+        <span className="text-[11px]">{fmt(value)}</span>
+        {renderCommentButton(fieldLabel)}
+      </div>
     </td>
   );
 
-  const boolCell = (value: boolean | undefined, field: keyof Transaction) => (
+  const boolCell = (value: boolean | undefined, field: keyof Transaction, fieldLabel: string) => (
     <td className="px-1 py-0.5 border-b border-r text-center">
-      <Checkbox
-        checked={!!value}
-        disabled={locked}
-        onCheckedChange={(checked) => {
-          if (!locked) onUpdate({ [field]: !!checked } as Partial<Transaction>);
-        }}
-        className="h-3.5 w-3.5"
-      />
+      <div className="group relative flex justify-center pr-6">
+        <Checkbox
+          checked={!!value}
+          disabled={locked}
+          onCheckedChange={(checked) => {
+            if (!locked) onUpdate({ [field]: !!checked } as Partial<Transaction>);
+          }}
+          className="h-3.5 w-3.5"
+        />
+        {renderCommentButton(fieldLabel)}
+      </div>
     </td>
   );
 
@@ -836,7 +1082,7 @@ function TransactionRow({ tx, rowNum, weekLabel, onUpdate, onChangeState, userRo
     <tr className={`hover:bg-muted/30 transition-colors ${locked ? 'opacity-80' : ''}`}>
       {/* 작성자 + 상태배지 */}
       <td className={`px-1 py-0.5 border-b border-r`}>
-        <div className="flex items-center gap-1">
+        <div className="group relative flex items-center gap-1 pr-6">
           <input
             type="text"
             defaultValue={tx.author || ''}
@@ -864,102 +1110,121 @@ function TransactionRow({ tx, rowNum, weekLabel, onUpdate, onChangeState, userRo
               수정
             </button>
           )}
+          {renderCommentButton('작성자')}
         </div>
       </td>
       {/* No. */}
       <td className="px-1 py-0.5 border-b border-r text-center text-[11px] text-muted-foreground">
-        {rowNum}
+        <div className="group relative pr-6">
+          {rowNum}
+          {renderCommentButton('No.')}
+        </div>
       </td>
       {/* 거래일시 */}
       <td className="px-1 py-0.5 border-b border-r">
-        <input
-          type="date"
-          defaultValue={tx.dateTime?.slice(0, 10) || ''}
-          disabled={locked}
-          className={`bg-transparent outline-none text-[11px] px-0.5 ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
-          onBlur={(e) => {
-            if (!locked && e.target.value && e.target.value !== tx.dateTime?.slice(0, 10)) {
-              debouncedUpdate({ dateTime: e.target.value });
-            }
-          }}
-        />
+        <div className="group relative pr-6">
+          <input
+            type="date"
+            defaultValue={tx.dateTime?.slice(0, 10) || ''}
+            disabled={locked}
+            className={`bg-transparent outline-none text-[11px] px-0.5 ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
+            onBlur={(e) => {
+              if (!locked && e.target.value && e.target.value !== tx.dateTime?.slice(0, 10)) {
+                debouncedUpdate({ dateTime: e.target.value });
+              }
+            }}
+          />
+          {renderCommentButton('거래일시')}
+        </div>
       </td>
       {/* 해당 주차 */}
       <td className="px-1 py-0.5 border-b border-r text-center text-[11px] text-muted-foreground">
-        {weekLabel}
+        <div className="group relative pr-6">
+          {weekLabel}
+          {renderCommentButton('해당 주차')}
+        </div>
       </td>
       {/* 지출구분 */}
       <td className="px-1 py-0.5 border-b border-r">
-        <select
-          defaultValue={tx.method || ''}
-          disabled={locked}
-          className={`bg-transparent outline-none text-[11px] w-full cursor-pointer ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
-          onChange={(e) => { if (!locked) onUpdate({ method: e.target.value as Transaction['method'] }); }}
-        >
-          {METHOD_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>{o.label}</option>
-          ))}
-        </select>
+        <div className="group relative pr-6">
+          <select
+            defaultValue={tx.method || ''}
+            disabled={locked}
+            className={`bg-transparent outline-none text-[11px] w-full cursor-pointer ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
+            onChange={(e) => { if (!locked) onUpdate({ method: e.target.value as Transaction['method'] }); }}
+          >
+            {METHOD_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+          {renderCommentButton('지출구분')}
+        </div>
       </td>
       {/* 비목 */}
-      {textCell(tx.budgetCategory, 'budgetCategory')}
+      {textCell(tx.budgetCategory, 'budgetCategory', '비목')}
       {/* 세목 */}
-      {textCell(tx.budgetSubCategory, 'budgetSubCategory')}
+      {textCell(tx.budgetSubCategory, 'budgetSubCategory', '세목')}
       {/* 세세목 */}
-      {textCell(tx.budgetSubSubCategory, 'budgetSubSubCategory')}
+      {textCell(tx.budgetSubSubCategory, 'budgetSubSubCategory', '세세목')}
       {/* cashflow항목 */}
       <td className="px-1 py-0.5 border-b border-r">
-        <select
-          defaultValue={tx.cashflowLabel || ''}
-          disabled={locked}
-          className={`bg-transparent outline-none text-[11px] w-full cursor-pointer min-w-[100px] ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
-          onChange={(e) => { if (!locked) onUpdate({ cashflowLabel: e.target.value }); }}
-        >
-          <option value="">-</option>
-          {CASHFLOW_LINE_OPTIONS.map((o) => (
-            <option key={o.value} value={o.label}>{o.label}</option>
-          ))}
-        </select>
+        <div className="group relative pr-6">
+          <select
+            defaultValue={tx.cashflowLabel || ''}
+            disabled={locked}
+            className={`bg-transparent outline-none text-[11px] w-full cursor-pointer min-w-[100px] ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
+            onChange={(e) => { if (!locked) onUpdate({ cashflowLabel: e.target.value }); }}
+          >
+            <option value="">-</option>
+            {CASHFLOW_LINE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.label}>{o.label}</option>
+            ))}
+          </select>
+          {renderCommentButton('cashflow항목')}
+        </div>
       </td>
       {/* 통장잔액 */}
-      {numberCell(tx.amounts?.balanceAfter)}
+      {numberCell(tx.amounts?.balanceAfter, '통장잔액')}
       {/* 통장에 찍힌 입/출금액 */}
-      {numberCell(tx.amounts?.bankAmount)}
+      {numberCell(tx.amounts?.bankAmount, '통장에 찍힌 입/출금액')}
       {/* 입금합계: 입금액 */}
-      {numberCell(tx.amounts?.depositAmount)}
+      {numberCell(tx.amounts?.depositAmount, '입금액(사업비,공급가액,은행이자)')}
       {/* 입금합계: 매입부가세 반환 */}
-      {numberCell(tx.amounts?.vatRefund)}
+      {numberCell(tx.amounts?.vatRefund, '매입부가세 반환')}
       {/* 출금합계: 사업비 사용액 */}
-      {numberCell(tx.amounts?.expenseAmount)}
+      {numberCell(tx.amounts?.expenseAmount, '사업비 사용액')}
       {/* 출금합계: 매입부가세 */}
-      {numberCell(tx.amounts?.vatIn)}
+      {numberCell(tx.amounts?.vatIn, '매입부가세')}
       {/* 사업팀: 지급처 */}
-      {textCell(tx.counterparty, 'counterparty')}
+      {textCell(tx.counterparty, 'counterparty', '지급처')}
       {/* 사업팀: 상세 적요 */}
-      {textCell(tx.memo, 'memo', 'min-w-[150px]')}
+      {textCell(tx.memo, 'memo', '상세 적요', 'min-w-[150px]')}
       {/* 사업팀: 필수증빙자료 리스트 */}
-      {textCell(tx.evidenceRequiredDesc, 'evidenceRequiredDesc')}
+      {textCell(tx.evidenceRequiredDesc, 'evidenceRequiredDesc', '필수증빙자료 리스트')}
       {/* 사업팀: 실제 구비 완료된 증빙자료 리스트 */}
       <td className="px-1 py-0.5 border-b border-r">
-        <input
-          type="text"
-          defaultValue={tx.evidenceCompletedDesc || ''}
-          disabled={locked}
-          className={`w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[60px] ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
-          onBlur={(e) => {
-            if (!locked && e.target.value !== (tx.evidenceCompletedDesc || '')) {
-              const updatedTx = { ...tx, evidenceCompletedDesc: e.target.value };
-              const newStatus = computeEvidenceStatus(updatedTx);
-              debouncedUpdate({ evidenceCompletedDesc: e.target.value, evidenceStatus: newStatus });
-            }
-          }}
-        />
+        <div className="group relative min-w-[60px]">
+          <input
+            type="text"
+            defaultValue={tx.evidenceCompletedDesc || ''}
+            disabled={locked}
+            className={`w-full bg-transparent outline-none text-[11px] px-1 py-0.5 pr-6 min-w-[60px] ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
+            onBlur={(e) => {
+              if (!locked && e.target.value !== (tx.evidenceCompletedDesc || '')) {
+                const updatedTx = { ...tx, evidenceCompletedDesc: e.target.value };
+                const newStatus = computeEvidenceStatus(updatedTx);
+                debouncedUpdate({ evidenceCompletedDesc: e.target.value, evidenceStatus: newStatus });
+              }
+            }}
+          />
+          {renderCommentButton('실제 구비 완료된 증빙자료 리스트')}
+        </div>
       </td>
       {/* 사업팀: 준비필요자료 */}
-      {textCell(tx.evidencePendingDesc, 'evidencePendingDesc')}
+      {textCell(tx.evidencePendingDesc, 'evidencePendingDesc', '준비필요자료')}
       {/* 정산지원: 증빙자료 드라이브 */}
       <td className="px-1 py-0.5 border-b border-r">
-        <div className="flex items-center gap-1">
+        <div className="group relative flex items-center gap-1 pr-6">
           <input
             type="text"
             defaultValue={tx.evidenceDriveLink || ''}
@@ -986,21 +1251,22 @@ function TransactionRow({ tx, rowNum, weekLabel, onUpdate, onChangeState, userRo
               <ExternalLink className="h-3 w-3" />
             </a>
           )}
+          {renderCommentButton('증빙자료 드라이브')}
         </div>
       </td>
       {/* 정산지원: 준비 필요자료 */}
-      {textCell(tx.supportPendingDocs, 'supportPendingDocs')}
+      {textCell(tx.supportPendingDocs, 'supportPendingDocs', '준비 필요자료')}
       {/* 도담: e나라 등록 */}
-      {textCell(tx.eNaraRegistered, 'eNaraRegistered')}
+      {textCell(tx.eNaraRegistered, 'eNaraRegistered', 'e나라 등록')}
       {/* 도담: e나라 집행 */}
-      {textCell(tx.eNaraExecuted, 'eNaraExecuted')}
+      {textCell(tx.eNaraExecuted, 'eNaraExecuted', 'e나라 집행')}
       {/* 도담: 부가세 지결 완료여부 */}
-      {boolCell(tx.vatSettlementDone, 'vatSettlementDone')}
+      {boolCell(tx.vatSettlementDone, 'vatSettlementDone', '부가세 지결 완료여부')}
       {/* 도담: 최종완료 */}
-      {boolCell(tx.settlementComplete, 'settlementComplete')}
+      {boolCell(tx.settlementComplete, 'settlementComplete', '최종완료')}
       {/* 비고 */}
       <td className="px-1 py-0.5 border-b border-r">
-        <div className="min-w-[140px]">
+        <div className="group relative min-w-[140px] pr-6">
           <input
             type="text"
             defaultValue={parsedSettlementNote.note}
@@ -1026,6 +1292,7 @@ function TransactionRow({ tx, rowNum, weekLabel, onUpdate, onChangeState, userRo
               <option key={option.value} value={option.value}>{option.label}</option>
             ))}
           </select>
+          {renderCommentButton('비고')}
         </div>
       </td>
     </tr>
@@ -1043,6 +1310,8 @@ function ImportEditor({
   defaultLedgerId,
   evidenceRequiredMap,
   onSaveEvidenceRequiredMap,
+  commentCountByCell,
+  onOpenCellComments,
   inline = false,
 }: {
   rows: ImportRow[];
@@ -1053,6 +1322,8 @@ function ImportEditor({
   defaultLedgerId: string;
   evidenceRequiredMap?: Record<string, string>;
   onSaveEvidenceRequiredMap?: (map: Record<string, string>) => void | Promise<void>;
+  commentCountByCell: Map<string, number>;
+  onOpenCellComments: (anchor: ActiveCommentAnchor) => void;
   inline?: boolean;
 }) {
   const errorCount = rows.filter((r) => r.error).length;
@@ -1329,6 +1600,8 @@ function ImportEditor({
                 subCodeIdx={subCodeIdx}
                 evidenceIdx={evidenceIdx}
                 evidenceRequiredMap={evidenceRequiredMap}
+                commentCountByCell={commentCountByCell}
+                onOpenCellComments={onOpenCellComments}
               />
             ))}
             {rows.length === 0 && (
@@ -1405,6 +1678,8 @@ function ImportEditorRow({
   subCodeIdx,
   evidenceIdx,
   evidenceRequiredMap,
+  commentCountByCell,
+  onOpenCellComments,
 }: {
   row: ImportRow;
   rowIdx: number;
@@ -1416,6 +1691,8 @@ function ImportEditorRow({
   subCodeIdx: number;
   evidenceIdx: number;
   evidenceRequiredMap?: Record<string, string>;
+  commentCountByCell: Map<string, number>;
+  onOpenCellComments: (anchor: ActiveCommentAnchor) => void;
 }) {
   const hasError = Boolean(row.error);
   const methodIdx = useMemo(
@@ -1456,6 +1733,8 @@ function ImportEditorRow({
     [noteIdx, row.cells],
   );
   const progressValue = parsedSettlementNote.progress;
+  const rowLabel = `${rowIdx + 1}행`;
+  const commentTransactionId = row.sourceTxId || buildSheetRowCommentId(row.tempId);
   const derivedSupplyAmount = useMemo(() => {
     if (!featureFlags.qaP0SettlementV1) return '';
     const bankAmount = parseNumber(row.cells[bankAmountIdx]) ?? 0;
@@ -1468,6 +1747,27 @@ function ImportEditorRow({
       amounts: { bankAmount, expenseAmount, vatIn },
     }).supplyAmount.toLocaleString('ko-KR');
   }, [bankAmountIdx, expenseAmountIdx, row.cells, vatIdx]);
+
+  const renderCommentButton = useCallback((fieldLabel: string) => {
+    const fieldKey = toFieldSlug(fieldLabel);
+    const count = commentTransactionId
+      ? (commentCountByCell.get(buildCommentThreadKey(commentTransactionId, fieldKey)) || 0)
+      : 0;
+    return (
+      <CellCommentButton
+        count={count}
+        testId={`comment-button-${row.tempId}-${fieldKey}`}
+        onClick={() => {
+          onOpenCellComments({
+            transactionId: commentTransactionId,
+            fieldKey,
+            fieldLabel,
+            rowLabel,
+          });
+        }}
+      />
+    );
+  }, [commentCountByCell, commentTransactionId, onOpenCellComments, row.tempId, rowLabel]);
 
   return (
     <tr className={`${hasError ? 'bg-red-50/60 dark:bg-red-950/20' : 'hover:bg-muted/30'} transition-colors`}>
@@ -1516,179 +1816,203 @@ function ImportEditorRow({
         return (
           <td key={colIdx} className="px-0.5 py-0.5 border-b border-r">
             {isReadOnly ? (
-              <input
-                type="text"
-                readOnly
-                aria-label={fieldLabel}
-                data-testid={toCellTestId(rowIdx, col.csvHeader)}
-                value={row.cells[colIdx] || ''}
-                className="w-full bg-transparent outline-none text-[10px] text-muted-foreground px-1 py-0.5"
-                {...primaryNavProps}
-              />
-            ) : colIdx === methodIdx ? (
-              <select
-                value={row.cells[colIdx] || ''}
-                aria-label={fieldLabel}
-                data-testid={toCellTestId(rowIdx, col.csvHeader)}
-                className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[80px]"
-                onChange={(e) => {
-                  if (e.target.value !== row.cells[colIdx]) {
-                    onCellChange(colIdx, e.target.value);
-                  }
-                }}
-                {...primaryNavProps}
-              >
-                <option value="">-</option>
-                {METHOD_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.label}>{o.label}</option>
-                ))}
-              </select>
-            ) : isBudgetCode ? (
-              <select
-                value={row.cells[colIdx] || ''}
-                aria-label={fieldLabel}
-                data-testid={toCellTestId(rowIdx, col.csvHeader)}
-                className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[90px]"
-                onChange={(e) => {
-                  const nextCode = e.target.value;
-                  onRowChange((prev) => {
-                    if (budgetCodeIdx < 0) return prev;
-                    const cells = [...prev.cells];
-                    cells[budgetCodeIdx] = nextCode;
-                    if (subCodeIdx >= 0) {
-                      const allowed = BUDGET_CODE_BOOK.find((c) => c.code === nextCode)?.subCodes || [];
-                      if (!allowed.includes(cells[subCodeIdx])) cells[subCodeIdx] = '';
-                    }
-                    if (evidenceIdx >= 0) {
-                      const mapped = resolveEvidenceRequiredDesc(evidenceRequiredMap, nextCode, cells[subCodeIdx] || '');
-                      if (mapped) cells[evidenceIdx] = mapped;
-                    }
-                    return { ...prev, cells };
-                  });
-                }}
-                {...primaryNavProps}
-              >
-                <option value="">-</option>
-                {BUDGET_CODE_BOOK.map((c) => (
-                  <option key={c.code} value={c.code}>{c.code}</option>
-                ))}
-              </select>
-            ) : isSubCode ? (
-              <select
-                value={row.cells[colIdx] || ''}
-                disabled={!budgetCode}
-                aria-label={fieldLabel}
-                data-testid={toCellTestId(rowIdx, col.csvHeader)}
-                className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[90px]"
-                onChange={(e) => {
-                  const nextSub = e.target.value;
-                  onRowChange((prev) => {
-                    if (subCodeIdx < 0) return prev;
-                    const cells = [...prev.cells];
-                    cells[subCodeIdx] = nextSub;
-                    if (evidenceIdx >= 0) {
-                      const mapped = resolveEvidenceRequiredDesc(evidenceRequiredMap, budgetCode, nextSub);
-                      if (mapped) cells[evidenceIdx] = mapped;
-                    }
-                    return { ...prev, cells };
-                  });
-                }}
-                {...primaryNavProps}
-              >
-                <option value="">-</option>
-                {subCodes.map((sc) => (
-                  <option key={sc} value={sc}>{sc}</option>
-                ))}
-              </select>
-            ) : isDriveLink ? (
-              <div className="flex items-center gap-1 min-w-[180px]">
+              <div className="group relative">
                 <input
                   type="text"
+                  readOnly
                   aria-label={fieldLabel}
                   data-testid={toCellTestId(rowIdx, col.csvHeader)}
                   value={row.cells[colIdx] || ''}
-                  placeholder="Drive URL"
-                  className="flex-1 bg-transparent outline-none text-[11px] px-1 py-0.5"
-                  onChange={(e) => onCellChange(colIdx, e.target.value)}
+                  className="w-full bg-transparent outline-none text-[10px] text-muted-foreground px-1 py-0.5 pr-6"
                   {...primaryNavProps}
                 />
-                {isValidDriveUrl(row.cells[colIdx] || '') && (
-                  <a
-                    href={row.cells[colIdx]}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    aria-label={`${fieldLabel} 열기`}
-                    data-testid={toCellTestId(rowIdx, `${col.csvHeader}-open`)}
-                    className="shrink-0 inline-flex h-6 items-center rounded-md border px-2 text-[10px] text-blue-600 hover:bg-blue-50"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    열기
-                  </a>
-                )}
+                {renderCommentButton(col.csvHeader)}
+              </div>
+            ) : colIdx === methodIdx ? (
+              <div className="group relative">
+                <select
+                  value={row.cells[colIdx] || ''}
+                  aria-label={fieldLabel}
+                  data-testid={toCellTestId(rowIdx, col.csvHeader)}
+                  className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5 pr-6 min-w-[80px]"
+                  onChange={(e) => {
+                    if (e.target.value !== row.cells[colIdx]) {
+                      onCellChange(colIdx, e.target.value);
+                    }
+                  }}
+                  {...primaryNavProps}
+                >
+                  <option value="">-</option>
+                  {METHOD_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.label}>{o.label}</option>
+                  ))}
+                </select>
+                {renderCommentButton(col.csvHeader)}
+              </div>
+            ) : isBudgetCode ? (
+              <div className="group relative">
+                <select
+                  value={row.cells[colIdx] || ''}
+                  aria-label={fieldLabel}
+                  data-testid={toCellTestId(rowIdx, col.csvHeader)}
+                  className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5 pr-6 min-w-[90px]"
+                  onChange={(e) => {
+                    const nextCode = e.target.value;
+                    onRowChange((prev) => {
+                      if (budgetCodeIdx < 0) return prev;
+                      const cells = [...prev.cells];
+                      cells[budgetCodeIdx] = nextCode;
+                      if (subCodeIdx >= 0) {
+                        const allowed = BUDGET_CODE_BOOK.find((c) => c.code === nextCode)?.subCodes || [];
+                        if (!allowed.includes(cells[subCodeIdx])) cells[subCodeIdx] = '';
+                      }
+                      if (evidenceIdx >= 0) {
+                        const mapped = resolveEvidenceRequiredDesc(evidenceRequiredMap, nextCode, cells[subCodeIdx] || '');
+                        if (mapped) cells[evidenceIdx] = mapped;
+                      }
+                      return { ...prev, cells };
+                    });
+                  }}
+                  {...primaryNavProps}
+                >
+                  <option value="">-</option>
+                  {BUDGET_CODE_BOOK.map((c) => (
+                    <option key={c.code} value={c.code}>{c.code}</option>
+                  ))}
+                </select>
+                {renderCommentButton(col.csvHeader)}
+              </div>
+            ) : isSubCode ? (
+              <div className="group relative">
+                <select
+                  value={row.cells[colIdx] || ''}
+                  disabled={!budgetCode}
+                  aria-label={fieldLabel}
+                  data-testid={toCellTestId(rowIdx, col.csvHeader)}
+                  className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5 pr-6 min-w-[90px]"
+                  onChange={(e) => {
+                    const nextSub = e.target.value;
+                    onRowChange((prev) => {
+                      if (subCodeIdx < 0) return prev;
+                      const cells = [...prev.cells];
+                      cells[subCodeIdx] = nextSub;
+                      if (evidenceIdx >= 0) {
+                        const mapped = resolveEvidenceRequiredDesc(evidenceRequiredMap, budgetCode, nextSub);
+                        if (mapped) cells[evidenceIdx] = mapped;
+                      }
+                      return { ...prev, cells };
+                    });
+                  }}
+                  {...primaryNavProps}
+                >
+                  <option value="">-</option>
+                  {subCodes.map((sc) => (
+                    <option key={sc} value={sc}>{sc}</option>
+                  ))}
+                </select>
+                {renderCommentButton(col.csvHeader)}
+              </div>
+            ) : isDriveLink ? (
+              <div className="group relative min-w-[180px]">
+                <div className="flex items-center gap-1 pr-6">
+                  <input
+                    type="text"
+                    aria-label={fieldLabel}
+                    data-testid={toCellTestId(rowIdx, col.csvHeader)}
+                    value={row.cells[colIdx] || ''}
+                    placeholder="Drive URL"
+                    className="flex-1 bg-transparent outline-none text-[11px] px-1 py-0.5"
+                    onChange={(e) => onCellChange(colIdx, e.target.value)}
+                    {...primaryNavProps}
+                  />
+                  {isValidDriveUrl(row.cells[colIdx] || '') && (
+                    <a
+                      href={row.cells[colIdx]}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label={`${fieldLabel} 열기`}
+                      data-testid={toCellTestId(rowIdx, `${col.csvHeader}-open`)}
+                      className="shrink-0 inline-flex h-6 items-center rounded-md border px-2 text-[10px] text-blue-600 hover:bg-blue-50"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      열기
+                    </a>
+                  )}
+                </div>
+                {renderCommentButton(col.csvHeader)}
               </div>
             ) : isVat ? (
-              <div className="min-w-[90px]">
+              <div className="group relative min-w-[90px]">
+                <div className="pr-6">
+                  <input
+                    type="text"
+                    aria-label={fieldLabel}
+                    data-testid={toCellTestId(rowIdx, col.csvHeader)}
+                    value={row.cells[colIdx] || ''}
+                    className={`w-full bg-transparent outline-none text-[11px] px-1 py-0.5 ${hasError && colIdx === dateIdx && !row.cells[colIdx]
+                      ? 'ring-1 ring-red-300 rounded'
+                      : ''
+                      }`}
+                    onChange={(e) => onCellChange(colIdx, e.target.value)}
+                    {...primaryNavProps}
+                  />
+                  {derivedSupplyAmount && (
+                    <span className="block px-1 pb-0.5 text-[9px] text-muted-foreground">
+                      공급가액 {derivedSupplyAmount}
+                    </span>
+                  )}
+                </div>
+                {renderCommentButton(col.csvHeader)}
+              </div>
+            ) : isNote ? (
+              <div className="group relative min-w-[140px]">
+                <div className="pr-6">
+                  <input
+                    type="text"
+                    aria-label={fieldLabel}
+                    data-testid={toCellTestId(rowIdx, col.csvHeader)}
+                    value={parsedSettlementNote.note}
+                    className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5"
+                    onChange={(e) => onCellChange(colIdx, composeSettlementNote(progressValue, e.target.value))}
+                    {...primaryNavProps}
+                  />
+                  <select
+                    value={progressValue}
+                    aria-label={`${fieldLabel} 상태`}
+                    data-testid={toCellTestId(rowIdx, `${col.csvHeader}-status`)}
+                    className="mt-1 w-full rounded border bg-background/60 px-1 py-0.5 text-[10px]"
+                    onChange={(e) => {
+                      const nextProgress = e.target.value as NonNullable<Transaction['settlementProgress']>;
+                      onCellChange(colIdx, composeSettlementNote(nextProgress, parsedSettlementNote.note));
+                    }}
+                    data-grid-row={rowIdx}
+                    data-grid-col={colIdx}
+                    data-grid-slot="secondary"
+                    onKeyDown={(event) => handleGridKeyDown(event, rowIdx, colIdx, 'secondary')}
+                  >
+                    {SETTLEMENT_PROGRESS_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </div>
+                {renderCommentButton(col.csvHeader)}
+              </div>
+            ) : (
+              <div className="group relative">
                 <input
                   type="text"
                   aria-label={fieldLabel}
                   data-testid={toCellTestId(rowIdx, col.csvHeader)}
                   value={row.cells[colIdx] || ''}
-                  className={`w-full bg-transparent outline-none text-[11px] px-1 py-0.5 ${hasError && colIdx === dateIdx && !row.cells[colIdx]
+                  className={`w-full bg-transparent outline-none text-[11px] px-1 py-0.5 pr-6 min-w-[50px] ${hasError && colIdx === dateIdx && !row.cells[colIdx]
                     ? 'ring-1 ring-red-300 rounded'
                     : ''
                     }`}
                   onChange={(e) => onCellChange(colIdx, e.target.value)}
                   {...primaryNavProps}
                 />
-                {derivedSupplyAmount && (
-                  <span className="block px-1 pb-0.5 text-[9px] text-muted-foreground">
-                    공급가액 {derivedSupplyAmount}
-                  </span>
-                )}
+                {renderCommentButton(col.csvHeader)}
               </div>
-            ) : isNote ? (
-              <div className="min-w-[140px]">
-                <input
-                  type="text"
-                  aria-label={fieldLabel}
-                  data-testid={toCellTestId(rowIdx, col.csvHeader)}
-                  value={parsedSettlementNote.note}
-                  className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5"
-                  onChange={(e) => onCellChange(colIdx, composeSettlementNote(progressValue, e.target.value))}
-                  {...primaryNavProps}
-                />
-                <select
-                  value={progressValue}
-                  aria-label={`${fieldLabel} 상태`}
-                  data-testid={toCellTestId(rowIdx, `${col.csvHeader}-status`)}
-                  className="mt-1 w-full rounded border bg-background/60 px-1 py-0.5 text-[10px]"
-                  onChange={(e) => {
-                    const nextProgress = e.target.value as NonNullable<Transaction['settlementProgress']>;
-                    onCellChange(colIdx, composeSettlementNote(nextProgress, parsedSettlementNote.note));
-                  }}
-                  data-grid-row={rowIdx}
-                  data-grid-col={colIdx}
-                  data-grid-slot="secondary"
-                  onKeyDown={(event) => handleGridKeyDown(event, rowIdx, colIdx, 'secondary')}
-                >
-                  {SETTLEMENT_PROGRESS_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </select>
-              </div>
-            ) : (
-              <input
-                type="text"
-                aria-label={fieldLabel}
-                data-testid={toCellTestId(rowIdx, col.csvHeader)}
-                value={row.cells[colIdx] || ''}
-                className={`w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[50px] ${hasError && colIdx === dateIdx && !row.cells[colIdx]
-                  ? 'ring-1 ring-red-300 rounded'
-                  : ''
-                  }`}
-                onChange={(e) => onCellChange(colIdx, e.target.value)}
-                {...primaryNavProps}
-              />
             )}
           </td>
         );
