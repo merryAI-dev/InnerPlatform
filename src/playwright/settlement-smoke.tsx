@@ -41,6 +41,8 @@ function SettlementSmokeHarness() {
       evidenceMissing: ['세금계산서'],
       attachmentsCount: 1,
       evidenceDriveLink: 'https://drive.google.com/file/d/smoke-evidence/view',
+      settlementProgress: 'INCOMPLETE',
+      settlementNote: '확인 대기',
       createdBy: 'pm-smoke',
       createdAt: '2026-03-05T00:00:00Z',
       updatedBy: 'pm-smoke',
@@ -63,7 +65,7 @@ function SettlementSmokeHarness() {
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Playwright smoke</p>
           <h1 className="text-2xl font-black tracking-tight">사업비 입력(주간)</h1>
           <p className="text-sm text-slate-600">
-            헤더는 그대로 두고 지출구분, 공급가액 보조 계산, 증빙 드라이브 동작만 검증합니다.
+            헤더는 그대로 두고 지출구분, 내용 상태, 행 삽입, 공급가액 보조 계산을 검증합니다.
           </p>
         </header>
 

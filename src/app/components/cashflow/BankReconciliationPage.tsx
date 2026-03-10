@@ -20,7 +20,9 @@ import {
 } from '../../platform/settlement-ledger.helpers';
 import {
   autoMatchBankTransactions,
+  detectBankCsvProfile,
   parseBankCsv,
+  type BankCsvProfileId,
   type BankTransaction,
   type ReconciliationMatch,
 } from '../../platform/bank-reconciliation';
@@ -32,6 +34,13 @@ function fmtShort(n: number) {
   return n.toLocaleString();
 }
 
+function toPolicySlug(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9가-힣]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
 const STATUS_STYLE: Record<string, { bg: string; text: string; label: string }> = {
   MATCHED: { bg: 'bg-emerald-50 dark:bg-emerald-950/30', text: 'text-emerald-700 dark:text-emerald-400', label: '매칭' },
   UNMATCHED_BANK: { bg: 'bg-rose-50 dark:bg-rose-950/30', text: 'text-rose-700 dark:text-rose-400', label: '은행만' },
@@ -41,6 +50,7 @@ const STATUS_STYLE: Record<string, { bg: string; text: string; label: string }> 
 export function BankReconciliationPage() {
   const { currentUser, transactions, projects } = useAppStore();
   const [bankTxs, setBankTxs] = useState<BankTransaction[]>([]);
+  const [bankProfileId, setBankProfileId] = useState<BankCsvProfileId>('GENERIC');
   const [projectFilter, setProjectFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [fileName, setFileName] = useState('');
@@ -74,8 +84,8 @@ export function BankReconciliationPage() {
     return m;
   }, [projects]);
   const viewPolicy = useMemo(
-    () => getBankReconciliationViewPolicy(currentUser.role),
-    [currentUser.role],
+    () => getBankReconciliationViewPolicy(currentUser.role, bankProfileId),
+    [currentUser.role, bankProfileId],
   );
 
   const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -86,7 +96,9 @@ export function BankReconciliationPage() {
     reader.onload = () => {
       const text = reader.result as string;
       const matrix = parseCsv(text);
+      const detectedProfile = detectBankCsvProfile(matrix);
       const parsed = parseBankCsv(matrix);
+      setBankProfileId(detectedProfile);
       setBankTxs(parsed);
     };
     reader.readAsText(file, 'UTF-8');
@@ -146,6 +158,37 @@ export function BankReconciliationPage() {
           </SelectContent>
         </Select>
       </div>
+
+      {bankTxs.length > 0 && (
+        <Card className="shadow-sm border-border/40">
+          <CardContent className="p-4 flex flex-wrap gap-4">
+            <div className="space-y-1 min-w-[180px]">
+              <p className="text-[10px] text-muted-foreground">감지된 은행 포맷</p>
+              <Badge variant="secondary" data-testid="bank-policy-profile">{viewPolicy.profileLabel}</Badge>
+            </div>
+            <div className="space-y-1 min-w-[220px]">
+              <p className="text-[10px] text-muted-foreground">가능한 확인 액션</p>
+              <div className="flex flex-wrap gap-1.5">
+                {viewPolicy.availableActions.map((action) => (
+                  <Badge
+                    key={action}
+                    variant="outline"
+                    data-testid={`bank-policy-action-${toPolicySlug(action)}`}
+                  >
+                    {action}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-1 min-w-[280px]">
+              <p className="text-[10px] text-muted-foreground">현재 역할에서 확인 가능한 필드</p>
+              <p className="text-[11px] text-foreground" data-testid="bank-policy-fields">
+                {viewPolicy.visibleFieldLabels.join(' · ')}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Stats */}
       {bankTxs.length > 0 && (
@@ -213,6 +256,7 @@ export function BankReconciliationPage() {
                     const bankDescriptionView = getBankDescriptionView(
                       m.bankTx?.description,
                       currentUser.role,
+                      bankProfileId,
                     );
                     const memoView = resolveTransactionMemo({
                       memo: m.systemTx?.memo,

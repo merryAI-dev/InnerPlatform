@@ -8,6 +8,10 @@ import {
   type TransactionAmounts,
   type UserRole,
 } from '../data/types';
+import {
+  getBankCsvProfileMeta,
+  type BankCsvProfileId,
+} from './bank-reconciliation';
 
 export interface PaymentMethodOption {
   value: PaymentMethod;
@@ -29,8 +33,12 @@ export interface DerivedSettlementAmounts {
 }
 
 export interface BankReconciliationViewPolicy {
+  profileId: BankCsvProfileId;
+  profileLabel: string;
   roleLabel: string;
   showRoleNotice: boolean;
+  availableActions: string[];
+  visibleFieldLabels: string[];
   visibleColumns: Array<
     | 'status'
     | 'confidence'
@@ -178,6 +186,7 @@ export function resolveTransactionMemo(input: {
 
 export function getBankReconciliationViewPolicy(
   role: UserRole | undefined,
+  profileId: BankCsvProfileId = 'GENERIC',
 ): BankReconciliationViewPolicy {
   const normalizedRole = role || 'viewer';
   const privileged = normalizedRole === 'admin'
@@ -186,10 +195,21 @@ export function getBankReconciliationViewPolicy(
     || normalizedRole === 'auditor'
     || normalizedRole === 'support'
     || normalizedRole === 'security';
+  const profile = getBankCsvProfileMeta(profileId);
+  const visibleFieldLabels = privileged
+    ? profile.fieldLabels
+    : profile.fieldLabels.filter((label) => !/(적요|내용)/.test(label));
+  const availableActions = privileged
+    ? [profile.quickViewLabel, profile.actionMenuLabel, '원문 적요 확인']
+    : [profile.quickViewLabel, '마스킹 적요 확인'];
 
   return {
+    profileId,
+    profileLabel: profile.label,
     roleLabel: privileged ? '도담/재경팀 기준' : '사업팀 기준',
     showRoleNotice: true,
+    availableActions,
+    visibleFieldLabels,
     visibleColumns: privileged
       ? ['status', 'confidence', 'bankDate', 'bankDescription', 'bankAmount', 'systemDate', 'project', 'counterparty', 'internalMemo', 'systemAmount']
       : ['status', 'confidence', 'bankDate', 'bankAmount', 'systemDate', 'project', 'counterparty', 'internalMemo', 'systemAmount'],
@@ -199,12 +219,13 @@ export function getBankReconciliationViewPolicy(
 export function getBankDescriptionView(
   description: string | undefined,
   role: UserRole | undefined,
+  profileId: BankCsvProfileId = 'GENERIC',
 ): BankDescriptionView {
   const value = String(description || '').trim();
   if (!value) {
     return { text: '-', restricted: false };
   }
-  const policy = getBankReconciliationViewPolicy(role);
+  const policy = getBankReconciliationViewPolicy(role, profileId);
   const canViewRaw = policy.visibleColumns.includes('bankDescription');
   if (canViewRaw) {
     return { text: value, restricted: false };

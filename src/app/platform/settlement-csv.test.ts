@@ -5,6 +5,7 @@ import {
   SETTLEMENT_COLUMNS,
   exportSettlementCsv,
   importRowToTransaction,
+  renumberImportRows,
   transactionsToImportRows,
   type ImportRow,
 } from './settlement-csv';
@@ -79,6 +80,7 @@ describe('settlement-csv', () => {
       '상세 적요': '행사 운영비',
       비고: '검토 완료',
     });
+    row.settlementProgress = 'COMPLETE';
 
     const result = importRowToTransaction(row, 'p-1', 'l-1', 0);
 
@@ -86,6 +88,7 @@ describe('settlement-csv', () => {
     expect(result.transaction?.method).toBe('CORP_CARD_2');
     expect(result.transaction?.memo).toBe('행사 운영비');
     expect(result.transaction?.amounts.supplyAmount).toBe(10000);
+    expect(result.transaction?.settlementProgress).toBe('COMPLETE');
   });
 
   it('builds import rows with derived enhanced columns', () => {
@@ -130,5 +133,19 @@ describe('settlement-csv', () => {
 
     expect(rows[0].cells[memoIdx]).toBe('출장 내부 메모');
     expect(rows[0].cells[methodIdx]).toBe('법인카드(뒷번호2)');
+    expect(rows[0].settlementProgress).toBe('INCOMPLETE');
+  });
+
+  it('renumbers rows after structural edits while keeping hidden progress state', () => {
+    const rows = renumberImportRows([
+      { ...makeBaseRow({ 작성자: 'A', 'No.': '7' }), tempId: 'row-1', settlementProgress: 'COMPLETE' },
+      { ...makeBaseRow({ 작성자: 'B', 'No.': '99' }), tempId: 'row-2' },
+    ]);
+    const noIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === 'No.');
+
+    expect(rows[0].cells[noIdx]).toBe('1');
+    expect(rows[1].cells[noIdx]).toBe('2');
+    expect(rows[0].settlementProgress).toBe('COMPLETE');
+    expect(rows[1].settlementProgress).toBe('INCOMPLETE');
   });
 });

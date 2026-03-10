@@ -453,6 +453,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       tempId: row.tempId || `imp-${Date.now()}`,
       ...(row.sourceTxId ? { sourceTxId: row.sourceTxId } : {}),
       cells: Array.isArray(row.cells) ? row.cells.map((c) => (c ?? '')) : [],
+      ...(row.settlementProgress ? { settlementProgress: row.settlementProgress } : {}),
     }));
     const payload = withTenantScope(orgId, {
       projectId: portalUser.projectId,

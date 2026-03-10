@@ -1,7 +1,12 @@
 // ── Settlement Ledger CSV column definitions & bidirectional mapping ──
 
 import { featureFlags } from '../config/feature-flags';
-import type { Transaction, CashflowSheetLineId, Direction } from '../data/types';
+import type {
+  Transaction,
+  CashflowSheetLineId,
+  Direction,
+  SettlementProgress,
+} from '../data/types';
 import { CASHFLOW_SHEET_LINE_LABELS } from '../data/types';
 import type { MonthMondayWeek } from './cashflow-weeks';
 import { findWeekForDate, getYearMondayWeeks } from './cashflow-weeks';
@@ -438,8 +443,23 @@ export interface ImportRow {
   sourceTxId?: string;
   /** Cell values aligned to SETTLEMENT_COLUMNS order (string representation). */
   cells: string[];
+  /** Hidden UI-only state kept outside CSV headers to avoid sheet schema changes. */
+  settlementProgress?: SettlementProgress;
   /** Validation error when trying to parse this row. */
   error?: string;
+}
+
+export function renumberImportRows(rows: ImportRow[]): ImportRow[] {
+  const noIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === 'No.');
+  return rows.map((row, index) => {
+    const cells = [...row.cells];
+    if (noIdx >= 0) cells[noIdx] = String(index + 1);
+    return {
+      ...row,
+      cells,
+      settlementProgress: row.settlementProgress || 'INCOMPLETE',
+    };
+  });
 }
 
 /**
@@ -453,6 +473,10 @@ export function normalizeMatrixToImportRows(matrix: string[][]): ImportRow[] {
 
   const headers = matrix[headerRowIdx].map((h) => normalizeSpace(h));
   const dataRows = matrix.slice(headerRowIdx + 1);
+  const progressIdx = headers.findIndex((header) => {
+    const normalized = normalizeKey(header);
+    return normalized === normalizeKey('내용 기재 상태') || normalized === normalizeKey('settlementProgress');
+  });
 
   // Build mapping: SETTLEMENT_COLUMNS index → source CSV column index
   const colMapping: (number | -1)[] = SETTLEMENT_COLUMNS.map((col) => {
@@ -474,16 +498,13 @@ export function normalizeMatrixToImportRows(matrix: string[][]): ImportRow[] {
       srcIdx >= 0 ? normalizeSpace(raw[srcIdx] || '') : '',
     );
 
-    // Auto-fill No. column
-    const noIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === 'No.');
-    if (noIdx >= 0) cells[noIdx] = String(rows.length + 1);
-
     rows.push({
       tempId: `imp-${Date.now()}-${i}`,
       cells,
+      settlementProgress: normalizeSettlementProgress(progressIdx >= 0 ? raw[progressIdx] || '' : ''),
     });
   }
-  return rows;
+  return renumberImportRows(rows);
 }
 
 /**
@@ -493,6 +514,7 @@ export function createEmptyImportRow(): ImportRow {
   return {
     tempId: `imp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     cells: SETTLEMENT_COLUMNS.map(() => ''),
+    settlementProgress: 'INCOMPLETE',
   };
 }
 
@@ -522,6 +544,7 @@ export function transactionsToImportRows(
       tempId: tx.id,
       sourceTxId: tx.id,
       cells,
+      settlementProgress: tx.settlementProgress || 'INCOMPLETE',
     };
   });
 }
@@ -646,7 +669,8 @@ export function importRowToTransaction(
     eNaraExecuted: pickValue(kv, ['e나라 집행', 'eNaraExecuted']) || undefined,
     vatSettlementDone: /Y|yes|완료|true/i.test(pickValue(kv, ['부가세 지결 완료여부', 'vatSettlementDone'])) || undefined,
     settlementComplete: /Y|yes|완료|true/i.test(pickValue(kv, ['최종완료', 'settlementComplete'])) || undefined,
-    settlementProgress: normalizeSettlementProgress(pickValue(kv, ['내용 기재 상태', 'settlementProgress'])),
+    settlementProgress: row.settlementProgress
+      || normalizeSettlementProgress(pickValue(kv, ['내용 기재 상태', 'settlementProgress'])),
     settlementNote: pickValue(kv, ['비고', 'settlementNote', 'note']) || undefined,
   };
 

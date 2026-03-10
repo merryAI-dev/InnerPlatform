@@ -43,9 +43,19 @@ const BANK_HEADERS = [
   '시스템 금액',
 ];
 
-const BANK_CSV = [
-  '거래일,적요,입금액,출금액,잔액',
-  '2026-02-12,Masion Viet (프랑스),0,11520000,1216329459',
+const HANA_BANK_CSV = [
+  '거래일시,적요,입금액,출금액,거래 후 잔액',
+  '2026-02-12 09:00,Masion Viet (프랑스),0,11520000,1216329459',
+].join('\n');
+
+const KOOKMIN_BANK_CSV = [
+  '거래일자,기재내용,맡기신금액,찾으신금액,잔액',
+  '2026.02.12,Masion Viet (프랑스),0,11520000,1216329459',
+].join('\n');
+
+const SHINHAN_BANK_CSV = [
+  '거래일,내용,입출금액,거래구분,잔액',
+  '20260212,Masion Viet (프랑스),11520000,출금,1216329459',
 ].join('\n');
 
 test('settlement smoke keeps headers and exposes enhanced helpers', async ({ page }) => {
@@ -69,26 +79,45 @@ test('settlement smoke keeps headers and exposes enhanced helpers', async ({ pag
   await vatInput.fill('2,000');
   await expect(page.getByText('공급가액 9,000')).toBeVisible();
 
+  const progressSelect = page.locator('[data-testid="settlement-1-비고-status"]');
+  await progressSelect.selectOption('COMPLETE');
+  await expect(progressSelect).toHaveValue('COMPLETE');
+
+  await page.locator('[data-testid="settlement-row-insert-1"]').click();
+  await expect(page.locator('[data-testid="settlement-21-거래일시"]')).toHaveCount(1);
+  await expect(page.locator('[data-testid="settlement-2-no"]')).toHaveValue('2');
+
   const driveLink = page.getByRole('link', { name: '1행 증빙자료 드라이브 열기' });
   await expect(driveLink).toHaveAttribute('href', /drive\.google\.com/);
 });
 
-test('bank reconciliation smoke preserves headers for finance view', async ({ page }) => {
-  await page.goto('/playwright/bank-reconciliation-smoke.html?role=finance');
-  await page.locator('input[type="file"]').setInputFiles({
-    name: 'bank.csv',
-    mimeType: 'text/csv',
-    buffer: Buffer.from(BANK_CSV, 'utf8'),
-  });
+test('bank reconciliation smoke preserves headers and bank policy matrix for finance view', async ({ page }) => {
+  const cases = [
+    { csv: HANA_BANK_CSV, label: '하나은행 빠른조회', field: '거래일시' },
+    { csv: KOOKMIN_BANK_CSV, label: '국민은행 빠른조회', field: '기재내용' },
+    { csv: SHINHAN_BANK_CSV, label: '신한은행 빠른조회', field: '거래구분' },
+  ];
 
-  await expect(page.getByText('현재 보기 기준:')).toContainText('도담/재경팀 기준');
-  await expect(page.locator('[data-testid="bank-description-1"]')).toBeVisible();
+  for (const bankCase of cases) {
+    await page.goto('/playwright/bank-reconciliation-smoke.html?role=finance');
+    await page.locator('input[type="file"]').setInputFiles({
+      name: 'bank.csv',
+      mimeType: 'text/csv',
+      buffer: Buffer.from(bankCase.csv, 'utf8'),
+    });
+
+    await expect(page.getByText('현재 보기 기준:')).toContainText('도담/재경팀 기준');
+    await expect(page.locator('[data-testid="bank-description-1"]')).toContainText('Masion Viet (프랑스)');
+    await expect(page.locator('[data-testid="system-counterparty-1"]')).toContainText('내부 메모:');
+    await expect(page.locator('[data-testid="bank-policy-profile"]')).toContainText(bankCase.label);
+    await expect(page.locator('[data-testid="bank-policy-fields"]')).toContainText(bankCase.field);
+    await expect(page.locator('[data-testid="bank-policy-action-빠른조회"]')).toBeVisible();
+  }
+
   const headerTexts = (await page.locator('thead').locator('th').allTextContents())
     .map((text) => text.trim())
     .filter(Boolean);
   expect(headerTexts).toEqual(BANK_HEADERS);
-  await expect(page.locator('[data-testid="bank-description-1"]')).toContainText('Masion Viet (프랑스)');
-  await expect(page.locator('[data-testid="system-counterparty-1"]')).toContainText('내부 메모:');
 });
 
 test('bank reconciliation smoke masks bank description for pm view', async ({ page }) => {
@@ -96,7 +125,7 @@ test('bank reconciliation smoke masks bank description for pm view', async ({ pa
   await page.locator('input[type="file"]').setInputFiles({
     name: 'bank.csv',
     mimeType: 'text/csv',
-    buffer: Buffer.from(BANK_CSV, 'utf8'),
+    buffer: Buffer.from(HANA_BANK_CSV, 'utf8'),
   });
 
   await expect(page.getByText('현재 보기 기준:')).toContainText('사업팀 기준');
@@ -105,5 +134,7 @@ test('bank reconciliation smoke masks bank description for pm view', async ({ pa
     .map((text) => text.trim())
     .filter(Boolean);
   expect(headerTexts).toEqual(BANK_HEADERS);
+  await expect(page.locator('[data-testid="bank-policy-profile"]')).toContainText('하나은행 빠른조회');
   await expect(page.locator('[data-testid="bank-description-1"]')).toContainText('권한 필요');
+  await expect(page.locator('[data-testid="bank-policy-fields"]')).not.toContainText('적요');
 });

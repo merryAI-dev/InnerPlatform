@@ -10,6 +10,7 @@ import { computeEvidenceStatus, computeEvidenceSummary, isValidDriveUrl } from '
 import {
   deriveSettlementAmounts,
   getPaymentMethodOptions,
+  getSettlementProgressLabel,
 } from '../../platform/settlement-ledger.helpers';
 import {
   CASHFLOW_LINE_OPTIONS,
@@ -19,6 +20,7 @@ import {
   exportSettlementCsv,
   importRowToTransaction,
   normalizeMatrixToImportRows,
+  renumberImportRows,
   transactionsToImportRows,
   type ImportRow,
 } from '../../platform/settlement-csv';
@@ -32,6 +34,10 @@ const fmt = (n: number | undefined) =>
   n != null && Number.isFinite(n) ? n.toLocaleString('ko-KR') : '';
 
 const METHOD_OPTIONS = getPaymentMethodOptions(!featureFlags.qaP0SettlementV1);
+const SETTLEMENT_PROGRESS_OPTIONS = (['INCOMPLETE', 'COMPLETE'] as const).map((value) => ({
+  value,
+  label: getSettlementProgressLabel(value),
+}));
 
 function toCellTestId(rowIdx: number, header: string): string {
   const slug = header
@@ -856,7 +862,35 @@ function TransactionRow({ tx, rowNum, weekLabel, onUpdate, onChangeState, userRo
       {/* 도담: 최종완료 */}
       {boolCell(tx.settlementComplete, 'settlementComplete')}
       {/* 비고 */}
-      {textCell(tx.settlementNote, 'settlementNote')}
+      <td className="px-1 py-0.5 border-b border-r">
+        <div className="min-w-[140px]">
+          <input
+            type="text"
+            defaultValue={tx.settlementNote || ''}
+            disabled={locked}
+            className={`w-full bg-transparent outline-none text-[11px] px-1 py-0.5 ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
+            onBlur={(e) => {
+              if (!locked && e.target.value !== (tx.settlementNote || '')) {
+                debouncedUpdate({ settlementNote: e.target.value });
+              }
+            }}
+          />
+          <select
+            defaultValue={tx.settlementProgress || 'INCOMPLETE'}
+            disabled={locked}
+            className={`mt-1 w-full rounded border bg-background/60 px-1 py-0.5 text-[10px] ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
+            onChange={(e) => {
+              if (!locked) {
+                onUpdate({ settlementProgress: e.target.value as NonNullable<Transaction['settlementProgress']> });
+              }
+            }}
+          >
+            {SETTLEMENT_PROGRESS_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </div>
+      </td>
     </tr>
   );
 }
@@ -941,7 +975,8 @@ function ImportEditor({
 
   const applyDerivedRows = useCallback(
     (input: ImportRow[]) => {
-      const recalced = recomputeBalances(input);
+      const normalized = renumberImportRows(input);
+      const recalced = recomputeBalances(normalized);
       return recalced.map((row, i) => {
         const result = importRowToTransaction(row, projectId, defaultLedgerId, i);
         return { ...row, error: result.error };
@@ -987,21 +1022,15 @@ function ImportEditor({
 
   const addRow = useCallback(() => {
     const newRow = createEmptyImportRow();
-    // Set No. column
-    const noIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === 'No.');
-    if (noIdx >= 0) newRow.cells[noIdx] = String(rows.length + 1);
     newRow.error = undefined;
     onChange(applyDerivedRows([...rows, newRow]));
   }, [rows, onChange, applyDerivedRows]);
 
   const addRows = useCallback((count: number) => {
     if (count <= 0) return;
-    const noIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === 'No.');
     const nextRows = [...rows];
     for (let i = 0; i < count; i++) {
-      const newRow = createEmptyImportRow();
-      if (noIdx >= 0) newRow.cells[noIdx] = String(nextRows.length + 1);
-      nextRows.push(newRow);
+      nextRows.push(createEmptyImportRow());
     }
     onChange(applyDerivedRows(nextRows));
   }, [rows, onChange, applyDerivedRows]);
@@ -1015,6 +1044,15 @@ function ImportEditor({
   const removeRow = useCallback(
     (rowIdx: number) => {
       onChange(applyDerivedRows(rows.filter((_, i) => i !== rowIdx)));
+    },
+    [rows, onChange, applyDerivedRows],
+  );
+
+  const insertRowAt = useCallback(
+    (rowIdx: number) => {
+      const nextRows = [...rows];
+      nextRows.splice(rowIdx + 1, 0, createEmptyImportRow());
+      onChange(applyDerivedRows(nextRows));
     },
     [rows, onChange, applyDerivedRows],
   );
@@ -1145,6 +1183,7 @@ function ImportEditor({
                 rowIdx={rowIdx}
                 onCellChange={(colIdx, value) => updateCell(rowIdx, colIdx, value)}
                 onRowChange={(updater) => updateRow(rowIdx, updater)}
+                onInsertBelow={() => insertRowAt(rowIdx)}
                 onRemove={() => removeRow(rowIdx)}
                 budgetCodeIdx={budgetCodeIdx}
                 subCodeIdx={subCodeIdx}
@@ -1220,6 +1259,7 @@ function ImportEditorRow({
   rowIdx,
   onCellChange,
   onRowChange,
+  onInsertBelow,
   onRemove,
   budgetCodeIdx,
   subCodeIdx,
@@ -1230,6 +1270,7 @@ function ImportEditorRow({
   rowIdx: number;
   onCellChange: (colIdx: number, value: string) => void;
   onRowChange: (updater: (row: ImportRow) => ImportRow) => void;
+  onInsertBelow: () => void;
   onRemove: () => void;
   budgetCodeIdx: number;
   subCodeIdx: number;
@@ -1261,11 +1302,16 @@ function ImportEditorRow({
     () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '증빙자료 드라이브'),
     [],
   );
+  const noteIdx = useMemo(
+    () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '비고'),
+    [],
+  );
   const budgetCode = budgetCodeIdx >= 0 ? row.cells[budgetCodeIdx] : '';
   const subCodes = useMemo(() => {
     const entry = BUDGET_CODE_BOOK.find((c) => c.code === budgetCode);
     return entry ? entry.subCodes : [];
   }, [budgetCode]);
+  const progressValue = row.settlementProgress || 'INCOMPLETE';
   const derivedSupplyAmount = useMemo(() => {
     if (!featureFlags.qaP0SettlementV1) return '';
     const bankAmount = parseNumber(row.cells[bankAmountIdx]) ?? 0;
@@ -1291,6 +1337,14 @@ function ImportEditorRow({
             </span>
           )}
           <button
+            onClick={onInsertBelow}
+            className="text-muted-foreground/60 hover:text-primary transition-colors"
+            title="아래 행 삽입"
+            data-testid={`settlement-row-insert-${rowIdx + 1}`}
+          >
+            <Plus className="h-3 w-3" />
+          </button>
+          <button
             onClick={onRemove}
             className="text-muted-foreground/40 hover:text-destructive transition-colors"
             title="행 삭제"
@@ -1306,6 +1360,7 @@ function ImportEditorRow({
         const isSubCode = colIdx === subCodeIdx;
         const isDriveLink = colIdx === driveLinkIdx;
         const isVat = colIdx === vatIdx;
+        const isNote = colIdx === noteIdx;
         const fieldLabel = `${rowIdx + 1}행 ${col.csvHeader}`;
         return (
           <td key={colIdx} className="px-0.5 py-0.5 border-b border-r">
@@ -1433,6 +1488,31 @@ function ImportEditorRow({
                     공급가액 {derivedSupplyAmount}
                   </span>
                 )}
+              </div>
+            ) : isNote ? (
+              <div className="min-w-[140px]">
+                <input
+                  type="text"
+                  aria-label={fieldLabel}
+                  data-testid={toCellTestId(rowIdx, col.csvHeader)}
+                  value={row.cells[colIdx] || ''}
+                  className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5"
+                  onChange={(e) => onCellChange(colIdx, e.target.value)}
+                />
+                <select
+                  value={progressValue}
+                  aria-label={`${fieldLabel} 상태`}
+                  data-testid={toCellTestId(rowIdx, `${col.csvHeader}-status`)}
+                  className="mt-1 w-full rounded border bg-background/60 px-1 py-0.5 text-[10px]"
+                  onChange={(e) => {
+                    const nextProgress = e.target.value as NonNullable<Transaction['settlementProgress']>;
+                    onRowChange((prev) => ({ ...prev, settlementProgress: nextProgress }));
+                  }}
+                >
+                  {SETTLEMENT_PROGRESS_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
               </div>
             ) : (
               <input

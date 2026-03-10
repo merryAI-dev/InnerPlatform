@@ -80,6 +80,9 @@ describe('settlement-ledger helpers', () => {
   it('returns role-specific bank reconciliation columns', () => {
     expect(getBankReconciliationViewPolicy('finance').visibleColumns).toContain('bankDescription');
     expect(getBankReconciliationViewPolicy('pm').visibleColumns).not.toContain('bankDescription');
+    expect(getBankReconciliationViewPolicy('finance', 'HANA').profileLabel).toBe('하나은행 빠른조회');
+    expect(getBankReconciliationViewPolicy('finance', 'HANA').availableActions).toContain('열 메뉴');
+    expect(getBankReconciliationViewPolicy('pm', 'SHINHAN').visibleFieldLabels).not.toContain('내용');
   });
 
   it('masks bank descriptions for non-privileged roles', () => {
