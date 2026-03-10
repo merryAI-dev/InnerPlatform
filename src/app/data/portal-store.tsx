@@ -173,7 +173,7 @@ function normalizePortalUser(candidate: Partial<PortalUser> | null | undefined):
 }
 
 export function PortalProvider({ children }: { children: ReactNode }) {
-  const { isAuthenticated, user: authUser } = useAuth();
+  const { isAuthenticated, isLoading: authLoading, user: authUser } = useAuth();
   const { db, isOnline, orgId } = useFirebase();
   const firestoreEnabled = isOnline && !!db;
 
@@ -208,11 +208,17 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
+    if (authLoading) {
+      setIsMemberLoading(true);
+      return;
+    }
     if (!isAuthenticated || !authUser) {
+      setPortalUser(null);
       setIsMemberLoading(false);
       return;
     }
     if (!canEnterPortalWorkspace(authUser.role)) {
+      setPortalUser(null);
       setIsMemberLoading(false);
       return;
     }
@@ -296,11 +302,28 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     };
 
     loadFromStore();
-  }, [isAuthenticated, authUser?.uid, authUser?.role, firestoreEnabled, db, orgId]);
+  }, [authLoading, isAuthenticated, authUser, firestoreEnabled, db, orgId]);
 
   useEffect(() => {
     unsubsRef.current.forEach((unsub) => unsub());
     unsubsRef.current = [];
+
+    if (authLoading || isMemberLoading || !isAuthenticated || !authUser) {
+      setProjects([]);
+      setLedgers([]);
+      setExpenseSets([]);
+      setChangeRequests([]);
+      setParticipationEntries([]);
+      setTransactions([]);
+      setComments([]);
+      setEvidenceRequiredMap({});
+      setExpenseSheetRows(null);
+      setBankStatementRows(null);
+      setBudgetPlanRows(null);
+      setWeeklySubmissionStatuses([]);
+      setIsLoading(authLoading || isMemberLoading);
+      return;
+    }
 
     if (!firestoreEnabled || !db) {
       setProjects([]);
@@ -733,7 +756,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       unsubsRef.current.forEach((unsub) => unsub());
       unsubsRef.current = [];
     };
-  }, [firestoreEnabled, db, orgId, portalUser?.projectId, scopedProjectIds]);
+  }, [authLoading, isMemberLoading, isAuthenticated, authUser, firestoreEnabled, db, orgId, portalUser?.projectId, scopedProjectIds]);
 
   const persistExpenseSet = useCallback(async (set: ExpenseSet) => {
     if (!db) return;

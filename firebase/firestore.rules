@@ -116,6 +116,9 @@ service cloud.firestore {
                     canReadProjectResource(orgId, projectId)
                     || (resource.data.managerId == request.auth.uid)
                     || (
+                      resource.data.status in ['CONTRACT_PENDING', 'IN_PROGRESS', 'COMPLETED_PENDING_PAYMENT']
+                    )
+                    || (
                       role(orgId) in ['pm', 'viewer']
                       && resource.data.status in ['CONTRACT_PENDING', 'IN_PROGRESS', 'COMPLETED_PENDING_PAYMENT']
                     )

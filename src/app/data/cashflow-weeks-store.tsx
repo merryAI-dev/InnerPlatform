@@ -92,7 +92,7 @@ if (!_g.__MYSC_CASHFLOW_WEEKS_CTX__) {
 const CashflowWeekContext: React.Context<(CashflowWeekState & CashflowWeekActions) | null> = _g.__MYSC_CASHFLOW_WEEKS_CTX__;
 
 export function CashflowWeekProvider({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
+  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const { db, isOnline, orgId } = useFirebase();
   const firestoreEnabled = isOnline && !!db;
 
@@ -127,7 +127,19 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     unsubsRef.current.forEach((u) => u());
     unsubsRef.current = [];
 
+    if (authLoading || !isAuthenticated || !user) {
+      setWeeks([]);
+      setIsLoading(false);
+      return;
+    }
+
     if (!firestoreEnabled || !db) {
+      setWeeks([]);
+      setIsLoading(false);
+      return;
+    }
+
+    if (!readAll && projectIds.length === 0) {
       setWeeks([]);
       setIsLoading(false);
       return;
@@ -189,7 +201,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
       unsubsRef.current.forEach((u) => u());
       unsubsRef.current = [];
     };
-  }, [db, firestoreEnabled, orgId, projectIds, readAll, yearMonth]);
+  }, [authLoading, isAuthenticated, user, db, firestoreEnabled, orgId, projectIds, readAll, yearMonth]);
 
   const upsertWeekAmounts = useCallback(async (input: {
     projectId: string;
