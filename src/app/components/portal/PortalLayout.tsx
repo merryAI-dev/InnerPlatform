@@ -206,7 +206,7 @@ function PortalContent() {
             아직 배정된 사업이 없습니다. 관리자에게 사업 배정을 요청하거나, 온보딩에서 사업을 선택해 주세요.
           </p>
           <div className="mt-4 flex items-center justify-center gap-2">
-            <Button variant="outline" onClick={() => navigate('/portal/project-settings')}>
+            <Button variant="outline" onClick={() => navigate('/portal/onboarding')}>
               사업 배정 수정
             </Button>
             <Button variant="ghost" onClick={() => { portalLogout(); authLogout(); navigate('/login'); }}>
@@ -228,7 +228,7 @@ function PortalContent() {
             배정된 사업 정보가 존재하지 않거나 접근 권한이 없습니다. 관리자에게 문의해 주세요.
           </p>
           <div className="mt-4 flex items-center justify-center gap-2">
-            <Button variant="outline" onClick={() => navigate('/portal/project-settings')}>
+            <Button variant="outline" onClick={() => navigate('/portal/onboarding')}>
               사업 배정 수정
             </Button>
             <Button variant="ghost" onClick={() => { portalLogout(); authLogout(); navigate('/login'); }}>
