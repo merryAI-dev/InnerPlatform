@@ -2561,6 +2561,7 @@ function ImportEditorRow({
     options,
     onChange,
     onFocus,
+    cellColIdx,
     disabled = false,
     isOpen,
     onOpen,
@@ -2570,6 +2571,7 @@ function ImportEditorRow({
     options: { value: string; label: string }[];
     onChange: (next: string) => void;
     onFocus: () => void;
+    cellColIdx: number;
     disabled?: boolean;
     isOpen: boolean;
     onOpen: () => void;
@@ -2619,7 +2621,7 @@ function ImportEditorRow({
             onMouseDownCapture={openPicker}
             data-select-toggle
             data-cell-row={rowIdx}
-            data-cell-col={colIdx}
+            data-cell-col={cellColIdx}
             title="옵션 열기"
             ref={btnRef}
           >
@@ -2752,6 +2754,7 @@ function ImportEditorRow({
                     value={row.cells[colIdx] || ''}
                     options={weekOptions}
                     onFocus={() => onCellFocus(rowIdx, colIdx)}
+                    cellColIdx={colIdx}
                     isOpen={openSelect?.rowIdx === rowIdx && openSelect?.colIdx === colIdx}
                     onOpen={() => onOpenSelect(rowIdx, colIdx)}
                     onClose={onCloseSelect}
@@ -2764,6 +2767,7 @@ function ImportEditorRow({
                     value={row.cells[colIdx] || ''}
                     options={METHOD_OPTIONS.map((o) => ({ value: o.label, label: o.label }))}
                     onFocus={() => onCellFocus(rowIdx, colIdx)}
+                    cellColIdx={colIdx}
                     isOpen={openSelect?.rowIdx === rowIdx && openSelect?.colIdx === colIdx}
                     onOpen={() => onOpenSelect(rowIdx, colIdx)}
                     onClose={onCloseSelect}
@@ -2778,6 +2782,7 @@ function ImportEditorRow({
                     value={row.cells[colIdx] || ''}
                     options={cashflowOptions.map((o) => ({ value: o.label, label: o.label }))}
                     onFocus={() => onCellFocus(rowIdx, colIdx)}
+                    cellColIdx={colIdx}
                     isOpen={openSelect?.rowIdx === rowIdx && openSelect?.colIdx === colIdx}
                     onOpen={() => onOpenSelect(rowIdx, colIdx)}
                     onClose={onCloseSelect}
@@ -2790,6 +2795,7 @@ function ImportEditorRow({
                     value={normalizeBudgetLabel(String(row.cells[colIdx] || ''))}
                     options={budgetCodeBook.map((c, idx) => ({ value: c.code, label: formatBudgetCodeLabel(idx, c.code) }))}
                     onFocus={() => onCellFocus(rowIdx, colIdx)}
+                    cellColIdx={colIdx}
                     isOpen={openSelect?.rowIdx === rowIdx && openSelect?.colIdx === colIdx}
                     onOpen={() => onOpenSelect(rowIdx, colIdx)}
                     onClose={onCloseSelect}
@@ -2825,6 +2831,7 @@ function ImportEditorRow({
                       return { value: sc, label: formatSubCodeLabel(codeIdx, sidx, sc) };
                     })}
                     onFocus={() => onCellFocus(rowIdx, colIdx)}
+                    cellColIdx={colIdx}
                     disabled={!budgetCode}
                     isOpen={openSelect?.rowIdx === rowIdx && openSelect?.colIdx === colIdx}
                     onOpen={() => onOpenSelect(rowIdx, colIdx)}
@@ -2849,6 +2856,7 @@ function ImportEditorRow({
                     value={row.cells[colIdx] || ''}
                     options={(authorOptions || []).map((name) => ({ value: name, label: name }))}
                     onFocus={() => onCellFocus(rowIdx, colIdx)}
+                    cellColIdx={colIdx}
                     isOpen={openSelect?.rowIdx === rowIdx && openSelect?.colIdx === colIdx}
                     onOpen={() => onOpenSelect(rowIdx, colIdx)}
                     onClose={onCloseSelect}
