@@ -2,10 +2,15 @@ import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, Download, Extern
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { BUDGET_CODE_BOOK } from '../../data/budget-data';
+import { featureFlags } from '../../config/feature-flags';
 import type { Transaction, TransactionState } from '../../data/types';
 import { findWeekForDate, getYearMondayWeeks, type MonthMondayWeek } from '../../platform/cashflow-weeks';
 import { parseCsv, parseNumber, triggerDownload } from '../../platform/csv-utils';
 import { computeEvidenceStatus, computeEvidenceSummary, isValidDriveUrl } from '../../platform/evidence-helpers';
+import {
+  deriveSettlementAmounts,
+  getPaymentMethodOptions,
+} from '../../platform/settlement-ledger.helpers';
 import {
   CASHFLOW_LINE_OPTIONS,
   SETTLEMENT_COLUMNS, SETTLEMENT_COLUMN_GROUPS,
@@ -26,21 +31,14 @@ import { Checkbox } from '../ui/checkbox';
 const fmt = (n: number | undefined) =>
   n != null && Number.isFinite(n) ? n.toLocaleString('ko-KR') : '';
 
-const METHOD_LABELS: Record<string, string> = {
-  TRANSFER: '계좌이체',
-  CORP_CARD_1: '법인카드(뒷번호1)',
-  CORP_CARD_2: '법인카드(뒷번호2)',
-  OTHER: '기타',
-};
+const METHOD_OPTIONS = getPaymentMethodOptions(!featureFlags.qaP0SettlementV1);
 
-const METHOD_OPTIONS = Object.entries(METHOD_LABELS).map(([v, l]) => ({ value: v, label: l }));
-
-function normalizeMethodValue(value: string | undefined): string {
-  if (!value) return '';
-  if (value === 'BANK_TRANSFER') return 'TRANSFER';
-  if (value === 'CARD') return 'CORP_CARD_1';
-  if (value === 'CASH' || value === 'CHECK') return 'OTHER';
-  return value;
+function toCellTestId(rowIdx: number, header: string): string {
+  const slug = header
+    .toLowerCase()
+    .replace(/[^a-z0-9가-힣]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return `settlement-${rowIdx + 1}-${slug}`;
 }
 const TX_STATE_BADGE: Record<TransactionState, { label: string; cls: string }> = {
   DRAFT: { label: '작성중', cls: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300' },
@@ -111,9 +109,6 @@ export function SettlementLedgerPage({
   currentUserName = 'PM',
   userRole = 'pm',
 }: SettlementLedgerProps) {
-
-
-  console.log(sheetRows, "sheetRows")
   const [year, setYear] = useState(() => new Date().getFullYear());
   const [collapsedWeeks, setCollapsedWeeks] = useState<Set<string>>(new Set());
   const [importRows, setImportRows] = useState<ImportRow[] | null>(null);
@@ -753,7 +748,7 @@ function TransactionRow({ tx, rowNum, weekLabel, onUpdate, onChangeState, userRo
       {/* 지출구분 */}
       <td className="px-1 py-0.5 border-b border-r">
         <select
-          defaultValue={normalizeMethodValue(tx.method)}
+          defaultValue={tx.method || ''}
           disabled={locked}
           className={`bg-transparent outline-none text-[11px] w-full cursor-pointer ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
           onChange={(e) => { if (!locked) onUpdate({ method: e.target.value as Transaction['method'] }); }}
@@ -1072,8 +1067,6 @@ function ImportEditor({
     }
   }, [mappingDraft, onSaveEvidenceRequiredMap]);
 
-  console.log(mappingRows, "mappingRows")
-
   return (
     <div className={inline ? 'relative border rounded-lg bg-background flex flex-col overflow-visible' : 'fixed inset-0 z-50 bg-background/95 flex flex-col'}>
       {/* Toolbar */}
@@ -1086,6 +1079,9 @@ function ImportEditor({
           )}
           <span className="text-[10px] text-muted-foreground">
             셀을 직접 수정하거나 행을 추가할 수 있습니다
+          </span>
+          <span className="text-[10px] text-amber-700 dark:text-amber-300">
+            매입부가세는 계산값이 아니라 영수증 기준 확인값입니다
           </span>
         </div>
         <div className="flex items-center gap-2">
@@ -1228,7 +1224,6 @@ function ImportEditorRow({
   budgetCodeIdx,
   subCodeIdx,
   evidenceIdx,
-  projectId,
   evidenceRequiredMap,
 }: {
   row: ImportRow;
@@ -1250,13 +1245,39 @@ function ImportEditorRow({
     () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '거래일시'),
     [],
   );
+  const expenseAmountIdx = useMemo(
+    () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '사업비 사용액'),
+    [],
+  );
+  const bankAmountIdx = useMemo(
+    () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '통장에 찍힌 입/출금액'),
+    [],
+  );
+  const vatIdx = useMemo(
+    () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '매입부가세'),
+    [],
+  );
+  const driveLinkIdx = useMemo(
+    () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '증빙자료 드라이브'),
+    [],
+  );
   const budgetCode = budgetCodeIdx >= 0 ? row.cells[budgetCodeIdx] : '';
   const subCodes = useMemo(() => {
     const entry = BUDGET_CODE_BOOK.find((c) => c.code === budgetCode);
     return entry ? entry.subCodes : [];
   }, [budgetCode]);
-
-  console.log(row, "")
+  const derivedSupplyAmount = useMemo(() => {
+    if (!featureFlags.qaP0SettlementV1) return '';
+    const bankAmount = parseNumber(row.cells[bankAmountIdx]) ?? 0;
+    const expenseAmount = parseNumber(row.cells[expenseAmountIdx]) ?? 0;
+    const vatIn = parseNumber(row.cells[vatIdx]) ?? 0;
+    const hasExpenseContext = bankAmount > 0 || expenseAmount > 0 || vatIn > 0;
+    if (!hasExpenseContext) return '';
+    return deriveSettlementAmounts({
+      direction: 'OUT',
+      amounts: { bankAmount, expenseAmount, vatIn },
+    }).supplyAmount.toLocaleString('ko-KR');
+  }, [bankAmountIdx, expenseAmountIdx, row.cells, vatIdx]);
 
   return (
     <tr className={`${hasError ? 'bg-red-50/60 dark:bg-red-950/20' : 'hover:bg-muted/30'} transition-colors`}>
@@ -1283,15 +1304,25 @@ function ImportEditorRow({
         const isReadOnly = col.csvHeader === 'No.' || col.csvHeader === '해당 주차';
         const isBudgetCode = colIdx === budgetCodeIdx;
         const isSubCode = colIdx === subCodeIdx;
+        const isDriveLink = colIdx === driveLinkIdx;
+        const isVat = colIdx === vatIdx;
+        const fieldLabel = `${rowIdx + 1}행 ${col.csvHeader}`;
         return (
           <td key={colIdx} className="px-0.5 py-0.5 border-b border-r">
             {isReadOnly ? (
-              <span className="text-[10px] text-muted-foreground px-1">
-                {row.cells[colIdx]}
-              </span>
+              <input
+                type="text"
+                readOnly
+                aria-label={fieldLabel}
+                data-testid={toCellTestId(rowIdx, col.csvHeader)}
+                value={row.cells[colIdx] || ''}
+                className="w-full bg-transparent outline-none text-[10px] text-muted-foreground px-1 py-0.5"
+              />
             ) : colIdx === methodIdx ? (
               <select
                 value={row.cells[colIdx] || ''}
+                aria-label={fieldLabel}
+                data-testid={toCellTestId(rowIdx, col.csvHeader)}
                 className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[80px]"
                 onChange={(e) => {
                   if (e.target.value !== row.cells[colIdx]) {
@@ -1307,6 +1338,8 @@ function ImportEditorRow({
             ) : isBudgetCode ? (
               <select
                 value={row.cells[colIdx] || ''}
+                aria-label={fieldLabel}
+                data-testid={toCellTestId(rowIdx, col.csvHeader)}
                 className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[90px]"
                 onChange={(e) => {
                   const nextCode = e.target.value;
@@ -1335,6 +1368,8 @@ function ImportEditorRow({
               <select
                 value={row.cells[colIdx] || ''}
                 disabled={!budgetCode}
+                aria-label={fieldLabel}
+                data-testid={toCellTestId(rowIdx, col.csvHeader)}
                 className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[90px]"
                 onChange={(e) => {
                   const nextSub = e.target.value;
@@ -1355,9 +1390,55 @@ function ImportEditorRow({
                   <option key={sc} value={sc}>{sc}</option>
                 ))}
               </select>
+            ) : isDriveLink ? (
+              <div className="flex items-center gap-1 min-w-[180px]">
+                <input
+                  type="text"
+                  aria-label={fieldLabel}
+                  data-testid={toCellTestId(rowIdx, col.csvHeader)}
+                  value={row.cells[colIdx] || ''}
+                  placeholder="Drive URL"
+                  className="flex-1 bg-transparent outline-none text-[11px] px-1 py-0.5"
+                  onChange={(e) => onCellChange(colIdx, e.target.value)}
+                />
+                {isValidDriveUrl(row.cells[colIdx] || '') && (
+                  <a
+                    href={row.cells[colIdx]}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={`${fieldLabel} 열기`}
+                    data-testid={toCellTestId(rowIdx, `${col.csvHeader}-open`)}
+                    className="shrink-0 inline-flex h-6 items-center rounded-md border px-2 text-[10px] text-blue-600 hover:bg-blue-50"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    열기
+                  </a>
+                )}
+              </div>
+            ) : isVat ? (
+              <div className="min-w-[90px]">
+                <input
+                  type="text"
+                  aria-label={fieldLabel}
+                  data-testid={toCellTestId(rowIdx, col.csvHeader)}
+                  value={row.cells[colIdx] || ''}
+                  className={`w-full bg-transparent outline-none text-[11px] px-1 py-0.5 ${hasError && colIdx === dateIdx && !row.cells[colIdx]
+                    ? 'ring-1 ring-red-300 rounded'
+                    : ''
+                    }`}
+                  onChange={(e) => onCellChange(colIdx, e.target.value)}
+                />
+                {derivedSupplyAmount && (
+                  <span className="block px-1 pb-0.5 text-[9px] text-muted-foreground">
+                    공급가액 {derivedSupplyAmount}
+                  </span>
+                )}
+              </div>
             ) : (
               <input
                 type="text"
+                aria-label={fieldLabel}
+                data-testid={toCellTestId(rowIdx, col.csvHeader)}
                 value={row.cells[colIdx] || ''}
                 className={`w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[50px] ${hasError && colIdx === dateIdx && !row.cells[colIdx]
                   ? 'ring-1 ring-red-300 rounded'

@@ -1,10 +1,18 @@
 // ── Settlement Ledger CSV column definitions & bidirectional mapping ──
 
-import type { Transaction, CashflowSheetLineId, PaymentMethod, Direction } from '../data/types';
+import { featureFlags } from '../config/feature-flags';
+import type { Transaction, CashflowSheetLineId, Direction } from '../data/types';
 import { CASHFLOW_SHEET_LINE_LABELS } from '../data/types';
 import type { MonthMondayWeek } from './cashflow-weeks';
 import { findWeekForDate, getYearMondayWeeks } from './cashflow-weeks';
 import { pickValue, parseNumber, parseDate, stableHash, normalizeSpace, normalizeKey } from './csv-utils';
+import {
+  deriveSettlementAmounts,
+  getPaymentMethodLabel,
+  normalizePaymentMethod,
+  normalizeSettlementProgress,
+  resolveTransactionMemo,
+} from './settlement-ledger.helpers';
 
 // ── Cashflow line label ↔ id mapping ──
 
@@ -81,27 +89,21 @@ export const SETTLEMENT_COLUMNS: SettlementColumn[] = [
   { csvHeader: 'cashflow항목', group: '기본정보', txField: 'cashflowLabel', format: 'string' },
   { csvHeader: '통장잔액', group: '기본정보', txField: 'amounts.balanceAfter', format: 'number' },
   { csvHeader: '통장에 찍힌 입/출금액', group: '기본정보', txField: 'amounts.bankAmount', format: 'number' },
-  // 입금합계
   { csvHeader: '입금액(사업비,공급가액,은행이자)', group: '입금합계', txField: 'amounts.depositAmount', format: 'number' },
   { csvHeader: '매입부가세 반환', group: '입금합계', txField: 'amounts.vatRefund', format: 'number' },
-  // 출금합계
   { csvHeader: '사업비 사용액', group: '출금합계', txField: 'amounts.expenseAmount', format: 'number' },
   { csvHeader: '매입부가세', group: '출금합계', txField: 'amounts.vatIn', format: 'number' },
-  // 사업팀
   { csvHeader: '지급처', group: '사업팀', txField: 'counterparty', format: 'string' },
   { csvHeader: '상세 적요', group: '사업팀', txField: 'memo', format: 'string' },
   { csvHeader: '필수증빙자료 리스트', group: '사업팀', txField: 'evidenceRequiredDesc', format: 'string' },
   { csvHeader: '실제 구비 완료된 증빙자료 리스트', group: '사업팀', txField: 'evidenceCompletedDesc', format: 'string' },
   { csvHeader: '준비필요자료', group: '사업팀', txField: 'evidencePendingDesc', format: 'string' },
-  // 정산지원 담당자
   { csvHeader: '증빙자료 드라이브', group: '정산지원', txField: 'evidenceDriveLink', format: 'string' },
   { csvHeader: '준비 필요자료', group: '정산지원', txField: 'supportPendingDocs', format: 'string' },
-  // 도담
   { csvHeader: 'e나라 등록', group: '도담', txField: 'eNaraRegistered', format: 'string' },
   { csvHeader: 'e나라 집행', group: '도담', txField: 'eNaraExecuted', format: 'string' },
   { csvHeader: '부가세 지결 완료여부', group: '도담', txField: 'vatSettlementDone', format: 'boolean' },
   { csvHeader: '최종완료', group: '도담', txField: 'settlementComplete', format: 'boolean' },
-  // 비고
   { csvHeader: '비고', group: '비고', txField: 'settlementNote', format: 'string' },
 ];
 
@@ -118,28 +120,6 @@ export const SETTLEMENT_COLUMN_GROUPS = (() => {
   }
   return groups;
 })();
-
-// ── Payment method display ──
-
-const METHOD_LABELS: Record<string, string> = {
-  TRANSFER: '계좌이체',
-  CORP_CARD_1: '법인카드(뒷번호1)',
-  CORP_CARD_2: '법인카드(뒷번호2)',
-  OTHER: '기타',
-};
-
-function methodToLabel(method: string | undefined): string {
-  return (method && METHOD_LABELS[method]) || method || '';
-}
-
-function labelToMethod(raw: string): PaymentMethod {
-  const s = normalizeSpace(raw).toLowerCase();
-  if (/법인카드.*1|뒷번호1|card.?1/.test(s)) return 'CORP_CARD_1';
-  if (/법인카드.*2|뒷번호2|card.?2/.test(s)) return 'CORP_CARD_2';
-  if (/법인카드|카드|card/.test(s)) return 'CORP_CARD_1';
-  if (/계좌|이체|bank/.test(s)) return 'TRANSFER';
-  return 'OTHER';
-}
 
 // ── Direction inference from cashflow line ──
 
@@ -174,6 +154,13 @@ function formatCellValue(val: unknown, format: string): string {
     return val === true || val === 'true' || val === 'Y' ? 'Y' : '';
   }
   return String(val);
+}
+
+function getColumnValue(tx: Transaction, col: SettlementColumn): unknown {
+  if (col.csvHeader === '지출구분') return getPaymentMethodLabel(tx.method, !featureFlags.qaP0SettlementV1);
+  if (col.csvHeader === '상세 적요') return resolveTransactionMemo(tx).internalMemo;
+  if (!col.txField) return '';
+  return getNestedValue(tx, col.txField);
 }
 
 export function exportSettlementCsv(
@@ -217,12 +204,10 @@ export function exportSettlementCsv(
       const row: string[] = SETTLEMENT_COLUMNS.map((col) => {
         if (col.csvHeader === 'No.') return String(rowNum);
         if (col.csvHeader === '해당 주차') return week.label;
-        if (col.csvHeader === '지출구분') return methodToLabel(tx.method);
         if (col.csvHeader === 'cashflow항목') return getCashflowLineLabelForExport(tx.cashflowLabel || undefined);
         if (col.csvHeader === '부가세 지결 완료여부') return tx.vatSettlementDone ? 'Y' : '';
         if (col.csvHeader === '최종완료') return tx.settlementComplete ? 'Y' : '';
-        if (!col.txField) return '';
-        const val = getNestedValue(tx, col.txField);
+        const val = getColumnValue(tx, col);
         return formatCellValue(val, col.format);
       });
       rows.push(row);
@@ -340,7 +325,7 @@ export function parseSettlementCsv(
 
     const bankAmount = parseNumber(amountRaw) ?? 0;
     const methodRaw = pickValue(kv, ['지출구분', '결제수단', 'method']);
-    const method = labelToMethod(methodRaw);
+    const method = normalizePaymentMethod(methodRaw) || 'OTHER';
 
     const budgetCategory = pickValue(kv, ['비목', 'budgetCategory']);
     const budgetSubCategory = pickValue(kv, ['세목', 'budgetSubCategory']);
@@ -355,11 +340,34 @@ export function parseSettlementCsv(
     const depositAmount = parseNumber(pickValue(kv, ['입금액', 'depositAmount'])) ?? 0;
     const vatRefund = parseNumber(pickValue(kv, ['매입부가세 반환', 'vatRefund'])) ?? 0;
     const expenseAmount = parseNumber(pickValue(kv, ['사업비 사용액', 'expenseAmount'])) ?? 0;
+    const supplyAmount = parseNumber(pickValue(kv, ['공급가액', 'supplyAmount'])) ?? undefined;
     const vatIn = parseNumber(pickValue(kv, ['매입부가세', 'vatIn'])) ?? 0;
 
     const counterparty = pickValue(kv, ['지급처', '거래처', 'counterparty']);
-    const memo = pickValue(kv, ['상세 적요', '적요', 'memo']);
+    const internalMemo = pickValue(kv, ['상세 적요(내부 메모)', '상세 적요', '적요', 'memo']);
+    const bankMemo = pickValue(kv, ['은행 기재내역', '은행 적요', 'bankMemo']);
     const author = pickValue(kv, ['작성자', 'author']);
+    const derivedAmounts = deriveSettlementAmounts({
+      direction,
+      amounts: {
+        bankAmount,
+        depositAmount,
+        expenseAmount,
+        vatIn,
+        vatRefund,
+        balanceAfter,
+        supplyAmount,
+      },
+    });
+
+    if (derivedAmounts.warnings.length > 0) {
+      warnings.push(
+        ...derivedAmounts.warnings.map((warning) => ({
+          row: rowNum,
+          message: warning.message,
+        })),
+      );
+    }
 
     const id = `stl-${stableHash(`${projectId}|${dateTime}|${counterparty}|${bankAmount}|${i}`)}`;
 
@@ -379,12 +387,15 @@ export function parseSettlementCsv(
       cashflowLabel,
       budgetCategory: budgetCategory || undefined,
       counterparty,
-      memo,
+      memo: internalMemo,
+      internalMemo: internalMemo || undefined,
+      bankMemo: bankMemo || undefined,
       amounts: {
-        bankAmount,
-        depositAmount,
-        expenseAmount,
-        vatIn,
+        bankAmount: derivedAmounts.bankAmount,
+        depositAmount: derivedAmounts.depositAmount,
+        expenseAmount: derivedAmounts.expenseAmount,
+        supplyAmount: derivedAmounts.supplyAmount || undefined,
+        vatIn: derivedAmounts.vatIn,
         vatOut: 0,
         vatRefund,
         balanceAfter,
@@ -410,6 +421,7 @@ export function parseSettlementCsv(
       eNaraExecuted: pickValue(kv, ['e나라 집행', 'eNaraExecuted']) || undefined,
       vatSettlementDone: /Y|yes|완료|true/i.test(pickValue(kv, ['부가세 지결 완료여부', 'vatSettlementDone'])) || undefined,
       settlementComplete: /Y|yes|완료|true/i.test(pickValue(kv, ['최종완료', 'settlementComplete'])) || undefined,
+      settlementProgress: normalizeSettlementProgress(pickValue(kv, ['내용 기재 상태', 'settlementProgress'])),
       settlementNote: pickValue(kv, ['비고', 'settlementNote', 'note']) || undefined,
     };
 
@@ -503,9 +515,7 @@ export function transactionsToImportRows(
     const cells = SETTLEMENT_COLUMNS.map((col) => {
       if (col.csvHeader === 'No.') return String(rowNum);
       if (col.csvHeader === '해당 주차') return weekLabel;
-      if (col.csvHeader === '지출구분') return methodToLabel(tx.method);
-      if (!col.txField) return '';
-      return formatCellValue(getNestedValue(tx, col.txField), col.format);
+      return formatCellValue(getColumnValue(tx, col), col.format);
     });
 
     return {
@@ -546,7 +556,7 @@ export function importRowToTransaction(
 
   const bankAmount = parseNumber(amountRaw) ?? 0;
   const methodRaw = pickValue(kv, ['지출구분', '결제수단', 'method']);
-  const method = labelToMethod(methodRaw);
+  const method = normalizePaymentMethod(methodRaw) || 'OTHER';
 
   const budgetCategory = pickValue(kv, ['비목', 'budgetCategory']);
   const budgetSubCategory = pickValue(kv, ['세목', 'budgetSubCategory']);
@@ -561,11 +571,30 @@ export function importRowToTransaction(
   const depositAmount = parseNumber(pickValue(kv, ['입금액', 'depositAmount'])) ?? 0;
   const vatRefund = parseNumber(pickValue(kv, ['매입부가세 반환', 'vatRefund'])) ?? 0;
   const expenseAmount = parseNumber(pickValue(kv, ['사업비 사용액', 'expenseAmount'])) ?? 0;
+  const supplyAmount = parseNumber(pickValue(kv, ['공급가액', 'supplyAmount'])) ?? undefined;
   const vatIn = parseNumber(pickValue(kv, ['매입부가세', 'vatIn'])) ?? 0;
 
   const counterparty = pickValue(kv, ['지급처', '거래처', 'counterparty']);
-  const memo = pickValue(kv, ['상세 적요', '적요', 'memo']);
+  const internalMemo = pickValue(kv, ['상세 적요(내부 메모)', '상세 적요', '적요', 'memo']);
+  const bankMemo = pickValue(kv, ['은행 기재내역', '은행 적요', 'bankMemo']);
   const author = pickValue(kv, ['작성자', 'author']);
+  const derivedAmounts = deriveSettlementAmounts({
+    direction,
+    amounts: {
+      bankAmount,
+      depositAmount,
+      expenseAmount,
+      vatIn,
+      vatRefund,
+      balanceAfter,
+      supplyAmount,
+    },
+  });
+
+  const impossibleAmount = derivedAmounts.warnings.find((warning) => warning.code === 'NEGATIVE_SUPPLY_AMOUNT');
+  if (impossibleAmount) {
+    return { error: impossibleAmount.message };
+  }
 
   const now = new Date().toISOString();
   const id = row.sourceTxId || `stl-${stableHash(`${projectId}|${dateTime}|${counterparty}|${bankAmount}|${rowIndex}`)}`;
@@ -584,12 +613,15 @@ export function importRowToTransaction(
     cashflowLabel,
     budgetCategory: budgetCategory || undefined,
     counterparty,
-    memo,
+    memo: internalMemo,
+    internalMemo: internalMemo || undefined,
+    bankMemo: bankMemo || undefined,
     amounts: {
-      bankAmount,
-      depositAmount,
-      expenseAmount,
-      vatIn,
+      bankAmount: derivedAmounts.bankAmount,
+      depositAmount: derivedAmounts.depositAmount,
+      expenseAmount: derivedAmounts.expenseAmount,
+      supplyAmount: derivedAmounts.supplyAmount || undefined,
+      vatIn: derivedAmounts.vatIn,
       vatOut: 0,
       vatRefund,
       balanceAfter,
@@ -614,6 +646,7 @@ export function importRowToTransaction(
     eNaraExecuted: pickValue(kv, ['e나라 집행', 'eNaraExecuted']) || undefined,
     vatSettlementDone: /Y|yes|완료|true/i.test(pickValue(kv, ['부가세 지결 완료여부', 'vatSettlementDone'])) || undefined,
     settlementComplete: /Y|yes|완료|true/i.test(pickValue(kv, ['최종완료', 'settlementComplete'])) || undefined,
+    settlementProgress: normalizeSettlementProgress(pickValue(kv, ['내용 기재 상태', 'settlementProgress'])),
     settlementNote: pickValue(kv, ['비고', 'settlementNote', 'note']) || undefined,
   };
 
