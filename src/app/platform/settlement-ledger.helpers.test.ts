@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  composeSettlementNote,
   deriveSettlementAmounts,
   getBankDescriptionView,
   getBankReconciliationViewPolicy,
@@ -8,6 +9,7 @@ import {
   getSettlementProgressLabel,
   normalizePaymentMethod,
   normalizeSettlementProgress,
+  parseSettlementNote,
   resolveTransactionMemo,
 } from './settlement-ledger.helpers';
 
@@ -68,6 +70,16 @@ describe('settlement-ledger helpers', () => {
     expect(normalizeSettlementProgress('미완료')).toBe('INCOMPLETE');
     expect(normalizeSettlementProgress('')).toBe('INCOMPLETE');
     expect(getSettlementProgressLabel('COMPLETE')).toBe('완료');
+  });
+
+  it('parses and composes settlement status inside note text', () => {
+    expect(parseSettlementNote('[완료] 증빙 확인').progress).toBe('COMPLETE');
+    expect(parseSettlementNote('[완료] 증빙 확인').note).toBe('증빙 확인');
+    expect(parseSettlementNote('내용 기재 상태: 미완료 | 추가 정리').progress).toBe('INCOMPLETE');
+    expect(parseSettlementNote('일반 메모').note).toBe('일반 메모');
+    expect(composeSettlementNote('COMPLETE', '증빙 확인')).toBe('[완료] 증빙 확인');
+    expect(composeSettlementNote('INCOMPLETE', '추가 정리')).toBe('[미완료] 추가 정리');
+    expect(composeSettlementNote('INCOMPLETE', '')).toBe('');
   });
 
   it('keeps bank memo separate from internal memo', () => {

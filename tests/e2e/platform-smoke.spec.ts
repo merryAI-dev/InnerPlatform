@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import { expect, test } from '@playwright/test';
 
 const SETTLEMENT_HEADERS = [
@@ -61,6 +62,7 @@ const SHINHAN_BANK_CSV = [
 test('settlement smoke keeps headers and exposes enhanced helpers', async ({ page }) => {
   await page.goto('/playwright/settlement-smoke.html');
   await expect(page.locator('[data-testid="settlement-1-지출구분"]')).toBeVisible();
+  await expect(page.locator('[data-testid="settlement-view-tabs"]')).toBeVisible();
 
   const headerTexts = (await page.locator('thead tr').nth(1).locator('th').allTextContents())
     .map((text) => text.trim())
@@ -83,12 +85,31 @@ test('settlement smoke keeps headers and exposes enhanced helpers', async ({ pag
   await progressSelect.selectOption('COMPLETE');
   await expect(progressSelect).toHaveValue('COMPLETE');
 
+  await page.locator('[data-testid="settlement-1-거래일시"]').focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('[data-testid="settlement-2-거래일시"]')).toBeFocused();
+
   await page.locator('[data-testid="settlement-row-insert-1"]').click();
   await expect(page.locator('[data-testid="settlement-21-거래일시"]')).toHaveCount(1);
   await expect(page.locator('[data-testid="settlement-2-no"]')).toHaveValue('2');
 
+  await page.locator('[data-testid="settlement-download-start"]').fill('2026-03-01');
+  await page.locator('[data-testid="settlement-download-end"]').fill('2026-03-31');
+  const downloadPromise = page.waitForEvent('download');
+  await page.locator('[data-testid="settlement-download-range-csv"]').click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toContain('2026-03-01_2026-03-31');
+  const downloadPath = await download.path();
+  expect(downloadPath).not.toBeNull();
+  const csv = await readFile(downloadPath!, 'utf8');
+  expect(csv).toContain('[완료] 확인 대기');
+  expect(csv).not.toContain('출장 파트너');
+
   const driveLink = page.getByRole('link', { name: '1행 증빙자료 드라이브 열기' });
   await expect(driveLink).toHaveAttribute('href', /drive\.google\.com/);
+
+  await page.locator('[data-testid="settlement-tab-weekly"]').click();
+  await expect(page.getByText('26-3-1').first()).toBeVisible();
 });
 
 test('bank reconciliation smoke preserves headers and bank policy matrix for finance view', async ({ page }) => {

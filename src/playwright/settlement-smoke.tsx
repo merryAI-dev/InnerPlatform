@@ -48,6 +48,45 @@ function SettlementSmokeHarness() {
       updatedBy: 'pm-smoke',
       updatedAt: '2026-03-05T00:00:00Z',
     },
+    {
+      id: 'smoke-tx-2',
+      ledgerId: 'smoke-ledger',
+      projectId: 'smoke-project',
+      state: 'DRAFT',
+      dateTime: '2026-04-02',
+      weekCode: '2026-04 1주',
+      direction: 'OUT',
+      method: 'CORP_CARD_2',
+      cashflowCategory: 'TRAVEL',
+      cashflowLabel: '직접사업비(공급가액)',
+      budgetCategory: '2.1',
+      budgetSubCategory: '2.1.1',
+      budgetSubSubCategory: '',
+      counterparty: '출장 파트너',
+      memo: '출장 정산',
+      internalMemo: '출장 정산',
+      bankMemo: '출장 은행 적요',
+      amounts: {
+        bankAmount: 33000,
+        depositAmount: 0,
+        expenseAmount: 33000,
+        supplyAmount: 30000,
+        vatIn: 3000,
+        vatOut: 0,
+        vatRefund: 0,
+        balanceAfter: 217000,
+      },
+      evidenceRequired: ['영수증'],
+      evidenceStatus: 'MISSING',
+      evidenceMissing: ['영수증'],
+      attachmentsCount: 0,
+      settlementProgress: 'COMPLETE',
+      settlementNote: '출장 마감',
+      createdBy: 'pm-smoke',
+      createdAt: '2026-04-02T00:00:00Z',
+      updatedBy: 'pm-smoke',
+      updatedAt: '2026-04-02T00:00:00Z',
+    },
   ]);
   const [sheetRows, setSheetRows] = useState<ImportRow[] | null>(null);
 
@@ -65,7 +104,7 @@ function SettlementSmokeHarness() {
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Playwright smoke</p>
           <h1 className="text-2xl font-black tracking-tight">사업비 입력(주간)</h1>
           <p className="text-sm text-slate-600">
-            헤더는 그대로 두고 지출구분, 내용 상태, 행 삽입, 공급가액 보조 계산을 검증합니다.
+            헤더는 그대로 두고 지출구분, 내용 상태, 행 삽입, 기간 다운로드, 공급가액 보조 계산을 검증합니다.
           </p>
         </header>
 

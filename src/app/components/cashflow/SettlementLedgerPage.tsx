@@ -1,18 +1,21 @@
 import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, Download, ExternalLink, Plus, Save, Send, Upload, X } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { BUDGET_CODE_BOOK } from '../../data/budget-data';
 import { featureFlags } from '../../config/feature-flags';
 import type { Transaction, TransactionState } from '../../data/types';
 import { findWeekForDate, getYearMondayWeeks, type MonthMondayWeek } from '../../platform/cashflow-weeks';
-import { parseCsv, parseNumber, triggerDownload } from '../../platform/csv-utils';
+import { parseCsv, parseDate, parseNumber, triggerDownload } from '../../platform/csv-utils';
 import { computeEvidenceStatus, computeEvidenceSummary, isValidDriveUrl } from '../../platform/evidence-helpers';
 import {
+  composeSettlementNote,
   deriveSettlementAmounts,
   getPaymentMethodOptions,
   getSettlementProgressLabel,
+  parseSettlementNote,
 } from '../../platform/settlement-ledger.helpers';
 import {
+  buildImportRowsMatrix,
   CASHFLOW_LINE_OPTIONS,
   SETTLEMENT_COLUMNS, SETTLEMENT_COLUMN_GROUPS,
   createEmptyImportRow,
@@ -27,6 +30,7 @@ import {
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Checkbox } from '../ui/checkbox';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 
 // ── Helpers ──
 
@@ -46,6 +50,88 @@ function toCellTestId(rowIdx: number, header: string): string {
     .replace(/^-+|-+$/g, '');
   return `settlement-${rowIdx + 1}-${slug}`;
 }
+
+type GridSlot = 'primary' | 'secondary';
+
+function focusGridControl(rowIdx: number, colIdx: number, slot: GridSlot = 'primary'): boolean {
+  if (rowIdx < 0 || colIdx < 0 || typeof document === 'undefined') return false;
+  const selectors = [
+    `[data-grid-row="${rowIdx}"][data-grid-col="${colIdx}"][data-grid-slot="${slot}"]`,
+    slot === 'secondary' ? `[data-grid-row="${rowIdx}"][data-grid-col="${colIdx}"][data-grid-slot="primary"]` : '',
+    `[data-grid-row="${rowIdx}"][data-grid-col="${colIdx}"]`,
+  ].filter(Boolean);
+
+  for (const selector of selectors) {
+    const target = document.querySelector(selector) as HTMLElement | null;
+    if (!target) continue;
+    target.focus();
+    if (target instanceof HTMLInputElement && !['checkbox', 'date', 'file'].includes(target.type)) {
+      target.select();
+    }
+    return true;
+  }
+
+  return false;
+}
+
+function handleGridKeyDown(
+  event: KeyboardEvent<HTMLInputElement | HTMLSelectElement>,
+  rowIdx: number,
+  colIdx: number,
+  slot: GridSlot = 'primary',
+) {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    focusGridControl(rowIdx + (event.shiftKey ? -1 : 1), colIdx, slot);
+    return;
+  }
+
+  if (event.currentTarget instanceof HTMLSelectElement) {
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      focusGridControl(rowIdx, colIdx - 1);
+    } else if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      focusGridControl(rowIdx, colIdx + 1);
+    }
+    return;
+  }
+
+  if (event.key === 'ArrowUp') {
+    event.preventDefault();
+    focusGridControl(rowIdx - 1, colIdx, slot);
+    return;
+  }
+
+  if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    focusGridControl(rowIdx + 1, colIdx, slot);
+    return;
+  }
+
+  const input = event.currentTarget;
+  if (!['text', 'search', 'url', 'tel', 'password'].includes(input.type)) return;
+
+  const selectionStart = input.selectionStart ?? 0;
+  const selectionEnd = input.selectionEnd ?? 0;
+  const length = input.value.length;
+
+  if (event.key === 'ArrowLeft' && selectionStart === 0 && selectionEnd === 0) {
+    event.preventDefault();
+    focusGridControl(rowIdx, colIdx - 1);
+  } else if (event.key === 'ArrowRight' && selectionStart === length && selectionEnd === length) {
+    event.preventDefault();
+    focusGridControl(rowIdx, colIdx + 1);
+  }
+}
+
+function normalizeRowDateForFilter(value: string | undefined): string {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const head = raw.split(/[ T]/)[0] || raw;
+  return parseDate(head) || parseDate(raw.slice(0, 10));
+}
+
 const TX_STATE_BADGE: Record<TransactionState, { label: string; cls: string }> = {
   DRAFT: { label: '작성중', cls: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300' },
   SUBMITTED: { label: '제출', cls: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300' },
@@ -116,9 +202,12 @@ export function SettlementLedgerPage({
   userRole = 'pm',
 }: SettlementLedgerProps) {
   const [year, setYear] = useState(() => new Date().getFullYear());
+  const [viewMode, setViewMode] = useState<'sheet' | 'weekly'>('sheet');
   const [collapsedWeeks, setCollapsedWeeks] = useState<Set<string>>(new Set());
   const [importRows, setImportRows] = useState<ImportRow[] | null>(null);
   const [importDirty, setImportDirty] = useState(false);
+  const [downloadStartDate, setDownloadStartDate] = useState('');
+  const [downloadEndDate, setDownloadEndDate] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // All weeks for the year
@@ -135,11 +224,16 @@ export function SettlementLedgerPage({
   useEffect(() => {
     if (importDirty) return;
     if (sheetRows && sheetRows.length > 0) {
-      setImportRows(sheetRows);
+      setImportRows(renumberImportRows(sheetRows));
       return;
     }
     setImportRows(transactionsToImportRows(projectTxs, yearWeeks));
   }, [projectTxs, yearWeeks, importDirty, sheetRows]);
+
+  useEffect(() => {
+    setDownloadStartDate(`${year}-01-01`);
+    setDownloadEndDate(`${year}-12-31`);
+  }, [year]);
 
   // Group transactions by week
   const weekBuckets: WeekBucket[] = useMemo(() => {
@@ -211,12 +305,83 @@ export function SettlementLedgerPage({
     setCollapsedWeeks(new Set(yearWeeks.map((w) => w.label)));
   }, [yearWeeks]);
 
+  const dateIdx = useMemo(
+    () => SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '거래일시'),
+    [],
+  );
+
+  const getSheetRowsForExport = useCallback(() => {
+    return importRows ? renumberImportRows(importRows) : transactionsToImportRows(projectTxs, yearWeeks);
+  }, [importRows, projectTxs, yearWeeks]);
+
+  const filterRowsByDateRange = useCallback((rows: ImportRow[]) => {
+    if (!downloadStartDate && !downloadEndDate) return rows;
+    if (downloadStartDate && downloadEndDate && downloadStartDate > downloadEndDate) {
+      throw new Error('다운로드 시작일이 종료일보다 늦습니다.');
+    }
+    if (dateIdx < 0) return rows;
+    return rows.filter((row) => {
+      const normalized = normalizeRowDateForFilter(row.cells[dateIdx]);
+      if (!normalized) return false;
+      if (downloadStartDate && normalized < downloadStartDate) return false;
+      if (downloadEndDate && normalized > downloadEndDate) return false;
+      return true;
+    });
+  }, [dateIdx, downloadEndDate, downloadStartDate]);
+
+  const resolveDownloadFileStem = useCallback((suffix: string) => {
+    const rangeLabel = downloadStartDate || downloadEndDate
+      ? `_${downloadStartDate || 'start'}_${downloadEndDate || 'end'}`
+      : '';
+    return `정산대장_${projectName}_${year}${rangeLabel}.${suffix}`;
+  }, [downloadEndDate, downloadStartDate, projectName, year]);
+
   // ── CSV Download ──
   const handleDownload = useCallback(() => {
-    const csv = importRows ? exportImportRowsCsv(importRows) : exportSettlementCsv(projectTxs, yearWeeks);
+    const csv = importRows ? exportImportRowsCsv(renumberImportRows(importRows)) : exportSettlementCsv(projectTxs, yearWeeks);
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
     triggerDownload(blob, `정산대장_${projectName}_${year}.csv`);
   }, [importRows, projectTxs, yearWeeks, projectName, year]);
+
+  const handleRangeCsvDownload = useCallback(() => {
+    try {
+      const rows = filterRowsByDateRange(getSheetRowsForExport());
+      if (rows.length === 0) {
+        toast.error('선택한 기간에 내려받을 행이 없습니다.');
+        return;
+      }
+      const csv = exportImportRowsCsv(rows);
+      const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+      triggerDownload(blob, resolveDownloadFileStem('csv'));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '기간 다운로드에 실패했습니다.');
+    }
+  }, [filterRowsByDateRange, getSheetRowsForExport, resolveDownloadFileStem]);
+
+  const handleRangeXlsxDownload = useCallback(async () => {
+    try {
+      const rows = filterRowsByDateRange(getSheetRowsForExport());
+      if (rows.length === 0) {
+        toast.error('선택한 기간에 내려받을 행이 없습니다.');
+        return;
+      }
+      const ExcelJS = await import('exceljs');
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet('settlement');
+      for (const row of buildImportRowsMatrix(rows)) {
+        worksheet.addRow(row);
+      }
+      const buffer = await workbook.xlsx.writeBuffer();
+      triggerDownload(
+        new Blob([buffer as ArrayBuffer], {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        }),
+        resolveDownloadFileStem('xlsx'),
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '기간 XLSX 다운로드에 실패했습니다.');
+    }
+  }, [filterRowsByDateRange, getSheetRowsForExport, resolveDownloadFileStem]);
 
   // ── CSV Upload ──
   const handleFileUpload = useCallback(async (file: File) => {
@@ -319,75 +484,10 @@ export function SettlementLedgerPage({
 
   const totalCount = projectTxs.length;
 
-  const viewMode: 'sheet' | 'weekly' = 'sheet';
-
-  if (viewMode === 'sheet') {
-    return (
-      <div className="flex flex-col gap-3">
-        <div className="flex items-center justify-between gap-2 flex-wrap">
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => setYear((y) => y - 1)}>
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <span className="text-sm font-semibold min-w-[60px] text-center">{year}년</span>
-            <Button variant="outline" size="sm" onClick={() => setYear((y) => y + 1)}>
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-            <Badge variant="secondary" className="ml-2 text-[11px]">
-              {totalCount}건
-            </Badge>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={handleDownload}>
-              <Download className="h-4 w-4 mr-1" />
-              CSV 다운로드
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
-              <Upload className="h-4 w-4 mr-1" />
-              CSV 업로드
-            </Button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".csv"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) void handleFileUpload(file);
-                e.currentTarget.value = '';
-              }}
-            />
-          </div>
-        </div>
-
-        {importRows && (
-          <ImportEditor
-            rows={importRows}
-            onChange={(rows) => {
-              setImportRows(rows);
-              setImportDirty(true);
-            }}
-            onSave={handleImportSave}
-            onCancel={() => {
-              setImportRows(transactionsToImportRows(projectTxs, yearWeeks));
-              setImportDirty(false);
-            }}
-            projectId={projectId}
-            defaultLedgerId={defaultLedgerId}
-            evidenceRequiredMap={evidenceRequiredMap}
-            onSaveEvidenceRequiredMap={onSaveEvidenceRequiredMap}
-            inline
-          />
-        )}
-      </div>
-    );
-  }
-
   return (
-    <div className="flex flex-col gap-3">
-      {/* ── Toolbar ── */}
+    <Tabs value={viewMode} onValueChange={(value) => setViewMode(value as 'sheet' | 'weekly')} className="flex flex-col gap-3">
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <Button variant="outline" size="sm" onClick={() => setYear((y) => y - 1)}>
             <ChevronLeft className="h-4 w-4" />
           </Button>
@@ -398,17 +498,25 @@ export function SettlementLedgerPage({
           <Badge variant="secondary" className="ml-2 text-[11px]">
             {totalCount}건
           </Badge>
+          <TabsList className="h-8" data-testid="settlement-view-tabs">
+            <TabsTrigger value="sheet" className="text-xs" data-testid="settlement-tab-sheet">시트 보기</TabsTrigger>
+            <TabsTrigger value="weekly" className="text-xs" data-testid="settlement-tab-weekly">주차 보기</TabsTrigger>
+          </TabsList>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={expandAll}>
-            전체 펼치기
-          </Button>
-          <Button variant="outline" size="sm" onClick={collapseAll}>
-            전체 접기
-          </Button>
+        <div className="flex items-center gap-2 flex-wrap">
+          {viewMode === 'weekly' && (
+            <>
+              <Button variant="outline" size="sm" onClick={expandAll}>
+                전체 펼치기
+              </Button>
+              <Button variant="outline" size="sm" onClick={collapseAll}>
+                전체 접기
+              </Button>
+            </>
+          )}
           <Button variant="outline" size="sm" onClick={handleDownload}>
             <Download className="h-4 w-4 mr-1" />
-            CSV 다운로드
+            전체 CSV
           </Button>
           <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
             <Upload className="h-4 w-4 mr-1" />
@@ -428,85 +536,113 @@ export function SettlementLedgerPage({
         </div>
       </div>
 
-      {/* ── Table ── */}
-      <div className="relative w-full overflow-x-auto border rounded-lg">
-        <table className="w-full text-[11px] border-collapse">
-          {/* Group header row */}
-          <thead className="sticky top-0 z-10">
-            <tr className="bg-slate-100 dark:bg-slate-800">
-              {SETTLEMENT_COLUMN_GROUPS.map((g) => (
-                <th
-                  key={g.name}
-                  colSpan={g.colSpan}
-                  className="px-2 py-1.5 text-center font-bold border-b border-r text-[10px] text-slate-600 dark:text-slate-300 uppercase tracking-wide"
-                >
-                  {g.name}
-                </th>
-              ))}
-            </tr>
-            {/* Column header row */}
-            <tr className="bg-slate-50 dark:bg-slate-900">
-              {SETTLEMENT_COLUMNS.map((col, i) => (
-                <th
-                  key={i}
-                  className={`px-2 py-1.5 font-medium border-b border-r whitespace-nowrap text-[10px] ${col.format === 'number' ? 'text-right' : 'text-left'
-                    }`}
-                >
-                  {col.csvHeader}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {weekBuckets.map((bucket) => {
-              const { week, transactions: txs, collapsed } = bucket;
-              const weekTxCount = txs.length;
-
-              // Accumulate row numbers even when collapsed
-              const rows = txs.map((tx) => {
-                globalRowNum++;
-                return { tx, rowNum: globalRowNum };
-              });
-
-              return (
-                <WeekSection
-                  key={week.label}
-                  week={week}
-                  txRows={rows}
-                  collapsed={collapsed}
-                  txCount={weekTxCount}
-                  onToggle={() => toggleWeek(week.label)}
-                  onUpdateTx={handleUpdateTx}
-                  onSubmitWeek={onSubmitWeek}
-                  onChangeTransactionState={onChangeTransactionState}
-                  userRole={userRole}
-                />
-              );
-            })}
-          </tbody>
-        </table>
+      <div className="flex items-center justify-between gap-2 flex-wrap rounded-lg border bg-muted/20 px-3 py-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <label className="text-[11px] text-muted-foreground" htmlFor="settlement-download-start">다운로드 기간</label>
+          <input
+            id="settlement-download-start"
+            type="date"
+            value={downloadStartDate}
+            data-testid="settlement-download-start"
+            className="rounded border bg-background px-2 py-1 text-[11px]"
+            onChange={(e) => setDownloadStartDate(e.target.value)}
+          />
+          <span className="text-[11px] text-muted-foreground">~</span>
+          <input
+            type="date"
+            value={downloadEndDate}
+            data-testid="settlement-download-end"
+            className="rounded border bg-background px-2 py-1 text-[11px]"
+            onChange={(e) => setDownloadEndDate(e.target.value)}
+          />
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button variant="outline" size="sm" onClick={handleRangeCsvDownload} data-testid="settlement-download-range-csv">
+            기간 CSV
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => void handleRangeXlsxDownload()} data-testid="settlement-download-range-xlsx">
+            기간 XLSX
+          </Button>
+        </div>
       </div>
 
-      {/* ── Import Editor (editable preview) ── */}
-      {importRows !== null && (
-        <ImportEditor
-          rows={importRows}
-          onChange={(rows) => {
-            setImportRows(rows);
-            setImportDirty(true);
-          }}
-          onSave={handleImportSave}
-          onCancel={() => {
-            setImportRows(transactionsToImportRows(projectTxs, yearWeeks));
-            setImportDirty(false);
-          }}
-          projectId={projectId}
-          defaultLedgerId={defaultLedgerId}
-          evidenceRequiredMap={evidenceRequiredMap}
-          onSaveEvidenceRequiredMap={onSaveEvidenceRequiredMap}
-        />
-      )}
-    </div>
+      <TabsContent value="sheet">
+        {importRows && (
+          <ImportEditor
+            rows={importRows}
+            onChange={(rows) => {
+              setImportRows(rows);
+              setImportDirty(true);
+            }}
+            onSave={handleImportSave}
+            onCancel={() => {
+              setImportRows(transactionsToImportRows(projectTxs, yearWeeks));
+              setImportDirty(false);
+            }}
+            projectId={projectId}
+            defaultLedgerId={defaultLedgerId}
+            evidenceRequiredMap={evidenceRequiredMap}
+            onSaveEvidenceRequiredMap={onSaveEvidenceRequiredMap}
+            inline
+          />
+        )}
+      </TabsContent>
+
+      <TabsContent value="weekly">
+        <div className="relative w-full overflow-x-auto border rounded-lg">
+          <table className="w-full text-[11px] border-collapse">
+            <thead className="sticky top-0 z-10">
+              <tr className="bg-slate-100 dark:bg-slate-800">
+                {SETTLEMENT_COLUMN_GROUPS.map((g) => (
+                  <th
+                    key={g.name}
+                    colSpan={g.colSpan}
+                    className="px-2 py-1.5 text-center font-bold border-b border-r text-[10px] text-slate-600 dark:text-slate-300 uppercase tracking-wide"
+                  >
+                    {g.name}
+                  </th>
+                ))}
+              </tr>
+              <tr className="bg-slate-50 dark:bg-slate-900">
+                {SETTLEMENT_COLUMNS.map((col, i) => (
+                  <th
+                    key={i}
+                    className={`px-2 py-1.5 font-medium border-b border-r whitespace-nowrap text-[10px] ${col.format === 'number' ? 'text-right' : 'text-left'}`}
+                  >
+                    {col.csvHeader}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {weekBuckets.map((bucket) => {
+                const { week, transactions: txs, collapsed } = bucket;
+                const weekTxCount = txs.length;
+                const rows = txs.map((tx) => {
+                  globalRowNum++;
+                  return { tx, rowNum: globalRowNum };
+                });
+
+                return (
+                  <WeekSection
+                    key={week.label}
+                    week={week}
+                    txRows={rows}
+                    collapsed={collapsed}
+                    txCount={weekTxCount}
+                    onToggle={() => toggleWeek(week.label)}
+                    onUpdateTx={handleUpdateTx}
+                    onSubmitWeek={onSubmitWeek}
+                    onChangeTransactionState={onChangeTransactionState}
+                    userRole={userRole}
+                  />
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </TabsContent>
+    </Tabs>
   );
 }
 
@@ -638,6 +774,7 @@ interface TransactionRowProps {
 function TransactionRow({ tx, rowNum, weekLabel, onUpdate, onChangeState, userRole }: TransactionRowProps) {
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
   const locked = !isEditable(tx.state);
+  const parsedSettlementNote = parseSettlementNote(tx.settlementNote, tx.settlementProgress || 'INCOMPLETE');
 
   const debouncedUpdate = useCallback(
     (updates: Partial<Transaction>) => {
@@ -866,17 +1003,17 @@ function TransactionRow({ tx, rowNum, weekLabel, onUpdate, onChangeState, userRo
         <div className="min-w-[140px]">
           <input
             type="text"
-            defaultValue={tx.settlementNote || ''}
+            defaultValue={parsedSettlementNote.note}
             disabled={locked}
             className={`w-full bg-transparent outline-none text-[11px] px-1 py-0.5 ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
             onBlur={(e) => {
-              if (!locked && e.target.value !== (tx.settlementNote || '')) {
+              if (!locked && e.target.value !== parsedSettlementNote.note) {
                 debouncedUpdate({ settlementNote: e.target.value });
               }
             }}
           />
           <select
-            defaultValue={tx.settlementProgress || 'INCOMPLETE'}
+            defaultValue={parsedSettlementNote.progress}
             disabled={locked}
             className={`mt-1 w-full rounded border bg-background/60 px-1 py-0.5 text-[10px] ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
             onChange={(e) => {
@@ -1118,6 +1255,9 @@ function ImportEditor({
           <span className="text-[10px] text-muted-foreground">
             셀을 직접 수정하거나 행을 추가할 수 있습니다
           </span>
+          <span className="text-[10px] text-muted-foreground">
+            Enter/Shift+Enter, ↑↓, 텍스트 끝의 ←→ 로 셀 이동
+          </span>
           <span className="text-[10px] text-amber-700 dark:text-amber-300">
             매입부가세는 계산값이 아니라 영수증 기준 확인값입니다
           </span>
@@ -1311,7 +1451,11 @@ function ImportEditorRow({
     const entry = BUDGET_CODE_BOOK.find((c) => c.code === budgetCode);
     return entry ? entry.subCodes : [];
   }, [budgetCode]);
-  const progressValue = row.settlementProgress || 'INCOMPLETE';
+  const parsedSettlementNote = useMemo(
+    () => parseSettlementNote(noteIdx >= 0 ? row.cells[noteIdx] : '', 'INCOMPLETE'),
+    [noteIdx, row.cells],
+  );
+  const progressValue = parsedSettlementNote.progress;
   const derivedSupplyAmount = useMemo(() => {
     if (!featureFlags.qaP0SettlementV1) return '';
     const bankAmount = parseNumber(row.cells[bankAmountIdx]) ?? 0;
@@ -1362,6 +1506,13 @@ function ImportEditorRow({
         const isVat = colIdx === vatIdx;
         const isNote = colIdx === noteIdx;
         const fieldLabel = `${rowIdx + 1}행 ${col.csvHeader}`;
+        const primaryNavProps = {
+          'data-grid-row': rowIdx,
+          'data-grid-col': colIdx,
+          'data-grid-slot': 'primary' as const,
+          onKeyDown: (event: KeyboardEvent<HTMLInputElement | HTMLSelectElement>) =>
+            handleGridKeyDown(event, rowIdx, colIdx, 'primary'),
+        };
         return (
           <td key={colIdx} className="px-0.5 py-0.5 border-b border-r">
             {isReadOnly ? (
@@ -1372,6 +1523,7 @@ function ImportEditorRow({
                 data-testid={toCellTestId(rowIdx, col.csvHeader)}
                 value={row.cells[colIdx] || ''}
                 className="w-full bg-transparent outline-none text-[10px] text-muted-foreground px-1 py-0.5"
+                {...primaryNavProps}
               />
             ) : colIdx === methodIdx ? (
               <select
@@ -1384,6 +1536,7 @@ function ImportEditorRow({
                     onCellChange(colIdx, e.target.value);
                   }
                 }}
+                {...primaryNavProps}
               >
                 <option value="">-</option>
                 {METHOD_OPTIONS.map((o) => (
@@ -1413,6 +1566,7 @@ function ImportEditorRow({
                     return { ...prev, cells };
                   });
                 }}
+                {...primaryNavProps}
               >
                 <option value="">-</option>
                 {BUDGET_CODE_BOOK.map((c) => (
@@ -1439,6 +1593,7 @@ function ImportEditorRow({
                     return { ...prev, cells };
                   });
                 }}
+                {...primaryNavProps}
               >
                 <option value="">-</option>
                 {subCodes.map((sc) => (
@@ -1455,6 +1610,7 @@ function ImportEditorRow({
                   placeholder="Drive URL"
                   className="flex-1 bg-transparent outline-none text-[11px] px-1 py-0.5"
                   onChange={(e) => onCellChange(colIdx, e.target.value)}
+                  {...primaryNavProps}
                 />
                 {isValidDriveUrl(row.cells[colIdx] || '') && (
                   <a
@@ -1482,6 +1638,7 @@ function ImportEditorRow({
                     : ''
                     }`}
                   onChange={(e) => onCellChange(colIdx, e.target.value)}
+                  {...primaryNavProps}
                 />
                 {derivedSupplyAmount && (
                   <span className="block px-1 pb-0.5 text-[9px] text-muted-foreground">
@@ -1495,9 +1652,10 @@ function ImportEditorRow({
                   type="text"
                   aria-label={fieldLabel}
                   data-testid={toCellTestId(rowIdx, col.csvHeader)}
-                  value={row.cells[colIdx] || ''}
+                  value={parsedSettlementNote.note}
                   className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5"
-                  onChange={(e) => onCellChange(colIdx, e.target.value)}
+                  onChange={(e) => onCellChange(colIdx, composeSettlementNote(progressValue, e.target.value))}
+                  {...primaryNavProps}
                 />
                 <select
                   value={progressValue}
@@ -1506,8 +1664,12 @@ function ImportEditorRow({
                   className="mt-1 w-full rounded border bg-background/60 px-1 py-0.5 text-[10px]"
                   onChange={(e) => {
                     const nextProgress = e.target.value as NonNullable<Transaction['settlementProgress']>;
-                    onRowChange((prev) => ({ ...prev, settlementProgress: nextProgress }));
+                    onCellChange(colIdx, composeSettlementNote(nextProgress, parsedSettlementNote.note));
                   }}
+                  data-grid-row={rowIdx}
+                  data-grid-col={colIdx}
+                  data-grid-slot="secondary"
+                  onKeyDown={(event) => handleGridKeyDown(event, rowIdx, colIdx, 'secondary')}
                 >
                   {SETTLEMENT_PROGRESS_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>{option.label}</option>
@@ -1525,6 +1687,7 @@ function ImportEditorRow({
                   : ''
                   }`}
                 onChange={(e) => onCellChange(colIdx, e.target.value)}
+                {...primaryNavProps}
               />
             )}
           </td>

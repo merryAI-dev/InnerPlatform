@@ -130,6 +130,63 @@ export function getSettlementProgressLabel(progress: SettlementProgress | undefi
   return SETTLEMENT_PROGRESS_LABELS[progress || 'INCOMPLETE'];
 }
 
+export interface ParsedSettlementNote {
+  progress: SettlementProgress;
+  note: string;
+  hasExplicitProgress: boolean;
+}
+
+const SETTLEMENT_NOTE_PREFIX_PATTERNS: RegExp[] = [
+  /^\[(미완료|완료)\]\s*/u,
+  /^내용\s*기재\s*상태\s*[:：]\s*(미완료|완료)\s*(?:[|｜-]\s*)?/u,
+];
+
+export function parseSettlementNote(
+  value: string | undefined,
+  fallbackProgress: SettlementProgress = 'INCOMPLETE',
+): ParsedSettlementNote {
+  const raw = String(value || '').trim();
+  if (!raw) {
+    return {
+      progress: fallbackProgress,
+      note: '',
+      hasExplicitProgress: false,
+    };
+  }
+
+  for (const pattern of SETTLEMENT_NOTE_PREFIX_PATTERNS) {
+    const match = raw.match(pattern);
+    if (!match) continue;
+    return {
+      progress: normalizeSettlementProgress(match[1]),
+      note: raw.slice(match[0].length).trim(),
+      hasExplicitProgress: true,
+    };
+  }
+
+  return {
+    progress: fallbackProgress,
+    note: raw,
+    hasExplicitProgress: false,
+  };
+}
+
+export function composeSettlementNote(
+  progress: SettlementProgress | undefined,
+  value: string | undefined,
+): string {
+  const effectiveProgress = progress || 'INCOMPLETE';
+  const parsed = parseSettlementNote(value, effectiveProgress);
+  const cleanNote = parsed.note.trim();
+
+  if (!cleanNote && effectiveProgress === 'INCOMPLETE') {
+    return '';
+  }
+
+  const label = getSettlementProgressLabel(effectiveProgress);
+  return cleanNote ? `[${label}] ${cleanNote}` : `[${label}]`;
+}
+
 export function deriveSettlementAmounts(input: {
   direction?: Direction;
   amounts?: Partial<TransactionAmounts> | null;
