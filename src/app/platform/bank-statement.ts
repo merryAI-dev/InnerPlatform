@@ -15,6 +15,21 @@ export const BANK_STATEMENT_COLUMNS = [
   '구분',
 ] as const;
 
+export type BankStatementProfile = 'hana' | 'kb' | 'shinhan' | 'generic';
+
+export function getBankStatementProfileLabel(profile: BankStatementProfile): string {
+  switch (profile) {
+    case 'hana':
+      return '하나은행';
+    case 'kb':
+      return '국민은행';
+    case 'shinhan':
+      return '신한은행';
+    default:
+      return '일반 형식';
+  }
+}
+
 export interface BankStatementRow {
   tempId: string;
   cells: string[];
@@ -122,6 +137,24 @@ function findHeaderIndicesByKeyword(columns: string[], keyword: string): number[
     if (key.includes(target)) indices.push(idx);
   });
   return indices;
+}
+
+export function detectBankStatementProfile(columns: string[], fileName = ''): BankStatementProfile {
+  const joined = [
+    ...columns.map((col) => cleanHeader(col)),
+    cleanHeader(fileName),
+  ].join(' ');
+
+  if (joined.includes(cleanHeader('하나')) || joined.includes(cleanHeader('keb')) || joined.includes(cleanHeader('hana'))) {
+    return 'hana';
+  }
+  if (joined.includes(cleanHeader('국민')) || joined.includes(cleanHeader('kb'))) {
+    return 'kb';
+  }
+  if (joined.includes(cleanHeader('신한')) || joined.includes(cleanHeader('shinhan'))) {
+    return 'shinhan';
+  }
+  return 'generic';
 }
 
 function parseDateOnly(raw: string): string {
@@ -240,6 +273,7 @@ export function mapBankStatementsToImportRows(sheet: BankStatementSheet): Import
   const idxDate = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '거래일시');
   const idxWeek = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '해당 주차');
   const idxCounterparty = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '지급처');
+  const idxMemo = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '상세 적요');
   const idxBankAmount = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '통장에 찍힌 입/출금액');
   const idxBalance = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '통장잔액');
 
@@ -265,6 +299,7 @@ export function mapBankStatementsToImportRows(sheet: BankStatementSheet): Import
   })();
 
   const balanceIdx = findFirstHeaderIndex(columns, ['잔액']);
+  const memoIdxCandidates = findHeaderIndicesByAliases(columns, ['적요', '메모', '내용', '거래내용', '상세적요']);
   const amountIdxs = resolveAmountColumnIndices(columns, bankRows);
 
   const nextRows: ImportRow[] = [];
@@ -298,6 +333,18 @@ export function mapBankStatementsToImportRows(sheet: BankStatementSheet): Import
         break;
       }
       cells[idxCounterparty] = picked;
+    }
+
+    if (idxMemo >= 0 && memoIdxCandidates.length > 0) {
+      let detail = '';
+      for (const idx of memoIdxCandidates) {
+        const raw = String(rowCells[idx] || '');
+        const normalized = normalizeSpace(raw);
+        if (!normalized) continue;
+        detail = normalized;
+        break;
+      }
+      cells[idxMemo] = detail;
     }
 
     if (idxBankAmount >= 0 && amountIdxs.length > 0) {

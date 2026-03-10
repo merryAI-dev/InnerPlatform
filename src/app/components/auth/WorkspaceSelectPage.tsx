@@ -99,7 +99,7 @@ export function WorkspaceSelectPage() {
               <div>
                 <h2 className="text-[18px]" style={{ fontWeight: 700 }}>PM 포털 공간</h2>
                 <p className="mt-1 text-[12px] text-muted-foreground">
-                  예산총괄, 주간 사업비, 통장내역 같은 PM 실무 화면으로 이동합니다.
+                  예산 편집, 통장내역, 주간 사업비 같은 PM 실무 화면으로 이동합니다.
                 </p>
               </div>
               <Button

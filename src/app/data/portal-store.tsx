@@ -65,6 +65,15 @@ export interface PortalUser {
   registeredAt: string;
 }
 
+export interface ExpenseSheetTab {
+  id: string;
+  name: string;
+  rows: ImportRow[] | null;
+  order: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 interface PortalState {
   isRegistered: boolean;
   isLoading: boolean;
@@ -78,6 +87,8 @@ interface PortalState {
   transactions: Transaction[];
   comments: Comment[];
   evidenceRequiredMap: Record<string, string>;
+  expenseSheets: ExpenseSheetTab[];
+  activeExpenseSheetId: string;
   expenseSheetRows: ImportRow[] | null;
   bankStatementRows: BankStatementSheet | null;
   budgetPlanRows: BudgetPlanRow[] | null;
@@ -109,6 +120,10 @@ interface PortalActions {
   changeTransactionState: (id: string, newState: TransactionState, reason?: string) => void;
   addComment: (comment: Comment) => Promise<void>;
   saveEvidenceRequiredMap: (map: Record<string, string>) => Promise<void>;
+  setActiveExpenseSheet: (sheetId: string) => void;
+  createExpenseSheet: (name?: string) => Promise<string | null>;
+  renameExpenseSheet: (sheetId: string, name: string) => Promise<boolean>;
+  deleteExpenseSheet: (sheetId: string) => Promise<boolean>;
   saveExpenseSheetRows: (rows: ImportRow[]) => Promise<void>;
   saveBankStatementRows: (sheet: BankStatementSheet) => Promise<void>;
   saveBudgetPlanRows: (rows: BudgetPlanRow[]) => Promise<void>;
@@ -152,6 +167,15 @@ function withTenantScope<T extends Record<string, unknown>>(orgId: string, paylo
   };
 }
 
+function createExpenseSheetId(): string {
+  return `sheet-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function sanitizeExpenseSheetName(value: string | undefined, fallback: string): string {
+  const trimmed = normalizeSpace(String(value || ''));
+  return trimmed || fallback;
+}
+
 function normalizePortalUser(candidate: Partial<PortalUser> | null | undefined): PortalUser | null {
   if (!candidate) return null;
   const projectIds = normalizeProjectIds([
@@ -187,6 +211,8 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [comments, setComments] = useState<Comment[]>([]);
   const [evidenceRequiredMap, setEvidenceRequiredMap] = useState<Record<string, string>>({});
+  const [expenseSheets, setExpenseSheets] = useState<ExpenseSheetTab[]>([]);
+  const [activeExpenseSheetId, setActiveExpenseSheetIdState] = useState('default');
   const [expenseSheetRows, setExpenseSheetRows] = useState<ImportRow[] | null>(null);
   const [bankStatementRows, setBankStatementRows] = useState<BankStatementSheet | null>(null);
   const [budgetPlanRows, setBudgetPlanRows] = useState<BudgetPlanRow[] | null>(null);
@@ -317,6 +343,8 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       setTransactions([]);
       setComments([]);
       setEvidenceRequiredMap({});
+      setExpenseSheets([]);
+      setActiveExpenseSheetIdState('default');
       setExpenseSheetRows(null);
       setBankStatementRows(null);
       setBudgetPlanRows(null);
@@ -332,6 +360,8 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       setChangeRequests([]);
       setParticipationEntries([]);
       setTransactions([]);
+      setExpenseSheets([]);
+      setActiveExpenseSheetIdState('default');
       setEvidenceRequiredMap({});
       setExpenseSheetRows(null);
       setWeeklySubmissionStatuses([]);
@@ -584,9 +614,9 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       );
 
       const evidenceMapRef = doc(db, getOrgDocumentPath(orgId, 'budgetEvidenceMaps', portalUser.projectId));
-      const expenseSheetRef = doc(
+      const expenseSheetCollection = collection(
         db,
-        `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/expense_sheets/default`,
+        `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/expense_sheets`,
       );
       const bankStatementRef = doc(
         db,
@@ -648,15 +678,46 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       );
 
       unsubsRef.current.push(
-        onSnapshot(expenseSheetRef, (snap) => {
-          if (!snap.exists()) {
-            setExpenseSheetRows(null);
-            return;
+        onSnapshot(expenseSheetCollection, (snap) => {
+          const docs = snap.docs
+            .map((docItem) => {
+              const data = docItem.data() as {
+                name?: string;
+                rows?: ImportRow[];
+                order?: number;
+                createdAt?: string;
+                updatedAt?: string;
+                deletedAt?: string;
+              };
+              if (data?.deletedAt) return null;
+              return {
+                id: docItem.id,
+                name: sanitizeExpenseSheetName(data?.name, docItem.id === 'default' ? '기본 탭' : '새 탭'),
+                rows: Array.isArray(data?.rows) ? data.rows : null,
+                order: Number.isFinite(Number(data?.order)) ? Number(data?.order) : (docItem.id === 'default' ? 0 : 999),
+                createdAt: data?.createdAt,
+                updatedAt: data?.updatedAt,
+              } satisfies ExpenseSheetTab;
+            })
+            .filter((sheet): sheet is ExpenseSheetTab => !!sheet)
+            .sort((a, b) => {
+              if (a.order !== b.order) return a.order - b.order;
+              return String(a.createdAt || a.updatedAt || '').localeCompare(String(b.createdAt || b.updatedAt || ''));
+            });
+
+          setExpenseSheets(docs);
+          const fallbackId = docs.find((sheet) => sheet.id === 'default')?.id || docs[0]?.id || 'default';
+          const nextActiveId = docs.some((sheet) => sheet.id === activeExpenseSheetId)
+            ? activeExpenseSheetId
+            : fallbackId;
+          if (nextActiveId !== activeExpenseSheetId) {
+            setActiveExpenseSheetIdState(nextActiveId);
           }
-          const data = snap.data() as { rows?: ImportRow[] };
-          setExpenseSheetRows(Array.isArray(data?.rows) ? data.rows : null);
+          const activeSheet = docs.find((sheet) => sheet.id === nextActiveId) || null;
+          setExpenseSheetRows(activeSheet?.rows || null);
         }, (err) => {
           console.error('[PortalStore] expense sheet listen error:', err);
+          setExpenseSheets([]);
           setExpenseSheetRows(null);
         }),
       );
@@ -756,7 +817,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       unsubsRef.current.forEach((unsub) => unsub());
       unsubsRef.current = [];
     };
-  }, [authLoading, isMemberLoading, isAuthenticated, authUser, firestoreEnabled, db, orgId, portalUser?.projectId, scopedProjectIds]);
+  }, [authLoading, isMemberLoading, isAuthenticated, authUser, firestoreEnabled, db, orgId, portalUser?.projectId, scopedProjectIds, activeExpenseSheetId]);
 
   const persistExpenseSet = useCallback(async (set: ExpenseSet) => {
     if (!db) return;
@@ -775,6 +836,92 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       { merge: true },
     );
   }, [db, orgId]);
+
+  const setActiveExpenseSheet = useCallback((sheetId: string) => {
+    const nextId = String(sheetId || '').trim();
+    if (!nextId) return;
+    setActiveExpenseSheetIdState(nextId);
+    const activeSheet = expenseSheets.find((sheet) => sheet.id === nextId) || null;
+    setExpenseSheetRows(activeSheet?.rows || null);
+  }, [expenseSheets]);
+
+  const createExpenseSheet = useCallback(async (name?: string): Promise<string | null> => {
+    if (!db || !portalUser?.projectId) {
+      toast.error('Firestore 연결이 필요합니다. 관리자에게 문의해 주세요.');
+      return null;
+    }
+    const now = new Date().toISOString();
+    const id = createExpenseSheetId();
+    const nextOrder = expenseSheets.length > 0
+      ? Math.max(...expenseSheets.map((sheet) => (Number.isFinite(sheet.order) ? sheet.order : 0))) + 1
+      : 1;
+    await setDoc(
+      doc(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/expense_sheets/${id}`),
+      withTenantScope(orgId, {
+        id,
+        projectId: portalUser.projectId,
+        name: sanitizeExpenseSheetName(name, `탭 ${expenseSheets.length + 1}`),
+        order: nextOrder,
+        rows: [] as ImportRow[],
+        createdAt: now,
+        updatedAt: now,
+        updatedBy: portalUser.name || authUser?.name || '',
+      }),
+      { merge: true },
+    );
+    setActiveExpenseSheetIdState(id);
+    return id;
+  }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name, expenseSheets]);
+
+  const renameExpenseSheet = useCallback(async (sheetId: string, name: string): Promise<boolean> => {
+    if (!db || !portalUser?.projectId) {
+      toast.error('Firestore 연결이 필요합니다. 관리자에게 문의해 주세요.');
+      return false;
+    }
+    const id = String(sheetId || '').trim();
+    const nextName = sanitizeExpenseSheetName(name, '');
+    if (!id || !nextName) return false;
+    await setDoc(
+      doc(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/expense_sheets/${id}`),
+      withTenantScope(orgId, {
+        id,
+        projectId: portalUser.projectId,
+        name: nextName,
+        updatedAt: new Date().toISOString(),
+        updatedBy: portalUser.name || authUser?.name || '',
+      }),
+      { merge: true },
+    );
+    return true;
+  }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name]);
+
+  const deleteExpenseSheet = useCallback(async (sheetId: string): Promise<boolean> => {
+    if (!db || !portalUser?.projectId) {
+      toast.error('Firestore 연결이 필요합니다. 관리자에게 문의해 주세요.');
+      return false;
+    }
+    const id = String(sheetId || '').trim();
+    if (!id) return false;
+    if (expenseSheets.length <= 1) {
+      toast.message('최소 1개의 탭은 유지되어야 합니다.');
+      return false;
+    }
+    await setDoc(
+      doc(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/expense_sheets/${id}`),
+      withTenantScope(orgId, {
+        id,
+        projectId: portalUser.projectId,
+        deletedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+      { merge: true },
+    );
+    if (activeExpenseSheetId === id) {
+      const fallback = expenseSheets.find((sheet) => sheet.id !== id)?.id || 'default';
+      setActiveExpenseSheetIdState(fallback);
+    }
+    return true;
+  }, [db, orgId, portalUser?.projectId, expenseSheets, activeExpenseSheetId]);
 
   const saveEvidenceRequiredMap = useCallback(async (map: Record<string, string>) => {
     if (!db || !portalUser?.projectId) {
@@ -802,19 +949,26 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       return;
     }
     const now = new Date().toISOString();
+    const activeSheet = expenseSheets.find((sheet) => sheet.id === activeExpenseSheetId) || null;
+    const activeSheetId = activeSheet?.id || activeExpenseSheetId || 'default';
+    const activeSheetName = sanitizeExpenseSheetName(activeSheet?.name, activeSheetId === 'default' ? '기본 탭' : '새 탭');
     const sanitizedRows = rows.map((row) => ({
       tempId: row.tempId || `imp-${Date.now()}`,
       ...(row.sourceTxId ? { sourceTxId: row.sourceTxId } : {}),
       cells: Array.isArray(row.cells) ? row.cells.map((c) => (c ?? '')) : [],
     }));
     const payload = withTenantScope(orgId, {
+      id: activeSheetId,
       projectId: portalUser.projectId,
+      name: activeSheetName,
+      order: activeSheet?.order || (activeSheetId === 'default' ? 0 : expenseSheets.length + 1),
       rows: sanitizedRows,
+      createdAt: activeSheet?.createdAt || now,
       updatedAt: now,
       updatedBy: portalUser.name || authUser?.name || '',
     });
     await setDoc(
-      doc(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/expense_sheets/default`),
+      doc(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/expense_sheets/${activeSheetId}`),
       payload,
       { merge: true },
     );
@@ -825,6 +979,8 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     portalUser?.projectId,
     portalUser?.name,
     authUser?.name,
+    activeExpenseSheetId,
+    expenseSheets,
     budgetPlanRows,
     expenseSheetRows,
     evidenceRequiredMap,
@@ -894,7 +1050,10 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     if (renameMap.size === 0) return;
 
     const budgetPlanRef = doc(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/budget_summary/default`);
-    const expenseSheetRef = doc(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/expense_sheets/default`);
+    const expenseSheetRef = doc(
+      db,
+      `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/expense_sheets/${activeExpenseSheetId || 'default'}`,
+    );
     const evidenceMapRef = doc(db, getOrgDocumentPath(orgId, 'budgetEvidenceMaps', portalUser.projectId));
     const updatedBy = portalUser.name || authUser?.name || '';
 
@@ -996,7 +1155,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         setEvidenceRequiredMap(nextMap);
       }
     }
-  }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name]);
+  }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name, activeExpenseSheetId]);
 
   const upsertWeeklySubmissionStatus = useCallback(async (input: {
     projectId: string;
@@ -1168,19 +1327,25 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     // Sync into expense sheet rows (통장내역 → 사용내역)
     const mappedExpenseRows = mapBankStatementsToImportRows(sanitizedSheet);
     const nextExpenseRows = mergeBankRowsIntoExpenseSheet(expenseSheetRows, mappedExpenseRows);
+    const activeSheet = expenseSheets.find((sheet) => sheet.id === activeExpenseSheetId) || null;
+    const activeSheetId = activeSheet?.id || activeExpenseSheetId || 'default';
     const expensePayload = withTenantScope(orgId, {
+      id: activeSheetId,
       projectId: portalUser.projectId,
+      name: sanitizeExpenseSheetName(activeSheet?.name, activeSheetId === 'default' ? '기본 탭' : '새 탭'),
+      order: activeSheet?.order || (activeSheetId === 'default' ? 0 : expenseSheets.length + 1),
       rows: nextExpenseRows,
+      createdAt: activeSheet?.createdAt || now,
       updatedAt: now,
       updatedBy: portalUser.name || authUser?.name || '',
     });
     await setDoc(
-      doc(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/expense_sheets/default`),
+      doc(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/expense_sheets/${activeSheetId}`),
       expensePayload,
       { merge: true },
     );
     setExpenseSheetRows(nextExpenseRows);
-  }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name, expenseSheetRows]);
+  }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name, expenseSheetRows, expenseSheets, activeExpenseSheetId]);
 
   const persistTransaction = useCallback(async (txData: Transaction) => {
     if (!db) return;
@@ -1639,6 +1804,8 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     transactions,
     comments,
     evidenceRequiredMap,
+    expenseSheets,
+    activeExpenseSheetId,
     expenseSheetRows,
     bankStatementRows,
     budgetPlanRows,
@@ -1661,6 +1828,10 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     changeTransactionState,
     addComment,
     saveEvidenceRequiredMap,
+    setActiveExpenseSheet,
+    createExpenseSheet,
+    renameExpenseSheet,
+    deleteExpenseSheet,
     saveExpenseSheetRows,
     saveBankStatementRows,
     saveBudgetPlanRows,

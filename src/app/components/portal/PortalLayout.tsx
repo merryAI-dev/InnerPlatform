@@ -47,10 +47,10 @@ const NAV_ITEMS = [
   { to: '/portal', icon: LayoutDashboard, label: '내 사업 현황', exact: true },
   { to: '/portal/submissions', icon: ClipboardList, label: '내 제출 현황' },
   { to: '/portal/payroll', icon: CircleDollarSign, label: '인건비/공지', accent: true, hidden: true },
-  { to: '/portal/cashflow', icon: BarChart3, label: '캐시플로(주간)' },
-  { to: '/portal/budget', icon: Calculator, label: '예산총괄' },
-  { to: '/portal/weekly-expenses', icon: FileSpreadsheet, label: '사업비 입력(주간)' },
+  { to: '/portal/budget', icon: Calculator, label: '예산 편집' },
   { to: '/portal/bank-statements', icon: FileSpreadsheet, label: '통장내역' },
+  { to: '/portal/weekly-expenses', icon: FileSpreadsheet, label: '사업비 입력(주간)' },
+  { to: '/portal/cashflow', icon: BarChart3, label: '캐시플로(주간)' },
   // removed: board, personnel, change-requests, training, career-profile, guide-chat
   { to: '/portal/project-settings', icon: Settings2, label: '사업 배정 수정', exact: true },
   { to: '/portal/register-project', icon: Plus, label: '사업 등록 제안', accent: true },

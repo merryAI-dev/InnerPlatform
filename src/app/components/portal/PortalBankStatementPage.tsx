@@ -1,23 +1,35 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Upload, Save, Plus, Loader2 } from 'lucide-react';
+import { useNavigate } from 'react-router';
+import { Upload, Save, Plus, Loader2, ArrowRight, ShieldAlert, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { usePortalStore } from '../../data/portal-store';
-import { normalizeBankStatementMatrix, type BankStatementRow } from '../../platform/bank-statement';
+import {
+  detectBankStatementProfile,
+  getBankStatementProfileLabel,
+  normalizeBankStatementMatrix,
+  type BankStatementRow,
+} from '../../platform/bank-statement';
 import { normalizeKey, parseCsv, parseNumber } from '../../platform/csv-utils';
 
 export function PortalBankStatementPage() {
+  const navigate = useNavigate();
   const { portalUser, myProject, bankStatementRows, saveBankStatementRows } = usePortalStore();
   const [columns, setColumns] = useState<string[]>(bankStatementRows?.columns || []);
   const [rows, setRows] = useState<BankStatementRow[]>(bankStatementRows?.rows || []);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [lastUploadedName, setLastUploadedName] = useState('');
+  const [lastSavedAt, setLastSavedAt] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const projectName = myProject?.name || '내 사업';
   const ready = useMemo(() => Boolean(portalUser?.projectId), [portalUser?.projectId]);
+  const role = String(portalUser?.role || 'pm').toLowerCase();
+  const isFinanceView = role === 'admin' || role === 'tenant_admin' || role === 'finance' || role === 'auditor';
+  const bankProfile = useMemo(() => detectBankStatementProfile(columns, lastUploadedName), [columns, lastUploadedName]);
   const amountColIdxs = useMemo(() => {
     return new Set(
       columns.map((col, idx) => ({ col, idx }))
@@ -52,6 +64,14 @@ export function PortalBankStatementPage() {
     setColumns([]);
     setRows([]);
   }, [bankStatementRows, dirty, formatAmountRow]);
+
+  const findColumnIndex = useCallback((aliases: string[]) => {
+    const normalizedAliases = aliases.map((alias) => normalizeKey(alias));
+    return columns.findIndex((column) => {
+      const key = normalizeKey(column);
+      return normalizedAliases.some((alias) => key === alias || key.includes(alias));
+    });
+  }, [columns]);
 
   const parseExcelToMatrix = useCallback(async (file: File): Promise<string[][]> => {
     const XLSX = await import('xlsx');
@@ -98,6 +118,7 @@ export function PortalBankStatementPage() {
         toast.error('업로드 데이터에서 컬럼/행을 찾지 못했습니다. 파일 형식을 확인해 주세요.');
         return;
       }
+      setLastUploadedName(file.name);
       setColumns(result.columns);
       setRows(result.rows.map(formatAmountRow));
       setDirty(true);
@@ -117,6 +138,43 @@ export function PortalBankStatementPage() {
     setDirty(true);
   }, [rows, columns]);
 
+  const addSpecialTemplateRow = useCallback((kind: 'corp-card-refund' | 'prepaid-in' | 'special-case') => {
+    if (columns.length === 0) {
+      toast.message('먼저 통장내역 파일을 업로드해 주세요.');
+      return;
+    }
+    const nextRow: BankStatementRow = { tempId: `bank-${Date.now()}`, cells: columns.map(() => '') };
+    const dateIdx = findColumnIndex(['거래일시', '거래일자', '거래일', '일자', '날짜']);
+    const memoIdx = findColumnIndex(['적요', '메모', '내용', '거래내용', '내통장표시내용']);
+    const counterpartyIdx = findColumnIndex(['의뢰인/수취인', '의뢰인', '수취인', '상대계좌명', '거래처']);
+    const inIdx = findColumnIndex(['입금금액', '입금', '입금액']);
+    const outIdx = findColumnIndex(['출금금액', '출금', '출금액']);
+
+    if (dateIdx >= 0) nextRow.cells[dateIdx] = new Date().toISOString().slice(0, 10);
+
+    if (kind === 'corp-card-refund') {
+      if (memoIdx >= 0) nextRow.cells[memoIdx] = '개인법인카드 사용 환수';
+      if (counterpartyIdx >= 0) nextRow.cells[counterpartyIdx] = '개인법인카드 환수';
+      if (inIdx >= 0) nextRow.cells[inIdx] = '';
+    } else if (kind === 'prepaid-in') {
+      if (memoIdx >= 0) nextRow.cells[memoIdx] = '선사용금 입금';
+      if (counterpartyIdx >= 0) nextRow.cells[counterpartyIdx] = '선사용금';
+      if (inIdx >= 0) nextRow.cells[inIdx] = '';
+    } else {
+      if (memoIdx >= 0) nextRow.cells[memoIdx] = '특이 건 수기 관리';
+      if (counterpartyIdx >= 0) nextRow.cells[counterpartyIdx] = '수기 입력';
+      if (outIdx >= 0) nextRow.cells[outIdx] = '';
+    }
+
+    setRows((prev) => [...prev, nextRow]);
+    setDirty(true);
+  }, [columns, findColumnIndex]);
+
+  const removeRow = useCallback((rowIdx: number) => {
+    setRows((prev) => prev.filter((_, idx) => idx !== rowIdx));
+    setDirty(true);
+  }, []);
+
   const updateCell = useCallback((rowIdx: number, colIdx: number, value: string) => {
     const nextValue = amountColIdxs.has(colIdx) ? formatAmount(value) : value;
     setRows((prev) => prev.map((row, i) => {
@@ -135,23 +193,41 @@ export function PortalBankStatementPage() {
     updateCell(rowIdx, colIdx, formatted);
   }, [amountColIdxs, formatAmount, updateCell]);
 
-  const handleSave = useCallback(async () => {
+  const persistSheet = useCallback(async (options?: { silent?: boolean }) => {
     if (!saveBankStatementRows) {
-      toast.error('저장 기능이 연결되어 있지 않습니다.');
+      if (!options?.silent) toast.error('저장 기능이 연결되어 있지 않습니다.');
       return;
     }
     setSaving(true);
     try {
       await saveBankStatementRows({ columns, rows });
       setDirty(false);
-      toast.success('통장내역을 저장했습니다.');
+      const now = new Date().toISOString();
+      setLastSavedAt(now);
+      if (!options?.silent) toast.success('통장내역을 저장했습니다.');
     } catch (err) {
       console.error('[BankStatement] save failed:', err);
-      toast.error('통장내역 저장에 실패했습니다.');
+      if (!options?.silent) toast.error('통장내역 저장에 실패했습니다.');
     } finally {
       setSaving(false);
     }
   }, [columns, rows, saveBankStatementRows]);
+
+  const handleSave = useCallback(async () => {
+    await persistSheet();
+  }, [persistSheet]);
+
+  useEffect(() => {
+    if (!dirty || saving || !saveBankStatementRows || columns.length === 0) return;
+    const timer = window.setTimeout(() => {
+      void persistSheet({ silent: true });
+    }, 900);
+    return () => window.clearTimeout(timer);
+  }, [dirty, saving, saveBankStatementRows, columns.length, persistSheet]);
+
+  const roleNotice = isFinanceView
+    ? '재경/관리자 권한 기준 화면입니다. 업로드 원문 검토와 수정본 저장에 집중합니다.'
+    : 'PM 기준 화면입니다. 저장하면 통장내역이 주간 사업비 시트에 자동 반영됩니다.';
 
   if (!ready) {
     return (
@@ -172,6 +248,13 @@ export function PortalBankStatementPage() {
           <Badge variant={dirty ? 'destructive' : 'secondary'} className="text-[10px]">
             {dirty ? '변경됨' : '저장됨'}
           </Badge>
+          <Badge variant="outline" className="text-[10px]">
+            {getBankStatementProfileLabel(bankProfile)}
+          </Badge>
+          <Button variant="outline" size="sm" onClick={() => navigate('/portal/weekly-expenses')}>
+            사업비 입력(주간)
+            <ArrowRight className="h-4 w-4 ml-1" />
+          </Button>
           <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
             <Upload className="h-4 w-4 mr-1" /> 엑셀 업로드
           </Button>
@@ -189,6 +272,15 @@ export function PortalBankStatementPage() {
           <Button variant="outline" size="sm" onClick={addRow}>
             <Plus className="h-4 w-4 mr-1" /> 행 추가
           </Button>
+          <Button variant="outline" size="sm" onClick={() => addSpecialTemplateRow('corp-card-refund')}>
+            환수 행
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => addSpecialTemplateRow('prepaid-in')}>
+            선사용금
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => addSpecialTemplateRow('special-case')}>
+            특이건
+          </Button>
           <Button size="sm" onClick={handleSave} disabled={saving}>
             {saving ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Save className="h-4 w-4 mr-1" />}
             저장
@@ -196,12 +288,33 @@ export function PortalBankStatementPage() {
         </div>
       </div>
 
+      <Card className="border-amber-200/70 bg-amber-50/60">
+        <CardContent className="px-4 py-3">
+          <div className="flex items-start gap-2">
+            <ShieldAlert className="mt-0.5 h-4 w-4 text-amber-700" />
+            <div className="space-y-1 text-[12px] text-amber-900">
+              <p className="font-semibold">통장내역 정책 안내</p>
+              <p>{roleNotice}</p>
+              <p>
+                현재 프로필: {getBankStatementProfileLabel(bankProfile)}
+                {lastUploadedName ? ` · 최근 파일: ${lastUploadedName}` : ''}
+              </p>
+              <p>저장 시 통장금액·잔액·상세 적요가 현재 주간 사업비 탭으로 동기화됩니다.</p>
+              {lastSavedAt && <p className="text-[11px] text-amber-800/80">마지막 자동저장: {lastSavedAt.slice(0, 16).replace('T', ' ')}</p>}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       <Card>
         <CardContent className="p-0">
           <div className="overflow-auto max-h-[70vh]">
             <table className="w-full text-[11px] border-collapse">
               <thead className="sticky top-0 z-10 bg-muted/60">
                 <tr>
+                  <th className="px-2 py-1 text-left border-b border-r font-medium whitespace-nowrap w-12">
+                    행
+                  </th>
                   {columns.map((col, idx) => (
                     <th key={idx} className="px-2 py-1 text-left border-b border-r font-medium whitespace-nowrap">
                       {col}
@@ -212,13 +325,26 @@ export function PortalBankStatementPage() {
               <tbody>
                 {rows.length === 0 && (
                   <tr>
-                    <td colSpan={Math.max(1, columns.length)} className="text-center text-[12px] text-muted-foreground py-10">
+                    <td colSpan={Math.max(1, columns.length + 1)} className="text-center text-[12px] text-muted-foreground py-10">
                       엑셀 파일을 업로드하세요.
                     </td>
                   </tr>
                 )}
                 {rows.map((row, rowIdx) => (
                   <tr key={row.tempId || rowIdx} className="border-t border-border/30">
+                    <td className="px-1.5 py-1 border-r border-border/30">
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="text-[10px] text-muted-foreground">{rowIdx + 1}</span>
+                        <button
+                          type="button"
+                          className="inline-flex h-6 w-6 items-center justify-center rounded border text-muted-foreground hover:bg-muted"
+                          onClick={() => removeRow(rowIdx)}
+                          title="행 삭제"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </td>
                     {columns.map((_, colIdx) => (
                       <td
                         key={colIdx}

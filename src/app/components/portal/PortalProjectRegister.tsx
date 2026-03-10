@@ -61,7 +61,7 @@ const initialProposal: ProjectProposalDraft = {
 
 export function PortalProjectRegister() {
   const navigate = useNavigate();
-  const { portalUser, createProjectRequest } = usePortalStore();
+  const { portalUser, projects, createProjectRequest } = usePortalStore();
   const [step, setStep] = useState<Step>('basic');
   const [form, setForm] = useState<ProjectProposalDraft>({
     ...initialProposal,
@@ -107,6 +107,8 @@ export function PortalProjectRegister() {
   const update = (key: keyof ProjectProposalDraft, value: any) => {
     setForm(prev => ({ ...prev, [key]: value }));
   };
+  const projectNameOptions = Array.from(new Set(projects.map((project) => String(project.name || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'ko'));
+  const clientOrgOptions = Array.from(new Set(projects.map((project) => String(project.clientOrg || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'ko'));
 
   if (submitted) {
     return (
@@ -196,10 +198,16 @@ export function PortalProjectRegister() {
 
               <div>
                 <Label className="text-[11px]">사업명 *</Label>
+                <datalist id="project-name-options">
+                  {projectNameOptions.map((name) => (
+                    <option key={name} value={name} />
+                  ))}
+                </datalist>
                 <Input
                   value={form.name}
                   onChange={e => update('name', e.target.value)}
                   placeholder="예: KOICA 르완다 기술혁신 역량강화 사업"
+                  list="project-name-options"
                   className="h-9 text-[12px] mt-1"
                 />
               </div>
@@ -220,10 +228,16 @@ export function PortalProjectRegister() {
                 </div>
                 <div>
                   <Label className="text-[11px]">발주기관 *</Label>
+                  <datalist id="client-org-options">
+                    {clientOrgOptions.map((name) => (
+                      <option key={name} value={name} />
+                    ))}
+                  </datalist>
                   <Input
                     value={form.clientOrg}
                     onChange={e => update('clientOrg', e.target.value)}
                     placeholder="예: KOICA"
+                    list="client-org-options"
                     className="h-9 text-[12px] mt-1"
                   />
                 </div>

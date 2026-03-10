@@ -41,8 +41,8 @@ function dayOfWeekUtc(year: number, month: number, day: number): number {
 export interface MonthMondayWeek {
   yearMonth: string; // YYYY-MM
   weekNo: number; // 1..5
-  weekStart: string; // YYYY-MM-DD (Monday)
-  weekEnd: string; // YYYY-MM-DD (Sunday)
+  weekStart: string; // YYYY-MM-DD (Wednesday)
+  weekEnd: string; // YYYY-MM-DD (Tuesday)
   label: string; // e.g. "26-1-4"
 }
 
@@ -50,13 +50,13 @@ function daysInMonthUtc(year: number, month: number): number {
   return new Date(Date.UTC(year, month, 0)).getUTCDate();
 }
 
-function startOfWeekMonday(isoDate: string): string {
+function startOfWeekWednesday(isoDate: string): string {
   const [yRaw, mRaw, dRaw] = isoDate.split('-');
   const year = Number.parseInt(yRaw, 10);
   const month = Number.parseInt(mRaw, 10);
   const day = Number.parseInt(dRaw, 10);
   const dow = dayOfWeekUtc(year, month, day); // 0..6, Sunday=0
-  const delta = dow === 0 ? -6 : 1 - dow;
+  const delta = -((dow - 3 + 7) % 7);
   return addDaysUtc(isoDate, delta);
 }
 
@@ -72,9 +72,9 @@ function countDaysInMonthForWeek(weekStart: string, year: number, month: number)
 
 /**
  * Month week buckets used by the finance sheet:
- * - Weeks are Monday..Sunday.
+ * - Weeks are Wednesday..Tuesday.
  * - ISO-like month rule: a week belongs to the month if it contains 4+ days of that month.
- *   (week 1 = week containing the first Thursday of the month)
+ *   (week 1 = first Wednesday..Tuesday window with 4+ days in the month)
  */
 export function getMonthMondayWeeks(yearMonth: string): MonthMondayWeek[] {
   const parsed = parseYearMonth(yearMonth);
@@ -83,7 +83,7 @@ export function getMonthMondayWeeks(yearMonth: string): MonthMondayWeek[] {
   const { year, month } = parsed;
   const firstDay = formatIsoDate(year, month, 1);
   const lastDay = formatIsoDate(year, month, daysInMonthUtc(year, month));
-  let weekStart = startOfWeekMonday(firstDay);
+  let weekStart = startOfWeekWednesday(firstDay);
   const weeks: MonthMondayWeek[] = [];
   const yy = year % 100;
   let weekNo = 0;

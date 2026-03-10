@@ -156,8 +156,8 @@ export const EVIDENCE_STATUS_LABELS: Record<EvidenceStatus, string> = {
 
 export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   TRANSFER: '계좌이체',
-  CORP_CARD_1: '법인카드(뒷번호1)',
-  CORP_CARD_2: '법인카드(뒷번호2)',
+  CORP_CARD_1: '사업비카드',
+  CORP_CARD_2: '개인법인카드',
   OTHER: '기타',
 };
 
