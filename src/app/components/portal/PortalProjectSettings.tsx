@@ -9,7 +9,7 @@ import { PROJECT_STATUS_LABELS, type Project } from '../../data/types';
 import { normalizeProjectIds, resolvePrimaryProjectId } from '../../data/project-assignment';
 import { useAuth } from '../../data/auth-store';
 import { PROJECTS } from '../../data/mock-data';
-import { resolveHomePath } from '../../platform/navigation';
+import { canEnterPortalWorkspace } from '../../platform/navigation';
 
 const statusColors: Record<string, string> = {
   CONTRACT_PENDING: 'bg-amber-100 text-amber-700',
@@ -35,8 +35,6 @@ export function PortalProjectSettings() {
     resolvePrimaryProjectId(projectIds, portalUser?.projectId || authUser?.projectId) || ''
   ));
 
-  const isAdminSpaceUser = resolveHomePath(authUser?.role) === '/';
-
   useEffect(() => {
     if (authLoading) return;
     if (!isAuthenticated) {
@@ -44,10 +42,10 @@ export function PortalProjectSettings() {
       return;
     }
 
-    if (isAdminSpaceUser) {
+    if (!canEnterPortalWorkspace(authUser?.role)) {
       navigate('/', { replace: true });
     }
-  }, [authLoading, isAuthenticated, isAdminSpaceUser, navigate]);
+  }, [authLoading, isAuthenticated, authUser?.role, navigate]);
 
   useEffect(() => {
     if (authLoading || isLoading) return;

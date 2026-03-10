@@ -1,12 +1,21 @@
-import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, Download, ExternalLink, Plus, Save, Send, Upload, X } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, Download, ExternalLink, MessageSquare, Plus, Save, Send, Upload, X } from 'lucide-react';
+import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { BUDGET_CODE_BOOK } from '../../data/budget-data';
-import type { Transaction, TransactionState } from '../../data/types';
+import { featureFlags } from '../../config/feature-flags';
+import type { Comment, Transaction, TransactionState } from '../../data/types';
 import { findWeekForDate, getYearMondayWeeks, type MonthMondayWeek } from '../../platform/cashflow-weeks';
-import { parseCsv, parseNumber, triggerDownload } from '../../platform/csv-utils';
+import { parseCsv, parseDate, parseNumber, triggerDownload } from '../../platform/csv-utils';
 import { computeEvidenceStatus, computeEvidenceSummary, isValidDriveUrl } from '../../platform/evidence-helpers';
 import {
+  composeSettlementNote,
+  deriveSettlementAmounts,
+  getPaymentMethodOptions,
+  getSettlementProgressLabel,
+  parseSettlementNote,
+} from '../../platform/settlement-ledger.helpers';
+import {
+  buildImportRowsMatrix,
   CASHFLOW_LINE_OPTIONS,
   SETTLEMENT_COLUMNS, SETTLEMENT_COLUMN_GROUPS,
   createEmptyImportRow,
@@ -14,34 +23,282 @@ import {
   exportSettlementCsv,
   importRowToTransaction,
   normalizeMatrixToImportRows,
+  renumberImportRows,
   transactionsToImportRows,
   type ImportRow,
 } from '../../platform/settlement-csv';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Checkbox } from '../ui/checkbox';
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '../ui/sheet';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
+import { Textarea } from '../ui/textarea';
 
 // ── Helpers ──
 
 const fmt = (n: number | undefined) =>
   n != null && Number.isFinite(n) ? n.toLocaleString('ko-KR') : '';
 
-const METHOD_LABELS: Record<string, string> = {
-  TRANSFER: '계좌이체',
-  CORP_CARD_1: '법인카드(뒷번호1)',
-  CORP_CARD_2: '법인카드(뒷번호2)',
-  OTHER: '기타',
-};
+const METHOD_OPTIONS = getPaymentMethodOptions(!featureFlags.qaP0SettlementV1);
+const SETTLEMENT_PROGRESS_OPTIONS = (['INCOMPLETE', 'COMPLETE'] as const).map((value) => ({
+  value,
+  label: getSettlementProgressLabel(value),
+}));
 
-const METHOD_OPTIONS = Object.entries(METHOD_LABELS).map(([v, l]) => ({ value: v, label: l }));
-
-function normalizeMethodValue(value: string | undefined): string {
-  if (!value) return '';
-  if (value === 'BANK_TRANSFER') return 'TRANSFER';
-  if (value === 'CARD') return 'CORP_CARD_1';
-  if (value === 'CASH' || value === 'CHECK') return 'OTHER';
-  return value;
+function toCellTestId(rowIdx: number, header: string): string {
+  return `settlement-${rowIdx + 1}-${toFieldSlug(header)}`;
 }
+
+function toFieldSlug(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9가-힣]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function buildCommentThreadKey(transactionId: string, fieldKey: string): string {
+  return `${transactionId}::${fieldKey}`;
+}
+
+function buildSheetRowCommentId(tempId: string): string {
+  return `sheet-row:${tempId}`;
+}
+
+function formatCommentTime(value: string): string {
+  return value ? value.slice(0, 16).replace('T', ' ') : '';
+}
+
+type GridSlot = 'primary' | 'secondary';
+
+function focusGridControl(rowIdx: number, colIdx: number, slot: GridSlot = 'primary'): boolean {
+  if (rowIdx < 0 || colIdx < 0 || typeof document === 'undefined') return false;
+  const selectors = [
+    `[data-grid-row="${rowIdx}"][data-grid-col="${colIdx}"][data-grid-slot="${slot}"]`,
+    slot === 'secondary' ? `[data-grid-row="${rowIdx}"][data-grid-col="${colIdx}"][data-grid-slot="primary"]` : '',
+    `[data-grid-row="${rowIdx}"][data-grid-col="${colIdx}"]`,
+  ].filter(Boolean);
+
+  for (const selector of selectors) {
+    const target = document.querySelector(selector) as HTMLElement | null;
+    if (!target) continue;
+    target.focus();
+    if (target instanceof HTMLInputElement && !['checkbox', 'date', 'file'].includes(target.type)) {
+      target.select();
+    }
+    return true;
+  }
+
+  return false;
+}
+
+function handleGridKeyDown(
+  event: KeyboardEvent<HTMLInputElement | HTMLSelectElement>,
+  rowIdx: number,
+  colIdx: number,
+  slot: GridSlot = 'primary',
+) {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    focusGridControl(rowIdx + (event.shiftKey ? -1 : 1), colIdx, slot);
+    return;
+  }
+
+  if (event.currentTarget instanceof HTMLSelectElement) {
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      focusGridControl(rowIdx, colIdx - 1);
+    } else if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      focusGridControl(rowIdx, colIdx + 1);
+    }
+    return;
+  }
+
+  if (event.key === 'ArrowUp') {
+    event.preventDefault();
+    focusGridControl(rowIdx - 1, colIdx, slot);
+    return;
+  }
+
+  if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    focusGridControl(rowIdx + 1, colIdx, slot);
+    return;
+  }
+
+  const input = event.currentTarget;
+  if (!['text', 'search', 'url', 'tel', 'password'].includes(input.type)) return;
+
+  const selectionStart = input.selectionStart ?? 0;
+  const selectionEnd = input.selectionEnd ?? 0;
+  const length = input.value.length;
+
+  if (event.key === 'ArrowLeft' && selectionStart === 0 && selectionEnd === 0) {
+    event.preventDefault();
+    focusGridControl(rowIdx, colIdx - 1);
+  } else if (event.key === 'ArrowRight' && selectionStart === length && selectionEnd === length) {
+    event.preventDefault();
+    focusGridControl(rowIdx, colIdx + 1);
+  }
+}
+
+function normalizeRowDateForFilter(value: string | undefined): string {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const head = raw.split(/[ T]/)[0] || raw;
+  return parseDate(head) || parseDate(raw.slice(0, 10));
+}
+
+function CellCommentButton({
+  count,
+  disabled,
+  onClick,
+  testId,
+}: {
+  count: number;
+  disabled?: boolean;
+  onClick: () => void;
+  testId?: string;
+}) {
+  return (
+    <button
+      type="button"
+      title={disabled ? '저장 후 메모를 남길 수 있습니다' : '셀 메모 열기'}
+      aria-label="셀 메모 열기"
+      data-testid={testId}
+      disabled={disabled}
+      className={`absolute top-1 right-1 inline-flex h-5 w-5 items-center justify-center rounded-md border text-[10px] transition ${count > 0
+        ? 'border-amber-300 bg-amber-50 text-amber-700 opacity-100'
+        : 'border-transparent bg-background/90 text-muted-foreground opacity-0 group-hover:opacity-100'
+        } ${disabled ? 'cursor-not-allowed opacity-40' : 'hover:border-border hover:text-foreground'}`}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
+    >
+      <MessageSquare className="h-3.5 w-3.5" />
+      {count > 0 && (
+        <span className="absolute -top-1 -right-1 inline-flex min-w-4 items-center justify-center rounded-full bg-amber-500 px-1 text-[9px] font-bold leading-none text-white">
+          {count}
+        </span>
+      )}
+    </button>
+  );
+}
+
+function CommentThreadSheet({
+  anchor,
+  comments,
+  open,
+  projectId,
+  currentUserId,
+  currentUserName,
+  onClose,
+  onAddComment,
+}: {
+  anchor: ActiveCommentAnchor | null;
+  comments: Comment[];
+  open: boolean;
+  projectId: string;
+  currentUserId: string;
+  currentUserName: string;
+  onClose: () => void;
+  onAddComment?: (comment: Comment) => void | Promise<void>;
+}) {
+  const [draft, setDraft] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!open) setDraft('');
+  }, [open]);
+
+  const handleSubmit = useCallback(async () => {
+    if (!anchor || !onAddComment) return;
+    const content = draft.trim();
+    if (!content) return;
+
+    setSaving(true);
+    try {
+      const isSheetRowComment = anchor.transactionId.startsWith('sheet-row:');
+      await onAddComment({
+        id: `cmt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        transactionId: anchor.transactionId,
+        projectId,
+        targetType: isSheetRowComment ? 'expense_sheet_row' : 'transaction',
+        ...(isSheetRowComment ? { sheetRowId: anchor.transactionId } : {}),
+        authorId: currentUserId || currentUserName,
+        authorName: currentUserName,
+        fieldKey: anchor.fieldKey,
+        fieldLabel: anchor.fieldLabel,
+        content,
+        createdAt: new Date().toISOString(),
+      });
+      setDraft('');
+      toast.success('메모를 남겼습니다.');
+    } catch (error) {
+      console.error('[SettlementLedger] add comment failed:', error);
+      toast.error('메모 저장에 실패했습니다.');
+    } finally {
+      setSaving(false);
+    }
+  }, [anchor, currentUserId, currentUserName, draft, onAddComment, projectId]);
+
+  return (
+    <Sheet modal={false} open={open} onOpenChange={(nextOpen) => { if (!nextOpen) onClose(); }}>
+      <SheetContent side="right" showOverlay={false} className="w-[420px] sm:max-w-[420px] gap-0">
+        <SheetHeader className="border-b">
+          <SheetTitle className="text-[14px]">셀 메모</SheetTitle>
+          <SheetDescription className="text-[11px]">
+            {anchor ? `${anchor.rowLabel} · ${anchor.fieldLabel}` : '메모를 남길 셀을 선택하세요.'}
+          </SheetDescription>
+        </SheetHeader>
+        <div className="flex-1 overflow-y-auto px-4 py-4">
+          {comments.length === 0 ? (
+            <div className="rounded-lg border border-dashed px-4 py-6 text-[12px] text-muted-foreground">
+              아직 메모가 없습니다. 아래 입력창에 첫 메모를 남겨보세요.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {comments.map((comment) => (
+                <div key={comment.id} className="rounded-2xl border bg-background px-3 py-2.5 shadow-sm">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-semibold">{comment.authorName}</span>
+                    <span className="text-[10px] text-muted-foreground">{formatCommentTime(comment.createdAt)}</span>
+                  </div>
+                  {comment.fieldLabel && (
+                    <Badge variant="secondary" className="mt-2 text-[9px]">{comment.fieldLabel}</Badge>
+                  )}
+                  <p className="mt-2 whitespace-pre-wrap text-[12px] leading-5">{comment.content}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="border-t px-4 py-4 space-y-2">
+          <Textarea
+            value={draft}
+            placeholder="이 셀에 남길 메모를 적어주세요"
+            className="min-h-24 text-[12px]"
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                event.preventDefault();
+                void handleSubmit();
+              }
+            }}
+          />
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] text-muted-foreground">Cmd/Ctrl + Enter로 저장</span>
+            <Button size="sm" className="h-8 text-[11px]" disabled={!draft.trim() || saving || !anchor || !onAddComment} onClick={() => void handleSubmit()}>
+              {saving ? '저장중...' : '메모 남기기'}
+            </Button>
+          </div>
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
 const TX_STATE_BADGE: Record<TransactionState, { label: string; cls: string }> = {
   DRAFT: { label: '작성중', cls: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300' },
   SUBMITTED: { label: '제출', cls: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300' },
@@ -70,6 +327,13 @@ interface WeekBucket {
   collapsed: boolean;
 }
 
+interface ActiveCommentAnchor {
+  transactionId: string;
+  fieldKey: string;
+  fieldLabel: string;
+  rowLabel: string;
+}
+
 export interface SettlementLedgerProps {
   projectId: string;
   projectName: string;
@@ -90,7 +354,10 @@ export interface SettlementLedgerProps {
   onChangeTransactionState?: (txId: string, newState: TransactionState, reason?: string) => void;
   /** Current user name for audit trail */
   currentUserName?: string;
+  currentUserId?: string;
   userRole?: 'pm' | 'admin';
+  comments?: Comment[];
+  onAddComment?: (comment: Comment) => void | Promise<void>;
 }
 
 // ── Main Component ──
@@ -109,15 +376,19 @@ export function SettlementLedgerPage({
   onSubmitWeek,
   onChangeTransactionState,
   currentUserName = 'PM',
+  currentUserId = 'pm',
   userRole = 'pm',
+  comments = [],
+  onAddComment,
 }: SettlementLedgerProps) {
-
-
-  console.log(sheetRows, "sheetRows")
   const [year, setYear] = useState(() => new Date().getFullYear());
+  const [viewMode, setViewMode] = useState<'sheet' | 'weekly'>('sheet');
   const [collapsedWeeks, setCollapsedWeeks] = useState<Set<string>>(new Set());
   const [importRows, setImportRows] = useState<ImportRow[] | null>(null);
   const [importDirty, setImportDirty] = useState(false);
+  const [downloadStartDate, setDownloadStartDate] = useState('');
+  const [downloadEndDate, setDownloadEndDate] = useState('');
+  const [activeCommentAnchor, setActiveCommentAnchor] = useState<ActiveCommentAnchor | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // All weeks for the year
@@ -134,11 +405,16 @@ export function SettlementLedgerPage({
   useEffect(() => {
     if (importDirty) return;
     if (sheetRows && sheetRows.length > 0) {
-      setImportRows(sheetRows);
+      setImportRows(renumberImportRows(sheetRows));
       return;
     }
     setImportRows(transactionsToImportRows(projectTxs, yearWeeks));
   }, [projectTxs, yearWeeks, importDirty, sheetRows]);
+
+  useEffect(() => {
+    setDownloadStartDate(`${year}-01-01`);
+    setDownloadEndDate(`${year}-12-31`);
+  }, [year]);
 
   // Group transactions by week
   const weekBuckets: WeekBucket[] = useMemo(() => {
@@ -210,12 +486,83 @@ export function SettlementLedgerPage({
     setCollapsedWeeks(new Set(yearWeeks.map((w) => w.label)));
   }, [yearWeeks]);
 
+  const dateIdx = useMemo(
+    () => SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '거래일시'),
+    [],
+  );
+
+  const getSheetRowsForExport = useCallback(() => {
+    return importRows ? renumberImportRows(importRows) : transactionsToImportRows(projectTxs, yearWeeks);
+  }, [importRows, projectTxs, yearWeeks]);
+
+  const filterRowsByDateRange = useCallback((rows: ImportRow[]) => {
+    if (!downloadStartDate && !downloadEndDate) return rows;
+    if (downloadStartDate && downloadEndDate && downloadStartDate > downloadEndDate) {
+      throw new Error('다운로드 시작일이 종료일보다 늦습니다.');
+    }
+    if (dateIdx < 0) return rows;
+    return rows.filter((row) => {
+      const normalized = normalizeRowDateForFilter(row.cells[dateIdx]);
+      if (!normalized) return false;
+      if (downloadStartDate && normalized < downloadStartDate) return false;
+      if (downloadEndDate && normalized > downloadEndDate) return false;
+      return true;
+    });
+  }, [dateIdx, downloadEndDate, downloadStartDate]);
+
+  const resolveDownloadFileStem = useCallback((suffix: string) => {
+    const rangeLabel = downloadStartDate || downloadEndDate
+      ? `_${downloadStartDate || 'start'}_${downloadEndDate || 'end'}`
+      : '';
+    return `정산대장_${projectName}_${year}${rangeLabel}.${suffix}`;
+  }, [downloadEndDate, downloadStartDate, projectName, year]);
+
   // ── CSV Download ──
   const handleDownload = useCallback(() => {
-    const csv = importRows ? exportImportRowsCsv(importRows) : exportSettlementCsv(projectTxs, yearWeeks);
+    const csv = importRows ? exportImportRowsCsv(renumberImportRows(importRows)) : exportSettlementCsv(projectTxs, yearWeeks);
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
     triggerDownload(blob, `정산대장_${projectName}_${year}.csv`);
   }, [importRows, projectTxs, yearWeeks, projectName, year]);
+
+  const handleRangeCsvDownload = useCallback(() => {
+    try {
+      const rows = filterRowsByDateRange(getSheetRowsForExport());
+      if (rows.length === 0) {
+        toast.error('선택한 기간에 내려받을 행이 없습니다.');
+        return;
+      }
+      const csv = exportImportRowsCsv(rows);
+      const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+      triggerDownload(blob, resolveDownloadFileStem('csv'));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '기간 다운로드에 실패했습니다.');
+    }
+  }, [filterRowsByDateRange, getSheetRowsForExport, resolveDownloadFileStem]);
+
+  const handleRangeXlsxDownload = useCallback(async () => {
+    try {
+      const rows = filterRowsByDateRange(getSheetRowsForExport());
+      if (rows.length === 0) {
+        toast.error('선택한 기간에 내려받을 행이 없습니다.');
+        return;
+      }
+      const ExcelJS = await import('exceljs');
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet('settlement');
+      for (const row of buildImportRowsMatrix(rows)) {
+        worksheet.addRow(row);
+      }
+      const buffer = await workbook.xlsx.writeBuffer();
+      triggerDownload(
+        new Blob([buffer as ArrayBuffer], {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        }),
+        resolveDownloadFileStem('xlsx'),
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '기간 XLSX 다운로드에 실패했습니다.');
+    }
+  }, [filterRowsByDateRange, getSheetRowsForExport, resolveDownloadFileStem]);
 
   // ── CSV Upload ──
   const handleFileUpload = useCallback(async (file: File) => {
@@ -318,75 +665,34 @@ export function SettlementLedgerPage({
 
   const totalCount = projectTxs.length;
 
-  const viewMode: 'sheet' | 'weekly' = 'sheet';
+  const commentCountByCell = useMemo(() => {
+    const buckets = new Map<string, number>();
+    for (const comment of comments) {
+      if (!comment.transactionId || !comment.fieldKey) continue;
+      const key = buildCommentThreadKey(comment.transactionId, comment.fieldKey);
+      buckets.set(key, (buckets.get(key) || 0) + 1);
+    }
+    return buckets;
+  }, [comments]);
 
-  if (viewMode === 'sheet') {
-    return (
-      <div className="flex flex-col gap-3">
-        <div className="flex items-center justify-between gap-2 flex-wrap">
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => setYear((y) => y - 1)}>
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <span className="text-sm font-semibold min-w-[60px] text-center">{year}년</span>
-            <Button variant="outline" size="sm" onClick={() => setYear((y) => y + 1)}>
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-            <Badge variant="secondary" className="ml-2 text-[11px]">
-              {totalCount}건
-            </Badge>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={handleDownload}>
-              <Download className="h-4 w-4 mr-1" />
-              CSV 다운로드
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
-              <Upload className="h-4 w-4 mr-1" />
-              CSV 업로드
-            </Button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".csv"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) void handleFileUpload(file);
-                e.currentTarget.value = '';
-              }}
-            />
-          </div>
-        </div>
+  const activeCellComments = useMemo(() => {
+    if (!activeCommentAnchor) return [];
+    return comments
+      .filter((comment) => (
+        comment.transactionId === activeCommentAnchor.transactionId
+        && comment.fieldKey === activeCommentAnchor.fieldKey
+      ))
+      .sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+  }, [activeCommentAnchor, comments]);
 
-        {importRows && (
-          <ImportEditor
-            rows={importRows}
-            onChange={(rows) => {
-              setImportRows(rows);
-              setImportDirty(true);
-            }}
-            onSave={handleImportSave}
-            onCancel={() => {
-              setImportRows(transactionsToImportRows(projectTxs, yearWeeks));
-              setImportDirty(false);
-            }}
-            projectId={projectId}
-            defaultLedgerId={defaultLedgerId}
-            evidenceRequiredMap={evidenceRequiredMap}
-            onSaveEvidenceRequiredMap={onSaveEvidenceRequiredMap}
-            inline
-          />
-        )}
-      </div>
-    );
-  }
+  const openCellComments = useCallback((anchor: ActiveCommentAnchor) => {
+    setActiveCommentAnchor(anchor);
+  }, []);
 
   return (
-    <div className="flex flex-col gap-3">
-      {/* ── Toolbar ── */}
+    <Tabs value={viewMode} onValueChange={(value) => setViewMode(value as 'sheet' | 'weekly')} className="flex flex-col gap-3">
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <Button variant="outline" size="sm" onClick={() => setYear((y) => y - 1)}>
             <ChevronLeft className="h-4 w-4" />
           </Button>
@@ -397,17 +703,25 @@ export function SettlementLedgerPage({
           <Badge variant="secondary" className="ml-2 text-[11px]">
             {totalCount}건
           </Badge>
+          <TabsList className="h-8" data-testid="settlement-view-tabs">
+            <TabsTrigger value="sheet" className="text-xs" data-testid="settlement-tab-sheet">시트 보기</TabsTrigger>
+            <TabsTrigger value="weekly" className="text-xs" data-testid="settlement-tab-weekly">주차 보기</TabsTrigger>
+          </TabsList>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={expandAll}>
-            전체 펼치기
-          </Button>
-          <Button variant="outline" size="sm" onClick={collapseAll}>
-            전체 접기
-          </Button>
+        <div className="flex items-center gap-2 flex-wrap">
+          {viewMode === 'weekly' && (
+            <>
+              <Button variant="outline" size="sm" onClick={expandAll}>
+                전체 펼치기
+              </Button>
+              <Button variant="outline" size="sm" onClick={collapseAll}>
+                전체 접기
+              </Button>
+            </>
+          )}
           <Button variant="outline" size="sm" onClick={handleDownload}>
             <Download className="h-4 w-4 mr-1" />
-            CSV 다운로드
+            전체 CSV
           </Button>
           <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
             <Upload className="h-4 w-4 mr-1" />
@@ -427,85 +741,127 @@ export function SettlementLedgerPage({
         </div>
       </div>
 
-      {/* ── Table ── */}
-      <div className="relative w-full overflow-x-auto border rounded-lg">
-        <table className="w-full text-[11px] border-collapse">
-          {/* Group header row */}
-          <thead className="sticky top-0 z-10">
-            <tr className="bg-slate-100 dark:bg-slate-800">
-              {SETTLEMENT_COLUMN_GROUPS.map((g) => (
-                <th
-                  key={g.name}
-                  colSpan={g.colSpan}
-                  className="px-2 py-1.5 text-center font-bold border-b border-r text-[10px] text-slate-600 dark:text-slate-300 uppercase tracking-wide"
-                >
-                  {g.name}
-                </th>
-              ))}
-            </tr>
-            {/* Column header row */}
-            <tr className="bg-slate-50 dark:bg-slate-900">
-              {SETTLEMENT_COLUMNS.map((col, i) => (
-                <th
-                  key={i}
-                  className={`px-2 py-1.5 font-medium border-b border-r whitespace-nowrap text-[10px] ${col.format === 'number' ? 'text-right' : 'text-left'
-                    }`}
-                >
-                  {col.csvHeader}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {weekBuckets.map((bucket) => {
-              const { week, transactions: txs, collapsed } = bucket;
-              const weekTxCount = txs.length;
-
-              // Accumulate row numbers even when collapsed
-              const rows = txs.map((tx) => {
-                globalRowNum++;
-                return { tx, rowNum: globalRowNum };
-              });
-
-              return (
-                <WeekSection
-                  key={week.label}
-                  week={week}
-                  txRows={rows}
-                  collapsed={collapsed}
-                  txCount={weekTxCount}
-                  onToggle={() => toggleWeek(week.label)}
-                  onUpdateTx={handleUpdateTx}
-                  onSubmitWeek={onSubmitWeek}
-                  onChangeTransactionState={onChangeTransactionState}
-                  userRole={userRole}
-                />
-              );
-            })}
-          </tbody>
-        </table>
+      <div className="flex items-center justify-between gap-2 flex-wrap rounded-lg border bg-muted/20 px-3 py-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <label className="text-[11px] text-muted-foreground" htmlFor="settlement-download-start">다운로드 기간</label>
+          <input
+            id="settlement-download-start"
+            type="date"
+            value={downloadStartDate}
+            data-testid="settlement-download-start"
+            className="rounded border bg-background px-2 py-1 text-[11px]"
+            onChange={(e) => setDownloadStartDate(e.target.value)}
+          />
+          <span className="text-[11px] text-muted-foreground">~</span>
+          <input
+            type="date"
+            value={downloadEndDate}
+            data-testid="settlement-download-end"
+            className="rounded border bg-background px-2 py-1 text-[11px]"
+            onChange={(e) => setDownloadEndDate(e.target.value)}
+          />
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button variant="outline" size="sm" onClick={handleRangeCsvDownload} data-testid="settlement-download-range-csv">
+            기간 CSV
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => void handleRangeXlsxDownload()} data-testid="settlement-download-range-xlsx">
+            기간 XLSX
+          </Button>
+        </div>
       </div>
 
-      {/* ── Import Editor (editable preview) ── */}
-      {importRows !== null && (
-        <ImportEditor
-          rows={importRows}
-          onChange={(rows) => {
-            setImportRows(rows);
-            setImportDirty(true);
-          }}
-          onSave={handleImportSave}
-          onCancel={() => {
-            setImportRows(transactionsToImportRows(projectTxs, yearWeeks));
-            setImportDirty(false);
-          }}
-          projectId={projectId}
-          defaultLedgerId={defaultLedgerId}
-          evidenceRequiredMap={evidenceRequiredMap}
-          onSaveEvidenceRequiredMap={onSaveEvidenceRequiredMap}
-        />
-      )}
-    </div>
+      <TabsContent value="sheet">
+        {importRows && (
+          <ImportEditor
+            rows={importRows}
+            onChange={(rows) => {
+              setImportRows(rows);
+              setImportDirty(true);
+            }}
+            onSave={handleImportSave}
+            onCancel={() => {
+              setImportRows(transactionsToImportRows(projectTxs, yearWeeks));
+              setImportDirty(false);
+            }}
+            projectId={projectId}
+            defaultLedgerId={defaultLedgerId}
+            evidenceRequiredMap={evidenceRequiredMap}
+            onSaveEvidenceRequiredMap={onSaveEvidenceRequiredMap}
+            inline
+            commentCountByCell={commentCountByCell}
+            onOpenCellComments={openCellComments}
+          />
+        )}
+      </TabsContent>
+
+      <TabsContent value="weekly">
+        <div className="relative w-full overflow-x-auto border rounded-lg">
+          <table className="w-full text-[11px] border-collapse">
+            <thead className="sticky top-0 z-10">
+              <tr className="bg-slate-100 dark:bg-slate-800">
+                {SETTLEMENT_COLUMN_GROUPS.map((g) => (
+                  <th
+                    key={g.name}
+                    colSpan={g.colSpan}
+                    className="px-2 py-1.5 text-center font-bold border-b border-r text-[10px] text-slate-600 dark:text-slate-300 uppercase tracking-wide"
+                  >
+                    {g.name}
+                  </th>
+                ))}
+              </tr>
+              <tr className="bg-slate-50 dark:bg-slate-900">
+                {SETTLEMENT_COLUMNS.map((col, i) => (
+                  <th
+                    key={i}
+                    className={`px-2 py-1.5 font-medium border-b border-r whitespace-nowrap text-[10px] ${col.format === 'number' ? 'text-right' : 'text-left'}`}
+                  >
+                    {col.csvHeader}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {weekBuckets.map((bucket) => {
+                const { week, transactions: txs, collapsed } = bucket;
+                const weekTxCount = txs.length;
+                const rows = txs.map((tx) => {
+                  globalRowNum++;
+                  return { tx, rowNum: globalRowNum };
+                });
+
+                return (
+                  <WeekSection
+                    key={week.label}
+                    week={week}
+                    txRows={rows}
+                    collapsed={collapsed}
+                    txCount={weekTxCount}
+                    onToggle={() => toggleWeek(week.label)}
+                    onUpdateTx={handleUpdateTx}
+                    onSubmitWeek={onSubmitWeek}
+                    onChangeTransactionState={onChangeTransactionState}
+                    userRole={userRole}
+                    commentCountByCell={commentCountByCell}
+                    onOpenCellComments={openCellComments}
+                  />
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </TabsContent>
+      <CommentThreadSheet
+        anchor={activeCommentAnchor}
+        comments={activeCellComments}
+        open={!!activeCommentAnchor}
+        projectId={projectId}
+        currentUserId={currentUserId}
+        currentUserName={currentUserName}
+        onClose={() => setActiveCommentAnchor(null)}
+        onAddComment={onAddComment}
+      />
+    </Tabs>
   );
 }
 
@@ -526,9 +882,11 @@ interface WeekSectionProps {
   }) => void | Promise<void>;
   onChangeTransactionState?: (txId: string, newState: TransactionState, reason?: string) => void;
   userRole?: 'pm' | 'admin';
+  commentCountByCell: Map<string, number>;
+  onOpenCellComments: (anchor: ActiveCommentAnchor) => void;
 }
 
-function WeekSection({ week, txRows, collapsed, txCount, onToggle, onUpdateTx, onSubmitWeek, onChangeTransactionState, userRole }: WeekSectionProps) {
+function WeekSection({ week, txRows, collapsed, txCount, onToggle, onUpdateTx, onSubmitWeek, onChangeTransactionState, userRole, commentCountByCell, onOpenCellComments }: WeekSectionProps) {
   const [submitting, setSubmitting] = useState(false);
   const colCount = SETTLEMENT_COLUMNS.length;
   const draftTxIds = txRows.filter(({ tx }) => tx.state === 'DRAFT').map(({ tx }) => tx.id);
@@ -610,6 +968,8 @@ function WeekSection({ week, txRows, collapsed, txCount, onToggle, onUpdateTx, o
             onUpdate={(updates) => onUpdateTx(tx.id, updates)}
             onChangeState={onChangeTransactionState}
             userRole={userRole}
+            commentCountByCell={commentCountByCell}
+            onOpenCellComments={onOpenCellComments}
           />
         ))}
       {!collapsed && txCount === 0 && (
@@ -632,11 +992,15 @@ interface TransactionRowProps {
   onUpdate: (updates: Partial<Transaction>) => void;
   onChangeState?: (txId: string, newState: TransactionState, reason?: string) => void;
   userRole?: 'pm' | 'admin';
+  commentCountByCell: Map<string, number>;
+  onOpenCellComments: (anchor: ActiveCommentAnchor) => void;
 }
 
-function TransactionRow({ tx, rowNum, weekLabel, onUpdate, onChangeState, userRole }: TransactionRowProps) {
+function TransactionRow({ tx, rowNum, weekLabel, onUpdate, onChangeState, userRole, commentCountByCell, onOpenCellComments }: TransactionRowProps) {
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
   const locked = !isEditable(tx.state);
+  const parsedSettlementNote = parseSettlementNote(tx.settlementNote, tx.settlementProgress || 'INCOMPLETE');
+  const rowLabel = `${rowNum}행`;
 
   const debouncedUpdate = useCallback(
     (updates: Partial<Transaction>) => {
@@ -653,42 +1017,69 @@ function TransactionRow({ tx, rowNum, weekLabel, onUpdate, onChangeState, userRo
     };
   }, []);
 
+  const renderCommentButton = useCallback((fieldLabel: string) => {
+    const fieldKey = toFieldSlug(fieldLabel);
+    const count = commentCountByCell.get(buildCommentThreadKey(tx.id, fieldKey)) || 0;
+    return (
+      <CellCommentButton
+        count={count}
+        testId={`comment-button-${tx.id}-${fieldKey}`}
+        onClick={() => onOpenCellComments({
+          transactionId: tx.id,
+          fieldKey,
+          fieldLabel,
+          rowLabel,
+        })}
+      />
+    );
+  }, [commentCountByCell, onOpenCellComments, rowLabel, tx.id]);
+
   const textCell = (
     value: string | undefined,
     field: keyof Transaction,
+    fieldLabel: string,
     className?: string,
   ) => (
     <td className={`px-1 py-0.5 border-b border-r ${className || ''}`}>
-      <input
-        type="text"
-        defaultValue={value || ''}
-        disabled={locked}
-        className={`w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[60px] ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
-        onBlur={(e) => {
-          if (!locked && e.target.value !== (value || '')) {
-            debouncedUpdate({ [field]: e.target.value } as Partial<Transaction>);
-          }
-        }}
-      />
+      <div className="group relative min-w-[60px]">
+        <input
+          type="text"
+          defaultValue={value || ''}
+          disabled={locked}
+          className={`w-full bg-transparent outline-none text-[11px] px-1 py-0.5 pr-6 min-w-[60px] ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
+          onBlur={(e) => {
+            if (!locked && e.target.value !== (value || '')) {
+              debouncedUpdate({ [field]: e.target.value } as Partial<Transaction>);
+            }
+          }}
+        />
+        {renderCommentButton(fieldLabel)}
+      </div>
     </td>
   );
 
-  const numberCell = (value: number | undefined) => (
+  const numberCell = (value: number | undefined, fieldLabel: string) => (
     <td className="px-1 py-0.5 border-b border-r text-right tabular-nums">
-      <span className="text-[11px]">{fmt(value)}</span>
+      <div className="group relative pr-6">
+        <span className="text-[11px]">{fmt(value)}</span>
+        {renderCommentButton(fieldLabel)}
+      </div>
     </td>
   );
 
-  const boolCell = (value: boolean | undefined, field: keyof Transaction) => (
+  const boolCell = (value: boolean | undefined, field: keyof Transaction, fieldLabel: string) => (
     <td className="px-1 py-0.5 border-b border-r text-center">
-      <Checkbox
-        checked={!!value}
-        disabled={locked}
-        onCheckedChange={(checked) => {
-          if (!locked) onUpdate({ [field]: !!checked } as Partial<Transaction>);
-        }}
-        className="h-3.5 w-3.5"
-      />
+      <div className="group relative flex justify-center pr-6">
+        <Checkbox
+          checked={!!value}
+          disabled={locked}
+          onCheckedChange={(checked) => {
+            if (!locked) onUpdate({ [field]: !!checked } as Partial<Transaction>);
+          }}
+          className="h-3.5 w-3.5"
+        />
+        {renderCommentButton(fieldLabel)}
+      </div>
     </td>
   );
 
@@ -698,7 +1089,7 @@ function TransactionRow({ tx, rowNum, weekLabel, onUpdate, onChangeState, userRo
     <tr className={`hover:bg-muted/30 transition-colors ${locked ? 'opacity-80' : ''}`}>
       {/* 작성자 + 상태배지 */}
       <td className={`px-1 py-0.5 border-b border-r`}>
-        <div className="flex items-center gap-1">
+        <div className="group relative flex items-center gap-1 pr-6">
           <input
             type="text"
             defaultValue={tx.author || ''}
@@ -726,102 +1117,121 @@ function TransactionRow({ tx, rowNum, weekLabel, onUpdate, onChangeState, userRo
               수정
             </button>
           )}
+          {renderCommentButton('작성자')}
         </div>
       </td>
       {/* No. */}
       <td className="px-1 py-0.5 border-b border-r text-center text-[11px] text-muted-foreground">
-        {rowNum}
+        <div className="group relative pr-6">
+          {rowNum}
+          {renderCommentButton('No.')}
+        </div>
       </td>
       {/* 거래일시 */}
       <td className="px-1 py-0.5 border-b border-r">
-        <input
-          type="date"
-          defaultValue={tx.dateTime?.slice(0, 10) || ''}
-          disabled={locked}
-          className={`bg-transparent outline-none text-[11px] px-0.5 ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
-          onBlur={(e) => {
-            if (!locked && e.target.value && e.target.value !== tx.dateTime?.slice(0, 10)) {
-              debouncedUpdate({ dateTime: e.target.value });
-            }
-          }}
-        />
+        <div className="group relative pr-6">
+          <input
+            type="date"
+            defaultValue={tx.dateTime?.slice(0, 10) || ''}
+            disabled={locked}
+            className={`bg-transparent outline-none text-[11px] px-0.5 ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
+            onBlur={(e) => {
+              if (!locked && e.target.value && e.target.value !== tx.dateTime?.slice(0, 10)) {
+                debouncedUpdate({ dateTime: e.target.value });
+              }
+            }}
+          />
+          {renderCommentButton('거래일시')}
+        </div>
       </td>
       {/* 해당 주차 */}
       <td className="px-1 py-0.5 border-b border-r text-center text-[11px] text-muted-foreground">
-        {weekLabel}
+        <div className="group relative pr-6">
+          {weekLabel}
+          {renderCommentButton('해당 주차')}
+        </div>
       </td>
       {/* 지출구분 */}
       <td className="px-1 py-0.5 border-b border-r">
-        <select
-          defaultValue={normalizeMethodValue(tx.method)}
-          disabled={locked}
-          className={`bg-transparent outline-none text-[11px] w-full cursor-pointer ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
-          onChange={(e) => { if (!locked) onUpdate({ method: e.target.value as Transaction['method'] }); }}
-        >
-          {METHOD_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>{o.label}</option>
-          ))}
-        </select>
+        <div className="group relative pr-6">
+          <select
+            defaultValue={tx.method || ''}
+            disabled={locked}
+            className={`bg-transparent outline-none text-[11px] w-full cursor-pointer ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
+            onChange={(e) => { if (!locked) onUpdate({ method: e.target.value as Transaction['method'] }); }}
+          >
+            {METHOD_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+          {renderCommentButton('지출구분')}
+        </div>
       </td>
       {/* 비목 */}
-      {textCell(tx.budgetCategory, 'budgetCategory')}
+      {textCell(tx.budgetCategory, 'budgetCategory', '비목')}
       {/* 세목 */}
-      {textCell(tx.budgetSubCategory, 'budgetSubCategory')}
+      {textCell(tx.budgetSubCategory, 'budgetSubCategory', '세목')}
       {/* 세세목 */}
-      {textCell(tx.budgetSubSubCategory, 'budgetSubSubCategory')}
+      {textCell(tx.budgetSubSubCategory, 'budgetSubSubCategory', '세세목')}
       {/* cashflow항목 */}
       <td className="px-1 py-0.5 border-b border-r">
-        <select
-          defaultValue={tx.cashflowLabel || ''}
-          disabled={locked}
-          className={`bg-transparent outline-none text-[11px] w-full cursor-pointer min-w-[100px] ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
-          onChange={(e) => { if (!locked) onUpdate({ cashflowLabel: e.target.value }); }}
-        >
-          <option value="">-</option>
-          {CASHFLOW_LINE_OPTIONS.map((o) => (
-            <option key={o.value} value={o.label}>{o.label}</option>
-          ))}
-        </select>
+        <div className="group relative pr-6">
+          <select
+            defaultValue={tx.cashflowLabel || ''}
+            disabled={locked}
+            className={`bg-transparent outline-none text-[11px] w-full cursor-pointer min-w-[100px] ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
+            onChange={(e) => { if (!locked) onUpdate({ cashflowLabel: e.target.value }); }}
+          >
+            <option value="">-</option>
+            {CASHFLOW_LINE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.label}>{o.label}</option>
+            ))}
+          </select>
+          {renderCommentButton('cashflow항목')}
+        </div>
       </td>
       {/* 통장잔액 */}
-      {numberCell(tx.amounts?.balanceAfter)}
+      {numberCell(tx.amounts?.balanceAfter, '통장잔액')}
       {/* 통장에 찍힌 입/출금액 */}
-      {numberCell(tx.amounts?.bankAmount)}
+      {numberCell(tx.amounts?.bankAmount, '통장에 찍힌 입/출금액')}
       {/* 입금합계: 입금액 */}
-      {numberCell(tx.amounts?.depositAmount)}
+      {numberCell(tx.amounts?.depositAmount, '입금액(사업비,공급가액,은행이자)')}
       {/* 입금합계: 매입부가세 반환 */}
-      {numberCell(tx.amounts?.vatRefund)}
+      {numberCell(tx.amounts?.vatRefund, '매입부가세 반환')}
       {/* 출금합계: 사업비 사용액 */}
-      {numberCell(tx.amounts?.expenseAmount)}
+      {numberCell(tx.amounts?.expenseAmount, '사업비 사용액')}
       {/* 출금합계: 매입부가세 */}
-      {numberCell(tx.amounts?.vatIn)}
+      {numberCell(tx.amounts?.vatIn, '매입부가세')}
       {/* 사업팀: 지급처 */}
-      {textCell(tx.counterparty, 'counterparty')}
+      {textCell(tx.counterparty, 'counterparty', '지급처')}
       {/* 사업팀: 상세 적요 */}
-      {textCell(tx.memo, 'memo', 'min-w-[150px]')}
+      {textCell(tx.memo, 'memo', '상세 적요', 'min-w-[150px]')}
       {/* 사업팀: 필수증빙자료 리스트 */}
-      {textCell(tx.evidenceRequiredDesc, 'evidenceRequiredDesc')}
+      {textCell(tx.evidenceRequiredDesc, 'evidenceRequiredDesc', '필수증빙자료 리스트')}
       {/* 사업팀: 실제 구비 완료된 증빙자료 리스트 */}
       <td className="px-1 py-0.5 border-b border-r">
-        <input
-          type="text"
-          defaultValue={tx.evidenceCompletedDesc || ''}
-          disabled={locked}
-          className={`w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[60px] ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
-          onBlur={(e) => {
-            if (!locked && e.target.value !== (tx.evidenceCompletedDesc || '')) {
-              const updatedTx = { ...tx, evidenceCompletedDesc: e.target.value };
-              const newStatus = computeEvidenceStatus(updatedTx);
-              debouncedUpdate({ evidenceCompletedDesc: e.target.value, evidenceStatus: newStatus });
-            }
-          }}
-        />
+        <div className="group relative min-w-[60px]">
+          <input
+            type="text"
+            defaultValue={tx.evidenceCompletedDesc || ''}
+            disabled={locked}
+            className={`w-full bg-transparent outline-none text-[11px] px-1 py-0.5 pr-6 min-w-[60px] ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
+            onBlur={(e) => {
+              if (!locked && e.target.value !== (tx.evidenceCompletedDesc || '')) {
+                const updatedTx = { ...tx, evidenceCompletedDesc: e.target.value };
+                const newStatus = computeEvidenceStatus(updatedTx);
+                debouncedUpdate({ evidenceCompletedDesc: e.target.value, evidenceStatus: newStatus });
+              }
+            }}
+          />
+          {renderCommentButton('실제 구비 완료된 증빙자료 리스트')}
+        </div>
       </td>
       {/* 사업팀: 준비필요자료 */}
-      {textCell(tx.evidencePendingDesc, 'evidencePendingDesc')}
+      {textCell(tx.evidencePendingDesc, 'evidencePendingDesc', '준비필요자료')}
       {/* 정산지원: 증빙자료 드라이브 */}
       <td className="px-1 py-0.5 border-b border-r">
-        <div className="flex items-center gap-1">
+        <div className="group relative flex items-center gap-1 pr-6">
           <input
             type="text"
             defaultValue={tx.evidenceDriveLink || ''}
@@ -848,20 +1258,50 @@ function TransactionRow({ tx, rowNum, weekLabel, onUpdate, onChangeState, userRo
               <ExternalLink className="h-3 w-3" />
             </a>
           )}
+          {renderCommentButton('증빙자료 드라이브')}
         </div>
       </td>
       {/* 정산지원: 준비 필요자료 */}
-      {textCell(tx.supportPendingDocs, 'supportPendingDocs')}
+      {textCell(tx.supportPendingDocs, 'supportPendingDocs', '준비 필요자료')}
       {/* 도담: e나라 등록 */}
-      {textCell(tx.eNaraRegistered, 'eNaraRegistered')}
+      {textCell(tx.eNaraRegistered, 'eNaraRegistered', 'e나라 등록')}
       {/* 도담: e나라 집행 */}
-      {textCell(tx.eNaraExecuted, 'eNaraExecuted')}
+      {textCell(tx.eNaraExecuted, 'eNaraExecuted', 'e나라 집행')}
       {/* 도담: 부가세 지결 완료여부 */}
-      {boolCell(tx.vatSettlementDone, 'vatSettlementDone')}
+      {boolCell(tx.vatSettlementDone, 'vatSettlementDone', '부가세 지결 완료여부')}
       {/* 도담: 최종완료 */}
-      {boolCell(tx.settlementComplete, 'settlementComplete')}
+      {boolCell(tx.settlementComplete, 'settlementComplete', '최종완료')}
       {/* 비고 */}
-      {textCell(tx.settlementNote, 'settlementNote')}
+      <td className="px-1 py-0.5 border-b border-r">
+        <div className="group relative min-w-[140px] pr-6">
+          <input
+            type="text"
+            defaultValue={parsedSettlementNote.note}
+            disabled={locked}
+            className={`w-full bg-transparent outline-none text-[11px] px-1 py-0.5 ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
+            onBlur={(e) => {
+              if (!locked && e.target.value !== parsedSettlementNote.note) {
+                debouncedUpdate({ settlementNote: e.target.value });
+              }
+            }}
+          />
+          <select
+            defaultValue={parsedSettlementNote.progress}
+            disabled={locked}
+            className={`mt-1 w-full rounded border bg-background/60 px-1 py-0.5 text-[10px] ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
+            onChange={(e) => {
+              if (!locked) {
+                onUpdate({ settlementProgress: e.target.value as NonNullable<Transaction['settlementProgress']> });
+              }
+            }}
+          >
+            {SETTLEMENT_PROGRESS_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+          {renderCommentButton('비고')}
+        </div>
+      </td>
     </tr>
   );
 }
@@ -877,6 +1317,8 @@ function ImportEditor({
   defaultLedgerId,
   evidenceRequiredMap,
   onSaveEvidenceRequiredMap,
+  commentCountByCell,
+  onOpenCellComments,
   inline = false,
 }: {
   rows: ImportRow[];
@@ -887,6 +1329,8 @@ function ImportEditor({
   defaultLedgerId: string;
   evidenceRequiredMap?: Record<string, string>;
   onSaveEvidenceRequiredMap?: (map: Record<string, string>) => void | Promise<void>;
+  commentCountByCell: Map<string, number>;
+  onOpenCellComments: (anchor: ActiveCommentAnchor) => void;
   inline?: boolean;
 }) {
   const errorCount = rows.filter((r) => r.error).length;
@@ -946,7 +1390,8 @@ function ImportEditor({
 
   const applyDerivedRows = useCallback(
     (input: ImportRow[]) => {
-      const recalced = recomputeBalances(input);
+      const normalized = renumberImportRows(input);
+      const recalced = recomputeBalances(normalized);
       return recalced.map((row, i) => {
         const result = importRowToTransaction(row, projectId, defaultLedgerId, i);
         return { ...row, error: result.error };
@@ -992,21 +1437,15 @@ function ImportEditor({
 
   const addRow = useCallback(() => {
     const newRow = createEmptyImportRow();
-    // Set No. column
-    const noIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === 'No.');
-    if (noIdx >= 0) newRow.cells[noIdx] = String(rows.length + 1);
     newRow.error = undefined;
     onChange(applyDerivedRows([...rows, newRow]));
   }, [rows, onChange, applyDerivedRows]);
 
   const addRows = useCallback((count: number) => {
     if (count <= 0) return;
-    const noIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === 'No.');
     const nextRows = [...rows];
     for (let i = 0; i < count; i++) {
-      const newRow = createEmptyImportRow();
-      if (noIdx >= 0) newRow.cells[noIdx] = String(nextRows.length + 1);
-      nextRows.push(newRow);
+      nextRows.push(createEmptyImportRow());
     }
     onChange(applyDerivedRows(nextRows));
   }, [rows, onChange, applyDerivedRows]);
@@ -1020,6 +1459,15 @@ function ImportEditor({
   const removeRow = useCallback(
     (rowIdx: number) => {
       onChange(applyDerivedRows(rows.filter((_, i) => i !== rowIdx)));
+    },
+    [rows, onChange, applyDerivedRows],
+  );
+
+  const insertRowAt = useCallback(
+    (rowIdx: number) => {
+      const nextRows = [...rows];
+      nextRows.splice(rowIdx + 1, 0, createEmptyImportRow());
+      onChange(applyDerivedRows(nextRows));
     },
     [rows, onChange, applyDerivedRows],
   );
@@ -1072,8 +1520,6 @@ function ImportEditor({
     }
   }, [mappingDraft, onSaveEvidenceRequiredMap]);
 
-  console.log(mappingRows, "mappingRows")
-
   return (
     <div className={inline ? 'relative border rounded-lg bg-background flex flex-col overflow-visible' : 'fixed inset-0 z-50 bg-background/95 flex flex-col'}>
       {/* Toolbar */}
@@ -1086,6 +1532,12 @@ function ImportEditor({
           )}
           <span className="text-[10px] text-muted-foreground">
             셀을 직접 수정하거나 행을 추가할 수 있습니다
+          </span>
+          <span className="text-[10px] text-muted-foreground">
+            Enter/Shift+Enter, ↑↓, 텍스트 끝의 ←→ 로 셀 이동
+          </span>
+          <span className="text-[10px] text-amber-700 dark:text-amber-300">
+            매입부가세는 계산값이 아니라 영수증 기준 확인값입니다
           </span>
         </div>
         <div className="flex items-center gap-2">
@@ -1149,11 +1601,14 @@ function ImportEditor({
                 rowIdx={rowIdx}
                 onCellChange={(colIdx, value) => updateCell(rowIdx, colIdx, value)}
                 onRowChange={(updater) => updateRow(rowIdx, updater)}
+                onInsertBelow={() => insertRowAt(rowIdx)}
                 onRemove={() => removeRow(rowIdx)}
                 budgetCodeIdx={budgetCodeIdx}
                 subCodeIdx={subCodeIdx}
                 evidenceIdx={evidenceIdx}
                 evidenceRequiredMap={evidenceRequiredMap}
+                commentCountByCell={commentCountByCell}
+                onOpenCellComments={onOpenCellComments}
               />
             ))}
             {rows.length === 0 && (
@@ -1224,22 +1679,27 @@ function ImportEditorRow({
   rowIdx,
   onCellChange,
   onRowChange,
+  onInsertBelow,
   onRemove,
   budgetCodeIdx,
   subCodeIdx,
   evidenceIdx,
-  projectId,
   evidenceRequiredMap,
+  commentCountByCell,
+  onOpenCellComments,
 }: {
   row: ImportRow;
   rowIdx: number;
   onCellChange: (colIdx: number, value: string) => void;
   onRowChange: (updater: (row: ImportRow) => ImportRow) => void;
+  onInsertBelow: () => void;
   onRemove: () => void;
   budgetCodeIdx: number;
   subCodeIdx: number;
   evidenceIdx: number;
   evidenceRequiredMap?: Record<string, string>;
+  commentCountByCell: Map<string, number>;
+  onOpenCellComments: (anchor: ActiveCommentAnchor) => void;
 }) {
   const hasError = Boolean(row.error);
   const methodIdx = useMemo(
@@ -1250,13 +1710,71 @@ function ImportEditorRow({
     () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '거래일시'),
     [],
   );
+  const expenseAmountIdx = useMemo(
+    () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '사업비 사용액'),
+    [],
+  );
+  const bankAmountIdx = useMemo(
+    () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '통장에 찍힌 입/출금액'),
+    [],
+  );
+  const vatIdx = useMemo(
+    () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '매입부가세'),
+    [],
+  );
+  const driveLinkIdx = useMemo(
+    () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '증빙자료 드라이브'),
+    [],
+  );
+  const noteIdx = useMemo(
+    () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '비고'),
+    [],
+  );
   const budgetCode = budgetCodeIdx >= 0 ? row.cells[budgetCodeIdx] : '';
   const subCodes = useMemo(() => {
     const entry = BUDGET_CODE_BOOK.find((c) => c.code === budgetCode);
     return entry ? entry.subCodes : [];
   }, [budgetCode]);
+  const parsedSettlementNote = useMemo(
+    () => parseSettlementNote(noteIdx >= 0 ? row.cells[noteIdx] : '', 'INCOMPLETE'),
+    [noteIdx, row.cells],
+  );
+  const progressValue = parsedSettlementNote.progress;
+  const rowLabel = `${rowIdx + 1}행`;
+  const commentTransactionId = row.sourceTxId || buildSheetRowCommentId(row.tempId);
+  const derivedSupplyAmount = useMemo(() => {
+    if (!featureFlags.qaP0SettlementV1) return '';
+    const bankAmount = parseNumber(row.cells[bankAmountIdx]) ?? 0;
+    const expenseAmount = parseNumber(row.cells[expenseAmountIdx]) ?? 0;
+    const vatIn = parseNumber(row.cells[vatIdx]) ?? 0;
+    const hasExpenseContext = bankAmount > 0 || expenseAmount > 0 || vatIn > 0;
+    if (!hasExpenseContext) return '';
+    return deriveSettlementAmounts({
+      direction: 'OUT',
+      amounts: { bankAmount, expenseAmount, vatIn },
+    }).supplyAmount.toLocaleString('ko-KR');
+  }, [bankAmountIdx, expenseAmountIdx, row.cells, vatIdx]);
 
-  console.log(row, "")
+  const renderCommentButton = useCallback((fieldLabel: string) => {
+    const fieldKey = toFieldSlug(fieldLabel);
+    const count = commentTransactionId
+      ? (commentCountByCell.get(buildCommentThreadKey(commentTransactionId, fieldKey)) || 0)
+      : 0;
+    return (
+      <CellCommentButton
+        count={count}
+        testId={`comment-button-${row.tempId}-${fieldKey}`}
+        onClick={() => {
+          onOpenCellComments({
+            transactionId: commentTransactionId,
+            fieldKey,
+            fieldLabel,
+            rowLabel,
+          });
+        }}
+      />
+    );
+  }, [commentCountByCell, commentTransactionId, onOpenCellComments, row.tempId, rowLabel]);
 
   return (
     <tr className={`${hasError ? 'bg-red-50/60 dark:bg-red-950/20' : 'hover:bg-muted/30'} transition-colors`}>
@@ -1269,6 +1787,14 @@ function ImportEditorRow({
               <AlertTriangle className="h-3 w-3" />
             </span>
           )}
+          <button
+            onClick={onInsertBelow}
+            className="text-muted-foreground/60 hover:text-primary transition-colors"
+            title="아래 행 삽입"
+            data-testid={`settlement-row-insert-${rowIdx + 1}`}
+          >
+            <Plus className="h-3 w-3" />
+          </button>
           <button
             onClick={onRemove}
             className="text-muted-foreground/40 hover:text-destructive transition-colors"
@@ -1283,88 +1809,217 @@ function ImportEditorRow({
         const isReadOnly = col.csvHeader === 'No.' || col.csvHeader === '해당 주차';
         const isBudgetCode = colIdx === budgetCodeIdx;
         const isSubCode = colIdx === subCodeIdx;
+        const isDriveLink = colIdx === driveLinkIdx;
+        const isVat = colIdx === vatIdx;
+        const isNote = colIdx === noteIdx;
+        const fieldLabel = `${rowIdx + 1}행 ${col.csvHeader}`;
+        const primaryNavProps = {
+          'data-grid-row': rowIdx,
+          'data-grid-col': colIdx,
+          'data-grid-slot': 'primary' as const,
+          onKeyDown: (event: KeyboardEvent<HTMLInputElement | HTMLSelectElement>) =>
+            handleGridKeyDown(event, rowIdx, colIdx, 'primary'),
+        };
         return (
           <td key={colIdx} className="px-0.5 py-0.5 border-b border-r">
             {isReadOnly ? (
-              <span className="text-[10px] text-muted-foreground px-1">
-                {row.cells[colIdx]}
-              </span>
+              <div className="group relative">
+                <input
+                  type="text"
+                  readOnly
+                  aria-label={fieldLabel}
+                  data-testid={toCellTestId(rowIdx, col.csvHeader)}
+                  value={row.cells[colIdx] || ''}
+                  className="w-full bg-transparent outline-none text-[10px] text-muted-foreground px-1 py-0.5 pr-6"
+                  {...primaryNavProps}
+                />
+                {renderCommentButton(col.csvHeader)}
+              </div>
             ) : colIdx === methodIdx ? (
-              <select
-                value={row.cells[colIdx] || ''}
-                className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[80px]"
-                onChange={(e) => {
-                  if (e.target.value !== row.cells[colIdx]) {
-                    onCellChange(colIdx, e.target.value);
-                  }
-                }}
-              >
-                <option value="">-</option>
-                {METHOD_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.label}>{o.label}</option>
-                ))}
-              </select>
+              <div className="group relative">
+                <select
+                  value={row.cells[colIdx] || ''}
+                  aria-label={fieldLabel}
+                  data-testid={toCellTestId(rowIdx, col.csvHeader)}
+                  className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5 pr-6 min-w-[80px]"
+                  onChange={(e) => {
+                    if (e.target.value !== row.cells[colIdx]) {
+                      onCellChange(colIdx, e.target.value);
+                    }
+                  }}
+                  {...primaryNavProps}
+                >
+                  <option value="">-</option>
+                  {METHOD_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.label}>{o.label}</option>
+                  ))}
+                </select>
+                {renderCommentButton(col.csvHeader)}
+              </div>
             ) : isBudgetCode ? (
-              <select
-                value={row.cells[colIdx] || ''}
-                className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[90px]"
-                onChange={(e) => {
-                  const nextCode = e.target.value;
-                  onRowChange((prev) => {
-                    if (budgetCodeIdx < 0) return prev;
-                    const cells = [...prev.cells];
-                    cells[budgetCodeIdx] = nextCode;
-                    if (subCodeIdx >= 0) {
-                      const allowed = BUDGET_CODE_BOOK.find((c) => c.code === nextCode)?.subCodes || [];
-                      if (!allowed.includes(cells[subCodeIdx])) cells[subCodeIdx] = '';
-                    }
-                    if (evidenceIdx >= 0) {
-                      const mapped = resolveEvidenceRequiredDesc(evidenceRequiredMap, nextCode, cells[subCodeIdx] || '');
-                      if (mapped) cells[evidenceIdx] = mapped;
-                    }
-                    return { ...prev, cells };
-                  });
-                }}
-              >
-                <option value="">-</option>
-                {BUDGET_CODE_BOOK.map((c) => (
-                  <option key={c.code} value={c.code}>{c.code}</option>
-                ))}
-              </select>
+              <div className="group relative">
+                <select
+                  value={row.cells[colIdx] || ''}
+                  aria-label={fieldLabel}
+                  data-testid={toCellTestId(rowIdx, col.csvHeader)}
+                  className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5 pr-6 min-w-[90px]"
+                  onChange={(e) => {
+                    const nextCode = e.target.value;
+                    onRowChange((prev) => {
+                      if (budgetCodeIdx < 0) return prev;
+                      const cells = [...prev.cells];
+                      cells[budgetCodeIdx] = nextCode;
+                      if (subCodeIdx >= 0) {
+                        const allowed = BUDGET_CODE_BOOK.find((c) => c.code === nextCode)?.subCodes || [];
+                        if (!allowed.includes(cells[subCodeIdx])) cells[subCodeIdx] = '';
+                      }
+                      if (evidenceIdx >= 0) {
+                        const mapped = resolveEvidenceRequiredDesc(evidenceRequiredMap, nextCode, cells[subCodeIdx] || '');
+                        if (mapped) cells[evidenceIdx] = mapped;
+                      }
+                      return { ...prev, cells };
+                    });
+                  }}
+                  {...primaryNavProps}
+                >
+                  <option value="">-</option>
+                  {BUDGET_CODE_BOOK.map((c) => (
+                    <option key={c.code} value={c.code}>{c.code}</option>
+                  ))}
+                </select>
+                {renderCommentButton(col.csvHeader)}
+              </div>
             ) : isSubCode ? (
-              <select
-                value={row.cells[colIdx] || ''}
-                disabled={!budgetCode}
-                className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[90px]"
-                onChange={(e) => {
-                  const nextSub = e.target.value;
-                  onRowChange((prev) => {
-                    if (subCodeIdx < 0) return prev;
-                    const cells = [...prev.cells];
-                    cells[subCodeIdx] = nextSub;
-                    if (evidenceIdx >= 0) {
-                      const mapped = resolveEvidenceRequiredDesc(evidenceRequiredMap, budgetCode, nextSub);
-                      if (mapped) cells[evidenceIdx] = mapped;
-                    }
-                    return { ...prev, cells };
-                  });
-                }}
-              >
-                <option value="">-</option>
-                {subCodes.map((sc) => (
-                  <option key={sc} value={sc}>{sc}</option>
-                ))}
-              </select>
+              <div className="group relative">
+                <select
+                  value={row.cells[colIdx] || ''}
+                  disabled={!budgetCode}
+                  aria-label={fieldLabel}
+                  data-testid={toCellTestId(rowIdx, col.csvHeader)}
+                  className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5 pr-6 min-w-[90px]"
+                  onChange={(e) => {
+                    const nextSub = e.target.value;
+                    onRowChange((prev) => {
+                      if (subCodeIdx < 0) return prev;
+                      const cells = [...prev.cells];
+                      cells[subCodeIdx] = nextSub;
+                      if (evidenceIdx >= 0) {
+                        const mapped = resolveEvidenceRequiredDesc(evidenceRequiredMap, budgetCode, nextSub);
+                        if (mapped) cells[evidenceIdx] = mapped;
+                      }
+                      return { ...prev, cells };
+                    });
+                  }}
+                  {...primaryNavProps}
+                >
+                  <option value="">-</option>
+                  {subCodes.map((sc) => (
+                    <option key={sc} value={sc}>{sc}</option>
+                  ))}
+                </select>
+                {renderCommentButton(col.csvHeader)}
+              </div>
+            ) : isDriveLink ? (
+              <div className="group relative min-w-[180px]">
+                <div className="flex items-center gap-1 pr-6">
+                  <input
+                    type="text"
+                    aria-label={fieldLabel}
+                    data-testid={toCellTestId(rowIdx, col.csvHeader)}
+                    value={row.cells[colIdx] || ''}
+                    placeholder="Drive URL"
+                    className="flex-1 bg-transparent outline-none text-[11px] px-1 py-0.5"
+                    onChange={(e) => onCellChange(colIdx, e.target.value)}
+                    {...primaryNavProps}
+                  />
+                  {isValidDriveUrl(row.cells[colIdx] || '') && (
+                    <a
+                      href={row.cells[colIdx]}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label={`${fieldLabel} 열기`}
+                      data-testid={toCellTestId(rowIdx, `${col.csvHeader}-open`)}
+                      className="shrink-0 inline-flex h-6 items-center rounded-md border px-2 text-[10px] text-blue-600 hover:bg-blue-50"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      열기
+                    </a>
+                  )}
+                </div>
+                {renderCommentButton(col.csvHeader)}
+              </div>
+            ) : isVat ? (
+              <div className="group relative min-w-[90px]">
+                <div className="pr-6">
+                  <input
+                    type="text"
+                    aria-label={fieldLabel}
+                    data-testid={toCellTestId(rowIdx, col.csvHeader)}
+                    value={row.cells[colIdx] || ''}
+                    className={`w-full bg-transparent outline-none text-[11px] px-1 py-0.5 ${hasError && colIdx === dateIdx && !row.cells[colIdx]
+                      ? 'ring-1 ring-red-300 rounded'
+                      : ''
+                      }`}
+                    onChange={(e) => onCellChange(colIdx, e.target.value)}
+                    {...primaryNavProps}
+                  />
+                  {derivedSupplyAmount && (
+                    <span className="block px-1 pb-0.5 text-[9px] text-muted-foreground">
+                      공급가액 {derivedSupplyAmount}
+                    </span>
+                  )}
+                </div>
+                {renderCommentButton(col.csvHeader)}
+              </div>
+            ) : isNote ? (
+              <div className="group relative min-w-[140px]">
+                <div className="pr-6">
+                  <input
+                    type="text"
+                    aria-label={fieldLabel}
+                    data-testid={toCellTestId(rowIdx, col.csvHeader)}
+                    value={parsedSettlementNote.note}
+                    className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5"
+                    onChange={(e) => onCellChange(colIdx, composeSettlementNote(progressValue, e.target.value))}
+                    {...primaryNavProps}
+                  />
+                  <select
+                    value={progressValue}
+                    aria-label={`${fieldLabel} 상태`}
+                    data-testid={toCellTestId(rowIdx, `${col.csvHeader}-status`)}
+                    className="mt-1 w-full rounded border bg-background/60 px-1 py-0.5 text-[10px]"
+                    onChange={(e) => {
+                      const nextProgress = e.target.value as NonNullable<Transaction['settlementProgress']>;
+                      onCellChange(colIdx, composeSettlementNote(nextProgress, parsedSettlementNote.note));
+                    }}
+                    data-grid-row={rowIdx}
+                    data-grid-col={colIdx}
+                    data-grid-slot="secondary"
+                    onKeyDown={(event) => handleGridKeyDown(event, rowIdx, colIdx, 'secondary')}
+                  >
+                    {SETTLEMENT_PROGRESS_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </div>
+                {renderCommentButton(col.csvHeader)}
+              </div>
             ) : (
-              <input
-                type="text"
-                value={row.cells[colIdx] || ''}
-                className={`w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[50px] ${hasError && colIdx === dateIdx && !row.cells[colIdx]
-                  ? 'ring-1 ring-red-300 rounded'
-                  : ''
-                  }`}
-                onChange={(e) => onCellChange(colIdx, e.target.value)}
-              />
+              <div className="group relative">
+                <input
+                  type="text"
+                  aria-label={fieldLabel}
+                  data-testid={toCellTestId(rowIdx, col.csvHeader)}
+                  value={row.cells[colIdx] || ''}
+                  className={`w-full bg-transparent outline-none text-[11px] px-1 py-0.5 pr-6 min-w-[50px] ${hasError && colIdx === dateIdx && !row.cells[colIdx]
+                    ? 'ring-1 ring-red-300 rounded'
+                    : ''
+                    }`}
+                  onChange={(e) => onCellChange(colIdx, e.target.value)}
+                  {...primaryNavProps}
+                />
+                {renderCommentButton(col.csvHeader)}
+              </div>
             )}
           </td>
         );

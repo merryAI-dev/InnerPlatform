@@ -19,6 +19,7 @@ export type AccountType = 'DEDICATED' | 'OPERATING' | 'NONE'; // 전용통장 / 
 export type TransactionState = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED';
 export type Direction = 'IN' | 'OUT';
 export type PaymentMethod = 'TRANSFER' | 'CORP_CARD_1' | 'CORP_CARD_2' | 'OTHER';
+export type SettlementProgress = 'INCOMPLETE' | 'COMPLETE';
 
 export type EvidenceStatus = 'MISSING' | 'PARTIAL' | 'COMPLETE';
 
@@ -132,11 +133,23 @@ export const EVIDENCE_STATUS_LABELS: Record<EvidenceStatus, string> = {
   COMPLETE: '완료',
 };
 
-export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
+export const LEGACY_PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   TRANSFER: '계좌이체',
   CORP_CARD_1: '법인카드(뒷번호1)',
   CORP_CARD_2: '법인카드(뒷번호2)',
   OTHER: '기타',
+};
+
+export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
+  TRANSFER: '계좌이체',
+  CORP_CARD_1: '사업비카드',
+  CORP_CARD_2: '개인법인카드',
+  OTHER: '기타',
+};
+
+export const SETTLEMENT_PROGRESS_LABELS: Record<SettlementProgress, string> = {
+  INCOMPLETE: '미완료',
+  COMPLETE: '완료',
 };
 
 // ── 참여율 관리 (Participation Rate) ──
@@ -325,6 +338,7 @@ export interface TransactionAmounts {
   vatOut: number;          // 매출세액
   vatRefund: number;       // 부가세환급
   balanceAfter: number;    // 거래 후 잔액
+  supplyAmount?: number;   // 공급가액 (자동 계산/보조값)
 }
 
 export interface Transaction {
@@ -342,6 +356,8 @@ export interface Transaction {
   budgetCategory?: string; // 비목/세목
   counterparty: string;    // 거래처
   memo: string;
+  internalMemo?: string;   // 사업팀 내부 메모
+  bankMemo?: string;       // 은행 원문 적요
   amounts: TransactionAmounts;
   // 증빙
   evidenceRequired: string[];
@@ -375,6 +391,7 @@ export interface Transaction {
   eNaraExecuted?: string;          // e나라 집행
   vatSettlementDone?: boolean;     // 부가세 지결 완료여부
   settlementComplete?: boolean;    // 최종완료
+  settlementProgress?: SettlementProgress; // 내용 기재 상태
   settlementNote?: string;         // 비고
   // 감사 로그 (회계부정 방지)
   editHistory?: Array<{
@@ -404,8 +421,13 @@ export interface Comment {
   id: string;
   version?: number;
   transactionId: string;
+  projectId?: string;
+  targetType?: 'transaction' | 'expense_sheet_row';
+  sheetRowId?: string;
   authorId: string;
   authorName: string;
+  fieldKey?: string;
+  fieldLabel?: string;
   content: string;
   createdAt: string;
 }
