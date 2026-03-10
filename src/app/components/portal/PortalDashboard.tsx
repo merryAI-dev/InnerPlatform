@@ -345,7 +345,7 @@ export function PortalDashboard() {
             {/* 빠른 링크 */}
             <div className="pt-1 space-y-1">
               {[
-                { label: '예산총괄 확인', icon: Calculator, to: '/portal/budget', color: '#0d9488' },
+                { label: '예산 편집', icon: Calculator, to: '/portal/budget', color: '#0d9488' },
                 { label: '인력변경 신청하기', icon: ArrowRightLeft, to: '/portal/change-requests', color: '#7c3aed' },
                 { label: '인력 현황 보기', icon: Users, to: '/portal/personnel', color: '#059669' },
               ].map(a => (

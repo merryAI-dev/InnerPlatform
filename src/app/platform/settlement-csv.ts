@@ -123,8 +123,8 @@ export const SETTLEMENT_COLUMN_GROUPS = (() => {
 
 const METHOD_LABELS: Record<string, string> = {
   TRANSFER: '계좌이체',
-  CORP_CARD_1: '법인카드',
-  CORP_CARD_2: '법인카드(뒷번호2)',
+  CORP_CARD_1: '사업비카드',
+  CORP_CARD_2: '개인법인카드',
   OTHER: '기타',
 };
 
@@ -134,8 +134,8 @@ function methodToLabel(method: string | undefined): string {
 
 function labelToMethod(raw: string): PaymentMethod {
   const s = normalizeSpace(raw).toLowerCase();
-  if (/법인카드.*1|뒷번호1|card.?1/.test(s)) return 'CORP_CARD_1';
-  if (/법인카드.*2|뒷번호2|card.?2/.test(s)) return 'CORP_CARD_2';
+  if (/개인.?법인.?카드|법인카드.*2|뒷번호2|card.?2/.test(s)) return 'CORP_CARD_2';
+  if (/사업비.?카드|법인카드.*1|뒷번호1|card.?1/.test(s)) return 'CORP_CARD_1';
   if (/법인카드|카드|card/.test(s)) return 'CORP_CARD_1';
   if (/계좌|이체|bank/.test(s)) return 'TRANSFER';
   return 'OTHER';

@@ -67,7 +67,7 @@ if (!_g.__MYSC_PAYROLL_CTX__) {
 const PayrollContext: React.Context<(PayrollState & PayrollActions) | null> = _g.__MYSC_PAYROLL_CTX__;
 
 export function PayrollProvider({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
+  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const { db, isOnline, orgId } = useFirebase();
   const firestoreEnabled = featureFlags.firestoreCoreEnabled && isOnline && !!db;
 
@@ -83,6 +83,13 @@ export function PayrollProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     unsubsRef.current.forEach((u) => u());
     unsubsRef.current = [];
+
+    if (authLoading || !isAuthenticated || !user) {
+      setSchedules([]);
+      setRuns([]);
+      setMonthlyCloses([]);
+      return;
+    }
 
     if (!firestoreEnabled || !db) {
       setSchedules([]);
@@ -174,7 +181,7 @@ export function PayrollProvider({ children }: { children: ReactNode }) {
       unsubsRef.current.forEach((u) => u());
       unsubsRef.current = [];
     };
-  }, [db, firestoreEnabled, myProjectId, orgId, readAll]);
+  }, [authLoading, isAuthenticated, user, db, firestoreEnabled, myProjectId, orgId, readAll]);
 
   const upsertSchedule = useCallback(async (input: {
     projectId: string;
@@ -382,4 +389,3 @@ export function usePayroll() {
   if (!ctx) throw new Error('usePayroll must be used within PayrollProvider');
   return ctx;
 }
-

@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  canChooseWorkspace,
+  canEnterPortalWorkspace,
   isAdminSpaceRole,
   isPortalRole,
   resolveHomePath,
+  resolvePostLoginPath,
+  shouldPromptWorkspaceSelection,
   shouldForcePortalOnboarding,
 } from './navigation';
 
@@ -24,10 +28,38 @@ describe('navigation helpers', () => {
     expect(resolveHomePath('ADMIN')).toBe('/');
   });
 
+  it('supports workspace-aware home resolution for admin accounts', () => {
+    expect(resolveHomePath('admin', 'portal')).toBe('/portal');
+    expect(resolveHomePath('tenant_admin', 'admin')).toBe('/');
+  });
+
   it('defaults unknown roles to portal space (least privilege)', () => {
     expect(resolveHomePath('unknown_role')).toBe('/portal');
     expect(resolveHomePath('')).toBe('/portal');
     expect(resolveHomePath(null)).toBe('/portal');
+  });
+
+  it('knows which roles can enter or choose a workspace', () => {
+    expect(canEnterPortalWorkspace('pm')).toBe(true);
+    expect(canEnterPortalWorkspace('admin')).toBe(true);
+    expect(canEnterPortalWorkspace('finance')).toBe(false);
+    expect(canChooseWorkspace('admin')).toBe(true);
+    expect(canChooseWorkspace('tenant_admin')).toBe(true);
+    expect(canChooseWorkspace('pm')).toBe(false);
+  });
+
+  it('prompts workspace selection only when admin-like roles have no preference', () => {
+    expect(shouldPromptWorkspaceSelection('admin', undefined)).toBe(true);
+    expect(shouldPromptWorkspaceSelection('tenant_admin', 'portal')).toBe(false);
+    expect(shouldPromptWorkspaceSelection('pm', undefined)).toBe(false);
+  });
+
+  it('resolves post-login routes without leaking unauthorized paths', () => {
+    expect(resolvePostLoginPath('pm', undefined, '/portal/weekly-expenses')).toBe('/portal/weekly-expenses');
+    expect(resolvePostLoginPath('pm', undefined, '/settings')).toBe('/portal');
+    expect(resolvePostLoginPath('admin', 'portal', '/settings')).toBe('/settings');
+    expect(resolvePostLoginPath('admin', 'portal', '/portal/budget')).toBe('/portal/budget');
+    expect(resolvePostLoginPath('finance', undefined, '/portal/weekly-expenses')).toBe('/');
   });
 
   it('forces onboarding only for unregistered portal users', () => {

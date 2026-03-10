@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router';
+import { useEffect, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router';
 import {
   FolderKanban,
   ArrowRight,
@@ -9,7 +9,7 @@ import {
 import { Card, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
 import { useAuth } from '../../data/auth-store';
-import { resolveHomePath } from '../../platform/navigation';
+import { resolvePostLoginPath, shouldPromptWorkspaceSelection } from '../../platform/navigation';
 
 // ═══════════════════════════════════════════════════════════════
 // LoginPage — 통합 로그인 페이지
@@ -18,6 +18,7 @@ import { resolveHomePath } from '../../platform/navigation';
 
 export function LoginPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const {
     loginWithGoogle,
     isLoading,
@@ -26,14 +27,23 @@ export function LoginPage() {
     user,
   } = useAuth();
   const [error, setError] = useState('');
+  const redirectFrom = (location.state as { from?: string } | null)?.from;
 
   // 이미 인증된 사용자는 역할에 맞는 페이지로 리다이렉트
   useEffect(() => {
     if (isAuthenticated && user) {
-      const target = resolveHomePath(user.role);
+      if (shouldPromptWorkspaceSelection(user.role, user.defaultWorkspace ?? user.lastWorkspace)) {
+        navigate('/workspace-select', { replace: true, state: redirectFrom ? { from: redirectFrom } : undefined });
+        return;
+      }
+      const target = resolvePostLoginPath(
+        user.role,
+        user.defaultWorkspace ?? user.lastWorkspace,
+        redirectFrom,
+      );
       navigate(target, { replace: true });
     }
-  }, [isAuthenticated, user, navigate]);
+  }, [isAuthenticated, navigate, redirectFrom, user]);
 
   if (isAuthenticated && user) return null;
 

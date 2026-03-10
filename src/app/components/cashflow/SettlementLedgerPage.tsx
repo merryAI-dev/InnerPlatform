@@ -1,10 +1,10 @@
-import { ChevronDown, ChevronLeft, ChevronRight, Download, ExternalLink, GripVertical, Loader2, Plus, RotateCcw, Save, Send, X } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, Download, ExternalLink, GripVertical, Loader2, MessageSquare, Plus, RotateCcw, Save, Send, X } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { ClipboardEvent, KeyboardEvent, MouseEvent } from 'react';
 import { toast } from 'sonner';
 import { BUDGET_CODE_BOOK } from '../../data/budget-data';
-import type { BudgetCodeEntry, Transaction, TransactionState } from '../../data/types';
+import type { BudgetCodeEntry, Comment, Transaction, TransactionState } from '../../data/types';
 import { findWeekForDate, getMonthMondayWeeks, getYearMondayWeeks, type MonthMondayWeek } from '../../platform/cashflow-weeks';
 import { parseDate, parseNumber, triggerDownload } from '../../platform/csv-utils';
 import { computeEvidenceStatus, computeEvidenceSummary, isValidDriveUrl } from '../../platform/evidence-helpers';
@@ -22,6 +22,8 @@ import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Checkbox } from '../ui/checkbox';
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '../ui/sheet';
+import { Textarea } from '../ui/textarea';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -47,8 +49,8 @@ const fmt = (n: number | undefined) =>
 
 const METHOD_LABELS: Record<string, string> = {
   TRANSFER: '계좌이체',
-  CORP_CARD_1: '법인카드',
-  CORP_CARD_2: '법인카드(뒷번호2)',
+  CORP_CARD_1: '사업비카드',
+  CORP_CARD_2: '개인법인카드',
   OTHER: '기타',
 };
 
@@ -80,12 +82,75 @@ function formatSubCodeLabel(codeIndex: number, subIndex: number, name: string): 
   return `${codeIndex + 1}-${subIndex + 1} ${trimmed}`;
 }
 
+function toFieldSlug(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9가-힣]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function buildCommentThreadKey(transactionId: string, fieldKey: string): string {
+  return `${transactionId}::${fieldKey}`;
+}
+
+function buildSheetRowCommentId(tempId: string): string {
+  return `sheet-row:${tempId}`;
+}
+
+function formatCommentTime(value: string): string {
+  return value ? value.slice(0, 16).replace('T', ' ') : '';
+}
+
 function normalizeMethodValue(value: string | undefined): string {
   if (!value) return '';
   if (value === 'BANK_TRANSFER') return 'TRANSFER';
   if (value === 'CARD') return 'CORP_CARD_1';
   if (value === 'CASH' || value === 'CHECK') return 'OTHER';
   return value;
+}
+
+function parseContentStatusNote(value: string): { status: '' | '미완료' | '완료'; text: string } {
+  const trimmed = String(value || '').trim();
+  const match = trimmed.match(/^\[(미완료|완료)\]\s*(.*)$/);
+  if (!match) return { status: '', text: trimmed };
+  return { status: match[1] as '미완료' | '완료', text: match[2] || '' };
+}
+
+function composeContentStatusNote(status: '' | '미완료' | '완료', text: string): string {
+  const body = String(text || '').trim();
+  if (!status) return body;
+  return body ? `[${status}] ${body}` : `[${status}]`;
+}
+
+interface QuickExpenseTemplate {
+  id: string;
+  label: string;
+  methodLabel: string;
+  cashflowLabel: string;
+  counterparty: string;
+  memo: string;
+}
+
+const QUICK_EXPENSE_TEMPLATES: QuickExpenseTemplate[] = [
+  { id: 'communication', label: '통신비', methodLabel: '계좌이체', cashflowLabel: '직접사업비', counterparty: '통신비', memo: '정기지출: 통신비' },
+  { id: 'rent', label: '임차료', methodLabel: '계좌이체', cashflowLabel: '직접사업비', counterparty: '임차료', memo: '정기지출: 임차료' },
+  { id: 'utility', label: '공과금', methodLabel: '계좌이체', cashflowLabel: '직접사업비', counterparty: '공과금', memo: '정기지출: 공과금' },
+  { id: 'insurance', label: '보험료', methodLabel: '계좌이체', cashflowLabel: '직접사업비', counterparty: '보험료', memo: '정기지출: 보험료' },
+];
+
+function derivePendingEvidence(requiredDesc: string, completedDesc: string): string {
+  const required = String(requiredDesc || '')
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (required.length === 0) return '';
+  const completed = String(completedDesc || '')
+    .split(',')
+    .map((part) => part.trim().toLowerCase())
+    .filter(Boolean);
+  return required
+    .filter((item) => !completed.some((done) => done.includes(item.toLowerCase())))
+    .join(', ');
 }
 const TX_STATE_BADGE: Record<TransactionState, { label: string; cls: string }> = {
   DRAFT: { label: '작성중', cls: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300' },
@@ -124,6 +189,161 @@ function resolveWeekFromLabel(label: string, yearWeeks: MonthMondayWeek[]): Mont
   return getMonthMondayWeeks(yearMonth).find((w) => w.weekNo === weekNo);
 }
 
+interface ActiveCommentAnchor {
+  transactionId: string;
+  fieldKey: string;
+  fieldLabel: string;
+  rowLabel: string;
+}
+
+function CellCommentButton({
+  count,
+  disabled,
+  onClick,
+}: {
+  count: number;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      title={disabled ? '저장 후 메모를 남길 수 있습니다' : '셀 메모 열기'}
+      aria-label="셀 메모 열기"
+      disabled={disabled}
+      className={`absolute top-1 right-1 inline-flex h-5 w-5 items-center justify-center rounded-md border text-[10px] transition ${
+        count > 0
+          ? 'border-amber-300 bg-amber-50 text-amber-700 opacity-100'
+          : 'border-transparent bg-background/90 text-muted-foreground opacity-0 group-hover:opacity-100'
+      } ${disabled ? 'cursor-not-allowed opacity-40' : 'hover:border-border hover:text-foreground'}`}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
+    >
+      <MessageSquare className="h-3.5 w-3.5" />
+      {count > 0 && (
+        <span className="absolute -top-1 -right-1 inline-flex min-w-4 items-center justify-center rounded-full bg-amber-500 px-1 text-[9px] font-bold leading-none text-white">
+          {count}
+        </span>
+      )}
+    </button>
+  );
+}
+
+function CommentThreadSheet({
+  anchor,
+  comments,
+  open,
+  projectId,
+  currentUserId,
+  currentUserName,
+  onClose,
+  onAddComment,
+}: {
+  anchor: ActiveCommentAnchor | null;
+  comments: Comment[];
+  open: boolean;
+  projectId: string;
+  currentUserId: string;
+  currentUserName: string;
+  onClose: () => void;
+  onAddComment?: (comment: Comment) => void | Promise<void>;
+}) {
+  const [draft, setDraft] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!open) setDraft('');
+  }, [open]);
+
+  const handleSubmit = useCallback(async () => {
+    if (!anchor || !onAddComment) return;
+    const content = draft.trim();
+    if (!content) return;
+
+    setSaving(true);
+    try {
+      const isSheetRowComment = anchor.transactionId.startsWith('sheet-row:');
+      await onAddComment({
+        id: `cmt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        transactionId: anchor.transactionId,
+        projectId,
+        targetType: isSheetRowComment ? 'expense_sheet_row' : 'transaction',
+        ...(isSheetRowComment ? { sheetRowId: anchor.transactionId } : {}),
+        authorId: currentUserId || currentUserName,
+        authorName: currentUserName,
+        fieldKey: anchor.fieldKey,
+        fieldLabel: anchor.fieldLabel,
+        content,
+        createdAt: new Date().toISOString(),
+      });
+      setDraft('');
+      toast.success('메모를 남겼습니다.');
+    } catch (error) {
+      console.error('[SettlementLedger] add comment failed:', error);
+      toast.error('메모 저장에 실패했습니다.');
+    } finally {
+      setSaving(false);
+    }
+  }, [anchor, currentUserId, currentUserName, draft, onAddComment, projectId]);
+
+  return (
+    <Sheet modal={false} open={open} onOpenChange={(nextOpen) => { if (!nextOpen) onClose(); }}>
+      <SheetContent side="right" showOverlay={false} className="w-[420px] sm:max-w-[420px] gap-0">
+        <SheetHeader className="border-b">
+          <SheetTitle className="text-[14px]">셀 메모</SheetTitle>
+          <SheetDescription className="text-[11px]">
+            {anchor ? `${anchor.rowLabel} · ${anchor.fieldLabel}` : '메모를 남길 셀을 선택하세요.'}
+          </SheetDescription>
+        </SheetHeader>
+        <div className="flex-1 overflow-y-auto px-4 py-4">
+          {comments.length === 0 ? (
+            <div className="rounded-lg border border-dashed px-4 py-6 text-[12px] text-muted-foreground">
+              아직 메모가 없습니다. 아래 입력창에 첫 메모를 남겨보세요.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {comments.map((comment) => (
+                <div key={comment.id} className="rounded-2xl border bg-background px-3 py-2.5 shadow-sm">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-semibold">{comment.authorName}</span>
+                    <span className="text-[10px] text-muted-foreground">{formatCommentTime(comment.createdAt)}</span>
+                  </div>
+                  {comment.fieldLabel && (
+                    <Badge variant="secondary" className="mt-2 text-[9px]">{comment.fieldLabel}</Badge>
+                  )}
+                  <p className="mt-2 whitespace-pre-wrap text-[12px] leading-5">{comment.content}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="border-t px-4 py-4 space-y-2">
+          <Textarea
+            value={draft}
+            placeholder="이 셀에 남길 메모를 적어주세요"
+            className="min-h-24 text-[12px]"
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                event.preventDefault();
+                void handleSubmit();
+              }
+            }}
+          />
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] text-muted-foreground">Cmd/Ctrl + Enter로 저장</span>
+            <Button size="sm" className="h-8 text-[11px]" disabled={!draft.trim() || saving || !anchor || !onAddComment} onClick={() => void handleSubmit()}>
+              {saving ? '저장중...' : '메모 남기기'}
+            </Button>
+          </div>
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
 // ── Types ──
 
 interface WeekBucket {
@@ -144,6 +364,7 @@ export interface SettlementLedgerProps {
   saving?: boolean;
   sheetRows?: ImportRow[] | null;
   onSaveSheetRows?: (rows: ImportRow[]) => void | Promise<void>;
+  autoSaveSheet?: boolean;
   authorOptions?: string[];
   budgetCodeBook?: BudgetCodeEntry[];
   hideYearControls?: boolean;
@@ -157,7 +378,10 @@ export interface SettlementLedgerProps {
   onChangeTransactionState?: (txId: string, newState: TransactionState, reason?: string) => void;
   /** Current user name for audit trail */
   currentUserName?: string;
+  currentUserId?: string;
   userRole?: 'pm' | 'admin';
+  comments?: Comment[];
+  onAddComment?: (comment: Comment) => void | Promise<void>;
 }
 
 // ── Main Component ──
@@ -173,6 +397,7 @@ export function SettlementLedgerPage({
   onSaveEvidenceRequiredMap,
   sheetRows,
   onSaveSheetRows,
+  autoSaveSheet = false,
   authorOptions,
   budgetCodeBook,
   hideYearControls = false,
@@ -180,7 +405,10 @@ export function SettlementLedgerPage({
   onSubmitWeek,
   onChangeTransactionState,
   currentUserName = 'PM',
+  currentUserId = 'pm',
   userRole = 'pm',
+  comments = [],
+  onAddComment,
 }: SettlementLedgerProps) {
   const { upsertWeekAmounts } = useCashflowWeeks();
   const [year, setYear] = useState(() => new Date().getFullYear());
@@ -188,6 +416,9 @@ export function SettlementLedgerPage({
   const [importRows, setImportRows] = useState<ImportRow[] | null>(null);
   const [importDirty, setImportDirty] = useState(false);
   const [sheetSaving, setSheetSaving] = useState(false);
+  const [lastAutoSavedAt, setLastAutoSavedAt] = useState('');
+  const [downloadFrom, setDownloadFrom] = useState('');
+  const [downloadTo, setDownloadTo] = useState('');
   const [revertConfirmOpen, setRevertConfirmOpen] = useState(false);
   const cloneImportRows = useCallback((input: ImportRow[]) => (
     input.map((row) => ({ ...row, cells: [...row.cells] }))
@@ -360,11 +591,21 @@ export function SettlementLedgerPage({
       return [name, ...Array(colSpan - 1).fill('')];
     });
     const columnRow = SETTLEMENT_COLUMNS.map((c) => c.csvHeader);
-    const dataRows = importRows
-      ? importRows.map((row) => row.cells.map((c) => c ?? ''))
-      : transactionsToImportRows(projectTxs, yearWeeks).map((row) => row.cells.map((c) => c ?? ''));
+    const sourceRows = importRows || transactionsToImportRows(projectTxs, yearWeeks);
+    const dateIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '거래일시');
+    const dataRows = sourceRows
+      .filter((row) => {
+        if (dateIdx < 0 || (!downloadFrom && !downloadTo)) return true;
+        const raw = String(row.cells[dateIdx] || '').trim();
+        const iso = raw ? (parseDate(raw.split(/\s+/)[0]) || '') : '';
+        if (!iso) return true;
+        if (downloadFrom && iso < downloadFrom) return false;
+        if (downloadTo && iso > downloadTo) return false;
+        return true;
+      })
+      .map((row) => row.cells.map((c) => c ?? ''));
     return [headerRow, columnRow, ...dataRows];
-  }, [importRows, projectTxs, yearWeeks]);
+  }, [downloadFrom, downloadTo, importRows, projectTxs, yearWeeks]);
 
   // ── Excel Download ──
   const handleDownload = useCallback(async () => {
@@ -386,12 +627,13 @@ export function SettlementLedgerPage({
 
   
 
-  const handleImportSave = useCallback(async () => {
+  const handleImportSave = useCallback(async (options?: { silent?: boolean }) => {
     if (!importRows) return;
     if (!onSaveSheetRows) {
       toast.error('저장 기능이 연결되어 있지 않습니다.');
       return;
     }
+    const silent = options?.silent ?? false;
     setSheetSaving(true);
     try {
       await onSaveSheetRows(importRows);
@@ -497,18 +739,33 @@ export function SettlementLedgerPage({
       );
 
       setImportDirty(false);
+      setLastAutoSavedAt(new Date().toISOString());
       if (cashflowFailed) {
-        toast.message('정산대장은 저장되었지만 캐시플로 업데이트에 실패했습니다.');
+        if (!silent) {
+          toast.message('정산대장은 저장되었지만 캐시플로 업데이트에 실패했습니다.');
+        }
       } else {
-        toast.success('정산대장을 저장했습니다.');
+        if (!silent) {
+          toast.success('정산대장을 저장했습니다.');
+        }
       }
     } catch (err) {
       console.error('[SettlementLedger] save sheet failed:', err);
-      toast.error('정산대장 저장에 실패했습니다.');
+      if (!silent) {
+        toast.error('정산대장 저장에 실패했습니다.');
+      }
     } finally {
       setSheetSaving(false);
     }
   }, [importRows, onSaveSheetRows, upsertWeekAmounts, projectId, yearWeeks, sheetRows]);
+
+  useEffect(() => {
+    if (!autoSaveSheet || !importDirty || !importRows || !onSaveSheetRows || sheetSaving) return;
+    const timer = window.setTimeout(() => {
+      void handleImportSave({ silent: true });
+    }, 900);
+    return () => window.clearTimeout(timer);
+  }, [autoSaveSheet, importDirty, importRows, onSaveSheetRows, sheetSaving, handleImportSave]);
 
   // ── Inline edit handler with audit trail ──
   const handleUpdateTx = useCallback(
@@ -587,7 +844,21 @@ export function SettlementLedgerPage({
               </Badge>
             )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <input
+              type="date"
+              value={downloadFrom}
+              onChange={(e) => setDownloadFrom(e.target.value)}
+              className="h-8 rounded-md border px-2 text-[11px] bg-background"
+              title="다운로드 시작일"
+            />
+            <input
+              type="date"
+              value={downloadTo}
+              onChange={(e) => setDownloadTo(e.target.value)}
+              className="h-8 rounded-md border px-2 text-[11px] bg-background"
+              title="다운로드 종료일"
+            />
             <Button
               variant="outline"
               size="sm"
@@ -597,7 +868,11 @@ export function SettlementLedgerPage({
               <Download className="h-4 w-4 mr-1" />
               엑셀 다운로드
             </Button>
-            
+            {autoSaveSheet && (
+              <span className="text-[10px] text-muted-foreground">
+                {sheetSaving ? '자동 저장 중...' : lastAutoSavedAt ? `자동 저장 ${formatCommentTime(lastAutoSavedAt)}` : '자동 저장 대기'}
+              </span>
+            )}
           </div>
         </div>
 
@@ -619,6 +894,10 @@ export function SettlementLedgerPage({
             budgetCodeBook={resolvedBudgetBook}
             weekOptions={weekOptions}
             inline
+            comments={comments}
+            currentUserId={currentUserId}
+            currentUserName={currentUserName}
+            onAddComment={onAddComment}
           />
         )}
         {revertConfirmDialog}
@@ -648,10 +927,10 @@ export function SettlementLedgerPage({
             </Badge>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button
+              variant="outline"
+              size="sm"
             className="cursor-pointer shadow-sm hover:bg-muted/40"
             onClick={expandAll}
           >
@@ -670,11 +949,29 @@ export function SettlementLedgerPage({
             size="sm"
             className="cursor-pointer shadow-sm hover:bg-muted/40"
             onClick={handleDownload}
-          >
-            <Download className="h-4 w-4 mr-1" />
-            엑셀 다운로드
-          </Button>
-          
+            >
+              <Download className="h-4 w-4 mr-1" />
+              엑셀 다운로드
+            </Button>
+            <input
+              type="date"
+              value={downloadFrom}
+              onChange={(e) => setDownloadFrom(e.target.value)}
+              className="h-8 rounded-md border px-2 text-[11px] bg-background"
+              title="다운로드 시작일"
+            />
+            <input
+              type="date"
+              value={downloadTo}
+              onChange={(e) => setDownloadTo(e.target.value)}
+              className="h-8 rounded-md border px-2 text-[11px] bg-background"
+              title="다운로드 종료일"
+            />
+            {autoSaveSheet && (
+              <span className="text-[10px] text-muted-foreground">
+                {sheetSaving ? '자동 저장 중...' : lastAutoSavedAt ? `자동 저장 ${formatCommentTime(lastAutoSavedAt)}` : '자동 저장 대기'}
+              </span>
+            )}
         </div>
       </div>
 
@@ -755,6 +1052,10 @@ export function SettlementLedgerPage({
           authorOptions={authorOptions}
           budgetCodeBook={resolvedBudgetBook}
           weekOptions={weekOptions}
+          comments={comments}
+          currentUserId={currentUserId}
+          currentUserName={currentUserName}
+          onAddComment={onAddComment}
         />
       )}
       {revertConfirmDialog}
@@ -1135,6 +1436,10 @@ function ImportEditor({
   budgetCodeBook,
   weekOptions,
   inline = false,
+  comments = [],
+  currentUserId = 'pm',
+  currentUserName = 'PM',
+  onAddComment,
 }: {
   rows: ImportRow[];
   onChange: (rows: ImportRow[]) => void;
@@ -1149,6 +1454,10 @@ function ImportEditor({
   budgetCodeBook?: BudgetCodeEntry[];
   weekOptions: { value: string; label: string }[];
   inline?: boolean;
+  comments?: Comment[];
+  currentUserId?: string;
+  currentUserName?: string;
+  onAddComment?: (comment: Comment) => void | Promise<void>;
 }) {
   const errorCount = rows.filter((r) => r.error).length;
   const validCount = rows.length - errorCount;
@@ -1194,6 +1503,22 @@ function ImportEditor({
   );
   const evidenceIdx = useMemo(
     () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '필수증빙자료 리스트'),
+    [],
+  );
+  const evidenceCompletedIdx = useMemo(
+    () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '실제 구비 완료된 증빙자료 리스트'),
+    [],
+  );
+  const evidencePendingIdx = useMemo(
+    () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '준비필요자료'),
+    [],
+  );
+  const counterpartyIdx = useMemo(
+    () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '지급처'),
+    [],
+  );
+  const memoIdx = useMemo(
+    () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '상세 적요'),
     [],
   );
   const cashflowOptions = useMemo(
@@ -1247,6 +1572,7 @@ function ImportEditor({
   const [mappingDraft, setMappingDraft] = useState<Record<string, string>>({});
   const [mappingSaving, setMappingSaving] = useState(false);
   const lastFocusedCell = useRef<{ rowIdx: number; colIdx: number } | null>(null);
+  const pendingFocusCell = useRef<{ rowIdx: number; colIdx: number } | null>(null);
   const draggingSelection = useRef(false);
   const [selection, setSelection] = useState<{ start: { r: number; c: number }; end: { r: number; c: number } } | null>(null);
   const undoStack = useRef<ImportRow[][]>([]);
@@ -1265,6 +1591,31 @@ function ImportEditor({
       return Math.max(min, Math.min(max, base));
     }),
   );
+  const [activeCommentAnchor, setActiveCommentAnchor] = useState<ActiveCommentAnchor | null>(null);
+
+  const commentCountByCell = useMemo(() => {
+    const buckets = new Map<string, number>();
+    for (const comment of comments) {
+      if (!comment.transactionId || !comment.fieldKey) continue;
+      const key = buildCommentThreadKey(comment.transactionId, comment.fieldKey);
+      buckets.set(key, (buckets.get(key) || 0) + 1);
+    }
+    return buckets;
+  }, [comments]);
+
+  const activeCellComments = useMemo(() => {
+    if (!activeCommentAnchor) return [];
+    return comments
+      .filter((comment) => (
+        comment.transactionId === activeCommentAnchor.transactionId
+        && comment.fieldKey === activeCommentAnchor.fieldKey
+      ))
+      .sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+  }, [activeCommentAnchor, comments]);
+
+  const openCellComments = useCallback((anchor: ActiveCommentAnchor) => {
+    setActiveCommentAnchor(anchor);
+  }, []);
 
   const recomputeBalances = useCallback(
     (input: ImportRow[]) => {
@@ -1306,7 +1657,7 @@ function ImportEditor({
       return recalced.map((row, i) => {
         let next = row;
         const weekCell = weekIdx >= 0 ? String(row.cells[weekIdx] || '').trim() : '';
-        if (weekIdx >= 0 && dateIdx >= 0 && (!weekCell || weekCell === '-') && row.cells[dateIdx]) {
+      if (weekIdx >= 0 && dateIdx >= 0 && (!weekCell || weekCell === '-') && row.cells[dateIdx]) {
           const rawDate = String(row.cells[dateIdx]).trim();
           const datePart = rawDate.split(/\s+/)[0];
           let dateIso = parseDate(datePart);
@@ -1326,11 +1677,30 @@ function ImportEditor({
             }
           }
         }
+        if (bankAmountIdx >= 0 && expenseIdx >= 0 && vatInIdx >= 0) {
+          const existingExpense = String(next.cells[expenseIdx] || '').trim();
+          const bankAmount = parseNumber(next.cells[bankAmountIdx]) ?? 0;
+          const vatAmount = parseNumber(next.cells[vatInIdx]) ?? 0;
+          if (bankAmount > 0 && (!existingExpense || existingExpense === '0')) {
+            const derivedExpense = Math.max(bankAmount - Math.max(vatAmount, 0), 0);
+            const cells = [...next.cells];
+            cells[expenseIdx] = derivedExpense > 0 ? derivedExpense.toLocaleString('ko-KR') : '';
+            next = { ...next, cells };
+          }
+        }
+        if (evidenceIdx >= 0 && evidenceCompletedIdx >= 0 && evidencePendingIdx >= 0) {
+          const requiredDesc = String(next.cells[evidenceIdx] || '');
+          const completedDesc = String(next.cells[evidenceCompletedIdx] || '');
+          const pendingDesc = derivePendingEvidence(requiredDesc, completedDesc);
+          const cells = [...next.cells];
+          cells[evidencePendingIdx] = pendingDesc;
+          next = { ...next, cells };
+        }
         const result = importRowToTransaction(next, projectId, defaultLedgerId, i);
         return { ...next, error: result.error };
       });
     },
-    [recomputeBalances, projectId, defaultLedgerId, weekIdx, dateIdx],
+    [recomputeBalances, projectId, defaultLedgerId, weekIdx, dateIdx, bankAmountIdx, expenseIdx, vatInIdx, evidenceIdx, evidenceCompletedIdx, evidencePendingIdx],
   );
 
   const updateCell = useCallback(
@@ -1379,38 +1749,89 @@ function ImportEditor({
     [rows, onChange, budgetCodeIdx, subCodeIdx, evidenceIdx, evidenceRequiredMap, applyDerivedRows],
   );
 
+  const normalizeRowNumbers = useCallback((input: ImportRow[]) => {
+    if (noIdx < 0) return input;
+    return input.map((row, index) => {
+      const nextNo = String(index + 1);
+      if (row.cells[noIdx] === nextNo) return row;
+      const cells = [...row.cells];
+      cells[noIdx] = nextNo;
+      return { ...row, cells };
+    });
+  }, [noIdx]);
+
+  const getSelectionAnchor = useCallback(() => {
+    if (selection) {
+      return {
+        rowIdx: Math.min(selection.start.r, selection.end.r),
+        colIdx: Math.min(selection.start.c, selection.end.c),
+      };
+    }
+    return lastFocusedCell.current;
+  }, [selection]);
+
+  const getPreferredEditableCol = useCallback(() => {
+    const anchor = getSelectionAnchor();
+    const fallback = noIdx === 0 ? 1 : 0;
+    if (!anchor) return fallback;
+    if (anchor.colIdx === noIdx) return fallback;
+    return anchor.colIdx;
+  }, [getSelectionAnchor, noIdx]);
+
+  const commitRows = useCallback((nextRows: ImportRow[], focusTarget?: { rowIdx: number; colIdx: number } | null) => {
+    if (focusTarget) pendingFocusCell.current = focusTarget;
+    onChange(applyDerivedRows(normalizeRowNumbers(nextRows)));
+  }, [onChange, applyDerivedRows, normalizeRowNumbers]);
+
   const addRow = useCallback(() => {
+    const anchor = getSelectionAnchor();
+    const insertIndex = anchor ? Math.min(rows.length, anchor.rowIdx + 1) : rows.length;
     const newRow = createEmptyImportRow();
-    // Set No. column
-    const noIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === 'No.');
-    if (noIdx >= 0) newRow.cells[noIdx] = String(rows.length + 1);
     newRow.error = undefined;
-    onChange(applyDerivedRows([...rows, newRow]));
-  }, [rows, onChange, applyDerivedRows]);
+    const nextRows = [
+      ...rows.slice(0, insertIndex),
+      newRow,
+      ...rows.slice(insertIndex),
+    ];
+    commitRows(nextRows, { rowIdx: insertIndex, colIdx: getPreferredEditableCol() });
+  }, [rows, getSelectionAnchor, commitRows, getPreferredEditableCol]);
 
   const addRows = useCallback((count: number) => {
     if (count <= 0) return;
-    const noIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === 'No.');
     const nextRows = [...rows];
     for (let i = 0; i < count; i++) {
       const newRow = createEmptyImportRow();
-      if (noIdx >= 0) newRow.cells[noIdx] = String(nextRows.length + 1);
       nextRows.push(newRow);
     }
-    onChange(applyDerivedRows(nextRows));
-  }, [rows, onChange, applyDerivedRows]);
+    commitRows(nextRows);
+  }, [rows, commitRows]);
+
+  const addTemplateRow = useCallback((template: QuickExpenseTemplate) => {
+    const anchor = getSelectionAnchor();
+    const insertIndex = anchor ? Math.min(rows.length, anchor.rowIdx + 1) : rows.length;
+    const newRow = createEmptyImportRow();
+    if (methodIdx >= 0) newRow.cells[methodIdx] = template.methodLabel;
+    if (cashflowIdx >= 0) newRow.cells[cashflowIdx] = template.cashflowLabel;
+    if (counterpartyIdx >= 0) newRow.cells[counterpartyIdx] = template.counterparty;
+    if (memoIdx >= 0) newRow.cells[memoIdx] = template.memo;
+    const nextRows = [
+      ...rows.slice(0, insertIndex),
+      newRow,
+      ...rows.slice(insertIndex),
+    ];
+    commitRows(nextRows, { rowIdx: insertIndex, colIdx: getPreferredEditableCol() });
+  }, [rows, methodIdx, cashflowIdx, counterpartyIdx, memoIdx, getSelectionAnchor, commitRows, getPreferredEditableCol]);
 
   const insertRowAt = useCallback((index: number) => {
     const boundedIndex = Math.max(0, Math.min(rows.length, index));
     const newRow = createEmptyImportRow();
-    if (noIdx >= 0) newRow.cells[noIdx] = String(boundedIndex + 1);
     const nextRows = [
       ...rows.slice(0, boundedIndex),
       newRow,
       ...rows.slice(boundedIndex),
     ];
-    onChange(applyDerivedRows(nextRows));
-  }, [rows, noIdx, onChange, applyDerivedRows]);
+    commitRows(nextRows, { rowIdx: boundedIndex, colIdx: getPreferredEditableCol() });
+  }, [rows, commitRows, getPreferredEditableCol]);
 
   const formatNumberCell = useCallback((value: string) => {
     if (!value) return '';
@@ -1452,9 +1873,7 @@ function ImportEditor({
       const neededRows = bounds.r2 + 1;
       const nextRows = [...rows];
       while (nextRows.length < neededRows) {
-        const newRow = createEmptyImportRow();
-        if (noIdx >= 0) newRow.cells[noIdx] = String(nextRows.length + 1);
-        nextRows.push(newRow);
+        nextRows.push(createEmptyImportRow());
       }
 
       const fillAll = gridRows === 1 && gridCols === 1;
@@ -1516,12 +1935,11 @@ function ImportEditor({
         nextRows[rowIdx] = updated;
       }
 
-      onChange(applyDerivedRows(nextRows));
+      commitRows(nextRows);
     },
     [
       rows,
-      onChange,
-      applyDerivedRows,
+      commitRows,
       formatNumberCell,
       noIdx,
       selection,
@@ -1600,10 +2018,67 @@ function ImportEditor({
     document.body.removeChild(ta);
   }, [selection, rows, noIdx]);
 
+  const focusCellAt = useCallback((rowIdx: number, colIdx: number) => {
+    if (!tableWrapRef.current) return;
+    const boundedRow = Math.max(0, Math.min(rows.length - 1, rowIdx));
+    let boundedCol = Math.max(0, Math.min(SETTLEMENT_COLUMNS.length - 1, colIdx));
+    if (boundedCol === noIdx) boundedCol = Math.min(SETTLEMENT_COLUMNS.length - 1, boundedCol + 1);
+    const selector = `[data-cell-row="${boundedRow}"][data-cell-col="${boundedCol}"]`;
+    const target = tableWrapRef.current.querySelector<HTMLElement>(selector);
+    if (!target) return;
+    target.focus();
+    handleCellFocus(boundedRow, boundedCol);
+  }, [rows.length, noIdx, handleCellFocus]);
+
+  useEffect(() => {
+    if (!pendingFocusCell.current) return;
+    const target = pendingFocusCell.current;
+    pendingFocusCell.current = null;
+    const timer = window.setTimeout(() => {
+      focusCellAt(target.rowIdx, target.colIdx);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [rows, focusCellAt]);
+
   const handleTableKeyDown = useCallback((e: KeyboardEvent<HTMLDivElement>) => {
     handleUndo(e);
     handleCopy(e);
-  }, [handleUndo, handleCopy]);
+    if (e.defaultPrevented) return;
+
+    const anchor = selection
+      ? {
+        r: Math.min(selection.start.r, selection.end.r),
+        c: Math.min(selection.start.c, selection.end.c),
+      }
+      : lastFocusedCell.current
+        ? { r: lastFocusedCell.current.rowIdx, c: lastFocusedCell.current.colIdx }
+        : null;
+    if (!anchor) return;
+
+    const navigationKeys = new Set(['Enter', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
+    if (!navigationKeys.has(e.key) || e.altKey || e.metaKey || e.ctrlKey) return;
+
+    e.preventDefault();
+    if (e.key === 'Enter') {
+      focusCellAt(anchor.r + (e.shiftKey ? -1 : 1), anchor.c);
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      focusCellAt(anchor.r - 1, anchor.c);
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      focusCellAt(anchor.r + 1, anchor.c);
+      return;
+    }
+    if (e.key === 'ArrowLeft') {
+      focusCellAt(anchor.r, anchor.c - 1);
+      return;
+    }
+    if (e.key === 'ArrowRight') {
+      focusCellAt(anchor.r, anchor.c + 1);
+    }
+  }, [handleUndo, handleCopy, selection, focusCellAt]);
 
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
@@ -1681,9 +2156,11 @@ function ImportEditor({
 
   const removeRow = useCallback(
     (rowIdx: number) => {
-      onChange(applyDerivedRows(rows.filter((_, i) => i !== rowIdx)));
+      const nextRows = rows.filter((_, i) => i !== rowIdx);
+      const nextFocusRow = Math.min(Math.max(0, rowIdx - 1), Math.max(0, nextRows.length - 1));
+      commitRows(nextRows, nextRows.length > 0 ? { rowIdx: nextFocusRow, colIdx: getPreferredEditableCol() } : null);
     },
-    [rows, onChange, applyDerivedRows],
+    [rows, commitRows, getPreferredEditableCol],
   );
 
   const applyEvidenceMapping = useCallback((rowIdx?: number) => {
@@ -1767,6 +2244,28 @@ function ImportEditor({
           >
             증빙 매핑 설정
           </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-[11px] gap-1 cursor-pointer shadow-sm hover:bg-muted/40"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                정기지출 템플릿
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="text-[11px]">
+              {QUICK_EXPENSE_TEMPLATES.map((template) => (
+                <DropdownMenuItem
+                  key={template.id}
+                  onClick={() => addTemplateRow(template)}
+                >
+                  {template.label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button
             variant="outline"
             size="sm"
@@ -1905,6 +2404,8 @@ function ImportEditor({
                 weekOptions={weekOptions}
                 cashflowOptions={cashflowOptions}
                 evidenceRequiredMap={evidenceRequiredMap}
+                commentCountByCell={commentCountByCell}
+                onOpenCellComments={openCellComments}
                 noIdx={noIdx}
                 colWidths={colWidths}
               />
@@ -1972,6 +2473,16 @@ function ImportEditor({
           </div>
         </div>
       )}
+      <CommentThreadSheet
+        anchor={activeCommentAnchor}
+        comments={activeCellComments}
+        open={!!activeCommentAnchor}
+        projectId={projectId}
+        currentUserId={currentUserId}
+        currentUserName={currentUserName}
+        onClose={() => setActiveCommentAnchor(null)}
+        onAddComment={onAddComment}
+      />
     </div>
   );
 }
@@ -2003,6 +2514,8 @@ function ImportEditorRow({
   weekOptions,
   cashflowOptions,
   evidenceRequiredMap,
+  commentCountByCell,
+  onOpenCellComments,
   noIdx,
   colWidths,
 }: {
@@ -2032,6 +2545,8 @@ function ImportEditorRow({
   weekOptions: { value: string; label: string }[];
   cashflowOptions: { value: string; label: string }[];
   evidenceRequiredMap?: Record<string, string>;
+  commentCountByCell: Map<string, number>;
+  onOpenCellComments: (anchor: ActiveCommentAnchor) => void;
   noIdx: number;
   colWidths: number[];
 }) {
@@ -2056,12 +2571,31 @@ function ImportEditorRow({
     const entry = budgetCodeBook.find((c) => c.code === budgetCode);
     return entry ? entry.subCodes : [];
   }, [budgetCode, budgetCodeBook]);
+  const rowLabel = `${rowIdx + 1}행`;
+  const commentTransactionId = row.sourceTxId || buildSheetRowCommentId(row.tempId);
   const formatNumberInput = useCallback((value: string) => {
     if (!value) return '';
     const num = parseNumber(value);
     if (num == null) return value;
     return Number.isFinite(num) ? num.toLocaleString('ko-KR') : value;
   }, []);
+  const renderCommentButton = useCallback((fieldLabel: string) => {
+    const fieldKey = toFieldSlug(fieldLabel);
+    const count = commentCountByCell.get(buildCommentThreadKey(commentTransactionId, fieldKey)) || 0;
+    return (
+      <CellCommentButton
+        count={count}
+        onClick={() => {
+          onOpenCellComments({
+            transactionId: commentTransactionId,
+            fieldKey,
+            fieldLabel,
+            rowLabel,
+          });
+        }}
+      />
+    );
+  }, [commentCountByCell, commentTransactionId, onOpenCellComments, rowLabel]);
 
   const handlePaste = useCallback((
     colIdx: number,
@@ -2078,6 +2612,7 @@ function ImportEditorRow({
     options,
     onChange,
     onFocus,
+    cellColIdx,
     disabled = false,
     isOpen,
     onOpen,
@@ -2087,6 +2622,7 @@ function ImportEditorRow({
     options: { value: string; label: string }[];
     onChange: (next: string) => void;
     onFocus: () => void;
+    cellColIdx: number;
     disabled?: boolean;
     isOpen: boolean;
     onOpen: () => void;
@@ -2135,6 +2671,8 @@ function ImportEditorRow({
             onMouseDown={(e) => e.stopPropagation()}
             onMouseDownCapture={openPicker}
             data-select-toggle
+            data-cell-row={rowIdx}
+            data-cell-col={cellColIdx}
             title="옵션 열기"
             ref={btnRef}
           >
@@ -2238,6 +2776,8 @@ function ImportEditorRow({
         const isWeek = colIdx === weekIdx;
         const isCashflow = colIdx === cashflowIdx;
         const isAuthor = colIdx === authorIdx;
+        const isDriveLink = col.csvHeader === '증빙자료 드라이브';
+        const isSettlementNote = col.csvHeader === '비고';
         const hasAuthorOptions = (authorOptions || []).length > 0;
         return (
           <td
@@ -2254,126 +2794,195 @@ function ImportEditorRow({
             onMouseDown={() => onCellMouseDown(rowIdx, colIdx)}
             onMouseEnter={() => onCellMouseEnter(rowIdx, colIdx)}
           >
-            {isReadOnly ? (
-              <span className="text-[10px] text-muted-foreground px-1">
-                {row.cells[colIdx]}
-              </span>
-            ) : isWeek ? (
-              <SelectCell
-                value={row.cells[colIdx] || ''}
-                options={weekOptions}
-                onFocus={() => onCellFocus(rowIdx, colIdx)}
-                isOpen={openSelect?.rowIdx === rowIdx && openSelect?.colIdx === colIdx}
-                onOpen={() => onOpenSelect(rowIdx, colIdx)}
-                onClose={onCloseSelect}
-                onChange={(next) => onCellChange(colIdx, next)}
-              />
-            ) : colIdx === methodIdx ? (
-              <SelectCell
-                value={row.cells[colIdx] || ''}
-                options={METHOD_OPTIONS.map((o) => ({ value: o.label, label: o.label }))}
-                onFocus={() => onCellFocus(rowIdx, colIdx)}
-                isOpen={openSelect?.rowIdx === rowIdx && openSelect?.colIdx === colIdx}
-                onOpen={() => onOpenSelect(rowIdx, colIdx)}
-                onClose={onCloseSelect}
-                onChange={(next) => {
-                  if (next !== row.cells[colIdx]) onCellChange(colIdx, next);
-                }}
-              />
-            ) : isCashflow ? (
-              <SelectCell
-                value={row.cells[colIdx] || ''}
-                options={cashflowOptions.map((o) => ({ value: o.label, label: o.label }))}
-                onFocus={() => onCellFocus(rowIdx, colIdx)}
-                isOpen={openSelect?.rowIdx === rowIdx && openSelect?.colIdx === colIdx}
-                onOpen={() => onOpenSelect(rowIdx, colIdx)}
-                onClose={onCloseSelect}
-                onChange={(next) => onCellChange(colIdx, next)}
-              />
-            ) : isBudgetCode ? (
-              <SelectCell
-                value={normalizeBudgetLabel(String(row.cells[colIdx] || ''))}
-                options={budgetCodeBook.map((c, idx) => ({ value: c.code, label: formatBudgetCodeLabel(idx, c.code) }))}
-                onFocus={() => onCellFocus(rowIdx, colIdx)}
-                isOpen={openSelect?.rowIdx === rowIdx && openSelect?.colIdx === colIdx}
-                onOpen={() => onOpenSelect(rowIdx, colIdx)}
-                onClose={onCloseSelect}
-                onChange={(nextCode) => {
-                  onRowChange((prev) => {
-                    if (budgetCodeIdx < 0) return prev;
-                    const cells = [...prev.cells];
-                    cells[budgetCodeIdx] = nextCode;
-                    if (subCodeIdx >= 0) {
-                      const allowed = budgetCodeBook.find((c) => c.code === nextCode)?.subCodes || [];
-                      const currentSub = normalizeBudgetLabel(String(cells[subCodeIdx] || ''));
-                      if (!allowed.includes(currentSub)) {
-                        cells[subCodeIdx] = '';
-                      } else {
-                        cells[subCodeIdx] = currentSub;
-                      }
-                    }
-                    if (evidenceIdx >= 0) {
-                      const mapped = resolveEvidenceRequiredDesc(evidenceRequiredMap, nextCode, cells[subCodeIdx] || '');
-                      if (mapped) cells[evidenceIdx] = mapped;
-                    }
-                    return { ...prev, cells };
-                  });
-                }}
-              />
-            ) : isSubCode ? (
-              <SelectCell
-                value={normalizeBudgetLabel(String(row.cells[colIdx] || ''))}
-                options={subCodes.map((sc, sidx) => {
-                  const codeIdx = Math.max(0, budgetCodeBook.findIndex((c) => c.code === budgetCode));
-                  return { value: sc, label: formatSubCodeLabel(codeIdx, sidx, sc) };
-                })}
-                onFocus={() => onCellFocus(rowIdx, colIdx)}
-                disabled={!budgetCode}
-                isOpen={openSelect?.rowIdx === rowIdx && openSelect?.colIdx === colIdx}
-                onOpen={() => onOpenSelect(rowIdx, colIdx)}
-                onClose={onCloseSelect}
-                onChange={(nextSub) => {
-                  onRowChange((prev) => {
-                    if (subCodeIdx < 0) return prev;
-                    const cells = [...prev.cells];
-                    cells[subCodeIdx] = nextSub;
-                    if (evidenceIdx >= 0) {
-                      const mapped = resolveEvidenceRequiredDesc(evidenceRequiredMap, budgetCode, nextSub);
-                      if (mapped) cells[evidenceIdx] = mapped;
-                    }
-                    return { ...prev, cells };
-                  });
-                }}
-              />
-            ) : isAuthor && hasAuthorOptions ? (
-              <SelectCell
-                value={row.cells[colIdx] || ''}
-                options={(authorOptions || []).map((name) => ({ value: name, label: name }))}
-                onFocus={() => onCellFocus(rowIdx, colIdx)}
-                isOpen={openSelect?.rowIdx === rowIdx && openSelect?.colIdx === colIdx}
-                onOpen={() => onOpenSelect(rowIdx, colIdx)}
-                onClose={onCloseSelect}
-                onChange={(next) => onCellChange(colIdx, next)}
-              />
-            ) : (
-              <input
-                type="text"
-                value={row.cells[colIdx] || ''}
-                className={`w-full bg-transparent outline-none text-[11px] px-1 py-0.5 ${hasError && colIdx === dateIdx && !row.cells[colIdx]
-                  ? 'ring-1 ring-red-300 rounded'
-                  : ''
-                  }`}
-                list={isAuthor && authorListId ? authorListId : undefined}
-                onFocus={() => onCellFocus(rowIdx, colIdx)}
-                onPaste={(e) => handlePaste(colIdx, e)}
-                onChange={(e) => {
-                  const next = col.format === 'number'
-                    ? formatNumberInput(e.target.value)
-                    : e.target.value;
-                  onCellChange(colIdx, next);
-                }}
-              />
-            )}
+            <div className="group relative">
+              {isReadOnly ? (
+                <span className="block pr-6 text-[10px] text-muted-foreground px-1">
+                  {row.cells[colIdx]}
+                </span>
+              ) : isWeek ? (
+                <div className="pr-6">
+                  <SelectCell
+                    value={row.cells[colIdx] || ''}
+                    options={weekOptions}
+                    onFocus={() => onCellFocus(rowIdx, colIdx)}
+                    cellColIdx={colIdx}
+                    isOpen={openSelect?.rowIdx === rowIdx && openSelect?.colIdx === colIdx}
+                    onOpen={() => onOpenSelect(rowIdx, colIdx)}
+                    onClose={onCloseSelect}
+                    onChange={(next) => onCellChange(colIdx, next)}
+                  />
+                </div>
+              ) : colIdx === methodIdx ? (
+                <div className="pr-6">
+                  <SelectCell
+                    value={row.cells[colIdx] || ''}
+                    options={METHOD_OPTIONS.map((o) => ({ value: o.label, label: o.label }))}
+                    onFocus={() => onCellFocus(rowIdx, colIdx)}
+                    cellColIdx={colIdx}
+                    isOpen={openSelect?.rowIdx === rowIdx && openSelect?.colIdx === colIdx}
+                    onOpen={() => onOpenSelect(rowIdx, colIdx)}
+                    onClose={onCloseSelect}
+                    onChange={(next) => {
+                      if (next !== row.cells[colIdx]) onCellChange(colIdx, next);
+                    }}
+                  />
+                </div>
+              ) : isCashflow ? (
+                <div className="pr-6">
+                  <SelectCell
+                    value={row.cells[colIdx] || ''}
+                    options={cashflowOptions.map((o) => ({ value: o.label, label: o.label }))}
+                    onFocus={() => onCellFocus(rowIdx, colIdx)}
+                    cellColIdx={colIdx}
+                    isOpen={openSelect?.rowIdx === rowIdx && openSelect?.colIdx === colIdx}
+                    onOpen={() => onOpenSelect(rowIdx, colIdx)}
+                    onClose={onCloseSelect}
+                    onChange={(next) => onCellChange(colIdx, next)}
+                  />
+                </div>
+              ) : isBudgetCode ? (
+                <div className="pr-6">
+                  <SelectCell
+                    value={normalizeBudgetLabel(String(row.cells[colIdx] || ''))}
+                    options={budgetCodeBook.map((c, idx) => ({ value: c.code, label: formatBudgetCodeLabel(idx, c.code) }))}
+                    onFocus={() => onCellFocus(rowIdx, colIdx)}
+                    cellColIdx={colIdx}
+                    isOpen={openSelect?.rowIdx === rowIdx && openSelect?.colIdx === colIdx}
+                    onOpen={() => onOpenSelect(rowIdx, colIdx)}
+                    onClose={onCloseSelect}
+                    onChange={(nextCode) => {
+                      onRowChange((prev) => {
+                        if (budgetCodeIdx < 0) return prev;
+                        const cells = [...prev.cells];
+                        cells[budgetCodeIdx] = nextCode;
+                        if (subCodeIdx >= 0) {
+                          const allowed = budgetCodeBook.find((c) => c.code === nextCode)?.subCodes || [];
+                          const currentSub = normalizeBudgetLabel(String(cells[subCodeIdx] || ''));
+                          if (!allowed.includes(currentSub)) {
+                            cells[subCodeIdx] = '';
+                          } else {
+                            cells[subCodeIdx] = currentSub;
+                          }
+                        }
+                        if (evidenceIdx >= 0) {
+                          const mapped = resolveEvidenceRequiredDesc(evidenceRequiredMap, nextCode, cells[subCodeIdx] || '');
+                          if (mapped) cells[evidenceIdx] = mapped;
+                        }
+                        return { ...prev, cells };
+                      });
+                    }}
+                  />
+                </div>
+              ) : isSubCode ? (
+                <div className="pr-6">
+                  <SelectCell
+                    value={normalizeBudgetLabel(String(row.cells[colIdx] || ''))}
+                    options={subCodes.map((sc, sidx) => {
+                      const codeIdx = Math.max(0, budgetCodeBook.findIndex((c) => c.code === budgetCode));
+                      return { value: sc, label: formatSubCodeLabel(codeIdx, sidx, sc) };
+                    })}
+                    onFocus={() => onCellFocus(rowIdx, colIdx)}
+                    cellColIdx={colIdx}
+                    disabled={!budgetCode}
+                    isOpen={openSelect?.rowIdx === rowIdx && openSelect?.colIdx === colIdx}
+                    onOpen={() => onOpenSelect(rowIdx, colIdx)}
+                    onClose={onCloseSelect}
+                    onChange={(nextSub) => {
+                      onRowChange((prev) => {
+                        if (subCodeIdx < 0) return prev;
+                        const cells = [...prev.cells];
+                        cells[subCodeIdx] = nextSub;
+                        if (evidenceIdx >= 0) {
+                          const mapped = resolveEvidenceRequiredDesc(evidenceRequiredMap, budgetCode, nextSub);
+                          if (mapped) cells[evidenceIdx] = mapped;
+                        }
+                        return { ...prev, cells };
+                      });
+                    }}
+                  />
+                </div>
+              ) : isAuthor && hasAuthorOptions ? (
+                <div className="pr-6">
+                  <SelectCell
+                    value={row.cells[colIdx] || ''}
+                    options={(authorOptions || []).map((name) => ({ value: name, label: name }))}
+                    onFocus={() => onCellFocus(rowIdx, colIdx)}
+                    cellColIdx={colIdx}
+                    isOpen={openSelect?.rowIdx === rowIdx && openSelect?.colIdx === colIdx}
+                    onOpen={() => onOpenSelect(rowIdx, colIdx)}
+                    onClose={onCloseSelect}
+                    onChange={(next) => onCellChange(colIdx, next)}
+                  />
+                </div>
+              ) : isSettlementNote ? (
+                <div className="flex items-center gap-1 pr-6">
+                  <select
+                    value={parseContentStatusNote(String(row.cells[colIdx] || '')).status}
+                    data-cell-row={rowIdx}
+                    data-cell-col={colIdx}
+                    className="h-6 rounded border bg-background px-1 text-[10px]"
+                    onFocus={() => onCellFocus(rowIdx, colIdx)}
+                    onChange={(e) => {
+                      const parsed = parseContentStatusNote(String(row.cells[colIdx] || ''));
+                      onCellChange(colIdx, composeContentStatusNote(
+                        (e.target.value as '' | '미완료' | '완료'),
+                        parsed.text,
+                      ));
+                    }}
+                  >
+                    <option value="">상태</option>
+                    <option value="미완료">미완료</option>
+                    <option value="완료">완료</option>
+                  </select>
+                  <input
+                    type="text"
+                    value={parseContentStatusNote(String(row.cells[colIdx] || '')).text}
+                    className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5"
+                    data-cell-row={rowIdx}
+                    data-cell-col={colIdx}
+                    onFocus={() => onCellFocus(rowIdx, colIdx)}
+                    onPaste={(e) => handlePaste(colIdx, e)}
+                    onChange={(e) => {
+                      const parsed = parseContentStatusNote(String(row.cells[colIdx] || ''));
+                      onCellChange(colIdx, composeContentStatusNote(parsed.status, e.target.value));
+                    }}
+                  />
+                </div>
+              ) : (
+                <input
+                  type="text"
+                  value={row.cells[colIdx] || ''}
+                  className={`w-full bg-transparent outline-none text-[11px] px-1 py-0.5 pr-6 ${hasError && colIdx === dateIdx && !row.cells[colIdx]
+                    ? 'ring-1 ring-red-300 rounded'
+                    : ''
+                    }`}
+                  data-cell-row={rowIdx}
+                  data-cell-col={colIdx}
+                  list={isAuthor && authorListId ? authorListId : undefined}
+                  onFocus={() => onCellFocus(rowIdx, colIdx)}
+                  onPaste={(e) => handlePaste(colIdx, e)}
+                  onChange={(e) => {
+                    const next = col.format === 'number'
+                      ? formatNumberInput(e.target.value)
+                      : e.target.value;
+                    onCellChange(colIdx, next);
+                  }}
+                />
+              )}
+              {isDriveLink && isValidDriveUrl(String(row.cells[colIdx] || '')) && (
+                <a
+                  href={String(row.cells[colIdx] || '')}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="absolute top-1 right-7 inline-flex h-5 w-5 items-center justify-center rounded-md border bg-background text-[10px] hover:bg-muted"
+                  title="증빙 드라이브 열기"
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+              )}
+              {renderCommentButton(col.csvHeader)}
+            </div>
           </td>
         );
       })}

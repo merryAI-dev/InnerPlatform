@@ -21,6 +21,11 @@ import {
 } from './auth-helpers';
 import { isBootstrapAdminEmail } from './auth-bootstrap';
 import { normalizeProjectIds, resolvePrimaryProjectId } from './project-assignment';
+import {
+  buildWorkspacePreferencePatch,
+  readMemberWorkspace,
+  type WorkspaceId,
+} from './member-workspace';
 import { extractAuthContextFromClaims } from '../platform/rbac';
 import { isAdminSpaceRole } from '../platform/navigation';
 import { resolveTenantId } from '../platform/tenant';
@@ -38,6 +43,8 @@ export interface AuthUser {
   tenantId?: string;
   department?: string;
   registeredAt?: string;
+  defaultWorkspace?: WorkspaceId;
+  lastWorkspace?: WorkspaceId;
 }
 
 interface AuthState {
@@ -49,6 +56,7 @@ interface AuthState {
 
 interface AuthActions {
   loginWithGoogle: () => Promise<{ success: boolean; error?: string }>;
+  setWorkspacePreference: (workspace: WorkspaceId, options?: { persistDefault?: boolean }) => Promise<boolean>;
   logout: () => void;
   isAdmin: () => boolean;
   isPortalUser: () => boolean;
@@ -68,6 +76,10 @@ interface MemberDoc {
   createdAt?: string;
   updatedAt?: string;
   lastLoginAt?: string;
+  projectNames?: Record<string, string>;
+  portalProfile?: Record<string, unknown>;
+  defaultWorkspace?: WorkspaceId;
+  lastWorkspace?: WorkspaceId;
 }
 
 const AUTH_STORAGE_KEY = 'mysc-auth-user';
@@ -112,6 +124,24 @@ function saveUser(user: AuthUser | null) {
   }
 }
 
+function getCachedMemberFallback(firebaseUser: FirebaseUser): Partial<MemberDoc> | undefined {
+  const saved = loadSavedUser();
+  if (!saved || saved.uid !== firebaseUser.uid) return undefined;
+  return {
+    uid: saved.uid,
+    name: saved.name,
+    email: saved.email,
+    role: saved.role,
+    tenantId: saved.tenantId,
+    projectId: saved.projectId,
+    projectIds: saved.projectIds,
+    avatarUrl: saved.avatarUrl,
+    createdAt: saved.registeredAt,
+    defaultWorkspace: saved.defaultWorkspace,
+    lastWorkspace: saved.lastWorkspace,
+  };
+}
+
 function toUserRole(role: string | undefined): UserRole | undefined {
   if (
     role === 'admin' ||
@@ -135,17 +165,24 @@ function mapFirebaseUserToAuthUser(
   idToken?: string,
 ): AuthUser {
   const normalizedEmail = normalizeEmail(firebaseUser.email || member?.email || '');
+  const workspace = readMemberWorkspace(member);
   const mergedProjectIds = normalizeProjectIds([
+    ...(workspace.portalProfile?.projectIds || []),
     ...(Array.isArray(member?.projectIds) ? member?.projectIds : []),
+    workspace.portalProfile?.projectId,
     member?.projectId,
     resolveProjectIdForManager(firebaseUser.uid, PROJECT_OWNERS),
   ]);
-  const primaryProjectId = resolvePrimaryProjectId(mergedProjectIds, member?.projectId);
-  // Bootstrap admin은 Firestore 쓰기 실패해도 항상 admin role 부여
+  const primaryProjectId = resolvePrimaryProjectId(
+    mergedProjectIds,
+    workspace.portalProfile?.projectId || member?.projectId,
+  );
   const role =
     isBootstrapAdminEmail(normalizedEmail)
       ? 'admin'
-      : 'pm';
+      : toUserRole(member?.role) ||
+        resolveRoleFromDirectory(firebaseUser.email || '', ROLE_DIRECTORY) ||
+        'pm';
   return {
     uid: firebaseUser.uid,
     name: member?.name || firebaseUser.displayName || '사용자',
@@ -158,6 +195,8 @@ function mapFirebaseUserToAuthUser(
     tenantId,
     department: member?.department,
     registeredAt: member?.createdAt,
+    defaultWorkspace: workspace.defaultWorkspace,
+    lastWorkspace: workspace.lastWorkspace,
   };
 }
 
@@ -184,16 +223,17 @@ async function upsertMemberFromFirebase(
   ]);
   const primaryProjectId = resolvePrimaryProjectId(mergedProjectIds, existing?.projectId) || '';
 
-  const resolvedRole =
-    bootstrapAdmin
-      ? 'admin'
-      : 'pm';
-
   const merged: MemberDoc = {
     uid: firebaseUser.uid,
     name: firebaseUser.displayName || existing?.name || '사용자',
     email: normalizedEmail,
-    role: resolvedRole,
+    role:
+      bootstrapAdmin
+        ? 'admin'
+        : toUserRole(roleFromClaims) ||
+          existing?.role ||
+          resolveRoleFromDirectory(firebaseUser.email || '', ROLE_DIRECTORY) ||
+          'pm',
     tenantId,
     status: existing?.status || 'ACTIVE',
     projectId: primaryProjectId,
@@ -251,11 +291,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
+      const cachedMember = getCachedMemberFallback(firebaseUser);
+      const cachedTenantId = resolveTenantId({
+        savedTenantId: cachedMember?.tenantId,
+        envTenantId: DEFAULT_ORG_ID,
+        strict: false,
+      });
+      const optimisticUser = mapFirebaseUserToAuthUser(firebaseUser, cachedMember, cachedTenantId);
+      setUser(optimisticUser);
+      saveUser(optimisticUser);
+      setIsLoading(false);
+
       try {
         const token = await firebaseUser.getIdTokenResult().catch(() => null);
         const claimsContext = extractAuthContextFromClaims(token?.claims);
-        const normalizedEmail = normalizeEmail(firebaseUser.email || '');
-        const tenantId = DEFAULT_ORG_ID;
+        const tenantId = resolveTenantId({
+          claimTenantId: claimsContext.tenantId,
+          envTenantId: DEFAULT_ORG_ID,
+          strict: featureFlags.tenantIsolationStrict,
+        });
         const member = await upsertMemberFromFirebase(
           firebaseUser,
           tenantId,
@@ -268,20 +322,62 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch (err) {
         console.error('[Auth] Failed to sync member profile:', err);
         const fallbackTenantId = resolveTenantId({
+          savedTenantId: cachedMember?.tenantId,
           envTenantId: DEFAULT_ORG_ID,
           strict: false,
         });
         const token = await firebaseUser.getIdTokenResult().catch(() => null);
-        const fallback = mapFirebaseUserToAuthUser(firebaseUser, undefined, fallbackTenantId, token?.token);
+        const fallback = mapFirebaseUserToAuthUser(firebaseUser, cachedMember, fallbackTenantId, token?.token);
         setUser(fallback);
         saveUser(fallback);
-      } finally {
-        setIsLoading(false);
       }
     });
 
     return () => unsubscribe();
   }, []);
+
+  const setWorkspacePreference = useCallback(async (
+    workspace: WorkspaceId,
+    options?: { persistDefault?: boolean },
+  ): Promise<boolean> => {
+    const persistDefault = options?.persistDefault ?? true;
+    const currentUser = user;
+    if (!currentUser) return false;
+
+    const updatedAt = new Date().toISOString();
+    const nextUser: AuthUser = {
+      ...currentUser,
+      ...(persistDefault ? { defaultWorkspace: workspace } : {}),
+      lastWorkspace: workspace,
+    };
+    setUser(nextUser);
+    saveUser(nextUser);
+
+    const db = getDb();
+    if (!db) return true;
+
+    try {
+      await setDoc(
+        doc(db, getOrgDocumentPath(currentUser.tenantId || DEFAULT_ORG_ID, 'members', currentUser.uid)),
+        {
+          uid: currentUser.uid,
+          email: currentUser.email,
+          name: currentUser.name,
+          role: currentUser.role,
+          tenantId: currentUser.tenantId || DEFAULT_ORG_ID,
+          ...buildWorkspacePreferencePatch(workspace, updatedAt, persistDefault),
+          lastLoginAt: updatedAt,
+        },
+        { merge: true },
+      );
+      return true;
+    } catch (err) {
+      console.error('[Auth] setWorkspacePreference failed:', err);
+      setUser(currentUser);
+      saveUser(currentUser);
+      return false;
+    }
+  }, [user]);
 
   const loginWithGoogle = useCallback(async (): Promise<{ success: boolean; error?: string }> => {
     if (!featureFlags.firebaseAuthEnabled) {
@@ -357,6 +453,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isLoading,
     isFirebaseAuthEnabled: featureFlags.firebaseAuthEnabled,
     loginWithGoogle,
+    setWorkspacePreference,
     logout,
     isAdmin,
     isPortalUser,

@@ -474,7 +474,7 @@ export function PortalBudget() {
         <PageHeader
           icon={Calculator}
           iconGradient="linear-gradient(135deg, #0d9488 0%, #059669 100%)"
-          title="예산총괄"
+          title="예산 편집"
           description={myProject ? myProject.name : '예산 현황'}
           badge={`${meta.year}년`}
           actions={(
@@ -490,10 +490,10 @@ export function PortalBudget() {
                 </>
               ) : !codeBookMode ? (
                 <>
-                  <Button variant="outline" size="sm" className="h-8 text-[12px]" onClick={startEdit}>
+                  <Button variant="default" size="sm" className="h-8 text-[12px] shadow-sm" onClick={startEdit}>
                     예산 편집
                   </Button>
-                  <Button variant="outline" size="sm" className="h-8 text-[12px] gap-1" onClick={startCodeBookEdit}>
+                  <Button variant="default" size="sm" className="h-8 text-[12px] gap-1 shadow-sm" onClick={startCodeBookEdit}>
                     <Settings className="w-3.5 h-3.5" />
                     카테고리 관리
                   </Button>

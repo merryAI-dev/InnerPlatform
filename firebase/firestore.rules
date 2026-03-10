@@ -116,6 +116,9 @@ service cloud.firestore {
                     canReadProjectResource(orgId, projectId)
                     || (resource.data.managerId == request.auth.uid)
                     || (
+                      resource.data.status in ['CONTRACT_PENDING', 'IN_PROGRESS', 'COMPLETED_PENDING_PAYMENT']
+                    )
+                    || (
                       role(orgId) in ['pm', 'viewer']
                       && resource.data.status in ['CONTRACT_PENDING', 'IN_PROGRESS', 'COMPLETED_PENDING_PAYMENT']
                     )
@@ -201,10 +204,31 @@ service cloud.firestore {
     }
 
     match /orgs/{orgId}/comments/{commentId} {
-      allow read: if isSignedIn() && resourceHasValidTenant(orgId) && canReadTransactionResource(orgId, resource.data.transactionId);
-      allow create: if isSignedIn() && requestHasValidTenant(orgId) && canWriteTransactionResource(orgId, request.resource.data.transactionId);
-      allow update: if isSignedIn() && requestHasValidTenant(orgId) && resourceHasValidTenant(orgId) && canWriteTransactionResource(orgId, resource.data.transactionId);
-      allow delete: if isSignedIn() && resourceHasValidTenant(orgId) && canWriteTransactionResource(orgId, resource.data.transactionId);
+      allow read: if isSignedIn()
+                  && resourceHasValidTenant(orgId)
+                  && (
+                    (resource.data.targetType == 'expense_sheet_row' && canReadProjectResource(orgId, resource.data.projectId))
+                    || canReadTransactionResource(orgId, resource.data.transactionId)
+                  );
+      allow create: if isSignedIn()
+                    && requestHasValidTenant(orgId)
+                    && (
+                      (request.resource.data.targetType == 'expense_sheet_row' && canWriteProjectResource(orgId, request.resource.data.projectId))
+                      || canWriteTransactionResource(orgId, request.resource.data.transactionId)
+                    );
+      allow update: if isSignedIn()
+                    && requestHasValidTenant(orgId)
+                    && resourceHasValidTenant(orgId)
+                    && (
+                      (resource.data.targetType == 'expense_sheet_row' && canWriteProjectResource(orgId, resource.data.projectId))
+                      || canWriteTransactionResource(orgId, resource.data.transactionId)
+                    );
+      allow delete: if isSignedIn()
+                    && resourceHasValidTenant(orgId)
+                    && (
+                      (resource.data.targetType == 'expense_sheet_row' && canWriteProjectResource(orgId, resource.data.projectId))
+                      || canWriteTransactionResource(orgId, resource.data.transactionId)
+                    );
     }
 
     match /orgs/{orgId}/evidences/{evidenceId} {

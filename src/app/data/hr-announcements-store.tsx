@@ -12,6 +12,7 @@ import {
 } from 'firebase/firestore';
 import { PART_PROJECTS } from './participation-data';
 import type { ParticipationEntry } from './types';
+import { useAuth } from './auth-store';
 import { useFirebase } from '../lib/firebase-context';
 import { featureFlags } from '../config/feature-flags';
 import { getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
@@ -198,6 +199,7 @@ const INITIAL_ALERTS: ProjectChangeAlert[] = [
 ];
 
 export function HrAnnouncementProvider({ children }: { children: ReactNode }) {
+  const { isAuthenticated, isLoading: authLoading, user } = useAuth();
   const { db, isOnline, orgId } = useFirebase();
   const firestoreEnabled = featureFlags.firestoreCoreEnabled && isOnline && !!db;
 
@@ -208,6 +210,12 @@ export function HrAnnouncementProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     unsubsRef.current.forEach((unsub) => unsub());
     unsubsRef.current = [];
+
+    if (authLoading || !isAuthenticated || !user) {
+      setAnnouncements(INITIAL_ANNOUNCEMENTS);
+      setAlerts(INITIAL_ALERTS);
+      return;
+    }
 
     if (!firestoreEnabled || !db) {
       setAnnouncements(INITIAL_ANNOUNCEMENTS);
@@ -247,7 +255,7 @@ export function HrAnnouncementProvider({ children }: { children: ReactNode }) {
       unsubsRef.current.forEach((unsub) => unsub());
       unsubsRef.current = [];
     };
-  }, [firestoreEnabled, db, orgId]);
+  }, [authLoading, isAuthenticated, user, firestoreEnabled, db, orgId]);
 
   const createAnnouncement = useCallback((
     data: Omit<HrAnnouncement, 'id' | 'announcedAt' | 'affectedProjectIds' | 'resolved'>,

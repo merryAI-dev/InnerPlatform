@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { AlertTriangle, Send } from 'lucide-react';
+import { AlertTriangle, Plus, Send, Settings2 } from 'lucide-react';
 import { usePortalStore } from '../../data/portal-store';
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { SettlementLedgerPage } from '../cashflow/SettlementLedgerPage';
@@ -18,8 +18,16 @@ export function PortalWeeklyExpensePage() {
     changeTransactionState,
     evidenceRequiredMap,
     saveEvidenceRequiredMap,
+    expenseSheets,
+    activeExpenseSheetId,
+    setActiveExpenseSheet,
+    createExpenseSheet,
+    renameExpenseSheet,
+    deleteExpenseSheet,
     expenseSheetRows,
     saveExpenseSheetRows,
+    comments,
+    addComment,
     participationEntries,
     budgetCodeBook,
   } = usePortalStore();
@@ -27,6 +35,15 @@ export function PortalWeeklyExpensePage() {
 
   const projectId = portalUser?.projectId || '';
   const projectName = myProject?.name || '내 사업';
+  const ledgerUserRole = portalUser?.role === 'pm' || portalUser?.role === 'viewer' ? 'pm' : 'admin';
+  const visibleExpenseSheets = useMemo(() => (
+    expenseSheets.length > 0
+      ? expenseSheets
+      : [{ id: 'default', name: '기본 탭', rows: expenseSheetRows, order: 0 }]
+  ), [expenseSheets, expenseSheetRows]);
+  const activeSheetName = useMemo(() => {
+    return visibleExpenseSheets.find((sheet) => sheet.id === activeExpenseSheetId)?.name || visibleExpenseSheets[0]?.name || '기본 탭';
+  }, [visibleExpenseSheets, activeExpenseSheetId]);
 
   const defaultLedgerId = useMemo(() => {
     const ledger = ledgers.find((l) => l.projectId === projectId);
@@ -56,7 +73,79 @@ export function PortalWeeklyExpensePage() {
 
   return (
     <div className="space-y-3">
-      <h2 className="text-base font-bold">사업비 입력(주간)</h2>
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h2 className="text-base font-bold">사업비 입력(주간)</h2>
+          <p className="text-[12px] text-muted-foreground mt-1">
+            현재 탭: {activeSheetName}
+          </p>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          {visibleExpenseSheets.map((sheet) => (
+            <Button
+              key={sheet.id}
+              variant={sheet.id === activeExpenseSheetId ? 'default' : 'outline'}
+              size="sm"
+              className="h-8 text-[11px]"
+              onClick={() => setActiveExpenseSheet(sheet.id)}
+            >
+              {sheet.name}
+            </Button>
+          ))}
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 text-[11px] gap-1"
+            onClick={async () => {
+              const raw = window.prompt('새 탭 이름을 입력하세요.', `탭 ${visibleExpenseSheets.length + 1}`);
+              if (raw == null) return;
+              const trimmed = raw.trim();
+              if (!trimmed) return;
+              const created = await createExpenseSheet(trimmed);
+              if (created) toast.success('새 탭을 만들었습니다.');
+            }}
+          >
+            <Plus className="h-3.5 w-3.5" />
+            탭 추가
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 text-[11px] gap-1"
+            onClick={async () => {
+              const raw = window.prompt('탭 이름을 수정하세요.', activeSheetName);
+              if (raw == null) return;
+              const trimmed = raw.trim();
+              if (!trimmed) return;
+              const ok = await renameExpenseSheet(activeExpenseSheetId || visibleExpenseSheets[0]?.id || 'default', trimmed);
+              if (ok) toast.success('탭 이름을 수정했습니다.');
+            }}
+          >
+            <Settings2 className="h-3.5 w-3.5" />
+            이름 변경
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 text-[11px]"
+            disabled={visibleExpenseSheets.length <= 1}
+            onClick={async () => {
+              const targetId = activeExpenseSheetId || visibleExpenseSheets[0]?.id || 'default';
+              const ok = await deleteExpenseSheet(targetId);
+              if (ok) toast.success('탭을 삭제했습니다.');
+            }}
+          >
+            탭 삭제
+          </Button>
+        </div>
+      </div>
+      <div className="rounded-xl border border-amber-200/70 bg-amber-50/70 px-4 py-3 text-[12px] text-amber-900">
+        <p className="font-semibold">매입 부가세 입력 안내</p>
+        <p className="mt-1 text-amber-800/90">
+          부가세는 계산값이 아니라 영수증/세금계산서 증빙 기준 금액으로 입력하세요. 통장금액만 있고 사업비 사용액이 비어 있으면
+          입력한 부가세를 기준으로 공급가액이 자동 보조 계산됩니다.
+        </p>
+      </div>
       <VarianceFlagBanner
         projectId={projectId}
         pmName={portalUser?.name || 'PM'}
@@ -73,6 +162,7 @@ export function PortalWeeklyExpensePage() {
         budgetCodeBook={budgetCodeBook}
         hideYearControls
         hideCountBadge
+        autoSaveSheet
         evidenceRequiredMap={evidenceRequiredMap}
         onSaveEvidenceRequiredMap={saveEvidenceRequiredMap}
         sheetRows={expenseSheetRows}
@@ -89,7 +179,10 @@ export function PortalWeeklyExpensePage() {
         }}
         onChangeTransactionState={(txId, newState, reason) => changeTransactionState(txId, newState, reason)}
         currentUserName={portalUser?.name || 'PM'}
-        userRole="pm"
+        currentUserId={portalUser?.id || 'pm'}
+        userRole={ledgerUserRole}
+        comments={comments}
+        onAddComment={addComment}
       />
     </div>
   );
