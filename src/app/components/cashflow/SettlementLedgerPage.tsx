@@ -1572,6 +1572,7 @@ function ImportEditor({
   const [mappingDraft, setMappingDraft] = useState<Record<string, string>>({});
   const [mappingSaving, setMappingSaving] = useState(false);
   const lastFocusedCell = useRef<{ rowIdx: number; colIdx: number } | null>(null);
+  const pendingFocusCell = useRef<{ rowIdx: number; colIdx: number } | null>(null);
   const draggingSelection = useRef(false);
   const [selection, setSelection] = useState<{ start: { r: number; c: number }; end: { r: number; c: number } } | null>(null);
   const undoStack = useRef<ImportRow[][]>([]);
@@ -1748,48 +1749,89 @@ function ImportEditor({
     [rows, onChange, budgetCodeIdx, subCodeIdx, evidenceIdx, evidenceRequiredMap, applyDerivedRows],
   );
 
+  const normalizeRowNumbers = useCallback((input: ImportRow[]) => {
+    if (noIdx < 0) return input;
+    return input.map((row, index) => {
+      const nextNo = String(index + 1);
+      if (row.cells[noIdx] === nextNo) return row;
+      const cells = [...row.cells];
+      cells[noIdx] = nextNo;
+      return { ...row, cells };
+    });
+  }, [noIdx]);
+
+  const getSelectionAnchor = useCallback(() => {
+    if (selection) {
+      return {
+        rowIdx: Math.min(selection.start.r, selection.end.r),
+        colIdx: Math.min(selection.start.c, selection.end.c),
+      };
+    }
+    return lastFocusedCell.current;
+  }, [selection]);
+
+  const getPreferredEditableCol = useCallback(() => {
+    const anchor = getSelectionAnchor();
+    const fallback = noIdx === 0 ? 1 : 0;
+    if (!anchor) return fallback;
+    if (anchor.colIdx === noIdx) return fallback;
+    return anchor.colIdx;
+  }, [getSelectionAnchor, noIdx]);
+
+  const commitRows = useCallback((nextRows: ImportRow[], focusTarget?: { rowIdx: number; colIdx: number } | null) => {
+    if (focusTarget) pendingFocusCell.current = focusTarget;
+    onChange(applyDerivedRows(normalizeRowNumbers(nextRows)));
+  }, [onChange, applyDerivedRows, normalizeRowNumbers]);
+
   const addRow = useCallback(() => {
+    const anchor = getSelectionAnchor();
+    const insertIndex = anchor ? Math.min(rows.length, anchor.rowIdx + 1) : rows.length;
     const newRow = createEmptyImportRow();
-    // Set No. column
-    const noIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === 'No.');
-    if (noIdx >= 0) newRow.cells[noIdx] = String(rows.length + 1);
     newRow.error = undefined;
-    onChange(applyDerivedRows([...rows, newRow]));
-  }, [rows, onChange, applyDerivedRows]);
+    const nextRows = [
+      ...rows.slice(0, insertIndex),
+      newRow,
+      ...rows.slice(insertIndex),
+    ];
+    commitRows(nextRows, { rowIdx: insertIndex, colIdx: getPreferredEditableCol() });
+  }, [rows, getSelectionAnchor, commitRows, getPreferredEditableCol]);
 
   const addRows = useCallback((count: number) => {
     if (count <= 0) return;
-    const noIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === 'No.');
     const nextRows = [...rows];
     for (let i = 0; i < count; i++) {
       const newRow = createEmptyImportRow();
-      if (noIdx >= 0) newRow.cells[noIdx] = String(nextRows.length + 1);
       nextRows.push(newRow);
     }
-    onChange(applyDerivedRows(nextRows));
-  }, [rows, onChange, applyDerivedRows]);
+    commitRows(nextRows);
+  }, [rows, commitRows]);
 
   const addTemplateRow = useCallback((template: QuickExpenseTemplate) => {
+    const anchor = getSelectionAnchor();
+    const insertIndex = anchor ? Math.min(rows.length, anchor.rowIdx + 1) : rows.length;
     const newRow = createEmptyImportRow();
-    if (noIdx >= 0) newRow.cells[noIdx] = String(rows.length + 1);
     if (methodIdx >= 0) newRow.cells[methodIdx] = template.methodLabel;
     if (cashflowIdx >= 0) newRow.cells[cashflowIdx] = template.cashflowLabel;
     if (counterpartyIdx >= 0) newRow.cells[counterpartyIdx] = template.counterparty;
     if (memoIdx >= 0) newRow.cells[memoIdx] = template.memo;
-    onChange(applyDerivedRows([...rows, newRow]));
-  }, [rows, noIdx, methodIdx, cashflowIdx, counterpartyIdx, memoIdx, onChange, applyDerivedRows]);
+    const nextRows = [
+      ...rows.slice(0, insertIndex),
+      newRow,
+      ...rows.slice(insertIndex),
+    ];
+    commitRows(nextRows, { rowIdx: insertIndex, colIdx: getPreferredEditableCol() });
+  }, [rows, methodIdx, cashflowIdx, counterpartyIdx, memoIdx, getSelectionAnchor, commitRows, getPreferredEditableCol]);
 
   const insertRowAt = useCallback((index: number) => {
     const boundedIndex = Math.max(0, Math.min(rows.length, index));
     const newRow = createEmptyImportRow();
-    if (noIdx >= 0) newRow.cells[noIdx] = String(boundedIndex + 1);
     const nextRows = [
       ...rows.slice(0, boundedIndex),
       newRow,
       ...rows.slice(boundedIndex),
     ];
-    onChange(applyDerivedRows(nextRows));
-  }, [rows, noIdx, onChange, applyDerivedRows]);
+    commitRows(nextRows, { rowIdx: boundedIndex, colIdx: getPreferredEditableCol() });
+  }, [rows, commitRows, getPreferredEditableCol]);
 
   const formatNumberCell = useCallback((value: string) => {
     if (!value) return '';
@@ -1831,9 +1873,7 @@ function ImportEditor({
       const neededRows = bounds.r2 + 1;
       const nextRows = [...rows];
       while (nextRows.length < neededRows) {
-        const newRow = createEmptyImportRow();
-        if (noIdx >= 0) newRow.cells[noIdx] = String(nextRows.length + 1);
-        nextRows.push(newRow);
+        nextRows.push(createEmptyImportRow());
       }
 
       const fillAll = gridRows === 1 && gridCols === 1;
@@ -1895,12 +1935,11 @@ function ImportEditor({
         nextRows[rowIdx] = updated;
       }
 
-      onChange(applyDerivedRows(nextRows));
+      commitRows(nextRows);
     },
     [
       rows,
-      onChange,
-      applyDerivedRows,
+      commitRows,
       formatNumberCell,
       noIdx,
       selection,
@@ -1990,6 +2029,16 @@ function ImportEditor({
     target.focus();
     handleCellFocus(boundedRow, boundedCol);
   }, [rows.length, noIdx, handleCellFocus]);
+
+  useEffect(() => {
+    if (!pendingFocusCell.current) return;
+    const target = pendingFocusCell.current;
+    pendingFocusCell.current = null;
+    const timer = window.setTimeout(() => {
+      focusCellAt(target.rowIdx, target.colIdx);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [rows, focusCellAt]);
 
   const handleTableKeyDown = useCallback((e: KeyboardEvent<HTMLDivElement>) => {
     handleUndo(e);
@@ -2107,9 +2156,11 @@ function ImportEditor({
 
   const removeRow = useCallback(
     (rowIdx: number) => {
-      onChange(applyDerivedRows(rows.filter((_, i) => i !== rowIdx)));
+      const nextRows = rows.filter((_, i) => i !== rowIdx);
+      const nextFocusRow = Math.min(Math.max(0, rowIdx - 1), Math.max(0, nextRows.length - 1));
+      commitRows(nextRows, nextRows.length > 0 ? { rowIdx: nextFocusRow, colIdx: getPreferredEditableCol() } : null);
     },
-    [rows, onChange, applyDerivedRows],
+    [rows, commitRows, getPreferredEditableCol],
   );
 
   const applyEvidenceMapping = useCallback((rowIdx?: number) => {
