@@ -30,7 +30,12 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/
 import { DarkModeToggle } from '../layout/DarkModeToggle';
 import { PageTransition } from '../layout/PageTransition';
 import { ErrorBoundary } from '../layout/ErrorBoundary';
-import { resolveHomePath, shouldForcePortalOnboarding } from '../../platform/navigation';
+import {
+  canChooseWorkspace,
+  canEnterPortalWorkspace,
+  resolveHomePath,
+  shouldForcePortalOnboarding,
+} from '../../platform/navigation';
 import { addMonthsToYearMonth, getSeoulTodayIso } from '../../platform/business-days';
 
 // ═══════════════════════════════════════════════════════════════
@@ -62,12 +67,19 @@ function PortalContent() {
     projects,
     setActiveProject,
   } = usePortalStore();
-  const { isAuthenticated, isLoading: authLoading, user: authUser, logout: authLogout } = useAuth();
+  const {
+    isAuthenticated,
+    isLoading: authLoading,
+    user: authUser,
+    logout: authLogout,
+    setWorkspacePreference,
+  } = useAuth();
   const { getUnacknowledgedCount } = useHrAnnouncements();
   const { runs, monthlyCloses } = usePayroll();
   const location = useLocation();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const currentPath = `${location.pathname}${location.search}${location.hash}`;
 
   // ── 모든 hooks는 early return 전에 호출 ──
   const assignedProjects = useMemo(() => {
@@ -120,15 +132,15 @@ function PortalContent() {
   useEffect(() => {
     if (authLoading) return;
     if (!isAuthenticated) {
-      navigate('/login', { replace: true });
+      navigate('/login', { replace: true, state: { from: currentPath } });
     }
-  }, [authLoading, isAuthenticated, navigate]);
+  }, [authLoading, currentPath, isAuthenticated, navigate]);
 
   useEffect(() => {
     if (authLoading) return;
     const role = authUser?.role;
     if (!isAuthenticated || !role) return;
-    if (resolveHomePath(role) === '/') {
+    if (!canEnterPortalWorkspace(role)) {
       if (location.pathname.startsWith('/portal/board')) {
         const suffix = location.pathname.slice('/portal'.length);
         navigate(suffix, { replace: true });
@@ -138,6 +150,13 @@ function PortalContent() {
       navigate('/', { replace: true });
     }
   }, [authLoading, isAuthenticated, authUser, location.pathname, navigate]);
+
+  useEffect(() => {
+    const role = authUser?.role;
+    if (!isAuthenticated || !role || !canChooseWorkspace(role)) return;
+    if (authUser?.lastWorkspace === 'portal') return;
+    void setWorkspacePreference('portal', { persistDefault: false });
+  }, [authUser?.lastWorkspace, authUser?.role, isAuthenticated, setWorkspacePreference]);
 
   // 포털 미등록 시 온보딩으로 (인증은 되었지만 포털 사업 미선택)
   useEffect(() => {
@@ -171,7 +190,7 @@ function PortalContent() {
   const standaloneOnboarding = (
     (location.pathname.includes('/portal/onboarding') || location.pathname.includes('/portal/register-project')) &&
     !isRegistered &&
-    resolveHomePath(authUser?.role) === '/portal'
+    canEnterPortalWorkspace(authUser?.role)
   );
   if (standaloneOnboarding) {
     return <Outlet />;

@@ -20,6 +20,8 @@ export function PortalWeeklyExpensePage() {
     saveEvidenceRequiredMap,
     expenseSheetRows,
     saveExpenseSheetRows,
+    comments,
+    addComment,
     participationEntries,
     budgetCodeBook,
   } = usePortalStore();
@@ -89,7 +91,10 @@ export function PortalWeeklyExpensePage() {
         }}
         onChangeTransactionState={(txId, newState, reason) => changeTransactionState(txId, newState, reason)}
         currentUserName={portalUser?.name || 'PM'}
+        currentUserId={portalUser?.id || 'pm'}
         userRole="pm"
+        comments={comments}
+        onAddComment={addComment}
       />
     </div>
   );

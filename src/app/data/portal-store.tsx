@@ -16,6 +16,7 @@ import type {
   BudgetPlanRow,
   BudgetCodeEntry,
   BudgetCodeRename,
+  Comment,
   Ledger,
   Project,
   ParticipationEntry,
@@ -48,8 +49,10 @@ import { useAuth } from './auth-store';
 import { useFirebase } from '../lib/firebase-context';
 import { getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
 import { duplicateExpenseSetAsDraft, withExpenseItems } from './portal-store.helpers';
+import { buildPortalProfilePatch, readMemberWorkspace } from './member-workspace';
 import { toast } from 'sonner';
 import { includesProject, normalizeProjectIds, resolvePrimaryProjectId } from './project-assignment';
+import { canEnterPortalWorkspace } from '../platform/navigation';
 
 export interface PortalUser {
   id: string;
@@ -73,6 +76,7 @@ interface PortalState {
   expenseSets: ExpenseSet[];
   changeRequests: ChangeRequest[];
   transactions: Transaction[];
+  comments: Comment[];
   evidenceRequiredMap: Record<string, string>;
   expenseSheetRows: ImportRow[] | null;
   bankStatementRows: BankStatementSheet | null;
@@ -103,6 +107,7 @@ interface PortalActions {
   addTransaction: (tx: Transaction) => void;
   updateTransaction: (id: string, updates: Partial<Transaction>) => void;
   changeTransactionState: (id: string, newState: TransactionState, reason?: string) => void;
+  addComment: (comment: Comment) => Promise<void>;
   saveEvidenceRequiredMap: (map: Record<string, string>) => Promise<void>;
   saveExpenseSheetRows: (rows: ImportRow[]) => Promise<void>;
   saveBankStatementRows: (sheet: BankStatementSheet) => Promise<void>;
@@ -180,6 +185,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   const [ledgers, setLedgers] = useState<Ledger[]>([]);
   const [participationEntries, setParticipationEntries] = useState<ParticipationEntry[]>(PARTICIPATION_ENTRIES);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [comments, setComments] = useState<Comment[]>([]);
   const [evidenceRequiredMap, setEvidenceRequiredMap] = useState<Record<string, string>>({});
   const [expenseSheetRows, setExpenseSheetRows] = useState<ImportRow[] | null>(null);
   const [bankStatementRows, setBankStatementRows] = useState<BankStatementSheet | null>(null);
@@ -206,7 +212,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       setIsMemberLoading(false);
       return;
     }
-    if (authUser.role !== 'pm' && authUser.role !== 'viewer') {
+    if (!canEnterPortalWorkspace(authUser.role)) {
       setIsMemberLoading(false);
       return;
     }
@@ -228,6 +234,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           projectIds?: Array<string | { id?: string; name?: string }>;
           projectId?: string | { id?: string; name?: string };
         };
+        const workspace = readMemberWorkspace(member);
         const nameMap: Record<string, string> = {};
         const rawIds = Array.isArray(member.projectIds) ? member.projectIds : [];
         const coercedIds = rawIds
@@ -239,9 +246,14 @@ export function PortalProvider({ children }: { children: ReactNode }) {
             return id;
           })
           .filter(Boolean);
-        const preferredId = typeof member.projectId === 'string'
-          ? member.projectId
-          : String((member.projectId as any)?.id || '');
+        for (const [projectId, name] of Object.entries(workspace.portalProfile?.projectNames || {})) {
+          if (projectId && name) nameMap[projectId] = name;
+        }
+        const preferredId = workspace.portalProfile?.projectId || (
+          typeof member.projectId === 'string'
+            ? member.projectId
+            : String((member.projectId as any)?.id || '')
+        );
         const normalizedPreferred = preferredId || '';
         const normalized = normalizePortalUser({
           id: authUser.uid,
@@ -249,7 +261,10 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           email: member.email || authUser.email,
           role: authUser.role,
           projectId: normalizedPreferred,
-          projectIds: coercedIds,
+          projectIds: normalizeProjectIds([
+            ...(workspace.portalProfile?.projectIds || []),
+            ...coercedIds,
+          ]),
           projectNames: Object.keys(nameMap).length ? nameMap : undefined,
           registeredAt: member.registeredAt || authUser.registeredAt || new Date().toISOString(),
         });
@@ -540,6 +555,10 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         collection(db, getOrgCollectionPath(orgId, 'transactions')),
         where('projectId', '==', portalUser.projectId),
       );
+      const commentQuery = query(
+        collection(db, getOrgCollectionPath(orgId, 'comments')),
+        where('projectId', '==', portalUser.projectId),
+      );
 
       const evidenceMapRef = doc(db, getOrgDocumentPath(orgId, 'budgetEvidenceMaps', portalUser.projectId));
       const expenseSheetRef = doc(
@@ -576,6 +595,18 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           setTransactions(TRANSACTIONS.filter((t) => t.projectId === portalUser.projectId));
           txReady = true;
           markReady();
+        }),
+      );
+
+      unsubsRef.current.push(
+        onSnapshot(commentQuery, (snap) => {
+          const list = snap.docs
+            .map((docItem) => docItem.data() as Comment)
+            .sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+          setComments(list);
+        }, (err) => {
+          console.error('[PortalStore] comments listen error:', err);
+          setComments([]);
         }),
       );
 
@@ -1209,8 +1240,14 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           role: memberRole,
           tenantId: orgId,
           status: 'ACTIVE',
-          projectId: candidate.projectId,
-          projectIds: candidate.projectIds,
+          ...buildPortalProfilePatch({
+            projectId: candidate.projectId,
+            projectIds: candidate.projectIds,
+            projectNames: candidate.projectNames,
+            updatedAt: now,
+            updatedByUid: authUser.uid,
+            updatedByName: authUser.name || candidate.name,
+          }),
           updatedAt: now,
           createdAt: authUser.registeredAt || now,
           lastLoginAt: now,
@@ -1255,11 +1292,18 @@ export function PortalProvider({ children }: { children: ReactNode }) {
 
     if (authUser) {
       try {
+        const now = new Date().toISOString();
         await updateDoc(doc(db, getOrgDocumentPath(orgId, 'members', authUser.uid)), {
-          projectId: target,
-          projectIds: nextUser.projectIds,
           tenantId: orgId,
-          updatedAt: new Date().toISOString(),
+          ...buildPortalProfilePatch({
+            projectId: target,
+            projectIds: nextUser.projectIds,
+            projectNames: nextUser.projectNames,
+            updatedAt: now,
+            updatedByUid: authUser.uid,
+            updatedByName: authUser.name || nextUser.name,
+          }),
+          updatedAt: now,
         });
       } catch (err) {
         console.error('[PortalStore] setActiveProject member sync error:', err);
@@ -1531,6 +1575,34 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     }
   }, [firestoreEnabled, persistTransaction, portalUser?.id, portalUser?.name]);
 
+  const addComment = useCallback(async (comment: Comment) => {
+    if (!portalUser?.projectId) {
+      toast.error('사업 정보가 없어 메모를 저장할 수 없습니다.');
+      return;
+    }
+
+    const isSheetRowComment = (comment.targetType === 'expense_sheet_row')
+      || comment.transactionId.startsWith('sheet-row:')
+      || comment.sheetRowId?.startsWith('sheet-row:');
+    const payload = withTenantScope(orgId, {
+      ...comment,
+      projectId: comment.projectId || portalUser.projectId,
+      targetType: isSheetRowComment ? 'expense_sheet_row' : (comment.targetType || 'transaction'),
+      ...(isSheetRowComment ? { sheetRowId: comment.sheetRowId || comment.transactionId } : {}),
+    });
+
+    if (firestoreEnabled && db) {
+      await setDoc(
+        doc(db, getOrgDocumentPath(orgId, 'comments', comment.id)),
+        payload,
+        { merge: true },
+      );
+      return;
+    }
+
+    setComments((prev) => [...prev, payload as Comment]);
+  }, [db, firestoreEnabled, orgId, portalUser?.projectId]);
+
   const value: PortalState & PortalActions = {
     isRegistered: !!(portalUser && portalUser.projectIds.length > 0),
     isLoading: isLoading || isMemberLoading,
@@ -1542,6 +1614,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     expenseSets,
     changeRequests,
     transactions,
+    comments,
     evidenceRequiredMap,
     expenseSheetRows,
     bankStatementRows,
@@ -1563,6 +1636,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     addTransaction,
     updateTransaction,
     changeTransactionState,
+    addComment,
     saveEvidenceRequiredMap,
     saveExpenseSheetRows,
     saveBankStatementRows,

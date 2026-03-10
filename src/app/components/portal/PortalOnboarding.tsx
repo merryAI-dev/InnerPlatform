@@ -8,7 +8,7 @@ import { usePortalStore } from '../../data/portal-store';
 import { PROJECT_STATUS_LABELS } from '../../data/types';
 import { normalizeProjectIds, resolvePrimaryProjectId } from '../../data/project-assignment';
 import { useAuth } from '../../data/auth-store';
-import { resolveHomePath } from '../../platform/navigation';
+import { canEnterPortalWorkspace } from '../../platform/navigation';
 
 const statusColors: Record<string, string> = {
   CONTRACT_PENDING: 'bg-amber-100 text-amber-700',
@@ -33,12 +33,12 @@ export function PortalOnboarding() {
     resolvePrimaryProjectId(projectIds, portalUser?.projectId || authUser?.projectId) || ''
   ));
 
-  const isAdminSpaceUser = resolveHomePath(authUser?.role) === '/';
+  const isAdminSpaceUser = !canEnterPortalWorkspace(authUser?.role);
 
   useEffect(() => {
     if (authLoading) return;
     if (!isAuthenticated) {
-      navigate('/login', { replace: true });
+      navigate('/login', { replace: true, state: { from: '/portal/onboarding' } });
       return;
     }
 

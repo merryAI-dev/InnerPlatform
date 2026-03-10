@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   Settings, Users, BookOpen, Shield, Building2, Plus, Database, Upload, MessageCircle,
 } from 'lucide-react';
-import { useNavigate } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
@@ -51,11 +51,13 @@ export function SettingsPage() {
   const { org, members, templates } = useAppStore();
   const { isAuthenticated, user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [tab, setTab] = useState('org');
+  const currentPath = `${location.pathname}${location.search}${location.hash}`;
 
   useEffect(() => {
     if (!isAuthenticated) {
-      navigate('/login', { replace: true });
+      navigate('/login', { replace: true, state: { from: currentPath } });
       return;
     }
 
@@ -65,9 +67,9 @@ export function SettingsPage() {
     // Keep operational settings (Firebase/feature toggles, member management) admin-scoped.
     const allowed = role === 'admin' || role === 'tenant_admin';
     if (!allowed) {
-      navigate(resolveHomePath(role), { replace: true });
+      navigate(resolveHomePath(role, user?.defaultWorkspace ?? user?.lastWorkspace), { replace: true });
     }
-  }, [isAuthenticated, navigate, user?.role]);
+  }, [currentPath, isAuthenticated, navigate, user?.defaultWorkspace, user?.lastWorkspace, user?.role]);
 
   if (!isAuthenticated) return null;
   if (!user) return null;
