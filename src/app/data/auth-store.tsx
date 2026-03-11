@@ -30,6 +30,7 @@ import { extractAuthContextFromClaims } from '../platform/rbac';
 import { isAdminSpaceRole } from '../platform/navigation';
 import { resolveTenantId } from '../platform/tenant';
 import { formatAllowedDomains, getAllowedEmailDomains, isAllowedEmail } from '../platform/email-allowlist';
+import { buildPreviewAuthBlockedMessage, shouldBlockFirebasePopupAuth } from '../platform/preview-auth';
 
 export interface AuthUser {
   uid: string;
@@ -394,6 +395,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { success: false, error: 'Firebase Auth 기능이 비활성화되어 있습니다.' };
     }
 
+    const host = typeof window !== 'undefined' ? window.location.hostname : '';
+    if (shouldBlockFirebasePopupAuth(host, import.meta.env)) {
+      return {
+        success: false,
+        error: buildPreviewAuthBlockedMessage(host, import.meta.env),
+      };
+    }
+
     setIsLoading(true);
 
     try {
@@ -420,7 +429,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setIsLoading(false);
       const code = String(err?.code || '').trim();
       if (code === 'auth/unauthorized-domain') {
-        const host = typeof window !== 'undefined' ? window.location.hostname : '';
         return {
           success: false,
           error: `Firebase Auth에서 허용되지 않은 도메인입니다. Firebase Console > Authentication > Settings > Authorized domains에 ${host || '현재 도메인'}을 추가해 주세요.`,

@@ -11,6 +11,11 @@ import { Button } from '../ui/button';
 import { useAuth } from '../../data/auth-store';
 import { resolvePostLoginPath, shouldPromptWorkspaceSelection } from '../../platform/navigation';
 import { readFirebaseEmulatorConfig } from '../../lib/firebase';
+import {
+  buildPreviewAuthBlockedMessage,
+  readPreviewAuthGuardConfig,
+  shouldBlockFirebasePopupAuth,
+} from '../../platform/preview-auth';
 
 // ═══════════════════════════════════════════════════════════════
 // LoginPage — 통합 로그인 페이지
@@ -30,6 +35,12 @@ export function LoginPage() {
   const [error, setError] = useState('');
   const redirectFrom = (location.state as { from?: string } | null)?.from;
   const emulatorConfig = readFirebaseEmulatorConfig(import.meta.env);
+  const previewAuthConfig = readPreviewAuthGuardConfig(import.meta.env);
+  const currentHost = typeof window !== 'undefined' ? window.location.hostname : '';
+  const loginBlockedOnPreview = shouldBlockFirebasePopupAuth(currentHost, import.meta.env);
+  const previewBlockMessage = loginBlockedOnPreview
+    ? buildPreviewAuthBlockedMessage(currentHost, import.meta.env)
+    : '';
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -98,6 +109,36 @@ export function LoginPage() {
                 </div>
               )}
 
+              {loginBlockedOnPreview && (
+                <div className="rounded-lg border border-amber-200/60 bg-amber-50 p-3 text-[12px] text-amber-800">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                    <div className="space-y-2">
+                      <p>{previewBlockMessage}</p>
+                      {previewAuthConfig.fallbackUrl ? (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="h-8 border-amber-300 bg-white px-3 text-[11px] text-amber-900 hover:bg-amber-100"
+                            onClick={() => window.location.assign(previewAuthConfig.fallbackUrl)}
+                          >
+                            고정 preview로 이동
+                          </Button>
+                          <span className="break-all text-[10px] text-amber-700/90">
+                            {previewAuthConfig.fallbackUrl}
+                          </span>
+                        </div>
+                      ) : (
+                        <p className="text-[11px] text-amber-700/90">
+                          `VITE_FIREBASE_AUTH_FALLBACK_URL`을 설정하면 여기서 바로 고정 preview 주소로 이동할 수 있습니다.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {error && (
                 <div className="flex items-center gap-2 p-3 rounded-lg bg-rose-50 dark:bg-rose-950/20 border border-rose-200/60 dark:border-rose-800/40 text-rose-700 dark:text-rose-300 text-[12px]">
                   <AlertCircle className="w-4 h-4 shrink-0" />
@@ -108,7 +149,7 @@ export function LoginPage() {
               <Button
                 type="button"
                 className="w-full h-11 text-[13px] gap-2"
-                disabled={isLoading || !isFirebaseAuthEnabled}
+                disabled={isLoading || !isFirebaseAuthEnabled || loginBlockedOnPreview}
                 onClick={() => handleLogin()}
                 style={{ background: 'linear-gradient(135deg, #312e81, #4f46e5)' }}
               >
