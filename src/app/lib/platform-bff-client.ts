@@ -101,18 +101,45 @@ export interface SyncTransactionEvidenceDriveResult {
   updatedAt: string;
 }
 
+export interface UploadTransactionEvidenceDrivePayload {
+  fileName: string;
+  originalFileName?: string;
+  mimeType: string;
+  fileSize: number;
+  contentBase64: string;
+  category?: string;
+}
+
+export interface UploadTransactionEvidenceDriveResult extends SyncTransactionEvidenceDriveResult {
+  driveFileId: string;
+  fileName: string;
+  originalFileName?: string;
+  webViewLink: string | null;
+  category: string;
+  parserCategory: string;
+  parserConfidence: number;
+}
+
 export interface PlatformApiClientLike {
   get<T>(path: string, options: {
     tenantId: string;
     actor: RequestActor;
     body?: unknown;
     headers?: HeadersInit;
+    idempotencyKey?: string;
+    requestId?: string;
+    retries?: number;
+    timeoutMs?: number;
   }): Promise<{ data: T }>;
   post<T>(path: string, options: {
     tenantId: string;
     actor: RequestActor;
     body?: unknown;
     headers?: HeadersInit;
+    idempotencyKey?: string;
+    requestId?: string;
+    retries?: number;
+    timeoutMs?: number;
   }): Promise<{ data: T }>;
   request<T>(path: string, options: {
     method?: string;
@@ -120,6 +147,10 @@ export interface PlatformApiClientLike {
     actor: RequestActor;
     body?: unknown;
     headers?: HeadersInit;
+    idempotencyKey?: string;
+    requestId?: string;
+    retries?: number;
+    timeoutMs?: number;
   }): Promise<{ data: T }>;
 }
 
@@ -321,11 +352,14 @@ export async function provisionTransactionEvidenceDriveViaBff(params: {
   client?: PlatformApiClientLike;
 }): Promise<ProvisionTransactionEvidenceDriveResult> {
   const apiClient = resolveClient(params.client);
-  const response = await apiClient.post<ProvisionTransactionEvidenceDriveResult>(
+  const response = await apiClient.request<ProvisionTransactionEvidenceDriveResult>(
     `/api/v1/transactions/${params.transactionId}/evidence-drive/provision`,
     {
+      method: 'POST',
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
+      retries: 0,
+      timeoutMs: 15000,
     },
   );
   return response.data;
@@ -338,11 +372,36 @@ export async function syncTransactionEvidenceDriveViaBff(params: {
   client?: PlatformApiClientLike;
 }): Promise<SyncTransactionEvidenceDriveResult> {
   const apiClient = resolveClient(params.client);
-  const response = await apiClient.post<SyncTransactionEvidenceDriveResult>(
+  const response = await apiClient.request<SyncTransactionEvidenceDriveResult>(
     `/api/v1/transactions/${params.transactionId}/evidence-drive/sync`,
     {
+      method: 'POST',
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
+      retries: 0,
+      timeoutMs: 20000,
+    },
+  );
+  return response.data;
+}
+
+export async function uploadTransactionEvidenceDriveViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  transactionId: string;
+  upload: UploadTransactionEvidenceDrivePayload;
+  client?: PlatformApiClientLike;
+}): Promise<UploadTransactionEvidenceDriveResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.request<UploadTransactionEvidenceDriveResult>(
+    `/api/v1/transactions/${params.transactionId}/evidence-drive/upload`,
+    {
+      method: 'POST',
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.upload,
+      retries: 0,
+      timeoutMs: 30000,
     },
   );
   return response.data;

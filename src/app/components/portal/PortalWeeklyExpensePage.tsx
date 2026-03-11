@@ -1,18 +1,33 @@
 import { useMemo, useState } from 'react';
-import { AlertTriangle, Plus, Send, Settings2 } from 'lucide-react';
+import { AlertTriangle, ExternalLink, FolderPlus, Loader2, Plus, Send, Settings2 } from 'lucide-react';
 import { usePortalStore } from '../../data/portal-store';
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { useAuth } from '../../data/auth-store';
-import { SettlementLedgerPage } from '../cashflow/SettlementLedgerPage';
+import { type EvidenceUploadSelection, SettlementLedgerPage } from '../cashflow/SettlementLedgerPage';
 import { Button } from '../ui/button';
 import type { CashflowWeekSheet, Transaction, TransactionState } from '../../data/types';
 import { toast } from 'sonner';
 import { useFirebase } from '../../lib/firebase-context';
 import {
+  type ProvisionProjectEvidenceDriveRootResult,
+  type ProvisionTransactionEvidenceDriveResult,
+  type SyncTransactionEvidenceDriveResult,
+  type UploadTransactionEvidenceDriveResult,
+  provisionProjectEvidenceDriveRootViaBff,
   provisionTransactionEvidenceDriveViaBff,
   syncTransactionEvidenceDriveViaBff,
+  upsertTransactionViaBff,
+  uploadTransactionEvidenceDriveViaBff,
 } from '../../lib/platform-bff-client';
 import { PlatformApiError } from '../../platform/api-client';
+import { splitLooseNameList } from '../../platform/name-list';
+
+function normalizeBudgetLabel(value: string): string {
+  return String(value || '')
+    .replace(/^\s*\d+(?:[.\-]\d+)?\s*/, '')
+    .replace(/^[.\-]+\s*/, '')
+    .trim();
+}
 
 export function PortalWeeklyExpensePage() {
   const { user: authUser } = useAuth();
@@ -38,9 +53,11 @@ export function PortalWeeklyExpensePage() {
     comments,
     addComment,
     participationEntries,
+    budgetPlanRows,
     budgetCodeBook,
   } = usePortalStore();
   const { submitWeekAsPm } = useCashflowWeeks();
+  const [projectDriveProvisioning, setProjectDriveProvisioning] = useState(false);
 
   const projectId = portalUser?.projectId || '';
   const projectName = myProject?.name || '내 사업';
@@ -59,16 +76,50 @@ export function PortalWeeklyExpensePage() {
     return ledger?.id || `l-${projectId}`;
   }, [projectId, ledgers]);
 
+  const effectiveBudgetCodeBook = useMemo(() => {
+    const orderedCodes: string[] = [];
+    const subCodesByCode = new Map<string, Set<string>>();
+    const pushEntry = (rawCode?: string | null, rawSub?: string | null) => {
+      const code = normalizeBudgetLabel(rawCode || '');
+      const sub = normalizeBudgetLabel(rawSub || '');
+      if (!code || !sub) return;
+      if (!subCodesByCode.has(code)) {
+        subCodesByCode.set(code, new Set());
+        orderedCodes.push(code);
+      }
+      subCodesByCode.get(code)!.add(sub);
+    };
+
+    budgetCodeBook.forEach((entry) => {
+      const code = normalizeBudgetLabel(entry.code);
+      if (!code) return;
+      if (!subCodesByCode.has(code)) {
+        subCodesByCode.set(code, new Set());
+        orderedCodes.push(code);
+      }
+      entry.subCodes.forEach((subCode) => pushEntry(code, subCode));
+    });
+    (budgetPlanRows || []).forEach((row) => pushEntry(row.budgetCode, row.subCode));
+
+    return orderedCodes.map((code) => ({
+      code,
+      subCodes: Array.from(subCodesByCode.get(code) || []),
+    })).filter((entry) => entry.subCodes.length > 0);
+  }, [budgetCodeBook, budgetPlanRows]);
+
   const authorOptions = useMemo(() => {
     const names = new Set<string>();
+    const collectNames = (value?: string | null) => {
+      splitLooseNameList(value).forEach((name) => names.add(name));
+    };
     participationEntries
       .filter((e) => e.projectId === projectId)
       .forEach((e) => {
-        if (e.memberName) names.add(e.memberName);
+        collectNames(e.memberName);
       });
-    if (portalUser?.name) names.add(portalUser.name);
-    if (myProject?.managerName) names.add(myProject.managerName);
-    if (myProject?.settlementSupportName) names.add(myProject.settlementSupportName);
+    collectNames(portalUser?.name);
+    collectNames(myProject?.managerName);
+    collectNames(myProject?.settlementSupportName);
     return Array.from(names).filter(Boolean).sort((a, b) => a.localeCompare(b, 'ko'));
   }, [participationEntries, projectId, portalUser?.name, myProject?.managerName, myProject?.settlementSupportName]);
 
@@ -91,6 +142,126 @@ export function PortalWeeklyExpensePage() {
     toast.error(`${actionLabel}에 실패했습니다.`);
   };
 
+  const resolveVersionFromApiError = (error: unknown): number | null => {
+    if (!(error instanceof PlatformApiError)) return null;
+    const bodyMessage = typeof error.body === 'object' && error.body && 'message' in (error.body as Record<string, unknown>)
+      ? String((error.body as Record<string, unknown>).message || '')
+      : '';
+    const source = `${error.message} ${bodyMessage}`;
+    const currentMatch = source.match(/current=(\d+)/i);
+    if (currentMatch) return Number.parseInt(currentMatch[1], 10);
+    const actualMatch = source.match(/actual\s+(\d+)/i);
+    if (actualMatch) return Number.parseInt(actualMatch[1], 10);
+    return null;
+  };
+
+  const applyProvisionedDriveState = (
+    txId: string,
+    result: ProvisionTransactionEvidenceDriveResult,
+  ) => {
+    updateTransaction(txId, {
+      version: result.version,
+      evidenceDriveFolderId: result.folderId,
+      evidenceDriveFolderName: result.folderName,
+      evidenceDriveLink: result.webViewLink || undefined,
+      evidenceDriveSharedDriveId: result.sharedDriveId || undefined,
+      evidenceDriveSyncStatus: result.syncStatus,
+      updatedAt: result.updatedAt,
+    });
+  };
+
+  const applySyncedEvidenceState = (
+    txId: string,
+    result: SyncTransactionEvidenceDriveResult | UploadTransactionEvidenceDriveResult,
+  ) => {
+    updateTransaction(txId, {
+      version: result.version,
+      attachmentsCount: result.evidenceCount,
+      evidenceDriveFolderId: result.folderId,
+      evidenceDriveFolderName: result.folderName,
+      evidenceDriveLink: result.webViewLink || undefined,
+      evidenceDriveSharedDriveId: result.sharedDriveId || undefined,
+      evidenceDriveSyncStatus: 'SYNCED',
+      evidenceDriveLastSyncedAt: result.lastSyncedAt,
+      evidenceCompletedDesc: result.evidenceCompletedDesc || undefined,
+      evidenceAutoListedDesc: result.evidenceAutoListedDesc || undefined,
+      evidencePendingDesc: result.evidencePendingDesc || undefined,
+      supportPendingDocs: result.supportPendingDocs || undefined,
+      evidenceMissing: result.evidenceMissing,
+      evidenceStatus: result.evidenceStatus,
+      updatedAt: result.updatedAt,
+    });
+  };
+
+  const ensureTransactionPersisted = async ({
+    transaction,
+    sourceTxId,
+  }: {
+    transaction: Transaction;
+    sourceTxId?: string;
+  }): Promise<string | null> => {
+    const existingTx = sourceTxId ? transactions.find((candidate) => candidate.id === sourceTxId) : undefined;
+    const now = new Date().toISOString();
+    const txId = existingTx?.id || transaction.id;
+    const nextTx: Transaction = {
+      ...(existingTx || {}),
+      ...transaction,
+      id: txId,
+      projectId,
+      ledgerId: defaultLedgerId,
+      counterparty: transaction.counterparty.trim(),
+      state: existingTx?.state || transaction.state || 'DRAFT',
+      createdAt: existingTx?.createdAt || transaction.createdAt || now,
+      createdBy: existingTx?.createdBy || transaction.createdBy || portalUser?.name || authUser?.name || 'pm',
+      updatedAt: now,
+      updatedBy: portalUser?.name || authUser?.name || transaction.updatedBy || 'pm',
+      weekCode: transaction.weekCode || existingTx?.weekCode || '',
+    };
+
+    try {
+      const requestPayload = {
+        ...nextTx,
+        ...(Number.isFinite(existingTx?.version)
+          ? { expectedVersion: existingTx?.version }
+          : {}),
+      };
+      let result;
+      try {
+        result = await upsertTransactionViaBff({
+          tenantId: orgId,
+          actor: bffActor,
+          transaction: requestPayload,
+        });
+      } catch (error) {
+        const retryVersion = resolveVersionFromApiError(error);
+        if (retryVersion == null) throw error;
+        result = await upsertTransactionViaBff({
+          tenantId: orgId,
+          actor: bffActor,
+          transaction: {
+            ...nextTx,
+            expectedVersion: retryVersion,
+          },
+        });
+      }
+      const syncedTx = {
+        ...nextTx,
+        version: result.version,
+        updatedAt: result.updatedAt,
+        state: result.state as TransactionState,
+      };
+      if (existingTx) {
+        updateTransaction(txId, syncedTx);
+      } else {
+        addTransaction(syncedTx);
+      }
+      return txId;
+    } catch (error) {
+      handleEvidenceDriveError(error, '거래 저장');
+      return null;
+    }
+  };
+
   const provisionEvidenceDrive = async (tx: Transaction) => {
     try {
       const result = await provisionTransactionEvidenceDriveViaBff({
@@ -98,6 +269,7 @@ export function PortalWeeklyExpensePage() {
         actor: bffActor,
         transactionId: tx.id,
       });
+      applyProvisionedDriveState(tx.id, result);
       toast.success(`증빙 폴더 연결 완료: ${result.folderName}`);
     } catch (error) {
       handleEvidenceDriveError(error, '증빙 폴더 생성');
@@ -112,9 +284,56 @@ export function PortalWeeklyExpensePage() {
         actor: bffActor,
         transactionId: tx.id,
       });
+      applySyncedEvidenceState(tx.id, result);
       toast.success(`증빙 동기화 완료: ${result.evidenceCount}건`);
     } catch (error) {
       handleEvidenceDriveError(error, '증빙 동기화');
+      throw error;
+    }
+  };
+
+  const provisionProjectDriveRoot = async () => {
+    setProjectDriveProvisioning(true);
+    try {
+      const result = await provisionProjectEvidenceDriveRootViaBff({
+        tenantId: orgId,
+        actor: bffActor,
+        projectId,
+      });
+      toast.success(`기본 폴더 연결 완료: ${result.folderName}`);
+    } catch (error) {
+      handleEvidenceDriveError(error, '기본 폴더 생성');
+      throw error;
+    } finally {
+      setProjectDriveProvisioning(false);
+    }
+  };
+
+  const uploadEvidenceDrive = async (tx: Transaction, uploads: EvidenceUploadSelection[]) => {
+    try {
+      let lastResult: UploadTransactionEvidenceDriveResult | null = null;
+      for (const upload of uploads) {
+        const contentBase64 = await readFileAsBase64(upload.file);
+        lastResult = await uploadTransactionEvidenceDriveViaBff({
+          tenantId: orgId,
+          actor: bffActor,
+          transactionId: tx.id,
+          upload: {
+            fileName: upload.reviewedFileName,
+            originalFileName: upload.file.name,
+            mimeType: upload.file.type || 'application/octet-stream',
+            fileSize: upload.file.size,
+            contentBase64,
+            category: upload.category,
+          },
+        });
+      }
+      if (lastResult) {
+        applySyncedEvidenceState(tx.id, lastResult);
+      }
+      toast.success(`증빙 업로드 완료: ${uploads.length}건`);
+    } catch (error) {
+      handleEvidenceDriveError(error, '증빙 업로드');
       throw error;
     }
   };
@@ -202,6 +421,45 @@ export function PortalWeeklyExpensePage() {
           입력한 부가세를 기준으로 공급가액이 자동 보조 계산됩니다.
         </p>
       </div>
+      <div className="rounded-xl border border-sky-200/80 bg-sky-50/70 px-4 py-3 text-[12px] text-sky-950">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div className="space-y-1">
+            <p className="font-semibold">증빙 기본 폴더</p>
+            <p className="text-sky-900/80">
+              {myProject?.evidenceDriveRootFolderName
+                ? `${myProject.evidenceDriveRootFolderName}에 거래별 폴더를 자동 생성합니다.`
+                : '아직 사업 기본 폴더가 없습니다. 먼저 기본 폴더를 생성하세요.'}
+            </p>
+            <p className="text-[11px] text-sky-900/70">
+              사업 저장 1회 후에는 각 거래 행에서 `생성 / 업로드 / 동기화`를 바로 사용할 수 있습니다.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            {myProject?.evidenceDriveRootFolderLink && (
+              <Button asChild variant="outline" size="sm" className="h-8 text-[11px]">
+                <a href={myProject.evidenceDriveRootFolderLink} target="_blank" rel="noreferrer">
+                  <ExternalLink className="mr-1 h-3.5 w-3.5" />
+                  기본 폴더 열기
+                </a>
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-[11px]"
+              disabled={projectDriveProvisioning}
+              onClick={() => void provisionProjectDriveRoot()}
+            >
+              {projectDriveProvisioning ? (
+                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <FolderPlus className="mr-1 h-3.5 w-3.5" />
+              )}
+              {myProject?.evidenceDriveRootFolderId ? '기본 폴더 재확인' : '기본 폴더 생성'}
+            </Button>
+          </div>
+        </div>
+      </div>
       <VarianceFlagBanner
         projectId={projectId}
         pmName={portalUser?.name || 'PM'}
@@ -215,7 +473,7 @@ export function PortalWeeklyExpensePage() {
         onAddTransaction={addTransaction}
         onUpdateTransaction={updateTransaction}
         authorOptions={authorOptions}
-        budgetCodeBook={budgetCodeBook}
+        budgetCodeBook={effectiveBudgetCodeBook}
         hideYearControls
         hideCountBadge
         autoSaveSheet
@@ -241,9 +499,26 @@ export function PortalWeeklyExpensePage() {
         onAddComment={addComment}
         onProvisionEvidenceDrive={provisionEvidenceDrive}
         onSyncEvidenceDrive={syncEvidenceDrive}
+        onUploadEvidenceDrive={uploadEvidenceDrive}
+        onEnsureTransactionPersisted={ensureTransactionPersisted}
       />
     </div>
   );
+}
+
+async function readFileAsBase64(file: File): Promise<string> {
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error || new Error('파일 읽기에 실패했습니다.'));
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.readAsDataURL(file);
+  });
+
+  const [, base64 = ''] = dataUrl.split(',', 2);
+  if (!base64) {
+    throw new Error(`파일 인코딩에 실패했습니다: ${file.name}`);
+  }
+  return base64;
 }
 
 // ── PM 편차 확인 배너 ──

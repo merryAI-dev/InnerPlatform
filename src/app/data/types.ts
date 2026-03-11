@@ -508,6 +508,7 @@ export interface Evidence {
   version?: number;
   transactionId: string;
   fileName: string;
+  originalFileName?: string;
   fileType: string;
   fileSize: number;
   uploadedBy: string;

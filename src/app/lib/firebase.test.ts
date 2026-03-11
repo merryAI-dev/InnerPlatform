@@ -60,6 +60,9 @@ describe('readFirebaseEmulatorConfig', () => {
     expect(readFirebaseEmulatorConfig({})).toEqual({
       enabled: false,
       host: '127.0.0.1',
+      firestoreEnabled: false,
+      authEnabled: false,
+      storageEnabled: false,
       firestorePort: 8080,
       authPort: 9099,
       storagePort: 9199,
@@ -76,9 +79,30 @@ describe('readFirebaseEmulatorConfig', () => {
     })).toEqual({
       enabled: true,
       host: 'localhost',
+      firestoreEnabled: true,
+      authEnabled: true,
+      storageEnabled: true,
       firestorePort: 8181,
       authPort: 9292,
       storagePort: 9393,
+    });
+  });
+
+  it('supports hybrid mode with real auth and emulator firestore/storage', () => {
+    expect(readFirebaseEmulatorConfig({
+      VITE_FIREBASE_USE_EMULATORS: 'true',
+      VITE_FIREBASE_USE_FIRESTORE_EMULATOR: 'true',
+      VITE_FIREBASE_USE_AUTH_EMULATOR: 'false',
+      VITE_FIREBASE_USE_STORAGE_EMULATOR: 'true',
+    })).toEqual({
+      enabled: true,
+      host: '127.0.0.1',
+      firestoreEnabled: true,
+      authEnabled: false,
+      storageEnabled: true,
+      firestorePort: 8080,
+      authPort: 9099,
+      storagePort: 9199,
     });
   });
 });

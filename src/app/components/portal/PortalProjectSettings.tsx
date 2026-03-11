@@ -77,11 +77,7 @@ export function PortalProjectSettings() {
     setPrimaryProjectId(resolvePrimaryProjectId(merged, portalUser?.projectId || authUser?.projectId) || '');
   }, [authUser, portalUser]);
 
-  const activeProjects = useMemo(() => (
-    projects.filter((p) => p.status === 'CONTRACT_PENDING')
-  ), [projects]);
-
-  const allProjects = activeProjects;
+  const allProjects = useMemo(() => projects, [projects]);
   const primaryProject = useMemo(
     () => allProjects.find((project) => project.id === primaryProjectId) || null,
     [allProjects, primaryProjectId],

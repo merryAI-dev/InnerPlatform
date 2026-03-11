@@ -60,6 +60,15 @@ export const projectDriveRootLinkSchema = z.object({
   value: NON_EMPTY_STRING,
 }).strict();
 
+export const evidenceDriveUploadSchema = z.object({
+  fileName: NON_EMPTY_STRING,
+  originalFileName: NON_EMPTY_STRING.optional(),
+  mimeType: NON_EMPTY_STRING,
+  fileSize: z.number().int().nonnegative(),
+  contentBase64: NON_EMPTY_STRING,
+  category: NON_EMPTY_STRING.optional(),
+}).strict();
+
 export const memberRoleUpdateSchema = z.object({
   role: z.enum(['admin', 'finance', 'pm', 'viewer', 'auditor', 'tenant_admin', 'support', 'security']),
   reason: z.string().trim().min(1).max(500).optional(),

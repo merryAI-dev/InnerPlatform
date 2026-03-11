@@ -3,6 +3,7 @@ import { JWT } from 'google-auth-library';
 import { resolveServiceAccount } from './firestore.mjs';
 
 const DRIVE_API_BASE_URL = 'https://www.googleapis.com/drive/v3';
+const DRIVE_UPLOAD_API_BASE_URL = 'https://www.googleapis.com/upload/drive/v3';
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive';
 const DRIVE_FOLDER_MIME_TYPE = 'application/vnd.google-apps.folder';
 const INVALID_DRIVE_CHARS = /[<>:"/\\|?*\u0000-\u001f]/g;
@@ -21,6 +22,13 @@ export class DriveServiceError extends Error {
 
 function readOptionalText(value) {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function normalizeEvidenceFileName(fileName) {
+  return String(fileName || '')
+    .normalize('NFC')
+    .trim()
+    .replace(/[_-]+/g, ' ');
 }
 
 function normalizeSegment(value, fallback) {
@@ -81,26 +89,74 @@ export function buildDriveTransactionFolderName(transaction) {
 }
 
 const CATEGORY_PATTERNS = [
-  { category: '세금계산서', confidence: 0.96, patterns: [/세금계산서/i, /tax[_\s-]?invoice/i, /invoice/i] },
-  { category: '영수증', confidence: 0.94, patterns: [/영수증/i, /receipt/i, /카드매출전표/i] },
-  { category: '입금확인서', confidence: 0.9, patterns: [/입금확인/i, /송금확인/i, /transfer/i, /deposit/i] },
+  { category: 'ZOOM invoice', confidence: 0.92, patterns: [/zoom\s*invoice/i] },
+  { category: '심사결과보고서', confidence: 0.93, patterns: [/심사\s*결과\s*보고서/i] },
+  { category: '진행결과보고서', confidence: 0.92, patterns: [/진행\s*결과\s*보고서/i] },
+  { category: '결과보고서', confidence: 0.9, patterns: [/결과\s*보고서/i] },
+  { category: '강의자료', confidence: 0.91, patterns: [/강의\s*자료/i, /lecture/i] },
+  { category: '견적서', confidence: 0.91, patterns: [/견적서/i, /quotation/i, /estimate/i] },
+  { category: '결과물', confidence: 0.82, patterns: [/결과물/i, /deliverable/i, /output/i] },
   { category: '계약서', confidence: 0.9, patterns: [/계약서/i, /contract/i, /agreement/i] },
-  { category: '거래명세서', confidence: 0.86, patterns: [/거래명세/i, /statement/i] },
-  { category: '지출결의서', confidence: 0.84, patterns: [/지출결의/i, /품의서/i] },
-  { category: '참석자명단', confidence: 0.88, patterns: [/참석자명단/i, /출석부/i, /attendance/i] },
-  { category: '결과보고서', confidence: 0.82, patterns: [/결과보고서/i, /보고서/i, /report/i] },
-  { category: '통장사본', confidence: 0.8, patterns: [/통장사본/i, /bank[_\s-]?copy/i] },
+  { category: '협약서', confidence: 0.89, patterns: [/협약서/i, /mou/i, /memorandum/i] },
+  { category: '공문', confidence: 0.87, patterns: [/공문/i, /공문서/i, /official\s*letter/i] },
+  { category: '매출전표', confidence: 0.9, patterns: [/매출전표/i, /카드\s*매출\s*전표/i] },
+  { category: '보도자료', confidence: 0.86, patterns: [/보도자료/i, /press\s*release/i] },
+  { category: '표준재무제표증명', confidence: 0.95, patterns: [/표준\s*재무\s*제표\s*증명/i, /재무\s*제표\s*증명/i] },
+  { category: '비용지급확인서', confidence: 0.91, patterns: [/비용\s*지급\s*확인서/i] },
+  { category: '사업자등록증', confidence: 0.94, patterns: [/사업자\s*등록증?/i, /business\s*registration/i] },
+  { category: '사용계획서', confidence: 0.83, patterns: [/사용\s*계획서/i] },
+  { category: '세금계산서', confidence: 0.96, patterns: [/세금\s*계산서/i, /tax\s*invoice/i, /invoice/i] },
+  { category: '신분증 사본', confidence: 0.91, patterns: [/신분증\s*사본/i, /id\s*copy/i, /identity/i] },
+  { category: '심사자료', confidence: 0.88, patterns: [/심사\s*자료/i, /review\s*material/i] },
+  { category: '영수증', confidence: 0.94, patterns: [/영수증/i, /receipt/i] },
+  { category: '우버 인증 내역', confidence: 0.83, patterns: [/우버\s*인증\s*내역/i, /uber/i] },
+  { category: '운영계획', confidence: 0.82, patterns: [/운영\s*계획/i] },
+  { category: '원천세 내역', confidence: 0.88, patterns: [/원천세\s*내역/i, /withholding/i] },
+  { category: '이력서', confidence: 0.92, patterns: [/이력서/i, /resume/i, /cv/i] },
+  { category: '이체확인증', confidence: 0.92, patterns: [/이체\s*확인증/i, /transfer\s*confirmation/i] },
+  { category: '입금확인증', confidence: 0.9, patterns: [/입금\s*확인증/i, /deposit\s*confirmation/i] },
+  { category: '입금확인서', confidence: 0.9, patterns: [/입금\s*확인서/i, /송금\s*확인/i, /deposit/i] },
+  { category: '재단 메일', confidence: 0.75, patterns: [/재단\s*메일/i, /foundation\s*mail/i, /email/i] },
+  { category: '정산규정', confidence: 0.86, patterns: [/정산\s*규정/i, /policy/i] },
+  { category: '지출결의', confidence: 0.84, patterns: [/지출\s*결의/i, /품의서/i] },
+  { category: '진행개요', confidence: 0.81, patterns: [/진행\s*개요/i, /overview/i] },
+  { category: '청구내역서', confidence: 0.9, patterns: [/청구\s*내역서/i, /billing\s*statement/i] },
+  { category: '청구서', confidence: 0.88, patterns: [/청구서/i, /bill/i, /claim/i] },
+  { category: '출장신청서', confidence: 0.88, patterns: [/출장\s*신청서/i, /travel\s*request/i] },
+  { category: '통장사본', confidence: 0.8, patterns: [/통장\s*사본/i, /bank\s*copy/i] },
+  { category: '해외송금영수증', confidence: 0.92, patterns: [/해외\s*송금\s*영수증/i, /wire\s*receipt/i, /swift/i] },
+  { category: '해외이용내역서', confidence: 0.86, patterns: [/해외\s*이용\s*내역서/i, /overseas\s*usage/i] },
+  { category: '행사계획안', confidence: 0.84, patterns: [/행사\s*계획안/i, /event\s*plan/i] },
+  { category: '회의록', confidence: 0.9, patterns: [/회의록/i, /minutes/i] },
+  { category: '참석자명단', confidence: 0.88, patterns: [/참석자\s*명단/i, /출석부/i, /attendance/i] },
+  { category: '거래명세서', confidence: 0.86, patterns: [/거래\s*명세/i, /statement/i] },
   { category: '사진', confidence: 0.72, patterns: [/사진/i, /photo/i, /image/i] },
 ];
 
 export function inferEvidenceCategoryFromFileName(fileName, fallback = '기타') {
-  const normalized = String(fileName || '').trim();
+  const normalized = normalizeEvidenceFileName(fileName);
   if (!normalized) return { category: fallback, confidence: 0.2 };
   const matched = CATEGORY_PATTERNS.find((entry) => entry.patterns.some((pattern) => pattern.test(normalized)));
   if (!matched) {
     return { category: fallback, confidence: 0.2 };
   }
   return { category: matched.category, confidence: matched.confidence };
+}
+
+export function inferEvidenceCategoryFromDocumentText(documentText, fallback = '기타') {
+  const normalized = String(documentText || '')
+    .normalize('NFC')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!normalized) return { category: fallback, confidence: 0.2 };
+  if (
+    (/표준\s*재무\s*제표\s*증명/i.test(normalized) || /재무\s*제표\s*증명/i.test(normalized))
+    && /사업자\s*등록\s*번호/i.test(normalized)
+    && /(업태|종목)/i.test(normalized)
+  ) {
+    return { category: '표준재무제표증명', confidence: 0.95 };
+  }
+  return inferEvidenceCategoryFromFileName(normalized, fallback);
 }
 
 export function buildEvidenceCompletedDesc(evidences) {
@@ -118,9 +174,71 @@ function splitEvidenceList(value) {
     .filter(Boolean);
 }
 
-function computeEvidenceMissing(requiredValues, completedDesc) {
-  const completed = splitEvidenceList(completedDesc).map((entry) => entry.toLowerCase());
-  return requiredValues.filter((required) => !completed.some((entry) => entry.includes(required.toLowerCase())));
+function normalizeEvidenceMatchKey(value) {
+  const normalized = String(value || '')
+    .normalize('NFC')
+    .toLowerCase()
+    .replace(/[_\-\s()[\]{}]+/g, '');
+  if (!normalized) return '';
+  if (normalized.includes('zoominvoice')) return 'ZOOM invoice';
+  if (normalized.includes('표준재무제표증명') || normalized.includes('재무제표증명')) return '표준재무제표증명';
+  if (normalized.includes('세금계산서') || normalized.includes('전자세금계산') || normalized.includes('taxinvoice')) return '세금계산서';
+  if (normalized.includes('입금확인증') || normalized.includes('입금확인서') || normalized.includes('depositconfirmation')) return '입금확인서';
+  if (normalized.includes('이체확인증') || normalized.includes('이체확인서') || normalized.includes('transferconfirmation')) return '이체확인증';
+  if (normalized.includes('해외송금영수증') || normalized.includes('wirereceipt') || normalized.includes('swift')) return '해외송금영수증';
+  return normalized;
+}
+
+function collectEvidenceMatchKeys(evidence) {
+  const keys = new Set();
+  for (const candidate of [
+    evidence?.category,
+    evidence?.parserCategory,
+    evidence?.fileName,
+    evidence?.originalFileName,
+  ]) {
+    const raw = readOptionalText(candidate);
+    if (!raw) continue;
+    const normalized = normalizeEvidenceMatchKey(raw);
+    if (normalized) keys.add(normalized);
+    const inferred = inferEvidenceCategoryFromFileName(raw).category;
+    const inferredNormalized = normalizeEvidenceMatchKey(inferred);
+    if (inferredNormalized) keys.add(inferredNormalized);
+  }
+  return keys;
+}
+
+function mergeEvidenceCompletedDesc(previousCompleted, autoCompletedDesc) {
+  const merged = [];
+  const seen = new Set();
+  for (const entry of [
+    ...splitEvidenceList(previousCompleted),
+    ...splitEvidenceList(autoCompletedDesc),
+  ]) {
+    const key = normalizeEvidenceMatchKey(entry) || entry;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(entry);
+  }
+  return merged.join(', ');
+}
+
+function computeEvidenceMissing(requiredValues, completedDesc, evidences = []) {
+  const completedKeys = new Set(
+    splitEvidenceList(completedDesc)
+      .map((entry) => normalizeEvidenceMatchKey(entry))
+      .filter(Boolean),
+  );
+  for (const evidence of Array.isArray(evidences) ? evidences : []) {
+    for (const key of collectEvidenceMatchKeys(evidence)) {
+      completedKeys.add(key);
+    }
+  }
+  return requiredValues.filter((required) => {
+    const requiredKey = normalizeEvidenceMatchKey(required);
+    if (!requiredKey) return true;
+    return !completedKeys.has(requiredKey);
+      });
 }
 
 function computeEvidenceStatus({ hasLink, requiredValues, completedDesc }) {
@@ -236,12 +354,9 @@ function normalizeDriveFile(file, fallbackDriveId = '') {
 export function resolveEvidenceSyncPatch({ transaction, evidences, folder }) {
   const autoCompletedDesc = buildEvidenceCompletedDesc(evidences);
   const previousCompleted = readOptionalText(transaction?.evidenceCompletedDesc);
-  const previousAuto = readOptionalText(transaction?.evidenceAutoListedDesc);
-  const completedDesc = !previousCompleted || previousCompleted === previousAuto
-    ? autoCompletedDesc
-    : previousCompleted;
+  const completedDesc = mergeEvidenceCompletedDesc(previousCompleted, autoCompletedDesc) || undefined;
   const requiredValues = readRequiredEvidence(transaction);
-  const evidenceMissing = computeEvidenceMissing(requiredValues, completedDesc);
+  const evidenceMissing = computeEvidenceMissing(requiredValues, completedDesc, evidences);
   const evidencePendingDesc = evidenceMissing.join(', ');
   const hasLink = !!readOptionalText(folder?.webViewLink) || !!readOptionalText(transaction?.evidenceDriveLink);
 
@@ -286,10 +401,10 @@ export function createGoogleDriveService(options = {}) {
     return jwtClient;
   }
 
-  async function driveFetch(pathname, init = {}) {
+  async function driveFetch(pathname, init = {}, baseUrl = DRIVE_API_BASE_URL) {
     const client = getJwtClient();
     const authHeaders = await client.getRequestHeaders();
-    const response = await fetchImpl(`${DRIVE_API_BASE_URL}${pathname}`, {
+    const response = await fetchImpl(`${baseUrl}${pathname}`, {
       ...init,
       headers: {
         ...authHeaders,
@@ -372,6 +487,61 @@ export function createGoogleDriveService(options = {}) {
     return normalizeDriveFile(data, config.sharedDriveId);
   }
 
+  async function uploadFileToFolder({
+    folderId,
+    fileName,
+    mimeType = 'application/octet-stream',
+    contentBase64,
+    appProperties = {},
+  }) {
+    const normalizedFolderId = readOptionalText(folderId);
+    const normalizedFileName = readOptionalText(fileName);
+    const normalizedMimeType = readOptionalText(mimeType) || 'application/octet-stream';
+    const normalizedContentBase64 = readOptionalText(contentBase64);
+
+    if (!normalizedFolderId) {
+      throw new DriveServiceError('folderId is required', { statusCode: 400, code: 'drive_folder_id_required' });
+    }
+    if (!normalizedFileName) {
+      throw new DriveServiceError('fileName is required', { statusCode: 400, code: 'drive_file_name_required' });
+    }
+    if (!normalizedContentBase64) {
+      throw new DriveServiceError('contentBase64 is required', { statusCode: 400, code: 'drive_file_content_required' });
+    }
+
+    const contentBuffer = Buffer.from(normalizedContentBase64, 'base64');
+    if (!contentBuffer.length) {
+      throw new DriveServiceError('Decoded upload body is empty', { statusCode: 400, code: 'drive_file_content_invalid' });
+    }
+
+    const boundary = `driveupload_${Date.now().toString(36)}`;
+    const metadata = {
+      name: normalizedFileName,
+      parents: [normalizedFolderId],
+      appProperties,
+    };
+    const prefix = Buffer.from(
+      `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n`
+      + `--${boundary}\r\nContent-Type: ${normalizedMimeType}\r\n\r\n`,
+      'utf8',
+    );
+    const suffix = Buffer.from(`\r\n--${boundary}--`, 'utf8');
+    const body = Buffer.concat([prefix, contentBuffer, suffix]);
+
+    const data = await driveFetch(
+      `/files?uploadType=multipart&supportsAllDrives=true&fields=id,name,mimeType,size,webViewLink,webContentLink,modifiedTime,createdTime,parents,driveId,appProperties`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': `multipart/related; boundary=${boundary}`,
+        },
+        body,
+      },
+      DRIVE_UPLOAD_API_BASE_URL,
+    );
+    return normalizeDriveFile(data, config.sharedDriveId);
+  }
+
   async function ensureProjectRootFolder({ tenantId, projectId, projectName, existingFolderId, preferredParentFolderId }) {
     const existingFolder = await getFile(existingFolderId);
     if (existingFolder) {
@@ -402,7 +572,16 @@ export function createGoogleDriveService(options = {}) {
   async function ensureTransactionFolder({ tenantId, projectId, projectName, transaction, projectFolderId, existingFolderId }) {
     const existingFolder = await getFile(existingFolderId);
     if (existingFolder) {
-      return existingFolder;
+      const projectRootFolder = await ensureProjectRootFolder({
+        tenantId,
+        projectId,
+        projectName,
+        existingFolderId: projectFolderId,
+      });
+      return {
+        folder: existingFolder,
+        projectRootFolder,
+      };
     }
 
     const projectRootFolder = await ensureProjectRootFolder({
@@ -489,5 +668,6 @@ export function createGoogleDriveService(options = {}) {
     ensureProjectRootFolder,
     ensureTransactionFolder,
     listFolderFiles,
+    uploadFileToFolder,
   };
 }

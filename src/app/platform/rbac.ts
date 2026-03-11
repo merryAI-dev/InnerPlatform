@@ -9,6 +9,7 @@ export type PlatformRole = UserRole;
 export type PlatformPermission =
   | 'project:read'
   | 'project:write'
+  | 'project:evidence_drive:write'
   | 'ledger:read'
   | 'ledger:write'
   | 'transaction:submit'
@@ -18,6 +19,7 @@ export type PlatformPermission =
   | 'comment:write'
   | 'evidence:read'
   | 'evidence:write'
+  | 'evidence:drive:write'
   | 'audit:read'
   | 'user:manage'
   | 'tenant:manage'
@@ -33,6 +35,7 @@ const PLATFORM_ROLES: PlatformRole[] = ['admin', 'finance', 'pm', 'viewer', 'aud
 const KNOWN_PERMISSIONS = new Set<PlatformPermission>([
   'project:read',
   'project:write',
+  'project:evidence_drive:write',
   'ledger:read',
   'ledger:write',
   'transaction:submit',
@@ -42,6 +45,7 @@ const KNOWN_PERMISSIONS = new Set<PlatformPermission>([
   'comment:write',
   'evidence:read',
   'evidence:write',
+  'evidence:drive:write',
   'audit:read',
   'user:manage',
   'tenant:manage',

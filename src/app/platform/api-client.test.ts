@@ -158,4 +158,29 @@ describe('PlatformApiClient', () => {
 
     expect(response.data).toBe('not-json');
   });
+
+  it('binds the global fetch implementation when no custom fetch is provided', async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchSpy = vi.fn(async function (this: typeof globalThis, _input: RequestInfo | URL, _init?: RequestInit) {
+      expect(this).toBe(globalThis);
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    // Simulate browsers that require window/global binding for fetch.
+    globalThis.fetch = fetchSpy as typeof fetch;
+
+    try {
+      const client = new PlatformApiClient();
+      const response = await client.get<{ ok: boolean }>('/api/v1/health', {
+        tenantId: 'mysc',
+        actor: { id: 'u001' },
+      });
+      expect(response.data.ok).toBe(true);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });

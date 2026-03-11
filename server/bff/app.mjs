@@ -39,6 +39,7 @@ import {
 import {
   commentCreateSchema,
   evidenceCreateSchema,
+  evidenceDriveUploadSchema,
   genericWriteSchema,
   ledgerUpsertSchema,
   memberRoleUpdateSchema,
@@ -246,6 +247,8 @@ const ROUTE_ROLES = {
   readCore: ['admin', 'finance', 'pm', 'viewer', 'auditor', 'tenant_admin', 'support', 'security'],
   writeCore: ['admin', 'finance', 'pm', 'tenant_admin'],
   writeTransaction: ['admin', 'finance', 'pm', 'tenant_admin'],
+  writeProjectDrive: ['admin', 'finance', 'pm', 'viewer', 'tenant_admin'],
+  writeEvidenceDrive: ['admin', 'finance', 'pm', 'viewer', 'tenant_admin'],
   auditRead: ['admin', 'finance', 'auditor', 'tenant_admin', 'support', 'security'],
   memberWrite: ['admin', 'tenant_admin'],
 };
@@ -262,6 +265,23 @@ async function ensureDocumentExists(db, path, notFoundMessage) {
     throw createHttpError(404, notFoundMessage, 'not_found');
   }
   return snap.data();
+}
+
+function stripUndefinedDeep(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => stripUndefinedDeep(entry))
+      .filter((entry) => entry !== undefined);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).flatMap(([key, entry]) => {
+        const cleaned = stripUndefinedDeep(entry);
+        return cleaned === undefined ? [] : [[key, cleaned]];
+      }),
+    );
+  }
+  return value;
 }
 
 async function upsertVersionedDoc({
@@ -295,11 +315,11 @@ async function upsertVersionedDoc({
         updatedAt: now,
       };
 
-      tx.set(ref, document, { merge: true });
+      tx.set(ref, stripUndefinedDeep(document), { merge: true });
       if (outboxEvent) {
         enqueueOutboxEventInTransaction(tx, db, outboxEvent);
       }
-      return { created: true, version: nextVersion, data: document };
+      return { created: true, version: nextVersion, data: stripUndefinedDeep(document) };
     }
 
     const current = snap.data() || {};
@@ -329,11 +349,11 @@ async function upsertVersionedDoc({
       updatedAt: now,
     };
 
-    tx.set(ref, document, { merge: true });
+    tx.set(ref, stripUndefinedDeep(document), { merge: true });
     if (outboxEvent) {
       enqueueOutboxEventInTransaction(tx, db, outboxEvent);
     }
-    return { created: false, version: nextVersion, data: document };
+    return { created: false, version: nextVersion, data: stripUndefinedDeep(document) };
   });
 }
 
@@ -368,8 +388,8 @@ async function mergeSystemManagedDoc({
       updatedAt: now,
     };
 
-    tx.set(ref, document, { merge: true });
-    return { version: nextVersion, data: document };
+    tx.set(ref, stripUndefinedDeep(document), { merge: true });
+    return { version: nextVersion, data: stripUndefinedDeep(document) };
   });
 }
 
@@ -519,7 +539,7 @@ export function createBffApp(options = {}) {
   const workerSecret = readOptionalText(options.workerSecret || process.env.BFF_WORKER_SECRET || process.env.CRON_SECRET);
 
   app.disable('x-powered-by');
-  app.use(express.json({ limit: '1mb' }));
+  app.use(express.json({ limit: process.env.BFF_JSON_LIMIT || '25mb' }));
 
   app.use((req, res, next) => {
     const requestOrigin = req.header('origin') || '';
@@ -611,6 +631,83 @@ export function createBffApp(options = {}) {
     if (!matched) {
       throw createHttpError(401, 'Worker authorization failed', 'unauthorized_worker');
     }
+  }
+
+  async function syncDriveEvidenceState({
+    tenantId,
+    actorId,
+    txId,
+    transaction,
+    folder,
+    files,
+    timestamp,
+  }) {
+    const evidenceSnap = await db
+      .collection(`orgs/${tenantId}/evidences`)
+      .where('transactionId', '==', txId)
+      .get();
+    const existingEvidenceByFileId = new Map();
+    evidenceSnap.docs.forEach((doc) => {
+      const data = doc.data() || {};
+      const driveFileId = readOptionalText(data.driveFileId);
+      if (driveFileId) {
+        existingEvidenceByFileId.set(driveFileId, { id: doc.id, ...data });
+      }
+    });
+
+    const evidenceDocs = files.map((file) => {
+      const existing = existingEvidenceByFileId.get(file.id);
+      const parser = inferEvidenceCategoryFromFileName(file.name);
+      const category = readOptionalText(existing?.category) || parser.category;
+      return {
+        id: existing?.id || toDriveEvidenceDocId(file.id),
+        tenantId,
+        transactionId: txId,
+        fileName: file.name || 'untitled',
+        originalFileName: readOptionalText(existing?.originalFileName)
+          || readOptionalText(file.appProperties?.originalFileName)
+          || undefined,
+        fileType: file.mimeType || 'application/octet-stream',
+        fileSize: file.size || 0,
+        uploadedBy: existing?.uploadedBy || actorId,
+        uploadedAt: existing?.uploadedAt || timestamp,
+        category,
+        status: existing?.status || 'PENDING',
+        source: existing?.source || 'DRIVE_SYNC',
+        driveFileId: file.id,
+        driveFolderId: folder.id,
+        driveFolderName: folder.name,
+        webViewLink: file.webViewLink || undefined,
+        mimeType: file.mimeType || 'application/octet-stream',
+        parserCategory: parser.category,
+        parserConfidence: parser.confidence,
+        createdAt: existing?.createdAt || timestamp,
+        updatedAt: timestamp,
+        version: Number.isInteger(existing?.version) && existing.version > 0 ? existing.version + 1 : 1,
+      };
+    });
+
+    for (const docs of chunkArray(evidenceDocs, 400)) {
+      const batch = db.batch();
+      docs.forEach((evidence) => {
+        batch.set(db.doc(`orgs/${tenantId}/evidences/${evidence.id}`), stripUndefinedDeep(evidence), { merge: true });
+      });
+      await batch.commit();
+    }
+
+    const syncPatch = resolveEvidenceSyncPatch({
+      transaction: {
+        ...transaction,
+        evidenceDriveLink: folder.webViewLink || transaction.evidenceDriveLink,
+      },
+      evidences: evidenceDocs,
+      folder,
+    });
+
+    return {
+      evidenceDocs,
+      syncPatch,
+    };
   }
 
   app.get('/api/v1/health', (_req, res) => {
@@ -1102,8 +1199,8 @@ export function createBffApp(options = {}) {
   }));
 
   app.post('/api/v1/projects/:projectId/evidence-drive/root/provision', createMutatingRoute(idempotencyService, async (req) => {
-    assertActorRoleAllowed(req, ROUTE_ROLES.writeCore, 'provision evidence drive root');
-    assertActorPermissionAllowed(rbacPolicy, req, 'project:write', 'provision evidence drive root');
+    assertActorRoleAllowed(req, ROUTE_ROLES.writeProjectDrive, 'provision evidence drive root');
+    assertActorPermissionAllowed(rbacPolicy, req, 'project:evidence_drive:write', 'provision evidence drive root');
     const { tenantId, actorId, actorRole, actorEmail, requestId } = req.context;
     const { projectId } = req.params;
     const timestamp = now();
@@ -1180,8 +1277,8 @@ export function createBffApp(options = {}) {
   }));
 
   app.post('/api/v1/projects/:projectId/evidence-drive/root/link', createMutatingRoute(idempotencyService, async (req) => {
-    assertActorRoleAllowed(req, ROUTE_ROLES.writeCore, 'link evidence drive root');
-    assertActorPermissionAllowed(rbacPolicy, req, 'project:write', 'link evidence drive root');
+    assertActorRoleAllowed(req, ROUTE_ROLES.writeProjectDrive, 'link evidence drive root');
+    assertActorPermissionAllowed(rbacPolicy, req, 'project:evidence_drive:write', 'link evidence drive root');
     const { tenantId, actorId, actorRole, actorEmail, requestId } = req.context;
     const { projectId } = req.params;
     const timestamp = now();
@@ -1829,8 +1926,8 @@ export function createBffApp(options = {}) {
   }));
 
   app.post('/api/v1/transactions/:txId/evidence-drive/provision', createMutatingRoute(idempotencyService, async (req) => {
-    assertActorRoleAllowed(req, ROUTE_ROLES.writeTransaction, 'provision evidence drive folder');
-    assertActorPermissionAllowed(rbacPolicy, req, 'evidence:write', 'provision evidence drive folder');
+    assertActorRoleAllowed(req, ROUTE_ROLES.writeEvidenceDrive, 'provision evidence drive folder');
+    assertActorPermissionAllowed(rbacPolicy, req, 'evidence:drive:write', 'provision evidence drive folder');
     const { tenantId, actorId, actorRole, actorEmail, requestId } = req.context;
     const { txId } = req.params;
     const timestamp = now();
@@ -1942,8 +2039,8 @@ export function createBffApp(options = {}) {
   }));
 
   app.post('/api/v1/transactions/:txId/evidence-drive/sync', createMutatingRoute(idempotencyService, async (req) => {
-    assertActorRoleAllowed(req, ROUTE_ROLES.writeTransaction, 'sync evidence drive folder');
-    assertActorPermissionAllowed(rbacPolicy, req, 'evidence:write', 'sync evidence drive folder');
+    assertActorRoleAllowed(req, ROUTE_ROLES.writeEvidenceDrive, 'sync evidence drive folder');
+    assertActorPermissionAllowed(rbacPolicy, req, 'evidence:drive:write', 'sync evidence drive folder');
     const { tenantId, actorId, actorRole, actorEmail, requestId } = req.context;
     const { txId } = req.params;
     const timestamp = now();
@@ -1979,63 +2076,14 @@ export function createBffApp(options = {}) {
     }
 
     const folder = linkedFolder.folder;
-    const evidenceSnap = await db
-      .collection(`orgs/${tenantId}/evidences`)
-      .where('transactionId', '==', txId)
-      .get();
-    const existingEvidenceByFileId = new Map();
-    evidenceSnap.docs.forEach((doc) => {
-      const data = doc.data() || {};
-      const driveFileId = readOptionalText(data.driveFileId);
-      if (driveFileId) {
-        existingEvidenceByFileId.set(driveFileId, { id: doc.id, ...data });
-      }
-    });
-
-    const evidenceDocs = files.map((file) => {
-      const existing = existingEvidenceByFileId.get(file.id);
-      const parser = inferEvidenceCategoryFromFileName(file.name);
-      const category = readOptionalText(existing?.category) || parser.category;
-      return {
-        id: existing?.id || toDriveEvidenceDocId(file.id),
-        tenantId,
-        transactionId: txId,
-        fileName: file.name || 'untitled',
-        fileType: file.mimeType || 'application/octet-stream',
-        fileSize: file.size || 0,
-        uploadedBy: existing?.uploadedBy || actorId,
-        uploadedAt: existing?.uploadedAt || timestamp,
-        category,
-        status: existing?.status || 'PENDING',
-        source: existing?.source || 'DRIVE_SYNC',
-        driveFileId: file.id,
-        driveFolderId: folder.id,
-        driveFolderName: folder.name,
-        webViewLink: file.webViewLink || undefined,
-        mimeType: file.mimeType || 'application/octet-stream',
-        parserCategory: parser.category,
-        parserConfidence: parser.confidence,
-        createdAt: existing?.createdAt || timestamp,
-        updatedAt: timestamp,
-        version: Number.isInteger(existing?.version) && existing.version > 0 ? existing.version + 1 : 1,
-      };
-    });
-
-    for (const docs of chunkArray(evidenceDocs, 400)) {
-      const batch = db.batch();
-      docs.forEach((evidence) => {
-        batch.set(db.doc(`orgs/${tenantId}/evidences/${evidence.id}`), evidence, { merge: true });
-      });
-      await batch.commit();
-    }
-
-    const syncPatch = resolveEvidenceSyncPatch({
-      transaction: {
-        ...transaction,
-        evidenceDriveLink: folder.webViewLink || transaction.evidenceDriveLink,
-      },
-      evidences: evidenceDocs,
+    const { evidenceDocs, syncPatch } = await syncDriveEvidenceState({
+      tenantId,
+      actorId,
+      txId,
+      transaction,
       folder,
+      files,
+      timestamp,
     });
 
     const projectUpdate = !project.evidenceDriveRootFolderId || project.evidenceDriveRootFolderId !== linkedFolder.projectRootFolder.id
@@ -2104,6 +2152,178 @@ export function createBffApp(options = {}) {
         folderId: folder.id,
         folderName: folder.name,
         webViewLink: folder.webViewLink || null,
+        sharedDriveId: folder.driveId || null,
+        evidenceCount: evidenceDocs.length,
+        evidenceCompletedDesc: txResult.data.evidenceCompletedDesc || null,
+        evidenceAutoListedDesc: txResult.data.evidenceAutoListedDesc || null,
+        evidencePendingDesc: txResult.data.evidencePendingDesc || null,
+        supportPendingDocs: txResult.data.supportPendingDocs || null,
+        evidenceMissing: txResult.data.evidenceMissing || [],
+        evidenceStatus: txResult.data.evidenceStatus,
+        lastSyncedAt: timestamp,
+        version: txResult.version,
+        updatedAt: txResult.data.updatedAt,
+      },
+    };
+  }));
+
+  app.post('/api/v1/transactions/:txId/evidence-drive/upload', createMutatingRoute(idempotencyService, async (req) => {
+    assertActorRoleAllowed(req, ROUTE_ROLES.writeEvidenceDrive, 'upload evidence drive file');
+    assertActorPermissionAllowed(rbacPolicy, req, 'evidence:drive:write', 'upload evidence drive file');
+    const { tenantId, actorId, actorRole, actorEmail, requestId } = req.context;
+    const { txId } = req.params;
+    const timestamp = now();
+    const parsed = parseWithSchema(evidenceDriveUploadSchema, req.body, 'Invalid evidence drive upload payload');
+
+    const transaction = await ensureDocumentExists(
+      db,
+      `orgs/${tenantId}/transactions/${txId}`,
+      `Transaction not found: ${txId}`,
+    );
+    const project = await ensureDocumentExists(
+      db,
+      `orgs/${tenantId}/projects/${transaction.projectId}`,
+      `Project not found: ${transaction.projectId}`,
+    );
+
+    let linkedFolder;
+    let uploadedFile;
+    let files;
+    try {
+      linkedFolder = await driveService.ensureTransactionFolder({
+        tenantId,
+        projectId: transaction.projectId,
+        projectName: project.name || transaction.projectId,
+        projectFolderId: project.evidenceDriveRootFolderId,
+        existingFolderId: transaction.evidenceDriveFolderId,
+        transaction,
+      });
+      uploadedFile = await driveService.uploadFileToFolder({
+        folderId: linkedFolder.folder.id,
+        fileName: parsed.fileName,
+        mimeType: parsed.mimeType,
+        contentBase64: parsed.contentBase64,
+        appProperties: {
+          managedBy: 'mysc-platform',
+          tenantId,
+          projectId: transaction.projectId,
+          transactionId: txId,
+          evidenceSource: 'platform-upload',
+          originalFileName: parsed.originalFileName || parsed.fileName,
+        },
+      });
+      files = await driveService.listFolderFiles({ folderId: linkedFolder.folder.id });
+    } catch (error) {
+      if (error instanceof DriveServiceError) {
+        throw createHttpError(error.statusCode, error.message, error.code);
+      }
+      throw error;
+    }
+
+    const folder = linkedFolder.folder;
+    const parser = inferEvidenceCategoryFromFileName(parsed.fileName);
+    const { evidenceDocs } = await syncDriveEvidenceState({
+      tenantId,
+      actorId,
+      txId,
+      transaction,
+      folder,
+      files,
+      timestamp,
+    });
+
+    const uploadedEvidence = evidenceDocs.find((item) => item.driveFileId === uploadedFile.id);
+    if (uploadedEvidence && parsed.category && parsed.category.trim()) {
+      const overriddenCategory = parsed.category.trim();
+      await db.doc(`orgs/${tenantId}/evidences/${uploadedEvidence.id}`).set({
+        category: overriddenCategory,
+        updatedAt: timestamp,
+      }, { merge: true });
+      uploadedEvidence.category = overriddenCategory;
+    }
+
+    const syncPatch = resolveEvidenceSyncPatch({
+      transaction: {
+        ...transaction,
+        evidenceDriveLink: folder.webViewLink || transaction.evidenceDriveLink,
+      },
+      evidences: evidenceDocs,
+      folder,
+    });
+
+    const projectUpdate = !project.evidenceDriveRootFolderId || project.evidenceDriveRootFolderId !== linkedFolder.projectRootFolder.id
+      ? mergeSystemManagedDoc({
+        db,
+        path: `orgs/${tenantId}/projects/${transaction.projectId}`,
+        patch: {
+          evidenceDriveSharedDriveId: linkedFolder.projectRootFolder.driveId || project.evidenceDriveSharedDriveId || undefined,
+          evidenceDriveRootFolderId: linkedFolder.projectRootFolder.id,
+          evidenceDriveRootFolderName: linkedFolder.projectRootFolder.name,
+          evidenceDriveRootFolderLink: linkedFolder.projectRootFolder.webViewLink || undefined,
+          evidenceDriveProvisionedAt: timestamp,
+        },
+        tenantId,
+        actorId,
+        now: timestamp,
+        notFoundMessage: `Project not found: ${transaction.projectId}`,
+      })
+      : Promise.resolve(null);
+
+    const txResult = await mergeSystemManagedDoc({
+      db,
+      path: `orgs/${tenantId}/transactions/${txId}`,
+      patch: {
+        ...syncPatch,
+        evidenceDriveSharedDriveId: folder.driveId || transaction.evidenceDriveSharedDriveId || undefined,
+        evidenceDriveFolderId: folder.id,
+        evidenceDriveFolderName: folder.name,
+        evidenceDriveLink: folder.webViewLink || transaction.evidenceDriveLink || undefined,
+        evidenceDriveSyncStatus: 'SYNCED',
+        evidenceDriveLastSyncedAt: timestamp,
+      },
+      tenantId,
+      actorId,
+      now: timestamp,
+      notFoundMessage: `Transaction not found: ${txId}`,
+    });
+
+    await projectUpdate;
+
+    const actorEmailEnc = await encryptAuditEmail(piiProtector, actorEmail);
+    await auditChainService.append({
+      tenantId,
+      entityType: 'evidence',
+      entityId: uploadedEvidence?.id || toDriveEvidenceDocId(uploadedFile.id),
+      action: 'CREATE',
+      actorId,
+      actorRole,
+      actorEmailEnc,
+      requestId,
+      details: `증빙 Drive 업로드: ${parsed.fileName}`,
+      metadata: {
+        source: 'bff',
+        transactionId: txId,
+        folderId: folder.id,
+        driveFileId: uploadedFile.id,
+        parserCategory: parser.category,
+      },
+      timestamp,
+    });
+
+    return {
+      status: 201,
+      body: {
+        transactionId: txId,
+        projectId: transaction.projectId,
+        folderId: folder.id,
+        folderName: folder.name,
+        driveFileId: uploadedFile.id,
+        fileName: uploadedFile.name || parsed.fileName,
+        originalFileName: parsed.originalFileName || null,
+        webViewLink: uploadedFile.webViewLink || null,
+        category: (parsed.category && parsed.category.trim()) || uploadedEvidence?.category || parser.category,
+        parserCategory: parser.category,
+        parserConfidence: parser.confidence,
         sharedDriveId: folder.driveId || null,
         evidenceCount: evidenceDocs.length,
         evidenceCompletedDesc: txResult.data.evidenceCompletedDesc || null,

@@ -44,6 +44,13 @@ describe('rbac helpers', () => {
     expect(hasPermission('tenant_admin', 'tenant:manage')).toBe(true);
   });
 
+  it('keeps viewer least-privileged but allows evidence drive workflows', () => {
+    expect(hasPermission('viewer', 'project:write')).toBe(false);
+    expect(hasPermission('viewer', 'project:evidence_drive:write')).toBe(true);
+    expect(hasPermission('viewer', 'evidence:write')).toBe(false);
+    expect(hasPermission('viewer', 'evidence:drive:write')).toBe(true);
+  });
+
   it('enforces tenant access for tenant-scoped roles', () => {
     expect(canAccessTenant({ actorRole: 'pm', actorTenantId: 't1', targetTenantId: 't1' })).toBe(true);
     expect(canAccessTenant({ actorRole: 'pm', actorTenantId: 't1', targetTenantId: 't2' })).toBe(false);
