@@ -408,6 +408,151 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     expect(verify.body.checked).toBeGreaterThanOrEqual(5);
   });
 
+  it('provisions and syncs evidence drive folders via injected drive service', async () => {
+    const driveService = {
+      getConfig: vi.fn(() => ({
+        enabled: true,
+        defaultParentFolderId: 'fld-company-root',
+        sharedDriveId: 'shared-drive-001',
+      })),
+      ensureProjectRootFolder: vi.fn(async () => ({
+        id: 'fld-project-root',
+        name: 'Drive_Project_p-drive-001',
+        webViewLink: 'https://drive.google.com/drive/folders/fld-project-root',
+        driveId: 'shared-drive-001',
+        mimeType: 'application/vnd.google-apps.folder',
+      })),
+      getFile: vi.fn(async (folderId: string) => ({
+        id: folderId,
+        name: 'Manual Root',
+        webViewLink: `https://drive.google.com/drive/folders/${folderId}`,
+        driveId: 'shared-drive-001',
+        mimeType: 'application/vnd.google-apps.folder',
+      })),
+      ensureTransactionFolder: vi.fn(async () => ({
+        projectRootFolder: {
+          id: 'fld-project-root',
+          name: 'Drive_Project_p-drive-001',
+          webViewLink: 'https://drive.google.com/drive/folders/fld-project-root',
+          driveId: 'shared-drive-001',
+          mimeType: 'application/vnd.google-apps.folder',
+        },
+        folder: {
+          id: 'fld-tx-root',
+          name: '20260311_회의비_다과비_tx-drive-001',
+          webViewLink: 'https://drive.google.com/drive/folders/fld-tx-root',
+          driveId: 'shared-drive-001',
+          mimeType: 'application/vnd.google-apps.folder',
+        },
+      })),
+      listFolderFiles: vi.fn(async () => ([
+        {
+          id: 'file-tax-001',
+          name: '세금계산서_3월.pdf',
+          mimeType: 'application/pdf',
+          size: 18000,
+          webViewLink: 'https://drive.google.com/file/d/file-tax-001/view',
+        },
+        {
+          id: 'file-transfer-001',
+          name: '입금확인서_3월.pdf',
+          mimeType: 'application/pdf',
+          size: 9000,
+          webViewLink: 'https://drive.google.com/file/d/file-transfer-001/view',
+        },
+      ])),
+    };
+    const driveApi = request(createBffApp({ projectId, workerSecret, db, driveService }));
+
+    const createdProject = await driveApi
+      .post('/api/v1/projects')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-drive-001' })
+      .send({ id: 'p-drive-001', name: 'Drive Project' });
+
+    expect(createdProject.status).toBe(201);
+    expect(createdProject.body.evidenceDriveRootFolderId).toBe('fld-project-root');
+    expect(driveService.ensureProjectRootFolder).toHaveBeenCalledWith(expect.objectContaining({
+      tenantId,
+      projectId: 'p-drive-001',
+      projectName: 'Drive Project',
+    }));
+
+    await driveApi
+      .post('/api/v1/ledgers')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-ledger-drive-001' })
+      .send({ id: 'l-drive-001', projectId: 'p-drive-001', name: 'Drive Ledger' });
+
+    await driveApi
+      .post('/api/v1/transactions')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-tx-drive-001' })
+      .send({
+        id: 'tx-drive-001',
+        projectId: 'p-drive-001',
+        ledgerId: 'l-drive-001',
+        counterparty: 'Vendor Drive',
+        budgetCategory: '회의비',
+        budgetSubCategory: '다과비',
+        dateTime: '2026-03-11',
+        evidenceRequired: ['세금계산서', '입금확인서'],
+        evidenceStatus: 'MISSING',
+        evidenceMissing: ['세금계산서', '입금확인서'],
+        attachmentsCount: 0,
+        state: 'DRAFT',
+      });
+
+    const projectRoot = await driveApi
+      .post('/api/v1/projects/p-drive-001/evidence-drive/root/provision')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-drive-root-001' })
+      .send({});
+
+    expect(projectRoot.status).toBe(200);
+    expect(projectRoot.body.folderId).toBe('fld-project-root');
+
+    const linkedRoot = await driveApi
+      .post('/api/v1/projects/p-drive-001/evidence-drive/root/link')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-drive-link-001' })
+      .send({ value: 'https://drive.google.com/drive/folders/1GD5XnPypL-s6Jp44TJjRRd0nnP0Yu_sg?usp=share_link' });
+
+    expect(linkedRoot.status).toBe(200);
+    expect(linkedRoot.body.folderId).toBe('1GD5XnPypL-s6Jp44TJjRRd0nnP0Yu_sg');
+    expect(driveService.getFile).toHaveBeenCalledWith('1GD5XnPypL-s6Jp44TJjRRd0nnP0Yu_sg');
+
+    const txFolder = await driveApi
+      .post('/api/v1/transactions/tx-drive-001/evidence-drive/provision')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-tx-drive-provision-001' })
+      .send({});
+
+    expect(txFolder.status).toBe(200);
+    expect(txFolder.body.folderId).toBe('fld-tx-root');
+    expect(driveService.ensureTransactionFolder).toHaveBeenCalled();
+
+    const sync = await driveApi
+      .post('/api/v1/transactions/tx-drive-001/evidence-drive/sync')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-tx-drive-sync-001' })
+      .send({});
+
+    expect(sync.status).toBe(200);
+    expect(sync.body.evidenceCount).toBe(2);
+    expect(sync.body.evidenceStatus).toBe('COMPLETE');
+    expect(sync.body.evidenceCompletedDesc).toContain('세금계산서');
+
+    const txSnap = await db.doc(`orgs/${tenantId}/transactions/tx-drive-001`).get();
+    expect(txSnap.exists).toBe(true);
+    expect(txSnap.data()?.evidenceDriveFolderId).toBe('fld-tx-root');
+    expect(txSnap.data()?.evidenceAutoListedDesc).toBe('세금계산서, 입금확인서');
+    expect(txSnap.data()?.evidenceMissing).toEqual([]);
+
+    const projectSnap = await db.doc(`orgs/${tenantId}/projects/p-drive-001`).get();
+    expect(projectSnap.data()?.evidenceDriveRootFolderId).toBe('fld-project-root');
+
+    const evidenceSnap = await db
+      .collection(`orgs/${tenantId}/evidences`)
+      .where('transactionId', '==', 'tx-drive-001')
+      .get();
+    expect(evidenceSnap.size).toBe(2);
+    expect(evidenceSnap.docs.map((doc) => doc.data().driveFileId).sort()).toEqual(['file-tax-001', 'file-transfer-001']);
+  });
+
   it('detects tampering in audit hash chain', async () => {
     await api
       .post('/api/v1/projects')

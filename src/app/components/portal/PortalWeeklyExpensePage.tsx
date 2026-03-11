@@ -2,12 +2,21 @@ import { useMemo, useState } from 'react';
 import { AlertTriangle, Plus, Send, Settings2 } from 'lucide-react';
 import { usePortalStore } from '../../data/portal-store';
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
+import { useAuth } from '../../data/auth-store';
 import { SettlementLedgerPage } from '../cashflow/SettlementLedgerPage';
 import { Button } from '../ui/button';
-import type { CashflowWeekSheet, TransactionState } from '../../data/types';
+import type { CashflowWeekSheet, Transaction, TransactionState } from '../../data/types';
 import { toast } from 'sonner';
+import { useFirebase } from '../../lib/firebase-context';
+import {
+  provisionTransactionEvidenceDriveViaBff,
+  syncTransactionEvidenceDriveViaBff,
+} from '../../lib/platform-bff-client';
+import { PlatformApiError } from '../../platform/api-client';
 
 export function PortalWeeklyExpensePage() {
+  const { user: authUser } = useAuth();
+  const { orgId } = useFirebase();
   const {
     portalUser,
     myProject,
@@ -62,6 +71,53 @@ export function PortalWeeklyExpensePage() {
     if (myProject?.settlementSupportName) names.add(myProject.settlementSupportName);
     return Array.from(names).filter(Boolean).sort((a, b) => a.localeCompare(b, 'ko'));
   }, [participationEntries, projectId, portalUser?.name, myProject?.managerName, myProject?.settlementSupportName]);
+
+  const bffActor = useMemo(() => ({
+    uid: authUser?.uid || portalUser?.id || 'portal-user',
+    email: authUser?.email || portalUser?.email || '',
+    role: portalUser?.role || authUser?.role || 'pm',
+    idToken: authUser?.idToken,
+  }), [authUser?.uid, authUser?.email, authUser?.role, authUser?.idToken, portalUser?.id, portalUser?.email, portalUser?.role]);
+
+  const handleEvidenceDriveError = (error: unknown, actionLabel: string) => {
+    console.error(`[PortalWeeklyExpensePage] ${actionLabel} failed:`, error);
+    if (error instanceof PlatformApiError) {
+      const message = typeof error.body === 'object' && error.body && 'message' in (error.body as Record<string, unknown>)
+        ? String((error.body as Record<string, unknown>).message || '')
+        : error.message;
+      toast.error(message || `${actionLabel}에 실패했습니다.`);
+      return;
+    }
+    toast.error(`${actionLabel}에 실패했습니다.`);
+  };
+
+  const provisionEvidenceDrive = async (tx: Transaction) => {
+    try {
+      const result = await provisionTransactionEvidenceDriveViaBff({
+        tenantId: orgId,
+        actor: bffActor,
+        transactionId: tx.id,
+      });
+      toast.success(`증빙 폴더 연결 완료: ${result.folderName}`);
+    } catch (error) {
+      handleEvidenceDriveError(error, '증빙 폴더 생성');
+      throw error;
+    }
+  };
+
+  const syncEvidenceDrive = async (tx: Transaction) => {
+    try {
+      const result = await syncTransactionEvidenceDriveViaBff({
+        tenantId: orgId,
+        actor: bffActor,
+        transactionId: tx.id,
+      });
+      toast.success(`증빙 동기화 완료: ${result.evidenceCount}건`);
+    } catch (error) {
+      handleEvidenceDriveError(error, '증빙 동기화');
+      throw error;
+    }
+  };
 
   if (!projectId) {
     return (
@@ -183,6 +239,8 @@ export function PortalWeeklyExpensePage() {
         userRole={ledgerUserRole}
         comments={comments}
         onAddComment={addComment}
+        onProvisionEvidenceDrive={provisionEvidenceDrive}
+        onSyncEvidenceDrive={syncEvidenceDrive}
       />
     </div>
   );

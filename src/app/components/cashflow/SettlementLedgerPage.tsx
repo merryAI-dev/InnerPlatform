@@ -8,6 +8,7 @@ import type { BudgetCodeEntry, Comment, Transaction, TransactionState } from '..
 import { findWeekForDate, getMonthMondayWeeks, getYearMondayWeeks, type MonthMondayWeek } from '../../platform/cashflow-weeks';
 import { parseDate, parseNumber, triggerDownload } from '../../platform/csv-utils';
 import { computeEvidenceStatus, computeEvidenceSummary, isValidDriveUrl } from '../../platform/evidence-helpers';
+import { buildDriveTransactionFolderName } from '../../platform/drive-evidence';
 import {
   CASHFLOW_LINE_OPTIONS,
   SETTLEMENT_COLUMNS, SETTLEMENT_COLUMN_GROUPS,
@@ -382,6 +383,8 @@ export interface SettlementLedgerProps {
   userRole?: 'pm' | 'admin';
   comments?: Comment[];
   onAddComment?: (comment: Comment) => void | Promise<void>;
+  onProvisionEvidenceDrive?: (tx: Transaction) => void | Promise<void>;
+  onSyncEvidenceDrive?: (tx: Transaction) => void | Promise<void>;
 }
 
 // ── Main Component ──
@@ -409,6 +412,8 @@ export function SettlementLedgerPage({
   userRole = 'pm',
   comments = [],
   onAddComment,
+  onProvisionEvidenceDrive,
+  onSyncEvidenceDrive,
 }: SettlementLedgerProps) {
   const { upsertWeekAmounts } = useCashflowWeeks();
   const [year, setYear] = useState(() => new Date().getFullYear());
@@ -1024,6 +1029,8 @@ export function SettlementLedgerPage({
                   txCount={weekTxCount}
                   onToggle={() => toggleWeek(week.label)}
                   onUpdateTx={handleUpdateTx}
+                  onProvisionEvidenceDrive={onProvisionEvidenceDrive}
+                  onSyncEvidenceDrive={onSyncEvidenceDrive}
                   onSubmitWeek={onSubmitWeek}
                   onChangeTransactionState={onChangeTransactionState}
                   userRole={userRole}
@@ -1072,6 +1079,8 @@ interface WeekSectionProps {
   txCount: number;
   onToggle: () => void;
   onUpdateTx: (txId: string, updates: Partial<Transaction>) => void;
+  onProvisionEvidenceDrive?: (tx: Transaction) => void | Promise<void>;
+  onSyncEvidenceDrive?: (tx: Transaction) => void | Promise<void>;
   onSubmitWeek?: (input: {
     weekLabel: string;
     yearMonth: string;
@@ -1082,7 +1091,19 @@ interface WeekSectionProps {
   userRole?: 'pm' | 'admin';
 }
 
-function WeekSection({ week, txRows, collapsed, txCount, onToggle, onUpdateTx, onSubmitWeek, onChangeTransactionState, userRole }: WeekSectionProps) {
+function WeekSection({
+  week,
+  txRows,
+  collapsed,
+  txCount,
+  onToggle,
+  onUpdateTx,
+  onProvisionEvidenceDrive,
+  onSyncEvidenceDrive,
+  onSubmitWeek,
+  onChangeTransactionState,
+  userRole,
+}: WeekSectionProps) {
   const [submitting, setSubmitting] = useState(false);
   const colCount = SETTLEMENT_COLUMNS.length;
   const draftTxIds = txRows.filter(({ tx }) => tx.state === 'DRAFT').map(({ tx }) => tx.id);
@@ -1162,6 +1183,8 @@ function WeekSection({ week, txRows, collapsed, txCount, onToggle, onUpdateTx, o
             rowNum={rowNum}
             weekLabel={week.label}
             onUpdate={(updates) => onUpdateTx(tx.id, updates)}
+            onProvisionEvidenceDrive={onProvisionEvidenceDrive}
+            onSyncEvidenceDrive={onSyncEvidenceDrive}
             onChangeState={onChangeTransactionState}
             userRole={userRole}
           />
@@ -1184,13 +1207,25 @@ interface TransactionRowProps {
   rowNum: number;
   weekLabel: string;
   onUpdate: (updates: Partial<Transaction>) => void;
+  onProvisionEvidenceDrive?: (tx: Transaction) => void | Promise<void>;
+  onSyncEvidenceDrive?: (tx: Transaction) => void | Promise<void>;
   onChangeState?: (txId: string, newState: TransactionState, reason?: string) => void;
   userRole?: 'pm' | 'admin';
 }
 
-function TransactionRow({ tx, rowNum, weekLabel, onUpdate, onChangeState, userRole }: TransactionRowProps) {
+function TransactionRow({
+  tx,
+  rowNum,
+  weekLabel,
+  onUpdate,
+  onProvisionEvidenceDrive,
+  onSyncEvidenceDrive,
+  onChangeState,
+  userRole,
+}: TransactionRowProps) {
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
   const locked = !isEditable(tx.state);
+  const [driveAction, setDriveAction] = useState<'' | 'provision' | 'sync'>('');
 
   const debouncedUpdate = useCallback(
     (updates: Partial<Transaction>) => {
@@ -1206,6 +1241,24 @@ function TransactionRow({ tx, rowNum, weekLabel, onUpdate, onChangeState, userRo
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, []);
+
+  const effectiveCompletedDesc = tx.evidenceCompletedDesc || tx.evidenceAutoListedDesc || '';
+  const suggestedFolderName = tx.evidenceDriveFolderName || buildDriveTransactionFolderName(tx);
+
+  const runDriveAction = useCallback(async (
+    action: 'provision' | 'sync',
+    handler?: (targetTx: Transaction) => void | Promise<void>,
+  ) => {
+    if (!handler || driveAction) return;
+    setDriveAction(action);
+    try {
+      await handler(tx);
+    } catch (error) {
+      console.error(`[SettlementLedger] evidence drive ${action} failed:`, error);
+    } finally {
+      setDriveAction('');
+    }
+  }, [driveAction, tx]);
 
   const textCell = (
     value: string | undefined,
@@ -1358,12 +1411,15 @@ function TransactionRow({ tx, rowNum, weekLabel, onUpdate, onChangeState, userRo
       {/* 사업팀: 실제 구비 완료된 증빙자료 리스트 */}
       <td className="px-1 py-0.5 border-b border-r">
         <input
+          key={`evidence-completed-${tx.id}-${effectiveCompletedDesc}`}
           type="text"
-          defaultValue={tx.evidenceCompletedDesc || ''}
+          defaultValue={effectiveCompletedDesc}
           disabled={locked}
+          placeholder={tx.evidenceAutoListedDesc ? `자동집계: ${tx.evidenceAutoListedDesc}` : ''}
+          title={tx.evidenceAutoListedDesc ? `자동 집계: ${tx.evidenceAutoListedDesc}` : undefined}
           className={`w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[60px] ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
           onBlur={(e) => {
-            if (!locked && e.target.value !== (tx.evidenceCompletedDesc || '')) {
+            if (!locked && e.target.value !== effectiveCompletedDesc) {
               const updatedTx = { ...tx, evidenceCompletedDesc: e.target.value };
               const newStatus = computeEvidenceStatus(updatedTx);
               debouncedUpdate({ evidenceCompletedDesc: e.target.value, evidenceStatus: newStatus });
@@ -1376,11 +1432,43 @@ function TransactionRow({ tx, rowNum, weekLabel, onUpdate, onChangeState, userRo
       {/* 정산지원: 증빙자료 드라이브 */}
       <td className="px-1 py-0.5 border-b border-r">
         <div className="flex items-center gap-1">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-5 px-1.5 text-[9px] shrink-0"
+            disabled={driveAction !== '' || !onProvisionEvidenceDrive}
+            onClick={(e) => {
+              e.stopPropagation();
+              void runDriveAction('provision', onProvisionEvidenceDrive);
+            }}
+            title={`증빙 폴더 생성 · ${suggestedFolderName}`}
+          >
+            {driveAction === 'provision' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}
+            생성
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-5 px-1.5 text-[9px] shrink-0"
+            disabled={driveAction !== '' || !onSyncEvidenceDrive}
+            onClick={(e) => {
+              e.stopPropagation();
+              void runDriveAction('sync', onSyncEvidenceDrive);
+            }}
+            title="Drive 폴더 파일 동기화"
+          >
+            {driveAction === 'sync' ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
+            동기화
+          </Button>
           <input
+            key={`evidence-drive-link-${tx.id}-${tx.evidenceDriveLink || ''}-${tx.evidenceDriveFolderId || ''}`}
             type="text"
             defaultValue={tx.evidenceDriveLink || ''}
             disabled={locked}
-            placeholder="Drive URL"
+            placeholder={`Drive URL · ${suggestedFolderName}`}
+            title={`권장 폴더명: ${suggestedFolderName}`}
             className={`flex-1 bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[60px] ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
             onBlur={(e) => {
               if (!locked && e.target.value !== (tx.evidenceDriveLink || '')) {

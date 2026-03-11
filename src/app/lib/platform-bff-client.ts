@@ -56,6 +56,51 @@ export interface CreateEvidencePayload {
   [key: string]: unknown;
 }
 
+export interface ProvisionProjectEvidenceDriveRootResult {
+  projectId: string;
+  folderId: string;
+  folderName: string;
+  webViewLink: string | null;
+  sharedDriveId: string | null;
+  version: number;
+  updatedAt: string;
+}
+
+export interface LinkProjectEvidenceDriveRootResult extends ProvisionProjectEvidenceDriveRootResult {}
+
+export interface ProvisionTransactionEvidenceDriveResult {
+  transactionId: string;
+  projectId: string;
+  projectFolderId: string;
+  projectFolderName: string;
+  folderId: string;
+  folderName: string;
+  webViewLink: string | null;
+  sharedDriveId: string | null;
+  syncStatus: 'LINKED';
+  version: number;
+  updatedAt: string;
+}
+
+export interface SyncTransactionEvidenceDriveResult {
+  transactionId: string;
+  projectId: string;
+  folderId: string;
+  folderName: string;
+  webViewLink: string | null;
+  sharedDriveId: string | null;
+  evidenceCount: number;
+  evidenceCompletedDesc: string | null;
+  evidenceAutoListedDesc: string | null;
+  evidencePendingDesc: string | null;
+  supportPendingDocs: string | null;
+  evidenceMissing: string[];
+  evidenceStatus: 'MISSING' | 'PARTIAL' | 'COMPLETE';
+  lastSyncedAt: string;
+  version: number;
+  updatedAt: string;
+}
+
 export interface PlatformApiClientLike {
   get<T>(path: string, options: {
     tenantId: string;
@@ -228,6 +273,76 @@ export async function addEvidenceViaBff(params: {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
       body: params.evidence,
+    },
+  );
+  return response.data;
+}
+
+export async function provisionProjectEvidenceDriveRootViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  client?: PlatformApiClientLike;
+}): Promise<ProvisionProjectEvidenceDriveRootResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<ProvisionProjectEvidenceDriveRootResult>(
+    `/api/v1/projects/${params.projectId}/evidence-drive/root/provision`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+    },
+  );
+  return response.data;
+}
+
+export async function linkProjectEvidenceDriveRootViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  value: string;
+  client?: PlatformApiClientLike;
+}): Promise<LinkProjectEvidenceDriveRootResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<LinkProjectEvidenceDriveRootResult>(
+    `/api/v1/projects/${params.projectId}/evidence-drive/root/link`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: { value: params.value },
+    },
+  );
+  return response.data;
+}
+
+export async function provisionTransactionEvidenceDriveViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  transactionId: string;
+  client?: PlatformApiClientLike;
+}): Promise<ProvisionTransactionEvidenceDriveResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<ProvisionTransactionEvidenceDriveResult>(
+    `/api/v1/transactions/${params.transactionId}/evidence-drive/provision`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+    },
+  );
+  return response.data;
+}
+
+export async function syncTransactionEvidenceDriveViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  transactionId: string;
+  client?: PlatformApiClientLike;
+}): Promise<SyncTransactionEvidenceDriveResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<SyncTransactionEvidenceDriveResult>(
+    `/api/v1/transactions/${params.transactionId}/evidence-drive/sync`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
     },
   );
   return response.data;

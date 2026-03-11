@@ -321,6 +321,12 @@ export interface Project {
   confirmerName: string;         // 확인자 닉네임 (센터장/그룹장)
   lastCheckedAt: string;         // 마지막 확인 일시
   cashflowDiffNote: string;      // 입출금합계 차이 사유
+  // 증빙 Shared Drive
+  evidenceDriveSharedDriveId?: string;
+  evidenceDriveRootFolderId?: string;
+  evidenceDriveRootFolderName?: string;
+  evidenceDriveRootFolderLink?: string;
+  evidenceDriveProvisionedAt?: string;
   // 메타
   description?: string;
   createdAt: string;
@@ -431,6 +437,12 @@ export interface Transaction {
   evidencePendingDesc?: string;    // 준비필요자료
   // 정산지원 담당자
   evidenceDriveLink?: string;      // 증빙자료 드라이브 링크
+  evidenceDriveSharedDriveId?: string;
+  evidenceDriveFolderId?: string;  // 거래별 증빙 폴더 id
+  evidenceDriveFolderName?: string;// 거래별 증빙 폴더명
+  evidenceDriveSyncStatus?: 'NOT_LINKED' | 'LINKED' | 'SYNCING' | 'SYNCED' | 'ERROR';
+  evidenceDriveLastSyncedAt?: string;
+  evidenceAutoListedDesc?: string; // 드라이브 파일 기준 자동 집계 목록
   supportPendingDocs?: string;     // 도담/써니 준비 필요자료
   // 도담 (정부 보고)
   eNaraRegistered?: string;        // e나라 등록
@@ -502,6 +514,14 @@ export interface Evidence {
   uploadedAt: string;
   category: string;        // 증빙 유형 (세금계산서, 영수증, 계약서 등)
   status: 'PENDING' | 'ACCEPTED' | 'REJECTED';
+  source?: 'MANUAL' | 'PLATFORM_UPLOAD' | 'DRIVE_SYNC';
+  driveFileId?: string;
+  driveFolderId?: string;
+  driveFolderName?: string;
+  webViewLink?: string;
+  mimeType?: string;
+  parserCategory?: string;
+  parserConfidence?: number;
   rejectedReason?: string;
 }
 

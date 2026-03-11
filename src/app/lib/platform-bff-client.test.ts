@@ -3,7 +3,11 @@ import {
   addCommentViaBff,
   addEvidenceViaBff,
   changeTransactionStateViaBff,
+  linkProjectEvidenceDriveRootViaBff,
+  provisionProjectEvidenceDriveRootViaBff,
+  provisionTransactionEvidenceDriveViaBff,
   readPlatformApiRuntimeConfig,
+  syncTransactionEvidenceDriveViaBff,
   toRequestActor,
   upsertLedgerViaBff,
   upsertProjectViaBff,
@@ -142,5 +146,118 @@ describe('platform-bff-client', () => {
 
     expect(comment.id).toBe('c001');
     expect(evidence.id).toBe('ev001');
+  });
+
+  it('calls evidence drive provision/sync endpoints', async () => {
+    const client = {
+      post: vi
+        .fn()
+        .mockResolvedValueOnce({
+          data: {
+            projectId: 'p001',
+            folderId: 'fld-project',
+            folderName: 'Project Root',
+            webViewLink: 'https://drive.google.com/drive/folders/fld-project',
+            sharedDriveId: 'shared-001',
+            version: 2,
+            updatedAt: '2026-03-11T10:00:00.000Z',
+          },
+        })
+        .mockResolvedValueOnce({
+          data: {
+            transactionId: 'tx001',
+            projectId: 'p001',
+            projectFolderId: 'fld-project',
+            projectFolderName: 'Project Root',
+            folderId: 'fld-tx',
+            folderName: '20260311_회의비_다과비_tx001',
+            webViewLink: 'https://drive.google.com/drive/folders/fld-tx',
+            sharedDriveId: 'shared-001',
+            syncStatus: 'LINKED',
+            version: 3,
+            updatedAt: '2026-03-11T10:01:00.000Z',
+          },
+        })
+        .mockResolvedValueOnce({
+          data: {
+            projectId: 'p001',
+            folderId: 'fld-project',
+            folderName: 'Project Root',
+            webViewLink: 'https://drive.google.com/drive/folders/fld-project',
+            sharedDriveId: 'shared-001',
+            version: 3,
+            updatedAt: '2026-03-11T10:01:30.000Z',
+          },
+        })
+        .mockResolvedValueOnce({
+          data: {
+            transactionId: 'tx001',
+            projectId: 'p001',
+            folderId: 'fld-tx',
+            folderName: '20260311_회의비_다과비_tx001',
+            webViewLink: 'https://drive.google.com/drive/folders/fld-tx',
+            sharedDriveId: 'shared-001',
+            evidenceCount: 2,
+            evidenceCompletedDesc: '세금계산서, 입금확인서',
+            evidenceAutoListedDesc: '세금계산서, 입금확인서',
+            evidencePendingDesc: null,
+            supportPendingDocs: null,
+            evidenceMissing: [],
+            evidenceStatus: 'COMPLETE',
+            lastSyncedAt: '2026-03-11T10:02:00.000Z',
+            version: 4,
+            updatedAt: '2026-03-11T10:02:00.000Z',
+          },
+        }),
+      get: vi.fn(),
+      request: vi.fn(),
+    };
+
+    const projectRoot = await provisionProjectEvidenceDriveRootViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'admin' },
+      projectId: 'p001',
+      client,
+    });
+
+    const txFolder = await provisionTransactionEvidenceDriveViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'admin' },
+      transactionId: 'tx001',
+      client,
+    });
+
+    const linkedRoot = await linkProjectEvidenceDriveRootViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'admin' },
+      projectId: 'p001',
+      value: 'https://drive.google.com/drive/folders/fld-project',
+      client,
+    });
+
+    const syncResult = await syncTransactionEvidenceDriveViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'admin' },
+      transactionId: 'tx001',
+      client,
+    });
+
+    expect(client.post).toHaveBeenNthCalledWith(1, '/api/v1/projects/p001/evidence-drive/root/provision', expect.objectContaining({
+      tenantId: 'mysc',
+    }));
+    expect(client.post).toHaveBeenNthCalledWith(2, '/api/v1/transactions/tx001/evidence-drive/provision', expect.objectContaining({
+      tenantId: 'mysc',
+    }));
+    expect(client.post).toHaveBeenNthCalledWith(3, '/api/v1/projects/p001/evidence-drive/root/link', expect.objectContaining({
+      tenantId: 'mysc',
+      body: { value: 'https://drive.google.com/drive/folders/fld-project' },
+    }));
+    expect(client.post).toHaveBeenNthCalledWith(4, '/api/v1/transactions/tx001/evidence-drive/sync', expect.objectContaining({
+      tenantId: 'mysc',
+    }));
+    expect(projectRoot.folderId).toBe('fld-project');
+    expect(txFolder.syncStatus).toBe('LINKED');
+    expect(linkedRoot.folderName).toBe('Project Root');
+    expect(syncResult.evidenceStatus).toBe('COMPLETE');
   });
 });

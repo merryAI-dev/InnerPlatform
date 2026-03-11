@@ -43,6 +43,7 @@ import {
   ledgerUpsertSchema,
   memberRoleUpdateSchema,
   parseWithSchema,
+  projectDriveRootLinkSchema,
   projectUpsertSchema,
   transactionStateSchema,
   transactionUpsertSchema,
@@ -52,6 +53,13 @@ import {
   normalizeState,
 } from './state-policy.mjs';
 import { mountGuideChatRoutes } from './guide-chat.mjs';
+import {
+  DriveServiceError,
+  createGoogleDriveService,
+  extractDriveFolderId,
+  inferEvidenceCategoryFromFileName,
+  resolveEvidenceSyncPatch,
+} from './google-drive.mjs';
 
 function createHttpError(statusCode, message, code = 'request_error') {
   const error = new Error(message);
@@ -181,6 +189,19 @@ function stripExpectedVersion(payload) {
   const cloned = { ...payload };
   delete cloned.expectedVersion;
   return cloned;
+}
+
+function toDriveEvidenceDocId(fileId) {
+  const normalized = readOptionalText(fileId).replace(/[^A-Za-z0-9_-]/g, '_');
+  return normalized ? `evdrv_${normalized}` : `evdrv_${randomUUID().replace(/-/g, '').slice(0, 12)}`;
+}
+
+function chunkArray(items, chunkSize) {
+  const result = [];
+  for (let index = 0; index < items.length; index += chunkSize) {
+    result.push(items.slice(index, index + chunkSize));
+  }
+  return result;
 }
 
 const SERVER_MANAGED_FIELDS = new Set([
@@ -316,6 +337,42 @@ async function upsertVersionedDoc({
   });
 }
 
+async function mergeSystemManagedDoc({
+  db,
+  path,
+  patch,
+  tenantId,
+  actorId,
+  now,
+  notFoundMessage,
+}) {
+  const ref = db.doc(path);
+
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) {
+      throw createHttpError(404, notFoundMessage || `Document not found: ${path}`, 'not_found');
+    }
+
+    const current = snap.data() || {};
+    const currentVersion = Number.isInteger(current.version) && current.version > 0 ? current.version : 1;
+    const nextVersion = currentVersion + 1;
+    const document = {
+      ...current,
+      ...patch,
+      tenantId,
+      version: nextVersion,
+      createdBy: current.createdBy || actorId,
+      createdAt: current.createdAt || now,
+      updatedBy: actorId,
+      updatedAt: now,
+    };
+
+    tx.set(ref, document, { merge: true });
+    return { version: nextVersion, data: document };
+  });
+}
+
 function asyncHandler(handler) {
   return async (req, res, next) => {
     try {
@@ -448,6 +505,7 @@ export function createBffApp(options = {}) {
   const auditChainService = createAuditChainService(db, { now });
   const piiProtector = options.piiProtector || createPiiProtector();
   const rbacPolicy = options.rbacPolicy || loadRbacPolicy();
+  const driveService = options.driveService || createGoogleDriveService();
   const allowedOrigins = parseAllowedOrigins(options.allowedOrigins || process.env.BFF_ALLOWED_ORIGINS);
   const relationRulesPolicyPath = options.relationRulesPolicyPath || resolveRelationRulesPolicyPath();
   const workQueueBatchSizeRaw = Number.parseInt(process.env.BFF_WORK_QUEUE_BATCH || '100', 10);
@@ -1043,6 +1101,172 @@ export function createBffApp(options = {}) {
     res.status(200).json({ items, count: items.length });
   }));
 
+  app.post('/api/v1/projects/:projectId/evidence-drive/root/provision', createMutatingRoute(idempotencyService, async (req) => {
+    assertActorRoleAllowed(req, ROUTE_ROLES.writeCore, 'provision evidence drive root');
+    assertActorPermissionAllowed(rbacPolicy, req, 'project:write', 'provision evidence drive root');
+    const { tenantId, actorId, actorRole, actorEmail, requestId } = req.context;
+    const { projectId } = req.params;
+    const timestamp = now();
+
+    const project = await ensureDocumentExists(
+      db,
+      `orgs/${tenantId}/projects/${projectId}`,
+      `Project not found: ${projectId}`,
+    );
+
+    let folder;
+    try {
+      folder = await driveService.ensureProjectRootFolder({
+        tenantId,
+        projectId,
+        projectName: project.name || projectId,
+        existingFolderId: project.evidenceDriveRootFolderId,
+      });
+    } catch (error) {
+      if (error instanceof DriveServiceError) {
+        throw createHttpError(error.statusCode, error.message, error.code);
+      }
+      throw error;
+    }
+
+    const result = await mergeSystemManagedDoc({
+      db,
+      path: `orgs/${tenantId}/projects/${projectId}`,
+      patch: {
+        evidenceDriveSharedDriveId: folder.driveId || project.evidenceDriveSharedDriveId || undefined,
+        evidenceDriveRootFolderId: folder.id,
+        evidenceDriveRootFolderName: folder.name,
+        evidenceDriveRootFolderLink: folder.webViewLink || undefined,
+        evidenceDriveProvisionedAt: timestamp,
+      },
+      tenantId,
+      actorId,
+      now: timestamp,
+      notFoundMessage: `Project not found: ${projectId}`,
+    });
+
+    const actorEmailEnc = await encryptAuditEmail(piiProtector, actorEmail);
+    await auditChainService.append({
+      tenantId,
+      entityType: 'project',
+      entityId: projectId,
+      action: 'UPSERT',
+      actorId,
+      actorRole,
+      actorEmailEnc,
+      requestId,
+      details: `프로젝트 증빙 루트 폴더 연결: ${folder.name}`,
+      metadata: {
+        source: 'bff',
+        folderId: folder.id,
+        folderName: folder.name,
+        driveId: folder.driveId || null,
+      },
+      timestamp,
+    });
+
+    return {
+      status: 200,
+      body: {
+        projectId,
+        folderId: folder.id,
+        folderName: folder.name,
+        webViewLink: folder.webViewLink || null,
+        sharedDriveId: folder.driveId || null,
+        version: result.version,
+        updatedAt: result.data.updatedAt,
+      },
+    };
+  }));
+
+  app.post('/api/v1/projects/:projectId/evidence-drive/root/link', createMutatingRoute(idempotencyService, async (req) => {
+    assertActorRoleAllowed(req, ROUTE_ROLES.writeCore, 'link evidence drive root');
+    assertActorPermissionAllowed(rbacPolicy, req, 'project:write', 'link evidence drive root');
+    const { tenantId, actorId, actorRole, actorEmail, requestId } = req.context;
+    const { projectId } = req.params;
+    const timestamp = now();
+    const parsed = parseWithSchema(projectDriveRootLinkSchema, req.body, 'Invalid evidence drive root payload');
+    const folderId = extractDriveFolderId(parsed.value);
+
+    if (!folderId) {
+      throw createHttpError(400, 'Google Drive 폴더 링크 또는 폴더 ID를 입력해 주세요.', 'invalid_drive_folder_link');
+    }
+
+    const project = await ensureDocumentExists(
+      db,
+      `orgs/${tenantId}/projects/${projectId}`,
+      `Project not found: ${projectId}`,
+    );
+
+    let folder;
+    try {
+      folder = await driveService.getFile(folderId);
+    } catch (error) {
+      if (error instanceof DriveServiceError) {
+        throw createHttpError(error.statusCode, error.message, error.code);
+      }
+      throw error;
+    }
+
+    if (!folder) {
+      throw createHttpError(404, `Google Drive 폴더를 찾을 수 없습니다: ${folderId}`, 'drive_folder_not_found');
+    }
+
+    if (folder.mimeType !== 'application/vnd.google-apps.folder') {
+      throw createHttpError(400, '입력한 링크가 폴더가 아닙니다. Shared Drive 폴더 링크를 입력해 주세요.', 'drive_folder_required');
+    }
+
+    const result = await mergeSystemManagedDoc({
+      db,
+      path: `orgs/${tenantId}/projects/${projectId}`,
+      patch: {
+        evidenceDriveSharedDriveId: folder.driveId || project.evidenceDriveSharedDriveId || undefined,
+        evidenceDriveRootFolderId: folder.id,
+        evidenceDriveRootFolderName: folder.name,
+        evidenceDriveRootFolderLink: folder.webViewLink || parsed.value,
+        evidenceDriveProvisionedAt: timestamp,
+      },
+      tenantId,
+      actorId,
+      now: timestamp,
+      notFoundMessage: `Project not found: ${projectId}`,
+    });
+
+    const actorEmailEnc = await encryptAuditEmail(piiProtector, actorEmail);
+    await auditChainService.append({
+      tenantId,
+      entityType: 'project',
+      entityId: projectId,
+      action: 'UPSERT',
+      actorId,
+      actorRole,
+      actorEmailEnc,
+      requestId,
+      details: `프로젝트 증빙 루트 폴더 수동 연결: ${folder.name}`,
+      metadata: {
+        source: 'bff',
+        folderId: folder.id,
+        folderName: folder.name,
+        driveId: folder.driveId || null,
+        inputValue: parsed.value,
+      },
+      timestamp,
+    });
+
+    return {
+      status: 200,
+      body: {
+        projectId,
+        folderId: folder.id,
+        folderName: folder.name,
+        webViewLink: folder.webViewLink || parsed.value,
+        sharedDriveId: folder.driveId || null,
+        version: result.version,
+        updatedAt: result.data.updatedAt,
+      },
+    };
+  }));
+
   app.get('/api/v1/audit-logs', asyncHandler(async (req, res) => {
     const { tenantId } = req.context;
     assertActorRoleAllowed(req, ROUTE_ROLES.auditRead, 'read audit logs');
@@ -1073,6 +1297,9 @@ export function createBffApp(options = {}) {
     const timestamp = now();
     const parsed = parseWithSchema(projectUpsertSchema, req.body, 'Invalid project payload');
     const expectedVersion = parsed.expectedVersion;
+    const driveConfig = typeof driveService?.getConfig === 'function'
+      ? driveService.getConfig()
+      : null;
 
     const projectPayload = {
       ...stripServerManagedFields(stripExpectedVersion(parsed)),
@@ -1080,6 +1307,36 @@ export function createBffApp(options = {}) {
       name: parsed.name.trim(),
       orgId: tenantId,
     };
+
+    const shouldProvisionProjectDriveRoot = !!(
+      driveService
+      && typeof driveService.ensureProjectRootFolder === 'function'
+      && (driveConfig ? driveConfig.enabled && driveConfig.defaultParentFolderId : true)
+      && !projectPayload.evidenceDriveRootFolderId
+    );
+
+    if (shouldProvisionProjectDriveRoot) {
+      let folder;
+      try {
+        folder = await driveService.ensureProjectRootFolder({
+          tenantId,
+          projectId: projectPayload.id,
+          projectName: projectPayload.name || projectPayload.id,
+          existingFolderId: projectPayload.evidenceDriveRootFolderId,
+        });
+      } catch (error) {
+        if (error instanceof DriveServiceError) {
+          throw createHttpError(error.statusCode, error.message, error.code);
+        }
+        throw error;
+      }
+
+      projectPayload.evidenceDriveSharedDriveId = folder.driveId || projectPayload.evidenceDriveSharedDriveId || undefined;
+      projectPayload.evidenceDriveRootFolderId = folder.id;
+      projectPayload.evidenceDriveRootFolderName = folder.name;
+      projectPayload.evidenceDriveRootFolderLink = folder.webViewLink || projectPayload.evidenceDriveRootFolderLink || undefined;
+      projectPayload.evidenceDriveProvisionedAt = timestamp;
+    }
 
     const outboxEvent = createOutboxEvent({
       tenantId,
@@ -1125,6 +1382,10 @@ export function createBffApp(options = {}) {
       body: {
         id: projectPayload.id,
         tenantId,
+        evidenceDriveRootFolderId: result.data.evidenceDriveRootFolderId || null,
+        evidenceDriveRootFolderName: result.data.evidenceDriveRootFolderName || null,
+        evidenceDriveRootFolderLink: result.data.evidenceDriveRootFolderLink || null,
+        evidenceDriveSharedDriveId: result.data.evidenceDriveSharedDriveId || null,
         version: result.version,
         updatedAt: result.data.updatedAt,
       },
@@ -1563,6 +1824,297 @@ export function createBffApp(options = {}) {
         transactionId: txId,
         version: 1,
         uploadedAt: timestamp,
+      },
+    };
+  }));
+
+  app.post('/api/v1/transactions/:txId/evidence-drive/provision', createMutatingRoute(idempotencyService, async (req) => {
+    assertActorRoleAllowed(req, ROUTE_ROLES.writeTransaction, 'provision evidence drive folder');
+    assertActorPermissionAllowed(rbacPolicy, req, 'evidence:write', 'provision evidence drive folder');
+    const { tenantId, actorId, actorRole, actorEmail, requestId } = req.context;
+    const { txId } = req.params;
+    const timestamp = now();
+
+    const transaction = await ensureDocumentExists(
+      db,
+      `orgs/${tenantId}/transactions/${txId}`,
+      `Transaction not found: ${txId}`,
+    );
+    const project = await ensureDocumentExists(
+      db,
+      `orgs/${tenantId}/projects/${transaction.projectId}`,
+      `Project not found: ${transaction.projectId}`,
+    );
+
+    let linkedFolder;
+    try {
+      linkedFolder = await driveService.ensureTransactionFolder({
+        tenantId,
+        projectId: transaction.projectId,
+        projectName: project.name || transaction.projectId,
+        projectFolderId: project.evidenceDriveRootFolderId,
+        existingFolderId: transaction.evidenceDriveFolderId,
+        transaction,
+      });
+    } catch (error) {
+      if (error instanceof DriveServiceError) {
+        throw createHttpError(error.statusCode, error.message, error.code);
+      }
+      throw error;
+    }
+
+    const folder = linkedFolder.folder;
+    const projectRootFolder = linkedFolder.projectRootFolder;
+
+    const projectUpdate = !project.evidenceDriveRootFolderId || project.evidenceDriveRootFolderId !== projectRootFolder.id
+      ? mergeSystemManagedDoc({
+        db,
+        path: `orgs/${tenantId}/projects/${transaction.projectId}`,
+        patch: {
+          evidenceDriveSharedDriveId: projectRootFolder.driveId || project.evidenceDriveSharedDriveId || undefined,
+          evidenceDriveRootFolderId: projectRootFolder.id,
+          evidenceDriveRootFolderName: projectRootFolder.name,
+          evidenceDriveRootFolderLink: projectRootFolder.webViewLink || undefined,
+          evidenceDriveProvisionedAt: timestamp,
+        },
+        tenantId,
+        actorId,
+        now: timestamp,
+        notFoundMessage: `Project not found: ${transaction.projectId}`,
+      })
+      : Promise.resolve(null);
+
+    const txResult = await mergeSystemManagedDoc({
+      db,
+      path: `orgs/${tenantId}/transactions/${txId}`,
+      patch: {
+        evidenceDriveSharedDriveId: folder.driveId || transaction.evidenceDriveSharedDriveId || undefined,
+        evidenceDriveFolderId: folder.id,
+        evidenceDriveFolderName: folder.name,
+        evidenceDriveLink: folder.webViewLink || undefined,
+        evidenceDriveSyncStatus: 'LINKED',
+      },
+      tenantId,
+      actorId,
+      now: timestamp,
+      notFoundMessage: `Transaction not found: ${txId}`,
+    });
+
+    await projectUpdate;
+
+    const actorEmailEnc = await encryptAuditEmail(piiProtector, actorEmail);
+    await auditChainService.append({
+      tenantId,
+      entityType: 'transaction',
+      entityId: txId,
+      action: 'UPSERT',
+      actorId,
+      actorRole,
+      actorEmailEnc,
+      requestId,
+      details: `거래 증빙 폴더 연결: ${folder.name}`,
+      metadata: {
+        source: 'bff',
+        transactionId: txId,
+        folderId: folder.id,
+        folderName: folder.name,
+        projectFolderId: projectRootFolder.id,
+      },
+      timestamp,
+    });
+
+    return {
+      status: 200,
+      body: {
+        transactionId: txId,
+        projectId: transaction.projectId,
+        projectFolderId: projectRootFolder.id,
+        projectFolderName: projectRootFolder.name,
+        folderId: folder.id,
+        folderName: folder.name,
+        webViewLink: folder.webViewLink || null,
+        sharedDriveId: folder.driveId || null,
+        syncStatus: 'LINKED',
+        version: txResult.version,
+        updatedAt: txResult.data.updatedAt,
+      },
+    };
+  }));
+
+  app.post('/api/v1/transactions/:txId/evidence-drive/sync', createMutatingRoute(idempotencyService, async (req) => {
+    assertActorRoleAllowed(req, ROUTE_ROLES.writeTransaction, 'sync evidence drive folder');
+    assertActorPermissionAllowed(rbacPolicy, req, 'evidence:write', 'sync evidence drive folder');
+    const { tenantId, actorId, actorRole, actorEmail, requestId } = req.context;
+    const { txId } = req.params;
+    const timestamp = now();
+
+    const transaction = await ensureDocumentExists(
+      db,
+      `orgs/${tenantId}/transactions/${txId}`,
+      `Transaction not found: ${txId}`,
+    );
+    const project = await ensureDocumentExists(
+      db,
+      `orgs/${tenantId}/projects/${transaction.projectId}`,
+      `Project not found: ${transaction.projectId}`,
+    );
+
+    let linkedFolder;
+    let files;
+    try {
+      linkedFolder = await driveService.ensureTransactionFolder({
+        tenantId,
+        projectId: transaction.projectId,
+        projectName: project.name || transaction.projectId,
+        projectFolderId: project.evidenceDriveRootFolderId,
+        existingFolderId: transaction.evidenceDriveFolderId,
+        transaction,
+      });
+      files = await driveService.listFolderFiles({ folderId: linkedFolder.folder.id });
+    } catch (error) {
+      if (error instanceof DriveServiceError) {
+        throw createHttpError(error.statusCode, error.message, error.code);
+      }
+      throw error;
+    }
+
+    const folder = linkedFolder.folder;
+    const evidenceSnap = await db
+      .collection(`orgs/${tenantId}/evidences`)
+      .where('transactionId', '==', txId)
+      .get();
+    const existingEvidenceByFileId = new Map();
+    evidenceSnap.docs.forEach((doc) => {
+      const data = doc.data() || {};
+      const driveFileId = readOptionalText(data.driveFileId);
+      if (driveFileId) {
+        existingEvidenceByFileId.set(driveFileId, { id: doc.id, ...data });
+      }
+    });
+
+    const evidenceDocs = files.map((file) => {
+      const existing = existingEvidenceByFileId.get(file.id);
+      const parser = inferEvidenceCategoryFromFileName(file.name);
+      const category = readOptionalText(existing?.category) || parser.category;
+      return {
+        id: existing?.id || toDriveEvidenceDocId(file.id),
+        tenantId,
+        transactionId: txId,
+        fileName: file.name || 'untitled',
+        fileType: file.mimeType || 'application/octet-stream',
+        fileSize: file.size || 0,
+        uploadedBy: existing?.uploadedBy || actorId,
+        uploadedAt: existing?.uploadedAt || timestamp,
+        category,
+        status: existing?.status || 'PENDING',
+        source: existing?.source || 'DRIVE_SYNC',
+        driveFileId: file.id,
+        driveFolderId: folder.id,
+        driveFolderName: folder.name,
+        webViewLink: file.webViewLink || undefined,
+        mimeType: file.mimeType || 'application/octet-stream',
+        parserCategory: parser.category,
+        parserConfidence: parser.confidence,
+        createdAt: existing?.createdAt || timestamp,
+        updatedAt: timestamp,
+        version: Number.isInteger(existing?.version) && existing.version > 0 ? existing.version + 1 : 1,
+      };
+    });
+
+    for (const docs of chunkArray(evidenceDocs, 400)) {
+      const batch = db.batch();
+      docs.forEach((evidence) => {
+        batch.set(db.doc(`orgs/${tenantId}/evidences/${evidence.id}`), evidence, { merge: true });
+      });
+      await batch.commit();
+    }
+
+    const syncPatch = resolveEvidenceSyncPatch({
+      transaction: {
+        ...transaction,
+        evidenceDriveLink: folder.webViewLink || transaction.evidenceDriveLink,
+      },
+      evidences: evidenceDocs,
+      folder,
+    });
+
+    const projectUpdate = !project.evidenceDriveRootFolderId || project.evidenceDriveRootFolderId !== linkedFolder.projectRootFolder.id
+      ? mergeSystemManagedDoc({
+        db,
+        path: `orgs/${tenantId}/projects/${transaction.projectId}`,
+        patch: {
+          evidenceDriveSharedDriveId: linkedFolder.projectRootFolder.driveId || project.evidenceDriveSharedDriveId || undefined,
+          evidenceDriveRootFolderId: linkedFolder.projectRootFolder.id,
+          evidenceDriveRootFolderName: linkedFolder.projectRootFolder.name,
+          evidenceDriveRootFolderLink: linkedFolder.projectRootFolder.webViewLink || undefined,
+          evidenceDriveProvisionedAt: timestamp,
+        },
+        tenantId,
+        actorId,
+        now: timestamp,
+        notFoundMessage: `Project not found: ${transaction.projectId}`,
+      })
+      : Promise.resolve(null);
+
+    const txResult = await mergeSystemManagedDoc({
+      db,
+      path: `orgs/${tenantId}/transactions/${txId}`,
+      patch: {
+        ...syncPatch,
+        evidenceDriveSharedDriveId: folder.driveId || transaction.evidenceDriveSharedDriveId || undefined,
+        evidenceDriveFolderId: folder.id,
+        evidenceDriveFolderName: folder.name,
+        evidenceDriveLink: folder.webViewLink || transaction.evidenceDriveLink || undefined,
+        evidenceDriveSyncStatus: 'SYNCED',
+        evidenceDriveLastSyncedAt: timestamp,
+      },
+      tenantId,
+      actorId,
+      now: timestamp,
+      notFoundMessage: `Transaction not found: ${txId}`,
+    });
+
+    await projectUpdate;
+
+    const actorEmailEnc = await encryptAuditEmail(piiProtector, actorEmail);
+    await auditChainService.append({
+      tenantId,
+      entityType: 'transaction',
+      entityId: txId,
+      action: 'UPSERT',
+      actorId,
+      actorRole,
+      actorEmailEnc,
+      requestId,
+      details: `거래 증빙 Drive 동기화: ${evidenceDocs.length}건`,
+      metadata: {
+        source: 'bff',
+        transactionId: txId,
+        folderId: folder.id,
+        evidenceCount: evidenceDocs.length,
+      },
+      timestamp,
+    });
+
+    return {
+      status: 200,
+      body: {
+        transactionId: txId,
+        projectId: transaction.projectId,
+        folderId: folder.id,
+        folderName: folder.name,
+        webViewLink: folder.webViewLink || null,
+        sharedDriveId: folder.driveId || null,
+        evidenceCount: evidenceDocs.length,
+        evidenceCompletedDesc: txResult.data.evidenceCompletedDesc || null,
+        evidenceAutoListedDesc: txResult.data.evidenceAutoListedDesc || null,
+        evidencePendingDesc: txResult.data.evidencePendingDesc || null,
+        supportPendingDocs: txResult.data.supportPendingDocs || null,
+        evidenceMissing: txResult.data.evidenceMissing || [],
+        evidenceStatus: txResult.data.evidenceStatus,
+        lastSyncedAt: timestamp,
+        version: txResult.version,
+        updatedAt: txResult.data.updatedAt,
       },
     };
   }));
