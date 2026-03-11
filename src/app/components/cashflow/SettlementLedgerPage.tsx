@@ -763,7 +763,7 @@ export function SettlementLedgerPage({
     if (!autoSaveSheet || !importDirty || !importRows || !onSaveSheetRows || sheetSaving) return;
     const timer = window.setTimeout(() => {
       void handleImportSave({ silent: true });
-    }, 900);
+    }, 10_000);
     return () => window.clearTimeout(timer);
   }, [autoSaveSheet, importDirty, importRows, onSaveSheetRows, sheetSaving, handleImportSave]);
 
@@ -1777,6 +1777,7 @@ function ImportEditor({
     if (anchor.colIdx === noIdx) return fallback;
     return anchor.colIdx;
   }, [getSelectionAnchor, noIdx]);
+  const selectedRowIdx = getSelectionAnchor()?.rowIdx ?? -1;
 
   const commitRows = useCallback((nextRows: ImportRow[], focusTarget?: { rowIdx: number; colIdx: number } | null) => {
     if (focusTarget) pendingFocusCell.current = focusTarget;
@@ -2274,6 +2275,19 @@ function ImportEditor({
           >
             <Plus className="h-3.5 w-3.5" />
             행 추가
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-[11px] gap-1 cursor-pointer shadow-sm hover:bg-muted/40"
+            onClick={() => {
+              if (selectedRowIdx < 0) return;
+              removeRow(selectedRowIdx);
+            }}
+            disabled={selectedRowIdx < 0 || rows.length === 0}
+          >
+            <X className="h-3.5 w-3.5" />
+            선택 행 삭제
           </Button>
           <Button
             variant="outline"

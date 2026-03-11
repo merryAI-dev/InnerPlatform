@@ -328,10 +328,10 @@ export function PortalBudget() {
       setCodeBookMode(false);
       setDraftRows([]);
       setDraftCodeBook([]);
-      toast.success(codeBookMode && !editMode ? '카테고리가 저장되었습니다.' : '예산이 저장되었습니다.');
+      toast.success(codeBookMode && !editMode ? '비목/세목이 저장되었습니다.' : '예산이 저장되었습니다.');
     } catch (err) {
       console.error('[PortalBudget] save failed:', err);
-      toast.error(codeBookMode && !editMode ? '카테고리 저장에 실패했습니다.' : '예산 저장에 실패했습니다.');
+      toast.error(codeBookMode && !editMode ? '비목/세목 저장에 실패했습니다.' : '예산 저장에 실패했습니다.');
     } finally {
       setSettingsSaving(false);
     }
@@ -495,7 +495,7 @@ export function PortalBudget() {
                   </Button>
                   <Button variant="default" size="sm" className="h-8 text-[12px] gap-1 shadow-sm" onClick={startCodeBookEdit}>
                     <Settings className="w-3.5 h-3.5" />
-                    카테고리 관리
+                    비목/세목 수정
                   </Button>
                 </>
               ) : null}
@@ -506,7 +506,7 @@ export function PortalBudget() {
         <Dialog open={codeBookMode} onOpenChange={(open) => !open && cancelEdit()}>
           <DialogContent className="max-w-2xl">
             <DialogHeader>
-              <DialogTitle className="text-[14px]">카테고리 관리</DialogTitle>
+              <DialogTitle className="text-[14px]">비목/세목 수정</DialogTitle>
             </DialogHeader>
             <div className="space-y-3">
               <div className="flex items-center justify-between">
