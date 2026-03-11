@@ -25,6 +25,9 @@ export interface FirebaseConfig {
 export interface FirebaseEmulatorConfig {
   enabled: boolean;
   host: string;
+  firestoreEnabled: boolean;
+  authEnabled: boolean;
+  storageEnabled: boolean;
   firestorePort: number;
   authPort: number;
   storagePort: number;
@@ -108,9 +111,16 @@ export function getDefaultOrgId(env: Record<string, unknown> = import.meta.env):
 export function readFirebaseEmulatorConfig(
   env: Record<string, unknown> = import.meta.env,
 ): FirebaseEmulatorConfig {
+  const enabled = parseFeatureFlag(env.VITE_FIREBASE_USE_EMULATORS, false);
+  const firestoreEnabled = parseFeatureFlag(env.VITE_FIREBASE_USE_FIRESTORE_EMULATOR, enabled);
+  const authEnabled = parseFeatureFlag(env.VITE_FIREBASE_USE_AUTH_EMULATOR, enabled);
+  const storageEnabled = parseFeatureFlag(env.VITE_FIREBASE_USE_STORAGE_EMULATOR, enabled);
   return {
-    enabled: parseFeatureFlag(env.VITE_FIREBASE_USE_EMULATORS, false),
+    enabled: firestoreEnabled || authEnabled || storageEnabled,
     host: normalizeString(env.VITE_FIREBASE_EMULATOR_HOST) || '127.0.0.1',
+    firestoreEnabled,
+    authEnabled,
+    storageEnabled,
     firestorePort: readPort(env.VITE_FIRESTORE_EMULATOR_PORT, 8080),
     authPort: readPort(env.VITE_FIREBASE_AUTH_EMULATOR_PORT, 9099),
     storagePort: readPort(env.VITE_FIREBASE_STORAGE_EMULATOR_PORT, 9199),
@@ -131,9 +141,15 @@ function maybeConnectEmulators(db: Firestore, auth: Auth, storage: FirebaseStora
   const emulator = readFirebaseEmulatorConfig(import.meta.env);
   if (!emulator.enabled) return;
 
-  connectFirestoreEmulator(db, emulator.host, emulator.firestorePort);
-  connectAuthEmulator(auth, `http://${emulator.host}:${emulator.authPort}`, { disableWarnings: true });
-  connectStorageEmulator(storage, emulator.host, emulator.storagePort);
+  if (emulator.firestoreEnabled) {
+    connectFirestoreEmulator(db, emulator.host, emulator.firestorePort);
+  }
+  if (emulator.authEnabled) {
+    connectAuthEmulator(auth, `http://${emulator.host}:${emulator.authPort}`, { disableWarnings: true });
+  }
+  if (emulator.storageEnabled) {
+    connectStorageEmulator(storage, emulator.host, emulator.storagePort);
+  }
   _emulatorsConnected = true;
 }
 

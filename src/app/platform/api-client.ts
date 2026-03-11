@@ -112,7 +112,7 @@ export class PlatformApiClient {
 
   constructor(options: PlatformApiClientOptions = {}) {
     this.baseUrl = (options.baseUrl || '').replace(/\/$/, '');
-    this.fetchImpl = options.fetchImpl || fetch;
+    this.fetchImpl = options.fetchImpl || globalThis.fetch.bind(globalThis);
     this.maxRetries = normalizeRetryCount(options.maxRetries);
     this.retryDelayMs = normalizeDelay(options.retryDelayMs, 150);
     this.retryOnStatuses = new Set(options.retryOnStatuses || Array.from(DEFAULT_RETRY_STATUSES));

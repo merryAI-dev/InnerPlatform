@@ -10,6 +10,7 @@ import { Card, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
 import { useAuth } from '../../data/auth-store';
 import { resolvePostLoginPath, shouldPromptWorkspaceSelection } from '../../platform/navigation';
+import { readFirebaseEmulatorConfig } from '../../lib/firebase';
 
 // ═══════════════════════════════════════════════════════════════
 // LoginPage — 통합 로그인 페이지
@@ -28,6 +29,18 @@ export function LoginPage() {
   } = useAuth();
   const [error, setError] = useState('');
   const redirectFrom = (location.state as { from?: string } | null)?.from;
+  const emulatorConfig = readFirebaseEmulatorConfig(import.meta.env);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (emulatorConfig.authEnabled) return;
+
+    const { hostname, protocol, port, pathname, search, hash } = window.location;
+    if (!['127.0.0.1', '0.0.0.0', '::1', '[::1]'].includes(hostname)) return;
+
+    const target = `${protocol}//localhost${port ? `:${port}` : ''}${pathname}${search}${hash}`;
+    window.location.replace(target);
+  }, [emulatorConfig.authEnabled]);
 
   // 이미 인증된 사용자는 역할에 맞는 페이지로 리다이렉트
   useEffect(() => {

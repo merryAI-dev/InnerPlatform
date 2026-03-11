@@ -1,12 +1,18 @@
 import type { EvidenceStatus, Transaction } from '../data/types';
 
+function resolveCompletedDesc(tx: Transaction): string {
+  const manual = tx.evidenceCompletedDesc?.trim() || '';
+  if (manual) return manual;
+  return tx.evidenceAutoListedDesc?.trim() || '';
+}
+
 /**
  * 증빙 상태 자동 계산
  * Transaction의 evidenceDriveLink, evidenceRequiredDesc, evidenceCompletedDesc 기반
  */
 export function computeEvidenceStatus(tx: Transaction): EvidenceStatus {
-  const hasLink = !!tx.evidenceDriveLink?.trim();
-  const completedDesc = tx.evidenceCompletedDesc?.trim() || '';
+  const hasLink = !!tx.evidenceDriveLink?.trim() || !!tx.evidenceDriveFolderId?.trim();
+  const completedDesc = resolveCompletedDesc(tx);
 
   // evidenceRequired 배열이 비어있으면 기본 규칙 적용
   if (tx.evidenceRequired.length === 0) {
@@ -45,7 +51,7 @@ export function isValidDriveUrl(url: string): boolean {
  */
 export function computeEvidenceMissing(tx: Transaction): string[] {
   if (tx.evidenceRequired.length === 0) return [];
-  const completed = (tx.evidenceCompletedDesc || '')
+  const completed = resolveCompletedDesc(tx)
     .split(',')
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);

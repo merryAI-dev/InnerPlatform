@@ -1,5 +1,5 @@
-import { ChevronDown, ChevronLeft, ChevronRight, Download, ExternalLink, GripVertical, Loader2, MessageSquare, Plus, RotateCcw, Save, Send, X } from 'lucide-react';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { ChevronDown, ChevronLeft, ChevronRight, Download, ExternalLink, GripVertical, Loader2, MessageSquare, Plus, RotateCcw, Save, Send, Upload, X } from 'lucide-react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { ClipboardEvent, KeyboardEvent, MouseEvent } from 'react';
 import { toast } from 'sonner';
@@ -8,6 +8,12 @@ import type { BudgetCodeEntry, Comment, Transaction, TransactionState } from '..
 import { findWeekForDate, getMonthMondayWeeks, getYearMondayWeeks, type MonthMondayWeek } from '../../platform/cashflow-weeks';
 import { parseDate, parseNumber, triggerDownload } from '../../platform/csv-utils';
 import { computeEvidenceStatus, computeEvidenceSummary, isValidDriveUrl } from '../../platform/evidence-helpers';
+import {
+  buildDriveTransactionFolderName,
+  EVIDENCE_DOCUMENT_CATEGORIES,
+  inferEvidenceCategoryFromFileName,
+  suggestEvidenceUploadFileName,
+} from '../../platform/drive-evidence';
 import {
   CASHFLOW_LINE_OPTIONS,
   SETTLEMENT_COLUMNS, SETTLEMENT_COLUMN_GROUPS,
@@ -41,6 +47,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '../ui/alert-dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '../ui/dialog';
 
 // ── Helpers ──
 
@@ -99,6 +113,36 @@ function buildSheetRowCommentId(tempId: string): string {
 
 function formatCommentTime(value: string): string {
   return value ? value.slice(0, 16).replace('T', ' ') : '';
+}
+
+function readImportDraftCache(cacheKey: string): ImportRow[] | null {
+  if (!cacheKey || typeof window === 'undefined') return null;
+  try {
+    const raw = window.sessionStorage.getItem(cacheKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { rows?: ImportRow[] } | null;
+    return Array.isArray(parsed?.rows) ? parsed.rows : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeImportDraftCache(cacheKey: string, rows: ImportRow[]): void {
+  if (!cacheKey || typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.setItem(cacheKey, JSON.stringify({ rows }));
+  } catch {
+    // Ignore browser storage quota errors during local draft caching.
+  }
+}
+
+function clearImportDraftCache(cacheKey: string): void {
+  if (!cacheKey || typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.removeItem(cacheKey);
+  } catch {
+    // Ignore storage cleanup failures.
+  }
 }
 
 function normalizeMethodValue(value: string | undefined): string {
@@ -382,6 +426,20 @@ export interface SettlementLedgerProps {
   userRole?: 'pm' | 'admin';
   comments?: Comment[];
   onAddComment?: (comment: Comment) => void | Promise<void>;
+  onProvisionEvidenceDrive?: (tx: Transaction) => void | Promise<void>;
+  onSyncEvidenceDrive?: (tx: Transaction) => void | Promise<void>;
+  onUploadEvidenceDrive?: (tx: Transaction, uploads: EvidenceUploadSelection[]) => void | Promise<void>;
+  onEnsureTransactionPersisted?: (input: {
+    transaction: Transaction;
+    sourceTxId?: string;
+  }) => Promise<string | null>;
+}
+
+export interface EvidenceUploadSelection {
+  file: File;
+  category: string;
+  parserCategory: string;
+  reviewedFileName: string;
 }
 
 // ── Main Component ──
@@ -409,6 +467,10 @@ export function SettlementLedgerPage({
   userRole = 'pm',
   comments = [],
   onAddComment,
+  onProvisionEvidenceDrive,
+  onSyncEvidenceDrive,
+  onUploadEvidenceDrive,
+  onEnsureTransactionPersisted,
 }: SettlementLedgerProps) {
   const { upsertWeekAmounts } = useCashflowWeeks();
   const [year, setYear] = useState(() => new Date().getFullYear());
@@ -420,6 +482,7 @@ export function SettlementLedgerPage({
   const [downloadFrom, setDownloadFrom] = useState('');
   const [downloadTo, setDownloadTo] = useState('');
   const [revertConfirmOpen, setRevertConfirmOpen] = useState(false);
+  const restoredDraftCacheKeyRef = useRef('');
   const cloneImportRows = useCallback((input: ImportRow[]) => (
     input.map((row) => ({ ...row, cells: [...row.cells] }))
   ), []);
@@ -430,6 +493,10 @@ export function SettlementLedgerPage({
 
   // All weeks for the year
   const yearWeeks = useMemo(() => getYearMondayWeeks(year), [year]);
+  const draftCacheKey = useMemo(
+    () => `settlement-import-draft:${projectId}:${defaultLedgerId}:${year}`,
+    [projectId, defaultLedgerId, year],
+  );
 
   // Filter transactions for this project + year
   const projectTxs = useMemo(() => {
@@ -441,25 +508,45 @@ export function SettlementLedgerPage({
 
   useEffect(() => {
     if (importDirty) return;
+    if (restoredDraftCacheKeyRef.current !== draftCacheKey) {
+      const cachedRows = readImportDraftCache(draftCacheKey);
+      if (cachedRows && cachedRows.length > 0) {
+        restoredDraftCacheKeyRef.current = draftCacheKey;
+        setImportRows(cachedRows);
+        setImportDirty(true);
+        toast.message('브라우저 임시 저장본을 복원했습니다.');
+        return;
+      }
+    }
     if (sheetRows && sheetRows.length > 0) {
       setImportRows(cloneImportRows(sheetRows));
       return;
     }
     setImportRows(transactionsToImportRows(projectTxs, yearWeeks));
-  }, [projectTxs, yearWeeks, importDirty, sheetRows, cloneImportRows]);
+  }, [projectTxs, yearWeeks, importDirty, sheetRows, cloneImportRows, draftCacheKey]);
+
+  useEffect(() => {
+    if (!importDirty || !importRows || importRows.length === 0) return;
+    const timer = window.setTimeout(() => {
+      writeImportDraftCache(draftCacheKey, importRows);
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [draftCacheKey, importDirty, importRows]);
 
   const revertToSavedSnapshot = useCallback(() => {
     if (sheetSaving) return;
     if (sheetRows && sheetRows.length > 0) {
       setImportRows(cloneImportRows(sheetRows));
       setImportDirty(false);
+      clearImportDraftCache(draftCacheKey);
       toast.message('마지막 저장값으로 되돌렸습니다.');
       return;
     }
     setImportRows(transactionsToImportRows(projectTxs, yearWeeks));
     setImportDirty(false);
+    clearImportDraftCache(draftCacheKey);
     toast.message('저장된 사업비 입력이 없어 기본값으로 되돌렸습니다.');
-  }, [sheetSaving, sheetRows, cloneImportRows, projectTxs, yearWeeks]);
+  }, [sheetSaving, sheetRows, cloneImportRows, projectTxs, yearWeeks, draftCacheKey]);
 
   const handleRevertToSaved = useCallback(() => {
     if (sheetSaving) return;
@@ -739,6 +826,7 @@ export function SettlementLedgerPage({
       );
 
       setImportDirty(false);
+      clearImportDraftCache(draftCacheKey);
       setLastAutoSavedAt(new Date().toISOString());
       if (cashflowFailed) {
         if (!silent) {
@@ -757,13 +845,13 @@ export function SettlementLedgerPage({
     } finally {
       setSheetSaving(false);
     }
-  }, [importRows, onSaveSheetRows, upsertWeekAmounts, projectId, yearWeeks, sheetRows]);
+  }, [draftCacheKey, importRows, onSaveSheetRows, upsertWeekAmounts, projectId, yearWeeks, sheetRows]);
 
   useEffect(() => {
     if (!autoSaveSheet || !importDirty || !importRows || !onSaveSheetRows || sheetSaving) return;
     const timer = window.setTimeout(() => {
       void handleImportSave({ silent: true });
-    }, 900);
+    }, 10_000);
     return () => window.clearTimeout(timer);
   }, [autoSaveSheet, importDirty, importRows, onSaveSheetRows, sheetSaving, handleImportSave]);
 
@@ -814,6 +902,36 @@ export function SettlementLedgerPage({
     },
     [allTransactions, onUpdateTransaction, currentUserName, resolveWeekLabelFromDate],
   );
+
+  const handleProvisionEvidenceDriveById = useCallback(async (txId: string) => {
+    if (!onProvisionEvidenceDrive) return;
+    const tx = allTransactions.find((item) => item.id === txId);
+    if (!tx) {
+      toast.error('먼저 저장된 거래에서 사용하세요.');
+      return;
+    }
+    await onProvisionEvidenceDrive(tx);
+  }, [allTransactions, onProvisionEvidenceDrive]);
+
+  const handleSyncEvidenceDriveById = useCallback(async (txId: string) => {
+    if (!onSyncEvidenceDrive) return;
+    const tx = allTransactions.find((item) => item.id === txId);
+    if (!tx) {
+      toast.error('먼저 저장된 거래에서 사용하세요.');
+      return;
+    }
+    await onSyncEvidenceDrive(tx);
+  }, [allTransactions, onSyncEvidenceDrive]);
+
+  const handleUploadEvidenceDriveById = useCallback(async (txId: string, uploads: EvidenceUploadSelection[]) => {
+    if (!onUploadEvidenceDrive) return;
+    const tx = allTransactions.find((item) => item.id === txId);
+    if (!tx) {
+      toast.error('먼저 저장된 거래에서 사용하세요.');
+      return;
+    }
+    await onUploadEvidenceDrive(tx, uploads);
+  }, [allTransactions, onUploadEvidenceDrive]);
 
   // Row numbering
   let globalRowNum = 0;
@@ -898,6 +1016,11 @@ export function SettlementLedgerPage({
             currentUserId={currentUserId}
             currentUserName={currentUserName}
             onAddComment={onAddComment}
+            onProvisionEvidenceDriveById={handleProvisionEvidenceDriveById}
+            onSyncEvidenceDriveById={handleSyncEvidenceDriveById}
+            onUploadEvidenceDriveById={handleUploadEvidenceDriveById}
+            onEnsureTransactionPersisted={onEnsureTransactionPersisted}
+            sourceTransactions={allTransactions}
           />
         )}
         {revertConfirmDialog}
@@ -1024,6 +1147,8 @@ export function SettlementLedgerPage({
                   txCount={weekTxCount}
                   onToggle={() => toggleWeek(week.label)}
                   onUpdateTx={handleUpdateTx}
+                  onProvisionEvidenceDrive={onProvisionEvidenceDrive}
+                  onSyncEvidenceDrive={onSyncEvidenceDrive}
                   onSubmitWeek={onSubmitWeek}
                   onChangeTransactionState={onChangeTransactionState}
                   userRole={userRole}
@@ -1056,6 +1181,11 @@ export function SettlementLedgerPage({
           currentUserId={currentUserId}
           currentUserName={currentUserName}
           onAddComment={onAddComment}
+          onProvisionEvidenceDriveById={handleProvisionEvidenceDriveById}
+          onSyncEvidenceDriveById={handleSyncEvidenceDriveById}
+          onUploadEvidenceDriveById={handleUploadEvidenceDriveById}
+          onEnsureTransactionPersisted={onEnsureTransactionPersisted}
+          sourceTransactions={allTransactions}
         />
       )}
       {revertConfirmDialog}
@@ -1072,6 +1202,8 @@ interface WeekSectionProps {
   txCount: number;
   onToggle: () => void;
   onUpdateTx: (txId: string, updates: Partial<Transaction>) => void;
+  onProvisionEvidenceDrive?: (tx: Transaction) => void | Promise<void>;
+  onSyncEvidenceDrive?: (tx: Transaction) => void | Promise<void>;
   onSubmitWeek?: (input: {
     weekLabel: string;
     yearMonth: string;
@@ -1082,7 +1214,19 @@ interface WeekSectionProps {
   userRole?: 'pm' | 'admin';
 }
 
-function WeekSection({ week, txRows, collapsed, txCount, onToggle, onUpdateTx, onSubmitWeek, onChangeTransactionState, userRole }: WeekSectionProps) {
+function WeekSection({
+  week,
+  txRows,
+  collapsed,
+  txCount,
+  onToggle,
+  onUpdateTx,
+  onProvisionEvidenceDrive,
+  onSyncEvidenceDrive,
+  onSubmitWeek,
+  onChangeTransactionState,
+  userRole,
+}: WeekSectionProps) {
   const [submitting, setSubmitting] = useState(false);
   const colCount = SETTLEMENT_COLUMNS.length;
   const draftTxIds = txRows.filter(({ tx }) => tx.state === 'DRAFT').map(({ tx }) => tx.id);
@@ -1162,6 +1306,8 @@ function WeekSection({ week, txRows, collapsed, txCount, onToggle, onUpdateTx, o
             rowNum={rowNum}
             weekLabel={week.label}
             onUpdate={(updates) => onUpdateTx(tx.id, updates)}
+            onProvisionEvidenceDrive={onProvisionEvidenceDrive}
+            onSyncEvidenceDrive={onSyncEvidenceDrive}
             onChangeState={onChangeTransactionState}
             userRole={userRole}
           />
@@ -1184,13 +1330,25 @@ interface TransactionRowProps {
   rowNum: number;
   weekLabel: string;
   onUpdate: (updates: Partial<Transaction>) => void;
+  onProvisionEvidenceDrive?: (tx: Transaction) => void | Promise<void>;
+  onSyncEvidenceDrive?: (tx: Transaction) => void | Promise<void>;
   onChangeState?: (txId: string, newState: TransactionState, reason?: string) => void;
   userRole?: 'pm' | 'admin';
 }
 
-function TransactionRow({ tx, rowNum, weekLabel, onUpdate, onChangeState, userRole }: TransactionRowProps) {
+function TransactionRow({
+  tx,
+  rowNum,
+  weekLabel,
+  onUpdate,
+  onProvisionEvidenceDrive,
+  onSyncEvidenceDrive,
+  onChangeState,
+  userRole,
+}: TransactionRowProps) {
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
   const locked = !isEditable(tx.state);
+  const [driveAction, setDriveAction] = useState<'' | 'provision' | 'sync'>('');
 
   const debouncedUpdate = useCallback(
     (updates: Partial<Transaction>) => {
@@ -1206,6 +1364,24 @@ function TransactionRow({ tx, rowNum, weekLabel, onUpdate, onChangeState, userRo
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, []);
+
+  const effectiveCompletedDesc = tx.evidenceCompletedDesc || tx.evidenceAutoListedDesc || '';
+  const suggestedFolderName = tx.evidenceDriveFolderName || buildDriveTransactionFolderName(tx);
+
+  const runDriveAction = useCallback(async (
+    action: 'provision' | 'sync',
+    handler?: (targetTx: Transaction) => void | Promise<void>,
+  ) => {
+    if (!handler || driveAction) return;
+    setDriveAction(action);
+    try {
+      await handler(tx);
+    } catch (error) {
+      console.error(`[SettlementLedger] evidence drive ${action} failed:`, error);
+    } finally {
+      setDriveAction('');
+    }
+  }, [driveAction, tx]);
 
   const textCell = (
     value: string | undefined,
@@ -1358,12 +1534,15 @@ function TransactionRow({ tx, rowNum, weekLabel, onUpdate, onChangeState, userRo
       {/* 사업팀: 실제 구비 완료된 증빙자료 리스트 */}
       <td className="px-1 py-0.5 border-b border-r">
         <input
+          key={`evidence-completed-${tx.id}-${effectiveCompletedDesc}`}
           type="text"
-          defaultValue={tx.evidenceCompletedDesc || ''}
+          defaultValue={effectiveCompletedDesc}
           disabled={locked}
+          placeholder={tx.evidenceAutoListedDesc ? `자동집계: ${tx.evidenceAutoListedDesc}` : ''}
+          title={tx.evidenceAutoListedDesc ? `자동 집계: ${tx.evidenceAutoListedDesc}` : undefined}
           className={`w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[60px] ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
           onBlur={(e) => {
-            if (!locked && e.target.value !== (tx.evidenceCompletedDesc || '')) {
+            if (!locked && e.target.value !== effectiveCompletedDesc) {
               const updatedTx = { ...tx, evidenceCompletedDesc: e.target.value };
               const newStatus = computeEvidenceStatus(updatedTx);
               debouncedUpdate({ evidenceCompletedDesc: e.target.value, evidenceStatus: newStatus });
@@ -1376,11 +1555,43 @@ function TransactionRow({ tx, rowNum, weekLabel, onUpdate, onChangeState, userRo
       {/* 정산지원: 증빙자료 드라이브 */}
       <td className="px-1 py-0.5 border-b border-r">
         <div className="flex items-center gap-1">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-5 px-1.5 text-[9px] shrink-0"
+            disabled={driveAction !== '' || !onProvisionEvidenceDrive}
+            onClick={(e) => {
+              e.stopPropagation();
+              void runDriveAction('provision', onProvisionEvidenceDrive);
+            }}
+            title={`증빙 폴더 생성 · ${suggestedFolderName}`}
+          >
+            {driveAction === 'provision' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}
+            생성
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-5 px-1.5 text-[9px] shrink-0"
+            disabled={driveAction !== '' || !onSyncEvidenceDrive}
+            onClick={(e) => {
+              e.stopPropagation();
+              void runDriveAction('sync', onSyncEvidenceDrive);
+            }}
+            title="Drive 폴더 파일 동기화"
+          >
+            {driveAction === 'sync' ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
+            동기화
+          </Button>
           <input
+            key={`evidence-drive-link-${tx.id}-${tx.evidenceDriveLink || ''}-${tx.evidenceDriveFolderId || ''}`}
             type="text"
             defaultValue={tx.evidenceDriveLink || ''}
             disabled={locked}
-            placeholder="Drive URL"
+            placeholder={`Drive URL · ${suggestedFolderName}`}
+            title={`권장 폴더명: ${suggestedFolderName}`}
             className={`flex-1 bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[60px] ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
             onBlur={(e) => {
               if (!locked && e.target.value !== (tx.evidenceDriveLink || '')) {
@@ -1422,6 +1633,17 @@ function TransactionRow({ tx, rowNum, weekLabel, onUpdate, onChangeState, userRo
 
 // ── Import Editor (editable CSV preview) ──
 
+interface EvidenceUploadDraft {
+  id: string;
+  file: File;
+  objectUrl: string;
+  category: string;
+  parserCategory: string;
+  suggestedFileName: string;
+  reviewedFileName: string;
+  previewType: 'pdf' | 'image' | 'other';
+}
+
 function ImportEditor({
   rows,
   onChange,
@@ -1440,6 +1662,11 @@ function ImportEditor({
   currentUserId = 'pm',
   currentUserName = 'PM',
   onAddComment,
+  onProvisionEvidenceDriveById,
+  onSyncEvidenceDriveById,
+  onUploadEvidenceDriveById,
+  onEnsureTransactionPersisted,
+  sourceTransactions = [],
 }: {
   rows: ImportRow[];
   onChange: (rows: ImportRow[]) => void;
@@ -1458,6 +1685,14 @@ function ImportEditor({
   currentUserId?: string;
   currentUserName?: string;
   onAddComment?: (comment: Comment) => void | Promise<void>;
+  onProvisionEvidenceDriveById?: (txId: string) => void | Promise<void>;
+  onSyncEvidenceDriveById?: (txId: string) => void | Promise<void>;
+  onUploadEvidenceDriveById?: (txId: string, uploads: EvidenceUploadSelection[]) => void | Promise<void>;
+  onEnsureTransactionPersisted?: (input: {
+    transaction: Transaction;
+    sourceTxId?: string;
+  }) => Promise<string | null>;
+  sourceTransactions?: Transaction[];
 }) {
   const errorCount = rows.filter((r) => r.error).length;
   const validCount = rows.length - errorCount;
@@ -1592,6 +1827,73 @@ function ImportEditor({
     }),
   );
   const [activeCommentAnchor, setActiveCommentAnchor] = useState<ActiveCommentAnchor | null>(null);
+  const evidenceFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [uploadTargetTxId, setUploadTargetTxId] = useState<string | null>(null);
+  const [uploadDrafts, setUploadDrafts] = useState<EvidenceUploadDraft[]>([]);
+  const [activeUploadDraftId, setActiveUploadDraftId] = useState('');
+  const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
+  const [uploadingEvidence, setUploadingEvidence] = useState(false);
+  const selectionBounds = useMemo(() => {
+    if (!selection) return null;
+    return {
+      r1: Math.min(selection.start.r, selection.end.r),
+      r2: Math.max(selection.start.r, selection.end.r),
+      c1: Math.min(selection.start.c, selection.end.c),
+      c2: Math.max(selection.start.c, selection.end.c),
+    };
+  }, [selection]);
+  const sourceTransactionMap = useMemo(
+    () => new Map(sourceTransactions.map((transaction) => [transaction.id, transaction])),
+    [sourceTransactions],
+  );
+
+  const ensurePersistedTransactionByRow = useCallback(async (rowIdx: number): Promise<string | null> => {
+    const row = rows[rowIdx];
+    if (!row) return null;
+    if (row.sourceTxId && sourceTransactionMap.has(row.sourceTxId)) {
+      return row.sourceTxId;
+    }
+    if (!onEnsureTransactionPersisted) {
+      toast.error('먼저 실제 거래로 저장한 후 사용하세요.');
+      return null;
+    }
+    const parsed = importRowToTransaction(
+      { ...row, sourceTxId: undefined },
+      projectId,
+      defaultLedgerId,
+      rowIdx,
+    );
+    if (parsed.error || !parsed.transaction) {
+      toast.error(parsed.error || '거래 정보를 먼저 입력하세요.');
+      return null;
+    }
+    if (!parsed.transaction.dateTime || !parsed.transaction.counterparty.trim()) {
+      toast.error('거래일시와 지급처를 입력한 후 다시 시도하세요.');
+      return null;
+    }
+    const persistedTxId = await onEnsureTransactionPersisted({
+      transaction: {
+        ...parsed.transaction,
+        weekCode: weekIdx >= 0 ? String(row.cells[weekIdx] || '').trim() : parsed.transaction.weekCode,
+      },
+      sourceTxId: row.sourceTxId,
+    });
+    if (!persistedTxId) return null;
+    if (row.sourceTxId !== persistedTxId) {
+      onChange(rows.map((candidate, index) => (
+        index === rowIdx ? { ...candidate, sourceTxId: persistedTxId } : candidate
+      )));
+    }
+    return persistedTxId;
+  }, [
+    defaultLedgerId,
+    onChange,
+    onEnsureTransactionPersisted,
+    projectId,
+    rows,
+    sourceTransactionMap,
+    weekIdx,
+  ]);
 
   const commentCountByCell = useMemo(() => {
     const buckets = new Map<string, number>();
@@ -1616,6 +1918,70 @@ function ImportEditor({
   const openCellComments = useCallback((anchor: ActiveCommentAnchor) => {
     setActiveCommentAnchor(anchor);
   }, []);
+
+  const clearUploadDrafts = useCallback(() => {
+    setUploadDrafts((current) => {
+      current.forEach((draft) => {
+        try {
+          URL.revokeObjectURL(draft.objectUrl);
+        } catch {
+          // ignore cleanup failures for browser object URLs
+        }
+      });
+      return [];
+    });
+    setActiveUploadDraftId('');
+    setUploadTargetTxId(null);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      uploadDrafts.forEach((draft) => {
+        try {
+          URL.revokeObjectURL(draft.objectUrl);
+        } catch {
+          // ignore cleanup failures for browser object URLs
+        }
+      });
+    };
+  }, [uploadDrafts]);
+
+  const openEvidenceUploadPicker = useCallback((txId: string) => {
+    setUploadTargetTxId(txId);
+    if (evidenceFileInputRef.current) {
+      evidenceFileInputRef.current.value = '';
+      evidenceFileInputRef.current.click();
+    }
+  }, []);
+
+  const activeUploadDraft = useMemo(
+    () => uploadDrafts.find((draft) => draft.id === activeUploadDraftId) || uploadDrafts[0] || null,
+    [uploadDrafts, activeUploadDraftId],
+  );
+
+  const confirmEvidenceUpload = useCallback(async () => {
+    if (!uploadTargetTxId || !onUploadEvidenceDriveById || uploadDrafts.length === 0) return;
+    setUploadingEvidence(true);
+    try {
+      await onUploadEvidenceDriveById(
+        uploadTargetTxId,
+        uploadDrafts.map((draft) => ({
+          file: draft.file,
+          category: draft.category,
+          parserCategory: draft.parserCategory,
+          reviewedFileName: draft.reviewedFileName.trim() || draft.suggestedFileName,
+        })),
+      );
+      toast.success(`${uploadDrafts.length}건 업로드 완료`);
+      setUploadDialogOpen(false);
+      clearUploadDrafts();
+    } catch (error) {
+      console.error('[ImportEditor] evidence upload failed:', error);
+      toast.error('증빙 업로드에 실패했습니다.');
+    } finally {
+      setUploadingEvidence(false);
+    }
+  }, [clearUploadDrafts, onUploadEvidenceDriveById, uploadDrafts, uploadTargetTxId]);
 
   const recomputeBalances = useCallback(
     (input: ImportRow[]) => {
@@ -1777,6 +2143,7 @@ function ImportEditor({
     if (anchor.colIdx === noIdx) return fallback;
     return anchor.colIdx;
   }, [getSelectionAnchor, noIdx]);
+  const selectedRowIdx = getSelectionAnchor()?.rowIdx ?? -1;
 
   const commitRows = useCallback((nextRows: ImportRow[], focusTarget?: { rowIdx: number; colIdx: number } | null) => {
     if (focusTarget) pendingFocusCell.current = focusTarget;
@@ -1953,7 +2320,15 @@ function ImportEditor({
 
   const handleCellFocus = useCallback((rowIdx: number, colIdx: number) => {
     lastFocusedCell.current = { rowIdx, colIdx };
-    setSelection({ start: { r: rowIdx, c: colIdx }, end: { r: rowIdx, c: colIdx } });
+    setSelection((prev) => (
+      prev
+      && prev.start.r === rowIdx
+      && prev.start.c === colIdx
+      && prev.end.r === rowIdx
+      && prev.end.c === colIdx
+        ? prev
+        : { start: { r: rowIdx, c: colIdx }, end: { r: rowIdx, c: colIdx } }
+    ));
   }, []);
 
   const handleTablePaste = useCallback((e: ClipboardEvent<HTMLDivElement>) => {
@@ -2117,7 +2492,15 @@ function ImportEditor({
     document.body.style.userSelect = 'none';
     tableWrapRef.current?.focus();
     setOpenSelect(null);
-    setSelection({ start: { r: rowIdx, c: colIdx }, end: { r: rowIdx, c: colIdx } });
+    setSelection((prev) => (
+      prev
+      && prev.start.r === rowIdx
+      && prev.start.c === colIdx
+      && prev.end.r === rowIdx
+      && prev.end.c === colIdx
+        ? prev
+        : { start: { r: rowIdx, c: colIdx }, end: { r: rowIdx, c: colIdx } }
+    ));
   }, [noIdx]);
 
   const handleCellMouseEnter = useCallback((rowIdx: number, colIdx: number) => {
@@ -2128,16 +2511,6 @@ function ImportEditor({
       return { ...prev, end: { r: rowIdx, c: colIdx } };
     });
   }, [noIdx]);
-
-  const isCellSelected = useCallback((rowIdx: number, colIdx: number) => {
-    if (!selection) return false;
-    if (colIdx === noIdx) return false;
-    const r1 = Math.min(selection.start.r, selection.end.r);
-    const r2 = Math.max(selection.start.r, selection.end.r);
-    const c1 = Math.min(selection.start.c, selection.end.c);
-    const c2 = Math.max(selection.start.c, selection.end.c);
-    return rowIdx >= r1 && rowIdx <= r2 && colIdx >= c1 && colIdx <= c2;
-  }, [selection, noIdx]);
 
   useEffect(() => {
     const onUp = () => {
@@ -2278,6 +2651,19 @@ function ImportEditor({
           <Button
             variant="outline"
             size="sm"
+            className="h-7 text-[11px] gap-1 cursor-pointer shadow-sm hover:bg-muted/40"
+            onClick={() => {
+              if (selectedRowIdx < 0) return;
+              removeRow(selectedRowIdx);
+            }}
+            disabled={selectedRowIdx < 0 || rows.length === 0}
+          >
+            <X className="h-3.5 w-3.5" />
+            선택 행 삭제
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             className="h-7 text-[11px] cursor-pointer shadow-sm hover:bg-muted/40"
             onClick={onCancel}
           >
@@ -2376,7 +2762,7 @@ function ImportEditor({
           </thead>
           <tbody>
             {rows.map((row, rowIdx) => (
-              <ImportEditorRow
+              <MemoizedImportEditorRow
                 key={`${row.tempId}-${rowIdx}`}
                 row={row}
                 rowIdx={rowIdx}
@@ -2388,7 +2774,7 @@ function ImportEditor({
                 onCellFocus={handleCellFocus}
                 onCellMouseDown={handleCellMouseDown}
                 onCellMouseEnter={handleCellMouseEnter}
-                isCellSelected={isCellSelected}
+                selectionBounds={selectionBounds}
                 openSelect={openSelect}
                 onOpenSelect={(rowIdx, colIdx) => setOpenSelect({ rowIdx, colIdx })}
                 onCloseSelect={() => setOpenSelect(null)}
@@ -2406,6 +2792,11 @@ function ImportEditor({
                 evidenceRequiredMap={evidenceRequiredMap}
                 commentCountByCell={commentCountByCell}
                 onOpenCellComments={openCellComments}
+                onProvisionEvidenceDriveById={onProvisionEvidenceDriveById}
+                onSyncEvidenceDriveById={onSyncEvidenceDriveById}
+                onOpenEvidenceUpload={openEvidenceUploadPicker}
+                persistedTransactionId={row.sourceTxId && sourceTransactionMap.has(row.sourceTxId) ? row.sourceTxId : ''}
+                onEnsurePersistedTransaction={() => ensurePersistedTransactionByRow(rowIdx)}
                 noIdx={noIdx}
                 colWidths={colWidths}
               />
@@ -2423,6 +2814,229 @@ function ImportEditor({
           </tbody>
         </table>
       </div>
+      <input
+        ref={evidenceFileInputRef}
+        type="file"
+        accept=".pdf,.png,.jpg,.jpeg,.webp,.xlsx,.xls,.csv,.doc,.docx,.txt,.eml,.msg"
+        multiple
+        className="hidden"
+        onChange={(event) => {
+          const files = Array.from(event.target.files || []);
+          if (!files.length || !uploadTargetTxId) return;
+          const batchId = Date.now();
+          const sourceTransaction = sourceTransactionMap.get(uploadTargetTxId);
+          setUploadDrafts((current) => {
+            current.forEach((draft) => {
+              try {
+                URL.revokeObjectURL(draft.objectUrl);
+              } catch {
+                // ignore cleanup failures for browser object URLs
+              }
+            });
+            return files.map((file, index) => {
+              const parserCategory = inferEvidenceCategoryFromFileName(file.name);
+              const suggestedFileName = suggestEvidenceUploadFileName({
+                originalFileName: file.name,
+                category: parserCategory,
+                transaction: sourceTransaction,
+              });
+              return {
+                id: `${batchId}-${index}-${file.name}`,
+                file,
+                objectUrl: URL.createObjectURL(file),
+                category: parserCategory,
+                parserCategory,
+                suggestedFileName,
+                reviewedFileName: suggestedFileName,
+                previewType: file.type === 'application/pdf'
+                  ? 'pdf'
+                  : (file.type.startsWith('image/') ? 'image' : 'other'),
+              };
+            });
+          });
+          setActiveUploadDraftId(`${batchId}-0-${files[0].name}`);
+          setUploadDialogOpen(true);
+        }}
+      />
+      <Dialog
+        open={uploadDialogOpen}
+        onOpenChange={(open) => {
+          setUploadDialogOpen(open);
+          if (!open && !uploadingEvidence) {
+            clearUploadDrafts();
+          }
+        }}
+      >
+        <DialogContent className="h-[92vh] w-[96vw] max-w-[96vw] gap-0 overflow-hidden p-0 sm:max-w-[96vw]">
+          <DialogHeader className="border-b px-6 py-4">
+            <DialogTitle>증빙 업로드 검토</DialogTitle>
+            <DialogDescription>
+              좌측에서 파일을 확인하고, 우측에서 자동 분류 결과를 수정한 뒤 업로드하세요.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex-1 overflow-hidden px-6 py-4">
+            <div className="grid h-full gap-4 lg:grid-cols-[minmax(0,1.4fr)_380px]">
+            <div className="min-h-0 rounded-xl border bg-slate-50/60 p-3">
+              {activeUploadDraft ? (
+                <div className="flex h-full min-h-0 flex-col gap-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-[12px] font-semibold">{activeUploadDraft.file.name}</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {(activeUploadDraft.file.size / 1024).toFixed(1)} KB · {activeUploadDraft.file.type || 'application/octet-stream'}
+                      </p>
+                    </div>
+                    <span className="rounded-full border bg-background px-2 py-1 text-[10px] text-muted-foreground">
+                      파일명 자동분류
+                    </span>
+                  </div>
+                  <div className="rounded-lg border bg-background px-3 py-2 text-[11px]">
+                    <p className="text-[10px] font-semibold text-muted-foreground">원본 파일명</p>
+                    <p className="mt-1 break-all">{activeUploadDraft.file.name}</p>
+                  </div>
+                  <div className="flex-1 overflow-hidden rounded-lg border bg-background">
+                    {activeUploadDraft.previewType === 'pdf' ? (
+                      <iframe
+                        title={activeUploadDraft.file.name}
+                        src={activeUploadDraft.objectUrl}
+                        className="h-full min-h-[420px] w-full"
+                      />
+                    ) : activeUploadDraft.previewType === 'image' ? (
+                      <img
+                        src={activeUploadDraft.objectUrl}
+                        alt={activeUploadDraft.file.name}
+                        className="h-full min-h-[420px] w-full object-contain"
+                      />
+                    ) : (
+                      <div className="flex h-full min-h-[420px] items-center justify-center px-6 text-center text-[12px] text-muted-foreground">
+                        브라우저 미리보기를 지원하지 않는 형식입니다. 업로드 후 Drive 링크에서 원본을 확인하세요.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="flex h-full min-h-[420px] items-center justify-center text-[12px] text-muted-foreground">
+                  업로드할 파일을 선택하세요.
+                </div>
+              )}
+            </div>
+            <div className="flex min-h-0 flex-col gap-3">
+              <div className="rounded-xl border bg-background p-3">
+                <p className="text-[12px] font-semibold">파싱 결과</p>
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  파일명과 운영 규칙으로 자동 분류했습니다. 사람이 최종 확인해 주세요.
+                </p>
+              </div>
+              <div className="min-h-0 flex-1 space-y-2 overflow-auto pr-1">
+                {uploadDrafts.map((draft) => (
+                  <div
+                    key={draft.id}
+                    role="button"
+                    tabIndex={0}
+                    className={`w-full rounded-xl border p-3 text-left transition-colors ${
+                      activeUploadDraft?.id === draft.id
+                        ? 'border-teal-400 bg-teal-50/70'
+                        : 'border-border bg-background hover:bg-muted/40'
+                    }`}
+                    onClick={() => setActiveUploadDraftId(draft.id)}
+                    onKeyDown={(event) => {
+                      if (event.target !== event.currentTarget) return;
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        setActiveUploadDraftId(draft.id);
+                      }
+                    }}
+                  >
+                    <p className="truncate text-[12px] font-medium">{draft.file.name}</p>
+                    <p className="mt-1 text-[10px] text-muted-foreground">
+                      자동분류: {draft.parserCategory}
+                    </p>
+                    <div className="mt-2 space-y-1.5">
+                      <div>
+                        <label className="mb-1 block text-[10px] text-muted-foreground">권장 파일명</label>
+                        <div className="rounded-md border bg-muted/30 px-2 py-1.5 text-[10px] break-all">
+                          {draft.suggestedFileName}
+                        </div>
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-[10px] text-muted-foreground">최종 업로드 파일명</label>
+                        <input
+                          type="text"
+                          value={draft.reviewedFileName}
+                          className="h-8 w-full rounded-md border bg-background px-2 text-[11px]"
+                          onClick={(event) => event.stopPropagation()}
+                          onChange={(event) => {
+                            const nextFileName = event.target.value;
+                            setUploadDrafts((current) => current.map((item) => (
+                              item.id === draft.id
+                                ? { ...item, reviewedFileName: nextFileName }
+                                : item
+                            )));
+                          }}
+                        />
+                        <div className="mt-1 flex justify-end">
+                          <button
+                            type="button"
+                            className="text-[10px] text-teal-700 underline underline-offset-2"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setUploadDrafts((current) => current.map((item) => (
+                                item.id === draft.id
+                                  ? { ...item, reviewedFileName: item.suggestedFileName }
+                                  : item
+                              )));
+                            }}
+                          >
+                            권장안 다시 적용
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="mt-2">
+                      <label className="mb-1 block text-[10px] text-muted-foreground">문서 종류</label>
+                      <select
+                        value={draft.category}
+                        className="h-8 w-full rounded-md border bg-background px-2 text-[11px]"
+                        onClick={(event) => event.stopPropagation()}
+                        onChange={(event) => {
+                          const nextCategory = event.target.value;
+                          setUploadDrafts((current) => current.map((item) => (
+                            item.id === draft.id
+                              ? { ...item, category: nextCategory }
+                              : item
+                          )));
+                        }}
+                      >
+                        {EVIDENCE_DOCUMENT_CATEGORIES.map((category) => (
+                          <option key={category} value={category}>
+                            {category}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+          </div>
+          <DialogFooter className="border-t px-6 py-4">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setUploadDialogOpen(false);
+                clearUploadDrafts();
+              }}
+              disabled={uploadingEvidence}
+            >
+              취소
+            </Button>
+            <Button onClick={() => void confirmEvidenceUpload()} disabled={uploadingEvidence || uploadDrafts.length === 0}>
+              {uploadingEvidence ? '업로드 중...' : `선택한 ${uploadDrafts.length}건 업로드`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       {mappingOpen && (
         <div className="fixed inset-0 z-[80] bg-black/40 flex items-center justify-center p-4 pointer-events-auto">
           <div className="w-full max-w-3xl bg-background rounded-lg border shadow-lg flex flex-col max-h-[80vh] pointer-events-auto">
@@ -2498,7 +3112,7 @@ function ImportEditorRow({
   onCellFocus,
   onCellMouseDown,
   onCellMouseEnter,
-  isCellSelected,
+  selectionBounds,
   openSelect,
   onOpenSelect,
   onCloseSelect,
@@ -2516,6 +3130,11 @@ function ImportEditorRow({
   evidenceRequiredMap,
   commentCountByCell,
   onOpenCellComments,
+  onProvisionEvidenceDriveById,
+  onSyncEvidenceDriveById,
+  onOpenEvidenceUpload,
+  persistedTransactionId,
+  onEnsurePersistedTransaction,
   noIdx,
   colWidths,
 }: {
@@ -2529,7 +3148,7 @@ function ImportEditorRow({
   onCellFocus: (rowIdx: number, colIdx: number) => void;
   onCellMouseDown: (rowIdx: number, colIdx: number) => void;
   onCellMouseEnter: (rowIdx: number, colIdx: number) => void;
-  isCellSelected: (rowIdx: number, colIdx: number) => boolean;
+  selectionBounds: { r1: number; r2: number; c1: number; c2: number } | null;
   openSelect: { rowIdx: number; colIdx: number } | null;
   onOpenSelect: (rowIdx: number, colIdx: number) => void;
   onCloseSelect: () => void;
@@ -2547,6 +3166,11 @@ function ImportEditorRow({
   evidenceRequiredMap?: Record<string, string>;
   commentCountByCell: Map<string, number>;
   onOpenCellComments: (anchor: ActiveCommentAnchor) => void;
+  onProvisionEvidenceDriveById?: (txId: string) => void | Promise<void>;
+  onSyncEvidenceDriveById?: (txId: string) => void | Promise<void>;
+  onOpenEvidenceUpload?: (txId: string) => void;
+  persistedTransactionId?: string;
+  onEnsurePersistedTransaction?: () => Promise<string | null>;
   noIdx: number;
   colWidths: number[];
 }) {
@@ -2573,6 +3197,16 @@ function ImportEditorRow({
   }, [budgetCode, budgetCodeBook]);
   const rowLabel = `${rowIdx + 1}행`;
   const commentTransactionId = row.sourceTxId || buildSheetRowCommentId(row.tempId);
+  const [driveAction, setDriveAction] = useState<'' | 'provision' | 'sync'>('');
+  const hasSourceTransaction = Boolean(persistedTransactionId);
+  const canUseDrive = hasSourceTransaction || !!onEnsurePersistedTransaction;
+  const isCellSelected = useCallback((colIdx: number) => {
+    if (!selectionBounds || colIdx === noIdx) return false;
+    return rowIdx >= selectionBounds.r1
+      && rowIdx <= selectionBounds.r2
+      && colIdx >= selectionBounds.c1
+      && colIdx <= selectionBounds.c2;
+  }, [selectionBounds, rowIdx, noIdx]);
   const formatNumberInput = useCallback((value: string) => {
     if (!value) return '';
     const num = parseNumber(value);
@@ -2606,6 +3240,21 @@ function ImportEditorRow({
     e.preventDefault();
     onPasteRange(rowIdx, colIdx, text);
   }, [onPasteRange, rowIdx]);
+
+  const runDriveAction = useCallback(async (
+    action: 'provision' | 'sync',
+    handler?: (txId: string) => void | Promise<void>,
+  ) => {
+    if (!handler) return;
+    const txId = persistedTransactionId || await onEnsurePersistedTransaction?.();
+    if (!txId) return;
+    setDriveAction(action);
+    try {
+      await handler(txId);
+    } finally {
+      setDriveAction('');
+    }
+  }, [onEnsurePersistedTransaction, persistedTransactionId]);
 
   const SelectCell = ({
     value,
@@ -2782,7 +3431,7 @@ function ImportEditorRow({
         return (
           <td
             key={colIdx}
-            className={`px-0.5 py-0.5 border-b border-r focus-within:bg-teal-50/20 focus-within:shadow-[inset_0_0_0_2px_rgba(20,184,166,0.8)] ${isCellSelected(rowIdx, colIdx)
+            className={`px-0.5 py-0.5 border-b border-r focus-within:bg-teal-50/20 focus-within:shadow-[inset_0_0_0_2px_rgba(20,184,166,0.8)] ${isCellSelected(colIdx)
               ? 'bg-teal-50/40 dark:bg-teal-900/20 shadow-[inset_0_0_0_2px_rgba(20,184,166,0.7)]'
               : ''
             }`}
@@ -2948,6 +3597,67 @@ function ImportEditorRow({
                     }}
                   />
                 </div>
+              ) : isDriveLink ? (
+                <div className="space-y-1.5 pr-10">
+                  <div className="flex flex-wrap items-center gap-1">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-5 px-1.5 text-[9px]"
+                      disabled={driveAction !== '' || !canUseDrive || !onProvisionEvidenceDriveById}
+                      title={hasSourceTransaction ? '거래별 증빙 폴더 생성' : '필요한 값을 확인한 뒤 실제 거래로 저장하고 계속합니다'}
+                      onClick={() => {
+                        void runDriveAction('provision', onProvisionEvidenceDriveById);
+                      }}
+                    >
+                      {driveAction === 'provision' ? '생성중' : '생성'}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-5 px-1.5 text-[9px]"
+                      disabled={!canUseDrive || !onOpenEvidenceUpload}
+                      title={hasSourceTransaction ? '파일 업로드 및 분류 검토' : '필요한 값을 확인한 뒤 실제 거래로 저장하고 계속합니다'}
+                      onClick={() => {
+                        if (!onOpenEvidenceUpload) return;
+                        void (async () => {
+                          const txId = persistedTransactionId || await onEnsurePersistedTransaction?.();
+                          if (!txId) return;
+                          onOpenEvidenceUpload(txId);
+                        })();
+                      }}
+                    >
+                      <Upload className="mr-1 h-2.5 w-2.5" />
+                      업로드
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-5 px-1.5 text-[9px]"
+                      disabled={driveAction !== '' || !canUseDrive || !onSyncEvidenceDriveById}
+                      title={hasSourceTransaction ? 'Drive 파일목록 동기화' : '필요한 값을 확인한 뒤 실제 거래로 저장하고 계속합니다'}
+                      onClick={() => {
+                        void runDriveAction('sync', onSyncEvidenceDriveById);
+                      }}
+                    >
+                      {driveAction === 'sync' ? '동기화중' : '동기화'}
+                    </Button>
+                  </div>
+                  <input
+                    type="text"
+                    value={row.cells[colIdx] || ''}
+                    className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5"
+                    data-cell-row={rowIdx}
+                    data-cell-col={colIdx}
+                    onFocus={() => onCellFocus(rowIdx, colIdx)}
+                    onPaste={(e) => handlePaste(colIdx, e)}
+                    onChange={(e) => onCellChange(colIdx, e.target.value)}
+                    placeholder={hasSourceTransaction ? '생성 후 Drive 폴더 링크가 표시됩니다.' : '행 저장 후 Drive 사용 가능'}
+                  />
+                </div>
               ) : (
                 <input
                   type="text"
@@ -2989,3 +3699,42 @@ function ImportEditorRow({
     </tr>
   );
 }
+
+function selectionKeyForRow(
+  rowIdx: number,
+  selectionBounds: { r1: number; r2: number; c1: number; c2: number } | null,
+): string {
+  if (!selectionBounds || rowIdx < selectionBounds.r1 || rowIdx > selectionBounds.r2) {
+    return '';
+  }
+  return `${selectionBounds.c1}:${selectionBounds.c2}`;
+}
+
+function openSelectKeyForRow(
+  rowIdx: number,
+  openSelect: { rowIdx: number; colIdx: number } | null,
+): string {
+  return openSelect?.rowIdx === rowIdx ? String(openSelect.colIdx) : '';
+}
+
+const MemoizedImportEditorRow = memo(ImportEditorRow, (prev, next) => {
+  return prev.row === next.row
+    && prev.rowIdx === next.rowIdx
+    && prev.authorListId === next.authorListId
+    && prev.authorOptions === next.authorOptions
+    && prev.budgetCodeBook === next.budgetCodeBook
+    && prev.budgetCodeIdx === next.budgetCodeIdx
+    && prev.subCodeIdx === next.subCodeIdx
+    && prev.evidenceIdx === next.evidenceIdx
+    && prev.weekIdx === next.weekIdx
+    && prev.cashflowIdx === next.cashflowIdx
+    && prev.weekOptions === next.weekOptions
+    && prev.cashflowOptions === next.cashflowOptions
+    && prev.evidenceRequiredMap === next.evidenceRequiredMap
+    && prev.commentCountByCell === next.commentCountByCell
+    && prev.persistedTransactionId === next.persistedTransactionId
+    && prev.noIdx === next.noIdx
+    && prev.colWidths === next.colWidths
+    && selectionKeyForRow(prev.rowIdx, prev.selectionBounds) === selectionKeyForRow(next.rowIdx, next.selectionBounds)
+    && openSelectKeyForRow(prev.rowIdx, prev.openSelect) === openSelectKeyForRow(next.rowIdx, next.openSelect);
+});

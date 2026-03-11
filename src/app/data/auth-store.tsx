@@ -124,6 +124,12 @@ function saveUser(user: AuthUser | null) {
   }
 }
 
+function omitUndefinedFields<T extends Record<string, unknown>>(input: T): T {
+  return Object.fromEntries(
+    Object.entries(input).filter(([, value]) => value !== undefined),
+  ) as T;
+}
+
 function getCachedMemberFallback(firebaseUser: FirebaseUser): Partial<MemberDoc> | undefined {
   const saved = loadSavedUser();
   if (!saved || saved.uid !== firebaseUser.uid) return undefined;
@@ -223,7 +229,7 @@ async function upsertMemberFromFirebase(
   ]);
   const primaryProjectId = resolvePrimaryProjectId(mergedProjectIds, existing?.projectId) || '';
 
-  const merged: MemberDoc = {
+  const merged = omitUndefinedFields<MemberDoc>({
     uid: firebaseUser.uid,
     name: firebaseUser.displayName || existing?.name || '사용자',
     email: normalizedEmail,
@@ -242,7 +248,11 @@ async function upsertMemberFromFirebase(
     createdAt: existing?.createdAt || now,
     updatedAt: now,
     lastLoginAt: now,
-  };
+    projectNames: existing?.projectNames,
+    portalProfile: existing?.portalProfile,
+    defaultWorkspace: existing?.defaultWorkspace,
+    lastWorkspace: existing?.lastWorkspace,
+  });
   if (department) merged.department = department;
 
   await setDoc(memberRef, merged, { merge: true });

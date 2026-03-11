@@ -167,6 +167,23 @@ function withTenantScope<T extends Record<string, unknown>>(orgId: string, paylo
   };
 }
 
+function stripUndefinedDeep<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => stripUndefinedDeep(entry))
+      .filter((entry) => entry !== undefined) as T;
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).flatMap(([key, entry]) => {
+        const cleaned = stripUndefinedDeep(entry);
+        return cleaned === undefined ? [] : [[key, cleaned]];
+      }),
+    ) as T;
+  }
+  return value;
+}
+
 function createExpenseSheetId(): string {
   return `sheet-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -1351,7 +1368,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     if (!db) return;
     await setDoc(
       doc(db, getOrgDocumentPath(orgId, 'transactions', txData.id)),
-      withTenantScope(orgId, txData),
+      stripUndefinedDeep(withTenantScope(orgId, txData)),
       { merge: true },
     );
   }, [db, orgId]);

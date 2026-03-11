@@ -43,17 +43,31 @@ import { addMonthsToYearMonth, getSeoulTodayIso } from '../../platform/business-
 // 하나의 사업만 볼 수 있는 간소화된 UI
 // ═══════════════════════════════════════════════════════════════
 
-const NAV_ITEMS = [
-  { to: '/portal', icon: LayoutDashboard, label: '내 사업 현황', exact: true },
-  { to: '/portal/submissions', icon: ClipboardList, label: '내 제출 현황' },
-  { to: '/portal/payroll', icon: CircleDollarSign, label: '인건비/공지', accent: true, hidden: true },
-  { to: '/portal/budget', icon: Calculator, label: '예산 편집' },
-  { to: '/portal/bank-statements', icon: FileSpreadsheet, label: '통장내역' },
-  { to: '/portal/weekly-expenses', icon: FileSpreadsheet, label: '사업비 입력(주간)' },
-  { to: '/portal/cashflow', icon: BarChart3, label: '캐시플로(주간)' },
-  // removed: board, personnel, change-requests, training, career-profile, guide-chat
-  { to: '/portal/project-settings', icon: Settings2, label: '사업 배정 수정', exact: true },
-  { to: '/portal/register-project', icon: Plus, label: '사업 등록 제안', accent: true },
+const NAV_SECTIONS = [
+  {
+    title: '마이메뉴',
+    items: [
+      { to: '/portal', icon: LayoutDashboard, label: '내 사업 현황', exact: true },
+      { to: '/portal/submissions', icon: ClipboardList, label: '내 제출 현황' },
+      { to: '/portal/payroll', icon: CircleDollarSign, label: '인건비/공지', accent: true, hidden: true },
+    ],
+  },
+  {
+    title: '사업비관리',
+    items: [
+      { to: '/portal/budget', icon: Calculator, label: '예산 편집' },
+      { to: '/portal/bank-statements', icon: FileSpreadsheet, label: '통장내역' },
+      { to: '/portal/weekly-expenses', icon: FileSpreadsheet, label: '사업비 입력(주간)' },
+      { to: '/portal/cashflow', icon: BarChart3, label: '캐시플로(주간)' },
+    ],
+  },
+  {
+    title: '사업 배정 및 등록',
+    items: [
+      { to: '/portal/project-settings', icon: Settings2, label: '사업 배정 수정', exact: true },
+      { to: '/portal/register-project', icon: Plus, label: '사업 등록 제안', accent: true },
+    ],
+  },
 ];
 
 function PortalContent() {
@@ -350,34 +364,47 @@ function PortalContent() {
 
           {/* Navigation */}
           <nav className="flex-1 py-1 overflow-y-auto">
-            <div className="space-y-px px-2">
-              {NAV_ITEMS.filter((item) => !item.hidden).map(item => {
-                const active = isActive(item.to, item.exact);
-                const badge = getBadge(item.to);
+            <div className="space-y-3 px-2">
+              {NAV_SECTIONS.map((section) => {
+                const visibleItems = section.items.filter((item) => !item.hidden);
+                if (visibleItems.length === 0) return null;
                 return (
-                  <NavLink
-                    key={item.to}
-                    to={item.to}
-                    end={item.exact}
-                    className={`
-                      group relative flex items-center gap-2 rounded-md text-[12px] px-2.5 py-[7px] transition-all duration-100
-                      ${active
-                        ? 'bg-teal-500/18 text-white backdrop-blur-sm'
-                        : 'text-slate-400 hover:text-slate-200 hover:bg-white/8'
-                      }
-                    `}
-                  >
-                    {active && (
-                      <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-3.5 rounded-r bg-teal-400" />
-                    )}
-                    <item.icon className={`w-[15px] h-[15px] shrink-0 ${active ? 'text-teal-400' : 'text-slate-600 group-hover:text-slate-400'}`} />
-                    <span style={{ fontWeight: active ? 500 : 400 }}>{item.label}</span>
-                    {badge !== null && (
-                      <span className="ml-auto flex items-center justify-center min-w-[16px] h-[16px] rounded-full bg-teal-500/90 text-[9px] text-white px-1" style={{ fontWeight: 700 }}>
-                        {badge}
-                      </span>
-                    )}
-                  </NavLink>
+                  <div key={section.title} className="space-y-1">
+                    <p className="px-2.5 text-[10px] text-slate-500 tracking-wide" style={{ fontWeight: 700 }}>
+                      {section.title}
+                    </p>
+                    <div className="space-y-px">
+                      {visibleItems.map((item) => {
+                        const active = isActive(item.to, item.exact);
+                        const badge = getBadge(item.to);
+                        return (
+                          <NavLink
+                            key={item.to}
+                            to={item.to}
+                            end={item.exact}
+                            className={`
+                              group relative flex items-center gap-2 rounded-md text-[12px] px-2.5 py-[7px] transition-all duration-100
+                              ${active
+                                ? 'bg-teal-500/18 text-white backdrop-blur-sm'
+                                : 'text-slate-400 hover:text-slate-200 hover:bg-white/8'
+                              }
+                            `}
+                          >
+                            {active && (
+                              <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-3.5 rounded-r bg-teal-400" />
+                            )}
+                            <item.icon className={`w-[15px] h-[15px] shrink-0 ${active ? 'text-teal-400' : 'text-slate-600 group-hover:text-slate-400'}`} />
+                            <span style={{ fontWeight: active ? 500 : 400 }}>{item.label}</span>
+                            {badge !== null && (
+                              <span className="ml-auto flex items-center justify-center min-w-[16px] h-[16px] rounded-full bg-teal-500/90 text-[9px] text-white px-1" style={{ fontWeight: 700 }}>
+                                {badge}
+                              </span>
+                            )}
+                          </NavLink>
+                        );
+                      })}
+                    </div>
+                  </div>
                 );
               })}
             </div>

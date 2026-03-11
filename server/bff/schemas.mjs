@@ -45,7 +45,28 @@ export const evidenceCreateSchema = z.object({
   fileSize: z.number().int().nonnegative(),
   category: NON_EMPTY_STRING,
   status: z.enum(['PENDING', 'ACCEPTED', 'REJECTED']).optional(),
+  source: z.enum(['MANUAL', 'PLATFORM_UPLOAD', 'DRIVE_SYNC']).optional(),
+  driveFileId: NON_EMPTY_STRING.optional(),
+  driveFolderId: NON_EMPTY_STRING.optional(),
+  driveFolderName: NON_EMPTY_STRING.optional(),
+  webViewLink: NON_EMPTY_STRING.optional(),
+  mimeType: NON_EMPTY_STRING.optional(),
+  parserCategory: NON_EMPTY_STRING.optional(),
+  parserConfidence: z.number().min(0).max(1).optional(),
   expectedVersion: z.number().int().nonnegative().optional(),
+}).strict();
+
+export const projectDriveRootLinkSchema = z.object({
+  value: NON_EMPTY_STRING,
+}).strict();
+
+export const evidenceDriveUploadSchema = z.object({
+  fileName: NON_EMPTY_STRING,
+  originalFileName: NON_EMPTY_STRING.optional(),
+  mimeType: NON_EMPTY_STRING,
+  fileSize: z.number().int().nonnegative(),
+  contentBase64: NON_EMPTY_STRING,
+  category: NON_EMPTY_STRING.optional(),
 }).strict();
 
 export const memberRoleUpdateSchema = z.object({

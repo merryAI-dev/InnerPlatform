@@ -3,8 +3,13 @@ import {
   addCommentViaBff,
   addEvidenceViaBff,
   changeTransactionStateViaBff,
+  linkProjectEvidenceDriveRootViaBff,
+  provisionProjectEvidenceDriveRootViaBff,
+  provisionTransactionEvidenceDriveViaBff,
   readPlatformApiRuntimeConfig,
+  syncTransactionEvidenceDriveViaBff,
   toRequestActor,
+  uploadTransactionEvidenceDriveViaBff,
   upsertLedgerViaBff,
   upsertProjectViaBff,
   upsertTransactionViaBff,
@@ -142,5 +147,207 @@ describe('platform-bff-client', () => {
 
     expect(comment.id).toBe('c001');
     expect(evidence.id).toBe('ev001');
+  });
+
+  it('calls evidence drive provision/sync endpoints', async () => {
+    const client = {
+      post: vi
+        .fn()
+        .mockResolvedValueOnce({
+          data: {
+            projectId: 'p001',
+            folderId: 'fld-project',
+            folderName: 'Project Root',
+            webViewLink: 'https://drive.google.com/drive/folders/fld-project',
+            sharedDriveId: 'shared-001',
+            version: 2,
+            updatedAt: '2026-03-11T10:00:00.000Z',
+          },
+        })
+        .mockResolvedValueOnce({
+          data: {
+            projectId: 'p001',
+            folderId: 'fld-project',
+            folderName: 'Project Root',
+            webViewLink: 'https://drive.google.com/drive/folders/fld-project',
+            sharedDriveId: 'shared-001',
+            version: 3,
+            updatedAt: '2026-03-11T10:01:30.000Z',
+          },
+        })
+        .mockResolvedValueOnce({
+          data: {
+            transactionId: 'tx001',
+            projectId: 'p001',
+            folderId: 'fld-tx',
+            folderName: '20260311_회의비_다과비_tx001',
+            webViewLink: 'https://drive.google.com/drive/folders/fld-tx',
+            sharedDriveId: 'shared-001',
+            evidenceCount: 2,
+            evidenceCompletedDesc: '세금계산서, 입금확인서',
+            evidenceAutoListedDesc: '세금계산서, 입금확인서',
+            evidencePendingDesc: null,
+            supportPendingDocs: null,
+            evidenceMissing: [],
+            evidenceStatus: 'COMPLETE',
+            lastSyncedAt: '2026-03-11T10:02:00.000Z',
+            version: 4,
+            updatedAt: '2026-03-11T10:02:00.000Z',
+          },
+        }),
+      get: vi.fn(),
+      request: vi
+        .fn()
+        .mockResolvedValueOnce({
+          data: {
+            transactionId: 'tx001',
+            projectId: 'p001',
+            projectFolderId: 'fld-project',
+            projectFolderName: 'Project Root',
+            folderId: 'fld-tx',
+            folderName: '20260311_회의비_다과비_tx001',
+            webViewLink: 'https://drive.google.com/drive/folders/fld-tx',
+            sharedDriveId: 'shared-001',
+            syncStatus: 'LINKED',
+            version: 3,
+            updatedAt: '2026-03-11T10:01:00.000Z',
+          },
+        })
+        .mockResolvedValueOnce({
+          data: {
+            transactionId: 'tx001',
+            projectId: 'p001',
+            folderId: 'fld-tx',
+            folderName: '20260311_회의비_다과비_tx001',
+            webViewLink: 'https://drive.google.com/drive/folders/fld-tx',
+            sharedDriveId: 'shared-001',
+            evidenceCount: 2,
+            evidenceCompletedDesc: '세금계산서, 입금확인서',
+            evidenceAutoListedDesc: '세금계산서, 입금확인서',
+            evidencePendingDesc: null,
+            supportPendingDocs: null,
+            evidenceMissing: [],
+            evidenceStatus: 'COMPLETE',
+            lastSyncedAt: '2026-03-11T10:02:00.000Z',
+            version: 4,
+            updatedAt: '2026-03-11T10:02:00.000Z',
+          },
+        }),
+    };
+
+    const projectRoot = await provisionProjectEvidenceDriveRootViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'admin' },
+      projectId: 'p001',
+      client,
+    });
+
+    const txFolder = await provisionTransactionEvidenceDriveViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'admin' },
+      transactionId: 'tx001',
+      client,
+    });
+
+    const linkedRoot = await linkProjectEvidenceDriveRootViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'admin' },
+      projectId: 'p001',
+      value: 'https://drive.google.com/drive/folders/fld-project',
+      client,
+    });
+
+    const syncResult = await syncTransactionEvidenceDriveViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'admin' },
+      transactionId: 'tx001',
+      client,
+    });
+
+    expect(client.post).toHaveBeenNthCalledWith(1, '/api/v1/projects/p001/evidence-drive/root/provision', expect.objectContaining({
+      tenantId: 'mysc',
+    }));
+    expect(client.request).toHaveBeenNthCalledWith(1, '/api/v1/transactions/tx001/evidence-drive/provision', expect.objectContaining({
+      tenantId: 'mysc',
+      method: 'POST',
+      retries: 0,
+      timeoutMs: 15000,
+    }));
+    expect(client.post).toHaveBeenNthCalledWith(2, '/api/v1/projects/p001/evidence-drive/root/link', expect.objectContaining({
+      tenantId: 'mysc',
+      body: { value: 'https://drive.google.com/drive/folders/fld-project' },
+    }));
+    expect(client.request).toHaveBeenNthCalledWith(2, '/api/v1/transactions/tx001/evidence-drive/sync', expect.objectContaining({
+      tenantId: 'mysc',
+      method: 'POST',
+      retries: 0,
+      timeoutMs: 20000,
+    }));
+    expect(projectRoot.folderId).toBe('fld-project');
+    expect(txFolder.syncStatus).toBe('LINKED');
+    expect(linkedRoot.folderName).toBe('Project Root');
+    expect(syncResult.evidenceStatus).toBe('COMPLETE');
+  });
+
+  it('uploads an evidence file through the drive upload endpoint', async () => {
+    const client = {
+      post: vi.fn(),
+      get: vi.fn(),
+      request: vi.fn(async () => ({
+        data: {
+          transactionId: 'tx001',
+          projectId: 'p001',
+          folderId: 'fld-tx',
+          folderName: '20260311_회의비_다과비_tx001',
+          driveFileId: 'drv-file-001',
+          fileName: 'ZOOM invoice March.pdf',
+          webViewLink: 'https://drive.google.com/file/d/drv-file-001/view',
+          category: 'ZOOM invoice',
+          parserCategory: 'ZOOM invoice',
+          parserConfidence: 0.92,
+          evidenceCount: 1,
+          evidenceCompletedDesc: 'ZOOM invoice',
+          evidenceAutoListedDesc: 'ZOOM invoice',
+          evidencePendingDesc: null,
+          supportPendingDocs: null,
+          evidenceMissing: [],
+          evidenceStatus: 'COMPLETE',
+          lastSyncedAt: '2026-03-11T11:00:00.000Z',
+          version: 5,
+          updatedAt: '2026-03-11T11:00:00.000Z',
+        },
+      })),
+    };
+
+    const result = await uploadTransactionEvidenceDriveViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'admin' },
+      transactionId: 'tx001',
+      upload: {
+        fileName: 'ZOOM invoice March.pdf',
+        originalFileName: 'zoom_3month_raw.pdf',
+        mimeType: 'application/pdf',
+        fileSize: 1024,
+        contentBase64: 'ZmFrZS1wZGY=',
+        category: 'ZOOM invoice',
+      },
+      client,
+    });
+
+    expect(client.request).toHaveBeenCalledWith('/api/v1/transactions/tx001/evidence-drive/upload', expect.objectContaining({
+      tenantId: 'mysc',
+      method: 'POST',
+      retries: 0,
+      timeoutMs: 30000,
+      body: expect.objectContaining({
+        fileName: 'ZOOM invoice March.pdf',
+        originalFileName: 'zoom_3month_raw.pdf',
+        mimeType: 'application/pdf',
+        fileSize: 1024,
+        category: 'ZOOM invoice',
+      }),
+    }));
+    expect(result.driveFileId).toBe('drv-file-001');
+    expect(result.evidenceCompletedDesc).toBe('ZOOM invoice');
   });
 });

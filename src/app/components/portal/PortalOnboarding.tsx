@@ -65,11 +65,11 @@ export function PortalOnboarding() {
     setPrimaryProjectId(resolvePrimaryProjectId(merged, portalUser?.projectId || authUser?.projectId) || '');
   }, [authUser, portalUser]);
 
-  const activeProjects = useMemo(() => (
-    projects.filter((p) => p.status === 'CONTRACT_PENDING')
-  ), [projects]);
-
-  const allProjects = activeProjects;
+  const allProjects = useMemo(() => projects, [projects]);
+  const primaryProject = useMemo(
+    () => allProjects.find((project) => project.id === primaryProjectId) || null,
+    [allProjects, primaryProjectId],
+  );
 
   const toggleProject = (projectId: string) => {
     setError('');
@@ -195,43 +195,83 @@ export function PortalOnboarding() {
               </div>
             )}
 
+            <div className="rounded-xl border border-teal-200/70 bg-teal-50/80 px-4 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-[11px] text-teal-700" style={{ fontWeight: 700 }}>현재 선택 상태</p>
+                  <p className="text-[13px] text-slate-900" style={{ fontWeight: 700 }}>
+                    {projectIds.length > 0 ? `${projectIds.length}개 사업 선택됨` : '아직 선택한 사업이 없습니다'}
+                  </p>
+                </div>
+                <Badge className="bg-white text-teal-700 border border-teal-200 text-[10px]">
+                  {primaryProject ? `주사업: ${primaryProject.name}` : '주사업 미선택'}
+                </Badge>
+              </div>
+              <p className="mt-2 text-[11px] text-teal-800/80">
+                카드를 선택하면 내 사업에 포함되고, 그중 하나를 주사업으로 지정할 수 있습니다.
+              </p>
+            </div>
+
             <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
               {allProjects.map((project) => {
                 const selected = projectIds.includes(project.id);
+                const isPrimary = primaryProjectId === project.id;
                 const statusLabel = PROJECT_STATUS_LABELS[project.status] || project.status;
                 return (
                   <div
                     key={project.id}
-                    className={`flex items-center justify-between gap-3 p-3 rounded-lg border ${selected ? 'border-teal-300 bg-teal-50/50' : 'border-border/60'} transition-colors`}
+                    className={`flex items-center justify-between gap-3 rounded-xl border p-4 transition-all ${
+                      selected
+                        ? 'border-teal-400 bg-teal-50 shadow-sm shadow-teal-200/40 ring-1 ring-teal-200'
+                        : 'border-border/60 bg-white/80 hover:border-teal-200 hover:bg-teal-50/30'
+                    }`}
                   >
                     <div className="min-w-0">
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <span className="text-[13px]" style={{ fontWeight: 600 }}>{project.name}</span>
                         <Badge className={`text-[10px] ${statusColors[project.status] || 'bg-slate-100 text-slate-700'}`}>{statusLabel}</Badge>
+                        {selected ? (
+                          <Badge className="bg-teal-600 text-white text-[10px]">
+                            <CheckCircle2 className="mr-1 h-3 w-3" />
+                            선택한 사업
+                          </Badge>
+                        ) : null}
+                        {isPrimary ? (
+                          <Badge className="bg-amber-100 text-amber-800 text-[10px] border border-amber-200">
+                            주사업
+                          </Badge>
+                        ) : null}
                       </div>
                       <p className="text-[11px] text-muted-foreground">{getClientLabel(project)}</p>
+                      {selected ? (
+                        <p className="mt-1 text-[11px] text-teal-800">
+                          {isPrimary ? '이 사업이 현재 포털 기본 진입 사업입니다.' : '선택된 사업입니다. 필요하면 주사업으로 지정하세요.'}
+                        </p>
+                      ) : (
+                        <p className="mt-1 text-[11px] text-muted-foreground">선택하면 내 사업 목록에 포함됩니다.</p>
+                      )}
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex shrink-0 items-center gap-2">
                       {selected && (
                         <Button
-                          variant={primaryProjectId === project.id ? 'default' : 'outline'}
-                          className="h-8 text-[11px]"
+                          variant={isPrimary ? 'default' : 'outline'}
+                          className={`h-9 text-[11px] ${isPrimary ? 'bg-amber-500 hover:bg-amber-500/90 text-white border-amber-500' : ''}`}
                           onClick={() => selectPrimary(project.id)}
                         >
-                          {primaryProjectId === project.id ? (
-                            <><CheckCircle2 className="w-3 h-3 mr-1" /> 주사업</>
+                          {isPrimary ? (
+                            <><CheckCircle2 className="w-3 h-3 mr-1" /> 주사업 선택 완료</>
                           ) : (
-                            '주사업 지정'
+                            '주사업으로 지정'
                           )}
                         </Button>
                       )}
                       <Button
                         variant={selected ? 'default' : 'outline'}
-                        className="h-8 text-[11px]"
+                        className={`h-9 text-[11px] ${selected ? 'bg-teal-600 hover:bg-teal-600/90' : ''}`}
                         onClick={() => toggleProject(project.id)}
                       >
-                        {selected ? '선택됨' : '선택'}
+                        {selected ? '선택 취소' : '내 사업으로 선택'}
                       </Button>
                     </div>
                   </div>
@@ -252,14 +292,16 @@ export function PortalOnboarding() {
 
             <div className="flex items-center justify-between pt-2">
               <p className="text-[11px] text-muted-foreground">
-                {isRegistered ? '선택 정보를 변경하면 바로 반영됩니다.' : '사업을 선택해야 포털을 사용할 수 있습니다.'}
+                {isRegistered
+                  ? `선택 정보를 저장하면 ${primaryProject?.name || '주사업'} 기준으로 바로 반영됩니다.`
+                  : '사업을 선택하고 주사업을 확인한 뒤 포털로 이동하세요.'}
               </p>
               <Button
                 className="h-9 text-[12px]"
                 onClick={handleSave}
                 disabled={saving || projectIds.length === 0}
               >
-                {saving ? '저장 중...' : '저장하고 계속'}
+                {saving ? '저장 중...' : `선택 저장 후 계속${primaryProject ? ` · ${primaryProject.name}` : ''}`}
               </Button>
             </div>
           </CardContent>
