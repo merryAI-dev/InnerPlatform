@@ -430,7 +430,7 @@ function assertActorPermissionAllowed(policy, req, requiredPermission, action) {
   }
 }
 
-function createApiContextMiddleware({ authMode, verifyToken }) {
+function createApiContextMiddleware({ authMode, verifyToken, resolveMemberIdentity }) {
   return asyncHandler(async (req, res, next) => {
     const requestId = req.header('x-request-id') || createRequestId();
     const isMutating = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method.toUpperCase());
@@ -446,11 +446,23 @@ function createApiContextMiddleware({ authMode, verifyToken }) {
       readHeaderValue: (name) => req.header(name),
     });
 
+    let actorRole = identity.actorRole;
+    let actorEmail = identity.actorEmail;
+
+    if ((!actorRole || !actorEmail) && identity.source === 'firebase' && typeof resolveMemberIdentity === 'function') {
+      const memberIdentity = await resolveMemberIdentity({
+        tenantId: identity.tenantId,
+        actorId: identity.actorId,
+      });
+      actorRole = actorRole || normalizeRole(memberIdentity?.role) || undefined;
+      actorEmail = actorEmail || readOptionalText(memberIdentity?.email).toLowerCase() || undefined;
+    }
+
     req.context = {
       tenantId: identity.tenantId,
       actorId: identity.actorId,
-      actorRole: identity.actorRole,
-      actorEmail: identity.actorEmail,
+      actorRole,
+      actorEmail,
       authSource: identity.source,
       requestId,
       idempotencyKey: idempotencyKey.trim() || undefined,
@@ -544,6 +556,21 @@ export function createBffApp(options = {}) {
   const outboxMaxAttempts = Number.isFinite(outboxMaxAttemptsRaw) && outboxMaxAttemptsRaw > 0 ? outboxMaxAttemptsRaw : 8;
   const workerSecret = readOptionalText(options.workerSecret || process.env.BFF_WORKER_SECRET || process.env.CRON_SECRET);
 
+  async function resolveMemberIdentity({ tenantId, actorId }) {
+    const normalizedTenantId = readOptionalText(tenantId);
+    const normalizedActorId = readOptionalText(actorId);
+    if (!normalizedTenantId || !normalizedActorId) return null;
+
+    const snap = await db.doc(`orgs/${normalizedTenantId}/members/${normalizedActorId}`).get();
+    if (!snap.exists) return null;
+
+    const data = snap.data() || {};
+    return {
+      role: normalizeRole(data.role),
+      email: readOptionalText(data.email).toLowerCase() || undefined,
+    };
+  }
+
   app.disable('x-powered-by');
   app.use(express.json({ limit: process.env.BFF_JSON_LIMIT || '25mb' }));
 
@@ -564,7 +591,7 @@ export function createBffApp(options = {}) {
       res.setHeader('Access-Control-Allow-Origin', allowAnyOrigin ? '*' : requestOrigin);
     }
     res.setHeader('Vary', 'Origin');
-    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, x-tenant-id, x-actor-id, x-actor-role, x-actor-email, x-request-id, idempotency-key');
+    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, x-tenant-id, x-actor-id, x-actor-role, x-actor-email, x-request-id, idempotency-key, x-google-access-token');
     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,PUT,DELETE,OPTIONS');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
@@ -827,7 +854,7 @@ export function createBffApp(options = {}) {
   app.get('/api/internal/workers/monthly-close/run', runMonthlyCloseWorkerRoute);
   app.post('/api/internal/workers/monthly-close/run', runMonthlyCloseWorkerRoute);
 
-  app.use('/api/v1', createApiContextMiddleware({ authMode, verifyToken }));
+  app.use('/api/v1', createApiContextMiddleware({ authMode, verifyToken, resolveMemberIdentity }));
 
   app.post('/api/v1/write', createMutatingRoute(idempotencyService, async (req) => {
     assertActorRoleAllowed(req, ROUTE_ROLES.writeCore, 'write data');
@@ -1115,6 +1142,7 @@ export function createBffApp(options = {}) {
     assertActorRoleAllowed(req, ROUTE_ROLES.readCore, 'preview google sheet import');
     const { projectId } = req.params;
     const parsed = parseWithSchema(googleSheetImportPreviewSchema, req.body, 'Invalid google sheet preview payload');
+    const googleAccessToken = readOptionalText(req.header('x-google-access-token'));
 
     await ensureDocumentExists(
       db,
@@ -1126,6 +1154,7 @@ export function createBffApp(options = {}) {
       const preview = await googleSheetsService.previewSpreadsheet({
         value: parsed.value,
         sheetName: parsed.sheetName,
+        accessToken: googleAccessToken || undefined,
       });
       res.status(200).json(preview);
     } catch (error) {

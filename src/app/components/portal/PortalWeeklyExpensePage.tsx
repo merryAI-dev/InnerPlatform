@@ -110,7 +110,7 @@ interface GoogleSheetMigrationReviewState {
 }
 
 export function PortalWeeklyExpensePage() {
-  const { user: authUser } = useAuth();
+  const { user: authUser, ensureGoogleWorkspaceAccess } = useAuth();
   const { orgId } = useFirebase();
   const {
     portalUser,
@@ -218,7 +218,17 @@ export function PortalWeeklyExpensePage() {
     email: authUser?.email || portalUser?.email || '',
     role: authUser?.role || portalUser?.role || 'pm',
     idToken: authUser?.idToken,
-  }), [authUser?.uid, authUser?.email, authUser?.role, authUser?.idToken, portalUser?.id, portalUser?.email, portalUser?.role]);
+    googleAccessToken: authUser?.googleAccessToken,
+  }), [
+    authUser?.uid,
+    authUser?.email,
+    authUser?.role,
+    authUser?.idToken,
+    authUser?.googleAccessToken,
+    portalUser?.id,
+    portalUser?.email,
+    portalUser?.role,
+  ]);
   const googleSheetSelectedDescriptor = useMemo(
     () => describeGoogleSheetMigrationTarget(googleSheetImportPreview?.selectedSheetName || ''),
     [googleSheetImportPreview?.selectedSheetName],
@@ -555,9 +565,13 @@ export function PortalWeeklyExpensePage() {
 
     setGoogleSheetPreviewing(true);
     try {
+      const googleAccessToken = bffActor.googleAccessToken || await ensureGoogleWorkspaceAccess() || undefined;
       const result = await previewGoogleSheetImportViaBff({
         tenantId: orgId,
-        actor: bffActor,
+        actor: {
+          ...bffActor,
+          ...(googleAccessToken ? { googleAccessToken } : {}),
+        },
         projectId,
         value: trimmedLink,
         ...(sheetName ? { sheetName } : {}),

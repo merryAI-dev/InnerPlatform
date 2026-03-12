@@ -375,7 +375,7 @@ describe('platform-bff-client', () => {
 
     const preview = await previewGoogleSheetImportViaBff({
       tenantId: 'mysc',
-      actor: { uid: 'u001', role: 'pm' },
+      actor: { uid: 'u001', role: 'pm', googleAccessToken: 'google-token-123' },
       projectId: 'p001',
       value: 'https://docs.google.com/spreadsheets/d/sheet-001/edit#gid=1',
       sheetName: '주간정산',
@@ -383,6 +383,9 @@ describe('platform-bff-client', () => {
     });
 
     expect(client.post).toHaveBeenCalledWith('/api/v1/projects/p001/google-sheet-import/preview', expect.objectContaining({
+      headers: {
+        'x-google-access-token': 'google-token-123',
+      },
       body: {
         value: 'https://docs.google.com/spreadsheets/d/sheet-001/edit#gid=1',
         sheetName: '주간정산',

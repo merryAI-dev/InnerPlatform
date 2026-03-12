@@ -13,6 +13,7 @@ export interface ActorLike {
   email?: string;
   role?: string;
   idToken?: string;
+  googleAccessToken?: string;
 }
 
 export interface UpsertProjectPayload {
@@ -354,6 +355,9 @@ export async function previewGoogleSheetImportViaBff(params: {
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
+      headers: params.actor.googleAccessToken
+        ? { 'x-google-access-token': params.actor.googleAccessToken }
+        : undefined,
       body: {
         value: params.value,
         ...(params.sheetName ? { sheetName: params.sheetName } : {}),

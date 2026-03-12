@@ -1611,9 +1611,8 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       return false;
     }
 
-    setPortalUser(candidate);
-
     if (authUser) {
+      setIsMemberLoading(true);
       let memberRole = (authUser.role || user.role || 'pm').toLowerCase();
       try {
         const memberSnap = await getDoc(doc(db, getOrgDocumentPath(orgId, 'members', authUser.uid)));
@@ -1646,15 +1645,17 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           createdAt: authUser.registeredAt || now,
           lastLoginAt: now,
         }, { merge: true });
-        if (candidate.role !== memberRole) {
-          setPortalUser({ ...candidate, role: memberRole });
-        }
+        setPortalUser(candidate.role !== memberRole ? { ...candidate, role: memberRole } : candidate);
       } catch (err) {
         console.error('[PortalStore] register member sync error:', err);
         setPortalUser(previousPortalUser);
         toast.error('회원 정보를 저장하지 못했습니다.');
         return false;
+      } finally {
+        setIsMemberLoading(false);
       }
+    } else {
+      setPortalUser(candidate);
     }
 
     return true;
@@ -1699,9 +1700,9 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       ...portalUser,
       projectId: target,
     };
-    setPortalUser(nextUser);
 
     if (authUser) {
+      setIsMemberLoading(true);
       try {
         const now = new Date().toISOString();
         await updateDoc(doc(db, getOrgDocumentPath(orgId, 'members', authUser.uid)), {
@@ -1716,12 +1717,17 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           }),
           updatedAt: now,
         });
+        setPortalUser(nextUser);
       } catch (err) {
         console.error('[PortalStore] setActiveProject member sync error:', err);
         setPortalUser(previousUser);
         toast.error('주사업 변경을 저장하지 못했습니다.');
         return false;
+      } finally {
+        setIsMemberLoading(false);
       }
+    } else {
+      setPortalUser(nextUser);
     }
 
     return true;

@@ -128,7 +128,11 @@ export function createGoogleSheetsService(options = {}) {
     }
   }
 
-  async function getAuthHeaders() {
+  async function getAuthHeaders(accessToken) {
+    const normalizedAccessToken = readOptionalText(accessToken);
+    if (normalizedAccessToken) {
+      return { authorization: `Bearer ${normalizedAccessToken}` };
+    }
     if (typeof authHeadersFactory === 'function') {
       return authHeadersFactory();
     }
@@ -143,8 +147,8 @@ export function createGoogleSheetsService(options = {}) {
     return jwtClient.getRequestHeaders();
   }
 
-  async function sheetsFetch(pathname, init = {}) {
-    const authHeaders = await getAuthHeaders();
+  async function sheetsFetch(pathname, init = {}, accessToken) {
+    const authHeaders = await getAuthHeaders(accessToken);
     const response = await fetchImpl(`${SHEETS_API_BASE_URL}${pathname}`, {
       ...init,
       headers: {
@@ -168,7 +172,7 @@ export function createGoogleSheetsService(options = {}) {
     return readJsonResponse(response);
   }
 
-  async function getSpreadsheetMeta(spreadsheetId) {
+  async function getSpreadsheetMeta(spreadsheetId, accessToken) {
     const normalizedId = extractSpreadsheetId(spreadsheetId);
     if (!normalizedId) {
       throw new GoogleSheetsServiceError(
@@ -184,7 +188,11 @@ export function createGoogleSheetsService(options = {}) {
       'sheets.properties.title',
       'sheets.properties.index',
     ].join(',');
-    const data = await sheetsFetch(`/spreadsheets/${encodeURIComponent(normalizedId)}?fields=${encodeURIComponent(fields)}`);
+    const data = await sheetsFetch(
+      `/spreadsheets/${encodeURIComponent(normalizedId)}?fields=${encodeURIComponent(fields)}`,
+      {},
+      accessToken,
+    );
     const availableSheets = Array.isArray(data?.sheets)
       ? data.sheets.map((sheet) => normalizeSheetDescriptor(sheet)).sort((a, b) => a.index - b.index)
       : [];
@@ -196,7 +204,7 @@ export function createGoogleSheetsService(options = {}) {
     };
   }
 
-  async function getSheetValues({ spreadsheetId, sheetName }) {
+  async function getSheetValues({ spreadsheetId, sheetName, accessToken }) {
     const normalizedId = extractSpreadsheetId(spreadsheetId);
     const normalizedSheetName = normalizeSheetTitle(sheetName);
     const range = quoteSheetNameForRange(normalizedSheetName);
@@ -208,6 +216,8 @@ export function createGoogleSheetsService(options = {}) {
 
     const data = await sheetsFetch(
       `/spreadsheets/${encodeURIComponent(normalizedId)}/values/${encodeURIComponent(range)}?${params.toString()}`,
+      {},
+      accessToken,
     );
 
     return Array.isArray(data?.values)
@@ -215,7 +225,7 @@ export function createGoogleSheetsService(options = {}) {
       : [];
   }
 
-  async function previewSpreadsheet({ value, sheetName }) {
+  async function previewSpreadsheet({ value, sheetName, accessToken }) {
     const spreadsheetId = extractSpreadsheetId(value);
     if (!spreadsheetId) {
       throw new GoogleSheetsServiceError(
@@ -225,7 +235,7 @@ export function createGoogleSheetsService(options = {}) {
     }
 
     const gid = sheetName ? null : extractSpreadsheetGid(value);
-    const meta = await getSpreadsheetMeta(spreadsheetId);
+    const meta = await getSpreadsheetMeta(spreadsheetId, accessToken);
 
     let selectedSheet = null;
     if (sheetName) {
@@ -253,6 +263,7 @@ export function createGoogleSheetsService(options = {}) {
     const matrix = await getSheetValues({
       spreadsheetId: meta.spreadsheetId,
       sheetName: selectedSheet.title,
+      accessToken,
     });
 
     return {
