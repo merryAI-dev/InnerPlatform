@@ -56,6 +56,16 @@ export function isStableVercelPreviewHost(hostname: unknown): boolean {
   return normalized.endsWith('.vercel.app') && normalized.includes('-git-');
 }
 
+export function isStableVercelAliasHost(hostname: unknown): boolean {
+  const normalized = normalizeHost(hostname);
+  if (!normalized.endsWith('.vercel.app')) return false;
+  const label = normalized.slice(0, -'.vercel.app'.length);
+  if (!label) return false;
+  if (label.includes('-git-')) return true;
+  if (!label.includes('-')) return true;
+  return !/-[a-z0-9]*\d[a-z0-9]*-/.test(label);
+}
+
 export function shouldBlockFirebasePopupAuth(
   hostname: unknown,
   env: Record<string, unknown> = import.meta.env,
@@ -67,6 +77,7 @@ export function shouldBlockFirebasePopupAuth(
   const config = readPreviewAuthGuardConfig(env);
   if (config.allowedHosts.includes(normalized)) return false;
   if (isStableVercelPreviewHost(normalized)) return false;
+  if (isStableVercelAliasHost(normalized)) return false;
   return true;
 }
 
