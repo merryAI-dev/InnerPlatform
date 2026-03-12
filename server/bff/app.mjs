@@ -711,7 +711,9 @@ export function createBffApp(options = {}) {
     const evidenceDocs = files.map((file) => {
       const existing = existingEvidenceByFileId.get(file.id);
       const parser = inferEvidenceCategoryFromFileName(file.name);
-      const category = readOptionalText(existing?.category) || parser.category;
+      const category = readOptionalText(existing?.category)
+        || readOptionalText(file.appProperties?.category)
+        || parser.category;
       return {
         id: existing?.id || toDriveEvidenceDocId(file.id),
         tenantId,

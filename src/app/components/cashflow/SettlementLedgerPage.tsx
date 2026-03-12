@@ -2009,8 +2009,8 @@ function ImportEditor({
       const firstFileName = uploadedNames[0] || '증빙 파일';
       toast.success(
         uploadDrafts.length === 1
-          ? `업로드 완료: ${firstFileName}`
-          : `업로드 완료: ${firstFileName} 외 ${uploadDrafts.length - 1}건`,
+          ? `Drive 업로드 완료: ${firstFileName} · 목록 반영은 동기화 버튼에서 진행`
+          : `Drive 업로드 완료: ${firstFileName} 외 ${uploadDrafts.length - 1}건 · 목록 반영은 동기화 버튼에서 진행`,
       );
       setUploadDialogOpen(false);
       clearUploadDrafts();
