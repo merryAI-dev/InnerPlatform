@@ -1977,6 +1977,10 @@ function ImportEditor({
 
   const openEvidenceUploadPicker = useCallback((txId: string) => {
     setUploadTargetTxId(txId);
+    setUploadDialogOpen(true);
+  }, []);
+
+  const triggerEvidenceFilePicker = useCallback(() => {
     if (evidenceFileInputRef.current) {
       evidenceFileInputRef.current.value = '';
       evidenceFileInputRef.current.click();
@@ -2898,10 +2902,17 @@ function ImportEditor({
       >
         <DialogContent className="h-[92vh] w-[96vw] max-w-[96vw] gap-0 overflow-hidden p-0 sm:max-w-[96vw]">
           <DialogHeader className="border-b px-6 py-4">
-            <DialogTitle>증빙 업로드 검토</DialogTitle>
-            <DialogDescription>
-              좌측에서 파일을 확인하고, 우측에서 자동 분류 결과를 수정한 뒤 업로드하세요.
-            </DialogDescription>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <DialogTitle>증빙 업로드 검토</DialogTitle>
+                <DialogDescription>
+                  좌측에서 파일을 확인하고, 우측에서 자동 분류 결과를 수정한 뒤 업로드하세요.
+                </DialogDescription>
+              </div>
+              <Button type="button" variant="outline" size="sm" onClick={triggerEvidenceFilePicker} disabled={uploadingEvidence}>
+                파일 선택
+              </Button>
+            </div>
           </DialogHeader>
           <div className="flex-1 overflow-hidden px-6 py-4">
             <div className="grid h-full gap-4 lg:grid-cols-[minmax(0,1.4fr)_380px]">
@@ -2944,8 +2955,11 @@ function ImportEditor({
                   </div>
                 </div>
               ) : (
-                <div className="flex h-full min-h-[420px] items-center justify-center text-[12px] text-muted-foreground">
-                  업로드할 파일을 선택하세요.
+                <div className="flex h-full min-h-[420px] flex-col items-center justify-center gap-3 text-[12px] text-muted-foreground">
+                  <p>업로드할 파일을 선택하세요.</p>
+                  <Button type="button" variant="outline" size="sm" onClick={triggerEvidenceFilePicker} disabled={uploadingEvidence}>
+                    파일 선택
+                  </Button>
                 </div>
               )}
             </div>
