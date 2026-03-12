@@ -31,6 +31,7 @@ import { normalizeProjectIds, resolvePrimaryProjectId } from './project-assignme
 import {
   buildWorkspacePreferencePatch,
   readMemberWorkspace,
+  resolveMemberProjectAccessState,
   type WorkspaceId,
 } from './member-workspace';
 import { extractAuthContextFromClaims } from '../platform/rbac';
@@ -296,12 +297,17 @@ async function upsertMemberFromFirebase(
   const now = new Date().toISOString();
   const normalizedEmail = normalizeEmail(firebaseUser.email || existing?.email || '');
   const bootstrapAdmin = isBootstrapAdminEmail(normalizedEmail);
+  const access = resolveMemberProjectAccessState(existing);
   const mergedProjectIds = normalizeProjectIds([
+    ...access.normalizedProjectIds,
     ...(Array.isArray(existing?.projectIds) ? existing?.projectIds : []),
     existing?.projectId,
     resolveProjectIdForManager(firebaseUser.uid, PROJECT_OWNERS),
   ]);
-  const primaryProjectId = resolvePrimaryProjectId(mergedProjectIds, existing?.projectId) || '';
+  const primaryProjectId = resolvePrimaryProjectId(
+    mergedProjectIds,
+    access.normalizedProjectId || existing?.projectId,
+  ) || '';
 
   const merged = omitUndefinedFields<MemberDoc>({
     uid: firebaseUser.uid,
@@ -322,7 +328,7 @@ async function upsertMemberFromFirebase(
     createdAt: existing?.createdAt || now,
     updatedAt: now,
     lastLoginAt: now,
-    projectNames: existing?.projectNames,
+    projectNames: access.projectNames || existing?.projectNames,
     portalProfile: existing?.portalProfile,
     defaultWorkspace: existing?.defaultWorkspace,
     lastWorkspace: existing?.lastWorkspace,

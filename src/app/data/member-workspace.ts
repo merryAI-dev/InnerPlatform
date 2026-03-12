@@ -17,6 +17,18 @@ export interface MemberWorkspaceState {
   portalProfile: MemberPortalProfile | null;
 }
 
+export interface MemberProjectAccessState {
+  rootProjectId?: string;
+  rootProjectIds: string[];
+  portalProjectId?: string;
+  portalProjectIds: string[];
+  normalizedProjectId?: string;
+  normalizedProjectIds: string[];
+  projectNames?: Record<string, string>;
+  hasObjectRootProjectIds: boolean;
+  needsRootSync: boolean;
+}
+
 interface BuildPortalProfilePatchInput {
   projectId?: string;
   projectIds?: string[];
@@ -39,11 +51,21 @@ function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function readLooseProjectId(value: unknown): string {
+  if (typeof value === 'string') return value.trim();
+  if (isRecord(value)) return readString(value.id);
+  return '';
+}
+
 function readStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value
     .map((entry) => readString(entry))
     .filter(Boolean);
+}
+
+function hasObjectArrayEntries(value: unknown): boolean {
+  return Array.isArray(value) && value.some((entry) => typeof entry === 'object' && entry !== null);
 }
 
 function readProjectNames(value: unknown): Record<string, string> | undefined {
@@ -63,35 +85,79 @@ function mergeProjectNames(
   return Object.keys(merged).length > 0 ? merged : undefined;
 }
 
+function sameProjectIds(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((value, index) => value === b[index]);
+}
+
+export function resolveMemberProjectAccessState(candidate: unknown): MemberProjectAccessState {
+  if (!isRecord(candidate)) {
+    return {
+      rootProjectIds: [],
+      portalProjectIds: [],
+      normalizedProjectIds: [],
+      hasObjectRootProjectIds: false,
+      needsRootSync: false,
+    };
+  }
+
+  const rawPortalProfile = isRecord(candidate.portalProfile) ? candidate.portalProfile : null;
+  const rootProjectIds = normalizeProjectIds([
+    ...readStringArray(candidate.projectIds),
+    readLooseProjectId(candidate.projectId),
+  ]);
+  const portalProjectIds = normalizeProjectIds([
+    ...readStringArray(rawPortalProfile?.projectIds),
+    readLooseProjectId(rawPortalProfile?.projectId),
+  ]);
+  const normalizedProjectIds = normalizeProjectIds([
+    ...rootProjectIds,
+    ...portalProjectIds,
+  ]);
+  const rootProjectId = resolvePrimaryProjectId(rootProjectIds, readLooseProjectId(candidate.projectId));
+  const portalProjectId = resolvePrimaryProjectId(portalProjectIds, readLooseProjectId(rawPortalProfile?.projectId));
+  const normalizedProjectId = resolvePrimaryProjectId(
+    normalizedProjectIds,
+    portalProjectId || rootProjectId,
+  );
+  const projectNames = mergeProjectNames(
+    readProjectNames(candidate.projectNames),
+    readProjectNames(rawPortalProfile?.projectNames),
+  );
+  const hasObjectRootProjectIds = hasObjectArrayEntries(candidate.projectIds);
+
+  return {
+    rootProjectId: rootProjectId || undefined,
+    rootProjectIds,
+    portalProjectId: portalProjectId || undefined,
+    portalProjectIds,
+    normalizedProjectId: normalizedProjectId || undefined,
+    normalizedProjectIds,
+    ...(projectNames ? { projectNames } : {}),
+    hasObjectRootProjectIds,
+    needsRootSync:
+      hasObjectRootProjectIds
+      || (rootProjectId || '') !== (normalizedProjectId || '')
+      || !sameProjectIds(rootProjectIds, normalizedProjectIds),
+  };
+}
+
 export function readMemberWorkspace(candidate: unknown): MemberWorkspaceState {
   if (!isRecord(candidate)) {
     return { portalProfile: null };
   }
 
   const rawPortalProfile = isRecord(candidate.portalProfile) ? candidate.portalProfile : null;
-  const projectNames = mergeProjectNames(
-    readProjectNames(candidate.projectNames),
-    readProjectNames(rawPortalProfile?.projectNames),
-  );
-  const projectIds = normalizeProjectIds([
-    ...readStringArray(candidate.projectIds),
-    readString(candidate.projectId),
-    ...readStringArray(rawPortalProfile?.projectIds),
-    readString(rawPortalProfile?.projectId),
-  ]);
-  const projectId = resolvePrimaryProjectId(
-    projectIds,
-    readString(rawPortalProfile?.projectId) || readString(candidate.projectId),
-  );
+  const access = resolveMemberProjectAccessState(candidate);
 
   return {
     defaultWorkspace: normalizeWorkspaceId(candidate.defaultWorkspace),
     lastWorkspace: normalizeWorkspaceId(candidate.lastWorkspace),
-    portalProfile: projectIds.length > 0 || projectId
+    portalProfile: access.normalizedProjectIds.length > 0 || access.normalizedProjectId
       ? {
-        projectId: projectId || undefined,
-        projectIds,
-        ...(projectNames ? { projectNames } : {}),
+        projectId: access.normalizedProjectId || undefined,
+        projectIds: access.normalizedProjectIds,
+        ...(access.projectNames ? { projectNames: access.projectNames } : {}),
         ...(readString(rawPortalProfile?.updatedAt) ? { updatedAt: readString(rawPortalProfile?.updatedAt) } : {}),
         ...(readString(rawPortalProfile?.updatedByUid) ? { updatedByUid: readString(rawPortalProfile?.updatedByUid) } : {}),
         ...(readString(rawPortalProfile?.updatedByName) ? { updatedByName: readString(rawPortalProfile?.updatedByName) } : {}),
