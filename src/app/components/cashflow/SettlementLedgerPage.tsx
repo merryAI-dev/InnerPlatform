@@ -1996,6 +1996,7 @@ function ImportEditor({
     if (!uploadTargetTxId || !onUploadEvidenceDriveById || uploadDrafts.length === 0) return;
     setUploadingEvidence(true);
     try {
+      const uploadedNames = uploadDrafts.map((draft) => draft.reviewedFileName.trim() || draft.suggestedFileName);
       await onUploadEvidenceDriveById(
         uploadTargetTxId,
         uploadDrafts.map((draft) => ({
@@ -2005,7 +2006,12 @@ function ImportEditor({
           reviewedFileName: draft.reviewedFileName.trim() || draft.suggestedFileName,
         })),
       );
-      toast.success(`${uploadDrafts.length}건 업로드 완료`);
+      const firstFileName = uploadedNames[0] || '증빙 파일';
+      toast.success(
+        uploadDrafts.length === 1
+          ? `업로드 완료: ${firstFileName}`
+          : `업로드 완료: ${firstFileName} 외 ${uploadDrafts.length - 1}건`,
+      );
       setUploadDialogOpen(false);
       clearUploadDrafts();
     } catch (error) {
