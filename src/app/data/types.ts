@@ -440,7 +440,7 @@ export interface Transaction {
   evidenceDriveSharedDriveId?: string;
   evidenceDriveFolderId?: string;  // 거래별 증빙 폴더 id
   evidenceDriveFolderName?: string;// 거래별 증빙 폴더명
-  evidenceDriveSyncStatus?: 'NOT_LINKED' | 'LINKED' | 'SYNCING' | 'SYNCED' | 'ERROR';
+  evidenceDriveSyncStatus?: 'NOT_LINKED' | 'LINKED' | 'UPLOADED' | 'SYNCING' | 'SYNCED' | 'ERROR';
   evidenceDriveLastSyncedAt?: string;
   evidenceAutoListedDesc?: string; // 드라이브 파일 기준 자동 집계 목록
   supportPendingDocs?: string;     // 도담/써니 준비 필요자료

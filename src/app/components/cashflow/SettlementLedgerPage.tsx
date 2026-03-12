@@ -1396,6 +1396,11 @@ function TransactionRow({
 
   const effectiveCompletedDesc = tx.evidenceCompletedDesc || tx.evidenceAutoListedDesc || '';
   const suggestedFolderName = tx.evidenceDriveFolderName || buildDriveTransactionFolderName(tx);
+  const driveStatusLabel = tx.evidenceDriveSyncStatus === 'UPLOADED'
+    ? '업로드됨'
+    : tx.evidenceDriveSyncStatus === 'SYNCED'
+      ? '동기화됨'
+      : '';
 
   const runDriveAction = useCallback(async (
     action: 'provision' | 'sync',
@@ -1614,6 +1619,18 @@ function TransactionRow({
             {driveAction === 'sync' ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
             동기화
           </Button>
+          {driveStatusLabel && (
+            <span
+              className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] font-medium ${
+                tx.evidenceDriveSyncStatus === 'UPLOADED'
+                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                  : 'border-sky-200 bg-sky-50 text-sky-700'
+              }`}
+              title={tx.evidenceDriveSyncStatus === 'UPLOADED' ? '업로드는 완료됐고 목록 반영은 동기화 버튼에서 진행됩니다.' : 'Drive와 목록이 동기화된 상태입니다.'}
+            >
+              {driveStatusLabel}
+            </span>
+          )}
           <input
             key={`evidence-drive-link-${tx.id}-${tx.evidenceDriveLink || ''}-${tx.evidenceDriveFolderId || ''}`}
             type="text"
@@ -2009,8 +2026,8 @@ function ImportEditor({
       const firstFileName = uploadedNames[0] || '증빙 파일';
       toast.success(
         uploadDrafts.length === 1
-          ? `Drive 업로드 완료: ${firstFileName} · 목록 반영은 동기화 버튼에서 진행`
-          : `Drive 업로드 완료: ${firstFileName} 외 ${uploadDrafts.length - 1}건 · 목록 반영은 동기화 버튼에서 진행`,
+          ? `업로드 완료 · Drive 폴더에 저장됨: ${firstFileName} · 목록 반영은 동기화 버튼에서 진행`
+          : `업로드 완료 · Drive 폴더에 저장됨: ${firstFileName} 외 ${uploadDrafts.length - 1}건 · 목록 반영은 동기화 버튼에서 진행`,
       );
       setUploadDialogOpen(false);
       clearUploadDrafts();
@@ -2835,6 +2852,7 @@ function ImportEditor({
                 onSyncEvidenceDriveById={onSyncEvidenceDriveById}
                 onOpenEvidenceUpload={openEvidenceUploadPicker}
                 persistedTransactionId={row.sourceTxId && sourceTransactionMap.has(row.sourceTxId) ? row.sourceTxId : ''}
+                persistedTransaction={row.sourceTxId ? sourceTransactionMap.get(row.sourceTxId) : undefined}
                 onEnsurePersistedTransaction={() => ensurePersistedTransactionByRow(rowIdx)}
                 noIdx={noIdx}
                 colWidths={colWidths}
@@ -3183,6 +3201,7 @@ function ImportEditorRow({
   onSyncEvidenceDriveById,
   onOpenEvidenceUpload,
   persistedTransactionId,
+  persistedTransaction,
   onEnsurePersistedTransaction,
   noIdx,
   colWidths,
@@ -3219,6 +3238,7 @@ function ImportEditorRow({
   onSyncEvidenceDriveById?: (txId: string) => void | Promise<void>;
   onOpenEvidenceUpload?: (txId: string) => void;
   persistedTransactionId?: string;
+  persistedTransaction?: Transaction;
   onEnsurePersistedTransaction?: () => Promise<string | null>;
   noIdx: number;
   colWidths: number[];
@@ -3249,6 +3269,11 @@ function ImportEditorRow({
   const [driveAction, setDriveAction] = useState<'' | 'provision' | 'sync'>('');
   const hasSourceTransaction = Boolean(persistedTransactionId);
   const canUseDrive = hasSourceTransaction || !!onEnsurePersistedTransaction;
+  const persistedDriveStatusLabel = persistedTransaction?.evidenceDriveSyncStatus === 'UPLOADED'
+    ? '업로드됨'
+    : persistedTransaction?.evidenceDriveSyncStatus === 'SYNCED'
+      ? '동기화됨'
+      : '';
   const isCellSelected = useCallback((colIdx: number) => {
     if (!selectionBounds || colIdx === noIdx) return false;
     return rowIdx >= selectionBounds.r1
@@ -3694,6 +3719,20 @@ function ImportEditorRow({
                     >
                       {driveAction === 'sync' ? '동기화중' : '동기화'}
                     </Button>
+                    {persistedDriveStatusLabel && (
+                      <span
+                        className={`rounded-full border px-1.5 py-0.5 text-[9px] font-medium ${
+                          persistedTransaction?.evidenceDriveSyncStatus === 'UPLOADED'
+                            ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                            : 'border-sky-200 bg-sky-50 text-sky-700'
+                        }`}
+                        title={persistedTransaction?.evidenceDriveSyncStatus === 'UPLOADED'
+                          ? '업로드는 완료됐고 목록 반영은 동기화 버튼에서 진행됩니다.'
+                          : 'Drive와 목록이 동기화된 상태입니다.'}
+                      >
+                        {persistedDriveStatusLabel}
+                      </span>
+                    )}
                   </div>
                   <input
                     type="text"
