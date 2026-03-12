@@ -49,7 +49,7 @@ import { useAuth } from './auth-store';
 import { useFirebase } from '../lib/firebase-context';
 import { getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
 import { duplicateExpenseSetAsDraft, withExpenseItems } from './portal-store.helpers';
-import { buildPortalProfilePatch, readMemberWorkspace } from './member-workspace';
+import { buildPortalProfilePatch, readMemberWorkspace, resolveMemberProjectAccessState } from './member-workspace';
 import { toast } from 'sonner';
 import { includesProject, normalizeProjectIds, resolvePrimaryProjectId } from './project-assignment';
 import { canEnterPortalWorkspace } from '../platform/navigation';
@@ -307,6 +307,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           projectId?: string | { id?: string; name?: string };
         };
         const workspace = readMemberWorkspace(member);
+        const access = resolveMemberProjectAccessState(member);
         const nameMap: Record<string, string> = {};
         const rawIds = Array.isArray(member.projectIds) ? member.projectIds : [];
         const coercedIds = rawIds
@@ -346,9 +347,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         }
         // Normalize member projectIds to string array for security rules (one-time fix)
         try {
-          const rawProjectIds = Array.isArray(member.projectIds) ? member.projectIds : [];
-          const hasObjectIds = rawProjectIds.some((entry) => typeof entry === 'object');
-          if (hasObjectIds || member.projectId !== normalized.projectId) {
+          if (access.needsRootSync) {
             await updateDoc(doc(db, getOrgDocumentPath(orgId, 'members', authUser.uid)), {
               projectId: normalized.projectId,
               projectIds: normalized.projectIds,
