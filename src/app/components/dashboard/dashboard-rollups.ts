@@ -7,6 +7,18 @@ export function toFiniteNumber(value: unknown): number {
   return Number.isFinite(num) ? num : 0;
 }
 
+export function toSafeString(value: unknown): string {
+  return typeof value === 'string' ? value : String(value ?? '');
+}
+
+export function compareSafeLocaleAsc(a: unknown, b: unknown): number {
+  return toSafeString(a).localeCompare(toSafeString(b));
+}
+
+export function compareSafeLocaleDesc(a: unknown, b: unknown): number {
+  return toSafeString(b).localeCompare(toSafeString(a));
+}
+
 function toTimestamp(value?: string): number {
   if (!value) return 0;
   const time = Date.parse(value);

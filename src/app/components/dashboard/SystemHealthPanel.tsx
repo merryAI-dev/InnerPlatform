@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Progress } from '../ui/progress';
 import { useAppStore } from '../../data/store';
 import { computeMemberSummaries } from '../../data/participation-data';
+import { compareSafeLocaleDesc, toSafeString } from './dashboard-rollups';
 
 interface HealthMetric {
   id: string;
@@ -212,7 +213,7 @@ export function ActivityFeed() {
       }
     });
 
-    return items.sort((a, b) => b.timestamp.localeCompare(a.timestamp)).slice(0, 12);
+    return items.sort((a, b) => compareSafeLocaleDesc(a.timestamp, b.timestamp)).slice(0, 12);
   }, [transactions, projects]);
 
   return (
@@ -240,7 +241,7 @@ export function ActivityFeed() {
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[11px]" style={{ fontWeight: 600 }}>{a.title}</span>
                     <span className="text-[9px] text-muted-foreground whitespace-nowrap" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                      {a.timestamp.slice(5, 16)}
+                      {toSafeString(a.timestamp).slice(5, 16)}
                     </span>
                   </div>
                   <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-1">{a.detail}</p>

@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { validateProject } from './DashboardGuide';
-import { buildDashboardCashflowRollups } from './dashboard-rollups';
+import {
+  buildDashboardCashflowRollups,
+  compareSafeLocaleDesc,
+  toSafeString,
+} from './dashboard-rollups';
 import type { CashflowWeekSheet, Project, Transaction } from '../../data/types';
 
 function makeProject(overrides: Partial<Project> = {}): Project {
@@ -168,5 +172,11 @@ describe('dashboard rollups', () => {
     const directCostOut = lineRows.find((row) => row.lineId === 'DIRECT_COST_OUT');
     expect(directCostOut?.currentMonthProjectionAmount).toBe(300000);
     expect(directCostOut?.currentMonthActualAmount).toBe(370000);
+  });
+
+  it('compares nullable date-like strings without throwing', () => {
+    expect(() => compareSafeLocaleDesc(null, '2026-03-12')).not.toThrow();
+    expect(compareSafeLocaleDesc(null, '2026-03-12')).toBeGreaterThan(0);
+    expect(toSafeString(null)).toBe('');
   });
 });
