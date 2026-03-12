@@ -208,7 +208,16 @@ Authorized domains (to fix `auth/unauthorized-domain`):
 - Add:
   - `localhost` (local dev)
   - your Vercel production domain (for example: `inner-platform.vercel.app`)
-  - any Preview domain you want to use for login (Preview URLs change per deploy)
+  - only fixed Preview aliases you intentionally use for login
+- Do not use random per-deploy Preview URLs as login domains
+- Recommended Preview strategy:
+  - block login on random `*.vercel.app` preview URLs
+  - route users to a fixed alias such as `inner-platform-git-ft-izzie-merryai-devs-projects.vercel.app`
+- Optional Preview env:
+  - `VITE_FIREBASE_AUTH_ALLOWED_HOSTS`
+  - `VITE_FIREBASE_AUTH_FALLBACK_URL`
+- QA checklist:
+  - `guidelines/Firebase-Auth-Preview-QA.md`
 
 Email domain allowlist (company-only login):
 
