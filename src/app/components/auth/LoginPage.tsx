@@ -16,6 +16,7 @@ import {
   readPreviewAuthGuardConfig,
   shouldBlockFirebasePopupAuth,
 } from '../../platform/preview-auth';
+import { readDevAuthHarnessConfig } from '../../platform/dev-harness';
 
 // ═══════════════════════════════════════════════════════════════
 // LoginPage — 통합 로그인 페이지
@@ -27,6 +28,7 @@ export function LoginPage() {
   const location = useLocation();
   const {
     loginWithGoogle,
+    loginWithDevHarness,
     isLoading,
     isAuthenticated,
     isFirebaseAuthEnabled,
@@ -37,6 +39,7 @@ export function LoginPage() {
   const emulatorConfig = readFirebaseEmulatorConfig(import.meta.env);
   const previewAuthConfig = readPreviewAuthGuardConfig(import.meta.env);
   const currentHost = typeof window !== 'undefined' ? window.location.hostname : '';
+  const devAuthHarness = readDevAuthHarnessConfig(import.meta.env, typeof window !== 'undefined' ? window.location : undefined);
   const loginBlockedOnPreview = shouldBlockFirebasePopupAuth(currentHost, import.meta.env);
   const previewBlockMessage = loginBlockedOnPreview
     ? buildPreviewAuthBlockedMessage(currentHost, import.meta.env)
@@ -76,6 +79,14 @@ export function LoginPage() {
     const result = await loginWithGoogle();
     if (!result.success) {
       setError(result.error || 'Google 로그인에 실패했습니다.');
+    }
+  };
+
+  const handleDevHarnessLogin = async (preset: 'pm' | 'admin') => {
+    setError('');
+    const result = await loginWithDevHarness(preset);
+    if (!result.success) {
+      setError(result.error || '개발용 로그인에 실패했습니다.');
     }
   };
 
@@ -163,6 +174,30 @@ export function LoginPage() {
               <p className="text-[11px] text-muted-foreground text-center">
                 `mysc.co.kr` 계정만 로그인할 수 있습니다.
               </p>
+
+              {devAuthHarness.enabled && (
+                <div className="rounded-lg border border-sky-200/60 bg-sky-50 p-3">
+                  <p className="text-[11px] font-medium text-sky-900">로컬 개발용 인증 harness</p>
+                  <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-9 border-sky-300 bg-white text-[12px] text-sky-900 hover:bg-sky-100"
+                      onClick={() => void handleDevHarnessLogin('pm')}
+                    >
+                      PM 샘플 로그인
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-9 border-sky-300 bg-white text-[12px] text-sky-900 hover:bg-sky-100"
+                      onClick={() => void handleDevHarnessLogin('admin')}
+                    >
+                      관리자 샘플 로그인
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>

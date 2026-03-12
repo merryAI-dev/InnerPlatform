@@ -31,12 +31,21 @@ import { isAdminSpaceRole } from '../platform/navigation';
 import { resolveTenantId } from '../platform/tenant';
 import { formatAllowedDomains, getAllowedEmailDomains, isAllowedEmail } from '../platform/email-allowlist';
 import { buildPreviewAuthBlockedMessage, shouldBlockFirebasePopupAuth } from '../platform/preview-auth';
+import {
+  clearDevHarnessSession,
+  createDevHarnessSession,
+  readDevAuthHarnessConfig,
+  readDevHarnessSession,
+  persistDevHarnessSession,
+  type DevHarnessPreset,
+} from '../platform/dev-harness';
 
 export interface AuthUser {
   uid: string;
   name: string;
   email: string;
   role: UserRole;
+  source?: 'firebase' | 'dev_harness';
   idToken?: string;
   avatarUrl?: string;
   projectId?: string;
@@ -57,6 +66,7 @@ interface AuthState {
 
 interface AuthActions {
   loginWithGoogle: () => Promise<{ success: boolean; error?: string }>;
+  loginWithDevHarness: (preset?: DevHarnessPreset) => Promise<{ success: boolean; error?: string }>;
   setWorkspacePreference: (workspace: WorkspaceId, options?: { persistDefault?: boolean }) => Promise<boolean>;
   logout: () => void;
   isAdmin: () => boolean;
@@ -87,6 +97,7 @@ const AUTH_STORAGE_KEY = 'mysc-auth-user';
 const ACTIVE_TENANT_KEY = 'MYSC_ACTIVE_TENANT';
 const DEFAULT_ORG_ID = getDefaultOrgId();
 const ALLOWED_EMAIL_DOMAINS = getAllowedEmailDomains(import.meta.env);
+const DEV_AUTH_HARNESS_CONFIG = readDevAuthHarnessConfig(import.meta.env);
 
 const ROLE_DIRECTORY: RoleDirectoryEntry[] = ORG_MEMBERS.map((member) => ({
   uid: member.uid,
@@ -273,6 +284,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(featureFlags.firebaseAuthEnabled);
 
   useEffect(() => {
+    const harnessSession = readDevHarnessSession();
+    if (DEV_AUTH_HARNESS_CONFIG.enabled && harnessSession) {
+      const mapped: AuthUser = {
+        uid: harnessSession.uid,
+        name: harnessSession.name,
+        email: harnessSession.email,
+        role: harnessSession.role,
+        source: 'dev_harness',
+        tenantId: harnessSession.tenantId,
+        projectId: harnessSession.projectId,
+        projectIds: harnessSession.projectIds,
+        defaultWorkspace: harnessSession.defaultWorkspace,
+        lastWorkspace: harnessSession.lastWorkspace,
+      };
+      setUser(mapped);
+      saveUser(mapped);
+      setIsLoading(false);
+      return;
+    }
+
     if (!featureFlags.firebaseAuthEnabled) {
       setIsLoading(false);
       return;
@@ -309,6 +340,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         strict: false,
       });
       const optimisticUser = mapFirebaseUserToAuthUser(firebaseUser, cachedMember, cachedTenantId);
+      optimisticUser.source = 'firebase';
       setUser(optimisticUser);
       saveUser(optimisticUser);
       setIsLoading(false);
@@ -328,6 +360,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           claimsContext.department,
         );
         const mapped = mapFirebaseUserToAuthUser(firebaseUser, member, tenantId, token?.token);
+        mapped.source = 'firebase';
         setUser(mapped);
         saveUser(mapped);
       } catch (err) {
@@ -339,6 +372,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
         const token = await firebaseUser.getIdTokenResult().catch(() => null);
         const fallback = mapFirebaseUserToAuthUser(firebaseUser, cachedMember, fallbackTenantId, token?.token);
+        fallback.source = 'firebase';
         setUser(fallback);
         saveUser(fallback);
       }
@@ -363,6 +397,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
     setUser(nextUser);
     saveUser(nextUser);
+
+    if (currentUser.source === 'dev_harness') {
+      persistDevHarnessSession({
+        source: 'dev_harness',
+        uid: nextUser.uid,
+        name: nextUser.name,
+        email: nextUser.email,
+        role: nextUser.role,
+        tenantId: nextUser.tenantId || DEFAULT_ORG_ID,
+        projectId: nextUser.projectId,
+        projectIds: nextUser.projectIds,
+        defaultWorkspace: nextUser.defaultWorkspace,
+        lastWorkspace: nextUser.lastWorkspace,
+      });
+      return true;
+    }
 
     const db = getDb();
     if (!db) return true;
@@ -441,6 +491,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const loginWithDevHarness = useCallback(async (
+    preset: DevHarnessPreset = 'pm',
+  ): Promise<{ success: boolean; error?: string }> => {
+    if (!DEV_AUTH_HARNESS_CONFIG.enabled) {
+      return { success: false, error: '개발용 인증 harness가 비활성화되어 있습니다.' };
+    }
+    const session = createDevHarnessSession(preset, DEFAULT_ORG_ID);
+    persistDevHarnessSession(session);
+    const mapped: AuthUser = {
+      uid: session.uid,
+      name: session.name,
+      email: session.email,
+      role: session.role,
+      source: 'dev_harness',
+      tenantId: session.tenantId,
+      projectId: session.projectId,
+      projectIds: session.projectIds,
+      defaultWorkspace: session.defaultWorkspace,
+      lastWorkspace: session.lastWorkspace,
+    };
+    setUser(mapped);
+    saveUser(mapped);
+    setIsLoading(false);
+    return { success: true };
+  }, []);
+
   const logout = useCallback(() => {
     if (featureFlags.firebaseAuthEnabled) {
       const auth = getAuthInstance();
@@ -453,6 +529,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     setUser(null);
     saveUser(null);
+    clearDevHarnessSession();
     localStorage.removeItem(ACTIVE_TENANT_KEY);
     localStorage.removeItem('mysc-portal-user');
   }, []);
@@ -471,6 +548,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isLoading,
     isFirebaseAuthEnabled: featureFlags.firebaseAuthEnabled,
     loginWithGoogle,
+    loginWithDevHarness,
     setWorkspacePreference,
     logout,
     isAdmin,

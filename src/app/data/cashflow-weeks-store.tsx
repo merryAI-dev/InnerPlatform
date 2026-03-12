@@ -210,7 +210,6 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     mode: 'projection' | 'actual';
     amounts: Partial<Record<CashflowSheetLineId, number>>;
   }): Promise<void> => {
-    if (!db) return;
     const actor = user;
     if (!actor) return;
 
@@ -222,6 +221,57 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     const monthWeeks = getMonthMondayWeeks(ym);
     const def = monthWeeks.find((w) => w.weekNo === weekNo);
     if (!def) return;
+
+    if (!db && actor.source === 'dev_harness') {
+      const id = resolveWeekDocId(projectId, ym, weekNo);
+      const now = new Date().toISOString();
+      const normalizedAmounts = Object.fromEntries(
+        Object.entries(input.amounts || {})
+          .filter(([lineId]) => typeof lineId === 'string' && lineId.trim())
+          .map(([lineId, amountRaw]) => [lineId, clampAmount(Number(amountRaw))]),
+      ) as Partial<Record<CashflowSheetLineId, number>>;
+      setWeeks((prev) => {
+        const existingIndex = prev.findIndex((sheet) => sheet.id === id);
+        if (existingIndex >= 0) {
+          const next = [...prev];
+          const current = next[existingIndex];
+          next[existingIndex] = {
+            ...current,
+            [input.mode]: {
+              ...current[input.mode],
+              ...normalizedAmounts,
+            },
+            updatedAt: now,
+            updatedByUid: actor.uid,
+            updatedByName: actor.name,
+          };
+          return next;
+        }
+        return [
+          ...prev,
+          {
+            id,
+            tenantId: orgId,
+            projectId,
+            yearMonth: ym,
+            weekNo,
+            weekStart: def.weekStart,
+            weekEnd: def.weekEnd,
+            projection: input.mode === 'projection' ? normalizedAmounts : {},
+            actual: input.mode === 'actual' ? normalizedAmounts : {},
+            pmSubmitted: false,
+            adminClosed: false,
+            createdAt: now,
+            updatedAt: now,
+            updatedByUid: actor.uid,
+            updatedByName: actor.name,
+          },
+        ];
+      });
+      return;
+    }
+
+    if (!db) return;
 
     const id = resolveWeekDocId(projectId, ym, weekNo);
     const now = new Date().toISOString();

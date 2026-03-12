@@ -24,6 +24,7 @@ import {
 } from '../../data/types';
 import { toast } from 'sonner';
 import { type ProjectProposalDraft } from './project-proposal';
+import { PROJECT_DEPARTMENT_OPTIONS } from '../../data/project-department-options';
 
 // ═══════════════════════════════════════════════════════════════
 // PortalProjectRegister — 포털 사용자의 사업 등록 제안
@@ -245,12 +246,21 @@ export function PortalProjectRegister() {
 
               <div>
                 <Label className="text-[11px]">담당조직</Label>
-                <Input
-                  value={form.department}
-                  onChange={e => update('department', e.target.value)}
-                  placeholder="예: 임팩트 이노베이션 그룹"
-                  className="h-9 text-[12px] mt-1"
-                />
+                <Select
+                  value={form.department || undefined}
+                  onValueChange={(value) => update('department', value)}
+                >
+                  <SelectTrigger className="h-9 text-[12px] mt-1">
+                    <SelectValue placeholder="담당조직 선택" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PROJECT_DEPARTMENT_OPTIONS.map((department) => (
+                      <SelectItem key={department} value={department}>
+                        {department}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               <div>

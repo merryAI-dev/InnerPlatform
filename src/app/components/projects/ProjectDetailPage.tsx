@@ -41,19 +41,30 @@ const statusColor: Record<string, string> = {
   COMPLETED_PENDING_PAYMENT: 'bg-teal-100 text-teal-800',
 };
 
-function fmt(n: number) {
-  return n.toLocaleString('ko-KR');
+function toFiniteNumber(value: unknown) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return 0;
 }
 
-function fmtShort(n: number) {
-  if (Math.abs(n) >= 1e8) return (n / 1e8).toFixed(1) + '억';
-  if (Math.abs(n) >= 1e4) return (n / 1e4).toFixed(0) + '만';
-  return n.toLocaleString();
+function fmt(n: number | null | undefined) {
+  return toFiniteNumber(n).toLocaleString('ko-KR');
 }
 
-function fmtPercent(n: number) {
-  if (n === 0) return '-';
-  return (n * 100).toFixed(2) + '%';
+function fmtShort(n: number | null | undefined) {
+  const amount = toFiniteNumber(n);
+  if (Math.abs(amount) >= 1e8) return (amount / 1e8).toFixed(1) + '억';
+  if (Math.abs(amount) >= 1e4) return (amount / 1e4).toFixed(0) + '만';
+  return amount.toLocaleString();
+}
+
+function fmtPercent(n: number | null | undefined) {
+  const ratio = toFiniteNumber(n);
+  if (ratio === 0) return '-';
+  return (ratio * 100).toFixed(2) + '%';
 }
 
 export function ProjectDetailPage() {
@@ -66,6 +77,12 @@ export function ProjectDetailPage() {
 
   const project = getProjectById(projectId || '');
   const projectLedgers = getProjectLedgers(projectId || '');
+
+  const contractAmount = toFiniteNumber(project?.contractAmount);
+  const budgetCurrentYear = toFiniteNumber(project?.budgetCurrentYear);
+  const profitRate = toFiniteNumber(project?.profitRate);
+  const profitAmount = toFiniteNumber(project?.profitAmount);
+  const taxInvoiceAmount = toFiniteNumber(project?.taxInvoiceAmount);
 
   const [showLedgerDialog, setShowLedgerDialog] = useState(false);
   const [ledgerForm, setLedgerForm] = useState({
@@ -274,7 +291,7 @@ export function ProjectDetailPage() {
             <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
               <Landmark className="w-3.5 h-3.5" /> 총 사업비
             </div>
-            <p className="text-xl" style={{ fontWeight: 600 }}>{fmtShort(project.contractAmount)}</p>
+            <p className="text-xl" style={{ fontWeight: 600 }}>{fmtShort(contractAmount)}</p>
           </CardContent>
         </Card>
         <Card>
@@ -282,7 +299,7 @@ export function ProjectDetailPage() {
             <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
               <DollarSign className="w-3.5 h-3.5" /> 2026년 예산
             </div>
-            <p className="text-xl" style={{ fontWeight: 600 }}>{fmtShort(project.budgetCurrentYear)}</p>
+            <p className="text-xl" style={{ fontWeight: 600 }}>{fmtShort(budgetCurrentYear)}</p>
           </CardContent>
         </Card>
         <Card>
@@ -291,12 +308,12 @@ export function ProjectDetailPage() {
               <TrendingUp className="w-3.5 h-3.5 text-emerald-600" /> 수익률 / 수익금액
             </div>
             <p className="text-xl" style={{ fontWeight: 600 }}>
-              <span className={project.profitRate >= 0.1 ? 'text-emerald-700' : 'text-amber-700'}>
-                {fmtPercent(project.profitRate)}
+              <span className={profitRate >= 0.1 ? 'text-emerald-700' : 'text-amber-700'}>
+                {fmtPercent(profitRate)}
               </span>
             </p>
             <p className="text-xs text-muted-foreground mt-1">
-              {project.profitAmount > 0 ? fmt(project.profitAmount) + '원' : '-'}
+              {profitAmount > 0 ? fmt(profitAmount) + '원' : '-'}
             </p>
           </CardContent>
         </Card>
@@ -307,7 +324,7 @@ export function ProjectDetailPage() {
             </div>
             <p className="text-xl text-green-700" style={{ fontWeight: 600 }}>{fmtShort(stats.totalIn)}</p>
             <p className="text-xs text-muted-foreground mt-1">
-              사업비대비 {project.contractAmount > 0 ? ((stats.totalIn / project.contractAmount) * 100).toFixed(1) : 0}%
+              사업비대비 {contractAmount > 0 ? ((stats.totalIn / contractAmount) * 100).toFixed(1) : 0}%
             </p>
           </CardContent>
         </Card>
@@ -352,7 +369,7 @@ export function ProjectDetailPage() {
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">세금계산서 금액</span>
-                <span>{project.taxInvoiceAmount > 0 ? fmt(project.taxInvoiceAmount) + '원' : '-'}</span>
+                <span>{taxInvoiceAmount > 0 ? fmt(taxInvoiceAmount) + '원' : '-'}</span>
               </div>
             </div>
           </CardContent>
@@ -408,7 +425,7 @@ export function ProjectDetailPage() {
                   <p className="text-xs text-muted-foreground">{item.label}</p>
                   <p className="text-lg" style={{ fontWeight: 600 }}>{fmtShort(item.amount)}</p>
                   <p className="text-xs text-muted-foreground">
-                    {project.contractAmount > 0 ? ((item.amount / project.contractAmount) * 100).toFixed(0) : 0}%
+                    {contractAmount > 0 ? ((item.amount / contractAmount) * 100).toFixed(0) : 0}%
                   </p>
                 </div>
               ))}
