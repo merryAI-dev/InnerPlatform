@@ -39,6 +39,7 @@ import {
 import {
   commentCreateSchema,
   evidenceCreateSchema,
+  evidenceDriveOverrideSchema,
   evidenceDriveUploadSchema,
   genericWriteSchema,
   googleSheetImportPreviewSchema,
@@ -1661,20 +1662,33 @@ export function createBffApp(options = {}) {
     let ledger = ledgerSnap.exists ? (ledgerSnap.data() || {}) : null;
 
     if (!ledger) {
-      const ensuredLedger = await upsertVersionedDoc({
-        db,
-        path: ledgerPath,
-        payload: {
-          id: parsed.ledgerId.trim(),
-          projectId: parsed.projectId.trim(),
-          name: resolveAutoLedgerName(project),
-        },
-        tenantId,
-        actorId,
-        now: timestamp,
-        expectedVersion: 0,
-      });
-      ledger = ensuredLedger.data;
+      try {
+        const ensuredLedger = await upsertVersionedDoc({
+          db,
+          path: ledgerPath,
+          payload: {
+            id: parsed.ledgerId.trim(),
+            projectId: parsed.projectId.trim(),
+            name: resolveAutoLedgerName(project),
+          },
+          tenantId,
+          actorId,
+          now: timestamp,
+          expectedVersion: 0,
+        });
+        ledger = ensuredLedger.data;
+      } catch (error) {
+        const statusCode = Number.isFinite(error?.statusCode) ? Number(error.statusCode) : 0;
+        const errorCode = readOptionalText(error?.code);
+        if (statusCode !== 409 && errorCode !== 'version_conflict' && errorCode !== 'version_required') {
+          throw error;
+        }
+        const retryLedgerSnap = await ledgerRef.get();
+        if (!retryLedgerSnap.exists) {
+          throw error;
+        }
+        ledger = retryLedgerSnap.data() || {};
+      }
     }
 
     if (ledger.projectId !== parsed.projectId) {
@@ -2261,6 +2275,99 @@ export function createBffApp(options = {}) {
         evidenceMissing: txResult.data.evidenceMissing || [],
         evidenceStatus: txResult.data.evidenceStatus,
         lastSyncedAt: timestamp,
+        version: txResult.version,
+        updatedAt: txResult.data.updatedAt,
+      },
+    };
+  }));
+
+  app.post('/api/v1/transactions/:txId/evidence-drive/overrides', createMutatingRoute(idempotencyService, async (req) => {
+    assertActorRoleAllowed(req, ROUTE_ROLES.writeEvidenceDrive, 'override evidence drive metadata');
+    assertActorPermissionAllowed(rbacPolicy, req, 'evidence:drive:write', 'override evidence drive metadata');
+    const { tenantId, actorId } = req.context;
+    const { txId } = req.params;
+    const timestamp = now();
+    const parsed = parseWithSchema(evidenceDriveOverrideSchema, req.body, 'Invalid evidence drive override payload');
+
+    const transaction = await ensureDocumentExists(
+      db,
+      `orgs/${tenantId}/transactions/${txId}`,
+      `Transaction not found: ${txId}`,
+    );
+
+    const snapshot = await db
+      .collection(`orgs/${tenantId}/evidences`)
+      .where('transactionId', '==', txId)
+      .get();
+
+    const overrideByFileId = new Map(
+      parsed.items.map((item) => [item.driveFileId.trim(), item.category.trim()]),
+    );
+    const evidenceDocs = snapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...(doc.data() || {}),
+    }));
+
+    const docsToUpdate = evidenceDocs.filter((item) => overrideByFileId.has(readOptionalText(item.driveFileId)));
+    if (docsToUpdate.length > 0) {
+      for (const docs of chunkArray(docsToUpdate, 400)) {
+        const batch = db.batch();
+        docs.forEach((item) => {
+          const category = overrideByFileId.get(readOptionalText(item.driveFileId));
+          if (!category) return;
+          batch.set(
+            db.doc(`orgs/${tenantId}/evidences/${item.id}`),
+            {
+              category,
+              updatedAt: timestamp,
+            },
+            { merge: true },
+          );
+          item.category = category;
+          item.updatedAt = timestamp;
+        });
+        await batch.commit();
+      }
+    }
+
+    const syncPatch = resolveEvidenceSyncPatch({
+      transaction,
+      evidences: evidenceDocs,
+      folder: {
+        id: transaction.evidenceDriveFolderId,
+        name: transaction.evidenceDriveFolderName,
+        webViewLink: transaction.evidenceDriveLink,
+        driveId: transaction.evidenceDriveSharedDriveId,
+      },
+    });
+
+    const txResult = await mergeSystemManagedDoc({
+      db,
+      path: `orgs/${tenantId}/transactions/${txId}`,
+      patch: syncPatch,
+      tenantId,
+      actorId,
+      now: timestamp,
+      notFoundMessage: `Transaction not found: ${txId}`,
+    });
+
+    return {
+      status: 200,
+      body: {
+        transactionId: txId,
+        projectId: transaction.projectId,
+        folderId: transaction.evidenceDriveFolderId || null,
+        folderName: transaction.evidenceDriveFolderName || null,
+        webViewLink: transaction.evidenceDriveLink || null,
+        sharedDriveId: transaction.evidenceDriveSharedDriveId || null,
+        evidenceCount: evidenceDocs.length,
+        evidenceCompletedDesc: txResult.data.evidenceCompletedDesc || null,
+        evidenceAutoListedDesc: txResult.data.evidenceAutoListedDesc || null,
+        evidencePendingDesc: txResult.data.evidencePendingDesc || null,
+        supportPendingDocs: txResult.data.supportPendingDocs || null,
+        evidenceMissing: txResult.data.evidenceMissing || [],
+        evidenceStatus: txResult.data.evidenceStatus,
+        lastSyncedAt: transaction.evidenceDriveLastSyncedAt || timestamp,
         version: txResult.version,
         updatedAt: txResult.data.updatedAt,
       },

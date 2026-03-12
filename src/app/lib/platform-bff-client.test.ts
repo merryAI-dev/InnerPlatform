@@ -4,6 +4,7 @@ import {
   addEvidenceViaBff,
   changeTransactionStateViaBff,
   linkProjectEvidenceDriveRootViaBff,
+  overrideTransactionEvidenceDriveCategoriesViaBff,
   previewGoogleSheetImportViaBff,
   provisionProjectEvidenceDriveRootViaBff,
   provisionTransactionEvidenceDriveViaBff,
@@ -350,6 +351,52 @@ describe('platform-bff-client', () => {
     }));
     expect(result.driveFileId).toBe('drv-file-001');
     expect(result.evidenceCompletedDesc).toBe('ZOOM invoice');
+  });
+
+  it('posts evidence drive category overrides', async () => {
+    const client = {
+      post: vi.fn(),
+      get: vi.fn(),
+      request: vi.fn(async () => ({
+        data: {
+          transactionId: 'tx001',
+          projectId: 'p001',
+          folderId: 'fld-tx',
+          folderName: '20260311_회의비_다과비_tx001',
+          webViewLink: 'https://drive.google.com/drive/folders/fld-tx',
+          sharedDriveId: 'drive-001',
+          evidenceCount: 1,
+          evidenceCompletedDesc: '세금계산서',
+          evidenceAutoListedDesc: '세금계산서',
+          evidencePendingDesc: null,
+          supportPendingDocs: null,
+          evidenceMissing: [],
+          evidenceStatus: 'COMPLETE',
+          lastSyncedAt: '2026-03-11T11:10:00.000Z',
+          version: 6,
+          updatedAt: '2026-03-11T11:10:00.000Z',
+        },
+      })),
+    };
+
+    const result = await overrideTransactionEvidenceDriveCategoriesViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm' },
+      transactionId: 'tx001',
+      overrides: {
+        items: [{ driveFileId: 'drv-file-001', category: '세금계산서' }],
+      },
+      client,
+    });
+
+    expect(client.request).toHaveBeenCalledWith('/api/v1/transactions/tx001/evidence-drive/overrides', expect.objectContaining({
+      method: 'POST',
+      tenantId: 'mysc',
+      body: {
+        items: [{ driveFileId: 'drv-file-001', category: '세금계산서' }],
+      },
+    }));
+    expect(result.evidenceCompletedDesc).toBe('세금계산서');
   });
 
   it('calls google sheet import preview endpoint', async () => {

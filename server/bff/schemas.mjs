@@ -74,6 +74,15 @@ export const evidenceDriveUploadSchema = z.object({
   category: NON_EMPTY_STRING.optional(),
 }).strict();
 
+export const evidenceDriveOverrideSchema = z.object({
+  items: z.array(
+    z.object({
+      driveFileId: NON_EMPTY_STRING,
+      category: NON_EMPTY_STRING,
+    }).strict(),
+  ).min(1),
+}).strict();
+
 export const memberRoleUpdateSchema = z.object({
   role: z.enum(['admin', 'finance', 'pm', 'viewer', 'auditor', 'tenant_admin', 'support', 'security']),
   reason: z.string().trim().min(1).max(500).optional(),

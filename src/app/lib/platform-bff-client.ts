@@ -135,6 +135,13 @@ export interface UploadTransactionEvidenceDriveResult extends SyncTransactionEvi
   parserConfidence: number;
 }
 
+export interface OverrideTransactionEvidenceDriveCategoriesPayload {
+  items: Array<{
+    driveFileId: string;
+    category: string;
+  }>;
+}
+
 export interface PlatformApiClientLike {
   get<T>(path: string, options: {
     tenantId: string;
@@ -444,6 +451,28 @@ export async function uploadTransactionEvidenceDriveViaBff(params: {
       body: params.upload,
       retries: 0,
       timeoutMs: 30000,
+    },
+  );
+  return response.data;
+}
+
+export async function overrideTransactionEvidenceDriveCategoriesViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  transactionId: string;
+  overrides: OverrideTransactionEvidenceDriveCategoriesPayload;
+  client?: PlatformApiClientLike;
+}): Promise<SyncTransactionEvidenceDriveResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.request<SyncTransactionEvidenceDriveResult>(
+    `/api/v1/transactions/${params.transactionId}/evidence-drive/overrides`,
+    {
+      method: 'POST',
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.overrides,
+      retries: 0,
+      timeoutMs: 15000,
     },
   );
   return response.data;

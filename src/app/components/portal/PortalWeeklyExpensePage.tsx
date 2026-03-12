@@ -23,6 +23,7 @@ import { toast } from 'sonner';
 import { useFirebase } from '../../lib/firebase-context';
 import {
   type GoogleSheetImportPreviewResult,
+  overrideTransactionEvidenceDriveCategoriesViaBff,
   type ProvisionTransactionEvidenceDriveResult,
   type SyncTransactionEvidenceDriveResult,
   type UploadTransactionEvidenceDriveResult,
@@ -34,6 +35,10 @@ import {
   uploadTransactionEvidenceDriveViaBff,
 } from '../../lib/platform-bff-client';
 import { PlatformApiError } from '../../platform/api-client';
+import {
+  GoogleDriveBrowserUploadError,
+  uploadFileToGoogleDriveFolder,
+} from '../../platform/google-drive-browser-upload';
 import { splitLooseNameList } from '../../platform/name-list';
 import {
   GOOGLE_SHEET_PROTECTED_HEADERS,
@@ -341,6 +346,10 @@ export function PortalWeeklyExpensePage() {
 
   const handleEvidenceDriveError = (error: unknown, actionLabel: string) => {
     console.error(`[PortalWeeklyExpensePage] ${actionLabel} failed:`, error);
+    if (error instanceof GoogleDriveBrowserUploadError) {
+      toast.error(error.message || `${actionLabel}에 실패했습니다.`);
+      return;
+    }
     if (error instanceof PlatformApiError) {
       const message = typeof error.body === 'object' && error.body && 'message' in (error.body as Record<string, unknown>)
         ? String((error.body as Record<string, unknown>).message || '')
@@ -480,6 +489,7 @@ export function PortalWeeklyExpensePage() {
       });
       applyProvisionedDriveState(tx.id, result);
       toast.success(`증빙 폴더 연결 완료: ${result.folderName}`);
+      return result;
     } catch (error) {
       handleEvidenceDriveError(error, '증빙 폴더 생성');
       throw error;
@@ -520,8 +530,58 @@ export function PortalWeeklyExpensePage() {
 
   const uploadEvidenceDrive = async (tx: Transaction, uploads: EvidenceUploadSelection[]) => {
     try {
-      let lastResult: UploadTransactionEvidenceDriveResult | null = null;
+      const googleAccessToken = bffActor.googleAccessToken || await ensureGoogleWorkspaceAccess() || undefined;
+      let workingTx = transactions.find((candidate) => candidate.id === tx.id) || tx;
+      let folderId = workingTx.evidenceDriveFolderId || '';
+      let sharedDriveId = workingTx.evidenceDriveSharedDriveId || '';
+
+      if (!folderId) {
+        const provisioned = await provisionEvidenceDrive(workingTx);
+        folderId = provisioned.folderId;
+        sharedDriveId = provisioned.sharedDriveId || sharedDriveId;
+        workingTx = {
+          ...workingTx,
+          evidenceDriveFolderId: provisioned.folderId,
+          evidenceDriveFolderName: provisioned.folderName,
+          evidenceDriveLink: provisioned.webViewLink || workingTx.evidenceDriveLink,
+          evidenceDriveSharedDriveId: provisioned.sharedDriveId || workingTx.evidenceDriveSharedDriveId,
+        };
+      }
+
+      if (!folderId) {
+        throw new Error('증빙 Drive 폴더를 찾지 못했습니다.');
+      }
+
+      const categoryOverrides: Array<{ driveFileId: string; category: string }> = [];
+      let usedBrowserUpload = false;
+      let lastResult: UploadTransactionEvidenceDriveResult | SyncTransactionEvidenceDriveResult | null = null;
+
       for (const upload of uploads) {
+        if (googleAccessToken) {
+          const uploadedFile = await uploadFileToGoogleDriveFolder({
+            accessToken: googleAccessToken,
+            folderId,
+            file: upload.file,
+            fileName: upload.reviewedFileName,
+            mimeType: upload.file.type || 'application/octet-stream',
+            appProperties: {
+              managedBy: 'mysc-platform',
+              tenantId: orgId,
+              projectId,
+              transactionId: tx.id,
+              evidenceSource: 'platform-upload',
+              originalFileName: upload.file.name,
+              sharedDriveId,
+            },
+          });
+          categoryOverrides.push({
+            driveFileId: uploadedFile.id,
+            category: upload.category,
+          });
+          usedBrowserUpload = true;
+          continue;
+        }
+
         const contentBase64 = await readFileAsBase64(upload.file);
         lastResult = await uploadTransactionEvidenceDriveViaBff({
           tenantId: orgId,
@@ -537,7 +597,29 @@ export function PortalWeeklyExpensePage() {
           },
         });
       }
-      if (lastResult) {
+
+      if (usedBrowserUpload) {
+        lastResult = await syncTransactionEvidenceDriveViaBff({
+          tenantId: orgId,
+          actor: {
+            ...bffActor,
+            ...(googleAccessToken ? { googleAccessToken } : {}),
+          },
+          transactionId: tx.id,
+        });
+        applySyncedEvidenceState(tx.id, lastResult);
+
+        if (categoryOverrides.length > 0) {
+          const overrideResult = await overrideTransactionEvidenceDriveCategoriesViaBff({
+            tenantId: orgId,
+            actor: bffActor,
+            transactionId: tx.id,
+            overrides: { items: categoryOverrides },
+          });
+          applySyncedEvidenceState(tx.id, overrideResult);
+          lastResult = overrideResult;
+        }
+      } else if (lastResult) {
         applySyncedEvidenceState(tx.id, lastResult);
       }
       toast.success(`증빙 업로드 완료: ${uploads.length}건`);
