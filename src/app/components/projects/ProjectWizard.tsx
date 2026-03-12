@@ -42,6 +42,7 @@ import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Progress } from '../ui/progress';
 import { Separator } from '../ui/separator';
+import { PROJECT_DEPARTMENT_OPTIONS } from '../../data/project-department-options';
 
 // ── Step Definitions ──
 
@@ -103,12 +104,6 @@ const INITIAL_DATA: WizardFormData = {
   contractAmount: 0, budgetCurrentYear: 0, taxInvoiceAmount: 0, profitRate: 0, profitAmount: 0,
   paymentContract: 0, paymentInterim: 0, paymentFinal: 0, paymentPlanDesc: '', finalPaymentNote: '',
 };
-
-const DEPARTMENTS = [
-  'L-개발협력센터', 'L-글로벌센터', 'L-디자인팀',
-  'C-스템CIC', 'C-모모CIC', 'C-썬CIC',
-  'I-공간플랫폼센터', 'I-투자센터',
-];
 
 const CONTRACT_TYPES = ['계약서(날인)', '발주기관 전자시스템', '기타'];
 
@@ -295,7 +290,7 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
                   className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
                 >
                   <option value="">선택하세요</option>
-                  {DEPARTMENTS.map(d => (
+                  {PROJECT_DEPARTMENT_OPTIONS.map((d) => (
                     <option key={d} value={d}>{d}</option>
                   ))}
                 </select>

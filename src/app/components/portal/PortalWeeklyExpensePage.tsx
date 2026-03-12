@@ -153,7 +153,7 @@ export function PortalWeeklyExpensePage() {
   const bffActor = useMemo(() => ({
     uid: authUser?.uid || portalUser?.id || 'portal-user',
     email: authUser?.email || portalUser?.email || '',
-    role: portalUser?.role || authUser?.role || 'pm',
+    role: authUser?.role || portalUser?.role || 'pm',
     idToken: authUser?.idToken,
   }), [authUser?.uid, authUser?.email, authUser?.role, authUser?.idToken, portalUser?.id, portalUser?.email, portalUser?.role]);
   const googleSheetPreviewRows = useMemo(() => (

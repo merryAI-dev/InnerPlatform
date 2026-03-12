@@ -59,10 +59,13 @@ describe('request-context helpers', () => {
   it('adds authorization header when id token exists', () => {
     const headers = buildStandardHeaders({
       tenantId: 'mysc',
-      actor: { id: 'u001', idToken: 'token-123' },
+      actor: { id: 'u001', email: 'viewer@mysc.co.kr', role: 'viewer', idToken: 'token-123' },
       method: 'GET',
     });
 
     expect(headers.get('authorization')).toBe('Bearer token-123');
+    expect(headers.get('x-actor-id')).toBeNull();
+    expect(headers.get('x-actor-email')).toBeNull();
+    expect(headers.get('x-actor-role')).toBeNull();
   });
 });
