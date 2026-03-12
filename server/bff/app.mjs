@@ -110,6 +110,13 @@ function parseAllowedOrigins(value) {
   return ['http://127.0.0.1:5173', 'http://localhost:5173'];
 }
 
+function isKnownMyscVercelOrigin(origin) {
+  const normalized = readOptionalText(origin);
+  if (!normalized) return false;
+  if (normalized === 'https://inner-platform.vercel.app') return true;
+  return /^https:\/\/inner-platform(?:-[a-z0-9-]+)?-merryai-devs-projects\.vercel\.app$/i.test(normalized);
+}
+
 function buildListResponse(items, limit) {
   const nextCursor = items.length === limit ? items[items.length - 1]?.id || null : null;
   return {
@@ -248,12 +255,14 @@ function normalizeRole(value) {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
 }
 
+const ALL_INTERNAL_ROUTE_ROLES = ['admin', 'finance', 'pm', 'viewer', 'auditor', 'tenant_admin', 'support', 'security'];
+
 const ROUTE_ROLES = {
-  readCore: ['admin', 'finance', 'pm', 'viewer', 'auditor', 'tenant_admin', 'support', 'security'],
-  writeCore: ['admin', 'finance', 'pm', 'tenant_admin'],
-  writeTransaction: ['admin', 'finance', 'pm', 'tenant_admin'],
-  writeProjectDrive: ['admin', 'finance', 'pm', 'viewer', 'tenant_admin'],
-  writeEvidenceDrive: ['admin', 'finance', 'pm', 'viewer', 'tenant_admin'],
+  readCore: ALL_INTERNAL_ROUTE_ROLES,
+  writeCore: ALL_INTERNAL_ROUTE_ROLES,
+  writeTransaction: ALL_INTERNAL_ROUTE_ROLES,
+  writeProjectDrive: ALL_INTERNAL_ROUTE_ROLES,
+  writeEvidenceDrive: ALL_INTERNAL_ROUTE_ROLES,
   auditRead: ['admin', 'finance', 'auditor', 'tenant_admin', 'support', 'security'],
   memberWrite: ['admin', 'tenant_admin'],
 };
@@ -577,7 +586,10 @@ export function createBffApp(options = {}) {
   app.use((req, res, next) => {
     const requestOrigin = req.header('origin') || '';
     const allowAnyOrigin = allowedOrigins.includes('*');
-    const isAllowedOrigin = allowAnyOrigin || !requestOrigin || allowedOrigins.includes(requestOrigin);
+    const isAllowedOrigin = allowAnyOrigin
+      || !requestOrigin
+      || allowedOrigins.includes(requestOrigin)
+      || isKnownMyscVercelOrigin(requestOrigin);
 
     if (!isAllowedOrigin) {
       res.status(403).json({

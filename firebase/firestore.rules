@@ -26,7 +26,7 @@ service cloud.firestore {
     }
 
     function role(orgId) {
-      return isSignedIn() ? memberDoc(orgId).data.role : null;
+      return isSignedIn() && memberDoc(orgId).data != null ? memberDoc(orgId).data.role : null;
     }
 
     function tokenRole() {
@@ -55,10 +55,10 @@ service cloud.firestore {
     }
 
     function memberProjectId(orgId) {
-      return memberDoc(orgId).data.projectId;
+      return memberDoc(orgId).data != null ? memberDoc(orgId).data.projectId : null;
     }
     function memberProjectIds(orgId) {
-      return memberDoc(orgId).data.projectIds;
+      return memberDoc(orgId).data != null ? memberDoc(orgId).data.projectIds : null;
     }
 
     function isProjectAssigned(orgId, projectId) {
@@ -67,15 +67,15 @@ service cloud.firestore {
     }
 
     function canReadProjectResource(orgId, projectId) {
-      return isPrivileged(orgId)
-        || (role(orgId) in ['pm', 'viewer'] && isProjectAssigned(orgId, projectId));
+      // Internal MYSC rollout mode: once authenticated with a company account,
+      // all project-scoped portal resources are readable without member/project mapping.
+      return isSignedIn();
     }
 
     function canWriteProjectResource(orgId, projectId) {
-      return role(orgId) in ['admin', 'tenant_admin', 'finance']
-        || tokenRole() in ['admin', 'tenant_admin', 'finance']
-        || isBootstrapAdminEmail()
-        || (role(orgId) == 'pm' && isProjectAssigned(orgId, projectId));
+      // Internal MYSC rollout mode: allow all signed-in company users to use
+      // project-scoped portal features without per-project assignment.
+      return isSignedIn();
     }
 
     function projectIdFromTransaction(orgId, txId) {
