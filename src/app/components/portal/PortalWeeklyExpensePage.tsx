@@ -30,7 +30,6 @@ import {
   provisionProjectEvidenceDriveRootViaBff,
   provisionTransactionEvidenceDriveViaBff,
   syncTransactionEvidenceDriveViaBff,
-  upsertLedgerViaBff,
   upsertTransactionViaBff,
   uploadTransactionEvidenceDriveViaBff,
 } from '../../lib/platform-bff-client';
@@ -72,12 +71,6 @@ function normalizeBudgetLabel(value: string): string {
     .replace(/^\s*\d+(?:[.\-]\d+)?\s*/, '')
     .replace(/^[.\-]+\s*/, '')
     .trim();
-}
-
-function resolveAutoLedgerName(accountType?: string): string {
-  if (accountType === 'DEDICATED') return '전용통장 원장';
-  if (accountType === 'OPERATING') return '운영통장 원장';
-  return '기본 원장';
 }
 
 type GoogleSheetWizardStep = 'source' | 'sheet' | 'review' | 'apply';
@@ -435,20 +428,6 @@ export function PortalWeeklyExpensePage() {
     };
 
     try {
-      const existingLedger = ledgers.find((candidate) => candidate.id === defaultLedgerId);
-      await upsertLedgerViaBff({
-        tenantId: orgId,
-        actor: bffActor,
-        ledger: {
-          id: defaultLedgerId,
-          projectId,
-          name: existingLedger?.name || resolveAutoLedgerName(myProject?.accountType),
-          ...(Number.isFinite(existingLedger?.version)
-            ? { expectedVersion: existingLedger?.version }
-            : {}),
-        },
-      });
-
       const requestPayload = {
         ...nextTx,
         ...(Number.isFinite(existingTx?.version)
@@ -487,7 +466,7 @@ export function PortalWeeklyExpensePage() {
       }
       return txId;
     } catch (error) {
-      handleEvidenceDriveError(error, '거래/원장 저장');
+      handleEvidenceDriveError(error, '거래 저장');
       return null;
     }
   };
