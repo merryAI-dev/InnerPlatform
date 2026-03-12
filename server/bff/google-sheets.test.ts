@@ -59,4 +59,38 @@ describe('google-sheets helpers', () => {
     expect(preview.matrix[1]).toEqual(['홍길동', '2026-03-12', '카페 메리']);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
+
+  it('prefers caller google access token over service account auth', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        properties: { title: '사업비 시트' },
+        sheets: [
+          { properties: { sheetId: 0, title: '사용내역', index: 0 } },
+        ],
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        values: [
+          ['작성자', '거래일시'],
+          ['홍길동', '2026-03-12'],
+        ],
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }));
+    const authHeadersFactory = vi.fn(async () => ({ authorization: 'Bearer service-account-token' }));
+    const service = createGoogleSheetsService({ fetchImpl, authHeadersFactory });
+
+    await service.previewSpreadsheet({
+      value: 'https://docs.google.com/spreadsheets/d/1abcDEFghiJKlmnOPQ_rst-123/edit#gid=0',
+      accessToken: 'user-google-token',
+    });
+
+    expect(authHeadersFactory).not.toHaveBeenCalled();
+    const firstHeaders = fetchImpl.mock.calls[0]?.[1]?.headers as Record<string, string>;
+    expect(firstHeaders.authorization).toBe('Bearer user-google-token');
+  });
 });

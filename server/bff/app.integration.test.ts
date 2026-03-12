@@ -106,7 +106,7 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
 
     const preview = await sheetsApi
       .post('/api/v1/projects/p-sheets-001/google-sheet-import/preview')
-      .set(defaultHeaders)
+      .set({ ...defaultHeaders, 'x-google-access-token': 'google-token-123' })
       .send({ value: 'https://docs.google.com/spreadsheets/d/sheet-001/edit#gid=1' });
 
     expect(preview.status).toBe(200);
@@ -116,6 +116,7 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     expect(googleSheetsService.previewSpreadsheet).toHaveBeenCalledWith({
       value: 'https://docs.google.com/spreadsheets/d/sheet-001/edit#gid=1',
       sheetName: undefined,
+      accessToken: 'google-token-123',
     });
   });
 

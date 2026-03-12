@@ -1,6 +1,13 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { onIdTokenChanged, signInWithPopup, signOut, type User as FirebaseUser } from 'firebase/auth';
+import {
+  GoogleAuthProvider,
+  onIdTokenChanged,
+  reauthenticateWithPopup,
+  signInWithPopup,
+  signOut,
+  type User as FirebaseUser,
+} from 'firebase/auth';
 import type { UserRole } from './types';
 import { ORG_MEMBERS, PROJECTS } from './mock-data';
 import { featureFlags } from '../config/feature-flags';
@@ -47,6 +54,7 @@ export interface AuthUser {
   role: UserRole;
   source?: 'firebase' | 'dev_harness';
   idToken?: string;
+  googleAccessToken?: string;
   avatarUrl?: string;
   projectId?: string;
   projectIds?: string[];
@@ -67,6 +75,7 @@ interface AuthState {
 interface AuthActions {
   loginWithGoogle: () => Promise<{ success: boolean; error?: string }>;
   loginWithDevHarness: (preset?: DevHarnessPreset) => Promise<{ success: boolean; error?: string }>;
+  ensureGoogleWorkspaceAccess: () => Promise<string | null>;
   setWorkspacePreference: (workspace: WorkspaceId, options?: { persistDefault?: boolean }) => Promise<boolean>;
   logout: () => void;
   isAdmin: () => boolean;
@@ -95,6 +104,7 @@ interface MemberDoc {
 
 const AUTH_STORAGE_KEY = 'mysc-auth-user';
 const ACTIVE_TENANT_KEY = 'MYSC_ACTIVE_TENANT';
+const GOOGLE_WORKSPACE_TOKEN_STORAGE_KEY = 'mysc-google-workspace-token-map';
 const DEFAULT_ORG_ID = getDefaultOrgId();
 const ALLOWED_EMAIL_DOMAINS = getAllowedEmailDomains(import.meta.env);
 const DEV_AUTH_HARNESS_CONFIG = readDevAuthHarnessConfig(import.meta.env);
@@ -113,15 +123,66 @@ const PROJECT_OWNERS: ProjectOwnerEntry[] = PROJECTS.map((project) => ({
 function loadSavedUser(): AuthUser | null {
   try {
     const saved = localStorage.getItem(AUTH_STORAGE_KEY);
-    return saved ? (JSON.parse(saved) as AuthUser) : null;
+    if (!saved) return null;
+    const parsed = JSON.parse(saved) as AuthUser;
+    return {
+      ...parsed,
+      ...(parsed.uid ? { googleAccessToken: loadGoogleWorkspaceAccessToken(parsed.uid) } : {}),
+    };
   } catch {
     return null;
   }
 }
 
+function readGoogleWorkspaceTokenMap(): Record<string, string> {
+  try {
+    if (typeof sessionStorage === 'undefined') return {};
+    const saved = sessionStorage.getItem(GOOGLE_WORKSPACE_TOKEN_STORAGE_KEY);
+    if (!saved) return {};
+    const parsed = JSON.parse(saved) as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.entries(parsed || {})
+        .map(([uid, token]) => [uid, typeof token === 'string' ? token.trim() : ''] as const)
+        .filter(([uid, token]) => uid && token),
+    );
+  } catch {
+    return {};
+  }
+}
+
+function writeGoogleWorkspaceTokenMap(next: Record<string, string>) {
+  if (typeof sessionStorage === 'undefined') return;
+  const entries = Object.entries(next).filter(([uid, token]) => uid && token);
+  if (entries.length === 0) {
+    sessionStorage.removeItem(GOOGLE_WORKSPACE_TOKEN_STORAGE_KEY);
+    return;
+  }
+  sessionStorage.setItem(GOOGLE_WORKSPACE_TOKEN_STORAGE_KEY, JSON.stringify(Object.fromEntries(entries)));
+}
+
+function loadGoogleWorkspaceAccessToken(uid: string | undefined): string | undefined {
+  const normalizedUid = String(uid || '').trim();
+  if (!normalizedUid) return undefined;
+  return readGoogleWorkspaceTokenMap()[normalizedUid];
+}
+
+function persistGoogleWorkspaceAccessToken(uid: string | undefined, token: string | undefined) {
+  const normalizedUid = String(uid || '').trim();
+  if (!normalizedUid) return;
+  const next = readGoogleWorkspaceTokenMap();
+  const normalizedToken = String(token || '').trim();
+  if (!normalizedToken) {
+    delete next[normalizedUid];
+  } else {
+    next[normalizedUid] = normalizedToken;
+  }
+  writeGoogleWorkspaceTokenMap(next);
+}
+
 function saveUser(user: AuthUser | null) {
   if (user) {
-    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(user));
+    const { googleAccessToken: _ignoredGoogleAccessToken, ...persistedUser } = user;
+    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(persistedUser));
     if (user.tenantId) {
       localStorage.setItem(ACTIVE_TENANT_KEY, user.tenantId);
       if (typeof window !== 'undefined') {
@@ -207,6 +268,7 @@ function mapFirebaseUserToAuthUser(
     email: normalizedEmail,
     role,
     idToken,
+    googleAccessToken: loadGoogleWorkspaceAccessToken(firebaseUser.uid),
     avatarUrl: member?.avatarUrl || firebaseUser.photoURL || undefined,
     projectId: primaryProjectId,
     projectIds: mergedProjectIds,
@@ -464,6 +526,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       const cred = await signInWithPopup(auth, getGoogleAuthProvider());
+      const providerCredential = GoogleAuthProvider.credentialFromResult(cred);
+      const googleAccessToken = providerCredential?.accessToken || undefined;
+      if (cred?.user?.uid) {
+        persistGoogleWorkspaceAccessToken(cred.user.uid, googleAccessToken);
+      }
       const email = cred?.user?.email || '';
       if (!isAllowedEmail(email, ALLOWED_EMAIL_DOMAINS)) {
         await signOut(auth).catch(() => {});
@@ -517,6 +584,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { success: true };
   }, []);
 
+  const ensureGoogleWorkspaceAccess = useCallback(async (): Promise<string | null> => {
+    const currentUser = user;
+    if (!featureFlags.firebaseAuthEnabled || !currentUser || currentUser.source !== 'firebase') {
+      return null;
+    }
+
+    const cached = loadGoogleWorkspaceAccessToken(currentUser.uid);
+    if (cached) {
+      if (!currentUser.googleAccessToken) {
+        const nextUser = { ...currentUser, googleAccessToken: cached };
+        setUser(nextUser);
+        saveUser(nextUser);
+      }
+      return cached;
+    }
+
+    const auth = getAuthInstance();
+    if (!auth) return null;
+
+    try {
+      const provider = getGoogleAuthProvider();
+      const cred = auth.currentUser
+        ? await reauthenticateWithPopup(auth.currentUser, provider)
+        : await signInWithPopup(auth, provider);
+      const providerCredential = GoogleAuthProvider.credentialFromResult(cred);
+      const googleAccessToken = providerCredential?.accessToken || '';
+      if (!googleAccessToken) return null;
+      persistGoogleWorkspaceAccessToken(cred.user?.uid || currentUser.uid, googleAccessToken);
+      const nextUser = { ...currentUser, googleAccessToken };
+      setUser(nextUser);
+      saveUser(nextUser);
+      return googleAccessToken;
+    } catch (err) {
+      console.error('[Auth] ensureGoogleWorkspaceAccess failed:', err);
+      return null;
+    }
+  }, [user]);
+
   const logout = useCallback(() => {
     if (featureFlags.firebaseAuthEnabled) {
       const auth = getAuthInstance();
@@ -529,10 +634,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     setUser(null);
     saveUser(null);
+    if (user?.uid) {
+      persistGoogleWorkspaceAccessToken(user.uid, undefined);
+    }
     clearDevHarnessSession();
     localStorage.removeItem(ACTIVE_TENANT_KEY);
     localStorage.removeItem('mysc-portal-user');
-  }, []);
+  }, [user?.uid]);
 
   const isAdmin = useCallback(() => {
     return !!user && isAdminSpaceRole(user.role);
@@ -549,6 +657,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isFirebaseAuthEnabled: featureFlags.firebaseAuthEnabled,
     loginWithGoogle,
     loginWithDevHarness,
+    ensureGoogleWorkspaceAccess,
     setWorkspacePreference,
     logout,
     isAdmin,

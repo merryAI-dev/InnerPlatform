@@ -201,6 +201,7 @@ export function getStorageInstance(): FirebaseStorage | null {
 export function getGoogleAuthProvider(): GoogleAuthProvider {
   if (_googleProvider) return _googleProvider;
   _googleProvider = new GoogleAuthProvider();
+  _googleProvider.addScope('https://www.googleapis.com/auth/spreadsheets.readonly');
   const domains = getAllowedEmailDomains(import.meta.env);
   const hd = domains.length === 1 ? domains[0] : '';
   _googleProvider.setCustomParameters({
