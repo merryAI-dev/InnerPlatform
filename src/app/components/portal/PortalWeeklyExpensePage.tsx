@@ -481,6 +481,24 @@ export function PortalWeeklyExpensePage() {
   };
 
   const provisionEvidenceDrive = async (tx: Transaction) => {
+    if (tx.evidenceDriveFolderId) {
+      const folderName = tx.evidenceDriveFolderName || '기존 증빙 폴더';
+      toast.success(`이미 연결된 증빙 폴더를 사용합니다: ${folderName}`);
+      return {
+        transactionId: tx.id,
+        projectId: tx.projectId,
+        projectFolderId: myProject?.evidenceDriveRootFolderId || '',
+        projectFolderName: myProject?.evidenceDriveRootFolderName || '',
+        folderId: tx.evidenceDriveFolderId,
+        folderName,
+        webViewLink: tx.evidenceDriveLink || null,
+        sharedDriveId: tx.evidenceDriveSharedDriveId || myProject?.evidenceDriveSharedDriveId || null,
+        syncStatus: 'LINKED' as const,
+        version: tx.version || 1,
+        updatedAt: tx.updatedAt || new Date().toISOString(),
+      };
+    }
+
     try {
       const result = await provisionTransactionEvidenceDriveViaBff({
         tenantId: orgId,
@@ -622,7 +640,6 @@ export function PortalWeeklyExpensePage() {
       } else if (lastResult) {
         applySyncedEvidenceState(tx.id, lastResult);
       }
-      toast.success(`증빙 업로드 완료: ${uploads.length}건`);
     } catch (error) {
       handleEvidenceDriveError(error, '증빙 업로드');
       throw error;
