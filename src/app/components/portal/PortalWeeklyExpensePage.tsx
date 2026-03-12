@@ -53,6 +53,11 @@ import {
   type GoogleSheetMigrationDescriptor,
 } from '../../platform/google-sheet-migration';
 import {
+  buildDevGoogleSheetImportPreview,
+  DEV_GOOGLE_SHEET_SAMPLE_VALUE,
+} from '../../platform/google-sheet-migration.samples';
+import { readDevAuthHarnessConfig } from '../../platform/dev-harness';
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -135,6 +140,7 @@ export function PortalWeeklyExpensePage() {
     saveBudgetCodeBook,
   } = usePortalStore();
   const { submitWeekAsPm, upsertWeekAmounts } = useCashflowWeeks();
+  const devHarnessConfig = readDevAuthHarnessConfig(import.meta.env, typeof window !== 'undefined' ? window.location : undefined);
   const [projectDriveProvisioning, setProjectDriveProvisioning] = useState(false);
   const [googleSheetImportOpen, setGoogleSheetImportOpen] = useState(false);
   const [googleSheetImportStep, setGoogleSheetImportStep] = useState<GoogleSheetWizardStep>('source');
@@ -538,6 +544,15 @@ export function PortalWeeklyExpensePage() {
       return;
     }
 
+    if (devHarnessConfig.enabled && trimmedLink === DEV_GOOGLE_SHEET_SAMPLE_VALUE) {
+      const result = buildDevGoogleSheetImportPreview(sheetName);
+      setGoogleSheetImportPreview(result);
+      setGoogleSheetImportLink(trimmedLink);
+      setGoogleSheetImportStep(sheetName ? 'review' : 'sheet');
+      toast.success(`개발용 샘플 미리보기 완료: ${result.selectedSheetName}`);
+      return;
+    }
+
     setGoogleSheetPreviewing(true);
     try {
       const result = await previewGoogleSheetImportViaBff({
@@ -837,6 +852,7 @@ export function PortalWeeklyExpensePage() {
         preview={googleSheetImportPreview}
         activeSheetName={activeSheetName}
         reviewState={googleSheetReviewState}
+        devHarnessEnabled={devHarnessConfig.enabled}
         previewing={googleSheetPreviewing}
         applying={googleSheetApplying}
         onPreview={() => void previewGoogleSheetImport()}
@@ -872,6 +888,7 @@ function GoogleSheetImportDialog({
   preview,
   activeSheetName,
   reviewState,
+  devHarnessEnabled,
   previewing,
   applying,
   onPreview,
@@ -887,6 +904,7 @@ function GoogleSheetImportDialog({
   preview: GoogleSheetImportPreviewResult | null;
   activeSheetName: string;
   reviewState: GoogleSheetMigrationReviewState | null;
+  devHarnessEnabled: boolean;
   previewing: boolean;
   applying: boolean;
   onPreview: () => void;
@@ -1029,6 +1047,14 @@ function GoogleSheetImportDialog({
                     <p className="mt-3 text-[11px] text-muted-foreground">
                       스캔이 완료되면 탭 목록과 현재 플랫폼에서 직접 반영 가능한 탭을 구분해서 보여줍니다.
                     </p>
+                    {devHarnessEnabled && (
+                      <div className="mt-3 rounded-xl border border-sky-200 bg-sky-50 px-3 py-3 text-[11px] text-sky-950">
+                        <p className="font-medium">로컬 샘플 미리보기</p>
+                        <p className="mt-1 text-sky-900/80">
+                          외부 Sheets 없이 wizard를 검증하려면 <code className="rounded bg-white px-1 py-0.5">{DEV_GOOGLE_SHEET_SAMPLE_VALUE}</code> 를 입력하세요.
+                        </p>
+                      </div>
+                    )}
                     {preview && (
                       <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-[11px] text-emerald-950">
                         <p className="font-semibold">{preview.spreadsheetTitle}</p>

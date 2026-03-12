@@ -145,6 +145,15 @@ function clearImportDraftCache(cacheKey: string): void {
   }
 }
 
+function serializeImportRows(rows: ImportRow[] | null | undefined): string {
+  if (!rows || rows.length === 0) return '';
+  try {
+    return JSON.stringify(rows);
+  } catch {
+    return String(rows.length);
+  }
+}
+
 function normalizeMethodValue(value: string | undefined): string {
   if (!value) return '';
   if (value === 'BANK_TRANSFER') return 'TRANSFER';
@@ -483,6 +492,7 @@ export function SettlementLedgerPage({
   const [downloadTo, setDownloadTo] = useState('');
   const [revertConfirmOpen, setRevertConfirmOpen] = useState(false);
   const restoredDraftCacheKeyRef = useRef('');
+  const lastSyncedSheetRowsSignatureRef = useRef('');
   const cloneImportRows = useCallback((input: ImportRow[]) => (
     input.map((row) => ({ ...row, cells: [...row.cells] }))
   ), []);
@@ -532,6 +542,25 @@ export function SettlementLedgerPage({
     }, 400);
     return () => window.clearTimeout(timer);
   }, [draftCacheKey, importDirty, importRows]);
+
+  useEffect(() => {
+    const nextSignature = serializeImportRows(sheetRows);
+    if (nextSignature === lastSyncedSheetRowsSignatureRef.current) return;
+    lastSyncedSheetRowsSignatureRef.current = nextSignature;
+
+    if (sheetRows && sheetRows.length > 0) {
+      setImportRows(cloneImportRows(sheetRows));
+      setImportDirty(false);
+      clearImportDraftCache(draftCacheKey);
+      return;
+    }
+
+    if (nextSignature === '') {
+      setImportRows(transactionsToImportRows(projectTxs, yearWeeks));
+      setImportDirty(false);
+      clearImportDraftCache(draftCacheKey);
+    }
+  }, [sheetRows, cloneImportRows, draftCacheKey, projectTxs, yearWeeks]);
 
   const revertToSavedSnapshot = useCallback(() => {
     if (sheetSaving) return;

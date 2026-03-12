@@ -53,6 +53,7 @@ import { buildPortalProfilePatch, readMemberWorkspace } from './member-workspace
 import { toast } from 'sonner';
 import { includesProject, normalizeProjectIds, resolvePrimaryProjectId } from './project-assignment';
 import { canEnterPortalWorkspace } from '../platform/navigation';
+import { readDevAuthHarnessConfig } from '../platform/dev-harness';
 
 export interface PortalUser {
   id: string;
@@ -216,6 +217,8 @@ function normalizePortalUser(candidate: Partial<PortalUser> | null | undefined):
 export function PortalProvider({ children }: { children: ReactNode }) {
   const { isAuthenticated, isLoading: authLoading, user: authUser } = useAuth();
   const { db, isOnline, orgId } = useFirebase();
+  const devHarnessConfig = readDevAuthHarnessConfig(import.meta.env, typeof window !== 'undefined' ? window.location : undefined);
+  const isDevHarnessUser = authUser?.source === 'dev_harness' && devHarnessConfig.enabled;
   const firestoreEnabled = isOnline && !!db;
 
   const [portalUser, setPortalUser] = useState<PortalUser | null>(null);
@@ -262,6 +265,26 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     }
     if (!canEnterPortalWorkspace(authUser.role)) {
       setPortalUser(null);
+      setIsMemberLoading(false);
+      return;
+    }
+
+    if (isDevHarnessUser) {
+      const now = new Date().toISOString();
+      const projectIds = normalizeProjectIds([
+        ...(Array.isArray(authUser.projectIds) ? authUser.projectIds : []),
+        authUser.projectId,
+      ]);
+      const normalized = normalizePortalUser({
+        id: authUser.uid,
+        name: authUser.name,
+        email: authUser.email,
+        role: authUser.role,
+        projectId: resolvePrimaryProjectId(projectIds, authUser.projectId) || '',
+        projectIds,
+        registeredAt: authUser.registeredAt || now,
+      });
+      setPortalUser(normalized);
       setIsMemberLoading(false);
       return;
     }
@@ -345,7 +368,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     };
 
     loadFromStore();
-  }, [authLoading, isAuthenticated, authUser, firestoreEnabled, db, orgId]);
+  }, [authLoading, isAuthenticated, authUser, firestoreEnabled, db, orgId, isDevHarnessUser]);
 
   useEffect(() => {
     unsubsRef.current.forEach((unsub) => unsub());
@@ -367,6 +390,25 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       setBudgetPlanRows(null);
       setWeeklySubmissionStatuses([]);
       setIsLoading(authLoading || isMemberLoading);
+      return;
+    }
+
+    if (isDevHarnessUser) {
+      const scopedIds = normalizeProjectIds([
+        ...(Array.isArray(portalUser?.projectIds) ? portalUser.projectIds : []),
+        portalUser?.projectId,
+      ]);
+      setProjects(PROJECTS.filter((project) => scopedIds.includes(project.id)));
+      setLedgers(LEDGERS.filter((ledger) => scopedIds.includes(ledger.projectId)));
+      setExpenseSets(EXPENSE_SETS);
+      setChangeRequests(CHANGE_REQUESTS);
+      setParticipationEntries(PARTICIPATION_ENTRIES.filter((entry) => scopedIds.includes(entry.projectId)));
+      setTransactions(TRANSACTIONS.filter((tx) => scopedIds.includes(tx.projectId)));
+      setComments([]);
+      setEvidenceRequiredMap((prev) => prev || {});
+      setExpenseSheets((prev) => prev || []);
+      setWeeklySubmissionStatuses([]);
+      setIsLoading(false);
       return;
     }
 
@@ -834,7 +876,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       unsubsRef.current.forEach((unsub) => unsub());
       unsubsRef.current = [];
     };
-  }, [authLoading, isMemberLoading, isAuthenticated, authUser, firestoreEnabled, db, orgId, portalUser?.projectId, scopedProjectIds, activeExpenseSheetId]);
+  }, [authLoading, isMemberLoading, isAuthenticated, authUser, firestoreEnabled, db, orgId, portalUser?.projectId, scopedProjectIds, activeExpenseSheetId, isDevHarnessUser, portalUser?.projectIds]);
 
   const persistExpenseSet = useCallback(async (set: ExpenseSet) => {
     if (!db) return;
@@ -863,6 +905,25 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   }, [expenseSheets]);
 
   const createExpenseSheet = useCallback(async (name?: string): Promise<string | null> => {
+    if (isDevHarnessUser) {
+      const now = new Date().toISOString();
+      const id = createExpenseSheetId();
+      const nextOrder = expenseSheets.length > 0
+        ? Math.max(...expenseSheets.map((sheet) => (Number.isFinite(sheet.order) ? sheet.order : 0))) + 1
+        : 1;
+      const nextSheet = {
+        id,
+        name: sanitizeExpenseSheetName(name, `탭 ${expenseSheets.length + 1}`),
+        order: nextOrder,
+        rows: [] as ImportRow[],
+        createdAt: now,
+        updatedAt: now,
+      };
+      setExpenseSheets((prev) => [...prev, nextSheet]);
+      setActiveExpenseSheetIdState(id);
+      setExpenseSheetRows([]);
+      return id;
+    }
     if (!db || !portalUser?.projectId) {
       toast.error('Firestore 연결이 필요합니다. 관리자에게 문의해 주세요.');
       return null;
@@ -888,9 +949,20 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     );
     setActiveExpenseSheetIdState(id);
     return id;
-  }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name, expenseSheets]);
+  }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name, expenseSheets, isDevHarnessUser]);
 
   const renameExpenseSheet = useCallback(async (sheetId: string, name: string): Promise<boolean> => {
+    if (isDevHarnessUser) {
+      const id = String(sheetId || '').trim();
+      const nextName = sanitizeExpenseSheetName(name, '');
+      if (!id || !nextName) return false;
+      setExpenseSheets((prev) => prev.map((sheet) => (
+        sheet.id === id
+          ? { ...sheet, name: nextName, updatedAt: new Date().toISOString() }
+          : sheet
+      )));
+      return true;
+    }
     if (!db || !portalUser?.projectId) {
       toast.error('Firestore 연결이 필요합니다. 관리자에게 문의해 주세요.');
       return false;
@@ -910,9 +982,25 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       { merge: true },
     );
     return true;
-  }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name]);
+  }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name, isDevHarnessUser]);
 
   const deleteExpenseSheet = useCallback(async (sheetId: string): Promise<boolean> => {
+    if (isDevHarnessUser) {
+      const id = String(sheetId || '').trim();
+      if (!id) return false;
+      if (expenseSheets.length <= 1) {
+        toast.message('최소 1개의 탭은 유지되어야 합니다.');
+        return false;
+      }
+      const nextSheets = expenseSheets.filter((sheet) => sheet.id !== id);
+      setExpenseSheets(nextSheets);
+      if (activeExpenseSheetId === id) {
+        const fallback = nextSheets[0]?.id || 'default';
+        setActiveExpenseSheetIdState(fallback);
+        setExpenseSheetRows(nextSheets.find((sheet) => sheet.id === fallback)?.rows || []);
+      }
+      return true;
+    }
     if (!db || !portalUser?.projectId) {
       toast.error('Firestore 연결이 필요합니다. 관리자에게 문의해 주세요.');
       return false;
@@ -938,9 +1026,13 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       setActiveExpenseSheetIdState(fallback);
     }
     return true;
-  }, [db, orgId, portalUser?.projectId, expenseSheets, activeExpenseSheetId]);
+  }, [db, orgId, portalUser?.projectId, expenseSheets, activeExpenseSheetId, isDevHarnessUser]);
 
   const saveEvidenceRequiredMap = useCallback(async (map: Record<string, string>) => {
+    if (isDevHarnessUser) {
+      setEvidenceRequiredMap(map);
+      return;
+    }
     if (!db || !portalUser?.projectId) {
       toast.error('Firestore 연결이 필요합니다. 관리자에게 문의해 주세요.');
       return;
@@ -958,13 +1050,9 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       { merge: true },
     );
     setEvidenceRequiredMap(map);
-  }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name, expenseSheetRows]);
+  }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name, expenseSheetRows, isDevHarnessUser]);
 
   const saveExpenseSheetRows = useCallback(async (rows: ImportRow[]) => {
-    if (!db || !portalUser?.projectId) {
-      toast.error('Firestore 연결이 필요합니다. 관리자에게 문의해 주세요.');
-      return;
-    }
     const now = new Date().toISOString();
     const activeSheet = expenseSheets.find((sheet) => sheet.id === activeExpenseSheetId) || null;
     const activeSheetId = activeSheet?.id || activeExpenseSheetId || 'default';
@@ -974,6 +1062,28 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       ...(row.sourceTxId ? { sourceTxId: row.sourceTxId } : {}),
       cells: Array.isArray(row.cells) ? row.cells.map((c) => (c ?? '')) : [],
     }));
+    if (isDevHarnessUser || !db || !portalUser?.projectId) {
+      setExpenseSheetRows(sanitizedRows as ImportRow[]);
+      setExpenseSheets((prev) => {
+        const next = [...prev];
+        const index = next.findIndex((sheet) => sheet.id === activeSheetId);
+        const draftSheet = {
+          id: activeSheetId,
+          name: activeSheetName,
+          rows: sanitizedRows as ImportRow[],
+          order: activeSheet?.order || (activeSheetId === 'default' ? 0 : next.length + 1),
+          createdAt: activeSheet?.createdAt || now,
+          updatedAt: now,
+        };
+        if (index >= 0) {
+          next[index] = draftSheet;
+        } else {
+          next.push(draftSheet);
+        }
+        return next;
+      });
+      return;
+    }
     const payload = withTenantScope(orgId, {
       id: activeSheetId,
       projectId: portalUser.projectId,
@@ -1001,13 +1111,10 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     budgetPlanRows,
     expenseSheetRows,
     evidenceRequiredMap,
+    isDevHarnessUser,
   ]);
 
   const saveBudgetPlanRows = useCallback(async (rows: BudgetPlanRow[]) => {
-    if (!db || !portalUser?.projectId) {
-      toast.error('Firestore 연결이 필요합니다. 관리자에게 문의해 주세요.');
-      return;
-    }
     const now = new Date().toISOString();
     const sanitizedRows = rows.map((row) => ({
       budgetCode: row.budgetCode || '',
@@ -1016,6 +1123,10 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       revisedBudget: Number.isFinite(row.revisedBudget ?? NaN) ? row.revisedBudget : 0,
       ...(row.note ? { note: row.note } : {}),
     }));
+    if (isDevHarnessUser || !db || !portalUser?.projectId) {
+      setBudgetPlanRows(sanitizedRows as BudgetPlanRow[]);
+      return;
+    }
     const payload = withTenantScope(orgId, {
       projectId: portalUser.projectId,
       rows: sanitizedRows,
@@ -1028,17 +1139,17 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       { merge: true },
     );
     setBudgetPlanRows(sanitizedRows as BudgetPlanRow[]);
-  }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name]);
+  }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name, isDevHarnessUser]);
 
   const saveBudgetCodeBook = useCallback(async (rows: BudgetCodeEntry[], renames: BudgetCodeRename[] = []) => {
-    if (!db || !portalUser?.projectId) {
-      toast.error('Firestore 연결이 필요합니다. 관리자에게 문의해 주세요.');
-      return;
-    }
     const now = new Date().toISOString();
     const sanitized = normalizeBudgetCodeBook(rows);
     if (sanitized.length === 0) {
       toast.error('비목/세목이 비어 있습니다.');
+      return;
+    }
+    if (isDevHarnessUser || !db || !portalUser?.projectId) {
+      setBudgetCodeBook(sanitized);
       return;
     }
     const payload = withTenantScope(orgId, {
@@ -1172,7 +1283,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         setEvidenceRequiredMap(nextMap);
       }
     }
-  }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name, activeExpenseSheetId]);
+  }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name, activeExpenseSheetId, isDevHarnessUser]);
 
   const upsertWeeklySubmissionStatus = useCallback(async (input: {
     projectId: string;
@@ -1298,10 +1409,6 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   }, [db, orgId, portalUser, authUser]);
 
   const saveBankStatementRows = useCallback(async (sheet: BankStatementSheet) => {
-    if (!db || !portalUser?.projectId) {
-      toast.error('Firestore 연결이 필요합니다. 관리자에게 문의해 주세요.');
-      return;
-    }
     const now = new Date().toISOString();
     const incomingColumns = Array.isArray(sheet?.columns) ? sheet.columns : [];
     const maxLenFromRows = Array.isArray(sheet?.rows)
@@ -1326,6 +1433,14 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       tempId: row?.tempId || `bank-${Date.now()}-${i}`,
       cells: sanitizedColumns.map((_, colIdx) => normalizeSpace(String(Array.isArray(row?.cells) ? (row.cells[colIdx] ?? '') : ''))),
     }));
+    const sanitizedSheet: BankStatementSheet = { columns: sanitizedColumns, rows: sanitizedRows as BankStatementRow[] };
+    const mappedExpenseRows = mapBankStatementsToImportRows(sanitizedSheet);
+    const nextExpenseRows = mergeBankRowsIntoExpenseSheet(expenseSheetRows, mappedExpenseRows);
+    if (isDevHarnessUser || !db || !portalUser?.projectId) {
+      setBankStatementRows(sanitizedSheet);
+      setExpenseSheetRows(nextExpenseRows);
+      return;
+    }
     const payload = withTenantScope(orgId, {
       projectId: portalUser.projectId,
       columns: sanitizedColumns,
@@ -1338,12 +1453,9 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       payload,
       { merge: true },
     );
-    const sanitizedSheet: BankStatementSheet = { columns: sanitizedColumns, rows: sanitizedRows as BankStatementRow[] };
     setBankStatementRows(sanitizedSheet);
 
     // Sync into expense sheet rows (통장내역 → 사용내역)
-    const mappedExpenseRows = mapBankStatementsToImportRows(sanitizedSheet);
-    const nextExpenseRows = mergeBankRowsIntoExpenseSheet(expenseSheetRows, mappedExpenseRows);
     const activeSheet = expenseSheets.find((sheet) => sheet.id === activeExpenseSheetId) || null;
     const activeSheetId = activeSheet?.id || activeExpenseSheetId || 'default';
     const expensePayload = withTenantScope(orgId, {
@@ -1362,7 +1474,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       { merge: true },
     );
     setExpenseSheetRows(nextExpenseRows);
-  }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name, expenseSheetRows, expenseSheets, activeExpenseSheetId]);
+  }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name, expenseSheetRows, expenseSheets, activeExpenseSheetId, isDevHarnessUser]);
 
   const persistTransaction = useCallback(async (txData: Transaction) => {
     if (!db) return;
@@ -1380,6 +1492,44 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       allowEmptyProject?: boolean;
     },
   ): Promise<boolean> => {
+    if (isDevHarnessUser) {
+      const now = new Date().toISOString();
+      const normalizedProjectIds = normalizeProjectIds([
+        ...(Array.isArray(user.projectIds) ? user.projectIds : []),
+        user.projectId,
+      ]);
+      const primaryProjectId = resolvePrimaryProjectId(normalizedProjectIds, user.projectId);
+      const allowEmpty = Boolean(user.allowEmptyProject);
+      if (!primaryProjectId && !allowEmpty) {
+        toast.error('최소 1개 이상의 사업을 선택해 주세요.');
+        return false;
+      }
+      const candidate = allowEmpty && !primaryProjectId
+        ? {
+          id: authUser?.uid || `pu-${Date.now()}`,
+          name: user.name || '사용자',
+          email: user.email || '',
+          role: (authUser?.role || user.role || 'pm').toLowerCase(),
+          projectId: '',
+          projectIds: [],
+          projectNames: portalUser?.projectNames,
+          registeredAt: now,
+        }
+        : normalizePortalUser({
+          ...user,
+          id: authUser?.uid || `pu-${Date.now()}`,
+          role: (authUser?.role || user.role || 'pm').toLowerCase(),
+          projectId: primaryProjectId,
+          projectIds: normalizedProjectIds,
+          registeredAt: now,
+        });
+      if (!candidate) {
+        toast.error('사업 정보를 저장하지 못했습니다.');
+        return false;
+      }
+      setPortalUser(candidate);
+      return true;
+    }
     if (!firestoreEnabled || !db) {
       toast.error('Firestore 연결이 필요합니다. 관리자에게 문의해 주세요.');
       return false;
@@ -1469,9 +1619,26 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     }
 
     return true;
-  }, [authUser, firestoreEnabled, db, orgId, portalUser]);
+  }, [authUser, firestoreEnabled, db, orgId, portalUser, isDevHarnessUser]);
 
   const setActiveProject = useCallback(async (projectId: string): Promise<boolean> => {
+    if (isDevHarnessUser) {
+      const target = projectId.trim();
+      if (!target || !portalUser) return false;
+      const allowedIds = normalizeProjectIds([
+        ...(Array.isArray(portalUser.projectIds) ? portalUser.projectIds : []),
+        portalUser.projectId,
+      ]);
+      if (!includesProject(allowedIds, target)) {
+        toast.error('배정되지 않은 사업입니다.');
+        return false;
+      }
+      setPortalUser({
+        ...portalUser,
+        projectId: target,
+      });
+      return true;
+    }
     if (!firestoreEnabled || !db) {
       toast.error('Firestore 연결이 필요합니다. 관리자에게 문의해 주세요.');
       return false;
@@ -1519,7 +1686,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     }
 
     return true;
-  }, [portalUser, firestoreEnabled, db, authUser, orgId]);
+  }, [portalUser, firestoreEnabled, db, authUser, orgId, isDevHarnessUser]);
 
   const logout = useCallback(() => {
     setPortalUser(null);
