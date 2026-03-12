@@ -437,7 +437,7 @@ export function PortalWeeklyExpensePage() {
           evidenceDriveFolderName: workingTx.evidenceDriveFolderName,
           evidenceDriveLink: workingTx.evidenceDriveLink,
           evidenceDriveSharedDriveId: sharedDriveId || workingTx.evidenceDriveSharedDriveId,
-          evidenceDriveSyncStatus: 'LINKED',
+          evidenceDriveSyncStatus: 'UPLOADED',
           updatedAt: new Date().toISOString(),
         });
       } else if (lastResult) {
