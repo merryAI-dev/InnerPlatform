@@ -298,6 +298,13 @@ function stripUndefinedDeep(value) {
   return value;
 }
 
+function resolveAutoLedgerName(project) {
+  const accountType = readOptionalText(project?.accountType);
+  if (accountType === 'DEDICATED') return '전용통장 원장';
+  if (accountType === 'OPERATING') return '운영통장 원장';
+  return '기본 원장';
+}
+
 async function upsertVersionedDoc({
   db,
   path,
@@ -1648,8 +1655,28 @@ export function createBffApp(options = {}) {
     const projectPath = `orgs/${tenantId}/projects/${parsed.projectId}`;
     const ledgerPath = `orgs/${tenantId}/ledgers/${parsed.ledgerId}`;
 
-    await ensureDocumentExists(db, projectPath, `Project not found: ${parsed.projectId}`);
-    const ledger = await ensureDocumentExists(db, ledgerPath, `Ledger not found: ${parsed.ledgerId}`);
+    const project = await ensureDocumentExists(db, projectPath, `Project not found: ${parsed.projectId}`);
+    const ledgerRef = db.doc(ledgerPath);
+    const ledgerSnap = await ledgerRef.get();
+    let ledger = ledgerSnap.exists ? (ledgerSnap.data() || {}) : null;
+
+    if (!ledger) {
+      const ensuredLedger = await upsertVersionedDoc({
+        db,
+        path: ledgerPath,
+        payload: {
+          id: parsed.ledgerId.trim(),
+          projectId: parsed.projectId.trim(),
+          name: resolveAutoLedgerName(project),
+        },
+        tenantId,
+        actorId,
+        now: timestamp,
+        expectedVersion: 0,
+      });
+      ledger = ensuredLedger.data;
+    }
+
     if (ledger.projectId !== parsed.projectId) {
       throw createHttpError(400, `Ledger ${parsed.ledgerId} does not belong to project ${parsed.projectId}`);
     }
