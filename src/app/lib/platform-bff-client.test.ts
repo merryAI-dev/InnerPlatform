@@ -4,6 +4,7 @@ import {
   addEvidenceViaBff,
   changeTransactionStateViaBff,
   linkProjectEvidenceDriveRootViaBff,
+  previewGoogleSheetImportViaBff,
   provisionProjectEvidenceDriveRootViaBff,
   provisionTransactionEvidenceDriveViaBff,
   readPlatformApiRuntimeConfig,
@@ -349,5 +350,45 @@ describe('platform-bff-client', () => {
     }));
     expect(result.driveFileId).toBe('drv-file-001');
     expect(result.evidenceCompletedDesc).toBe('ZOOM invoice');
+  });
+
+  it('calls google sheet import preview endpoint', async () => {
+    const client = {
+      post: vi.fn(async () => ({
+        data: {
+          spreadsheetId: 'sheet-001',
+          spreadsheetTitle: '주간 사업비 시트',
+          selectedSheetName: '주간정산',
+          availableSheets: [
+            { sheetId: 0, title: '요약', index: 0 },
+            { sheetId: 1, title: '주간정산', index: 1 },
+          ],
+          matrix: [
+            ['작성자', '거래일시', '지급처'],
+            ['홍길동', '2026-03-12', '카페 메리'],
+          ],
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    };
+
+    const preview = await previewGoogleSheetImportViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm' },
+      projectId: 'p001',
+      value: 'https://docs.google.com/spreadsheets/d/sheet-001/edit#gid=1',
+      sheetName: '주간정산',
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/projects/p001/google-sheet-import/preview', expect.objectContaining({
+      body: {
+        value: 'https://docs.google.com/spreadsheets/d/sheet-001/edit#gid=1',
+        sheetName: '주간정산',
+      },
+      timeoutMs: 20000,
+    }));
+    expect(preview.selectedSheetName).toBe('주간정산');
   });
 });

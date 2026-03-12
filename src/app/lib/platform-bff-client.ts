@@ -68,6 +68,20 @@ export interface ProvisionProjectEvidenceDriveRootResult {
 
 export interface LinkProjectEvidenceDriveRootResult extends ProvisionProjectEvidenceDriveRootResult {}
 
+export interface GoogleSheetPreviewSheet {
+  sheetId: number;
+  title: string;
+  index: number;
+}
+
+export interface GoogleSheetImportPreviewResult {
+  spreadsheetId: string;
+  spreadsheetTitle: string;
+  selectedSheetName: string;
+  availableSheets: GoogleSheetPreviewSheet[];
+  matrix: string[][];
+}
+
 export interface ProvisionTransactionEvidenceDriveResult {
   transactionId: string;
   projectId: string;
@@ -321,6 +335,30 @@ export async function provisionProjectEvidenceDriveRootViaBff(params: {
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
+    },
+  );
+  return response.data;
+}
+
+export async function previewGoogleSheetImportViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  value: string;
+  sheetName?: string;
+  client?: PlatformApiClientLike;
+}): Promise<GoogleSheetImportPreviewResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<GoogleSheetImportPreviewResult>(
+    `/api/v1/projects/${params.projectId}/google-sheet-import/preview`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: {
+        value: params.value,
+        ...(params.sheetName ? { sheetName: params.sheetName } : {}),
+      },
+      timeoutMs: 20000,
     },
   );
   return response.data;

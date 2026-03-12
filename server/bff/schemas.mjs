@@ -60,6 +60,11 @@ export const projectDriveRootLinkSchema = z.object({
   value: NON_EMPTY_STRING,
 }).strict();
 
+export const googleSheetImportPreviewSchema = z.object({
+  value: NON_EMPTY_STRING,
+  sheetName: NON_EMPTY_STRING.optional(),
+}).strict();
+
 export const evidenceDriveUploadSchema = z.object({
   fileName: NON_EMPTY_STRING,
   originalFileName: NON_EMPTY_STRING.optional(),

@@ -81,6 +81,44 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     expect(response.body.projectId).toBe(projectId);
   });
 
+  it('previews google sheet rows for an existing project', async () => {
+    const googleSheetsService = {
+      previewSpreadsheet: vi.fn(async ({ value, sheetName }) => ({
+        spreadsheetId: 'sheet-001',
+        spreadsheetTitle: '주간 사업비 시트',
+        selectedSheetName: sheetName || '주간정산',
+        availableSheets: [
+          { sheetId: 0, title: '요약', index: 0 },
+          { sheetId: 1, title: '주간정산', index: 1 },
+        ],
+        matrix: [
+          ['작성자', '거래일시', '지급처'],
+          ['홍길동', '2026-03-12', '카페 메리'],
+        ],
+      })),
+    };
+    const sheetsApi = request(createBffApp({ projectId, workerSecret, db, googleSheetsService }));
+
+    await sheetsApi
+      .post('/api/v1/projects')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-sheets-001' })
+      .send({ id: 'p-sheets-001', name: 'Sheets Project' });
+
+    const preview = await sheetsApi
+      .post('/api/v1/projects/p-sheets-001/google-sheet-import/preview')
+      .set(defaultHeaders)
+      .send({ value: 'https://docs.google.com/spreadsheets/d/sheet-001/edit#gid=1' });
+
+    expect(preview.status).toBe(200);
+    expect(preview.body.spreadsheetTitle).toBe('주간 사업비 시트');
+    expect(preview.body.selectedSheetName).toBe('주간정산');
+    expect(preview.body.matrix[1]).toEqual(['홍길동', '2026-03-12', '카페 메리']);
+    expect(googleSheetsService.previewSpreadsheet).toHaveBeenCalledWith({
+      value: 'https://docs.google.com/spreadsheets/d/sheet-001/edit#gid=1',
+      sheetName: undefined,
+    });
+  });
+
   it('rejects disallowed CORS origin', async () => {
     const corsApi = request(createBffApp({
       projectId,

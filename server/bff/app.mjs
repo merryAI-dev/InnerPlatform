@@ -41,6 +41,7 @@ import {
   evidenceCreateSchema,
   evidenceDriveUploadSchema,
   genericWriteSchema,
+  googleSheetImportPreviewSchema,
   ledgerUpsertSchema,
   memberRoleUpdateSchema,
   parseWithSchema,
@@ -61,6 +62,10 @@ import {
   inferEvidenceCategoryFromFileName,
   resolveEvidenceSyncPatch,
 } from './google-drive.mjs';
+import {
+  GoogleSheetsServiceError,
+  createGoogleSheetsService,
+} from './google-sheets.mjs';
 
 function createHttpError(statusCode, message, code = 'request_error') {
   const error = new Error(message);
@@ -526,6 +531,7 @@ export function createBffApp(options = {}) {
   const piiProtector = options.piiProtector || createPiiProtector();
   const rbacPolicy = options.rbacPolicy || loadRbacPolicy();
   const driveService = options.driveService || createGoogleDriveService();
+  const googleSheetsService = options.googleSheetsService || createGoogleSheetsService();
   const allowedOrigins = parseAllowedOrigins(options.allowedOrigins || process.env.BFF_ALLOWED_ORIGINS);
   const relationRulesPolicyPath = options.relationRulesPolicyPath || resolveRelationRulesPolicyPath();
   const workQueueBatchSizeRaw = Number.parseInt(process.env.BFF_WORK_QUEUE_BATCH || '100', 10);
@@ -1102,6 +1108,32 @@ export function createBffApp(options = {}) {
     const snap = await query.get();
     const items = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
     res.status(200).json(buildListResponse(items, limit));
+  }));
+
+  app.post('/api/v1/projects/:projectId/google-sheet-import/preview', asyncHandler(async (req, res) => {
+    const { tenantId } = req.context;
+    assertActorRoleAllowed(req, ROUTE_ROLES.readCore, 'preview google sheet import');
+    const { projectId } = req.params;
+    const parsed = parseWithSchema(googleSheetImportPreviewSchema, req.body, 'Invalid google sheet preview payload');
+
+    await ensureDocumentExists(
+      db,
+      `orgs/${tenantId}/projects/${projectId}`,
+      `Project not found: ${projectId}`,
+    );
+
+    try {
+      const preview = await googleSheetsService.previewSpreadsheet({
+        value: parsed.value,
+        sheetName: parsed.sheetName,
+      });
+      res.status(200).json(preview);
+    } catch (error) {
+      if (error instanceof GoogleSheetsServiceError) {
+        throw createHttpError(error.statusCode, error.message, error.code);
+      }
+      throw error;
+    }
   }));
 
   app.get('/api/v1/ledgers', asyncHandler(async (req, res) => {

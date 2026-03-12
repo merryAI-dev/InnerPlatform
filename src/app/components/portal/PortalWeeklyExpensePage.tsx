@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { AlertTriangle, ExternalLink, FolderPlus, Loader2, Plus, Send, Settings2 } from 'lucide-react';
+import { AlertTriangle, ExternalLink, FileSpreadsheet, FolderPlus, Loader2, Plus, Send, Settings2 } from 'lucide-react';
 import { usePortalStore } from '../../data/portal-store';
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { useAuth } from '../../data/auth-store';
@@ -9,10 +9,11 @@ import type { CashflowWeekSheet, Transaction, TransactionState } from '../../dat
 import { toast } from 'sonner';
 import { useFirebase } from '../../lib/firebase-context';
 import {
-  type ProvisionProjectEvidenceDriveRootResult,
+  type GoogleSheetImportPreviewResult,
   type ProvisionTransactionEvidenceDriveResult,
   type SyncTransactionEvidenceDriveResult,
   type UploadTransactionEvidenceDriveResult,
+  previewGoogleSheetImportViaBff,
   provisionProjectEvidenceDriveRootViaBff,
   provisionTransactionEvidenceDriveViaBff,
   syncTransactionEvidenceDriveViaBff,
@@ -21,6 +22,27 @@ import {
 } from '../../lib/platform-bff-client';
 import { PlatformApiError } from '../../platform/api-client';
 import { splitLooseNameList } from '../../platform/name-list';
+import {
+  GOOGLE_SHEET_PROTECTED_HEADERS,
+  planGoogleSheetImportMerge,
+  type GoogleSheetImportMergeSummary,
+} from '../../platform/google-sheet-import';
+import { normalizeMatrixToImportRows, SETTLEMENT_COLUMNS, type ImportRow } from '../../platform/settlement-csv';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '../ui/dialog';
+import { Input } from '../ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../ui/select';
 
 function normalizeBudgetLabel(value: string): string {
   return String(value || '')
@@ -58,6 +80,11 @@ export function PortalWeeklyExpensePage() {
   } = usePortalStore();
   const { submitWeekAsPm } = useCashflowWeeks();
   const [projectDriveProvisioning, setProjectDriveProvisioning] = useState(false);
+  const [googleSheetImportOpen, setGoogleSheetImportOpen] = useState(false);
+  const [googleSheetImportLink, setGoogleSheetImportLink] = useState('');
+  const [googleSheetImportPreview, setGoogleSheetImportPreview] = useState<GoogleSheetImportPreviewResult | null>(null);
+  const [googleSheetPreviewing, setGoogleSheetPreviewing] = useState(false);
+  const [googleSheetApplying, setGoogleSheetApplying] = useState(false);
 
   const projectId = portalUser?.projectId || '';
   const projectName = myProject?.name || '내 사업';
@@ -129,6 +156,14 @@ export function PortalWeeklyExpensePage() {
     role: portalUser?.role || authUser?.role || 'pm',
     idToken: authUser?.idToken,
   }), [authUser?.uid, authUser?.email, authUser?.role, authUser?.idToken, portalUser?.id, portalUser?.email, portalUser?.role]);
+  const googleSheetPreviewRows = useMemo(() => (
+    googleSheetImportPreview
+      ? normalizeMatrixToImportRows(googleSheetImportPreview.matrix)
+      : []
+  ), [googleSheetImportPreview]);
+  const googleSheetMergePlan = useMemo(() => (
+    planGoogleSheetImportMerge(expenseSheetRows, googleSheetPreviewRows)
+  ), [expenseSheetRows, googleSheetPreviewRows]);
 
   const handleEvidenceDriveError = (error: unknown, actionLabel: string) => {
     console.error(`[PortalWeeklyExpensePage] ${actionLabel} failed:`, error);
@@ -338,6 +373,58 @@ export function PortalWeeklyExpensePage() {
     }
   };
 
+  const previewGoogleSheetImport = async (sheetName?: string) => {
+    const trimmedLink = googleSheetImportLink.trim();
+    if (!trimmedLink) {
+      toast.error('Google Sheets 링크 또는 spreadsheet ID를 입력해 주세요.');
+      return;
+    }
+
+    setGoogleSheetPreviewing(true);
+    try {
+      const result = await previewGoogleSheetImportViaBff({
+        tenantId: orgId,
+        actor: bffActor,
+        projectId,
+        value: trimmedLink,
+        ...(sheetName ? { sheetName } : {}),
+      });
+      setGoogleSheetImportPreview(result);
+      setGoogleSheetImportLink(trimmedLink);
+      toast.success(`Google Sheets 미리보기 완료: ${result.selectedSheetName}`);
+    } catch (error) {
+      setGoogleSheetImportPreview(null);
+      handleEvidenceDriveError(error, 'Google Sheets 미리보기');
+    } finally {
+      setGoogleSheetPreviewing(false);
+    }
+  };
+
+  const applyGoogleSheetImport = async () => {
+    if (!googleSheetImportPreview) {
+      toast.error('먼저 Google Sheets 미리보기를 불러와 주세요.');
+      return;
+    }
+    if (googleSheetPreviewRows.length === 0) {
+      toast.error('가져올 데이터 행이 없습니다.');
+      return;
+    }
+
+    setGoogleSheetApplying(true);
+    try {
+      await saveExpenseSheetRows(googleSheetMergePlan.mergedRows);
+      toast.success(
+        `Google Sheets ${googleSheetMergePlan.summary.importedCount}건을 ${activeSheetName}에 반영했습니다.`,
+      );
+      setGoogleSheetImportOpen(false);
+    } catch (error) {
+      console.error('[PortalWeeklyExpensePage] Google Sheets import apply failed:', error);
+      toast.error('Google Sheets 반영에 실패했습니다.');
+    } finally {
+      setGoogleSheetApplying(false);
+    }
+  };
+
   if (!projectId) {
     return (
       <div className="p-6 text-[12px] text-muted-foreground">
@@ -367,6 +454,15 @@ export function PortalWeeklyExpensePage() {
               {sheet.name}
             </Button>
           ))}
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 text-[11px] gap-1"
+            onClick={() => setGoogleSheetImportOpen(true)}
+          >
+            <FileSpreadsheet className="h-3.5 w-3.5" />
+            Google Sheets 가져오기
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -502,6 +598,24 @@ export function PortalWeeklyExpensePage() {
         onUploadEvidenceDrive={uploadEvidenceDrive}
         onEnsureTransactionPersisted={ensureTransactionPersisted}
       />
+      <GoogleSheetImportDialog
+        open={googleSheetImportOpen}
+        onOpenChange={setGoogleSheetImportOpen}
+        link={googleSheetImportLink}
+        onLinkChange={(value) => {
+          setGoogleSheetImportLink(value);
+          setGoogleSheetImportPreview(null);
+        }}
+        preview={googleSheetImportPreview}
+        previewRows={googleSheetPreviewRows}
+        mergeSummary={googleSheetMergePlan.summary}
+        activeSheetName={activeSheetName}
+        previewing={googleSheetPreviewing}
+        applying={googleSheetApplying}
+        onPreview={() => void previewGoogleSheetImport()}
+        onSelectSheet={(sheetName) => void previewGoogleSheetImport(sheetName)}
+        onApply={() => void applyGoogleSheetImport()}
+      />
     </div>
   );
 }
@@ -519,6 +633,219 @@ async function readFileAsBase64(file: File): Promise<string> {
     throw new Error(`파일 인코딩에 실패했습니다: ${file.name}`);
   }
   return base64;
+}
+
+function GoogleSheetImportDialog({
+  open,
+  onOpenChange,
+  link,
+  onLinkChange,
+  preview,
+  previewRows,
+  mergeSummary,
+  activeSheetName,
+  previewing,
+  applying,
+  onPreview,
+  onSelectSheet,
+  onApply,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  link: string;
+  onLinkChange: (value: string) => void;
+  preview: GoogleSheetImportPreviewResult | null;
+  previewRows: ImportRow[];
+  mergeSummary: GoogleSheetImportMergeSummary;
+  activeSheetName: string;
+  previewing: boolean;
+  applying: boolean;
+  onPreview: () => void;
+  onSelectSheet: (sheetName: string) => void;
+  onApply: () => void;
+}) {
+  const protectedHeaderSet = useMemo(() => new Set(GOOGLE_SHEET_PROTECTED_HEADERS), []);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] max-w-[calc(100vw-2rem)] gap-0 overflow-hidden p-0">
+        <div className="flex h-full min-h-0">
+          <div className="flex min-w-0 flex-1 flex-col bg-white/70">
+            <div className="border-b px-6 py-4">
+              <DialogHeader className="gap-1 text-left">
+                <DialogTitle className="text-base">Google Sheets 가져오기</DialogTitle>
+                <DialogDescription>
+                  왼쪽 미리보기로 가져올 행을 먼저 확인하고, 오른쪽에서 시트 탭 선택과 반영 범위를 점검하세요.
+                </DialogDescription>
+              </DialogHeader>
+            </div>
+            <div className="min-h-0 flex-1 overflow-auto">
+              {preview ? (
+                <div className="min-w-[1680px] px-6 py-4">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold">{preview.spreadsheetTitle}</p>
+                      <p className="text-[12px] text-muted-foreground">
+                        탭: {preview.selectedSheetName} · 미리보기 {previewRows.length}건
+                      </p>
+                    </div>
+                    <div className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] text-slate-700">
+                      활성 탭 반영 대상: {activeSheetName}
+                    </div>
+                  </div>
+                  <table className="w-full border-separate border-spacing-0 text-[11px]">
+                    <thead className="sticky top-0 z-10">
+                      <tr>
+                        {SETTLEMENT_COLUMNS.map((column) => {
+                          const isProtected = protectedHeaderSet.has(column.csvHeader);
+                          return (
+                            <th
+                              key={column.csvHeader}
+                              className={`border-b px-2 py-2 text-left font-semibold whitespace-nowrap ${isProtected ? 'bg-amber-50 text-amber-900' : 'bg-slate-50 text-slate-800'}`}
+                            >
+                              <div>{column.csvHeader}</div>
+                              <div className="mt-0.5 text-[10px] font-normal opacity-70">{column.group}</div>
+                            </th>
+                          );
+                        })}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {previewRows.length > 0 ? previewRows.map((row, rowIndex) => (
+                        <tr key={`${row.tempId}-${rowIndex}`} className="align-top">
+                          {SETTLEMENT_COLUMNS.map((column, columnIndex) => {
+                            const isProtected = protectedHeaderSet.has(column.csvHeader);
+                            return (
+                              <td
+                                key={`${row.tempId}-${column.csvHeader}`}
+                                className={`border-b px-2 py-2 whitespace-pre-wrap ${isProtected ? 'bg-amber-50/70 text-amber-950' : 'text-slate-800'}`}
+                              >
+                                {row.cells[columnIndex] || <span className="text-slate-300">-</span>}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      )) : (
+                        <tr>
+                          <td colSpan={SETTLEMENT_COLUMNS.length} className="px-4 py-12 text-center text-[12px] text-muted-foreground">
+                            헤더는 읽었지만 가져올 데이터 행이 없습니다.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="flex h-full items-center justify-center px-6 py-10 text-center text-[12px] text-muted-foreground">
+                  Google Sheets 링크를 붙여넣고 미리보기를 실행하면, 활성 탭에 반영될 행과 보호 컬럼을 여기서 먼저 확인할 수 있습니다.
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="flex w-[360px] shrink-0 flex-col border-l bg-slate-50/80">
+            <div className="flex-1 space-y-5 overflow-y-auto p-6">
+              <section className="space-y-2">
+                <p className="text-[12px] font-semibold text-slate-900">1. 시트 링크 붙여넣기</p>
+                <Input
+                  value={link}
+                  onChange={(event) => onLinkChange(event.target.value)}
+                  placeholder="https://docs.google.com/spreadsheets/d/... 또는 spreadsheet ID"
+                  className="text-[12px]"
+                />
+                <Button
+                  type="button"
+                  className="w-full text-[12px]"
+                  disabled={previewing}
+                  onClick={onPreview}
+                >
+                  {previewing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileSpreadsheet className="mr-2 h-4 w-4" />}
+                  미리보기 불러오기
+                </Button>
+              </section>
+
+              <section className="space-y-2">
+                <p className="text-[12px] font-semibold text-slate-900">2. 시트 탭 선택</p>
+                <Select
+                  value={preview?.selectedSheetName ?? undefined}
+                  onValueChange={onSelectSheet}
+                  disabled={!preview || previewing}
+                >
+                  <SelectTrigger className="text-[12px]">
+                    <SelectValue placeholder="탭을 선택하세요" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(preview?.availableSheets || []).map((sheet) => (
+                      <SelectItem key={sheet.sheetId} value={sheet.title}>
+                        {sheet.title}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-muted-foreground">
+                  링크에 특정 탭이 포함되어 있으면 먼저 그 탭을 열고, 필요하면 여기서 다른 탭으로 다시 미리보기할 수 있습니다.
+                </p>
+              </section>
+
+              <section className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
+                <div>
+                  <p className="text-[12px] font-semibold text-slate-900">3. 안전 병합 요약</p>
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    활성 탭 <span className="font-medium text-slate-900">{activeSheetName}</span> 에 반영됩니다.
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-[11px]">
+                  <SummaryStat label="가져온 행" value={`${mergeSummary.importedCount}건`} />
+                  <SummaryStat label="신규 추가" value={`${mergeSummary.createCount}건`} />
+                  <SummaryStat label="기존 업데이트" value={`${mergeSummary.updateCount}건`} />
+                  <SummaryStat label="그대로 유지" value={`${mergeSummary.unchangedCount}건`} />
+                </div>
+              </section>
+
+              <section className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-4">
+                <p className="text-[12px] font-semibold text-amber-950">보호 컬럼</p>
+                <p className="text-[11px] text-amber-900/80">
+                  아래 항목은 Google Sheets 값이 있어도 플랫폼 값을 덮어쓰지 않습니다.
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {GOOGLE_SHEET_PROTECTED_HEADERS.map((header) => (
+                    <span
+                      key={header}
+                      className="rounded-full border border-amber-200 bg-white px-2 py-1 text-[10px] font-medium text-amber-900"
+                    >
+                      {header}
+                    </span>
+                  ))}
+                </div>
+              </section>
+            </div>
+            <div className="border-t bg-white px-6 py-4">
+              <Button
+                type="button"
+                className="w-full text-[12px]"
+                disabled={applying || previewing || mergeSummary.importedCount === 0}
+                onClick={onApply}
+              >
+                {applying ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileSpreadsheet className="mr-2 h-4 w-4" />}
+                활성 탭에 안전 반영
+              </Button>
+              <p className="mt-2 text-[11px] text-muted-foreground">
+                빈 셀은 기존 값을 지우지 않고, 드라이브/업로드 연동 컬럼은 유지합니다.
+              </p>
+            </div>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function SummaryStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+      <p className="text-[10px] text-muted-foreground">{label}</p>
+      <p className="mt-1 text-[12px] font-semibold text-slate-900">{value}</p>
+    </div>
+  );
 }
 
 // ── PM 편차 확인 배너 ──
