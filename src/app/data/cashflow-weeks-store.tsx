@@ -11,6 +11,7 @@ import React, {
 import {
   collection,
   doc,
+  getDoc,
   limit,
   onSnapshot,
   query,
@@ -22,11 +23,11 @@ import {
 import { useAuth } from './auth-store';
 import type { CashflowSheetLineId, CashflowWeekSheet, VarianceFlag, VarianceFlagEvent } from './types';
 import { shouldCreateDocOnUpdateError } from './cashflow-weeks.helpers';
-import { featureFlags } from '../config/feature-flags';
 import { useFirebase } from '../lib/firebase-context';
 import { getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
 import { addMonthsToYearMonth, getSeoulTodayIso } from '../platform/business-days';
 import { getMonthMondayWeeks } from '../platform/cashflow-weeks';
+import { normalizeProjectIds } from './project-assignment';
 
 function normalizeRole(value: unknown): string {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
@@ -91,12 +92,16 @@ if (!_g.__MYSC_CASHFLOW_WEEKS_CTX__) {
 const CashflowWeekContext: React.Context<(CashflowWeekState & CashflowWeekActions) | null> = _g.__MYSC_CASHFLOW_WEEKS_CTX__;
 
 export function CashflowWeekProvider({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
+  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const { db, isOnline, orgId } = useFirebase();
-  const firestoreEnabled = featureFlags.firestoreCoreEnabled && isOnline && !!db;
+  const firestoreEnabled = isOnline && !!db;
 
   const role = user?.role;
   const myProjectId = user?.projectId || '';
+  const projectIds = useMemo(
+    () => normalizeProjectIds([...(Array.isArray(user?.projectIds) ? user?.projectIds : []), myProjectId]),
+    [user?.projectIds, myProjectId],
+  );
   const readAll = canReadAll(role);
 
   const [yearMonth, setYearMonthState] = useState(() => getSeoulTodayIso().slice(0, 7));
@@ -122,7 +127,19 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     unsubsRef.current.forEach((u) => u());
     unsubsRef.current = [];
 
+    if (authLoading || !isAuthenticated || !user) {
+      setWeeks([]);
+      setIsLoading(false);
+      return;
+    }
+
     if (!firestoreEnabled || !db) {
+      setWeeks([]);
+      setIsLoading(false);
+      return;
+    }
+
+    if (!readAll && projectIds.length === 0) {
       setWeeks([]);
       setIsLoading(false);
       return;
@@ -131,17 +148,38 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     setIsLoading(true);
 
     const base = collection(db, getOrgCollectionPath(orgId, 'cashflowWeeks'));
+    const year = yearMonth.slice(0, 4);
+    const yearStart = `${year}-01`;
+    const yearEnd = `${year}-12`;
     const q = readAll
-      ? query(base, where('yearMonth', '==', yearMonth), limit(2500))
-      : (myProjectId
-        ? query(base, where('projectId', '==', myProjectId), where('yearMonth', '==', yearMonth), limit(80))
-        : null);
-
-    if (!q) {
-      setWeeks([]);
-      setIsLoading(false);
-      return;
-    }
+      ? query(
+        base,
+        where('yearMonth', '>=', yearStart),
+        where('yearMonth', '<=', yearEnd),
+        limit(2500),
+      )
+      : (projectIds.length > 0
+        ? (projectIds.length === 1
+          ? query(
+            base,
+            where('projectId', '==', projectIds[0]),
+            where('yearMonth', '>=', yearStart),
+            where('yearMonth', '<=', yearEnd),
+            limit(2500),
+          )
+          : query(
+            base,
+            where('projectId', 'in', projectIds.slice(0, 10)),
+            where('yearMonth', '>=', yearStart),
+            where('yearMonth', '<=', yearEnd),
+            limit(2500),
+          ))
+        : query(
+          base,
+          where('yearMonth', '>=', yearStart),
+          where('yearMonth', '<=', yearEnd),
+          limit(2500),
+        ));
 
     unsubsRef.current.push(
       onSnapshot(q, (snap) => {
@@ -163,7 +201,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
       unsubsRef.current.forEach((u) => u());
       unsubsRef.current = [];
     };
-  }, [db, firestoreEnabled, myProjectId, orgId, readAll, yearMonth]);
+  }, [authLoading, isAuthenticated, user, db, firestoreEnabled, orgId, projectIds, readAll, yearMonth]);
 
   const upsertWeekAmounts = useCallback(async (input: {
     projectId: string;
@@ -202,13 +240,10 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
       patch[`${input.mode}.${lineKey}`] = amount;
     }
 
-    try {
+    const existingSnap = await getDoc(ref).catch(() => null);
+    if (existingSnap?.exists()) {
       await updateDoc(ref, patch as any);
       return;
-    } catch (error) {
-      if (!shouldCreateDocOnUpdateError(error)) {
-        throw error;
-      }
     }
 
     const amounts: Partial<Record<CashflowSheetLineId, number>> = {};

@@ -1,24 +1,19 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router';
 import {
-  LayoutDashboard, Wallet, Calculator, Users,
-  ArrowRightLeft, LogOut,
+  LayoutDashboard, Calculator,
+  LogOut,
   FolderKanban, Menu,
   Plus,
-  MessagesSquare,
   CircleDollarSign,
   BarChart3,
   ClipboardList,
   Loader2,
   AlertTriangle,
   Settings2,
-  BookOpen,
-  Briefcase,
   FileSpreadsheet,
-  MessageCircle,
 } from 'lucide-react';
 import { PortalProvider, usePortalStore } from '../../data/portal-store';
-import { PROJECTS } from '../../data/mock-data';
 import { useAuth } from '../../data/auth-store';
 import { useHrAnnouncements } from '../../data/hr-announcements-store';
 import { usePayroll } from '../../data/payroll-store';
@@ -35,7 +30,12 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/
 import { DarkModeToggle } from '../layout/DarkModeToggle';
 import { PageTransition } from '../layout/PageTransition';
 import { ErrorBoundary } from '../layout/ErrorBoundary';
-import { resolveHomePath, shouldForcePortalOnboarding } from '../../platform/navigation';
+import {
+  canChooseWorkspace,
+  canEnterPortalWorkspace,
+  resolveHomePath,
+  shouldForcePortalOnboarding,
+} from '../../platform/navigation';
 import { addMonthsToYearMonth, getSeoulTodayIso } from '../../platform/business-days';
 
 // ═══════════════════════════════════════════════════════════════
@@ -43,22 +43,31 @@ import { addMonthsToYearMonth, getSeoulTodayIso } from '../../platform/business-
 // 하나의 사업만 볼 수 있는 간소화된 UI
 // ═══════════════════════════════════════════════════════════════
 
-const NAV_ITEMS = [
-  { to: '/portal', icon: LayoutDashboard, label: '내 사업 현황', exact: true },
-  { to: '/portal/submissions', icon: ClipboardList, label: '내 제출 현황' },
-  { to: '/portal/board', icon: MessagesSquare, label: '전사 게시판' },
-  { to: '/portal/payroll', icon: CircleDollarSign, label: '인건비/공지', accent: true },
-  { to: '/portal/cashflow', icon: BarChart3, label: '캐시플로(주간)' },
-  { to: '/portal/budget', icon: Calculator, label: '예산총괄' },
-  { to: '/portal/expenses', icon: Wallet, label: '사업비 입력' },
-  { to: '/portal/weekly-expenses', icon: FileSpreadsheet, label: '사업비 입력(주간)' },
-  { to: '/portal/personnel', icon: Users, label: '인력 현황' },
-  { to: '/portal/change-requests', icon: ArrowRightLeft, label: '인력변경 신청' },
-  { to: '/portal/training', icon: BookOpen, label: '사내 교육' },
-  { to: '/portal/career-profile', icon: Briefcase, label: '내 경력 프로필' },
-  { to: '/portal/guide-chat', icon: MessageCircle, label: '사업비 가이드 Q&A' },
-  { to: '/portal/project-settings', icon: Settings2, label: '사업 배정 수정', exact: true },
-  { to: '/portal/register-project', icon: Plus, label: '사업 등록 제안', accent: true },
+const NAV_SECTIONS = [
+  {
+    title: '마이메뉴',
+    items: [
+      { to: '/portal', icon: LayoutDashboard, label: '내 사업 현황', exact: true },
+      { to: '/portal/submissions', icon: ClipboardList, label: '내 제출 현황' },
+      { to: '/portal/payroll', icon: CircleDollarSign, label: '인건비/공지', accent: true, hidden: true },
+    ],
+  },
+  {
+    title: '사업비관리',
+    items: [
+      { to: '/portal/budget', icon: Calculator, label: '예산 편집' },
+      { to: '/portal/bank-statements', icon: FileSpreadsheet, label: '통장내역' },
+      { to: '/portal/weekly-expenses', icon: FileSpreadsheet, label: '사업비 입력(주간)' },
+      { to: '/portal/cashflow', icon: BarChart3, label: '캐시플로(주간)' },
+    ],
+  },
+  {
+    title: '사업 배정 및 등록',
+    items: [
+      { to: '/portal/project-settings', icon: Settings2, label: '사업 배정 수정', exact: true },
+      { to: '/portal/register-project', icon: Plus, label: '사업 등록 제안', accent: true },
+    ],
+  },
 ];
 
 function PortalContent() {
@@ -68,17 +77,23 @@ function PortalContent() {
     portalUser,
     myProject,
     logout: portalLogout,
-    expenseSets,
     changeRequests,
     projects,
     setActiveProject,
   } = usePortalStore();
-  const { isAuthenticated, isLoading: authLoading, user: authUser, logout: authLogout } = useAuth();
+  const {
+    isAuthenticated,
+    isLoading: authLoading,
+    user: authUser,
+    logout: authLogout,
+    setWorkspacePreference,
+  } = useAuth();
   const { getUnacknowledgedCount } = useHrAnnouncements();
   const { runs, monthlyCloses } = usePayroll();
   const location = useLocation();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const currentPath = `${location.pathname}${location.search}${location.hash}`;
 
   // ── 모든 hooks는 early return 전에 호출 ──
   const assignedProjects = useMemo(() => {
@@ -99,15 +114,21 @@ function PortalContent() {
     const ids = Array.isArray(portalUser.projectIds) && portalUser.projectIds.length
       ? portalUser.projectIds
       : portalUser.projectId ? [portalUser.projectId] : [];
-    return ids.map((id) => {
-      const project =
-        projects.find((p) => p.id === id) ||
-        PROJECTS.find((p) => p.id === id) ||
-        null;
-      const fallbackName = portalUser.projectNames?.[id];
-      return { id, name: project?.name || fallbackName || id };
-    });
+    return ids
+      .map((id) => {
+        const project = projects.find((p) => p.id === id) || null;
+        if (project && project.status !== 'CONTRACT_PENDING') return null;
+        const fallbackName = portalUser.projectNames?.[id];
+        if (!project && !fallbackName) return null;
+        return { id, name: project?.name || fallbackName || id };
+      })
+      .filter((item): item is { id: string; name: string } => item !== null);
   }, [portalUser, projects]);
+
+  const selectedProjectOptionValue = useMemo(() => {
+    if (!portalUser?.projectId) return '';
+    return projectOptions.some((item) => item.id === portalUser.projectId) ? portalUser.projectId : '';
+  }, [portalUser?.projectId, projectOptions]);
 
   const currentProject = useMemo(() => {
     if (!portalUser) return myProject;
@@ -125,15 +146,15 @@ function PortalContent() {
   useEffect(() => {
     if (authLoading) return;
     if (!isAuthenticated) {
-      navigate('/login', { replace: true });
+      navigate('/login', { replace: true, state: { from: currentPath } });
     }
-  }, [authLoading, isAuthenticated, navigate]);
+  }, [authLoading, currentPath, isAuthenticated, navigate]);
 
   useEffect(() => {
     if (authLoading) return;
     const role = authUser?.role;
     if (!isAuthenticated || !role) return;
-    if (resolveHomePath(role) === '/') {
+    if (!canEnterPortalWorkspace(role)) {
       if (location.pathname.startsWith('/portal/board')) {
         const suffix = location.pathname.slice('/portal'.length);
         navigate(suffix, { replace: true });
@@ -143,6 +164,13 @@ function PortalContent() {
       navigate('/', { replace: true });
     }
   }, [authLoading, isAuthenticated, authUser, location.pathname, navigate]);
+
+  useEffect(() => {
+    const role = authUser?.role;
+    if (!isAuthenticated || !role || !canChooseWorkspace(role)) return;
+    if (authUser?.lastWorkspace === 'portal') return;
+    void setWorkspacePreference('portal', { persistDefault: false });
+  }, [authUser?.lastWorkspace, authUser?.role, isAuthenticated, setWorkspacePreference]);
 
   // 포털 미등록 시 온보딩으로 (인증은 되었지만 포털 사업 미선택)
   useEffect(() => {
@@ -174,9 +202,9 @@ function PortalContent() {
   }
 
   const standaloneOnboarding = (
-    location.pathname.includes('/portal/onboarding') &&
+    (location.pathname.includes('/portal/onboarding') || location.pathname.includes('/portal/register-project')) &&
     !isRegistered &&
-    resolveHomePath(authUser?.role) === '/portal'
+    canEnterPortalWorkspace(authUser?.role)
   );
   if (standaloneOnboarding) {
     return <Outlet />;
@@ -192,7 +220,7 @@ function PortalContent() {
             아직 배정된 사업이 없습니다. 관리자에게 사업 배정을 요청하거나, 온보딩에서 사업을 선택해 주세요.
           </p>
           <div className="mt-4 flex items-center justify-center gap-2">
-            <Button variant="outline" onClick={() => navigate('/portal/project-settings')}>
+            <Button variant="outline" onClick={() => navigate('/portal/onboarding')}>
               사업 배정 수정
             </Button>
             <Button variant="ghost" onClick={() => { portalLogout(); authLogout(); navigate('/login'); }}>
@@ -214,7 +242,7 @@ function PortalContent() {
             배정된 사업 정보가 존재하지 않거나 접근 권한이 없습니다. 관리자에게 문의해 주세요.
           </p>
           <div className="mt-4 flex items-center justify-center gap-2">
-            <Button variant="outline" onClick={() => navigate('/portal/project-settings')}>
+            <Button variant="outline" onClick={() => navigate('/portal/onboarding')}>
               사업 배정 수정
             </Button>
             <Button variant="ghost" onClick={() => { portalLogout(); authLogout(); navigate('/login'); }}>
@@ -227,9 +255,6 @@ function PortalContent() {
   }
 
   // 배지 카운트
-  const myExpenses = expenseSets.filter(s => s.projectId === portalUser.projectId);
-  const draftCount = myExpenses.filter(s => s.status === 'DRAFT').length;
-  const rejectedCount = myExpenses.filter(s => s.status === 'REJECTED').length;
   const pendingChanges = changeRequests.filter(r => r.state === 'SUBMITTED').length;
   const hrAlertCount = getUnacknowledgedCount();
   const payrollPendingCount = (() => {
@@ -249,7 +274,6 @@ function PortalContent() {
   }
 
   function getBadge(to: string): number | null {
-    if (to === '/portal/expenses' && (draftCount + rejectedCount) > 0) return draftCount + rejectedCount;
     if (to === '/portal/payroll' && payrollPendingCount > 0) return payrollPendingCount;
     if (to === '/portal/change-requests') {
       const total = pendingChanges + hrAlertCount;
@@ -298,7 +322,7 @@ function PortalContent() {
               <p className="text-[10px] text-slate-500 mb-0.5">내 사업</p>
               {projectOptions.length > 0 ? (
                 <Select
-                  value={portalUser?.projectId || ''}
+                  value={selectedProjectOptionValue}
                   onValueChange={(value) => {
                     if (value && value !== portalUser?.projectId) {
                       setActiveProject(value);
@@ -340,34 +364,47 @@ function PortalContent() {
 
           {/* Navigation */}
           <nav className="flex-1 py-1 overflow-y-auto">
-            <div className="space-y-px px-2">
-              {NAV_ITEMS.map(item => {
-                const active = isActive(item.to, item.exact);
-                const badge = getBadge(item.to);
+            <div className="space-y-3 px-2">
+              {NAV_SECTIONS.map((section) => {
+                const visibleItems = section.items.filter((item) => !item.hidden);
+                if (visibleItems.length === 0) return null;
                 return (
-                  <NavLink
-                    key={item.to}
-                    to={item.to}
-                    end={item.exact}
-                    className={`
-                      group relative flex items-center gap-2 rounded-md text-[12px] px-2.5 py-[7px] transition-all duration-100
-                      ${active
-                        ? 'bg-teal-500/18 text-white backdrop-blur-sm'
-                        : 'text-slate-400 hover:text-slate-200 hover:bg-white/8'
-                      }
-                    `}
-                  >
-                    {active && (
-                      <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-3.5 rounded-r bg-teal-400" />
-                    )}
-                    <item.icon className={`w-[15px] h-[15px] shrink-0 ${active ? 'text-teal-400' : 'text-slate-600 group-hover:text-slate-400'}`} />
-                    <span style={{ fontWeight: active ? 500 : 400 }}>{item.label}</span>
-                    {badge !== null && (
-                      <span className="ml-auto flex items-center justify-center min-w-[16px] h-[16px] rounded-full bg-teal-500/90 text-[9px] text-white px-1" style={{ fontWeight: 700 }}>
-                        {badge}
-                      </span>
-                    )}
-                  </NavLink>
+                  <div key={section.title} className="space-y-1">
+                    <p className="px-2.5 text-[10px] text-slate-500 tracking-wide" style={{ fontWeight: 700 }}>
+                      {section.title}
+                    </p>
+                    <div className="space-y-px">
+                      {visibleItems.map((item) => {
+                        const active = isActive(item.to, item.exact);
+                        const badge = getBadge(item.to);
+                        return (
+                          <NavLink
+                            key={item.to}
+                            to={item.to}
+                            end={item.exact}
+                            className={`
+                              group relative flex items-center gap-2 rounded-md text-[12px] px-2.5 py-[7px] transition-all duration-100
+                              ${active
+                                ? 'bg-teal-500/18 text-white backdrop-blur-sm'
+                                : 'text-slate-400 hover:text-slate-200 hover:bg-white/8'
+                              }
+                            `}
+                          >
+                            {active && (
+                              <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-3.5 rounded-r bg-teal-400" />
+                            )}
+                            <item.icon className={`w-[15px] h-[15px] shrink-0 ${active ? 'text-teal-400' : 'text-slate-600 group-hover:text-slate-400'}`} />
+                            <span style={{ fontWeight: active ? 500 : 400 }}>{item.label}</span>
+                            {badge !== null && (
+                              <span className="ml-auto flex items-center justify-center min-w-[16px] h-[16px] rounded-full bg-teal-500/90 text-[9px] text-white px-1" style={{ fontWeight: 700 }}>
+                                {badge}
+                              </span>
+                            )}
+                          </NavLink>
+                        );
+                      })}
+                    </div>
+                  </div>
                 );
               })}
             </div>

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CheckCircle2, ClipboardCheck, ClipboardList, CircleDollarSign, ChevronLeft, ChevronRight } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { CheckCircle2, ClipboardCheck, ClipboardList, CircleDollarSign, ChevronLeft, ChevronRight, Download, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
@@ -23,13 +23,15 @@ import {
   type CashflowSheetLineId,
   type CashflowWeekSheet,
   type Transaction,
+  type UserRole,
 } from '../../data/types';
 import { getSeoulTodayIso } from '../../platform/business-days';
-import { CASHFLOW_ALL_LINES, CASHFLOW_IN_LINES, CASHFLOW_OUT_LINES, aggregateTransactionsToActual } from '../../platform/cashflow-sheet';
+import { CASHFLOW_ALL_LINES, CASHFLOW_IN_LINES, CASHFLOW_OUT_LINES, computeCashflowTotals } from '../../platform/cashflow-sheet';
 import { getMonthMondayWeeks } from '../../platform/cashflow-weeks';
 import { useAuth } from '../../data/auth-store';
 import { useBlocker } from 'react-router';
 import { hasUnsavedChanges } from './cashflow-unsaved';
+import { triggerDownload } from '../../platform/csv-utils';
 
 function fmt(n: number): string {
   return n.toLocaleString('ko-KR');
@@ -43,17 +45,27 @@ function parseAmount(raw: string): number {
   return Math.trunc(n);
 }
 
+function formatAmountInput(raw: string): string {
+  const cleaned = String(raw || '').replace(/[^\d-]/g, '');
+  if (!cleaned) return '';
+  const n = Number(cleaned);
+  if (!Number.isFinite(n)) return '';
+  return Math.trunc(n).toLocaleString('ko-KR');
+}
+
 export function CashflowProjectSheet({
   projectId,
   projectName,
   transactions,
+  roleOverride,
 }: {
   projectId: string;
   projectName: string;
   transactions: Transaction[];
+  roleOverride?: UserRole | string;
 }) {
   const { user } = useAuth();
-  const role = user?.role;
+  const role = (roleOverride || user?.role || '').toString().toLowerCase() as UserRole | '';
   const isPm = role === 'pm';
   const canClose = role === 'admin' || role === 'finance' || role === 'tenant_admin';
   const canEdit = isPm || canClose;
@@ -72,36 +84,73 @@ export function CashflowProjectSheet({
   } = useCashflowWeeks();
 
   const monthWeeks = useMemo(() => getMonthMondayWeeks(yearMonth), [yearMonth]);
-  const projectWeeks = useMemo(() => weeks.filter((w) => w.projectId === projectId && w.yearMonth === yearMonth), [projectId, weeks, yearMonth]);
+  const normalizedYearMonth = useMemo(() => {
+    const [y, m] = yearMonth.split('-');
+    if (!y || !m) return yearMonth;
+    return `${y}-${m.padStart(2, '0')}`;
+  }, [yearMonth]);
+  const projectWeeks = useMemo(
+    () => weeks.filter((w) => {
+      if (w.projectId !== projectId) return false;
+      const ym = typeof w.yearMonth === 'string' ? w.yearMonth : '';
+      const [yy, mm] = ym.split('-');
+      const normalized = yy && mm ? `${yy}-${mm.padStart(2, '0')}` : ym;
+      return normalized === normalizedYearMonth;
+    }),
+    [projectId, weeks, normalizedYearMonth],
+  );
   const byWeekNo = useMemo(() => {
     const map = new Map<number, CashflowWeekSheet>();
     for (const w of projectWeeks) map.set(w.weekNo, w);
     return map;
   }, [projectWeeks]);
 
-  // ── Actual 자동 집계: 트랜잭션에서 주차별 금액 계산 ──
-  const projectTxForMonth = useMemo(
-    () => transactions.filter((t) => t.projectId === projectId && t.dateTime.startsWith(yearMonth)),
-    [transactions, projectId, yearMonth],
-  );
-  const actualFromTx = useMemo(
-    () => aggregateTransactionsToActual(projectTxForMonth, monthWeeks),
-    [projectTxForMonth, monthWeeks],
-  );
+  const openingTotalsByMode = useMemo(() => {
+    function ymToNumber(value: string): number | null {
+      const [y, m] = value.split('-');
+      const yy = Number.parseInt(y, 10);
+      const mm = Number.parseInt(m, 10);
+      if (!Number.isFinite(yy) || !Number.isFinite(mm)) return null;
+      return yy * 100 + mm;
+    }
+
+    const currentYmNum = ymToNumber(normalizedYearMonth);
+    const currentYear = currentYmNum ? Math.trunc(currentYmNum / 100) : null;
+    let projectionIn = 0;
+    let projectionOut = 0;
+    let actualIn = 0;
+    let actualOut = 0;
+
+    for (const w of weeks) {
+      if (w.projectId !== projectId) continue;
+      const ymRaw = typeof w.yearMonth === 'string' ? w.yearMonth : '';
+      const ymNum = ymToNumber(ymRaw);
+      if (!ymNum || !currentYear || !currentYmNum) continue;
+      if (Math.trunc(ymNum / 100) !== currentYear) continue;
+      if (ymNum >= currentYmNum) continue;
+      const p = computeCashflowTotals(w.projection);
+      const a = computeCashflowTotals(w.actual);
+      projectionIn += p.totalIn;
+      projectionOut += p.totalOut;
+      actualIn += a.totalIn;
+      actualOut += a.totalOut;
+    }
+
+    return { projectionIn, projectionOut, actualIn, actualOut };
+  }, [normalizedYearMonth, projectId, weeks]);
+
+
+  // ── Actual: Firestore cashflow_weeks actual 값 사용 ──
 
   const [mode, setMode] = useState<'projection' | 'actual'>('projection');
   const [drafts, setDrafts] = useState<Record<string, string>>({});
-  const draftsRef = useRef(drafts);
-  useEffect(() => {
-    draftsRef.current = drafts;
-  }, [drafts]);
 
   type WeekSaveState = 'dirty' | 'saving' | 'error' | 'saved';
   const [weekSaveState, setWeekSaveState] = useState<Record<string, WeekSaveState>>({});
-  const autosaveTimersRef = useRef<Record<string, ReturnType<typeof setTimeout> | undefined>>({});
 
   const [submitConfirm, setSubmitConfirm] = useState<{ weekNo: number; yearMonth: string } | null>(null);
   const [submitBusy, setSubmitBusy] = useState(false);
+  const [monthSaving, setMonthSaving] = useState(false);
 
   const hasDirty = useMemo(
     () => hasUnsavedChanges(weekSaveState) || Object.keys(drafts).length > 0,
@@ -133,10 +182,6 @@ export function CashflowProjectSheet({
     setDrafts({});
     setWeekSaveState({});
     setSubmitConfirm(null);
-    for (const t of Object.values(autosaveTimersRef.current)) {
-      if (t) clearTimeout(t);
-    }
-    autosaveTimersRef.current = {};
   }, [yearMonth, projectId]);
 
   const weekMeta = useMemo(() => {
@@ -147,6 +192,16 @@ export function CashflowProjectSheet({
         pmSubmitted: Boolean(doc?.pmSubmitted),
         adminClosed: Boolean(doc?.adminClosed),
       };
+    }
+    return map;
+  }, [byWeekNo, monthWeeks]);
+
+  const weekHasActual = useMemo(() => {
+    const map: Record<number, boolean> = {};
+    for (const def of monthWeeks) {
+      const doc = byWeekNo.get(def.weekNo);
+      const actual = doc?.actual || {};
+      map[def.weekNo] = Object.values(actual).some((v) => Number(v) !== 0);
     }
     return map;
   }, [byWeekNo, monthWeeks]);
@@ -181,26 +236,27 @@ export function CashflowProjectSheet({
     weekNo: number;
     lineId: CashflowSheetLineId;
   }): number {
-    // Actual → 트랜잭션 자동 집계값 사용 (수동 입력 X)
-    if (params.mode === 'actual') {
-      const weekBucket = actualFromTx.get(params.weekNo);
-      return weekBucket?.[params.lineId] || 0;
-    }
-    // Projection → 기존 수동 입력 로직
+    // Actual/Projection → Firestore 캐시플로 시트 값 사용
     const doc = byWeekNo.get(params.weekNo);
     const persisted = getPersistedCell({ doc, mode: params.mode, lineId: params.lineId });
     const key = resolveCellKey(params);
-    const raw = Object.prototype.hasOwnProperty.call(draftsRef.current, key) ? draftsRef.current[key] : undefined;
+    const raw = Object.prototype.hasOwnProperty.call(drafts, key) ? drafts[key] : undefined;
     return raw !== undefined ? parseAmount(raw) : persisted.amount;
   }
 
   const derivedByMode = useMemo(() => {
     function compute(mode: 'projection' | 'actual') {
       const rowTotals: Record<CashflowSheetLineId, number> = Object.fromEntries(CASHFLOW_ALL_LINES.map((id) => [id, 0])) as any;
+      const openingIn = mode === 'projection' ? openingTotalsByMode.projectionIn : openingTotalsByMode.actualIn;
+      const openingOut = mode === 'projection' ? openingTotalsByMode.projectionOut : openingTotalsByMode.actualOut;
+      let runningIn = openingIn;
+      let runningOut = openingOut;
       const weekTotals = monthWeeks.map((def) => {
-        const totalIn = CASHFLOW_IN_LINES.reduce((acc, id) => acc + getEffectiveAmount({ yearMonth, mode, weekNo: def.weekNo, lineId: id }), 0);
-        const totalOut = CASHFLOW_OUT_LINES.reduce((acc, id) => acc + getEffectiveAmount({ yearMonth, mode, weekNo: def.weekNo, lineId: id }), 0);
-        return { weekNo: def.weekNo, totalIn, totalOut, net: totalIn - totalOut };
+        const weekIn = CASHFLOW_IN_LINES.reduce((acc, id) => acc + getEffectiveAmount({ yearMonth, mode, weekNo: def.weekNo, lineId: id }), 0);
+        const weekOut = CASHFLOW_OUT_LINES.reduce((acc, id) => acc + getEffectiveAmount({ yearMonth, mode, weekNo: def.weekNo, lineId: id }), 0);
+        runningIn += weekIn;
+        runningOut += weekOut;
+        return { weekNo: def.weekNo, totalIn: runningIn, totalOut: runningOut, net: runningIn - runningOut, weekIn, weekOut };
       });
 
       for (const lineId of CASHFLOW_ALL_LINES) {
@@ -209,8 +265,8 @@ export function CashflowProjectSheet({
         }
       }
 
-      const totalIn = weekTotals.reduce((acc, w) => acc + w.totalIn, 0);
-      const totalOut = weekTotals.reduce((acc, w) => acc + w.totalOut, 0);
+      const totalIn = weekTotals.length ? weekTotals[weekTotals.length - 1].totalIn : openingIn;
+      const totalOut = weekTotals.length ? weekTotals[weekTotals.length - 1].totalOut : openingOut;
       return {
         rowTotals,
         weekTotals,
@@ -222,14 +278,59 @@ export function CashflowProjectSheet({
       projection: compute('projection'),
       actual: compute('actual'),
     };
-  }, [getEffectiveAmount, monthWeeks, yearMonth]);
+  }, [drafts, getEffectiveAmount, monthWeeks, openingTotalsByMode, yearMonth]);
+
+  const buildExportMatrix = useCallback((tableMode: 'projection' | 'actual') => {
+    const derived = tableMode === 'projection' ? derivedByMode.projection : derivedByMode.actual;
+    const headerRow = ['항목', ...monthWeeks.map((w) => w.label), '월 합계'];
+    const dateRow = ['기간', ...monthWeeks.map((w) => `${w.weekStart} ~ ${w.weekEnd}`), ''];
+
+    const rows: (string | number)[][] = [];
+    rows.push(headerRow, dateRow, []);
+    rows.push([`입금 (${tableMode === 'projection' ? 'Projection' : 'Actual'})`, ...Array(monthWeeks.length + 1).fill('')]);
+    for (const lineId of CASHFLOW_IN_LINES) {
+      const weekValues = monthWeeks.map((w) => getEffectiveAmount({ yearMonth, mode: tableMode, weekNo: w.weekNo, lineId }));
+      rows.push([CASHFLOW_SHEET_LINE_LABELS[lineId], ...weekValues, derived.rowTotals[lineId] || 0]);
+    }
+    rows.push(['입금 합계', ...derived.weekTotals.map((w) => w.totalIn), derived.monthTotals.totalIn]);
+    rows.push([]);
+    rows.push([`출금 (${tableMode === 'projection' ? 'Projection' : 'Actual'})`, ...Array(monthWeeks.length + 1).fill('')]);
+    for (const lineId of CASHFLOW_OUT_LINES) {
+      const weekValues = monthWeeks.map((w) => getEffectiveAmount({ yearMonth, mode: tableMode, weekNo: w.weekNo, lineId }));
+      rows.push([CASHFLOW_SHEET_LINE_LABELS[lineId], ...weekValues, derived.rowTotals[lineId] || 0]);
+    }
+    rows.push(['출금 합계', ...derived.weekTotals.map((w) => w.totalOut), derived.monthTotals.totalOut]);
+    rows.push(['잔액', ...derived.weekTotals.map((w) => w.net), derived.monthTotals.net]);
+    return rows;
+  }, [derivedByMode, getEffectiveAmount, monthWeeks, yearMonth]);
+
+  const handleDownload = useCallback(async () => {
+    const ExcelJS = await import('exceljs');
+    const wb = new ExcelJS.Workbook();
+    const addSheet = (label: string, tableMode: 'projection' | 'actual') => {
+      const ws = wb.addWorksheet(label);
+      const matrix = buildExportMatrix(tableMode);
+      matrix.forEach((row) => ws.addRow(row));
+      ws.getRow(1).font = { bold: true };
+      ws.getRow(2).font = { bold: true };
+      ws.views = [{ state: 'frozen', ySplit: 2 }];
+    };
+    addSheet('Projection', 'projection');
+    addSheet('Actual', 'actual');
+    const buffer = await wb.xlsx.writeBuffer();
+    const blob = new Blob(
+      [buffer],
+      { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+    );
+    triggerDownload(blob, `프로젝트_캐시플로(주간)_${projectName}_${yearMonth}.xlsx`);
+  }, [buildExportMatrix, projectName, yearMonth]);
 
   const flushWeek = useCallback(async (input: {
     weekNo: number;
     mode: 'projection' | 'actual';
     silent?: boolean;
   }): Promise<void> => {
-    if (!canEdit) return;
+    if (!canEdit && input.mode === 'actual') return;
     const wkKey = resolveWeekKey({ yearMonth, mode: input.mode, weekNo: input.weekNo });
     const doc = byWeekNo.get(input.weekNo);
 
@@ -237,10 +338,10 @@ export function CashflowProjectSheet({
     const amounts: Partial<Record<CashflowSheetLineId, number>> = {};
     for (const lineId of CASHFLOW_ALL_LINES) {
       const cellKey = resolveCellKey({ yearMonth, mode: input.mode, weekNo: input.weekNo, lineId });
-      const hasDraft = Object.prototype.hasOwnProperty.call(draftsRef.current, cellKey);
+      const hasDraft = Object.prototype.hasOwnProperty.call(drafts, cellKey);
       if (!hasDraft) continue;
 
-      const raw = draftsRef.current[cellKey];
+      const raw = drafts[cellKey];
       rawByLine[lineId] = raw;
 
       const nextAmount = parseAmount(raw);
@@ -293,18 +394,12 @@ export function CashflowProjectSheet({
       }
       throw error;
     }
-  }, [byWeekNo, canEdit, projectId, resolveCellKey, resolveWeekKey, upsertWeekAmounts, yearMonth]);
+  }, [byWeekNo, canEdit, drafts, projectId, resolveCellKey, resolveWeekKey, upsertWeekAmounts, yearMonth]);
 
-  const scheduleAutosave = useCallback((input: { weekNo: number; mode: 'projection' | 'actual' }) => {
+  const markDirty = useCallback((input: { weekNo: number; mode: 'projection' | 'actual' }) => {
     const wkKey = resolveWeekKey({ yearMonth, mode: input.mode, weekNo: input.weekNo });
-    const existing = autosaveTimersRef.current[wkKey];
-    if (existing) clearTimeout(existing);
-
     setWeekSaveState((prev) => ({ ...prev, [wkKey]: 'dirty' }));
-    autosaveTimersRef.current[wkKey] = setTimeout(() => {
-      void flushWeek({ weekNo: input.weekNo, mode: input.mode, silent: true }).catch(() => {});
-    }, 1200);
-  }, [flushWeek, resolveWeekKey, yearMonth]);
+  }, [resolveWeekKey, yearMonth]);
 
   const flushAllDirtyBeforeMonthChange = useCallback(async () => {
     const entries = Object.entries(weekSaveState).filter(([, state]) => state === 'dirty' || state === 'error');
@@ -332,6 +427,22 @@ export function CashflowProjectSheet({
       .then(() => goNextMonth())
       .catch(() => {});
   }, [flushAllDirtyBeforeMonthChange, goNextMonth]);
+
+  const saveMonthProjection = useCallback(() => {
+    const targets = monthWeeks.map((w) => w.weekNo);
+    void (async () => {
+      setMonthSaving(true);
+      for (const weekNo of targets) {
+        await flushWeek({ weekNo, mode: 'projection', silent: false });
+      }
+      toast.success('이번 달 Projection을 저장했습니다.');
+    })().catch((err) => {
+      console.error('[Cashflow] month projection save failed:', err);
+      toast.error('월 저장에 실패했습니다. 네트워크/권한을 확인해 주세요.');
+    }).finally(() => {
+      setMonthSaving(false);
+    });
+  }, [flushWeek, monthWeeks]);
 
   const handleSubmitWeek = useCallback(async (input: { weekNo: number; yearMonth: string }) => {
     setSubmitBusy(true);
@@ -363,7 +474,7 @@ export function CashflowProjectSheet({
     for (const lineId of CASHFLOW_ALL_LINES) {
       const persisted = getPersistedCell({ doc, mode: input.mode, lineId });
       const key = resolveCellKey({ yearMonth, mode: input.mode, weekNo: input.weekNo, lineId });
-      const raw = Object.prototype.hasOwnProperty.call(draftsRef.current, key) ? draftsRef.current[key] : undefined;
+      const raw = Object.prototype.hasOwnProperty.call(drafts, key) ? drafts[key] : undefined;
       const filled = persisted.hasValue || (typeof raw === 'string' && raw.trim() !== '');
       if (!filled) empty += 1;
     }
@@ -393,7 +504,7 @@ export function CashflowProjectSheet({
                           <span>{w.label}</span>
                           {weekMeta[w.weekNo]?.adminClosed ? (
                             <Badge className="h-4 px-1 text-[9px] bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-0">결산</Badge>
-                          ) : weekMeta[w.weekNo]?.pmSubmitted ? (
+                          ) : weekMeta[w.weekNo]?.pmSubmitted || weekHasActual[w.weekNo] ? (
                             <Badge className="h-4 px-1 text-[9px] bg-amber-500/15 text-amber-700 dark:text-amber-300 border-0">작성</Badge>
                           ) : (
                             <Badge className="h-4 px-1 text-[9px] bg-slate-500/10 text-slate-600 dark:text-slate-300 border-0">미작성</Badge>
@@ -410,16 +521,6 @@ export function CashflowProjectSheet({
                         </div>
                         <div className="text-[9px] text-muted-foreground mt-0.5">{w.weekStart} ~ {w.weekEnd}</div>
                         <div className="mt-2 flex items-center justify-end gap-1.5">
-                          {canEdit && !weekMeta[w.weekNo]?.adminClosed && tableMode !== 'actual' && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-7 text-[10px] gap-1"
-                              onClick={() => void flushWeek({ weekNo: w.weekNo, mode: tableMode, silent: false }).catch(() => {})}
-                            >
-                              저장
-                            </Button>
-                          )}
                           {tableMode === 'actual' && !weekMeta[w.weekNo]?.pmSubmitted && isPm && (
                             <Button
                               size="sm"
@@ -451,13 +552,6 @@ export function CashflowProjectSheet({
                 </tr>
               </thead>
               <tbody>
-                {tableMode === 'actual' && (
-                  <tr className="bg-sky-50/50 dark:bg-sky-950/20">
-                    <td className="px-4 py-2 text-[10px] text-sky-700 dark:text-sky-300" colSpan={monthWeeks.length + 2}>
-                      Actual 값은 승인/제출된 사업비 사용내역(트랜잭션)에서 자동 집계됩니다. 사용내역 등록 시 자동 반영됩니다.
-                    </td>
-                  </tr>
-                )}
                 <tr className="bg-emerald-50/40 dark:bg-emerald-950/10">
                   <td className="px-4 py-2" colSpan={monthWeeks.length + 2} style={{ fontWeight: 700 }}>
                     입금 ({tableMode === 'projection' ? 'Projection' : 'Actual'})
@@ -465,7 +559,7 @@ export function CashflowProjectSheet({
                 </tr>
                 {CASHFLOW_IN_LINES.map((lineId) => (
                   <tr key={lineId} className="border-t border-border/30">
-                    <td className="px-4 py-2" style={{ fontWeight: 500 }}>{CASHFLOW_SHEET_LINE_LABELS[lineId]}</td>
+                    <td className="px-4 py-1.5 text-[10px] whitespace-nowrap" style={{ fontWeight: 500 }}>{CASHFLOW_SHEET_LINE_LABELS[lineId]}</td>
                     {monthWeeks.map((w) => {
                       const isThisWeek = todayYearMonth === yearMonth && todayIso >= w.weekStart && todayIso <= w.weekEnd;
                       const colClass = isThisWeek ? 'bg-teal-50/30 dark:bg-teal-950/10' : '';
@@ -473,9 +567,9 @@ export function CashflowProjectSheet({
                       if (tableMode === 'actual') {
                         const amount = getEffectiveAmount({ yearMonth, mode: 'actual', weekNo: w.weekNo, lineId });
                         return (
-                          <td key={w.weekNo} className={`px-3 py-2 text-right ${colClass}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
-                            {fmt(amount)}
-                          </td>
+                        <td key={w.weekNo} className={`px-3 py-2 h-9 align-middle text-right ${colClass}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
+                          {fmt(amount)}
+                        </td>
                         );
                       }
 
@@ -486,26 +580,38 @@ export function CashflowProjectSheet({
                       const value = raw !== undefined ? raw : (persisted.hasValue ? String(persisted.amount) : '');
 
                       return (
-                        <td key={w.weekNo} className={`px-3 py-1.5 text-right ${colClass}`}>
+                        <td key={w.weekNo} className={`px-3 h-9 align-middle text-right ${colClass}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
                           <Input
                             value={value}
                             inputMode="numeric"
-                            className="h-8 text-[11px] text-right"
+                            className="h-6 text-[10px] md:text-[10px] leading-[10px] font-normal text-right px-1 py-0 bg-transparent border-transparent focus-visible:ring-0 focus-visible:border-teal-500/60"
                             placeholder="0"
-                            disabled={!canEdit || weekMeta[w.weekNo]?.adminClosed}
+                            disabled={false}
                             onChange={(e) => {
-                              setDrafts((prev) => ({ ...prev, [key]: e.target.value }));
-                              scheduleAutosave({ weekNo: w.weekNo, mode: tableMode });
+                              const formatted = formatAmountInput(e.target.value);
+                              setDrafts((prev) => ({ ...prev, [key]: formatted }));
+                              markDirty({ weekNo: w.weekNo, mode: tableMode });
                             }}
                           />
                         </td>
                       );
                     })}
-                    <td className="px-3 py-2 text-right" style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                    <td className="px-3 py-1.5 pr-2 h-9 align-middle text-right text-[10px]" style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
                       {fmt(derived.rowTotals[lineId] || 0)}
                     </td>
                   </tr>
                 ))}
+                <tr className="border-t border-border/50 bg-muted/40">
+                  <td className="px-4 py-1.5 text-[10px]" style={{ fontWeight: 800 }}>입금 합계</td>
+                  {derived.weekTotals.map((w) => (
+                    <td key={w.weekNo} className="px-3 py-1.5 pr-2 h-9 align-middle text-right text-[10px]" style={{ fontWeight: 800, color: '#059669', fontVariantNumeric: 'tabular-nums' }}>
+                      {fmt(w.totalIn)}
+                    </td>
+                  ))}
+                  <td className="px-3 py-1.5 pr-2 h-9 align-middle text-right text-[10px]" style={{ fontWeight: 900, color: '#059669', fontVariantNumeric: 'tabular-nums' }}>
+                    {fmt(derived.monthTotals.totalIn)}
+                  </td>
+                </tr>
 
                 <tr className="border-t border-border/50 bg-rose-50/30 dark:bg-rose-950/10">
                   <td className="px-4 py-2" colSpan={monthWeeks.length + 2} style={{ fontWeight: 700 }}>
@@ -514,7 +620,7 @@ export function CashflowProjectSheet({
                 </tr>
                 {CASHFLOW_OUT_LINES.map((lineId) => (
                   <tr key={lineId} className="border-t border-border/30">
-                    <td className="px-4 py-2" style={{ fontWeight: 500 }}>{CASHFLOW_SHEET_LINE_LABELS[lineId]}</td>
+                    <td className="px-4 py-1.5 text-[10px] whitespace-nowrap" style={{ fontWeight: 500 }}>{CASHFLOW_SHEET_LINE_LABELS[lineId]}</td>
                     {monthWeeks.map((w) => {
                       const isThisWeek = todayYearMonth === yearMonth && todayIso >= w.weekStart && todayIso <= w.weekEnd;
                       const colClass = isThisWeek ? 'bg-teal-50/30 dark:bg-teal-950/10' : '';
@@ -522,9 +628,9 @@ export function CashflowProjectSheet({
                       if (tableMode === 'actual') {
                         const amount = getEffectiveAmount({ yearMonth, mode: 'actual', weekNo: w.weekNo, lineId });
                         return (
-                          <td key={w.weekNo} className={`px-3 py-2 text-right ${colClass}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
-                            {fmt(amount)}
-                          </td>
+                        <td key={w.weekNo} className={`px-3 py-2 h-9 align-middle text-right ${colClass}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
+                          {fmt(amount)}
+                        </td>
                         );
                       }
 
@@ -535,56 +641,52 @@ export function CashflowProjectSheet({
                       const value = raw !== undefined ? raw : (persisted.hasValue ? String(persisted.amount) : '');
 
                       return (
-                        <td key={w.weekNo} className={`px-3 py-1.5 text-right ${colClass}`}>
+                        <td key={w.weekNo} className={`px-3 h-9 align-middle text-right ${colClass}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
                           <Input
                             value={value}
                             inputMode="numeric"
-                            className="h-8 text-[11px] text-right"
+                            className="h-6 text-[10px] md:text-[10px] leading-[10px] font-normal text-right px-1 py-0 bg-transparent border-transparent focus-visible:ring-0 focus-visible:border-teal-500/60"
                             placeholder="0"
-                            disabled={!canEdit || weekMeta[w.weekNo]?.adminClosed}
+                            disabled={false}
                             onChange={(e) => {
-                              setDrafts((prev) => ({ ...prev, [key]: e.target.value }));
-                              scheduleAutosave({ weekNo: w.weekNo, mode: tableMode });
+                              const formatted = formatAmountInput(e.target.value);
+                              setDrafts((prev) => ({ ...prev, [key]: formatted }));
+                              markDirty({ weekNo: w.weekNo, mode: tableMode });
                             }}
                           />
                         </td>
                       );
                     })}
-                    <td className="px-3 py-2 text-right" style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                    <td className="px-3 py-1.5 pr-2 h-9 align-middle text-right text-[10px]" style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
                       {fmt(derived.rowTotals[lineId] || 0)}
                     </td>
                   </tr>
                 ))}
 
-                <tr className="border-t border-border/50 bg-muted/40">
-                  <td className="px-4 py-2" style={{ fontWeight: 800 }}>입금 합계</td>
-                  {derived.weekTotals.map((w) => (
-                    <td key={w.weekNo} className="px-3 py-2 text-right" style={{ fontWeight: 800, color: '#059669' }}>
-                      {fmt(w.totalIn)}
-                    </td>
-                  ))}
-                  <td className="px-3 py-2 text-right" style={{ fontWeight: 900, color: '#059669' }}>
-                    {fmt(derived.monthTotals.totalIn)}
-                  </td>
-                </tr>
                 <tr className="border-t border-border/30 bg-muted/40">
-                  <td className="px-4 py-2" style={{ fontWeight: 800 }}>출금 합계</td>
+                  <td className="px-4 py-1.5 text-[10px]" style={{ fontWeight: 800 }}>출금 합계</td>
                   {derived.weekTotals.map((w) => (
-                    <td key={w.weekNo} className="px-3 py-2 text-right" style={{ fontWeight: 800, color: '#e11d48' }}>
+                    <td key={w.weekNo} className="px-3 py-1.5 pr-2 h-9 align-middle text-right text-[10px]" style={{ fontWeight: 800, color: '#e11d48', fontVariantNumeric: 'tabular-nums' }}>
                       {fmt(w.totalOut)}
                     </td>
                   ))}
-                  <td className="px-3 py-2 text-right" style={{ fontWeight: 900, color: '#e11d48' }}>
+                  <td className="px-3 py-1.5 pr-2 h-9 align-middle text-right text-[10px]" style={{ fontWeight: 900, color: '#e11d48', fontVariantNumeric: 'tabular-nums' }}>
                     {fmt(derived.monthTotals.totalOut)}
                   </td>
                 </tr>
-                <tr className="border-t border-border/30 bg-muted/40">
-                  <td className="px-4 py-2" style={{ fontWeight: 900 }}>NET</td>
-                  {derived.weekTotals.map((w) => (
-                    <td key={w.weekNo} className="px-3 py-2 text-right" style={{ fontWeight: 900, color: w.net >= 0 ? '#059669' : '#e11d48' }}>
-                      {fmt(w.net)}
-                    </td>
-                  ))}
+                <tr className="border-t border-border/30 bg-muted/50">
+                  <td className="px-4 py-2" style={{ fontWeight: 900 }}>잔액</td>
+                  {(() => {
+                    let running = 0;
+                    return derived.weekTotals.map((w) => {
+                      running = w.net;
+                      return (
+                        <td key={w.weekNo} className="px-3 py-2 text-right" style={{ fontWeight: 900, color: running >= 0 ? '#059669' : '#e11d48' }}>
+                          {fmt(running)}
+                        </td>
+                      );
+                    });
+                  })()}
                   <td className="px-3 py-2 text-right" style={{ fontWeight: 900, color: derived.monthTotals.net >= 0 ? '#059669' : '#e11d48' }}>
                     {fmt(derived.monthTotals.net)}
                   </td>
@@ -609,6 +711,26 @@ export function CashflowProjectSheet({
         description={`${projectName} · ${yearMonth}`}
         actions={(
           <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-[12px] gap-1.5"
+              onClick={handleDownload}
+            >
+              <Download className="w-3.5 h-3.5" /> 엑셀 다운로드
+            </Button>
+            {mode === 'projection' && (
+              <Button
+                variant="default"
+                size="sm"
+                className="h-8 text-[12px] gap-1.5"
+                onClick={saveMonthProjection}
+                disabled={monthSaving}
+              >
+                {monthSaving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                월 저장
+              </Button>
+            )}
             <Button variant="outline" size="sm" className="h-8 text-[12px] gap-1.5" onClick={goPrevMonthSafe}>
               <ChevronLeft className="w-3.5 h-3.5" /> 이전 달
             </Button>
@@ -620,12 +742,18 @@ export function CashflowProjectSheet({
       />
 
       <Tabs value={mode} onValueChange={(v) => (v === 'projection' || v === 'actual') && setMode(v)}>
-        <TabsList className="w-full sm:w-fit">
-          <TabsTrigger value="projection" className="gap-2">
+        <TabsList className="w-full sm:w-fit bg-transparent p-0 border-b border-border/60 rounded-md">
+          <TabsTrigger
+            value="projection"
+            className="gap-2 rounded-md border border-transparent px-3 py-2 -mb-px text-muted-foreground hover:bg-muted/40 data-[state=active]:border-border data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-md data-[state=active]:ring-1 data-[state=active]:ring-foreground/30 data-[state=active]:font-semibold"
+          >
             <ClipboardList className="w-4 h-4" />
             Projection
           </TabsTrigger>
-          <TabsTrigger value="actual" className="gap-2">
+          <TabsTrigger
+            value="actual"
+            className="gap-2 rounded-md border border-transparent px-3 py-2 -mb-px text-muted-foreground hover:bg-muted/40 data-[state=active]:border-border data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-md data-[state=active]:ring-1 data-[state=active]:ring-foreground/30 data-[state=active]:font-semibold"
+          >
             <ClipboardCheck className="w-4 h-4" />
             Actual
           </TabsTrigger>

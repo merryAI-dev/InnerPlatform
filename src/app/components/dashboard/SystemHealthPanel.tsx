@@ -166,6 +166,8 @@ interface ActivityItem {
 
 export function ActivityFeed() {
   const { transactions, projects, auditLogs } = useAppStore();
+  const fmtAmount = (value?: number | null) =>
+    Number.isFinite(value) ? Number(value).toLocaleString('ko-KR') : '-';
 
   const activities = useMemo<ActivityItem[]>(() => {
     const items: ActivityItem[] = [];
@@ -181,7 +183,7 @@ export function ActivityFeed() {
           icon: CheckCircle2,
           iconColor: 'text-emerald-500',
           title: '거래 승인',
-          detail: `${t.counterparty} ${t.amounts.bankAmount.toLocaleString()}원 — ${projName}`,
+          detail: `${t.counterparty} ${fmtAmount(t.amounts?.bankAmount)}원 — ${projName}`,
           timestamp: t.approvedAt,
           type: 'approval',
         });
@@ -203,7 +205,7 @@ export function ActivityFeed() {
           icon: Clock,
           iconColor: 'text-amber-500',
           title: '승인 요청',
-          detail: `${t.counterparty} ${t.amounts.bankAmount.toLocaleString()}원`,
+          detail: `${t.counterparty} ${fmtAmount(t.amounts?.bankAmount)}원`,
           timestamp: t.submittedAt,
           type: 'creation',
         });

@@ -1,3 +1,6 @@
+import { normalizeWorkspaceId, type WorkspaceId } from '../data/member-workspace';
+import { canAccessAdminPath } from './admin-nav';
+
 export type HomePath = '/' | '/portal';
 
 function normalizeRole(value: unknown): string {
@@ -23,13 +26,64 @@ export function isAdminSpaceRole(role: unknown): boolean {
   return ADMIN_SPACE_ROLES.has(normalized);
 }
 
-export function resolveHomePath(role: unknown): HomePath {
+export function canEnterPortalWorkspace(role: unknown): boolean {
+  const normalized = normalizeRole(role);
+  return normalized === 'pm'
+    || normalized === 'viewer'
+    || normalized === 'admin'
+    || normalized === 'tenant_admin';
+}
+
+export function canChooseWorkspace(role: unknown): boolean {
+  const normalized = normalizeRole(role);
+  return normalized === 'admin' || normalized === 'tenant_admin';
+}
+
+export function shouldPromptWorkspaceSelection(
+  role: unknown,
+  preferredWorkspace: unknown,
+): boolean {
+  if (!canChooseWorkspace(role)) return false;
+  return !normalizeWorkspaceId(preferredWorkspace);
+}
+
+export function resolveHomePath(role: unknown, preferredWorkspace?: WorkspaceId | unknown): HomePath {
   const normalized = normalizeRole(role);
   if (!normalized) return '/portal';
   if (isPortalRole(normalized)) return '/portal';
+  if ((normalized === 'admin' || normalized === 'tenant_admin') && normalizeWorkspaceId(preferredWorkspace) === 'portal') {
+    return '/portal';
+  }
   if (isAdminSpaceRole(normalized)) return '/';
-  // Least privilege: unknown roles land in the portal space.
   return '/portal';
+}
+
+function normalizeRequestedPath(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  if (!trimmed.startsWith('/')) return '';
+  if (trimmed === '/login' || trimmed === '/workspace-select') return '';
+  return trimmed;
+}
+
+export function resolvePostLoginPath(
+  role: unknown,
+  preferredWorkspace: WorkspaceId | unknown,
+  requestedPath?: unknown,
+): string {
+  const fallback = resolveHomePath(role, preferredWorkspace);
+  const normalizedPath = normalizeRequestedPath(requestedPath);
+  if (!normalizedPath) return fallback;
+
+  if (normalizedPath === '/portal' || normalizedPath.startsWith('/portal/')) {
+    return canEnterPortalWorkspace(role) ? normalizedPath : fallback;
+  }
+
+  if (!isPortalRole(role) && canAccessAdminPath(role, normalizedPath)) {
+    return normalizedPath;
+  }
+
+  return fallback;
 }
 
 interface PortalOnboardingRedirectInput {
@@ -45,7 +99,8 @@ interface PortalOnboardingRedirectInput {
  */
 export function shouldForcePortalOnboarding(input: PortalOnboardingRedirectInput): boolean {
   if (!input.isAuthenticated) return false;
-  if (resolveHomePath(input.role) !== '/portal') return false;
+  if (canChooseWorkspace(input.role)) return false;
+  if (!canEnterPortalWorkspace(input.role)) return false;
   if (input.isRegistered) return false;
   return !input.pathname.includes('/portal/onboarding');
 }

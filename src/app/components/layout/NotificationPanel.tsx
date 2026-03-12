@@ -31,6 +31,8 @@ export function NotificationPanel() {
   const { transactions, projects, participationEntries } = useAppStore();
   const { weeks: cashflowWeeks } = useCashflowWeeks();
   const [open, setOpen] = useState(false);
+  const fmtAmount = (value?: number | null) =>
+    Number.isFinite(value) ? Number(value).toLocaleString('ko-KR') : '-';
 
   const today = getSeoulTodayIso();
   const dayOfWeek = new Date(today).getDay(); // 0=Sun..6=Sat
@@ -47,7 +49,7 @@ export function NotificationPanel() {
         type: 'approval',
         severity: 'warning',
         title: '승인 대기 거래',
-        description: `${t.counterparty} — ${t.amounts.bankAmount.toLocaleString()}원 (${proj?.name || ''})`,
+        description: `${t.counterparty} — ${fmtAmount(t.amounts?.bankAmount)}원 (${proj?.name || ''})`,
         timestamp: t.submittedAt || t.dateTime,
         link: proj ? `/projects/${proj.id}` : undefined,
         read: false,
@@ -163,7 +165,7 @@ export function NotificationPanel() {
         type: 'approval',
         severity: 'info',
         title: '거래 승인됨',
-        description: `${t.counterparty} — ${t.amounts.bankAmount.toLocaleString()}원 (${proj?.name || ''})`,
+        description: `${t.counterparty} — ${fmtAmount(t.amounts?.bankAmount)}원 (${proj?.name || ''})`,
         timestamp: t.approvedAt || t.dateTime,
         link: '/evidence',
         read: false,

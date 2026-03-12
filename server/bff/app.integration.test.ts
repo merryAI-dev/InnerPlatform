@@ -81,6 +81,44 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     expect(response.body.projectId).toBe(projectId);
   });
 
+  it('previews google sheet rows for an existing project', async () => {
+    const googleSheetsService = {
+      previewSpreadsheet: vi.fn(async ({ value, sheetName }) => ({
+        spreadsheetId: 'sheet-001',
+        spreadsheetTitle: '주간 사업비 시트',
+        selectedSheetName: sheetName || '주간정산',
+        availableSheets: [
+          { sheetId: 0, title: '요약', index: 0 },
+          { sheetId: 1, title: '주간정산', index: 1 },
+        ],
+        matrix: [
+          ['작성자', '거래일시', '지급처'],
+          ['홍길동', '2026-03-12', '카페 메리'],
+        ],
+      })),
+    };
+    const sheetsApi = request(createBffApp({ projectId, workerSecret, db, googleSheetsService }));
+
+    await sheetsApi
+      .post('/api/v1/projects')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-sheets-001' })
+      .send({ id: 'p-sheets-001', name: 'Sheets Project' });
+
+    const preview = await sheetsApi
+      .post('/api/v1/projects/p-sheets-001/google-sheet-import/preview')
+      .set(defaultHeaders)
+      .send({ value: 'https://docs.google.com/spreadsheets/d/sheet-001/edit#gid=1' });
+
+    expect(preview.status).toBe(200);
+    expect(preview.body.spreadsheetTitle).toBe('주간 사업비 시트');
+    expect(preview.body.selectedSheetName).toBe('주간정산');
+    expect(preview.body.matrix[1]).toEqual(['홍길동', '2026-03-12', '카페 메리']);
+    expect(googleSheetsService.previewSpreadsheet).toHaveBeenCalledWith({
+      value: 'https://docs.google.com/spreadsheets/d/sheet-001/edit#gid=1',
+      sheetName: undefined,
+    });
+  });
+
   it('rejects disallowed CORS origin', async () => {
     const corsApi = request(createBffApp({
       projectId,
@@ -406,6 +444,282 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     expect(verify.status).toBe(200);
     expect(verify.body.ok).toBe(true);
     expect(verify.body.checked).toBeGreaterThanOrEqual(5);
+  });
+
+  it('provisions and syncs evidence drive folders via injected drive service', async () => {
+    const driveService = {
+      getConfig: vi.fn(() => ({
+        enabled: true,
+        defaultParentFolderId: 'fld-company-root',
+        sharedDriveId: 'shared-drive-001',
+      })),
+      ensureProjectRootFolder: vi.fn(async () => ({
+        id: 'fld-project-root',
+        name: 'Drive_Project_p-drive-001',
+        webViewLink: 'https://drive.google.com/drive/folders/fld-project-root',
+        driveId: 'shared-drive-001',
+        mimeType: 'application/vnd.google-apps.folder',
+      })),
+      getFile: vi.fn(async (folderId: string) => ({
+        id: folderId,
+        name: 'Manual Root',
+        webViewLink: `https://drive.google.com/drive/folders/${folderId}`,
+        driveId: 'shared-drive-001',
+        mimeType: 'application/vnd.google-apps.folder',
+      })),
+      ensureTransactionFolder: vi.fn(async () => ({
+        projectRootFolder: {
+          id: 'fld-project-root',
+          name: 'Drive_Project_p-drive-001',
+          webViewLink: 'https://drive.google.com/drive/folders/fld-project-root',
+          driveId: 'shared-drive-001',
+          mimeType: 'application/vnd.google-apps.folder',
+        },
+        folder: {
+          id: 'fld-tx-root',
+          name: '20260311_회의비_다과비_tx-drive-001',
+          webViewLink: 'https://drive.google.com/drive/folders/fld-tx-root',
+          driveId: 'shared-drive-001',
+          mimeType: 'application/vnd.google-apps.folder',
+        },
+      })),
+      listFolderFiles: vi.fn(async () => ([
+        {
+          id: 'file-tax-001',
+          name: '세금계산서_3월.pdf',
+          mimeType: 'application/pdf',
+          size: 18000,
+          webViewLink: 'https://drive.google.com/file/d/file-tax-001/view',
+        },
+        {
+          id: 'file-transfer-001',
+          name: '입금확인서_3월.pdf',
+          mimeType: 'application/pdf',
+          size: 9000,
+          webViewLink: 'https://drive.google.com/file/d/file-transfer-001/view',
+        },
+      ])),
+    };
+    const driveApi = request(createBffApp({ projectId, workerSecret, db, driveService }));
+
+    const createdProject = await driveApi
+      .post('/api/v1/projects')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-drive-001' })
+      .send({ id: 'p-drive-001', name: 'Drive Project' });
+
+    expect(createdProject.status).toBe(201);
+    expect(createdProject.body.evidenceDriveRootFolderId).toBe('fld-project-root');
+    expect(driveService.ensureProjectRootFolder).toHaveBeenCalledWith(expect.objectContaining({
+      tenantId,
+      projectId: 'p-drive-001',
+      projectName: 'Drive Project',
+    }));
+
+    await driveApi
+      .post('/api/v1/ledgers')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-ledger-drive-001' })
+      .send({ id: 'l-drive-001', projectId: 'p-drive-001', name: 'Drive Ledger' });
+
+    await driveApi
+      .post('/api/v1/transactions')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-tx-drive-001' })
+      .send({
+        id: 'tx-drive-001',
+        projectId: 'p-drive-001',
+        ledgerId: 'l-drive-001',
+        counterparty: 'Vendor Drive',
+        budgetCategory: '회의비',
+        budgetSubCategory: '다과비',
+        dateTime: '2026-03-11',
+        evidenceRequired: ['세금계산서', '입금확인서'],
+        evidenceStatus: 'MISSING',
+        evidenceMissing: ['세금계산서', '입금확인서'],
+        attachmentsCount: 0,
+        state: 'DRAFT',
+      });
+
+    const projectRoot = await driveApi
+      .post('/api/v1/projects/p-drive-001/evidence-drive/root/provision')
+      .set({ ...defaultHeaders, 'x-actor-role': 'viewer', 'idempotency-key': 'idem-project-drive-root-001' })
+      .send({});
+
+    expect(projectRoot.status).toBe(200);
+    expect(projectRoot.body.folderId).toBe('fld-project-root');
+
+    const linkedRoot = await driveApi
+      .post('/api/v1/projects/p-drive-001/evidence-drive/root/link')
+      .set({ ...defaultHeaders, 'x-actor-role': 'viewer', 'idempotency-key': 'idem-project-drive-link-001' })
+      .send({ value: 'https://drive.google.com/drive/folders/1GD5XnPypL-s6Jp44TJjRRd0nnP0Yu_sg?usp=share_link' });
+
+    expect(linkedRoot.status).toBe(200);
+    expect(linkedRoot.body.folderId).toBe('1GD5XnPypL-s6Jp44TJjRRd0nnP0Yu_sg');
+    expect(driveService.getFile).toHaveBeenCalledWith('1GD5XnPypL-s6Jp44TJjRRd0nnP0Yu_sg');
+
+    const txFolder = await driveApi
+      .post('/api/v1/transactions/tx-drive-001/evidence-drive/provision')
+      .set({ ...defaultHeaders, 'x-actor-role': 'viewer', 'idempotency-key': 'idem-tx-drive-provision-001' })
+      .send({});
+
+    expect(txFolder.status).toBe(200);
+    expect(txFolder.body.folderId).toBe('fld-tx-root');
+    expect(driveService.ensureTransactionFolder).toHaveBeenCalled();
+
+    const sync = await driveApi
+      .post('/api/v1/transactions/tx-drive-001/evidence-drive/sync')
+      .set({ ...defaultHeaders, 'x-actor-role': 'viewer', 'idempotency-key': 'idem-tx-drive-sync-001' })
+      .send({});
+
+    expect(sync.status).toBe(200);
+    expect(sync.body.evidenceCount).toBe(2);
+    expect(sync.body.evidenceStatus).toBe('COMPLETE');
+    expect(sync.body.evidenceCompletedDesc).toContain('세금계산서');
+
+    const txSnap = await db.doc(`orgs/${tenantId}/transactions/tx-drive-001`).get();
+    expect(txSnap.exists).toBe(true);
+    expect(txSnap.data()?.evidenceDriveFolderId).toBe('fld-tx-root');
+    expect(txSnap.data()?.evidenceAutoListedDesc).toBe('세금계산서, 입금확인서');
+    expect(txSnap.data()?.evidenceMissing).toEqual([]);
+
+    const projectSnap = await db.doc(`orgs/${tenantId}/projects/p-drive-001`).get();
+    expect(projectSnap.data()?.evidenceDriveRootFolderId).toBe('fld-project-root');
+
+    const evidenceSnap = await db
+      .collection(`orgs/${tenantId}/evidences`)
+      .where('transactionId', '==', 'tx-drive-001')
+      .get();
+    expect(evidenceSnap.size).toBe(2);
+    expect(evidenceSnap.docs.map((doc) => doc.data().driveFileId).sort()).toEqual(['file-tax-001', 'file-transfer-001']);
+  });
+
+  it('creates project roots per project and uploads files with parser categories', async () => {
+    const folderState = new Map<string, Array<any>>();
+    const ensureProjectRootFolder = vi.fn(async ({ projectId, projectName }) => ({
+      id: `fld-project-${projectId}`,
+      name: `${projectName}_${projectId}`,
+      webViewLink: `https://drive.google.com/drive/folders/fld-project-${projectId}`,
+      driveId: 'shared-drive-001',
+      mimeType: 'application/vnd.google-apps.folder',
+    }));
+    const ensureTransactionFolder = vi.fn(async ({ projectId, transaction }) => ({
+      projectRootFolder: {
+        id: `fld-project-${projectId}`,
+        name: `Project_${projectId}`,
+        webViewLink: `https://drive.google.com/drive/folders/fld-project-${projectId}`,
+        driveId: 'shared-drive-001',
+        mimeType: 'application/vnd.google-apps.folder',
+      },
+      folder: {
+        id: `fld-${transaction.id}`,
+        name: `${transaction.id}_folder`,
+        webViewLink: `https://drive.google.com/drive/folders/fld-${transaction.id}`,
+        driveId: 'shared-drive-001',
+        mimeType: 'application/vnd.google-apps.folder',
+      },
+    }));
+    const driveService = {
+      getConfig: vi.fn(() => ({
+        enabled: true,
+        defaultParentFolderId: 'fld-company-root',
+        sharedDriveId: 'shared-drive-001',
+      })),
+      ensureProjectRootFolder,
+      getFile: vi.fn(),
+      ensureTransactionFolder,
+      uploadFileToFolder: vi.fn(async ({ folderId, fileName, mimeType, appProperties }) => {
+        const fileId = `drv-${folderId}-${folderState.get(folderId)?.length || 0}`;
+        const uploaded = {
+          id: fileId,
+          name: fileName,
+          mimeType,
+          size: 1024,
+          webViewLink: `https://drive.google.com/file/d/${fileId}/view`,
+          parents: [folderId],
+          driveId: 'shared-drive-001',
+          appProperties,
+        };
+        folderState.set(folderId, [...(folderState.get(folderId) || []), uploaded]);
+        return uploaded;
+      }),
+      listFolderFiles: vi.fn(async ({ folderId }) => folderState.get(folderId) || []),
+    };
+    const driveApi = request(createBffApp({ projectId, workerSecret, db, driveService }));
+
+    for (const project of [
+      { id: 'p-upload-001', name: '온드림 교육사업' },
+      { id: 'p-upload-002', name: '체인지메이커 운영사업' },
+    ]) {
+      const createdProject = await driveApi
+        .post('/api/v1/projects')
+        .set({ ...defaultHeaders, 'idempotency-key': `idem-project-${project.id}` })
+        .send(project);
+
+      expect(createdProject.status).toBe(201);
+      expect(createdProject.body.evidenceDriveRootFolderId).toBe(`fld-project-${project.id}`);
+    }
+
+    expect(ensureProjectRootFolder).toHaveBeenCalledTimes(2);
+
+    await driveApi
+      .post('/api/v1/ledgers')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-ledger-upload-001' })
+      .send({ id: 'l-upload-001', projectId: 'p-upload-001', name: 'Upload Ledger' });
+
+    await driveApi
+      .post('/api/v1/transactions')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-tx-upload-001' })
+      .send({
+        id: 'tx-upload-001',
+        projectId: 'p-upload-001',
+        ledgerId: 'l-upload-001',
+        counterparty: 'Zoom',
+        budgetCategory: '교육운영비',
+        budgetSubCategory: '강의자료',
+        dateTime: '2026-03-11',
+        evidenceRequired: ['강의자료', 'ZOOM invoice'],
+        evidenceStatus: 'MISSING',
+        evidenceMissing: ['강의자료', 'ZOOM invoice'],
+        attachmentsCount: 0,
+        state: 'DRAFT',
+      });
+
+    const firstUpload = await driveApi
+      .post('/api/v1/transactions/tx-upload-001/evidence-drive/upload')
+      .set({ ...defaultHeaders, 'x-actor-role': 'viewer', 'idempotency-key': 'idem-upload-file-001' })
+      .send({
+        fileName: '강의자료_1차시.pdf',
+        mimeType: 'application/pdf',
+        fileSize: 1024,
+        contentBase64: 'ZmFrZS1wZGY=',
+      });
+
+    expect(firstUpload.status).toBe(201);
+    expect(firstUpload.body.parserCategory).toBe('강의자료');
+    expect(firstUpload.body.evidenceCompletedDesc).toBe('강의자료');
+    expect(firstUpload.body.evidencePendingDesc).toBe('ZOOM invoice');
+
+    const secondUpload = await driveApi
+      .post('/api/v1/transactions/tx-upload-001/evidence-drive/upload')
+      .set({ ...defaultHeaders, 'x-actor-role': 'viewer', 'idempotency-key': 'idem-upload-file-002' })
+      .send({
+        fileName: 'ZOOM invoice March.pdf',
+        mimeType: 'application/pdf',
+        fileSize: 2048,
+        contentBase64: 'ZmFrZS16b29tLXBkZg==',
+      });
+
+    expect(secondUpload.status).toBe(201);
+    expect(secondUpload.body.parserCategory).toBe('ZOOM invoice');
+    expect(secondUpload.body.evidenceStatus).toBe('COMPLETE');
+    expect(secondUpload.body.evidenceCompletedDesc).toContain('강의자료');
+    expect(secondUpload.body.evidenceCompletedDesc).toContain('ZOOM invoice');
+
+    const evidenceSnap = await db
+      .collection(`orgs/${tenantId}/evidences`)
+      .where('transactionId', '==', 'tx-upload-001')
+      .get();
+
+    expect(evidenceSnap.size).toBe(2);
+    expect(evidenceSnap.docs.map((doc) => doc.data().parserCategory).sort()).toEqual(['ZOOM invoice', '강의자료']);
   });
 
   it('detects tampering in audit hash chain', async () => {

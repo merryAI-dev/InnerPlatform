@@ -17,14 +17,13 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '../ui/select';
 import { usePortalStore } from '../../data/portal-store';
-import { useBoard } from '../../data/board-store';
 import {
   PROJECT_TYPE_LABELS, SETTLEMENT_TYPE_LABELS, ACCOUNT_TYPE_LABELS,
   BASIS_LABELS,
   type ProjectType,
 } from '../../data/types';
 import { toast } from 'sonner';
-import { buildProjectProposalPost, type ProjectProposalDraft } from './project-proposal';
+import { type ProjectProposalDraft } from './project-proposal';
 
 // ═══════════════════════════════════════════════════════════════
 // PortalProjectRegister — 포털 사용자의 사업 등록 제안
@@ -42,7 +41,7 @@ const STEPS: { key: Step; label: string; icon: typeof FolderKanban }[] = [
 
 const initialProposal: ProjectProposalDraft = {
   name: '',
-  type: 'DEV_COOPERATION',
+  type: 'D1',
   description: '',
   clientOrg: '',
   department: '',
@@ -62,8 +61,7 @@ const initialProposal: ProjectProposalDraft = {
 
 export function PortalProjectRegister() {
   const navigate = useNavigate();
-  const { portalUser } = usePortalStore();
-  const { createPost } = useBoard();
+  const { portalUser, projects, createProjectRequest } = usePortalStore();
   const [step, setStep] = useState<Step>('basic');
   const [form, setForm] = useState<ProjectProposalDraft>({
     ...initialProposal,
@@ -71,7 +69,6 @@ export function PortalProjectRegister() {
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
-  const [createdPostId, setCreatedPostId] = useState<string | null>(null);
 
   const currentStepIdx = STEPS.findIndex(s => s.key === step);
   const canProceed = () => {
@@ -86,24 +83,12 @@ export function PortalProjectRegister() {
     setIsSubmitting(true);
 
     try {
-      const payload = buildProjectProposalPost(
-        form,
-        portalUser?.name || form.managerName || '포털 사용자',
-        portalUser?.email || '',
-      );
-      const created = await createPost({
-        title: payload.title,
-        body: payload.body,
-        channel: 'ideas',
-        tagsInput: payload.tagsInput,
-      });
-
-      if (!created) {
+      const createdId = await createProjectRequest(form);
+      if (!createdId) {
         toast.error('사업 등록 제안 저장에 실패했습니다. 다시 시도해 주세요.');
         return;
       }
 
-      setCreatedPostId(created.id);
       setSubmitted(true);
       toast.success('사업 등록 제안이 저장되었습니다. 관리자 검토를 기다려주세요.');
     } catch (err: any) {
@@ -122,6 +107,8 @@ export function PortalProjectRegister() {
   const update = (key: keyof ProjectProposalDraft, value: any) => {
     setForm(prev => ({ ...prev, [key]: value }));
   };
+  const projectNameOptions = Array.from(new Set(projects.map((project) => String(project.name || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'ko'));
+  const clientOrgOptions = Array.from(new Set(projects.map((project) => String(project.clientOrg || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'ko'));
 
   if (submitted) {
     return (
@@ -141,11 +128,6 @@ export function PortalProjectRegister() {
         </p>
         <div className="flex justify-center gap-2">
           <Button variant="outline" onClick={() => navigate('/portal')}>대시보드로</Button>
-          {createdPostId && (
-            <Button variant="outline" onClick={() => navigate(`/portal/board/${createdPostId}`)}>
-              게시글 보기
-            </Button>
-          )}
           <Button onClick={() => { setSubmitted(false); setForm({ ...initialProposal, managerName: portalUser?.name || '' }); setStep('basic'); }}>
             추가 등록
           </Button>
@@ -216,10 +198,16 @@ export function PortalProjectRegister() {
 
               <div>
                 <Label className="text-[11px]">사업명 *</Label>
+                <datalist id="project-name-options">
+                  {projectNameOptions.map((name) => (
+                    <option key={name} value={name} />
+                  ))}
+                </datalist>
                 <Input
                   value={form.name}
                   onChange={e => update('name', e.target.value)}
                   placeholder="예: KOICA 르완다 기술혁신 역량강화 사업"
+                  list="project-name-options"
                   className="h-9 text-[12px] mt-1"
                 />
               </div>
@@ -240,10 +228,16 @@ export function PortalProjectRegister() {
                 </div>
                 <div>
                   <Label className="text-[11px]">발주기관 *</Label>
+                  <datalist id="client-org-options">
+                    {clientOrgOptions.map((name) => (
+                      <option key={name} value={name} />
+                    ))}
+                  </datalist>
                   <Input
                     value={form.clientOrg}
                     onChange={e => update('clientOrg', e.target.value)}
                     placeholder="예: KOICA"
+                    list="client-org-options"
                     className="h-9 text-[12px] mt-1"
                   />
                 </div>

@@ -5,12 +5,14 @@ import { PortalLayout } from './components/portal/PortalLayout';
 
 // Lazy-loaded pages — each becomes a separate chunk
 const LoginPage = lazy(() => import('./components/auth/LoginPage').then(m => ({ default: m.LoginPage })));
+const WorkspaceSelectPage = lazy(() => import('./components/auth/WorkspaceSelectPage').then(m => ({ default: m.WorkspaceSelectPage })));
 const DashboardPage = lazy(() => import('./components/dashboard/DashboardPage').then(m => ({ default: m.DashboardPage })));
 const BoardFeedPage = lazy(() => import('./components/board/BoardFeedPage').then(m => ({ default: m.BoardFeedPage })));
 const BoardPostPage = lazy(() => import('./components/board/BoardPostPage').then(m => ({ default: m.BoardPostPage })));
 const ProjectListPage = lazy(() => import('./components/projects/ProjectListPage').then(m => ({ default: m.ProjectListPage })));
 const ProjectDetailPage = lazy(() => import('./components/projects/ProjectDetailPage').then(m => ({ default: m.ProjectDetailPage })));
 const ProjectWizardPage = lazy(() => import('./components/projects/ProjectWizardPage').then(m => ({ default: m.ProjectWizardPage })));
+const ProjectRequestApprovalPage = lazy(() => import('./components/projects/ProjectRequestApprovalPage').then(m => ({ default: m.ProjectRequestApprovalPage })));
 const LedgerDetailPage = lazy(() => import('./components/ledgers/LedgerDetailPage').then(m => ({ default: m.LedgerDetailPage })));
 const CashflowPage = lazy(() => import('./components/cashflow/CashflowPage').then(m => ({ default: m.CashflowPage })));
 const ProjectCashflowSheetPage = lazy(() => import('./components/cashflow/ProjectCashflowSheetPage').then(m => ({ default: m.ProjectCashflowSheetPage })));
@@ -34,7 +36,6 @@ const NotFoundPage = lazy(() => import('./components/layout/NotFoundPage').then(
 const PortalOnboarding = lazy(() => import('./components/portal/PortalOnboarding').then(m => ({ default: m.PortalOnboarding })));
 const PortalProjectSettings = lazy(() => import('./components/portal/PortalProjectSettings').then(m => ({ default: m.PortalProjectSettings })));
 const PortalDashboard = lazy(() => import('./components/portal/PortalDashboard').then(m => ({ default: m.PortalDashboard })));
-const PortalExpenses = lazy(() => import('./components/portal/PortalExpenses').then(m => ({ default: m.PortalExpenses })));
 const PortalBudget = lazy(() => import('./components/portal/PortalBudget').then(m => ({ default: m.PortalBudget })));
 const PortalPersonnel = lazy(() => import('./components/portal/PortalPersonnel').then(m => ({ default: m.PortalPersonnel })));
 const PortalChangeRequests = lazy(() => import('./components/portal/PortalChangeRequests').then(m => ({ default: m.PortalChangeRequests })));
@@ -45,6 +46,7 @@ const PortalSubmissionsPage = lazy(() => import('./components/portal/PortalSubmi
 const CareerProfilePage = lazy(() => import('./components/portal/CareerProfilePage').then(m => ({ default: m.CareerProfilePage })));
 const PortalTrainingPage = lazy(() => import('./components/portal/PortalTrainingPage').then(m => ({ default: m.PortalTrainingPage })));
 const PortalWeeklyExpensePage = lazy(() => import('./components/portal/PortalWeeklyExpensePage').then(m => ({ default: m.PortalWeeklyExpensePage })));
+const PortalBankStatementPage = lazy(() => import('./components/portal/PortalBankStatementPage').then(m => ({ default: m.PortalBankStatementPage })));
 const GuideChatPage = lazy(() => import('./components/guide-chat/GuideChatPage').then(m => ({ default: m.GuideChatPage })));
 
 // Suspense wrapper — layouts already provide visual chrome, so a minimal fallback suffices
@@ -59,6 +61,7 @@ function S({ C }: { C: ComponentType }) {
 export const router = createBrowserRouter([
   // ── Login ──
   { path: '/login', element: <S C={LoginPage} /> },
+  { path: '/workspace-select', element: <S C={WorkspaceSelectPage} /> },
   // ── Admin (관리자) ──
   {
     path: '/',
@@ -74,7 +77,7 @@ export const router = createBrowserRouter([
         ],
       },
       { path: 'projects', element: <S C={ProjectListPage} /> },
-      { path: 'projects/new', element: <S C={ProjectWizardPage} /> },
+      { path: 'projects/new', element: <S C={ProjectRequestApprovalPage} /> },
       { path: 'projects/:projectId', element: <S C={ProjectDetailPage} /> },
       { path: 'projects/:projectId/edit', element: <S C={ProjectWizardPage} /> },
       { path: 'projects/:projectId/ledgers/:ledgerId', element: <S C={LedgerDetailPage} /> },
@@ -118,8 +121,8 @@ export const router = createBrowserRouter([
       { path: 'payroll', element: <S C={PortalPayrollPage} /> },
       { path: 'cashflow', element: <S C={PortalCashflowPage} /> },
       { path: 'budget', element: <S C={PortalBudget} /> },
-      { path: 'expenses', element: <S C={PortalExpenses} /> },
       { path: 'weekly-expenses', element: <S C={PortalWeeklyExpensePage} /> },
+      { path: 'bank-statements', element: <S C={PortalBankStatementPage} /> },
       { path: 'personnel', element: <S C={PortalPersonnel} /> },
       { path: 'change-requests', element: <S C={PortalChangeRequests} /> },
       { path: 'register-project', element: <S C={PortalProjectRegister} /> },
