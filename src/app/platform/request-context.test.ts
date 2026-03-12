@@ -64,8 +64,8 @@ describe('request-context helpers', () => {
     });
 
     expect(headers.get('authorization')).toBe('Bearer token-123');
-    expect(headers.get('x-actor-id')).toBeNull();
-    expect(headers.get('x-actor-email')).toBeNull();
-    expect(headers.get('x-actor-role')).toBeNull();
+    expect(headers.get('x-actor-id')).toBe('u001');
+    expect(headers.get('x-actor-email')).toBe('viewer@mysc.co.kr');
+    expect(headers.get('x-actor-role')).toBe('viewer');
   });
 });
