@@ -38,7 +38,13 @@ import {
   UpdateReminderBadge,
   validateProject,
 } from './DashboardGuide';
-import { buildDashboardCashflowRollups, toFiniteNumber } from './dashboard-rollups';
+import {
+  buildDashboardCashflowRollups,
+  compareSafeLocaleAsc,
+  compareSafeLocaleDesc,
+  toFiniteNumber,
+  toSafeString,
+} from './dashboard-rollups';
 import { getSeoulTodayIso } from '../../platform/business-days';
 import { findWeekForDate, getMonthMondayWeeks } from '../../platform/cashflow-weeks';
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
@@ -276,12 +282,13 @@ export function DashboardPage() {
   const cashflowTrend = useMemo(() => {
     const months: Record<string, { month: string; in: number; out: number }> = {};
     transactions.filter(t => t.state === 'APPROVED').forEach(t => {
-      const m = t.dateTime.slice(0, 7);
+      const m = toSafeString(t.dateTime).slice(0, 7);
+      if (!m) return;
       if (!months[m]) months[m] = { month: m, in: 0, out: 0 };
       if (t.direction === 'IN') months[m].in += toFiniteNumber(t.amounts?.bankAmount);
       else months[m].out += toFiniteNumber(t.amounts?.bankAmount);
     });
-    return Object.values(months).sort((a, b) => a.month.localeCompare(b.month)).slice(-6);
+    return Object.values(months).sort((a, b) => compareSafeLocaleAsc(a.month, b.month)).slice(-6);
   }, [transactions]);
 
   const cashflowRollup = useMemo(() => {
@@ -294,7 +301,7 @@ export function DashboardPage() {
   }, [projects, transactions, cashflowWeeks, yearMonth]);
 
   const recentTx = useMemo(() => {
-    return [...transactions].sort((a, b) => b.dateTime.localeCompare(a.dateTime)).slice(0, 6);
+    return [...transactions].sort((a, b) => compareSafeLocaleDesc(a.dateTime, b.dateTime)).slice(0, 6);
   }, [transactions]);
 
   return (
