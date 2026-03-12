@@ -1397,6 +1397,45 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       updatedAt: now,
     };
     await setDoc(doc(db, getOrgDocumentPath(orgId, 'projects', projectId)), withTenantScope(orgId, project), { merge: true });
+    const nextPortalProjectIds = normalizeProjectIds([
+      ...(Array.isArray(portalUser?.projectIds) ? portalUser.projectIds : []),
+      portalUser?.projectId,
+      projectId,
+    ]);
+    const nextPortalProjectId = resolvePrimaryProjectId(nextPortalProjectIds, projectId) || projectId;
+    const nextPortalProjectNames = {
+      ...(portalUser?.projectNames || {}),
+      [projectId]: payload.name,
+    };
+    await setDoc(doc(db, getOrgDocumentPath(orgId, 'members', authUser.uid)), {
+      uid: authUser.uid,
+      name: authUser.name || portalUser?.name || '사용자',
+      email: authUser.email || portalUser?.email || '',
+      role: (authUser.role || portalUser?.role || 'pm').toLowerCase(),
+      tenantId: orgId,
+      status: 'ACTIVE',
+      ...buildPortalProfilePatch({
+        projectId: nextPortalProjectId,
+        projectIds: nextPortalProjectIds,
+        projectNames: nextPortalProjectNames,
+        updatedAt: now,
+        updatedByUid: authUser.uid,
+        updatedByName: authUser.name || portalUser?.name || '사용자',
+      }),
+      updatedAt: now,
+      createdAt: authUser.registeredAt || now,
+      lastLoginAt: now,
+    }, { merge: true });
+    setPortalUser((previous) => normalizePortalUser({
+      id: authUser.uid,
+      name: authUser.name || previous?.name || portalUser?.name || '사용자',
+      email: authUser.email || previous?.email || portalUser?.email || '',
+      role: authUser.role || previous?.role || portalUser?.role || 'pm',
+      projectId: nextPortalProjectId,
+      projectIds: nextPortalProjectIds,
+      projectNames: nextPortalProjectNames,
+      registeredAt: previous?.registeredAt || authUser.registeredAt || now,
+    }));
     await setDoc(doc(db, getOrgDocumentPath(orgId, 'projectRequests', id)), {
       ...request,
       status: 'APPROVED',

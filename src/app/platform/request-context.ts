@@ -56,16 +56,16 @@ export function buildStandardHeaders(input: BuildStandardHeadersInput): Headers 
   }
 
   headers.set('x-tenant-id', tenantId);
-  if (!hasIdToken) {
+  if (!headers.get('x-actor-id')) {
     headers.set('x-actor-id', actorId);
+  }
 
-    if (input.actor.email && !headers.get('x-actor-email')) {
-      headers.set('x-actor-email', input.actor.email.trim().toLowerCase());
-    }
+  if (input.actor.email && !headers.get('x-actor-email')) {
+    headers.set('x-actor-email', input.actor.email.trim().toLowerCase());
+  }
 
-    if (input.actor.role && !headers.get('x-actor-role')) {
-      headers.set('x-actor-role', input.actor.role);
-    }
+  if (input.actor.role && !headers.get('x-actor-role')) {
+    headers.set('x-actor-role', input.actor.role);
   }
 
   if (hasIdToken && !headers.get('authorization')) {
