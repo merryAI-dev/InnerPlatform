@@ -946,9 +946,9 @@ function GoogleSheetImportDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] max-w-[calc(100vw-2rem)] gap-0 overflow-hidden p-0">
+      <DialogContent className="!inset-0 !left-0 !top-0 !h-screen !w-screen !max-w-none !translate-x-0 !translate-y-0 gap-0 overflow-hidden rounded-none border-0 p-0 sm:!max-w-none">
         <div className="flex h-full min-h-0 flex-col bg-white">
-          <div className="border-b px-6 py-4">
+          <div className="border-b px-4 py-4 sm:px-6">
             <DialogHeader className="gap-2 text-left">
               <div className="flex items-center gap-2">
                 <DialogTitle className="text-base">Google Sheets Migration Wizard</DialogTitle>
@@ -958,7 +958,7 @@ function GoogleSheetImportDialog({
                 공통양식 워크북을 한 번에 덮어쓰지 않고, 소스 확인 → 탭 선택 → 미리보기 → 안전 반영 순서로 진행합니다.
               </DialogDescription>
             </DialogHeader>
-            <div className="mt-4 grid gap-2 md:grid-cols-4">
+            <div className="mt-4 grid gap-2 lg:grid-cols-4">
               {steps.map((stepKey, index) => {
                 const isActive = stepKey === step;
                 const isDone = index < currentStepIndex;
@@ -1004,8 +1004,8 @@ function GoogleSheetImportDialog({
             </div>
           </div>
 
-          <div className="grid min-h-0 flex-1 gap-0 lg:grid-cols-[minmax(0,1fr)_360px]">
-            <div className="min-h-0 overflow-auto px-6 py-5">
+          <div className="grid min-h-0 flex-1 gap-0 2xl:grid-cols-[minmax(0,1fr)_380px]">
+            <div className="min-h-0 overflow-auto px-4 py-5 sm:px-6">
               {step === 'source' && (
                 <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
                   <div className="space-y-4">
@@ -1314,7 +1314,7 @@ function GoogleSheetImportDialog({
               )}
             </div>
 
-            <div className="flex flex-col border-l bg-slate-50/80 px-5 py-5">
+            <div className="flex min-h-0 flex-col border-t bg-slate-50/80 px-4 py-5 sm:px-5 2xl:border-t-0 2xl:border-l">
               <div className="space-y-3">
                 <p className="text-[12px] font-semibold text-slate-900">현재 선택 상태</p>
                 <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-[11px]">
@@ -1331,7 +1331,7 @@ function GoogleSheetImportDialog({
                   </div>
                 )}
               </div>
-              <div className="mt-auto border-t pt-4">
+              <div className="mt-5 border-t pt-4 2xl:mt-auto">
                 <div className="flex items-center gap-2">
                   <Button
                     type="button"
