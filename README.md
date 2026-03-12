@@ -1,448 +1,333 @@
-# Business Management Platform
-
-Business Management Platform frontend bundle (Vite + React + TypeScript).
-Original design source: https://www.figma.com/design/HUL2PbwDK68w46Nzl5sVCn/Business-Management-Platform.
-
-## Getting Started
-
-```bash
-nvm use 24 # or install Node 24 first
-npm install
-cp .env.example .env
-npm run dev
-```
-
-## Scripts
-
-- `npm run dev`: start local Vite server.
-- `npm run build`: production build.
-- `npm test`: run unit tests (Vitest).
-- `npm run bff:dev`: start local BFF API server (`/api/v1/*`) on `127.0.0.1:8787`.
-- `npm run bff:seed:demo`: seed demo project/transaction documents for BFF validation.
-- `npm run bff:test:integration`: run Firestore emulator + BFF integration tests (real writes/reads).
-- `npm run bff:cleanup:idempotency`: delete expired idempotency keys.
-- `npm run bff:outbox:worker`: process outbox events with retry/dead-letter status updates.
-- `npm run bff:work-queue:worker`: process projection work queue jobs (`work_queue/*`).
-- `npm run bff:deploy:cloud-run`: build/push/deploy BFF to Cloud Run (requires gcloud/docker auth).
-- `npm run firebase:whoami`: check Firebase CLI login status.
-- `npm run firebase:login`: login to Firebase CLI.
-- `npm run firebase:login:daemon:start`: start persistent login flow and auto-open browser URL.
-- `npm run firebase:login:daemon:submit -- '<authorization-code>'`: submit code without needing an active terminal prompt.
-- `npm run firebase:login:daemon:status`: inspect daemon/login state.
-- `npm run firebase:open:google-auth`: open Firebase Console Google provider page for current project.
-- `npm run firebase:autosetup`: auto-detect project/app, write `.env` and `.firebaserc`, deploy Firestore rules/indexes.
-- `npm run firebase:bootstrap`: validate `.env`, generate `.firebaserc`, and deploy Firestore rules/indexes when logged in.
-- `npm run firebase:deploy:firestore`: deploy only Firestore rules/indexes.
-- `npm run firebase:deploy:indexes`: deploy only Firestore composite indexes.
-- `npm run firebase:fill-env -- '<firebaseConfig-json>'`: fill `.env` from copied Firebase web config JSON.
-- `npm run firebase:emulators:prepare`: generate `.env.local` + `.firebaserc` for local emulator mode.
-- `npm run firebase:emulators:start`: run Auth/Firestore/Storage emulators with local overrides.
-  - Requires Java 21+ for Firestore emulator.
-- `npm run firestore:backup:schedule`: create/update managed Firestore backup schedule.
-- `npm run firestore:backup:rehearsal`: restore latest backup into rehearsal database for recovery drill.
-- `npm run monitoring:setup:alerts`: create/update 5xx/latency/version-conflict alert policies.
-- `npm run pii:rotate`: rotate encrypted PII fields to current key.
-- `npm run pii:setup:vercel`: generate/push Vercel-ready local PII keys (no GCP KMS).
-- `npm run policy:verify`: verify RBAC policy-as-code file integrity.
-
-## Firestore Automation System (비개발자 운영 가이드)
-
-이 프로젝트는 Firebase/Firestore 운영 작업을 "명령 1개" 단위로 실행할 수 있게 자동화했습니다.  
-목표는 개발자가 아니어도, 체크리스트만 따라가면 초기 세팅부터 운영 점검까지 끝내는 것입니다.
-
-### 1) 자동화가 해주는 일
-
-- Firebase 로그인 세션 안정화(daemon 방식).
-- 프로젝트/웹앱 자동 탐지 후 `.env`, `.firebaserc` 자동 생성.
-- Firestore 보안 규칙/복합 인덱스 배포.
-- 로컬 Emulator 준비 및 실행.
-- 백업 스케줄 생성/갱신, 복구 리허설 실행.
-- 운영 알림(5xx/지연/충돌 비율) 정책 생성.
-- Vercel 환경에서 PII 키 생성/배포/로테이션 지원.
-
-### 2) 최초 1회 준비
-
-- Node 24 권장: `nvm use 24`
-- 의존성 설치: `npm install`
-- Firebase 로그인(권장: daemon):
-  - `npm run firebase:login:daemon:start`
-  - 브라우저 코드 발급 후 `npm run firebase:login:daemon:submit -- '<authorization-code>'`
-- 로그인 확인: `npm run firebase:whoami`
-
-### 3) 표준 실행 순서(운영용)
-
-1. 원샷 세팅: `npm run firebase:autosetup`
-2. Google 로그인 활성화(콘솔 이동): `npm run firebase:open:google-auth`
-3. 인덱스만 재배포(스키마/쿼리 변경 시): `npm run firebase:deploy:indexes`
-4. 앱 실행 확인: `npm run dev`
-
-### 4) 자동화 메뉴판 (상황별)
-
-| 상황 | 실행 명령 | 자동 처리 내용 | 성공 기준 |
-| --- | --- | --- | --- |
-| 신규 환경 세팅 | `npm run firebase:autosetup` | 프로젝트 탐지, 웹앱 확인/생성, `.env`/`.firebaserc` 생성, rules/indexes 배포 | `.env` 생성 + deploy 완료 로그 |
-| 이미 `.env` 있음 | `npm run firebase:bootstrap` | `.env` 검증 후 rules/indexes 배포 | missing env 에러 없이 완료 |
-| 인덱스만 반영 | `npm run firebase:deploy:indexes` | Firestore composite indexes만 배포 | indexes deploy 완료 |
-| 콘솔 설정 이동 | `npm run firebase:open:google-auth` | Google provider 설정 페이지 오픈 | Firebase Console 페이지 열림 |
-| 로컬 테스트 | `npm run firebase:emulators:start` | Auth/Firestore/Storage emulator 실행 | emulator listening 로그 확인 |
-| 백업 정책 | `npm run firestore:backup:schedule` | 백업 스케줄 생성/보존기간 업데이트 | schedule list 출력 |
-| 복구 리허설 | `npm run firestore:backup:rehearsal` | 최신 백업을 별도 DB로 restore | restore 요청 성공 로그 |
-
-### 5) 반드시 사람이 해야 하는 것
-
-- Firebase Console에서 Google 로그인 Provider 활성화(보안/정책 승인 이슈로 완전 자동화 불가).
-- 운영 권한 승인(IAM, 결제, 조직 정책)은 관리자 계정에서 수행.
-- Vercel 사용 시 환경변수 반영 후 재배포 실행.
-
-### 6) 자주 나는 오류와 즉시 조치
-
-- `Unable to verify client`
-  - 원인: 로그인 URL/코드 만료 또는 세션 불일치.
-  - 조치: `firebase:login:daemon:start`를 다시 실행하고 새 코드로 즉시 submit.
-- `No authorized accounts`
-  - 원인: Firebase CLI 미로그인.
-  - 조치: `npm run firebase:login` 또는 daemon 로그인 재실행.
-- `Could not resolve Firebase project id`
-  - 원인: `.env`/`.firebaserc`에 project id 없음.
-  - 조치: `npm run firebase:autosetup` 먼저 실행.
-- `Java 21+ is required`
-  - 원인: Firestore emulator 실행 조건 미충족.
-  - 조치: `brew install openjdk@21` 후 재실행.
-
-### 7) 운영 문서(권장 읽기 순서)
-
-- `guidelines/Firestore-Automation-System-Guide.md`: 비개발자용 상세 운영 핸드북.
-- `guidelines/TIL-Firebase-Daemon-Setup.md`: 자동화 메뉴판 + 타 프로젝트 재사용 템플릿.
-- `guidelines/Operational-Hardening-Runbook.md`: 인덱스/백업/알림/PII/정책 운영런북.
-
-## Firebase Runtime Configuration
-
-Set Firebase runtime values in `.env`:
-
-- `VITE_FIREBASE_API_KEY`
-- `VITE_FIREBASE_AUTH_DOMAIN`
-- `VITE_FIREBASE_PROJECT_ID`
-- `VITE_FIREBASE_STORAGE_BUCKET`
-- `VITE_FIREBASE_MESSAGING_SENDER_ID`
-- `VITE_FIREBASE_APP_ID`
-
-Feature flags:
-
-- `VITE_FIREBASE_AUTH_ENABLED=true`: enable Google Auth login flow.
-- `VITE_FIRESTORE_CORE_ENABLED=true`: enable Firestore-backed core data store.
-- `VITE_FIREBASE_USE_ENV_CONFIG=true`: prioritize env config over local saved config.
-- `VITE_DEFAULT_ORG_ID=mysc`: default org scope path (`orgs/{orgId}/...`).
-- `VITE_FIREBASE_USE_EMULATORS=false`: when true, app connects to local Firebase emulators.
-- `VITE_TENANT_ISOLATION_STRICT=true`: strict validation for tenant ids and scoped paths.
-- `VITE_FIREBASE_EMULATOR_HOST=127.0.0.1`
-- `VITE_FIRESTORE_EMULATOR_PORT=8080`
-- `VITE_FIREBASE_AUTH_EMULATOR_PORT=9099`
-- `VITE_FIREBASE_STORAGE_EMULATOR_PORT=9199`
-- `VITE_PLATFORM_API_ENABLED=false`: route selected mutations through BFF (`/api/v1`).
-- `VITE_PLATFORM_API_BASE_URL=http://127.0.0.1:8787`
-
-## Firestore Rules
-
-Security rules/index templates were added under `firebase/`:
-
-- `firebase/firestore.rules`
-- `firebase/firestore.indexes.json`
-
-## Company Board (전사 게시판)
-
-- 경로:
-  - 관리자(App): `/board`
-  - 포털(Portal): `/portal/board`
-  - 어떤 링크로 들어가도 역할에 맞게 자동 리다이렉트되어 사이드바가 유지됩니다.
-- 기능: 글 작성, 댓글/답글(1-depth), 추천/비추천(vote)
-- Firestore 컬렉션(테넌트 스코프):
-  - `orgs/{orgId}/board_posts`
-  - `orgs/{orgId}/board_comments`
-  - `orgs/{orgId}/board_votes`
-- 요구 사항:
-  - `VITE_FIRESTORE_CORE_ENABLED=true` (Firestore 기반 데이터 사용)
-  - 로그인 후 사이드바 `전사 게시판`에서 진입
-
-## Payroll (인건비 공지/확인 + 월간정산)
-
-핵심: 사업 담당자가 인건비 지급일을 등록하면, 지급일 3영업일 전에 포털 홈에 공지가 노출되고(PM 확인 필요), Admin은 프로젝트별 지급 여부(거래 자동매칭+확정)와 월간정산 현황을 운영 화면에서 확인합니다.
-
-- 경로:
-  - 포털: `/portal/payroll` (지급일 등록 + 공지 확인)
-  - 관리자: `/payroll` (프로젝트별 인지/지급/정산 현황)
-- Firestore 컬렉션(테넌트 스코프):
-  - `orgs/{orgId}/payroll_schedules` (프로젝트별 지급일: 매월 N일)
-  - `orgs/{orgId}/payroll_runs` (프로젝트-월 단위 공지/인지/지급 상태)
-  - `orgs/{orgId}/monthly_closes` (프로젝트-월 단위 월간정산 완료/인지)
-- 자동화 워커(Vercel Cron):
-  - `GET /api/internal/workers/payroll/run` (run doc 보장 + 인건비 거래 자동매칭)
-  - `GET /api/internal/workers/monthly-close/run` (월간정산 doc 보장)
-- Bootstrap admin(선택):
-  - `VITE_BOOTSTRAP_ADMIN_EMAILS=admin@mysc.co.kr` 처럼 “최초 1회”만 설정해, 해당 이메일 최초 로그인 시 admin role이 자동 부여되게 할 수 있습니다.
-
-## Cashflow Weekly Sheet (Projection/Actual)
-
-구글시트 기반의 주간 캐시플로 입력/결산 UI를 제공합니다.  
-각 주차는 "해당 월의 n번째 월요일(월~일)" 기준으로 계산되며, 라벨은 `26-1-4` 형태(YY-월-주차)로 표시됩니다.
-
-- 경로:
-  - 포털(PM): `/portal/cashflow` (내 사업 Projection/Actual 입력 + 주간 작성완료)
-  - 관리자: `/cashflow` (전사 주간 작성/결산 현황)
-  - 관리자(프로젝트 시트): `/cashflow/projects/:projectId`
-- Firestore 컬렉션(테넌트 스코프):
-  - `orgs/{orgId}/cashflow_weeks`
-    - doc id: `${projectId}-${yearMonth}-w${weekNo}` (예: `p001-2026-01-w4`)
-    - 상태: `pmSubmitted`(작성완료), `adminClosed`(결산완료)
-
-## Firebase Auth Quick Link
-
-Enable Google login provider:
-
-```bash
-npm run firebase:open:google-auth
-```
-
-Authorized domains (to fix `auth/unauthorized-domain`):
-
-- Firebase Console > Authentication > Settings > Authorized domains
-- Add:
-  - `localhost` (local dev)
-  - your Vercel production domain (for example: `inner-platform.vercel.app`)
-  - only fixed Preview aliases you intentionally use for login
-- Do not use random per-deploy Preview URLs as login domains
-- Recommended Preview strategy:
-  - block login on random `*.vercel.app` preview URLs
-  - route users to a fixed alias such as `inner-platform-git-ft-izzie-merryai-devs-projects.vercel.app`
-- Optional Preview env:
-  - `VITE_FIREBASE_AUTH_ALLOWED_HOSTS`
-  - `VITE_FIREBASE_AUTH_FALLBACK_URL`
-- QA checklist:
-  - `guidelines/Firebase-Auth-Preview-QA.md`
-
-Email domain allowlist (company-only login):
-
-- Default: `@mysc.co.kr` only
-- Optional env: `VITE_ALLOWED_EMAIL_DOMAINS=mysc.co.kr` (comma-separated supported)
-
-Reference doc:
-
-- `guidelines/Firestore-Automation-System-Guide.md`
-  - 비개발자용 Firestore 자동화 운영 핸드북
-- `guidelines/TIL-Firebase-Daemon-Setup.md`
-  - Firebase 자동화 메뉴판 + 타 프로젝트 재사용 가이드
-- `guidelines/Platform-Foundation-Roadmap.md`
-  - 멀티테넌시/RBAC/Audit 기반 구현 현황 + 다음 실행 블록
-- `guidelines/Data-Stability-Backlog.md`
-  - 데이터 안정성 강화 우선순위 백로그(P0~P2)
-- `guidelines/Data-Stability-Implemented.md`
-  - 이번 구현에서 실제 반영된 P0 안정성 항목
-- `guidelines/Operational-Hardening-Runbook.md`
-  - 인덱스/아웃박스/백업/알림/PII/정책 운영 런북
-- `guidelines/User-Feature-Enhancement-Backlog.md`
-  - 사용자 기능 관점(ServiceNow급) 우선순위 백로그
-
-## Platform Foundation (Q1)
-
-Implemented core enterprise foundation modules under `src/app/platform/`:
-
-- `tenant.ts`: tenant ID validation + safe org path helpers.
-- `request-context.ts`: standard request headers (`x-request-id`, `x-tenant-id`, `x-actor-id`) and idempotency key generation.
-- `api-client.ts`: fetch wrapper for API v1-style requests with consistent metadata, retry/backoff, and timeout handling.
-- `rbac.ts`: claim parsing and permission/tenant access helpers.
-- `audit-log.ts`: normalized audit event schema used by Firestore service writes.
-
-## BFF Flow (Option 2 + 1)
-
-Run BFF first, then execute real-data integration tests:
-
-```bash
-npm run bff:dev
-npm run bff:seed:demo
-npm run bff:test:integration
-```
-
-## BFF API Surface
-
-- `GET /api/v1/health`
-- `POST /api/internal/workers/outbox/run` (protected; worker secret required)
-- `POST /api/internal/workers/work-queue/run` (protected; worker secret required)
-- `POST /api/internal/workers/payroll/run` (protected; worker secret required)
-- `POST /api/internal/workers/monthly-close/run` (protected; worker secret required)
-- `POST /api/v1/write`
-- `GET /api/v1/views/:viewName`
-- `GET /api/v1/queue/jobs`
-- `POST /api/v1/queue/replay/:eventId`
-- `GET /api/v1/projects`
-- `POST /api/v1/projects`
-- `GET /api/v1/ledgers`
-- `POST /api/v1/ledgers`
-- `GET /api/v1/transactions`
-- `POST /api/v1/transactions`
-- `PATCH /api/v1/transactions/:txId/state`
-- `GET /api/v1/transactions/:txId/comments`
-- `POST /api/v1/transactions/:txId/comments`
-- `GET /api/v1/transactions/:txId/evidences`
-- `POST /api/v1/transactions/:txId/evidences`
-- `GET /api/v1/audit-logs`
-- `GET /api/v1/audit-logs/verify`
-- `PATCH /api/v1/members/:memberId/role`
-
-Mutating endpoints require:
-- `x-tenant-id`
-- `x-actor-id`
-- `idempotency-key`
-
-Authentication mode:
-- `BFF_AUTH_MODE=headers`: trust request headers (local/default).
-- `BFF_AUTH_MODE=firebase_optional`: verify `Authorization: Bearer <Firebase ID token>` when present, else fallback to headers.
-- `BFF_AUTH_MODE=firebase_required`: require/verify Firebase ID token and reject header spoofing (`actor_mismatch`, `tenant_mismatch`).
-
-State transitions also require:
-- `expectedVersion` in request body
-
-State transition RBAC (permission-based):
-- `SUBMITTED`: `transaction:submit`
-- `APPROVED`: `transaction:approve`
-- `REJECTED`: `transaction:reject`
-
-Comment/Evidence RBAC (permission-based):
-- comments: `comment:read` / `comment:write`
-- evidences: `evidence:read` / `evidence:write`
-
-Role change endpoint requires:
-- `x-actor-role` allowed by policy (`policies/rbac-policy.json`)
-
-List endpoints support deterministic pagination:
-- query: `?limit=50&cursor=<lastDocumentId>`
-- response: `nextCursor` (null when done)
-
-Single write pipeline:
-- `POST /api/v1/write` writes a canonical entity document (`project`, `ledger`, `transaction`, `expense_set`, `change_request`, `member`) with version checks.
-- Same transaction creates `orgs/{tenantId}/change_events/{eventId}` and queue jobs in `work_queue/{jobId}`.
-- Queue jobs rebuild projection views in `orgs/{tenantId}/views/{viewName}`.
-- Manual replay endpoint: `POST /api/v1/queue/replay/:eventId`.
-
-Relation-rule policy (no hardcoded cross-entity wiring in route code):
-- `policies/relation-rules.json`
-- Optional override: `orgs/{tenantId}/relation_rules/*`
-
-Internal worker auth:
-- `BFF_WORKER_SECRET` or `CRON_SECRET` must be set.
-- Send one of:
-  - `x-worker-secret: <secret>`
-  - `Authorization: Bearer <secret>`
-
-BFF runtime env template:
-- `server/bff/.env.example`
-
-## Data Hardening (P0 + Ops)
-
-- Audit log chain hashing:
-  - append-only logs with `chainSeq`, `prevHash`, `hash`
-  - tamper check endpoint: `GET /api/v1/audit-logs/verify`
-- Outbox pattern:
-  - mutation events are persisted to `outbox/*` in the same write transaction/batch
-  - worker retries and moves exhausted events to `DEAD`
-- PII encryption and rotation:
-  - `PII_MODE=local|kms|auto|off`
-  - local keyring (`PII_LOCAL_KEYRING`) or Cloud KMS (`PII_KMS_KEYS`)
-  - rotation script: `npm run pii:rotate`
-- Policy-as-code:
-  - RBAC role-change policy stored at `policies/rbac-policy.json`
-  - verifier in CI: `npm run policy:verify`
-- Monitoring:
-  - alert setup script provisions 5xx ratio, p95 latency, version-conflict ratio alerts
-- Backup/recovery rehearsal:
-  - schedule backups and run restore drills via `firestore:backup:*` scripts
-
-## Worker Strategy (Vercel / External)
-
-For production, keep both asynchronous pipelines alive:
-- outbox worker (`npm run bff:outbox:worker`)
-- projection queue worker (`npm run bff:work-queue:worker`)
-
-### Option A: Vercel Cron + internal worker endpoints (recommended on Vercel)
-
-1. Expose protected internal endpoints in BFF for one-shot processing.
-2. Configure Vercel Cron:
-   - work queue: every minute
-   - outbox: every 1-5 minutes
-3. In each run, process bounded batches and return counts.
-4. This repo includes default cron schedules in `vercel.json` (Hobby-safe daily):
-   - `/api/internal/workers/work-queue/run`: `15 2 * * *`
-   - `/api/internal/workers/outbox/run`: `30 2 * * *`
-5. For near-real-time processing (every minute/5 minutes), use Vercel Pro cron or an external always-on worker.
-
-### Option B: External always-on worker
-
-Run loop mode in a dedicated runtime:
-
-```bash
-BFF_OUTBOX_LOOP=true BFF_OUTBOX_INTERVAL_MS=2000 npm run bff:outbox:worker
-BFF_WORK_QUEUE_LOOP=true BFF_WORK_QUEUE_INTERVAL_MS=2000 npm run bff:work-queue:worker
-```
-
-Detailed runbook:
-- `guidelines/Operational-Hardening-Runbook.md`
-
-## Vercel Deployment (TDD Gate)
-
-Deploy only after all gates pass:
-
-```bash
-npm test
-npm run bff:test:integration
-npm run build
-```
-
-Set required runtime envs in Vercel:
-- Firebase/Vite envs (`VITE_FIREBASE_*`, `VITE_PLATFORM_API_ENABLED`, etc.)
-- BFF envs (`BFF_AUTH_MODE`, `BFF_ALLOWED_ORIGINS`)
-- Worker secret (`CRON_SECRET` recommended, or `BFF_WORKER_SECRET`)
-- Firebase Admin credentials for server runtime:
-  - `FIREBASE_SERVICE_ACCOUNT_JSON` (recommended), or
-  - `FIREBASE_SERVICE_ACCOUNT_BASE64`
-
-Deploy:
-
-```bash
-vercel login
-vercel link
-vercel --prod
-```
-
-Post-deploy smoke checks:
-- `GET /api/v1/health`
-- `POST /api/internal/workers/work-queue/run` with worker secret
-- `POST /api/internal/workers/outbox/run` with worker secret
-
-If worker endpoints return `500` with `Could not load the default credentials`, add Firebase Admin credentials envs above and redeploy.
-
-## Cloud Run Deployment
-
-Local deploy script:
-
-```bash
-export FIREBASE_PROJECT_ID=<gcp-project-id>
-export REGION=asia-northeast3
-npm run bff:deploy:cloud-run
-```
-
-Cloud Build pipeline file:
-- `cloudbuild.bff.yaml`
-
-Container build source:
-- `server/bff/Dockerfile`
-
-GitHub CI workflow:
-- This branch intentionally excludes workflow file due GitHub token scope (`workflow`) limitation.
-- Add `.github/workflows/bff-ci.yml` in a follow-up PR with proper token scope.
-
-## Local Emulator Prerequisite
-
-Install Java before starting emulators:
-
-```bash
-brew install openjdk@21
-java -version
-```
+# MYSC 사업관리플랫폼 온보딩 가이드
+
+개발 배경 : 상호검증성 강화를 통한 기존 시트 방식의 모니터링, 자산화, 표준화 상에서 오류와 소통 비용 감소
+
+**1.(모니터링 관점)작성 여부에 대해 교차검증이 불가능했고** 
+
+**2.(자산화 측면)사업비 활용/반려에 대해서 암묵지들을 축적되지 못하며**
+
+**3.(표준화 측면)사업별 양식 변경/파편화로 인해 오류가 나거나 전사적으로는 중요 거래 건에 대해서도 누락이 발생하는 문제가 있었습니다.** 
+
+본 세션 목적 : 기술 설명보다 **어느 화면에서 무엇을 확인하고**, **무엇은 시스템이 해주고**, **무엇은 내가 판단해야 하는지**를 이해하는 데 집중해요.
+
+![overview](https://github.com/user-attachments/assets/fb102c88-9ab0-4d37-b32c-e6679ff0922d)
+
+
+이 프로그램의 단계는 AX이전의 DX단계로 아직 AI가 저희를 지원해주는 기능은 없지만 향후 이를 준비하기 위한 Base Camp로 기능합니다.  
+더불어 사용자 관점으로는 `예산 총괄 → 통장내역 정리 → 사업비 입력(주간) 검토 → 캐시플로(주간) 비교 → 주차 마감`을 하나의 흐름 속에서 안정적으로 운영하고 전사적으로 교차검증 가능한 데이터화 해주는 데 있습니다.
+
+
+## 주요 개선점: AS-IS vs TO-BE
+
+| 항목 | AS-IS | TO-BE |
+| --- | --- | --- |
+| 기존 수식 반영 | 파일 정리/열 맞춘 후 수식 변경 | 업로드 후 정규화 |
+| 수작업 감소 | 통장내역의 값을 사업비 시트에 복사 붙여넣기(수작업) | 초안 자동 연동 |
+| 소통 비용 감소 | 모든 시트의 업데이트를 기록을 통해서 확인 | 알림/대시보드로 확인 가능 |
+| 검증 비용 감소 | 중간/최종 정산 전 몰아서 진행 | 매주 금요일 6시까지 책임자(PM)이 상신 |
+
+## 1. 먼저 이 프로그램을 쓰는 방식부터 정리해요
+기존 시트와 용어는 100% 동일합니다. 
+
+| 먼저 이해할 것 | 뜻 |
+| --- | --- |
+| `통장내역` | 은행/카드 원본 내역을 받아오는 첫 화면 |
+| `사업비 입력(주간)` | 통장내역이 자동 초안으로 넘어와 검토하는 화면 |
+| `캐시플로(주간)` | 계획(Projection)과 실제(Actual)를 비교해 마감 기준을 잡는 화면 |
+
+그리고 가장 먼저 기억할 구분이 있어요. 앞으로 AI가 도입되더라도 사람과 AI가 해야하는 일은 명확하게 구분됩니다.
+
+| 구분 | 의미 |
+| --- | --- |
+| 시스템이 잘하는 일 | 파일 읽기, 표 정렬, 매핑, 계산, 반영 연결, 상태 표시 |
+| 사람이 꼭 판단해야 하는 일 | 주차 판단, 항목 분류, 설명 정합성, 마감 타이밍 결정과 책임과 설명가능성(Accountability)|
+
+## 2. 오늘 바로 시작하기: 준비 순서
+
+처음 PM은 이 순서만 익히면 됩니다.
+
+| 순서 | 해야 할 일 |
+| --- | --- |
+| 1 | 로그인하고 내 사업 배정 확인 |
+| 2 | `/portal` 대시보드에서 공지/상태 확인 |
+| 3 | `통장내역` 업로드 후 저장 |
+| 4 | `사업비 입력(주간)`에서 초안 검토/수정 |
+| 5 | 저장하고 `캐시플로(주간)` Actual 반영 확인 |
+| 6 | Projection과 Actual 비교 |
+| 7 | 작성완료/결산완료 판단 |
+| 8 | `내 제출 현황`으로 월 마감 완결성 확인 |
+
+## 3. 시작 전에 챙겨두면 좋은 것들
+
+| 준비물 | 왜 필요한지 |
+| --- | --- |
+| 회사 Google 계정 | 로그인/권한 확인 기본 요건 |
+| 담당 사업 정보 | 사업이 틀리면 모든 수치 기준이 틀어짐 |
+| `.csv`/`.xlsx`/`.xls` 파일 | `통장내역` 업로드 재료 |
+| 거래 성격에 대한 사전 이해 | `cashflow항목` 분류 정확도 핵심 |
+| 주차 기준 감각 | Actual 반영 주차를 정확히 맞추기 위해 |
+
+실무에서 가장 많이 틀리는 건 숫자보다 분류예요.
+그래서 “얼마”보다 “어느 주차, 어떤 항목으로 봐야 하는지”가 더 중요해요.
+
+## 4. 로그인하고 내 사업부터 확인하기
+![login](https://github.com/user-attachments/assets/826e827c-7299-46c0-873c-d14e97368d98)
+
+로그인 후 바로 입력으로 가기보다, 첫 단계는 사업 배정 점검이 기본입니다.
+
+| 구분 | 시스템이 해주는 것 | 사람이 할 일 |
+| --- | --- | --- |
+| 로그인 라우팅 | 권한에 맞는 진입 경로로 이동 | 회사 계정으로 정확히 접속 |
+| 사업 배정 확인 | 사업 미배정이면 안내 화면/온보딩 흐름 | 내 담당 사업이 맞는지 눈으로 확인 |
+| 접근 제한 | 미배정일 경우 입력 진입 제한 | 잘못된 배정이면 `사업 배정 수정`으로 바로 수정 |
+
+점검 루틴
+1. 포털 진입 후 대시보드 확인
+2. 화면 상단 프로젝트명이 본인 담당 사업인지 확인
+3. 다르면 `사업 배정 수정` 먼저 처리
+
+실수 사례:
+“로그인만 되면 된다”라고 생각하고 넘기면, 나중에 데이터가 다른 사업으로 섞이기 쉬워요.
+
+## 5. `내 사업 현황`은 입력 체크용 대시보드예요
+<img width="1518" height="822" alt="스크린샷 2026-03-04 오전 10 47 15" src="https://github.com/user-attachments/assets/a109e233-bbff-4656-9280-19383554c952" />
+
+이 화면은 사업비를 한 눈에 보면서 전사 공지와 함께 사업비 관련 업무 우선순위을 잡는 곳이에요.
+
+| 항목 | 시스템이 보여주는 값 | PM 판단 |
+| --- | --- | --- |
+| 공지 | 월간 정산/인사 관련 변동 이슈 | 우선순위 정하기 |
+| 잔액 | 현재 프로젝트 잔액 | 그 주 사용 여력 판단 |
+| 소진율 | 월 내 사용 비율 | 과다 소진 여부 조기 감지 |
+
+권장 습관
+- 먼저 공지와 상태를 점검해요.
+- 팀 간에도 “아무것도 안 한 상태에서 시작”이 아니라 “무엇부터 처리”를 정하고 들어가요.
+
+## 6. 통장 내역을 업로드하면 
+![통장내역관리](https://github.com/user-attachments/assets/a124ffab-d2a3-4330-a893-0fe1c2af1897)
+
+외부 데이터가 들어오는 유일한 경로입니다.
+
+| 구분 | 자동화 | 사람이 할 일 |
+| --- | --- | --- |
+| 파일 파싱 | 헤더 인식·표 정리 | 파일이 최신인지 확인 |
+| 금액 처리 | 숫자 포맷 정리 | 입/출금 방향이 맞는지 점검 |
+| 행 정리 | 행 목록 생성 | 누락/중복 의심 행 확인 |
+| 보완 입력 | 수동 행 추가 가능 | 빠진 건 직접 입력 |
+
+기본 작업
+1. `엑셀 업로드` 실행
+2. 표 미리보기에서 앞뒤 행 확인
+3. 누락 의심 행은 `행 추가`
+4. 저장
+
+### 통장내역에서 꼭 체크해야 할 점
+
+| 확인 포인트 | 이유 |
+| --- | --- |
+| 날짜 누락 | 다음 단계 주차 계산 기준이 깨짐 |
+| 입금/출금 반전 | Actual 반영이 반대로 누적됨 |
+| 잔액 흐름 단절 | 누락 거래/중복의 첫 신호 |
+| 같은 파일 재업로드 | 중복 반영 위험 |
+
+완료 기준
+- 표가 정상적으로 로드됨
+- 대표 행을 원본과 대조해 오차가 없음
+- 누락 행 보완 완료
+- 저장 안내 메시지 확인
+
+## 7. 통장내역 저장 후 자동으로 이어지는 흐름
+
+`통장내역` 저장은 다음 화면을 여는 단계입니다.
+
+| 전달 값 | 다음 화면에서 역할 |
+| --- | --- |
+| 거래일시 | `해당 주차` 계산 입력값 |
+| 의뢰인/수취인 | `지급처`로 반영 |
+| 입/출금액 | `통장에 찍힌 입/출금액` |
+| 잔액 | `통장잔액` |
+| 적요/표시내용 | `상세 적요` 및 분류 보조 근거 |
+
+중요
+- 통장내역 저장만으로 마감이 끝나지 않아요.
+- 실제 판단은 `사업비 입력(주간)`에서 다시 합니다.
+
+## 8. `사업비 입력(주간)`은 “재입력”이 아니라 “검토와 정제” 화면입니다
+
+이 화면이 정확해야 Actual이 맞아요.
+
+| 구분 | 시스템이 해주는 것 | 사람이 할 일 |
+| --- | --- | --- |
+| 초안 제공 | 통장초안 기반 정산대장 행 생성 | 항목/주차 정확성 검증 |
+| 구조 제공 | 기본 칼럼/표시 정렬 | 누락/오류 보완 |
+| 저장 연동 | 저장 시 캐시플로 반영 이어짐 | 최종 상태를 점검해 확정 |
+
+### 최우선 검토 칼럼
+
+| 칼럼 | 왜 중요 |
+| --- | --- |
+| `해당 주차` | Actual 반영 주차를 결정 |
+| `cashflow항목` | 어떤 항목 라인으로 집계될지 결정 |
+| `통장에 찍힌 입/출금액` | 정산의 실계산 기준 |
+| `통장잔액` | 데이터 자연스러움 확인 |
+| `지급처` / `상세 적요` | 나중 설명/감사 대응 근거 |
+
+### 실무 검토 순서
+
+1. 초안이 채워졌는지 확인
+2. `해당 주차` 누락행 우선 보완
+3. `cashflow항목` 빈칸 및 애매분류 보정
+4. 큰 금액 거래 중심으로 지급처·적요·주차 재확인
+5. 저장
+
+### 여기서 생기는 실수
+
+| 실수 | 결과 |
+| --- | --- |
+| 주차 미입력 | Actual이 다른 주차로 빠짐 |
+| 항목 미입력 | 캐시플로 집계 누락 |
+| 금액만 맞고 분류만 틀림 | 리포트가 틀려도 바로 알아차리기 어려움 |
+
+완료 기준
+- 핵심 칼럼 비어 있음 없음
+- 큰 금액 거래 설명 가능
+- 저장 성공 확인
+
+## 9. 사업비 입력 저장은 바로 Actual 반영의 시작입니다
+
+`정산대장 저장 = 캐시플로 Actual 반영 시도`라고 보면 돼요.
+
+| 자동 동작 | 사람이 확인할 점 |
+| --- | --- |
+| 주차 단위로 묶기 | 주차 정확도 확인 |
+| 항목별 합산 | 항목 분류 정확도 확인 |
+| Actual 반영 | 해당 주차/항목 값 들어갔는지 확인 |
+
+반드시 바로 확인하세요.
+1. 저장 후 오류 토스트 없는지
+2. 캐시플로(주간) Actual 열기
+3. 방금 반영 분류/주차 점검
+
+## 10. `캐시플로(주간)`은 비교의 중심 화면입니다
+
+여기는 “정리된 수치 보드”가 아니라 계획 대비 실제를 판단하는 운영 화면이에요.
+
+| 구분 | 의미 |
+| --- | --- |
+| Projection | 이번 달/차주 계획값 입력 | 내가 앞으로 계획한 값 |
+| Actual | 사업비 입력 저장값 반영 | 이미 발생한 실제 금액 |
+
+점검 포인트
+- 주차별 주된 변화 확인
+- 예상과 실제의 이격 판단
+- 변경이 큰 항목은 근거 확보
+
+## 11. Projection: 내가 계획을 넣는 화면
+
+Projection은 자동이 아닙니다.
+
+| 자동화되는 것 | 사람이 해야 할 것 |
+| --- | --- |
+| 월별 칸 배열 | 주차별 계획 직접 입력 |
+| 합계 계산 | 계획의 현실성 판단 |
+| 미저장 경고 | 저장하지 않고 나가지 않게 주의 |
+
+좋은 사용 습관
+- 큰 항목부터 먼저 입력
+- 월합계로 최종 균형 확인
+- 저장 후 다시 월 기준으로 점검
+
+## 12. Actual: 조회 전용, 판단용 화면
+
+Actual은 화면상 숫자 확인만 하는 곳입니다.
+
+| 구분 | 포인트 |
+| --- | --- |
+| 값의 성격 | 정산대장에서 반영된 실제값 | 직접 입력창이 아님 |
+| 상태 표시 | 반영된 주차는 상태 변화 존재 | 마감은 `작성완료`로 별도 수행 |
+
+실수 방지
+- Actual이 보인다고 즉시 마감 완료가 아님
+- `작성완료` 전 `내부 점검` 필요
+
+## 13. 주차 마감: `작성완료`와 `결산완료`
+
+| 상태 | 의미 | 판단 주체 |
+| --- | --- | --- |
+| 미작성 | 아직 넘기기 전 | PM |
+| 작성완료 | 점검 완료 후 전달 | PM |
+| 결산완료 | 최종 잠금 | 관리자 권한 동반 운영 단계 |
+
+### 작성완료 누르기 전 체크
+
+- Actual의 큰 금액이 설명 가능한가
+- 누락 주차/항목이 없는가
+- Projection 대비 차이가 해석 가능한가
+
+### 결산완료 전에 꼭 기억할 점
+
+- 결산완료는 사실상 “이제 수정 안 함”에 가깝습니다.
+- 마지막으로 한 번 더 설명/근거 점검한 뒤 누르기
+
+## 14. 확인요청 대응은 실패가 아니라 설명 정합성 점검이에요
+
+차이가 생기면 보통 확인요청이 옵니다.
+
+| 시스템이 해주는 것 | PM이 해야 하는 것 |
+| --- | --- |
+| 요청 배너 표시 | 어떤 주차의 요청인지 우선 파악 |
+| 이력 저장 | 답변을 사실 중심으로 기록 |
+
+답변 원칙
+- 날짜·거래처·금액·사유를 반드시 넣기
+- 추측/감정 표현보다 사실 근거 우선
+- 필요하면 수정으로 이어지는 실행계획 포함
+
+## 15. 내 제출 현황은 월 마감 완결성 체크표
+
+
+| 구분 | 시스템이 보여주는 것 | 사람이 해야 하는 것 |
+| --- | --- | --- |
+| 상태 요약 | 미작성/작성완료/결산완료 | 남은 주차로 이동해 보완 |
+| 월 단위 보기 | 한눈에 주차 진행 | 오늘 마감 가능한지 판단 |
+
+점검 루틴
+1. 월 기준으로 상태 전체 보기
+2. 미작성 있는지 확인
+3. 미작성 주차가 있으면 `캐시플로` 또는 `사업비 입력(주간)`으로 복귀
+
+
+## FAQ - 실수
+
+| 실수 | 왜 생기나 | 예방 |
+| --- | --- | --- |
+| 통장내역만 저장하고 끝 | 자동으로 끝났다고 착각 | 반드시 사업비 입력까지 검토/저장 |
+| 주차를 대충 입력 | 계산이 되지만 반영이 틀어짐 | 큰 금액부터 주차 우선 정리 |
+| 항목 분류 미루기 | 항목 기준 미숙 | 빈 항목부터 먼저 처리 |
+| Projection 저장 안 함 | 월 계획 누락 | 저장 전 월 저장 상태 확인 |
+| Actual 보였다고 곧바로 결산 | 상태 오해 | 작성완료/결산완료는 별도 판단 |
+
+## FAQ - 주요 예상 에러 
+
+| 증상 | 먼저 볼 곳 | 먼저 확인할 것 |
+| --- | --- | --- |
+| 통장내역 저장 후 다음 화면이 비어 있음 | 통장내역 | 저장 성공 메시지, 행 존재 |
+| 정산대장 저장 후 Actual 없음 | 사업비 입력(주간) | 주차/항목/금액 누락 |
+| 금액이 다른 주차로 들어감 | 사업비 입력(주간) | `해당 주차` 오입력 |
+| 금액이 다른 항목에 들어감 | 사업비 입력(주간) | `cashflow항목` 오분류 |
+| 마감 후 수정 불가 | 내 제출 현황/캐시플로 | 결산완료 여부 |
+
+
+## 마지막 한마디
+
+이 포털은 단순한 입력기와 달리,
+`통장내역을 올리면 정산대장이 이어지고, 정산대장 검토/저장을 통해 캐시플로 Actual로 연결되며,
+PM이 계획과 실제를 비교하고 주차를 마감하는` 운영 흐름을 만드는 툴이에요.
+
+결국 지표를 제대로 만드는 사람은 PM의 판단입니다.
+- 주차를 정확히
+- 항목을 정확히
+- 저장/반영/마감 순서를 정확히
+
+이 세 가지만 지키면, 주간 운영이 훨씬 단단해집니다.
