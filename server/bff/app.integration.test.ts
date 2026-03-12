@@ -324,6 +324,35 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     expect(seenIds.size).toBe(3);
   });
 
+  it('auto-provisions a default ledger when a transaction is created before ledger setup', async () => {
+    await api
+      .post('/api/v1/projects')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-auto-ledger-project-001' })
+      .send({
+        id: 'p-auto-ledger-001',
+        name: 'Auto Ledger Project',
+        accountType: 'DEDICATED',
+      });
+
+    const tx = await api
+      .post('/api/v1/transactions')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-auto-ledger-tx-001' })
+      .send({
+        id: 'tx-auto-ledger-001',
+        projectId: 'p-auto-ledger-001',
+        ledgerId: 'l-p-auto-ledger-001',
+        counterparty: 'Vendor Auto',
+      });
+
+    expect(tx.status).toBe(201);
+    expect(tx.body.state).toBe('DRAFT');
+
+    const ledgerSnap = await db.doc(`orgs/${tenantId}/ledgers/l-p-auto-ledger-001`).get();
+    expect(ledgerSnap.exists).toBe(true);
+    expect(ledgerSnap.data()?.projectId).toBe('p-auto-ledger-001');
+    expect(ledgerSnap.data()?.name).toBe('전용통장 원장');
+  });
+
   it('enforces deterministic state transitions and version checks', async () => {
     await api
       .post('/api/v1/projects')
