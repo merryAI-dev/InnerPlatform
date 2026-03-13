@@ -120,6 +120,60 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     });
   });
 
+  it('analyzes google sheet migration guidance for an existing project', async () => {
+    const googleSheetMigrationAiService = {
+      analyzePreview: vi.fn(async ({ spreadsheetTitle, selectedSheetName, matrix }) => ({
+        provider: 'anthropic',
+        model: 'claude-sonnet-4-20250514',
+        summary: `${spreadsheetTitle}의 ${selectedSheetName} 탭은 사용내역으로 보입니다.`,
+        confidence: 'high',
+        likelyTarget: 'expense_sheet',
+        usageTips: ['비목/세목 컬럼을 먼저 확인하세요.'],
+        warnings: ['2줄 헤더 여부를 확인하세요.'],
+        nextActions: ['표본 3행을 먼저 검증하세요.'],
+        suggestedMappings: [
+          {
+            sourceHeader: '입금합계 > 입금액',
+            platformField: '입금합계/입금액',
+            confidence: 'high',
+            reason: '입금 금액 그룹으로 보입니다.',
+          },
+        ],
+        headerPreview: ['작성자', '입금합계 > 입금액'],
+      })),
+    };
+    const analysisApi = request(createBffApp({ projectId, workerSecret, db, googleSheetMigrationAiService }));
+
+    await analysisApi
+      .post('/api/v1/projects')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-sheets-002' })
+      .send({ id: 'p-sheets-002', name: 'Sheets Analysis Project' });
+
+    const analysis = await analysisApi
+      .post('/api/v1/projects/p-sheets-002/google-sheet-import/analyze')
+      .set(defaultHeaders)
+      .send({
+        spreadsheetTitle: '2026 사업비 관리 시트',
+        selectedSheetName: '사용내역',
+        matrix: [
+          ['작성자', '입금합계', '사업팀'],
+          ['No.', '입금액', '지급처'],
+        ],
+      });
+
+    expect(analysis.status).toBe(200);
+    expect(analysis.body.likelyTarget).toBe('expense_sheet');
+    expect(analysis.body.usageTips[0]).toContain('비목/세목');
+    expect(googleSheetMigrationAiService.analyzePreview).toHaveBeenCalledWith({
+      spreadsheetTitle: '2026 사업비 관리 시트',
+      selectedSheetName: '사용내역',
+      matrix: [
+        ['작성자', '입금합계', '사업팀'],
+        ['No.', '입금액', '지급처'],
+      ],
+    });
+  });
+
   it('rejects disallowed CORS origin', async () => {
     const corsApi = request(createBffApp({
       projectId,
