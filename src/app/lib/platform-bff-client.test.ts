@@ -495,4 +495,43 @@ describe('platform-bff-client', () => {
     }));
     expect(analysis.likelyTarget).toBe('expense_sheet');
   });
+
+  it('normalizes nullable google sheet migration analysis arrays', async () => {
+    const client = {
+      post: vi.fn(async () => ({
+        data: {
+          provider: 'anthropic',
+          model: 'claude-sonnet-4-20250514',
+          summary: '사용내역 탭으로 보입니다.',
+          confidence: 'high',
+          likelyTarget: 'expense_sheet',
+          usageTips: null,
+          warnings: null,
+          nextActions: null,
+          suggestedMappings: null,
+          headerPreview: null,
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    };
+
+    const analysis = await analyzeGoogleSheetImportViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm' },
+      projectId: 'p001',
+      selectedSheetName: '사용내역',
+      matrix: [
+        ['작성자', '입금합계', '사업팀'],
+        ['No.', '입금액', '지급처'],
+      ],
+      client,
+    });
+
+    expect(analysis.usageTips).toEqual([]);
+    expect(analysis.warnings).toEqual([]);
+    expect(analysis.nextActions).toEqual([]);
+    expect(analysis.suggestedMappings).toEqual([]);
+    expect(analysis.headerPreview).toEqual([]);
+  });
 });
