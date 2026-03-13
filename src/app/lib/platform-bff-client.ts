@@ -178,6 +178,7 @@ export interface SyncTransactionEvidenceDriveResult {
   sharedDriveId: string | null;
   evidenceCount: number;
   evidenceCompletedDesc: string | null;
+  evidenceCompletedManualDesc?: string | null;
   evidenceAutoListedDesc: string | null;
   evidencePendingDesc: string | null;
   supportPendingDocs: string | null;

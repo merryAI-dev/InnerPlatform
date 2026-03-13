@@ -23,7 +23,7 @@ export type ProjectType =
   | 'Z1'; // 기타사업
 export type ProjectPhase = 'PROSPECT' | 'CONFIRMED';  // 입찰예정 / 확정
 
-export type SettlementType = 'TYPE1' | 'TYPE2' | 'TYPE4';
+export type SettlementType = 'TYPE1' | 'TYPE2' | 'TYPE3' | 'TYPE4' | 'TYPE5';
 export type Basis = 'SUPPLY_AMOUNT' | 'SUPPLY_PRICE'; // 공급가액 / 공급대가
 
 export type AccountType = 'DEDICATED' | 'OPERATING' | 'NONE'; // 전용통장 / 운영통장 / 없음
@@ -116,13 +116,17 @@ export const PROJECT_TYPE_SHORT_LABELS: Record<ProjectType, string> = {
 export const SETTLEMENT_TYPE_LABELS: Record<SettlementType, string> = {
   TYPE1: 'Type1. 세금계산서발행+공급가액',
   TYPE2: 'Type2. 세금계산서발행+공급대가',
+  TYPE3: 'Type3. 공급가액+세금계산서 미발행',
   TYPE4: 'Type4. 세금계산서미발행+공급대가',
+  TYPE5: 'Type5. 이나라도움+공급가액',
 };
 
 export const SETTLEMENT_TYPE_SHORT: Record<SettlementType, string> = {
   TYPE1: 'Type1',
   TYPE2: 'Type2',
+  TYPE3: 'Type3',
   TYPE4: 'Type4',
+  TYPE5: 'Type5',
 };
 
 export const BASIS_LABELS: Record<Basis, string> = {
@@ -433,7 +437,8 @@ export interface Transaction {
   budgetSubSubCategory?: string;   // 세세목
   // 증빙 추적 (사업팀)
   evidenceRequiredDesc?: string;   // 필수증빙자료 리스트 (텍스트)
-  evidenceCompletedDesc?: string;  // 구비 완료된 증빙자료 리스트
+  evidenceCompletedDesc?: string;  // 구비 완료된 증빙자료 리스트 (자동+수기 보정 적용 결과)
+  evidenceCompletedManualDesc?: string; // 구비 완료 수기 보정 목록
   evidencePendingDesc?: string;    // 준비필요자료
   // 정산지원 담당자
   evidenceDriveLink?: string;      // 증빙자료 드라이브 링크
