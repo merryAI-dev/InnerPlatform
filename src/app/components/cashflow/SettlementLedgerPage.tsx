@@ -23,8 +23,8 @@ import {
   transactionsToImportRows,
   type ImportRow,
 } from '../../platform/settlement-csv';
-import { CASHFLOW_ALL_LINES } from '../../platform/cashflow-sheet';
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
+import { buildSettlementActualSyncPayload } from '../../platform/settlement-sheet-sync';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Checkbox } from '../ui/checkbox';
@@ -487,7 +487,11 @@ export function SettlementLedgerPage({
   const [importRows, setImportRows] = useState<ImportRow[] | null>(null);
   const [importDirty, setImportDirty] = useState(false);
   const [sheetSaving, setSheetSaving] = useState(false);
+  const [cashflowSyncing, setCashflowSyncing] = useState(false);
   const [lastAutoSavedAt, setLastAutoSavedAt] = useState('');
+  const [lastCashflowSyncedAt, setLastCashflowSyncedAt] = useState('');
+  const [sheetSaveState, setSheetSaveState] = useState<'idle' | 'dirty' | 'saving' | 'saved' | 'save_failed'>('idle');
+  const [cashflowSyncState, setCashflowSyncState] = useState<'idle' | 'pending' | 'syncing' | 'synced' | 'sync_failed'>('idle');
   const [downloadFrom, setDownloadFrom] = useState('');
   const [downloadTo, setDownloadTo] = useState('');
   const [revertConfirmOpen, setRevertConfirmOpen] = useState(false);
@@ -524,6 +528,7 @@ export function SettlementLedgerPage({
         restoredDraftCacheKeyRef.current = draftCacheKey;
         setImportRows(cachedRows);
         setImportDirty(true);
+        setSheetSaveState('dirty');
         toast.message('브라우저 임시 저장본을 복원했습니다.');
         return;
       }
@@ -551,6 +556,8 @@ export function SettlementLedgerPage({
     if (sheetRows && sheetRows.length > 0) {
       setImportRows(cloneImportRows(sheetRows));
       setImportDirty(false);
+      setSheetSaveState('saved');
+      setCashflowSyncState('synced');
       clearImportDraftCache(draftCacheKey);
       return;
     }
@@ -558,6 +565,8 @@ export function SettlementLedgerPage({
     if (nextSignature === '') {
       setImportRows(transactionsToImportRows(projectTxs, yearWeeks));
       setImportDirty(false);
+      setSheetSaveState('idle');
+      setCashflowSyncState('idle');
       clearImportDraftCache(draftCacheKey);
     }
   }, [sheetRows, cloneImportRows, draftCacheKey, projectTxs, yearWeeks]);
@@ -567,12 +576,16 @@ export function SettlementLedgerPage({
     if (sheetRows && sheetRows.length > 0) {
       setImportRows(cloneImportRows(sheetRows));
       setImportDirty(false);
+      setSheetSaveState('saved');
+      setCashflowSyncState('synced');
       clearImportDraftCache(draftCacheKey);
       toast.message('마지막 저장값으로 되돌렸습니다.');
       return;
     }
     setImportRows(transactionsToImportRows(projectTxs, yearWeeks));
     setImportDirty(false);
+    setSheetSaveState('idle');
+    setCashflowSyncState('idle');
     clearImportDraftCache(draftCacheKey);
     toast.message('저장된 사업비 입력이 없어 기본값으로 되돌렸습니다.');
   }, [sheetSaving, sheetRows, cloneImportRows, projectTxs, yearWeeks, draftCacheKey]);
@@ -743,146 +756,130 @@ export function SettlementLedgerPage({
 
   
 
-  const handleImportSave = useCallback(async (options?: { silent?: boolean }) => {
-    if (!importRows) return;
+  const persistImportRowsSnapshot = useCallback(async (
+    rows: ImportRow[],
+    options?: { silent?: boolean },
+  ) => {
     if (!onSaveSheetRows) {
       toast.error('저장 기능이 연결되어 있지 않습니다.');
-      return;
+      return false;
     }
     const silent = options?.silent ?? false;
     setSheetSaving(true);
+    setSheetSaveState('saving');
     try {
-      await onSaveSheetRows(importRows);
-      const weekIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '해당 주차');
-      const cashflowIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === 'cashflow항목');
-      const depositIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '입금액(사업비,공급가액,은행이자)');
-      const refundIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '매입부가세 반환');
-      const expenseIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '사업비 사용액');
-      const vatInIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '매입부가세');
-      const bankAmountIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '통장에 찍힌 입/출금액');
+      await onSaveSheetRows(rows);
+      setImportDirty(false);
+      setSheetSaveState('saved');
+      setCashflowSyncState('pending');
+      clearImportDraftCache(draftCacheKey);
+      setLastAutoSavedAt(new Date().toISOString());
+      if (!silent) toast.success('정산대장을 저장했습니다.');
+      return true;
+    } catch (err) {
+      console.error('[SettlementLedger] save sheet failed:', err);
+      setSheetSaveState('save_failed');
+      if (!silent) toast.error('정산대장 저장에 실패했습니다.');
+      return false;
+    } finally {
+      setSheetSaving(false);
+    }
+  }, [draftCacheKey, onSaveSheetRows]);
 
-      const byWeek = new Map<string, Record<string, number>>();
-      const weekLabels = new Set<string>();
-      const targetYears = new Set<number>([year]);
-      const dateIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '거래일시');
-      const collectWeekLabels = (rows: ImportRow[] | null | undefined) => {
-        if (!rows) return;
-        for (const row of rows) {
-          const label = weekIdx >= 0 ? (row.cells[weekIdx] || '').trim() : '';
-          if (label) weekLabels.add(label);
-        }
-      };
-      const collectYearsFromRows = (rows: ImportRow[] | null | undefined) => {
-        if (!rows || dateIdx < 0) return;
-        for (const row of rows) {
-          const raw = String(row.cells[dateIdx] || '').trim();
-          if (!raw) continue;
-          const datePart = raw.split(/\s+/)[0];
-          const iso = parseDate(datePart);
-          if (!iso) continue;
-          const y = Number.parseInt(iso.slice(0, 4), 10);
-          if (Number.isFinite(y)) targetYears.add(y);
-        }
-      };
-
-      // Snapshot sync rule:
-      // - Current edited rows define latest truth.
-      // - Previously saved rows are also included as clear targets so removed weeks are zeroed out.
-      collectWeekLabels(importRows);
-      collectWeekLabels(sheetRows || null);
-      collectYearsFromRows(importRows);
-      collectYearsFromRows(sheetRows || null);
-
-      for (const weekLabel of weekLabels) {
-        const week = resolveWeekFromLabel(weekLabel, yearWeeks);
-        if (!week?.yearMonth) continue;
-        const y = Number.parseInt(week.yearMonth.slice(0, 4), 10);
-        if (Number.isFinite(y)) targetYears.add(y);
-      }
-
-      for (const row of importRows) {
-        const weekLabel = weekIdx >= 0 ? row.cells[weekIdx] || '' : '';
-        const cashflowLabel = cashflowIdx >= 0 ? row.cells[cashflowIdx] || '' : '';
-        if (!weekLabel || !cashflowLabel) continue;
-        const lineId = parseCashflowLineLabel(cashflowLabel);
-        if (!lineId) continue;
-        if (lineId === 'INPUT_VAT_OUT') continue;
-        const target = byWeek.get(weekLabel) || {};
-        const bankAmount = bankAmountIdx >= 0 ? (parseNumber(row.cells[bankAmountIdx]) ?? 0) : 0;
-        const amount = bankAmount;
-        if (amount !== 0) {
-          target[lineId] = (target[lineId] || 0) + amount;
-          byWeek.set(weekLabel, target);
-        }
-      }
-
-
-      let cashflowFailed = false;
-      const cleared: Partial<Record<string, number>> = {};
-      for (const lineId of CASHFLOW_ALL_LINES) {
-        cleared[lineId] = 0;
-      }
-
-      const targetWeeks: MonthMondayWeek[] = [];
-      const seenWeekIds = new Set<string>();
-      for (const targetYear of Array.from(targetYears)) {
-        const weeks = getYearMondayWeeks(targetYear);
-        for (const w of weeks) {
-          const key = `${w.yearMonth}-${w.weekNo}`;
-          if (seenWeekIds.has(key)) continue;
-          seenWeekIds.add(key);
-          targetWeeks.push(w);
-        }
-      }
-
+  const syncImportRowsToCashflow = useCallback(async (
+    rows: ImportRow[],
+    options?: { silent?: boolean },
+  ) => {
+    const silent = options?.silent ?? false;
+    setCashflowSyncing(true);
+    setCashflowSyncState('syncing');
+    try {
+      const payload = buildSettlementActualSyncPayload(rows, yearWeeks, sheetRows || null);
+      let syncFailed = false;
       await Promise.all(
-        targetWeeks.map(async (week) => {
-          const amounts = byWeek.get(week.label) || {};
-          const merged = { ...cleared, ...amounts };
+        payload.map(async (week) => {
           try {
             await upsertWeekAmounts({
               projectId,
               yearMonth: week.yearMonth,
               weekNo: week.weekNo,
               mode: 'actual',
-              amounts: merged as any,
+              amounts: week.amounts as any,
             });
           } catch (err) {
-            cashflowFailed = true;
+            syncFailed = true;
             console.error('[SettlementLedger] cashflow actual update failed:', err);
           }
         }),
       );
-
-      setImportDirty(false);
-      clearImportDraftCache(draftCacheKey);
-      setLastAutoSavedAt(new Date().toISOString());
-      if (cashflowFailed) {
-        if (!silent) {
-          toast.message('정산대장은 저장되었지만 캐시플로 업데이트에 실패했습니다.');
-        }
-      } else {
-        if (!silent) {
-          toast.success('정산대장을 저장했습니다.');
-        }
+      if (syncFailed) {
+        setCashflowSyncState('sync_failed');
+        if (!silent) toast.message('정산대장은 저장되었지만 캐시플로 업데이트에 실패했습니다.');
+        return false;
       }
-    } catch (err) {
-      console.error('[SettlementLedger] save sheet failed:', err);
-      if (!silent) {
-        toast.error('정산대장 저장에 실패했습니다.');
-      }
+      setCashflowSyncState('synced');
+      setLastCashflowSyncedAt(new Date().toISOString());
+      if (!silent) toast.success('캐시플로 실제값까지 동기화했습니다.');
+      return true;
     } finally {
-      setSheetSaving(false);
+      setCashflowSyncing(false);
     }
-  }, [draftCacheKey, importRows, onSaveSheetRows, upsertWeekAmounts, projectId, yearWeeks, sheetRows]);
+  }, [projectId, sheetRows, upsertWeekAmounts, yearWeeks]);
+
+  const handleImportSave = useCallback(async (options?: { silent?: boolean; syncCashflow?: boolean }) => {
+    if (!importRows) return;
+    const silent = options?.silent ?? false;
+    const syncCashflow = options?.syncCashflow ?? true;
+    const persisted = await persistImportRowsSnapshot(importRows, { silent });
+    if (!persisted) return;
+    if (syncCashflow) {
+      await syncImportRowsToCashflow(importRows, { silent });
+    }
+  }, [importRows, persistImportRowsSnapshot, syncImportRowsToCashflow]);
 
   useEffect(() => {
     if (!autoSaveSheet || !importDirty || !importRows || !onSaveSheetRows || sheetSaving) return;
     const timer = window.setTimeout(() => {
-      void handleImportSave({ silent: true });
+      void handleImportSave({ silent: true, syncCashflow: false });
     }, 10_000);
     return () => window.clearTimeout(timer);
   }, [autoSaveSheet, importDirty, importRows, onSaveSheetRows, sheetSaving, handleImportSave]);
+
+  useEffect(() => {
+    if (!autoSaveSheet || importDirty || !importRows || sheetSaving || cashflowSyncing || cashflowSyncState !== 'pending') return;
+    const timer = window.setTimeout(() => {
+      void syncImportRowsToCashflow(importRows, { silent: true });
+    }, 45_000);
+    return () => window.clearTimeout(timer);
+  }, [autoSaveSheet, cashflowSyncState, cashflowSyncing, importDirty, importRows, sheetSaving, syncImportRowsToCashflow]);
+
+  useEffect(() => {
+    if (!importDirty) return;
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [importDirty]);
+
+  const autoSaveStatusLabel = useMemo(() => {
+    if (!autoSaveSheet) return '';
+    if (sheetSaveState === 'saving') return '시트 저장 중...';
+    if (sheetSaveState === 'save_failed') return '시트 저장 실패';
+    if (importDirty || sheetSaveState === 'dirty') return '저장되지 않은 변경 있음';
+    if (cashflowSyncState === 'syncing') return '시트 저장됨 · 캐시플로 동기화 중...';
+    if (cashflowSyncState === 'sync_failed') return '시트 저장됨 · 캐시플로 동기화 실패';
+    if (cashflowSyncState === 'pending') {
+      return lastAutoSavedAt
+        ? `시트 저장 ${formatCommentTime(lastAutoSavedAt)} · 캐시플로 동기화 대기`
+        : '시트 저장됨 · 캐시플로 동기화 대기';
+    }
+    if (cashflowSyncState === 'synced' && lastCashflowSyncedAt) {
+      return `시트 저장 ${formatCommentTime(lastAutoSavedAt || lastCashflowSyncedAt)} · 캐시플로 동기화 ${formatCommentTime(lastCashflowSyncedAt)}`;
+    }
+    return lastAutoSavedAt ? `자동 저장 ${formatCommentTime(lastAutoSavedAt)}` : '자동 저장 대기';
+  }, [autoSaveSheet, cashflowSyncState, importDirty, lastAutoSavedAt, lastCashflowSyncedAt, sheetSaveState]);
 
   // ── Inline edit handler with audit trail ──
   const handleUpdateTx = useCallback(
@@ -1017,7 +1014,7 @@ export function SettlementLedgerPage({
             </Button>
             {autoSaveSheet && (
               <span className="text-[10px] text-muted-foreground">
-                {sheetSaving ? '자동 저장 중...' : lastAutoSavedAt ? `자동 저장 ${formatCommentTime(lastAutoSavedAt)}` : '자동 저장 대기'}
+                {autoSaveStatusLabel}
               </span>
             )}
           </div>
@@ -1029,6 +1026,7 @@ export function SettlementLedgerPage({
             onChange={(rows) => {
               setImportRows(rows);
               setImportDirty(true);
+              setSheetSaveState('dirty');
             }}
             onSave={handleImportSave}
             saving={sheetSaving}
@@ -1121,7 +1119,7 @@ export function SettlementLedgerPage({
             />
             {autoSaveSheet && (
               <span className="text-[10px] text-muted-foreground">
-                {sheetSaving ? '자동 저장 중...' : lastAutoSavedAt ? `자동 저장 ${formatCommentTime(lastAutoSavedAt)}` : '자동 저장 대기'}
+                {autoSaveStatusLabel}
               </span>
             )}
         </div>
@@ -1195,6 +1193,7 @@ export function SettlementLedgerPage({
           onChange={(rows) => {
             setImportRows(rows);
             setImportDirty(true);
+            setSheetSaveState('dirty');
           }}
           onSave={handleImportSave}
           saving={sheetSaving}
