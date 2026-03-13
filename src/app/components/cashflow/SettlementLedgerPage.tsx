@@ -25,6 +25,7 @@ import {
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { buildSettlementActualSyncPayload } from '../../platform/settlement-sheet-sync';
 import { computeSettlementGridWindowRange } from '../../platform/settlement-grid-windowing';
+import { updateImportRowAt } from '../../platform/settlement-grid-state';
 import {
   deriveSettlementRows,
   isSettlementCascadeColumn,
@@ -1825,9 +1826,7 @@ function ImportEditor({
     });
     if (!persistedTxId) return null;
     if (row.sourceTxId !== persistedTxId) {
-      onChange(rows.map((candidate, index) => (
-        index === rowIdx ? { ...candidate, sourceTxId: persistedTxId } : candidate
-      )));
+      onChange(updateImportRowAt(rows, rowIdx, (candidate) => ({ ...candidate, sourceTxId: persistedTxId })));
     }
     return persistedTxId;
   }, [
@@ -1965,8 +1964,7 @@ function ImportEditor({
 
   const updateCell = useCallback(
     (rowIdx: number, colIdx: number, value: string) => {
-      const next = rows.map((r, i) => {
-        if (i !== rowIdx) return r;
+      const next = updateImportRowAt(rows, rowIdx, (r) => {
         const cells = [...r.cells];
         cells[colIdx] = value;
         return { ...r, cells };
@@ -1984,8 +1982,7 @@ function ImportEditor({
 
   const updateRow = useCallback(
     (rowIdx: number, updater: (row: ImportRow) => ImportRow) => {
-      const next = rows.map((r, i) => {
-        if (i !== rowIdx) return r;
+      const next = updateImportRowAt(rows, rowIdx, (r) => {
         let updated = updater(r);
         if (budgetCodeIdx >= 0 && subCodeIdx >= 0 && evidenceIdx >= 0 && evidenceRequiredMap) {
           const budgetCode = updated.cells[budgetCodeIdx] || '';
@@ -2462,19 +2459,31 @@ function ImportEditor({
   const applyEvidenceMapping = useCallback((rowIdx?: number) => {
     if (budgetCodeIdx < 0 || subCodeIdx < 0 || evidenceIdx < 0) return;
     if (!evidenceRequiredMap || Object.keys(evidenceRequiredMap).length === 0) return;
-    const next = rows.map((r, i) => {
-      if (rowIdx != null && i !== rowIdx) return r;
-      const budgetCode = r.cells[budgetCodeIdx] || '';
-      const subCode = r.cells[subCodeIdx] || '';
-      const mapped = resolveEvidenceRequiredDesc(evidenceRequiredMap, budgetCode, subCode);
-      if (!mapped) return r;
-      const cells = [...r.cells];
-      cells[evidenceIdx] = mapped;
-      const updated: ImportRow = { ...r, cells };
-      const result = importRowToTransaction(updated, projectId, defaultLedgerId, i);
-      updated.error = result.error;
-      return updated;
-    });
+    const next = rowIdx == null
+      ? rows.map((r, i) => {
+        const budgetCode = r.cells[budgetCodeIdx] || '';
+        const subCode = r.cells[subCodeIdx] || '';
+        const mapped = resolveEvidenceRequiredDesc(evidenceRequiredMap, budgetCode, subCode);
+        if (!mapped) return r;
+        const cells = [...r.cells];
+        cells[evidenceIdx] = mapped;
+        const updated: ImportRow = { ...r, cells };
+        const result = importRowToTransaction(updated, projectId, defaultLedgerId, i);
+        updated.error = result.error;
+        return updated;
+      })
+      : updateImportRowAt(rows, rowIdx, (r) => {
+        const budgetCode = r.cells[budgetCodeIdx] || '';
+        const subCode = r.cells[subCodeIdx] || '';
+        const mapped = resolveEvidenceRequiredDesc(evidenceRequiredMap, budgetCode, subCode);
+        if (!mapped) return r;
+        const cells = [...r.cells];
+        cells[evidenceIdx] = mapped;
+        const updated: ImportRow = { ...r, cells };
+        const result = importRowToTransaction(updated, projectId, defaultLedgerId, rowIdx);
+        updated.error = result.error;
+        return updated;
+      });
     onChange(next);
   }, [rows, onChange, projectId, defaultLedgerId, budgetCodeIdx, subCodeIdx, evidenceIdx, evidenceRequiredMap]);
 
