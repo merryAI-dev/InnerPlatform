@@ -1731,6 +1731,9 @@ function ImportEditor({
   const lastFocusedCell = useRef<{ rowIdx: number; colIdx: number } | null>(null);
   const pendingFocusCell = useRef<{ rowIdx: number; colIdx: number } | null>(null);
   const draggingSelection = useRef(false);
+  const selectionRef = useRef<{ start: { r: number; c: number }; end: { r: number; c: number } } | null>(null);
+  const pendingSelectionEndRef = useRef<{ r: number; c: number } | null>(null);
+  const dragSelectionFrameRef = useRef<number | null>(null);
   const [selection, setSelection] = useState<{ start: { r: number; c: number }; end: { r: number; c: number } } | null>(null);
   const undoStack = useRef<ImportRow[][]>([]);
   const tableWrapRef = useRef<HTMLDivElement | null>(null);
@@ -1765,6 +1768,10 @@ function ImportEditor({
       c1: Math.min(selection.start.c, selection.end.c),
       c2: Math.max(selection.start.c, selection.end.c),
     };
+  }, [selection]);
+
+  useEffect(() => {
+    selectionRef.current = selection;
   }, [selection]);
   const sourceTransactionMap = useMemo(
     () => new Map(sourceTransactions.map((transaction) => [transaction.id, transaction])),
@@ -2389,6 +2396,11 @@ function ImportEditor({
   const handleCellMouseDown = useCallback((rowIdx: number, colIdx: number) => {
     if (colIdx === noIdx) return;
     draggingSelection.current = true;
+    pendingSelectionEndRef.current = null;
+    if (dragSelectionFrameRef.current != null) {
+      window.cancelAnimationFrame(dragSelectionFrameRef.current);
+      dragSelectionFrameRef.current = null;
+    }
     document.body.style.userSelect = 'none';
     tableWrapRef.current?.focus();
     setOpenSelect(null);
@@ -2403,23 +2415,49 @@ function ImportEditor({
     ));
   }, [noIdx]);
 
+  const flushPendingSelection = useCallback(() => {
+    dragSelectionFrameRef.current = null;
+    const pending = pendingSelectionEndRef.current;
+    pendingSelectionEndRef.current = null;
+    if (!pending) return;
+    setSelection((prev) => {
+      if (!prev) return prev;
+      if (prev.end.r === pending.r && prev.end.c === pending.c) return prev;
+      return { ...prev, end: pending };
+    });
+  }, []);
+
   const handleCellMouseEnter = useCallback((rowIdx: number, colIdx: number) => {
     if (!draggingSelection.current) return;
     if (colIdx === noIdx) return;
-    setSelection((prev) => {
-      if (!prev) return prev;
-      return { ...prev, end: { r: rowIdx, c: colIdx } };
-    });
-  }, [noIdx]);
+    const current = selectionRef.current;
+    if (current?.end.r === rowIdx && current.end.c === colIdx) return;
+    const pending = pendingSelectionEndRef.current;
+    if (pending?.r === rowIdx && pending.c === colIdx) return;
+    pendingSelectionEndRef.current = { r: rowIdx, c: colIdx };
+    if (dragSelectionFrameRef.current != null) return;
+    dragSelectionFrameRef.current = window.requestAnimationFrame(flushPendingSelection);
+  }, [flushPendingSelection, noIdx]);
 
   useEffect(() => {
     const onUp = () => {
+      if (dragSelectionFrameRef.current != null) {
+        window.cancelAnimationFrame(dragSelectionFrameRef.current);
+      }
+      flushPendingSelection();
       draggingSelection.current = false;
       document.body.style.userSelect = '';
     };
     window.addEventListener('mouseup', onUp);
-    return () => window.removeEventListener('mouseup', onUp);
-  }, []);
+    return () => {
+      window.removeEventListener('mouseup', onUp);
+      if (dragSelectionFrameRef.current != null) {
+        window.cancelAnimationFrame(dragSelectionFrameRef.current);
+        dragSelectionFrameRef.current = null;
+      }
+      pendingSelectionEndRef.current = null;
+    };
+  }, [flushPendingSelection]);
 
   useEffect(() => {
     if (!tableWrapRef.current) return;
