@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronLeft, ChevronRight, Download, ExternalLink, GripVertical, Loader2, MessageSquare, Plus, RotateCcw, Save, Send, Upload, X } from 'lucide-react';
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { ClipboardEvent, KeyboardEvent, MouseEvent } from 'react';
 import { toast } from 'sonner';
@@ -10,7 +10,6 @@ import { parseDate, parseNumber, triggerDownload } from '../../platform/csv-util
 import { computeEvidenceStatus, computeEvidenceSummary, isValidDriveUrl } from '../../platform/evidence-helpers';
 import {
   buildDriveTransactionFolderName,
-  EVIDENCE_DOCUMENT_CATEGORIES,
   inferEvidenceCategoryFromFileName,
   suggestEvidenceUploadFileName,
 } from '../../platform/drive-evidence';
@@ -23,13 +22,17 @@ import {
   transactionsToImportRows,
   type ImportRow,
 } from '../../platform/settlement-csv';
-import { CASHFLOW_ALL_LINES } from '../../platform/cashflow-sheet';
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
+import { buildSettlementActualSyncPayload } from '../../platform/settlement-sheet-sync';
+import { computeSettlementGridWindowRange } from '../../platform/settlement-grid-windowing';
+import { updateImportRowAt } from '../../platform/settlement-grid-state';
+import {
+  deriveSettlementRows,
+  isSettlementCascadeColumn,
+} from '../../platform/settlement-row-derivation';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Checkbox } from '../ui/checkbox';
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '../ui/sheet';
-import { Textarea } from '../ui/textarea';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -47,14 +50,15 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '../ui/alert-dialog';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '../ui/dialog';
+import type { ActiveCommentAnchor } from './SettlementCommentThreadSheet';
+import type { EvidenceUploadDraft } from './SettlementEvidenceUploadDialog';
+
+const SettlementCommentThreadSheet = lazy(
+  () => import('./SettlementCommentThreadSheet').then((module) => ({ default: module.SettlementCommentThreadSheet })),
+);
+const SettlementEvidenceUploadDialog = lazy(
+  () => import('./SettlementEvidenceUploadDialog').then((module) => ({ default: module.SettlementEvidenceUploadDialog })),
+);
 
 // ── Helpers ──
 
@@ -114,6 +118,10 @@ function buildSheetRowCommentId(tempId: string): string {
 function formatCommentTime(value: string): string {
   return value ? value.slice(0, 16).replace('T', ' ') : '';
 }
+
+const IMPORT_EDITOR_ROW_HEIGHT_ESTIMATE = 56;
+const IMPORT_EDITOR_WINDOW_OVERSCAN = 8;
+const IMPORT_EDITOR_WINDOW_THRESHOLD = 80;
 
 function readImportDraftCache(cacheKey: string): ImportRow[] | null {
   if (!cacheKey || typeof window === 'undefined') return null;
@@ -242,13 +250,6 @@ function resolveWeekFromLabel(label: string, yearWeeks: MonthMondayWeek[]): Mont
   return getMonthMondayWeeks(yearMonth).find((w) => w.weekNo === weekNo);
 }
 
-interface ActiveCommentAnchor {
-  transactionId: string;
-  fieldKey: string;
-  fieldLabel: string;
-  rowLabel: string;
-}
-
 function CellCommentButton({
   count,
   disabled,
@@ -281,119 +282,6 @@ function CellCommentButton({
         </span>
       )}
     </button>
-  );
-}
-
-function CommentThreadSheet({
-  anchor,
-  comments,
-  open,
-  projectId,
-  currentUserId,
-  currentUserName,
-  onClose,
-  onAddComment,
-}: {
-  anchor: ActiveCommentAnchor | null;
-  comments: Comment[];
-  open: boolean;
-  projectId: string;
-  currentUserId: string;
-  currentUserName: string;
-  onClose: () => void;
-  onAddComment?: (comment: Comment) => void | Promise<void>;
-}) {
-  const [draft, setDraft] = useState('');
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (!open) setDraft('');
-  }, [open]);
-
-  const handleSubmit = useCallback(async () => {
-    if (!anchor || !onAddComment) return;
-    const content = draft.trim();
-    if (!content) return;
-
-    setSaving(true);
-    try {
-      const isSheetRowComment = anchor.transactionId.startsWith('sheet-row:');
-      await onAddComment({
-        id: `cmt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        transactionId: anchor.transactionId,
-        projectId,
-        targetType: isSheetRowComment ? 'expense_sheet_row' : 'transaction',
-        ...(isSheetRowComment ? { sheetRowId: anchor.transactionId } : {}),
-        authorId: currentUserId || currentUserName,
-        authorName: currentUserName,
-        fieldKey: anchor.fieldKey,
-        fieldLabel: anchor.fieldLabel,
-        content,
-        createdAt: new Date().toISOString(),
-      });
-      setDraft('');
-      toast.success('메모를 남겼습니다.');
-    } catch (error) {
-      console.error('[SettlementLedger] add comment failed:', error);
-      toast.error('메모 저장에 실패했습니다.');
-    } finally {
-      setSaving(false);
-    }
-  }, [anchor, currentUserId, currentUserName, draft, onAddComment, projectId]);
-
-  return (
-    <Sheet modal={false} open={open} onOpenChange={(nextOpen) => { if (!nextOpen) onClose(); }}>
-      <SheetContent side="right" showOverlay={false} className="w-[420px] sm:max-w-[420px] gap-0">
-        <SheetHeader className="border-b">
-          <SheetTitle className="text-[14px]">셀 메모</SheetTitle>
-          <SheetDescription className="text-[11px]">
-            {anchor ? `${anchor.rowLabel} · ${anchor.fieldLabel}` : '메모를 남길 셀을 선택하세요.'}
-          </SheetDescription>
-        </SheetHeader>
-        <div className="flex-1 overflow-y-auto px-4 py-4">
-          {comments.length === 0 ? (
-            <div className="rounded-lg border border-dashed px-4 py-6 text-[12px] text-muted-foreground">
-              아직 메모가 없습니다. 아래 입력창에 첫 메모를 남겨보세요.
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {comments.map((comment) => (
-                <div key={comment.id} className="rounded-2xl border bg-background px-3 py-2.5 shadow-sm">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-[11px] font-semibold">{comment.authorName}</span>
-                    <span className="text-[10px] text-muted-foreground">{formatCommentTime(comment.createdAt)}</span>
-                  </div>
-                  {comment.fieldLabel && (
-                    <Badge variant="secondary" className="mt-2 text-[9px]">{comment.fieldLabel}</Badge>
-                  )}
-                  <p className="mt-2 whitespace-pre-wrap text-[12px] leading-5">{comment.content}</p>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-        <div className="border-t px-4 py-4 space-y-2">
-          <Textarea
-            value={draft}
-            placeholder="이 셀에 남길 메모를 적어주세요"
-            className="min-h-24 text-[12px]"
-            onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-                event.preventDefault();
-                void handleSubmit();
-              }
-            }}
-          />
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-[10px] text-muted-foreground">Cmd/Ctrl + Enter로 저장</span>
-            <Button size="sm" className="h-8 text-[11px]" disabled={!draft.trim() || saving || !anchor || !onAddComment} onClick={() => void handleSubmit()}>
-              {saving ? '저장중...' : '메모 남기기'}
-            </Button>
-          </div>
-        </div>
-      </SheetContent>
-    </Sheet>
   );
 }
 
@@ -487,7 +375,11 @@ export function SettlementLedgerPage({
   const [importRows, setImportRows] = useState<ImportRow[] | null>(null);
   const [importDirty, setImportDirty] = useState(false);
   const [sheetSaving, setSheetSaving] = useState(false);
+  const [cashflowSyncing, setCashflowSyncing] = useState(false);
   const [lastAutoSavedAt, setLastAutoSavedAt] = useState('');
+  const [lastCashflowSyncedAt, setLastCashflowSyncedAt] = useState('');
+  const [sheetSaveState, setSheetSaveState] = useState<'idle' | 'dirty' | 'saving' | 'saved' | 'save_failed'>('idle');
+  const [cashflowSyncState, setCashflowSyncState] = useState<'idle' | 'pending' | 'syncing' | 'synced' | 'sync_failed'>('idle');
   const [downloadFrom, setDownloadFrom] = useState('');
   const [downloadTo, setDownloadTo] = useState('');
   const [revertConfirmOpen, setRevertConfirmOpen] = useState(false);
@@ -524,6 +416,7 @@ export function SettlementLedgerPage({
         restoredDraftCacheKeyRef.current = draftCacheKey;
         setImportRows(cachedRows);
         setImportDirty(true);
+        setSheetSaveState('dirty');
         toast.message('브라우저 임시 저장본을 복원했습니다.');
         return;
       }
@@ -551,6 +444,8 @@ export function SettlementLedgerPage({
     if (sheetRows && sheetRows.length > 0) {
       setImportRows(cloneImportRows(sheetRows));
       setImportDirty(false);
+      setSheetSaveState('saved');
+      setCashflowSyncState('synced');
       clearImportDraftCache(draftCacheKey);
       return;
     }
@@ -558,6 +453,8 @@ export function SettlementLedgerPage({
     if (nextSignature === '') {
       setImportRows(transactionsToImportRows(projectTxs, yearWeeks));
       setImportDirty(false);
+      setSheetSaveState('idle');
+      setCashflowSyncState('idle');
       clearImportDraftCache(draftCacheKey);
     }
   }, [sheetRows, cloneImportRows, draftCacheKey, projectTxs, yearWeeks]);
@@ -567,12 +464,16 @@ export function SettlementLedgerPage({
     if (sheetRows && sheetRows.length > 0) {
       setImportRows(cloneImportRows(sheetRows));
       setImportDirty(false);
+      setSheetSaveState('saved');
+      setCashflowSyncState('synced');
       clearImportDraftCache(draftCacheKey);
       toast.message('마지막 저장값으로 되돌렸습니다.');
       return;
     }
     setImportRows(transactionsToImportRows(projectTxs, yearWeeks));
     setImportDirty(false);
+    setSheetSaveState('idle');
+    setCashflowSyncState('idle');
     clearImportDraftCache(draftCacheKey);
     toast.message('저장된 사업비 입력이 없어 기본값으로 되돌렸습니다.');
   }, [sheetSaving, sheetRows, cloneImportRows, projectTxs, yearWeeks, draftCacheKey]);
@@ -743,146 +644,130 @@ export function SettlementLedgerPage({
 
   
 
-  const handleImportSave = useCallback(async (options?: { silent?: boolean }) => {
-    if (!importRows) return;
+  const persistImportRowsSnapshot = useCallback(async (
+    rows: ImportRow[],
+    options?: { silent?: boolean },
+  ) => {
     if (!onSaveSheetRows) {
       toast.error('저장 기능이 연결되어 있지 않습니다.');
-      return;
+      return false;
     }
     const silent = options?.silent ?? false;
     setSheetSaving(true);
+    setSheetSaveState('saving');
     try {
-      await onSaveSheetRows(importRows);
-      const weekIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '해당 주차');
-      const cashflowIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === 'cashflow항목');
-      const depositIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '입금액(사업비,공급가액,은행이자)');
-      const refundIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '매입부가세 반환');
-      const expenseIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '사업비 사용액');
-      const vatInIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '매입부가세');
-      const bankAmountIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '통장에 찍힌 입/출금액');
+      await onSaveSheetRows(rows);
+      setImportDirty(false);
+      setSheetSaveState('saved');
+      setCashflowSyncState('pending');
+      clearImportDraftCache(draftCacheKey);
+      setLastAutoSavedAt(new Date().toISOString());
+      if (!silent) toast.success('정산대장을 저장했습니다.');
+      return true;
+    } catch (err) {
+      console.error('[SettlementLedger] save sheet failed:', err);
+      setSheetSaveState('save_failed');
+      if (!silent) toast.error('정산대장 저장에 실패했습니다.');
+      return false;
+    } finally {
+      setSheetSaving(false);
+    }
+  }, [draftCacheKey, onSaveSheetRows]);
 
-      const byWeek = new Map<string, Record<string, number>>();
-      const weekLabels = new Set<string>();
-      const targetYears = new Set<number>([year]);
-      const dateIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '거래일시');
-      const collectWeekLabels = (rows: ImportRow[] | null | undefined) => {
-        if (!rows) return;
-        for (const row of rows) {
-          const label = weekIdx >= 0 ? (row.cells[weekIdx] || '').trim() : '';
-          if (label) weekLabels.add(label);
-        }
-      };
-      const collectYearsFromRows = (rows: ImportRow[] | null | undefined) => {
-        if (!rows || dateIdx < 0) return;
-        for (const row of rows) {
-          const raw = String(row.cells[dateIdx] || '').trim();
-          if (!raw) continue;
-          const datePart = raw.split(/\s+/)[0];
-          const iso = parseDate(datePart);
-          if (!iso) continue;
-          const y = Number.parseInt(iso.slice(0, 4), 10);
-          if (Number.isFinite(y)) targetYears.add(y);
-        }
-      };
-
-      // Snapshot sync rule:
-      // - Current edited rows define latest truth.
-      // - Previously saved rows are also included as clear targets so removed weeks are zeroed out.
-      collectWeekLabels(importRows);
-      collectWeekLabels(sheetRows || null);
-      collectYearsFromRows(importRows);
-      collectYearsFromRows(sheetRows || null);
-
-      for (const weekLabel of weekLabels) {
-        const week = resolveWeekFromLabel(weekLabel, yearWeeks);
-        if (!week?.yearMonth) continue;
-        const y = Number.parseInt(week.yearMonth.slice(0, 4), 10);
-        if (Number.isFinite(y)) targetYears.add(y);
-      }
-
-      for (const row of importRows) {
-        const weekLabel = weekIdx >= 0 ? row.cells[weekIdx] || '' : '';
-        const cashflowLabel = cashflowIdx >= 0 ? row.cells[cashflowIdx] || '' : '';
-        if (!weekLabel || !cashflowLabel) continue;
-        const lineId = parseCashflowLineLabel(cashflowLabel);
-        if (!lineId) continue;
-        if (lineId === 'INPUT_VAT_OUT') continue;
-        const target = byWeek.get(weekLabel) || {};
-        const bankAmount = bankAmountIdx >= 0 ? (parseNumber(row.cells[bankAmountIdx]) ?? 0) : 0;
-        const amount = bankAmount;
-        if (amount !== 0) {
-          target[lineId] = (target[lineId] || 0) + amount;
-          byWeek.set(weekLabel, target);
-        }
-      }
-
-
-      let cashflowFailed = false;
-      const cleared: Partial<Record<string, number>> = {};
-      for (const lineId of CASHFLOW_ALL_LINES) {
-        cleared[lineId] = 0;
-      }
-
-      const targetWeeks: MonthMondayWeek[] = [];
-      const seenWeekIds = new Set<string>();
-      for (const targetYear of Array.from(targetYears)) {
-        const weeks = getYearMondayWeeks(targetYear);
-        for (const w of weeks) {
-          const key = `${w.yearMonth}-${w.weekNo}`;
-          if (seenWeekIds.has(key)) continue;
-          seenWeekIds.add(key);
-          targetWeeks.push(w);
-        }
-      }
-
+  const syncImportRowsToCashflow = useCallback(async (
+    rows: ImportRow[],
+    options?: { silent?: boolean },
+  ) => {
+    const silent = options?.silent ?? false;
+    setCashflowSyncing(true);
+    setCashflowSyncState('syncing');
+    try {
+      const payload = buildSettlementActualSyncPayload(rows, yearWeeks, sheetRows || null);
+      let syncFailed = false;
       await Promise.all(
-        targetWeeks.map(async (week) => {
-          const amounts = byWeek.get(week.label) || {};
-          const merged = { ...cleared, ...amounts };
+        payload.map(async (week) => {
           try {
             await upsertWeekAmounts({
               projectId,
               yearMonth: week.yearMonth,
               weekNo: week.weekNo,
               mode: 'actual',
-              amounts: merged as any,
+              amounts: week.amounts as any,
             });
           } catch (err) {
-            cashflowFailed = true;
+            syncFailed = true;
             console.error('[SettlementLedger] cashflow actual update failed:', err);
           }
         }),
       );
-
-      setImportDirty(false);
-      clearImportDraftCache(draftCacheKey);
-      setLastAutoSavedAt(new Date().toISOString());
-      if (cashflowFailed) {
-        if (!silent) {
-          toast.message('정산대장은 저장되었지만 캐시플로 업데이트에 실패했습니다.');
-        }
-      } else {
-        if (!silent) {
-          toast.success('정산대장을 저장했습니다.');
-        }
+      if (syncFailed) {
+        setCashflowSyncState('sync_failed');
+        if (!silent) toast.message('정산대장은 저장되었지만 캐시플로 업데이트에 실패했습니다.');
+        return false;
       }
-    } catch (err) {
-      console.error('[SettlementLedger] save sheet failed:', err);
-      if (!silent) {
-        toast.error('정산대장 저장에 실패했습니다.');
-      }
+      setCashflowSyncState('synced');
+      setLastCashflowSyncedAt(new Date().toISOString());
+      if (!silent) toast.success('캐시플로 실제값까지 동기화했습니다.');
+      return true;
     } finally {
-      setSheetSaving(false);
+      setCashflowSyncing(false);
     }
-  }, [draftCacheKey, importRows, onSaveSheetRows, upsertWeekAmounts, projectId, yearWeeks, sheetRows]);
+  }, [projectId, sheetRows, upsertWeekAmounts, yearWeeks]);
+
+  const handleImportSave = useCallback(async (options?: { silent?: boolean; syncCashflow?: boolean }) => {
+    if (!importRows) return;
+    const silent = options?.silent ?? false;
+    const syncCashflow = options?.syncCashflow ?? true;
+    const persisted = await persistImportRowsSnapshot(importRows, { silent });
+    if (!persisted) return;
+    if (syncCashflow) {
+      await syncImportRowsToCashflow(importRows, { silent });
+    }
+  }, [importRows, persistImportRowsSnapshot, syncImportRowsToCashflow]);
 
   useEffect(() => {
     if (!autoSaveSheet || !importDirty || !importRows || !onSaveSheetRows || sheetSaving) return;
     const timer = window.setTimeout(() => {
-      void handleImportSave({ silent: true });
+      void handleImportSave({ silent: true, syncCashflow: false });
     }, 10_000);
     return () => window.clearTimeout(timer);
   }, [autoSaveSheet, importDirty, importRows, onSaveSheetRows, sheetSaving, handleImportSave]);
+
+  useEffect(() => {
+    if (!autoSaveSheet || importDirty || !importRows || sheetSaving || cashflowSyncing || cashflowSyncState !== 'pending') return;
+    const timer = window.setTimeout(() => {
+      void syncImportRowsToCashflow(importRows, { silent: true });
+    }, 45_000);
+    return () => window.clearTimeout(timer);
+  }, [autoSaveSheet, cashflowSyncState, cashflowSyncing, importDirty, importRows, sheetSaving, syncImportRowsToCashflow]);
+
+  useEffect(() => {
+    if (!importDirty) return;
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [importDirty]);
+
+  const autoSaveStatusLabel = useMemo(() => {
+    if (!autoSaveSheet) return '';
+    if (sheetSaveState === 'saving') return '시트 저장 중...';
+    if (sheetSaveState === 'save_failed') return '시트 저장 실패';
+    if (importDirty || sheetSaveState === 'dirty') return '저장되지 않은 변경 있음';
+    if (cashflowSyncState === 'syncing') return '시트 저장됨 · 캐시플로 동기화 중...';
+    if (cashflowSyncState === 'sync_failed') return '시트 저장됨 · 캐시플로 동기화 실패';
+    if (cashflowSyncState === 'pending') {
+      return lastAutoSavedAt
+        ? `시트 저장 ${formatCommentTime(lastAutoSavedAt)} · 캐시플로 동기화 대기`
+        : '시트 저장됨 · 캐시플로 동기화 대기';
+    }
+    if (cashflowSyncState === 'synced' && lastCashflowSyncedAt) {
+      return `시트 저장 ${formatCommentTime(lastAutoSavedAt || lastCashflowSyncedAt)} · 캐시플로 동기화 ${formatCommentTime(lastCashflowSyncedAt)}`;
+    }
+    return lastAutoSavedAt ? `자동 저장 ${formatCommentTime(lastAutoSavedAt)}` : '자동 저장 대기';
+  }, [autoSaveSheet, cashflowSyncState, importDirty, lastAutoSavedAt, lastCashflowSyncedAt, sheetSaveState]);
 
   // ── Inline edit handler with audit trail ──
   const handleUpdateTx = useCallback(
@@ -1017,7 +902,7 @@ export function SettlementLedgerPage({
             </Button>
             {autoSaveSheet && (
               <span className="text-[10px] text-muted-foreground">
-                {sheetSaving ? '자동 저장 중...' : lastAutoSavedAt ? `자동 저장 ${formatCommentTime(lastAutoSavedAt)}` : '자동 저장 대기'}
+                {autoSaveStatusLabel}
               </span>
             )}
           </div>
@@ -1029,6 +914,7 @@ export function SettlementLedgerPage({
             onChange={(rows) => {
               setImportRows(rows);
               setImportDirty(true);
+              setSheetSaveState('dirty');
             }}
             onSave={handleImportSave}
             saving={sheetSaving}
@@ -1121,7 +1007,7 @@ export function SettlementLedgerPage({
             />
             {autoSaveSheet && (
               <span className="text-[10px] text-muted-foreground">
-                {sheetSaving ? '자동 저장 중...' : lastAutoSavedAt ? `자동 저장 ${formatCommentTime(lastAutoSavedAt)}` : '자동 저장 대기'}
+                {autoSaveStatusLabel}
               </span>
             )}
         </div>
@@ -1195,6 +1081,7 @@ export function SettlementLedgerPage({
           onChange={(rows) => {
             setImportRows(rows);
             setImportDirty(true);
+            setSheetSaveState('dirty');
           }}
           onSave={handleImportSave}
           saving={sheetSaving}
@@ -1679,17 +1566,6 @@ function TransactionRow({
 
 // ── Import Editor (editable CSV preview) ──
 
-interface EvidenceUploadDraft {
-  id: string;
-  file: File;
-  objectUrl: string;
-  category: string;
-  parserCategory: string;
-  suggestedFileName: string;
-  reviewedFileName: string;
-  previewType: 'pdf' | 'image' | 'other';
-}
-
 function ImportEditor({
   rows,
   onChange,
@@ -1855,6 +1731,9 @@ function ImportEditor({
   const lastFocusedCell = useRef<{ rowIdx: number; colIdx: number } | null>(null);
   const pendingFocusCell = useRef<{ rowIdx: number; colIdx: number } | null>(null);
   const draggingSelection = useRef(false);
+  const selectionRef = useRef<{ start: { r: number; c: number }; end: { r: number; c: number } } | null>(null);
+  const pendingSelectionEndRef = useRef<{ r: number; c: number } | null>(null);
+  const dragSelectionFrameRef = useRef<number | null>(null);
   const [selection, setSelection] = useState<{ start: { r: number; c: number }; end: { r: number; c: number } } | null>(null);
   const undoStack = useRef<ImportRow[][]>([]);
   const tableWrapRef = useRef<HTMLDivElement | null>(null);
@@ -1873,6 +1752,8 @@ function ImportEditor({
     }),
   );
   const [activeCommentAnchor, setActiveCommentAnchor] = useState<ActiveCommentAnchor | null>(null);
+  const [virtualScrollTop, setVirtualScrollTop] = useState(0);
+  const [virtualViewportHeight, setVirtualViewportHeight] = useState(0);
   const evidenceFileInputRef = useRef<HTMLInputElement | null>(null);
   const [uploadTargetTxId, setUploadTargetTxId] = useState<string | null>(null);
   const [uploadDrafts, setUploadDrafts] = useState<EvidenceUploadDraft[]>([]);
@@ -1888,9 +1769,35 @@ function ImportEditor({
       c2: Math.max(selection.start.c, selection.end.c),
     };
   }, [selection]);
+
+  useEffect(() => {
+    selectionRef.current = selection;
+  }, [selection]);
   const sourceTransactionMap = useMemo(
     () => new Map(sourceTransactions.map((transaction) => [transaction.id, transaction])),
     [sourceTransactions],
+  );
+  const shouldVirtualizeRows = inline && rows.length >= IMPORT_EDITOR_WINDOW_THRESHOLD;
+  const visibleRowWindow = useMemo(() => {
+    if (!shouldVirtualizeRows) {
+      return {
+        startIndex: 0,
+        endIndex: rows.length,
+        paddingTop: 0,
+        paddingBottom: 0,
+      };
+    }
+    return computeSettlementGridWindowRange({
+      rowCount: rows.length,
+      scrollTop: virtualScrollTop,
+      viewportHeight: virtualViewportHeight,
+      rowHeightEstimate: IMPORT_EDITOR_ROW_HEIGHT_ESTIMATE,
+      overscan: IMPORT_EDITOR_WINDOW_OVERSCAN,
+    });
+  }, [rows.length, shouldVirtualizeRows, virtualScrollTop, virtualViewportHeight]);
+  const visibleRows = useMemo(
+    () => rows.slice(visibleRowWindow.startIndex, visibleRowWindow.endIndex),
+    [rows, visibleRowWindow.endIndex, visibleRowWindow.startIndex],
   );
 
   const ensurePersistedTransactionByRow = useCallback(async (rowIdx: number): Promise<string | null> => {
@@ -1926,9 +1833,7 @@ function ImportEditor({
     });
     if (!persistedTxId) return null;
     if (row.sourceTxId !== persistedTxId) {
-      onChange(rows.map((candidate, index) => (
-        index === rowIdx ? { ...candidate, sourceTxId: persistedTxId } : candidate
-      )));
+      onChange(updateImportRowAt(rows, rowIdx, (candidate) => ({ ...candidate, sourceTxId: persistedTxId })));
     }
     return persistedTxId;
   }, [
@@ -2004,11 +1909,6 @@ function ImportEditor({
     }
   }, []);
 
-  const activeUploadDraft = useMemo(
-    () => uploadDrafts.find((draft) => draft.id === activeUploadDraftId) || uploadDrafts[0] || null,
-    [uploadDrafts, activeUploadDraftId],
-  );
-
   const confirmEvidenceUpload = useCallback(async () => {
     if (!uploadTargetTxId || !onUploadEvidenceDriveById || uploadDrafts.length === 0) return;
     setUploadingEvidence(true);
@@ -2039,120 +1939,57 @@ function ImportEditor({
     }
   }, [clearUploadDrafts, onUploadEvidenceDriveById, uploadDrafts, uploadTargetTxId]);
 
-  const recomputeBalances = useCallback(
-    (input: ImportRow[]) => {
-      if (depositIdx < 0 || refundIdx < 0 || expenseIdx < 0 || vatInIdx < 0 || bankAmountIdx < 0 || balanceIdx < 0) return input;
-      let running = 0;
-      return input.map((row) => {
-        const existingBankRaw = String(row.cells[bankAmountIdx] || '').trim();
-        const existingBalanceRaw = String(row.cells[balanceIdx] || '').trim();
-        const hasExistingBank = existingBankRaw !== '';
-        const hasExistingBalance = existingBalanceRaw !== '';
-        const existingBalanceNum = hasExistingBalance ? (parseNumber(existingBalanceRaw) ?? null) : null;
-
-        const depositSum = (parseNumber(row.cells[depositIdx]) ?? 0) + (parseNumber(row.cells[refundIdx]) ?? 0);
-        const expenseSum = (parseNumber(row.cells[expenseIdx]) ?? 0) + (parseNumber(row.cells[vatInIdx]) ?? 0);
-        const derivedBankAmount = depositSum > 0 ? depositSum : expenseSum;
-        const bankAmount = hasExistingBank ? (parseNumber(existingBankRaw) ?? 0) : derivedBankAmount;
-
-        if (existingBalanceNum != null) {
-          running = existingBalanceNum;
-        } else if (depositSum !== 0 || expenseSum !== 0) {
-          running += depositSum - expenseSum;
-        }
-        const cells = [...row.cells];
-        if (!hasExistingBank) {
-          cells[bankAmountIdx] = Number.isFinite(bankAmount) && bankAmount !== 0 ? bankAmount.toLocaleString('ko-KR') : '';
-        }
-        if (!hasExistingBalance && (depositSum !== 0 || expenseSum !== 0)) {
-          cells[balanceIdx] = Number.isFinite(running) ? running.toLocaleString('ko-KR') : '';
-        }
-        return { ...row, cells };
-      });
-    },
-    [depositIdx, refundIdx, expenseIdx, vatInIdx, bankAmountIdx, balanceIdx],
-  );
-
-  const applyDerivedRows = useCallback(
-    (input: ImportRow[]) => {
-      const recalced = recomputeBalances(input);
-      return recalced.map((row, i) => {
-        let next = row;
-        const weekCell = weekIdx >= 0 ? String(row.cells[weekIdx] || '').trim() : '';
-      if (weekIdx >= 0 && dateIdx >= 0 && (!weekCell || weekCell === '-') && row.cells[dateIdx]) {
-          const rawDate = String(row.cells[dateIdx]).trim();
-          const datePart = rawDate.split(/\s+/)[0];
-          let dateIso = parseDate(datePart);
-          if (!dateIso) {
-            const m = datePart.match(/(\d{4})\D(\d{1,2})\D(\d{1,2})/);
-            if (m) {
-              dateIso = `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
-            }
-          }
-          if (dateIso) {
-            const weeks = getYearMondayWeeks(Number.parseInt(dateIso.slice(0, 4), 10));
-            const label = findWeekForDate(dateIso, weeks)?.label || '';
-            if (label) {
-              const cells = [...row.cells];
-              cells[weekIdx] = label;
-              next = { ...row, cells };
-            }
-          }
-        }
-        if (bankAmountIdx >= 0 && expenseIdx >= 0 && vatInIdx >= 0) {
-          const existingExpense = String(next.cells[expenseIdx] || '').trim();
-          const bankAmount = parseNumber(next.cells[bankAmountIdx]) ?? 0;
-          const vatAmount = parseNumber(next.cells[vatInIdx]) ?? 0;
-          if (bankAmount > 0 && (!existingExpense || existingExpense === '0')) {
-            const derivedExpense = Math.max(bankAmount - Math.max(vatAmount, 0), 0);
-            const cells = [...next.cells];
-            cells[expenseIdx] = derivedExpense > 0 ? derivedExpense.toLocaleString('ko-KR') : '';
-            next = { ...next, cells };
-          }
-        }
-        if (evidenceIdx >= 0 && evidenceCompletedIdx >= 0 && evidencePendingIdx >= 0) {
-          const requiredDesc = String(next.cells[evidenceIdx] || '');
-          const completedDesc = String(next.cells[evidenceCompletedIdx] || '');
-          const pendingDesc = derivePendingEvidence(requiredDesc, completedDesc);
-          const cells = [...next.cells];
-          cells[evidencePendingIdx] = pendingDesc;
-          next = { ...next, cells };
-        }
-        const result = importRowToTransaction(next, projectId, defaultLedgerId, i);
-        return { ...next, error: result.error };
-      });
-    },
-    [recomputeBalances, projectId, defaultLedgerId, weekIdx, dateIdx, bankAmountIdx, expenseIdx, vatInIdx, evidenceIdx, evidenceCompletedIdx, evidencePendingIdx],
-  );
+  const settlementDerivationContext = useMemo(() => ({
+    projectId,
+    defaultLedgerId,
+    dateIdx,
+    weekIdx,
+    depositIdx,
+    refundIdx,
+    expenseIdx,
+    vatInIdx,
+    bankAmountIdx,
+    balanceIdx,
+    evidenceIdx,
+    evidenceCompletedIdx,
+    evidencePendingIdx,
+  }), [
+    projectId,
+    defaultLedgerId,
+    dateIdx,
+    weekIdx,
+    depositIdx,
+    refundIdx,
+    expenseIdx,
+    vatInIdx,
+    bankAmountIdx,
+    balanceIdx,
+    evidenceIdx,
+    evidenceCompletedIdx,
+    evidencePendingIdx,
+  ]);
 
   const updateCell = useCallback(
     (rowIdx: number, colIdx: number, value: string) => {
-      const next = rows.map((r, i) => {
-        if (i !== rowIdx) return r;
+      const next = updateImportRowAt(rows, rowIdx, (r) => {
         const cells = [...r.cells];
         cells[colIdx] = value;
         return { ...r, cells };
       });
 
-      if (colIdx === cashflowIdx) {
-        const updated = next.map((row, i) => {
-          if (i !== rowIdx) return row;
-          const result = importRowToTransaction(row, projectId, defaultLedgerId, i);
-          return { ...row, error: result.error };
-        });
-        onChange(updated);
-        return;
-      }
-
-      onChange(applyDerivedRows(next));
+      const mode = colIdx === cashflowIdx
+        ? 'row'
+        : isSettlementCascadeColumn(colIdx, settlementDerivationContext)
+          ? 'cascade'
+          : 'row';
+      onChange(deriveSettlementRows(next, settlementDerivationContext, { mode, rowIdx }));
     },
-    [rows, onChange, applyDerivedRows, cashflowIdx, projectId, defaultLedgerId],
+    [rows, onChange, cashflowIdx, settlementDerivationContext],
   );
 
   const updateRow = useCallback(
     (rowIdx: number, updater: (row: ImportRow) => ImportRow) => {
-      const next = rows.map((r, i) => {
-        if (i !== rowIdx) return r;
+      const next = updateImportRowAt(rows, rowIdx, (r) => {
         let updated = updater(r);
         if (budgetCodeIdx >= 0 && subCodeIdx >= 0 && evidenceIdx >= 0 && evidenceRequiredMap) {
           const budgetCode = updated.cells[budgetCodeIdx] || '';
@@ -2166,9 +2003,9 @@ function ImportEditor({
         }
         return updated;
       });
-      onChange(applyDerivedRows(next));
+      onChange(deriveSettlementRows(next, settlementDerivationContext, { mode: 'row', rowIdx }));
     },
-    [rows, onChange, budgetCodeIdx, subCodeIdx, evidenceIdx, evidenceRequiredMap, applyDerivedRows],
+    [rows, onChange, budgetCodeIdx, subCodeIdx, evidenceIdx, evidenceRequiredMap, settlementDerivationContext],
   );
 
   const normalizeRowNumbers = useCallback((input: ImportRow[]) => {
@@ -2203,8 +2040,8 @@ function ImportEditor({
 
   const commitRows = useCallback((nextRows: ImportRow[], focusTarget?: { rowIdx: number; colIdx: number } | null) => {
     if (focusTarget) pendingFocusCell.current = focusTarget;
-    onChange(applyDerivedRows(normalizeRowNumbers(nextRows)));
-  }, [onChange, applyDerivedRows, normalizeRowNumbers]);
+    onChange(deriveSettlementRows(normalizeRowNumbers(nextRows), settlementDerivationContext, { mode: 'full' }));
+  }, [onChange, normalizeRowNumbers, settlementDerivationContext]);
 
   const addRow = useCallback(() => {
     const anchor = getSelectionAnchor();
@@ -2455,11 +2292,25 @@ function ImportEditor({
     let boundedCol = Math.max(0, Math.min(SETTLEMENT_COLUMNS.length - 1, colIdx));
     if (boundedCol === noIdx) boundedCol = Math.min(SETTLEMENT_COLUMNS.length - 1, boundedCol + 1);
     const selector = `[data-cell-row="${boundedRow}"][data-cell-col="${boundedCol}"]`;
-    const target = tableWrapRef.current.querySelector<HTMLElement>(selector);
-    if (!target) return;
-    target.focus();
-    handleCellFocus(boundedRow, boundedCol);
-  }, [rows.length, noIdx, handleCellFocus]);
+    const tryFocus = () => {
+      const target = tableWrapRef.current?.querySelector<HTMLElement>(selector);
+      if (!target) return false;
+      target.focus();
+      handleCellFocus(boundedRow, boundedCol);
+      return true;
+    };
+    if (tryFocus()) return;
+    if (shouldVirtualizeRows && tableWrapRef.current) {
+      const nextScrollTop = Math.max(
+        0,
+        boundedRow * IMPORT_EDITOR_ROW_HEIGHT_ESTIMATE - IMPORT_EDITOR_ROW_HEIGHT_ESTIMATE * 2,
+      );
+      tableWrapRef.current.scrollTop = nextScrollTop;
+      window.requestAnimationFrame(() => {
+        void tryFocus();
+      });
+    }
+  }, [rows.length, noIdx, handleCellFocus, shouldVirtualizeRows]);
 
   useEffect(() => {
     if (!pendingFocusCell.current) return;
@@ -2545,6 +2396,11 @@ function ImportEditor({
   const handleCellMouseDown = useCallback((rowIdx: number, colIdx: number) => {
     if (colIdx === noIdx) return;
     draggingSelection.current = true;
+    pendingSelectionEndRef.current = null;
+    if (dragSelectionFrameRef.current != null) {
+      window.cancelAnimationFrame(dragSelectionFrameRef.current);
+      dragSelectionFrameRef.current = null;
+    }
     document.body.style.userSelect = 'none';
     tableWrapRef.current?.focus();
     setOpenSelect(null);
@@ -2559,23 +2415,69 @@ function ImportEditor({
     ));
   }, [noIdx]);
 
+  const flushPendingSelection = useCallback(() => {
+    dragSelectionFrameRef.current = null;
+    const pending = pendingSelectionEndRef.current;
+    pendingSelectionEndRef.current = null;
+    if (!pending) return;
+    setSelection((prev) => {
+      if (!prev) return prev;
+      if (prev.end.r === pending.r && prev.end.c === pending.c) return prev;
+      return { ...prev, end: pending };
+    });
+  }, []);
+
   const handleCellMouseEnter = useCallback((rowIdx: number, colIdx: number) => {
     if (!draggingSelection.current) return;
     if (colIdx === noIdx) return;
-    setSelection((prev) => {
-      if (!prev) return prev;
-      return { ...prev, end: { r: rowIdx, c: colIdx } };
-    });
-  }, [noIdx]);
+    const current = selectionRef.current;
+    if (current?.end.r === rowIdx && current.end.c === colIdx) return;
+    const pending = pendingSelectionEndRef.current;
+    if (pending?.r === rowIdx && pending.c === colIdx) return;
+    pendingSelectionEndRef.current = { r: rowIdx, c: colIdx };
+    if (dragSelectionFrameRef.current != null) return;
+    dragSelectionFrameRef.current = window.requestAnimationFrame(flushPendingSelection);
+  }, [flushPendingSelection, noIdx]);
 
   useEffect(() => {
     const onUp = () => {
+      if (dragSelectionFrameRef.current != null) {
+        window.cancelAnimationFrame(dragSelectionFrameRef.current);
+      }
+      flushPendingSelection();
       draggingSelection.current = false;
       document.body.style.userSelect = '';
     };
     window.addEventListener('mouseup', onUp);
-    return () => window.removeEventListener('mouseup', onUp);
-  }, []);
+    return () => {
+      window.removeEventListener('mouseup', onUp);
+      if (dragSelectionFrameRef.current != null) {
+        window.cancelAnimationFrame(dragSelectionFrameRef.current);
+        dragSelectionFrameRef.current = null;
+      }
+      pendingSelectionEndRef.current = null;
+    };
+  }, [flushPendingSelection]);
+
+  useEffect(() => {
+    if (!tableWrapRef.current) return;
+    const element = tableWrapRef.current;
+    const syncViewport = () => {
+      setVirtualScrollTop(element.scrollTop);
+      setVirtualViewportHeight(element.clientHeight);
+    };
+    syncViewport();
+    const handleScroll = () => {
+      setVirtualScrollTop(element.scrollTop);
+    };
+    element.addEventListener('scroll', handleScroll, { passive: true });
+    const observer = new ResizeObserver(() => syncViewport());
+    observer.observe(element);
+    return () => {
+      element.removeEventListener('scroll', handleScroll);
+      observer.disconnect();
+    };
+  }, [inline, rows.length]);
 
   useEffect(() => {
     if (!inline) return;
@@ -2595,19 +2497,31 @@ function ImportEditor({
   const applyEvidenceMapping = useCallback((rowIdx?: number) => {
     if (budgetCodeIdx < 0 || subCodeIdx < 0 || evidenceIdx < 0) return;
     if (!evidenceRequiredMap || Object.keys(evidenceRequiredMap).length === 0) return;
-    const next = rows.map((r, i) => {
-      if (rowIdx != null && i !== rowIdx) return r;
-      const budgetCode = r.cells[budgetCodeIdx] || '';
-      const subCode = r.cells[subCodeIdx] || '';
-      const mapped = resolveEvidenceRequiredDesc(evidenceRequiredMap, budgetCode, subCode);
-      if (!mapped) return r;
-      const cells = [...r.cells];
-      cells[evidenceIdx] = mapped;
-      const updated: ImportRow = { ...r, cells };
-      const result = importRowToTransaction(updated, projectId, defaultLedgerId, i);
-      updated.error = result.error;
-      return updated;
-    });
+    const next = rowIdx == null
+      ? rows.map((r, i) => {
+        const budgetCode = r.cells[budgetCodeIdx] || '';
+        const subCode = r.cells[subCodeIdx] || '';
+        const mapped = resolveEvidenceRequiredDesc(evidenceRequiredMap, budgetCode, subCode);
+        if (!mapped) return r;
+        const cells = [...r.cells];
+        cells[evidenceIdx] = mapped;
+        const updated: ImportRow = { ...r, cells };
+        const result = importRowToTransaction(updated, projectId, defaultLedgerId, i);
+        updated.error = result.error;
+        return updated;
+      })
+      : updateImportRowAt(rows, rowIdx, (r) => {
+        const budgetCode = r.cells[budgetCodeIdx] || '';
+        const subCode = r.cells[subCodeIdx] || '';
+        const mapped = resolveEvidenceRequiredDesc(evidenceRequiredMap, budgetCode, subCode);
+        if (!mapped) return r;
+        const cells = [...r.cells];
+        cells[evidenceIdx] = mapped;
+        const updated: ImportRow = { ...r, cells };
+        const result = importRowToTransaction(updated, projectId, defaultLedgerId, rowIdx);
+        updated.error = result.error;
+        return updated;
+      });
     onChange(next);
   }, [rows, onChange, projectId, defaultLedgerId, budgetCodeIdx, subCodeIdx, evidenceIdx, evidenceRequiredMap]);
 
@@ -2817,7 +2731,18 @@ function ImportEditor({
             </tr>
           </thead>
           <tbody>
-            {rows.map((row, rowIdx) => (
+            {shouldVirtualizeRows && visibleRowWindow.paddingTop > 0 && (
+              <tr aria-hidden="true">
+                <td
+                  colSpan={SETTLEMENT_COLUMNS.length + 1}
+                  style={{ height: visibleRowWindow.paddingTop }}
+                  className="border-b-0 p-0"
+                />
+              </tr>
+            )}
+            {visibleRows.map((row, visibleIndex) => {
+              const rowIdx = visibleRowWindow.startIndex + visibleIndex;
+              return (
               <MemoizedImportEditorRow
                 key={`${row.tempId}-${rowIdx}`}
                 row={row}
@@ -2857,7 +2782,17 @@ function ImportEditor({
                 noIdx={noIdx}
                 colWidths={colWidths}
               />
-            ))}
+              );
+            })}
+            {shouldVirtualizeRows && visibleRowWindow.paddingBottom > 0 && (
+              <tr aria-hidden="true">
+                <td
+                  colSpan={SETTLEMENT_COLUMNS.length + 1}
+                  style={{ height: visibleRowWindow.paddingBottom }}
+                  className="border-b-0 p-0"
+                />
+              </tr>
+            )}
             {rows.length === 0 && (
               <tr>
                 <td
@@ -2915,195 +2850,50 @@ function ImportEditor({
           setUploadDialogOpen(true);
         }}
       />
-      <Dialog
-        open={uploadDialogOpen}
-        onOpenChange={(open) => {
-          setUploadDialogOpen(open);
-          if (!open && !uploadingEvidence) {
-            clearUploadDrafts();
-          }
-        }}
-      >
-        <DialogContent className="h-[92vh] w-[96vw] max-w-[96vw] gap-0 overflow-hidden p-0 sm:max-w-[96vw]">
-          <DialogHeader className="border-b px-6 py-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <DialogTitle>증빙 업로드 검토</DialogTitle>
-                <DialogDescription>
-                  좌측에서 파일을 확인하고, 우측에서 자동 분류 결과를 수정한 뒤 업로드하세요.
-                </DialogDescription>
-              </div>
-              <Button type="button" variant="outline" size="sm" onClick={triggerEvidenceFilePicker} disabled={uploadingEvidence}>
-                파일 선택
-              </Button>
-            </div>
-          </DialogHeader>
-          <div className="flex-1 overflow-hidden px-6 py-4">
-            <div className="grid h-full gap-4 lg:grid-cols-[minmax(0,1.4fr)_380px]">
-            <div className="min-h-0 rounded-xl border bg-slate-50/60 p-3">
-              {activeUploadDraft ? (
-                <div className="flex h-full min-h-0 flex-col gap-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="truncate text-[12px] font-semibold">{activeUploadDraft.file.name}</p>
-                      <p className="text-[11px] text-muted-foreground">
-                        {(activeUploadDraft.file.size / 1024).toFixed(1)} KB · {activeUploadDraft.file.type || 'application/octet-stream'}
-                      </p>
-                    </div>
-                    <span className="rounded-full border bg-background px-2 py-1 text-[10px] text-muted-foreground">
-                      파일명 자동분류
-                    </span>
-                  </div>
-                  <div className="rounded-lg border bg-background px-3 py-2 text-[11px]">
-                    <p className="text-[10px] font-semibold text-muted-foreground">원본 파일명</p>
-                    <p className="mt-1 break-all">{activeUploadDraft.file.name}</p>
-                  </div>
-                  <div className="flex-1 overflow-hidden rounded-lg border bg-background">
-                    {activeUploadDraft.previewType === 'pdf' ? (
-                      <iframe
-                        title={activeUploadDraft.file.name}
-                        src={activeUploadDraft.objectUrl}
-                        className="h-full min-h-[420px] w-full"
-                      />
-                    ) : activeUploadDraft.previewType === 'image' ? (
-                      <img
-                        src={activeUploadDraft.objectUrl}
-                        alt={activeUploadDraft.file.name}
-                        className="h-full min-h-[420px] w-full object-contain"
-                      />
-                    ) : (
-                      <div className="flex h-full min-h-[420px] items-center justify-center px-6 text-center text-[12px] text-muted-foreground">
-                        브라우저 미리보기를 지원하지 않는 형식입니다. 업로드 후 Drive 링크에서 원본을 확인하세요.
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <div className="flex h-full min-h-[420px] flex-col items-center justify-center gap-3 text-[12px] text-muted-foreground">
-                  <p>업로드할 파일을 선택하세요.</p>
-                  <Button type="button" variant="outline" size="sm" onClick={triggerEvidenceFilePicker} disabled={uploadingEvidence}>
-                    파일 선택
-                  </Button>
-                </div>
-              )}
-            </div>
-            <div className="flex min-h-0 flex-col gap-3">
-              <div className="rounded-xl border bg-background p-3">
-                <p className="text-[12px] font-semibold">파싱 결과</p>
-                <p className="mt-1 text-[11px] text-muted-foreground">
-                  파일명과 운영 규칙으로 자동 분류했습니다. 사람이 최종 확인해 주세요.
-                </p>
-              </div>
-              <div className="min-h-0 flex-1 space-y-2 overflow-auto pr-1">
-                {uploadDrafts.map((draft) => (
-                  <div
-                    key={draft.id}
-                    role="button"
-                    tabIndex={0}
-                    className={`w-full rounded-xl border p-3 text-left transition-colors ${
-                      activeUploadDraft?.id === draft.id
-                        ? 'border-teal-400 bg-teal-50/70'
-                        : 'border-border bg-background hover:bg-muted/40'
-                    }`}
-                    onClick={() => setActiveUploadDraftId(draft.id)}
-                    onKeyDown={(event) => {
-                      if (event.target !== event.currentTarget) return;
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        setActiveUploadDraftId(draft.id);
-                      }
-                    }}
-                  >
-                    <p className="truncate text-[12px] font-medium">{draft.file.name}</p>
-                    <p className="mt-1 text-[10px] text-muted-foreground">
-                      자동분류: {draft.parserCategory}
-                    </p>
-                    <div className="mt-2 space-y-1.5">
-                      <div>
-                        <label className="mb-1 block text-[10px] text-muted-foreground">권장 파일명</label>
-                        <div className="rounded-md border bg-muted/30 px-2 py-1.5 text-[10px] break-all">
-                          {draft.suggestedFileName}
-                        </div>
-                      </div>
-                      <div>
-                        <label className="mb-1 block text-[10px] text-muted-foreground">최종 업로드 파일명</label>
-                        <input
-                          type="text"
-                          value={draft.reviewedFileName}
-                          className="h-8 w-full rounded-md border bg-background px-2 text-[11px]"
-                          onClick={(event) => event.stopPropagation()}
-                          onChange={(event) => {
-                            const nextFileName = event.target.value;
-                            setUploadDrafts((current) => current.map((item) => (
-                              item.id === draft.id
-                                ? { ...item, reviewedFileName: nextFileName }
-                                : item
-                            )));
-                          }}
-                        />
-                        <div className="mt-1 flex justify-end">
-                          <button
-                            type="button"
-                            className="text-[10px] text-teal-700 underline underline-offset-2"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              setUploadDrafts((current) => current.map((item) => (
-                                item.id === draft.id
-                                  ? { ...item, reviewedFileName: item.suggestedFileName }
-                                  : item
-                              )));
-                            }}
-                          >
-                            권장안 다시 적용
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="mt-2">
-                      <label className="mb-1 block text-[10px] text-muted-foreground">문서 종류</label>
-                      <select
-                        value={draft.category}
-                        className="h-8 w-full rounded-md border bg-background px-2 text-[11px]"
-                        onClick={(event) => event.stopPropagation()}
-                        onChange={(event) => {
-                          const nextCategory = event.target.value;
-                          setUploadDrafts((current) => current.map((item) => (
-                            item.id === draft.id
-                              ? { ...item, category: nextCategory }
-                              : item
-                          )));
-                        }}
-                      >
-                        {EVIDENCE_DOCUMENT_CATEGORIES.map((category) => (
-                          <option key={category} value={category}>
-                            {category}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-          </div>
-          <DialogFooter className="border-t px-6 py-4">
-            <Button
-              variant="outline"
-              onClick={() => {
-                setUploadDialogOpen(false);
+      {uploadDialogOpen && (
+        <Suspense fallback={null}>
+          <SettlementEvidenceUploadDialog
+            open={uploadDialogOpen}
+            uploadDrafts={uploadDrafts}
+            activeUploadDraftId={activeUploadDraftId}
+            uploadingEvidence={uploadingEvidence}
+            onOpenChange={(open) => {
+              setUploadDialogOpen(open);
+              if (!open && !uploadingEvidence) {
                 clearUploadDrafts();
-              }}
-              disabled={uploadingEvidence}
-            >
-              취소
-            </Button>
-            <Button onClick={() => void confirmEvidenceUpload()} disabled={uploadingEvidence || uploadDrafts.length === 0}>
-              {uploadingEvidence ? '업로드 중...' : `선택한 ${uploadDrafts.length}건 업로드`}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+              }
+            }}
+            onPickFiles={triggerEvidenceFilePicker}
+            onCancel={() => {
+              setUploadDialogOpen(false);
+              clearUploadDrafts();
+            }}
+            onConfirm={() => void confirmEvidenceUpload()}
+            onSelectDraft={setActiveUploadDraftId}
+            onUpdateDraftCategory={(draftId, nextCategory) => {
+              setUploadDrafts((current) => current.map((item) => (
+                item.id === draftId
+                  ? { ...item, category: nextCategory }
+                  : item
+              )));
+            }}
+            onUpdateDraftFileName={(draftId, nextFileName) => {
+              setUploadDrafts((current) => current.map((item) => (
+                item.id === draftId
+                  ? { ...item, reviewedFileName: nextFileName }
+                  : item
+              )));
+            }}
+            onResetDraftFileName={(draftId) => {
+              setUploadDrafts((current) => current.map((item) => (
+                item.id === draftId
+                  ? { ...item, reviewedFileName: item.suggestedFileName }
+                  : item
+              )));
+            }}
+          />
+        </Suspense>
+      )}
       {mappingOpen && (
         <div className="fixed inset-0 z-[80] bg-black/40 flex items-center justify-center p-4 pointer-events-auto">
           <div className="w-full max-w-3xl bg-background rounded-lg border shadow-lg flex flex-col max-h-[80vh] pointer-events-auto">
@@ -3154,16 +2944,20 @@ function ImportEditor({
           </div>
         </div>
       )}
-      <CommentThreadSheet
-        anchor={activeCommentAnchor}
-        comments={activeCellComments}
-        open={!!activeCommentAnchor}
-        projectId={projectId}
-        currentUserId={currentUserId}
-        currentUserName={currentUserName}
-        onClose={() => setActiveCommentAnchor(null)}
-        onAddComment={onAddComment}
-      />
+      {activeCommentAnchor && (
+        <Suspense fallback={null}>
+          <SettlementCommentThreadSheet
+            anchor={activeCommentAnchor}
+            comments={activeCellComments}
+            open={!!activeCommentAnchor}
+            projectId={projectId}
+            currentUserId={currentUserId}
+            currentUserName={currentUserName}
+            onClose={() => setActiveCommentAnchor(null)}
+            onAddComment={onAddComment}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

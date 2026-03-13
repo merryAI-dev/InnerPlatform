@@ -12,7 +12,7 @@ import {
 import { usePortalStore } from '../../data/portal-store';
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { useAuth } from '../../data/auth-store';
-import { type EvidenceUploadSelection, SettlementLedgerPage } from '../cashflow/SettlementLedgerPage';
+import type { EvidenceUploadSelection } from '../cashflow/SettlementLedgerPage';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import type { CashflowWeekSheet, Transaction, TransactionState } from '../../data/types';
@@ -38,6 +38,9 @@ import { type ImportRow } from '../../platform/settlement-csv';
 import { readDevAuthHarnessConfig } from '../../platform/dev-harness';
 const GoogleSheetMigrationWizard = lazy(
   () => import('./GoogleSheetMigrationWizard').then((module) => ({ default: module.GoogleSheetMigrationWizard })),
+);
+const SettlementLedgerPage = lazy(
+  () => import('../cashflow/SettlementLedgerPage').then((module) => ({ default: module.SettlementLedgerPage })),
 );
 
 function normalizeBudgetLabel(value: string): string {
@@ -585,43 +588,54 @@ export function PortalWeeklyExpensePage() {
         pmName={portalUser?.name || 'PM'}
         pmUid={portalUser?.id || ''}
       />
-      <SettlementLedgerPage
-        projectId={projectId}
-        projectName={projectName}
-        transactions={transactions}
-        defaultLedgerId={defaultLedgerId}
-        onAddTransaction={addTransaction}
-        onUpdateTransaction={updateTransaction}
-        authorOptions={authorOptions}
-        budgetCodeBook={effectiveBudgetCodeBook}
-        hideYearControls
-        hideCountBadge
-        autoSaveSheet
-        evidenceRequiredMap={evidenceRequiredMap}
-        onSaveEvidenceRequiredMap={saveEvidenceRequiredMap}
-        sheetRows={expenseSheetRows}
-        onSaveSheetRows={saveExpenseSheetRows}
-        onSubmitWeek={async ({ yearMonth, weekNo, txIds }) => {
-          try {
-            await submitWeekAsPm({ projectId, yearMonth, weekNo });
-            for (const txId of txIds) changeTransactionState(txId, 'SUBMITTED');
-            toast.success(`${yearMonth} ${weekNo}주 제출 처리 완료`);
-          } catch (err) {
-            toast.error('주간 제출 처리에 실패했습니다');
-            throw err;
-          }
-        }}
-        onChangeTransactionState={(txId, newState, reason) => changeTransactionState(txId, newState, reason)}
-        currentUserName={portalUser?.name || 'PM'}
-        currentUserId={portalUser?.id || 'pm'}
-        userRole={ledgerUserRole}
-        comments={comments}
-        onAddComment={addComment}
-        onProvisionEvidenceDrive={provisionEvidenceDrive}
-        onSyncEvidenceDrive={syncEvidenceDrive}
-        onUploadEvidenceDrive={uploadEvidenceDrive}
-        onEnsureTransactionPersisted={ensureTransactionPersisted}
-      />
+      <Suspense
+        fallback={(
+          <div className="rounded-xl border bg-background px-4 py-6">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              사업비 시트를 불러오는 중입니다…
+            </div>
+          </div>
+        )}
+      >
+        <SettlementLedgerPage
+          projectId={projectId}
+          projectName={projectName}
+          transactions={transactions}
+          defaultLedgerId={defaultLedgerId}
+          onAddTransaction={addTransaction}
+          onUpdateTransaction={updateTransaction}
+          authorOptions={authorOptions}
+          budgetCodeBook={effectiveBudgetCodeBook}
+          hideYearControls
+          hideCountBadge
+          autoSaveSheet
+          evidenceRequiredMap={evidenceRequiredMap}
+          onSaveEvidenceRequiredMap={saveEvidenceRequiredMap}
+          sheetRows={expenseSheetRows}
+          onSaveSheetRows={saveExpenseSheetRows}
+          onSubmitWeek={async ({ yearMonth, weekNo, txIds }) => {
+            try {
+              await submitWeekAsPm({ projectId, yearMonth, weekNo });
+              for (const txId of txIds) changeTransactionState(txId, 'SUBMITTED');
+              toast.success(`${yearMonth} ${weekNo}주 제출 처리 완료`);
+            } catch (err) {
+              toast.error('주간 제출 처리에 실패했습니다');
+              throw err;
+            }
+          }}
+          onChangeTransactionState={(txId, newState, reason) => changeTransactionState(txId, newState, reason)}
+          currentUserName={portalUser?.name || 'PM'}
+          currentUserId={portalUser?.id || 'pm'}
+          userRole={ledgerUserRole}
+          comments={comments}
+          onAddComment={addComment}
+          onProvisionEvidenceDrive={provisionEvidenceDrive}
+          onSyncEvidenceDrive={syncEvidenceDrive}
+          onUploadEvidenceDrive={uploadEvidenceDrive}
+          onEnsureTransactionPersisted={ensureTransactionPersisted}
+        />
+      </Suspense>
       {googleSheetImportOpen && (
         <Suspense fallback={null}>
           <GoogleSheetMigrationWizard
