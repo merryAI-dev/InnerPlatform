@@ -27,7 +27,6 @@ import { buildSettlementActualSyncPayload } from '../../platform/settlement-shee
 import { computeSettlementGridWindowRange } from '../../platform/settlement-grid-windowing';
 import { updateImportRowAt } from '../../platform/settlement-grid-state';
 import {
-  clearAllEditableCells,
   clearSelectionCells,
   DEFAULT_PROTECTED_SETTLEMENT_HEADERS,
   deleteSelectedRows,
@@ -39,6 +38,7 @@ import {
 import {
   buildSettlementDerivationContext,
   resolveEvidenceRequiredDesc,
+  isSettlementRowMeaningful,
 } from '../../platform/settlement-sheet-prepare';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -1613,20 +1613,24 @@ function ImportEditor({
   }) => Promise<string | null>;
   sourceTransactions?: Transaction[];
 }) {
-  const errorCount = rows.filter((r) => r.error).length;
-  const validCount = rows.length - errorCount;
+  const meaningfulRows = useMemo(
+    () => rows.filter((row) => isSettlementRowMeaningful(row)),
+    [rows],
+  );
+  const errorCount = meaningfulRows.filter((r) => r.error).length;
+  const validCount = meaningfulRows.length - errorCount;
   const noIdx = useMemo(
     () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === 'No.'),
     [],
   );
   const missingCount = useMemo(() => {
-    return rows.filter((row) => {
+    return meaningfulRows.filter((row) => {
       const cells = row.cells || [];
       const hasAnyValue = cells.some((cell, idx) => idx !== noIdx && String(cell || '').trim() !== '');
       if (!hasAnyValue) return false;
       return cells.some((cell, idx) => idx !== noIdx && String(cell || '').trim() === '');
     }).length;
-  }, [rows, noIdx]);
+  }, [meaningfulRows, noIdx]);
   const budgetCodeIdx = useMemo(
     () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '비목'),
     [],
@@ -2147,24 +2151,16 @@ function ImportEditor({
   }, [commitRows, getActiveSelectionBounds, getPreferredEditableCol, pushUndoSnapshot, rows]);
 
   const clearAllRows = useCallback(() => {
-    const nextRows = clearAllEditableCells(rows, {
-      protectedColumnIndexes: protectedClearColumnIndexes,
-    });
-    if (nextRows === rows) {
-      toast.message('비울 수 있는 내용이 없습니다.');
+    if (rows.length === 0) {
+      toast.message('초기화할 행이 없습니다.');
       return false;
     }
     pushUndoSnapshot();
     setSelection(null);
-    commitRows(
-      nextRows,
-      nextRows.length > 0
-        ? { rowIdx: 0, colIdx: getPreferredEditableCol() }
-        : null,
-    );
-    toast.success('현재 탭의 입력값을 비웠습니다.');
+    commitRows([], null);
+    toast.success('현재 탭을 초기화했습니다.');
     return true;
-  }, [commitRows, getPreferredEditableCol, protectedClearColumnIndexes, pushUndoSnapshot, rows]);
+  }, [commitRows, pushUndoSnapshot, rows]);
 
   const applyPaste = useCallback(
     (startRow: number, startCol: number, text: string) => {
@@ -2797,9 +2793,9 @@ function ImportEditor({
       <AlertDialog open={clearAllConfirmOpen} onOpenChange={setClearAllConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>현재 탭 입력값을 모두 비울까요?</AlertDialogTitle>
+            <AlertDialogTitle>현재 탭을 완전히 초기화할까요?</AlertDialogTitle>
             <AlertDialogDescription>
-              행 구조는 유지하고 일반 입력값만 비웁니다. 증빙/드라이브 관련 보호 컬럼은 유지됩니다.
+              현재 탭의 모든 행을 제거하고 빈 상태로 저장합니다. 되돌리기를 누르기 전까지는 기존 데이터가 복구되지 않습니다.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -2810,7 +2806,7 @@ function ImportEditor({
                 setClearAllConfirmOpen(false);
               }}
             >
-              전체 비우기
+              탭 초기화
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
