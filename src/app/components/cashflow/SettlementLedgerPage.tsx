@@ -36,6 +36,10 @@ import {
   deriveSettlementRows,
   isSettlementCascadeColumn,
 } from '../../platform/settlement-row-derivation';
+import {
+  buildSettlementDerivationContext,
+  resolveEvidenceRequiredDesc,
+} from '../../platform/settlement-sheet-prepare';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Checkbox } from '../ui/checkbox';
@@ -228,19 +232,6 @@ const TX_STATE_BADGE: Record<TransactionState, { label: string; cls: string }> =
 
 function isEditable(state: TransactionState | undefined): boolean {
   return !state || state === 'DRAFT' || state === 'REJECTED';
-}
-
-function resolveEvidenceRequiredDesc(
-  map: Record<string, string> | undefined,
-  budgetCode: string,
-  subCode: string,
-): string {
-  if (!map) return '';
-  const direct = map[`${budgetCode}|${subCode}`] || map[subCode] || map[budgetCode] || '';
-  if (direct) return direct;
-  const normBudget = normalizeBudgetLabel(budgetCode);
-  const normSub = normalizeBudgetLabel(subCode);
-  return map[`${normBudget}|${normSub}`] || map[normSub] || map[normBudget] || '';
 }
 
 function resolveWeekFromLabel(label: string, yearWeeks: MonthMondayWeek[]): MonthMondayWeek | undefined {
@@ -1955,35 +1946,10 @@ function ImportEditor({
     }
   }, [clearUploadDrafts, onUploadEvidenceDriveById, uploadDrafts, uploadTargetTxId]);
 
-  const settlementDerivationContext = useMemo(() => ({
-    projectId,
-    defaultLedgerId,
-    dateIdx,
-    weekIdx,
-    depositIdx,
-    refundIdx,
-    expenseIdx,
-    vatInIdx,
-    bankAmountIdx,
-    balanceIdx,
-    evidenceIdx,
-    evidenceCompletedIdx,
-    evidencePendingIdx,
-  }), [
-    projectId,
-    defaultLedgerId,
-    dateIdx,
-    weekIdx,
-    depositIdx,
-    refundIdx,
-    expenseIdx,
-    vatInIdx,
-    bankAmountIdx,
-    balanceIdx,
-    evidenceIdx,
-    evidenceCompletedIdx,
-    evidencePendingIdx,
-  ]);
+  const settlementDerivationContext = useMemo(
+    () => buildSettlementDerivationContext(projectId, defaultLedgerId),
+    [projectId, defaultLedgerId],
+  );
 
   const updateCell = useCallback(
     (rowIdx: number, colIdx: number, value: string) => {

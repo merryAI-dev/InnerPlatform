@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   addCommentViaBff,
   addEvidenceViaBff,
+  analyzeGoogleSheetImportViaBff,
   changeTransactionStateViaBff,
   linkProjectEvidenceDriveRootViaBff,
   overrideTransactionEvidenceDriveCategoriesViaBff,
@@ -440,5 +441,58 @@ describe('platform-bff-client', () => {
       timeoutMs: 20000,
     }));
     expect(preview.selectedSheetName).toBe('주간정산');
+  });
+
+  it('calls google sheet import analysis endpoint', async () => {
+    const client = {
+      post: vi.fn(async () => ({
+        data: {
+          provider: 'anthropic',
+          model: 'claude-sonnet-4-20250514',
+          summary: '사용내역 탭으로 보입니다.',
+          confidence: 'high',
+          likelyTarget: 'expense_sheet',
+          usageTips: ['상단 헤더를 먼저 확인하세요.'],
+          warnings: ['2줄 헤더 여부를 확인하세요.'],
+          nextActions: ['표본 3행을 먼저 검증하세요.'],
+          suggestedMappings: [
+            {
+              sourceHeader: '입금합계 > 입금액',
+              platformField: '입금합계/입금액',
+              confidence: 'high',
+              reason: '입금 금액 계열입니다.',
+            },
+          ],
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    };
+
+    const analysis = await analyzeGoogleSheetImportViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm' },
+      projectId: 'p001',
+      spreadsheetTitle: '2026 사업비 관리 시트',
+      selectedSheetName: '사용내역',
+      matrix: [
+        ['작성자', '입금합계', '사업팀'],
+        ['No.', '입금액', '지급처'],
+      ],
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/projects/p001/google-sheet-import/analyze', expect.objectContaining({
+      body: {
+        spreadsheetTitle: '2026 사업비 관리 시트',
+        selectedSheetName: '사용내역',
+        matrix: [
+          ['작성자', '입금합계', '사업팀'],
+          ['No.', '입금액', '지급처'],
+        ],
+      },
+      timeoutMs: 25000,
+    }));
+    expect(analysis.likelyTarget).toBe('expense_sheet');
   });
 });

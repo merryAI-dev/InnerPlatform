@@ -83,6 +83,26 @@ export interface GoogleSheetImportPreviewResult {
   matrix: string[][];
 }
 
+export interface GoogleSheetMigrationAnalysisSuggestion {
+  sourceHeader: string;
+  platformField: string;
+  confidence: 'high' | 'medium' | 'low';
+  reason: string;
+}
+
+export interface GoogleSheetMigrationAnalysisResult {
+  provider: 'anthropic' | 'heuristic';
+  model: string;
+  summary: string;
+  confidence: 'high' | 'medium' | 'low';
+  likelyTarget: string;
+  usageTips: string[];
+  warnings: string[];
+  nextActions: string[];
+  suggestedMappings: GoogleSheetMigrationAnalysisSuggestion[];
+  headerPreview?: string[];
+}
+
 export interface ProvisionTransactionEvidenceDriveResult {
   transactionId: string;
   projectId: string;
@@ -370,6 +390,32 @@ export async function previewGoogleSheetImportViaBff(params: {
         ...(params.sheetName ? { sheetName: params.sheetName } : {}),
       },
       timeoutMs: 20000,
+    },
+  );
+  return response.data;
+}
+
+export async function analyzeGoogleSheetImportViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  spreadsheetTitle?: string;
+  selectedSheetName: string;
+  matrix: string[][];
+  client?: PlatformApiClientLike;
+}): Promise<GoogleSheetMigrationAnalysisResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<GoogleSheetMigrationAnalysisResult>(
+    `/api/v1/projects/${params.projectId}/google-sheet-import/analyze`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: {
+        ...(params.spreadsheetTitle ? { spreadsheetTitle: params.spreadsheetTitle } : {}),
+        selectedSheetName: params.selectedSheetName,
+        matrix: params.matrix,
+      },
+      timeoutMs: 25000,
     },
   );
   return response.data;

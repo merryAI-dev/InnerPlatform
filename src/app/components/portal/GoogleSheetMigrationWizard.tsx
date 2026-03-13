@@ -10,6 +10,8 @@ import { toast } from 'sonner';
 import type { BudgetCodeEntry, BudgetCodeRename, BudgetPlanRow } from '../../data/types';
 import {
   type ActorLike,
+  analyzeGoogleSheetImportViaBff,
+  type GoogleSheetMigrationAnalysisResult,
   type GoogleSheetImportPreviewResult,
   previewGoogleSheetImportViaBff,
 } from '../../lib/platform-bff-client';
@@ -49,6 +51,8 @@ import { Input } from '../ui/input';
 type GoogleSheetWizardStep = 'source' | 'sheet' | 'review' | 'apply';
 
 type BankStatementImportSheet = ReturnType<typeof parseBankStatementMatrix>;
+const GOOGLE_SHEET_AI_MAX_ROWS = 40;
+const GOOGLE_SHEET_AI_MAX_COLS = 24;
 
 interface GoogleSheetSummaryStat {
   label: string;
@@ -123,6 +127,12 @@ function resolveApiErrorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
+function buildAnalysisMatrixSample(matrix: string[][]): string[][] {
+  return (matrix || [])
+    .slice(0, GOOGLE_SHEET_AI_MAX_ROWS)
+    .map((row) => (row || []).slice(0, GOOGLE_SHEET_AI_MAX_COLS).map((cell) => String(cell ?? '')));
+}
+
 export function GoogleSheetMigrationWizard({
   open,
   onOpenChange,
@@ -147,6 +157,10 @@ export function GoogleSheetMigrationWizard({
   const [preview, setPreview] = useState<GoogleSheetImportPreviewResult | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [applying, setApplying] = useState(false);
+  const [analysis, setAnalysis] = useState<GoogleSheetMigrationAnalysisResult | null>(null);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [analysisError, setAnalysisError] = useState('');
+  const [analysisKey, setAnalysisKey] = useState('');
 
   useEffect(() => {
     if (open) return;
@@ -155,6 +169,10 @@ export function GoogleSheetMigrationWizard({
     setPreview(null);
     setPreviewing(false);
     setApplying(false);
+    setAnalysis(null);
+    setAnalysisLoading(false);
+    setAnalysisError('');
+    setAnalysisKey('');
   }, [open]);
 
   const selectedDescriptor = useMemo(
@@ -174,7 +192,7 @@ export function GoogleSheetMigrationWizard({
           descriptor,
           applySupported: mergePlan.summary.importedCount > 0,
           applyButtonLabel: `${activeSheetName}에 안전 반영`,
-          applyHint: '빈 셀은 기존 값을 지우지 않고, 드라이브/업로드 연동 컬럼은 유지합니다.',
+          applyHint: '빈 셀은 기존 값을 지우지 않고, Drive 링크 컬럼은 유지합니다.',
           summaryStats: [
             { label: '가져온 행', value: `${mergePlan.summary.importedCount}건` },
             { label: '신규 추가', value: `${mergePlan.summary.createCount}건` },
@@ -268,6 +286,48 @@ export function GoogleSheetMigrationWizard({
     selectedDescriptor,
   ]);
 
+  useEffect(() => {
+    if (!preview || step === 'source') return;
+    const key = `${preview.spreadsheetId}:${preview.selectedSheetName}`;
+    if (analysisLoading || analysisKey === key) return;
+
+    let cancelled = false;
+    setAnalysisLoading(true);
+    setAnalysisError('');
+
+    void analyzeGoogleSheetImportViaBff({
+      tenantId: orgId,
+      actor: bffActor,
+      projectId,
+      spreadsheetTitle: preview.spreadsheetTitle,
+      selectedSheetName: preview.selectedSheetName,
+      matrix: buildAnalysisMatrixSample(preview.matrix),
+    }).then((result) => {
+      if (cancelled) return;
+      setAnalysis(result);
+      setAnalysisKey(key);
+    }).catch((error) => {
+      if (cancelled) return;
+      setAnalysis(null);
+      setAnalysisError(resolveApiErrorMessage(error, 'AI migration 분석에 실패했습니다.'));
+    }).finally(() => {
+      if (cancelled) return;
+      setAnalysisLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    analysisKey,
+    analysisLoading,
+    bffActor,
+    orgId,
+    preview,
+    projectId,
+    step,
+  ]);
+
   const previewGoogleSheetImport = async (sheetName?: string) => {
     const trimmedLink = link.trim();
     if (!trimmedLink) {
@@ -278,6 +338,9 @@ export function GoogleSheetMigrationWizard({
     if (devHarnessEnabled && trimmedLink === DEV_GOOGLE_SHEET_SAMPLE_VALUE) {
       const result = buildDevGoogleSheetImportPreview(sheetName);
       setPreview(result);
+      setAnalysis(null);
+      setAnalysisError('');
+      setAnalysisKey('');
       setLink(trimmedLink);
       setStep(sheetName ? 'review' : 'sheet');
       toast.success(`개발용 샘플 미리보기 완료: ${result.selectedSheetName}`);
@@ -298,11 +361,17 @@ export function GoogleSheetMigrationWizard({
         ...(sheetName ? { sheetName } : {}),
       });
       setPreview(result);
+      setAnalysis(null);
+      setAnalysisError('');
+      setAnalysisKey('');
       setLink(trimmedLink);
       setStep(sheetName ? 'review' : 'sheet');
       toast.success(`Google Sheets 미리보기 완료: ${result.selectedSheetName}`);
     } catch (error) {
       setPreview(null);
+      setAnalysis(null);
+      setAnalysisError('');
+      setAnalysisKey('');
       toast.error(resolveApiErrorMessage(error, 'Google Sheets 미리보기에 실패했습니다.'));
     } finally {
       setPreviewing(false);
@@ -391,11 +460,17 @@ export function GoogleSheetMigrationWizard({
       onLinkChange={(value) => {
         setLink(value);
         setPreview(null);
+        setAnalysis(null);
+        setAnalysisError('');
+        setAnalysisKey('');
         setStep('source');
       }}
       preview={preview}
       activeSheetName={activeSheetName}
       reviewState={reviewState}
+      analysis={analysis}
+      analysisLoading={analysisLoading}
+      analysisError={analysisError}
       devHarnessEnabled={devHarnessEnabled}
       previewing={previewing}
       applying={applying}
@@ -416,6 +491,9 @@ function GoogleSheetImportDialog({
   preview,
   activeSheetName,
   reviewState,
+  analysis,
+  analysisLoading,
+  analysisError,
   devHarnessEnabled,
   previewing,
   applying,
@@ -432,6 +510,9 @@ function GoogleSheetImportDialog({
   preview: GoogleSheetImportPreviewResult | null;
   activeSheetName: string;
   reviewState: GoogleSheetMigrationReviewState | null;
+  analysis: GoogleSheetMigrationAnalysisResult | null;
+  analysisLoading: boolean;
+  analysisError: string;
   devHarnessEnabled: boolean;
   previewing: boolean;
   applying: boolean;
@@ -550,7 +631,7 @@ function GoogleSheetImportDialog({
                       <p className="font-semibold">안전 규칙</p>
                       <ul className="mt-2 space-y-1 text-amber-900/90">
                         <li>빈 셀은 기존 값을 지우지 않습니다.</li>
-                        <li>증빙 드라이브/업로드 결과는 덮어쓰지 않습니다.</li>
+                        <li>증빙 Drive 링크 컬럼은 덮어쓰지 않습니다.</li>
                         <li>탭 성격이 다른 경우 preview만 허용하고 반영은 막습니다.</li>
                       </ul>
                     </div>
@@ -592,6 +673,12 @@ function GoogleSheetImportDialog({
                       </div>
                     )}
                   </div>
+                  <div className="rounded-2xl border border-sky-200 bg-sky-50 p-5 text-[12px] text-sky-950">
+                    <p className="font-semibold">AI migration assistant</p>
+                    <p className="mt-1 text-sky-900/85">
+                      review 단계에서는 Claude가 실제 탭 구조를 읽고, 컬럼 매핑 후보와 반영 전 체크 포인트를 같이 제안합니다.
+                    </p>
+                  </div>
                 </div>
               )}
 
@@ -606,6 +693,12 @@ function GoogleSheetImportDialog({
                     </div>
                     <Badge variant="outline" className="text-[10px]">{selectedDescriptor.readinessLabel}</Badge>
                   </div>
+                  <GoogleSheetMigrationAiInlineCard
+                    analysis={analysis}
+                    analysisLoading={analysisLoading}
+                    analysisError={analysisError}
+                    selectedSheetName={selectedSheetName}
+                  />
                   <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                     {(preview?.availableSheets || []).map((sheet) => {
                       const descriptor = describeGoogleSheetMigrationTarget(sheet.title);
@@ -858,6 +951,12 @@ function GoogleSheetImportDialog({
                     <p className="mt-1 text-slate-600">현재 active expense sheet: {activeSheetName}</p>
                   </div>
                 )}
+                <GoogleSheetMigrationAiPanel
+                  analysis={analysis}
+                  analysisLoading={analysisLoading}
+                  analysisError={analysisError}
+                  step={step}
+                />
               </div>
               <div className="mt-5 border-t pt-4 2xl:mt-auto">
                 <div className="flex items-center gap-2">
@@ -906,6 +1005,156 @@ function SummaryStat({ label, value }: { label: string; value: string }) {
     <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
       <p className="text-[10px] text-muted-foreground">{label}</p>
       <p className="mt-1 text-[12px] font-semibold text-slate-900">{value}</p>
+    </div>
+  );
+}
+
+function GoogleSheetMigrationAiInlineCard({
+  analysis,
+  analysisLoading,
+  analysisError,
+  selectedSheetName,
+}: {
+  analysis: GoogleSheetMigrationAnalysisResult | null;
+  analysisLoading: boolean;
+  analysisError: string;
+  selectedSheetName: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-4 text-[12px] text-sky-950">
+      <div className="flex items-center justify-between gap-2">
+        <p className="font-semibold">AI 빠른 분석</p>
+        {analysis && (
+          <Badge variant={analysis.provider === 'anthropic' ? 'default' : 'outline'} className="text-[10px]">
+            {analysis.provider === 'anthropic' ? 'Claude 분석' : '규칙 기반'}
+          </Badge>
+        )}
+      </div>
+      {!selectedSheetName ? (
+        <p className="mt-2 text-sky-900/85">탭을 하나 선택하면 AI가 구조와 반영 위험을 바로 정리합니다.</p>
+      ) : analysisLoading ? (
+        <div className="mt-2 flex items-center gap-2 text-sky-900/85">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          <span>{selectedSheetName} 탭을 AI가 읽고 있습니다…</span>
+        </div>
+      ) : analysisError ? (
+        <p className="mt-2 text-amber-900">{analysisError}</p>
+      ) : analysis ? (
+        <div className="mt-2 space-y-2">
+          <p className="font-medium">{analysis.summary}</p>
+          {analysis.warnings[0] && (
+            <p className="text-[11px] text-amber-900">주의: {analysis.warnings[0]}</p>
+          )}
+          {analysis.nextActions[0] && (
+            <p className="text-[11px] text-sky-900/85">추천: {analysis.nextActions[0]}</p>
+          )}
+        </div>
+      ) : (
+        <p className="mt-2 text-sky-900/85">선택한 탭에 대한 AI 분석을 준비 중입니다.</p>
+      )}
+    </div>
+  );
+}
+
+function GoogleSheetMigrationAiPanel({
+  analysis,
+  analysisLoading,
+  analysisError,
+  step,
+}: {
+  analysis: GoogleSheetMigrationAnalysisResult | null;
+  analysisLoading: boolean;
+  analysisError: string;
+  step: GoogleSheetWizardStep;
+}) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-[11px]">
+      <div className="flex items-center justify-between gap-2">
+        <p className="font-medium text-slate-900">AI migration assistant</p>
+        {analysis && (
+          <Badge variant={analysis.provider === 'anthropic' ? 'default' : 'outline'} className="text-[10px]">
+            {analysis.provider === 'anthropic' ? 'Claude 분석' : '규칙 기반'}
+          </Badge>
+        )}
+      </div>
+      {step === 'source' ? (
+        <p className="mt-2 text-slate-600">
+          시트를 불러오면 AI가 탭 구조를 읽고, 추천 매핑과 주의사항을 자동으로 정리합니다.
+        </p>
+      ) : analysisLoading ? (
+        <div className="mt-3 flex items-center gap-2 text-slate-600">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          <span>AI가 탭 구조를 읽고 있습니다…</span>
+        </div>
+      ) : analysisError ? (
+        <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-amber-950">
+          <p className="font-medium">AI 분석을 불러오지 못했습니다.</p>
+          <p className="mt-1 text-[10px] opacity-80">{analysisError}</p>
+        </div>
+      ) : analysis ? (
+        <div className="mt-3 space-y-3">
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-medium text-slate-900">요약</span>
+              <Badge variant="outline" className="text-[10px]">
+                신뢰도 {analysis.confidence}
+              </Badge>
+            </div>
+            <p className="mt-1 text-slate-700">{analysis.summary}</p>
+          </div>
+          {analysis.usageTips.length > 0 && (
+            <PanelList title="추천 사용 순서" items={analysis.usageTips} />
+          )}
+          {analysis.warnings.length > 0 && (
+            <PanelList title="주의할 점" items={analysis.warnings} tone="amber" />
+          )}
+          {analysis.suggestedMappings.length > 0 && (
+            <div className="rounded-lg border border-slate-200 bg-white px-3 py-3">
+              <p className="font-medium text-slate-900">추천 매핑</p>
+              <div className="mt-2 space-y-2">
+                {analysis.suggestedMappings.map((item) => (
+                  <div key={`${item.sourceHeader}-${item.platformField}`} className="rounded-md border border-slate-200 bg-slate-50 px-2 py-2">
+                    <p className="font-medium text-slate-900">{item.sourceHeader} → {item.platformField}</p>
+                    <p className="mt-1 text-[10px] text-slate-600">{item.reason}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {analysis.nextActions.length > 0 && (
+            <PanelList title="바로 해볼 일" items={analysis.nextActions} tone="emerald" />
+          )}
+        </div>
+      ) : (
+        <p className="mt-2 text-slate-600">아직 분석 결과가 없습니다.</p>
+      )}
+    </div>
+  );
+}
+
+function PanelList({
+  title,
+  items,
+  tone = 'slate',
+}: {
+  title: string;
+  items: string[];
+  tone?: 'slate' | 'amber' | 'emerald';
+}) {
+  const toneClasses = tone === 'amber'
+    ? 'border-amber-200 bg-amber-50 text-amber-950'
+    : tone === 'emerald'
+      ? 'border-emerald-200 bg-emerald-50 text-emerald-950'
+      : 'border-slate-200 bg-slate-50 text-slate-900';
+
+  return (
+    <div className={`rounded-lg border px-3 py-3 ${toneClasses}`}>
+      <p className="font-medium">{title}</p>
+      <ul className="mt-2 space-y-1 text-[10px]">
+        {items.map((item) => (
+          <li key={`${title}-${item}`}>• {item}</li>
+        ))}
+      </ul>
     </div>
   );
 }

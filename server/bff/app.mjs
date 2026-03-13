@@ -42,6 +42,7 @@ import {
   evidenceDriveOverrideSchema,
   evidenceDriveUploadSchema,
   genericWriteSchema,
+  googleSheetImportAnalyzeSchema,
   googleSheetImportPreviewSchema,
   ledgerUpsertSchema,
   memberRoleUpdateSchema,
@@ -67,6 +68,7 @@ import {
   GoogleSheetsServiceError,
   createGoogleSheetsService,
 } from './google-sheets.mjs';
+import { createGoogleSheetMigrationAiService } from './google-sheet-migration-ai.mjs';
 
 function createHttpError(statusCode, message, code = 'request_error') {
   const error = new Error(message);
@@ -561,6 +563,7 @@ export function createBffApp(options = {}) {
   const rbacPolicy = options.rbacPolicy || loadRbacPolicy();
   const driveService = options.driveService || createGoogleDriveService();
   const googleSheetsService = options.googleSheetsService || createGoogleSheetsService();
+  const googleSheetMigrationAiService = options.googleSheetMigrationAiService || createGoogleSheetMigrationAiService();
   const allowedOrigins = parseAllowedOrigins(options.allowedOrigins || process.env.BFF_ALLOWED_ORIGINS);
   const relationRulesPolicyPath = options.relationRulesPolicyPath || resolveRelationRulesPolicyPath();
   const workQueueBatchSizeRaw = Number.parseInt(process.env.BFF_WORK_QUEUE_BATCH || '100', 10);
@@ -1185,6 +1188,26 @@ export function createBffApp(options = {}) {
       }
       throw error;
     }
+  }));
+
+  app.post('/api/v1/projects/:projectId/google-sheet-import/analyze', asyncHandler(async (req, res) => {
+    const { tenantId } = req.context;
+    assertActorRoleAllowed(req, ROUTE_ROLES.readCore, 'analyze google sheet import');
+    const { projectId } = req.params;
+    const parsed = parseWithSchema(googleSheetImportAnalyzeSchema, req.body, 'Invalid google sheet analysis payload');
+
+    await ensureDocumentExists(
+      db,
+      `orgs/${tenantId}/projects/${projectId}`,
+      `Project not found: ${projectId}`,
+    );
+
+    const analysis = await googleSheetMigrationAiService.analyzePreview({
+      spreadsheetTitle: parsed.spreadsheetTitle,
+      selectedSheetName: parsed.selectedSheetName,
+      matrix: parsed.matrix,
+    });
+    res.status(200).json(analysis);
   }));
 
   app.get('/api/v1/ledgers', asyncHandler(async (req, res) => {

@@ -65,6 +65,12 @@ export const googleSheetImportPreviewSchema = z.object({
   sheetName: NON_EMPTY_STRING.optional(),
 }).strict();
 
+export const googleSheetImportAnalyzeSchema = z.object({
+  spreadsheetTitle: z.string().trim().optional(),
+  selectedSheetName: NON_EMPTY_STRING,
+  matrix: z.array(z.array(z.string())).min(1),
+}).strict();
+
 export const evidenceDriveUploadSchema = z.object({
   fileName: NON_EMPTY_STRING,
   originalFileName: NON_EMPTY_STRING.optional(),
