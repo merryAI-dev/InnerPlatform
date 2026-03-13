@@ -45,7 +45,7 @@ import {
   type BankStatementSheet,
 } from '../platform/bank-statement';
 import { normalizeSpace } from '../platform/csv-utils';
-import { prepareSettlementImportRows } from '../platform/settlement-sheet-prepare';
+import { prepareSettlementImportRows, pruneEmptySettlementRows } from '../platform/settlement-sheet-prepare';
 import { useAuth } from './auth-store';
 import { useFirebase } from '../lib/firebase-context';
 import { getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
@@ -1059,7 +1059,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     const activeSheetName = sanitizeExpenseSheetName(activeSheet?.name, activeSheetId === 'default' ? '기본 탭' : '새 탭');
     const defaultLedgerId = ledgers.find((ledger) => ledger.projectId === portalUser?.projectId)?.id
       || (portalUser?.projectId ? `l-${portalUser.projectId}` : 'l-default');
-    const preparedRows = prepareSettlementImportRows(rows, {
+    const preparedRows = prepareSettlementImportRows(pruneEmptySettlementRows(rows), {
       projectId: portalUser?.projectId || '',
       defaultLedgerId,
       evidenceRequiredMap,

@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { getYearMondayWeeks } from './cashflow-weeks';
 import { SETTLEMENT_COLUMNS, type ImportRow } from './settlement-csv';
 import { buildSettlementActualSyncPayload } from './settlement-sheet-sync';
-import { prepareSettlementImportRows } from './settlement-sheet-prepare';
+import {
+  isSettlementRowMeaningful,
+  prepareSettlementImportRows,
+  pruneEmptySettlementRows,
+} from './settlement-sheet-prepare';
 
 function makeRow(values: Record<string, string>): ImportRow {
   return {
@@ -53,5 +57,23 @@ describe('prepareSettlementImportRows', () => {
     const payload = buildSettlementActualSyncPayload(prepared, getYearMondayWeeks(2026));
     expect(payload).toHaveLength(1);
     expect(payload[0]?.amounts.DIRECT_COST_OUT).toBe(33000);
+  });
+
+  it('drops rows that only contain derived or protected settlement fields', () => {
+    const meaningful = makeRow({
+      'No.': '1',
+      '거래일시': '2026-03-05',
+      '지급처': '카페 메리',
+    });
+    const derivedOnly = makeRow({
+      'No.': '2',
+      '필수증빙자료 리스트': '영수증',
+      '실제 구비 완료된 증빙자료 리스트': '영수증',
+      '준비필요자료': '결과보고서',
+    });
+
+    expect(isSettlementRowMeaningful(meaningful)).toBe(true);
+    expect(isSettlementRowMeaningful(derivedOnly)).toBe(false);
+    expect(pruneEmptySettlementRows([meaningful, derivedOnly])).toEqual([meaningful]);
   });
 });

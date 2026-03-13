@@ -212,13 +212,13 @@ export function GoogleSheetMigrationWizard({
         return {
           descriptor,
           applySupported: parsed.rows.length > 0,
-          applyButtonLabel: '예산/비목 세목 반영',
-          applyHint: '같은 비목/세목은 갱신하고, 없는 항목은 추가합니다. 기존 예산 외 다른 화면 값은 건드리지 않습니다.',
+          applyButtonLabel: '예산/비목 세목 교체 반영',
+          applyHint: '가져온 예산총괄시트를 기준으로 현재 예산/비목·세목 구성을 교체합니다. 기존에만 있던 항목은 제거됩니다.',
           summaryStats: [
             { label: '가져온 행', value: `${parsed.rows.length}건` },
-            { label: '비목 수', value: `${mergePlan.codeBook.length}개` },
+            { label: '비목 수', value: `${mergePlan.importedCodeBook.length}개` },
             { label: '신규 추가', value: `${mergePlan.summary.createCount}건` },
-            { label: '기존 업데이트', value: `${mergePlan.summary.updateCount}건` },
+            { label: '기존 교체', value: `${mergePlan.summary.updateCount}건` },
           ],
           budgetPlanMerge: mergePlan,
         };
@@ -408,10 +408,10 @@ export function GoogleSheetMigrationWizard({
         }
         case 'budget_plan': {
           const budgetPlanMerge = reviewState.budgetPlanMerge;
-          if (!budgetPlanMerge || budgetPlanMerge.mergedRows.length === 0) throw new Error('가져올 예산 행이 없습니다.');
-          await saveBudgetPlanRows(budgetPlanMerge.mergedRows);
-          await saveBudgetCodeBook(budgetPlanMerge.codeBook);
-          toast.success(`예산 ${budgetPlanMerge.summary.importedCount}건을 반영했습니다.`);
+          if (!budgetPlanMerge || budgetPlanMerge.importedRows.length === 0) throw new Error('가져올 예산 행이 없습니다.');
+          await saveBudgetPlanRows(budgetPlanMerge.importedRows);
+          await saveBudgetCodeBook(budgetPlanMerge.importedCodeBook);
+          toast.success(`예산 ${budgetPlanMerge.summary.importedCount}건으로 교체 반영했습니다.`);
           break;
         }
         case 'bank_statement': {

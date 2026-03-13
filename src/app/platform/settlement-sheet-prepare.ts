@@ -15,6 +15,29 @@ function getColumnIndex(header: string): number {
   return SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === header);
 }
 
+const NON_SUBSTANTIVE_SETTLEMENT_HEADERS = new Set([
+  'No.',
+  '해당 주차',
+  '필수증빙자료 리스트',
+  '실제 구비 완료된 증빙자료 리스트',
+  '준비필요자료',
+  '증빙자료 드라이브',
+  '준비 필요자료',
+]);
+
+export function isSettlementRowMeaningful(row: ImportRow | null | undefined): boolean {
+  if (!row) return false;
+  return SETTLEMENT_COLUMNS.some((column, index) => {
+    if (NON_SUBSTANTIVE_SETTLEMENT_HEADERS.has(column.csvHeader)) return false;
+    return String(row.cells[index] ?? '').trim() !== '';
+  });
+}
+
+export function pruneEmptySettlementRows(rows: ImportRow[] | null | undefined): ImportRow[] {
+  if (!rows || rows.length === 0) return [];
+  return rows.filter((row) => isSettlementRowMeaningful(row));
+}
+
 function normalizeImportRow(row: ImportRow, fallbackIndex: number): ImportRow {
   return {
     tempId: row.tempId || `sheet-import-${fallbackIndex + 1}`,
@@ -80,12 +103,13 @@ export function prepareSettlementImportRows(
     evidenceRequiredMap?: Record<string, string>;
   },
 ): ImportRow[] {
-  if (!rows || rows.length === 0) return [];
+  const nonEmptyRows = pruneEmptySettlementRows(rows);
+  if (nonEmptyRows.length === 0) return [];
 
   const budgetCodeIdx = getColumnIndex('비목');
   const subCodeIdx = getColumnIndex('세목');
   const evidenceIdx = getColumnIndex('필수증빙자료 리스트');
-  const normalizedRows = renumberRows(rows.map((row, index) => normalizeImportRow(row, index)));
+  const normalizedRows = renumberRows(nonEmptyRows.map((row, index) => normalizeImportRow(row, index)));
   const withEvidenceMap = normalizedRows.map((row) => {
     if (budgetCodeIdx < 0 || subCodeIdx < 0 || evidenceIdx < 0) return row;
     const budgetCode = row.cells[budgetCodeIdx] || '';
