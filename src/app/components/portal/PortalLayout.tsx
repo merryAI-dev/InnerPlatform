@@ -12,6 +12,7 @@ import {
   AlertTriangle,
   Settings2,
   FileSpreadsheet,
+  Bot,
 } from 'lucide-react';
 import { PortalProvider, usePortalStore } from '../../data/portal-store';
 import { useAuth } from '../../data/auth-store';
@@ -49,6 +50,7 @@ const NAV_SECTIONS = [
     items: [
       { to: '/portal', icon: LayoutDashboard, label: '내 사업 현황', exact: true },
       { to: '/portal/submissions', icon: ClipboardList, label: '내 제출 현황' },
+      { to: '/portal/claude-sdk-help', icon: Bot, label: 'Claude SDK 도움봇' },
       { to: '/portal/payroll', icon: CircleDollarSign, label: '인건비/공지', accent: true, hidden: true },
     ],
   },

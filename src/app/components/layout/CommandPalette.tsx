@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router';
 import {
   LayoutDashboard, FolderKanban, BarChart3, FileCheck, Shield,
   ClipboardList, BookOpen, Settings, Search, ArrowRight,
-  Plus, Zap, Clock, AlertTriangle, Users, Hash,
+  Plus, Zap, Clock, AlertTriangle, Users, Hash, Bot,
 } from 'lucide-react';
 import { Dialog, DialogContent } from '../ui/dialog';
 import { useAppStore } from '../../data/store';
@@ -125,6 +125,7 @@ export function CommandPalette() {
       { id: 'nav-koica', icon: ClipboardList, label: 'KOICA 인력배치', path: '/koica-personnel', category: '탐색', action: () => go('/koica-personnel'), keywords: ['koica', '인력'] },
       { id: 'nav-audit', icon: BookOpen, label: '감사 로그', path: '/audit', category: '탐색', action: () => go('/audit'), keywords: ['audit', '감사'] },
       { id: 'nav-set', icon: Settings, label: '설정', path: '/settings', category: '탐색', action: () => go('/settings'), keywords: ['settings', '설정'] },
+      { id: 'nav-claude-sdk-help', icon: Bot, label: 'Claude SDK 도움봇', path: '/claude-sdk-help', category: '도움', action: () => go('/claude-sdk-help'), keywords: ['claude', 'sdk', 'anthropic', 'agent', '도움봇'] },
     ]
       .filter((item) => canShowAdminNavItem(user?.role, (item as any).path))
       .map(({ path: _path, ...rest }) => rest);

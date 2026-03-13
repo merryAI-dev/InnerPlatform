@@ -71,6 +71,16 @@ export const googleSheetImportAnalyzeSchema = z.object({
   matrix: z.array(z.array(z.string())).min(1),
 }).strict();
 
+export const claudeSdkHelpAskSchema = z.object({
+  question: NON_EMPTY_STRING.max(2000),
+  history: z.array(
+    z.object({
+      role: z.enum(['user', 'assistant']),
+      content: NON_EMPTY_STRING.max(4000),
+    }).strict(),
+  ).max(12).optional(),
+}).strict();
+
 export const evidenceDriveUploadSchema = z.object({
   fileName: NON_EMPTY_STRING,
   originalFileName: NON_EMPTY_STRING.optional(),

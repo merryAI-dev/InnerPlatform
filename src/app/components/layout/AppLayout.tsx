@@ -6,7 +6,7 @@ import {
   Bell, User, Plus, Shield, ClipboardList, ClipboardCheck,
   Search, Zap, HelpCircle, Maximize2, Minimize2,
   Menu, X, Calculator, Wallet, ExternalLink,
-  ListChecks, Users, LogOut, Megaphone, MessagesSquare,
+  ListChecks, Users, LogOut, Megaphone, MessagesSquare, Bot,
   CircleDollarSign, GraduationCap, ArrowLeftRight,
 } from 'lucide-react';
 import { useAppStore, AppProvider } from '../../data/store';
@@ -68,6 +68,7 @@ const NAV_GROUPS = [
       { to: '/users', icon: Users, label: '사용자 관리' },
       { to: '/audit', icon: BookOpen, label: '감사로그' },
       { to: '/settings', icon: Settings, label: '설정' },
+      { to: '/claude-sdk-help', icon: Bot, label: 'Claude SDK 도움봇' },
       { to: '/portal', icon: ExternalLink, label: '사용자 포털' },
     ],
   },

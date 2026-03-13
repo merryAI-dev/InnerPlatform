@@ -15,6 +15,7 @@ const FINANCE_ALLOWED = new Set([
   '/expense-management',
   '/approvals',
   '/audit',
+  '/claude-sdk-help',
   '/portal',
 ]);
 
@@ -28,6 +29,7 @@ const AUDITOR_ALLOWED = new Set([
   '/budget-summary',
   '/expense-management',
   '/audit',
+  '/claude-sdk-help',
   '/portal',
 ]);
 
@@ -37,6 +39,7 @@ const SUPPORT_ALLOWED = new Set([
   '/board',
   '/evidence',
   '/audit',
+  '/claude-sdk-help',
   '/portal',
 ]);
 
@@ -45,6 +48,7 @@ const SECURITY_ALLOWED = new Set([
   '/projects',
   '/board',
   '/audit',
+  '/claude-sdk-help',
 ]);
 
 /**
@@ -84,6 +88,7 @@ function canonicalizeAdminPath(pathname: string): string | undefined {
     '/users',
     '/audit',
     '/settings',
+    '/claude-sdk-help',
     '/participation',
     '/koica-personnel',
     '/personnel-changes',

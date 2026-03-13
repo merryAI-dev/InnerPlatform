@@ -48,6 +48,7 @@ const PortalTrainingPage = lazy(() => import('./components/portal/PortalTraining
 const PortalWeeklyExpensePage = lazy(() => import('./components/portal/PortalWeeklyExpensePage').then(m => ({ default: m.PortalWeeklyExpensePage })));
 const PortalBankStatementPage = lazy(() => import('./components/portal/PortalBankStatementPage').then(m => ({ default: m.PortalBankStatementPage })));
 const GuideChatPage = lazy(() => import('./components/guide-chat/GuideChatPage').then(m => ({ default: m.GuideChatPage })));
+const ClaudeSdkHelpPage = lazy(() => import('./components/guide-chat/ClaudeSdkHelpPage').then(m => ({ default: m.ClaudeSdkHelpPage })));
 
 // Suspense wrapper — layouts already provide visual chrome, so a minimal fallback suffices
 function S({ C }: { C: ComponentType }) {
@@ -98,6 +99,7 @@ export const router = createBrowserRouter([
       { path: 'training', element: <S C={TrainingManagePage} /> },
       { path: 'audit', element: <S C={AuditLogPage} /> },
       { path: 'settings', element: <S C={SettingsPage} /> },
+      { path: 'claude-sdk-help', element: <S C={ClaudeSdkHelpPage} /> },
       { path: '*', element: <S C={NotFoundPage} /> },
     ],
   },
@@ -129,6 +131,7 @@ export const router = createBrowserRouter([
       { path: 'training', element: <S C={PortalTrainingPage} /> },
       { path: 'career-profile', element: <S C={CareerProfilePage} /> },
       { path: 'guide-chat', element: <S C={GuideChatPage} /> },
+      { path: 'claude-sdk-help', element: <S C={ClaudeSdkHelpPage} /> },
     ],
   },
 ]);
