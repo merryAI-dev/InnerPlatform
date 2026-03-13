@@ -103,6 +103,58 @@ export interface GoogleSheetMigrationAnalysisResult {
   headerPreview?: string[];
 }
 
+function normalizeStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function normalizeSuggestedMappings(value: unknown): GoogleSheetMigrationAnalysisSuggestion[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null;
+      const sourceHeader = typeof item.sourceHeader === 'string' ? item.sourceHeader.trim() : '';
+      const platformField = typeof item.platformField === 'string' ? item.platformField.trim() : '';
+      const reason = typeof item.reason === 'string' ? item.reason.trim() : '';
+      const confidence = item.confidence === 'high' || item.confidence === 'medium' || item.confidence === 'low'
+        ? item.confidence
+        : 'medium';
+      if (!sourceHeader || !platformField || !reason) return null;
+      return {
+        sourceHeader,
+        platformField,
+        confidence,
+        reason,
+      } satisfies GoogleSheetMigrationAnalysisSuggestion;
+    })
+    .filter((item): item is GoogleSheetMigrationAnalysisSuggestion => Boolean(item));
+}
+
+export function normalizeGoogleSheetMigrationAnalysisResult(
+  value: unknown,
+): GoogleSheetMigrationAnalysisResult {
+  const raw = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  return {
+    provider: raw.provider === 'anthropic' ? 'anthropic' : 'heuristic',
+    model: typeof raw.model === 'string' && raw.model.trim() ? raw.model.trim() : 'unavailable',
+    summary: typeof raw.summary === 'string' && raw.summary.trim()
+      ? raw.summary.trim()
+      : 'AI 분석 결과를 확인할 수 없어 기본 가이드를 표시합니다.',
+    confidence: raw.confidence === 'high' || raw.confidence === 'medium' || raw.confidence === 'low'
+      ? raw.confidence
+      : 'medium',
+    likelyTarget: typeof raw.likelyTarget === 'string' && raw.likelyTarget.trim() ? raw.likelyTarget.trim() : 'unknown',
+    usageTips: normalizeStringArray(raw.usageTips),
+    warnings: normalizeStringArray(raw.warnings),
+    nextActions: normalizeStringArray(raw.nextActions),
+    suggestedMappings: normalizeSuggestedMappings(raw.suggestedMappings),
+    headerPreview: normalizeStringArray(raw.headerPreview),
+  };
+}
+
 export interface ProvisionTransactionEvidenceDriveResult {
   transactionId: string;
   projectId: string;
@@ -418,7 +470,7 @@ export async function analyzeGoogleSheetImportViaBff(params: {
       timeoutMs: 25000,
     },
   );
-  return response.data;
+  return normalizeGoogleSheetMigrationAnalysisResult(response.data);
 }
 
 export async function linkProjectEvidenceDriveRootViaBff(params: {

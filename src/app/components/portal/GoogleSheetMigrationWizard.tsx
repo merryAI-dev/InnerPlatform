@@ -13,6 +13,7 @@ import {
   analyzeGoogleSheetImportViaBff,
   type GoogleSheetMigrationAnalysisResult,
   type GoogleSheetImportPreviewResult,
+  normalizeGoogleSheetMigrationAnalysisResult,
   previewGoogleSheetImportViaBff,
 } from '../../lib/platform-bff-client';
 import { PlatformApiError } from '../../platform/api-client';
@@ -1020,13 +1021,15 @@ function GoogleSheetMigrationAiInlineCard({
   analysisError: string;
   selectedSheetName: string;
 }) {
+  const safeAnalysis = analysis ? normalizeGoogleSheetMigrationAnalysisResult(analysis) : null;
+
   return (
     <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-4 text-[12px] text-sky-950">
       <div className="flex items-center justify-between gap-2">
         <p className="font-semibold">AI 빠른 분석</p>
-        {analysis && (
-          <Badge variant={analysis.provider === 'anthropic' ? 'default' : 'outline'} className="text-[10px]">
-            {analysis.provider === 'anthropic' ? 'Claude 분석' : '규칙 기반'}
+        {safeAnalysis && (
+          <Badge variant={safeAnalysis.provider === 'anthropic' ? 'default' : 'outline'} className="text-[10px]">
+            {safeAnalysis.provider === 'anthropic' ? 'Claude 분석' : '규칙 기반'}
           </Badge>
         )}
       </div>
@@ -1039,14 +1042,14 @@ function GoogleSheetMigrationAiInlineCard({
         </div>
       ) : analysisError ? (
         <p className="mt-2 text-amber-900">{analysisError}</p>
-      ) : analysis ? (
+      ) : safeAnalysis ? (
         <div className="mt-2 space-y-2">
-          <p className="font-medium">{analysis.summary}</p>
-          {analysis.warnings[0] && (
-            <p className="text-[11px] text-amber-900">주의: {analysis.warnings[0]}</p>
+          <p className="font-medium">{safeAnalysis.summary}</p>
+          {safeAnalysis.warnings[0] && (
+            <p className="text-[11px] text-amber-900">주의: {safeAnalysis.warnings[0]}</p>
           )}
-          {analysis.nextActions[0] && (
-            <p className="text-[11px] text-sky-900/85">추천: {analysis.nextActions[0]}</p>
+          {safeAnalysis.nextActions[0] && (
+            <p className="text-[11px] text-sky-900/85">추천: {safeAnalysis.nextActions[0]}</p>
           )}
         </div>
       ) : (
@@ -1067,13 +1070,15 @@ function GoogleSheetMigrationAiPanel({
   analysisError: string;
   step: GoogleSheetWizardStep;
 }) {
+  const safeAnalysis = analysis ? normalizeGoogleSheetMigrationAnalysisResult(analysis) : null;
+
   return (
     <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-[11px]">
       <div className="flex items-center justify-between gap-2">
         <p className="font-medium text-slate-900">AI migration assistant</p>
-        {analysis && (
-          <Badge variant={analysis.provider === 'anthropic' ? 'default' : 'outline'} className="text-[10px]">
-            {analysis.provider === 'anthropic' ? 'Claude 분석' : '규칙 기반'}
+        {safeAnalysis && (
+          <Badge variant={safeAnalysis.provider === 'anthropic' ? 'default' : 'outline'} className="text-[10px]">
+            {safeAnalysis.provider === 'anthropic' ? 'Claude 분석' : '규칙 기반'}
           </Badge>
         )}
       </div>
@@ -1091,28 +1096,28 @@ function GoogleSheetMigrationAiPanel({
           <p className="font-medium">AI 분석을 불러오지 못했습니다.</p>
           <p className="mt-1 text-[10px] opacity-80">{analysisError}</p>
         </div>
-      ) : analysis ? (
+      ) : safeAnalysis ? (
         <div className="mt-3 space-y-3">
           <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
             <div className="flex items-center justify-between gap-2">
               <span className="font-medium text-slate-900">요약</span>
               <Badge variant="outline" className="text-[10px]">
-                신뢰도 {analysis.confidence}
+                신뢰도 {safeAnalysis.confidence}
               </Badge>
             </div>
-            <p className="mt-1 text-slate-700">{analysis.summary}</p>
+            <p className="mt-1 text-slate-700">{safeAnalysis.summary}</p>
           </div>
-          {analysis.usageTips.length > 0 && (
-            <PanelList title="추천 사용 순서" items={analysis.usageTips} />
+          {safeAnalysis.usageTips.length > 0 && (
+            <PanelList title="추천 사용 순서" items={safeAnalysis.usageTips} />
           )}
-          {analysis.warnings.length > 0 && (
-            <PanelList title="주의할 점" items={analysis.warnings} tone="amber" />
+          {safeAnalysis.warnings.length > 0 && (
+            <PanelList title="주의할 점" items={safeAnalysis.warnings} tone="amber" />
           )}
-          {analysis.suggestedMappings.length > 0 && (
+          {safeAnalysis.suggestedMappings.length > 0 && (
             <div className="rounded-lg border border-slate-200 bg-white px-3 py-3">
               <p className="font-medium text-slate-900">추천 매핑</p>
               <div className="mt-2 space-y-2">
-                {analysis.suggestedMappings.map((item) => (
+                {safeAnalysis.suggestedMappings.map((item) => (
                   <div key={`${item.sourceHeader}-${item.platformField}`} className="rounded-md border border-slate-200 bg-slate-50 px-2 py-2">
                     <p className="font-medium text-slate-900">{item.sourceHeader} → {item.platformField}</p>
                     <p className="mt-1 text-[10px] text-slate-600">{item.reason}</p>
@@ -1121,8 +1126,8 @@ function GoogleSheetMigrationAiPanel({
               </div>
             </div>
           )}
-          {analysis.nextActions.length > 0 && (
-            <PanelList title="바로 해볼 일" items={analysis.nextActions} tone="emerald" />
+          {safeAnalysis.nextActions.length > 0 && (
+            <PanelList title="바로 해볼 일" items={safeAnalysis.nextActions} tone="emerald" />
           )}
         </div>
       ) : (
