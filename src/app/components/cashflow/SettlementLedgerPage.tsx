@@ -26,6 +26,10 @@ import {
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { buildSettlementActualSyncPayload } from '../../platform/settlement-sheet-sync';
 import { computeSettlementGridWindowRange } from '../../platform/settlement-grid-windowing';
+import {
+  deriveSettlementRows,
+  isSettlementCascadeColumn,
+} from '../../platform/settlement-row-derivation';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Checkbox } from '../ui/checkbox';
@@ -2067,91 +2071,35 @@ function ImportEditor({
     }
   }, [clearUploadDrafts, onUploadEvidenceDriveById, uploadDrafts, uploadTargetTxId]);
 
-  const recomputeBalances = useCallback(
-    (input: ImportRow[]) => {
-      if (depositIdx < 0 || refundIdx < 0 || expenseIdx < 0 || vatInIdx < 0 || bankAmountIdx < 0 || balanceIdx < 0) return input;
-      let running = 0;
-      return input.map((row) => {
-        const existingBankRaw = String(row.cells[bankAmountIdx] || '').trim();
-        const existingBalanceRaw = String(row.cells[balanceIdx] || '').trim();
-        const hasExistingBank = existingBankRaw !== '';
-        const hasExistingBalance = existingBalanceRaw !== '';
-        const existingBalanceNum = hasExistingBalance ? (parseNumber(existingBalanceRaw) ?? null) : null;
-
-        const depositSum = (parseNumber(row.cells[depositIdx]) ?? 0) + (parseNumber(row.cells[refundIdx]) ?? 0);
-        const expenseSum = (parseNumber(row.cells[expenseIdx]) ?? 0) + (parseNumber(row.cells[vatInIdx]) ?? 0);
-        const derivedBankAmount = depositSum > 0 ? depositSum : expenseSum;
-        const bankAmount = hasExistingBank ? (parseNumber(existingBankRaw) ?? 0) : derivedBankAmount;
-
-        if (existingBalanceNum != null) {
-          running = existingBalanceNum;
-        } else if (depositSum !== 0 || expenseSum !== 0) {
-          running += depositSum - expenseSum;
-        }
-        const cells = [...row.cells];
-        if (!hasExistingBank) {
-          cells[bankAmountIdx] = Number.isFinite(bankAmount) && bankAmount !== 0 ? bankAmount.toLocaleString('ko-KR') : '';
-        }
-        if (!hasExistingBalance && (depositSum !== 0 || expenseSum !== 0)) {
-          cells[balanceIdx] = Number.isFinite(running) ? running.toLocaleString('ko-KR') : '';
-        }
-        return { ...row, cells };
-      });
-    },
-    [depositIdx, refundIdx, expenseIdx, vatInIdx, bankAmountIdx, balanceIdx],
-  );
-
-  const applyDerivedRows = useCallback(
-    (input: ImportRow[]) => {
-      const recalced = recomputeBalances(input);
-      return recalced.map((row, i) => {
-        let next = row;
-        const weekCell = weekIdx >= 0 ? String(row.cells[weekIdx] || '').trim() : '';
-      if (weekIdx >= 0 && dateIdx >= 0 && (!weekCell || weekCell === '-') && row.cells[dateIdx]) {
-          const rawDate = String(row.cells[dateIdx]).trim();
-          const datePart = rawDate.split(/\s+/)[0];
-          let dateIso = parseDate(datePart);
-          if (!dateIso) {
-            const m = datePart.match(/(\d{4})\D(\d{1,2})\D(\d{1,2})/);
-            if (m) {
-              dateIso = `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
-            }
-          }
-          if (dateIso) {
-            const weeks = getYearMondayWeeks(Number.parseInt(dateIso.slice(0, 4), 10));
-            const label = findWeekForDate(dateIso, weeks)?.label || '';
-            if (label) {
-              const cells = [...row.cells];
-              cells[weekIdx] = label;
-              next = { ...row, cells };
-            }
-          }
-        }
-        if (bankAmountIdx >= 0 && expenseIdx >= 0 && vatInIdx >= 0) {
-          const existingExpense = String(next.cells[expenseIdx] || '').trim();
-          const bankAmount = parseNumber(next.cells[bankAmountIdx]) ?? 0;
-          const vatAmount = parseNumber(next.cells[vatInIdx]) ?? 0;
-          if (bankAmount > 0 && (!existingExpense || existingExpense === '0')) {
-            const derivedExpense = Math.max(bankAmount - Math.max(vatAmount, 0), 0);
-            const cells = [...next.cells];
-            cells[expenseIdx] = derivedExpense > 0 ? derivedExpense.toLocaleString('ko-KR') : '';
-            next = { ...next, cells };
-          }
-        }
-        if (evidenceIdx >= 0 && evidenceCompletedIdx >= 0 && evidencePendingIdx >= 0) {
-          const requiredDesc = String(next.cells[evidenceIdx] || '');
-          const completedDesc = String(next.cells[evidenceCompletedIdx] || '');
-          const pendingDesc = derivePendingEvidence(requiredDesc, completedDesc);
-          const cells = [...next.cells];
-          cells[evidencePendingIdx] = pendingDesc;
-          next = { ...next, cells };
-        }
-        const result = importRowToTransaction(next, projectId, defaultLedgerId, i);
-        return { ...next, error: result.error };
-      });
-    },
-    [recomputeBalances, projectId, defaultLedgerId, weekIdx, dateIdx, bankAmountIdx, expenseIdx, vatInIdx, evidenceIdx, evidenceCompletedIdx, evidencePendingIdx],
-  );
+  const settlementDerivationContext = useMemo(() => ({
+    projectId,
+    defaultLedgerId,
+    dateIdx,
+    weekIdx,
+    depositIdx,
+    refundIdx,
+    expenseIdx,
+    vatInIdx,
+    bankAmountIdx,
+    balanceIdx,
+    evidenceIdx,
+    evidenceCompletedIdx,
+    evidencePendingIdx,
+  }), [
+    projectId,
+    defaultLedgerId,
+    dateIdx,
+    weekIdx,
+    depositIdx,
+    refundIdx,
+    expenseIdx,
+    vatInIdx,
+    bankAmountIdx,
+    balanceIdx,
+    evidenceIdx,
+    evidenceCompletedIdx,
+    evidencePendingIdx,
+  ]);
 
   const updateCell = useCallback(
     (rowIdx: number, colIdx: number, value: string) => {
@@ -2162,19 +2110,14 @@ function ImportEditor({
         return { ...r, cells };
       });
 
-      if (colIdx === cashflowIdx) {
-        const updated = next.map((row, i) => {
-          if (i !== rowIdx) return row;
-          const result = importRowToTransaction(row, projectId, defaultLedgerId, i);
-          return { ...row, error: result.error };
-        });
-        onChange(updated);
-        return;
-      }
-
-      onChange(applyDerivedRows(next));
+      const mode = colIdx === cashflowIdx
+        ? 'row'
+        : isSettlementCascadeColumn(colIdx, settlementDerivationContext)
+          ? 'cascade'
+          : 'row';
+      onChange(deriveSettlementRows(next, settlementDerivationContext, { mode, rowIdx }));
     },
-    [rows, onChange, applyDerivedRows, cashflowIdx, projectId, defaultLedgerId],
+    [rows, onChange, cashflowIdx, settlementDerivationContext],
   );
 
   const updateRow = useCallback(
@@ -2194,9 +2137,9 @@ function ImportEditor({
         }
         return updated;
       });
-      onChange(applyDerivedRows(next));
+      onChange(deriveSettlementRows(next, settlementDerivationContext, { mode: 'row', rowIdx }));
     },
-    [rows, onChange, budgetCodeIdx, subCodeIdx, evidenceIdx, evidenceRequiredMap, applyDerivedRows],
+    [rows, onChange, budgetCodeIdx, subCodeIdx, evidenceIdx, evidenceRequiredMap, settlementDerivationContext],
   );
 
   const normalizeRowNumbers = useCallback((input: ImportRow[]) => {
@@ -2231,8 +2174,8 @@ function ImportEditor({
 
   const commitRows = useCallback((nextRows: ImportRow[], focusTarget?: { rowIdx: number; colIdx: number } | null) => {
     if (focusTarget) pendingFocusCell.current = focusTarget;
-    onChange(applyDerivedRows(normalizeRowNumbers(nextRows)));
-  }, [onChange, applyDerivedRows, normalizeRowNumbers]);
+    onChange(deriveSettlementRows(normalizeRowNumbers(nextRows), settlementDerivationContext, { mode: 'full' }));
+  }, [onChange, normalizeRowNumbers, settlementDerivationContext]);
 
   const addRow = useCallback(() => {
     const anchor = getSelectionAnchor();
