@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronLeft, ChevronRight, Download, ExternalLink, GripVertical, Loader2, MessageSquare, Plus, RotateCcw, Save, Send, Upload, X } from 'lucide-react';
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { ClipboardEvent, KeyboardEvent, MouseEvent } from 'react';
 import { toast } from 'sonner';
@@ -10,7 +10,6 @@ import { parseDate, parseNumber, triggerDownload } from '../../platform/csv-util
 import { computeEvidenceStatus, computeEvidenceSummary, isValidDriveUrl } from '../../platform/evidence-helpers';
 import {
   buildDriveTransactionFolderName,
-  EVIDENCE_DOCUMENT_CATEGORIES,
   inferEvidenceCategoryFromFileName,
   suggestEvidenceUploadFileName,
 } from '../../platform/drive-evidence';
@@ -33,8 +32,6 @@ import {
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Checkbox } from '../ui/checkbox';
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '../ui/sheet';
-import { Textarea } from '../ui/textarea';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -52,14 +49,15 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '../ui/alert-dialog';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '../ui/dialog';
+import type { ActiveCommentAnchor } from './SettlementCommentThreadSheet';
+import type { EvidenceUploadDraft } from './SettlementEvidenceUploadDialog';
+
+const SettlementCommentThreadSheet = lazy(
+  () => import('./SettlementCommentThreadSheet').then((module) => ({ default: module.SettlementCommentThreadSheet })),
+);
+const SettlementEvidenceUploadDialog = lazy(
+  () => import('./SettlementEvidenceUploadDialog').then((module) => ({ default: module.SettlementEvidenceUploadDialog })),
+);
 
 // ── Helpers ──
 
@@ -251,13 +249,6 @@ function resolveWeekFromLabel(label: string, yearWeeks: MonthMondayWeek[]): Mont
   return getMonthMondayWeeks(yearMonth).find((w) => w.weekNo === weekNo);
 }
 
-interface ActiveCommentAnchor {
-  transactionId: string;
-  fieldKey: string;
-  fieldLabel: string;
-  rowLabel: string;
-}
-
 function CellCommentButton({
   count,
   disabled,
@@ -290,119 +281,6 @@ function CellCommentButton({
         </span>
       )}
     </button>
-  );
-}
-
-function CommentThreadSheet({
-  anchor,
-  comments,
-  open,
-  projectId,
-  currentUserId,
-  currentUserName,
-  onClose,
-  onAddComment,
-}: {
-  anchor: ActiveCommentAnchor | null;
-  comments: Comment[];
-  open: boolean;
-  projectId: string;
-  currentUserId: string;
-  currentUserName: string;
-  onClose: () => void;
-  onAddComment?: (comment: Comment) => void | Promise<void>;
-}) {
-  const [draft, setDraft] = useState('');
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (!open) setDraft('');
-  }, [open]);
-
-  const handleSubmit = useCallback(async () => {
-    if (!anchor || !onAddComment) return;
-    const content = draft.trim();
-    if (!content) return;
-
-    setSaving(true);
-    try {
-      const isSheetRowComment = anchor.transactionId.startsWith('sheet-row:');
-      await onAddComment({
-        id: `cmt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        transactionId: anchor.transactionId,
-        projectId,
-        targetType: isSheetRowComment ? 'expense_sheet_row' : 'transaction',
-        ...(isSheetRowComment ? { sheetRowId: anchor.transactionId } : {}),
-        authorId: currentUserId || currentUserName,
-        authorName: currentUserName,
-        fieldKey: anchor.fieldKey,
-        fieldLabel: anchor.fieldLabel,
-        content,
-        createdAt: new Date().toISOString(),
-      });
-      setDraft('');
-      toast.success('메모를 남겼습니다.');
-    } catch (error) {
-      console.error('[SettlementLedger] add comment failed:', error);
-      toast.error('메모 저장에 실패했습니다.');
-    } finally {
-      setSaving(false);
-    }
-  }, [anchor, currentUserId, currentUserName, draft, onAddComment, projectId]);
-
-  return (
-    <Sheet modal={false} open={open} onOpenChange={(nextOpen) => { if (!nextOpen) onClose(); }}>
-      <SheetContent side="right" showOverlay={false} className="w-[420px] sm:max-w-[420px] gap-0">
-        <SheetHeader className="border-b">
-          <SheetTitle className="text-[14px]">셀 메모</SheetTitle>
-          <SheetDescription className="text-[11px]">
-            {anchor ? `${anchor.rowLabel} · ${anchor.fieldLabel}` : '메모를 남길 셀을 선택하세요.'}
-          </SheetDescription>
-        </SheetHeader>
-        <div className="flex-1 overflow-y-auto px-4 py-4">
-          {comments.length === 0 ? (
-            <div className="rounded-lg border border-dashed px-4 py-6 text-[12px] text-muted-foreground">
-              아직 메모가 없습니다. 아래 입력창에 첫 메모를 남겨보세요.
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {comments.map((comment) => (
-                <div key={comment.id} className="rounded-2xl border bg-background px-3 py-2.5 shadow-sm">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-[11px] font-semibold">{comment.authorName}</span>
-                    <span className="text-[10px] text-muted-foreground">{formatCommentTime(comment.createdAt)}</span>
-                  </div>
-                  {comment.fieldLabel && (
-                    <Badge variant="secondary" className="mt-2 text-[9px]">{comment.fieldLabel}</Badge>
-                  )}
-                  <p className="mt-2 whitespace-pre-wrap text-[12px] leading-5">{comment.content}</p>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-        <div className="border-t px-4 py-4 space-y-2">
-          <Textarea
-            value={draft}
-            placeholder="이 셀에 남길 메모를 적어주세요"
-            className="min-h-24 text-[12px]"
-            onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-                event.preventDefault();
-                void handleSubmit();
-              }
-            }}
-          />
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-[10px] text-muted-foreground">Cmd/Ctrl + Enter로 저장</span>
-            <Button size="sm" className="h-8 text-[11px]" disabled={!draft.trim() || saving || !anchor || !onAddComment} onClick={() => void handleSubmit()}>
-              {saving ? '저장중...' : '메모 남기기'}
-            </Button>
-          </div>
-        </div>
-      </SheetContent>
-    </Sheet>
   );
 }
 
@@ -1687,17 +1565,6 @@ function TransactionRow({
 
 // ── Import Editor (editable CSV preview) ──
 
-interface EvidenceUploadDraft {
-  id: string;
-  file: File;
-  objectUrl: string;
-  category: string;
-  parserCategory: string;
-  suggestedFileName: string;
-  reviewedFileName: string;
-  previewType: 'pdf' | 'image' | 'other';
-}
-
 function ImportEditor({
   rows,
   onChange,
@@ -2035,11 +1902,6 @@ function ImportEditor({
       evidenceFileInputRef.current.click();
     }
   }, []);
-
-  const activeUploadDraft = useMemo(
-    () => uploadDrafts.find((draft) => draft.id === activeUploadDraftId) || uploadDrafts[0] || null,
-    [uploadDrafts, activeUploadDraftId],
-  );
 
   const confirmEvidenceUpload = useCallback(async () => {
     if (!uploadTargetTxId || !onUploadEvidenceDriveById || uploadDrafts.length === 0) return;
@@ -2941,195 +2803,50 @@ function ImportEditor({
           setUploadDialogOpen(true);
         }}
       />
-      <Dialog
-        open={uploadDialogOpen}
-        onOpenChange={(open) => {
-          setUploadDialogOpen(open);
-          if (!open && !uploadingEvidence) {
-            clearUploadDrafts();
-          }
-        }}
-      >
-        <DialogContent className="h-[92vh] w-[96vw] max-w-[96vw] gap-0 overflow-hidden p-0 sm:max-w-[96vw]">
-          <DialogHeader className="border-b px-6 py-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <DialogTitle>증빙 업로드 검토</DialogTitle>
-                <DialogDescription>
-                  좌측에서 파일을 확인하고, 우측에서 자동 분류 결과를 수정한 뒤 업로드하세요.
-                </DialogDescription>
-              </div>
-              <Button type="button" variant="outline" size="sm" onClick={triggerEvidenceFilePicker} disabled={uploadingEvidence}>
-                파일 선택
-              </Button>
-            </div>
-          </DialogHeader>
-          <div className="flex-1 overflow-hidden px-6 py-4">
-            <div className="grid h-full gap-4 lg:grid-cols-[minmax(0,1.4fr)_380px]">
-            <div className="min-h-0 rounded-xl border bg-slate-50/60 p-3">
-              {activeUploadDraft ? (
-                <div className="flex h-full min-h-0 flex-col gap-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="truncate text-[12px] font-semibold">{activeUploadDraft.file.name}</p>
-                      <p className="text-[11px] text-muted-foreground">
-                        {(activeUploadDraft.file.size / 1024).toFixed(1)} KB · {activeUploadDraft.file.type || 'application/octet-stream'}
-                      </p>
-                    </div>
-                    <span className="rounded-full border bg-background px-2 py-1 text-[10px] text-muted-foreground">
-                      파일명 자동분류
-                    </span>
-                  </div>
-                  <div className="rounded-lg border bg-background px-3 py-2 text-[11px]">
-                    <p className="text-[10px] font-semibold text-muted-foreground">원본 파일명</p>
-                    <p className="mt-1 break-all">{activeUploadDraft.file.name}</p>
-                  </div>
-                  <div className="flex-1 overflow-hidden rounded-lg border bg-background">
-                    {activeUploadDraft.previewType === 'pdf' ? (
-                      <iframe
-                        title={activeUploadDraft.file.name}
-                        src={activeUploadDraft.objectUrl}
-                        className="h-full min-h-[420px] w-full"
-                      />
-                    ) : activeUploadDraft.previewType === 'image' ? (
-                      <img
-                        src={activeUploadDraft.objectUrl}
-                        alt={activeUploadDraft.file.name}
-                        className="h-full min-h-[420px] w-full object-contain"
-                      />
-                    ) : (
-                      <div className="flex h-full min-h-[420px] items-center justify-center px-6 text-center text-[12px] text-muted-foreground">
-                        브라우저 미리보기를 지원하지 않는 형식입니다. 업로드 후 Drive 링크에서 원본을 확인하세요.
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <div className="flex h-full min-h-[420px] flex-col items-center justify-center gap-3 text-[12px] text-muted-foreground">
-                  <p>업로드할 파일을 선택하세요.</p>
-                  <Button type="button" variant="outline" size="sm" onClick={triggerEvidenceFilePicker} disabled={uploadingEvidence}>
-                    파일 선택
-                  </Button>
-                </div>
-              )}
-            </div>
-            <div className="flex min-h-0 flex-col gap-3">
-              <div className="rounded-xl border bg-background p-3">
-                <p className="text-[12px] font-semibold">파싱 결과</p>
-                <p className="mt-1 text-[11px] text-muted-foreground">
-                  파일명과 운영 규칙으로 자동 분류했습니다. 사람이 최종 확인해 주세요.
-                </p>
-              </div>
-              <div className="min-h-0 flex-1 space-y-2 overflow-auto pr-1">
-                {uploadDrafts.map((draft) => (
-                  <div
-                    key={draft.id}
-                    role="button"
-                    tabIndex={0}
-                    className={`w-full rounded-xl border p-3 text-left transition-colors ${
-                      activeUploadDraft?.id === draft.id
-                        ? 'border-teal-400 bg-teal-50/70'
-                        : 'border-border bg-background hover:bg-muted/40'
-                    }`}
-                    onClick={() => setActiveUploadDraftId(draft.id)}
-                    onKeyDown={(event) => {
-                      if (event.target !== event.currentTarget) return;
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        setActiveUploadDraftId(draft.id);
-                      }
-                    }}
-                  >
-                    <p className="truncate text-[12px] font-medium">{draft.file.name}</p>
-                    <p className="mt-1 text-[10px] text-muted-foreground">
-                      자동분류: {draft.parserCategory}
-                    </p>
-                    <div className="mt-2 space-y-1.5">
-                      <div>
-                        <label className="mb-1 block text-[10px] text-muted-foreground">권장 파일명</label>
-                        <div className="rounded-md border bg-muted/30 px-2 py-1.5 text-[10px] break-all">
-                          {draft.suggestedFileName}
-                        </div>
-                      </div>
-                      <div>
-                        <label className="mb-1 block text-[10px] text-muted-foreground">최종 업로드 파일명</label>
-                        <input
-                          type="text"
-                          value={draft.reviewedFileName}
-                          className="h-8 w-full rounded-md border bg-background px-2 text-[11px]"
-                          onClick={(event) => event.stopPropagation()}
-                          onChange={(event) => {
-                            const nextFileName = event.target.value;
-                            setUploadDrafts((current) => current.map((item) => (
-                              item.id === draft.id
-                                ? { ...item, reviewedFileName: nextFileName }
-                                : item
-                            )));
-                          }}
-                        />
-                        <div className="mt-1 flex justify-end">
-                          <button
-                            type="button"
-                            className="text-[10px] text-teal-700 underline underline-offset-2"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              setUploadDrafts((current) => current.map((item) => (
-                                item.id === draft.id
-                                  ? { ...item, reviewedFileName: item.suggestedFileName }
-                                  : item
-                              )));
-                            }}
-                          >
-                            권장안 다시 적용
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="mt-2">
-                      <label className="mb-1 block text-[10px] text-muted-foreground">문서 종류</label>
-                      <select
-                        value={draft.category}
-                        className="h-8 w-full rounded-md border bg-background px-2 text-[11px]"
-                        onClick={(event) => event.stopPropagation()}
-                        onChange={(event) => {
-                          const nextCategory = event.target.value;
-                          setUploadDrafts((current) => current.map((item) => (
-                            item.id === draft.id
-                              ? { ...item, category: nextCategory }
-                              : item
-                          )));
-                        }}
-                      >
-                        {EVIDENCE_DOCUMENT_CATEGORIES.map((category) => (
-                          <option key={category} value={category}>
-                            {category}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-          </div>
-          <DialogFooter className="border-t px-6 py-4">
-            <Button
-              variant="outline"
-              onClick={() => {
-                setUploadDialogOpen(false);
+      {uploadDialogOpen && (
+        <Suspense fallback={null}>
+          <SettlementEvidenceUploadDialog
+            open={uploadDialogOpen}
+            uploadDrafts={uploadDrafts}
+            activeUploadDraftId={activeUploadDraftId}
+            uploadingEvidence={uploadingEvidence}
+            onOpenChange={(open) => {
+              setUploadDialogOpen(open);
+              if (!open && !uploadingEvidence) {
                 clearUploadDrafts();
-              }}
-              disabled={uploadingEvidence}
-            >
-              취소
-            </Button>
-            <Button onClick={() => void confirmEvidenceUpload()} disabled={uploadingEvidence || uploadDrafts.length === 0}>
-              {uploadingEvidence ? '업로드 중...' : `선택한 ${uploadDrafts.length}건 업로드`}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+              }
+            }}
+            onPickFiles={triggerEvidenceFilePicker}
+            onCancel={() => {
+              setUploadDialogOpen(false);
+              clearUploadDrafts();
+            }}
+            onConfirm={() => void confirmEvidenceUpload()}
+            onSelectDraft={setActiveUploadDraftId}
+            onUpdateDraftCategory={(draftId, nextCategory) => {
+              setUploadDrafts((current) => current.map((item) => (
+                item.id === draftId
+                  ? { ...item, category: nextCategory }
+                  : item
+              )));
+            }}
+            onUpdateDraftFileName={(draftId, nextFileName) => {
+              setUploadDrafts((current) => current.map((item) => (
+                item.id === draftId
+                  ? { ...item, reviewedFileName: nextFileName }
+                  : item
+              )));
+            }}
+            onResetDraftFileName={(draftId) => {
+              setUploadDrafts((current) => current.map((item) => (
+                item.id === draftId
+                  ? { ...item, reviewedFileName: item.suggestedFileName }
+                  : item
+              )));
+            }}
+          />
+        </Suspense>
+      )}
       {mappingOpen && (
         <div className="fixed inset-0 z-[80] bg-black/40 flex items-center justify-center p-4 pointer-events-auto">
           <div className="w-full max-w-3xl bg-background rounded-lg border shadow-lg flex flex-col max-h-[80vh] pointer-events-auto">
@@ -3180,16 +2897,20 @@ function ImportEditor({
           </div>
         </div>
       )}
-      <CommentThreadSheet
-        anchor={activeCommentAnchor}
-        comments={activeCellComments}
-        open={!!activeCommentAnchor}
-        projectId={projectId}
-        currentUserId={currentUserId}
-        currentUserName={currentUserName}
-        onClose={() => setActiveCommentAnchor(null)}
-        onAddComment={onAddComment}
-      />
+      {activeCommentAnchor && (
+        <Suspense fallback={null}>
+          <SettlementCommentThreadSheet
+            anchor={activeCommentAnchor}
+            comments={activeCellComments}
+            open={!!activeCommentAnchor}
+            projectId={projectId}
+            currentUserId={currentUserId}
+            currentUserName={currentUserName}
+            onClose={() => setActiveCommentAnchor(null)}
+            onAddComment={onAddComment}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }
