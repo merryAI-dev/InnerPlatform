@@ -27,6 +27,12 @@ import { buildSettlementActualSyncPayload } from '../../platform/settlement-shee
 import { computeSettlementGridWindowRange } from '../../platform/settlement-grid-windowing';
 import { updateImportRowAt } from '../../platform/settlement-grid-state';
 import {
+  clearAllEditableCells,
+  clearSelectionCells,
+  DEFAULT_PROTECTED_SETTLEMENT_HEADERS,
+  deleteSelectedRows,
+} from '../../platform/settlement-grid-actions';
+import {
   deriveSettlementRows,
   isSettlementCascadeColumn,
 } from '../../platform/settlement-row-derivation';
@@ -729,7 +735,7 @@ export function SettlementLedgerPage({
     if (!autoSaveSheet || !importDirty || !importRows || !onSaveSheetRows || sheetSaving) return;
     const timer = window.setTimeout(() => {
       void handleImportSave({ silent: true, syncCashflow: false });
-    }, 10_000);
+    }, 20_000);
     return () => window.clearTimeout(timer);
   }, [autoSaveSheet, importDirty, importRows, onSaveSheetRows, sheetSaving, handleImportSave]);
 
@@ -737,7 +743,7 @@ export function SettlementLedgerPage({
     if (!autoSaveSheet || importDirty || !importRows || sheetSaving || cashflowSyncing || cashflowSyncState !== 'pending') return;
     const timer = window.setTimeout(() => {
       void syncImportRowsToCashflow(importRows, { silent: true });
-    }, 45_000);
+    }, 60_000);
     return () => window.clearTimeout(timer);
   }, [autoSaveSheet, cashflowSyncState, cashflowSyncing, importDirty, importRows, sheetSaving, syncImportRowsToCashflow]);
 
@@ -1760,6 +1766,7 @@ function ImportEditor({
   const [activeUploadDraftId, setActiveUploadDraftId] = useState('');
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const [uploadingEvidence, setUploadingEvidence] = useState(false);
+  const [clearAllConfirmOpen, setClearAllConfirmOpen] = useState(false);
   const selectionBounds = useMemo(() => {
     if (!selection) return null;
     return {
@@ -1776,6 +1783,15 @@ function ImportEditor({
   const sourceTransactionMap = useMemo(
     () => new Map(sourceTransactions.map((transaction) => [transaction.id, transaction])),
     [sourceTransactions],
+  );
+  const protectedClearColumnIndexes = useMemo(
+    () => SETTLEMENT_COLUMNS.reduce<number[]>((indexes, column, index) => {
+      if (DEFAULT_PROTECTED_SETTLEMENT_HEADERS.includes(column.csvHeader as (typeof DEFAULT_PROTECTED_SETTLEMENT_HEADERS)[number])) {
+        indexes.push(index);
+      }
+      return indexes;
+    }, []),
+    [],
   );
   const shouldVirtualizeRows = inline && rows.length >= IMPORT_EDITOR_WINDOW_THRESHOLD;
   const visibleRowWindow = useMemo(() => {
@@ -2037,6 +2053,17 @@ function ImportEditor({
     return anchor.colIdx;
   }, [getSelectionAnchor, noIdx]);
   const selectedRowIdx = getSelectionAnchor()?.rowIdx ?? -1;
+  const getActiveSelectionBounds = useCallback(() => {
+    if (selectionBounds) return selectionBounds;
+    const anchor = getSelectionAnchor();
+    if (!anchor) return null;
+    return {
+      r1: anchor.rowIdx,
+      r2: anchor.rowIdx,
+      c1: anchor.colIdx,
+      c2: anchor.colIdx,
+    };
+  }, [getSelectionAnchor, selectionBounds]);
 
   const commitRows = useCallback((nextRows: ImportRow[], focusTarget?: { rowIdx: number; colIdx: number } | null) => {
     if (focusTarget) pendingFocusCell.current = focusTarget;
@@ -2103,6 +2130,75 @@ function ImportEditor({
   const cloneRows = useCallback((input: ImportRow[]) => {
     return input.map((row) => ({ ...row, cells: [...row.cells] }));
   }, []);
+
+  const pushUndoSnapshot = useCallback(() => {
+    undoStack.current.push(cloneRows(rows));
+  }, [cloneRows, rows]);
+
+  const clearSelectedCells = useCallback((options?: { silent?: boolean }) => {
+    const bounds = getActiveSelectionBounds();
+    if (!bounds) return false;
+    const nextRows = clearSelectionCells(rows, bounds, {
+      protectedColumnIndexes: protectedClearColumnIndexes,
+    });
+    if (nextRows === rows) {
+      if (!options?.silent) {
+        toast.message('비울 수 있는 셀이 선택되지 않았습니다.');
+      }
+      return false;
+    }
+    pushUndoSnapshot();
+    commitRows(nextRows, {
+      rowIdx: bounds.r1,
+      colIdx: bounds.c1 === noIdx ? getPreferredEditableCol() : bounds.c1,
+    });
+    return true;
+  }, [
+    commitRows,
+    getActiveSelectionBounds,
+    getPreferredEditableCol,
+    noIdx,
+    protectedClearColumnIndexes,
+    pushUndoSnapshot,
+    rows,
+  ]);
+
+  const removeSelectedRows = useCallback(() => {
+    const bounds = getActiveSelectionBounds();
+    if (!bounds) return false;
+    const nextRows = deleteSelectedRows(rows, bounds);
+    if (nextRows === rows) return false;
+    pushUndoSnapshot();
+    setSelection(null);
+    const nextFocusRow = Math.min(bounds.r1, Math.max(0, nextRows.length - 1));
+    commitRows(
+      nextRows,
+      nextRows.length > 0
+        ? { rowIdx: nextFocusRow, colIdx: getPreferredEditableCol() }
+        : null,
+    );
+    return true;
+  }, [commitRows, getActiveSelectionBounds, getPreferredEditableCol, pushUndoSnapshot, rows]);
+
+  const clearAllRows = useCallback(() => {
+    const nextRows = clearAllEditableCells(rows, {
+      protectedColumnIndexes: protectedClearColumnIndexes,
+    });
+    if (nextRows === rows) {
+      toast.message('비울 수 있는 내용이 없습니다.');
+      return false;
+    }
+    pushUndoSnapshot();
+    setSelection(null);
+    commitRows(
+      nextRows,
+      nextRows.length > 0
+        ? { rowIdx: 0, colIdx: getPreferredEditableCol() }
+        : null,
+    );
+    toast.success('현재 탭의 입력값을 비웠습니다.');
+    return true;
+  }, [commitRows, getPreferredEditableCol, protectedClearColumnIndexes, pushUndoSnapshot, rows]);
 
   const applyPaste = useCallback(
     (startRow: number, startCol: number, text: string) => {
@@ -2327,6 +2423,54 @@ function ImportEditor({
     handleCopy(e);
     if (e.defaultPrevented) return;
 
+    const target = e.target as HTMLElement | null;
+    const isTextEditingTarget = Boolean(
+      target
+      && (
+        target instanceof HTMLInputElement
+        || target instanceof HTMLTextAreaElement
+        || target.isContentEditable
+      ),
+    );
+    const hasMultiCellSelection = Boolean(
+      selectionBounds
+      && (selectionBounds.r1 !== selectionBounds.r2 || selectionBounds.c1 !== selectionBounds.c2),
+    );
+    const inputHasPartialSelection = Boolean(
+      target instanceof HTMLInputElement
+      && typeof target.selectionStart === 'number'
+      && typeof target.selectionEnd === 'number'
+      && target.selectionStart !== target.selectionEnd,
+    );
+
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+      if (isTextEditingTarget) return;
+      if (rows.length === 0) return;
+      e.preventDefault();
+      const firstEditableCol = noIdx === 0 ? 1 : 0;
+      setSelection({
+        start: { r: 0, c: firstEditableCol },
+        end: { r: rows.length - 1, c: Math.max(firstEditableCol, SETTLEMENT_COLUMNS.length - 1) },
+      });
+      tableWrapRef.current?.focus();
+      return;
+    }
+
+    if (e.key === 'Escape') {
+      if (!selectionRef.current) return;
+      e.preventDefault();
+      setSelection(null);
+      return;
+    }
+
+    if ((e.key === 'Delete' || e.key === 'Backspace') && !e.altKey && !e.ctrlKey && !e.metaKey) {
+      if (isTextEditingTarget && !hasMultiCellSelection && inputHasPartialSelection) return;
+      if (!getActiveSelectionBounds()) return;
+      e.preventDefault();
+      void clearSelectedCells();
+      return;
+    }
+
     const anchor = selection
       ? {
         r: Math.min(selection.start.r, selection.end.r),
@@ -2360,7 +2504,17 @@ function ImportEditor({
     if (e.key === 'ArrowRight') {
       focusCellAt(anchor.r, anchor.c + 1);
     }
-  }, [handleUndo, handleCopy, selection, focusCellAt]);
+  }, [
+    clearSelectedCells,
+    focusCellAt,
+    getActiveSelectionBounds,
+    handleCopy,
+    handleUndo,
+    noIdx,
+    rows.length,
+    selection,
+    selectionBounds,
+  ]);
 
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
@@ -2487,11 +2641,14 @@ function ImportEditor({
 
   const removeRow = useCallback(
     (rowIdx: number) => {
-      const nextRows = rows.filter((_, i) => i !== rowIdx);
+      const nextRows = deleteSelectedRows(rows, { r1: rowIdx, r2: rowIdx, c1: 0, c2: SETTLEMENT_COLUMNS.length - 1 });
+      if (nextRows === rows) return;
+      pushUndoSnapshot();
+      setSelection(null);
       const nextFocusRow = Math.min(Math.max(0, rowIdx - 1), Math.max(0, nextRows.length - 1));
       commitRows(nextRows, nextRows.length > 0 ? { rowIdx: nextFocusRow, colIdx: getPreferredEditableCol() } : null);
     },
-    [rows, commitRows, getPreferredEditableCol],
+    [rows, pushUndoSnapshot, commitRows, getPreferredEditableCol],
   );
 
   const applyEvidenceMapping = useCallback((rowIdx?: number) => {
@@ -2623,13 +2780,33 @@ function ImportEditor({
             size="sm"
             className="h-7 text-[11px] gap-1 cursor-pointer shadow-sm hover:bg-muted/40"
             onClick={() => {
-              if (selectedRowIdx < 0) return;
-              removeRow(selectedRowIdx);
+              void clearSelectedCells();
+            }}
+            disabled={!getActiveSelectionBounds()}
+          >
+            <X className="h-3.5 w-3.5" />
+            선택 셀 비우기
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-[11px] gap-1 cursor-pointer shadow-sm hover:bg-muted/40"
+            onClick={() => {
+              void removeSelectedRows();
             }}
             disabled={selectedRowIdx < 0 || rows.length === 0}
           >
             <X className="h-3.5 w-3.5" />
             선택 행 삭제
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-[11px] cursor-pointer shadow-sm hover:bg-muted/40"
+            onClick={() => setClearAllConfirmOpen(true)}
+            disabled={rows.length === 0}
+          >
+            현재 탭 전체 비우기
           </Button>
           <Button
             variant="outline"
@@ -2651,6 +2828,27 @@ function ImportEditor({
           </Button>
         </div>
       </div>
+      <AlertDialog open={clearAllConfirmOpen} onOpenChange={setClearAllConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>현재 탭 입력값을 모두 비울까요?</AlertDialogTitle>
+            <AlertDialogDescription>
+              행 구조는 유지하고 일반 입력값만 비웁니다. 증빙/드라이브 관련 보호 컬럼은 유지됩니다.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>취소</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                void clearAllRows();
+                setClearAllConfirmOpen(false);
+              }}
+            >
+              전체 비우기
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Scrollable table */}
       <div
