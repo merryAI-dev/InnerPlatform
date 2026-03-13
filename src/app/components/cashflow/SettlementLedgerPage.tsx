@@ -25,6 +25,7 @@ import {
 } from '../../platform/settlement-csv';
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { buildSettlementActualSyncPayload } from '../../platform/settlement-sheet-sync';
+import { computeSettlementGridWindowRange } from '../../platform/settlement-grid-windowing';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Checkbox } from '../ui/checkbox';
@@ -114,6 +115,10 @@ function buildSheetRowCommentId(tempId: string): string {
 function formatCommentTime(value: string): string {
   return value ? value.slice(0, 16).replace('T', ' ') : '';
 }
+
+const IMPORT_EDITOR_ROW_HEIGHT_ESTIMATE = 56;
+const IMPORT_EDITOR_WINDOW_OVERSCAN = 8;
+const IMPORT_EDITOR_WINDOW_THRESHOLD = 80;
 
 function readImportDraftCache(cacheKey: string): ImportRow[] | null {
   if (!cacheKey || typeof window === 'undefined') return null;
@@ -1872,6 +1877,8 @@ function ImportEditor({
     }),
   );
   const [activeCommentAnchor, setActiveCommentAnchor] = useState<ActiveCommentAnchor | null>(null);
+  const [virtualScrollTop, setVirtualScrollTop] = useState(0);
+  const [virtualViewportHeight, setVirtualViewportHeight] = useState(0);
   const evidenceFileInputRef = useRef<HTMLInputElement | null>(null);
   const [uploadTargetTxId, setUploadTargetTxId] = useState<string | null>(null);
   const [uploadDrafts, setUploadDrafts] = useState<EvidenceUploadDraft[]>([]);
@@ -1890,6 +1897,28 @@ function ImportEditor({
   const sourceTransactionMap = useMemo(
     () => new Map(sourceTransactions.map((transaction) => [transaction.id, transaction])),
     [sourceTransactions],
+  );
+  const shouldVirtualizeRows = inline && rows.length >= IMPORT_EDITOR_WINDOW_THRESHOLD;
+  const visibleRowWindow = useMemo(() => {
+    if (!shouldVirtualizeRows) {
+      return {
+        startIndex: 0,
+        endIndex: rows.length,
+        paddingTop: 0,
+        paddingBottom: 0,
+      };
+    }
+    return computeSettlementGridWindowRange({
+      rowCount: rows.length,
+      scrollTop: virtualScrollTop,
+      viewportHeight: virtualViewportHeight,
+      rowHeightEstimate: IMPORT_EDITOR_ROW_HEIGHT_ESTIMATE,
+      overscan: IMPORT_EDITOR_WINDOW_OVERSCAN,
+    });
+  }, [rows.length, shouldVirtualizeRows, virtualScrollTop, virtualViewportHeight]);
+  const visibleRows = useMemo(
+    () => rows.slice(visibleRowWindow.startIndex, visibleRowWindow.endIndex),
+    [rows, visibleRowWindow.endIndex, visibleRowWindow.startIndex],
   );
 
   const ensurePersistedTransactionByRow = useCallback(async (rowIdx: number): Promise<string | null> => {
@@ -2454,11 +2483,25 @@ function ImportEditor({
     let boundedCol = Math.max(0, Math.min(SETTLEMENT_COLUMNS.length - 1, colIdx));
     if (boundedCol === noIdx) boundedCol = Math.min(SETTLEMENT_COLUMNS.length - 1, boundedCol + 1);
     const selector = `[data-cell-row="${boundedRow}"][data-cell-col="${boundedCol}"]`;
-    const target = tableWrapRef.current.querySelector<HTMLElement>(selector);
-    if (!target) return;
-    target.focus();
-    handleCellFocus(boundedRow, boundedCol);
-  }, [rows.length, noIdx, handleCellFocus]);
+    const tryFocus = () => {
+      const target = tableWrapRef.current?.querySelector<HTMLElement>(selector);
+      if (!target) return false;
+      target.focus();
+      handleCellFocus(boundedRow, boundedCol);
+      return true;
+    };
+    if (tryFocus()) return;
+    if (shouldVirtualizeRows && tableWrapRef.current) {
+      const nextScrollTop = Math.max(
+        0,
+        boundedRow * IMPORT_EDITOR_ROW_HEIGHT_ESTIMATE - IMPORT_EDITOR_ROW_HEIGHT_ESTIMATE * 2,
+      );
+      tableWrapRef.current.scrollTop = nextScrollTop;
+      window.requestAnimationFrame(() => {
+        void tryFocus();
+      });
+    }
+  }, [rows.length, noIdx, handleCellFocus, shouldVirtualizeRows]);
 
   useEffect(() => {
     if (!pendingFocusCell.current) return;
@@ -2575,6 +2618,26 @@ function ImportEditor({
     window.addEventListener('mouseup', onUp);
     return () => window.removeEventListener('mouseup', onUp);
   }, []);
+
+  useEffect(() => {
+    if (!tableWrapRef.current) return;
+    const element = tableWrapRef.current;
+    const syncViewport = () => {
+      setVirtualScrollTop(element.scrollTop);
+      setVirtualViewportHeight(element.clientHeight);
+    };
+    syncViewport();
+    const handleScroll = () => {
+      setVirtualScrollTop(element.scrollTop);
+    };
+    element.addEventListener('scroll', handleScroll, { passive: true });
+    const observer = new ResizeObserver(() => syncViewport());
+    observer.observe(element);
+    return () => {
+      element.removeEventListener('scroll', handleScroll);
+      observer.disconnect();
+    };
+  }, [inline, rows.length]);
 
   useEffect(() => {
     if (!inline) return;
@@ -2816,7 +2879,18 @@ function ImportEditor({
             </tr>
           </thead>
           <tbody>
-            {rows.map((row, rowIdx) => (
+            {shouldVirtualizeRows && visibleRowWindow.paddingTop > 0 && (
+              <tr aria-hidden="true">
+                <td
+                  colSpan={SETTLEMENT_COLUMNS.length + 1}
+                  style={{ height: visibleRowWindow.paddingTop }}
+                  className="border-b-0 p-0"
+                />
+              </tr>
+            )}
+            {visibleRows.map((row, visibleIndex) => {
+              const rowIdx = visibleRowWindow.startIndex + visibleIndex;
+              return (
               <MemoizedImportEditorRow
                 key={`${row.tempId}-${rowIdx}`}
                 row={row}
@@ -2856,7 +2930,17 @@ function ImportEditor({
                 noIdx={noIdx}
                 colWidths={colWidths}
               />
-            ))}
+              );
+            })}
+            {shouldVirtualizeRows && visibleRowWindow.paddingBottom > 0 && (
+              <tr aria-hidden="true">
+                <td
+                  colSpan={SETTLEMENT_COLUMNS.length + 1}
+                  style={{ height: visibleRowWindow.paddingBottom }}
+                  className="border-b-0 p-0"
+                />
+              </tr>
+            )}
             {rows.length === 0 && (
               <tr>
                 <td
