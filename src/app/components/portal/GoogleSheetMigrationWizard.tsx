@@ -162,6 +162,7 @@ export function GoogleSheetMigrationWizard({
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisError, setAnalysisError] = useState('');
   const [analysisKey, setAnalysisKey] = useState('');
+  const [pendingSheetName, setPendingSheetName] = useState('');
 
   useEffect(() => {
     if (open) return;
@@ -174,6 +175,7 @@ export function GoogleSheetMigrationWizard({
     setAnalysisLoading(false);
     setAnalysisError('');
     setAnalysisKey('');
+    setPendingSheetName('');
   }, [open]);
 
   const selectedDescriptor = useMemo(
@@ -337,6 +339,7 @@ export function GoogleSheetMigrationWizard({
     }
 
     if (devHarnessEnabled && trimmedLink === DEV_GOOGLE_SHEET_SAMPLE_VALUE) {
+      setPendingSheetName(sheetName || '');
       const result = buildDevGoogleSheetImportPreview(sheetName);
       setPreview(result);
       setAnalysis(null);
@@ -344,10 +347,12 @@ export function GoogleSheetMigrationWizard({
       setAnalysisKey('');
       setLink(trimmedLink);
       setStep(sheetName ? 'review' : 'sheet');
+      setPendingSheetName('');
       toast.success(`개발용 샘플 미리보기 완료: ${result.selectedSheetName}`);
       return;
     }
 
+    setPendingSheetName(sheetName || '');
     setPreviewing(true);
     try {
       const googleAccessToken = bffActor.googleAccessToken || await ensureGoogleWorkspaceAccess() || undefined;
@@ -375,6 +380,7 @@ export function GoogleSheetMigrationWizard({
       setAnalysisKey('');
       toast.error(resolveApiErrorMessage(error, 'Google Sheets 미리보기에 실패했습니다.'));
     } finally {
+      setPendingSheetName('');
       setPreviewing(false);
     }
   };
@@ -472,6 +478,7 @@ export function GoogleSheetMigrationWizard({
       analysis={analysis}
       analysisLoading={analysisLoading}
       analysisError={analysisError}
+      pendingSheetName={pendingSheetName}
       devHarnessEnabled={devHarnessEnabled}
       previewing={previewing}
       applying={applying}
@@ -495,6 +502,7 @@ function GoogleSheetImportDialog({
   analysis,
   analysisLoading,
   analysisError,
+  pendingSheetName,
   devHarnessEnabled,
   previewing,
   applying,
@@ -514,6 +522,7 @@ function GoogleSheetImportDialog({
   analysis: GoogleSheetMigrationAnalysisResult | null;
   analysisLoading: boolean;
   analysisError: string;
+  pendingSheetName: string;
   devHarnessEnabled: boolean;
   previewing: boolean;
   applying: boolean;
@@ -524,20 +533,23 @@ function GoogleSheetImportDialog({
   const protectedHeaderSet = useMemo(() => new Set(GOOGLE_SHEET_PROTECTED_HEADERS), []);
   const steps: GoogleSheetWizardStep[] = ['source', 'sheet', 'review', 'apply'];
   const currentStepIndex = steps.indexOf(step);
-  const selectedSheetName = preview?.selectedSheetName || '';
+  const selectedSheetName = pendingSheetName || preview?.selectedSheetName || '';
   const selectedDescriptor = reviewState?.descriptor || describeGoogleSheetMigrationTarget(selectedSheetName);
   const applySupported = Boolean(reviewState?.applySupported);
+  const navigationLocked = previewing || applying;
   const matrixPreview = useMemo(
     () => (preview?.matrix || []).slice(0, 24).map((row) => row.slice(0, 16)),
     [preview?.matrix],
   );
 
   const goPrev = () => {
+    if (navigationLocked) return;
     if (currentStepIndex <= 0) return;
     onStepChange(steps[currentStepIndex - 1]);
   };
 
   const goNext = () => {
+    if (navigationLocked) return;
     if (step === 'source') {
       if (!preview) return;
       onStepChange('sheet');
@@ -583,7 +595,9 @@ function GoogleSheetImportDialog({
                           ? 'border-emerald-200 bg-emerald-50 text-emerald-950'
                           : 'border-slate-200 bg-slate-50 text-slate-600'
                     }`}
+                    disabled={navigationLocked}
                     onClick={() => {
+                      if (navigationLocked) return;
                       if (stepKey === 'source') onStepChange('source');
                       if (preview && (stepKey === 'sheet' || stepKey === 'review' || stepKey === 'apply')) {
                         onStepChange(stepKey);
@@ -690,6 +704,7 @@ function GoogleSheetImportDialog({
                       <p className="text-sm font-semibold text-slate-950">{preview?.spreadsheetTitle || '워크북 탭 선택'}</p>
                       <p className="text-[12px] text-muted-foreground">
                         현재 선택 탭: {selectedSheetName || '없음'}
+                        {previewing && pendingSheetName ? ' · 새 탭 미리보기 불러오는 중' : ''}
                       </p>
                     </div>
                     <Badge variant="outline" className="text-[10px]">{selectedDescriptor.readinessLabel}</Badge>
@@ -713,6 +728,7 @@ function GoogleSheetImportDialog({
                               ? 'border-sky-300 bg-sky-50'
                               : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
                           }`}
+                          disabled={navigationLocked}
                           onClick={() => onSelectSheet(sheet.title)}
                         >
                           <div className="flex items-start justify-between gap-2">
@@ -965,7 +981,7 @@ function GoogleSheetImportDialog({
                     type="button"
                     variant="outline"
                     className="flex-1 text-[12px]"
-                    disabled={currentStepIndex === 0}
+                    disabled={currentStepIndex === 0 || navigationLocked}
                     onClick={goPrev}
                   >
                     <ChevronLeft className="mr-1 h-4 w-4" />
@@ -975,10 +991,10 @@ function GoogleSheetImportDialog({
                     <Button
                       type="button"
                       className="flex-1 text-[12px]"
-                      disabled={(step === 'source' && !preview) || (step !== 'source' && !preview)}
+                      disabled={navigationLocked || (step === 'source' && !preview) || (step !== 'source' && !preview)}
                       onClick={goNext}
                     >
-                      다음
+                      {previewing && pendingSheetName ? '탭 불러오는 중…' : '다음'}
                       <ChevronRight className="ml-1 h-4 w-4" />
                     </Button>
                   ) : (
