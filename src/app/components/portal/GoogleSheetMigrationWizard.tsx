@@ -174,7 +174,7 @@ export function GoogleSheetMigrationWizard({
           descriptor,
           applySupported: mergePlan.summary.importedCount > 0,
           applyButtonLabel: `${activeSheetName}에 안전 반영`,
-          applyHint: '빈 셀은 기존 값을 지우지 않고, 드라이브/업로드 연동 컬럼은 유지합니다.',
+          applyHint: '빈 셀은 기존 값을 지우지 않고, Drive 링크 컬럼은 유지합니다.',
           summaryStats: [
             { label: '가져온 행', value: `${mergePlan.summary.importedCount}건` },
             { label: '신규 추가', value: `${mergePlan.summary.createCount}건` },
@@ -550,7 +550,7 @@ function GoogleSheetImportDialog({
                       <p className="font-semibold">안전 규칙</p>
                       <ul className="mt-2 space-y-1 text-amber-900/90">
                         <li>빈 셀은 기존 값을 지우지 않습니다.</li>
-                        <li>증빙 드라이브/업로드 결과는 덮어쓰지 않습니다.</li>
+                        <li>증빙 Drive 링크 컬럼은 덮어쓰지 않습니다.</li>
                         <li>탭 성격이 다른 경우 preview만 허용하고 반영은 막습니다.</li>
                       </ul>
                     </div>

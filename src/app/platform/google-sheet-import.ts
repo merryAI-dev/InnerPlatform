@@ -4,9 +4,6 @@ const COLUMN_INDEX_BY_HEADER = new Map(SETTLEMENT_COLUMNS.map((column, index) =>
 
 export const GOOGLE_SHEET_PROTECTED_HEADERS = [
   '증빙자료 드라이브',
-  '실제 구비 완료된 증빙자료 리스트',
-  '준비필요자료',
-  '준비 필요자료',
 ] as const;
 
 const PROTECTED_HEADER_SET = new Set<string>(GOOGLE_SHEET_PROTECTED_HEADERS);
