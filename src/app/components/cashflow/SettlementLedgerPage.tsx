@@ -24,6 +24,12 @@ import {
   type ImportRow,
 } from '../../platform/settlement-csv';
 import { CASHFLOW_ALL_LINES } from '../../platform/cashflow-sheet';
+import {
+  buildProtectedClearColumnIndexes,
+  clearAllImportCells,
+  clearSelectedImportCells,
+  removeSelectedImportRows,
+} from '../../platform/settlement-grid-actions';
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -1888,6 +1894,10 @@ function ImportEditor({
       c2: Math.max(selection.start.c, selection.end.c),
     };
   }, [selection]);
+  const protectedClearColumnIndexes = useMemo(
+    () => buildProtectedClearColumnIndexes(SETTLEMENT_COLUMNS),
+    [],
+  );
   const sourceTransactionMap = useMemo(
     () => new Map(sourceTransactions.map((transaction) => [transaction.id, transaction])),
     [sourceTransactions],
@@ -2206,6 +2216,10 @@ function ImportEditor({
     onChange(applyDerivedRows(normalizeRowNumbers(nextRows)));
   }, [onChange, applyDerivedRows, normalizeRowNumbers]);
 
+  const pushUndoSnapshot = useCallback(() => {
+    undoStack.current.push(cloneRows(rows));
+  }, [cloneRows, rows]);
+
   const addRow = useCallback(() => {
     const anchor = getSelectionAnchor();
     const insertIndex = anchor ? Math.min(rows.length, anchor.rowIdx + 1) : rows.length;
@@ -2291,7 +2305,7 @@ function ImportEditor({
         };
 
       // Snapshot for undo
-      undoStack.current.push(cloneRows(rows));
+      pushUndoSnapshot();
 
       const neededRows = bounds.r2 + 1;
       const nextRows = [...rows];
@@ -2366,7 +2380,7 @@ function ImportEditor({
       formatNumberCell,
       noIdx,
       selection,
-      cloneRows,
+      pushUndoSnapshot,
       budgetCodeIdx,
       subCodeIdx,
       evidenceIdx,
@@ -2411,6 +2425,28 @@ function ImportEditor({
     const prev = undoStack.current.pop();
     if (prev) onChange(prev);
   }, [onChange]);
+
+  const clearSelectedCells = useCallback(() => {
+    if (!selectionBounds) return;
+    const nextRows = clearSelectedImportCells(rows, selectionBounds, protectedClearColumnIndexes);
+    const changed = nextRows.some((row, index) => row !== rows[index]);
+    if (!changed) return;
+    pushUndoSnapshot();
+    commitRows(nextRows, {
+      rowIdx: selectionBounds.r1,
+      colIdx: Math.max(0, selectionBounds.c1),
+    });
+  }, [commitRows, protectedClearColumnIndexes, pushUndoSnapshot, rows, selectionBounds]);
+
+  const clearCurrentSheet = useCallback(() => {
+    const confirmed = window.confirm('현재 탭의 내용을 모두 비울까요? Drive/증빙 상태 컬럼은 유지됩니다.');
+    if (!confirmed) return;
+    const nextRows = clearAllImportCells(rows, protectedClearColumnIndexes);
+    const changed = nextRows.some((row, index) => row !== rows[index]);
+    if (!changed) return;
+    pushUndoSnapshot();
+    commitRows(nextRows, selectionBounds ? { rowIdx: selectionBounds.r1, colIdx: selectionBounds.c1 } : null);
+  }, [commitRows, protectedClearColumnIndexes, pushUndoSnapshot, rows, selectionBounds]);
 
   const handleCopy = useCallback((e: KeyboardEvent<HTMLDivElement>) => {
     const isCopy = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c';
@@ -2476,6 +2512,42 @@ function ImportEditor({
     handleCopy(e);
     if (e.defaultPrevented) return;
 
+    const isSelectAll = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a';
+    if (isSelectAll) {
+      e.preventDefault();
+      if (rows.length === 0 || SETTLEMENT_COLUMNS.length <= 1) return;
+      setSelection({
+        start: { r: 0, c: noIdx === 0 ? 1 : 0 },
+        end: { r: Math.max(0, rows.length - 1), c: Math.max(0, SETTLEMENT_COLUMNS.length - 1) },
+      });
+      return;
+    }
+
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      setOpenSelect(null);
+      setSelection(null);
+      return;
+    }
+
+    const isEditableTarget = e.target instanceof HTMLElement
+      && (e.target instanceof HTMLInputElement
+        || e.target instanceof HTMLTextAreaElement
+        || e.target instanceof HTMLSelectElement
+        || e.target.isContentEditable);
+    const isSingleCellSelection = Boolean(
+      selectionBounds
+      && selectionBounds.r1 === selectionBounds.r2
+      && selectionBounds.c1 === selectionBounds.c2,
+    );
+    if ((e.key === 'Delete' || e.key === 'Backspace') && selectionBounds) {
+      if (!(isEditableTarget && isSingleCellSelection && e.key === 'Backspace')) {
+        e.preventDefault();
+        clearSelectedCells();
+        return;
+      }
+    }
+
     const anchor = selection
       ? {
         r: Math.min(selection.start.r, selection.end.r),
@@ -2509,7 +2581,7 @@ function ImportEditor({
     if (e.key === 'ArrowRight') {
       focusCellAt(anchor.r, anchor.c + 1);
     }
-  }, [handleUndo, handleCopy, selection, focusCellAt]);
+  }, [clearSelectedCells, focusCellAt, handleCopy, handleUndo, noIdx, rows.length, selection, selectionBounds]);
 
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
@@ -2586,11 +2658,25 @@ function ImportEditor({
   const removeRow = useCallback(
     (rowIdx: number) => {
       const nextRows = rows.filter((_, i) => i !== rowIdx);
+      if (nextRows.length === rows.length) return;
+      pushUndoSnapshot();
       const nextFocusRow = Math.min(Math.max(0, rowIdx - 1), Math.max(0, nextRows.length - 1));
       commitRows(nextRows, nextRows.length > 0 ? { rowIdx: nextFocusRow, colIdx: getPreferredEditableCol() } : null);
     },
-    [rows, commitRows, getPreferredEditableCol],
+    [rows, pushUndoSnapshot, commitRows, getPreferredEditableCol],
   );
+
+  const removeSelectedRowsByRange = useCallback(() => {
+    if (!selectionBounds) return;
+    const nextRows = removeSelectedImportRows(rows, selectionBounds);
+    if (nextRows.length === rows.length) return;
+    pushUndoSnapshot();
+    const nextFocusRow = Math.min(selectionBounds.r1, Math.max(0, nextRows.length - 1));
+    commitRows(
+      nextRows,
+      nextRows.length > 0 ? { rowIdx: nextFocusRow, colIdx: getPreferredEditableCol() } : null,
+    );
+  }, [commitRows, getPreferredEditableCol, pushUndoSnapshot, rows, selectionBounds]);
 
   const applyEvidenceMapping = useCallback((rowIdx?: number) => {
     if (budgetCodeIdx < 0 || subCodeIdx < 0 || evidenceIdx < 0) return;
@@ -2661,7 +2747,7 @@ function ImportEditor({
             <Badge variant="secondary" className="text-[10px] text-red-600">{missingCount}건 미입력</Badge>
           )}
           <span className="text-[10px] text-muted-foreground">
-            셀을 직접 수정하거나 행을 추가할 수 있습니다
+            Delete로 선택 셀 비우기, Cmd/Ctrl+A로 전체 선택, 드라이브 컬럼은 보호됩니다
           </span>
         </div>
         <div className="flex items-center gap-2">
@@ -2708,14 +2794,38 @@ function ImportEditor({
             variant="outline"
             size="sm"
             className="h-7 text-[11px] gap-1 cursor-pointer shadow-sm hover:bg-muted/40"
+            onClick={clearSelectedCells}
+            disabled={!selectionBounds}
+          >
+            <X className="h-3.5 w-3.5" />
+            선택 셀 비우기
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-[11px] gap-1 cursor-pointer shadow-sm hover:bg-muted/40"
             onClick={() => {
+              if (selectionBounds) {
+                removeSelectedRowsByRange();
+                return;
+              }
               if (selectedRowIdx < 0) return;
               removeRow(selectedRowIdx);
             }}
-            disabled={selectedRowIdx < 0 || rows.length === 0}
+            disabled={(selectedRowIdx < 0 && !selectionBounds) || rows.length === 0}
           >
             <X className="h-3.5 w-3.5" />
             선택 행 삭제
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-[11px] gap-1 cursor-pointer shadow-sm hover:bg-muted/40"
+            onClick={clearCurrentSheet}
+            disabled={rows.length === 0}
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            현재 탭 전체 비우기
           </Button>
           <Button
             variant="outline"
@@ -3821,6 +3931,7 @@ const MemoizedImportEditorRow = memo(ImportEditorRow, (prev, next) => {
     && prev.evidenceRequiredMap === next.evidenceRequiredMap
     && prev.commentCountByCell === next.commentCountByCell
     && prev.persistedTransactionId === next.persistedTransactionId
+    && prev.persistedTransaction?.evidenceDriveSyncStatus === next.persistedTransaction?.evidenceDriveSyncStatus
     && prev.noIdx === next.noIdx
     && prev.colWidths === next.colWidths
     && selectionKeyForRow(prev.rowIdx, prev.selectionBounds) === selectionKeyForRow(next.rowIdx, next.selectionBounds)
