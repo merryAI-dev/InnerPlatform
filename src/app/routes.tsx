@@ -63,6 +63,7 @@ export const router = createBrowserRouter([
   // ── Login ──
   { path: '/login', element: <S C={LoginPage} /> },
   { path: '/workspace-select', element: <S C={WorkspaceSelectPage} /> },
+  { path: '/help/claude-sdk', element: <S C={ClaudeSdkHelpPage} /> },
   // ── Admin (관리자) ──
   {
     path: '/',
