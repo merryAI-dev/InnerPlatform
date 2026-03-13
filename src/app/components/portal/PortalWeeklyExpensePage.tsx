@@ -36,6 +36,7 @@ import {
 import { splitLooseNameList } from '../../platform/name-list';
 import { type ImportRow } from '../../platform/settlement-csv';
 import { readDevAuthHarnessConfig } from '../../platform/dev-harness';
+import { resolvePortalHappyPath } from '../../platform/portal-happy-path';
 const GoogleSheetMigrationWizard = lazy(
   () => import('./GoogleSheetMigrationWizard').then((module) => ({ default: module.GoogleSheetMigrationWizard })),
 );
@@ -101,6 +102,12 @@ export function PortalWeeklyExpensePage() {
     const ledger = ledgers.find((l) => l.projectId === projectId);
     return ledger?.id || `l-${projectId}`;
   }, [projectId, ledgers]);
+  const happyPath = useMemo(() => resolvePortalHappyPath({
+    authUser,
+    portalUser,
+    project: myProject,
+    ledgers,
+  }), [authUser, portalUser, myProject, ledgers]);
 
   const effectiveBudgetCodeBook = useMemo(() => {
     const orderedCodes: string[] = [];
@@ -535,6 +542,54 @@ export function PortalWeeklyExpensePage() {
           >
             탭 삭제
           </Button>
+        </div>
+      </div>
+      <div className={`rounded-xl border px-4 py-3 text-[12px] ${
+        happyPath.canUseEvidenceWorkflow
+          ? 'border-emerald-200/80 bg-emerald-50/70 text-emerald-950'
+          : 'border-sky-200/80 bg-sky-50/70 text-sky-950'
+      }`}>
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div className="space-y-1">
+            <p className="font-semibold">현재 happy path 상태</p>
+            <p className={happyPath.canUseEvidenceWorkflow ? 'text-emerald-900/80' : 'text-sky-900/80'}>
+              {happyPath.canUseEvidenceWorkflow
+                ? `${happyPath.selectedProjectName || projectName}에서 행 저장 후 생성/업로드/동기화를 바로 사용할 수 있습니다.`
+                : '주간 입력은 가능하지만, 증빙 Workflow를 바로 쓰려면 기본 폴더 준비가 먼저 필요합니다.'}
+            </p>
+            <p className="text-[11px] text-muted-foreground">
+              {happyPath.steps
+                .filter((step) => step.status !== 'complete')
+                .map((step) => step.label)
+                .join(' · ') || '필수 준비가 모두 완료되었습니다.'}
+            </p>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            {!happyPath.canUseEvidenceWorkflow && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 text-[11px]"
+                onClick={() => void provisionProjectDriveRoot()}
+                disabled={projectDriveProvisioning || !happyPath.canOpenWeeklyExpenses}
+              >
+                {projectDriveProvisioning ? (
+                  <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <FolderPlus className="mr-1 h-3.5 w-3.5" />
+                )}
+                기본 폴더 준비
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-[11px]"
+              onClick={() => window.location.assign('/portal/project-settings')}
+            >
+              설정 열기
+            </Button>
+          </div>
         </div>
       </div>
       <div className="rounded-xl border border-amber-200/70 bg-amber-50/70 px-4 py-3 text-[12px] text-amber-900">
