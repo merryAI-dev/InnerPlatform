@@ -231,6 +231,7 @@ export function PortalWeeklyExpensePage() {
       evidenceDriveSyncStatus: 'SYNCED',
       evidenceDriveLastSyncedAt: result.lastSyncedAt,
       evidenceCompletedDesc: result.evidenceCompletedDesc || undefined,
+      evidenceCompletedManualDesc: result.evidenceCompletedManualDesc || undefined,
       evidenceAutoListedDesc: result.evidenceAutoListedDesc || undefined,
       evidencePendingDesc: result.evidencePendingDesc || undefined,
       supportPendingDocs: result.supportPendingDocs || undefined,
@@ -450,6 +451,16 @@ export function PortalWeeklyExpensePage() {
           evidenceDriveSyncStatus: 'UPLOADED',
           updatedAt: new Date().toISOString(),
         });
+        const syncResult = await syncTransactionEvidenceDriveViaBff({
+          tenantId: orgId,
+          actor: bffActor,
+          transactionId: tx.id,
+        });
+        applySyncedEvidenceState(tx.id, syncResult);
+        const uploadLabel = uploads.length === 1
+          ? uploads[0]?.reviewedFileName || uploads[0]?.file.name || '파일 1건'
+          : `${uploads[0]?.reviewedFileName || uploads[0]?.file.name || '파일'} 외 ${uploads.length - 1}건`;
+        toast.success(`업로드 완료 후 동기화됨: ${uploadLabel}`);
       } else if (lastResult) {
         applySyncedEvidenceState(tx.id, lastResult);
       }

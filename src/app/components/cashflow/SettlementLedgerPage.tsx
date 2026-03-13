@@ -7,7 +7,13 @@ import { BUDGET_CODE_BOOK } from '../../data/budget-data';
 import type { BudgetCodeEntry, Comment, Transaction, TransactionState } from '../../data/types';
 import { findWeekForDate, getMonthMondayWeeks, getYearMondayWeeks, type MonthMondayWeek } from '../../platform/cashflow-weeks';
 import { parseDate, parseNumber, triggerDownload } from '../../platform/csv-utils';
-import { computeEvidenceStatus, computeEvidenceSummary, isValidDriveUrl } from '../../platform/evidence-helpers';
+import {
+  computeEvidenceStatus,
+  computeEvidenceSummary,
+  isValidDriveUrl,
+  resolveEvidenceCompletedDesc,
+  resolveEvidenceCompletedManualDesc,
+} from '../../platform/evidence-helpers';
 import {
   buildDriveTransactionFolderName,
   inferEvidenceCategoryFromFileName,
@@ -1278,7 +1284,9 @@ function TransactionRow({
     };
   }, []);
 
-  const effectiveCompletedDesc = tx.evidenceCompletedDesc || tx.evidenceAutoListedDesc || '';
+  const autoCompletedDesc = tx.evidenceAutoListedDesc || '';
+  const manualCompletedDesc = resolveEvidenceCompletedManualDesc(tx);
+  const effectiveCompletedDesc = resolveEvidenceCompletedDesc(tx);
   const suggestedFolderName = tx.evidenceDriveFolderName || buildDriveTransactionFolderName(tx);
   const driveStatusLabel = tx.evidenceDriveSyncStatus === 'UPLOADED'
     ? '업로드됨'
@@ -1450,23 +1458,44 @@ function TransactionRow({
       {/* 사업팀: 필수증빙자료 리스트 */}
       {textCell(tx.evidenceRequiredDesc, 'evidenceRequiredDesc')}
       {/* 사업팀: 실제 구비 완료된 증빙자료 리스트 */}
-      <td className="px-1 py-0.5 border-b border-r">
-        <input
-          key={`evidence-completed-${tx.id}-${effectiveCompletedDesc}`}
-          type="text"
-          defaultValue={effectiveCompletedDesc}
-          disabled={locked}
-          placeholder={tx.evidenceAutoListedDesc ? `자동집계: ${tx.evidenceAutoListedDesc}` : ''}
-          title={tx.evidenceAutoListedDesc ? `자동 집계: ${tx.evidenceAutoListedDesc}` : undefined}
-          className={`w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[60px] ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
-          onBlur={(e) => {
-            if (!locked && e.target.value !== effectiveCompletedDesc) {
-              const updatedTx = { ...tx, evidenceCompletedDesc: e.target.value };
-              const newStatus = computeEvidenceStatus(updatedTx);
-              debouncedUpdate({ evidenceCompletedDesc: e.target.value, evidenceStatus: newStatus });
-            }
-          }}
-        />
+      <td className="px-1 py-0.5 border-b border-r align-top">
+        <div className="min-w-[160px] space-y-1">
+          <div
+            className="rounded border border-dashed bg-muted/30 px-1 py-0.5 text-[10px]"
+            title={autoCompletedDesc ? `드라이브 자동 집계: ${autoCompletedDesc}` : '동기화 후 드라이브 파일 기준으로 자동 집계됩니다.'}
+          >
+            <div className="text-[8px] font-semibold uppercase tracking-wide text-muted-foreground">자동 집계</div>
+            <div className="truncate">{autoCompletedDesc || '동기화 전'}</div>
+          </div>
+          <input
+            key={`evidence-completed-manual-${tx.id}-${manualCompletedDesc}`}
+            type="text"
+            defaultValue={manualCompletedDesc}
+            disabled={locked}
+            placeholder="수기 보정(선택)"
+            title={effectiveCompletedDesc ? `최종 반영: ${effectiveCompletedDesc}` : '수기 보정이 없으면 자동 집계 목록이 그대로 반영됩니다.'}
+            className={`w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[60px] border rounded ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
+            onBlur={(e) => {
+              if (!locked && e.target.value !== manualCompletedDesc) {
+                const nextManualDesc = e.target.value.trim();
+                const updatedTx = {
+                  ...tx,
+                  evidenceCompletedManualDesc: nextManualDesc || undefined,
+                  evidenceCompletedDesc: resolveEvidenceCompletedDesc({
+                    ...tx,
+                    evidenceCompletedManualDesc: nextManualDesc || undefined,
+                  } as Transaction),
+                };
+                const newStatus = computeEvidenceStatus(updatedTx);
+                debouncedUpdate({
+                  evidenceCompletedManualDesc: nextManualDesc || undefined,
+                  evidenceCompletedDesc: updatedTx.evidenceCompletedDesc,
+                  evidenceStatus: newStatus,
+                });
+              }
+            }}
+          />
+        </div>
       </td>
       {/* 사업팀: 준비필요자료 */}
       {textCell(tx.evidencePendingDesc, 'evidencePendingDesc')}

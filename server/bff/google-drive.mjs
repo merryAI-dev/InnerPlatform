@@ -223,6 +223,28 @@ function mergeEvidenceCompletedDesc(previousCompleted, autoCompletedDesc) {
   return merged.join(', ');
 }
 
+function resolveManualCompletedDesc(transaction) {
+  const explicitManual = readOptionalText(transaction?.evidenceCompletedManualDesc);
+  if (explicitManual) return explicitManual;
+
+  const completedDesc = readOptionalText(transaction?.evidenceCompletedDesc);
+  const autoCompletedDesc = readOptionalText(transaction?.evidenceAutoListedDesc);
+  if (!completedDesc) return '';
+  if (!autoCompletedDesc) return completedDesc;
+
+  const autoKeys = new Set(
+    splitEvidenceList(autoCompletedDesc)
+      .map((entry) => normalizeEvidenceMatchKey(entry) || entry),
+  );
+
+  return splitEvidenceList(completedDesc)
+    .filter((entry) => {
+      const key = normalizeEvidenceMatchKey(entry) || entry;
+      return !autoKeys.has(key);
+    })
+    .join(', ');
+}
+
 function computeEvidenceMissing(requiredValues, completedDesc, evidences = []) {
   const completedKeys = new Set(
     splitEvidenceList(completedDesc)
@@ -353,8 +375,8 @@ function normalizeDriveFile(file, fallbackDriveId = '') {
 
 export function resolveEvidenceSyncPatch({ transaction, evidences, folder }) {
   const autoCompletedDesc = buildEvidenceCompletedDesc(evidences);
-  const previousCompleted = readOptionalText(transaction?.evidenceCompletedDesc);
-  const completedDesc = mergeEvidenceCompletedDesc(previousCompleted, autoCompletedDesc) || undefined;
+  const manualCompletedDesc = resolveManualCompletedDesc(transaction);
+  const completedDesc = mergeEvidenceCompletedDesc(autoCompletedDesc, manualCompletedDesc) || undefined;
   const requiredValues = readRequiredEvidence(transaction);
   const evidenceMissing = computeEvidenceMissing(requiredValues, completedDesc, evidences);
   const evidencePendingDesc = evidenceMissing.join(', ');
@@ -363,6 +385,7 @@ export function resolveEvidenceSyncPatch({ transaction, evidences, folder }) {
   return {
     attachmentsCount: evidences.length,
     evidenceAutoListedDesc: autoCompletedDesc || undefined,
+    evidenceCompletedManualDesc: manualCompletedDesc || undefined,
     evidenceCompletedDesc: completedDesc || undefined,
     evidencePendingDesc: evidencePendingDesc || undefined,
     supportPendingDocs: evidencePendingDesc || undefined,
