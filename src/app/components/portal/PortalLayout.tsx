@@ -31,6 +31,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/
 import { DarkModeToggle } from '../layout/DarkModeToggle';
 import { PageTransition } from '../layout/PageTransition';
 import { ErrorBoundary } from '../layout/ErrorBoundary';
+import { ClaudeSdkHelpWidget } from '../guide-chat/ClaudeSdkHelpWidget';
 import {
   canChooseWorkspace,
   canEnterPortalWorkspace,
@@ -474,6 +475,7 @@ function PortalContent() {
           </main>
         </div>
       </div>
+      <ClaudeSdkHelpWidget />
     </TooltipProvider>
   );
 }

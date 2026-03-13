@@ -27,6 +27,7 @@ import { ScrollToTop } from './ScrollToTop';
 import { QuickActionFab } from './QuickActionFab';
 import { PageTransition } from './PageTransition';
 import { ErrorBoundary } from './ErrorBoundary';
+import { ClaudeSdkHelpWidget } from '../guide-chat/ClaudeSdkHelpWidget';
 import { canChooseWorkspace, isPortalRole, resolveHomePath } from '../../platform/navigation';
 import { canAccessAdminPath, canShowAdminNavItem } from '../../platform/admin-nav';
 
@@ -446,6 +447,7 @@ function AppLayoutContent() {
       </div>
       <ScrollToTop />
       <QuickActionFab />
+      <ClaudeSdkHelpWidget />
     </TooltipProvider>
   );
 }
