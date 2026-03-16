@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 
-const MODEL = 'claude-sonnet-4-20250514';
+const MODEL = process.env.ANTHROPIC_MIGRATION_AI_MODEL || process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514';
 const MAX_ANALYSIS_ROWS = 40;
 const MAX_ANALYSIS_COLS = 24;
 const MAX_CELL_CHARS = 160;
@@ -207,13 +207,57 @@ function sanitizeMappings(value, fallback = []) {
 
 function buildPrompt(input, fallback) {
   const sampleRows = compactRows(input.matrix).slice(0, 16);
+  const examples = [
+    {
+      sheetName: '사용내역(통장내역기준/취소내역,불인정포함)',
+      summary: '2줄 헤더가 있는 사용내역 탭으로 보이며, 사업비 입력(주간) 반영 대상으로 우선 검토하는 것이 안전합니다.',
+      confidence: 'high',
+      likelyTarget: 'expense_sheet',
+      usageTips: [
+        '그룹 헤더와 실제 컬럼 헤더를 함께 읽어 입금/출금/지급처 컬럼을 확인하세요.',
+        '반영 후 표본 3~5행에서 거래일시, 지급처, 금액이 올바른지 확인하세요.',
+      ],
+      warnings: [
+        '2줄 헤더 탭이라 그룹 헤더 아래 실제 컬럼이 밀리지 않았는지 사람이 한 번 더 확인해야 합니다.',
+      ],
+      nextActions: [
+        '미리보기에서 입금합계 > 입금액, 사업팀 > 지급처 같은 매핑이 맞는지 확인하세요.',
+      ],
+      suggestedMappings: [
+        { sourceHeader: '입금합계 > 입금액', platformField: '입금합계/입금액', confidence: 'high', reason: '입금 집계 또는 실제 입금 금액 후보입니다.' },
+      ],
+    },
+    {
+      sheetName: 'FAQ',
+      summary: '반영 대상이 아니라 참고용 탭으로 보입니다. 구조만 점검하고 실제 반영은 하지 않는 것이 안전합니다.',
+      confidence: 'high',
+      likelyTarget: 'preview_only',
+      usageTips: ['preview-only 탭은 반영보다 안내문/참고자료 여부를 먼저 확인하세요.'],
+      warnings: ['FAQ/안내문 성격 탭은 직접 반영하면 데이터가 섞일 수 있습니다.'],
+      nextActions: ['이 탭은 넘어가고 실제 데이터가 있는 탭으로 이동하세요.'],
+      suggestedMappings: [],
+    },
+  ];
+
+  const examplesXml = examples
+    .map((example) => [
+      '<example>',
+      `<sheet_name>${example.sheetName}</sheet_name>`,
+      `<ideal_json>${JSON.stringify(example)}</ideal_json>`,
+      '</example>',
+    ].join('\n'))
+    .join('\n');
+
   return [
+    '<role>',
     '당신은 Google Sheets → MYSC 플랫폼 migration assistant 입니다.',
-    '당신의 역할은 시트 탭 구조를 읽고, 사용자가 migration 전 무엇을 먼저 봐야 하는지 실제 업무 관점에서 도와주는 것입니다.',
-    '최종 저장 로직은 사람이 결정하므로, 보수적으로 판단하세요.',
+    '탭 구조를 읽고, 사용자가 실제 migration 전에 무엇을 먼저 확인해야 하는지 업무 관점에서 도와줍니다.',
+    '</role>',
+    '<success_criteria>',
+    '보수적으로 판단하세요. 최종 저장 로직은 사람이 결정하므로, 확신이 낮으면 낮게 표시하세요.',
     '반드시 한국어 JSON만 반환하세요.',
-    '',
-    '반환 JSON 스키마:',
+    '</success_criteria>',
+    '<output_schema>',
     '{',
     '  "summary": "한두 문장 요약",',
     '  "confidence": "high|medium|low",',
@@ -225,26 +269,31 @@ function buildPrompt(input, fallback) {
     '    { "sourceHeader": "원본 헤더", "platformField": "플랫폼 필드", "confidence": "high|medium|low", "reason": "근거" }',
     '  ]',
     '}',
-    '',
-    '기본 규칙 기반 판단(참고):',
+    '</output_schema>',
+    '<heuristic_baseline>',
     JSON.stringify({
       likelyTarget: fallback.likelyTarget,
       headerPreview: fallback.headerPreview,
       suggestedMappings: fallback.suggestedMappings,
     }, null, 2),
-    '',
-    '시트 컨텍스트:',
+    '</heuristic_baseline>',
+    '<sheet_context>',
     JSON.stringify({
       spreadsheetTitle: input.spreadsheetTitle,
       selectedSheetName: input.selectedSheetName,
       sampleRows,
     }, null, 2),
-    '',
-    '주의:',
+    '</sheet_context>',
+    '<examples>',
+    examplesXml,
+    '</examples>',
+    '<rules>',
     '- 근거가 약하면 confidence를 낮게 주세요.',
     '- 헤더가 2줄처럼 보이면 그룹 헤더와 실제 컬럼 헤더를 함께 읽으세요.',
     '- 사람이 바로 확인해야 할 리스크를 warnings에 우선 적으세요.',
     '- usageTips에는 이 wizard를 어떤 순서로 쓰면 좋은지 실무 팁을 주세요.',
+    '- summary는 탭 성격과 가장 중요한 주의점이 바로 보이도록 짧고 직접적으로 쓰세요.',
+    '</rules>',
   ].join('\n');
 }
 

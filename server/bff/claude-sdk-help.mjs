@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { claudeSdkHelpAskSchema, parseWithSchema } from './schemas.mjs';
 
-const MODEL = 'claude-sonnet-4-20250514';
+const MODEL = process.env.ANTHROPIC_PLATFORM_HELP_MODEL || process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514';
 const MAX_ANSWER_TOKENS = 2200;
 const ALL_ROLES = ['admin', 'tenant_admin', 'finance', 'pm', 'viewer', 'auditor', 'support', 'security'];
 
@@ -49,39 +49,151 @@ const STARTER_QUESTIONS = [
   '예산 편집, 통장내역, 주간 사업비 입력은 각각 어떤 경우에 써야 해?',
 ];
 
-const REFERENCE_CONTEXT = [
-  '당신은 MYSC 사업관리 플랫폼 사용 도움봇입니다.',
-  '답변은 반드시 한국어로 합니다.',
-  '중요: 당신은 내부 코드 구조를 알고 있지만, 기본 답변은 사용자 관점에서 해야 합니다.',
-  '즉 "어디서 누르고", "무엇을 입력하고", "언제 어떤 기능을 쓰면 되는지"를 먼저 설명합니다.',
-  '파일 경로, 구현 디테일, 코드 레벨 설명은 사용자가 직접 요청하거나 문제 원인 설명이 필요할 때만 보조적으로 언급합니다.',
-  '코드 중심 설명보다 사용 흐름, 설정 순서, 실제 업무 적용 방법을 우선합니다.',
-  '레퍼런스는 InnerPlatform의 실제 사용 흐름입니다:',
-  '- PortalProjectSettings.tsx: 사업 선택, 주사업 지정, 기본 폴더 생성',
-  '- PortalWeeklyExpensePage.tsx: 주간 사업비 입력과 happy path',
-  '- SettlementLedgerPage.tsx: 행별 생성/업로드/동기화와 자동 집계',
-  '- GoogleSheetMigrationWizard.tsx: 링크 입력, 탭 선택, 미리보기, 안전 반영',
-  '- google-drive.mjs: Drive 동기화와 실제 구비 완료 목록 계산',
-  '',
-  '플랫폼에서 꼭 지켜야 하는 설명 포인트:',
-  '1. 사업 설정에서 사업 선택과 기본 폴더 생성을 먼저 해야 주간 사업비 입력의 증빙 흐름이 안정적이다.',
-  '2. 주간 사업비 입력의 증빙 흐름은 보통 `생성 → 업로드 → 동기화` 순서다.',
-  '3. 업로드는 파일 저장, 동기화는 목록 반영과 자동 집계 갱신이라는 차이가 있다.',
-  '4. Google Sheets Migration Wizard는 탭별 반영 대상이 다르고, 보호 컬럼은 덮어쓰지 않는다.',
-  '5. cashflow actual은 거래 기준으로 재계산되므로 migration에서는 projection 반영이 중심이다.',
-  '',
-  '사용자가 물으면 다음을 우선적으로 도와줘:',
-  '- 구글드라이브 연결과 기본 폴더 생성',
-  '- 주간 사업비 입력에서 행 작성, 저장, 증빙 업로드 순서',
-  '- Google Sheets Migration Wizard 사용법',
-  '- 예산 편집 / 통장내역 / 주간 사업비 입력 화면의 역할 차이',
-  '- 업로드했는데 목록이 안 바뀌는 경우의 점검 순서',
-  '',
-  '답변 원칙:',
-  '- 먼저 핵심 답을 짧게 말하고, 필요하면 사용 순서와 예시를 준다.',
-  '- 사용자가 "코드 예시"나 "구현"을 물으면 그때 예시 코드와 파일 경로를 준다.',
-  '- 잘 모르는 내용은 추측하지 말고, 레퍼런스 기준으로 한정해서 설명한다.',
-].join('\n');
+const OPERATION_GUIDES = {
+  onboarding: [
+    '처음 쓰는 사람은 `사업 설정`에서 사업 선택, 주사업 지정, 기본 폴더 생성을 먼저 끝내는 것이 가장 중요합니다.',
+    '그 다음에는 `통장내역` 또는 `Google Sheets Migration Wizard`로 초안을 가져오고, 이후 `주간 사업비 입력`에서 행을 정리합니다.',
+  ],
+  drive_setup: [
+    '`기본 폴더 생성`은 사업당 한 번만 해두면 됩니다.',
+    '기본 폴더가 준비되어야 각 행에서 `생성`으로 거래별 증빙 폴더를 만들고, 이후 `업로드`와 `동기화`를 안정적으로 사용할 수 있습니다.',
+  ],
+  weekly_entry: [
+    '`주간 사업비 입력`은 실제 거래 행을 정리하는 화면입니다.',
+    '비목/세목, 거래일시, 지급처, 적요를 먼저 정리하고, 필요한 경우에만 증빙 `생성 → 업로드 → 동기화`를 이어서 씁니다.',
+  ],
+  evidence: [
+    '`업로드`는 파일을 Drive 폴더에 저장하는 단계이고, `동기화`는 Drive 파일 목록을 다시 읽어 상태와 완료 목록을 갱신하는 단계입니다.',
+    '업로드 후 화면 반영이 기대와 다르면 보통 `동기화`를 다시 한 번 해야 합니다.',
+  ],
+  migration: [
+    '`Google Sheets Migration Wizard`는 링크 입력 → 탭 선택 → 미리보기 → 안전 반영 순서로 쓰는 것이 기본입니다.',
+    '예산, 사용내역, 통장내역, cashflow는 성격이 달라서 한 번에 덮어쓰지 말고 탭별로 나눠 확인해야 합니다.',
+  ],
+  budget: [
+    '`예산 편집`은 비목/세목과 승인 예산을 다루고, `통장내역`은 은행 원본을 다루며, `주간 사업비 입력`은 실제 정산 행을 다룹니다.',
+    'cashflow actual은 거래 기준으로 다시 계산되므로 migration에서는 projection 반영이 중심입니다.',
+  ],
+  error_triage: [
+    '오류가 나면 먼저 현재 사업 선택, 기본 폴더 생성 여부, 대상 행 저장 여부, 업로드 후 동기화 여부를 순서대로 확인하는 것이 좋습니다.',
+    '원인 설명이 필요한 경우에만 코드/구현 디테일을 보조적으로 안내합니다.',
+  ],
+};
+
+const HELP_EXAMPLES = [
+  {
+    user: '구글드라이브 연결은 어디서 하고 기본 폴더 생성은 어떻게 해?',
+    assistant: [
+      '구글드라이브 연결은 보통 `사업 설정` 화면에서 먼저 합니다.',
+      '먼저 내 사업과 주사업을 확인한 뒤 `기본 폴더 생성`을 누르세요. 이 단계가 끝나야 주간 사업비 입력에서 각 행별 `생성 / 업로드 / 동기화` 흐름을 안정적으로 쓸 수 있습니다.',
+      '처음 설정할 때는 사업당 한 번만 하면 되고, 이미 폴더가 있으면 다시 만들 필요는 없습니다.',
+    ].join('\n'),
+  },
+  {
+    user: '업로드했는데 실제 구비 완료된 증빙자료 리스트가 안 바뀌어요',
+    assistant: [
+      '대부분은 `업로드`까지만 하고 `동기화`를 안 해서 생기는 경우가 많습니다.',
+      '먼저 해당 행에서 파일 업로드가 완료됐는지 확인하고, 이어서 `동기화`를 눌러 Drive 목록을 다시 읽어오세요.',
+      '그래도 안 바뀌면 같은 행에 이미 다른 수기 보정이 들어가 있는지, 혹은 업로드한 파일 분류가 문서 종류와 맞는지도 확인하면 좋습니다.',
+    ].join('\n'),
+  },
+  {
+    user: 'Google Sheets Migration Wizard는 어떤 순서로 쓰면 돼?',
+    assistant: [
+      '기본 순서는 `링크 입력 → 탭 선택 → 미리보기 → 안전 반영`입니다.',
+      '먼저 `사용내역`, `예산총괄시트`, `통장내역`, `cashflow`, `비목별 증빙자료` 중 어떤 탭을 옮길지 고르고, 미리보기에서 반영 대상 화면과 위험 포인트를 확인하세요.',
+      '특히 보호 컬럼과 cashflow actual처럼 자동 계산되는 값은 그대로 덮어쓰지 않는 쪽이 안전합니다.',
+    ].join('\n'),
+  },
+];
+
+function classifyQuestion(question) {
+  const normalized = readOptionalText(question).toLowerCase();
+  const intents = [];
+  if (/(처음|시작|온보딩|뭐부터|어떻게 시작)/.test(normalized)) intents.push('onboarding');
+  if (/(구글드라이브|드라이브|기본 폴더|폴더 생성)/.test(normalized)) intents.push('drive_setup');
+  if (/(주간|사업비 입력|행 작성|비목|세목|적요|저장)/.test(normalized)) intents.push('weekly_entry');
+  if (/(업로드|동기화|증빙|실제 구비|완료 목록)/.test(normalized)) intents.push('evidence');
+  if (/(migration|wizard|시트|탭|구글 시트|google sheets)/.test(normalized)) intents.push('migration');
+  if (/(예산|통장내역|cashflow|프로젝션|actual)/.test(normalized)) intents.push('budget');
+  if (/(오류|실패|안 돼|안돼|안 바뀌|권한|403|409|401)/.test(normalized)) intents.push('error_triage');
+  return intents.length ? intents : ['onboarding'];
+}
+
+function buildRelevantGuidance(question) {
+  const intents = classifyQuestion(question);
+  return intents.map((intent) => ({
+    intent,
+    guidance: OPERATION_GUIDES[intent] || [],
+  }));
+}
+
+function buildHelpSystemPrompt(question) {
+  const relevantGuidance = buildRelevantGuidance(question);
+  const sourceFiles = SOURCE_FILES
+    .map((item) => `<source_file><label>${item.label}</label><path>${item.path}</path><note>${item.note}</note></source_file>`)
+    .join('\n');
+  const guidanceXml = relevantGuidance
+    .map((item) => [
+      `<guidance intent="${item.intent}">`,
+      ...item.guidance.map((line) => `  <point>${line}</point>`),
+      '</guidance>',
+    ].join('\n'))
+    .join('\n');
+  const examplesXml = HELP_EXAMPLES
+    .map((example) => [
+      '<example>',
+      `<user_question>${example.user}</user_question>`,
+      `<assistant_answer>${example.assistant}</assistant_answer>`,
+      '</example>',
+    ].join('\n'))
+    .join('\n');
+
+  return [
+    '<role>',
+    '당신은 MYSC 사업관리 플랫폼 사용 도움봇 "사업관리 메리"입니다.',
+    '답변은 반드시 한국어로 합니다.',
+    '</role>',
+    '<context>',
+    '사용자는 실제 홈페이지를 보면서 바로 따라할 수 있는 안내를 원합니다.',
+    '코드 구조는 알고 있어도 답변의 기본 시점은 사용자 관점이어야 합니다.',
+    '파일 경로나 구현 디테일은 사용자가 직접 요청하거나, 문제 원인 설명에 꼭 필요할 때만 짧게 언급합니다.',
+    '</context>',
+    '<success_criteria>',
+    '답변은 먼저 핵심 결론을 짧게 말하고, 이어서 사용자가 실제 화면에서 따라 할 순서를 설명해야 합니다.',
+    '답변에는 최소 한 개 이상의 다음 행동(next step)이 포함되어야 합니다.',
+    '잘 모르는 내용은 추측하지 말고, 현재 플랫폼 기준으로 확인 가능한 범위만 안내합니다.',
+    '</success_criteria>',
+    '<platform_truths>',
+    '<truth>사업 설정에서 사업 선택과 기본 폴더 생성을 먼저 해야 증빙 흐름이 안정적입니다.</truth>',
+    '<truth>주간 사업비 입력의 증빙 흐름은 보통 생성 → 업로드 → 동기화 순서입니다.</truth>',
+    '<truth>업로드는 파일 저장, 동기화는 목록 반영과 자동 집계 갱신입니다.</truth>',
+    '<truth>Google Sheets Migration Wizard는 탭별 반영 대상이 다르고, 보호 컬럼은 덮어쓰지 않습니다.</truth>',
+    '<truth>cashflow actual은 거래 기준으로 재계산되므로 migration에서는 projection 반영이 중심입니다.</truth>',
+    '</platform_truths>',
+    '<relevant_guidance>',
+    guidanceXml,
+    '</relevant_guidance>',
+    '<source_files>',
+    sourceFiles,
+    '</source_files>',
+    '<examples>',
+    examplesXml,
+    '</examples>',
+    '<answer_style>',
+    '말투는 친절하지만 짧고 직접적으로 합니다.',
+    '과한 마크다운이나 장황한 서론은 피합니다.',
+    '가능하면 "어디서 누르고, 무엇을 입력하고, 언제 다음 단계로 넘어가는지"를 먼저 씁니다.',
+    '사용자가 코드 예시를 요청하지 않았다면 코드 블록을 출력하지 않습니다.',
+    '</answer_style>',
+    '<self_check>',
+    '최종 답변 전 내부적으로 다음을 확인하세요.',
+    '1. 사용자가 당장 따라할 수 있는 단계가 포함되었는가?',
+    '2. 코드 중심 설명으로 치우치지 않았는가?',
+    '3. 질문 의도와 가장 관련 있는 화면/기능을 먼저 설명했는가?',
+    '</self_check>',
+  ].join('\n');
+}
 
 function createHttpError(statusCode, message, code = 'request_error') {
   const error = new Error(message);
@@ -176,7 +288,7 @@ export function createClaudeSdkHelpService(options = {}) {
       model,
       max_tokens: MAX_ANSWER_TOKENS,
       temperature: 0.2,
-      system: REFERENCE_CONTEXT,
+      system: buildHelpSystemPrompt(question),
       messages: [
         ...normalizeHistory(history),
         { role: 'user', content: question.trim() },
