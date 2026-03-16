@@ -55,7 +55,6 @@ import {
 type Step = 'contract' | 'basic' | 'financial' | 'team' | 'review';
 type ContractAnalysisState = 'idle' | 'extracting' | 'analyzing' | 'ready' | 'error';
 type AnalysisFieldKey = keyof ProjectRequestContractAnalysis['fields'];
-type AnalysisApplyMode = 'overwrite' | 'fill' | null;
 
 const STEPS: Array<{
   key: Step;
@@ -172,25 +171,6 @@ function mergeAnalysisIntoDraft(
   return next;
 }
 
-function hasAnalysisMergeChanges(
-  draft: ProjectProposalDraft,
-  analysis: ProjectRequestContractAnalysisResult,
-  options?: { overwriteExisting?: boolean },
-) {
-  const merged = mergeAnalysisIntoDraft(draft, analysis, options);
-  return (
-    merged.officialContractName !== draft.officialContractName ||
-    merged.name !== draft.name ||
-    merged.clientOrg !== draft.clientOrg ||
-    merged.projectPurpose !== draft.projectPurpose ||
-    merged.description !== draft.description ||
-    merged.contractStart !== draft.contractStart ||
-    merged.contractEnd !== draft.contractEnd ||
-    merged.contractAmount !== draft.contractAmount ||
-    merged.salesVatAmount !== draft.salesVatAmount
-  );
-}
-
 function confidenceLabel(confidence: ProjectRequestContractAnalysis['fields'][AnalysisFieldKey]['confidence']) {
   if (confidence === 'high') return '높음';
   if (confidence === 'medium') return '보통';
@@ -299,9 +279,7 @@ export function PortalProjectRegister() {
   const [isUploadingContract, setIsUploadingContract] = useState(false);
   const [contractAnalysisState, setContractAnalysisState] = useState<ContractAnalysisState>('idle');
   const [analysisError, setAnalysisError] = useState('');
-  const [analysisApplyMode, setAnalysisApplyMode] = useState<AnalysisApplyMode>(null);
   const contractFileInputRef = useRef<HTMLInputElement | null>(null);
-  const analysisApplyLockRef = useRef(false);
 
   const currentStepIdx = STEPS.findIndex((item) => item.key === step);
   const currentStep = STEPS[currentStepIdx];
@@ -340,26 +318,6 @@ export function PortalProjectRegister() {
 
   const update = (key: keyof ProjectProposalDraft, value: ProjectProposalDraft[keyof ProjectProposalDraft]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
-  };
-
-  const applyContractAnalysis = (overwriteExisting: boolean) => {
-    if (!analysis || analysisApplyLockRef.current) return;
-    const nextMode: AnalysisApplyMode = overwriteExisting ? 'overwrite' : 'fill';
-    analysisApplyLockRef.current = true;
-    setAnalysisApplyMode(nextMode);
-
-    const changed = hasAnalysisMergeChanges(form, analysis, { overwriteExisting });
-    if (changed) {
-      setForm((prev) => mergeAnalysisIntoDraft(prev, analysis, { overwriteExisting }));
-      toast.success(overwriteExisting ? 'Merry의 분석을 다시 반영했습니다.' : '빈 항목에만 Merry의 분석을 반영했습니다.');
-    } else {
-      toast.message(overwriteExisting ? '다시 반영할 새 Merry 분석이 없습니다.' : '채울 수 있는 빈 항목이 없습니다.');
-    }
-
-    globalThis.setTimeout(() => {
-      analysisApplyLockRef.current = false;
-      setAnalysisApplyMode(null);
-    }, 900);
   };
 
   const handleContractDocumentSelect = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -739,27 +697,8 @@ export function PortalProjectRegister() {
                         </div>
                       ) : null}
 
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="h-8 text-[11px]"
-                          onClick={() => applyContractAnalysis(true)}
-                          disabled={Boolean(analysisApplyMode) || isUploadingContract || contractAnalysisState !== 'ready'}
-                        >
-                          {analysisApplyMode === 'overwrite' ? '다시 반영 중...' : 'Merry 분석 다시 반영'}
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 text-[11px]"
-                          onClick={() => applyContractAnalysis(false)}
-                          disabled={Boolean(analysisApplyMode) || isUploadingContract || contractAnalysisState !== 'ready'}
-                        >
-                          {analysisApplyMode === 'fill' ? '채우는 중...' : '빈 항목만 채우기'}
-                        </Button>
+                      <div className="rounded-xl border border-teal-200 bg-teal-50/70 px-3 py-3 text-[11px] text-teal-800 dark:border-teal-800/40 dark:bg-teal-950/20 dark:text-teal-200">
+                        Merry의 분석 초안은 이미 다음 단계의 기본 정보에 반영되었습니다. 아래 단계에서 사람 기준으로 바로 수정해 주세요.
                       </div>
                     </>
                   ) : (
