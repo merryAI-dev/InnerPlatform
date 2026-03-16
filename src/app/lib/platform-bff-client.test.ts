@@ -8,6 +8,7 @@ import {
   linkProjectEvidenceDriveRootViaBff,
   overrideTransactionEvidenceDriveCategoriesViaBff,
   previewGoogleSheetImportViaBff,
+  processProjectRequestContractViaBff,
   provisionProjectEvidenceDriveRootViaBff,
   provisionTransactionEvidenceDriveViaBff,
   readPlatformApiRuntimeConfig,
@@ -238,6 +239,64 @@ describe('platform-bff-client', () => {
       },
     }));
     expect(result.downloadURL).toContain('contract.pdf');
+  });
+
+  it('calls project request contract process endpoint with binary body', async () => {
+    const file = new File(['pdf-bytes'], 'contract.pdf', { type: 'application/pdf' });
+    const client = {
+      post: vi.fn(),
+      get: vi.fn(),
+      request: vi.fn(async () => ({
+        data: {
+          contractDocument: {
+            path: 'orgs/mysc/project-request-contracts/u001/contract.pdf',
+            name: 'contract.pdf',
+            downloadURL: 'https://example.com/contract.pdf',
+            size: 1234,
+            contentType: 'application/pdf',
+            uploadedAt: '2026-03-16T10:00:00.000Z',
+          },
+          analysis: {
+            provider: 'heuristic',
+            model: 'deterministic-fallback',
+            summary: 'summary',
+            warnings: [],
+            nextActions: [],
+            extractedAt: '2026-03-16T10:00:00.000Z',
+            fields: {
+              officialContractName: { value: '공식 계약명', confidence: 'medium', evidence: '근거' },
+              suggestedProjectName: { value: '계약명', confidence: 'medium', evidence: '근거' },
+              clientOrg: { value: '', confidence: 'low', evidence: '' },
+              projectPurpose: { value: '', confidence: 'low', evidence: '' },
+              description: { value: '', confidence: 'low', evidence: '' },
+              contractStart: { value: '', confidence: 'low', evidence: '' },
+              contractEnd: { value: '', confidence: 'low', evidence: '' },
+              contractAmount: { value: null, confidence: 'low', evidence: '' },
+              salesVatAmount: { value: null, confidence: 'low', evidence: '' },
+            },
+          },
+        },
+      })),
+    };
+
+    const result = await processProjectRequestContractViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm', idToken: 'token-abc' },
+      file,
+      client,
+    });
+
+    expect(client.request).toHaveBeenCalledWith('/api/v1/project-requests/contract/process', expect.objectContaining({
+      method: 'POST',
+      tenantId: 'mysc',
+      body: file,
+      headers: expect.objectContaining({
+        'content-type': 'application/octet-stream',
+        'x-file-name': 'contract.pdf',
+        'x-file-type': 'application/pdf',
+      }),
+    }));
+    expect(result.analysis.fields.officialContractName.value).toBe('공식 계약명');
   });
 
   it('calls evidence drive provision/sync endpoints', async () => {

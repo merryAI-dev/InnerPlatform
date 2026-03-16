@@ -587,6 +587,56 @@ export async function uploadProjectRequestContractViaBff(params: {
   return response.data;
 }
 
+export async function processProjectRequestContractViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  file: File;
+  client?: PlatformApiClientLike;
+}): Promise<{
+  contractDocument: {
+    path: string;
+    name: string;
+    downloadURL: string;
+    size: number;
+    contentType: string;
+    uploadedAt: string;
+  };
+  analysis: ProjectRequestContractAnalysisResult;
+}> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.request<{
+    contractDocument: {
+      path: string;
+      name: string;
+      downloadURL: string;
+      size: number;
+      contentType: string;
+      uploadedAt: string;
+    };
+    analysis: ProjectRequestContractAnalysisResult;
+  }>(
+    '/api/v1/project-requests/contract/process',
+    {
+      method: 'POST',
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      headers: {
+        'content-type': 'application/octet-stream',
+        'x-file-name': params.file.name,
+        'x-file-type': params.file.type || 'application/pdf',
+        'x-file-size': String(params.file.size || 0),
+      },
+      body: params.file,
+      timeoutMs: 45000,
+      retries: 0,
+    },
+  );
+  return {
+    contractDocument: response.data.contractDocument,
+    analysis: normalizeProjectRequestContractAnalysisResult(response.data.analysis),
+  };
+}
+
 export async function linkProjectEvidenceDriveRootViaBff(params: {
   tenantId: string;
   actor: ActorLike;

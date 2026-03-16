@@ -27,6 +27,14 @@ export interface PlatformRequestOptions {
   retryOnStatuses?: number[];
 }
 
+function isBinaryBody(value: unknown): value is Blob | ArrayBuffer | Uint8Array {
+  return (
+    (typeof Blob !== 'undefined' && value instanceof Blob)
+    || value instanceof ArrayBuffer
+    || value instanceof Uint8Array
+  );
+}
+
 export interface PlatformApiClientOptions {
   baseUrl?: string;
   fetchImpl?: typeof fetch;
@@ -224,7 +232,7 @@ export class PlatformApiClient {
     let body: BodyInit | undefined;
 
     if (options.body !== undefined && options.body !== null) {
-      if (options.body instanceof FormData) {
+      if (options.body instanceof FormData || isBinaryBody(options.body)) {
         body = options.body;
       } else {
         if (!headers.has('content-type')) {
