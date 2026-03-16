@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildFallbackProjectRequestContractAnalysis,
   createProjectRequestContractAiService,
+  sanitizeOfficialContractName,
   sanitizeProjectName,
 } from './project-request-contract-ai.mjs';
 
@@ -10,11 +11,16 @@ describe('project-request-contract-ai', () => {
     expect(sanitizeProjectName('뷰티풀 커넥트 운영 계약서')).toBe('뷰티풀커넥트');
   });
 
+  it('strips document form words from official contract name', () => {
+    expect(sanitizeOfficialContractName('뷰티풀 커넥트 운영 협약서')).toBe('뷰티풀 커넥트 운영');
+    expect(sanitizeOfficialContractName('청년 창업 지원 사업 계약서 최종본')).toBe('청년 창업 지원 사업');
+  });
+
   it('builds fallback analysis from contract text', () => {
     const analysis = buildFallbackProjectRequestContractAnalysis({
       fileName: '뷰티풀커넥트_계약서.pdf',
       documentText: [
-        '사업명: 뷰티풀 커넥트 운영 계약',
+        '사업명: 뷰티풀 커넥트 운영 협약서',
         '발주기관: 아모레퍼시픽재단',
         '계약기간: 2026.03.01 ~ 2026.12.31',
         '총 계약금액: 120,000,000원',
@@ -24,7 +30,7 @@ describe('project-request-contract-ai', () => {
     }, '2026-03-16T09:00:00.000Z');
 
     expect(analysis.provider).toBe('heuristic');
-    expect(analysis.fields.officialContractName.value).toContain('뷰티풀 커넥트');
+    expect(analysis.fields.officialContractName.value).toBe('뷰티풀 커넥트 운영');
     expect(analysis.fields.clientOrg.value).toBe('아모레퍼시픽재단');
     expect(analysis.fields.contractStart.value).toBe('2026-03-01');
     expect(analysis.fields.contractEnd.value).toBe('2026-12-31');

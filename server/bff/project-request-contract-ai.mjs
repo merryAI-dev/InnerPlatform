@@ -44,6 +44,19 @@ function sanitizeProjectName(value) {
   return normalized.replace(/\s+/g, '').slice(0, 10);
 }
 
+function sanitizeOfficialContractName(value) {
+  const normalized = normalizeWhitespace(value)
+    .replace(/[()[\]{}]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!normalized) return '';
+  const stripped = normalized
+    .replace(/\s*(계약서|협약서|제안서|합의서|신청서|확인서|각서|문서)(\s*(초안|사본|원본|최종본|최종))?\s*$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return stripped || normalized;
+}
+
 function normalizeDate(value) {
   const normalized = readOptionalText(value).replace(/\s+/g, '');
   if (!normalized) return '';
@@ -155,7 +168,8 @@ function buildFallbackProjectRequestContractAnalysis(input, timestamp = nowIso()
   ]);
   const dateRange = extractDateRange(documentText);
 
-  const officialContractName = officialContractMatch?.value || fileName;
+  const rawOfficialContractName = officialContractMatch?.value || fileName;
+  const officialContractName = sanitizeOfficialContractName(rawOfficialContractName);
   const suggestedProjectName = sanitizeProjectName(officialContractName || fileName);
   const warnings = [];
   const nextActions = [];
@@ -296,7 +310,7 @@ function buildPrompt(input, fallback) {
       '<example>',
       '<document_name>뷰티풀커넥트_계약서.pdf</document_name>',
       '<document_excerpt>사업명: 뷰티풀 커넥트 운영 계약 발주기관: 아모레퍼시픽재단 계약기간: 2026.03.01 ~ 2026.12.31 총 계약금액: 120,000,000원 부가세: 12,000,000원 사업 목적: 청년 창업가의 지역 연결을 지원한다.</document_excerpt>',
-      '<ideal_json>{"summary":"계약서 주요 항목을 읽어 기본 정보를 채울 수 있습니다.","warnings":[],"nextActions":["담당팀과 정산유형은 사람이 직접 선택하세요."],"fields":{"officialContractName":{"value":"뷰티풀 커넥트 운영 계약","confidence":"high","evidence":"사업명: 뷰티풀 커넥트 운영 계약"},"suggestedProjectName":{"value":"뷰티풀커넥트","confidence":"high","evidence":"뷰티풀 커넥트 운영 계약"},"clientOrg":{"value":"아모레퍼시픽재단","confidence":"high","evidence":"발주기관: 아모레퍼시픽재단"},"projectPurpose":{"value":"청년 창업가의 지역 연결을 지원한다.","confidence":"high","evidence":"사업 목적: 청년 창업가의 지역 연결을 지원한다."},"description":{"value":"","confidence":"low","evidence":""},"contractStart":{"value":"2026-03-01","confidence":"high","evidence":"계약기간: 2026.03.01 ~ 2026.12.31"},"contractEnd":{"value":"2026-12-31","confidence":"high","evidence":"계약기간: 2026.03.01 ~ 2026.12.31"},"contractAmount":{"value":120000000,"confidence":"high","evidence":"총 계약금액: 120,000,000원"},"salesVatAmount":{"value":12000000,"confidence":"high","evidence":"부가세: 12,000,000원"}}}</ideal_json>',
+      '<ideal_json>{"summary":"계약서 주요 항목을 읽어 기본 정보를 채울 수 있습니다.","warnings":[],"nextActions":["담당팀과 정산유형은 사람이 직접 선택하세요."],"fields":{"officialContractName":{"value":"뷰티풀 커넥트 운영 계약","confidence":"high","evidence":"사업명: 뷰티풀 커넥트 운영 계약서"},"suggestedProjectName":{"value":"뷰티풀커넥트","confidence":"high","evidence":"뷰티풀 커넥트 운영 계약"},"clientOrg":{"value":"아모레퍼시픽재단","confidence":"high","evidence":"발주기관: 아모레퍼시픽재단"},"projectPurpose":{"value":"청년 창업가의 지역 연결을 지원한다.","confidence":"high","evidence":"사업 목적: 청년 창업가의 지역 연결을 지원한다."},"description":{"value":"","confidence":"low","evidence":""},"contractStart":{"value":"2026-03-01","confidence":"high","evidence":"계약기간: 2026.03.01 ~ 2026.12.31"},"contractEnd":{"value":"2026-12-31","confidence":"high","evidence":"계약기간: 2026.03.01 ~ 2026.12.31"},"contractAmount":{"value":120000000,"confidence":"high","evidence":"총 계약금액: 120,000,000원"},"salesVatAmount":{"value":12000000,"confidence":"high","evidence":"부가세: 12,000,000원"}}}</ideal_json>',
       '</example>',
     ].join('\n'),
     [
@@ -320,6 +334,7 @@ function buildPrompt(input, fallback) {
     '</success_criteria>',
     '<field_rules>',
     '<rule>officialContractName은 계약서 상의 공식 명칭입니다.</rule>',
+    '<rule>officialContractName에서는 협약서, 계약서, 제안서처럼 문서 형식/종류를 나타내는 단어를 제외합니다.</rule>',
     '<rule>suggestedProjectName은 내부 등록용 10자 이내 짧은 이름입니다.</rule>',
     '<rule>department, settlementType, accountType은 추측하지 않습니다.</rule>',
     '<rule>날짜는 YYYY-MM-DD 형식입니다.</rule>',
@@ -345,6 +360,12 @@ function buildPrompt(input, fallback) {
 
 function sanitizeAnalysis(value, fallback, timestamp = nowIso()) {
   const raw = value && typeof value === 'object' ? value : {};
+  const officialContractName = sanitizeTextSuggestion(raw.fields?.officialContractName, fallback.fields.officialContractName);
+  officialContractName.value = sanitizeOfficialContractName(officialContractName.value);
+  const suggestedProjectName = sanitizeTextSuggestion(raw.fields?.suggestedProjectName, fallback.fields.suggestedProjectName);
+  if (!suggestedProjectName.value) {
+    suggestedProjectName.value = sanitizeProjectName(officialContractName.value);
+  }
   return {
     provider: 'anthropic',
     model: MODEL,
@@ -353,8 +374,8 @@ function sanitizeAnalysis(value, fallback, timestamp = nowIso()) {
     nextActions: sanitizeStringArray(raw.nextActions, fallback.nextActions),
     extractedAt: timestamp,
     fields: {
-      officialContractName: sanitizeTextSuggestion(raw.fields?.officialContractName, fallback.fields.officialContractName),
-      suggestedProjectName: sanitizeTextSuggestion(raw.fields?.suggestedProjectName, fallback.fields.suggestedProjectName),
+      officialContractName,
+      suggestedProjectName,
       clientOrg: sanitizeTextSuggestion(raw.fields?.clientOrg, fallback.fields.clientOrg),
       projectPurpose: sanitizeTextSuggestion(raw.fields?.projectPurpose, fallback.fields.projectPurpose),
       description: sanitizeTextSuggestion(raw.fields?.description, fallback.fields.description),
@@ -402,5 +423,6 @@ export function createProjectRequestContractAiService(options = {}) {
 
 export {
   buildFallbackProjectRequestContractAnalysis,
+  sanitizeOfficialContractName,
   sanitizeProjectName,
 };
