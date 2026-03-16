@@ -57,6 +57,7 @@ import {
   normalizeState,
 } from './state-policy.mjs';
 import { mountGuideChatRoutes } from './guide-chat.mjs';
+import { mountClaudeSdkHelpRoutes } from './claude-sdk-help.mjs';
 import {
   DriveServiceError,
   createGoogleDriveService,
@@ -2670,6 +2671,14 @@ export function createBffApp(options = {}) {
   // ── Guide Q&A chatbot ──
   mountGuideChatRoutes(app, {
     db, now, idempotencyService, asyncHandler, createMutatingRoute, assertActorRoleAllowed,
+  });
+
+  // ── Claude SDK helper chatbot ──
+  mountClaudeSdkHelpRoutes(app, {
+    idempotencyService,
+    asyncHandler,
+    createMutatingRoute,
+    assertActorRoleAllowed,
   });
 
   app.use((error, req, res, _next) => {
