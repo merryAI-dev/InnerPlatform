@@ -20,11 +20,9 @@ import { usePortalStore } from '../../data/portal-store';
 import { useAuth } from '../../data/auth-store';
 import { useFirebase } from '../../lib/firebase-context';
 import { getAuthInstance } from '../../lib/firebase';
-import { extractTextFromPdf } from '../../lib/pdf-extract';
 import {
-  analyzeProjectRequestContractViaBff,
+  processProjectRequestContractViaBff,
   type ProjectRequestContractAnalysisResult,
-  uploadProjectRequestContractViaBff,
 } from '../../lib/platform-bff-client';
 import {
   ACCOUNT_TYPE_LABELS,
@@ -245,21 +243,6 @@ function resolveContractUploadUiState(
   };
 }
 
-function readArrayBufferAsBase64(buffer: ArrayBuffer, fileName: string): string {
-  const bytes = new Uint8Array(buffer);
-  const chunkSize = 0x8000;
-  let binary = '';
-  for (let index = 0; index < bytes.length; index += chunkSize) {
-    const chunk = bytes.subarray(index, index + chunkSize);
-    binary += String.fromCharCode(...chunk);
-  }
-  const base64 = btoa(binary);
-  if (!base64) {
-    throw new Error(`파일 인코딩에 실패했습니다: ${fileName}`);
-  }
-  return base64;
-}
-
 function isFileReadError(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'NotReadableError';
 }
@@ -347,9 +330,7 @@ export function PortalProjectRegister() {
 
     try {
       const idToken = authUser.idToken || await getAuthInstance()?.currentUser?.getIdToken() || undefined;
-      const fileBuffer = await file.arrayBuffer();
-      const contentBase64 = readArrayBufferAsBase64(fileBuffer, file.name);
-      const contractDocument = await uploadProjectRequestContractViaBff({
+      const processed = await processProjectRequestContractViaBff({
         tenantId: orgId,
         actor: {
           uid: authUser.uid,
@@ -357,40 +338,10 @@ export function PortalProjectRegister() {
           role: authUser.role,
           idToken,
         },
-        upload: {
-          fileName: file.name,
-          mimeType: file.type || 'application/pdf',
-          fileSize: file.size,
-          contentBase64,
-        },
+        file,
       });
-
-      let documentText = '';
-      try {
-        documentText = await extractTextFromPdf(fileBuffer);
-      } catch (error) {
-        console.warn('[PortalProjectRegister] pdf text extraction failed:', error);
-      }
-
-      setContractAnalysisState('analyzing');
-
-      let nextAnalysis: ProjectRequestContractAnalysisResult | null = null;
-      try {
-        nextAnalysis = await analyzeProjectRequestContractViaBff({
-          tenantId: orgId,
-          actor: {
-            uid: authUser.uid,
-            email: authUser.email,
-            role: authUser.role,
-            idToken,
-          },
-          fileName: file.name,
-          documentText: documentText || file.name,
-        });
-      } catch (error) {
-        console.error('[PortalProjectRegister] contract analysis failed:', error);
-        setAnalysisError('업로드는 완료됐지만 AI 초안 생성에 실패했습니다. 직접 입력하거나 다시 시도해 주세요.');
-      }
+      const contractDocument = processed.contractDocument;
+      const nextAnalysis: ProjectRequestContractAnalysisResult | null = processed.analysis || null;
 
       setForm((prev) => {
         const base = {

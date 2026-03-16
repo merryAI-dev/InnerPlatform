@@ -39,18 +39,23 @@ export function createProjectRequestContractStorageService(options = {}) {
       const fileName = normalizeSafeFileName(input?.fileName);
       const mimeType = readOptionalText(input?.mimeType) || 'application/pdf';
       const fileSize = Number.isFinite(input?.fileSize) ? input.fileSize : 0;
+      const buffer = input?.buffer instanceof Uint8Array
+        ? Buffer.from(input.buffer)
+        : Buffer.isBuffer(input?.buffer)
+          ? input.buffer
+          : null;
       const contentBase64 = readOptionalText(input?.contentBase64);
-      if (!contentBase64) {
-        throw new Error('contentBase64 is required');
+      if (!buffer && !contentBase64) {
+        throw new Error('buffer or contentBase64 is required');
       }
 
       const uploadedAt = new Date().toISOString();
       const token = randomUUID();
       const path = `orgs/${tenantId}/project-request-contracts/${actorId}/${Date.now()}-${fileName}`;
       const file = bucket.file(path);
-      const buffer = Buffer.from(contentBase64, 'base64');
+      const uploadBuffer = buffer || Buffer.from(contentBase64, 'base64');
 
-      await file.save(buffer, {
+      await file.save(uploadBuffer, {
         resumable: false,
         metadata: {
           contentType: mimeType,
@@ -64,7 +69,7 @@ export function createProjectRequestContractStorageService(options = {}) {
         path,
         name: readOptionalText(input?.fileName) || fileName,
         downloadURL: buildDownloadUrl(bucketName, path, token),
-        size: fileSize || buffer.byteLength,
+        size: fileSize || uploadBuffer.byteLength,
         contentType: mimeType,
         uploadedAt,
       };

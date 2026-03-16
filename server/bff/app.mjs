@@ -74,6 +74,7 @@ import {
 import { createGoogleSheetMigrationAiService } from './google-sheet-migration-ai.mjs';
 import { createProjectRequestContractAiService } from './project-request-contract-ai.mjs';
 import { createProjectRequestContractStorageService } from './project-request-contract-storage.mjs';
+import { extractTextFromPdfBuffer } from './pdf-text.mjs';
 
 function createHttpError(statusCode, message, code = 'request_error') {
   const error = new Error(message);
@@ -621,7 +622,7 @@ export function createBffApp(options = {}) {
       res.setHeader('Access-Control-Allow-Origin', allowAnyOrigin ? '*' : requestOrigin);
     }
     res.setHeader('Vary', 'Origin');
-    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, x-tenant-id, x-actor-id, x-actor-role, x-actor-email, x-request-id, idempotency-key, x-google-access-token');
+    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, x-tenant-id, x-actor-id, x-actor-role, x-actor-email, x-request-id, idempotency-key, x-google-access-token, x-file-name, x-file-type, x-file-size');
     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,PUT,DELETE,OPTIONS');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
@@ -1249,6 +1250,49 @@ export function createBffApp(options = {}) {
     });
     res.status(200).json(uploaded);
   }));
+
+  app.post(
+    '/api/v1/project-requests/contract/process',
+    express.raw({ type: ['application/octet-stream', 'application/pdf'], limit: process.env.BFF_JSON_LIMIT || '25mb' }),
+    asyncHandler(async (req, res) => {
+      const { tenantId, actorId } = req.context;
+      assertActorRoleAllowed(req, ROUTE_ROLES.writeCore, 'process project request contract');
+      const fileName = readOptionalText(req.header('x-file-name')) || 'contract.pdf';
+      const mimeType = readOptionalText(req.header('x-file-type')) || req.header('content-type') || 'application/pdf';
+      const fileSizeHeader = Number.parseInt(readOptionalText(req.header('x-file-size')), 10);
+      const fileBuffer = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body || []);
+
+      if (!fileBuffer.byteLength) {
+        throw createHttpError(400, 'Contract upload body is empty', 'empty_contract_upload');
+      }
+
+      const contractDocument = await projectRequestContractStorageService.uploadContract({
+        tenantId,
+        actorId,
+        fileName,
+        mimeType,
+        fileSize: Number.isFinite(fileSizeHeader) ? fileSizeHeader : fileBuffer.byteLength,
+        buffer: fileBuffer,
+      });
+
+      let documentText = '';
+      try {
+        documentText = await extractTextFromPdfBuffer(fileBuffer);
+      } catch (error) {
+        console.warn('[BFF] contract pdf text extraction failed:', error);
+      }
+
+      const analysis = await projectRequestContractAiService.analyzeContract({
+        fileName,
+        documentText: documentText || fileName,
+      });
+
+      res.status(200).json({
+        contractDocument,
+        analysis,
+      });
+    }),
+  );
 
   app.get('/api/v1/ledgers', asyncHandler(async (req, res) => {
     const { tenantId } = req.context;
