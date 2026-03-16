@@ -245,19 +245,23 @@ function resolveContractUploadUiState(
   };
 }
 
-async function readFileAsBase64(file: File): Promise<string> {
-  const dataUrl = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(reader.error || new Error('파일 읽기에 실패했습니다.'));
-    reader.onload = () => resolve(String(reader.result || ''));
-    reader.readAsDataURL(file);
-  });
-
-  const [, base64 = ''] = dataUrl.split(',', 2);
+function readArrayBufferAsBase64(buffer: ArrayBuffer, fileName: string): string {
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  let binary = '';
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    const chunk = bytes.subarray(index, index + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  const base64 = btoa(binary);
   if (!base64) {
-    throw new Error(`파일 인코딩에 실패했습니다: ${file.name}`);
+    throw new Error(`파일 인코딩에 실패했습니다: ${fileName}`);
   }
   return base64;
+}
+
+function isFileReadError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'NotReadableError';
 }
 
 export function PortalProjectRegister() {
@@ -324,15 +328,17 @@ export function PortalProjectRegister() {
   };
 
   const handleContractDocumentSelect = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = '';
+    const input = event.currentTarget;
+    const file = input.files?.[0];
     if (!file) return;
     if (!/pdf$/i.test(file.name) && file.type !== 'application/pdf') {
       toast.error('계약서 파일은 PDF로 업로드해 주세요.');
+      input.value = '';
       return;
     }
     if (!authUser?.uid) {
       toast.error('로그인 정보를 확인할 수 없습니다.');
+      input.value = '';
       return;
     }
     setIsUploadingContract(true);
@@ -341,7 +347,8 @@ export function PortalProjectRegister() {
 
     try {
       const idToken = authUser.idToken || await getAuthInstance()?.currentUser?.getIdToken() || undefined;
-      const contentBase64 = await readFileAsBase64(file);
+      const fileBuffer = await file.arrayBuffer();
+      const contentBase64 = readArrayBufferAsBase64(fileBuffer, file.name);
       const contractDocument = await uploadProjectRequestContractViaBff({
         tenantId: orgId,
         actor: {
@@ -360,7 +367,7 @@ export function PortalProjectRegister() {
 
       let documentText = '';
       try {
-        documentText = await extractTextFromPdf(file);
+        documentText = await extractTextFromPdf(fileBuffer);
       } catch (error) {
         console.warn('[PortalProjectRegister] pdf text extraction failed:', error);
       }
@@ -404,10 +411,16 @@ export function PortalProjectRegister() {
     } catch (error) {
       console.error('[PortalProjectRegister] contract upload failed:', error);
       setContractAnalysisState('error');
-      setAnalysisError('계약서 업로드에 실패했습니다. 다시 시도해 주세요.');
-      toast.error('계약서 업로드에 실패했습니다. 다시 시도해 주세요.');
+      if (isFileReadError(error)) {
+        setAnalysisError('선택한 파일을 브라우저가 읽지 못했습니다. 파일을 다시 선택하거나 다른 PDF로 시도해 주세요.');
+        toast.error('파일을 읽지 못했습니다. 같은 파일을 다시 선택하거나 다시 다운로드한 PDF로 시도해 주세요.');
+      } else {
+        setAnalysisError('계약서 업로드에 실패했습니다. 다시 시도해 주세요.');
+        toast.error('계약서 업로드에 실패했습니다. 다시 시도해 주세요.');
+      }
     } finally {
       setIsUploadingContract(false);
+      input.value = '';
     }
   };
 
