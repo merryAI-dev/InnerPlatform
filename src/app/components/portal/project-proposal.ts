@@ -1,4 +1,14 @@
-import { ACCOUNT_TYPE_LABELS, BASIS_LABELS, PROJECT_TYPE_LABELS, SETTLEMENT_TYPE_LABELS, type AccountType, type Basis, type ProjectType, type SettlementType } from '../../data/types';
+import {
+  ACCOUNT_TYPE_LABELS,
+  BASIS_LABELS,
+  PROJECT_TYPE_LABELS,
+  SETTLEMENT_TYPE_LABELS,
+  type AccountType,
+  type Basis,
+  type ProjectRequestContractAnalysis,
+  type ProjectType,
+  type SettlementType,
+} from '../../data/types';
 
 export interface ProjectProposalDraft {
   name: string;
@@ -25,6 +35,7 @@ export interface ProjectProposalDraft {
   participantCondition: string;
   note: string;
   contractDocument: import('../../data/types').FileAttachment | null;
+  contractAnalysis?: ProjectRequestContractAnalysis | null;
 }
 
 export interface ProjectProposalPostPayload {

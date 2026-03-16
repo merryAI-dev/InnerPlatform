@@ -71,6 +71,11 @@ export const googleSheetImportAnalyzeSchema = z.object({
   matrix: z.array(z.array(z.string())).min(1),
 }).strict();
 
+export const projectRequestContractAnalyzeSchema = z.object({
+  fileName: NON_EMPTY_STRING.max(300),
+  documentText: z.string().max(200000).optional(),
+}).strict();
+
 export const claudeSdkHelpAskSchema = z.object({
   question: NON_EMPTY_STRING.max(2000),
   history: z.array(

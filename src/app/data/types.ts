@@ -355,6 +355,40 @@ export interface FileAttachment {
   uploadedAt: string;
 }
 
+export type AiSuggestionConfidence = 'high' | 'medium' | 'low';
+
+export interface ProjectRequestContractTextSuggestion {
+  value: string;
+  confidence: AiSuggestionConfidence;
+  evidence: string;
+}
+
+export interface ProjectRequestContractNumberSuggestion {
+  value: number | null;
+  confidence: AiSuggestionConfidence;
+  evidence: string;
+}
+
+export interface ProjectRequestContractAnalysis {
+  provider: 'anthropic' | 'heuristic';
+  model: string;
+  summary: string;
+  warnings: string[];
+  nextActions: string[];
+  extractedAt: string;
+  fields: {
+    officialContractName: ProjectRequestContractTextSuggestion;
+    suggestedProjectName: ProjectRequestContractTextSuggestion;
+    clientOrg: ProjectRequestContractTextSuggestion;
+    projectPurpose: ProjectRequestContractTextSuggestion;
+    description: ProjectRequestContractTextSuggestion;
+    contractStart: ProjectRequestContractTextSuggestion;
+    contractEnd: ProjectRequestContractTextSuggestion;
+    contractAmount: ProjectRequestContractNumberSuggestion;
+    salesVatAmount: ProjectRequestContractNumberSuggestion;
+  };
+}
+
 export interface ProjectRequestPayload {
   name: string;
   officialContractName: string;
@@ -380,6 +414,7 @@ export interface ProjectRequestPayload {
   participantCondition: string;
   note: string;
   contractDocument: FileAttachment | null;
+  contractAnalysis?: ProjectRequestContractAnalysis | null;
 }
 
 export interface ProjectRequest {
