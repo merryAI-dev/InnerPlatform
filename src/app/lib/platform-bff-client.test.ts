@@ -242,7 +242,7 @@ describe('platform-bff-client', () => {
   });
 
   it('calls project request contract process endpoint with binary body', async () => {
-    const file = new File(['pdf-bytes'], 'contract.pdf', { type: 'application/pdf' });
+    const file = new File(['pdf-bytes'], '계약서 샘플.pdf', { type: 'application/pdf' });
     const client = {
       post: vi.fn(),
       get: vi.fn(),
@@ -292,7 +292,7 @@ describe('platform-bff-client', () => {
       body: file,
       headers: expect.objectContaining({
         'content-type': 'application/octet-stream',
-        'x-file-name': 'contract.pdf',
+        'x-file-name': encodeURIComponent('계약서 샘플.pdf'),
         'x-file-type': 'application/pdf',
       }),
     }));
