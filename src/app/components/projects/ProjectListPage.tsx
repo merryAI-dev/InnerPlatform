@@ -179,13 +179,15 @@ export function ProjectListPage() {
                     {p.groupwareName || '-'}
                   </TableCell>
                   <TableCell className="text-[11px]">
-                    {p.accountType !== 'NONE' ? (
-                      <span className={`inline-flex rounded px-1 py-0 text-[10px] ${
-                        p.accountType === 'DEDICATED' ? 'bg-blue-50 text-blue-700' : 'bg-gray-100 text-gray-600'
-                      }`}>
-                        {ACCOUNT_TYPE_LABELS[p.accountType]}
-                      </span>
-                    ) : '-'}
+                    <span className={`inline-flex rounded px-1 py-0 text-[10px] ${
+                      p.accountType === 'DEDICATED'
+                        ? 'bg-blue-50 text-blue-700'
+                        : p.accountType === 'OPERATING'
+                          ? 'bg-slate-100 text-slate-700'
+                          : 'bg-gray-100 text-gray-600'
+                    }`}>
+                      {ACCOUNT_TYPE_LABELS[p.accountType]}
+                    </span>
                   </TableCell>
                   <TableCell style={{ fontWeight: 500 }} className="max-w-[220px] truncate text-sm">
                     {p.name}

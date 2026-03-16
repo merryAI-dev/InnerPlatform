@@ -26,7 +26,7 @@ export type ProjectPhase = 'PROSPECT' | 'CONFIRMED';  // 입찰예정 / 확정
 export type SettlementType = 'TYPE1' | 'TYPE2' | 'TYPE3' | 'TYPE4' | 'TYPE5';
 export type Basis = 'SUPPLY_AMOUNT' | 'SUPPLY_PRICE'; // 공급가액 / 공급대가
 
-export type AccountType = 'DEDICATED' | 'OPERATING' | 'NONE'; // 전용통장 / 운영통장 / 없음
+export type AccountType = 'DEDICATED' | 'OPERATING' | 'NONE'; // 전용계좌 사업(이나라도움) / 전용계좌(이나라도움x) / 일반 사업
 
 export type TransactionState = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED';
 export type Direction = 'IN' | 'OUT';
@@ -135,9 +135,9 @@ export const BASIS_LABELS: Record<Basis, string> = {
 };
 
 export const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
-  DEDICATED: '전용통장',
-  OPERATING: '운영통장',
-  NONE: '-',
+  DEDICATED: '전용계좌 사업(이나라도움)',
+  OPERATING: '전용계좌(이나라도움x)',
+  NONE: '일반 사업',
 };
 
 export const DIRECTION_LABELS: Record<Direction, string> = {
@@ -286,6 +286,7 @@ export interface Project {
   slug: string;        // URL-safe unique key
   orgId: string;
   name: string;
+  officialContractName?: string;
   status: ProjectStatus;
   type: ProjectType;
   phase: ProjectPhase;
@@ -307,6 +308,12 @@ export interface Project {
   groupwareName: string;         // 그룹웨어 프로젝트등록명
   participantCondition: string;  // 참여기업 조건
   contractType: string;          // 계약서 유형 (계약서(날인), 기타 등)
+  projectPurpose?: string;
+  totalRevenueAmount?: number;
+  supportAmount?: number;
+  salesVatAmount?: number;
+  settlementGuide?: string;
+  contractDocument?: FileAttachment | null;
   // 팀/담당자
   department: string;            // 담당조직
   teamName: string;              // 사내기업팀 (팀장)
@@ -339,24 +346,40 @@ export interface Project {
 
 export type ProjectRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 
+export interface FileAttachment {
+  path: string;
+  name: string;
+  downloadURL: string;
+  size: number;
+  contentType: string;
+  uploadedAt: string;
+}
+
 export interface ProjectRequestPayload {
   name: string;
+  officialContractName: string;
   type: ProjectType;
   description: string;
   clientOrg: string;
   department: string;
   contractAmount: number;
+  salesVatAmount: number;
+  totalRevenueAmount: number;
+  supportAmount: number;
   contractStart: string;
   contractEnd: string;
   settlementType: SettlementType;
   basis: Basis;
   accountType: AccountType;
   paymentPlanDesc: string;
+  settlementGuide: string;
+  projectPurpose: string;
   managerName: string;
   teamName: string;
   teamMembers: string;
   participantCondition: string;
   note: string;
+  contractDocument: FileAttachment | null;
 }
 
 export interface ProjectRequest {

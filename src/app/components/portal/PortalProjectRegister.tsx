@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useRef, useState, type ChangeEvent } from 'react';
 import { useNavigate } from 'react-router';
 import {
   FolderKanban, ArrowLeft, ArrowRight, CheckCircle2,
   Building2, Calendar, Wallet, FileText,
   Users, Briefcase, ClipboardList, AlertTriangle,
-  Zap, Send,
+  Loader2, Send, Upload,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
@@ -17,6 +17,10 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '../ui/select';
 import { usePortalStore } from '../../data/portal-store';
+import { useAuth } from '../../data/auth-store';
+import { useFirebase } from '../../lib/firebase-context';
+import { getStorageInstance } from '../../lib/firebase';
+import { getDownloadURL, ref as storageRef, uploadBytes } from 'firebase/storage';
 import {
   PROJECT_TYPE_LABELS, SETTLEMENT_TYPE_LABELS, ACCOUNT_TYPE_LABELS,
   BASIS_LABELS,
@@ -42,26 +46,35 @@ const STEPS: { key: Step; label: string; icon: typeof FolderKanban }[] = [
 
 const initialProposal: ProjectProposalDraft = {
   name: '',
+  officialContractName: '',
   type: 'D1',
   description: '',
   clientOrg: '',
   department: '',
   contractAmount: 0,
+  salesVatAmount: 0,
+  totalRevenueAmount: 0,
+  supportAmount: 0,
   contractStart: '',
   contractEnd: '',
   settlementType: 'TYPE1',
   basis: 'SUPPLY_AMOUNT',
   accountType: 'DEDICATED',
   paymentPlanDesc: '',
+  settlementGuide: '',
+  projectPurpose: '',
   managerName: '',
   teamName: '',
   teamMembers: '',
   participantCondition: '',
   note: '',
+  contractDocument: null,
 };
 
 export function PortalProjectRegister() {
   const navigate = useNavigate();
+  const { user: authUser } = useAuth();
+  const { orgId } = useFirebase();
   const { portalUser, projects, createProjectRequest } = usePortalStore();
   const [step, setStep] = useState<Step>('basic');
   const [form, setForm] = useState<ProjectProposalDraft>({
@@ -70,17 +83,69 @@ export function PortalProjectRegister() {
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [isUploadingContract, setIsUploadingContract] = useState(false);
+  const contractFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const currentStepIdx = STEPS.findIndex(s => s.key === step);
   const canProceed = () => {
-    if (step === 'basic') return form.name && form.clientOrg && form.type;
+    if (step === 'basic') return form.name.trim() && form.officialContractName.trim() && form.clientOrg.trim() && form.type && form.department;
     if (step === 'financial') return form.contractAmount > 0 && form.contractStart && form.contractEnd;
     if (step === 'team') return form.managerName;
     return true;
   };
 
+  const handleContractDocumentSelect = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (!/pdf$/i.test(file.name) && file.type !== 'application/pdf') {
+      toast.error('계약서 파일은 PDF로 업로드해 주세요.');
+      return;
+    }
+    if (!authUser?.uid) {
+      toast.error('로그인 정보를 확인할 수 없습니다.');
+      return;
+    }
+    const storage = getStorageInstance();
+    if (!storage) {
+      toast.error('파일 업로드를 위한 저장소를 초기화할 수 없습니다.');
+      return;
+    }
+
+    setIsUploadingContract(true);
+    try {
+      const uploadedAt = new Date().toISOString();
+      const safeName = file.name.replace(/[^\w.\-가-힣() ]+/g, '_');
+      const path = `orgs/${orgId}/project-request-contracts/${authUser.uid}/${Date.now()}-${safeName}`;
+      const ref = storageRef(storage, path);
+      const snapshot = await uploadBytes(ref, file, {
+        contentType: file.type || 'application/pdf',
+      });
+      const downloadURL = await getDownloadURL(snapshot.ref);
+      update('contractDocument', {
+        path,
+        name: file.name,
+        downloadURL,
+        size: file.size,
+        contentType: file.type || 'application/pdf',
+        uploadedAt,
+      });
+      toast.success(`계약서 업로드 완료: ${file.name}`);
+    } catch (error) {
+      console.error('[PortalProjectRegister] contract upload failed:', error);
+      toast.error('계약서 업로드에 실패했습니다. 다시 시도해 주세요.');
+    } finally {
+      setIsUploadingContract(false);
+    }
+  };
+
   const handleSubmit = async () => {
     if (isSubmitting) return;
+    if (!form.contractDocument) {
+      setStep('financial');
+      toast.error('계약서 등 PDF를 업로드해 주세요.');
+      return;
+    }
     setIsSubmitting(true);
 
     try {
@@ -197,8 +262,50 @@ export function PortalProjectRegister() {
                 <h3 className="text-[14px]" style={{ fontWeight: 600 }}>기본 정보</h3>
               </div>
 
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <Label className="text-[11px]">신청자(별명)</Label>
+                  <Input
+                    value={portalUser?.name || authUser?.name || ''}
+                    readOnly
+                    className="h-9 text-[12px] mt-1 bg-muted/40"
+                  />
+                </div>
+                <div>
+                  <Label className="text-[11px]">담당팀 *</Label>
+                  <Select
+                    value={form.department || undefined}
+                    onValueChange={(value) => update('department', value)}
+                  >
+                    <SelectTrigger className="h-9 text-[12px] mt-1">
+                      <SelectValue placeholder="담당팀 선택" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PROJECT_DEPARTMENT_OPTIONS.map((department) => (
+                        <SelectItem key={department} value={department}>
+                          {department}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
               <div>
-                <Label className="text-[11px]">사업명 *</Label>
+                <Label className="text-[11px]">공식 계약명 *</Label>
+                <Input
+                  value={form.officialContractName}
+                  onChange={e => update('officialContractName', e.target.value)}
+                  placeholder="계약서 상의 공식 명칭을 그대로 입력해 주세요. 헷갈리면 OCR/PDF 제목 기준으로 적어도 괜찮습니다."
+                  className="h-9 text-[12px] mt-1"
+                />
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  계약서 상의 공식 명칭이라고 꼭 명시해 주세요. 헷갈리면 OCR/PDF 제목 기준으로 적어도 괜찮습니다.
+                </p>
+              </div>
+
+              <div>
+                <Label className="text-[11px]">등록 프로젝트명 (10글자 이내) *</Label>
                 <datalist id="project-name-options">
                   {projectNameOptions.map((name) => (
                     <option key={name} value={name} />
@@ -206,16 +313,17 @@ export function PortalProjectRegister() {
                 </datalist>
                 <Input
                   value={form.name}
-                  onChange={e => update('name', e.target.value)}
-                  placeholder="예: KOICA 르완다 기술혁신 역량강화 사업"
+                  onChange={e => update('name', e.target.value.slice(0, 10))}
+                  placeholder="예: 뷰티풀커넥트"
                   list="project-name-options"
                   className="h-9 text-[12px] mt-1"
                 />
+                <p className="text-[10px] text-muted-foreground mt-1">{form.name.length}/10자</p>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label className="text-[11px]">사업 유형 *</Label>
+                  <Label className="text-[11px]">프로젝트 유형 *</Label>
                   <Select value={form.type} onValueChange={v => update('type', v)}>
                     <SelectTrigger className="h-9 text-[12px] mt-1">
                       <SelectValue />
@@ -228,7 +336,7 @@ export function PortalProjectRegister() {
                   </Select>
                 </div>
                 <div>
-                  <Label className="text-[11px]">발주기관 *</Label>
+                  <Label className="text-[11px]">계약 대상 *</Label>
                   <datalist id="client-org-options">
                     {clientOrgOptions.map((name) => (
                       <option key={name} value={name} />
@@ -237,7 +345,7 @@ export function PortalProjectRegister() {
                   <Input
                     value={form.clientOrg}
                     onChange={e => update('clientOrg', e.target.value)}
-                    placeholder="예: KOICA"
+                    placeholder="예: KOICA, 서울시, 아모레퍼시픽재단"
                     list="client-org-options"
                     className="h-9 text-[12px] mt-1"
                   />
@@ -245,30 +353,21 @@ export function PortalProjectRegister() {
               </div>
 
               <div>
-                <Label className="text-[11px]">담당조직</Label>
-                <Select
-                  value={form.department || undefined}
-                  onValueChange={(value) => update('department', value)}
-                >
-                  <SelectTrigger className="h-9 text-[12px] mt-1">
-                    <SelectValue placeholder="담당조직 선택" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PROJECT_DEPARTMENT_OPTIONS.map((department) => (
-                      <SelectItem key={department} value={department}>
-                        {department}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label className="text-[11px]">프로젝트 목적</Label>
+                <Textarea
+                  value={form.projectPurpose}
+                  onChange={e => update('projectPurpose', e.target.value)}
+                  placeholder="예: 어떤 대상에게 어떤 가치를 제공하는 사업인지 적어 주세요."
+                  className="text-[12px] mt-1 min-h-[72px]"
+                />
               </div>
 
               <div>
-                <Label className="text-[11px]">사업 설명</Label>
+                <Label className="text-[11px]">프로젝트 주요 내용</Label>
                 <Textarea
                   value={form.description}
                   onChange={e => update('description', e.target.value)}
-                  placeholder="사업 목적, 주요 내용 등"
+                  placeholder="프로젝트 주요 수행 내용, 범위, 산출물 등을 적어 주세요."
                   className="text-[12px] mt-1 min-h-[80px]"
                 />
               </div>
@@ -283,7 +382,7 @@ export function PortalProjectRegister() {
               </div>
 
               <div>
-                <Label className="text-[11px]">총 사업비 (원) *</Label>
+                <Label className="text-[11px]">계약금액 (계약서 내 기재된 총 금액) *</Label>
                 <Input
                   type="number"
                   value={form.contractAmount || ''}
@@ -298,7 +397,7 @@ export function PortalProjectRegister() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label className="text-[11px]">사업 시작일 *</Label>
+                  <Label className="text-[11px]">계약 시작일 *</Label>
                   <Input
                     type="date"
                     value={form.contractStart}
@@ -307,11 +406,44 @@ export function PortalProjectRegister() {
                   />
                 </div>
                 <div>
-                  <Label className="text-[11px]">사업 종료일 *</Label>
+                  <Label className="text-[11px]">계약 종료일 *</Label>
                   <Input
                     type="date"
                     value={form.contractEnd}
                     onChange={e => update('contractEnd', e.target.value)}
+                    className="h-9 text-[12px] mt-1"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <Label className="text-[11px]">매출 부가세</Label>
+                  <Input
+                    type="number"
+                    value={form.salesVatAmount || ''}
+                    onChange={e => update('salesVatAmount', Number(e.target.value) || 0)}
+                    placeholder="0"
+                    className="h-9 text-[12px] mt-1"
+                  />
+                </div>
+                <div>
+                  <Label className="text-[11px]">총수익</Label>
+                  <Input
+                    type="number"
+                    value={form.totalRevenueAmount || ''}
+                    onChange={e => update('totalRevenueAmount', Number(e.target.value) || 0)}
+                    placeholder="0"
+                    className="h-9 text-[12px] mt-1"
+                  />
+                </div>
+                <div>
+                  <Label className="text-[11px]">지원금</Label>
+                  <Input
+                    type="number"
+                    value={form.supportAmount || ''}
+                    onChange={e => update('supportAmount', Number(e.target.value) || 0)}
+                    placeholder="0"
                     className="h-9 text-[12px] mt-1"
                   />
                 </div>
@@ -361,14 +493,85 @@ export function PortalProjectRegister() {
                   </Select>
                 </div>
                 <div>
-                  <Label className="text-[11px]">입금계획</Label>
+                  <Label className="text-[11px]">선금/중도금/잔금 비율(%) 및 금액, 입금예상시점</Label>
                   <Input
                     value={form.paymentPlanDesc}
                     onChange={e => update('paymentPlanDesc', e.target.value)}
-                    placeholder="예: 선금80%, 잔금20%"
+                    placeholder="예: 선금 50%(5천만원, 4월), 잔금 50%(6월 예정)"
                     className="h-9 text-[12px] mt-1"
                   />
                 </div>
+              </div>
+
+              <div>
+                <Label className="text-[11px]">사업비 수령 방식 및 정산 기준</Label>
+                <Textarea
+                  value={form.settlementGuide}
+                  onChange={e => update('settlementGuide', e.target.value)}
+                  placeholder="예: 이나라도움 수령, 공급가액 기준, 선지급 후 정산"
+                  className="text-[12px] mt-1 min-h-[72px]"
+                />
+              </div>
+
+              <div className="rounded-lg border border-dashed border-border p-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-teal-600" />
+                  <div>
+                    <p className="text-[12px]" style={{ fontWeight: 600 }}>계약서 등 (PDF로 업로드) *</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      계약이 확정되었다는 서류를 업로드해 주세요. 날인이 되어 있지 않아도 됩니다.
+                    </p>
+                  </div>
+                </div>
+                <input
+                  ref={contractFileInputRef}
+                  type="file"
+                  accept="application/pdf,.pdf"
+                  className="hidden"
+                  onChange={handleContractDocumentSelect}
+                />
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-9 text-[12px] gap-1.5"
+                    onClick={() => contractFileInputRef.current?.click()}
+                    disabled={isUploadingContract}
+                  >
+                    {isUploadingContract ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                    {isUploadingContract ? '업로드 중...' : 'PDF 업로드'}
+                  </Button>
+                  {form.contractDocument && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-9 text-[12px]"
+                      onClick={() => update('contractDocument', null)}
+                    >
+                      첨부 제거
+                    </Button>
+                  )}
+                </div>
+                {form.contractDocument ? (
+                  <div className="rounded-md bg-muted/40 px-3 py-2 text-[11px] space-y-1">
+                    <div style={{ fontWeight: 600 }}>{form.contractDocument.name}</div>
+                    <div className="text-muted-foreground">
+                      {(form.contractDocument.size / 1024 / 1024).toFixed(2)} MB · {form.contractDocument.uploadedAt.slice(0, 10)}
+                    </div>
+                    <a
+                      href={form.contractDocument.downloadURL}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-teal-600 hover:underline"
+                    >
+                      업로드된 파일 보기
+                    </a>
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-amber-700">제출 전까지 PDF 1개 업로드가 필요합니다.</p>
+                )}
               </div>
             </div>
           )}
@@ -387,15 +590,6 @@ export function PortalProjectRegister() {
                     value={form.managerName}
                     onChange={e => update('managerName', e.target.value)}
                     placeholder="메인 담당자명"
-                    className="h-9 text-[12px] mt-1"
-                  />
-                </div>
-                <div>
-                  <Label className="text-[11px]">팀명 (팀장)</Label>
-                  <Input
-                    value={form.teamName}
-                    onChange={e => update('teamName', e.target.value)}
-                    placeholder="예: 혁신팀 (홍길동)"
                     className="h-9 text-[12px] mt-1"
                   />
                 </div>
@@ -422,11 +616,11 @@ export function PortalProjectRegister() {
               </div>
 
               <div>
-                <Label className="text-[11px]">추가 메모</Label>
+                <Label className="text-[11px]">기타 참고사항</Label>
                 <Textarea
                   value={form.note}
                   onChange={e => update('note', e.target.value)}
-                  placeholder="관리자에게 전달할 사항"
+                  placeholder="관리자에게 전달할 추가 참고사항"
                   className="text-[12px] mt-1 min-h-[60px]"
                 />
               </div>
@@ -444,6 +638,11 @@ export function PortalProjectRegister() {
                 <AlertTriangle className="w-4 h-4 inline mr-1" />
                 제출 후에는 수정이 불가합니다. 정보를 다시 확인해 주세요.
               </div>
+              {!form.contractDocument && (
+                <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-[11px] text-rose-700">
+                  계약서 등 PDF가 아직 업로드되지 않았습니다. 이전 단계로 돌아가 첨부 후 제출해 주세요.
+                </div>
+              )}
 
               {/* 요약 카드 */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -456,11 +655,14 @@ export function PortalProjectRegister() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-2">
-                    <ReviewRow label="사업명" value={form.name} />
+                    <ReviewRow label="신청자" value={portalUser?.name || authUser?.name || '-'} />
+                    <ReviewRow label="공식계약명" value={form.officialContractName} />
+                    <ReviewRow label="등록명" value={form.name} />
                     <ReviewRow label="유형" value={PROJECT_TYPE_LABELS[form.type]} />
-                    <ReviewRow label="발주기관" value={form.clientOrg} />
-                    <ReviewRow label="담당조직" value={form.department || '-'} />
-                    {form.description && <ReviewRow label="설명" value={form.description} />}
+                    <ReviewRow label="계약대상" value={form.clientOrg} />
+                    <ReviewRow label="담당팀" value={form.department || '-'} />
+                    {form.projectPurpose && <ReviewRow label="목적" value={form.projectPurpose} />}
+                    {form.description && <ReviewRow label="주요내용" value={form.description} />}
                   </CardContent>
                 </Card>
 
@@ -473,12 +675,17 @@ export function PortalProjectRegister() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-2">
-                    <ReviewRow label="총 사업비" value={`${fmtKRW(form.contractAmount)}원`} highlight />
-                    <ReviewRow label="사업기간" value={`${form.contractStart} ~ ${form.contractEnd}`} />
+                    <ReviewRow label="계약금액" value={`${fmtKRW(form.contractAmount)}원`} highlight />
+                    <ReviewRow label="매출부가세" value={`${fmtKRW(form.salesVatAmount)}원`} />
+                    <ReviewRow label="총수익" value={`${fmtKRW(form.totalRevenueAmount)}원`} />
+                    <ReviewRow label="지원금" value={`${fmtKRW(form.supportAmount)}원`} />
+                    <ReviewRow label="계약기간" value={`${form.contractStart} ~ ${form.contractEnd}`} />
                     <ReviewRow label="정산유형" value={SETTLEMENT_TYPE_LABELS[form.settlementType]} />
                     <ReviewRow label="기준" value={BASIS_LABELS[form.basis]} />
                     <ReviewRow label="통장유형" value={ACCOUNT_TYPE_LABELS[form.accountType]} />
                     {form.paymentPlanDesc && <ReviewRow label="입금계획" value={form.paymentPlanDesc} />}
+                    {form.settlementGuide && <ReviewRow label="수령/정산" value={form.settlementGuide} />}
+                    <ReviewRow label="첨부파일" value={form.contractDocument?.name || '미업로드'} />
                   </CardContent>
                 </Card>
 
@@ -492,7 +699,6 @@ export function PortalProjectRegister() {
                   </CardHeader>
                   <CardContent className="space-y-2">
                     <ReviewRow label="PM" value={form.managerName} />
-                    {form.teamName && <ReviewRow label="팀명" value={form.teamName} />}
                     {form.teamMembers && <ReviewRow label="팀원" value={form.teamMembers} />}
                     {form.participantCondition && <ReviewRow label="참여조건" value={form.participantCondition} />}
                     {form.note && <ReviewRow label="메모" value={form.note} />}
@@ -522,7 +728,7 @@ export function PortalProjectRegister() {
             className="h-9 text-[12px] gap-1.5"
             style={{ background: 'linear-gradient(135deg, #0d9488, #059669)' }}
             onClick={handleSubmit}
-            disabled={isSubmitting}
+            disabled={isSubmitting || !form.contractDocument}
           >
             <Send className="w-3.5 h-3.5" /> {isSubmitting ? '제출 중...' : '관리자에게 제출'}
           </Button>

@@ -180,13 +180,15 @@ export function ProjectDetailPage() {
                   입찰/예정
                 </span>
               )}
-              {project.accountType !== 'NONE' && (
-                <span className={`inline-flex rounded px-1.5 py-0.5 text-[10px] ${
-                  project.accountType === 'DEDICATED' ? 'bg-blue-50 text-blue-700' : 'bg-gray-100 text-gray-600'
-                }`}>
-                  {ACCOUNT_TYPE_LABELS[project.accountType]}
-                </span>
-              )}
+              <span className={`inline-flex rounded px-1.5 py-0.5 text-[10px] ${
+                project.accountType === 'DEDICATED'
+                  ? 'bg-blue-50 text-blue-700'
+                  : project.accountType === 'OPERATING'
+                    ? 'bg-slate-100 text-slate-700'
+                    : 'bg-gray-100 text-gray-600'
+              }`}>
+                {ACCOUNT_TYPE_LABELS[project.accountType]}
+              </span>
             </div>
             <p className="text-[12px] text-muted-foreground mt-0.5">{project.description}</p>
           </div>
