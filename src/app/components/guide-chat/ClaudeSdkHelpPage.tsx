@@ -111,7 +111,7 @@ export function ClaudeSdkHelpPage() {
         <PageHeader
           icon={Bot}
           iconGradient="linear-gradient(135deg, #2563eb, #8b5cf6)"
-          title="플랫폼 사용 도움봇"
+          title="사업관리 메리"
           description="실제 홈페이지 흐름 기준으로 사업 설정, Drive 연결, Migration, 증빙 업로드 사용법을 안내합니다"
         />
         <Card>
@@ -132,7 +132,7 @@ export function ClaudeSdkHelpPage() {
       <PageHeader
         icon={Bot}
         iconGradient="linear-gradient(135deg, #2563eb, #8b5cf6)"
-        title="플랫폼 사용 도움봇"
+        title="사업관리 메리"
         description="실제 홈페이지 흐름 기준으로 사업 설정, Drive 연결, Migration, 증빙 업로드 사용법을 안내합니다"
       />
 
@@ -238,7 +238,7 @@ export function ClaudeSdkHelpPage() {
                     {message.role === 'assistant' && (
                       <div className="mt-2 flex items-center gap-2 text-[10px] text-muted-foreground">
                         <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
-                          {message.provider === 'anthropic' ? 'Claude 답변' : '기본 안내'}
+                          {message.provider === 'anthropic' ? 'Merry 답변' : 'Merry 안내'}
                         </Badge>
                         {message.tokensUsed ? <span>{message.tokensUsed.toLocaleString()} tokens</span> : null}
                       </div>

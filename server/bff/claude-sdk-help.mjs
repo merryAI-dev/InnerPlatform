@@ -34,11 +34,11 @@ const SOURCE_FILES = [
 ];
 
 const QUICKSTART_STEPS = [
-  '로그인 후 먼저 `사업 설정`에서 내 사업과 주사업을 확인합니다. 사업이 안 보이면 여기서 배정 상태부터 맞춥니다.',
-  '같은 화면에서 `기본 폴더 생성`을 눌러 사업별 증빙 루트 폴더를 준비합니다. 이 단계가 끝나야 주간 시트의 증빙 흐름이 안정적입니다.',
-  '주간 사업비 입력에서는 행을 작성한 뒤 `생성 → 업로드 → 동기화` 순서로 사용합니다.',
+  '먼저 `사업 설정`에서 내 사업과 주사업을 확인하고 `기본 폴더 생성`으로 사업별 증빙 루트 폴더를 준비합니다.',
+  '`통장내역` 화면에서 엑셀이나 통장 원본을 업로드하면 주간 사업비 입력의 초안 정리에 도움이 됩니다.',
+  '`주간 사업비 입력`에서 비목/세목, 거래처, 적요를 정리하고 필요한 행을 저장합니다.',
+  '증빙은 각 행에서 `생성 → 업로드 → 동기화` 순서로 사용합니다. 업로드는 파일 저장, 동기화는 목록 반영입니다.',
   '기존 Google Sheets를 옮길 때는 `Google Sheets Migration Wizard`에서 링크 입력 → 탭 선택 → 미리보기 → 안전 반영 순서로 진행합니다.',
-  '업로드했는데 목록이 안 바뀌면 `동기화`를 다시 눌러 Drive 파일 목록을 재반영합니다.',
 ];
 
 const STARTER_QUESTIONS = [
@@ -199,7 +199,7 @@ export function createClaudeSdkHelpService(options = {}) {
   return {
     getMeta() {
       return {
-        title: '플랫폼 사용 도움봇',
+        title: '사업관리 메리',
         description: '실제 홈페이지 흐름을 기준으로 사업 설정, Drive 연결, Migration, 주간 사업비 입력 사용법을 안내합니다.',
         sourceFiles: SOURCE_FILES,
         quickstartSteps: QUICKSTART_STEPS,

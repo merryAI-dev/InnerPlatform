@@ -139,13 +139,13 @@ export function ClaudeSdkHelpWidget() {
       </div>
 
       <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent side="right" className="w-full sm:max-w-xl p-0">
+        <SheetContent side="right" className="flex h-[100dvh] w-full max-w-full flex-col p-0 sm:max-w-xl">
           <SheetHeader className="border-b border-border/60">
             <div className="flex items-start justify-between gap-3 pr-8">
               <div className="space-y-1">
                 <SheetTitle className="flex items-center gap-2">
                   <MessageCircleQuestion className="h-4 w-4" />
-                  플랫폼 사용 도움봇
+                  사업관리 메리
                 </SheetTitle>
                 <SheetDescription>
                   실제 홈페이지 흐름 기준으로 사업 설정, Drive 연결, Migration, 증빙 업로드 사용법을 안내합니다.
@@ -154,8 +154,8 @@ export function ClaudeSdkHelpWidget() {
             </div>
           </SheetHeader>
 
-          <div className="flex h-full flex-col">
-            <div className="border-b border-border/60 p-4">
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="shrink-0 border-b border-border/60 p-4">
               <div className="mb-3 flex items-center gap-2">
                 <Badge variant="secondary">사용법 중심</Badge>
                 <Badge variant="outline">실제 화면 흐름 기반</Badge>
@@ -168,9 +168,25 @@ export function ClaudeSdkHelpWidget() {
                 </div>
               ) : meta ? (
                 <div className="space-y-2">
-                  <div className="text-xs font-semibold">추천 질문</div>
+                  <div className="rounded-xl border bg-muted/30 p-3 text-[11px] text-muted-foreground">
+                    <div className="mb-2 flex items-center gap-1 font-semibold text-foreground">
+                      <Sparkles className="h-3.5 w-3.5" />
+                      기본 사용 가이드
+                    </div>
+                    <ol className="space-y-1.5">
+                      {meta.quickstartSteps.slice(0, 4).map((step, index) => (
+                        <li key={step} className="flex gap-2">
+                          <span className="mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] font-semibold text-primary">
+                            {index + 1}
+                          </span>
+                          <span>{step}</span>
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                  <div className="text-xs font-semibold">바로 물어보기</div>
                   <div className="flex flex-wrap gap-2">
-                    {meta.starterQuestions.slice(0, 3).map((item) => (
+                    {meta.starterQuestions.slice(0, 4).map((item) => (
                       <Button
                         key={item}
                         type="button"
@@ -184,18 +200,11 @@ export function ClaudeSdkHelpWidget() {
                       </Button>
                     ))}
                   </div>
-                  <div className="rounded-xl border bg-muted/30 p-3 text-[11px] text-muted-foreground">
-                    <div className="mb-1 flex items-center gap-1 font-semibold text-foreground">
-                      <Sparkles className="h-3.5 w-3.5" />
-                      빠른 시작
-                    </div>
-                    <div>{meta.quickstartSteps[0]}</div>
-                  </div>
                 </div>
               ) : null}
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            <div className="min-h-0 flex-1 overflow-y-auto p-4 space-y-3">
               {messages.length === 0 ? (
                 <div className="rounded-2xl border border-dashed p-4 text-sm text-muted-foreground">
                   예: “구글드라이브 연결은 어디서 하고 기본 폴더 생성은 어떻게 해?”
@@ -216,7 +225,7 @@ export function ClaudeSdkHelpWidget() {
                       <pre className="whitespace-pre-wrap break-words font-sans">{message.content}</pre>
                       {message.role === 'assistant' && message.provider && (
                         <div className="mt-2 text-[10px] text-muted-foreground">
-                          {message.provider === 'anthropic' ? 'Claude 답변' : '기본 안내'}
+                          {message.provider === 'anthropic' ? 'Merry 답변' : 'Merry 안내'}
                         </div>
                       )}
                     </div>
@@ -238,12 +247,12 @@ export function ClaudeSdkHelpWidget() {
             </div>
 
             {error && (
-              <div className="border-t border-border/60 bg-destructive/10 px-4 py-2 text-xs text-destructive">
+              <div className="shrink-0 border-t border-border/60 bg-destructive/10 px-4 py-2 text-xs text-destructive">
                 {error}
               </div>
             )}
 
-            <div className="border-t border-border/60 p-3">
+            <div className="shrink-0 border-t border-border/60 p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
               <div className="flex gap-2">
                 <Input
                   value={question}
