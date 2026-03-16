@@ -51,12 +51,12 @@ export function validateProject(
 
   const checks: CheckItem[] = [];
 
-  // 1. 전용/운영통장 여부
-  const accountOk = project.accountType !== 'NONE';
+  // 1. 통장 유형
+  const accountOk = Boolean(ACCOUNT_TYPE_LABELS[project.accountType]);
   checks.push({
     id: 'account-type',
     label: '통장 구분',
-    description: '전용통장/운영통장 여부 지정',
+    description: '통장 유형 지정',
     passed: accountOk,
     severity: 'error',
     detail: accountOk
@@ -285,10 +285,10 @@ export function DashboardGuidePanel() {
               </div>
               <div className="bg-red-50 rounded-md px-3 py-2 border border-red-200">
                 <p className="text-red-800" style={{ fontWeight: 500 }}>
-                  운영통장으로 입금, 운영통장에서 출금되는 Big Money!
+                  사업비 입출금 흐름이 큰 항목은 통장 유형에 맞춰 반드시 추적 관리하세요.
                 </p>
                 <p className="text-red-600 mt-0.5">
-                  전용/운영통장 구분을 반드시 확인하세요.
+                  일반 사업인지, 전용계좌 사업인지 먼저 확인하세요.
                 </p>
               </div>
             </div>
@@ -312,7 +312,7 @@ export function DashboardGuidePanel() {
                 기본 체크 사항 (6개 항목)
               </div>
               <ol className="space-y-1 text-muted-foreground ml-5">
-                <li className="list-decimal">전용/운영통장 여부</li>
+                <li className="list-decimal">통장 유형</li>
                 <li className="list-decimal">캐시플로 원장 연결</li>
                 <li className="list-decimal">업데이트 날짜 & 담당자</li>
                 <li className="list-decimal">총계약금액 = 캐시플로 입금합계</li>
