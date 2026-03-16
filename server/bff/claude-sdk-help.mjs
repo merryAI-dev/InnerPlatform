@@ -7,75 +7,75 @@ const ALL_ROLES = ['admin', 'tenant_admin', 'finance', 'pm', 'viewer', 'auditor'
 
 const SOURCE_FILES = [
   {
-    label: 'AGENT_SDK_DESIGN.md',
-    path: 'merry/AGENT_SDK_DESIGN.md',
-    note: 'Claude Agent SDK와 Anthropic SDK 차이, 에이전트 설계 원칙',
+    label: 'PortalProjectSettings.tsx',
+    path: 'src/app/components/portal/PortalProjectSettings.tsx',
+    note: '사업 선택, 주사업 지정, 기본 증빙 폴더 생성 흐름',
   },
   {
-    label: 'QUICKSTART.md',
-    path: 'merry/QUICKSTART.md',
-    note: 'API 키 설정, 설치, chat/analyze/test 명령 빠른 시작',
+    label: 'PortalWeeklyExpensePage.tsx',
+    path: 'src/app/components/portal/PortalWeeklyExpensePage.tsx',
+    note: '주간 사업비 입력, Drive 생성/업로드/동기화, happy path 안내',
   },
   {
-    label: 'USAGE.md',
-    path: 'merry/USAGE.md',
-    note: '웹 UI, CLI, 파일 분석/Exit 프로젝션 실제 사용 흐름',
+    label: 'SettlementLedgerPage.tsx',
+    path: 'src/app/components/cashflow/SettlementLedgerPage.tsx',
+    note: '행 단위 업로드, 동기화, 자동 집계, 셀 편집 규칙',
   },
   {
-    label: 'discovery_agent.py',
-    path: 'merry/agent/discovery_agent.py',
-    note: 'ClaudeSDKClient + ClaudeAgentOptions 구성, Anthropic SDK 폴백 패턴',
+    label: 'GoogleSheetMigrationWizard.tsx',
+    path: 'src/app/components/portal/GoogleSheetMigrationWizard.tsx',
+    note: '시트 링크 입력, 탭 선택, 미리보기, 안전 반영 단계',
   },
   {
-    label: 'autonomous_agent.py',
-    path: 'merry/agent/autonomous_agent.py',
-    note: 'connect/query/receive_response/disconnect 기반 자율 에이전트 실행 흐름',
+    label: 'google-drive.mjs',
+    path: 'server/bff/google-drive.mjs',
+    note: 'Drive 폴더 생성, 파일 동기화, 실제 구비 완료 자동 집계 규칙',
   },
 ];
 
 const QUICKSTART_STEPS = [
-  'Python 가상환경을 만들고 `pip install -r requirements.txt`로 의존성을 설치합니다.',
-  '`.env` 또는 환경변수에 `ANTHROPIC_API_KEY`를 넣습니다. 코드에 키를 직접 넣지 않습니다.',
-  '`ClaudeSDKClient`와 `ClaudeAgentOptions`를 생성하고 모델, allowed_tools, setting_sources를 설정합니다.',
-  '스트리밍 실행은 `await client.connect()` → `await client.query(prompt)` → `for await ... receive_response()` → `await client.disconnect()` 순서로 사용합니다.',
-  '단순 1회성 텍스트 질의는 Claude Agent SDK보다 Anthropic SDK가 더 단순할 수 있습니다.',
+  '로그인 후 먼저 `사업 설정`에서 내 사업과 주사업을 확인합니다. 사업이 안 보이면 여기서 배정 상태부터 맞춥니다.',
+  '같은 화면에서 `기본 폴더 생성`을 눌러 사업별 증빙 루트 폴더를 준비합니다. 이 단계가 끝나야 주간 시트의 증빙 흐름이 안정적입니다.',
+  '주간 사업비 입력에서는 행을 작성한 뒤 `생성 → 업로드 → 동기화` 순서로 사용합니다.',
+  '기존 Google Sheets를 옮길 때는 `Google Sheets Migration Wizard`에서 링크 입력 → 탭 선택 → 미리보기 → 안전 반영 순서로 진행합니다.',
+  '업로드했는데 목록이 안 바뀌면 `동기화`를 다시 눌러 Drive 파일 목록을 재반영합니다.',
 ];
 
 const STARTER_QUESTIONS = [
-  'Claude Agent SDK와 Anthropic SDK 차이를 merry 코드 기준으로 설명해줘',
-  'merry의 discovery_agent.py처럼 ClaudeSDKClient를 초기화하는 예시를 보여줘',
-  'autonomous_agent.py 기준으로 connect/query/receive_response 패턴을 설명해줘',
-  'InnerPlatform에서 Claude SDK 도움봇이나 자동화 에이전트를 붙이려면 어떤 구조가 좋아?',
-  'Vercel과 로컬에서 ANTHROPIC_API_KEY를 어떻게 안전하게 관리하면 돼?',
+  '구글드라이브 연결은 어디서 하고 기본 폴더 생성은 어떻게 해?',
+  '주간 사업비 입력에서 생성, 업로드, 동기화는 각각 언제 눌러야 해?',
+  'Google Sheets Migration Wizard로 기존 시트를 옮길 때 순서를 알려줘',
+  '업로드했는데 실제 구비 완료된 증빙자료 리스트가 안 바뀌면 어떻게 해야 해?',
+  '예산 편집, 통장내역, 주간 사업비 입력은 각각 어떤 경우에 써야 해?',
 ];
 
 const REFERENCE_CONTEXT = [
-  '당신은 MYSC 내부 Claude SDK 도우미입니다.',
+  '당신은 MYSC 사업관리 플랫폼 사용 도움봇입니다.',
   '답변은 반드시 한국어로 합니다.',
   '중요: 당신은 내부 코드 구조를 알고 있지만, 기본 답변은 사용자 관점에서 해야 합니다.',
   '즉 "어디서 누르고", "무엇을 입력하고", "언제 어떤 기능을 쓰면 되는지"를 먼저 설명합니다.',
   '파일 경로, 구현 디테일, 코드 레벨 설명은 사용자가 직접 요청하거나 문제 원인 설명이 필요할 때만 보조적으로 언급합니다.',
   '코드 중심 설명보다 사용 흐름, 설정 순서, 실제 업무 적용 방법을 우선합니다.',
-  '레퍼런스는 merry 프로젝트의 다음 파일들입니다:',
-  '- AGENT_SDK_DESIGN.md: Claude Agent SDK와 Anthropic SDK 차이, 에이전트 설계 철학',
-  '- QUICKSTART.md: .env에 ANTHROPIC_API_KEY 설정, venv/requirements 설치, python cli.py chat, python cli.py analyze, python cli.py test',
-  '- USAGE.md: streamlit run app.py 기반 웹 UI, CLI 사용 흐름, 분석/Exit 프로젝션 예시',
-  '- agent/discovery_agent.py: ClaudeSDKClient를 선택적으로 사용하고, SDK unavailable 시 Anthropic SDK로 폴백',
-  '- agent/autonomous_agent.py: ClaudeSDKClient를 기본으로 쓰며 setting_sources=["project"], allowed_tools=["Read","Write","Edit","Bash","Glob","Grep"], permission_mode="acceptEdits" 예시 포함',
+  '레퍼런스는 InnerPlatform의 실제 사용 흐름입니다:',
+  '- PortalProjectSettings.tsx: 사업 선택, 주사업 지정, 기본 폴더 생성',
+  '- PortalWeeklyExpensePage.tsx: 주간 사업비 입력과 happy path',
+  '- SettlementLedgerPage.tsx: 행별 생성/업로드/동기화와 자동 집계',
+  '- GoogleSheetMigrationWizard.tsx: 링크 입력, 탭 선택, 미리보기, 안전 반영',
+  '- google-drive.mjs: Drive 동기화와 실제 구비 완료 목록 계산',
   '',
-  '레퍼런스에서 중요한 실무 포인트:',
-  '1. API 키는 .env 또는 환경변수로 관리하고 절대 코드에 하드코딩하지 않는다.',
-  '2. Claude Agent SDK는 세션, 도구 사용, 스트리밍, 컨텍스트 관리가 필요한 에이전트형 작업에 적합하다.',
-  '3. Anthropic SDK는 단순 text generation이나 서버 단일 응답 생성에 더 단순하다.',
-  '4. discovery_agent.py는 SDK가 없을 수 있는 환경을 고려해 Anthropic SDK 폴백을 유지한다.',
-  '5. autonomous_agent.py는 connect/query/receive_response/disconnect 라이프사이클을 보여준다.',
+  '플랫폼에서 꼭 지켜야 하는 설명 포인트:',
+  '1. 사업 설정에서 사업 선택과 기본 폴더 생성을 먼저 해야 주간 사업비 입력의 증빙 흐름이 안정적이다.',
+  '2. 주간 사업비 입력의 증빙 흐름은 보통 `생성 → 업로드 → 동기화` 순서다.',
+  '3. 업로드는 파일 저장, 동기화는 목록 반영과 자동 집계 갱신이라는 차이가 있다.',
+  '4. Google Sheets Migration Wizard는 탭별 반영 대상이 다르고, 보호 컬럼은 덮어쓰지 않는다.',
+  '5. cashflow actual은 거래 기준으로 재계산되므로 migration에서는 projection 반영이 중심이다.',
   '',
   '사용자가 물으면 다음을 우선적으로 도와줘:',
-  '- 설치/환경변수 설정',
-  '- 최소 실행 예시 코드',
-  '- 언제 Claude Agent SDK를 쓰고 언제 Anthropic SDK를 쓰는지',
-  '- merry 코드 기준으로 어떤 파일을 참고해야 하는지',
-  '- InnerPlatform에 붙일 때의 구조 제안',
+  '- 구글드라이브 연결과 기본 폴더 생성',
+  '- 주간 사업비 입력에서 행 작성, 저장, 증빙 업로드 순서',
+  '- Google Sheets Migration Wizard 사용법',
+  '- 예산 편집 / 통장내역 / 주간 사업비 입력 화면의 역할 차이',
+  '- 업로드했는데 목록이 안 바뀌는 경우의 점검 순서',
   '',
   '답변 원칙:',
   '- 먼저 핵심 답을 짧게 말하고, 필요하면 사용 순서와 예시를 준다.',
@@ -114,43 +114,57 @@ function normalizeHistory(history) {
 
 function buildFallbackAnswer(question) {
   const normalized = String(question || '').trim().toLowerCase();
-  if (normalized.includes('차이') || normalized.includes('anthropic sdk')) {
+  if (normalized.includes('구글드라이브') || normalized.includes('드라이브 연결') || normalized.includes('기본 폴더')) {
     return [
-      'Claude Agent SDK는 도구 사용과 세션 관리가 필요한 에이전트형 작업에 더 적합합니다.',
-      'Anthropic SDK는 단순한 `messages.create()` 호출처럼 서버 단일 응답을 만들 때 더 단순합니다.',
+      '구글드라이브 연결은 보통 `사업 설정` 화면에서 먼저 합니다.',
+      '1. 사업을 선택하거나 주사업을 지정합니다.',
+      '2. `기본 폴더 생성`을 눌러 사업별 증빙 루트 폴더를 만듭니다.',
+      '3. 그 다음 주간 사업비 입력으로 가면 각 행에서 `생성 / 업로드 / 동기화`를 사용할 수 있습니다.',
       '',
-      'merry 기준 참고 파일:',
-      '- `merry/AGENT_SDK_DESIGN.md`',
-      '- `merry/agent/discovery_agent.py`',
-      '- `merry/agent/autonomous_agent.py`',
+      '실무 팁:',
+      '- 기본 폴더 생성은 사업당 한 번만 하면 됩니다.',
+      '- 행에 이미 폴더가 있으면 다시 만들지 않고 기존 폴더를 재사용합니다.',
+      '- 업로드 후 목록 반영은 `동기화` 버튼에서 마무리됩니다.',
     ].join('\n');
   }
 
-  if (normalized.includes('connect') || normalized.includes('query') || normalized.includes('receive_response')) {
+  if (normalized.includes('업로드') || normalized.includes('동기화')) {
     return [
-      '`autonomous_agent.py` 패턴 기준 기본 순서는 다음과 같습니다.',
-      '1. `await client.connect()`',
-      '2. `await client.query(prompt)`',
-      '3. `async for message in client.receive_response(): ...`',
-      '4. `await client.disconnect()`',
+      '증빙은 보통 `생성 → 업로드 → 동기화` 순서로 씁니다.',
+      '1. `생성`: 거래 행에 대응하는 Drive 폴더를 준비합니다.',
+      '2. `업로드`: 파일을 Drive 폴더에 올립니다. 이 단계만으로는 목록 반영이 끝나지 않을 수 있습니다.',
+      '3. `동기화`: Drive 파일 목록을 다시 읽어서 `실제 구비 완료된 증빙자료 리스트`와 상태를 갱신합니다.',
       '',
-      '실제 예시는 `merry/agent/autonomous_agent.py`를 참고하면 됩니다.',
+      '업로드만 했는데 화면이 안 바뀌면 `동기화`를 한 번 더 눌러야 합니다.',
+    ].join('\n');
+  }
+
+  if (normalized.includes('migration') || normalized.includes('시트') || normalized.includes('wizard')) {
+    return [
+      '기존 Google Sheets를 옮길 때는 `Google Sheets Migration Wizard`를 쓰면 됩니다.',
+      '1. 시트 링크 또는 spreadsheet ID를 붙여넣습니다.',
+      '2. 탭 목록에서 `사용내역`, `예산총괄시트`, `cashflow`, `비목별 증빙자료` 같은 반영 대상을 고릅니다.',
+      '3. 미리보기에서 어떤 화면으로 들어갈지 확인합니다.',
+      '4. `안전 반영` 단계에서 실제로 가져옵니다.',
+      '',
+      '주의:',
+      '- 증빙 드라이브 링크처럼 보호 컬럼은 덮어쓰지 않습니다.',
+      '- `cashflow`는 projection만 가져오고 actual은 거래 기준으로 다시 계산합니다.',
     ].join('\n');
   }
 
   return [
-    '현재 Claude API 답변을 생성하지 못해 레퍼런스 요약으로 안내합니다.',
+    '현재 AI 답변을 만들지 못해 기본 사용 흐름 기준으로 안내합니다.',
     '',
-    '빠른 시작:',
-    '- `python -m venv venv && source venv/bin/activate`',
-    '- `pip install -r requirements.txt`',
-    '- `.env`에 `ANTHROPIC_API_KEY=...` 설정',
-    '- 필요 시 `python cli.py chat` 또는 `streamlit run app.py`',
+    '추천 시작 순서:',
+    '- `사업 설정`에서 사업 선택과 기본 폴더 생성',
+    '- `주간 사업비 입력`에서 행 작성 후 생성/업로드/동기화',
+    '- 기존 시트가 있으면 `Google Sheets Migration Wizard` 사용',
     '',
-    '참고 파일:',
-    '- `merry/QUICKSTART.md`',
-    '- `merry/USAGE.md`',
-    '- `merry/AGENT_SDK_DESIGN.md`',
+    '지금 바로 물어볼 만한 질문:',
+    '- 구글드라이브 연결은 어떻게 해?',
+    '- 기본 폴더 생성은 어디서 해?',
+    '- 업로드했는데 목록이 안 바뀌면?',
   ].join('\n');
 }
 
@@ -185,8 +199,8 @@ export function createClaudeSdkHelpService(options = {}) {
   return {
     getMeta() {
       return {
-        title: 'Claude SDK 도움봇',
-        description: 'merry 프로젝트 레퍼런스를 바탕으로 Claude Agent SDK와 Anthropic SDK 사용법을 안내합니다.',
+        title: '플랫폼 사용 도움봇',
+        description: '실제 홈페이지 흐름을 기준으로 사업 설정, Drive 연결, Migration, 주간 사업비 입력 사용법을 안내합니다.',
         sourceFiles: SOURCE_FILES,
         quickstartSteps: QUICKSTART_STEPS,
         starterQuestions: STARTER_QUESTIONS,
@@ -203,7 +217,7 @@ export function createClaudeSdkHelpService(options = {}) {
           model,
           provider: 'fallback',
           tokensUsed: 0,
-          warning: error instanceof Error ? error.message : 'Claude SDK help fallback used',
+          warning: error instanceof Error ? error.message : 'platform help fallback used',
         };
       }
     },
