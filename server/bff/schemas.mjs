@@ -76,6 +76,13 @@ export const projectRequestContractAnalyzeSchema = z.object({
   documentText: z.string().max(200000).optional(),
 }).strict();
 
+export const projectRequestContractUploadSchema = z.object({
+  fileName: NON_EMPTY_STRING.max(300),
+  mimeType: NON_EMPTY_STRING.max(200),
+  fileSize: z.number().int().nonnegative(),
+  contentBase64: NON_EMPTY_STRING,
+}).strict();
+
 export const claudeSdkHelpAskSchema = z.object({
   question: NON_EMPTY_STRING.max(2000),
   history: z.array(

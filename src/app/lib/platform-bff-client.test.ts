@@ -12,6 +12,7 @@ import {
   provisionTransactionEvidenceDriveViaBff,
   readPlatformApiRuntimeConfig,
   syncTransactionEvidenceDriveViaBff,
+  uploadProjectRequestContractViaBff,
   toRequestActor,
   uploadTransactionEvidenceDriveViaBff,
   upsertLedgerViaBff,
@@ -197,6 +198,46 @@ describe('platform-bff-client', () => {
     }));
     expect(result.fields.officialContractName.value).toBe('뷰티풀 커넥트 운영 계약');
     expect(result.fields.contractAmount.value).toBe(120000000);
+  });
+
+  it('calls project request contract upload endpoint', async () => {
+    const client = {
+      post: vi.fn(async () => ({
+        data: {
+          path: 'orgs/mysc/project-request-contracts/u001/contract.pdf',
+          name: 'contract.pdf',
+          downloadURL: 'https://example.com/contract.pdf',
+          size: 1234,
+          contentType: 'application/pdf',
+          uploadedAt: '2026-03-16T10:00:00.000Z',
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    };
+
+    const result = await uploadProjectRequestContractViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm', idToken: 'token-abc' },
+      upload: {
+        fileName: 'contract.pdf',
+        mimeType: 'application/pdf',
+        fileSize: 1234,
+        contentBase64: 'ZmFrZS1wZGY=',
+      },
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/project-requests/contract/upload', expect.objectContaining({
+      tenantId: 'mysc',
+      body: {
+        fileName: 'contract.pdf',
+        mimeType: 'application/pdf',
+        fileSize: 1234,
+        contentBase64: 'ZmFrZS1wZGY=',
+      },
+    }));
+    expect(result.downloadURL).toContain('contract.pdf');
   });
 
   it('calls evidence drive provision/sync endpoints', async () => {

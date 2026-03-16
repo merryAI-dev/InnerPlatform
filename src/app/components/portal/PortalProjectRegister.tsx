@@ -15,16 +15,16 @@ import {
 } from 'lucide-react';
 import { useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
-import { getDownloadURL, ref as storageRef, uploadBytes } from 'firebase/storage';
 import { toast } from 'sonner';
 import { usePortalStore } from '../../data/portal-store';
 import { useAuth } from '../../data/auth-store';
 import { useFirebase } from '../../lib/firebase-context';
-import { getAuthInstance, getStorageInstance } from '../../lib/firebase';
+import { getAuthInstance } from '../../lib/firebase';
 import { extractTextFromPdf } from '../../lib/pdf-extract';
 import {
   analyzeProjectRequestContractViaBff,
   type ProjectRequestContractAnalysisResult,
+  uploadProjectRequestContractViaBff,
 } from '../../lib/platform-bff-client';
 import {
   ACCOUNT_TYPE_LABELS,
@@ -169,6 +169,97 @@ function confidenceBadgeClass(confidence: ProjectRequestContractAnalysis['fields
   return 'bg-slate-500/15 text-slate-700 dark:text-slate-300';
 }
 
+function resolveContractUploadUiState(
+  contractAnalysisState: ContractAnalysisState,
+  hasContractDocument: boolean,
+) {
+  if (contractAnalysisState === 'extracting') {
+    return {
+      cardClass: 'border-teal-300 bg-teal-50/70 dark:border-teal-700/50 dark:bg-teal-950/20',
+      surfaceClass: 'border-teal-300/70 bg-white/85 dark:border-teal-700/50 dark:bg-teal-950/30',
+      badgeClass: 'bg-teal-500/15 text-teal-700 dark:text-teal-300',
+      buttonClass: 'bg-teal-600 text-white hover:bg-teal-700',
+      statusLabel: 'PDF 텍스트 추출 중',
+      title: '계약서를 읽는 중입니다',
+      description: 'PDF 텍스트를 먼저 추출한 뒤, AI 초안 생성 단계로 넘어갑니다.',
+      ctaLabel: '처리 중...',
+    };
+  }
+  if (contractAnalysisState === 'analyzing') {
+    return {
+      cardClass: 'border-teal-300 bg-teal-50/70 dark:border-teal-700/50 dark:bg-teal-950/20',
+      surfaceClass: 'border-teal-300/70 bg-white/85 dark:border-teal-700/50 dark:bg-teal-950/30',
+      badgeClass: 'bg-teal-500/15 text-teal-700 dark:text-teal-300',
+      buttonClass: 'bg-teal-600 text-white hover:bg-teal-700',
+      statusLabel: 'AI 초안 생성 중',
+      title: '기본 정보를 채우는 중입니다',
+      description: '공식 계약명, 계약 대상, 기간, 금액을 자동으로 읽어 초안을 만들고 있습니다.',
+      ctaLabel: '분석 중...',
+    };
+  }
+  if (hasContractDocument && contractAnalysisState === 'ready') {
+    return {
+      cardClass: 'border-emerald-300 bg-emerald-50/80 dark:border-emerald-700/50 dark:bg-emerald-950/20',
+      surfaceClass: 'border-emerald-300/70 bg-white/90 dark:border-emerald-700/50 dark:bg-emerald-950/30',
+      badgeClass: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
+      buttonClass: 'bg-emerald-600 text-white hover:bg-emerald-700',
+      statusLabel: '업로드 및 초안 생성 완료',
+      title: '계약서 업로드가 완료됐습니다',
+      description: '오른쪽 AI 초안을 확인하고, 아래 단계에서 사람 기준으로 한 번만 검토하면 됩니다.',
+      ctaLabel: '계약서 다시 업로드',
+    };
+  }
+  if (hasContractDocument) {
+    return {
+      cardClass: 'border-amber-300 bg-amber-50/80 dark:border-amber-700/50 dark:bg-amber-950/20',
+      surfaceClass: 'border-amber-300/70 bg-white/90 dark:border-amber-700/50 dark:bg-amber-950/30',
+      badgeClass: 'bg-amber-500/15 text-amber-700 dark:text-amber-300',
+      buttonClass: 'bg-amber-600 text-white hover:bg-amber-700',
+      statusLabel: '업로드 완료',
+      title: '계약서는 올라갔지만 확인이 더 필요합니다',
+      description: 'AI 초안 생성이 실패했거나 일부만 읽혔을 수 있습니다. 직접 보완하거나 다시 업로드할 수 있습니다.',
+      ctaLabel: '계약서 다시 업로드',
+    };
+  }
+  if (contractAnalysisState === 'error') {
+    return {
+      cardClass: 'border-rose-300 bg-rose-50/80 dark:border-rose-700/50 dark:bg-rose-950/20',
+      surfaceClass: 'border-rose-300/70 bg-white/90 dark:border-rose-700/50 dark:bg-rose-950/30',
+      badgeClass: 'bg-rose-500/15 text-rose-700 dark:text-rose-300',
+      buttonClass: 'bg-rose-600 text-white hover:bg-rose-700',
+      statusLabel: '업로드 오류',
+      title: '계약서 업로드를 다시 시도해 주세요',
+      description: 'PDF 업로드나 AI 초안 생성 중 문제가 있었습니다. 계약서를 다시 올리면 바로 재시도할 수 있습니다.',
+      ctaLabel: '계약서 다시 업로드',
+    };
+  }
+  return {
+    cardClass: 'border-teal-200 bg-gradient-to-br from-teal-50/80 via-white to-cyan-50/70 dark:border-teal-800/40 dark:from-teal-950/20 dark:via-background dark:to-cyan-950/10',
+    surfaceClass: 'border-teal-200/80 bg-white/90 dark:border-teal-800/40 dark:bg-teal-950/20',
+    badgeClass: 'bg-teal-500/15 text-teal-700 dark:text-teal-300',
+    buttonClass: 'bg-teal-600 text-white hover:bg-teal-700',
+    statusLabel: '업로드 필요',
+    title: '먼저 계약서 PDF를 올려 주세요',
+    description: '이 단계가 끝나면 공식 계약명, 계약 대상, 기간, 금액 초안을 자동으로 채워서 다음 입력 부담을 줄입니다.',
+    ctaLabel: '계약서 PDF 업로드 시작',
+  };
+}
+
+async function readFileAsBase64(file: File): Promise<string> {
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error || new Error('파일 읽기에 실패했습니다.'));
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.readAsDataURL(file);
+  });
+
+  const [, base64 = ''] = dataUrl.split(',', 2);
+  if (!base64) {
+    throw new Error(`파일 인코딩에 실패했습니다: ${file.name}`);
+  }
+  return base64;
+}
+
 export function PortalProjectRegister() {
   const navigate = useNavigate();
   const { user: authUser } = useAuth();
@@ -203,6 +294,8 @@ export function PortalProjectRegister() {
 
   const analysis = form.contractAnalysis || null;
   const analysisField = (key: AnalysisFieldKey) => analysis?.fields[key] || null;
+  const hasContractDocument = Boolean(form.contractDocument);
+  const contractUploadUi = resolveContractUploadUiState(contractAnalysisState, hasContractDocument);
 
   const canProceed = () => {
     if (step === 'contract') {
@@ -242,33 +335,28 @@ export function PortalProjectRegister() {
       toast.error('로그인 정보를 확인할 수 없습니다.');
       return;
     }
-    const storage = getStorageInstance();
-    if (!storage) {
-      toast.error('파일 업로드를 위한 저장소를 초기화할 수 없습니다.');
-      return;
-    }
-
     setIsUploadingContract(true);
     setContractAnalysisState('extracting');
     setAnalysisError('');
 
     try {
-      const uploadedAt = new Date().toISOString();
-      const safeName = file.name.replace(/[^\w.\-가-힣() ]+/g, '_');
-      const path = `orgs/${orgId}/project-request-contracts/${authUser.uid}/${Date.now()}-${safeName}`;
-      const ref = storageRef(storage, path);
-      const snapshot = await uploadBytes(ref, file, {
-        contentType: file.type || 'application/pdf',
+      const idToken = authUser.idToken || await getAuthInstance()?.currentUser?.getIdToken() || undefined;
+      const contentBase64 = await readFileAsBase64(file);
+      const contractDocument = await uploadProjectRequestContractViaBff({
+        tenantId: orgId,
+        actor: {
+          uid: authUser.uid,
+          email: authUser.email,
+          role: authUser.role,
+          idToken,
+        },
+        upload: {
+          fileName: file.name,
+          mimeType: file.type || 'application/pdf',
+          fileSize: file.size,
+          contentBase64,
+        },
       });
-      const downloadURL = await getDownloadURL(snapshot.ref);
-      const contractDocument = {
-        path,
-        name: file.name,
-        downloadURL,
-        size: file.size,
-        contentType: file.type || 'application/pdf',
-        uploadedAt,
-      };
 
       let documentText = '';
       try {
@@ -281,7 +369,6 @@ export function PortalProjectRegister() {
 
       let nextAnalysis: ProjectRequestContractAnalysisResult | null = null;
       try {
-        const idToken = authUser.idToken || await getAuthInstance()?.currentUser?.getIdToken() || undefined;
         nextAnalysis = await analyzeProjectRequestContractViaBff({
           tenantId: orgId,
           actor: {
@@ -461,9 +548,14 @@ export function PortalProjectRegister() {
         <CardContent className="space-y-5 p-5">
           {step === 'contract' && (
             <div className="grid gap-4 xl:grid-cols-[1.2fr,0.8fr]">
-              <Card className="border-dashed border-border/80">
+              <Card className={contractUploadUi.cardClass}>
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-[13px]">1. 계약서 업로드</CardTitle>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <CardTitle className="text-[13px]">1. 계약서 업로드</CardTitle>
+                    <Badge className={`border-0 ${contractUploadUi.badgeClass}`}>
+                      {contractUploadUi.statusLabel}
+                    </Badge>
+                  </div>
                   <p className="text-[11px] text-muted-foreground">
                     계약서 PDF를 먼저 올리면 공식 계약명, 계약 대상, 기간, 금액 초안을 자동으로 채웁니다.
                   </p>
@@ -476,54 +568,73 @@ export function PortalProjectRegister() {
                     className="hidden"
                     onChange={handleContractDocumentSelect}
                   />
-                  <div className="rounded-xl border border-dashed border-border p-4">
-                    <div className="flex flex-wrap items-center gap-2">
+                  <div className={`rounded-2xl border border-dashed p-5 shadow-sm transition-colors ${contractUploadUi.surfaceClass}`}>
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="space-y-1">
+                        <div className="text-[15px]" style={{ fontWeight: 700 }}>{contractUploadUi.title}</div>
+                        <p className="max-w-xl text-[11px] leading-5 text-muted-foreground">
+                          {contractUploadUi.description}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Badge className={`border-0 ${contractUploadUi.badgeClass}`}>PDF 1개 필수</Badge>
+                        <Badge className="border-0 bg-slate-500/15 text-slate-700 dark:text-slate-300">업로드 후 AI 초안 자동 생성</Badge>
+                      </div>
+                    </div>
+
+                    <div className="mt-5">
                       <Button
                         type="button"
-                        variant="outline"
-                        className="h-9 gap-1.5 text-[12px]"
+                        className={`h-14 w-full gap-2 text-[14px] shadow-sm ${contractUploadUi.buttonClass}`}
                         onClick={() => contractFileInputRef.current?.click()}
                         disabled={isUploadingContract}
                       >
-                        {isUploadingContract ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
-                        {isUploadingContract ? '업로드 중...' : '계약서 PDF 업로드'}
+                        {isUploadingContract ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                        {contractUploadUi.ctaLabel}
                       </Button>
-                      {form.contractDocument ? (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          className="h-9 text-[12px]"
-                          onClick={() => {
-                            setForm((prev) => ({ ...prev, contractDocument: null, contractAnalysis: null }));
-                            setContractAnalysisState('idle');
-                            setAnalysisError('');
-                          }}
-                        >
-                          첨부 제거
-                        </Button>
-                      ) : null}
                     </div>
-                    <p className="mt-3 text-[11px] text-muted-foreground">
-                      계약이 확정되었다는 서류를 업로드해 주세요. 날인이 되어 있지 않아도 됩니다.
-                    </p>
+
+                    <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+                      <span>계약이 확정되었다는 서류를 업로드해 주세요.</span>
+                      <span>날인이 되어 있지 않아도 됩니다.</span>
+                      <span>스캔본도 가능하지만 텍스트 PDF가 더 잘 읽힙니다.</span>
+                    </div>
                     {form.contractDocument ? (
-                      <div className="mt-4 rounded-lg bg-muted/40 px-3 py-3 text-[11px]">
-                        <div style={{ fontWeight: 600 }}>{form.contractDocument.name}</div>
-                        <div className="mt-1 text-muted-foreground">
-                          {(form.contractDocument.size / 1024 / 1024).toFixed(2)} MB · {form.contractDocument.uploadedAt.slice(0, 10)}
+                      <div className="mt-4 rounded-xl border border-border/60 bg-background/80 px-4 py-3 text-[11px]">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <div style={{ fontWeight: 700 }}>{form.contractDocument.name}</div>
+                            <div className="mt-1 text-muted-foreground">
+                              {(form.contractDocument.size / 1024 / 1024).toFixed(2)} MB · {form.contractDocument.uploadedAt.slice(0, 10)}
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <a
+                              href={form.contractDocument.downloadURL}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex h-8 items-center rounded-md border border-border px-3 text-[11px] text-teal-600 transition-colors hover:bg-teal-50 dark:hover:bg-teal-950/20"
+                            >
+                              업로드된 파일 보기
+                            </a>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              className="h-8 text-[11px]"
+                              onClick={() => {
+                                setForm((prev) => ({ ...prev, contractDocument: null, contractAnalysis: null }));
+                                setContractAnalysisState('idle');
+                                setAnalysisError('');
+                              }}
+                            >
+                              첨부 제거
+                            </Button>
+                          </div>
                         </div>
-                        <a
-                          href={form.contractDocument.downloadURL}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="mt-2 inline-block text-teal-600 hover:underline"
-                        >
-                          업로드된 파일 보기
-                        </a>
                       </div>
                     ) : (
-                      <div className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-[11px] text-amber-700 dark:bg-amber-950/20 dark:text-amber-300">
-                        제출 전까지 계약서 PDF 1개 업로드가 필요합니다.
+                      <div className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-[11px] text-amber-700 dark:bg-amber-950/20 dark:text-amber-300">
+                        아직 계약서 PDF가 없습니다. 위 버튼으로 먼저 업로드를 시작해 주세요.
                       </div>
                     )}
                   </div>

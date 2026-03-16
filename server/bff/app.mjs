@@ -48,6 +48,7 @@ import {
   memberRoleUpdateSchema,
   parseWithSchema,
   projectRequestContractAnalyzeSchema,
+  projectRequestContractUploadSchema,
   projectDriveRootLinkSchema,
   projectUpsertSchema,
   transactionStateSchema,
@@ -72,6 +73,7 @@ import {
 } from './google-sheets.mjs';
 import { createGoogleSheetMigrationAiService } from './google-sheet-migration-ai.mjs';
 import { createProjectRequestContractAiService } from './project-request-contract-ai.mjs';
+import { createProjectRequestContractStorageService } from './project-request-contract-storage.mjs';
 
 function createHttpError(statusCode, message, code = 'request_error') {
   const error = new Error(message);
@@ -568,6 +570,7 @@ export function createBffApp(options = {}) {
   const googleSheetsService = options.googleSheetsService || createGoogleSheetsService();
   const googleSheetMigrationAiService = options.googleSheetMigrationAiService || createGoogleSheetMigrationAiService();
   const projectRequestContractAiService = options.projectRequestContractAiService || createProjectRequestContractAiService();
+  const projectRequestContractStorageService = options.projectRequestContractStorageService || createProjectRequestContractStorageService({ projectId });
   const allowedOrigins = parseAllowedOrigins(options.allowedOrigins || process.env.BFF_ALLOWED_ORIGINS);
   const relationRulesPolicyPath = options.relationRulesPolicyPath || resolveRelationRulesPolicyPath();
   const workQueueBatchSizeRaw = Number.parseInt(process.env.BFF_WORK_QUEUE_BATCH || '100', 10);
@@ -1226,6 +1229,25 @@ export function createBffApp(options = {}) {
       documentText: parsed.documentText || '',
     });
     res.status(200).json(analysis);
+  }));
+
+  app.post('/api/v1/project-requests/contract/upload', asyncHandler(async (req, res) => {
+    const { tenantId, actorId } = req.context;
+    assertActorRoleAllowed(req, ROUTE_ROLES.writeCore, 'upload project request contract');
+    const parsed = parseWithSchema(
+      projectRequestContractUploadSchema,
+      req.body,
+      'Invalid project request contract upload payload',
+    );
+    const uploaded = await projectRequestContractStorageService.uploadContract({
+      tenantId,
+      actorId,
+      fileName: parsed.fileName,
+      mimeType: parsed.mimeType,
+      fileSize: parsed.fileSize,
+      contentBase64: parsed.contentBase64,
+    });
+    res.status(200).json(uploaded);
   }));
 
   app.get('/api/v1/ledgers', asyncHandler(async (req, res) => {
