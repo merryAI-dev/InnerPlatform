@@ -1,16 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router';
-import { Bot, Loader2, MessageCircleQuestion, Send, Sparkles } from 'lucide-react';
+import { Bot, Loader2, MessageCircleQuestion, Send, Sparkles, X } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Badge } from '../ui/badge';
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from '../ui/sheet';
 import { useAuth } from '../../data/auth-store';
 import { useFirebase } from '../../lib/firebase-context';
 import { isPlatformApiEnabled } from '../../lib/platform-bff-client';
@@ -132,29 +125,38 @@ export function ClaudeSdkHelpWidget() {
           type="button"
           size="icon"
           className="h-14 w-14 rounded-full shadow-xl"
-          onClick={() => setOpen(true)}
+          onClick={() => setOpen((prev) => !prev)}
         >
           <Bot className="h-6 w-6" />
         </Button>
       </div>
 
-      <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent side="right" className="flex h-[100dvh] w-full max-w-full flex-col p-0 sm:max-w-xl">
-          <SheetHeader className="border-b border-border/60">
-            <div className="flex items-start justify-between gap-3 pr-8">
-              <div className="space-y-1">
-                <SheetTitle className="flex items-center gap-2">
+      {open ? (
+        <div className="fixed right-3 bottom-24 z-[70] flex w-[min(420px,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-2xl border border-border/70 bg-background shadow-2xl sm:right-5 sm:w-[380px] md:w-[420px]">
+          <div className="border-b border-border/60 px-4 py-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 space-y-1">
+                <div className="flex items-center gap-2 text-sm font-semibold">
                   <MessageCircleQuestion className="h-4 w-4" />
                   사업관리 메리
-                </SheetTitle>
-                <SheetDescription>
+                </div>
+                <p className="text-xs text-muted-foreground">
                   실제 홈페이지 흐름 기준으로 사업 설정, Drive 연결, Migration, 증빙 업로드 사용법을 안내합니다.
-                </SheetDescription>
+                </p>
               </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 shrink-0"
+                onClick={() => setOpen(false)}
+              >
+                <X className="h-4 w-4" />
+              </Button>
             </div>
-          </SheetHeader>
+          </div>
 
-          <div className="flex min-h-0 flex-1 flex-col">
+          <div className="flex h-[min(70vh,640px)] max-h-[calc(100dvh-8rem)] min-h-[440px] min-w-0 flex-col">
             <div className="shrink-0 border-b border-border/60 p-4">
               <div className="mb-3 flex items-center gap-2">
                 <Badge variant="secondary">사용법 중심</Badge>
@@ -277,8 +279,8 @@ export function ClaudeSdkHelpWidget() {
               </div>
             </div>
           </div>
-        </SheetContent>
-      </Sheet>
+        </div>
+      ) : null}
     </>
   );
 }
