@@ -145,10 +145,10 @@ export function ClaudeSdkHelpWidget() {
               <div className="space-y-1">
                 <SheetTitle className="flex items-center gap-2">
                   <MessageCircleQuestion className="h-4 w-4" />
-                  Claude SDK 도움봇
+                  플랫폼 사용 도움봇
                 </SheetTitle>
                 <SheetDescription>
-                  코드 구조는 알고 있지만, 답변은 사용자 관점에서 사용 방법 중심으로 안내합니다.
+                  실제 홈페이지 흐름 기준으로 사업 설정, Drive 연결, Migration, 증빙 업로드 사용법을 안내합니다.
                 </SheetDescription>
               </div>
             </div>
@@ -158,7 +158,7 @@ export function ClaudeSdkHelpWidget() {
             <div className="border-b border-border/60 p-4">
               <div className="mb-3 flex items-center gap-2">
                 <Badge variant="secondary">사용법 중심</Badge>
-                <Badge variant="outline">merry 레퍼런스 기반</Badge>
+                <Badge variant="outline">실제 화면 흐름 기반</Badge>
               </div>
 
               {loadingMeta ? (
@@ -198,7 +198,7 @@ export function ClaudeSdkHelpWidget() {
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
               {messages.length === 0 ? (
                 <div className="rounded-2xl border border-dashed p-4 text-sm text-muted-foreground">
-                  예: “처음 쓰는 사람 기준으로 Claude SDK를 어떻게 시작하면 되나요?”
+                  예: “구글드라이브 연결은 어디서 하고 기본 폴더 생성은 어떻게 해?”
                 </div>
               ) : (
                 messages.map((message) => (
@@ -229,7 +229,7 @@ export function ClaudeSdkHelpWidget() {
                   <div className="rounded-2xl bg-muted px-3 py-2 text-sm text-muted-foreground">
                     <div className="flex items-center gap-2">
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      사용 흐름 기준으로 답변을 정리하고 있습니다...
+                      실제 사용 흐름 기준으로 답변을 정리하고 있습니다...
                     </div>
                   </div>
                 </div>
@@ -248,7 +248,7 @@ export function ClaudeSdkHelpWidget() {
                 <Input
                   value={question}
                   onChange={(event) => setQuestion(event.target.value)}
-                  placeholder="사용자 입장에서 어떻게 쓰는지 물어보세요"
+                  placeholder="예: 기본 폴더 생성은 어디서 해? 업로드 후 동기화는 왜 필요해?"
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' && !event.shiftKey) {
                       event.preventDefault();

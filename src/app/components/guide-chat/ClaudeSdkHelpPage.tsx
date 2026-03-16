@@ -111,8 +111,8 @@ export function ClaudeSdkHelpPage() {
         <PageHeader
           icon={Bot}
           iconGradient="linear-gradient(135deg, #2563eb, #8b5cf6)"
-          title="Claude SDK 도움봇"
-          description="merry 레퍼런스를 기준으로 Claude SDK 사용법을 설명합니다"
+          title="플랫폼 사용 도움봇"
+          description="실제 홈페이지 흐름 기준으로 사업 설정, Drive 연결, Migration, 증빙 업로드 사용법을 안내합니다"
         />
         <Card>
           <CardContent className="py-12 text-center">
@@ -132,8 +132,8 @@ export function ClaudeSdkHelpPage() {
       <PageHeader
         icon={Bot}
         iconGradient="linear-gradient(135deg, #2563eb, #8b5cf6)"
-        title="Claude SDK 도움봇"
-        description="merry 레퍼런스를 기준으로 Claude Agent SDK와 Anthropic SDK 사용법을 설명합니다"
+        title="플랫폼 사용 도움봇"
+        description="실제 홈페이지 흐름 기준으로 사업 설정, Drive 연결, Migration, 증빙 업로드 사용법을 안내합니다"
       />
 
       <div className="grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
@@ -219,7 +219,7 @@ export function ClaudeSdkHelpPage() {
               <div className="text-center py-16">
                 <Bot className="w-10 h-10 mx-auto text-muted-foreground/30 mb-3" />
                 <p className="text-sm text-muted-foreground">
-                  Claude SDK 사용법, 설정, 샘플 코드, merry 레퍼런스 경로를 질문해보세요.
+                  사업 설정, 구글드라이브 연결, Migration, 증빙 업로드/동기화 사용법을 질문해보세요.
                 </p>
               </div>
             )}

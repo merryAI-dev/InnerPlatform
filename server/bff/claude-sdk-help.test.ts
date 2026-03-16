@@ -13,10 +13,10 @@ describe('claude-sdk-help', () => {
     });
 
     const meta = service.getMeta();
-    expect(meta.title).toBe('Claude SDK 도움봇');
+    expect(meta.title).toBe('플랫폼 사용 도움봇');
     expect(meta.sourceFiles.length).toBeGreaterThanOrEqual(5);
-    expect(meta.quickstartSteps.some((step) => step.includes('ANTHROPIC_API_KEY'))).toBe(true);
-    expect(meta.starterQuestions.some((item) => item.includes('Claude Agent SDK'))).toBe(true);
+    expect(meta.quickstartSteps.some((step) => step.includes('기본 폴더 생성'))).toBe(true);
+    expect(meta.starterQuestions.some((item) => item.includes('구글드라이브 연결'))).toBe(true);
   });
 
   it('uses injected model response when available', async () => {
@@ -48,12 +48,12 @@ describe('claude-sdk-help', () => {
     });
 
     const result = await service.ask({
-      question: 'connect query receive_response 순서를 알려줘',
+      question: '구글드라이브 연결은 어디서 하고 기본 폴더 생성은 어떻게 해?',
       history: [],
     });
 
     expect(result.provider).toBe('fallback');
     expect(result.warning).toBe('boom');
-    expect(result.answer).toContain('autonomous_agent.py');
+    expect(result.answer).toContain('기본 폴더 생성');
   });
 });
