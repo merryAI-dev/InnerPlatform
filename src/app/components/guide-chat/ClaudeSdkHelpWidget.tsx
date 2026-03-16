@@ -41,24 +41,39 @@ export function ClaudeSdkHelpWidget() {
   const [error, setError] = useState('');
   const [messages, setMessages] = useState<WidgetMessage[]>([]);
   const endRef = useRef<HTMLDivElement>(null);
+  const attemptedMetaRef = useRef(false);
 
   const hidden = !bffEnabled
     || !isAuthenticated
     || !user
+    || !user.idToken
     || location.pathname === '/login'
     || location.pathname === '/workspace-select';
 
   const actorParams = useMemo(() => ({
     tenantId: orgId || 'mysc',
-    actor: { uid: user?.uid || '', email: user?.email || '', role: user?.role || '' },
-  }), [orgId, user]);
+    actor: {
+      uid: user?.uid || '',
+      email: user?.email || '',
+      role: user?.role || '',
+      idToken: user?.idToken,
+    },
+  }), [orgId, user?.uid, user?.email, user?.role, user?.idToken]);
+
+  useEffect(() => {
+    if (!open) {
+      attemptedMetaRef.current = false;
+      setError('');
+    }
+  }, [open]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages.length, open]);
 
   useEffect(() => {
-    if (!open || meta || loadingMeta) return;
+    if (!open || meta || loadingMeta || attemptedMetaRef.current || !actorParams.actor.idToken) return;
+    attemptedMetaRef.current = true;
     setLoadingMeta(true);
     void getClaudeSdkHelpMeta(actorParams)
       .then(setMeta)

@@ -34,20 +34,27 @@ export function ClaudeSdkHelpPage() {
   const [loading, setLoading] = useState(true);
   const [asking, setAsking] = useState(false);
   const [error, setError] = useState('');
+  const attemptedMetaRef = useRef(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const actorParams = useMemo(() => ({
     tenantId: orgId || 'mysc',
-    actor: { uid: user?.uid || '', email: user?.email || '', role: user?.role || '' },
-  }), [orgId, user]);
+    actor: {
+      uid: user?.uid || '',
+      email: user?.email || '',
+      role: user?.role || '',
+      idToken: user?.idToken,
+    },
+  }), [orgId, user?.uid, user?.email, user?.role, user?.idToken]);
 
   useEffect(() => {
-    if (!bffEnabled || !user) {
+    if (!bffEnabled || !user || !user.idToken || attemptedMetaRef.current) {
       setLoading(false);
       return;
     }
 
+    attemptedMetaRef.current = true;
     getClaudeSdkHelpMeta(actorParams)
       .then(setMeta)
       .catch((err) => setError((err as Error).message || '도움봇 정보를 불러오지 못했습니다.'))
