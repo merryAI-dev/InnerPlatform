@@ -13,9 +13,9 @@ describe('claude-sdk-help', () => {
     });
 
     const meta = service.getMeta();
-    expect(meta.title).toBe('플랫폼 사용 도움봇');
+    expect(meta.title).toBe('사업관리 메리');
     expect(meta.sourceFiles.length).toBeGreaterThanOrEqual(5);
-    expect(meta.quickstartSteps.some((step) => step.includes('기본 폴더 생성'))).toBe(true);
+    expect(meta.quickstartSteps.some((step) => step.includes('통장내역'))).toBe(true);
     expect(meta.starterQuestions.some((item) => item.includes('구글드라이브 연결'))).toBe(true);
   });
 
