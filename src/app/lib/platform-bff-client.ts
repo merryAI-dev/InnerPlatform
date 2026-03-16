@@ -357,6 +357,10 @@ function resolveClient(client?: PlatformApiClientLike): PlatformApiClientLike {
   return client || createPlatformApiClient();
 }
 
+function encodeHeaderValue(value: string): string {
+  return encodeURIComponent(value);
+}
+
 export async function upsertProjectViaBff(params: {
   tenantId: string;
   actor: ActorLike;
@@ -622,7 +626,7 @@ export async function processProjectRequestContractViaBff(params: {
       actor: toRequestActor(params.actor),
       headers: {
         'content-type': 'application/octet-stream',
-        'x-file-name': params.file.name,
+        'x-file-name': encodeHeaderValue(params.file.name),
         'x-file-type': params.file.type || 'application/pdf',
         'x-file-size': String(params.file.size || 0),
       },

@@ -105,6 +105,16 @@ function readOptionalText(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function decodeHeaderValue(value) {
+  const text = readOptionalText(value);
+  if (!text) return '';
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
+}
+
 function parseAllowedOrigins(value) {
   const rawValue = String(value || '');
   const parsed = rawValue
@@ -1257,7 +1267,7 @@ export function createBffApp(options = {}) {
     asyncHandler(async (req, res) => {
       const { tenantId, actorId } = req.context;
       assertActorRoleAllowed(req, ROUTE_ROLES.writeCore, 'process project request contract');
-      const fileName = readOptionalText(req.header('x-file-name')) || 'contract.pdf';
+      const fileName = decodeHeaderValue(req.header('x-file-name')) || 'contract.pdf';
       const mimeType = readOptionalText(req.header('x-file-type')) || req.header('content-type') || 'application/pdf';
       const fileSizeHeader = Number.parseInt(readOptionalText(req.header('x-file-size')), 10);
       const fileBuffer = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body || []);
