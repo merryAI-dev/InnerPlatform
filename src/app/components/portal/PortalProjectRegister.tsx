@@ -55,6 +55,7 @@ import {
 type Step = 'contract' | 'basic' | 'financial' | 'team' | 'review';
 type ContractAnalysisState = 'idle' | 'extracting' | 'analyzing' | 'ready' | 'error';
 type AnalysisFieldKey = keyof ProjectRequestContractAnalysis['fields'];
+type AnalysisApplyMode = 'overwrite' | 'fill' | null;
 
 const STEPS: Array<{
   key: Step;
@@ -115,6 +116,19 @@ function toSuggestedProjectName(value: string) {
   return normalized.slice(0, 10);
 }
 
+function sanitizeOfficialContractName(value: string) {
+  const normalized = String(value || '')
+    .replace(/[()[\]{}]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!normalized) return '';
+  const stripped = normalized
+    .replace(/\s*(계약서|협약서|제안서|합의서|신청서|확인서|각서|문서)(\s*(초안|사본|원본|최종본|최종))?\s*$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return stripped || normalized;
+}
+
 function mergeAnalysisIntoDraft(
   draft: ProjectProposalDraft,
   analysis: ProjectRequestContractAnalysisResult,
@@ -124,12 +138,15 @@ function mergeAnalysisIntoDraft(
   const next = { ...draft, contractAnalysis: analysis };
   const shouldApplyText = (value: string, current: string) => overwriteExisting || isTextBlank(current);
   const shouldApplyNumber = (value: number | null, current: number) => value !== null && (overwriteExisting || !current);
+  const officialContractName = sanitizeOfficialContractName(analysis.fields.officialContractName.value);
+  const suggestedProjectName =
+    analysis.fields.suggestedProjectName.value || officialContractName;
 
-  if (shouldApplyText(analysis.fields.officialContractName.value, draft.officialContractName)) {
-    next.officialContractName = analysis.fields.officialContractName.value;
+  if (shouldApplyText(officialContractName, draft.officialContractName)) {
+    next.officialContractName = officialContractName;
   }
-  if (shouldApplyText(analysis.fields.suggestedProjectName.value, draft.name)) {
-    next.name = toSuggestedProjectName(analysis.fields.suggestedProjectName.value || analysis.fields.officialContractName.value);
+  if (shouldApplyText(suggestedProjectName, draft.name)) {
+    next.name = toSuggestedProjectName(suggestedProjectName);
   }
   if (shouldApplyText(analysis.fields.clientOrg.value, draft.clientOrg)) {
     next.clientOrg = analysis.fields.clientOrg.value;
@@ -153,6 +170,25 @@ function mergeAnalysisIntoDraft(
     next.salesVatAmount = analysis.fields.salesVatAmount.value || 0;
   }
   return next;
+}
+
+function hasAnalysisMergeChanges(
+  draft: ProjectProposalDraft,
+  analysis: ProjectRequestContractAnalysisResult,
+  options?: { overwriteExisting?: boolean },
+) {
+  const merged = mergeAnalysisIntoDraft(draft, analysis, options);
+  return (
+    merged.officialContractName !== draft.officialContractName ||
+    merged.name !== draft.name ||
+    merged.clientOrg !== draft.clientOrg ||
+    merged.projectPurpose !== draft.projectPurpose ||
+    merged.description !== draft.description ||
+    merged.contractStart !== draft.contractStart ||
+    merged.contractEnd !== draft.contractEnd ||
+    merged.contractAmount !== draft.contractAmount ||
+    merged.salesVatAmount !== draft.salesVatAmount
+  );
 }
 
 function confidenceLabel(confidence: ProjectRequestContractAnalysis['fields'][AnalysisFieldKey]['confidence']) {
@@ -263,7 +299,9 @@ export function PortalProjectRegister() {
   const [isUploadingContract, setIsUploadingContract] = useState(false);
   const [contractAnalysisState, setContractAnalysisState] = useState<ContractAnalysisState>('idle');
   const [analysisError, setAnalysisError] = useState('');
+  const [analysisApplyMode, setAnalysisApplyMode] = useState<AnalysisApplyMode>(null);
   const contractFileInputRef = useRef<HTMLInputElement | null>(null);
+  const analysisApplyLockRef = useRef(false);
 
   const currentStepIdx = STEPS.findIndex((item) => item.key === step);
   const currentStep = STEPS[currentStepIdx];
@@ -305,9 +343,23 @@ export function PortalProjectRegister() {
   };
 
   const applyContractAnalysis = (overwriteExisting: boolean) => {
-    if (!analysis) return;
-    setForm((prev) => mergeAnalysisIntoDraft(prev, analysis, { overwriteExisting }));
-    toast.success(overwriteExisting ? 'AI 초안을 다시 반영했습니다.' : '빈 항목에 AI 초안을 반영했습니다.');
+    if (!analysis || analysisApplyLockRef.current) return;
+    const nextMode: AnalysisApplyMode = overwriteExisting ? 'overwrite' : 'fill';
+    analysisApplyLockRef.current = true;
+    setAnalysisApplyMode(nextMode);
+
+    const changed = hasAnalysisMergeChanges(form, analysis, { overwriteExisting });
+    if (changed) {
+      setForm((prev) => mergeAnalysisIntoDraft(prev, analysis, { overwriteExisting }));
+      toast.success(overwriteExisting ? 'Merry의 분석을 다시 반영했습니다.' : '빈 항목에만 Merry의 분석을 반영했습니다.');
+    } else {
+      toast.message(overwriteExisting ? '다시 반영할 새 Merry 분석이 없습니다.' : '채울 수 있는 빈 항목이 없습니다.');
+    }
+
+    globalThis.setTimeout(() => {
+      analysisApplyLockRef.current = false;
+      setAnalysisApplyMode(null);
+    }, 900);
   };
 
   const handleContractDocumentSelect = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -359,6 +411,7 @@ export function PortalProjectRegister() {
         setContractAnalysisState('error');
         toast.success(`계약서 업로드 완료: ${file.name}`);
       }
+      setStep('basic');
     } catch (error) {
       console.error('[PortalProjectRegister] contract upload failed:', error);
       setContractAnalysisState('error');
@@ -622,10 +675,10 @@ export function PortalProjectRegister() {
               <Card className="border-border/60">
                 <CardHeader className="pb-2">
                   <div className="flex items-center justify-between gap-2">
-                    <CardTitle className="text-[13px]">계약서 AI 초안</CardTitle>
+                    <CardTitle className="text-[13px]">Merry의 분석 초안</CardTitle>
                     {analysis ? (
                       <Badge className="border-0 bg-teal-500/15 text-teal-700 dark:text-teal-300">
-                        {analysis.provider === 'anthropic' ? 'Claude 분석' : '기본 분석'}
+                        {analysis.provider === 'anthropic' ? 'Merry의 분석' : 'Merry 기본 분석'}
                       </Badge>
                     ) : null}
                   </div>
@@ -693,8 +746,9 @@ export function PortalProjectRegister() {
                           size="sm"
                           className="h-8 text-[11px]"
                           onClick={() => applyContractAnalysis(true)}
+                          disabled={Boolean(analysisApplyMode) || isUploadingContract || contractAnalysisState !== 'ready'}
                         >
-                          AI 초안 다시 반영
+                          {analysisApplyMode === 'overwrite' ? '다시 반영 중...' : 'Merry 분석 다시 반영'}
                         </Button>
                         <Button
                           type="button"
@@ -702,8 +756,9 @@ export function PortalProjectRegister() {
                           size="sm"
                           className="h-8 text-[11px]"
                           onClick={() => applyContractAnalysis(false)}
+                          disabled={Boolean(analysisApplyMode) || isUploadingContract || contractAnalysisState !== 'ready'}
                         >
-                          빈 항목만 채우기
+                          {analysisApplyMode === 'fill' ? '채우는 중...' : '빈 항목만 채우기'}
                         </Button>
                       </div>
                     </>

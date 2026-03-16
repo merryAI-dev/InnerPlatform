@@ -1045,7 +1045,7 @@ function GoogleSheetMigrationAiInlineCard({
         <p className="font-semibold">AI 빠른 분석</p>
         {safeAnalysis && (
           <Badge variant={safeAnalysis.provider === 'anthropic' ? 'default' : 'outline'} className="text-[10px]">
-            {safeAnalysis.provider === 'anthropic' ? 'Claude 분석' : '규칙 기반'}
+            {safeAnalysis.provider === 'anthropic' ? 'Merry의 분석' : '규칙 기반'}
           </Badge>
         )}
       </div>
@@ -1094,7 +1094,7 @@ function GoogleSheetMigrationAiPanel({
         <p className="font-medium text-slate-900">AI migration assistant</p>
         {safeAnalysis && (
           <Badge variant={safeAnalysis.provider === 'anthropic' ? 'default' : 'outline'} className="text-[10px]">
-            {safeAnalysis.provider === 'anthropic' ? 'Claude 분석' : '규칙 기반'}
+            {safeAnalysis.provider === 'anthropic' ? 'Merry의 분석' : '규칙 기반'}
           </Badge>
         )}
       </div>
