@@ -1,5 +1,8 @@
 import { featureFlags, parseFeatureFlag } from '../config/feature-flags';
-import type { TransactionState } from '../data/types';
+import type {
+  ProjectRequestContractAnalysis,
+  TransactionState,
+} from '../data/types';
 import { PlatformApiClient } from '../platform/api-client';
 import type { RequestActor } from '../platform/request-context';
 
@@ -103,6 +106,8 @@ export interface GoogleSheetMigrationAnalysisResult {
   headerPreview?: string[];
 }
 
+export interface ProjectRequestContractAnalysisResult extends ProjectRequestContractAnalysis {}
+
 function normalizeStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value
@@ -133,6 +138,28 @@ function normalizeSuggestedMappings(value: unknown): GoogleSheetMigrationAnalysi
     .filter((item): item is GoogleSheetMigrationAnalysisSuggestion => Boolean(item));
 }
 
+function normalizeAiConfidence(value: unknown): 'high' | 'medium' | 'low' {
+  return value === 'high' || value === 'medium' || value === 'low' ? value : 'low';
+}
+
+function normalizeProjectRequestTextSuggestion(value: unknown) {
+  const raw = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  return {
+    value: typeof raw.value === 'string' ? raw.value.trim() : '',
+    confidence: normalizeAiConfidence(raw.confidence),
+    evidence: typeof raw.evidence === 'string' ? raw.evidence.trim() : '',
+  };
+}
+
+function normalizeProjectRequestNumberSuggestion(value: unknown) {
+  const raw = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  return {
+    value: typeof raw.value === 'number' && Number.isFinite(raw.value) ? raw.value : null,
+    confidence: normalizeAiConfidence(raw.confidence),
+    evidence: typeof raw.evidence === 'string' ? raw.evidence.trim() : '',
+  };
+}
+
 export function normalizeGoogleSheetMigrationAnalysisResult(
   value: unknown,
 ): GoogleSheetMigrationAnalysisResult {
@@ -152,6 +179,36 @@ export function normalizeGoogleSheetMigrationAnalysisResult(
     nextActions: normalizeStringArray(raw.nextActions),
     suggestedMappings: normalizeSuggestedMappings(raw.suggestedMappings),
     headerPreview: normalizeStringArray(raw.headerPreview),
+  };
+}
+
+export function normalizeProjectRequestContractAnalysisResult(
+  value: unknown,
+): ProjectRequestContractAnalysisResult {
+  const raw = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  const fields = raw.fields && typeof raw.fields === 'object' ? raw.fields as Record<string, unknown> : {};
+  return {
+    provider: raw.provider === 'anthropic' ? 'anthropic' : 'heuristic',
+    model: typeof raw.model === 'string' && raw.model.trim() ? raw.model.trim() : 'unavailable',
+    summary: typeof raw.summary === 'string' && raw.summary.trim()
+      ? raw.summary.trim()
+      : '계약서 초안을 확인할 수 없어 직접 입력이 필요합니다.',
+    warnings: normalizeStringArray(raw.warnings),
+    nextActions: normalizeStringArray(raw.nextActions),
+    extractedAt: typeof raw.extractedAt === 'string' && raw.extractedAt.trim()
+      ? raw.extractedAt.trim()
+      : new Date().toISOString(),
+    fields: {
+      officialContractName: normalizeProjectRequestTextSuggestion(fields.officialContractName),
+      suggestedProjectName: normalizeProjectRequestTextSuggestion(fields.suggestedProjectName),
+      clientOrg: normalizeProjectRequestTextSuggestion(fields.clientOrg),
+      projectPurpose: normalizeProjectRequestTextSuggestion(fields.projectPurpose),
+      description: normalizeProjectRequestTextSuggestion(fields.description),
+      contractStart: normalizeProjectRequestTextSuggestion(fields.contractStart),
+      contractEnd: normalizeProjectRequestTextSuggestion(fields.contractEnd),
+      contractAmount: normalizeProjectRequestNumberSuggestion(fields.contractAmount),
+      salesVatAmount: normalizeProjectRequestNumberSuggestion(fields.salesVatAmount),
+    },
   };
 }
 
@@ -472,6 +529,29 @@ export async function analyzeGoogleSheetImportViaBff(params: {
     },
   );
   return normalizeGoogleSheetMigrationAnalysisResult(response.data);
+}
+
+export async function analyzeProjectRequestContractViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  fileName: string;
+  documentText?: string;
+  client?: PlatformApiClientLike;
+}): Promise<ProjectRequestContractAnalysisResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<ProjectRequestContractAnalysisResult>(
+    '/api/v1/project-requests/contract/analyze',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: {
+        fileName: params.fileName,
+        ...(params.documentText ? { documentText: params.documentText } : {}),
+      },
+      timeoutMs: 45000,
+    },
+  );
+  return normalizeProjectRequestContractAnalysisResult(response.data);
 }
 
 export async function linkProjectEvidenceDriveRootViaBff(params: {

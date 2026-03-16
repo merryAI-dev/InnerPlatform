@@ -47,6 +47,7 @@ import {
   ledgerUpsertSchema,
   memberRoleUpdateSchema,
   parseWithSchema,
+  projectRequestContractAnalyzeSchema,
   projectDriveRootLinkSchema,
   projectUpsertSchema,
   transactionStateSchema,
@@ -70,6 +71,7 @@ import {
   createGoogleSheetsService,
 } from './google-sheets.mjs';
 import { createGoogleSheetMigrationAiService } from './google-sheet-migration-ai.mjs';
+import { createProjectRequestContractAiService } from './project-request-contract-ai.mjs';
 
 function createHttpError(statusCode, message, code = 'request_error') {
   const error = new Error(message);
@@ -565,6 +567,7 @@ export function createBffApp(options = {}) {
   const driveService = options.driveService || createGoogleDriveService();
   const googleSheetsService = options.googleSheetsService || createGoogleSheetsService();
   const googleSheetMigrationAiService = options.googleSheetMigrationAiService || createGoogleSheetMigrationAiService();
+  const projectRequestContractAiService = options.projectRequestContractAiService || createProjectRequestContractAiService();
   const allowedOrigins = parseAllowedOrigins(options.allowedOrigins || process.env.BFF_ALLOWED_ORIGINS);
   const relationRulesPolicyPath = options.relationRulesPolicyPath || resolveRelationRulesPolicyPath();
   const workQueueBatchSizeRaw = Number.parseInt(process.env.BFF_WORK_QUEUE_BATCH || '100', 10);
@@ -1207,6 +1210,20 @@ export function createBffApp(options = {}) {
       spreadsheetTitle: parsed.spreadsheetTitle,
       selectedSheetName: parsed.selectedSheetName,
       matrix: parsed.matrix,
+    });
+    res.status(200).json(analysis);
+  }));
+
+  app.post('/api/v1/project-requests/contract/analyze', asyncHandler(async (req, res) => {
+    assertActorRoleAllowed(req, ROUTE_ROLES.readCore, 'analyze project request contract');
+    const parsed = parseWithSchema(
+      projectRequestContractAnalyzeSchema,
+      req.body,
+      'Invalid project request contract analysis payload',
+    );
+    const analysis = await projectRequestContractAiService.analyzeContract({
+      fileName: parsed.fileName,
+      documentText: parsed.documentText || '',
     });
     res.status(200).json(analysis);
   }));

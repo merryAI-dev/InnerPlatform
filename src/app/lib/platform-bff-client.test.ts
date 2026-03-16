@@ -3,6 +3,7 @@ import {
   addCommentViaBff,
   addEvidenceViaBff,
   analyzeGoogleSheetImportViaBff,
+  analyzeProjectRequestContractViaBff,
   changeTransactionStateViaBff,
   linkProjectEvidenceDriveRootViaBff,
   overrideTransactionEvidenceDriveCategoriesViaBff,
@@ -150,6 +151,52 @@ describe('platform-bff-client', () => {
 
     expect(comment.id).toBe('c001');
     expect(evidence.id).toBe('ev001');
+  });
+
+  it('calls project request contract analysis endpoint', async () => {
+    const client = {
+      post: vi.fn(async () => ({
+        data: {
+          provider: 'anthropic',
+          model: 'claude-sonnet',
+          summary: '초안 생성',
+          warnings: ['사람 확인 필요'],
+          nextActions: ['담당팀은 직접 선택하세요.'],
+          extractedAt: '2026-03-16T09:00:00.000Z',
+          fields: {
+            officialContractName: { value: '뷰티풀 커넥트 운영 계약', confidence: 'high', evidence: '사업명: 뷰티풀 커넥트 운영 계약' },
+            suggestedProjectName: { value: '뷰티풀커넥트', confidence: 'high', evidence: '사업명' },
+            clientOrg: { value: '아모레퍼시픽재단', confidence: 'high', evidence: '발주기관' },
+            projectPurpose: { value: '청년 창업가의 지역 연결 지원', confidence: 'medium', evidence: '사업 목적' },
+            description: { value: '', confidence: 'low', evidence: '' },
+            contractStart: { value: '2026-03-01', confidence: 'high', evidence: '계약기간' },
+            contractEnd: { value: '2026-12-31', confidence: 'high', evidence: '계약기간' },
+            contractAmount: { value: 120000000, confidence: 'high', evidence: '총 계약금액' },
+            salesVatAmount: { value: 12000000, confidence: 'medium', evidence: '부가세' },
+          },
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    };
+
+    const result = await analyzeProjectRequestContractViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm', idToken: 'token-abc' },
+      fileName: 'contract.pdf',
+      documentText: '사업명: 뷰티풀 커넥트 운영 계약',
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/project-requests/contract/analyze', expect.objectContaining({
+      tenantId: 'mysc',
+      body: {
+        fileName: 'contract.pdf',
+        documentText: '사업명: 뷰티풀 커넥트 운영 계약',
+      },
+    }));
+    expect(result.fields.officialContractName.value).toBe('뷰티풀 커넥트 운영 계약');
+    expect(result.fields.contractAmount.value).toBe(120000000);
   });
 
   it('calls evidence drive provision/sync endpoints', async () => {
