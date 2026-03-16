@@ -60,6 +60,13 @@ export interface CreateEvidencePayload {
   [key: string]: unknown;
 }
 
+export interface ProjectRequestContractUploadPayload {
+  fileName: string;
+  mimeType: string;
+  fileSize: number;
+  contentBase64: string;
+}
+
 export interface ProvisionProjectEvidenceDriveRootResult {
   projectId: string;
   folderId: string;
@@ -552,6 +559,32 @@ export async function analyzeProjectRequestContractViaBff(params: {
     },
   );
   return normalizeProjectRequestContractAnalysisResult(response.data);
+}
+
+export async function uploadProjectRequestContractViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  upload: ProjectRequestContractUploadPayload;
+  client?: PlatformApiClientLike;
+}) {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<{
+    path: string;
+    name: string;
+    downloadURL: string;
+    size: number;
+    contentType: string;
+    uploadedAt: string;
+  }>(
+    '/api/v1/project-requests/contract/upload',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.upload,
+      timeoutMs: 45000,
+    },
+  );
+  return response.data;
 }
 
 export async function linkProjectEvidenceDriveRootViaBff(params: {
