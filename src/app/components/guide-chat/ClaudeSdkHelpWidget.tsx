@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router';
+import { useLocation } from 'react-router';
 import { Bot, Loader2, MessageCircleQuestion, Send, Sparkles } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -29,7 +29,6 @@ interface WidgetMessage {
 
 export function ClaudeSdkHelpWidget() {
   const location = useLocation();
-  const navigate = useNavigate();
   const { user, isAuthenticated } = useAuth();
   const { orgId } = useFirebase();
   const bffEnabled = isPlatformApiEnabled();
@@ -47,10 +46,7 @@ export function ClaudeSdkHelpWidget() {
     || !isAuthenticated
     || !user
     || location.pathname === '/login'
-    || location.pathname === '/workspace-select'
-    || location.pathname === '/claude-sdk-help'
-    || location.pathname === '/portal/claude-sdk-help'
-    || location.pathname === '/help/claude-sdk';
+    || location.pathname === '/workspace-select';
 
   const actorParams = useMemo(() => ({
     tenantId: orgId || 'mysc',
@@ -140,17 +136,6 @@ export function ClaudeSdkHelpWidget() {
                   코드 구조는 알고 있지만, 답변은 사용자 관점에서 사용 방법 중심으로 안내합니다.
                 </SheetDescription>
               </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setOpen(false);
-                  navigate('/help/claude-sdk');
-                }}
-              >
-                전체 화면
-              </Button>
             </div>
           </SheetHeader>
 
