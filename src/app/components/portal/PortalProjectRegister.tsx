@@ -7,8 +7,10 @@ import {
   ClipboardList,
   FileText,
   Loader2,
+  Plus,
   Send,
   Sparkles,
+  Trash2,
   Upload,
   Users,
   Wallet,
@@ -33,10 +35,17 @@ import {
   type Basis,
   type ProjectRequestContractAnalysis,
   type SettlementType,
+  type ProjectTeamMemberAssignment,
   type ProjectType,
 } from '../../data/types';
 import { PROJECT_DEPARTMENT_OPTIONS } from '../../data/project-department-options';
+import { PROJECT_TEAM_MEMBER_OPTION_MAP, PROJECT_TEAM_MEMBER_OPTIONS } from '../../data/project-team-member-options';
 import { type ProjectProposalDraft } from './project-proposal';
+import {
+  formatProjectTeamMembersSummary,
+  hasIncompleteProjectTeamMembers,
+  normalizeProjectTeamMembers,
+} from '../../platform/project-team-members';
 import { Progress } from '../ui/progress';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
@@ -91,6 +100,7 @@ const initialProposal: ProjectProposalDraft = {
   managerName: '',
   teamName: '',
   teamMembers: '',
+  teamMembersDetailed: [],
   participantCondition: '',
   note: '',
   contractDocument: null,
@@ -263,6 +273,15 @@ function isFileReadError(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'NotReadableError';
 }
 
+function createEmptyTeamMember(): ProjectTeamMemberAssignment {
+  return {
+    memberName: '',
+    memberNickname: '',
+    role: '',
+    participationRate: 0,
+  };
+}
+
 export function PortalProjectRegister() {
   const navigate = useNavigate();
   const { user: authUser } = useAuth();
@@ -299,6 +318,18 @@ export function PortalProjectRegister() {
   const analysisField = (key: AnalysisFieldKey) => analysis?.fields[key] || null;
   const hasContractDocument = Boolean(form.contractDocument);
   const contractUploadUi = resolveContractUploadUiState(contractAnalysisState, hasContractDocument);
+  const normalizedTeamMembers = useMemo(
+    () => normalizeProjectTeamMembers(form.teamMembersDetailed),
+    [form.teamMembersDetailed],
+  );
+  const teamMembersSummary = useMemo(
+    () => formatProjectTeamMembersSummary(normalizedTeamMembers, form.teamMembers),
+    [normalizedTeamMembers, form.teamMembers],
+  );
+  const hasIncompleteTeamRows = useMemo(
+    () => hasIncompleteProjectTeamMembers(form.teamMembersDetailed),
+    [form.teamMembersDetailed],
+  );
 
   const canProceed = () => {
     if (step === 'contract') {
@@ -311,13 +342,40 @@ export function PortalProjectRegister() {
       return form.contractAmount > 0 && Boolean(form.contractStart) && Boolean(form.contractEnd);
     }
     if (step === 'team') {
-      return Boolean(form.managerName.trim());
+      return Boolean(form.managerName.trim()) && !hasIncompleteTeamRows;
     }
     return true;
   };
 
   const update = (key: keyof ProjectProposalDraft, value: ProjectProposalDraft[keyof ProjectProposalDraft]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const syncTeamMembers = (members: ProjectTeamMemberAssignment[]) => {
+    const normalized = normalizeProjectTeamMembers(members);
+    const summary = formatProjectTeamMembersSummary(normalized, '');
+    setForm((prev) => ({
+      ...prev,
+      teamMembersDetailed: members,
+      teamMembers: summary === '-' ? '' : summary,
+    }));
+  };
+
+  const addTeamMember = () => {
+    syncTeamMembers([...(form.teamMembersDetailed || []), createEmptyTeamMember()]);
+  };
+
+  const updateTeamMember = (index: number, patch: Partial<ProjectTeamMemberAssignment>) => {
+    const next = [...(form.teamMembersDetailed || [])];
+    const current = next[index] || createEmptyTeamMember();
+    next[index] = { ...current, ...patch };
+    syncTeamMembers(next);
+  };
+
+  const removeTeamMember = (index: number) => {
+    const next = [...(form.teamMembersDetailed || [])];
+    next.splice(index, 1);
+    syncTeamMembers(next);
   };
 
   const handleContractDocumentSelect = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -396,11 +454,17 @@ export function PortalProjectRegister() {
 
     setIsSubmitting(true);
     try {
-      const createdId = await createProjectRequest(form);
+      const payload = {
+        ...form,
+        teamMembersDetailed: normalizedTeamMembers,
+        teamMembers: teamMembersSummary === '-' ? '' : teamMembersSummary,
+      };
+      const createdId = await createProjectRequest(payload);
       if (!createdId) {
         toast.error('사업 등록 제안 저장에 실패했습니다. 다시 시도해 주세요.');
         return;
       }
+      setForm(payload);
       setSubmitted(true);
       toast.success('사업 등록 제안이 저장되었습니다. 관리자 검토를 기다려주세요.');
     } catch (error: any) {
@@ -988,13 +1052,117 @@ export function PortalProjectRegister() {
               </div>
 
               <div>
-                <Label className="text-[11px]">팀원 구성</Label>
-                <Textarea
-                  value={form.teamMembers}
-                  onChange={(event) => update('teamMembers', event.target.value)}
-                  placeholder="투입 예정 인력 (이름, 역할 등)"
-                  className="mt-1 min-h-[90px] text-[12px]"
-                />
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <Label className="text-[11px]">팀원 구성</Label>
+                    <p className="mt-1 text-[10px] text-muted-foreground">
+                      팀원을 선택하고 역할과 참여율(%)을 같이 입력해 주세요.
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1 text-[11px]"
+                    onClick={addTeamMember}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    팀원 추가
+                  </Button>
+                </div>
+
+                {form.teamMembersDetailed.length === 0 ? (
+                  <div className="mt-2 rounded-xl border border-dashed border-border/70 bg-muted/10 px-4 py-5 text-[11px] text-muted-foreground">
+                    아직 추가된 팀원이 없습니다. `팀원 추가`를 눌러 역할과 참여율을 함께 입력해 주세요.
+                  </div>
+                ) : (
+                  <div className="mt-2 space-y-3">
+                    {form.teamMembersDetailed.map((member, index) => {
+                      const selectedNames = new Set(
+                        form.teamMembersDetailed
+                          .map((item, itemIndex) => (itemIndex === index ? '' : item.memberName))
+                          .filter(Boolean),
+                      );
+                      return (
+                        <div key={`${member.memberName || 'member'}-${index}`} className="rounded-xl border border-border/60 bg-background/70 p-4">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="text-[11px]" style={{ fontWeight: 600 }}>팀원 {index + 1}</div>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 px-2 text-[11px] text-rose-600 hover:text-rose-700"
+                              onClick={() => removeTeamMember(index)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+
+                          <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_120px]">
+                            <div>
+                              <Label className="text-[11px]">팀원</Label>
+                              <Select
+                                value={member.memberName || undefined}
+                                onValueChange={(value) => {
+                                  const option = PROJECT_TEAM_MEMBER_OPTION_MAP[value];
+                                  updateTeamMember(index, {
+                                    memberName: option?.name || value,
+                                    memberNickname: option?.nickname || '',
+                                  });
+                                }}
+                              >
+                                <SelectTrigger className="mt-1 h-9 text-[12px]">
+                                  <SelectValue placeholder="팀원 선택" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {PROJECT_TEAM_MEMBER_OPTIONS.map((option) => (
+                                    <SelectItem
+                                      key={option.value}
+                                      value={option.value}
+                                      disabled={selectedNames.has(option.value)}
+                                    >
+                                      {option.label}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            <div>
+                              <Label className="text-[11px]">역할</Label>
+                              <Input
+                                value={member.role}
+                                onChange={(event) => updateTeamMember(index, { role: event.target.value })}
+                                placeholder="예: PM, 운영, 정산지원"
+                                className="mt-1 h-9 text-[12px]"
+                              />
+                            </div>
+
+                            <div>
+                              <Label className="text-[11px]">참여율(%)</Label>
+                              <Input
+                                type="number"
+                                min={0}
+                                max={100}
+                                step={1}
+                                value={member.participationRate || ''}
+                                onChange={(event) => updateTeamMember(index, { participationRate: Number(event.target.value) || 0 })}
+                                placeholder="0"
+                                className="mt-1 h-9 text-[12px]"
+                              />
+                            </div>
+                          </div>
+
+                          {(!member.memberName || !member.role.trim() || member.participationRate <= 0) ? (
+                            <p className="mt-2 text-[10px] text-amber-700 dark:text-amber-300">
+                              팀원, 역할, 참여율을 모두 입력해야 다음 단계로 넘어갈 수 있습니다.
+                            </p>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               <div>
@@ -1047,7 +1215,7 @@ export function PortalProjectRegister() {
 
                 <SummaryCard title="팀 구성">
                   <ReviewRow label="PM" value={form.managerName || '-'} />
-                  <ReviewRow label="팀원" value={form.teamMembers || '-'} />
+                  <ReviewRow label="팀원" value={teamMembersSummary} />
                   <ReviewRow label="참여조건" value={form.participantCondition || '-'} />
                   <ReviewRow label="참고사항" value={form.note || '-'} />
                 </SummaryCard>

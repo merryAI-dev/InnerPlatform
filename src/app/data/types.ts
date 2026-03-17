@@ -307,6 +307,7 @@ export interface Project {
   clientOrg: string;             // 발주기관(계약기관)
   groupwareName: string;         // 그룹웨어 프로젝트등록명
   participantCondition: string;  // 참여기업 조건
+  teamMembersDetailed?: ProjectTeamMemberAssignment[];
   contractType: string;          // 계약서 유형 (계약서(날인), 기타 등)
   projectPurpose?: string;
   totalRevenueAmount?: number;
@@ -389,6 +390,13 @@ export interface ProjectRequestContractAnalysis {
   };
 }
 
+export interface ProjectTeamMemberAssignment {
+  memberName: string;
+  memberNickname: string;
+  role: string;
+  participationRate: number;
+}
+
 export interface ProjectRequestPayload {
   name: string;
   officialContractName: string;
@@ -411,6 +419,7 @@ export interface ProjectRequestPayload {
   managerName: string;
   teamName: string;
   teamMembers: string;
+  teamMembersDetailed?: ProjectTeamMemberAssignment[];
   participantCondition: string;
   note: string;
   contractDocument: FileAttachment | null;

@@ -35,6 +35,7 @@ import {
 } from '../../data/types';
 import { getOrgCollectionPath, getOrgDocumentPath } from '../../lib/firebase';
 import { toast } from 'sonner';
+import { formatProjectTeamMembersSummary } from '../../platform/project-team-members';
 
 const STATUS_BADGES: Record<ProjectRequest['status'], string> = {
   PENDING: 'bg-amber-500/15 text-amber-700 dark:text-amber-300',
@@ -231,7 +232,9 @@ export function ProjectRequestApprovalPage() {
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="min-w-[80px]">팀원</span>
-                    <span className="text-foreground/80">{req.payload.teamMembers || '-'}</span>
+                    <span className="text-foreground/80 whitespace-pre-line">
+                      {formatProjectTeamMembersSummary(req.payload.teamMembersDetailed, req.payload.teamMembers, '\n')}
+                    </span>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="min-w-[80px]">계약대상</span>
