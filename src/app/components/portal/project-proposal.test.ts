@@ -23,6 +23,10 @@ const sampleDraft: ProjectProposalDraft = {
   managerName: '데이나',
   teamName: 'DX Team',
   teamMembers: 'A, B, C',
+  teamMembersDetailed: [
+    { memberName: '김다은', memberNickname: '데이나', role: 'PM', participationRate: 60 },
+    { memberName: '변민욱', memberNickname: '보람', role: '운영', participationRate: 40 },
+  ],
   participantCondition: '전담 2명 이상',
   note: '3월 내 착수 필요',
   contractDocument: null,
@@ -44,6 +48,7 @@ describe('buildProjectProposalPost', () => {
     expect(result.body).toContain('[첨부]');
     expect(result.body).toContain('[추가 메모]');
     expect(result.body).toContain('120,000,000원');
+    expect(result.body).toContain('김다은 (데이나) / PM / 60%');
   });
 
   it('uses fallback text for optional blanks', () => {

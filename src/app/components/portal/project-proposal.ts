@@ -6,9 +6,11 @@ import {
   type AccountType,
   type Basis,
   type ProjectRequestContractAnalysis,
+  type ProjectTeamMemberAssignment,
   type ProjectType,
   type SettlementType,
 } from '../../data/types';
+import { formatProjectTeamMembersSummary } from '../../platform/project-team-members';
 
 export interface ProjectProposalDraft {
   name: string;
@@ -32,6 +34,7 @@ export interface ProjectProposalDraft {
   managerName: string;
   teamName: string;
   teamMembers: string;
+  teamMembersDetailed: ProjectTeamMemberAssignment[];
   participantCondition: string;
   note: string;
   contractDocument: import('../../data/types').FileAttachment | null;
@@ -55,6 +58,7 @@ export function buildProjectProposalPost(
 ): ProjectProposalPostPayload {
   const projectName = String(draft.name || '').trim() || '제목 미입력 사업';
   const officialContractName = String(draft.officialContractName || '').trim() || '-';
+  const teamMembersSummary = formatProjectTeamMembersSummary(draft.teamMembersDetailed, draft.teamMembers);
   const title = `[사업등록제안] ${projectName}`;
 
   const body = [
@@ -86,7 +90,7 @@ export function buildProjectProposalPost(
     '',
     '[팀 정보]',
     `- 담당자: ${draft.managerName || '-'}`,
-    `- 팀원: ${draft.teamMembers || '-'}`,
+    `- 팀원: ${teamMembersSummary}`,
     `- 참여 조건: ${draft.participantCondition || '-'}`,
     '',
     '[첨부]',

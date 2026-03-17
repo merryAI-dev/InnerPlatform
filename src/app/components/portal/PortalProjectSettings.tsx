@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { FolderKanban, AlertCircle, ArrowRight, CheckCircle2, ExternalLink, Loader2 } from 'lucide-react';
+import { FolderKanban, AlertCircle, CheckCircle2, ExternalLink, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
@@ -314,7 +314,7 @@ export function PortalProjectSettings() {
                 ))}
               </div>
 
-              <div className="flex items-center justify-between gap-3 flex-wrap rounded-lg border border-dashed border-slate-200 bg-white px-3 py-3">
+              <div className="rounded-lg border border-dashed border-slate-200 bg-white px-3 py-3">
                 <div>
                   <p className="text-[12px] font-semibold text-slate-900">
                     {happyPath.canUseEvidenceWorkflow
@@ -326,18 +326,6 @@ export function PortalProjectSettings() {
                   <p className="mt-1 text-[11px] text-muted-foreground">
                     주간 시트에서는 행 저장 후 `생성 → 업로드 → 동기화` 순서로 바로 이어집니다.
                   </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  {happyPath.canOpenWeeklyExpenses && (
-                    <Button
-                      variant="outline"
-                      className="h-9 text-[11px]"
-                      onClick={() => navigate('/portal/weekly-expenses')}
-                    >
-                      주간 시트로 이동
-                      <ArrowRight className="ml-1 h-3.5 w-3.5" />
-                    </Button>
-                  )}
                 </div>
               </div>
             </div>
