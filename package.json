@@ -28,6 +28,7 @@
     "firebase:fill-env": "bash scripts/firebase_fill_env_from_config.sh",
     "firebase:emulators:prepare": "bash scripts/firebase_emulator_bootstrap.sh",
     "firebase:emulators:start": "bash scripts/firebase_emulator_bootstrap.sh --start",
+    "firestore:live-cutover": "npx tsx scripts/firestore_live_cutover.ts",
     "firestore:backup:schedule": "bash scripts/firestore_backup_schedule.sh",
     "firestore:backup:rehearsal": "bash scripts/firestore_backup_rehearsal.sh",
     "monitoring:setup:alerts": "bash scripts/setup_monitoring_alerts.sh",
