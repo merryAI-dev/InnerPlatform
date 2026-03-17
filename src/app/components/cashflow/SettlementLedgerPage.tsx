@@ -104,16 +104,14 @@ function normalizeBudgetLabel(value: string): string {
     .trim();
 }
 
-function formatBudgetCodeLabel(index: number, name: string): string {
+function formatBudgetCodeLabel(_index: number, name: string): string {
   const trimmed = String(name || '').trim();
-  if (!trimmed) return `${index + 1}`;
-  return `${index + 1} ${trimmed}`;
+  return trimmed || '비목 미입력';
 }
 
-function formatSubCodeLabel(codeIndex: number, subIndex: number, name: string): string {
+function formatSubCodeLabel(_codeIndex: number, _subIndex: number, name: string) {
   const trimmed = String(name || '').trim();
-  if (!trimmed) return `${codeIndex + 1}-${subIndex + 1}`;
-  return `${codeIndex + 1}-${subIndex + 1} ${trimmed}`;
+  return trimmed || '세목 미입력';
 }
 
 function toFieldSlug(value: string): string {
