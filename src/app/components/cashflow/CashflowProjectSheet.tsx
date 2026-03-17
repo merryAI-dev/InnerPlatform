@@ -591,7 +591,7 @@ export function CashflowProjectSheet({
                           )}
                         </div>
                         {doc?.adminClosed && (
-                          <div className="mt-1 text-[9px] text-muted-foreground">결산완료 이후 입력이 잠깁니다.</div>
+                          <div className="mt-1 text-[9px] text-muted-foreground">결산완료 이후에도 Projection 수정은 가능합니다.</div>
                         )}
                       </th>
                     );
@@ -634,7 +634,7 @@ export function CashflowProjectSheet({
                             inputMode="numeric"
                             className="h-6 text-[10px] md:text-[10px] leading-[10px] font-normal text-right px-1 py-0 bg-transparent border-transparent focus-visible:ring-0 focus-visible:border-teal-500/60"
                             placeholder="0"
-                            disabled={Boolean(doc?.adminClosed)}
+                            disabled={false}
                             onChange={(e) => {
                               const formatted = formatAmountInput(e.target.value);
                               setDrafts((prev) => ({ ...prev, [key]: formatted }));
@@ -695,7 +695,7 @@ export function CashflowProjectSheet({
                             inputMode="numeric"
                             className="h-6 text-[10px] md:text-[10px] leading-[10px] font-normal text-right px-1 py-0 bg-transparent border-transparent focus-visible:ring-0 focus-visible:border-teal-500/60"
                             placeholder="0"
-                            disabled={Boolean(doc?.adminClosed)}
+                            disabled={false}
                             onChange={(e) => {
                               const formatted = formatAmountInput(e.target.value);
                               setDrafts((prev) => ({ ...prev, [key]: formatted }));
@@ -905,7 +905,7 @@ export function CashflowProjectSheet({
             <AlertDialogDescription>
               {closeDialog?.kind === 'prerequisite'
                 ? '내 제출현황에서 Projection 업데이트와 사업비 입력을 체크해주세요.'
-                : 'Projection 업데이트와 사업비 입력 체크가 완료된 주차입니다. 결산완료 후에는 Projection 입력이 잠깁니다.'}
+                : 'Projection 업데이트와 사업비 입력 체크가 완료된 주차입니다. 결산완료 후에도 Projection은 계속 수정할 수 있습니다.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
           {closeDialog && (
