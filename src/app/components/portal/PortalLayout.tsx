@@ -214,7 +214,7 @@ function PortalContent() {
     return <Outlet />;
   }
 
-  if (!isRegistered || !portalUser || !myProject) {
+  if (!isRegistered || !portalUser) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-teal-50/30 dark:from-slate-950 dark:via-slate-900 dark:to-teal-950/20 flex items-center justify-center px-6">
         <div className="max-w-lg w-full">

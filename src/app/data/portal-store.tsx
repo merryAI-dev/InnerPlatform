@@ -2053,7 +2053,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   }, [db, firestoreEnabled, orgId, portalUser?.projectId]);
 
   const value: PortalState & PortalActions = {
-    isRegistered: !!(portalUser && portalUser.projectIds.length > 0),
+    isRegistered: !!portalUser,
     isLoading: isLoading || isMemberLoading,
     portalUser,
     projects,
