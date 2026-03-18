@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  canAccessProject,
   canAccessTenant,
   extractAuthContextFromClaims,
   hasPermission,
@@ -55,5 +56,22 @@ describe('rbac helpers', () => {
     expect(canAccessTenant({ actorRole: 'pm', actorTenantId: 't1', targetTenantId: 't1' })).toBe(true);
     expect(canAccessTenant({ actorRole: 'pm', actorTenantId: 't1', targetTenantId: 't2' })).toBe(false);
     expect(canAccessTenant({ actorRole: 'support', actorTenantId: 't1', targetTenantId: 't2' })).toBe(true);
+  });
+
+  it('checks project-scoped access based on role and assignment', () => {
+    // Admin can access any project without assignment
+    expect(canAccessProject({ actorRole: 'admin', permission: 'project:read', targetProjectId: 'p1' })).toBe(true);
+    expect(canAccessProject({ actorRole: 'finance', permission: 'project:write', targetProjectId: 'p1' })).toBe(true);
+
+    // PM needs assignment
+    expect(canAccessProject({ actorRole: 'pm', permission: 'project:write', targetProjectId: 'p1', assignedProjectIds: ['p1', 'p2'] })).toBe(true);
+    expect(canAccessProject({ actorRole: 'pm', permission: 'project:write', targetProjectId: 'p3', assignedProjectIds: ['p1', 'p2'] })).toBe(false);
+
+    // Viewer cannot write even with assignment
+    expect(canAccessProject({ actorRole: 'viewer', permission: 'project:write', targetProjectId: 'p1', assignedProjectIds: ['p1'] })).toBe(false);
+
+    // Viewer can read with assignment
+    expect(canAccessProject({ actorRole: 'viewer', permission: 'project:read', targetProjectId: 'p1', assignedProjectIds: ['p1'] })).toBe(true);
+    expect(canAccessProject({ actorRole: 'viewer', permission: 'project:read', targetProjectId: 'p2', assignedProjectIds: ['p1'] })).toBe(false);
   });
 });

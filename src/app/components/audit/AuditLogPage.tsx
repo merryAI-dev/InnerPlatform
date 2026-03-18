@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import {
   BookOpen, Shield, Clock, User, FileText, FolderKanban,
   Search, Filter, CheckCircle2, XCircle, AlertTriangle,
-  ArrowUpDown, ChevronDown,
+  ArrowUpDown, ChevronDown, Download,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
@@ -148,6 +148,28 @@ export function AuditLogPage() {
     return map;
   }, [displayed]);
 
+  const exportCsv = () => {
+    const header = '시각,액션,엔티티,사용자,상세';
+    const rows = filtered.map((log) => {
+      const escape = (v: string) => `"${v.replace(/"/g, '""')}"`;
+      return [
+        log.timestamp,
+        log.action,
+        log.entityType,
+        log.userName || log.userId,
+        escape(log.details || ''),
+      ].join(',');
+    });
+    const csv = [header, ...rows].join('\n');
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `audit-log-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="space-y-5">
       <PageHeader
@@ -156,6 +178,12 @@ export function AuditLogPage() {
         title="감사 로그"
         description="모든 데이터 변경 이력 추적 · 읽기 전용"
         badge={`${allLogs.length}건`}
+        actions={
+          <Button size="sm" variant="outline" onClick={exportCsv} className="gap-1">
+            <Download className="h-3.5 w-3.5" />
+            CSV 내보내기
+          </Button>
+        }
       />
 
       {/* Stats bar */}
