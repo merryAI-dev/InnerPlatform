@@ -440,33 +440,33 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       if (projectReady && ledgerReady && expenseReady && changeReady && partReady && txReady) setIsLoading(false);
     };
 
-    if (!portalUser?.projectId) {
-      // 프로젝트 선택 화면: 전사 프로젝트를 모두 표시 (상태 무관)
-      const projectQuery = query(
-        collection(db, getOrgCollectionPath(orgId, 'projects')),
-        limit(500),
-      );
-      unsubsRef.current.push(
-        onSnapshot(projectQuery, (snap) => {
+    // 전사 프로젝트 전체 표시 — 분기 없이 항상 전체 조회
+    unsubsRef.current.push(
+      onSnapshot(
+        query(collection(db, getOrgCollectionPath(orgId, 'projects')), limit(500)),
+        (snap) => {
           const map = new Map<string, Project>();
           snap.docs.forEach((docItem) => {
             const data = docItem.data() as Project;
             const id = data.id || docItem.id;
             map.set(id, { ...data, id });
           });
-          const list = Array.from(map.values()).sort((a, b) =>
+          setProjects(Array.from(map.values()).sort((a, b) =>
             String(a.name || '').localeCompare(String(b.name || '')),
-          );
-          setProjects(list);
+          ));
           projectReady = true;
           markReady();
-        }, (err) => {
+        },
+        (err) => {
           console.error('[PortalStore] projects listen error:', err);
           setProjects([]);
           projectReady = true;
           markReady();
-        }),
-      );
+        },
+      ),
+    );
+
+    if (!portalUser?.projectId) {
       setLedgers([]);
       setExpenseSets(EXPENSE_SETS);
       setChangeRequests(CHANGE_REQUESTS);
@@ -480,32 +480,6 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       txReady = true;
       markReady();
     } else {
-      // 전사 프로젝트 전체 표시 — 모든 멤버가 조회 가능
-      const allProjectsQuery = query(
-        collection(db, getOrgCollectionPath(orgId, 'projects')),
-        limit(500),
-      );
-      unsubsRef.current.push(
-        onSnapshot(allProjectsQuery, (snap) => {
-          const map = new Map<string, Project>();
-          snap.docs.forEach((docItem) => {
-            const data = docItem.data() as Project;
-            const id = data.id || docItem.id;
-            map.set(id, { ...data, id });
-          });
-          setProjects(Array.from(map.values()).sort((a, b) =>
-            String(a.name || '').localeCompare(String(b.name || '')),
-          ));
-          projectReady = true;
-          markReady();
-        }, (err) => {
-          console.error('[PortalStore] projects listen error:', err);
-          setProjects([]);
-          projectReady = true;
-          markReady();
-        }),
-      );
-
       const ledgerQuery = query(
         collection(db, getOrgCollectionPath(orgId, 'ledgers')),
         where('projectId', '==', portalUser.projectId),
