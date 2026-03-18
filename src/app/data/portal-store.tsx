@@ -297,23 +297,9 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           setPortalUser(null);
           return;
         }
-        const memberRef = doc(db, getOrgDocumentPath(orgId, 'members', authUser.uid));
-        let snap = await getDoc(memberRef);
-        // UID로 못 찾으면 이메일 기반 사전 등록 문서를 찾아서 UID로 마이그레이션
-        if (!snap.exists() && authUser.email) {
-          const emailKey = authUser.email.replace(/[@.]/g, '_');
-          const preRegRef = doc(db, getOrgDocumentPath(orgId, 'members', emailKey));
-          const preRegSnap = await getDoc(preRegRef);
-          if (preRegSnap.exists()) {
-            const preData = preRegSnap.data();
-            try {
-              await setDoc(memberRef, { ...preData, uid: authUser.uid, email: authUser.email });
-              snap = await getDoc(memberRef);
-            } catch (migErr) {
-              console.error('[PortalStore] pre-reg migration failed:', migErr);
-            }
-          }
-        }
+        const emailKey = (authUser.email || '').replace(/[@.]/g, '_');
+        const memberRef = doc(db, getOrgDocumentPath(orgId, 'members', emailKey));
+        const snap = await getDoc(memberRef);
         if (!snap.exists()) {
           setPortalUser(null);
           return;
@@ -364,7 +350,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         // Normalize member projectIds to string array for security rules (one-time fix)
         try {
           if (access.needsRootSync) {
-            await updateDoc(doc(db, getOrgDocumentPath(orgId, 'members', authUser.uid)), {
+            await updateDoc(doc(db, getOrgDocumentPath(orgId, 'members', (authUser.email || '').replace(/[@.]/g, '_'))), {
               projectId: normalized.projectId,
               projectIds: normalized.projectIds,
               tenantId: orgId,
@@ -1370,7 +1356,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       ...(portalUser?.projectNames || {}),
       [projectId]: payload.name,
     };
-    await setDoc(doc(db, getOrgDocumentPath(orgId, 'members', authUser.uid)), {
+    await setDoc(doc(db, getOrgDocumentPath(orgId, 'members', (authUser.email || '').replace(/[@.]/g, '_'))), {
       uid: authUser.uid,
       name: authUser.name || portalUser?.name || '사용자',
       email: authUser.email || portalUser?.email || '',
@@ -1578,7 +1564,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       setIsMemberLoading(true);
       let memberRole = (authUser.role || user.role || 'pm').toLowerCase();
       try {
-        const memberSnap = await getDoc(doc(db, getOrgDocumentPath(orgId, 'members', authUser.uid)));
+        const memberSnap = await getDoc(doc(db, getOrgDocumentPath(orgId, 'members', (authUser.email || '').replace(/[@.]/g, '_'))));
         if (memberSnap.exists()) {
           const existingRole = (memberSnap.data() as { role?: string }).role;
           if (typeof existingRole === 'string' && existingRole.trim()) {
@@ -1589,7 +1575,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         // If role lookup fails, fall back to current auth role
       }
       try {
-        await setDoc(doc(db, getOrgDocumentPath(orgId, 'members', authUser.uid)), {
+        await setDoc(doc(db, getOrgDocumentPath(orgId, 'members', (authUser.email || '').replace(/[@.]/g, '_'))), {
           uid: authUser.uid,
           name: candidate.name,
           email: candidate.email,
@@ -1668,7 +1654,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       setIsMemberLoading(true);
       try {
         const now = new Date().toISOString();
-        await updateDoc(doc(db, getOrgDocumentPath(orgId, 'members', authUser.uid)), {
+        await updateDoc(doc(db, getOrgDocumentPath(orgId, 'members', (authUser.email || '').replace(/[@.]/g, '_'))), {
           tenantId: orgId,
           ...buildPortalProfilePatch({
             projectId: target,
