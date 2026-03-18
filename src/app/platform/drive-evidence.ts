@@ -90,8 +90,8 @@ export function buildDriveTransactionFolderDescriptor(
   const dateToken = formatDriveDateToken(tx.dateTime);
   const budgetToken = normalizeSegment(tx.budgetCategory || tx.counterparty || '미분류', '미분류');
   const subBudgetToken = normalizeSegment(tx.budgetSubCategory || tx.memo || '기타', '기타');
-  const transactionToken = normalizeSegment(tx.id || '', 'tx');
-  const folderName = [dateToken, budgetToken, subBudgetToken, transactionToken].join('_');
+  const transactionToken = '';
+  const folderName = [dateToken, budgetToken, subBudgetToken].filter(Boolean).join('_');
   return { dateToken, budgetToken, subBudgetToken, transactionToken, folderName };
 }
 

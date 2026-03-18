@@ -18,10 +18,10 @@ describe('drive evidence helpers', () => {
       counterparty: '테스트 상점',
       memo: '전단 제작',
     });
-    expect(folderName).toBe('20260311_사업비_홍보비_tx_001');
+    expect(folderName).toBe('20260311_사업비_홍보비');
   });
 
-  it('parses the deterministic folder name back into tokens', () => {
+  it('parses folder name back into tokens', () => {
     expect(parseDriveTransactionFolderName('20260311_사업비_홍보비_tx_001')).toEqual({
       dateToken: '20260311',
       budgetToken: '사업비',
