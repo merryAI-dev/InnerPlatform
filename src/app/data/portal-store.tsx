@@ -298,7 +298,22 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           return;
         }
         const memberRef = doc(db, getOrgDocumentPath(orgId, 'members', authUser.uid));
-        const snap = await getDoc(memberRef);
+        let snap = await getDoc(memberRef);
+        // UID로 못 찾으면 이메일 기반 사전 등록 문서를 찾아서 UID로 마이그레이션
+        if (!snap.exists() && authUser.email) {
+          const emailKey = authUser.email.replace(/[@.]/g, '_');
+          const preRegRef = doc(db, getOrgDocumentPath(orgId, 'members', emailKey));
+          const preRegSnap = await getDoc(preRegRef);
+          if (preRegSnap.exists()) {
+            const preData = preRegSnap.data();
+            try {
+              await setDoc(memberRef, { ...preData, uid: authUser.uid, email: authUser.email });
+              snap = await getDoc(memberRef);
+            } catch (migErr) {
+              console.error('[PortalStore] pre-reg migration failed:', migErr);
+            }
+          }
+        }
         if (!snap.exists()) {
           setPortalUser(null);
           return;
