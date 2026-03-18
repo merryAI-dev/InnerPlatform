@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react';
+import { isPermissionDenied } from '../platform/firestore-error';
 import {
   collection,
   doc,
@@ -509,7 +510,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           markReady();
         }, (err) => {
           console.error('[PortalStore] ledgers listen error:', err);
-          if ((err as any)?.code !== 'permission-denied') {
+          if (!isPermissionDenied(err)) {
             toast.error('원장 데이터를 불러오지 못했습니다');
           }
           setLedgers(LEDGERS.filter((l) => l.projectId === portalUser.projectId));
@@ -560,7 +561,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           markReady();
         }, (err) => {
           console.error('[PortalStore] participation entries listen error:', err);
-          if ((err as any)?.code !== 'permission-denied') {
+          if (!isPermissionDenied(err)) {
             toast.error('인력 데이터를 불러오지 못했습니다. 기본 데이터를 표시합니다.');
           }
           setParticipationEntries(PARTICIPATION_ENTRIES.filter((entry) => entry.projectId === portalUser.projectId));
@@ -607,7 +608,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           markReady();
         }, (err) => {
           console.error('[PortalStore] transactions listen error:', err);
-          if ((err as any)?.code !== 'permission-denied') {
+          if (!isPermissionDenied(err)) {
             toast.error('거래 데이터를 불러오지 못했습니다');
           }
           setTransactions(TRANSACTIONS.filter((t) => t.projectId === portalUser.projectId));
