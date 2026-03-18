@@ -50,4 +50,19 @@ describe('readFeatureFlags', () => {
     expect(flags.demoLoginEnabled).toBe(false);
     expect(flags.etlStagingLocalEnabled).toBe(false);
   });
+
+  it('BFF cutover config: all production flags enabled', () => {
+    const flags = readFeatureFlags({
+      VITE_FIREBASE_AUTH_ENABLED: 'true',
+      VITE_FIRESTORE_CORE_ENABLED: 'true',
+      VITE_PLATFORM_API_ENABLED: 'true',
+      VITE_TENANT_ISOLATION_STRICT: 'true',
+      VITE_FIREBASE_USE_EMULATORS: 'false',
+    });
+    expect(flags.platformApiEnabled).toBe(true);
+    expect(flags.firebaseAuthEnabled).toBe(true);
+    expect(flags.firestoreCoreEnabled).toBe(true);
+    expect(flags.tenantIsolationStrict).toBe(true);
+    expect(flags.firebaseUseEmulators).toBe(false);
+  });
 });
