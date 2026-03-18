@@ -517,9 +517,9 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         }
       };
 
+      // 전사 프로젝트 전체 표시 (상태 무관)
       const activeProjectQuery = query(
         projectCollection,
-        where('status', '==', 'CONTRACT_PENDING'),
         limit(500),
       );
 
