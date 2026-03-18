@@ -1792,6 +1792,17 @@ function ImportEditor({
         },
       },
       {
+        combo: { key: 'x', mod: true },
+        run: (_ev) => {
+          if (!selection) return false;
+          // Copy first
+          handleCopy(_ev as unknown as KeyboardEvent<HTMLDivElement>);
+          // Then clear
+          void clearSelectedCells();
+          return true;
+        },
+      },
+      {
         combo: { key: 'Escape' },
         run: (_ev) => {
           if (!selectionRef.current) return false;
