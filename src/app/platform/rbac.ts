@@ -136,6 +136,29 @@ export function hasPermission(
   return granted.has(permission);
 }
 
+export type ProjectScopedPermission = 'project:read' | 'project:write' | 'project:evidence_drive:write';
+
+const CROSS_PROJECT_ROLES: PlatformRole[] = ['admin', 'finance', 'support', 'security', 'tenant_admin', 'auditor'];
+
+export function canAccessProject(options: {
+  actorRole: PlatformRole;
+  permission: ProjectScopedPermission;
+  assignedProjectIds?: string[];
+  targetProjectId: string;
+  extraPermissions?: PlatformPermission[];
+}): boolean {
+  if (!hasPermission(options.actorRole, options.permission, options.extraPermissions)) {
+    return false;
+  }
+  if (CROSS_PROJECT_ROLES.includes(options.actorRole)) {
+    return true;
+  }
+  if (!options.assignedProjectIds || options.assignedProjectIds.length === 0) {
+    return false;
+  }
+  return options.assignedProjectIds.includes(options.targetProjectId);
+}
+
 export function canAccessTenant(options: {
   actorRole: PlatformRole;
   actorTenantId?: string;
