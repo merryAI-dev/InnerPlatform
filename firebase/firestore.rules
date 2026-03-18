@@ -566,6 +566,28 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // ── HR: Employees ──
+    match /orgs/{orgId}/hr_employees/{employeeId} {
+      allow read: if isSignedIn() && (isPrivileged(orgId) || request.auth.uid == resource.data.uid);
+      allow create, update: if isSignedIn() && isPrivileged(orgId) && requestHasValidTenant(orgId);
+      allow delete: if isSignedIn() && isAdmin(orgId);
+    }
+
+    // ── HR: Contracts ──
+    match /orgs/{orgId}/hr_contracts/{contractId} {
+      allow read: if isSignedIn() && isPrivileged(orgId);
+      allow create, update: if isSignedIn() && isPrivileged(orgId) && requestHasValidTenant(orgId);
+      allow delete: if isSignedIn() && isAdmin(orgId);
+    }
+
+    // ── HR: Leave requests ──
+    match /orgs/{orgId}/hr_leaves/{leaveId} {
+      allow read: if isSignedIn() && (isPrivileged(orgId) || request.auth.uid == resource.data.employeeUid);
+      allow create: if isSignedIn() && requestHasValidTenant(orgId);
+      allow update: if isSignedIn() && (isPrivileged(orgId) || request.auth.uid == resource.data.employeeUid);
+      allow delete: if isSignedIn() && isAdmin(orgId);
+    }
+
     match /orgs/{orgId}/{document=**} {
       allow read: if isSignedIn() && resourceHasValidTenant(orgId);
       allow create: if isSignedIn() && isAdmin(orgId) && requestHasValidTenant(orgId);
