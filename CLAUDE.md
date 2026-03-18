@@ -12,6 +12,46 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `merge-worktree` | 현재 worktree 브랜치를 main(또는 지정 브랜치)에 스쿼시 머지 |
 | `manage-skills` | 세션 변경사항을 분석하여 verify 스킬 누락을 탐지하고 생성/업데이트 |
 | `verify-implementation` | 등록된 모든 verify-* 스킬을 순차 실행하여 통합 검증 보고서 생성 |
+| `verify-firebase` | Firebase 프로젝트 전환/배포 전 env, auth, rules, members 정합성 검증 |
+
+## Firebase 운영 정책
+
+배포 시 반드시 지켜야 할 사항:
+
+1. **Vercel env 설정 시 `printf` 사용** — `echo`는 trailing newline이 들어감
+   ```bash
+   # ✅ 올바름
+   printf 'value' | vercel env add VAR_NAME production
+   # ❌ 틀림 — \n이 값에 포함됨
+   echo "value" | vercel env add VAR_NAME production
+   ```
+
+2. **Firebase UID는 프로젝트마다 다름** — 프로젝트 전환 시 members 컬렉션에 새 UID 등록 필수
+   ```bash
+   # 현재 프로젝트의 UID 확인
+   gcloud auth list  # 계정 확인
+   # Firebase Auth에서 실제 UID 조회 후 members에 등록
+   ```
+
+3. **Firestore documentId() 쿼리에 빈 문자열 금지** — `.filter(Boolean)` 필수
+   ```typescript
+   // ✅ 올바름
+   const ids = [...projectIds].filter(Boolean);
+   // ❌ 빈 문자열이면 쿼리가 아무것도 안 반환
+   where(documentId(), 'in', [''])
+   ```
+
+4. **`vercel --prod` 후 반드시 alias 확인**
+   ```bash
+   vercel alias <deployment-url> inner-platform.vercel.app
+   ```
+
+5. **새 Firebase 프로젝트 세팅 체크리스트**
+   - [ ] Google Sign-In provider 활성화
+   - [ ] Authorized domains에 production URL 추가
+   - [ ] Firestore rules + indexes 배포
+   - [ ] Storage bucket 초기화
+   - [ ] members 컬렉션에 admin 사용자 등록 (새 UID로)
 
 ## Project Overview
 
