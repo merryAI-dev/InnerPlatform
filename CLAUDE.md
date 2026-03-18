@@ -10,6 +10,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 |-------|---------|
 | `verify-git-policy` | PR/머지 전 브랜치 네이밍·커밋 컨벤션·PR 없는 미머지 브랜치 일괄 검증 |
 | `merge-worktree` | 현재 worktree 브랜치를 main(또는 지정 브랜치)에 스쿼시 머지 |
+| `manage-skills` | 세션 변경사항을 분석하여 verify 스킬 누락을 탐지하고 생성/업데이트 |
+| `verify-implementation` | 등록된 모든 verify-* 스킬을 순차 실행하여 통합 검증 보고서 생성 |
 
 ## Project Overview
 
