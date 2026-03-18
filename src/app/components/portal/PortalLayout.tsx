@@ -220,11 +220,14 @@ function PortalContent() {
           <AlertTriangle className="w-10 h-10 mx-auto text-muted-foreground/30 mb-3" />
           <p className="text-[14px]" style={{ fontWeight: 800 }}>사업이 배정되지 않았습니다</p>
           <p className="text-[12px] text-muted-foreground mt-1">
-            아직 배정된 사업이 없습니다. 관리자에게 사업 배정을 요청하거나, 온보딩에서 사업을 선택해 주세요.
+            기존 사업을 선택하거나, 새 사업을 등록할 수 있습니다.
           </p>
           <div className="mt-4 flex items-center justify-center gap-2">
             <Button variant="outline" onClick={() => navigate('/portal/project-settings')}>
-              사업 배정 수정
+              기존 사업 선택
+            </Button>
+            <Button onClick={() => navigate('/portal/register-project')}>
+              새 사업 등록
             </Button>
             <Button variant="ghost" onClick={() => { portalLogout(); authLogout(); navigate('/login'); }}>
               로그아웃
@@ -242,11 +245,14 @@ function PortalContent() {
           <AlertTriangle className="w-10 h-10 mx-auto text-muted-foreground/30 mb-3" />
           <p className="text-[14px]" style={{ fontWeight: 800 }}>사업 정보를 찾을 수 없습니다</p>
           <p className="text-[12px] text-muted-foreground mt-1">
-            배정된 사업 정보가 존재하지 않거나 접근 권한이 없습니다. 관리자에게 문의해 주세요.
+            기존 사업을 선택하거나, 새 사업을 등록할 수 있습니다.
           </p>
           <div className="mt-4 flex items-center justify-center gap-2">
             <Button variant="outline" onClick={() => navigate('/portal/project-settings')}>
-              사업 배정 수정
+              기존 사업 선택
+            </Button>
+            <Button onClick={() => navigate('/portal/register-project')}>
+              새 사업 등록
             </Button>
             <Button variant="ghost" onClick={() => { portalLogout(); authLogout(); navigate('/login'); }}>
               로그아웃
