@@ -2,14 +2,18 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   addCommentViaBff,
   addEvidenceViaBff,
+  analyzeGoogleSheetImportViaBff,
+  analyzeProjectRequestContractViaBff,
   changeTransactionStateViaBff,
   linkProjectEvidenceDriveRootViaBff,
   overrideTransactionEvidenceDriveCategoriesViaBff,
   previewGoogleSheetImportViaBff,
+  processProjectRequestContractViaBff,
   provisionProjectEvidenceDriveRootViaBff,
   provisionTransactionEvidenceDriveViaBff,
   readPlatformApiRuntimeConfig,
   syncTransactionEvidenceDriveViaBff,
+  uploadProjectRequestContractViaBff,
   toRequestActor,
   uploadTransactionEvidenceDriveViaBff,
   upsertLedgerViaBff,
@@ -149,6 +153,150 @@ describe('platform-bff-client', () => {
 
     expect(comment.id).toBe('c001');
     expect(evidence.id).toBe('ev001');
+  });
+
+  it('calls project request contract analysis endpoint', async () => {
+    const client = {
+      post: vi.fn(async () => ({
+        data: {
+          provider: 'anthropic',
+          model: 'claude-sonnet',
+          summary: '초안 생성',
+          warnings: ['사람 확인 필요'],
+          nextActions: ['담당팀은 직접 선택하세요.'],
+          extractedAt: '2026-03-16T09:00:00.000Z',
+          fields: {
+            officialContractName: { value: '뷰티풀 커넥트 운영 계약', confidence: 'high', evidence: '사업명: 뷰티풀 커넥트 운영 계약' },
+            suggestedProjectName: { value: '뷰티풀커넥트', confidence: 'high', evidence: '사업명' },
+            clientOrg: { value: '아모레퍼시픽재단', confidence: 'high', evidence: '발주기관' },
+            projectPurpose: { value: '청년 창업가의 지역 연결 지원', confidence: 'medium', evidence: '사업 목적' },
+            description: { value: '', confidence: 'low', evidence: '' },
+            contractStart: { value: '2026-03-01', confidence: 'high', evidence: '계약기간' },
+            contractEnd: { value: '2026-12-31', confidence: 'high', evidence: '계약기간' },
+            contractAmount: { value: 120000000, confidence: 'high', evidence: '총 계약금액' },
+            salesVatAmount: { value: 12000000, confidence: 'medium', evidence: '부가세' },
+          },
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    };
+
+    const result = await analyzeProjectRequestContractViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm', idToken: 'token-abc' },
+      fileName: 'contract.pdf',
+      documentText: '사업명: 뷰티풀 커넥트 운영 계약',
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/project-requests/contract/analyze', expect.objectContaining({
+      tenantId: 'mysc',
+      body: {
+        fileName: 'contract.pdf',
+        documentText: '사업명: 뷰티풀 커넥트 운영 계약',
+      },
+    }));
+    expect(result.fields.officialContractName.value).toBe('뷰티풀 커넥트 운영 계약');
+    expect(result.fields.contractAmount.value).toBe(120000000);
+  });
+
+  it('calls project request contract upload endpoint', async () => {
+    const client = {
+      post: vi.fn(async () => ({
+        data: {
+          path: 'orgs/mysc/project-request-contracts/u001/contract.pdf',
+          name: 'contract.pdf',
+          downloadURL: 'https://example.com/contract.pdf',
+          size: 1234,
+          contentType: 'application/pdf',
+          uploadedAt: '2026-03-16T10:00:00.000Z',
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    };
+
+    const result = await uploadProjectRequestContractViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm', idToken: 'token-abc' },
+      upload: {
+        fileName: 'contract.pdf',
+        mimeType: 'application/pdf',
+        fileSize: 1234,
+        contentBase64: 'ZmFrZS1wZGY=',
+      },
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/project-requests/contract/upload', expect.objectContaining({
+      tenantId: 'mysc',
+      body: {
+        fileName: 'contract.pdf',
+        mimeType: 'application/pdf',
+        fileSize: 1234,
+        contentBase64: 'ZmFrZS1wZGY=',
+      },
+    }));
+    expect(result.downloadURL).toContain('contract.pdf');
+  });
+
+  it('calls project request contract process endpoint with binary body', async () => {
+    const file = new File(['pdf-bytes'], '계약서 샘플.pdf', { type: 'application/pdf' });
+    const client = {
+      post: vi.fn(),
+      get: vi.fn(),
+      request: vi.fn(async () => ({
+        data: {
+          contractDocument: {
+            path: 'orgs/mysc/project-request-contracts/u001/contract.pdf',
+            name: 'contract.pdf',
+            downloadURL: 'https://example.com/contract.pdf',
+            size: 1234,
+            contentType: 'application/pdf',
+            uploadedAt: '2026-03-16T10:00:00.000Z',
+          },
+          analysis: {
+            provider: 'heuristic',
+            model: 'deterministic-fallback',
+            summary: 'summary',
+            warnings: [],
+            nextActions: [],
+            extractedAt: '2026-03-16T10:00:00.000Z',
+            fields: {
+              officialContractName: { value: '공식 계약명', confidence: 'medium', evidence: '근거' },
+              suggestedProjectName: { value: '계약명', confidence: 'medium', evidence: '근거' },
+              clientOrg: { value: '', confidence: 'low', evidence: '' },
+              projectPurpose: { value: '', confidence: 'low', evidence: '' },
+              description: { value: '', confidence: 'low', evidence: '' },
+              contractStart: { value: '', confidence: 'low', evidence: '' },
+              contractEnd: { value: '', confidence: 'low', evidence: '' },
+              contractAmount: { value: null, confidence: 'low', evidence: '' },
+              salesVatAmount: { value: null, confidence: 'low', evidence: '' },
+            },
+          },
+        },
+      })),
+    };
+
+    const result = await processProjectRequestContractViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm', idToken: 'token-abc' },
+      file,
+      client,
+    });
+
+    expect(client.request).toHaveBeenCalledWith('/api/v1/project-requests/contract/process', expect.objectContaining({
+      method: 'POST',
+      tenantId: 'mysc',
+      body: file,
+      headers: expect.objectContaining({
+        'content-type': 'application/octet-stream',
+        'x-file-name': encodeURIComponent('계약서 샘플.pdf'),
+        'x-file-type': 'application/pdf',
+      }),
+    }));
+    expect(result.analysis.fields.officialContractName.value).toBe('공식 계약명');
   });
 
   it('calls evidence drive provision/sync endpoints', async () => {
@@ -440,5 +588,97 @@ describe('platform-bff-client', () => {
       timeoutMs: 20000,
     }));
     expect(preview.selectedSheetName).toBe('주간정산');
+  });
+
+  it('calls google sheet import analysis endpoint', async () => {
+    const client = {
+      post: vi.fn(async () => ({
+        data: {
+          provider: 'anthropic',
+          model: 'claude-sonnet-4-20250514',
+          summary: '사용내역 탭으로 보입니다.',
+          confidence: 'high',
+          likelyTarget: 'expense_sheet',
+          usageTips: ['상단 헤더를 먼저 확인하세요.'],
+          warnings: ['2줄 헤더 여부를 확인하세요.'],
+          nextActions: ['표본 3행을 먼저 검증하세요.'],
+          suggestedMappings: [
+            {
+              sourceHeader: '입금합계 > 입금액',
+              platformField: '입금합계/입금액',
+              confidence: 'high',
+              reason: '입금 금액 계열입니다.',
+            },
+          ],
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    };
+
+    const analysis = await analyzeGoogleSheetImportViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm' },
+      projectId: 'p001',
+      spreadsheetTitle: '2026 사업비 관리 시트',
+      selectedSheetName: '사용내역',
+      matrix: [
+        ['작성자', '입금합계', '사업팀'],
+        ['No.', '입금액', '지급처'],
+      ],
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/projects/p001/google-sheet-import/analyze', expect.objectContaining({
+      body: {
+        spreadsheetTitle: '2026 사업비 관리 시트',
+        selectedSheetName: '사용내역',
+        matrix: [
+          ['작성자', '입금합계', '사업팀'],
+          ['No.', '입금액', '지급처'],
+        ],
+      },
+      timeoutMs: 25000,
+    }));
+    expect(analysis.likelyTarget).toBe('expense_sheet');
+  });
+
+  it('normalizes nullable google sheet migration analysis arrays', async () => {
+    const client = {
+      post: vi.fn(async () => ({
+        data: {
+          provider: 'anthropic',
+          model: 'claude-sonnet-4-20250514',
+          summary: '사용내역 탭으로 보입니다.',
+          confidence: 'high',
+          likelyTarget: 'expense_sheet',
+          usageTips: null,
+          warnings: null,
+          nextActions: null,
+          suggestedMappings: null,
+          headerPreview: null,
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    };
+
+    const analysis = await analyzeGoogleSheetImportViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm' },
+      projectId: 'p001',
+      selectedSheetName: '사용내역',
+      matrix: [
+        ['작성자', '입금합계', '사업팀'],
+        ['No.', '입금액', '지급처'],
+      ],
+      client,
+    });
+
+    expect(analysis.usageTips).toEqual([]);
+    expect(analysis.warnings).toEqual([]);
+    expect(analysis.nextActions).toEqual([]);
+    expect(analysis.suggestedMappings).toEqual([]);
+    expect(analysis.headerPreview).toEqual([]);
   });
 });

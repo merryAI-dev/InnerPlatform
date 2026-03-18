@@ -2,7 +2,7 @@
  * Client-side PDF text extraction using pdfjs-dist (Mozilla PDF.js).
  * Dynamically imported to avoid bundling ~2.5MB when unused.
  */
-export async function extractTextFromPdf(file: File): Promise<string> {
+export async function extractTextFromPdf(source: File | Blob | ArrayBuffer | Uint8Array): Promise<string> {
   const pdfjsLib = await import('pdfjs-dist');
 
   pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -10,7 +10,11 @@ export async function extractTextFromPdf(file: File): Promise<string> {
     import.meta.url,
   ).toString();
 
-  const arrayBuffer = await file.arrayBuffer();
+  const arrayBuffer = source instanceof ArrayBuffer
+    ? source
+    : source instanceof Uint8Array
+      ? source.buffer.slice(source.byteOffset, source.byteOffset + source.byteLength)
+      : await source.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
 
   const pages: string[] = [];

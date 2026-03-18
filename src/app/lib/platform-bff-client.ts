@@ -1,5 +1,8 @@
 import { featureFlags, parseFeatureFlag } from '../config/feature-flags';
-import type { TransactionState } from '../data/types';
+import type {
+  ProjectRequestContractAnalysis,
+  TransactionState,
+} from '../data/types';
 import { PlatformApiClient } from '../platform/api-client';
 import type { RequestActor } from '../platform/request-context';
 
@@ -57,6 +60,13 @@ export interface CreateEvidencePayload {
   [key: string]: unknown;
 }
 
+export interface ProjectRequestContractUploadPayload {
+  fileName: string;
+  mimeType: string;
+  fileSize: number;
+  contentBase64: string;
+}
+
 export interface ProvisionProjectEvidenceDriveRootResult {
   projectId: string;
   folderId: string;
@@ -83,6 +93,132 @@ export interface GoogleSheetImportPreviewResult {
   matrix: string[][];
 }
 
+export interface GoogleSheetMigrationAnalysisSuggestion {
+  sourceHeader: string;
+  platformField: string;
+  confidence: 'high' | 'medium' | 'low';
+  reason: string;
+}
+
+export interface GoogleSheetMigrationAnalysisResult {
+  provider: 'anthropic' | 'heuristic';
+  model: string;
+  summary: string;
+  confidence: 'high' | 'medium' | 'low';
+  likelyTarget: string;
+  usageTips: string[];
+  warnings: string[];
+  nextActions: string[];
+  suggestedMappings: GoogleSheetMigrationAnalysisSuggestion[];
+  headerPreview?: string[];
+}
+
+export interface ProjectRequestContractAnalysisResult extends ProjectRequestContractAnalysis {}
+
+function normalizeStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function normalizeSuggestedMappings(value: unknown): GoogleSheetMigrationAnalysisSuggestion[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null;
+      const sourceHeader = typeof item.sourceHeader === 'string' ? item.sourceHeader.trim() : '';
+      const platformField = typeof item.platformField === 'string' ? item.platformField.trim() : '';
+      const reason = typeof item.reason === 'string' ? item.reason.trim() : '';
+      const confidence = item.confidence === 'high' || item.confidence === 'medium' || item.confidence === 'low'
+        ? item.confidence
+        : 'medium';
+      if (!sourceHeader || !platformField || !reason) return null;
+      return {
+        sourceHeader,
+        platformField,
+        confidence,
+        reason,
+      } satisfies GoogleSheetMigrationAnalysisSuggestion;
+    })
+    .filter((item): item is GoogleSheetMigrationAnalysisSuggestion => Boolean(item));
+}
+
+function normalizeAiConfidence(value: unknown): 'high' | 'medium' | 'low' {
+  return value === 'high' || value === 'medium' || value === 'low' ? value : 'low';
+}
+
+function normalizeProjectRequestTextSuggestion(value: unknown) {
+  const raw = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  return {
+    value: typeof raw.value === 'string' ? raw.value.trim() : '',
+    confidence: normalizeAiConfidence(raw.confidence),
+    evidence: typeof raw.evidence === 'string' ? raw.evidence.trim() : '',
+  };
+}
+
+function normalizeProjectRequestNumberSuggestion(value: unknown) {
+  const raw = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  return {
+    value: typeof raw.value === 'number' && Number.isFinite(raw.value) ? raw.value : null,
+    confidence: normalizeAiConfidence(raw.confidence),
+    evidence: typeof raw.evidence === 'string' ? raw.evidence.trim() : '',
+  };
+}
+
+export function normalizeGoogleSheetMigrationAnalysisResult(
+  value: unknown,
+): GoogleSheetMigrationAnalysisResult {
+  const raw = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  return {
+    provider: raw.provider === 'anthropic' ? 'anthropic' : 'heuristic',
+    model: typeof raw.model === 'string' && raw.model.trim() ? raw.model.trim() : 'unavailable',
+    summary: typeof raw.summary === 'string' && raw.summary.trim()
+      ? raw.summary.trim()
+      : 'AI 분석 결과를 확인할 수 없어 기본 가이드를 표시합니다.',
+    confidence: raw.confidence === 'high' || raw.confidence === 'medium' || raw.confidence === 'low'
+      ? raw.confidence
+      : 'medium',
+    likelyTarget: typeof raw.likelyTarget === 'string' && raw.likelyTarget.trim() ? raw.likelyTarget.trim() : 'unknown',
+    usageTips: normalizeStringArray(raw.usageTips),
+    warnings: normalizeStringArray(raw.warnings),
+    nextActions: normalizeStringArray(raw.nextActions),
+    suggestedMappings: normalizeSuggestedMappings(raw.suggestedMappings),
+    headerPreview: normalizeStringArray(raw.headerPreview),
+  };
+}
+
+export function normalizeProjectRequestContractAnalysisResult(
+  value: unknown,
+): ProjectRequestContractAnalysisResult {
+  const raw = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  const fields = raw.fields && typeof raw.fields === 'object' ? raw.fields as Record<string, unknown> : {};
+  return {
+    provider: raw.provider === 'anthropic' ? 'anthropic' : 'heuristic',
+    model: typeof raw.model === 'string' && raw.model.trim() ? raw.model.trim() : 'unavailable',
+    summary: typeof raw.summary === 'string' && raw.summary.trim()
+      ? raw.summary.trim()
+      : '계약서 초안을 확인할 수 없어 직접 입력이 필요합니다.',
+    warnings: normalizeStringArray(raw.warnings),
+    nextActions: normalizeStringArray(raw.nextActions),
+    extractedAt: typeof raw.extractedAt === 'string' && raw.extractedAt.trim()
+      ? raw.extractedAt.trim()
+      : new Date().toISOString(),
+    fields: {
+      officialContractName: normalizeProjectRequestTextSuggestion(fields.officialContractName),
+      suggestedProjectName: normalizeProjectRequestTextSuggestion(fields.suggestedProjectName),
+      clientOrg: normalizeProjectRequestTextSuggestion(fields.clientOrg),
+      projectPurpose: normalizeProjectRequestTextSuggestion(fields.projectPurpose),
+      description: normalizeProjectRequestTextSuggestion(fields.description),
+      contractStart: normalizeProjectRequestTextSuggestion(fields.contractStart),
+      contractEnd: normalizeProjectRequestTextSuggestion(fields.contractEnd),
+      contractAmount: normalizeProjectRequestNumberSuggestion(fields.contractAmount),
+      salesVatAmount: normalizeProjectRequestNumberSuggestion(fields.salesVatAmount),
+    },
+  };
+}
+
 export interface ProvisionTransactionEvidenceDriveResult {
   transactionId: string;
   projectId: string;
@@ -106,6 +242,7 @@ export interface SyncTransactionEvidenceDriveResult {
   sharedDriveId: string | null;
   evidenceCount: number;
   evidenceCompletedDesc: string | null;
+  evidenceCompletedManualDesc?: string | null;
   evidenceAutoListedDesc: string | null;
   evidencePendingDesc: string | null;
   supportPendingDocs: string | null;
@@ -218,6 +355,10 @@ export function createPlatformApiClient(
 
 function resolveClient(client?: PlatformApiClientLike): PlatformApiClientLike {
   return client || createPlatformApiClient();
+}
+
+function encodeHeaderValue(value: string): string {
+  return encodeURIComponent(value);
 }
 
 export async function upsertProjectViaBff(params: {
@@ -373,6 +514,131 @@ export async function previewGoogleSheetImportViaBff(params: {
     },
   );
   return response.data;
+}
+
+export async function analyzeGoogleSheetImportViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  spreadsheetTitle?: string;
+  selectedSheetName: string;
+  matrix: string[][];
+  client?: PlatformApiClientLike;
+}): Promise<GoogleSheetMigrationAnalysisResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<GoogleSheetMigrationAnalysisResult>(
+    `/api/v1/projects/${params.projectId}/google-sheet-import/analyze`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: {
+        ...(params.spreadsheetTitle ? { spreadsheetTitle: params.spreadsheetTitle } : {}),
+        selectedSheetName: params.selectedSheetName,
+        matrix: params.matrix,
+      },
+      timeoutMs: 25000,
+    },
+  );
+  return normalizeGoogleSheetMigrationAnalysisResult(response.data);
+}
+
+export async function analyzeProjectRequestContractViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  fileName: string;
+  documentText?: string;
+  client?: PlatformApiClientLike;
+}): Promise<ProjectRequestContractAnalysisResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<ProjectRequestContractAnalysisResult>(
+    '/api/v1/project-requests/contract/analyze',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: {
+        fileName: params.fileName,
+        ...(params.documentText ? { documentText: params.documentText } : {}),
+      },
+      timeoutMs: 45000,
+    },
+  );
+  return normalizeProjectRequestContractAnalysisResult(response.data);
+}
+
+export async function uploadProjectRequestContractViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  upload: ProjectRequestContractUploadPayload;
+  client?: PlatformApiClientLike;
+}) {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<{
+    path: string;
+    name: string;
+    downloadURL: string;
+    size: number;
+    contentType: string;
+    uploadedAt: string;
+  }>(
+    '/api/v1/project-requests/contract/upload',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.upload,
+      timeoutMs: 45000,
+    },
+  );
+  return response.data;
+}
+
+export async function processProjectRequestContractViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  file: File;
+  client?: PlatformApiClientLike;
+}): Promise<{
+  contractDocument: {
+    path: string;
+    name: string;
+    downloadURL: string;
+    size: number;
+    contentType: string;
+    uploadedAt: string;
+  };
+  analysis: ProjectRequestContractAnalysisResult;
+}> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.request<{
+    contractDocument: {
+      path: string;
+      name: string;
+      downloadURL: string;
+      size: number;
+      contentType: string;
+      uploadedAt: string;
+    };
+    analysis: ProjectRequestContractAnalysisResult;
+  }>(
+    '/api/v1/project-requests/contract/process',
+    {
+      method: 'POST',
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      headers: {
+        'content-type': 'application/octet-stream',
+        'x-file-name': encodeHeaderValue(params.file.name),
+        'x-file-type': params.file.type || 'application/pdf',
+        'x-file-size': String(params.file.size || 0),
+      },
+      body: params.file,
+      timeoutMs: 45000,
+      retries: 0,
+    },
+  );
+  return {
+    contractDocument: response.data.contractDocument,
+    analysis: normalizeProjectRequestContractAnalysisResult(response.data.analysis),
+  };
 }
 
 export async function linkProjectEvidenceDriveRootViaBff(params: {

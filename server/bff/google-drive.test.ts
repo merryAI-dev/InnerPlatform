@@ -71,6 +71,7 @@ describe('google-drive helpers', () => {
       transaction: {
         evidenceRequired: ['세금계산서', '입금확인서', '계약서'],
         evidenceCompletedDesc: '세금계산서, 계약서',
+        evidenceCompletedManualDesc: '계약서',
         evidenceAutoListedDesc: '세금계산서',
         evidenceDriveLink: 'https://drive.google.com/drive/folders/fld-tx',
       },
@@ -84,7 +85,8 @@ describe('google-drive helpers', () => {
     });
 
     expect(patch.evidenceAutoListedDesc).toBe('세금계산서, 입금확인서');
-    expect(patch.evidenceCompletedDesc).toBe('세금계산서, 계약서, 입금확인서');
+    expect(patch.evidenceCompletedManualDesc).toBe('계약서');
+    expect(patch.evidenceCompletedDesc).toBe('세금계산서, 입금확인서, 계약서');
     expect(patch.evidencePendingDesc).toBeUndefined();
     expect(patch.supportPendingDocs).toBeUndefined();
     expect(patch.evidenceMissing).toEqual([]);
@@ -108,6 +110,7 @@ describe('google-drive helpers', () => {
       },
     });
 
+    expect(patch.evidenceCompletedManualDesc).toBeUndefined();
     expect(patch.evidenceCompletedDesc).toBe('세금계산서, 입금확인서');
     expect(patch.evidencePendingDesc).toBeUndefined();
     expect(patch.evidenceMissing).toEqual([]);
@@ -131,9 +134,31 @@ describe('google-drive helpers', () => {
       },
     });
 
+    expect(patch.evidenceCompletedManualDesc).toBeUndefined();
     expect(patch.evidenceCompletedDesc).toBe('세금계산서, 입금확인서');
     expect(patch.evidencePendingDesc).toBeUndefined();
     expect(patch.evidenceMissing).toEqual([]);
     expect(patch.evidenceStatus).toBe('COMPLETE');
+  });
+
+  it('derives legacy manual-only entries from completed desc when auto list already exists', () => {
+    const patch = resolveEvidenceSyncPatch({
+      transaction: {
+        evidenceRequired: ['세금계산서', '입금확인서', '계약서'],
+        evidenceCompletedDesc: '세금계산서, 계약서',
+        evidenceAutoListedDesc: '세금계산서',
+        evidenceDriveLink: 'https://drive.google.com/drive/folders/fld-tx',
+      },
+      evidences: [
+        { fileName: '세금계산서_3월.pdf', category: '세금계산서' },
+        { fileName: '입금확인서_3월.pdf', category: '입금확인서' },
+      ],
+      folder: {
+        webViewLink: 'https://drive.google.com/drive/folders/fld-tx',
+      },
+    });
+
+    expect(patch.evidenceCompletedManualDesc).toBe('계약서');
+    expect(patch.evidenceCompletedDesc).toBe('세금계산서, 입금확인서, 계약서');
   });
 });

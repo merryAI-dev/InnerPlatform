@@ -23,10 +23,10 @@ export type ProjectType =
   | 'Z1'; // 기타사업
 export type ProjectPhase = 'PROSPECT' | 'CONFIRMED';  // 입찰예정 / 확정
 
-export type SettlementType = 'TYPE1' | 'TYPE2' | 'TYPE4';
+export type SettlementType = 'TYPE1' | 'TYPE2' | 'TYPE3' | 'TYPE4' | 'TYPE5';
 export type Basis = 'SUPPLY_AMOUNT' | 'SUPPLY_PRICE'; // 공급가액 / 공급대가
 
-export type AccountType = 'DEDICATED' | 'OPERATING' | 'NONE'; // 전용통장 / 운영통장 / 없음
+export type AccountType = 'DEDICATED' | 'OPERATING' | 'NONE'; // 전용계좌 사업(이나라도움) / 전용계좌(이나라도움x) / 일반 사업
 
 export type TransactionState = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED';
 export type Direction = 'IN' | 'OUT';
@@ -116,13 +116,17 @@ export const PROJECT_TYPE_SHORT_LABELS: Record<ProjectType, string> = {
 export const SETTLEMENT_TYPE_LABELS: Record<SettlementType, string> = {
   TYPE1: 'Type1. 세금계산서발행+공급가액',
   TYPE2: 'Type2. 세금계산서발행+공급대가',
+  TYPE3: 'Type3. 공급가액+세금계산서 미발행',
   TYPE4: 'Type4. 세금계산서미발행+공급대가',
+  TYPE5: 'Type5. 이나라도움+공급가액',
 };
 
 export const SETTLEMENT_TYPE_SHORT: Record<SettlementType, string> = {
   TYPE1: 'Type1',
   TYPE2: 'Type2',
+  TYPE3: 'Type3',
   TYPE4: 'Type4',
+  TYPE5: 'Type5',
 };
 
 export const BASIS_LABELS: Record<Basis, string> = {
@@ -131,9 +135,9 @@ export const BASIS_LABELS: Record<Basis, string> = {
 };
 
 export const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
-  DEDICATED: '전용통장',
-  OPERATING: '운영통장',
-  NONE: '-',
+  DEDICATED: '전용계좌 사업(이나라도움)',
+  OPERATING: '전용계좌(이나라도움x)',
+  NONE: '일반 사업',
 };
 
 export const DIRECTION_LABELS: Record<Direction, string> = {
@@ -282,6 +286,7 @@ export interface Project {
   slug: string;        // URL-safe unique key
   orgId: string;
   name: string;
+  officialContractName?: string;
   status: ProjectStatus;
   type: ProjectType;
   phase: ProjectPhase;
@@ -302,7 +307,14 @@ export interface Project {
   clientOrg: string;             // 발주기관(계약기관)
   groupwareName: string;         // 그룹웨어 프로젝트등록명
   participantCondition: string;  // 참여기업 조건
+  teamMembersDetailed?: ProjectTeamMemberAssignment[];
   contractType: string;          // 계약서 유형 (계약서(날인), 기타 등)
+  projectPurpose?: string;
+  totalRevenueAmount?: number;
+  supportAmount?: number;
+  salesVatAmount?: number;
+  settlementGuide?: string;
+  contractDocument?: FileAttachment | null;
   // 팀/담당자
   department: string;            // 담당조직
   teamName: string;              // 사내기업팀 (팀장)
@@ -335,24 +347,83 @@ export interface Project {
 
 export type ProjectRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 
+export interface FileAttachment {
+  path: string;
+  name: string;
+  downloadURL: string;
+  size: number;
+  contentType: string;
+  uploadedAt: string;
+}
+
+export type AiSuggestionConfidence = 'high' | 'medium' | 'low';
+
+export interface ProjectRequestContractTextSuggestion {
+  value: string;
+  confidence: AiSuggestionConfidence;
+  evidence: string;
+}
+
+export interface ProjectRequestContractNumberSuggestion {
+  value: number | null;
+  confidence: AiSuggestionConfidence;
+  evidence: string;
+}
+
+export interface ProjectRequestContractAnalysis {
+  provider: 'anthropic' | 'heuristic';
+  model: string;
+  summary: string;
+  warnings: string[];
+  nextActions: string[];
+  extractedAt: string;
+  fields: {
+    officialContractName: ProjectRequestContractTextSuggestion;
+    suggestedProjectName: ProjectRequestContractTextSuggestion;
+    clientOrg: ProjectRequestContractTextSuggestion;
+    projectPurpose: ProjectRequestContractTextSuggestion;
+    description: ProjectRequestContractTextSuggestion;
+    contractStart: ProjectRequestContractTextSuggestion;
+    contractEnd: ProjectRequestContractTextSuggestion;
+    contractAmount: ProjectRequestContractNumberSuggestion;
+    salesVatAmount: ProjectRequestContractNumberSuggestion;
+  };
+}
+
+export interface ProjectTeamMemberAssignment {
+  memberName: string;
+  memberNickname: string;
+  role: string;
+  participationRate: number;
+}
+
 export interface ProjectRequestPayload {
   name: string;
+  officialContractName: string;
   type: ProjectType;
   description: string;
   clientOrg: string;
   department: string;
   contractAmount: number;
+  salesVatAmount: number;
+  totalRevenueAmount: number;
+  supportAmount: number;
   contractStart: string;
   contractEnd: string;
   settlementType: SettlementType;
   basis: Basis;
   accountType: AccountType;
   paymentPlanDesc: string;
+  settlementGuide: string;
+  projectPurpose: string;
   managerName: string;
   teamName: string;
   teamMembers: string;
+  teamMembersDetailed?: ProjectTeamMemberAssignment[];
   participantCondition: string;
   note: string;
+  contractDocument: FileAttachment | null;
+  contractAnalysis?: ProjectRequestContractAnalysis | null;
 }
 
 export interface ProjectRequest {
@@ -433,7 +504,8 @@ export interface Transaction {
   budgetSubSubCategory?: string;   // 세세목
   // 증빙 추적 (사업팀)
   evidenceRequiredDesc?: string;   // 필수증빙자료 리스트 (텍스트)
-  evidenceCompletedDesc?: string;  // 구비 완료된 증빙자료 리스트
+  evidenceCompletedDesc?: string;  // 구비 완료된 증빙자료 리스트 (자동+수기 보정 적용 결과)
+  evidenceCompletedManualDesc?: string; // 구비 완료 수기 보정 목록
   evidencePendingDesc?: string;    // 준비필요자료
   // 정산지원 담당자
   evidenceDriveLink?: string;      // 증빙자료 드라이브 링크

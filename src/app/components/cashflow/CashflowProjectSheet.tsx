@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { doc, getDoc } from 'firebase/firestore';
 import { CheckCircle2, ClipboardCheck, ClipboardList, CircleDollarSign, ChevronLeft, ChevronRight, Download, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useBlocker, useNavigate } from 'react-router';
 import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
 import { Input } from '../ui/input';
@@ -24,14 +26,16 @@ import {
   type CashflowWeekSheet,
   type Transaction,
   type UserRole,
+  type WeeklySubmissionStatus,
 } from '../../data/types';
 import { getSeoulTodayIso } from '../../platform/business-days';
 import { CASHFLOW_ALL_LINES, CASHFLOW_IN_LINES, CASHFLOW_OUT_LINES, computeCashflowTotals } from '../../platform/cashflow-sheet';
 import { getMonthMondayWeeks } from '../../platform/cashflow-weeks';
 import { useAuth } from '../../data/auth-store';
-import { useBlocker } from 'react-router';
 import { hasUnsavedChanges } from './cashflow-unsaved';
 import { triggerDownload } from '../../platform/csv-utils';
+import { useFirebase } from '../../lib/firebase-context';
+import { getOrgDocumentPath } from '../../lib/firebase';
 
 function fmt(n: number): string {
   return n.toLocaleString('ko-KR');
@@ -65,6 +69,8 @@ export function CashflowProjectSheet({
   roleOverride?: UserRole | string;
 }) {
   const { user } = useAuth();
+  const { db, orgId } = useFirebase();
+  const navigate = useNavigate();
   const role = (roleOverride || user?.role || '').toString().toLowerCase() as UserRole | '';
   const isPm = role === 'pm';
   const canClose = role === 'admin' || role === 'finance' || role === 'tenant_admin';
@@ -150,6 +156,13 @@ export function CashflowProjectSheet({
 
   const [submitConfirm, setSubmitConfirm] = useState<{ weekNo: number; yearMonth: string } | null>(null);
   const [submitBusy, setSubmitBusy] = useState(false);
+  const [closeBusy, setCloseBusy] = useState(false);
+  const [closeDialog, setCloseDialog] = useState<{
+    kind: 'prerequisite' | 'confirm';
+    weekNo: number;
+    projectionDone: boolean;
+    expenseDone: boolean;
+  } | null>(null);
   const [monthSaving, setMonthSaving] = useState(false);
 
   const hasDirty = useMemo(
@@ -459,14 +472,49 @@ export function CashflowProjectSheet({
   }, [flushWeek, projectId, submitWeekAsPm]);
 
   const handleCloseWeek = useCallback(async (weekNo: number) => {
+    setCloseBusy(true);
     try {
-      await flushWeek({ weekNo, mode: 'actual', silent: false });
+      await flushWeek({ weekNo, mode: 'projection', silent: false });
       await closeWeekAsAdmin({ projectId, yearMonth, weekNo });
       toast.success('결산완료 처리했습니다.');
     } catch (e) {
       toast.error('결산완료 처리에 실패했습니다.');
+    } finally {
+      setCloseBusy(false);
+      setCloseDialog(null);
     }
   }, [closeWeekAsAdmin, flushWeek, projectId, yearMonth]);
+
+  const handleStartCloseWeek = useCallback(async (weekNo: number) => {
+    if (!db) {
+      setCloseDialog({
+        kind: 'confirm',
+        weekNo,
+        projectionDone: true,
+        expenseDone: true,
+      });
+      return;
+    }
+
+    try {
+      const statusId = `${projectId}-${yearMonth}-w${weekNo}`;
+      const statusRef = doc(db, getOrgDocumentPath(orgId, 'weeklySubmissionStatus', statusId));
+      const snap = await getDoc(statusRef);
+      const status = snap.exists() ? (snap.data() as WeeklySubmissionStatus) : undefined;
+      const projectionDone = Boolean(status?.projectionUpdated);
+      const expenseDone = Boolean(status?.expenseUpdated);
+
+      setCloseDialog({
+        kind: projectionDone && expenseDone ? 'confirm' : 'prerequisite',
+        weekNo,
+        projectionDone,
+        expenseDone,
+      });
+    } catch (error) {
+      console.error('[Cashflow] weekly submission status read failed:', error);
+      toast.error('결산 전 제출현황을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+    }
+  }, [db, orgId, projectId, yearMonth]);
 
   function countEmptyCellsForWeek(input: { weekNo: number; mode: 'projection' | 'actual' }): number {
     const doc = byWeekNo.get(input.weekNo);
@@ -531,19 +579,19 @@ export function CashflowProjectSheet({
                               <CheckCircle2 className="w-3 h-3" /> 작성완료
                             </Button>
                           )}
-                          {tableMode === 'actual' && !weekMeta[w.weekNo]?.adminClosed && canClose && (
+                          {tableMode === 'projection' && !weekMeta[w.weekNo]?.adminClosed && canClose && (
                             <Button
                               size="sm"
                               className="h-7 text-[10px] gap-1"
-                              onClick={() => void handleCloseWeek(w.weekNo)}
+                              onClick={() => void handleStartCloseWeek(w.weekNo)}
                               style={{ background: 'linear-gradient(135deg, #059669, #0d9488)' }}
                             >
-                              <CheckCircle2 className="w-3 h-3" /> 결산완료
+                              <CheckCircle2 className="w-3 h-3" /> 결산
                             </Button>
                           )}
                         </div>
                         {doc?.adminClosed && (
-                          <div className="mt-1 text-[9px] text-muted-foreground">결산완료 이후 입력이 잠깁니다.</div>
+                          <div className="mt-1 text-[9px] text-muted-foreground">결산완료 이후에도 Projection 수정은 가능합니다.</div>
                         )}
                       </th>
                     );
@@ -837,6 +885,75 @@ export function CashflowProjectSheet({
           <AlertDialogFooter>
             <AlertDialogCancel onClick={() => blocker.reset()}>계속 편집</AlertDialogCancel>
             <AlertDialogAction onClick={() => blocker.proceed()}>나가기</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={!!closeDialog}
+        onOpenChange={(open) => {
+          if (!open && !closeBusy) setCloseDialog(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {closeDialog?.kind === 'prerequisite'
+                ? '결산 전에 제출현황을 확인해 주세요'
+                : '이번 주차를 결산완료 처리할까요?'}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {closeDialog?.kind === 'prerequisite'
+                ? '내 제출현황에서 Projection 업데이트와 사업비 입력을 체크해주세요.'
+                : 'Projection 업데이트와 사업비 입력 체크가 완료된 주차입니다. 결산완료 후에도 Projection은 계속 수정할 수 있습니다.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {closeDialog && (
+            <div className="text-sm space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">주차</span>
+                <span style={{ fontWeight: 700 }}>
+                  {monthWeeks.find((x) => x.weekNo === closeDialog.weekNo)?.label || `w${closeDialog.weekNo}`}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Projection 업데이트</span>
+                <span style={{ fontWeight: 700 }}>
+                  {closeDialog.projectionDone ? '완료' : '미완료'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">사업비 입력</span>
+                <span style={{ fontWeight: 700 }}>
+                  {closeDialog.expenseDone ? '완료' : '미완료'}
+                </span>
+              </div>
+            </div>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={closeBusy}>취소</AlertDialogCancel>
+            {closeDialog?.kind === 'prerequisite' ? (
+              <AlertDialogAction
+                onClick={(e) => {
+                  e.preventDefault();
+                  setCloseDialog(null);
+                  navigate('/portal/submissions');
+                }}
+              >
+                내 제출현황으로 이동
+              </AlertDialogAction>
+            ) : (
+              <AlertDialogAction
+                disabled={!closeDialog || closeBusy}
+                onClick={(e) => {
+                  e.preventDefault();
+                  if (!closeDialog) return;
+                  void handleCloseWeek(closeDialog.weekNo);
+                }}
+              >
+                {closeBusy ? '처리 중…' : '결산완료'}
+              </AlertDialogAction>
+            )}
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

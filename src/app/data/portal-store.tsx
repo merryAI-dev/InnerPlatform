@@ -45,6 +45,7 @@ import {
   type BankStatementSheet,
 } from '../platform/bank-statement';
 import { normalizeSpace } from '../platform/csv-utils';
+import { prepareSettlementImportRows, pruneEmptySettlementRows } from '../platform/settlement-sheet-prepare';
 import { useAuth } from './auth-store';
 import { useFirebase } from '../lib/firebase-context';
 import { getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
@@ -1056,10 +1057,18 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     const activeSheet = expenseSheets.find((sheet) => sheet.id === activeExpenseSheetId) || null;
     const activeSheetId = activeSheet?.id || activeExpenseSheetId || 'default';
     const activeSheetName = sanitizeExpenseSheetName(activeSheet?.name, activeSheetId === 'default' ? '기본 탭' : '새 탭');
-    const sanitizedRows = rows.map((row) => ({
+    const defaultLedgerId = ledgers.find((ledger) => ledger.projectId === portalUser?.projectId)?.id
+      || (portalUser?.projectId ? `l-${portalUser.projectId}` : 'l-default');
+    const preparedRows = prepareSettlementImportRows(pruneEmptySettlementRows(rows), {
+      projectId: portalUser?.projectId || '',
+      defaultLedgerId,
+      evidenceRequiredMap,
+    });
+    const sanitizedRows = preparedRows.map((row) => ({
       tempId: row.tempId || `imp-${Date.now()}`,
       ...(row.sourceTxId ? { sourceTxId: row.sourceTxId } : {}),
       cells: Array.isArray(row.cells) ? row.cells.map((c) => (c ?? '')) : [],
+      ...(row.error ? { error: row.error } : {}),
     }));
     if (isDevHarnessUser || !db || !portalUser?.projectId) {
       setExpenseSheetRows(sanitizedRows as ImportRow[]);
@@ -1110,6 +1119,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     budgetPlanRows,
     expenseSheetRows,
     evidenceRequiredMap,
+    ledgers,
     isDevHarnessUser,
   ]);
 
@@ -1363,6 +1373,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       slug,
       orgId,
       name: payload.name,
+      officialContractName: payload.officialContractName,
       status: 'CONTRACT_PENDING',
       type: payload.type,
       phase: 'CONFIRMED',
@@ -1377,11 +1388,18 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       clientOrg: payload.clientOrg,
       groupwareName: '',
       participantCondition: payload.participantCondition,
+      teamMembersDetailed: payload.teamMembersDetailed || [],
       contractType: '계약서(날인)',
+      projectPurpose: payload.projectPurpose,
+      totalRevenueAmount: payload.totalRevenueAmount,
+      supportAmount: payload.supportAmount,
+      salesVatAmount: payload.salesVatAmount,
+      settlementGuide: payload.settlementGuide,
+      contractDocument: payload.contractDocument,
       department: payload.department,
       teamName: payload.teamName,
       managerId: authUser.uid,
-      managerName: authUser.name || portalUser?.name || '',
+      managerName: payload.managerName || authUser.name || portalUser?.name || '',
       budgetCurrentYear: payload.contractAmount || 0,
       taxInvoiceAmount: 0,
       profitRate: 0,

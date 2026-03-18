@@ -1,71 +1,96 @@
 import type { ImportRow } from './settlement-csv';
 
-export interface GridSelectionBounds {
+export interface SettlementSelectionBounds {
   r1: number;
   r2: number;
   c1: number;
   c2: number;
 }
 
-export const PROTECTED_SETTLEMENT_CLEAR_HEADERS = [
+export const DEFAULT_PROTECTED_SETTLEMENT_HEADERS = [
   'No.',
+  '필수증빙자료 리스트',
   '실제 구비 완료된 증빙자료 리스트',
   '준비필요자료',
   '증빙자료 드라이브',
   '준비 필요자료',
 ] as const;
 
-export function buildProtectedClearColumnIndexes(
-  columns: Array<{ csvHeader: string }>,
-  extraProtectedHeaders: string[] = [],
-): Set<number> {
-  const protectedHeaders = new Set<string>([
-    ...PROTECTED_SETTLEMENT_CLEAR_HEADERS,
-    ...extraProtectedHeaders,
-  ]);
-  return new Set(
-    columns
-      .map((column, index) => (protectedHeaders.has(column.csvHeader) ? index : -1))
-      .filter((index) => index >= 0),
-  );
+function normalizeBounds(
+  rows: ImportRow[],
+  bounds: SettlementSelectionBounds | null,
+): SettlementSelectionBounds | null {
+  if (!bounds || rows.length === 0) return null;
+  const r1 = Math.max(0, Math.min(rows.length - 1, bounds.r1));
+  const r2 = Math.max(0, Math.min(rows.length - 1, bounds.r2));
+  if (r1 > r2) return null;
+  return {
+    r1,
+    r2,
+    c1: Math.max(0, Math.min(bounds.c1, bounds.c2)),
+    c2: Math.max(0, Math.max(bounds.c1, bounds.c2)),
+  };
 }
 
-export function clearSelectedImportCells(
+export function clearSelectionCells(
   rows: ImportRow[],
-  bounds: GridSelectionBounds,
-  protectedColumnIndexes: Set<number>,
+  bounds: SettlementSelectionBounds | null,
+  options?: {
+    protectedColumnIndexes?: number[];
+  },
 ): ImportRow[] {
-  return rows.map((row, rowIdx) => {
-    if (rowIdx < bounds.r1 || rowIdx > bounds.r2) return row;
-    const nextCells = [...row.cells];
-    let changed = false;
-    for (let colIdx = bounds.c1; colIdx <= bounds.c2; colIdx += 1) {
-      if (colIdx < 0 || colIdx >= nextCells.length) continue;
-      if (protectedColumnIndexes.has(colIdx)) continue;
-      if (nextCells[colIdx] === '') continue;
-      nextCells[colIdx] = '';
-      changed = true;
+  const normalized = normalizeBounds(rows, bounds);
+  if (!normalized) return rows;
+  const protectedColumns = new Set(options?.protectedColumnIndexes || []);
+  let changed = false;
+  const next = rows.map((row, rowIdx) => {
+    if (rowIdx < normalized.r1 || rowIdx > normalized.r2) return row;
+    let rowChanged = false;
+    const cells = [...row.cells];
+    for (let colIdx = normalized.c1; colIdx <= normalized.c2; colIdx += 1) {
+      if (protectedColumns.has(colIdx)) continue;
+      if (colIdx >= cells.length) continue;
+      if (cells[colIdx] === '') continue;
+      cells[colIdx] = '';
+      rowChanged = true;
     }
-    return changed ? { ...row, cells: nextCells } : row;
+    if (!rowChanged) return row;
+    changed = true;
+    return { ...row, cells };
   });
+  return changed ? next : rows;
 }
 
-export function clearAllImportCells(
+export function deleteSelectedRows(
   rows: ImportRow[],
-  protectedColumnIndexes: Set<number>,
+  bounds: SettlementSelectionBounds | null,
 ): ImportRow[] {
-  return rows.map((row) => {
-    const nextCells = row.cells.map((cell, colIdx) => (
-      protectedColumnIndexes.has(colIdx) ? cell : ''
-    ));
-    const changed = nextCells.some((cell, index) => cell !== row.cells[index]);
-    return changed ? { ...row, cells: nextCells } : row;
-  });
+  const normalized = normalizeBounds(rows, bounds);
+  if (!normalized) return rows;
+  return rows.filter((_, rowIdx) => rowIdx < normalized.r1 || rowIdx > normalized.r2);
 }
 
-export function removeSelectedImportRows(
+export function clearAllEditableCells(
   rows: ImportRow[],
-  bounds: GridSelectionBounds,
+  options?: {
+    protectedColumnIndexes?: number[];
+  },
 ): ImportRow[] {
-  return rows.filter((_, rowIdx) => rowIdx < bounds.r1 || rowIdx > bounds.r2);
+  if (rows.length === 0) return rows;
+  const protectedColumns = new Set(options?.protectedColumnIndexes || []);
+  let changed = false;
+  const next = rows.map((row) => {
+    let rowChanged = false;
+    const cells = [...row.cells];
+    for (let colIdx = 0; colIdx < cells.length; colIdx += 1) {
+      if (protectedColumns.has(colIdx)) continue;
+      if (cells[colIdx] === '') continue;
+      cells[colIdx] = '';
+      rowChanged = true;
+    }
+    if (!rowChanged) return row;
+    changed = true;
+    return { ...row, cells };
+  });
+  return changed ? next : rows;
 }

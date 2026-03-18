@@ -42,10 +42,13 @@ import {
   evidenceDriveOverrideSchema,
   evidenceDriveUploadSchema,
   genericWriteSchema,
+  googleSheetImportAnalyzeSchema,
   googleSheetImportPreviewSchema,
   ledgerUpsertSchema,
   memberRoleUpdateSchema,
   parseWithSchema,
+  projectRequestContractAnalyzeSchema,
+  projectRequestContractUploadSchema,
   projectDriveRootLinkSchema,
   projectUpsertSchema,
   transactionStateSchema,
@@ -56,6 +59,7 @@ import {
   normalizeState,
 } from './state-policy.mjs';
 import { mountGuideChatRoutes } from './guide-chat.mjs';
+import { mountClaudeSdkHelpRoutes } from './claude-sdk-help.mjs';
 import {
   DriveServiceError,
   createGoogleDriveService,
@@ -67,6 +71,10 @@ import {
   GoogleSheetsServiceError,
   createGoogleSheetsService,
 } from './google-sheets.mjs';
+import { createGoogleSheetMigrationAiService } from './google-sheet-migration-ai.mjs';
+import { createProjectRequestContractAiService } from './project-request-contract-ai.mjs';
+import { createProjectRequestContractStorageService } from './project-request-contract-storage.mjs';
+import { extractTextFromPdfBuffer } from './pdf-text.mjs';
 
 function createHttpError(statusCode, message, code = 'request_error') {
   const error = new Error(message);
@@ -95,6 +103,16 @@ function parseBearerToken(rawAuthorization) {
 
 function readOptionalText(value) {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function decodeHeaderValue(value) {
+  const text = readOptionalText(value);
+  if (!text) return '';
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
 }
 
 function parseAllowedOrigins(value) {
@@ -561,6 +579,9 @@ export function createBffApp(options = {}) {
   const rbacPolicy = options.rbacPolicy || loadRbacPolicy();
   const driveService = options.driveService || createGoogleDriveService();
   const googleSheetsService = options.googleSheetsService || createGoogleSheetsService();
+  const googleSheetMigrationAiService = options.googleSheetMigrationAiService || createGoogleSheetMigrationAiService();
+  const projectRequestContractAiService = options.projectRequestContractAiService || createProjectRequestContractAiService();
+  const projectRequestContractStorageService = options.projectRequestContractStorageService || createProjectRequestContractStorageService({ projectId });
   const allowedOrigins = parseAllowedOrigins(options.allowedOrigins || process.env.BFF_ALLOWED_ORIGINS);
   const relationRulesPolicyPath = options.relationRulesPolicyPath || resolveRelationRulesPolicyPath();
   const workQueueBatchSizeRaw = Number.parseInt(process.env.BFF_WORK_QUEUE_BATCH || '100', 10);
@@ -611,7 +632,7 @@ export function createBffApp(options = {}) {
       res.setHeader('Access-Control-Allow-Origin', allowAnyOrigin ? '*' : requestOrigin);
     }
     res.setHeader('Vary', 'Origin');
-    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, x-tenant-id, x-actor-id, x-actor-role, x-actor-email, x-request-id, idempotency-key, x-google-access-token');
+    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, x-tenant-id, x-actor-id, x-actor-role, x-actor-email, x-request-id, idempotency-key, x-google-access-token, x-file-name, x-file-type, x-file-size');
     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,PUT,DELETE,OPTIONS');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
@@ -1186,6 +1207,102 @@ export function createBffApp(options = {}) {
       throw error;
     }
   }));
+
+  app.post('/api/v1/projects/:projectId/google-sheet-import/analyze', asyncHandler(async (req, res) => {
+    const { tenantId } = req.context;
+    assertActorRoleAllowed(req, ROUTE_ROLES.readCore, 'analyze google sheet import');
+    const { projectId } = req.params;
+    const parsed = parseWithSchema(googleSheetImportAnalyzeSchema, req.body, 'Invalid google sheet analysis payload');
+
+    await ensureDocumentExists(
+      db,
+      `orgs/${tenantId}/projects/${projectId}`,
+      `Project not found: ${projectId}`,
+    );
+
+    const analysis = await googleSheetMigrationAiService.analyzePreview({
+      spreadsheetTitle: parsed.spreadsheetTitle,
+      selectedSheetName: parsed.selectedSheetName,
+      matrix: parsed.matrix,
+    });
+    res.status(200).json(analysis);
+  }));
+
+  app.post('/api/v1/project-requests/contract/analyze', asyncHandler(async (req, res) => {
+    assertActorRoleAllowed(req, ROUTE_ROLES.readCore, 'analyze project request contract');
+    const parsed = parseWithSchema(
+      projectRequestContractAnalyzeSchema,
+      req.body,
+      'Invalid project request contract analysis payload',
+    );
+    const analysis = await projectRequestContractAiService.analyzeContract({
+      fileName: parsed.fileName,
+      documentText: parsed.documentText || '',
+    });
+    res.status(200).json(analysis);
+  }));
+
+  app.post('/api/v1/project-requests/contract/upload', asyncHandler(async (req, res) => {
+    const { tenantId, actorId } = req.context;
+    assertActorRoleAllowed(req, ROUTE_ROLES.writeCore, 'upload project request contract');
+    const parsed = parseWithSchema(
+      projectRequestContractUploadSchema,
+      req.body,
+      'Invalid project request contract upload payload',
+    );
+    const uploaded = await projectRequestContractStorageService.uploadContract({
+      tenantId,
+      actorId,
+      fileName: parsed.fileName,
+      mimeType: parsed.mimeType,
+      fileSize: parsed.fileSize,
+      contentBase64: parsed.contentBase64,
+    });
+    res.status(200).json(uploaded);
+  }));
+
+  app.post(
+    '/api/v1/project-requests/contract/process',
+    express.raw({ type: ['application/octet-stream', 'application/pdf'], limit: process.env.BFF_JSON_LIMIT || '25mb' }),
+    asyncHandler(async (req, res) => {
+      const { tenantId, actorId } = req.context;
+      assertActorRoleAllowed(req, ROUTE_ROLES.writeCore, 'process project request contract');
+      const fileName = decodeHeaderValue(req.header('x-file-name')) || 'contract.pdf';
+      const mimeType = readOptionalText(req.header('x-file-type')) || req.header('content-type') || 'application/pdf';
+      const fileSizeHeader = Number.parseInt(readOptionalText(req.header('x-file-size')), 10);
+      const fileBuffer = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body || []);
+
+      if (!fileBuffer.byteLength) {
+        throw createHttpError(400, 'Contract upload body is empty', 'empty_contract_upload');
+      }
+
+      const contractDocument = await projectRequestContractStorageService.uploadContract({
+        tenantId,
+        actorId,
+        fileName,
+        mimeType,
+        fileSize: Number.isFinite(fileSizeHeader) ? fileSizeHeader : fileBuffer.byteLength,
+        buffer: fileBuffer,
+      });
+
+      let documentText = '';
+      try {
+        documentText = await extractTextFromPdfBuffer(fileBuffer);
+      } catch (error) {
+        console.warn('[BFF] contract pdf text extraction failed:', error);
+      }
+
+      const analysis = await projectRequestContractAiService.analyzeContract({
+        fileName,
+        documentText: documentText || fileName,
+      });
+
+      res.status(200).json({
+        contractDocument,
+        analysis,
+      });
+    }),
+  );
 
   app.get('/api/v1/ledgers', asyncHandler(async (req, res) => {
     const { tenantId } = req.context;
@@ -2271,6 +2388,7 @@ export function createBffApp(options = {}) {
         sharedDriveId: folder.driveId || null,
         evidenceCount: evidenceDocs.length,
         evidenceCompletedDesc: txResult.data.evidenceCompletedDesc || null,
+        evidenceCompletedManualDesc: txResult.data.evidenceCompletedManualDesc || null,
         evidenceAutoListedDesc: txResult.data.evidenceAutoListedDesc || null,
         evidencePendingDesc: txResult.data.evidencePendingDesc || null,
         supportPendingDocs: txResult.data.supportPendingDocs || null,
@@ -2364,6 +2482,7 @@ export function createBffApp(options = {}) {
         sharedDriveId: transaction.evidenceDriveSharedDriveId || null,
         evidenceCount: evidenceDocs.length,
         evidenceCompletedDesc: txResult.data.evidenceCompletedDesc || null,
+        evidenceCompletedManualDesc: txResult.data.evidenceCompletedManualDesc || null,
         evidenceAutoListedDesc: txResult.data.evidenceAutoListedDesc || null,
         evidencePendingDesc: txResult.data.evidencePendingDesc || null,
         supportPendingDocs: txResult.data.supportPendingDocs || null,
@@ -2536,6 +2655,7 @@ export function createBffApp(options = {}) {
         sharedDriveId: folder.driveId || null,
         evidenceCount: evidenceDocs.length,
         evidenceCompletedDesc: txResult.data.evidenceCompletedDesc || null,
+        evidenceCompletedManualDesc: txResult.data.evidenceCompletedManualDesc || null,
         evidenceAutoListedDesc: txResult.data.evidenceAutoListedDesc || null,
         evidencePendingDesc: txResult.data.evidencePendingDesc || null,
         supportPendingDocs: txResult.data.supportPendingDocs || null,
@@ -2644,6 +2764,14 @@ export function createBffApp(options = {}) {
   // ── Guide Q&A chatbot ──
   mountGuideChatRoutes(app, {
     db, now, idempotencyService, asyncHandler, createMutatingRoute, assertActorRoleAllowed,
+  });
+
+  // ── Claude SDK helper chatbot ──
+  mountClaudeSdkHelpRoutes(app, {
+    idempotencyService,
+    asyncHandler,
+    createMutatingRoute,
+    assertActorRoleAllowed,
   });
 
   app.use((error, req, res, _next) => {

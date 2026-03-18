@@ -175,7 +175,7 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
       { id: 'name', label: '사업명', passed: !!formData.name.trim(), required: true },
       { id: 'dept', label: '담당조직', passed: !!formData.department, required: true },
       { id: 'client', label: '발주기관', passed: !!formData.clientOrg.trim(), required: targetPhase === 'CONFIRMED' },
-      { id: 'account', label: '통장 구분', passed: formData.accountType !== 'NONE', required: targetPhase === 'CONFIRMED' },
+      { id: 'account', label: '통장 구분', passed: !!ACCOUNT_TYPE_LABELS[formData.accountType], required: targetPhase === 'CONFIRMED' },
       { id: 'groupware', label: '그룹웨어 등록명', passed: !!formData.groupwareName.trim(), required: targetPhase === 'CONFIRMED' },
       { id: 'manager', label: '메인 담당자', passed: !!formData.managerName.trim(), required: targetPhase === 'CONFIRMED' },
       { id: 'contractAmount', label: '총 계약금액', passed: formData.contractAmount > 0 || formData.status === 'CONTRACT_PENDING', required: targetPhase === 'CONFIRMED' },
@@ -397,7 +397,7 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
         return (
           <div className="space-y-5">
             <div className="space-y-3">
-              <Label>전용통장 / 운영통장 여부 *</Label>
+              <Label>통장 유형 *</Label>
               <div className="grid grid-cols-3 gap-3">
                 {(['DEDICATED', 'OPERATING', 'NONE'] as AccountType[]).map(at => (
                   <button
@@ -412,16 +412,16 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
                       {ACCOUNT_TYPE_LABELS[at]}
                     </div>
                     <div className="text-xs text-muted-foreground mt-1">
-                      {at === 'DEDICATED' && '사업 전용 통장을 사용합니다'}
-                      {at === 'OPERATING' && '운영통장에서 관리합니다'}
-                      {at === 'NONE' && '아직 결정되지 않았습니다'}
+                      {at === 'DEDICATED' && '이나라도움 전용계좌로 관리합니다'}
+                      {at === 'OPERATING' && '전용계좌를 사용하지만 이나라도움은 사용하지 않습니다'}
+                      {at === 'NONE' && '일반 사업으로 관리합니다'}
                     </div>
                   </button>
                 ))}
               </div>
               {formData.accountType !== 'NONE' && (
                 <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-800">
-                  <span style={{ fontWeight: 600 }}>중요:</span> 운영통장으로 입금/출금되는 Big Money는 반드시 추적 관리됩니다.
+                  <span style={{ fontWeight: 600 }}>중요:</span> 전용계좌를 사용하는 사업의 입출금 흐름은 반드시 추적 관리됩니다.
                 </div>
               )}
             </div>

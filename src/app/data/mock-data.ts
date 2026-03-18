@@ -69,7 +69,7 @@ export const LEDGER_TEMPLATES: LedgerTemplate[] = [
     evidenceRules: ['세금계산서', '입금확인서', '계약서'],
     approvalThreshold: 1000000,
     defaultBasis: 'SUPPLY_AMOUNT',
-    allowedSettlementTypes: ['TYPE1', 'TYPE2', 'TYPE4'],
+    allowedSettlementTypes: ['TYPE1', 'TYPE2', 'TYPE3', 'TYPE4', 'TYPE5'],
     createdAt: '2023-01-15T09:00:00Z',
   },
   {
@@ -85,7 +85,7 @@ export const LEDGER_TEMPLATES: LedgerTemplate[] = [
     evidenceRules: ['세금계산서', '영수증', '입금확인서'],
     approvalThreshold: 500000,
     defaultBasis: 'SUPPLY_AMOUNT',
-    allowedSettlementTypes: ['TYPE1', 'TYPE2', 'TYPE4'],
+    allowedSettlementTypes: ['TYPE1', 'TYPE2', 'TYPE3', 'TYPE4', 'TYPE5'],
     createdAt: '2023-01-15T09:00:00Z',
   },
   {
@@ -100,7 +100,7 @@ export const LEDGER_TEMPLATES: LedgerTemplate[] = [
     evidenceRules: ['세금계산서', '근로소득원천징수영수증', '지출결의서'],
     approvalThreshold: 0,
     defaultBasis: 'SUPPLY_AMOUNT',
-    allowedSettlementTypes: ['TYPE1', 'TYPE4'],
+    allowedSettlementTypes: ['TYPE1', 'TYPE3', 'TYPE4', 'TYPE5'],
     createdAt: '2023-02-01T09:00:00Z',
   },
 ];

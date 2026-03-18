@@ -29,25 +29,8 @@ import { SETTLEMENT_COLUMNS } from '../../platform/settlement-csv';
 // PortalBudget — 예산총괄 (리디자인 — 모바일 우선, 깨짐 방지)
 // ═══════════════════════════════════════════════════════════════
 
-const GROUP_LABELS: Record<string, string> = {
-  g1: 'MYSC 인건비',
-  g2: '직접사업비',
-  g3: '업무추진비',
-  g4: '팀지원금',
-  g0: '기타',
-};
-
-function groupIdForEntry(index: number, name: string): string {
-  const raw = normalizeBudgetLabel(name).toLowerCase();
-  if (raw.includes('인건비')) return 'g1';
-  if (raw.includes('프로그램') || raw.includes('운영')) return 'g2';
-  if (raw.includes('업무') || raw.includes('추진') || raw.includes('여비') || raw.includes('회의')) return 'g3';
-  if (raw.includes('팀지원') || raw.includes('지원금')) return 'g4';
-  if (index === 0) return 'g1';
-  if (index === 1) return 'g2';
-  if (index === 2) return 'g3';
-  if (index === 3) return 'g4';
-  return 'g0';
+function groupIdForEntry(name: string): string {
+  return normalizeBudgetLabel(name) || '기타';
 }
 
 function normalizeBudgetLabel(value: string): string {
@@ -57,16 +40,14 @@ function normalizeBudgetLabel(value: string): string {
     .trim();
 }
 
-function formatBudgetCodeLabel(index: number, name: string): string {
+function formatBudgetCodeLabel(_index: number, name: string): string {
   const trimmed = String(name || '').trim();
-  if (!trimmed) return `${index + 1}`;
-  return `${index + 1} ${trimmed}`;
+  return trimmed || '비목 미입력';
 }
 
-function formatSubCodeLabel(codeIndex: number, subIndex: number, name: string): string {
+function formatSubCodeLabel(_codeIndex: number, _subIndex: number, name: string): string {
   const trimmed = String(name || '').trim();
-  if (!trimmed) return `${codeIndex + 1}-${subIndex + 1}`;
-  return `${codeIndex + 1}-${subIndex + 1} ${trimmed}`;
+  return trimmed || '세목 미입력';
 }
 
 // 소진율 색상
@@ -350,11 +331,11 @@ export function PortalBudget() {
         const burnRate = effective > 0 ? spent / effective : 0;
         const codeLabel = formatBudgetCodeLabel(codeIdx, entry.code);
         const subLabel = formatSubCodeLabel(codeIdx, subIdx, subCode);
-        const groupId = groupIdForEntry(codeIdx, entry.code);
+        const groupId = groupIdForEntry(entry.code);
         return {
           id: lookupKey,
           projectId: myProject?.id || '',
-          category: GROUP_LABELS[groupId] || '',
+          category: groupId,
           budgetCode: codeLabel,
           subCode: subLabel,
           calcDesc: '',
@@ -457,7 +438,7 @@ export function PortalBudget() {
     return Object.entries(groups.groupMap).map(([gid, group]) => {
       const effective = group.subtotal.revisedAug > 0 ? group.subtotal.revisedAug : group.subtotal.initialBudget;
       return {
-        label: GROUP_LABELS[gid] || gid,
+        label: gid || '기타',
         amount: effective,
         ratio: effectiveTotal > 0 ? effective / effectiveTotal : 0,
       };
@@ -682,7 +663,7 @@ export function PortalBudget() {
                 >
                   {isCollapsed ? <ChevronRight className="w-3.5 h-3.5 text-muted-foreground shrink-0" /> : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground shrink-0" />}
                   <span className="text-[12px] flex-1" style={{ fontWeight: 600 }}>
-                    {GROUP_LABELS[gid] || gid}
+                    {gid || '기타'}
                   </span>
                   <div className="flex items-center gap-3 text-[10px]" style={{ fontVariantNumeric: 'tabular-nums' }}>
                     <span className="text-muted-foreground">예산 <strong className="text-foreground">{fmtShort(subEffective)}</strong></span>

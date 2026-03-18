@@ -88,6 +88,11 @@ describe('google-sheet-migration', () => {
       { code: '회의비', subCodes: ['다과비'] },
       { code: '홍보비', subCodes: ['보도자료'] },
     ]);
+    expect(plan.importedRows).toEqual(imported);
+    expect(plan.importedCodeBook).toEqual([
+      { code: '여비', subCodes: ['교통비'] },
+      { code: '홍보비', subCodes: ['보도자료'] },
+    ]);
   });
 
   it('parses evidence rule matrices with intermediate category columns', () => {

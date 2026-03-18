@@ -40,6 +40,7 @@ describe('google-sheet-import', () => {
         '상세 적요': '기존 메모',
         '증빙자료 드라이브': 'https://drive.google.com/drive/folders/existing',
         '실제 구비 완료된 증빙자료 리스트': '세금계산서',
+        '준비필요자료': '입금확인서',
       }, 'tx-001'),
     ];
 
@@ -53,6 +54,7 @@ describe('google-sheet-import', () => {
         '상세 적요': '가져온 메모',
         '증빙자료 드라이브': 'https://drive.google.com/drive/folders/new',
         '실제 구비 완료된 증빙자료 리스트': '입금확인서',
+        '준비필요자료': '없음',
       }),
     ];
 
@@ -61,7 +63,8 @@ describe('google-sheet-import', () => {
 
     expect(mergedRow.cells[SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '상세 적요')]).toBe('가져온 메모');
     expect(mergedRow.cells[SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '증빙자료 드라이브')]).toBe('https://drive.google.com/drive/folders/existing');
-    expect(mergedRow.cells[SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '실제 구비 완료된 증빙자료 리스트')]).toBe('세금계산서');
+    expect(mergedRow.cells[SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '실제 구비 완료된 증빙자료 리스트')]).toBe('입금확인서');
+    expect(mergedRow.cells[SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '준비필요자료')]).toBe('없음');
     expect(plan.summary.updateCount).toBe(1);
     expect(plan.summary.protectedHeaders).toEqual(GOOGLE_SHEET_PROTECTED_HEADERS);
   });

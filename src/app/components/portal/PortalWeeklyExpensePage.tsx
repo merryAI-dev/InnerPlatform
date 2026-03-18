@@ -12,7 +12,7 @@ import {
 import { usePortalStore } from '../../data/portal-store';
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { useAuth } from '../../data/auth-store';
-import { type EvidenceUploadSelection, SettlementLedgerPage } from '../cashflow/SettlementLedgerPage';
+import type { EvidenceUploadSelection } from '../cashflow/SettlementLedgerPage';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import type { CashflowWeekSheet, Transaction, TransactionState } from '../../data/types';
@@ -36,8 +36,12 @@ import {
 import { splitLooseNameList } from '../../platform/name-list';
 import { type ImportRow } from '../../platform/settlement-csv';
 import { readDevAuthHarnessConfig } from '../../platform/dev-harness';
+import { resolvePortalHappyPath } from '../../platform/portal-happy-path';
 const GoogleSheetMigrationWizard = lazy(
   () => import('./GoogleSheetMigrationWizard').then((module) => ({ default: module.GoogleSheetMigrationWizard })),
+);
+const SettlementLedgerPage = lazy(
+  () => import('../cashflow/SettlementLedgerPage').then((module) => ({ default: module.SettlementLedgerPage })),
 );
 
 function normalizeBudgetLabel(value: string): string {
@@ -98,6 +102,12 @@ export function PortalWeeklyExpensePage() {
     const ledger = ledgers.find((l) => l.projectId === projectId);
     return ledger?.id || `l-${projectId}`;
   }, [projectId, ledgers]);
+  const happyPath = useMemo(() => resolvePortalHappyPath({
+    authUser,
+    portalUser,
+    project: myProject,
+    ledgers,
+  }), [authUser, portalUser, myProject, ledgers]);
 
   const effectiveBudgetCodeBook = useMemo(() => {
     const orderedCodes: string[] = [];
@@ -221,6 +231,7 @@ export function PortalWeeklyExpensePage() {
       evidenceDriveSyncStatus: 'SYNCED',
       evidenceDriveLastSyncedAt: result.lastSyncedAt,
       evidenceCompletedDesc: result.evidenceCompletedDesc || undefined,
+      evidenceCompletedManualDesc: result.evidenceCompletedManualDesc || undefined,
       evidenceAutoListedDesc: result.evidenceAutoListedDesc || undefined,
       evidencePendingDesc: result.evidencePendingDesc || undefined,
       supportPendingDocs: result.supportPendingDocs || undefined,
@@ -440,6 +451,16 @@ export function PortalWeeklyExpensePage() {
           evidenceDriveSyncStatus: 'UPLOADED',
           updatedAt: new Date().toISOString(),
         });
+        const syncResult = await syncTransactionEvidenceDriveViaBff({
+          tenantId: orgId,
+          actor: bffActor,
+          transactionId: tx.id,
+        });
+        applySyncedEvidenceState(tx.id, syncResult);
+        const uploadLabel = uploads.length === 1
+          ? uploads[0]?.reviewedFileName || uploads[0]?.file.name || '파일 1건'
+          : `${uploads[0]?.reviewedFileName || uploads[0]?.file.name || '파일'} 외 ${uploads.length - 1}건`;
+        toast.success(`업로드 완료 후 동기화됨: ${uploadLabel}`);
       } else if (lastResult) {
         applySyncedEvidenceState(tx.id, lastResult);
       }
@@ -534,6 +555,54 @@ export function PortalWeeklyExpensePage() {
           </Button>
         </div>
       </div>
+      <div className={`rounded-xl border px-4 py-3 text-[12px] ${
+        happyPath.canUseEvidenceWorkflow
+          ? 'border-emerald-200/80 bg-emerald-50/70 text-emerald-950'
+          : 'border-sky-200/80 bg-sky-50/70 text-sky-950'
+      }`}>
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div className="space-y-1">
+            <p className="font-semibold">현재 happy path 상태</p>
+            <p className={happyPath.canUseEvidenceWorkflow ? 'text-emerald-900/80' : 'text-sky-900/80'}>
+              {happyPath.canUseEvidenceWorkflow
+                ? `${happyPath.selectedProjectName || projectName}에서 행 저장 후 생성/업로드/동기화를 바로 사용할 수 있습니다.`
+                : '주간 입력은 가능하지만, 증빙 Workflow를 바로 쓰려면 기본 폴더 준비가 먼저 필요합니다.'}
+            </p>
+            <p className="text-[11px] text-muted-foreground">
+              {happyPath.steps
+                .filter((step) => step.status !== 'complete')
+                .map((step) => step.label)
+                .join(' · ') || '필수 준비가 모두 완료되었습니다.'}
+            </p>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            {!happyPath.canUseEvidenceWorkflow && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 text-[11px]"
+                onClick={() => void provisionProjectDriveRoot()}
+                disabled={projectDriveProvisioning || !happyPath.canOpenWeeklyExpenses}
+              >
+                {projectDriveProvisioning ? (
+                  <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <FolderPlus className="mr-1 h-3.5 w-3.5" />
+                )}
+                기본 폴더 준비
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-[11px]"
+              onClick={() => window.location.assign('/portal/project-settings')}
+            >
+              설정 열기
+            </Button>
+          </div>
+        </div>
+      </div>
       <div className="rounded-xl border border-amber-200/70 bg-amber-50/70 px-4 py-3 text-[12px] text-amber-900">
         <p className="font-semibold">매입 부가세 입력 안내</p>
         <p className="mt-1 text-amber-800/90">
@@ -585,43 +654,54 @@ export function PortalWeeklyExpensePage() {
         pmName={portalUser?.name || 'PM'}
         pmUid={portalUser?.id || ''}
       />
-      <SettlementLedgerPage
-        projectId={projectId}
-        projectName={projectName}
-        transactions={transactions}
-        defaultLedgerId={defaultLedgerId}
-        onAddTransaction={addTransaction}
-        onUpdateTransaction={updateTransaction}
-        authorOptions={authorOptions}
-        budgetCodeBook={effectiveBudgetCodeBook}
-        hideYearControls
-        hideCountBadge
-        autoSaveSheet
-        evidenceRequiredMap={evidenceRequiredMap}
-        onSaveEvidenceRequiredMap={saveEvidenceRequiredMap}
-        sheetRows={expenseSheetRows}
-        onSaveSheetRows={saveExpenseSheetRows}
-        onSubmitWeek={async ({ yearMonth, weekNo, txIds }) => {
-          try {
-            await submitWeekAsPm({ projectId, yearMonth, weekNo });
-            for (const txId of txIds) changeTransactionState(txId, 'SUBMITTED');
-            toast.success(`${yearMonth} ${weekNo}주 제출 처리 완료`);
-          } catch (err) {
-            toast.error('주간 제출 처리에 실패했습니다');
-            throw err;
-          }
-        }}
-        onChangeTransactionState={(txId, newState, reason) => changeTransactionState(txId, newState, reason)}
-        currentUserName={portalUser?.name || 'PM'}
-        currentUserId={portalUser?.id || 'pm'}
-        userRole={ledgerUserRole}
-        comments={comments}
-        onAddComment={addComment}
-        onProvisionEvidenceDrive={provisionEvidenceDrive}
-        onSyncEvidenceDrive={syncEvidenceDrive}
-        onUploadEvidenceDrive={uploadEvidenceDrive}
-        onEnsureTransactionPersisted={ensureTransactionPersisted}
-      />
+      <Suspense
+        fallback={(
+          <div className="rounded-xl border bg-background px-4 py-6">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              사업비 시트를 불러오는 중입니다…
+            </div>
+          </div>
+        )}
+      >
+        <SettlementLedgerPage
+          projectId={projectId}
+          projectName={projectName}
+          transactions={transactions}
+          defaultLedgerId={defaultLedgerId}
+          onAddTransaction={addTransaction}
+          onUpdateTransaction={updateTransaction}
+          authorOptions={authorOptions}
+          budgetCodeBook={effectiveBudgetCodeBook}
+          hideYearControls
+          hideCountBadge
+          autoSaveSheet
+          evidenceRequiredMap={evidenceRequiredMap}
+          onSaveEvidenceRequiredMap={saveEvidenceRequiredMap}
+          sheetRows={expenseSheetRows}
+          onSaveSheetRows={saveExpenseSheetRows}
+          onSubmitWeek={async ({ yearMonth, weekNo, txIds }) => {
+            try {
+              await submitWeekAsPm({ projectId, yearMonth, weekNo });
+              for (const txId of txIds) changeTransactionState(txId, 'SUBMITTED');
+              toast.success(`${yearMonth} ${weekNo}주 제출 처리 완료`);
+            } catch (err) {
+              toast.error('주간 제출 처리에 실패했습니다');
+              throw err;
+            }
+          }}
+          onChangeTransactionState={(txId, newState, reason) => changeTransactionState(txId, newState, reason)}
+          currentUserName={portalUser?.name || 'PM'}
+          currentUserId={portalUser?.id || 'pm'}
+          userRole={ledgerUserRole}
+          comments={comments}
+          onAddComment={addComment}
+          onProvisionEvidenceDrive={provisionEvidenceDrive}
+          onSyncEvidenceDrive={syncEvidenceDrive}
+          onUploadEvidenceDrive={uploadEvidenceDrive}
+          onEnsureTransactionPersisted={ensureTransactionPersisted}
+        />
+      </Suspense>
       {googleSheetImportOpen && (
         <Suspense fallback={null}>
           <GoogleSheetMigrationWizard

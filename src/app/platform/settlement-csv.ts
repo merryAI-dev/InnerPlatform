@@ -275,27 +275,104 @@ export interface SettlementParseResult {
   warnings: { row: number; message: string }[];
 }
 
+function scoreSettlementHeaderRow(row: string[] | undefined): number {
+  if (!row || row.length === 0) return -1;
+  let score = 0;
+  const targetKeys = SETTLEMENT_COLUMNS.map((c) => normalizeKey(c.csvHeader));
+  for (const cell of row) {
+    const src = normalizeKey(cell || '');
+    if (!src) continue;
+    if (targetKeys.includes(src)) score += 3;
+    else if (targetKeys.some((t) => src.includes(t) || t.includes(src))) score += 1;
+  }
+  return score;
+}
+
+function scoreSettlementGroupRow(row: string[] | undefined): number {
+  if (!row || row.length === 0) return -1;
+  let score = 0;
+  const groupKeys = SETTLEMENT_COLUMN_GROUPS.map((group) => normalizeKey(group.name));
+  for (const cell of row) {
+    const src = normalizeKey(cell || '');
+    if (!src) continue;
+    if (groupKeys.includes(src)) score += 3;
+    else if (groupKeys.some((groupKey) => src.includes(groupKey) || groupKey.includes(src))) score += 1;
+  }
+  return score;
+}
+
 function findHeaderRowIdx(matrix: string[][]): number {
   if (matrix.length === 0) return 0;
   let bestIdx = 0;
   let bestScore = -1;
-  const targetKeys = SETTLEMENT_COLUMNS.map((c) => normalizeKey(c.csvHeader));
   const scanMax = Math.min(5, matrix.length);
   for (let i = 0; i < scanMax; i++) {
     const row = matrix[i];
-    let score = 0;
-    for (const cell of row) {
-      const src = normalizeKey(cell || '');
-      if (!src) continue;
-      if (targetKeys.includes(src)) score += 3;
-      else if (targetKeys.some((t) => src.includes(t) || t.includes(src))) score += 1;
-    }
+    const score = scoreSettlementHeaderRow(row);
     if (score > bestScore) {
       bestScore = score;
       bestIdx = i;
     }
   }
   return bestIdx;
+}
+
+function resolveSettlementHeaders(matrix: string[][]): {
+  headerRowIdx: number;
+  dataStartRowIdx: number;
+  headers: string[];
+  dataRows: string[][];
+} {
+  if (matrix.length === 0) {
+    return {
+      headerRowIdx: 0,
+      dataStartRowIdx: 0,
+      headers: [],
+      dataRows: [],
+    };
+  }
+
+  const headerRowIdx = findHeaderRowIdx(matrix);
+  const primaryHeaders = (matrix[headerRowIdx] || []).map((h) => normalizeSpace(h));
+  const composeHeaders = (groupRow: string[], detailRow: string[]) => Array.from(
+    { length: Math.max(groupRow.length, detailRow.length) },
+    (_, index) => normalizeSpace(detailRow[index] || groupRow[index] || ''),
+  );
+  const shouldUseTwoRowHeader = (groupRow: string[], detailRow: string[]) => (
+    scoreSettlementGroupRow(groupRow) >= 6
+    && scoreSettlementHeaderRow(detailRow) >= 4
+  );
+
+  if (headerRowIdx > 0) {
+    const previousHeaders = (matrix[headerRowIdx - 1] || []).map((h) => normalizeSpace(h));
+    if (shouldUseTwoRowHeader(previousHeaders, primaryHeaders)) {
+      return {
+        headerRowIdx: headerRowIdx - 1,
+        dataStartRowIdx: headerRowIdx + 1,
+        headers: composeHeaders(previousHeaders, primaryHeaders),
+        dataRows: matrix.slice(headerRowIdx + 1),
+      };
+    }
+  }
+
+  if (headerRowIdx + 1 < matrix.length) {
+    const nextHeaders = (matrix[headerRowIdx + 1] || []).map((h) => normalizeSpace(h));
+    if (shouldUseTwoRowHeader(primaryHeaders, nextHeaders)) {
+      return {
+        headerRowIdx,
+        dataStartRowIdx: headerRowIdx + 2,
+        headers: composeHeaders(primaryHeaders, nextHeaders),
+        dataRows: matrix.slice(headerRowIdx + 2),
+      };
+    }
+  }
+
+  return {
+    headerRowIdx,
+    dataStartRowIdx: headerRowIdx + 1,
+    headers: primaryHeaders,
+    dataRows: matrix.slice(headerRowIdx + 1),
+  };
 }
 
 export function parseSettlementCsv(
@@ -307,10 +384,11 @@ export function parseSettlementCsv(
     return { valid: [], errors: [{ row: 0, message: '헤더 행이 없습니다' }], warnings: [] };
   }
 
-  const headerRowIdx = findHeaderRowIdx(matrix);
-
-  const headers = matrix[headerRowIdx].map((h) => normalizeSpace(h));
-  const dataRows = matrix.slice(headerRowIdx + 1);
+  const {
+    dataStartRowIdx,
+    headers,
+    dataRows,
+  } = resolveSettlementHeaders(matrix);
 
   const valid: Transaction[] = [];
   const errors: { row: number; message: string }[] = [];
@@ -319,7 +397,7 @@ export function parseSettlementCsv(
 
   for (let i = 0; i < dataRows.length; i++) {
     const cells = dataRows[i];
-    const rowNum = headerRowIdx + i + 2; // 1-based display row
+    const rowNum = dataStartRowIdx + i + 1; // 1-based display row
 
     // Build key-value map from headers
     const kv: Record<string, string> = {};
@@ -437,19 +515,44 @@ export interface ImportRow {
 export function normalizeMatrixToImportRows(matrix: string[][]): ImportRow[] {
   if (matrix.length < 2) return [];
 
-  const headerRowIdx = findHeaderRowIdx(matrix);
+  const {
+    headers,
+    dataRows,
+  } = resolveSettlementHeaders(matrix);
 
-  const headers = matrix[headerRowIdx].map((h) => normalizeSpace(h));
-  const dataRows = matrix.slice(headerRowIdx + 1);
+  const getHeaderMatchScore = (sourceHeader: string, targetHeader: string): number => {
+    const rawSource = normalizeSpace(sourceHeader);
+    const rawTarget = normalizeSpace(targetHeader);
+    if (rawTarget === '준비 필요자료') {
+      if (/(도담|써니)/.test(rawSource) && rawSource.includes('준비 필요자료')) return 160;
+      if (rawSource === rawTarget) return 140;
+    }
+    if (rawTarget === '준비필요자료' && rawSource === rawTarget) {
+      return 140;
+    }
+
+    const source = normalizeKey(sourceHeader);
+    const target = normalizeKey(targetHeader);
+    if (!source || !target) return -1;
+    if (source === target) return 100;
+    if (source.includes(target)) {
+      return 40 - Math.abs(source.length - target.length);
+    }
+    return -1;
+  };
 
   // Build mapping: SETTLEMENT_COLUMNS index → source CSV column index
   const colMapping: (number | -1)[] = SETTLEMENT_COLUMNS.map((col) => {
-    const target = normalizeKey(col.csvHeader);
+    let bestIndex = -1;
+    let bestScore = -1;
     for (let j = 0; j < headers.length; j++) {
-      const src = normalizeKey(headers[j]);
-      if (src === target || src.includes(target) || target.includes(src)) return j;
+      const score = getHeaderMatchScore(headers[j], col.csvHeader);
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = j;
+      }
     }
-    return -1;
+    return bestIndex;
   });
 
   const rows: ImportRow[] = [];

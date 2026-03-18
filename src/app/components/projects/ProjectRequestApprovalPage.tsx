@@ -35,6 +35,7 @@ import {
 } from '../../data/types';
 import { getOrgCollectionPath, getOrgDocumentPath } from '../../lib/firebase';
 import { toast } from 'sonner';
+import { formatProjectTeamMembersSummary } from '../../platform/project-team-members';
 
 const STATUS_BADGES: Record<ProjectRequest['status'], string> = {
   PENDING: 'bg-amber-500/15 text-amber-700 dark:text-amber-300',
@@ -214,6 +215,14 @@ export function ProjectRequestApprovalPage() {
 
                 <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2 text-[10px] text-muted-foreground">
                   <div className="flex items-center gap-2">
+                    <span className="min-w-[80px]">공식계약명</span>
+                    <span className="text-foreground/80">{req.payload.officialContractName || '-'}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="min-w-[80px]">등록명</span>
+                    <span className="text-foreground/80">{req.payload.name || '-'}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
                     <span className="min-w-[80px]">담당조직</span>
                     <span className="text-foreground/80">{req.payload.department || '-'}</span>
                   </div>
@@ -222,16 +231,30 @@ export function ProjectRequestApprovalPage() {
                     <span className="text-foreground/80">{req.payload.managerName || '-'}</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="min-w-[80px]">팀명</span>
-                    <span className="text-foreground/80">{req.payload.teamName || '-'}</span>
+                    <span className="min-w-[80px]">팀원</span>
+                    <span className="text-foreground/80 whitespace-pre-line">
+                      {formatProjectTeamMembersSummary(req.payload.teamMembersDetailed, req.payload.teamMembers, '\n')}
+                    </span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="min-w-[80px]">팀원</span>
-                    <span className="text-foreground/80">{req.payload.teamMembers || '-'}</span>
+                    <span className="min-w-[80px]">계약대상</span>
+                    <span className="text-foreground/80">{req.payload.clientOrg || '-'}</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="min-w-[80px]">참여조건</span>
                     <span className="text-foreground/80">{req.payload.participantCondition || '-'}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="min-w-[80px]">매출부가세</span>
+                    <span className="text-foreground/80">{Number(req.payload.salesVatAmount || 0).toLocaleString('ko-KR')}원</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="min-w-[80px]">총수익</span>
+                    <span className="text-foreground/80">{Number(req.payload.totalRevenueAmount || 0).toLocaleString('ko-KR')}원</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="min-w-[80px]">지원금</span>
+                    <span className="text-foreground/80">{Number(req.payload.supportAmount || 0).toLocaleString('ko-KR')}원</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="min-w-[80px]">정산유형</span>
@@ -252,8 +275,31 @@ export function ProjectRequestApprovalPage() {
                     </span>
                   </div>
                   <div className="flex items-start gap-2 md:col-span-2">
-                    <span className="min-w-[80px]">설명</span>
+                    <span className="min-w-[80px]">목적</span>
+                    <span className="text-foreground/80">{req.payload.projectPurpose || '-'}</span>
+                  </div>
+                  <div className="flex items-start gap-2 md:col-span-2">
+                    <span className="min-w-[80px]">주요내용</span>
                     <span className="text-foreground/80">{req.payload.description || '-'}</span>
+                  </div>
+                  <div className="flex items-start gap-2 md:col-span-2">
+                    <span className="min-w-[80px]">수령/정산</span>
+                    <span className="text-foreground/80">{req.payload.settlementGuide || '-'}</span>
+                  </div>
+                  <div className="flex items-start gap-2 md:col-span-2">
+                    <span className="min-w-[80px]">첨부</span>
+                    {req.payload.contractDocument?.downloadURL ? (
+                      <a
+                        href={req.payload.contractDocument.downloadURL}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-foreground/80 underline underline-offset-2"
+                      >
+                        {req.payload.contractDocument.name}
+                      </a>
+                    ) : (
+                      <span className="text-foreground/80">-</span>
+                    )}
                   </div>
                   <div className="flex items-start gap-2 md:col-span-2">
                     <span className="min-w-[80px]">비고</span>

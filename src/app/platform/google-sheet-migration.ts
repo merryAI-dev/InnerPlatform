@@ -47,6 +47,8 @@ export interface BudgetPlanMergeSummary {
 export interface BudgetPlanMergePlan {
   mergedRows: BudgetPlanRow[];
   codeBook: BudgetCodeEntry[];
+  importedRows: BudgetPlanRow[];
+  importedCodeBook: BudgetCodeEntry[];
   summary: BudgetPlanMergeSummary;
 }
 
@@ -316,6 +318,8 @@ export function planBudgetPlanMerge(
   return {
     mergedRows,
     codeBook: buildBudgetCodeBook(mergedRows),
+    importedRows: importedRows.map((row) => ({ ...row })),
+    importedCodeBook: buildBudgetCodeBook(importedRows),
     summary: {
       importedCount: importedRows.length,
       createCount,
