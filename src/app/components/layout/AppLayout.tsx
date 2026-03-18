@@ -6,7 +6,8 @@ import {
   Bell, User, Plus, Shield, ClipboardList, ClipboardCheck,
   Search, Zap, HelpCircle, Maximize2, Minimize2,
   Menu, X, Calculator, Wallet, ExternalLink,
-  ListChecks, Users, LogOut, Megaphone,
+  ListChecks, Users, LogOut, Megaphone, MessagesSquare,
+  CircleDollarSign, GraduationCap, ArrowLeftRight,
 } from 'lucide-react';
 import { useAppStore, AppProvider } from '../../data/store';
 import { useAuth } from '../../data/auth-store';
@@ -25,6 +26,10 @@ import { KeyboardShortcuts } from './KeyboardShortcuts';
 import { ScrollToTop } from './ScrollToTop';
 import { QuickActionFab } from './QuickActionFab';
 import { PageTransition } from './PageTransition';
+import { ErrorBoundary } from './ErrorBoundary';
+import { ClaudeSdkHelpWidget } from '../guide-chat/ClaudeSdkHelpWidget';
+import { canChooseWorkspace, isPortalRole, resolveHomePath } from '../../platform/navigation';
+import { canAccessAdminPath, canShowAdminNavItem } from '../../platform/admin-nav';
 
 const NAV_GROUPS = [
   {
@@ -32,6 +37,7 @@ const NAV_GROUPS = [
     items: [
       { to: '/', icon: LayoutDashboard, label: '대시보드' },
       { to: '/projects', icon: FolderKanban, label: '프로젝트' },
+      { to: '/board', icon: MessagesSquare, label: '전사 게시판' },
       { to: '/projects/new', icon: Plus, label: '사업 등록', accent: true },
     ],
   },
@@ -40,6 +46,8 @@ const NAV_GROUPS = [
     items: [
       { to: '/cashflow', icon: BarChart3, label: '캐시플로' },
       { to: '/evidence', icon: FileCheck, label: '증빙/정산' },
+      { to: '/bank-reconciliation', icon: ArrowLeftRight, label: '은행 대조' },
+      { to: '/payroll', icon: CircleDollarSign, label: '인건비/월간정산', accent: true },
       { to: '/budget-summary', icon: Calculator, label: '예산총괄' },
       { to: '/expense-management', icon: Wallet, label: '사업비 관리' },
     ],
@@ -51,6 +59,7 @@ const NAV_GROUPS = [
       { to: '/koica-personnel', icon: ClipboardList, label: 'KOICA 인력배치' },
       { to: '/personnel-changes', icon: ClipboardCheck, label: '인력변경 관리' },
       { to: '/hr-announcements', icon: Megaphone, label: '인사 공지', accent: true },
+      { to: '/training', icon: GraduationCap, label: '사내 교육 관리' },
     ],
   },
   {
@@ -67,27 +76,45 @@ const NAV_GROUPS = [
 
 function AppLayoutContent() {
   const { org, currentUser, transactions, participationEntries, dataSource } = useAppStore();
-  const { isAuthenticated, user: authUser, logout } = useAuth();
+  const { isAuthenticated, user: authUser, logout, setWorkspacePreference } = useAuth();
   const { getAllPendingCount: getHrPendingCount } = useHrAnnouncements();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
+  const currentPath = `${location.pathname}${location.search}${location.hash}`;
 
   // Auth guard — 미인증 시 로그인 페이지로
   useEffect(() => {
     if (!isAuthenticated) {
-      navigate('/login', { replace: true });
+      navigate('/login', { replace: true, state: { from: currentPath } });
     }
-  }, [isAuthenticated, navigate]);
+  }, [currentPath, isAuthenticated, navigate]);
 
   useEffect(() => {
     const role = (authUser || currentUser)?.role;
     if (!isAuthenticated || !role) return;
-    if (role === 'pm' || role === 'viewer') {
+    if (isPortalRole(role)) {
+      if (location.pathname.startsWith('/board')) {
+        navigate(`/portal${location.pathname}`, { replace: true });
+        return;
+      }
+
       navigate('/portal', { replace: true });
+      return;
     }
-  }, [isAuthenticated, authUser, currentUser, navigate]);
+
+    if (!canAccessAdminPath(role, location.pathname)) {
+      navigate(resolveHomePath(role, authUser?.defaultWorkspace ?? authUser?.lastWorkspace), { replace: true });
+    }
+  }, [authUser, currentUser, isAuthenticated, location.pathname, navigate]);
+
+  useEffect(() => {
+    const role = authUser?.role;
+    if (!isAuthenticated || !role || !canChooseWorkspace(role)) return;
+    if (authUser?.lastWorkspace === 'admin') return;
+    void setWorkspacePreference('admin', { persistDefault: false });
+  }, [authUser?.lastWorkspace, authUser?.role, isAuthenticated, setWorkspacePreference]);
 
   // Close mobile sidebar on route change
   useEffect(() => {
@@ -98,6 +125,14 @@ function AppLayoutContent() {
 
   // 인증된 사용자 정보 (authUser 우선, fallback currentUser)
   const displayUser = authUser || currentUser;
+  const navGroups = React.useMemo(() => {
+    return NAV_GROUPS
+      .map((group) => ({
+        ...group,
+        items: group.items.filter((item) => canShowAdminNavItem(displayUser?.role, item.to)),
+      }))
+      .filter((group) => group.items.length > 0);
+  }, [displayUser?.role]);
 
   const pendingCount = transactions.filter(t => t.state === 'SUBMITTED').length;
   const missingEvidenceCount = transactions.filter(t => t.evidenceStatus !== 'COMPLETE' && t.state !== 'REJECTED').length;
@@ -145,11 +180,11 @@ function AppLayoutContent() {
     <TooltipProvider delayDuration={300}>
       <CommandPalette />
       <KeyboardShortcuts />
-      <div className="flex h-screen w-full overflow-hidden">
+      <div className="flex h-screen w-full overflow-hidden relative">
         {/* ━━━ Mobile Overlay ━━━ */}
         {mobileOpen && (
           <div
-            className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+            className="fixed inset-0 bg-black/30 backdrop-blur-sm z-40 lg:hidden"
             onClick={() => setMobileOpen(false)}
           />
         )}
@@ -160,8 +195,8 @@ function AppLayoutContent() {
             ${collapsed ? 'w-[60px]' : 'w-[240px]'}
             fixed lg:relative inset-y-0 left-0 z-50
             ${mobileOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0
+            bg-sidebar/90 backdrop-blur-xl border-r border-white/10
           `}
-          style={{ background: '#0f172a' }}
         >
           {/* Brand */}
           <div className={`flex items-center gap-2.5 h-[48px] px-3 ${collapsed ? 'justify-center' : ''}`}>
@@ -187,7 +222,7 @@ function AppLayoutContent() {
           {!collapsed && (
             <div className="px-2.5 mb-1">
               <button
-                className="w-full flex items-center gap-2 h-[30px] px-2.5 rounded-md text-[11px] text-slate-500 bg-white/5 hover:bg-white/8 border border-slate-700/50 transition-colors"
+                className="w-full flex items-center gap-2 h-[30px] px-2.5 rounded-md text-[11px] text-slate-400 bg-white/10 hover:bg-white/15 border border-white/20 backdrop-blur-sm transition-colors"
                 onClick={() => {
                   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }));
                 }}
@@ -201,14 +236,14 @@ function AppLayoutContent() {
 
           {/* Navigation */}
           <nav className="flex-1 py-1.5 overflow-y-auto">
-            {NAV_GROUPS.map((group, gi) => (
+            {navGroups.map((group, gi) => (
               <div key={group.label} className={gi > 0 ? 'mt-2.5' : ''}>
                 {!collapsed && (
                   <p className="px-4 pb-1 text-[9px] tracking-[0.08em] text-slate-600" style={{ fontWeight: 600, textTransform: 'uppercase' }}>
                     {group.label}
                   </p>
                 )}
-                {collapsed && gi > 0 && <div className="mx-3 my-1.5 border-t border-slate-800" />}
+                {collapsed && gi > 0 && <div className="mx-3 my-1.5 border-t border-white/10" />}
                 <div className="space-y-px px-2">
                   {group.items.map(item => {
                     const active = isActive(item.to);
@@ -223,8 +258,8 @@ function AppLayoutContent() {
                           group relative flex items-center gap-2 rounded-md text-[12px] transition-all duration-100
                           ${collapsed ? 'justify-center h-9 w-full' : 'px-2.5 py-[6px]'}
                           ${active
-                            ? 'bg-indigo-500/15 text-white'
-                            : 'text-slate-500 hover:text-slate-300 hover:bg-white/[0.04]'
+                            ? 'bg-indigo-500/18 text-white backdrop-blur-sm'
+                            : 'text-slate-400 hover:text-slate-200 hover:bg-white/8'
                           }
                         `}
                       >
@@ -268,7 +303,7 @@ function AppLayoutContent() {
           </nav>
 
           {/* Footer */}
-          <div className="border-t border-slate-800 p-2 space-y-1.5">
+          <div className="border-t border-white/10 p-2 space-y-1.5">
             {!collapsed && (
               <div className="px-1 mb-1">
                 <FirebaseStatusBadge />
@@ -276,7 +311,7 @@ function AppLayoutContent() {
             )}
             <DarkModeToggle collapsed={collapsed} />
             {!collapsed && (
-              <div className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-white/[0.03]">
+              <div className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-white/8 border border-white/10">
                 <div
                   className="w-6 h-6 rounded-md flex items-center justify-center shrink-0 text-[10px] text-white"
                   style={{ fontWeight: 700, background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' }}
@@ -291,7 +326,7 @@ function AppLayoutContent() {
                   <TooltipTrigger asChild>
                     <button
                       onClick={() => { logout(); navigate('/login'); }}
-                      className="p-1 rounded hover:bg-white/[0.06] text-slate-600 hover:text-slate-400 transition-colors"
+                      className="p-1 rounded hover:bg-white/15 text-slate-500 hover:text-slate-300 transition-colors"
                     >
                       <LogOut className="w-3.5 h-3.5" />
                     </button>
@@ -302,7 +337,7 @@ function AppLayoutContent() {
             )}
             <button
               onClick={() => setCollapsed(!collapsed)}
-              className="w-full flex items-center justify-center h-7 rounded-md text-slate-600 hover:text-slate-400 hover:bg-white/[0.04] transition-colors"
+              className="w-full flex items-center justify-center h-7 rounded-md text-slate-500 hover:text-slate-300 hover:bg-white/10 transition-colors"
             >
               {collapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronLeft className="w-3.5 h-3.5" />}
             </button>
@@ -312,7 +347,7 @@ function AppLayoutContent() {
         {/* ━━━ Main ━━━ */}
         <div className="flex-1 flex flex-col min-w-0 bg-background">
           {/* Top Header */}
-          <header className="flex items-center justify-between h-[48px] border-b border-border/50 px-5 bg-card shrink-0">
+          <header className="glass sticky top-0 z-30 flex items-center justify-between h-[48px] border-b border-glass-border px-5 shrink-0">
             <div className="flex items-center gap-3">
               {/* Mobile hamburger */}
               <button
@@ -383,7 +418,7 @@ function AppLayoutContent() {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <div
-                    className="w-7 h-7 rounded-md flex items-center justify-center text-white text-[10px] cursor-pointer"
+                    className="w-7 h-7 rounded-md flex items-center justify-center text-white text-[10px] cursor-pointer ring-1 ring-white/20"
                     style={{ fontWeight: 700, background: 'linear-gradient(135deg, #4f46e5, #7c3aed)' }}
                   >
                     {displayUser.name.charAt(0)}
@@ -398,7 +433,9 @@ function AppLayoutContent() {
           <main className="flex-1 overflow-y-auto">
             <div className="p-5 max-w-[1600px] mx-auto">
               <PageTransition>
-                <Outlet />
+                <ErrorBoundary resetKey={location.pathname}>
+                  <Outlet />
+                </ErrorBoundary>
               </PageTransition>
             </div>
           </main>
@@ -409,6 +446,7 @@ function AppLayoutContent() {
       </div>
       <ScrollToTop />
       <QuickActionFab />
+      <ClaudeSdkHelpWidget />
     </TooltipProvider>
   );
 }

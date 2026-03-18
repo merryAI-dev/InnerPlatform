@@ -1,6 +1,13 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { onIdTokenChanged, signInWithPopup, signOut, type User as FirebaseUser } from 'firebase/auth';
+import {
+  GoogleAuthProvider,
+  onIdTokenChanged,
+  reauthenticateWithPopup,
+  signInWithPopup,
+  signOut,
+  type User as FirebaseUser,
+} from 'firebase/auth';
 import type { UserRole } from './types';
 import { ORG_MEMBERS, PROJECTS } from './mock-data';
 import { featureFlags } from '../config/feature-flags';
@@ -13,27 +20,50 @@ import {
   initFirebase,
 } from '../lib/firebase';
 import {
-  isPrivilegedRole,
   normalizeEmail,
   resolveProjectIdForManager,
   resolveRoleFromDirectory,
   type ProjectOwnerEntry,
   type RoleDirectoryEntry,
 } from './auth-helpers';
+import { isBootstrapAdminEmail } from './auth-bootstrap';
+import { normalizeProjectIds, resolvePrimaryProjectId } from './project-assignment';
+import {
+  buildWorkspacePreferencePatch,
+  readMemberWorkspace,
+  resolveMemberProjectAccessState,
+  type WorkspaceId,
+} from './member-workspace';
 import { extractAuthContextFromClaims } from '../platform/rbac';
+import { isAdminSpaceRole } from '../platform/navigation';
 import { resolveTenantId } from '../platform/tenant';
+import { formatAllowedDomains, getAllowedEmailDomains, isAllowedEmail } from '../platform/email-allowlist';
+import { buildPreviewAuthBlockedMessage, shouldBlockFirebasePopupAuth } from '../platform/preview-auth';
+import {
+  clearDevHarnessSession,
+  createDevHarnessSession,
+  readDevAuthHarnessConfig,
+  readDevHarnessSession,
+  persistDevHarnessSession,
+  type DevHarnessPreset,
+} from '../platform/dev-harness';
 
 export interface AuthUser {
   uid: string;
   name: string;
   email: string;
   role: UserRole;
+  source?: 'firebase' | 'dev_harness';
   idToken?: string;
+  googleAccessToken?: string;
   avatarUrl?: string;
   projectId?: string;
+  projectIds?: string[];
   tenantId?: string;
   department?: string;
   registeredAt?: string;
+  defaultWorkspace?: WorkspaceId;
+  lastWorkspace?: WorkspaceId;
 }
 
 interface AuthState {
@@ -44,10 +74,10 @@ interface AuthState {
 }
 
 interface AuthActions {
-  login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   loginWithGoogle: () => Promise<{ success: boolean; error?: string }>;
-  loginAsDemo: (role: 'admin' | 'pm' | 'finance' | 'auditor') => void;
-  registerPortalUser: (data: { name: string; email: string; password: string; role: string; projectId: string }) => Promise<{ success: boolean; error?: string }>;
+  loginWithDevHarness: (preset?: DevHarnessPreset) => Promise<{ success: boolean; error?: string }>;
+  ensureGoogleWorkspaceAccess: () => Promise<string | null>;
+  setWorkspacePreference: (workspace: WorkspaceId, options?: { persistDefault?: boolean }) => Promise<boolean>;
   logout: () => void;
   isAdmin: () => boolean;
   isPortalUser: () => boolean;
@@ -62,23 +92,23 @@ interface MemberDoc {
   department?: string;
   status?: 'ACTIVE' | 'INACTIVE' | 'PENDING';
   projectId?: string;
+  projectIds?: string[];
   avatarUrl?: string;
   createdAt?: string;
   updatedAt?: string;
   lastLoginAt?: string;
+  projectNames?: Record<string, string>;
+  portalProfile?: Record<string, unknown>;
+  defaultWorkspace?: WorkspaceId;
+  lastWorkspace?: WorkspaceId;
 }
-
-const MOCK_PASSWORDS: Record<string, string> = {};
-ORG_MEMBERS.forEach((m) => {
-  MOCK_PASSWORDS[m.email] = 'mysc1234';
-});
-
-const portalRegisteredUsers: AuthUser[] = [];
-const portalPasswords: Record<string, string> = {};
 
 const AUTH_STORAGE_KEY = 'mysc-auth-user';
 const ACTIVE_TENANT_KEY = 'MYSC_ACTIVE_TENANT';
+const GOOGLE_WORKSPACE_TOKEN_STORAGE_KEY = 'mysc-google-workspace-token-map';
 const DEFAULT_ORG_ID = getDefaultOrgId();
+const ALLOWED_EMAIL_DOMAINS = getAllowedEmailDomains(import.meta.env);
+const DEV_AUTH_HARNESS_CONFIG = readDevAuthHarnessConfig(import.meta.env);
 
 const ROLE_DIRECTORY: RoleDirectoryEntry[] = ORG_MEMBERS.map((member) => ({
   uid: member.uid,
@@ -94,15 +124,66 @@ const PROJECT_OWNERS: ProjectOwnerEntry[] = PROJECTS.map((project) => ({
 function loadSavedUser(): AuthUser | null {
   try {
     const saved = localStorage.getItem(AUTH_STORAGE_KEY);
-    return saved ? (JSON.parse(saved) as AuthUser) : null;
+    if (!saved) return null;
+    const parsed = JSON.parse(saved) as AuthUser;
+    return {
+      ...parsed,
+      ...(parsed.uid ? { googleAccessToken: loadGoogleWorkspaceAccessToken(parsed.uid) } : {}),
+    };
   } catch {
     return null;
   }
 }
 
+function readGoogleWorkspaceTokenMap(): Record<string, string> {
+  try {
+    if (typeof sessionStorage === 'undefined') return {};
+    const saved = sessionStorage.getItem(GOOGLE_WORKSPACE_TOKEN_STORAGE_KEY);
+    if (!saved) return {};
+    const parsed = JSON.parse(saved) as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.entries(parsed || {})
+        .map(([uid, token]) => [uid, typeof token === 'string' ? token.trim() : ''] as const)
+        .filter(([uid, token]) => uid && token),
+    );
+  } catch {
+    return {};
+  }
+}
+
+function writeGoogleWorkspaceTokenMap(next: Record<string, string>) {
+  if (typeof sessionStorage === 'undefined') return;
+  const entries = Object.entries(next).filter(([uid, token]) => uid && token);
+  if (entries.length === 0) {
+    sessionStorage.removeItem(GOOGLE_WORKSPACE_TOKEN_STORAGE_KEY);
+    return;
+  }
+  sessionStorage.setItem(GOOGLE_WORKSPACE_TOKEN_STORAGE_KEY, JSON.stringify(Object.fromEntries(entries)));
+}
+
+function loadGoogleWorkspaceAccessToken(uid: string | undefined): string | undefined {
+  const normalizedUid = String(uid || '').trim();
+  if (!normalizedUid) return undefined;
+  return readGoogleWorkspaceTokenMap()[normalizedUid];
+}
+
+function persistGoogleWorkspaceAccessToken(uid: string | undefined, token: string | undefined) {
+  const normalizedUid = String(uid || '').trim();
+  if (!normalizedUid) return;
+  const next = readGoogleWorkspaceTokenMap();
+  const normalizedToken = String(token || '').trim();
+  if (!normalizedToken) {
+    delete next[normalizedUid];
+  } else {
+    next[normalizedUid] = normalizedToken;
+  }
+  writeGoogleWorkspaceTokenMap(next);
+}
+
 function saveUser(user: AuthUser | null) {
   if (user) {
-    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(user));
+    const { googleAccessToken: _ignoredGoogleAccessToken, ...persistedUser } = user;
+    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(persistedUser));
     if (user.tenantId) {
       localStorage.setItem(ACTIVE_TENANT_KEY, user.tenantId);
       if (typeof window !== 'undefined') {
@@ -117,13 +198,43 @@ function saveUser(user: AuthUser | null) {
   }
 }
 
+function omitUndefinedFields<T extends Record<string, unknown>>(input: T): T {
+  return Object.fromEntries(
+    Object.entries(input).filter(([, value]) => value !== undefined),
+  ) as T;
+}
+
+function getCachedMemberFallback(firebaseUser: FirebaseUser): Partial<MemberDoc> | undefined {
+  const saved = loadSavedUser();
+  if (!saved || saved.uid !== firebaseUser.uid) return undefined;
+  return {
+    uid: saved.uid,
+    name: saved.name,
+    email: saved.email,
+    role: saved.role,
+    tenantId: saved.tenantId,
+    projectId: saved.projectId,
+    projectIds: saved.projectIds,
+    avatarUrl: saved.avatarUrl,
+    createdAt: saved.registeredAt,
+    defaultWorkspace: saved.defaultWorkspace,
+    lastWorkspace: saved.lastWorkspace,
+  };
+}
+
 function toUserRole(role: string | undefined): UserRole | undefined {
-  if (role === 'admin' || role === 'finance' || role === 'pm' || role === 'viewer' || role === 'auditor') {
+  if (
+    role === 'admin' ||
+    role === 'tenant_admin' ||
+    role === 'finance' ||
+    role === 'pm' ||
+    role === 'viewer' ||
+    role === 'auditor' ||
+    role === 'support' ||
+    role === 'security'
+  ) {
     return role;
   }
-  if (role === 'tenant_admin') return 'admin';
-  if (role === 'support') return 'viewer';
-  if (role === 'security') return 'auditor';
   return undefined;
 }
 
@@ -133,20 +244,40 @@ function mapFirebaseUserToAuthUser(
   tenantId: string,
   idToken?: string,
 ): AuthUser {
+  const normalizedEmail = normalizeEmail(firebaseUser.email || member?.email || '');
+  const workspace = readMemberWorkspace(member);
+  const mergedProjectIds = normalizeProjectIds([
+    ...(workspace.portalProfile?.projectIds || []),
+    ...(Array.isArray(member?.projectIds) ? member?.projectIds : []),
+    workspace.portalProfile?.projectId,
+    member?.projectId,
+    resolveProjectIdForManager(firebaseUser.uid, PROJECT_OWNERS),
+  ]);
+  const primaryProjectId = resolvePrimaryProjectId(
+    mergedProjectIds,
+    workspace.portalProfile?.projectId || member?.projectId,
+  );
   const role =
-    toUserRole(member?.role) ||
-    resolveRoleFromDirectory(firebaseUser.email || '', ROLE_DIRECTORY);
+    isBootstrapAdminEmail(normalizedEmail)
+      ? 'admin'
+      : toUserRole(member?.role) ||
+        resolveRoleFromDirectory(firebaseUser.email || '', ROLE_DIRECTORY) ||
+        'pm';
   return {
     uid: firebaseUser.uid,
     name: member?.name || firebaseUser.displayName || '사용자',
-    email: firebaseUser.email || member?.email || '',
+    email: normalizedEmail,
     role,
     idToken,
+    googleAccessToken: loadGoogleWorkspaceAccessToken(firebaseUser.uid),
     avatarUrl: member?.avatarUrl || firebaseUser.photoURL || undefined,
-    projectId: member?.projectId || resolveProjectIdForManager(firebaseUser.uid, PROJECT_OWNERS),
+    projectId: primaryProjectId,
+    projectIds: mergedProjectIds,
     tenantId,
     department: member?.department,
     registeredAt: member?.createdAt,
+    defaultWorkspace: workspace.defaultWorkspace,
+    lastWorkspace: workspace.lastWorkspace,
   };
 }
 
@@ -164,23 +295,44 @@ async function upsertMemberFromFirebase(
   const snap = await getDoc(memberRef);
   const existing = snap.exists() ? (snap.data() as MemberDoc) : undefined;
   const now = new Date().toISOString();
+  const normalizedEmail = normalizeEmail(firebaseUser.email || existing?.email || '');
+  const bootstrapAdmin = isBootstrapAdminEmail(normalizedEmail);
+  const access = resolveMemberProjectAccessState(existing);
+  const mergedProjectIds = normalizeProjectIds([
+    ...access.normalizedProjectIds,
+    ...(Array.isArray(existing?.projectIds) ? existing?.projectIds : []),
+    existing?.projectId,
+    resolveProjectIdForManager(firebaseUser.uid, PROJECT_OWNERS),
+  ]);
+  const primaryProjectId = resolvePrimaryProjectId(
+    mergedProjectIds,
+    access.normalizedProjectId || existing?.projectId,
+  ) || '';
 
-  const merged: MemberDoc = {
+  const merged = omitUndefinedFields<MemberDoc>({
     uid: firebaseUser.uid,
     name: firebaseUser.displayName || existing?.name || '사용자',
-    email: normalizeEmail(firebaseUser.email || existing?.email || ''),
+    email: normalizedEmail,
     role:
-      toUserRole(roleFromClaims) ||
-      existing?.role ||
-      resolveRoleFromDirectory(firebaseUser.email || '', ROLE_DIRECTORY),
+      bootstrapAdmin
+        ? 'admin'
+        : toUserRole(roleFromClaims) ||
+          existing?.role ||
+          resolveRoleFromDirectory(firebaseUser.email || '', ROLE_DIRECTORY) ||
+          'pm',
     tenantId,
     status: existing?.status || 'ACTIVE',
-    projectId: existing?.projectId || resolveProjectIdForManager(firebaseUser.uid, PROJECT_OWNERS),
+    projectId: primaryProjectId,
+    projectIds: mergedProjectIds,
     avatarUrl: firebaseUser.photoURL || existing?.avatarUrl,
     createdAt: existing?.createdAt || now,
     updatedAt: now,
     lastLoginAt: now,
-  };
+    projectNames: access.projectNames || existing?.projectNames,
+    portalProfile: existing?.portalProfile,
+    defaultWorkspace: existing?.defaultWorkspace,
+    lastWorkspace: existing?.lastWorkspace,
+  });
   if (department) merged.department = department;
 
   await setDoc(memberRef, merged, { merge: true });
@@ -200,6 +352,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(featureFlags.firebaseAuthEnabled);
 
   useEffect(() => {
+    const harnessSession = readDevHarnessSession();
+    if (DEV_AUTH_HARNESS_CONFIG.enabled && harnessSession) {
+      const mapped: AuthUser = {
+        uid: harnessSession.uid,
+        name: harnessSession.name,
+        email: harnessSession.email,
+        role: harnessSession.role,
+        source: 'dev_harness',
+        tenantId: harnessSession.tenantId,
+        projectId: harnessSession.projectId,
+        projectIds: harnessSession.projectIds,
+        defaultWorkspace: harnessSession.defaultWorkspace,
+        lastWorkspace: harnessSession.lastWorkspace,
+      };
+      setUser(mapped);
+      saveUser(mapped);
+      setIsLoading(false);
+      return;
+    }
+
     if (!featureFlags.firebaseAuthEnabled) {
       setIsLoading(false);
       return;
@@ -220,6 +392,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
+      if (!isAllowedEmail(firebaseUser.email, ALLOWED_EMAIL_DOMAINS)) {
+        console.warn('[Auth] blocked sign-in for disallowed email:', firebaseUser.email);
+        await signOut(auth).catch(() => {});
+        setUser(null);
+        saveUser(null);
+        setIsLoading(false);
+        return;
+      }
+
+      const cachedMember = getCachedMemberFallback(firebaseUser);
+      const cachedTenantId = resolveTenantId({
+        savedTenantId: cachedMember?.tenantId,
+        envTenantId: DEFAULT_ORG_ID,
+        strict: false,
+      });
+      const optimisticUser = mapFirebaseUserToAuthUser(firebaseUser, cachedMember, cachedTenantId);
+      optimisticUser.source = 'firebase';
+      setUser(optimisticUser);
+      saveUser(optimisticUser);
+      setIsLoading(false);
+
       try {
         const token = await firebaseUser.getIdTokenResult().catch(() => null);
         const claimsContext = extractAuthContextFromClaims(token?.claims);
@@ -235,79 +428,97 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           claimsContext.department,
         );
         const mapped = mapFirebaseUserToAuthUser(firebaseUser, member, tenantId, token?.token);
+        mapped.source = 'firebase';
         setUser(mapped);
         saveUser(mapped);
       } catch (err) {
         console.error('[Auth] Failed to sync member profile:', err);
         const fallbackTenantId = resolveTenantId({
+          savedTenantId: cachedMember?.tenantId,
           envTenantId: DEFAULT_ORG_ID,
           strict: false,
         });
         const token = await firebaseUser.getIdTokenResult().catch(() => null);
-        const fallback = mapFirebaseUserToAuthUser(firebaseUser, undefined, fallbackTenantId, token?.token);
+        const fallback = mapFirebaseUserToAuthUser(firebaseUser, cachedMember, fallbackTenantId, token?.token);
+        fallback.source = 'firebase';
         setUser(fallback);
         saveUser(fallback);
-      } finally {
-        setIsLoading(false);
       }
     });
 
     return () => unsubscribe();
   }, []);
 
-  const login = useCallback(async (
-    email: string,
-    password: string,
-  ): Promise<{ success: boolean; error?: string }> => {
-    if (featureFlags.firebaseAuthEnabled) {
-      return { success: false, error: 'Google 로그인을 사용해 주세요.' };
+  const setWorkspacePreference = useCallback(async (
+    workspace: WorkspaceId,
+    options?: { persistDefault?: boolean },
+  ): Promise<boolean> => {
+    const persistDefault = options?.persistDefault ?? true;
+    const currentUser = user;
+    if (!currentUser) return false;
+
+    const updatedAt = new Date().toISOString();
+    const nextUser: AuthUser = {
+      ...currentUser,
+      ...(persistDefault ? { defaultWorkspace: workspace } : {}),
+      lastWorkspace: workspace,
+    };
+    setUser(nextUser);
+    saveUser(nextUser);
+
+    if (currentUser.source === 'dev_harness') {
+      persistDevHarnessSession({
+        source: 'dev_harness',
+        uid: nextUser.uid,
+        name: nextUser.name,
+        email: nextUser.email,
+        role: nextUser.role,
+        tenantId: nextUser.tenantId || DEFAULT_ORG_ID,
+        projectId: nextUser.projectId,
+        projectIds: nextUser.projectIds,
+        defaultWorkspace: nextUser.defaultWorkspace,
+        lastWorkspace: nextUser.lastWorkspace,
+      });
+      return true;
     }
 
-    setIsLoading(true);
-    await new Promise((r) => setTimeout(r, 600));
+    const db = getDb();
+    if (!db) return true;
 
-    const emailLower = normalizeEmail(email);
-
-    const orgMember = ORG_MEMBERS.find((m) => normalizeEmail(m.email) === emailLower);
-    if (orgMember) {
-      if (MOCK_PASSWORDS[orgMember.email] === password) {
-        const authUser: AuthUser = {
-          uid: orgMember.uid,
-          name: orgMember.name,
-          email: orgMember.email,
-          role: orgMember.role,
-          avatarUrl: orgMember.avatarUrl,
-          projectId: resolveProjectIdForManager(orgMember.uid, PROJECT_OWNERS),
-          tenantId: DEFAULT_ORG_ID,
-        };
-        setUser(authUser);
-        saveUser(authUser);
-        setIsLoading(false);
-        return { success: true };
-      }
-      setIsLoading(false);
-      return { success: false, error: '비밀번호가 올바르지 않습니다' };
+    try {
+      await setDoc(
+        doc(db, getOrgDocumentPath(currentUser.tenantId || DEFAULT_ORG_ID, 'members', currentUser.uid)),
+        {
+          uid: currentUser.uid,
+          email: currentUser.email,
+          name: currentUser.name,
+          role: currentUser.role,
+          tenantId: currentUser.tenantId || DEFAULT_ORG_ID,
+          ...buildWorkspacePreferencePatch(workspace, updatedAt, persistDefault),
+          lastLoginAt: updatedAt,
+        },
+        { merge: true },
+      );
+      return true;
+    } catch (err) {
+      console.error('[Auth] setWorkspacePreference failed:', err);
+      setUser(currentUser);
+      saveUser(currentUser);
+      return false;
     }
-
-    const portalUser = portalRegisteredUsers.find((u) => normalizeEmail(u.email) === emailLower);
-    if (portalUser) {
-      if (portalPasswords[portalUser.email] === password) {
-        setUser(portalUser);
-        saveUser(portalUser);
-        setIsLoading(false);
-        return { success: true };
-      }
-      setIsLoading(false);
-      return { success: false, error: '비밀번호가 올바르지 않습니다' };
-    }
-
-    setIsLoading(false);
-    return { success: false, error: '등록되지 않은 이메일입니다' };
-  }, []);
+  }, [user]);
 
   const loginWithGoogle = useCallback(async (): Promise<{ success: boolean; error?: string }> => {
     if (!featureFlags.firebaseAuthEnabled) {
       return { success: false, error: 'Firebase Auth 기능이 비활성화되어 있습니다.' };
+    }
+
+    const host = typeof window !== 'undefined' ? window.location.hostname : '';
+    if (shouldBlockFirebasePopupAuth(host, import.meta.env)) {
+      return {
+        success: false,
+        error: buildPreviewAuthBlockedMessage(host, import.meta.env),
+      };
     }
 
     setIsLoading(true);
@@ -320,114 +531,101 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { success: false, error: 'Firebase 인증 구성을 찾을 수 없습니다.' };
       }
 
-      await signInWithPopup(auth, getGoogleAuthProvider());
+      const cred = await signInWithPopup(auth, getGoogleAuthProvider());
+      const providerCredential = GoogleAuthProvider.credentialFromResult(cred);
+      const googleAccessToken = providerCredential?.accessToken || undefined;
+      if (cred?.user?.uid) {
+        persistGoogleWorkspaceAccessToken(cred.user.uid, googleAccessToken);
+      }
+      const email = cred?.user?.email || '';
+      if (!isAllowedEmail(email, ALLOWED_EMAIL_DOMAINS)) {
+        await signOut(auth).catch(() => {});
+        setIsLoading(false);
+        return {
+          success: false,
+          error: `회사 계정(${formatAllowedDomains(ALLOWED_EMAIL_DOMAINS)})만 로그인할 수 있습니다.`,
+        };
+      }
+
       return { success: true };
     } catch (err: any) {
       setIsLoading(false);
+      const code = String(err?.code || '').trim();
+      if (code === 'auth/unauthorized-domain') {
+        return {
+          success: false,
+          error: `Firebase Auth에서 허용되지 않은 도메인입니다. Firebase Console > Authentication > Settings > Authorized domains에 ${host || '현재 도메인'}을 추가해 주세요.`,
+        };
+      }
+      if (code === 'auth/popup-closed-by-user') {
+        return { success: false, error: '로그인을 취소했습니다.' };
+      }
       return { success: false, error: err?.message || 'Google 로그인에 실패했습니다.' };
     }
   }, []);
 
-  const loginAsDemo = useCallback((role: 'admin' | 'pm' | 'finance' | 'auditor') => {
-    const demoUsers: Record<string, AuthUser> = {
-      admin: {
-        uid: 'u001',
-        name: '관리자',
-        email: 'admin@mysc.co.kr',
-        role: 'admin',
-        projectId: resolveProjectIdForManager('u001', PROJECT_OWNERS),
-        tenantId: DEFAULT_ORG_ID,
-      },
-      pm: { uid: 'u002', name: '데이나', email: 'dana@mysc.co.kr', role: 'pm', projectId: 'p001', tenantId: DEFAULT_ORG_ID },
-      finance: { uid: 'u019', name: '재무팀', email: 'finance@mysc.co.kr', role: 'finance', tenantId: DEFAULT_ORG_ID },
-      auditor: { uid: 'u020', name: '감사팀', email: 'audit@mysc.co.kr', role: 'auditor', tenantId: DEFAULT_ORG_ID },
-    };
-
-    const selected = demoUsers[role];
-    setUser(selected);
-    saveUser(selected);
-  }, []);
-
-  const registerPortalUser = useCallback(async (
-    data: { name: string; email: string; password: string; role: string; projectId: string },
+  const loginWithDevHarness = useCallback(async (
+    preset: DevHarnessPreset = 'pm',
   ): Promise<{ success: boolean; error?: string }> => {
-    setIsLoading(true);
-    await new Promise((r) => setTimeout(r, 300));
-
-    if (featureFlags.firebaseAuthEnabled && user) {
-      const db = getDb();
-      if (!db) {
-        setIsLoading(false);
-        return { success: false, error: 'Firestore 연결이 필요합니다.' };
-      }
-
-      try {
-        const now = new Date().toISOString();
-        const tenantId = resolveTenantId({
-          savedTenantId: user.tenantId,
-          envTenantId: DEFAULT_ORG_ID,
-          strict: featureFlags.tenantIsolationStrict,
-        });
-        const memberRef = doc(db, getOrgDocumentPath(tenantId, 'members', user.uid));
-        await setDoc(memberRef, {
-          uid: user.uid,
-          name: data.name,
-          email: normalizeEmail(data.email),
-          role: 'pm',
-          tenantId,
-          status: 'ACTIVE',
-          projectId: data.projectId,
-          updatedAt: now,
-          createdAt: user.registeredAt || now,
-          lastLoginAt: now,
-        }, { merge: true });
-
-        const updatedUser: AuthUser = {
-          ...user,
-          name: data.name,
-          email: normalizeEmail(data.email),
-          role: 'pm',
-          projectId: data.projectId,
-          tenantId,
-          registeredAt: user.registeredAt || now,
-        };
-
-        setUser(updatedUser);
-        saveUser(updatedUser);
-        setIsLoading(false);
-        return { success: true };
-      } catch (err: any) {
-        setIsLoading(false);
-        return { success: false, error: err?.message || '포털 사용자 등록에 실패했습니다.' };
-      }
+    if (!DEV_AUTH_HARNESS_CONFIG.enabled) {
+      return { success: false, error: '개발용 인증 harness가 비활성화되어 있습니다.' };
     }
-
-    const emailLower = normalizeEmail(data.email);
-    const existsOrg = ORG_MEMBERS.find((m) => normalizeEmail(m.email) === emailLower);
-    const existsPortal = portalRegisteredUsers.find((u) => normalizeEmail(u.email) === emailLower);
-
-    if (existsOrg || existsPortal) {
-      setIsLoading(false);
-      return { success: false, error: '이미 등록된 이메일입니다. 로그인 페이지에서 로그인해 주세요.' };
-    }
-
-    const newUser: AuthUser = {
-      uid: `pu-${Date.now()}`,
-      name: data.name,
-      email: emailLower,
-      role: 'pm',
-      projectId: data.projectId,
-      tenantId: DEFAULT_ORG_ID,
-      registeredAt: new Date().toISOString(),
+    const session = createDevHarnessSession(preset, DEFAULT_ORG_ID);
+    persistDevHarnessSession(session);
+    const mapped: AuthUser = {
+      uid: session.uid,
+      name: session.name,
+      email: session.email,
+      role: session.role,
+      source: 'dev_harness',
+      tenantId: session.tenantId,
+      projectId: session.projectId,
+      projectIds: session.projectIds,
+      defaultWorkspace: session.defaultWorkspace,
+      lastWorkspace: session.lastWorkspace,
     };
-
-    portalRegisteredUsers.push(newUser);
-    portalPasswords[emailLower] = data.password;
-
-    setUser(newUser);
-    saveUser(newUser);
+    setUser(mapped);
+    saveUser(mapped);
     setIsLoading(false);
     return { success: true };
+  }, []);
+
+  const ensureGoogleWorkspaceAccess = useCallback(async (): Promise<string | null> => {
+    const currentUser = user;
+    if (!featureFlags.firebaseAuthEnabled || !currentUser || currentUser.source !== 'firebase') {
+      return null;
+    }
+
+    const cached = loadGoogleWorkspaceAccessToken(currentUser.uid);
+    if (cached) {
+      if (!currentUser.googleAccessToken) {
+        const nextUser = { ...currentUser, googleAccessToken: cached };
+        setUser(nextUser);
+        saveUser(nextUser);
+      }
+      return cached;
+    }
+
+    const auth = getAuthInstance();
+    if (!auth) return null;
+
+    try {
+      const provider = getGoogleAuthProvider();
+      const cred = auth.currentUser
+        ? await reauthenticateWithPopup(auth.currentUser, provider)
+        : await signInWithPopup(auth, provider);
+      const providerCredential = GoogleAuthProvider.credentialFromResult(cred);
+      const googleAccessToken = providerCredential?.accessToken || '';
+      if (!googleAccessToken) return null;
+      persistGoogleWorkspaceAccessToken(cred.user?.uid || currentUser.uid, googleAccessToken);
+      const nextUser = { ...currentUser, googleAccessToken };
+      setUser(nextUser);
+      saveUser(nextUser);
+      return googleAccessToken;
+    } catch (err) {
+      console.error('[Auth] ensureGoogleWorkspaceAccess failed:', err);
+      return null;
+    }
   }, [user]);
 
   const logout = useCallback(() => {
@@ -442,12 +640,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     setUser(null);
     saveUser(null);
+    if (user?.uid) {
+      persistGoogleWorkspaceAccessToken(user.uid, undefined);
+    }
+    clearDevHarnessSession();
     localStorage.removeItem(ACTIVE_TENANT_KEY);
     localStorage.removeItem('mysc-portal-user');
-  }, []);
+  }, [user?.uid]);
 
   const isAdmin = useCallback(() => {
-    return !!user && isPrivilegedRole(user.role);
+    return !!user && isAdminSpaceRole(user.role);
   }, [user]);
 
   const isPortalUser = useCallback(() => {
@@ -459,10 +661,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     user,
     isLoading,
     isFirebaseAuthEnabled: featureFlags.firebaseAuthEnabled,
-    login,
     loginWithGoogle,
-    loginAsDemo,
-    registerPortalUser,
+    loginWithDevHarness,
+    ensureGoogleWorkspaceAccess,
+    setWorkspacePreference,
     logout,
     isAdmin,
     isPortalUser,

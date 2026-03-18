@@ -6,7 +6,8 @@ describe('PlatformApiClient', () => {
     const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       const headers = new Headers(init?.headers);
       expect(headers.get('x-tenant-id')).toBe('mysc');
-      expect(headers.get('x-actor-id')).toBe('u001');
+      expect(headers.get('x-actor-id')).toBeNull();
+      expect(headers.get('x-actor-role')).toBeNull();
       expect(headers.get('authorization')).toBe('Bearer id-token-1');
       expect(headers.get('idempotency-key')).toMatch(/^idem_POST_u001_/);
       expect(headers.get('content-type')).toBe('application/json');
@@ -157,5 +158,30 @@ describe('PlatformApiClient', () => {
     });
 
     expect(response.data).toBe('not-json');
+  });
+
+  it('binds the global fetch implementation when no custom fetch is provided', async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchSpy = vi.fn(async function (this: typeof globalThis, _input: RequestInfo | URL, _init?: RequestInit) {
+      expect(this).toBe(globalThis);
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    // Simulate browsers that require window/global binding for fetch.
+    globalThis.fetch = fetchSpy as typeof fetch;
+
+    try {
+      const client = new PlatformApiClient();
+      const response = await client.get<{ ok: boolean }>('/api/v1/health', {
+        tenantId: 'mysc',
+        actor: { id: 'u001' },
+      });
+      expect(response.data.ok).toBe(true);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });

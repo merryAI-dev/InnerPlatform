@@ -5,20 +5,32 @@
 
 // ── Enums ──
 
-export type UserRole = 'admin' | 'finance' | 'pm' | 'viewer' | 'auditor';
+export type UserRole = 'admin' | 'tenant_admin' | 'finance' | 'pm' | 'viewer' | 'auditor' | 'support' | 'security';
 
 export type ProjectStatus = 'CONTRACT_PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'COMPLETED_PENDING_PAYMENT';
-export type ProjectType = 'DEV_COOPERATION' | 'CONSULTING' | 'SPACE_BIZ' | 'IMPACT_INVEST' | 'OTHER';
+export type ProjectType =
+  | 'C1'  // 컨설팅
+  | 'A1'  // 액셀러레이팅 - 국내일반
+  | 'A2'  // 액셀러레이팅 - 글로벌
+  | 'I1'  // 투자조합운용 - GP성과보수
+  | 'I2'  // 투자조합운용 - GP관리보수
+  | 'I3'  // 투자조합운용 - LP수익
+  | 'D1'  // 개발협력사업 - AVPN 포함
+  | 'S1'  // 공간사업 - 메리히어
+  | 'S2'  // 공간사업 - 공간운영 용역사업
+  | 'E1'  // 교육사업 - 단기 워크숍 등
+  | 'P1'  // 출판사업
+  | 'Z1'; // 기타사업
 export type ProjectPhase = 'PROSPECT' | 'CONFIRMED';  // 입찰예정 / 확정
 
-export type SettlementType = 'TYPE1' | 'TYPE2' | 'TYPE4';
+export type SettlementType = 'TYPE1' | 'TYPE2' | 'TYPE3' | 'TYPE4' | 'TYPE5';
 export type Basis = 'SUPPLY_AMOUNT' | 'SUPPLY_PRICE'; // 공급가액 / 공급대가
 
-export type AccountType = 'DEDICATED' | 'OPERATING' | 'NONE'; // 전용통장 / 운영통장 / 없음
+export type AccountType = 'DEDICATED' | 'OPERATING' | 'NONE'; // 전용계좌 사업(이나라도움) / 전용계좌(이나라도움x) / 일반 사업
 
 export type TransactionState = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED';
 export type Direction = 'IN' | 'OUT';
-export type PaymentMethod = 'BANK_TRANSFER' | 'CARD' | 'CASH' | 'CHECK' | 'OTHER';
+export type PaymentMethod = 'TRANSFER' | 'CORP_CARD_1' | 'CORP_CARD_2' | 'OTHER';
 
 export type EvidenceStatus = 'MISSING' | 'PARTIAL' | 'COMPLETE';
 
@@ -72,31 +84,49 @@ export const PROJECT_PHASE_LABELS: Record<ProjectPhase, string> = {
 };
 
 export const PROJECT_TYPE_LABELS: Record<ProjectType, string> = {
-  DEV_COOPERATION: 'D-1. 개발협력(KOICA)',
-  CONSULTING: 'C-1. 컨설팅',
-  SPACE_BIZ: 'S-1. 공간사업',
-  IMPACT_INVEST: 'I-투자/임팩트',
-  OTHER: 'Z-1. 기타사업',
+  C1: 'C-1 컨설팅',
+  A1: 'A-1 액셀러레이팅 - 국내일반',
+  A2: 'A-2 액셀러레이팅 - 글로벌',
+  I1: 'I-1 투자조합운용 - GP성과보수',
+  I2: 'I-2 투자조합운용 - GP관리보수',
+  I3: 'I-3 투자조합운용 - LP수익',
+  D1: 'D-1 개발협력사업 - AVPN 포함',
+  S1: 'S-1 공간사업 - 메리히어',
+  S2: 'S-2 공간사업 - 공간운영 용역사업',
+  E1: 'E-1 교육사업 - 단기 워크숍 등',
+  P1: 'P-1 출판사업',
+  Z1: 'Z-1 기타사업',
 };
 
 export const PROJECT_TYPE_SHORT_LABELS: Record<ProjectType, string> = {
-  DEV_COOPERATION: '개발협력',
-  CONSULTING: '컨설팅',
-  SPACE_BIZ: '공간사업',
-  IMPACT_INVEST: '투자/임팩트',
-  OTHER: '기타',
+  C1: '컨설팅',
+  A1: 'AC 국내',
+  A2: 'AC 글로벌',
+  I1: '투자 GP성과',
+  I2: '투자 GP관리',
+  I3: '투자 LP수익',
+  D1: '개발협력',
+  S1: '공간사업(메리히어)',
+  S2: '공간사업(용역)',
+  E1: '교육사업',
+  P1: '출판사업',
+  Z1: '기타',
 };
 
 export const SETTLEMENT_TYPE_LABELS: Record<SettlementType, string> = {
   TYPE1: 'Type1. 세금계산서발행+공급가액',
   TYPE2: 'Type2. 세금계산서발행+공급대가',
+  TYPE3: 'Type3. 공급가액+세금계산서 미발행',
   TYPE4: 'Type4. 세금계산서미발행+공급대가',
+  TYPE5: 'Type5. 이나라도움+공급가액',
 };
 
 export const SETTLEMENT_TYPE_SHORT: Record<SettlementType, string> = {
   TYPE1: 'Type1',
   TYPE2: 'Type2',
+  TYPE3: 'Type3',
   TYPE4: 'Type4',
+  TYPE5: 'Type5',
 };
 
 export const BASIS_LABELS: Record<Basis, string> = {
@@ -105,9 +135,9 @@ export const BASIS_LABELS: Record<Basis, string> = {
 };
 
 export const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
-  DEDICATED: '전용통장',
-  OPERATING: '운영통장',
-  NONE: '-',
+  DEDICATED: '전용계좌 사업(이나라도움)',
+  OPERATING: '전용계좌(이나라도움x)',
+  NONE: '일반 사업',
 };
 
 export const DIRECTION_LABELS: Record<Direction, string> = {
@@ -129,10 +159,9 @@ export const EVIDENCE_STATUS_LABELS: Record<EvidenceStatus, string> = {
 };
 
 export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
-  BANK_TRANSFER: '계좌이체',
-  CARD: '카드',
-  CASH: '현금',
-  CHECK: '수표',
+  TRANSFER: '계좌이체',
+  CORP_CARD_1: '사업비카드',
+  CORP_CARD_2: '개인법인카드',
   OTHER: '기타',
 };
 
@@ -257,6 +286,7 @@ export interface Project {
   slug: string;        // URL-safe unique key
   orgId: string;
   name: string;
+  officialContractName?: string;
   status: ProjectStatus;
   type: ProjectType;
   phase: ProjectPhase;
@@ -277,7 +307,14 @@ export interface Project {
   clientOrg: string;             // 발주기관(계약기관)
   groupwareName: string;         // 그룹웨어 프로젝트등록명
   participantCondition: string;  // 참여기업 조건
+  teamMembersDetailed?: ProjectTeamMemberAssignment[];
   contractType: string;          // 계약서 유형 (계약서(날인), 기타 등)
+  projectPurpose?: string;
+  totalRevenueAmount?: number;
+  supportAmount?: number;
+  salesVatAmount?: number;
+  settlementGuide?: string;
+  contractDocument?: FileAttachment | null;
   // 팀/담당자
   department: string;            // 담당조직
   teamName: string;              // 사내기업팀 (팀장)
@@ -296,10 +333,115 @@ export interface Project {
   confirmerName: string;         // 확인자 닉네임 (센터장/그룹장)
   lastCheckedAt: string;         // 마지막 확인 일시
   cashflowDiffNote: string;      // 입출금합계 차이 사유
+  // 증빙 Shared Drive
+  evidenceDriveSharedDriveId?: string;
+  evidenceDriveRootFolderId?: string;
+  evidenceDriveRootFolderName?: string;
+  evidenceDriveRootFolderLink?: string;
+  evidenceDriveProvisionedAt?: string;
   // 메타
   description?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export type ProjectRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+
+export interface FileAttachment {
+  path: string;
+  name: string;
+  downloadURL: string;
+  size: number;
+  contentType: string;
+  uploadedAt: string;
+}
+
+export type AiSuggestionConfidence = 'high' | 'medium' | 'low';
+
+export interface ProjectRequestContractTextSuggestion {
+  value: string;
+  confidence: AiSuggestionConfidence;
+  evidence: string;
+}
+
+export interface ProjectRequestContractNumberSuggestion {
+  value: number | null;
+  confidence: AiSuggestionConfidence;
+  evidence: string;
+}
+
+export interface ProjectRequestContractAnalysis {
+  provider: 'anthropic' | 'heuristic';
+  model: string;
+  summary: string;
+  warnings: string[];
+  nextActions: string[];
+  extractedAt: string;
+  fields: {
+    officialContractName: ProjectRequestContractTextSuggestion;
+    suggestedProjectName: ProjectRequestContractTextSuggestion;
+    clientOrg: ProjectRequestContractTextSuggestion;
+    projectPurpose: ProjectRequestContractTextSuggestion;
+    description: ProjectRequestContractTextSuggestion;
+    contractStart: ProjectRequestContractTextSuggestion;
+    contractEnd: ProjectRequestContractTextSuggestion;
+    contractAmount: ProjectRequestContractNumberSuggestion;
+    salesVatAmount: ProjectRequestContractNumberSuggestion;
+  };
+}
+
+export interface ProjectTeamMemberAssignment {
+  memberName: string;
+  memberNickname: string;
+  role: string;
+  participationRate: number;
+}
+
+export interface ProjectRequestPayload {
+  name: string;
+  officialContractName: string;
+  type: ProjectType;
+  description: string;
+  clientOrg: string;
+  department: string;
+  contractAmount: number;
+  salesVatAmount: number;
+  totalRevenueAmount: number;
+  supportAmount: number;
+  contractStart: string;
+  contractEnd: string;
+  settlementType: SettlementType;
+  basis: Basis;
+  accountType: AccountType;
+  paymentPlanDesc: string;
+  settlementGuide: string;
+  projectPurpose: string;
+  managerName: string;
+  teamName: string;
+  teamMembers: string;
+  teamMembersDetailed?: ProjectTeamMemberAssignment[];
+  participantCondition: string;
+  note: string;
+  contractDocument: FileAttachment | null;
+  contractAnalysis?: ProjectRequestContractAnalysis | null;
+}
+
+export interface ProjectRequest {
+  id: string;
+  tenantId?: string;
+  status: ProjectRequestStatus;
+  payload: ProjectRequestPayload;
+  requestedBy: string;
+  requestedByName: string;
+  requestedByEmail: string;
+  requestedAt: string;
+  reviewedBy?: string;
+  reviewedByName?: string;
+  reviewedAt?: string;
+  rejectedReason?: string;
+  approvedProjectId?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface Ledger {
@@ -356,6 +498,81 @@ export interface Transaction {
   createdAt: string;
   updatedBy: string;
   updatedAt: string;
+  // ── 정산 대장 확장 필드 (Settlement Ledger) ──
+  author?: string;                 // 작성자
+  budgetSubCategory?: string;      // 세목
+  budgetSubSubCategory?: string;   // 세세목
+  // 증빙 추적 (사업팀)
+  evidenceRequiredDesc?: string;   // 필수증빙자료 리스트 (텍스트)
+  evidenceCompletedDesc?: string;  // 구비 완료된 증빙자료 리스트 (자동+수기 보정 적용 결과)
+  evidenceCompletedManualDesc?: string; // 구비 완료 수기 보정 목록
+  evidencePendingDesc?: string;    // 준비필요자료
+  // 정산지원 담당자
+  evidenceDriveLink?: string;      // 증빙자료 드라이브 링크
+  evidenceDriveSharedDriveId?: string;
+  evidenceDriveFolderId?: string;  // 거래별 증빙 폴더 id
+  evidenceDriveFolderName?: string;// 거래별 증빙 폴더명
+  evidenceDriveSyncStatus?: 'NOT_LINKED' | 'LINKED' | 'UPLOADED' | 'SYNCING' | 'SYNCED' | 'ERROR';
+  evidenceDriveLastSyncedAt?: string;
+  evidenceAutoListedDesc?: string; // 드라이브 파일 기준 자동 집계 목록
+  supportPendingDocs?: string;     // 도담/써니 준비 필요자료
+  // 도담 (정부 보고)
+  eNaraRegistered?: string;        // e나라 등록
+  eNaraExecuted?: string;          // e나라 집행
+  vatSettlementDone?: boolean;     // 부가세 지결 완료여부
+  settlementComplete?: boolean;    // 최종완료
+  settlementNote?: string;         // 비고
+  // 감사 로그 (회계부정 방지)
+  editHistory?: Array<{
+    field: string;
+    before: unknown;
+    after: unknown;
+    editedBy: string;
+    editedAt: string;
+  }>;
+}
+
+export interface BudgetPlanRow {
+  budgetCode: string;
+  subCode: string;
+  initialBudget: number;
+  revisedBudget?: number;
+  note?: string;
+}
+
+export interface BudgetCodeEntry {
+  code: string;
+  subCodes: string[];
+}
+
+export interface BudgetCodeRename {
+  fromCode: string;
+  fromSub: string;
+  toCode: string;
+  toSub: string;
+}
+
+export interface WeeklySubmissionStatus {
+  id: string; // `${projectId}-${yearMonth}-w${weekNo}`
+  tenantId?: string;
+  projectId: string;
+  yearMonth: string; // "YYYY-MM"
+  weekNo: number; // 1..6
+  projectionUpdated?: boolean;
+  projectionUpdatedAt?: string;
+  projectionUpdatedByName?: string;
+  expenseUpdated?: boolean;
+  expenseUpdatedAt?: string;
+  expenseUpdatedByName?: string;
+  updatedAt?: string;
+  updatedByName?: string;
+}
+
+export interface BudgetPlanSnapshot {
+  projectId: string;
+  rows: BudgetPlanRow[];
+  updatedAt: string;
+  updatedBy: string;
 }
 
 export interface Evidence {
@@ -363,12 +580,21 @@ export interface Evidence {
   version?: number;
   transactionId: string;
   fileName: string;
+  originalFileName?: string;
   fileType: string;
   fileSize: number;
   uploadedBy: string;
   uploadedAt: string;
   category: string;        // 증빙 유형 (세금계산서, 영수증, 계약서 등)
   status: 'PENDING' | 'ACCEPTED' | 'REJECTED';
+  source?: 'MANUAL' | 'PLATFORM_UPLOAD' | 'DRIVE_SYNC';
+  driveFileId?: string;
+  driveFolderId?: string;
+  driveFolderName?: string;
+  webViewLink?: string;
+  mimeType?: string;
+  parserCategory?: string;
+  parserConfidence?: number;
   rejectedReason?: string;
 }
 
@@ -376,10 +602,225 @@ export interface Comment {
   id: string;
   version?: number;
   transactionId: string;
+  projectId?: string;
+  targetType?: 'transaction' | 'expense_sheet_row';
+  sheetRowId?: string;
   authorId: string;
   authorName: string;
+  fieldKey?: string;
+  fieldLabel?: string;
   content: string;
   createdAt: string;
+}
+
+// ── Company Board (전사 게시판) ──
+
+export type BoardChannel = 'general' | 'qna' | 'ideas' | 'help' | 'training';
+
+export const BOARD_CHANNEL_LABELS: Record<BoardChannel, string> = {
+  general: '일반',
+  qna: '질문',
+  ideas: '아이디어',
+  help: '도움요청',
+  training: '교육',
+};
+
+export interface BoardPost {
+  id: string;
+  tenantId?: string;
+  channel: BoardChannel;
+  title: string;
+  body: string;
+  tags: string[];
+  createdBy: string;
+  createdByName: string;
+  createdByRole?: string;
+  createdByAvatarUrl?: string;
+  createdAt: string;
+  updatedAt: string;
+  lastActivityAt: string;
+  commentCount: number;
+  upvoteCount: number;
+  downvoteCount: number;
+  voteScore: number;
+  deletedAt?: string | null;
+}
+
+export interface BoardComment {
+  id: string;
+  tenantId?: string;
+  postId: string;
+  parentId?: string | null;
+  body: string;
+  createdBy: string;
+  createdByName: string;
+  createdByAvatarUrl?: string;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string | null;
+}
+
+export interface BoardVote {
+  id: string;
+  tenantId?: string;
+  postId: string;
+  voterId: string;
+  value: -1 | 1;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ── Payroll (인건비 공지/확인) ──
+
+export type PayrollPaidStatus = 'UNKNOWN' | 'AUTO_MATCHED' | 'CONFIRMED' | 'MISSING';
+
+export interface PayrollSchedule {
+  /** doc id = projectId */
+  id: string;
+  tenantId?: string;
+  projectId: string;
+  /** 1..31 (없는 날짜면 월 말일로 clamp) */
+  dayOfMonth: number;
+  timezone: string; // e.g. "Asia/Seoul"
+  noticeLeadBusinessDays: number; // default 3
+  active: boolean;
+  updatedAt: string;
+  updatedBy: string;
+  updatedByName?: string;
+  createdAt?: string;
+  createdBy?: string;
+}
+
+export interface PayrollRun {
+  /** doc id = `${projectId}-${yearMonth}` */
+  id: string;
+  tenantId?: string;
+  projectId: string;
+  yearMonth: string; // "2026-02"
+  plannedPayDate: string; // "YYYY-MM-DD"
+  noticeDate: string; // "YYYY-MM-DD"
+  noticeLeadBusinessDays: number;
+  acknowledged: boolean;
+  acknowledgedAt?: string;
+  acknowledgedByUid?: string;
+  acknowledgedByName?: string;
+  paidStatus: PayrollPaidStatus;
+  matchedTxIds?: string[];
+  confirmedAt?: string;
+  confirmedByUid?: string;
+  confirmedByName?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type MonthlyCloseStatus = 'OPEN' | 'DONE';
+
+export interface MonthlyClose {
+  /** doc id = `${projectId}-${yearMonth}` */
+  id: string;
+  tenantId?: string;
+  projectId: string;
+  yearMonth: string; // "2026-02"
+  status: MonthlyCloseStatus;
+  doneAt?: string;
+  doneByUid?: string;
+  doneByName?: string;
+  acknowledged: boolean;
+  acknowledgedAt?: string;
+  acknowledgedByUid?: string;
+  acknowledgedByName?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ── Cashflow Weekly Sheet (주간 캐시플로 시트) ──
+
+export type CashflowSheetLineId =
+  // IN
+  | 'MYSC_PREPAY_IN'        // MYSC 선입금(필요 시 - 금액)
+  | 'SALES_IN'              // 매출액(입금)
+  | 'SALES_VAT_IN'          // 매출부가세(입금)
+  | 'TEAM_SUPPORT_IN'       // 팀지원금(입금)
+  | 'BANK_INTEREST_IN'      // 은행이자(입금)
+  // OUT
+  | 'DIRECT_COST_OUT'       // 직접사업비(공급가액/공급대가)
+  | 'INPUT_VAT_OUT'         // 매입부가세(출금)
+  | 'MYSC_LABOR_OUT'        // MYSC 인건비
+  | 'MYSC_PROFIT_OUT'       // MYSC 수익(간접비 등)
+  | 'SALES_VAT_OUT'         // 매출부가세(출금)
+  | 'TEAM_SUPPORT_OUT'      // 팀지원금(출금)
+  | 'BANK_INTEREST_OUT';    // 은행이자(출금)
+
+export const CASHFLOW_SHEET_LINE_LABELS: Record<CashflowSheetLineId, string> = {
+  MYSC_PREPAY_IN: 'MYSC 선입금(잔금 등 입금 필요 시)',
+  SALES_IN: '매출액(입금)',
+  SALES_VAT_IN: '매출부가세(입금)',
+  TEAM_SUPPORT_IN: '팀지원금(입금)',
+  BANK_INTEREST_IN: '은행이자(입금)',
+  DIRECT_COST_OUT: '직접사업비',
+  INPUT_VAT_OUT: '매입부가세',
+  MYSC_LABOR_OUT: 'MYSC 인건비',
+  MYSC_PROFIT_OUT: 'MYSC 수익(간접비 등)',
+  SALES_VAT_OUT: '매출부가세(출금)',
+  TEAM_SUPPORT_OUT: '팀지원금(출금)',
+  BANK_INTEREST_OUT: '은행이자(출금)',
+};
+
+export interface CashflowWeekSheet {
+  /** doc id = `${projectId}-${yearMonth}-w${weekNo}` */
+  id: string;
+  tenantId?: string;
+  projectId: string;
+  yearMonth: string; // "2026-01"
+  weekNo: number; // 1..5 (nth Monday in month)
+  weekStart: string; // "YYYY-MM-DD" (Monday)
+  weekEnd: string; // "YYYY-MM-DD" (Sunday)
+  projection: Partial<Record<CashflowSheetLineId, number>>;
+  actual: Partial<Record<CashflowSheetLineId, number>>;
+  pmSubmitted: boolean;
+  pmSubmittedAt?: string;
+  pmSubmittedByUid?: string;
+  pmSubmittedByName?: string;
+  adminClosed: boolean;
+  adminClosedAt?: string;
+  adminClosedByUid?: string;
+  adminClosedByName?: string;
+  createdAt: string;
+  updatedAt: string;
+  updatedByUid?: string;
+  updatedByName?: string;
+  // ── 편차 확인 티켓 (Admin ↔ PM) ──
+  varianceFlag?: VarianceFlag;
+  // 편차 확인 영구 이력 — 모든 플래그/답변/해결 기록 (삭제 불가)
+  varianceHistory?: VarianceFlagEvent[];
+}
+
+// 편차 확인 티켓 — 현재 상태
+export type VarianceFlagStatus = 'OPEN' | 'REPLIED' | 'RESOLVED';
+
+export interface VarianceFlag {
+  status: VarianceFlagStatus;
+  reason: string;                // Admin이 작성한 확인 사유
+  flaggedBy: string;             // Admin 이름
+  flaggedByUid?: string;
+  flaggedAt: string;             // ISO
+  pmReply?: string;              // PM 답변
+  pmRepliedBy?: string;
+  pmRepliedByUid?: string;
+  pmRepliedAt?: string;
+  resolvedBy?: string;
+  resolvedByUid?: string;
+  resolvedAt?: string;
+}
+
+// 편차 확인 영구 이력 — 한 번 기록되면 삭제/수정 불가
+export interface VarianceFlagEvent {
+  id: string;
+  action: 'FLAG' | 'REPLY' | 'RESOLVE';
+  actor: string;                 // 이름
+  actorUid?: string;
+  content: string;               // 사유 / 답변 / 해결 코멘트
+  timestamp: string;             // ISO
 }
 
 export interface AuditLog {
@@ -425,6 +866,165 @@ export interface MonthlyRollup {
   totalNet: number;
   totalCount: number;
   byCategory: CategoryRollup[];
+}
+
+// ── 경력 프로필 (Career Profile) ──
+
+export type DegreeType = '학사' | '석사' | '박사' | '전문학사' | '수료' | '기타';
+
+export interface EducationEntry {
+  id: string;
+  school: string;       // 학교명
+  major: string;        // 전공
+  degree: DegreeType;
+  startDate: string;    // YYYY-MM
+  endDate: string;      // YYYY-MM or '재학중'
+}
+
+export interface WorkHistoryEntry {
+  id: string;
+  company: string;      // 기업명
+  title: string;        // 최종직위
+  description: string;  // 담당업무/주요프로젝트
+  startDate: string;    // YYYY-MM
+  endDate: string;      // YYYY-MM or '현재'
+}
+
+export interface CertificationEntry {
+  id: string;
+  name: string;         // 자격증명
+  issuedAt: string;     // YYYY-MM-DD
+  issuer: string;       // 발행기관
+}
+
+/**
+ * 개인 경력 프로필 (Firestore: orgs/{orgId}/careerProfiles/{uid})
+ * 참여경력(ParticipationEntry)과 사내교육(TrainingEnrollment)은 별도 컬렉션에서 join
+ */
+export interface CareerProfile {
+  uid: string;
+  orgId: string;
+  nameKo: string;           // 국문 성명
+  nameEn?: string;          // 영문 성명
+  nameHanja?: string;       // 한자 성명
+  birthDate?: string;       // YYYY-MM-DD
+  phone?: string;           // 핸드폰
+  officePhone?: string;     // 직장 전화
+  department?: string;      // 부서
+  title?: string;           // 직책
+  joinedAt?: string;        // 입사일 YYYY-MM-DD
+  bio?: string;             // 간단 소개
+  education: EducationEntry[];
+  workHistory: WorkHistoryEntry[];
+  certifications: CertificationEntry[];
+  updatedAt: string;
+}
+
+// ── 사내 강의 (Internal Training) ──
+
+export type TrainingCategory = 'technical' | 'compliance' | 'soft-skills' | 'management' | 'language' | 'other';
+export type TrainingStatus = 'DRAFT' | 'OPEN' | 'CLOSED' | 'COMPLETED';
+export type EnrollmentStatus = 'ENROLLED' | 'COMPLETED' | 'DROPPED';
+
+export const TRAINING_CATEGORY_LABELS: Record<TrainingCategory, string> = {
+  technical: '직무/기술',
+  compliance: '컴플라이언스',
+  'soft-skills': '소프트스킬',
+  management: '사업관리',
+  language: '어학',
+  other: '기타',
+};
+
+export const TRAINING_STATUS_LABELS: Record<TrainingStatus, string> = {
+  DRAFT: '준비중',
+  OPEN: '모집중',
+  CLOSED: '모집마감',
+  COMPLETED: '종료',
+};
+
+export const ENROLLMENT_STATUS_LABELS: Record<EnrollmentStatus, string> = {
+  ENROLLED: '수강중',
+  COMPLETED: '이수완료',
+  DROPPED: '수강취소',
+};
+
+/**
+ * 사내 강의 (Firestore: orgs/{orgId}/trainingCourses/{courseId})
+ */
+export interface TrainingCourse {
+  id: string;
+  orgId: string;
+  title: string;
+  description: string;
+  category: TrainingCategory;
+  durationHours: number;      // 수강 시간 (h)
+  instructor: string;         // 강사명
+  instructorId?: string;      // 내부 강사 uid
+  startDate: string;          // YYYY-MM-DD
+  endDate: string;            // YYYY-MM-DD
+  maxParticipants: number;
+  isRequired: boolean;        // 필수 교육 여부
+  status: TrainingStatus;
+  createdBy: string;          // admin uid
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * 수강 신청/이수 (Firestore: orgs/{orgId}/trainingEnrollments/{id})
+ */
+export interface TrainingEnrollment {
+  id: string;
+  courseId: string;
+  courseTitle: string;        // denormalized
+  memberId: string;
+  memberName: string;         // denormalized
+  enrolledAt: string;
+  status: EnrollmentStatus;
+  completedAt?: string;
+  certificate?: string;       // 수료증 Storage URL
+  notes?: string;
+}
+
+// ── 사업비 가이드 Q&A 챗봇 ──
+
+export type GuideStatus = 'CALIBRATING' | 'READY';
+
+export interface GuideMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: string;
+}
+
+export interface GuideDocument {
+  id: string;
+  tenantId?: string;
+  title: string;
+  content: string;                    // 원문 전체 텍스트
+  sourceType: 'pdf' | 'text' | 'markdown';
+  sourceFileName?: string;
+  charCount: number;
+  status: GuideStatus;
+  calibrationMessages: GuideMessage[];  // 캘리브레이션 대화 기록
+  calibrationSummary?: string;          // finalize 시 생성된 요약
+  uploadedBy: string;
+  uploadedByName: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GuideQA {
+  id: string;
+  tenantId?: string;
+  guideId: string;
+  question: string;
+  answer: string;
+  askedBy: string;
+  askedByName: string;
+  askedByRole: string;
+  tokensUsed?: number;
+  modelUsed?: string;
+  createdAt: string;
 }
 
 // ── Filter ──

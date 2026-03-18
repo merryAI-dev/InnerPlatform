@@ -3,7 +3,7 @@ import { useState, useMemo } from 'react';
 import {
   Users, AlertTriangle, ShieldAlert, Shield,
   ChevronDown, ChevronUp, Search, Info,
-  UserCheck, FileText, FolderKanban,
+  UserCheck, FolderKanban, Download,
   AlertCircle, CheckCircle2, XCircle, Eye, Network,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
@@ -26,10 +26,9 @@ import { SETTLEMENT_SYSTEM_SHORT } from '../../data/types';
 import type { SettlementSystemCode, ParticipationEntry } from '../../data/types';
 import {
   computeMemberSummaries,
-  PART_PROJECTS,
-  EMPLOYEES,
+  buildParticipationRiskReport,
+  PARTICIPATION_RISK_RULESET,
   getCrossVerifyRisk,
-  CROSS_VERIFY_RULES,
 } from '../../data/participation-data';
 import type { MemberParticipationSummary } from '../../data/participation-data';
 
@@ -88,6 +87,18 @@ function PhaseChip({ phase }: { phase: string }) {
     : phase.includes('변경') ? 'bg-purple-100 text-purple-700 border-purple-200'
     : 'bg-green-100 text-green-800 border-green-200';
   return <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] border ${c}`}>{phase}</span>;
+}
+
+interface ProjectParticipationView {
+  id: string;
+  shortName: string;
+  clientOrg: string;
+  settlement: SettlementSystemCode;
+  phase: string;
+  periodDesc: string;
+  entries: ParticipationEntry[];
+  totalRate: number;
+  memberCount: number;
 }
 
 // ── Protocol Guide ──
@@ -266,7 +277,7 @@ function MemberDetailDialog({ member, open, onClose }: {
 
 // ── Cross-Verification Matrix ──
 
-function CrossVerificationInfo() {
+function CrossVerificationInfo({ projects }: { projects: ProjectParticipationView[] }) {
   const systems: SettlementSystemCode[] = ['E_NARA_DOUM', 'ACCOUNTANT', 'IRIS', 'RCMS', 'EZBARO', 'E_HIJO', 'AGRIX'];
   const riskBg: Record<string, string> = { HIGH: 'bg-red-200 text-red-900', MEDIUM: 'bg-amber-200 text-amber-900', LOW: 'bg-gray-100 text-gray-500' };
 
@@ -293,14 +304,14 @@ function CrossVerificationInfo() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {PART_PROJECTS.map(p => (
+                {projects.map(p => (
                   <TableRow key={p.id}>
                     <TableCell className="text-xs" style={{ fontWeight: 500 }}>{p.shortName}</TableCell>
                     <TableCell className="text-xs text-muted-foreground">{p.clientOrg}</TableCell>
                     <TableCell><SettlementBadge system={p.settlement} /></TableCell>
                     <TableCell><PhaseChip phase={p.phase} /></TableCell>
                     <TableCell className="text-xs text-muted-foreground">{p.periodDesc}</TableCell>
-                    <TableCell className="text-center text-xs">-</TableCell>
+                    <TableCell className="text-center text-xs">{p.memberCount}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -398,7 +409,7 @@ function CrossVerificationInfo() {
 // ── Main Page ──
 
 export function ParticipationPage() {
-  const { participationEntries } = useAppStore();
+  const { participationEntries, projects, members } = useAppStore();
   const [searchText, setSearchText] = useState('');
   const [selectedMember, setSelectedMember] = useState<MemberParticipationSummary | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -423,31 +434,67 @@ export function ParticipationPage() {
     return result;
   }, [memberSummaries, searchText, riskFilter]);
 
+  // Project-centric view
+  const projectEntries = useMemo<ProjectParticipationView[]>(() => {
+    const byProject = new Map<string, ParticipationEntry[]>();
+    participationEntries.forEach((entry) => {
+      const list = byProject.get(entry.projectId) || [];
+      list.push(entry);
+      byProject.set(entry.projectId, list);
+    });
+
+    const rows = Array.from(byProject.entries()).map(([projectId, entries]) => {
+      const totalRate = entries.reduce((s, e) => s + e.rate, 0);
+      const first = entries[0];
+      const mappedProject = projects.find((p) => p.id === projectId);
+      const periodTokens = Array.from(new Set(entries.map((e) => e.periodStart).filter(Boolean)));
+      const periodDesc = periodTokens.slice(0, 2).join(', ') || '-';
+
+      return {
+        id: projectId,
+        shortName: mappedProject?.name || first?.projectName || projectId,
+        clientOrg: mappedProject?.clientOrg || first?.clientOrg || '',
+        settlement: first?.settlementSystem || 'NONE',
+        phase: mappedProject?.status === 'CONTRACT_PENDING'
+          ? '계약전'
+          : mappedProject?.status === 'IN_PROGRESS'
+            ? '진행중'
+            : '완료',
+        periodDesc,
+        entries,
+        totalRate,
+        memberCount: new Set(entries.map((e) => e.memberId)).size,
+      };
+    });
+
+    return rows.sort((a, b) => b.memberCount - a.memberCount);
+  }, [participationEntries, projects]);
+
   // KPIs
   const kpis = useMemo(() => {
     const total = memberSummaries.length;
     const danger = memberSummaries.filter(m => m.riskLevel === 'DANGER').length;
     const warning = memberSummaries.filter(m => m.riskLevel === 'WARNING').length;
     const safe = memberSummaries.filter(m => m.riskLevel === 'SAFE').length;
-    const totalEmployees = EMPLOYEES.length;
-    const unassigned = totalEmployees - total;
+    const totalEmployees = Math.max(total, members.length);
     const avgRate = total > 0 ? Math.round(memberSummaries.reduce((s, m) => s + m.totalRate, 0) / total) : 0;
-    const eNaraProjects = PART_PROJECTS.filter(p => p.settlement === 'E_NARA_DOUM').length;
-    return { total, danger, warning, safe, totalEmployees, unassigned, avgRate, eNaraProjects };
-  }, [memberSummaries]);
-
-  // Project-centric view
-  const projectEntries = useMemo(() => {
-    return PART_PROJECTS.map(proj => {
-      const entries = participationEntries.filter(e => e.projectId === proj.id);
-      const totalRate = entries.reduce((s, e) => s + e.rate, 0);
-      return { ...proj, entries, totalRate, memberCount: new Set(entries.map(e => e.memberId)).size };
-    });
-  }, [participationEntries]);
+    const eNaraProjects = projectEntries.filter((p) => p.settlement === 'E_NARA_DOUM').length;
+    return { total, danger, warning, safe, totalEmployees, avgRate, eNaraProjects };
+  }, [memberSummaries, members.length, projectEntries]);
 
   const handleOpenDetail = (s: MemberParticipationSummary) => {
     setSelectedMember(s);
     setDetailOpen(true);
+  };
+
+  const handleDownloadRiskJson = () => {
+    const report = buildParticipationRiskReport(participationEntries);
+    const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `participation-risk-report-${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    URL.revokeObjectURL(link.href);
   };
 
   return (
@@ -460,6 +507,16 @@ export function ParticipationPage() {
           title="참여율 관리 (100-1)"
           description="2025-2026 KOICA 사업 통합관리 — 교차검증 가능 사업 참여율 합산 ≤ 100% 관리"
         />
+        <div className="flex items-center justify-between rounded-lg border border-indigo-200/60 bg-indigo-50/40 px-3 py-2">
+          <div className="flex items-center gap-2 text-xs">
+            <Badge className="bg-indigo-100 text-indigo-700 border border-indigo-200">규칙 검증 결과</Badge>
+            <span className="text-indigo-700">AI 추론 미사용 · ruleset {PARTICIPATION_RISK_RULESET.version}</span>
+          </div>
+          <Button variant="outline" size="sm" className="h-7 text-xs gap-1.5" onClick={handleDownloadRiskJson}>
+            <Download className="w-3.5 h-3.5" />
+            결과 JSON
+          </Button>
+        </div>
 
         <ProtocolGuide />
 
@@ -515,7 +572,7 @@ export function ParticipationPage() {
               <div className="flex items-center gap-1.5 text-xs mb-0.5">
                 <FolderKanban className="w-3.5 h-3.5" /><span>전체 사업</span>
               </div>
-              <p className="text-xl" style={{ fontWeight: 600 }}>{PART_PROJECTS.length}건</p>
+              <p className="text-xl" style={{ fontWeight: 600 }}>{projectEntries.length}건</p>
               <p className="text-[10px] text-muted-foreground">확정+입찰 포함</p>
             </CardContent>
           </Card>
@@ -695,7 +752,7 @@ export function ParticipationPage() {
 
           {/* ─── Cross-Verification Matrix ─── */}
           <TabsContent value="matrix" className="mt-4">
-            <CrossVerificationInfo />
+            <CrossVerificationInfo projects={projectEntries} />
           </TabsContent>
         </Tabs>
 

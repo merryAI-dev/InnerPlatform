@@ -3,7 +3,6 @@ import {
   canAccessTenant,
   extractAuthContextFromClaims,
   hasPermission,
-  isPrivilegedPlatformRole,
 } from './rbac';
 
 describe('rbac helpers', () => {
@@ -45,10 +44,11 @@ describe('rbac helpers', () => {
     expect(hasPermission('tenant_admin', 'tenant:manage')).toBe(true);
   });
 
-  it('classifies privileged roles', () => {
-    expect(isPrivilegedPlatformRole('admin')).toBe(true);
-    expect(isPrivilegedPlatformRole('tenant_admin')).toBe(true);
-    expect(isPrivilegedPlatformRole('pm')).toBe(false);
+  it('keeps viewer least-privileged but allows evidence drive workflows', () => {
+    expect(hasPermission('viewer', 'project:write')).toBe(false);
+    expect(hasPermission('viewer', 'project:evidence_drive:write')).toBe(true);
+    expect(hasPermission('viewer', 'evidence:write')).toBe(false);
+    expect(hasPermission('viewer', 'evidence:drive:write')).toBe(true);
   });
 
   it('enforces tenant access for tenant-scoped roles', () => {

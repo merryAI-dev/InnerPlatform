@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import {
   X, FolderKanban, BarChart3, Shield, Keyboard,
   ArrowRight, Sparkles,
 } from 'lucide-react';
 import { useAppStore } from '../../data/store';
+import { useAuth } from '../../data/auth-store';
+import { canShowAdminNavItem } from '../../platform/admin-nav';
 
 const QUICK_ACTIONS = [
   {
@@ -40,6 +42,7 @@ const QUICK_ACTIONS = [
 export function WelcomeBanner() {
   const navigate = useNavigate();
   const { currentUser } = useAppStore();
+  const { user } = useAuth();
   const [dismissed, setDismissed] = useState(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('mysc-welcome-dismissed') === 'true';
@@ -47,6 +50,14 @@ export function WelcomeBanner() {
     return false;
   });
   const [exiting, setExiting] = useState(false);
+
+  const visibleActions = useMemo(() => {
+    return QUICK_ACTIONS.filter((action) => {
+      if ('action' in action) return true;
+      if (!('path' in action) || !action.path) return true;
+      return canShowAdminNavItem(user?.role, action.path);
+    });
+  }, [user?.role]);
 
   const handleDismiss = () => {
     setExiting(true);
@@ -97,7 +108,7 @@ export function WelcomeBanner() {
         </p>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-          {QUICK_ACTIONS.map((action) => (
+          {visibleActions.map((action) => (
             <button
               key={action.label}
               onClick={() => {

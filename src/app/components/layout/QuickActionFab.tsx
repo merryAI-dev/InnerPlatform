@@ -4,6 +4,8 @@ import {
   Plus, X, FolderKanban, BarChart3, FileCheck,
   Shield, Zap,
 } from 'lucide-react';
+import { useAuth } from '../../data/auth-store';
+import { canShowAdminNavItem } from '../../platform/admin-nav';
 
 const ACTIONS = [
   { icon: FolderKanban, label: '새 사업 등록', path: '/projects/new', color: '#4f46e5' },
@@ -17,6 +19,10 @@ export function QuickActionFab() {
   const navigate = useNavigate();
   const location = useLocation();
   const fabRef = useRef<HTMLDivElement>(null);
+  const { user } = useAuth();
+
+  const visibleActions = ACTIONS.filter((action) => canShowAdminNavItem(user?.role, action.path));
+  if (visibleActions.length === 0) return null;
 
   // Close on route change
   useEffect(() => {
@@ -52,7 +58,7 @@ export function QuickActionFab() {
           transition: 'opacity 200ms ease-out, transform 200ms ease-out',
         }}
       >
-        {ACTIONS.map((action, i) => (
+        {visibleActions.map((action, i) => (
           <button
             key={action.path}
             onClick={() => {

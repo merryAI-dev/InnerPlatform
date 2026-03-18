@@ -1,33 +1,52 @@
-import { useEffect, useState, useMemo, useCallback } from 'react';
-import { useNavigate } from 'react-router';
 import {
-  ChevronLeft, ChevronRight, Check, Save, ArrowLeft,
-  Building2, FileText, Banknote, Users, Calculator, CreditCard, Shield,
-  CheckCircle2, XCircle, AlertCircle, Sparkles,
+  AlertCircle,
+  ArrowLeft,
+  Banknote,
+  Building2,
+  Calculator,
+  Check,
+  CheckCircle2,
+  ChevronLeft, ChevronRight,
+  CreditCard,
+  FileText,
+  Save,
+  Shield,
+  Sparkles,
+  Users,
+  XCircle,
 } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
-import { Button } from '../ui/button';
+import { useCallback, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router';
+import { toast } from 'sonner';
+import { useAppStore } from '../../data/store';
+import type {
+  AccountType,
+  Basis,
+  Project,
+  ProjectPhase,
+  ProjectStatus,
+  ProjectType,
+  SettlementType,
+} from '../../data/types';
+import {
+  ACCOUNT_TYPE_LABELS,
+  BASIS_LABELS,
+  PROJECT_STATUS_LABELS,
+  PROJECT_TYPE_LABELS,
+  SETTLEMENT_TYPE_LABELS
+} from '../../data/types';
 import { Badge } from '../ui/badge';
+import { Button } from '../ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Progress } from '../ui/progress';
 import { Separator } from '../ui/separator';
-import { useAppStore } from '../../data/store';
-import { toast } from 'sonner';
-import type {
-  Project, ProjectType, ProjectStatus, ProjectPhase,
-  SettlementType, Basis, AccountType,
-} from '../../data/types';
-import {
-  PROJECT_TYPE_LABELS, PROJECT_STATUS_LABELS,
-  SETTLEMENT_TYPE_LABELS, BASIS_LABELS, ACCOUNT_TYPE_LABELS,
-  PROJECT_PHASE_LABELS,
-} from '../../data/types';
-import { computeProjectCompleteness } from '../../data/project-completeness';
+import { PROJECT_DEPARTMENT_OPTIONS } from '../../data/project-department-options';
 
 // ── Step Definitions ──
 
-const FULL_STEPS = [
+const STEPS = [
   { id: 'basic', label: '기본 정보', icon: Building2, desc: '사업명, 유형, 발주기관' },
   { id: 'contract', label: '계약/일정', icon: FileText, desc: '계약서, 기간, 상태' },
   { id: 'account', label: '통장/정산', icon: Banknote, desc: '통장구분, 정산유형' },
@@ -37,26 +56,7 @@ const FULL_STEPS = [
   { id: 'review', label: '검증 & 확정', icon: Shield, desc: '체크리스트, 제출' },
 ] as const;
 
-const QUICK_STEPS = [
-  { id: 'basic', label: '핵심 정보', icon: Building2, desc: '사업명, 유형, 발주기관' },
-  { id: 'team', label: '담당자', icon: Users, desc: '팀, 메인 담당자' },
-  { id: 'review', label: '완료', icon: Shield, desc: '입력 확인 및 등록' },
-] as const;
-
-type StepId = typeof FULL_STEPS[number]['id'];
-type WizardMode = 'quick' | 'full';
-
-const WIZARD_MODE_KEY = 'mysc-project-wizard-mode';
-
-function readWizardMode(): WizardMode {
-  try {
-    const raw = localStorage.getItem(WIZARD_MODE_KEY);
-    if (raw === 'quick' || raw === 'full') return raw;
-  } catch {
-    // no-op
-  }
-  return 'quick';
-}
+type StepId = typeof STEPS[number]['id'];
 
 // ── Form Data Interface ──
 
@@ -97,19 +97,13 @@ interface WizardFormData {
 }
 
 const INITIAL_DATA: WizardFormData = {
-  name: '', type: 'DEV_COOPERATION', department: '', clientOrg: '', groupwareName: '', description: '',
+  name: '', type: 'D1', department: '', clientOrg: '', groupwareName: '', description: '',
   status: 'CONTRACT_PENDING', contractType: '계약서(날인)', contractStart: '', contractEnd: '', participantCondition: '',
   accountType: 'NONE', settlementType: 'TYPE1', basis: 'SUPPLY_AMOUNT',
   teamName: '', managerName: '', managerId: '',
   contractAmount: 0, budgetCurrentYear: 0, taxInvoiceAmount: 0, profitRate: 0, profitAmount: 0,
   paymentContract: 0, paymentInterim: 0, paymentFinal: 0, paymentPlanDesc: '', finalPaymentNote: '',
 };
-
-const DEPARTMENTS = [
-  'L-개발협력센터', 'L-글로벌센터', 'L-디자인팀',
-  'C-스템CIC', 'C-모모CIC', 'C-썬CIC',
-  'I-공간플랫폼센터', 'I-투자센터',
-];
 
 const CONTRACT_TYPES = ['계약서(날인)', '발주기관 전자시스템', '기타'];
 
@@ -123,9 +117,6 @@ interface ProjectWizardProps {
 export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: ProjectWizardProps) {
   const navigate = useNavigate();
   const { addProject, updateProject, members } = useAppStore();
-
-  const [mode, setMode] = useState<WizardMode>(() => (editProject ? 'full' : readWizardMode()));
-  const steps = (mode === 'quick' && !editProject) ? QUICK_STEPS : FULL_STEPS;
 
   const [currentStep, setCurrentStep] = useState(0);
   const [targetPhase, setTargetPhase] = useState<ProjectPhase>(editProject?.phase || initialPhase);
@@ -164,22 +155,6 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
     return INITIAL_DATA;
   });
 
-  useEffect(() => {
-    // Keep step index in range when switching modes.
-    setCurrentStep((prev) => Math.min(prev, steps.length - 1));
-  }, [steps.length]);
-
-  useEffect(() => {
-    // Default create flow to quick mode; switching modes restarts the wizard.
-    setCurrentStep(0);
-    if (editProject) return;
-    try {
-      localStorage.setItem(WIZARD_MODE_KEY, mode);
-    } catch {
-      // no-op
-    }
-  }, [mode, editProject]);
-
   const update = useCallback((field: keyof WizardFormData, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }));
   }, []);
@@ -195,85 +170,24 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
   }, [formData.contractAmount, formData.profitRate]);
 
   // Validation checks
-  type ValidationCheck = {
-    id: string;
-    label: string;
-    passed: boolean;
-    requiredProspect: boolean;
-    requiredConfirmed: boolean;
-  };
-
-  const validationChecks = useMemo<ValidationCheck[]>(() => {
-    const requireFull = mode === 'full' || !!editProject;
-    return [
-      { id: 'name', label: '사업명', passed: !!formData.name.trim(), requiredProspect: true, requiredConfirmed: true },
-      { id: 'dept', label: '담당조직', passed: !!formData.department, requiredProspect: true, requiredConfirmed: true },
-      { id: 'client', label: '발주기관', passed: !!formData.clientOrg.trim(), requiredProspect: false, requiredConfirmed: true },
-      { id: 'manager', label: '메인 담당자', passed: !!formData.managerName.trim(), requiredProspect: false, requiredConfirmed: true },
-      { id: 'account', label: '통장 구분', passed: formData.accountType !== 'NONE', requiredProspect: false, requiredConfirmed: requireFull },
-      { id: 'groupware', label: '그룹웨어 등록명', passed: !!formData.groupwareName.trim(), requiredProspect: false, requiredConfirmed: requireFull },
-      {
-        id: 'contractAmount',
-        label: '총 계약금액',
-        passed: formData.contractAmount > 0 || formData.status === 'CONTRACT_PENDING',
-        requiredProspect: false,
-        requiredConfirmed: requireFull,
-      },
-      {
-        id: 'paymentPlan',
-        label: '입금 계획',
-        passed: !!formData.paymentPlanDesc.trim() || formData.status === 'CONTRACT_PENDING',
-        requiredProspect: false,
-        requiredConfirmed: requireFull,
-      },
+  const validationChecks = useMemo(() => {
+    const checks = [
+      { id: 'name', label: '사업명', passed: !!formData.name.trim(), required: true },
+      { id: 'dept', label: '담당조직', passed: !!formData.department, required: true },
+      { id: 'client', label: '발주기관', passed: !!formData.clientOrg.trim(), required: targetPhase === 'CONFIRMED' },
+      { id: 'account', label: '통장 구분', passed: !!ACCOUNT_TYPE_LABELS[formData.accountType], required: targetPhase === 'CONFIRMED' },
+      { id: 'groupware', label: '그룹웨어 등록명', passed: !!formData.groupwareName.trim(), required: targetPhase === 'CONFIRMED' },
+      { id: 'manager', label: '메인 담당자', passed: !!formData.managerName.trim(), required: targetPhase === 'CONFIRMED' },
+      { id: 'contractAmount', label: '총 계약금액', passed: formData.contractAmount > 0 || formData.status === 'CONTRACT_PENDING', required: targetPhase === 'CONFIRMED' },
+      { id: 'paymentPlan', label: '입금 계획', passed: !!formData.paymentPlanDesc.trim() || formData.status === 'CONTRACT_PENDING', required: targetPhase === 'CONFIRMED' },
     ];
-  }, [formData, mode, editProject]);
+    return checks;
+  }, [formData, targetPhase]);
 
-  const requiredChecksProspect = useMemo(
-    () => validationChecks.filter(c => c.requiredProspect),
-    [validationChecks],
-  );
-  const requiredChecksConfirmed = useMemo(
-    () => validationChecks.filter(c => c.requiredConfirmed),
-    [validationChecks],
-  );
-
-  const canSaveProspect = requiredChecksProspect.every(c => c.passed);
-  const canConfirm = requiredChecksConfirmed.every(c => c.passed);
-
-  const activeRequiredChecks = targetPhase === 'CONFIRMED'
-    ? requiredChecksConfirmed
-    : requiredChecksProspect;
-  const passedRequired = activeRequiredChecks.filter(c => c.passed).length;
-  const overallScore = activeRequiredChecks.length > 0
-    ? Math.round((passedRequired / activeRequiredChecks.length) * 100)
-    : 0;
-
-  const completeness = useMemo(() => computeProjectCompleteness({
-    department: formData.department,
-    clientOrg: formData.clientOrg,
-    managerName: formData.managerName,
-    managerId: formData.managerId,
-    accountType: formData.accountType,
-    contractStart: formData.contractStart,
-    contractEnd: formData.contractEnd,
-    contractAmount: formData.contractAmount,
-    paymentPlanDesc: formData.paymentPlanDesc,
-    groupwareName: formData.groupwareName,
-  } as any), [
-    formData.department,
-    formData.clientOrg,
-    formData.managerName,
-    formData.managerId,
-    formData.accountType,
-    formData.contractStart,
-    formData.contractEnd,
-    formData.contractAmount,
-    formData.paymentPlanDesc,
-    formData.groupwareName,
-  ]);
-
-  const isQuickCreate = mode === 'quick' && !editProject;
+  const requiredChecks = validationChecks.filter(c => c.required);
+  const passedRequired = requiredChecks.filter(c => c.passed).length;
+  const canConfirm = requiredChecks.every(c => c.passed);
+  const overallScore = requiredChecks.length > 0 ? Math.round((passedRequired / requiredChecks.length) * 100) : 0;
 
   // Submit
   const handleSubmit = useCallback((phase: ProjectPhase) => {
@@ -333,9 +247,8 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
       addProject(projectData);
       toast.success(phase === 'CONFIRMED' ? '확정 사업이 등록되었습니다' : '예정 사업이 등록되었습니다');
     }
-    const destination = (editProject || mode === 'quick') ? `/projects/${projectData.id}` : '/projects';
-    navigate(destination);
-  }, [formData, calculatedProfit, editProject, mode, addProject, updateProject, navigate]);
+    navigate('/projects');
+  }, [formData, calculatedProfit, editProject, addProject, updateProject, navigate]);
 
   // Format number input
   const fmtInput = (n: number) => n > 0 ? n.toLocaleString('ko-KR') : '';
@@ -344,7 +257,7 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
   // ── Render Steps ──
 
   const renderStep = () => {
-    switch (steps[currentStep].id) {
+    switch (STEPS[currentStep].id) {
       case 'basic':
         return (
           <div className="space-y-5">
@@ -377,7 +290,7 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
                   className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
                 >
                   <option value="">선택하세요</option>
-                  {DEPARTMENTS.map(d => (
+                  {PROJECT_DEPARTMENT_OPTIONS.map((d) => (
                     <option key={d} value={d}>{d}</option>
                   ))}
                 </select>
@@ -484,32 +397,31 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
         return (
           <div className="space-y-5">
             <div className="space-y-3">
-              <Label>전용통장 / 운영통장 여부 *</Label>
+              <Label>통장 유형 *</Label>
               <div className="grid grid-cols-3 gap-3">
                 {(['DEDICATED', 'OPERATING', 'NONE'] as AccountType[]).map(at => (
                   <button
                     key={at}
                     onClick={() => update('accountType', at)}
-                    className={`rounded-lg border-2 p-4 text-left transition-all ${
-                      formData.accountType === at
+                    className={`rounded-lg border-2 p-4 text-left transition-all ${formData.accountType === at
                         ? 'border-primary bg-primary/5'
                         : 'border-border hover:border-primary/50'
-                    }`}
+                      }`}
                   >
                     <div className="text-sm" style={{ fontWeight: 600 }}>
                       {ACCOUNT_TYPE_LABELS[at]}
                     </div>
                     <div className="text-xs text-muted-foreground mt-1">
-                      {at === 'DEDICATED' && '사업 전용 통장을 사용합니다'}
-                      {at === 'OPERATING' && '운영통장에서 관리합니다'}
-                      {at === 'NONE' && '아직 결정되지 않았습니다'}
+                      {at === 'DEDICATED' && '이나라도움 전용계좌로 관리합니다'}
+                      {at === 'OPERATING' && '전용계좌를 사용하지만 이나라도움은 사용하지 않습니다'}
+                      {at === 'NONE' && '일반 사업으로 관리합니다'}
                     </div>
                   </button>
                 ))}
               </div>
               {formData.accountType !== 'NONE' && (
                 <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-800">
-                  <span style={{ fontWeight: 600 }}>중요:</span> 운영통장으로 입금/출금되는 Big Money는 반드시 추적 관리됩니다.
+                  <span style={{ fontWeight: 600 }}>중요:</span> 전용계좌를 사용하는 사업의 입출금 흐름은 반드시 추적 관리됩니다.
                 </div>
               )}
             </div>
@@ -709,11 +621,10 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
             </div>
             {/* Sum check */}
             {formData.contractAmount > 0 && (
-              <div className={`rounded-lg p-3 text-xs ${
-                (formData.paymentContract + formData.paymentInterim + formData.paymentFinal) === formData.contractAmount
+              <div className={`rounded-lg p-3 text-xs ${(formData.paymentContract + formData.paymentInterim + formData.paymentFinal) === formData.contractAmount
                   ? 'bg-green-50 border border-green-200 text-green-800'
                   : 'bg-amber-50 border border-amber-200 text-amber-800'
-              }`}>
+                }`}>
                 입금계획 합계: {fmtKRW(formData.paymentContract + formData.paymentInterim + formData.paymentFinal)}
                 {' / '}총 사업비: {fmtKRW(formData.contractAmount)}
                 {(formData.paymentContract + formData.paymentInterim + formData.paymentFinal) === formData.contractAmount
@@ -749,11 +660,10 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
               <div className="grid grid-cols-2 gap-3">
                 <button
                   onClick={() => setTargetPhase('PROSPECT')}
-                  className={`rounded-lg border-2 p-4 text-left transition-all ${
-                    targetPhase === 'PROSPECT'
+                  className={`rounded-lg border-2 p-4 text-left transition-all ${targetPhase === 'PROSPECT'
                       ? 'border-amber-500 bg-amber-50'
                       : 'border-border hover:border-amber-300'
-                  }`}
+                    }`}
                 >
                   <div className="flex items-center gap-2 text-sm" style={{ fontWeight: 600 }}>
                     <Sparkles className="w-4 h-4 text-amber-600" />
@@ -765,11 +675,10 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
                 </button>
                 <button
                   onClick={() => setTargetPhase('CONFIRMED')}
-                  className={`rounded-lg border-2 p-4 text-left transition-all ${
-                    targetPhase === 'CONFIRMED'
+                  className={`rounded-lg border-2 p-4 text-left transition-all ${targetPhase === 'CONFIRMED'
                       ? 'border-green-500 bg-green-50'
                       : 'border-border hover:border-green-300'
-                  } ${!canConfirm ? 'opacity-60' : ''}`}
+                    } ${!canConfirm ? 'opacity-60' : ''}`}
                 >
                   <div className="flex items-center gap-2 text-sm" style={{ fontWeight: 600 }}>
                     <CheckCircle2 className="w-4 h-4 text-green-600" />
@@ -785,63 +694,34 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
               </div>
             </div>
 
-            {isQuickCreate && (
-              <>
-                <Separator />
-
-                {/* Completeness */}
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <Label>입력 완성도</Label>
-                    <Badge variant="outline" className="text-xs">
-                      {completeness.percent}% ({completeness.filled}/{completeness.total})
-                    </Badge>
-                  </div>
-                  <Progress value={completeness.percent} className="h-2" />
-                  {completeness.missing.length > 0 && (
-                    <p className="text-xs text-muted-foreground">
-                      다음 항목을 채우면 좋아요: {completeness.missing.slice(0, 4).map((m) => m.label).join(', ')}
-                      {completeness.missing.length > 4 ? ` 외 ${completeness.missing.length - 4}개` : ''}
-                    </p>
-                  )}
-                  <div className="rounded-lg border bg-muted/20 p-3 text-xs text-muted-foreground">
-                    빠른 등록 후에도 <span style={{ fontWeight: 600 }}>프로젝트 상세 → 수정</span>에서 언제든지 보완할 수 있습니다.
-                  </div>
-                </div>
-              </>
-            )}
-
             <Separator />
 
             {/* Validation Checklist */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <Label>{isQuickCreate ? '필수 항목' : '검증 체크리스트'}</Label>
+                <Label>검증 체크리스트</Label>
                 <Badge variant="outline" className={`text-xs ${overallScore === 100 ? 'text-green-700' : 'text-amber-700'}`}>
-                  {passedRequired}/{activeRequiredChecks.length} 완료 ({overallScore}%)
+                  {passedRequired}/{requiredChecks.length} 완료 ({overallScore}%)
                 </Badge>
               </div>
               <Progress value={overallScore} className="h-2" />
               <div className="space-y-1.5">
-                {(isQuickCreate ? activeRequiredChecks : validationChecks).map(c => {
-                  const required = targetPhase === 'CONFIRMED' ? c.requiredConfirmed : c.requiredProspect;
-                  return (
-                    <div key={c.id} className="flex items-center gap-2 text-sm">
-                      {c.passed ? (
-                        <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0" />
-                      ) : required ? (
-                        <XCircle className="w-4 h-4 text-red-500 shrink-0" />
-                      ) : (
-                        <AlertCircle className="w-4 h-4 text-amber-500 shrink-0" />
-                      )}
-                      <span className={c.passed ? 'text-muted-foreground' : ''}>
-                        {c.label}
-                        {required && <span className="text-red-500 ml-0.5">*</span>}
-                      </span>
-                      {c.passed && <Check className="w-3 h-3 text-green-600 ml-auto" />}
-                    </div>
-                  );
-                })}
+                {validationChecks.map(c => (
+                  <div key={c.id} className="flex items-center gap-2 text-sm">
+                    {c.passed ? (
+                      <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0" />
+                    ) : c.required ? (
+                      <XCircle className="w-4 h-4 text-red-500 shrink-0" />
+                    ) : (
+                      <AlertCircle className="w-4 h-4 text-amber-500 shrink-0" />
+                    )}
+                    <span className={c.passed ? 'text-muted-foreground' : ''}>
+                      {c.label}
+                      {c.required && <span className="text-red-500 ml-0.5">*</span>}
+                    </span>
+                    {c.passed && <Check className="w-3 h-3 text-green-600 ml-auto" />}
+                  </div>
+                ))}
               </div>
             </div>
 
@@ -894,56 +774,31 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
   };
 
   return (
-      <div className="max-w-4xl mx-auto space-y-6">
+    <div className="max-w-4xl mx-auto space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <Button variant="ghost" size="sm" onClick={() => navigate(-1)} className="gap-1">
-            <ArrowLeft className="w-4 h-4" />
-            뒤로
-          </Button>
-          <div>
-            <h1 className="text-xl">
-              {editProject ? '사업 정보 수정' : '새 사업 등록'}
-              {editProject?.phase === 'PROSPECT' && (
-                <Badge className="ml-2 text-xs bg-amber-100 text-amber-800" variant="secondary">→ 확정 전환 가능</Badge>
-              )}
-            </h1>
-            <p className="text-sm text-muted-foreground">
-              {editProject
-                ? `${editProject.name} 정보를 수정합니다`
-                : mode === 'quick'
-                  ? '3단계 빠른 등록 후 나머지는 상세에서 보완할 수 있습니다'
-                  : '전체 위저드를 따라 사업 정보를 입력하세요'}
-            </p>
-          </div>
+      <div className="flex items-center gap-3">
+        <Button variant="ghost" size="sm" onClick={() => navigate(-1)} className="gap-1">
+          <ArrowLeft className="w-4 h-4" />
+          뒤로
+        </Button>
+        <div>
+          <h1 className="text-xl">
+            {editProject ? '사업 정보 수정' : '새 사업 등록'}
+            {editProject?.phase === 'PROSPECT' && (
+              <Badge className="ml-2 text-xs bg-amber-100 text-amber-800" variant="secondary">→ 확정 전환 가능</Badge>
+            )}
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            {editProject
+              ? `${editProject.name} 정보를 수정합니다`
+              : '위저드를 따라 사업 정보를 입력하세요'}
+          </p>
         </div>
-
-        {!editProject && (
-          <div className="flex items-center gap-1">
-            <Button
-              size="sm"
-              variant={mode === 'quick' ? 'default' : 'outline'}
-              className="h-8 text-[11px]"
-              onClick={() => setMode('quick')}
-            >
-              빠른 등록
-            </Button>
-            <Button
-              size="sm"
-              variant={mode === 'full' ? 'default' : 'outline'}
-              className="h-8 text-[11px]"
-              onClick={() => setMode('full')}
-            >
-              전체 입력
-            </Button>
-          </div>
-        )}
       </div>
 
       {/* Step Indicator */}
       <div className="flex items-center gap-1">
-        {steps.map((step, i) => {
+        {STEPS.map((step, i) => {
           const StepIcon = step.icon;
           const isActive = i === currentStep;
           const isCompleted = i < currentStep;
@@ -951,13 +806,12 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
             <div key={step.id} className="flex items-center">
               <button
                 onClick={() => setCurrentStep(i)}
-                className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs transition-all ${
-                  isActive
+                className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs transition-all ${isActive
                     ? 'bg-primary text-primary-foreground'
                     : isCompleted
-                    ? 'bg-green-100 text-green-800'
-                    : 'bg-muted text-muted-foreground hover:bg-accent'
-                }`}
+                      ? 'bg-green-100 text-green-800'
+                      : 'bg-muted text-muted-foreground hover:bg-accent'
+                  }`}
               >
                 {isCompleted ? (
                   <Check className="w-3 h-3" />
@@ -967,7 +821,7 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
                 <span className="hidden md:inline">{step.label}</span>
                 <span className="md:hidden">{i + 1}</span>
               </button>
-              {i < steps.length - 1 && (
+              {i < STEPS.length - 1 && (
                 <div className={`w-4 h-px mx-0.5 ${i < currentStep ? 'bg-green-400' : 'bg-border'}`} />
               )}
             </div>
@@ -980,12 +834,12 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2">
             {(() => {
-              const StepIcon = steps[currentStep].icon;
+              const StepIcon = STEPS[currentStep].icon;
               return <StepIcon className="w-5 h-5 text-primary" />;
             })()}
-            {steps[currentStep].label}
+            {STEPS[currentStep].label}
             <span className="text-sm text-muted-foreground" style={{ fontWeight: 400 }}>
-              — {steps[currentStep].desc}
+              — {STEPS[currentStep].desc}
             </span>
           </CardTitle>
         </CardHeader>
@@ -1007,12 +861,11 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
         </Button>
 
         <div className="flex items-center gap-2">
-          {currentStep === steps.length - 1 ? (
+          {currentStep === STEPS.length - 1 ? (
             <>
               <Button
                 variant="outline"
                 onClick={() => handleSubmit('PROSPECT')}
-                disabled={!canSaveProspect}
                 className="gap-1"
               >
                 <Save className="w-4 h-4" />
@@ -1029,7 +882,7 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
             </>
           ) : (
             <Button
-              onClick={() => setCurrentStep(Math.min(steps.length - 1, currentStep + 1))}
+              onClick={() => setCurrentStep(Math.min(STEPS.length - 1, currentStep + 1))}
               className="gap-1"
             >
               다음

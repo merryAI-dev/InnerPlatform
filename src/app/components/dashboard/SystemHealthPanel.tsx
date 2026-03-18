@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Progress } from '../ui/progress';
 import { useAppStore } from '../../data/store';
 import { computeMemberSummaries } from '../../data/participation-data';
+import { compareSafeLocaleDesc, toSafeString } from './dashboard-rollups';
 
 interface HealthMetric {
   id: string;
@@ -166,6 +167,8 @@ interface ActivityItem {
 
 export function ActivityFeed() {
   const { transactions, projects, auditLogs } = useAppStore();
+  const fmtAmount = (value?: number | null) =>
+    Number.isFinite(value) ? Number(value).toLocaleString('ko-KR') : '-';
 
   const activities = useMemo<ActivityItem[]>(() => {
     const items: ActivityItem[] = [];
@@ -181,7 +184,7 @@ export function ActivityFeed() {
           icon: CheckCircle2,
           iconColor: 'text-emerald-500',
           title: '거래 승인',
-          detail: `${t.counterparty} ${t.amounts.bankAmount.toLocaleString()}원 — ${projName}`,
+          detail: `${t.counterparty} ${fmtAmount(t.amounts?.bankAmount)}원 — ${projName}`,
           timestamp: t.approvedAt,
           type: 'approval',
         });
@@ -203,14 +206,14 @@ export function ActivityFeed() {
           icon: Clock,
           iconColor: 'text-amber-500',
           title: '승인 요청',
-          detail: `${t.counterparty} ${t.amounts.bankAmount.toLocaleString()}원`,
+          detail: `${t.counterparty} ${fmtAmount(t.amounts?.bankAmount)}원`,
           timestamp: t.submittedAt,
           type: 'creation',
         });
       }
     });
 
-    return items.sort((a, b) => b.timestamp.localeCompare(a.timestamp)).slice(0, 12);
+    return items.sort((a, b) => compareSafeLocaleDesc(a.timestamp, b.timestamp)).slice(0, 12);
   }, [transactions, projects]);
 
   return (
@@ -238,7 +241,7 @@ export function ActivityFeed() {
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[11px]" style={{ fontWeight: 600 }}>{a.title}</span>
                     <span className="text-[9px] text-muted-foreground whitespace-nowrap" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                      {a.timestamp.slice(5, 16)}
+                      {toSafeString(a.timestamp).slice(5, 16)}
                     </span>
                   </div>
                   <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-1">{a.detail}</p>

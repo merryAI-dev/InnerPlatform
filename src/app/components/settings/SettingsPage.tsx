@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  Settings, Users, BookOpen, Shield, Building2, Plus, Database,
+  Settings, Users, BookOpen, Shield, Building2, Plus, Database, Upload, MessageCircle,
 } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
@@ -18,27 +19,61 @@ import {
   type CashflowCategory,
 } from '../../data/types';
 import { FirebaseSetup } from './FirebaseSetup';
+import { DataMigrationTab } from './DataMigrationTab';
+import { GuideUploadTab } from '../guide-chat/GuideUploadTab';
 import { PageHeader } from '../layout/PageHeader';
+import { useAuth } from '../../data/auth-store';
+import { resolveHomePath } from '../../platform/navigation';
 
 const roleLabels: Record<string, string> = {
   admin: '관리자',
+  tenant_admin: '테넌트 관리자',
   finance: '재무',
   pm: 'PM',
   viewer: '뷰어',
   auditor: '감사',
+  support: '지원',
+  security: '보안',
 };
 
 const roleColor: Record<string, string> = {
   admin: 'bg-purple-100 text-purple-800',
+  tenant_admin: 'bg-violet-100 text-violet-800',
   finance: 'bg-blue-100 text-blue-800',
   pm: 'bg-green-100 text-green-800',
   viewer: 'bg-gray-100 text-gray-700',
   auditor: 'bg-amber-100 text-amber-800',
+  support: 'bg-slate-100 text-slate-700',
+  security: 'bg-rose-100 text-rose-800',
 };
 
 export function SettingsPage() {
   const { org, members, templates } = useAppStore();
+  const { isAuthenticated, user } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [tab, setTab] = useState('org');
+  const currentPath = `${location.pathname}${location.search}${location.hash}`;
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      navigate('/login', { replace: true, state: { from: currentPath } });
+      return;
+    }
+
+    const role = user?.role;
+    if (!role) return;
+
+    // Keep operational settings (Firebase/feature toggles, member management) admin-scoped.
+    const allowed = role === 'admin' || role === 'tenant_admin';
+    if (!allowed) {
+      navigate(resolveHomePath(role, user?.defaultWorkspace ?? user?.lastWorkspace), { replace: true });
+    }
+  }, [currentPath, isAuthenticated, navigate, user?.defaultWorkspace, user?.lastWorkspace, user?.role]);
+
+  if (!isAuthenticated) return null;
+  if (!user) return null;
+  if (!(user.role === 'admin' || user.role === 'tenant_admin')) return null;
 
   return (
     <div className="space-y-5">
@@ -63,8 +98,14 @@ export function SettingsPage() {
           <TabsTrigger value="templates" className="gap-1.5">
             <BookOpen className="w-3.5 h-3.5" /> 원장 템플릿
           </TabsTrigger>
+          <TabsTrigger value="migration" className="gap-1.5">
+            <Upload className="w-3.5 h-3.5" /> 데이터 마이그레이션
+          </TabsTrigger>
           <TabsTrigger value="permissions" className="gap-1.5">
             <Shield className="w-3.5 h-3.5" /> 권한 설정
+          </TabsTrigger>
+          <TabsTrigger value="guide" className="gap-1.5">
+            <MessageCircle className="w-3.5 h-3.5" /> 사업비 가이드
           </TabsTrigger>
         </TabsList>
 
@@ -205,6 +246,11 @@ export function SettingsPage() {
           </div>
         </TabsContent>
 
+        {/* Data migration */}
+        <TabsContent value="migration">
+          <DataMigrationTab />
+        </TabsContent>
+
         {/* Permissions */}
         <TabsContent value="permissions">
           <Card>
@@ -256,6 +302,11 @@ export function SettingsPage() {
               </Table>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* Guide Q&A */}
+        <TabsContent value="guide">
+          <GuideUploadTab />
         </TabsContent>
       </Tabs>
     </div>

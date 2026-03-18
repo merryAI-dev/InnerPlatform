@@ -1,0 +1,86 @@
+{
+  "1": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": {
+      "ckpt_name": "v1-5-pruned-emaonly.safetensors"
+    }
+  },
+  "2": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "1",
+        1
+      ],
+      "text": "clean business workflow infographic, korean labels, white background, navy and emerald accent, title: 사업관리 플랫폼 기능 흐름도. very high readability, large Korean labels, clear arrows, no tiny text. Group 1 사용자 역할: 관리자, 사업담당자(PM), 실무자. Group 2 전체 업무 여정(왼쪽에서 오른쪽): 사업 등록/기획 -> 예산 수립 -> 인력 배치 -> 집행(지출/증빙) -> 주간 캐시플로 점검 -> 인건비 공지/인지 -> 월간 정산 마감 -> 감사/리포트. Group 3 관리자 주요 기능: 전사 대시보드, 프로젝트 관리, 예산/지출 관리, 승인 관리, 사용자 권한, 감사 로그, 설정. Group 4 포털 주요 기능: 온보딩, 내 사업 현황, 지출/변경 요청 제출, 주간 캐시플로 입력, 인건비 공지 확인, 교육/경력, 신규 사업 제안. Group 5 협업 접점: 게시판 공지, 승인 반려/재요청, 알림 패널, 상태 추적. Group 6 핵심 산출물: 실행 예산, 지출 세트, 주간 현금흐름, 인건비 상태, 월 마감 상태, 운영 리포트. Group 7 운영 성과: 누락 감소, 마감 예측 가능성 향상, 감사 대응 시간 단축. flat vector style, crisp lines, grid layout, professional presentation slide style"
+    }
+  },
+  "3": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "1",
+        1
+      ],
+      "text": "blurry, low contrast, photorealistic, 3d render, noisy background, handwriting, illegible text, overlapping boxes, distorted arrows, typo, watermark, logo, people"
+    }
+  },
+  "4": {
+    "class_type": "EmptyLatentImage",
+    "inputs": {
+      "width": 1792,
+      "height": 1024,
+      "batch_size": 1
+    }
+  },
+  "5": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": [
+        "1",
+        0
+      ],
+      "positive": [
+        "2",
+        0
+      ],
+      "negative": [
+        "3",
+        0
+      ],
+      "latent_image": [
+        "4",
+        0
+      ],
+      "seed": 428313221,
+      "steps": 35,
+      "cfg": 7,
+      "sampler_name": "dpmpp_2m",
+      "scheduler": "karras",
+      "denoise": 1
+    }
+  },
+  "6": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "5",
+        0
+      ],
+      "vae": [
+        "1",
+        2
+      ]
+    }
+  },
+  "7": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": [
+        "6",
+        0
+      ],
+      "filename_prefix": "BMP_Feature_Map"
+    }
+  }
+}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import {
   Bell, X, Clock, AlertTriangle, CheckCircle2, FileText,
@@ -11,10 +11,9 @@ import { Separator } from '../ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { useAppStore } from '../../data/store';
 import { computeMemberSummaries } from '../../data/participation-data';
-import { useAuth } from '../../data/auth-store';
-import { useFirebase } from '../../lib/firebase-context';
-import { featureFlags } from '../../config/feature-flags';
-import { listenNotificationsForRecipient, type PlatformNotificationDoc } from '../../lib/notifications-service';
+import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
+import { getSeoulTodayIso } from '../../platform/business-days';
+import { findWeekForDate, getMonthMondayWeeks } from '../../platform/cashflow-weeks';
 
 interface NotifItem {
   id: string;
@@ -27,75 +26,19 @@ interface NotifItem {
   read: boolean;
 }
 
-const SEEN_STORAGE_KEY = 'mysc-notifications-seen-v1';
-
-function loadSeenIds(): Set<string> {
-  try {
-    const raw = localStorage.getItem(SEEN_STORAGE_KEY);
-    if (!raw) return new Set();
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') return new Set();
-    return new Set(Object.keys(parsed));
-  } catch {
-    return new Set();
-  }
-}
-
-function markSeen(id: string) {
-  try {
-    const raw = localStorage.getItem(SEEN_STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : {};
-    parsed[id] = new Date().toISOString();
-    localStorage.setItem(SEEN_STORAGE_KEY, JSON.stringify(parsed));
-  } catch {
-    // no-op
-  }
-}
-
 export function NotificationPanel() {
   const navigate = useNavigate();
   const { transactions, projects, participationEntries } = useAppStore();
-  const { user } = useAuth();
-  const { db, isOnline, orgId } = useFirebase();
+  const { weeks: cashflowWeeks } = useCashflowWeeks();
   const [open, setOpen] = useState(false);
-  const [feed, setFeed] = useState<PlatformNotificationDoc[]>([]);
-  const [seenIds, setSeenIds] = useState<Set<string>>(() => loadSeenIds());
+  const fmtAmount = (value?: number | null) =>
+    Number.isFinite(value) ? Number(value).toLocaleString('ko-KR') : '-';
 
-  const firestoreEnabled = featureFlags.firestoreCoreEnabled && isOnline && !!db && !!user?.uid;
-
-  useEffect(() => {
-    if (!firestoreEnabled || !db || !user?.uid) {
-      setFeed([]);
-      return;
-    }
-    return listenNotificationsForRecipient(db, orgId, user.uid, (items) => setFeed(items));
-  }, [firestoreEnabled, db, orgId, user?.uid]);
+  const today = getSeoulTodayIso();
+  const dayOfWeek = new Date(today).getDay(); // 0=Sun..6=Sat
 
   const notifications = useMemo<NotifItem[]>(() => {
     const items: NotifItem[] = [];
-
-    // Activity feed (outbox-backed notifications)
-    feed.forEach((n) => {
-      const state = String(n.state || '').toUpperCase();
-      const type: NotifItem['type'] = state === 'SUBMITTED' ? 'approval' : 'system';
-      const severity = n.severity || (state === 'REJECTED' ? 'critical' : state === 'SUBMITTED' ? 'warning' : 'info');
-      const link = state === 'SUBMITTED'
-        ? '/approvals'
-        : n.projectId
-          ? `/projects/${n.projectId}`
-          : undefined;
-
-      items.push({
-        id: n.id,
-        type,
-        severity,
-        title: n.title,
-        description: n.description,
-        timestamp: n.createdAt,
-        link,
-        read: seenIds.has(n.id),
-      });
-    });
 
     // Pending approvals
     const pending = transactions.filter(t => t.state === 'SUBMITTED');
@@ -106,7 +49,7 @@ export function NotificationPanel() {
         type: 'approval',
         severity: 'warning',
         title: '승인 대기 거래',
-        description: `${t.counterparty} — ${t.amounts.bankAmount.toLocaleString()}원 (${proj?.name || ''})`,
+        description: `${t.counterparty} — ${fmtAmount(t.amounts?.bankAmount)}원 (${proj?.name || ''})`,
         timestamp: t.submittedAt || t.dateTime,
         link: proj ? `/projects/${proj.id}` : undefined,
         read: false,
@@ -161,13 +104,79 @@ export function NotificationPanel() {
       });
     });
 
+    // Weekly deadline reminder (Thu=4, Fri=5)
+    if (dayOfWeek === 4 || dayOfWeek === 5) {
+      const monthWeeks = getMonthMondayWeeks(today.slice(0, 7));
+      const currentWeek = findWeekForDate(today, monthWeeks);
+      if (currentWeek) {
+        const activeProjectIds = projects
+          .filter(p => p.phase === 'CONFIRMED' && p.status === 'IN_PROGRESS')
+          .map(p => p.id);
+        const thisWeekTxProjectIds = new Set(
+          transactions
+            .filter(t => t.dateTime >= currentWeek.weekStart && t.dateTime <= currentWeek.weekEnd)
+            .map(t => t.projectId),
+        );
+        const thisWeekSheetProjectIds = new Set(
+          cashflowWeeks
+            .filter(w => w.yearMonth === today.slice(0, 7) && w.weekNo === currentWeek.weekNo)
+            .map(w => w.projectId),
+        );
+        const missingIds = activeProjectIds.filter(
+          pid => !thisWeekTxProjectIds.has(pid) && !thisWeekSheetProjectIds.has(pid),
+        );
+        if (missingIds.length > 0) {
+          items.push({
+            id: 'deadline-weekly',
+            type: 'system',
+            severity: 'warning',
+            title: '주간 마감 임박',
+            description: `미입력 사업 ${missingIds.length}건 — 금주 사업비 입력을 완료해주세요`,
+            timestamp: today,
+            link: '/cashflow',
+            read: false,
+          });
+        }
+      }
+    }
+
+    // Variance flags (OPEN)
+    const openFlags = cashflowWeeks.filter(w => w.varianceFlag?.status === 'OPEN');
+    openFlags.forEach(w => {
+      const proj = projects.find(p => p.id === w.projectId);
+      items.push({
+        id: `vflag-${w.id}`,
+        type: 'system',
+        severity: 'critical',
+        title: '편차 플래그 확인요청',
+        description: `${proj?.name || w.projectId} — ${w.yearMonth} ${w.weekNo}주: "${w.varianceFlag?.reason || ''}"`,
+        timestamp: w.varianceFlag?.flaggedAt || today,
+        link: '/cashflow',
+        read: false,
+      });
+    });
+
+    // Approved transactions notification (info)
+    const recentApproved = transactions.filter(t => t.state === 'APPROVED' && t.approvedAt);
+    recentApproved.slice(0, 3).forEach(t => {
+      const proj = projects.find(p => p.id === t.projectId);
+      items.push({
+        id: `approved-${t.id}`,
+        type: 'approval',
+        severity: 'info',
+        title: '거래 승인됨',
+        description: `${t.counterparty} — ${fmtAmount(t.amounts?.bankAmount)}원 (${proj?.name || ''})`,
+        timestamp: t.approvedAt || t.dateTime,
+        link: '/evidence',
+        read: false,
+      });
+    });
+
     return items.sort((a, b) => {
       const severityOrder = { critical: 0, warning: 1, info: 2 };
-      const sev = severityOrder[a.severity] - severityOrder[b.severity];
-      if (sev !== 0) return sev;
-      return String(b.timestamp || '').localeCompare(String(a.timestamp || ''));
+      return severityOrder[a.severity] - severityOrder[b.severity];
     });
-  }, [feed, seenIds, transactions, projects, participationEntries]);
+  }, [transactions, projects, participationEntries, cashflowWeeks, today, dayOfWeek]);
 
   const criticalCount = notifications.filter(n => n.severity === 'critical').length;
   const totalCount = notifications.length;
@@ -180,28 +189,22 @@ export function NotificationPanel() {
   };
 
   const severityStyles = {
-    critical: { dot: 'bg-rose-500', bg: 'bg-rose-50/50', border: 'border-l-rose-500' },
-    warning: { dot: 'bg-amber-500', bg: 'bg-amber-50/30', border: 'border-l-amber-500' },
-    info: { dot: 'bg-blue-500', bg: 'bg-blue-50/30', border: 'border-l-blue-500' },
+    critical: { dot: 'bg-rose-500', bg: 'bg-rose-500/10 dark:bg-rose-500/15', border: 'border-l-rose-500' },
+    warning: { dot: 'bg-amber-500', bg: 'bg-amber-500/10 dark:bg-amber-500/15', border: 'border-l-amber-500' },
+    info: { dot: 'bg-blue-500', bg: 'bg-blue-500/10 dark:bg-blue-500/15', border: 'border-l-blue-500' },
   };
 
-  const handleGo = (link?: string) => {
-    if (link) {
-      navigate(link);
-      setOpen(false);
-    }
+  const fallbackByType: Record<NotifItem['type'], string> = {
+    approval: '/approvals',
+    evidence: '/evidence',
+    risk: '/participation',
+    system: '/approvals',
   };
 
-  const handleClickItem = (item: NotifItem) => {
-    if (!item.read) {
-      markSeen(item.id);
-      setSeenIds((prev) => {
-        const next = new Set(prev);
-        next.add(item.id);
-        return next;
-      });
-    }
-    handleGo(item.link);
+  const handleGo = (notif: NotifItem) => {
+    const target = notif.link || fallbackByType[notif.type];
+    navigate(target);
+    setOpen(false);
   };
 
   return (
@@ -219,14 +222,14 @@ export function NotificationPanel() {
           )}
         </Button>
       </SheetTrigger>
-      <SheetContent className="w-[420px] p-0 flex flex-col">
+      <SheetContent className="glass-heavy w-[420px] p-0 flex flex-col">
         {/* Header */}
-        <div className="px-5 py-4 border-b border-border/60">
+        <div className="px-5 py-4 border-b border-glass-border">
           <div className="flex items-center justify-between mb-1">
             <SheetTitle className="text-[15px]" style={{ fontWeight: 700 }}>알림 센터</SheetTitle>
             <div className="flex items-center gap-2">
               {criticalCount > 0 && (
-                <Badge className="bg-rose-500 text-white text-[10px]" style={{ fontWeight: 700 }}>
+                <Badge className="border border-rose-300/40 bg-rose-500/30 text-rose-100 text-[10px]" style={{ fontWeight: 700 }}>
                   긴급 {criticalCount}
                 </Badge>
               )}
@@ -261,16 +264,16 @@ export function NotificationPanel() {
               return (
                 <div
                   key={n.id}
-                  className={`flex items-start gap-3 p-3 rounded-lg border-l-[3px] cursor-pointer transition-colors hover:bg-muted/40 ${sev.border} ${sev.bg}`}
-                  onClick={() => handleClickItem(n)}
+                  className={`flex items-start gap-3 p-3 rounded-lg border-l-[3px] cursor-pointer transition-colors hover:bg-white/10 ${sev.border} ${sev.bg}`}
+                  onClick={() => handleGo(n)}
                 >
-                  <div className="w-7 h-7 rounded-md bg-white/80 flex items-center justify-center shrink-0 border border-border/40 mt-0.5">
+                  <div className="w-7 h-7 rounded-md bg-white/40 dark:bg-white/10 backdrop-blur-sm flex items-center justify-center shrink-0 border border-white/20 mt-0.5">
                     <Icon className="w-3.5 h-3.5 text-muted-foreground" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
                       <span className="text-[12px]" style={{ fontWeight: 600 }}>{n.title}</span>
-                      {!n.read && <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${sev.dot}`} />}
+                      <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${sev.dot}`} />
                     </div>
                     <p className="text-[11px] text-muted-foreground mt-0.5 line-clamp-2">{n.description}</p>
                     <p className="text-[10px] text-muted-foreground/60 mt-1">{n.timestamp.slice(0, 10)}</p>
@@ -290,10 +293,10 @@ export function NotificationPanel() {
               return (
                 <div
                   key={n.id}
-                  className={`flex items-start gap-3 p-3 rounded-lg border-l-[3px] cursor-pointer transition-colors hover:bg-muted/40 ${sev.border} ${sev.bg}`}
-                  onClick={() => handleClickItem(n)}
+                  className={`flex items-start gap-3 p-3 rounded-lg border-l-[3px] cursor-pointer transition-colors hover:bg-white/10 ${sev.border} ${sev.bg}`}
+                  onClick={() => handleGo(n)}
                 >
-                  <div className="w-7 h-7 rounded-md bg-white/80 flex items-center justify-center shrink-0 border border-border/40 mt-0.5">
+                  <div className="w-7 h-7 rounded-md bg-white/40 dark:bg-white/10 backdrop-blur-sm flex items-center justify-center shrink-0 border border-white/20 mt-0.5">
                     <Icon className="w-3.5 h-3.5 text-rose-500" />
                   </div>
                   <div className="flex-1 min-w-0">
@@ -312,10 +315,10 @@ export function NotificationPanel() {
               return (
                 <div
                   key={n.id}
-                  className={`flex items-start gap-3 p-3 rounded-lg border-l-[3px] cursor-pointer transition-colors hover:bg-muted/40 ${sev.border} ${sev.bg}`}
-                  onClick={() => handleClickItem(n)}
+                  className={`flex items-start gap-3 p-3 rounded-lg border-l-[3px] cursor-pointer transition-colors hover:bg-white/10 ${sev.border} ${sev.bg}`}
+                  onClick={() => handleGo(n)}
                 >
-                  <div className="w-7 h-7 rounded-md bg-white/80 flex items-center justify-center shrink-0 border border-border/40 mt-0.5">
+                  <div className="w-7 h-7 rounded-md bg-white/40 dark:bg-white/10 backdrop-blur-sm flex items-center justify-center shrink-0 border border-white/20 mt-0.5">
                     <Clock className="w-3.5 h-3.5 text-amber-500" />
                   </div>
                   <div className="flex-1 min-w-0">

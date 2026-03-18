@@ -1,7 +1,8 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import {
   Lock, SlidersHorizontal, ChevronDown, ChevronRight,
-  Calculator, Wallet, TrendingUp, Info, ExternalLink,
+  Calculator, Wallet, TrendingUp, Info,
+  ArrowUp, ArrowDown, Plus, Trash2, Settings,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
@@ -14,22 +15,40 @@ import {
 } from '../ui/tooltip';
 import { PageHeader } from '../layout/PageHeader';
 import { usePortalStore } from '../../data/portal-store';
+import { toast } from 'sonner';
 import {
-  BUDGET_ROWS, BUDGET_AUX_ROWS, BUDGET_META,
+  BUDGET_META,
   fmtKRW, fmtPercent, fmtShort,
   type BudgetRow,
 } from '../../data/budget-data';
+import type { BudgetPlanRow, BudgetCodeEntry, BudgetCodeRename } from '../../data/types';
+import { parseNumber } from '../../platform/csv-utils';
+import { SETTLEMENT_COLUMNS } from '../../platform/settlement-csv';
 
 // ═══════════════════════════════════════════════════════════════
 // PortalBudget — 예산총괄 (리디자인 — 모바일 우선, 깨짐 방지)
 // ═══════════════════════════════════════════════════════════════
 
-const GROUP_LABELS: Record<string, string> = {
-  g1: 'MYSC 인건비',
-  g2: '직접사업비',
-  g3: '업무추진비',
-  g4: '팀지원금',
-};
+function groupIdForEntry(name: string): string {
+  return normalizeBudgetLabel(name) || '기타';
+}
+
+function normalizeBudgetLabel(value: string): string {
+  return String(value || '')
+    .replace(/^\s*\d+(?:[.\-]\d+)?\s*/, '')
+    .replace(/^[.\-]+\s*/, '')
+    .trim();
+}
+
+function formatBudgetCodeLabel(_index: number, name: string): string {
+  const trimmed = String(name || '').trim();
+  return trimmed || '비목 미입력';
+}
+
+function formatSubCodeLabel(_codeIndex: number, _subIndex: number, name: string): string {
+  const trimmed = String(name || '').trim();
+  return trimmed || '세목 미입력';
+}
 
 // 소진율 색상
 function burnColor(rate: number): string {
@@ -40,12 +59,28 @@ function burnColor(rate: number): string {
 }
 
 export function PortalBudget() {
-  const { myProject } = usePortalStore();
+  const {
+    myProject,
+    expenseSheetRows,
+    budgetPlanRows,
+    budgetCodeBook,
+    saveBudgetPlanRows,
+    saveBudgetCodeBook,
+  } = usePortalStore();
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [selectedRow, setSelectedRow] = useState<BudgetRow | null>(null);
-  const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [editMode, setEditMode] = useState(false);
+  const [codeBookMode, setCodeBookMode] = useState(false);
+  const [draftRows, setDraftRows] = useState<Array<{
+    budgetCode: string;
+    subCode: string;
+    initialBudget: string;
+    revisedBudget: string;
+    note: string;
+  }>>([]);
+  const [draftCodeBook, setDraftCodeBook] = useState<BudgetCodeEntry[]>([]);
 
-  const rows = BUDGET_ROWS;
   const meta = BUDGET_META;
 
   const toggleGroup = (gid: string) => {
@@ -56,21 +91,363 @@ export function PortalBudget() {
     });
   };
 
-  // 그룹별 정리
+  const planMap = useMemo(() => {
+    const map = new Map<string, BudgetPlanRow>();
+    (budgetPlanRows || []).forEach((row) => {
+      const key = `${normalizeBudgetLabel(row.budgetCode)}|${normalizeBudgetLabel(row.subCode)}`;
+      map.set(key, row);
+    });
+    return map;
+  }, [budgetPlanRows]);
+
+  const spentMap = useMemo(() => {
+    const map = new Map<string, number>();
+    if (!expenseSheetRows) return map;
+    const budgetCodeIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '비목');
+    const subCodeIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '세목');
+    const bankAmountIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '통장에 찍힌 입/출금액');
+    if (budgetCodeIdx < 0 || subCodeIdx < 0 || bankAmountIdx < 0) return map;
+    for (const row of expenseSheetRows) {
+      const budgetCode = normalizeBudgetLabel(String(row.cells[budgetCodeIdx] || '').trim());
+      const subCode = normalizeBudgetLabel(String(row.cells[subCodeIdx] || '').trim());
+      if (!budgetCode || !subCode) continue;
+      const amount = parseNumber(String(row.cells[bankAmountIdx] || '')) ?? 0;
+      if (amount === 0) continue;
+      const key = `${budgetCode}|${subCode}`;
+      map.set(key, (map.get(key) || 0) + amount);
+    }
+    return map;
+  }, [expenseSheetRows]);
+
+  const activeCodeBook = useMemo(
+    () => budgetCodeBook,
+    [budgetCodeBook],
+  );
+
+  const formatInput = useCallback((value: string) => {
+    const num = parseNumber(value);
+    if (num == null) return '';
+    return num.toLocaleString('ko-KR');
+  }, []);
+
+  const formatInputLive = useCallback((value: string) => {
+    const trimmed = value.replace(/[^0-9.,-]/g, '');
+    return formatInput(trimmed);
+  }, [formatInput]);
+
+  const syncDraftRowCode = useCallback((prevCode: string, nextCode: string) => {
+    if (!editMode) return;
+    setDraftRows((prev) => prev.map((r) => (
+      r.budgetCode === prevCode ? { ...r, budgetCode: nextCode } : r
+    )));
+  }, [editMode]);
+
+  const syncDraftRowSubCode = useCallback((budgetCode: string, prevSub: string, nextSub: string) => {
+    if (!editMode) return;
+    setDraftRows((prev) => prev.map((r) => (
+      r.budgetCode === budgetCode && r.subCode === prevSub ? { ...r, subCode: nextSub } : r
+    )));
+  }, [editMode]);
+
+  const addDraftRow = useCallback((budgetCode: string, subCode: string) => {
+    setDraftRows((prev) => ([
+      ...prev,
+      { budgetCode, subCode, initialBudget: '', revisedBudget: '', note: '' },
+    ]));
+  }, []);
+
+  const removeDraftRows = useCallback((budgetCode: string, subCode?: string) => {
+    setDraftRows((prev) => prev.filter((r) => {
+      if (r.budgetCode !== budgetCode) return true;
+      if (subCode == null) return false;
+      return r.subCode !== subCode;
+    }));
+  }, []);
+
+  const updateBudgetCode = useCallback((idx: number, nextCode: string) => {
+    setDraftCodeBook((prev) => {
+      const copy = prev.map((c) => ({ code: c.code, subCodes: [...c.subCodes] }));
+      const before = copy[idx];
+      if (!before) return prev;
+      copy[idx] = { ...before, code: nextCode };
+      if (before.code !== nextCode) syncDraftRowCode(before.code, nextCode);
+      return copy;
+    });
+  }, [syncDraftRowCode]);
+
+  const updateSubCode = useCallback((idx: number, subIdx: number, nextSub: string) => {
+    setDraftCodeBook((prev) => {
+      const copy = prev.map((c) => ({ code: c.code, subCodes: [...c.subCodes] }));
+      const entry = copy[idx];
+      if (!entry) return prev;
+      const before = entry.subCodes[subIdx] || '';
+      entry.subCodes[subIdx] = nextSub;
+      if (before !== nextSub) syncDraftRowSubCode(entry.code, before, nextSub);
+      return copy;
+    });
+  }, [syncDraftRowSubCode]);
+
+  const addBudgetCode = useCallback(() => {
+    setDraftCodeBook((prev) => ([...prev, { code: '', subCodes: [''] }]));
+    addDraftRow('', '');
+  }, [addDraftRow]);
+
+  const removeBudgetCode = useCallback((idx: number) => {
+    setDraftCodeBook((prev) => {
+      const entry = prev[idx];
+      const next = prev.filter((_, i) => i !== idx);
+      if (entry?.code) removeDraftRows(entry.code);
+      return next;
+    });
+  }, [removeDraftRows]);
+
+  const addSubCode = useCallback((idx: number) => {
+    setDraftCodeBook((prev) => {
+      const copy = prev.map((c) => ({ code: c.code, subCodes: [...c.subCodes] }));
+      const entry = copy[idx];
+      if (!entry) return prev;
+      entry.subCodes.push('');
+      addDraftRow(entry.code, '');
+      return copy;
+    });
+  }, [addDraftRow]);
+
+  const removeSubCode = useCallback((idx: number, subIdx: number) => {
+    setDraftCodeBook((prev) => {
+      const copy = prev.map((c) => ({ code: c.code, subCodes: [...c.subCodes] }));
+      const entry = copy[idx];
+      if (!entry) return prev;
+      const removed = entry.subCodes[subIdx] || '';
+      entry.subCodes = entry.subCodes.filter((_, i) => i !== subIdx);
+      if (entry.code && removed) removeDraftRows(entry.code, removed);
+      return copy;
+    });
+  }, [removeDraftRows]);
+
+  const startEdit = useCallback(() => {
+    const next = budgetCodeBook.flatMap((entry) => (
+      entry.subCodes.map((subCode) => {
+        const key = `${entry.code}|${subCode}`;
+        const existing = planMap.get(key);
+        return {
+          budgetCode: entry.code,
+          subCode,
+          initialBudget: existing?.initialBudget ? existing.initialBudget.toLocaleString('ko-KR') : '',
+          revisedBudget: existing?.revisedBudget ? existing.revisedBudget.toLocaleString('ko-KR') : '',
+          note: existing?.note || '',
+        };
+      })
+    ));
+    setDraftRows(next);
+    setEditMode(true);
+  }, [planMap, budgetCodeBook]);
+
+  const startCodeBookEdit = useCallback(() => {
+    setDraftCodeBook(budgetCodeBook.map((c) => ({ code: c.code, subCodes: [...c.subCodes] })));
+    setCodeBookMode(true);
+  }, [budgetCodeBook]);
+
+  const cancelEdit = useCallback(() => {
+    setEditMode(false);
+    setCodeBookMode(false);
+    setDraftRows([]);
+    setDraftCodeBook([]);
+  }, []);
+
+  const buildCodeBookRenames = useCallback((): BudgetCodeRename[] => {
+    if (!codeBookMode) return [];
+    const renames: BudgetCodeRename[] = [];
+    draftCodeBook.forEach((nextEntry, idx) => {
+      const prevEntry = budgetCodeBook[idx];
+      if (!prevEntry) return;
+      const prevCode = normalizeBudgetLabel(prevEntry.code);
+      const nextCode = normalizeBudgetLabel(nextEntry.code);
+      if (!prevCode || !nextCode) return;
+      const prevSubs = prevEntry.subCodes || [];
+      const nextSubs = nextEntry.subCodes || [];
+      const max = Math.min(prevSubs.length, nextSubs.length);
+      for (let sidx = 0; sidx < max; sidx += 1) {
+        const prevSub = normalizeBudgetLabel(prevSubs[sidx]);
+        const nextSub = normalizeBudgetLabel(nextSubs[sidx]);
+        if (!prevSub || !nextSub) continue;
+        if (prevCode !== nextCode || prevSub !== nextSub) {
+          renames.push({ fromCode: prevCode, fromSub: prevSub, toCode: nextCode, toSub: nextSub });
+        }
+      }
+    });
+    return renames;
+  }, [budgetCodeBook, draftCodeBook, codeBookMode]);
+
+  const saveSettings = useCallback(async () => {
+    if (!saveBudgetPlanRows && !saveBudgetCodeBook) return;
+    const normalized: BudgetPlanRow[] = editMode ? draftRows.map((row) => {
+      const budgetCode = normalizeBudgetLabel(String(row.budgetCode || '').trim());
+      const subCode = normalizeBudgetLabel(String(row.subCode || '').trim());
+      const initial = parseNumber(row.initialBudget) ?? 0;
+      const revised = parseNumber(row.revisedBudget) ?? 0;
+      return {
+        budgetCode,
+        subCode,
+        initialBudget: initial,
+        revisedBudget: revised,
+        ...(row.note ? { note: row.note } : {}),
+      };
+    }).filter((row) => row.budgetCode && row.subCode)
+      .filter((row) => row.initialBudget > 0 || (row.revisedBudget ?? 0) > 0 || (row.note && row.note.trim() !== ''))
+      : [];
+
+    setSettingsSaving(true);
+    try {
+      if (codeBookMode && saveBudgetCodeBook && draftCodeBook.length > 0) {
+        const renames = buildCodeBookRenames();
+        await saveBudgetCodeBook(draftCodeBook, renames);
+      }
+      if (editMode) {
+        await saveBudgetPlanRows(normalized);
+      }
+      setEditMode(false);
+      setCodeBookMode(false);
+      setDraftRows([]);
+      setDraftCodeBook([]);
+      toast.success(codeBookMode && !editMode ? '비목/세목이 저장되었습니다.' : '예산이 저장되었습니다.');
+    } catch (err) {
+      console.error('[PortalBudget] save failed:', err);
+      toast.error(codeBookMode && !editMode ? '비목/세목 저장에 실패했습니다.' : '예산 저장에 실패했습니다.');
+    } finally {
+      setSettingsSaving(false);
+    }
+  }, [draftRows, draftCodeBook, saveBudgetPlanRows, saveBudgetCodeBook, editMode, codeBookMode, buildCodeBookRenames]);
+
+  const budgetItems = useMemo(() => {
+    const items: BudgetRow[] = activeCodeBook.flatMap((entry, codeIdx) => (
+      entry.subCodes.map((subCode, subIdx) => {
+        const lookupKey = `${normalizeBudgetLabel(entry.code)}|${normalizeBudgetLabel(subCode)}`;
+        const plan = planMap.get(lookupKey);
+        const initial = plan?.initialBudget ?? 0;
+        const revised = plan?.revisedBudget ?? 0;
+        const effective = revised > 0 ? revised : initial;
+        const spent = spentMap.get(lookupKey) ?? 0;
+        const balance = effective - spent;
+        const burnRate = effective > 0 ? spent / effective : 0;
+        const codeLabel = formatBudgetCodeLabel(codeIdx, entry.code);
+        const subLabel = formatSubCodeLabel(codeIdx, subIdx, subCode);
+        const groupId = groupIdForEntry(entry.code);
+        return {
+          id: lookupKey,
+          projectId: myProject?.id || '',
+          category: groupId,
+          budgetCode: codeLabel,
+          subCode: subLabel,
+          calcDesc: '',
+          initialBudget: initial,
+          lastYearBudget: 0,
+          comparison: '',
+          revisedAug: revised,
+          revisedOct: 0,
+          planAmount: 0,
+          composition: 0,
+          spent,
+          vatPurchase: 0,
+          burnRate,
+          balance,
+          balanceOct: 0,
+          note: plan?.note || '',
+          rowType: 'ITEM',
+          fixType: 'NONE',
+          groupId,
+          order: 0,
+        } as BudgetRow;
+      })
+    ));
+
+    const totalEffective = items.reduce((sum, row) => {
+      const effective = row.revisedAug > 0 ? row.revisedAug : row.initialBudget;
+      return sum + effective;
+    }, 0);
+
+    return items.map((row) => {
+      const effective = row.revisedAug > 0 ? row.revisedAug : row.initialBudget;
+      return {
+        ...row,
+        composition: totalEffective > 0 ? effective / totalEffective : 0,
+      };
+    });
+  }, [planMap, spentMap, myProject?.id, activeCodeBook]);
+
   const groups = useMemo(() => {
     const groupMap: Record<string, { subtotal: BudgetRow; items: BudgetRow[] }> = {};
     const ungrouped: BudgetRow[] = [];
-    rows.forEach(r => {
-      if (r.rowType === 'TOTAL') return;
-      if (!r.groupId) { ungrouped.push(r); return; }
-      if (!groupMap[r.groupId]) groupMap[r.groupId] = { subtotal: r, items: [] };
-      if (r.rowType === 'SUBTOTAL') groupMap[r.groupId].subtotal = r;
-      else groupMap[r.groupId].items.push(r);
+    budgetItems.forEach((row) => {
+      if (!row.groupId) { ungrouped.push(row); return; }
+      if (!groupMap[row.groupId]) {
+        groupMap[row.groupId] = {
+          subtotal: {
+            ...row,
+            id: `${row.groupId}-subtotal`,
+            budgetCode: '',
+            subCode: '',
+            rowType: 'SUBTOTAL',
+            fixType: 'NONE',
+            spent: 0,
+            burnRate: 0,
+            balance: 0,
+            initialBudget: 0,
+            revisedAug: 0,
+          } as BudgetRow,
+          items: [],
+        };
+      }
+      groupMap[row.groupId].items.push(row);
     });
-    return { groupMap, ungrouped };
-  }, [rows]);
 
-  const total = rows.find(r => r.rowType === 'TOTAL');
+    Object.values(groupMap).forEach((group) => {
+      const initialSum = group.items.reduce((s, r) => s + (r.initialBudget || 0), 0);
+      const revisedSum = group.items.reduce((s, r) => s + (r.revisedAug || 0), 0);
+      const effectiveSum = group.items.reduce((s, r) => s + ((r.revisedAug > 0 ? r.revisedAug : r.initialBudget) || 0), 0);
+      const spentSum = group.items.reduce((s, r) => s + (r.spent || 0), 0);
+      group.subtotal = {
+        ...group.subtotal,
+        initialBudget: initialSum,
+        revisedAug: revisedSum,
+        spent: spentSum,
+        balance: effectiveSum - spentSum,
+        burnRate: effectiveSum > 0 ? spentSum / effectiveSum : 0,
+      };
+    });
+
+    return { groupMap, ungrouped };
+  }, [budgetItems]);
+
+  const total = useMemo(() => {
+    const initialSum = budgetItems.reduce((s, r) => s + (r.initialBudget || 0), 0);
+    const revisedSum = budgetItems.reduce((s, r) => s + (r.revisedAug || 0), 0);
+    const effectiveSum = budgetItems.reduce((s, r) => s + ((r.revisedAug > 0 ? r.revisedAug : r.initialBudget) || 0), 0);
+    const spentSum = budgetItems.reduce((s, r) => s + (r.spent || 0), 0);
+    return {
+      initialBudget: initialSum,
+      revisedAug: revisedSum,
+      spent: spentSum,
+      balance: effectiveSum - spentSum,
+      burnRate: effectiveSum > 0 ? spentSum / effectiveSum : 0,
+      effectiveBudget: effectiveSum,
+    };
+  }, [budgetItems]);
+
+  const auxRows = useMemo(() => {
+    const effectiveTotal = total.effectiveBudget || 0;
+    return Object.entries(groups.groupMap).map(([gid, group]) => {
+      const effective = group.subtotal.revisedAug > 0 ? group.subtotal.revisedAug : group.subtotal.initialBudget;
+      return {
+        label: gid || '기타',
+        amount: effective,
+        ratio: effectiveTotal > 0 ? effective / effectiveTotal : 0,
+      };
+    });
+  }, [groups.groupMap, total.effectiveBudget]);
+
+  const getEffectiveBudget = useCallback((row: BudgetRow) => {
+    return row.revisedAug > 0 ? row.revisedAug : row.initialBudget;
+  }, []);
 
   return (
     <TooltipProvider delayDuration={200}>
@@ -78,18 +455,114 @@ export function PortalBudget() {
         <PageHeader
           icon={Calculator}
           iconGradient="linear-gradient(135deg, #0d9488 0%, #059669 100%)"
-          title="예산총괄"
+          title="예산 편집"
           description={myProject ? myProject.name : '예산 현황'}
           badge={`${meta.year}년`}
+          actions={(
+            <div className="flex items-center gap-2">
+              {editMode ? (
+                <>
+                  <Button variant="outline" size="sm" className="h-8 text-[12px]" onClick={cancelEdit}>
+                    취소
+                  </Button>
+                  <Button size="sm" className="h-8 text-[12px]" onClick={saveSettings} disabled={settingsSaving}>
+                    {settingsSaving ? '저장 중...' : '저장'}
+                  </Button>
+                </>
+              ) : !codeBookMode ? (
+                <>
+                  <Button variant="default" size="sm" className="h-8 text-[12px] shadow-sm" onClick={startEdit}>
+                    예산 편집
+                  </Button>
+                  <Button variant="default" size="sm" className="h-8 text-[12px] gap-1 shadow-sm" onClick={startCodeBookEdit}>
+                    <Settings className="w-3.5 h-3.5" />
+                    비목/세목 수정
+                  </Button>
+                </>
+              ) : null}
+            </div>
+          )}
         />
+
+        <Dialog open={codeBookMode} onOpenChange={(open) => !open && cancelEdit()}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle className="text-[14px]">비목/세목 수정</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] text-muted-foreground">비목/세목을 추가하세요.</p>
+                <Button variant="outline" size="sm" className="h-7 text-[11px] gap-1" onClick={addBudgetCode}>
+                  <Plus className="w-3.5 h-3.5" />
+                  비목 추가
+                </Button>
+              </div>
+              <div className="space-y-3">
+                {draftCodeBook.map((entry, idx) => (
+                  <div key={`code-${idx}`} className="rounded-md border border-border/60 p-3 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-muted-foreground min-w-[24px]">{idx + 1}</span>
+                      <input
+                        type="text"
+                        value={entry.code}
+                        placeholder="비목명"
+                        className="flex-1 bg-transparent outline-none text-[11px] px-2 py-1 border rounded"
+                        onChange={(e) => updateBudgetCode(idx, e.target.value)}
+                      />
+                      <Button variant="outline" size="sm" className="h-7 text-[10px] gap-1" onClick={() => addSubCode(idx)}>
+                        <Plus className="w-3 h-3" />
+                        세목 추가
+                      </Button>
+                      <Button variant="outline" size="sm" className="h-7 text-[10px] gap-1" onClick={() => removeBudgetCode(idx)}>
+                        <Trash2 className="w-3 h-3" />
+                        비목 삭제
+                      </Button>
+                    </div>
+                    <div className="space-y-1">
+                      {entry.subCodes.map((sub, sidx) => (
+                        <div key={`sub-${idx}-${sidx}`} className="flex items-center gap-2">
+                          <span className="text-[10px] text-muted-foreground min-w-[28px]">{idx + 1}-{sidx + 1}</span>
+                          <input
+                            type="text"
+                            value={sub}
+                            placeholder="세목명"
+                            className="flex-1 bg-transparent outline-none text-[11px] px-2 py-1 border rounded"
+                            onChange={(e) => updateSubCode(idx, sidx, e.target.value)}
+                          />
+                          <Button variant="outline" size="sm" className="h-7 text-[10px]" onClick={() => removeSubCode(idx, sidx)}>
+                            <Trash2 className="w-3 h-3" />
+                          </Button>
+                        </div>
+                      ))}
+                      {entry.subCodes.length === 0 && (
+                        <p className="text-[10px] text-muted-foreground">세목이 없습니다.</p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+                {draftCodeBook.length === 0 && (
+                  <p className="text-[11px] text-muted-foreground">비목을 추가해 주세요.</p>
+                )}
+              </div>
+              <div className="flex justify-end gap-2 pt-2 border-t border-border/60">
+                <Button variant="outline" size="sm" className="h-8 text-[12px]" onClick={cancelEdit}>
+                  취소
+                </Button>
+                <Button size="sm" className="h-8 text-[12px]" onClick={saveSettings} disabled={settingsSaving}>
+                  {settingsSaving ? '저장 중...' : '저장'}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {/* KPI Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           {[
-            { label: '총 예산', value: fmtShort(total?.initialBudget || 0), sub: fmtKRW(total?.initialBudget || 0) + '원', gradient: 'linear-gradient(135deg, #4f46e5, #7c3aed)', icon: Calculator },
-            { label: '집행액', value: fmtShort(total?.spent || 0), sub: fmtKRW(total?.spent || 0) + '원', gradient: 'linear-gradient(135deg, #e11d48, #f43f5e)', icon: Wallet },
-            { label: '잔액', value: fmtShort(total?.balance || 0), sub: fmtKRW(total?.balance || 0) + '원', gradient: 'linear-gradient(135deg, #0d9488, #059669)', icon: TrendingUp },
-            { label: '소진율', value: fmtPercent(total?.burnRate || 0), sub: `${fmtKRW(total?.spent || 0)} / ${fmtKRW(total?.initialBudget || 0)}`, gradient: `linear-gradient(135deg, ${burnColor(total?.burnRate || 0)}, ${burnColor(total?.burnRate || 0)}88)`, icon: TrendingUp },
+            { label: '총 예산', value: fmtShort(total.effectiveBudget || 0), sub: fmtKRW(total.effectiveBudget || 0) + '원', gradient: 'linear-gradient(135deg, #4f46e5, #7c3aed)', icon: Calculator },
+            { label: '집행액', value: fmtShort(total.spent || 0), sub: fmtKRW(total.spent || 0) + '원', gradient: 'linear-gradient(135deg, #e11d48, #f43f5e)', icon: Wallet },
+            { label: '잔액', value: fmtShort(total.balance || 0), sub: fmtKRW(total.balance || 0) + '원', gradient: 'linear-gradient(135deg, #0d9488, #059669)', icon: TrendingUp },
+            { label: '소진율', value: fmtPercent(total.burnRate || 0), sub: `${fmtKRW(total.spent || 0)} / ${fmtKRW(total.effectiveBudget || 0)}`, gradient: `linear-gradient(135deg, ${burnColor(total.burnRate || 0)}, ${burnColor(total.burnRate || 0)}88)`, icon: TrendingUp },
           ].map(k => (
             <Card key={k.label} className="overflow-hidden">
               <CardContent className="p-3">
@@ -127,24 +600,50 @@ export function PortalBudget() {
           </CardContent>
         </Card>
 
+        {/* 보조 테이블 */}
+        <Card>
+          <CardHeader className="pb-2"><CardTitle className="text-[12px]">예산 구성</CardTitle></CardHeader>
+          <CardContent className="p-0">
+            <div className="divide-y divide-border/50">
+              {auxRows.map((r, i) => (
+                <div key={i} className="flex items-center justify-between px-4 py-2.5 text-[11px]">
+                  <span>{r.label}</span>
+                  <div className="flex items-center gap-4" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                    <span style={{ fontWeight: 500 }}>{fmtKRW(r.amount)}원</span>
+                    <span className="text-muted-foreground w-[50px] text-right">{fmtPercent(r.ratio)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
         {/* 소진율 바 총괄 */}
         <Card>
           <CardContent className="p-3">
             <div className="flex items-center justify-between mb-2">
               <span className="text-[11px]" style={{ fontWeight: 600 }}>전체 소진율</span>
-              <span className="text-[13px]" style={{ fontWeight: 700, color: burnColor(total?.burnRate || 0) }}>
-                {fmtPercent(total?.burnRate || 0)}
+              <span className="text-[13px]" style={{ fontWeight: 700, color: burnColor(total.burnRate || 0) }}>
+                {fmtPercent(total.burnRate || 0)}
               </span>
             </div>
             <div className="w-full h-3 rounded-full bg-muted overflow-hidden">
               <div className="h-full rounded-full transition-all duration-500" style={{
-                width: `${Math.min((total?.burnRate || 0) * 100, 100)}%`,
-                background: `linear-gradient(90deg, ${burnColor(total?.burnRate || 0)}, ${burnColor(total?.burnRate || 0)}cc)`,
+                width: `${Math.min((total.burnRate || 0) * 100, 100)}%`,
+                background: `linear-gradient(90deg, ${burnColor(total.burnRate || 0)}, ${burnColor(total.burnRate || 0)}cc)`,
               }} />
             </div>
             <div className="flex justify-between mt-1.5 text-[9px] text-muted-foreground" style={{ fontVariantNumeric: 'tabular-nums' }}>
-              <span>집행 {fmtKRW(total?.spent || 0)}원</span>
-              <span>잔액 {fmtKRW(total?.balance || 0)}원</span>
+              <span>집행 {fmtKRW(total.spent || 0)}원</span>
+              <span>잔액 {fmtKRW(total.balance || 0)}원</span>
+            </div>
+            <div className="mt-2.5 pt-2 border-t border-border/60">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px]" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                <span className="text-muted-foreground">총계</span>
+                <span>예산 <strong>{fmtKRW(total.effectiveBudget || 0)}</strong></span>
+                <span>집행 <strong style={{ color: '#e11d48' }}>{fmtKRW(total.spent || 0)}</strong></span>
+                <span>잔액 <strong style={{ color: '#059669' }}>{fmtKRW(total.balance || 0)}</strong></span>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -154,6 +653,7 @@ export function PortalBudget() {
           {Object.entries(groups.groupMap).map(([gid, group]) => {
             const isCollapsed = collapsedGroups.has(gid);
             const sub = group.subtotal;
+            const subEffective = getEffectiveBudget(sub);
             return (
               <Card key={gid} className="overflow-hidden">
                 {/* 그룹 헤더 */}
@@ -163,10 +663,10 @@ export function PortalBudget() {
                 >
                   {isCollapsed ? <ChevronRight className="w-3.5 h-3.5 text-muted-foreground shrink-0" /> : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground shrink-0" />}
                   <span className="text-[12px] flex-1" style={{ fontWeight: 600 }}>
-                    {GROUP_LABELS[gid] || gid}
+                    {gid || '기타'}
                   </span>
                   <div className="flex items-center gap-3 text-[10px]" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                    <span className="text-muted-foreground">예산 <strong className="text-foreground">{fmtShort(sub.initialBudget)}</strong></span>
+                    <span className="text-muted-foreground">예산 <strong className="text-foreground">{fmtShort(subEffective)}</strong></span>
                     <span className="text-muted-foreground">집행 <strong style={{ color: sub.spent > 0 ? '#e11d48' : undefined }}>{fmtShort(sub.spent)}</strong></span>
                     <span style={{ fontWeight: 600, color: burnColor(sub.burnRate) }}>{fmtPercent(sub.burnRate)}</span>
                   </div>
@@ -189,7 +689,8 @@ export function PortalBudget() {
                       <thead>
                         <tr className="bg-muted/30">
                           <th className="px-4 py-2 text-left" style={{ fontWeight: 600, minWidth: 100 }}>비목 / 세목</th>
-                          <th className="px-3 py-2 text-right" style={{ fontWeight: 600, minWidth: 90 }}>승인예산</th>
+                          <th className="px-3 py-2 text-right" style={{ fontWeight: 600, minWidth: 90 }}>최초 예산</th>
+                          <th className="px-3 py-2 text-right" style={{ fontWeight: 600, minWidth: 90 }}>수정 예산</th>
                           <th className="px-3 py-2 text-right" style={{ fontWeight: 600, minWidth: 90 }}>소진금액</th>
                           <th className="px-3 py-2 text-right" style={{ fontWeight: 600, minWidth: 50 }}>소진율</th>
                           <th className="px-3 py-2 text-right" style={{ fontWeight: 600, minWidth: 90 }}>잔액</th>
@@ -197,11 +698,24 @@ export function PortalBudget() {
                         </tr>
                       </thead>
                       <tbody>
-                        {group.items.map(row => (
+                        {group.items.map(row => {
+                          const effective = getEffectiveBudget(row);
+                          const hasRevised = row.revisedAug > 0;
+                          const delta = hasRevised ? row.revisedAug - row.initialBudget : 0;
+                          const deltaUp = delta > 0;
+                          const deltaDown = delta < 0;
+                          const draft = editMode
+                            ? draftRows.find((r) =>
+                              normalizeBudgetLabel(row.budgetCode) === normalizeBudgetLabel(r.budgetCode) &&
+                              normalizeBudgetLabel(row.subCode) === normalizeBudgetLabel(r.subCode))
+                            : null;
+                          return (
                           <tr
                             key={row.id}
-                            className="border-t border-border/30 hover:bg-muted/20 cursor-pointer transition-colors"
-                            onClick={() => setSelectedRow(row)}
+                            className={`border-t border-border/30 transition-colors ${editMode ? '' : 'hover:bg-muted/20 cursor-pointer'}`}
+                            onClick={() => {
+                              if (!editMode) setSelectedRow(row);
+                            }}
                           >
                             <td className="px-4 py-2.5">
                               <div className="flex items-center gap-1.5">
@@ -227,8 +741,58 @@ export function PortalBudget() {
                                 )}
                               </div>
                             </td>
-                            <td className="px-3 py-2.5 text-right" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                              {fmtKRW(row.initialBudget)}
+                            <td className="px-3 py-2.5 text-right align-top" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                              {editMode ? (
+                                <input
+                                  type="text"
+                                  inputMode="numeric"
+                                  value={draft?.initialBudget || ''}
+                                  className="w-full bg-transparent outline-none text-[11px] text-right px-1 py-0.5 border rounded"
+                                  onChange={(e) => {
+                                    const value = formatInputLive(e.target.value);
+                                    setDraftRows((prev) => prev.map((r) => (
+                                      normalizeBudgetLabel(r.budgetCode) === normalizeBudgetLabel(row.budgetCode)
+                                        && normalizeBudgetLabel(r.subCode) === normalizeBudgetLabel(row.subCode)
+                                        ? { ...r, initialBudget: value }
+                                        : r
+                                    )));
+                                  }}
+                                />
+                              ) : (
+                                <div>{fmtKRW(row.initialBudget)}</div>
+                              )}
+                            </td>
+                            <td className="px-3 py-2.5 text-right align-top" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                              {editMode ? (
+                                <input
+                                  type="text"
+                                  inputMode="numeric"
+                                  value={draft?.revisedBudget || ''}
+                                  className="w-full bg-transparent outline-none text-[11px] text-right px-1 py-0.5 border rounded"
+                                  onChange={(e) => {
+                                    const value = formatInputLive(e.target.value);
+                                    setDraftRows((prev) => prev.map((r) => (
+                                      normalizeBudgetLabel(r.budgetCode) === normalizeBudgetLabel(row.budgetCode)
+                                        && normalizeBudgetLabel(r.subCode) === normalizeBudgetLabel(row.subCode)
+                                        ? { ...r, revisedBudget: value }
+                                        : r
+                                    )));
+                                  }}
+                                />
+                              ) : (
+                                <div className="flex flex-col items-end leading-tight">
+                                  <div>{fmtKRW(effective)}</div>
+                                  {hasRevised && delta !== 0 && (
+                                    <div className={`text-[9px] mt-0.5 inline-flex items-center gap-1 ${deltaUp ? 'text-emerald-600' : 'text-rose-600'}`}>
+                                      {deltaUp ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
+                                      {deltaUp ? '증액' : '감액'} {fmtKRW(Math.abs(delta))}
+                                    </div>
+                                  )}
+                                  {hasRevised && delta === 0 && (
+                                    <div className="text-[9px] mt-0.5 text-muted-foreground">유지 0</div>
+                                  )}
+                                </div>
+                              )}
                             </td>
                             <td className="px-3 py-2.5 text-right" style={{ fontVariantNumeric: 'tabular-nums', color: row.spent > 0 ? '#e11d48' : undefined }}>
                               {fmtKRW(row.spent)}
@@ -246,8 +810,24 @@ export function PortalBudget() {
                             <td className="px-3 py-2.5 text-right" style={{ fontVariantNumeric: 'tabular-nums', color: '#059669' }}>
                               {fmtKRW(row.balance)}
                             </td>
-                            <td className="px-4 py-2.5 hidden lg:table-cell max-w-[180px]">
-                              {row.note ? (
+                            <td className={`px-4 py-2.5 max-w-[180px] ${editMode ? '' : 'hidden lg:table-cell'}`}>
+                              {editMode ? (
+                                <input
+                                  type="text"
+                                  value={draft?.note || ''}
+                                  className="w-full bg-transparent outline-none text-[11px] px-2 py-1 border rounded"
+                                  placeholder="특이사항"
+                                  onChange={(e) => {
+                                    const value = e.target.value;
+                                    setDraftRows((prev) => prev.map((r) => (
+                                      normalizeBudgetLabel(r.budgetCode) === normalizeBudgetLabel(row.budgetCode)
+                                        && normalizeBudgetLabel(r.subCode) === normalizeBudgetLabel(row.subCode)
+                                        ? { ...r, note: value }
+                                        : r
+                                    )));
+                                  }}
+                                />
+                              ) : row.note ? (
                                 <Tooltip>
                                   <TooltipTrigger>
                                     <span className="text-muted-foreground truncate block text-[10px]">{row.note.slice(0, 40)}{row.note.length > 40 ? '...' : ''}</span>
@@ -259,7 +839,8 @@ export function PortalBudget() {
                               )}
                             </td>
                           </tr>
-                        ))}
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -268,7 +849,7 @@ export function PortalBudget() {
                 {/* 소계 풋터 */}
                 <div className="px-4 py-2.5 bg-muted/20 border-t border-border/50 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px]" style={{ fontVariantNumeric: 'tabular-nums' }}>
                   <span className="text-muted-foreground">소계</span>
-                  <span>예산 <strong>{fmtKRW(sub.initialBudget)}</strong></span>
+                  <span>예산 <strong>{fmtKRW(subEffective)}</strong></span>
                   <span>집행 <strong style={{ color: sub.spent > 0 ? '#e11d48' : undefined }}>{fmtKRW(sub.spent)}</strong></span>
                   <span className="ml-auto" style={{ fontWeight: 600, color: '#059669' }}>잔액 {fmtKRW(sub.balance)}</span>
                 </div>
@@ -276,54 +857,7 @@ export function PortalBudget() {
             );
           })}
 
-          {/* 총계 */}
-          {total && (
-            <Card className="border-indigo-200 dark:border-indigo-800 bg-indigo-50/30 dark:bg-indigo-950/10">
-              <CardContent className="p-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <p className="text-[10px] text-indigo-600 dark:text-indigo-400" style={{ fontWeight: 600 }}>총계</p>
-                    <p className="text-[18px] text-indigo-700 dark:text-indigo-300" style={{ fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>
-                      {fmtKRW(total.initialBudget)}원
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-4 text-[11px]" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                    <div className="text-center">
-                      <p className="text-[9px] text-muted-foreground">집행</p>
-                      <p style={{ fontWeight: 700, color: '#e11d48' }}>{fmtKRW(total.spent)}</p>
-                    </div>
-                    <div className="text-center">
-                      <p className="text-[9px] text-muted-foreground">잔액</p>
-                      <p style={{ fontWeight: 700, color: '#059669' }}>{fmtKRW(total.balance)}</p>
-                    </div>
-                    <div className="text-center">
-                      <p className="text-[9px] text-muted-foreground">소진율</p>
-                      <p style={{ fontWeight: 700, color: burnColor(total.burnRate) }}>{fmtPercent(total.burnRate)}</p>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          )}
         </div>
-
-        {/* 보조 테이블 */}
-        <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-[12px]">예산 구성</CardTitle></CardHeader>
-          <CardContent className="p-0">
-            <div className="divide-y divide-border/50">
-              {BUDGET_AUX_ROWS.map((r, i) => (
-                <div key={i} className="flex items-center justify-between px-4 py-2.5 text-[11px]">
-                  <span>{r.label}</span>
-                  <div className="flex items-center gap-4" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                    <span style={{ fontWeight: 500 }}>{fmtKRW(r.amount)}원</span>
-                    <span className="text-muted-foreground w-[50px] text-right">{fmtPercent(r.ratio)}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
 
         {/* 행 상세 모달 */}
         <Dialog open={!!selectedRow} onOpenChange={open => !open && setSelectedRow(null)}>
@@ -342,7 +876,8 @@ export function PortalBudget() {
                   {[
                     ['비목', selectedRow.budgetCode || '—'],
                     ['세목', selectedRow.subCode || '—'],
-                    ['승인예산', fmtKRW(selectedRow.initialBudget) + '원'],
+                    ['최초 예산', fmtKRW(selectedRow.initialBudget) + '원'],
+                    ['수정 예산', selectedRow.revisedAug > 0 ? fmtKRW(selectedRow.revisedAug) + '원' : '—'],
                     ['구성비', fmtPercent(selectedRow.composition)],
                     ['소진금액', fmtKRW(selectedRow.spent) + '원'],
                     ['소진율', fmtPercent(selectedRow.burnRate)],

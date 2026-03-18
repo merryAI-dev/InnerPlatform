@@ -11,7 +11,7 @@ function StatusItem({ icon: Icon, label, value, color, tooltip }: {
   icon: any; label: string; value: string | number; color?: string; tooltip?: string;
 }) {
   const content = (
-    <div className={`flex items-center gap-1.5 px-2 py-0 text-[10px] ${color || 'text-slate-500'}`}>
+    <div className={`flex items-center gap-1.5 px-2 py-0.5 text-[10px] rounded-sm bg-white/30 dark:bg-white/5 ${color || 'text-slate-500'}`}>
       <Icon className="w-3 h-3" />
       <span className="hidden xl:inline">{label}</span>
       <span style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{value}</span>
@@ -48,7 +48,7 @@ export function StatusBar() {
 
   return (
     <div
-      className="flex items-center justify-between h-[26px] border-t border-border/50 bg-white px-3 shrink-0 select-none"
+      className="glass-light flex items-center justify-between h-[26px] border-t border-glass-border px-3 shrink-0 select-none"
     >
       {/* Left section */}
       <div className="flex items-center gap-0.5 divide-x divide-border/40">

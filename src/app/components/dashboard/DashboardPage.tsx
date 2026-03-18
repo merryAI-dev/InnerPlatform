@@ -10,6 +10,7 @@ import {
   Landmark, PieChart, BarChart3, Sparkles, Shield,
   ArrowUpRight, Banknote, Activity, ChevronRight,
   LayoutDashboard,
+  Megaphone,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
@@ -23,6 +24,8 @@ import {
   AreaChart, Area,
 } from 'recharts';
 import { useAppStore } from '../../data/store';
+import { useHrAnnouncements, HR_EVENT_LABELS, HR_EVENT_COLORS } from '../../data/hr-announcements-store';
+import { usePayroll } from '../../data/payroll-store';
 import {
   PROJECT_STATUS_LABELS, PROJECT_TYPE_SHORT_LABELS,
   TX_STATE_LABELS,
@@ -35,19 +38,37 @@ import {
   UpdateReminderBadge,
   validateProject,
 } from './DashboardGuide';
+import {
+  buildDashboardCashflowRollups,
+  compareSafeLocaleAsc,
+  compareSafeLocaleDesc,
+  toFiniteNumber,
+  toSafeString,
+} from './dashboard-rollups';
+import { getSeoulTodayIso } from '../../platform/business-days';
+import { findWeekForDate, getMonthMondayWeeks } from '../../platform/cashflow-weeks';
+import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 
-function fmt(n: number) {
+function fmt(value: unknown) {
+  const n = toFiniteNumber(value);
   if (Math.abs(n) >= 1e8) return (n / 1e8).toFixed(1) + '억';
   if (Math.abs(n) >= 1e4) return (n / 1e4).toFixed(0) + '만';
   return n.toLocaleString();
 }
 
-function fmtFull(n: number) {
-  return n.toLocaleString('ko-KR') + '원';
+function fmtFull(value: unknown) {
+  return toFiniteNumber(value).toLocaleString('ko-KR') + '원';
 }
 
 function fmtPercent(n: number) {
   return (n * 100).toFixed(2) + '%';
+}
+
+function fmtShortDate(value?: string) {
+  if (!value) return '-';
+  const d = new Date(value);
+  if (!Number.isFinite(d.getTime())) return value.slice(0, 10) || '-';
+  return d.toLocaleDateString('ko-KR', { month: '2-digit', day: '2-digit' });
 }
 
 const statusStyles: Record<string, { bg: string; text: string; dot: string }> = {
@@ -58,11 +79,18 @@ const statusStyles: Record<string, { bg: string; text: string; dot: string }> = 
 };
 
 const typeColors: Record<ProjectType, string> = {
-  DEV_COOPERATION: '#6366f1',
-  CONSULTING: '#8b5cf6',
-  SPACE_BIZ: '#f59e0b',
-  IMPACT_INVEST: '#10b981',
-  OTHER: '#94a3b8',
+  C1: '#8b5cf6',
+  A1: '#06b6d4',
+  A2: '#0ea5e9',
+  I1: '#10b981',
+  I2: '#16a34a',
+  I3: '#22c55e',
+  D1: '#6366f1',
+  S1: '#f59e0b',
+  S2: '#f97316',
+  E1: '#ec4899',
+  P1: '#a855f7',
+  Z1: '#94a3b8',
 };
 
 const txStateStyles: Record<string, { bg: string; text: string }> = {
@@ -131,11 +159,59 @@ function AlertStrip({ icon: Icon, label, count, color, onClick }: {
 export function DashboardPage() {
   const { projects, transactions, ledgers, participationEntries } = useAppStore();
   const navigate = useNavigate();
+  const { announcements, getUnacknowledgedCount: getHrUnacked } = useHrAnnouncements();
+  const { runs } = usePayroll();
+
+  const today = getSeoulTodayIso();
+  const yearMonth = today.slice(0, 7);
+
+  const payrollSummary = useMemo(() => {
+    const thisMonth = runs.filter((r) => r.yearMonth === yearMonth);
+    const due = thisMonth.filter((r) => today >= r.noticeDate).length;
+    const unacked = thisMonth.filter((r) => today >= r.noticeDate && !r.acknowledged).length;
+    const unconfirmed = thisMonth.filter((r) => today >= r.plannedPayDate && r.paidStatus !== 'CONFIRMED').length;
+    return { due, unacked, unconfirmed };
+  }, [runs, today, yearMonth]);
+
+  const hrSummary = useMemo(() => {
+    const unresolved = announcements.filter((a) => !a.resolved);
+    const resignations = unresolved.filter((a) => a.eventType === 'RESIGNATION');
+    return {
+      unresolved,
+      resignations,
+      unackedAlerts: getHrUnacked(),
+    };
+  }, [announcements, getHrUnacked]);
 
   const participationDanger = useMemo(() => {
     const summaries = computeMemberSummaries(participationEntries);
     return summaries.filter(m => m.riskLevel === 'DANGER');
   }, [participationEntries]);
+
+  const { weeks: cashflowWeeks } = useCashflowWeeks();
+
+  const missingPmCount = useMemo(() => {
+    const monthWeeks = getMonthMondayWeeks(today.slice(0, 7));
+    const currentWeek = findWeekForDate(today, monthWeeks);
+    if (!currentWeek) return 0;
+    const activeProjectIds = projects
+      .filter(p => p.phase === 'CONFIRMED' && p.status === 'IN_PROGRESS')
+      .map(p => p.id);
+    if (activeProjectIds.length === 0) return 0;
+    const thisWeekTxProjectIds = new Set(
+      transactions
+        .filter(t => t.dateTime >= currentWeek.weekStart && t.dateTime <= currentWeek.weekEnd)
+        .map(t => t.projectId),
+    );
+    const thisWeekSheetProjectIds = new Set(
+      cashflowWeeks
+        .filter(w => w.yearMonth === today.slice(0, 7) && w.weekNo === currentWeek.weekNo)
+        .map(w => w.projectId),
+    );
+    return activeProjectIds.filter(
+      pid => !thisWeekTxProjectIds.has(pid) && !thisWeekSheetProjectIds.has(pid),
+    ).length;
+  }, [projects, transactions, cashflowWeeks, today]);
 
   const validations = useMemo(() => {
     return projects.map(p => {
@@ -153,18 +229,24 @@ export function DashboardPage() {
   const kpis = useMemo(() => {
     const confirmed = projects.filter(p => p.phase === 'CONFIRMED');
     const prospects = projects.filter(p => p.phase === 'PROSPECT');
-    const totalContractAmount = confirmed.reduce((s, p) => s + p.contractAmount, 0);
-    const totalBudget2026 = confirmed.reduce((s, p) => s + p.budgetCurrentYear, 0);
-    const totalTaxInvoice = confirmed.reduce((s, p) => s + p.taxInvoiceAmount, 0);
-    const totalProfit = confirmed.filter(p => p.profitAmount > 0).reduce((s, p) => s + p.profitAmount, 0);
+    const totalContractAmount = confirmed.reduce((s, p) => s + toFiniteNumber(p.contractAmount), 0);
+    const totalBudget2026 = confirmed.reduce((s, p) => s + toFiniteNumber(p.budgetCurrentYear), 0);
+    const totalTaxInvoice = confirmed.reduce((s, p) => s + toFiniteNumber(p.taxInvoiceAmount), 0);
+    const totalProfit = confirmed
+      .filter(p => toFiniteNumber(p.profitAmount) > 0)
+      .reduce((s, p) => s + toFiniteNumber(p.profitAmount), 0);
     const activeProjects = confirmed.filter(p => p.status === 'IN_PROGRESS').length;
     const completedProjects = confirmed.filter(p => p.status === 'COMPLETED' || p.status === 'COMPLETED_PENDING_PAYMENT').length;
     const prospectCount = prospects.length;
     const pendingApproval = transactions.filter(t => t.state === 'SUBMITTED').length;
     const missingEvidence = transactions.filter(t => t.evidenceStatus !== 'COMPLETE' && t.state !== 'REJECTED').length;
     const rejectedTx = transactions.filter(t => t.state === 'REJECTED').length;
-    const totalIn = transactions.filter(t => t.direction === 'IN' && t.state === 'APPROVED').reduce((s, t) => s + t.amounts.bankAmount, 0);
-    const totalOut = transactions.filter(t => t.direction === 'OUT' && t.state === 'APPROVED').reduce((s, t) => s + t.amounts.bankAmount, 0);
+    const totalIn = transactions
+      .filter(t => t.direction === 'IN' && t.state === 'APPROVED')
+      .reduce((s, t) => s + toFiniteNumber(t.amounts?.bankAmount), 0);
+    const totalOut = transactions
+      .filter(t => t.direction === 'OUT' && t.state === 'APPROVED')
+      .reduce((s, t) => s + toFiniteNumber(t.amounts?.bankAmount), 0);
     return {
       totalContractAmount, totalBudget2026, totalTaxInvoice, totalProfit,
       activeProjects, completedProjects, prospectCount,
@@ -180,8 +262,8 @@ export function DashboardPage() {
       const dept = p.department || '미지정';
       if (!map[dept]) map[dept] = { dept, count: 0, totalAmount: 0, budget2026: 0 };
       map[dept].count += 1;
-      map[dept].totalAmount += p.contractAmount;
-      map[dept].budget2026 += p.budgetCurrentYear;
+      map[dept].totalAmount += toFiniteNumber(p.contractAmount);
+      map[dept].budget2026 += toFiniteNumber(p.budgetCurrentYear);
     });
     return Object.values(map).sort((a, b) => b.totalAmount - a.totalAmount);
   }, [projects]);
@@ -191,7 +273,7 @@ export function DashboardPage() {
     projects.forEach(p => {
       if (!map[p.type]) map[p.type] = { type: p.type, count: 0, amount: 0 };
       map[p.type].count += 1;
-      map[p.type].amount += p.contractAmount;
+      map[p.type].amount += toFiniteNumber(p.contractAmount);
     });
     return Object.values(map).filter(d => d.amount > 0).sort((a, b) => b.amount - a.amount);
   }, [projects]);
@@ -200,16 +282,26 @@ export function DashboardPage() {
   const cashflowTrend = useMemo(() => {
     const months: Record<string, { month: string; in: number; out: number }> = {};
     transactions.filter(t => t.state === 'APPROVED').forEach(t => {
-      const m = t.dateTime.slice(0, 7);
+      const m = toSafeString(t.dateTime).slice(0, 7);
+      if (!m) return;
       if (!months[m]) months[m] = { month: m, in: 0, out: 0 };
-      if (t.direction === 'IN') months[m].in += t.amounts.bankAmount;
-      else months[m].out += t.amounts.bankAmount;
+      if (t.direction === 'IN') months[m].in += toFiniteNumber(t.amounts?.bankAmount);
+      else months[m].out += toFiniteNumber(t.amounts?.bankAmount);
     });
-    return Object.values(months).sort((a, b) => a.month.localeCompare(b.month)).slice(-6);
+    return Object.values(months).sort((a, b) => compareSafeLocaleAsc(a.month, b.month)).slice(-6);
   }, [transactions]);
 
+  const cashflowRollup = useMemo(() => {
+    return buildDashboardCashflowRollups({
+      projects,
+      transactions,
+      cashflowWeeks,
+      yearMonth,
+    });
+  }, [projects, transactions, cashflowWeeks, yearMonth]);
+
   const recentTx = useMemo(() => {
-    return [...transactions].sort((a, b) => b.dateTime.localeCompare(a.dateTime)).slice(0, 6);
+    return [...transactions].sort((a, b) => compareSafeLocaleDesc(a.dateTime, b.dateTime)).slice(0, 6);
   }, [transactions]);
 
   return (
@@ -272,10 +364,17 @@ export function DashboardPage() {
       </div>
 
       {/* Alerts Row */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-2.5">
         <AlertStrip icon={Clock} label="승인 대기" count={kpis.pendingApproval} color="#d97706" />
         <AlertStrip icon={AlertTriangle} label="증빙 미완료" count={kpis.missingEvidence} color="#ea580c" />
         <AlertStrip icon={TrendingDown} label="반려 거래" count={kpis.rejectedTx} color="#e11d48" />
+        <AlertStrip
+          icon={Banknote}
+          label="미입력 PM"
+          count={missingPmCount}
+          color={missingPmCount > 0 ? '#ea580c' : '#64748b'}
+          onClick={() => navigate('/cashflow')}
+        />
         <AlertStrip
           icon={Shield}
           label="참여율 위험"
@@ -284,6 +383,275 @@ export function DashboardPage() {
           onClick={() => navigate('/participation')}
         />
       </div>
+
+      {/* HR + Payroll Highlights */}
+      {(hrSummary.unresolved.length > 0 || payrollSummary.due > 0 || payrollSummary.unacked > 0) && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <Card className="shadow-sm border-border/50">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-[13px] flex items-center justify-between gap-2">
+                <span className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-md bg-rose-50 dark:bg-rose-950/40 flex items-center justify-center">
+                    <Megaphone className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
+                  </div>
+                  인사 공지 (홈)
+                </span>
+                <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => navigate('/hr-announcements')}>
+                  관리
+                </Button>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                <span>미해결 {hrSummary.unresolved.length}건</span>
+                <span>·</span>
+                <span>미확인 알림 {hrSummary.unackedAlerts}건</span>
+              </div>
+
+              {hrSummary.unresolved.length === 0 ? (
+                <p className="text-[12px] text-muted-foreground">현재 미해결 인사 공지가 없습니다.</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {hrSummary.unresolved.slice(0, 3).map((ann) => (
+                    <div key={ann.id} className="p-2.5 rounded-lg bg-muted/30 border border-border/40">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-[12px] truncate" style={{ fontWeight: 700 }}>
+                            {ann.employeeName} ({ann.employeeNickname})
+                          </p>
+                          <p className="text-[10px] text-muted-foreground truncate">
+                            적용일: {ann.effectiveDate} · 영향 사업 {ann.affectedProjectIds.length}개
+                          </p>
+                        </div>
+                        <Badge className={`text-[9px] h-4 px-1.5 shrink-0 ${HR_EVENT_COLORS[ann.eventType]}`}>
+                          {HR_EVENT_LABELS[ann.eventType]}
+                        </Badge>
+                      </div>
+                    </div>
+                  ))}
+                  {hrSummary.unresolved.length > 3 && (
+                    <p className="text-[10px] text-muted-foreground">외 {hrSummary.unresolved.length - 3}건</p>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="shadow-sm border-border/50">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-[13px] flex items-center justify-between gap-2">
+                <span className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-md bg-emerald-50 dark:bg-emerald-950/40 flex items-center justify-center">
+                    <CircleDollarSign className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                  </div>
+                  인건비/월간정산 (요약)
+                </span>
+                <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => navigate('/payroll')}>
+                  운영 보기
+                </Button>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <div className="text-[11px] text-muted-foreground">
+                기준 월: <span style={{ fontWeight: 700 }} className="text-foreground">{yearMonth}</span>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { label: '공지 대상', value: payrollSummary.due, color: '#4f46e5' },
+                  { label: '미인지', value: payrollSummary.unacked, color: '#e11d48' },
+                  { label: '미확정', value: payrollSummary.unconfirmed, color: '#d97706' },
+                ].map((k) => (
+                  <div key={k.label} className="p-2.5 rounded-lg bg-muted/30 border border-border/40 text-center">
+                    <p className="text-[9px] text-muted-foreground">{k.label}</p>
+                    <p className="text-[16px]" style={{ fontWeight: 800, color: k.value > 0 ? k.color : undefined }}>
+                      {k.value}
+                    </p>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                지급일 3영업일 전부터 PM 확인이 필요하며, 거래 자동매칭 후 Admin이 지급을 확정합니다.
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      <Card className="shadow-sm border-border/50">
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between gap-3">
+            <CardTitle className="text-[13px] flex items-center gap-2">
+              <div className="w-6 h-6 rounded-md bg-sky-50 dark:bg-sky-950/40 flex items-center justify-center">
+                <BarChart3 className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
+              </div>
+              전사 캐시플로우 집계
+            </CardTitle>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-[11px]"
+              onClick={() => navigate('/cashflow')}
+            >
+              캐시플로 보기
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="rounded-lg border border-emerald-200/60 bg-emerald-50/50 p-3">
+              <p className="text-[10px] text-emerald-700">승인 입금 누계</p>
+              <p className="text-[18px] text-emerald-700" style={{ fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>
+                +{fmt(cashflowRollup.summary.totalApprovedIn)}
+              </p>
+            </div>
+            <div className="rounded-lg border border-rose-200/60 bg-rose-50/50 p-3">
+              <p className="text-[10px] text-rose-700">승인 출금 누계</p>
+              <p className="text-[18px] text-rose-700" style={{ fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>
+                -{fmt(cashflowRollup.summary.totalApprovedOut)}
+              </p>
+            </div>
+            <div className="rounded-lg border border-indigo-200/60 bg-indigo-50/50 p-3">
+              <p className="text-[10px] text-indigo-700">당월 시트 순현금흐름</p>
+              <p className="text-[18px] text-indigo-700" style={{ fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>
+                {fmt(cashflowRollup.summary.totalCurrentMonthActualNet)}
+              </p>
+              <p className="text-[10px] text-indigo-500 mt-1">
+                예상 {fmt(cashflowRollup.summary.totalCurrentMonthProjectionNet)}
+              </p>
+            </div>
+            <div className="rounded-lg border border-amber-200/60 bg-amber-50/50 p-3">
+              <p className="text-[10px] text-amber-700">집계 대상</p>
+              <p className="text-[18px] text-amber-700" style={{ fontWeight: 800 }}>
+                {cashflowRollup.summary.activeProjectCount}개 사업
+              </p>
+              <p className="text-[10px] text-amber-500 mt-1">
+                당월 편차 {cashflowRollup.summary.varianceProjectCount}개
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <p className="text-[12px]" style={{ fontWeight: 700 }}>캐시플로우 항목별 집계</p>
+                <p className="text-[10px] text-muted-foreground">기존 캐시플로우 시트 항목 기준으로 당월 예상/실적/편차를 그대로 집계합니다.</p>
+              </div>
+            </div>
+            <div className="overflow-x-auto rounded-lg border border-border/50">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="min-w-[180px] text-[10px]">항목</TableHead>
+                    <TableHead className="text-[10px]">구분</TableHead>
+                    <TableHead className="text-right text-[10px]">당월 예상</TableHead>
+                    <TableHead className="text-right text-[10px]">당월 실적</TableHead>
+                    <TableHead className="text-right text-[10px]">당월 편차</TableHead>
+                    <TableHead className="text-right text-[10px]">누적 실적</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {cashflowRollup.lineRows.map((row) => (
+                    <TableRow key={row.lineId} className="h-9">
+                      <TableCell className="py-1 text-[11px]" style={{ fontWeight: 600 }}>
+                        {row.label}
+                      </TableCell>
+                      <TableCell className="py-1 text-[10px]">
+                        <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 ${row.direction === 'IN' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
+                          {row.direction === 'IN' ? '입금' : '출금'}
+                        </span>
+                      </TableCell>
+                      <TableCell className="py-1 text-right text-[11px]" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                        {fmt(row.currentMonthProjectionAmount)}
+                      </TableCell>
+                      <TableCell className="py-1 text-right text-[11px]" style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>
+                        {fmt(row.currentMonthActualAmount)}
+                      </TableCell>
+                      <TableCell className="py-1 text-right text-[11px]" style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>
+                        <span className={row.currentMonthVarianceAmount === 0 ? 'text-muted-foreground' : row.currentMonthVarianceAmount > 0 ? 'text-emerald-600' : 'text-rose-600'}>
+                          {row.currentMonthVarianceAmount > 0 ? '+' : ''}{fmt(row.currentMonthVarianceAmount)}
+                        </span>
+                      </TableCell>
+                      <TableCell className="py-1 text-right text-[11px]" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                        {fmt(row.cumulativeActualAmount)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="min-w-[180px] text-[10px]">사업</TableHead>
+                  <TableHead className="text-right text-[10px]">승인 입금</TableHead>
+                  <TableHead className="text-right text-[10px]">승인 출금</TableHead>
+                  <TableHead className="text-right text-[10px]">승인 순현금흐름</TableHead>
+                  <TableHead className="text-right text-[10px]">당월 예상</TableHead>
+                  <TableHead className="text-right text-[10px]">당월 실적</TableHead>
+                  <TableHead className="text-right text-[10px]">당월 편차</TableHead>
+                  <TableHead className="text-right text-[10px]">최근 갱신</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {cashflowRollup.rows.slice(0, 12).map((row) => (
+                  <TableRow
+                    key={row.projectId}
+                    className="cursor-pointer hover:bg-muted/50 h-10"
+                    onClick={() => navigate(`/projects/${row.projectId}`)}
+                  >
+                    <TableCell className="py-1">
+                      <div className="min-w-0">
+                        <p className="text-[11px] truncate" style={{ fontWeight: 700 }}>
+                          {row.projectName}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground truncate">
+                          {row.department} · 거래 {row.transactionCount}건 · 시트 {row.weekCount}주
+                        </p>
+                      </div>
+                    </TableCell>
+                    <TableCell className="py-1 text-right text-[11px] text-emerald-600" style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>
+                      +{fmt(row.approvedIn)}
+                    </TableCell>
+                    <TableCell className="py-1 text-right text-[11px] text-rose-600" style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>
+                      -{fmt(row.approvedOut)}
+                    </TableCell>
+                    <TableCell className="py-1 text-right text-[11px]" style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>
+                      <span className={row.approvedNet >= 0 ? 'text-emerald-600' : 'text-rose-600'}>
+                        {row.approvedNet >= 0 ? '+' : ''}{fmt(row.approvedNet)}
+                      </span>
+                    </TableCell>
+                    <TableCell className="py-1 text-right text-[11px]" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                      {fmt(row.currentMonthProjectionNet)}
+                    </TableCell>
+                    <TableCell className="py-1 text-right text-[11px]" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                      {fmt(row.currentMonthActualNet)}
+                    </TableCell>
+                    <TableCell className="py-1 text-right text-[11px]" style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>
+                      <span
+                        className={
+                          row.currentMonthVarianceNet === 0
+                            ? 'text-muted-foreground'
+                            : row.currentMonthVarianceNet > 0
+                            ? 'text-emerald-600'
+                            : 'text-rose-600'
+                        }
+                      >
+                        {row.currentMonthVarianceNet > 0 ? '+' : ''}{fmt(row.currentMonthVarianceNet)}
+                      </span>
+                    </TableCell>
+                    <TableCell className="py-1 text-right text-[10px] text-muted-foreground whitespace-nowrap">
+                      {fmtShortDate(row.lastUpdatedAt)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Main Grid: Charts + Health + Activity */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
@@ -472,12 +840,12 @@ export function DashboardPage() {
                           </span>
                         </TableCell>
                         <TableCell className="py-1 text-right text-[11px]" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                          {p.contractAmount > 0 ? fmt(p.contractAmount) : '-'}
+                          {toFiniteNumber(p.contractAmount) > 0 ? fmt(p.contractAmount) : '-'}
                         </TableCell>
                         <TableCell className="py-1 text-right text-[11px]" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                          {p.profitRate > 0 ? (
-                            <span className={p.profitRate >= 0.1 ? 'text-emerald-600' : 'text-amber-600'} style={{ fontWeight: 700 }}>
-                              {fmtPercent(p.profitRate)}
+                          {toFiniteNumber(p.profitRate) > 0 ? (
+                            <span className={toFiniteNumber(p.profitRate) >= 0.1 ? 'text-emerald-600' : 'text-amber-600'} style={{ fontWeight: 700 }}>
+                              {fmtPercent(toFiniteNumber(p.profitRate))}
                             </span>
                           ) : '-'}
                         </TableCell>
@@ -535,7 +903,7 @@ export function DashboardPage() {
                       <TableCell className="py-1 text-[11px] max-w-[90px] truncate">{t.counterparty}</TableCell>
                       <TableCell className="py-1 text-right text-[11px] whitespace-nowrap" style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
                         <span className={t.direction === 'IN' ? 'text-emerald-600' : 'text-rose-600'}>
-                          {t.direction === 'IN' ? '+' : '-'}{fmt(t.amounts.bankAmount)}
+                          {t.direction === 'IN' ? '+' : '-'}{fmt(t.amounts?.bankAmount)}
                         </span>
                       </TableCell>
                       <TableCell className="py-1">

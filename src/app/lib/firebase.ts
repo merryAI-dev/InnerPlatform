@@ -9,6 +9,7 @@ import { connectAuthEmulator, getAuth, GoogleAuthProvider, type Auth } from 'fir
 import { connectStorageEmulator, getStorage, type FirebaseStorage } from 'firebase/storage';
 import { featureFlags, parseFeatureFlag } from '../config/feature-flags';
 import { buildTenantScopedPath, resolveTenantId } from '../platform/tenant';
+import { getAllowedEmailDomains } from '../platform/email-allowlist';
 
 const STORAGE_KEY = 'MYSC_FIREBASE_CONFIG';
 
@@ -24,6 +25,9 @@ export interface FirebaseConfig {
 export interface FirebaseEmulatorConfig {
   enabled: boolean;
   host: string;
+  firestoreEnabled: boolean;
+  authEnabled: boolean;
+  storageEnabled: boolean;
   firestorePort: number;
   authPort: number;
   storagePort: number;
@@ -107,9 +111,16 @@ export function getDefaultOrgId(env: Record<string, unknown> = import.meta.env):
 export function readFirebaseEmulatorConfig(
   env: Record<string, unknown> = import.meta.env,
 ): FirebaseEmulatorConfig {
+  const enabled = parseFeatureFlag(env.VITE_FIREBASE_USE_EMULATORS, false);
+  const firestoreEnabled = parseFeatureFlag(env.VITE_FIREBASE_USE_FIRESTORE_EMULATOR, enabled);
+  const authEnabled = parseFeatureFlag(env.VITE_FIREBASE_USE_AUTH_EMULATOR, enabled);
+  const storageEnabled = parseFeatureFlag(env.VITE_FIREBASE_USE_STORAGE_EMULATOR, enabled);
   return {
-    enabled: parseFeatureFlag(env.VITE_FIREBASE_USE_EMULATORS, false),
+    enabled: firestoreEnabled || authEnabled || storageEnabled,
     host: normalizeString(env.VITE_FIREBASE_EMULATOR_HOST) || '127.0.0.1',
+    firestoreEnabled,
+    authEnabled,
+    storageEnabled,
     firestorePort: readPort(env.VITE_FIRESTORE_EMULATOR_PORT, 8080),
     authPort: readPort(env.VITE_FIREBASE_AUTH_EMULATOR_PORT, 9099),
     storagePort: readPort(env.VITE_FIREBASE_STORAGE_EMULATOR_PORT, 9199),
@@ -130,9 +141,15 @@ function maybeConnectEmulators(db: Firestore, auth: Auth, storage: FirebaseStora
   const emulator = readFirebaseEmulatorConfig(import.meta.env);
   if (!emulator.enabled) return;
 
-  connectFirestoreEmulator(db, emulator.host, emulator.firestorePort);
-  connectAuthEmulator(auth, `http://${emulator.host}:${emulator.authPort}`, { disableWarnings: true });
-  connectStorageEmulator(storage, emulator.host, emulator.storagePort);
+  if (emulator.firestoreEnabled) {
+    connectFirestoreEmulator(db, emulator.host, emulator.firestorePort);
+  }
+  if (emulator.authEnabled) {
+    connectAuthEmulator(auth, `http://${emulator.host}:${emulator.authPort}`, { disableWarnings: true });
+  }
+  if (emulator.storageEnabled) {
+    connectStorageEmulator(storage, emulator.host, emulator.storagePort);
+  }
   _emulatorsConnected = true;
 }
 
@@ -184,7 +201,14 @@ export function getStorageInstance(): FirebaseStorage | null {
 export function getGoogleAuthProvider(): GoogleAuthProvider {
   if (_googleProvider) return _googleProvider;
   _googleProvider = new GoogleAuthProvider();
-  _googleProvider.setCustomParameters({ prompt: 'select_account' });
+  _googleProvider.addScope('https://www.googleapis.com/auth/spreadsheets.readonly');
+  _googleProvider.addScope('https://www.googleapis.com/auth/drive');
+  const domains = getAllowedEmailDomains(import.meta.env);
+  const hd = domains.length === 1 ? domains[0] : '';
+  _googleProvider.setCustomParameters({
+    prompt: 'select_account',
+    ...(hd ? { hd } : {}),
+  });
   return _googleProvider;
 }
 
@@ -202,6 +226,13 @@ export const ORG_COLLECTIONS = {
   transactions: 'transactions',
   evidences: 'evidences',
   comments: 'comments',
+  boardPosts: 'board_posts',
+  boardComments: 'board_comments',
+  boardVotes: 'board_votes',
+  cashflowWeeks: 'cashflow_weeks',
+  payrollSchedules: 'payroll_schedules',
+  payrollRuns: 'payroll_runs',
+  monthlyCloses: 'monthly_closes',
   auditLogs: 'audit_logs',
   notifications: 'notifications',
   ledgerTemplates: 'ledger_templates',
@@ -209,6 +240,14 @@ export const ORG_COLLECTIONS = {
   projectChangeAlerts: 'project_change_alerts',
   expenseSets: 'expense_sets',
   changeRequests: 'change_requests',
+  budgetEvidenceMaps: 'budget_evidence_maps',
+  guideDocuments: 'guide_documents',
+  guideQa: 'guide_qa',
+  weeklySubmissionStatus: 'weekly_submission_status',
+  projectRequests: 'project_requests',
+  careerProfiles: 'careerProfiles',
+  trainingCourses: 'trainingCourses',
+  trainingEnrollments: 'trainingEnrollments',
 } as const;
 
 export type OrgCollectionKey = keyof typeof ORG_COLLECTIONS;

@@ -64,6 +64,8 @@ export function AuditLogPage() {
   const [actionFilter, setActionFilter] = useState('ALL');
   const [entityFilter, setEntityFilter] = useState('ALL');
   const [showCount, setShowCount] = useState(30);
+  const fmtAmount = (value?: number | null) =>
+    Number.isFinite(value) ? Number(value).toLocaleString('ko-KR') : '-';
 
   const allLogs = useMemo(() => {
     const logs = [...auditLogs];
@@ -78,7 +80,7 @@ export function AuditLogPage() {
           action: 'APPROVE',
           userId: t.approvedBy || '',
           userName: t.approvedBy === 'u001' ? '김재무' : '시스템',
-          details: `거래 승인: ${t.counterparty} ${t.amounts.bankAmount.toLocaleString()}원 (${proj?.name || ''})`,
+          details: `거래 승인: ${t.counterparty} ${fmtAmount(t.amounts?.bankAmount)}원 (${proj?.name || ''})`,
           timestamp: t.approvedAt,
         });
       }

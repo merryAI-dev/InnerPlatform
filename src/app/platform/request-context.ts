@@ -49,13 +49,16 @@ export function buildStandardHeaders(input: BuildStandardHeadersInput): Headers 
   const method = (input.method || 'GET').toUpperCase();
   const actorId = normalizeActorId(input.actor.id);
   const headers = new Headers(input.headers || {});
+  const hasIdToken = Boolean(input.actor.idToken && input.actor.idToken.trim());
 
   if (!headers.get('x-request-id')) {
     headers.set('x-request-id', input.requestId || createRequestId());
   }
 
   headers.set('x-tenant-id', tenantId);
-  headers.set('x-actor-id', actorId);
+  if (!headers.get('x-actor-id')) {
+    headers.set('x-actor-id', actorId);
+  }
 
   if (input.actor.email && !headers.get('x-actor-email')) {
     headers.set('x-actor-email', input.actor.email.trim().toLowerCase());
@@ -65,7 +68,7 @@ export function buildStandardHeaders(input: BuildStandardHeadersInput): Headers 
     headers.set('x-actor-role', input.actor.role);
   }
 
-  if (input.actor.idToken && !headers.get('authorization')) {
+  if (hasIdToken && !headers.get('authorization')) {
     headers.set('authorization', `Bearer ${input.actor.idToken}`);
   }
 

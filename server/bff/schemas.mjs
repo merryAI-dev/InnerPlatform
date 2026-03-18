@@ -45,7 +45,70 @@ export const evidenceCreateSchema = z.object({
   fileSize: z.number().int().nonnegative(),
   category: NON_EMPTY_STRING,
   status: z.enum(['PENDING', 'ACCEPTED', 'REJECTED']).optional(),
+  source: z.enum(['MANUAL', 'PLATFORM_UPLOAD', 'DRIVE_SYNC']).optional(),
+  driveFileId: NON_EMPTY_STRING.optional(),
+  driveFolderId: NON_EMPTY_STRING.optional(),
+  driveFolderName: NON_EMPTY_STRING.optional(),
+  webViewLink: NON_EMPTY_STRING.optional(),
+  mimeType: NON_EMPTY_STRING.optional(),
+  parserCategory: NON_EMPTY_STRING.optional(),
+  parserConfidence: z.number().min(0).max(1).optional(),
   expectedVersion: z.number().int().nonnegative().optional(),
+}).strict();
+
+export const projectDriveRootLinkSchema = z.object({
+  value: NON_EMPTY_STRING,
+}).strict();
+
+export const googleSheetImportPreviewSchema = z.object({
+  value: NON_EMPTY_STRING,
+  sheetName: NON_EMPTY_STRING.optional(),
+}).strict();
+
+export const googleSheetImportAnalyzeSchema = z.object({
+  spreadsheetTitle: z.string().trim().optional(),
+  selectedSheetName: NON_EMPTY_STRING,
+  matrix: z.array(z.array(z.string())).min(1),
+}).strict();
+
+export const projectRequestContractAnalyzeSchema = z.object({
+  fileName: NON_EMPTY_STRING.max(300),
+  documentText: z.string().max(200000).optional(),
+}).strict();
+
+export const projectRequestContractUploadSchema = z.object({
+  fileName: NON_EMPTY_STRING.max(300),
+  mimeType: NON_EMPTY_STRING.max(200),
+  fileSize: z.number().int().nonnegative(),
+  contentBase64: NON_EMPTY_STRING,
+}).strict();
+
+export const claudeSdkHelpAskSchema = z.object({
+  question: NON_EMPTY_STRING.max(2000),
+  history: z.array(
+    z.object({
+      role: z.enum(['user', 'assistant']),
+      content: NON_EMPTY_STRING.max(4000),
+    }).strict(),
+  ).max(12).optional(),
+}).strict();
+
+export const evidenceDriveUploadSchema = z.object({
+  fileName: NON_EMPTY_STRING,
+  originalFileName: NON_EMPTY_STRING.optional(),
+  mimeType: NON_EMPTY_STRING,
+  fileSize: z.number().int().nonnegative(),
+  contentBase64: NON_EMPTY_STRING,
+  category: NON_EMPTY_STRING.optional(),
+}).strict();
+
+export const evidenceDriveOverrideSchema = z.object({
+  items: z.array(
+    z.object({
+      driveFileId: NON_EMPTY_STRING,
+      category: NON_EMPTY_STRING,
+    }).strict(),
+  ).min(1),
 }).strict();
 
 export const memberRoleUpdateSchema = z.object({

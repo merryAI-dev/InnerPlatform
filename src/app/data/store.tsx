@@ -29,6 +29,7 @@ import { useFirebase } from '../lib/firebase-context';
 import { featureFlags } from '../config/feature-flags';
 import { useAuth } from './auth-store';
 import {
+  listenMembers,
   listenPartEntries,
   listenProjects,
   listenLedgers,
@@ -45,6 +46,8 @@ import {
   changeTransactionStateFS,
   addCommentFS,
   addEvidenceFS,
+  upsertMember as upsertMemberFS,
+  deleteMember as deleteMemberFS,
 } from '../lib/firestore-service';
 import {
   addCommentViaBff,
@@ -55,6 +58,17 @@ import {
   upsertTransactionViaBff,
 } from '../lib/platform-bff-client';
 import type { Unsubscribe } from 'firebase/firestore';
+
+interface EtlStagingUiPayload {
+  projects?: Project[];
+  members?: OrgMember[];
+  ledgers?: Ledger[];
+  transactions?: Transaction[];
+  comments?: Comment[];
+  evidences?: Evidence[];
+  auditLogs?: AuditLog[];
+  participationEntries?: ParticipationEntry[];
+}
 
 interface AppState {
   org: Organization;
@@ -72,6 +86,8 @@ interface AppState {
 }
 
 interface AppActions {
+  upsertMember: (member: OrgMember & Record<string, unknown>) => void;
+  removeMember: (uid: string) => void;
   addProject: (p: Project) => void;
   updateProject: (id: string, updates: Partial<Project>) => void;
   addLedger: (l: Ledger) => void;
@@ -111,6 +127,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [evidences, setEvidences] = useState<Evidence[]>(EVIDENCES);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(AUDIT_LOGS);
   const [participationEntries, setParticipationEntries] = useState<ParticipationEntry[]>(PARTICIPATION_ENTRIES);
+  const [localMembers, setLocalMembers] = useState<Array<OrgMember & Record<string, unknown>>>(ORG_MEMBERS);
   const [dataSource, setDataSource] = useState<'local' | 'firestore'>('local');
 
   const unsubsRef = useRef<Unsubscribe[]>([]);
@@ -142,10 +159,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const members = useMemo<OrgMember[]>(() => {
-    if (!authUser) return ORG_MEMBERS;
-    if (ORG_MEMBERS.some((m) => m.uid === authUser.uid)) return ORG_MEMBERS;
-    return [currentUser, ...ORG_MEMBERS];
-  }, [authUser, currentUser]);
+    const baseMembers = dataSource === 'firestore'
+      ? localMembers
+      : (localMembers.length > 0 ? localMembers : ORG_MEMBERS);
+    if (!authUser) return baseMembers;
+    if (baseMembers.some((m) => m.uid === authUser.uid)) return baseMembers;
+    return [currentUser, ...baseMembers];
+  }, [authUser, currentUser, dataSource, localMembers]);
 
   useEffect(() => {
     unsubsRef.current.forEach((unsub) => unsub());
@@ -160,10 +180,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setEvidences(EVIDENCES);
       setAuditLogs(AUDIT_LOGS);
       setParticipationEntries(PARTICIPATION_ENTRIES);
+      setLocalMembers(ORG_MEMBERS);
       return;
     }
 
     setDataSource('firestore');
+    setLocalMembers([]);
+
+    unsubsRef.current.push(
+      listenMembers(db, orgId, (items) => setLocalMembers(items)),
+    );
 
     unsubsRef.current.push(
       listenPartEntries(db, orgId, (entries) => setParticipationEntries(entries)),
@@ -199,6 +225,48 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
   }, [firestoreEnabled, db, orgId]);
 
+  useEffect(() => {
+    if (firestoreEnabled || !featureFlags.etlStagingLocalEnabled) return;
+
+    let cancelled = false;
+    fetch('/data/etl-staging-ui.json', { cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
+      .then((payload: EtlStagingUiPayload) => {
+        if (cancelled) return;
+        if (Array.isArray(payload.projects) && payload.projects.length > 0) {
+          setProjects(payload.projects);
+        }
+        if (Array.isArray(payload.members) && payload.members.length > 0) {
+          setLocalMembers(payload.members);
+        }
+        if (Array.isArray(payload.ledgers) && payload.ledgers.length > 0) {
+          setLedgers(payload.ledgers);
+        }
+        if (Array.isArray(payload.transactions) && payload.transactions.length > 0) {
+          setTransactions(payload.transactions);
+        }
+        if (Array.isArray(payload.comments) && payload.comments.length > 0) {
+          setComments(payload.comments);
+        }
+        if (Array.isArray(payload.evidences) && payload.evidences.length > 0) {
+          setEvidences(payload.evidences);
+        }
+        if (Array.isArray(payload.auditLogs) && payload.auditLogs.length > 0) {
+          setAuditLogs(payload.auditLogs);
+        }
+        if (Array.isArray(payload.participationEntries) && payload.participationEntries.length > 0) {
+          setParticipationEntries(payload.participationEntries);
+        }
+      })
+      .catch((err) => {
+        console.error('[ETL staging] local json load failed:', err);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [firestoreEnabled]);
+
   const addProject = useCallback((p: Project) => {
     if (platformApiEnabled) {
       upsertProjectViaBff({
@@ -224,6 +292,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
     setProjects((prev) => [...prev, p]);
   }, [platformApiEnabled, orgId, bffActor, firestoreEnabled, db, auditActor]);
+
+  const upsertMember = useCallback((member: OrgMember & Record<string, unknown>) => {
+    if (firestoreEnabled && db) {
+      upsertMemberFS(db, orgId, member, auditActor).catch(console.error);
+      return;
+    }
+    setLocalMembers((prev) => {
+      const idx = prev.findIndex((m) => m.uid === member.uid);
+      if (idx === -1) return [member, ...prev];
+      const next = [...prev];
+      next[idx] = { ...next[idx], ...member };
+      return next;
+    });
+  }, [firestoreEnabled, db, orgId, auditActor]);
+
+  const removeMember = useCallback((uid: string) => {
+    if (firestoreEnabled && db) {
+      deleteMemberFS(db, orgId, uid, auditActor).catch(console.error);
+      return;
+    }
+    setLocalMembers((prev) => prev.filter((m) => m.uid !== uid));
+  }, [firestoreEnabled, db, orgId, auditActor]);
 
   const updateProject = useCallback((id: string, updates: Partial<Project>) => {
     if (platformApiEnabled) {
@@ -538,6 +628,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     auditLogs,
     participationEntries,
     dataSource,
+    upsertMember,
+    removeMember,
     addProject,
     updateProject,
     addLedger,

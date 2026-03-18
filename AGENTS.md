@@ -1,56 +1,45 @@
 # Repository Guidelines
 
-## Project Structure & Module Organization
-The app is a Vite + React + TypeScript frontend.
+## Project Structure
+- `src/`: Vite + React + TypeScript frontend.
+  - `src/app/routes.tsx`: admin (`/`) and portal (`/portal`) routing.
+  - `src/app/components/`: feature UIs (projects, payroll, board, cashflow, portal).
+  - `src/app/data/`: client stores/providers and shared types (`src/app/data/types.ts`).
+  - `src/app/platform/`: shared “policy/logic” helpers (RBAC, tenant, business-days, cashflow week buckets).
+- `server/bff/`: Express BFF used by `/api/v1/*` (idempotency, outbox, queue workers, audit chain).
+- `api/bff.js`: Vercel Serverless entrypoint for the BFF.
+- `firebase/`: Firestore rules + composite indexes.
+- `policies/`: policy-as-code JSON (RBAC, relation rules).
+- `scripts/` + `guidelines/`: Firebase automation + operational runbooks.
 
-- `src/main.tsx`: app entry point.
-- `src/app/App.tsx`: top-level providers and router wiring.
-- `src/app/routes.tsx`: route map for admin (`/`) and portal (`/portal`) flows.
-- `src/app/components/`: feature UIs (`dashboard`, `projects`, `portal`, etc.) and shared `ui/` primitives.
-- `src/app/data/`: mock datasets and client-side stores.
-- `src/app/lib/`: Firebase initialization, Firestore CRUD, and seed utilities.
-- `src/styles/`: global style imports (`fonts.css`, `tailwind.css`, `theme.css`).
-- `guidelines/Guidelines.md`: optional local AI/design guidance.
+## Build, Test, Run
+- `npm run dev`: local frontend.
+- `npm run build`: production build.
+- `npm test`: unit tests (Vitest).
+- `npm run bff:dev`: local BFF on `127.0.0.1:8787`.
+- `npm run bff:test:integration`: Firestore emulator + BFF integration tests.
 
-## Build, Test, and Development Commands
-- `npm install`: install dependencies.
-- `npm run dev`: start local Vite dev server.
-- `npm run build`: create a production build.
-
-Example:
+Recommended gate before PR:
 ```bash
-npm install
-npm run dev
+npm test
+npm run bff:test:integration
+npm run build
 ```
 
-## Coding Style & Naming Conventions
-- Use TypeScript React function components.
-- Follow existing formatting: 2-space indentation, semicolons, and file-local quote style.
-- Use `PascalCase` for component/page files (for example, `ProjectDetailPage.tsx`).
-- Keep route paths and folder names in kebab/lowercase style (for example, `expense-management`).
-- Place shared UI in `src/app/components/ui/`; keep feature logic inside its feature folder.
-- Use the `@` alias for `src` imports when helpful.
+## Coding Style & Naming
+- TypeScript, React function components, 2-space indentation.
+- Components/pages: `PascalCase.tsx` (example: `AdminPayrollPage.tsx`).
+- Route segments/folders: lowercase/kebab (example: `expense-management`).
+- Keep cross-cutting rules in `src/app/platform/`; keep feature UI in `src/app/components/<feature>/`.
 
-## Testing Guidelines
-No automated test framework is configured yet (no `test` script or `*.test.*` files currently).
+## Commit & PR Guidelines
+- Prefer Conventional Commits: `feat(cashflow): ...`, `fix(rbac): ...`, `docs: ...`.
+- PRs should include:
+  - What/why, screenshots for UI changes (admin + portal), and test results.
+  - Ops notes when Firestore rules/indexes or Vercel envs change.
 
-- For each PR, run `npm run build` and manually verify key routes in both admin and portal flows.
-- If adding tests, prefer Vitest + React Testing Library and name files `*.test.ts` or `*.test.tsx` next to source files.
-- Prioritize coverage for routing, state stores, and Firestore service logic.
+## Firebase/Vercel Ops (Common)
+- Deploy Firestore rules/indexes: `npm run firebase:deploy:firestore`.
+- One-shot Firebase setup (writes `.env`, `.firebaserc`, deploys): `npm run firebase:autosetup`.
+- Vercel deploy: `vercel deploy` (preview) or `vercel --prod` (production).
 
-## Commit & Pull Request Guidelines
-This bundle does not include `.git` history, so no existing commit convention can be inferred. Use Conventional Commits:
-
-- `feat(portal): add budget summary widget`
-- `fix(firebase): guard empty projectId`
-
-PRs should include:
-- Scope and reason for changes.
-- Linked issue/task ID.
-- Screenshots for UI updates (admin and portal where relevant).
-- Manual verification notes (`npm run build`, routes checked, Firebase impact).
-
-## Security & Configuration Tips
-- Do not commit real Firebase credentials or production project IDs.
-- Keep environment-specific Firebase config local (for example via the in-app setup flow/local storage).
-- Treat files in `src/app/data/` as sample/mock content unless explicitly migrating to backend data.

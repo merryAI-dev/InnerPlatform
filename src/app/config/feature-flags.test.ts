@@ -37,6 +37,8 @@ describe('readFeatureFlags', () => {
       firebaseUseEmulators: true,
       tenantIsolationStrict: false,
       platformApiEnabled: true,
+      demoLoginEnabled: false,
+      etlStagingLocalEnabled: false,
     });
   });
 
@@ -45,5 +47,7 @@ describe('readFeatureFlags', () => {
     expect(flags.firebaseUseEmulators).toBe(false);
     expect(flags.tenantIsolationStrict).toBe(true);
     expect(flags.platformApiEnabled).toBe(false);
+    expect(flags.demoLoginEnabled).toBe(false);
+    expect(flags.etlStagingLocalEnabled).toBe(false);
   });
 });

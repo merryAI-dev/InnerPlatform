@@ -414,6 +414,58 @@ export interface MemberParticipationSummary {
   maxVerifiableRate: number;  // 교차검증 가능한 최대 합산
 }
 
+export const PARTICIPATION_RISK_RULESET = {
+  version: '2026-02-24-rules-v1',
+  warningRate: 80,
+  limitRate: 100,
+  koicaOrgKeywords: ['KOICA', '한국국제협력단'],
+} as const;
+
+export interface ParticipationRiskReportRow {
+  memberId: string;
+  name: string;
+  totalRate: number;
+  eNaraRate: number;
+  accountantRate: number;
+  privateRate: number;
+  projectCount: number;
+  riskLevel: MemberParticipationSummary['riskLevel'];
+  risk: string;
+  riskDetails: string[];
+}
+
+export interface ParticipationRiskReport {
+  generatedAt: string;
+  rulesetVersion: string;
+  thresholds: {
+    warningRate: number;
+    limitRate: number;
+  };
+  totalMembers: number;
+  rows: ParticipationRiskReportRow[];
+}
+
+function orgKey(clientOrg: string): string {
+  const raw = (clientOrg || '').split('/')[0]?.trim() || '';
+  if (/koica|한국국제협력단/i.test(raw)) return 'KOICA';
+  return raw;
+}
+
+function isKoicaOrg(org: string): boolean {
+  const key = org.toLowerCase();
+  return PARTICIPATION_RISK_RULESET.koicaOrgKeywords.some((kw) => key.includes(kw.toLowerCase()));
+}
+
+function parseMemberDisplayName(value: string): { realName: string; nickname: string } {
+  const text = (value || '').trim();
+  const m = text.match(/^(.+?)\((.+)\)$/);
+  if (!m) return { realName: text, nickname: '' };
+  return {
+    realName: m[1].trim(),
+    nickname: m[2].trim(),
+  };
+}
+
 export function computeMemberSummaries(entries: ParticipationEntry[]): MemberParticipationSummary[] {
   // Group by member
   const memberMap = new Map<string, ParticipationEntry[]>();
@@ -428,8 +480,9 @@ export function computeMemberSummaries(entries: ParticipationEntry[]): MemberPar
   memberMap.forEach((memberEntries, memberId) => {
     const first = memberEntries[0];
     const emp = EMPLOYEES.find(e => e.id === memberId);
-    const realName = emp?.realName || first.memberName.split('(')[0];
-    const nickname = emp?.nickname || '';
+    const parsedName = parseMemberDisplayName(first.memberName);
+    const realName = parsedName.realName || emp?.realName || first.memberName;
+    const nickname = parsedName.nickname || emp?.nickname || '';
 
     // 동일 이름 다중 기간 합산 (같은 사업에 기간별로 다른 참여율인 경우 최대값 사용)
     // → CTS(25~28)의 강민경 10%+15%, 최지윤 20%+80% 같은 경우는 기간이 다르므로 합산
@@ -455,35 +508,46 @@ export function computeMemberSummaries(entries: ParticipationEntry[]): MemberPar
       else if (e.settlementSystem === 'ACCOUNTANT') accountantRate += e.rate;
       else if (e.settlementSystem === 'PRIVATE') privateRate += e.rate;
 
-      const org = e.clientOrg.split('/')[0];  // "KOICA", "기후에너지환경부" 등
+      const org = orgKey(e.clientOrg);  // "KOICA", "기후에너지환경부" 등
       orgRates[org] = (orgRates[org] || 0) + e.rate;
     });
 
-    // 리스크 분석
+    // 리스크 분석 (규칙 기반 / deterministic)
     const riskDetails: string[] = [];
     let maxVerifiableRate = 0;
+    let dangerByENara = false;
+    let dangerByKoica = false;
 
-    // 1) e나라도움 시스템 내 합산 (가장 위험)
+    // 1) e나라도움 시스템 내 합산
     if (eNaraRate > 0) {
       if (eNaraRate > maxVerifiableRate) maxVerifiableRate = eNaraRate;
-      if (eNaraRate > 100) {
+      if (eNaraRate > PARTICIPATION_RISK_RULESET.limitRate) {
+        dangerByENara = true;
         riskDetails.push(`e나라도움 시스템 합산 ${eNaraRate}% → 100% 초과! 즉시 환수 위험`);
-      } else if (eNaraRate > 80) {
+      } else if (eNaraRate >= PARTICIPATION_RISK_RULESET.limitRate) {
+        riskDetails.push(`e나라도움 시스템 합산 ${eNaraRate}% (경고 수준, 추가 배정 주의)`);
+      } else if (eNaraRate > PARTICIPATION_RISK_RULESET.warningRate) {
         riskDetails.push(`e나라도움 시스템 합산 ${eNaraRate}% (경고 수준, 추가 배정 주의)`);
       }
     }
 
-    // 2) 동일 발주기관 합산 (기관이 자체 확인 가능)
+    // 2) 동일 발주기관 합산 (KOICA 계열은 위험)
     Object.entries(orgRates).forEach(([org, rate]) => {
       if (rate > maxVerifiableRate) maxVerifiableRate = rate;
-      if (rate > 100) {
+      if (rate <= PARTICIPATION_RISK_RULESET.warningRate) return;
+
+      const entriesInOrg = memberEntries.filter(e => orgKey(e.clientOrg) === org);
+      const hasVerifiableSettlement = entriesInOrg.some(
+        e => e.settlementSystem === 'E_NARA_DOUM' || e.settlementSystem === 'ACCOUNTANT',
+      );
+      const koicaSensitive = isKoicaOrg(org);
+
+      if (koicaSensitive && hasVerifiableSettlement && rate > PARTICIPATION_RISK_RULESET.limitRate) {
+        dangerByKoica = true;
         riskDetails.push(`${org} 발주 사업 합산 ${rate}% → 동일 기관 100% 초과`);
-      } else if (rate > 80 && rate <= 100) {
-        // Only warn if this agency has system verification
-        const hasSystemSettlement = memberEntries.some(e =>
-          e.clientOrg.startsWith(org) && e.settlementSystem === 'E_NARA_DOUM'
-        );
-        if (hasSystemSettlement) {
+      } else if (hasVerifiableSettlement && rate <= PARTICIPATION_RISK_RULESET.limitRate) {
+        const hasENara = entriesInOrg.some(e => e.settlementSystem === 'E_NARA_DOUM');
+        if (hasENara) {
           riskDetails.push(`${org} 발주 e나라도움 사업 합산 ${rate}% (경고 수준)`);
         }
       }
@@ -493,7 +557,7 @@ export function computeMemberSummaries(entries: ParticipationEntry[]): MemberPar
     if (eNaraRate > 0 && accountantRate > 0) {
       const crossRate = eNaraRate + accountantRate;
       if (crossRate > maxVerifiableRate) maxVerifiableRate = crossRate;
-      if (crossRate > 100) {
+      if (crossRate > PARTICIPATION_RISK_RULESET.limitRate) {
         riskDetails.push(`e나라도움(${eNaraRate}%) + 회계사정산(${accountantRate}%) = ${crossRate}% (교차 잠재 위험)`);
       }
     }
@@ -504,11 +568,9 @@ export function computeMemberSummaries(entries: ParticipationEntry[]): MemberPar
     }
 
     const riskLevel: MemberParticipationSummary['riskLevel'] =
-      eNaraRate > 100 ? 'DANGER' :
-      (Object.values(orgRates).some(r => r > 100) && Object.entries(orgRates).some(([org]) => 
-        memberEntries.some(e => e.clientOrg.startsWith(org) && (e.settlementSystem === 'E_NARA_DOUM' || e.settlementSystem === 'ACCOUNTANT'))
-      )) ? 'DANGER' :
-      eNaraRate > 80 || maxVerifiableRate > 100 ? 'WARNING' : 'SAFE';
+      (dangerByENara || dangerByKoica) ? 'DANGER'
+        : riskDetails.length > 0 ? 'WARNING'
+          : 'SAFE';
 
     summaries.push({
       memberId, memberName: first.memberName,
@@ -526,6 +588,32 @@ export function computeMemberSummaries(entries: ParticipationEntry[]): MemberPar
     if (ro[a.riskLevel] !== ro[b.riskLevel]) return ro[a.riskLevel] - ro[b.riskLevel];
     return b.totalRate - a.totalRate;
   });
+}
+
+export function buildParticipationRiskReport(entries: ParticipationEntry[]): ParticipationRiskReport {
+  const rows: ParticipationRiskReportRow[] = computeMemberSummaries(entries).map((member) => ({
+    memberId: member.memberId,
+    name: member.nickname ? `${member.realName}(${member.nickname})` : member.realName,
+    totalRate: member.totalRate,
+    eNaraRate: member.eNaraRate,
+    accountantRate: member.accountantRate,
+    privateRate: member.privateRate,
+    projectCount: member.projectCount,
+    riskLevel: member.riskLevel,
+    risk: member.riskDetails[0] || '리스크 없음',
+    riskDetails: member.riskDetails,
+  }));
+
+  return {
+    generatedAt: new Date().toISOString(),
+    rulesetVersion: PARTICIPATION_RISK_RULESET.version,
+    thresholds: {
+      warningRate: PARTICIPATION_RISK_RULESET.warningRate,
+      limitRate: PARTICIPATION_RISK_RULESET.limitRate,
+    },
+    totalMembers: rows.length,
+    rows,
+  };
 }
 
 // ── 교차검증 그룹 계산 ──

@@ -10,6 +10,7 @@ import { Progress } from '../ui/progress';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import type { Project, Transaction } from '../../data/types';
 import { ACCOUNT_TYPE_LABELS } from '../../data/types';
+import { toFiniteNumber } from './dashboard-rollups';
 
 // ── Validation Types ──
 
@@ -40,17 +41,22 @@ export function validateProject(
 ): ProjectValidation {
   const projectTx = transactions.filter(t => t.projectId === project.id);
   const approvedTx = projectTx.filter(t => t.state === 'APPROVED');
-  const totalIn = approvedTx.filter(t => t.direction === 'IN').reduce((s, t) => s + t.amounts.bankAmount, 0);
-  const totalOut = approvedTx.filter(t => t.direction === 'OUT').reduce((s, t) => s + t.amounts.bankAmount, 0);
+  const contractAmount = toFiniteNumber(project.contractAmount);
+  const totalIn = approvedTx
+    .filter(t => t.direction === 'IN')
+    .reduce((s, t) => s + toFiniteNumber(t.amounts?.bankAmount), 0);
+  const totalOut = approvedTx
+    .filter(t => t.direction === 'OUT')
+    .reduce((s, t) => s + toFiniteNumber(t.amounts?.bankAmount), 0);
 
   const checks: CheckItem[] = [];
 
-  // 1. 전용/운영통장 여부
-  const accountOk = project.accountType !== 'NONE';
+  // 1. 통장 유형
+  const accountOk = Boolean(ACCOUNT_TYPE_LABELS[project.accountType]);
   checks.push({
     id: 'account-type',
     label: '통장 구분',
-    description: '전용통장/운영통장 여부 지정',
+    description: '통장 유형 지정',
     passed: accountOk,
     severity: 'error',
     detail: accountOk
@@ -94,9 +100,9 @@ export function validateProject(
 
   // 4. 총계약금액 = 캐시플로 입금합계
   const contractMatchesIn = (() => {
-    if (project.contractAmount === 0) return true; // 계약전 미확정
+    if (contractAmount === 0) return true; // 계약전 미확정
     if (totalIn === 0 && project.status === 'CONTRACT_PENDING') return true; // 계약전이면 입금 없어도 OK
-    return project.contractAmount === totalIn;
+    return contractAmount === totalIn;
   })();
   checks.push({
     id: 'amount-in-match',
@@ -105,19 +111,19 @@ export function validateProject(
     passed: contractMatchesIn,
     severity: 'warning',
     detail: (() => {
-      if (project.contractAmount === 0) return '계약금액 미확정';
-      const diff = project.contractAmount - totalIn;
+      if (contractAmount === 0) return '계약금액 미확정';
+      const diff = contractAmount - totalIn;
       if (diff === 0) return '일치';
-      return `차이: ${diff.toLocaleString('ko-KR')}원 (계약: ${project.contractAmount.toLocaleString('ko-KR')} / 입금: ${totalIn.toLocaleString('ko-KR')})`;
+      return `차이: ${diff.toLocaleString('ko-KR')}원 (계약: ${contractAmount.toLocaleString('ko-KR')} / 입금: ${totalIn.toLocaleString('ko-KR')})`;
     })(),
   });
 
   // 5. 총계약금액 = 출금합계 (차이시 이유)
   const contractMatchesOut = (() => {
-    if (project.contractAmount === 0) return true;
+    if (contractAmount === 0) return true;
     if (totalOut === 0 && project.status === 'CONTRACT_PENDING') return true;
-    if (project.contractAmount !== totalOut && project.cashflowDiffNote) return true; // 차이 이유 있으면 OK
-    return project.contractAmount === totalOut;
+    if (contractAmount !== totalOut && project.cashflowDiffNote) return true; // 차이 이유 있으면 OK
+    return contractAmount === totalOut;
   })();
   checks.push({
     id: 'amount-out-match',
@@ -126,8 +132,8 @@ export function validateProject(
     passed: contractMatchesOut,
     severity: 'warning',
     detail: (() => {
-      if (project.contractAmount === 0) return '계약금액 미확정';
-      const diff = project.contractAmount - totalOut;
+      if (contractAmount === 0) return '계약금액 미확정';
+      const diff = contractAmount - totalOut;
       if (diff === 0) return '일치';
       if (project.cashflowDiffNote) return `차이 사유: ${project.cashflowDiffNote}`;
       return `차이: ${diff.toLocaleString('ko-KR')}원 (사유 미기입)`;
@@ -279,10 +285,10 @@ export function DashboardGuidePanel() {
               </div>
               <div className="bg-red-50 rounded-md px-3 py-2 border border-red-200">
                 <p className="text-red-800" style={{ fontWeight: 500 }}>
-                  운영통장으로 입금, 운영통장에서 출금되는 Big Money!
+                  사업비 입출금 흐름이 큰 항목은 통장 유형에 맞춰 반드시 추적 관리하세요.
                 </p>
                 <p className="text-red-600 mt-0.5">
-                  전용/운영통장 구분을 반드시 확인하세요.
+                  일반 사업인지, 전용계좌 사업인지 먼저 확인하세요.
                 </p>
               </div>
             </div>
@@ -306,7 +312,7 @@ export function DashboardGuidePanel() {
                 기본 체크 사항 (6개 항목)
               </div>
               <ol className="space-y-1 text-muted-foreground ml-5">
-                <li className="list-decimal">전용/운영통장 여부</li>
+                <li className="list-decimal">통장 유형</li>
                 <li className="list-decimal">캐시플로 원장 연결</li>
                 <li className="list-decimal">업데이트 날짜 & 담당자</li>
                 <li className="list-decimal">총계약금액 = 캐시플로 입금합계</li>

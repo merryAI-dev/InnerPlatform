@@ -114,7 +114,7 @@ export function LedgerDetailPage() {
   const [txForm, setTxForm] = useState({
     dateTime: new Date().toISOString().split('T')[0],
     direction: 'OUT' as Direction,
-    method: 'BANK_TRANSFER' as PaymentMethod,
+    method: 'TRANSFER' as PaymentMethod,
     cashflowCategory: '' as CashflowCategory,
     counterparty: '',
     memo: '',
@@ -175,7 +175,7 @@ export function LedgerDetailPage() {
     setShowTxForm(false);
     setTxForm({
       dateTime: new Date().toISOString().split('T')[0],
-      direction: 'OUT', method: 'BANK_TRANSFER',
+      direction: 'OUT', method: 'TRANSFER',
       cashflowCategory: '' as CashflowCategory,
       counterparty: '', memo: '', bankAmount: '', budgetCategory: '',
     });

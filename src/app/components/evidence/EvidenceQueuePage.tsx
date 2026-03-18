@@ -21,6 +21,7 @@ import {
   type EvidenceStatus,
 } from '../../data/types';
 import { PageHeader } from '../layout/PageHeader';
+import { isValidDriveUrl } from '../../platform/evidence-helpers';
 
 const evidenceStyles: Record<string, { bg: string; text: string; dot: string }> = {
   MISSING: { bg: 'bg-rose-50', text: 'text-rose-700', dot: 'bg-rose-500' },
@@ -144,6 +145,22 @@ export function EvidenceQueuePage() {
           <span className={`text-[9px] px-1.5 py-0.5 rounded-md ${txSt?.bg || ''} ${txSt?.text || ''}`} style={{ fontWeight: 500 }}>
             {TX_STATE_LABELS[t.state]}
           </span>
+        </TableCell>
+        <TableCell className="py-1 text-center">
+          {isValidDriveUrl(t.evidenceDriveLink || '') ? (
+            <a
+              href={t.evidenceDriveLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center text-blue-500 hover:text-blue-700"
+              onClick={(e) => e.stopPropagation()}
+              title="Google Drive에서 열기"
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+            </a>
+          ) : (
+            <span className="text-[9px] text-muted-foreground">-</span>
+          )}
         </TableCell>
         <TableCell className="py-1 text-[10px] text-muted-foreground max-w-[100px] truncate">
           {showRejection ? (t.rejectedReason || '-') : (t.evidenceMissing.join(', ') || '-')}
@@ -269,6 +286,7 @@ export function EvidenceQueuePage() {
                       <TableHead className="text-right text-[10px]">금액</TableHead>
                       <TableHead className="text-[10px]">증빙</TableHead>
                       <TableHead className="text-[10px]">상태</TableHead>
+                      <TableHead className="text-[10px] text-center">드라이브</TableHead>
                       <TableHead className="text-[10px]">미제출</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -276,7 +294,7 @@ export function EvidenceQueuePage() {
                     {incompleteTx.map(t => renderTxRow(t))}
                     {incompleteTx.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={9} className="text-center py-10 text-[13px] text-muted-foreground">
+                        <TableCell colSpan={10} className="text-center py-10 text-[13px] text-muted-foreground">
                           <CheckCircle2 className="w-8 h-8 mx-auto mb-2 text-emerald-300" />
                           모든 증빙이 완료되었습니다
                         </TableCell>
@@ -305,6 +323,7 @@ export function EvidenceQueuePage() {
                       <TableHead className="text-right text-[10px]">금액</TableHead>
                       <TableHead className="text-[10px]">증빙</TableHead>
                       <TableHead className="text-[10px]">상태</TableHead>
+                      <TableHead className="text-[10px] text-center">드라이브</TableHead>
                       <TableHead className="text-[10px]">미제출</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -312,7 +331,7 @@ export function EvidenceQueuePage() {
                     {pendingTx.map(t => renderTxRow(t))}
                     {pendingTx.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={9} className="text-center py-10 text-[13px] text-muted-foreground">
+                        <TableCell colSpan={10} className="text-center py-10 text-[13px] text-muted-foreground">
                           승인 대기 거래가 없습니다
                         </TableCell>
                       </TableRow>
@@ -340,6 +359,7 @@ export function EvidenceQueuePage() {
                       <TableHead className="text-right text-[10px]">금액</TableHead>
                       <TableHead className="text-[10px]">증빙</TableHead>
                       <TableHead className="text-[10px]">상태</TableHead>
+                      <TableHead className="text-[10px] text-center">드라이브</TableHead>
                       <TableHead className="text-[10px]">반려 사유</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -347,7 +367,7 @@ export function EvidenceQueuePage() {
                     {rejectedTx.map(t => renderTxRow(t, true))}
                     {rejectedTx.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={9} className="text-center py-10 text-[13px] text-muted-foreground">
+                        <TableCell colSpan={10} className="text-center py-10 text-[13px] text-muted-foreground">
                           반려된 거래가 없습니다
                         </TableCell>
                       </TableRow>

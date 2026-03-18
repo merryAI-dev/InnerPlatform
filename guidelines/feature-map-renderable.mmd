@@ -1,0 +1,88 @@
+flowchart LR
+  subgraph U1[Admin Space]
+    A0[Dashboard: health, alerts]
+    A1[Project Mgmt: list, detail, wizard, ledger]
+    A2[Finance: cashflow, evidence, payroll, budget, expense]
+    A3[People: participation, KOICA, personnel changes, training]
+    A4[Governance: approvals, users, audit, settings]
+    A5[Company Board: feed, post, comment, vote]
+  end
+
+  subgraph U2[Portal Space]
+    P0[Portal Dashboard: assigned projects]
+    P1[Onboarding: assignment and selection]
+    P2[Submissions: expense and change status]
+    P3[Payroll: notice acknowledge]
+    P4[Cashflow Weekly: projection, actual, submit]
+    P5[Budget and Expense: view and input]
+    P6[Personnel: team view and changes]
+    P7[Training and Career: training and profile]
+    P8[Project Register Proposal]
+    P9[Company Board shared]
+  end
+
+  subgraph C1[Client Core]
+    C0[Auth and Role Routing]
+    C2[Providers: firebase auth board hr payroll cashflow career training]
+    C3[Store Layer: app portal firestore listeners bff fallback]
+    C4[Feature Flags: firestore core, platform api, emulator env]
+  end
+
+  subgraph B1[BFF API]
+    B0[Security Context: token verify tenant actor domain]
+    B2[Write APIs: upsert and state transition]
+    B3[Read APIs: data, audit verify, queue jobs]
+    B4[Integrity: idempotency, version check, state guard]
+    B5[Audit Chain: hash append and verify]
+    B6[PII Protection: encrypted actor email]
+  end
+
+  subgraph W1[Async Processing]
+    W0[Outbox: enqueue retry deadletter]
+    W2[Work Queue: projection rebuild replay]
+    W3[Workers: outbox queue payroll monthly close]
+    W4[Projections: project financials approval inbox member workload]
+  end
+
+  subgraph D1[Firestore Model]
+    D0[Core: projects ledgers transactions comments evidences audit logs members]
+    D2[Business: participation payroll schedules runs closes cashflow weeks]
+    D3[Infra: outbox work queue idempotency keys views]
+  end
+
+  subgraph E1[Excel ETL]
+    E0[Step 1 Discover]
+    E2[Step 2 Static Schema Map]
+    E3[Step 3 Extract and Normalize]
+    E4[Step 4 Validate]
+    E5[Step 5 Load dry run and strict commit]
+    E6[Outputs: summary issues collection json]
+  end
+
+  subgraph O1[Ops]
+    O0[Firebase automation setup deploy emulator]
+    O2[Observability and Recovery]
+    O3[Policy and Security ops]
+  end
+
+  U1 --> C0
+  U2 --> C0
+  C0 --> C2 --> C3
+  C4 --> C3
+
+  C3 --> B1
+  C3 --> D1
+
+  B1 --> D1
+  B2 --> B4
+  B2 --> B5
+  B2 --> W0
+  W0 --> W2 --> W4
+  W3 --> W0
+  W3 --> W2
+  W3 --> W4
+
+  E1 --> D1
+  O1 --> D1
+  O2 --> D1
+  O3 --> B1

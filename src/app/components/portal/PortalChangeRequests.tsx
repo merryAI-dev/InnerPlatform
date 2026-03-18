@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router';
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router';
 import {
   ArrowRightLeft, Plus, Send, Clock, CheckCircle2,
   XCircle, FileText, Users, UserPlus, UserMinus,
   Percent, ArrowUpDown, Calendar, Eye, AlertTriangle,
-  Megaphone, Bell, ChevronRight, X,
+  Megaphone, Bell, ChevronRight, X, Loader2,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -22,6 +23,16 @@ import {
 import { PageHeader } from '../layout/PageHeader';
 import { usePortalStore } from '../../data/portal-store';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../ui/alert-dialog';
+import {
   useHrAnnouncements,
   HR_EVENT_LABELS, HR_EVENT_COLORS,
   type ProjectChangeAlert,
@@ -30,63 +41,6 @@ import {
   STATE_LABELS,
   type ChangeRequest, type ChangeRequestState, type StaffChangeItem,
 } from '../../data/personnel-change-data';
-
-// ═══════════════════════════════════════════════════════════════
-// PortalChangeRequests — 인력변경 신청 (사용자 포털)
-//
-// ── 아키텍처 요약 (이후 작업자 참고) ──
-//
-// [데이터 흐름]
-// 1. admin이 /hr-announcements 에서 인사 공지 등록
-//    → hr-announcements-store.createAnnouncement()
-//    → participation-data에서 해당 인력 참여 사업 자동 탐색
-//    → 각 사업에 ProjectChangeAlert 자동 생성
-//
-// 2. 포털 사용자가 이 페이지에 진입하면
-//    → useHrAnnouncements().getProjectAlerts(myProject.id) 로 내 사업 알림 조회
-//    → 미확인 알림이 있으면 상단 배너에 표시
-//    → "확인" 클릭 → acknowledgeAlert()
-//    → "인력변경 시작" 클릭 → markAlertResolved() + 신규 ChangeRequest 생성
-//
-// 3. 사이드바 배지
-//    → PortalLayout.getBadge('/portal/change-requests')에서
-//      pendingChanges + hrAlertCount 합산하여 (N) 표시
-//
-// [Firebase 마이그레이션 — Phase 1]
-// 현재: React Context + useState (로컬 메모리, HMR-safe globalThis 패턴)
-// 목표: Firestore onSnapshot 실시간 구독
-//
-// 변환 포인트:
-//   hr-announcements-store.tsx
-//   ├─ INITIAL_ANNOUNCEMENTS/INITIAL_ALERTS → Firestore seed data
-//   ├─ createAnnouncement → addDoc('orgs/{orgId}/hrAnnouncements', ...)
-//   │                       + batch addDoc('orgs/{orgId}/projectChangeAlerts', ...)
-//   ├─ acknowledgeAlert   → updateDoc('orgs/{orgId}/projectChangeAlerts/{id}', { acknowledged: true })
-//   ├─ markAlertResolved  → updateDoc(..., { changeRequestCreated: true })
-//   └─ announcements/alerts state → onSnapshot 구독으로 교체
-//
-//   portal-store.tsx
-//   ├─ changeRequests     → onSnapshot('orgs/{orgId}/projects/{pid}/changeRequests')
-//   ├─ addChangeRequest   → addDoc(...)
-//   └─ submitChangeRequest → updateDoc(... { state: 'SUBMITTED' })
-//
-// Security Rules 예시:
-//   match /orgs/{orgId}/hrAnnouncements/{annId} {
-//     allow read: if isAuthenticated();
-//     allow write: if isAdmin(orgId);
-//   }
-//   match /orgs/{orgId}/projectChangeAlerts/{alertId} {
-//     allow read: if isAuthenticated();
-//     allow update: if isProjectMember(resource.data.projectId);
-//     allow create, delete: if isAdmin(orgId);
-//   }
-//
-// Cloud Functions 연동 (선택):
-//   - onWrite hrAnnouncements → 자동 projectChangeAlerts 생성 (현재 클라이언트에서 수행)
-//   - onWrite projectChangeAlerts → FCM push / Slack webhook / 이메일 알림
-//   - Scheduled: 적용일 D-7, D-3, D-1에 미처리 사업 PM에게 리마인더
-//
-// ═══════════════════════════════════════════════════════════════
 
 const stateStyles: Record<ChangeRequestState, string> = {
   DRAFT: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400',
@@ -122,8 +76,13 @@ const changeTypeColors: Record<string, string> = {
   REPLACEMENT: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-400',
 };
 
+const DISMISSED_ALERT_STORAGE_PREFIX = 'mysc-dismissed-hr-alerts';
+
+function getDismissedAlertStorageKey(projectId: string): string {
+  return `${DISMISSED_ALERT_STORAGE_PREFIX}:${projectId}`;
+}
+
 // HR 이벤트 → 인력변경 유형 매핑
-// TODO(Firebase): Cloud Function에서 자동 매핑하도록 이전
 const HR_EVENT_TO_CHANGE_TYPE: Record<string, StaffChangeItem['changeType']> = {
   RESIGNATION: 'REMOVE',
   LEAVE: 'REMOVE',
@@ -133,8 +92,8 @@ const HR_EVENT_TO_CHANGE_TYPE: Record<string, StaffChangeItem['changeType']> = {
 };
 
 export function PortalChangeRequests() {
-  const [searchParams] = useSearchParams();
-  const { portalUser, myProject, changeRequests, addChangeRequest, submitChangeRequest } = usePortalStore();
+  const navigate = useNavigate();
+  const { isLoading, portalUser, myProject, changeRequests, addChangeRequest, submitChangeRequest } = usePortalStore();
   const {
     getProjectAlerts, acknowledgeAlert, markAlertResolved,
     announcements,
@@ -142,7 +101,7 @@ export function PortalChangeRequests() {
 
   const [showCreate, setShowCreate] = useState(false);
   const [selectedReq, setSelectedReq] = useState<ChangeRequest | null>(null);
-  // HR 알림 배너 닫기 (세션 내 dismiss — Firestore 전환 시 acknowledged 플래그로 영속화)
+  const [submitConfirm, setSubmitConfirm] = useState<string | null>(null);
   const [dismissedAlerts, setDismissedAlerts] = useState<Set<string>>(new Set());
 
   const [form, setForm] = useState({
@@ -154,22 +113,36 @@ export function PortalChangeRequests() {
     rateAfter: 0,
   });
 
-  if (!portalUser || !myProject) return null;
+  if (isLoading) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-5 h-5 mx-auto animate-spin text-muted-foreground" />
+          <p className="mt-2 text-[12px] text-muted-foreground">인력변경 데이터를 불러오는 중...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!portalUser || !myProject) {
+    return (
+      <div className="text-center py-16">
+        <AlertTriangle className="w-10 h-10 mx-auto text-muted-foreground/30 mb-3" />
+        <p className="text-[14px] text-muted-foreground">사업이 선택되지 않았습니다.</p>
+        <Button variant="outline" className="mt-4" onClick={() => navigate('/portal/project-settings')}>
+          사업 선택하기
+        </Button>
+      </div>
+    );
+  }
 
   // ── 내 사업의 HR 알림 ──
-  // TODO(Firebase): getProjectAlerts를 onSnapshot 구독으로 교체
   const myAlerts = getProjectAlerts(myProject.id);
   const unacknowledgedAlerts = myAlerts.filter(a => !a.acknowledged && !dismissedAlerts.has(a.id));
   const pendingAlerts = myAlerts.filter(a => !a.changeRequestCreated);
 
   const myRequests = changeRequests.filter(r => r.projectId === myProject.id);
-  const reqIdFromUrl = searchParams.get('req') || '';
-
-  useEffect(() => {
-    if (!reqIdFromUrl) return;
-    const found = myRequests.find((r) => r.id === reqIdFromUrl);
-    if (found) setSelectedReq(found);
-  }, [reqIdFromUrl, myRequests]);
+  const submitReq = submitConfirm ? myRequests.find((r) => r.id === submitConfirm) || null : null;
 
   const kpi = {
     total: myRequests.length,
@@ -178,6 +151,52 @@ export function PortalChangeRequests() {
     approved: myRequests.filter(r => r.state === 'APPROVED').length,
     rejected: myRequests.filter(r => r.state === 'REJECTED' || r.state === 'REVISION_REQUESTED').length,
   };
+
+  useEffect(() => {
+    const storageKey = getDismissedAlertStorageKey(myProject.id);
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (!raw) {
+        setDismissedAlerts(new Set());
+        return;
+      }
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) {
+        setDismissedAlerts(new Set());
+        return;
+      }
+      const ids = parsed.filter((item): item is string => typeof item === 'string');
+      setDismissedAlerts(new Set(ids));
+    } catch {
+      setDismissedAlerts(new Set());
+    }
+  }, [myProject.id]);
+
+  useEffect(() => {
+    const storageKey = getDismissedAlertStorageKey(myProject.id);
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(Array.from(dismissedAlerts)));
+    } catch {
+      // ignore localStorage failures (private mode / quota)
+    }
+  }, [dismissedAlerts, myProject.id]);
+
+  useEffect(() => {
+    if (dismissedAlerts.size === 0) return;
+    const validIds = new Set(myAlerts.map((alert) => alert.id));
+    setDismissedAlerts((prev) => {
+      let changed = false;
+      const next = new Set<string>();
+      prev.forEach((id) => {
+        if (validIds.has(id)) {
+          next.add(id);
+        } else {
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [dismissedAlerts.size, myAlerts]);
 
   // ── HR 알림에서 인력변경 시작 ──
   const handleStartChangeFromAlert = (alert: ProjectChangeAlert) => {
@@ -294,18 +313,7 @@ export function PortalChangeRequests() {
         }
       />
 
-      {/* ═══════════════════════════════════════════════════════════
-          HR 알림 배너 — 인사 공지에서 자동 생성된 알림 표시
-          ─────────────────────────────────────────────────────────
-          admin이 인사공지를 등록하면 이 사업에 관련된 알림이 여기 표시됨.
-          PM은 "확인"(acknowledge)하거나 바로 "인력변경 시작"을 눌러
-          ChangeRequest 초안을 자동 생성할 수 있음.
-
-          TODO(Firebase Phase 1):
-          - ProjectChangeAlert 문서의 acknowledged 플래그를 Firestore에 영속화
-          - onSnapshot으로 실시간 업데이트 (admin이 공지 등록 즉시 배너 노출)
-          - FCM push notification 연동으로 앱 밖에서도 알림 수신
-          ═══════════════════════════════════════════════════════════ */}
+      {/* HR 알림 배너 */}
       {unacknowledgedAlerts.length > 0 && (
         <div className="space-y-2">
           {unacknowledgedAlerts.map(alert => {
@@ -375,6 +383,7 @@ export function PortalChangeRequests() {
 
                     {/* 닫기 (세션 내 dismiss) */}
                     <button
+                      aria-label="알림 닫기"
                       className="p-1 rounded hover:bg-black/5 dark:hover:bg-white/5 text-muted-foreground shrink-0"
                       onClick={() => setDismissedAlerts(prev => new Set([...prev, alert.id]))}
                     >
@@ -475,7 +484,7 @@ export function PortalChangeRequests() {
                           size="sm"
                           variant="outline"
                           className="h-6 text-[10px] gap-1 mt-2"
-                          onClick={e => { e.stopPropagation(); submitChangeRequest(req.id); }}
+                          onClick={e => { e.stopPropagation(); setSubmitConfirm(req.id); }}
                         >
                           <Send className="w-3 h-3" /> 제출하기
                         </Button>
@@ -585,6 +594,46 @@ export function PortalChangeRequests() {
           </div>
         )}
       </div>
+
+      {/* 제출 확인 */}
+      <AlertDialog open={!!submitConfirm} onOpenChange={(open) => { if (!open) setSubmitConfirm(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>인력변경 요청을 제출하시겠습니까?</AlertDialogTitle>
+            <AlertDialogDescription>
+              제출 후 관리자가 검토합니다.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {submitReq && (
+            <div className="text-sm space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">요청명</span>
+                <span className="truncate max-w-[220px]" style={{ fontWeight: 700 }}>{submitReq.title}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">변경 건수</span>
+                <span style={{ fontWeight: 700 }}>{submitReq.changes.length}건</span>
+              </div>
+            </div>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel>취소</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={async (e) => {
+                e.preventDefault();
+                if (!submitReq) return;
+                const ok = await submitChangeRequest(submitReq.id);
+                if (ok) {
+                  toast.success('제출했습니다.');
+                  setSubmitConfirm(null);
+                }
+              }}
+            >
+              제출
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* 새 신청 다이얼로그 */}
       <Dialog open={showCreate} onOpenChange={setShowCreate}>
