@@ -2,6 +2,15 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Skills
+
+커스텀 스킬은 `.claude/skills/`에 정의되어 있습니다.
+
+| Skill | Purpose |
+|-------|---------|
+| `verify-git-policy` | PR/머지 전 브랜치 네이밍·커밋 컨벤션·PR 없는 미머지 브랜치 일괄 검증 |
+| `merge-worktree` | 현재 worktree 브랜치를 main(또는 지정 브랜치)에 스쿼시 머지 |
+
 ## Project Overview
 
 MYSC 사업관리 통합 플랫폼 — an enterprise business management platform for a Korean social enterprise (MYSC). Manages projects, ledgers, transactions, payroll, cashflow, personnel, budgets, training, and career profiles. **All user-facing UI text is in Korean (한국어).**
