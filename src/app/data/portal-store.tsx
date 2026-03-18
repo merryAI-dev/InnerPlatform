@@ -440,9 +440,9 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     };
 
     if (!portalUser?.projectId) {
+      // 프로젝트 선택 화면: 전사 프로젝트를 모두 표시 (상태 무관)
       const projectQuery = query(
         collection(db, getOrgCollectionPath(orgId, 'projects')),
-        where('status', '==', 'CONTRACT_PENDING'),
         limit(500),
       );
       unsubsRef.current.push(
