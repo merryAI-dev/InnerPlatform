@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronLeft, ChevronRight, Download, ExternalLink, GripVertical, Loader2, MessageSquare, Plus, RotateCcw, Save, Send, Upload, X } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, Download, ExternalLink, GripVertical, Loader2, Plus, RotateCcw, Save, Upload, X } from 'lucide-react';
 import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { ClipboardEvent, KeyboardEvent, MouseEvent } from 'react';
