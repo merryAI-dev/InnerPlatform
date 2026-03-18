@@ -8,6 +8,7 @@
     "dev": "vite",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "npx playwright test --config playwright.harness.config.mjs",
     "bff:dev": "node server/bff/server.mjs",
     "bff:seed:demo": "node scripts/bff_seed_demo_data.mjs",
     "bff:test:integration": "bash scripts/test_bff_integration.sh",
