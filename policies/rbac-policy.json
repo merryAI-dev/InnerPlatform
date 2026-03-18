@@ -81,15 +81,11 @@
     ],
     "viewer": [
       "project:read",
-      "project:write",
       "project:evidence_drive:write",
       "ledger:read",
-      "ledger:write",
-      "transaction:submit",
       "comment:read",
       "comment:write",
       "evidence:read",
-      "evidence:write",
       "evidence:drive:write"
     ],
     "auditor": [
