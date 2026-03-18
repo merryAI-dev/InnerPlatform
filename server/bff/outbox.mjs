@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { createNotificationsForOutboxEvent } from './notifications.mjs';
 
 function toIso(value = new Date()) {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
@@ -97,6 +98,8 @@ async function defaultOutboxHandler(db, event, nowIso) {
   } catch (error) {
     if (!isAlreadyExistsError(error)) throw error;
   }
+
+  await createNotificationsForOutboxEvent(db, event, nowIso);
 }
 
 async function markSuccess(ref, nowIso) {
