@@ -28,6 +28,7 @@ describe('readFeatureFlags', () => {
       VITE_FIREBASE_USE_EMULATORS: '1',
       VITE_TENANT_ISOLATION_STRICT: '0',
       VITE_PLATFORM_API_ENABLED: 'yes',
+      VITE_QA_P0_SETTLEMENT_V1: 'off',
     });
 
     expect(flags).toEqual({
@@ -39,6 +40,7 @@ describe('readFeatureFlags', () => {
       platformApiEnabled: true,
       demoLoginEnabled: false,
       etlStagingLocalEnabled: false,
+      qaP0SettlementV1: false,
     });
   });
 
@@ -49,5 +51,6 @@ describe('readFeatureFlags', () => {
     expect(flags.platformApiEnabled).toBe(false);
     expect(flags.demoLoginEnabled).toBe(false);
     expect(flags.etlStagingLocalEnabled).toBe(false);
+    expect(flags.qaP0SettlementV1).toBe(false);
   });
 });

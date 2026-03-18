@@ -11,6 +11,16 @@ export interface BankTransaction {
   balance: number;
 }
 
+export type BankCsvProfileId = 'GENERIC' | 'HANA' | 'KOOKMIN' | 'SHINHAN';
+
+export interface BankCsvProfileMeta {
+  id: BankCsvProfileId;
+  label: string;
+  quickViewLabel: string;
+  actionMenuLabel: string;
+  fieldLabels: string[];
+}
+
 export type MatchStatus = 'MATCHED' | 'UNMATCHED_BANK' | 'UNMATCHED_SYSTEM';
 
 export interface ReconciliationMatch {
@@ -18,6 +28,56 @@ export interface ReconciliationMatch {
   systemTx: Transaction | null;
   status: MatchStatus;
   confidence: number; // 0-1
+}
+
+const BANK_CSV_PROFILES: Record<BankCsvProfileId, BankCsvProfileMeta> = {
+  GENERIC: {
+    id: 'GENERIC',
+    label: '일반 은행 CSV',
+    quickViewLabel: '공통 조회',
+    actionMenuLabel: '공통 열',
+    fieldLabels: ['거래일자', '적요', '입금/출금액', '잔액'],
+  },
+  HANA: {
+    id: 'HANA',
+    label: '하나은행 빠른조회',
+    quickViewLabel: '빠른조회',
+    actionMenuLabel: '열 메뉴',
+    fieldLabels: ['거래일시', '적요', '입금액', '출금액', '거래 후 잔액'],
+  },
+  KOOKMIN: {
+    id: 'KOOKMIN',
+    label: '국민은행 빠른조회',
+    quickViewLabel: '빠른조회',
+    actionMenuLabel: '열 메뉴',
+    fieldLabels: ['거래일자', '기재내용', '맡기신금액', '찾으신금액', '잔액'],
+  },
+  SHINHAN: {
+    id: 'SHINHAN',
+    label: '신한은행 빠른조회',
+    quickViewLabel: '빠른조회',
+    actionMenuLabel: '조회 항목',
+    fieldLabels: ['거래일', '내용', '입출금액', '거래구분', '잔액'],
+  },
+};
+
+export function getBankCsvProfileMeta(profileId: BankCsvProfileId | undefined): BankCsvProfileMeta {
+  return BANK_CSV_PROFILES[profileId || 'GENERIC'] || BANK_CSV_PROFILES.GENERIC;
+}
+
+export function detectBankCsvProfile(matrix: string[][]): BankCsvProfileId {
+  if (matrix.length === 0) return 'GENERIC';
+  const header = matrix[0].map((cell) => normalizeHeaderToken(cell));
+  if (header.some((cell) => cell.includes('거래후잔액')) || header.some((cell) => cell.includes('거래일시'))) {
+    return 'HANA';
+  }
+  if (header.some((cell) => cell.includes('기재내용')) || header.some((cell) => cell.includes('찾으신금액')) || header.some((cell) => cell.includes('맡기신금액'))) {
+    return 'KOOKMIN';
+  }
+  if (header.some((cell) => cell.includes('거래구분')) || header.some((cell) => cell.includes('입출금구분'))) {
+    return 'SHINHAN';
+  }
+  return 'GENERIC';
 }
 
 // ── Matching algorithm ──
@@ -113,16 +173,17 @@ export function autoMatchBankTransactions(
 export function parseBankCsv(matrix: string[][]): BankTransaction[] {
   if (matrix.length < 2) return [];
 
-  const header = matrix[0].map((h) => h.trim().toLowerCase());
+  const header = matrix[0].map((h) => normalizeHeaderToken(h));
   const results: BankTransaction[] = [];
 
   // Detect format: look for column patterns
-  const dateIdx = header.findIndex((h) => h.includes('날짜') || h.includes('거래일') || h.includes('date'));
-  const descIdx = header.findIndex((h) => h.includes('적요') || h.includes('내용') || h.includes('desc') || h.includes('메모'));
-  const inIdx = header.findIndex((h) => h.includes('입금') || h.includes('credit'));
-  const outIdx = header.findIndex((h) => h.includes('출금') || h.includes('debit') || h.includes('지출'));
-  const balIdx = header.findIndex((h) => h.includes('잔액') || h.includes('balance') || h.includes('잔고'));
-  const amtIdx = header.findIndex((h) => h === '금액' || h === 'amount');
+  const dateIdx = findHeaderIndex(header, ['날짜', '거래일', '거래일시', '거래일자', 'date']);
+  const descIdx = findHeaderIndex(header, ['적요', '내용', '기재내용', 'desc', '메모']);
+  const inIdx = findHeaderIndex(header, ['입금액', '입금', '맡기신금액', 'credit']);
+  const outIdx = findHeaderIndex(header, ['출금액', '출금', '찾으신금액', 'debit', '지출']);
+  const balIdx = findHeaderIndex(header, ['거래후잔액', '잔액', 'balance', '잔고']);
+  const amtIdx = findHeaderIndex(header, ['입출금액', '금액', 'amount']);
+  const dirIdx = findHeaderIndex(header, ['입출금구분', '거래구분', 'direction']);
 
   if (dateIdx < 0) return [];
 
@@ -150,9 +211,21 @@ export function parseBankCsv(matrix: string[][]): BankTransaction[] {
         direction = 'OUT';
       }
     } else if (amtIdx >= 0) {
-      // Single amount column - positive = IN, negative = OUT
+      // Single amount column - infer direction from explicit column first, then from sign.
       const rawAmt = parseAmount(row[amtIdx]);
-      if (rawAmt >= 0) {
+      if (dirIdx >= 0) {
+        const explicitDirection = parseDirection(row[dirIdx]);
+        if (explicitDirection) {
+          amount = Math.abs(rawAmt);
+          direction = explicitDirection;
+        } else if (rawAmt >= 0) {
+          amount = rawAmt;
+          direction = 'IN';
+        } else {
+          amount = Math.abs(rawAmt);
+          direction = 'OUT';
+        }
+      } else if (rawAmt >= 0) {
         amount = rawAmt;
         direction = 'IN';
       } else {
@@ -178,11 +251,29 @@ export function parseBankCsv(matrix: string[][]): BankTransaction[] {
 
 // ── Helpers ──
 
+function normalizeHeaderToken(raw: string | undefined): string {
+  return String(raw || '').trim().toLowerCase().replace(/\s+/g, '');
+}
+
+function findHeaderIndex(headers: string[], keywords: string[]): number {
+  return headers.findIndex((header) => keywords.some((keyword) => header.includes(keyword.toLowerCase().replace(/\s+/g, ''))));
+}
+
 function parseAmount(raw: string | undefined): number {
   if (!raw) return 0;
   const cleaned = raw.replace(/[,\s원₩]/g, '').trim();
   const n = Number(cleaned);
   return Number.isFinite(n) ? Math.trunc(n) : 0;
+}
+
+function parseDirection(raw: string | undefined): 'IN' | 'OUT' | null {
+  const normalized = String(raw || '').trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized.includes('입')) return 'IN';
+  if (normalized.includes('출')) return 'OUT';
+  if (normalized.includes('credit') || normalized.includes('deposit')) return 'IN';
+  if (normalized.includes('debit') || normalized.includes('withdraw')) return 'OUT';
+  return null;
 }
 
 function normalizeDate(raw: string): string {

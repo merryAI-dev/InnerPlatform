@@ -76,6 +76,26 @@ service cloud.firestore {
       return canWriteProjectResource(orgId, projectIdFromTransaction(orgId, txId));
     }
 
+    function isSheetRowComment(data) {
+      return data.targetType == 'expense_sheet_row'
+        && data.projectId is string
+        && data.sheetRowId is string
+        && data.transactionId is string
+        && data.sheetRowId == data.transactionId;
+    }
+
+    function canReadCommentResource(orgId, data) {
+      return isSheetRowComment(data)
+        ? canReadProjectResource(orgId, data.projectId)
+        : canReadTransactionResource(orgId, data.transactionId);
+    }
+
+    function canWriteCommentResource(orgId, data) {
+      return isSheetRowComment(data)
+        ? canWriteProjectResource(orgId, data.projectId)
+        : canWriteTransactionResource(orgId, data.transactionId);
+    }
+
     match /orgs/{orgId}/members/{uid} {
       allow read: if isSignedIn() && resourceHasValidTenant(orgId);
       allow create: if isSignedIn()
@@ -116,10 +136,10 @@ service cloud.firestore {
     }
 
     match /orgs/{orgId}/comments/{commentId} {
-      allow read: if isSignedIn() && resourceHasValidTenant(orgId) && canReadTransactionResource(orgId, resource.data.transactionId);
-      allow create: if isSignedIn() && requestHasValidTenant(orgId) && canWriteTransactionResource(orgId, request.resource.data.transactionId);
-      allow update: if isSignedIn() && requestHasValidTenant(orgId) && resourceHasValidTenant(orgId) && canWriteTransactionResource(orgId, resource.data.transactionId);
-      allow delete: if isSignedIn() && resourceHasValidTenant(orgId) && canWriteTransactionResource(orgId, resource.data.transactionId);
+      allow read: if isSignedIn() && resourceHasValidTenant(orgId) && canReadCommentResource(orgId, resource.data);
+      allow create: if isSignedIn() && requestHasValidTenant(orgId) && canWriteCommentResource(orgId, request.resource.data);
+      allow update: if isSignedIn() && requestHasValidTenant(orgId) && resourceHasValidTenant(orgId) && canWriteCommentResource(orgId, resource.data);
+      allow delete: if isSignedIn() && resourceHasValidTenant(orgId) && canWriteCommentResource(orgId, resource.data);
     }
 
     match /orgs/{orgId}/evidences/{evidenceId} {

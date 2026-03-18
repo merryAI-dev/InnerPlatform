@@ -21,6 +21,11 @@ import {
 } from './auth-helpers';
 import { isBootstrapAdminEmail } from './auth-bootstrap';
 import { normalizeProjectIds, resolvePrimaryProjectId } from './project-assignment';
+import {
+  buildWorkspacePreferencePatch,
+  readMemberWorkspace,
+  type WorkspaceId,
+} from './member-workspace';
 import { extractAuthContextFromClaims } from '../platform/rbac';
 import { isAdminSpaceRole } from '../platform/navigation';
 import { resolveTenantId } from '../platform/tenant';
@@ -38,6 +43,8 @@ export interface AuthUser {
   tenantId?: string;
   department?: string;
   registeredAt?: string;
+  defaultWorkspace?: WorkspaceId;
+  lastWorkspace?: WorkspaceId;
 }
 
 interface AuthState {
@@ -49,6 +56,7 @@ interface AuthState {
 
 interface AuthActions {
   loginWithGoogle: () => Promise<{ success: boolean; error?: string }>;
+  setWorkspacePreference: (workspace: WorkspaceId, options?: { persistDefault?: boolean }) => Promise<boolean>;
   logout: () => void;
   isAdmin: () => boolean;
   isPortalUser: () => boolean;
@@ -68,6 +76,10 @@ interface MemberDoc {
   createdAt?: string;
   updatedAt?: string;
   lastLoginAt?: string;
+  projectNames?: Record<string, string>;
+  portalProfile?: Record<string, unknown>;
+  defaultWorkspace?: WorkspaceId;
+  lastWorkspace?: WorkspaceId;
 }
 
 const AUTH_STORAGE_KEY = 'mysc-auth-user';
@@ -135,12 +147,18 @@ function mapFirebaseUserToAuthUser(
   idToken?: string,
 ): AuthUser {
   const normalizedEmail = normalizeEmail(firebaseUser.email || member?.email || '');
+  const workspace = readMemberWorkspace(member);
   const mergedProjectIds = normalizeProjectIds([
+    ...(workspace.portalProfile?.projectIds || []),
     ...(Array.isArray(member?.projectIds) ? member?.projectIds : []),
+    workspace.portalProfile?.projectId,
     member?.projectId,
     resolveProjectIdForManager(firebaseUser.uid, PROJECT_OWNERS),
   ]);
-  const primaryProjectId = resolvePrimaryProjectId(mergedProjectIds, member?.projectId);
+  const primaryProjectId = resolvePrimaryProjectId(
+    mergedProjectIds,
+    workspace.portalProfile?.projectId || member?.projectId,
+  );
   // Bootstrap admin은 Firestore 쓰기 실패해도 항상 admin role 부여
   const role =
     isBootstrapAdminEmail(normalizedEmail)
@@ -159,6 +177,8 @@ function mapFirebaseUserToAuthUser(
     tenantId,
     department: member?.department,
     registeredAt: member?.createdAt,
+    defaultWorkspace: workspace.defaultWorkspace,
+    lastWorkspace: workspace.lastWorkspace,
   };
 }
 
@@ -331,6 +351,49 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const setWorkspacePreference = useCallback(async (
+    workspace: WorkspaceId,
+    options?: { persistDefault?: boolean },
+  ): Promise<boolean> => {
+    const persistDefault = options?.persistDefault ?? true;
+    const currentUser = user;
+    if (!currentUser) return false;
+
+    const updatedAt = new Date().toISOString();
+    const nextUser: AuthUser = {
+      ...currentUser,
+      ...(persistDefault ? { defaultWorkspace: workspace } : {}),
+      lastWorkspace: workspace,
+    };
+    setUser(nextUser);
+    saveUser(nextUser);
+
+    const db = getDb();
+    if (!db) return true;
+
+    try {
+      await setDoc(
+        doc(db, getOrgDocumentPath(currentUser.tenantId || DEFAULT_ORG_ID, 'members', currentUser.uid)),
+        {
+          uid: currentUser.uid,
+          email: currentUser.email,
+          name: currentUser.name,
+          role: currentUser.role,
+          tenantId: currentUser.tenantId || DEFAULT_ORG_ID,
+          ...buildWorkspacePreferencePatch(workspace, updatedAt, persistDefault),
+          lastLoginAt: updatedAt,
+        },
+        { merge: true },
+      );
+      return true;
+    } catch (err) {
+      console.error('[Auth] setWorkspacePreference failed:', err);
+      setUser(currentUser);
+      saveUser(currentUser);
+      return false;
+    }
+  }, [user]);
+
   const logout = useCallback(() => {
     if (featureFlags.firebaseAuthEnabled) {
       const auth = getAuthInstance();
@@ -361,6 +424,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isLoading,
     isFirebaseAuthEnabled: featureFlags.firebaseAuthEnabled,
     loginWithGoogle,
+    setWorkspacePreference,
     logout,
     isAdmin,
     isPortalUser,

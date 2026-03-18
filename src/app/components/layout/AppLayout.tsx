@@ -27,7 +27,7 @@ import { ScrollToTop } from './ScrollToTop';
 import { QuickActionFab } from './QuickActionFab';
 import { PageTransition } from './PageTransition';
 import { ErrorBoundary } from './ErrorBoundary';
-import { resolveHomePath } from '../../platform/navigation';
+import { canChooseWorkspace, isPortalRole, resolveHomePath } from '../../platform/navigation';
 import { canAccessAdminPath, canShowAdminNavItem } from '../../platform/admin-nav';
 
 const NAV_GROUPS = [
@@ -75,7 +75,7 @@ const NAV_GROUPS = [
 
 function AppLayoutContent() {
   const { org, currentUser, transactions, participationEntries, dataSource } = useAppStore();
-  const { isAuthenticated, user: authUser, logout } = useAuth();
+  const { isAuthenticated, user: authUser, logout, setWorkspacePreference } = useAuth();
   const { getAllPendingCount: getHrPendingCount } = useHrAnnouncements();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -92,8 +92,7 @@ function AppLayoutContent() {
   useEffect(() => {
     const role = (authUser || currentUser)?.role;
     if (!isAuthenticated || !role) return;
-    const home = resolveHomePath(role);
-    if (home === '/portal') {
+    if (isPortalRole(role)) {
       if (location.pathname.startsWith('/board')) {
         navigate(`/portal${location.pathname}`, { replace: true });
         return;
@@ -104,9 +103,16 @@ function AppLayoutContent() {
     }
 
     if (!canAccessAdminPath(role, location.pathname)) {
-      navigate(home, { replace: true });
+      navigate(resolveHomePath(role, authUser?.defaultWorkspace ?? authUser?.lastWorkspace), { replace: true });
     }
   }, [isAuthenticated, authUser, currentUser, location.pathname, navigate]);
+
+  useEffect(() => {
+    const role = authUser?.role;
+    if (!isAuthenticated || !role || !canChooseWorkspace(role)) return;
+    if ((authUser?.lastWorkspace || '') === 'admin') return;
+    void setWorkspacePreference('admin', { persistDefault: false });
+  }, [isAuthenticated, authUser?.role, authUser?.lastWorkspace, setWorkspacePreference]);
 
   // Close mobile sidebar on route change
   useEffect(() => {

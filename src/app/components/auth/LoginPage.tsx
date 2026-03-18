@@ -9,7 +9,7 @@ import {
 import { Card, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
 import { useAuth } from '../../data/auth-store';
-import { resolveHomePath } from '../../platform/navigation';
+import { resolveHomePath, shouldPromptWorkspaceSelection } from '../../platform/navigation';
 
 // ═══════════════════════════════════════════════════════════════
 // LoginPage — 통합 로그인 페이지
@@ -30,7 +30,11 @@ export function LoginPage() {
   // 이미 인증된 사용자는 역할에 맞는 페이지로 리다이렉트
   useEffect(() => {
     if (isAuthenticated && user) {
-      const target = resolveHomePath(user.role);
+      if (shouldPromptWorkspaceSelection(user.role, user.defaultWorkspace ?? user.lastWorkspace)) {
+        navigate('/workspace-select', { replace: true });
+        return;
+      }
+      const target = resolveHomePath(user.role, user.defaultWorkspace ?? user.lastWorkspace);
       navigate(target, { replace: true });
     }
   }, [isAuthenticated, user, navigate]);
