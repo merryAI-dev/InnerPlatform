@@ -3,6 +3,7 @@ import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo,
 import { createPortal } from 'react-dom';
 import type { ClipboardEvent, KeyboardEvent, MouseEvent } from 'react';
 import { toast } from 'sonner';
+import { detectKeyRuleContext, runKeyRules, type KeyRule } from '../../platform/settlement-grid-keymap';
 import { BUDGET_CODE_BOOK } from '../../data/budget-data';
 import type { BudgetCodeEntry, Comment, Transaction, TransactionState } from '../../data/types';
 import { findWeekForDate, getMonthMondayWeeks, getYearMondayWeeks, type MonthMondayWeek } from '../../platform/cashflow-weeks';
@@ -1757,53 +1758,11 @@ function ImportEditor({
     handleCopy(e);
     if (e.defaultPrevented) return;
 
-    const target = e.target as HTMLElement | null;
-    const isTextEditingTarget = Boolean(
-      target
-      && (
-        target instanceof HTMLInputElement
-        || target instanceof HTMLTextAreaElement
-        || target.isContentEditable
-      ),
-    );
-    const hasMultiCellSelection = Boolean(
+    const ctx = detectKeyRuleContext(e as unknown as globalThis.KeyboardEvent);
+    ctx.hasMultiCellSelection = Boolean(
       selectionBounds
       && (selectionBounds.r1 !== selectionBounds.r2 || selectionBounds.c1 !== selectionBounds.c2),
     );
-    const inputHasPartialSelection = Boolean(
-      target instanceof HTMLInputElement
-      && typeof target.selectionStart === 'number'
-      && typeof target.selectionEnd === 'number'
-      && target.selectionStart !== target.selectionEnd,
-    );
-
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
-      if (isTextEditingTarget) return;
-      if (rows.length === 0) return;
-      e.preventDefault();
-      const firstEditableCol = noIdx === 0 ? 1 : 0;
-      setSelection({
-        start: { r: 0, c: firstEditableCol },
-        end: { r: rows.length - 1, c: Math.max(firstEditableCol, SETTLEMENT_COLUMNS.length - 1) },
-      });
-      tableWrapRef.current?.focus();
-      return;
-    }
-
-    if (e.key === 'Escape') {
-      if (!selectionRef.current) return;
-      e.preventDefault();
-      setSelection(null);
-      return;
-    }
-
-    if ((e.key === 'Delete' || e.key === 'Backspace') && !e.altKey && !e.ctrlKey && !e.metaKey) {
-      if (isTextEditingTarget && !hasMultiCellSelection && inputHasPartialSelection) return;
-      if (!getActiveSelectionBounds()) return;
-      e.preventDefault();
-      void clearSelectedCells();
-      return;
-    }
 
     const anchor = selection
       ? {
@@ -1813,31 +1772,92 @@ function ImportEditor({
       : lastFocusedCell.current
         ? { r: lastFocusedCell.current.rowIdx, c: lastFocusedCell.current.colIdx }
         : null;
-    if (!anchor) return;
 
-    const navigationKeys = new Set(['Enter', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
-    if (!navigationKeys.has(e.key) || e.altKey || e.metaKey || e.ctrlKey) return;
+    const keyRules: KeyRule[] = [
+      {
+        combo: { key: 'a', mod: true },
+        run: (_ev, ruleCtx) => {
+          if (ruleCtx.isTextEditingTarget) return false;
+          if (rows.length === 0) return false;
+          _ev.preventDefault();
+          const firstEditableCol = noIdx === 0 ? 1 : 0;
+          setSelection({
+            start: { r: 0, c: firstEditableCol },
+            end: { r: rows.length - 1, c: Math.max(firstEditableCol, SETTLEMENT_COLUMNS.length - 1) },
+          });
+          tableWrapRef.current?.focus();
+          return true;
+        },
+      },
+      {
+        combo: { key: 'Escape' },
+        run: (_ev) => {
+          if (!selectionRef.current) return false;
+          _ev.preventDefault();
+          setSelection(null);
+          return true;
+        },
+      },
+      {
+        combo: [{ key: 'Delete' }, { key: 'Backspace' }],
+        run: (_ev, ruleCtx) => {
+          if (ruleCtx.isTextEditingTarget && !ruleCtx.hasMultiCellSelection && ruleCtx.inputHasPartialSelection) return false;
+          if (!getActiveSelectionBounds()) return false;
+          _ev.preventDefault();
+          void clearSelectedCells();
+          return true;
+        },
+      },
+      {
+        combo: { key: 'Tab' },
+        run: (_ev) => {
+          if (!anchor) return false;
+          _ev.preventDefault();
+          const nextCol = anchor.c + 1 >= SETTLEMENT_COLUMNS.length ? 0 : anchor.c + 1;
+          const nextRow = nextCol === 0 ? Math.min(anchor.r + 1, rows.length - 1) : anchor.r;
+          focusCellAt(nextRow, nextCol === noIdx ? nextCol + 1 : nextCol);
+          return true;
+        },
+      },
+      {
+        combo: { key: 'Tab', shift: true },
+        run: (_ev) => {
+          if (!anchor) return false;
+          _ev.preventDefault();
+          const prevCol = anchor.c - 1 < 0 ? SETTLEMENT_COLUMNS.length - 1 : anchor.c - 1;
+          const prevRow = prevCol === SETTLEMENT_COLUMNS.length - 1 ? Math.max(anchor.r - 1, 0) : anchor.r;
+          focusCellAt(prevRow, prevCol === noIdx ? Math.max(prevCol - 1, 0) : prevCol);
+          return true;
+        },
+      },
+      {
+        combo: [{ key: 'Enter' }, { key: 'Enter', shift: true }],
+        run: (_ev) => {
+          if (!anchor) return false;
+          _ev.preventDefault();
+          focusCellAt(anchor.r + (_ev.shiftKey ? -1 : 1), anchor.c);
+          return true;
+        },
+      },
+      {
+        combo: { key: 'ArrowUp' },
+        run: (_ev) => { if (!anchor) return false; _ev.preventDefault(); focusCellAt(anchor.r - 1, anchor.c); return true; },
+      },
+      {
+        combo: { key: 'ArrowDown' },
+        run: (_ev) => { if (!anchor) return false; _ev.preventDefault(); focusCellAt(anchor.r + 1, anchor.c); return true; },
+      },
+      {
+        combo: { key: 'ArrowLeft' },
+        run: (_ev) => { if (!anchor) return false; _ev.preventDefault(); focusCellAt(anchor.r, anchor.c - 1); return true; },
+      },
+      {
+        combo: { key: 'ArrowRight' },
+        run: (_ev) => { if (!anchor) return false; _ev.preventDefault(); focusCellAt(anchor.r, anchor.c + 1); return true; },
+      },
+    ];
 
-    e.preventDefault();
-    if (e.key === 'Enter') {
-      focusCellAt(anchor.r + (e.shiftKey ? -1 : 1), anchor.c);
-      return;
-    }
-    if (e.key === 'ArrowUp') {
-      focusCellAt(anchor.r - 1, anchor.c);
-      return;
-    }
-    if (e.key === 'ArrowDown') {
-      focusCellAt(anchor.r + 1, anchor.c);
-      return;
-    }
-    if (e.key === 'ArrowLeft') {
-      focusCellAt(anchor.r, anchor.c - 1);
-      return;
-    }
-    if (e.key === 'ArrowRight') {
-      focusCellAt(anchor.r, anchor.c + 1);
-    }
+    runKeyRules(e as unknown as globalThis.KeyboardEvent, keyRules, ctx);
   }, [
     clearSelectedCells,
     focusCellAt,
