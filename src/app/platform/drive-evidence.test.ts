@@ -18,7 +18,7 @@ describe('drive evidence helpers', () => {
       counterparty: '테스트 상점',
       memo: '전단 제작',
     });
-    expect(folderName).toBe('20260311_사업비_홍보비');
+    expect(folderName).toBe('20260311_사업비_홍보비_테스트_상점');
   });
 
   it('parses folder name back into tokens', () => {
