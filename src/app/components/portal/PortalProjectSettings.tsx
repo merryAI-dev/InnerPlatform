@@ -259,7 +259,7 @@ export function PortalProjectSettings() {
             {isRegistered ? '사업 배정 수정' : '포털 시작하기'}
           </h1>
           <p className="text-[12px] text-muted-foreground">
-            로그인 후 바로 사업 선택과 증빙 기본 경로까지 한 번에 준비할 수 있습니다.
+            내 사업을 선택하고 주사업을 지정하세요.
           </p>
         </div>
 
@@ -271,64 +271,6 @@ export function PortalProjectSettings() {
                 <span>{error}</span>
               </div>
             )}
-
-            <div className="rounded-xl border border-slate-200/80 bg-slate-50/80 px-4 py-4 space-y-3">
-              <div className="flex items-start justify-between gap-3 flex-wrap">
-                <div>
-                  <p className="text-[12px] text-slate-900" style={{ fontWeight: 800 }}>Evidence Workflow MVP 준비 상태</p>
-                  <p className="text-[11px] text-muted-foreground mt-1">
-                    로그인부터 사업 선택, 기본 증빙 폴더 연결까지 한 경로로 맞췄습니다.
-                  </p>
-                </div>
-                <Badge className={`text-[10px] ${
-                  happyPath.status === 'ready'
-                    ? 'bg-emerald-100 text-emerald-700'
-                    : happyPath.status === 'blocked'
-                      ? 'bg-rose-100 text-rose-700'
-                      : 'bg-amber-100 text-amber-800'
-                }`}>
-                  {happyPath.status === 'ready' ? '준비 완료' : happyPath.status === 'blocked' ? '권한 확인 필요' : '설정 필요'}
-                </Badge>
-              </div>
-
-              <div className="grid gap-2 md:grid-cols-2">
-                {happyPath.steps.map((step) => (
-                  <div
-                    key={step.key}
-                    className={`rounded-lg border px-3 py-3 text-[11px] ${
-                      step.status === 'complete'
-                        ? 'border-emerald-200 bg-emerald-50/70'
-                        : step.status === 'required'
-                          ? 'border-amber-200 bg-amber-50/70'
-                          : 'border-slate-200 bg-white'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <CheckCircle2 className={`h-3.5 w-3.5 ${
-                        step.status === 'complete' ? 'text-emerald-600' : 'text-slate-400'
-                      }`} />
-                      <span className="font-semibold text-slate-900">{step.label}</span>
-                    </div>
-                    <p className="mt-1 text-slate-700/80">{step.detail}</p>
-                  </div>
-                ))}
-              </div>
-
-              <div className="rounded-lg border border-dashed border-slate-200 bg-white px-3 py-3">
-                <div>
-                  <p className="text-[12px] font-semibold text-slate-900">
-                    {happyPath.canUseEvidenceWorkflow
-                      ? `${happyPath.selectedProjectName || '주사업'}에서 바로 증빙 Workflow를 사용할 수 있습니다.`
-                      : happyPath.canOpenWeeklyExpenses
-                        ? '사업 선택은 끝났습니다. 기본 증빙 폴더만 연결하면 업로드/동기화를 바로 사용할 수 있습니다.'
-                        : '먼저 내 사업과 주사업을 저장하면 다음 단계로 넘어갈 수 있습니다.'}
-                  </p>
-                  <p className="mt-1 text-[11px] text-muted-foreground">
-                    주간 시트에서는 행 저장 후 `생성 → 업로드 → 동기화` 순서로 바로 이어집니다.
-                  </p>
-                </div>
-              </div>
-            </div>
 
             {allProjects.length === 0 && (
               <div className="p-4 rounded-lg border border-dashed border-border text-center text-[12px] text-muted-foreground">
