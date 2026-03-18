@@ -493,100 +493,31 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       txReady = true;
       markReady();
     } else {
-      const projectCollection = collection(db, getOrgCollectionPath(orgId, 'projects'));
-      const assignedProjectIds = (scopedProjectIds.length > 0 ? scopedProjectIds : [portalUser.projectId]).filter(Boolean);
-      const assignedChunks: string[][] = [];
-      for (let i = 0; i < assignedProjectIds.length; i += 10) {
-        assignedChunks.push(assignedProjectIds.slice(i, i + 10));
-      }
-
-      const assignedMaps = assignedChunks.map(() => new Map<string, Project>());
-      const activeMap = new Map<string, Project>();
-      const assignedReadyFlags = assignedChunks.map(() => false);
-      let pendingAssigned = assignedChunks.length;
-      let activeReady = false;
-
-      const refreshProjectList = () => {
-        const merged = new Map<string, Project>();
-        assignedMaps.forEach((chunkMap) => {
-          chunkMap.forEach((project, id) => merged.set(id, project));
-        });
-        activeMap.forEach((project, id) => merged.set(id, project));
-        const list = Array.from(merged.values()).sort((a, b) =>
-          String(a.name || '').localeCompare(String(b.name || '')),
-        );
-        setProjects(list);
-      };
-
-      const markAssignedReady = (index: number) => {
-        if (assignedReadyFlags[index]) return;
-        assignedReadyFlags[index] = true;
-        pendingAssigned = Math.max(0, pendingAssigned - 1);
-      };
-
-      const maybeMarkProjectReady = () => {
-        if (activeReady && pendingAssigned === 0) {
-          projectReady = true;
-          markReady();
-        }
-      };
-
-      // 전사 프로젝트 전체 표시 (상태 무관)
-      const activeProjectQuery = query(
-        projectCollection,
+      // 전사 프로젝트 전체 표시 — 모든 멤버가 조회 가능
+      const allProjectsQuery = query(
+        collection(db, getOrgCollectionPath(orgId, 'projects')),
         limit(500),
       );
-
       unsubsRef.current.push(
-        onSnapshot(activeProjectQuery, (snap) => {
-          activeMap.clear();
+        onSnapshot(allProjectsQuery, (snap) => {
+          const map = new Map<string, Project>();
           snap.docs.forEach((docItem) => {
             const data = docItem.data() as Project;
             const id = data.id || docItem.id;
-            activeMap.set(id, { ...data, id });
+            map.set(id, { ...data, id });
           });
-          refreshProjectList();
-          activeReady = true;
-          maybeMarkProjectReady();
+          setProjects(Array.from(map.values()).sort((a, b) =>
+            String(a.name || '').localeCompare(String(b.name || '')),
+          ));
+          projectReady = true;
+          markReady();
         }, (err) => {
-          console.error('[PortalStore] active projects listen error:', err);
-          activeMap.clear();
-          refreshProjectList();
-          activeReady = true;
-          maybeMarkProjectReady();
+          console.error('[PortalStore] projects listen error:', err);
+          setProjects([]);
+          projectReady = true;
+          markReady();
         }),
       );
-
-      assignedChunks.forEach((chunk, index) => {
-        const assignedQuery = chunk.length === 1
-          ? query(projectCollection, where(documentId(), '==', chunk[0]))
-          : query(projectCollection, where(documentId(), 'in', chunk));
-
-        unsubsRef.current.push(
-          onSnapshot(assignedQuery, (snap) => {
-            const chunkMap = assignedMaps[index];
-            chunkMap.clear();
-            snap.docs.forEach((docItem) => {
-              const data = docItem.data() as Project;
-              const id = data.id || docItem.id;
-              chunkMap.set(id, { ...data, id });
-            });
-            refreshProjectList();
-            markAssignedReady(index);
-            maybeMarkProjectReady();
-          }, (err) => {
-            console.error('[PortalStore] assigned projects listen error:', err);
-            assignedMaps[index].clear();
-            refreshProjectList();
-            markAssignedReady(index);
-            maybeMarkProjectReady();
-          }),
-        );
-      });
-
-      if (assignedChunks.length === 0) {
-        maybeMarkProjectReady();
-      }
 
       const ledgerQuery = query(
         collection(db, getOrgCollectionPath(orgId, 'ledgers')),
