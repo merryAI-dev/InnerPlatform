@@ -67,13 +67,14 @@ service cloud.firestore {
     }
 
     function canReadProjectResource(orgId, projectId) {
-      return isSignedIn()
-        && (isPrivileged(orgId) || isProjectAssigned(orgId, projectId));
+      // Internal MYSC rollout: 모든 인증 사용자가 프로젝트 조회 가능
+      return isSignedIn();
     }
 
     function canWriteProjectResource(orgId, projectId) {
+      // Internal MYSC rollout: 인증 사용자 중 privileged 또는 PM이면 쓰기 가능
       return isSignedIn()
-        && (isPrivileged(orgId) || (role(orgId) == 'pm' && isProjectAssigned(orgId, projectId)));
+        && (isPrivileged(orgId) || role(orgId) == 'pm');
     }
 
     function projectIdFromTransaction(orgId, txId) {
