@@ -2,6 +2,7 @@ import { normalizeEmail } from './auth-helpers';
 
 // Keep frontend bootstrap defaults aligned with Firestore rules.
 export const DEFAULT_BOOTSTRAP_ADMIN_EMAILS: readonly string[] = [
+  'admin@mysc.co.kr',
   'ai@mysc.co.kr',
 ];
 
