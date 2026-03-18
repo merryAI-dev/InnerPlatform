@@ -1,0 +1,4375 @@
+{
+  "generatedAt": "2026-03-18T01:22:31.734Z",
+  "sourceProjectId": "mysc-bmp-14173451",
+  "orgId": "mysc",
+  "totalProjects": 329,
+  "likelyLiveCount": 5,
+  "likelyTestCount": 324,
+  "projects": [
+    {
+      "id": "p1772676132414",
+      "name": "'23~'26 창업기획자를 통한 혁신적기술프로그램(CTS) 참여기업 역량 강화 용역(2026)",
+      "officialContractName": "",
+      "clientOrg": "KOICA",
+      "status": "CONTRACT_PENDING",
+      "phase": "CONFIRMED",
+      "createdAt": "2026-03-05T02:02:12.414Z",
+      "likelyTestData": false,
+      "reasons": []
+    },
+    {
+      "id": "p1773651024850",
+      "name": "2026 다자간협력",
+      "officialContractName": "2026 다자간협력사업",
+      "clientOrg": "아름다운재단",
+      "status": "CONTRACT_PENDING",
+      "phase": "CONFIRMED",
+      "createdAt": "2026-03-16T08:50:24.850Z",
+      "likelyTestData": false,
+      "reasons": []
+    },
+    {
+      "id": "p1772676088818",
+      "name": "2026 에코스타트업",
+      "officialContractName": "",
+      "clientOrg": "한국환경산업기술원",
+      "status": "CONTRACT_PENDING",
+      "phase": "CONFIRMED",
+      "createdAt": "2026-03-05T02:01:28.818Z",
+      "likelyTestData": false,
+      "reasons": []
+    },
+    {
+      "id": "p1772676112928",
+      "name": "2026년 CMK 임팩트프러너 14기",
+      "officialContractName": "",
+      "clientOrg": "현대차 정몽구 재단",
+      "status": "CONTRACT_PENDING",
+      "phase": "CONFIRMED",
+      "createdAt": "2026-03-05T02:01:52.928Z",
+      "likelyTestData": false,
+      "reasons": []
+    },
+    {
+      "id": "p1773638600519",
+      "name": "경기사경(환경)",
+      "officialContractName": "2025 경기도사회적경제원 사회환경 문제해결 지원사업",
+      "clientOrg": "경기도사회적경제원",
+      "status": "CONTRACT_PENDING",
+      "phase": "CONFIRMED",
+      "createdAt": "2026-03-16T05:23:20.519Z",
+      "likelyTestData": false,
+      "reasons": []
+    },
+    {
+      "id": "import-projects-1771904064551-34",
+      "name": "(시니어) 스타트업 코칭멘토 양성과정",
+      "officialContractName": "",
+      "clientOrg": "강남구 신중년 디지털 일자리센터",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-34",
+      "name": "(시니어) 스타트업 코칭멘토 양성과정",
+      "officialContractName": "",
+      "clientOrg": "강남구 신중년 디지털 일자리센터",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-32",
+      "name": "(MYSC 제안 예정)",
+      "officialContractName": "",
+      "clientOrg": "가톨릭대학교 (RISE)",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-32",
+      "name": "(MYSC 제안 예정)",
+      "officialContractName": "",
+      "clientOrg": "가톨릭대학교 (RISE)",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-57",
+      "name": "2023-2026 창업·투자 전문기관을 통한 CTS 참여기업 역량 강화 용역",
+      "officialContractName": "",
+      "clientOrg": "KOICA",
+      "status": "IN_PROGRESS",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-57",
+      "name": "2023-2026 창업·투자 전문기관을 통한 CTS 참여기업 역량 강화 용역",
+      "officialContractName": "",
+      "clientOrg": "KOICA",
+      "status": "IN_PROGRESS",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064553-2",
+      "name": "2023-2026 창업투자 전문기관을 통한 혁신적기술프로그램(CTS)참여기업 역량 강화 용역",
+      "officialContractName": "",
+      "clientOrg": "KOICA",
+      "status": "IN_PROGRESS",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841603-2",
+      "name": "2023-2026 창업투자 전문기관을 통한 혁신적기술프로그램(CTS)참여기업 역량 강화 용역",
+      "officialContractName": "",
+      "clientOrg": "KOICA",
+      "status": "IN_PROGRESS",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-66",
+      "name": "2023-2027 네팔 귀환노동자 재정착 사업",
+      "officialContractName": "",
+      "clientOrg": "KOICA",
+      "status": "IN_PROGRESS",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064553-3",
+      "name": "2023-2027 네팔 귀환노동자 재정착 사업",
+      "officialContractName": "",
+      "clientOrg": "KOICA",
+      "status": "IN_PROGRESS",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-66",
+      "name": "2023-2027 네팔 귀환노동자 재정착 사업",
+      "officialContractName": "",
+      "clientOrg": "KOICA",
+      "status": "IN_PROGRESS",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841603-3",
+      "name": "2023-2027 네팔 귀환노동자 재정착 사업",
+      "officialContractName": "",
+      "clientOrg": "KOICA",
+      "status": "IN_PROGRESS",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-85",
+      "name": "2025 경기도사회적경제원 사회혁신공간 중장기 운영 계획 수립 용역",
+      "officialContractName": "",
+      "clientOrg": "경기도사회적경제원",
+      "status": "COMPLETED",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-85",
+      "name": "2025 경기도사회적경제원 사회혁신공간 중장기 운영 계획 수립 용역",
+      "officialContractName": "",
+      "clientOrg": "경기도사회적경제원",
+      "status": "COMPLETED",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-90",
+      "name": "2025 경북 청년창업사관학교 IR 교육 용역",
+      "officialContractName": "",
+      "clientOrg": "중소벤처기업진흥공단",
+      "status": "COMPLETED",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-90",
+      "name": "2025 경북 청년창업사관학교 IR 교육 용역",
+      "officialContractName": "",
+      "clientOrg": "중소벤처기업진흥공단",
+      "status": "COMPLETED",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-2",
+      "name": "2025 다자간협력사업 (뷰티풀 커넥트)",
+      "officialContractName": "",
+      "clientOrg": "아름다운재단",
+      "status": "IN_PROGRESS",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064553-7",
+      "name": "2025 다자간협력사업 (뷰티풀 커넥트)",
+      "officialContractName": "",
+      "clientOrg": "아름다운재단",
+      "status": "IN_PROGRESS",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-2",
+      "name": "2025 다자간협력사업 (뷰티풀 커넥트)",
+      "officialContractName": "",
+      "clientOrg": "아름다운재단",
+      "status": "IN_PROGRESS",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841603-7",
+      "name": "2025 다자간협력사업 (뷰티풀 커넥트)",
+      "officialContractName": "",
+      "clientOrg": "아름다운재단",
+      "status": "IN_PROGRESS",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-37",
+      "name": "2025 창업, 벤처 녹색융합클러스터 예비 그린유니콘 육성사업",
+      "officialContractName": "",
+      "clientOrg": "한국환경산업기술원",
+      "status": "CONTRACT_PENDING",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-37",
+      "name": "2025 창업, 벤처 녹색융합클러스터 예비 그린유니콘 육성사업",
+      "officialContractName": "",
+      "clientOrg": "한국환경산업기술원",
+      "status": "CONTRACT_PENDING",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-83",
+      "name": "2025 카카오 제주 임팩트 챌린지",
+      "officialContractName": "",
+      "clientOrg": "카카오 지역협력팀",
+      "status": "COMPLETED",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-83",
+      "name": "2025 카카오 제주 임팩트 챌린지",
+      "officialContractName": "",
+      "clientOrg": "카카오 지역협력팀",
+      "status": "COMPLETED",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-87",
+      "name": "2025 A MORE Beautiful Challenge",
+      "officialContractName": "",
+      "clientOrg": "비랩코리아",
+      "status": "COMPLETED",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-87",
+      "name": "2025 A MORE Beautiful Challenge",
+      "officialContractName": "",
+      "clientOrg": "비랩코리아",
+      "status": "COMPLETED",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-84",
+      "name": "2025 SNU BIG Scale-up 스타트업 액셀러레이션 프로그램 특화 트랙 운영",
+      "officialContractName": "",
+      "clientOrg": "국립대학법인 서울대학교 창업지원단",
+      "status": "COMPLETED",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-84",
+      "name": "2025 SNU BIG Scale-up 스타트업 액셀러레이션 프로그램 특화 트랙 운영",
+      "officialContractName": "",
+      "clientOrg": "국립대학법인 서울대학교 창업지원단",
+      "status": "COMPLETED",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-58",
+      "name": "2025-2028 창업·투자 전문기관을 통한 CTS 참여기업 역량 강화 용역",
+      "officialContractName": "",
+      "clientOrg": "KOICA",
+      "status": "IN_PROGRESS",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-58",
+      "name": "2025-2028 창업·투자 전문기관을 통한 CTS 참여기업 역량 강화 용역",
+      "officialContractName": "",
+      "clientOrg": "KOICA",
+      "status": "IN_PROGRESS",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-20",
+      "name": "2025~2026 CTS Seed 0 ODA 혁신기술 시장조사 및 창업 초기기업 액셀러레이팅 운영 용역",
+      "officialContractName": "",
+      "clientOrg": "한국국제협력단\n(KOICA)",
+      "status": "IN_PROGRESS",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064553-4",
+      "name": "2025~2026 CTS Seed 0 ODA 혁신기술 시장조사 및 창업 초기기업 액셀러레이팅 운영 용역",
+      "officialContractName": "",
+      "clientOrg": "한국국제협력단(KOICA)",
+      "status": "IN_PROGRESS",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-20",
+      "name": "2025~2026 CTS Seed 0 ODA 혁신기술 시장조사 및 창업 초기기업 액셀러레이팅 운영 용역",
+      "officialContractName": "",
+      "clientOrg": "한국국제협력단\n(KOICA)",
+      "status": "IN_PROGRESS",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841603-4",
+      "name": "2025~2026 CTS Seed 0 ODA 혁신기술 시장조사 및 창업 초기기업 액셀러레이팅 운영 용역",
+      "officialContractName": "",
+      "clientOrg": "한국국제협력단(KOICA)",
+      "status": "IN_PROGRESS",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-95",
+      "name": "2025년 디자인-기술협업 전주기 지원사업 액셀러레이팅 프로그램 운영 (KIDP)",
+      "officialContractName": "",
+      "clientOrg": "한국디자인진흥원(KIDP)",
+      "status": "",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-95",
+      "name": "2025년 디자인-기술협업 전주기 지원사업 액셀러레이팅 프로그램 운영 (KIDP)",
+      "officialContractName": "",
+      "clientOrg": "한국디자인진흥원(KIDP)",
+      "status": "",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-19",
+      "name": "2025년 메트라이프 인클루전 플러스 9.0",
+      "officialContractName": "",
+      "clientOrg": "메트라이프생명 사회공헌재단",
+      "status": "IN_PROGRESS",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-19",
+      "name": "2025년 메트라이프 인클루전 플러스 9.0",
+      "officialContractName": "",
+      "clientOrg": "메트라이프생명 사회공헌재단",
+      "status": "IN_PROGRESS",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-93",
+      "name": "2025년 사회서비스 투자 유치 역량 강화 아카데미 및 투자교류회 (중서원)",
+      "officialContractName": "",
+      "clientOrg": "중앙사회서비스원",
+      "status": "",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-93",
+      "name": "2025년 사회서비스 투자 유치 역량 강화 아카데미 및 투자교류회 (중서원)",
+      "officialContractName": "",
+      "clientOrg": "중앙사회서비스원",
+      "status": "",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-39",
+      "name": "2025년 사회적경제 도약패키지\n(글로벌, 사회문제해결)",
+      "officialContractName": "",
+      "clientOrg": "경기도사회적경제원",
+      "status": "CONTRACT_PENDING",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-39",
+      "name": "2025년 사회적경제 도약패키지\n(글로벌, 사회문제해결)",
+      "officialContractName": "",
+      "clientOrg": "경기도사회적경제원",
+      "status": "CONTRACT_PENDING",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-89",
+      "name": "2025년 제16회 초기관광벤처 지원사업 운영대행",
+      "officialContractName": "",
+      "clientOrg": "한국관광공사",
+      "status": "COMPLETED",
+      "phase": "사업종료",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-89",
+      "name": "2025년 제16회 초기관광벤처 지원사업 운영대행",
+      "officialContractName": "",
+      "clientOrg": "한국관광공사",
+      "status": "COMPLETED",
+      "phase": "사업종료",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-82",
+      "name": "2025년 제주지역기업 성장사다리 지원사업",
+      "officialContractName": "",
+      "clientOrg": "제주클린산업",
+      "status": "COMPLETED",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-82",
+      "name": "2025년 제주지역기업 성장사다리 지원사업",
+      "officialContractName": "",
+      "clientOrg": "제주클린산업",
+      "status": "COMPLETED",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064553-15",
+      "name": "2025년 중소기업 혁신 바우처",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841603-15",
+      "name": "2025년 중소기업 혁신 바우처",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-41",
+      "name": "2025년 펠로&아미 2년차 사회혁신프로젝트",
+      "officialContractName": "",
+      "clientOrg": "재단법인 티앤씨재단",
+      "status": "CONTRACT_PENDING",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-41",
+      "name": "2025년 펠로&아미 2년차 사회혁신프로젝트",
+      "officialContractName": "",
+      "clientOrg": "재단법인 티앤씨재단",
+      "status": "CONTRACT_PENDING",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-47",
+      "name": "2025년 Start-up NEST 액셀러레이팅 위탁운영_소셜벤처 및 넷제로 챌린지X전형",
+      "officialContractName": "",
+      "clientOrg": "신용보증기금",
+      "status": "CONTRACT_PENDING",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-47",
+      "name": "2025년 Start-up NEST 액셀러레이팅 위탁운영_소셜벤처 및 넷제로 챌린지X전형",
+      "officialContractName": "",
+      "clientOrg": "신용보증기금",
+      "status": "CONTRACT_PENDING",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-26",
+      "name": "2026 농식품 기술창업 액셀러레이터 육성 사업",
+      "officialContractName": "",
+      "clientOrg": "한국농업기술진흥원",
+      "status": "",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-26",
+      "name": "2026 농식품 기술창업 액셀러레이터 육성 사업",
+      "officialContractName": "",
+      "clientOrg": "한국농업기술진흥원",
+      "status": "",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064553-10",
+      "name": "2026 농식품 기술창업 액셀러레이터 육성지원",
+      "officialContractName": "",
+      "clientOrg": "한국농업기술진흥원",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841603-10",
+      "name": "2026 농식품 기술창업 액셀러레이터 육성지원",
+      "officialContractName": "",
+      "clientOrg": "한국농업기술진흥원",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-27",
+      "name": "2026 에코스타트업",
+      "officialContractName": "",
+      "clientOrg": "한국환경산업기술원",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064553-11",
+      "name": "2026 에코스타트업",
+      "officialContractName": "",
+      "clientOrg": "한국환경산업기술원",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-27",
+      "name": "2026 에코스타트업",
+      "officialContractName": "",
+      "clientOrg": "한국환경산업기술원",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841603-11",
+      "name": "2026 에코스타트업",
+      "officialContractName": "",
+      "clientOrg": "한국환경산업기술원",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-25",
+      "name": "2026 예술기업 지원 사업 액셀러레이터 (성장도약)",
+      "officialContractName": "",
+      "clientOrg": "예술경영지원센터",
+      "status": "CONTRACT_PENDING",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-25",
+      "name": "2026 예술기업 지원 사업 액셀러레이터 (성장도약)",
+      "officialContractName": "",
+      "clientOrg": "예술경영지원센터",
+      "status": "CONTRACT_PENDING",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-94",
+      "name": "2026 카카오 안산 임팩트 챌린지\n(안산+제주대)",
+      "officialContractName": "",
+      "clientOrg": "카카오 지역협력팀",
+      "status": "",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-94",
+      "name": "2026 카카오 안산 임팩트 챌린지\n(안산+제주대)",
+      "officialContractName": "",
+      "clientOrg": "카카오 지역협력팀",
+      "status": "",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-11",
+      "name": "2026년 로컬창업 기업 육성 주관기관 모집 공고",
+      "officialContractName": "",
+      "clientOrg": "소상공인진흥공단",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-11",
+      "name": "2026년 로컬창업 기업 육성 주관기관 모집 공고",
+      "officialContractName": "",
+      "clientOrg": "소상공인진흥공단",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-8",
+      "name": "2026년 우수기술 사업화지원 기술사업화 역량강화 프로그램",
+      "officialContractName": "",
+      "clientOrg": "한국농업기술진흥원",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064553-19",
+      "name": "2026년 우수기술 사업화지원 기술사업화 역량강화 프로그램",
+      "officialContractName": "",
+      "clientOrg": "농업기술진흥원",
+      "status": "IN_PROGRESS",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-8",
+      "name": "2026년 우수기술 사업화지원 기술사업화 역량강화 프로그램",
+      "officialContractName": "",
+      "clientOrg": "한국농업기술진흥원",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841603-19",
+      "name": "2026년 우수기술 사업화지원 기술사업화 역량강화 프로그램",
+      "officialContractName": "",
+      "clientOrg": "농업기술진흥원",
+      "status": "IN_PROGRESS",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-9",
+      "name": "2026년 제주더큰내일센터 탐나는인재 창업트랙 운영",
+      "officialContractName": "",
+      "clientOrg": "제주더큰내일센터",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064553-18",
+      "name": "2026년 제주더큰내일센터 탐나는인재 창업트랙 운영",
+      "officialContractName": "",
+      "clientOrg": "제주더큰내일센터",
+      "status": "IN_PROGRESS",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-9",
+      "name": "2026년 제주더큰내일센터 탐나는인재 창업트랙 운영",
+      "officialContractName": "",
+      "clientOrg": "제주더큰내일센터",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841603-18",
+      "name": "2026년 제주더큰내일센터 탐나는인재 창업트랙 운영",
+      "officialContractName": "",
+      "clientOrg": "제주더큰내일센터",
+      "status": "IN_PROGRESS",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-44",
+      "name": "2026년 중장년 창업컨설팅 지원사업",
+      "officialContractName": "",
+      "clientOrg": "서울시50플러스재단",
+      "status": "CONTRACT_PENDING",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-44",
+      "name": "2026년 중장년 창업컨설팅 지원사업",
+      "officialContractName": "",
+      "clientOrg": "서울시50플러스재단",
+      "status": "CONTRACT_PENDING",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-31",
+      "name": "2026년 창업보육센터 지원사업 (BI투자형)",
+      "officialContractName": "",
+      "clientOrg": "국립한국농수산대학교",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-31",
+      "name": "2026년 창업보육센터 지원사업 (BI투자형)",
+      "officialContractName": "",
+      "clientOrg": "국립한국농수산대학교",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-38",
+      "name": "2026년 해양수산 창업기획자\n(액셀러레이터) 운영",
+      "officialContractName": "",
+      "clientOrg": "KIMST",
+      "status": "CONTRACT_PENDING",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-38",
+      "name": "2026년 해양수산 창업기획자\n(액셀러레이터) 운영",
+      "officialContractName": "",
+      "clientOrg": "KIMST",
+      "status": "CONTRACT_PENDING",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-33",
+      "name": "2026년도 기술경영 촉진 신규과제 (컴퍼니빌딩형)",
+      "officialContractName": "",
+      "clientOrg": "과학기술사업화진흥원",
+      "status": "CONTRACT_PENDING",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-33",
+      "name": "2026년도 기술경영 촉진 신규과제 (컴퍼니빌딩형)",
+      "officialContractName": "",
+      "clientOrg": "과학기술사업화진흥원",
+      "status": "CONTRACT_PENDING",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-76",
+      "name": "25년 ITC 컴업",
+      "officialContractName": "",
+      "clientOrg": "ITC",
+      "status": "COMPLETED",
+      "phase": "사업종료",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-76",
+      "name": "25년 ITC 컴업",
+      "officialContractName": "",
+      "clientOrg": "ITC",
+      "status": "COMPLETED",
+      "phase": "사업종료",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-69",
+      "name": "26년 ITC 컴업",
+      "officialContractName": "",
+      "clientOrg": "ITC",
+      "status": "",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-69",
+      "name": "26년 ITC 컴업",
+      "officialContractName": "",
+      "clientOrg": "ITC",
+      "status": "",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-60",
+      "name": "26년 KOICA 이노포트 사업",
+      "officialContractName": "",
+      "clientOrg": "KOICA",
+      "status": "",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-60",
+      "name": "26년 KOICA 이노포트 사업",
+      "officialContractName": "",
+      "clientOrg": "KOICA",
+      "status": "",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "p1773709860357",
+      "name": "경기사회환경",
+      "officialContractName": "테스트 사업",
+      "clientOrg": "경기도사회적경제원",
+      "status": "CONTRACT_PENDING",
+      "phase": "CONFIRMED",
+      "createdAt": "2026-03-17T01:11:00.357Z",
+      "likelyTestData": true,
+      "reasons": [
+        "korean_test_keyword"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-35",
+      "name": "과학기술AC 양성사업",
+      "officialContractName": "",
+      "clientOrg": "자체사업(w. 대덕넷)",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-35",
+      "name": "과학기술AC 양성사업",
+      "officialContractName": "",
+      "clientOrg": "자체사업(w. 대덕넷)",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-96",
+      "name": "광주 투자진흥지구 기업(투자)유치 \n및 국내외 프로모션 운영",
+      "officialContractName": "",
+      "clientOrg": "광주정보문화산업진흥원",
+      "status": "",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-96",
+      "name": "광주 투자진흥지구 기업(투자)유치 \n및 국내외 프로모션 운영",
+      "officialContractName": "",
+      "clientOrg": "광주정보문화산업진흥원",
+      "status": "",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-63",
+      "name": "노루홀딩스 오픈이노베이션 프로젝트 - 1단계 (기획~선발)",
+      "officialContractName": "",
+      "clientOrg": "노루홀딩스",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-63",
+      "name": "노루홀딩스 오픈이노베이션 프로젝트 - 1단계 (기획~선발)",
+      "officialContractName": "",
+      "clientOrg": "노루홀딩스",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-64",
+      "name": "노루홀딩스 오픈이노베이션 프로젝트 - 2단계 (PoC~데모데이)",
+      "officialContractName": "",
+      "clientOrg": "노루홀딩스",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "korean_test_keyword",
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-64",
+      "name": "노루홀딩스 오픈이노베이션 프로젝트 - 2단계 (PoC~데모데이)",
+      "officialContractName": "",
+      "clientOrg": "노루홀딩스",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "korean_test_keyword",
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-22",
+      "name": "농진원 CJ OI",
+      "officialContractName": "",
+      "clientOrg": "CJ",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-22",
+      "name": "농진원 CJ OI",
+      "officialContractName": "",
+      "clientOrg": "CJ",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-4",
+      "name": "대전 청년내일가게 사업",
+      "officialContractName": "",
+      "clientOrg": "대전 공공감성",
+      "status": "CONTRACT_PENDING",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-4",
+      "name": "대전 청년내일가게 사업",
+      "officialContractName": "",
+      "clientOrg": "대전 공공감성",
+      "status": "CONTRACT_PENDING",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-5",
+      "name": "도전J 스타트업",
+      "officialContractName": "",
+      "clientOrg": "제주관광공사",
+      "status": "CONTRACT_PENDING",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-5",
+      "name": "도전J 스타트업",
+      "officialContractName": "",
+      "clientOrg": "제주관광공사",
+      "status": "CONTRACT_PENDING",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-13",
+      "name": "드론AC",
+      "officialContractName": "",
+      "clientOrg": "TS한국교통안전공단",
+      "status": "CONTRACT_PENDING",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-13",
+      "name": "드론AC",
+      "officialContractName": "",
+      "clientOrg": "TS한국교통안전공단",
+      "status": "CONTRACT_PENDING",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064553-14",
+      "name": "립스(LIPS) 프로그램",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841603-14",
+      "name": "립스(LIPS) 프로그램",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-74",
+      "name": "립스기업 대상 프랑스 명장 요리사 협회MCF 품평회",
+      "officialContractName": "",
+      "clientOrg": "소진공 기업가형소상공인육성팀",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-74",
+      "name": "립스기업 대상 프랑스 명장 요리사 협회MCF 품평회",
+      "officialContractName": "",
+      "clientOrg": "소진공 기업가형소상공인육성팀",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064553-13",
+      "name": "메리히어",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841603-13",
+      "name": "메리히어",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-46",
+      "name": "모두의아이디어",
+      "officialContractName": "",
+      "clientOrg": "지식재산처/발명진흥회",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-46",
+      "name": "모두의아이디어",
+      "officialContractName": "",
+      "clientOrg": "지식재산처/발명진흥회",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-21",
+      "name": "몽골 울란바타르 스타트업 타운조성 및 액셀러레이팅 (프로젝트사업)",
+      "officialContractName": "",
+      "clientOrg": "중소벤처기업부",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-21",
+      "name": "몽골 울란바타르 스타트업 타운조성 및 액셀러레이팅 (프로젝트사업)",
+      "officialContractName": "",
+      "clientOrg": "중소벤처기업부",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-79",
+      "name": "문화선도산단 해커톤 대회",
+      "officialContractName": "",
+      "clientOrg": "한국산업단지공단",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-79",
+      "name": "문화선도산단 해커톤 대회",
+      "officialContractName": "",
+      "clientOrg": "한국산업단지공단",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-17",
+      "name": "벤처리움 AC",
+      "officialContractName": "",
+      "clientOrg": "한국통신자연합회",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-17",
+      "name": "벤처리움 AC",
+      "officialContractName": "",
+      "clientOrg": "한국통신자연합회",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-0",
+      "name": "빛가람 청년 에너지플러스 사업 제안\n*인건비 25% 제한사업",
+      "officialContractName": "",
+      "clientOrg": "전남테크노파크",
+      "status": "CONTRACT_PENDING",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-0",
+      "name": "빛가람 청년 에너지플러스 사업 제안\n*인건비 25% 제한사업",
+      "officialContractName": "",
+      "clientOrg": "전남테크노파크",
+      "status": "CONTRACT_PENDING",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-92",
+      "name": "사회적경제 혁신타운 입주기업 기업 컨설팅 및 발굴 육성 사업",
+      "officialContractName": "",
+      "clientOrg": "충남사회적경제네트워크",
+      "status": "COMPLETED",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-92",
+      "name": "사회적경제 혁신타운 입주기업 기업 컨설팅 및 발굴 육성 사업",
+      "officialContractName": "",
+      "clientOrg": "충남사회적경제네트워크",
+      "status": "COMPLETED",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-43",
+      "name": "사회적기업 서울권역 센터",
+      "officialContractName": "",
+      "clientOrg": "사회적기업진흥원",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-43",
+      "name": "사회적기업 서울권역 센터",
+      "officialContractName": "",
+      "clientOrg": "사회적기업진흥원",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-51",
+      "name": "상상플래닛",
+      "officialContractName": "",
+      "clientOrg": "KT&G",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-51",
+      "name": "상상플래닛",
+      "officialContractName": "",
+      "clientOrg": "KT&G",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-86",
+      "name": "서울경제진흥원 스타트업 \nESG 진단 컨설팅",
+      "officialContractName": "",
+      "clientOrg": "서울경제진흥원",
+      "status": "COMPLETED",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-86",
+      "name": "서울경제진흥원 스타트업 \nESG 진단 컨설팅",
+      "officialContractName": "",
+      "clientOrg": "서울경제진흥원",
+      "status": "COMPLETED",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-77",
+      "name": "서울사회복지공동모금회 지원사업|사회복지 종 사자의 기획교육을 통한 직무역량강화사업 : 열매학당",
+      "officialContractName": "",
+      "clientOrg": "서울특별시사회복지사협회",
+      "status": "COMPLETED",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-77",
+      "name": "서울사회복지공동모금회 지원사업|사회복지 종 사자의 기획교육을 통한 직무역량강화사업 : 열매학당",
+      "officialContractName": "",
+      "clientOrg": "서울특별시사회복지사협회",
+      "status": "COMPLETED",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-40",
+      "name": "소셜임팩트 체인저스 7기 위탁운영",
+      "officialContractName": "",
+      "clientOrg": "대전창조경제혁신센터",
+      "status": "CONTRACT_PENDING",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-40",
+      "name": "소셜임팩트 체인저스 7기 위탁운영",
+      "officialContractName": "",
+      "clientOrg": "대전창조경제혁신센터",
+      "status": "CONTRACT_PENDING",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-97",
+      "name": "스마트 축산·관광단지 조성 \n마스터플랜 연구용역",
+      "officialContractName": "",
+      "clientOrg": "진저티 (태백시 재하청)",
+      "status": "CONTRACT_PENDING",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-97",
+      "name": "스마트 축산·관광단지 조성 \n마스터플랜 연구용역",
+      "officialContractName": "",
+      "clientOrg": "진저티 (태백시 재하청)",
+      "status": "CONTRACT_PENDING",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-53",
+      "name": "스케일업 팁스 운영사",
+      "officialContractName": "",
+      "clientOrg": "중소벤처기업부",
+      "status": "CONTRACT_PENDING",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-53",
+      "name": "스케일업 팁스 운영사",
+      "officialContractName": "",
+      "clientOrg": "중소벤처기업부",
+      "status": "CONTRACT_PENDING",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-61",
+      "name": "실용적 ODA 추진을 위한 정책 방향 연구",
+      "officialContractName": "",
+      "clientOrg": "국무조정실",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-61",
+      "name": "실용적 ODA 추진을 위한 정책 방향 연구",
+      "officialContractName": "",
+      "clientOrg": "국무조정실",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-42",
+      "name": "아산상회7기",
+      "officialContractName": "",
+      "clientOrg": "아산나눔재단",
+      "status": "CONTRACT_PENDING",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-42",
+      "name": "아산상회7기",
+      "officialContractName": "",
+      "clientOrg": "아산나눔재단",
+      "status": "CONTRACT_PENDING",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-45",
+      "name": "인베스트 경기(컨소시엄)",
+      "officialContractName": "",
+      "clientOrg": "경기도과학경제원",
+      "status": "CONTRACT_PENDING",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-45",
+      "name": "인베스트 경기(컨소시엄)",
+      "officialContractName": "",
+      "clientOrg": "경기도과학경제원",
+      "status": "CONTRACT_PENDING",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-91",
+      "name": "장수군 지방소멸대응기금 컨설팅",
+      "officialContractName": "",
+      "clientOrg": "녹주",
+      "status": "COMPLETED",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-91",
+      "name": "장수군 지방소멸대응기금 컨설팅",
+      "officialContractName": "",
+      "clientOrg": "녹주",
+      "status": "COMPLETED",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-7",
+      "name": "전북특별자치도 2026 민간투자주도형 기술창업 활성화 지원사업",
+      "officialContractName": "",
+      "clientOrg": "전북테크노파크",
+      "status": "CONTRACT_PENDING",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-7",
+      "name": "전북특별자치도 2026 민간투자주도형 기술창업 활성화 지원사업",
+      "officialContractName": "",
+      "clientOrg": "전북테크노파크",
+      "status": "CONTRACT_PENDING",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-52",
+      "name": "제9회 소셜벤처 혁신경연대회",
+      "officialContractName": "",
+      "clientOrg": "성동구청",
+      "status": "CONTRACT_PENDING",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-52",
+      "name": "제9회 소셜벤처 혁신경연대회",
+      "officialContractName": "",
+      "clientOrg": "성동구청",
+      "status": "CONTRACT_PENDING",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-12",
+      "name": "제주더큰내일센터 탐나는인재",
+      "officialContractName": "",
+      "clientOrg": "제주더큰내일센터",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-12",
+      "name": "제주더큰내일센터 탐나는인재",
+      "officialContractName": "",
+      "clientOrg": "제주더큰내일센터",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-16",
+      "name": "제주청년창업 스케일업",
+      "officialContractName": "",
+      "clientOrg": "제주TP",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-16",
+      "name": "제주청년창업 스케일업",
+      "officialContractName": "",
+      "clientOrg": "제주TP",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-78",
+      "name": "중소기업혁신바우처",
+      "officialContractName": "",
+      "clientOrg": "중소벤처기업부, 중소벤처기업진흥공단",
+      "status": "",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-78",
+      "name": "중소기업혁신바우처",
+      "officialContractName": "",
+      "clientOrg": "중소벤처기업부, 중소벤처기업진흥공단",
+      "status": "",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-99",
+      "name": "중앙대학교 글로컬 이노컬이노베이터 양성",
+      "officialContractName": "",
+      "clientOrg": "중앙대학교",
+      "status": "CONTRACT_PENDING",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-99",
+      "name": "중앙대학교 글로컬 이노컬이노베이터 양성",
+      "officialContractName": "",
+      "clientOrg": "중앙대학교",
+      "status": "CONTRACT_PENDING",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-98",
+      "name": "지속가능한 ESG 리더과정 3.0 1기 \n- 심화과정 프로그램 운영 용역",
+      "officialContractName": "",
+      "clientOrg": "한양대학교",
+      "status": "CONTRACT_PENDING",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-98",
+      "name": "지속가능한 ESG 리더과정 3.0 1기 \n- 심화과정 프로그램 운영 용역",
+      "officialContractName": "",
+      "clientOrg": "한양대학교",
+      "status": "CONTRACT_PENDING",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-48",
+      "name": "지역주도 민관협력 사회혁신 플랫폼 \n(경북시민재단, 빠띠, 한신대, MYSC 컨소)",
+      "officialContractName": "",
+      "clientOrg": "행안부/경북시민재단",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-48",
+      "name": "지역주도 민관협력 사회혁신 플랫폼 \n(경북시민재단, 빠띠, 한신대, MYSC 컨소)",
+      "officialContractName": "",
+      "clientOrg": "행안부/경북시민재단",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-28",
+      "name": "초기 임업 관련 창업자 AC",
+      "officialContractName": "",
+      "clientOrg": "한국임업진흥원",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-28",
+      "name": "초기 임업 관련 창업자 AC",
+      "officialContractName": "",
+      "clientOrg": "한국임업진흥원",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-73",
+      "name": "추가: \n인바운드/크로스보더/글로벌이니셭티브 사업",
+      "officialContractName": "",
+      "clientOrg": "(추가 인바운드/크로스보더 사업)",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-73",
+      "name": "추가: \n인바운드/크로스보더/글로벌이니셭티브 사업",
+      "officialContractName": "",
+      "clientOrg": "(추가 인바운드/크로스보더 사업)",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-80",
+      "name": "투자연계형 초창패",
+      "officialContractName": "",
+      "clientOrg": "중소벤처기업부",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-80",
+      "name": "투자연계형 초창패",
+      "officialContractName": "",
+      "clientOrg": "중소벤처기업부",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-14",
+      "name": "풀무원 사내벤처 컨설팅",
+      "officialContractName": "",
+      "clientOrg": "풀무원",
+      "status": "CONTRACT_PENDING",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-14",
+      "name": "풀무원 사내벤처 컨설팅",
+      "officialContractName": "",
+      "clientOrg": "풀무원",
+      "status": "CONTRACT_PENDING",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-29",
+      "name": "핀테크 이노베이션 스쿨-데모데이",
+      "officialContractName": "",
+      "clientOrg": "한국핀테크지원센터",
+      "status": "",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "korean_test_keyword",
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-29",
+      "name": "핀테크 이노베이션 스쿨-데모데이",
+      "officialContractName": "",
+      "clientOrg": "한국핀테크지원센터",
+      "status": "",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "korean_test_keyword",
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-68",
+      "name": "해외 수출바우처",
+      "officialContractName": "",
+      "clientOrg": "KOTRA·중진공",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064553-17",
+      "name": "해외 수출바우처",
+      "officialContractName": "",
+      "clientOrg": "KOTRA·중진공",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-68",
+      "name": "해외 수출바우처",
+      "officialContractName": "",
+      "clientOrg": "KOTRA·중진공",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841603-17",
+      "name": "해외 수출바우처",
+      "officialContractName": "",
+      "clientOrg": "KOTRA·중진공",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-3",
+      "name": "현대 모비스 CSV OI 컨설팅",
+      "officialContractName": "",
+      "clientOrg": "현대모비스",
+      "status": "IN_PROGRESS",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064553-8",
+      "name": "현대 모비스 CSV OI 컨설팅",
+      "officialContractName": "",
+      "clientOrg": "현대모비스",
+      "status": "CONTRACT_PENDING",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-3",
+      "name": "현대 모비스 CSV OI 컨설팅",
+      "officialContractName": "",
+      "clientOrg": "현대모비스",
+      "status": "IN_PROGRESS",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841603-8",
+      "name": "현대 모비스 CSV OI 컨설팅",
+      "officialContractName": "",
+      "clientOrg": "현대모비스",
+      "status": "CONTRACT_PENDING",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-65",
+      "name": "AVPN",
+      "officialContractName": "",
+      "clientOrg": "AVPN",
+      "status": "IN_PROGRESS",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064553-6",
+      "name": "AVPN",
+      "officialContractName": "",
+      "clientOrg": "AVPN",
+      "status": "IN_PROGRESS",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-65",
+      "name": "AVPN",
+      "officialContractName": "",
+      "clientOrg": "AVPN",
+      "status": "IN_PROGRESS",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841603-6",
+      "name": "AVPN",
+      "officialContractName": "",
+      "clientOrg": "AVPN",
+      "status": "IN_PROGRESS",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-55",
+      "name": "Climate-tech Startup Acceleration and Investment Mobilization in Viet Nam",
+      "officialContractName": "",
+      "clientOrg": "GGGI",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064553-16",
+      "name": "Climate-tech Startup Acceleration and Investment Mobilization in Viet Nam",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-55",
+      "name": "Climate-tech Startup Acceleration and Investment Mobilization in Viet Nam",
+      "officialContractName": "",
+      "clientOrg": "GGGI",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841603-16",
+      "name": "Climate-tech Startup Acceleration and Investment Mobilization in Viet Nam",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-30",
+      "name": "D-TIPS 프로그램 용역",
+      "officialContractName": "",
+      "clientOrg": "DGIST",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-30",
+      "name": "D-TIPS 프로그램 용역",
+      "officialContractName": "",
+      "clientOrg": "DGIST",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-54",
+      "name": "DAK 취약계층 소득증대 사업의 지속가능성 제고를 위한 기반 체계화 사업",
+      "officialContractName": "",
+      "clientOrg": "한국국제협력단",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-54",
+      "name": "DAK 취약계층 소득증대 사업의 지속가능성 제고를 위한 기반 체계화 사업",
+      "officialContractName": "",
+      "clientOrg": "한국국제협력단",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-6",
+      "name": "DGB 금융지주 피움랩 8기\n(iM금융지주 피움랩 7기)",
+      "officialContractName": "",
+      "clientOrg": "DGB 금융지주",
+      "status": "COMPLETED",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-6",
+      "name": "DGB 금융지주 피움랩 8기\n(iM금융지주 피움랩 7기)",
+      "officialContractName": "",
+      "clientOrg": "DGB 금융지주",
+      "status": "COMPLETED",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-15",
+      "name": "ERT 워크숍",
+      "officialContractName": "",
+      "clientOrg": "대한상의",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-15",
+      "name": "ERT 워크숍",
+      "officialContractName": "",
+      "clientOrg": "대한상의",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-50",
+      "name": "GH 창업경진대회",
+      "officialContractName": "",
+      "clientOrg": "GH(경기주택도시공사)",
+      "status": "IN_PROGRESS",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-50",
+      "name": "GH 창업경진대회",
+      "officialContractName": "",
+      "clientOrg": "GH(경기주택도시공사)",
+      "status": "IN_PROGRESS",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-49",
+      "name": "GH 창업특화주택(특화형 매입임대주택) 운영 사업",
+      "officialContractName": "",
+      "clientOrg": "GH(경기주택도시공사)",
+      "status": "IN_PROGRESS",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064553-9",
+      "name": "GH 창업특화주택(특화형 매입임대주택) 운영 사업",
+      "officialContractName": "",
+      "clientOrg": "GH(경기주택도시공사)",
+      "status": "CONTRACT_PENDING",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-49",
+      "name": "GH 창업특화주택(특화형 매입임대주택) 운영 사업",
+      "officialContractName": "",
+      "clientOrg": "GH(경기주택도시공사)",
+      "status": "IN_PROGRESS",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841603-9",
+      "name": "GH 창업특화주택(특화형 매입임대주택) 운영 사업",
+      "officialContractName": "",
+      "clientOrg": "GH(경기주택도시공사)",
+      "status": "CONTRACT_PENDING",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064553-12",
+      "name": "GS칼텍스 다문화 육성 사업 (CSR) [가칭]",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841603-12",
+      "name": "GS칼텍스 다문화 육성 사업 (CSR) [가칭]",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-36",
+      "name": "GS칼텍스 육성 사업 (CSR) [가칭]",
+      "officialContractName": "",
+      "clientOrg": "GS칼텍스",
+      "status": "CONTRACT_PENDING",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-36",
+      "name": "GS칼텍스 육성 사업 (CSR) [가칭]",
+      "officialContractName": "",
+      "clientOrg": "GS칼텍스",
+      "status": "CONTRACT_PENDING",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-18",
+      "name": "H-온드림 스타트업 그라운드 (2026)",
+      "officialContractName": "",
+      "clientOrg": "현대차정몽구재단",
+      "status": "IN_PROGRESS",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-18",
+      "name": "H-온드림 스타트업 그라운드 (2026)",
+      "officialContractName": "",
+      "clientOrg": "현대차정몽구재단",
+      "status": "IN_PROGRESS",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-75",
+      "name": "IKEA (Social Enterprise  Partnership Programme)",
+      "officialContractName": "",
+      "clientOrg": "Yunus Social Innovation",
+      "status": "COMPLETED",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-75",
+      "name": "IKEA (Social Enterprise  Partnership Programme)",
+      "officialContractName": "",
+      "clientOrg": "Yunus Social Innovation",
+      "status": "COMPLETED",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064557-0",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064557-1",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064557-10",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064557-11",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064557-12",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064557-13",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064557-14",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064557-15",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064557-16",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064557-17",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064557-18",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064557-19",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064557-2",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064557-20",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064557-21",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064557-22",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064557-3",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064557-4",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064557-5",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064557-6",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064557-7",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064557-8",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064557-9",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064559-0",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064559-1",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064559-10",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064559-11",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064559-12",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064559-13",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064559-14",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064559-15",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064559-2",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064559-3",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064559-4",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064559-5",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064559-6",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064559-7",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064559-8",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064559-9",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841609-0",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841609-1",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841609-2",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841609-3",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841609-4",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841609-5",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841609-6",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841609-7",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841609-8",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841610-10",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841610-11",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841610-12",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841610-13",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841610-14",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841610-15",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841610-16",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841610-17",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841610-18",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841610-19",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841610-20",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841610-21",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841610-22",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841610-9",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841612-0",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841612-1",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841612-10",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841612-11",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841612-12",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841612-13",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841612-14",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841612-15",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841612-2",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841612-3",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841612-4",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841612-5",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841612-6",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841612-7",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841612-8",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841612-9",
+      "name": "",
+      "officialContractName": "",
+      "clientOrg": "",
+      "status": "",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id",
+        "missing_status_phase"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-59",
+      "name": "IPS 프로그램 - BorderlessJapan*MYSC 컨소시엄",
+      "officialContractName": "",
+      "clientOrg": "한국국제협력단",
+      "status": "CONTRACT_PENDING",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-59",
+      "name": "IPS 프로그램 - BorderlessJapan*MYSC 컨소시엄",
+      "officialContractName": "",
+      "clientOrg": "한국국제협력단",
+      "status": "CONTRACT_PENDING",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-67",
+      "name": "IPS 프로그램 - Pulse*MYSC 컨소시엄",
+      "officialContractName": "",
+      "clientOrg": "한국국제협력단",
+      "status": "CONTRACT_PENDING",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-67",
+      "name": "IPS 프로그램 - Pulse*MYSC 컨소시엄",
+      "officialContractName": "",
+      "clientOrg": "한국국제협력단",
+      "status": "CONTRACT_PENDING",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-71",
+      "name": "ITC",
+      "officialContractName": "",
+      "clientOrg": "ITC",
+      "status": "CONTRACT_PENDING",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-71",
+      "name": "ITC",
+      "officialContractName": "",
+      "clientOrg": "ITC",
+      "status": "CONTRACT_PENDING",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-62",
+      "name": "K-파운너 네트워크",
+      "officialContractName": "",
+      "clientOrg": "창진원",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-62",
+      "name": "K-파운너 네트워크",
+      "officialContractName": "",
+      "clientOrg": "창진원",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-1",
+      "name": "K-Camp 제주 5기 액셀러레이팅",
+      "officialContractName": "",
+      "clientOrg": "한국예탁결제원 - 제주",
+      "status": "CONTRACT_PENDING",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-1",
+      "name": "K-Camp 제주 5기 액셀러레이팅",
+      "officialContractName": "",
+      "clientOrg": "한국예탁결제원 - 제주",
+      "status": "CONTRACT_PENDING",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-81",
+      "name": "KIAT ODA",
+      "officialContractName": "",
+      "clientOrg": "LG에너지솔루션",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-81",
+      "name": "KIAT ODA",
+      "officialContractName": "",
+      "clientOrg": "LG에너지솔루션",
+      "status": "",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064553-0",
+      "name": "KOICA 이노포트 사업 (2023~2025)",
+      "officialContractName": "",
+      "clientOrg": "KOICA",
+      "status": "COMPLETED",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841603-0",
+      "name": "KOICA 이노포트 사업 (2023~2025)",
+      "officialContractName": "",
+      "clientOrg": "KOICA",
+      "status": "COMPLETED",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-56",
+      "name": "KOICA 포용적 비즈니스 프로그램(IBS) 3 (w.JLIN)",
+      "officialContractName": "",
+      "clientOrg": "KOICA",
+      "status": "IN_PROGRESS",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-56",
+      "name": "KOICA 포용적 비즈니스 프로그램(IBS) 3 (w.JLIN)",
+      "officialContractName": "",
+      "clientOrg": "KOICA",
+      "status": "IN_PROGRESS",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-24",
+      "name": "KOICA 포용적 비즈니스 프로그램(IBS) 4 (w.아모레퍼시픽)",
+      "officialContractName": "",
+      "clientOrg": "KOICA",
+      "status": "IN_PROGRESS",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064553-5",
+      "name": "KOICA 포용적 비즈니스 프로그램(IBS) 4 (w.아모레퍼시픽)",
+      "officialContractName": "",
+      "clientOrg": "KOICA",
+      "status": "IN_PROGRESS",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-24",
+      "name": "KOICA 포용적 비즈니스 프로그램(IBS) 4 (w.아모레퍼시픽)",
+      "officialContractName": "",
+      "clientOrg": "KOICA",
+      "status": "IN_PROGRESS",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841603-5",
+      "name": "KOICA 포용적 비즈니스 프로그램(IBS) 4 (w.아모레퍼시픽)",
+      "officialContractName": "",
+      "clientOrg": "KOICA",
+      "status": "IN_PROGRESS",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-23",
+      "name": "KOICA 플랫폼 ESG 이니셔티브 (IBS) 2 (w.유한킴벌리)",
+      "officialContractName": "",
+      "clientOrg": "KOICA",
+      "status": "IN_PROGRESS",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064553-1",
+      "name": "KOICA 플랫폼 ESG 이니셔티브 (IBS) 2 (w.유한킴벌리)",
+      "officialContractName": "",
+      "clientOrg": "KOICA",
+      "status": "IN_PROGRESS",
+      "phase": "",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-23",
+      "name": "KOICA 플랫폼 ESG 이니셔티브 (IBS) 2 (w.유한킴벌리)",
+      "officialContractName": "",
+      "clientOrg": "KOICA",
+      "status": "IN_PROGRESS",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841603-1",
+      "name": "KOICA 플랫폼 ESG 이니셔티브 (IBS) 2 (w.유한킴벌리)",
+      "officialContractName": "",
+      "clientOrg": "KOICA",
+      "status": "IN_PROGRESS",
+      "phase": "",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-70",
+      "name": "Ministry of commerce&industry gov of India",
+      "officialContractName": "",
+      "clientOrg": "Ministry of commerce&industry gov of India",
+      "status": "CONTRACT_PENDING",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-70",
+      "name": "Ministry of commerce&industry gov of India",
+      "officialContractName": "",
+      "clientOrg": "Ministry of commerce&industry gov of India",
+      "status": "CONTRACT_PENDING",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-10",
+      "name": "SBA 창업허브 에이지테크+ESG컨설팅",
+      "officialContractName": "",
+      "clientOrg": "SBA창업허브 성수",
+      "status": "CONTRACT_PENDING",
+      "phase": "연속",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-10",
+      "name": "SBA 창업허브 에이지테크+ESG컨설팅",
+      "officialContractName": "",
+      "clientOrg": "SBA창업허브 성수",
+      "status": "CONTRACT_PENDING",
+      "phase": "연속",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "p1772622375619",
+      "name": "TEST 사업 (AXR)",
+      "officialContractName": "",
+      "clientOrg": "mysc",
+      "status": "CONTRACT_PENDING",
+      "phase": "CONFIRMED",
+      "createdAt": "2026-03-04T11:06:15.619Z",
+      "likelyTestData": true,
+      "reasons": [
+        "english_test_keyword"
+      ]
+    },
+    {
+      "id": "p1772625312528",
+      "name": "test10",
+      "officialContractName": "",
+      "clientOrg": "tt",
+      "status": "CONTRACT_PENDING",
+      "phase": "CONFIRMED",
+      "createdAt": "2026-03-04T11:55:12.527Z",
+      "likelyTestData": true,
+      "reasons": [
+        "english_test_keyword"
+      ]
+    },
+    {
+      "id": "p1772674366013",
+      "name": "test2",
+      "officialContractName": "",
+      "clientOrg": "mysc",
+      "status": "CONTRACT_PENDING",
+      "phase": "CONFIRMED",
+      "createdAt": "2026-03-05T01:32:46.013Z",
+      "likelyTestData": true,
+      "reasons": [
+        "english_test_keyword"
+      ]
+    },
+    {
+      "id": "p1772624399418",
+      "name": "test5",
+      "officialContractName": "",
+      "clientOrg": "11",
+      "status": "CONTRACT_PENDING",
+      "phase": "CONFIRMED",
+      "createdAt": "2026-03-04T11:39:59.418Z",
+      "likelyTestData": true,
+      "reasons": [
+        "english_test_keyword"
+      ]
+    },
+    {
+      "id": "p1772624885396",
+      "name": "test6",
+      "officialContractName": "",
+      "clientOrg": "test",
+      "status": "CONTRACT_PENDING",
+      "phase": "CONFIRMED",
+      "createdAt": "2026-03-04T11:48:05.396Z",
+      "likelyTestData": true,
+      "reasons": [
+        "english_test_keyword"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-72",
+      "name": "THE CIRCLE FC",
+      "officialContractName": "",
+      "clientOrg": "THE CIRCLE FC",
+      "status": "CONTRACT_PENDING",
+      "phase": "신규",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-72",
+      "name": "THE CIRCLE FC",
+      "officialContractName": "",
+      "clientOrg": "THE CIRCLE FC",
+      "status": "CONTRACT_PENDING",
+      "phase": "신규",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771904064551-88",
+      "name": "UN Women_WEPs \nKorea Impact Studio 운영",
+      "officialContractName": "",
+      "clientOrg": "UN Women",
+      "status": "COMPLETED",
+      "phase": "사업종료",
+      "createdAt": "2026-02-24T03:34:24.550Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    },
+    {
+      "id": "import-projects-1771906841601-88",
+      "name": "UN Women_WEPs \nKorea Impact Studio 운영",
+      "officialContractName": "",
+      "clientOrg": "UN Women",
+      "status": "COMPLETED",
+      "phase": "사업종료",
+      "createdAt": "2026-02-24T04:20:41.600Z",
+      "likelyTestData": true,
+      "reasons": [
+        "non_standard_project_id"
+      ]
+    }
+  ]
+}

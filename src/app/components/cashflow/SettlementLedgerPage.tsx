@@ -1,8 +1,9 @@
-import { ChevronDown, ChevronLeft, ChevronRight, Download, ExternalLink, GripVertical, Loader2, MessageSquare, Plus, RotateCcw, Save, Send, Upload, X } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, Download, ExternalLink, GripVertical, Loader2, Plus, RotateCcw, Save, Upload, X } from 'lucide-react';
 import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { ClipboardEvent, KeyboardEvent, MouseEvent } from 'react';
 import { toast } from 'sonner';
+import { detectKeyRuleContext, runKeyRules, type KeyRule } from '../../platform/settlement-grid-keymap';
 import { BUDGET_CODE_BOOK } from '../../data/budget-data';
 import type { BudgetCodeEntry, Comment, Transaction, TransactionState } from '../../data/types';
 import { findWeekForDate, getMonthMondayWeeks, getYearMondayWeeks, type MonthMondayWeek } from '../../platform/cashflow-weeks';
@@ -68,6 +69,8 @@ import {
 } from '../ui/alert-dialog';
 import type { ActiveCommentAnchor } from './SettlementCommentThreadSheet';
 import type { EvidenceUploadDraft } from './SettlementEvidenceUploadDialog';
+import { CellCommentButton } from './CellCommentButton';
+import { SettlementWeekSection } from './SettlementWeekSection';
 import {
   fmt,
   METHOD_LABELS,
@@ -106,41 +109,6 @@ const SettlementCommentThreadSheet = lazy(
 const SettlementEvidenceUploadDialog = lazy(
   () => import('./SettlementEvidenceUploadDialog').then((module) => ({ default: module.SettlementEvidenceUploadDialog })),
 );
-
-function CellCommentButton({
-  count,
-  disabled,
-  onClick,
-}: {
-  count: number;
-  disabled?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      title={disabled ? '저장 후 메모를 남길 수 있습니다' : '셀 메모 열기'}
-      aria-label="셀 메모 열기"
-      disabled={disabled}
-      className={`absolute top-1 right-1 inline-flex h-5 w-5 items-center justify-center rounded-md border text-[10px] transition ${
-        count > 0
-          ? 'border-amber-300 bg-amber-50 text-amber-700 opacity-100'
-          : 'border-transparent bg-background/90 text-muted-foreground opacity-0 group-hover:opacity-100'
-      } ${disabled ? 'cursor-not-allowed opacity-40' : 'hover:border-border hover:text-foreground'}`}
-      onClick={(event) => {
-        event.stopPropagation();
-        onClick();
-      }}
-    >
-      <MessageSquare className="h-3.5 w-3.5" />
-      {count > 0 && (
-        <span className="absolute -top-1 -right-1 inline-flex min-w-4 items-center justify-center rounded-full bg-amber-500 px-1 text-[9px] font-bold leading-none text-white">
-          {count}
-        </span>
-      )}
-    </button>
-  );
-}
 
 // ── Types ──
 
@@ -911,7 +879,7 @@ export function SettlementLedgerPage({
               });
 
               return (
-                <WeekSection
+                <SettlementWeekSection
                   key={week.label}
                   week={week}
                   txRows={rows}
@@ -963,484 +931,6 @@ export function SettlementLedgerPage({
       )}
       {revertConfirmDialog}
     </div>
-  );
-}
-
-// ── Week Section ──
-
-interface WeekSectionProps {
-  week: MonthMondayWeek;
-  txRows: { tx: Transaction; rowNum: number }[];
-  collapsed: boolean;
-  txCount: number;
-  onToggle: () => void;
-  onUpdateTx: (txId: string, updates: Partial<Transaction>) => void;
-  onProvisionEvidenceDrive?: (tx: Transaction) => void | Promise<void>;
-  onSyncEvidenceDrive?: (tx: Transaction) => void | Promise<void>;
-  onSubmitWeek?: (input: {
-    weekLabel: string;
-    yearMonth: string;
-    weekNo: number;
-    txIds: string[];
-  }) => void | Promise<void>;
-  onChangeTransactionState?: (txId: string, newState: TransactionState, reason?: string) => void;
-  userRole?: 'pm' | 'admin';
-}
-
-function WeekSection({
-  week,
-  txRows,
-  collapsed,
-  txCount,
-  onToggle,
-  onUpdateTx,
-  onProvisionEvidenceDrive,
-  onSyncEvidenceDrive,
-  onSubmitWeek,
-  onChangeTransactionState,
-  userRole,
-}: WeekSectionProps) {
-  const [submitting, setSubmitting] = useState(false);
-  const colCount = SETTLEMENT_COLUMNS.length;
-  const draftTxIds = txRows.filter(({ tx }) => tx.state === 'DRAFT').map(({ tx }) => tx.id);
-  const hasDrafts = draftTxIds.length > 0 && userRole === 'pm' && week.weekNo > 0;
-  const evSummary = txRows.length > 0 ? computeEvidenceSummary(txRows.map(({ tx }) => tx)) : null;
-
-  return (
-    <>
-      {/* Week header row */}
-      <tr
-        className="bg-blue-50 dark:bg-blue-950 cursor-pointer hover:bg-blue-100 dark:hover:bg-blue-900"
-        onClick={onToggle}
-      >
-        <td colSpan={colCount} className="px-3 py-1.5 border-b">
-          <div className="flex items-center gap-2">
-            {collapsed ? (
-              <ChevronRight className="h-3.5 w-3.5 text-blue-600" />
-            ) : (
-              <ChevronDown className="h-3.5 w-3.5 text-blue-600" />
-            )}
-            <span className="font-bold text-[11px] text-blue-700 dark:text-blue-300">
-              {week.label}
-            </span>
-            <span className="text-[10px] text-muted-foreground">
-              {week.weekStart ? `${week.weekStart} ~ ${week.weekEnd}` : '날짜 없음'}
-            </span>
-            <Badge
-              variant={txCount > 0 ? 'default' : 'secondary'}
-              className="text-[9px] h-4 px-1.5"
-            >
-              {txCount}건
-            </Badge>
-            {evSummary && txCount > 0 && (
-              <span className="text-[9px] text-muted-foreground">
-                증빙:
-                {evSummary.complete > 0 && <span className="text-emerald-600 ml-1">완료 {evSummary.complete}</span>}
-                {evSummary.partial > 0 && <span className="text-amber-600 ml-1">일부 {evSummary.partial}</span>}
-                {evSummary.missing > 0 && <span className="text-rose-600 ml-1">미제출 {evSummary.missing}</span>}
-              </span>
-            )}
-            {hasDrafts && onSubmitWeek && (
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-5 text-[9px] gap-1 px-2 ml-auto border-amber-400 text-amber-700 hover:bg-amber-50"
-                disabled={submitting}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setSubmitting(true);
-                  Promise.resolve(
-                    onSubmitWeek({
-                      weekLabel: week.label,
-                      yearMonth: week.yearMonth,
-                      weekNo: week.weekNo,
-                      txIds: draftTxIds,
-                    }),
-                  )
-                    .catch((err) => {
-                      console.error('[SettlementLedger] submit week failed:', err);
-                    })
-                    .finally(() => setSubmitting(false));
-                }}
-              >
-                <Send className="h-2.5 w-2.5" />
-                {submitting ? '제출중...' : `제출 (${draftTxIds.length}건)`}
-              </Button>
-            )}
-          </div>
-        </td>
-      </tr>
-      {/* Transaction rows */}
-      {!collapsed &&
-        txRows.map(({ tx, rowNum }) => (
-          <TransactionRow
-            key={tx.id}
-            tx={tx}
-            rowNum={rowNum}
-            weekLabel={week.label}
-            onUpdate={(updates) => onUpdateTx(tx.id, updates)}
-            onProvisionEvidenceDrive={onProvisionEvidenceDrive}
-            onSyncEvidenceDrive={onSyncEvidenceDrive}
-            onChangeState={onChangeTransactionState}
-            userRole={userRole}
-          />
-        ))}
-      {!collapsed && txCount === 0 && (
-        <tr className="text-muted-foreground">
-          <td colSpan={colCount} className="px-3 py-2 text-center text-[10px] border-b italic">
-            이 주차에 등록된 거래가 없습니다
-          </td>
-        </tr>
-      )}
-    </>
-  );
-}
-
-// ── Transaction Row ──
-
-interface TransactionRowProps {
-  tx: Transaction;
-  rowNum: number;
-  weekLabel: string;
-  onUpdate: (updates: Partial<Transaction>) => void;
-  onProvisionEvidenceDrive?: (tx: Transaction) => void | Promise<void>;
-  onSyncEvidenceDrive?: (tx: Transaction) => void | Promise<void>;
-  onChangeState?: (txId: string, newState: TransactionState, reason?: string) => void;
-  userRole?: 'pm' | 'admin';
-}
-
-function TransactionRow({
-  tx,
-  rowNum,
-  weekLabel,
-  onUpdate,
-  onProvisionEvidenceDrive,
-  onSyncEvidenceDrive,
-  onChangeState,
-  userRole,
-}: TransactionRowProps) {
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
-  const locked = !isEditable(tx.state);
-  const [driveAction, setDriveAction] = useState<'' | 'provision' | 'sync'>('');
-
-  const debouncedUpdate = useCallback(
-    (updates: Partial<Transaction>) => {
-      if (locked) return;
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(() => onUpdate(updates), 1200);
-    },
-    [onUpdate, locked],
-  );
-
-  useEffect(() => {
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, []);
-
-  const autoCompletedDesc = tx.evidenceAutoListedDesc || '';
-  const manualCompletedDesc = resolveEvidenceCompletedManualDesc(tx);
-  const effectiveCompletedDesc = resolveEvidenceCompletedDesc(tx);
-  const suggestedFolderName = tx.evidenceDriveFolderName || buildDriveTransactionFolderName(tx);
-  const driveStatusLabel = tx.evidenceDriveSyncStatus === 'UPLOADED'
-    ? '업로드됨'
-    : tx.evidenceDriveSyncStatus === 'SYNCED'
-      ? '동기화됨'
-      : '';
-
-  const runDriveAction = useCallback(async (
-    action: 'provision' | 'sync',
-    handler?: (targetTx: Transaction) => void | Promise<void>,
-  ) => {
-    if (!handler || driveAction) return;
-    setDriveAction(action);
-    try {
-      await handler(tx);
-    } catch (error) {
-      console.error(`[SettlementLedger] evidence drive ${action} failed:`, error);
-    } finally {
-      setDriveAction('');
-    }
-  }, [driveAction, tx]);
-
-  const textCell = (
-    value: string | undefined,
-    field: keyof Transaction,
-    className?: string,
-  ) => (
-    <td className={`px-1 py-0.5 border-b border-r ${className || ''}`}>
-      <input
-        type="text"
-        defaultValue={value || ''}
-        disabled={locked}
-        className={`w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[60px] ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
-        onBlur={(e) => {
-          if (!locked && e.target.value !== (value || '')) {
-            debouncedUpdate({ [field]: e.target.value } as Partial<Transaction>);
-          }
-        }}
-      />
-    </td>
-  );
-
-  const numberCell = (value: number | undefined) => (
-    <td className="px-1 py-0.5 border-b border-r text-right tabular-nums">
-      <span className="text-[11px]">{fmt(value)}</span>
-    </td>
-  );
-
-  const boolCell = (value: boolean | undefined, field: keyof Transaction) => (
-    <td className="px-1 py-0.5 border-b border-r text-center">
-      <Checkbox
-        checked={!!value}
-        disabled={locked}
-        onCheckedChange={(checked) => {
-          if (!locked) onUpdate({ [field]: !!checked } as Partial<Transaction>);
-        }}
-        className="h-3.5 w-3.5"
-      />
-    </td>
-  );
-
-  const stateBadge = TX_STATE_BADGE[tx.state] || TX_STATE_BADGE.DRAFT;
-
-  return (
-    <tr className={`hover:bg-muted/30 transition-colors ${locked ? 'opacity-80' : ''}`}>
-      {/* 작성자 + 상태배지 */}
-      <td className={`px-1 py-0.5 border-b border-r`}>
-        <div className="flex items-center gap-1">
-          <input
-            type="text"
-            defaultValue={tx.author || ''}
-            disabled={locked}
-            className={`flex-1 bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[40px] ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
-            onBlur={(e) => {
-              if (!locked && e.target.value !== (tx.author || '')) {
-                debouncedUpdate({ author: e.target.value });
-              }
-            }}
-          />
-          <span className={`shrink-0 inline-flex items-center h-4 px-1.5 rounded-full text-[8px] font-bold ${stateBadge.cls}`}>
-            {stateBadge.label}
-          </span>
-          {tx.state === 'REJECTED' && tx.rejectedReason && (
-            <span className="shrink-0 text-[8px] text-red-500 truncate max-w-[80px]" title={tx.rejectedReason}>
-              ({tx.rejectedReason})
-            </span>
-          )}
-          {tx.state === 'REJECTED' && userRole === 'pm' && onChangeState && (
-            <button
-              className="shrink-0 text-[8px] text-blue-600 hover:underline"
-              onClick={() => onChangeState(tx.id, 'DRAFT')}
-            >
-              수정
-            </button>
-          )}
-        </div>
-      </td>
-      {/* No. */}
-      <td className="px-1 py-0.5 border-b border-r text-center text-[11px] text-muted-foreground">
-        {rowNum}
-      </td>
-      {/* 거래일시 */}
-      <td className="px-1 py-0.5 border-b border-r">
-        <input
-          type="date"
-          defaultValue={tx.dateTime?.slice(0, 10) || ''}
-          disabled={locked}
-          className={`bg-transparent outline-none text-[11px] px-0.5 ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
-          onBlur={(e) => {
-            if (!locked && e.target.value && e.target.value !== tx.dateTime?.slice(0, 10)) {
-              debouncedUpdate({ dateTime: e.target.value });
-            }
-          }}
-        />
-      </td>
-      {/* 해당 주차 */}
-      <td className="px-1 py-0.5 border-b border-r text-center text-[11px] text-muted-foreground">
-        {weekLabel}
-      </td>
-      {/* 지출구분 */}
-      <td className="px-1 py-0.5 border-b border-r">
-        <select
-          defaultValue={normalizeMethodValue(tx.method)}
-          disabled={locked}
-          className={`bg-transparent outline-none text-[11px] w-full cursor-pointer ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
-          onChange={(e) => { if (!locked) onUpdate({ method: e.target.value as Transaction['method'] }); }}
-        >
-          {METHOD_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>{o.label}</option>
-          ))}
-        </select>
-      </td>
-      {/* 비목 */}
-      {textCell(tx.budgetCategory, 'budgetCategory')}
-      {/* 세목 */}
-      {textCell(tx.budgetSubCategory, 'budgetSubCategory')}
-      {/* 세세목 */}
-      {textCell(tx.budgetSubSubCategory, 'budgetSubSubCategory')}
-      {/* cashflow항목 */}
-      <td className="px-1 py-0.5 border-b border-r">
-        <select
-          defaultValue={tx.cashflowLabel || ''}
-          disabled={locked}
-          className={`bg-transparent outline-none text-[11px] w-full cursor-pointer min-w-[100px] ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
-          onChange={(e) => { if (!locked) onUpdate({ cashflowLabel: e.target.value }); }}
-        >
-          <option value="">-</option>
-          {CASHFLOW_LINE_OPTIONS.map((o) => (
-            <option key={o.value} value={o.label}>{o.label}</option>
-          ))}
-        </select>
-      </td>
-      {/* 통장잔액 */}
-      {numberCell(tx.amounts?.balanceAfter)}
-      {/* 통장에 찍힌 입/출금액 */}
-      {numberCell(tx.amounts?.bankAmount)}
-      {/* 입금합계: 입금액 */}
-      {numberCell(tx.amounts?.depositAmount)}
-      {/* 입금합계: 매입부가세 반환 */}
-      {numberCell(tx.amounts?.vatRefund)}
-      {/* 출금합계: 사업비 사용액 */}
-      {numberCell(tx.amounts?.expenseAmount)}
-      {/* 출금합계: 매입부가세 */}
-      {numberCell(tx.amounts?.vatIn)}
-      {/* 사업팀: 지급처 */}
-      {textCell(tx.counterparty, 'counterparty')}
-      {/* 사업팀: 상세 적요 */}
-      {textCell(tx.memo, 'memo', 'min-w-[150px]')}
-      {/* 사업팀: 필수증빙자료 리스트 */}
-      {textCell(tx.evidenceRequiredDesc, 'evidenceRequiredDesc')}
-      {/* 사업팀: 실제 구비 완료된 증빙자료 리스트 */}
-      <td className="px-1 py-0.5 border-b border-r align-top">
-        <div className="min-w-[160px] space-y-1">
-          <div
-            className="rounded border border-dashed bg-muted/30 px-1 py-0.5 text-[10px]"
-            title={autoCompletedDesc ? `드라이브 자동 집계: ${autoCompletedDesc}` : '동기화 후 드라이브 파일 기준으로 자동 집계됩니다.'}
-          >
-            <div className="text-[8px] font-semibold uppercase tracking-wide text-muted-foreground">자동 집계</div>
-            <div className="truncate">{autoCompletedDesc || '동기화 전'}</div>
-          </div>
-          <input
-            key={`evidence-completed-manual-${tx.id}-${manualCompletedDesc}`}
-            type="text"
-            defaultValue={manualCompletedDesc}
-            disabled={locked}
-            placeholder="수기 보정(선택)"
-            title={effectiveCompletedDesc ? `최종 반영: ${effectiveCompletedDesc}` : '수기 보정이 없으면 자동 집계 목록이 그대로 반영됩니다.'}
-            className={`w-full bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[60px] border rounded ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
-            onBlur={(e) => {
-              if (!locked && e.target.value !== manualCompletedDesc) {
-                const nextManualDesc = e.target.value.trim();
-                const updatedTx = {
-                  ...tx,
-                  evidenceCompletedManualDesc: nextManualDesc || undefined,
-                  evidenceCompletedDesc: resolveEvidenceCompletedDesc({
-                    ...tx,
-                    evidenceCompletedManualDesc: nextManualDesc || undefined,
-                  } as Transaction),
-                };
-                const newStatus = computeEvidenceStatus(updatedTx);
-                debouncedUpdate({
-                  evidenceCompletedManualDesc: nextManualDesc || undefined,
-                  evidenceCompletedDesc: updatedTx.evidenceCompletedDesc,
-                  evidenceStatus: newStatus,
-                });
-              }
-            }}
-          />
-        </div>
-      </td>
-      {/* 사업팀: 준비필요자료 */}
-      {textCell(tx.evidencePendingDesc, 'evidencePendingDesc')}
-      {/* 정산지원: 증빙자료 드라이브 */}
-      <td className="px-1 py-0.5 border-b border-r">
-        <div className="flex items-center gap-1">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-5 px-1.5 text-[9px] shrink-0"
-            disabled={driveAction !== '' || !onProvisionEvidenceDrive}
-            onClick={(e) => {
-              e.stopPropagation();
-              void runDriveAction('provision', onProvisionEvidenceDrive);
-            }}
-            title={`증빙 폴더 생성 · ${suggestedFolderName}`}
-          >
-            {driveAction === 'provision' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}
-            생성
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-5 px-1.5 text-[9px] shrink-0"
-            disabled={driveAction !== '' || !onSyncEvidenceDrive}
-            onClick={(e) => {
-              e.stopPropagation();
-              void runDriveAction('sync', onSyncEvidenceDrive);
-            }}
-            title="Drive 폴더 파일 동기화"
-          >
-            {driveAction === 'sync' ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
-            동기화
-          </Button>
-          {driveStatusLabel && (
-            <span
-              className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] font-medium ${
-                tx.evidenceDriveSyncStatus === 'UPLOADED'
-                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                  : 'border-sky-200 bg-sky-50 text-sky-700'
-              }`}
-              title={tx.evidenceDriveSyncStatus === 'UPLOADED' ? '업로드는 완료됐고 목록 반영은 동기화 버튼에서 진행됩니다.' : 'Drive와 목록이 동기화된 상태입니다.'}
-            >
-              {driveStatusLabel}
-            </span>
-          )}
-          <input
-            key={`evidence-drive-link-${tx.id}-${tx.evidenceDriveLink || ''}-${tx.evidenceDriveFolderId || ''}`}
-            type="text"
-            defaultValue={tx.evidenceDriveLink || ''}
-            disabled={locked}
-            placeholder={`Drive URL · ${suggestedFolderName}`}
-            title={`권장 폴더명: ${suggestedFolderName}`}
-            className={`flex-1 bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[60px] ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
-            onBlur={(e) => {
-              if (!locked && e.target.value !== (tx.evidenceDriveLink || '')) {
-                const updatedTx = { ...tx, evidenceDriveLink: e.target.value };
-                const newStatus = computeEvidenceStatus(updatedTx);
-                debouncedUpdate({ evidenceDriveLink: e.target.value, evidenceStatus: newStatus });
-              }
-            }}
-          />
-          {isValidDriveUrl(tx.evidenceDriveLink || '') && (
-            <a
-              href={tx.evidenceDriveLink}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="shrink-0 text-blue-500 hover:text-blue-700"
-              onClick={(e) => e.stopPropagation()}
-              title="Google Drive에서 열기"
-            >
-              <ExternalLink className="h-3 w-3" />
-            </a>
-          )}
-        </div>
-      </td>
-      {/* 정산지원: 준비 필요자료 */}
-      {textCell(tx.supportPendingDocs, 'supportPendingDocs')}
-      {/* 도담: e나라 등록 */}
-      {textCell(tx.eNaraRegistered, 'eNaraRegistered')}
-      {/* 도담: e나라 집행 */}
-      {textCell(tx.eNaraExecuted, 'eNaraExecuted')}
-      {/* 도담: 부가세 지결 완료여부 */}
-      {boolCell(tx.vatSettlementDone, 'vatSettlementDone')}
-      {/* 도담: 최종완료 */}
-      {boolCell(tx.settlementComplete, 'settlementComplete')}
-      {/* 비고 */}
-      {textCell(tx.settlementNote, 'settlementNote')}
-    </tr>
   );
 }
 
@@ -2237,6 +1727,7 @@ function ImportEditor({
       const target = tableWrapRef.current?.querySelector<HTMLElement>(selector);
       if (!target) return false;
       target.focus();
+      target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
       handleCellFocus(boundedRow, boundedCol);
       return true;
     };
@@ -2268,53 +1759,11 @@ function ImportEditor({
     handleCopy(e);
     if (e.defaultPrevented) return;
 
-    const target = e.target as HTMLElement | null;
-    const isTextEditingTarget = Boolean(
-      target
-      && (
-        target instanceof HTMLInputElement
-        || target instanceof HTMLTextAreaElement
-        || target.isContentEditable
-      ),
-    );
-    const hasMultiCellSelection = Boolean(
+    const ctx = detectKeyRuleContext(e as unknown as globalThis.KeyboardEvent);
+    ctx.hasMultiCellSelection = Boolean(
       selectionBounds
       && (selectionBounds.r1 !== selectionBounds.r2 || selectionBounds.c1 !== selectionBounds.c2),
     );
-    const inputHasPartialSelection = Boolean(
-      target instanceof HTMLInputElement
-      && typeof target.selectionStart === 'number'
-      && typeof target.selectionEnd === 'number'
-      && target.selectionStart !== target.selectionEnd,
-    );
-
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
-      if (isTextEditingTarget) return;
-      if (rows.length === 0) return;
-      e.preventDefault();
-      const firstEditableCol = noIdx === 0 ? 1 : 0;
-      setSelection({
-        start: { r: 0, c: firstEditableCol },
-        end: { r: rows.length - 1, c: Math.max(firstEditableCol, SETTLEMENT_COLUMNS.length - 1) },
-      });
-      tableWrapRef.current?.focus();
-      return;
-    }
-
-    if (e.key === 'Escape') {
-      if (!selectionRef.current) return;
-      e.preventDefault();
-      setSelection(null);
-      return;
-    }
-
-    if ((e.key === 'Delete' || e.key === 'Backspace') && !e.altKey && !e.ctrlKey && !e.metaKey) {
-      if (isTextEditingTarget && !hasMultiCellSelection && inputHasPartialSelection) return;
-      if (!getActiveSelectionBounds()) return;
-      e.preventDefault();
-      void clearSelectedCells();
-      return;
-    }
 
     const anchor = selection
       ? {
@@ -2324,31 +1773,92 @@ function ImportEditor({
       : lastFocusedCell.current
         ? { r: lastFocusedCell.current.rowIdx, c: lastFocusedCell.current.colIdx }
         : null;
-    if (!anchor) return;
 
-    const navigationKeys = new Set(['Enter', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
-    if (!navigationKeys.has(e.key) || e.altKey || e.metaKey || e.ctrlKey) return;
+    const keyRules: KeyRule[] = [
+      {
+        combo: { key: 'a', mod: true },
+        run: (_ev, ruleCtx) => {
+          if (ruleCtx.isTextEditingTarget) return false;
+          if (rows.length === 0) return false;
+          _ev.preventDefault();
+          const firstEditableCol = noIdx === 0 ? 1 : 0;
+          setSelection({
+            start: { r: 0, c: firstEditableCol },
+            end: { r: rows.length - 1, c: Math.max(firstEditableCol, SETTLEMENT_COLUMNS.length - 1) },
+          });
+          tableWrapRef.current?.focus();
+          return true;
+        },
+      },
+      {
+        combo: { key: 'Escape' },
+        run: (_ev) => {
+          if (!selectionRef.current) return false;
+          _ev.preventDefault();
+          setSelection(null);
+          return true;
+        },
+      },
+      {
+        combo: [{ key: 'Delete' }, { key: 'Backspace' }],
+        run: (_ev, ruleCtx) => {
+          if (ruleCtx.isTextEditingTarget && !ruleCtx.hasMultiCellSelection && ruleCtx.inputHasPartialSelection) return false;
+          if (!getActiveSelectionBounds()) return false;
+          _ev.preventDefault();
+          void clearSelectedCells();
+          return true;
+        },
+      },
+      {
+        combo: { key: 'Tab' },
+        run: (_ev) => {
+          if (!anchor) return false;
+          _ev.preventDefault();
+          const nextCol = anchor.c + 1 >= SETTLEMENT_COLUMNS.length ? 0 : anchor.c + 1;
+          const nextRow = nextCol === 0 ? Math.min(anchor.r + 1, rows.length - 1) : anchor.r;
+          focusCellAt(nextRow, nextCol === noIdx ? nextCol + 1 : nextCol);
+          return true;
+        },
+      },
+      {
+        combo: { key: 'Tab', shift: true },
+        run: (_ev) => {
+          if (!anchor) return false;
+          _ev.preventDefault();
+          const prevCol = anchor.c - 1 < 0 ? SETTLEMENT_COLUMNS.length - 1 : anchor.c - 1;
+          const prevRow = prevCol === SETTLEMENT_COLUMNS.length - 1 ? Math.max(anchor.r - 1, 0) : anchor.r;
+          focusCellAt(prevRow, prevCol === noIdx ? Math.max(prevCol - 1, 0) : prevCol);
+          return true;
+        },
+      },
+      {
+        combo: [{ key: 'Enter' }, { key: 'Enter', shift: true }],
+        run: (_ev) => {
+          if (!anchor) return false;
+          _ev.preventDefault();
+          focusCellAt(anchor.r + (_ev.shiftKey ? -1 : 1), anchor.c);
+          return true;
+        },
+      },
+      {
+        combo: { key: 'ArrowUp' },
+        run: (_ev) => { if (!anchor) return false; _ev.preventDefault(); focusCellAt(anchor.r - 1, anchor.c); return true; },
+      },
+      {
+        combo: { key: 'ArrowDown' },
+        run: (_ev) => { if (!anchor) return false; _ev.preventDefault(); focusCellAt(anchor.r + 1, anchor.c); return true; },
+      },
+      {
+        combo: { key: 'ArrowLeft' },
+        run: (_ev) => { if (!anchor) return false; _ev.preventDefault(); focusCellAt(anchor.r, anchor.c - 1); return true; },
+      },
+      {
+        combo: { key: 'ArrowRight' },
+        run: (_ev) => { if (!anchor) return false; _ev.preventDefault(); focusCellAt(anchor.r, anchor.c + 1); return true; },
+      },
+    ];
 
-    e.preventDefault();
-    if (e.key === 'Enter') {
-      focusCellAt(anchor.r + (e.shiftKey ? -1 : 1), anchor.c);
-      return;
-    }
-    if (e.key === 'ArrowUp') {
-      focusCellAt(anchor.r - 1, anchor.c);
-      return;
-    }
-    if (e.key === 'ArrowDown') {
-      focusCellAt(anchor.r + 1, anchor.c);
-      return;
-    }
-    if (e.key === 'ArrowLeft') {
-      focusCellAt(anchor.r, anchor.c - 1);
-      return;
-    }
-    if (e.key === 'ArrowRight') {
-      focusCellAt(anchor.r, anchor.c + 1);
-    }
+    runKeyRules(e as unknown as globalThis.KeyboardEvent, keyRules, ctx);
   }, [
     clearSelectedCells,
     focusCellAt,
