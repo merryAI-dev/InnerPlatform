@@ -298,7 +298,22 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           return;
         }
         const memberRef = doc(db, getOrgDocumentPath(orgId, 'members', authUser.uid));
-        const snap = await getDoc(memberRef);
+        let snap = await getDoc(memberRef);
+        if (!snap.exists() && authUser.email?.endsWith('@mysc.co.kr')) {
+          // @mysc.co.kr 첫 로그인 → PM으로 자동 등록
+          const { setDoc } = await import('firebase/firestore');
+          await setDoc(memberRef, {
+            uid: authUser.uid,
+            email: authUser.email,
+            name: authUser.name || authUser.email.split('@')[0],
+            role: 'pm',
+            tenantId: orgId,
+            projectId: '',
+            projectIds: [],
+            createdAt: new Date().toISOString(),
+          });
+          snap = await getDoc(memberRef);
+        }
         if (!snap.exists()) {
           setPortalUser(null);
           return;
