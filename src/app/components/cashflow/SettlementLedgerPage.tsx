@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import type { ClipboardEvent, KeyboardEvent, MouseEvent } from 'react';
 import { toast } from 'sonner';
 import { detectKeyRuleContext, runKeyRules, type KeyRule } from '../../platform/settlement-grid-keymap';
+import { grid2tsv, parseTsvRows, isSpreadsheetHtml, html2grid } from '../../platform/settlement-grid-clipboard';
 import { BUDGET_CODE_BOOK } from '../../data/budget-data';
 import type { BudgetCodeEntry, Comment, Transaction, TransactionState } from '../../data/types';
 import { findWeekForDate, getMonthMondayWeeks, getYearMondayWeeks, type MonthMondayWeek } from '../../platform/cashflow-weeks';
@@ -1536,11 +1537,10 @@ function ImportEditor({
   }, [commitRows, pushUndoSnapshot, rows]);
 
   const applyPaste = useCallback(
-    (startRow: number, startCol: number, text: string) => {
-      const normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-      let lines = normalized.split('\n');
-      if (lines.length > 1 && lines[lines.length - 1] === '') lines = lines.slice(0, -1);
-      const grid = lines.map((line) => line.split('\t'));
+    (startRow: number, startCol: number, text: string, html?: string) => {
+      const grid = (html && isSpreadsheetHtml(html))
+        ? html2grid(html)
+        : parseTsvRows(text);
       const gridRows = grid.length;
       const gridCols = Math.max(0, ...grid.map((r) => r.length));
 
@@ -1656,8 +1656,9 @@ function ImportEditor({
   }, []);
 
   const handleTablePaste = useCallback((e: ClipboardEvent<HTMLDivElement>) => {
-    const text = e.clipboardData.getData('text');
-    if (!text) return;
+    const text = e.clipboardData.getData('text/plain') || e.clipboardData.getData('text');
+    const html = e.clipboardData.getData('text/html') || undefined;
+    if (!text && !html) return;
     const anchor = selection
       ? {
         r: Math.min(selection.start.r, selection.end.r),
@@ -1668,7 +1669,7 @@ function ImportEditor({
         : null;
     if (!anchor) return;
     e.preventDefault();
-    applyPaste(anchor.r, anchor.c, text);
+    applyPaste(anchor.r, anchor.c, text || '', html);
   }, [applyPaste, selection]);
 
   const handleUndo = useCallback((e: KeyboardEvent<HTMLDivElement>) => {
@@ -1689,7 +1690,7 @@ function ImportEditor({
     const c1 = Math.min(selection.start.c, selection.end.c);
     const c2 = Math.max(selection.start.c, selection.end.c);
     if (r1 < 0 || c1 < 0) return;
-    const lines: string[] = [];
+    const grid: string[][] = [];
     for (let r = r1; r <= r2; r++) {
       const row = rows[r];
       if (!row) continue;
@@ -1698,9 +1699,9 @@ function ImportEditor({
         if (c === noIdx) continue;
         cells.push(String(row.cells[c] ?? ''));
       }
-      lines.push(cells.join('\t'));
+      grid.push(cells);
     }
-    const text = lines.join('\n');
+    const text = grid2tsv(grid);
     if (!text) return;
     e.preventDefault();
     if (navigator?.clipboard?.writeText) {
@@ -1873,7 +1874,8 @@ function ImportEditor({
 
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
-      const text = e.clipboardData?.getData('text') || '';
+      const text = e.clipboardData?.getData('text/plain') || e.clipboardData?.getData('text') || '';
+      const html = e.clipboardData?.getData('text/html') || undefined;
       if (!text) return;
       const anchor = selection
         ? {
@@ -1885,7 +1887,7 @@ function ImportEditor({
           : null;
       if (!anchor) return;
       e.preventDefault();
-      applyPaste(anchor.r, anchor.c, text);
+      applyPaste(anchor.r, anchor.c, text, html);
     };
     window.addEventListener('paste', onPaste);
     return () => window.removeEventListener('paste', onPaste);
