@@ -67,15 +67,13 @@ service cloud.firestore {
     }
 
     function canReadProjectResource(orgId, projectId) {
-      // Internal MYSC rollout mode: once authenticated with a company account,
-      // all project-scoped portal resources are readable without member/project mapping.
-      return isSignedIn();
+      return isSignedIn()
+        && (isPrivileged(orgId) || isProjectAssigned(orgId, projectId));
     }
 
     function canWriteProjectResource(orgId, projectId) {
-      // Internal MYSC rollout mode: allow all signed-in company users to use
-      // project-scoped portal features without per-project assignment.
-      return isSignedIn();
+      return isSignedIn()
+        && (isPrivileged(orgId) || (role(orgId) == 'pm' && isProjectAssigned(orgId, projectId)));
     }
 
     function projectIdFromTransaction(orgId, txId) {
