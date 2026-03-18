@@ -204,7 +204,7 @@ export function LoginPage() {
 
         {/* Footer */}
         <p className="text-center text-[10px] text-muted-foreground/60 mt-6">
-          MYSC(마이에스씨) 사업관리 통합 플랫폼 v1.0
+          MYSC 사업관리통합플랫폼 v1.0
         </p>
       </div>
     </div>
