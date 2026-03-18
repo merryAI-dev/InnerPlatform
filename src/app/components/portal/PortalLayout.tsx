@@ -9,9 +9,10 @@ import {
   BarChart3,
   ClipboardList,
   Loader2,
-  AlertTriangle,
   Settings2,
   FileSpreadsheet,
+  Sparkles,
+  ArrowRight,
 } from 'lucide-react';
 import { PortalProvider, usePortalStore } from '../../data/portal-store';
 import { useAuth } from '../../data/auth-store';
@@ -213,50 +214,62 @@ function PortalContent() {
     return <Outlet />;
   }
 
-  if (!isRegistered || !portalUser) {
+  if (!isRegistered || !portalUser || !myProject) {
     return (
-      <div className="min-h-[60vh] flex items-center justify-center px-6">
-        <div className="max-w-md text-center">
-          <AlertTriangle className="w-10 h-10 mx-auto text-muted-foreground/30 mb-3" />
-          <p className="text-[14px]" style={{ fontWeight: 800 }}>사업이 배정되지 않았습니다</p>
-          <p className="text-[12px] text-muted-foreground mt-1">
-            기존 사업을 선택하거나, 새 사업을 등록할 수 있습니다.
-          </p>
-          <div className="mt-4 flex items-center justify-center gap-2">
-            <Button variant="outline" onClick={() => navigate('/portal/project-settings')}>
-              기존 사업 선택
-            </Button>
-            <Button onClick={() => navigate('/portal/register-project')}>
-              새 사업 등록
-            </Button>
-            <Button variant="ghost" onClick={() => { portalLogout(); authLogout(); navigate('/login'); }}>
-              로그아웃
-            </Button>
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-teal-50/30 dark:from-slate-950 dark:via-slate-900 dark:to-teal-950/20 flex items-center justify-center px-6">
+        <div className="max-w-lg w-full">
+          {/* 환영 헤더 */}
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-teal-500 to-emerald-600 shadow-lg shadow-teal-500/20 mb-4">
+              <Sparkles className="w-7 h-7 text-white" />
+            </div>
+            <h1 className="text-xl font-bold tracking-tight">
+              환영합니다!
+            </h1>
+            <p className="text-sm text-muted-foreground mt-1.5">
+              사업관리를 시작하려면 아래에서 선택해 주세요
+            </p>
           </div>
-        </div>
-      </div>
-    );
-  }
 
-  if (!myProject) {
-    return (
-      <div className="min-h-[60vh] flex items-center justify-center px-6">
-        <div className="max-w-md text-center">
-          <AlertTriangle className="w-10 h-10 mx-auto text-muted-foreground/30 mb-3" />
-          <p className="text-[14px]" style={{ fontWeight: 800 }}>사업 정보를 찾을 수 없습니다</p>
-          <p className="text-[12px] text-muted-foreground mt-1">
-            기존 사업을 선택하거나, 새 사업을 등록할 수 있습니다.
-          </p>
-          <div className="mt-4 flex items-center justify-center gap-2">
-            <Button variant="outline" onClick={() => navigate('/portal/project-settings')}>
-              기존 사업 선택
-            </Button>
-            <Button onClick={() => navigate('/portal/register-project')}>
-              새 사업 등록
-            </Button>
-            <Button variant="ghost" onClick={() => { portalLogout(); authLogout(); navigate('/login'); }}>
-              로그아웃
-            </Button>
+          {/* 선택 카드 */}
+          <div className="grid gap-3">
+            <button
+              onClick={() => navigate('/portal/project-settings')}
+              className="group relative flex items-center gap-4 p-5 rounded-2xl border border-border/60 bg-white/80 dark:bg-slate-800/60 backdrop-blur-sm hover:border-teal-300 hover:shadow-md hover:shadow-teal-500/5 transition-all duration-200 text-left"
+            >
+              <div className="shrink-0 flex items-center justify-center w-11 h-11 rounded-xl bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 group-hover:scale-105 transition-transform">
+                <FolderKanban className="w-5 h-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold">기존 사업 선택</p>
+                <p className="text-xs text-muted-foreground mt-0.5">이미 등록된 사업에서 선택하여 시작합니다</p>
+              </div>
+              <ArrowRight className="w-4 h-4 text-muted-foreground/40 group-hover:text-teal-500 group-hover:translate-x-0.5 transition-all" />
+            </button>
+
+            <button
+              onClick={() => navigate('/portal/register-project')}
+              className="group relative flex items-center gap-4 p-5 rounded-2xl border border-border/60 bg-white/80 dark:bg-slate-800/60 backdrop-blur-sm hover:border-emerald-300 hover:shadow-md hover:shadow-emerald-500/5 transition-all duration-200 text-left"
+            >
+              <div className="shrink-0 flex items-center justify-center w-11 h-11 rounded-xl bg-emerald-50 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400 group-hover:scale-105 transition-transform">
+                <Plus className="w-5 h-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold">새 사업 등록</p>
+                <p className="text-xs text-muted-foreground mt-0.5">새로운 사업을 제안하고 등록을 시작합니다</p>
+              </div>
+              <ArrowRight className="w-4 h-4 text-muted-foreground/40 group-hover:text-emerald-500 group-hover:translate-x-0.5 transition-all" />
+            </button>
+          </div>
+
+          {/* 로그아웃 */}
+          <div className="mt-6 text-center">
+            <button
+              onClick={() => { portalLogout(); authLogout(); navigate('/login'); }}
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              다른 계정으로 로그인
+            </button>
           </div>
         </div>
       </div>
