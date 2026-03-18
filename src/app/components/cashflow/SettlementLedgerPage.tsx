@@ -1727,6 +1727,7 @@ function ImportEditor({
       const target = tableWrapRef.current?.querySelector<HTMLElement>(selector);
       if (!target) return false;
       target.focus();
+      target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
       handleCellFocus(boundedRow, boundedCol);
       return true;
     };
