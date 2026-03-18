@@ -23,3 +23,4 @@ scripts/etl/output/
 # Large binary files
 *.xlsx
 .env.vercel.production
+.gitnexus
