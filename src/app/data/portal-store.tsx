@@ -480,7 +480,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       markReady();
     } else {
       const projectCollection = collection(db, getOrgCollectionPath(orgId, 'projects'));
-      const assignedProjectIds = scopedProjectIds.length > 0 ? scopedProjectIds : [portalUser.projectId];
+      const assignedProjectIds = (scopedProjectIds.length > 0 ? scopedProjectIds : [portalUser.projectId]).filter(Boolean);
       const assignedChunks: string[][] = [];
       for (let i = 0; i < assignedProjectIds.length; i += 10) {
         assignedChunks.push(assignedProjectIds.slice(i, i + 10));
