@@ -1,0 +1,20 @@
+{
+  "orgId": "mysc",
+  "projectIds": [
+    "p1773638600519"
+  ],
+  "memberUids": [
+    "8ocLxUWmBmglNEyNlXCVyfIRFyt1"
+  ],
+  "projectRequestIds": [
+    "pr-1773638600519"
+  ],
+  "includeProjectRequests": true,
+  "includeProjectSubcollections": true,
+  "includeWeeklySubmissionStatus": true,
+  "includeCashflowWeeks": true,
+  "includeComments": true,
+  "includeEvidences": true,
+  "includeAuditLogs": false,
+  "includeContractStorage": true
+}
