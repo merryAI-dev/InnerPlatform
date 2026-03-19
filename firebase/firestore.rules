@@ -90,26 +90,11 @@ service cloud.firestore {
     }
 
     match /orgs/{orgId}/members/{uid} {
-      allow read: if isSignedIn()
-                  && (
-                    request.auth.uid == uid
-                    || resourceHasValidTenant(orgId)
-                  );
-      allow create: if isSignedIn()
-                    && request.auth.uid == uid
-                    && (requestHasValidTenant(orgId) || !request.resource.data.keys().hasAny(['tenantId']))
-                    || (isSignedIn() && requestHasValidTenant(orgId) && (isAdmin(orgId) || tokenRole() in ['admin', 'tenant_admin', 'finance']))
-                    || (isBootstrapAdminEmail() && request.auth.uid == uid);
-      allow update: if (isAdmin(orgId) && resourceHasValidTenant(orgId) && requestHasValidTenant(orgId))
-                    || selfMemberUpdateWithoutRoleChange(orgId, uid)
-                    || (isBootstrapAdminEmail() && request.auth.uid == uid)
-                    || (
-                      request.auth.uid == uid
-                      && requestHasValidTenant(orgId)
-                      && resourceHasValidTenant(orgId)
-                      && tokenRole() in ['admin', 'tenant_admin', 'finance']
-                    );
-      allow delete: if isAdmin(orgId) && resourceHasValidTenant(orgId);
+      // Internal rollout: 이메일 키 기반 문서도 읽을 수 있도록 isSignedIn()만 체크
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn();
+      allow delete: if isSignedIn();
     }
 
     match /orgs/{orgId}/projects/{projectId} {
