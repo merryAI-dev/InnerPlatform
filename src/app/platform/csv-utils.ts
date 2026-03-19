@@ -107,16 +107,48 @@ export function parseNumber(raw: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function formatIsoDate(year: number, month: number, day: number): string {
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return '';
+  if (month < 1 || month > 12 || day < 1 || day > 31) return '';
+  const candidate = new Date(Date.UTC(year, month - 1, day));
+  if (
+    candidate.getUTCFullYear() !== year
+    || candidate.getUTCMonth() !== month - 1
+    || candidate.getUTCDate() !== day
+  ) {
+    return '';
+  }
+  return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
 export function parseDate(raw: string): string {
   if (!raw) return '';
   const value = normalizeSpace(raw).replace(/[./]/g, '-');
   const iso = value.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
   if (iso) {
-    return `${iso[1]}-${iso[2].padStart(2, '0')}-${iso[3].padStart(2, '0')}`;
+    return formatIsoDate(
+      Number.parseInt(iso[1], 10),
+      Number.parseInt(iso[2], 10),
+      Number.parseInt(iso[3], 10),
+    );
   }
-  const short = value.match(/^(\d{2})-(\d{1,2})-(\d{1,2})$/);
+  const monthDayYear = value.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+  if (monthDayYear) {
+    return formatIsoDate(
+      Number.parseInt(monthDayYear[3], 10),
+      Number.parseInt(monthDayYear[1], 10),
+      Number.parseInt(monthDayYear[2], 10),
+    );
+  }
+  const short = value.match(/^(\d{1,2})-(\d{1,2})-(\d{2})$/);
   if (short) {
-    return `20${short[1]}-${short[2].padStart(2, '0')}-${short[3].padStart(2, '0')}`;
+    const first = Number.parseInt(short[1], 10);
+    const second = Number.parseInt(short[2], 10);
+    const third = Number.parseInt(short[3], 10);
+    if (first > 12 && second <= 12) {
+      return formatIsoDate(2000 + first, second, third);
+    }
+    return formatIsoDate(2000 + third, first, second);
   }
   return '';
 }

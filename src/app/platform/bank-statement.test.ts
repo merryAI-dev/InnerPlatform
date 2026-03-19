@@ -5,6 +5,7 @@ import {
   mapBankStatementsToImportRows,
   normalizeBankStatementMatrix,
 } from './bank-statement';
+import { SETTLEMENT_COLUMNS } from './settlement-csv';
 
 describe('bank statement helpers', () => {
   it('detects known bank profiles from headers and file name', () => {
@@ -40,5 +41,33 @@ describe('bank statement helpers', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].cells.some((cell) => cell === 'Masion Viet (프랑스)')).toBe(true);
     expect(rows[0].cells.some((cell) => cell === 'Masion Viet')).toBe(true);
+  });
+
+  it('maps US-style bank export dates without dropping rows', () => {
+    const dateIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '거래일시');
+    const rows = mapBankStatementsToImportRows({
+      columns: ['거래일시', '적요', '출금금액', '입금금액', '잔액'],
+      rows: [
+        {
+          tempId: 'bank-1',
+          cells: ['12/31/25', '23CTS선입금', '', '10,000,000', '10,644,328'],
+        },
+        {
+          tempId: 'bank-2',
+          cells: ['1/4/26', 'W-store스타약국', '31,000', '', '1,435,848'],
+        },
+        {
+          tempId: 'bank-3',
+          cells: ['03/19/2026', '테스트 거래', '12,000', '', '1,423,848'],
+        },
+      ],
+    });
+
+    expect(rows).toHaveLength(3);
+    expect(rows.map((row) => row.cells[dateIdx])).toEqual([
+      '2025-12-31',
+      '2026-01-04',
+      '2026-03-19',
+    ]);
   });
 });
