@@ -5,6 +5,7 @@ import {
   getOrgDocumentPath,
   readFirebaseEmulatorConfig,
   selectFirebaseConfig,
+  shouldEnableFirebaseEmulatorsForLocation,
   type FirebaseConfig,
 } from './firebase';
 
@@ -104,6 +105,39 @@ describe('readFirebaseEmulatorConfig', () => {
       authPort: 9099,
       storagePort: 9199,
     });
+  });
+
+  it('disables emulator usage on hosted origins even when env flags are enabled', () => {
+    expect(readFirebaseEmulatorConfig({
+      VITE_FIREBASE_USE_EMULATORS: 'true',
+      VITE_FIREBASE_USE_FIRESTORE_EMULATOR: 'true',
+      VITE_FIREBASE_USE_AUTH_EMULATOR: 'true',
+      VITE_FIREBASE_USE_STORAGE_EMULATOR: 'true',
+    }, {
+      hostname: 'inner-platform.vercel.app',
+    })).toEqual({
+      enabled: false,
+      host: '127.0.0.1',
+      firestoreEnabled: false,
+      authEnabled: false,
+      storageEnabled: false,
+      firestorePort: 8080,
+      authPort: 9099,
+      storagePort: 9199,
+    });
+  });
+});
+
+describe('shouldEnableFirebaseEmulatorsForLocation', () => {
+  it('allows emulator usage on localhost-style origins', () => {
+    expect(shouldEnableFirebaseEmulatorsForLocation({ hostname: 'localhost' })).toBe(true);
+    expect(shouldEnableFirebaseEmulatorsForLocation({ hostname: '127.0.0.1' })).toBe(true);
+    expect(shouldEnableFirebaseEmulatorsForLocation({ hostname: 'dev.localhost' })).toBe(true);
+  });
+
+  it('blocks emulator usage on hosted origins', () => {
+    expect(shouldEnableFirebaseEmulatorsForLocation({ hostname: 'inner-platform.vercel.app' })).toBe(false);
+    expect(shouldEnableFirebaseEmulatorsForLocation({ hostname: 'example.com' })).toBe(false);
   });
 });
 

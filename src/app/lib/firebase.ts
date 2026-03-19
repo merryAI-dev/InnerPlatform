@@ -33,6 +33,10 @@ export interface FirebaseEmulatorConfig {
   storagePort: number;
 }
 
+interface LocationLike {
+  hostname?: string;
+}
+
 function normalizeString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
@@ -40,6 +44,25 @@ function normalizeString(value: unknown): string {
 function readPort(value: unknown, fallback: number): number {
   const n = Number.parseInt(normalizeString(value), 10);
   return Number.isInteger(n) && n > 0 && n < 65536 ? n : fallback;
+}
+
+function getRuntimeLocation(): LocationLike | undefined {
+  if (typeof window === 'undefined') return undefined;
+  return window.location;
+}
+
+function isLoopbackDevHostname(hostname: string): boolean {
+  const normalized = hostname.trim().toLowerCase();
+  return normalized === 'localhost'
+    || normalized === '127.0.0.1'
+    || normalized === '0.0.0.0'
+    || normalized === '[::1]'
+    || normalized.endsWith('.localhost');
+}
+
+export function shouldEnableFirebaseEmulatorsForLocation(locationLike?: LocationLike): boolean {
+  if (!locationLike?.hostname) return true;
+  return isLoopbackDevHostname(locationLike.hostname);
 }
 
 export function readFirebaseConfigFromEnv(
@@ -110,17 +133,22 @@ export function getDefaultOrgId(env: Record<string, unknown> = import.meta.env):
 
 export function readFirebaseEmulatorConfig(
   env: Record<string, unknown> = import.meta.env,
+  locationLike: LocationLike | undefined = getRuntimeLocation(),
 ): FirebaseEmulatorConfig {
+  const runtimeAllowsEmulators = shouldEnableFirebaseEmulatorsForLocation(locationLike);
   const enabled = parseFeatureFlag(env.VITE_FIREBASE_USE_EMULATORS, false);
   const firestoreEnabled = parseFeatureFlag(env.VITE_FIREBASE_USE_FIRESTORE_EMULATOR, enabled);
   const authEnabled = parseFeatureFlag(env.VITE_FIREBASE_USE_AUTH_EMULATOR, enabled);
   const storageEnabled = parseFeatureFlag(env.VITE_FIREBASE_USE_STORAGE_EMULATOR, enabled);
+  const effectiveFirestoreEnabled = runtimeAllowsEmulators && firestoreEnabled;
+  const effectiveAuthEnabled = runtimeAllowsEmulators && authEnabled;
+  const effectiveStorageEnabled = runtimeAllowsEmulators && storageEnabled;
   return {
-    enabled: firestoreEnabled || authEnabled || storageEnabled,
+    enabled: effectiveFirestoreEnabled || effectiveAuthEnabled || effectiveStorageEnabled,
     host: normalizeString(env.VITE_FIREBASE_EMULATOR_HOST) || '127.0.0.1',
-    firestoreEnabled,
-    authEnabled,
-    storageEnabled,
+    firestoreEnabled: effectiveFirestoreEnabled,
+    authEnabled: effectiveAuthEnabled,
+    storageEnabled: effectiveStorageEnabled,
     firestorePort: readPort(env.VITE_FIRESTORE_EMULATOR_PORT, 8080),
     authPort: readPort(env.VITE_FIREBASE_AUTH_EMULATOR_PORT, 9099),
     storagePort: readPort(env.VITE_FIREBASE_STORAGE_EMULATOR_PORT, 9199),
