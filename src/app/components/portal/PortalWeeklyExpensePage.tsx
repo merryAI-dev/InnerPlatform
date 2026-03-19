@@ -33,6 +33,7 @@ import {
   GoogleDriveBrowserUploadError,
   uploadFileToGoogleDriveFolder,
 } from '../../platform/google-drive-browser-upload';
+import { shouldFallbackToBffOnBrowserUploadError } from '../../platform/evidence-drive-upload';
 import { splitLooseNameList } from '../../platform/name-list';
 import { type ImportRow } from '../../platform/settlement-csv';
 import { readDevAuthHarnessConfig } from '../../platform/dev-harness';
@@ -402,28 +403,37 @@ export function PortalWeeklyExpensePage() {
 
       let usedBrowserUpload = false;
       let lastResult: UploadTransactionEvidenceDriveResult | null = null;
+      let browserFallbackUsed = false;
 
       for (const upload of uploads) {
         if (googleAccessToken) {
-          await uploadFileToGoogleDriveFolder({
-            accessToken: googleAccessToken,
-            folderId,
-            file: upload.file,
-            fileName: upload.reviewedFileName,
-            mimeType: upload.file.type || 'application/octet-stream',
-            appProperties: {
-              managedBy: 'mysc-platform',
-              tenantId: orgId,
-              projectId,
-              transactionId: tx.id,
-              evidenceSource: 'platform-upload',
-              originalFileName: upload.file.name,
-              category: upload.category,
-              sharedDriveId,
-            },
-          });
-          usedBrowserUpload = true;
-          continue;
+          try {
+            await uploadFileToGoogleDriveFolder({
+              accessToken: googleAccessToken,
+              folderId,
+              file: upload.file,
+              fileName: upload.reviewedFileName,
+              mimeType: upload.file.type || 'application/octet-stream',
+              appProperties: {
+                managedBy: 'mysc-platform',
+                tenantId: orgId,
+                projectId,
+                transactionId: tx.id,
+                evidenceSource: 'platform-upload',
+                originalFileName: upload.file.name,
+                category: upload.category,
+                sharedDriveId,
+              },
+            });
+            usedBrowserUpload = true;
+            continue;
+          } catch (error) {
+            if (!shouldFallbackToBffOnBrowserUploadError(error)) {
+              throw error;
+            }
+            browserFallbackUsed = true;
+            console.warn('[PortalWeeklyExpensePage] Browser Drive upload failed; falling back to BFF upload:', error);
+          }
         }
 
         const contentBase64 = await readFileAsBase64(upload.file);
@@ -460,9 +470,16 @@ export function PortalWeeklyExpensePage() {
         const uploadLabel = uploads.length === 1
           ? uploads[0]?.reviewedFileName || uploads[0]?.file.name || '파일 1건'
           : `${uploads[0]?.reviewedFileName || uploads[0]?.file.name || '파일'} 외 ${uploads.length - 1}건`;
-        toast.success(`업로드 완료 후 동기화됨: ${uploadLabel}`);
+        toast.success(
+          browserFallbackUsed
+            ? `업로드 완료: 일부 파일은 서버 경유로 처리됨 (${uploadLabel})`
+            : `업로드 완료 후 동기화됨: ${uploadLabel}`,
+        );
       } else if (lastResult) {
         applySyncedEvidenceState(tx.id, lastResult);
+        if (browserFallbackUsed) {
+          toast.success('브라우저 업로드 권한이 없어 서버 경유 업로드로 전환했습니다.');
+        }
       }
     } catch (error) {
       handleEvidenceDriveError(error, '증빙 업로드');
