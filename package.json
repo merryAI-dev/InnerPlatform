@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
+    "deploy:prod:safe": "node scripts/assert-safe-local-deploy.mjs && vercel deploy --prod",
     "dev": "vite",
     "test": "vitest run",
     "test:watch": "vitest",

@@ -52,6 +52,7 @@ import { useFirebase } from '../lib/firebase-context';
 import { getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
 import { duplicateExpenseSetAsDraft, withExpenseItems } from './portal-store.helpers';
 import { buildPortalProfilePatch, readMemberWorkspace, resolveMemberProjectAccessState } from './member-workspace';
+import { buildLegacyMemberDocId, mergeMemberRecordSources } from './member-documents';
 import { toast } from 'sonner';
 import { includesProject, normalizeProjectIds, resolvePrimaryProjectId } from './project-assignment';
 import { canEnterPortalWorkspace } from '../platform/navigation';
@@ -104,7 +105,6 @@ interface PortalActions {
     user: Omit<PortalUser, 'id' | 'registeredAt' | 'projectId' | 'projectIds'> & {
       projectId?: string;
       projectIds?: string[];
-      allowEmptyProject?: boolean;
     },
   ) => Promise<boolean>;
   setActiveProject: (projectId: string) => Promise<boolean>;
@@ -216,6 +216,48 @@ function normalizePortalUser(candidate: Partial<PortalUser> | null | undefined):
   };
 }
 
+type StoredPortalMember = Partial<PortalUser> & {
+  projectIds?: Array<string | { id?: string; name?: string }>;
+  projectId?: string | { id?: string; name?: string };
+  role?: string;
+  status?: string;
+  createdAt?: string;
+};
+
+function getPortalMemberRefs(
+  db: Parameters<typeof doc>[0],
+  orgId: string,
+  identity: { uid: string; email?: string },
+) {
+  const canonicalRef = doc(db, getOrgDocumentPath(orgId, 'members', identity.uid));
+  const legacyMemberId = buildLegacyMemberDocId(identity.email || '');
+  const legacyRef = legacyMemberId && legacyMemberId !== identity.uid
+    ? doc(db, getOrgDocumentPath(orgId, 'members', legacyMemberId))
+    : null;
+  return { canonicalRef, legacyRef };
+}
+
+async function loadPortalMemberRecord(
+  db: Parameters<typeof doc>[0],
+  orgId: string,
+  identity: { uid: string; email?: string },
+) {
+  const { canonicalRef, legacyRef } = getPortalMemberRefs(db, orgId, identity);
+  const [canonicalSnap, legacySnap] = await Promise.all([
+    getDoc(canonicalRef),
+    legacyRef ? getDoc(legacyRef) : Promise.resolve(null),
+  ]);
+
+  return {
+    canonicalRef,
+    usedLegacyFallback: !canonicalSnap.exists() && Boolean(legacySnap?.exists()),
+    member: mergeMemberRecordSources(
+      canonicalSnap.exists() ? (canonicalSnap.data() as Record<string, unknown>) : undefined,
+      legacySnap?.exists() ? (legacySnap.data() as Record<string, unknown>) : undefined,
+    ) as StoredPortalMember | undefined,
+  };
+}
+
 export function PortalProvider({ children }: { children: ReactNode }) {
   const { isAuthenticated, isLoading: authLoading, user: authUser } = useAuth();
   const { db, isOnline, orgId } = useFirebase();
@@ -298,19 +340,16 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           setPortalUser(null);
           return;
         }
-        const emailKey = (authUser.email || '').replace(/[@.]/g, '_');
-        const memberRef = doc(db, getOrgDocumentPath(orgId, 'members', emailKey));
-        const snap = await getDoc(memberRef);
-        if (!snap.exists()) {
+        const { canonicalRef, member, usedLegacyFallback } = await loadPortalMemberRecord(db, orgId, authUser);
+        if (!member) {
           setPortalUser(null);
           return;
         }
-        const member = snap.data() as Partial<PortalUser> & {
-          projectIds?: Array<string | { id?: string; name?: string }>;
-          projectId?: string | { id?: string; name?: string };
-        };
         const workspace = readMemberWorkspace(member);
         const access = resolveMemberProjectAccessState(member);
+        const memberRole = typeof member.role === 'string' && member.role.trim()
+          ? member.role.trim().toLowerCase()
+          : (authUser.role || 'pm').toLowerCase();
         const nameMap: Record<string, string> = {};
         const rawIds = Array.isArray(member.projectIds) ? member.projectIds : [];
         const coercedIds = rawIds
@@ -335,28 +374,42 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           id: authUser.uid,
           name: member.name || authUser.name,
           email: member.email || authUser.email,
-          role: authUser.role,
+          role: memberRole,
           projectId: normalizedPreferred,
           projectIds: normalizeProjectIds([
             ...(workspace.portalProfile?.projectIds || []),
             ...coercedIds,
           ]),
           projectNames: Object.keys(nameMap).length ? nameMap : undefined,
-          registeredAt: member.registeredAt || authUser.registeredAt || new Date().toISOString(),
+          registeredAt: member.createdAt || authUser.registeredAt || new Date().toISOString(),
         });
         if (!normalized) {
           setPortalUser(null);
           return;
         }
-        // Normalize member projectIds to string array for security rules (one-time fix)
         try {
-          if (access.needsRootSync) {
-            await updateDoc(doc(db, getOrgDocumentPath(orgId, 'members', (authUser.email || '').replace(/[@.]/g, '_'))), {
-              projectId: normalized.projectId,
-              projectIds: normalized.projectIds,
+          if (access.needsRootSync || usedLegacyFallback) {
+            const now = new Date().toISOString();
+            await setDoc(canonicalRef, {
+              uid: authUser.uid,
+              name: normalized.name,
+              email: normalized.email,
+              role: memberRole,
               tenantId: orgId,
-              updatedAt: new Date().toISOString(),
-            });
+              status: typeof member.status === 'string' && member.status.trim() ? member.status : 'ACTIVE',
+              ...(access.projectNames ? { projectNames: access.projectNames } : {}),
+              ...buildPortalProfilePatch({
+                projectId: normalized.projectId,
+                projectIds: normalized.projectIds,
+                projectNames: normalized.projectNames,
+                updatedAt: now,
+                updatedByUid: authUser.uid,
+                updatedByName: authUser.name || normalized.name,
+              }),
+              updatedAt: now,
+              createdAt: member.createdAt || authUser.registeredAt || now,
+              lastLoginAt: now,
+            }, { merge: true });
           }
         } catch (err) {
           console.error('[PortalStore] member projectIds normalize failed:', err);
@@ -1331,7 +1384,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       ...(portalUser?.projectNames || {}),
       [projectId]: payload.name,
     };
-    await setDoc(doc(db, getOrgDocumentPath(orgId, 'members', (authUser.email || '').replace(/[@.]/g, '_'))), {
+    await setDoc(doc(db, getOrgDocumentPath(orgId, 'members', authUser.uid)), {
       uid: authUser.uid,
       name: authUser.name || portalUser?.name || '사용자',
       email: authUser.email || portalUser?.email || '',
@@ -1452,7 +1505,6 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     user: Omit<PortalUser, 'id' | 'registeredAt' | 'projectId' | 'projectIds'> & {
       projectId?: string;
       projectIds?: string[];
-      allowEmptyProject?: boolean;
     },
   ): Promise<boolean> => {
     if (isDevHarnessUser) {
@@ -1462,30 +1514,18 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         user.projectId,
       ]);
       const primaryProjectId = resolvePrimaryProjectId(normalizedProjectIds, user.projectId);
-      const allowEmpty = Boolean(user.allowEmptyProject);
-      if (!primaryProjectId && !allowEmpty) {
+      if (!primaryProjectId) {
         toast.error('최소 1개 이상의 사업을 선택해 주세요.');
         return false;
       }
-      const candidate = allowEmpty && !primaryProjectId
-        ? {
-          id: authUser?.uid || `pu-${Date.now()}`,
-          name: user.name || '사용자',
-          email: user.email || '',
-          role: (authUser?.role || user.role || 'pm').toLowerCase(),
-          projectId: '',
-          projectIds: [],
-          projectNames: portalUser?.projectNames,
-          registeredAt: now,
-        }
-        : normalizePortalUser({
-          ...user,
-          id: authUser?.uid || `pu-${Date.now()}`,
-          role: (authUser?.role || user.role || 'pm').toLowerCase(),
-          projectId: primaryProjectId,
-          projectIds: normalizedProjectIds,
-          registeredAt: now,
-        });
+      const candidate = normalizePortalUser({
+        ...user,
+        id: authUser?.uid || `pu-${Date.now()}`,
+        role: (authUser?.role || user.role || 'pm').toLowerCase(),
+        projectId: primaryProjectId,
+        projectIds: normalizedProjectIds,
+        registeredAt: now,
+      });
       if (!candidate) {
         toast.error('사업 정보를 저장하지 못했습니다.');
         return false;
@@ -1504,31 +1544,19 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       user.projectId,
     ]);
     const primaryProjectId = resolvePrimaryProjectId(normalizedProjectIds, user.projectId);
-    const allowEmpty = Boolean(user.allowEmptyProject);
-    if (!primaryProjectId && !allowEmpty) {
+    if (!primaryProjectId) {
       toast.error('최소 1개 이상의 사업을 선택해 주세요.');
       return false;
     }
 
-    const candidate = allowEmpty && !primaryProjectId
-      ? {
-        id: authUser?.uid || `pu-${Date.now()}`,
-        name: user.name || '사용자',
-        email: user.email || '',
-        role: (authUser?.role || user.role || 'pm').toLowerCase(),
-        projectId: '',
-        projectIds: [],
-        projectNames: portalUser?.projectNames,
-        registeredAt: now,
-      }
-      : normalizePortalUser({
-        ...user,
-        id: authUser?.uid || `pu-${Date.now()}`,
-        role: (authUser?.role || user.role || 'pm').toLowerCase(),
-        projectId: primaryProjectId,
-        projectIds: normalizedProjectIds,
-        registeredAt: now,
-      });
+    const candidate = normalizePortalUser({
+      ...user,
+      id: authUser?.uid || `pu-${Date.now()}`,
+      role: (authUser?.role || user.role || 'pm').toLowerCase(),
+      projectId: primaryProjectId,
+      projectIds: normalizedProjectIds,
+      registeredAt: now,
+    });
 
     if (!candidate) {
       toast.error('사업 정보를 저장하지 못했습니다.');
@@ -1539,24 +1567,17 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       setIsMemberLoading(true);
       let memberRole = (authUser.role || user.role || 'pm').toLowerCase();
       try {
-        const memberSnap = await getDoc(doc(db, getOrgDocumentPath(orgId, 'members', (authUser.email || '').replace(/[@.]/g, '_'))));
-        if (memberSnap.exists()) {
-          const existingRole = (memberSnap.data() as { role?: string }).role;
-          if (typeof existingRole === 'string' && existingRole.trim()) {
-            memberRole = existingRole.trim().toLowerCase();
-          }
+        const { canonicalRef, member } = await loadPortalMemberRecord(db, orgId, authUser);
+        if (typeof member?.role === 'string' && member.role.trim()) {
+          memberRole = member.role.trim().toLowerCase();
         }
-      } catch (err) {
-        // If role lookup fails, fall back to current auth role
-      }
-      try {
-        await setDoc(doc(db, getOrgDocumentPath(orgId, 'members', (authUser.email || '').replace(/[@.]/g, '_'))), {
+        await setDoc(canonicalRef, {
           uid: authUser.uid,
           name: candidate.name,
           email: candidate.email,
           role: memberRole,
           tenantId: orgId,
-          status: 'ACTIVE',
+          status: typeof member?.status === 'string' && member.status.trim() ? member.status : 'ACTIVE',
           ...buildPortalProfilePatch({
             projectId: candidate.projectId,
             projectIds: candidate.projectIds,
@@ -1566,7 +1587,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
             updatedByName: authUser.name || candidate.name,
           }),
           updatedAt: now,
-          createdAt: authUser.registeredAt || now,
+          createdAt: member?.createdAt || authUser.registeredAt || now,
           lastLoginAt: now,
         }, { merge: true });
         setPortalUser(candidate.role !== memberRole ? { ...candidate, role: memberRole } : candidate);
@@ -1629,8 +1650,16 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       setIsMemberLoading(true);
       try {
         const now = new Date().toISOString();
-        await updateDoc(doc(db, getOrgDocumentPath(orgId, 'members', (authUser.email || '').replace(/[@.]/g, '_'))), {
+        const { canonicalRef, member } = await loadPortalMemberRecord(db, orgId, authUser);
+        await setDoc(canonicalRef, {
+          uid: authUser.uid,
+          name: authUser.name || nextUser.name,
+          email: authUser.email || nextUser.email,
+          role: typeof member?.role === 'string' && member.role.trim()
+            ? member.role.trim().toLowerCase()
+            : nextUser.role,
           tenantId: orgId,
+          status: typeof member?.status === 'string' && member.status.trim() ? member.status : 'ACTIVE',
           ...buildPortalProfilePatch({
             projectId: target,
             projectIds: nextUser.projectIds,
@@ -1640,7 +1669,9 @@ export function PortalProvider({ children }: { children: ReactNode }) {
             updatedByName: authUser.name || nextUser.name,
           }),
           updatedAt: now,
-        });
+          createdAt: member?.createdAt || authUser.registeredAt || now,
+          lastLoginAt: now,
+        }, { merge: true });
         setPortalUser(nextUser);
       } catch (err) {
         console.error('[PortalStore] setActiveProject member sync error:', err);

@@ -50,6 +50,14 @@ function saveOrgId(orgId: string): void {
   }
 }
 
+function resolveEnvScopedOrgId(): string {
+  return resolveTenantId({
+    envTenantId: getDefaultOrgId(),
+    defaultTenantId: 'mysc',
+    strict: featureFlags.tenantIsolationStrict,
+  });
+}
+
 const _g = globalThis as any;
 if (!_g.__MYSC_FB_CTX__) {
   _g.__MYSC_FB_CTX__ = createContext<FirebaseContextValue | null>(null);
@@ -57,6 +65,8 @@ if (!_g.__MYSC_FB_CTX__) {
 const FirebaseContext: React.Context<FirebaseContextValue | null> = _g.__MYSC_FB_CTX__;
 
 export function FirebaseProvider({ children }: { children: ReactNode }) {
+  const envConfig = readFirebaseConfigFromEnv();
+  const isUsingEnvConfig = !!envConfig;
   const [status, setStatus] = useState<FirebaseConnectionStatus>('disconnected');
   const [db, setDb] = useState<Firestore | null>(null);
   const [auth, setAuth] = useState<Auth | null>(null);
@@ -64,17 +74,24 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [manualDisconnected, setManualDisconnected] = useState(false);
   const [orgId, setOrgIdState] = useState(() => resolveTenantId({
-    savedTenantId: getSavedOrgId(),
+    savedTenantId: isUsingEnvConfig ? '' : getSavedOrgId(),
     envTenantId: getDefaultOrgId(),
     strict: featureFlags.tenantIsolationStrict,
   }));
-  const isUsingEnvConfig = !!readFirebaseConfigFromEnv();
+
+  useEffect(() => {
+    if (!isUsingEnvConfig) return;
+    clearConfig();
+    const forcedOrgId = resolveEnvScopedOrgId();
+    saveOrgId(forcedOrgId);
+    setOrgIdState((prev) => (prev === forcedOrgId ? prev : forcedOrgId));
+  }, [isUsingEnvConfig]);
 
   useEffect(() => {
     function applyTenantFromEvent(rawTenantId: unknown) {
       try {
         const nextTenantId = resolveTenantId({
-          savedTenantId: rawTenantId,
+          savedTenantId: isUsingEnvConfig ? '' : rawTenantId,
           envTenantId: getDefaultOrgId(),
           strict: featureFlags.tenantIsolationStrict,
         });
@@ -100,7 +117,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       window.removeEventListener('storage', onStorage);
       window.removeEventListener('mysc:tenant-changed', onTenantChanged);
     };
-  }, []);
+  }, [isUsingEnvConfig]);
 
   useEffect(() => {
     if (manualDisconnected) return;

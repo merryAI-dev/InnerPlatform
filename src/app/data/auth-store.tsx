@@ -27,6 +27,7 @@ import {
   type RoleDirectoryEntry,
 } from './auth-helpers';
 import { isBootstrapAdminEmail } from './auth-bootstrap';
+import { buildLegacyMemberDocId, mergeMemberRecordSources } from './member-documents';
 import { normalizeProjectIds, resolvePrimaryProjectId } from './project-assignment';
 import {
   buildWorkspacePreferencePatch,
@@ -290,12 +291,22 @@ async function upsertMemberFromFirebase(
   const db = getDb();
   if (!db) return undefined;
 
+  const normalizedEmail = normalizeEmail(firebaseUser.email || '');
   const memberPath = getOrgDocumentPath(tenantId, 'members', firebaseUser.uid);
   const memberRef = doc(db, memberPath);
-  const snap = await getDoc(memberRef);
-  const existing = snap.exists() ? (snap.data() as MemberDoc) : undefined;
+  const legacyMemberId = buildLegacyMemberDocId(normalizedEmail);
+  const legacyMemberRef = legacyMemberId && legacyMemberId !== firebaseUser.uid
+    ? doc(db, getOrgDocumentPath(tenantId, 'members', legacyMemberId))
+    : null;
+  const [memberSnap, legacySnap] = await Promise.all([
+    getDoc(memberRef),
+    legacyMemberRef ? getDoc(legacyMemberRef) : Promise.resolve(null),
+  ]);
+  const existing = mergeMemberRecordSources(
+    memberSnap.exists() ? (memberSnap.data() as Record<string, unknown>) : undefined,
+    legacySnap?.exists() ? (legacySnap.data() as Record<string, unknown>) : undefined,
+  ) as Partial<MemberDoc> | undefined;
   const now = new Date().toISOString();
-  const normalizedEmail = normalizeEmail(firebaseUser.email || existing?.email || '');
   const bootstrapAdmin = isBootstrapAdminEmail(normalizedEmail);
   const access = resolveMemberProjectAccessState(existing);
   const mergedProjectIds = normalizeProjectIds([

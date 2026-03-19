@@ -131,21 +131,8 @@ export function PortalProjectSettings() {
     }
 
     const normalized = normalizeProjectIds(projectIds);
-    // NOTE: 테스트용으로 사업 선택 필수 조건을 일시적으로 해제
     if (normalized.length === 0) {
-      setSaving(true);
-      const ok = await register({
-        name: authUser.name,
-        email: authUser.email,
-        role: authUser.role || 'pm',
-        projectId: '',
-        projectIds: [],
-        allowEmptyProject: true,
-      });
-      setSaving(false);
-      if (!ok) {
-        setError('저장에 실패했습니다. 잠시 후 다시 시도해 주세요.');
-      }
+      setError('최소 1개 이상의 사업을 선택해 주세요.');
       return;
     }
 
@@ -461,7 +448,7 @@ export function PortalProjectSettings() {
               <Button
                 className="h-9 text-[12px]"
                 onClick={handleSave}
-                disabled={saving || allProjects.length === 0}
+                disabled={saving || allProjects.length === 0 || projectIds.length === 0}
               >
                 {saving ? '저장 중...' : `선택 저장${primaryProject ? ` · ${primaryProject.name}` : ''}`}
               </Button>

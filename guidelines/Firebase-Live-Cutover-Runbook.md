@@ -6,11 +6,11 @@
 
 이 프로젝트는 이미 Firebase 런타임 연결과 rules/indexes 배포가 env 기반으로 분리돼 있다.
 
-- Firebase 클라이언트 연결: [src/app/lib/firebase.ts](/Users/boram/InnerPlatform-ft-izzie-latest/src/app/lib/firebase.ts)
-- Firestore rules: [firebase/firestore.rules](/Users/boram/InnerPlatform-ft-izzie-latest/firebase/firestore.rules)
-- Firestore indexes: [firebase/firestore.indexes.json](/Users/boram/InnerPlatform-ft-izzie-latest/firebase/firestore.indexes.json)
-- 자동 세팅: [scripts/firebase_autosetup.sh](/Users/boram/InnerPlatform-ft-izzie-latest/scripts/firebase_autosetup.sh)
-- 선별 이관 스크립트: [scripts/firestore_live_cutover.ts](/Users/boram/InnerPlatform-ft-izzie-latest/scripts/firestore_live_cutover.ts)
+- Firebase 클라이언트 연결: [src/app/lib/firebase.ts](/Users/boram/InnerPlatform/src/app/lib/firebase.ts)
+- Firestore rules: [firebase/firestore.rules](/Users/boram/InnerPlatform/firebase/firestore.rules)
+- Firestore indexes: [firebase/firestore.indexes.json](/Users/boram/InnerPlatform/firebase/firestore.indexes.json)
+- 자동 세팅: [scripts/firebase_autosetup.sh](/Users/boram/InnerPlatform/scripts/firebase_autosetup.sh)
+- 선별 이관 스크립트: [scripts/firestore_live_cutover.ts](/Users/boram/InnerPlatform/scripts/firestore_live_cutover.ts)
 
 ## 권장 전략
 
@@ -102,7 +102,7 @@ npx tsx scripts/firestore_live_cutover.ts discover \
 
 샘플:
 
-- [scripts/firestore_live_cutover.manifest.sample.json](/Users/boram/InnerPlatform-ft-izzie-latest/scripts/firestore_live_cutover.manifest.sample.json)
+- [scripts/firestore_live_cutover.manifest.sample.json](/Users/boram/InnerPlatform/scripts/firestore_live_cutover.manifest.sample.json)
 
 핵심 필드:
 
