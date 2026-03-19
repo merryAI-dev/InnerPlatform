@@ -5,6 +5,7 @@ export const PROJECT_DEPARTMENT_OPTIONS = [
   'CIC3',
   'CIC4',
   '글로벌센터',
+  '개발협력센터',
   '조인트액션',
   'CI그룹',
   'AXR팀',
