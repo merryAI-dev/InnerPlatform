@@ -353,7 +353,7 @@ export function PortalWeeklyExpensePage() {
         transactionId: tx.id,
       });
       applySyncedEvidenceState(tx.id, result);
-      toast.success(`증빙 동기화 완료: ${result.evidenceCount}건`);
+      toast.success(`증빙 동기화 완료: Drive 폴더 파일 ${result.evidenceCount}건 반영`);
     } catch (error) {
       handleEvidenceDriveError(error, '증빙 동기화');
       throw error;
@@ -403,8 +403,6 @@ export function PortalWeeklyExpensePage() {
 
       let usedBrowserUpload = false;
       let lastResult: UploadTransactionEvidenceDriveResult | null = null;
-      let browserFallbackUsed = false;
-
       for (const upload of uploads) {
         if (googleAccessToken) {
           try {
@@ -431,7 +429,6 @@ export function PortalWeeklyExpensePage() {
             if (!shouldFallbackToBffOnBrowserUploadError(error)) {
               throw error;
             }
-            browserFallbackUsed = true;
             console.warn('[PortalWeeklyExpensePage] Browser Drive upload failed; falling back to BFF upload:', error);
           }
         }
@@ -470,16 +467,9 @@ export function PortalWeeklyExpensePage() {
         const uploadLabel = uploads.length === 1
           ? uploads[0]?.reviewedFileName || uploads[0]?.file.name || '파일 1건'
           : `${uploads[0]?.reviewedFileName || uploads[0]?.file.name || '파일'} 외 ${uploads.length - 1}건`;
-        toast.success(
-          browserFallbackUsed
-            ? `업로드 완료: 일부 파일은 서버 경유로 처리됨 (${uploadLabel})`
-            : `업로드 완료 후 동기화됨: ${uploadLabel}`,
-        );
+        toast.success(`업로드 완료 후 동기화됨: ${uploadLabel}`);
       } else if (lastResult) {
         applySyncedEvidenceState(tx.id, lastResult);
-        if (browserFallbackUsed) {
-          toast.success('브라우저 업로드 권한이 없어 서버 경유 업로드로 전환했습니다.');
-        }
       }
     } catch (error) {
       handleEvidenceDriveError(error, '증빙 업로드');

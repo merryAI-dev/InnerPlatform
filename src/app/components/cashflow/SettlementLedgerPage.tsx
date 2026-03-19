@@ -3072,7 +3072,7 @@ function ImportEditorRow({
                       size="sm"
                       className="h-5 px-1.5 text-[9px]"
                       disabled={driveAction !== '' || !canUseDrive || !onSyncEvidenceDriveById}
-                      title={hasSourceTransaction ? 'Drive 파일목록 동기화' : '필요한 값을 확인한 뒤 실제 거래로 저장하고 계속합니다'}
+                      title={hasSourceTransaction ? 'Drive 폴더 파일을 다시 읽어 완료 목록에 반영' : '필요한 값을 확인한 뒤 실제 거래로 저장하고 계속합니다'}
                       onClick={() => {
                         void runDriveAction('sync', onSyncEvidenceDriveById);
                       }}
@@ -3088,7 +3088,7 @@ function ImportEditorRow({
                         }`}
                         title={persistedTransaction?.evidenceDriveSyncStatus === 'UPLOADED'
                           ? '업로드는 완료됐고 목록 반영은 동기화 버튼에서 진행됩니다.'
-                          : 'Drive와 목록이 동기화된 상태입니다.'}
+                          : 'Drive 폴더 파일 기준 완료 목록이 반영된 상태입니다.'}
                       >
                         {persistedDriveStatusLabel}
                       </span>
@@ -3103,7 +3103,7 @@ function ImportEditorRow({
                     onFocus={() => onCellFocus(rowIdx, colIdx)}
                     onPaste={(e) => handlePaste(colIdx, e)}
                     onChange={(e) => onCellChange(colIdx, e.target.value)}
-                    placeholder={hasSourceTransaction ? '생성 후 Drive 폴더 링크가 표시됩니다.' : '행 저장 후 Drive 사용 가능'}
+                    placeholder={hasSourceTransaction ? '' : '행 저장 후 Drive 사용 가능'}
                   />
                 </div>
               ) : (

@@ -281,7 +281,7 @@ export function SettlementTransactionRow({
               e.stopPropagation();
               void runDriveAction('sync', onSyncEvidenceDrive);
             }}
-            title="Drive 폴더 파일 동기화"
+            title="Drive 폴더 파일을 다시 읽어 완료 목록에 반영"
           >
             {driveAction === 'sync' ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
             동기화
@@ -293,7 +293,7 @@ export function SettlementTransactionRow({
                   ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
                   : 'border-sky-200 bg-sky-50 text-sky-700'
               }`}
-              title={tx.evidenceDriveSyncStatus === 'UPLOADED' ? '업로드는 완료됐고 목록 반영은 동기화 버튼에서 진행됩니다.' : 'Drive와 목록이 동기화된 상태입니다.'}
+              title={tx.evidenceDriveSyncStatus === 'UPLOADED' ? '업로드는 완료됐고 목록 반영은 동기화 버튼에서 진행됩니다.' : 'Drive 폴더 파일 기준 완료 목록이 반영된 상태입니다.'}
             >
               {driveStatusLabel}
             </span>
@@ -303,7 +303,7 @@ export function SettlementTransactionRow({
             type="text"
             defaultValue={tx.evidenceDriveLink || ''}
             disabled={locked}
-            placeholder={`Drive URL · ${suggestedFolderName}`}
+            placeholder=""
             title={`권장 폴더명: ${suggestedFolderName}`}
             className={`flex-1 bg-transparent outline-none text-[11px] px-1 py-0.5 min-w-[60px] ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
             onBlur={(e) => {
