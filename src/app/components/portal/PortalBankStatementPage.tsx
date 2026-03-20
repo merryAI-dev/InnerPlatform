@@ -14,6 +14,29 @@ import {
 } from '../../platform/bank-statement';
 import { normalizeKey, parseCsv, parseNumber } from '../../platform/csv-utils';
 
+function getAmountColumnIndexes(columns: string[]): Set<number> {
+  return new Set(
+    columns.map((col, idx) => ({ col, idx }))
+      .filter(({ col }) => {
+        const key = normalizeKey(col);
+        return key.includes(normalizeKey('입금')) || key.includes(normalizeKey('출금')) || key.includes(normalizeKey('잔액'));
+      })
+      .map(({ idx }) => idx),
+  );
+}
+
+function formatBankStatementRows(
+  rows: BankStatementRow[],
+  columns: string[],
+  formatAmount: (value: string) => string,
+): BankStatementRow[] {
+  const amountColIdxs = getAmountColumnIndexes(columns);
+  return rows.map((row) => ({
+    ...row,
+    cells: row.cells.map((cell, idx) => (amountColIdxs.has(idx) ? formatAmount(cell) : cell)),
+  }));
+}
+
 export function PortalBankStatementPage() {
   const navigate = useNavigate();
   const { portalUser, myProject, bankStatementRows, saveBankStatementRows } = usePortalStore();
@@ -30,16 +53,7 @@ export function PortalBankStatementPage() {
   const role = String(portalUser?.role || 'pm').toLowerCase();
   const isFinanceView = role === 'admin' || role === 'tenant_admin' || role === 'finance' || role === 'auditor';
   const bankProfile = useMemo(() => detectBankStatementProfile(columns, lastUploadedName), [columns, lastUploadedName]);
-  const amountColIdxs = useMemo(() => {
-    return new Set(
-      columns.map((col, idx) => ({ col, idx }))
-        .filter(({ col }) => {
-          const key = normalizeKey(col);
-          return key.includes(normalizeKey('입금')) || key.includes(normalizeKey('출금')) || key.includes(normalizeKey('잔액'));
-        })
-        .map(({ idx }) => idx),
-    );
-  }, [columns]);
+  const amountColIdxs = useMemo(() => getAmountColumnIndexes(columns), [columns]);
 
   const formatAmount = useCallback((value: string) => {
     const trimmed = value.trim();
@@ -49,21 +63,17 @@ export function PortalBankStatementPage() {
     return num.toLocaleString('ko-KR');
   }, []);
 
-  const formatAmountRow = useCallback((row: BankStatementRow) => {
-    const cells = row.cells.map((cell, idx) => (amountColIdxs.has(idx) ? formatAmount(cell) : cell));
-    return { ...row, cells };
-  }, [amountColIdxs, formatAmount]);
-
   useEffect(() => {
     if (dirty) return;
     if (bankStatementRows?.rows && bankStatementRows.rows.length > 0) {
-      setColumns(bankStatementRows.columns || []);
-      setRows(bankStatementRows.rows.map(formatAmountRow));
+      const nextColumns = bankStatementRows.columns || [];
+      setColumns(nextColumns);
+      setRows(formatBankStatementRows(bankStatementRows.rows, nextColumns, formatAmount));
       return;
     }
     setColumns([]);
     setRows([]);
-  }, [bankStatementRows, dirty, formatAmountRow]);
+  }, [bankStatementRows, dirty, formatAmount]);
 
   const findColumnIndex = useCallback((aliases: string[]) => {
     const normalizedAliases = aliases.map((alias) => normalizeKey(alias));
@@ -120,13 +130,13 @@ export function PortalBankStatementPage() {
       }
       setLastUploadedName(file.name);
       setColumns(result.columns);
-      setRows(result.rows.map(formatAmountRow));
+      setRows(formatBankStatementRows(result.rows, result.columns, formatAmount));
       setDirty(true);
     } catch (err) {
       console.error('[BankStatement] upload parse failed:', err);
       toast.error('파일을 읽지 못했습니다. `.xls`/`.xlsx`/`.csv` 파일인지 확인해 주세요.');
     }
-  }, [parseExcelToMatrix, formatAmountRow]);
+  }, [parseExcelToMatrix, formatAmount]);
 
   const addRow = useCallback(() => {
     if (columns.length === 0) {

@@ -54,29 +54,44 @@ test('6. PM can access weekly expense page', async ({ page }) => {
   await expect(page.getByRole('heading', { name: '사업비 입력(주간)' })).toBeVisible({ timeout: 15_000 });
 });
 
-// ── 7. Portal budget ──
-test('7. PM can access budget page', async ({ page }) => {
+// ── 7. Portal bank statement -> other pages ──
+test('7. PM can navigate away from bank statement page', async ({ page }) => {
+  await loginAsPm(page);
+  await page.goto('/portal/bank-statements');
+  await expect(page.getByRole('heading', { name: '통장내역' })).toBeVisible({ timeout: 15_000 });
+
+  await page.getByRole('link', { name: '예산 편집' }).click();
+  await expect(page).toHaveURL(/\/portal\/budget$/);
+  await expect(page.getByRole('heading', { name: '예산 편집' })).toBeVisible({ timeout: 15_000 });
+
+  await page.getByRole('link', { name: '캐시플로(주간)' }).click();
+  await expect(page).toHaveURL(/\/portal\/cashflow$/);
+  await expect(page.getByRole('heading', { name: '프로젝트 캐시플로(주간)' })).toBeVisible({ timeout: 15_000 });
+});
+
+// ── 8. Portal budget ──
+test('8. PM can access budget page', async ({ page }) => {
   await loginAsPm(page);
   await page.goto('/portal/budget');
   await expect(page.locator('body')).toBeVisible({ timeout: 15_000 });
 });
 
-// ── 8. Audit log ──
-test('8. Admin can view audit log', async ({ page }) => {
+// ── 9. Audit log ──
+test('9. Admin can view audit log', async ({ page }) => {
   await loginAsAdmin(page);
   await page.goto('/audit');
   await expect(page.getByText('감사 로그').first()).toBeVisible({ timeout: 15_000 });
 });
 
-// ── 9. Settings ──
-test('9. Admin can access settings', async ({ page }) => {
+// ── 10. Settings ──
+test('10. Admin can access settings', async ({ page }) => {
   await loginAsAdmin(page);
   await page.goto('/settings');
   await expect(page.locator('body')).toBeVisible({ timeout: 15_000 });
 });
 
-// ── 10. 404 handling ──
-test('10. Unknown route shows 404 page', async ({ page }) => {
+// ── 11. 404 handling ──
+test('11. Unknown route shows 404 page', async ({ page }) => {
   await loginAsAdmin(page);
   await page.goto('/nonexistent-page');
   await expect(page.getByText(/404|찾을 수 없|존재하지 않/).first()).toBeVisible({ timeout: 15_000 });
