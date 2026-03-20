@@ -1,6 +1,6 @@
-import { parseNumber } from './csv-utils';
+import { parseDate, parseNumber } from './csv-utils';
 import { CASHFLOW_ALL_LINES } from './cashflow-sheet';
-import { getMonthMondayWeeks, type MonthMondayWeek } from './cashflow-weeks';
+import { findWeekForDate, getMonthMondayWeeks, getYearMondayWeeks, type MonthMondayWeek } from './cashflow-weeks';
 import {
   parseCashflowLineLabel,
   SETTLEMENT_COLUMNS,
@@ -12,6 +12,14 @@ export interface SettlementActualSyncWeekPayload {
   weekNo: number;
   amounts: Partial<Record<string, number>>;
 }
+
+const CASHFLOW_IN_LINE_IDS = new Set<string>([
+  'MYSC_PREPAY_IN',
+  'SALES_IN',
+  'SALES_VAT_IN',
+  'TEAM_SUPPORT_IN',
+  'BANK_INTEREST_IN',
+]);
 
 function resolveWeekFromLabel(label: string, yearWeeks: MonthMondayWeek[]): MonthMondayWeek | undefined {
   const fromYear = yearWeeks.find((week) => week.label === label);
@@ -26,22 +34,60 @@ function resolveWeekFromLabel(label: string, yearWeeks: MonthMondayWeek[]): Mont
   return getMonthMondayWeeks(yearMonth).find((week) => week.weekNo === weekNo);
 }
 
+function resolveWeekLabelFromRow(
+  row: ImportRow,
+  yearWeeks: MonthMondayWeek[],
+  weekIdx: number,
+  dateIdx: number,
+): string {
+  const explicitLabel = weekIdx >= 0 ? String(row.cells[weekIdx] || '').trim() : '';
+  if (explicitLabel) return explicitLabel;
+  if (dateIdx < 0) return '';
+  const parsedDate = parseDate(String(row.cells[dateIdx] || '').trim());
+  if (!parsedDate) return '';
+  const dateOnly = parsedDate.slice(0, 10);
+  const dateYear = Number.parseInt(dateOnly.slice(0, 4), 10);
+  if (!Number.isFinite(dateYear)) return '';
+  const anchorYear = Number.parseInt(yearWeeks[0]?.yearMonth.slice(0, 4) || '', 10);
+  const matchedWeek = findWeekForDate(
+    dateOnly,
+    dateYear === anchorYear ? yearWeeks : getYearMondayWeeks(dateYear),
+  );
+  return matchedWeek?.label || '';
+}
+
+function resolveActualAmount(
+  row: ImportRow,
+  lineId: string,
+  bankAmountIdx: number,
+  expenseAmountIdx: number,
+): number {
+  const bankAmount = bankAmountIdx >= 0 ? (parseNumber(row.cells[bankAmountIdx]) ?? 0) : 0;
+  if (CASHFLOW_IN_LINE_IDS.has(lineId)) {
+    return bankAmount;
+  }
+  const expenseAmount = expenseAmountIdx >= 0 ? (parseNumber(row.cells[expenseAmountIdx]) ?? 0) : 0;
+  return expenseAmount || bankAmount;
+}
+
 export function buildSettlementActualSyncPayload(
   rows: ImportRow[],
   yearWeeks: MonthMondayWeek[],
   persistedRows?: ImportRow[] | null,
 ): SettlementActualSyncWeekPayload[] {
   const weekIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '해당 주차');
+  const dateIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '거래일시');
   const cashflowIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === 'cashflow항목');
   const bankAmountIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '통장에 찍힌 입/출금액');
+  const expenseAmountIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '사업비 사용액');
 
   const byWeek = new Map<string, Record<string, number>>();
   const weekLabels = new Set<string>();
 
   const collectWeekLabels = (candidateRows: ImportRow[] | null | undefined) => {
-    if (!candidateRows || weekIdx < 0) return;
+    if (!candidateRows) return;
     for (const row of candidateRows) {
-      const label = String(row.cells[weekIdx] || '').trim();
+      const label = resolveWeekLabelFromRow(row, yearWeeks, weekIdx, dateIdx);
       if (label) weekLabels.add(label);
     }
   };
@@ -50,12 +96,12 @@ export function buildSettlementActualSyncPayload(
   collectWeekLabels(persistedRows);
 
   for (const row of rows) {
-    const weekLabel = weekIdx >= 0 ? String(row.cells[weekIdx] || '').trim() : '';
+    const weekLabel = resolveWeekLabelFromRow(row, yearWeeks, weekIdx, dateIdx);
     const cashflowLabel = cashflowIdx >= 0 ? String(row.cells[cashflowIdx] || '').trim() : '';
     if (!weekLabel || !cashflowLabel) continue;
     const lineId = parseCashflowLineLabel(cashflowLabel);
     if (!lineId || lineId === 'INPUT_VAT_OUT') continue;
-    const amount = bankAmountIdx >= 0 ? (parseNumber(row.cells[bankAmountIdx]) ?? 0) : 0;
+    const amount = resolveActualAmount(row, lineId, bankAmountIdx, expenseAmountIdx);
     if (amount === 0) continue;
     const target = byWeek.get(weekLabel) || {};
     target[lineId] = (target[lineId] || 0) + amount;

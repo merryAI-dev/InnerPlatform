@@ -57,6 +57,62 @@ describe('buildSettlementActualSyncPayload', () => {
     expect(marchWeek?.amounts.SALES_IN).toBe(250000);
   });
 
+  it('prefers expense amount for outflow actuals and falls back to bank amount when missing', () => {
+    const base = createEmptyCells();
+    const expensePriorityRow = createRow(
+      withCell(
+        withCell(
+          withCell(
+            withCell(base, 2, '2026-03-05'),
+            3,
+            '26-03-01',
+          ),
+          8,
+          '직접사업비',
+        ),
+        10,
+        '33,000',
+      ).map((cell, index) => (index === 13 ? '30,000' : cell)),
+    );
+    const fallbackRow = createRow(
+      withCell(
+        withCell(
+          withCell(base, 2, '2026-03-06'),
+          3,
+          '26-03-01',
+        ),
+        8,
+        '직접사업비',
+      ).map((cell, index) => (index === 10 ? '15,000' : cell)),
+    );
+
+    const payload = buildSettlementActualSyncPayload([expensePriorityRow, fallbackRow], [
+      { yearMonth: '2026-03', weekNo: 1, weekStart: '2026-03-02', weekEnd: '2026-03-08', label: '26-03-01' },
+    ]);
+
+    expect(payload[0]?.amounts.DIRECT_COST_OUT).toBe(45000);
+  });
+
+  it('derives week labels from transaction date when the imported week column is blank', () => {
+    const base = createEmptyCells();
+    const row = createRow(
+      withCell(
+        withCell(base, 2, '2026-03-05'),
+        8,
+        '직접사업비',
+      ).map((cell, index) => (index === 13 ? '30,000' : cell)),
+    );
+
+    const payload = buildSettlementActualSyncPayload([row], [
+      { yearMonth: '2026-03', weekNo: 1, weekStart: '2026-03-02', weekEnd: '2026-03-08', label: '26-03-01' },
+    ]);
+
+    expect(payload).toHaveLength(1);
+    expect(payload[0]?.yearMonth).toBe('2026-03');
+    expect(payload[0]?.weekNo).toBe(1);
+    expect(payload[0]?.amounts.DIRECT_COST_OUT).toBe(30000);
+  });
+
   it('includes cleared weeks from persisted rows so removed rows zero out previous actuals', () => {
     const base = createEmptyCells();
     const currentRows = [

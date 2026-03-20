@@ -38,10 +38,13 @@ import {
 } from '../../platform/google-sheet-migration.samples';
 import {
   analyzeSettlementHeaderMapping,
+  buildSettlementDataPreview,
   normalizeMatrixToImportRows,
   SETTLEMENT_COLUMNS,
   type ImportRow,
+  type SettlementHeaderAnalysis,
 } from '../../platform/settlement-csv';
+import { getYearMondayWeeks } from '../../platform/cashflow-weeks';
 import {
   describeGoogleSheetMigrationTarget,
   parseBankStatementMatrix,
@@ -56,6 +59,7 @@ import {
 } from '../../platform/google-sheet-migration';
 import { parseLocalWorkbookFile, type LocalWorkbookSheet } from '../../platform/local-workbook';
 import { reportError } from '../../platform/observability';
+import { buildSettlementActualSyncPayload } from '../../platform/settlement-sheet-sync';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import {
@@ -85,6 +89,7 @@ interface GoogleSheetMigrationReviewState {
   applyHint: string;
   summaryStats: GoogleSheetSummaryStat[];
   expenseRows?: ImportRow[];
+  expenseSheetAnalysis?: SettlementHeaderAnalysis;
   mergeSummary?: GoogleSheetImportMergeSummary;
   budgetPlanMerge?: BudgetPlanMergePlan;
   bankSheet?: BankStatementImportSheet;
@@ -161,6 +166,15 @@ function buildStoredPreviewMatrix(matrix: string[][]): string[][] {
   return (matrix || [])
     .slice(0, 60)
     .map((row) => (row || []).slice(0, 24).map((cell) => String(cell ?? '')));
+}
+
+function formatHeaderRowTrace(headerRowIndices: number[]): string {
+  if (!headerRowIndices.length) return '-';
+  return headerRowIndices.map((index) => `${index + 1}행`).join(' + ');
+}
+
+function formatFieldList(items: string[], emptyLabel = '-'): string {
+  return items.length > 0 ? items.join(', ') : emptyLabel;
 }
 
 async function readFileAsBase64(file: File): Promise<string> {
@@ -352,20 +366,24 @@ export function GoogleSheetMigrationWizard({
     };
     switch (descriptor.target) {
       case 'expense_sheet': {
+        const expenseSheetAnalysis = analyzeSettlementHeaderMapping(preview.matrix);
         const expenseRows = normalizeMatrixToImportRows(preview.matrix);
         const mergePlan = planGoogleSheetImportMerge(expenseSheetRows, expenseRows);
         return finalizeReviewState({
           descriptor,
           applySupported: mergePlan.summary.importedCount > 0,
           applyButtonLabel: `${activeSheetName}에 안전 반영`,
-          applyHint: '빈 셀은 기존 값을 지우지 않고, Drive 링크 컬럼은 유지합니다.',
+          applyHint: '빈 셀은 기존 값을 지우지 않고, Drive 링크 컬럼은 유지합니다. 캐시플로 actual은 출금 row에서 사업비 사용액을 우선 사용합니다.',
           summaryStats: [
             { label: '가져온 행', value: `${mergePlan.summary.importedCount}건` },
             { label: '신규 추가', value: `${mergePlan.summary.createCount}건` },
             { label: '기존 업데이트', value: `${mergePlan.summary.updateCount}건` },
             { label: '그대로 유지', value: `${mergePlan.summary.unchangedCount}건` },
+            { label: '헤더 선택', value: formatHeaderRowTrace(expenseSheetAnalysis.headerRowIndices) },
+            { label: '핵심 필드', value: `${expenseSheetAnalysis.matchedCriticalFields.length}/${expenseSheetAnalysis.matchedCriticalFields.length + expenseSheetAnalysis.unmatchedCriticalFields.length}` },
           ],
           expenseRows,
+          expenseSheetAnalysis,
           mergeSummary: mergePlan.summary,
         });
       }
@@ -723,7 +741,48 @@ export function GoogleSheetMigrationWizard({
           if (expenseRows.length === 0) throw new Error('가져올 데이터 행이 없습니다.');
           const mergePlan = planGoogleSheetImportMerge(expenseSheetRows, expenseRows);
           await saveExpenseSheetRows(mergePlan.mergedRows);
-          toast.success(`Google Sheets ${mergePlan.summary.importedCount}건을 ${activeSheetName}에 반영했습니다.`);
+          const actualPayload = buildSettlementActualSyncPayload(
+            mergePlan.mergedRows,
+            getYearMondayWeeks(new Date().getFullYear()),
+            expenseSheetRows,
+          );
+          let actualSyncFailed = false;
+          if (actualPayload.length > 0) {
+            const results = await Promise.allSettled(
+              actualPayload.map((sheet) => upsertWeekAmounts({
+                projectId,
+                yearMonth: sheet.yearMonth,
+                weekNo: sheet.weekNo,
+                mode: 'actual',
+                amounts: sheet.amounts as Record<string, number>,
+              })),
+            );
+            actualSyncFailed = results.some((result) => result.status === 'rejected');
+            results.forEach((result) => {
+              if (result.status === 'rejected') {
+                reportError(result.reason, {
+                  message: '[GoogleSheetMigrationWizard] expense sheet actual sync failed:',
+                  options: {
+                    level: 'error',
+                    tags: {
+                      surface: 'google_sheet_migration',
+                      action: 'expense_sheet_actual_sync',
+                    },
+                    extra: {
+                      projectId,
+                      selectedSheetName: preview.selectedSheetName,
+                    },
+                  },
+                });
+              }
+            });
+          }
+          if (actualSyncFailed) {
+            toast.message(`Google Sheets ${mergePlan.summary.importedCount}건을 ${activeSheetName}에 반영했지만 캐시플로 actual 동기화는 일부 실패했습니다.`);
+          } else {
+            const cashflowSuffix = actualPayload.length > 0 ? ` · actual ${actualPayload.length}주차 동기화` : '';
+            toast.success(`Google Sheets ${mergePlan.summary.importedCount}건을 ${activeSheetName}에 반영했습니다${cashflowSuffix}.`);
+          }
           break;
         }
         case 'budget_plan': {
@@ -904,8 +963,14 @@ function GoogleSheetImportDialog({
   const applySupported = Boolean(reviewState?.applySupported);
   const navigationLocked = previewing || applying;
   const matrixPreview = useMemo(
-    () => (preview?.matrix || []).slice(0, 24).map((row) => row.slice(0, 16)),
-    [preview?.matrix],
+    () => {
+      const matrix = preview?.matrix || [];
+      if (selectedDescriptor.target === 'expense_sheet') {
+        return buildSettlementDataPreview(matrix, 24, 16);
+      }
+      return matrix.slice(0, 24).map((row) => row.slice(0, 16));
+    },
+    [preview?.matrix, selectedDescriptor.target],
   );
 
   const goPrev = () => {
@@ -1242,48 +1307,98 @@ function GoogleSheetImportDialog({
                     </Badge>
                   </div>
                   {reviewState?.descriptor.target === 'expense_sheet' ? (
-                    <div className="min-w-[1480px]">
-                      <table className="w-full border-separate border-spacing-0 text-[11px]">
-                        <thead className="sticky top-0 z-10">
-                          <tr>
-                            {SETTLEMENT_COLUMNS.map((column) => {
-                              const isProtected = protectedHeaderSet.has(column.csvHeader);
-                              return (
-                                <th
-                                  key={column.csvHeader}
-                                  className={`border-b px-2 py-2 text-left font-semibold whitespace-nowrap ${isProtected ? 'bg-amber-50 text-amber-900' : 'bg-slate-50 text-slate-800'}`}
-                                >
-                                  <div>{column.csvHeader}</div>
-                                  <div className="mt-0.5 text-[10px] font-normal opacity-70">{column.group}</div>
-                                </th>
-                              );
-                            })}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {(reviewState.expenseRows || []).length > 0 ? (reviewState.expenseRows || []).map((row, rowIndex) => (
-                            <tr key={`${row.tempId}-${rowIndex}`} className="align-top">
-                              {SETTLEMENT_COLUMNS.map((column, columnIndex) => {
+                    <div className="space-y-4">
+                      <div className="grid gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+                        <div className="space-y-4">
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            {(reviewState.summaryStats || []).map((item) => (
+                              <SummaryStat key={item.label} label={item.label} value={item.value} />
+                            ))}
+                          </div>
+                          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 text-[12px] text-slate-700">
+                            <p className="font-semibold text-slate-950">Parser trace</p>
+                            <p className="mt-1">
+                              선택된 헤더 행: {formatHeaderRowTrace(reviewState.expenseSheetAnalysis?.headerRowIndices || [])}
+                            </p>
+                            <p className="mt-2 text-[11px] text-slate-500">
+                              핵심 매칭: {formatFieldList(reviewState.expenseSheetAnalysis?.matchedCriticalFields || [])}
+                            </p>
+                            <p className="mt-1 text-[11px] text-amber-700">
+                              아직 비어 있는 핵심 필드: {formatFieldList(reviewState.expenseSheetAnalysis?.unmatchedCriticalFields || [])}
+                            </p>
+                            <p className="mt-2 text-[11px] text-slate-500">
+                              actual 집계 기준: 입금은 통장에 찍힌 입/출금액, 출금은 사업비 사용액 우선 후 통장 금액 fallback
+                            </p>
+                          </div>
+                        </div>
+                        <div className="overflow-auto rounded-2xl border border-slate-200 bg-white">
+                          <table className="w-full border-separate border-spacing-0 text-[11px]">
+                            <tbody>
+                              {matrixPreview.length > 0 ? matrixPreview.map((row, rowIndex) => (
+                                <tr key={`expense-raw-${rowIndex}`}>
+                                  {row.map((cell, columnIndex) => (
+                                    <td
+                                      key={`expense-raw-${rowIndex}-${columnIndex}`}
+                                      className={`border-b border-r px-2 py-2 align-top ${rowIndex < 4 ? 'bg-slate-50 font-medium text-slate-900' : 'text-slate-700'}`}
+                                    >
+                                      {cell || <span className="text-slate-300">-</span>}
+                                    </td>
+                                  ))}
+                                </tr>
+                              )) : (
+                                <tr>
+                                  <td className="px-4 py-12 text-center text-[12px] text-muted-foreground">
+                                    미리보기할 데이터가 없습니다.
+                                  </td>
+                                </tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                      <div className="min-w-[1480px]">
+                        <table className="w-full border-separate border-spacing-0 text-[11px]">
+                          <thead className="sticky top-0 z-10">
+                            <tr>
+                              {SETTLEMENT_COLUMNS.map((column) => {
                                 const isProtected = protectedHeaderSet.has(column.csvHeader);
                                 return (
-                                  <td
-                                    key={`${row.tempId}-${column.csvHeader}`}
-                                    className={`border-b px-2 py-2 whitespace-pre-wrap ${isProtected ? 'bg-amber-50/70 text-amber-950' : 'text-slate-800'}`}
+                                  <th
+                                    key={column.csvHeader}
+                                    className={`border-b px-2 py-2 text-left font-semibold whitespace-nowrap ${isProtected ? 'bg-amber-50 text-amber-900' : 'bg-slate-50 text-slate-800'}`}
                                   >
-                                    {row.cells[columnIndex] || <span className="text-slate-300">-</span>}
-                                  </td>
+                                    <div>{column.csvHeader}</div>
+                                    <div className="mt-0.5 text-[10px] font-normal opacity-70">{column.group}</div>
+                                  </th>
                                 );
                               })}
                             </tr>
-                          )) : (
-                            <tr>
-                              <td colSpan={SETTLEMENT_COLUMNS.length} className="px-4 py-12 text-center text-[12px] text-muted-foreground">
-                                헤더는 읽었지만 가져올 데이터 행이 없습니다.
-                              </td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
+                          </thead>
+                          <tbody>
+                            {(reviewState.expenseRows || []).length > 0 ? (reviewState.expenseRows || []).map((row, rowIndex) => (
+                              <tr key={`${row.tempId}-${rowIndex}`} className="align-top">
+                                {SETTLEMENT_COLUMNS.map((column, columnIndex) => {
+                                  const isProtected = protectedHeaderSet.has(column.csvHeader);
+                                  return (
+                                    <td
+                                      key={`${row.tempId}-${column.csvHeader}`}
+                                      className={`border-b px-2 py-2 whitespace-pre-wrap ${isProtected ? 'bg-amber-50/70 text-amber-950' : 'text-slate-800'}`}
+                                    >
+                                      {row.cells[columnIndex] || <span className="text-slate-300">-</span>}
+                                    </td>
+                                  );
+                                })}
+                              </tr>
+                            )) : (
+                              <tr>
+                                <td colSpan={SETTLEMENT_COLUMNS.length} className="px-4 py-12 text-center text-[12px] text-muted-foreground">
+                                  헤더는 읽었지만 가져올 데이터 행이 없습니다.
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   ) : (
                     <div className="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">

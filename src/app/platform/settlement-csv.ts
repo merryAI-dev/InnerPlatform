@@ -278,48 +278,6 @@ export interface SettlementParseResult {
   warnings: { row: number; message: string }[];
 }
 
-function scoreSettlementHeaderRow(row: string[] | undefined): number {
-  if (!row || row.length === 0) return -1;
-  let score = 0;
-  const targetKeys = SETTLEMENT_COLUMNS.map((c) => normalizeKey(c.csvHeader));
-  for (const cell of row) {
-    const src = normalizeKey(cell || '');
-    if (!src) continue;
-    if (targetKeys.includes(src)) score += 3;
-    else if (targetKeys.some((t) => src.includes(t) || t.includes(src))) score += 1;
-  }
-  return score;
-}
-
-function scoreSettlementGroupRow(row: string[] | undefined): number {
-  if (!row || row.length === 0) return -1;
-  let score = 0;
-  const groupKeys = SETTLEMENT_COLUMN_GROUPS.map((group) => normalizeKey(group.name));
-  for (const cell of row) {
-    const src = normalizeKey(cell || '');
-    if (!src) continue;
-    if (groupKeys.includes(src)) score += 3;
-    else if (groupKeys.some((groupKey) => src.includes(groupKey) || groupKey.includes(src))) score += 1;
-  }
-  return score;
-}
-
-function findHeaderRowIdx(matrix: string[][]): number {
-  if (matrix.length === 0) return 0;
-  let bestIdx = 0;
-  let bestScore = -1;
-  const scanMax = Math.min(5, matrix.length);
-  for (let i = 0; i < scanMax; i++) {
-    const row = matrix[i];
-    const score = scoreSettlementHeaderRow(row);
-    if (score > bestScore) {
-      bestScore = score;
-      bestIdx = i;
-    }
-  }
-  return bestIdx;
-}
-
 function composeSettlementHeaders(groupRow: string[], detailRow: string[]): string[] {
   return Array.from(
     { length: Math.max(groupRow.length, detailRow.length) },
@@ -334,20 +292,9 @@ function composeSettlementHeaders(groupRow: string[], detailRow: string[]): stri
   );
 }
 
-function countRecognizedSettlementHeaders(row: string[] | undefined): number {
-  if (!row || row.length === 0) return 0;
-  const targetKeys = SETTLEMENT_COLUMNS.map((column) => normalizeKey(column.csvHeader));
-  return row.reduce((count, cell) => {
-    const source = normalizeKey(cell || '');
-    if (!source) return count;
-    if (targetKeys.includes(source)) return count + 1;
-    if (targetKeys.some((target) => source.includes(target) || target.includes(source))) return count + 1;
-    return count;
-  }, 0);
-}
-
 function resolveSettlementHeaders(matrix: string[][]): {
   headerRowIdx: number;
+  headerRowIndices: number[];
   dataStartRowIdx: number;
   headers: string[];
   dataRows: string[][];
@@ -355,57 +302,55 @@ function resolveSettlementHeaders(matrix: string[][]): {
   if (matrix.length === 0) {
     return {
       headerRowIdx: 0,
+      headerRowIndices: [],
       dataStartRowIdx: 0,
       headers: [],
       dataRows: [],
     };
   }
 
-  const headerRowIdx = findHeaderRowIdx(matrix);
-  const primaryHeaders = (matrix[headerRowIdx] || []).map((h) => normalizeSpace(h));
-  const shouldUseTwoRowHeader = (groupRow: string[], detailRow: string[]) => {
-    const mergedHeaders = composeSettlementHeaders(groupRow, detailRow);
-    const groupScore = scoreSettlementGroupRow(groupRow);
-    const detailScore = scoreSettlementHeaderRow(detailRow);
-    const mergedScore = scoreSettlementHeaderRow(mergedHeaders);
-    const detailMatchCount = countRecognizedSettlementHeaders(detailRow);
-    const mergedMatchCount = countRecognizedSettlementHeaders(mergedHeaders);
-    return (
-      (groupScore >= 6 && detailScore >= 4)
-      || mergedMatchCount > detailMatchCount
-      || mergedScore >= detailScore + 2
-    );
+  const candidates: SettlementHeaderCandidate[] = [];
+  const scanMax = Math.min(6, matrix.length);
+
+  const addCandidate = (headerRowIndices: number[], headers: string[]) => {
+    const normalizedHeaders = headers.map((header) => normalizeSpace(header));
+    if (!normalizedHeaders.some(Boolean)) return;
+    candidates.push(evaluateSettlementHeaderCandidate(normalizedHeaders, headerRowIndices));
   };
 
-  if (headerRowIdx > 0) {
-    const previousHeaders = (matrix[headerRowIdx - 1] || []).map((h) => normalizeSpace(h));
-    if (shouldUseTwoRowHeader(previousHeaders, primaryHeaders)) {
-      return {
-        headerRowIdx: headerRowIdx - 1,
-        dataStartRowIdx: headerRowIdx + 1,
-        headers: composeSettlementHeaders(previousHeaders, primaryHeaders),
-        dataRows: matrix.slice(headerRowIdx + 1),
-      };
+  for (let rowIndex = 0; rowIndex < scanMax; rowIndex += 1) {
+    const row = matrix[rowIndex] || [];
+    addCandidate([rowIndex], row);
+    if (rowIndex + 1 < scanMax) {
+      const nextRow = matrix[rowIndex + 1] || [];
+      addCandidate([rowIndex, rowIndex + 1], composeSettlementHeaders(row, nextRow));
     }
   }
 
-  if (headerRowIdx + 1 < matrix.length) {
-    const nextHeaders = (matrix[headerRowIdx + 1] || []).map((h) => normalizeSpace(h));
-    if (shouldUseTwoRowHeader(primaryHeaders, nextHeaders)) {
-      return {
-        headerRowIdx,
-        dataStartRowIdx: headerRowIdx + 2,
-        headers: composeSettlementHeaders(primaryHeaders, nextHeaders),
-        dataRows: matrix.slice(headerRowIdx + 2),
-      };
-    }
+  const bestCandidate = candidates.sort((left, right) => (
+    right.score - left.score
+    || right.matchedCriticalFields.length - left.matchedCriticalFields.length
+    || right.matchedHeaders.length - left.matchedHeaders.length
+    || right.headerRowIndices.length - left.headerRowIndices.length
+    || left.headerRowIndices[0] - right.headerRowIndices[0]
+  ))[0];
+
+  if (!bestCandidate) {
+    return {
+      headerRowIdx: 0,
+      headerRowIndices: [0],
+      dataStartRowIdx: 1,
+      headers: (matrix[0] || []).map((header) => normalizeSpace(header)),
+      dataRows: matrix.slice(1),
+    };
   }
 
   return {
-    headerRowIdx,
-    dataStartRowIdx: headerRowIdx + 1,
-    headers: primaryHeaders,
-    dataRows: matrix.slice(headerRowIdx + 1),
+    headerRowIdx: bestCandidate.headerRowIndices[0] || 0,
+    headerRowIndices: bestCandidate.headerRowIndices,
+    dataStartRowIdx: bestCandidate.dataStartRowIdx,
+    headers: bestCandidate.headers,
+    dataRows: matrix.slice(bestCandidate.dataStartRowIdx),
   };
 }
 
@@ -420,6 +365,32 @@ const SETTLEMENT_HEADER_ALIAS_KEYS: Record<string, string[]> = {
   '증빙자료 드라이브': ['증빙자료드라이브', '드라이브바로가기'],
   '준비 필요자료': ['준비필요자료', '도담준비필요자료', '써니준비필요자료', '도담or써니준비필요자료'],
 };
+
+const SETTLEMENT_CRITICAL_HEADERS = [
+  '거래일시',
+  '해당 주차',
+  '비목',
+  '세목',
+  'cashflow항목',
+  '통장에 찍힌 입/출금액',
+  '사업비 사용액',
+  '지급처',
+  '상세 적요',
+  '필수증빙자료 리스트',
+  '준비필요자료',
+  '증빙자료 드라이브',
+  '준비 필요자료',
+] as const;
+
+const SETTLEMENT_DETAIL_HEADERS = [
+  '사업비 사용액',
+  '지급처',
+  '상세 적요',
+  '필수증빙자료 리스트',
+  '준비필요자료',
+  '증빙자료 드라이브',
+  '준비 필요자료',
+] as const;
 
 function getHeaderMatchScore(sourceHeader: string, targetHeader: string): number {
   const rawSource = normalizeSpace(sourceHeader);
@@ -480,20 +451,79 @@ function combineDistinctCellValues(values: string[]): string {
 }
 
 export interface SettlementHeaderAnalysis {
+  headerRowIndices: number[];
   headers: string[];
   matchedHeaders: string[];
   unmatchedHeaders: string[];
+  matchedCriticalFields: string[];
+  unmatchedCriticalFields: string[];
 }
 
-export function analyzeSettlementHeaderMapping(matrix: string[][]): SettlementHeaderAnalysis {
-  const { headers } = resolveSettlementHeaders(matrix);
+interface SettlementHeaderCandidate extends SettlementHeaderAnalysis {
+  dataStartRowIdx: number;
+  score: number;
+}
+
+function analyzeSettlementHeaders(
+  headers: string[],
+  headerRowIndices: number[],
+): SettlementHeaderAnalysis {
   const matchedHeaders = headers.filter((header) => SETTLEMENT_COLUMNS.some((column) => getHeaderMatchScore(header, column.csvHeader) >= 0));
   const unmatchedHeaders = headers.filter((header) => header && !matchedHeaders.includes(header));
+  const matchedCriticalFields = SETTLEMENT_CRITICAL_HEADERS.filter((targetHeader) => (
+    headers.some((header) => getHeaderMatchScore(header, targetHeader) >= 0)
+  ));
+  const unmatchedCriticalFields = SETTLEMENT_CRITICAL_HEADERS.filter((targetHeader) => !matchedCriticalFields.includes(targetHeader));
   return {
+    headerRowIndices,
     headers,
     matchedHeaders,
     unmatchedHeaders,
+    matchedCriticalFields: [...matchedCriticalFields],
+    unmatchedCriticalFields: [...unmatchedCriticalFields],
   };
+}
+
+function evaluateSettlementHeaderCandidate(
+  headers: string[],
+  headerRowIndices: number[],
+): SettlementHeaderCandidate {
+  const analysis = analyzeSettlementHeaders(headers, headerRowIndices);
+  const totalTargetScore = SETTLEMENT_COLUMNS.reduce((sum, column) => {
+    const bestScore = headers.reduce((best, header) => Math.max(best, getHeaderMatchScore(header, column.csvHeader)), -1);
+    return bestScore >= 0 ? sum + bestScore : sum;
+  }, 0);
+  const detailMatchCount = SETTLEMENT_DETAIL_HEADERS.filter((targetHeader) => (
+    analysis.matchedCriticalFields.includes(targetHeader)
+  )).length;
+  const score = totalTargetScore
+    + (analysis.matchedHeaders.length * 12)
+    + (analysis.matchedCriticalFields.length * 40)
+    + (detailMatchCount * 80)
+    + (headerRowIndices.length === 2 ? 18 : 0)
+    - (analysis.unmatchedHeaders.length * 2);
+
+  return {
+    ...analysis,
+    dataStartRowIdx: headerRowIndices[headerRowIndices.length - 1] + 1,
+    score,
+  };
+}
+
+export function analyzeSettlementHeaderMapping(matrix: string[][]): SettlementHeaderAnalysis {
+  const { headerRowIndices, headers } = resolveSettlementHeaders(matrix);
+  return analyzeSettlementHeaders(headers, headerRowIndices);
+}
+
+export function buildSettlementDataPreview(
+  matrix: string[][],
+  rowLimit = 24,
+  columnLimit = 16,
+): string[][] {
+  const { dataRows } = resolveSettlementHeaders(matrix);
+  return (dataRows || [])
+    .slice(0, rowLimit)
+    .map((row) => (row || []).slice(0, columnLimit));
 }
 
 export function parseSettlementCsv(

@@ -56,7 +56,7 @@ describe('prepareSettlementImportRows', () => {
 
     const payload = buildSettlementActualSyncPayload(prepared, getYearMondayWeeks(2026));
     expect(payload).toHaveLength(1);
-    expect(payload[0]?.amounts.DIRECT_COST_OUT).toBe(33000);
+    expect(payload[0]?.amounts.DIRECT_COST_OUT).toBe(30000);
   });
 
   it('drops rows that only contain derived or protected settlement fields', () => {
