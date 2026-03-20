@@ -3,6 +3,7 @@ import {
   type BuildStandardHeadersInput,
   type RequestActor,
 } from './request-context';
+import { captureException } from './observability';
 
 const DEFAULT_RETRY_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
 
@@ -288,7 +289,26 @@ export class PlatformApiClient {
           retryOnStatuses,
         });
 
-        if (!shouldRetry) throw error;
+        if (!shouldRetry) {
+          captureException(error, {
+            level: 'error',
+            tags: {
+              surface: 'platform_api',
+              method,
+            },
+            extra: {
+              requestUrl,
+              attempt,
+              maxRetries,
+              requestId: headers.get('x-request-id') || '',
+              tenantId: options.tenantId,
+              actorId: options.actor.id,
+              status: error instanceof PlatformApiError ? error.status : undefined,
+              responseRequestId: error instanceof PlatformApiError ? error.requestId : undefined,
+            },
+          });
+          throw error;
+        }
 
         const delayMs = this.getRetryDelayMs(attempt);
         if (delayMs > 0) {

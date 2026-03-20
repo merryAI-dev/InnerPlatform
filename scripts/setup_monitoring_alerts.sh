@@ -18,20 +18,22 @@ fi
 to_json_array() {
   local csv="$1"
   local arr=()
-  IFS=',' read -r -a arr <<< "$csv"
   local out="["
   local first=true
-  for raw in "${arr[@]}"; do
-    local value
-    value="$(echo "$raw" | xargs)"
-    [[ -z "$value" ]] && continue
-    if [[ "$first" == true ]]; then
-      first=false
-    else
-      out+=", "
-    fi
-    out+="\"${value}\""
-  done
+  if [[ -n "$csv" ]]; then
+    IFS=',' read -r -a arr <<< "$csv"
+    for raw in "${arr[@]}"; do
+      local value
+      value="$(echo "$raw" | xargs)"
+      [[ -z "$value" ]] && continue
+      if [[ "$first" == true ]]; then
+        first=false
+      else
+        out+=", "
+      fi
+      out+="\"${value}\""
+    done
+  fi
   out+="]"
   printf "%s" "$out"
 }
@@ -126,33 +128,26 @@ EOF
 
 cat > "${TMP_DIR}/bff-version-conflict-rate.json" <<EOF
 {
-  "displayName": "${SERVICE_NAME} version-conflict rate > 5%",
+  "displayName": "${SERVICE_NAME} version-conflict count > 10 / 10m",
   "combiner": "OR",
   "enabled": true,
   "notificationChannels": ${CHANNELS_JSON},
   "documentation": {
-    "content": "Version conflict ratio exceeded 5% for 10 minutes. Check optimistic concurrency hot-spots.",
+    "content": "Version conflict count exceeded 10 over 10 minutes. Check optimistic concurrency hot-spots.",
     "mimeType": "text/markdown"
   },
   "conditions": [
     {
-      "displayName": "version_conflict ratio > 5% (10m)",
+      "displayName": "version_conflict count > 10 (10m)",
       "conditionThreshold": {
         "filter": "metric.type=\\"logging.googleapis.com/user/bff_version_conflicts_count\\" resource.type=\\"cloud_run_revision\\" resource.label.\\"service_name\\"=\\"${SERVICE_NAME}\\"",
-        "denominatorFilter": "metric.type=\\"run.googleapis.com/request_count\\" resource.type=\\"cloud_run_revision\\" resource.label.\\"service_name\\"=\\"${SERVICE_NAME}\\"",
         "comparison": "COMPARISON_GT",
-        "thresholdValue": 0.05,
+        "thresholdValue": 10,
         "duration": "600s",
         "aggregations": [
           {
-            "alignmentPeriod": "60s",
-            "perSeriesAligner": "ALIGN_RATE"
-          }
-        ],
-        "denominatorAggregations": [
-          {
-            "alignmentPeriod": "60s",
-            "perSeriesAligner": "ALIGN_RATE"
+            "alignmentPeriod": "600s",
+            "perSeriesAligner": "ALIGN_SUM"
           }
         ],
         "trigger": {
@@ -168,7 +163,14 @@ apply_policy() {
   local file="$1"
   local display_name="$2"
   local existing
-  existing="$(gcloud monitoring policies list --project "$PROJECT_ID" --filter="displayName=\"${display_name}\"" --format='value(name)' --limit=1)"
+  existing="$(gcloud monitoring policies list --project "$PROJECT_ID" --format=json \
+    | node -e '
+      const fs = require("fs");
+      const displayName = process.argv[1];
+      const items = JSON.parse(fs.readFileSync(0, "utf8") || "[]");
+      const found = items.find((item) => item && item.displayName === displayName);
+      if (found?.name) process.stdout.write(found.name);
+    ' "$display_name")"
   if [[ -n "$existing" ]]; then
     gcloud monitoring policies update "$existing" --project "$PROJECT_ID" --policy-from-file "$file" >/dev/null
     printf "[monitoring-setup] updated: %s\n" "$display_name"
@@ -180,6 +182,6 @@ apply_policy() {
 
 apply_policy "${TMP_DIR}/bff-5xx-rate.json" "${SERVICE_NAME} 5xx rate > 1%"
 apply_policy "${TMP_DIR}/bff-latency-p95.json" "${SERVICE_NAME} P95 latency > 2s"
-apply_policy "${TMP_DIR}/bff-version-conflict-rate.json" "${SERVICE_NAME} version-conflict rate > 5%"
+apply_policy "${TMP_DIR}/bff-version-conflict-rate.json" "${SERVICE_NAME} version-conflict count > 10 / 10m"
 
 printf "[monitoring-setup] done (project=%s service=%s)\n" "$PROJECT_ID" "$SERVICE_NAME"

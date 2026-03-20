@@ -1,4 +1,4 @@
-import type { BudgetCodeEntry, BudgetPlanRow, CashflowSheetLineId } from '../data/types';
+import type { BudgetCodeEntry, BudgetPlanRow, CashflowSheetLineId, ProjectSheetSourceType } from '../data/types';
 import { normalizeBankStatementMatrix, type BankStatementSheet } from './bank-statement';
 import { normalizeSpace, parseNumber } from './csv-utils';
 import { parseCashflowLineLabel } from './settlement-csv';
@@ -50,6 +50,25 @@ export interface BudgetPlanMergePlan {
   importedRows: BudgetPlanRow[];
   importedCodeBook: BudgetCodeEntry[];
   summary: BudgetPlanMergeSummary;
+}
+
+export function resolveProjectSheetSourceType(
+  target: GoogleSheetMigrationTarget,
+): ProjectSheetSourceType | null {
+  switch (target) {
+    case 'expense_sheet':
+      return 'usage';
+    case 'budget_plan':
+      return 'budget';
+    case 'evidence_rules':
+      return 'evidence_rules';
+    case 'cashflow_projection':
+      return 'cashflow';
+    case 'bank_statement':
+      return 'bank_statement';
+    default:
+      return null;
+  }
 }
 
 function normalizeBudgetLabel(value: unknown): string {
@@ -121,6 +140,7 @@ function isSubtotalLike(value: string): boolean {
 
 export function describeGoogleSheetMigrationTarget(sheetName: string): GoogleSheetMigrationDescriptor {
   const normalized = String(sheetName || '').trim();
+  const isENaraCashflowGuide = normalized.includes('cashflow') && normalized.includes('이나라도움');
   if (!normalized) {
     return {
       target: 'preview_only',
@@ -141,7 +161,7 @@ export function describeGoogleSheetMigrationTarget(sheetName: string): GoogleShe
       readinessLabel: '안전 반영 가능',
     };
   }
-  if (normalized.includes('비목별 증빙자료')) {
+  if (normalized.includes('비목별 증빙자료') || normalized.includes('증빙서류')) {
     return {
       target: 'evidence_rules',
       kindLabel: '증빙 규칙',
@@ -161,14 +181,16 @@ export function describeGoogleSheetMigrationTarget(sheetName: string): GoogleShe
       readinessLabel: 'projection 반영 가능',
     };
   }
-  if (normalized.includes('cashflow')) {
+  if (isENaraCashflowGuide || normalized.includes('cashflow')) {
     return {
-      target: 'preview_only',
+      target: 'cashflow_projection',
       kindLabel: '캐시플로우',
-      description: '이 탭은 구조가 유사하지만 현재 wizard에서는 preview만 지원합니다.',
+      description: isENaraCashflowGuide
+        ? 'e나라도움 전용 cashflow 탭입니다. 주차 헤더가 감지되면 projection으로 반영하고, 그렇지 않으면 원본 preview로 확인합니다.'
+        : '구조가 유사한 cashflow 탭입니다. 주차 헤더가 감지되면 projection으로 반영합니다.',
       recommendedScreen: '캐시플로우',
-      applySupported: false,
-      readinessLabel: 'preview only',
+      applySupported: true,
+      readinessLabel: isENaraCashflowGuide ? 'e나라도움 cashflow 후보' : '주차 헤더 기반 반영',
     };
   }
   if (normalized.includes('인력투입률')) {
@@ -212,7 +234,7 @@ export function describeGoogleSheetMigrationTarget(sheetName: string): GoogleShe
 }
 
 export function parseBudgetPlanMatrix(matrix: string[][]): BudgetSheetImportPayload {
-  const headerRowIndex = findHeaderRow(matrix, ['사업비 구분', '비목', '세목', '최초 승인 예산'], 12);
+  const headerRowIndex = findHeaderRow(matrix, ['비목', '세목', '최초 승인 예산'], 20);
   if (headerRowIndex < 0) {
     return { rows: [], codeBook: [] };
   }
@@ -221,7 +243,9 @@ export function parseBudgetPlanMatrix(matrix: string[][]): BudgetSheetImportPayl
   const subCodeIndex = findColumnIndex(headers, '세목');
   const calcDescIndex = findColumnIndex(headers, '산정 내역');
   const initialBudgetIndex = findColumnIndex(headers, '최초 승인 예산');
-  const revisedBudgetIndex = findColumnIndex(headers, '변경 승인 예산');
+  const revisedBudgetIndex = findColumnIndex(headers, '변경 승인 예산') >= 0
+    ? findColumnIndex(headers, '변경 승인 예산')
+    : findColumnIndex(headers, '변경 예산');
   const noteIndex = findColumnIndex(headers, '특이사항');
   if (budgetCodeIndex < 0 || subCodeIndex < 0 || initialBudgetIndex < 0) {
     return { rows: [], codeBook: [] };
@@ -330,15 +354,25 @@ export function planBudgetPlanMerge(
 }
 
 export function parseEvidenceRuleMatrix(matrix: string[][]): EvidenceRuleImportPayload {
-  const headerRowIndex = findHeaderRow(matrix, ['비목', '세목', '사전 업로드', '사후 업로드'], 40);
+  const headerRowIndex = (() => {
+    const preferred = findHeaderRow(matrix, ['비목', '세목', '사전 업로드', '사후 업로드'], 40);
+    if (preferred >= 0) return preferred;
+    return findHeaderRow(matrix, ['비목', '세목', '필수 증빙 자료'], 40);
+  })();
   if (headerRowIndex < 0) {
     return { map: {} };
   }
   const headers = (matrix[headerRowIndex] || []).map((cell) => normalizeHeader(cell));
   const budgetIndex = findColumnIndex(headers, '비목');
+  const explicitSubCodeIndex = findColumnIndex(headers, '세목');
   const preIndex = findColumnIndex(headers, '사전 업로드');
   const postIndex = findColumnIndex(headers, '사후 업로드');
-  if (budgetIndex < 0 || preIndex < 0 || postIndex < 0) {
+  const requiredIndex = findColumnIndex(headers, '필수 증빙 자료');
+  const extraIndex = findColumnIndex(headers, '회계법인 추가 요청했던 자료');
+  const firstDocIndex = [preIndex, postIndex, requiredIndex, extraIndex]
+    .filter((value) => value >= 0)
+    .sort((a, b) => a - b)[0] ?? -1;
+  if (budgetIndex < 0 || firstDocIndex < 0) {
     return { map: {} };
   }
 
@@ -352,14 +386,25 @@ export function parseEvidenceRuleMatrix(matrix: string[][]): EvidenceRuleImportP
       currentBudgetCode = budgetRaw;
     }
     const budgetCode = normalizeBudgetLabel(budgetRaw || currentBudgetCode);
-    const subCandidates = row
-      .slice(budgetIndex + 1, preIndex)
-      .map((cell) => normalizeBudgetLabel(cell))
+    const subCode = explicitSubCodeIndex >= 0
+      ? normalizeBudgetLabel(readCell(row, explicitSubCodeIndex))
+      : (() => {
+        const subCandidates = row
+          .slice(budgetIndex + 1, firstDocIndex)
+          .map((cell) => normalizeBudgetLabel(cell))
+          .filter(Boolean);
+        return subCandidates[subCandidates.length - 1] || '';
+      })();
+    const docs = [
+      preIndex >= 0 ? readMultilineCell(row, preIndex) : '',
+      postIndex >= 0 ? readMultilineCell(row, postIndex) : '',
+      requiredIndex >= 0 ? readMultilineCell(row, requiredIndex) : '',
+      extraIndex >= 0 ? readMultilineCell(row, extraIndex) : '',
+    ]
+      .flatMap((value) => value.split(/\r?\n/g))
+      .map((value) => normalizeSpace(value))
       .filter(Boolean);
-    const subCode = subCandidates[subCandidates.length - 1] || '';
-    const preDocs = readMultilineCell(row, preIndex);
-    const postDocs = readMultilineCell(row, postIndex);
-    const combinedDocs = [preDocs, postDocs].filter(Boolean).join('\n').trim();
+    const combinedDocs = Array.from(new Set(docs)).join('\n').trim();
 
     if (!budgetCode || !subCode || !combinedDocs) continue;
     map[`${budgetCode}|${subCode}`] = combinedDocs;

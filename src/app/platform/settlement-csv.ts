@@ -20,11 +20,14 @@ const CASHFLOW_LABEL_ALIASES: Record<string, CashflowSheetLineId> = {
   'MYSC선입금(입금필요시)': 'MYSC_PREPAY_IN',
   'MYSC 선입금(입금필요시)': 'MYSC_PREPAY_IN',
   '매출액(입금)': 'SALES_IN',
+  '매출액': 'SALES_IN',
   '매출부가세(입금)': 'SALES_VAT_IN',
+  '매출부가세': 'SALES_VAT_IN',
   '팀지원금(입금)': 'TEAM_SUPPORT_IN',
   '은행이자(입금)': 'BANK_INTEREST_IN',
   '직접사업비(공급가액)': 'DIRECT_COST_OUT',
   '직접사업비': 'DIRECT_COST_OUT',
+  '직접사업비(공급가액)+매입부가세': 'DIRECT_COST_OUT',
   '매입부가세': 'INPUT_VAT_OUT',
   'MYSC인건비': 'MYSC_LABOR_OUT',
   'MYSC 인건비': 'MYSC_LABOR_OUT',
@@ -317,6 +320,32 @@ function findHeaderRowIdx(matrix: string[][]): number {
   return bestIdx;
 }
 
+function composeSettlementHeaders(groupRow: string[], detailRow: string[]): string[] {
+  return Array.from(
+    { length: Math.max(groupRow.length, detailRow.length) },
+    (_, index) => {
+      const group = normalizeSpace(groupRow[index] || '');
+      const detail = normalizeSpace(detailRow[index] || '');
+      if (!group) return detail;
+      if (!detail) return group;
+      if (detail.includes(group) || group.includes(detail)) return detail;
+      return `${group} ${detail}`.trim();
+    },
+  );
+}
+
+function countRecognizedSettlementHeaders(row: string[] | undefined): number {
+  if (!row || row.length === 0) return 0;
+  const targetKeys = SETTLEMENT_COLUMNS.map((column) => normalizeKey(column.csvHeader));
+  return row.reduce((count, cell) => {
+    const source = normalizeKey(cell || '');
+    if (!source) return count;
+    if (targetKeys.includes(source)) return count + 1;
+    if (targetKeys.some((target) => source.includes(target) || target.includes(source))) return count + 1;
+    return count;
+  }, 0);
+}
+
 function resolveSettlementHeaders(matrix: string[][]): {
   headerRowIdx: number;
   dataStartRowIdx: number;
@@ -334,14 +363,19 @@ function resolveSettlementHeaders(matrix: string[][]): {
 
   const headerRowIdx = findHeaderRowIdx(matrix);
   const primaryHeaders = (matrix[headerRowIdx] || []).map((h) => normalizeSpace(h));
-  const composeHeaders = (groupRow: string[], detailRow: string[]) => Array.from(
-    { length: Math.max(groupRow.length, detailRow.length) },
-    (_, index) => normalizeSpace(detailRow[index] || groupRow[index] || ''),
-  );
-  const shouldUseTwoRowHeader = (groupRow: string[], detailRow: string[]) => (
-    scoreSettlementGroupRow(groupRow) >= 6
-    && scoreSettlementHeaderRow(detailRow) >= 4
-  );
+  const shouldUseTwoRowHeader = (groupRow: string[], detailRow: string[]) => {
+    const mergedHeaders = composeSettlementHeaders(groupRow, detailRow);
+    const groupScore = scoreSettlementGroupRow(groupRow);
+    const detailScore = scoreSettlementHeaderRow(detailRow);
+    const mergedScore = scoreSettlementHeaderRow(mergedHeaders);
+    const detailMatchCount = countRecognizedSettlementHeaders(detailRow);
+    const mergedMatchCount = countRecognizedSettlementHeaders(mergedHeaders);
+    return (
+      (groupScore >= 6 && detailScore >= 4)
+      || mergedMatchCount > detailMatchCount
+      || mergedScore >= detailScore + 2
+    );
+  };
 
   if (headerRowIdx > 0) {
     const previousHeaders = (matrix[headerRowIdx - 1] || []).map((h) => normalizeSpace(h));
@@ -349,7 +383,7 @@ function resolveSettlementHeaders(matrix: string[][]): {
       return {
         headerRowIdx: headerRowIdx - 1,
         dataStartRowIdx: headerRowIdx + 1,
-        headers: composeHeaders(previousHeaders, primaryHeaders),
+        headers: composeSettlementHeaders(previousHeaders, primaryHeaders),
         dataRows: matrix.slice(headerRowIdx + 1),
       };
     }
@@ -361,7 +395,7 @@ function resolveSettlementHeaders(matrix: string[][]): {
       return {
         headerRowIdx,
         dataStartRowIdx: headerRowIdx + 2,
-        headers: composeHeaders(primaryHeaders, nextHeaders),
+        headers: composeSettlementHeaders(primaryHeaders, nextHeaders),
         dataRows: matrix.slice(headerRowIdx + 2),
       };
     }
@@ -372,6 +406,93 @@ function resolveSettlementHeaders(matrix: string[][]): {
     dataStartRowIdx: headerRowIdx + 1,
     headers: primaryHeaders,
     dataRows: matrix.slice(headerRowIdx + 1),
+  };
+}
+
+const SETTLEMENT_HEADER_ALIAS_KEYS: Record<string, string[]> = {
+  '통장에 찍힌 입/출금액': ['통장에찍힌입출금액', '입출금액', '통장입출금액'],
+  '입금액(사업비,공급가액,은행이자)': ['입금액사업비공급가액은행이자', '입금액사업비공급가액은행이자)', '입금액'],
+  '사업비 사용액': ['사업비사용액', '직접사업비공급가액매입부가세', '직접사업비공급가액'],
+  '지급처': ['지급처', '거래처', '거래처명'],
+  '상세 적요': ['상세적요', '상세적요내용'],
+  '필수증빙자료 리스트': ['필수증빙자료리스트', '필수증빙자료', '추가증빙자료'],
+  '준비필요자료': ['준비필요자료', '작성필요자료'],
+  '증빙자료 드라이브': ['증빙자료드라이브', '드라이브바로가기'],
+  '준비 필요자료': ['준비필요자료', '도담준비필요자료', '써니준비필요자료', '도담or써니준비필요자료'],
+};
+
+function getHeaderMatchScore(sourceHeader: string, targetHeader: string): number {
+  const rawSource = normalizeSpace(sourceHeader);
+  const rawTarget = normalizeSpace(targetHeader);
+  if (rawTarget === '준비 필요자료') {
+    if (/(도담|써니)/.test(rawSource) && rawSource.includes('준비 필요자료')) return 160;
+    if (rawSource === rawTarget) return 140;
+  }
+  if (rawTarget === '준비필요자료' && rawSource === rawTarget) {
+    return 140;
+  }
+
+  const source = normalizeKey(sourceHeader);
+  const target = normalizeKey(targetHeader);
+  if (!source || !target) return -1;
+  if (source === target) return 100;
+  const aliasMatches = (SETTLEMENT_HEADER_ALIAS_KEYS[targetHeader] || []).some((alias) => {
+    const normalizedAlias = normalizeKey(alias);
+    return normalizedAlias === source || source.includes(normalizedAlias) || normalizedAlias.includes(source);
+  });
+  if (aliasMatches) return 90;
+  if (source.endsWith(target)) {
+    return 60 - Math.abs(source.length - target.length);
+  }
+  if (source.startsWith(target)) {
+    return 20 - Math.abs(source.length - target.length);
+  }
+  if (source.includes(target)) {
+    return 10 - Math.abs(source.length - target.length);
+  }
+  return -1;
+}
+
+function findHeadersMatchingAliases(headers: string[], targetHeader: string): number[] {
+  const matched = headers
+    .map((header, index) => {
+      const normalizedHeader = normalizeKey(header);
+      if (targetHeader === '준비필요자료' && /(도담|써니)/.test(normalizedHeader)) {
+        return { header, index, score: -1 };
+      }
+      if (targetHeader === '준비 필요자료' && !/(도담|써니)/.test(normalizedHeader) && normalizedHeader !== normalizeKey('준비 필요자료')) {
+        return { header, index, score: -1 };
+      }
+      return { header, index, score: getHeaderMatchScore(header, targetHeader) };
+    })
+    .filter((entry) => entry.score >= 0)
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .map((entry) => entry.index);
+  return Array.from(new Set(matched));
+}
+
+function combineDistinctCellValues(values: string[]): string {
+  const normalized = values
+    .flatMap((value) => String(value || '').split(/\r?\n|,\s*/g))
+    .map((value) => normalizeSpace(value))
+    .filter(Boolean);
+  return Array.from(new Set(normalized)).join(', ');
+}
+
+export interface SettlementHeaderAnalysis {
+  headers: string[];
+  matchedHeaders: string[];
+  unmatchedHeaders: string[];
+}
+
+export function analyzeSettlementHeaderMapping(matrix: string[][]): SettlementHeaderAnalysis {
+  const { headers } = resolveSettlementHeaders(matrix);
+  const matchedHeaders = headers.filter((header) => SETTLEMENT_COLUMNS.some((column) => getHeaderMatchScore(header, column.csvHeader) >= 0));
+  const unmatchedHeaders = headers.filter((header) => header && !matchedHeaders.includes(header));
+  return {
+    headers,
+    matchedHeaders,
+    unmatchedHeaders,
   };
 }
 
@@ -520,27 +641,6 @@ export function normalizeMatrixToImportRows(matrix: string[][]): ImportRow[] {
     dataRows,
   } = resolveSettlementHeaders(matrix);
 
-  const getHeaderMatchScore = (sourceHeader: string, targetHeader: string): number => {
-    const rawSource = normalizeSpace(sourceHeader);
-    const rawTarget = normalizeSpace(targetHeader);
-    if (rawTarget === '준비 필요자료') {
-      if (/(도담|써니)/.test(rawSource) && rawSource.includes('준비 필요자료')) return 160;
-      if (rawSource === rawTarget) return 140;
-    }
-    if (rawTarget === '준비필요자료' && rawSource === rawTarget) {
-      return 140;
-    }
-
-    const source = normalizeKey(sourceHeader);
-    const target = normalizeKey(targetHeader);
-    if (!source || !target) return -1;
-    if (source === target) return 100;
-    if (source.includes(target)) {
-      return 40 - Math.abs(source.length - target.length);
-    }
-    return -1;
-  };
-
   // Build mapping: SETTLEMENT_COLUMNS index → source CSV column index
   const colMapping: (number | -1)[] = SETTLEMENT_COLUMNS.map((col) => {
     let bestIndex = -1;
@@ -564,6 +664,36 @@ export function normalizeMatrixToImportRows(matrix: string[][]): ImportRow[] {
     const cells = colMapping.map((srcIdx) =>
       srcIdx >= 0 ? normalizeSpace(raw[srcIdx] || '') : '',
     );
+
+    const requiredDocsIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '필수증빙자료 리스트');
+    if (requiredDocsIdx >= 0) {
+      const merged = combineDistinctCellValues(
+        findHeadersMatchingAliases(headers, '필수증빙자료 리스트').map((index) => raw[index] || ''),
+      );
+      if (merged) cells[requiredDocsIdx] = merged;
+    }
+
+    const pendingIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '준비필요자료');
+    if (pendingIdx >= 0) {
+      const merged = combineDistinctCellValues(
+        findHeadersMatchingAliases(headers, '준비필요자료').map((index) => raw[index] || ''),
+      );
+      if (merged) cells[pendingIdx] = merged;
+    }
+
+    const supportPendingIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '준비 필요자료');
+    if (supportPendingIdx >= 0) {
+      const merged = combineDistinctCellValues(
+        findHeadersMatchingAliases(headers, '준비 필요자료').map((index) => raw[index] || ''),
+      );
+      if (merged) cells[supportPendingIdx] = merged;
+    }
+
+    const driveIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '증빙자료 드라이브');
+    if (driveIdx >= 0 && !cells[driveIdx]) {
+      const driveSourceIndex = findHeadersMatchingAliases(headers, '증빙자료 드라이브')[0] ?? -1;
+      if (driveSourceIndex >= 0) cells[driveIdx] = normalizeSpace(raw[driveSourceIndex] || '');
+    }
 
     // Auto-fill No. column
     const noIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === 'No.');

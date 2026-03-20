@@ -6,6 +6,7 @@ import {
   parseCashflowProjectionMatrix,
   parseEvidenceRuleMatrix,
   planBudgetPlanMerge,
+  resolveProjectSheetSourceType,
 } from './google-sheet-migration';
 
 describe('google-sheet-migration', () => {
@@ -14,9 +15,10 @@ describe('google-sheet-migration', () => {
     expect(describeGoogleSheetMigrationTarget('그룹지출대장(취소내역,불인정포함)').target).toBe('expense_sheet');
     expect(describeGoogleSheetMigrationTarget('예산총괄시트').target).toBe('budget_plan');
     expect(describeGoogleSheetMigrationTarget('비목별 증빙자료').target).toBe('evidence_rules');
+    expect(describeGoogleSheetMigrationTarget('증빙서류(2025업데이트)').target).toBe('evidence_rules');
     expect(describeGoogleSheetMigrationTarget('통장내역(MYSC법인계좌e나라도움제외)').target).toBe('bank_statement');
     expect(describeGoogleSheetMigrationTarget('cashflow(사용내역 연동)').target).toBe('cashflow_projection');
-    expect(describeGoogleSheetMigrationTarget('cashflow(e나라도움 시 가이드)').target).toBe('preview_only');
+    expect(describeGoogleSheetMigrationTarget('cashflow(e나라도움 시 가이드)').target).toBe('cashflow_projection');
     expect(describeGoogleSheetMigrationTarget('인력투입률').target).toBe('preview_only');
   });
 
@@ -57,6 +59,33 @@ describe('google-sheet-migration', () => {
     expect(result.codeBook).toEqual([
       { code: '여비', subCodes: ['교통비', '숙박비'] },
       { code: '회의비', subCodes: ['다과비'] },
+    ]);
+  });
+
+  it('parses special workbook budget summary headers with 구분/변경 예산', () => {
+    const matrix = [
+      ['안내', '환경AC'],
+      ['구분', '비목', '세목', '최초 승인 예산', '변경 예산', '산정 내역'],
+      ['직접사업비', '여비', '교통비', '100,000', '150,000', '출장 3회'],
+      ['', '', '숙박비', '80,000', '', '숙박 1박'],
+    ];
+
+    const result = parseBudgetPlanMatrix(matrix);
+
+    expect(result.rows).toEqual([
+      {
+        budgetCode: '여비',
+        subCode: '교통비',
+        initialBudget: 100000,
+        revisedBudget: 150000,
+        note: '출장 3회',
+      },
+      {
+        budgetCode: '여비',
+        subCode: '숙박비',
+        initialBudget: 80000,
+        note: '숙박 1박',
+      },
     ]);
   });
 
@@ -113,6 +142,22 @@ describe('google-sheet-migration', () => {
     });
   });
 
+  it('parses evidence rule matrices from 증빙서류 탭 variants', () => {
+    const matrix = [
+      ['안내', '증빙 가이드'],
+      ['비목', '세목', '필수 증빙 자료', '회계법인 추가 요청했던 자료'],
+      ['여비', '교통비', '출장신청서\n영수증', '지출결의서'],
+      ['', '숙박비', '영수증', '이체확인증'],
+    ];
+
+    const result = parseEvidenceRuleMatrix(matrix);
+
+    expect(result.map).toEqual({
+      '여비|교통비': '출장신청서\n영수증\n지출결의서',
+      '여비|숙박비': '영수증\n이체확인증',
+    });
+  });
+
   it('parses cashflow projection matrices into week upserts', () => {
     const matrix = [
       ['구분', '설명', '26-03-1', '26-03-2', '26-04-1'],
@@ -150,6 +195,15 @@ describe('google-sheet-migration', () => {
         },
       },
     ]);
+  });
+
+  it('resolves sheet source types from migration targets', () => {
+    expect(resolveProjectSheetSourceType('expense_sheet')).toBe('usage');
+    expect(resolveProjectSheetSourceType('budget_plan')).toBe('budget');
+    expect(resolveProjectSheetSourceType('evidence_rules')).toBe('evidence_rules');
+    expect(resolveProjectSheetSourceType('cashflow_projection')).toBe('cashflow');
+    expect(resolveProjectSheetSourceType('bank_statement')).toBe('bank_statement');
+    expect(resolveProjectSheetSourceType('preview_only')).toBeNull();
   });
 
   it('normalizes bank statement matrices into structured sheets', () => {

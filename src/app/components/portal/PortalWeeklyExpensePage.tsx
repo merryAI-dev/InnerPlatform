@@ -35,6 +35,7 @@ import {
 } from '../../platform/google-drive-browser-upload';
 import { shouldFallbackToBffOnBrowserUploadError } from '../../platform/evidence-drive-upload';
 import { splitLooseNameList } from '../../platform/name-list';
+import { reportError } from '../../platform/observability';
 import { type ImportRow } from '../../platform/settlement-csv';
 import { readDevAuthHarnessConfig } from '../../platform/dev-harness';
 import { resolvePortalHappyPath } from '../../platform/portal-happy-path';
@@ -64,6 +65,7 @@ export function PortalWeeklyExpensePage() {
     updateTransaction,
     changeTransactionState,
     evidenceRequiredMap,
+    sheetSources,
     saveEvidenceRequiredMap,
     expenseSheets,
     activeExpenseSheetId,
@@ -81,6 +83,7 @@ export function PortalWeeklyExpensePage() {
     saveBankStatementRows,
     saveBudgetPlanRows,
     saveBudgetCodeBook,
+    markSheetSourceApplied,
   } = usePortalStore();
   const { submitWeekAsPm, upsertWeekAmounts } = useCashflowWeeks();
   const devHarnessConfig = readDevAuthHarnessConfig(import.meta.env, typeof window !== 'undefined' ? window.location : undefined);
@@ -109,6 +112,7 @@ export function PortalWeeklyExpensePage() {
     project: myProject,
     ledgers,
   }), [authUser, portalUser, myProject, ledgers]);
+  const isENaraProject = myProject?.settlementType === 'TYPE5' || myProject?.accountType === 'DEDICATED';
 
   const effectiveBudgetCodeBook = useMemo(() => {
     const orderedCodes: string[] = [];
@@ -175,7 +179,20 @@ export function PortalWeeklyExpensePage() {
   ]);
 
   const handleEvidenceDriveError = (error: unknown, actionLabel: string) => {
-    console.error(`[PortalWeeklyExpensePage] ${actionLabel} failed:`, error);
+    reportError(error, {
+      message: `[PortalWeeklyExpensePage] ${actionLabel} failed:`,
+      options: {
+        level: 'error',
+        tags: {
+          surface: 'portal_weekly_expense',
+          action: actionLabel,
+        },
+        extra: {
+          projectId,
+          actorId: bffActor.uid,
+        },
+      },
+    });
     if (error instanceof GoogleDriveBrowserUploadError) {
       toast.error(error.message || `${actionLabel}에 실패했습니다.`);
       return;
@@ -429,7 +446,21 @@ export function PortalWeeklyExpensePage() {
             if (!shouldFallbackToBffOnBrowserUploadError(error)) {
               throw error;
             }
-            console.warn('[PortalWeeklyExpensePage] Browser Drive upload failed; falling back to BFF upload:', error);
+            reportError(error, {
+              message: '[PortalWeeklyExpensePage] Browser Drive upload failed; falling back to BFF upload:',
+              options: {
+                level: 'warning',
+                tags: {
+                  surface: 'portal_weekly_expense',
+                  action: 'browser_drive_upload_fallback',
+                },
+                extra: {
+                  projectId,
+                  transactionId: tx.id,
+                  actorId: bffActor.uid,
+                },
+              },
+            });
           }
         }
 
@@ -493,8 +524,18 @@ export function PortalWeeklyExpensePage() {
           <p className="text-[12px] text-muted-foreground mt-1">
             현재 탭: {activeSheetName}
           </p>
+          {isENaraProject && (
+            <p className="text-[11px] text-violet-700 mt-1">
+              이나라도움 프로젝트 감지됨: 통장내역 / cashflow / 사용내역 원본 중심으로 migration을 진행하세요.
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          {isENaraProject && (
+            <Badge variant="outline" className="h-8 text-[11px] border-violet-300 bg-violet-50 text-violet-900">
+              TYPE5 / 전용계좌
+            </Badge>
+          )}
           {visibleExpenseSheets.map((sheet) => (
             <Button
               key={sheet.id}
@@ -711,16 +752,20 @@ export function PortalWeeklyExpensePage() {
       </Suspense>
       {googleSheetImportOpen && (
         <Suspense fallback={null}>
-          <GoogleSheetMigrationWizard
-            open={googleSheetImportOpen}
-            onOpenChange={setGoogleSheetImportOpen}
-            orgId={orgId}
-            projectId={projectId}
-            activeSheetName={activeSheetName}
-            bffActor={bffActor}
+            <GoogleSheetMigrationWizard
+              open={googleSheetImportOpen}
+              onOpenChange={setGoogleSheetImportOpen}
+              orgId={orgId}
+              projectId={projectId}
+              projectName={projectName}
+              projectSettlementType={myProject?.settlementType}
+              projectAccountType={myProject?.accountType}
+              activeSheetName={activeSheetName}
+              bffActor={bffActor}
             expenseSheetRows={expenseSheetRows}
             budgetPlanRows={budgetPlanRows}
             evidenceRequiredMap={evidenceRequiredMap}
+            sheetSources={sheetSources}
             devHarnessEnabled={devHarnessConfig.enabled}
             ensureGoogleWorkspaceAccess={ensureGoogleWorkspaceAccess}
             saveExpenseSheetRows={saveExpenseSheetRows}
@@ -728,6 +773,7 @@ export function PortalWeeklyExpensePage() {
             saveBudgetCodeBook={saveBudgetCodeBook}
             saveBankStatementRows={saveBankStatementRows}
             saveEvidenceRequiredMap={saveEvidenceRequiredMap}
+            markSheetSourceApplied={markSheetSourceApplied}
             upsertWeekAmounts={upsertWeekAmounts}
           />
         </Suspense>

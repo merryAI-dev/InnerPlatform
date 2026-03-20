@@ -19,6 +19,8 @@ import type {
   BudgetCodeRename,
   Comment,
   Ledger,
+  ProjectSheetSourceSnapshot,
+  ProjectSheetSourceType,
   Project,
   ParticipationEntry,
   Transaction,
@@ -57,6 +59,7 @@ import { toast } from 'sonner';
 import { includesProject, normalizeProjectIds, resolvePrimaryProjectId } from './project-assignment';
 import { canEnterPortalWorkspace } from '../platform/navigation';
 import { readDevAuthHarnessConfig } from '../platform/dev-harness';
+import { reportError } from '../platform/observability';
 
 export interface PortalUser {
   id: string;
@@ -91,6 +94,7 @@ interface PortalState {
   transactions: Transaction[];
   comments: Comment[];
   evidenceRequiredMap: Record<string, string>;
+  sheetSources: ProjectSheetSourceSnapshot[];
   expenseSheets: ExpenseSheetTab[];
   activeExpenseSheetId: string;
   expenseSheetRows: ImportRow[] | null;
@@ -123,6 +127,7 @@ interface PortalActions {
   changeTransactionState: (id: string, newState: TransactionState, reason?: string) => void;
   addComment: (comment: Comment) => Promise<void>;
   saveEvidenceRequiredMap: (map: Record<string, string>) => Promise<void>;
+  markSheetSourceApplied: (input: { sourceType: ProjectSheetSourceType; applyTarget: string }) => Promise<void>;
   setActiveExpenseSheet: (sheetId: string) => void;
   createExpenseSheet: (name?: string) => Promise<string | null>;
   renameExpenseSheet: (sheetId: string, name: string) => Promise<boolean>;
@@ -275,6 +280,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [comments, setComments] = useState<Comment[]>([]);
   const [evidenceRequiredMap, setEvidenceRequiredMap] = useState<Record<string, string>>({});
+  const [sheetSources, setSheetSources] = useState<ProjectSheetSourceSnapshot[]>([]);
   const [expenseSheets, setExpenseSheets] = useState<ExpenseSheetTab[]>([]);
   const [activeExpenseSheetId, setActiveExpenseSheetIdState] = useState('default');
   const [expenseSheetRows, setExpenseSheetRows] = useState<ImportRow[] | null>(null);
@@ -412,11 +418,37 @@ export function PortalProvider({ children }: { children: ReactNode }) {
             }, { merge: true });
           }
         } catch (err) {
-          console.error('[PortalStore] member projectIds normalize failed:', err);
+          reportError(err, {
+            message: '[PortalStore] member projectIds normalize failed:',
+            options: {
+              level: 'warning',
+              tags: {
+                surface: 'portal_store',
+                action: 'member_projectids_normalize',
+              },
+              extra: {
+                orgId,
+                actorId: authUser.uid,
+              },
+            },
+          });
         }
         setPortalUser(normalized);
       } catch (err) {
-        console.error('[PortalStore] member load failed:', err);
+        reportError(err, {
+          message: '[PortalStore] member load failed:',
+          options: {
+            level: 'error',
+            tags: {
+              surface: 'portal_store',
+              action: 'member_load',
+            },
+            extra: {
+              orgId,
+              actorId: authUser.uid,
+            },
+          },
+        });
       } finally {
         setIsMemberLoading(false);
       }
@@ -438,6 +470,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       setTransactions([]);
       setComments([]);
       setEvidenceRequiredMap({});
+      setSheetSources([]);
       setExpenseSheets([]);
       setActiveExpenseSheetIdState('default');
       setExpenseSheetRows(null);
@@ -461,6 +494,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       setTransactions(TRANSACTIONS.filter((tx) => scopedIds.includes(tx.projectId)));
       setComments([]);
       setEvidenceRequiredMap((prev) => prev || {});
+      setSheetSources((prev) => prev || []);
       setExpenseSheets((prev) => prev || []);
       setWeeklySubmissionStatuses([]);
       setIsLoading(false);
@@ -474,9 +508,11 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       setChangeRequests([]);
       setParticipationEntries([]);
       setTransactions([]);
+      setComments([]);
       setExpenseSheets([]);
       setActiveExpenseSheetIdState('default');
       setEvidenceRequiredMap({});
+      setSheetSources([]);
       setExpenseSheetRows(null);
       setWeeklySubmissionStatuses([]);
       setIsLoading(false);
@@ -512,7 +548,20 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           markReady();
         },
         (err) => {
-          console.error('[PortalStore] projects listen error:', err);
+          reportError(err, {
+            message: '[PortalStore] projects listen error:',
+            options: {
+              level: 'error',
+              tags: {
+                surface: 'portal_store',
+                action: 'projects_listen',
+              },
+              extra: {
+                orgId,
+                actorId: authUser.uid,
+              },
+            },
+          });
           setProjects([]);
           projectReady = true;
           markReady();
@@ -633,6 +682,10 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       );
 
       const evidenceMapRef = doc(db, getOrgDocumentPath(orgId, 'budgetEvidenceMaps', portalUser.projectId));
+      const sheetSourceCollection = collection(
+        db,
+        `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/sheet_sources`,
+      );
       const expenseSheetCollection = collection(
         db,
         `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/expense_sheets`,
@@ -697,6 +750,55 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       );
 
       unsubsRef.current.push(
+        onSnapshot(sheetSourceCollection, (snap) => {
+          const list = snap.docs
+            .map((docItem) => {
+              const data = docItem.data() as Partial<ProjectSheetSourceSnapshot>;
+              return {
+                sourceType: (data.sourceType || docItem.id) as ProjectSheetSourceType,
+                projectId: String(data.projectId || portalUser.projectId || ''),
+                sheetName: String(data.sheetName || ''),
+                fileName: String(data.fileName || ''),
+                storagePath: String(data.storagePath || ''),
+                downloadURL: String(data.downloadURL || ''),
+                contentType: String(data.contentType || ''),
+                uploadedAt: String(data.uploadedAt || ''),
+                rowCount: Number.isFinite(Number(data.rowCount)) ? Number(data.rowCount) : 0,
+                columnCount: Number.isFinite(Number(data.columnCount)) ? Number(data.columnCount) : 0,
+                matchedColumns: Array.isArray(data.matchedColumns) ? data.matchedColumns.map((value) => String(value || '')) : [],
+                unmatchedColumns: Array.isArray(data.unmatchedColumns) ? data.unmatchedColumns.map((value) => String(value || '')) : [],
+                previewMatrix: Array.isArray(data.previewMatrix)
+                  ? data.previewMatrix.map((row) => (Array.isArray(row) ? row.map((cell) => String(cell ?? '')) : []))
+                  : [],
+                ...(data.applyTarget ? { applyTarget: String(data.applyTarget) } : {}),
+                ...(data.lastAppliedAt ? { lastAppliedAt: String(data.lastAppliedAt) } : {}),
+                ...(data.updatedAt ? { updatedAt: String(data.updatedAt) } : {}),
+                ...(data.updatedBy ? { updatedBy: String(data.updatedBy) } : {}),
+              } satisfies ProjectSheetSourceSnapshot;
+            })
+            .sort((a, b) => String(b.uploadedAt || '').localeCompare(String(a.uploadedAt || '')));
+          setSheetSources(list);
+        }, (err) => {
+          reportError(err, {
+            message: '[PortalStore] sheet source listen error:',
+            options: {
+              level: 'error',
+              tags: {
+                surface: 'portal_store',
+                action: 'sheet_source_listen',
+              },
+              extra: {
+                orgId,
+                actorId: authUser.uid,
+                projectId: portalUser.projectId,
+              },
+            },
+          });
+          setSheetSources([]);
+        }),
+      );
+
+      unsubsRef.current.push(
         onSnapshot(expenseSheetCollection, (snap) => {
           const docs = snap.docs
             .map((docItem) => {
@@ -735,7 +837,21 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           const activeSheet = docs.find((sheet) => sheet.id === nextActiveId) || null;
           setExpenseSheetRows(activeSheet?.rows || null);
         }, (err) => {
-          console.error('[PortalStore] expense sheet listen error:', err);
+          reportError(err, {
+            message: '[PortalStore] expense sheet listen error:',
+            options: {
+              level: 'error',
+              tags: {
+                surface: 'portal_store',
+                action: 'expense_sheet_listen',
+              },
+              extra: {
+                orgId,
+                actorId: authUser.uid,
+                projectId: portalUser.projectId,
+              },
+            },
+          });
           setExpenseSheets([]);
           setExpenseSheetRows(null);
         }),
@@ -768,7 +884,21 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           }));
           setBankStatementRows({ columns, rows });
         }, (err) => {
-          console.error('[PortalStore] bank statement listen error:', err);
+          reportError(err, {
+            message: '[PortalStore] bank statement listen error:',
+            options: {
+              level: 'error',
+              tags: {
+                surface: 'portal_store',
+                action: 'bank_statement_listen',
+              },
+              extra: {
+                orgId,
+                actorId: authUser.uid,
+                projectId: portalUser.projectId,
+              },
+            },
+          });
           setBankStatementRows(null);
         }),
       );
@@ -1011,6 +1141,42 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     );
     setEvidenceRequiredMap(map);
   }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name, expenseSheetRows, isDevHarnessUser]);
+
+  const markSheetSourceApplied = useCallback(async (input: {
+    sourceType: ProjectSheetSourceType;
+    applyTarget: string;
+  }) => {
+    const sourceType = String(input.sourceType || '').trim() as ProjectSheetSourceType;
+    const applyTarget = normalizeSpace(String(input.applyTarget || ''));
+    if (!sourceType || !applyTarget) return;
+    const now = new Date().toISOString();
+    if (isDevHarnessUser || !db || !portalUser?.projectId) {
+      setSheetSources((prev) => prev.map((item) => (
+        item.sourceType === sourceType
+          ? {
+            ...item,
+            applyTarget,
+            lastAppliedAt: now,
+            updatedAt: now,
+            updatedBy: portalUser?.name || authUser?.name || '',
+          }
+          : item
+      )));
+      return;
+    }
+    await setDoc(
+      doc(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/sheet_sources/${sourceType}`),
+      withTenantScope(orgId, {
+        projectId: portalUser.projectId,
+        sourceType,
+        applyTarget,
+        lastAppliedAt: now,
+        updatedAt: now,
+        updatedBy: portalUser.name || authUser?.name || '',
+      }),
+      { merge: true },
+    );
+  }, [authUser?.name, db, isDevHarnessUser, orgId, portalUser?.name, portalUser?.projectId]);
 
   const saveExpenseSheetRows = useCallback(async (rows: ImportRow[]) => {
     const now = new Date().toISOString();
@@ -1988,6 +2154,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     transactions,
     comments,
     evidenceRequiredMap,
+    sheetSources,
     expenseSheets,
     activeExpenseSheetId,
     expenseSheetRows,
@@ -2012,6 +2179,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     changeTransactionState,
     addComment,
     saveEvidenceRequiredMap,
+    markSheetSourceApplied,
     setActiveExpenseSheet,
     createExpenseSheet,
     renameExpenseSheet,

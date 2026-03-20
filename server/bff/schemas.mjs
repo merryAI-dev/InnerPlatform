@@ -71,6 +71,37 @@ export const googleSheetImportAnalyzeSchema = z.object({
   matrix: z.array(z.array(z.string())).min(1),
 }).strict();
 
+export const projectSheetSourceUploadSchema = z.object({
+  sourceType: z.enum(['usage', 'budget', 'evidence_rules', 'cashflow', 'bank_statement']),
+  sheetName: NON_EMPTY_STRING.max(200),
+  fileName: NON_EMPTY_STRING.max(300),
+  mimeType: NON_EMPTY_STRING.max(200),
+  fileSize: z.number().int().nonnegative(),
+  contentBase64: NON_EMPTY_STRING,
+  rowCount: z.number().int().nonnegative(),
+  columnCount: z.number().int().nonnegative(),
+  matchedColumns: z.array(z.string().trim().max(300)).max(80).optional(),
+  unmatchedColumns: z.array(z.string().trim().max(300)).max(80).optional(),
+  previewMatrix: z.array(z.array(z.string().max(1000)).max(24)).max(60).optional(),
+  applyTarget: z.string().trim().max(120).optional(),
+}).strict();
+
+export const clientErrorIngestSchema = z.object({
+  eventType: z.enum(['exception', 'message']).optional(),
+  message: NON_EMPTY_STRING.max(4000),
+  name: z.string().trim().max(200).optional(),
+  stack: z.string().max(16000).optional(),
+  level: z.enum(['info', 'warning', 'error', 'fatal']).optional(),
+  source: NON_EMPTY_STRING.max(120),
+  route: z.string().trim().max(500).optional(),
+  href: z.string().trim().max(2000).optional(),
+  clientRequestId: z.string().trim().max(200).optional(),
+  fingerprint: z.array(z.string().trim().max(200)).max(8).optional(),
+  tags: RECORD_UNKNOWN.optional(),
+  extra: RECORD_UNKNOWN.optional(),
+  occurredAt: z.string().trim().max(100).optional(),
+}).strict();
+
 export const projectRequestContractAnalyzeSchema = z.object({
   fileName: NON_EMPTY_STRING.max(300),
   documentText: z.string().max(200000).optional(),

@@ -1,6 +1,7 @@
 
 import { createRoot } from 'react-dom/client';
 import App from './app/App.tsx';
+import { initObservability, installGlobalObservabilityHandlers } from './app/platform/observability';
 import './styles/index.css';
 
 const VITE_PRELOAD_RECOVERY_KEY = '__mysc_vite_preload_recovery__';
@@ -33,6 +34,8 @@ function installVitePreloadRecovery(): void {
 }
 
 installVitePreloadRecovery();
+initObservability(import.meta.env);
+installGlobalObservabilityHandlers();
 
 createRoot(document.getElementById('root')!).render(<App />);
   

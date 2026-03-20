@@ -356,6 +356,33 @@ export interface FileAttachment {
   uploadedAt: string;
 }
 
+export type ProjectSheetSourceType =
+  | 'usage'
+  | 'budget'
+  | 'evidence_rules'
+  | 'cashflow'
+  | 'bank_statement';
+
+export interface ProjectSheetSourceSnapshot {
+  sourceType: ProjectSheetSourceType;
+  projectId: string;
+  sheetName: string;
+  fileName: string;
+  storagePath: string;
+  downloadURL: string;
+  contentType: string;
+  uploadedAt: string;
+  rowCount: number;
+  columnCount: number;
+  matchedColumns: string[];
+  unmatchedColumns: string[];
+  previewMatrix: string[][];
+  applyTarget?: string;
+  lastAppliedAt?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
 export type AiSuggestionConfidence = 'high' | 'medium' | 'low';
 
 export interface ProjectRequestContractTextSuggestion {

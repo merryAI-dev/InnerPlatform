@@ -37,6 +37,7 @@ import {
   createRequestId,
 } from './utils.mjs';
 import {
+  clientErrorIngestSchema,
   commentCreateSchema,
   evidenceCreateSchema,
   evidenceDriveOverrideSchema,
@@ -47,6 +48,7 @@ import {
   ledgerUpsertSchema,
   memberRoleUpdateSchema,
   parseWithSchema,
+  projectSheetSourceUploadSchema,
   projectRequestContractAnalyzeSchema,
   projectRequestContractUploadSchema,
   projectDriveRootLinkSchema,
@@ -74,7 +76,9 @@ import {
 import { createGoogleSheetMigrationAiService } from './google-sheet-migration-ai.mjs';
 import { createProjectRequestContractAiService } from './project-request-contract-ai.mjs';
 import { createProjectRequestContractStorageService } from './project-request-contract-storage.mjs';
+import { createProjectSheetSourceStorageService } from './project-sheet-source-storage.mjs';
 import { extractTextFromPdfBuffer } from './pdf-text.mjs';
+import { createSlackAlertService } from './slack-alerts.mjs';
 
 function createHttpError(statusCode, message, code = 'request_error') {
   const error = new Error(message);
@@ -103,6 +107,13 @@ function parseBearerToken(rawAuthorization) {
 
 function readOptionalText(value) {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function truncateText(value, maxLength = 500) {
+  const text = readOptionalText(value);
+  if (!text) return '';
+  if (!Number.isFinite(maxLength) || maxLength <= 1 || text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength - 1)}…`;
 }
 
 function decodeHeaderValue(value) {
@@ -272,6 +283,14 @@ function assertReasonForRejected(state, reason) {
 
 function normalizeRole(value) {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
+}
+
+function mapClientErrorSeverity(level) {
+  const normalized = readOptionalText(level).toLowerCase();
+  if (normalized === 'fatal') return 'CRITICAL';
+  if (normalized === 'warning') return 'WARNING';
+  if (normalized === 'info') return 'INFO';
+  return 'ERROR';
 }
 
 const ALL_INTERNAL_ROUTE_ROLES = ['admin', 'finance', 'pm', 'viewer', 'auditor', 'tenant_admin', 'support', 'security'];
@@ -465,45 +484,56 @@ function assertActorPermissionAllowed(policy, req, requiredPermission, action) {
   }
 }
 
-function createApiContextMiddleware({ authMode, verifyToken, resolveMemberIdentity }) {
-  return asyncHandler(async (req, res, next) => {
-    const requestId = req.header('x-request-id') || createRequestId();
-    const isMutating = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method.toUpperCase());
-    const idempotencyKey = req.header('idempotency-key') || '';
+async function resolveApiRequestContext(req, {
+  authMode,
+  verifyToken,
+  resolveMemberIdentity,
+} = {}) {
+  const requestId = req.header('x-request-id') || createRequestId();
+  const isMutating = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method.toUpperCase());
+  const idempotencyKey = req.header('idempotency-key') || '';
 
-    if (isMutating && !idempotencyKey.trim()) {
-      throw createHttpError(400, 'idempotency-key header is required for mutating requests');
-    }
+  if (isMutating && !idempotencyKey.trim()) {
+    throw createHttpError(400, 'idempotency-key header is required for mutating requests');
+  }
 
-    const identity = await resolveRequestIdentity({
-      authMode,
-      verifyToken,
-      readHeaderValue: (name) => req.header(name),
-    });
+  const identity = await resolveRequestIdentity({
+    authMode,
+    verifyToken,
+    readHeaderValue: (name) => req.header(name),
+  });
 
-    let actorRole = identity.actorRole;
-    let actorEmail = identity.actorEmail;
+  let actorRole = identity.actorRole;
+  let actorEmail = identity.actorEmail;
 
-    if ((!actorRole || !actorEmail) && identity.source === 'firebase' && typeof resolveMemberIdentity === 'function') {
-      const memberIdentity = await resolveMemberIdentity({
-        tenantId: identity.tenantId,
-        actorId: identity.actorId,
-      });
-      actorRole = actorRole || normalizeRole(memberIdentity?.role) || undefined;
-      actorEmail = actorEmail || readOptionalText(memberIdentity?.email).toLowerCase() || undefined;
-    }
-
-    req.context = {
+  if ((!actorRole || !actorEmail) && identity.source === 'firebase' && typeof resolveMemberIdentity === 'function') {
+    const memberIdentity = await resolveMemberIdentity({
       tenantId: identity.tenantId,
       actorId: identity.actorId,
-      actorRole,
-      actorEmail,
-      authSource: identity.source,
-      requestId,
-      idempotencyKey: idempotencyKey.trim() || undefined,
-    };
+    });
+    actorRole = actorRole || normalizeRole(memberIdentity?.role) || undefined;
+    actorEmail = actorEmail || readOptionalText(memberIdentity?.email).toLowerCase() || undefined;
+  }
 
-    res.setHeader('x-request-id', requestId);
+  return {
+    tenantId: identity.tenantId,
+    actorId: identity.actorId,
+    actorRole,
+    actorEmail,
+    authSource: identity.source,
+    requestId,
+    idempotencyKey: idempotencyKey.trim() || undefined,
+  };
+}
+
+function createApiContextMiddleware({ authMode, verifyToken, resolveMemberIdentity }) {
+  return asyncHandler(async (req, res, next) => {
+    req.context = await resolveApiRequestContext(req, {
+      authMode,
+      verifyToken,
+      resolveMemberIdentity,
+    });
+    res.setHeader('x-request-id', req.context.requestId);
     next();
   });
 }
@@ -582,17 +612,23 @@ export function createBffApp(options = {}) {
   const googleSheetMigrationAiService = options.googleSheetMigrationAiService || createGoogleSheetMigrationAiService();
   const projectRequestContractAiService = options.projectRequestContractAiService || createProjectRequestContractAiService();
   const projectRequestContractStorageService = options.projectRequestContractStorageService || createProjectRequestContractStorageService({ projectId });
+  const projectSheetSourceStorageService = options.projectSheetSourceStorageService || createProjectSheetSourceStorageService({ projectId });
   const allowedOrigins = parseAllowedOrigins(options.allowedOrigins || process.env.BFF_ALLOWED_ORIGINS);
   const relationRulesPolicyPath = options.relationRulesPolicyPath || resolveRelationRulesPolicyPath();
   const workQueueBatchSizeRaw = Number.parseInt(process.env.BFF_WORK_QUEUE_BATCH || '100', 10);
   const workQueueMaxAttemptsRaw = Number.parseInt(process.env.BFF_WORK_QUEUE_MAX_ATTEMPTS || '6', 10);
   const outboxBatchSizeRaw = Number.parseInt(process.env.BFF_OUTBOX_BATCH || '50', 10);
   const outboxMaxAttemptsRaw = Number.parseInt(process.env.BFF_OUTBOX_MAX_ATTEMPTS || '8', 10);
+  const clientErrorBatchSizeRaw = Number.parseInt(process.env.BFF_CLIENT_ERROR_SLACK_BATCH || '20', 10);
+  const clientErrorMaxAttemptsRaw = Number.parseInt(process.env.BFF_CLIENT_ERROR_SLACK_MAX_ATTEMPTS || '5', 10);
   const workQueueBatchSize = Number.isFinite(workQueueBatchSizeRaw) && workQueueBatchSizeRaw > 0 ? workQueueBatchSizeRaw : 100;
   const workQueueMaxAttempts = Number.isFinite(workQueueMaxAttemptsRaw) && workQueueMaxAttemptsRaw > 0 ? workQueueMaxAttemptsRaw : 6;
   const outboxBatchSize = Number.isFinite(outboxBatchSizeRaw) && outboxBatchSizeRaw > 0 ? outboxBatchSizeRaw : 50;
   const outboxMaxAttempts = Number.isFinite(outboxMaxAttemptsRaw) && outboxMaxAttemptsRaw > 0 ? outboxMaxAttemptsRaw : 8;
+  const clientErrorBatchSize = Number.isFinite(clientErrorBatchSizeRaw) && clientErrorBatchSizeRaw > 0 ? clientErrorBatchSizeRaw : 20;
+  const clientErrorMaxAttempts = Number.isFinite(clientErrorMaxAttemptsRaw) && clientErrorMaxAttemptsRaw > 0 ? clientErrorMaxAttemptsRaw : 5;
   const workerSecret = readOptionalText(options.workerSecret || process.env.BFF_WORKER_SECRET || process.env.CRON_SECRET);
+  const slackAlertService = options.slackAlertService || createSlackAlertService();
 
   async function resolveMemberIdentity({ tenantId, actorId }) {
     const normalizedTenantId = readOptionalText(tenantId);
@@ -896,6 +932,196 @@ export function createBffApp(options = {}) {
   });
   app.get('/api/internal/workers/monthly-close/run', runMonthlyCloseWorkerRoute);
   app.post('/api/internal/workers/monthly-close/run', runMonthlyCloseWorkerRoute);
+
+  const runClientErrorSlackWorkerRoute = asyncHandler(async (req, res) => {
+    assertInternalWorkerAuthorized(req);
+    const limit = parseLimit(req.body?.limit ?? req.query?.limit, clientErrorBatchSize, 100);
+    const maxAttempts = parseLimit(req.body?.maxAttempts ?? req.query?.maxAttempts, clientErrorMaxAttempts, 20);
+
+    if (!slackAlertService.enabled) {
+      res.status(200).json({
+        ok: true,
+        worker: 'client_errors',
+        enabled: false,
+        reason: 'slack_webhook_not_configured',
+        processed: 0,
+        delivered: 0,
+        failed: 0,
+      });
+      return;
+    }
+
+    const pendingSnap = await db
+      .collectionGroup('client_error_events')
+      .where('slackStatus', '==', 'pending')
+      .limit(limit)
+      .get();
+
+    let processed = 0;
+    let delivered = 0;
+    let failed = 0;
+
+    for (const docSnap of pendingSnap.docs) {
+      processed += 1;
+      const event = docSnap.data() || {};
+      const nextAttemptCount = Number.isInteger(event.slackAttemptCount) ? event.slackAttemptCount + 1 : 1;
+      const attemptedAt = now();
+
+      try {
+        await slackAlertService.notifyClientError(event);
+        await docSnap.ref.set({
+          slackStatus: 'sent',
+          slackAttemptCount: nextAttemptCount,
+          slackLastAttemptAt: attemptedAt,
+          slackNotifiedAt: attemptedAt,
+          slackLastError: null,
+          updatedAt: attemptedAt,
+        }, { merge: true });
+        delivered += 1;
+      } catch (error) {
+        const exhausted = nextAttemptCount >= maxAttempts;
+        await docSnap.ref.set({
+          slackStatus: exhausted ? 'failed' : 'pending',
+          slackAttemptCount: nextAttemptCount,
+          slackLastAttemptAt: attemptedAt,
+          slackLastError: truncateText(error instanceof Error ? error.message : String(error), 500),
+          updatedAt: attemptedAt,
+        }, { merge: true });
+        failed += 1;
+      }
+    }
+
+    res.status(200).json({
+      ok: true,
+      worker: 'client_errors',
+      enabled: true,
+      processed,
+      delivered,
+      failed,
+      pending: pendingSnap.size,
+    });
+  });
+  app.get('/api/internal/workers/client-errors/run', runClientErrorSlackWorkerRoute);
+  app.post('/api/internal/workers/client-errors/run', runClientErrorSlackWorkerRoute);
+
+  app.post('/api/v1/client-errors', asyncHandler(async (req, res) => {
+    req.context = await resolveApiRequestContext(req, {
+      authMode: authMode === 'headers' ? 'headers' : 'firebase_optional',
+      verifyToken,
+      resolveMemberIdentity,
+    });
+    res.setHeader('x-request-id', req.context.requestId);
+
+    const parsed = parseWithSchema(clientErrorIngestSchema, req.body, 'Invalid client error payload');
+    const { tenantId, actorId, actorRole, actorEmail, authSource, requestId } = req.context;
+    const timestamp = now();
+    const eventId = `cerr_${timestamp.replace(/[^0-9]/g, '').slice(0, 14)}_${randomUUID().replace(/-/g, '').slice(0, 10)}`;
+    const slackEligible = slackAlertService.shouldAlertClientError(parsed);
+
+    const initialSlackStatus = !slackEligible
+      ? 'skipped'
+      : (slackAlertService.enabled ? 'pending' : 'disabled');
+
+    const event = stripUndefinedDeep({
+      id: eventId,
+      tenantId,
+      actorId,
+      actorRole,
+      actorEmail,
+      authSource,
+      requestId,
+      eventType: parsed.eventType || 'exception',
+      level: parsed.level || 'error',
+      source: parsed.source,
+      name: parsed.name,
+      message: parsed.message,
+      stack: parsed.stack,
+      route: parsed.route,
+      href: parsed.href,
+      clientRequestId: parsed.clientRequestId,
+      fingerprint: parsed.fingerprint,
+      tags: parsed.tags,
+      extra: parsed.extra,
+      userAgent: readOptionalText(req.header('user-agent')),
+      occurredAt: parsed.occurredAt || timestamp,
+      slackEligible,
+      slackStatus: initialSlackStatus,
+      slackAttemptCount: 0,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      version: 1,
+    });
+
+    const eventRef = db.doc(`orgs/${tenantId}/client_error_events/${eventId}`);
+    await eventRef.set(event, { merge: false });
+
+    console.error(JSON.stringify(stripUndefinedDeep({
+      severity: mapClientErrorSeverity(event.level),
+      message: 'client.error',
+      eventId,
+      tenantId,
+      actorId,
+      actorRole,
+      actorEmailMasked: piiProtector.maskEmail(actorEmail || ''),
+      authSource,
+      requestId,
+      clientRequestId: event.clientRequestId,
+      source: event.source,
+      route: event.route,
+      href: event.href,
+      errorName: event.name,
+      errorMessage: event.message,
+      fingerprint: event.fingerprint,
+      userAgent: event.userAgent,
+      tagKeys: Object.keys(event.tags || {}),
+      extraKeys: Object.keys(event.extra || {}),
+      occurredAt: event.occurredAt,
+      createdAt: event.createdAt,
+    })));
+
+    let slackStatus = event.slackStatus;
+    if (slackEligible && slackAlertService.enabled) {
+      const attemptedAt = now();
+      try {
+        await slackAlertService.notifyClientError(event);
+        slackStatus = 'sent';
+        await eventRef.set({
+          slackStatus,
+          slackAttemptCount: 1,
+          slackLastAttemptAt: attemptedAt,
+          slackNotifiedAt: attemptedAt,
+          slackLastError: null,
+          updatedAt: attemptedAt,
+        }, { merge: true });
+      } catch (error) {
+        slackStatus = 'failed';
+        const slackLastError = truncateText(error instanceof Error ? error.message : String(error), 500);
+        await eventRef.set({
+          slackStatus,
+          slackAttemptCount: 1,
+          slackLastAttemptAt: attemptedAt,
+          slackLastError,
+          updatedAt: attemptedAt,
+        }, { merge: true });
+        console.error(JSON.stringify(stripUndefinedDeep({
+          severity: 'ERROR',
+          message: 'client.error.slack_delivery_failed',
+          eventId,
+          tenantId,
+          requestId,
+          slackLastError,
+        })));
+      }
+    }
+
+    res.status(200).json({
+      ok: true,
+      id: eventId,
+      tenantId,
+      receivedAt: timestamp,
+      slackStatus,
+    });
+  }));
 
   app.use('/api/v1', createApiContextMiddleware({ authMode, verifyToken, resolveMemberIdentity }));
 
@@ -1226,6 +1452,62 @@ export function createBffApp(options = {}) {
       matrix: parsed.matrix,
     });
     res.status(200).json(analysis);
+  }));
+
+  app.post('/api/v1/projects/:projectId/sheet-sources/upload', asyncHandler(async (req, res) => {
+    const { tenantId, actorId } = req.context;
+    assertActorRoleAllowed(req, ROUTE_ROLES.writeCore, 'upload project sheet source');
+    const { projectId } = req.params;
+    const parsed = parseWithSchema(
+      projectSheetSourceUploadSchema,
+      req.body,
+      'Invalid project sheet source upload payload',
+    );
+
+    await ensureDocumentExists(
+      db,
+      `orgs/${tenantId}/projects/${projectId}`,
+      `Project not found: ${projectId}`,
+    );
+
+    const uploaded = await projectSheetSourceStorageService.uploadSource({
+      tenantId,
+      actorId,
+      projectId,
+      sourceType: parsed.sourceType,
+      fileName: parsed.fileName,
+      mimeType: parsed.mimeType,
+      fileSize: parsed.fileSize,
+      contentBase64: parsed.contentBase64,
+    });
+
+    const timestamp = uploaded.uploadedAt || now();
+    const metadata = {
+      tenantId,
+      projectId,
+      sourceType: parsed.sourceType,
+      sheetName: parsed.sheetName,
+      fileName: uploaded.name,
+      storagePath: uploaded.path,
+      downloadURL: uploaded.downloadURL,
+      contentType: uploaded.contentType,
+      uploadedAt: timestamp,
+      rowCount: parsed.rowCount,
+      columnCount: parsed.columnCount,
+      matchedColumns: parsed.matchedColumns || [],
+      unmatchedColumns: parsed.unmatchedColumns || [],
+      previewMatrix: parsed.previewMatrix || [],
+      ...(parsed.applyTarget ? { applyTarget: parsed.applyTarget } : {}),
+      updatedAt: timestamp,
+      updatedBy: actorId,
+    };
+
+    await db.doc(`orgs/${tenantId}/projects/${projectId}/sheet_sources/${parsed.sourceType}`).set(
+      metadata,
+      { merge: true },
+    );
+
+    res.status(200).json(metadata);
   }));
 
   app.post('/api/v1/project-requests/contract/analyze', asyncHandler(async (req, res) => {

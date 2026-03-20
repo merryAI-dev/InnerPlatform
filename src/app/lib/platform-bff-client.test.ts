@@ -13,6 +13,7 @@ import {
   provisionTransactionEvidenceDriveViaBff,
   readPlatformApiRuntimeConfig,
   syncTransactionEvidenceDriveViaBff,
+  uploadProjectSheetSourceViaBff,
   uploadProjectRequestContractViaBff,
   toRequestActor,
   uploadTransactionEvidenceDriveViaBff,
@@ -641,6 +642,63 @@ describe('platform-bff-client', () => {
       timeoutMs: 25000,
     }));
     expect(analysis.likelyTarget).toBe('expense_sheet');
+  });
+
+  it('calls project sheet source upload endpoint', async () => {
+    const client = {
+      post: vi.fn(async () => ({
+        data: {
+          sourceType: 'usage',
+          projectId: 'p001',
+          sheetName: '사용내역',
+          fileName: '환경AC.xlsx',
+          storagePath: 'orgs/mysc/project-sheet-sources/p001/usage/123-환경AC.xlsx',
+          downloadURL: 'https://example.com/source.xlsx',
+          contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          uploadedAt: '2026-03-19T12:00:00.000Z',
+          rowCount: 176,
+          columnCount: 27,
+          matchedColumns: ['작성자', '비목'],
+          unmatchedColumns: ['정산증빙자료 부착완료 여부'],
+          previewMatrix: [['작성자', '비목'], ['메리', '여비']],
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    };
+
+    const result = await uploadProjectSheetSourceViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm' },
+      projectId: 'p001',
+      upload: {
+        sourceType: 'usage',
+        sheetName: '사용내역',
+        fileName: '환경AC.xlsx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        fileSize: 123456,
+        contentBase64: 'ZmFrZS14bHN4',
+        rowCount: 176,
+        columnCount: 27,
+        matchedColumns: ['작성자', '비목'],
+        unmatchedColumns: ['정산증빙자료 부착완료 여부'],
+        previewMatrix: [['작성자', '비목'], ['메리', '여비']],
+        applyTarget: 'expense_sheet',
+      },
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/projects/p001/sheet-sources/upload', expect.objectContaining({
+      tenantId: 'mysc',
+      body: expect.objectContaining({
+        sourceType: 'usage',
+        sheetName: '사용내역',
+        applyTarget: 'expense_sheet',
+      }),
+      timeoutMs: 45000,
+    }));
+    expect(result.sourceType).toBe('usage');
+    expect(result.previewMatrix[1]).toEqual(['메리', '여비']);
   });
 
   it('normalizes nullable google sheet migration analysis arrays', async () => {

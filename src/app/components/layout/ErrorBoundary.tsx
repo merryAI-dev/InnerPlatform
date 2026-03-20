@@ -2,6 +2,7 @@ import React from 'react';
 import { AlertTriangle, Home, RefreshCcw } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
+import { reportError } from '../../platform/observability';
 
 type ResetKey = string | number | null | undefined;
 
@@ -29,10 +30,19 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
     return { hasError: true, error };
   }
 
-  componentDidCatch(error: unknown) {
-    // Keep a console record for debugging; UI shows a user-friendly fallback.
-    // eslint-disable-next-line no-console
-    console.error('[ErrorBoundary] uncaught error', error);
+  componentDidCatch(error: unknown, info: React.ErrorInfo) {
+    reportError(error, {
+      message: '[ErrorBoundary] uncaught error',
+      options: {
+        level: 'error',
+        tags: {
+          surface: 'error_boundary',
+        },
+        extra: {
+          componentStack: info.componentStack,
+        },
+      },
+    });
   }
 
   componentDidUpdate(prevProps: ErrorBoundaryProps) {
@@ -94,4 +104,3 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
     );
   }
 }
-

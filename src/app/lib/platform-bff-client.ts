@@ -1,5 +1,7 @@
 import { featureFlags, parseFeatureFlag } from '../config/feature-flags';
 import type {
+  ProjectSheetSourceSnapshot,
+  ProjectSheetSourceType,
   ProjectRequestContractAnalysis,
   TransactionState,
 } from '../data/types';
@@ -111,6 +113,21 @@ export interface GoogleSheetMigrationAnalysisResult {
   nextActions: string[];
   suggestedMappings: GoogleSheetMigrationAnalysisSuggestion[];
   headerPreview?: string[];
+}
+
+export interface ProjectSheetSourceUploadPayload {
+  sourceType: ProjectSheetSourceType;
+  sheetName: string;
+  fileName: string;
+  mimeType: string;
+  fileSize: number;
+  contentBase64: string;
+  rowCount: number;
+  columnCount: number;
+  matchedColumns?: string[];
+  unmatchedColumns?: string[];
+  previewMatrix?: string[][];
+  applyTarget?: string;
 }
 
 export interface ProjectRequestContractAnalysisResult extends ProjectRequestContractAnalysis {}
@@ -540,6 +557,26 @@ export async function analyzeGoogleSheetImportViaBff(params: {
     },
   );
   return normalizeGoogleSheetMigrationAnalysisResult(response.data);
+}
+
+export async function uploadProjectSheetSourceViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  upload: ProjectSheetSourceUploadPayload;
+  client?: PlatformApiClientLike;
+}): Promise<ProjectSheetSourceSnapshot> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<ProjectSheetSourceSnapshot>(
+    `/api/v1/projects/${params.projectId}/sheet-sources/upload`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.upload,
+      timeoutMs: 45000,
+    },
+  );
+  return response.data;
 }
 
 export async function analyzeProjectRequestContractViaBff(params: {

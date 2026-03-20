@@ -1,5 +1,7 @@
 # Monitoring & SLO Guide
 
+상세 실행 플랜은 [Observability-Implementation-Plan.md](/Users/boram/InnerPlatform/guidelines/Observability-Implementation-Plan.md) 참고.
+
 ## SLO Targets
 
 | Metric | Target | Source |

@@ -64,6 +64,10 @@
       "destination": "/api/bff?__path=/api/internal/workers/monthly-close/run"
     },
     {
+      "source": "/api/internal/workers/client-errors/run",
+      "destination": "/api/bff?__path=/api/internal/workers/client-errors/run"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

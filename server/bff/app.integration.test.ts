@@ -43,6 +43,7 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       'transactions',
       'comments',
       'evidences',
+      'client_error_events',
       'audit_logs',
       'audit_chain',
       'change_events',
@@ -79,6 +80,43 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     expect(response.status).toBe(200);
     expect(response.body.ok).toBe(true);
     expect(response.body.projectId).toBe(projectId);
+  });
+
+  it('ingests client error events into Firestore', async () => {
+    const response = await api
+      .post('/api/v1/client-errors')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-client-error-001' })
+      .send({
+        eventType: 'exception',
+        message: 'Portal projects listen failed',
+        name: 'FirebaseError',
+        stack: 'Error: Portal projects listen failed',
+        level: 'error',
+        source: 'portal_store',
+        route: '/portal/project-settings',
+        href: 'https://inner-platform.vercel.app/portal/project-settings',
+        clientRequestId: 'ui_req_001',
+        tags: {
+          action: 'projects_listen',
+        },
+        extra: {
+          requestId: 'req_001',
+        },
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body.ok).toBe(true);
+    expect(response.body.id).toMatch(/^cerr_/);
+
+    const stored = await db.doc(`orgs/${tenantId}/client_error_events/${response.body.id}`).get();
+    expect(stored.exists).toBe(true);
+    expect(stored.data()).toMatchObject({
+      tenantId,
+      actorId,
+      source: 'portal_store',
+      message: 'Portal projects listen failed',
+      clientRequestId: 'ui_req_001',
+    });
   });
 
   it('previews google sheet rows for an existing project', async () => {
@@ -172,6 +210,62 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
         ['No.', '입금액', '지급처'],
       ],
     });
+  });
+
+  it('uploads and persists project sheet source snapshots for an existing project', async () => {
+    const projectSheetSourceStorageService = {
+      uploadSource: vi.fn(async () => ({
+        path: 'orgs/mysc/project-sheet-sources/p-source-001/usage/123-환경AC.xlsx',
+        name: '환경AC.xlsx',
+        downloadURL: 'https://example.com/source.xlsx',
+        size: 1024,
+        contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        uploadedAt: '2026-03-19T12:00:00.000Z',
+      })),
+    };
+    const sourceApi = request(createBffApp({ projectId, workerSecret, db, projectSheetSourceStorageService }));
+
+    await sourceApi
+      .post('/api/v1/projects')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-source-001' })
+      .send({ id: 'p-source-001', name: 'Source Project' });
+
+    const upload = await sourceApi
+      .post('/api/v1/projects/p-source-001/sheet-sources/upload')
+      .set(defaultHeaders)
+      .send({
+        sourceType: 'usage',
+        sheetName: '사용내역',
+        fileName: '환경AC.xlsx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        fileSize: 1024,
+        contentBase64: 'ZmFrZS14bHN4',
+        rowCount: 176,
+        columnCount: 27,
+        matchedColumns: ['작성자', '비목'],
+        unmatchedColumns: ['정산증빙자료 부착완료 여부'],
+        previewMatrix: [
+          ['작성자', '비목'],
+          ['메리', '여비'],
+        ],
+        applyTarget: 'expense_sheet',
+      });
+
+    expect(upload.status).toBe(200);
+    expect(projectSheetSourceStorageService.uploadSource).toHaveBeenCalledWith(expect.objectContaining({
+      tenantId,
+      actorId,
+      projectId: 'p-source-001',
+      sourceType: 'usage',
+      fileName: '환경AC.xlsx',
+    }));
+    expect(upload.body.sourceType).toBe('usage');
+    expect(upload.body.previewMatrix[1]).toEqual(['메리', '여비']);
+
+    const snap = await db.doc(`orgs/${tenantId}/projects/p-source-001/sheet_sources/usage`).get();
+    expect(snap.exists).toBe(true);
+    expect(snap.data()?.sheetName).toBe('사용내역');
+    expect(snap.data()?.applyTarget).toBe('expense_sheet');
   });
 
   it('rejects disallowed CORS origin', async () => {

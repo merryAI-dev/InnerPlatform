@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeMatrixToImportRows, SETTLEMENT_COLUMNS } from './settlement-csv';
+import { analyzeSettlementHeaderMapping, normalizeMatrixToImportRows, SETTLEMENT_COLUMNS } from './settlement-csv';
 
 function readCell(row: { cells: string[] }, header: string): string {
   const index = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === header);
@@ -31,5 +31,27 @@ describe('normalizeMatrixToImportRows', () => {
     expect(readCell(rows[0], 'e나라 등록')).toBe('Y');
     expect(readCell(rows[0], '최종완료')).toBe('Y');
     expect(readCell(rows[0], '비고')).toBe('샘플 비고');
+  });
+
+  it('supports hybrid two-row headers and merges special workbook evidence columns', () => {
+    const matrix = [
+      ['기본 정보', '', '', '', '', '', '', '', '', '', '입금/출금', '입금/출금', '입금/출금', '입금/출금', '사업팀', '사업팀', '증빙', '증빙', '정산지원', '도담', '도담'],
+      ['작성자', 'No.', '거래일시', '비목', '세목', 'cashflow항목', '통장잔액', '통장에 찍힌 입/출금액', '입금액', '매입부가세 반환', '사업비 사용액', '매입부가세', '지급처', '상세 적요(내용)', '필수 증빙 자료', '추가 증빙 자료', '작성 필요 자료', '드라이브 바로가기', '도담 준비 필요자료', 'e나라 등록', '최종완료'],
+      ['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+      ['보람', '12', '2026-03-17', '여비', '교통비', '직접사업비(공급가액)+매입부가세', '120,000', '', '', '', '50,000', '5,000', 'KTX', '서울 출장', '출장신청서', '영수증', '지출결의서', 'https://drive.google.com/example', '정산 메모', 'Y', 'N'],
+    ];
+
+    const analysis = analyzeSettlementHeaderMapping(matrix);
+    const rows = normalizeMatrixToImportRows(matrix);
+
+    expect(analysis.matchedHeaders.some((header) => header.includes('상세 적요'))).toBe(true);
+    expect(rows).toHaveLength(1);
+    expect(readCell(rows[0], '상세 적요')).toBe('서울 출장');
+    expect(readCell(rows[0], '필수증빙자료 리스트')).toBe('출장신청서, 영수증');
+    expect(readCell(rows[0], '준비필요자료')).toBe('지출결의서');
+    expect(readCell(rows[0], '증빙자료 드라이브')).toBe('https://drive.google.com/example');
+    expect(readCell(rows[0], '준비 필요자료')).toBe('정산 메모');
+    expect(readCell(rows[0], '사업비 사용액')).toBe('50,000');
+    expect(readCell(rows[0], '매입부가세')).toBe('5,000');
   });
 });

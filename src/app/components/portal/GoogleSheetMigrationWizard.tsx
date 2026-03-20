@@ -3,11 +3,20 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  ExternalLink,
   FileSpreadsheet,
   Loader2,
+  Upload,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import type { BudgetCodeEntry, BudgetCodeRename, BudgetPlanRow } from '../../data/types';
+import type {
+  AccountType,
+  BudgetCodeEntry,
+  BudgetCodeRename,
+  BudgetPlanRow,
+  ProjectSheetSourceSnapshot,
+  SettlementType,
+} from '../../data/types';
 import {
   type ActorLike,
   analyzeGoogleSheetImportViaBff,
@@ -15,6 +24,7 @@ import {
   type GoogleSheetImportPreviewResult,
   normalizeGoogleSheetMigrationAnalysisResult,
   previewGoogleSheetImportViaBff,
+  uploadProjectSheetSourceViaBff,
 } from '../../lib/platform-bff-client';
 import { PlatformApiError } from '../../platform/api-client';
 import {
@@ -26,7 +36,12 @@ import {
   buildDevGoogleSheetImportPreview,
   DEV_GOOGLE_SHEET_SAMPLE_VALUE,
 } from '../../platform/google-sheet-migration.samples';
-import { normalizeMatrixToImportRows, SETTLEMENT_COLUMNS, type ImportRow } from '../../platform/settlement-csv';
+import {
+  analyzeSettlementHeaderMapping,
+  normalizeMatrixToImportRows,
+  SETTLEMENT_COLUMNS,
+  type ImportRow,
+} from '../../platform/settlement-csv';
 import {
   describeGoogleSheetMigrationTarget,
   parseBankStatementMatrix,
@@ -34,10 +49,13 @@ import {
   parseCashflowProjectionMatrix,
   parseEvidenceRuleMatrix,
   planBudgetPlanMerge,
+  resolveProjectSheetSourceType,
   type BudgetPlanMergePlan,
   type CashflowProjectionImportPayload,
   type GoogleSheetMigrationDescriptor,
 } from '../../platform/google-sheet-migration';
+import { parseLocalWorkbookFile, type LocalWorkbookSheet } from '../../platform/local-workbook';
+import { reportError } from '../../platform/observability';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import {
@@ -79,11 +97,15 @@ interface GoogleSheetMigrationWizardProps {
   onOpenChange: (open: boolean) => void;
   orgId: string;
   projectId: string;
+  projectName: string;
+  projectSettlementType?: SettlementType;
+  projectAccountType?: AccountType;
   activeSheetName: string;
   bffActor: ActorLike;
   expenseSheetRows: ImportRow[];
   budgetPlanRows: BudgetPlanRow[];
   evidenceRequiredMap: Record<string, string>;
+  sheetSources: ProjectSheetSourceSnapshot[];
   devHarnessEnabled: boolean;
   ensureGoogleWorkspaceAccess: () => Promise<string | null | undefined>;
   saveExpenseSheetRows: (rows: ImportRow[]) => Promise<void>;
@@ -91,6 +113,7 @@ interface GoogleSheetMigrationWizardProps {
   saveBudgetCodeBook: (rows: BudgetCodeEntry[], renames?: BudgetCodeRename[]) => Promise<void>;
   saveBankStatementRows: (sheet: BankStatementImportSheet) => Promise<void>;
   saveEvidenceRequiredMap: (map: Record<string, string>) => Promise<void>;
+  markSheetSourceApplied: (input: { sourceType: ProjectSheetSourceSnapshot['sourceType']; applyTarget: string }) => Promise<void>;
   upsertWeekAmounts: (input: {
     projectId: string;
     yearMonth: string;
@@ -134,16 +157,137 @@ function buildAnalysisMatrixSample(matrix: string[][]): string[][] {
     .map((row) => (row || []).slice(0, GOOGLE_SHEET_AI_MAX_COLS).map((cell) => String(cell ?? '')));
 }
 
+function buildStoredPreviewMatrix(matrix: string[][]): string[][] {
+  return (matrix || [])
+    .slice(0, 60)
+    .map((row) => (row || []).slice(0, 24).map((cell) => String(cell ?? '')));
+}
+
+async function readFileAsBase64(file: File): Promise<string> {
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error || new Error('파일 읽기에 실패했습니다.'));
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.readAsDataURL(file);
+  });
+
+  const [, base64 = ''] = dataUrl.split(',', 2);
+  if (!base64) {
+    throw new Error(`파일 인코딩에 실패했습니다: ${file.name}`);
+  }
+  return base64;
+}
+
+interface LocalWorkbookState {
+  file: File;
+  spreadsheetId: string;
+  spreadsheetTitle: string;
+  sheets: LocalWorkbookSheet[];
+}
+
+type PreviewSourceMode = 'google_sheet' | 'local_workbook' | 'saved_source';
+
+function buildLocalWorkbookPreview(
+  workbook: LocalWorkbookState,
+  sheetName: string,
+): GoogleSheetImportPreviewResult {
+  const selectedSheet = workbook.sheets.find((sheet) => sheet.name === sheetName) || workbook.sheets[0];
+  return {
+    spreadsheetId: workbook.spreadsheetId,
+    spreadsheetTitle: workbook.spreadsheetTitle,
+    selectedSheetName: selectedSheet?.name || '',
+    availableSheets: workbook.sheets.map((sheet, index) => ({
+      sheetId: index,
+      title: sheet.name,
+      index,
+    })),
+    matrix: selectedSheet?.matrix || [],
+  };
+}
+
+function buildSavedSourcePreview(source: ProjectSheetSourceSnapshot): GoogleSheetImportPreviewResult {
+  return {
+    spreadsheetId: `saved:${source.sourceType}:${source.uploadedAt}`,
+    spreadsheetTitle: source.fileName,
+    selectedSheetName: source.sheetName,
+    availableSheets: [
+      { sheetId: 0, title: source.sheetName, index: 0 },
+    ],
+    matrix: source.previewMatrix || [],
+  };
+}
+
+function summarizeSourceHeaders(
+  descriptor: GoogleSheetMigrationDescriptor,
+  matrix: string[][],
+): { matchedColumns: string[]; unmatchedColumns: string[] } {
+  if (descriptor.target === 'expense_sheet') {
+    const summary = analyzeSettlementHeaderMapping(matrix);
+    return {
+      matchedColumns: summary.matchedHeaders,
+      unmatchedColumns: summary.unmatchedHeaders,
+    };
+  }
+
+  const headers = (matrix.find((row) => (row || []).some((cell) => String(cell || '').trim())) || [])
+    .map((cell) => String(cell || '').trim())
+    .filter(Boolean);
+  if (headers.length === 0) {
+    return { matchedColumns: [], unmatchedColumns: [] };
+  }
+
+  const headerSet = new Set(headers);
+  const matchIfIncludes = (needles: string[]) => headers.filter((header) => needles.some((needle) => header.includes(needle)));
+  let matchedColumns: string[] = [];
+  switch (descriptor.target) {
+    case 'budget_plan':
+      matchedColumns = [
+        ...matchIfIncludes(['구분', '사업비 구분']),
+        ...matchIfIncludes(['비목']),
+        ...matchIfIncludes(['세목']),
+        ...matchIfIncludes(['최초 승인 예산']),
+        ...matchIfIncludes(['변경 승인 예산', '변경 예산']),
+        ...matchIfIncludes(['산정 내역', '특이사항']),
+      ];
+      break;
+    case 'evidence_rules':
+      matchedColumns = [
+        ...matchIfIncludes(['비목']),
+        ...matchIfIncludes(['세목']),
+        ...matchIfIncludes(['필수 증빙 자료', '사전 업로드']),
+        ...matchIfIncludes(['회계법인 추가 요청했던 자료', '사후 업로드']),
+      ];
+      break;
+    case 'bank_statement':
+      matchedColumns = matchIfIncludes(['거래일시', '적요', '출금', '입금', '잔액']);
+      break;
+    case 'cashflow_projection':
+      matchedColumns = matchIfIncludes(['구분']);
+      break;
+    default:
+      matchedColumns = [];
+  }
+  const dedupedMatched = Array.from(new Set(matchedColumns)).filter((header) => headerSet.has(header));
+  return {
+    matchedColumns: dedupedMatched,
+    unmatchedColumns: headers.filter((header) => !dedupedMatched.includes(header)),
+  };
+}
+
 export function GoogleSheetMigrationWizard({
   open,
   onOpenChange,
   orgId,
   projectId,
+  projectName,
+  projectSettlementType,
+  projectAccountType,
   activeSheetName,
   bffActor,
   expenseSheetRows,
   budgetPlanRows,
   evidenceRequiredMap,
+  sheetSources,
   devHarnessEnabled,
   ensureGoogleWorkspaceAccess,
   saveExpenseSheetRows,
@@ -151,26 +295,36 @@ export function GoogleSheetMigrationWizard({
   saveBudgetCodeBook,
   saveBankStatementRows,
   saveEvidenceRequiredMap,
+  markSheetSourceApplied,
   upsertWeekAmounts,
 }: GoogleSheetMigrationWizardProps) {
   const [step, setStep] = useState<GoogleSheetWizardStep>('source');
   const [link, setLink] = useState('');
   const [preview, setPreview] = useState<GoogleSheetImportPreviewResult | null>(null);
+  const [previewSourceMode, setPreviewSourceMode] = useState<PreviewSourceMode>('google_sheet');
+  const [selectedSavedSource, setSelectedSavedSource] = useState<ProjectSheetSourceSnapshot | null>(null);
+  const [localWorkbook, setLocalWorkbook] = useState<LocalWorkbookState | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [applying, setApplying] = useState(false);
+  const [sourceUploadingKey, setSourceUploadingKey] = useState('');
   const [analysis, setAnalysis] = useState<GoogleSheetMigrationAnalysisResult | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisError, setAnalysisError] = useState('');
   const [analysisKey, setAnalysisKey] = useState('');
   const [pendingSheetName, setPendingSheetName] = useState('');
+  const isENaraProject = projectSettlementType === 'TYPE5' || projectAccountType === 'DEDICATED';
 
   useEffect(() => {
     if (open) return;
     setStep('source');
     setLink('');
     setPreview(null);
+    setPreviewSourceMode('google_sheet');
+    setSelectedSavedSource(null);
+    setLocalWorkbook(null);
     setPreviewing(false);
     setApplying(false);
+    setSourceUploadingKey('');
     setAnalysis(null);
     setAnalysisLoading(false);
     setAnalysisError('');
@@ -187,11 +341,20 @@ export function GoogleSheetMigrationWizard({
     if (!preview) return null;
 
     const descriptor = selectedDescriptor;
+    const finalizeReviewState = (state: GoogleSheetMigrationReviewState): GoogleSheetMigrationReviewState => {
+      if (previewSourceMode !== 'saved_source') return state;
+      return {
+        ...state,
+        applySupported: false,
+        applyButtonLabel: '저장된 원본 미리보기',
+        applyHint: '저장된 원본은 read-only preview 입니다. 다시 반영하려면 Google Sheets 또는 로컬 워크북을 다시 불러오세요.',
+      };
+    };
     switch (descriptor.target) {
       case 'expense_sheet': {
         const expenseRows = normalizeMatrixToImportRows(preview.matrix);
         const mergePlan = planGoogleSheetImportMerge(expenseSheetRows, expenseRows);
-        return {
+        return finalizeReviewState({
           descriptor,
           applySupported: mergePlan.summary.importedCount > 0,
           applyButtonLabel: `${activeSheetName}에 안전 반영`,
@@ -204,12 +367,12 @@ export function GoogleSheetMigrationWizard({
           ],
           expenseRows,
           mergeSummary: mergePlan.summary,
-        };
+        });
       }
       case 'budget_plan': {
         const parsed = parseBudgetPlanMatrix(preview.matrix);
         const mergePlan = planBudgetPlanMerge(budgetPlanRows, parsed.rows);
-        return {
+        return finalizeReviewState({
           descriptor,
           applySupported: parsed.rows.length > 0,
           applyButtonLabel: '예산/비목 세목 교체 반영',
@@ -221,11 +384,11 @@ export function GoogleSheetMigrationWizard({
             { label: '기존 교체', value: `${mergePlan.summary.updateCount}건` },
           ],
           budgetPlanMerge: mergePlan,
-        };
+        });
       }
       case 'bank_statement': {
         const bankSheet = parseBankStatementMatrix(preview.matrix);
-        return {
+        return finalizeReviewState({
           descriptor,
           applySupported: bankSheet.rows.length > 0,
           applyButtonLabel: '통장내역 반영',
@@ -236,11 +399,11 @@ export function GoogleSheetMigrationWizard({
             { label: '프로파일', value: bankSheet.columns[0] ? '자동 정규화' : '헤더 확인 필요' },
           ],
           bankSheet,
-        };
+        });
       }
       case 'evidence_rules': {
         const parsed = parseEvidenceRuleMatrix(preview.matrix);
-        return {
+        return finalizeReviewState({
           descriptor,
           applySupported: Object.keys(parsed.map).length > 0,
           applyButtonLabel: '증빙 매핑 반영',
@@ -250,13 +413,13 @@ export function GoogleSheetMigrationWizard({
             { label: '기존 규칙', value: `${Object.keys(evidenceRequiredMap || {}).length}개` },
           ],
           evidenceRuleMap: parsed.map,
-        };
+        });
       }
       case 'cashflow_projection': {
         const parsed = parseCashflowProjectionMatrix(preview.matrix);
         const amountCellCount = parsed.sheets.reduce((total, sheet) => total + Object.keys(sheet.amounts).length, 0);
         const yearMonthCount = new Set(parsed.sheets.map((sheet) => sheet.yearMonth)).size;
-        return {
+        return finalizeReviewState({
           descriptor,
           applySupported: parsed.sheets.length > 0,
           applyButtonLabel: '캐시플로우 projection 반영',
@@ -267,10 +430,10 @@ export function GoogleSheetMigrationWizard({
             { label: '입력 셀', value: `${amountCellCount}칸` },
           ],
           cashflowProjection: parsed,
-        };
+        });
       }
       default:
-        return {
+        return finalizeReviewState({
           descriptor,
           applySupported: false,
           applyButtonLabel: '현재는 preview only',
@@ -278,7 +441,7 @@ export function GoogleSheetMigrationWizard({
           summaryStats: [
             { label: '탭 상태', value: descriptor.readinessLabel },
           ],
-        };
+        });
     }
   }, [
     activeSheetName,
@@ -286,6 +449,7 @@ export function GoogleSheetMigrationWizard({
     evidenceRequiredMap,
     expenseSheetRows,
     preview,
+    previewSourceMode,
     selectedDescriptor,
   ]);
 
@@ -331,6 +495,122 @@ export function GoogleSheetMigrationWizard({
     step,
   ]);
 
+  const persistLocalSheetSource = async (
+    workbook: LocalWorkbookState,
+    nextPreview: GoogleSheetImportPreviewResult,
+  ) => {
+    const descriptor = describeGoogleSheetMigrationTarget(nextPreview.selectedSheetName);
+    const sourceType = resolveProjectSheetSourceType(descriptor.target);
+    if (!sourceType) return;
+    const uploadKey = `${sourceType}:${nextPreview.selectedSheetName}`;
+    setSourceUploadingKey(uploadKey);
+    try {
+      const { matchedColumns, unmatchedColumns } = summarizeSourceHeaders(descriptor, nextPreview.matrix);
+      const contentBase64 = await readFileAsBase64(workbook.file);
+      await uploadProjectSheetSourceViaBff({
+        tenantId: orgId,
+        actor: bffActor,
+        projectId,
+        upload: {
+          sourceType,
+          sheetName: nextPreview.selectedSheetName,
+          fileName: workbook.file.name,
+          mimeType: workbook.file.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          fileSize: workbook.file.size,
+          contentBase64,
+          rowCount: nextPreview.matrix.length,
+          columnCount: Math.max(...nextPreview.matrix.map((row) => row.length), 0),
+          matchedColumns,
+          unmatchedColumns,
+          previewMatrix: buildStoredPreviewMatrix(nextPreview.matrix),
+          applyTarget: descriptor.target,
+        },
+      });
+    } catch (error) {
+      reportError(error, {
+        message: '[GoogleSheetMigrationWizard] source upload failed:',
+        options: {
+          level: 'error',
+          tags: {
+            surface: 'google_sheet_migration',
+            action: 'source_upload',
+          },
+          extra: {
+            projectId,
+            sourceType,
+            sheetName: nextPreview.selectedSheetName,
+            actorId: bffActor.uid,
+          },
+        },
+      });
+      toast.error(resolveApiErrorMessage(error, '원본 워크북 저장에 실패했습니다.'));
+    } finally {
+      setSourceUploadingKey((current) => (current === uploadKey ? '' : current));
+    }
+  };
+
+  const handleLocalWorkbookUpload = async (file: File) => {
+    setPendingSheetName('');
+    setPreviewing(true);
+    try {
+      const sheets = await parseLocalWorkbookFile(file);
+      if (sheets.length === 0) {
+        throw new Error('파일에서 읽을 수 있는 시트를 찾지 못했습니다.');
+      }
+      const workbook: LocalWorkbookState = {
+        file,
+        spreadsheetId: `local:${Date.now()}:${file.name}`,
+        spreadsheetTitle: file.name,
+        sheets,
+      };
+      setLocalWorkbook(workbook);
+      setSelectedSavedSource(null);
+      setPreviewSourceMode('local_workbook');
+      setPreview(buildLocalWorkbookPreview(workbook, sheets[0]?.name || ''));
+      setAnalysis(null);
+      setAnalysisError('');
+      setAnalysisKey('');
+      setStep('sheet');
+      toast.success(`로컬 워크북 미리보기 완료: ${file.name}`);
+    } catch (error) {
+      reportError(error, {
+        message: '[GoogleSheetMigrationWizard] local workbook preview failed:',
+        options: {
+          level: 'error',
+          tags: {
+            surface: 'google_sheet_migration',
+            action: 'local_workbook_preview',
+          },
+          extra: {
+            projectId,
+            fileName: file.name,
+            fileSize: file.size,
+            actorId: bffActor.uid,
+          },
+        },
+      });
+      setLocalWorkbook(null);
+      setPreview(null);
+      setAnalysis(null);
+      setAnalysisError('');
+      setAnalysisKey('');
+      toast.error(resolveApiErrorMessage(error, '로컬 워크북을 읽지 못했습니다.'));
+    } finally {
+      setPreviewing(false);
+    }
+  };
+
+  const handleSavedSourcePreview = (source: ProjectSheetSourceSnapshot) => {
+    setSelectedSavedSource(source);
+    setLocalWorkbook(null);
+    setPreviewSourceMode('saved_source');
+    setPreview(buildSavedSourcePreview(source));
+    setAnalysis(null);
+    setAnalysisError('');
+    setAnalysisKey('');
+    setStep('review');
+  };
+
   const previewGoogleSheetImport = async (sheetName?: string) => {
     const trimmedLink = link.trim();
     if (!trimmedLink) {
@@ -342,6 +622,9 @@ export function GoogleSheetMigrationWizard({
       setPendingSheetName(sheetName || '');
       const result = buildDevGoogleSheetImportPreview(sheetName);
       setPreview(result);
+      setPreviewSourceMode('google_sheet');
+      setSelectedSavedSource(null);
+      setLocalWorkbook(null);
       setAnalysis(null);
       setAnalysisError('');
       setAnalysisKey('');
@@ -367,6 +650,9 @@ export function GoogleSheetMigrationWizard({
         ...(sheetName ? { sheetName } : {}),
       });
       setPreview(result);
+      setPreviewSourceMode('google_sheet');
+      setSelectedSavedSource(null);
+      setLocalWorkbook(null);
       setAnalysis(null);
       setAnalysisError('');
       setAnalysisKey('');
@@ -374,6 +660,22 @@ export function GoogleSheetMigrationWizard({
       setStep(sheetName ? 'review' : 'sheet');
       toast.success(`Google Sheets 미리보기 완료: ${result.selectedSheetName}`);
     } catch (error) {
+      reportError(error, {
+        message: '[GoogleSheetMigrationWizard] google sheet preview failed:',
+        options: {
+          level: 'error',
+          tags: {
+            surface: 'google_sheet_migration',
+            action: 'google_sheet_preview',
+          },
+          extra: {
+            projectId,
+            actorId: bffActor.uid,
+            sheetName: sheetName || '',
+            sourceValue: trimmedLink,
+          },
+        },
+      });
       setPreview(null);
       setAnalysis(null);
       setAnalysisError('');
@@ -383,6 +685,24 @@ export function GoogleSheetMigrationWizard({
       setPendingSheetName('');
       setPreviewing(false);
     }
+  };
+
+  const handleSelectSheet = (sheetName: string) => {
+    if (localWorkbook && previewSourceMode === 'local_workbook') {
+      const nextPreview = buildLocalWorkbookPreview(localWorkbook, sheetName);
+      setPendingSheetName(sheetName);
+      setPreview(nextPreview);
+      setSelectedSavedSource(null);
+      setAnalysis(null);
+      setAnalysisError('');
+      setAnalysisKey('');
+      setStep('review');
+      void persistLocalSheetSource(localWorkbook, nextPreview).finally(() => {
+        setPendingSheetName('');
+      });
+      return;
+    }
+    void previewGoogleSheetImport(sheetName);
   };
 
   const applyGoogleSheetImport = async () => {
@@ -448,9 +768,31 @@ export function GoogleSheetMigrationWizard({
         default:
           throw new Error('현재 선택한 탭은 바로 반영할 수 없습니다.');
       }
+      const sourceType = resolveProjectSheetSourceType(reviewState.descriptor.target);
+      if (sourceType) {
+        await markSheetSourceApplied({
+          sourceType,
+          applyTarget: reviewState.descriptor.target,
+        });
+      }
       setStep('sheet');
     } catch (error) {
-      console.error('[GoogleSheetMigrationWizard] apply failed:', error);
+      reportError(error, {
+        message: '[GoogleSheetMigrationWizard] apply failed:',
+        options: {
+          level: 'error',
+          tags: {
+            surface: 'google_sheet_migration',
+            action: 'apply',
+            applyTarget: reviewState.descriptor.target,
+          },
+          extra: {
+            projectId,
+            actorId: bffActor.uid,
+            selectedSheetName: preview.selectedSheetName,
+          },
+        },
+      });
       toast.error(resolveApiErrorMessage(error, 'Google Sheets 반영에 실패했습니다.'));
     } finally {
       setApplying(false);
@@ -474,16 +816,24 @@ export function GoogleSheetMigrationWizard({
       }}
       preview={preview}
       activeSheetName={activeSheetName}
+      projectName={projectName}
+      isENaraProject={isENaraProject}
       reviewState={reviewState}
       analysis={analysis}
       analysisLoading={analysisLoading}
       analysisError={analysisError}
       pendingSheetName={pendingSheetName}
       devHarnessEnabled={devHarnessEnabled}
+      sheetSources={sheetSources}
+      previewSourceMode={previewSourceMode}
+      selectedSavedSource={selectedSavedSource}
+      sourceUploadingKey={sourceUploadingKey}
       previewing={previewing}
       applying={applying}
       onPreview={() => void previewGoogleSheetImport()}
-      onSelectSheet={(sheetName) => void previewGoogleSheetImport(sheetName)}
+      onSelectSheet={handleSelectSheet}
+      onUploadLocalWorkbook={(file) => void handleLocalWorkbookUpload(file)}
+      onLoadSavedSource={handleSavedSourcePreview}
       onApply={() => void applyGoogleSheetImport()}
     />
   );
@@ -498,16 +848,24 @@ function GoogleSheetImportDialog({
   onLinkChange,
   preview,
   activeSheetName,
+  projectName,
+  isENaraProject,
   reviewState,
   analysis,
   analysisLoading,
   analysisError,
   pendingSheetName,
   devHarnessEnabled,
+  sheetSources,
+  previewSourceMode,
+  selectedSavedSource,
+  sourceUploadingKey,
   previewing,
   applying,
   onPreview,
   onSelectSheet,
+  onUploadLocalWorkbook,
+  onLoadSavedSource,
   onApply,
 }: {
   open: boolean;
@@ -518,16 +876,24 @@ function GoogleSheetImportDialog({
   onLinkChange: (value: string) => void;
   preview: GoogleSheetImportPreviewResult | null;
   activeSheetName: string;
+  projectName: string;
+  isENaraProject: boolean;
   reviewState: GoogleSheetMigrationReviewState | null;
   analysis: GoogleSheetMigrationAnalysisResult | null;
   analysisLoading: boolean;
   analysisError: string;
   pendingSheetName: string;
   devHarnessEnabled: boolean;
+  sheetSources: ProjectSheetSourceSnapshot[];
+  previewSourceMode: PreviewSourceMode;
+  selectedSavedSource: ProjectSheetSourceSnapshot | null;
+  sourceUploadingKey: string;
   previewing: boolean;
   applying: boolean;
   onPreview: () => void;
   onSelectSheet: (sheetName: string) => void;
+  onUploadLocalWorkbook: (file: File) => void;
+  onLoadSavedSource: (source: ProjectSheetSourceSnapshot) => void;
   onApply: () => void;
 }) {
   const protectedHeaderSet = useMemo(() => new Set(GOOGLE_SHEET_PROTECTED_HEADERS), []);
@@ -636,12 +1002,32 @@ function GoogleSheetImportDialog({
                     <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
                       <p className="text-sm font-semibold text-slate-950">이 wizard가 하는 일</p>
                       <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                        <SummaryStat label="지원 방식" value="링크 기반 스캔" />
+                        <SummaryStat label="지원 방식" value="Google Sheets + 로컬 업로드" />
                         <SummaryStat label="현재 직접 반영" value="예산·통장·사용내역·증빙·cashflow" />
                         <SummaryStat label="보호 대상" value="증빙/드라이브" />
                         <SummaryStat label="반영 위치" value={activeSheetName} />
                       </div>
                     </div>
+                    {isENaraProject && (
+                      <div className="rounded-2xl border border-violet-200 bg-violet-50 p-5 text-[12px] text-violet-950">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="font-semibold">{projectName} · 이나라도움 흐름</p>
+                            <p className="mt-1 text-violet-900/85">
+                              예전 e나라도움 import 흐름을 현재 wizard에 다시 연결했습니다. 권장 순서는 통장내역 → cashflow → 사용내역 → 예산총괄시트 → 증빙서류입니다.
+                            </p>
+                          </div>
+                          <Badge className="bg-violet-600 text-white hover:bg-violet-600">TYPE5 / 전용계좌</Badge>
+                        </div>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {['통장내역', 'cashflow', '사용내역', '예산총괄시트', '증빙서류'].map((label) => (
+                            <Badge key={label} variant="outline" className="border-violet-300 bg-white text-violet-900">
+                              {label}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-[12px] text-amber-950">
                       <p className="font-semibold">안전 규칙</p>
                       <ul className="mt-2 space-y-1 text-amber-900/90">
@@ -687,7 +1073,84 @@ function GoogleSheetImportDialog({
                         </p>
                       </div>
                     )}
+                    <div className="mt-4 border-t pt-4">
+                      <p className="text-[12px] font-semibold text-slate-900">로컬 워크북 업로드</p>
+                      <Input
+                        type="file"
+                        accept=".csv,.xlsx,.xls"
+                        className="mt-3 text-[12px]"
+                        disabled={previewing}
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          if (file) onUploadLocalWorkbook(file);
+                          event.currentTarget.value = '';
+                        }}
+                      />
+                      <p className="mt-2 text-[11px] text-muted-foreground">
+                        `사용내역` 원본은 apply와 별개로 read-only 보관용 snapshot도 함께 저장합니다.
+                      </p>
+                    </div>
                   </div>
+                  {sheetSources.length > 0 && (
+                    <div className="rounded-2xl border border-slate-200 bg-white p-5 xl:col-span-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <p className="text-[12px] font-semibold text-slate-900">최근 업로드한 원본 시트</p>
+                          <p className="mt-1 text-[11px] text-muted-foreground">
+                            저장된 원본은 read-only preview로 다시 열 수 있습니다.
+                          </p>
+                        </div>
+                        <Badge variant="outline" className="text-[10px]">{sheetSources.length}건</Badge>
+                      </div>
+                      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                        {sheetSources.map((source) => (
+                          <div key={`${source.sourceType}-${source.uploadedAt}`} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-[11px]">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <p className="truncate font-medium text-slate-900">{source.sheetName}</p>
+                                <p className="mt-1 truncate text-slate-600">{source.fileName}</p>
+                              </div>
+                              <Badge variant="outline" className="text-[10px]">{source.sourceType}</Badge>
+                            </div>
+                            <p className="mt-2 text-slate-600">
+                              {source.rowCount}행 · {source.columnCount}열
+                            </p>
+                            <p className="mt-1 text-slate-500">
+                              업로드: {source.uploadedAt ? source.uploadedAt.slice(0, 10) : '-'}
+                            </p>
+                            {source.lastAppliedAt && (
+                              <p className="mt-1 text-emerald-700">
+                                마지막 반영: {source.lastAppliedAt.slice(0, 10)}
+                              </p>
+                            )}
+                            <div className="mt-3 flex items-center gap-2">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="h-8 text-[11px]"
+                                onClick={() => onLoadSavedSource(source)}
+                              >
+                                <Upload className="mr-1 h-3.5 w-3.5" />
+                                미리보기
+                              </Button>
+                              {source.downloadURL && (
+                                <a
+                                  href={source.downloadURL}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-2 text-[11px] text-slate-700 hover:bg-slate-100"
+                                >
+                                  <ExternalLink className="mr-1 h-3.5 w-3.5" />
+                                  원본 열기
+                                </a>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   <div className="rounded-2xl border border-sky-200 bg-sky-50 p-5 text-[12px] text-sky-950">
                     <p className="font-semibold">AI migration assistant</p>
                     <p className="mt-1 text-sky-900/85">
@@ -719,6 +1182,13 @@ function GoogleSheetImportDialog({
                     {(preview?.availableSheets || []).map((sheet) => {
                       const descriptor = describeGoogleSheetMigrationTarget(sheet.title);
                       const isSelected = sheet.title === selectedSheetName;
+                      const isENaraRecommended = isENaraProject && (
+                        sheet.title.includes('통장내역')
+                        || sheet.title.includes('cashflow')
+                        || sheet.title.includes('사용내역')
+                        || sheet.title.includes('예산총괄')
+                        || sheet.title.includes('증빙서류')
+                      );
                       return (
                         <button
                           key={sheet.sheetId}
@@ -736,9 +1206,16 @@ function GoogleSheetImportDialog({
                               <p className="text-[13px] font-semibold text-slate-950">{sheet.title}</p>
                               <p className="mt-1 text-[11px] text-slate-600">{descriptor.description}</p>
                             </div>
-                            <Badge variant={descriptor.applySupported ? 'default' : 'outline'} className="text-[10px]">
-                              {descriptor.kindLabel}
-                            </Badge>
+                            <div className="flex items-center gap-1">
+                              {isENaraRecommended && (
+                                <Badge variant="outline" className="text-[10px] border-violet-300 bg-violet-50 text-violet-900">
+                                  이나라도움 추천
+                                </Badge>
+                              )}
+                              <Badge variant={descriptor.applySupported ? 'default' : 'outline'} className="text-[10px]">
+                                {descriptor.kindLabel}
+                              </Badge>
+                            </div>
                           </div>
                           <div className="mt-3 flex items-center justify-between text-[10px] text-slate-600">
                             <span>추천 화면: {descriptor.recommendedScreen}</span>
@@ -959,6 +1436,13 @@ function GoogleSheetImportDialog({
                   <p className="font-medium text-slate-900">{preview?.spreadsheetTitle || '워크북 미선택'}</p>
                   <p className="mt-1 text-slate-600">탭: {selectedSheetName || '없음'}</p>
                   <p className="mt-1 text-slate-600">분류: {selectedDescriptor.kindLabel}</p>
+                  <p className="mt-1 text-slate-600">
+                    소스: {previewSourceMode === 'google_sheet'
+                      ? 'Google Sheets'
+                      : previewSourceMode === 'local_workbook'
+                        ? '로컬 워크북'
+                        : '저장된 원본'}
+                  </p>
                   <p className="mt-1 text-slate-600">추천 화면: {selectedDescriptor.recommendedScreen}</p>
                 </div>
                 {preview && (
@@ -966,6 +1450,12 @@ function GoogleSheetImportDialog({
                     <p className="font-medium text-slate-900">탭 현황</p>
                     <p className="mt-1 text-slate-600">총 {preview.availableSheets.length}개 탭</p>
                     <p className="mt-1 text-slate-600">현재 active expense sheet: {activeSheetName}</p>
+                    {selectedSavedSource?.uploadedAt && (
+                      <p className="mt-1 text-slate-600">저장 시각: {selectedSavedSource.uploadedAt.replace('T', ' ').slice(0, 16)}</p>
+                    )}
+                    {sourceUploadingKey && (
+                      <p className="mt-1 text-sky-700">원본 snapshot 저장 중…</p>
+                    )}
                   </div>
                 )}
                 <GoogleSheetMigrationAiPanel

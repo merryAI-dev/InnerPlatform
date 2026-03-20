@@ -48,6 +48,7 @@ import {
   persistDevHarnessSession,
   type DevHarnessPreset,
 } from '../platform/dev-harness';
+import { setObservabilityUserContext } from '../platform/observability';
 
 export interface AuthUser {
   uid: string;
@@ -459,6 +460,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    setObservabilityUserContext(
+      user
+        ? {
+          id: user.uid,
+          email: user.email,
+          role: user.role,
+          tenantId: user.tenantId,
+          idToken: user.idToken,
+        }
+        : null,
+    );
+  }, [user]);
 
   const setWorkspacePreference = useCallback(async (
     workspace: WorkspaceId,
