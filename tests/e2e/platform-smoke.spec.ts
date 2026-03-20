@@ -10,7 +10,9 @@ async function loginAsPm(page: import('@playwright/test').Page) {
 async function loginAsAdmin(page: import('@playwright/test').Page) {
   await page.goto('/login');
   await page.getByRole('button', { name: '관리자 샘플 로그인' }).click();
-  await expect(page).toHaveURL(/^\//);
+  await expect
+    .poll(() => new URL(page.url()).pathname)
+    .toBe('/');
 }
 
 // ── 1. Login ──
