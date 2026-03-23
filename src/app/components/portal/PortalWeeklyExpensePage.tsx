@@ -35,6 +35,7 @@ import {
 } from '../../platform/google-drive-browser-upload';
 import { shouldFallbackToBffOnBrowserUploadError } from '../../platform/evidence-drive-upload';
 import { splitLooseNameList } from '../../platform/name-list';
+import { resolveApiErrorMessage } from '../../platform/api-error-message';
 import { reportError } from '../../platform/observability';
 import { type ImportRow } from '../../platform/settlement-csv';
 import { readDevAuthHarnessConfig } from '../../platform/dev-harness';
@@ -193,18 +194,10 @@ export function PortalWeeklyExpensePage() {
         },
       },
     });
-    if (error instanceof GoogleDriveBrowserUploadError) {
-      toast.error(error.message || `${actionLabel}에 실패했습니다.`);
-      return;
-    }
-    if (error instanceof PlatformApiError) {
-      const message = typeof error.body === 'object' && error.body && 'message' in (error.body as Record<string, unknown>)
-        ? String((error.body as Record<string, unknown>).message || '')
-        : error.message;
-      toast.error(message || `${actionLabel}에 실패했습니다.`);
-      return;
-    }
-    toast.error(`${actionLabel}에 실패했습니다.`);
+    const fallback = error instanceof GoogleDriveBrowserUploadError
+      ? (error.message || `${actionLabel}에 실패했습니다.`)
+      : `${actionLabel}에 실패했습니다.`;
+    toast.error(resolveApiErrorMessage(error, fallback));
   };
 
   const resolveVersionFromApiError = (error: unknown): number | null => {
@@ -220,11 +213,11 @@ export function PortalWeeklyExpensePage() {
     return null;
   };
 
-  const applyProvisionedDriveState = (
+  const applyProvisionedDriveState = async (
     txId: string,
     result: ProvisionTransactionEvidenceDriveResult,
   ) => {
-    updateTransaction(txId, {
+    await updateTransaction(txId, {
       version: result.version,
       evidenceDriveFolderId: result.folderId,
       evidenceDriveFolderName: result.folderName,
@@ -235,11 +228,11 @@ export function PortalWeeklyExpensePage() {
     });
   };
 
-  const applySyncedEvidenceState = (
+  const applySyncedEvidenceState = async (
     txId: string,
     result: SyncTransactionEvidenceDriveResult | UploadTransactionEvidenceDriveResult,
   ) => {
-    updateTransaction(txId, {
+    await updateTransaction(txId, {
       version: result.version,
       attachmentsCount: result.evidenceCount,
       evidenceDriveFolderId: result.folderId,
@@ -317,9 +310,9 @@ export function PortalWeeklyExpensePage() {
         state: result.state as TransactionState,
       };
       if (existingTx) {
-        updateTransaction(txId, syncedTx);
+        await updateTransaction(txId, syncedTx);
       } else {
-        addTransaction(syncedTx);
+        await addTransaction(syncedTx);
       }
       return txId;
     } catch (error) {
@@ -353,7 +346,7 @@ export function PortalWeeklyExpensePage() {
         actor: bffActor,
         transactionId: tx.id,
       });
-      applyProvisionedDriveState(tx.id, result);
+      await applyProvisionedDriveState(tx.id, result);
       toast.success(`증빙 폴더 연결 완료: ${result.folderName}`);
       return result;
     } catch (error) {
@@ -369,7 +362,7 @@ export function PortalWeeklyExpensePage() {
         actor: bffActor,
         transactionId: tx.id,
       });
-      applySyncedEvidenceState(tx.id, result);
+      await applySyncedEvidenceState(tx.id, result);
       toast.success(`증빙 동기화 완료: Drive 폴더 파일 ${result.evidenceCount}건 반영`);
     } catch (error) {
       handleEvidenceDriveError(error, '증빙 동기화');
@@ -481,7 +474,7 @@ export function PortalWeeklyExpensePage() {
       }
 
       if (usedBrowserUpload) {
-        updateTransaction(tx.id, {
+        await updateTransaction(tx.id, {
           evidenceDriveFolderId: folderId,
           evidenceDriveFolderName: workingTx.evidenceDriveFolderName,
           evidenceDriveLink: workingTx.evidenceDriveLink,
@@ -494,13 +487,13 @@ export function PortalWeeklyExpensePage() {
           actor: bffActor,
           transactionId: tx.id,
         });
-        applySyncedEvidenceState(tx.id, syncResult);
+        await applySyncedEvidenceState(tx.id, syncResult);
         const uploadLabel = uploads.length === 1
           ? uploads[0]?.reviewedFileName || uploads[0]?.file.name || '파일 1건'
           : `${uploads[0]?.reviewedFileName || uploads[0]?.file.name || '파일'} 외 ${uploads.length - 1}건`;
         toast.success(`업로드 완료 후 동기화됨: ${uploadLabel}`);
       } else if (lastResult) {
-        applySyncedEvidenceState(tx.id, lastResult);
+        await applySyncedEvidenceState(tx.id, lastResult);
       }
     } catch (error) {
       handleEvidenceDriveError(error, '증빙 업로드');
@@ -717,8 +710,16 @@ export function PortalWeeklyExpensePage() {
           projectName={projectName}
           transactions={transactions}
           defaultLedgerId={defaultLedgerId}
-          onAddTransaction={addTransaction}
-          onUpdateTransaction={updateTransaction}
+          onAddTransaction={(tx) => {
+            void addTransaction(tx).catch((error) => {
+              toast.error(resolveApiErrorMessage(error, '거래 저장에 실패했습니다.'));
+            });
+          }}
+          onUpdateTransaction={(txId, updates) => {
+            void updateTransaction(txId, updates).catch((error) => {
+              toast.error(resolveApiErrorMessage(error, '거래 수정에 실패했습니다.'));
+            });
+          }}
           authorOptions={authorOptions}
           budgetCodeBook={effectiveBudgetCodeBook}
           hideYearControls
@@ -729,16 +730,27 @@ export function PortalWeeklyExpensePage() {
           sheetRows={expenseSheetRows}
           onSaveSheetRows={saveExpenseSheetRows}
           onSubmitWeek={async ({ yearMonth, weekNo, txIds }) => {
+            let updatedCount = 0;
             try {
               await submitWeekAsPm({ projectId, yearMonth, weekNo });
-              for (const txId of txIds) changeTransactionState(txId, 'SUBMITTED');
+              for (const txId of txIds) {
+                await changeTransactionState(txId, 'SUBMITTED');
+                updatedCount += 1;
+              }
               toast.success(`${yearMonth} ${weekNo}주 제출 처리 완료`);
             } catch (err) {
-              toast.error('주간 제출 처리에 실패했습니다');
+              const fallback = updatedCount > 0
+                ? `주간 제출은 저장됐지만 거래 상태 ${updatedCount}/${txIds.length}건만 갱신했습니다.`
+                : '주간 제출 처리에 실패했습니다';
+              toast.error(resolveApiErrorMessage(err, fallback));
               throw err;
             }
           }}
-          onChangeTransactionState={(txId, newState, reason) => changeTransactionState(txId, newState, reason)}
+          onChangeTransactionState={(txId, newState, reason) => {
+            void changeTransactionState(txId, newState, reason).catch((error) => {
+              toast.error(resolveApiErrorMessage(error, '거래 상태 변경에 실패했습니다.'));
+            });
+          }}
           currentUserName={portalUser?.name || 'PM'}
           currentUserId={portalUser?.id || 'pm'}
           userRole={ledgerUserRole}
@@ -762,20 +774,20 @@ export function PortalWeeklyExpensePage() {
               projectAccountType={myProject?.accountType}
               activeSheetName={activeSheetName}
               bffActor={bffActor}
-            expenseSheetRows={expenseSheetRows}
-            budgetPlanRows={budgetPlanRows}
-            evidenceRequiredMap={evidenceRequiredMap}
-            sheetSources={sheetSources}
-            devHarnessEnabled={devHarnessConfig.enabled}
-            ensureGoogleWorkspaceAccess={ensureGoogleWorkspaceAccess}
-            saveExpenseSheetRows={saveExpenseSheetRows}
-            saveBudgetPlanRows={saveBudgetPlanRows}
-            saveBudgetCodeBook={saveBudgetCodeBook}
-            saveBankStatementRows={saveBankStatementRows}
-            saveEvidenceRequiredMap={saveEvidenceRequiredMap}
-            markSheetSourceApplied={markSheetSourceApplied}
-            upsertWeekAmounts={upsertWeekAmounts}
-          />
+              expenseSheetRows={expenseSheetRows || []}
+              budgetPlanRows={budgetPlanRows || []}
+              evidenceRequiredMap={evidenceRequiredMap}
+              sheetSources={sheetSources}
+              devHarnessEnabled={devHarnessConfig.enabled}
+              ensureGoogleWorkspaceAccess={ensureGoogleWorkspaceAccess}
+              saveExpenseSheetRows={saveExpenseSheetRows}
+              saveBudgetPlanRows={saveBudgetPlanRows}
+              saveBudgetCodeBook={saveBudgetCodeBook}
+              saveBankStatementRows={saveBankStatementRows}
+              saveEvidenceRequiredMap={saveEvidenceRequiredMap}
+              markSheetSourceApplied={markSheetSourceApplied}
+              upsertWeekAmounts={upsertWeekAmounts}
+            />
         </Suspense>
       )}
     </div>

@@ -19,6 +19,7 @@ import {
 } from '../ui/table';
 import { Separator } from '../ui/separator';
 import { useAppStore } from '../../data/store';
+import { resolveApiErrorMessage } from '../../platform/api-error-message';
 import {
   parseCsv, toCsv, escapeCsvCell, triggerDownload,
   normalizeSpace, normalizeKey, pickValue, parseNumber, parseDate, stableHash,
@@ -303,60 +304,78 @@ export function DataMigrationTab() {
     setApplySummary('');
 
     let processed = 0;
+    let failed = 0;
+    let firstFailureMessage = '';
     const importedIds = new Set<string>();
     const existingProjectIds = new Set(projects.map((p) => p.id));
     const existingParticipationIds = new Set(participationEntries.map((p) => p.id));
     const existingTransactionIds = new Set(transactions.map((t) => t.id));
 
-    for (const row of validRows) {
-      if (!row.normalized) continue;
-      if (section === 'projects') {
-        const project = row.normalized as Project;
-        if (importedIds.has(project.id)) continue;
-        importedIds.add(project.id);
-        const exists = existingProjectIds.has(project.id);
-        if (exists) {
-          updateProject(project.id, project);
-        } else {
-          addProject(project);
-          existingProjectIds.add(project.id);
-        }
-        processed++;
-        continue;
-      }
+    try {
+      for (const row of validRows) {
+        if (!row.normalized) continue;
 
-      if (section === 'participationEntries') {
-        const entry = row.normalized as ParticipationEntry;
-        if (importedIds.has(entry.id)) continue;
-        importedIds.add(entry.id);
-        const exists = existingParticipationIds.has(entry.id);
-        if (exists) {
-          updateParticipation(entry.id, entry);
-        } else {
-          addParticipation(entry);
-          existingParticipationIds.add(entry.id);
-        }
-        processed++;
-        continue;
-      }
+        try {
+          if (section === 'projects') {
+            const project = row.normalized as Project;
+            if (importedIds.has(project.id)) continue;
+            const exists = existingProjectIds.has(project.id);
+            if (exists) {
+              await updateProject(project.id, project);
+            } else {
+              await addProject(project);
+              existingProjectIds.add(project.id);
+            }
+            importedIds.add(project.id);
+            processed++;
+            continue;
+          }
 
-      if (section === 'transactions') {
-        const tx = row.normalized as Transaction;
-        if (importedIds.has(tx.id)) continue;
-        importedIds.add(tx.id);
-        const exists = existingTransactionIds.has(tx.id);
-        if (exists) {
-          updateTransaction(tx.id, tx);
-        } else {
-          addTransaction(tx);
-          existingTransactionIds.add(tx.id);
+          if (section === 'participationEntries') {
+            const entry = row.normalized as ParticipationEntry;
+            if (importedIds.has(entry.id)) continue;
+            const exists = existingParticipationIds.has(entry.id);
+            if (exists) {
+              await updateParticipation(entry.id, entry);
+            } else {
+              await addParticipation(entry);
+              existingParticipationIds.add(entry.id);
+            }
+            importedIds.add(entry.id);
+            processed++;
+            continue;
+          }
+
+          if (section === 'transactions') {
+            const tx = row.normalized as Transaction;
+            if (importedIds.has(tx.id)) continue;
+            const exists = existingTransactionIds.has(tx.id);
+            if (exists) {
+              await updateTransaction(tx.id, tx);
+            } else {
+              await addTransaction(tx);
+              existingTransactionIds.add(tx.id);
+            }
+            importedIds.add(tx.id);
+            processed++;
+          }
+        } catch (error) {
+          failed++;
+          if (!firstFailureMessage) {
+            firstFailureMessage = `${row.rowNumber}행: ${resolveApiErrorMessage(error, '반영에 실패했습니다.')}`;
+          }
         }
-        processed++;
       }
+    } finally {
+      setIsApplying(false);
+    }
+
+    if (failed > 0) {
+      setApplySummary(`적용 완료: 성공 ${processed}건, 실패 ${failed}건${firstFailureMessage ? ` · ${firstFailureMessage}` : ''}`);
+      return;
     }
 
     setApplySummary(`적용 완료: ${processed}건`);
-    setIsApplying(false);
   }
 
   async function downloadTemplateXlsx() {
@@ -528,7 +547,11 @@ export function DataMigrationTab() {
               </div>
 
               {applySummary && (
-                <div className="flex items-center gap-2 p-3 rounded-md border border-emerald-200 bg-emerald-50 text-emerald-700 text-sm">
+                <div className={`flex items-center gap-2 p-3 rounded-md border text-sm ${
+                  applySummary.includes('실패') || applySummary.includes('중단')
+                    ? 'border-amber-200 bg-amber-50 text-amber-700'
+                    : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                }`}>
                   <CheckCircle2 className="w-4 h-4" />
                   {applySummary}
                 </div>

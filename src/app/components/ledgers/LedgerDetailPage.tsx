@@ -22,6 +22,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { Separator } from '../ui/separator';
 import { useAppStore } from '../../data/store';
+import { resolveApiErrorMessage } from '../../platform/api-error-message';
 import {
   TX_STATE_LABELS, DIRECTION_LABELS, CASHFLOW_CATEGORY_LABELS, PAYMENT_METHOD_LABELS,
   EVIDENCE_STATUS_LABELS, BASIS_LABELS, SETTLEMENT_TYPE_LABELS,
@@ -122,7 +123,7 @@ export function LedgerDetailPage() {
     budgetCategory: '',
   });
 
-  const handleAddTx = () => {
+  const handleAddTx = async () => {
     const amt = Number(txForm.bankAmount) || 0;
     const dir = txForm.direction;
     const basis = ledger?.basis || 'SUPPLY_AMOUNT';
@@ -171,37 +172,53 @@ export function LedgerDetailPage() {
       updatedBy: currentUser.uid,
       updatedAt: new Date().toISOString(),
     };
-    addTransaction(newTx);
-    setShowTxForm(false);
-    setTxForm({
-      dateTime: new Date().toISOString().split('T')[0],
-      direction: 'OUT', method: 'TRANSFER',
-      cashflowCategory: '' as CashflowCategory,
-      counterparty: '', memo: '', bankAmount: '', budgetCategory: '',
-    });
-    toast.success('거래가 추가되었습니다.');
-  };
-
-  const handleSubmit = (txId: string) => {
-    changeTransactionState(txId, 'SUBMITTED');
-    toast.success('제출 완료');
-  };
-
-  const handleApprove = (txId: string) => {
-    changeTransactionState(txId, 'APPROVED');
-    toast.success('승인 완료');
-  };
-
-  const handleReject = () => {
-    if (selectedTxId) {
-      changeTransactionState(selectedTxId, 'REJECTED', rejectReason);
-      setShowRejectDialog(false);
-      setRejectReason('');
-      toast.success('반려 처리됨');
+    try {
+      await addTransaction(newTx);
+      setShowTxForm(false);
+      setTxForm({
+        dateTime: new Date().toISOString().split('T')[0],
+        direction: 'OUT', method: 'TRANSFER',
+        cashflowCategory: '' as CashflowCategory,
+        counterparty: '', memo: '', bankAmount: '', budgetCategory: '',
+      });
+      toast.success('거래가 추가되었습니다.');
+    } catch (error) {
+      toast.error(resolveApiErrorMessage(error, '거래가 추가되지 않았습니다.'));
     }
   };
 
-  const handleAddComment = () => {
+  const handleSubmit = async (txId: string) => {
+    try {
+      await changeTransactionState(txId, 'SUBMITTED');
+      toast.success('제출 완료');
+    } catch (error) {
+      toast.error(resolveApiErrorMessage(error, '제출 처리에 실패했습니다.'));
+    }
+  };
+
+  const handleApprove = async (txId: string) => {
+    try {
+      await changeTransactionState(txId, 'APPROVED');
+      toast.success('승인 완료');
+    } catch (error) {
+      toast.error(resolveApiErrorMessage(error, '승인 처리에 실패했습니다.'));
+    }
+  };
+
+  const handleReject = async () => {
+    if (selectedTxId) {
+      try {
+        await changeTransactionState(selectedTxId, 'REJECTED', rejectReason);
+        setShowRejectDialog(false);
+        setRejectReason('');
+        toast.success('반려 처리됨');
+      } catch (error) {
+        toast.error(resolveApiErrorMessage(error, '반려 처리에 실패했습니다.'));
+      }
+    }
+  };
+
+  const handleAddComment = async () => {
     if (!selectedTxId || !commentText.trim()) return;
     const newComment: CommentType = {
       id: 'c' + String(Date.now()).slice(-6),
@@ -211,8 +228,12 @@ export function LedgerDetailPage() {
       content: commentText.trim(),
       createdAt: new Date().toISOString(),
     };
-    addComment(newComment);
-    setCommentText('');
+    try {
+      await addComment(newComment);
+      setCommentText('');
+    } catch (error) {
+      toast.error(resolveApiErrorMessage(error, '메모 저장에 실패했습니다.'));
+    }
   };
 
   if (!project || !ledger) {
@@ -377,7 +398,7 @@ export function LedgerDetailPage() {
                             variant="outline"
                             size="sm"
                             className="h-6 text-xs px-2"
-                            onClick={() => handleSubmit(t.id)}
+                            onClick={() => void handleSubmit(t.id)}
                           >
                             <Send className="w-3 h-3 mr-1" /> 제출
                           </Button>
@@ -388,7 +409,7 @@ export function LedgerDetailPage() {
                               variant="outline"
                               size="sm"
                               className="h-6 text-xs px-2 text-green-700 border-green-300"
-                              onClick={() => handleApprove(t.id)}
+                              onClick={() => void handleApprove(t.id)}
                             >
                               <CheckCircle2 className="w-3 h-3" />
                             </Button>
@@ -559,9 +580,13 @@ export function LedgerDetailPage() {
                     onChange={e => setCommentText(e.target.value)}
                     placeholder="코멘트 입력..."
                     className="h-8 text-sm"
-                    onKeyDown={e => e.key === 'Enter' && handleAddComment()}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        void handleAddComment();
+                      }
+                    }}
                   />
-                  <Button size="sm" className="h-8 px-3" onClick={handleAddComment} disabled={!commentText.trim()}>
+                  <Button size="sm" className="h-8 px-3" onClick={() => void handleAddComment()} disabled={!commentText.trim()}>
                     <Send className="w-3 h-3" />
                   </Button>
                 </div>
@@ -656,7 +681,7 @@ export function LedgerDetailPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowTxForm(false)}>취소</Button>
             <Button
-              onClick={handleAddTx}
+              onClick={() => void handleAddTx()}
               disabled={!txForm.dateTime || !txForm.cashflowCategory || !txForm.counterparty || !txForm.bankAmount}
             >
               추가
@@ -680,7 +705,7 @@ export function LedgerDetailPage() {
           />
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowRejectDialog(false)}>취소</Button>
-            <Button variant="destructive" onClick={handleReject} disabled={!rejectReason.trim()}>반려</Button>
+            <Button variant="destructive" onClick={() => void handleReject()} disabled={!rejectReason.trim()}>반려</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

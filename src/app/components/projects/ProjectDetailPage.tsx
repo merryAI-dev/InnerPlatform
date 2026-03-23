@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router';
+import { toast } from 'sonner';
 import {
   ArrowLeft, Plus, BookOpen, Calendar, Building2,
   User, DollarSign, BarChart3, Landmark, FileText,
@@ -35,6 +36,7 @@ import {
 import { EmptyState } from '../ui/empty-state';
 import { Progress } from '../ui/progress';
 import { computeProjectCompleteness } from '../../data/project-completeness';
+import { resolveApiErrorMessage } from '../../platform/api-error-message';
 
 const statusColor: Record<string, string> = {
   CONTRACT_PENDING: 'bg-amber-100 text-amber-800',
@@ -136,7 +138,7 @@ export function ProjectDetailPage() {
     );
   }
 
-  const handleCreateLedger = () => {
+  const handleCreateLedger = async () => {
     const tpl = templates.find(t => t.id === ledgerForm.templateId);
     const newLedger: Ledger = {
       id: 'l' + String(Date.now()).slice(-6),
@@ -148,13 +150,21 @@ export function ProjectDetailPage() {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    addLedger(newLedger);
-    setShowLedgerDialog(false);
-    setLedgerForm({ name: '', templateId: '', basis: '' as Basis, settlementType: '' as SettlementType });
+    try {
+      await addLedger(newLedger);
+      setShowLedgerDialog(false);
+      setLedgerForm({ name: '', templateId: '', basis: '' as Basis, settlementType: '' as SettlementType });
+    } catch (error) {
+      toast.error(resolveApiErrorMessage(error, '원장 생성에 실패했습니다.'));
+    }
   };
 
-  const handleStatusChange = (newStatus: ProjectStatus) => {
-    updateProject(project.id, { status: newStatus, updatedAt: new Date().toISOString() });
+  const handleStatusChange = async (newStatus: ProjectStatus) => {
+    try {
+      await updateProject(project.id, { status: newStatus, updatedAt: new Date().toISOString() });
+    } catch (error) {
+      toast.error(resolveApiErrorMessage(error, '사업 상태 변경에 실패했습니다.'));
+    }
   };
 
   return (
@@ -220,7 +230,7 @@ export function ProjectDetailPage() {
                 </AlertDialogHeader>
                 <AlertDialogFooter>
                   <AlertDialogCancel>취소</AlertDialogCancel>
-                  <AlertDialogAction onClick={() => handleStatusChange('IN_PROGRESS')}>
+                  <AlertDialogAction onClick={() => void handleStatusChange('IN_PROGRESS')}>
                     사업 시작
                   </AlertDialogAction>
                 </AlertDialogFooter>
@@ -249,7 +259,7 @@ export function ProjectDetailPage() {
                 </AlertDialogHeader>
                 <AlertDialogFooter>
                   <AlertDialogCancel>취소</AlertDialogCancel>
-                  <AlertDialogAction onClick={() => handleStatusChange('COMPLETED')}>
+                  <AlertDialogAction onClick={() => void handleStatusChange('COMPLETED')}>
                     사업 종료
                   </AlertDialogAction>
                 </AlertDialogFooter>
@@ -591,7 +601,7 @@ export function ProjectDetailPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowLedgerDialog(false)}>취소</Button>
-            <Button onClick={handleCreateLedger} disabled={!ledgerForm.templateId}>생성</Button>
+            <Button onClick={() => void handleCreateLedger()} disabled={!ledgerForm.templateId}>생성</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

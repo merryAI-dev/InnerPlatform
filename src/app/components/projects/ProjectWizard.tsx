@@ -19,6 +19,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { toast } from 'sonner';
 import { useAppStore } from '../../data/store';
+import { resolveApiErrorMessage } from '../../platform/api-error-message';
 import type {
   AccountType,
   Basis,
@@ -119,6 +120,7 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
   const { addProject, updateProject, members } = useAppStore();
 
   const [currentStep, setCurrentStep] = useState(0);
+  const [saving, setSaving] = useState(false);
   const [targetPhase, setTargetPhase] = useState<ProjectPhase>(editProject?.phase || initialPhase);
   const [formData, setFormData] = useState<WizardFormData>(() => {
     if (editProject) {
@@ -190,7 +192,8 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
   const overallScore = requiredChecks.length > 0 ? Math.round((passedRequired / requiredChecks.length) * 100) : 0;
 
   // Submit
-  const handleSubmit = useCallback((phase: ProjectPhase) => {
+  const handleSubmit = useCallback(async (phase: ProjectPhase) => {
+    if (saving) return;
     const now = new Date().toISOString();
     const slug = formData.name
       .toLowerCase()
@@ -240,15 +243,22 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
       updatedAt: now,
     };
 
-    if (editProject) {
-      updateProject(editProject.id, projectData);
-      toast.success(phase === 'CONFIRMED' ? '사업이 확정되었습니다' : '사업 정보가 저장되었습니다');
-    } else {
-      addProject(projectData);
-      toast.success(phase === 'CONFIRMED' ? '확정 사업이 등록되었습니다' : '예정 사업이 등록되었습니다');
+    setSaving(true);
+    try {
+      if (editProject) {
+        await updateProject(editProject.id, projectData);
+        toast.success(phase === 'CONFIRMED' ? '사업이 확정되었습니다' : '사업 정보가 저장되었습니다');
+      } else {
+        await addProject(projectData);
+        toast.success(phase === 'CONFIRMED' ? '확정 사업이 등록되었습니다' : '예정 사업이 등록되었습니다');
+      }
+      navigate('/projects');
+    } catch (error) {
+      toast.error(resolveApiErrorMessage(error, '사업 저장에 실패했습니다.'));
+    } finally {
+      setSaving(false);
     }
-    navigate('/projects');
-  }, [formData, calculatedProfit, editProject, addProject, updateProject, navigate]);
+  }, [saving, formData, calculatedProfit, editProject, addProject, updateProject, navigate]);
 
   // Format number input
   const fmtInput = (n: number) => n > 0 ? n.toLocaleString('ko-KR') : '';
@@ -853,7 +863,7 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
         <Button
           variant="outline"
           onClick={() => setCurrentStep(Math.max(0, currentStep - 1))}
-          disabled={currentStep === 0}
+          disabled={currentStep === 0 || saving}
           className="gap-1"
         >
           <ChevronLeft className="w-4 h-4" />
@@ -865,24 +875,26 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
             <>
               <Button
                 variant="outline"
-                onClick={() => handleSubmit('PROSPECT')}
+                onClick={() => void handleSubmit('PROSPECT')}
+                disabled={saving}
                 className="gap-1"
               >
                 <Save className="w-4 h-4" />
-                예정 사업으로 저장
+                {saving ? '저장 중...' : '예정 사업으로 저장'}
               </Button>
               <Button
-                onClick={() => handleSubmit('CONFIRMED')}
-                disabled={!canConfirm}
+                onClick={() => void handleSubmit('CONFIRMED')}
+                disabled={!canConfirm || saving}
                 className="gap-1"
               >
                 <CheckCircle2 className="w-4 h-4" />
-                확정 등록
+                {saving ? '저장 중...' : '확정 등록'}
               </Button>
             </>
           ) : (
             <Button
               onClick={() => setCurrentStep(Math.min(STEPS.length - 1, currentStep + 1))}
+              disabled={saving}
               className="gap-1"
             >
               다음
