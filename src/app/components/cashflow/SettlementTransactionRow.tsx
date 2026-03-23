@@ -10,12 +10,15 @@ import {
 import { buildDriveTransactionFolderName } from '../../platform/drive-evidence';
 import { CASHFLOW_LINE_OPTIONS } from '../../platform/settlement-csv';
 import {
+  findLatestFieldEdit,
+  formatCommentTime,
   fmt,
   METHOD_OPTIONS,
   normalizeMethodValue,
   TX_STATE_BADGE,
   isEditable,
 } from '../../platform/settlement-grid-helpers';
+import { parseNumber } from '../../platform/csv-utils';
 import { Button } from '../ui/button';
 import { Checkbox } from '../ui/checkbox';
 
@@ -66,6 +69,7 @@ export function SettlementTransactionRow({
   const autoCompletedDesc = tx.evidenceAutoListedDesc || '';
   const manualCompletedDesc = resolveEvidenceCompletedManualDesc(tx);
   const effectiveCompletedDesc = resolveEvidenceCompletedDesc(tx);
+  const expenseAudit = findLatestFieldEdit(tx, 'amounts.expenseAmount');
   const suggestedFolderName = tx.evidenceDriveFolderName || buildDriveTransactionFolderName(tx);
   const driveStatusLabel = tx.evidenceDriveSyncStatus === 'UPLOADED'
     ? '업로드됨'
@@ -111,6 +115,38 @@ export function SettlementTransactionRow({
   const numberCell = (value: number | undefined) => (
     <td className="px-1 py-0.5 border-b border-r text-right tabular-nums">
       <span className="text-[11px]">{fmt(value)}</span>
+    </td>
+  );
+
+  const expenseAmountCell = (value: number | undefined) => (
+    <td className="px-1 py-0.5 border-b border-r text-right tabular-nums align-top">
+      <div className="space-y-0.5">
+        <input
+          key={`expense-${tx.id}-${value ?? ''}`}
+          type="text"
+          defaultValue={fmt(value)}
+          className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5 text-right"
+          onBlur={(e) => {
+            const nextAmount = parseNumber(e.target.value) ?? 0;
+            if (nextAmount !== (value ?? 0)) {
+              void Promise.resolve(onUpdate({
+                amounts: {
+                  ...tx.amounts,
+                  expenseAmount: nextAmount,
+                },
+              })).catch((error) => {
+                console.error('[SettlementLedger] update transaction failed:', error);
+              });
+            }
+            e.target.value = fmt(nextAmount);
+          }}
+        />
+        {expenseAudit && (
+          <div className="text-[9px] leading-tight text-muted-foreground">
+            최종 수정 {expenseAudit.editedBy} · {formatCommentTime(expenseAudit.editedAt)}
+          </div>
+        )}
+      </div>
     </td>
   );
 
@@ -233,7 +269,7 @@ export function SettlementTransactionRow({
       {numberCell(tx.amounts?.bankAmount)}
       {numberCell(tx.amounts?.depositAmount)}
       {numberCell(tx.amounts?.vatRefund)}
-      {numberCell(tx.amounts?.expenseAmount)}
+      {expenseAmountCell(tx.amounts?.expenseAmount)}
       {numberCell(tx.amounts?.vatIn)}
       {textCell(tx.counterparty, 'counterparty')}
       {textCell(tx.memo, 'memo', 'min-w-[150px]')}

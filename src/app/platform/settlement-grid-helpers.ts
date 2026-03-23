@@ -1,4 +1,4 @@
-import type { TransactionState } from '../data/types';
+import type { Transaction, TransactionState } from '../data/types';
 import { getMonthMondayWeeks, type MonthMondayWeek } from './cashflow-weeks';
 
 // ── Number formatting ──
@@ -63,6 +63,59 @@ export function buildSheetRowCommentId(tempId: string): string {
 
 export function formatCommentTime(value: string): string {
   return value ? value.slice(0, 16).replace('T', ' ') : '';
+}
+
+export function findLatestFieldEdit(
+  transaction: Pick<Transaction, 'editHistory'> | undefined,
+  field: string,
+): NonNullable<Transaction['editHistory']>[number] | null {
+  const history = transaction?.editHistory || [];
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const entry = history[index];
+    if (entry?.field === field) return entry;
+  }
+  return null;
+}
+
+export function buildTransactionEditHistoryEntries(
+  existing: Transaction,
+  updates: Partial<Transaction>,
+  editedBy: string,
+  editedAt: string,
+): NonNullable<Transaction['editHistory']> {
+  const entries: NonNullable<Transaction['editHistory']> = [];
+
+  for (const [key, newValue] of Object.entries(updates)) {
+    if (key === 'amounts' && newValue && typeof newValue === 'object') {
+      const nextAmounts = newValue as Partial<Transaction['amounts']>;
+      for (const [amountKey, amountValue] of Object.entries(nextAmounts)) {
+        const previousAmount = existing.amounts?.[amountKey as keyof Transaction['amounts']];
+        if (previousAmount !== amountValue) {
+          entries.push({
+            field: `amounts.${amountKey}`,
+            before: previousAmount,
+            after: amountValue,
+            editedBy,
+            editedAt,
+          });
+        }
+      }
+      continue;
+    }
+
+    const previousValue = (existing as unknown as Record<string, unknown>)[key];
+    if (previousValue !== newValue) {
+      entries.push({
+        field: key,
+        before: previousValue,
+        after: newValue,
+        editedBy,
+        editedAt,
+      });
+    }
+  }
+
+  return entries;
 }
 
 // ── Grid constants ──
