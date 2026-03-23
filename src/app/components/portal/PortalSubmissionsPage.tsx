@@ -5,8 +5,7 @@ import { PageHeader } from '../layout/PageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
-import { Checkbox } from '../ui/checkbox';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+import { ToggleGroup, ToggleGroupItem } from '../ui/toggle-group';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -57,7 +56,27 @@ function formatKstDateTime(value: string | undefined): { date: string; time: str
   };
 }
 
-function StatusAuditMeta(props: {
+function pickLatestAuditMeta(props: {
+  editedAt?: string;
+  editedByName?: string;
+  updatedAt?: string;
+  updatedByName?: string;
+}) {
+  const items = [
+    props.updatedAt
+      ? { title: '최종 제출 반영', at: props.updatedAt, byName: props.updatedByName || '-' }
+      : null,
+    props.editedAt
+      ? { title: '최종 수정 상태 반영', at: props.editedAt, byName: props.editedByName || '-' }
+      : null,
+  ].filter(Boolean) as Array<{ title: string; at: string; byName: string }>;
+
+  if (items.length === 0) return null;
+  items.sort((left, right) => String(right.at).localeCompare(String(left.at)));
+  return items[0];
+}
+
+function AuditMetaLine(props: {
   title: string;
   at?: string;
   byName?: string;
@@ -66,15 +85,15 @@ function StatusAuditMeta(props: {
   if (!formatted && !props.byName) return null;
 
   return (
-    <div className="mt-1.5 rounded-md border border-border/40 bg-muted/20 px-2 py-1.5 text-left text-[9px] leading-4 text-muted-foreground">
+    <div className="pt-1.5 text-left text-[9px] leading-4 text-muted-foreground">
       <div className="text-foreground/80" style={{ fontWeight: 700 }}>{props.title}</div>
       {formatted && (
         <div className="mt-0.5">
           <div>{formatted.date}</div>
-          <div>{formatted.time}</div>
+          <div>{formatted.time} · {props.byName || '-'}</div>
         </div>
       )}
-      <div className="mt-0.5">처리자 {props.byName || '-'}</div>
+      {!formatted && <div className="mt-0.5">{props.byName || '-'}</div>}
     </div>
   );
 }
@@ -317,8 +336,13 @@ export function PortalSubmissionsPage() {
             )}
           </div>
 
-          <div className="text-[10px] text-muted-foreground">
-            수정 여부는 드롭다운으로 직접 선택하고, 하단 상태는 제출 체크 여부를 표시합니다.
+          <div className="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
+            <span className="inline-flex items-center rounded-full bg-sky-500/10 px-2 py-0.5 text-sky-700 dark:text-sky-300" style={{ fontWeight: 700 }}>
+              수정 상태 직접 선택
+            </span>
+            <span className="inline-flex items-center rounded-full bg-emerald-500/10 px-2 py-0.5 text-emerald-700 dark:text-emerald-300" style={{ fontWeight: 700 }}>
+              제출 상태 별도 체크
+            </span>
           </div>
 
           <div className="overflow-x-auto">
@@ -339,103 +363,107 @@ export function PortalSubmissionsPage() {
                   const expenseDone = Boolean(status?.expenseUpdated);
                   const projectionEdited = resolveEditedState(status?.projectionEdited, hasWeekAmounts(weekSheet?.projection));
                   const expenseEdited = resolveEditedState(status?.expenseEdited, hasWeekAmounts(weekSheet?.actual));
+                  const projectionAudit = pickLatestAuditMeta({
+                    editedAt: status?.projectionEditedAt,
+                    editedByName: status?.projectionEditedByName,
+                    updatedAt: status?.projectionUpdatedAt,
+                    updatedByName: status?.projectionUpdatedByName,
+                  });
+                  const expenseAudit = pickLatestAuditMeta({
+                    editedAt: status?.expenseEditedAt,
+                    editedByName: status?.expenseEditedByName,
+                    updatedAt: status?.expenseUpdatedAt,
+                    updatedByName: status?.expenseUpdatedByName,
+                  });
                   return (
                     <tr key={p.id} className="border-t border-border/30">
-                      <td className="px-3 py-2">
+                      <td className="px-3 py-3 align-top">
                         <div className="text-[12px]" style={{ fontWeight: 700 }}>{p.name}</div>
                         <div className="text-[10px] text-muted-foreground">{p.shortName || p.id}</div>
                       </td>
-                      <td className="px-3 py-2 text-center">
-                        <div className="inline-flex items-start gap-2">
-                          <Checkbox
-                            checked={projectionDone}
+                      <td className="px-3 py-3 align-top text-center">
+                        <div className="mx-auto flex max-w-[172px] flex-col items-stretch gap-2">
+                          <ToggleGroup
+                            type="single"
+                            value={projectionEdited ? 'edited' : 'not-edited'}
+                            variant="outline"
+                            size="sm"
+                            className="w-full"
+                            onValueChange={(value) => {
+                              if (!value) return;
+                              handleEditedChange({
+                                projectId: p.id,
+                                field: 'projection',
+                                nextValue: value === 'edited',
+                              });
+                            }}
+                            disabled={editSavingKey === `${p.id}:projection`}
+                          >
+                            <ToggleGroupItem value="edited" className={`px-2 text-[10px] ${projectionEdited ? 'bg-sky-500/15 text-sky-700 dark:text-sky-300' : ''}`}>
+                              수정 O
+                            </ToggleGroupItem>
+                            <ToggleGroupItem value="not-edited" className={`px-2 text-[10px] ${!projectionEdited ? 'bg-slate-500/10 text-slate-700 dark:text-slate-300' : ''}`}>
+                              수정 X
+                            </ToggleGroupItem>
+                          </ToggleGroup>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className={`h-7 rounded-full px-2 text-[10px] ${projectionDone ? 'border-emerald-200 bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/15 dark:text-emerald-300' : 'border-slate-200 bg-slate-500/5 text-slate-600 hover:bg-slate-500/10 dark:text-slate-300'}`}
                             disabled={confirmSaving}
-                            onCheckedChange={() => openConfirm({
+                            onClick={() => openConfirm({
                               projectId: p.id,
                               projectName: p.name,
                               field: 'projection',
                               nextValue: !projectionDone,
                             })}
-                          />
-                          <div className="text-left">
-                            <Select
-                              value={projectionEdited ? 'edited' : 'not-edited'}
-                              onValueChange={(value) => handleEditedChange({
-                                projectId: p.id,
-                                field: 'projection',
-                                nextValue: value === 'edited',
-                              })}
-                              disabled={editSavingKey === `${p.id}:projection`}
-                            >
-                              <SelectTrigger size="sm" className="h-7 min-w-[104px] px-2 text-[10px]">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="edited">수정 O</SelectItem>
-                                <SelectItem value="not-edited">수정 X</SelectItem>
-                              </SelectContent>
-                            </Select>
-                            <div className={`mt-1 text-[10px] ${projectionDone ? 'text-emerald-700 dark:text-emerald-300' : 'text-muted-foreground'}`} style={{ fontWeight: 700 }}>
-                              {projectionDone ? '완료' : '미완료'}
-                            </div>
-                          </div>
+                          >
+                            {projectionDone ? '제출 완료' : '미완료'}
+                          </Button>
+                          {projectionAudit && <AuditMetaLine {...projectionAudit} />}
                         </div>
-                        <StatusAuditMeta
-                          title="수정 상태 반영"
-                          at={status?.projectionEditedAt}
-                          byName={status?.projectionEditedByName}
-                        />
-                        <StatusAuditMeta
-                          title="제출 상태 반영"
-                          at={status?.projectionUpdatedAt}
-                          byName={status?.projectionUpdatedByName}
-                        />
                       </td>
-                      <td className="px-3 py-2 text-center">
-                        <div className="inline-flex items-start gap-2">
-                          <Checkbox
-                            checked={expenseDone}
+                      <td className="px-3 py-3 align-top text-center">
+                        <div className="mx-auto flex max-w-[172px] flex-col items-stretch gap-2">
+                          <ToggleGroup
+                            type="single"
+                            value={expenseEdited ? 'edited' : 'not-edited'}
+                            variant="outline"
+                            size="sm"
+                            className="w-full"
+                            onValueChange={(value) => {
+                              if (!value) return;
+                              handleEditedChange({
+                                projectId: p.id,
+                                field: 'expense',
+                                nextValue: value === 'edited',
+                              });
+                            }}
+                            disabled={editSavingKey === `${p.id}:expense`}
+                          >
+                            <ToggleGroupItem value="edited" className={`px-2 text-[10px] ${expenseEdited ? 'bg-sky-500/15 text-sky-700 dark:text-sky-300' : ''}`}>
+                              수정 O
+                            </ToggleGroupItem>
+                            <ToggleGroupItem value="not-edited" className={`px-2 text-[10px] ${!expenseEdited ? 'bg-slate-500/10 text-slate-700 dark:text-slate-300' : ''}`}>
+                              수정 X
+                            </ToggleGroupItem>
+                          </ToggleGroup>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className={`h-7 rounded-full px-2 text-[10px] ${expenseDone ? 'border-emerald-200 bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/15 dark:text-emerald-300' : 'border-slate-200 bg-slate-500/5 text-slate-600 hover:bg-slate-500/10 dark:text-slate-300'}`}
                             disabled={confirmSaving}
-                            onCheckedChange={() => openConfirm({
+                            onClick={() => openConfirm({
                               projectId: p.id,
                               projectName: p.name,
                               field: 'expense',
                               nextValue: !expenseDone,
                             })}
-                          />
-                          <div className="text-left">
-                            <Select
-                              value={expenseEdited ? 'edited' : 'not-edited'}
-                              onValueChange={(value) => handleEditedChange({
-                                projectId: p.id,
-                                field: 'expense',
-                                nextValue: value === 'edited',
-                              })}
-                              disabled={editSavingKey === `${p.id}:expense`}
-                            >
-                              <SelectTrigger size="sm" className="h-7 min-w-[104px] px-2 text-[10px]">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="edited">수정 O</SelectItem>
-                                <SelectItem value="not-edited">수정 X</SelectItem>
-                              </SelectContent>
-                            </Select>
-                            <div className={`mt-1 text-[10px] ${expenseDone ? 'text-emerald-700 dark:text-emerald-300' : 'text-muted-foreground'}`} style={{ fontWeight: 700 }}>
-                              {expenseDone ? '완료' : '미완료'}
-                            </div>
-                          </div>
+                          >
+                            {expenseDone ? '제출 완료' : '미완료'}
+                          </Button>
+                          {expenseAudit && <AuditMetaLine {...expenseAudit} />}
                         </div>
-                        <StatusAuditMeta
-                          title="수정 상태 반영"
-                          at={status?.expenseEditedAt}
-                          byName={status?.expenseEditedByName}
-                        />
-                        <StatusAuditMeta
-                          title="제출 상태 반영"
-                          at={status?.expenseUpdatedAt}
-                          byName={status?.expenseUpdatedByName}
-                        />
                       </td>
                     </tr>
                   );
