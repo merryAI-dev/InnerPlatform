@@ -144,7 +144,11 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
 
     const preview = await sheetsApi
       .post('/api/v1/projects/p-sheets-001/google-sheet-import/preview')
-      .set({ ...defaultHeaders, 'x-google-access-token': 'google-token-123' })
+      .set({
+        ...defaultHeaders,
+        'x-google-access-token': 'google-token-123',
+        'idempotency-key': 'idem-google-sheet-preview-001',
+      })
       .send({ value: 'https://docs.google.com/spreadsheets/d/sheet-001/edit#gid=1' });
 
     expect(preview.status).toBe(200);
@@ -189,7 +193,7 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
 
     const analysis = await analysisApi
       .post('/api/v1/projects/p-sheets-002/google-sheet-import/analyze')
-      .set(defaultHeaders)
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-google-sheet-analyze-001' })
       .send({
         spreadsheetTitle: '2026 사업비 관리 시트',
         selectedSheetName: '사용내역',
@@ -232,7 +236,7 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
 
     const upload = await sourceApi
       .post('/api/v1/projects/p-source-001/sheet-sources/upload')
-      .set(defaultHeaders)
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-sheet-source-upload-001' })
       .send({
         sourceType: 'usage',
         sheetName: '사용내역',

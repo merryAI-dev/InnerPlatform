@@ -294,10 +294,11 @@ function mapClientErrorSeverity(level) {
 }
 
 const ALL_INTERNAL_ROUTE_ROLES = ['admin', 'finance', 'pm', 'viewer', 'auditor', 'tenant_admin', 'support', 'security'];
+const CORE_WRITE_ROUTE_ROLES = ['admin', 'finance', 'pm', 'auditor', 'tenant_admin', 'support', 'security'];
 
 const ROUTE_ROLES = {
   readCore: ALL_INTERNAL_ROUTE_ROLES,
-  writeCore: ALL_INTERNAL_ROUTE_ROLES,
+  writeCore: CORE_WRITE_ROUTE_ROLES,
   writeTransaction: ALL_INTERNAL_ROUTE_ROLES,
   writeProjectDrive: ALL_INTERNAL_ROUTE_ROLES,
   writeEvidenceDrive: ALL_INTERNAL_ROUTE_ROLES,
@@ -1482,6 +1483,7 @@ export function createBffApp(options = {}) {
     });
 
     const timestamp = uploaded.uploadedAt || now();
+    const previewMatrix = parsed.previewMatrix || [];
     const metadata = {
       tenantId,
       projectId,
@@ -1496,14 +1498,19 @@ export function createBffApp(options = {}) {
       columnCount: parsed.columnCount,
       matchedColumns: parsed.matchedColumns || [],
       unmatchedColumns: parsed.unmatchedColumns || [],
-      previewMatrix: parsed.previewMatrix || [],
+      previewMatrix,
       ...(parsed.applyTarget ? { applyTarget: parsed.applyTarget } : {}),
       updatedAt: timestamp,
       updatedBy: actorId,
     };
+    const firestoreMetadata = {
+      ...metadata,
+      previewMatrixRows: previewMatrix.map((cells) => ({ cells })),
+    };
+    delete firestoreMetadata.previewMatrix;
 
     await db.doc(`orgs/${tenantId}/projects/${projectId}/sheet_sources/${parsed.sourceType}`).set(
-      metadata,
+      firestoreMetadata,
       { merge: true },
     );
 

@@ -749,30 +749,38 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         }),
       );
 
-      unsubsRef.current.push(
-        onSnapshot(sheetSourceCollection, (snap) => {
-          const list = snap.docs
-            .map((docItem) => {
-              const data = docItem.data() as Partial<ProjectSheetSourceSnapshot>;
-              return {
-                sourceType: (data.sourceType || docItem.id) as ProjectSheetSourceType,
-                projectId: String(data.projectId || portalUser.projectId || ''),
+	      unsubsRef.current.push(
+	        onSnapshot(sheetSourceCollection, (snap) => {
+	          const list = snap.docs
+	            .map((docItem) => {
+	              const data = docItem.data() as Partial<ProjectSheetSourceSnapshot> & {
+	                previewMatrixRows?: Array<{ cells?: unknown }>;
+	              };
+	              const previewMatrix = Array.isArray(data.previewMatrix)
+	                ? data.previewMatrix.map((row) => (Array.isArray(row) ? row.map((cell) => String(cell ?? '')) : []))
+	                : Array.isArray(data.previewMatrixRows)
+	                  ? data.previewMatrixRows.map((row) => {
+	                      const cells = row && typeof row === 'object' ? row.cells : undefined;
+	                      return Array.isArray(cells) ? cells.map((cell) => String(cell ?? '')) : [];
+	                    })
+	                  : [];
+	              return {
+	                sourceType: (data.sourceType || docItem.id) as ProjectSheetSourceType,
+	                projectId: String(data.projectId || portalUser.projectId || ''),
                 sheetName: String(data.sheetName || ''),
                 fileName: String(data.fileName || ''),
                 storagePath: String(data.storagePath || ''),
                 downloadURL: String(data.downloadURL || ''),
                 contentType: String(data.contentType || ''),
                 uploadedAt: String(data.uploadedAt || ''),
-                rowCount: Number.isFinite(Number(data.rowCount)) ? Number(data.rowCount) : 0,
-                columnCount: Number.isFinite(Number(data.columnCount)) ? Number(data.columnCount) : 0,
-                matchedColumns: Array.isArray(data.matchedColumns) ? data.matchedColumns.map((value) => String(value || '')) : [],
-                unmatchedColumns: Array.isArray(data.unmatchedColumns) ? data.unmatchedColumns.map((value) => String(value || '')) : [],
-                previewMatrix: Array.isArray(data.previewMatrix)
-                  ? data.previewMatrix.map((row) => (Array.isArray(row) ? row.map((cell) => String(cell ?? '')) : []))
-                  : [],
-                ...(data.applyTarget ? { applyTarget: String(data.applyTarget) } : {}),
-                ...(data.lastAppliedAt ? { lastAppliedAt: String(data.lastAppliedAt) } : {}),
-                ...(data.updatedAt ? { updatedAt: String(data.updatedAt) } : {}),
+	                rowCount: Number.isFinite(Number(data.rowCount)) ? Number(data.rowCount) : 0,
+	                columnCount: Number.isFinite(Number(data.columnCount)) ? Number(data.columnCount) : 0,
+	                matchedColumns: Array.isArray(data.matchedColumns) ? data.matchedColumns.map((value) => String(value || '')) : [],
+	                unmatchedColumns: Array.isArray(data.unmatchedColumns) ? data.unmatchedColumns.map((value) => String(value || '')) : [],
+	                previewMatrix,
+	                ...(data.applyTarget ? { applyTarget: String(data.applyTarget) } : {}),
+	                ...(data.lastAppliedAt ? { lastAppliedAt: String(data.lastAppliedAt) } : {}),
+	                ...(data.updatedAt ? { updatedAt: String(data.updatedAt) } : {}),
                 ...(data.updatedBy ? { updatedBy: String(data.updatedBy) } : {}),
               } satisfies ProjectSheetSourceSnapshot;
             })
