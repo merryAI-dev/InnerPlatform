@@ -25,6 +25,7 @@ import {
   LEDGER_TEMPLATES,
 } from './mock-data';
 import { PARTICIPATION_ENTRIES } from './participation-data';
+import { resolveAppWriteStrategy } from './store-write-strategy';
 import { useFirebase } from '../lib/firebase-context';
 import { featureFlags } from '../config/feature-flags';
 import { useAuth } from './auth-store';
@@ -113,12 +114,20 @@ if (!_g.__MYSC_APP_CTX__) {
 }
 const AppContext: React.Context<(AppState & AppActions) | null> = _g.__MYSC_APP_CTX__;
 
+function logBffWriteFailure(operation: string, err: unknown) {
+  console.error(`[BFF] ${operation} failed; Firestore fallback disabled:`, err);
+}
+
 export function AppProvider({ children }: { children: ReactNode }) {
   const { db, isOnline, orgId } = useFirebase();
   const { user: authUser } = useAuth();
 
   const firestoreEnabled = featureFlags.firestoreCoreEnabled && isOnline && !!db;
   const platformApiEnabled = featureFlags.platformApiEnabled;
+  const writeStrategy = useMemo(
+    () => resolveAppWriteStrategy(platformApiEnabled, firestoreEnabled),
+    [platformApiEnabled, firestoreEnabled],
+  );
 
   const [projects, setProjects] = useState<Project[]>(PROJECTS);
   const [ledgers, setLedgers] = useState<Ledger[]>(LEDGERS);
@@ -268,30 +277,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [firestoreEnabled]);
 
   const addProject = useCallback((p: Project) => {
-    if (platformApiEnabled) {
+    if (writeStrategy.target === 'bff') {
       upsertProjectViaBff({
         tenantId: orgId,
         actor: bffActor,
         project: p,
-      }).catch((err) => {
-        console.error('[BFF] addProject failed, fallback to Firestore:', err);
-        if (firestoreEnabled && db) {
-          upsertProject(db, orgId, p, auditActor).catch(console.error);
-        }
-      });
+      }).catch((err) => logBffWriteFailure('addProject', err));
 
-      if (!firestoreEnabled) {
+      if (writeStrategy.mirrorRemoteWritesLocally) {
         setProjects((prev) => [...prev, p]);
       }
       return;
     }
 
-    if (firestoreEnabled && db) {
+    if (writeStrategy.target === 'firestore' && db) {
       upsertProject(db, orgId, p, auditActor).catch(console.error);
       return;
     }
     setProjects((prev) => [...prev, p]);
-  }, [platformApiEnabled, orgId, bffActor, firestoreEnabled, db, auditActor]);
+  }, [writeStrategy, orgId, bffActor, db, auditActor]);
 
   const upsertMember = useCallback((member: OrgMember & Record<string, unknown>) => {
     if (firestoreEnabled && db) {
@@ -316,7 +320,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [firestoreEnabled, db, orgId, auditActor]);
 
   const updateProject = useCallback((id: string, updates: Partial<Project>) => {
-    if (platformApiEnabled) {
+    if (writeStrategy.target === 'bff') {
       const existing = projects.find((project) => project.id === id);
       if (existing) {
         const merged = { ...existing, ...updates } as Project;
@@ -327,21 +331,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
             ...merged,
             expectedVersion: existing.version ?? 1,
           },
-        }).catch((err) => {
-          console.error('[BFF] updateProject failed, fallback to Firestore:', err);
-          if (firestoreEnabled && db) {
-            upsertProject(db, orgId, merged, auditActor).catch(console.error);
-          }
-        });
+        }).catch((err) => logBffWriteFailure('updateProject', err));
       }
 
-      if (!firestoreEnabled) {
+      if (writeStrategy.mirrorRemoteWritesLocally) {
         setProjects((prev) => prev.map((p) => (p.id === id ? { ...p, ...updates } : p)));
       }
       return;
     }
 
-    if (firestoreEnabled && db) {
+    if (writeStrategy.target === 'firestore' && db) {
       setProjects((prev) => {
         const existing = prev.find((p) => p.id === id);
         if (existing) {
@@ -352,62 +351,52 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return;
     }
     setProjects((prev) => prev.map((p) => (p.id === id ? { ...p, ...updates } : p)));
-  }, [platformApiEnabled, projects, orgId, bffActor, firestoreEnabled, db, auditActor]);
+  }, [writeStrategy, projects, orgId, bffActor, db, auditActor]);
 
   const addLedger = useCallback((l: Ledger) => {
-    if (platformApiEnabled) {
+    if (writeStrategy.target === 'bff') {
       upsertLedgerViaBff({
         tenantId: orgId,
         actor: bffActor,
         ledger: l as any,
-      }).catch((err) => {
-        console.error('[BFF] addLedger failed, fallback to Firestore:', err);
-        if (firestoreEnabled && db) {
-          upsertLedger(db, orgId, l, auditActor).catch(console.error);
-        }
-      });
+      }).catch((err) => logBffWriteFailure('addLedger', err));
 
-      if (!firestoreEnabled) {
+      if (writeStrategy.mirrorRemoteWritesLocally) {
         setLedgers((prev) => [...prev, l]);
       }
       return;
     }
 
-    if (firestoreEnabled && db) {
+    if (writeStrategy.target === 'firestore' && db) {
       upsertLedger(db, orgId, l, auditActor).catch(console.error);
       return;
     }
     setLedgers((prev) => [...prev, l]);
-  }, [platformApiEnabled, orgId, bffActor, firestoreEnabled, db, auditActor]);
+  }, [writeStrategy, orgId, bffActor, db, auditActor]);
 
   const addTransaction = useCallback((t: Transaction) => {
-    if (platformApiEnabled) {
+    if (writeStrategy.target === 'bff') {
       upsertTransactionViaBff({
         tenantId: orgId,
         actor: bffActor,
         transaction: t as any,
-      }).catch((err) => {
-        console.error('[BFF] addTransaction failed, fallback to Firestore:', err);
-        if (firestoreEnabled && db) {
-          upsertTransaction(db, orgId, t, auditActor).catch(console.error);
-        }
-      });
+      }).catch((err) => logBffWriteFailure('addTransaction', err));
 
-      if (!firestoreEnabled) {
+      if (writeStrategy.mirrorRemoteWritesLocally) {
         setTransactions((prev) => [...prev, t]);
       }
       return;
     }
 
-    if (firestoreEnabled && db) {
+    if (writeStrategy.target === 'firestore' && db) {
       upsertTransaction(db, orgId, t, auditActor).catch(console.error);
       return;
     }
     setTransactions((prev) => [...prev, t]);
-  }, [platformApiEnabled, orgId, bffActor, firestoreEnabled, db, auditActor]);
+  }, [writeStrategy, orgId, bffActor, db, auditActor]);
 
   const updateTransaction = useCallback((id: string, updates: Partial<Transaction>) => {
-    if (platformApiEnabled) {
+    if (writeStrategy.target === 'bff') {
       const existing = transactions.find((tx) => tx.id === id);
       if (existing) {
         upsertTransactionViaBff({
@@ -418,21 +407,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
             ...updates,
             expectedVersion: existing.version ?? 1,
           } as any,
-        }).catch((err) => {
-          console.error('[BFF] updateTransaction failed, fallback to Firestore:', err);
-          if (firestoreEnabled && db) {
-            upsertTransaction(db, orgId, { ...existing, ...updates }, auditActor).catch(console.error);
-          }
-        });
+        }).catch((err) => logBffWriteFailure('updateTransaction', err));
       }
 
-      if (!firestoreEnabled) {
+      if (writeStrategy.mirrorRemoteWritesLocally) {
         setTransactions((prev) => prev.map((t) => (t.id === id ? { ...t, ...updates } : t)));
       }
       return;
     }
 
-    if (firestoreEnabled && db) {
+    if (writeStrategy.target === 'firestore' && db) {
       setTransactions((prev) => {
         const existing = prev.find((t) => t.id === id);
         if (existing) {
@@ -443,10 +427,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return;
     }
     setTransactions((prev) => prev.map((t) => (t.id === id ? { ...t, ...updates } : t)));
-  }, [platformApiEnabled, transactions, orgId, bffActor, firestoreEnabled, db, auditActor]);
+  }, [writeStrategy, transactions, orgId, bffActor, db, auditActor]);
 
   const changeTransactionState = useCallback((id: string, newState: TransactionState, reason?: string) => {
-    if (platformApiEnabled) {
+    if (writeStrategy.target === 'bff') {
       const currentTx = transactions.find((tx) => tx.id === id);
       changeTransactionStateViaBff({
         tenantId: orgId,
@@ -455,14 +439,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         newState,
         expectedVersion: currentTx?.version ?? 1,
         reason,
-      }).catch((err) => {
-        console.error('[BFF] changeTransactionState failed, fallback to Firestore:', err);
-        if (firestoreEnabled && db) {
-          changeTransactionStateFS(db, orgId, id, newState, auditActor, reason).catch(console.error);
-        }
-      });
+      }).catch((err) => logBffWriteFailure('changeTransactionState', err));
 
-      if (!firestoreEnabled) {
+      if (writeStrategy.mirrorRemoteWritesLocally) {
         setTransactions((prev) => prev.map((t) => {
           if (t.id !== id) return t;
           const updates: Partial<Transaction> = { state: newState };
@@ -481,7 +460,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    if (firestoreEnabled && db) {
+    if (writeStrategy.target === 'firestore' && db) {
       changeTransactionStateFS(db, orgId, id, newState, auditActor, reason).catch(console.error);
       return;
     }
@@ -500,10 +479,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       return { ...t, ...updates };
     }));
-  }, [platformApiEnabled, transactions, orgId, bffActor, firestoreEnabled, db, currentUser.uid, auditActor]);
+  }, [writeStrategy, transactions, orgId, bffActor, db, currentUser.uid, auditActor]);
 
   const addComment = useCallback((c: Comment) => {
-    if (platformApiEnabled) {
+    if (writeStrategy.target === 'bff') {
       addCommentViaBff({
         tenantId: orgId,
         actor: bffActor,
@@ -513,28 +492,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
           content: c.content,
           authorName: c.authorName,
         },
-      }).catch((err) => {
-        console.error('[BFF] addComment failed, fallback to Firestore:', err);
-        if (firestoreEnabled && db) {
-          addCommentFS(db, orgId, c, auditActor).catch(console.error);
-        }
-      });
+      }).catch((err) => logBffWriteFailure('addComment', err));
 
-      if (!firestoreEnabled) {
+      if (writeStrategy.mirrorRemoteWritesLocally) {
         setComments((prev) => [...prev, c]);
       }
       return;
     }
 
-    if (firestoreEnabled && db) {
+    if (writeStrategy.target === 'firestore' && db) {
       addCommentFS(db, orgId, c, auditActor).catch(console.error);
       return;
     }
     setComments((prev) => [...prev, c]);
-  }, [platformApiEnabled, orgId, bffActor, firestoreEnabled, db, auditActor]);
+  }, [writeStrategy, orgId, bffActor, db, auditActor]);
 
   const addEvidence = useCallback((e: Evidence) => {
-    if (platformApiEnabled) {
+    if (writeStrategy.target === 'bff') {
       addEvidenceViaBff({
         tenantId: orgId,
         actor: bffActor,
@@ -547,25 +521,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
           category: e.category,
           status: e.status,
         },
-      }).catch((err) => {
-        console.error('[BFF] addEvidence failed, fallback to Firestore:', err);
-        if (firestoreEnabled && db) {
-          addEvidenceFS(db, orgId, e, auditActor).catch(console.error);
-        }
-      });
+      }).catch((err) => logBffWriteFailure('addEvidence', err));
 
-      if (!firestoreEnabled) {
+      if (writeStrategy.mirrorRemoteWritesLocally) {
         setEvidences((prev) => [...prev, e]);
       }
       return;
     }
 
-    if (firestoreEnabled && db) {
+    if (writeStrategy.target === 'firestore' && db) {
       addEvidenceFS(db, orgId, e, auditActor).catch(console.error);
       return;
     }
     setEvidences((prev) => [...prev, e]);
-  }, [platformApiEnabled, orgId, bffActor, firestoreEnabled, db, auditActor]);
+  }, [writeStrategy, orgId, bffActor, db, auditActor]);
 
   const addParticipation = useCallback((pe: ParticipationEntry) => {
     if (firestoreEnabled && db) {
