@@ -27,6 +27,11 @@ function sortIsoDesc(a: string | undefined, b: string | undefined): number {
   return String(b || '').localeCompare(String(a || ''));
 }
 
+function hasWeekAmounts(values: Record<string, unknown> | undefined): boolean {
+  if (!values) return false;
+  return Object.values(values).some((value) => typeof value === 'number' && Number.isFinite(value) && value !== 0);
+}
+
 const CHANGE_TABS: Array<{ label: string; value: ChangeRequestState | 'ALL' }> = [
   { label: '전체', value: 'ALL' },
   { label: '제출됨', value: 'SUBMITTED' },
@@ -46,7 +51,7 @@ export function PortalSubmissionsPage() {
     weeklySubmissionStatuses,
     upsertWeeklySubmissionStatus,
   } = usePortalStore();
-  const { getWeeksForProject } = useCashflowWeeks();
+  const { getWeeksForProject, weeks } = useCashflowWeeks();
 
   const [changeTab, setChangeTab] = useState<ChangeRequestState | 'ALL'>('SUBMITTED');
   const [selectedWeekNo, setSelectedWeekNo] = useState(1);
@@ -110,6 +115,17 @@ export function PortalSubmissionsPage() {
   }, [projects, portalUser]);
 
   const selectedWeek = useMemo(() => monthWeeks.find((w) => w.weekNo === selectedWeekNo) || monthWeeks[0], [monthWeeks, selectedWeekNo]);
+
+  const checklistWeekMap = useMemo(() => {
+    const map = new Map<string, (typeof weeks)[number]>();
+    const targetWeekNo = selectedWeek?.weekNo;
+    if (!targetWeekNo) return map;
+    weeks.forEach((week) => {
+      if (week.yearMonth !== yearMonth || week.weekNo !== targetWeekNo) return;
+      map.set(week.projectId, week);
+    });
+    return map;
+  }, [selectedWeek, weeks, yearMonth]);
 
   const weekDeadline = useMemo(() => {
     if (!selectedWeek?.weekStart) return '';
@@ -229,6 +245,10 @@ export function PortalSubmissionsPage() {
             )}
           </div>
 
+          <div className="text-[10px] text-muted-foreground">
+            상단 배지는 실제 수정 여부, 하단 상태는 제출 체크 여부입니다.
+          </div>
+
           <div className="overflow-x-auto">
             <table className="min-w-[720px] w-full text-[11px]">
               <thead>
@@ -242,8 +262,11 @@ export function PortalSubmissionsPage() {
                 {assignedProjects.map((p) => {
                   const key = `${p.id}-${yearMonth}-w${selectedWeek?.weekNo || 1}`;
                   const status = statusMap.get(key);
+                  const weekSheet = checklistWeekMap.get(p.id);
                   const projectionDone = Boolean(status?.projectionUpdated);
                   const expenseDone = Boolean(status?.expenseUpdated);
+                  const projectionModified = hasWeekAmounts(weekSheet?.projection);
+                  const expenseModified = hasWeekAmounts(weekSheet?.actual);
                   return (
                     <tr key={p.id} className="border-t border-border/30">
                       <td className="px-3 py-2">
@@ -251,7 +274,7 @@ export function PortalSubmissionsPage() {
                         <div className="text-[10px] text-muted-foreground">{p.shortName || p.id}</div>
                       </td>
                       <td className="px-3 py-2 text-center">
-                        <div className="inline-flex items-center gap-2">
+                        <div className="inline-flex items-start gap-2">
                           <Checkbox
                             checked={projectionDone}
                             onCheckedChange={() => openConfirm({
@@ -261,9 +284,14 @@ export function PortalSubmissionsPage() {
                               nextValue: !projectionDone,
                             })}
                           />
-                          <span className={`inline-flex items-center h-5 px-2 rounded-full text-[10px] ${projectionDone ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' : 'bg-slate-500/10 text-slate-600 dark:text-slate-300'}`} style={{ fontWeight: 800 }}>
-                            {projectionDone ? '완료' : '미완료'}
-                          </span>
+                          <div className="text-left">
+                            <span className={`inline-flex items-center h-5 px-2 rounded-full text-[10px] ${projectionModified ? 'bg-sky-500/15 text-sky-700 dark:text-sky-300' : 'bg-slate-500/10 text-slate-600 dark:text-slate-300'}`} style={{ fontWeight: 800 }}>
+                              수정 {projectionModified ? 'O' : 'X'}
+                            </span>
+                            <div className={`mt-1 text-[10px] ${projectionDone ? 'text-emerald-700 dark:text-emerald-300' : 'text-muted-foreground'}`} style={{ fontWeight: 700 }}>
+                              {projectionDone ? '완료' : '미완료'}
+                            </div>
+                          </div>
                         </div>
                         {status?.projectionUpdatedAt && (
                           <div className="text-[9px] text-muted-foreground mt-1">
@@ -272,7 +300,7 @@ export function PortalSubmissionsPage() {
                         )}
                       </td>
                       <td className="px-3 py-2 text-center">
-                        <div className="inline-flex items-center gap-2">
+                        <div className="inline-flex items-start gap-2">
                           <Checkbox
                             checked={expenseDone}
                             onCheckedChange={() => openConfirm({
@@ -282,9 +310,14 @@ export function PortalSubmissionsPage() {
                               nextValue: !expenseDone,
                             })}
                           />
-                          <span className={`inline-flex items-center h-5 px-2 rounded-full text-[10px] ${expenseDone ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' : 'bg-slate-500/10 text-slate-600 dark:text-slate-300'}`} style={{ fontWeight: 800 }}>
-                            {expenseDone ? '완료' : '미완료'}
-                          </span>
+                          <div className="text-left">
+                            <span className={`inline-flex items-center h-5 px-2 rounded-full text-[10px] ${expenseModified ? 'bg-sky-500/15 text-sky-700 dark:text-sky-300' : 'bg-slate-500/10 text-slate-600 dark:text-slate-300'}`} style={{ fontWeight: 800 }}>
+                              수정 {expenseModified ? 'O' : 'X'}
+                            </span>
+                            <div className={`mt-1 text-[10px] ${expenseDone ? 'text-emerald-700 dark:text-emerald-300' : 'text-muted-foreground'}`} style={{ fontWeight: 700 }}>
+                              {expenseDone ? '완료' : '미완료'}
+                            </div>
+                          </div>
                         </div>
                         {status?.expenseUpdatedAt && (
                           <div className="text-[9px] text-muted-foreground mt-1">
