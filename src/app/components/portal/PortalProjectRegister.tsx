@@ -26,6 +26,8 @@ import {
   processProjectRequestContractViaBff,
   type ProjectRequestContractAnalysisResult,
 } from '../../lib/platform-bff-client';
+import { resolveApiErrorMessage } from '../../platform/api-error-message';
+import { PlatformApiError } from '../../platform/api-client';
 import {
   ACCOUNT_TYPE_LABELS,
   BASIS_LABELS,
@@ -64,6 +66,8 @@ import {
 type Step = 'contract' | 'basic' | 'financial' | 'team' | 'review';
 type ContractAnalysisState = 'idle' | 'extracting' | 'analyzing' | 'ready' | 'error';
 type AnalysisFieldKey = keyof ProjectRequestContractAnalysis['fields'];
+const MAX_CONTRACT_UPLOAD_SIZE_BYTES = 4 * 1024 * 1024;
+const MAX_CONTRACT_UPLOAD_SIZE_LABEL = '4MB';
 
 const STEPS: Array<{
   key: Step;
@@ -282,6 +286,18 @@ function createEmptyTeamMember(): ProjectTeamMemberAssignment {
   };
 }
 
+function resolveContractUploadErrorMessage(error: unknown) {
+  if (error instanceof PlatformApiError) {
+    if (error.status === 413) {
+      return `계약서 PDF는 ${MAX_CONTRACT_UPLOAD_SIZE_LABEL} 이하만 업로드할 수 있습니다. 파일을 압축하거나 필요한 페이지만 추려 다시 시도해 주세요.`;
+    }
+    if (error.status === 403) {
+      return '현재 로그인 상태로 계약서 업로드를 완료하지 못했습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.';
+    }
+  }
+  return resolveApiErrorMessage(error, '계약서 업로드에 실패했습니다. 다시 시도해 주세요.');
+}
+
 export function PortalProjectRegister() {
   const navigate = useNavigate();
   const { user: authUser } = useAuth();
@@ -392,6 +408,14 @@ export function PortalProjectRegister() {
       input.value = '';
       return;
     }
+    if (file.size > MAX_CONTRACT_UPLOAD_SIZE_BYTES) {
+      const message = `계약서 PDF는 ${MAX_CONTRACT_UPLOAD_SIZE_LABEL} 이하만 업로드할 수 있습니다. 파일을 압축하거나 필요한 페이지만 추려 다시 시도해 주세요.`;
+      setContractAnalysisState('error');
+      setAnalysisError(message);
+      toast.error(message);
+      input.value = '';
+      return;
+    }
     setIsUploadingContract(true);
     setContractAnalysisState('extracting');
     setAnalysisError('');
@@ -435,8 +459,9 @@ export function PortalProjectRegister() {
         setAnalysisError('선택한 파일을 브라우저가 읽지 못했습니다. 파일을 다시 선택하거나 다른 PDF로 시도해 주세요.');
         toast.error('파일을 읽지 못했습니다. 같은 파일을 다시 선택하거나 다시 다운로드한 PDF로 시도해 주세요.');
       } else {
-        setAnalysisError('계약서 업로드에 실패했습니다. 다시 시도해 주세요.');
-        toast.error('계약서 업로드에 실패했습니다. 다시 시도해 주세요.');
+        const message = resolveContractUploadErrorMessage(error);
+        setAnalysisError(message);
+        toast.error(message);
       }
     } finally {
       setIsUploadingContract(false);
