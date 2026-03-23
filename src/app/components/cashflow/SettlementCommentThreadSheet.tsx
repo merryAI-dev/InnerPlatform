@@ -76,7 +76,7 @@ export function SettlementCommentThreadSheet({
 
   return (
     <Sheet modal={false} open={open} onOpenChange={(nextOpen) => { if (!nextOpen) onClose(); }}>
-      <SheetContent side="right" showOverlay={false} className="w-[420px] sm:max-w-[420px] gap-0">
+      <SheetContent side="right" className="w-[420px] sm:max-w-[420px] gap-0">
         <SheetHeader className="border-b">
           <SheetTitle className="text-[14px]">셀 메모</SheetTitle>
           <SheetDescription className="text-[11px]">

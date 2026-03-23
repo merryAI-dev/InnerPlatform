@@ -64,12 +64,13 @@ function makeTransaction(overrides: Partial<Transaction> = {}): Transaction {
     counterparty: '거래처',
     memo: '',
     amounts: {
-      supplyAmount: 1000000,
       vatIn: 0,
       vatOut: 0,
+      vatRefund: 0,
       depositAmount: 1000000,
       expenseAmount: 0,
       bankAmount: 1000000,
+      balanceAfter: 1000000,
     },
     evidenceRequired: [],
     evidenceStatus: 'COMPLETE',
@@ -128,12 +129,13 @@ describe('dashboard rollups', () => {
       id: 'tx-2',
       direction: 'OUT',
       amounts: {
-        supplyAmount: 0,
         vatIn: 0,
         vatOut: 0,
+        vatRefund: 0,
         depositAmount: 0,
         expenseAmount: 300000,
         bankAmount: 300000,
+        balanceAfter: 700000,
       },
     });
     const weekA = makeWeek();

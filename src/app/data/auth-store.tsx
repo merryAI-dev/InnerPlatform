@@ -35,7 +35,7 @@ import {
   resolveMemberProjectAccessState,
   type WorkspaceId,
 } from './member-workspace';
-import { extractAuthContextFromClaims } from '../platform/rbac';
+import { extractAuthContextFromClaims, type FirebaseAuthClaims } from '../platform/rbac';
 import { isAdminSpaceRole } from '../platform/navigation';
 import { resolveTenantId } from '../platform/tenant';
 import { formatAllowedDomains, getAllowedEmailDomains, isAllowedEmail } from '../platform/email-allowlist';
@@ -200,9 +200,9 @@ function saveUser(user: AuthUser | null) {
   }
 }
 
-function omitUndefinedFields<T extends Record<string, unknown>>(input: T): T {
+function omitUndefinedFields<T extends object>(input: T): T {
   return Object.fromEntries(
-    Object.entries(input).filter(([, value]) => value !== undefined),
+    Object.entries(input as Record<string, unknown>).filter(([, value]) => value !== undefined),
   ) as T;
 }
 
@@ -427,7 +427,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       try {
         const token = await firebaseUser.getIdTokenResult().catch(() => null);
-        const claimsContext = extractAuthContextFromClaims(token?.claims);
+        const claimsContext = extractAuthContextFromClaims(token?.claims as FirebaseAuthClaims | undefined);
         const tenantId = resolveTenantId({
           claimTenantId: claimsContext.tenantId,
           envTenantId: DEFAULT_ORG_ID,

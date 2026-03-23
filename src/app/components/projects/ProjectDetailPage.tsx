@@ -121,7 +121,7 @@ export function ProjectDetailPage() {
     return map;
   }, [projectLedgers, transactions]);
 
-  const completeness = useMemo(() => computeProjectCompleteness(project), [project]);
+  const completeness = useMemo(() => computeProjectCompleteness(project || {}), [project]);
 
   if (!project) {
     return (

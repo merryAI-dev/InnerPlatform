@@ -36,6 +36,16 @@ function isBinaryBody(value: unknown): value is Blob | ArrayBuffer | Uint8Array 
   );
 }
 
+function toBinaryBody(value: Blob | ArrayBuffer | Uint8Array): BodyInit {
+  if (typeof Blob !== 'undefined' && value instanceof Blob) {
+    return value;
+  }
+  if (value instanceof Uint8Array) {
+    return value.slice().buffer as ArrayBuffer;
+  }
+  return value;
+}
+
 export interface PlatformApiClientOptions {
   baseUrl?: string;
   fetchImpl?: typeof fetch;
@@ -234,7 +244,7 @@ export class PlatformApiClient {
 
     if (options.body !== undefined && options.body !== null) {
       if (options.body instanceof FormData || isBinaryBody(options.body)) {
-        body = options.body;
+        body = options.body instanceof FormData ? options.body : toBinaryBody(options.body);
       } else {
         if (!headers.has('content-type')) {
           headers.set('content-type', 'application/json');

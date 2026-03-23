@@ -36,10 +36,13 @@ describe('google-drive-browser-upload', () => {
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0] || [];
+    const firstCall = fetchMock.mock.calls[0];
+    expect(firstCall).toBeDefined();
+    const [url, init] = firstCall as unknown as [RequestInfo | URL, RequestInit | undefined];
+    const headers = new Headers(init?.headers);
     expect(String(url)).toContain('uploadType=multipart');
     expect(init?.method).toBe('POST');
-    expect(init?.headers?.authorization).toBe('Bearer google-token-123');
+    expect(headers.get('authorization')).toBe('Bearer google-token-123');
     expect(result.id).toBe('drv-file-001');
     expect(result.driveId).toBe('drive-001');
 

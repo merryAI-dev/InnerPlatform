@@ -133,7 +133,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [evidences, setEvidences] = useState<Evidence[]>(EVIDENCES);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(AUDIT_LOGS);
   const [participationEntries, setParticipationEntries] = useState<ParticipationEntry[]>(PARTICIPATION_ENTRIES);
-  const [localMembers, setLocalMembers] = useState<Array<OrgMember & Record<string, unknown>>>(ORG_MEMBERS);
+  const [localMembers, setLocalMembers] = useState<Array<OrgMember & Record<string, unknown>>>(
+    ORG_MEMBERS as Array<OrgMember & Record<string, unknown>>,
+  );
   const [dataSource, setDataSource] = useState<'local' | 'firestore'>('local');
 
   const unsubsRef = useRef<Unsubscribe[]>([]);
@@ -228,7 +230,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setEvidences(EVIDENCES);
       setAuditLogs(AUDIT_LOGS);
       setParticipationEntries(PARTICIPATION_ENTRIES);
-      setLocalMembers(ORG_MEMBERS);
+      setLocalMembers(ORG_MEMBERS as Array<OrgMember & Record<string, unknown>>);
       return;
     }
 
@@ -236,7 +238,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setLocalMembers([]);
 
     unsubsRef.current.push(
-      listenMembers(db, orgId, (items) => setLocalMembers(items)),
+      listenMembers(db, orgId, (items) => setLocalMembers(items as Array<OrgMember & Record<string, unknown>>)),
     );
 
     unsubsRef.current.push(
@@ -285,7 +287,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setProjects(payload.projects);
         }
         if (Array.isArray(payload.members) && payload.members.length > 0) {
-          setLocalMembers(payload.members);
+          setLocalMembers(payload.members as Array<OrgMember & Record<string, unknown>>);
         }
         if (Array.isArray(payload.ledgers) && payload.ledgers.length > 0) {
           setLedgers(payload.ledgers);

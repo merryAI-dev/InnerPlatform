@@ -64,7 +64,7 @@ function randomToken(): string {
   return Math.random().toString(36).slice(2, 14);
 }
 
-function stripUndefined<T extends Record<string, unknown>>(obj: T): T {
+function stripUndefined<T extends object>(obj: T): T {
   return JSON.parse(JSON.stringify(obj)) as T;
 }
 

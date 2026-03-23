@@ -1255,7 +1255,7 @@ function parsePaymentMethod(raw: string): PaymentMethod {
   if (/법인카드.*2|뒷번호2|card.?2/.test(s)) return 'CORP_CARD_2';
   if (/법인카드|카드|card/.test(s)) return 'CORP_CARD_1';
   if (/계좌|이체|bank/.test(s)) return 'TRANSFER';
-  return 'Z1';
+  return 'OTHER';
 }
 
 function parseDirection(raw: string, amount: number): 'IN' | 'OUT' {

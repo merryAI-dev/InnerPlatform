@@ -5,7 +5,7 @@ import { Card, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { usePortalStore } from '../../data/portal-store';
-import { PROJECT_STATUS_LABELS } from '../../data/types';
+import { PROJECT_STATUS_LABELS, type Project } from '../../data/types';
 import { normalizeProjectIds, resolvePrimaryProjectId } from '../../data/project-assignment';
 import { useAuth } from '../../data/auth-store';
 import { canEnterPortalWorkspace } from '../../platform/navigation';

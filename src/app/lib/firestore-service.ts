@@ -92,11 +92,11 @@ export function buildTransactionStatePatch(input: BuildTransactionStatePatchInpu
   return updates;
 }
 
-function stripUndefined<T extends Record<string, unknown>>(obj: T): T {
+function stripUndefined<T extends object>(obj: T): T {
   return JSON.parse(JSON.stringify(obj)) as T;
 }
 
-export function withTenantScope<T extends Record<string, unknown>>(
+export function withTenantScope<T extends object>(
   orgId: string,
   data: T,
 ): T & { tenantId: string } {

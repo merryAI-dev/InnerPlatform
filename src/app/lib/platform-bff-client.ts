@@ -25,7 +25,6 @@ export interface UpsertProjectPayload {
   id: string;
   name: string;
   expectedVersion?: number;
-  [key: string]: unknown;
 }
 
 export interface UpsertLedgerPayload {
@@ -33,7 +32,6 @@ export interface UpsertLedgerPayload {
   projectId: string;
   name: string;
   expectedVersion?: number;
-  [key: string]: unknown;
 }
 
 export interface UpsertTransactionPayload {
@@ -42,14 +40,12 @@ export interface UpsertTransactionPayload {
   ledgerId: string;
   counterparty: string;
   expectedVersion?: number;
-  [key: string]: unknown;
 }
 
 export interface CreateCommentPayload {
   id?: string;
   content: string;
   authorName?: string;
-  [key: string]: unknown;
 }
 
 export interface CreateEvidencePayload {
@@ -59,7 +55,6 @@ export interface CreateEvidencePayload {
   fileSize: number;
   category: string;
   status?: 'PENDING' | 'ACCEPTED' | 'REJECTED';
-  [key: string]: unknown;
 }
 
 export interface ProjectRequestContractUploadPayload {

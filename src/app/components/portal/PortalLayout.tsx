@@ -388,7 +388,7 @@ function PortalContent() {
           <nav className="flex-1 py-1 overflow-y-auto">
             <div className="space-y-3 px-2">
               {NAV_SECTIONS.map((section) => {
-                const visibleItems = section.items.filter((item) => !item.hidden);
+                const visibleItems = section.items.filter((item) => !('hidden' in item && item.hidden));
                 if (visibleItems.length === 0) return null;
                 return (
                   <div key={section.title} className="space-y-1">

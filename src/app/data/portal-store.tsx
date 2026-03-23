@@ -11,6 +11,7 @@ import {
   setDoc,
   updateDoc,
   where,
+  type Firestore,
   type Unsubscribe,
 } from 'firebase/firestore';
 import type {
@@ -168,7 +169,7 @@ function normalizeBudgetCodeBook(input: BudgetCodeEntry[]): BudgetCodeEntry[] {
     .filter((row) => row.code && row.subCodes.length > 0);
 }
 
-function withTenantScope<T extends Record<string, unknown>>(orgId: string, payload: T): T & { tenantId: string } {
+function withTenantScope<T extends object>(orgId: string, payload: T): T & { tenantId: string } {
   return {
     ...payload,
     tenantId: orgId,
@@ -221,7 +222,7 @@ function normalizePortalUser(candidate: Partial<PortalUser> | null | undefined):
   };
 }
 
-type StoredPortalMember = Partial<PortalUser> & {
+type StoredPortalMember = Omit<Partial<PortalUser>, 'projectIds' | 'projectId'> & {
   projectIds?: Array<string | { id?: string; name?: string }>;
   projectId?: string | { id?: string; name?: string };
   role?: string;
@@ -230,7 +231,7 @@ type StoredPortalMember = Partial<PortalUser> & {
 };
 
 function getPortalMemberRefs(
-  db: Parameters<typeof doc>[0],
+  db: Firestore,
   orgId: string,
   identity: { uid: string; email?: string },
 ) {
@@ -243,7 +244,7 @@ function getPortalMemberRefs(
 }
 
 async function loadPortalMemberRecord(
-  db: Parameters<typeof doc>[0],
+  db: Firestore,
   orgId: string,
   identity: { uid: string; email?: string },
 ) {
@@ -809,7 +810,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       unsubsRef.current.push(
         onSnapshot(expenseSheetCollection, (snap) => {
           const docs = snap.docs
-            .map((docItem) => {
+            .map<ExpenseSheetTab | null>((docItem) => {
               const data = docItem.data() as {
                 name?: string;
                 rows?: ImportRow[];
@@ -819,16 +820,17 @@ export function PortalProvider({ children }: { children: ReactNode }) {
                 deletedAt?: string;
               };
               if (data?.deletedAt) return null;
-              return {
+              const nextSheet: ExpenseSheetTab = {
                 id: docItem.id,
                 name: sanitizeExpenseSheetName(data?.name, docItem.id === 'default' ? '기본 탭' : '새 탭'),
                 rows: Array.isArray(data?.rows) ? data.rows : null,
                 order: Number.isFinite(Number(data?.order)) ? Number(data?.order) : (docItem.id === 'default' ? 0 : 999),
                 createdAt: data?.createdAt,
                 updatedAt: data?.updatedAt,
-              } satisfies ExpenseSheetTab;
+              };
+              return nextSheet;
             })
-            .filter((sheet): sheet is ExpenseSheetTab => !!sheet)
+            .filter((sheet): sheet is ExpenseSheetTab => sheet !== null)
             .sort((a, b) => {
               if (a.order !== b.order) return a.order - b.order;
               return String(a.createdAt || a.updatedAt || '').localeCompare(String(b.createdAt || b.updatedAt || ''));
