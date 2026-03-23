@@ -272,6 +272,74 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     expect(snap.data()?.applyTarget).toBe('expense_sheet');
   });
 
+  it('allows viewer role to process project request contract uploads', async () => {
+    const projectRequestContractStorageService = {
+      uploadContract: vi.fn(async ({ fileName, mimeType, fileSize }) => ({
+        path: `orgs/${tenantId}/project-request-contracts/${actorId}/${fileName}`,
+        name: fileName,
+        downloadURL: `https://example.com/contracts/${encodeURIComponent(fileName)}`,
+        size: fileSize,
+        contentType: mimeType,
+        uploadedAt: '2026-03-23T08:40:00.000Z',
+      })),
+    };
+    const projectRequestContractAiService = {
+      analyzeContract: vi.fn(async ({ fileName, documentText }) => ({
+        provider: 'heuristic',
+        model: 'deterministic-fallback',
+        summary: `${fileName} 요약`,
+        warnings: [],
+        nextActions: [],
+        extractedAt: '2026-03-23T08:40:00.000Z',
+        fields: {
+          officialContractName: { value: '공식 계약명', confidence: 'medium', evidence: documentText || fileName },
+          suggestedProjectName: { value: '신규 사업', confidence: 'medium', evidence: fileName },
+          clientOrg: { value: '발주처', confidence: 'low', evidence: '' },
+          projectPurpose: { value: '', confidence: 'low', evidence: '' },
+          description: { value: '', confidence: 'low', evidence: '' },
+          contractStart: { value: '', confidence: 'low', evidence: '' },
+          contractEnd: { value: '', confidence: 'low', evidence: '' },
+          contractAmount: { value: null, confidence: 'low', evidence: '' },
+          salesVatAmount: { value: null, confidence: 'low', evidence: '' },
+        },
+      })),
+    };
+    const contractApi = request(createBffApp({
+      projectId,
+      workerSecret,
+      db,
+      projectRequestContractStorageService,
+      projectRequestContractAiService,
+    }));
+
+    const upload = await contractApi
+      .post('/api/v1/project-requests/contract/process')
+      .set({
+        ...defaultHeaders,
+        'x-actor-role': 'viewer',
+        'content-type': 'application/octet-stream',
+        'x-file-name': encodeURIComponent('viewer-contract.pdf'),
+        'x-file-type': 'application/pdf',
+        'x-file-size': '9',
+        'idempotency-key': 'idem-project-request-contract-001',
+      })
+      .send(Buffer.from('%PDF-test'));
+
+    expect(upload.status).toBe(200);
+    expect(upload.body.contractDocument.name).toBe('viewer-contract.pdf');
+    expect(upload.body.analysis.fields.officialContractName.value).toBe('공식 계약명');
+    expect(projectRequestContractStorageService.uploadContract).toHaveBeenCalledWith(expect.objectContaining({
+      tenantId,
+      actorId,
+      fileName: 'viewer-contract.pdf',
+      mimeType: 'application/pdf',
+      fileSize: 9,
+    }));
+    expect(projectRequestContractAiService.analyzeContract).toHaveBeenCalledWith(expect.objectContaining({
+      fileName: 'viewer-contract.pdf',
+    }));
+  });
+
   it('rejects disallowed CORS origin', async () => {
     const corsApi = request(createBffApp({
       projectId,
