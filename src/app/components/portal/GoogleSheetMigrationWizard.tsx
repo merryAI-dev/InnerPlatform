@@ -350,6 +350,7 @@ export function GoogleSheetMigrationWizard({
     () => describeGoogleSheetMigrationTarget(preview?.selectedSheetName || ''),
     [preview?.selectedSheetName],
   );
+  const showAnalysisAssist = Boolean(preview?.selectedSheetName) && selectedDescriptor.target === 'preview_only';
 
   const reviewState = useMemo<GoogleSheetMigrationReviewState | null>(() => {
     if (!preview) return null;
@@ -474,6 +475,13 @@ export function GoogleSheetMigrationWizard({
   useEffect(() => {
     if (!preview || step === 'source') return;
     const key = `${preview.spreadsheetId}:${preview.selectedSheetName}`;
+    if (!showAnalysisAssist) {
+      setAnalysis(null);
+      setAnalysisLoading(false);
+      setAnalysisError('');
+      setAnalysisKey(key);
+      return;
+    }
     if (analysisLoading || analysisKey === key) return;
 
     let cancelled = false;
@@ -494,7 +502,7 @@ export function GoogleSheetMigrationWizard({
     }).catch((error) => {
       if (cancelled) return;
       setAnalysis(null);
-      setAnalysisError(resolveApiErrorMessage(error, 'AI migration 분석에 실패했습니다.'));
+      setAnalysisError(resolveApiErrorMessage(error, '추가 분석을 불러오지 못했습니다.'));
     }).finally(() => {
       if (cancelled) return;
       setAnalysisLoading(false);
@@ -510,6 +518,7 @@ export function GoogleSheetMigrationWizard({
     orgId,
     preview,
     projectId,
+    showAnalysisAssist,
     step,
   ]);
 
@@ -881,6 +890,7 @@ export function GoogleSheetMigrationWizard({
       analysis={analysis}
       analysisLoading={analysisLoading}
       analysisError={analysisError}
+      showAnalysisAssist={showAnalysisAssist}
       pendingSheetName={pendingSheetName}
       devHarnessEnabled={devHarnessEnabled}
       sheetSources={sheetSources}
@@ -913,6 +923,7 @@ function GoogleSheetImportDialog({
   analysis,
   analysisLoading,
   analysisError,
+  showAnalysisAssist,
   pendingSheetName,
   devHarnessEnabled,
   sheetSources,
@@ -941,6 +952,7 @@ function GoogleSheetImportDialog({
   analysis: GoogleSheetMigrationAnalysisResult | null;
   analysisLoading: boolean;
   analysisError: string;
+  showAnalysisAssist: boolean;
   pendingSheetName: string;
   devHarnessEnabled: boolean;
   sheetSources: ProjectSheetSourceSnapshot[];
@@ -1217,9 +1229,9 @@ function GoogleSheetImportDialog({
                     </div>
                   )}
                   <div className="rounded-2xl border border-sky-200 bg-sky-50 p-5 text-[12px] text-sky-950">
-                    <p className="font-semibold">AI migration assistant</p>
+                    <p className="font-semibold">추가 분석</p>
                     <p className="mt-1 text-sky-900/85">
-                      review 단계에서는 Claude가 실제 탭 구조를 읽고, 컬럼 매핑 후보와 반영 전 체크 포인트를 같이 제안합니다.
+                      정규화된 탭은 바로 preview/apply 하고, 미분류 탭에서만 추가 분석을 시도합니다.
                     </p>
                   </div>
                 </div>
@@ -1237,12 +1249,14 @@ function GoogleSheetImportDialog({
                     </div>
                     <Badge variant="outline" className="text-[10px]">{selectedDescriptor.readinessLabel}</Badge>
                   </div>
-                  <GoogleSheetMigrationAiInlineCard
-                    analysis={analysis}
-                    analysisLoading={analysisLoading}
-                    analysisError={analysisError}
-                    selectedSheetName={selectedSheetName}
-                  />
+                  {showAnalysisAssist && (
+                    <GoogleSheetMigrationAiInlineCard
+                      analysis={analysis}
+                      analysisLoading={analysisLoading}
+                      analysisError={analysisError}
+                      selectedSheetName={selectedSheetName}
+                    />
+                  )}
                   <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                     {(preview?.availableSheets || []).map((sheet) => {
                       const descriptor = describeGoogleSheetMigrationTarget(sheet.title);
@@ -1573,12 +1587,14 @@ function GoogleSheetImportDialog({
                     )}
                   </div>
                 )}
-                <GoogleSheetMigrationAiPanel
-                  analysis={analysis}
-                  analysisLoading={analysisLoading}
-                  analysisError={analysisError}
-                  step={step}
-                />
+                {showAnalysisAssist && (
+                  <GoogleSheetMigrationAiPanel
+                    analysis={analysis}
+                    analysisLoading={analysisLoading}
+                    analysisError={analysisError}
+                    step={step}
+                  />
+                )}
               </div>
               <div className="mt-5 border-t pt-4 2xl:mt-auto">
                 <div className="flex items-center gap-2">
@@ -1647,7 +1663,7 @@ function GoogleSheetMigrationAiInlineCard({
   return (
     <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-4 text-[12px] text-sky-950">
       <div className="flex items-center justify-between gap-2">
-        <p className="font-semibold">AI 빠른 분석</p>
+        <p className="font-semibold">탭 구조 분석</p>
         {safeAnalysis && (
           <Badge variant={safeAnalysis.provider === 'anthropic' ? 'default' : 'outline'} className="text-[10px]">
             {safeAnalysis.provider === 'anthropic' ? 'Merry의 분석' : '규칙 기반'}
@@ -1655,11 +1671,11 @@ function GoogleSheetMigrationAiInlineCard({
         )}
       </div>
       {!selectedSheetName ? (
-        <p className="mt-2 text-sky-900/85">탭을 하나 선택하면 AI가 구조와 반영 위험을 바로 정리합니다.</p>
+        <p className="mt-2 text-sky-900/85">탭을 하나 선택하면 구조와 반영 포인트를 바로 정리합니다.</p>
       ) : analysisLoading ? (
         <div className="mt-2 flex items-center gap-2 text-sky-900/85">
           <Loader2 className="h-4 w-4 animate-spin" />
-          <span>{selectedSheetName} 탭을 AI가 읽고 있습니다…</span>
+          <span>{selectedSheetName} 탭을 분석하고 있습니다…</span>
         </div>
       ) : analysisError ? (
         <p className="mt-2 text-amber-900">{analysisError}</p>
@@ -1696,7 +1712,7 @@ function GoogleSheetMigrationAiPanel({
   return (
     <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-[11px]">
       <div className="flex items-center justify-between gap-2">
-        <p className="font-medium text-slate-900">AI migration assistant</p>
+        <p className="font-medium text-slate-900">Migration assistant</p>
         {safeAnalysis && (
           <Badge variant={safeAnalysis.provider === 'anthropic' ? 'default' : 'outline'} className="text-[10px]">
             {safeAnalysis.provider === 'anthropic' ? 'Merry의 분석' : '규칙 기반'}
@@ -1705,16 +1721,16 @@ function GoogleSheetMigrationAiPanel({
       </div>
       {step === 'source' ? (
         <p className="mt-2 text-slate-600">
-          시트를 불러오면 AI가 탭 구조를 읽고, 추천 매핑과 주의사항을 자동으로 정리합니다.
+          시트를 불러오면 탭 구조를 읽고, 추천 매핑과 주의사항을 자동으로 정리합니다.
         </p>
       ) : analysisLoading ? (
         <div className="mt-3 flex items-center gap-2 text-slate-600">
           <Loader2 className="h-4 w-4 animate-spin" />
-          <span>AI가 탭 구조를 읽고 있습니다…</span>
+          <span>탭 구조를 읽고 있습니다…</span>
         </div>
       ) : analysisError ? (
         <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-amber-950">
-          <p className="font-medium">AI 분석을 불러오지 못했습니다.</p>
+          <p className="font-medium">분석을 불러오지 못했습니다.</p>
           <p className="mt-1 text-[10px] opacity-80">{analysisError}</p>
         </div>
       ) : safeAnalysis ? (
