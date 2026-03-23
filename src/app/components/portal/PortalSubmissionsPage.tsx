@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Checkbox } from '../ui/checkbox';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -30,6 +31,52 @@ function sortIsoDesc(a: string | undefined, b: string | undefined): number {
 function hasWeekAmounts(values: Record<string, unknown> | undefined): boolean {
   if (!values) return false;
   return Object.values(values).some((value) => typeof value === 'number' && Number.isFinite(value) && value !== 0);
+}
+
+function resolveEditedState(manualValue: boolean | undefined, fallbackValue: boolean): boolean {
+  return typeof manualValue === 'boolean' ? manualValue : fallbackValue;
+}
+
+function formatKstDateTime(value: string | undefined): { date: string; time: string } | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(date);
+  const pick = (type: string) => parts.find((part) => part.type === type)?.value || '--';
+  return {
+    date: `${pick('year')}-${pick('month')}-${pick('day')}`,
+    time: `${pick('hour')}:${pick('minute')} KST`,
+  };
+}
+
+function StatusAuditMeta(props: {
+  title: string;
+  at?: string;
+  byName?: string;
+}) {
+  const formatted = formatKstDateTime(props.at);
+  if (!formatted && !props.byName) return null;
+
+  return (
+    <div className="mt-1.5 rounded-md border border-border/40 bg-muted/20 px-2 py-1.5 text-left text-[9px] leading-4 text-muted-foreground">
+      <div className="text-foreground/80" style={{ fontWeight: 700 }}>{props.title}</div>
+      {formatted && (
+        <div className="mt-0.5">
+          <div>{formatted.date}</div>
+          <div>{formatted.time}</div>
+        </div>
+      )}
+      <div className="mt-0.5">처리자 {props.byName || '-'}</div>
+    </div>
+  );
 }
 
 const CHANGE_TABS: Array<{ label: string; value: ChangeRequestState | 'ALL' }> = [
@@ -69,6 +116,7 @@ export function PortalSubmissionsPage() {
     nextValue: true,
   });
   const [confirmSaving, setConfirmSaving] = useState(false);
+  const [editSavingKey, setEditSavingKey] = useState('');
 
   const todayIso = getSeoulTodayIso();
   const [yearMonth, setYearMonth] = useState(() => todayIso.slice(0, 7));
@@ -166,6 +214,30 @@ export function PortalSubmissionsPage() {
     }
   }, [confirmState, selectedWeek, upsertWeeklySubmissionStatus, yearMonth]);
 
+  const handleEditedChange = useCallback(async (input: {
+    projectId: string;
+    field: 'projection' | 'expense';
+    nextValue: boolean;
+  }) => {
+    if (!selectedWeek) return;
+    const savingKey = `${input.projectId}:${input.field}`;
+    setEditSavingKey(savingKey);
+    try {
+      await upsertWeeklySubmissionStatus({
+        projectId: input.projectId,
+        yearMonth,
+        weekNo: selectedWeek.weekNo,
+        ...(input.field === 'projection'
+          ? { projectionEdited: input.nextValue }
+          : { expenseEdited: input.nextValue }),
+      });
+    } catch (err) {
+      // store already toasts
+    } finally {
+      setEditSavingKey((prev) => (prev === savingKey ? '' : prev));
+    }
+  }, [selectedWeek, upsertWeeklySubmissionStatus, yearMonth]);
+
   if (isLoading) {
     return (
       <div className="min-h-[60vh] flex items-center justify-center">
@@ -246,7 +318,7 @@ export function PortalSubmissionsPage() {
           </div>
 
           <div className="text-[10px] text-muted-foreground">
-            상단 배지는 실제 수정 여부, 하단 상태는 제출 체크 여부입니다.
+            수정 여부는 드롭다운으로 직접 선택하고, 하단 상태는 제출 체크 여부를 표시합니다.
           </div>
 
           <div className="overflow-x-auto">
@@ -265,8 +337,8 @@ export function PortalSubmissionsPage() {
                   const weekSheet = checklistWeekMap.get(p.id);
                   const projectionDone = Boolean(status?.projectionUpdated);
                   const expenseDone = Boolean(status?.expenseUpdated);
-                  const projectionModified = hasWeekAmounts(weekSheet?.projection);
-                  const expenseModified = hasWeekAmounts(weekSheet?.actual);
+                  const projectionEdited = resolveEditedState(status?.projectionEdited, hasWeekAmounts(weekSheet?.projection));
+                  const expenseEdited = resolveEditedState(status?.expenseEdited, hasWeekAmounts(weekSheet?.actual));
                   return (
                     <tr key={p.id} className="border-t border-border/30">
                       <td className="px-3 py-2">
@@ -277,6 +349,7 @@ export function PortalSubmissionsPage() {
                         <div className="inline-flex items-start gap-2">
                           <Checkbox
                             checked={projectionDone}
+                            disabled={confirmSaving}
                             onCheckedChange={() => openConfirm({
                               projectId: p.id,
                               projectName: p.name,
@@ -285,24 +358,44 @@ export function PortalSubmissionsPage() {
                             })}
                           />
                           <div className="text-left">
-                            <span className={`inline-flex items-center h-5 px-2 rounded-full text-[10px] ${projectionModified ? 'bg-sky-500/15 text-sky-700 dark:text-sky-300' : 'bg-slate-500/10 text-slate-600 dark:text-slate-300'}`} style={{ fontWeight: 800 }}>
-                              수정 {projectionModified ? 'O' : 'X'}
-                            </span>
+                            <Select
+                              value={projectionEdited ? 'edited' : 'not-edited'}
+                              onValueChange={(value) => handleEditedChange({
+                                projectId: p.id,
+                                field: 'projection',
+                                nextValue: value === 'edited',
+                              })}
+                              disabled={editSavingKey === `${p.id}:projection`}
+                            >
+                              <SelectTrigger size="sm" className="h-7 min-w-[104px] px-2 text-[10px]">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="edited">수정 O</SelectItem>
+                                <SelectItem value="not-edited">수정 X</SelectItem>
+                              </SelectContent>
+                            </Select>
                             <div className={`mt-1 text-[10px] ${projectionDone ? 'text-emerald-700 dark:text-emerald-300' : 'text-muted-foreground'}`} style={{ fontWeight: 700 }}>
                               {projectionDone ? '완료' : '미완료'}
                             </div>
                           </div>
                         </div>
-                        {status?.projectionUpdatedAt && (
-                          <div className="text-[9px] text-muted-foreground mt-1">
-                            {status.projectionUpdatedAt.slice(0, 10)} · {status.projectionUpdatedByName || '-'}
-                          </div>
-                        )}
+                        <StatusAuditMeta
+                          title="수정 상태 반영"
+                          at={status?.projectionEditedAt}
+                          byName={status?.projectionEditedByName}
+                        />
+                        <StatusAuditMeta
+                          title="제출 상태 반영"
+                          at={status?.projectionUpdatedAt}
+                          byName={status?.projectionUpdatedByName}
+                        />
                       </td>
                       <td className="px-3 py-2 text-center">
                         <div className="inline-flex items-start gap-2">
                           <Checkbox
                             checked={expenseDone}
+                            disabled={confirmSaving}
                             onCheckedChange={() => openConfirm({
                               projectId: p.id,
                               projectName: p.name,
@@ -311,19 +404,38 @@ export function PortalSubmissionsPage() {
                             })}
                           />
                           <div className="text-left">
-                            <span className={`inline-flex items-center h-5 px-2 rounded-full text-[10px] ${expenseModified ? 'bg-sky-500/15 text-sky-700 dark:text-sky-300' : 'bg-slate-500/10 text-slate-600 dark:text-slate-300'}`} style={{ fontWeight: 800 }}>
-                              수정 {expenseModified ? 'O' : 'X'}
-                            </span>
+                            <Select
+                              value={expenseEdited ? 'edited' : 'not-edited'}
+                              onValueChange={(value) => handleEditedChange({
+                                projectId: p.id,
+                                field: 'expense',
+                                nextValue: value === 'edited',
+                              })}
+                              disabled={editSavingKey === `${p.id}:expense`}
+                            >
+                              <SelectTrigger size="sm" className="h-7 min-w-[104px] px-2 text-[10px]">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="edited">수정 O</SelectItem>
+                                <SelectItem value="not-edited">수정 X</SelectItem>
+                              </SelectContent>
+                            </Select>
                             <div className={`mt-1 text-[10px] ${expenseDone ? 'text-emerald-700 dark:text-emerald-300' : 'text-muted-foreground'}`} style={{ fontWeight: 700 }}>
                               {expenseDone ? '완료' : '미완료'}
                             </div>
                           </div>
                         </div>
-                        {status?.expenseUpdatedAt && (
-                          <div className="text-[9px] text-muted-foreground mt-1">
-                            {status.expenseUpdatedAt.slice(0, 10)} · {status.expenseUpdatedByName || '-'}
-                          </div>
-                        )}
+                        <StatusAuditMeta
+                          title="수정 상태 반영"
+                          at={status?.expenseEditedAt}
+                          byName={status?.expenseEditedByName}
+                        />
+                        <StatusAuditMeta
+                          title="제출 상태 반영"
+                          at={status?.expenseUpdatedAt}
+                          byName={status?.expenseUpdatedByName}
+                        />
                       </td>
                     </tr>
                   );

@@ -587,9 +587,15 @@ export interface WeeklySubmissionStatus {
   projectId: string;
   yearMonth: string; // "YYYY-MM"
   weekNo: number; // 1..6
+  projectionEdited?: boolean;
+  projectionEditedAt?: string;
+  projectionEditedByName?: string;
   projectionUpdated?: boolean;
   projectionUpdatedAt?: string;
   projectionUpdatedByName?: string;
+  expenseEdited?: boolean;
+  expenseEditedAt?: string;
+  expenseEditedByName?: string;
   expenseUpdated?: boolean;
   expenseUpdatedAt?: string;
   expenseUpdatedByName?: string;

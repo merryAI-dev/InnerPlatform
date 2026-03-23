@@ -141,7 +141,9 @@ interface PortalActions {
     projectId: string;
     yearMonth: string;
     weekNo: number;
+    projectionEdited?: boolean;
     projectionUpdated?: boolean;
+    expenseEdited?: boolean;
     expenseUpdated?: boolean;
   }) => Promise<void>;
   createProjectRequest: (payload: ProjectRequestPayload) => Promise<string | null>;
@@ -1434,7 +1436,9 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     projectId: string;
     yearMonth: string;
     weekNo: number;
+    projectionEdited?: boolean;
     projectionUpdated?: boolean;
+    expenseEdited?: boolean;
     expenseUpdated?: boolean;
   }) => {
     if (!db) {
@@ -1459,10 +1463,20 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       updatedAt: now,
       updatedByName: updatedBy,
     };
+    if (typeof input.projectionEdited === 'boolean') {
+      patch.projectionEdited = input.projectionEdited;
+      patch.projectionEditedAt = now;
+      patch.projectionEditedByName = updatedBy;
+    }
     if (typeof input.projectionUpdated === 'boolean') {
       patch.projectionUpdated = input.projectionUpdated;
       patch.projectionUpdatedAt = now;
       patch.projectionUpdatedByName = updatedBy;
+    }
+    if (typeof input.expenseEdited === 'boolean') {
+      patch.expenseEdited = input.expenseEdited;
+      patch.expenseEditedAt = now;
+      patch.expenseEditedByName = updatedBy;
     }
     if (typeof input.expenseUpdated === 'boolean') {
       patch.expenseUpdated = input.expenseUpdated;
