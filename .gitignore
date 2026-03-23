@@ -26,3 +26,4 @@ scripts/etl/output/
 *.xlsx
 .env.vercel.production
 .gitnexus
+.env*.local
