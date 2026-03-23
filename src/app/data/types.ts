@@ -226,6 +226,7 @@ export interface ParticipationEntry {
   memberName: string;
   projectId: string;
   projectName: string;
+  projectShortName?: string;
   rate: number;                          // 0~100 (%)
   settlementSystem: SettlementSystemCode;
   clientOrg: string;                     // 발주기관
@@ -286,6 +287,7 @@ export interface Project {
   slug: string;        // URL-safe unique key
   orgId: string;
   name: string;
+  shortName?: string;
   officialContractName?: string;
   status: ProjectStatus;
   type: ProjectType;

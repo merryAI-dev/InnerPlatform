@@ -63,7 +63,7 @@ function generateId(prefix: string): string {
 // ── Provider ──
 
 export function CareerProfileProvider({ children }: { children: ReactNode }) {
-  const { authUser } = useAuth();
+  const { user: authUser } = useAuth();
   const { db, orgId } = useFirebase();
   const [myProfile, setMyProfile] = useState<CareerProfile | null>(null);
   const [viewedProfile, setViewedProfile] = useState<CareerProfile | null>(null);

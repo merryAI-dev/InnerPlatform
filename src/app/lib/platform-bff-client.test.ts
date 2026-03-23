@@ -18,9 +18,18 @@ import {
   toRequestActor,
   uploadTransactionEvidenceDriveViaBff,
   upsertLedgerViaBff,
+  type PlatformApiClientLike,
   upsertProjectViaBff,
   upsertTransactionViaBff,
 } from './platform-bff-client';
+
+function asMockClient<T extends {
+  post: ReturnType<typeof vi.fn>;
+  get: ReturnType<typeof vi.fn>;
+  request: ReturnType<typeof vi.fn>;
+}>(client: T): T & PlatformApiClientLike {
+  return client as T & PlatformApiClientLike;
+}
 
 describe('platform-bff-client', () => {
   it('reads runtime config with defaults', () => {
@@ -47,11 +56,11 @@ describe('platform-bff-client', () => {
   });
 
   it('calls project upsert endpoint', async () => {
-    const client = {
+    const client = asMockClient({
       post: vi.fn(async () => ({ data: { id: 'p001', tenantId: 'mysc', version: 1, updatedAt: '2026-01-01' } })),
       get: vi.fn(),
       request: vi.fn(),
-    };
+    });
 
     const result = await upsertProjectViaBff({
       tenantId: 'mysc',
@@ -68,14 +77,14 @@ describe('platform-bff-client', () => {
   });
 
   it('calls ledger/transaction endpoints', async () => {
-    const client = {
+    const client = asMockClient({
       post: vi
         .fn()
         .mockResolvedValueOnce({ data: { id: 'l001', tenantId: 'mysc', version: 1, updatedAt: '2026-01-02' } })
         .mockResolvedValueOnce({ data: { id: 'tx001', tenantId: 'mysc', version: 1, updatedAt: '2026-01-02', state: 'DRAFT' } }),
       get: vi.fn(),
       request: vi.fn(),
-    };
+    });
 
     const ledger = await upsertLedgerViaBff({
       tenantId: 'mysc',
@@ -96,13 +105,13 @@ describe('platform-bff-client', () => {
   });
 
   it('calls transaction state endpoint with expected version', async () => {
-    const client = {
+    const client = asMockClient({
       post: vi.fn(),
       get: vi.fn(),
       request: vi.fn(async () => ({
         data: { id: 'tx001', state: 'APPROVED', rejectedReason: null, version: 2, updatedAt: '2026-01-02' },
       })),
-    };
+    });
 
     const result = await changeTransactionStateViaBff({
       tenantId: 'mysc',
@@ -122,14 +131,14 @@ describe('platform-bff-client', () => {
   });
 
   it('calls comment/evidence endpoints', async () => {
-    const client = {
+    const client = asMockClient({
       post: vi
         .fn()
         .mockResolvedValueOnce({ data: { id: 'c001', transactionId: 'tx001', version: 1, createdAt: '2026-01-02' } })
         .mockResolvedValueOnce({ data: { id: 'ev001', transactionId: 'tx001', version: 1, uploadedAt: '2026-01-02' } }),
       get: vi.fn(),
       request: vi.fn(),
-    };
+    });
 
     const comment = await addCommentViaBff({
       tenantId: 'mysc',
@@ -157,7 +166,7 @@ describe('platform-bff-client', () => {
   });
 
   it('calls project request contract analysis endpoint', async () => {
-    const client = {
+    const client = asMockClient({
       post: vi.fn(async () => ({
         data: {
           provider: 'anthropic',
@@ -181,7 +190,7 @@ describe('platform-bff-client', () => {
       })),
       get: vi.fn(),
       request: vi.fn(),
-    };
+    });
 
     const result = await analyzeProjectRequestContractViaBff({
       tenantId: 'mysc',
@@ -203,7 +212,7 @@ describe('platform-bff-client', () => {
   });
 
   it('calls project request contract upload endpoint', async () => {
-    const client = {
+    const client = asMockClient({
       post: vi.fn(async () => ({
         data: {
           path: 'orgs/mysc/project-request-contracts/u001/contract.pdf',
@@ -216,7 +225,7 @@ describe('platform-bff-client', () => {
       })),
       get: vi.fn(),
       request: vi.fn(),
-    };
+    });
 
     const result = await uploadProjectRequestContractViaBff({
       tenantId: 'mysc',
@@ -244,7 +253,7 @@ describe('platform-bff-client', () => {
 
   it('calls project request contract process endpoint with binary body', async () => {
     const file = new File(['pdf-bytes'], '계약서 샘플.pdf', { type: 'application/pdf' });
-    const client = {
+    const client = asMockClient({
       post: vi.fn(),
       get: vi.fn(),
       request: vi.fn(async () => ({
@@ -278,7 +287,7 @@ describe('platform-bff-client', () => {
           },
         },
       })),
-    };
+    });
 
     const result = await processProjectRequestContractViaBff({
       tenantId: 'mysc',
@@ -301,7 +310,7 @@ describe('platform-bff-client', () => {
   });
 
   it('calls evidence drive provision/sync endpoints', async () => {
-    const client = {
+    const client = asMockClient({
       post: vi
         .fn()
         .mockResolvedValueOnce({
@@ -384,7 +393,7 @@ describe('platform-bff-client', () => {
             updatedAt: '2026-03-11T10:02:00.000Z',
           },
         }),
-    };
+    });
 
     const projectRoot = await provisionProjectEvidenceDriveRootViaBff({
       tenantId: 'mysc',
@@ -441,7 +450,7 @@ describe('platform-bff-client', () => {
   });
 
   it('uploads an evidence file through the drive upload endpoint', async () => {
-    const client = {
+    const client = asMockClient({
       post: vi.fn(),
       get: vi.fn(),
       request: vi.fn(async () => ({
@@ -468,7 +477,7 @@ describe('platform-bff-client', () => {
           updatedAt: '2026-03-11T11:00:00.000Z',
         },
       })),
-    };
+    });
 
     const result = await uploadTransactionEvidenceDriveViaBff({
       tenantId: 'mysc',
@@ -503,7 +512,7 @@ describe('platform-bff-client', () => {
   });
 
   it('posts evidence drive category overrides', async () => {
-    const client = {
+    const client = asMockClient({
       post: vi.fn(),
       get: vi.fn(),
       request: vi.fn(async () => ({
@@ -526,7 +535,7 @@ describe('platform-bff-client', () => {
           updatedAt: '2026-03-11T11:10:00.000Z',
         },
       })),
-    };
+    });
 
     const result = await overrideTransactionEvidenceDriveCategoriesViaBff({
       tenantId: 'mysc',
@@ -549,7 +558,7 @@ describe('platform-bff-client', () => {
   });
 
   it('calls google sheet import preview endpoint', async () => {
-    const client = {
+    const client = asMockClient({
       post: vi.fn(async () => ({
         data: {
           spreadsheetId: 'sheet-001',
@@ -567,7 +576,7 @@ describe('platform-bff-client', () => {
       })),
       get: vi.fn(),
       request: vi.fn(),
-    };
+    });
 
     const preview = await previewGoogleSheetImportViaBff({
       tenantId: 'mysc',
@@ -592,7 +601,7 @@ describe('platform-bff-client', () => {
   });
 
   it('calls google sheet import analysis endpoint', async () => {
-    const client = {
+    const client = asMockClient({
       post: vi.fn(async () => ({
         data: {
           provider: 'anthropic',
@@ -615,7 +624,7 @@ describe('platform-bff-client', () => {
       })),
       get: vi.fn(),
       request: vi.fn(),
-    };
+    });
 
     const analysis = await analyzeGoogleSheetImportViaBff({
       tenantId: 'mysc',
@@ -645,7 +654,7 @@ describe('platform-bff-client', () => {
   });
 
   it('calls project sheet source upload endpoint', async () => {
-    const client = {
+    const client = asMockClient({
       post: vi.fn(async () => ({
         data: {
           sourceType: 'usage',
@@ -665,7 +674,7 @@ describe('platform-bff-client', () => {
       })),
       get: vi.fn(),
       request: vi.fn(),
-    };
+    });
 
     const result = await uploadProjectSheetSourceViaBff({
       tenantId: 'mysc',
@@ -702,7 +711,7 @@ describe('platform-bff-client', () => {
   });
 
   it('normalizes nullable google sheet migration analysis arrays', async () => {
-    const client = {
+    const client = asMockClient({
       post: vi.fn(async () => ({
         data: {
           provider: 'anthropic',
@@ -719,7 +728,7 @@ describe('platform-bff-client', () => {
       })),
       get: vi.fn(),
       request: vi.fn(),
-    };
+    });
 
     const analysis = await analyzeGoogleSheetImportViaBff({
       tenantId: 'mysc',

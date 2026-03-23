@@ -883,8 +883,8 @@ export function CashflowProjectSheet({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => blocker.reset()}>계속 편집</AlertDialogCancel>
-            <AlertDialogAction onClick={() => blocker.proceed()}>나가기</AlertDialogAction>
+            <AlertDialogCancel onClick={() => blocker.reset?.()}>계속 편집</AlertDialogCancel>
+            <AlertDialogAction onClick={() => blocker.proceed?.()}>나가기</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

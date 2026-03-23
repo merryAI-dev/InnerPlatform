@@ -967,7 +967,10 @@ function GoogleSheetImportDialog({
   onLoadSavedSource: (source: ProjectSheetSourceSnapshot) => void;
   onApply: () => void;
 }) {
-  const protectedHeaderSet = useMemo(() => new Set(GOOGLE_SHEET_PROTECTED_HEADERS), []);
+  const protectedHeaderSet = useMemo<Set<string>>(
+    () => new Set<string>(GOOGLE_SHEET_PROTECTED_HEADERS),
+    [],
+  );
   const steps: GoogleSheetWizardStep[] = ['source', 'sheet', 'review', 'apply'];
   const currentStepIndex = steps.indexOf(step);
   const selectedSheetName = pendingSheetName || preview?.selectedSheetName || '';

@@ -4,6 +4,9 @@ import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 type JsonMap = Record<string, unknown>;
+type FirebaseAdminNamespace = typeof import('firebase-admin') & {
+  default?: typeof import('firebase-admin');
+};
 
 export interface LiveCutoverManifest {
   orgId: string;
@@ -98,15 +101,17 @@ async function runDiscover() {
   );
   const outPath = getFlagValue('--out');
 
-  const admin = await import('firebase-admin');
-  const sourceApp = initNamedAdminApp(admin.default, 'live-cutover-source', {
+  const admin = resolveFirebaseAdminNamespace(await import('firebase-admin'));
+  const sourceApp = initNamedAdminApp(admin, 'live-cutover-source', {
     projectId: sourceProjectId,
     envPrefix: 'SOURCE',
   });
   const sourceDb = sourceApp.firestore();
 
   const projectSnap = await sourceDb.collection(`orgs/${orgId}/projects`).get();
-  const discoveries = projectSnap.docs.map((doc) => buildProjectDiscoveryEntry(doc.id, doc.data() || {}));
+  const discoveries: ProjectDiscoveryEntry[] = projectSnap.docs.map((doc: { id: string; data(): JsonMap }) => (
+    buildProjectDiscoveryEntry(doc.id, doc.data() || {})
+  ));
   discoveries.sort((a, b) => {
     const aScore = a.likelyTestData ? 1 : 0;
     const bScore = b.likelyTestData ? 1 : 0;
@@ -164,12 +169,12 @@ async function runMigrate() {
     JSON.parse(readFileSync(resolve(manifestPath), 'utf8')) as Partial<LiveCutoverManifest>,
   );
 
-  const admin = await import('firebase-admin');
-  const sourceApp = initNamedAdminApp(admin.default, 'live-cutover-source', {
+  const admin = resolveFirebaseAdminNamespace(await import('firebase-admin'));
+  const sourceApp = initNamedAdminApp(admin, 'live-cutover-source', {
     projectId: sourceProjectId,
     envPrefix: 'SOURCE',
   });
-  const destApp = initNamedAdminApp(admin.default, 'live-cutover-dest', {
+  const destApp = initNamedAdminApp(admin, 'live-cutover-dest', {
     projectId: destProjectId,
     envPrefix: 'DEST',
   });
@@ -520,11 +525,11 @@ async function copyStorageObjects(options: {
 }
 
 function initNamedAdminApp(
-  admin: typeof import('firebase-admin').default,
+  admin: typeof import('firebase-admin'),
   appName: string,
   options: { projectId: string; envPrefix: 'SOURCE' | 'DEST' },
 ) {
-  const existing = admin.apps.find((app) => app.name === appName);
+  const existing = admin.apps.find((app) => app?.name === appName);
   if (existing) return existing;
 
   const serviceAccount = readServiceAccount(options.envPrefix);
@@ -547,6 +552,10 @@ function initNamedAdminApp(
     },
     appName,
   );
+}
+
+function resolveFirebaseAdminNamespace(adminModule: FirebaseAdminNamespace): typeof import('firebase-admin') {
+  return adminModule.default || adminModule;
 }
 
 function readServiceAccount(prefix: 'SOURCE' | 'DEST') {

@@ -11,6 +11,7 @@ import {
   setDoc,
   updateDoc,
   where,
+  type Firestore,
   type Unsubscribe,
 } from 'firebase/firestore';
 import type {
@@ -122,9 +123,9 @@ interface PortalActions {
   duplicateExpenseSet: (setId: string) => void;
   addChangeRequest: (req: ChangeRequest) => void;
   submitChangeRequest: (id: string) => Promise<boolean>;
-  addTransaction: (tx: Transaction) => void;
-  updateTransaction: (id: string, updates: Partial<Transaction>) => void;
-  changeTransactionState: (id: string, newState: TransactionState, reason?: string) => void;
+  addTransaction: (tx: Transaction) => Promise<void>;
+  updateTransaction: (id: string, updates: Partial<Transaction>) => Promise<void>;
+  changeTransactionState: (id: string, newState: TransactionState, reason?: string) => Promise<void>;
   addComment: (comment: Comment) => Promise<void>;
   saveEvidenceRequiredMap: (map: Record<string, string>) => Promise<void>;
   markSheetSourceApplied: (input: { sourceType: ProjectSheetSourceType; applyTarget: string }) => Promise<void>;
@@ -168,7 +169,7 @@ function normalizeBudgetCodeBook(input: BudgetCodeEntry[]): BudgetCodeEntry[] {
     .filter((row) => row.code && row.subCodes.length > 0);
 }
 
-function withTenantScope<T extends Record<string, unknown>>(orgId: string, payload: T): T & { tenantId: string } {
+function withTenantScope<T extends object>(orgId: string, payload: T): T & { tenantId: string } {
   return {
     ...payload,
     tenantId: orgId,
@@ -221,7 +222,7 @@ function normalizePortalUser(candidate: Partial<PortalUser> | null | undefined):
   };
 }
 
-type StoredPortalMember = Partial<PortalUser> & {
+type StoredPortalMember = Omit<Partial<PortalUser>, 'projectIds' | 'projectId'> & {
   projectIds?: Array<string | { id?: string; name?: string }>;
   projectId?: string | { id?: string; name?: string };
   role?: string;
@@ -230,7 +231,7 @@ type StoredPortalMember = Partial<PortalUser> & {
 };
 
 function getPortalMemberRefs(
-  db: Parameters<typeof doc>[0],
+  db: Firestore,
   orgId: string,
   identity: { uid: string; email?: string },
 ) {
@@ -243,7 +244,7 @@ function getPortalMemberRefs(
 }
 
 async function loadPortalMemberRecord(
-  db: Parameters<typeof doc>[0],
+  db: Firestore,
   orgId: string,
   identity: { uid: string; email?: string },
 ) {
@@ -809,7 +810,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       unsubsRef.current.push(
         onSnapshot(expenseSheetCollection, (snap) => {
           const docs = snap.docs
-            .map((docItem) => {
+            .map<ExpenseSheetTab | null>((docItem) => {
               const data = docItem.data() as {
                 name?: string;
                 rows?: ImportRow[];
@@ -819,16 +820,17 @@ export function PortalProvider({ children }: { children: ReactNode }) {
                 deletedAt?: string;
               };
               if (data?.deletedAt) return null;
-              return {
+              const nextSheet: ExpenseSheetTab = {
                 id: docItem.id,
                 name: sanitizeExpenseSheetName(data?.name, docItem.id === 'default' ? '기본 탭' : '새 탭'),
                 rows: Array.isArray(data?.rows) ? data.rows : null,
                 order: Number.isFinite(Number(data?.order)) ? Number(data?.order) : (docItem.id === 'default' ? 0 : 999),
                 createdAt: data?.createdAt,
                 updatedAt: data?.updatedAt,
-              } satisfies ExpenseSheetTab;
+              };
+              return nextSheet;
             })
-            .filter((sheet): sheet is ExpenseSheetTab => !!sheet)
+            .filter((sheet): sheet is ExpenseSheetTab => sheet !== null)
             .sort((a, b) => {
               if (a.order !== b.order) return a.order - b.order;
               return String(a.createdAt || a.updatedAt || '').localeCompare(String(b.createdAt || b.updatedAt || ''));
@@ -2060,66 +2062,71 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     }
   }, [firestoreEnabled, db, portalUser?.name, persistChangeRequest]);
 
-  const addTransaction = useCallback((txData: Transaction) => {
-    setTransactions((prev) => [txData, ...prev]);
-
+  const addTransaction = useCallback(async (txData: Transaction) => {
     if (firestoreEnabled) {
-      persistTransaction(txData).catch((err) => {
+      try {
+        await persistTransaction(txData);
+      } catch (err) {
         console.error('[PortalStore] persistTransaction error:', err);
         toast.error('거래 저장에 실패했습니다');
-      });
+        throw err;
+      }
     }
+
+    setTransactions((prev) => [txData, ...prev.filter((tx) => tx.id !== txData.id)]);
   }, [firestoreEnabled, persistTransaction]);
 
-  const updateTransaction = useCallback((id: string, updates: Partial<Transaction>) => {
+  const updateTransaction = useCallback(async (id: string, updates: Partial<Transaction>) => {
     const now = new Date().toISOString();
-    let nextTx: Transaction | null = null;
+    const currentTx = transactions.find((t) => t.id === id);
+    if (!currentTx) return;
+    const nextTx: Transaction = { ...currentTx, ...updates, updatedAt: now };
 
-    setTransactions((prev) => prev.map((t) => {
-      if (t.id !== id) return t;
-      nextTx = { ...t, ...updates, updatedAt: now };
-      return nextTx;
-    }));
-
-    if (firestoreEnabled && nextTx) {
-      persistTransaction(nextTx).catch((err) => {
+    if (firestoreEnabled) {
+      try {
+        await persistTransaction(nextTx);
+      } catch (err) {
         console.error('[PortalStore] updateTransaction error:', err);
         toast.error('거래 수정에 실패했습니다');
-      });
-    }
-  }, [firestoreEnabled, persistTransaction]);
-
-  const changeTransactionState = useCallback((id: string, newState: TransactionState, reason?: string) => {
-    const now = new Date().toISOString();
-    let nextTx: Transaction | null = null;
-
-    setTransactions((prev) => prev.map((t) => {
-      if (t.id !== id) return t;
-      const stateUpdates: Partial<Transaction> = {
-        state: newState,
-        updatedAt: now,
-        updatedBy: portalUser?.id || 'unknown',
-      };
-      if (newState === 'SUBMITTED') {
-        stateUpdates.submittedBy = portalUser?.name || portalUser?.id;
-        stateUpdates.submittedAt = now;
-      } else if (newState === 'APPROVED') {
-        stateUpdates.approvedBy = portalUser?.name || portalUser?.id;
-        stateUpdates.approvedAt = now;
-      } else if (newState === 'REJECTED' && reason) {
-        stateUpdates.rejectedReason = reason;
+        throw err;
       }
-      nextTx = { ...t, ...stateUpdates };
-      return nextTx;
-    }));
+    }
 
-    if (firestoreEnabled && nextTx) {
-      persistTransaction(nextTx).catch((err) => {
+    setTransactions((prev) => prev.map((t) => (t.id === id ? nextTx : t)));
+  }, [firestoreEnabled, persistTransaction, transactions]);
+
+  const changeTransactionState = useCallback(async (id: string, newState: TransactionState, reason?: string) => {
+    const now = new Date().toISOString();
+    const currentTx = transactions.find((t) => t.id === id);
+    if (!currentTx) return;
+    const stateUpdates: Partial<Transaction> = {
+      state: newState,
+      updatedAt: now,
+      updatedBy: portalUser?.id || 'unknown',
+    };
+    if (newState === 'SUBMITTED') {
+      stateUpdates.submittedBy = portalUser?.name || portalUser?.id;
+      stateUpdates.submittedAt = now;
+    } else if (newState === 'APPROVED') {
+      stateUpdates.approvedBy = portalUser?.name || portalUser?.id;
+      stateUpdates.approvedAt = now;
+    } else if (newState === 'REJECTED' && reason) {
+      stateUpdates.rejectedReason = reason;
+    }
+    const nextTx: Transaction = { ...currentTx, ...stateUpdates };
+
+    if (firestoreEnabled) {
+      try {
+        await persistTransaction(nextTx);
+      } catch (err) {
         console.error('[PortalStore] changeTransactionState error:', err);
         toast.error('거래 상태 변경에 실패했습니다');
-      });
+        throw err;
+      }
     }
-  }, [firestoreEnabled, persistTransaction, portalUser?.id, portalUser?.name]);
+
+    setTransactions((prev) => prev.map((t) => (t.id === id ? nextTx : t)));
+  }, [firestoreEnabled, persistTransaction, portalUser?.id, portalUser?.name, transactions]);
 
   const addComment = useCallback(async (comment: Comment) => {
     if (!portalUser?.projectId) {

@@ -23,10 +23,10 @@ export interface TransactionRowProps {
   tx: Transaction;
   rowNum: number;
   weekLabel: string;
-  onUpdate: (updates: Partial<Transaction>) => void;
-  onProvisionEvidenceDrive?: (tx: Transaction) => void | Promise<void>;
-  onSyncEvidenceDrive?: (tx: Transaction) => void | Promise<void>;
-  onChangeState?: (txId: string, newState: TransactionState, reason?: string) => void;
+  onUpdate: (updates: Partial<Transaction>) => void | Promise<void>;
+  onProvisionEvidenceDrive?: (tx: Transaction) => void | Promise<unknown>;
+  onSyncEvidenceDrive?: (tx: Transaction) => void | Promise<unknown>;
+  onChangeState?: (txId: string, newState: TransactionState, reason?: string) => void | Promise<void>;
   userRole?: 'pm' | 'admin';
 }
 
@@ -48,7 +48,11 @@ export function SettlementTransactionRow({
     (updates: Partial<Transaction>) => {
       if (locked) return;
       if (debounceRef.current) clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(() => onUpdate(updates), 1200);
+      debounceRef.current = setTimeout(() => {
+        void Promise.resolve(onUpdate(updates)).catch((error) => {
+          console.error('[SettlementLedger] update transaction failed:', error);
+        });
+      }, 1200);
     },
     [onUpdate, locked],
   );
@@ -71,7 +75,7 @@ export function SettlementTransactionRow({
 
   const runDriveAction = useCallback(async (
     action: 'provision' | 'sync',
-    handler?: (targetTx: Transaction) => void | Promise<void>,
+    handler?: (targetTx: Transaction) => void | Promise<unknown>,
   ) => {
     if (!handler || driveAction) return;
     setDriveAction(action);
@@ -116,7 +120,11 @@ export function SettlementTransactionRow({
         checked={!!value}
         disabled={locked}
         onCheckedChange={(checked) => {
-          if (!locked) onUpdate({ [field]: !!checked } as Partial<Transaction>);
+          if (!locked) {
+            void Promise.resolve(onUpdate({ [field]: !!checked } as Partial<Transaction>)).catch((error) => {
+              console.error('[SettlementLedger] update transaction failed:', error);
+            });
+          }
         }}
         className="h-3.5 w-3.5"
       />
@@ -151,7 +159,11 @@ export function SettlementTransactionRow({
           {tx.state === 'REJECTED' && userRole === 'pm' && onChangeState && (
             <button
               className="shrink-0 text-[8px] text-blue-600 hover:underline"
-              onClick={() => onChangeState(tx.id, 'DRAFT')}
+              onClick={() => {
+                void Promise.resolve(onChangeState(tx.id, 'DRAFT')).catch((error) => {
+                  console.error('[SettlementLedger] change transaction state failed:', error);
+                });
+              }}
             >
               수정
             </button>
@@ -182,7 +194,13 @@ export function SettlementTransactionRow({
           defaultValue={normalizeMethodValue(tx.method)}
           disabled={locked}
           className={`bg-transparent outline-none text-[11px] w-full cursor-pointer ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
-          onChange={(e) => { if (!locked) onUpdate({ method: e.target.value as Transaction['method'] }); }}
+          onChange={(e) => {
+            if (!locked) {
+              void Promise.resolve(onUpdate({ method: e.target.value as Transaction['method'] })).catch((error) => {
+                console.error('[SettlementLedger] update transaction failed:', error);
+              });
+            }
+          }}
         >
           {METHOD_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>{o.label}</option>
@@ -197,7 +215,13 @@ export function SettlementTransactionRow({
           defaultValue={tx.cashflowLabel || ''}
           disabled={locked}
           className={`bg-transparent outline-none text-[11px] w-full cursor-pointer min-w-[100px] ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
-          onChange={(e) => { if (!locked) onUpdate({ cashflowLabel: e.target.value }); }}
+          onChange={(e) => {
+            if (!locked) {
+              void Promise.resolve(onUpdate({ cashflowLabel: e.target.value })).catch((error) => {
+                console.error('[SettlementLedger] update transaction failed:', error);
+              });
+            }
+          }}
         >
           <option value="">-</option>
           {CASHFLOW_LINE_OPTIONS.map((o) => (

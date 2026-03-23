@@ -14,16 +14,16 @@ export interface WeekSectionProps {
   collapsed: boolean;
   txCount: number;
   onToggle: () => void;
-  onUpdateTx: (txId: string, updates: Partial<Transaction>) => void;
-  onProvisionEvidenceDrive?: (tx: Transaction) => void | Promise<void>;
-  onSyncEvidenceDrive?: (tx: Transaction) => void | Promise<void>;
+  onUpdateTx: (txId: string, updates: Partial<Transaction>) => void | Promise<void>;
+  onProvisionEvidenceDrive?: (tx: Transaction) => void | Promise<unknown>;
+  onSyncEvidenceDrive?: (tx: Transaction) => void | Promise<unknown>;
   onSubmitWeek?: (input: {
     weekLabel: string;
     yearMonth: string;
     weekNo: number;
     txIds: string[];
   }) => void | Promise<void>;
-  onChangeTransactionState?: (txId: string, newState: TransactionState, reason?: string) => void;
+  onChangeTransactionState?: (txId: string, newState: TransactionState, reason?: string) => void | Promise<void>;
   userRole?: 'pm' | 'admin';
 }
 

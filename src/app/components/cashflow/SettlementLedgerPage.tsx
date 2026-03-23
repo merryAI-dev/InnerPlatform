@@ -1,12 +1,17 @@
 import { ChevronDown, ChevronLeft, ChevronRight, Download, ExternalLink, GripVertical, Loader2, Plus, RotateCcw, Save, Upload, X } from 'lucide-react';
 import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { ClipboardEvent, KeyboardEvent, MouseEvent } from 'react';
+import type {
+  ClipboardEvent as ReactClipboardEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent as ReactMouseEvent,
+} from 'react';
 import { toast } from 'sonner';
 import { detectKeyRuleContext, runKeyRules, type KeyRule } from '../../platform/settlement-grid-keymap';
 import { grid2tsv, parseTsvRows, isSpreadsheetHtml, html2grid } from '../../platform/settlement-grid-clipboard';
 import { BUDGET_CODE_BOOK } from '../../data/budget-data';
 import type { BudgetCodeEntry, Comment, Transaction, TransactionState } from '../../data/types';
+import { resolveApiErrorMessage } from '../../platform/api-error-message';
 import { findWeekForDate, getMonthMondayWeeks, getYearMondayWeeks, type MonthMondayWeek } from '../../platform/cashflow-weeks';
 import { parseDate, parseNumber, triggerDownload } from '../../platform/csv-utils';
 import {
@@ -124,8 +129,8 @@ export interface SettlementLedgerProps {
   projectName: string;
   transactions: Transaction[];
   defaultLedgerId: string;
-  onAddTransaction: (tx: Transaction) => void;
-  onUpdateTransaction: (id: string, updates: Partial<Transaction>) => void;
+  onAddTransaction: (tx: Transaction) => void | Promise<void>;
+  onUpdateTransaction: (id: string, updates: Partial<Transaction>) => void | Promise<void>;
   evidenceRequiredMap?: Record<string, string>;
   onSaveEvidenceRequiredMap?: (map: Record<string, string>) => void | Promise<void>;
   saving?: boolean;
@@ -142,16 +147,16 @@ export interface SettlementLedgerProps {
     weekNo: number;
     txIds: string[];
   }) => void | Promise<void>;
-  onChangeTransactionState?: (txId: string, newState: TransactionState, reason?: string) => void;
+  onChangeTransactionState?: (txId: string, newState: TransactionState, reason?: string) => void | Promise<void>;
   /** Current user name for audit trail */
   currentUserName?: string;
   currentUserId?: string;
   userRole?: 'pm' | 'admin';
   comments?: Comment[];
   onAddComment?: (comment: Comment) => void | Promise<void>;
-  onProvisionEvidenceDrive?: (tx: Transaction) => void | Promise<void>;
-  onSyncEvidenceDrive?: (tx: Transaction) => void | Promise<void>;
-  onUploadEvidenceDrive?: (tx: Transaction, uploads: EvidenceUploadSelection[]) => void | Promise<void>;
+  onProvisionEvidenceDrive?: (tx: Transaction) => void | Promise<unknown>;
+  onSyncEvidenceDrive?: (tx: Transaction) => void | Promise<unknown>;
+  onUploadEvidenceDrive?: (tx: Transaction, uploads: EvidenceUploadSelection[]) => void | Promise<unknown>;
   onEnsureTransactionPersisted?: (input: {
     transaction: Transaction;
     sourceTxId?: string;
@@ -600,7 +605,10 @@ export function SettlementLedgerPage({
     (txId: string, updates: Partial<Transaction>) => {
       const existing = allTransactions.find((t) => t.id === txId);
       if (!existing) {
-        onUpdateTransaction(txId, updates);
+        void Promise.resolve(onUpdateTransaction(txId, updates)).catch((error) => {
+          console.error('[SettlementLedger] update transaction failed:', error);
+          toast.error(resolveApiErrorMessage(error, '거래 수정에 실패했습니다.'));
+        });
         return;
       }
 
@@ -612,8 +620,9 @@ export function SettlementLedgerPage({
       // Build edit history entries for changed fields
       const now = new Date().toISOString();
       const newEntries: NonNullable<Transaction['editHistory']> = [];
+      const existingRecord = existing as unknown as Record<string, unknown>;
       for (const [key, newValue] of Object.entries(normalizedUpdates)) {
-        const oldValue = (existing as Record<string, unknown>)[key];
+        const oldValue = existingRecord[key];
         if (oldValue !== newValue) {
           newEntries.push({
             field: key,
@@ -638,7 +647,10 @@ export function SettlementLedgerPage({
         ];
       }
 
-      onUpdateTransaction(txId, enhancedUpdates);
+      void Promise.resolve(onUpdateTransaction(txId, enhancedUpdates)).catch((error) => {
+        console.error('[SettlementLedger] update transaction failed:', error);
+        toast.error(resolveApiErrorMessage(error, '거래 수정에 실패했습니다.'));
+      });
     },
     [allTransactions, onUpdateTransaction, currentUserName, resolveWeekLabelFromDate],
   );
@@ -978,9 +990,9 @@ function ImportEditor({
   currentUserId?: string;
   currentUserName?: string;
   onAddComment?: (comment: Comment) => void | Promise<void>;
-  onProvisionEvidenceDriveById?: (txId: string) => void | Promise<void>;
-  onSyncEvidenceDriveById?: (txId: string) => void | Promise<void>;
-  onUploadEvidenceDriveById?: (txId: string, uploads: EvidenceUploadSelection[]) => void | Promise<void>;
+  onProvisionEvidenceDriveById?: (txId: string) => void | Promise<unknown>;
+  onSyncEvidenceDriveById?: (txId: string) => void | Promise<unknown>;
+  onUploadEvidenceDriveById?: (txId: string, uploads: EvidenceUploadSelection[]) => void | Promise<unknown>;
   onEnsureTransactionPersisted?: (input: {
     transaction: Transaction;
     sourceTxId?: string;
@@ -1655,7 +1667,7 @@ function ImportEditor({
     ));
   }, []);
 
-  const handleTablePaste = useCallback((e: ClipboardEvent<HTMLDivElement>) => {
+  const handleTablePaste = useCallback((e: ReactClipboardEvent<HTMLDivElement>) => {
     const text = e.clipboardData.getData('text/plain') || e.clipboardData.getData('text');
     const html = e.clipboardData.getData('text/html') || undefined;
     if (!text && !html) return;
@@ -1672,7 +1684,7 @@ function ImportEditor({
     applyPaste(anchor.r, anchor.c, text || '', html);
   }, [applyPaste, selection]);
 
-  const handleUndo = useCallback((e: KeyboardEvent<HTMLDivElement>) => {
+  const handleUndo = useCallback((e: ReactKeyboardEvent<HTMLDivElement>) => {
     const isUndo = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z';
     if (!isUndo) return;
     if (undoStack.current.length === 0) return;
@@ -1681,7 +1693,7 @@ function ImportEditor({
     if (prev) onChange(prev);
   }, [onChange]);
 
-  const handleCopy = useCallback((e: KeyboardEvent<HTMLDivElement>) => {
+  const handleCopy = useCallback((e: ReactKeyboardEvent<HTMLDivElement>) => {
     const isCopy = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c';
     if (!isCopy) return;
     if (!selection) return;
@@ -1755,7 +1767,7 @@ function ImportEditor({
     return () => window.clearTimeout(timer);
   }, [rows, focusCellAt]);
 
-  const handleTableKeyDown = useCallback((e: KeyboardEvent<HTMLDivElement>) => {
+  const handleTableKeyDown = useCallback((e: ReactKeyboardEvent<HTMLDivElement>) => {
     handleUndo(e);
     handleCopy(e);
     if (e.defaultPrevented) return;
@@ -1796,7 +1808,7 @@ function ImportEditor({
         run: (_ev) => {
           if (!selection) return false;
           // Copy first
-          handleCopy(_ev as unknown as KeyboardEvent<HTMLDivElement>);
+          handleCopy(_ev as unknown as ReactKeyboardEvent<HTMLDivElement>);
           // Then clear
           void clearSelectedCells();
           return true;
@@ -2594,8 +2606,8 @@ function ImportEditorRow({
   evidenceRequiredMap?: Record<string, string>;
   commentCountByCell: Map<string, number>;
   onOpenCellComments: (anchor: ActiveCommentAnchor) => void;
-  onProvisionEvidenceDriveById?: (txId: string) => void | Promise<void>;
-  onSyncEvidenceDriveById?: (txId: string) => void | Promise<void>;
+  onProvisionEvidenceDriveById?: (txId: string) => void | Promise<unknown>;
+  onSyncEvidenceDriveById?: (txId: string) => void | Promise<unknown>;
   onOpenEvidenceUpload?: (txId: string) => void;
   persistedTransactionId?: string;
   persistedTransaction?: Transaction;
@@ -2667,7 +2679,7 @@ function ImportEditorRow({
 
   const handlePaste = useCallback((
     colIdx: number,
-    e: ClipboardEvent<HTMLTableCellElement | HTMLInputElement | HTMLSelectElement>,
+    e: ReactClipboardEvent<HTMLTableCellElement | HTMLInputElement | HTMLSelectElement>,
   ) => {
     const text = e.clipboardData.getData('text');
     if (!text) return;
@@ -2677,7 +2689,7 @@ function ImportEditorRow({
 
   const runDriveAction = useCallback(async (
     action: 'provision' | 'sync',
-    handler?: (txId: string) => void | Promise<void>,
+    handler?: (txId: string) => void | Promise<unknown>,
   ) => {
     if (!handler) return;
     const txId = persistedTransactionId || await onEnsurePersistedTransaction?.();
@@ -2736,7 +2748,7 @@ function ImportEditorRow({
       };
     }, [isOpen]);
 
-    const openPicker = (e: MouseEvent<HTMLButtonElement>) => {
+    const openPicker = (e: ReactMouseEvent<HTMLButtonElement>) => {
       e.preventDefault();
       e.stopPropagation();
       if (disabled) return;

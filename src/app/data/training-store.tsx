@@ -46,7 +46,7 @@ const TrainingContext: React.Context<(TrainingState & TrainingActions) | null> =
 // ── Provider ──
 
 export function TrainingProvider({ children }: { children: ReactNode }) {
-  const { authUser } = useAuth();
+  const { user: authUser } = useAuth();
   const { db, orgId } = useFirebase();
   const [courses, setCourses] = useState<TrainingCourse[]>(MOCK_TRAINING_COURSES);
   const [myEnrollments, setMyEnrollments] = useState<TrainingEnrollment[]>([]);
