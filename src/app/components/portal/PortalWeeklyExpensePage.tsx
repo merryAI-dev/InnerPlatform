@@ -754,6 +754,7 @@ export function PortalWeeklyExpensePage() {
           currentUserName={portalUser?.name || 'PM'}
           currentUserId={portalUser?.id || 'pm'}
           userRole={ledgerUserRole}
+          allowEditSubmitted
           comments={comments}
           onAddComment={addComment}
           onProvisionEvidenceDrive={provisionEvidenceDrive}

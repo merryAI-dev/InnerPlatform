@@ -163,6 +163,7 @@ export interface SettlementLedgerProps {
     transaction: Transaction;
     sourceTxId?: string;
   }) => Promise<string | null>;
+  allowEditSubmitted?: boolean;
 }
 
 export interface EvidenceUploadSelection {
@@ -201,6 +202,7 @@ export function SettlementLedgerPage({
   onSyncEvidenceDrive,
   onUploadEvidenceDrive,
   onEnsureTransactionPersisted,
+  allowEditSubmitted = false,
 }: SettlementLedgerProps) {
   const { upsertWeekAmounts } = useCashflowWeeks();
   const [year, setYear] = useState(() => new Date().getFullYear());
@@ -894,6 +896,7 @@ export function SettlementLedgerPage({
                   onSubmitWeek={onSubmitWeek}
                   onChangeTransactionState={onChangeTransactionState}
                   userRole={userRole}
+                  allowEditSubmitted={allowEditSubmitted}
                 />
               );
             })}
