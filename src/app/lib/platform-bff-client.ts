@@ -779,3 +779,41 @@ export async function overrideTransactionEvidenceDriveCategoriesViaBff(params: {
 export function isPlatformApiEnabled(): boolean {
   return featureFlags.platformApiEnabled;
 }
+
+// ─── Budget Suggestion ───────────────────────────────────────────────────────
+
+export interface BudgetSuggestion {
+  budgetCategory: string;
+  budgetSubCategory: string;
+  /** 'history' = 과거 거래 패턴 기반 */
+  confidence: 'history';
+}
+
+/**
+ * 거래처 이름 기반 비목/세목 제안을 BFF에서 조회한다.
+ * 히스토리가 없으면 null 반환.
+ */
+export async function fetchBudgetSuggestionViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  counterparty: string;
+  client?: PlatformApiClientLike;
+}): Promise<BudgetSuggestion | null> {
+  if (!params.counterparty.trim() || !params.projectId.trim()) return null;
+  const apiClient = resolveClient(params.client);
+  const qs = new URLSearchParams({
+    counterparty: params.counterparty.trim(),
+    projectId: params.projectId.trim(),
+  });
+  const response = await apiClient.get<{ suggestion: BudgetSuggestion | null }>(
+    `/api/v1/budget/suggest?${qs}`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      retries: 0,
+      timeoutMs: 3000,
+    },
+  );
+  return response.data.suggestion ?? null;
+}

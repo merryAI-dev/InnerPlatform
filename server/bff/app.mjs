@@ -79,6 +79,7 @@ import { createProjectRequestContractStorageService } from './project-request-co
 import { createProjectSheetSourceStorageService } from './project-sheet-source-storage.mjs';
 import { extractTextFromPdfBuffer } from './pdf-text.mjs';
 import { createSlackAlertService } from './slack-alerts.mjs';
+import { updateCounterpartyHistory, lookupCounterpartyHistory } from './counterparty-budget-history.mjs';
 
 function createHttpError(statusCode, message, code = 'request_error') {
   const error = new Error(message);
@@ -299,7 +300,6 @@ const CORE_WRITE_ROUTE_ROLES = ['admin', 'finance', 'pm', 'auditor', 'tenant_adm
 const ROUTE_ROLES = {
   readCore: ALL_INTERNAL_ROUTE_ROLES,
   writeCore: CORE_WRITE_ROUTE_ROLES,
-  writeProjectRequestContract: ALL_INTERNAL_ROUTE_ROLES,
   writeTransaction: ALL_INTERNAL_ROUTE_ROLES,
   writeProjectDrive: ALL_INTERNAL_ROUTE_ROLES,
   writeEvidenceDrive: ALL_INTERNAL_ROUTE_ROLES,
@@ -1534,7 +1534,7 @@ export function createBffApp(options = {}) {
 
   app.post('/api/v1/project-requests/contract/upload', asyncHandler(async (req, res) => {
     const { tenantId, actorId } = req.context;
-    assertActorRoleAllowed(req, ROUTE_ROLES.writeProjectRequestContract, 'upload project request contract');
+    assertActorRoleAllowed(req, ROUTE_ROLES.writeCore, 'upload project request contract');
     const parsed = parseWithSchema(
       projectRequestContractUploadSchema,
       req.body,
@@ -1556,7 +1556,7 @@ export function createBffApp(options = {}) {
     express.raw({ type: ['application/octet-stream', 'application/pdf'], limit: process.env.BFF_JSON_LIMIT || '25mb' }),
     asyncHandler(async (req, res) => {
       const { tenantId, actorId } = req.context;
-      assertActorRoleAllowed(req, ROUTE_ROLES.writeProjectRequestContract, 'process project request contract');
+      assertActorRoleAllowed(req, ROUTE_ROLES.writeCore, 'process project request contract');
       const fileName = decodeHeaderValue(req.header('x-file-name')) || 'contract.pdf';
       const mimeType = readOptionalText(req.header('x-file-type')) || req.header('content-type') || 'application/pdf';
       const fileSizeHeader = Number.parseInt(readOptionalText(req.header('x-file-size')), 10);
@@ -1613,6 +1613,22 @@ export function createBffApp(options = {}) {
     const snap = await query.get();
     const items = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
     res.status(200).json(buildListResponse(items, limit));
+  }));
+
+  // 거래처 비목/세목 제안 — 히스토리 우선, fallback: 없음(프론트에서 fuzzy 처리)
+  app.get('/api/v1/budget/suggest', asyncHandler(async (req, res) => {
+    const { tenantId } = req.context;
+    assertActorRoleAllowed(req, ROUTE_ROLES.readCore, 'suggest budget code');
+
+    const counterparty = typeof req.query.counterparty === 'string' ? req.query.counterparty.trim() : '';
+    const projectId = typeof req.query.projectId === 'string' ? req.query.projectId.trim() : '';
+
+    if (!counterparty || !projectId) {
+      return res.status(200).json({ suggestion: null });
+    }
+
+    const suggestion = await lookupCounterpartyHistory(db, tenantId, projectId, counterparty);
+    return res.status(200).json({ suggestion });
   }));
 
   app.get('/api/v1/transactions', asyncHandler(async (req, res) => {
@@ -2160,6 +2176,11 @@ export function createBffApp(options = {}) {
       },
       timestamp,
     });
+
+    // 비목이 입력된 경우 거래처 히스토리 업데이트 (fire-and-forget, 실패해도 무관)
+    if (txPayload.budgetCategory) {
+      updateCounterpartyHistory(db, tenantId, txPayload).catch(() => {});
+    }
 
     return {
       status: result.created ? 201 : 200,
