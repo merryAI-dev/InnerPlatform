@@ -83,6 +83,16 @@ describe('settlement-row-derivation', () => {
     expect(next[1]?.cells[9]).toBe('70,000');
   });
 
+  it('overwrites existing expense amount when bank amount is present', () => {
+    const rowCells = createCells();
+    rowCells[10] = '110,000'; // bankAmount
+    rowCells[14] = '10,000';  // vatIn
+    rowCells[13] = '999,999'; // existing expenseAmount — should be overwritten
+    const next = deriveSettlementRows([createRow(rowCells)], context, { mode: 'row', rowIdx: 0 });
+
+    expect(next[0]?.cells[13]).toBe('100,000');
+  });
+
   it('derives expense from bank amount before recalculating balance', () => {
     const rowCells = createCells();
     rowCells[10] = '110,000';

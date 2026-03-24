@@ -96,11 +96,10 @@ function deriveRowLocally(
     }
 
     if (context.bankAmountIdx >= 0 && context.expenseIdx >= 0 && context.vatInIdx >= 0) {
-      const existingExpense = String(cells[context.expenseIdx] || '').trim();
       const existingBankRaw = String(cells[context.bankAmountIdx] || '').trim();
       const bankAmount = parseNumber(existingBankRaw) ?? 0;
       const vatAmount = parseNumber(cells[context.vatInIdx]) ?? 0;
-      if (bankAmount > 0 && (!existingExpense || existingExpense === '0')) {
+      if (bankAmount > 0) {
         const derivedExpense = Math.max(bankAmount - Math.max(vatAmount, 0), 0);
         cells[context.expenseIdx] = derivedExpense > 0 ? derivedExpense.toLocaleString('ko-KR') : '';
       }
