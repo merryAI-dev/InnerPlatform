@@ -78,6 +78,8 @@ import type { EvidenceUploadDraft } from './SettlementEvidenceUploadDialog';
 import { CellCommentButton } from './CellCommentButton';
 import { SettlementWeekSection } from './SettlementWeekSection';
 import {
+  buildTransactionEditHistoryEntries,
+  findLatestFieldEdit,
   fmt,
   METHOD_LABELS,
   METHOD_OPTIONS,
@@ -619,20 +621,7 @@ export function SettlementLedgerPage({
 
       // Build edit history entries for changed fields
       const now = new Date().toISOString();
-      const newEntries: NonNullable<Transaction['editHistory']> = [];
-      const existingRecord = existing as unknown as Record<string, unknown>;
-      for (const [key, newValue] of Object.entries(normalizedUpdates)) {
-        const oldValue = existingRecord[key];
-        if (oldValue !== newValue) {
-          newEntries.push({
-            field: key,
-            before: oldValue,
-            after: newValue,
-            editedBy: currentUserName,
-            editedAt: now,
-          });
-        }
-      }
+      const newEntries = buildTransactionEditHistoryEntries(existing, normalizedUpdates, currentUserName, now);
 
       const enhancedUpdates: Partial<Transaction> = {
         ...normalizedUpdates,
@@ -2641,6 +2630,10 @@ function ImportEditorRow({
   const [driveAction, setDriveAction] = useState<'' | 'provision' | 'sync'>('');
   const hasSourceTransaction = Boolean(persistedTransactionId);
   const canUseDrive = hasSourceTransaction || !!onEnsurePersistedTransaction;
+  const expenseAudit = useMemo(
+    () => findLatestFieldEdit(persistedTransaction, 'amounts.expenseAmount'),
+    [persistedTransaction],
+  );
   const persistedDriveStatusLabel = persistedTransaction?.evidenceDriveSyncStatus === 'UPLOADED'
     ? '업로드됨'
     : persistedTransaction?.evidenceDriveSyncStatus === 'SYNCED'
@@ -2872,6 +2865,7 @@ function ImportEditorRow({
         const isCashflow = colIdx === cashflowIdx;
         const isAuthor = colIdx === authorIdx;
         const isDriveLink = col.csvHeader === '증빙자료 드라이브';
+        const isExpenseAmount = col.csvHeader === '사업비 사용액';
         const isSettlementNote = col.csvHeader === '비고';
         const hasAuthorOptions = (authorOptions || []).length > 0;
         return (
@@ -3117,6 +3111,24 @@ function ImportEditorRow({
                     onChange={(e) => onCellChange(colIdx, e.target.value)}
                     placeholder={hasSourceTransaction ? '' : '행 저장 후 Drive 사용 가능'}
                   />
+                </div>
+              ) : isExpenseAmount ? (
+                <div className="space-y-0.5 pr-6">
+                  <input
+                    type="text"
+                    value={row.cells[colIdx] || ''}
+                    className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5"
+                    data-cell-row={rowIdx}
+                    data-cell-col={colIdx}
+                    onFocus={() => onCellFocus(rowIdx, colIdx)}
+                    onPaste={(e) => handlePaste(colIdx, e)}
+                    onChange={(e) => onCellChange(colIdx, formatNumberInput(e.target.value))}
+                  />
+                  {expenseAudit && (
+                    <div className="px-1 text-[9px] leading-tight text-muted-foreground">
+                      최종 수정 {expenseAudit.editedBy} · {formatCommentTime(expenseAudit.editedAt)}
+                    </div>
+                  )}
                 </div>
               ) : (
                 <input
