@@ -220,6 +220,7 @@ export function SettlementLedgerPage({
   const [revertConfirmOpen, setRevertConfirmOpen] = useState(false);
   const restoredDraftCacheKeyRef = useRef('');
   const lastSyncedSheetRowsSignatureRef = useRef('');
+  const pendingSheetRowsSyncRef = useRef<ImportRow[] | null>(null);
   const cloneImportRows = useCallback((input: ImportRow[]) => (
     input.map((row) => ({ ...row, cells: [...row.cells] }))
   ), []);
@@ -271,28 +272,54 @@ export function SettlementLedgerPage({
     return () => window.clearTimeout(timer);
   }, [draftCacheKey, importDirty, importRows]);
 
-  useEffect(() => {
-    const nextSignature = serializeImportRows(sheetRows);
-    if (nextSignature === lastSyncedSheetRowsSignatureRef.current) return;
-    lastSyncedSheetRowsSignatureRef.current = nextSignature;
-
-    if (sheetRows && sheetRows.length > 0) {
-      setImportRows(cloneImportRows(sheetRows));
+  const applySheetRowsSync = useCallback((rows: ImportRow[] | null | undefined) => {
+    if (rows && rows.length > 0) {
+      setImportRows(cloneImportRows(rows));
       setImportDirty(false);
       setSheetSaveState('saved');
       setCashflowSyncState('synced');
       clearImportDraftCache(draftCacheKey);
-      return;
-    }
-
-    if (nextSignature === '') {
+    } else if (serializeImportRows(rows) === '') {
       setImportRows(transactionsToImportRows(projectTxs, yearWeeks));
       setImportDirty(false);
       setSheetSaveState('idle');
       setCashflowSyncState('idle');
       clearImportDraftCache(draftCacheKey);
     }
-  }, [sheetRows, cloneImportRows, draftCacheKey, projectTxs, yearWeeks]);
+  }, [cloneImportRows, draftCacheKey, projectTxs, yearWeeks]);
+
+  useEffect(() => {
+    const nextSignature = serializeImportRows(sheetRows);
+    if (nextSignature === lastSyncedSheetRowsSignatureRef.current) return;
+    lastSyncedSheetRowsSignatureRef.current = nextSignature;
+
+    // 그리드 셀에 포커스가 있으면 리셋을 defer — 타이핑 중 백스페이스 끊김 방지
+    const active = document.activeElement;
+    const isCellFocused = active instanceof HTMLInputElement && active.getAttribute('data-cell-row') != null;
+    if (isCellFocused) {
+      pendingSheetRowsSyncRef.current = sheetRows ?? null;
+      return;
+    }
+
+    applySheetRowsSync(sheetRows);
+  }, [sheetRows, applySheetRowsSync]);
+
+  // 포커스가 그리드 밖으로 나갈 때 pending sync 적용
+  useEffect(() => {
+    const handleFocusOut = () => {
+      if (!pendingSheetRowsSyncRef.current) return;
+      requestAnimationFrame(() => {
+        const active = document.activeElement;
+        const isCellFocused = active instanceof HTMLInputElement && active.getAttribute('data-cell-row') != null;
+        if (isCellFocused) return; // 그리드 내 다른 셀로 이동한 경우 유지
+        const pending = pendingSheetRowsSyncRef.current;
+        pendingSheetRowsSyncRef.current = null;
+        applySheetRowsSync(pending);
+      });
+    };
+    document.addEventListener('focusout', handleFocusOut);
+    return () => document.removeEventListener('focusout', handleFocusOut);
+  }, [applySheetRowsSync]);
 
   const revertToSavedSnapshot = useCallback(() => {
     if (sheetSaving) return;
