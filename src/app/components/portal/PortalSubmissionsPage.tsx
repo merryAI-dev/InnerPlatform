@@ -106,6 +106,18 @@ const CHANGE_TABS: Array<{ label: string; value: ChangeRequestState | 'ALL' }> =
   { label: '수정요청', value: 'REVISION_REQUESTED' },
 ];
 
+const editToggleGroupClassName =
+  'w-full rounded-lg border border-emerald-200/70 bg-emerald-50/40 p-0.5 dark:border-emerald-900/50 dark:bg-emerald-950/10';
+
+const editToggleItemClassName =
+  'px-2 text-[10px] text-slate-600 hover:bg-emerald-500/8 hover:text-emerald-900 dark:text-slate-300 dark:hover:bg-emerald-400/12 dark:hover:text-emerald-100 data-[state=on]:border-emerald-300 data-[state=on]:bg-emerald-600/24 data-[state=on]:text-emerald-950 data-[state=on]:shadow-none dark:data-[state=on]:border-emerald-700/80 dark:data-[state=on]:bg-emerald-400/28 dark:data-[state=on]:text-emerald-50';
+
+const pendingStatusButtonClassName =
+  'h-7 rounded-full border-emerald-200/90 bg-emerald-50/80 px-2 text-[10px] text-emerald-800 hover:bg-emerald-100 dark:border-emerald-900/60 dark:bg-emerald-950/15 dark:text-emerald-200 dark:hover:bg-emerald-900/30';
+
+const completedStatusButtonClassName =
+  'h-7 rounded-full border-emerald-300 bg-emerald-600/16 px-2 text-[10px] text-emerald-900 hover:bg-emerald-600/20 dark:border-emerald-700/80 dark:bg-emerald-400/22 dark:text-emerald-50 dark:hover:bg-emerald-400/28';
+
 export function PortalSubmissionsPage() {
   const navigate = useNavigate();
   const {
@@ -300,7 +312,7 @@ export function PortalSubmissionsPage() {
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between gap-3">
             <CardTitle className="text-[13px] flex items-center gap-1.5">
-              <BarChart3 className="w-4 h-4 text-sky-600" />
+              <BarChart3 className="w-4 h-4 text-emerald-600" />
               주간 제출 체크
             </CardTitle>
             <div className="flex items-center gap-1.5">
@@ -337,10 +349,10 @@ export function PortalSubmissionsPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
-            <span className="inline-flex items-center rounded-full bg-sky-500/10 px-2 py-0.5 text-sky-700 dark:text-sky-300" style={{ fontWeight: 700 }}>
+            <span className="inline-flex items-center rounded-full bg-emerald-600/12 px-2 py-0.5 text-emerald-800 dark:text-emerald-200" style={{ fontWeight: 700 }}>
               수정 상태 직접 선택
             </span>
-            <span className="inline-flex items-center rounded-full bg-emerald-500/10 px-2 py-0.5 text-emerald-700 dark:text-emerald-300" style={{ fontWeight: 700 }}>
+            <span className="inline-flex items-center rounded-full bg-green-600/12 px-2 py-0.5 text-green-800 dark:text-green-200" style={{ fontWeight: 700 }}>
               제출 상태 별도 체크
             </span>
           </div>
@@ -388,7 +400,7 @@ export function PortalSubmissionsPage() {
                             value={projectionEdited ? 'edited' : 'not-edited'}
                             variant="outline"
                             size="sm"
-                            className="w-full"
+                            className={editToggleGroupClassName}
                             onValueChange={(value) => {
                               if (!value) return;
                               handleEditedChange({
@@ -399,17 +411,17 @@ export function PortalSubmissionsPage() {
                             }}
                             disabled={editSavingKey === `${p.id}:projection`}
                           >
-                            <ToggleGroupItem value="edited" className={`px-2 text-[10px] ${projectionEdited ? 'bg-sky-500/15 text-sky-700 dark:text-sky-300' : ''}`}>
+                            <ToggleGroupItem value="edited" className={editToggleItemClassName}>
                               수정 O
                             </ToggleGroupItem>
-                            <ToggleGroupItem value="not-edited" className={`px-2 text-[10px] ${!projectionEdited ? 'bg-slate-500/10 text-slate-700 dark:text-slate-300' : ''}`}>
+                            <ToggleGroupItem value="not-edited" className={editToggleItemClassName}>
                               수정 X
                             </ToggleGroupItem>
                           </ToggleGroup>
                           <Button
                             variant="outline"
                             size="sm"
-                            className={`h-7 rounded-full px-2 text-[10px] ${projectionDone ? 'border-emerald-200 bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/15 dark:text-emerald-300' : 'border-slate-200 bg-slate-500/5 text-slate-600 hover:bg-slate-500/10 dark:text-slate-300'}`}
+                            className={projectionDone ? completedStatusButtonClassName : pendingStatusButtonClassName}
                             disabled={confirmSaving}
                             onClick={() => openConfirm({
                               projectId: p.id,
@@ -430,7 +442,7 @@ export function PortalSubmissionsPage() {
                             value={expenseEdited ? 'edited' : 'not-edited'}
                             variant="outline"
                             size="sm"
-                            className="w-full"
+                            className={editToggleGroupClassName}
                             onValueChange={(value) => {
                               if (!value) return;
                               handleEditedChange({
@@ -441,17 +453,17 @@ export function PortalSubmissionsPage() {
                             }}
                             disabled={editSavingKey === `${p.id}:expense`}
                           >
-                            <ToggleGroupItem value="edited" className={`px-2 text-[10px] ${expenseEdited ? 'bg-sky-500/15 text-sky-700 dark:text-sky-300' : ''}`}>
+                            <ToggleGroupItem value="edited" className={editToggleItemClassName}>
                               수정 O
                             </ToggleGroupItem>
-                            <ToggleGroupItem value="not-edited" className={`px-2 text-[10px] ${!expenseEdited ? 'bg-slate-500/10 text-slate-700 dark:text-slate-300' : ''}`}>
+                            <ToggleGroupItem value="not-edited" className={editToggleItemClassName}>
                               수정 X
                             </ToggleGroupItem>
                           </ToggleGroup>
                           <Button
                             variant="outline"
                             size="sm"
-                            className={`h-7 rounded-full px-2 text-[10px] ${expenseDone ? 'border-emerald-200 bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/15 dark:text-emerald-300' : 'border-slate-200 bg-slate-500/5 text-slate-600 hover:bg-slate-500/10 dark:text-slate-300'}`}
+                            className={expenseDone ? completedStatusButtonClassName : pendingStatusButtonClassName}
                             disabled={confirmSaving}
                             onClick={() => openConfirm({
                               projectId: p.id,

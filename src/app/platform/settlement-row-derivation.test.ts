@@ -83,6 +83,16 @@ describe('settlement-row-derivation', () => {
     expect(next[1]?.cells[9]).toBe('70,000');
   });
 
+  it('derives vatIn from expense amount when both bank and expense amounts are present', () => {
+    const rowCells = createCells();
+    rowCells[10] = '110,000'; // bankAmount
+    rowCells[13] = '100,000'; // expenseAmount — user entered
+    const next = deriveSettlementRows([createRow(rowCells)], context, { mode: 'row', rowIdx: 0 });
+
+    expect(next[0]?.cells[13]).toBe('100,000'); // expenseAmount preserved
+    expect(next[0]?.cells[14]).toBe('10,000');  // vatIn auto-calculated
+  });
+
   it('derives expense from bank amount before recalculating balance', () => {
     const rowCells = createCells();
     rowCells[10] = '110,000';

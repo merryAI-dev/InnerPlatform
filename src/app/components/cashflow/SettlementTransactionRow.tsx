@@ -31,6 +31,7 @@ export interface TransactionRowProps {
   onSyncEvidenceDrive?: (tx: Transaction) => void | Promise<unknown>;
   onChangeState?: (txId: string, newState: TransactionState, reason?: string) => void | Promise<void>;
   userRole?: 'pm' | 'admin';
+  allowEditSubmitted?: boolean;
 }
 
 export function SettlementTransactionRow({
@@ -42,9 +43,10 @@ export function SettlementTransactionRow({
   onSyncEvidenceDrive,
   onChangeState,
   userRole,
+  allowEditSubmitted = false,
 }: TransactionRowProps) {
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
-  const locked = !isEditable(tx.state);
+  const locked = allowEditSubmitted ? tx.state === 'APPROVED' : !isEditable(tx.state);
   const [driveAction, setDriveAction] = useState<'' | 'provision' | 'sync'>('');
 
   const debouncedUpdate = useCallback(

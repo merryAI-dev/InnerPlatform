@@ -25,6 +25,7 @@ export interface WeekSectionProps {
   }) => void | Promise<void>;
   onChangeTransactionState?: (txId: string, newState: TransactionState, reason?: string) => void | Promise<void>;
   userRole?: 'pm' | 'admin';
+  allowEditSubmitted?: boolean;
 }
 
 export function SettlementWeekSection({
@@ -39,6 +40,7 @@ export function SettlementWeekSection({
   onSubmitWeek,
   onChangeTransactionState,
   userRole,
+  allowEditSubmitted,
 }: WeekSectionProps) {
   const [submitting, setSubmitting] = useState(false);
   const colCount = SETTLEMENT_COLUMNS.length;
@@ -121,6 +123,7 @@ export function SettlementWeekSection({
             onSyncEvidenceDrive={onSyncEvidenceDrive}
             onChangeState={onChangeTransactionState}
             userRole={userRole}
+            allowEditSubmitted={allowEditSubmitted}
           />
         ))}
       {!collapsed && txCount === 0 && (
