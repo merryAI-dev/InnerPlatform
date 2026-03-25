@@ -41,6 +41,17 @@ import { resolveApiErrorMessage } from '../../platform/api-error-message';
 import { reportError } from '../../platform/observability';
 import { type ImportRow } from '../../platform/settlement-csv';
 import { readDevAuthHarnessConfig } from '../../platform/dev-harness';
+import { detectParticipationRisk } from '../../platform/participation-risk-rules';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../ui/alert-dialog';
 import { resolvePortalHappyPath } from '../../platform/portal-happy-path';
 const GoogleSheetMigrationWizard = lazy(
   () => import('./GoogleSheetMigrationWizard').then((module) => ({ default: module.GoogleSheetMigrationWizard })),
@@ -92,6 +103,12 @@ export function PortalWeeklyExpensePage() {
   const devHarnessConfig = readDevAuthHarnessConfig(import.meta.env, typeof window !== 'undefined' ? window.location : undefined);
   const [projectDriveProvisioning, setProjectDriveProvisioning] = useState(false);
   const [googleSheetImportOpen, setGoogleSheetImportOpen] = useState(false);
+  const [participationRiskWarning, setParticipationRiskWarning] = useState<{
+    yearMonth: string;
+    weekNo: number;
+    txIds: string[];
+    overLimitMembers: { memberName: string; groupLabel: string; totalRate: number }[];
+  } | null>(null);
 
   const projectId = portalUser?.projectId || '';
   const projectName = myProject?.name || '내 사업';
@@ -732,6 +749,21 @@ export function PortalWeeklyExpensePage() {
           sheetRows={expenseSheetRows}
           onSaveSheetRows={saveExpenseSheetRows}
           onSubmitWeek={async ({ yearMonth, weekNo, txIds }) => {
+            // 참여율 이상 탐지 — 100% 초과 시 사용자에게 경고 (제출 차단 아님)
+            const riskCheck = detectParticipationRisk(participationEntries);
+            if (riskCheck.hasOverLimit) {
+              setParticipationRiskWarning({
+                yearMonth,
+                weekNo,
+                txIds,
+                overLimitMembers: riskCheck.overLimitMembers.map((m) => ({
+                  memberName: m.memberName,
+                  groupLabel: m.groupLabel,
+                  totalRate: m.totalRate,
+                })),
+              });
+              return; // 모달 확인 후 진행
+            }
             let updatedCount = 0;
             try {
               await submitWeekAsPm({ projectId, yearMonth, weekNo });
@@ -796,6 +828,59 @@ export function PortalWeeklyExpensePage() {
             />
         </Suspense>
       )}
+      {/* 참여율 이상 탐지 경고 모달 */}
+      <AlertDialog open={!!participationRiskWarning} onOpenChange={(open) => { if (!open) setParticipationRiskWarning(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>⚠️ 참여율 초과 경고</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2 text-sm">
+                <p>아래 인력의 참여율이 100%를 초과합니다. 확인 후 제출하세요.</p>
+                <ul className="space-y-1 mt-2">
+                  {participationRiskWarning?.overLimitMembers.map((m, i) => (
+                    <li key={i} className="flex items-center gap-2 text-rose-700 font-medium">
+                      <span className="inline-block w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />
+                      {m.memberName} — {m.groupLabel} 합산 {m.totalRate}%
+                    </li>
+                  ))}
+                </ul>
+                <p className="text-muted-foreground text-[11px] mt-2">
+                  계속 진행하면 제출이 완료됩니다. 참여율 관리는 인사 설정에서 수정하세요.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setParticipationRiskWarning(null)}>
+              취소
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-rose-600 hover:bg-rose-700"
+              onClick={async () => {
+                if (!participationRiskWarning) return;
+                const { yearMonth, weekNo, txIds } = participationRiskWarning;
+                setParticipationRiskWarning(null);
+                let updatedCount = 0;
+                try {
+                  await submitWeekAsPm({ projectId, yearMonth, weekNo });
+                  for (const txId of txIds) {
+                    await changeTransactionState(txId, 'SUBMITTED');
+                    updatedCount += 1;
+                  }
+                  toast.success(`${yearMonth} ${weekNo}주 제출 처리 완료`);
+                } catch (err) {
+                  const fallback = updatedCount > 0
+                    ? `주간 제출은 저장됐지만 거래 상태 ${updatedCount}/${txIds.length}건만 갱신했습니다.`
+                    : '주간 제출 처리에 실패했습니다';
+                  toast.error(resolveApiErrorMessage(err, fallback));
+                }
+              }}
+            >
+              이해했습니다, 제출
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
