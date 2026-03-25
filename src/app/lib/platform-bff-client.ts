@@ -785,8 +785,8 @@ export function isPlatformApiEnabled(): boolean {
 export interface BudgetSuggestion {
   budgetCategory: string;
   budgetSubCategory: string;
-  /** 'history' = 과거 거래 패턴 기반 */
-  confidence: 'history';
+  /** 'history' = 과거 거래 패턴 기반, 'codebook' = 코드북 키워드 매칭 */
+  confidence: 'history' | 'codebook';
 }
 
 /**

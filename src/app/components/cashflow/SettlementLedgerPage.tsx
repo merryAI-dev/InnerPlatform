@@ -53,6 +53,7 @@ import {
   type CounterpartySuggestion,
 } from '../../platform/counterparty-normalizer';
 import { resolveEvidenceRequiredByRules } from '../../platform/evidence-rules';
+import { matchBudgetCode } from '../../platform/budget-auto-match';
 import {
   buildSettlementDerivationContext,
   resolveEvidenceRequiredDesc,
@@ -220,9 +221,6 @@ export function SettlementLedgerPage({
   const [sheetSaving, setSheetSaving] = useState(false);
   const [cashflowSyncing, setCashflowSyncing] = useState(false);
   const [lastAutoSavedAt, setLastAutoSavedAt] = useState('');
-  const [budgetSuggestionsMap, setBudgetSuggestionsMap] = useState<Record<string, { budgetCategory: string; budgetSubCategory: string } | null>>({});
-  const pendingBudgetFetches = useRef<Set<string>>(new Set());
-  const [counterpartyHintMap, setCounterpartyHintMap] = useState<Record<string, CounterpartySuggestion | null>>({});
   const [lastCashflowSyncedAt, setLastCashflowSyncedAt] = useState('');
   const [sheetSaveState, setSheetSaveState] = useState<'idle' | 'dirty' | 'saving' | 'saved' | 'save_failed'>('idle');
   const [cashflowSyncState, setCashflowSyncState] = useState<'idle' | 'pending' | 'syncing' | 'synced' | 'sync_failed'>('idle');
@@ -331,26 +329,6 @@ export function SettlementLedgerPage({
     document.addEventListener('focusout', handleFocusOut);
     return () => document.removeEventListener('focusout', handleFocusOut);
   }, [applySheetRowsSync]);
-
-  // 거래처 입력 후 비목이 비어있는 행에 대해 히스토리 제안 fetch
-  useEffect(() => {
-    if (!onFetchBudgetSuggestion || counterpartyIdx < 0 || budgetCodeIdx < 0) return;
-    const currentRows = importRows ?? [];
-    for (const row of currentRows) {
-      const counterparty = String(row.cells[counterpartyIdx] || '').trim();
-      const budgetCode = String(row.cells[budgetCodeIdx] || '').trim();
-      if (!counterparty || budgetCode) continue;
-      const key = `${row.tempId}::${counterparty}`;
-      if (pendingBudgetFetches.current.has(key) || key in budgetSuggestionsMap) continue;
-      pendingBudgetFetches.current.add(key);
-      onFetchBudgetSuggestion(counterparty).then((suggestion) => {
-        pendingBudgetFetches.current.delete(key);
-        setBudgetSuggestionsMap((prev) => ({ ...prev, [key]: suggestion }));
-      }).catch(() => {
-        pendingBudgetFetches.current.delete(key);
-      });
-    }
-  }, [importRows, onFetchBudgetSuggestion, counterpartyIdx, budgetCodeIdx, budgetSuggestionsMap]);
 
   const revertToSavedSnapshot = useCallback(() => {
     if (sheetSaving) return;
@@ -990,6 +968,7 @@ export function SettlementLedgerPage({
           onUploadEvidenceDriveById={handleUploadEvidenceDriveById}
           onEnsureTransactionPersisted={onEnsureTransactionPersisted}
           sourceTransactions={allTransactions}
+          onFetchBudgetSuggestion={onFetchBudgetSuggestion}
         />
       )}
       {revertConfirmDialog}
@@ -1022,6 +1001,7 @@ function ImportEditor({
   onUploadEvidenceDriveById,
   onEnsureTransactionPersisted,
   sourceTransactions = [],
+  onFetchBudgetSuggestion,
 }: {
   rows: ImportRow[];
   onChange: (rows: ImportRow[]) => void;
@@ -1048,6 +1028,7 @@ function ImportEditor({
     sourceTxId?: string;
   }) => Promise<string | null>;
   sourceTransactions?: Transaction[];
+  onFetchBudgetSuggestion?: (counterparty: string) => Promise<{ budgetCategory: string; budgetSubCategory: string } | null>;
 }) {
   const meaningfulRows = useMemo(
     () => rows.filter((row) => isSettlementRowMeaningful(row)),
@@ -1067,6 +1048,12 @@ function ImportEditor({
       return cells.some((cell, idx) => idx !== noIdx && String(cell || '').trim() === '');
     }).length;
   }, [meaningfulRows, noIdx]);
+
+  // ── 비목 제안: 거래처 히스토리 → 코드북 fuzzy cascade ──
+  const [budgetSuggestionsMap, setBudgetSuggestionsMap] = useState<Record<string, { budgetCategory: string; budgetSubCategory: string; confidence?: 'history' | 'codebook' } | null>>({});
+  const pendingBudgetFetches = useRef<Set<string>>(new Set());
+  const [counterpartyHintMap, setCounterpartyHintMap] = useState<Record<string, CounterpartySuggestion | null>>({});
+
   const budgetCodeIdx = useMemo(
     () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '비목'),
     [],
@@ -1115,6 +1102,47 @@ function ImportEditor({
     () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '상세 적요'),
     [],
   );
+
+  // 거래처 입력 후 비목이 비어있는 행에 대해 히스토리 → 코드북 cascade 제안
+  // 1. BFF 히스토리 hit → 즉시 사용
+  // 2. BFF miss + 코드북 있음 → 코드북 fuzzy match (confidence: 'codebook')
+  // 3. 둘 다 miss → null (칩 미표시)
+  useEffect(() => {
+    if (!onFetchBudgetSuggestion || counterpartyIdx < 0 || budgetCodeIdx < 0) return;
+    const codebook = budgetCodeBook ?? [];
+    for (const row of rows) {
+      const counterparty = String(row.cells[counterpartyIdx] || '').trim();
+      const budgetCode = String(row.cells[budgetCodeIdx] || '').trim();
+      if (!counterparty || budgetCode) continue;
+      const key = `${row.tempId}::${counterparty}`;
+      if (pendingBudgetFetches.current.has(key) || key in budgetSuggestionsMap) continue;
+      pendingBudgetFetches.current.add(key);
+      const memo = memoIdx >= 0 ? String(row.cells[memoIdx] || '').trim() : '';
+      const cashflowLabel = cashflowIdx >= 0 ? String(row.cells[cashflowIdx] || '').trim() : '';
+      onFetchBudgetSuggestion(counterparty).then((suggestion) => {
+        pendingBudgetFetches.current.delete(key);
+        if (suggestion) {
+          setBudgetSuggestionsMap((prev) => ({ ...prev, [key]: suggestion }));
+          return;
+        }
+        // BFF miss → 코드북 fuzzy fallback
+        if (codebook.length > 0) {
+          const local = matchBudgetCode(counterparty, memo, cashflowLabel, codebook);
+          if (local.confidence !== 'none') {
+            setBudgetSuggestionsMap((prev) => ({
+              ...prev,
+              [key]: { budgetCategory: local.budgetCategory, budgetSubCategory: local.budgetSubCategory, confidence: 'codebook' as const },
+            }));
+            return;
+          }
+        }
+        setBudgetSuggestionsMap((prev) => ({ ...prev, [key]: null }));
+      }).catch(() => {
+        pendingBudgetFetches.current.delete(key);
+      });
+    }
+  }, [rows, onFetchBudgetSuggestion, counterpartyIdx, budgetCodeIdx, budgetSuggestionsMap, budgetCodeBook, memoIdx, cashflowIdx]);
+
   const cashflowOptions = useMemo(
     () => CASHFLOW_LINE_OPTIONS.filter((o) => o.value !== 'INPUT_VAT_OUT'),
     [],
@@ -2700,7 +2728,7 @@ function ImportEditorRow({
   onEnsurePersistedTransaction?: () => Promise<string | null>;
   noIdx: number;
   colWidths: number[];
-  budgetSuggestion?: { budgetCategory: string; budgetSubCategory: string } | null;
+  budgetSuggestion?: { budgetCategory: string; budgetSubCategory: string; confidence?: 'history' | 'codebook' } | null;
   counterpartyHint?: CounterpartySuggestion | null;
 }) {
   const hasError = Boolean(row.error);
@@ -3065,7 +3093,7 @@ function ImportEditorRow({
                     <button
                       type="button"
                       className="mt-0.5 w-full text-left text-[9px] bg-teal-50 border border-teal-200 rounded px-1.5 py-0.5 text-teal-700 hover:bg-teal-100 truncate leading-tight"
-                      title={`이전 거래 기반 제안: ${budgetSuggestion.budgetCategory}${budgetSuggestion.budgetSubCategory ? ` · ${budgetSuggestion.budgetSubCategory}` : ''}`}
+                      title={`${budgetSuggestion.confidence === 'codebook' ? '코드북 기반 제안' : '이전 거래 기반 제안'}: ${budgetSuggestion.budgetCategory}${budgetSuggestion.budgetSubCategory ? ` · ${budgetSuggestion.budgetSubCategory}` : ''}`}
                       onClick={() => {
                         onRowChange((prev) => {
                           if (budgetCodeIdx < 0) return prev;
