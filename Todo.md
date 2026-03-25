@@ -92,13 +92,16 @@
 > 재설계: VLM 외 AI 불필요로 결론. 규칙 기반 고도화에 집중.
 > AI(VLM)는 영수증/계약서 이미지 파싱에만 제한적으로 고려.
 
-### 2-1. 코드북 fuzzy match (비목 제안 고도화)
-- [ ] `src/app/platform/budget-auto-match.ts` 신규
-  - 거래처명 + 메모 → 코드북 항목 fuzzy match (Levenshtein + 키워드 교집합)
-  - cascade: 히스토리 hit → 코드북 매칭 → 빈값
-  - 코드북 = `budgetCodebook` (프로젝트별 비목/세목 목록)
-- [ ] BFF `GET /api/v1/budget/suggest` — 코드북 매칭 결과도 반환 (source: 'codebook')
-- [ ] `SettlementLedgerPage.tsx` — 히스토리 miss 시 코드북 제안도 칩으로 표시
+### 2-1. 코드북 fuzzy match (비목 제안 고도화) ✅
+- [x] `src/app/platform/budget-auto-match.ts` 강화
+  - 거래처명 + 메모 → 코드북 항목 fuzzy match (Levenshtein + 키워드 교집합/substring)
+  - cascade: 히스토리 hit → 코드북 매칭 → 빈값 (confidence: 'history' | 'codebook')
+  - 9/9 테스트 통과 (exact 3 + fuzzy 3 + none 3)
+- [x] `BudgetSuggestion.confidence` 타입 확장: 'history' | 'codebook'
+- [x] `ImportEditor` — 히스토리 miss 시 코드북 제안도 칩으로 표시
+  - 칩 tooltip: confidence별 출처 표시 ('이전 거래 기반' vs '코드북 기반')
+- 수정: budgetSuggestionsMap/counterpartyHintMap 스코프 버그 (SettlementLedgerPage → ImportEditor)
+- ~~BFF 코드북 서버사이드 매칭~~ → 클라이언트 코드북(이미 로드됨)으로 충분, 불필요
 
 ### 2-2. Admin 대시보드 강화
 - [ ] 참여율 위험 직원 상세 목록 (기존 카운트 → 드릴다운 뷰) ← Phase 1-4에서 이전
