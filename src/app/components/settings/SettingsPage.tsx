@@ -29,7 +29,7 @@ import { PageHeader } from '../layout/PageHeader';
 import { useAuth } from '../../data/auth-store';
 import { resolveHomePath } from '../../platform/navigation';
 
-const DISPLAY_ROLES = ['admin', 'finance', 'pm', 'auditor', 'viewer'] as const;
+const DISPLAY_ROLES = ['admin', 'finance', 'pm', 'viewer'] as const;
 type DisplayRole = typeof DISPLAY_ROLES[number];
 
 const PERMISSION_LABELS: Partial<Record<PlatformPermission, string>> = {
@@ -64,7 +64,7 @@ export function SettingsPage() {
     if (!role) return;
 
     // Keep operational settings (Firebase/feature toggles, member management) admin-scoped.
-    const allowed = role === 'admin' || role === 'tenant_admin';
+    const allowed = role === 'admin';
     if (!allowed) {
       navigate(resolveHomePath(role, user?.defaultWorkspace ?? user?.lastWorkspace), { replace: true });
     }
@@ -72,7 +72,7 @@ export function SettingsPage() {
 
   if (!isAuthenticated) return null;
   if (!user) return null;
-  if (!(user.role === 'admin' || user.role === 'tenant_admin')) return null;
+  if (user.role !== 'admin') return null;
 
   return (
     <div className="space-y-5">

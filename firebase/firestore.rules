@@ -37,28 +37,22 @@ service cloud.firestore {
       return isMember(orgId);
     }
 
-    // 쓰기: viewer 제외 모든 역할 허용
-    // (admin, tenant_admin, finance, pm, auditor, support, security)
+    // 쓰기: viewer 제외 모든 역할 허용 (admin, finance, pm)
     function canWrite(orgId) {
       return isMember(orgId)
-        && getMemberRole(orgId) in [
-          'admin', 'tenant_admin', 'finance', 'pm',
-          'auditor', 'support', 'security'
-        ];
+        && getMemberRole(orgId) in ['admin', 'finance', 'pm'];
     }
 
-    // 어드민 전용 (admin, tenant_admin)
+    // 어드민 전용
     function isAdmin(orgId) {
       return isMember(orgId)
-        && getMemberRole(orgId) in ['admin', 'tenant_admin'];
+        && getMemberRole(orgId) in ['admin'];
     }
 
     // 감사/재무 접근 (audit_logs 읽기용)
     function canReadAuditLogs(orgId) {
       return isMember(orgId)
-        && getMemberRole(orgId) in [
-          'admin', 'tenant_admin', 'finance', 'auditor', 'support', 'security'
-        ];
+        && getMemberRole(orgId) in ['admin', 'finance'];
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -108,7 +102,7 @@ service cloud.firestore {
     match /orgs/{orgId}/project_change_alerts/{alertId} {
       allow read: if canRead(orgId);
       allow write: if isMember(orgId)
-        && getMemberRole(orgId) in ['admin', 'tenant_admin', 'finance'];
+        && getMemberRole(orgId) in ['admin', 'finance'];
     }
 
     // ── 일반 규칙: 나머지 모든 컬렉션 ──

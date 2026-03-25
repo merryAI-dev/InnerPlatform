@@ -17,7 +17,7 @@ const ROUTE_PERMISSIONS_BY_ROLE: Record<string, Set<string>> = Object.fromEntrie
 /**
  * UI-level navigation policy for the admin space (AppLayout).
  * This is intentionally opinionated to keep role experiences clean:
- * - finance/auditor shouldn't see HR menus or "new project" CTA
+ * - finance shouldn't see HR menus or "new project" CTA
  * - operational settings are admin-scoped
  */
 export function canShowAdminNavItem(role: unknown, to: string): boolean {

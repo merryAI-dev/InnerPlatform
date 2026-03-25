@@ -22,15 +22,14 @@ export type PlatformPermission =
   | 'evidence:drive:write'
   | 'audit:read'
   | 'user:manage'
-  | 'tenant:manage'
-  | 'security:manage';
+  | 'tenant:manage';
 
 type RbacPolicy = {
   defaultRole?: unknown;
   rolePermissions?: unknown;
 };
 
-const PLATFORM_ROLES: PlatformRole[] = ['admin', 'finance', 'pm', 'viewer', 'auditor', 'tenant_admin', 'support', 'security'];
+const PLATFORM_ROLES: PlatformRole[] = ['admin', 'finance', 'pm', 'viewer'];
 
 const KNOWN_PERMISSIONS = new Set<PlatformPermission>([
   'project:read',
@@ -49,7 +48,6 @@ const KNOWN_PERMISSIONS = new Set<PlatformPermission>([
   'audit:read',
   'user:manage',
   'tenant:manage',
-  'security:manage',
 ]);
 
 function normalizePlatformRole(value: unknown): PlatformRole | null {
@@ -75,10 +73,6 @@ const PERMISSIONS_BY_ROLE: Record<PlatformRole, PlatformPermission[]> = (() => {
     finance: [],
     pm: [],
     viewer: [],
-    auditor: [],
-    tenant_admin: [],
-    support: [],
-    security: [],
   };
 
   const raw = RBAC_POLICY.rolePermissions && typeof RBAC_POLICY.rolePermissions === 'object'
@@ -138,7 +132,7 @@ export function hasPermission(
 
 export type ProjectScopedPermission = 'project:read' | 'project:write' | 'project:evidence_drive:write';
 
-const CROSS_PROJECT_ROLES: PlatformRole[] = ['admin', 'finance', 'support', 'security', 'tenant_admin', 'auditor'];
+const CROSS_PROJECT_ROLES: PlatformRole[] = ['admin', 'finance'];
 
 export function canAccessProject(options: {
   actorRole: PlatformRole;
@@ -168,7 +162,7 @@ export function canAccessTenant(options: {
   const actorTenantId = normalizeTenantId(options.actorTenantId);
 
   if (!targetTenantId) return false;
-  if (options.actorRole === 'admin' || options.actorRole === 'support' || options.actorRole === 'security') {
+  if (options.actorRole === 'admin') {
     return true;
   }
 

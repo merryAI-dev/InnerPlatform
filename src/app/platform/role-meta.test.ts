@@ -3,7 +3,7 @@ import { ROLE_META } from './role-meta';
 import type { UserRole } from '../data/types';
 
 const ALL_ROLES: UserRole[] = [
-  'admin', 'tenant_admin', 'finance', 'pm', 'viewer', 'auditor', 'support', 'security',
+  'admin', 'finance', 'pm', 'viewer',
 ];
 
 describe('ROLE_META', () => {

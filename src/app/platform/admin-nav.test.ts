@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { canAccessAdminPath, canShowAdminNavItem } from './admin-nav';
 
 describe('admin nav policy', () => {
-  it('allows full access for admin roles', () => {
+  it('allows full access for admin role', () => {
     expect(canShowAdminNavItem('admin', '/projects/new')).toBe(true);
-    expect(canShowAdminNavItem('tenant_admin', '/users')).toBe(true);
+    expect(canShowAdminNavItem('admin', '/users')).toBe(true);
   });
 
   it('filters finance to core + finance + approvals + audit', () => {
@@ -15,16 +15,6 @@ describe('admin nav policy', () => {
     expect(canShowAdminNavItem('finance', '/users')).toBe(false);
     expect(canShowAdminNavItem('finance', '/projects/new')).toBe(false);
     expect(canShowAdminNavItem('finance', '/koica-personnel')).toBe(false);
-  });
-
-  it('filters auditor to read-only surfaces (no approvals/settings/users)', () => {
-    expect(canShowAdminNavItem('auditor', '/audit')).toBe(true);
-    expect(canShowAdminNavItem('auditor', '/board')).toBe(true);
-    expect(canShowAdminNavItem('auditor', '/payroll')).toBe(true);
-    expect(canShowAdminNavItem('auditor', '/approvals')).toBe(false);
-    expect(canShowAdminNavItem('auditor', '/settings')).toBe(false);
-    expect(canShowAdminNavItem('auditor', '/users')).toBe(false);
-    expect(canShowAdminNavItem('auditor', '/projects/new')).toBe(false);
   });
 
   it('denies unknown roles by default', () => {

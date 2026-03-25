@@ -10,10 +10,6 @@ function normalizeRole(value: unknown): string {
 const ADMIN_SPACE_ROLES = new Set([
   'admin',
   'finance',
-  'auditor',
-  'tenant_admin',
-  'support',
-  'security',
 ]);
 
 export function isPortalRole(role: unknown): boolean {
@@ -30,13 +26,12 @@ export function canEnterPortalWorkspace(role: unknown): boolean {
   const normalized = normalizeRole(role);
   return normalized === 'pm'
     || normalized === 'viewer'
-    || normalized === 'admin'
-    || normalized === 'tenant_admin';
+    || normalized === 'admin';
 }
 
 export function canChooseWorkspace(role: unknown): boolean {
   const normalized = normalizeRole(role);
-  return normalized === 'admin' || normalized === 'tenant_admin';
+  return normalized === 'admin';
 }
 
 export function shouldPromptWorkspaceSelection(
@@ -51,7 +46,7 @@ export function resolveHomePath(role: unknown, preferredWorkspace?: WorkspaceId 
   const normalized = normalizeRole(role);
   if (!normalized) return '/portal';
   if (isPortalRole(normalized)) return '/portal';
-  if ((normalized === 'admin' || normalized === 'tenant_admin') && normalizeWorkspaceId(preferredWorkspace) === 'portal') {
+  if (normalized === 'admin' && normalizeWorkspaceId(preferredWorkspace) === 'portal') {
     return '/portal';
   }
   if (isAdminSpaceRole(normalized)) return '/';

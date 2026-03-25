@@ -419,7 +419,6 @@ export function UserManagementPage() {
                               background: u.role === 'admin' ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' :
                                          u.role === 'finance' ? 'linear-gradient(135deg, #059669, #0d9488)' :
                                          u.role === 'pm' ? 'linear-gradient(135deg, #3b82f6, #6366f1)' :
-                                         u.role === 'auditor' ? 'linear-gradient(135deg, #d97706, #f59e0b)' :
                                          'linear-gradient(135deg, #94a3b8, #64748b)',
                             }}
                           >
@@ -546,7 +545,6 @@ export function UserManagementPage() {
                       <SelectItem value="finance">재무팀</SelectItem>
                       <SelectItem value="pm">PM (사업담당)</SelectItem>
                       <SelectItem value="viewer">뷰어</SelectItem>
-                      <SelectItem value="auditor">감사</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -641,8 +639,7 @@ export function UserManagementPage() {
                         <SelectItem value="finance">재무팀</SelectItem>
                         <SelectItem value="pm">PM (사업담당)</SelectItem>
                         <SelectItem value="viewer">뷰어</SelectItem>
-                        <SelectItem value="auditor">감사</SelectItem>
-                      </SelectContent>
+                        </SelectContent>
                     </Select>
                   </div>
                   <div>
