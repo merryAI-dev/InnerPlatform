@@ -66,11 +66,24 @@ service cloud.firestore {
     // 특정 컬렉션 override → 일반 규칙 순서로 적용
     // ══════════════════════════════════════════════════════════════
 
-    // ── 구성원(members): admin/tenant_admin만 쓰기 ──
+    // ── 구성원(members) ──
     // 테넌트 격리의 핵심: 이 문서가 존재해야 isMember() 통과
-    // 최초 등록은 서버사이드 Admin SDK에서 수행
     match /orgs/{orgId}/members/{memberId} {
       allow read: if canRead(orgId);
+
+      // 최초 로그인 자기 등록: 본인 UID로만, admin/tenant_admin 셀프 등록 불가
+      // (auth-store.tsx의 upsertMemberFromFirebase 지원)
+      allow create: if isSignedIn()
+        && memberId == request.auth.uid
+        && request.resource.data.uid == request.auth.uid
+        && !(request.resource.data.role in ['admin', 'tenant_admin']);
+
+      // 자기 문서 업데이트: lastLoginAt/avatarUrl 등 갱신 허용, role 변경 불가
+      allow update: if isSignedIn()
+        && memberId == request.auth.uid
+        && request.resource.data.role == resource.data.role;
+
+      // Admin: 역할 변경·삭제·타인 문서 수정 포함 모든 쓰기
       allow write: if isAdmin(orgId);
     }
 

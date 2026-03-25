@@ -154,10 +154,14 @@ export function SettingsPage() {
             <CardHeader>
               <div className="flex items-center justify-between">
                 <CardTitle className="text-base">구성원 ({members.length}명)</CardTitle>
-                <Button variant="outline" size="sm" className="gap-1.5">
-                  <Plus className="w-3.5 h-3.5" /> 구성원 초대
+                <Button variant="outline" size="sm" className="gap-1.5" onClick={() => navigate('/users')}>
+                  <Plus className="w-3.5 h-3.5" /> 구성원·역할 관리
                 </Button>
               </div>
+              <p className="text-[12px] text-muted-foreground">
+                신규 구성원은 첫 로그인 시 자동 등록됩니다 (기본 역할: PM).
+                역할 변경·추가·삭제는 <button type="button" className="underline underline-offset-2" onClick={() => navigate('/users')}>구성원 관리 페이지</button>에서 할 수 있어요.
+              </p>
             </CardHeader>
             <CardContent>
               <Table>
