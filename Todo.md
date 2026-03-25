@@ -56,11 +56,10 @@
 - [x] BFF endpoint: `GET /api/v1/budget/suggest?counterparty=&projectId=`
 - [x] `platform-bff-client.ts` — `fetchBudgetSuggestionViaBff` 추가
 - [ ] `budget-auto-match.ts` — 히스토리 조회 레이어 추가 (fuzzy 이전에 실행)
-- [ ] BFF `ai-helpers.mjs` — `suggestBudgetCodeWithAI(counterparty, memo, codeBook)` 신규
-  - AI 호출은 히스토리 miss + 코드북 있을 때만
-  - 모델: `claude-haiku-4-5-20251001` (빠름, 저렴)
-  - 토큰 예산: 200 tokens
-- [ ] UI: 정산 그리드 비목/세목 셀에 제안 뱃지 표시 (클릭으로 수락)
+- [ ] BFF: 히스토리 miss 시 → 코드북 fuzzy match (키워드 + 유사도) → AI 불필요
+  - 거래처명 + 메모를 코드북 항목과 fuzzy 매칭 (Levenshtein/키워드)
+  - AI 호출은 VLM(영수증 이미지 파싱) 경우에만 고려
+- [x] UI: 정산 그리드 비목/세목 셀에 제안 칩 표시 (클릭으로 수락)
 
 ### 1-2. 거래처 정규화 + 오타 탐지 (규칙 기반)
 
@@ -72,45 +71,45 @@
 - [ ] `deriveRowLocally()` 내 거래처 입력 시 자동 실행
 - [ ] UI: "혹시 OOO을 입력하려 하셨나요?" 인라인 힌트
 
-### 1-3. 필수증빙 자동 판단 (규칙 기반 + AI fallback)
+### 1-3. 필수증빙 자동 판단 (규칙 기반, AI 불필요)
 
-> 현재 `evidenceRequired`가 빈 배열이면 아무것도 안 함.
-> 비목 + 금액대 기반 규칙표로 먼저 채우고, 모호한 경우만 AI.
+> 비목 + 금액대 기반 규칙표로 자동 채움. 규칙 miss는 빈값 유지 (VLM 이미지 파싱은 별도 검토).
 
 - [x] `src/app/platform/evidence-rules.ts` 신규
   - 비목별 금액대 기준 증빙 규칙표 (인건비/직접사업비/출장비/외주/운영비)
   - `prepareSettlementImportRows` + `updateRow` 에 2순위 fallback으로 통합
-- [ ] 규칙 miss 케이스 → AI 호출 (`suggestEvidenceRequirements`) — Phase 2
-- [ ] BFF endpoint: `POST /api/v1/ai/suggest-evidence` — Phase 2
+- [ ] 규칙 miss 케이스 → 빈값 유지 (사용자가 직접 입력)
+- ~~규칙 miss → AI 호출~~ — VLM 외 AI 불필요, 제거
 
 ### 1-4. 참여율 이상 탐지 (규칙 기반, AI 불필요)
 
 > 100% 초과 여부는 단순 합산. AI 필요 없음.
 
-- [ ] `participation-risk-rules.ts` — cross-project 합산 검증 함수 추가
-- [ ] 정산 저장 시 자동 실행 → 100% 초과 시 저장 전 경고 모달
-- [ ] Admin 대시보드: 참여율 위험 직원 목록
+- [x] `participation-risk-rules.ts` — cross-project 합산 검증 함수 추가
+- [x] 정산 저장 시 자동 실행 → 100% 초과 시 저장 전 경고 모달
+- [ ] Admin 대시보드: 참여율 위험 직원 상세 목록 (기존 카운트 → 드릴다운)
 
 ---
 
-## Phase 2 — AI 안정화 (A 마무리, 2주)
+## Phase 2 — 규칙 고도화 + VLM 파일럿 (A 마무리, 2주)
 
-### 비용 추적
-- [ ] `observability.ts` — AI 호출당 token 사용량 추적
-- [ ] Firestore `orgs/{orgId}/ai_metrics` 컬렉션 신설
-- [ ] 월별 API 비용 집계 뷰 (Admin 대시보드)
+> 재설계: VLM 외 AI 불필요로 결론. 규칙 기반 고도화에 집중.
+> AI(VLM)는 영수증/계약서 이미지 파싱에만 제한적으로 고려.
 
-### 품질 개선
-- [ ] 사용자 피드백 루프 — 각 AI 제안 옆 👍/👎
-- [ ] Rate limiting 추가 (대량 import 시 API quota 보호)
-- [ ] 배치 처리 큐잉 (기존 `work-queue.mjs` 패턴 재활용)
+### 2-1. 코드북 fuzzy match (비목 제안 고도화)
+- [ ] `budget-auto-match.ts` — 히스토리 miss 시 코드북 키워드 매칭
+  - 거래처명 + 메모 → 코드북 항목 fuzzy match (Levenshtein + 키워드)
+  - 히스토리 → 코드북 매칭 → 빈값 순서로 cascade
+- [ ] BFF `GET /api/v1/budget/suggest` — 코드북 매칭 결과도 반환
 
-### 환경변수 정리
-```bash
-ANTHROPIC_AI_BUDGET_SUGGEST_MODEL=claude-haiku-4-5-20251001
-ANTHROPIC_AI_EVIDENCE_CLASSIFY_MODEL=claude-sonnet-4-6
-ANTHROPIC_AI_CACHE_TTL_SECONDS=86400
-```
+### 2-2. Admin 대시보드 강화
+- [ ] 참여율 위험 직원 상세 목록 (기존 카운트 → 드릴다운 뷰)
+- [ ] 비목 제안 수락률 통계 (히스토리 hit/miss 카운트)
+
+### 2-3. VLM 파일럿 (선택, 별도 검토)
+- [ ] 영수증/계약서 이미지 → 거래처명/금액/날짜 자동 추출
+  - VLM(claude-sonnet vision)만 적용 범위
+  - 텍스트 기반 정산은 규칙으로 충분 → VLM 필요 없음
 
 ---
 
