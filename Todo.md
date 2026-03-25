@@ -21,9 +21,14 @@
 ## 🔴 긴급 (Expansion 전 반드시)
 
 ### 보안 — Firestore 규칙 강화
-- [ ] `firebase/firestore.rules` — `isSignedIn()` 단일 규칙 → 역할/테넌트 기반으로 세분화
+- [x] `firebase/firestore.rules` — `isSignedIn()` 단일 규칙 → 역할/테넌트 기반으로 세분화
+  - `isMember(orgId)` — `members/{uid}` exists 확인으로 테넌트 격리
+  - `canRead/canWrite/isAdmin/canReadAuditLogs` 헬퍼 함수
+  - `members` (admin만 쓰기), `audit_logs` (클라이언트 쓰기 금지), `notifications` (본인만 읽기/수정), `project_change_alerts` (admin/finance만 쓰기) 개별 규칙
+  - Storage: `allow read, write: if true` → @mysc.co.kr 인증 필수로 강화
 - [ ] 프로젝트 할당 검증 (할당된 프로젝트 외 접근 차단)
-- [ ] 테넌트 격리 완성 (다른 orgId 문서 접근 불가)
+  - 구현하려면 Project 문서에 `memberUids[]` 필드 추가 필요 (스키마 변경 → Phase B 검토)
+- [x] 테넌트 격리 완성 (다른 orgId 문서 접근 불가) — `isMember(orgId)` 로 보장
 - [ ] 규칙 배포 후 `npm run firebase:deploy:firestore` + 검증
 
 ### 코드 — 최대 부채 해소
@@ -103,9 +108,11 @@
 - 수정: budgetSuggestionsMap/counterpartyHintMap 스코프 버그 (SettlementLedgerPage → ImportEditor)
 - ~~BFF 코드북 서버사이드 매칭~~ → 클라이언트 코드북(이미 로드됨)으로 충분, 불필요
 
-### 2-2. Admin 대시보드 강화
-- [ ] 참여율 위험 직원 상세 목록 (기존 카운트 → 드릴다운 뷰) ← Phase 1-4에서 이전
-- [ ] 비목 제안 수락률 통계 (히스토리 hit/miss 카운트)
+### 2-2. Admin 대시보드 강화 ✅
+- [x] 참여율 위험 직원 상세 목록 (기존 카운트 → 드릴다운 뷰) ← Phase 1-4에서 이전
+  - DashboardPage AlertStrip 아래 인라인 패널: 이름·전체%·e나라도움% 표시, 클릭 → /participation
+- [x] 비목 제안 수락률 통계 (히스토리 hit/miss 카운트)
+  - ImportEditor 툴바: 칩 수락 시 confidence별 카운트, 배지로 실시간 표시
 
 ### 2-3. VLM 파일럿 (선택, 별도 검토)
 - [ ] 영수증/계약서 이미지 → 거래처명/금액/날짜 자동 추출
@@ -161,4 +168,4 @@
 
 ---
 
-_Last updated: 2026-03-25 (Phase 1 완료 ✅ · Phase 2 시작: 규칙 고도화 + VLM 파일럿 방향 확정)_
+_Last updated: 2026-03-25 (Phase 1 완료 ✅ · Phase 2-1 완료 ✅ · Phase 2-2 완료 ✅ · Phase 2-3 VLM 파일럿 남음)_
