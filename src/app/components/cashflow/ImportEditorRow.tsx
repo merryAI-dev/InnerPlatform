@@ -38,6 +38,119 @@ import {
 import type { ActiveCommentAnchor } from './SettlementCommentThreadSheet';
 import { CellCommentButton } from './CellCommentButton';
 
+// ── SelectCell (module-level to preserve React identity across renders) ──
+
+function SelectCell({
+  value,
+  options,
+  onChange,
+  onFocus,
+  cellColIdx,
+  rowIdx,
+  disabled = false,
+  isOpen,
+  onOpen,
+  onClose,
+}: {
+  value: string;
+  options: { value: string; label: string }[];
+  onChange: (next: string) => void;
+  onFocus: () => void;
+  cellColIdx: number;
+  rowIdx: number;
+  disabled?: boolean;
+  isOpen: boolean;
+  onOpen: () => void;
+  onClose: () => void;
+}) {
+  const btnRef = useRef<HTMLButtonElement | null>(null);
+  const [popupRect, setPopupRect] = useState<{ left: number; top: number } | null>(null);
+
+  useLayoutEffect(() => {
+    if (!isOpen) return;
+    const rect = btnRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setPopupRect({ left: rect.left, top: rect.bottom + 4 });
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const update = () => {
+      const rect = btnRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      setPopupRect({ left: rect.left, top: rect.bottom + 4 });
+    };
+    window.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
+    return () => {
+      window.removeEventListener('scroll', update, true);
+      window.removeEventListener('resize', update);
+    };
+  }, [isOpen]);
+
+  const openPicker = (e: ReactMouseEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (disabled) return;
+    onFocus();
+    onOpen();
+  };
+  const label = options.find((o) => o.value === value)?.label || value || '-';
+  return (
+    <div className="relative w-full">
+      <div className={`flex items-center justify-between gap-1 px-1 py-0.5 text-[11px] ${disabled ? 'text-muted-foreground' : ''}`}>
+        <span className="truncate">{label}</span>
+        <button
+          type="button"
+          className={`shrink-0 h-4 w-4 rounded border border-slate-200/80 dark:border-slate-700 bg-white/50 dark:bg-slate-900/30 text-[9px] leading-none text-slate-500 dark:text-slate-400 ${disabled ? 'opacity-40 cursor-not-allowed' : 'hover:bg-slate-100/80 dark:hover:bg-slate-800/60'}`}
+          onMouseDown={(e) => e.stopPropagation()}
+          onMouseDownCapture={openPicker}
+          data-select-toggle
+          data-cell-row={rowIdx}
+          data-cell-col={cellColIdx}
+          title="옵션 열기"
+          ref={btnRef}
+        >
+          ▼
+        </button>
+      </div>
+      {isOpen && !disabled && popupRect && createPortal(
+        <div
+          className="fixed z-[120] w-40 max-h-56 overflow-auto rounded-md border bg-background shadow-lg"
+          style={{ left: popupRect.left, top: popupRect.top }}
+          onMouseDown={(e) => e.stopPropagation()}
+          data-select-popup
+        >
+          <button
+            type="button"
+            className="w-full text-left px-2 py-1 text-[11px] hover:bg-muted"
+            onClick={() => {
+              onChange('');
+              onClose();
+            }}
+          >
+            -
+          </button>
+          {options.map((o) => (
+            <button
+              key={o.value}
+              type="button"
+              className="w-full text-left px-2 py-1 text-[11px] hover:bg-muted"
+              onClick={() => {
+                onChange(o.value);
+                onClose();
+              }}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>,
+        document.body,
+      )}
+    </div>
+  );
+}
+
 function ImportEditorRow({
   row,
   rowIdx,
@@ -210,115 +323,6 @@ function ImportEditorRow({
     }
   }, [onEnsurePersistedTransaction, persistedTransactionId]);
 
-  const SelectCell = ({
-    value,
-    options,
-    onChange,
-    onFocus,
-    cellColIdx,
-    disabled = false,
-    isOpen,
-    onOpen,
-    onClose,
-  }: {
-    value: string;
-    options: { value: string; label: string }[];
-    onChange: (next: string) => void;
-    onFocus: () => void;
-    cellColIdx: number;
-    disabled?: boolean;
-    isOpen: boolean;
-    onOpen: () => void;
-    onClose: () => void;
-  }) => {
-    const btnRef = useRef<HTMLButtonElement | null>(null);
-    const [popupRect, setPopupRect] = useState<{ left: number; top: number } | null>(null);
-
-    useLayoutEffect(() => {
-      if (!isOpen) return;
-      const rect = btnRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      setPopupRect({ left: rect.left, top: rect.bottom + 4 });
-    }, [isOpen]);
-
-    useEffect(() => {
-      if (!isOpen) return;
-      const update = () => {
-        const rect = btnRef.current?.getBoundingClientRect();
-        if (!rect) return;
-        setPopupRect({ left: rect.left, top: rect.bottom + 4 });
-      };
-      window.addEventListener('scroll', update, true);
-      window.addEventListener('resize', update);
-      return () => {
-        window.removeEventListener('scroll', update, true);
-        window.removeEventListener('resize', update);
-      };
-    }, [isOpen]);
-
-    const openPicker = (e: ReactMouseEvent<HTMLButtonElement>) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (disabled) return;
-      onFocus();
-      onOpen();
-    };
-    const label = options.find((o) => o.value === value)?.label || value || '-';
-    return (
-      <div className="relative w-full">
-        <div className={`flex items-center justify-between gap-1 px-1 py-0.5 text-[11px] ${disabled ? 'text-muted-foreground' : ''}`}>
-          <span className="truncate">{label}</span>
-          <button
-            type="button"
-            className={`shrink-0 h-4 w-4 rounded border border-slate-200/80 dark:border-slate-700 bg-white/50 dark:bg-slate-900/30 text-[9px] leading-none text-slate-500 dark:text-slate-400 ${disabled ? 'opacity-40 cursor-not-allowed' : 'hover:bg-slate-100/80 dark:hover:bg-slate-800/60'}`}
-            onMouseDown={(e) => e.stopPropagation()}
-            onMouseDownCapture={openPicker}
-            data-select-toggle
-            data-cell-row={rowIdx}
-            data-cell-col={cellColIdx}
-            title="옵션 열기"
-            ref={btnRef}
-          >
-            ▼
-          </button>
-        </div>
-        {isOpen && !disabled && popupRect && createPortal(
-          <div
-            className="fixed z-[120] w-40 max-h-56 overflow-auto rounded-md border bg-background shadow-lg"
-            style={{ left: popupRect.left, top: popupRect.top }}
-            onMouseDown={(e) => e.stopPropagation()}
-            data-select-popup
-          >
-            <button
-              type="button"
-              className="w-full text-left px-2 py-1 text-[11px] hover:bg-muted"
-              onClick={() => {
-                onChange('');
-                onClose();
-              }}
-            >
-              -
-            </button>
-            {options.map((o) => (
-              <button
-                key={o.value}
-                type="button"
-                className="w-full text-left px-2 py-1 text-[11px] hover:bg-muted"
-                onClick={() => {
-                  onChange(o.value);
-                  onClose();
-                }}
-              >
-                {o.label}
-              </button>
-            ))}
-          </div>,
-          document.body,
-        )}
-      </div>
-    );
-  };
-
   return (
     <tr className={`${hasError
       ? 'bg-red-50/60 dark:bg-red-950/20'
@@ -410,6 +414,7 @@ function ImportEditorRow({
                     value={row.cells[colIdx] || ''}
                     options={weekOptions}
                     onFocus={() => onCellFocus(rowIdx, colIdx)}
+                    rowIdx={rowIdx}
                     cellColIdx={colIdx}
                     isOpen={openSelect?.rowIdx === rowIdx && openSelect?.colIdx === colIdx}
                     onOpen={() => onOpenSelect(rowIdx, colIdx)}
@@ -423,6 +428,7 @@ function ImportEditorRow({
                     value={row.cells[colIdx] || ''}
                     options={METHOD_OPTIONS.map((o) => ({ value: o.label, label: o.label }))}
                     onFocus={() => onCellFocus(rowIdx, colIdx)}
+                    rowIdx={rowIdx}
                     cellColIdx={colIdx}
                     isOpen={openSelect?.rowIdx === rowIdx && openSelect?.colIdx === colIdx}
                     onOpen={() => onOpenSelect(rowIdx, colIdx)}
@@ -438,6 +444,7 @@ function ImportEditorRow({
                     value={row.cells[colIdx] || ''}
                     options={cashflowOptions.map((o) => ({ value: o.label, label: o.label }))}
                     onFocus={() => onCellFocus(rowIdx, colIdx)}
+                    rowIdx={rowIdx}
                     cellColIdx={colIdx}
                     isOpen={openSelect?.rowIdx === rowIdx && openSelect?.colIdx === colIdx}
                     onOpen={() => onOpenSelect(rowIdx, colIdx)}
@@ -451,6 +458,7 @@ function ImportEditorRow({
                     value={normalizeBudgetLabel(String(row.cells[colIdx] || ''))}
                     options={budgetCodeBook.map((c, idx) => ({ value: c.code, label: formatBudgetCodeLabel(idx, c.code) }))}
                     onFocus={() => onCellFocus(rowIdx, colIdx)}
+                    rowIdx={rowIdx}
                     cellColIdx={colIdx}
                     isOpen={openSelect?.rowIdx === rowIdx && openSelect?.colIdx === colIdx}
                     onOpen={() => onOpenSelect(rowIdx, colIdx)}
@@ -512,6 +520,7 @@ function ImportEditorRow({
                       return { value: sc, label: formatSubCodeLabel(codeIdx, sidx, sc) };
                     })}
                     onFocus={() => onCellFocus(rowIdx, colIdx)}
+                    rowIdx={rowIdx}
                     cellColIdx={colIdx}
                     disabled={!budgetCode}
                     isOpen={openSelect?.rowIdx === rowIdx && openSelect?.colIdx === colIdx}
@@ -537,6 +546,7 @@ function ImportEditorRow({
                     value={row.cells[colIdx] || ''}
                     options={(authorOptions || []).map((name) => ({ value: name, label: name }))}
                     onFocus={() => onCellFocus(rowIdx, colIdx)}
+                    rowIdx={rowIdx}
                     cellColIdx={colIdx}
                     isOpen={openSelect?.rowIdx === rowIdx && openSelect?.colIdx === colIdx}
                     onOpen={() => onOpenSelect(rowIdx, colIdx)}

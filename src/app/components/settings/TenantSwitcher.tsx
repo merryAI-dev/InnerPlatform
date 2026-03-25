@@ -37,9 +37,10 @@ async function loadKnownTenants(db: Firestore): Promise<TenantEntry[]> {
 interface TenantSwitcherProps {
   collapsed?: boolean;
   userRole?: string;
+  userTenantId?: string;
 }
 
-export function TenantSwitcher({ collapsed = false, userRole }: TenantSwitcherProps) {
+export function TenantSwitcher({ collapsed = false, userRole, userTenantId }: TenantSwitcherProps) {
   const { orgId, setOrgId, isUsingEnvConfig, db } = useFirebase();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
@@ -48,8 +49,10 @@ export function TenantSwitcher({ collapsed = false, userRole }: TenantSwitcherPr
   const [inputError, setInputError] = useState('');
   const loadedRef = useRef(false);
 
-  const isAdmin = userRole === 'admin' || userRole === 'tenant_admin';
-  const canSwitch = !isUsingEnvConfig && isAdmin;
+  // admin은 모든 테넌트 전환 가능, tenant_admin은 자기 테넌트만
+  const isGlobalAdmin = userRole === 'admin';
+  const isTenantAdmin = userRole === 'tenant_admin';
+  const canSwitch = !isUsingEnvConfig && (isGlobalAdmin || isTenantAdmin);
 
   useEffect(() => {
     if (!open || !db || loadedRef.current) return;
@@ -61,13 +64,15 @@ export function TenantSwitcher({ collapsed = false, userRole }: TenantSwitcherPr
 
   const handleSelect = useCallback((nextId: string) => {
     if (nextId === orgId) { setOpen(false); return; }
+    // tenant_admin은 자신의 테넌트만 전환 가능
+    if (isTenantAdmin && userTenantId && nextId !== userTenantId) return;
     const ok = setOrgId(nextId);
     if (ok) {
       setOpen(false);
       setCustomInput('');
       navigate('/', { replace: true });
     }
-  }, [orgId, setOrgId, navigate]);
+  }, [orgId, setOrgId, navigate, isTenantAdmin, userTenantId]);
 
   const handleCustomSwitch = useCallback(() => {
     const value = customInput.trim().toLowerCase();
@@ -75,9 +80,14 @@ export function TenantSwitcher({ collapsed = false, userRole }: TenantSwitcherPr
       setInputError('소문자 영문/숫자/-만 허용, 2~32자');
       return;
     }
+    // tenant_admin은 임의 테넌트 전환 차단
+    if (isTenantAdmin && userTenantId && value !== userTenantId) {
+      setInputError('자신의 테넌트만 전환할 수 있습니다');
+      return;
+    }
     setInputError('');
     handleSelect(value);
-  }, [customInput, handleSelect]);
+  }, [customInput, handleSelect, isTenantAdmin, userTenantId]);
 
   if (collapsed) {
     return (

@@ -131,8 +131,8 @@ export function TenantBrandingTab() {
     try {
       await saveBranding(db, orgId, branding);
       toast.success('브랜딩 설정 저장 완료');
-    } catch (err: any) {
-      toast.error('저장 실패: ' + (err.message || ''));
+    } catch (err: unknown) {
+      toast.error('저장 실패: ' + (err instanceof Error ? err.message : ''));
     } finally {
       setSavingBranding(false);
     }
@@ -144,8 +144,8 @@ export function TenantBrandingTab() {
     try {
       await saveFeatureFlags(db, orgId, flags);
       toast.success('기능 플래그 저장 완료');
-    } catch (err: any) {
-      toast.error('저장 실패: ' + (err.message || ''));
+    } catch (err: unknown) {
+      toast.error('저장 실패: ' + (err instanceof Error ? err.message : ''));
     } finally {
       setSavingFlags(false);
     }
@@ -220,7 +220,7 @@ export function TenantBrandingTab() {
                 <div className="rounded-lg border p-3 bg-muted/30">
                   <p className="text-[10px] text-muted-foreground mb-2 uppercase tracking-wider">미리보기</p>
                   <div className="flex items-center gap-2">
-                    {branding.logoUrl ? (
+                    {branding.logoUrl && /^https?:\/\//.test(branding.logoUrl) ? (
                       <img
                         src={branding.logoUrl}
                         alt="logo"
@@ -230,7 +230,7 @@ export function TenantBrandingTab() {
                     ) : (
                       <div
                         className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-[13px]"
-                        style={{ background: `linear-gradient(135deg, ${branding.primaryColor}, ${branding.primaryColor}99)` }}
+                        style={{ background: `linear-gradient(135deg, ${/^#[0-9a-fA-F]{6}$/.test(branding.primaryColor) ? branding.primaryColor : '#6366f1'}, ${/^#[0-9a-fA-F]{6}$/.test(branding.primaryColor) ? branding.primaryColor : '#6366f1'}99)` }}
                       >
                         {(branding.orgName || orgId).charAt(0).toUpperCase()}
                       </div>
