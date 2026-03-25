@@ -49,6 +49,10 @@ import {
   isSettlementCascadeColumn,
 } from '../../platform/settlement-row-derivation';
 import {
+  findSimilarCounterparty,
+  type CounterpartySuggestion,
+} from '../../platform/counterparty-normalizer';
+import {
   buildSettlementDerivationContext,
   resolveEvidenceRequiredDesc,
   isSettlementRowMeaningful,
@@ -217,6 +221,7 @@ export function SettlementLedgerPage({
   const [lastAutoSavedAt, setLastAutoSavedAt] = useState('');
   const [budgetSuggestionsMap, setBudgetSuggestionsMap] = useState<Record<string, { budgetCategory: string; budgetSubCategory: string } | null>>({});
   const pendingBudgetFetches = useRef<Set<string>>(new Set());
+  const [counterpartyHintMap, setCounterpartyHintMap] = useState<Record<string, CounterpartySuggestion | null>>({});
   const [lastCashflowSyncedAt, setLastCashflowSyncedAt] = useState('');
   const [sheetSaveState, setSheetSaveState] = useState<'idle' | 'dirty' | 'saving' | 'saved' | 'save_failed'>('idle');
   const [cashflowSyncState, setCashflowSyncState] = useState<'idle' | 'pending' | 'syncing' | 'synced' | 'sync_failed'>('idle');
@@ -1399,8 +1404,21 @@ function ImportEditor({
           ? 'cascade'
           : 'row';
       onChange(deriveSettlementRows(next, settlementDerivationContext, { mode, rowIdx }));
+
+      // 거래처 셀 변경 시 오타 탐지
+      if (colIdx === counterpartyIdx && value.trim()) {
+        const targetRow = rows[rowIdx];
+        if (targetRow) {
+          const existingCounterparties = rows
+            .filter((_, idx) => idx !== rowIdx)
+            .map((r) => String(r.cells[counterpartyIdx] || '').trim())
+            .filter(Boolean);
+          const hint = findSimilarCounterparty(value.trim(), existingCounterparties);
+          setCounterpartyHintMap((prev) => ({ ...prev, [targetRow.tempId]: hint }));
+        }
+      }
     },
-    [rows, onChange, cashflowIdx, settlementDerivationContext],
+    [rows, onChange, cashflowIdx, settlementDerivationContext, counterpartyIdx],
   );
 
   const updateRow = useCallback(
@@ -2370,12 +2388,14 @@ function ImportEditor({
               const budgetSuggestion = (onFetchBudgetSuggestion && !budgetCodeVal && counterpartyVal)
                 ? (budgetSuggestionsMap[suggestionKey] ?? null)
                 : null;
+              const counterpartyHint = counterpartyHintMap[row.tempId] ?? null;
               return (
               <MemoizedImportEditorRow
                 key={`${row.tempId}-${rowIdx}`}
                 row={row}
                 rowIdx={rowIdx}
                 budgetSuggestion={budgetSuggestion}
+                counterpartyHint={counterpartyHint}
                 onCellChange={(colIdx, value) => updateCell(rowIdx, colIdx, value)}
                 onRowChange={(updater) => updateRow(rowIdx, updater)}
                 onRemove={() => removeRow(rowIdx)}
@@ -2629,6 +2649,7 @@ function ImportEditorRow({
   noIdx,
   colWidths,
   budgetSuggestion,
+  counterpartyHint,
 }: {
   row: ImportRow;
   rowIdx: number;
@@ -2667,6 +2688,7 @@ function ImportEditorRow({
   noIdx: number;
   colWidths: number[];
   budgetSuggestion?: { budgetCategory: string; budgetSubCategory: string } | null;
+  counterpartyHint?: CounterpartySuggestion | null;
 }) {
   const hasError = Boolean(row.error);
   const hasMissingCell = useMemo(() => {
@@ -2928,6 +2950,7 @@ function ImportEditorRow({
         const isWeek = colIdx === weekIdx;
         const isCashflow = colIdx === cashflowIdx;
         const isAuthor = colIdx === authorIdx;
+        const isCounterparty = col.csvHeader === '지급처';
         const isDriveLink = col.csvHeader === '증빙자료 드라이브';
         const isExpenseAmount = col.csvHeader === '사업비 사용액';
         const isSettlementNote = col.csvHeader === '비고';
@@ -3239,6 +3262,16 @@ function ImportEditorRow({
                   }}
                 />
               )}
+              {isCounterparty && counterpartyHint && (
+                <button
+                  type="button"
+                  className="mt-0.5 w-full text-left text-[9px] bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 text-amber-700 hover:bg-amber-100 truncate leading-tight"
+                  title={`혹시 "${counterpartyHint.original}"을(를) 입력하려 하셨나요?`}
+                  onClick={() => onCellChange(colIdx, counterpartyHint.original)}
+                >
+                  혹시 {counterpartyHint.original}?
+                </button>
+              )}
               {isDriveLink && isValidDriveUrl(String(row.cells[colIdx] || '')) && (
                 <a
                   href={String(row.cells[colIdx] || '')}
@@ -3297,5 +3330,6 @@ const MemoizedImportEditorRow = memo(ImportEditorRow, (prev, next) => {
     && prev.colWidths === next.colWidths
     && selectionKeyForRow(prev.rowIdx, prev.selectionBounds) === selectionKeyForRow(next.rowIdx, next.selectionBounds)
     && openSelectKeyForRow(prev.rowIdx, prev.openSelect) === openSelectKeyForRow(next.rowIdx, next.openSelect)
-    && prev.budgetSuggestion === next.budgetSuggestion;
+    && prev.budgetSuggestion === next.budgetSuggestion
+    && prev.counterpartyHint === next.counterpartyHint;
 });
