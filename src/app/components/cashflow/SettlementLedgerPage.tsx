@@ -1053,6 +1053,8 @@ function ImportEditor({
   const [budgetSuggestionsMap, setBudgetSuggestionsMap] = useState<Record<string, { budgetCategory: string; budgetSubCategory: string; confidence?: 'history' | 'codebook' } | null>>({});
   const pendingBudgetFetches = useRef<Set<string>>(new Set());
   const [counterpartyHintMap, setCounterpartyHintMap] = useState<Record<string, CounterpartySuggestion | null>>({});
+  // 비목 제안 수락률 통계 (세션 내 카운트)
+  const [acceptStats, setAcceptStats] = useState<{ history: number; codebook: number }>({ history: 0, codebook: 0 });
 
   const budgetCodeIdx = useMemo(
     () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '비목'),
@@ -2214,6 +2216,16 @@ function ImportEditor({
           {missingCount > 0 && (
             <Badge variant="secondary" className="text-[10px] text-red-600">{missingCount}건 미입력</Badge>
           )}
+          {(acceptStats.history + acceptStats.codebook > 0) && (
+            <Badge variant="outline" className="text-[10px] text-teal-700 border-teal-300 bg-teal-50">
+              비목 수락 {acceptStats.history + acceptStats.codebook}건
+              {acceptStats.history > 0 && acceptStats.codebook > 0
+                ? ` (히스토리 ${acceptStats.history} · 코드북 ${acceptStats.codebook})`
+                : acceptStats.history > 0
+                  ? ' (히스토리 기반)'
+                  : ' (코드북 기반)'}
+            </Badge>
+          )}
           <span className="text-[10px] text-muted-foreground">
             셀을 직접 수정하거나 행을 추가할 수 있습니다
           </span>
@@ -2471,6 +2483,9 @@ function ImportEditor({
                 onEnsurePersistedTransaction={() => ensurePersistedTransactionByRow(rowIdx)}
                 noIdx={noIdx}
                 colWidths={colWidths}
+                onBudgetSuggestionAccepted={(confidence) => {
+                  setAcceptStats((prev) => ({ ...prev, [confidence]: prev[confidence] + 1 }));
+                }}
               />
               );
             })}
@@ -2691,6 +2706,7 @@ function ImportEditorRow({
   colWidths,
   budgetSuggestion,
   counterpartyHint,
+  onBudgetSuggestionAccepted,
 }: {
   row: ImportRow;
   rowIdx: number;
@@ -2730,6 +2746,7 @@ function ImportEditorRow({
   colWidths: number[];
   budgetSuggestion?: { budgetCategory: string; budgetSubCategory: string; confidence?: 'history' | 'codebook' } | null;
   counterpartyHint?: CounterpartySuggestion | null;
+  onBudgetSuggestionAccepted?: (confidence: 'history' | 'codebook') => void;
 }) {
   const hasError = Boolean(row.error);
   const hasMissingCell = useMemo(() => {
@@ -3095,6 +3112,7 @@ function ImportEditorRow({
                       className="mt-0.5 w-full text-left text-[9px] bg-teal-50 border border-teal-200 rounded px-1.5 py-0.5 text-teal-700 hover:bg-teal-100 truncate leading-tight"
                       title={`${budgetSuggestion.confidence === 'codebook' ? '코드북 기반 제안' : '이전 거래 기반 제안'}: ${budgetSuggestion.budgetCategory}${budgetSuggestion.budgetSubCategory ? ` · ${budgetSuggestion.budgetSubCategory}` : ''}`}
                       onClick={() => {
+                        onBudgetSuggestionAccepted?.(budgetSuggestion.confidence ?? 'history');
                         onRowChange((prev) => {
                           if (budgetCodeIdx < 0) return prev;
                           const cells = [...prev.cells];
