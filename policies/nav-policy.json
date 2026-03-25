@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "fullAccessRoles": ["admin", "tenant_admin"],
+  "routePermissions": {
+    "finance": [
+      "/",
+      "/projects",
+      "/board",
+      "/cashflow",
+      "/evidence",
+      "/payroll",
+      "/budget-summary",
+      "/expense-management",
+      "/approvals",
+      "/audit",
+      "/claude-sdk-help",
+      "/portal"
+    ],
+    "auditor": [
+      "/",
+      "/projects",
+      "/board",
+      "/cashflow",
+      "/evidence",
+      "/payroll",
+      "/budget-summary",
+      "/expense-management",
+      "/audit",
+      "/claude-sdk-help",
+      "/portal"
+    ],
+    "support": [
+      "/",
+      "/projects",
+      "/board",
+      "/evidence",
+      "/audit",
+      "/claude-sdk-help",
+      "/portal"
+    ],
+    "security": [
+      "/",
+      "/projects",
+      "/board",
+      "/audit",
+      "/claude-sdk-help"
+    ]
+  }
+}
