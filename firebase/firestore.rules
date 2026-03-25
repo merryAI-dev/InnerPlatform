@@ -71,12 +71,13 @@ service cloud.firestore {
     match /orgs/{orgId}/members/{memberId} {
       allow read: if canRead(orgId);
 
-      // 최초 로그인 자기 등록: 본인 UID로만, admin/tenant_admin 셀프 등록 불가
+      // 최초 로그인 자기 등록: 본인 UID로만, 기본 역할 pm 고정
       // (auth-store.tsx의 upsertMemberFromFirebase 지원)
+      // 다른 역할 부여는 admin이 /users 페이지에서 변경
       allow create: if isSignedIn()
         && memberId == request.auth.uid
         && request.resource.data.uid == request.auth.uid
-        && !(request.resource.data.role in ['admin', 'tenant_admin']);
+        && request.resource.data.role == 'pm';
 
       // 자기 문서 업데이트: lastLoginAt/avatarUrl 등 갱신 허용, role 변경 불가
       allow update: if isSignedIn()
