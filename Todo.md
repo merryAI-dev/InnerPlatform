@@ -37,57 +37,53 @@
 > 목표: 수동 반복 작업 줄이기. AI는 진짜 필요한 곳에만.
 > 원칙: 히스토리/규칙 먼저 → 해결 안 되면 AI 호출
 
-### 1-1. 비목/세목 히스토리 기반 제안 (AI 최소화)
+### 1-1. 비목/세목 히스토리 기반 제안 (AI 최소화) ✅
 
 > 비목/세목은 프로젝트마다 코드북이 다르고, 같은 거래처도 맥락에 따라 달라서
 > AI가 "알아서" 맞추기 어려움. 히스토리 패턴이 훨씬 정확.
 
 ```
 같은 프로젝트 + 기존 거래처  →  히스토리 캐시 → 즉시 제안 (AI 불필요)
-새 거래처 + 코드북 있음      →  AI 호출 (코드북 + 메모 컨텍스트 제공)
+새 거래처 + 코드북 있음      →  코드북 fuzzy match (Phase 2-1)
 새 거래처 + 코드북 없음      →  fuzzy만, 사람 검토 요청
 ```
 
 - [x] Firestore `orgs/{orgId}/counterparty_budget_history` 컬렉션 설계
-  - 거래처명 → `{ budgetCategory, budgetSubCategory, usageCount, lastUsed }` 저장
-  - 거래 저장 시 자동 업데이트
 - [x] BFF `counterparty-budget-history.mjs` — `updateCounterpartyHistory`, `lookupCounterpartyHistory` 구현
 - [x] BFF `upsertTransaction` — 비목 있으면 히스토리 side-effect (fire-and-forget)
 - [x] BFF endpoint: `GET /api/v1/budget/suggest?counterparty=&projectId=`
 - [x] `platform-bff-client.ts` — `fetchBudgetSuggestionViaBff` 추가
-- [ ] `budget-auto-match.ts` — 히스토리 조회 레이어 추가 (fuzzy 이전에 실행)
-- [ ] BFF: 히스토리 miss 시 → 코드북 fuzzy match (키워드 + 유사도) → AI 불필요
-  - 거래처명 + 메모를 코드북 항목과 fuzzy 매칭 (Levenshtein/키워드)
-  - AI 호출은 VLM(영수증 이미지 파싱) 경우에만 고려
 - [x] UI: 정산 그리드 비목/세목 셀에 제안 칩 표시 (클릭으로 수락)
 
-### 1-2. 거래처 정규화 + 오타 탐지 (규칙 기반)
+### 1-2. 거래처 정규화 + 오타 탐지 (규칙 기반) ✅
 
 > AI 없이도 충분히 가능. Levenshtein 유사도 + 정규화 규칙으로.
 
-- [ ] `src/app/platform/counterparty-normalizer.ts` 신규
+- [x] `src/app/platform/counterparty-normalizer.ts` 신규
   - 공백/특수문자 정규화 ("(주)", "주식회사" 등 제거)
   - 기존 거래처 목록과 유사도 비교 (편집거리 ≤ 2 이면 경고)
-- [ ] `deriveRowLocally()` 내 거래처 입력 시 자동 실행
-- [ ] UI: "혹시 OOO을 입력하려 하셨나요?" 인라인 힌트
+  - 16/16 테스트 통과
+- [x] `SettlementLedgerPage.tsx` `updateCell` — 거래처 변경 시 자동 실행
+- [x] UI: "혹시 OOO을 입력하려 하셨나요?" 인라인 힌트 (amber 칩)
 
-### 1-3. 필수증빙 자동 판단 (규칙 기반, AI 불필요)
+### 1-3. 필수증빙 자동 판단 (규칙 기반, AI 불필요) ✅
 
 > 비목 + 금액대 기반 규칙표로 자동 채움. 규칙 miss는 빈값 유지 (VLM 이미지 파싱은 별도 검토).
 
 - [x] `src/app/platform/evidence-rules.ts` 신규
   - 비목별 금액대 기준 증빙 규칙표 (인건비/직접사업비/출장비/외주/운영비)
   - `prepareSettlementImportRows` + `updateRow` 에 2순위 fallback으로 통합
-- [ ] 규칙 miss 케이스 → 빈값 유지 (사용자가 직접 입력)
+  - 17/17 테스트 통과
+- [x] 규칙 miss 케이스 → 빈값 유지 (사용자가 직접 입력)
 - ~~규칙 miss → AI 호출~~ — VLM 외 AI 불필요, 제거
 
-### 1-4. 참여율 이상 탐지 (규칙 기반, AI 불필요)
+### 1-4. 참여율 이상 탐지 (규칙 기반, AI 불필요) ✅
 
 > 100% 초과 여부는 단순 합산. AI 필요 없음.
 
-- [x] `participation-risk-rules.ts` — cross-project 합산 검증 함수 추가
-- [x] 정산 저장 시 자동 실행 → 100% 초과 시 저장 전 경고 모달
-- [ ] Admin 대시보드: 참여율 위험 직원 상세 목록 (기존 카운트 → 드릴다운)
+- [x] `participation-risk-rules.ts` — cross-project 합산 검증 함수 추가 (6/6 테스트 통과)
+- [x] 정산 저장 시 자동 실행 → 100% 초과 시 저장 전 경고 모달 (AlertDialog)
+- [ ] Admin 대시보드: 참여율 위험 직원 상세 목록 (기존 카운트 → 드릴다운) → Phase 2-2
 
 ---
 
@@ -97,13 +93,15 @@
 > AI(VLM)는 영수증/계약서 이미지 파싱에만 제한적으로 고려.
 
 ### 2-1. 코드북 fuzzy match (비목 제안 고도화)
-- [ ] `budget-auto-match.ts` — 히스토리 miss 시 코드북 키워드 매칭
-  - 거래처명 + 메모 → 코드북 항목 fuzzy match (Levenshtein + 키워드)
-  - 히스토리 → 코드북 매칭 → 빈값 순서로 cascade
-- [ ] BFF `GET /api/v1/budget/suggest` — 코드북 매칭 결과도 반환
+- [ ] `src/app/platform/budget-auto-match.ts` 신규
+  - 거래처명 + 메모 → 코드북 항목 fuzzy match (Levenshtein + 키워드 교집합)
+  - cascade: 히스토리 hit → 코드북 매칭 → 빈값
+  - 코드북 = `budgetCodebook` (프로젝트별 비목/세목 목록)
+- [ ] BFF `GET /api/v1/budget/suggest` — 코드북 매칭 결과도 반환 (source: 'codebook')
+- [ ] `SettlementLedgerPage.tsx` — 히스토리 miss 시 코드북 제안도 칩으로 표시
 
 ### 2-2. Admin 대시보드 강화
-- [ ] 참여율 위험 직원 상세 목록 (기존 카운트 → 드릴다운 뷰)
+- [ ] 참여율 위험 직원 상세 목록 (기존 카운트 → 드릴다운 뷰) ← Phase 1-4에서 이전
 - [ ] 비목 제안 수락률 통계 (히스토리 hit/miss 카운트)
 
 ### 2-3. VLM 파일럿 (선택, 별도 검토)
@@ -160,4 +158,4 @@
 
 ---
 
-_Last updated: 2026-03-24 (Phase 1 재설계: 비목/세목 히스토리 우선, AI는 new 거래처에만)_
+_Last updated: 2026-03-25 (Phase 1 완료 ✅ · Phase 2 시작: 규칙 고도화 + VLM 파일럿 방향 확정)_
