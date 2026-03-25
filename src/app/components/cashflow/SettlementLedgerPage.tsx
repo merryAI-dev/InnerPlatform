@@ -52,6 +52,7 @@ import {
   findSimilarCounterparty,
   type CounterpartySuggestion,
 } from '../../platform/counterparty-normalizer';
+import { resolveEvidenceRequiredByRules } from '../../platform/evidence-rules';
 import {
   buildSettlementDerivationContext,
   resolveEvidenceRequiredDesc,
@@ -1425,21 +1426,33 @@ function ImportEditor({
     (rowIdx: number, updater: (row: ImportRow) => ImportRow) => {
       const next = updateImportRowAt(rows, rowIdx, (r) => {
         let updated = updater(r);
-        if (budgetCodeIdx >= 0 && subCodeIdx >= 0 && evidenceIdx >= 0 && evidenceRequiredMap) {
+        if (budgetCodeIdx >= 0 && subCodeIdx >= 0 && evidenceIdx >= 0) {
           const budgetCode = updated.cells[budgetCodeIdx] || '';
           const subCode = updated.cells[subCodeIdx] || '';
+          // 1순위: 프로젝트별 evidenceRequiredMap
           const mapped = resolveEvidenceRequiredDesc(evidenceRequiredMap, budgetCode, subCode);
           if (mapped) {
             const cells = [...updated.cells];
             cells[evidenceIdx] = mapped;
             updated = { ...updated, cells };
+          } else {
+            // 2순위: 기본 규칙표 fallback
+            const amountStr = (expenseIdx >= 0 ? updated.cells[expenseIdx] : '')
+              || (bankAmountIdx >= 0 ? updated.cells[bankAmountIdx] : '')
+              || '';
+            const ruleResult = resolveEvidenceRequiredByRules(budgetCode, subCode, amountStr);
+            if (ruleResult) {
+              const cells = [...updated.cells];
+              cells[evidenceIdx] = ruleResult;
+              updated = { ...updated, cells };
+            }
           }
         }
         return updated;
       });
       onChange(deriveSettlementRows(next, settlementDerivationContext, { mode: 'row', rowIdx }));
     },
-    [rows, onChange, budgetCodeIdx, subCodeIdx, evidenceIdx, evidenceRequiredMap, settlementDerivationContext],
+    [rows, onChange, budgetCodeIdx, subCodeIdx, evidenceIdx, evidenceRequiredMap, settlementDerivationContext, expenseIdx, bankAmountIdx],
   );
 
   const normalizeRowNumbers = useCallback((input: ImportRow[]) => {

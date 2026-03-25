@@ -77,11 +77,11 @@
 > 현재 `evidenceRequired`가 빈 배열이면 아무것도 안 함.
 > 비목 + 금액대 기반 규칙표로 먼저 채우고, 모호한 경우만 AI.
 
-- [ ] `src/app/platform/evidence-rules.ts` 신규
-  - 비목별 금액대 기준 증빙 규칙표 (예: 직접사업비 50만원 이상 → 계약서 필수)
-  - 기존 `evidence-helpers.ts`의 `computeEvidenceStatus`와 통합
-- [ ] 규칙 miss 케이스 → AI 호출 (`suggestEvidenceRequirements`)
-- [ ] BFF endpoint: `POST /api/v1/ai/suggest-evidence`
+- [x] `src/app/platform/evidence-rules.ts` 신규
+  - 비목별 금액대 기준 증빙 규칙표 (인건비/직접사업비/출장비/외주/운영비)
+  - `prepareSettlementImportRows` + `updateRow` 에 2순위 fallback으로 통합
+- [ ] 규칙 miss 케이스 → AI 호출 (`suggestEvidenceRequirements`) — Phase 2
+- [ ] BFF endpoint: `POST /api/v1/ai/suggest-evidence` — Phase 2
 
 ### 1-4. 참여율 이상 탐지 (규칙 기반, AI 불필요)
 
