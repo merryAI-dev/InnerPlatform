@@ -27,3 +27,4 @@ scripts/etl/output/
 .env.vercel.production
 .gitnexus
 .env*.local
+.gstack/
