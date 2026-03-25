@@ -30,6 +30,7 @@ import { ErrorBoundary } from './ErrorBoundary';
 import { ClaudeSdkHelpWidget } from '../guide-chat/ClaudeSdkHelpWidget';
 import { canChooseWorkspace, isPortalRole, resolveHomePath } from '../../platform/navigation';
 import { canAccessAdminPath, canShowAdminNavItem } from '../../platform/admin-nav';
+import { TenantSwitcher, TenantBadge } from '../settings/TenantSwitcher';
 
 const NAV_GROUPS = [
   {
@@ -304,6 +305,8 @@ function AppLayoutContent() {
 
           {/* Footer */}
           <div className="border-t border-white/10 p-2 space-y-1.5">
+            {/* Tenant switcher */}
+            <TenantSwitcher collapsed={collapsed} userRole={displayUser.role} />
             {!collapsed && (
               <div className="px-1 mb-1">
                 <FirebaseStatusBadge />
@@ -372,6 +375,11 @@ function AppLayoutContent() {
                   로컬
                 </div>
               )}
+
+              <div className="w-px h-4 bg-border/50 mx-0.5" />
+
+              {/* Tenant badge */}
+              <TenantBadge />
 
               <div className="w-px h-4 bg-border/50 mx-0.5" />
 
