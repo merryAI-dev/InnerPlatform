@@ -32,8 +32,14 @@
 - [ ] 규칙 배포 후 `npm run firebase:deploy:firestore` + 검증
 
 ### 코드 — 최대 부채 해소
-- [ ] `server/bff/app.mjs` (105,305줄) → domain별 라우트 파일 분리 (`routes/settlement.mjs`, `routes/budget.mjs` 등)
-- [ ] `SettlementLedgerPage.tsx` (3,242줄) → 그리드/헬퍼/증빙 컴포넌트 분해
+- [x] `server/bff/app.mjs` (3,107줄) → domain별 라우트 파일 분리
+  - `routes/projects.mjs`, `routes/ledgers.mjs`, `routes/transactions.mjs`, `routes/audit.mjs`, `routes/members.mjs`
+  - `bff-utils.mjs` 공유 유틸리티 추출
+  - app.mjs: 3,107줄 → 1,368줄 (56% 감소)
+- [x] `SettlementLedgerPage.tsx` (3,242줄) → 그리드/헬퍼/증빙 컴포넌트 분해
+  - `ImportEditorRow.tsx` (765줄) — 행 렌더러 + MemoizedImportEditorRow 분리
+  - `ImportEditor.tsx` (1,804줄) — 편집 그리드 전체 + lazy 다이얼로그 분리
+  - `SettlementLedgerPage.tsx`: 3,242줄 → 889줄 (73% 감소)
 
 ---
 
@@ -124,10 +130,10 @@
 ## Phase 3 — B 준비 (SaaS 확장 기반, 3~4주)
 
 ### 멀티테넌시 UI
-- [ ] 테넌트 온보딩 플로우 (신규 조직 등록 화면)
-- [ ] 테넌트 선택 UI (현재 "mysc" 하드코딩 → 드롭다운)
-- [ ] 테넌트별 브랜딩 (로고, 컬러 커스터마이징)
-- [ ] 테넌트별 기능 플래그 관리 화면
+- [x] 테넌트 온보딩 플로우 (신규 조직 등록 화면) — `TenantManagementTab.tsx`: 테넌트 등록/삭제, Firestore `tenants` 컬렉션
+- [x] 테넌트 선택 UI (현재 "mysc" 하드코딩 → 드롭다운) — `TenantSwitcher.tsx`: 사이드바 footer + 헤더 뱃지, `setOrgId` 호출
+- [x] 테넌트별 브랜딩 (로고, 컬러 커스터마이징) — `TenantBrandingTab.tsx`: orgName/primaryColor/logoUrl, `orgs/{id}/settings/branding`
+- [x] 테넌트별 기능 플래그 관리 화면 — `TenantBrandingTab.tsx`: 기능 플래그 토글, `orgs/{id}/settings/feature-flags`
 
 ### AI 온보딩 가이드
 - [ ] 계약서 업로드 → 사업 유형 자동 감지 → 증빙 규칙 자동 설정
@@ -168,4 +174,4 @@
 
 ---
 
-_Last updated: 2026-03-25 (Phase 1 완료 ✅ · Phase 2-1 완료 ✅ · Phase 2-2 완료 ✅ · Phase 2-3 VLM 파일럿 남음)_
+_Last updated: 2026-03-25 (Phase 1 완료 ✅ · Phase 2-1 완료 ✅ · Phase 2-2 완료 ✅ · Phase 2-3 VLM 파일럿 남음 · 코드 부채 완료 ✅ · Phase 3 멀티테넌시 UI 완료 ✅)_
