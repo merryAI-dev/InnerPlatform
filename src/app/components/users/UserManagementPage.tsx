@@ -2,11 +2,11 @@ import { useState, useMemo } from 'react';
 import {
   Users, UserPlus, Search, Shield, Edit3,
   MoreHorizontal, Mail, Clock, CheckCircle2,
-  XCircle, Eye, UserCog, Key, Trash2,
-  ArrowUpDown, FolderKanban, Filter,
-  ShieldCheck, ShieldAlert, Activity,
+  XCircle, Trash2,
+  ArrowUpDown, Filter,
   Ban, RefreshCw,
 } from 'lucide-react';
+import { ROLE_META } from '../../platform/role-meta';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -55,38 +55,6 @@ interface ManagedUser {
 
 type MemberDoc = OrgMember & Record<string, unknown>;
 
-const ROLE_LABELS: Record<UserRole, string> = {
-  admin: '관리자',
-  tenant_admin: '테넌트 관리자',
-  finance: '재무팀',
-  pm: 'PM (사업담당)',
-  viewer: '뷰어',
-  auditor: '감사',
-  support: '지원',
-  security: '보안',
-};
-
-const ROLE_COLORS: Record<UserRole, string> = {
-  admin: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300',
-  tenant_admin: 'bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-300',
-  finance: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300',
-  pm: 'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300',
-  viewer: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400',
-  auditor: 'bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300',
-  support: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-400',
-  security: 'bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-300',
-};
-
-const ROLE_ICONS: Record<UserRole, typeof Shield> = {
-  admin: ShieldCheck,
-  tenant_admin: ShieldCheck,
-  finance: Activity,
-  pm: FolderKanban,
-  viewer: Eye,
-  auditor: ShieldAlert,
-  support: UserCog,
-  security: Key,
-};
 
 const STATUS_LABELS: Record<string, string> = {
   ACTIVE: '활성',
@@ -434,7 +402,7 @@ export function UserManagementPage() {
               ) : (
                 filteredUsers.map(u => {
                   const isSelected = selectedUser?.uid === u.uid;
-                  const RIcon = ROLE_ICONS[u.role];
+                  const RIcon = ROLE_META[u.role]?.Icon ?? Shield;
                   return (
                     <Card
                       key={u.uid}
@@ -462,8 +430,8 @@ export function UserManagementPage() {
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-2 mb-0.5">
                               <span className="text-[12px] truncate" style={{ fontWeight: 600 }}>{u.name}</span>
-                              <Badge className={`text-[8px] h-3.5 px-1.5 ${ROLE_COLORS[u.role]}`}>
-                                {ROLE_LABELS[u.role]}
+                              <Badge className={`text-[8px] h-3.5 px-1.5 ${ROLE_META[u.role]?.badgeClass ?? ''}`}>
+                                {ROLE_META[u.role]?.label ?? u.role}
                               </Badge>
                               <Badge className={`text-[8px] h-3.5 px-1.5 ${STATUS_COLORS[u.status]}`}>
                                 {STATUS_LABELS[u.status]}
@@ -768,9 +736,9 @@ function UserDetailPanel({
             <div>
               <h3 className="text-[15px]" style={{ fontWeight: 700 }}>{user.name}</h3>
               <div className="flex items-center gap-2 mt-0.5">
-                <Badge className={`text-[9px] h-4 px-1.5 ${ROLE_COLORS[user.role]}`}>
+                <Badge className={`text-[9px] h-4 px-1.5 ${ROLE_META[user.role]?.badgeClass ?? ''}`}>
                   <RIcon className="w-2.5 h-2.5 mr-0.5" />
-                  {ROLE_LABELS[user.role]}
+                  {ROLE_META[user.role]?.label ?? user.role}
                 </Badge>
                 <Badge className={`text-[9px] h-4 px-1.5 ${STATUS_COLORS[user.status]}`}>
                   {STATUS_LABELS[user.status]}
