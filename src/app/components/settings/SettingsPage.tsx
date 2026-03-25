@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
-  Settings, Users, BookOpen, Building2, Plus, Database, Upload, MessageCircle, Palette,
+  Settings, Users, BookOpen, Building2, Plus, Database, Upload, MessageCircle, Palette, Shield,
 } from 'lucide-react';
 import { ROLE_META } from '../../platform/role-meta';
 import { hasPermission, type PlatformPermission } from '../../platform/rbac';
