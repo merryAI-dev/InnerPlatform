@@ -27,6 +27,8 @@ import {
   syncTransactionEvidenceDriveViaBff,
   upsertTransactionViaBff,
   uploadTransactionEvidenceDriveViaBff,
+  fetchBudgetSuggestionViaBff,
+  isPlatformApiEnabled,
 } from '../../lib/platform-bff-client';
 import { PlatformApiError } from '../../platform/api-client';
 import {
@@ -761,6 +763,9 @@ export function PortalWeeklyExpensePage() {
           onSyncEvidenceDrive={syncEvidenceDrive}
           onUploadEvidenceDrive={uploadEvidenceDrive}
           onEnsureTransactionPersisted={ensureTransactionPersisted}
+          onFetchBudgetSuggestion={isPlatformApiEnabled() ? async (counterparty) => {
+            return fetchBudgetSuggestionViaBff({ tenantId: orgId, actor: bffActor, projectId, counterparty });
+          } : undefined}
         />
       </Suspense>
       {googleSheetImportOpen && (

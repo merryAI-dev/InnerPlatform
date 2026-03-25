@@ -164,6 +164,8 @@ export interface SettlementLedgerProps {
     sourceTxId?: string;
   }) => Promise<string | null>;
   allowEditSubmitted?: boolean;
+  /** 거래처 이름으로 비목/세목 히스토리 제안을 요청하는 콜백. 제공 시에만 제안 칩 표시. */
+  onFetchBudgetSuggestion?: (counterparty: string) => Promise<{ budgetCategory: string; budgetSubCategory: string } | null>;
 }
 
 export interface EvidenceUploadSelection {
@@ -203,6 +205,7 @@ export function SettlementLedgerPage({
   onUploadEvidenceDrive,
   onEnsureTransactionPersisted,
   allowEditSubmitted = false,
+  onFetchBudgetSuggestion,
 }: SettlementLedgerProps) {
   const { upsertWeekAmounts } = useCashflowWeeks();
   const [year, setYear] = useState(() => new Date().getFullYear());
@@ -212,6 +215,8 @@ export function SettlementLedgerPage({
   const [sheetSaving, setSheetSaving] = useState(false);
   const [cashflowSyncing, setCashflowSyncing] = useState(false);
   const [lastAutoSavedAt, setLastAutoSavedAt] = useState('');
+  const [budgetSuggestionsMap, setBudgetSuggestionsMap] = useState<Record<string, { budgetCategory: string; budgetSubCategory: string } | null>>({});
+  const pendingBudgetFetches = useRef<Set<string>>(new Set());
   const [lastCashflowSyncedAt, setLastCashflowSyncedAt] = useState('');
   const [sheetSaveState, setSheetSaveState] = useState<'idle' | 'dirty' | 'saving' | 'saved' | 'save_failed'>('idle');
   const [cashflowSyncState, setCashflowSyncState] = useState<'idle' | 'pending' | 'syncing' | 'synced' | 'sync_failed'>('idle');
@@ -320,6 +325,26 @@ export function SettlementLedgerPage({
     document.addEventListener('focusout', handleFocusOut);
     return () => document.removeEventListener('focusout', handleFocusOut);
   }, [applySheetRowsSync]);
+
+  // 거래처 입력 후 비목이 비어있는 행에 대해 히스토리 제안 fetch
+  useEffect(() => {
+    if (!onFetchBudgetSuggestion || counterpartyIdx < 0 || budgetCodeIdx < 0) return;
+    const currentRows = importRows ?? [];
+    for (const row of currentRows) {
+      const counterparty = String(row.cells[counterpartyIdx] || '').trim();
+      const budgetCode = String(row.cells[budgetCodeIdx] || '').trim();
+      if (!counterparty || budgetCode) continue;
+      const key = `${row.tempId}::${counterparty}`;
+      if (pendingBudgetFetches.current.has(key) || key in budgetSuggestionsMap) continue;
+      pendingBudgetFetches.current.add(key);
+      onFetchBudgetSuggestion(counterparty).then((suggestion) => {
+        pendingBudgetFetches.current.delete(key);
+        setBudgetSuggestionsMap((prev) => ({ ...prev, [key]: suggestion }));
+      }).catch(() => {
+        pendingBudgetFetches.current.delete(key);
+      });
+    }
+  }, [importRows, onFetchBudgetSuggestion, counterpartyIdx, budgetCodeIdx, budgetSuggestionsMap]);
 
   const revertToSavedSnapshot = useCallback(() => {
     if (sheetSaving) return;
@@ -2339,11 +2364,18 @@ function ImportEditor({
             )}
             {visibleRows.map((row, visibleIndex) => {
               const rowIdx = visibleRowWindow.startIndex + visibleIndex;
+              const counterpartyVal = counterpartyIdx >= 0 ? String(row.cells[counterpartyIdx] || '').trim() : '';
+              const budgetCodeVal = budgetCodeIdx >= 0 ? String(row.cells[budgetCodeIdx] || '').trim() : '';
+              const suggestionKey = `${row.tempId}::${counterpartyVal}`;
+              const budgetSuggestion = (onFetchBudgetSuggestion && !budgetCodeVal && counterpartyVal)
+                ? (budgetSuggestionsMap[suggestionKey] ?? null)
+                : null;
               return (
               <MemoizedImportEditorRow
                 key={`${row.tempId}-${rowIdx}`}
                 row={row}
                 rowIdx={rowIdx}
+                budgetSuggestion={budgetSuggestion}
                 onCellChange={(colIdx, value) => updateCell(rowIdx, colIdx, value)}
                 onRowChange={(updater) => updateRow(rowIdx, updater)}
                 onRemove={() => removeRow(rowIdx)}
@@ -2596,6 +2628,7 @@ function ImportEditorRow({
   onEnsurePersistedTransaction,
   noIdx,
   colWidths,
+  budgetSuggestion,
 }: {
   row: ImportRow;
   rowIdx: number;
@@ -2633,6 +2666,7 @@ function ImportEditorRow({
   onEnsurePersistedTransaction?: () => Promise<string | null>;
   noIdx: number;
   colWidths: number[];
+  budgetSuggestion?: { budgetCategory: string; budgetSubCategory: string } | null;
 }) {
   const hasError = Boolean(row.error);
   const hasMissingCell = useMemo(() => {
@@ -2991,6 +3025,30 @@ function ImportEditorRow({
                       });
                     }}
                   />
+                  {budgetSuggestion && !budgetCode && (
+                    <button
+                      type="button"
+                      className="mt-0.5 w-full text-left text-[9px] bg-teal-50 border border-teal-200 rounded px-1.5 py-0.5 text-teal-700 hover:bg-teal-100 truncate leading-tight"
+                      title={`이전 거래 기반 제안: ${budgetSuggestion.budgetCategory}${budgetSuggestion.budgetSubCategory ? ` · ${budgetSuggestion.budgetSubCategory}` : ''}`}
+                      onClick={() => {
+                        onRowChange((prev) => {
+                          if (budgetCodeIdx < 0) return prev;
+                          const cells = [...prev.cells];
+                          cells[budgetCodeIdx] = budgetSuggestion.budgetCategory;
+                          if (subCodeIdx >= 0 && budgetSuggestion.budgetSubCategory) {
+                            cells[subCodeIdx] = budgetSuggestion.budgetSubCategory;
+                          }
+                          if (evidenceIdx >= 0) {
+                            const mapped = resolveEvidenceRequiredDesc(evidenceRequiredMap, budgetSuggestion.budgetCategory, budgetSuggestion.budgetSubCategory);
+                            if (mapped) cells[evidenceIdx] = mapped;
+                          }
+                          return { ...prev, cells };
+                        });
+                      }}
+                    >
+                      ↑ {budgetSuggestion.budgetCategory}{budgetSuggestion.budgetSubCategory ? ` · ${budgetSuggestion.budgetSubCategory}` : ''}
+                    </button>
+                  )}
                 </div>
               ) : isSubCode ? (
                 <div className="pr-6">
@@ -3238,5 +3296,6 @@ const MemoizedImportEditorRow = memo(ImportEditorRow, (prev, next) => {
     && prev.noIdx === next.noIdx
     && prev.colWidths === next.colWidths
     && selectionKeyForRow(prev.rowIdx, prev.selectionBounds) === selectionKeyForRow(next.rowIdx, next.selectionBounds)
-    && openSelectKeyForRow(prev.rowIdx, prev.openSelect) === openSelectKeyForRow(next.rowIdx, next.openSelect);
+    && openSelectKeyForRow(prev.rowIdx, prev.openSelect) === openSelectKeyForRow(next.rowIdx, next.openSelect)
+    && prev.budgetSuggestion === next.budgetSuggestion;
 });
