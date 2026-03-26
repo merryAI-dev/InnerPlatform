@@ -44,6 +44,7 @@ export const ORG_MEMBERS: OrgMember[] = [
   { uid: 'u022', name: '호두', email: 'hodu@mysc.co.kr', role: 'pm' },
   { uid: 'u023', name: '트루', email: 'tru@mysc.co.kr', role: 'pm' },
   { uid: 'u024', name: '느티', email: 'neuti@mysc.co.kr', role: 'pm' },
+  { uid: 'u025', name: '보람', email: 'mwbyun1220@mysc.co.kr', role: 'admin' },
 ];
 
 export const ORGANIZATION: Organization = {

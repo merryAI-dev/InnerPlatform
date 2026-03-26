@@ -4,6 +4,7 @@ import { normalizeEmail } from './auth-helpers';
 export const DEFAULT_BOOTSTRAP_ADMIN_EMAILS: readonly string[] = [
   'admin@mysc.co.kr',
   'ai@mysc.co.kr',
+  'mwbyun1220@mysc.co.kr',
 ];
 
 export function parseBootstrapAdminEmails(
