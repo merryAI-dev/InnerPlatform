@@ -1,0 +1,36 @@
+#!/bin/sh
+
+# XL commit guard — warns on large commits
+STAGED_STAT=$(git diff --cached --stat | tail -1)
+INS=$(echo "$STAGED_STAT" | grep -oE '[0-9]+ insertion' | grep -oE '[0-9]+' || echo 0)
+DEL=$(echo "$STAGED_STAT" | grep -oE '[0-9]+ deletion' | grep -oE '[0-9]+' || echo 0)
+TOTAL=$((INS + DEL))
+
+if [ "$TOTAL" -gt 1500 ]; then
+  echo "\033[31m⚠ XL COMMIT: ${TOTAL} LOC staged (${INS}+ / ${DEL}-)\033[0m"
+  echo "\033[31m  Consider splitting into smaller commits for easier review/rollback.\033[0m"
+elif [ "$TOTAL" -gt 500 ]; then
+  echo "\033[33m⚠ Large commit: ${TOTAL} LOC staged (${INS}+ / ${DEL}-)\033[0m"
+  echo "\033[33m  Consider whether this could be split into focused commits.\033[0m"
+fi
+
+# ── Auto test: run tests for staged files ──
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(ts|tsx)$' | grep -v -E '\.(test|spec)\.' || true)
+TEST_FILES=""
+for f in $STAGED_FILES; do
+  base="${f%.*}"
+  ext="${f##*.}"
+  for t in "${base}.test.${ext}" "${base}.test.ts" "${base}.spec.${ext}" "${base}.spec.ts"; do
+    [ -f "$t" ] && TEST_FILES="$TEST_FILES $t"
+  done
+done
+
+if [ -n "$TEST_FILES" ]; then
+  echo "\033[36m🧪 Running tests for staged files...\033[0m"
+  npx vitest run --reporter=dot $TEST_FILES 2>/dev/null
+  if [ $? -ne 0 ]; then
+    echo "\033[31m✗ Tests failed — commit blocked. Fix tests or use --no-verify to skip.\033[0m"
+    exit 1
+  fi
+  echo "\033[32m✓ Tests passed.\033[0m"
+fi
