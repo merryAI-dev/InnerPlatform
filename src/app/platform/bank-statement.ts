@@ -2,6 +2,137 @@ import { normalizeKey, normalizeSpace, parseDate, parseNumber, stableHash } from
 import { findWeekForDate, getYearMondayWeeks } from './cashflow-weeks';
 import { SETTLEMENT_COLUMNS, createEmptyImportRow, type ImportRow } from './settlement-csv';
 
+// ── HTML-as-XLS parsing (KB, 신한 등 HTML 형식 은행 엑셀) ──
+
+/** Detect if raw file bytes look like HTML rather than real XLS/XLSX. */
+export function isHtmlMaskedAsXls(headText: string): boolean {
+  const trimmed = headText.trim();
+  return /^<(!DOCTYPE|html|meta|style|table)/i.test(trimmed) || trimmed.includes('<table');
+}
+
+/** Extract text content from an HTML string, stripping all tags. */
+function htmlTextContent(html: string): string {
+  return html.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/\s+/g, ' ').trim();
+}
+
+/** Extract all <table>...</table> blocks from HTML (non-greedy, handles nesting via iteration). */
+function extractTables(html: string): string[] {
+  const tables: string[] = [];
+  const re = /<table[\s>]/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    const start = m.index;
+    // Find the matching </table> — track nesting depth
+    let depth = 1;
+    let pos = start + m[0].length;
+    while (depth > 0 && pos < html.length) {
+      const openIdx = html.indexOf('<table', pos);
+      const closeIdx = html.indexOf('</table', pos);
+      if (closeIdx === -1) break;
+      if (openIdx !== -1 && openIdx < closeIdx) {
+        depth++;
+        pos = openIdx + 6;
+      } else {
+        depth--;
+        if (depth === 0) {
+          const endTag = html.indexOf('>', closeIdx);
+          tables.push(html.slice(start, endTag + 1));
+        }
+        pos = closeIdx + 8;
+      }
+    }
+  }
+  return tables;
+}
+
+/** Extract rows from a single <table> HTML string. */
+function parseTableRows(tableHtml: string): string[][] {
+  const rows: string[][] = [];
+  const trRe = /<tr[\s>][\s\S]*?<\/tr>/gi;
+  let trMatch: RegExpExecArray | null;
+  while ((trMatch = trRe.exec(tableHtml)) !== null) {
+    const cells: string[] = [];
+    const tdRe = /<t[dh]([^>]*)>([\s\S]*?)<\/t[dh]>/gi;
+    let tdMatch: RegExpExecArray | null;
+    while ((tdMatch = tdRe.exec(trMatch[0])) !== null) {
+      const attrs = tdMatch[1] || '';
+      const text = htmlTextContent(tdMatch[2] || '');
+      const colspanM = attrs.match(/colspan\s*=\s*['"]?(\d+)/i);
+      const colspan = Math.min(parseInt(colspanM?.[1] || '1', 10), 20);
+      cells.push(text);
+      for (let i = 1; i < colspan; i++) cells.push('');
+    }
+    if (cells.some(Boolean)) rows.push(cells);
+  }
+  return rows;
+}
+
+/**
+ * Parse HTML-formatted bank export into a matrix (regex-based, no DOM dependency).
+ * Strategy: find the table with the most rows + transaction keywords.
+ * Handles nested tables (KB), metadata header tables (신한), and colspan.
+ */
+export function parseHtmlBankExport(html: string): string[][] {
+  const tables = extractTables(html);
+  if (tables.length === 0) return [];
+
+  let bestRows: string[][] = [];
+  let bestScore = -1;
+
+  for (const tableHtml of tables) {
+    const rows = parseTableRows(tableHtml);
+    if (rows.length < 2) continue;
+
+    const text = htmlTextContent(tableHtml);
+    let score = rows.length;
+    if (/거래일|일시|날짜/.test(text)) score += 10;
+    if (/입금|출금|잔액/.test(text)) score += 10;
+    // Penalty for metadata tables (few columns)
+    if (rows[0] && rows[0].filter(Boolean).length <= 2) score -= 5;
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestRows = rows;
+    }
+  }
+
+  if (bestRows.length === 0) return [];
+
+  // Normalize column count
+  const maxCols = Math.max(...bestRows.map((r) => r.length), 0);
+  return bestRows.map((r) => {
+    while (r.length < maxCols) r.push('');
+    return r;
+  });
+}
+
+/**
+ * Post-process HTML-parsed matrix: strip residual HTML entities,
+ * normalize whitespace, and remove rows that look like HTML artifacts.
+ */
+export function sanitizeHtmlMatrix(matrix: string[][]): string[][] {
+  return matrix
+    .map((row) =>
+      row.map((cell) =>
+        cell
+          .replace(/&nbsp;/gi, ' ')
+          .replace(/&amp;/g, '&')
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/\s+/g, ' ')
+          .trim(),
+      ),
+    )
+    .filter((row) => {
+      // Remove rows that are all empty or look like HTML noise
+      const nonEmpty = row.filter(Boolean);
+      if (nonEmpty.length === 0) return false;
+      // Remove rows where any cell still contains HTML tags
+      return !nonEmpty.some((cell) => /<[a-z/]/i.test(cell));
+    });
+}
+
 export const BANK_STATEMENT_COLUMNS = [
   '통장번호',
   '거래일시',

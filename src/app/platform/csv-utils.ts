@@ -161,3 +161,8 @@ export function stableHash(input: string): string {
   }
   return (h >>> 0).toString(36);
 }
+
+/** Strip HTML tags from a string, returning only text content. */
+export function stripHtmlTags(html: string): string {
+  return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+}
