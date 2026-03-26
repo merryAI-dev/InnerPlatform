@@ -35,6 +35,7 @@ import { ClaudeSdkHelpWidget } from '../guide-chat/ClaudeSdkHelpWidget';
 import {
   canChooseWorkspace,
   canEnterPortalWorkspace,
+  isAdminSpaceRole,
   resolveHomePath,
   shouldForcePortalOnboarding,
 } from '../../platform/navigation';
@@ -170,6 +171,8 @@ function PortalContent() {
   useEffect(() => {
     const role = authUser?.role;
     if (!isAuthenticated || !role || !canChooseWorkspace(role)) return;
+    // admin/finance가 portal을 잠깐 방문할 때 workspace를 덮어쓰지 않음
+    if (isAdminSpaceRole(role)) return;
     if (authUser?.lastWorkspace === 'portal') return;
     void setWorkspacePreference('portal', { persistDefault: false });
   }, [authUser?.lastWorkspace, authUser?.role, isAuthenticated, setWorkspacePreference]);

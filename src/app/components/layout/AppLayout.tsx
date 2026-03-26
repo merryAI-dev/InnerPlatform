@@ -67,6 +67,8 @@ function AppLayoutContent() {
   useEffect(() => {
     const role = authUser?.role;
     if (!isAuthenticated || !role || !canChooseWorkspace(role)) return;
+    // pm/viewer가 잠깐 admin 라우트에 들어와도 workspace를 덮어쓰지 않음
+    if (isPortalRole(role)) return;
     if (authUser?.lastWorkspace === 'admin') return;
     void setWorkspacePreference('admin', { persistDefault: false });
   }, [authUser?.lastWorkspace, authUser?.role, isAuthenticated, setWorkspacePreference]);
