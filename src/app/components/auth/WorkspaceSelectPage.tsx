@@ -4,7 +4,7 @@ import { ArrowRight, FolderKanban, Loader2, Shield } from 'lucide-react';
 import { Card, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
 import { useAuth } from '../../data/auth-store';
-import { canChooseWorkspace, resolvePostLoginPath } from '../../platform/navigation';
+import { canChooseWorkspace, isAdminSpaceRole, resolvePostLoginPath } from '../../platform/navigation';
 import type { WorkspaceId } from '../../data/member-workspace';
 
 export function WorkspaceSelectPage() {
@@ -48,6 +48,7 @@ export function WorkspaceSelectPage() {
   }
 
   const currentWorkspace = user.defaultWorkspace ?? user.lastWorkspace;
+  const canAccessAdmin = isAdminSpaceRole(user.role);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-indigo-50/30 to-teal-50/20 dark:from-slate-950 dark:via-indigo-950/10 dark:to-teal-950/10 flex items-center justify-center p-4">
@@ -82,12 +83,15 @@ export function WorkspaceSelectPage() {
               <Button
                 className="w-full h-11 gap-2"
                 variant={currentWorkspace === 'admin' ? 'default' : 'outline'}
-                disabled={pending !== null}
+                disabled={pending !== null || !canAccessAdmin}
                 onClick={() => void handleSelect('admin')}
               >
                 {pending === 'admin' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Shield className="h-4 w-4" />}
                 관리자 공간으로 계속
               </Button>
+              {!canAccessAdmin && (
+                <p className="text-[11px] text-muted-foreground/60 text-center">관리자/재무 역할만 접근할 수 있습니다</p>
+              )}
             </CardContent>
           </Card>
 

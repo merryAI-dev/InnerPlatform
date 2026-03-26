@@ -24,14 +24,12 @@ export function isAdminSpaceRole(role: unknown): boolean {
 
 export function canEnterPortalWorkspace(role: unknown): boolean {
   const normalized = normalizeRole(role);
-  return normalized === 'pm'
-    || normalized === 'viewer'
-    || normalized === 'admin';
+  return !!normalized;
 }
 
 export function canChooseWorkspace(role: unknown): boolean {
   const normalized = normalizeRole(role);
-  return normalized === 'admin';
+  return !!normalized;
 }
 
 export function shouldPromptWorkspaceSelection(
@@ -94,7 +92,7 @@ interface PortalOnboardingRedirectInput {
  */
 export function shouldForcePortalOnboarding(input: PortalOnboardingRedirectInput): boolean {
   if (!input.isAuthenticated) return false;
-  if (canChooseWorkspace(input.role)) return false;
+  if (isAdminSpaceRole(input.role)) return false;
   if (!canEnterPortalWorkspace(input.role)) return false;
   if (input.isRegistered) return false;
   return !input.pathname.includes('/portal/onboarding');

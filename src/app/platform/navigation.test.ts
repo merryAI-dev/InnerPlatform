@@ -42,15 +42,20 @@ describe('navigation helpers', () => {
   it('knows which roles can enter or choose a workspace', () => {
     expect(canEnterPortalWorkspace('pm')).toBe(true);
     expect(canEnterPortalWorkspace('admin')).toBe(true);
-    expect(canEnterPortalWorkspace('finance')).toBe(false);
+    expect(canEnterPortalWorkspace('finance')).toBe(true);
+    // All valid roles can choose workspace (see landing page)
     expect(canChooseWorkspace('admin')).toBe(true);
-    expect(canChooseWorkspace('pm')).toBe(false);
+    expect(canChooseWorkspace('pm')).toBe(true);
+    expect(canChooseWorkspace('finance')).toBe(true);
+    expect(canChooseWorkspace('viewer')).toBe(true);
+    expect(canChooseWorkspace('')).toBe(false);
   });
 
-  it('prompts workspace selection only when admin has no preference', () => {
+  it('prompts workspace selection when any role has no preference', () => {
     expect(shouldPromptWorkspaceSelection('admin', undefined)).toBe(true);
     expect(shouldPromptWorkspaceSelection('admin', 'portal')).toBe(false);
-    expect(shouldPromptWorkspaceSelection('pm', undefined)).toBe(false);
+    expect(shouldPromptWorkspaceSelection('pm', undefined)).toBe(true);
+    expect(shouldPromptWorkspaceSelection('pm', 'portal')).toBe(false);
   });
 
   it('resolves post-login routes without leaking unauthorized paths', () => {
@@ -58,7 +63,7 @@ describe('navigation helpers', () => {
     expect(resolvePostLoginPath('pm', undefined, '/settings')).toBe('/portal');
     expect(resolvePostLoginPath('admin', 'portal', '/settings')).toBe('/settings');
     expect(resolvePostLoginPath('admin', 'portal', '/portal/budget')).toBe('/portal/budget');
-    expect(resolvePostLoginPath('finance', undefined, '/portal/weekly-expenses')).toBe('/');
+    expect(resolvePostLoginPath('finance', undefined, '/portal/weekly-expenses')).toBe('/portal/weekly-expenses');
   });
 
   it('forces onboarding only for unregistered portal users', () => {
