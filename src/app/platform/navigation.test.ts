@@ -65,26 +65,17 @@ describe('workspace selection', () => {
 });
 
 describe('shouldPromptWorkspaceSelection', () => {
-  it('prompts when valid role has no workspace preference', () => {
+  it('always prompts for valid roles (매번 workspace 선택)', () => {
     for (const role of ALL_ROLES) {
-      expect(shouldPromptWorkspaceSelection(role, undefined), `${role} with no pref`).toBe(true);
-      expect(shouldPromptWorkspaceSelection(role, null), `${role} with null pref`).toBe(true);
-    }
-  });
-
-  it('does NOT prompt when workspace already chosen', () => {
-    for (const role of ALL_ROLES) {
-      expect(shouldPromptWorkspaceSelection(role, 'portal'), `${role} portal`).toBe(false);
-      expect(shouldPromptWorkspaceSelection(role, 'admin'), `${role} admin`).toBe(false);
+      expect(shouldPromptWorkspaceSelection(role, undefined), `${role} no pref`).toBe(true);
+      expect(shouldPromptWorkspaceSelection(role, 'portal'), `${role} portal`).toBe(true);
+      expect(shouldPromptWorkspaceSelection(role, 'admin'), `${role} admin`).toBe(true);
     }
   });
 
   it('does NOT prompt for empty role', () => {
     expect(shouldPromptWorkspaceSelection('', undefined)).toBe(false);
-  });
-
-  it('does NOT prompt for invalid workspace string', () => {
-    expect(shouldPromptWorkspaceSelection('admin', 'bogus')).toBe(true); // bogus normalizes to undefined
+    expect(shouldPromptWorkspaceSelection(null, 'admin')).toBe(false);
   });
 });
 

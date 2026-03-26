@@ -37,7 +37,8 @@ export function shouldPromptWorkspaceSelection(
   preferredWorkspace: unknown,
 ): boolean {
   if (!canChooseWorkspace(role)) return false;
-  return !normalizeWorkspaceId(preferredWorkspace);
+  // 항상 workspace 선택 화면 표시 — 사용자가 매번 admin/portal 선택 가능
+  return true;
 }
 
 export function resolveHomePath(role: unknown, preferredWorkspace?: WorkspaceId | unknown): HomePath {
