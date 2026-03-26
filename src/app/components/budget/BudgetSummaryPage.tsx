@@ -154,20 +154,15 @@ export function BudgetSummaryPage() {
           <CardContent className="p-4 space-y-3">
             <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-[12px]">
               <div className="flex items-center gap-1.5">
-                <span className="text-muted-foreground">연도/펀더:</span>
-                <span style={{ fontWeight: 600 }}>{meta.year}년 / {meta.funder}</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-muted-foreground">정산기준:</span>
-                <Badge variant="outline" className="text-[10px] h-5">{meta.basis}</Badge>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-muted-foreground">사업명:</span>
+                <span className="text-muted-foreground">프로젝트:</span>
                 <span style={{ fontWeight: 600 }}>{meta.projectName}</span>
               </div>
-              <div className="flex items-center gap-1.5 ml-auto">
-                <Clock className="w-3 h-3 text-muted-foreground" />
-                <span className="text-muted-foreground">최종 업데이트: {meta.lastUpdated} ({meta.updatedBy})</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-muted-foreground">클라이언트:</span>
+                <span style={{ fontWeight: 600 }}>{meta.funder}</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <Badge variant="outline" className="text-[10px] h-5">{meta.year}년</Badge>
               </div>
             </div>
 
@@ -349,6 +344,14 @@ export function BudgetSummaryPage() {
             </div>
           </CardContent>
         </Card>
+
+        {/* ── 변경 기록 ── */}
+        <div className="flex items-center gap-2 text-[11px] text-muted-foreground px-1">
+          <Clock className="w-3 h-3" />
+          <span>마지막 수정: {meta.lastUpdated} ({meta.updatedBy})</span>
+          <span className="text-muted-foreground/50">·</span>
+          <span>예산 편집 / 비목·세목 수정</span>
+        </div>
 
         {/* ── 하단 보조 테이블 + 타임라인 ── */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
