@@ -2,8 +2,10 @@
 
 # XL commit guard — warns on large commits
 STAGED_STAT=$(git diff --cached --stat | tail -1)
-INS=$(echo "$STAGED_STAT" | grep -oE '[0-9]+ insertion' | grep -oE '[0-9]+' || echo 0)
-DEL=$(echo "$STAGED_STAT" | grep -oE '[0-9]+ deletion' | grep -oE '[0-9]+' || echo 0)
+INS=$(echo "$STAGED_STAT" | grep -oE '[0-9]+ insertion' | grep -oE '[0-9]+' || true)
+DEL=$(echo "$STAGED_STAT" | grep -oE '[0-9]+ deletion' | grep -oE '[0-9]+' || true)
+INS=${INS:-0}
+DEL=${DEL:-0}
 TOTAL=$((INS + DEL))
 
 if [ "$TOTAL" -gt 1500 ]; then

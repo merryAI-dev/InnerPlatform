@@ -41,7 +41,8 @@
     "pii:setup:vercel": "bash scripts/pii_setup_vercel_local.sh",
     "policy:verify": "node scripts/verify_rbac_policy.mjs",
     "etl:build:staging-json": "npx tsx scripts/etl/build-staging-json.ts",
-    "etl:sync:staging": "npx tsx scripts/etl/sync-staging-to-firestore.ts"
+    "etl:sync:staging": "npx tsx scripts/etl/sync-staging-to-firestore.ts",
+    "prepare": "husky"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
