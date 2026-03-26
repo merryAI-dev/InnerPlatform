@@ -20,12 +20,10 @@ describe('shortcut policy', () => {
     expect(descs).not.toContain('새 사업 등록');
   });
 
-  it('filters shortcuts for security role', () => {
-    const descs = flattenDescriptions(getShortcutGroupsForRole('security'));
-    expect(descs).toContain('감사로그로 이동');
-    expect(descs).not.toContain('캐시플로로 이동');
-    expect(descs).not.toContain('증빙/정산으로 이동');
-    expect(descs).not.toContain('새 사업 등록');
+  it('viewer gets minimal shortcuts', () => {
+    const descs = flattenDescriptions(getShortcutGroupsForRole('viewer'));
+    expect(descs).toContain('커맨드 팔레트 열기');
     expect(descs).not.toContain('설정으로 이동');
+    expect(descs).not.toContain('새 사업 등록');
   });
 });

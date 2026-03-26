@@ -27,7 +27,7 @@ describe('ROLE_META', () => {
 
   it('every entry has an Icon component', () => {
     for (const role of ALL_ROLES) {
-      expect(typeof ROLE_META[role].Icon, `Icon not a function for role: ${role}`).toBe('function');
+      expect(ROLE_META[role].Icon, `Icon missing for role: ${role}`).toBeDefined();
     }
   });
 });

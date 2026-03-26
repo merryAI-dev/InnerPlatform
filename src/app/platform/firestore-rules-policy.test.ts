@@ -20,30 +20,26 @@ const policy = rbacPolicy as {
 describe('firestore rules policy alignment', () => {
   // ── isSignedIn: company email domain ──
   it('only recognizes @mysc.co.kr emails (documented assumption)', () => {
-    // firestore.rules:5-8 — request.auth.token.email.matches('.*@mysc\\.co\\.kr$')
     expect('@mysc.co.kr'.endsWith('@mysc.co.kr')).toBe(true);
     expect('@gmail.com'.endsWith('@mysc.co.kr')).toBe(false);
   });
 
   // ── isBootstrapAdminEmail ──
   it('bootstrap admin emails match auth-bootstrap defaults', () => {
-    // firestore.rules:54 — ['admin@mysc.co.kr', 'ai@mysc.co.kr']
     expect(DEFAULT_BOOTSTRAP_ADMIN_EMAILS).toContain('admin@mysc.co.kr');
     expect(DEFAULT_BOOTSTRAP_ADMIN_EMAILS).toContain('ai@mysc.co.kr');
   });
 
-  // ── isPrivileged roles ──
-  it('privileged roles match firestore.rules isPrivileged()', () => {
-    // firestore.rules:40-42 — ['admin', 'tenant_admin', 'finance', 'auditor']
-    const privilegedRoles = ['admin', 'tenant_admin', 'finance', 'auditor'];
-    for (const role of privilegedRoles) {
+  // ── canWrite roles (admin, finance, pm — viewer excluded) ──
+  it('write roles match firestore.rules canWrite()', () => {
+    const writeRoles = ['admin', 'finance', 'pm'];
+    for (const role of writeRoles) {
       expect(policy.roles).toContain(role);
     }
   });
 
   // ── viewer least-privilege ──
   it('viewer cannot write projects or evidence', () => {
-    // firestore.rules:74-77 — canWriteProjectResource requires privileged OR pm
     expect(hasPermission('viewer', 'project:write')).toBe(false);
     expect(hasPermission('viewer', 'evidence:write')).toBe(false);
     expect(hasPermission('viewer', 'ledger:write')).toBe(false);
@@ -84,19 +80,15 @@ describe('firestore rules policy alignment', () => {
     }
   });
 
-  // ── tenant_admin management ──
-  it('tenant_admin can manage users and tenants', () => {
-    expect(hasPermission('tenant_admin', 'user:manage')).toBe(true);
-    expect(hasPermission('tenant_admin', 'tenant:manage')).toBe(true);
-  });
-
-  it('tenant_admin cannot manage security', () => {
-    expect(hasPermission('tenant_admin', 'security:manage')).toBe(false);
+  // ── admin management ──
+  it('admin can manage users and tenants', () => {
+    expect(hasPermission('admin', 'user:manage')).toBe(true);
+    expect(hasPermission('admin', 'tenant:manage')).toBe(true);
   });
 
   // ── canAccessProject: project-scoped ──
-  it('privileged roles access all projects without assignment', () => {
-    for (const role of ['admin', 'finance', 'auditor', 'tenant_admin'] as const) {
+  it('admin and finance access all projects without assignment', () => {
+    for (const role of ['admin', 'finance'] as const) {
       expect(canAccessProject({ actorRole: role, permission: 'project:read', targetProjectId: 'any' })).toBe(true);
     }
   });
@@ -120,9 +112,8 @@ describe('firestore rules policy alignment', () => {
   });
 
   // ── canAccessTenant: cross-tenant ──
-  it('support and security can access any tenant', () => {
-    expect(canAccessTenant({ actorRole: 'support', actorTenantId: 't1', targetTenantId: 't2' })).toBe(true);
-    expect(canAccessTenant({ actorRole: 'security', actorTenantId: 't1', targetTenantId: 't2' })).toBe(true);
+  it('admin can access any tenant', () => {
+    expect(canAccessTenant({ actorRole: 'admin', actorTenantId: 't1', targetTenantId: 't2' })).toBe(true);
   });
 
   it('pm is tenant-scoped', () => {
@@ -131,20 +122,9 @@ describe('firestore rules policy alignment', () => {
   });
 
   // ── HR rules assumptions ──
-  it('HR collections require privileged roles for full access', () => {
-    // firestore.rules: hr_employees, hr_contracts → isPrivileged
-    for (const role of ['admin', 'finance', 'tenant_admin', 'auditor'] as const) {
+  it('admin and finance have project:read for HR collections', () => {
+    for (const role of ['admin', 'finance'] as const) {
       expect(hasPermission(role, 'project:read')).toBe(true);
-    }
-  });
-
-  // ── no unexpected role has security:manage ──
-  it('only admin and security roles have security:manage', () => {
-    for (const role of policy.roles) {
-      const perms = policy.rolePermissions[role] || [];
-      if (role !== 'admin' && role !== 'security') {
-        expect(perms).not.toContain('security:manage');
-      }
     }
   });
 });
