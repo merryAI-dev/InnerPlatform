@@ -83,7 +83,46 @@ export function PortalBankStatementPage() {
     });
   }, [columns]);
 
+  /**
+   * KB 등 일부 은행은 .xls 확장자지만 실제로는 HTML 파일.
+   * HTML-as-XLS를 감지해서 DOM 파서로 테이블을 추출.
+   */
+  const parseHtmlAsMatrix = useCallback((html: string): string[][] => {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const tables = doc.querySelectorAll('table');
+    // 가장 행이 많은 테이블이 거래내역 테이블
+    let bestTable: HTMLTableElement | null = null;
+    let bestRowCount = 0;
+    tables.forEach((table) => {
+      const rowCount = table.querySelectorAll('tr').length;
+      if (rowCount > bestRowCount) {
+        bestRowCount = rowCount;
+        bestTable = table;
+      }
+    });
+    if (!bestTable) return [];
+    const rows: string[][] = [];
+    (bestTable as HTMLTableElement).querySelectorAll('tr').forEach((tr) => {
+      const cells: string[] = [];
+      tr.querySelectorAll('td, th').forEach((td) => {
+        cells.push((td.textContent || '').trim());
+      });
+      if (cells.some(Boolean)) rows.push(cells);
+    });
+    return rows;
+  }, []);
+
   const parseExcelToMatrix = useCallback(async (file: File): Promise<string[][]> => {
+    // KB 등 HTML-as-XLS 감지: 파일 앞부분이 HTML 태그로 시작하면 HTML 파서 사용
+    const headBytes = new Uint8Array(await file.slice(0, 512).arrayBuffer());
+    const headText = new TextDecoder('utf-8', { fatal: false }).decode(headBytes).trim();
+    if (/^<(!DOCTYPE|html|meta|style|table)/i.test(headText) || headText.includes('<table')) {
+      const fullText = await file.text();
+      const matrix = parseHtmlAsMatrix(fullText);
+      if (matrix.length > 0) return matrix;
+      // fallback to XLSX if HTML parse yields nothing
+    }
+
     const XLSX = await import('xlsx');
     const buffer = new Uint8Array(await file.arrayBuffer());
     const workbook = XLSX.read(buffer, { type: 'array', cellDates: true, raw: false });
@@ -108,7 +147,7 @@ export function PortalBankStatementPage() {
       .sort((a, b) => b.nonEmpty - a.nonEmpty)[0];
 
     return best?.matrix || [];
-  }, []);
+  }, [parseHtmlAsMatrix]);
 
   const handleFileUpload = useCallback(async (file: File) => {
     try {
