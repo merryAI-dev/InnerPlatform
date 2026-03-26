@@ -1136,6 +1136,10 @@ export function ImportEditor({
 
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
+      // Modal/form inputs handle their own paste — don't intercept
+      const active = document.activeElement;
+      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || (active as HTMLElement).isContentEditable)) return;
+
       const text = e.clipboardData?.getData('text/plain') || e.clipboardData?.getData('text') || '';
       const html = e.clipboardData?.getData('text/html') || undefined;
       if (!text) return;
