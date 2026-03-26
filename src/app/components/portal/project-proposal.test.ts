@@ -15,7 +15,7 @@ const sampleDraft: ProjectProposalDraft = {
   contractStart: '2026-03-01',
   contractEnd: '2026-12-31',
   settlementType: 'TYPE1',
-  basis: 'SUPPLY_AMOUNT',
+  basis: '공급가액',
   accountType: 'DEDICATED',
   paymentPlanDesc: '선금 50%, 중도 30%, 잔금 20%',
   settlementGuide: '선지급 후 정산, 공급가액 기준',

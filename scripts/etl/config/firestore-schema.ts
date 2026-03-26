@@ -34,7 +34,7 @@ export const FIRESTORE_SCHEMAS: CollectionSchema[] = [
       { name: 'contractStart', type: 'date', required: false, description: '계약 시작일' },
       { name: 'contractEnd', type: 'date', required: false, description: '계약 종료일' },
       { name: 'settlementType', type: 'enum', required: false, description: '정산유형', enumValues: ['TYPE1', 'TYPE2', 'TYPE4'] },
-      { name: 'basis', type: 'enum', required: false, description: '정산기준', enumValues: ['SUPPLY_AMOUNT', 'SUPPLY_PRICE'] },
+      { name: 'basis', type: 'enum', required: false, description: '정산기준', enumValues: ['공급가액', '공급대가'] },
       { name: 'accountType', type: 'enum', required: false, description: '통장유형', enumValues: ['DEDICATED', 'OPERATING', 'NONE'] },
       { name: 'clientOrg', type: 'string', required: false, description: '발주기관(계약기관)' },
       { name: 'department', type: 'string', required: false, description: '담당조직(센터)' },

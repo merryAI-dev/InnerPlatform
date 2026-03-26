@@ -21,7 +21,7 @@ function makeProject(overrides: Partial<Project> = {}): Project {
     contractStart: '2026-01-01',
     contractEnd: '2026-12-31',
     settlementType: 'TYPE1',
-    basis: 'SUPPLY_AMOUNT',
+    basis: '공급가액',
     accountType: 'DEDICATED',
     paymentPlan: { contract: 500000, interim: 300000, final: 200000 },
     paymentPlanDesc: '계약 50%, 중도 30%, 잔금 20%',

@@ -941,7 +941,7 @@ function normalizeProjectRow(
     contractStart: contractStart || now.slice(0, 10),
     contractEnd: contractEnd || now.slice(0, 10),
     settlementType: 'TYPE1',
-    basis: 'SUPPLY_AMOUNT',
+    basis: '공급가액',
     accountType: 'NONE',
     paymentPlan: {
       contract: contractAmount,

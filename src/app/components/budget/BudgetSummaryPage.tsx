@@ -19,10 +19,13 @@ import {
 } from '../ui/tooltip';
 import { PageHeader } from '../layout/PageHeader';
 import {
-  BUDGET_META, BANK_INFO, BUDGET_ROWS, BUDGET_AUX_ROWS, BUDGET_TIMELINE,
+  BANK_INFO, BUDGET_ROWS, BUDGET_AUX_ROWS, BUDGET_TIMELINE,
   fmtKRW, fmtPercent, fmtShort,
   type BudgetRow, type BudgetTimelineEvent,
 } from '../../data/budget-data';
+import { useAuth } from '../../data/auth-store';
+import { useAppStore } from '../../data/store';
+import { BASIS_LABELS } from '../../data/types';
 
 // ═══════════════════════════════════════════════════════════════
 // BudgetSummaryPage — 구글시트 "1.예산총괄시트" 재현
@@ -36,13 +39,26 @@ const GROUP_LABELS: Record<string, string> = {
 };
 
 export function BudgetSummaryPage() {
+  const { user } = useAuth();
+  const { projects } = useAppStore();
+  const project = projects.find(p => p.id === user?.projectId) || projects[0];
+
+  const meta = project ? {
+    projectId: project.id,
+    projectName: project.name,
+    year: new Date(project.contractStart).getFullYear(),
+    funder: project.clientOrg,
+    basis: BASIS_LABELS[project.basis] || project.basis,
+    totalBudget: project.contractAmount,
+    lastUpdated: project.updatedAt ? new Date(project.updatedAt).toLocaleDateString('ko-KR') : '-',
+    updatedBy: project.managerName || '-',
+  } : null;
+
   const [bankVisible, setBankVisible] = useState(false);
   const [bankRevealed, setBankRevealed] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [selectedRow, setSelectedRow] = useState<BudgetRow | null>(null);
   const [timelineOpen, setTimelineOpen] = useState(true);
-
-  const meta = BUDGET_META;
   const rows = BUDGET_ROWS;
   const auxRows = BUDGET_AUX_ROWS;
   const timeline = BUDGET_TIMELINE;
@@ -77,6 +93,10 @@ export function BudgetSummaryPage() {
       burnRate: total.burnRate,
     };
   }, [rows]);
+
+  if (!meta) {
+    return <div className="p-8 text-center text-muted-foreground">프로젝트를 선택해 주세요.</div>;
+  }
 
   return (
     <TooltipProvider delayDuration={200}>
@@ -139,7 +159,7 @@ export function BudgetSummaryPage() {
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="text-muted-foreground">정산기준:</span>
-                <Badge variant="outline" className="text-[10px] h-5">{meta.basis} {meta.basisOption}</Badge>
+                <Badge variant="outline" className="text-[10px] h-5">{meta.basis}</Badge>
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="text-muted-foreground">사업명:</span>
@@ -158,14 +178,14 @@ export function BudgetSummaryPage() {
               <div className="flex items-center gap-1.5">
                 <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300">
                   <Lock className="w-3 h-3" />
-                  <span style={{ fontWeight: 600 }}>{meta.guide.fixedLabel}</span>
+                  <span style={{ fontWeight: 600 }}>고정</span>
                 </div>
                 <span className="text-muted-foreground">= 변경 불가 항목</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-300">
                   <SlidersHorizontal className="w-3 h-3" />
-                  <span style={{ fontWeight: 600 }}>{meta.guide.adjustableLabel}</span>
+                  <span style={{ fontWeight: 600 }}>조정가능</span>
                 </div>
                 <span className="text-muted-foreground">= 예산 조정 가능</span>
               </div>

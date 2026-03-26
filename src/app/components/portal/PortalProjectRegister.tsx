@@ -96,7 +96,7 @@ const initialProposal: ProjectProposalDraft = {
   contractStart: '',
   contractEnd: '',
   settlementType: 'TYPE1',
-  basis: 'SUPPLY_AMOUNT',
+  basis: '공급가액',
   accountType: 'DEDICATED',
   paymentPlanDesc: '',
   settlementGuide: '',

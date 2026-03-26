@@ -1,0 +1,48 @@
+{
+  "date": "2026-03-26",
+  "window": "7d",
+  "metrics": {
+    "commits": 31,
+    "contributors": 1,
+    "prs_merged": 6,
+    "insertions": 6567,
+    "deletions": 1957,
+    "net_loc": 4610,
+    "test_loc": 1002,
+    "test_ratio": 0.15,
+    "active_days": 4,
+    "sessions": 11,
+    "deep_sessions": 4,
+    "avg_session_minutes": 40,
+    "loc_per_session_hour": 900,
+    "feat_pct": 0.13,
+    "fix_pct": 0.49,
+    "peak_hour": 17,
+    "ai_assisted_commits": 31
+  },
+  "authors": {
+    "merryAI-dev": {
+      "commits": 31,
+      "insertions": 6567,
+      "deletions": 1957,
+      "test_ratio": 0.15,
+      "top_area": "portal/"
+    }
+  },
+  "version_range": ["current", "current"],
+  "streak_days": 2,
+  "backlog": {
+    "total_open": 3,
+    "p0_p1": 1,
+    "p2": 1,
+    "completed_this_period": 2,
+    "added_this_period": 1
+  },
+  "test_health": {
+    "total_test_files": 86,
+    "tests_added_this_period": 5,
+    "regression_test_commits": 0,
+    "test_files_changed": 22
+  },
+  "tweetable": "Week of Mar 19: 31 commits, 6.6k LOC, 15% tests, 6 PRs, peak: 4-6pm | Streak: 2d"
+}

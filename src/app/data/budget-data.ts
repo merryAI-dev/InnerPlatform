@@ -109,24 +109,6 @@ export interface ExpenseSet {
 // P-2024-HAE: "2024 해양수산 AC" 예산총괄 데이터
 // ═══════════════════════════════════════════════════════════════
 
-export const BUDGET_META = {
-  projectId: 'p001-hae',
-  projectName: '2024 해양수산 AC',
-  year: 2024,
-  funder: '해양수산부',
-  basis: '공급가액' as const,
-  basisOption: '(공급대가 선택 가능)',
-  lastUpdated: '2024.11.05',
-  updatedBy: '람쥐',
-  totalBudget: 260000000,
-  guide: {
-    fixedLabel: '못 빼는 돌(고정)',
-    fixedColor: 'blue',
-    adjustableLabel: '조정 가능한 큰 돌',
-    adjustableColor: 'red',
-  },
-};
-
 export const BANK_INFO: BankInfo[] = [
   { label: '사업비 통장(국민)', value: '123-45-678906', masked: '국민 ***-**-*****6', type: 'ACCOUNT' },
   { label: '법인카드', value: '5205-1234-5678-0938', masked: '5205-****-****-0938', type: 'CARD' },

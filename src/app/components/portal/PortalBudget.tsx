@@ -17,11 +17,11 @@ import { PageHeader } from '../layout/PageHeader';
 import { usePortalStore } from '../../data/portal-store';
 import { toast } from 'sonner';
 import {
-  BUDGET_META,
   fmtKRW, fmtPercent, fmtShort,
   type BudgetRow,
 } from '../../data/budget-data';
 import type { BudgetPlanRow, BudgetCodeEntry, BudgetCodeRename } from '../../data/types';
+import { BASIS_LABELS } from '../../data/types';
 import { parseNumber } from '../../platform/csv-utils';
 import { SETTLEMENT_COLUMNS } from '../../platform/settlement-csv';
 
@@ -81,7 +81,16 @@ export function PortalBudget() {
   }>>([]);
   const [draftCodeBook, setDraftCodeBook] = useState<BudgetCodeEntry[]>([]);
 
-  const meta = BUDGET_META;
+  const meta = myProject ? {
+    projectId: myProject.id,
+    projectName: myProject.name,
+    year: new Date(myProject.contractStart).getFullYear(),
+    funder: myProject.clientOrg,
+    basis: BASIS_LABELS[myProject.basis] || myProject.basis,
+    totalBudget: myProject.contractAmount,
+    lastUpdated: myProject.updatedAt ? new Date(myProject.updatedAt).toLocaleDateString('ko-KR') : '-',
+    updatedBy: myProject.managerName || '-',
+  } : null;
 
   const toggleGroup = (gid: string) => {
     setCollapsedGroups(prev => {
@@ -448,6 +457,10 @@ export function PortalBudget() {
   const getEffectiveBudget = useCallback((row: BudgetRow) => {
     return row.revisedAug > 0 ? row.revisedAug : row.initialBudget;
   }, []);
+
+  if (!meta) {
+    return <div className="p-8 text-center text-muted-foreground">프로젝트를 선택해 주세요.</div>;
+  }
 
   return (
     <TooltipProvider delayDuration={200}>
