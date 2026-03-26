@@ -821,7 +821,9 @@ export function fmtPercent(n: number): string {
 }
 
 export function fmtShort(n: number): string {
-  if (Math.abs(n) >= 1e8) return (n / 1e8).toFixed(1) + '억';
-  if (Math.abs(n) >= 1e4) return Math.round(n / 1e4).toLocaleString() + '만';
+  const abs = Math.abs(n);
+  if (abs >= 1e9) return (n / 1e8).toFixed(0) + '억';         // 10억+: 정수 억 단위
+  if (abs >= 1e8) return (n / 1e8).toFixed(2) + '억';         // 1억~10억: 1.68억
+  if (abs >= 1e4) return Math.round(n / 1e4).toLocaleString() + '만';
   return n.toLocaleString();
 }
