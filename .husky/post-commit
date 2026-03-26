@@ -17,7 +17,8 @@ TOTAL=$(echo "$RECENT" | wc -l | tr -d ' ')
 FIX_PCT=$((FIX * 100 / TOTAL))
 
 # Save stats to git-local file (not committed)
-cat > .git/commit-type-stats.json << STATS
+GIT_DIR=$(git rev-parse --git-dir 2>/dev/null)
+cat > "$GIT_DIR/commit-type-stats.json" << STATS
 {"last_20":{"feat":$FEAT,"fix":$FIX,"refactor":$REFACTOR,"test":$TEST,"total":$TOTAL,"fix_pct":$FIX_PCT}}
 STATS
 
