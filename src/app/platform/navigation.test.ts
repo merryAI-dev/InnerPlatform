@@ -19,7 +19,7 @@ describe('navigation helpers', () => {
 
   it('classifies admin space roles', () => {
     expect(isAdminSpaceRole('admin')).toBe(true);
-    expect(isAdminSpaceRole('security')).toBe(true);
+    expect(isAdminSpaceRole('finance')).toBe(true);
     expect(isAdminSpaceRole('pm')).toBe(false);
   });
 
@@ -30,7 +30,7 @@ describe('navigation helpers', () => {
 
   it('supports workspace-aware home resolution for admin accounts', () => {
     expect(resolveHomePath('admin', 'portal')).toBe('/portal');
-    expect(resolveHomePath('tenant_admin', 'admin')).toBe('/');
+    expect(resolveHomePath('admin', 'admin')).toBe('/');
   });
 
   it('defaults unknown roles to portal space (least privilege)', () => {
@@ -44,13 +44,12 @@ describe('navigation helpers', () => {
     expect(canEnterPortalWorkspace('admin')).toBe(true);
     expect(canEnterPortalWorkspace('finance')).toBe(false);
     expect(canChooseWorkspace('admin')).toBe(true);
-    expect(canChooseWorkspace('tenant_admin')).toBe(true);
     expect(canChooseWorkspace('pm')).toBe(false);
   });
 
-  it('prompts workspace selection only when admin-like roles have no preference', () => {
+  it('prompts workspace selection only when admin has no preference', () => {
     expect(shouldPromptWorkspaceSelection('admin', undefined)).toBe(true);
-    expect(shouldPromptWorkspaceSelection('tenant_admin', 'portal')).toBe(false);
+    expect(shouldPromptWorkspaceSelection('admin', 'portal')).toBe(false);
     expect(shouldPromptWorkspaceSelection('pm', undefined)).toBe(false);
   });
 

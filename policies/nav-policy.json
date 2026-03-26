@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "fullAccessRoles": ["admin"],
+  "routePermissions": {
+    "finance": [
+      "/",
+      "/projects",
+      "/board",
+      "/cashflow",
+      "/evidence",
+      "/payroll",
+      "/budget-summary",
+      "/expense-management",
+      "/approvals",
+      "/audit",
+      "/claude-sdk-help",
+      "/portal"
+    ]
+  }
+}

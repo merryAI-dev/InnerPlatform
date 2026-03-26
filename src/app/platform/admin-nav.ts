@@ -1,60 +1,23 @@
+import navPolicyJson from '../../../policies/nav-policy.json';
+
 function normalizeRole(value: unknown): string {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
 }
 
-const FULL_ACCESS_ROLES = new Set(['admin', 'tenant_admin']);
+// nav-policy.json 기반으로 역할별 허용 경로 Set 동적 생성
+const FULL_ACCESS_ROLES = new Set(navPolicyJson.fullAccessRoles);
 
-const FINANCE_ALLOWED = new Set([
-  '/',
-  '/projects',
-  '/board',
-  '/cashflow',
-  '/evidence',
-  '/payroll',
-  '/budget-summary',
-  '/expense-management',
-  '/approvals',
-  '/audit',
-  '/claude-sdk-help',
-  '/portal',
-]);
-
-const AUDITOR_ALLOWED = new Set([
-  '/',
-  '/projects',
-  '/board',
-  '/cashflow',
-  '/evidence',
-  '/payroll',
-  '/budget-summary',
-  '/expense-management',
-  '/audit',
-  '/claude-sdk-help',
-  '/portal',
-]);
-
-const SUPPORT_ALLOWED = new Set([
-  '/',
-  '/projects',
-  '/board',
-  '/evidence',
-  '/audit',
-  '/claude-sdk-help',
-  '/portal',
-]);
-
-const SECURITY_ALLOWED = new Set([
-  '/',
-  '/projects',
-  '/board',
-  '/audit',
-  '/claude-sdk-help',
-]);
+const ROUTE_PERMISSIONS_BY_ROLE: Record<string, Set<string>> = Object.fromEntries(
+  Object.entries(navPolicyJson.routePermissions).map(([role, routes]) => [
+    role,
+    new Set(routes),
+  ]),
+);
 
 /**
  * UI-level navigation policy for the admin space (AppLayout).
  * This is intentionally opinionated to keep role experiences clean:
- * - finance/auditor shouldn't see HR menus or "new project" CTA
+ * - finance shouldn't see HR menus or "new project" CTA
  * - operational settings are admin-scoped
  */
 export function canShowAdminNavItem(role: unknown, to: string): boolean {
@@ -62,10 +25,9 @@ export function canShowAdminNavItem(role: unknown, to: string): boolean {
   if (!normalized) return false;
 
   if (FULL_ACCESS_ROLES.has(normalized)) return true;
-  if (normalized === 'finance') return FINANCE_ALLOWED.has(to);
-  if (normalized === 'auditor') return AUDITOR_ALLOWED.has(to);
-  if (normalized === 'support') return SUPPORT_ALLOWED.has(to);
-  if (normalized === 'security') return SECURITY_ALLOWED.has(to);
+
+  const allowed = ROUTE_PERMISSIONS_BY_ROLE[normalized];
+  if (allowed) return allowed.has(to);
 
   // Unknown roles should not be encouraged to navigate into admin-only areas.
   return false;

@@ -1,13 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router';
 import {
-  LayoutDashboard, FolderKanban, BookOpen, BarChart3,
-  FileCheck, Settings, ChevronLeft, ChevronRight,
-  Bell, User, Plus, Shield, ClipboardList, ClipboardCheck,
-  Search, Zap, HelpCircle, Maximize2, Minimize2,
-  Menu, X, Calculator, Wallet, ExternalLink,
-  ListChecks, Users, LogOut, Megaphone, MessagesSquare,
-  CircleDollarSign, GraduationCap, ArrowLeftRight,
+  ChevronLeft, ChevronRight,
+  Search, Zap, HelpCircle,
+  Menu, LogOut,
 } from 'lucide-react';
 import { useAppStore, AppProvider } from '../../data/store';
 import { useAuth } from '../../data/auth-store';
@@ -30,49 +26,8 @@ import { ErrorBoundary } from './ErrorBoundary';
 import { ClaudeSdkHelpWidget } from '../guide-chat/ClaudeSdkHelpWidget';
 import { canChooseWorkspace, isPortalRole, resolveHomePath } from '../../platform/navigation';
 import { canAccessAdminPath, canShowAdminNavItem } from '../../platform/admin-nav';
-
-const NAV_GROUPS = [
-  {
-    label: '메인',
-    items: [
-      { to: '/', icon: LayoutDashboard, label: '대시보드' },
-      { to: '/projects', icon: FolderKanban, label: '프로젝트' },
-      { to: '/board', icon: MessagesSquare, label: '전사 게시판' },
-      { to: '/projects/new', icon: Plus, label: '사업 등록', accent: true },
-    ],
-  },
-  {
-    label: '재무관리',
-    items: [
-      { to: '/cashflow', icon: BarChart3, label: '캐시플로' },
-      { to: '/evidence', icon: FileCheck, label: '증빙/정산' },
-      { to: '/bank-reconciliation', icon: ArrowLeftRight, label: '은행 대조' },
-      { to: '/payroll', icon: CircleDollarSign, label: '인건비/월간정산', accent: true },
-      { to: '/budget-summary', icon: Calculator, label: '예산총괄' },
-      { to: '/expense-management', icon: Wallet, label: '사업비 관리' },
-    ],
-  },
-  {
-    label: '인력/참여율',
-    items: [
-      { to: '/participation', icon: Shield, label: '참여율 관리' },
-      { to: '/koica-personnel', icon: ClipboardList, label: 'KOICA 인력배치' },
-      { to: '/personnel-changes', icon: ClipboardCheck, label: '인력변경 관리' },
-      { to: '/hr-announcements', icon: Megaphone, label: '인사 공지', accent: true },
-      { to: '/training', icon: GraduationCap, label: '사내 교육 관리' },
-    ],
-  },
-  {
-    label: '시스템',
-    items: [
-      { to: '/approvals', icon: ListChecks, label: '승인 대기열', accent: true },
-      { to: '/users', icon: Users, label: '사용자 관리' },
-      { to: '/audit', icon: BookOpen, label: '감사로그' },
-      { to: '/settings', icon: Settings, label: '설정' },
-      { to: '/portal', icon: ExternalLink, label: '사용자 포털' },
-    ],
-  },
-];
+import { NAV_GROUPS } from '../../platform/nav-config';
+import { TenantSwitcher, TenantBadge } from '../settings/TenantSwitcher';
 
 function AppLayoutContent() {
   const { org, currentUser, transactions, participationEntries, dataSource } = useAppStore();
@@ -304,6 +259,8 @@ function AppLayoutContent() {
 
           {/* Footer */}
           <div className="border-t border-white/10 p-2 space-y-1.5">
+            {/* Tenant switcher */}
+            <TenantSwitcher collapsed={collapsed} userRole={displayUser.role} />
             {!collapsed && (
               <div className="px-1 mb-1">
                 <FirebaseStatusBadge />
@@ -372,6 +329,11 @@ function AppLayoutContent() {
                   로컬
                 </div>
               )}
+
+              <div className="w-px h-4 bg-border/50 mx-0.5" />
+
+              {/* Tenant badge */}
+              <TenantBadge />
 
               <div className="w-px h-4 bg-border/50 mx-0.5" />
 

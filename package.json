@@ -7,6 +7,7 @@
     "build": "vite build",
     "deploy:prod:safe": "node scripts/assert-safe-local-deploy.mjs && vercel deploy --prod",
     "dev": "vite",
+    "dev:local": "VITE_DEV_AUTH_HARNESS_ENABLED=true VITE_DEMO_LOGIN_ENABLED=true VITE_FIREBASE_AUTH_ENABLED=false VITE_FIRESTORE_CORE_ENABLED=false vite",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "npx playwright test --config playwright.harness.config.mjs",
@@ -40,7 +41,8 @@
     "pii:setup:vercel": "bash scripts/pii_setup_vercel_local.sh",
     "policy:verify": "node scripts/verify_rbac_policy.mjs",
     "etl:build:staging-json": "npx tsx scripts/etl/build-staging-json.ts",
-    "etl:sync:staging": "npx tsx scripts/etl/sync-staging-to-firestore.ts"
+    "etl:sync:staging": "npx tsx scripts/etl/sync-staging-to-firestore.ts",
+    "prepare": "husky"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",

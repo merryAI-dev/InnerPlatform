@@ -1,20 +1,115 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // ══════════════════════════════════════════════════════════════
+    // 기본 인증 헬퍼
+    // ══════════════════════════════════════════════════════════════
+
+    // 1차: Firebase 로그인 + @mysc.co.kr 이메일 도메인 확인
     function isSignedIn() {
       return request.auth != null
         && request.auth.token.email != null
         && request.auth.token.email.matches('.*@mysc\\.co\\.kr$');
     }
 
-    // ──────────────────────────────────────────────────
-    // Internal MYSC Rollout Mode
-    // @mysc.co.kr 인증 사용자는 모든 컬렉션 읽기/쓰기 가능.
-    // 외부 공개 시 role/project 기반 세분화 필요.
-    // ──────────────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════
+    // 테넌트 격리 헬퍼 (orgs/{orgId}/members/{uid} 멤버십 확인)
+    // ══════════════════════════════════════════════════════════════
 
-    match /orgs/{orgId}/{document=**} {
-      allow read, write: if isSignedIn();
+    // 요청 사용자가 해당 orgId의 멤버인지 확인
+    function isMember(orgId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/orgs/$(orgId)/members/$(request.auth.uid));
+    }
+
+    // 멤버 문서에서 역할 조회
+    function getMemberRole(orgId) {
+      return get(/databases/$(database)/documents/orgs/$(orgId)/members/$(request.auth.uid)).data.role;
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // 역할 기반 접근 제어 헬퍼
+    // ══════════════════════════════════════════════════════════════
+
+    // 읽기: org 멤버면 허용 (viewer 포함)
+    function canRead(orgId) {
+      return isMember(orgId);
+    }
+
+    // 쓰기: viewer 제외 모든 역할 허용 (admin, finance, pm)
+    function canWrite(orgId) {
+      return isMember(orgId)
+        && getMemberRole(orgId) in ['admin', 'finance', 'pm'];
+    }
+
+    // 어드민 전용
+    function isAdmin(orgId) {
+      return isMember(orgId)
+        && getMemberRole(orgId) in ['admin'];
+    }
+
+    // 감사/재무 접근 (audit_logs 읽기용)
+    function canReadAuditLogs(orgId) {
+      return isMember(orgId)
+        && getMemberRole(orgId) in ['admin', 'finance'];
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // orgs/{orgId}/** 규칙
+    // 특정 컬렉션 override → 일반 규칙 순서로 적용
+    // ══════════════════════════════════════════════════════════════
+
+    // ── 구성원(members) ──
+    // 테넌트 격리의 핵심: 이 문서가 존재해야 isMember() 통과
+    match /orgs/{orgId}/members/{memberId} {
+      allow read: if canRead(orgId);
+
+      // 최초 로그인 자기 등록: 본인 UID로만, 기본 역할 pm 고정
+      // (auth-store.tsx의 upsertMemberFromFirebase 지원)
+      // 다른 역할 부여는 admin이 /users 페이지에서 변경
+      allow create: if isSignedIn()
+        && memberId == request.auth.uid
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.role == 'pm';
+
+      // 자기 문서 업데이트: lastLoginAt/avatarUrl 등 갱신 허용, role 변경 불가
+      allow update: if isSignedIn()
+        && memberId == request.auth.uid
+        && request.resource.data.role == resource.data.role;
+
+      // Admin: 역할 변경·삭제·타인 문서 수정 포함 모든 쓰기
+      allow write: if isAdmin(orgId);
+    }
+
+    // ── 감사 로그: 클라이언트 쓰기 금지, 특정 역할만 읽기 ──
+    // 생성은 BFF 서버(Admin SDK)에서만 수행 → 규칙 우회됨
+    match /orgs/{orgId}/audit_logs/{logId} {
+      allow read: if canReadAuditLogs(orgId);
+      allow write: if false;
+    }
+
+    // ── 알림: 본인 알림만 읽기/읽음 처리 ──
+    // 생성은 BFF 서버에서만 수행
+    // recipientId == request.auth.uid 조건은 쿼리 필터와 함께 동작
+    match /orgs/{orgId}/notifications/{notifId} {
+      allow read: if canRead(orgId) && resource.data.recipientId == request.auth.uid;
+      allow update: if canRead(orgId) && resource.data.recipientId == request.auth.uid;
+      allow create, delete: if false;
+    }
+
+    // ── 프로젝트 변경 알림: admin/finance만 쓰기 ──
+    match /orgs/{orgId}/project_change_alerts/{alertId} {
+      allow read: if canRead(orgId);
+      allow write: if isMember(orgId)
+        && getMemberRole(orgId) in ['admin', 'finance'];
+    }
+
+    // ── 일반 규칙: 나머지 모든 컬렉션 ──
+    // (projects, ledgers, transactions, evidences, comments, 등)
+    match /orgs/{orgId}/{collection}/{document=**} {
+      allow read: if canRead(orgId);
+      allow write: if canWrite(orgId);
     }
   }
 }
