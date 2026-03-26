@@ -15,6 +15,25 @@
       "/audit",
       "/claude-sdk-help",
       "/portal"
+    ],
+    "pm": [
+      "/",
+      "/projects",
+      "/projects/new",
+      "/board",
+      "/cashflow",
+      "/evidence",
+      "/expense-management",
+      "/approvals",
+      "/claude-sdk-help",
+      "/portal"
+    ],
+    "viewer": [
+      "/",
+      "/projects",
+      "/board",
+      "/claude-sdk-help",
+      "/portal"
     ]
   }
 }
