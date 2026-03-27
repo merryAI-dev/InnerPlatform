@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router';
+import { useNavigate } from 'react-router';
 import { ArrowRight, FolderKanban, Loader2, Shield } from 'lucide-react';
 import { Card, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
@@ -9,22 +9,20 @@ import type { WorkspaceId } from '../../data/member-workspace';
 
 export function WorkspaceSelectPage() {
   const navigate = useNavigate();
-  const location = useLocation();
   const { isAuthenticated, isLoading, user, setWorkspacePreference } = useAuth();
   const [pending, setPending] = useState<WorkspaceId | null>(null);
   const [error, setError] = useState('');
-  const redirectFrom = (location.state as { from?: string } | null)?.from;
 
   useEffect(() => {
     if (isLoading) return;
     if (!isAuthenticated || !user) {
-      navigate('/login', { replace: true, state: redirectFrom ? { from: redirectFrom } : undefined });
+      navigate('/login', { replace: true });
       return;
     }
     if (!canChooseWorkspace(user.role)) {
-      navigate(resolvePostLoginPath(user.role, user.defaultWorkspace ?? user.lastWorkspace, redirectFrom), { replace: true });
+      navigate(resolvePostLoginPath(user.role, user.defaultWorkspace ?? user.lastWorkspace), { replace: true });
     }
-  }, [isAuthenticated, isLoading, navigate, redirectFrom, user]);
+  }, [isAuthenticated, isLoading, navigate, user]);
 
   const handleSelect = async (workspace: WorkspaceId) => {
     if (!user) return;
@@ -36,16 +34,7 @@ export function WorkspaceSelectPage() {
       setError('공간 선택을 저장하지 못했습니다. 다시 시도해 주세요.');
       return;
     }
-    // workspace를 명시 선택했으면, redirectFrom이 다른 공간이면 무시
-    const effectiveRedirect = (() => {
-      if (!redirectFrom) return undefined;
-      const isPortalPath = redirectFrom === '/portal' || redirectFrom.startsWith('/portal/');
-      if (workspace === 'admin' && isPortalPath) return undefined;
-      if (workspace === 'portal' && !isPortalPath && redirectFrom !== '/') return undefined;
-      return redirectFrom;
-    })();
-    const target = resolvePostLoginPath(user.role, workspace, effectiveRedirect);
-    navigate(target, { replace: true });
+    navigate(workspace === 'admin' ? '/' : '/portal', { replace: true });
   };
 
   if (isLoading || !isAuthenticated || !user || !canChooseWorkspace(user.role)) {
