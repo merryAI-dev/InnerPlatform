@@ -446,11 +446,7 @@ export function PortalProjectRegister() {
 
   const handleSubmit = async () => {
     if (isSubmitting) return;
-    if (!form.contractDocument) {
-      setStep('contract');
-      toast.error('계약서 등 PDF를 먼저 업로드해 주세요.');
-      return;
-    }
+    // contractDocument is now optional — PDF upload can be skipped
 
     setIsSubmitting(true);
     try {
@@ -524,7 +520,7 @@ export function PortalProjectRegister() {
           <div className="space-y-1">
             <CardTitle className="text-[18px]" style={{ fontWeight: 700 }}>사업 등록 제안</CardTitle>
             <p className="text-[12px] text-muted-foreground">
-              계약서를 먼저 올리면 AI가 기본 정보를 채우고, 사람이 검토한 뒤 제출하는 방식입니다.
+              계약서 PDF를 올리면 AI가 기본 정보를 채워주고, 없으면 직접 입력할 수 있습니다.
             </p>
           </div>
           <div className="space-y-2">
@@ -616,7 +612,7 @@ export function PortalProjectRegister() {
                         </p>
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        <Badge className={`border-0 ${contractUploadUi.badgeClass}`}>PDF 1개 필수</Badge>
+                        <Badge className={`border-0 ${contractUploadUi.badgeClass}`}>PDF 선택</Badge>
                         <Badge className="border-0 bg-slate-500/15 text-slate-700 dark:text-slate-300">업로드 후 AI 초안 자동 생성</Badge>
                       </div>
                     </div>
@@ -672,8 +668,8 @@ export function PortalProjectRegister() {
                         </div>
                       </div>
                     ) : (
-                      <div className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-[11px] text-amber-700 dark:bg-amber-950/20 dark:text-amber-300">
-                        아직 계약서 PDF가 없습니다. 위 버튼으로 먼저 업로드를 시작해 주세요.
+                      <div className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-[11px] text-slate-600 dark:bg-slate-950/20 dark:text-slate-400">
+                        계약서 PDF 없이도 다음 단계로 넘어갈 수 있어요. 나중에 등록할 수도 있습니다.
                       </div>
                     )}
                   </div>
