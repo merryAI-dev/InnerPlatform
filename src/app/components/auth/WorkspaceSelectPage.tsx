@@ -36,7 +36,16 @@ export function WorkspaceSelectPage() {
       setError('공간 선택을 저장하지 못했습니다. 다시 시도해 주세요.');
       return;
     }
-    navigate(resolvePostLoginPath(user.role, workspace, redirectFrom), { replace: true });
+    // workspace를 명시 선택했으면, redirectFrom이 다른 공간이면 무시
+    const effectiveRedirect = (() => {
+      if (!redirectFrom) return undefined;
+      const isPortalPath = redirectFrom === '/portal' || redirectFrom.startsWith('/portal/');
+      if (workspace === 'admin' && isPortalPath) return undefined;
+      if (workspace === 'portal' && !isPortalPath && redirectFrom !== '/') return undefined;
+      return redirectFrom;
+    })();
+    const target = resolvePostLoginPath(user.role, workspace, effectiveRedirect);
+    navigate(target, { replace: true });
   };
 
   if (isLoading || !isAuthenticated || !user || !canChooseWorkspace(user.role)) {
