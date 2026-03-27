@@ -71,7 +71,7 @@ const STEPS: Array<{
   icon: typeof FileText;
   desc: string;
 }> = [
-  { key: 'contract', label: '계약서 업로드', icon: FileText, desc: 'PDF 업로드와 AI 기본값 생성' },
+  { key: 'contract', label: '계약서 업로드', icon: FileText, desc: 'PDF 업로드와 AI 기본값 생성 (선택)' },
   { key: 'basic', label: '기본 정보', icon: Building2, desc: '계약명, 등록명, 계약 대상' },
   { key: 'financial', label: '재무 정보', icon: Wallet, desc: '기간, 계약금액, 정산 기준' },
   { key: 'team', label: '팀 구성', icon: Users, desc: '담당자와 참고사항' },
@@ -262,10 +262,10 @@ function resolveContractUploadUiState(
     surfaceClass: 'border-teal-200/80 bg-white/90 dark:border-teal-800/40 dark:bg-teal-950/20',
     badgeClass: 'bg-teal-500/15 text-teal-700 dark:text-teal-300',
     buttonClass: 'bg-teal-600 text-white hover:bg-teal-700',
-    statusLabel: '업로드 필요',
-    title: '먼저 계약서 PDF를 올려 주세요',
-    description: '이 단계가 끝나면 공식 계약명, 계약 대상, 기간, 금액 초안을 자동으로 채워서 다음 입력 부담을 줄입니다.',
-    ctaLabel: '계약서 PDF 업로드 시작',
+    statusLabel: '선택 사항',
+    title: '계약서 PDF를 올리면 AI가 기본값을 채워줍니다',
+    description: '건너뛰어도 괜찮아요. 다음 단계에서 직접 입력할 수 있습니다.',
+    ctaLabel: '계약서 PDF 업로드',
   };
 }
 
@@ -333,7 +333,7 @@ export function PortalProjectRegister() {
 
   const canProceed = () => {
     if (step === 'contract') {
-      return Boolean(form.contractDocument) && !isUploadingContract && contractAnalysisState !== 'extracting' && contractAnalysisState !== 'analyzing';
+      return !isUploadingContract && contractAnalysisState !== 'extracting' && contractAnalysisState !== 'analyzing';
     }
     if (step === 'basic') {
       return Boolean(form.department && form.officialContractName.trim() && form.name.trim() && form.clientOrg.trim() && form.type);

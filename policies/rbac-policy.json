@@ -81,6 +81,7 @@
     ],
     "viewer": [
       "project:read",
+      "project:write",
       "project:evidence_drive:write",
       "ledger:read",
       "comment:read",

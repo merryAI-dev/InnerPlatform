@@ -295,6 +295,7 @@ function mapClientErrorSeverity(level) {
 
 const ALL_INTERNAL_ROUTE_ROLES = ['admin', 'finance', 'pm', 'viewer', 'auditor', 'tenant_admin', 'support', 'security'];
 const CORE_WRITE_ROUTE_ROLES = ['admin', 'finance', 'pm', 'auditor', 'tenant_admin', 'support', 'security'];
+const PROJECT_REQUEST_ROUTE_ROLES = [...CORE_WRITE_ROUTE_ROLES, 'viewer'];
 
 const ROUTE_ROLES = {
   readCore: ALL_INTERNAL_ROUTE_ROLES,
@@ -1533,7 +1534,7 @@ export function createBffApp(options = {}) {
 
   app.post('/api/v1/project-requests/contract/upload', asyncHandler(async (req, res) => {
     const { tenantId, actorId } = req.context;
-    assertActorRoleAllowed(req, ROUTE_ROLES.writeCore, 'upload project request contract');
+    assertActorRoleAllowed(req, PROJECT_REQUEST_ROUTE_ROLES, 'upload project request contract');
     const parsed = parseWithSchema(
       projectRequestContractUploadSchema,
       req.body,
@@ -1555,7 +1556,7 @@ export function createBffApp(options = {}) {
     express.raw({ type: ['application/octet-stream', 'application/pdf'], limit: process.env.BFF_JSON_LIMIT || '25mb' }),
     asyncHandler(async (req, res) => {
       const { tenantId, actorId } = req.context;
-      assertActorRoleAllowed(req, ROUTE_ROLES.writeCore, 'process project request contract');
+      assertActorRoleAllowed(req, PROJECT_REQUEST_ROUTE_ROLES, 'process project request contract');
       const fileName = decodeHeaderValue(req.header('x-file-name')) || 'contract.pdf';
       const mimeType = readOptionalText(req.header('x-file-type')) || req.header('content-type') || 'application/pdf';
       const fileSizeHeader = Number.parseInt(readOptionalText(req.header('x-file-size')), 10);
