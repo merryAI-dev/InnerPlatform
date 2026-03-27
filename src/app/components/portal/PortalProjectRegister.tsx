@@ -75,7 +75,7 @@ const STEPS: Array<{
   icon: typeof FileText;
   desc: string;
 }> = [
-  { key: 'contract', label: '계약서 업로드', icon: FileText, desc: 'PDF 업로드와 AI 기본값 생성' },
+  { key: 'contract', label: '계약서 업로드', icon: FileText, desc: 'PDF 업로드와 AI 기본값 생성 (선택)' },
   { key: 'basic', label: '기본 정보', icon: Building2, desc: '계약명, 등록명, 계약 대상' },
   { key: 'financial', label: '재무 정보', icon: Wallet, desc: '기간, 계약금액, 정산 기준' },
   { key: 'team', label: '팀 구성', icon: Users, desc: '담당자와 참고사항' },
@@ -266,10 +266,10 @@ function resolveContractUploadUiState(
     surfaceClass: 'border-teal-200/80 bg-white/90 dark:border-teal-800/40 dark:bg-teal-950/20',
     badgeClass: 'bg-teal-500/15 text-teal-700 dark:text-teal-300',
     buttonClass: 'bg-teal-600 text-white hover:bg-teal-700',
-    statusLabel: '업로드 필요',
-    title: '먼저 계약서 PDF를 올려 주세요',
-    description: '이 단계가 끝나면 공식 계약명, 계약 대상, 기간, 금액 초안을 자동으로 채워서 다음 입력 부담을 줄입니다.',
-    ctaLabel: '계약서 PDF 업로드 시작',
+    statusLabel: '선택 사항',
+    title: '계약서 PDF를 올리면 AI가 기본값을 채워줍니다',
+    description: '건너뛰어도 괜찮아요. 다음 단계에서 직접 입력할 수 있습니다.',
+    ctaLabel: '계약서 PDF 업로드',
   };
 }
 
@@ -305,6 +305,7 @@ export function PortalProjectRegister() {
   const { portalUser, projects, createProjectRequest } = usePortalStore();
 
   const [step, setStep] = useState<Step>('contract');
+  const [highestVisitedIdx, setHighestVisitedIdx] = useState(0);
   const [form, setForm] = useState<ProjectProposalDraft>({
     ...initialProposal,
     managerName: portalUser?.name || authUser?.name || '',
@@ -349,7 +350,7 @@ export function PortalProjectRegister() {
 
   const canProceed = () => {
     if (step === 'contract') {
-      return Boolean(form.contractDocument) && !isUploadingContract && contractAnalysisState !== 'extracting' && contractAnalysisState !== 'analyzing';
+      return !isUploadingContract && contractAnalysisState !== 'extracting' && contractAnalysisState !== 'analyzing';
     }
     if (step === 'basic') {
       return Boolean(form.department && form.officialContractName.trim() && form.name.trim() && form.clientOrg.trim() && form.type);
@@ -451,6 +452,8 @@ export function PortalProjectRegister() {
         setContractAnalysisState('error');
         toast.success(`계약서 업로드 완료: ${file.name}`);
       }
+      const basicIdx = STEPS.findIndex((s) => s.key === 'basic');
+      setHighestVisitedIdx((prev) => Math.max(prev, basicIdx));
       setStep('basic');
     } catch (error) {
       console.error('[PortalProjectRegister] contract upload failed:', error);
@@ -471,11 +474,7 @@ export function PortalProjectRegister() {
 
   const handleSubmit = async () => {
     if (isSubmitting) return;
-    if (!form.contractDocument) {
-      setStep('contract');
-      toast.error('계약서 등 PDF를 먼저 업로드해 주세요.');
-      return;
-    }
+    // contractDocument is now optional — PDF upload can be skipped
 
     setIsSubmitting(true);
     try {
@@ -549,7 +548,7 @@ export function PortalProjectRegister() {
           <div className="space-y-1">
             <CardTitle className="text-[18px]" style={{ fontWeight: 700 }}>사업 등록 제안</CardTitle>
             <p className="text-[12px] text-muted-foreground">
-              계약서를 먼저 올리면 AI가 기본 정보를 채우고, 사람이 검토한 뒤 제출하는 방식입니다.
+              계약서 PDF를 올리면 AI가 기본 정보를 채워주고, 없으면 직접 입력할 수 있습니다.
             </p>
           </div>
           <div className="space-y-2">
@@ -559,7 +558,50 @@ export function PortalProjectRegister() {
             </div>
             <Progress value={progress} className="h-2" />
           </div>
-          <div className="grid gap-2 md:grid-cols-5">
+          {/* Mobile: active step only with prev/next hints */}
+          <div className="flex items-center gap-2 md:hidden">
+            {currentStepIdx > 0 ? (
+              <button
+                type="button"
+                onClick={() => setStep(STEPS[currentStepIdx - 1].key)}
+                className="flex-shrink-0 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+              >
+                ← {STEPS[currentStepIdx - 1].label}
+              </button>
+            ) : <span className="flex-shrink-0" />}
+            <button
+              type="button"
+              className={[
+                'flex-1 rounded-xl border px-3 py-3 text-left transition-colors',
+                'border-teal-500/40 bg-teal-50 text-teal-700 dark:border-teal-700 dark:bg-teal-950/30 dark:text-teal-300',
+              ].join(' ')}
+            >
+              <div className="flex items-center gap-2">
+                <div
+                  className="flex h-7 w-7 items-center justify-center rounded-full bg-teal-500 text-white text-[10px]"
+                  style={{ fontWeight: 700 }}
+                >
+                  {currentStepIdx + 1}
+                </div>
+                {(() => { const Icon = currentStep.icon; return <Icon className="h-4 w-4" />; })()}
+              </div>
+              <div className="mt-2 text-[12px]" style={{ fontWeight: 600 }}>{currentStep.label}</div>
+              <div className="mt-1 text-[10px] text-muted-foreground">{currentStep.desc}</div>
+            </button>
+            {currentStepIdx < STEPS.length - 1 ? (
+              <button
+                type="button"
+                onClick={() => {
+                  if (currentStepIdx + 1 <= currentStepIdx) setStep(STEPS[currentStepIdx + 1].key);
+                }}
+                className="flex-shrink-0 text-[11px] text-muted-foreground opacity-50"
+              >
+                {STEPS[currentStepIdx + 1].label} →
+              </button>
+            ) : <span className="flex-shrink-0" />}
+          </div>
+          {/* Desktop: full 5-column grid */}
+          <div className="hidden md:grid md:grid-cols-5 gap-2">
             {STEPS.map((item, index) => {
               const Icon = item.icon;
               const active = item.key === step;
@@ -621,7 +663,7 @@ export function PortalProjectRegister() {
                     </Badge>
                   </div>
                   <p className="text-[11px] text-muted-foreground">
-                    계약서 PDF를 먼저 올리면 공식 계약명, 계약 대상, 기간, 금액 초안을 자동으로 채웁니다.
+                    계약서 PDF를 올리면 AI가 기본 정보를 채워줍니다. 건너뛰어도 괜찮아요.
                   </p>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -641,7 +683,7 @@ export function PortalProjectRegister() {
                         </p>
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        <Badge className={`border-0 ${contractUploadUi.badgeClass}`}>PDF 1개 필수</Badge>
+                        <Badge className={`border-0 ${contractUploadUi.badgeClass}`}>PDF 선택</Badge>
                         <Badge className="border-0 bg-slate-500/15 text-slate-700 dark:text-slate-300">업로드 후 AI 초안 자동 생성</Badge>
                       </div>
                     </div>
@@ -656,6 +698,17 @@ export function PortalProjectRegister() {
                         {isUploadingContract ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
                         {contractUploadUi.ctaLabel}
                       </Button>
+                      <button
+                        type="button"
+                        className="mt-2 text-[12px] text-muted-foreground underline hover:text-foreground"
+                        onClick={() => {
+                          const basicIdx = STEPS.findIndex((s) => s.key === 'basic');
+                          setHighestVisitedIdx((prev) => Math.max(prev, basicIdx));
+                          setStep('basic');
+                        }}
+                      >
+                        PDF 없이 직접 입력하기
+                      </button>
                     </div>
 
                     <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
@@ -697,8 +750,8 @@ export function PortalProjectRegister() {
                         </div>
                       </div>
                     ) : (
-                      <div className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-[11px] text-amber-700 dark:bg-amber-950/20 dark:text-amber-300">
-                        아직 계약서 PDF가 없습니다. 위 버튼으로 먼저 업로드를 시작해 주세요.
+                      <div className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-[11px] text-slate-600 dark:bg-slate-950/20 dark:text-slate-400">
+                        계약서 PDF 없이도 다음 단계로 넘어갈 수 있어요. 나중에 등록할 수도 있습니다.
                       </div>
                     )}
                   </div>
@@ -1246,9 +1299,15 @@ export function PortalProjectRegister() {
                 </SummaryCard>
 
                 <SummaryCard title="계약서 및 AI 초안">
-                  <ReviewRow label="첨부 파일" value={form.contractDocument?.name || '미업로드'} />
-                  <ReviewRow label="AI 요약" value={analysis?.summary || '-'} />
-                  <ReviewRow label="확인 필요" value={analysis?.warnings.join(', ') || '-'} />
+                  {form.contractDocument ? (
+                    <>
+                      <ReviewRow label="첨부 파일" value={form.contractDocument.name} />
+                      <ReviewRow label="AI 요약" value={analysis?.summary || '-'} />
+                      <ReviewRow label="확인 필요" value={analysis?.warnings.join(', ') || '-'} />
+                    </>
+                  ) : (
+                    <p className="text-[12px] text-muted-foreground">계약서 없이 등록합니다</p>
+                  )}
                 </SummaryCard>
               </div>
             </div>
@@ -1274,7 +1333,7 @@ export function PortalProjectRegister() {
             className="h-9 gap-1.5 text-[12px]"
             style={{ background: 'linear-gradient(135deg, #0d9488, #059669)' }}
             onClick={handleSubmit}
-            disabled={isSubmitting || !form.contractDocument}
+            disabled={isSubmitting}
           >
             {isSubmitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
             {isSubmitting ? '제출 중...' : '관리자에게 제출'}
@@ -1284,7 +1343,11 @@ export function PortalProjectRegister() {
             size="sm"
             className="h-9 gap-1 text-[12px]"
             disabled={!canProceed()}
-            onClick={() => setStep(STEPS[currentStepIdx + 1].key)}
+            onClick={() => {
+              const nextIdx = currentStepIdx + 1;
+              setHighestVisitedIdx((prev) => Math.max(prev, nextIdx));
+              setStep(STEPS[nextIdx].key);
+            }}
           >
             다음
             <ArrowRight className="h-3.5 w-3.5" />

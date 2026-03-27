@@ -8,7 +8,7 @@ import { GoogleSheetsServiceError } from '../google-sheets.mjs';
 import { extractTextFromPdfBuffer } from '../pdf-text.mjs';
 import {
   asyncHandler, createMutatingRoute, assertActorRoleAllowed,
-  ROUTE_ROLES, createHttpError, encryptAuditEmail,
+  ROUTE_ROLES, PROJECT_REQUEST_ROUTE_ROLES, createHttpError, encryptAuditEmail,
   parseLimit, parseCursor, buildListResponse,
   ensureDocumentExists, upsertVersionedDoc, mergeSystemManagedDoc,
   stripServerManagedFields, stripExpectedVersion, readOptionalText, decodeHeaderValue,
@@ -242,7 +242,7 @@ export function mountProjectRoutes(app, {
 
   app.post('/api/v1/project-requests/contract/upload', asyncHandler(async (req, res) => {
     const { tenantId, actorId } = req.context;
-    assertActorRoleAllowed(req, ROUTE_ROLES.writeCore, 'upload project request contract');
+    assertActorRoleAllowed(req, PROJECT_REQUEST_ROUTE_ROLES, 'upload project request contract');
     const parsed = parseWithSchema(projectRequestContractUploadSchema, req.body, 'Invalid project request contract upload payload');
     const uploaded = await projectRequestContractStorageService.uploadContract({
       tenantId, actorId,
@@ -259,7 +259,7 @@ export function mountProjectRoutes(app, {
     express.raw({ type: ['application/octet-stream', 'application/pdf'], limit: process.env.BFF_JSON_LIMIT || '25mb' }),
     asyncHandler(async (req, res) => {
       const { tenantId, actorId } = req.context;
-      assertActorRoleAllowed(req, ROUTE_ROLES.writeCore, 'process project request contract');
+      assertActorRoleAllowed(req, PROJECT_REQUEST_ROUTE_ROLES, 'process project request contract');
       const fileName = decodeHeaderValue(req.header('x-file-name')) || 'contract.pdf';
       const mimeType = readOptionalText(req.header('x-file-type')) || req.header('content-type') || 'application/pdf';
       const fileSizeHeader = Number.parseInt(readOptionalText(req.header('x-file-size')), 10);

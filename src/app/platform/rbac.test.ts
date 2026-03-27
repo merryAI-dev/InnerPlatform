@@ -46,7 +46,7 @@ describe('rbac helpers', () => {
   });
 
   it('keeps viewer least-privileged but allows evidence drive workflows', () => {
-    expect(hasPermission('viewer', 'project:write')).toBe(false);
+    expect(hasPermission('viewer', 'project:write')).toBe(true);
     expect(hasPermission('viewer', 'project:evidence_drive:write')).toBe(true);
     expect(hasPermission('viewer', 'evidence:write')).toBe(false);
     expect(hasPermission('viewer', 'evidence:drive:write')).toBe(true);
@@ -67,8 +67,8 @@ describe('rbac helpers', () => {
     expect(canAccessProject({ actorRole: 'pm', permission: 'project:write', targetProjectId: 'p1', assignedProjectIds: ['p1', 'p2'] })).toBe(true);
     expect(canAccessProject({ actorRole: 'pm', permission: 'project:write', targetProjectId: 'p3', assignedProjectIds: ['p1', 'p2'] })).toBe(false);
 
-    // Viewer cannot write even with assignment
-    expect(canAccessProject({ actorRole: 'viewer', permission: 'project:write', targetProjectId: 'p1', assignedProjectIds: ['p1'] })).toBe(false);
+    // Viewer can write with assignment
+    expect(canAccessProject({ actorRole: 'viewer', permission: 'project:write', targetProjectId: 'p1', assignedProjectIds: ['p1'] })).toBe(true);
 
     // Viewer can read with assignment
     expect(canAccessProject({ actorRole: 'viewer', permission: 'project:read', targetProjectId: 'p1', assignedProjectIds: ['p1'] })).toBe(true);

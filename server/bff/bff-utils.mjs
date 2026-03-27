@@ -193,6 +193,7 @@ export function resolveAutoLedgerName(project) {
 
 export const ALL_INTERNAL_ROUTE_ROLES = ['admin', 'finance', 'pm', 'viewer', 'auditor', 'tenant_admin', 'support', 'security'];
 export const CORE_WRITE_ROUTE_ROLES = ['admin', 'finance', 'pm', 'auditor', 'tenant_admin', 'support', 'security'];
+export const PROJECT_REQUEST_ROUTE_ROLES = [...CORE_WRITE_ROUTE_ROLES, 'viewer'];
 
 export const ROUTE_ROLES = {
   readCore: ALL_INTERNAL_ROUTE_ROLES,
