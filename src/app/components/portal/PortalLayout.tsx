@@ -13,6 +13,7 @@ import {
   FileSpreadsheet,
   Sparkles,
   ArrowRight,
+  Upload,
 } from 'lucide-react';
 import { PortalProvider, usePortalStore } from '../../data/portal-store';
 import { useAuth } from '../../data/auth-store';
@@ -35,6 +36,7 @@ import { ClaudeSdkHelpWidget } from '../guide-chat/ClaudeSdkHelpWidget';
 import {
   canChooseWorkspace,
   canEnterPortalWorkspace,
+  isAdminSpaceRole,
   resolveHomePath,
   shouldForcePortalOnboarding,
 } from '../../platform/navigation';
@@ -170,6 +172,8 @@ function PortalContent() {
   useEffect(() => {
     const role = authUser?.role;
     if (!isAuthenticated || !role || !canChooseWorkspace(role)) return;
+    // admin/finance가 portal을 잠깐 방문할 때 workspace를 덮어쓰지 않음
+    if (isAdminSpaceRole(role)) return;
     if (authUser?.lastWorkspace === 'portal') return;
     void setWorkspacePreference('portal', { persistDefault: false });
   }, [authUser?.lastWorkspace, authUser?.role, isAuthenticated, setWorkspacePreference]);
@@ -206,7 +210,8 @@ function PortalContent() {
   const standaloneOnboarding = (
     (location.pathname.includes('/portal/onboarding')
       || location.pathname.includes('/portal/project-settings')
-      || location.pathname.includes('/portal/register-project')) &&
+      || location.pathname.includes('/portal/register-project')
+      || location.pathname.includes('/portal/weekly-expenses')) &&
     !isRegistered &&
     canEnterPortalWorkspace(authUser?.role)
   );
@@ -245,6 +250,20 @@ function PortalContent() {
                 <p className="text-xs text-muted-foreground mt-0.5">이미 등록된 사업에서 선택하여 시작합니다</p>
               </div>
               <ArrowRight className="w-4 h-4 text-muted-foreground/40 group-hover:text-teal-500 group-hover:translate-x-0.5 transition-all" />
+            </button>
+
+            <button
+              onClick={() => navigate('/portal/weekly-expenses')}
+              className="group relative flex items-center gap-4 p-5 rounded-2xl border border-border/60 bg-white/80 dark:bg-slate-800/60 backdrop-blur-sm hover:border-violet-300 hover:shadow-md hover:shadow-violet-500/5 transition-all duration-200 text-left"
+            >
+              <div className="shrink-0 flex items-center justify-center w-11 h-11 rounded-xl bg-violet-50 dark:bg-violet-950 text-violet-600 dark:text-violet-400 group-hover:scale-105 transition-transform">
+                <Upload className="w-5 h-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold">증빙 업로드만 할게요</p>
+                <p className="text-xs text-muted-foreground mt-0.5">사업 선택 없이 바로 PDF/영수증을 업로드합니다</p>
+              </div>
+              <ArrowRight className="w-4 h-4 text-muted-foreground/40 group-hover:text-violet-500 group-hover:translate-x-0.5 transition-all" />
             </button>
 
             <button

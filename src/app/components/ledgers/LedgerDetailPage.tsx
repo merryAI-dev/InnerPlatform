@@ -126,10 +126,10 @@ export function LedgerDetailPage() {
   const handleAddTx = async () => {
     const amt = Number(txForm.bankAmount) || 0;
     const dir = txForm.direction;
-    const basis = ledger?.basis || 'SUPPLY_AMOUNT';
+    const basis = ledger?.basis || '공급가액';
     // VAT calculation based on basis
     let vatIn = 0, vatOut = 0;
-    if (basis === 'SUPPLY_PRICE') {
+    if (basis === '공급대가') {
       // 공급대가 기준: 금액에 VAT 포함
       if (dir === 'OUT') vatIn = Math.round(amt / 11);
       if (dir === 'IN') vatOut = Math.round(amt / 11);
@@ -670,7 +670,7 @@ export function LedgerDetailPage() {
               <div className="flex gap-4">
                 <span>거래금액: {fmt(Number(txForm.bankAmount))}원</span>
                 <span>
-                  {ledger.basis === 'SUPPLY_PRICE'
+                  {ledger.basis === '공급대가'
                     ? `VAT: ${fmt(Math.round(Number(txForm.bankAmount) / 11))}원 (포함)`
                     : `VAT: ${fmt(Math.round(Number(txForm.bankAmount) * 0.1))}원 (별도)`
                   }

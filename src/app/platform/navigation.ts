@@ -10,10 +10,6 @@ function normalizeRole(value: unknown): string {
 const ADMIN_SPACE_ROLES = new Set([
   'admin',
   'finance',
-  'auditor',
-  'tenant_admin',
-  'support',
-  'security',
 ]);
 
 export function isPortalRole(role: unknown): boolean {
@@ -28,15 +24,12 @@ export function isAdminSpaceRole(role: unknown): boolean {
 
 export function canEnterPortalWorkspace(role: unknown): boolean {
   const normalized = normalizeRole(role);
-  return normalized === 'pm'
-    || normalized === 'viewer'
-    || normalized === 'admin'
-    || normalized === 'tenant_admin';
+  return !!normalized;
 }
 
 export function canChooseWorkspace(role: unknown): boolean {
   const normalized = normalizeRole(role);
-  return normalized === 'admin' || normalized === 'tenant_admin';
+  return !!normalized;
 }
 
 export function shouldPromptWorkspaceSelection(
@@ -44,14 +37,15 @@ export function shouldPromptWorkspaceSelection(
   preferredWorkspace: unknown,
 ): boolean {
   if (!canChooseWorkspace(role)) return false;
-  return !normalizeWorkspaceId(preferredWorkspace);
+  // 항상 workspace 선택 화면 표시 — 사용자가 매번 admin/portal 선택 가능
+  return true;
 }
 
 export function resolveHomePath(role: unknown, preferredWorkspace?: WorkspaceId | unknown): HomePath {
   const normalized = normalizeRole(role);
   if (!normalized) return '/portal';
   if (isPortalRole(normalized)) return '/portal';
-  if ((normalized === 'admin' || normalized === 'tenant_admin') && normalizeWorkspaceId(preferredWorkspace) === 'portal') {
+  if (normalized === 'admin' && normalizeWorkspaceId(preferredWorkspace) === 'portal') {
     return '/portal';
   }
   if (isAdminSpaceRole(normalized)) return '/';
@@ -99,8 +93,10 @@ interface PortalOnboardingRedirectInput {
  */
 export function shouldForcePortalOnboarding(input: PortalOnboardingRedirectInput): boolean {
   if (!input.isAuthenticated) return false;
-  if (canChooseWorkspace(input.role)) return false;
+  if (isAdminSpaceRole(input.role)) return false;
   if (!canEnterPortalWorkspace(input.role)) return false;
   if (input.isRegistered) return false;
-  return !input.pathname.includes('/portal/onboarding');
+  // onboarding, project-settings, weekly-expenses는 미등록 상태에서도 접근 허용
+  const bypassPaths = ['/portal/onboarding', '/portal/project-settings', '/portal/register-project', '/portal/weekly-expenses'];
+  return !bypassPaths.some((p) => input.pathname.includes(p));
 }

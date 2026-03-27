@@ -9,7 +9,10 @@ import { usePortalStore } from '../../data/portal-store';
 import {
   detectBankStatementProfile,
   getBankStatementProfileLabel,
+  isHtmlMaskedAsXls,
   normalizeBankStatementMatrix,
+  parseHtmlBankExport,
+  sanitizeHtmlMatrix,
   type BankStatementRow,
 } from '../../platform/bank-statement';
 import { normalizeKey, parseCsv, parseNumber } from '../../platform/csv-utils';
@@ -84,6 +87,16 @@ export function PortalBankStatementPage() {
   }, [columns]);
 
   const parseExcelToMatrix = useCallback(async (file: File): Promise<string[][]> => {
+    // KB 등 HTML-as-XLS 감지: 파일 앞부분이 HTML 태그로 시작하면 HTML 파서 사용
+    const headBytes = new Uint8Array(await file.slice(0, 512).arrayBuffer());
+    const headText = new TextDecoder('utf-8', { fatal: false }).decode(headBytes).trim();
+    if (isHtmlMaskedAsXls(headText)) {
+      const fullText = await file.text();
+      const matrix = sanitizeHtmlMatrix(parseHtmlBankExport(fullText));
+      if (matrix.length > 0) return matrix;
+      // fallback to XLSX if HTML parse yields nothing
+    }
+
     const XLSX = await import('xlsx');
     const buffer = new Uint8Array(await file.arrayBuffer());
     const workbook = XLSX.read(buffer, { type: 'array', cellDates: true, raw: false });

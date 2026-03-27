@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "fullAccessRoles": ["admin"],
+  "routePermissions": {
+    "finance": [
+      "/",
+      "/projects",
+      "/board",
+      "/cashflow",
+      "/evidence",
+      "/payroll",
+      "/budget-summary",
+      "/expense-management",
+      "/approvals",
+      "/audit",
+      "/claude-sdk-help",
+      "/portal"
+    ],
+    "pm": [
+      "/",
+      "/projects",
+      "/projects/new",
+      "/board",
+      "/cashflow",
+      "/evidence",
+      "/expense-management",
+      "/approvals",
+      "/claude-sdk-help",
+      "/portal"
+    ],
+    "viewer": [
+      "/",
+      "/projects",
+      "/board",
+      "/claude-sdk-help",
+      "/portal"
+    ]
+  }
+}

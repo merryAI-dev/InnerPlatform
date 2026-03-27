@@ -1,0 +1,32 @@
+#!/bin/sh
+
+# ── Commit type ratio tracker ──
+# Tracks fix vs feat ratio in recent commits to surface shipping patterns
+
+RECENT=$(git log --oneline -20 --format="%s" 2>/dev/null)
+[ -z "$RECENT" ] && exit 0
+
+FEAT=$(echo "$RECENT" | grep -icE '^feat(\(|:)' || true)
+FIX=$(echo "$RECENT" | grep -icE '^(fix|hotfix)(\(|:| )' || true)
+REFACTOR=$(echo "$RECENT" | grep -icE '^refactor(\(|:)' || true)
+TEST=$(echo "$RECENT" | grep -icE '^test(\(|:)' || true)
+TOTAL=$(echo "$RECENT" | wc -l | tr -d ' ')
+
+[ "$TOTAL" -eq 0 ] && exit 0
+
+FIX_PCT=$((FIX * 100 / TOTAL))
+
+# Save stats to git-local file (not committed)
+GIT_DIR=$(git rev-parse --git-dir 2>/dev/null)
+cat > "$GIT_DIR/commit-type-stats.json" << STATS
+{"last_20":{"feat":$FEAT,"fix":$FIX,"refactor":$REFACTOR,"test":$TEST,"total":$TOTAL,"fix_pct":$FIX_PCT}}
+STATS
+
+if [ "$FIX_PCT" -gt 50 ]; then
+  echo ""
+  echo "\033[33m📊 Fix ratio: ${FIX_PCT}% of last 20 commits are fix/hotfix (${FIX}/${TOTAL})\033[0m"
+  echo "\033[33m   feat: ${FEAT} | fix: ${FIX} | refactor: ${REFACTOR} | test: ${TEST}\033[0m"
+  echo "\033[33m   Consider: more feat/refactor work to balance the ratio.\033[0m"
+fi
+
+exit 0

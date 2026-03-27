@@ -15,7 +15,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 350000000,
@@ -56,7 +56,7 @@
       "contractStart": "2025-02-27",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 169300000,
@@ -97,7 +97,7 @@
       "contractStart": "2025-07-15",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 100000000,
@@ -138,7 +138,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 0,
@@ -179,7 +179,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 20000000,
@@ -220,7 +220,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 1,
@@ -261,7 +261,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 114960000,
@@ -302,7 +302,7 @@
       "contractStart": "2025-05-01",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 170000000,
@@ -343,7 +343,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 107185000,
@@ -384,7 +384,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 323730000,
@@ -425,7 +425,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 1,
@@ -466,7 +466,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 600000000,
@@ -507,7 +507,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 16280000,
@@ -548,7 +548,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 180000000,
@@ -589,7 +589,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 0,
@@ -630,7 +630,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 9900000,
@@ -671,7 +671,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 0,
@@ -712,7 +712,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 386870000,
@@ -753,7 +753,7 @@
       "contractStart": "2025-02-01",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 2598820620,
@@ -794,7 +794,7 @@
       "contractStart": "2025-03-01",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 400000000,
@@ -835,7 +835,7 @@
       "contractStart": "2025-06-17",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 984068413,
@@ -876,7 +876,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 0,
@@ -917,7 +917,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 150000000,
@@ -958,7 +958,7 @@
       "contractStart": "2024-12-09",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 559826922,
@@ -999,7 +999,7 @@
       "contractStart": "2025-08-01",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 783154890,
@@ -1040,7 +1040,7 @@
       "contractStart": "2025-02-19",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 380000000,
@@ -1081,7 +1081,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 280000000,
@@ -1122,7 +1122,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 400000000,
@@ -1163,7 +1163,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 0,
@@ -1204,7 +1204,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 410000000,
@@ -1245,7 +1245,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 50000000,
@@ -1286,7 +1286,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 0,
@@ -1327,7 +1327,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 0,
@@ -1368,7 +1368,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 750000000,
@@ -1409,7 +1409,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 7700000,
@@ -1450,7 +1450,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 0,
@@ -1491,7 +1491,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 1,
@@ -1532,7 +1532,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 180000000,
@@ -1573,7 +1573,7 @@
       "contractStart": "2025-03-19",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 350000000,
@@ -1614,7 +1614,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 399961820,
@@ -1655,7 +1655,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 120000000,
@@ -1696,7 +1696,7 @@
       "contractStart": "2025-03-10",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 40000000,
@@ -1737,7 +1737,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 29000000,
@@ -1778,7 +1778,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 220000000,
@@ -1819,7 +1819,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 189800000,
@@ -1860,7 +1860,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 143000000,
@@ -1901,7 +1901,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 500000000,
@@ -1942,7 +1942,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 138000000,
@@ -1983,7 +1983,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 300000000,
@@ -2024,7 +2024,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 0,
@@ -2065,7 +2065,7 @@
       "contractStart": "2025-09-16",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 21560000,
@@ -2106,7 +2106,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 0,
@@ -2147,7 +2147,7 @@
       "contractStart": "2025-06-16",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 22000000,
@@ -2188,7 +2188,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 0,
@@ -2229,7 +2229,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 28297000,
@@ -2270,7 +2270,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 85704520,
@@ -2311,7 +2311,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 700000000,
@@ -2352,7 +2352,7 @@
       "contractStart": "2024-01-01",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 240322934,
@@ -2393,7 +2393,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 893338484,
@@ -2434,7 +2434,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 0,
@@ -2475,7 +2475,7 @@
       "contractStart": "2023-08-10",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 0,
@@ -2516,7 +2516,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 0,
@@ -2557,7 +2557,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 0,
@@ -2598,7 +2598,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 204582037,
@@ -2639,7 +2639,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 284406165,
@@ -2680,7 +2680,7 @@
       "contractStart": "2024-09-01",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 0,
@@ -2721,7 +2721,7 @@
       "contractStart": "2023-09-20",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 164086157,
@@ -2762,7 +2762,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 0,
@@ -2803,7 +2803,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 0,
@@ -2844,7 +2844,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 80000000,
@@ -2885,7 +2885,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 80000000,
@@ -2926,7 +2926,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 80000000,
@@ -2967,7 +2967,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 80000000,
@@ -3008,7 +3008,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 80000000,
@@ -3049,7 +3049,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 15000000,
@@ -3090,7 +3090,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 3500,
@@ -3131,7 +3131,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 0,
@@ -3172,7 +3172,7 @@
       "contractStart": "2025-01-02",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 9900000,
@@ -3213,7 +3213,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 0,
@@ -3254,7 +3254,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 0,
@@ -3295,7 +3295,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 0,
@@ -3336,7 +3336,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 0,
@@ -3377,7 +3377,7 @@
       "contractStart": "2025-07-01",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 2200000,
@@ -3418,7 +3418,7 @@
       "contractStart": "2025-03-14",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 141000000,
@@ -3459,7 +3459,7 @@
       "contractStart": "2025-03-11",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 20000000,
@@ -3500,7 +3500,7 @@
       "contractStart": "2025-07-25",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 50000000,
@@ -3541,7 +3541,7 @@
       "contractStart": "2025-04-11",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 21860000,
@@ -3582,7 +3582,7 @@
       "contractStart": "2025-05-01",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 80191160,
@@ -3623,7 +3623,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 0,
@@ -3664,7 +3664,7 @@
       "contractStart": "2025-01-15",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 590660000,
@@ -3705,7 +3705,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 11000000,
@@ -3746,7 +3746,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 3000000,
@@ -3787,7 +3787,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 7000000,
@@ -3828,7 +3828,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 229984210,
@@ -3869,7 +3869,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 99627000,
@@ -3910,7 +3910,7 @@
       "contractStart": "2025-06-17",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 395992710,
@@ -3951,7 +3951,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 397000000,
@@ -3992,7 +3992,7 @@
       "contractStart": "2025-05-15",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 18000000,
@@ -4033,7 +4033,7 @@
       "contractStart": "2025-06-20",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 10000000,
@@ -4074,7 +4074,7 @@
       "contractStart": "2025-09-11",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 52000000,
@@ -4115,7 +4115,7 @@
       "contractStart": "2023-08-10",
       "contractEnd": "2025-06-30",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "DEDICATED",
       "paymentPlan": {
         "contract": 0,
@@ -4156,7 +4156,7 @@
       "contractStart": "2024-12-09",
       "contractEnd": "2025-12-08",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "DEDICATED",
       "paymentPlan": {
         "contract": 0,
@@ -4197,7 +4197,7 @@
       "contractStart": "2024-01-01",
       "contractEnd": "2024-12-31",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "DEDICATED",
       "paymentPlan": {
         "contract": 0,
@@ -4238,7 +4238,7 @@
       "contractStart": "2023-09-20",
       "contractEnd": "2023-06-30",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "DEDICATED",
       "paymentPlan": {
         "contract": 0,
@@ -4279,7 +4279,7 @@
       "contractStart": "2025-06-17",
       "contractEnd": "2026-10-30",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "DEDICATED",
       "paymentPlan": {
         "contract": 0,
@@ -4320,7 +4320,7 @@
       "contractStart": "2025-08-01",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "DEDICATED",
       "paymentPlan": {
         "contract": 0,
@@ -4361,7 +4361,7 @@
       "contractStart": "2024-09-01",
       "contractEnd": "2025-08-30",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "OPERATING",
       "paymentPlan": {
         "contract": 0,
@@ -4402,7 +4402,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "OPERATING",
       "paymentPlan": {
         "contract": 0,
@@ -4443,7 +4443,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "OPERATING",
       "paymentPlan": {
         "contract": 0,
@@ -4484,7 +4484,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 0,
@@ -4525,7 +4525,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "DEDICATED",
       "paymentPlan": {
         "contract": 0,
@@ -4566,7 +4566,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "DEDICATED",
       "paymentPlan": {
         "contract": 0,
@@ -4607,7 +4607,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 0,
@@ -4648,7 +4648,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 0,
@@ -4689,7 +4689,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 0,
@@ -4730,7 +4730,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 0,
@@ -4771,7 +4771,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "NONE",
       "paymentPlan": {
         "contract": 0,
@@ -4812,7 +4812,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "OPERATING",
       "paymentPlan": {
         "contract": 0,
@@ -4853,7 +4853,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "OPERATING",
       "paymentPlan": {
         "contract": 0,
@@ -4894,7 +4894,7 @@
       "contractStart": "",
       "contractEnd": "",
       "settlementType": "TYPE1",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "accountType": "OPERATING",
       "paymentPlan": {
         "contract": 0,
@@ -5506,7 +5506,7 @@
       "projectId": "p-yh60kd",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5516,7 +5516,7 @@
       "projectId": "p-114ywu4",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5526,7 +5526,7 @@
       "projectId": "p-1m6c083",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5536,7 +5536,7 @@
       "projectId": "p-1eks49e",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5546,7 +5546,7 @@
       "projectId": "p-ny6rd4",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5556,7 +5556,7 @@
       "projectId": "p-9up34",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5566,7 +5566,7 @@
       "projectId": "p-1ixcf68",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5576,7 +5576,7 @@
       "projectId": "p-1ul7itx",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5586,7 +5586,7 @@
       "projectId": "p-qcmt1c",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5596,7 +5596,7 @@
       "projectId": "p-6wdnce",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5606,7 +5606,7 @@
       "projectId": "p-3j9zjh",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5616,7 +5616,7 @@
       "projectId": "p-1nxub4q",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5626,7 +5626,7 @@
       "projectId": "p-1r03eed",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5636,7 +5636,7 @@
       "projectId": "p-1elv0gp",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5646,7 +5646,7 @@
       "projectId": "p-2s5vo6",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5656,7 +5656,7 @@
       "projectId": "p-1j0mute",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5666,7 +5666,7 @@
       "projectId": "p-1vigohx",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5676,7 +5676,7 @@
       "projectId": "p-ddm5q2",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5686,7 +5686,7 @@
       "projectId": "p-oib852",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5696,7 +5696,7 @@
       "projectId": "p-1jct5th",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5706,7 +5706,7 @@
       "projectId": "p-tka2um",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5716,7 +5716,7 @@
       "projectId": "p-1c807ww",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5726,7 +5726,7 @@
       "projectId": "p-u2zoxy",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5736,7 +5736,7 @@
       "projectId": "p-13jrod9",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5746,7 +5746,7 @@
       "projectId": "p-7oiozu",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5756,7 +5756,7 @@
       "projectId": "p-1bm8pen",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5766,7 +5766,7 @@
       "projectId": "p-9tccqm",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5776,7 +5776,7 @@
       "projectId": "p-cx3ou",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5786,7 +5786,7 @@
       "projectId": "p-15vl91l",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5796,7 +5796,7 @@
       "projectId": "p-i0wwid",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5806,7 +5806,7 @@
       "projectId": "p-1ik3jgk",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5816,7 +5816,7 @@
       "projectId": "p-100zsjo",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5826,7 +5826,7 @@
       "projectId": "p-c2cwku",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5836,7 +5836,7 @@
       "projectId": "p-1l9s3yn",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5846,7 +5846,7 @@
       "projectId": "p-17s9h7c",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5856,7 +5856,7 @@
       "projectId": "p-1v1rh7r",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5866,7 +5866,7 @@
       "projectId": "p-1ia9uf3",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5876,7 +5876,7 @@
       "projectId": "p-p9mp3d",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5886,7 +5886,7 @@
       "projectId": "p-atckmm",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5896,7 +5896,7 @@
       "projectId": "p-1t2lh3h",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5906,7 +5906,7 @@
       "projectId": "p-1vvv69t",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5916,7 +5916,7 @@
       "projectId": "p-17fs4pe",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5926,7 +5926,7 @@
       "projectId": "p-1pi8yu6",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5936,7 +5936,7 @@
       "projectId": "p-1bq1b4a",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5946,7 +5946,7 @@
       "projectId": "p-1gzzy01",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5956,7 +5956,7 @@
       "projectId": "p-1tc97az",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5966,7 +5966,7 @@
       "projectId": "p-19391lq",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5976,7 +5976,7 @@
       "projectId": "p-12qfk0z",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5986,7 +5986,7 @@
       "projectId": "p-12tlxdn",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -5996,7 +5996,7 @@
       "projectId": "p-s5geve",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6006,7 +6006,7 @@
       "projectId": "p-6w0c4x",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6016,7 +6016,7 @@
       "projectId": "p-1eycsex",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6026,7 +6026,7 @@
       "projectId": "p-1eoq1tu",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6036,7 +6036,7 @@
       "projectId": "p-10o9u99",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6046,7 +6046,7 @@
       "projectId": "p-1izt7ot",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6056,7 +6056,7 @@
       "projectId": "p-z3y7jf",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6066,7 +6066,7 @@
       "projectId": "p-1n2lkhf",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6076,7 +6076,7 @@
       "projectId": "p-4r39bd",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6086,7 +6086,7 @@
       "projectId": "p-1l35ga8",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6096,7 +6096,7 @@
       "projectId": "p-qvuq8z",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6106,7 +6106,7 @@
       "projectId": "p-h0ewip",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6116,7 +6116,7 @@
       "projectId": "p-103f0p8",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6126,7 +6126,7 @@
       "projectId": "p-74wtqj",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6136,7 +6136,7 @@
       "projectId": "p-1gpalb",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6146,7 +6146,7 @@
       "projectId": "p-1vp939",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6156,7 +6156,7 @@
       "projectId": "p-c6ck4s",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6166,7 +6166,7 @@
       "projectId": "p-9k8hyy",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6176,7 +6176,7 @@
       "projectId": "p-tdumyu",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6186,7 +6186,7 @@
       "projectId": "p-8wgeer",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6196,7 +6196,7 @@
       "projectId": "p-1glypr8",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6206,7 +6206,7 @@
       "projectId": "p-gm2614",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6216,7 +6216,7 @@
       "projectId": "p-r4ry30",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6226,7 +6226,7 @@
       "projectId": "p-1lfxoku",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6236,7 +6236,7 @@
       "projectId": "p-pxujzb",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6246,7 +6246,7 @@
       "projectId": "p-1ot6b87",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6256,7 +6256,7 @@
       "projectId": "p-1svj1ix",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6266,7 +6266,7 @@
       "projectId": "p-11gshua",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6276,7 +6276,7 @@
       "projectId": "p-1gfl2cp",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6286,7 +6286,7 @@
       "projectId": "p-hb3ki0",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6296,7 +6296,7 @@
       "projectId": "p-1t201pq",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6306,7 +6306,7 @@
       "projectId": "p-zpkpnk",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6316,7 +6316,7 @@
       "projectId": "p-10024zx",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6326,7 +6326,7 @@
       "projectId": "p-1fz7s0e",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6336,7 +6336,7 @@
       "projectId": "p-zkogi4",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6346,7 +6346,7 @@
       "projectId": "p-1otp9ya",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6356,7 +6356,7 @@
       "projectId": "p-1vr1x31",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6366,7 +6366,7 @@
       "projectId": "p-co0kvg",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6376,7 +6376,7 @@
       "projectId": "p-1i12dx2",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6386,7 +6386,7 @@
       "projectId": "p-pnkcth",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6396,7 +6396,7 @@
       "projectId": "p-1lppt59",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6406,7 +6406,7 @@
       "projectId": "p-acpcsc",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6416,7 +6416,7 @@
       "projectId": "p-d6be1y",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6426,7 +6426,7 @@
       "projectId": "p-1hd8mpf",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6436,7 +6436,7 @@
       "projectId": "p-khbto4",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6446,7 +6446,7 @@
       "projectId": "p-17ozy7r",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6456,7 +6456,7 @@
       "projectId": "p-14swn0z",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6466,7 +6466,7 @@
       "projectId": "p-j02koq",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6476,7 +6476,7 @@
       "projectId": "p-xwqbxk",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6486,7 +6486,7 @@
       "projectId": "p-u21r82",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6496,7 +6496,7 @@
       "projectId": "p-14eu7j9",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6506,7 +6506,7 @@
       "projectId": "p-1j2h57v",
       "templateId": "tpl001",
       "name": "전용통장 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6516,7 +6516,7 @@
       "projectId": "p-hj91a2",
       "templateId": "tpl001",
       "name": "전용통장 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6526,7 +6526,7 @@
       "projectId": "p-wup4se",
       "templateId": "tpl001",
       "name": "전용통장 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6536,7 +6536,7 @@
       "projectId": "p-1c7z4nt",
       "templateId": "tpl001",
       "name": "전용통장 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6546,7 +6546,7 @@
       "projectId": "p-53xbrg",
       "templateId": "tpl001",
       "name": "전용통장 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6556,7 +6556,7 @@
       "projectId": "p-1q6n005",
       "templateId": "tpl001",
       "name": "전용통장 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6566,7 +6566,7 @@
       "projectId": "p-7rt6ij",
       "templateId": "tpl002",
       "name": "운영통장 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6576,7 +6576,7 @@
       "projectId": "p-rl41kl",
       "templateId": "tpl002",
       "name": "운영통장 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6586,7 +6586,7 @@
       "projectId": "p-5c70ce",
       "templateId": "tpl002",
       "name": "운영통장 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6596,7 +6596,7 @@
       "projectId": "p-1luq9kf",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6606,7 +6606,7 @@
       "projectId": "p-1hcakvo",
       "templateId": "tpl001",
       "name": "전용통장 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6616,7 +6616,7 @@
       "projectId": "p-92qj6d",
       "templateId": "tpl001",
       "name": "전용통장 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6626,7 +6626,7 @@
       "projectId": "p-14jn421",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6636,7 +6636,7 @@
       "projectId": "p-vk97ux",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6646,7 +6646,7 @@
       "projectId": "p-idw9jl",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6656,7 +6656,7 @@
       "projectId": "p-rtotq9",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6666,7 +6666,7 @@
       "projectId": "p-1xsrrcu",
       "templateId": "tpl003",
       "name": "정산제출 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6676,7 +6676,7 @@
       "projectId": "p-brvjtn",
       "templateId": "tpl002",
       "name": "운영통장 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6686,7 +6686,7 @@
       "projectId": "p-vm7lc1",
       "templateId": "tpl002",
       "name": "운영통장 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"
@@ -6696,7 +6696,7 @@
       "projectId": "p-1xrov8i",
       "templateId": "tpl002",
       "name": "운영통장 원장",
-      "basis": "SUPPLY_AMOUNT",
+      "basis": "공급가액",
       "settlementType": "TYPE1",
       "createdAt": "2026-02-24T04:20:41.600Z",
       "updatedAt": "2026-02-24T04:20:41.600Z"

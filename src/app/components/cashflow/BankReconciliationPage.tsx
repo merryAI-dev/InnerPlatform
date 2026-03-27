@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import {
-  Upload, CheckCircle2, XCircle, AlertTriangle, ArrowLeftRight, Filter,
+  Upload, CheckCircle2, XCircle, AlertTriangle, ArrowLeftRight, Filter, Trash2,
 } from 'lucide-react';
 import { Card, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
@@ -68,6 +68,10 @@ export function BankReconciliationPage() {
     projects.forEach(p => { m[p.id] = p.name; });
     return m;
   }, [projects]);
+
+  const removeBankTx = useCallback((id: string) => {
+    setBankTxs((prev) => prev.filter((tx) => tx.id !== id));
+  }, []);
 
   const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -179,6 +183,7 @@ export function BankReconciliationPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead className="text-[10px] w-[32px]" />
                     <TableHead className="text-[10px] w-[60px]">상태</TableHead>
                     <TableHead className="text-[10px]">신뢰도</TableHead>
                     <TableHead className="text-[10px] min-w-[80px]">은행 일자</TableHead>
@@ -196,6 +201,18 @@ export function BankReconciliationPage() {
                     const st = STATUS_STYLE[m.status];
                     return (
                       <TableRow key={idx} className="h-9">
+                        <TableCell className="py-1 px-1">
+                          {m.bankTx && (
+                            <button
+                              type="button"
+                              className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-destructive"
+                              onClick={() => removeBankTx(m.bankTx!.id)}
+                              title="이 행 삭제"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </TableCell>
                         <TableCell className="py-1">
                           <span className={`text-[9px] px-1.5 py-0.5 rounded-md ${st.bg} ${st.text}`} style={{ fontWeight: 500 }}>
                             {st.label}

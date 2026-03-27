@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import {
-  Settings, Users, BookOpen, Shield, Building2, Plus, Database, Upload, MessageCircle,
+  Settings, Users, BookOpen, Building2, Plus, Database, Upload, MessageCircle, Palette, Shield,
 } from 'lucide-react';
+import { ROLE_META } from '../../platform/role-meta';
+import { hasPermission, type PlatformPermission } from '../../platform/rbac';
 import { useLocation, useNavigate } from 'react-router';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
@@ -21,30 +23,25 @@ import {
 import { FirebaseSetup } from './FirebaseSetup';
 import { DataMigrationTab } from './DataMigrationTab';
 import { GuideUploadTab } from '../guide-chat/GuideUploadTab';
+import { TenantManagementTab } from './TenantManagementTab';
+import { TenantBrandingTab } from './TenantBrandingTab';
 import { PageHeader } from '../layout/PageHeader';
 import { useAuth } from '../../data/auth-store';
 import { resolveHomePath } from '../../platform/navigation';
 
-const roleLabels: Record<string, string> = {
-  admin: '관리자',
-  tenant_admin: '테넌트 관리자',
-  finance: '재무',
-  pm: 'PM',
-  viewer: '뷰어',
-  auditor: '감사',
-  support: '지원',
-  security: '보안',
-};
+const DISPLAY_ROLES = ['admin', 'finance', 'pm', 'viewer'] as const;
+type DisplayRole = typeof DISPLAY_ROLES[number];
 
-const roleColor: Record<string, string> = {
-  admin: 'bg-purple-100 text-purple-800',
-  tenant_admin: 'bg-violet-100 text-violet-800',
-  finance: 'bg-blue-100 text-blue-800',
-  pm: 'bg-green-100 text-green-800',
-  viewer: 'bg-gray-100 text-gray-700',
-  auditor: 'bg-amber-100 text-amber-800',
-  support: 'bg-slate-100 text-slate-700',
-  security: 'bg-rose-100 text-rose-800',
+const PERMISSION_LABELS: Partial<Record<PlatformPermission, string>> = {
+  'project:write':       '프로젝트 생성/수정',
+  'ledger:write':        '원장 생성',
+  'transaction:submit':  '거래 입력/수정',
+  'transaction:approve': '거래 승인/반려',
+  'evidence:write':      '증빙 첨부',
+  'comment:write':       '댓글/제출',
+  'audit:read':          '감사 로그 조회',
+  'user:manage':         '구성원 관리',
+  'tenant:manage':       '설정 변경',
 };
 
 export function SettingsPage() {
@@ -52,7 +49,9 @@ export function SettingsPage() {
   const { isAuthenticated, user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const [tab, setTab] = useState('org');
+  const searchParams = new URLSearchParams(location.search);
+  const initialTab = searchParams.get('tab') || 'org';
+  const [tab, setTab] = useState(initialTab);
   const currentPath = `${location.pathname}${location.search}${location.hash}`;
 
   useEffect(() => {
@@ -65,7 +64,7 @@ export function SettingsPage() {
     if (!role) return;
 
     // Keep operational settings (Firebase/feature toggles, member management) admin-scoped.
-    const allowed = role === 'admin' || role === 'tenant_admin';
+    const allowed = role === 'admin';
     if (!allowed) {
       navigate(resolveHomePath(role, user?.defaultWorkspace ?? user?.lastWorkspace), { replace: true });
     }
@@ -73,7 +72,7 @@ export function SettingsPage() {
 
   if (!isAuthenticated) return null;
   if (!user) return null;
-  if (!(user.role === 'admin' || user.role === 'tenant_admin')) return null;
+  if (user.role !== 'admin') return null;
 
   return (
     <div className="space-y-5">
@@ -107,6 +106,16 @@ export function SettingsPage() {
           <TabsTrigger value="guide" className="gap-1.5">
             <MessageCircle className="w-3.5 h-3.5" /> 사업비 가이드
           </TabsTrigger>
+          {user.role === 'admin' && (
+            <>
+              <TabsTrigger value="tenants" className="gap-1.5">
+                <Building2 className="w-3.5 h-3.5" /> 테넌트 관리
+              </TabsTrigger>
+              <TabsTrigger value="branding" className="gap-1.5">
+                <Palette className="w-3.5 h-3.5" /> 브랜딩/기능
+              </TabsTrigger>
+            </>
+          )}
         </TabsList>
 
         {/* Organization */}
@@ -154,10 +163,14 @@ export function SettingsPage() {
             <CardHeader>
               <div className="flex items-center justify-between">
                 <CardTitle className="text-base">구성원 ({members.length}명)</CardTitle>
-                <Button variant="outline" size="sm" className="gap-1.5">
-                  <Plus className="w-3.5 h-3.5" /> 구성원 초대
+                <Button variant="outline" size="sm" className="gap-1.5" onClick={() => navigate('/users')}>
+                  <Plus className="w-3.5 h-3.5" /> 구성원·역할 관리
                 </Button>
               </div>
+              <p className="text-[12px] text-muted-foreground">
+                신규 구성원은 첫 로그인 시 자동 등록됩니다 (기본 역할: PM).
+                역할 변경·추가·삭제는 <button type="button" className="underline underline-offset-2" onClick={() => navigate('/users')}>구성원 관리 페이지</button>에서 할 수 있어요.
+              </p>
             </CardHeader>
             <CardContent>
               <Table>
@@ -175,8 +188,8 @@ export function SettingsPage() {
                       <TableCell style={{ fontWeight: 500 }}>{m.name}</TableCell>
                       <TableCell className="text-sm text-muted-foreground">{m.email}</TableCell>
                       <TableCell>
-                        <span className={`text-xs px-2 py-0.5 rounded ${roleColor[m.role]}`}>
-                          {roleLabels[m.role]}
+                        <span className={`text-xs px-2 py-0.5 rounded ${ROLE_META[m.role]?.badgeClass ?? ''}`}>
+                          {ROLE_META[m.role]?.label ?? m.role}
                         </span>
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground font-mono">{m.uid}</TableCell>
@@ -262,34 +275,20 @@ export function SettingsPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>권한</TableHead>
-                    <TableHead className="text-center">관리자</TableHead>
-                    <TableHead className="text-center">재무</TableHead>
-                    <TableHead className="text-center">PM</TableHead>
-                    <TableHead className="text-center">감사</TableHead>
-                    <TableHead className="text-center">뷰어</TableHead>
+                    {DISPLAY_ROLES.map(role => (
+                      <TableHead key={role} className="text-center">
+                        {ROLE_META[role].label}
+                      </TableHead>
+                    ))}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {[
-                    { perm: '프로젝트 생성/수정', admin: true, finance: true, pm: false, auditor: false, viewer: false },
-                    { perm: '원장 생성', admin: true, finance: true, pm: true, auditor: false, viewer: false },
-                    { perm: '거래 입력/수정', admin: true, finance: true, pm: true, auditor: false, viewer: false },
-                    { perm: '거래 제출', admin: true, finance: true, pm: true, auditor: false, viewer: false },
-                    { perm: '거래 승인/반려', admin: true, finance: true, pm: false, auditor: false, viewer: false },
-                    { perm: '증빙 첨부', admin: true, finance: true, pm: true, auditor: false, viewer: false },
-                    { perm: '증빙 검토/반려', admin: true, finance: true, pm: false, auditor: false, viewer: false },
-                    { perm: '전사 대시보드 조회', admin: true, finance: true, pm: true, auditor: true, viewer: true },
-                    { perm: '캐시플로 분석', admin: true, finance: true, pm: true, auditor: true, viewer: true },
-                    { perm: '감사 로그 조회', admin: true, finance: false, pm: false, auditor: true, viewer: false },
-                    { perm: '설정 변경', admin: true, finance: false, pm: false, auditor: false, viewer: false },
-                    { perm: '구성원 관리', admin: true, finance: false, pm: false, auditor: false, viewer: false },
-                    { perm: '원장 템플릿 관리', admin: true, finance: true, pm: false, auditor: false, viewer: false },
-                  ].map(row => (
-                    <TableRow key={row.perm}>
-                      <TableCell className="text-sm">{row.perm}</TableCell>
-                      {(['admin', 'finance', 'pm', 'auditor', 'viewer'] as const).map(role => (
+                  {(Object.entries(PERMISSION_LABELS) as [PlatformPermission, string][]).map(([perm, label]) => (
+                    <TableRow key={perm}>
+                      <TableCell className="text-sm">{label}</TableCell>
+                      {DISPLAY_ROLES.map((role: DisplayRole) => (
                         <TableCell key={role} className="text-center">
-                          {row[role] ? (
+                          {hasPermission(role, perm) ? (
                             <span className="text-green-600">&#10003;</span>
                           ) : (
                             <span className="text-gray-300">&#10005;</span>
@@ -308,6 +307,18 @@ export function SettingsPage() {
         <TabsContent value="guide">
           <GuideUploadTab />
         </TabsContent>
+
+        {/* Tenant management (admin only) */}
+        {user.role === 'admin' && (
+          <>
+            <TabsContent value="tenants">
+              <TenantManagementTab />
+            </TabsContent>
+            <TabsContent value="branding">
+              <TenantBrandingTab />
+            </TabsContent>
+          </>
+        )}
       </Tabs>
     </div>
   );

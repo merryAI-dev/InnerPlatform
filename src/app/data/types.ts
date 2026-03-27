@@ -5,7 +5,7 @@
 
 // ── Enums ──
 
-export type UserRole = 'admin' | 'tenant_admin' | 'finance' | 'pm' | 'viewer' | 'auditor' | 'support' | 'security';
+export type UserRole = 'admin' | 'finance' | 'pm' | 'viewer';
 
 export type ProjectStatus = 'CONTRACT_PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'COMPLETED_PENDING_PAYMENT';
 export type ProjectType =
@@ -24,7 +24,7 @@ export type ProjectType =
 export type ProjectPhase = 'PROSPECT' | 'CONFIRMED';  // 입찰예정 / 확정
 
 export type SettlementType = 'TYPE1' | 'TYPE2' | 'TYPE3' | 'TYPE4' | 'TYPE5';
-export type Basis = 'SUPPLY_AMOUNT' | 'SUPPLY_PRICE'; // 공급가액 / 공급대가
+export type Basis = '공급가액' | '공급대가';
 
 export type AccountType = 'DEDICATED' | 'OPERATING' | 'NONE'; // 전용계좌 사업(이나라도움) / 전용계좌(이나라도움x) / 일반 사업
 
@@ -130,9 +130,16 @@ export const SETTLEMENT_TYPE_SHORT: Record<SettlementType, string> = {
 };
 
 export const BASIS_LABELS: Record<Basis, string> = {
-  SUPPLY_AMOUNT: '공급가액 기준',
-  SUPPLY_PRICE: '공급대가 기준',
+  '공급가액': '공급가액 기준',
+  '공급대가': '공급대가 기준',
 };
+
+/** Firestore 하위호환: 구 영문 enum도 인식 */
+export function normalizeBasis(raw: unknown): Basis {
+  if (raw === 'SUPPLY_AMOUNT' || raw === '공급가액') return '공급가액';
+  if (raw === 'SUPPLY_PRICE' || raw === '공급대가') return '공급대가';
+  return '공급가액';
+}
 
 export const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
   DEDICATED: '전용계좌 사업(이나라도움)',

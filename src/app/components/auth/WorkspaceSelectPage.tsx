@@ -1,30 +1,28 @@
 import { useEffect, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router';
+import { useNavigate } from 'react-router';
 import { ArrowRight, FolderKanban, Loader2, Shield } from 'lucide-react';
 import { Card, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
 import { useAuth } from '../../data/auth-store';
-import { canChooseWorkspace, resolvePostLoginPath } from '../../platform/navigation';
+import { canChooseWorkspace, isAdminSpaceRole, resolvePostLoginPath } from '../../platform/navigation';
 import type { WorkspaceId } from '../../data/member-workspace';
 
 export function WorkspaceSelectPage() {
   const navigate = useNavigate();
-  const location = useLocation();
   const { isAuthenticated, isLoading, user, setWorkspacePreference } = useAuth();
   const [pending, setPending] = useState<WorkspaceId | null>(null);
   const [error, setError] = useState('');
-  const redirectFrom = (location.state as { from?: string } | null)?.from;
 
   useEffect(() => {
     if (isLoading) return;
     if (!isAuthenticated || !user) {
-      navigate('/login', { replace: true, state: redirectFrom ? { from: redirectFrom } : undefined });
+      navigate('/login', { replace: true });
       return;
     }
     if (!canChooseWorkspace(user.role)) {
-      navigate(resolvePostLoginPath(user.role, user.defaultWorkspace ?? user.lastWorkspace, redirectFrom), { replace: true });
+      navigate(resolvePostLoginPath(user.role, user.defaultWorkspace ?? user.lastWorkspace), { replace: true });
     }
-  }, [isAuthenticated, isLoading, navigate, redirectFrom, user]);
+  }, [isAuthenticated, isLoading, navigate, user]);
 
   const handleSelect = async (workspace: WorkspaceId) => {
     if (!user) return;
@@ -36,7 +34,7 @@ export function WorkspaceSelectPage() {
       setError('공간 선택을 저장하지 못했습니다. 다시 시도해 주세요.');
       return;
     }
-    navigate(resolvePostLoginPath(user.role, workspace, redirectFrom), { replace: true });
+    navigate(workspace === 'admin' ? '/' : '/portal', { replace: true });
   };
 
   if (isLoading || !isAuthenticated || !user || !canChooseWorkspace(user.role)) {
@@ -48,6 +46,7 @@ export function WorkspaceSelectPage() {
   }
 
   const currentWorkspace = user.defaultWorkspace ?? user.lastWorkspace;
+  const canAccessAdmin = isAdminSpaceRole(user.role);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-indigo-50/30 to-teal-50/20 dark:from-slate-950 dark:via-indigo-950/10 dark:to-teal-950/10 flex items-center justify-center p-4">
@@ -82,12 +81,15 @@ export function WorkspaceSelectPage() {
               <Button
                 className="w-full h-11 gap-2"
                 variant={currentWorkspace === 'admin' ? 'default' : 'outline'}
-                disabled={pending !== null}
+                disabled={pending !== null || !canAccessAdmin}
                 onClick={() => void handleSelect('admin')}
               >
                 {pending === 'admin' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Shield className="h-4 w-4" />}
                 관리자 공간으로 계속
               </Button>
+              {!canAccessAdmin && (
+                <p className="text-[11px] text-muted-foreground/60 text-center">관리자/재무 역할만 접근할 수 있습니다</p>
+              )}
             </CardContent>
           </Card>
 

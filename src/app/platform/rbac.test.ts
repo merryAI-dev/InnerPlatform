@@ -9,14 +9,14 @@ import {
 describe('rbac helpers', () => {
   it('extracts auth context from firebase claims', () => {
     const context = extractAuthContextFromClaims({
-      role: 'TENANT_ADMIN',
+      role: 'FINANCE',
       tenantId: 'MYSC',
       permissions: ['project:read', 'invalid:perm'],
       department: 'operations',
     });
 
     expect(context).toEqual({
-      role: 'tenant_admin',
+      role: 'finance',
       tenantId: 'mysc',
       permissions: ['project:read'],
       department: 'operations',
@@ -40,9 +40,9 @@ describe('rbac helpers', () => {
     expect(context.permissions).toEqual(['project:write']);
   });
 
-  it('grants finance approvals and tenant_admin tenant management based on policy', () => {
+  it('grants finance approvals and admin tenant management based on policy', () => {
     expect(hasPermission('finance', 'transaction:approve')).toBe(true);
-    expect(hasPermission('tenant_admin', 'tenant:manage')).toBe(true);
+    expect(hasPermission('admin', 'tenant:manage')).toBe(true);
   });
 
   it('keeps viewer least-privileged but allows evidence drive workflows', () => {
@@ -55,7 +55,7 @@ describe('rbac helpers', () => {
   it('enforces tenant access for tenant-scoped roles', () => {
     expect(canAccessTenant({ actorRole: 'pm', actorTenantId: 't1', targetTenantId: 't1' })).toBe(true);
     expect(canAccessTenant({ actorRole: 'pm', actorTenantId: 't1', targetTenantId: 't2' })).toBe(false);
-    expect(canAccessTenant({ actorRole: 'support', actorTenantId: 't1', targetTenantId: 't2' })).toBe(true);
+    expect(canAccessTenant({ actorRole: 'admin', actorTenantId: 't1', targetTenantId: 't2' })).toBe(true);
   });
 
   it('checks project-scoped access based on role and assignment', () => {

@@ -73,7 +73,7 @@ export function CashflowProjectSheet({
   const navigate = useNavigate();
   const role = (roleOverride || user?.role || '').toString().toLowerCase() as UserRole | '';
   const isPm = role === 'pm';
-  const canClose = role === 'admin' || role === 'finance' || role === 'tenant_admin';
+  const canClose = role === 'admin' || role === 'finance';
   const canEdit = isPm || canClose;
   const todayIso = getSeoulTodayIso();
   const todayYearMonth = todayIso.slice(0, 7);
@@ -443,6 +443,12 @@ export function CashflowProjectSheet({
 
   const saveMonthProjection = useCallback(() => {
     const targets = monthWeeks.map((w) => w.weekNo);
+    // Check if there are any pending projection drafts for this month
+    const hasPendingDrafts = Object.keys(drafts).some((k) => k.startsWith(`${yearMonth}:projection:`));
+    if (!hasPendingDrafts) {
+      toast.message('저장할 변경사항이 없습니다.');
+      return;
+    }
     void (async () => {
       setMonthSaving(true);
       for (const weekNo of targets) {
@@ -455,7 +461,7 @@ export function CashflowProjectSheet({
     }).finally(() => {
       setMonthSaving(false);
     });
-  }, [flushWeek, monthWeeks]);
+  }, [drafts, flushWeek, monthWeeks, yearMonth]);
 
   const handleSubmitWeek = useCallback(async (input: { weekNo: number; yearMonth: string }) => {
     setSubmitBusy(true);

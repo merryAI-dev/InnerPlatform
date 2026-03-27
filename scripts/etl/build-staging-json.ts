@@ -467,7 +467,7 @@ function mapSettlementType(raw: unknown): string {
 
 function mapBasis(raw: unknown): string {
   const value = cleanText(raw);
-  return ['SUPPLY_AMOUNT', 'SUPPLY_PRICE'].includes(value) ? value : 'SUPPLY_AMOUNT';
+  return ['공급가액', '공급대가'].includes(value) ? value : '공급가액';
 }
 
 function mapAccountType(raw: unknown): string {

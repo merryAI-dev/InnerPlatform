@@ -3,6 +3,7 @@ import {
   deriveSettlementRows,
   type SettlementDerivationContext,
 } from './settlement-row-derivation';
+import { resolveEvidenceRequiredByRules } from './evidence-rules';
 
 function normalizeBudgetLabel(value: string): string {
   return String(value || '')
@@ -109,19 +110,33 @@ export function prepareSettlementImportRows(
   const budgetCodeIdx = getColumnIndex('비목');
   const subCodeIdx = getColumnIndex('세목');
   const evidenceIdx = getColumnIndex('필수증빙자료 리스트');
+  const expenseIdx = getColumnIndex('사업비 사용액');
+  const bankAmountIdx = getColumnIndex('통장에 찍힌 입/출금액');
   const normalizedRows = renumberRows(nonEmptyRows.map((row, index) => normalizeImportRow(row, index)));
   const withEvidenceMap = normalizedRows.map((row) => {
     if (budgetCodeIdx < 0 || subCodeIdx < 0 || evidenceIdx < 0) return row;
     const budgetCode = row.cells[budgetCodeIdx] || '';
     const subCode = row.cells[subCodeIdx] || '';
+    // 1순위: 프로젝트별 evidenceRequiredMap
     const mapped = resolveEvidenceRequiredDesc(options.evidenceRequiredMap, budgetCode, subCode);
-    if (!mapped) return row;
+    if (mapped) {
+      const cells = [...row.cells];
+      cells[evidenceIdx] = mapped;
+      return { ...row, cells };
+    }
+    // 2순위: 기본 규칙표 fallback (비목 + 금액 기반)
+    const amountStr = (expenseIdx >= 0 ? row.cells[expenseIdx] : '')
+      || (bankAmountIdx >= 0 ? row.cells[bankAmountIdx] : '')
+      || '';
+    const ruleResult = resolveEvidenceRequiredByRules(
+      normalizeBudgetLabel(budgetCode),
+      normalizeBudgetLabel(subCode),
+      amountStr,
+    );
+    if (!ruleResult) return row;
     const cells = [...row.cells];
-    cells[evidenceIdx] = mapped;
-    return {
-      ...row,
-      cells,
-    };
+    cells[evidenceIdx] = ruleResult;
+    return { ...row, cells };
   });
 
   return deriveSettlementRows(

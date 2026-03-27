@@ -5,11 +5,7 @@
     "admin",
     "finance",
     "pm",
-    "viewer",
-    "auditor",
-    "tenant_admin",
-    "support",
-    "security"
+    "viewer"
   ],
   "permissions": [
     "project:read",
@@ -27,8 +23,7 @@
     "evidence:drive:write",
     "audit:read",
     "user:manage",
-    "tenant:manage",
-    "security:manage"
+    "tenant:manage"
   ],
   "rolePermissions": {
     "admin": [
@@ -47,8 +42,7 @@
       "evidence:drive:write",
       "audit:read",
       "user:manage",
-      "tenant:manage",
-      "security:manage"
+      "tenant:manage"
     ],
     "finance": [
       "project:read",
@@ -88,70 +82,9 @@
       "comment:write",
       "evidence:read",
       "evidence:drive:write"
-    ],
-    "auditor": [
-      "project:read",
-      "project:write",
-      "project:evidence_drive:write",
-      "ledger:read",
-      "ledger:write",
-      "transaction:submit",
-      "comment:read",
-      "comment:write",
-      "evidence:read",
-      "evidence:write",
-      "evidence:drive:write",
-      "audit:read"
-    ],
-    "tenant_admin": [
-      "project:read",
-      "project:write",
-      "project:evidence_drive:write",
-      "ledger:read",
-      "ledger:write",
-      "transaction:submit",
-      "comment:read",
-      "comment:write",
-      "evidence:read",
-      "evidence:write",
-      "evidence:drive:write",
-      "audit:read",
-      "user:manage",
-      "tenant:manage"
-    ],
-    "support": [
-      "project:read",
-      "project:write",
-      "project:evidence_drive:write",
-      "ledger:read",
-      "ledger:write",
-      "transaction:submit",
-      "comment:read",
-      "comment:write",
-      "evidence:read",
-      "evidence:write",
-      "evidence:drive:write",
-      "audit:read"
-    ],
-    "security": [
-      "project:read",
-      "project:write",
-      "project:evidence_drive:write",
-      "ledger:read",
-      "ledger:write",
-      "transaction:submit",
-      "comment:read",
-      "comment:write",
-      "evidence:read",
-      "evidence:write",
-      "evidence:drive:write",
-      "audit:read",
-      "security:manage"
     ]
   },
   "roleChangeRules": {
-    "admin": ["admin", "finance", "pm", "viewer", "auditor", "tenant_admin", "support", "security"],
-    "tenant_admin": ["finance", "pm", "viewer", "auditor"],
-    "security": ["viewer", "auditor", "support"]
+    "admin": ["admin", "finance", "pm", "viewer"]
   }
 }

@@ -384,6 +384,43 @@ export function DashboardPage() {
         />
       </div>
 
+      {/* 참여율 위험 드릴다운 — 위험 인원 인라인 패널 */}
+      {participationDanger.length > 0 && (
+        <div className="rounded-lg border border-red-200 bg-red-50/60 px-4 py-3">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-1.5 text-[11px] text-red-700" style={{ fontWeight: 600 }}>
+              <AlertTriangle className="w-3.5 h-3.5" />
+              환수 위험 인원 {participationDanger.length}명 — 즉시 참여율 조정 필요
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 text-[10px] text-red-600 px-2 hover:bg-red-100"
+              onClick={() => navigate('/participation')}
+            >
+              상세 보기 <ChevronRight className="w-3 h-3 ml-0.5" />
+            </Button>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-1.5">
+            {participationDanger.map(m => (
+              <div
+                key={m.memberId}
+                className="flex items-center gap-2 text-xs cursor-pointer hover:opacity-80"
+                onClick={() => navigate('/participation')}
+              >
+                <div className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
+                <span className="text-red-800" style={{ fontWeight: 600 }}>{m.realName}</span>
+                {m.nickname && <span className="text-red-500 text-[10px]">({m.nickname})</span>}
+                <span className="text-red-600 tabular-nums">전체 {m.totalRate}%</span>
+                {m.eNaraRate > 100 && (
+                  <span className="text-red-400 tabular-nums text-[10px]">e나라 {m.eNaraRate}%</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* HR + Payroll Highlights */}
       {(hrSummary.unresolved.length > 0 || payrollSummary.due > 0 || payrollSummary.unacked > 0) && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
