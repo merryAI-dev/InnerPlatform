@@ -268,7 +268,7 @@ function resolveContractUploadUiState(
     buttonClass: 'bg-teal-600 text-white hover:bg-teal-700',
     statusLabel: '선택 사항',
     title: '계약서 PDF를 올리면 AI가 기본값을 채워줍니다',
-    description: '건너뛰어도 괜찮아요. 다음 단계에서 직접 입력할 수 있습니다.',
+    description: '건너뛰어도 괜찮아요! 다음 단계에서 직접 입력할 수 있습니다.',
     ctaLabel: '계약서 PDF 업로드',
   };
 }
@@ -663,7 +663,7 @@ export function PortalProjectRegister() {
                     </Badge>
                   </div>
                   <p className="text-[11px] text-muted-foreground">
-                    계약서 PDF를 올리면 AI가 기본 정보를 채워줍니다. 건너뛰어도 괜찮아요.
+                    계약서 PDF를 올리면 AI가 기본 정보를 채워줍니다. <span className="font-semibold text-teal-600 dark:text-teal-400">건너뛰어도 괜찮아요!</span>
                   </p>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -700,13 +700,14 @@ export function PortalProjectRegister() {
                       </Button>
                       <button
                         type="button"
-                        className="mt-2 text-[12px] text-muted-foreground underline hover:text-foreground"
+                        className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-teal-200 bg-teal-50 px-4 py-2.5 text-[13px] font-semibold text-teal-700 transition-colors hover:bg-teal-100 dark:border-teal-800 dark:bg-teal-950/30 dark:text-teal-300 dark:hover:bg-teal-950/50"
                         onClick={() => {
                           const basicIdx = STEPS.findIndex((s) => s.key === 'basic');
                           setHighestVisitedIdx((prev) => Math.max(prev, basicIdx));
                           setStep('basic');
                         }}
                       >
+                        <ArrowRight className="h-3.5 w-3.5" />
                         PDF 없이 직접 입력하기
                       </button>
                     </div>
@@ -750,8 +751,8 @@ export function PortalProjectRegister() {
                         </div>
                       </div>
                     ) : (
-                      <div className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-[11px] text-slate-600 dark:bg-slate-950/20 dark:text-slate-400">
-                        계약서 PDF 없이도 다음 단계로 넘어갈 수 있어요. 나중에 등록할 수도 있습니다.
+                      <div className="mt-4 rounded-xl border border-teal-200/60 bg-teal-50/50 px-4 py-3 text-[11px] text-teal-700 dark:border-teal-800/40 dark:bg-teal-950/20 dark:text-teal-300">
+                        <span className="font-semibold">PDF 없이도 진행 가능!</span> 위의 <span className="font-medium">&quot;PDF 없이 직접 입력하기&quot;</span> 버튼을 눌러 다음 단계로 넘어가세요.
                       </div>
                     )}
                   </div>
