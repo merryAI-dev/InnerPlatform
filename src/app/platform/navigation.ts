@@ -96,5 +96,7 @@ export function shouldForcePortalOnboarding(input: PortalOnboardingRedirectInput
   if (isAdminSpaceRole(input.role)) return false;
   if (!canEnterPortalWorkspace(input.role)) return false;
   if (input.isRegistered) return false;
-  return !input.pathname.includes('/portal/onboarding');
+  // onboarding, project-settings, weekly-expenses는 미등록 상태에서도 접근 허용
+  const bypassPaths = ['/portal/onboarding', '/portal/project-settings', '/portal/register-project', '/portal/weekly-expenses'];
+  return !bypassPaths.some((p) => input.pathname.includes(p));
 }

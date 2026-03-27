@@ -187,13 +187,16 @@ describe('shouldForcePortalOnboarding', () => {
     })).toBe(true);
   });
 
-  it('does NOT force if already on onboarding page', () => {
-    expect(shouldForcePortalOnboarding({
-      isAuthenticated: true, role: 'pm', isRegistered: false, pathname: '/portal/onboarding',
-    })).toBe(false);
-    expect(shouldForcePortalOnboarding({
-      isAuthenticated: true, role: 'viewer', isRegistered: false, pathname: '/portal/onboarding',
-    })).toBe(false);
+  it('does NOT force on bypass paths (onboarding, project-settings, weekly-expenses)', () => {
+    const bypassPaths = ['/portal/onboarding', '/portal/project-settings', '/portal/register-project', '/portal/weekly-expenses'];
+    for (const pathname of bypassPaths) {
+      expect(shouldForcePortalOnboarding({
+        isAuthenticated: true, role: 'pm', isRegistered: false, pathname,
+      }), `pm on ${pathname}`).toBe(false);
+      expect(shouldForcePortalOnboarding({
+        isAuthenticated: true, role: 'viewer', isRegistered: false, pathname,
+      }), `viewer on ${pathname}`).toBe(false);
+    }
   });
 
   it('does NOT force if registered', () => {
