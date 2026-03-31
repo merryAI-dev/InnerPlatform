@@ -9,7 +9,7 @@ describe('canShowAdminNavItem', () => {
     const paths = [
       '/', '/projects', '/projects/new', '/board', '/cashflow', '/evidence',
       '/payroll', '/budget-summary', '/expense-management', '/approvals',
-      '/users', '/audit', '/settings', '/participation', '/koica-personnel',
+      '/users', '/audit', '/settings', '/projects/migration-audit', '/participation', '/koica-personnel',
       '/personnel-changes', '/hr-announcements', '/claude-sdk-help', '/portal',
     ];
     for (const path of paths) {
@@ -28,7 +28,7 @@ describe('canShowAdminNavItem', () => {
 
   it('finance cannot see admin-only routes', () => {
     const denied = ['/users', '/settings', '/projects/new', '/participation',
-      '/koica-personnel', '/personnel-changes', '/hr-announcements'];
+      '/koica-personnel', '/personnel-changes', '/hr-announcements', '/projects/migration-audit'];
     for (const path of denied) {
       expect(canShowAdminNavItem('finance', path), `finance should NOT see ${path}`).toBe(false);
     }
@@ -45,7 +45,7 @@ describe('canShowAdminNavItem', () => {
 
   it('pm cannot see finance/admin-only routes', () => {
     const denied = ['/users', '/settings', '/payroll', '/budget-summary',
-      '/audit', '/participation', '/koica-personnel'];
+      '/audit', '/participation', '/koica-personnel', '/projects/migration-audit'];
     for (const path of denied) {
       expect(canShowAdminNavItem('pm', path), `pm should NOT see ${path}`).toBe(false);
     }
@@ -61,7 +61,7 @@ describe('canShowAdminNavItem', () => {
 
   it('viewer cannot see operational routes', () => {
     const denied = ['/cashflow', '/evidence', '/payroll', '/budget-summary',
-      '/expense-management', '/approvals', '/users', '/settings', '/projects/new'];
+      '/expense-management', '/approvals', '/users', '/settings', '/projects/new', '/projects/migration-audit'];
     for (const path of denied) {
       expect(canShowAdminNavItem('viewer', path), `viewer should NOT see ${path}`).toBe(false);
     }
@@ -104,6 +104,13 @@ describe('canAccessAdminPath', () => {
     expect(canAccessAdminPath('pm', '/projects/new')).toBe(true);
     expect(canAccessAdminPath('finance', '/projects/new')).toBe(false);
     expect(canAccessAdminPath('viewer', '/projects/new')).toBe(false);
+  });
+
+  it('migration audit route is admin-only', () => {
+    expect(canAccessAdminPath('admin', '/projects/migration-audit')).toBe(true);
+    expect(canAccessAdminPath('finance', '/projects/migration-audit')).toBe(false);
+    expect(canAccessAdminPath('pm', '/projects/migration-audit')).toBe(false);
+    expect(canAccessAdminPath('viewer', '/projects/migration-audit')).toBe(false);
   });
 
   it('project edit (canonical → /projects/new)', () => {

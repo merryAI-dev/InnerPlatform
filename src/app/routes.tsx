@@ -10,6 +10,7 @@ const DashboardPage = lazy(() => import('./components/dashboard/DashboardPage').
 const BoardFeedPage = lazy(() => import('./components/board/BoardFeedPage').then(m => ({ default: m.BoardFeedPage })));
 const BoardPostPage = lazy(() => import('./components/board/BoardPostPage').then(m => ({ default: m.BoardPostPage })));
 const ProjectListPage = lazy(() => import('./components/projects/ProjectListPage').then(m => ({ default: m.ProjectListPage })));
+const ProjectMigrationAuditPage = lazy(() => import('./components/projects/ProjectMigrationAuditPage').then(m => ({ default: m.ProjectMigrationAuditPage })));
 const ProjectDetailPage = lazy(() => import('./components/projects/ProjectDetailPage').then(m => ({ default: m.ProjectDetailPage })));
 const ProjectWizardPage = lazy(() => import('./components/projects/ProjectWizardPage').then(m => ({ default: m.ProjectWizardPage })));
 const ProjectRequestApprovalPage = lazy(() => import('./components/projects/ProjectRequestApprovalPage').then(m => ({ default: m.ProjectRequestApprovalPage })));
@@ -78,6 +79,7 @@ export const router = createBrowserRouter([
         ],
       },
       { path: 'projects', element: <S C={ProjectListPage} /> },
+      { path: 'projects/migration-audit', element: <S C={ProjectMigrationAuditPage} /> },
       { path: 'projects/new', element: <S C={ProjectRequestApprovalPage} /> },
       { path: 'projects/:projectId', element: <S C={ProjectDetailPage} /> },
       { path: 'projects/:projectId/edit', element: <S C={ProjectWizardPage} /> },
