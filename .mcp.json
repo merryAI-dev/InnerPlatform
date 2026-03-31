@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "slack-qa": {
+      "command": "node",
+      "args": ["/Users/boram/axr-qa-mcp/dist/index.js"],
+      "env": {
+        "SLACK_BOT_TOKEN": "${SLACK_BOT_TOKEN}",
+        "SLACK_QA_CHANNEL_ID": "C0AH3LQ00AD",
+        "SLACK_LIST_ID": "F0AGJCSEM27"
+      }
+    }
+  }
+}
