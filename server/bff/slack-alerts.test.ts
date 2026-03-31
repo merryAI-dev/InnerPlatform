@@ -83,4 +83,39 @@ describe('createSlackAlertService', () => {
     expect(body.channel).toBe('C1234567890');
     expect(body.text).toContain('[InnerPlatform][WARNING]');
   });
+
+  it('sends custom Slack messages through notifyMessage', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true, ts: '789.012' }),
+    }));
+    const service = createSlackAlertService({
+      webhookUrl: '',
+      botToken: 'xoxb-test-token',
+      channelId: 'C09BJ767XCM',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    await service.notifyMessage({
+      text: '[InnerPlatform] 신규 프로젝트 등록 완료: 2026 CTS2',
+      blocks: [
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: '*[InnerPlatform] 신규 프로젝트 등록 완료*',
+          },
+        },
+      ],
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe('https://slack.com/api/chat.postMessage');
+    const body = JSON.parse(String(init.body));
+    expect(body.channel).toBe('C09BJ767XCM');
+    expect(body.text).toContain('2026 CTS2');
+    expect(body.blocks[0].text.text).toContain('신규 프로젝트 등록 완료');
+  });
 });

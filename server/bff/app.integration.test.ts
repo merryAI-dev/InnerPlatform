@@ -119,6 +119,60 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     });
   });
 
+  it('delivers project registration Slack notifications for stored project requests', async () => {
+    const projectRegistrationSlackService = {
+      enabled: true,
+      notifyMessage: vi.fn(async () => {}),
+    };
+    const notifyApi = request(createBffApp({
+      projectId,
+      workerSecret,
+      db,
+      projectRegistrationSlackService,
+    }));
+
+    await db.doc(`orgs/${tenantId}/projectRequests/pr_notify_001`).set({
+      id: 'pr_notify_001',
+      tenantId,
+      status: 'APPROVED',
+      approvedProjectId: 'p_notify_001',
+      requestedByName: '보람',
+      requestedByEmail: 'boram@example.com',
+      payload: {
+        name: '2026 CTS2',
+        officialContractName: 'CTS 역량강화 사업',
+        clientOrg: 'CTS',
+        department: '개발협력센터',
+        managerName: '보람',
+        teamName: 'AXR팀',
+        contractStart: '2026-04-01',
+        contractEnd: '2026-12-31',
+        contractAmount: 120000000,
+        projectPurpose: '역량강화 교육 운영',
+      },
+      createdAt: '2026-03-31T10:00:00.000Z',
+      updatedAt: '2026-03-31T10:00:00.000Z',
+    }, { merge: true });
+
+    const response = await notifyApi
+      .post('/api/v1/project-requests/pr_notify_001/notify-registration')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-request-notify-001' })
+      .send({});
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      ok: true,
+      enabled: true,
+      delivered: true,
+      requestId: 'pr_notify_001',
+      projectId: 'p_notify_001',
+    });
+    expect(projectRegistrationSlackService.notifyMessage).toHaveBeenCalledTimes(1);
+    expect(projectRegistrationSlackService.notifyMessage).toHaveBeenCalledWith(expect.objectContaining({
+      text: expect.stringContaining('2026 CTS2'),
+    }));
+  });
+
   it('previews google sheet rows for an existing project', async () => {
     const googleSheetsService = {
       previewSpreadsheet: vi.fn(async ({ value, sheetName }) => ({

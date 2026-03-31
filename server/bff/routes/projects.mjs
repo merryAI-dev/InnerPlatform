@@ -24,6 +24,67 @@ import {
   projectDriveRootLinkSchema,
 } from '../schemas.mjs';
 
+function trimSlackText(value, maxLength = 200) {
+  const text = readOptionalText(value);
+  if (!text) return '-';
+  return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
+}
+
+function formatKrw(value) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '-';
+  return `${value.toLocaleString('ko-KR')}원`;
+}
+
+function formatProjectPeriod(start, end) {
+  const normalizedStart = readOptionalText(start);
+  const normalizedEnd = readOptionalText(end);
+  if (normalizedStart && normalizedEnd) return `${normalizedStart} ~ ${normalizedEnd}`;
+  return normalizedStart || normalizedEnd || '-';
+}
+
+function buildProjectRegistrationSlackPayload(projectRequest) {
+  const payload = projectRequest?.payload && typeof projectRequest.payload === 'object'
+    ? projectRequest.payload
+    : {};
+  const projectName = trimSlackText(payload.name, 120);
+  const officialContractName = trimSlackText(payload.officialContractName, 220);
+  const clientOrg = trimSlackText(payload.clientOrg, 160);
+  const department = trimSlackText(payload.department, 120);
+  const managerName = trimSlackText(payload.managerName, 120);
+  const teamName = trimSlackText(payload.teamName, 120);
+  const requester = trimSlackText(projectRequest?.requestedByName, 120);
+  const requesterEmail = trimSlackText(projectRequest?.requestedByEmail, 160);
+  const projectId = trimSlackText(projectRequest?.approvedProjectId, 120);
+  const purpose = trimSlackText(payload.projectPurpose, 280);
+  const lines = [
+    '*[InnerPlatform] 신규 프로젝트 등록 완료*',
+    `프로젝트명: \`${projectName}\``,
+    `계약명: ${officialContractName}`,
+    `발주기관: ${clientOrg}`,
+    `담당조직: ${department}`,
+    `메인 담당자: ${managerName}`,
+    `팀장/팀명: ${teamName}`,
+    `계약기간: ${formatProjectPeriod(payload.contractStart, payload.contractEnd)}`,
+    `계약금액: ${formatKrw(payload.contractAmount)}`,
+    `사업목적: ${purpose}`,
+    `요청자: ${requester} (${requesterEmail})`,
+    `projectId: \`${projectId}\``,
+  ];
+
+  return {
+    text: `[InnerPlatform] 신규 프로젝트 등록 완료: ${projectName}`,
+    blocks: [
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: lines.join('\n'),
+        },
+      },
+    ],
+  };
+}
+
 export function mountProjectRoutes(app, {
   db, now, idempotencyService, auditChainService, piiProtector,
   driveService,
@@ -32,6 +93,7 @@ export function mountProjectRoutes(app, {
   projectRequestContractAiService,
   projectRequestContractStorageService,
   projectSheetSourceStorageService,
+  projectRegistrationSlackService,
 }) {
   // ── GET /api/v1/projects ─────────────────────────────────────────────────────
   app.get('/api/v1/projects', asyncHandler(async (req, res) => {
@@ -290,6 +352,48 @@ export function mountProjectRoutes(app, {
       res.status(200).json({ contractDocument, analysis });
     }),
   );
+
+  app.post('/api/v1/project-requests/:requestId/notify-registration', createMutatingRoute(idempotencyService, async (req) => {
+    const { tenantId } = req.context;
+    assertActorRoleAllowed(req, PROJECT_REQUEST_ROUTE_ROLES, 'notify project registration');
+    const requestId = readOptionalText(req.params.requestId);
+
+    if (!requestId) {
+      throw createHttpError(400, 'project request id is required', 'missing_project_request_id');
+    }
+
+    if (!projectRegistrationSlackService?.enabled || typeof projectRegistrationSlackService.notifyMessage !== 'function') {
+      return {
+        status: 200,
+        body: {
+          ok: true,
+          enabled: false,
+          delivered: false,
+          reason: 'slack_not_configured',
+          requestId,
+        },
+      };
+    }
+
+    const requestSnap = await db.doc(`orgs/${tenantId}/projectRequests/${requestId}`).get();
+    if (!requestSnap.exists) {
+      throw createHttpError(404, `Project request not found: ${requestId}`, 'not_found');
+    }
+
+    const projectRequest = requestSnap.data() || {};
+    await projectRegistrationSlackService.notifyMessage(buildProjectRegistrationSlackPayload(projectRequest));
+
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        enabled: true,
+        delivered: true,
+        requestId,
+        projectId: readOptionalText(projectRequest.approvedProjectId) || null,
+      },
+    };
+  }));
 
   // ── Evidence drive root (project-level) ─────────────────────────────────────
   app.post('/api/v1/projects/:projectId/evidence-drive/root/provision', createMutatingRoute(idempotencyService, async (req) => {

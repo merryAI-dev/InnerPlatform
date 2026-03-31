@@ -6,6 +6,7 @@ import {
   analyzeProjectRequestContractViaBff,
   changeTransactionStateViaBff,
   linkProjectEvidenceDriveRootViaBff,
+  notifyProjectRequestRegistrationViaBff,
   overrideTransactionEvidenceDriveCategoriesViaBff,
   previewGoogleSheetImportViaBff,
   processProjectRequestContractViaBff,
@@ -307,6 +308,37 @@ describe('platform-bff-client', () => {
       }),
     }));
     expect(result.analysis.fields.officialContractName.value).toBe('공식 계약명');
+  });
+
+  it('calls project registration notification endpoint', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({
+        data: {
+          ok: true,
+          enabled: true,
+          delivered: true,
+          requestId: 'pr-123',
+          projectId: 'p-123',
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    const result = await notifyProjectRequestRegistrationViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm', idToken: 'token-abc' },
+      projectRequestId: 'pr-123',
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/project-requests/pr-123/notify-registration', expect.objectContaining({
+      tenantId: 'mysc',
+      body: {},
+      idempotencyKey: 'project-request-registration-notify:pr-123',
+    }));
+    expect(result.delivered).toBe(true);
+    expect(result.projectId).toBe('p-123');
   });
 
   it('calls evidence drive provision/sync endpoints', async () => {

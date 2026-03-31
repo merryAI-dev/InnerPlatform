@@ -637,6 +637,15 @@ export function createBffApp(options = {}) {
   const clientErrorMaxAttempts = Number.isFinite(clientErrorMaxAttemptsRaw) && clientErrorMaxAttemptsRaw > 0 ? clientErrorMaxAttemptsRaw : 5;
   const workerSecret = readOptionalText(options.workerSecret || process.env.BFF_WORKER_SECRET || process.env.CRON_SECRET);
   const slackAlertService = options.slackAlertService || createSlackAlertService();
+  const projectRegistrationSlackService = options.projectRegistrationSlackService || createSlackAlertService({
+    webhookUrl: options.projectRegistrationSlackWebhookUrl || process.env.PROJECT_REGISTRATION_SLACK_WEBHOOK_URL,
+    botToken: options.projectRegistrationSlackBotToken
+      || process.env.PROJECT_REGISTRATION_SLACK_BOT_TOKEN
+      || process.env.SLACK_ALERT_BOT_TOKEN,
+    channelId: options.projectRegistrationSlackChannelId
+      || process.env.PROJECT_REGISTRATION_SLACK_CHANNEL_ID
+      || 'C09BJ767XCM',
+  });
 
   async function resolveMemberIdentity({ tenantId, actorId }) {
     const normalizedTenantId = readOptionalText(tenantId);
@@ -1325,7 +1334,7 @@ export function createBffApp(options = {}) {
     db, now, idempotencyService, auditChainService, piiProtector,
     driveService, googleSheetsService, googleSheetMigrationAiService,
     projectRequestContractAiService, projectRequestContractStorageService,
-    projectSheetSourceStorageService,
+    projectSheetSourceStorageService, projectRegistrationSlackService,
   });
   mountLedgerRoutes(app, { db, now, idempotencyService, auditChainService, piiProtector });
   mountTransactionRoutes(app, { db, now, idempotencyService, auditChainService, piiProtector, rbacPolicy, driveService });

@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Calculator,
   LogOut,
   FolderKanban, Menu,
-  Plus,
+  Plus, Pencil,
   CircleDollarSign,
   BarChart3,
   ClipboardList,
@@ -69,6 +69,7 @@ const NAV_SECTIONS = [
     title: '사업 배정 및 등록',
     items: [
       { to: '/portal/project-settings', icon: Settings2, label: '사업 배정 수정', exact: true },
+      { to: '/portal/edit-project', icon: Pencil, label: '프로젝트 정보 수정' },
       { to: '/portal/register-project', icon: Plus, label: '사업 등록 제안', accent: true },
     ],
   },
