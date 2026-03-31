@@ -16,6 +16,20 @@ export interface ProjectMigrationAuditRow {
   matches: ProjectMigrationProjectMatch[];
 }
 
+export interface ProjectMigrationCurrentMatch {
+  candidate: ProjectMigrationCandidate;
+  score: number;
+  exact: boolean;
+  reasons: string[];
+  sourceStatus: ProjectMigrationStatus;
+}
+
+export interface ProjectMigrationCurrentRow {
+  project: Project;
+  status: ProjectMigrationStatus;
+  matches: ProjectMigrationCurrentMatch[];
+}
+
 const CLIENT_ALIASES: Array<[RegExp, string]> = [
   [/한국국제협력단/gi, 'koica'],
   [/경기주택도시공사/gi, 'gh'],
@@ -187,6 +201,38 @@ export function buildProjectMigrationAuditRows(
 
     return {
       candidate,
+      status,
+      matches,
+    };
+  });
+}
+
+export function buildProjectMigrationCurrentRows(
+  rows: ProjectMigrationAuditRow[],
+  projects: Project[],
+): ProjectMigrationCurrentRow[] {
+  return projects.map((project) => {
+    const matches = rows
+      .flatMap((row) => row.matches
+        .filter((match) => match.project.id === project.id)
+        .map((match) => ({
+          candidate: row.candidate,
+          score: match.score,
+          exact: match.exact,
+          reasons: match.reasons,
+          sourceStatus: row.status,
+        })))
+      .sort((left, right) => right.score - left.score)
+      .slice(0, 5);
+
+    const status: ProjectMigrationStatus = matches.some((match) => match.exact)
+      ? 'REGISTERED'
+      : matches.length > 0
+        ? 'CANDIDATE'
+        : 'MISSING';
+
+    return {
+      project,
       status,
       matches,
     };

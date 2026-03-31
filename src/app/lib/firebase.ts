@@ -273,6 +273,7 @@ export const ORG_COLLECTIONS = {
   guideQa: 'guide_qa',
   weeklySubmissionStatus: 'weekly_submission_status',
   projectRequests: 'project_requests',
+  projectDashboardProjects: 'project_dashboard_projects',
   projectMigrationCandidates: 'project_migration_candidates',
   careerProfiles: 'careerProfiles',
   trainingCourses: 'trainingCourses',

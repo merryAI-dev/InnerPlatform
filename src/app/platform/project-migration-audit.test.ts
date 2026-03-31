@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildProjectMigrationAuditRows } from './project-migration-audit';
+import { buildProjectMigrationAuditRows, buildProjectMigrationCurrentRows } from './project-migration-audit';
 import type { Project } from '../data/types';
 import type { ProjectMigrationCandidate } from '../data/project-migration-candidates';
 
@@ -94,5 +94,19 @@ describe('buildProjectMigrationAuditRows', () => {
 
     expect(rows[0].status).toBe('CANDIDATE');
     expect(rows[0].matches[0]?.reasons).toContain('사업명 유사');
+  });
+
+  it('builds current-project rows for reverse lookup', () => {
+    const rows = buildProjectMigrationAuditRows(
+      [makeCandidate({ businessName: '2026 에코스타트업', clientOrg: '한국환경산업기술원' })],
+      [makeProject({ id: 'p-eco', name: '2026 에코스타트업', clientOrg: '한국환경산업기술원' })],
+    );
+
+    const currentRows = buildProjectMigrationCurrentRows(rows, [
+      makeProject({ id: 'p-eco', name: '2026 에코스타트업', clientOrg: '한국환경산업기술원' }),
+    ]);
+
+    expect(currentRows[0].status).toBe('REGISTERED');
+    expect(currentRows[0].matches[0]?.candidate.businessName).toBe('2026 에코스타트업');
   });
 });
