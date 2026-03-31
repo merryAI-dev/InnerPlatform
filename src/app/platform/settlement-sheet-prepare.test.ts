@@ -319,12 +319,12 @@ describe('prepareSettlementImportRows', () => {
     expect(readCell(prepared[0], '필수증빙자료 리스트')).toBe('영수증');
   });
 
-  it('preserves existing evidence when map has no match', () => {
+  it('preserves existing evidence when neither map nor fallback rules match', () => {
     const row = makeRow({
       '거래일시': '2026-03-05',
-      '비목': '인건비',
-      '세목': '급여',
-      '지급처': '직원',
+      '비목': '기타',
+      '세목': '잡비',
+      '지급처': '기타처',
       '필수증빙자료 리스트': '기존 증빙',
     });
 

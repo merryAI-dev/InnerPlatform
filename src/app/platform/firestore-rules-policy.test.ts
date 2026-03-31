@@ -38,9 +38,9 @@ describe('firestore rules policy alignment', () => {
     }
   });
 
-  // ── viewer least-privilege ──
-  it('viewer cannot write projects or evidence', () => {
-    expect(hasPermission('viewer', 'project:write')).toBe(false);
+  // ── viewer permissions (project:write granted for project registration) ──
+  it('viewer can write projects but not evidence/ledger/transactions', () => {
+    expect(hasPermission('viewer', 'project:write')).toBe(true);
     expect(hasPermission('viewer', 'evidence:write')).toBe(false);
     expect(hasPermission('viewer', 'ledger:write')).toBe(false);
     expect(hasPermission('viewer', 'transaction:submit')).toBe(false);
@@ -102,12 +102,15 @@ describe('firestore rules policy alignment', () => {
     })).toBe(false);
   });
 
-  it('viewer needs assignment and can only read', () => {
+  it('viewer needs assignment and can read/write assigned projects', () => {
     expect(canAccessProject({
       actorRole: 'viewer', permission: 'project:read', targetProjectId: 'p1', assignedProjectIds: ['p1'],
     })).toBe(true);
     expect(canAccessProject({
       actorRole: 'viewer', permission: 'project:write', targetProjectId: 'p1', assignedProjectIds: ['p1'],
+    })).toBe(true);
+    expect(canAccessProject({
+      actorRole: 'viewer', permission: 'project:write', targetProjectId: 'p2', assignedProjectIds: ['p1'],
     })).toBe(false);
   });
 
