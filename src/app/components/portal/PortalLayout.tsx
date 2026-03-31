@@ -210,7 +210,6 @@ function PortalContent() {
   const standaloneOnboarding = (
     (location.pathname.includes('/portal/onboarding')
       || location.pathname.includes('/portal/project-settings')
-      || location.pathname.includes('/portal/register-project')
       || location.pathname.includes('/portal/weekly-expenses')) &&
     !isRegistered &&
     canEnterPortalWorkspace(authUser?.role)

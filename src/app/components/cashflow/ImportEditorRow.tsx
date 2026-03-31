@@ -116,7 +116,7 @@ function SelectCell({
       </div>
       {isOpen && !disabled && popupRect && createPortal(
         <div
-          className="fixed z-[120] w-40 max-h-56 overflow-auto rounded-md border bg-background shadow-lg"
+          className="fixed z-[120] w-40 max-h-80 overflow-auto rounded-md border bg-background shadow-lg"
           style={{ left: popupRect.left, top: popupRect.top }}
           onMouseDown={(e) => e.stopPropagation()}
           data-select-popup
@@ -513,32 +513,62 @@ function ImportEditorRow({
                 </div>
               ) : isSubCode ? (
                 <div className="pr-6">
-                  <SelectCell
-                    value={normalizeBudgetLabel(String(row.cells[colIdx] || ''))}
-                    options={subCodes.map((sc, sidx) => {
-                      const codeIdx = Math.max(0, budgetCodeBook.findIndex((c) => c.code === budgetCode));
-                      return { value: sc, label: formatSubCodeLabel(codeIdx, sidx, sc) };
-                    })}
-                    onFocus={() => onCellFocus(rowIdx, colIdx)}
-                    rowIdx={rowIdx}
-                    cellColIdx={colIdx}
-                    disabled={!budgetCode}
-                    isOpen={openSelect?.rowIdx === rowIdx && openSelect?.colIdx === colIdx}
-                    onOpen={() => onOpenSelect(rowIdx, colIdx)}
-                    onClose={onCloseSelect}
-                    onChange={(nextSub) => {
-                      onRowChange((prev) => {
-                        if (subCodeIdx < 0) return prev;
-                        const cells = [...prev.cells];
-                        cells[subCodeIdx] = nextSub;
-                        if (evidenceIdx >= 0) {
-                          const mapped = resolveEvidenceRequiredDesc(evidenceRequiredMap, budgetCode, nextSub);
-                          if (mapped) cells[evidenceIdx] = mapped;
-                        }
-                        return { ...prev, cells };
-                      });
-                    }}
-                  />
+                  {!budgetCode ? (
+                    <SelectCell
+                      value={normalizeBudgetLabel(String(row.cells[colIdx] || ''))}
+                      options={budgetCodeBook.flatMap((c, codeIdx) =>
+                        c.subCodes.map((sc, sidx) => ({
+                          value: `${c.code}::${sc}`,
+                          label: `${formatBudgetCodeLabel(codeIdx, c.code)} > ${formatSubCodeLabel(codeIdx, sidx, sc)}`,
+                        })),
+                      )}
+                      onFocus={() => onCellFocus(rowIdx, colIdx)}
+                      rowIdx={rowIdx}
+                      cellColIdx={colIdx}
+                      isOpen={openSelect?.rowIdx === rowIdx && openSelect?.colIdx === colIdx}
+                      onOpen={() => onOpenSelect(rowIdx, colIdx)}
+                      onClose={onCloseSelect}
+                      onChange={(packed) => {
+                        const [parentCode, nextSub] = packed.split('::');
+                        onRowChange((prev) => {
+                          const cells = [...prev.cells];
+                          if (budgetCodeIdx >= 0) cells[budgetCodeIdx] = parentCode;
+                          if (subCodeIdx >= 0) cells[subCodeIdx] = nextSub;
+                          if (evidenceIdx >= 0) {
+                            const mapped = resolveEvidenceRequiredDesc(evidenceRequiredMap, parentCode, nextSub);
+                            if (mapped) cells[evidenceIdx] = mapped;
+                          }
+                          return { ...prev, cells };
+                        });
+                      }}
+                    />
+                  ) : (
+                    <SelectCell
+                      value={normalizeBudgetLabel(String(row.cells[colIdx] || ''))}
+                      options={subCodes.map((sc, sidx) => {
+                        const codeIdx = Math.max(0, budgetCodeBook.findIndex((c) => c.code === budgetCode));
+                        return { value: sc, label: formatSubCodeLabel(codeIdx, sidx, sc) };
+                      })}
+                      onFocus={() => onCellFocus(rowIdx, colIdx)}
+                      rowIdx={rowIdx}
+                      cellColIdx={colIdx}
+                      isOpen={openSelect?.rowIdx === rowIdx && openSelect?.colIdx === colIdx}
+                      onOpen={() => onOpenSelect(rowIdx, colIdx)}
+                      onClose={onCloseSelect}
+                      onChange={(nextSub) => {
+                        onRowChange((prev) => {
+                          if (subCodeIdx < 0) return prev;
+                          const cells = [...prev.cells];
+                          cells[subCodeIdx] = nextSub;
+                          if (evidenceIdx >= 0) {
+                            const mapped = resolveEvidenceRequiredDesc(evidenceRequiredMap, budgetCode, nextSub);
+                            if (mapped) cells[evidenceIdx] = mapped;
+                          }
+                          return { ...prev, cells };
+                        });
+                      }}
+                    />
+                  )}
                 </div>
               ) : isAuthor && hasAuthorOptions ? (
                 <div className="pr-6">
