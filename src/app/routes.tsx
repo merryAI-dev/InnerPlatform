@@ -40,6 +40,7 @@ const PortalBudget = lazy(() => import('./components/portal/PortalBudget').then(
 const PortalPersonnel = lazy(() => import('./components/portal/PortalPersonnel').then(m => ({ default: m.PortalPersonnel })));
 const PortalChangeRequests = lazy(() => import('./components/portal/PortalChangeRequests').then(m => ({ default: m.PortalChangeRequests })));
 const PortalProjectRegister = lazy(() => import('./components/portal/PortalProjectRegister').then(m => ({ default: m.PortalProjectRegister })));
+const PortalProjectEdit = lazy(() => import('./components/portal/PortalProjectEdit').then(m => ({ default: m.PortalProjectEdit })));
 const PortalPayrollPage = lazy(() => import('./components/portal/PortalPayrollPage').then(m => ({ default: m.PortalPayrollPage })));
 const PortalCashflowPage = lazy(() => import('./components/portal/PortalCashflowPage').then(m => ({ default: m.PortalCashflowPage })));
 const PortalSubmissionsPage = lazy(() => import('./components/portal/PortalSubmissionsPage').then(m => ({ default: m.PortalSubmissionsPage })));
@@ -126,6 +127,7 @@ export const router = createBrowserRouter([
       { path: 'personnel', element: <S C={PortalPersonnel} /> },
       { path: 'change-requests', element: <S C={PortalChangeRequests} /> },
       { path: 'register-project', element: <S C={PortalProjectRegister} /> },
+      { path: 'edit-project', element: <S C={PortalProjectEdit} /> },
       { path: 'training', element: <S C={PortalTrainingPage} /> },
       { path: 'career-profile', element: <S C={CareerProfilePage} /> },
       { path: 'guide-chat', element: <S C={GuideChatPage} /> },

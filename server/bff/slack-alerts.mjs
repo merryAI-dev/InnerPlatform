@@ -90,6 +90,51 @@ export function createSlackAlertService({
     ? 'webhook'
     : (normalizedBotToken && normalizedChannelId ? 'bot' : 'disabled');
 
+  async function sendPayload(payload) {
+    if (mode === 'disabled') {
+      throw new Error('Slack delivery target is not configured');
+    }
+    if (typeof fetchImpl !== 'function') {
+      throw new Error('Fetch is not available for Slack delivery');
+    }
+
+    if (mode === 'webhook') {
+      const response = await fetchImpl(normalizedWebhookUrl, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const body = await response.text().catch(() => '');
+        throw new Error(`Slack webhook failed (${response.status}) ${truncate(body, 200)}`.trim());
+      }
+      return;
+    }
+
+    const response = await fetchImpl('https://slack.com/api/chat.postMessage', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+        'authorization': `Bearer ${normalizedBotToken}`,
+      },
+      body: JSON.stringify({
+        channel: normalizedChannelId,
+        text: payload.text,
+        blocks: payload.blocks,
+        unfurl_links: false,
+        unfurl_media: false,
+      }),
+    });
+
+    const body = await response.json().catch(() => null);
+    if (!response.ok || !body?.ok) {
+      throw new Error(`Slack chat.postMessage failed (${response.status}) ${truncate(body?.error || '', 200)}`.trim());
+    }
+  }
+
   return {
     enabled: mode !== 'disabled' && typeof fetchImpl === 'function',
     minLevel: normalizedMinLevel,
@@ -100,50 +145,15 @@ export function createSlackAlertService({
       return levelRank(event?.level) >= levelRank(normalizedMinLevel);
     },
 
+    async notifyMessage(payload) {
+      const normalizedPayload = payload && typeof payload === 'object' ? payload : {};
+      const text = truncate(normalizedPayload.text || '', 3000) || 'InnerPlatform notification';
+      const blocks = Array.isArray(normalizedPayload.blocks) ? normalizedPayload.blocks : undefined;
+      await sendPayload({ text, ...(blocks ? { blocks } : {}) });
+    },
+
     async notifyClientError(event) {
-      if (mode === 'disabled') {
-        throw new Error('Slack delivery target is not configured');
-      }
-      if (typeof fetchImpl !== 'function') {
-        throw new Error('Fetch is not available for Slack delivery');
-      }
-
-      if (mode === 'webhook') {
-        const response = await fetchImpl(normalizedWebhookUrl, {
-          method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-          },
-          body: JSON.stringify(buildSlackPayload(event)),
-        });
-
-        if (!response.ok) {
-          const body = await response.text().catch(() => '');
-          throw new Error(`Slack webhook failed (${response.status}) ${truncate(body, 200)}`.trim());
-        }
-        return;
-      }
-
-      const payload = buildSlackPayload(event);
-      const response = await fetchImpl('https://slack.com/api/chat.postMessage', {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json; charset=utf-8',
-          'authorization': `Bearer ${normalizedBotToken}`,
-        },
-        body: JSON.stringify({
-          channel: normalizedChannelId,
-          text: payload.text,
-          blocks: payload.blocks,
-          unfurl_links: false,
-          unfurl_media: false,
-        }),
-      });
-
-      const body = await response.json().catch(() => null);
-      if (!response.ok || !body?.ok) {
-        throw new Error(`Slack chat.postMessage failed (${response.status}) ${truncate(body?.error || '', 200)}`.trim());
-      }
+      await sendPayload(buildSlackPayload(event));
     },
   };
 }

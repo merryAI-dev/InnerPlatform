@@ -23,6 +23,7 @@ import { useAuth } from '../../data/auth-store';
 import { useFirebase } from '../../lib/firebase-context';
 import { getAuthInstance } from '../../lib/firebase';
 import {
+  notifyProjectRequestRegistrationViaBff,
   processProjectRequestContractViaBff,
   type ProjectRequestContractAnalysisResult,
 } from '../../lib/platform-bff-client';
@@ -488,6 +489,30 @@ export function PortalProjectRegister() {
         toast.error('사업 등록 제안 저장에 실패했습니다. 다시 시도해 주세요.');
         return;
       }
+
+      const currentAuthUser = authUser;
+      if (currentAuthUser) {
+        try {
+          const idToken = currentAuthUser.idToken || await getAuthInstance()?.currentUser?.getIdToken() || undefined;
+          const notification = await notifyProjectRequestRegistrationViaBff({
+            tenantId: orgId,
+            actor: {
+              uid: currentAuthUser.uid,
+              email: currentAuthUser.email,
+              role: currentAuthUser.role,
+              idToken,
+            },
+            projectRequestId: createdId,
+          });
+          if (!notification.delivered) {
+            toast.warning('사업 등록은 저장됐지만 재경팀 슬랙 알림은 아직 설정되지 않았습니다.');
+          }
+        } catch (notificationError) {
+          console.error('[PortalProjectRegister] project registration Slack notification failed:', notificationError);
+          toast.warning('사업 등록은 저장됐지만 재경팀 슬랙 알림 전송은 실패했습니다.');
+        }
+      }
+
       setForm(payload);
       setSubmitted(true);
       toast.success('사업 등록 제안이 저장되었습니다. 관리자 검토를 기다려주세요.');

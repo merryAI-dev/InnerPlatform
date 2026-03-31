@@ -25,6 +25,7 @@ export interface UpsertProjectPayload {
   id: string;
   name: string;
   expectedVersion?: number;
+  [key: string]: unknown;
 }
 
 export interface UpsertLedgerPayload {
@@ -126,6 +127,15 @@ export interface ProjectSheetSourceUploadPayload {
 }
 
 export interface ProjectRequestContractAnalysisResult extends ProjectRequestContractAnalysis {}
+
+export interface ProjectRequestRegistrationNotificationResult {
+  ok: boolean;
+  enabled: boolean;
+  delivered: boolean;
+  requestId: string;
+  projectId: string | null;
+  reason?: string;
+}
 
 function normalizeStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
@@ -671,6 +681,27 @@ export async function processProjectRequestContractViaBff(params: {
     contractDocument: response.data.contractDocument,
     analysis: normalizeProjectRequestContractAnalysisResult(response.data.analysis),
   };
+}
+
+export async function notifyProjectRequestRegistrationViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectRequestId: string;
+  client?: PlatformApiClientLike;
+}): Promise<ProjectRequestRegistrationNotificationResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<ProjectRequestRegistrationNotificationResult>(
+    `/api/v1/project-requests/${encodeURIComponent(params.projectRequestId)}/notify-registration`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: {},
+      idempotencyKey: `project-request-registration-notify:${params.projectRequestId}`,
+      timeoutMs: 10000,
+      retries: 0,
+    },
+  );
+  return response.data;
 }
 
 export async function linkProjectEvidenceDriveRootViaBff(params: {
