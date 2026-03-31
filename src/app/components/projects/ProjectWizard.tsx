@@ -16,7 +16,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import { toast } from 'sonner';
 import { useAppStore } from '../../data/store';
 import { resolveApiErrorMessage } from '../../platform/api-error-message';
@@ -117,10 +117,19 @@ interface ProjectWizardProps {
 
 export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: ProjectWizardProps) {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { addProject, updateProject, members } = useAppStore();
 
-  const [currentStep, setCurrentStep] = useState(0);
+  const stepFromUrl = parseInt(searchParams.get('step') ?? '0', 10);
+  const [currentStep, setCurrentStep] = useState(
+    Number.isFinite(stepFromUrl) && stepFromUrl >= 0 && stepFromUrl < STEPS.length ? stepFromUrl : 0
+  );
   const [saving, setSaving] = useState(false);
+
+  const goToStep = useCallback((step: number) => {
+    setCurrentStep(step);
+    setSearchParams(prev => { prev.set('step', String(step)); return prev; }, { replace: true });
+  }, [setSearchParams]);
   const [targetPhase, setTargetPhase] = useState<ProjectPhase>(editProject?.phase || initialPhase);
   const [formData, setFormData] = useState<WizardFormData>(() => {
     if (editProject) {
@@ -258,7 +267,7 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
     } finally {
       setSaving(false);
     }
-  }, [saving, formData, calculatedProfit, editProject, addProject, updateProject, navigate]);
+  }, [saving, formData, calculatedProfit, editProject, addProject, updateProject, navigate, setSearchParams]);
 
   // Format number input
   const fmtInput = (n: number) => n > 0 ? n.toLocaleString('ko-KR') : '';
@@ -815,7 +824,7 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
           return (
             <div key={step.id} className="flex items-center">
               <button
-                onClick={() => setCurrentStep(i)}
+                onClick={() => goToStep(i)}
                 className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs transition-all ${isActive
                     ? 'bg-primary text-primary-foreground'
                     : isCompleted
@@ -862,7 +871,7 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
       <div className="flex items-center justify-between">
         <Button
           variant="outline"
-          onClick={() => setCurrentStep(Math.max(0, currentStep - 1))}
+          onClick={() => goToStep(Math.max(0, currentStep - 1))}
           disabled={currentStep === 0 || saving}
           className="gap-1"
         >
@@ -893,7 +902,7 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
             </>
           ) : (
             <Button
-              onClick={() => setCurrentStep(Math.min(STEPS.length - 1, currentStep + 1))}
+              onClick={() => goToStep(Math.min(STEPS.length - 1, currentStep + 1))}
               disabled={saving}
               className="gap-1"
             >
