@@ -72,6 +72,7 @@ export function SettlementTransactionRow({
   const manualCompletedDesc = resolveEvidenceCompletedManualDesc(tx);
   const effectiveCompletedDesc = resolveEvidenceCompletedDesc(tx);
   const expenseAudit = findLatestFieldEdit(tx, 'amounts.expenseAmount');
+  const vatInAudit = findLatestFieldEdit(tx, 'amounts.vatIn');
   const suggestedFolderName = tx.evidenceDriveFolderName || buildDriveTransactionFolderName(tx);
   const driveStatusLabel = tx.evidenceDriveSyncStatus === 'UPLOADED'
     ? '업로드됨'
@@ -127,8 +128,10 @@ export function SettlementTransactionRow({
           key={`expense-${tx.id}-${value ?? ''}`}
           type="text"
           defaultValue={fmt(value)}
-          className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5 text-right"
+          disabled={locked}
+          className={`w-full bg-transparent outline-none text-[11px] px-1 py-0.5 text-right ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
           onBlur={(e) => {
+            if (locked) return;
             const nextAmount = parseNumber(e.target.value) ?? 0;
             if (nextAmount !== (value ?? 0)) {
               void Promise.resolve(onUpdate({
@@ -146,6 +149,40 @@ export function SettlementTransactionRow({
         {expenseAudit && (
           <div className="text-[9px] leading-tight text-muted-foreground">
             최종 수정 {expenseAudit.editedBy} · {formatCommentTime(expenseAudit.editedAt)}
+          </div>
+        )}
+      </div>
+    </td>
+  );
+
+  const vatInCell = (value: number | undefined) => (
+    <td className="px-1 py-0.5 border-b border-r text-right tabular-nums align-top">
+      <div className="space-y-0.5">
+        <input
+          key={`vatIn-${tx.id}-${value ?? ''}`}
+          type="text"
+          defaultValue={fmt(value)}
+          disabled={locked}
+          className={`w-full bg-transparent outline-none text-[11px] px-1 py-0.5 text-right ${locked ? 'text-muted-foreground cursor-not-allowed' : ''}`}
+          onBlur={(e) => {
+            if (locked) return;
+            const nextAmount = parseNumber(e.target.value) ?? 0;
+            if (nextAmount !== (value ?? 0)) {
+              void Promise.resolve(onUpdate({
+                amounts: {
+                  ...tx.amounts,
+                  vatIn: nextAmount,
+                },
+              })).catch((error) => {
+                console.error('[SettlementLedger] update transaction failed:', error);
+              });
+            }
+            e.target.value = fmt(nextAmount);
+          }}
+        />
+        {vatInAudit && (
+          <div className="text-[9px] leading-tight text-muted-foreground">
+            최종 수정 {vatInAudit.editedBy} · {formatCommentTime(vatInAudit.editedAt)}
           </div>
         )}
       </div>
@@ -272,7 +309,7 @@ export function SettlementTransactionRow({
       {numberCell(tx.amounts?.depositAmount)}
       {numberCell(tx.amounts?.vatRefund)}
       {expenseAmountCell(tx.amounts?.expenseAmount)}
-      {numberCell(tx.amounts?.vatIn)}
+      {vatInCell(tx.amounts?.vatIn)}
       {textCell(tx.counterparty, 'counterparty')}
       {textCell(tx.memo, 'memo', 'min-w-[150px]')}
       {textCell(tx.evidenceRequiredDesc, 'evidenceRequiredDesc')}
