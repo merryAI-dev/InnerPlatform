@@ -99,12 +99,16 @@ function deriveRowLocally(
       const bankAmount = parseNumber(cells[context.bankAmountIdx]) ?? 0;
       const expense = parseNumber(cells[context.expenseIdx]) ?? 0;
       const vat = parseNumber(cells[context.vatInIdx]) ?? 0;
+      const userEdited = row.userEditedCells ?? new Set<number>();
       if (bankAmount > 0) {
         if (expense > 0) {
           // 사업비 사용액이 입력되어 있으면 매입부가세를 자동 계산
-          const derivedVat = Math.max(bankAmount - expense, 0);
-          cells[context.vatInIdx] = derivedVat > 0 ? derivedVat.toLocaleString('ko-KR') : '';
-        } else {
+          // 단, 사용자가 매입부가세 또는 사업비 사용액을 직접 수정한 경우 자동계산 스킵
+          if (!userEdited.has(context.vatInIdx) && !userEdited.has(context.expenseIdx)) {
+            const derivedVat = Math.max(bankAmount - expense, 0);
+            cells[context.vatInIdx] = derivedVat > 0 ? derivedVat.toLocaleString('ko-KR') : '';
+          }
+        } else if (!userEdited.has(context.expenseIdx)) {
           // 사업비 사용액이 없으면 bankAmount - vatIn 으로 계산 (통장 import 기본)
           const derivedExpense = Math.max(bankAmount - Math.max(vat, 0), 0);
           cells[context.expenseIdx] = derivedExpense > 0 ? derivedExpense.toLocaleString('ko-KR') : '';

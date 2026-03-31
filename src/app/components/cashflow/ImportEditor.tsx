@@ -560,7 +560,9 @@ export function ImportEditor({
       const next = updateImportRowAt(rows, rowIdx, (r) => {
         const cells = [...r.cells];
         cells[colIdx] = value;
-        return { ...r, cells };
+        const userEditedCells = new Set(r.userEditedCells);
+        userEditedCells.add(colIdx);
+        return { ...r, cells, userEditedCells };
       });
 
       const mode = colIdx === cashflowIdx

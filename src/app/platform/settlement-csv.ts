@@ -657,6 +657,8 @@ export interface ImportRow {
   cells: string[];
   /** Validation error when trying to parse this row. */
   error?: string;
+  /** Column indices that the user has manually edited (derivation skips these). */
+  userEditedCells?: Set<number>;
 }
 
 /**
