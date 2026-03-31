@@ -25,6 +25,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/', icon: LayoutDashboard, label: '대시보드' },
       { to: '/projects', icon: FolderKanban, label: '프로젝트' },
+      { to: '/projects/migration-audit', icon: ListChecks, label: '이관 점검' },
       { to: '/board', icon: MessagesSquare, label: '전사 게시판' },
       { to: '/projects/new', icon: Plus, label: '사업 등록', accent: true },
     ],
