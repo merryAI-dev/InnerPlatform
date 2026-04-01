@@ -73,7 +73,7 @@ export function resolvePostLoginPath(
     return canEnterPortalWorkspace(role) ? normalizedPath : fallback;
   }
 
-  if (!isPortalRole(role) && canAccessAdminPath(role, normalizedPath)) {
+  if (canAccessAdminPath(role, normalizedPath)) {
     return normalizedPath;
   }
 

@@ -138,14 +138,19 @@ describe('resolvePostLoginPath', () => {
     expect(resolvePostLoginPath('finance', undefined, '/approvals')).toBe('/approvals');
   });
 
-  it('finance falls back for admin-only paths', () => {
-    expect(resolvePostLoginPath('finance', undefined, '/users')).toBe('/');
-    expect(resolvePostLoginPath('finance', undefined, '/settings')).toBe('/');
+  it('finance can temporarily access admin paths while admin is open to all', () => {
+    expect(resolvePostLoginPath('finance', undefined, '/users')).toBe('/users');
+    expect(resolvePostLoginPath('finance', undefined, '/settings')).toBe('/settings');
   });
 
-  it('pm cannot access admin-only paths', () => {
-    expect(resolvePostLoginPath('pm', undefined, '/settings')).toBe('/portal');
-    expect(resolvePostLoginPath('pm', undefined, '/users')).toBe('/portal');
+  it('pm can temporarily access admin paths while admin is open to all', () => {
+    expect(resolvePostLoginPath('pm', undefined, '/settings')).toBe('/settings');
+    expect(resolvePostLoginPath('pm', undefined, '/users')).toBe('/users');
+  });
+
+  it('viewer can temporarily access admin paths while admin is open to all', () => {
+    expect(resolvePostLoginPath('viewer', undefined, '/settings')).toBe('/settings');
+    expect(resolvePostLoginPath('viewer', undefined, '/users')).toBe('/users');
   });
 
   // ── special paths ──

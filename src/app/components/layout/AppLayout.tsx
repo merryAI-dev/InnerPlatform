@@ -49,7 +49,7 @@ function AppLayoutContent() {
   useEffect(() => {
     const role = (authUser || currentUser)?.role;
     if (!isAuthenticated || !role) return;
-    if (isPortalRole(role)) {
+    if (isPortalRole(role) && !canAccessAdminPath(role, location.pathname)) {
       if (location.pathname.startsWith('/board')) {
         navigate(`/portal${location.pathname}`, { replace: true });
         return;

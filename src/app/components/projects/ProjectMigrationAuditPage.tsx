@@ -130,6 +130,8 @@ function MatchProjectCard({
   match: ProjectMigrationProjectMatch;
   onOpenProject: (projectId: string) => void;
 }) {
+  const primaryLabel = match.project.officialContractName || match.project.name || '이름 없음';
+
   return (
     <div className="rounded-lg border border-border/60 bg-muted/20 p-2">
       <div className="flex flex-wrap items-center gap-2">
@@ -139,7 +141,7 @@ function MatchProjectCard({
           className="h-auto p-0 text-left text-[12px]"
           onClick={() => onOpenProject(match.project.id)}
         >
-          {match.project.name}
+          {primaryLabel}
         </Button>
         <Badge variant="outline" className="text-[10px]">
           {match.score}점
@@ -151,8 +153,10 @@ function MatchProjectCard({
         ) : null}
       </div>
       <div className="mt-1 space-y-1 text-[11px] text-muted-foreground">
-        <p>계약명: {match.project.officialContractName || '-'}</p>
-        <p>{match.project.clientOrg || '발주기관 없음'} · {match.project.department || '담당조직 없음'} · {match.project.managerName || '담당자 없음'}</p>
+        {match.project.officialContractName && match.project.officialContractName !== match.project.name ? (
+          <p>플랫폼 프로젝트명: {match.project.name}</p>
+        ) : null}
+        <p>{match.project.department || '담당조직 없음'} · {match.project.managerName || '담당자 없음'}</p>
       </div>
       <div className="mt-2 flex flex-wrap gap-1">
         {match.reasons.map((reason) => (
@@ -173,7 +177,7 @@ function CurrentProjectMatchCell({
   onOpenProject: (projectId: string) => void;
 }) {
   if (matches.length === 0) {
-    return <span className="text-[11px] text-muted-foreground">현재 등록 프로젝트 매칭 없음</span>;
+    return <span className="text-[11px] text-muted-foreground">플랫폼 프로젝트 매칭 없음</span>;
   }
   return (
     <div className="space-y-2">
@@ -191,6 +195,8 @@ function CurrentOnlyProjectCell({
   project: Project;
   onOpenProject: (projectId: string) => void;
 }) {
+  const primaryLabel = project.officialContractName || project.name || '이름 없음';
+
   return (
     <div className="rounded-lg border border-border/60 bg-muted/20 p-2">
       <div className="flex flex-wrap items-center gap-2">
@@ -200,12 +206,14 @@ function CurrentOnlyProjectCell({
           className="h-auto p-0 text-left text-[12px]"
           onClick={() => onOpenProject(project.id)}
         >
-          {project.name}
+          {primaryLabel}
         </Button>
       </div>
       <div className="mt-1 space-y-1 text-[11px] text-muted-foreground">
-        <p>계약명: {project.officialContractName || '-'}</p>
-        <p>{project.clientOrg || '발주기관 없음'} · {project.department || '담당조직 없음'} · {project.managerName || '담당자 없음'}</p>
+        {project.officialContractName && project.officialContractName !== project.name ? (
+          <p>플랫폼 프로젝트명: {project.name}</p>
+        ) : null}
+        <p>{project.department || '담당조직 없음'} · {project.managerName || '담당자 없음'}</p>
       </div>
     </div>
   );
@@ -407,7 +415,7 @@ export function ProjectMigrationAuditPage() {
         icon={FolderSearch}
         iconGradient="linear-gradient(135deg, #0f766e 0%, #0ea5e9 100%)"
         title="프로젝트 마이그레이션 등록 현황"
-        description={`승인된 비교 기준 ${sourceSummary.total}건과 현재 admin 등록 ${currentSummary.total}건을 Firestore에서 계약명 우선으로 대조합니다. 완료율 ${formatRatio(completionRatio)}, 검토 ${sourceSummary.candidate}, 미등록 ${sourceSummary.missing}`}
+        description={`승인된 비교 기준 ${sourceSummary.total}건과 현재 플랫폼 등록 ${currentSummary.total}건을 Firestore에서 계약명 우선으로 대조합니다. 완료율 ${formatRatio(completionRatio)}, 검토 ${sourceSummary.candidate}, 미등록 ${sourceSummary.missing}`}
         badge="Firestore"
       />
 
@@ -454,7 +462,7 @@ export function ProjectMigrationAuditPage() {
         </Card>
         <Card>
           <CardContent className="p-4">
-            <p className="text-[11px] text-muted-foreground">현재 admin 등록</p>
+            <p className="text-[11px] text-muted-foreground">현재 플랫폼 등록</p>
             <p className="mt-2 text-2xl font-semibold">{currentSummary.total}</p>
           </CardContent>
         </Card>
@@ -534,7 +542,7 @@ export function ProjectMigrationAuditPage() {
         <CardContent className="space-y-4 p-4">
           <div className="space-y-1">
             <h2 className="text-sm font-semibold">통합 대조표</h2>
-            <p className="text-[12px] text-muted-foreground">원본 25건을 기준으로 현재 admin 프로젝트를 계약명 우선, 프로젝트명 보조로 붙였습니다. 원본과 연결되지 않은 현재 프로젝트도 같은 표 하단에 함께 표시합니다.</p>
+            <p className="text-[12px] text-muted-foreground">원본 25건을 기준으로 플랫폼 프로젝트를 계약명 우선, 프로젝트명 보조로 붙였습니다. 원본과 연결되지 않은 현재 프로젝트도 같은 표 하단에 함께 표시합니다.</p>
           </div>
 
           <div className="overflow-x-auto">
@@ -542,8 +550,8 @@ export function ProjectMigrationAuditPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead className="min-w-[92px]">상태</TableHead>
-                  <TableHead className="min-w-[180px]">원본 사업명</TableHead>
-                  <TableHead className="min-w-[360px]">현재 admin 프로젝트 / 계약명</TableHead>
+                  <TableHead className="min-w-[180px]">사업대시보드 상의 프로젝트명</TableHead>
+                  <TableHead className="min-w-[360px]">플랫폼 상의 프로젝트</TableHead>
                   <TableHead className="min-w-[220px]">비고</TableHead>
                 </TableRow>
               </TableHeader>
@@ -563,8 +571,8 @@ export function ProjectMigrationAuditPage() {
                       {row.kind === 'source'
                         ? row.matches.length > 0
                           ? '상단 카드의 점수와 매칭 근거를 확인하세요.'
-                          : '현재 admin에 연결된 프로젝트가 없습니다.'
-                        : '현재 admin에는 있으나 승인된 25개 원본 범위와 연결되지 않은 프로젝트입니다.'}
+                          : '현재 플랫폼에 연결된 프로젝트가 없습니다.'
+                        : '현재 플랫폼에는 있으나 승인된 25개 원본 범위와 연결되지 않은 프로젝트입니다.'}
                     </TableCell>
                   </TableRow>
                 ))}

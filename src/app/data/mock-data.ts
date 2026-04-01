@@ -49,7 +49,7 @@ export const ORG_MEMBERS: OrgMember[] = [
 
 export const ORGANIZATION: Organization = {
   id: 'org001',
-  name: 'MYSC(마이에스씨)',
+  name: 'MYSC(Admin)',
   createdAt: '2023-01-01T09:00:00Z',
   members: ORG_MEMBERS,
 };
