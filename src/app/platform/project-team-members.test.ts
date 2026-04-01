@@ -16,6 +16,20 @@ describe('project-team-members', () => {
     expect(result).toContain('변민욱 (보람) / 운영 / 40%');
   });
 
+  it('formats team member without participation rate (omits rate)', () => {
+    const result = formatProjectTeamMembersSummary([
+      { memberName: '김다은', memberNickname: '데이나', role: 'PM', participationRate: 0 },
+    ]);
+
+    expect(result).toBe('김다은 (데이나) / PM');
+  });
+
+  it('treats member with name and role but no rate as complete', () => {
+    expect(hasIncompleteProjectTeamMembers([
+      { memberName: '김다은', memberNickname: '', role: 'PM', participationRate: 0 },
+    ])).toBe(false);
+  });
+
   it('detects incomplete rows but keeps normalized values trimmed', () => {
     const members = normalizeProjectTeamMembers([
       { memberName: ' 김다은 ', memberNickname: ' 데이나 ', role: ' ', participationRate: 50 },

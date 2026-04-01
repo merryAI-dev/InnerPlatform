@@ -25,7 +25,7 @@ export function normalizeProjectTeamMembers(
 }
 
 export function isProjectTeamMemberComplete(member: ProjectTeamMemberAssignment) {
-  return Boolean(member.memberName && member.role && member.participationRate > 0);
+  return Boolean(member.memberName && member.role);
 }
 
 export function hasIncompleteProjectTeamMembers(
@@ -38,7 +38,9 @@ export function formatProjectTeamMemberLine(member: ProjectTeamMemberAssignment)
   const identity = member.memberNickname
     ? `${member.memberName} (${member.memberNickname})`
     : member.memberName;
-  return `${identity} / ${member.role} / ${member.participationRate}%`;
+  return member.participationRate > 0
+    ? `${identity} / ${member.role} / ${member.participationRate}%`
+    : `${identity} / ${member.role}`;
 }
 
 export function formatProjectTeamMembersSummary(

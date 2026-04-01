@@ -15,7 +15,7 @@ import {
   Users,
   Wallet,
 } from 'lucide-react';
-import { useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
 import { toast } from 'sonner';
 import { usePortalStore } from '../../data/portal-store';
@@ -332,6 +332,40 @@ export function PortalProjectRegister() {
   const [hasContractAmountInput, setHasContractAmountInput] = useState(false);
   const contractFileInputRef = useRef<HTMLInputElement | null>(null);
 
+  const DRAFT_KEY = '__mysc_project_register_draft__';
+
+  // Restore draft from localStorage on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(DRAFT_KEY);
+      if (saved) {
+        const draft = JSON.parse(saved) as { form: ProjectProposalDraft; step: Step };
+        setForm((prev) => ({ ...prev, ...draft.form }));
+        if (draft.step) setStep(draft.step);
+        toast.info('이전에 작성 중이던 내용을 불러왔습니다.');
+      }
+    } catch { /* ignore corrupted draft */ }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-save draft to localStorage on form/step change (debounced)
+  const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (submitted) return;
+    if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
+    draftTimerRef.current = setTimeout(() => {
+      try {
+        const draft = { form: { ...form, contractDocument: undefined }, step };
+        localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+      } catch { /* storage full — ignore */ }
+    }, 800);
+    return () => { if (draftTimerRef.current) clearTimeout(draftTimerRef.current); };
+  }, [form, step, submitted]);
+
+  // Clear draft after successful submit
+  const clearDraft = useCallback(() => {
+    try { localStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ }
+  }, []);
+
   const currentStepIdx = STEPS.findIndex((item) => item.key === step);
   const currentStep = STEPS[currentStepIdx];
   const CurrentStepIcon = currentStep.icon;
@@ -543,6 +577,7 @@ export function PortalProjectRegister() {
 
       setForm(payload);
       setSubmitted(true);
+      clearDraft();
       toast.success('사업 등록 제안이 저장되었습니다. 관리자 검토를 기다려주세요.');
     } catch (error: any) {
       console.error('[PortalProjectRegister] create project request failed:', error);
@@ -1290,9 +1325,9 @@ export function PortalProjectRegister() {
                             </div>
                           </div>
 
-                          {(!member.memberName || !member.role.trim() || member.participationRate <= 0) ? (
+                          {(!member.memberName || !member.role.trim()) ? (
                             <p className="mt-2 text-[10px] text-amber-700 dark:text-amber-300">
-                              팀원, 역할, 참여율을 모두 입력해야 다음 단계로 넘어갈 수 있습니다.
+                              팀원과 역할을 입력해야 다음 단계로 넘어갈 수 있습니다.
                             </p>
                           ) : null}
                         </div>
