@@ -1,8 +1,8 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, type DragEvent } from 'react';
 import {
   Lock, SlidersHorizontal, ChevronDown, ChevronRight,
   Calculator, Wallet, TrendingUp, Info,
-  ArrowUp, ArrowDown, Plus, Trash2, Settings,
+  ArrowUp, ArrowDown, Plus, Trash2, Settings, GripVertical,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
@@ -22,7 +22,7 @@ import {
 } from '../../data/budget-data';
 import type { BudgetPlanRow, BudgetCodeEntry, BudgetCodeRename } from '../../data/types';
 import { BASIS_LABELS } from '../../data/types';
-import { moveBudgetSubCode } from '../../platform/budget-code-book-order';
+import { moveBudgetSubCode, moveBudgetSubCodeToIndex } from '../../platform/budget-code-book-order';
 import { parseNumber } from '../../platform/csv-utils';
 import { SETTLEMENT_COLUMNS } from '../../platform/settlement-csv';
 
@@ -81,6 +81,12 @@ export function PortalBudget() {
     note: string;
   }>>([]);
   const [draftCodeBook, setDraftCodeBook] = useState<BudgetCodeEntry[]>([]);
+  const [draggedSubCode, setDraggedSubCode] = useState<{ codeIdx: number; subIdx: number } | null>(null);
+  const [dropTarget, setDropTarget] = useState<{
+    codeIdx: number;
+    subIdx: number;
+    position: 'before' | 'after';
+  } | null>(null);
 
   const meta = myProject ? {
     projectId: myProject.id,
@@ -238,6 +244,53 @@ export function PortalBudget() {
     setDraftCodeBook((prev) => moveBudgetSubCode(prev, idx, subIdx, direction));
   }, []);
 
+  const handleSubCodeDragStart = useCallback((codeIdx: number, subIdx: number) => {
+    setDraggedSubCode({ codeIdx, subIdx });
+    setDropTarget({ codeIdx, subIdx, position: 'before' });
+  }, []);
+
+  const handleSubCodeDragOver = useCallback((
+    event: DragEvent<HTMLDivElement>,
+    codeIdx: number,
+    subIdx: number,
+  ) => {
+    if (!draggedSubCode || draggedSubCode.codeIdx !== codeIdx) return;
+    event.preventDefault();
+    const rect = event.currentTarget.getBoundingClientRect();
+    const position = event.clientY - rect.top > rect.height / 2 ? 'after' : 'before';
+    setDropTarget({ codeIdx, subIdx, position });
+  }, [draggedSubCode]);
+
+  const handleSubCodeDrop = useCallback((codeIdx: number, subIdx: number) => {
+    if (!draggedSubCode || draggedSubCode.codeIdx !== codeIdx) {
+      setDraggedSubCode(null);
+      setDropTarget(null);
+      return;
+    }
+
+    setDraftCodeBook((prev) => {
+      const entry = prev[codeIdx];
+      if (!entry) return prev;
+
+      const insertIndex = dropTarget?.codeIdx === codeIdx && dropTarget.subIdx === subIdx
+        ? (dropTarget.position === 'after' ? subIdx + 1 : subIdx)
+        : subIdx;
+      const boundedInsertIndex = Math.max(0, Math.min(insertIndex, entry.subCodes.length));
+      const targetIndex = draggedSubCode.subIdx < boundedInsertIndex
+        ? boundedInsertIndex - 1
+        : boundedInsertIndex;
+
+      return moveBudgetSubCodeToIndex(prev, codeIdx, draggedSubCode.subIdx, targetIndex);
+    });
+    setDraggedSubCode(null);
+    setDropTarget(null);
+  }, [draggedSubCode, dropTarget]);
+
+  const handleSubCodeDragEnd = useCallback(() => {
+    setDraggedSubCode(null);
+    setDropTarget(null);
+  }, []);
+
   const startEdit = useCallback(() => {
     const next = budgetCodeBook.flatMap((entry) => (
       entry.subCodes.map((subCode) => {
@@ -266,6 +319,8 @@ export function PortalBudget() {
     setCodeBookMode(false);
     setDraftRows([]);
     setDraftCodeBook([]);
+    setDraggedSubCode(null);
+    setDropTarget(null);
   }, []);
 
   const buildCodeBookRenames = useCallback((): BudgetCodeRename[] => {
@@ -503,19 +558,19 @@ export function PortalBudget() {
         />
 
         <Dialog open={codeBookMode} onOpenChange={(open) => !open && cancelEdit()}>
-          <DialogContent className="max-w-2xl">
+          <DialogContent className="max-w-2xl max-h-[85vh] overflow-hidden">
             <DialogHeader>
               <DialogTitle className="text-[14px]">비목/세목 수정</DialogTitle>
             </DialogHeader>
-            <div className="space-y-3">
+            <div className="flex max-h-[calc(85vh-4rem)] flex-col gap-3">
               <div className="flex items-center justify-between">
-                <p className="text-[11px] text-muted-foreground">비목/세목을 추가하세요.</p>
+                <p className="text-[11px] text-muted-foreground">세목은 드래그해서 순서를 바꿀 수 있습니다.</p>
                 <Button variant="outline" size="sm" className="h-7 text-[11px] gap-1" onClick={addBudgetCode}>
                   <Plus className="w-3.5 h-3.5" />
                   비목 추가
                 </Button>
               </div>
-              <div className="space-y-3">
+              <div className="min-h-0 flex-1 space-y-3 overflow-y-scroll pr-2">
                 {draftCodeBook.map((entry, idx) => (
                   <div key={`code-${idx}`} className="rounded-md border border-border/60 p-3 space-y-2">
                     <div className="flex items-center gap-2">
@@ -538,7 +593,31 @@ export function PortalBudget() {
                     </div>
                     <div className="space-y-1">
                       {entry.subCodes.map((sub, sidx) => (
-                        <div key={`sub-${idx}-${sidx}`} className="flex items-center gap-2">
+                        <div
+                          key={`sub-${idx}-${sidx}`}
+                          className={[
+                            'flex items-center gap-2 rounded-md border border-transparent px-1 py-1',
+                            draggedSubCode?.codeIdx === idx && draggedSubCode.subIdx === sidx ? 'opacity-50' : '',
+                            dropTarget?.codeIdx === idx && dropTarget.subIdx === sidx && dropTarget.position === 'before'
+                              ? 'border-t-primary'
+                              : '',
+                            dropTarget?.codeIdx === idx && dropTarget.subIdx === sidx && dropTarget.position === 'after'
+                              ? 'border-b-primary'
+                              : '',
+                          ].join(' ')}
+                          draggable
+                          onDragStart={() => handleSubCodeDragStart(idx, sidx)}
+                          onDragOver={(event) => handleSubCodeDragOver(event, idx, sidx)}
+                          onDrop={() => handleSubCodeDrop(idx, sidx)}
+                          onDragEnd={handleSubCodeDragEnd}
+                        >
+                          <button
+                            type="button"
+                            className="flex h-7 w-7 shrink-0 cursor-grab items-center justify-center rounded border border-dashed border-border/80 text-muted-foreground active:cursor-grabbing"
+                            aria-label="세목 순서 드래그"
+                          >
+                            <GripVertical className="h-3.5 w-3.5" />
+                          </button>
                           <span className="text-[10px] text-muted-foreground min-w-[28px]">{idx + 1}-{sidx + 1}</span>
                           <input
                             type="text"
