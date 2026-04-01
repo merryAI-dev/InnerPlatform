@@ -46,14 +46,16 @@ import { PROJECT_TEAM_MEMBER_OPTION_MAP, PROJECT_TEAM_MEMBER_OPTIONS } from '../
 import { type ProjectProposalDraft } from './project-proposal';
 import {
   formatProjectTeamMembersSummary,
-  hasIncompleteProjectTeamMembers,
   normalizeProjectTeamMembers,
 } from '../../platform/project-team-members';
 import {
   hasExplicitProjectAmountInput,
-  hasNonNegativeProjectAmountInput,
   parseProjectAmountInput,
 } from '../../platform/project-contract-amount';
+import {
+  canAdvanceProjectRegisterStep,
+  getProjectRegisterSubmitIssues,
+} from '../../platform/project-request-registration';
 import { Progress } from '../ui/progress';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
@@ -356,27 +358,12 @@ export function PortalProjectRegister() {
     () => formatProjectTeamMembersSummary(normalizedTeamMembers, form.teamMembers),
     [normalizedTeamMembers, form.teamMembers],
   );
-  const hasIncompleteTeamRows = useMemo(
-    () => hasIncompleteProjectTeamMembers(form.teamMembersDetailed),
-    [form.teamMembersDetailed],
-  );
-
   const canProceed = () => {
-    if (step === 'contract') {
-      return !isUploadingContract && contractAnalysisState !== 'extracting' && contractAnalysisState !== 'analyzing';
-    }
-    if (step === 'basic') {
-      return Boolean(form.department && form.officialContractName.trim() && form.name.trim() && form.clientOrg.trim() && form.type);
-    }
-    if (step === 'financial') {
-      return hasNonNegativeProjectAmountInput(hasContractAmountInput ? String(form.contractAmount) : '')
-        && Boolean(form.contractStart)
-        && Boolean(form.contractEnd);
-    }
-    if (step === 'team') {
-      return Boolean(form.managerName.trim()) && !hasIncompleteTeamRows;
-    }
-    return true;
+    return canAdvanceProjectRegisterStep({
+      step,
+      isUploadingContract,
+      contractAnalysisState,
+    });
   };
 
   const update = (key: keyof ProjectProposalDraft, value: ProjectProposalDraft[keyof ProjectProposalDraft]) => {
@@ -496,6 +483,27 @@ export function PortalProjectRegister() {
   const handleSubmit = async () => {
     if (isSubmitting) return;
     // contractDocument is now optional — PDF upload can be skipped
+
+    const submitIssues = getProjectRegisterSubmitIssues({
+      form: {
+        department: form.department,
+        name: form.name,
+        contractStart: form.contractStart,
+        contractEnd: form.contractEnd,
+        managerName: form.managerName,
+      },
+      hasContractAmountInput,
+    });
+    if (submitIssues.length > 0) {
+      const firstIssue = submitIssues[0];
+      const firstIssueIndex = STEPS.findIndex((item) => item.key === firstIssue.step);
+      if (firstIssueIndex >= 0) {
+        setHighestVisitedIdx((prev) => Math.max(prev, firstIssueIndex));
+        setStep(firstIssue.step);
+      }
+      toast.error(`제출 전 ${submitIssues.map((issue) => issue.label).join(', ')} 입력이 필요합니다.`);
+      return;
+    }
 
     setIsSubmitting(true);
     try {
@@ -638,7 +646,7 @@ export function PortalProjectRegister() {
               <button
                 type="button"
                 onClick={() => {
-                  if (currentStepIdx + 1 <= currentStepIdx) setStep(STEPS[currentStepIdx + 1].key);
+                  if (currentStepIdx + 1 < STEPS.length) setStep(STEPS[currentStepIdx + 1].key);
                 }}
                 className="flex-shrink-0 text-[11px] text-muted-foreground opacity-50"
               >
@@ -1393,8 +1401,12 @@ export function PortalProjectRegister() {
           <Button
             size="sm"
             className="h-9 gap-1 text-[12px]"
-            disabled={!canProceed()}
+            disabled={step === 'contract' && !canProceed()}
             onClick={() => {
+              if (!canProceed()) {
+                toast.info('계약서 업로드 또는 AI 분석이 끝나면 다음 단계로 이동할 수 있습니다.');
+                return;
+              }
               const nextIdx = currentStepIdx + 1;
               setHighestVisitedIdx((prev) => Math.max(prev, nextIdx));
               setStep(STEPS[nextIdx].key);
