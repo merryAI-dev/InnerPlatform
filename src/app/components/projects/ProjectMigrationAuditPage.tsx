@@ -50,11 +50,11 @@ import { useFirebase } from '../../lib/firebase-context';
 
 const STATUS_META: Record<ProjectMigrationStatus, { label: string; className: string }> = {
   REGISTERED: {
-    label: '등록됨',
+    label: '완료',
     className: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300',
   },
   CANDIDATE: {
-    label: '후보 있음',
+    label: '확인 필요',
     className: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
   },
   MISSING: {
@@ -123,6 +123,28 @@ function StatusBadge({ status }: { status: ProjectMigrationStatus }) {
   return <Badge className={`border-0 ${meta.className}`}>{meta.label}</Badge>;
 }
 
+function getCandidateNextAction(match: ProjectMigrationProjectMatch | null): string {
+  if (!match) return '플랫폼에 신규 등록이 필요합니다.';
+  if (match.exact) return '완료';
+  if (match.reasons.some((reason) => reason.includes('계약명'))) {
+    return '계약명만 확인하면 연결 여부를 확정할 수 있습니다.';
+  }
+  return '플랫폼 프로젝트와 같은 건인지 확인해 주세요.';
+}
+
+function getSourceRowNextAction(
+  status: ProjectMigrationStatus,
+  match: ProjectMigrationProjectMatch | null,
+): string {
+  if (status === 'REGISTERED') return '완료';
+  if (status === 'CANDIDATE') return getCandidateNextAction(match);
+  return '플랫폼에 신규 등록이 필요합니다.';
+}
+
+function getCurrentOnlyNextAction(): string {
+  return '이관 범위 밖 프로젝트인지 확인해 주세요.';
+}
+
 function MatchProjectCard({
   match,
   onOpenProject,
@@ -143,48 +165,26 @@ function MatchProjectCard({
         >
           {primaryLabel}
         </Button>
-        <Badge variant="outline" className="text-[10px]">
-          {match.score}점
-        </Badge>
-        {match.exact ? (
-          <Badge className="border-0 bg-emerald-100 text-[10px] text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
-            exact
-          </Badge>
-        ) : null}
       </div>
       <div className="mt-1 space-y-1 text-[11px] text-muted-foreground">
-        {match.project.officialContractName && match.project.officialContractName !== match.project.name ? (
-          <p>플랫폼 프로젝트명: {match.project.name}</p>
-        ) : null}
         <p>{match.project.department || '담당조직 없음'} · {match.project.managerName || '담당자 없음'}</p>
-      </div>
-      <div className="mt-2 flex flex-wrap gap-1">
-        {match.reasons.map((reason) => (
-          <Badge key={`${match.project.id}-${reason}`} variant="outline" className="text-[10px]">
-            {reason}
-          </Badge>
-        ))}
       </div>
     </div>
   );
 }
 
 function CurrentProjectMatchCell({
-  matches,
+  match,
   onOpenProject,
 }: {
-  matches: ProjectMigrationProjectMatch[];
+  match: ProjectMigrationProjectMatch | null;
   onOpenProject: (projectId: string) => void;
 }) {
-  if (matches.length === 0) {
+  if (!match) {
     return <span className="text-[11px] text-muted-foreground">플랫폼 프로젝트 매칭 없음</span>;
   }
   return (
-    <div className="space-y-2">
-      {matches.map((match) => (
-        <MatchProjectCard key={match.project.id} match={match} onOpenProject={onOpenProject} />
-      ))}
-    </div>
+    <MatchProjectCard match={match} onOpenProject={onOpenProject} />
   );
 }
 
@@ -210,9 +210,6 @@ function CurrentOnlyProjectCell({
         </Button>
       </div>
       <div className="mt-1 space-y-1 text-[11px] text-muted-foreground">
-        {project.officialContractName && project.officialContractName !== project.name ? (
-          <p>플랫폼 프로젝트명: {project.name}</p>
-        ) : null}
         <p>{project.department || '담당조직 없음'} · {project.managerName || '담당자 없음'}</p>
       </div>
     </div>
@@ -225,7 +222,7 @@ type UnifiedAuditTableRow =
     kind: 'source';
     status: ProjectMigrationStatus;
     sourceName: string;
-    matches: ProjectMigrationProjectMatch[];
+    match: ProjectMigrationProjectMatch | null;
   }
   | {
     key: string;
@@ -306,7 +303,7 @@ export function ProjectMigrationAuditPage() {
     const query = normalizeFilterText(search);
     return rows.filter((row) => {
       if (departmentFilter !== 'ALL') {
-        const matchedDepartment = row.matches.some((match) => match.project.department === departmentFilter);
+        const matchedDepartment = row.match?.project.department === departmentFilter;
         if (row.candidate.department !== departmentFilter && !matchedDepartment) return false;
       }
       if (statusFilter !== 'ALL' && row.status !== statusFilter) return false;
@@ -318,14 +315,14 @@ export function ProjectMigrationAuditPage() {
         row.candidate.groupwareProjectName,
         row.candidate.businessName,
         row.candidate.clientOrg,
-        ...row.matches.map((match) => [
-          match.project.name,
-          match.project.officialContractName,
-          match.project.groupwareName,
-          match.project.clientOrg,
-          match.project.department,
-          match.project.managerName,
-        ].join(' ')),
+        row.match ? [
+          row.match.project.name,
+          row.match.project.officialContractName,
+          row.match.project.groupwareName,
+          row.match.project.clientOrg,
+          row.match.project.department,
+          row.match.project.managerName,
+        ].join(' ') : '',
       ].join(' ').toLowerCase();
 
       return haystack.includes(query);
@@ -335,7 +332,7 @@ export function ProjectMigrationAuditPage() {
   const filteredCurrentOnlyRows = useMemo(() => {
     const query = normalizeFilterText(search);
     return currentRows.filter((row) => {
-      if (row.matches.length > 0) return false;
+      if (row.match) return false;
       if (departmentFilter !== 'ALL' && row.project.department !== departmentFilter) return false;
       if (statusFilter !== 'ALL' && row.status !== statusFilter) return false;
       if (!query) return true;
@@ -353,21 +350,36 @@ export function ProjectMigrationAuditPage() {
     });
   }, [currentRows, departmentFilter, search, statusFilter]);
 
-  const unifiedRows = useMemo<UnifiedAuditTableRow[]>(() => ([
-    ...filteredRows.map((row) => ({
-      key: row.candidate.id,
-      kind: 'source' as const,
-      status: row.status,
-      sourceName: row.candidate.businessName,
-      matches: row.matches,
-    })),
-    ...filteredCurrentOnlyRows.map((row) => ({
-      key: `current-${row.project.id}`,
-      kind: 'current-only' as const,
-      status: 'MISSING' as const,
-      project: row.project,
-    })),
-  ]), [filteredCurrentOnlyRows, filteredRows]);
+  const unifiedRows = useMemo<UnifiedAuditTableRow[]>(() => (
+    [
+      ...filteredRows.map((row) => ({
+        key: row.candidate.id,
+        kind: 'source' as const,
+        status: row.status,
+        sourceName: row.candidate.businessName,
+        match: row.match,
+      })),
+      ...filteredCurrentOnlyRows.map((row) => ({
+        key: `current-${row.project.id}`,
+        kind: 'current-only' as const,
+        status: 'MISSING' as const,
+        project: row.project,
+      })),
+    ].sort((left, right) => {
+      const statusCompare = STATUS_ORDER[left.status] - STATUS_ORDER[right.status];
+      if (statusCompare !== 0) return statusCompare;
+      if (left.kind !== right.kind) return left.kind === 'source' ? -1 : 1;
+
+      const leftName = left.kind === 'source'
+        ? left.sourceName
+        : left.project.officialContractName || left.project.name || '';
+      const rightName = right.kind === 'source'
+        ? right.sourceName
+        : right.project.officialContractName || right.project.name || '';
+
+      return leftName.localeCompare(rightName, 'ko');
+    })
+  ), [filteredCurrentOnlyRows, filteredRows]);
 
   const sourceSummary = useMemo(() => ({
     total: rows.length,
@@ -415,7 +427,7 @@ export function ProjectMigrationAuditPage() {
         icon={FolderSearch}
         iconGradient="linear-gradient(135deg, #0f766e 0%, #0ea5e9 100%)"
         title="프로젝트 마이그레이션 등록 현황"
-        description={`승인된 비교 기준 ${sourceSummary.total}건과 현재 플랫폼 등록 ${currentSummary.total}건을 Firestore에서 계약명 우선으로 대조합니다. 완료율 ${formatRatio(completionRatio)}, 검토 ${sourceSummary.candidate}, 미등록 ${sourceSummary.missing}`}
+        description={`사업대시보드 기준 ${sourceSummary.total}건과 현재 플랫폼 등록 ${currentSummary.total}건을 비교해 마이그레이션 진행 상태를 확인합니다. 완료율 ${formatRatio(completionRatio)}, 확인 필요 ${sourceSummary.candidate}, 미등록 ${sourceSummary.missing}`}
         badge="Firestore"
       />
 
@@ -424,8 +436,8 @@ export function ProjectMigrationAuditPage() {
           <div className="flex gap-3">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
             <div className="space-y-1">
-              <p className="font-medium">원본 대조 기준을 명시적으로 분리한 임시 점검 화면입니다.</p>
-              <p>왼쪽 기준은 Firestore `orgs/{orgId}/project_dashboard_projects`에 적재된 승인된 25개 비교기준 목록이고, 오른쪽 기준은 `orgs/{orgId}/projects`입니다. 두 컬렉션은 역할이 다르며 운영 프로젝트와 섞이지 않습니다.</p>
+              <p className="font-medium">사업대시보드의 기준 25건과 현재 플랫폼 프로젝트를 나란히 비교하는 임시 점검 화면입니다.</p>
+              <p>이관 대상 25건을 빠르게 확인하는 용도이며, 완료보다 미등록과 확인 필요 항목이 먼저 보이도록 정렬됩니다.</p>
             </div>
           </div>
           <div className="flex shrink-0 flex-col gap-2 lg:items-end">
@@ -438,9 +450,9 @@ export function ProjectMigrationAuditPage() {
               onClick={() => { void handleSyncApprovedScope(); }}
             >
               {isSyncingScope ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-              비교 기준 {APPROVED_PROJECT_DASHBOARD_SCOPE.length}개 적재
+              기준 {APPROVED_PROJECT_DASHBOARD_SCOPE.length}개 다시 적재
             </Button>
-            <p className="text-[11px] text-amber-800/80 dark:text-amber-200/80">source 컬렉션만 갱신하며 `projects`는 변경하지 않습니다.</p>
+            <p className="text-[11px] text-amber-800/80 dark:text-amber-200/80">비교 기준만 갱신하며 현재 플랫폼 프로젝트는 변경하지 않습니다.</p>
           </div>
         </CardContent>
       </Card>
@@ -468,13 +480,13 @@ export function ProjectMigrationAuditPage() {
         </Card>
         <Card>
           <CardContent className="p-4">
-            <p className="text-[11px] text-muted-foreground">등록됨</p>
+            <p className="text-[11px] text-muted-foreground">완료</p>
             <p className="mt-2 text-2xl font-semibold text-emerald-600">{sourceSummary.registered}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
-            <p className="text-[11px] text-muted-foreground">후보 있음</p>
+            <p className="text-[11px] text-muted-foreground">확인 필요</p>
             <p className="mt-2 text-2xl font-semibold text-amber-600">{sourceSummary.candidate}</p>
           </CardContent>
         </Card>
@@ -508,7 +520,7 @@ export function ProjectMigrationAuditPage() {
               <Input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="사업명, 계약명, 발주기관으로 검색"
+                placeholder="사업대시보드 프로젝트명, 플랫폼 계약명으로 검색"
                 className="pl-9"
               />
             </div>
@@ -529,8 +541,8 @@ export function ProjectMigrationAuditPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="ALL">전체 상태</SelectItem>
-                <SelectItem value="REGISTERED">등록됨</SelectItem>
-                <SelectItem value="CANDIDATE">후보 있음</SelectItem>
+                <SelectItem value="REGISTERED">완료</SelectItem>
+                <SelectItem value="CANDIDATE">확인 필요</SelectItem>
                 <SelectItem value="MISSING">미등록</SelectItem>
               </SelectContent>
             </Select>
@@ -542,7 +554,7 @@ export function ProjectMigrationAuditPage() {
         <CardContent className="space-y-4 p-4">
           <div className="space-y-1">
             <h2 className="text-sm font-semibold">통합 대조표</h2>
-            <p className="text-[12px] text-muted-foreground">원본 25건을 기준으로 플랫폼 프로젝트를 계약명 우선, 프로젝트명 보조로 붙였습니다. 원본과 연결되지 않은 현재 프로젝트도 같은 표 하단에 함께 표시합니다.</p>
+            <p className="text-[12px] text-muted-foreground">사업대시보드의 25건을 기준으로 플랫폼 프로젝트를 계약명 우선으로 붙였습니다. 미등록과 확인 필요 항목이 먼저 보입니다.</p>
           </div>
 
           <div className="overflow-x-auto">
@@ -552,7 +564,7 @@ export function ProjectMigrationAuditPage() {
                   <TableHead className="min-w-[92px]">상태</TableHead>
                   <TableHead className="min-w-[180px]">사업대시보드 상의 프로젝트명</TableHead>
                   <TableHead className="min-w-[360px]">플랫폼 상의 프로젝트</TableHead>
-                  <TableHead className="min-w-[220px]">비고</TableHead>
+                  <TableHead className="min-w-[220px]">다음 액션</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -564,15 +576,13 @@ export function ProjectMigrationAuditPage() {
                     </TableCell>
                     <TableCell>
                       {row.kind === 'source'
-                        ? <CurrentProjectMatchCell matches={row.matches} onOpenProject={(projectId) => navigate(`/projects/${projectId}`)} />
+                        ? <CurrentProjectMatchCell match={row.match} onOpenProject={(projectId) => navigate(`/projects/${projectId}`)} />
                         : <CurrentOnlyProjectCell project={row.project} onOpenProject={(projectId) => navigate(`/projects/${projectId}`)} />}
                     </TableCell>
                     <TableCell className="text-[11px] text-muted-foreground">
                       {row.kind === 'source'
-                        ? row.matches.length > 0
-                          ? '상단 카드의 점수와 매칭 근거를 확인하세요.'
-                          : '현재 플랫폼에 연결된 프로젝트가 없습니다.'
-                        : '현재 플랫폼에는 있으나 승인된 25개 원본 범위와 연결되지 않은 프로젝트입니다.'}
+                        ? getSourceRowNextAction(row.status, row.match)
+                        : getCurrentOnlyNextAction()}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -591,9 +601,9 @@ export function ProjectMigrationAuditPage() {
 
       <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
         <FolderSearch className="h-4 w-4" />
-        <span>등록된 프로젝트를 열어 상세 확인이 필요하면 현재 사업명을 누르세요.</span>
+        <span>플랫폼 프로젝트를 열어 확인이 필요하면 현재 사업명을 누르세요.</span>
         <ArrowRight className="h-3.5 w-3.5" />
-        <span>미등록 또는 후보 있음 위주로 보면 이관 누락을 빠르게 확인할 수 있습니다.</span>
+        <span>미등록과 확인 필요 항목부터 정리하면 이관 누락을 빠르게 줄일 수 있습니다.</span>
       </div>
     </div>
   );

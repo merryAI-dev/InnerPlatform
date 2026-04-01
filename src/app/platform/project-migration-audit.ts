@@ -13,7 +13,7 @@ export interface ProjectMigrationProjectMatch {
 export interface ProjectMigrationAuditRow {
   candidate: ProjectMigrationCandidate;
   status: ProjectMigrationStatus;
-  matches: ProjectMigrationProjectMatch[];
+  match: ProjectMigrationProjectMatch | null;
 }
 
 export interface ProjectMigrationCurrentMatch {
@@ -27,7 +27,7 @@ export interface ProjectMigrationCurrentMatch {
 export interface ProjectMigrationCurrentRow {
   project: Project;
   status: ProjectMigrationStatus;
-  matches: ProjectMigrationCurrentMatch[];
+  match: ProjectMigrationCurrentMatch | null;
 }
 
 const CLIENT_ALIASES: Array<[RegExp, string]> = [
@@ -202,59 +202,86 @@ function scoreProjectMatch(candidate: ProjectMigrationCandidate, project: Projec
   };
 }
 
+function compareProjectMatches(left: ProjectMigrationProjectMatch, right: ProjectMigrationProjectMatch): number {
+  if (left.exact !== right.exact) return left.exact ? -1 : 1;
+  if (left.score !== right.score) return right.score - left.score;
+
+  const leftLabel = left.project.officialContractName || left.project.name || '';
+  const rightLabel = right.project.officialContractName || right.project.name || '';
+  return leftLabel.localeCompare(rightLabel, 'ko');
+}
+
 export function buildProjectMigrationAuditRows(
   candidates: ProjectMigrationCandidate[],
   projects: Project[],
 ): ProjectMigrationAuditRow[] {
-  return candidates.map((candidate) => {
-    const matches = projects
-      .map((project) => scoreProjectMatch(candidate, project))
-      .filter((match): match is ProjectMigrationProjectMatch => !!match)
-      .sort((left, right) => right.score - left.score)
-      .slice(0, 3);
+  const rows: ProjectMigrationAuditRow[] = candidates.map((candidate) => ({
+    candidate,
+    status: 'MISSING',
+    match: null,
+  }));
 
-    const status: ProjectMigrationStatus = matches.some((match) => match.exact)
-      ? 'REGISTERED'
-      : matches.length > 0
-        ? 'CANDIDATE'
-        : 'MISSING';
+  const candidateEdges = candidates.flatMap((candidate, candidateIndex) => (
+    projects
+      .map((project) => {
+        const match = scoreProjectMatch(candidate, project);
+        if (!match) return null;
+        return {
+          candidateIndex,
+          match,
+        };
+      })
+      .filter((edge): edge is { candidateIndex: number; match: ProjectMigrationProjectMatch } => !!edge)
+  ));
 
-    return {
-      candidate,
-      status,
-      matches,
-    };
+  candidateEdges.sort((left, right) => {
+    const matchCompare = compareProjectMatches(left.match, right.match);
+    if (matchCompare !== 0) return matchCompare;
+    return left.candidateIndex - right.candidateIndex;
   });
+
+  const assignedCandidates = new Set<number>();
+  const assignedProjects = new Set<string>();
+
+  for (const edge of candidateEdges) {
+    if (assignedCandidates.has(edge.candidateIndex)) continue;
+    if (assignedProjects.has(edge.match.project.id)) continue;
+
+    rows[edge.candidateIndex] = {
+      candidate: rows[edge.candidateIndex].candidate,
+      status: edge.match.exact ? 'REGISTERED' : 'CANDIDATE',
+      match: edge.match,
+    };
+    assignedCandidates.add(edge.candidateIndex);
+    assignedProjects.add(edge.match.project.id);
+  }
+
+  return rows;
 }
 
 export function buildProjectMigrationCurrentRows(
   rows: ProjectMigrationAuditRow[],
   projects: Project[],
 ): ProjectMigrationCurrentRow[] {
+  const matchByProjectId = new Map<string, ProjectMigrationCurrentMatch>();
+
+  rows.forEach((row) => {
+    if (!row.match) return;
+    matchByProjectId.set(row.match.project.id, {
+      candidate: row.candidate,
+      score: row.match.score,
+      exact: row.match.exact,
+      reasons: row.match.reasons,
+      sourceStatus: row.status,
+    });
+  });
+
   return projects.map((project) => {
-    const matches = rows
-      .flatMap((row) => row.matches
-        .filter((match) => match.project.id === project.id)
-        .map((match) => ({
-          candidate: row.candidate,
-          score: match.score,
-          exact: match.exact,
-          reasons: match.reasons,
-          sourceStatus: row.status,
-        })))
-      .sort((left, right) => right.score - left.score)
-      .slice(0, 5);
-
-    const status: ProjectMigrationStatus = matches.some((match) => match.exact)
-      ? 'REGISTERED'
-      : matches.length > 0
-        ? 'CANDIDATE'
-        : 'MISSING';
-
+    const match = matchByProjectId.get(project.id) ?? null;
     return {
       project,
-      status,
-      matches,
+      status: match ? (match.exact ? 'REGISTERED' : 'CANDIDATE') : 'MISSING',
+      match,
     };
   });
 }

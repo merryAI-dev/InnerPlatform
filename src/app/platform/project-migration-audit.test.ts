@@ -64,7 +64,7 @@ describe('buildProjectMigrationAuditRows', () => {
     );
 
     expect(rows[0].status).toBe('REGISTERED');
-    expect(rows[0].matches[0]?.reasons).toContain('현재 프로젝트명 일치');
+    expect(rows[0].match?.reasons).toContain('현재 프로젝트명 일치');
   });
 
   it('accepts KOICA alias client names as the same organization', () => {
@@ -74,7 +74,7 @@ describe('buildProjectMigrationAuditRows', () => {
     );
 
     expect(rows[0].status).toBe('REGISTERED');
-    expect(rows[0].matches[0]?.reasons).toContain('발주기관 일치');
+    expect(rows[0].match?.reasons).toContain('발주기관 일치');
   });
 
   it('keeps placeholder groupware names from creating false exact matches', () => {
@@ -93,7 +93,7 @@ describe('buildProjectMigrationAuditRows', () => {
     );
 
     expect(rows[0].status).toBe('CANDIDATE');
-    expect(rows[0].matches[0]?.reasons).toContain('현재 프로젝트명 유사');
+    expect(rows[0].match?.reasons).toContain('현재 프로젝트명 유사');
   });
 
   it('treats an exact official contract name as a registered match', () => {
@@ -106,7 +106,7 @@ describe('buildProjectMigrationAuditRows', () => {
     );
 
     expect(rows[0].status).toBe('REGISTERED');
-    expect(rows[0].matches[0]?.reasons).toContain('계약명 일치');
+    expect(rows[0].match?.reasons).toContain('계약명 일치');
   });
 
   it('keeps compact cohort-style project names as candidates when core tokens match', () => {
@@ -116,7 +116,26 @@ describe('buildProjectMigrationAuditRows', () => {
     );
 
     expect(rows[0].status).toBe('CANDIDATE');
-    expect(rows[0].matches[0]?.reasons).toContain('현재 프로젝트명 유사');
+    expect(rows[0].match?.reasons).toContain('현재 프로젝트명 유사');
+  });
+
+  it('assigns each platform project to only one source row', () => {
+    const rows = buildProjectMigrationAuditRows(
+      [
+        makeCandidate({ id: 'candidate-contract', businessName: '2023-2026 창업투자 전문기관을 통한 혁신적기술프로그램(CTS)참여기업 역량 강화 용역' }),
+        makeCandidate({ id: 'candidate-short', businessName: 'CTS역량강화' }),
+      ],
+      [makeProject({
+        id: 'p-cts',
+        name: 'CTS역량강화',
+        officialContractName: '2023-2026 창업투자 전문기관을 통한 혁신적기술프로그램(CTS)참여기업 역량 강화 용역',
+      })],
+    );
+
+    expect(rows[0].status).toBe('REGISTERED');
+    expect(rows[0].match?.project.id).toBe('p-cts');
+    expect(rows[1].status).toBe('MISSING');
+    expect(rows[1].match).toBeNull();
   });
 
   it('builds current-project rows for reverse lookup', () => {
@@ -130,6 +149,6 @@ describe('buildProjectMigrationAuditRows', () => {
     ]);
 
     expect(currentRows[0].status).toBe('REGISTERED');
-    expect(currentRows[0].matches[0]?.candidate.businessName).toBe('2026 에코스타트업');
+    expect(currentRows[0].match?.candidate.businessName).toBe('2026 에코스타트업');
   });
 });
