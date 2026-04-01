@@ -130,6 +130,7 @@ function loadSavedUser(): AuthUser | null {
     const parsed = JSON.parse(saved) as AuthUser;
     return {
       ...parsed,
+      role: toUserRole(parsed.role) || 'pm',
       ...(parsed.uid ? { googleAccessToken: loadGoogleWorkspaceAccessToken(parsed.uid) } : {}),
     };
   } catch {
@@ -213,7 +214,7 @@ function getCachedMemberFallback(firebaseUser: FirebaseUser): Partial<MemberDoc>
     uid: saved.uid,
     name: saved.name,
     email: saved.email,
-    role: saved.role,
+    role: toUserRole(saved.role) || 'pm',
     tenantId: saved.tenantId,
     projectId: saved.projectId,
     projectIds: saved.projectIds,
@@ -225,17 +226,18 @@ function getCachedMemberFallback(firebaseUser: FirebaseUser): Partial<MemberDoc>
 }
 
 function toUserRole(role: string | undefined): UserRole | undefined {
+  const normalized = typeof role === 'string' ? role.trim().toLowerCase() : '';
+  const effectiveRole = normalized === 'viewer' ? 'pm' : normalized;
   if (
-    role === 'admin' ||
-    role === 'tenant_admin' ||
-    role === 'finance' ||
-    role === 'pm' ||
-    role === 'viewer' ||
-    role === 'auditor' ||
-    role === 'support' ||
-    role === 'security'
+    effectiveRole === 'admin' ||
+    effectiveRole === 'tenant_admin' ||
+    effectiveRole === 'finance' ||
+    effectiveRole === 'pm' ||
+    effectiveRole === 'auditor' ||
+    effectiveRole === 'support' ||
+    effectiveRole === 'security'
   ) {
-    return role;
+    return effectiveRole as UserRole;
   }
   return undefined;
 }
@@ -329,7 +331,7 @@ async function upsertMemberFromFirebase(
       bootstrapAdmin
         ? 'admin'
         : toUserRole(roleFromClaims) ||
-          existing?.role ||
+          toUserRole(existing?.role) ||
           resolveRoleFromDirectory(firebaseUser.email || '', ROLE_DIRECTORY) ||
           'pm',
     tenantId,
@@ -370,7 +372,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         uid: harnessSession.uid,
         name: harnessSession.name,
         email: harnessSession.email,
-        role: harnessSession.role,
+        role: toUserRole(harnessSession.role) || 'pm',
         source: 'dev_harness',
         tenantId: harnessSession.tenantId,
         projectId: harnessSession.projectId,
@@ -679,7 +681,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [user]);
 
   const isPortalUser = useCallback(() => {
-    return !!user && (user.role === 'pm' || user.role === 'viewer');
+    return !!user && user.role === 'pm';
   }, [user]);
 
   const value: AuthState & AuthActions = {

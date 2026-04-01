@@ -18,8 +18,8 @@ export function normalizeEmail(email: string): string {
 export function resolveRoleFromDirectory(email: string, directory: RoleDirectoryEntry[]): UserRole {
   const normalized = normalizeEmail(email);
   const found = directory.find((entry) => normalizeEmail(entry.email) === normalized);
-  // Least privilege: unknown users should not get write access by default.
-  return found?.role ?? 'viewer';
+  // Runtime policy currently treats legacy viewer access as PM access.
+  return found?.role ?? 'pm';
 }
 
 export function resolveProjectIdForManager(uid: string, projects: ProjectOwnerEntry[]): string | undefined {

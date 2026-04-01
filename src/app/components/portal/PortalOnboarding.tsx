@@ -271,11 +271,6 @@ export function PortalOnboarding() {
               >
                 사업 추가 요청
               </Button>
-              {authUser?.role === 'viewer' && (
-                <p className="text-[11px] text-teal-600 dark:text-teal-400 mt-1.5 text-center">
-                  Viewer도 사업을 등록할 수 있어요
-                </p>
-              )}
             </div>
 
             <div className="flex items-center justify-between pt-2">

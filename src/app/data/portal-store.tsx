@@ -73,6 +73,12 @@ export interface PortalUser {
   registeredAt: string;
 }
 
+function normalizePortalRole(value: unknown): string {
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  if (!normalized) return 'pm';
+  return normalized === 'viewer' ? 'pm' : normalized;
+}
+
 export interface ExpenseSheetTab {
   id: string;
   name: string;
@@ -216,7 +222,7 @@ function normalizePortalUser(candidate: Partial<PortalUser> | null | undefined):
     id: (candidate.id || '').trim(),
     name: candidate.name || '사용자',
     email: candidate.email || '',
-    role: (candidate.role || 'pm').toLowerCase(),
+    role: normalizePortalRole(candidate.role),
     projectId,
     projectIds,
     projectNames: candidate.projectNames,
@@ -357,8 +363,8 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         const workspace = readMemberWorkspace(member);
         const access = resolveMemberProjectAccessState(member);
         const memberRole = typeof member.role === 'string' && member.role.trim()
-          ? member.role.trim().toLowerCase()
-          : (authUser.role || 'pm').toLowerCase();
+          ? normalizePortalRole(member.role)
+          : normalizePortalRole(authUser.role || 'pm');
         const nameMap: Record<string, string> = {};
         const rawIds = Array.isArray(member.projectIds) ? member.projectIds : [];
         const coercedIds = rawIds
@@ -1578,7 +1584,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       uid: authUser.uid,
       name: authUser.name || portalUser?.name || '사용자',
       email: authUser.email || portalUser?.email || '',
-      role: (authUser.role || portalUser?.role || 'pm').toLowerCase(),
+      role: normalizePortalRole(authUser.role || portalUser?.role || 'pm'),
       tenantId: orgId,
       status: 'ACTIVE',
       ...buildPortalProfilePatch({
@@ -1597,7 +1603,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       id: authUser.uid,
       name: authUser.name || previous?.name || portalUser?.name || '사용자',
       email: authUser.email || previous?.email || portalUser?.email || '',
-      role: authUser.role || previous?.role || portalUser?.role || 'pm',
+      role: normalizePortalRole(authUser.role || previous?.role || portalUser?.role || 'pm'),
       projectId: nextPortalProjectId,
       projectIds: nextPortalProjectIds,
       projectNames: nextPortalProjectNames,
@@ -1708,14 +1714,14 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         toast.error('최소 1개 이상의 사업을 선택해 주세요.');
         return false;
       }
-      const candidate = normalizePortalUser({
-        ...user,
-        id: authUser?.uid || `pu-${Date.now()}`,
-        role: (authUser?.role || user.role || 'pm').toLowerCase(),
-        projectId: primaryProjectId,
-        projectIds: normalizedProjectIds,
-        registeredAt: now,
-      });
+        const candidate = normalizePortalUser({
+          ...user,
+          id: authUser?.uid || `pu-${Date.now()}`,
+          role: normalizePortalRole(authUser?.role || user.role || 'pm'),
+          projectId: primaryProjectId,
+          projectIds: normalizedProjectIds,
+          registeredAt: now,
+        });
       if (!candidate) {
         toast.error('사업 정보를 저장하지 못했습니다.');
         return false;
@@ -1742,7 +1748,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     const candidate = normalizePortalUser({
       ...user,
       id: authUser?.uid || `pu-${Date.now()}`,
-      role: (authUser?.role || user.role || 'pm').toLowerCase(),
+      role: normalizePortalRole(authUser?.role || user.role || 'pm'),
       projectId: primaryProjectId,
       projectIds: normalizedProjectIds,
       registeredAt: now,
@@ -1755,11 +1761,11 @@ export function PortalProvider({ children }: { children: ReactNode }) {
 
     if (authUser) {
       setIsMemberLoading(true);
-      let memberRole = (authUser.role || user.role || 'pm').toLowerCase();
+      let memberRole = normalizePortalRole(authUser.role || user.role || 'pm');
       try {
         const { canonicalRef, member } = await loadPortalMemberRecord(db, orgId, authUser);
         if (typeof member?.role === 'string' && member.role.trim()) {
-          memberRole = member.role.trim().toLowerCase();
+          memberRole = normalizePortalRole(member.role);
         }
         await setDoc(canonicalRef, {
           uid: authUser.uid,
@@ -1846,8 +1852,8 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           name: authUser.name || nextUser.name,
           email: authUser.email || nextUser.email,
           role: typeof member?.role === 'string' && member.role.trim()
-            ? member.role.trim().toLowerCase()
-            : nextUser.role,
+            ? normalizePortalRole(member.role)
+            : normalizePortalRole(nextUser.role),
           tenantId: orgId,
           status: typeof member?.status === 'string' && member.status.trim() ? member.status : 'ACTIVE',
           ...buildPortalProfilePatch({

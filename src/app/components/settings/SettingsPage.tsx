@@ -29,7 +29,7 @@ import { PageHeader } from '../layout/PageHeader';
 import { useAuth } from '../../data/auth-store';
 import { resolveHomePath } from '../../platform/navigation';
 
-const DISPLAY_ROLES = ['admin', 'finance', 'pm', 'viewer'] as const;
+const DISPLAY_ROLES = ['admin', 'finance', 'pm'] as const;
 type DisplayRole = typeof DISPLAY_ROLES[number];
 
 const PERMISSION_LABELS: Partial<Record<PlatformPermission, string>> = {

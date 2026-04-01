@@ -53,7 +53,8 @@ export function decodeHeaderValue(value) {
 }
 
 export function normalizeRole(value) {
-  return typeof value === 'string' ? value.trim().toLowerCase() : '';
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  return normalized === 'viewer' ? 'pm' : normalized;
 }
 
 export function normalizeEntityType(value) {

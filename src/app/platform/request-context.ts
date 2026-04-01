@@ -22,6 +22,12 @@ function normalizeActorId(value: string | undefined): string {
   return trimmed.replace(/\s+/g, '_').replace(/[^A-Za-z0-9._-]/g, '_');
 }
 
+function normalizeActorRole(value: string | undefined): string {
+  const normalized = (value || '').trim().toLowerCase();
+  if (!normalized) return '';
+  return normalized === 'viewer' ? 'pm' : normalized;
+}
+
 function randomToken(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID().replace(/-/g, '').slice(0, 16);
@@ -64,8 +70,9 @@ export function buildStandardHeaders(input: BuildStandardHeadersInput): Headers 
     headers.set('x-actor-email', input.actor.email.trim().toLowerCase());
   }
 
-  if (input.actor.role && !headers.get('x-actor-role')) {
-    headers.set('x-actor-role', input.actor.role);
+  const actorRole = normalizeActorRole(input.actor.role);
+  if (actorRole && !headers.get('x-actor-role')) {
+    headers.set('x-actor-role', actorRole);
   }
 
   if (hasIdToken && !headers.get('authorization')) {

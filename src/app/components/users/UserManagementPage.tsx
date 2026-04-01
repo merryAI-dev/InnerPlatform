@@ -85,7 +85,7 @@ function toManagedUser(member: MemberDoc, index: number): ManagedUser {
     uid: member.uid,
     name: member.name,
     email: member.email,
-    role: member.role,
+    role: member.role === 'viewer' ? 'pm' : member.role,
     status: normalizeStatus(member.status),
     department: typeof member.department === 'string' ? member.department : undefined,
     phone: typeof member.phone === 'string' ? member.phone : undefined,
@@ -346,7 +346,6 @@ export function UserManagementPage() {
                   <SelectItem value="admin">관리자</SelectItem>
                   <SelectItem value="finance">재무팀</SelectItem>
                   <SelectItem value="pm">PM</SelectItem>
-                  <SelectItem value="viewer">뷰어</SelectItem>
                   <SelectItem value="auditor">감사</SelectItem>
                 </SelectContent>
               </Select>
@@ -544,7 +543,6 @@ export function UserManagementPage() {
                       <SelectItem value="admin">관리자</SelectItem>
                       <SelectItem value="finance">재무팀</SelectItem>
                       <SelectItem value="pm">PM (사업담당)</SelectItem>
-                      <SelectItem value="viewer">뷰어</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -585,7 +583,6 @@ export function UserManagementPage() {
                 <p><span className="text-foreground" style={{ fontWeight: 500 }}>관리자</span> — 모든 사업·재무·사용자 관리 권한</p>
                 <p><span className="text-foreground" style={{ fontWeight: 500 }}>재무팀</span> — 모든 사업의 재무 조회·승인 권한</p>
                 <p><span className="text-foreground" style={{ fontWeight: 500 }}>PM</span> — 배정된 사업의 재무·인력 관리 권한</p>
-                <p><span className="text-foreground" style={{ fontWeight: 500 }}>뷰어</span> — 배정된 사업 조회만 가능</p>
                 <p><span className="text-foreground" style={{ fontWeight: 500 }}>감사</span> — 모든 사업 읽기 전용 + 감사로그</p>
               </div>
             </div>
@@ -638,7 +635,6 @@ export function UserManagementPage() {
                         <SelectItem value="admin">관리자</SelectItem>
                         <SelectItem value="finance">재무팀</SelectItem>
                         <SelectItem value="pm">PM (사업담당)</SelectItem>
-                        <SelectItem value="viewer">뷰어</SelectItem>
                         </SelectContent>
                     </Select>
                   </div>
@@ -779,7 +775,6 @@ function UserDetailPanel({
               <SelectItem value="admin">관리자</SelectItem>
               <SelectItem value="finance">재무팀</SelectItem>
               <SelectItem value="pm">PM (사업담당)</SelectItem>
-              <SelectItem value="viewer">뷰어</SelectItem>
               <SelectItem value="auditor">감사</SelectItem>
             </SelectContent>
           </Select>

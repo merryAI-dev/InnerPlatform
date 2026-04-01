@@ -56,7 +56,7 @@ describe('request-context helpers', () => {
     expect(headers.get('idempotency-key')).toBe('idem-fixed');
   });
 
-  it('adds authorization header when id token exists', () => {
+  it('adds authorization header and normalizes legacy viewer role to pm', () => {
     const headers = buildStandardHeaders({
       tenantId: 'mysc',
       actor: { id: 'u001', email: 'viewer@mysc.co.kr', role: 'viewer', idToken: 'token-123' },
@@ -66,6 +66,6 @@ describe('request-context helpers', () => {
     expect(headers.get('authorization')).toBe('Bearer token-123');
     expect(headers.get('x-actor-id')).toBe('u001');
     expect(headers.get('x-actor-email')).toBe('viewer@mysc.co.kr');
-    expect(headers.get('x-actor-role')).toBe('viewer');
+    expect(headers.get('x-actor-role')).toBe('pm');
   });
 });

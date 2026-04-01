@@ -112,7 +112,7 @@ export function PortalWeeklyExpensePage() {
 
   const projectId = portalUser?.projectId || '';
   const projectName = myProject?.name || '내 사업';
-  const ledgerUserRole = portalUser?.role === 'pm' || portalUser?.role === 'viewer' ? 'pm' : 'admin';
+  const ledgerUserRole = portalUser?.role === 'pm' ? 'pm' : 'admin';
   const visibleExpenseSheets = useMemo(() => (
     expenseSheets.length > 0
       ? expenseSheets

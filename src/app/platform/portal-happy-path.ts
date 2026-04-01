@@ -40,7 +40,8 @@ interface ResolvePortalHappyPathInput {
 
 export function resolvePortalHappyPath(input: ResolvePortalHappyPathInput): PortalHappyPathState {
   const authRole = String(input.authUser?.role || '').trim().toLowerCase();
-  const isPortalCapable = ['pm', 'viewer', 'admin', 'tenant_admin'].includes(authRole);
+  const effectiveAuthRole = authRole === 'viewer' ? 'pm' : authRole;
+  const isPortalCapable = ['pm', 'admin', 'tenant_admin'].includes(effectiveAuthRole);
   const assignedProjectIds = normalizeProjectIds([
     ...(Array.isArray(input.portalUser?.projectIds) ? input.portalUser?.projectIds : []),
     input.portalUser?.projectId,

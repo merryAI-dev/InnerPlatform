@@ -4,7 +4,8 @@ import { canAccessAdminPath } from './admin-nav';
 export type HomePath = '/' | '/portal';
 
 function normalizeRole(value: unknown): string {
-  return typeof value === 'string' ? value.trim().toLowerCase() : '';
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  return normalized === 'viewer' ? 'pm' : normalized;
 }
 
 const ADMIN_SPACE_ROLES = new Set([
@@ -14,7 +15,7 @@ const ADMIN_SPACE_ROLES = new Set([
 
 export function isPortalRole(role: unknown): boolean {
   const normalized = normalizeRole(role);
-  return normalized === 'pm' || normalized === 'viewer';
+  return normalized === 'pm';
 }
 
 export function isAdminSpaceRole(role: unknown): boolean {

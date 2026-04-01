@@ -436,11 +436,6 @@ function PortalContent() {
                             )}
                             <item.icon className={`w-[15px] h-[15px] shrink-0 ${active ? 'text-teal-400' : 'text-slate-600 group-hover:text-slate-400'}`} />
                             <span style={{ fontWeight: active ? 500 : 400 }}>{item.label}</span>
-                            {item.to === '/portal/register-project' && authUser?.role === 'viewer' && (
-                              <span className="ml-auto text-[8px] px-1.5 py-0.5 rounded-full bg-teal-500/15 text-teal-400 border border-teal-500/20" style={{ fontWeight: 600 }}>
-                                등록 가능
-                              </span>
-                            )}
                             {badge !== null && (
                               <span className="ml-auto flex items-center justify-center min-w-[16px] h-[16px] rounded-full bg-teal-500/90 text-[9px] text-white px-1" style={{ fontWeight: 700 }}>
                                 {badge}
