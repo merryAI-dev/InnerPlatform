@@ -74,6 +74,8 @@ const STATUS_ORDER: Record<ProjectMigrationStatus, number> = {
   REGISTERED: 2,
 };
 
+type StatusSortMode = 'STATUS_ASC' | 'STATUS_DESC';
+
 function normalizeFilterText(value: string): string {
   return value.trim().toLowerCase();
 }
@@ -81,6 +83,15 @@ function normalizeFilterText(value: string): string {
 function formatRatio(value: number | null): string {
   if (value == null) return '기준 없음';
   return `${value.toFixed(1)}%`;
+}
+
+function compareStatuses(
+  left: ProjectMigrationStatus,
+  right: ProjectMigrationStatus,
+  mode: StatusSortMode,
+): number {
+  const delta = STATUS_ORDER[left] - STATUS_ORDER[right];
+  return mode === 'STATUS_DESC' ? -delta : delta;
 }
 
 const PROJECT_DASHBOARD_SYNC_BATCH_LIMIT = 400;
@@ -403,6 +414,7 @@ export function ProjectMigrationAuditPage() {
   const [search, setSearch] = useState('');
   const [departmentFilter, setDepartmentFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState<'ALL' | ProjectMigrationStatus>('ALL');
+  const [statusSortMode, setStatusSortMode] = useState<StatusSortMode>('STATUS_ASC');
 
   useEffect(() => {
     if (!db || !isOnline) {
@@ -444,11 +456,11 @@ export function ProjectMigrationAuditPage() {
   const currentRows = useMemo(() => {
     const next = buildProjectMigrationCurrentRows(rows, projects);
     return next.sort((left, right) => {
-      const statusCompare = STATUS_ORDER[left.status] - STATUS_ORDER[right.status];
+      const statusCompare = compareStatuses(left.status, right.status, statusSortMode);
       if (statusCompare !== 0) return statusCompare;
       return left.project.name.localeCompare(right.project.name, 'ko');
     });
-  }, [projects, rows]);
+  }, [projects, rows, statusSortMode]);
 
   const departments = useMemo(() => {
     const values = new Set<string>();
@@ -529,7 +541,7 @@ export function ProjectMigrationAuditPage() {
         project: row.project,
       })),
     ].sort((left, right) => {
-      const statusCompare = STATUS_ORDER[left.status] - STATUS_ORDER[right.status];
+      const statusCompare = compareStatuses(left.status, right.status, statusSortMode);
       if (statusCompare !== 0) return statusCompare;
       if (left.kind !== right.kind) return left.kind === 'source' ? -1 : 1;
 
@@ -542,7 +554,7 @@ export function ProjectMigrationAuditPage() {
 
       return leftName.localeCompare(rightName, 'ko');
     })
-  ), [filteredCurrentOnlyRows, filteredRows]);
+  ), [filteredCurrentOnlyRows, filteredRows, statusSortMode]);
 
   const sourceSummary = useMemo(() => ({
     total: rows.length,
@@ -758,6 +770,15 @@ export function ProjectMigrationAuditPage() {
                 <SelectItem value="REGISTERED">완료</SelectItem>
                 <SelectItem value="CANDIDATE">확인 필요</SelectItem>
                 <SelectItem value="MISSING">미등록</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={statusSortMode} onValueChange={(value) => setStatusSortMode(value as StatusSortMode)}>
+              <SelectTrigger className="w-full lg:w-[180px]">
+                <SelectValue placeholder="정렬" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="STATUS_ASC">미등록 우선</SelectItem>
+                <SelectItem value="STATUS_DESC">완료 우선</SelectItem>
               </SelectContent>
             </Select>
           </div>
