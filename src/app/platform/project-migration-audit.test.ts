@@ -64,7 +64,7 @@ describe('buildProjectMigrationAuditRows', () => {
     );
 
     expect(rows[0].status).toBe('REGISTERED');
-    expect(rows[0].matches[0]?.reasons).toContain('사업명 일치');
+    expect(rows[0].matches[0]?.reasons).toContain('현재 프로젝트명 일치');
   });
 
   it('accepts KOICA alias client names as the same organization', () => {
@@ -93,7 +93,30 @@ describe('buildProjectMigrationAuditRows', () => {
     );
 
     expect(rows[0].status).toBe('CANDIDATE');
-    expect(rows[0].matches[0]?.reasons).toContain('사업명 유사');
+    expect(rows[0].matches[0]?.reasons).toContain('현재 프로젝트명 유사');
+  });
+
+  it('treats an exact official contract name as a registered match', () => {
+    const rows = buildProjectMigrationAuditRows(
+      [makeCandidate({ businessName: '2023-2026 창업투자 전문기관을 통한 혁신적기술프로그램(CTS)참여기업 역량 강화 용역' })],
+      [makeProject({
+        name: 'CTS역량강화',
+        officialContractName: '2023-2026 창업투자 전문기관을 통한 혁신적기술프로그램(CTS)참여기업 역량 강화 용역',
+      })],
+    );
+
+    expect(rows[0].status).toBe('REGISTERED');
+    expect(rows[0].matches[0]?.reasons).toContain('계약명 일치');
+  });
+
+  it('keeps compact cohort-style project names as candidates when core tokens match', () => {
+    const rows = buildProjectMigrationAuditRows(
+      [makeCandidate({ businessName: '2026 농식품 기술창업 액셀러레이터 육성지원' })],
+      [makeProject({ name: '2026농식품5기' })],
+    );
+
+    expect(rows[0].status).toBe('CANDIDATE');
+    expect(rows[0].matches[0]?.reasons).toContain('현재 프로젝트명 유사');
   });
 
   it('builds current-project rows for reverse lookup', () => {

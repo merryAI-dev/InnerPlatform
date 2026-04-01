@@ -35,6 +35,16 @@ const CLIENT_ALIASES: Array<[RegExp, string]> = [
   [/경기주택도시공사/gi, 'gh'],
 ];
 
+const MATCH_STOPWORDS = new Set([
+  '사업',
+  '프로그램',
+  '운영',
+  '지원',
+  '용역',
+  '계약',
+  '수행계획서',
+]);
+
 const GROUPWARE_PLACEHOLDER_PATTERNS = [
   /등록\s*전/i,
   /미등록/i,
@@ -50,6 +60,10 @@ function normalizeLooseText(value: unknown): string {
   const normalized = String(value || '')
     .normalize('NFKC')
     .toLowerCase()
+    .replace(/([0-9])([가-힣a-z])/gi, '$1 $2')
+    .replace(/([가-힣a-z])([0-9])/gi, '$1 $2')
+    .replace(/([a-z])([가-힣])/gi, '$1 $2')
+    .replace(/([가-힣])([a-z])/gi, '$1 $2')
     .replace(/(\d{4})년/g, '$1')
     .replace(/[\[\](){}]/g, ' ')
     .trim();
@@ -62,7 +76,13 @@ function normalizeLooseText(value: unknown): string {
     .split(' ')
     .filter(Boolean);
 
-  return tokenized.filter((token, index) => tokenized.indexOf(token) === index).join(' ');
+  return tokenized
+    .filter((token) => !MATCH_STOPWORDS.has(token))
+    .filter((token) => !/^\d+기$/.test(token))
+    .filter((token) => !/^\d{1,2}$/.test(token))
+    .filter((token) => !/^[기차회]$/.test(token))
+    .filter((token, index) => tokenized.indexOf(token) === index)
+    .join(' ');
 }
 
 function normalizeCompactText(value: unknown): string {
@@ -128,19 +148,19 @@ function scoreProjectMatch(candidate: ProjectMigrationCandidate, project: Projec
   const groupwareLoose = meaningfulGroupwareCandidate && isLooseTextMatch(candidate.groupwareProjectName, project.groupwareName);
 
   if (businessNameExact) {
-    score += 120;
-    reasons.push('사업명 일치');
+    score += 88;
+    reasons.push('현재 프로젝트명 일치');
   } else if (businessNameLoose) {
-    score += 72;
-    reasons.push('사업명 유사');
+    score += 48;
+    reasons.push('현재 프로젝트명 유사');
   }
 
   if (contractNameExact) {
-    score += 100;
-    reasons.push('계약서 사업명 일치');
+    score += 160;
+    reasons.push('계약명 일치');
   } else if (contractNameLoose) {
-    score += 60;
-    reasons.push('계약서 사업명 유사');
+    score += 104;
+    reasons.push('계약명 유사');
   }
 
   if (groupwareExact) {
@@ -172,7 +192,7 @@ function scoreProjectMatch(candidate: ProjectMigrationCandidate, project: Projec
   if (score <= 0) return null;
 
   const exact = businessNameExact || contractNameExact || (groupwareExact && (clientExact || !candidate.clientOrg.trim()));
-  if (!exact && score < 70) return null;
+  if (!exact && score < 45) return null;
 
   return {
     project,

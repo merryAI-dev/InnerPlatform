@@ -15,7 +15,7 @@ import {
   normalizeProjectMigrationCandidate,
   type ProjectMigrationCandidate,
 } from '../../data/project-migration-candidates';
-import { ACCOUNT_TYPE_LABELS } from '../../data/types';
+import type { Project } from '../../data/types';
 import { useAppStore } from '../../data/store';
 import { PageHeader } from '../layout/PageHeader';
 import { Card, CardContent } from '../ui/card';
@@ -41,8 +41,7 @@ import { Button } from '../ui/button';
 import {
   buildProjectMigrationAuditRows,
   buildProjectMigrationCurrentRows,
-  type ProjectMigrationAuditRow,
-  type ProjectMigrationCurrentRow,
+  type ProjectMigrationProjectMatch,
   type ProjectMigrationStatus,
 } from '../../platform/project-migration-audit';
 import { APPROVED_PROJECT_DASHBOARD_SCOPE, buildApprovedProjectDashboardSyncPlan } from '../../platform/project-dashboard-scope';
@@ -124,94 +123,108 @@ function StatusBadge({ status }: { status: ProjectMigrationStatus }) {
   return <Badge className={`border-0 ${meta.className}`}>{meta.label}</Badge>;
 }
 
-function CurrentProjectMatchCell({
-  row,
+function MatchProjectCard({
+  match,
   onOpenProject,
 }: {
-  row: ProjectMigrationAuditRow;
+  match: ProjectMigrationProjectMatch;
   onOpenProject: (projectId: string) => void;
 }) {
-  if (row.matches.length === 0) {
+  return (
+    <div className="rounded-lg border border-border/60 bg-muted/20 p-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          type="button"
+          variant="link"
+          className="h-auto p-0 text-left text-[12px]"
+          onClick={() => onOpenProject(match.project.id)}
+        >
+          {match.project.name}
+        </Button>
+        <Badge variant="outline" className="text-[10px]">
+          {match.score}점
+        </Badge>
+        {match.exact ? (
+          <Badge className="border-0 bg-emerald-100 text-[10px] text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+            exact
+          </Badge>
+        ) : null}
+      </div>
+      <div className="mt-1 space-y-1 text-[11px] text-muted-foreground">
+        <p>계약명: {match.project.officialContractName || '-'}</p>
+        <p>{match.project.clientOrg || '발주기관 없음'} · {match.project.department || '담당조직 없음'} · {match.project.managerName || '담당자 없음'}</p>
+      </div>
+      <div className="mt-2 flex flex-wrap gap-1">
+        {match.reasons.map((reason) => (
+          <Badge key={`${match.project.id}-${reason}`} variant="outline" className="text-[10px]">
+            {reason}
+          </Badge>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CurrentProjectMatchCell({
+  matches,
+  onOpenProject,
+}: {
+  matches: ProjectMigrationProjectMatch[];
+  onOpenProject: (projectId: string) => void;
+}) {
+  if (matches.length === 0) {
     return <span className="text-[11px] text-muted-foreground">현재 등록 프로젝트 매칭 없음</span>;
   }
-
   return (
     <div className="space-y-2">
-      {row.matches.map((match) => (
-        <div key={match.project.id} className="rounded-lg border border-border/60 bg-muted/20 p-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              type="button"
-              variant="link"
-              className="h-auto p-0 text-left text-[12px]"
-              onClick={() => onOpenProject(match.project.id)}
-            >
-              {match.project.name}
-            </Button>
-            <Badge variant="outline" className="text-[10px]">
-              {match.score}점
-            </Badge>
-            {match.exact ? (
-              <Badge className="border-0 bg-emerald-100 text-[10px] text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
-                exact
-              </Badge>
-            ) : null}
-          </div>
-          <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-            <span>{match.project.groupwareName || '등록명 없음'}</span>
-            <span>·</span>
-            <span>{match.project.clientOrg || '발주기관 없음'}</span>
-            <span>·</span>
-            <span>{ACCOUNT_TYPE_LABELS[match.project.accountType]}</span>
-          </div>
-          <div className="mt-2 flex flex-wrap gap-1">
-            {match.reasons.map((reason) => (
-              <Badge key={`${match.project.id}-${reason}`} variant="outline" className="text-[10px]">
-                {reason}
-              </Badge>
-            ))}
-          </div>
-        </div>
+      {matches.map((match) => (
+        <MatchProjectCard key={match.project.id} match={match} onOpenProject={onOpenProject} />
       ))}
     </div>
   );
 }
 
-function SourceMatchCell({ row }: { row: ProjectMigrationCurrentRow }) {
-  if (row.matches.length === 0) {
-    return <span className="text-[11px] text-muted-foreground">원본 대시보드 매칭 없음</span>;
+function CurrentOnlyProjectCell({
+  project,
+  onOpenProject,
+}: {
+  project: Project;
+  onOpenProject: (projectId: string) => void;
+}) {
+  return (
+    <div className="rounded-lg border border-border/60 bg-muted/20 p-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          type="button"
+          variant="link"
+          className="h-auto p-0 text-left text-[12px]"
+          onClick={() => onOpenProject(project.id)}
+        >
+          {project.name}
+        </Button>
+      </div>
+      <div className="mt-1 space-y-1 text-[11px] text-muted-foreground">
+        <p>계약명: {project.officialContractName || '-'}</p>
+        <p>{project.clientOrg || '발주기관 없음'} · {project.department || '담당조직 없음'} · {project.managerName || '담당자 없음'}</p>
+      </div>
+    </div>
+  );
+}
+
+type UnifiedAuditTableRow =
+  | {
+    key: string;
+    kind: 'source';
+    status: ProjectMigrationStatus;
+    sourceName: string;
+    matches: ProjectMigrationProjectMatch[];
   }
-
-  return (
-    <div className="space-y-2">
-      {row.matches.map((match) => (
-        <div key={`${row.project.id}-${match.candidate.id}`} className="rounded-lg border border-border/60 bg-muted/20 p-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[12px] font-medium">{match.candidate.businessName}</span>
-            <Badge variant="outline" className="text-[10px]">
-              {match.score}점
-            </Badge>
-            <StatusBadge status={match.sourceStatus} />
-          </div>
-          <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-            <span>{match.candidate.groupwareProjectName || '등록명 없음'}</span>
-            <span>·</span>
-            <span>{match.candidate.clientOrg || '발주기관 없음'}</span>
-            <span>·</span>
-            <span>{match.candidate.department || '담당조직 없음'}</span>
-          </div>
-          <div className="mt-2 flex flex-wrap gap-1">
-            {match.reasons.map((reason) => (
-              <Badge key={`${row.project.id}-${match.candidate.id}-${reason}`} variant="outline" className="text-[10px]">
-                {reason}
-              </Badge>
-            ))}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
+  | {
+    key: string;
+    kind: 'current-only';
+    status: 'MISSING';
+    project: Project;
+  };
 
 export function ProjectMigrationAuditPage() {
   const { projects } = useAppStore();
@@ -284,7 +297,10 @@ export function ProjectMigrationAuditPage() {
   const filteredRows = useMemo(() => {
     const query = normalizeFilterText(search);
     return rows.filter((row) => {
-      if (departmentFilter !== 'ALL' && row.candidate.department !== departmentFilter) return false;
+      if (departmentFilter !== 'ALL') {
+        const matchedDepartment = row.matches.some((match) => match.project.department === departmentFilter);
+        if (row.candidate.department !== departmentFilter && !matchedDepartment) return false;
+      }
       if (statusFilter !== 'ALL' && row.status !== statusFilter) return false;
       if (!query) return true;
 
@@ -294,16 +310,24 @@ export function ProjectMigrationAuditPage() {
         row.candidate.groupwareProjectName,
         row.candidate.businessName,
         row.candidate.clientOrg,
-        ...row.matches.map((match) => [match.project.name, match.project.groupwareName, match.project.clientOrg].join(' ')),
+        ...row.matches.map((match) => [
+          match.project.name,
+          match.project.officialContractName,
+          match.project.groupwareName,
+          match.project.clientOrg,
+          match.project.department,
+          match.project.managerName,
+        ].join(' ')),
       ].join(' ').toLowerCase();
 
       return haystack.includes(query);
     });
   }, [departmentFilter, rows, search, statusFilter]);
 
-  const filteredCurrentRows = useMemo(() => {
+  const filteredCurrentOnlyRows = useMemo(() => {
     const query = normalizeFilterText(search);
     return currentRows.filter((row) => {
+      if (row.matches.length > 0) return false;
       if (departmentFilter !== 'ALL' && row.project.department !== departmentFilter) return false;
       if (statusFilter !== 'ALL' && row.status !== statusFilter) return false;
       if (!query) return true;
@@ -313,13 +337,29 @@ export function ProjectMigrationAuditPage() {
         row.project.managerName,
         row.project.groupwareName,
         row.project.name,
+        row.project.officialContractName,
         row.project.clientOrg,
-        ...row.matches.map((match) => [match.candidate.businessName, match.candidate.groupwareProjectName, match.candidate.clientOrg].join(' ')),
       ].join(' ').toLowerCase();
 
       return haystack.includes(query);
     });
   }, [currentRows, departmentFilter, search, statusFilter]);
+
+  const unifiedRows = useMemo<UnifiedAuditTableRow[]>(() => ([
+    ...filteredRows.map((row) => ({
+      key: row.candidate.id,
+      kind: 'source' as const,
+      status: row.status,
+      sourceName: row.candidate.businessName,
+      matches: row.matches,
+    })),
+    ...filteredCurrentOnlyRows.map((row) => ({
+      key: `current-${row.project.id}`,
+      kind: 'current-only' as const,
+      status: 'MISSING' as const,
+      project: row.project,
+    })),
+  ]), [filteredCurrentOnlyRows, filteredRows]);
 
   const sourceSummary = useMemo(() => ({
     total: rows.length,
@@ -367,7 +407,7 @@ export function ProjectMigrationAuditPage() {
         icon={FolderSearch}
         iconGradient="linear-gradient(135deg, #0f766e 0%, #0ea5e9 100%)"
         title="프로젝트 마이그레이션 등록 현황"
-        description={`승인된 비교 기준 ${sourceSummary.total}건과 현재 admin 등록 ${currentSummary.total}건을 Firestore에서 대조합니다. 완료율 ${formatRatio(completionRatio)}, 검토 ${sourceSummary.candidate}, 미등록 ${sourceSummary.missing}`}
+        description={`승인된 비교 기준 ${sourceSummary.total}건과 현재 admin 등록 ${currentSummary.total}건을 Firestore에서 계약명 우선으로 대조합니다. 완료율 ${formatRatio(completionRatio)}, 검토 ${sourceSummary.candidate}, 미등록 ${sourceSummary.missing}`}
         badge="Firestore"
       />
 
@@ -460,7 +500,7 @@ export function ProjectMigrationAuditPage() {
               <Input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="사업명, 발주기관, 그룹웨어 등록명으로 검색"
+                placeholder="사업명, 계약명, 발주기관으로 검색"
                 className="pl-9"
               />
             </div>
@@ -493,8 +533,8 @@ export function ProjectMigrationAuditPage() {
       <Card>
         <CardContent className="space-y-4 p-4">
           <div className="space-y-1">
-            <h2 className="text-sm font-semibold">원본 대시보드 기준 대조</h2>
-            <p className="text-[12px] text-muted-foreground">왼쪽이 기존 사업대시보드 원본이며, 오른쪽 카드가 현재 admin 프로젝트 매칭 결과입니다.</p>
+            <h2 className="text-sm font-semibold">통합 대조표</h2>
+            <p className="text-[12px] text-muted-foreground">원본 25건을 기준으로 현재 admin 프로젝트를 계약명 우선, 프로젝트명 보조로 붙였습니다. 원본과 연결되지 않은 현재 프로젝트도 같은 표 하단에 함께 표시합니다.</p>
           </div>
 
           <div className="overflow-x-auto">
@@ -502,33 +542,35 @@ export function ProjectMigrationAuditPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead className="min-w-[92px]">상태</TableHead>
-                  <TableHead className="min-w-[92px]">원본 담당조직</TableHead>
                   <TableHead className="min-w-[180px]">원본 사업명</TableHead>
-                  <TableHead className="min-w-[120px]">원본 발주기관</TableHead>
-                  <TableHead className="min-w-[120px]">원본 그룹웨어 등록명</TableHead>
-                  <TableHead className="min-w-[100px]">원본 핵심인력</TableHead>
-                  <TableHead className="min-w-[70px]">원본 통장</TableHead>
-                  <TableHead className="min-w-[320px]">현재 admin 프로젝트 매칭</TableHead>
+                  <TableHead className="min-w-[360px]">현재 admin 프로젝트 / 계약명</TableHead>
+                  <TableHead className="min-w-[220px]">비고</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredRows.map((row) => (
-                  <TableRow key={row.candidate.id}>
+                {unifiedRows.map((row) => (
+                  <TableRow key={row.key}>
                     <TableCell><StatusBadge status={row.status} /></TableCell>
-                    <TableCell className="text-[12px]">{row.candidate.department || '-'}</TableCell>
-                    <TableCell className="text-[12px] font-medium">{row.candidate.businessName}</TableCell>
-                    <TableCell className="text-[11px] text-muted-foreground">{row.candidate.clientOrg || '-'}</TableCell>
-                    <TableCell className="text-[11px] text-muted-foreground">{row.candidate.groupwareProjectName || '-'}</TableCell>
-                    <TableCell className="text-[11px] text-muted-foreground">{row.candidate.coreMembers || '-'}</TableCell>
-                    <TableCell className="text-[11px] text-muted-foreground">{row.candidate.accountLabel || '-'}</TableCell>
+                    <TableCell className="text-[12px] font-medium">
+                      {row.kind === 'source' ? row.sourceName : <span className="text-muted-foreground">원본 대시보드 범위 없음</span>}
+                    </TableCell>
                     <TableCell>
-                      <CurrentProjectMatchCell row={row} onOpenProject={(projectId) => navigate(`/projects/${projectId}`)} />
+                      {row.kind === 'source'
+                        ? <CurrentProjectMatchCell matches={row.matches} onOpenProject={(projectId) => navigate(`/projects/${projectId}`)} />
+                        : <CurrentOnlyProjectCell project={row.project} onOpenProject={(projectId) => navigate(`/projects/${projectId}`)} />}
+                    </TableCell>
+                    <TableCell className="text-[11px] text-muted-foreground">
+                      {row.kind === 'source'
+                        ? row.matches.length > 0
+                          ? '상단 카드의 점수와 매칭 근거를 확인하세요.'
+                          : '현재 admin에 연결된 프로젝트가 없습니다.'
+                        : '현재 admin에는 있으나 승인된 25개 원본 범위와 연결되지 않은 프로젝트입니다.'}
                     </TableCell>
                   </TableRow>
                 ))}
-                {filteredRows.length === 0 ? (
+                {unifiedRows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="py-10 text-center text-[12px] text-muted-foreground">
+                    <TableCell colSpan={4} className="py-10 text-center text-[12px] text-muted-foreground">
                       {isSourceLoading ? '원본 대시보드 프로젝트를 불러오는 중입니다…' : `Firestore \`project_dashboard_projects\` 컬렉션이 비어 있습니다. 상단에서 승인된 비교 기준 ${APPROVED_PROJECT_DASHBOARD_SCOPE.length}개를 적재해 주세요.`}
                     </TableCell>
                   </TableRow>
@@ -539,66 +581,12 @@ export function ProjectMigrationAuditPage() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardContent className="space-y-4 p-4">
-          <div className="space-y-1">
-            <h2 className="text-sm font-semibold">현재 admin 등록 프로젝트</h2>
-            <p className="text-[12px] text-muted-foreground">현재 운영 중인 프로젝트를 기준으로, 어느 원본 대시보드 항목과 연결되는지 역방향으로 확인합니다.</p>
-          </div>
-
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="min-w-[92px]">상태</TableHead>
-                  <TableHead className="min-w-[92px]">담당조직</TableHead>
-                  <TableHead className="min-w-[180px]">현재 사업명</TableHead>
-                  <TableHead className="min-w-[120px]">발주기관</TableHead>
-                  <TableHead className="min-w-[120px]">그룹웨어 등록명</TableHead>
-                  <TableHead className="min-w-[100px]">담당자</TableHead>
-                  <TableHead className="min-w-[320px]">원본 대시보드 매칭</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredCurrentRows.map((row) => (
-                  <TableRow key={row.project.id}>
-                    <TableCell><StatusBadge status={row.status} /></TableCell>
-                    <TableCell className="text-[12px]">{row.project.department || '-'}</TableCell>
-                    <TableCell className="text-[12px] font-medium">
-                      <Button
-                        type="button"
-                        variant="link"
-                        className="h-auto p-0 text-left text-[12px]"
-                        onClick={() => navigate(`/projects/${row.project.id}`)}
-                      >
-                        {row.project.name}
-                      </Button>
-                    </TableCell>
-                    <TableCell className="text-[11px] text-muted-foreground">{row.project.clientOrg || '-'}</TableCell>
-                    <TableCell className="text-[11px] text-muted-foreground">{row.project.groupwareName || '-'}</TableCell>
-                    <TableCell className="text-[11px] text-muted-foreground">{row.project.managerName || '-'}</TableCell>
-                    <TableCell><SourceMatchCell row={row} /></TableCell>
-                  </TableRow>
-                ))}
-                {filteredCurrentRows.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={7} className="py-10 text-center text-[12px] text-muted-foreground">
-                      현재 admin에 등록된 프로젝트가 없습니다.
-                    </TableCell>
-                  </TableRow>
-                ) : null}
-              </TableBody>
-            </Table>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-            <FolderSearch className="h-4 w-4" />
-            <span>등록된 프로젝트를 열어 상세 확인이 필요하면 현재 사업명을 누르세요.</span>
-            <ArrowRight className="h-3.5 w-3.5" />
-            <span>미등록 또는 후보 있음 위주로 보면 이관 누락을 빠르게 확인할 수 있습니다.</span>
-          </div>
-        </CardContent>
-      </Card>
+      <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+        <FolderSearch className="h-4 w-4" />
+        <span>등록된 프로젝트를 열어 상세 확인이 필요하면 현재 사업명을 누르세요.</span>
+        <ArrowRight className="h-3.5 w-3.5" />
+        <span>미등록 또는 후보 있음 위주로 보면 이관 누락을 빠르게 확인할 수 있습니다.</span>
+      </div>
     </div>
   );
 }
