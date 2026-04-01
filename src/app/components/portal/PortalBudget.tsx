@@ -22,6 +22,7 @@ import {
 } from '../../data/budget-data';
 import type { BudgetPlanRow, BudgetCodeEntry, BudgetCodeRename } from '../../data/types';
 import { BASIS_LABELS } from '../../data/types';
+import { moveBudgetSubCode } from '../../platform/budget-code-book-order';
 import { parseNumber } from '../../platform/csv-utils';
 import { SETTLEMENT_COLUMNS } from '../../platform/settlement-csv';
 
@@ -232,6 +233,10 @@ export function PortalBudget() {
       return copy;
     });
   }, [removeDraftRows]);
+
+  const reorderSubCode = useCallback((idx: number, subIdx: number, direction: 'up' | 'down') => {
+    setDraftCodeBook((prev) => moveBudgetSubCode(prev, idx, subIdx, direction));
+  }, []);
 
   const startEdit = useCallback(() => {
     const next = budgetCodeBook.flatMap((entry) => (
@@ -542,6 +547,26 @@ export function PortalBudget() {
                             className="flex-1 bg-transparent outline-none text-[11px] px-2 py-1 border rounded"
                             onChange={(e) => updateSubCode(idx, sidx, e.target.value)}
                           />
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 w-7 p-0"
+                            onClick={() => reorderSubCode(idx, sidx, 'up')}
+                            disabled={sidx === 0}
+                            aria-label="세목 위로 이동"
+                          >
+                            <ArrowUp className="w-3 h-3" />
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 w-7 p-0"
+                            onClick={() => reorderSubCode(idx, sidx, 'down')}
+                            disabled={sidx === entry.subCodes.length - 1}
+                            aria-label="세목 아래로 이동"
+                          >
+                            <ArrowDown className="w-3 h-3" />
+                          </Button>
                           <Button variant="outline" size="sm" className="h-7 text-[10px]" onClick={() => removeSubCode(idx, sidx)}>
                             <Trash2 className="w-3 h-3" />
                           </Button>

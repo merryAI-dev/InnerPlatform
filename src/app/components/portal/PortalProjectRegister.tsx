@@ -49,6 +49,11 @@ import {
   hasIncompleteProjectTeamMembers,
   normalizeProjectTeamMembers,
 } from '../../platform/project-team-members';
+import {
+  hasExplicitProjectAmountInput,
+  hasNonNegativeProjectAmountInput,
+  parseProjectAmountInput,
+} from '../../platform/project-contract-amount';
 import { Progress } from '../ui/progress';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
@@ -146,12 +151,18 @@ function sanitizeOfficialContractName(value: string) {
 function mergeAnalysisIntoDraft(
   draft: ProjectProposalDraft,
   analysis: ProjectRequestContractAnalysisResult,
-  options?: { overwriteExisting?: boolean },
+  options?: {
+    overwriteExisting?: boolean;
+    hasExplicitContractAmount?: boolean;
+    hasExplicitSalesVatAmount?: boolean;
+  },
 ): ProjectProposalDraft {
   const overwriteExisting = Boolean(options?.overwriteExisting);
   const next = { ...draft, contractAnalysis: analysis };
   const shouldApplyText = (value: string, current: string) => overwriteExisting || isTextBlank(current);
-  const shouldApplyNumber = (value: number | null, current: number) => value !== null && (overwriteExisting || !current);
+  const shouldApplyNumber = (value: number | null, current: number, hasExplicitCurrent = false) => (
+    value !== null && (overwriteExisting || (!hasExplicitCurrent && !current))
+  );
   const officialContractName = sanitizeOfficialContractName(analysis.fields.officialContractName.value);
   const suggestedProjectName =
     analysis.fields.suggestedProjectName.value || officialContractName;
@@ -177,10 +188,10 @@ function mergeAnalysisIntoDraft(
   if (shouldApplyText(analysis.fields.contractEnd.value, draft.contractEnd)) {
     next.contractEnd = analysis.fields.contractEnd.value;
   }
-  if (shouldApplyNumber(analysis.fields.contractAmount.value, draft.contractAmount)) {
+  if (shouldApplyNumber(analysis.fields.contractAmount.value, draft.contractAmount, options?.hasExplicitContractAmount)) {
     next.contractAmount = analysis.fields.contractAmount.value || 0;
   }
-  if (shouldApplyNumber(analysis.fields.salesVatAmount.value, draft.salesVatAmount)) {
+  if (shouldApplyNumber(analysis.fields.salesVatAmount.value, draft.salesVatAmount, options?.hasExplicitSalesVatAmount)) {
     next.salesVatAmount = analysis.fields.salesVatAmount.value || 0;
   }
   return next;
@@ -316,6 +327,7 @@ export function PortalProjectRegister() {
   const [isUploadingContract, setIsUploadingContract] = useState(false);
   const [contractAnalysisState, setContractAnalysisState] = useState<ContractAnalysisState>('idle');
   const [analysisError, setAnalysisError] = useState('');
+  const [hasContractAmountInput, setHasContractAmountInput] = useState(false);
   const contractFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const currentStepIdx = STEPS.findIndex((item) => item.key === step);
@@ -357,7 +369,9 @@ export function PortalProjectRegister() {
       return Boolean(form.department && form.officialContractName.trim() && form.name.trim() && form.clientOrg.trim() && form.type);
     }
     if (step === 'financial') {
-      return form.contractAmount > 0 && Boolean(form.contractStart) && Boolean(form.contractEnd);
+      return hasNonNegativeProjectAmountInput(hasContractAmountInput ? String(form.contractAmount) : '')
+        && Boolean(form.contractStart)
+        && Boolean(form.contractEnd);
     }
     if (step === 'team') {
       return Boolean(form.managerName.trim()) && !hasIncompleteTeamRows;
@@ -443,8 +457,14 @@ export function PortalProjectRegister() {
           contractDocument,
           contractAnalysis: nextAnalysis || null,
         };
-        return nextAnalysis ? mergeAnalysisIntoDraft(base, nextAnalysis, { overwriteExisting: false }) : base;
+        return nextAnalysis ? mergeAnalysisIntoDraft(base, nextAnalysis, {
+          overwriteExisting: false,
+          hasExplicitContractAmount: hasContractAmountInput,
+        }) : base;
       });
+      if (nextAnalysis?.fields.contractAmount.value !== null) {
+        setHasContractAmountInput(true);
+      }
 
       if (nextAnalysis) {
         setContractAnalysisState('ready');
@@ -547,6 +567,7 @@ export function PortalProjectRegister() {
                 ...initialProposal,
                 managerName: portalUser?.name || authUser?.name || '',
               });
+              setHasContractAmountInput(false);
               setStep('contract');
               setContractAnalysisState('idle');
               setAnalysisError('');
@@ -1023,14 +1044,18 @@ export function PortalProjectRegister() {
                 <FieldLabel label="계약금액 (계약서 내 기재된 총 금액) *" field={analysisField('contractAmount')} />
                 <Input
                   type="number"
-                  value={form.contractAmount || ''}
-                  onChange={(event) => update('contractAmount', Number(event.target.value) || 0)}
+                  value={hasContractAmountInput ? String(form.contractAmount) : ''}
+                  onChange={(event) => {
+                    const nextValue = event.target.value;
+                    setHasContractAmountInput(hasExplicitProjectAmountInput(nextValue));
+                    update('contractAmount', parseProjectAmountInput(nextValue));
+                  }}
                   placeholder="0"
                   className="mt-1 h-9 text-[12px]"
                 />
                 <div className="mt-1 flex items-center justify-between text-[10px] text-muted-foreground">
                   <FieldEvidence field={analysisField('contractAmount')} />
-                  {form.contractAmount > 0 ? <span>{fmtKRW(form.contractAmount)}원</span> : null}
+                  {hasContractAmountInput ? <span>{fmtKRW(form.contractAmount)}원</span> : null}
                 </div>
               </div>
 

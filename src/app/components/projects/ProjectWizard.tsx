@@ -44,6 +44,12 @@ import { Label } from '../ui/label';
 import { Progress } from '../ui/progress';
 import { Separator } from '../ui/separator';
 import { PROJECT_DEPARTMENT_OPTIONS } from '../../data/project-department-options';
+import {
+  formatProjectAmountInput,
+  hasExplicitProjectAmountInput,
+  hasStoredProjectContractAmount,
+  parseProjectAmountInput,
+} from '../../platform/project-contract-amount';
 
 // ── Step Definitions ──
 
@@ -125,6 +131,9 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
     Number.isFinite(stepFromUrl) && stepFromUrl >= 0 && stepFromUrl < STEPS.length ? stepFromUrl : 0
   );
   const [saving, setSaving] = useState(false);
+  const [hasContractAmountInput, setHasContractAmountInput] = useState(() => (
+    editProject ? hasStoredProjectContractAmount(editProject) : false
+  ));
 
   const goToStep = useCallback((step: number) => {
     setCurrentStep(step);
@@ -175,6 +184,11 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
     setFormData(prev => ({ ...prev, [field]: num }));
   }, []);
 
+  const updateContractAmount = useCallback((value: string) => {
+    setHasContractAmountInput(hasExplicitProjectAmountInput(value));
+    setFormData(prev => ({ ...prev, contractAmount: parseProjectAmountInput(value) }));
+  }, []);
+
   // Auto-calculate profit amount when rate or contract changes
   const calculatedProfit = useMemo(() => {
     return Math.round(formData.contractAmount * formData.profitRate);
@@ -189,11 +203,11 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
       { id: 'account', label: '통장 구분', passed: !!ACCOUNT_TYPE_LABELS[formData.accountType], required: targetPhase === 'CONFIRMED' },
       { id: 'groupware', label: '그룹웨어 등록명', passed: !!formData.groupwareName.trim(), required: targetPhase === 'CONFIRMED' },
       { id: 'manager', label: '메인 담당자', passed: !!formData.managerName.trim(), required: targetPhase === 'CONFIRMED' },
-      { id: 'contractAmount', label: '총 계약금액', passed: formData.contractAmount > 0 || formData.status === 'CONTRACT_PENDING', required: targetPhase === 'CONFIRMED' },
+      { id: 'contractAmount', label: '총 계약금액', passed: hasContractAmountInput || formData.status === 'CONTRACT_PENDING', required: targetPhase === 'CONFIRMED' },
       { id: 'paymentPlan', label: '입금 계획', passed: !!formData.paymentPlanDesc.trim() || formData.status === 'CONTRACT_PENDING', required: targetPhase === 'CONFIRMED' },
     ];
     return checks;
-  }, [formData, targetPhase]);
+  }, [formData, targetPhase, hasContractAmountInput]);
 
   const requiredChecks = validationChecks.filter(c => c.required);
   const passedRequired = requiredChecks.filter(c => c.passed).length;
@@ -271,6 +285,7 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
 
   // Format number input
   const fmtInput = (n: number) => n > 0 ? n.toLocaleString('ko-KR') : '';
+  const fmtContractAmountInput = () => formatProjectAmountInput(formData.contractAmount, hasContractAmountInput);
   const fmtKRW = (n: number) => n.toLocaleString('ko-KR') + '원';
 
   // ── Render Steps ──
@@ -521,14 +536,14 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
               <Label>총 사업비 금액 (매출부가세 포함)</Label>
               <div className="relative">
                 <Input
-                  value={fmtInput(formData.contractAmount)}
-                  onChange={e => updateNum('contractAmount', e.target.value)}
+                  value={fmtContractAmountInput()}
+                  onChange={e => updateContractAmount(e.target.value)}
                   placeholder="0"
                   className="pr-8"
                 />
                 <span className="absolute right-3 top-2 text-sm text-muted-foreground">원</span>
               </div>
-              {formData.contractAmount > 0 && (
+              {hasContractAmountInput && (
                 <p className="text-xs text-muted-foreground">{fmtKRW(formData.contractAmount)}</p>
               )}
             </div>
@@ -639,7 +654,7 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
               </div>
             </div>
             {/* Sum check */}
-            {formData.contractAmount > 0 && (
+            {hasContractAmountInput && (
               <div className={`rounded-lg p-3 text-xs ${(formData.paymentContract + formData.paymentInterim + formData.paymentFinal) === formData.contractAmount
                   ? 'bg-green-50 border border-green-200 text-green-800'
                   : 'bg-amber-50 border border-amber-200 text-amber-800'
@@ -768,7 +783,7 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
                 </div>
                 <div>
                   <span className="text-muted-foreground">총 사업비:</span>
-                  <span className="ml-2" style={{ fontWeight: 500 }}>{formData.contractAmount > 0 ? fmtKRW(formData.contractAmount) : '-'}</span>
+                  <span className="ml-2" style={{ fontWeight: 500 }}>{hasContractAmountInput ? fmtKRW(formData.contractAmount) : '-'}</span>
                 </div>
                 <div>
                   <span className="text-muted-foreground">정산유형:</span>

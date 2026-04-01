@@ -173,6 +173,27 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     }));
   });
 
+  it('persists explicit zero contract amounts through project upsert', async () => {
+    const response = await api
+      .post('/api/v1/projects')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-zero-contract-001' })
+      .send({
+        id: 'p-zero-contract-001',
+        name: 'Zero Contract Project',
+        contractAmount: 0,
+      });
+
+    expect([200, 201]).toContain(response.status);
+
+    const stored = await db.doc(`orgs/${tenantId}/projects/p-zero-contract-001`).get();
+    expect(stored.exists).toBe(true);
+    expect(stored.data()).toMatchObject({
+      id: 'p-zero-contract-001',
+      name: 'Zero Contract Project',
+      contractAmount: 0,
+    });
+  });
+
   it('previews google sheet rows for an existing project', async () => {
     const googleSheetsService = {
       previewSpreadsheet: vi.fn(async ({ value, sheetName }) => ({

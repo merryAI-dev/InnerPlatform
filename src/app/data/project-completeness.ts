@@ -1,4 +1,5 @@
 import type { Project } from './types';
+import { hasStoredProjectContractAmount } from '../platform/project-contract-amount';
 
 type CompletenessField = {
   key: string;
@@ -14,7 +15,7 @@ const FIELDS: CompletenessField[] = [
   { key: 'accountType', label: '통장 구분', isFilled: (p) => String(p.accountType || '') !== 'NONE' && !!p.accountType },
   { key: 'contractStart', label: '계약 시작일', isFilled: (p) => !!String(p.contractStart || '').trim() },
   { key: 'contractEnd', label: '계약 종료일', isFilled: (p) => !!String(p.contractEnd || '').trim() },
-  { key: 'contractAmount', label: '총 사업비', isFilled: (p) => Number(p.contractAmount || 0) > 0 },
+  { key: 'contractAmount', label: '총 사업비', isFilled: (p) => hasStoredProjectContractAmount(p) },
   { key: 'paymentPlanDesc', label: '입금 계획', isFilled: (p) => !!String(p.paymentPlanDesc || '').trim() },
   { key: 'groupwareName', label: '그룹웨어 등록명', isFilled: (p) => !!String(p.groupwareName || '').trim() },
 ];
@@ -42,4 +43,3 @@ export function computeProjectCompleteness(project: Partial<Project>): ProjectCo
   const percent = total > 0 ? Math.round((filled / total) * 100) : 0;
   return { percent, filled, total, missing };
 }
-
