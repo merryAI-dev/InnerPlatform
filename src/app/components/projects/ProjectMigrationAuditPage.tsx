@@ -4,18 +4,23 @@ import {
   AlertTriangle,
   ArrowRight,
   FolderSearch,
+  Link2,
   Loader2,
   RefreshCw,
   Search,
 } from 'lucide-react';
 import type { Firestore } from 'firebase/firestore';
-import { collection, doc, getDocs, onSnapshot, writeBatch } from 'firebase/firestore';
+import { collection, doc, getDocs, onSnapshot, setDoc, writeBatch } from 'firebase/firestore';
 import { toast } from 'sonner';
 import {
   normalizeProjectMigrationCandidate,
   type ProjectMigrationCandidate,
 } from '../../data/project-migration-candidates';
-import type { Project } from '../../data/types';
+import {
+  PROJECT_STATUS_LABELS,
+  type Project,
+  type ProjectStatus,
+} from '../../data/types';
 import { useAppStore } from '../../data/store';
 import { PageHeader } from '../layout/PageHeader';
 import { Card, CardContent } from '../ui/card';
@@ -165,6 +170,9 @@ function MatchProjectCard({
         >
           {primaryLabel}
         </Button>
+        <Badge variant="outline" className="text-[10px]">
+          {PROJECT_STATUS_LABELS[match.project.status]}
+        </Badge>
       </div>
       <div className="mt-1 space-y-1 text-[11px] text-muted-foreground">
         <p>{match.project.department || '담당조직 없음'} · {match.project.managerName || '담당자 없음'}</p>
@@ -208,6 +216,9 @@ function CurrentOnlyProjectCell({
         >
           {primaryLabel}
         </Button>
+        <Badge variant="outline" className="text-[10px]">
+          {PROJECT_STATUS_LABELS[project.status]}
+        </Badge>
       </div>
       <div className="mt-1 space-y-1 text-[11px] text-muted-foreground">
         <p>{project.department || '담당조직 없음'} · {project.managerName || '담당자 없음'}</p>
@@ -216,10 +227,161 @@ function CurrentOnlyProjectCell({
   );
 }
 
+const EMPTY_PROJECT_VALUE = '__UNASSIGNED__';
+
+function formatProjectLabel(project: Project): string {
+  return project.officialContractName || project.name || '이름 없음';
+}
+
+function SourceRowActionCell({
+  candidate,
+  match,
+  projects,
+  projectUsageById,
+  disabled,
+  onApply,
+}: {
+  candidate: ProjectMigrationCandidate;
+  match: ProjectMigrationProjectMatch | null;
+  projects: Project[];
+  projectUsageById: Map<string, string>;
+  disabled: boolean;
+  onApply: (input: {
+    candidate: ProjectMigrationCandidate;
+    projectId: string;
+    projectStatus: ProjectStatus;
+  }) => Promise<void>;
+}) {
+  const [selectedProjectId, setSelectedProjectId] = useState(match?.project.id ?? '');
+  const [selectedProjectStatus, setSelectedProjectStatus] = useState<ProjectStatus>(match?.project.status ?? 'CONTRACT_PENDING');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setSelectedProjectId(match?.project.id ?? '');
+    setSelectedProjectStatus(match?.project.status ?? 'CONTRACT_PENDING');
+  }, [candidate.id, match?.project.id, match?.project.status]);
+
+  const selectedProject = useMemo(
+    () => projects.find((project) => project.id === selectedProjectId) ?? null,
+    [projects, selectedProjectId],
+  );
+
+  const projectOptions = useMemo(() => (
+    [...projects].sort((left, right) => {
+      const leftPinned = left.id === match?.project.id;
+      const rightPinned = right.id === match?.project.id;
+      if (leftPinned !== rightPinned) return leftPinned ? -1 : 1;
+
+      const leftAssigned = projectUsageById.has(left.id);
+      const rightAssigned = projectUsageById.has(right.id);
+      if (leftAssigned !== rightAssigned) return leftAssigned ? 1 : -1;
+
+      return formatProjectLabel(left).localeCompare(formatProjectLabel(right), 'ko');
+    })
+  ), [match?.project.id, projectUsageById, projects]);
+
+  async function handleApply() {
+    if (!selectedProjectId) {
+      toast.error('연결할 플랫폼 프로젝트를 먼저 선택해 주세요.');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await onApply({
+        candidate,
+        projectId: selectedProjectId,
+        projectStatus: selectedProjectStatus,
+      });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const assignedSourceName = selectedProjectId ? projectUsageById.get(selectedProjectId) : undefined;
+  const selectedProjectLabel = selectedProject ? formatProjectLabel(selectedProject) : '';
+
+  return (
+    <div className="space-y-2">
+      <p className="text-[11px] text-muted-foreground">{getSourceRowNextAction(match?.exact ? 'REGISTERED' : match ? 'CANDIDATE' : 'MISSING', match)}</p>
+      <div className="grid gap-2">
+        <Select
+          value={selectedProjectId || EMPTY_PROJECT_VALUE}
+          onValueChange={(value) => {
+            const nextProjectId = value === EMPTY_PROJECT_VALUE ? '' : value;
+            setSelectedProjectId(nextProjectId);
+            const project = projects.find((item) => item.id === nextProjectId);
+            if (project) setSelectedProjectStatus(project.status);
+          }}
+        >
+          <SelectTrigger className="w-full text-[11px]" disabled={disabled || saving}>
+            <SelectValue placeholder="플랫폼 프로젝트 선택" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={EMPTY_PROJECT_VALUE}>플랫폼 프로젝트 선택</SelectItem>
+            {projectOptions.map((project) => {
+              const linkedSource = projectUsageById.get(project.id);
+              const suffix = linkedSource && linkedSource !== candidate.businessName
+                ? ` · 현재 연결: ${linkedSource}`
+                : linkedSource
+                  ? ' · 현재 행과 연결됨'
+                  : ' · 미연결';
+              return (
+                <SelectItem key={project.id} value={project.id}>
+                  {formatProjectLabel(project)}{suffix}
+                </SelectItem>
+              );
+            })}
+          </SelectContent>
+        </Select>
+
+        <Select
+          value={selectedProjectStatus}
+          onValueChange={(value) => setSelectedProjectStatus(value as ProjectStatus)}
+          disabled={!selectedProjectId || disabled || saving}
+        >
+          <SelectTrigger className="w-full text-[11px]">
+            <SelectValue placeholder="프로젝트 상태" />
+          </SelectTrigger>
+          <SelectContent>
+            {Object.entries(PROJECT_STATUS_LABELS).map(([value, label]) => (
+              <SelectItem key={value} value={value}>{label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Button
+          type="button"
+          size="sm"
+          className="gap-1.5"
+          disabled={!selectedProjectId || disabled || saving}
+          onClick={() => { void handleApply(); }}
+        >
+          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Link2 className="h-3.5 w-3.5" />}
+          연결 내용 반영
+        </Button>
+      </div>
+
+      {selectedProjectLabel ? (
+        <p className="text-[10px] text-muted-foreground">
+          선택한 프로젝트에 계약명과 상태를 반영합니다.
+          {assignedSourceName && assignedSourceName !== candidate.businessName ? ` 기존 연결 ${assignedSourceName}은 이 행 기준으로 다시 계산됩니다.` : ''}
+        </p>
+      ) : null}
+      {candidate.migrationUpdatedAt ? (
+        <p className="text-[10px] text-muted-foreground">
+          마지막 연결: {candidate.migrationUpdatedBy || '사용자'} · {candidate.migrationUpdatedAt}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 type UnifiedAuditTableRow =
   | {
     key: string;
     kind: 'source';
+    candidate: ProjectMigrationCandidate;
     status: ProjectMigrationStatus;
     sourceName: string;
     match: ProjectMigrationProjectMatch | null;
@@ -232,7 +394,7 @@ type UnifiedAuditTableRow =
   };
 
 export function ProjectMigrationAuditPage() {
-  const { projects } = useAppStore();
+  const { projects, currentUser, updateProject } = useAppStore();
   const { db, isOnline, orgId } = useFirebase();
   const navigate = useNavigate();
   const [sourceProjects, setSourceProjects] = useState<ProjectMigrationCandidate[]>([]);
@@ -355,6 +517,7 @@ export function ProjectMigrationAuditPage() {
       ...filteredRows.map((row) => ({
         key: row.candidate.id,
         kind: 'source' as const,
+        candidate: row.candidate,
         status: row.status,
         sourceName: row.candidate.businessName,
         match: row.match,
@@ -399,6 +562,14 @@ export function ProjectMigrationAuditPage() {
     ? (sourceSummary.registered / sourceSummary.total) * 100
     : null;
 
+  const projectUsageById = useMemo(() => {
+    const next = new Map<string, string>();
+    rows.forEach((row) => {
+      if (row.match) next.set(row.match.project.id, row.candidate.businessName);
+    });
+    return next;
+  }, [rows]);
+
   async function handleSyncApprovedScope() {
     if (!db || !isOnline) {
       toast.error('Firebase 연결 후 다시 시도해 주세요.');
@@ -419,6 +590,49 @@ export function ProjectMigrationAuditPage() {
     } finally {
       setIsSyncingScope(false);
     }
+  }
+
+  async function handleApplyManualLink(input: {
+    candidate: ProjectMigrationCandidate;
+    projectId: string;
+    projectStatus: ProjectStatus;
+  }) {
+    if (!db || !isOnline) {
+      toast.error('Firebase 연결 후 다시 시도해 주세요.');
+      return;
+    }
+
+    const project = projects.find((item) => item.id === input.projectId);
+    if (!project) {
+      toast.error('선택한 플랫폼 프로젝트를 찾지 못했습니다.');
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const nextContractName = input.candidate.businessName.trim();
+    const nextProjectLabel = nextContractName || formatProjectLabel(project);
+
+    await updateProject(project.id, {
+      officialContractName: nextContractName,
+      status: input.projectStatus,
+      updatedAt: now,
+    });
+
+    await setDoc(
+      doc(db, getOrgCollectionPath(orgId, 'projectDashboardProjects'), input.candidate.id),
+      {
+        manualProjectId: project.id,
+        manualProjectName: nextProjectLabel,
+        migrationUpdatedAt: now,
+        migrationUpdatedBy: currentUser.name || currentUser.email || currentUser.uid,
+        updatedAt: now,
+      },
+      { merge: true },
+    );
+
+    toast.success('이관 연결을 반영했습니다.', {
+      description: `${input.candidate.businessName} → ${nextProjectLabel}`,
+    });
   }
 
   return (
@@ -554,7 +768,7 @@ export function ProjectMigrationAuditPage() {
         <CardContent className="space-y-4 p-4">
           <div className="space-y-1">
             <h2 className="text-sm font-semibold">통합 대조표</h2>
-            <p className="text-[12px] text-muted-foreground">사업대시보드의 25건을 기준으로 플랫폼 프로젝트를 계약명 우선으로 붙였습니다. 미등록과 확인 필요 항목이 먼저 보입니다.</p>
+            <p className="text-[12px] text-muted-foreground">이관 대상 25건을 기준으로 플랫폼 프로젝트를 계약명 우선으로 붙였습니다. 필요하면 아래에서 미아 프로젝트를 직접 연결하고 상태를 반영할 수 있습니다.</p>
           </div>
 
           <div className="overflow-x-auto">
@@ -562,9 +776,9 @@ export function ProjectMigrationAuditPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead className="min-w-[92px]">상태</TableHead>
-                  <TableHead className="min-w-[180px]">사업대시보드 상의 프로젝트명</TableHead>
+                  <TableHead className="min-w-[180px]">이관 대상 프로젝트(사업대시보드 기준)</TableHead>
                   <TableHead className="min-w-[360px]">플랫폼 상의 프로젝트</TableHead>
-                  <TableHead className="min-w-[220px]">다음 액션</TableHead>
+                  <TableHead className="min-w-[280px]">매칭/업데이트</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -581,7 +795,16 @@ export function ProjectMigrationAuditPage() {
                     </TableCell>
                     <TableCell className="text-[11px] text-muted-foreground">
                       {row.kind === 'source'
-                        ? getSourceRowNextAction(row.status, row.match)
+                        ? (
+                          <SourceRowActionCell
+                            candidate={row.candidate}
+                            match={row.match}
+                            projects={projects}
+                            projectUsageById={projectUsageById}
+                            disabled={!db || !isOnline}
+                            onApply={handleApplyManualLink}
+                          />
+                        )
                         : getCurrentOnlyNextAction()}
                     </TableCell>
                   </TableRow>

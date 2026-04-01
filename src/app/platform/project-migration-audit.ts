@@ -202,6 +202,23 @@ function scoreProjectMatch(candidate: ProjectMigrationCandidate, project: Projec
   };
 }
 
+function buildManualProjectMatch(
+  candidate: ProjectMigrationCandidate,
+  projects: Project[],
+): ProjectMigrationProjectMatch | null {
+  if (!candidate.manualProjectId) return null;
+
+  const project = projects.find((item) => item.id === candidate.manualProjectId);
+  if (!project) return null;
+
+  return scoreProjectMatch(candidate, project) ?? {
+    project,
+    score: 1000,
+    exact: true,
+    reasons: ['수동 연결'],
+  };
+}
+
 function compareProjectMatches(left: ProjectMigrationProjectMatch, right: ProjectMigrationProjectMatch): number {
   if (left.exact !== right.exact) return left.exact ? -1 : 1;
   if (left.score !== right.score) return right.score - left.score;
@@ -221,20 +238,31 @@ export function buildProjectMigrationAuditRows(
     match: null,
   }));
 
-  const candidateEdges = candidates.flatMap((candidate, candidateIndex) => (
-    projects
+  const candidateEdges = candidates.flatMap((candidate, candidateIndex) => {
+    const manualMatch = buildManualProjectMatch(candidate, projects);
+    if (manualMatch) {
+      return [{
+        candidateIndex,
+        match: manualMatch,
+        manual: true,
+      }];
+    }
+
+    return projects
       .map((project) => {
         const match = scoreProjectMatch(candidate, project);
         if (!match) return null;
         return {
           candidateIndex,
           match,
+          manual: false,
         };
       })
-      .filter((edge): edge is { candidateIndex: number; match: ProjectMigrationProjectMatch } => !!edge)
-  ));
+      .filter((edge): edge is { candidateIndex: number; match: ProjectMigrationProjectMatch; manual: boolean } => !!edge);
+  });
 
   candidateEdges.sort((left, right) => {
+    if (left.manual !== right.manual) return left.manual ? -1 : 1;
     const matchCompare = compareProjectMatches(left.match, right.match);
     if (matchCompare !== 0) return matchCompare;
     return left.candidateIndex - right.candidateIndex;

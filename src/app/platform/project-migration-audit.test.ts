@@ -138,6 +138,26 @@ describe('buildProjectMigrationAuditRows', () => {
     expect(rows[1].match).toBeNull();
   });
 
+  it('honors a manual project link even when auto similarity would miss', () => {
+    const rows = buildProjectMigrationAuditRows(
+      [
+        makeCandidate({
+          id: 'candidate-manual',
+          businessName: '완전히 다른 사업명',
+          manualProjectId: 'p-manual',
+        }),
+      ],
+      [makeProject({
+        id: 'p-manual',
+        name: '플랫폼 내부 별칭',
+      })],
+    );
+
+    expect(rows[0].status).toBe('REGISTERED');
+    expect(rows[0].match?.project.id).toBe('p-manual');
+    expect(rows[0].match?.reasons).toContain('수동 연결');
+  });
+
   it('builds current-project rows for reverse lookup', () => {
     const rows = buildProjectMigrationAuditRows(
       [makeCandidate({ businessName: '2026 에코스타트업', clientOrg: '한국환경산업기술원' })],

@@ -6,6 +6,10 @@ export interface ProjectMigrationCandidate {
   accountLabel: string;
   businessName: string;
   clientOrg: string;
+  manualProjectId?: string;
+  manualProjectName?: string;
+  migrationUpdatedAt?: string;
+  migrationUpdatedBy?: string;
   tenantId?: string;
   sourceRow?: number;
   createdAt?: string;
@@ -34,6 +38,10 @@ export function normalizeProjectMigrationCandidate(
     accountLabel: readString(raw.accountLabel),
     businessName: readString(raw.businessName),
     clientOrg: readString(raw.clientOrg),
+    manualProjectId: readString(raw.manualProjectId) || undefined,
+    manualProjectName: readString(raw.manualProjectName) || undefined,
+    migrationUpdatedAt: readString(raw.migrationUpdatedAt) || undefined,
+    migrationUpdatedBy: readString(raw.migrationUpdatedBy) || undefined,
     tenantId: readString(raw.tenantId) || undefined,
     sourceRow: readNumber(raw.sourceRow),
     createdAt: readString(raw.createdAt) || undefined,
