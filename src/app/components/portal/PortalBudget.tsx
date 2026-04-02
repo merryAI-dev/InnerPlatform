@@ -23,6 +23,7 @@ import {
 import type { BudgetPlanRow, BudgetCodeEntry, BudgetCodeRename } from '../../data/types';
 import { BASIS_LABELS } from '../../data/types';
 import { moveBudgetSubCode, moveBudgetSubCodeToIndex } from '../../platform/budget-code-book-order';
+import { buildBudgetLabelKey, normalizeBudgetLabel } from '../../platform/budget-labels';
 import { parseNumber } from '../../platform/csv-utils';
 import { SETTLEMENT_COLUMNS } from '../../platform/settlement-csv';
 
@@ -32,13 +33,6 @@ import { SETTLEMENT_COLUMNS } from '../../platform/settlement-csv';
 
 function groupIdForEntry(name: string): string {
   return normalizeBudgetLabel(name) || '기타';
-}
-
-function normalizeBudgetLabel(value: string): string {
-  return String(value || '')
-    .replace(/^\s*\d+(?:[.\-]\d+)?\s*/, '')
-    .replace(/^[.\-]+\s*/, '')
-    .trim();
 }
 
 function formatBudgetCodeLabel(_index: number, name: string): string {
@@ -110,8 +104,7 @@ export function PortalBudget() {
   const planMap = useMemo(() => {
     const map = new Map<string, BudgetPlanRow>();
     (budgetPlanRows || []).forEach((row) => {
-      const key = `${normalizeBudgetLabel(row.budgetCode)}|${normalizeBudgetLabel(row.subCode)}`;
-      map.set(key, row);
+      map.set(buildBudgetLabelKey(row.budgetCode, row.subCode), row);
     });
     return map;
   }, [budgetPlanRows]);
@@ -124,12 +117,10 @@ export function PortalBudget() {
     const bankAmountIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '통장에 찍힌 입/출금액');
     if (budgetCodeIdx < 0 || subCodeIdx < 0 || bankAmountIdx < 0) return map;
     for (const row of expenseSheetRows) {
-      const budgetCode = normalizeBudgetLabel(String(row.cells[budgetCodeIdx] || '').trim());
-      const subCode = normalizeBudgetLabel(String(row.cells[subCodeIdx] || '').trim());
-      if (!budgetCode || !subCode) continue;
       const amount = parseNumber(String(row.cells[bankAmountIdx] || '')) ?? 0;
       if (amount === 0) continue;
-      const key = `${budgetCode}|${subCode}`;
+      const key = buildBudgetLabelKey(row.cells[budgetCodeIdx], row.cells[subCodeIdx]);
+      if (key === '|') continue;
       map.set(key, (map.get(key) || 0) + amount);
     }
     return map;
@@ -294,7 +285,7 @@ export function PortalBudget() {
   const startEdit = useCallback(() => {
     const next = budgetCodeBook.flatMap((entry) => (
       entry.subCodes.map((subCode) => {
-        const key = `${entry.code}|${subCode}`;
+        const key = buildBudgetLabelKey(entry.code, subCode);
         const existing = planMap.get(key);
         return {
           budgetCode: entry.code,
@@ -390,7 +381,7 @@ export function PortalBudget() {
   const budgetItems = useMemo(() => {
     const items: BudgetRow[] = activeCodeBook.flatMap((entry, codeIdx) => (
       entry.subCodes.map((subCode, subIdx) => {
-        const lookupKey = `${normalizeBudgetLabel(entry.code)}|${normalizeBudgetLabel(subCode)}`;
+        const lookupKey = buildBudgetLabelKey(entry.code, subCode);
         const plan = planMap.get(lookupKey);
         const initial = plan?.initialBudget ?? 0;
         const revised = plan?.revisedBudget ?? 0;
@@ -821,10 +812,9 @@ export function PortalBudget() {
                           const delta = hasRevised ? row.revisedAug - row.initialBudget : 0;
                           const deltaUp = delta > 0;
                           const deltaDown = delta < 0;
+                          const rowKey = buildBudgetLabelKey(row.budgetCode, row.subCode);
                           const draft = editMode
-                            ? draftRows.find((r) =>
-                              normalizeBudgetLabel(row.budgetCode) === normalizeBudgetLabel(r.budgetCode) &&
-                              normalizeBudgetLabel(row.subCode) === normalizeBudgetLabel(r.subCode))
+                            ? draftRows.find((r) => buildBudgetLabelKey(r.budgetCode, r.subCode) === rowKey)
                             : null;
                           return (
                           <tr
@@ -868,8 +858,7 @@ export function PortalBudget() {
                                   onChange={(e) => {
                                     const value = formatInputLive(e.target.value);
                                     setDraftRows((prev) => prev.map((r) => (
-                                      normalizeBudgetLabel(r.budgetCode) === normalizeBudgetLabel(row.budgetCode)
-                                        && normalizeBudgetLabel(r.subCode) === normalizeBudgetLabel(row.subCode)
+                                      buildBudgetLabelKey(r.budgetCode, r.subCode) === rowKey
                                         ? { ...r, initialBudget: value }
                                         : r
                                     )));
@@ -889,8 +878,7 @@ export function PortalBudget() {
                                   onChange={(e) => {
                                     const value = formatInputLive(e.target.value);
                                     setDraftRows((prev) => prev.map((r) => (
-                                      normalizeBudgetLabel(r.budgetCode) === normalizeBudgetLabel(row.budgetCode)
-                                        && normalizeBudgetLabel(r.subCode) === normalizeBudgetLabel(row.subCode)
+                                      buildBudgetLabelKey(r.budgetCode, r.subCode) === rowKey
                                         ? { ...r, revisedBudget: value }
                                         : r
                                     )));
@@ -937,8 +925,7 @@ export function PortalBudget() {
                                   onChange={(e) => {
                                     const value = e.target.value;
                                     setDraftRows((prev) => prev.map((r) => (
-                                      normalizeBudgetLabel(r.budgetCode) === normalizeBudgetLabel(row.budgetCode)
-                                        && normalizeBudgetLabel(r.subCode) === normalizeBudgetLabel(row.subCode)
+                                      buildBudgetLabelKey(r.budgetCode, r.subCode) === rowKey
                                         ? { ...r, note: value }
                                         : r
                                     )));

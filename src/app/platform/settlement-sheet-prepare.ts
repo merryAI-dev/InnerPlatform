@@ -1,16 +1,10 @@
 import { SETTLEMENT_COLUMNS, type ImportRow } from './settlement-csv';
+import { buildBudgetLabelKey, normalizeBudgetLabel } from './budget-labels';
 import {
   deriveSettlementRows,
   type SettlementDerivationContext,
 } from './settlement-row-derivation';
 import { resolveEvidenceRequiredByRules } from './evidence-rules';
-
-function normalizeBudgetLabel(value: string): string {
-  return String(value || '')
-    .replace(/^\s*\d+(?:[.\-]\d+)?\s*/, '')
-    .replace(/^[.\-]+\s*/, '')
-    .trim();
-}
 
 function getColumnIndex(header: string): number {
   return SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === header);
@@ -72,7 +66,7 @@ export function resolveEvidenceRequiredDesc(
   if (direct) return direct;
   const normBudget = normalizeBudgetLabel(budgetCode);
   const normSub = normalizeBudgetLabel(subCode);
-  return map[`${normBudget}|${normSub}`] || map[normSub] || map[normBudget] || '';
+  return map[buildBudgetLabelKey(normBudget, normSub)] || map[normSub] || map[normBudget] || '';
 }
 
 export function buildSettlementDerivationContext(

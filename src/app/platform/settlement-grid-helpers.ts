@@ -1,5 +1,6 @@
 import type { Transaction, TransactionState } from '../data/types';
 import { getMonthMondayWeeks, type MonthMondayWeek } from './cashflow-weeks';
+export { normalizeBudgetLabel, buildBudgetLabelKey } from './budget-labels';
 
 // ── Number formatting ──
 
@@ -26,13 +27,6 @@ export const CASHFLOW_IN_LINE_IDS = new Set([
 ]);
 
 // ── Budget label helpers ──
-
-export function normalizeBudgetLabel(value: string): string {
-  return String(value || '')
-    .replace(/^\s*\d+(?:[.\-]\d+)?\s*/, '')
-    .replace(/^[.\-]+\s*/, '')
-    .trim();
-}
 
 export function formatBudgetCodeLabel(_index: number, name: string): string {
   const trimmed = String(name || '').trim();

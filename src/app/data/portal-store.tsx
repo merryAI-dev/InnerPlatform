@@ -61,6 +61,7 @@ import { includesProject, normalizeProjectIds, resolvePrimaryProjectId } from '.
 import { canEnterPortalWorkspace } from '../platform/navigation';
 import { readDevAuthHarnessConfig } from '../platform/dev-harness';
 import { reportError } from '../platform/observability';
+import { buildBudgetLabelKey, normalizeBudgetLabel } from '../platform/budget-labels';
 
 export interface PortalUser {
   id: string;
@@ -160,13 +161,6 @@ if (!_g.__PORTAL_CTX__) {
   _g.__PORTAL_CTX__ = createContext<(PortalState & PortalActions) | null>(null);
 }
 const PortalContext: React.Context<(PortalState & PortalActions) | null> = _g.__PORTAL_CTX__;
-
-function normalizeBudgetLabel(value: string): string {
-  return String(value || '')
-    .replace(/^\s*\d+(?:[.\-]\d+)?\s*/, '')
-    .replace(/^[.\-]+\s*/, '')
-    .trim();
-}
 
 function sanitizeBudgetEntry(value: string): string {
   return String(value || '').trim();
@@ -1330,7 +1324,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       const toCode = normalizeBudgetLabel(r.toCode);
       const toSub = normalizeBudgetLabel(r.toSub);
       if (!fromCode || !fromSub || !toCode || !toSub) return;
-      renameMap.set(`${fromCode}|${fromSub}`, { code: toCode, sub: toSub });
+      renameMap.set(buildBudgetLabelKey(fromCode, fromSub), { code: toCode, sub: toSub });
     });
     if (renameMap.size === 0) return;
 
@@ -1345,7 +1339,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     if (budgetPlanRows && budgetPlanRows.length > 0) {
       let touched = false;
       const nextRows = budgetPlanRows.map((row) => {
-        const key = `${normalizeBudgetLabel(row.budgetCode)}|${normalizeBudgetLabel(row.subCode)}`;
+        const key = buildBudgetLabelKey(row.budgetCode, row.subCode);
         const mapped = renameMap.get(key);
         if (!mapped) return row;
         touched = true;
@@ -1379,7 +1373,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         let touched = false;
         const nextRows = expenseSheetRows.map((row) => {
           const cells = Array.isArray(row.cells) ? [...row.cells] : [];
-          const key = `${normalizeBudgetLabel(cells[budgetCodeIdx] || '')}|${normalizeBudgetLabel(cells[subCodeIdx] || '')}`;
+          const key = buildBudgetLabelKey(cells[budgetCodeIdx] || '', cells[subCodeIdx] || '');
           const mapped = renameMap.get(key);
           if (!mapped) return row;
           cells[budgetCodeIdx] = mapped.code;
@@ -1416,7 +1410,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           nextMap[key] = value;
           return;
         }
-        const mapKey = `${normalizeBudgetLabel(rawCode)}|${normalizeBudgetLabel(rawSub)}`;
+        const mapKey = buildBudgetLabelKey(rawCode, rawSub);
         const mapped = renameMap.get(mapKey);
         if (!mapped) {
           nextMap[key] = value;

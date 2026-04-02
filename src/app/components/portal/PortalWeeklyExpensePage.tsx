@@ -42,6 +42,7 @@ import { reportError } from '../../platform/observability';
 import { type ImportRow } from '../../platform/settlement-csv';
 import { readDevAuthHarnessConfig } from '../../platform/dev-harness';
 import { detectParticipationRisk } from '../../platform/participation-risk-rules';
+import { normalizeBudgetLabel } from '../../platform/budget-labels';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -59,13 +60,6 @@ const GoogleSheetMigrationWizard = lazy(
 const SettlementLedgerPage = lazy(
   () => import('../cashflow/SettlementLedgerPage').then((module) => ({ default: module.SettlementLedgerPage })),
 );
-
-function normalizeBudgetLabel(value: string): string {
-  return String(value || '')
-    .replace(/^\s*\d+(?:[.\-]\d+)?\s*/, '')
-    .replace(/^[.\-]+\s*/, '')
-    .trim();
-}
 
 export function PortalWeeklyExpensePage() {
   const { user: authUser, ensureGoogleWorkspaceAccess } = useAuth();

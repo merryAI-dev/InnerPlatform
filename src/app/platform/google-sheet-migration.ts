@@ -1,5 +1,6 @@
 import type { BudgetCodeEntry, BudgetPlanRow, CashflowSheetLineId, ProjectSheetSourceType } from '../data/types';
 import { normalizeBankStatementMatrix, type BankStatementSheet } from './bank-statement';
+import { buildBudgetLabelKey, normalizeBudgetLabel } from './budget-labels';
 import { normalizeSpace, parseNumber } from './csv-utils';
 import { parseCashflowLineLabel } from './settlement-csv';
 
@@ -69,13 +70,6 @@ export function resolveProjectSheetSourceType(
     default:
       return null;
   }
-}
-
-function normalizeBudgetLabel(value: unknown): string {
-  return String(value || '')
-    .replace(/^\s*\d+(?:[.\-]\d+)?\s*/, '')
-    .replace(/^[.\-]+\s*/, '')
-    .trim();
 }
 
 function normalizeHeader(value: unknown): string {
@@ -288,14 +282,18 @@ export function parseBudgetPlanMatrix(matrix: string[][]): BudgetSheetImportPayl
 }
 
 function buildBudgetPlanMatchKey(row: BudgetPlanRow): string {
-  return `${normalizeBudgetLabel(row.budgetCode)}|${normalizeBudgetLabel(row.subCode)}`;
+  return buildBudgetLabelKey(row.budgetCode, row.subCode);
 }
 
 export function planBudgetPlanMerge(
   existingRows: BudgetPlanRow[],
   importedRows: BudgetPlanRow[],
 ): BudgetPlanMergePlan {
-  const mergedRows = existingRows.map((row) => ({ ...row }));
+  const mergedRows = existingRows.map((row) => ({
+    ...row,
+    budgetCode: normalizeBudgetLabel(row.budgetCode),
+    subCode: normalizeBudgetLabel(row.subCode),
+  }));
   const existingIndexByKey = new Map<string, number>();
   mergedRows.forEach((row, index) => {
     existingIndexByKey.set(buildBudgetPlanMatchKey(row), index);
@@ -306,11 +304,16 @@ export function planBudgetPlanMerge(
   let unchangedCount = 0;
 
   importedRows.forEach((row) => {
-    const key = buildBudgetPlanMatchKey(row);
+    const normalizedRow: BudgetPlanRow = {
+      ...row,
+      budgetCode: normalizeBudgetLabel(row.budgetCode),
+      subCode: normalizeBudgetLabel(row.subCode),
+    };
+    const key = buildBudgetPlanMatchKey(normalizedRow);
     if (!key || key === '|') return;
     const existingIndex = existingIndexByKey.get(key);
     if (existingIndex == null) {
-      mergedRows.push({ ...row });
+      mergedRows.push(normalizedRow);
       existingIndexByKey.set(key, mergedRows.length - 1);
       createCount += 1;
       return;
@@ -319,15 +322,15 @@ export function planBudgetPlanMerge(
     const existing = mergedRows[existingIndex];
     const next: BudgetPlanRow = {
       ...existing,
-      ...row,
-      budgetCode: row.budgetCode || existing.budgetCode,
-      subCode: row.subCode || existing.subCode,
-      initialBudget: Number.isFinite(row.initialBudget) ? row.initialBudget : existing.initialBudget,
-      ...(Number.isFinite(row.revisedBudget ?? NaN)
-        ? { revisedBudget: row.revisedBudget }
+      ...normalizedRow,
+      budgetCode: normalizedRow.budgetCode || existing.budgetCode,
+      subCode: normalizedRow.subCode || existing.subCode,
+      initialBudget: Number.isFinite(normalizedRow.initialBudget) ? normalizedRow.initialBudget : existing.initialBudget,
+      ...(Number.isFinite(normalizedRow.revisedBudget ?? NaN)
+        ? { revisedBudget: normalizedRow.revisedBudget }
         : (Number.isFinite(existing.revisedBudget ?? NaN) ? { revisedBudget: existing.revisedBudget } : {})),
-      ...((row.note ?? '').trim()
-        ? { note: row.note?.trim() }
+      ...((normalizedRow.note ?? '').trim()
+        ? { note: normalizedRow.note?.trim() }
         : ((existing.note ?? '').trim() ? { note: existing.note?.trim() } : {})),
     };
     const changed = JSON.stringify(existing) !== JSON.stringify(next);
@@ -342,7 +345,11 @@ export function planBudgetPlanMerge(
   return {
     mergedRows,
     codeBook: buildBudgetCodeBook(mergedRows),
-    importedRows: importedRows.map((row) => ({ ...row })),
+    importedRows: importedRows.map((row) => ({
+      ...row,
+      budgetCode: normalizeBudgetLabel(row.budgetCode),
+      subCode: normalizeBudgetLabel(row.subCode),
+    })),
     importedCodeBook: buildBudgetCodeBook(importedRows),
     summary: {
       importedCount: importedRows.length,

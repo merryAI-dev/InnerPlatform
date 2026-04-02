@@ -150,6 +150,15 @@ describe('resolveEvidenceRequiredDesc', () => {
     expect(resolveEvidenceRequiredDesc(map, '2. 여비', '2-1. 교통비')).toBe('출장신청서');
   });
 
+  it('keeps semantic month-prefixed sub codes distinct during normalized fallback', () => {
+    const map = {
+      '인건비|10월 인건비': '근로계약서',
+      '인건비|11월 인건비': '급여명세서',
+    };
+    expect(resolveEvidenceRequiredDesc(map, '1. 인건비', '10월 인건비')).toBe('근로계약서');
+    expect(resolveEvidenceRequiredDesc(map, '1. 인건비', '11월 인건비')).toBe('급여명세서');
+  });
+
   it('returns empty string when nothing matches', () => {
     const map = { '인건비|급여': '근로계약서' };
     expect(resolveEvidenceRequiredDesc(map, '회의비', '다과비')).toBe('');

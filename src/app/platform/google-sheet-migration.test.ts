@@ -124,6 +124,29 @@ describe('google-sheet-migration', () => {
     ]);
   });
 
+  it('keeps month-prefixed sub codes distinct during merge', () => {
+    const existing = [
+      { budgetCode: '인건비', subCode: '9월 인건비', initialBudget: 19527400 },
+      { budgetCode: '인건비', subCode: '10월 인건비', initialBudget: 0 },
+    ];
+    const imported = [
+      { budgetCode: '1. 인건비', subCode: '10월 인건비', initialBudget: 21000000 },
+    ];
+
+    const plan = planBudgetPlanMerge(existing, imported);
+
+    expect(plan.mergedRows).toEqual([
+      { budgetCode: '인건비', subCode: '9월 인건비', initialBudget: 19527400 },
+      { budgetCode: '인건비', subCode: '10월 인건비', initialBudget: 21000000 },
+    ]);
+    expect(plan.summary).toEqual({
+      importedCount: 1,
+      createCount: 0,
+      updateCount: 1,
+      unchangedCount: 0,
+    });
+  });
+
   it('parses evidence rule matrices with intermediate category columns', () => {
     const matrix = [
       ['안내', '증빙 작성법'],
