@@ -168,11 +168,15 @@ function normalizeBudgetLabel(value: string): string {
     .trim();
 }
 
+function sanitizeBudgetEntry(value: string): string {
+  return String(value || '').trim();
+}
+
 function normalizeBudgetCodeBook(input: BudgetCodeEntry[]): BudgetCodeEntry[] {
   return (input || [])
     .map((row) => ({
-      code: normalizeBudgetLabel(row.code),
-      subCodes: (row.subCodes || []).map(normalizeBudgetLabel).filter(Boolean),
+      code: sanitizeBudgetEntry(row.code),
+      subCodes: (row.subCodes || []).map(sanitizeBudgetEntry).filter(Boolean),
     }))
     .filter((row) => row.code && row.subCodes.length > 0);
 }
