@@ -270,6 +270,25 @@ function ImportEditorRow({
     : persistedTransaction?.evidenceDriveSyncStatus === 'SYNCED'
       ? '동기화됨'
       : '';
+  const rowSourceBadge = useMemo(() => {
+    if (isAdjustmentRow) return { label: '잔액 조정', className: 'border-amber-200 bg-amber-50 text-amber-700' };
+    if (row.entryKind === 'DEPOSIT') return { label: '직접 입금', className: 'border-sky-200 bg-sky-50 text-sky-700' };
+    if (row.entryKind === 'EXPENSE') return { label: '직접 지출', className: 'border-violet-200 bg-violet-50 text-violet-700' };
+    if (row.sourceTxId) return { label: '업로드 반영', className: 'border-slate-200 bg-slate-50 text-slate-700' };
+    return { label: '수동 입력', className: 'border-emerald-200 bg-emerald-50 text-emerald-700' };
+  }, [isAdjustmentRow, row.entryKind, row.sourceTxId]);
+  const rowEditStateBadge = useMemo(() => {
+    if ((row.userEditedCells?.size || 0) > 0) {
+      return { label: '수정됨', className: 'border-teal-200 bg-teal-50 text-teal-700' };
+    }
+    if (hasError) {
+      return { label: '검토 필요', className: 'border-rose-200 bg-rose-50 text-rose-700' };
+    }
+    if (hasMissingCell) {
+      return { label: '미입력', className: 'border-orange-200 bg-orange-50 text-orange-700' };
+    }
+    return null;
+  }, [hasError, hasMissingCell, row.userEditedCells]);
   const isCellSelected = useCallback((colIdx: number) => {
     if (!selectionBounds || colIdx === noIdx) return false;
     return rowIdx >= selectionBounds.r1
@@ -344,13 +363,24 @@ function ImportEditorRow({
         : 'hover:bg-muted/30'
     } transition-colors`}>
       {/* Row controls */}
-      <td className="relative px-0.5 py-0.5 border-b border-r align-middle w-11">
-        <div className="flex items-center justify-start gap-1.5 pl-1">
+      <td className="relative px-1 py-1 border-b border-r align-middle w-24">
+        <div className="flex items-start justify-between gap-1">
+          <div className="min-w-0 space-y-1">
+            <span className={`inline-flex rounded-full border px-1.5 py-0.5 text-[9px] leading-none ${rowSourceBadge.className}`}>
+              {rowSourceBadge.label}
+            </span>
+            {rowEditStateBadge && (
+              <span className={`inline-flex rounded-full border px-1.5 py-0.5 text-[9px] leading-none ${rowEditStateBadge.className}`}>
+                {rowEditStateBadge.label}
+              </span>
+            )}
+            <span className="block text-[9px] text-muted-foreground">#{rowIdx + 1}</span>
+          </div>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                className="inline-flex h-3 w-3 items-center justify-center rounded-sm text-muted-foreground/70 hover:bg-muted hover:text-foreground transition-colors"
+                className="inline-flex h-4 w-4 items-center justify-center rounded-sm text-muted-foreground/70 hover:bg-muted hover:text-foreground transition-colors"
                 title="행 작업"
               >
                 <GripVertical className="h-2.5 w-2.5" />
@@ -381,7 +411,6 @@ function ImportEditorRow({
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          <span className="inline-flex text-[9px] text-muted-foreground">{rowIdx + 1}</span>
         </div>
         {(hasError || hasMissingCell) && (
           <span

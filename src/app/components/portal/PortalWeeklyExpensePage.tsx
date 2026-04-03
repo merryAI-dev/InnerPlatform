@@ -551,8 +551,9 @@ export function PortalWeeklyExpensePage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div className="space-y-1">
+      <div className="rounded-2xl border bg-background px-5 py-4 shadow-sm">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div className="space-y-1">
           <div className="flex items-center gap-2 flex-wrap">
             <h2 className="text-base font-bold">사업비 입력(주간)</h2>
             <Badge variant="secondary" className="text-[10px]">
@@ -580,8 +581,8 @@ export function PortalWeeklyExpensePage() {
           <p className="text-[11px] text-muted-foreground">
             현재 정책: {formatSettlementSheetPolicySummary(settlementSheetPolicy)}
           </p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
           {isDirectEntryMode ? (
             <>
               <Button size="sm" onClick={() => queueQuickInsert('DEPOSIT')}>
@@ -636,6 +637,37 @@ export function PortalWeeklyExpensePage() {
           >
             설정 열기
           </Button>
+          </div>
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-4">
+          <div className="rounded-xl border bg-slate-50/70 px-3 py-3">
+            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">작업 방식</div>
+            <div className="mt-1 text-sm font-semibold">{PROJECT_FUND_INPUT_MODE_LABELS[fundInputMode]}</div>
+            <div className="mt-1 text-[11px] text-muted-foreground">
+              {isDirectEntryMode ? '표에서 바로 기록하고 계산을 검토합니다.' : '통장내역 업로드 후 사용내역을 정리합니다.'}
+            </div>
+          </div>
+          <div className="rounded-xl border bg-slate-50/70 px-3 py-3">
+            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">정산 정책</div>
+            <div className="mt-1 text-sm font-semibold">{settlementSheetPolicy.preset === 'STANDARD' ? '표준형' : settlementSheetPolicy.preset === 'DIRECT_ENTRY' ? '직접 입력형' : '잔액 추적형'}</div>
+            <div className="mt-1 text-[11px] text-muted-foreground">{formatSettlementSheetPolicySummary(settlementSheetPolicy)}</div>
+          </div>
+          <div className="rounded-xl border bg-slate-50/70 px-3 py-3">
+            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">원본 준비</div>
+            <div className="mt-1 text-sm font-semibold">
+              {!isDirectEntryMode ? (bankStatementCount > 0 ? `${bankStatementCount}건 연결됨` : '업로드 필요') : '직접 입력 진행'}
+            </div>
+            <div className="mt-1 text-[11px] text-muted-foreground">
+              기본 폴더 {myProject?.evidenceDriveRootFolderId ? '준비됨' : '미설정'}
+            </div>
+          </div>
+          <div className="rounded-xl border bg-slate-50/70 px-3 py-3">
+            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">이번 탭</div>
+            <div className="mt-1 text-sm font-semibold">{activeSheetName}</div>
+            <div className="mt-1 text-[11px] text-muted-foreground">
+              {transactions.length}건의 거래와 연결되어 있습니다.
+            </div>
+          </div>
         </div>
       </div>
 

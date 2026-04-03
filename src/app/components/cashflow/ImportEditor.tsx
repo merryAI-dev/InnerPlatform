@@ -196,6 +196,18 @@ export function ImportEditor({
   );
   const errorCount = meaningfulRows.filter((r) => r.error).length;
   const validCount = meaningfulRows.length - errorCount;
+  const importedRowCount = useMemo(
+    () => meaningfulRows.filter((row) => Boolean(row.sourceTxId)).length,
+    [meaningfulRows],
+  );
+  const manuallyEditedRowCount = useMemo(
+    () => meaningfulRows.filter((row) => (row.userEditedCells?.size || 0) > 0).length,
+    [meaningfulRows],
+  );
+  const quickEntryRowCount = useMemo(
+    () => meaningfulRows.filter((row) => row.entryKind && row.entryKind !== 'STANDARD').length,
+    [meaningfulRows],
+  );
   const noIdx = useMemo(
     () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === 'No.'),
     [],
@@ -397,6 +409,13 @@ export function ImportEditor({
       c2: Math.max(selection.start.c, selection.end.c),
     };
   }, [selection]);
+  const selectionSummary = useMemo(() => {
+    if (!selectionBounds) return null;
+    return {
+      rowCount: selectionBounds.r2 - selectionBounds.r1 + 1,
+      colCount: selectionBounds.c2 - selectionBounds.c1 + 1,
+    };
+  }, [selectionBounds]);
 
   useEffect(() => {
     selectionRef.current = selection;
@@ -1412,31 +1431,81 @@ export function ImportEditor({
         </datalist>
       )}
       {/* Toolbar */}
-      <div className={`flex items-center justify-between px-4 py-2.5 border-b bg-muted/30 shrink-0 ${inline ? 'sticky top-0 z-20' : ''}`}>
-        <div className="flex items-center gap-3">
-          <h3 className="text-sm font-bold">정산대장 편집</h3>
-          <Badge variant="default" className="text-[10px]">{validCount}건 유효</Badge>
-          {errorCount > 0 && (
-            <Badge variant="destructive" className="text-[10px]">{errorCount}건 오류</Badge>
-          )}
-          {missingCount > 0 && (
-            <Badge variant="secondary" className="text-[10px] text-red-600">{missingCount}건 미입력</Badge>
-          )}
-          {(acceptStats.history + acceptStats.codebook > 0) && (
-            <Badge variant="outline" className="text-[10px] text-teal-700 border-teal-300 bg-teal-50">
-              비목 수락 {acceptStats.history + acceptStats.codebook}건
-              {acceptStats.history > 0 && acceptStats.codebook > 0
-                ? ` (히스토리 ${acceptStats.history} · 코드북 ${acceptStats.codebook})`
-                : acceptStats.history > 0
-                  ? ' (히스토리 기반)'
-                  : ' (코드북 기반)'}
-            </Badge>
-          )}
-          <span className="text-[10px] text-muted-foreground">
-            셀을 직접 수정하거나 행을 추가할 수 있습니다
-          </span>
+      <div className={`border-b bg-muted/20 shrink-0 ${inline ? 'sticky top-0 z-20' : ''}`}>
+        <div className="flex items-start justify-between gap-4 px-4 py-3">
+          <div className="min-w-0 space-y-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="text-sm font-bold">정산대장 편집</h3>
+              <Badge variant="default" className="text-[10px]">{validCount}건 저장 가능</Badge>
+              {errorCount > 0 && (
+                <Badge variant="destructive" className="text-[10px]">{errorCount}건 수정 필요</Badge>
+              )}
+              {missingCount > 0 && (
+                <Badge variant="secondary" className="text-[10px] text-red-600">{missingCount}건 미입력</Badge>
+              )}
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+              <span className="rounded-full border bg-background px-2 py-1">업로드 반영 {importedRowCount}건</span>
+              <span className="rounded-full border bg-background px-2 py-1">수동 수정 {manuallyEditedRowCount}건</span>
+              <span className="rounded-full border bg-background px-2 py-1">빠른 입력 {quickEntryRowCount}건</span>
+              {(acceptStats.history + acceptStats.codebook > 0) && (
+                <span className="rounded-full border border-teal-200 bg-teal-50 px-2 py-1 text-teal-700">
+                  비목 제안 수락 {acceptStats.history + acceptStats.codebook}건
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="shrink-0 text-right text-[11px] text-muted-foreground">
+            <div>행 왼쪽 배지에서 출처를 확인할 수 있습니다.</div>
+            <div>업로드, 직접 입력, 계산값 잠금 상태를 한눈에 구분합니다.</div>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center justify-between gap-3 px-4 py-2 border-t bg-background/80">
+          <div className="flex flex-wrap items-center gap-2">
+            {selectionSummary ? (
+              <>
+                <Badge variant="outline" className="text-[10px]">
+                  선택 영역 {selectionSummary.rowCount}행 x {selectionSummary.colCount}열
+                </Badge>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-[11px] gap-1 cursor-pointer shadow-sm hover:bg-muted/40"
+                  onClick={() => {
+                    void clearSelectedCells();
+                  }}
+                >
+                  <X className="h-3.5 w-3.5" />
+                  선택 셀 비우기
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-[11px] gap-1 cursor-pointer shadow-sm hover:bg-muted/40"
+                  onClick={() => {
+                    void removeSelectedRows();
+                  }}
+                  disabled={selectedRowIdx < 0 || rows.length === 0 || !resolvedPolicy.allowRowDelete}
+                >
+                  <X className="h-3.5 w-3.5" />
+                  선택 행 삭제
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-[11px]"
+                  onClick={() => setSelection(null)}
+                >
+                  선택 해제
+                </Button>
+              </>
+            ) : (
+              <span className="text-[11px] text-muted-foreground">
+                셀이나 행을 선택하면 대량 작업 액션이 여기에 나타납니다.
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
           <Button
             variant="outline"
             size="sm"
@@ -1512,30 +1581,6 @@ export function ImportEditor({
           <Button
             variant="outline"
             size="sm"
-            className="h-7 text-[11px] gap-1 cursor-pointer shadow-sm hover:bg-muted/40"
-            onClick={() => {
-              void clearSelectedCells();
-            }}
-            disabled={!getActiveSelectionBounds()}
-          >
-            <X className="h-3.5 w-3.5" />
-            선택 셀 비우기
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 text-[11px] gap-1 cursor-pointer shadow-sm hover:bg-muted/40"
-            onClick={() => {
-              void removeSelectedRows();
-            }}
-            disabled={selectedRowIdx < 0 || rows.length === 0 || !resolvedPolicy.allowRowDelete}
-          >
-            <X className="h-3.5 w-3.5" />
-            선택 행 삭제
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
             className="h-7 text-[11px] cursor-pointer shadow-sm hover:bg-muted/40"
             onClick={() => setClearAllConfirmOpen(true)}
             disabled={rows.length === 0}
@@ -1560,6 +1605,7 @@ export function ImportEditor({
             {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
             {saving ? '저장 중...' : `${validCount}건 저장`}
           </Button>
+        </div>
         </div>
       </div>
       <AlertDialog open={clearAllConfirmOpen} onOpenChange={setClearAllConfirmOpen}>
@@ -1594,7 +1640,7 @@ export function ImportEditor({
       >
         <table className="w-full text-[11px] border-collapse table-fixed">
           <colgroup>
-            <col style={{ width: 44 }} />
+            <col style={{ width: 96 }} />
             {SETTLEMENT_COLUMNS.map((_, i) => (
               <col key={i} style={{ width: colWidths[i] }} />
             ))}
@@ -1602,7 +1648,7 @@ export function ImportEditor({
           <thead className="sticky top-0 z-10">
             {/* Group header */}
             <tr className="bg-slate-100 dark:bg-slate-800">
-              <th className="px-1 py-1 border-b border-r text-center text-[9px] w-11" />
+              <th className="px-1 py-1 border-b border-r text-center text-[9px] w-24">상태</th>
               {SETTLEMENT_COLUMN_GROUPS.map((g) => (
                 <th
                   key={g.name}
@@ -1615,7 +1661,7 @@ export function ImportEditor({
             </tr>
             {/* Column header */}
             <tr className="bg-slate-50 dark:bg-slate-900">
-              <th className="px-1 py-1 border-b border-r text-[9px] w-11" />
+              <th className="px-1 py-1 border-b border-r text-[9px] w-24">행 정보</th>
               {SETTLEMENT_COLUMNS.map((col, i) => (
                 <th
                   key={i}
