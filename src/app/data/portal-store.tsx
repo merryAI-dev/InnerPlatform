@@ -52,7 +52,8 @@ import { normalizeSpace } from '../platform/csv-utils';
 import { prepareSettlementImportRows, pruneEmptySettlementRows } from '../platform/settlement-sheet-prepare';
 import { useAuth } from './auth-store';
 import { useFirebase } from '../lib/firebase-context';
-import { getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
+import { getAuthInstance, getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
+import { isPlatformApiEnabled, upsertProjectViaBff } from '../lib/platform-bff-client';
 import { duplicateExpenseSetAsDraft, withExpenseItems } from './portal-store.helpers';
 import { buildPortalProfilePatch, readMemberWorkspace, resolveMemberProjectAccessState } from './member-workspace';
 import { buildLegacyMemberDocId, mergeMemberRecordSources } from './member-documents';
@@ -1568,7 +1569,21 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       createdAt: now,
       updatedAt: now,
     };
-    await setDoc(doc(db, getOrgDocumentPath(orgId, 'projects', projectId)), withTenantScope(orgId, project), { merge: true });
+    if (isPlatformApiEnabled()) {
+      const idToken = authUser.idToken || await getAuthInstance()?.currentUser?.getIdToken() || undefined;
+      await upsertProjectViaBff({
+        tenantId: orgId,
+        actor: {
+          uid: authUser.uid,
+          email: authUser.email,
+          role: authUser.role,
+          idToken,
+        },
+        project,
+      });
+    } else {
+      await setDoc(doc(db, getOrgDocumentPath(orgId, 'projects', projectId)), withTenantScope(orgId, project), { merge: true });
+    }
     const nextPortalProjectIds = normalizeProjectIds([
       ...(Array.isArray(portalUser?.projectIds) ? portalUser.projectIds : []),
       portalUser?.projectId,

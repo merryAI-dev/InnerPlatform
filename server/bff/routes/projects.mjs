@@ -93,6 +93,53 @@ function buildProjectRegistrationSlackPayload(projectRequest) {
   };
 }
 
+function buildProjectCreatedSlackPayload(project, context = {}) {
+  const payload = project && typeof project === 'object' ? project : {};
+  const projectName = trimSlackText(payload.name, 120);
+  const officialContractName = trimSlackText(payload.officialContractName, 220);
+  const clientOrg = trimSlackText(payload.clientOrg, 160);
+  const department = trimSlackText(payload.department, 120);
+  const managerName = trimSlackText(payload.managerName, 120);
+  const teamName = trimSlackText(payload.teamName, 120);
+  const actorId = trimSlackText(context.actorId, 120);
+  const actorEmail = trimSlackText(context.actorEmail, 160);
+  const tenantId = trimSlackText(context.tenantId, 120);
+  const projectId = trimSlackText(payload.id, 120);
+  const purpose = trimSlackText(payload.projectPurpose || payload.description, 280);
+  const financialInputFlags = payload.financialInputFlags && typeof payload.financialInputFlags === 'object'
+    ? payload.financialInputFlags
+    : {};
+  const lines = [
+    '*[InnerPlatform] 신규 프로젝트 등록 완료*',
+    `프로젝트명: \`${projectName}\``,
+    `계약명: ${officialContractName}`,
+    `발주기관: ${clientOrg}`,
+    `담당조직: ${department}`,
+    `프로젝트유형: ${trimSlackText(payload.type, 80)}`,
+    `메인 담당자: ${managerName}`,
+    `팀장/팀명: ${teamName}`,
+    `계약기간: ${formatProjectPeriod(payload.contractStart, payload.contractEnd)}`,
+    `계약금액: ${formatOptionalProjectAmount(payload.contractAmount, financialInputFlags.contractAmount)}`,
+    `사업목적: ${purpose}`,
+    `등록자: ${actorId} (${actorEmail})`,
+    `tenantId: \`${tenantId}\``,
+    `projectId: \`${projectId}\``,
+  ];
+
+  return {
+    text: `[InnerPlatform] 신규 프로젝트 등록 완료: ${projectName}`,
+    blocks: [
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: lines.join('\n'),
+        },
+      },
+    ],
+  };
+}
+
 export function mountProjectRoutes(app, {
   db, now, idempotencyService, auditChainService, piiProtector,
   driveService,
@@ -196,6 +243,18 @@ export function mountProjectRoutes(app, {
       metadata: { source: 'bff', version: result.version, outboxId: outboxEvent.id },
       timestamp,
     });
+
+    if (result.created && projectRegistrationSlackService?.enabled && typeof projectRegistrationSlackService.notifyMessage === 'function') {
+      try {
+        await projectRegistrationSlackService.notifyMessage(buildProjectCreatedSlackPayload(result.data, {
+          tenantId,
+          actorId,
+          actorEmail,
+        }));
+      } catch (error) {
+        console.error('[BFF] project registration Slack notification failed:', error);
+      }
+    }
 
     return {
       status: result.created ? 201 : 200,

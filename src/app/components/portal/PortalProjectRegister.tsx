@@ -23,6 +23,7 @@ import { useAuth } from '../../data/auth-store';
 import { useFirebase } from '../../lib/firebase-context';
 import { getAuthInstance } from '../../lib/firebase';
 import {
+  isPlatformApiEnabled,
   notifyProjectRequestRegistrationViaBff,
   processProjectRequestContractViaBff,
   type ProjectRequestContractAnalysisResult,
@@ -600,7 +601,7 @@ export function PortalProjectRegister() {
       }
 
       const currentAuthUser = authUser;
-      if (currentAuthUser) {
+      if (currentAuthUser && !isPlatformApiEnabled()) {
         try {
           const idToken = currentAuthUser.idToken || await getAuthInstance()?.currentUser?.getIdToken() || undefined;
           const notification = await notifyProjectRequestRegistrationViaBff({

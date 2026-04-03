@@ -194,6 +194,52 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     });
   });
 
+  it('delivers project registration Slack notifications when a project is newly created via project upsert', async () => {
+    const projectRegistrationSlackService = {
+      enabled: true,
+      notifyMessage: vi.fn(async () => {}),
+    };
+    const projectsApi = request(createBffApp({
+      projectId,
+      workerSecret,
+      db,
+      projectRegistrationSlackService,
+    }));
+
+    const created = await projectsApi
+      .post('/api/v1/projects')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-create-slack-001' })
+      .send({
+        id: 'p-slack-create-001',
+        name: 'Slack Create Project',
+        type: 'I1',
+        department: '투자센터',
+        managerName: '보람',
+        contractAmount: 0,
+        financialInputFlags: { contractAmount: false },
+      });
+
+    expect(created.status).toBe(201);
+    expect(projectRegistrationSlackService.notifyMessage).toHaveBeenCalledTimes(1);
+    expect(projectRegistrationSlackService.notifyMessage).toHaveBeenCalledWith(expect.objectContaining({
+      text: expect.stringContaining('Slack Create Project'),
+      blocks: expect.any(Array),
+    }));
+
+    const updated = await projectsApi
+      .post('/api/v1/projects')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-create-slack-002' })
+      .send({
+        id: 'p-slack-create-001',
+        name: 'Slack Create Project Updated',
+        type: 'I1',
+        expectedVersion: 1,
+      });
+
+    expect(updated.status).toBe(200);
+    expect(projectRegistrationSlackService.notifyMessage).toHaveBeenCalledTimes(1);
+  });
+
   it('previews google sheet rows for an existing project', async () => {
     const googleSheetsService = {
       previewSpreadsheet: vi.fn(async ({ value, sheetName }) => ({
