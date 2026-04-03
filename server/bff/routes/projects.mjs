@@ -176,6 +176,42 @@ function buildProjectTeamMemberSyncKey(member) {
   ].join('__');
 }
 
+export function resolveProjectTeamMemberLookupKeys(member) {
+  return Array.from(new Set([
+    readOptionalText(member?.memberNickname),
+    readOptionalText(member?.memberName),
+  ]
+    .filter(Boolean)
+    .map((value) => value.toLowerCase())));
+}
+
+export async function tryRenameManagedProjectRootFolder({
+  driveService,
+  projectId,
+  projectName,
+  existingFolderId,
+  logger = console,
+}) {
+  if (
+    !driveService
+    || typeof driveService.renameManagedProjectRootFolder !== 'function'
+    || !readOptionalText(existingFolderId)
+  ) {
+    return null;
+  }
+
+  try {
+    return await driveService.renameManagedProjectRootFolder({
+      projectId,
+      projectName,
+      existingFolderId,
+    });
+  } catch (error) {
+    logger.error('[BFF] managed project root rename skipped:', error);
+    return null;
+  }
+}
+
 function resolveParticipationSettlementSystem(project) {
   if (project?.settlementType === 'TYPE5' || project?.accountType === 'DEDICATED') {
     return 'E_NARA_DOUM';
@@ -213,9 +249,9 @@ async function syncProjectParticipationEntries({
   const desiredEntries = new Map();
   for (const member of teamMembers) {
     if (!member.role || (!member.memberName && !member.memberNickname)) continue;
-    const matchedMember = memberByIdentity.get((member.memberNickname || member.memberName).toLowerCase())
-      || memberByIdentity.get(member.memberName.toLowerCase())
-      || memberByIdentity.get(member.memberNickname.toLowerCase());
+    const matchedMember = resolveProjectTeamMemberLookupKeys(member)
+      .map((lookupKey) => memberByIdentity.get(lookupKey))
+      .find(Boolean);
     const memberId = readOptionalText(matchedMember?.uid || matchedMember?.id)
       || `project-team:${buildProjectTeamMemberSyncKey(member)}`;
     const displayName = readOptionalText(matchedMember?.name) || member.memberNickname || member.memberName;
@@ -403,11 +439,9 @@ export function mountProjectRoutes(app, {
       !result.created
       && existingName
       && existingName !== projectPayload.name
-      && driveService
-      && typeof driveService.renameManagedProjectRootFolder === 'function'
-      && readOptionalText(result.data.evidenceDriveRootFolderId)
     )
-      ? await driveService.renameManagedProjectRootFolder({
+      ? await tryRenameManagedProjectRootFolder({
+        driveService,
         projectId: projectPayload.id,
         projectName: projectPayload.name,
         existingFolderId: result.data.evidenceDriveRootFolderId,
