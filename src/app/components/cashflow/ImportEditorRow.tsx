@@ -312,6 +312,33 @@ function ImportEditorRow({
     if (header === '매입부가세') return settlementSheetPolicy.readOnlyDerivedFields.includes('vatIn');
     return false;
   }, [isAdjustmentRow, settlementSheetPolicy.readOnlyDerivedFields]);
+  const resolveCellSource = useCallback((colIdx: number, header: string) => {
+    if (isDerivedFieldLocked(header)) {
+      return { label: '계산', className: 'bg-slate-100 text-slate-600' };
+    }
+    if (row.userEditedCells?.has(colIdx)) {
+      return { label: '수정', className: 'bg-teal-100 text-teal-700' };
+    }
+    const cellValue = String(row.cells[colIdx] || '').trim();
+    if (
+      row.sourceTxId
+      && cellValue
+      && (
+        colIdx === budgetCodeIdx
+        || colIdx === subCodeIdx
+        || colIdx === cashflowIdx
+        || colIdx === weekIdx
+        || header === '통장잔액'
+        || header === '통장에 찍힌 입/출금액'
+        || header === '사업비 사용액'
+        || header === '매입부가세'
+        || header === '지급처'
+      )
+    ) {
+      return { label: '원본', className: 'bg-slate-100 text-slate-600' };
+    }
+    return null;
+  }, [budgetCodeIdx, cashflowIdx, row.cells, row.sourceTxId, row.userEditedCells, subCodeIdx, weekIdx, isDerivedFieldLocked]);
   const renderCommentButton = useCallback((fieldLabel: string) => {
     const fieldKey = toFieldSlug(fieldLabel);
     const count = commentCountByCell.get(buildCommentThreadKey(commentTransactionId, fieldKey)) || 0;
@@ -432,6 +459,7 @@ function ImportEditorRow({
         const isExpenseAmount = col.csvHeader === '사업비 사용액';
         const isSettlementNote = col.csvHeader === '비고';
         const isDerivedLocked = isDerivedFieldLocked(col.csvHeader);
+        const cellSource = resolveCellSource(colIdx, col.csvHeader);
         const hasAuthorOptions = (authorOptions || []).length > 0;
         return (
           <td
@@ -783,6 +811,11 @@ function ImportEditorRow({
               {isDerivedLocked && (
                 <span className="absolute left-1 bottom-0.5 rounded bg-muted px-1 text-[9px] text-muted-foreground">
                   계산값
+                </span>
+              )}
+              {cellSource && !isDerivedLocked && (
+                <span className={`absolute left-1 bottom-0.5 rounded px-1 text-[9px] ${cellSource.className}`}>
+                  {cellSource.label}
                 </span>
               )}
               {isCounterparty && counterpartyHint && (

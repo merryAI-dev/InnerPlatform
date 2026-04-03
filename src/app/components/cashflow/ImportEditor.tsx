@@ -416,6 +416,42 @@ export function ImportEditor({
       colCount: selectionBounds.c2 - selectionBounds.c1 + 1,
     };
   }, [selectionBounds]);
+  const reviewPanelItems = useMemo(() => {
+    const firstErrorRow = meaningfulRows.findIndex((row) => Boolean(row.error));
+    const firstMissingRow = meaningfulRows.findIndex((row) => {
+      const cells = row.cells || [];
+      const hasAnyValue = cells.some((cell, idx) => idx !== noIdx && String(cell || '').trim() !== '');
+      if (!hasAnyValue) return false;
+      return cells.some((cell, idx) => idx !== noIdx && String(cell || '').trim() === '');
+    });
+    const firstManualRow = meaningfulRows.findIndex((row) => (row.userEditedCells?.size || 0) > 0);
+    return [
+      {
+        key: 'error',
+        label: '수정 필요',
+        count: errorCount,
+        rowIdx: firstErrorRow >= 0 ? rows.findIndex((row) => row.tempId === meaningfulRows[firstErrorRow]?.tempId) : -1,
+        variant: 'destructive' as const,
+        description: '저장 전 반드시 확인해야 하는 오류 행',
+      },
+      {
+        key: 'missing',
+        label: '미입력',
+        count: missingCount,
+        rowIdx: firstMissingRow >= 0 ? rows.findIndex((row) => row.tempId === meaningfulRows[firstMissingRow]?.tempId) : -1,
+        variant: 'secondary' as const,
+        description: '빈 셀이 남아 있어 검토가 필요한 행',
+      },
+      {
+        key: 'manual',
+        label: '수동 수정',
+        count: manuallyEditedRowCount,
+        rowIdx: firstManualRow >= 0 ? rows.findIndex((row) => row.tempId === meaningfulRows[firstManualRow]?.tempId) : -1,
+        variant: 'outline' as const,
+        description: '원본/계산값에서 사용자가 직접 바꾼 행',
+      },
+    ];
+  }, [errorCount, manuallyEditedRowCount, meaningfulRows, missingCount, noIdx, rows]);
 
   useEffect(() => {
     selectionRef.current = selection;
@@ -1630,15 +1666,16 @@ export function ImportEditor({
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Scrollable table */}
-      <div
-        className={inline ? 'overflow-auto max-h-[calc(100vh-260px)]' : 'flex-1 overflow-auto'}
-        onPaste={handleTablePaste}
-        onKeyDownCapture={handleTableKeyDown}
-        tabIndex={0}
-        ref={tableWrapRef}
-      >
-        <table className="w-full text-[11px] border-collapse table-fixed">
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-start">
+        {/* Scrollable table */}
+        <div
+          className={`min-w-0 flex-1 ${inline ? 'overflow-auto max-h-[calc(100vh-260px)]' : 'flex-1 overflow-auto'}`}
+          onPaste={handleTablePaste}
+          onKeyDownCapture={handleTableKeyDown}
+          tabIndex={0}
+          ref={tableWrapRef}
+        >
+          <table className="w-full text-[11px] border-collapse table-fixed">
           <colgroup>
             <col style={{ width: 96 }} />
             {SETTLEMENT_COLUMNS.map((_, i) => (
@@ -1795,7 +1832,47 @@ export function ImportEditor({
               </tr>
             )}
           </tbody>
-        </table>
+          </table>
+        </div>
+        <aside className="w-full shrink-0 xl:sticky xl:top-[164px] xl:w-[280px]">
+          <div className="rounded-xl border bg-background p-4 shadow-sm">
+            <div className="space-y-1">
+              <h4 className="text-sm font-semibold">검토 패널</h4>
+              <p className="text-[11px] text-muted-foreground">
+                지금 탭에서 바로 확인해야 할 항목과 최근 수동 수정 영역입니다.
+              </p>
+            </div>
+            <div className="mt-4 space-y-3">
+              {reviewPanelItems.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  className="w-full rounded-lg border px-3 py-3 text-left transition-colors hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={item.count === 0 || item.rowIdx < 0}
+                  onClick={() => {
+                    focusCellAt(item.rowIdx, getPreferredEditableCol());
+                  }}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <Badge variant={item.variant} className="text-[10px]">
+                      {item.label}
+                    </Badge>
+                    <span className="text-sm font-semibold">{item.count}건</span>
+                  </div>
+                  <p className="mt-2 text-[11px] text-muted-foreground">{item.description}</p>
+                </button>
+              ))}
+            </div>
+            <div className="mt-4 rounded-lg border bg-slate-50/70 px-3 py-3 text-[11px] text-muted-foreground">
+              <div className="font-medium text-foreground">값 출처 안내</div>
+              <div className="mt-2 space-y-1">
+                <div>원본: 통장내역 또는 기존 저장값에서 온 셀</div>
+                <div>수정: 사용자가 직접 덮어쓴 셀</div>
+                <div>계산: 정책에 따라 자동 계산되고 잠긴 셀</div>
+              </div>
+            </div>
+          </div>
+        </aside>
       </div>
       <input
         ref={evidenceFileInputRef}
