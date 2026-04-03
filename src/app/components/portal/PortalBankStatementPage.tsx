@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { Upload, Save, Plus, Loader2, ArrowRight, ShieldAlert, Trash2 } from 'lucide-react';
+import { Upload, Save, Plus, Loader2, ArrowRight, ShieldAlert, Trash2, CheckCircle2, FileSpreadsheet } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
@@ -49,14 +49,14 @@ export function PortalBankStatementPage() {
   const [saving, setSaving] = useState(false);
   const [lastUploadedName, setLastUploadedName] = useState('');
   const [lastSavedAt, setLastSavedAt] = useState('');
+  const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const projectName = myProject?.name || '내 사업';
   const ready = useMemo(() => Boolean(portalUser?.projectId), [portalUser?.projectId]);
-  const role = String(portalUser?.role || 'pm').toLowerCase();
-  const isFinanceView = role === 'admin' || role === 'tenant_admin' || role === 'finance' || role === 'auditor';
   const bankProfile = useMemo(() => detectBankStatementProfile(columns, lastUploadedName), [columns, lastUploadedName]);
   const amountColIdxs = useMemo(() => getAmountColumnIndexes(columns), [columns]);
+  const hasUploadedSheet = rows.length > 0 && columns.length > 0;
 
   const formatAmount = useCallback((value: string) => {
     const trimmed = value.trim();
@@ -150,6 +150,17 @@ export function PortalBankStatementPage() {
       toast.error('파일을 읽지 못했습니다. `.xls`/`.xlsx`/`.csv` 파일인지 확인해 주세요.');
     }
   }, [parseExcelToMatrix, formatAmount]);
+
+  const openFilePicker = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  const handleDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setDragActive(false);
+    const file = event.dataTransfer.files?.[0];
+    if (file) void handleFileUpload(file);
+  }, [handleFileUpload]);
 
   const addRow = useCallback(() => {
     if (columns.length === 0) {
@@ -248,9 +259,26 @@ export function PortalBankStatementPage() {
     return () => window.clearTimeout(timer);
   }, [dirty, saving, saveBankStatementRows, columns.length, persistSheet]);
 
-  const roleNotice = isFinanceView
-    ? '재경/관리자 권한 기준 화면입니다. 업로드 원문 검토와 수정본 저장에 집중합니다.'
-    : 'PM 기준 화면입니다. 저장하면 통장내역이 주간 사업비 시트에 자동 반영됩니다.';
+  const roleNotice = 'PM 기준 화면입니다. 저장하면 통장내역이 주간 사업비 시트에 자동 반영됩니다.';
+  const syncNotice = dirty
+    ? '변경사항이 저장 전 상태입니다. 저장하면 현재 주간 사업비 탭으로 반영됩니다.'
+    : lastSavedAt
+      ? '최근 저장본이 현재 주간 사업비 탭과 동기화된 상태입니다.'
+      : '이번 주 원본 파일을 먼저 올리면 주간 사업비 입력의 시작점이 준비됩니다.';
+  const helperSteps = [
+    {
+      title: '1. 원본 업로드',
+      description: '은행/카드 엑셀 또는 CSV를 올려 이번 주 원본을 불러옵니다.',
+    },
+    {
+      title: '2. 필요한 행만 보정',
+      description: '행 추가, 환수 행, 선사용금, 특이건만 보조로 정리합니다.',
+    },
+    {
+      title: '3. 주간 사업비로 반영',
+      description: '저장 후 현재 탭의 사업비 입력(주간)에서 바로 이어서 작업합니다.',
+    },
+  ];
 
   if (!ready) {
     return (
@@ -263,23 +291,28 @@ export function PortalBankStatementPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div>
-          <h1 className="text-[18px]" style={{ fontWeight: 700 }}>통장내역</h1>
+        <div className="space-y-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h1 className="text-[18px]" style={{ fontWeight: 700 }}>통장내역</h1>
+            <Badge variant={hasUploadedSheet ? 'secondary' : 'outline'} className="text-[10px]">
+              {hasUploadedSheet ? `${rows.length}건 불러옴` : '업로드 전'}
+            </Badge>
+            <Badge variant={dirty ? 'destructive' : 'secondary'} className="text-[10px]">
+              {dirty ? '변경됨' : '저장됨'}
+            </Badge>
+            <Badge variant="outline" className="text-[10px]">
+              {getBankStatementProfileLabel(bankProfile)}
+            </Badge>
+          </div>
           <p className="text-[12px] text-muted-foreground">{projectName} · 카드/통장 내역 업로드</p>
         </div>
-        <div className="flex items-center gap-2">
-          <Badge variant={dirty ? 'destructive' : 'secondary'} className="text-[10px]">
-            {dirty ? '변경됨' : '저장됨'}
-          </Badge>
-          <Badge variant="outline" className="text-[10px]">
-            {getBankStatementProfileLabel(bankProfile)}
-          </Badge>
+        <div className="flex items-center justify-end gap-2 flex-wrap">
           <Button variant="outline" size="sm" onClick={() => navigate('/portal/weekly-expenses')}>
             사업비 입력(주간)
             <ArrowRight className="h-4 w-4 ml-1" />
           </Button>
-          <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
-            <Upload className="h-4 w-4 mr-1" /> 엑셀 업로드
+          <Button size="sm" onClick={openFilePicker}>
+            <Upload className="h-4 w-4 mr-1" /> {hasUploadedSheet ? '파일 다시 업로드' : '엑셀 업로드'}
           </Button>
           <input
             ref={fileInputRef}
@@ -292,24 +325,90 @@ export function PortalBankStatementPage() {
               e.currentTarget.value = '';
             }}
           />
-          <Button variant="outline" size="sm" onClick={addRow}>
+          <Button variant="outline" size="sm" onClick={addRow} disabled={!hasUploadedSheet}>
             <Plus className="h-4 w-4 mr-1" /> 행 추가
           </Button>
-          <Button variant="outline" size="sm" onClick={() => addSpecialTemplateRow('corp-card-refund')}>
+          <Button variant="outline" size="sm" onClick={() => addSpecialTemplateRow('corp-card-refund')} disabled={!hasUploadedSheet}>
             환수 행
           </Button>
-          <Button variant="outline" size="sm" onClick={() => addSpecialTemplateRow('prepaid-in')}>
+          <Button variant="outline" size="sm" onClick={() => addSpecialTemplateRow('prepaid-in')} disabled={!hasUploadedSheet}>
             선사용금
           </Button>
-          <Button variant="outline" size="sm" onClick={() => addSpecialTemplateRow('special-case')}>
+          <Button variant="outline" size="sm" onClick={() => addSpecialTemplateRow('special-case')} disabled={!hasUploadedSheet}>
             특이건
           </Button>
-          <Button size="sm" onClick={handleSave} disabled={saving}>
+          <Button variant="outline" size="sm" onClick={handleSave} disabled={saving || !hasUploadedSheet}>
             {saving ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Save className="h-4 w-4 mr-1" />}
             저장
           </Button>
         </div>
       </div>
+
+      {!hasUploadedSheet && (
+        <Card className="border-teal-200/80 bg-gradient-to-br from-teal-50/90 via-white to-emerald-50/60">
+          <CardContent className="p-5">
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(280px,0.65fr)]">
+              <div
+                className={`rounded-2xl border-2 border-dashed p-6 transition-colors ${
+                  dragActive ? 'border-teal-500 bg-teal-50' : 'border-teal-200/80 bg-white/80'
+                }`}
+                onDragEnter={(event) => {
+                  event.preventDefault();
+                  setDragActive(true);
+                }}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  setDragActive(true);
+                }}
+                onDragLeave={(event) => {
+                  event.preventDefault();
+                  setDragActive(false);
+                }}
+                onDrop={handleDrop}
+              >
+                <div className="flex h-full flex-col justify-between gap-5">
+                  <div className="space-y-3">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-teal-600 text-white shadow-sm">
+                      <FileSpreadsheet className="h-5 w-5" />
+                    </div>
+                    <div className="space-y-2">
+                      <p className="text-[18px] font-semibold text-slate-900">이번 주 통장내역부터 올리세요</p>
+                      <p className="max-w-2xl text-[13px] leading-6 text-slate-600">
+                        원본 파일을 올리면 표는 그대로 유지한 채 이 화면에서 검토하고, 저장 후 바로 사업비 입력(주간)으로 이어서 정리할 수 있습니다.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Button size="sm" onClick={openFilePicker}>
+                      <Upload className="mr-1 h-4 w-4" />
+                      파일 선택
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => navigate('/portal/weekly-expenses')}>
+                      사업비 입력(주간) 먼저 보기
+                      <ArrowRight className="ml-1 h-4 w-4" />
+                    </Button>
+                    <span className="text-[11px] text-muted-foreground">지원 형식: `.csv`, `.xls`, `.xlsx`</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid gap-3">
+                {helperSteps.map((step) => (
+                  <div key={step.title} className="rounded-2xl border border-white/80 bg-white/80 px-4 py-3 shadow-sm">
+                    <div className="flex items-start gap-3">
+                      <CheckCircle2 className="mt-0.5 h-4 w-4 text-teal-600" />
+                      <div className="space-y-1">
+                        <p className="text-[12px] font-semibold text-slate-900">{step.title}</p>
+                        <p className="text-[11px] leading-5 text-slate-600">{step.description}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card className="border-amber-200/70 bg-amber-50/60">
         <CardContent className="px-4 py-3">
@@ -322,73 +421,79 @@ export function PortalBankStatementPage() {
                 현재 프로필: {getBankStatementProfileLabel(bankProfile)}
                 {lastUploadedName ? ` · 최근 파일: ${lastUploadedName}` : ''}
               </p>
-              <p>저장 시 통장금액·잔액·상세 적요가 현재 주간 사업비 탭으로 동기화됩니다.</p>
+              <p>{syncNotice}</p>
               {lastSavedAt && <p className="text-[11px] text-amber-800/80">마지막 자동저장: {lastSavedAt.slice(0, 16).replace('T', ' ')}</p>}
             </div>
           </div>
         </CardContent>
       </Card>
 
-      <Card>
-        <CardContent className="p-0">
-          <div className="overflow-auto max-h-[70vh]">
-            <table className="w-full text-[11px] border-collapse">
-              <thead className="sticky top-0 z-10 bg-muted/60">
-                <tr>
-                  <th className="px-2 py-1 text-left border-b border-r font-medium whitespace-nowrap w-12">
-                    행
-                  </th>
-                  {columns.map((col, idx) => (
-                    <th key={idx} className="px-2 py-1 text-left border-b border-r font-medium whitespace-nowrap">
-                      {col}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {rows.length === 0 && (
+      {hasUploadedSheet ? (
+        <Card>
+          <CardContent className="p-0">
+            <div className="overflow-auto max-h-[70vh]">
+              <table className="w-full text-[11px] border-collapse">
+                <thead className="sticky top-0 z-10 bg-muted/60">
                   <tr>
-                    <td colSpan={Math.max(1, columns.length + 1)} className="text-center text-[12px] text-muted-foreground py-10">
-                      엑셀 파일을 업로드하세요.
-                    </td>
-                  </tr>
-                )}
-                {rows.map((row, rowIdx) => (
-                  <tr key={row.tempId || rowIdx} className="border-t border-border/30">
-                    <td className="px-1.5 py-1 border-r border-border/30">
-                      <div className="flex items-center justify-between gap-1">
-                        <span className="text-[10px] text-muted-foreground">{rowIdx + 1}</span>
-                        <button
-                          type="button"
-                          className="inline-flex h-6 w-6 items-center justify-center rounded border text-muted-foreground hover:bg-muted"
-                          onClick={() => removeRow(rowIdx)}
-                          title="행 삭제"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    </td>
-                    {columns.map((_, colIdx) => (
-                      <td
-                        key={colIdx}
-                        className="px-1.5 py-1 border-r border-border/30 focus-within:bg-teal-50/20 focus-within:shadow-[inset_0_0_0_2px_rgba(20,184,166,0.8)]"
-                      >
-                        <input
-                          type="text"
-                          value={row.cells[colIdx] || ''}
-                          className="w-full bg-transparent outline-none text-[11px]"
-                          onChange={(e) => updateCell(rowIdx, colIdx, e.target.value)}
-                          onBlur={(e) => handleCellBlur(rowIdx, colIdx, e.target.value)}
-                        />
-                      </td>
+                    <th className="px-2 py-1 text-left border-b border-r font-medium whitespace-nowrap w-12">
+                      행
+                    </th>
+                    {columns.map((col, idx) => (
+                      <th key={idx} className="px-2 py-1 text-left border-b border-r font-medium whitespace-nowrap">
+                        {col}
+                      </th>
                     ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </CardContent>
-      </Card>
+                </thead>
+                <tbody>
+                  {rows.map((row, rowIdx) => (
+                    <tr key={row.tempId || rowIdx} className="border-t border-border/30">
+                      <td className="px-1.5 py-1 border-r border-border/30">
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-[10px] text-muted-foreground">{rowIdx + 1}</span>
+                          <button
+                            type="button"
+                            className="inline-flex h-6 w-6 items-center justify-center rounded border text-muted-foreground hover:bg-muted"
+                            onClick={() => removeRow(rowIdx)}
+                            title="행 삭제"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                      {columns.map((_, colIdx) => (
+                        <td
+                          key={colIdx}
+                          className="px-1.5 py-1 border-r border-border/30 focus-within:bg-teal-50/20 focus-within:shadow-[inset_0_0_0_2px_rgba(20,184,166,0.8)]"
+                        >
+                          <input
+                            type="text"
+                            value={row.cells[colIdx] || ''}
+                            className="w-full bg-transparent outline-none text-[11px]"
+                            onChange={(e) => updateCell(rowIdx, colIdx, e.target.value)}
+                            onBlur={(e) => handleCellBlur(rowIdx, colIdx, e.target.value)}
+                          />
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card className="border-dashed">
+          <CardContent className="flex min-h-[240px] items-center justify-center p-6">
+            <div className="max-w-md text-center">
+              <p className="text-[13px] font-medium text-slate-800">업로드 후 표가 여기에 그대로 표시됩니다.</p>
+              <p className="mt-2 text-[12px] leading-6 text-muted-foreground">
+                헤더와 값은 원본 구조를 유지하고, 이 화면에서는 검토와 보조 입력만 이어서 진행합니다.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
