@@ -47,16 +47,18 @@ export function clearSelectionCells(
     if (rowIdx < normalized.r1 || rowIdx > normalized.r2) return row;
     let rowChanged = false;
     const cells = [...row.cells];
+    const userEditedCells = new Set(row.userEditedCells || []);
     for (let colIdx = normalized.c1; colIdx <= normalized.c2; colIdx += 1) {
       if (protectedColumns.has(colIdx)) continue;
       if (colIdx >= cells.length) continue;
       if (cells[colIdx] === '') continue;
       cells[colIdx] = '';
+      userEditedCells.add(colIdx);
       rowChanged = true;
     }
     if (!rowChanged) return row;
     changed = true;
-    return { ...row, cells };
+    return { ...row, cells, userEditedCells };
   });
   return changed ? next : rows;
 }
@@ -82,15 +84,17 @@ export function clearAllEditableCells(
   const next = rows.map((row) => {
     let rowChanged = false;
     const cells = [...row.cells];
+    const userEditedCells = new Set(row.userEditedCells || []);
     for (let colIdx = 0; colIdx < cells.length; colIdx += 1) {
       if (protectedColumns.has(colIdx)) continue;
       if (cells[colIdx] === '') continue;
       cells[colIdx] = '';
+      userEditedCells.add(colIdx);
       rowChanged = true;
     }
     if (!rowChanged) return row;
     changed = true;
-    return { ...row, cells };
+    return { ...row, cells, userEditedCells };
   });
   return changed ? next : rows;
 }

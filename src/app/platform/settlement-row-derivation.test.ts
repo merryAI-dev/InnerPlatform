@@ -103,6 +103,22 @@ describe('settlement-row-derivation', () => {
     expect(next[0]?.cells[9]).toBe('-110,000');
   });
 
+  it('keeps a cleared expense amount empty when the user explicitly cleared it', () => {
+    const rowCells = createCells();
+    rowCells[10] = '110,000';
+    rowCells[15] = 'CMK 임팩트프러너';
+    const row: ImportRow = {
+      tempId: 'manual-clear-row',
+      cells: rowCells,
+      userEditedCells: new Set([13]),
+    };
+
+    const next = deriveSettlementRows([row], context, { mode: 'cascade', rowIdx: 0 });
+
+    expect(next[0]?.cells[13]).toBe('');
+    expect(next[0]?.cells[10]).toBe('110,000');
+  });
+
   it('derives adjustment rows from the entered balance anchor', () => {
     const firstCells = createCells();
     firstCells[11] = '100,000';

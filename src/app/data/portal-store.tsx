@@ -85,15 +85,44 @@ function normalizePortalRole(value: unknown): string {
 function normalizeExpenseSheetRows(rows: unknown): ImportRow[] | null {
   if (!Array.isArray(rows)) return null;
   return rows.map((row, index) => {
-    const candidate = row && typeof row === 'object' ? row as Partial<ImportRow> : {};
+    const candidate = row && typeof row === 'object' ? row as Partial<ImportRow> & {
+      userEditedCellIndexes?: unknown;
+      userEditedCells?: unknown;
+    } : {};
+    const rawUserEdited = Array.isArray(candidate.userEditedCellIndexes)
+      ? candidate.userEditedCellIndexes
+      : Array.isArray(candidate.userEditedCells)
+        ? candidate.userEditedCells
+        : candidate.userEditedCells instanceof Set
+          ? Array.from(candidate.userEditedCells)
+          : [];
+    const userEditedCells = new Set(
+      rawUserEdited
+        .map((value) => (typeof value === 'number' ? value : Number.parseInt(String(value), 10)))
+        .filter((value) => Number.isInteger(value) && value >= 0),
+    );
     return {
       tempId: candidate.tempId || `imp-${Date.now()}-${index}`,
       ...(candidate.sourceTxId ? { sourceTxId: candidate.sourceTxId } : {}),
       ...(candidate.entryKind ? { entryKind: candidate.entryKind } : {}),
       cells: Array.isArray(candidate.cells) ? candidate.cells.map((cell) => String(cell ?? '')) : [],
       ...(candidate.error ? { error: String(candidate.error) } : {}),
+      ...(userEditedCells.size > 0 ? { userEditedCells } : {}),
     } satisfies ImportRow;
   });
+}
+
+function serializeExpenseSheetRow(row: ImportRow) {
+  return {
+    tempId: row.tempId || `imp-${Date.now()}`,
+    ...(row.sourceTxId ? { sourceTxId: row.sourceTxId } : {}),
+    ...(row.entryKind ? { entryKind: row.entryKind } : {}),
+    cells: Array.isArray(row.cells) ? row.cells.map((c) => (c ?? '')) : [],
+    ...(row.error ? { error: row.error } : {}),
+    ...(row.userEditedCells && row.userEditedCells.size > 0
+      ? { userEditedCellIndexes: Array.from(row.userEditedCells).sort((a, b) => a - b) }
+      : {}),
+  };
 }
 
 export interface ExpenseSheetTab {
@@ -1224,12 +1253,13 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       policy: normalizeSettlementSheetPolicy(myProject?.settlementSheetPolicy, myProject?.fundInputMode),
     });
     const sanitizedRows = preparedRows.map((row) => ({
-      tempId: row.tempId || `imp-${Date.now()}`,
-      ...(row.sourceTxId ? { sourceTxId: row.sourceTxId } : {}),
-      ...(row.entryKind ? { entryKind: row.entryKind } : {}),
+      ...row,
       cells: Array.isArray(row.cells) ? row.cells.map((c) => (c ?? '')) : [],
-      ...(row.error ? { error: row.error } : {}),
+      ...(row.userEditedCells && row.userEditedCells.size > 0
+        ? { userEditedCells: new Set(row.userEditedCells) }
+        : {}),
     }));
+    const persistedRows = sanitizedRows.map(serializeExpenseSheetRow);
     if (isDevHarnessUser || !db || !portalUser?.projectId) {
       setExpenseSheetRows(sanitizedRows as ImportRow[]);
       setExpenseSheets((prev) => {
@@ -1257,7 +1287,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       projectId: portalUser.projectId,
       name: activeSheetName,
       order: activeSheet?.order || (activeSheetId === 'default' ? 0 : expenseSheets.length + 1),
-      rows: sanitizedRows,
+      rows: persistedRows,
       createdAt: activeSheet?.createdAt || now,
       updatedAt: now,
       updatedBy: portalUser.name || authUser?.name || '',
@@ -1404,12 +1434,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
             expenseSheetRef,
             withTenantScope(orgId, {
               projectId: portalUser.projectId,
-              rows: nextRows.map((row) => ({
-                tempId: row.tempId || `imp-${Date.now()}`,
-                ...(row.sourceTxId ? { sourceTxId: row.sourceTxId } : {}),
-                ...(row.entryKind ? { entryKind: row.entryKind } : {}),
-                cells: Array.isArray(row.cells) ? row.cells.map((c) => (c ?? '')) : [],
-              })),
+              rows: nextRows.map(serializeExpenseSheetRow),
               updatedAt: now,
               updatedBy,
             }),
@@ -1710,7 +1735,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       projectId: portalUser.projectId,
       name: sanitizeExpenseSheetName(activeSheet?.name, activeSheetId === 'default' ? '기본 탭' : '새 탭'),
       order: activeSheet?.order || (activeSheetId === 'default' ? 0 : expenseSheets.length + 1),
-      rows: nextExpenseRows,
+      rows: nextExpenseRows.map(serializeExpenseSheetRow),
       createdAt: activeSheet?.createdAt || now,
       updatedAt: now,
       updatedBy: portalUser.name || authUser?.name || '',

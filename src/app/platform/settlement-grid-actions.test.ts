@@ -27,6 +27,8 @@ describe('settlement-grid-actions', () => {
     expect(next).not.toBe(rows);
     expect(next[0]?.cells).toEqual(['1', '', '', 'Drive', '']);
     expect(next[1]?.cells).toEqual(['2', '', '', 'Drive2', '']);
+    expect(Array.from(next[0]?.userEditedCells || [])).toEqual([1, 2, 4]);
+    expect(Array.from(next[1]?.userEditedCells || [])).toEqual([1, 2, 4]);
   });
 
   it('preserves references when nothing can be cleared', () => {
@@ -66,5 +68,7 @@ describe('settlement-grid-actions', () => {
 
     expect(next[0]?.cells).toEqual(['1', '', '', 'Drive']);
     expect(next[1]?.cells).toEqual(['2', '', '', 'Drive2']);
+    expect(Array.from(next[0]?.userEditedCells || [])).toEqual([1, 2]);
+    expect(Array.from(next[1]?.userEditedCells || [])).toEqual([1]);
   });
 });
