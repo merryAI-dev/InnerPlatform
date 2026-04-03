@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   resolveProjectTeamMemberLookupKeys,
+  tryEnsureProjectRootFolder,
   tryRenameManagedProjectRootFolder,
 } from './projects.mjs';
 
@@ -39,6 +40,32 @@ describe('project route helpers', () => {
       projectId: 'p001',
       projectName: 'Updated Name',
       existingFolderId: 'folder-001',
+    });
+    expect(logger.error).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not fail project save flow when managed Drive root provision throws', async () => {
+    const logger = { error: vi.fn() };
+    const driveService = {
+      ensureProjectRootFolder: vi.fn(async () => {
+        throw new Error('drive unavailable');
+      }),
+    };
+
+    await expect(tryEnsureProjectRootFolder({
+      driveService,
+      tenantId: 'mysc',
+      projectId: 'p001',
+      projectName: 'Created Project',
+      existingFolderId: '',
+      logger,
+    })).resolves.toBeNull();
+
+    expect(driveService.ensureProjectRootFolder).toHaveBeenCalledWith({
+      tenantId: 'mysc',
+      projectId: 'p001',
+      projectName: 'Created Project',
+      existingFolderId: '',
     });
     expect(logger.error).toHaveBeenCalledTimes(1);
   });

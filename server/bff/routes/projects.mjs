@@ -212,6 +212,34 @@ export async function tryRenameManagedProjectRootFolder({
   }
 }
 
+export async function tryEnsureProjectRootFolder({
+  driveService,
+  tenantId,
+  projectId,
+  projectName,
+  existingFolderId,
+  logger = console,
+}) {
+  if (
+    !driveService
+    || typeof driveService.ensureProjectRootFolder !== 'function'
+  ) {
+    return null;
+  }
+
+  try {
+    return await driveService.ensureProjectRootFolder({
+      tenantId,
+      projectId,
+      projectName,
+      existingFolderId,
+    });
+  } catch (error) {
+    logger.error('[BFF] managed project root provision skipped:', error);
+    return null;
+  }
+}
+
 function resolveParticipationSettlementSystem(project) {
   if (project?.settlementType === 'TYPE5' || project?.accountType === 'DEDICATED') {
     return 'E_NARA_DOUM';
@@ -385,23 +413,20 @@ export function mountProjectRoutes(app, {
     );
 
     if (shouldProvisionProjectDriveRoot) {
-      let folder;
-      try {
-        folder = await driveService.ensureProjectRootFolder({
-          tenantId,
-          projectId: projectPayload.id,
-          projectName: projectPayload.name || projectPayload.id,
-          existingFolderId: projectPayload.evidenceDriveRootFolderId,
-        });
-      } catch (error) {
-        if (error instanceof DriveServiceError) throw createHttpError(error.statusCode, error.message, error.code);
-        throw error;
+      const folder = await tryEnsureProjectRootFolder({
+        driveService,
+        tenantId,
+        projectId: projectPayload.id,
+        projectName: projectPayload.name || projectPayload.id,
+        existingFolderId: projectPayload.evidenceDriveRootFolderId,
+      });
+      if (folder) {
+        projectPayload.evidenceDriveSharedDriveId = folder.driveId || projectPayload.evidenceDriveSharedDriveId || undefined;
+        projectPayload.evidenceDriveRootFolderId = folder.id;
+        projectPayload.evidenceDriveRootFolderName = folder.name;
+        projectPayload.evidenceDriveRootFolderLink = folder.webViewLink || projectPayload.evidenceDriveRootFolderLink || undefined;
+        projectPayload.evidenceDriveProvisionedAt = timestamp;
       }
-      projectPayload.evidenceDriveSharedDriveId = folder.driveId || projectPayload.evidenceDriveSharedDriveId || undefined;
-      projectPayload.evidenceDriveRootFolderId = folder.id;
-      projectPayload.evidenceDriveRootFolderName = folder.name;
-      projectPayload.evidenceDriveRootFolderLink = folder.webViewLink || projectPayload.evidenceDriveRootFolderLink || undefined;
-      projectPayload.evidenceDriveProvisionedAt = timestamp;
     }
 
     const outboxEvent = createOutboxEvent({
