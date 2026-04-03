@@ -60,6 +60,15 @@ export const projectDriveRootLinkSchema = z.object({
   value: NON_EMPTY_STRING,
 }).strict();
 
+export const projectTrashSchema = z.object({
+  expectedVersion: z.number().int().positive(),
+  reason: z.string().trim().max(500).optional(),
+}).strict();
+
+export const projectRestoreSchema = z.object({
+  expectedVersion: z.number().int().positive(),
+}).strict();
+
 export const googleSheetImportPreviewSchema = z.object({
   value: NON_EMPTY_STRING,
   sheetName: NON_EMPTY_STRING.optional(),
