@@ -244,7 +244,13 @@ export function mountProjectRoutes(app, {
       timestamp,
     });
 
-    if (result.created && projectRegistrationSlackService?.enabled && typeof projectRegistrationSlackService.notifyMessage === 'function') {
+    const registrationSource = readOptionalText(result.data.registrationSource);
+    if (
+      result.created
+      && registrationSource === 'pm_portal'
+      && projectRegistrationSlackService?.enabled
+      && typeof projectRegistrationSlackService.notifyMessage === 'function'
+    ) {
       try {
         await projectRegistrationSlackService.notifyMessage(buildProjectCreatedSlackPayload(result.data, {
           tenantId,

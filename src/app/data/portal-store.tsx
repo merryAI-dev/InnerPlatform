@@ -1527,6 +1527,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       id: projectId,
       slug,
       orgId,
+      registrationSource: 'pm_portal',
       name: payload.name,
       officialContractName: payload.officialContractName,
       status: 'CONTRACT_PENDING',

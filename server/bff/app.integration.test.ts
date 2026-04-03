@@ -194,7 +194,7 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     });
   });
 
-  it('delivers project registration Slack notifications when a project is newly created via project upsert', async () => {
+  it('delivers project registration Slack notifications only for PM portal-created projects', async () => {
     const projectRegistrationSlackService = {
       enabled: true,
       notifyMessage: vi.fn(async () => {}),
@@ -206,12 +206,12 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       projectRegistrationSlackService,
     }));
 
-    const created = await projectsApi
+    const adminCreated = await projectsApi
       .post('/api/v1/projects')
       .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-create-slack-001' })
       .send({
-        id: 'p-slack-create-001',
-        name: 'Slack Create Project',
+        id: 'p-slack-create-admin-001',
+        name: 'Admin Create Project',
         type: 'I1',
         department: '투자센터',
         managerName: '보람',
@@ -219,21 +219,39 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
         financialInputFlags: { contractAmount: false },
       });
 
-    expect(created.status).toBe(201);
+    expect(adminCreated.status).toBe(201);
+    expect(projectRegistrationSlackService.notifyMessage).toHaveBeenCalledTimes(0);
+
+    const pmCreated = await projectsApi
+      .post('/api/v1/projects')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-create-slack-002' })
+      .send({
+        id: 'p-slack-create-pm-001',
+        name: 'PM Portal Create Project',
+        type: 'I1',
+        department: '투자센터',
+        managerName: '보람',
+        contractAmount: 0,
+        financialInputFlags: { contractAmount: false },
+        registrationSource: 'pm_portal',
+      });
+
+    expect(pmCreated.status).toBe(201);
     expect(projectRegistrationSlackService.notifyMessage).toHaveBeenCalledTimes(1);
     expect(projectRegistrationSlackService.notifyMessage).toHaveBeenCalledWith(expect.objectContaining({
-      text: expect.stringContaining('Slack Create Project'),
+      text: expect.stringContaining('PM Portal Create Project'),
       blocks: expect.any(Array),
     }));
 
     const updated = await projectsApi
       .post('/api/v1/projects')
-      .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-create-slack-002' })
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-create-slack-003' })
       .send({
-        id: 'p-slack-create-001',
-        name: 'Slack Create Project Updated',
+        id: 'p-slack-create-pm-001',
+        name: 'PM Portal Create Project Updated',
         type: 'I1',
         expectedVersion: 1,
+        registrationSource: 'pm_portal',
       });
 
     expect(updated.status).toBe(200);
