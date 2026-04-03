@@ -1,12 +1,14 @@
 import { findWeekForDate, getYearMondayWeeks } from './cashflow-weeks';
 import { parseDate, parseNumber } from './csv-utils';
 import { importRowToTransaction, type ImportRow } from './settlement-csv';
+import type { SettlementSheetPolicy } from '../data/types';
 
 export type SettlementDerivationMode = 'row' | 'cascade' | 'full';
 
 export interface SettlementDerivationContext {
   projectId: string;
   defaultLedgerId: string;
+  policy?: SettlementSheetPolicy;
   dateIdx: number;
   weekIdx: number;
   depositIdx: number;
@@ -85,6 +87,7 @@ function deriveRowLocally(
 ): { row: ImportRow; nextRunningBalance: number } {
   let next = row;
   const userEdited = row.userEditedCells ?? new Set<number>();
+  const policy = context.policy;
 
   next = updateCells(next, (cells) => {
     if (context.weekIdx >= 0 && context.dateIdx >= 0) {
@@ -128,7 +131,12 @@ function deriveRowLocally(
       }
     }
 
-    if (context.bankAmountIdx >= 0 && context.expenseIdx >= 0 && context.vatInIdx >= 0) {
+    if (
+      (policy?.autoComputeExpenseFromBank ?? true)
+      && context.bankAmountIdx >= 0
+      && context.expenseIdx >= 0
+      && context.vatInIdx >= 0
+    ) {
       const bankAmount = parseNumber(cells[context.bankAmountIdx]) ?? 0;
       const expense = parseNumber(cells[context.expenseIdx]) ?? 0;
       const vat = parseNumber(cells[context.vatInIdx]) ?? 0;
@@ -149,6 +157,8 @@ function deriveRowLocally(
     }
 
     if (
+      (policy?.autoComputeBankFromExpense ?? true)
+      &&
       context.depositIdx >= 0
       && context.refundIdx >= 0
       && context.expenseIdx >= 0
@@ -168,7 +178,7 @@ function deriveRowLocally(
   });
 
   let nextRunningBalance = runningBalance;
-  if (includeBalance && context.balanceIdx >= 0) {
+  if (includeBalance && context.balanceIdx >= 0 && (policy?.autoComputeBalance ?? true)) {
     next = updateCells(next, (cells) => {
       const existingBalanceRaw = String(cells[context.balanceIdx] || '').trim();
       const hasExistingBalance = existingBalanceRaw !== '';
@@ -186,6 +196,15 @@ function deriveRowLocally(
       }
 
       if (depositSum !== 0 || expenseSum !== 0) {
+        if (
+          (policy?.preset === 'DIRECT_ENTRY' || policy?.preset === 'BALANCE_TRACKING')
+          && runningBalance === 0
+          && depositSum === 0
+          && expenseSum > 0
+        ) {
+          nextRunningBalance = runningBalance;
+          return;
+        }
         nextRunningBalance += depositSum - expenseSum;
         cells[context.balanceIdx] = Number.isFinite(nextRunningBalance)
           ? nextRunningBalance.toLocaleString('ko-KR')
@@ -202,7 +221,7 @@ function deriveRowLocally(
     }
   });
 
-  const result = importRowToTransaction(next, context.projectId, context.defaultLedgerId, rowIdx);
+  const result = importRowToTransaction(next, context.projectId, context.defaultLedgerId, rowIdx, { policy });
   if (next.error === result.error) {
     return { row: next, nextRunningBalance };
   }

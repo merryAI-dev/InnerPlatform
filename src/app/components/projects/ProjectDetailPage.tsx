@@ -5,7 +5,7 @@ import {
   ArrowLeft, Plus, BookOpen, Calendar, Building2,
   User, DollarSign, BarChart3, Landmark, FileText,
   Wallet, Users, TrendingUp, Edit, FolderKanban,
-  Play, Square, AlertTriangle,
+  Play, Square, AlertTriangle, RotateCcw, Trash2,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
@@ -32,6 +32,8 @@ import {
   SETTLEMENT_TYPE_SHORT, BASIS_LABELS, ACCOUNT_TYPE_LABELS,
   PROJECT_PHASE_LABELS,
   type ProjectStatus, type Basis, type SettlementType, type Ledger,
+  formatSettlementSheetPolicySummary,
+  normalizeSettlementSheetPolicy,
 } from '../../data/types';
 import { EmptyState } from '../ui/empty-state';
 import { Progress } from '../ui/progress';
@@ -76,7 +78,7 @@ export function ProjectDetailPage() {
   const navigate = useNavigate();
   const {
     getProjectById, getProjectLedgers, transactions, templates,
-    addLedger, updateProject,
+    addLedger, participationEntries, restoreProject, trashProject, updateProject,
   } = useAppStore();
 
   const project = getProjectById(projectId || '');
@@ -87,6 +89,7 @@ export function ProjectDetailPage() {
   const profitRate = toFiniteNumber(project?.profitRate);
   const profitAmount = toFiniteNumber(project?.profitAmount);
   const taxInvoiceAmount = toFiniteNumber(project?.taxInvoiceAmount);
+  const isTrashed = !!project?.trashedAt;
 
   const [showLedgerDialog, setShowLedgerDialog] = useState(false);
   const [ledgerForm, setLedgerForm] = useState({
@@ -122,6 +125,16 @@ export function ProjectDetailPage() {
   }, [projectLedgers, transactions]);
 
   const completeness = useMemo(() => computeProjectCompleteness(project || {}), [project]);
+  const projectParticipationEntries = useMemo(() => {
+    if (!project) return [];
+    return participationEntries
+      .filter((entry) => entry.projectId === project.id)
+      .sort((a, b) => String(a.memberName || '').localeCompare(String(b.memberName || ''), 'ko'));
+  }, [participationEntries, project]);
+  const settlementSheetPolicy = useMemo(
+    () => normalizeSettlementSheetPolicy(project?.settlementSheetPolicy, project?.fundInputMode),
+    [project?.fundInputMode, project?.settlementSheetPolicy],
+  );
 
   if (!project) {
     return (
@@ -167,6 +180,25 @@ export function ProjectDetailPage() {
     }
   };
 
+  const handleTrash = async () => {
+    try {
+      await trashProject(project.id, '어드민 휴지통 이동');
+      toast.success(`휴지통으로 이동됨: ${project.name}`);
+      navigate('/projects');
+    } catch (error) {
+      toast.error(resolveApiErrorMessage(error, '프로젝트 휴지통 이동에 실패했습니다.'));
+    }
+  };
+
+  const handleRestore = async () => {
+    try {
+      await restoreProject(project.id);
+      toast.success(`프로젝트 복구됨: ${project.name}`);
+    } catch (error) {
+      toast.error(resolveApiErrorMessage(error, '프로젝트 복구에 실패했습니다.'));
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -189,6 +221,9 @@ export function ProjectDetailPage() {
               <span className={`inline-flex rounded-full px-2 py-0.5 text-xs ${statusColor[project.status]}`}>
                 {PROJECT_STATUS_LABELS[project.status]}
               </span>
+              {isTrashed && (
+                <Badge variant="destructive">휴지통</Badge>
+              )}
               {project.phase === 'PROSPECT' && (
                 <span className="inline-flex rounded-full px-2 py-0.5 text-xs bg-amber-100 text-amber-800">
                   입찰/예정
@@ -208,11 +243,60 @@ export function ProjectDetailPage() {
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => navigate(`/projects/${project.id}/edit`)}>
-            <Edit className="w-3.5 h-3.5" />
-            수정
-          </Button>
-          {project.status === 'CONTRACT_PENDING' && (
+          {!isTrashed && (
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => navigate(`/projects/${project.id}/edit`)}>
+              <Edit className="w-3.5 h-3.5" />
+              수정
+            </Button>
+          )}
+          {isTrashed ? (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button size="sm" className="gap-1.5">
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  복구
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>프로젝트를 복구하시겠습니까?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    "{project.name}"을(를) 활성 프로젝트 목록으로 되돌립니다. 기존 원장과 거래 연결은 그대로 유지됩니다.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>취소</AlertDialogCancel>
+                  <AlertDialogAction onClick={() => void handleRestore()}>
+                    복구
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          ) : (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="destructive" size="sm" className="gap-1.5">
+                  <Trash2 className="w-3.5 h-3.5" />
+                  휴지통 이동
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>프로젝트를 휴지통으로 이동하시겠습니까?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    "{project.name}"은(는) 즉시 숨겨지지만 완전 삭제되지 않습니다. 휴지통 탭에서 언제든 복구할 수 있습니다.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>취소</AlertDialogCancel>
+                  <AlertDialogAction onClick={() => void handleTrash()}>
+                    휴지통 이동
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          )}
+          {!isTrashed && project.status === 'CONTRACT_PENDING' && (
             <AlertDialog>
               <AlertDialogTrigger asChild>
                 <Button size="sm" className="gap-1.5" style={{ background: 'linear-gradient(135deg, #4f46e5, #6366f1)' }}>
@@ -237,7 +321,7 @@ export function ProjectDetailPage() {
               </AlertDialogContent>
             </AlertDialog>
           )}
-          {project.status === 'IN_PROGRESS' && (
+          {!isTrashed && project.status === 'IN_PROGRESS' && (
             <AlertDialog>
               <AlertDialogTrigger asChild>
                 <Button variant="outline" size="sm" className="gap-1.5 text-amber-700 border-amber-300 hover:bg-amber-50">
@@ -269,6 +353,24 @@ export function ProjectDetailPage() {
         </div>
       </div>
 
+      {isTrashed && (
+        <Card className="border-destructive/30 bg-destructive/5">
+          <CardContent className="pt-3 pb-3">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-4 h-4 text-destructive mt-0.5 shrink-0" />
+              <div className="text-sm">
+                <p style={{ fontWeight: 600 }}>휴지통 보관 중인 프로젝트입니다.</p>
+                <p className="text-muted-foreground mt-1">
+                  삭제일: {project.trashedAt?.slice(0, 10) || '-'}
+                  {project.trashedByEmail ? ` · 삭제자: ${project.trashedByEmail}` : ''}
+                  {project.trashedReason ? ` · 사유: ${project.trashedReason}` : ''}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Project Info Grid */}
       <Card>
         <CardContent className="pt-3 pb-3">
@@ -279,7 +381,7 @@ export function ProjectDetailPage() {
                 {completeness.percent}% ({completeness.filled}/{completeness.total})
               </p>
             </div>
-            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => navigate(`/projects/${project.id}/edit`)}>
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => navigate(`/projects/${project.id}/edit`)} disabled={isTrashed}>
               <Edit className="w-3.5 h-3.5" />
               정보 보완
             </Button>
@@ -322,6 +424,14 @@ export function ProjectDetailPage() {
             <p className="text-xs text-muted-foreground mb-1">담당조직 / 팀</p>
             <p className="text-sm" style={{ fontWeight: 500 }}>{project.department}</p>
             <p className="text-xs text-muted-foreground">{project.teamName || '-'}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-3 pb-3">
+            <p className="text-xs text-muted-foreground mb-1">정산 시트 정책</p>
+            <p className="text-sm" style={{ fontWeight: 500 }}>
+              {formatSettlementSheetPolicySummary(settlementSheetPolicy)}
+            </p>
           </CardContent>
         </Card>
       </div>
@@ -450,6 +560,48 @@ export function ProjectDetailPage() {
         </Card>
       </div>
 
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">참여 인력 현황</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {projectParticipationEntries.length === 0 ? (
+            <div className="rounded-lg border border-dashed px-4 py-6 text-sm text-muted-foreground">
+              연동된 참여 인력이 없습니다. 프로젝트 팀 정보를 저장하면 이 영역과 PM 인력 현황이 같은 데이터를 보여줍니다.
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>이름</TableHead>
+                  <TableHead>참여율</TableHead>
+                  <TableHead>기간</TableHead>
+                  <TableHead>정산 체계</TableHead>
+                  <TableHead>연동 상태</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {projectParticipationEntries.map((entry) => (
+                  <TableRow key={entry.id}>
+                    <TableCell>{entry.memberName || '-'}</TableCell>
+                    <TableCell>{entry.rate ? `${entry.rate}%` : '-'}</TableCell>
+                    <TableCell>
+                      {[entry.periodStart, entry.periodEnd].filter(Boolean).join(' ~ ') || '-'}
+                    </TableCell>
+                    <TableCell>{entry.settlementSystem || '-'}</TableCell>
+                    <TableCell>
+                      <Badge variant={entry.source === 'PROJECT_TEAM_SYNC' ? 'secondary' : 'outline'}>
+                        {entry.source === 'PROJECT_TEAM_SYNC' ? '프로젝트 팀 연동' : '수동 입력'}
+                      </Badge>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Payment Plan */}
       {(project.paymentPlan.contract > 0 || project.paymentPlan.interim > 0 || project.paymentPlan.final > 0) && (
         <Card>
@@ -482,9 +634,11 @@ export function ProjectDetailPage() {
           <h2 className="flex items-center gap-2">
             <BookOpen className="w-5 h-5" /> 원장 목록
           </h2>
-          <Button onClick={() => setShowLedgerDialog(true)} className="gap-1.5">
-            <Plus className="w-4 h-4" /> 원장 생성
-          </Button>
+          {!isTrashed && (
+            <Button onClick={() => setShowLedgerDialog(true)} className="gap-1.5">
+              <Plus className="w-4 h-4" /> 원장 생성
+            </Button>
+          )}
         </div>
 
         {projectLedgers.length === 0 ? (
@@ -494,9 +648,9 @@ export function ProjectDetailPage() {
               title="아직 원장이 없습니다"
               description="템플릿에서 원장을 생성하여 거래 내역을 관리하세요."
               action={{
-                label: '원장 생성',
-                onClick: () => setShowLedgerDialog(true),
-                icon: Plus,
+                label: isTrashed ? '휴지통 보관 중' : '원장 생성',
+                onClick: () => { if (!isTrashed) setShowLedgerDialog(true); },
+                icon: isTrashed ? AlertTriangle : Plus,
               }}
               variant="compact"
             />

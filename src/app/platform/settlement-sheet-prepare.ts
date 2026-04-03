@@ -1,4 +1,5 @@
 import { SETTLEMENT_COLUMNS, type ImportRow } from './settlement-csv';
+import type { SettlementSheetPolicy } from '../data/types';
 import { buildBudgetLabelKey, normalizeBudgetLabel } from './budget-labels';
 import {
   deriveSettlementRows,
@@ -73,10 +74,12 @@ export function resolveEvidenceRequiredDesc(
 export function buildSettlementDerivationContext(
   projectId: string,
   defaultLedgerId: string,
+  policy?: SettlementSheetPolicy,
 ): SettlementDerivationContext {
   return {
     projectId,
     defaultLedgerId,
+    policy,
     dateIdx: getColumnIndex('거래일시'),
     weekIdx: getColumnIndex('해당 주차'),
     depositIdx: getColumnIndex('입금액(사업비,공급가액,은행이자)'),
@@ -97,6 +100,7 @@ export function prepareSettlementImportRows(
     projectId: string;
     defaultLedgerId: string;
     evidenceRequiredMap?: Record<string, string>;
+    policy?: SettlementSheetPolicy;
   },
 ): ImportRow[] {
   const nonEmptyRows = pruneEmptySettlementRows(rows);
@@ -136,7 +140,7 @@ export function prepareSettlementImportRows(
 
   return deriveSettlementRows(
     withEvidenceMap,
-    buildSettlementDerivationContext(options.projectId, options.defaultLedgerId),
+    buildSettlementDerivationContext(options.projectId, options.defaultLedgerId, options.policy),
     { mode: 'full' },
   );
 }

@@ -1,6 +1,9 @@
 import {
   ACCOUNT_TYPE_LABELS,
   BASIS_LABELS,
+  formatSettlementSheetPolicySummary,
+  getDefaultSettlementSheetPolicyForFundInputMode,
+  normalizeSettlementSheetPolicy,
   PROJECT_FUND_INPUT_MODE_LABELS,
   PROJECT_TYPE_LABELS,
   SETTLEMENT_TYPE_LABELS,
@@ -8,6 +11,7 @@ import {
   type Basis,
   type ProjectFundInputMode,
   type ProjectRequestContractAnalysis,
+  type SettlementSheetPolicy,
   type ProjectTeamMemberAssignment,
   type ProjectType,
   type SettlementType,
@@ -34,6 +38,7 @@ export interface ProjectProposalDraft {
   basis: Basis;
   accountType: AccountType;
   fundInputMode: ProjectFundInputMode;
+  settlementSheetPolicy?: SettlementSheetPolicy;
   paymentPlanDesc: string;
   settlementGuide: string;
   projectPurpose: string;
@@ -61,6 +66,10 @@ export function buildProjectProposalPost(
   const projectName = String(draft.name || '').trim() || '제목 미입력 사업';
   const officialContractName = String(draft.officialContractName || '').trim() || '-';
   const teamMembersSummary = formatProjectTeamMembersSummary(draft.teamMembersDetailed, draft.teamMembers);
+  const settlementSheetPolicy = normalizeSettlementSheetPolicy(
+    draft.settlementSheetPolicy,
+    draft.fundInputMode,
+  ) || getDefaultSettlementSheetPolicyForFundInputMode(draft.fundInputMode);
   const title = `[사업등록제안] ${projectName}`;
 
   const body = [
@@ -88,6 +97,7 @@ export function buildProjectProposalPost(
     `- 기준: ${BASIS_LABELS[draft.basis]}`,
     `- 계좌 유형: ${ACCOUNT_TYPE_LABELS[draft.accountType]}`,
     `- 자금 입력 방식: ${PROJECT_FUND_INPUT_MODE_LABELS[draft.fundInputMode]}`,
+    `- 정산 시트 정책: ${formatSettlementSheetPolicySummary(settlementSheetPolicy)}`,
     `- 선금/중도금/잔금 및 입금 계획: ${draft.paymentPlanDesc || '-'}`,
     `- 사업비 수령 방식 및 정산 기준: ${draft.settlementGuide || '-'}`,
     '',

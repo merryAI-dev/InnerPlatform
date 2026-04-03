@@ -22,6 +22,8 @@ import {
   projectRequestContractAnalyzeSchema,
   projectRequestContractUploadSchema,
   projectDriveRootLinkSchema,
+  projectRestoreSchema,
+  projectTrashSchema,
 } from '../schemas.mjs';
 
 function trimSlackText(value, maxLength = 200) {
@@ -140,6 +142,160 @@ function buildProjectCreatedSlackPayload(project, context = {}) {
   };
 }
 
+function normalizeParticipationRate(value) {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.max(0, Math.min(100, Math.round(parsed)));
+}
+
+function normalizeProjectTeamMembersDetailed(value) {
+  return (Array.isArray(value) ? value : [])
+    .map((member) => ({
+      memberName: readOptionalText(member?.memberName),
+      memberNickname: readOptionalText(member?.memberNickname),
+      role: readOptionalText(member?.role),
+      participationRate: normalizeParticipationRate(member?.participationRate),
+    }))
+    .filter((member) => member.memberName || member.memberNickname || member.role || member.participationRate > 0);
+}
+
+function normalizeSyncKeySegment(value, fallback = 'na') {
+  const normalized = String(value || '')
+    .normalize('NFC')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9가-힣]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return normalized || fallback;
+}
+
+function buildProjectTeamMemberSyncKey(member) {
+  return [
+    normalizeSyncKeySegment(member.memberNickname || member.memberName, 'member'),
+    normalizeSyncKeySegment(member.role, 'role'),
+  ].join('__');
+}
+
+function resolveParticipationSettlementSystem(project) {
+  if (project?.settlementType === 'TYPE5' || project?.accountType === 'DEDICATED') {
+    return 'E_NARA_DOUM';
+  }
+  if (project?.settlementType === 'NONE' && project?.accountType === 'NONE') {
+    return 'NONE';
+  }
+  return 'PRIVATE';
+}
+
+async function syncProjectParticipationEntries({
+  db,
+  tenantId,
+  project,
+  now,
+}) {
+  const teamMembers = normalizeProjectTeamMembersDetailed(project?.teamMembersDetailed);
+  const partEntriesRef = db.collection(`orgs/${tenantId}/partEntries`);
+  const existingSnap = await partEntriesRef.where('projectId', '==', project.id).get();
+  const existingSyncEntries = existingSnap.docs.filter((doc) => doc.data()?.source === 'PROJECT_TEAM_SYNC');
+
+  const memberSnap = await db.collection(`orgs/${tenantId}/members`).get();
+  const members = memberSnap.docs.map((doc) => ({ id: doc.id, ...(doc.data() || {}) }));
+  const memberByIdentity = new Map();
+  for (const member of members) {
+    for (const key of [
+      readOptionalText(member?.nickname),
+      readOptionalText(member?.name),
+    ]) {
+      if (!key) continue;
+      memberByIdentity.set(key.toLowerCase(), member);
+    }
+  }
+
+  const desiredEntries = new Map();
+  for (const member of teamMembers) {
+    if (!member.role || (!member.memberName && !member.memberNickname)) continue;
+    const matchedMember = memberByIdentity.get((member.memberNickname || member.memberName).toLowerCase())
+      || memberByIdentity.get(member.memberName.toLowerCase())
+      || memberByIdentity.get(member.memberNickname.toLowerCase());
+    const memberId = readOptionalText(matchedMember?.uid || matchedMember?.id)
+      || `project-team:${buildProjectTeamMemberSyncKey(member)}`;
+    const displayName = readOptionalText(matchedMember?.name) || member.memberNickname || member.memberName;
+    const key = buildProjectTeamMemberSyncKey(member);
+    const entryId = `pte-${project.id}-${key}`;
+    desiredEntries.set(entryId, {
+      id: entryId,
+      memberId,
+      memberName: displayName,
+      projectId: project.id,
+      projectName: project.name,
+      projectShortName: readOptionalText(project.shortName) || undefined,
+      rate: member.participationRate,
+      settlementSystem: resolveParticipationSettlementSystem(project),
+      clientOrg: readOptionalText(project.clientOrg),
+      periodStart: readOptionalText(project.contractStart).slice(0, 7),
+      periodEnd: readOptionalText(project.contractEnd).slice(0, 7),
+      isDocumentOnly: false,
+      note: member.role,
+      source: 'PROJECT_TEAM_SYNC',
+      projectTeamMemberKey: key,
+      updatedAt: now,
+    });
+  }
+
+  const batch = db.batch();
+  for (const [entryId, entry] of desiredEntries.entries()) {
+    batch.set(partEntriesRef.doc(entryId), {
+      ...entry,
+      tenantId,
+    }, { merge: true });
+  }
+  for (const doc of existingSyncEntries) {
+    if (desiredEntries.has(doc.id)) continue;
+    batch.delete(doc.ref);
+  }
+  if (desiredEntries.size > 0 || existingSyncEntries.length > 0) {
+    await batch.commit();
+  }
+}
+
+async function updateProjectTrashState({
+  db,
+  tenantId,
+  projectId,
+  actorId,
+  actorEmail,
+  now,
+  expectedVersion,
+  patch,
+}) {
+  const ref = db.doc(`orgs/${tenantId}/projects/${projectId}`);
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) {
+      throw createHttpError(404, `Project not found: ${projectId}`, 'not_found');
+    }
+
+    const current = snap.data() || {};
+    const currentVersion = Number.isInteger(current.version) && current.version > 0 ? current.version : 1;
+    if (expectedVersion !== currentVersion) {
+      throw createHttpError(409, `Version mismatch: expected ${expectedVersion}, actual ${currentVersion}`, 'version_conflict');
+    }
+
+    const document = {
+      ...current,
+      ...patch,
+      tenantId,
+      version: currentVersion + 1,
+      createdBy: current.createdBy || actorId,
+      createdAt: current.createdAt || now,
+      updatedBy: actorId,
+      updatedAt: now,
+    };
+
+    tx.set(ref, document, { merge: true });
+    return { version: currentVersion + 1, data: document };
+  });
+}
+
 export function mountProjectRoutes(app, {
   db, now, idempotencyService, auditChainService, piiProtector,
   driveService,
@@ -173,12 +329,16 @@ export function mountProjectRoutes(app, {
     const parsed = parseWithSchema(projectUpsertSchema, req.body, 'Invalid project payload');
     const expectedVersion = parsed.expectedVersion;
     const driveConfig = typeof driveService?.getConfig === 'function' ? driveService.getConfig() : null;
+    const projectRef = db.doc(`orgs/${tenantId}/projects/${parsed.id.trim()}`);
+    const existingProjectSnap = await projectRef.get();
+    const existingProject = existingProjectSnap.exists ? (existingProjectSnap.data() || {}) : null;
 
     const projectPayload = {
       ...stripServerManagedFields(stripExpectedVersion(parsed)),
       id: parsed.id.trim(),
       name: parsed.name.trim(),
       orgId: tenantId,
+      teamMembersDetailed: normalizeProjectTeamMembersDetailed(parsed.teamMembersDetailed),
     };
 
     const shouldProvisionProjectDriveRoot = !!(
@@ -229,6 +389,48 @@ export function mountProjectRoutes(app, {
       outboxEvent,
     });
 
+    if (Array.isArray(projectPayload.teamMembersDetailed)) {
+      await syncProjectParticipationEntries({
+        db,
+        tenantId,
+        project: result.data,
+        now: timestamp,
+      });
+    }
+
+    const existingName = readOptionalText(existingProject?.name);
+    const renamedProjectRoot = (
+      !result.created
+      && existingName
+      && existingName !== projectPayload.name
+      && driveService
+      && typeof driveService.renameManagedProjectRootFolder === 'function'
+      && readOptionalText(result.data.evidenceDriveRootFolderId)
+    )
+      ? await driveService.renameManagedProjectRootFolder({
+        projectId: projectPayload.id,
+        projectName: projectPayload.name,
+        existingFolderId: result.data.evidenceDriveRootFolderId,
+      })
+      : null;
+
+    if (renamedProjectRoot?.name && renamedProjectRoot.name !== readOptionalText(result.data.evidenceDriveRootFolderName)) {
+      const renamed = await mergeSystemManagedDoc({
+        db,
+        path: `orgs/${tenantId}/projects/${projectPayload.id}`,
+        patch: {
+          evidenceDriveRootFolderName: renamedProjectRoot.name,
+          evidenceDriveRootFolderLink: renamedProjectRoot.webViewLink || undefined,
+        },
+        tenantId,
+        actorId,
+        now: timestamp,
+        notFoundMessage: `Project not found: ${projectPayload.id}`,
+      });
+      result.version = renamed.version;
+      result.data = renamed.data;
+    }
+
     const actorEmailEnc = await encryptAuditEmail(piiProtector, actorEmail);
     await auditChainService.append({
       tenantId,
@@ -271,6 +473,111 @@ export function mountProjectRoutes(app, {
         evidenceDriveRootFolderName: result.data.evidenceDriveRootFolderName || null,
         evidenceDriveRootFolderLink: result.data.evidenceDriveRootFolderLink || null,
         evidenceDriveSharedDriveId: result.data.evidenceDriveSharedDriveId || null,
+        version: result.version,
+        updatedAt: result.data.updatedAt,
+      },
+    };
+  }));
+
+  app.post('/api/v1/projects/:projectId/trash', createMutatingRoute(idempotencyService, async (req) => {
+    assertActorRoleAllowed(req, ROUTE_ROLES.writeCore, 'trash project');
+    const { tenantId, actorId, actorRole, actorEmail, requestId } = req.context;
+    const { projectId } = req.params;
+    const timestamp = now();
+    const parsed = parseWithSchema(projectTrashSchema, req.body, 'Invalid project trash payload');
+    const result = await updateProjectTrashState({
+      db,
+      tenantId,
+      projectId,
+      actorId,
+      actorEmail,
+      now: timestamp,
+      expectedVersion: parsed.expectedVersion,
+      patch: {
+        trashedAt: timestamp,
+        trashedById: actorId,
+        trashedByEmail: actorEmail || null,
+        trashedReason: readOptionalText(parsed.reason) || null,
+      },
+    });
+
+    const actorEmailEnc = await encryptAuditEmail(piiProtector, actorEmail);
+    await auditChainService.append({
+      tenantId,
+      entityType: 'project',
+      entityId: projectId,
+      action: 'TRASH',
+      actorId,
+      actorRole,
+      actorEmailEnc,
+      requestId,
+      details: `프로젝트 휴지통 이동: ${result.data.name || projectId}`,
+      metadata: {
+        source: 'bff',
+        version: result.version,
+        trashedAt: result.data.trashedAt,
+        reason: result.data.trashedReason || null,
+      },
+      timestamp,
+    });
+
+    return {
+      status: 200,
+      body: {
+        id: projectId,
+        tenantId,
+        version: result.version,
+        updatedAt: result.data.updatedAt,
+        trashedAt: result.data.trashedAt,
+      },
+    };
+  }));
+
+  app.post('/api/v1/projects/:projectId/restore', createMutatingRoute(idempotencyService, async (req) => {
+    assertActorRoleAllowed(req, ROUTE_ROLES.writeCore, 'restore project');
+    const { tenantId, actorId, actorRole, actorEmail, requestId } = req.context;
+    const { projectId } = req.params;
+    const timestamp = now();
+    const parsed = parseWithSchema(projectRestoreSchema, req.body, 'Invalid project restore payload');
+    const result = await updateProjectTrashState({
+      db,
+      tenantId,
+      projectId,
+      actorId,
+      actorEmail,
+      now: timestamp,
+      expectedVersion: parsed.expectedVersion,
+      patch: {
+        trashedAt: null,
+        trashedById: null,
+        trashedByEmail: null,
+        trashedReason: null,
+      },
+    });
+
+    const actorEmailEnc = await encryptAuditEmail(piiProtector, actorEmail);
+    await auditChainService.append({
+      tenantId,
+      entityType: 'project',
+      entityId: projectId,
+      action: 'RESTORE',
+      actorId,
+      actorRole,
+      actorEmailEnc,
+      requestId,
+      details: `프로젝트 복구: ${result.data.name || projectId}`,
+      metadata: {
+        source: 'bff',
+        version: result.version,
+      },
+      timestamp,
+    });
+
+    return {
+      status: 200,
+      body: {
+        id: projectId,
+        tenantId,
         version: result.version,
         updatedAt: result.data.updatedAt,
       },

@@ -5,7 +5,7 @@ import type {
   MouseEvent as ReactMouseEvent,
 } from 'react';
 import { ExternalLink, GripVertical, Plus, Upload, X } from 'lucide-react';
-import type { BudgetCodeEntry, Transaction } from '../../data/types';
+import type { BudgetCodeEntry, Transaction, SettlementSheetPolicy } from '../../data/types';
 import { parseNumber } from '../../platform/csv-utils';
 import { isValidDriveUrl } from '../../platform/evidence-helpers';
 import type { CounterpartySuggestion } from '../../platform/counterparty-normalizer';
@@ -159,6 +159,7 @@ function ImportEditorRow({
   onRemove,
   onInsertBelow,
   onPasteRange,
+  settlementSheetPolicy,
   onCellFocus,
   onCellMouseDown,
   onCellMouseEnter,
@@ -199,6 +200,7 @@ function ImportEditorRow({
   onRemove: () => void;
   onInsertBelow: () => void;
   onPasteRange: (rowIdx: number, colIdx: number, text: string) => void;
+  settlementSheetPolicy: SettlementSheetPolicy;
   onCellFocus: (rowIdx: number, colIdx: number) => void;
   onCellMouseDown: (rowIdx: number, colIdx: number) => void;
   onCellMouseEnter: (rowIdx: number, colIdx: number) => void;
@@ -249,6 +251,7 @@ function ImportEditorRow({
   );
   const budgetCodeRaw = budgetCodeIdx >= 0 ? row.cells[budgetCodeIdx] : '';
   const budgetCode = normalizeBudgetLabel(String(budgetCodeRaw || ''));
+  const isAdjustmentRow = row.entryKind === 'ADJUSTMENT';
   const subCodes = useMemo(() => {
     const entry = budgetCodeBook.find((c) => c.code === budgetCode);
     return entry ? entry.subCodes : [];
@@ -280,6 +283,16 @@ function ImportEditorRow({
     if (num == null) return value;
     return Number.isFinite(num) ? num.toLocaleString('ko-KR') : value;
   }, []);
+  const isDerivedFieldLocked = useCallback((header: string) => {
+    if (header === '통장잔액') {
+      return settlementSheetPolicy.readOnlyDerivedFields.includes('balance') && !isAdjustmentRow;
+    }
+    if (!isAdjustmentRow) return false;
+    if (header === '사업비 사용액') return settlementSheetPolicy.readOnlyDerivedFields.includes('expenseAmount');
+    if (header === '통장에 찍힌 입/출금액') return settlementSheetPolicy.readOnlyDerivedFields.includes('bankAmount');
+    if (header === '매입부가세') return settlementSheetPolicy.readOnlyDerivedFields.includes('vatIn');
+    return false;
+  }, [isAdjustmentRow, settlementSheetPolicy.readOnlyDerivedFields]);
   const renderCommentButton = useCallback((fieldLabel: string) => {
     const fieldKey = toFieldSlug(fieldLabel);
     const count = commentCountByCell.get(buildCommentThreadKey(commentTransactionId, fieldKey)) || 0;
@@ -356,13 +369,15 @@ function ImportEditorRow({
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 variant="destructive"
+                disabled={!settlementSheetPolicy.allowRowDelete}
                 onClick={(e) => {
                   e.stopPropagation();
+                  if (!settlementSheetPolicy.allowRowDelete) return;
                   onRemove();
                 }}
               >
                 <X className="h-3.5 w-3.5" />
-                행 삭제
+                {settlementSheetPolicy.allowRowDelete ? '행 삭제' : '행 삭제 잠금'}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -387,6 +402,7 @@ function ImportEditorRow({
         const isDriveLink = col.csvHeader === '증빙자료 드라이브';
         const isExpenseAmount = col.csvHeader === '사업비 사용액';
         const isSettlementNote = col.csvHeader === '비고';
+        const isDerivedLocked = isDerivedFieldLocked(col.csvHeader);
         const hasAuthorOptions = (authorOptions || []).length > 0;
         return (
           <td
@@ -698,9 +714,10 @@ function ImportEditorRow({
                   <input
                     type="text"
                     value={row.cells[colIdx] || ''}
-                    className="w-full bg-transparent outline-none text-[11px] px-1 py-0.5"
+                    className={`w-full outline-none text-[11px] px-1 py-0.5 ${isDerivedLocked ? 'bg-muted/40 text-muted-foreground cursor-not-allowed rounded' : 'bg-transparent'}`}
                     data-cell-row={rowIdx}
                     data-cell-col={colIdx}
+                    readOnly={isDerivedLocked}
                     onFocus={() => onCellFocus(rowIdx, colIdx)}
                     onPaste={(e) => handlePaste(colIdx, e)}
                     onChange={(e) => onCellChange(colIdx, formatNumberInput(e.target.value))}
@@ -715,22 +732,29 @@ function ImportEditorRow({
                 <input
                   type="text"
                   value={row.cells[colIdx] || ''}
-                  className={`w-full bg-transparent outline-none text-[11px] px-1 py-0.5 pr-6 ${hasError && colIdx === dateIdx && !row.cells[colIdx]
+                  className={`w-full outline-none text-[11px] px-1 py-0.5 pr-6 ${isDerivedLocked ? 'bg-muted/40 text-muted-foreground cursor-not-allowed rounded' : 'bg-transparent'} ${hasError && colIdx === dateIdx && !row.cells[colIdx]
                     ? 'ring-1 ring-red-300 rounded'
                     : ''
                     }`}
                   data-cell-row={rowIdx}
                   data-cell-col={colIdx}
                   list={isAuthor && authorListId ? authorListId : undefined}
+                  readOnly={isDerivedLocked}
                   onFocus={() => onCellFocus(rowIdx, colIdx)}
                   onPaste={(e) => handlePaste(colIdx, e)}
                   onChange={(e) => {
+                    if (isDerivedLocked) return;
                     const next = col.format === 'number'
                       ? formatNumberInput(e.target.value)
                       : e.target.value;
                     onCellChange(colIdx, next);
                   }}
                 />
+              )}
+              {isDerivedLocked && (
+                <span className="absolute left-1 bottom-0.5 rounded bg-muted px-1 text-[9px] text-muted-foreground">
+                  계산값
+                </span>
               )}
               {isCounterparty && counterpartyHint && (
                 <button
@@ -793,6 +817,7 @@ export const MemoizedImportEditorRow = memo(ImportEditorRow, (prev, next) => {
     && prev.cashflowIdx === next.cashflowIdx
     && prev.weekOptions === next.weekOptions
     && prev.cashflowOptions === next.cashflowOptions
+    && prev.settlementSheetPolicy === next.settlementSheetPolicy
     && prev.evidenceRequiredMap === next.evidenceRequiredMap
     && prev.commentCountByCell === next.commentCountByCell
     && prev.persistedTransactionId === next.persistedTransactionId

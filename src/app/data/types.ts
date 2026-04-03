@@ -23,11 +23,13 @@ export type ProjectType =
   | 'Z1'; // 기타사업
 export type ProjectPhase = 'PROSPECT' | 'CONFIRMED';  // 입찰예정 / 확정
 
-export type SettlementType = 'TYPE1' | 'TYPE2' | 'TYPE3' | 'TYPE4' | 'TYPE5';
-export type Basis = '공급가액' | '공급대가';
+export type SettlementType = 'TYPE1' | 'TYPE2' | 'TYPE3' | 'TYPE4' | 'TYPE5' | 'NONE';
+export type Basis = '공급가액' | '공급대가' | 'NONE';
 
 export type AccountType = 'DEDICATED' | 'OPERATING' | 'NONE'; // 전용계좌 사업(이나라도움) / 전용계좌(이나라도움x) / 일반 사업
 export type ProjectFundInputMode = 'BANK_UPLOAD' | 'DIRECT_ENTRY';
+export type SettlementSheetPolicyPreset = 'STANDARD' | 'DIRECT_ENTRY' | 'BALANCE_TRACKING';
+export type SettlementSheetDerivedField = 'balance' | 'expenseAmount' | 'bankAmount' | 'vatIn';
 
 export type TransactionState = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED';
 export type Direction = 'IN' | 'OUT';
@@ -121,6 +123,7 @@ export const SETTLEMENT_TYPE_LABELS: Record<SettlementType, string> = {
   TYPE3: 'Type3. 공급가액+세금계산서 미발행',
   TYPE4: 'Type4. 세금계산서미발행+공급대가',
   TYPE5: 'Type5. 이나라도움+공급가액',
+  NONE: '해당없음',
 };
 
 export const SETTLEMENT_TYPE_SHORT: Record<SettlementType, string> = {
@@ -129,24 +132,31 @@ export const SETTLEMENT_TYPE_SHORT: Record<SettlementType, string> = {
   TYPE3: 'Type3',
   TYPE4: 'Type4',
   TYPE5: 'Type5',
+  NONE: '해당없음',
 };
 
 export const BASIS_LABELS: Record<Basis, string> = {
   '공급가액': '공급가액 기준',
   '공급대가': '공급대가 기준',
+  NONE: '해당없음',
 };
+
+export function normalizeSettlementType(raw: unknown): SettlementType {
+  if (raw === 'TYPE1' || raw === 'TYPE2' || raw === 'TYPE3' || raw === 'TYPE4' || raw === 'TYPE5') return raw;
+  return 'NONE';
+}
 
 /** Firestore 하위호환: 구 영문 enum도 인식 */
 export function normalizeBasis(raw: unknown): Basis {
   if (raw === 'SUPPLY_AMOUNT' || raw === '공급가액') return '공급가액';
   if (raw === 'SUPPLY_PRICE' || raw === '공급대가') return '공급대가';
-  return '공급가액';
+  return 'NONE';
 }
 
 export const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
   DEDICATED: '전용계좌 사업(이나라도움)',
   OPERATING: '전용계좌(이나라도움x)',
-  NONE: '일반 사업',
+  NONE: '해당없음',
 };
 
 export const PROJECT_FUND_INPUT_MODE_LABELS: Record<ProjectFundInputMode, string> = {
@@ -157,6 +167,119 @@ export const PROJECT_FUND_INPUT_MODE_LABELS: Record<ProjectFundInputMode, string
 export function normalizeProjectFundInputMode(raw: unknown): ProjectFundInputMode {
   if (raw === 'DIRECT_ENTRY') return 'DIRECT_ENTRY';
   return 'BANK_UPLOAD';
+}
+
+export interface SettlementSheetPolicy {
+  preset: SettlementSheetPolicyPreset;
+  allowAdjustmentRows: boolean;
+  allowRowDelete: boolean;
+  autoComputeBalance: boolean;
+  autoComputeExpenseFromBank: boolean;
+  autoComputeBankFromExpense: boolean;
+  requireCounterparty: boolean;
+  requireNoteForAdjustment: boolean;
+  requireEvidenceBeforeSubmit: boolean;
+  preserveExplicitZero: boolean;
+  readOnlyDerivedFields: SettlementSheetDerivedField[];
+}
+
+export const SETTLEMENT_SHEET_POLICY_PRESET_LABELS: Record<SettlementSheetPolicyPreset, string> = {
+  STANDARD: '표준형',
+  DIRECT_ENTRY: '직접 입력형',
+  BALANCE_TRACKING: '잔액 추적형',
+};
+
+export const SETTLEMENT_SHEET_POLICY_PRESET_DESCRIPTIONS: Record<SettlementSheetPolicyPreset, string> = {
+  STANDARD: '통장내역 업로드와 자동 계산 보조를 함께 사용하는 기본 운영 방식',
+  DIRECT_ENTRY: 'PM이 직접 입력하고 시스템은 계산만 보조하는 방식',
+  BALANCE_TRACKING: '입금·지출·잔액 흐름을 중심으로 관리하는 방식',
+};
+
+const SETTLEMENT_SHEET_POLICY_PRESETS: Record<SettlementSheetPolicyPreset, SettlementSheetPolicy> = {
+  STANDARD: {
+    preset: 'STANDARD',
+    allowAdjustmentRows: false,
+    allowRowDelete: true,
+    autoComputeBalance: true,
+    autoComputeExpenseFromBank: true,
+    autoComputeBankFromExpense: true,
+    requireCounterparty: false,
+    requireNoteForAdjustment: true,
+    requireEvidenceBeforeSubmit: false,
+    preserveExplicitZero: true,
+    readOnlyDerivedFields: [],
+  },
+  DIRECT_ENTRY: {
+    preset: 'DIRECT_ENTRY',
+    allowAdjustmentRows: true,
+    allowRowDelete: true,
+    autoComputeBalance: true,
+    autoComputeExpenseFromBank: false,
+    autoComputeBankFromExpense: true,
+    requireCounterparty: false,
+    requireNoteForAdjustment: true,
+    requireEvidenceBeforeSubmit: false,
+    preserveExplicitZero: true,
+    readOnlyDerivedFields: ['balance'],
+  },
+  BALANCE_TRACKING: {
+    preset: 'BALANCE_TRACKING',
+    allowAdjustmentRows: true,
+    allowRowDelete: false,
+    autoComputeBalance: true,
+    autoComputeExpenseFromBank: false,
+    autoComputeBankFromExpense: true,
+    requireCounterparty: false,
+    requireNoteForAdjustment: true,
+    requireEvidenceBeforeSubmit: false,
+    preserveExplicitZero: true,
+    readOnlyDerivedFields: ['balance', 'expenseAmount', 'bankAmount', 'vatIn'],
+  },
+};
+
+export function createSettlementSheetPolicy(
+  preset: SettlementSheetPolicyPreset = 'STANDARD',
+): SettlementSheetPolicy {
+  return {
+    ...SETTLEMENT_SHEET_POLICY_PRESETS[preset],
+    readOnlyDerivedFields: [...SETTLEMENT_SHEET_POLICY_PRESETS[preset].readOnlyDerivedFields],
+  };
+}
+
+export function getDefaultSettlementSheetPolicyForFundInputMode(
+  mode: ProjectFundInputMode | null | undefined,
+): SettlementSheetPolicy {
+  return mode === 'DIRECT_ENTRY'
+    ? createSettlementSheetPolicy('DIRECT_ENTRY')
+    : createSettlementSheetPolicy('STANDARD');
+}
+
+export function normalizeSettlementSheetPolicy(
+  raw: SettlementSheetPolicy | null | undefined,
+  fundInputMode?: ProjectFundInputMode | null,
+): SettlementSheetPolicy {
+  const preset = raw?.preset && raw.preset in SETTLEMENT_SHEET_POLICY_PRESETS
+    ? raw.preset
+    : getDefaultSettlementSheetPolicyForFundInputMode(fundInputMode).preset;
+  const base = createSettlementSheetPolicy(preset);
+  return {
+    ...base,
+    ...(raw || {}),
+    preset,
+    readOnlyDerivedFields: Array.isArray(raw?.readOnlyDerivedFields)
+      ? raw.readOnlyDerivedFields.filter((field): field is SettlementSheetDerivedField => (
+        field === 'balance' || field === 'expenseAmount' || field === 'bankAmount' || field === 'vatIn'
+      ))
+      : base.readOnlyDerivedFields,
+  };
+}
+
+export function formatSettlementSheetPolicySummary(policy: SettlementSheetPolicy): string {
+  return [
+    SETTLEMENT_SHEET_POLICY_PRESET_LABELS[policy.preset],
+    `잔액 자동 계산 ${policy.autoComputeBalance ? 'ON' : 'OFF'}`,
+    `조정행 ${policy.allowAdjustmentRows ? '허용' : '숨김'}`,
+  ].join(' · ');
 }
 
 export interface ProjectFinancialInputFlags {
@@ -285,6 +408,8 @@ export interface ParticipationEntry {
   periodEnd: string;                     // YYYY-MM
   isDocumentOnly: boolean;               // 서류상 인력 여부
   note: string;
+  source?: 'MANUAL' | 'PROJECT_TEAM_SYNC';
+  projectTeamMemberKey?: string;
   updatedAt: string;
 }
 
@@ -355,6 +480,7 @@ export interface Project {
   basis: Basis;
   accountType: AccountType;      // 전용통장/운영통장
   fundInputMode?: ProjectFundInputMode;
+  settlementSheetPolicy?: SettlementSheetPolicy;
   // 입금계획
   paymentPlan: {
     contract: number;    // 계약금
@@ -502,6 +628,7 @@ export interface ProjectRequestPayload {
   basis: Basis;
   accountType: AccountType;
   fundInputMode?: ProjectFundInputMode;
+  settlementSheetPolicy?: SettlementSheetPolicy;
   paymentPlanDesc: string;
   settlementGuide: string;
   projectPurpose: string;

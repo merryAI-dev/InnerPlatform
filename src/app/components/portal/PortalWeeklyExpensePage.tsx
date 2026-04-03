@@ -18,6 +18,8 @@ import type { EvidenceUploadSelection, PendingQuickInsert } from '../cashflow/Se
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import {
+  formatSettlementSheetPolicySummary,
+  normalizeSettlementSheetPolicy,
   normalizeProjectFundInputMode,
   PROJECT_FUND_INPUT_MODE_LABELS,
   type CashflowWeekSheet,
@@ -141,6 +143,10 @@ export function PortalWeeklyExpensePage() {
   const isENaraProject = myProject?.settlementType === 'TYPE5' || myProject?.accountType === 'DEDICATED';
   const fundInputMode = normalizeProjectFundInputMode(myProject?.fundInputMode);
   const isDirectEntryMode = fundInputMode === 'DIRECT_ENTRY';
+  const settlementSheetPolicy = useMemo(
+    () => normalizeSettlementSheetPolicy(myProject?.settlementSheetPolicy, myProject?.fundInputMode),
+    [myProject?.fundInputMode, myProject?.settlementSheetPolicy],
+  );
 
   const effectiveBudgetCodeBook = useMemo(() => {
     const orderedCodes: string[] = [];
@@ -571,6 +577,9 @@ export function PortalWeeklyExpensePage() {
               ? '이 표에서 바로 입금, 지출, 조정을 입력하고 잔액 흐름을 이어가세요.'
               : '필요한 준비는 버튼에서 바로 처리하고, 아래 표에서 바로 입력을 이어가세요.'}
           </p>
+          <p className="text-[11px] text-muted-foreground">
+            현재 정책: {formatSettlementSheetPolicySummary(settlementSheetPolicy)}
+          </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           {isDirectEntryMode ? (
@@ -581,9 +590,11 @@ export function PortalWeeklyExpensePage() {
               <Button variant="outline" size="sm" onClick={() => queueQuickInsert('EXPENSE')}>
                 지출 추가
               </Button>
-              <Button variant="outline" size="sm" onClick={() => queueQuickInsert('ADJUSTMENT')}>
-                조정
-              </Button>
+              {settlementSheetPolicy.allowAdjustmentRows && (
+                <Button variant="outline" size="sm" onClick={() => queueQuickInsert('ADJUSTMENT')}>
+                  잔액 조정
+                </Button>
+              )}
               <Button variant="outline" size="sm" onClick={() => navigate('/portal/bank-statements')}>
                 기존 통장내역 가져오기
                 <ArrowRight className="h-4 w-4" />
@@ -631,6 +642,7 @@ export function PortalWeeklyExpensePage() {
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border bg-muted/10 px-4 py-3 text-[11px] text-muted-foreground">
         {!isDirectEntryMode && <span>통장내역: {bankStatementCount > 0 ? `${bankStatementCount}건 연결됨` : '업로드 필요'}</span>}
         {isDirectEntryMode && <span>입력 방식: 직접 입력</span>}
+        <span>시트 정책: {formatSettlementSheetPolicySummary(settlementSheetPolicy)}</span>
         <span>거래: {transactions.length}건</span>
         <span>기본 폴더: {myProject?.evidenceDriveRootFolderId ? '준비됨' : '미설정'}</span>
         {isENaraProject && <span>TYPE5 / 전용계좌 프로젝트</span>}
@@ -798,6 +810,7 @@ export function PortalWeeklyExpensePage() {
             return fetchBudgetSuggestionViaBff({ tenantId: orgId, actor: bffActor, projectId, counterparty });
           } : undefined}
           workflowMode={fundInputMode}
+          settlementSheetPolicy={settlementSheetPolicy}
           pendingQuickInsert={pendingQuickInsert}
           onPendingQuickInsertHandled={() => setPendingQuickInsert(null)}
         />

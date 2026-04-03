@@ -133,17 +133,18 @@ describe('buildSettlementActualSyncPayload', () => {
     expect(clearedWeek?.amounts.DIRECT_COST_OUT).toBe(0);
   });
 
-  it('ignores input vat out rows when building actual payloads', () => {
+  it('includes input vat out rows when building actual payloads', () => {
     const base = createEmptyCells();
     const rows = [
       createRow(withCell(withCell(withCell(base, 2, '2026-03-03'), 3, '26-03-01'), 8, '매입부가세').map((cell, index) => (index === 10 ? '33,000' : cell))),
     ];
+    rows[0].cells[14] = '3,000';
 
     const payload = buildSettlementActualSyncPayload(rows, [
       { yearMonth: '2026-03', weekNo: 1, weekStart: '2026-03-02', weekEnd: '2026-03-08', label: '26-03-01' },
     ]);
 
     const marchWeek = payload.find((item) => item.yearMonth === '2026-03' && item.weekNo === 1);
-    expect(marchWeek?.amounts.INPUT_VAT_OUT).toBe(0);
+    expect(marchWeek?.amounts.INPUT_VAT_OUT).toBe(3000);
   });
 });

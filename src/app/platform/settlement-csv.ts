@@ -6,6 +6,7 @@ import type {
   PaymentMethod,
   Direction,
   SettlementEntryKind,
+  SettlementSheetPolicy,
 } from '../data/types';
 import { CASHFLOW_SHEET_LINE_LABELS } from '../data/types';
 import type { MonthMondayWeek } from './cashflow-weeks';
@@ -820,6 +821,7 @@ export function importRowToTransaction(
   projectId: string,
   ledgerId: string,
   rowIndex: number,
+  options?: { policy?: SettlementSheetPolicy | null },
 ): { transaction?: Transaction; error?: string } {
   // Build key-value map from column headers
   const kv: Record<string, string> = {};
@@ -870,9 +872,13 @@ export function importRowToTransaction(
   const memo = pickValue(kv, ['상세 적요', '적요', 'memo']);
   const author = pickValue(kv, ['작성자', 'author']);
   const settlementNote = pickValue(kv, ['비고', 'settlementNote', 'note']);
+  const policy = options?.policy || null;
 
-  if (entryKind === 'ADJUSTMENT' && !settlementNote.trim()) {
+  if ((policy?.requireNoteForAdjustment ?? true) && entryKind === 'ADJUSTMENT' && !settlementNote.trim()) {
     return { error: '조정 사유를 비고에 입력해 주세요' };
+  }
+  if (policy?.requireCounterparty && !counterparty.trim()) {
+    return { error: '거래처를 입력해 주세요' };
   }
 
   const now = new Date().toISOString();

@@ -510,6 +510,29 @@ export function createGoogleDriveService(options = {}) {
     return normalizeDriveFile(data, config.sharedDriveId);
   }
 
+  async function renameFile({ fileId, name }) {
+    const normalizedFileId = readOptionalText(fileId);
+    const normalizedName = readOptionalText(name);
+    if (!normalizedFileId) {
+      throw new DriveServiceError('fileId is required', { statusCode: 400, code: 'drive_file_id_required' });
+    }
+    if (!normalizedName) {
+      throw new DriveServiceError('name is required', { statusCode: 400, code: 'drive_file_name_required' });
+    }
+
+    const data = await driveFetch(
+      `/files/${encodeURIComponent(normalizedFileId)}?supportsAllDrives=true&fields=id,name,mimeType,webViewLink,parents,driveId,appProperties`,
+      {
+        method: 'PATCH',
+        headers: {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ name: normalizedName }),
+      },
+    );
+    return normalizeDriveFile(data, config.sharedDriveId);
+  }
+
   async function uploadFileToFolder({
     folderId,
     fileName,
@@ -590,6 +613,22 @@ export function createGoogleDriveService(options = {}) {
       parentFolderId,
       appProperties,
     });
+  }
+
+  async function renameManagedProjectRootFolder({ projectId, projectName, existingFolderId }) {
+    const existingFolder = await getFile(existingFolderId);
+    if (!existingFolder) return null;
+    const managedBy = readOptionalText(existingFolder.appProperties?.managedBy);
+    const folderRole = readOptionalText(existingFolder.appProperties?.folderRole);
+    const folderProjectId = readOptionalText(existingFolder.appProperties?.projectId);
+    if (managedBy !== 'mysc-platform' || folderRole !== 'project-root' || folderProjectId !== readOptionalText(projectId)) {
+      return existingFolder;
+    }
+    const nextName = buildDriveProjectFolderName(projectName, projectId);
+    if (!nextName || existingFolder.name === nextName) {
+      return existingFolder;
+    }
+    return renameFile({ fileId: existingFolder.id, name: nextName });
   }
 
   async function ensureTransactionFolder({ tenantId, projectId, projectName, transaction, projectFolderId, existingFolderId }) {
@@ -689,6 +728,7 @@ export function createGoogleDriveService(options = {}) {
     assertConfigured,
     getFile,
     ensureProjectRootFolder,
+    renameManagedProjectRootFolder,
     ensureTransactionFolder,
     listFolderFiles,
     uploadFileToFolder,

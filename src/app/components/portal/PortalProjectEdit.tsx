@@ -15,7 +15,12 @@ import { useFirebase } from '../../lib/firebase-context';
 import { getAuthInstance } from '../../lib/firebase';
 import { upsertProjectViaBff } from '../../lib/platform-bff-client';
 import {
+  createSettlementSheetPolicy,
+  getDefaultSettlementSheetPolicyForFundInputMode,
+  normalizeBasis,
   getProjectTypeSelectableOptions,
+  normalizeSettlementSheetPolicy,
+  normalizeSettlementType,
   normalizeProjectFundInputMode,
   PROJECT_TYPE_LABELS,
   PROJECT_FUND_INPUT_MODE_LABELS,
@@ -24,6 +29,7 @@ import {
   ACCOUNT_TYPE_LABELS,
   type ProjectType,
   type ProjectFundInputMode,
+  type SettlementSheetPolicy,
   type SettlementType,
   type Basis,
   type AccountType,
@@ -46,6 +52,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../ui/select';
+import { SettlementSheetPolicyFields } from '../projects/SettlementSheetPolicyFields';
 
 function fmtKRW(value: number) {
   if (!value) return '0';
@@ -70,10 +77,11 @@ export function PortalProjectEdit() {
     financialInputFlags: createEmptyProjectFinancialInputFlags(),
     contractStart: '',
     contractEnd: '',
-    settlementType: 'TYPE1' as SettlementType,
-    basis: '공급가액' as Basis,
-    accountType: 'DEDICATED' as AccountType,
+    settlementType: 'NONE' as SettlementType,
+    basis: 'NONE' as Basis,
+    accountType: 'NONE' as AccountType,
     fundInputMode: 'BANK_UPLOAD' as ProjectFundInputMode,
+    settlementSheetPolicy: createSettlementSheetPolicy('STANDARD') as SettlementSheetPolicy,
     managerName: '',
     teamName: '',
     participantCondition: '',
@@ -94,10 +102,11 @@ export function PortalProjectEdit() {
         financialInputFlags: normalizeProjectFinancialInputFlags(myProject.financialInputFlags),
         contractStart: myProject.contractStart || '',
         contractEnd: myProject.contractEnd || '',
-        settlementType: myProject.settlementType || 'TYPE1',
-        basis: myProject.basis || '공급가액',
-        accountType: myProject.accountType || 'DEDICATED',
+        settlementType: normalizeSettlementType(myProject.settlementType),
+        basis: normalizeBasis(myProject.basis),
+        accountType: myProject.accountType || 'NONE',
         fundInputMode: normalizeProjectFundInputMode(myProject.fundInputMode),
+        settlementSheetPolicy: normalizeSettlementSheetPolicy(myProject.settlementSheetPolicy, myProject.fundInputMode),
         managerName: myProject.managerName || '',
         teamName: myProject.teamName || '',
         participantCondition: myProject.participantCondition || '',
@@ -170,6 +179,7 @@ export function PortalProjectEdit() {
           basis: form.basis,
           accountType: form.accountType,
           fundInputMode: form.fundInputMode,
+          settlementSheetPolicy: form.settlementSheetPolicy,
           managerName: form.managerName.trim(),
           teamName: form.teamName.trim(),
           participantCondition: form.participantCondition.trim(),
@@ -193,7 +203,16 @@ export function PortalProjectEdit() {
       const confirmed = window.confirm('이미 주간 입력 또는 통장내역 데이터가 있습니다. 입력 방식을 바꾸면 이후 작업 흐름만 바뀌고 기존 데이터는 유지됩니다. 계속할까요?');
       if (!confirmed) return;
     }
-    update('fundInputMode', nextMode);
+    setForm((prev) => {
+      const shouldResetPolicy = prev.settlementSheetPolicy.preset === getDefaultSettlementSheetPolicyForFundInputMode(prev.fundInputMode).preset;
+      return {
+        ...prev,
+        fundInputMode: nextMode,
+        settlementSheetPolicy: shouldResetPolicy
+          ? getDefaultSettlementSheetPolicyForFundInputMode(nextMode)
+          : prev.settlementSheetPolicy,
+      };
+    });
   };
 
   return (
@@ -397,6 +416,10 @@ export function PortalProjectEdit() {
               </p>
             </div>
           </div>
+          <SettlementSheetPolicyFields
+            policy={form.settlementSheetPolicy}
+            onChange={(next) => update('settlementSheetPolicy', next)}
+          />
         </CardContent>
       </Card>
 

@@ -26,6 +26,7 @@ import type {
   Project,
   ProjectFinancialInputFlags,
   ProjectFundInputMode,
+  SettlementSheetPolicy,
   ProjectPhase,
   ProjectStatus,
   ProjectType,
@@ -34,7 +35,13 @@ import type {
 import {
   ACCOUNT_TYPE_LABELS,
   BASIS_LABELS,
+  createSettlementSheetPolicy,
+  formatSettlementSheetPolicySummary,
+  getDefaultSettlementSheetPolicyForFundInputMode,
   getProjectTypeSelectableOptions,
+  normalizeBasis,
+  normalizeSettlementSheetPolicy,
+  normalizeSettlementType,
   normalizeProjectFundInputMode,
   PROJECT_FUND_INPUT_MODE_LABELS,
   PROJECT_STATUS_LABELS,
@@ -49,6 +56,7 @@ import { Label } from '../ui/label';
 import { Progress } from '../ui/progress';
 import { Separator } from '../ui/separator';
 import { PROJECT_DEPARTMENT_OPTIONS } from '../../data/project-department-options';
+import { SettlementSheetPolicyFields } from './SettlementSheetPolicyFields';
 import {
   createEmptyProjectFinancialInputFlags,
   formatProjectAmountInput,
@@ -91,6 +99,7 @@ interface WizardFormData {
   settlementType: SettlementType;
   basis: Basis;
   fundInputMode: ProjectFundInputMode;
+  settlementSheetPolicy: SettlementSheetPolicy;
   // Step 4: Team
   teamName: string;
   managerName: string;
@@ -113,7 +122,7 @@ interface WizardFormData {
 const INITIAL_DATA: WizardFormData = {
   name: '', type: 'D1', department: '', clientOrg: '', groupwareName: '', description: '',
   status: 'CONTRACT_PENDING', contractType: '계약서(날인)', contractStart: '', contractEnd: '', participantCondition: '',
-  accountType: 'NONE', settlementType: 'TYPE1', basis: '공급가액', fundInputMode: 'BANK_UPLOAD',
+  accountType: 'NONE', settlementType: 'NONE', basis: 'NONE', fundInputMode: 'BANK_UPLOAD', settlementSheetPolicy: createSettlementSheetPolicy('STANDARD'),
   teamName: '', managerName: '', managerId: '',
   contractAmount: 0, financialInputFlags: createEmptyProjectFinancialInputFlags(), budgetCurrentYear: 0, taxInvoiceAmount: 0, profitRate: 0, profitAmount: 0,
   paymentContract: 0, paymentInterim: 0, paymentFinal: 0, paymentPlanDesc: '', finalPaymentNote: '',
@@ -159,9 +168,10 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
         contractEnd: editProject.contractEnd,
         participantCondition: editProject.participantCondition,
         accountType: editProject.accountType,
-        settlementType: editProject.settlementType,
-        basis: editProject.basis,
+        settlementType: normalizeSettlementType(editProject.settlementType),
+        basis: normalizeBasis(editProject.basis),
         fundInputMode: normalizeProjectFundInputMode(editProject.fundInputMode),
+        settlementSheetPolicy: normalizeSettlementSheetPolicy(editProject.settlementSheetPolicy, editProject.fundInputMode),
         teamName: editProject.teamName,
         managerName: editProject.managerName,
         managerId: editProject.managerId,
@@ -214,7 +224,16 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
       const confirmed = window.confirm('이미 저장된 거래가 있습니다. 입력 방식을 바꾸면 이후 작업 흐름만 바뀌고 기존 데이터는 유지됩니다. 계속할까요?');
       if (!confirmed) return;
     }
-    update('fundInputMode', nextMode);
+    setFormData((prev) => {
+      const shouldResetPolicy = prev.settlementSheetPolicy.preset === getDefaultSettlementSheetPolicyForFundInputMode(prev.fundInputMode).preset;
+      return {
+        ...prev,
+        fundInputMode: nextMode,
+        settlementSheetPolicy: shouldResetPolicy
+          ? getDefaultSettlementSheetPolicyForFundInputMode(nextMode)
+          : prev.settlementSheetPolicy,
+      };
+    });
   }, [formData.fundInputMode, editProject?.id, transactions, update]);
 
   const updateContractAmount = useCallback((value: string) => {
@@ -281,6 +300,7 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
       basis: formData.basis,
       accountType: formData.accountType,
       fundInputMode: formData.fundInputMode,
+      settlementSheetPolicy: formData.settlementSheetPolicy,
       paymentPlan: {
         contract: formData.paymentContract,
         interim: formData.paymentInterim,
@@ -497,7 +517,7 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
                     <div className="text-xs text-muted-foreground mt-1">
                       {at === 'DEDICATED' && '이나라도움 전용계좌로 관리합니다'}
                       {at === 'OPERATING' && '전용계좌를 사용하지만 이나라도움은 사용하지 않습니다'}
-                      {at === 'NONE' && '일반 사업으로 관리합니다'}
+                      {at === 'NONE' && '해당없음으로 관리합니다'}
                     </div>
                   </button>
                 ))}
@@ -559,6 +579,10 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
                 ))}
               </div>
             </div>
+            <SettlementSheetPolicyFields
+              policy={formData.settlementSheetPolicy}
+              onChange={(next) => update('settlementSheetPolicy', next)}
+            />
           </div>
         );
 
@@ -873,6 +897,10 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
                 <div>
                   <span className="text-muted-foreground">입력 방식:</span>
                   <span className="ml-2">{PROJECT_FUND_INPUT_MODE_LABELS[formData.fundInputMode]}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">시트 정책:</span>
+                  <span className="ml-2">{formatSettlementSheetPolicySummary(formData.settlementSheetPolicy)}</span>
                 </div>
                 <div>
                   <span className="text-muted-foreground">메인 담당:</span>

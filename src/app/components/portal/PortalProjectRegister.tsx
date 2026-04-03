@@ -33,8 +33,14 @@ import { PlatformApiError } from '../../platform/api-client';
 import {
   ACCOUNT_TYPE_LABELS,
   BASIS_LABELS,
+  createSettlementSheetPolicy,
+  formatSettlementSheetPolicySummary,
+  getDefaultSettlementSheetPolicyForFundInputMode,
   getProjectTypeSelectableOptions,
+  normalizeBasis,
   normalizeProjectFundInputMode,
+  normalizeSettlementSheetPolicy,
+  normalizeSettlementType,
   PROJECT_FUND_INPUT_MODE_LABELS,
   PROJECT_TYPE_LABELS,
   SETTLEMENT_TYPE_LABELS,
@@ -42,6 +48,7 @@ import {
   type Basis,
   type ProjectFundInputMode,
   type ProjectRequestContractAnalysis,
+  type SettlementSheetPolicy,
   type SettlementType,
   type ProjectTeamMemberAssignment,
   type ProjectType,
@@ -78,6 +85,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../ui/select';
+import { SettlementSheetPolicyFields } from '../projects/SettlementSheetPolicyFields';
 
 type Step = 'contract' | 'basic' | 'financial' | 'team' | 'review';
 type ContractAnalysisState = 'idle' | 'extracting' | 'analyzing' | 'ready' | 'error';
@@ -112,10 +120,11 @@ const initialProposal: ProjectProposalDraft = {
   financialInputFlags: createEmptyProjectFinancialInputFlags(),
   contractStart: '',
   contractEnd: '',
-  settlementType: 'TYPE1',
-  basis: '공급가액',
-  accountType: 'DEDICATED',
+  settlementType: 'NONE',
+  basis: 'NONE',
+  accountType: 'NONE',
   fundInputMode: 'BANK_UPLOAD',
+  settlementSheetPolicy: createSettlementSheetPolicy('STANDARD'),
   paymentPlanDesc: '',
   settlementGuide: '',
   projectPurpose: '',
@@ -359,7 +368,10 @@ export function PortalProjectRegister() {
           ...prev,
           ...draft.form,
           financialInputFlags: normalizeProjectFinancialInputFlags(draft.form?.financialInputFlags),
+          settlementType: normalizeSettlementType(draft.form?.settlementType),
+          basis: normalizeBasis(draft.form?.basis),
           fundInputMode: normalizeProjectFundInputMode(draft.form?.fundInputMode),
+          settlementSheetPolicy: normalizeSettlementSheetPolicy(draft.form?.settlementSheetPolicy, draft.form?.fundInputMode),
         }));
         if (draft.step) setStep(draft.step);
         toast.info('이전에 작성 중이던 내용을 불러왔습니다.');
@@ -442,6 +454,18 @@ export function PortalProjectRegister() {
 
   const update = (key: keyof ProjectProposalDraft, value: ProjectProposalDraft[keyof ProjectProposalDraft]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
+  };
+  const updateFundInputMode = (nextMode: ProjectFundInputMode) => {
+    setForm((prev) => {
+      const shouldResetPolicy = prev.settlementSheetPolicy.preset === getDefaultSettlementSheetPolicyForFundInputMode(prev.fundInputMode).preset;
+      return {
+        ...prev,
+        fundInputMode: nextMode,
+        settlementSheetPolicy: shouldResetPolicy
+          ? getDefaultSettlementSheetPolicyForFundInputMode(nextMode)
+          : prev.settlementSheetPolicy,
+      };
+    });
   };
 
   const updateFinancialFlag = useCallback((
@@ -596,6 +620,7 @@ export function PortalProjectRegister() {
       const payload = {
         ...form,
         financialInputFlags,
+        settlementSheetPolicy: normalizeSettlementSheetPolicy(form.settlementSheetPolicy, form.fundInputMode),
         teamMembersDetailed: normalizedTeamMembers,
         teamMembers: teamMembersSummary === '-' ? '' : teamMembersSummary,
       };
@@ -1259,7 +1284,7 @@ export function PortalProjectRegister() {
                 </div>
                 <div>
                   <Label className="text-[11px]">자금 입력 방식</Label>
-                  <Select value={form.fundInputMode} onValueChange={(value) => update('fundInputMode', value as ProjectFundInputMode)}>
+                  <Select value={form.fundInputMode} onValueChange={(value) => updateFundInputMode(value as ProjectFundInputMode)}>
                     <SelectTrigger className="mt-1 h-9 text-[12px]">
                       <SelectValue />
                     </SelectTrigger>
@@ -1276,6 +1301,11 @@ export function PortalProjectRegister() {
                   </p>
                 </div>
               </div>
+
+              <SettlementSheetPolicyFields
+                policy={form.settlementSheetPolicy}
+                onChange={(next) => update('settlementSheetPolicy', next)}
+              />
 
               <div>
                 <Label className="text-[11px]">선금/중도금/잔금 비율(%) 및 금액, 입금예상시점</Label>
@@ -1481,6 +1511,7 @@ export function PortalProjectRegister() {
                   <ReviewRow label="정산 기준" value={BASIS_LABELS[form.basis]} />
                   <ReviewRow label="통장 유형" value={ACCOUNT_TYPE_LABELS[form.accountType]} />
                   <ReviewRow label="자금 입력 방식" value={PROJECT_FUND_INPUT_MODE_LABELS[form.fundInputMode]} />
+                  <ReviewRow label="정산 시트 정책" value={formatSettlementSheetPolicySummary(form.settlementSheetPolicy)} />
                   <ReviewRow label="입금 계획" value={form.paymentPlanDesc || '-'} />
                   <ReviewRow label="사업비 수령/정산" value={form.settlementGuide || '-'} />
                 </SummaryCard>

@@ -8,8 +8,14 @@ import { toast } from 'sonner';
 import { detectKeyRuleContext, runKeyRules, type KeyRule } from '../../platform/settlement-grid-keymap';
 import { grid2tsv, html2grid, isSpreadsheetHtml, parseTsvRows } from '../../platform/settlement-grid-clipboard';
 import { BUDGET_CODE_BOOK } from '../../data/budget-data';
-import type { BudgetCodeEntry, Comment, Transaction } from '../../data/types';
-import type { ProjectFundInputMode } from '../../data/types';
+import type {
+  BudgetCodeEntry,
+  Comment,
+  Transaction,
+  ProjectFundInputMode,
+  SettlementSheetPolicy,
+} from '../../data/types';
+import { normalizeSettlementSheetPolicy } from '../../data/types';
 import { parseNumber } from '../../platform/csv-utils';
 import {
   computeEvidenceStatus,
@@ -145,6 +151,7 @@ export function ImportEditor({
   sourceTransactions = [],
   onFetchBudgetSuggestion,
   workflowMode = 'BANK_UPLOAD',
+  settlementSheetPolicy,
   pendingQuickInsert,
   onPendingQuickInsertHandled,
 }: {
@@ -175,9 +182,14 @@ export function ImportEditor({
   sourceTransactions?: Transaction[];
   onFetchBudgetSuggestion?: (counterparty: string) => Promise<{ budgetCategory: string; budgetSubCategory: string } | null>;
   workflowMode?: ProjectFundInputMode;
+  settlementSheetPolicy?: SettlementSheetPolicy;
   pendingQuickInsert?: PendingQuickInsert | null;
   onPendingQuickInsertHandled?: () => void;
 }) {
+  const resolvedPolicy = useMemo(
+    () => normalizeSettlementSheetPolicy(settlementSheetPolicy, workflowMode),
+    [settlementSheetPolicy, workflowMode],
+  );
   const meaningfulRows = useMemo(
     () => rows.filter((row) => isSettlementRowMeaningful(row)),
     [rows],
@@ -440,6 +452,7 @@ export function ImportEditor({
       projectId,
       defaultLedgerId,
       rowIdx,
+      { policy: resolvedPolicy },
     );
     if (parsed.error || !parsed.transaction) {
       toast.error(parsed.error || '거래 정보를 먼저 입력하세요.');
@@ -565,8 +578,8 @@ export function ImportEditor({
   }, [clearUploadDrafts, onUploadEvidenceDriveById, uploadDrafts, uploadTargetTxId]);
 
   const settlementDerivationContext = useMemo(
-    () => buildSettlementDerivationContext(projectId, defaultLedgerId),
-    [projectId, defaultLedgerId],
+    () => buildSettlementDerivationContext(projectId, defaultLedgerId, resolvedPolicy),
+    [projectId, defaultLedgerId, resolvedPolicy],
   );
 
   const updateCell = useCallback(
@@ -706,6 +719,10 @@ export function ImportEditor({
   }, [rows, getSelectionAnchor, commitRows, getPreferredEditableCol]);
 
   const addQuickInsertRow = useCallback((kind: SettlementQuickInsertKind) => {
+    if (kind === 'ADJUSTMENT' && !resolvedPolicy.allowAdjustmentRows) {
+      toast.message('현재 사업 정책에서는 잔액 조정 행을 사용할 수 없습니다.');
+      return;
+    }
     const preparedRow = createQuickEntryImportRow(kind);
     const focusColIdx = kind === 'DEPOSIT'
       ? (depositIdx >= 0 ? depositIdx : bankAmountIdx)
@@ -713,7 +730,7 @@ export function ImportEditor({
         ? (expenseIdx >= 0 ? expenseIdx : bankAmountIdx)
         : (balanceIdx >= 0 ? balanceIdx : bankAmountIdx);
     insertPreparedRow(preparedRow, focusColIdx >= 0 ? focusColIdx : undefined);
-  }, [insertPreparedRow, depositIdx, expenseIdx, balanceIdx, bankAmountIdx]);
+  }, [insertPreparedRow, depositIdx, expenseIdx, balanceIdx, bankAmountIdx, resolvedPolicy.allowAdjustmentRows]);
 
   const addRows = useCallback((count: number) => {
     if (count <= 0) return;
@@ -802,6 +819,10 @@ export function ImportEditor({
   ]);
 
   const removeSelectedRows = useCallback(() => {
+    if (!resolvedPolicy.allowRowDelete) {
+      toast.message('현재 사업 정책에서는 행 삭제가 잠겨 있습니다.');
+      return false;
+    }
     const bounds = getActiveSelectionBounds();
     if (!bounds) return false;
     const nextRows = deleteSelectedRows(rows, bounds);
@@ -816,7 +837,7 @@ export function ImportEditor({
         : null,
     );
     return true;
-  }, [commitRows, getActiveSelectionBounds, getPreferredEditableCol, pushUndoSnapshot, rows]);
+  }, [commitRows, getActiveSelectionBounds, getPreferredEditableCol, pushUndoSnapshot, resolvedPolicy.allowRowDelete, rows]);
 
   const clearAllRows = useCallback(() => {
     if (rows.length === 0) {
@@ -1307,6 +1328,10 @@ export function ImportEditor({
 
   const removeRow = useCallback(
     (rowIdx: number) => {
+      if (!resolvedPolicy.allowRowDelete) {
+        toast.message('현재 사업 정책에서는 행 삭제가 잠겨 있습니다.');
+        return;
+      }
       const nextRows = deleteSelectedRows(rows, { r1: rowIdx, r2: rowIdx, c1: 0, c2: SETTLEMENT_COLUMNS.length - 1 });
       if (nextRows === rows) return;
       pushUndoSnapshot();
@@ -1314,7 +1339,7 @@ export function ImportEditor({
       const nextFocusRow = Math.min(Math.max(0, rowIdx - 1), Math.max(0, nextRows.length - 1));
       commitRows(nextRows, nextRows.length > 0 ? { rowIdx: nextFocusRow, colIdx: getPreferredEditableCol() } : null);
     },
-    [rows, pushUndoSnapshot, commitRows, getPreferredEditableCol],
+    [rows, pushUndoSnapshot, commitRows, getPreferredEditableCol, resolvedPolicy.allowRowDelete],
   );
 
   const applyEvidenceMapping = useCallback((rowIdx?: number) => {
@@ -1329,7 +1354,7 @@ export function ImportEditor({
         const cells = [...r.cells];
         cells[evidenceIdx] = mapped;
         const updated: ImportRow = { ...r, cells };
-        const result = importRowToTransaction(updated, projectId, defaultLedgerId, i);
+        const result = importRowToTransaction(updated, projectId, defaultLedgerId, i, { policy: resolvedPolicy });
         updated.error = result.error;
         return updated;
       })
@@ -1341,7 +1366,7 @@ export function ImportEditor({
         const cells = [...r.cells];
         cells[evidenceIdx] = mapped;
         const updated: ImportRow = { ...r, cells };
-        const result = importRowToTransaction(updated, projectId, defaultLedgerId, rowIdx);
+        const result = importRowToTransaction(updated, projectId, defaultLedgerId, rowIdx, { policy: resolvedPolicy });
         updated.error = result.error;
         return updated;
       });
@@ -1440,15 +1465,17 @@ export function ImportEditor({
                 <Plus className="h-3.5 w-3.5" />
                 지출 추가
               </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 text-[11px] gap-1 cursor-pointer shadow-sm hover:bg-muted/40"
-                onClick={() => addQuickInsertRow('ADJUSTMENT')}
-              >
-                <Plus className="h-3.5 w-3.5" />
-                조정
-              </Button>
+              {resolvedPolicy.allowAdjustmentRows && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-[11px] gap-1 cursor-pointer shadow-sm hover:bg-muted/40"
+                  onClick={() => addQuickInsertRow('ADJUSTMENT')}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  잔액 조정
+                </Button>
+              )}
             </>
           )}
           <DropdownMenu>
@@ -1501,7 +1528,7 @@ export function ImportEditor({
             onClick={() => {
               void removeSelectedRows();
             }}
-            disabled={selectedRowIdx < 0 || rows.length === 0}
+            disabled={selectedRowIdx < 0 || rows.length === 0 || !resolvedPolicy.allowRowDelete}
           >
             <X className="h-3.5 w-3.5" />
             선택 행 삭제
@@ -1665,6 +1692,7 @@ export function ImportEditor({
                 onRowChange={(updater) => updateRow(rowIdx, updater)}
                 onRemove={() => removeRow(rowIdx)}
                 onInsertBelow={() => insertRowAt(rowIdx + 1)}
+                settlementSheetPolicy={resolvedPolicy}
                 onPasteRange={applyPaste}
                 onCellFocus={handleCellFocus}
                 onCellMouseDown={handleCellMouseDown}

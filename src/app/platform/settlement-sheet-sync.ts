@@ -61,10 +61,14 @@ function resolveActualAmount(
   lineId: string,
   bankAmountIdx: number,
   expenseAmountIdx: number,
+  vatInIdx: number,
 ): number {
   const bankAmount = bankAmountIdx >= 0 ? (parseNumber(row.cells[bankAmountIdx]) ?? 0) : 0;
   if (CASHFLOW_IN_LINE_IDS.has(lineId)) {
     return bankAmount;
+  }
+  if (lineId === 'INPUT_VAT_OUT') {
+    return vatInIdx >= 0 ? (parseNumber(row.cells[vatInIdx]) ?? 0) : 0;
   }
   const expenseAmount = expenseAmountIdx >= 0 ? (parseNumber(row.cells[expenseAmountIdx]) ?? 0) : 0;
   return expenseAmount || bankAmount;
@@ -80,6 +84,7 @@ export function buildSettlementActualSyncPayload(
   const cashflowIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === 'cashflow항목');
   const bankAmountIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '통장에 찍힌 입/출금액');
   const expenseAmountIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '사업비 사용액');
+  const vatInIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '매입부가세');
 
   const byWeek = new Map<string, Record<string, number>>();
   const weekLabels = new Set<string>();
@@ -100,8 +105,8 @@ export function buildSettlementActualSyncPayload(
     const cashflowLabel = cashflowIdx >= 0 ? String(row.cells[cashflowIdx] || '').trim() : '';
     if (!weekLabel || !cashflowLabel) continue;
     const lineId = parseCashflowLineLabel(cashflowLabel);
-    if (!lineId || lineId === 'INPUT_VAT_OUT') continue;
-    const amount = resolveActualAmount(row, lineId, bankAmountIdx, expenseAmountIdx);
+    if (!lineId) continue;
+    const amount = resolveActualAmount(row, lineId, bankAmountIdx, expenseAmountIdx, vatInIdx);
     if (amount === 0) continue;
     const target = byWeek.get(weekLabel) || {};
     target[lineId] = (target[lineId] || 0) + amount;

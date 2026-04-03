@@ -6,6 +6,7 @@ import type {
   BudgetCodeEntry,
   Comment,
   ProjectFundInputMode,
+  SettlementSheetPolicy,
   Transaction,
   TransactionState,
 } from '../../data/types';
@@ -95,6 +96,7 @@ export interface SettlementLedgerProps {
   /** 거래처 이름으로 비목/세목 히스토리 제안을 요청하는 콜백. 제공 시에만 제안 칩 표시. */
   onFetchBudgetSuggestion?: (counterparty: string) => Promise<{ budgetCategory: string; budgetSubCategory: string } | null>;
   workflowMode?: ProjectFundInputMode;
+  settlementSheetPolicy?: SettlementSheetPolicy;
   pendingQuickInsert?: import('./ImportEditor').PendingQuickInsert | null;
   onPendingQuickInsertHandled?: () => void;
 }
@@ -131,6 +133,7 @@ export function SettlementLedgerPage({
   allowEditSubmitted = false,
   onFetchBudgetSuggestion,
   workflowMode = 'BANK_UPLOAD',
+  settlementSheetPolicy,
   pendingQuickInsert,
   onPendingQuickInsertHandled,
 }: SettlementLedgerProps) {
@@ -723,6 +726,7 @@ export function SettlementLedgerPage({
             onEnsureTransactionPersisted={onEnsureTransactionPersisted}
             sourceTransactions={allTransactions}
             workflowMode={workflowMode}
+            settlementSheetPolicy={settlementSheetPolicy}
             pendingQuickInsert={pendingQuickInsert}
             onPendingQuickInsertHandled={onPendingQuickInsertHandled}
           />
@@ -894,6 +898,7 @@ export function SettlementLedgerPage({
           sourceTransactions={allTransactions}
           onFetchBudgetSuggestion={onFetchBudgetSuggestion}
           workflowMode={workflowMode}
+          settlementSheetPolicy={settlementSheetPolicy}
           pendingQuickInsert={pendingQuickInsert}
           onPendingQuickInsertHandled={onPendingQuickInsertHandled}
         />

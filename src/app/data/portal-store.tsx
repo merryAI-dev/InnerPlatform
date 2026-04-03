@@ -30,6 +30,7 @@ import type {
   ProjectRequest,
   ProjectRequestPayload,
 } from './types';
+import { normalizeSettlementSheetPolicy } from './types';
 import type { ExpenseSet, ExpenseItem, ExpenseSetStatus } from './budget-data';
 import { BUDGET_CODE_BOOK, EXPENSE_SETS } from './budget-data';
 import {
@@ -1220,6 +1221,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       projectId: portalUser?.projectId || '',
       defaultLedgerId,
       evidenceRequiredMap,
+      policy: normalizeSettlementSheetPolicy(myProject?.settlementSheetPolicy, myProject?.fundInputMode),
     });
     const sanitizedRows = preparedRows.map((row) => ({
       tempId: row.tempId || `imp-${Date.now()}`,
@@ -1556,6 +1558,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       basis: payload.basis,
       accountType: payload.accountType,
       fundInputMode: payload.fundInputMode,
+      settlementSheetPolicy: normalizeSettlementSheetPolicy(payload.settlementSheetPolicy, payload.fundInputMode),
       paymentPlan: { contract: 0, interim: 0, final: 0 },
       paymentPlanDesc: payload.paymentPlanDesc,
       clientOrg: payload.clientOrg,
