@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { FolderKanban, AlertCircle, CheckCircle2, ExternalLink, Loader2 } from 'lucide-react';
+import { FolderKanban, AlertCircle, CheckCircle2, ExternalLink, Loader2, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
+import { Input } from '../ui/input';
 import { usePortalStore } from '../../data/portal-store';
-import { PROJECT_STATUS_LABELS, type Project } from '../../data/types';
+import { PROJECT_STATUS_LABELS, PROJECT_TYPE_LABELS, type Project } from '../../data/types';
 import { normalizeProjectIds, resolvePrimaryProjectId } from '../../data/project-assignment';
 import { useAuth } from '../../data/auth-store';
 import { canEnterPortalWorkspace } from '../../platform/navigation';
@@ -33,6 +34,7 @@ export function PortalProjectSettings() {
   const { orgId } = useFirebase();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [projectSearch, setProjectSearch] = useState('');
   const [driveRootInputs, setDriveRootInputs] = useState<Record<string, string>>({});
   const [driveSavingProjectId, setDriveSavingProjectId] = useState('');
   const [driveProvisioningProjectId, setDriveProvisioningProjectId] = useState('');
@@ -79,6 +81,45 @@ export function PortalProjectSettings() {
   const selectedProjects = useMemo(
     () => allProjects.filter((project) => projectIds.includes(project.id)),
     [allProjects, projectIds],
+  );
+  const filteredProjects = useMemo(() => {
+    const keyword = projectSearch.trim().toLowerCase();
+    if (!keyword) return allProjects;
+    return allProjects.filter((project) => {
+      const statusLabel = PROJECT_STATUS_LABELS[project.status] || project.status;
+      const projectTypeLabel = PROJECT_TYPE_LABELS[project.projectType] || project.projectType || '';
+      const haystack = [
+        project.name,
+        getClientLabel(project),
+        statusLabel,
+        projectTypeLabel,
+        project.managerName || '',
+        String(project.contractStart || ''),
+      ]
+        .join(' ')
+        .toLowerCase();
+      return haystack.includes(keyword);
+    });
+  }, [allProjects, projectSearch]);
+  const visibleProjects = useMemo(() => {
+    const sorted = [...filteredProjects].sort((left, right) => {
+      const leftSelected = projectIds.includes(left.id);
+      const rightSelected = projectIds.includes(right.id);
+      const leftPrimary = left.id === primaryProjectId;
+      const rightPrimary = right.id === primaryProjectId;
+      if (leftPrimary !== rightPrimary) return leftPrimary ? -1 : 1;
+      if (leftSelected !== rightSelected) return leftSelected ? -1 : 1;
+      return left.name.localeCompare(right.name, 'ko');
+    });
+    return sorted;
+  }, [filteredProjects, projectIds, primaryProjectId]);
+  const visibleSelectedProjects = useMemo(
+    () => visibleProjects.filter((project) => projectIds.includes(project.id)),
+    [visibleProjects, projectIds],
+  );
+  const visibleUnselectedProjects = useMemo(
+    () => visibleProjects.filter((project) => !projectIds.includes(project.id)),
+    [visibleProjects, projectIds],
   );
   const bffActor = useMemo(() => ({
     uid: authUser?.uid || portalUser?.id || 'portal-user',
@@ -230,10 +271,10 @@ export function PortalProjectSettings() {
     );
   }
 
-  const getClientLabel = (project: Project) => {
+  function getClientLabel(project: Project) {
     const maybeName = (project as unknown as { clientName?: string }).clientName;
     return project.clientOrg || maybeName || '클라이언트 미지정';
-  };
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-teal-50/30 dark:from-slate-950 dark:to-teal-950/10 flex items-center justify-center p-4">
@@ -282,8 +323,109 @@ export function PortalProjectSettings() {
               </p>
             </div>
 
+            {allProjects.length > 0 && (
+              <div className="space-y-2">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={projectSearch}
+                    onChange={(event) => setProjectSearch(event.target.value)}
+                    placeholder="사업명, 클라이언트, 유형, 담당자로 검색"
+                    className="h-10 pl-9 text-[12px]"
+                  />
+                </div>
+                <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                  <span>
+                    {projectSearch.trim()
+                      ? `${visibleProjects.length}개 검색 결과 · 선택 ${visibleSelectedProjects.length}개`
+                      : `${allProjects.length}개 전체 사업 · 선택 ${projectIds.length}개`}
+                  </span>
+                  {projectSearch.trim() ? (
+                    <button
+                      type="button"
+                      className="text-teal-700 hover:text-teal-800"
+                      onClick={() => setProjectSearch('')}
+                    >
+                      검색 지우기
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            )}
+
             <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
-              {allProjects.map((project) => {
+              {visibleSelectedProjects.length > 0 && (
+                <div className="sticky top-0 z-10 rounded-lg border border-amber-200/70 bg-amber-50/95 px-3 py-2 text-[11px] text-amber-800 backdrop-blur-sm">
+                  선택한 사업과 주사업이 먼저 보입니다.
+                </div>
+              )}
+              {visibleProjects.length > 0 && visibleSelectedProjects.length > 0 && (
+                <div className="px-1 pt-1 text-[11px] font-medium text-slate-700">
+                  선택한 사업
+                </div>
+              )}
+              {visibleSelectedProjects.map((project) => {
+                const selected = projectIds.includes(project.id);
+                const isPrimary = primaryProjectId === project.id;
+                const statusLabel = PROJECT_STATUS_LABELS[project.status] || project.status;
+                return (
+                  <div
+                    key={project.id}
+                    className={`flex items-center justify-between gap-3 rounded-xl border p-4 transition-all ${
+                      selected
+                        ? 'border-teal-400 bg-teal-50 shadow-sm shadow-teal-200/40 ring-1 ring-teal-200'
+                        : 'border-border/60 bg-white/80 hover:border-teal-200 hover:bg-teal-50/30'
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-[13px]" style={{ fontWeight: 600 }}>{project.name}</span>
+                        <Badge className={`text-[10px] ${statusColors[project.status] || 'bg-slate-100 text-slate-700'}`}>{statusLabel}</Badge>
+                        <Badge className="bg-teal-600 text-white text-[10px]">
+                          <CheckCircle2 className="mr-1 h-3 w-3" />
+                          선택한 사업
+                        </Badge>
+                        {isPrimary ? (
+                          <Badge className="bg-amber-100 text-amber-800 text-[10px] border border-amber-200">
+                            주사업
+                          </Badge>
+                        ) : null}
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">{getClientLabel(project)}</p>
+                      <p className="mt-1 text-[11px] text-teal-800">
+                        {isPrimary ? '이 사업이 현재 기본 사업으로 저장됩니다.' : '선택된 사업입니다. 필요하면 주사업으로 바꾸세요.'}
+                      </p>
+                    </div>
+
+                    <div className="flex shrink-0 items-center gap-2">
+                      <Button
+                        variant={isPrimary ? 'default' : 'outline'}
+                        className={`h-9 text-[11px] ${isPrimary ? 'bg-amber-500 hover:bg-amber-500/90 text-white border-amber-500' : ''}`}
+                        onClick={() => selectPrimary(project.id)}
+                      >
+                        {isPrimary ? (
+                          <><CheckCircle2 className="w-3 h-3 mr-1" /> 주사업 선택 완료</>
+                        ) : (
+                          '주사업으로 지정'
+                        )}
+                      </Button>
+                      <Button
+                        variant="default"
+                        className="h-9 text-[11px] bg-teal-600 hover:bg-teal-600/90"
+                        onClick={() => toggleProject(project.id)}
+                      >
+                        선택 취소
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+              {visibleUnselectedProjects.length > 0 && (
+                <div className="px-1 pt-2 text-[11px] font-medium text-slate-700">
+                  {visibleSelectedProjects.length > 0 ? '추가 가능한 사업' : '사업 목록'}
+                </div>
+              )}
+              {visibleUnselectedProjects.map((project) => {
                 const selected = projectIds.includes(project.id);
                 const isPrimary = primaryProjectId === project.id;
                 const statusLabel = PROJECT_STATUS_LABELS[project.status] || project.status;
@@ -347,6 +489,11 @@ export function PortalProjectSettings() {
                   </div>
                 );
               })}
+              {allProjects.length > 0 && visibleProjects.length === 0 && (
+                <div className="rounded-xl border border-dashed border-border px-4 py-8 text-center text-[12px] text-muted-foreground">
+                  검색 결과가 없습니다. 다른 키워드로 다시 찾아보세요.
+                </div>
+              )}
             </div>
 
             {selectedProjects.length > 0 && (

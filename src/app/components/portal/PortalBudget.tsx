@@ -13,6 +13,8 @@ import {
 import {
   Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
 } from '../ui/tooltip';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
+import { Textarea } from '../ui/textarea';
 import { PageHeader } from '../layout/PageHeader';
 import { usePortalStore } from '../../data/portal-store';
 import { toast } from 'sonner';
@@ -53,6 +55,120 @@ function burnColor(rate: number): string {
   return '#94a3b8';
 }
 
+interface BudgetCodeImportPreview {
+  rows: BudgetCodeEntry[];
+  totalPairs: number;
+  duplicatePairs: number;
+  skippedRows: number;
+  headerDetected: boolean;
+  samplePairs: Array<{ code: string; subCode: string }>;
+}
+
+function parseCsvCells(line: string): string[] {
+  const cells: string[] = [];
+  let current = '';
+  let inQuotes = false;
+  for (let idx = 0; idx < line.length; idx += 1) {
+    const ch = line[idx];
+    if (ch === '"') {
+      if (inQuotes && line[idx + 1] === '"') {
+        current += '"';
+        idx += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+    if (ch === ',' && !inQuotes) {
+      cells.push(current);
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  cells.push(current);
+  return cells.map((cell) => cell.trim());
+}
+
+function looksLikeBudgetCodeHeader(code: string, subCode: string): boolean {
+  const left = normalizeBudgetLabel(code).replace(/\s+/g, '').toLowerCase();
+  const right = normalizeBudgetLabel(subCode).replace(/\s+/g, '').toLowerCase();
+  const codeCandidates = new Set(['비목', 'budgetcode', 'budgetcategory', 'category']);
+  const subCandidates = new Set(['세목', 'subcode', 'subcategory', 'detailcategory']);
+  return codeCandidates.has(left) && subCandidates.has(right);
+}
+
+function parseBudgetCodeImportText(text: string): BudgetCodeImportPreview {
+  const grouped = new Map<string, { code: string; subCodes: string[]; seenSubs: Set<string> }>();
+  const samplePairs: Array<{ code: string; subCode: string }> = [];
+  const seenPairs = new Set<string>();
+  const lines = text.split(/\r?\n/);
+  let totalPairs = 0;
+  let duplicatePairs = 0;
+  let skippedRows = 0;
+  let headerDetected = false;
+  let processedLineCount = 0;
+
+  lines.forEach((rawLine) => {
+    const line = rawLine.trim();
+    if (!line) return;
+    const cells = line.includes('\t') ? line.split('\t').map((cell) => cell.trim()) : parseCsvCells(line);
+    const rawCode = String(cells[0] || '').trim();
+    const rawSubCode = String(cells[1] || '').trim();
+    if (!rawCode || !rawSubCode) {
+      skippedRows += 1;
+      return;
+    }
+    if (processedLineCount === 0 && looksLikeBudgetCodeHeader(rawCode, rawSubCode)) {
+      headerDetected = true;
+      processedLineCount += 1;
+      return;
+    }
+    processedLineCount += 1;
+
+    const codeKey = normalizeBudgetLabel(rawCode);
+    const subKey = normalizeBudgetLabel(rawSubCode);
+    if (!codeKey || !subKey) {
+      skippedRows += 1;
+      return;
+    }
+
+    const pairKey = `${codeKey}|${subKey}`;
+    if (seenPairs.has(pairKey)) {
+      duplicatePairs += 1;
+      return;
+    }
+    seenPairs.add(pairKey);
+    totalPairs += 1;
+
+    const existing = grouped.get(codeKey);
+    if (existing) {
+      if (!existing.seenSubs.has(subKey)) {
+        existing.subCodes.push(rawSubCode);
+        existing.seenSubs.add(subKey);
+      }
+    } else {
+      grouped.set(codeKey, {
+        code: rawCode,
+        subCodes: [rawSubCode],
+        seenSubs: new Set([subKey]),
+      });
+    }
+    if (samplePairs.length < 6) {
+      samplePairs.push({ code: rawCode, subCode: rawSubCode });
+    }
+  });
+
+  return {
+    rows: Array.from(grouped.values()).map((entry) => ({ code: entry.code, subCodes: entry.subCodes })),
+    totalPairs,
+    duplicatePairs,
+    skippedRows,
+    headerDetected,
+    samplePairs,
+  };
+}
+
 export function PortalBudget() {
   const {
     myProject,
@@ -75,6 +191,10 @@ export function PortalBudget() {
     note: string;
   }>>([]);
   const [draftCodeBook, setDraftCodeBook] = useState<BudgetCodeEntry[]>([]);
+  const [codeBookEditorTab, setCodeBookEditorTab] = useState<'manual' | 'paste' | 'csv'>('manual');
+  const [codeBookImportText, setCodeBookImportText] = useState('');
+  const [codeBookImportFileName, setCodeBookImportFileName] = useState('');
+  const [codeBookReplaceMode, setCodeBookReplaceMode] = useState(false);
   const [draggedSubCode, setDraggedSubCode] = useState<{ codeIdx: number; subIdx: number } | null>(null);
   const [dropTarget, setDropTarget] = useState<{
     codeIdx: number;
@@ -129,6 +249,11 @@ export function PortalBudget() {
   const activeCodeBook = useMemo(
     () => budgetCodeBook,
     [budgetCodeBook],
+  );
+
+  const codeBookImportPreview = useMemo(
+    () => parseBudgetCodeImportText(codeBookImportText),
+    [codeBookImportText],
   );
 
   const formatInput = useCallback((value: string) => {
@@ -302,6 +427,10 @@ export function PortalBudget() {
 
   const startCodeBookEdit = useCallback(() => {
     setDraftCodeBook(budgetCodeBook.map((c) => ({ code: c.code, subCodes: [...c.subCodes] })));
+    setCodeBookEditorTab('manual');
+    setCodeBookImportText('');
+    setCodeBookImportFileName('');
+    setCodeBookReplaceMode(false);
     setCodeBookMode(true);
   }, [budgetCodeBook]);
 
@@ -310,8 +439,39 @@ export function PortalBudget() {
     setCodeBookMode(false);
     setDraftRows([]);
     setDraftCodeBook([]);
+    setCodeBookEditorTab('manual');
+    setCodeBookImportText('');
+    setCodeBookImportFileName('');
+    setCodeBookReplaceMode(false);
     setDraggedSubCode(null);
     setDropTarget(null);
+  }, []);
+
+  const applyImportedCodeBook = useCallback(() => {
+    if (codeBookImportPreview.rows.length === 0) {
+      toast.error('가져올 비목/세목 구조를 먼저 입력해 주세요.');
+      return;
+    }
+    setDraftCodeBook(codeBookImportPreview.rows.map((entry) => ({
+      code: entry.code,
+      subCodes: [...entry.subCodes],
+    })));
+    setCodeBookReplaceMode(true);
+    setCodeBookEditorTab('manual');
+    toast.success(`비목 ${codeBookImportPreview.rows.length}개, 세목 ${codeBookImportPreview.totalPairs}건을 구조 초안으로 불러왔습니다.`);
+  }, [codeBookImportPreview]);
+
+  const handleCodeBookImportFile = useCallback(async (file: File | null) => {
+    if (!file) return;
+    try {
+      const text = await file.text();
+      setCodeBookImportText(text);
+      setCodeBookImportFileName(file.name);
+      setCodeBookEditorTab('csv');
+    } catch (error) {
+      console.error('[PortalBudget] code book file import failed:', error);
+      toast.error('CSV 파일을 읽지 못했습니다.');
+    }
   }, []);
 
   const buildCodeBookRenames = useCallback((): BudgetCodeRename[] => {
@@ -359,7 +519,7 @@ export function PortalBudget() {
     setSettingsSaving(true);
     try {
       if (codeBookMode && saveBudgetCodeBook && draftCodeBook.length > 0) {
-        const renames = buildCodeBookRenames();
+        const renames = codeBookReplaceMode ? [] : buildCodeBookRenames();
         await saveBudgetCodeBook(draftCodeBook, renames);
       }
       if (editMode) {
@@ -369,14 +529,18 @@ export function PortalBudget() {
       setCodeBookMode(false);
       setDraftRows([]);
       setDraftCodeBook([]);
-      toast.success(codeBookMode && !editMode ? '비목/세목이 저장되었습니다.' : '예산이 저장되었습니다.');
+      setCodeBookEditorTab('manual');
+      setCodeBookImportText('');
+      setCodeBookImportFileName('');
+      setCodeBookReplaceMode(false);
+      toast.success(codeBookMode && !editMode ? '예산 항목 구조가 저장되었습니다.' : '예산이 저장되었습니다.');
     } catch (err) {
       console.error('[PortalBudget] save failed:', err);
-      toast.error(codeBookMode && !editMode ? '비목/세목 저장에 실패했습니다.' : '예산 저장에 실패했습니다.');
+      toast.error(codeBookMode && !editMode ? '예산 항목 구조 저장에 실패했습니다.' : '예산 저장에 실패했습니다.');
     } finally {
       setSettingsSaving(false);
     }
-  }, [draftRows, draftCodeBook, saveBudgetPlanRows, saveBudgetCodeBook, editMode, codeBookMode, buildCodeBookRenames]);
+  }, [draftRows, draftCodeBook, saveBudgetPlanRows, saveBudgetCodeBook, editMode, codeBookMode, buildCodeBookRenames, codeBookReplaceMode]);
 
   const budgetItems = useMemo(() => {
     const items: BudgetRow[] = activeCodeBook.flatMap((entry, codeIdx) => (
@@ -538,9 +702,9 @@ export function PortalBudget() {
                   <Button variant="default" size="sm" className="h-8 text-[12px] shadow-sm" onClick={startEdit}>
                     예산 편집
                   </Button>
-                  <Button variant="default" size="sm" className="h-8 text-[12px] gap-1 shadow-sm" onClick={startCodeBookEdit}>
+                  <Button variant="outline" size="sm" className="h-8 text-[12px] gap-1" onClick={startCodeBookEdit}>
                     <Settings className="w-3.5 h-3.5" />
-                    비목/세목 수정
+                    구조 관리
                   </Button>
                 </>
               ) : null}
@@ -551,107 +715,237 @@ export function PortalBudget() {
         <Dialog open={codeBookMode} onOpenChange={(open) => !open && cancelEdit()}>
           <DialogContent className="max-w-2xl max-h-[85vh] overflow-hidden">
             <DialogHeader>
-              <DialogTitle className="text-[14px]">비목/세목 수정</DialogTitle>
+              <DialogTitle className="text-[14px]">예산 항목 구조 관리</DialogTitle>
             </DialogHeader>
             <div className="flex max-h-[calc(85vh-4rem)] flex-col gap-3">
-              <div className="flex items-center justify-between">
-                <p className="text-[11px] text-muted-foreground">세목은 드래그해서 순서를 바꿀 수 있습니다.</p>
-                <Button variant="outline" size="sm" className="h-7 text-[11px] gap-1" onClick={addBudgetCode}>
-                  <Plus className="w-3.5 h-3.5" />
-                  비목 추가
-                </Button>
+              <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
+                <p className="text-[11px] font-medium text-foreground">현재 예산 표에 쓰이는 비목/세목 구조를 관리합니다.</p>
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  숫자 편집과 별개 흐름입니다. 붙여넣기 또는 CSV 가져오기는 현재 구조 초안을 교체하고, 저장 전까지는 실제 예산에 반영되지 않습니다.
+                </p>
               </div>
-              <div className="min-h-0 flex-1 space-y-3 overflow-y-scroll pr-2">
-                {draftCodeBook.map((entry, idx) => (
-                  <div key={`code-${idx}`} className="rounded-md border border-border/60 p-3 space-y-2">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] text-muted-foreground min-w-[24px]">{idx + 1}</span>
-                      <input
-                        type="text"
-                        value={entry.code}
-                        placeholder="비목명"
-                        className="flex-1 bg-transparent outline-none text-[11px] px-2 py-1 border rounded"
-                        onChange={(e) => updateBudgetCode(idx, e.target.value)}
-                      />
-                      <Button variant="outline" size="sm" className="h-7 text-[10px] gap-1" onClick={() => addSubCode(idx)}>
-                        <Plus className="w-3 h-3" />
-                        세목 추가
-                      </Button>
-                      <Button variant="outline" size="sm" className="h-7 text-[10px] gap-1" onClick={() => removeBudgetCode(idx)}>
-                        <Trash2 className="w-3 h-3" />
-                        비목 삭제
-                      </Button>
-                    </div>
+              <Tabs value={codeBookEditorTab} onValueChange={(value) => setCodeBookEditorTab(value as 'manual' | 'paste' | 'csv')} className="min-h-0 flex-1">
+                <TabsList className="grid w-full grid-cols-3">
+                  <TabsTrigger value="manual" className="text-[11px]">직접 수정</TabsTrigger>
+                  <TabsTrigger value="paste" className="text-[11px]">엑셀 붙여넣기</TabsTrigger>
+                  <TabsTrigger value="csv" className="text-[11px]">CSV 가져오기</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="manual" className="min-h-0 flex-1 space-y-3">
+                  <div className="flex items-center justify-between">
                     <div className="space-y-1">
-                      {entry.subCodes.map((sub, sidx) => (
-                        <div
-                          key={`sub-${idx}-${sidx}`}
-                          className={[
-                            'flex items-center gap-2 rounded-md border border-transparent px-1 py-1',
-                            draggedSubCode?.codeIdx === idx && draggedSubCode.subIdx === sidx ? 'opacity-50' : '',
-                            dropTarget?.codeIdx === idx && dropTarget.subIdx === sidx && dropTarget.position === 'before'
-                              ? 'border-t-primary'
-                              : '',
-                            dropTarget?.codeIdx === idx && dropTarget.subIdx === sidx && dropTarget.position === 'after'
-                              ? 'border-b-primary'
-                              : '',
-                          ].join(' ')}
-                          draggable
-                          onDragStart={() => handleSubCodeDragStart(idx, sidx)}
-                          onDragOver={(event) => handleSubCodeDragOver(event, idx, sidx)}
-                          onDrop={() => handleSubCodeDrop(idx, sidx)}
-                          onDragEnd={handleSubCodeDragEnd}
-                        >
-                          <button
-                            type="button"
-                            className="flex h-7 w-7 shrink-0 cursor-grab items-center justify-center rounded border border-dashed border-border/80 text-muted-foreground active:cursor-grabbing"
-                            aria-label="세목 순서 드래그"
-                          >
-                            <GripVertical className="h-3.5 w-3.5" />
-                          </button>
-                          <span className="text-[10px] text-muted-foreground min-w-[28px]">{idx + 1}-{sidx + 1}</span>
+                      <p className="text-[11px] text-muted-foreground">세목은 드래그해서 순서를 바꿀 수 있습니다.</p>
+                      {codeBookReplaceMode ? (
+                        <p className="text-[10px] text-amber-600">가져온 구조 초안이 반영된 상태입니다. 저장하면 현재 비목/세목 구조가 교체됩니다.</p>
+                      ) : null}
+                    </div>
+                    <Button variant="outline" size="sm" className="h-7 text-[11px] gap-1" onClick={addBudgetCode}>
+                      <Plus className="w-3.5 h-3.5" />
+                      비목 추가
+                    </Button>
+                  </div>
+                  <div className="min-h-0 flex-1 space-y-3 overflow-y-scroll pr-2">
+                    {draftCodeBook.map((entry, idx) => (
+                      <div key={`code-${idx}`} className="rounded-md border border-border/60 p-3 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] text-muted-foreground min-w-[24px]">{idx + 1}</span>
                           <input
                             type="text"
-                            value={sub}
-                            placeholder="세목명"
+                            value={entry.code}
+                            placeholder="비목명"
                             className="flex-1 bg-transparent outline-none text-[11px] px-2 py-1 border rounded"
-                            onChange={(e) => updateSubCode(idx, sidx, e.target.value)}
+                            onChange={(e) => updateBudgetCode(idx, e.target.value)}
                           />
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-7 w-7 p-0"
-                            onClick={() => reorderSubCode(idx, sidx, 'up')}
-                            disabled={sidx === 0}
-                            aria-label="세목 위로 이동"
-                          >
-                            <ArrowUp className="w-3 h-3" />
+                          <Button variant="outline" size="sm" className="h-7 text-[10px] gap-1" onClick={() => addSubCode(idx)}>
+                            <Plus className="w-3 h-3" />
+                            세목 추가
                           </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-7 w-7 p-0"
-                            onClick={() => reorderSubCode(idx, sidx, 'down')}
-                            disabled={sidx === entry.subCodes.length - 1}
-                            aria-label="세목 아래로 이동"
-                          >
-                            <ArrowDown className="w-3 h-3" />
-                          </Button>
-                          <Button variant="outline" size="sm" className="h-7 text-[10px]" onClick={() => removeSubCode(idx, sidx)}>
+                          <Button variant="outline" size="sm" className="h-7 text-[10px] gap-1" onClick={() => removeBudgetCode(idx)}>
                             <Trash2 className="w-3 h-3" />
+                            비목 삭제
                           </Button>
                         </div>
-                      ))}
-                      {entry.subCodes.length === 0 && (
-                        <p className="text-[10px] text-muted-foreground">세목이 없습니다.</p>
-                      )}
-                    </div>
+                        <div className="space-y-1">
+                          {entry.subCodes.map((sub, sidx) => (
+                            <div
+                              key={`sub-${idx}-${sidx}`}
+                              className={[
+                                'flex items-center gap-2 rounded-md border border-transparent px-1 py-1',
+                                draggedSubCode?.codeIdx === idx && draggedSubCode.subIdx === sidx ? 'opacity-50' : '',
+                                dropTarget?.codeIdx === idx && dropTarget.subIdx === sidx && dropTarget.position === 'before'
+                                  ? 'border-t-primary'
+                                  : '',
+                                dropTarget?.codeIdx === idx && dropTarget.subIdx === sidx && dropTarget.position === 'after'
+                                  ? 'border-b-primary'
+                                  : '',
+                              ].join(' ')}
+                              draggable
+                              onDragStart={() => handleSubCodeDragStart(idx, sidx)}
+                              onDragOver={(event) => handleSubCodeDragOver(event, idx, sidx)}
+                              onDrop={() => handleSubCodeDrop(idx, sidx)}
+                              onDragEnd={handleSubCodeDragEnd}
+                            >
+                              <button
+                                type="button"
+                                className="flex h-7 w-7 shrink-0 cursor-grab items-center justify-center rounded border border-dashed border-border/80 text-muted-foreground active:cursor-grabbing"
+                                aria-label="세목 순서 드래그"
+                              >
+                                <GripVertical className="h-3.5 w-3.5" />
+                              </button>
+                              <span className="text-[10px] text-muted-foreground min-w-[28px]">{idx + 1}-{sidx + 1}</span>
+                              <input
+                                type="text"
+                                value={sub}
+                                placeholder="세목명"
+                                className="flex-1 bg-transparent outline-none text-[11px] px-2 py-1 border rounded"
+                                onChange={(e) => updateSubCode(idx, sidx, e.target.value)}
+                              />
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-7 w-7 p-0"
+                                onClick={() => reorderSubCode(idx, sidx, 'up')}
+                                disabled={sidx === 0}
+                                aria-label="세목 위로 이동"
+                              >
+                                <ArrowUp className="w-3 h-3" />
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-7 w-7 p-0"
+                                onClick={() => reorderSubCode(idx, sidx, 'down')}
+                                disabled={sidx === entry.subCodes.length - 1}
+                                aria-label="세목 아래로 이동"
+                              >
+                                <ArrowDown className="w-3 h-3" />
+                              </Button>
+                              <Button variant="outline" size="sm" className="h-7 text-[10px]" onClick={() => removeSubCode(idx, sidx)}>
+                                <Trash2 className="w-3 h-3" />
+                              </Button>
+                            </div>
+                          ))}
+                          {entry.subCodes.length === 0 && (
+                            <p className="text-[10px] text-muted-foreground">세목이 없습니다.</p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                    {draftCodeBook.length === 0 && (
+                      <p className="text-[11px] text-muted-foreground">비목을 추가해 주세요.</p>
+                    )}
                   </div>
-                ))}
-                {draftCodeBook.length === 0 && (
-                  <p className="text-[11px] text-muted-foreground">비목을 추가해 주세요.</p>
-                )}
-              </div>
+                </TabsContent>
+
+                <TabsContent value="paste" className="space-y-3">
+                  <div className="rounded-md border border-border/60 p-3 space-y-2">
+                    <p className="text-[11px] font-medium">엑셀에서 두 열을 그대로 복사해 붙여넣을 수 있습니다.</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      첫 번째 열은 비목, 두 번째 열은 세목으로 읽습니다. 헤더가 `비목 / 세목`이면 자동으로 건너뜁니다.
+                    </p>
+                    <div className="rounded-md bg-slate-950 px-3 py-2 font-mono text-[10px] text-slate-50 whitespace-pre-wrap">
+                      비목,세목{'\n'}
+                      교육운영비,강사비{'\n'}
+                      교육운영비,교재비{'\n'}
+                      출장비,교통비
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">쉼표 CSV와 탭 구분 복붙 둘 다 지원합니다.</p>
+                  </div>
+                  <Textarea
+                    value={codeBookImportText}
+                    onChange={(event) => {
+                      setCodeBookImportText(event.target.value);
+                      setCodeBookImportFileName('');
+                    }}
+                    placeholder={'비목\t세목\n교육운영비\t강사비\n교육운영비\t교재비'}
+                    className="min-h-[220px] text-[11px] font-mono"
+                  />
+                  <div className="rounded-md border border-border/60 p-3 text-[10px] text-muted-foreground">
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                      <span>비목 {codeBookImportPreview.rows.length}개</span>
+                      <span>세목 {codeBookImportPreview.totalPairs}건</span>
+                      <span>중복 제외 {codeBookImportPreview.duplicatePairs}건</span>
+                      <span>건너뜀 {codeBookImportPreview.skippedRows}건</span>
+                    </div>
+                    {codeBookImportPreview.samplePairs.length > 0 ? (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {codeBookImportPreview.samplePairs.map((pair) => (
+                          <Badge key={`${pair.code}-${pair.subCode}`} variant="outline" className="text-[10px]">
+                            {pair.code} / {pair.subCode}
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="flex justify-end">
+                    <Button
+                      size="sm"
+                      className="h-8 text-[12px]"
+                      onClick={applyImportedCodeBook}
+                      disabled={codeBookImportPreview.rows.length === 0}
+                    >
+                      가져온 구조로 교체
+                    </Button>
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="csv" className="space-y-3">
+                  <div className="rounded-md border border-border/60 p-3 space-y-2">
+                    <p className="text-[11px] font-medium">CSV 예시는 이 화면 안에서 바로 확인할 수 있습니다.</p>
+                    <div className="rounded-md bg-slate-950 px-3 py-2 font-mono text-[10px] text-slate-50 whitespace-pre-wrap">
+                      비목,세목{'\n'}
+                      교육운영비,강사비{'\n'}
+                      교육운영비,교재비{'\n'}
+                      출장비,숙박비
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">엑셀에서 저장한 `.csv` 또는 `.tsv` 파일을 올리면 미리보기 후 현재 구조 초안으로 교체합니다.</p>
+                  </div>
+                  <div className="rounded-md border border-dashed border-border/70 p-4">
+                    <input
+                      type="file"
+                      accept=".csv,.tsv,text/csv,text/tab-separated-values"
+                      className="block w-full text-[11px]"
+                      onChange={(event) => {
+                        void handleCodeBookImportFile(event.target.files?.[0] || null);
+                        event.currentTarget.value = '';
+                      }}
+                    />
+                    <p className="mt-2 text-[10px] text-muted-foreground">
+                      {codeBookImportFileName ? `${codeBookImportFileName} 파일을 읽어 미리보기를 준비했습니다.` : '업로드 후 아래 미리보기에서 비목/세목 개수를 확인하세요.'}
+                    </p>
+                  </div>
+                  <div className="rounded-md border border-border/60 p-3 text-[10px] text-muted-foreground">
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                      <span>비목 {codeBookImportPreview.rows.length}개</span>
+                      <span>세목 {codeBookImportPreview.totalPairs}건</span>
+                      <span>중복 제외 {codeBookImportPreview.duplicatePairs}건</span>
+                      <span>건너뜀 {codeBookImportPreview.skippedRows}건</span>
+                      {codeBookImportPreview.headerDetected ? <span>헤더 자동 인식</span> : null}
+                    </div>
+                    {codeBookImportPreview.samplePairs.length > 0 ? (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {codeBookImportPreview.samplePairs.map((pair) => (
+                          <Badge key={`${pair.code}-${pair.subCode}`} variant="outline" className="text-[10px]">
+                            {pair.code} / {pair.subCode}
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="mt-2">파일을 올리면 여기에서 예시 행을 바로 확인할 수 있습니다.</p>
+                    )}
+                  </div>
+                  <div className="flex justify-end">
+                    <Button
+                      size="sm"
+                      className="h-8 text-[12px]"
+                      onClick={applyImportedCodeBook}
+                      disabled={codeBookImportPreview.rows.length === 0}
+                    >
+                      가져온 구조로 교체
+                    </Button>
+                  </div>
+                </TabsContent>
+              </Tabs>
               <div className="flex justify-end gap-2 pt-2 border-t border-border/60">
                 <Button variant="outline" size="sm" className="h-8 text-[12px]" onClick={cancelEdit}>
                   취소
