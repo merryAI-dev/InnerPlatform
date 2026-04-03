@@ -84,6 +84,7 @@ function deriveRowLocally(
   runningBalance: number,
 ): { row: ImportRow; nextRunningBalance: number } {
   let next = row;
+  const userEdited = row.userEditedCells ?? new Set<number>();
 
   next = updateCells(next, (cells) => {
     if (context.weekIdx >= 0 && context.dateIdx >= 0) {
@@ -95,11 +96,42 @@ function deriveRowLocally(
       }
     }
 
+    if (
+      row.entryKind === 'ADJUSTMENT'
+      && context.balanceIdx >= 0
+      && context.depositIdx >= 0
+      && context.expenseIdx >= 0
+      && context.bankAmountIdx >= 0
+    ) {
+      const explicitBalance = parseNumber(cells[context.balanceIdx]) ?? null;
+      if (explicitBalance != null) {
+        const delta = explicitBalance - runningBalance;
+        if (delta > 0) {
+          cells[context.depositIdx] = delta.toLocaleString('ko-KR');
+          if (context.refundIdx >= 0) cells[context.refundIdx] = '';
+          cells[context.expenseIdx] = '';
+          if (context.vatInIdx >= 0) cells[context.vatInIdx] = '';
+          cells[context.bankAmountIdx] = delta.toLocaleString('ko-KR');
+        } else if (delta < 0) {
+          cells[context.depositIdx] = '';
+          if (context.refundIdx >= 0) cells[context.refundIdx] = '';
+          cells[context.expenseIdx] = Math.abs(delta).toLocaleString('ko-KR');
+          if (context.vatInIdx >= 0) cells[context.vatInIdx] = '';
+          cells[context.bankAmountIdx] = Math.abs(delta).toLocaleString('ko-KR');
+        } else {
+          cells[context.depositIdx] = '';
+          if (context.refundIdx >= 0) cells[context.refundIdx] = '';
+          cells[context.expenseIdx] = '';
+          if (context.vatInIdx >= 0) cells[context.vatInIdx] = '';
+          cells[context.bankAmountIdx] = '';
+        }
+      }
+    }
+
     if (context.bankAmountIdx >= 0 && context.expenseIdx >= 0 && context.vatInIdx >= 0) {
       const bankAmount = parseNumber(cells[context.bankAmountIdx]) ?? 0;
       const expense = parseNumber(cells[context.expenseIdx]) ?? 0;
       const vat = parseNumber(cells[context.vatInIdx]) ?? 0;
-      const userEdited = row.userEditedCells ?? new Set<number>();
       if (bankAmount > 0) {
         if (expense > 0) {
           // 사업비 사용액이 입력되어 있으면 매입부가세를 자동 계산

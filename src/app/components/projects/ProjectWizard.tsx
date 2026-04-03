@@ -25,6 +25,7 @@ import type {
   Basis,
   Project,
   ProjectFinancialInputFlags,
+  ProjectFundInputMode,
   ProjectPhase,
   ProjectStatus,
   ProjectType,
@@ -34,6 +35,8 @@ import {
   ACCOUNT_TYPE_LABELS,
   BASIS_LABELS,
   getProjectTypeSelectableOptions,
+  normalizeProjectFundInputMode,
+  PROJECT_FUND_INPUT_MODE_LABELS,
   PROJECT_STATUS_LABELS,
   PROJECT_TYPE_LABELS,
   SETTLEMENT_TYPE_LABELS
@@ -87,6 +90,7 @@ interface WizardFormData {
   accountType: AccountType;
   settlementType: SettlementType;
   basis: Basis;
+  fundInputMode: ProjectFundInputMode;
   // Step 4: Team
   teamName: string;
   managerName: string;
@@ -109,7 +113,7 @@ interface WizardFormData {
 const INITIAL_DATA: WizardFormData = {
   name: '', type: 'D1', department: '', clientOrg: '', groupwareName: '', description: '',
   status: 'CONTRACT_PENDING', contractType: '계약서(날인)', contractStart: '', contractEnd: '', participantCondition: '',
-  accountType: 'NONE', settlementType: 'TYPE1', basis: '공급가액',
+  accountType: 'NONE', settlementType: 'TYPE1', basis: '공급가액', fundInputMode: 'BANK_UPLOAD',
   teamName: '', managerName: '', managerId: '',
   contractAmount: 0, financialInputFlags: createEmptyProjectFinancialInputFlags(), budgetCurrentYear: 0, taxInvoiceAmount: 0, profitRate: 0, profitAmount: 0,
   paymentContract: 0, paymentInterim: 0, paymentFinal: 0, paymentPlanDesc: '', finalPaymentNote: '',
@@ -127,7 +131,7 @@ interface ProjectWizardProps {
 export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: ProjectWizardProps) {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { addProject, updateProject, members } = useAppStore();
+  const { addProject, updateProject, members, transactions } = useAppStore();
 
   const stepFromUrl = parseInt(searchParams.get('step') ?? '0', 10);
   const [currentStep, setCurrentStep] = useState(
@@ -157,6 +161,7 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
         accountType: editProject.accountType,
         settlementType: editProject.settlementType,
         basis: editProject.basis,
+        fundInputMode: normalizeProjectFundInputMode(editProject.fundInputMode),
         teamName: editProject.teamName,
         managerName: editProject.managerName,
         managerId: editProject.managerId,
@@ -202,6 +207,15 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
     const num = parseFloat(value.replace(/,/g, '')) || 0;
     setFormData(prev => ({ ...prev, [field]: num }));
   }, []);
+  const updateFundInputMode = useCallback((nextMode: ProjectFundInputMode) => {
+    if (nextMode === formData.fundInputMode) return;
+    const hasExistingTransactions = Boolean(editProject?.id) && transactions.some((tx) => tx.projectId === editProject?.id);
+    if (hasExistingTransactions) {
+      const confirmed = window.confirm('이미 저장된 거래가 있습니다. 입력 방식을 바꾸면 이후 작업 흐름만 바뀌고 기존 데이터는 유지됩니다. 계속할까요?');
+      if (!confirmed) return;
+    }
+    update('fundInputMode', nextMode);
+  }, [formData.fundInputMode, editProject?.id, transactions, update]);
 
   const updateContractAmount = useCallback((value: string) => {
     const normalized = value.replace(/,/g, '').trim();
@@ -266,6 +280,7 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
       settlementType: formData.settlementType,
       basis: formData.basis,
       accountType: formData.accountType,
+      fundInputMode: formData.fundInputMode,
       paymentPlan: {
         contract: formData.paymentContract,
         interim: formData.paymentInterim,
@@ -518,6 +533,30 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
                     <option key={k} value={k}>{v}</option>
                   ))}
                 </select>
+              </div>
+            </div>
+            <div className="space-y-3">
+              <Label>자금 입력 방식</Label>
+              <div className="grid grid-cols-2 gap-3">
+                {(['BANK_UPLOAD', 'DIRECT_ENTRY'] as ProjectFundInputMode[]).map((mode) => (
+                  <button
+                    key={mode}
+                    onClick={() => updateFundInputMode(mode)}
+                    className={`rounded-lg border-2 p-4 text-left transition-all ${formData.fundInputMode === mode
+                        ? 'border-primary bg-primary/5'
+                        : 'border-border hover:border-primary/50'
+                      }`}
+                  >
+                    <div className="text-sm" style={{ fontWeight: 600 }}>
+                      {PROJECT_FUND_INPUT_MODE_LABELS[mode]}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      {mode === 'DIRECT_ENTRY'
+                        ? '통장내역 없이 주간 표에서 입금, 지출, 조정을 직접 입력합니다'
+                        : '통장내역 업로드 후 주간 표와 연결해 작업합니다'}
+                    </div>
+                  </button>
+                ))}
               </div>
             </div>
           </div>
@@ -830,6 +869,10 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
                 <div>
                   <span className="text-muted-foreground">정산유형:</span>
                   <span className="ml-2">{SETTLEMENT_TYPE_LABELS[formData.settlementType]}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">입력 방식:</span>
+                  <span className="ml-2">{PROJECT_FUND_INPUT_MODE_LABELS[formData.fundInputMode]}</span>
                 </div>
                 <div>
                   <span className="text-muted-foreground">메인 담당:</span>

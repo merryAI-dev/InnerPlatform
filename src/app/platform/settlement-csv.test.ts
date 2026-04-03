@@ -3,6 +3,7 @@ import type { Transaction } from '../data/types';
 import { getYearMondayWeeks } from './cashflow-weeks';
 import {
   analyzeSettlementHeaderMapping,
+  createQuickEntryImportRow,
   buildSettlementDataPreview,
   createEmptyImportRow,
   exportImportRowsCsv,
@@ -323,6 +324,20 @@ describe('createEmptyImportRow', () => {
     const row2 = createEmptyImportRow();
     expect(row1.tempId).not.toBe(row2.tempId);
   });
+
+  it('stores a non-standard entry kind when provided', () => {
+    const row = createEmptyImportRow('DEPOSIT');
+    expect(row.entryKind).toBe('DEPOSIT');
+  });
+});
+
+describe('createQuickEntryImportRow', () => {
+  it('creates an adjustment row with the expected metadata', () => {
+    const row = createQuickEntryImportRow('ADJUSTMENT');
+    expect(row.entryKind).toBe('ADJUSTMENT');
+    expect(readCell(row, '상세 적요')).toBe('잔액 조정');
+    expect(readCell(row, '거래일시')).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
 });
 
 // ── transactionsToImportRows ──
@@ -470,6 +485,30 @@ describe('importRowToTransaction', () => {
     };
     const result = importRowToTransaction(row, 'p-001', 'l-001', 0);
     expect(result.transaction?.id).toBe('existing-tx-id');
+  });
+
+  it('infers IN direction from a deposit entry row without cashflow label', () => {
+    const row = makeImportRow({
+      '거래일시': '2026-03-05',
+      '입금액(사업비,공급가액,은행이자)': '100,000',
+      '통장에 찍힌 입/출금액': '100,000',
+    });
+    row.entryKind = 'DEPOSIT';
+
+    const result = importRowToTransaction(row, 'p-001', 'l-001', 0);
+    expect(result.transaction?.direction).toBe('IN');
+    expect(result.transaction?.entryKind).toBe('DEPOSIT');
+  });
+
+  it('requires a note for adjustment rows', () => {
+    const row = makeImportRow({
+      '거래일시': '2026-03-05',
+      '통장잔액': '500,000',
+    });
+    row.entryKind = 'ADJUSTMENT';
+
+    const result = importRowToTransaction(row, 'p-001', 'l-001', 0);
+    expect(result.error).toBe('조정 사유를 비고에 입력해 주세요');
   });
 });
 

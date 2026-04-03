@@ -2,7 +2,13 @@ import { ChevronLeft, ChevronRight, Download } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { BUDGET_CODE_BOOK } from '../../data/budget-data';
-import type { BudgetCodeEntry, Comment, Transaction, TransactionState } from '../../data/types';
+import type {
+  BudgetCodeEntry,
+  Comment,
+  ProjectFundInputMode,
+  Transaction,
+  TransactionState,
+} from '../../data/types';
 import { resolveApiErrorMessage } from '../../platform/api-error-message';
 import { findWeekForDate, getYearMondayWeeks, type MonthMondayWeek } from '../../platform/cashflow-weeks';
 import { parseDate, triggerDownload } from '../../platform/csv-utils';
@@ -27,7 +33,7 @@ import {
   AlertDialogTitle,
 } from '../ui/alert-dialog';
 import { ImportEditor } from './ImportEditor';
-export type { EvidenceUploadSelection } from './ImportEditor';
+export type { EvidenceUploadSelection, PendingQuickInsert } from './ImportEditor';
 import { SettlementWeekSection } from './SettlementWeekSection';
 import {
   buildTransactionEditHistoryEntries,
@@ -88,6 +94,9 @@ export interface SettlementLedgerProps {
   allowEditSubmitted?: boolean;
   /** 거래처 이름으로 비목/세목 히스토리 제안을 요청하는 콜백. 제공 시에만 제안 칩 표시. */
   onFetchBudgetSuggestion?: (counterparty: string) => Promise<{ budgetCategory: string; budgetSubCategory: string } | null>;
+  workflowMode?: ProjectFundInputMode;
+  pendingQuickInsert?: import('./ImportEditor').PendingQuickInsert | null;
+  onPendingQuickInsertHandled?: () => void;
 }
 
 // ── Main Component ──
@@ -121,6 +130,9 @@ export function SettlementLedgerPage({
   onEnsureTransactionPersisted,
   allowEditSubmitted = false,
   onFetchBudgetSuggestion,
+  workflowMode = 'BANK_UPLOAD',
+  pendingQuickInsert,
+  onPendingQuickInsertHandled,
 }: SettlementLedgerProps) {
   const { upsertWeekAmounts } = useCashflowWeeks();
   const [year, setYear] = useState(() => new Date().getFullYear());
@@ -710,6 +722,9 @@ export function SettlementLedgerPage({
             onUploadEvidenceDriveById={handleUploadEvidenceDriveById}
             onEnsureTransactionPersisted={onEnsureTransactionPersisted}
             sourceTransactions={allTransactions}
+            workflowMode={workflowMode}
+            pendingQuickInsert={pendingQuickInsert}
+            onPendingQuickInsertHandled={onPendingQuickInsertHandled}
           />
         )}
         {revertConfirmDialog}
@@ -878,6 +893,9 @@ export function SettlementLedgerPage({
           onEnsureTransactionPersisted={onEnsureTransactionPersisted}
           sourceTransactions={allTransactions}
           onFetchBudgetSuggestion={onFetchBudgetSuggestion}
+          workflowMode={workflowMode}
+          pendingQuickInsert={pendingQuickInsert}
+          onPendingQuickInsertHandled={onPendingQuickInsertHandled}
         />
       )}
       {revertConfirmDialog}

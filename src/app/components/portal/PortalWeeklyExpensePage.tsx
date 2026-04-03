@@ -14,10 +14,16 @@ import {
 import { usePortalStore } from '../../data/portal-store';
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { useAuth } from '../../data/auth-store';
-import type { EvidenceUploadSelection } from '../cashflow/SettlementLedgerPage';
+import type { EvidenceUploadSelection, PendingQuickInsert } from '../cashflow/SettlementLedgerPage';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
-import type { CashflowWeekSheet, Transaction, TransactionState } from '../../data/types';
+import {
+  normalizeProjectFundInputMode,
+  PROJECT_FUND_INPUT_MODE_LABELS,
+  type CashflowWeekSheet,
+  type Transaction,
+  type TransactionState,
+} from '../../data/types';
 import { toast } from 'sonner';
 import { useFirebase } from '../../lib/firebase-context';
 import {
@@ -101,6 +107,7 @@ export function PortalWeeklyExpensePage() {
   const devHarnessConfig = readDevAuthHarnessConfig(import.meta.env, typeof window !== 'undefined' ? window.location : undefined);
   const [projectDriveProvisioning, setProjectDriveProvisioning] = useState(false);
   const [googleSheetImportOpen, setGoogleSheetImportOpen] = useState(false);
+  const [pendingQuickInsert, setPendingQuickInsert] = useState<PendingQuickInsert | null>(null);
   const [participationRiskWarning, setParticipationRiskWarning] = useState<{
     yearMonth: string;
     weekNo: number;
@@ -132,6 +139,8 @@ export function PortalWeeklyExpensePage() {
     ledgers,
   }), [authUser, portalUser, myProject, ledgers]);
   const isENaraProject = myProject?.settlementType === 'TYPE5' || myProject?.accountType === 'DEDICATED';
+  const fundInputMode = normalizeProjectFundInputMode(myProject?.fundInputMode);
+  const isDirectEntryMode = fundInputMode === 'DIRECT_ENTRY';
 
   const effectiveBudgetCodeBook = useMemo(() => {
     const orderedCodes: string[] = [];
@@ -216,6 +225,13 @@ export function PortalWeeklyExpensePage() {
       ? (error.message || `${actionLabel}에 실패했습니다.`)
       : `${actionLabel}에 실패했습니다.`;
     toast.error(resolveApiErrorMessage(error, fallback));
+  };
+
+  const queueQuickInsert = (kind: PendingQuickInsert['kind']) => {
+    setPendingQuickInsert({
+      kind,
+      token: Date.now(),
+    });
   };
 
   const resolveVersionFromApiError = (error: unknown): number | null => {
@@ -536,26 +552,49 @@ export function PortalWeeklyExpensePage() {
             <Badge variant="secondary" className="text-[10px]">
               현재 탭: {activeSheetName}
             </Badge>
-            {bankStatementCount > 0 && (
+            <Badge variant="outline" className="text-[10px]">
+              {PROJECT_FUND_INPUT_MODE_LABELS[fundInputMode]}
+            </Badge>
+            {bankStatementCount > 0 && !isDirectEntryMode && (
               <Badge variant="outline" className="text-[10px]">
                 통장내역 {bankStatementCount}건 연결
               </Badge>
             )}
-          {isENaraProject && (
-            <Badge variant="outline" className="text-[10px]">
-              TYPE5 / 전용계좌
-            </Badge>
-          )}
+            {isENaraProject && (
+              <Badge variant="outline" className="text-[10px]">
+                TYPE5 / 전용계좌
+              </Badge>
+            )}
+          </div>
+          <p className="text-[12px] text-muted-foreground">
+            {isDirectEntryMode
+              ? '이 표에서 바로 입금, 지출, 조정을 입력하고 잔액 흐름을 이어가세요.'
+              : '필요한 준비는 버튼에서 바로 처리하고, 아래 표에서 바로 입력을 이어가세요.'}
+          </p>
         </div>
-        <p className="text-[12px] text-muted-foreground">
-          필요한 준비는 버튼에서 바로 처리하고, 아래 표에서 바로 입력을 이어가세요.
-        </p>
-      </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <Button size="sm" onClick={() => navigate('/portal/bank-statements')}>
-            {bankStatementCount > 0 ? '통장내역 검토' : '통장내역 열기'}
-            <ArrowRight className="h-4 w-4" />
-          </Button>
+          {isDirectEntryMode ? (
+            <>
+              <Button size="sm" onClick={() => queueQuickInsert('DEPOSIT')}>
+                입금 추가
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => queueQuickInsert('EXPENSE')}>
+                지출 추가
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => queueQuickInsert('ADJUSTMENT')}>
+                조정
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => navigate('/portal/bank-statements')}>
+                기존 통장내역 가져오기
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            </>
+          ) : (
+            <Button size="sm" onClick={() => navigate('/portal/bank-statements')}>
+              {bankStatementCount > 0 ? '통장내역 검토' : '통장내역 열기'}
+              <ArrowRight className="h-4 w-4" />
+            </Button>
+          )}
           {myProject?.evidenceDriveRootFolderLink && (
             <Button asChild variant="outline" size="sm">
               <a href={myProject.evidenceDriveRootFolderLink} target="_blank" rel="noreferrer">
@@ -590,7 +629,8 @@ export function PortalWeeklyExpensePage() {
       </div>
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border bg-muted/10 px-4 py-3 text-[11px] text-muted-foreground">
-        <span>통장내역: {bankStatementCount > 0 ? `${bankStatementCount}건 연결됨` : '업로드 필요'}</span>
+        {!isDirectEntryMode && <span>통장내역: {bankStatementCount > 0 ? `${bankStatementCount}건 연결됨` : '업로드 필요'}</span>}
+        {isDirectEntryMode && <span>입력 방식: 직접 입력</span>}
         <span>거래: {transactions.length}건</span>
         <span>기본 폴더: {myProject?.evidenceDriveRootFolderId ? '준비됨' : '미설정'}</span>
         {isENaraProject && <span>TYPE5 / 전용계좌 프로젝트</span>}
@@ -618,7 +658,7 @@ export function PortalWeeklyExpensePage() {
             onClick={() => setGoogleSheetImportOpen(true)}
           >
             <FileSpreadsheet className="h-3.5 w-3.5" />
-            Migration Wizard
+            {isDirectEntryMode ? '기존 시트 가져오기' : 'Migration Wizard'}
           </Button>
           <Button
             variant="outline"
@@ -757,6 +797,9 @@ export function PortalWeeklyExpensePage() {
           onFetchBudgetSuggestion={isPlatformApiEnabled() ? async (counterparty) => {
             return fetchBudgetSuggestionViaBff({ tenantId: orgId, actor: bffActor, projectId, counterparty });
           } : undefined}
+          workflowMode={fundInputMode}
+          pendingQuickInsert={pendingQuickInsert}
+          onPendingQuickInsertHandled={() => setPendingQuickInsert(null)}
         />
       </Suspense>
       {googleSheetImportOpen && (

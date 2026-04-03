@@ -1,6 +1,12 @@
 // ── Settlement Ledger CSV column definitions & bidirectional mapping ──
 
-import type { Transaction, CashflowSheetLineId, PaymentMethod, Direction } from '../data/types';
+import type {
+  Transaction,
+  CashflowSheetLineId,
+  PaymentMethod,
+  Direction,
+  SettlementEntryKind,
+} from '../data/types';
 import { CASHFLOW_SHEET_LINE_LABELS } from '../data/types';
 import type { MonthMondayWeek } from './cashflow-weeks';
 import { findWeekForDate, getYearMondayWeeks } from './cashflow-weeks';
@@ -653,6 +659,7 @@ export function parseSettlementCsv(
 export interface ImportRow {
   tempId: string;
   sourceTxId?: string;
+  entryKind?: SettlementEntryKind;
   /** Cell values aligned to SETTLEMENT_COLUMNS order (string representation). */
   cells: string[];
   /** Validation error when trying to parse this row. */
@@ -660,6 +667,8 @@ export interface ImportRow {
   /** Column indices that the user has manually edited (derivation skips these). */
   userEditedCells?: Set<number>;
 }
+
+export type SettlementQuickInsertKind = Exclude<SettlementEntryKind, 'STANDARD'>;
 
 /**
  * Normalize a CSV matrix into editable ImportRow[] aligned with SETTLEMENT_COLUMNS.
@@ -742,11 +751,31 @@ export function normalizeMatrixToImportRows(matrix: string[][]): ImportRow[] {
 /**
  * Create an empty ImportRow for manual row addition.
  */
-export function createEmptyImportRow(): ImportRow {
+export function createEmptyImportRow(entryKind: SettlementEntryKind = 'STANDARD'): ImportRow {
   return {
     tempId: `imp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    ...(entryKind !== 'STANDARD' ? { entryKind } : {}),
     cells: SETTLEMENT_COLUMNS.map(() => ''),
   };
+}
+
+export function createQuickEntryImportRow(kind: SettlementQuickInsertKind): ImportRow {
+  const row = createEmptyImportRow(kind);
+  const dateIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '거래일시');
+  const memoIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '상세 적요');
+  const noteIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '비고');
+  if (dateIdx >= 0) row.cells[dateIdx] = new Date().toISOString().slice(0, 10);
+  if (memoIdx >= 0) {
+    row.cells[memoIdx] = kind === 'DEPOSIT'
+      ? '입금 내역'
+      : kind === 'EXPENSE'
+        ? '지출 내역'
+        : '잔액 조정';
+  }
+  if (kind === 'ADJUSTMENT' && noteIdx >= 0) {
+    row.cells[noteIdx] = '';
+  }
+  return row;
 }
 
 /**
@@ -776,6 +805,7 @@ export function transactionsToImportRows(
     return {
       tempId: tx.id,
       sourceTxId: tx.id,
+      ...(tx.entryKind ? { entryKind: tx.entryKind } : {}),
       cells,
     };
   });
@@ -820,7 +850,6 @@ export function importRowToTransaction(
 
   const cashflowLabelRaw = pickValue(kv, ['cashflow항목', 'cashflowLabel', 'cashflow']);
   const lineId = parseCashflowLineLabel(cashflowLabelRaw);
-  const direction = inferDirection(lineId);
   const cashflowLabel = lineId ? getCashflowLineLabelForExport(lineId) : cashflowLabelRaw;
 
   const balanceAfter = parseNumber(pickValue(kv, ['통장잔액', 'balanceAfter'])) ?? 0;
@@ -828,10 +857,23 @@ export function importRowToTransaction(
   const vatRefund = parseNumber(pickValue(kv, ['매입부가세 반환', 'vatRefund'])) ?? 0;
   const expenseAmount = parseNumber(pickValue(kv, ['사업비 사용액', 'expenseAmount'])) ?? 0;
   const vatIn = parseNumber(pickValue(kv, ['매입부가세', 'vatIn'])) ?? 0;
+  const entryKind = row.entryKind || 'STANDARD';
+  const direction = inferDirectionFromRow(lineId, entryKind, {
+    bankAmount,
+    depositAmount,
+    vatRefund,
+    expenseAmount,
+    vatIn,
+  });
 
   const counterparty = pickValue(kv, ['지급처', '거래처', 'counterparty']);
   const memo = pickValue(kv, ['상세 적요', '적요', 'memo']);
   const author = pickValue(kv, ['작성자', 'author']);
+  const settlementNote = pickValue(kv, ['비고', 'settlementNote', 'note']);
+
+  if (entryKind === 'ADJUSTMENT' && !settlementNote.trim()) {
+    return { error: '조정 사유를 비고에 입력해 주세요' };
+  }
 
   const now = new Date().toISOString();
   const id = row.sourceTxId || `stl-${stableHash(`${projectId}|${dateTime}|${counterparty}|${bankAmount}|${rowIndex}`)}`;
@@ -845,6 +887,7 @@ export function importRowToTransaction(
     dateTime,
     weekCode: '',
     direction,
+    ...(entryKind !== 'STANDARD' ? { entryKind } : {}),
     method,
     cashflowCategory,
     cashflowLabel,
@@ -880,7 +923,7 @@ export function importRowToTransaction(
     eNaraExecuted: pickValue(kv, ['e나라 집행', 'eNaraExecuted']) || undefined,
     vatSettlementDone: /Y|yes|완료|true/i.test(pickValue(kv, ['부가세 지결 완료여부', 'vatSettlementDone'])) || undefined,
     settlementComplete: /Y|yes|완료|true/i.test(pickValue(kv, ['최종완료', 'settlementComplete'])) || undefined,
-    settlementNote: pickValue(kv, ['비고', 'settlementNote', 'note']) || undefined,
+    settlementNote: settlementNote || undefined,
   };
 
   return { transaction: tx };
@@ -909,4 +952,25 @@ function inferCashflowCategory(
     case 'BANK_INTEREST_OUT': return 'MISC_EXPENSE';
     default: return direction === 'IN' ? 'MISC_INCOME' : 'MISC_EXPENSE';
   }
+}
+
+function inferDirectionFromRow(
+  lineId: CashflowSheetLineId | undefined,
+  entryKind: SettlementEntryKind,
+  amounts: {
+    bankAmount: number;
+    depositAmount: number;
+    vatRefund: number;
+    expenseAmount: number;
+    vatIn: number;
+  },
+): Direction {
+  if (lineId) return inferDirection(lineId);
+  const depositSum = amounts.depositAmount + amounts.vatRefund;
+  const expenseSum = amounts.expenseAmount + amounts.vatIn;
+  if (depositSum > expenseSum && depositSum > 0) return 'IN';
+  if (expenseSum > depositSum && expenseSum > 0) return 'OUT';
+  if (entryKind === 'DEPOSIT') return 'IN';
+  if (entryKind === 'EXPENSE' || entryKind === 'ADJUSTMENT') return 'OUT';
+  return amounts.bankAmount < 0 ? 'OUT' : 'OUT';
 }

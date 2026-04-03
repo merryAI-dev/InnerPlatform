@@ -37,6 +37,7 @@ function normalizeImportRow(row: ImportRow, fallbackIndex: number): ImportRow {
   return {
     tempId: row.tempId || `sheet-import-${fallbackIndex + 1}`,
     ...(row.sourceTxId ? { sourceTxId: row.sourceTxId } : {}),
+    ...(row.entryKind ? { entryKind: row.entryKind } : {}),
     cells: SETTLEMENT_COLUMNS.map((_, columnIndex) => String(row.cells[columnIndex] ?? '').normalize('NFC').trim()),
   };
 }

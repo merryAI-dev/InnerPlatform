@@ -16,11 +16,14 @@ import { getAuthInstance } from '../../lib/firebase';
 import { upsertProjectViaBff } from '../../lib/platform-bff-client';
 import {
   getProjectTypeSelectableOptions,
+  normalizeProjectFundInputMode,
   PROJECT_TYPE_LABELS,
+  PROJECT_FUND_INPUT_MODE_LABELS,
   SETTLEMENT_TYPE_LABELS,
   BASIS_LABELS,
   ACCOUNT_TYPE_LABELS,
   type ProjectType,
+  type ProjectFundInputMode,
   type SettlementType,
   type Basis,
   type AccountType,
@@ -53,7 +56,7 @@ export function PortalProjectEdit() {
   const navigate = useNavigate();
   const { orgId } = useFirebase();
   const { user: authUser } = useAuth();
-  const { myProject } = usePortalStore();
+  const { myProject, transactions, expenseSheets, expenseSheetRows, bankStatementRows } = usePortalStore();
   const [saving, setSaving] = useState(false);
 
   const [form, setForm] = useState({
@@ -70,6 +73,7 @@ export function PortalProjectEdit() {
     settlementType: 'TYPE1' as SettlementType,
     basis: '공급가액' as Basis,
     accountType: 'DEDICATED' as AccountType,
+    fundInputMode: 'BANK_UPLOAD' as ProjectFundInputMode,
     managerName: '',
     teamName: '',
     participantCondition: '',
@@ -93,6 +97,7 @@ export function PortalProjectEdit() {
         settlementType: myProject.settlementType || 'TYPE1',
         basis: myProject.basis || '공급가액',
         accountType: myProject.accountType || 'DEDICATED',
+        fundInputMode: normalizeProjectFundInputMode(myProject.fundInputMode),
         managerName: myProject.managerName || '',
         teamName: myProject.teamName || '',
         participantCondition: myProject.participantCondition || '',
@@ -119,6 +124,12 @@ export function PortalProjectEdit() {
   );
   const hasContractAmountInput = financialInputFlags.contractAmount;
   const hasSalesVatAmountInput = financialInputFlags.salesVatAmount;
+  const hasExistingFundActivity = useMemo(() => (
+    transactions.some((tx) => tx.projectId === myProject?.id)
+    || (bankStatementRows?.rows?.length || 0) > 0
+    || expenseSheets.some((sheet) => (sheet.rows?.length || 0) > 0)
+    || (expenseSheetRows?.length || 0) > 0
+  ), [transactions, myProject?.id, bankStatementRows?.rows?.length, expenseSheets, expenseSheetRows]);
 
   if (!myProject) {
     return (
@@ -158,6 +169,7 @@ export function PortalProjectEdit() {
           settlementType: form.settlementType,
           basis: form.basis,
           accountType: form.accountType,
+          fundInputMode: form.fundInputMode,
           managerName: form.managerName.trim(),
           teamName: form.teamName.trim(),
           participantCondition: form.participantCondition.trim(),
@@ -175,6 +187,14 @@ export function PortalProjectEdit() {
 
   const update = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
+  const updateFundInputMode = (nextMode: ProjectFundInputMode) => {
+    if (nextMode === form.fundInputMode) return;
+    if (hasExistingFundActivity) {
+      const confirmed = window.confirm('이미 주간 입력 또는 통장내역 데이터가 있습니다. 입력 방식을 바꾸면 이후 작업 흐름만 바뀌고 기존 데이터는 유지됩니다. 계속할까요?');
+      if (!confirmed) return;
+    }
+    update('fundInputMode', nextMode);
+  };
 
   return (
     <div className="max-w-3xl mx-auto py-8 px-4">
@@ -326,7 +346,7 @@ export function PortalProjectEdit() {
               />
             </div>
           </div>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
             <div>
               <Label className="text-xs">정산 유형</Label>
               <Select value={form.settlementType} onValueChange={(v) => update('settlementType', v as SettlementType)}>
@@ -359,6 +379,22 @@ export function PortalProjectEdit() {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+            <div>
+              <Label className="text-xs">자금 입력 방식</Label>
+              <Select value={form.fundInputMode} onValueChange={(v) => updateFundInputMode(v as ProjectFundInputMode)}>
+                <SelectTrigger className="text-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {Object.entries(PROJECT_FUND_INPUT_MODE_LABELS).map(([k, v]) => (
+                    <SelectItem key={k} value={k}>{v}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="mt-1 text-[10px] text-muted-foreground">
+                {form.fundInputMode === 'DIRECT_ENTRY'
+                  ? '통장내역 없이 주간 표에서 바로 입력합니다.'
+                  : '통장내역 업로드 후 주간 표로 이어서 작업합니다.'}
+              </p>
             </div>
           </div>
         </CardContent>

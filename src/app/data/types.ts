@@ -27,10 +27,12 @@ export type SettlementType = 'TYPE1' | 'TYPE2' | 'TYPE3' | 'TYPE4' | 'TYPE5';
 export type Basis = '공급가액' | '공급대가';
 
 export type AccountType = 'DEDICATED' | 'OPERATING' | 'NONE'; // 전용계좌 사업(이나라도움) / 전용계좌(이나라도움x) / 일반 사업
+export type ProjectFundInputMode = 'BANK_UPLOAD' | 'DIRECT_ENTRY';
 
 export type TransactionState = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED';
 export type Direction = 'IN' | 'OUT';
 export type PaymentMethod = 'TRANSFER' | 'CORP_CARD_1' | 'CORP_CARD_2' | 'OTHER';
+export type SettlementEntryKind = 'STANDARD' | 'DEPOSIT' | 'EXPENSE' | 'ADJUSTMENT';
 
 export type EvidenceStatus = 'MISSING' | 'PARTIAL' | 'COMPLETE';
 
@@ -146,6 +148,16 @@ export const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
   OPERATING: '전용계좌(이나라도움x)',
   NONE: '일반 사업',
 };
+
+export const PROJECT_FUND_INPUT_MODE_LABELS: Record<ProjectFundInputMode, string> = {
+  BANK_UPLOAD: '통장내역 업로드',
+  DIRECT_ENTRY: '직접 입력',
+};
+
+export function normalizeProjectFundInputMode(raw: unknown): ProjectFundInputMode {
+  if (raw === 'DIRECT_ENTRY') return 'DIRECT_ENTRY';
+  return 'BANK_UPLOAD';
+}
 
 export interface ProjectFinancialInputFlags {
   contractAmount?: boolean;
@@ -326,6 +338,10 @@ export interface Project {
   slug: string;        // URL-safe unique key
   orgId: string;
   registrationSource?: string;
+  trashedAt?: string | null;
+  trashedById?: string | null;
+  trashedByEmail?: string | null;
+  trashedReason?: string | null;
   name: string;
   shortName?: string;
   officialContractName?: string;
@@ -338,6 +354,7 @@ export interface Project {
   settlementType: SettlementType;
   basis: Basis;
   accountType: AccountType;      // 전용통장/운영통장
+  fundInputMode?: ProjectFundInputMode;
   // 입금계획
   paymentPlan: {
     contract: number;    // 계약금
@@ -484,6 +501,7 @@ export interface ProjectRequestPayload {
   settlementType: SettlementType;
   basis: Basis;
   accountType: AccountType;
+  fundInputMode?: ProjectFundInputMode;
   paymentPlanDesc: string;
   settlementGuide: string;
   projectPurpose: string;
@@ -546,6 +564,7 @@ export interface Transaction {
   dateTime: string;        // ISO 날짜
   weekCode: string;        // e.g. "2026-W07"
   direction: Direction;
+  entryKind?: SettlementEntryKind;
   method: PaymentMethod;
   cashflowCategory: CashflowCategory;
   cashflowLabel: string;   // 표시용 라벨

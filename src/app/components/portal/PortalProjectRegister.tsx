@@ -34,10 +34,13 @@ import {
   ACCOUNT_TYPE_LABELS,
   BASIS_LABELS,
   getProjectTypeSelectableOptions,
+  normalizeProjectFundInputMode,
+  PROJECT_FUND_INPUT_MODE_LABELS,
   PROJECT_TYPE_LABELS,
   SETTLEMENT_TYPE_LABELS,
   type AccountType,
   type Basis,
+  type ProjectFundInputMode,
   type ProjectRequestContractAnalysis,
   type SettlementType,
   type ProjectTeamMemberAssignment,
@@ -112,6 +115,7 @@ const initialProposal: ProjectProposalDraft = {
   settlementType: 'TYPE1',
   basis: '공급가액',
   accountType: 'DEDICATED',
+  fundInputMode: 'BANK_UPLOAD',
   paymentPlanDesc: '',
   settlementGuide: '',
   projectPurpose: '',
@@ -355,6 +359,7 @@ export function PortalProjectRegister() {
           ...prev,
           ...draft.form,
           financialInputFlags: normalizeProjectFinancialInputFlags(draft.form?.financialInputFlags),
+          fundInputMode: normalizeProjectFundInputMode(draft.form?.fundInputMode),
         }));
         if (draft.step) setStep(draft.step);
         toast.info('이전에 작성 중이던 내용을 불러왔습니다.');
@@ -1212,7 +1217,7 @@ export function PortalProjectRegister() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
                 <div>
                   <Label className="text-[11px]">정산 유형</Label>
                   <Select value={form.settlementType} onValueChange={(value) => update('settlementType', value as SettlementType)}>
@@ -1251,6 +1256,24 @@ export function PortalProjectRegister() {
                       ))}
                     </SelectContent>
                   </Select>
+                </div>
+                <div>
+                  <Label className="text-[11px]">자금 입력 방식</Label>
+                  <Select value={form.fundInputMode} onValueChange={(value) => update('fundInputMode', value as ProjectFundInputMode)}>
+                    <SelectTrigger className="mt-1 h-9 text-[12px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(Object.entries(PROJECT_FUND_INPUT_MODE_LABELS) as [ProjectFundInputMode, string][]).map(([key, value]) => (
+                        <SelectItem key={key} value={key}>{value}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="mt-1 text-[10px] text-muted-foreground">
+                    {form.fundInputMode === 'DIRECT_ENTRY'
+                      ? '통장내역 없이 주간 표에서 바로 입금/지출을 입력합니다.'
+                      : '통장내역 업로드 후 주간 표로 이어서 작업합니다.'}
+                  </p>
                 </div>
               </div>
 
@@ -1457,6 +1480,7 @@ export function PortalProjectRegister() {
                   <ReviewRow label="정산 유형" value={SETTLEMENT_TYPE_LABELS[form.settlementType]} />
                   <ReviewRow label="정산 기준" value={BASIS_LABELS[form.basis]} />
                   <ReviewRow label="통장 유형" value={ACCOUNT_TYPE_LABELS[form.accountType]} />
+                  <ReviewRow label="자금 입력 방식" value={PROJECT_FUND_INPUT_MODE_LABELS[form.fundInputMode]} />
                   <ReviewRow label="입금 계획" value={form.paymentPlanDesc || '-'} />
                   <ReviewRow label="사업비 수령/정산" value={form.settlementGuide || '-'} />
                 </SummaryCard>

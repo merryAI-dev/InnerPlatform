@@ -1,10 +1,12 @@
 import {
   ACCOUNT_TYPE_LABELS,
   BASIS_LABELS,
+  PROJECT_FUND_INPUT_MODE_LABELS,
   PROJECT_TYPE_LABELS,
   SETTLEMENT_TYPE_LABELS,
   type AccountType,
   type Basis,
+  type ProjectFundInputMode,
   type ProjectRequestContractAnalysis,
   type ProjectTeamMemberAssignment,
   type ProjectType,
@@ -31,6 +33,7 @@ export interface ProjectProposalDraft {
   settlementType: SettlementType;
   basis: Basis;
   accountType: AccountType;
+  fundInputMode: ProjectFundInputMode;
   paymentPlanDesc: string;
   settlementGuide: string;
   projectPurpose: string;
@@ -84,6 +87,7 @@ export function buildProjectProposalPost(
     `- 정산 유형: ${SETTLEMENT_TYPE_LABELS[draft.settlementType]}`,
     `- 기준: ${BASIS_LABELS[draft.basis]}`,
     `- 계좌 유형: ${ACCOUNT_TYPE_LABELS[draft.accountType]}`,
+    `- 자금 입력 방식: ${PROJECT_FUND_INPUT_MODE_LABELS[draft.fundInputMode]}`,
     `- 선금/중도금/잔금 및 입금 계획: ${draft.paymentPlanDesc || '-'}`,
     `- 사업비 수령 방식 및 정산 기준: ${draft.settlementGuide || '-'}`,
     '',

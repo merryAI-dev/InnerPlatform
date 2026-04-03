@@ -81,6 +81,20 @@ function normalizePortalRole(value: unknown): string {
   return normalized === 'viewer' ? 'pm' : normalized;
 }
 
+function normalizeExpenseSheetRows(rows: unknown): ImportRow[] | null {
+  if (!Array.isArray(rows)) return null;
+  return rows.map((row, index) => {
+    const candidate = row && typeof row === 'object' ? row as Partial<ImportRow> : {};
+    return {
+      tempId: candidate.tempId || `imp-${Date.now()}-${index}`,
+      ...(candidate.sourceTxId ? { sourceTxId: candidate.sourceTxId } : {}),
+      ...(candidate.entryKind ? { entryKind: candidate.entryKind } : {}),
+      cells: Array.isArray(candidate.cells) ? candidate.cells.map((cell) => String(cell ?? '')) : [],
+      ...(candidate.error ? { error: String(candidate.error) } : {}),
+    } satisfies ImportRow;
+  });
+}
+
 export interface ExpenseSheetTab {
   id: string;
   name: string;
@@ -830,7 +844,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
               const nextSheet: ExpenseSheetTab = {
                 id: docItem.id,
                 name: sanitizeExpenseSheetName(data?.name, docItem.id === 'default' ? '기본 탭' : '새 탭'),
-                rows: Array.isArray(data?.rows) ? data.rows : null,
+                rows: normalizeExpenseSheetRows(data?.rows),
                 order: Number.isFinite(Number(data?.order)) ? Number(data?.order) : (docItem.id === 'default' ? 0 : 999),
                 createdAt: data?.createdAt,
                 updatedAt: data?.updatedAt,
@@ -1210,6 +1224,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     const sanitizedRows = preparedRows.map((row) => ({
       tempId: row.tempId || `imp-${Date.now()}`,
       ...(row.sourceTxId ? { sourceTxId: row.sourceTxId } : {}),
+      ...(row.entryKind ? { entryKind: row.entryKind } : {}),
       cells: Array.isArray(row.cells) ? row.cells.map((c) => (c ?? '')) : [],
       ...(row.error ? { error: row.error } : {}),
     }));
@@ -1390,6 +1405,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
               rows: nextRows.map((row) => ({
                 tempId: row.tempId || `imp-${Date.now()}`,
                 ...(row.sourceTxId ? { sourceTxId: row.sourceTxId } : {}),
+                ...(row.entryKind ? { entryKind: row.entryKind } : {}),
                 cells: Array.isArray(row.cells) ? row.cells.map((c) => (c ?? '')) : [],
               })),
               updatedAt: now,
@@ -1539,6 +1555,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       settlementType: payload.settlementType,
       basis: payload.basis,
       accountType: payload.accountType,
+      fundInputMode: payload.fundInputMode,
       paymentPlan: { contract: 0, interim: 0, final: 0 },
       paymentPlanDesc: payload.paymentPlanDesc,
       clientOrg: payload.clientOrg,

@@ -517,6 +517,7 @@ function normalizeImportRow(row: ImportRow): ImportRow {
   return {
     tempId: row.tempId || `imp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     ...(row.sourceTxId ? { sourceTxId: row.sourceTxId } : {}),
+    ...(row.entryKind ? { entryKind: row.entryKind } : {}),
     cells: Array.isArray(row.cells)
       ? SETTLEMENT_COLUMNS.map((_, i) => normalizeSpace(String(row.cells[i] ?? '')))
       : SETTLEMENT_COLUMNS.map(() => ''),

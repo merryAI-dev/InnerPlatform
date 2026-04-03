@@ -41,6 +41,7 @@ import {
   shouldForcePortalOnboarding,
 } from '../../platform/navigation';
 import { addMonthsToYearMonth, getSeoulTodayIso } from '../../platform/business-days';
+import { normalizeProjectFundInputMode } from '../../data/types';
 
 // ═══════════════════════════════════════════════════════════════
 // PortalLayout — 사용자(PM) 전용 레이아웃
@@ -145,6 +146,17 @@ function PortalContent() {
     const fromOptions = projectOptions.find((opt) => opt.id === portalUser.projectId)?.name;
     return fromOptions || myProject?.name;
   }, [portalUser?.projectId, projectOptions, myProject?.name]);
+  const currentFundInputMode = normalizeProjectFundInputMode(currentProject?.fundInputMode);
+  const navSections = useMemo(() => (
+    NAV_SECTIONS.map((section) => ({
+      ...section,
+      items: section.items.filter((item) => {
+        if ('hidden' in item && item.hidden) return false;
+        if (item.to === '/portal/bank-statements' && currentFundInputMode === 'DIRECT_ENTRY') return false;
+        return true;
+      }),
+    }))
+  ), [currentFundInputMode]);
 
 
   // 미인증 시 로그인으로
@@ -406,8 +418,8 @@ function PortalContent() {
           {/* Navigation */}
           <nav className="flex-1 py-1 overflow-y-auto">
             <div className="space-y-3 px-2">
-              {NAV_SECTIONS.map((section) => {
-                const visibleItems = section.items.filter((item) => !('hidden' in item && item.hidden));
+              {navSections.map((section) => {
+                const visibleItems = section.items;
                 if (visibleItems.length === 0) return null;
                 return (
                   <div key={section.title} className="space-y-1">

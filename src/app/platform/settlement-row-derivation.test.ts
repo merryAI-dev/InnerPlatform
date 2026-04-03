@@ -102,4 +102,24 @@ describe('settlement-row-derivation', () => {
     expect(next[0]?.cells[13]).toBe('100,000');
     expect(next[0]?.cells[9]).toBe('-110,000');
   });
+
+  it('derives adjustment rows from the entered balance anchor', () => {
+    const firstCells = createCells();
+    firstCells[11] = '100,000';
+    const adjustmentCells = createCells();
+    adjustmentCells[9] = '70,000';
+    adjustmentCells[25] = '잔액 보정';
+
+    const adjustmentRow: ImportRow = {
+      tempId: 'adjustment-row',
+      entryKind: 'ADJUSTMENT',
+      cells: adjustmentCells,
+    };
+
+    const next = deriveSettlementRows([createRow(firstCells), adjustmentRow], context, { mode: 'cascade', rowIdx: 0 });
+
+    expect(next[1]?.cells[13]).toBe('30,000');
+    expect(next[1]?.cells[10]).toBe('30,000');
+    expect(next[1]?.cells[9]).toBe('70,000');
+  });
 });
