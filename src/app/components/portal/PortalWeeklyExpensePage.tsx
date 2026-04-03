@@ -556,84 +556,156 @@ export function PortalWeeklyExpensePage() {
 
   return (
     <div className="space-y-4">
-      <div className="space-y-1">
-        <div className="flex items-center gap-2 flex-wrap">
-          <h2 className="text-base font-bold">사업비 입력(주간)</h2>
-          <Badge variant="secondary" className="text-[10px]">
-            현재 탭: {activeSheetName}
-          </Badge>
-          {bankStatementCount > 0 && (
-            <Badge variant="outline" className="text-[10px]">
-              통장내역 {bankStatementCount}건 연결
-            </Badge>
-          )}
-          {isENaraProject && (
-            <Badge variant="outline" className="text-[10px] border-violet-300 bg-violet-50 text-violet-900">
-              TYPE5 / 전용계좌
-            </Badge>
-          )}
-        </div>
-        <p className="text-[12px] text-muted-foreground">
-          이번 주 시작 순서를 먼저 확인한 뒤, 아래 표에서 거래와 증빙을 이어서 정리하세요.
-        </p>
-        {isENaraProject && (
-          <p className="text-[11px] text-violet-700">
-            이나라도움 프로젝트 감지됨: 통장내역 / cashflow / 사용내역 원본 중심으로 migration을 진행하세요.
-          </p>
-        )}
-      </div>
-
-      <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-50 via-white to-teal-50/60 px-4 py-4">
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div className="space-y-1">
-            <p className="text-[13px] font-semibold text-slate-900">이번 주 시작 순서</p>
-            <p className="text-[12px] text-slate-600">
-              {bankStatementCount > 0
-                ? `통장내역 ${bankStatementCount}건이 연결되어 있습니다. 지금은 주간 시트 입력과 증빙 정리에 집중하면 됩니다.`
-                : '먼저 통장내역을 올리고, 그 다음 현재 탭에서 주간 사업비와 증빙을 정리하는 흐름이 가장 빠릅니다.'}
-            </p>
-          </div>
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div className="space-y-1">
           <div className="flex items-center gap-2 flex-wrap">
-            <Button size="sm" onClick={() => navigate('/portal/bank-statements')}>
-              {bankStatementCount > 0 ? '통장내역 검토' : '통장내역 열기'}
-              <ArrowRight className="h-4 w-4" />
-            </Button>
-            {!happyPath.canUseEvidenceWorkflow && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => void provisionProjectDriveRoot()}
-                disabled={projectDriveProvisioning || !happyPath.canOpenWeeklyExpenses}
-              >
-                {projectDriveProvisioning ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <FolderPlus className="h-4 w-4" />
-                )}
-                기본 폴더 준비
-              </Button>
+            <h2 className="text-base font-bold">사업비 입력(주간)</h2>
+            <Badge variant="secondary" className="text-[10px]">
+              현재 탭: {activeSheetName}
+            </Badge>
+            {bankStatementCount > 0 && (
+              <Badge variant="outline" className="text-[10px]">
+                통장내역 {bankStatementCount}건 연결
+              </Badge>
+            )}
+            {isENaraProject && (
+              <Badge variant="outline" className="text-[10px] border-violet-300 bg-violet-50 text-violet-900">
+                TYPE5 / 전용계좌
+              </Badge>
             )}
           </div>
+          <p className="text-[12px] text-muted-foreground">
+            표 작업 전에 필요한 상태만 위에서 빠르게 확인하고 바로 입력을 이어가세요.
+          </p>
+          {isENaraProject && (
+            <p className="text-[11px] text-violet-700">
+              이나라도움 프로젝트 감지됨: 통장내역 / cashflow / 사용내역 원본 중심으로 migration을 진행하세요.
+            </p>
+          )}
         </div>
-        <div className="mt-4 grid gap-3 md:grid-cols-3">
-          {starterSteps.map((step) => (
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button size="sm" onClick={() => navigate('/portal/bank-statements')}>
+            {bankStatementCount > 0 ? '통장내역 검토' : '통장내역 열기'}
+            <ArrowRight className="h-4 w-4" />
+          </Button>
+          {!happyPath.canUseEvidenceWorkflow && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void provisionProjectDriveRoot()}
+              disabled={projectDriveProvisioning || !happyPath.canOpenWeeklyExpenses}
+            >
+              {projectDriveProvisioning ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <FolderPlus className="h-4 w-4" />
+              )}
+              기본 폴더 준비
+            </Button>
+          )}
+        </div>
+      </div>
+
+      <div className="rounded-xl border bg-card">
+        <div className="border-b px-4 py-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <p className="text-[12px] font-semibold text-foreground">작업 상태</p>
+              <p className="text-[11px] text-muted-foreground">
+                지금 필요한 확인 항목만 정리했습니다.
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-[11px]"
+              onClick={() => window.location.assign('/portal/project-settings')}
+            >
+              설정 열기
+            </Button>
+          </div>
+        </div>
+
+        <div className="grid gap-0 md:grid-cols-3">
+          {starterSteps.map((step, index) => (
             <div
               key={step.title}
-              className={`rounded-2xl border px-4 py-3 ${
-                step.done
-                  ? 'border-emerald-200 bg-emerald-50/80'
-                  : 'border-amber-200 bg-amber-50/70'
-              }`}
+              className={`px-4 py-4 ${index > 0 ? 'border-t md:border-t-0 md:border-l' : ''}`}
             >
               <div className="flex items-start gap-3">
                 <CheckCircle2 className={`mt-0.5 h-4 w-4 ${step.done ? 'text-emerald-600' : 'text-amber-600'}`} />
-                <div className="space-y-1">
-                  <p className="text-[12px] font-semibold text-slate-900">{step.title}</p>
-                  <p className="text-[11px] leading-5 text-slate-600">{step.detail}</p>
+                <div className="min-w-0 space-y-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="text-[12px] font-semibold text-foreground">{step.title}</p>
+                    <Badge variant={step.done ? 'secondary' : 'outline'} className="text-[9px]">
+                      {step.done ? '준비됨' : '확인 필요'}
+                    </Badge>
+                  </div>
+                  <p className="text-[11px] leading-5 text-muted-foreground">{step.detail}</p>
                 </div>
               </div>
             </div>
           ))}
+        </div>
+
+        <div className="border-t bg-muted/20 px-4 py-3">
+          <div className="grid gap-3 xl:grid-cols-[1.1fr_1.1fr_1fr]">
+            <div className="space-y-1">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Workflow</p>
+              <p className="text-[12px] font-medium text-foreground">
+                {happyPath.canUseEvidenceWorkflow
+                  ? `${happyPath.selectedProjectName || projectName}에서 행 저장 후 생성 / 업로드 / 동기화 사용 가능`
+                  : '증빙 Workflow를 바로 쓰려면 기본 폴더 준비가 필요합니다.'}
+              </p>
+              {!happyPath.canUseEvidenceWorkflow && (
+                <p className="text-[11px] text-muted-foreground">
+                  {pendingHappyPathSteps.map((step) => step.label).join(' · ') || '필수 준비가 모두 완료되었습니다.'}
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-1">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Evidence Folder</p>
+              <p className="text-[12px] font-medium text-foreground">
+                {myProject?.evidenceDriveRootFolderName || '기본 폴더가 아직 없습니다.'}
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                사업 저장 후 각 거래 행에서 `생성 / 업로드 / 동기화`를 바로 사용할 수 있습니다.
+              </p>
+              <div className="flex items-center gap-2 flex-wrap pt-1">
+                {myProject?.evidenceDriveRootFolderLink && (
+                  <Button asChild variant="outline" size="sm" className="h-7 text-[11px]">
+                    <a href={myProject.evidenceDriveRootFolderLink} target="_blank" rel="noreferrer">
+                      <ExternalLink className="mr-1 h-3.5 w-3.5" />
+                      기본 폴더 열기
+                    </a>
+                  </Button>
+                )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-[11px]"
+                  disabled={projectDriveProvisioning}
+                  onClick={() => void provisionProjectDriveRoot()}
+                >
+                  {projectDriveProvisioning ? (
+                    <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <FolderPlus className="mr-1 h-3.5 w-3.5" />
+                  )}
+                  {myProject?.evidenceDriveRootFolderId ? '기본 폴더 재확인' : '기본 폴더 생성'}
+                </Button>
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">VAT Rule</p>
+              <p className="text-[12px] font-medium text-foreground">부가세는 계산값이 아니라 증빙 기준 금액으로 입력</p>
+              <p className="text-[11px] text-muted-foreground">
+                통장금액만 있고 사업비 사용액이 비어 있으면 입력한 부가세를 기준으로 공급가액이 자동 보조 계산됩니다.
+              </p>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -709,85 +781,6 @@ export function PortalWeeklyExpensePage() {
         </div>
       </div>
 
-      <div className="grid gap-3 xl:grid-cols-2">
-        <div className={`rounded-xl border px-4 py-3 text-[12px] ${
-          happyPath.canUseEvidenceWorkflow
-            ? 'border-emerald-200/80 bg-emerald-50/70 text-emerald-950'
-            : 'border-sky-200/80 bg-sky-50/70 text-sky-950'
-        }`}>
-          <div className="flex items-start justify-between gap-3 flex-wrap">
-            <div className="space-y-1">
-              <p className="font-semibold">현재 happy path 상태</p>
-              <p className={happyPath.canUseEvidenceWorkflow ? 'text-emerald-900/80' : 'text-sky-900/80'}>
-                {happyPath.canUseEvidenceWorkflow
-                  ? `${happyPath.selectedProjectName || projectName}에서 행 저장 후 생성/업로드/동기화를 바로 사용할 수 있습니다.`
-                  : '주간 입력은 가능하지만, 증빙 Workflow를 바로 쓰려면 기본 폴더 준비가 먼저 필요합니다.'}
-              </p>
-              <p className="text-[11px] text-muted-foreground">
-                {pendingHappyPathSteps.map((step) => step.label).join(' · ') || '필수 준비가 모두 완료되었습니다.'}
-              </p>
-            </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 text-[11px]"
-                onClick={() => window.location.assign('/portal/project-settings')}
-              >
-                설정 열기
-              </Button>
-            </div>
-          </div>
-        </div>
-
-        <div className="rounded-xl border border-sky-200/80 bg-sky-50/70 px-4 py-3 text-[12px] text-sky-950">
-          <div className="flex items-start justify-between gap-3 flex-wrap">
-            <div className="space-y-1">
-              <p className="font-semibold">증빙 기본 폴더</p>
-              <p className="text-sky-900/80">
-                {myProject?.evidenceDriveRootFolderName
-                  ? `${myProject.evidenceDriveRootFolderName}에 거래별 폴더를 자동 생성합니다.`
-                  : '아직 사업 기본 폴더가 없습니다. 먼저 기본 폴더를 생성하세요.'}
-              </p>
-              <p className="text-[11px] text-sky-900/70">
-                사업 저장 1회 후에는 각 거래 행에서 `생성 / 업로드 / 동기화`를 바로 사용할 수 있습니다.
-              </p>
-            </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              {myProject?.evidenceDriveRootFolderLink && (
-                <Button asChild variant="outline" size="sm" className="h-8 text-[11px]">
-                  <a href={myProject.evidenceDriveRootFolderLink} target="_blank" rel="noreferrer">
-                    <ExternalLink className="mr-1 h-3.5 w-3.5" />
-                    기본 폴더 열기
-                  </a>
-                </Button>
-              )}
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 text-[11px]"
-                disabled={projectDriveProvisioning}
-                onClick={() => void provisionProjectDriveRoot()}
-              >
-                {projectDriveProvisioning ? (
-                  <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <FolderPlus className="mr-1 h-3.5 w-3.5" />
-                )}
-                {myProject?.evidenceDriveRootFolderId ? '기본 폴더 재확인' : '기본 폴더 생성'}
-              </Button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="rounded-xl border border-amber-200/70 bg-amber-50/70 px-4 py-3 text-[12px] text-amber-900">
-        <p className="font-semibold">매입 부가세 입력 안내</p>
-        <p className="mt-1 text-amber-800/90">
-          부가세는 계산값이 아니라 영수증/세금계산서 증빙 기준 금액으로 입력하세요. 통장금액만 있고 사업비 사용액이 비어 있으면
-          입력한 부가세를 기준으로 공급가액이 자동 보조 계산됩니다.
-        </p>
-      </div>
       <VarianceFlagBanner
         projectId={projectId}
         pmName={portalUser?.name || 'PM'}
