@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import {
   ArrowLeft,
@@ -15,6 +15,7 @@ import { useFirebase } from '../../lib/firebase-context';
 import { getAuthInstance } from '../../lib/firebase';
 import { upsertProjectViaBff } from '../../lib/platform-bff-client';
 import {
+  getProjectTypeSelectableOptions,
   PROJECT_TYPE_LABELS,
   SETTLEMENT_TYPE_LABELS,
   BASIS_LABELS,
@@ -25,6 +26,11 @@ import {
   type AccountType,
 } from '../../data/types';
 import { PROJECT_DEPARTMENT_OPTIONS } from '../../data/project-department-options';
+import {
+  createEmptyProjectFinancialInputFlags,
+  hasExplicitProjectAmountInput,
+  normalizeProjectFinancialInputFlags,
+} from '../../platform/project-contract-amount';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -58,6 +64,7 @@ export function PortalProjectEdit() {
     clientOrg: '',
     contractAmount: 0,
     salesVatAmount: 0,
+    financialInputFlags: createEmptyProjectFinancialInputFlags(),
     contractStart: '',
     contractEnd: '',
     settlementType: 'TYPE1' as SettlementType,
@@ -80,6 +87,7 @@ export function PortalProjectEdit() {
         clientOrg: myProject.clientOrg || '',
         contractAmount: myProject.contractAmount || 0,
         salesVatAmount: myProject.salesVatAmount || 0,
+        financialInputFlags: normalizeProjectFinancialInputFlags(myProject.financialInputFlags),
         contractStart: myProject.contractStart || '',
         contractEnd: myProject.contractEnd || '',
         settlementType: myProject.settlementType || 'TYPE1',
@@ -93,6 +101,24 @@ export function PortalProjectEdit() {
       });
     }
   }, [myProject]);
+
+  const departmentOptions = useMemo(
+    () => Array.from(new Set([
+      ...PROJECT_DEPARTMENT_OPTIONS,
+      myProject?.department || '',
+    ].filter(Boolean))).sort((a, b) => a.localeCompare(b, 'ko')),
+    [myProject?.department],
+  );
+  const projectTypeOptions = useMemo(
+    () => getProjectTypeSelectableOptions(form.type),
+    [form.type],
+  );
+  const financialInputFlags = useMemo(
+    () => normalizeProjectFinancialInputFlags(form.financialInputFlags),
+    [form.financialInputFlags],
+  );
+  const hasContractAmountInput = financialInputFlags.contractAmount;
+  const hasSalesVatAmountInput = financialInputFlags.salesVatAmount;
 
   if (!myProject) {
     return (
@@ -126,6 +152,7 @@ export function PortalProjectEdit() {
           clientOrg: form.clientOrg.trim(),
           contractAmount: form.contractAmount,
           salesVatAmount: form.salesVatAmount,
+          financialInputFlags,
           contractStart: form.contractStart,
           contractEnd: form.contractEnd,
           settlementType: form.settlementType,
@@ -197,22 +224,23 @@ export function PortalProjectEdit() {
               <Select value={form.type} onValueChange={(v) => update('type', v as ProjectType)}>
                 <SelectTrigger className="text-sm"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {Object.entries(PROJECT_TYPE_LABELS).map(([k, v]) => (
-                    <SelectItem key={k} value={k}>{v}</SelectItem>
+                  {projectTypeOptions.map((type) => (
+                    <SelectItem key={type} value={type}>{PROJECT_TYPE_LABELS[type]}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
             <div>
               <Label className="text-xs">담당조직</Label>
-              <Select value={form.department} onValueChange={(v) => update('department', v)}>
-                <SelectTrigger className="text-sm"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {PROJECT_DEPARTMENT_OPTIONS.map((d) => (
-                    <SelectItem key={d} value={d}>{d}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <datalist id="portal-project-edit-department-options">
+                {departmentOptions.map((department) => <option key={department} value={department} />)}
+              </datalist>
+              <Input
+                value={form.department}
+                onChange={(e) => update('department', e.target.value)}
+                list="portal-project-edit-department-options"
+                className="text-sm"
+              />
             </div>
           </div>
           <div>
@@ -248,18 +276,32 @@ export function PortalProjectEdit() {
               <Label className="text-xs">계약금액 (원)</Label>
               <Input
                 type="number"
-                value={form.contractAmount || ''}
-                onChange={(e) => update('contractAmount', Number(e.target.value))}
+                value={hasContractAmountInput ? String(form.contractAmount) : ''}
+                onChange={(e) => {
+                  const nextValue = e.target.value;
+                  update('financialInputFlags', {
+                    ...financialInputFlags,
+                    contractAmount: hasExplicitProjectAmountInput(nextValue),
+                  });
+                  update('contractAmount', Number(nextValue) || 0);
+                }}
                 className="text-sm"
               />
-              <p className="text-[10px] text-muted-foreground mt-0.5">{fmtKRW(form.contractAmount)}원</p>
+              <p className="text-[10px] text-muted-foreground mt-0.5">{hasContractAmountInput ? `${fmtKRW(form.contractAmount)}원` : '미입력'}</p>
             </div>
             <div>
               <Label className="text-xs">매출부가세 (원)</Label>
               <Input
                 type="number"
-                value={form.salesVatAmount || ''}
-                onChange={(e) => update('salesVatAmount', Number(e.target.value))}
+                value={hasSalesVatAmountInput ? String(form.salesVatAmount) : ''}
+                onChange={(e) => {
+                  const nextValue = e.target.value;
+                  update('financialInputFlags', {
+                    ...financialInputFlags,
+                    salesVatAmount: hasExplicitProjectAmountInput(nextValue),
+                  });
+                  update('salesVatAmount', Number(nextValue) || 0);
+                }}
                 className="text-sm"
               />
             </div>

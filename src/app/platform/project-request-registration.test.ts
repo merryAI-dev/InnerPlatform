@@ -30,6 +30,7 @@ describe('project-request-registration', () => {
       form: {
         department: '',
         name: '',
+        type: 'D1',
         contractStart: '',
         contractEnd: '',
         managerName: '',
@@ -52,11 +53,28 @@ describe('project-request-registration', () => {
       form: {
         department: 'L-개발협력센터',
         name: '바우처',
+        type: 'D1',
         contractStart: '2026-04-01',
         contractEnd: '2026-12-31',
         managerName: '보람',
       },
       hasContractAmountInput: true,
+    });
+
+    expect(issues).toEqual([]);
+  });
+
+  it('allows investment registrations to skip financial inputs', () => {
+    const issues = getProjectRegisterSubmitIssues({
+      form: {
+        department: '투자센터',
+        name: '투자조합',
+        type: 'I1',
+        contractStart: '',
+        contractEnd: '',
+        managerName: '보람',
+      },
+      hasContractAmountInput: false,
     });
 
     expect(issues).toEqual([]);

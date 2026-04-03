@@ -32,6 +32,7 @@ import { PlatformApiError } from '../../platform/api-client';
 import {
   ACCOUNT_TYPE_LABELS,
   BASIS_LABELS,
+  getProjectTypeSelectableOptions,
   PROJECT_TYPE_LABELS,
   SETTLEMENT_TYPE_LABELS,
   type AccountType,
@@ -49,7 +50,10 @@ import {
   normalizeProjectTeamMembers,
 } from '../../platform/project-team-members';
 import {
+  createEmptyProjectFinancialInputFlags,
+  formatStoredProjectAmount,
   hasExplicitProjectAmountInput,
+  normalizeProjectFinancialInputFlags,
   parseProjectAmountInput,
 } from '../../platform/project-contract-amount';
 import {
@@ -101,6 +105,7 @@ const initialProposal: ProjectProposalDraft = {
   salesVatAmount: 0,
   totalRevenueAmount: 0,
   supportAmount: 0,
+  financialInputFlags: createEmptyProjectFinancialInputFlags(),
   contractStart: '',
   contractEnd: '',
   settlementType: 'TYPE1',
@@ -160,7 +165,11 @@ function mergeAnalysisIntoDraft(
   },
 ): ProjectProposalDraft {
   const overwriteExisting = Boolean(options?.overwriteExisting);
-  const next = { ...draft, contractAnalysis: analysis };
+  const next = {
+    ...draft,
+    contractAnalysis: analysis,
+    financialInputFlags: normalizeProjectFinancialInputFlags(draft.financialInputFlags),
+  };
   const shouldApplyText = (value: string, current: string) => overwriteExisting || isTextBlank(current);
   const shouldApplyNumber = (value: number | null, current: number, hasExplicitCurrent = false) => (
     value !== null && (overwriteExisting || (!hasExplicitCurrent && !current))
@@ -192,9 +201,11 @@ function mergeAnalysisIntoDraft(
   }
   if (shouldApplyNumber(analysis.fields.contractAmount.value, draft.contractAmount, options?.hasExplicitContractAmount)) {
     next.contractAmount = analysis.fields.contractAmount.value || 0;
+    next.financialInputFlags.contractAmount = true;
   }
   if (shouldApplyNumber(analysis.fields.salesVatAmount.value, draft.salesVatAmount, options?.hasExplicitSalesVatAmount)) {
     next.salesVatAmount = analysis.fields.salesVatAmount.value || 0;
+    next.financialInputFlags.salesVatAmount = true;
   }
   return next;
 }
@@ -329,7 +340,6 @@ export function PortalProjectRegister() {
   const [isUploadingContract, setIsUploadingContract] = useState(false);
   const [contractAnalysisState, setContractAnalysisState] = useState<ContractAnalysisState>('idle');
   const [analysisError, setAnalysisError] = useState('');
-  const [hasContractAmountInput, setHasContractAmountInput] = useState(false);
   const contractFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const DRAFT_KEY = '__mysc_project_register_draft__';
@@ -340,7 +350,11 @@ export function PortalProjectRegister() {
       const saved = localStorage.getItem(DRAFT_KEY);
       if (saved) {
         const draft = JSON.parse(saved) as { form: ProjectProposalDraft; step: Step };
-        setForm((prev) => ({ ...prev, ...draft.form }));
+        setForm((prev) => ({
+          ...prev,
+          ...draft.form,
+          financialInputFlags: normalizeProjectFinancialInputFlags(draft.form?.financialInputFlags),
+        }));
         if (draft.step) setStep(draft.step);
         toast.info('이전에 작성 중이던 내용을 불러왔습니다.');
       }
@@ -375,10 +389,30 @@ export function PortalProjectRegister() {
     () => Array.from(new Set(projects.map((project) => String(project.name || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'ko')),
     [projects],
   );
+  const departmentOptions = useMemo(
+    () => Array.from(new Set([
+      ...PROJECT_DEPARTMENT_OPTIONS,
+      ...projects.map((project) => String(project.department || '').trim()),
+    ].filter(Boolean))).sort((a, b) => a.localeCompare(b, 'ko')),
+    [projects],
+  );
   const clientOrgOptions = useMemo(
     () => Array.from(new Set(projects.map((project) => String(project.clientOrg || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'ko')),
     [projects],
   );
+  const projectTypeOptions = useMemo(
+    () => getProjectTypeSelectableOptions(),
+    [],
+  );
+  const financialInputFlags = useMemo(
+    () => normalizeProjectFinancialInputFlags(form.financialInputFlags),
+    [form.financialInputFlags],
+  );
+  const hasContractAmountInput = financialInputFlags.contractAmount;
+  const hasSalesVatAmountInput = financialInputFlags.salesVatAmount;
+  const hasTotalRevenueAmountInput = financialInputFlags.totalRevenueAmount;
+  const hasSupportAmountInput = financialInputFlags.supportAmount;
+  const isInvestmentProject = form.type === 'I1';
 
   const analysis = form.contractAnalysis || null;
   const analysisField = (key: AnalysisFieldKey) => analysis?.fields[key] || null;
@@ -403,6 +437,19 @@ export function PortalProjectRegister() {
   const update = (key: keyof ProjectProposalDraft, value: ProjectProposalDraft[keyof ProjectProposalDraft]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
   };
+
+  const updateFinancialFlag = useCallback((
+    key: keyof NonNullable<ProjectProposalDraft['financialInputFlags']>,
+    value: boolean,
+  ) => {
+    setForm((prev) => ({
+      ...prev,
+      financialInputFlags: {
+        ...normalizeProjectFinancialInputFlags(prev.financialInputFlags),
+        [key]: value,
+      },
+    }));
+  }, []);
 
   const syncTeamMembers = (members: ProjectTeamMemberAssignment[]) => {
     const normalized = normalizeProjectTeamMembers(members);
@@ -481,11 +528,9 @@ export function PortalProjectRegister() {
         return nextAnalysis ? mergeAnalysisIntoDraft(base, nextAnalysis, {
           overwriteExisting: false,
           hasExplicitContractAmount: hasContractAmountInput,
+          hasExplicitSalesVatAmount: hasSalesVatAmountInput,
         }) : base;
       });
-      if (nextAnalysis?.fields.contractAmount.value !== null) {
-        setHasContractAmountInput(true);
-      }
 
       if (nextAnalysis) {
         setContractAnalysisState('ready');
@@ -522,6 +567,7 @@ export function PortalProjectRegister() {
       form: {
         department: form.department,
         name: form.name,
+        type: form.type,
         contractStart: form.contractStart,
         contractEnd: form.contractEnd,
         managerName: form.managerName,
@@ -543,6 +589,7 @@ export function PortalProjectRegister() {
     try {
       const payload = {
         ...form,
+        financialInputFlags,
         teamMembersDetailed: normalizedTeamMembers,
         teamMembers: teamMembersSummary === '-' ? '' : teamMembersSummary,
       };
@@ -567,11 +614,11 @@ export function PortalProjectRegister() {
             projectRequestId: createdId,
           });
           if (!notification.delivered) {
-            toast.warning('사업 등록은 저장됐지만 재경팀 슬랙 알림은 아직 설정되지 않았습니다.');
+            toast.warning('사업 등록은 저장됐지만 슬랙 알림은 아직 설정되지 않았습니다.');
           }
         } catch (notificationError) {
           console.error('[PortalProjectRegister] project registration Slack notification failed:', notificationError);
-          toast.warning('사업 등록은 저장됐지만 재경팀 슬랙 알림 전송은 실패했습니다.');
+          toast.warning('사업 등록은 저장됐지만 슬랙 알림 전송은 실패했습니다.');
         }
       }
 
@@ -610,7 +657,6 @@ export function PortalProjectRegister() {
                 ...initialProposal,
                 managerName: portalUser?.name || authUser?.name || '',
               });
-              setHasContractAmountInput(false);
               setStep('contract');
               setContractAnalysisState('idle');
               setAnalysisError('');
@@ -962,28 +1008,34 @@ export function PortalProjectRegister() {
                 </div>
                 <div>
                   <Label className="text-[11px]">담당팀 *</Label>
-                  <Select value={form.department || undefined} onValueChange={(value) => update('department', value)}>
-                    <SelectTrigger className="mt-1 h-9 text-[12px]">
-                      <SelectValue placeholder="담당팀 선택" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {PROJECT_DEPARTMENT_OPTIONS.map((department) => (
-                        <SelectItem key={department} value={department}>{department}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <datalist id="department-options">
+                    {departmentOptions.map((department) => <option key={department} value={department} />)}
+                  </datalist>
+                  <Input
+                    value={form.department}
+                    onChange={(event) => update('department', event.target.value)}
+                    placeholder="예: 투자센터"
+                    list="department-options"
+                    className="mt-1 h-9 text-[12px]"
+                  />
+                  <p className="mt-1 text-[10px] text-muted-foreground">
+                    센터 단위까지 자유롭게 입력해 주세요. 기존 담당조직은 추천 목록에서 선택할 수 있습니다.
+                  </p>
                 </div>
               </div>
 
               <div>
-                <FieldLabel label="공식 계약명 *" field={analysisField('officialContractName')} />
+                <FieldLabel label="공식 계약명" field={analysisField('officialContractName')} />
                 <Input
                   value={form.officialContractName}
                   onChange={(event) => update('officialContractName', event.target.value)}
-                  placeholder="계약서 상의 공식 명칭"
+                  placeholder="계약서가 없으면 내부 관리용 공식 명칭"
                   className="mt-1 h-9 text-[12px]"
                 />
                 <FieldEvidence field={analysisField('officialContractName')} />
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  계약서를 체결하지 않은 경우에도 경기팀과 합의된 내부 관리 명칭이면 입력할 수 있습니다.
+                </p>
               </div>
 
               <div>
@@ -1012,14 +1064,14 @@ export function PortalProjectRegister() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {(Object.entries(PROJECT_TYPE_LABELS) as [ProjectType, string][]).map(([key, value]) => (
-                        <SelectItem key={key} value={key}>{value}</SelectItem>
+                      {projectTypeOptions.map((key) => (
+                        <SelectItem key={key} value={key}>{PROJECT_TYPE_LABELS[key]}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
                 <div>
-                  <FieldLabel label="계약 대상 *" field={analysisField('clientOrg')} />
+                  <FieldLabel label="계약 대상" field={analysisField('clientOrg')} />
                   <datalist id="client-org-options">
                     {clientOrgOptions.map((name) => <option key={name} value={name} />)}
                   </datalist>
@@ -1031,6 +1083,9 @@ export function PortalProjectRegister() {
                     className="mt-1 h-9 text-[12px]"
                   />
                   <FieldEvidence field={analysisField('clientOrg')} />
+                  <p className="mt-1 text-[10px] text-muted-foreground">
+                    계약 대상이 없으면 공란으로 두셔도 되고, 형식상 필요하면 `-`로 입력해도 됩니다.
+                  </p>
                 </div>
               </div>
 
@@ -1060,9 +1115,14 @@ export function PortalProjectRegister() {
 
           {step === 'financial' && (
             <div className="space-y-4">
+              {isInvestmentProject ? (
+                <div className="rounded-xl border border-teal-200 bg-teal-50/70 px-3 py-3 text-[11px] text-teal-800 dark:border-teal-800/40 dark:bg-teal-950/20 dark:text-teal-200">
+                  투자조합운용 프로젝트는 재무정보에 작성할 내용이 없으면 공란으로 제출해도 됩니다.
+                </div>
+              ) : null}
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div>
-                  <FieldLabel label="계약 시작일 *" field={analysisField('contractStart')} />
+                  <FieldLabel label={isInvestmentProject ? '계약 시작일' : '계약 시작일 *'} field={analysisField('contractStart')} />
                   <Input
                     type="date"
                     value={form.contractStart}
@@ -1072,7 +1132,7 @@ export function PortalProjectRegister() {
                   <FieldEvidence field={analysisField('contractStart')} />
                 </div>
                 <div>
-                  <FieldLabel label="계약 종료일 *" field={analysisField('contractEnd')} />
+                  <FieldLabel label={isInvestmentProject ? '계약 종료일' : '계약 종료일 *'} field={analysisField('contractEnd')} />
                   <Input
                     type="date"
                     value={form.contractEnd}
@@ -1084,13 +1144,16 @@ export function PortalProjectRegister() {
               </div>
 
               <div>
-                <FieldLabel label="계약금액 (계약서 내 기재된 총 금액) *" field={analysisField('contractAmount')} />
+                <FieldLabel
+                  label={isInvestmentProject ? '계약금액 (계약서 내 기재된 총 금액)' : '계약금액 (계약서 내 기재된 총 금액) *'}
+                  field={analysisField('contractAmount')}
+                />
                 <Input
                   type="number"
                   value={hasContractAmountInput ? String(form.contractAmount) : ''}
                   onChange={(event) => {
                     const nextValue = event.target.value;
-                    setHasContractAmountInput(hasExplicitProjectAmountInput(nextValue));
+                    updateFinancialFlag('contractAmount', hasExplicitProjectAmountInput(nextValue));
                     update('contractAmount', parseProjectAmountInput(nextValue));
                   }}
                   placeholder="0"
@@ -1098,7 +1161,7 @@ export function PortalProjectRegister() {
                 />
                 <div className="mt-1 flex items-center justify-between text-[10px] text-muted-foreground">
                   <FieldEvidence field={analysisField('contractAmount')} />
-                  {hasContractAmountInput ? <span>{fmtKRW(form.contractAmount)}원</span> : null}
+                  {hasContractAmountInput ? <span>{fmtKRW(form.contractAmount)}원</span> : <span>미입력</span>}
                 </div>
               </div>
 
@@ -1107,8 +1170,12 @@ export function PortalProjectRegister() {
                   <FieldLabel label="매출 부가세" field={analysisField('salesVatAmount')} />
                   <Input
                     type="number"
-                    value={form.salesVatAmount || ''}
-                    onChange={(event) => update('salesVatAmount', Number(event.target.value) || 0)}
+                    value={hasSalesVatAmountInput ? String(form.salesVatAmount) : ''}
+                    onChange={(event) => {
+                      const nextValue = event.target.value;
+                      updateFinancialFlag('salesVatAmount', hasExplicitProjectAmountInput(nextValue));
+                      update('salesVatAmount', parseProjectAmountInput(nextValue));
+                    }}
                     placeholder="0"
                     className="mt-1 h-9 text-[12px]"
                   />
@@ -1118,8 +1185,12 @@ export function PortalProjectRegister() {
                   <Label className="text-[11px]">총수익</Label>
                   <Input
                     type="number"
-                    value={form.totalRevenueAmount || ''}
-                    onChange={(event) => update('totalRevenueAmount', Number(event.target.value) || 0)}
+                    value={hasTotalRevenueAmountInput ? String(form.totalRevenueAmount) : ''}
+                    onChange={(event) => {
+                      const nextValue = event.target.value;
+                      updateFinancialFlag('totalRevenueAmount', hasExplicitProjectAmountInput(nextValue));
+                      update('totalRevenueAmount', parseProjectAmountInput(nextValue));
+                    }}
                     placeholder="0"
                     className="mt-1 h-9 text-[12px]"
                   />
@@ -1128,8 +1199,12 @@ export function PortalProjectRegister() {
                   <Label className="text-[11px]">지원금</Label>
                   <Input
                     type="number"
-                    value={form.supportAmount || ''}
-                    onChange={(event) => update('supportAmount', Number(event.target.value) || 0)}
+                    value={hasSupportAmountInput ? String(form.supportAmount) : ''}
+                    onChange={(event) => {
+                      const nextValue = event.target.value;
+                      updateFinancialFlag('supportAmount', hasExplicitProjectAmountInput(nextValue));
+                      update('supportAmount', parseProjectAmountInput(nextValue));
+                    }}
                     placeholder="0"
                     className="mt-1 h-9 text-[12px]"
                   />
@@ -1374,10 +1449,10 @@ export function PortalProjectRegister() {
                 <SummaryCard title="재무 정보">
                   <ReviewRow label="계약 시작일" value={form.contractStart || '-'} />
                   <ReviewRow label="계약 종료일" value={form.contractEnd || '-'} />
-                  <ReviewRow label="계약금액" value={`${fmtKRW(form.contractAmount)}원`} highlight />
-                  <ReviewRow label="매출 부가세" value={`${fmtKRW(form.salesVatAmount)}원`} />
-                  <ReviewRow label="총수익" value={`${fmtKRW(form.totalRevenueAmount)}원`} />
-                  <ReviewRow label="지원금" value={`${fmtKRW(form.supportAmount)}원`} />
+                  <ReviewRow label="계약금액" value={formatStoredProjectAmount(form.contractAmount, financialInputFlags.contractAmount)} highlight />
+                  <ReviewRow label="매출 부가세" value={formatStoredProjectAmount(form.salesVatAmount, financialInputFlags.salesVatAmount)} />
+                  <ReviewRow label="총수익" value={formatStoredProjectAmount(form.totalRevenueAmount, financialInputFlags.totalRevenueAmount)} />
+                  <ReviewRow label="지원금" value={formatStoredProjectAmount(form.supportAmount, financialInputFlags.supportAmount)} />
                   <ReviewRow label="정산 유형" value={SETTLEMENT_TYPE_LABELS[form.settlementType]} />
                   <ReviewRow label="정산 기준" value={BASIS_LABELS[form.basis]} />
                   <ReviewRow label="통장 유형" value={ACCOUNT_TYPE_LABELS[form.accountType]} />

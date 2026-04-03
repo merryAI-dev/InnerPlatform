@@ -1,3 +1,5 @@
+import type { ProjectType } from '../data/types';
+
 export type ProjectRegisterStep = 'contract' | 'basic' | 'financial' | 'team' | 'review';
 
 export interface ProjectRegisterNextState {
@@ -9,6 +11,7 @@ export interface ProjectRegisterNextState {
 export interface ProjectRegisterDraftLike {
   department: string;
   name: string;
+  type: ProjectType;
   contractStart: string;
   contractEnd: string;
   managerName: string;
@@ -36,6 +39,7 @@ export function getProjectRegisterSubmitIssues(
 ): ProjectRegisterSubmitIssue[] {
   const issues: ProjectRegisterSubmitIssue[] = [];
   const { form, hasContractAmountInput } = context;
+  const requiresFinancialInputs = form.type !== 'I1';
 
   if (!String(form.department || '').trim()) {
     issues.push({ step: 'basic', label: '담당팀' });
@@ -43,13 +47,13 @@ export function getProjectRegisterSubmitIssues(
   if (!String(form.name || '').trim()) {
     issues.push({ step: 'basic', label: '등록 프로젝트명' });
   }
-  if (!String(form.contractStart || '').trim()) {
+  if (requiresFinancialInputs && !String(form.contractStart || '').trim()) {
     issues.push({ step: 'financial', label: '계약 시작일' });
   }
-  if (!String(form.contractEnd || '').trim()) {
+  if (requiresFinancialInputs && !String(form.contractEnd || '').trim()) {
     issues.push({ step: 'financial', label: '계약 종료일' });
   }
-  if (!hasContractAmountInput) {
+  if (requiresFinancialInputs && !hasContractAmountInput) {
     issues.push({ step: 'financial', label: '계약금액' });
   }
   if (!String(form.managerName || '').trim()) {

@@ -87,7 +87,7 @@ export const PROJECT_TYPE_LABELS: Record<ProjectType, string> = {
   C1: 'C-1 컨설팅',
   A1: 'A-1 액셀러레이팅 - 국내일반',
   A2: 'A-2 액셀러레이팅 - 글로벌',
-  I1: 'I-1 투자조합운용 - GP성과보수',
+  I1: 'I-1 투자조합운용',
   I2: 'I-2 투자조합운용 - GP관리보수',
   I3: 'I-3 투자조합운용 - LP수익',
   D1: 'D-1 개발협력사업 - AVPN 포함',
@@ -102,7 +102,7 @@ export const PROJECT_TYPE_SHORT_LABELS: Record<ProjectType, string> = {
   C1: '컨설팅',
   A1: 'AC 국내',
   A2: 'AC 글로벌',
-  I1: '투자 GP성과',
+  I1: '투자조합운용',
   I2: '투자 GP관리',
   I3: '투자 LP수익',
   D1: '개발협력',
@@ -146,6 +146,38 @@ export const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
   OPERATING: '전용계좌(이나라도움x)',
   NONE: '일반 사업',
 };
+
+export interface ProjectFinancialInputFlags {
+  contractAmount?: boolean;
+  salesVatAmount?: boolean;
+  totalRevenueAmount?: boolean;
+  supportAmount?: boolean;
+}
+
+export const PROJECT_TYPE_REGISTER_OPTIONS: ProjectType[] = [
+  'C1',
+  'A1',
+  'A2',
+  'I1',
+  'D1',
+  'S1',
+  'S2',
+  'E1',
+  'P1',
+  'Z1',
+];
+
+export function getProjectTypeSelectableOptions(currentType?: ProjectType): ProjectType[] {
+  if (!currentType || PROJECT_TYPE_REGISTER_OPTIONS.includes(currentType)) {
+    return [...PROJECT_TYPE_REGISTER_OPTIONS];
+  }
+  const next = [...PROJECT_TYPE_REGISTER_OPTIONS];
+  const insertIndex = currentType === 'I2' || currentType === 'I3'
+    ? next.indexOf('I1') + 1
+    : next.length;
+  next.splice(insertIndex, 0, currentType);
+  return next;
+}
 
 export const DIRECTION_LABELS: Record<Direction, string> = {
   IN: '입금',
@@ -322,6 +354,7 @@ export interface Project {
   totalRevenueAmount?: number;
   supportAmount?: number;
   salesVatAmount?: number;
+  financialInputFlags?: ProjectFinancialInputFlags;
   settlementGuide?: string;
   contractDocument?: FileAttachment | null;
   // 팀/담당자
@@ -444,6 +477,7 @@ export interface ProjectRequestPayload {
   salesVatAmount: number;
   totalRevenueAmount: number;
   supportAmount: number;
+  financialInputFlags?: ProjectFinancialInputFlags;
   contractStart: string;
   contractEnd: string;
   settlementType: SettlementType;

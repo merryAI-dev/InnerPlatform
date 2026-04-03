@@ -46,4 +46,25 @@ describe('project completeness', () => {
     expect(r.filled).toBe(r.total);
     expect(r.percent).toBe(100);
   });
+
+  it('does not require contract dates or amount for I1 projects', () => {
+    const r = computeProjectCompleteness({
+      type: 'I1',
+      department: '투자센터',
+      clientOrg: '',
+      managerName: '베리',
+      managerId: 'u1',
+      accountType: 'DEDICATED',
+      contractStart: '',
+      contractEnd: '',
+      contractAmount: 0,
+      financialInputFlags: { contractAmount: false },
+      paymentPlanDesc: '',
+      groupwareName: '',
+    } as any);
+
+    expect(r.missing.some((item) => item.key === 'contractStart')).toBe(false);
+    expect(r.missing.some((item) => item.key === 'contractEnd')).toBe(false);
+    expect(r.missing.some((item) => item.key === 'contractAmount')).toBe(false);
+  });
 });

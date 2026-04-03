@@ -24,6 +24,7 @@ import type {
   AccountType,
   Basis,
   Project,
+  ProjectFinancialInputFlags,
   ProjectPhase,
   ProjectStatus,
   ProjectType,
@@ -32,6 +33,7 @@ import type {
 import {
   ACCOUNT_TYPE_LABELS,
   BASIS_LABELS,
+  getProjectTypeSelectableOptions,
   PROJECT_STATUS_LABELS,
   PROJECT_TYPE_LABELS,
   SETTLEMENT_TYPE_LABELS
@@ -45,9 +47,9 @@ import { Progress } from '../ui/progress';
 import { Separator } from '../ui/separator';
 import { PROJECT_DEPARTMENT_OPTIONS } from '../../data/project-department-options';
 import {
+  createEmptyProjectFinancialInputFlags,
   formatProjectAmountInput,
-  hasExplicitProjectAmountInput,
-  hasStoredProjectContractAmount,
+  normalizeProjectFinancialInputFlags,
   parseProjectAmountInput,
 } from '../../platform/project-contract-amount';
 
@@ -91,6 +93,7 @@ interface WizardFormData {
   managerId: string;
   // Step 5: Finance
   contractAmount: number;
+  financialInputFlags: ProjectFinancialInputFlags;
   budgetCurrentYear: number;
   taxInvoiceAmount: number;
   profitRate: number;
@@ -108,7 +111,7 @@ const INITIAL_DATA: WizardFormData = {
   status: 'CONTRACT_PENDING', contractType: '계약서(날인)', contractStart: '', contractEnd: '', participantCondition: '',
   accountType: 'NONE', settlementType: 'TYPE1', basis: '공급가액',
   teamName: '', managerName: '', managerId: '',
-  contractAmount: 0, budgetCurrentYear: 0, taxInvoiceAmount: 0, profitRate: 0, profitAmount: 0,
+  contractAmount: 0, financialInputFlags: createEmptyProjectFinancialInputFlags(), budgetCurrentYear: 0, taxInvoiceAmount: 0, profitRate: 0, profitAmount: 0,
   paymentContract: 0, paymentInterim: 0, paymentFinal: 0, paymentPlanDesc: '', finalPaymentNote: '',
 };
 
@@ -131,9 +134,6 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
     Number.isFinite(stepFromUrl) && stepFromUrl >= 0 && stepFromUrl < STEPS.length ? stepFromUrl : 0
   );
   const [saving, setSaving] = useState(false);
-  const [hasContractAmountInput, setHasContractAmountInput] = useState(() => (
-    editProject ? hasStoredProjectContractAmount(editProject) : false
-  ));
 
   const goToStep = useCallback((step: number) => {
     setCurrentStep(step);
@@ -161,6 +161,7 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
         managerName: editProject.managerName,
         managerId: editProject.managerId,
         contractAmount: editProject.contractAmount,
+        financialInputFlags: normalizeProjectFinancialInputFlags(editProject.financialInputFlags),
         budgetCurrentYear: editProject.budgetCurrentYear,
         taxInvoiceAmount: editProject.taxInvoiceAmount,
         profitRate: editProject.profitRate,
@@ -175,6 +176,24 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
     return INITIAL_DATA;
   });
 
+  const departmentOptions = useMemo(
+    () => Array.from(new Set([
+      ...PROJECT_DEPARTMENT_OPTIONS,
+      editProject?.department || '',
+    ].filter(Boolean))).sort((a, b) => a.localeCompare(b, 'ko')),
+    [editProject?.department],
+  );
+  const projectTypeOptions = useMemo(
+    () => getProjectTypeSelectableOptions(formData.type),
+    [formData.type],
+  );
+  const financialInputFlags = useMemo(
+    () => normalizeProjectFinancialInputFlags(formData.financialInputFlags),
+    [formData.financialInputFlags],
+  );
+  const hasContractAmountInput = financialInputFlags.contractAmount;
+  const isInvestmentProject = formData.type === 'I1';
+
   const update = useCallback((field: keyof WizardFormData, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }));
   }, []);
@@ -185,8 +204,16 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
   }, []);
 
   const updateContractAmount = useCallback((value: string) => {
-    setHasContractAmountInput(hasExplicitProjectAmountInput(value));
-    setFormData(prev => ({ ...prev, contractAmount: parseProjectAmountInput(value) }));
+    const normalized = value.replace(/,/g, '').trim();
+    const hasExplicitValue = normalized.length > 0 && Number.isFinite(Number(normalized));
+    setFormData(prev => ({
+      ...prev,
+      contractAmount: parseProjectAmountInput(value),
+      financialInputFlags: {
+        ...normalizeProjectFinancialInputFlags(prev.financialInputFlags),
+        contractAmount: hasExplicitValue,
+      },
+    }));
   }, []);
 
   // Auto-calculate profit amount when rate or contract changes
@@ -199,15 +226,15 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
     const checks = [
       { id: 'name', label: '사업명', passed: !!formData.name.trim(), required: true },
       { id: 'dept', label: '담당조직', passed: !!formData.department, required: true },
-      { id: 'client', label: '발주기관', passed: !!formData.clientOrg.trim(), required: targetPhase === 'CONFIRMED' },
+      { id: 'client', label: '발주기관', passed: !!formData.clientOrg.trim(), required: targetPhase === 'CONFIRMED' && !isInvestmentProject },
       { id: 'account', label: '통장 구분', passed: !!ACCOUNT_TYPE_LABELS[formData.accountType], required: targetPhase === 'CONFIRMED' },
       { id: 'groupware', label: '그룹웨어 등록명', passed: !!formData.groupwareName.trim(), required: targetPhase === 'CONFIRMED' },
       { id: 'manager', label: '메인 담당자', passed: !!formData.managerName.trim(), required: targetPhase === 'CONFIRMED' },
-      { id: 'contractAmount', label: '총 계약금액', passed: hasContractAmountInput || formData.status === 'CONTRACT_PENDING', required: targetPhase === 'CONFIRMED' },
+      { id: 'contractAmount', label: '총 계약금액', passed: isInvestmentProject || hasContractAmountInput || formData.status === 'CONTRACT_PENDING', required: targetPhase === 'CONFIRMED' && !isInvestmentProject },
       { id: 'paymentPlan', label: '입금 계획', passed: !!formData.paymentPlanDesc.trim() || formData.status === 'CONTRACT_PENDING', required: targetPhase === 'CONFIRMED' },
     ];
     return checks;
-  }, [formData, targetPhase, hasContractAmountInput]);
+  }, [formData, targetPhase, hasContractAmountInput, isInvestmentProject]);
 
   const requiredChecks = validationChecks.filter(c => c.required);
   const passedRequired = requiredChecks.filter(c => c.passed).length;
@@ -233,6 +260,7 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
       type: formData.type,
       phase: phase,
       contractAmount: formData.contractAmount,
+      financialInputFlags,
       contractStart: formData.contractStart,
       contractEnd: formData.contractEnd,
       settlementType: formData.settlementType,
@@ -281,7 +309,7 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
     } finally {
       setSaving(false);
     }
-  }, [saving, formData, calculatedProfit, editProject, addProject, updateProject, navigate, setSearchParams]);
+  }, [saving, formData, calculatedProfit, editProject, addProject, updateProject, navigate, setSearchParams, financialInputFlags]);
 
   // Format number input
   const fmtInput = (n: number) => n > 0 ? n.toLocaleString('ko-KR') : '';
@@ -308,26 +336,27 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
                 <Label>사업유형 *</Label>
                 <select
                   value={formData.type}
-                  onChange={e => update('type', e.target.value)}
+                  onChange={e => update('type', e.target.value as ProjectType)}
                   className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
                 >
-                  {Object.entries(PROJECT_TYPE_LABELS).map(([k, v]) => (
-                    <option key={k} value={k}>{v}</option>
+                  {projectTypeOptions.map((type) => (
+                    <option key={type} value={type}>{PROJECT_TYPE_LABELS[type]}</option>
                   ))}
                 </select>
               </div>
               <div className="space-y-2">
                 <Label>담당조직 *</Label>
-                <select
+                <datalist id="project-wizard-department-options">
+                  {departmentOptions.map((department) => (
+                    <option key={department} value={department} />
+                  ))}
+                </datalist>
+                <Input
                   value={formData.department}
                   onChange={e => update('department', e.target.value)}
-                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
-                >
-                  <option value="">선택하세요</option>
-                  {PROJECT_DEPARTMENT_OPTIONS.map((d) => (
-                    <option key={d} value={d}>{d}</option>
-                  ))}
-                </select>
+                  list="project-wizard-department-options"
+                  placeholder="예: 투자센터"
+                />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
@@ -338,6 +367,11 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
                   onChange={e => update('clientOrg', e.target.value)}
                   placeholder="예: KOICA, 아름다운재단"
                 />
+                {isInvestmentProject && (
+                  <p className="text-xs text-muted-foreground">
+                    계약대상이 없으면 공란으로 두셔도 됩니다.
+                  </p>
+                )}
               </div>
               <div className="space-y-2">
                 <Label>그룹웨어 프로젝트등록명</Label>
@@ -532,6 +566,11 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
       case 'finance':
         return (
           <div className="space-y-5">
+            {isInvestmentProject && (
+              <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-800">
+                투자조합운용 사업은 작성할 재무정보가 없으면 공란으로 두셔도 됩니다.
+              </div>
+            )}
             <div className="space-y-2">
               <Label>총 사업비 금액 (매출부가세 포함)</Label>
               <div className="relative">
@@ -545,6 +584,9 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
               </div>
               {hasContractAmountInput && (
                 <p className="text-xs text-muted-foreground">{fmtKRW(formData.contractAmount)}</p>
+              )}
+              {!hasContractAmountInput && isInvestmentProject && (
+                <p className="text-xs text-muted-foreground">미입력</p>
               )}
             </div>
             <div className="grid grid-cols-2 gap-4">

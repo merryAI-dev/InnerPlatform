@@ -1548,6 +1548,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       totalRevenueAmount: payload.totalRevenueAmount,
       supportAmount: payload.supportAmount,
       salesVatAmount: payload.salesVatAmount,
+      financialInputFlags: payload.financialInputFlags,
       settlementGuide: payload.settlementGuide,
       contractDocument: payload.contractDocument,
       department: payload.department,

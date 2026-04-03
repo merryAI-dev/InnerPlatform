@@ -9,8 +9,10 @@ import {
   type ProjectTeamMemberAssignment,
   type ProjectType,
   type SettlementType,
+  type ProjectFinancialInputFlags,
 } from '../../data/types';
 import { formatProjectTeamMembersSummary } from '../../platform/project-team-members';
+import { formatStoredProjectAmount } from '../../platform/project-contract-amount';
 
 export interface ProjectProposalDraft {
   name: string;
@@ -23,6 +25,7 @@ export interface ProjectProposalDraft {
   salesVatAmount: number;
   totalRevenueAmount: number;
   supportAmount: number;
+  financialInputFlags?: ProjectFinancialInputFlags;
   contractStart: string;
   contractEnd: string;
   settlementType: SettlementType;
@@ -45,10 +48,6 @@ export interface ProjectProposalPostPayload {
   title: string;
   body: string;
   tagsInput: string;
-}
-
-function fmtCurrency(value: number): string {
-  return Number.isFinite(value) ? value.toLocaleString('ko-KR') : '0';
 }
 
 export function buildProjectProposalPost(
@@ -77,10 +76,10 @@ export function buildProjectProposalPost(
     `- 프로젝트 주요 내용: ${draft.description || '-'}`,
     '',
     '[재무 정보]',
-    `- 계약금액: ${fmtCurrency(draft.contractAmount)}원`,
-    `- 매출 부가세: ${fmtCurrency(draft.salesVatAmount)}원`,
-    `- 총수익: ${fmtCurrency(draft.totalRevenueAmount)}원`,
-    `- 지원금: ${fmtCurrency(draft.supportAmount)}원`,
+    `- 계약금액: ${formatStoredProjectAmount(draft.contractAmount, draft.financialInputFlags?.contractAmount)}`,
+    `- 매출 부가세: ${formatStoredProjectAmount(draft.salesVatAmount, draft.financialInputFlags?.salesVatAmount)}`,
+    `- 총수익: ${formatStoredProjectAmount(draft.totalRevenueAmount, draft.financialInputFlags?.totalRevenueAmount)}`,
+    `- 지원금: ${formatStoredProjectAmount(draft.supportAmount, draft.financialInputFlags?.supportAmount)}`,
     `- 계약기간: ${draft.contractStart || '-'} ~ ${draft.contractEnd || '-'}`,
     `- 정산 유형: ${SETTLEMENT_TYPE_LABELS[draft.settlementType]}`,
     `- 기준: ${BASIS_LABELS[draft.basis]}`,

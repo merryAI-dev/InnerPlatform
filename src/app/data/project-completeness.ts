@@ -13,9 +13,9 @@ const FIELDS: CompletenessField[] = [
   { key: 'managerName', label: '메인 담당자', isFilled: (p) => !!String(p.managerName || '').trim() },
   { key: 'managerId', label: '담당자 계정', isFilled: (p) => !!String(p.managerId || '').trim() },
   { key: 'accountType', label: '통장 구분', isFilled: (p) => String(p.accountType || '') !== 'NONE' && !!p.accountType },
-  { key: 'contractStart', label: '계약 시작일', isFilled: (p) => !!String(p.contractStart || '').trim() },
-  { key: 'contractEnd', label: '계약 종료일', isFilled: (p) => !!String(p.contractEnd || '').trim() },
-  { key: 'contractAmount', label: '총 사업비', isFilled: (p) => hasStoredProjectContractAmount(p) },
+  { key: 'contractStart', label: '계약 시작일', isFilled: (p) => p.type === 'I1' || !!String(p.contractStart || '').trim() },
+  { key: 'contractEnd', label: '계약 종료일', isFilled: (p) => p.type === 'I1' || !!String(p.contractEnd || '').trim() },
+  { key: 'contractAmount', label: '총 사업비', isFilled: (p) => p.type === 'I1' || hasStoredProjectContractAmount(p) },
   { key: 'paymentPlanDesc', label: '입금 계획', isFilled: (p) => !!String(p.paymentPlanDesc || '').trim() },
   { key: 'groupwareName', label: '그룹웨어 등록명', isFilled: (p) => !!String(p.groupwareName || '').trim() },
 ];

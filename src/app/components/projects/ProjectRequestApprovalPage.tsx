@@ -36,6 +36,7 @@ import {
 import { getOrgCollectionPath, getOrgDocumentPath } from '../../lib/firebase';
 import { toast } from 'sonner';
 import { formatProjectTeamMembersSummary } from '../../platform/project-team-members';
+import { formatStoredProjectAmount } from '../../platform/project-contract-amount';
 
 const STATUS_BADGES: Record<ProjectRequest['status'], string> = {
   PENDING: 'bg-amber-500/15 text-amber-700 dark:text-amber-300',
@@ -206,7 +207,7 @@ export function ProjectRequestApprovalPage() {
                     계약기간 {req.payload.contractStart || '-'} ~ {req.payload.contractEnd || '-'}
                   </span>
                   <span className="text-[10px] text-muted-foreground">
-                    계약금액 {req.payload.contractAmount ? req.payload.contractAmount.toLocaleString('ko-KR') : '-'}원
+                    계약금액 {formatStoredProjectAmount(req.payload.contractAmount, req.payload.financialInputFlags?.contractAmount)}
                   </span>
                   <span className="text-[10px] text-muted-foreground">
                     상태 {PROJECT_STATUS_LABELS['CONTRACT_PENDING']}
@@ -246,15 +247,21 @@ export function ProjectRequestApprovalPage() {
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="min-w-[80px]">매출부가세</span>
-                    <span className="text-foreground/80">{Number(req.payload.salesVatAmount || 0).toLocaleString('ko-KR')}원</span>
+                    <span className="text-foreground/80">
+                      {formatStoredProjectAmount(req.payload.salesVatAmount, req.payload.financialInputFlags?.salesVatAmount)}
+                    </span>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="min-w-[80px]">총수익</span>
-                    <span className="text-foreground/80">{Number(req.payload.totalRevenueAmount || 0).toLocaleString('ko-KR')}원</span>
+                    <span className="text-foreground/80">
+                      {formatStoredProjectAmount(req.payload.totalRevenueAmount, req.payload.financialInputFlags?.totalRevenueAmount)}
+                    </span>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="min-w-[80px]">지원금</span>
-                    <span className="text-foreground/80">{Number(req.payload.supportAmount || 0).toLocaleString('ko-KR')}원</span>
+                    <span className="text-foreground/80">
+                      {formatStoredProjectAmount(req.payload.supportAmount, req.payload.financialInputFlags?.supportAmount)}
+                    </span>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="min-w-[80px]">정산유형</span>

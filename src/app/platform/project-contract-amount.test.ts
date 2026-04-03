@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  formatStoredProjectAmount,
   formatProjectAmountInput,
   hasExplicitProjectAmountInput,
   hasNonNegativeProjectAmountInput,
+  hasStoredProjectAmount,
   hasStoredProjectContractAmount,
   parseProjectAmountInput,
 } from './project-contract-amount';
@@ -27,5 +29,14 @@ describe('project-contract-amount', () => {
   it('treats stored zero amounts as filled values', () => {
     expect(hasStoredProjectContractAmount({ contractAmount: 0 } as any)).toBe(true);
     expect(hasStoredProjectContractAmount({})).toBe(false);
+  });
+
+  it('treats flagged blank amounts as missing even when the stored number is zero', () => {
+    expect(hasStoredProjectAmount(0, false)).toBe(false);
+    expect(hasStoredProjectContractAmount({
+      contractAmount: 0,
+      financialInputFlags: { contractAmount: false },
+    } as any)).toBe(false);
+    expect(formatStoredProjectAmount(0, false)).toBe('-');
   });
 });

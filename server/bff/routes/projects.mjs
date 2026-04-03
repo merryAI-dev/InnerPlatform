@@ -42,6 +42,11 @@ function formatProjectPeriod(start, end) {
   return normalizedStart || normalizedEnd || '-';
 }
 
+function formatOptionalProjectAmount(value, explicit) {
+  if (explicit === false) return '-';
+  return Number.isFinite(value) ? formatKrw(value) : '-';
+}
+
 function buildProjectRegistrationSlackPayload(projectRequest) {
   const payload = projectRequest?.payload && typeof projectRequest.payload === 'object'
     ? projectRequest.payload
@@ -52,6 +57,9 @@ function buildProjectRegistrationSlackPayload(projectRequest) {
   const department = trimSlackText(payload.department, 120);
   const managerName = trimSlackText(payload.managerName, 120);
   const teamName = trimSlackText(payload.teamName, 120);
+  const financialInputFlags = payload.financialInputFlags && typeof payload.financialInputFlags === 'object'
+    ? payload.financialInputFlags
+    : {};
   const requester = trimSlackText(projectRequest?.requestedByName, 120);
   const requesterEmail = trimSlackText(projectRequest?.requestedByEmail, 160);
   const projectId = trimSlackText(projectRequest?.approvedProjectId, 120);
@@ -65,7 +73,7 @@ function buildProjectRegistrationSlackPayload(projectRequest) {
     `메인 담당자: ${managerName}`,
     `팀장/팀명: ${teamName}`,
     `계약기간: ${formatProjectPeriod(payload.contractStart, payload.contractEnd)}`,
-    `계약금액: ${formatKrw(payload.contractAmount)}`,
+    `계약금액: ${formatOptionalProjectAmount(payload.contractAmount, financialInputFlags.contractAmount)}`,
     `사업목적: ${purpose}`,
     `요청자: ${requester} (${requesterEmail})`,
     `projectId: \`${projectId}\``,

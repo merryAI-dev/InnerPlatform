@@ -1,7 +1,27 @@
-import type { Project } from '../data/types';
+import type { Project, ProjectFinancialInputFlags } from '../data/types';
+
+export const EMPTY_PROJECT_FINANCIAL_INPUT_FLAGS: Required<ProjectFinancialInputFlags> = {
+  contractAmount: false,
+  salesVatAmount: false,
+  totalRevenueAmount: false,
+  supportAmount: false,
+};
 
 function normalizeAmountInput(value: string): string {
   return String(value || '').replace(/,/g, '').trim();
+}
+
+export function createEmptyProjectFinancialInputFlags(): ProjectFinancialInputFlags {
+  return { ...EMPTY_PROJECT_FINANCIAL_INPUT_FLAGS };
+}
+
+export function normalizeProjectFinancialInputFlags(
+  value: ProjectFinancialInputFlags | null | undefined,
+): Required<ProjectFinancialInputFlags> {
+  return {
+    ...EMPTY_PROJECT_FINANCIAL_INPUT_FLAGS,
+    ...(value || {}),
+  };
 }
 
 export function parseProjectAmountInput(value: string): number {
@@ -28,6 +48,20 @@ export function formatProjectAmountInput(value: number, hasExplicitValue: boolea
   return value.toLocaleString('ko-KR');
 }
 
+export function hasStoredProjectAmount(value: unknown, hasExplicitValue?: boolean): boolean {
+  if (hasExplicitValue === false) return false;
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+export function formatStoredProjectAmount(value: unknown, hasExplicitValue?: boolean): string {
+  return hasStoredProjectAmount(value, hasExplicitValue)
+    ? `${Number(value).toLocaleString('ko-KR')}원`
+    : '-';
+}
+
 export function hasStoredProjectContractAmount(project: Partial<Project>): boolean {
-  return typeof project.contractAmount === 'number' && Number.isFinite(project.contractAmount);
+  return hasStoredProjectAmount(
+    project.contractAmount,
+    project.financialInputFlags?.contractAmount,
+  );
 }
