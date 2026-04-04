@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { doc, getDoc } from 'firebase/firestore';
-import { CheckCircle2, ClipboardCheck, ClipboardList, CircleDollarSign, ChevronLeft, ChevronRight, Download, Loader2 } from 'lucide-react';
+import { ArrowLeftRight, CheckCircle2, ClipboardCheck, ClipboardList, Columns2, CircleDollarSign, ChevronLeft, ChevronRight, Download, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useBlocker, useNavigate } from 'react-router';
 import { Button } from '../ui/button';
@@ -159,7 +159,7 @@ export function CashflowProjectSheet({
 
   // ── Actual: Firestore cashflow_weeks actual 값 사용 ──
 
-  const [mode, setMode] = useState<'projection' | 'actual'>('projection');
+  const [viewMode, setViewMode] = useState<'projection' | 'actual' | 'compare'>('compare');
   const [drafts, setDrafts] = useState<Record<string, string>>({});
 
   type WeekSaveState = 'dirty' | 'saving' | 'error' | 'saved';
@@ -176,7 +176,7 @@ export function CashflowProjectSheet({
     expenseStatusLabel?: string;
     expenseStatusDescription?: string;
   } | null>(null);
-  const [monthSaving, setMonthSaving] = useState(false);
+  const [monthSavingMode, setMonthSavingMode] = useState<null | 'projection' | 'actual'>(null);
 
   const hasDirty = useMemo(
     () => hasUnsavedChanges(weekSaveState) || Object.keys(drafts).length > 0,
@@ -464,27 +464,53 @@ export function CashflowProjectSheet({
       .catch(() => {});
   }, [flushAllDirtyBeforeMonthChange, goNextMonth]);
 
-  const saveMonthProjection = useCallback(() => {
+  const saveMonth = useCallback((targetMode: 'projection' | 'actual') => {
     const targets = monthWeeks.map((w) => w.weekNo);
-    // Check if there are any pending projection drafts for this month
-    const hasPendingDrafts = Object.keys(drafts).some((k) => k.startsWith(`${yearMonth}:projection:`));
+    const hasPendingDrafts = Object.keys(drafts).some((k) => k.startsWith(`${yearMonth}:${targetMode}:`));
     if (!hasPendingDrafts) {
       toast.message('저장할 변경사항이 없습니다.');
       return;
     }
     void (async () => {
-      setMonthSaving(true);
+      setMonthSavingMode(targetMode);
       for (const weekNo of targets) {
-        await flushWeek({ weekNo, mode: 'projection', silent: false });
+        await flushWeek({ weekNo, mode: targetMode, silent: false });
       }
-      toast.success('이번 달 Projection을 저장했습니다.');
+      toast.success(`이번 달 ${targetMode === 'projection' ? 'Projection' : 'Actual'}을 저장했습니다.`);
     })().catch((err) => {
       console.error('[Cashflow] month projection save failed:', err);
       toast.error('월 저장에 실패했습니다. 네트워크/권한을 확인해 주세요.');
     }).finally(() => {
-      setMonthSaving(false);
+      setMonthSavingMode((prev) => (prev === targetMode ? null : prev));
     });
   }, [drafts, flushWeek, monthWeeks, yearMonth]);
+
+  const copyMonthValues = useCallback((sourceMode: 'projection' | 'actual', targetMode: 'projection' | 'actual') => {
+    if (sourceMode === targetMode) return;
+    if (targetMode === 'actual' && !canEdit) {
+      toast.error('Actual 복사는 편집 권한이 있을 때만 가능합니다.');
+      return;
+    }
+    setDrafts((prev) => {
+      const next = { ...prev };
+      for (const week of monthWeeks) {
+        for (const lineId of CASHFLOW_ALL_LINES) {
+          const sourceValue = getEffectiveAmount({ yearMonth, mode: sourceMode, weekNo: week.weekNo, lineId });
+          const targetKey = resolveCellKey({ yearMonth, mode: targetMode, weekNo: week.weekNo, lineId });
+          next[targetKey] = formatAmountInput(String(sourceValue));
+        }
+      }
+      return next;
+    });
+    setWeekSaveState((prev) => {
+      const next = { ...prev };
+      for (const week of monthWeeks) {
+        next[resolveWeekKey({ yearMonth, mode: targetMode, weekNo: week.weekNo })] = 'dirty';
+      }
+      return next;
+    });
+    toast.success(`${sourceMode === 'projection' ? 'Projection' : 'Actual'} 값을 ${targetMode === 'projection' ? 'Projection' : 'Actual'} 초안으로 복사했습니다.`);
+  }, [canEdit, formatAmountInput, getEffectiveAmount, monthWeeks, resolveCellKey, resolveWeekKey, yearMonth]);
 
   const handleSubmitWeek = useCallback(async (input: { weekNo: number; yearMonth: string }) => {
     setSubmitBusy(true);
@@ -642,7 +668,7 @@ export function CashflowProjectSheet({
                       const isThisWeek = todayYearMonth === yearMonth && todayIso >= w.weekStart && todayIso <= w.weekEnd;
                       const colClass = isThisWeek ? 'bg-teal-50/30 dark:bg-teal-950/10' : '';
 
-                      if (tableMode === 'actual') {
+                      if (tableMode === 'actual' && !canEdit) {
                         const amount = getEffectiveAmount({ yearMonth, mode: 'actual', weekNo: w.weekNo, lineId });
                         return (
                         <td key={w.weekNo} className={`px-3 py-2 h-9 align-middle text-right ${colClass}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
@@ -703,7 +729,7 @@ export function CashflowProjectSheet({
                       const isThisWeek = todayYearMonth === yearMonth && todayIso >= w.weekStart && todayIso <= w.weekEnd;
                       const colClass = isThisWeek ? 'bg-teal-50/30 dark:bg-teal-950/10' : '';
 
-                      if (tableMode === 'actual') {
+                      if (tableMode === 'actual' && !canEdit) {
                         const amount = getEffectiveAmount({ yearMonth, mode: 'actual', weekNo: w.weekNo, lineId });
                         return (
                         <td key={w.weekNo} className={`px-3 py-2 h-9 align-middle text-right ${colClass}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
@@ -793,22 +819,47 @@ export function CashflowProjectSheet({
               variant="outline"
               size="sm"
               className="h-8 text-[12px] gap-1.5"
+              onClick={() => copyMonthValues('projection', 'actual')}
+              disabled={!canEdit}
+            >
+              <ArrowLeftRight className="w-3.5 h-3.5" /> Projection → Actual
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-[12px] gap-1.5"
+              onClick={() => copyMonthValues('actual', 'projection')}
+            >
+              <ArrowLeftRight className="w-3.5 h-3.5" /> Actual → Projection
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-[12px] gap-1.5"
               onClick={handleDownload}
             >
               <Download className="w-3.5 h-3.5" /> 엑셀 다운로드
             </Button>
-            {mode === 'projection' && (
-              <Button
-                variant="default"
-                size="sm"
-                className="h-8 text-[12px] gap-1.5"
-                onClick={saveMonthProjection}
-                disabled={monthSaving}
-              >
-                {monthSaving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                월 저장
-              </Button>
-            )}
+            <Button
+              variant="default"
+              size="sm"
+              className="h-8 text-[12px] gap-1.5"
+              onClick={() => saveMonth('projection')}
+              disabled={monthSavingMode !== null}
+            >
+              {monthSavingMode === 'projection' && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              Projection 저장
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-[12px] gap-1.5"
+              onClick={() => saveMonth('actual')}
+              disabled={!canEdit || monthSavingMode !== null}
+            >
+              {monthSavingMode === 'actual' && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              Actual 저장
+            </Button>
             <Button variant="outline" size="sm" className="h-8 text-[12px] gap-1.5" onClick={goPrevMonthSafe}>
               <ChevronLeft className="w-3.5 h-3.5" /> 이전 달
             </Button>
@@ -819,7 +870,11 @@ export function CashflowProjectSheet({
         )}
       />
 
-      <Tabs value={mode} onValueChange={(v) => (v === 'projection' || v === 'actual') && setMode(v)}>
+      <div className="rounded-2xl border border-slate-200/80 bg-slate-50/70 px-4 py-3 text-[11px] text-slate-600">
+        비교 모드에서는 Projection과 Actual을 동시에 보면서 바로 복사할 수 있습니다. 입력 필드는 그대로 복붙되고, 월 저장은 각 영역별로 따로 반영됩니다.
+      </div>
+
+      <Tabs value={viewMode} onValueChange={(v) => (v === 'projection' || v === 'actual' || v === 'compare') && setViewMode(v)}>
         <TabsList className="w-full sm:w-fit bg-transparent p-0 border-b border-border/60 rounded-md">
           <TabsTrigger
             value="projection"
@@ -835,6 +890,13 @@ export function CashflowProjectSheet({
             <ClipboardCheck className="w-4 h-4" />
             Actual
           </TabsTrigger>
+          <TabsTrigger
+            value="compare"
+            className="gap-2 rounded-md border border-transparent px-3 py-2 -mb-px text-muted-foreground hover:bg-muted/40 data-[state=active]:border-border data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-md data-[state=active]:ring-1 data-[state=active]:ring-foreground/30 data-[state=active]:font-semibold"
+          >
+            <Columns2 className="w-4 h-4" />
+            비교
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="projection">
@@ -843,6 +905,29 @@ export function CashflowProjectSheet({
 
         <TabsContent value="actual">
           {renderSheetTable('actual')}
+        </TabsContent>
+
+        <TabsContent value="compare">
+          <div className="grid gap-4 xl:grid-cols-2">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-[12px] font-semibold">Projection</div>
+                  <div className="text-[10px] text-muted-foreground">계획값을 편집하고 저장합니다.</div>
+                </div>
+              </div>
+              {renderSheetTable('projection')}
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-[12px] font-semibold">Actual</div>
+                  <div className="text-[10px] text-muted-foreground">실적값을 확인하고 필요 시 보정합니다.</div>
+                </div>
+              </div>
+              {renderSheetTable('actual')}
+            </div>
+          </div>
         </TabsContent>
       </Tabs>
 

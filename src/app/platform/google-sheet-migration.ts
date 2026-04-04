@@ -10,6 +10,7 @@ export type GoogleSheetMigrationTarget =
   | 'bank_statement'
   | 'evidence_rules'
   | 'cashflow_projection'
+  | 'cashflow_guide'
   | 'preview_only';
 
 export interface GoogleSheetMigrationDescriptor {
@@ -70,6 +71,7 @@ export function resolveProjectSheetSourceType(
     case 'evidence_rules':
       return 'evidence_rules';
     case 'cashflow_projection':
+    case 'cashflow_guide':
       return 'cashflow';
     case 'bank_statement':
       return 'bank_statement';
@@ -466,14 +468,14 @@ export function describeGoogleSheetMigrationTarget(sheetName: string): GoogleShe
   }
   if (isENaraCashflowGuide || normalized.includes('cashflow')) {
     return {
-      target: 'cashflow_projection',
-      kindLabel: '캐시플로우',
+      target: 'cashflow_guide',
+      kindLabel: '캐시플로우 가이드',
       description: isENaraCashflowGuide
-        ? 'e나라도움 전용 cashflow 탭입니다. 주차 헤더가 감지되면 projection으로 반영하고, 그렇지 않으면 원본 preview로 확인합니다.'
-        : '구조가 유사한 cashflow 탭입니다. 주차 헤더가 감지되면 projection으로 반영합니다.',
+        ? 'e나라도움 전용 guide 탭입니다. 자동 반영 대신 원본 preview와 비교 참고용으로 사용합니다.'
+        : '구조가 유사한 cashflow guide 탭입니다. 자동 반영 대신 비교/참고용으로 사용합니다.',
       recommendedScreen: '캐시플로우',
-      applySupported: true,
-      readinessLabel: isENaraCashflowGuide ? 'e나라도움 cashflow 후보' : '주차 헤더 기반 반영',
+      applySupported: false,
+      readinessLabel: isENaraCashflowGuide ? '가이드 preview 권장' : '비교/안내 전용',
     };
   }
   if (normalized.includes('인력투입률')) {

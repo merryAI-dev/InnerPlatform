@@ -72,8 +72,8 @@ export function PortalCashflowPage() {
         <CardContent className="flex flex-col gap-3 px-5 py-4 text-[12px] text-slate-700 sm:flex-row sm:items-center sm:justify-between">
           <div className="space-y-1">
             <p className="font-semibold text-slate-950">기존 캐시플로 형식 그대로 migration 할 수 있습니다.</p>
-            <p>Google Sheets, `.xlsx`, `.csv`를 바로 읽고 주차별 projection으로 반영합니다.</p>
-            <p className="text-[11px] text-slate-600">권장 형식: 첫 1~2열에 항목명, 주차 헤더는 `26-03-1` 또는 `2026년 3월 1주`처럼 두세요. actual은 계속 통장/정산 데이터 기준입니다.</p>
+            <p>Google Sheets, `.xlsx`, `.csv`를 바로 읽고 주차별 projection을 가져오거나 guide 탭을 preview로 비교할 수 있습니다.</p>
+            <p className="text-[11px] text-slate-600">권장 형식: 첫 1~2열에 항목명, 주차 헤더는 `26-03-1` 또는 `2026년 3월 1주`처럼 두세요. `cashflow(e나라도움 시 가이드)`는 자동 반영하지 않고 compare 화면에서 projection/actual을 같이 보며 복붙하는 참고용으로 씁니다.</p>
           </div>
           <Button type="button" className="h-9 gap-1.5 text-[12px]" onClick={() => setGoogleSheetImportOpen(true)}>
             <FileSpreadsheet className="h-4 w-4" />

@@ -46,6 +46,7 @@ function detectTarget(sheetName) {
   if (normalized.includes('예산총괄') || normalized.includes('그룹예산')) return 'budget_plan';
   if (normalized.includes('비목별 증빙자료')) return 'evidence_rules';
   if (normalized.includes('cashflow') && !normalized.includes('가이드')) return 'cashflow_projection';
+  if (normalized.includes('cashflow') && normalized.includes('가이드')) return 'cashflow_guide';
   if (normalized.includes('사용내역') || normalized.includes('지출대장') || normalized.includes('비용사용내역')) return 'expense_sheet';
   if (normalized.includes('통장내역')) return 'bank_statement';
   return 'preview_only';
@@ -138,6 +139,7 @@ export function buildFallbackGoogleSheetMigrationAnalysis(input) {
     bank_statement: '통장내역',
     evidence_rules: '증빙 규칙',
     cashflow_projection: '캐시플로우 projection',
+    cashflow_guide: '캐시플로우 가이드',
     preview_only: 'preview only',
   };
 
@@ -261,7 +263,7 @@ function buildPrompt(input, fallback) {
     '{',
     '  "summary": "한두 문장 요약",',
     '  "confidence": "high|medium|low",',
-    '  "likelyTarget": "expense_sheet|budget_plan|bank_statement|evidence_rules|cashflow_projection|preview_only",',
+    '  "likelyTarget": "expense_sheet|budget_plan|bank_statement|evidence_rules|cashflow_projection|cashflow_guide|preview_only",',
     '  "usageTips": ["실사용 팁", "..."],',
     '  "warnings": ["위험/주의사항", "..."],',
     '  "nextActions": ["바로 할 일", "..."],',

@@ -18,7 +18,7 @@ describe('google-sheet-migration', () => {
     expect(describeGoogleSheetMigrationTarget('증빙서류(2025업데이트)').target).toBe('evidence_rules');
     expect(describeGoogleSheetMigrationTarget('통장내역(MYSC법인계좌e나라도움제외)').target).toBe('bank_statement');
     expect(describeGoogleSheetMigrationTarget('cashflow(사용내역 연동)').target).toBe('cashflow_projection');
-    expect(describeGoogleSheetMigrationTarget('cashflow(e나라도움 시 가이드)').target).toBe('cashflow_projection');
+    expect(describeGoogleSheetMigrationTarget('cashflow(e나라도움 시 가이드)').target).toBe('cashflow_guide');
     expect(describeGoogleSheetMigrationTarget('인력투입률').target).toBe('preview_only');
   });
 
@@ -354,6 +354,7 @@ describe('google-sheet-migration', () => {
     expect(resolveProjectSheetSourceType('budget_plan')).toBe('budget');
     expect(resolveProjectSheetSourceType('evidence_rules')).toBe('evidence_rules');
     expect(resolveProjectSheetSourceType('cashflow_projection')).toBe('cashflow');
+    expect(resolveProjectSheetSourceType('cashflow_guide')).toBe('cashflow');
     expect(resolveProjectSheetSourceType('bank_statement')).toBe('bank_statement');
     expect(resolveProjectSheetSourceType('preview_only')).toBeNull();
   });

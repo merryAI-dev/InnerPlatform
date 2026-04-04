@@ -278,6 +278,9 @@ function summarizeSourceHeaders(
     case 'cashflow_projection':
       matchedColumns = matchIfIncludes(['구분']);
       break;
+    case 'cashflow_guide':
+      matchedColumns = matchIfIncludes(['구분']);
+      break;
     default:
       matchedColumns = [];
   }
@@ -447,6 +450,26 @@ export function GoogleSheetMigrationWizard({
             { label: '주차 문서', value: `${parsed.sheets.length}개` },
             { label: '월 수', value: `${yearMonthCount}개월` },
             { label: '입력 셀', value: `${amountCellCount}칸` },
+          ],
+          cashflowProjection: parsed,
+        });
+      }
+      case 'cashflow_guide': {
+        const parsed = parseCashflowProjectionMatrix(preview.matrix);
+        const amountCellCount = parsed.sheets.reduce((total, sheet) => total + Object.keys(sheet.amounts).length, 0);
+        const yearMonthCount = new Set(parsed.sheets.map((sheet) => sheet.yearMonth)).size;
+        return finalizeReviewState({
+          descriptor,
+          applySupported: false,
+          applyButtonLabel: '가이드 탭은 preview only',
+          applyHint: parsed.sheets.length > 0
+            ? '이 탭은 자동 반영하지 않습니다. 주차 구조를 참고한 뒤 캐시플로우 compare 화면에서 Projection/Actual을 함께 보며 복붙하거나 수동 조정하세요.'
+            : 'guide 탭은 계산 source가 아니라 참고용입니다. 실제 projection 반영은 cashflow(사용내역 연동) 같은 계산 탭에서만 진행하세요.',
+          summaryStats: [
+            { label: '감지 주차', value: `${parsed.sheets.length}개` },
+            { label: '감지 월 수', value: `${yearMonthCount}개월` },
+            { label: '참고 셀', value: `${amountCellCount}칸` },
+            { label: '반영 방식', value: 'preview only' },
           ],
           cashflowProjection: parsed,
         });
@@ -1083,7 +1106,7 @@ function GoogleSheetImportDialog({
                       <p className="text-sm font-semibold text-slate-950">이 wizard가 하는 일</p>
                       <div className="mt-3 grid gap-3 sm:grid-cols-2">
                         <SummaryStat label="지원 방식" value="Google Sheets + 로컬 업로드" />
-                        <SummaryStat label="현재 직접 반영" value="예산·통장·사용내역·증빙·cashflow" />
+                        <SummaryStat label="현재 직접 반영" value="예산·통장·사용내역·증빙·cashflow projection" />
                         <SummaryStat label="보호 대상" value="증빙/드라이브" />
                         <SummaryStat label="반영 위치" value={activeSheetName} />
                       </div>
@@ -1094,7 +1117,7 @@ function GoogleSheetImportDialog({
                           <div>
                             <p className="font-semibold">{projectName} · 이나라도움 흐름</p>
                             <p className="mt-1 text-violet-900/85">
-                              예전 e나라도움 import 흐름을 현재 wizard에 다시 연결했습니다. 권장 순서는 통장내역 → cashflow → 사용내역 → 예산총괄시트 → 증빙서류입니다.
+                              예전 e나라도움 import 흐름을 현재 wizard에 다시 연결했습니다. 권장 순서는 통장내역 → cashflow(사용내역 연동) → 사용내역 → 예산총괄시트 → 증빙서류입니다. `cashflow(e나라도움 시 가이드)`는 참고용 preview로만 봅니다.
                             </p>
                           </div>
                           <Badge className="bg-violet-600 text-white hover:bg-violet-600">TYPE5 / 전용계좌</Badge>
@@ -1449,7 +1472,9 @@ function GoogleSheetImportDialog({
                           )}
                           {reviewState?.cashflowProjection && (
                             <p className="mt-2 text-[11px] text-slate-500">
-                              actual 값은 유지하고 projection 필드만 주차별로 upsert합니다.
+                              {reviewState.descriptor.target === 'cashflow_projection'
+                                ? 'actual 값은 유지하고 projection 필드만 주차별로 upsert합니다.'
+                                : '감지된 주차 구조를 참고용으로 보여줍니다. 실제 입력은 캐시플로우 compare 화면에서 projection/actual을 함께 보고 반영하세요.'}
                             </p>
                           )}
                         </div>

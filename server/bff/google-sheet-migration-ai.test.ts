@@ -36,4 +36,18 @@ describe('google-sheet-migration-ai', () => {
     expect(analysis.provider).toBe('heuristic');
     expect(analysis.likelyTarget).toBe('budget_plan');
   });
+
+  it('treats e나라도움 cashflow guide tabs as guide-only targets', () => {
+    const analysis = buildFallbackGoogleSheetMigrationAnalysis({
+      spreadsheetTitle: '2026 사업비 관리 시트',
+      selectedSheetName: 'cashflow(e나라도움 시 가이드)',
+      matrix: [
+        ['구분', '26-03-1', '26-03-2'],
+        ['입금', '100000', '200000'],
+      ],
+    });
+
+    expect(analysis.provider).toBe('heuristic');
+    expect(analysis.likelyTarget).toBe('cashflow_guide');
+  });
 });
