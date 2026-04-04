@@ -5,7 +5,6 @@ import { PageHeader } from '../layout/PageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
-import { ToggleGroup, ToggleGroupItem } from '../ui/toggle-group';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -104,12 +103,6 @@ const CHANGE_TABS: Array<{ label: string; value: ChangeRequestState | 'ALL' }> =
   { label: '수정요청', value: 'REVISION_REQUESTED' },
 ];
 
-const editToggleGroupClassName =
-  'w-full rounded-lg border border-emerald-200/70 bg-emerald-50/40 p-0.5 dark:border-emerald-900/50 dark:bg-emerald-950/10';
-
-const editToggleItemClassName =
-  'px-2 text-[10px] text-slate-600 hover:bg-emerald-500/8 hover:text-emerald-900 dark:text-slate-300 dark:hover:bg-emerald-400/12 dark:hover:text-emerald-100 data-[state=on]:border-emerald-300 data-[state=on]:bg-emerald-600/24 data-[state=on]:text-emerald-950 data-[state=on]:shadow-none dark:data-[state=on]:border-emerald-700/80 dark:data-[state=on]:bg-emerald-400/28 dark:data-[state=on]:text-emerald-50';
-
 const pendingStatusButtonClassName =
   'h-7 rounded-full border-emerald-200/90 bg-emerald-50/80 px-2 text-[10px] text-emerald-800 hover:bg-emerald-100 dark:border-emerald-900/60 dark:bg-emerald-950/15 dark:text-emerald-200 dark:hover:bg-emerald-900/30';
 
@@ -145,7 +138,6 @@ export function PortalSubmissionsPage() {
     nextValue: true,
   });
   const [confirmSaving, setConfirmSaving] = useState(false);
-  const [editSavingKey, setEditSavingKey] = useState('');
 
   const todayIso = getSeoulTodayIso();
   const [yearMonth, setYearMonth] = useState(() => todayIso.slice(0, 7));
@@ -243,30 +235,6 @@ export function PortalSubmissionsPage() {
     }
   }, [confirmState, selectedWeek, upsertWeeklySubmissionStatus, yearMonth]);
 
-  const handleEditedChange = useCallback(async (input: {
-    projectId: string;
-    field: 'projection' | 'expense';
-    nextValue: boolean;
-  }) => {
-    if (!selectedWeek) return;
-    const savingKey = `${input.projectId}:${input.field}`;
-    setEditSavingKey(savingKey);
-    try {
-      await upsertWeeklySubmissionStatus({
-        projectId: input.projectId,
-        yearMonth,
-        weekNo: selectedWeek.weekNo,
-        ...(input.field === 'projection'
-          ? { projectionEdited: input.nextValue }
-          : { expenseEdited: input.nextValue }),
-      });
-    } catch (err) {
-      // store already toasts
-    } finally {
-      setEditSavingKey((prev) => (prev === savingKey ? '' : prev));
-    }
-  }, [selectedWeek, upsertWeeklySubmissionStatus, yearMonth]);
-
   if (isLoading) {
     return (
       <div className="min-h-[60vh] flex items-center justify-center">
@@ -348,10 +316,10 @@ export function PortalSubmissionsPage() {
 
           <div className="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
             <span className="inline-flex items-center rounded-full bg-emerald-600/12 px-2 py-0.5 text-emerald-800 dark:text-emerald-200" style={{ fontWeight: 700 }}>
-              수정 상태 직접 선택
+              실제 저장 데이터 기준 자동 반영
             </span>
             <span className="inline-flex items-center rounded-full bg-green-600/12 px-2 py-0.5 text-green-800 dark:text-green-200" style={{ fontWeight: 700 }}>
-              제출 상태 별도 체크
+              필요시만 수동 보정
             </span>
           </div>
 
@@ -375,6 +343,8 @@ export function PortalSubmissionsPage() {
                   const accountingState = resolveWeeklyAccountingState(status, weekSheet);
                   const projectionEdited = snapshot.projectionEdited;
                   const expenseEdited = snapshot.expenseEdited;
+                  const projectionInputLabel = projectionEdited ? '입력됨' : '미입력';
+                  const expenseInputLabel = expenseEdited ? '입력됨' : '미입력';
                   const projectionAudit = pickLatestAuditMeta({
                     editedAt: status?.projectionEditedAt,
                     editedByName: status?.projectionEditedByName,
@@ -406,29 +376,14 @@ export function PortalSubmissionsPage() {
                       </td>
                       <td className="px-3 py-3 align-top text-center">
                         <div className="mx-auto flex max-w-[172px] flex-col items-stretch gap-2">
-                          <ToggleGroup
-                            type="single"
-                            value={projectionEdited ? 'edited' : 'not-edited'}
-                            variant="outline"
-                            size="sm"
-                            className={editToggleGroupClassName}
-                            onValueChange={(value) => {
-                              if (!value) return;
-                              handleEditedChange({
-                                projectId: p.id,
-                                field: 'projection',
-                                nextValue: value === 'edited',
-                              });
-                            }}
-                            disabled={editSavingKey === `${p.id}:projection`}
-                          >
-                            <ToggleGroupItem value="edited" className={editToggleItemClassName}>
-                              수정 O
-                            </ToggleGroupItem>
-                            <ToggleGroupItem value="not-edited" className={editToggleItemClassName}>
-                              수정 X
-                            </ToggleGroupItem>
-                          </ToggleGroup>
+                          <div className="flex flex-wrap justify-center gap-1.5">
+                            <Badge variant="outline" className={projectionEdited ? 'border-sky-300 bg-sky-50 text-sky-700' : 'border-slate-200 bg-slate-50 text-slate-600'}>
+                              {projectionInputLabel}
+                            </Badge>
+                            <Badge variant="outline" className={projectionDone ? 'border-emerald-300 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-600'}>
+                              {projectionDone ? '제출 완료' : '미완료'}
+                            </Badge>
+                          </div>
                           <Button
                             variant="outline"
                             size="sm"
@@ -441,36 +396,30 @@ export function PortalSubmissionsPage() {
                               nextValue: !projectionDone,
                             })}
                           >
-                            {projectionDone ? '제출 완료' : '미완료'}
+                            {projectionDone ? '수동 보정: 미완료' : '수동 보정: 완료'}
                           </Button>
                           {projectionAudit && <AuditMetaLine {...projectionAudit} />}
                         </div>
                       </td>
                       <td className="px-3 py-3 align-top text-center">
                         <div className="mx-auto flex max-w-[172px] flex-col items-stretch gap-2">
-                          <ToggleGroup
-                            type="single"
-                            value={expenseEdited ? 'edited' : 'not-edited'}
-                            variant="outline"
-                            size="sm"
-                            className={editToggleGroupClassName}
-                            onValueChange={(value) => {
-                              if (!value) return;
-                              handleEditedChange({
-                                projectId: p.id,
-                                field: 'expense',
-                                nextValue: value === 'edited',
-                              });
-                            }}
-                            disabled={editSavingKey === `${p.id}:expense`}
-                          >
-                            <ToggleGroupItem value="edited" className={editToggleItemClassName}>
-                              수정 O
-                            </ToggleGroupItem>
-                            <ToggleGroupItem value="not-edited" className={editToggleItemClassName}>
-                              수정 X
-                            </ToggleGroupItem>
-                          </ToggleGroup>
+                          <div className="flex flex-wrap justify-center gap-1.5">
+                            <Badge variant="outline" className={expenseEdited ? 'border-sky-300 bg-sky-50 text-sky-700' : 'border-slate-200 bg-slate-50 text-slate-600'}>
+                              {expenseInputLabel}
+                            </Badge>
+                            <Badge
+                              variant="outline"
+                              className={
+                                accountingState.expenseStatusTone === 'success'
+                                  ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+                                  : accountingState.expenseStatusTone === 'danger'
+                                    ? 'border-rose-300 bg-rose-50 text-rose-700'
+                                    : 'border-amber-300 bg-amber-50 text-amber-700'
+                              }
+                            >
+                              {accountingState.expenseStatusLabel}
+                            </Badge>
+                          </div>
                           <Button
                             variant="outline"
                             size="sm"
@@ -483,27 +432,11 @@ export function PortalSubmissionsPage() {
                               nextValue: !expenseDone,
                             })}
                           >
-                            {expenseDone ? '제출 완료' : '미완료'}
+                            {expenseDone ? '수동 보정: 미완료' : '수동 보정: 완료'}
                           </Button>
-                          {expenseDone && (
-                            <div className="space-y-1">
-                              <Badge
-                                variant="outline"
-                                className={
-                                  accountingState.expenseStatusTone === 'success'
-                                    ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
-                                    : accountingState.expenseStatusTone === 'danger'
-                                      ? 'border-rose-300 bg-rose-50 text-rose-700'
-                                      : 'border-amber-300 bg-amber-50 text-amber-700'
-                                }
-                              >
-                                {accountingState.expenseStatusLabel}
-                              </Badge>
-                              <div className="text-[9px] leading-4 text-muted-foreground">
-                                {accountingState.expenseStatusDescription}
-                              </div>
-                            </div>
-                          )}
+                          <div className="text-[9px] leading-4 text-muted-foreground">
+                            {accountingState.expenseStatusDescription}
+                          </div>
                           {expenseAudit && <AuditMetaLine {...expenseAudit} />}
                         </div>
                       </td>
@@ -672,8 +605,8 @@ export function PortalSubmissionsPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>주간 제출 상태를 변경할까요?</AlertDialogTitle>
             <AlertDialogDescription>
-              {confirmState.projectName} · {yearMonth} {selectedWeek?.label || ''} · {confirmState.field === 'projection' ? 'Projection' : '사업비 입력'}을
-              {confirmState.nextValue ? ' 완료' : ' 미완료'}로 변경합니다.
+              {confirmState.projectName} · {yearMonth} {selectedWeek?.label || ''} · {confirmState.field === 'projection' ? 'Projection' : '사업비 입력'} 상태를
+              자동 계산 결과와 다르게 {confirmState.nextValue ? ' 완료' : ' 미완료'}로 수동 보정합니다.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
