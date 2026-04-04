@@ -100,6 +100,14 @@ export interface SettlementLedgerProps {
   workflowMode?: ProjectFundInputMode;
   settlementSheetPolicy?: SettlementSheetPolicy;
   basis?: Basis;
+  onUpdateWeeklySubmissionStatus?: (input: {
+    projectId: string;
+    yearMonth: string;
+    weekNo: number;
+    expenseUpdated?: boolean;
+    expenseSyncState?: 'pending' | 'review_required' | 'synced' | 'sync_failed';
+    expenseReviewPendingCount?: number;
+  }) => void | Promise<void>;
   pendingQuickInsert?: import('./ImportEditor').PendingQuickInsert | null;
   onPendingQuickInsertHandled?: () => void;
 }
@@ -138,6 +146,7 @@ export function SettlementLedgerPage({
   workflowMode = 'BANK_UPLOAD',
   settlementSheetPolicy,
   basis,
+  onUpdateWeeklySubmissionStatus,
   pendingQuickInsert,
   onPendingQuickInsertHandled,
 }: SettlementLedgerProps) {
@@ -178,6 +187,8 @@ export function SettlementLedgerPage({
     () => `settlement-import-draft:${projectId}:${defaultLedgerId}:${year}`,
     [projectId, defaultLedgerId, year],
   );
+  const weekIdx = useMemo(() => SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '해당 주차'), []);
+  const dateIdx = useMemo(() => SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '거래일시'), []);
 
   // Filter transactions for this project + year
   const projectTxs = useMemo(() => {
@@ -447,7 +458,64 @@ export function SettlementLedgerPage({
     triggerDownload(blob, `정산대장_${projectName}_${year}.xlsx`);
   }, [buildExportMatrix, projectName, year]);
 
-  
+  const resolveWeekLabelForImportRow = useCallback((row: ImportRow): string => {
+    const explicitLabel = weekIdx >= 0 ? String(row.cells[weekIdx] || '').trim() : '';
+    if (explicitLabel) return explicitLabel;
+    if (dateIdx < 0) return '';
+    const parsedDate = parseDate(String(row.cells[dateIdx] || '').trim());
+    if (!parsedDate) return '';
+    const dateOnly = parsedDate.slice(0, 10);
+    const dateYear = Number.parseInt(dateOnly.slice(0, 4), 10);
+    if (!Number.isFinite(dateYear)) return '';
+    const anchorYear = Number.parseInt(yearWeeks[0]?.yearMonth.slice(0, 4) || '', 10);
+    const matchedWeek = findWeekForDate(
+      dateOnly,
+      dateYear === anchorYear ? yearWeeks : getYearMondayWeeks(dateYear),
+    );
+    return matchedWeek?.label || '';
+  }, [dateIdx, weekIdx, yearWeeks]);
+
+  const buildPendingReviewCountsByWeek = useCallback((rows: ImportRow[]) => {
+    const counts = new Map<string, number>();
+    for (const row of rows) {
+      const isPending = (row.reviewHints?.length || 0) > 0 && row.reviewStatus !== 'confirmed';
+      if (!isPending) continue;
+      const weekLabel = resolveWeekLabelForImportRow(row);
+      if (!weekLabel) continue;
+      counts.set(weekLabel, (counts.get(weekLabel) || 0) + 1);
+    }
+    return counts;
+  }, [resolveWeekLabelForImportRow]);
+
+  const buildPayloadWeekLabelMap = useCallback(() => {
+    const labelMap = new Map<string, string>();
+    for (const week of yearWeeks) {
+      labelMap.set(`${week.yearMonth}:${week.weekNo}`, week.label);
+    }
+    return labelMap;
+  }, [yearWeeks]);
+
+  const updateWeeklyStatusesForPayload = useCallback(async (
+    payload: Array<{ yearMonth: string; weekNo: number }>,
+    input: {
+      expenseUpdated?: boolean;
+      expenseSyncState: 'pending' | 'review_required' | 'synced' | 'sync_failed';
+      reviewCountsByWeekLabel?: Map<string, number>;
+    },
+  ) => {
+    if (!onUpdateWeeklySubmissionStatus || payload.length === 0) return;
+    const weekLabelMap = buildPayloadWeekLabelMap();
+    await Promise.all(payload.map((week) => onUpdateWeeklySubmissionStatus({
+      projectId,
+      yearMonth: week.yearMonth,
+      weekNo: week.weekNo,
+      ...(typeof input.expenseUpdated === 'boolean' ? { expenseUpdated: input.expenseUpdated } : {}),
+      expenseSyncState: input.expenseSyncState,
+      expenseReviewPendingCount: input.reviewCountsByWeekLabel?.get(
+        weekLabelMap.get(`${week.yearMonth}:${week.weekNo}`) || '',
+      ) || 0,
+    })));
+  }, [buildPayloadWeekLabelMap, onUpdateWeeklySubmissionStatus, projectId]);
 
   const persistImportRowsSnapshot = useCallback(async (
     rows: ImportRow[],
@@ -462,6 +530,11 @@ export function SettlementLedgerPage({
     setSheetSaveState('saving');
     try {
       await onSaveSheetRows(rows);
+      const payload = buildSettlementActualSyncPayload(rows, yearWeeks, sheetRows || null);
+      await updateWeeklyStatusesForPayload(payload, {
+        expenseUpdated: true,
+        expenseSyncState: 'pending',
+      });
       setImportDirty(false);
       setSheetSaveState('saved');
       setCashflowSyncState('pending');
@@ -477,7 +550,7 @@ export function SettlementLedgerPage({
     } finally {
       setSheetSaving(false);
     }
-  }, [draftCacheKey, onSaveSheetRows]);
+  }, [draftCacheKey, onSaveSheetRows, sheetRows, updateWeeklyStatusesForPayload, yearWeeks]);
 
   const syncImportRowsToCashflow = useCallback(async (
     rows: ImportRow[],
@@ -485,20 +558,19 @@ export function SettlementLedgerPage({
   ) => {
     const silent = options?.silent ?? false;
     const pendingReviewCount = countPendingImportRowReviews(rows);
-    if (pendingReviewCount > 0) {
-      setCashflowSyncState('review_required');
-      if (!silent) {
-        toast.message(`정산대장은 저장했지만 사람 확인 ${pendingReviewCount}건 때문에 캐시플로 동기화는 보류했습니다.`);
-      }
-      return false;
-    }
+    const reviewCountsByWeekLabel = buildPendingReviewCountsByWeek(rows);
+    const payload = buildSettlementActualSyncPayload(rows, yearWeeks, sheetRows || null);
+    const weekLabelMap = buildPayloadWeekLabelMap();
+    const blockedWeeks = payload.filter((week) => (
+      reviewCountsByWeekLabel.get(weekLabelMap.get(`${week.yearMonth}:${week.weekNo}`) || '') || 0
+    ) > 0);
+    const syncableWeeks = payload.filter((week) => !blockedWeeks.includes(week));
     setCashflowSyncing(true);
-    setCashflowSyncState('syncing');
+    setCashflowSyncState(blockedWeeks.length > 0 ? 'review_required' : 'syncing');
     try {
-      const payload = buildSettlementActualSyncPayload(rows, yearWeeks, sheetRows || null);
       let syncFailed = false;
       await Promise.all(
-        payload.map(async (week) => {
+        syncableWeeks.map(async (week) => {
           try {
             await upsertWeekAmounts({
               projectId,
@@ -513,19 +585,46 @@ export function SettlementLedgerPage({
           }
         }),
       );
+      if (blockedWeeks.length > 0) {
+        await updateWeeklyStatusesForPayload(blockedWeeks, {
+          expenseUpdated: true,
+          expenseSyncState: 'review_required',
+          reviewCountsByWeekLabel,
+        });
+      }
       if (syncFailed) {
+        await updateWeeklyStatusesForPayload(syncableWeeks, {
+          expenseUpdated: true,
+          expenseSyncState: 'sync_failed',
+          reviewCountsByWeekLabel,
+        });
         setCashflowSyncState('sync_failed');
         if (!silent) toast.message('정산대장은 저장되었지만 캐시플로 업데이트에 실패했습니다.');
         return false;
       }
-      setCashflowSyncState('synced');
+      if (syncableWeeks.length > 0) {
+        await updateWeeklyStatusesForPayload(syncableWeeks, {
+          expenseUpdated: true,
+          expenseSyncState: 'synced',
+          reviewCountsByWeekLabel,
+        });
+      }
+      setCashflowSyncState(blockedWeeks.length > 0 ? 'review_required' : 'synced');
       setLastCashflowSyncedAt(new Date().toISOString());
-      if (!silent) toast.success('캐시플로 실제값까지 동기화했습니다.');
-      return true;
+      if (!silent) {
+        if (blockedWeeks.length > 0 && syncableWeeks.length > 0) {
+          toast.success(`검토가 끝난 ${syncableWeeks.length}개 주차는 캐시플로에 반영했고, ${blockedWeeks.length}개 주차는 사람 확인 상태로 남겼습니다.`);
+        } else if (blockedWeeks.length > 0) {
+          toast.message(`정산대장은 저장했고, 사람 확인 ${pendingReviewCount}건이 있는 주차는 검토 후 캐시플로에 반영됩니다.`);
+        } else {
+          toast.success('캐시플로 실제값까지 동기화했습니다.');
+        }
+      }
+      return blockedWeeks.length === 0;
     } finally {
       setCashflowSyncing(false);
     }
-  }, [projectId, sheetRows, upsertWeekAmounts, yearWeeks]);
+  }, [buildPayloadWeekLabelMap, buildPendingReviewCountsByWeek, projectId, sheetRows, updateWeeklyStatusesForPayload, upsertWeekAmounts, yearWeeks]);
 
   const handleImportSave = useCallback(async (options?: { silent?: boolean; syncCashflow?: boolean }) => {
     if (!importRows) return;

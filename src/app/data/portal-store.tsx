@@ -224,6 +224,8 @@ interface PortalActions {
     projectionUpdated?: boolean;
     expenseEdited?: boolean;
     expenseUpdated?: boolean;
+    expenseSyncState?: 'pending' | 'review_required' | 'synced' | 'sync_failed';
+    expenseReviewPendingCount?: number;
   }) => Promise<void>;
   createProjectRequest: (payload: ProjectRequestPayload) => Promise<string | null>;
 }
@@ -1523,6 +1525,8 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     projectionUpdated?: boolean;
     expenseEdited?: boolean;
     expenseUpdated?: boolean;
+    expenseSyncState?: 'pending' | 'review_required' | 'synced' | 'sync_failed';
+    expenseReviewPendingCount?: number;
   }) => {
     if (!db) {
       toast.error('Firestore 연결이 필요합니다. 관리자에게 문의해 주세요.');
@@ -1565,6 +1569,19 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       patch.expenseUpdated = input.expenseUpdated;
       patch.expenseUpdatedAt = now;
       patch.expenseUpdatedByName = updatedBy;
+    }
+    if (
+      input.expenseSyncState === 'pending'
+      || input.expenseSyncState === 'review_required'
+      || input.expenseSyncState === 'synced'
+      || input.expenseSyncState === 'sync_failed'
+    ) {
+      patch.expenseSyncState = input.expenseSyncState;
+      patch.expenseSyncUpdatedAt = now;
+      patch.expenseSyncUpdatedByName = updatedBy;
+    }
+    if (typeof input.expenseReviewPendingCount === 'number' && Number.isFinite(input.expenseReviewPendingCount)) {
+      patch.expenseReviewPendingCount = Math.max(0, Math.trunc(input.expenseReviewPendingCount));
     }
     try {
       await setDoc(ref, patch, { merge: true });

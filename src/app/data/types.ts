@@ -787,6 +787,10 @@ export interface WeeklySubmissionStatus {
   expenseUpdated?: boolean;
   expenseUpdatedAt?: string;
   expenseUpdatedByName?: string;
+  expenseSyncState?: 'pending' | 'review_required' | 'synced' | 'sync_failed';
+  expenseSyncUpdatedAt?: string;
+  expenseSyncUpdatedByName?: string;
+  expenseReviewPendingCount?: number;
   updatedAt?: string;
   updatedByName?: string;
 }

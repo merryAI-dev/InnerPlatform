@@ -104,6 +104,7 @@ export function PortalWeeklyExpensePage() {
     saveBudgetPlanRows,
     saveBudgetCodeBook,
     markSheetSourceApplied,
+    upsertWeeklySubmissionStatus,
   } = usePortalStore();
   const { submitWeekAsPm, upsertWeekAmounts } = useCashflowWeeks();
   const devHarnessConfig = readDevAuthHarnessConfig(import.meta.env, typeof window !== 'undefined' ? window.location : undefined);
@@ -844,6 +845,7 @@ export function PortalWeeklyExpensePage() {
           workflowMode={fundInputMode}
           settlementSheetPolicy={settlementSheetPolicy}
           basis={myProject?.basis}
+          onUpdateWeeklySubmissionStatus={upsertWeeklySubmissionStatus}
           pendingQuickInsert={pendingQuickInsert}
           onPendingQuickInsertHandled={() => setPendingQuickInsert(null)}
         />

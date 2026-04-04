@@ -22,6 +22,7 @@ import { STATE_LABELS, type ChangeRequestState } from '../../data/personnel-chan
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { getMonthMondayWeeks } from '../../platform/cashflow-weeks';
 import { addMonthsToYearMonth, getSeoulTodayIso } from '../../platform/business-days';
+import { resolveWeeklyAccountingState } from '../../platform/weekly-accounting-state';
 
 function sortIsoDesc(a: string | undefined, b: string | undefined): number {
   return String(b || '').localeCompare(String(a || ''));
@@ -373,6 +374,7 @@ export function PortalSubmissionsPage() {
                   const weekSheet = checklistWeekMap.get(p.id);
                   const projectionDone = Boolean(status?.projectionUpdated);
                   const expenseDone = Boolean(status?.expenseUpdated);
+                  const accountingState = resolveWeeklyAccountingState(status);
                   const projectionEdited = resolveEditedState(status?.projectionEdited, hasWeekAmounts(weekSheet?.projection));
                   const expenseEdited = resolveEditedState(status?.expenseEdited, hasWeekAmounts(weekSheet?.actual));
                   const projectionAudit = pickLatestAuditMeta({
@@ -474,6 +476,20 @@ export function PortalSubmissionsPage() {
                           >
                             {expenseDone ? '제출 완료' : '미완료'}
                           </Button>
+                          {expenseDone && (
+                            <Badge
+                              variant="outline"
+                              className={
+                                accountingState.expenseStatusTone === 'success'
+                                  ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+                                  : accountingState.expenseStatusTone === 'danger'
+                                    ? 'border-rose-300 bg-rose-50 text-rose-700'
+                                    : 'border-amber-300 bg-amber-50 text-amber-700'
+                              }
+                            >
+                              {accountingState.expenseStatusLabel}
+                            </Badge>
+                          )}
                           {expenseAudit && <AuditMetaLine {...expenseAudit} />}
                         </div>
                       </td>
