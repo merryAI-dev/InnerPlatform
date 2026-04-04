@@ -309,6 +309,46 @@ describe('google-sheet-migration', () => {
     ]);
   });
 
+  it('parses cashflow projection matrices from existing workbook variants', () => {
+    const matrix = [
+      ['2026 캐시플로우'],
+      ['구분', '항목', '2026-03-1주', '2026.03-2주', '2026년 4월 1주'],
+      ['입금', '매출액(입금)', '1,000,000', '2,000,000', '3,000,000'],
+      ['출금', '직접사업비', '400,000', '500,000', ''],
+      ['출금', '매입부가세', '40,000', '', '60,000'],
+    ];
+
+    const result = parseCashflowProjectionMatrix(matrix);
+
+    expect(result.sheets).toEqual([
+      {
+        yearMonth: '2026-03',
+        weekNo: 1,
+        amounts: {
+          SALES_IN: 1000000,
+          DIRECT_COST_OUT: 400000,
+          INPUT_VAT_OUT: 40000,
+        },
+      },
+      {
+        yearMonth: '2026-03',
+        weekNo: 2,
+        amounts: {
+          SALES_IN: 2000000,
+          DIRECT_COST_OUT: 500000,
+        },
+      },
+      {
+        yearMonth: '2026-04',
+        weekNo: 1,
+        amounts: {
+          SALES_IN: 3000000,
+          INPUT_VAT_OUT: 60000,
+        },
+      },
+    ]);
+  });
+
   it('resolves sheet source types from migration targets', () => {
     expect(resolveProjectSheetSourceType('expense_sheet')).toBe('usage');
     expect(resolveProjectSheetSourceType('budget_plan')).toBe('budget');

@@ -63,11 +63,21 @@ export function CashflowProjectSheet({
   projectName,
   transactions,
   roleOverride,
+  onUpdateWeeklySubmissionStatus,
 }: {
   projectId: string;
   projectName: string;
   transactions: Transaction[];
   roleOverride?: UserRole | string;
+  onUpdateWeeklySubmissionStatus?: (input: {
+    projectId: string;
+    yearMonth: string;
+    weekNo: number;
+    projectionEdited?: boolean;
+    projectionUpdated?: boolean;
+    expenseEdited?: boolean;
+    expenseUpdated?: boolean;
+  }) => Promise<void>;
 }) {
   const { user } = useAuth();
   const { db, orgId } = useFirebase();
@@ -393,6 +403,16 @@ export function CashflowProjectSheet({
         mode: input.mode,
         amounts,
       });
+      if (onUpdateWeeklySubmissionStatus) {
+        await onUpdateWeeklySubmissionStatus({
+          projectId,
+          yearMonth,
+          weekNo: input.weekNo,
+          ...(input.mode === 'projection'
+            ? { projectionEdited: true, projectionUpdated: true }
+            : { expenseEdited: true, expenseUpdated: true }),
+        });
+      }
 
       setWeekSaveState((prev) => ({ ...prev, [wkKey]: 'saved' }));
       setDrafts((prev) => {
@@ -410,7 +430,7 @@ export function CashflowProjectSheet({
       }
       throw error;
     }
-  }, [byWeekNo, canEdit, drafts, projectId, resolveCellKey, resolveWeekKey, upsertWeekAmounts, yearMonth]);
+  }, [byWeekNo, canEdit, drafts, onUpdateWeeklySubmissionStatus, projectId, resolveCellKey, resolveWeekKey, upsertWeekAmounts, yearMonth]);
 
   const markDirty = useCallback((input: { weekNo: number; mode: 'projection' | 'actual' }) => {
     const wkKey = resolveWeekKey({ yearMonth, mode: input.mode, weekNo: input.weekNo });

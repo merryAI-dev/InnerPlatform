@@ -743,16 +743,39 @@ export function parseEvidenceRuleMatrix(matrix: string[][]): EvidenceRuleImportP
 }
 
 function parseWeekCode(value: string): { yearMonth: string; weekNo: number } | null {
-  const match = String(value || '').trim().match(/^(\d{2})-(\d{1,2})-(\d)$/);
-  if (!match) return null;
-  const year = `20${match[1]}`;
-  const month = match[2].padStart(2, '0');
-  const weekNo = Number.parseInt(match[3], 10);
-  if (!Number.isFinite(weekNo)) return null;
-  return {
-    yearMonth: `${year}-${month}`,
-    weekNo,
-  };
+  const normalized = String(value || '').trim();
+  if (!normalized) return null;
+
+  const patterns = [
+    /^(\d{2})[-./](\d{1,2})[-./](\d)\s*주?$/i,
+    /^(\d{4})[-./](\d{1,2})[-./](\d)\s*주?$/i,
+    /^(\d{4})\s*년\s*(\d{1,2})\s*월\s*(\d)\s*주$/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern);
+    if (!match) continue;
+    const rawYear = match[1] || '';
+    const year = rawYear.length === 2 ? `20${rawYear}` : rawYear;
+    const month = String(match[2] || '').padStart(2, '0');
+    const weekNo = Number.parseInt(String(match[3] || ''), 10);
+    if (!/^\d{4}$/.test(year) || !/^\d{2}$/.test(month) || !Number.isFinite(weekNo)) continue;
+    return {
+      yearMonth: `${year}-${month}`,
+      weekNo,
+    };
+  }
+
+  return null;
+}
+
+function findCashflowLineId(row: string[]): CashflowSheetLineId | undefined {
+  const scanLimit = Math.min(Math.max(row.length, 1), 3);
+  for (let columnIndex = 0; columnIndex < scanLimit; columnIndex += 1) {
+    const lineId = parseCashflowLineLabel(normalizeHeader(row[columnIndex]));
+    if (lineId) return lineId;
+  }
+  return undefined;
 }
 
 export function parseCashflowProjectionMatrix(matrix: string[][]): CashflowProjectionImportPayload {
@@ -772,8 +795,7 @@ export function parseCashflowProjectionMatrix(matrix: string[][]): CashflowProje
   const byDocId = new Map<string, { yearMonth: string; weekNo: number; amounts: Partial<Record<CashflowSheetLineId, number>> }>();
   for (let rowIndex = weekHeaderRowIndex + 1; rowIndex < matrix.length; rowIndex += 1) {
     const row = matrix[rowIndex] || [];
-    const lineLabel = normalizeHeader(row[0]);
-    const lineId = parseCashflowLineLabel(lineLabel);
+    const lineId = findCashflowLineId(row);
     if (!lineId) continue;
 
     weekColumns.forEach(({ parsed, columnIndex }) => {
