@@ -47,14 +47,18 @@ npm run workbook:extract:formulas -- <path-to-workbook.xlsx> [outDir]
 
 - `formula-inventory.json`
 - `workbook-plan.json`
+- `workbook-freeze-line.json`
 - `source-bug-ledger.json`
 - `all-formulas.csv`
 - `formula-summary.md`
 
 목적:
 - 워크북 전체 탭을 `CORE / GROUP / AUXILIARY / REFERENCE` wave로 분류
-- 수식 전수 추출과 source bug (`#REF!`) 분리
+- 워크북 `SHA-256` 기준선 고정
+- 수식 전수 추출과 spreadsheet source bug (`#REF!`, `#N/A` 등) 분리
 - 이후 PR이 같은 기준선 위에서 진행되도록 freeze line 형성
+
+다음 구현 단계에 필요한 handoff packet은 [docs/architecture/workbook-phase-1-starter-pack-2026-04-04.md](docs/architecture/workbook-phase-1-starter-pack-2026-04-04.md)에 정리했습니다.
 
 
 ## 주요 개선점: AS-IS vs TO-BE

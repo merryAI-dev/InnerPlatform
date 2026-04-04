@@ -1,8 +1,4 @@
 import { normalizeSpace } from './csv-utils';
-import {
-  describeGoogleSheetMigrationTarget,
-  type GoogleSheetMigrationTarget,
-} from './google-sheet-migration';
 
 export type GoogleSheetRuleFamily =
   | 'BANK_STATEMENT'
@@ -25,7 +21,6 @@ export type GoogleSheetWorkbookConfidence = 'high' | 'medium' | 'low';
 
 export interface GoogleSheetWorkbookSheetPlan {
   sheetName: string;
-  target: GoogleSheetMigrationTarget;
   family: GoogleSheetRuleFamily;
   wave: GoogleSheetWorkbookWave;
   priority: number;
@@ -222,11 +217,9 @@ function buildSheetNotes(sheetName: string, family: GoogleSheetRuleFamily): stri
 export function planGoogleSheetWorkbook(sheetNames: string[]): GoogleSheetWorkbookPlan {
   const sheets = sheetNames.map((sheetName) => {
     const family = classifyGoogleSheetRuleFamily(sheetName);
-    const target = describeGoogleSheetMigrationTarget(sheetName).target;
     const config = FAMILY_CONFIG[family];
     return {
       sheetName,
-      target,
       family,
       wave: config.wave,
       priority: config.priority,

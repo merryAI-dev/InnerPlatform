@@ -1,6 +1,12 @@
+import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import ExcelJS from 'exceljs';
+import {
+  detectSpreadsheetFormulaIssue,
+  type SpreadsheetErrorCode,
+  type SpreadsheetFormulaIssueKind,
+} from '../src/app/platform/google-sheet-workbook-audit';
 import {
   GOOGLE_SHEET_RULE_FAMILY_LABELS,
   planGoogleSheetWorkbook,
@@ -34,8 +40,6 @@ interface SheetSummary {
   familyLabel: string;
   wave: string;
 }
-
-type SourceBugKind = 'literal_ref' | 'propagated_ref';
 
 function parseArgs(argv: string[]): ScriptOptions {
   const positional = argv.filter((arg) => !arg.startsWith('--'));
@@ -86,8 +90,10 @@ async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
   await fs.mkdir(options.outDir, { recursive: true });
 
+  const workbookBytes = await fs.readFile(options.inputPath);
+  const workbookSha256 = createHash('sha256').update(workbookBytes).digest('hex');
   const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.readFile(options.inputPath);
+  await workbook.xlsx.load(workbookBytes);
 
   const workbookPlan = planGoogleSheetWorkbook(workbook.worksheets.map((ws) => ws.name));
   const planByName = new Map(workbookPlan.sheets.map((sheet) => [sheet.sheetName, sheet]));
@@ -99,7 +105,8 @@ async function main(): Promise<void> {
     cell: string;
     formula: string;
     result: string;
-    kind: SourceBugKind;
+    kind: SpreadsheetFormulaIssueKind;
+    errorCode: SpreadsheetErrorCode;
   }> = [];
 
   for (const worksheet of workbook.worksheets) {
@@ -136,15 +143,15 @@ async function main(): Promise<void> {
           wave: sheetPlan?.wave || 'REFERENCE',
         });
 
-        const hasLiteralRef = normalizedFormula.includes('#REF!');
-        const hasPropagatedRef = result.includes('#REF!');
-        if (hasLiteralRef || hasPropagatedRef) {
+        const issue = detectSpreadsheetFormulaIssue(normalizedFormula, result);
+        if (issue) {
           sourceBugLedger.push({
             sheetName: worksheet.name,
             cell: cell.address,
             formula: normalizedFormula,
             result,
-            kind: hasLiteralRef ? 'literal_ref' : 'propagated_ref',
+            kind: issue.kind,
+            errorCode: issue.errorCode,
           });
         }
       });
@@ -180,20 +187,43 @@ async function main(): Promise<void> {
       acc[issue.kind] += 1;
       return acc;
     },
-    { literal_ref: 0, propagated_ref: 0 } satisfies Record<SourceBugKind, number>,
+    {
+      literal_formula_error: 0,
+      propagated_formula_error: 0,
+    } satisfies Record<SpreadsheetFormulaIssueKind, number>,
+  );
+  const sourceBugCountsByCode = sourceBugLedger.reduce(
+    (acc, issue) => {
+      acc[issue.errorCode] = (acc[issue.errorCode] || 0) + 1;
+      return acc;
+    },
+    {} as Partial<Record<SpreadsheetErrorCode, number>>,
   );
 
   const formulaInventory = {
     workbookPath: options.inputPath,
+    workbookSha256,
     generatedAt: new Date().toISOString(),
     workbookPlan,
     sheetSummaries,
+  };
+  const freezeLine = {
+    workbookPath: options.inputPath,
+    workbookSha256,
+    generatedAt: new Date().toISOString(),
+    sheetCount: workbook.worksheets.length,
+    sheetNames: workbook.worksheets.map((worksheet) => worksheet.name),
+    formulaCount: allFormulas.length,
+    sourceIssueCount: sourceBugLedger.length,
+    sourceIssueCounts: sourceBugCounts,
+    sourceIssueCountsByCode: sourceBugCountsByCode,
   };
 
   const summaryLines = [
     '# Workbook Formula Extraction Summary',
     '',
     `Source workbook: ${options.inputPath}`,
+    `Workbook SHA-256: ${workbookSha256}`,
     `Generated at: ${new Date().toISOString()}`,
     '',
     '## Workbook execution order',
@@ -219,11 +249,15 @@ async function main(): Promise<void> {
       : ['- none']),
     '',
     '## Source bug ledger',
-    `- literal_ref: ${sourceBugCounts.literal_ref}`,
-    `- propagated_ref: ${sourceBugCounts.propagated_ref}`,
+    `- literal_formula_error: ${sourceBugCounts.literal_formula_error}`,
+    `- propagated_formula_error: ${sourceBugCounts.propagated_formula_error}`,
+    ...Object.entries(sourceBugCountsByCode)
+      .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], 'en'))
+      .map(([errorCode, count]) => `- ${errorCode}: ${count}`),
     ...(sourceBugLedger.length > 0
       ? sourceBugLedger.map(
-          (issue) => `- [${issue.kind}] ${issue.sheetName}!${issue.cell}: \`${issue.formula}\` -> ${issue.result || '(empty result)'}`,
+          (issue) =>
+            `- [${issue.kind}] ${issue.sheetName}!${issue.cell}: ${issue.errorCode} \`${issue.formula}\` -> ${issue.result || '(empty result)'}`,
         )
       : ['- none']),
   ];
@@ -237,6 +271,11 @@ async function main(): Promise<void> {
     fs.writeFile(
       path.join(options.outDir, 'workbook-plan.json'),
       JSON.stringify(workbookPlan, null, 2),
+      'utf-8',
+    ),
+    fs.writeFile(
+      path.join(options.outDir, 'workbook-freeze-line.json'),
+      JSON.stringify(freezeLine, null, 2),
       'utf-8',
     ),
     fs.writeFile(
@@ -273,6 +312,7 @@ async function main(): Promise<void> {
     JSON.stringify(
       {
         inputPath: options.inputPath,
+        workbookSha256,
         outDir: options.outDir,
         sheetCount: workbook.worksheets.length,
         formulaCount: allFormulas.length,
