@@ -235,6 +235,8 @@ function ImportEditorRow({
   onBudgetSuggestionAccepted?: (confidence: 'history' | 'codebook') => void;
 }) {
   const hasError = Boolean(row.error);
+  const hasReviewHint = (row.reviewHints?.length || 0) > 0;
+  const reviewHintLabel = row.reviewHints?.[0] || '';
   const hasMissingCell = useMemo(() => {
     const cells = row.cells || [];
     const hasAnyValue = cells.some((cell, idx) => idx !== noIdx && String(cell || '').trim() !== '');
@@ -278,17 +280,20 @@ function ImportEditorRow({
     return { label: '수동 입력', className: 'border-emerald-200 bg-emerald-50 text-emerald-700' };
   }, [isAdjustmentRow, row.entryKind, row.sourceTxId]);
   const rowEditStateBadge = useMemo(() => {
-    if ((row.userEditedCells?.size || 0) > 0) {
-      return { label: '수정됨', className: 'border-teal-200 bg-teal-50 text-teal-700' };
-    }
     if (hasError) {
       return { label: '검토 필요', className: 'border-rose-200 bg-rose-50 text-rose-700' };
+    }
+    if (hasReviewHint) {
+      return { label: '사람 확인', className: 'border-amber-200 bg-amber-50 text-amber-700' };
+    }
+    if ((row.userEditedCells?.size || 0) > 0) {
+      return { label: '수정됨', className: 'border-teal-200 bg-teal-50 text-teal-700' };
     }
     if (hasMissingCell) {
       return { label: '미입력', className: 'border-orange-200 bg-orange-50 text-orange-700' };
     }
     return null;
-  }, [hasError, hasMissingCell, row.userEditedCells]);
+  }, [hasError, hasMissingCell, hasReviewHint, row.userEditedCells]);
   const isCellSelected = useCallback((colIdx: number) => {
     if (!selectionBounds || colIdx === noIdx) return false;
     return rowIdx >= selectionBounds.r1
@@ -319,6 +324,9 @@ function ImportEditorRow({
     if (row.userEditedCells?.has(colIdx)) {
       return { label: '수정', className: 'bg-teal-100 text-teal-700' };
     }
+    if (row.reviewRequiredCellIndexes?.includes(colIdx)) {
+      return { label: '검토', className: 'bg-amber-100 text-amber-700' };
+    }
     const cellValue = String(row.cells[colIdx] || '').trim();
     if (
       row.sourceTxId
@@ -338,7 +346,7 @@ function ImportEditorRow({
       return { label: '원본', className: 'bg-slate-100 text-slate-600' };
     }
     return null;
-  }, [budgetCodeIdx, cashflowIdx, row.cells, row.sourceTxId, row.userEditedCells, subCodeIdx, weekIdx, isDerivedFieldLocked]);
+  }, [budgetCodeIdx, cashflowIdx, row.cells, row.reviewRequiredCellIndexes, row.sourceTxId, row.userEditedCells, subCodeIdx, weekIdx, isDerivedFieldLocked]);
   const renderCommentButton = useCallback((fieldLabel: string) => {
     const fieldKey = toFieldSlug(fieldLabel);
     const count = commentCountByCell.get(buildCommentThreadKey(commentTransactionId, fieldKey)) || 0;
@@ -397,7 +405,10 @@ function ImportEditorRow({
               {rowSourceBadge.label}
             </span>
             {rowEditStateBadge && (
-              <span className={`inline-flex rounded-full border px-1.5 py-0.5 text-[9px] leading-none ${rowEditStateBadge.className}`}>
+              <span
+                title={hasReviewHint ? reviewHintLabel : undefined}
+                className={`inline-flex rounded-full border px-1.5 py-0.5 text-[9px] leading-none ${rowEditStateBadge.className}`}
+              >
                 {rowEditStateBadge.label}
               </span>
             )}
@@ -439,10 +450,12 @@ function ImportEditorRow({
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
-        {(hasError || hasMissingCell) && (
+        {(hasError || hasMissingCell || hasReviewHint) && (
           <span
-            className="absolute right-1 top-1 h-1 w-1 rounded-full bg-rose-500"
-            title={hasError ? (row.error || '행 오류') : '미입력 셀 있음'}
+            className={`absolute right-1 top-1 h-1 w-1 rounded-full ${
+              hasError || hasMissingCell ? 'bg-rose-500' : 'bg-amber-500'
+            }`}
+            title={hasError ? (row.error || '행 오류') : hasMissingCell ? '미입력 셀 있음' : reviewHintLabel}
           />
         )}
       </td>

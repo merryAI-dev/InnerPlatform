@@ -76,7 +76,7 @@ describe('usage-ledger-phase1', () => {
       rowNumbers: [4, 5, 6, 7, 8, 9],
       clearTrackedAnomalyCells: true,
     });
-    const context = buildSettlementDerivationContext('proj-phase1', 'ledger-phase1');
+    const context = buildSettlementDerivationContext('proj-phase1', 'ledger-phase1', undefined, '공급가액');
 
     for (const row of rows) {
       expect(row.cells[context.expenseIdx]).toBe('');
@@ -90,9 +90,15 @@ describe('usage-ledger-phase1', () => {
     const sharedExpenseFromWorkbook = Number(getUsageLedgerFixtureCell(fixture, 4, 'N')?.result || 0);
 
     for (const row of derived) {
+      const depositAmount = parseNumber(row.cells[context.depositIdx] || '') ?? 0;
       const bankAmount = parseNumber(row.cells[context.bankAmountIdx] || '') ?? 0;
       const expenseAmount = parseNumber(row.cells[context.expenseIdx] || '') ?? 0;
       const vatAmount = parseNumber(row.cells[context.vatInIdx] || '') ?? 0;
+      if (depositAmount > 0) {
+        expect(expenseAmount).toBe(0);
+        expect(vatAmount).toBe(0);
+        continue;
+      }
       expect(expenseAmount + vatAmount).toBeCloseTo(bankAmount, 6);
     }
 

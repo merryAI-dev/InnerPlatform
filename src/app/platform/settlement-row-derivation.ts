@@ -1,7 +1,7 @@
 import { findWeekForDate, getYearMondayWeeks } from './cashflow-weeks';
 import { parseDate, parseNumber } from './csv-utils';
 import { importRowToTransaction, type ImportRow } from './settlement-csv';
-import type { SettlementSheetPolicy } from '../data/types';
+import type { Basis, SettlementSheetPolicy } from '../data/types';
 
 export type SettlementDerivationMode = 'row' | 'cascade' | 'full';
 
@@ -19,6 +19,7 @@ export interface SettlementDerivationContext {
   projectId: string;
   defaultLedgerId: string;
   policy?: SettlementSheetPolicy;
+  basis?: Basis;
   dateIdx: number;
   weekIdx: number;
   depositIdx: number;
@@ -74,6 +75,32 @@ function updateCells(
   return changed ? { ...row, cells: nextCells } : row;
 }
 
+function updateReviewSignals(
+  row: ImportRow,
+  hints: string[],
+  reviewRequiredCellIndexes: Set<number>,
+): ImportRow {
+  const normalizedHints = Array.from(new Set(hints.map((hint) => hint.trim()).filter(Boolean)));
+  const normalizedIndexes = Array.from(reviewRequiredCellIndexes.values())
+    .filter((value) => Number.isInteger(value) && value >= 0)
+    .sort((left, right) => left - right);
+  const sameHints = JSON.stringify(row.reviewHints || []) === JSON.stringify(normalizedHints);
+  const sameIndexes = JSON.stringify(row.reviewRequiredCellIndexes || []) === JSON.stringify(normalizedIndexes);
+  if (sameHints && sameIndexes) return row;
+  const nextRow: ImportRow = { ...row };
+  if (normalizedHints.length > 0) nextRow.reviewHints = normalizedHints;
+  else delete nextRow.reviewHints;
+  if (normalizedIndexes.length > 0) nextRow.reviewRequiredCellIndexes = normalizedIndexes;
+  else delete nextRow.reviewRequiredCellIndexes;
+  return nextRow;
+}
+
+function deriveSupplyAmountCandidate(bankAmount: number): { expenseAmount: number; vatIn: number } {
+  const expenseAmount = Math.round((bankAmount / 11) * 10);
+  const vatIn = Math.max(bankAmount - expenseAmount, 0);
+  return { expenseAmount, vatIn };
+}
+
 function deriveWeekLabel(rawDate: string): string {
   const datePart = rawDate.split(/\s+/)[0];
   let dateIso = parseDate(datePart);
@@ -99,6 +126,8 @@ function deriveRowLocally(
   let next = row;
   const userEdited = row.userEditedCells ?? new Set<number>();
   const policy = context.policy;
+  const reviewHints: string[] = [];
+  const reviewRequiredCellIndexes = new Set<number>();
 
   next = updateCells(next, (cells) => {
     if (context.weekIdx >= 0 && context.dateIdx >= 0) {
@@ -149,18 +178,40 @@ function deriveRowLocally(
       && context.vatInIdx >= 0
     ) {
       const bankAmount = parseNumber(cells[context.bankAmountIdx]) ?? 0;
+      const depositSum = context.depositIdx >= 0 && context.refundIdx >= 0
+        ? (parseNumber(cells[context.depositIdx]) ?? 0) + (parseNumber(cells[context.refundIdx]) ?? 0)
+        : 0;
       const expense = parseNumber(cells[context.expenseIdx]) ?? 0;
       const vat = parseNumber(cells[context.vatInIdx]) ?? 0;
-      if (bankAmount > 0) {
+      const hasExpenseValue = String(cells[context.expenseIdx] || '').trim() !== '';
+      const hasVatValue = String(cells[context.vatInIdx] || '').trim() !== '';
+      const basis = context.basis || 'NONE';
+      const canTreatAsExpenseCandidate = depositSum === 0 && row.entryKind !== 'DEPOSIT';
+      if (bankAmount > 0 && canTreatAsExpenseCandidate) {
         if (expense > 0) {
           // 사업비 사용액이 입력되어 있으면 매입부가세를 자동 계산
           // 단, 사용자가 매입부가세 또는 사업비 사용액을 직접 수정한 경우 자동계산 스킵
           if (!userEdited.has(context.vatInIdx) && !userEdited.has(context.expenseIdx)) {
             const derivedVat = Math.max(bankAmount - expense, 0);
             cells[context.vatInIdx] = derivedVat > 0 ? derivedVat.toLocaleString('ko-KR') : '';
+            if (basis === '공급가액') {
+              reviewHints.push('매입부가세 후보값입니다. 증빙 기준 금액으로 다시 확인해 주세요.');
+              reviewRequiredCellIndexes.add(context.vatInIdx);
+            }
           }
         } else if (!userEdited.has(context.expenseIdx)) {
-          // 사업비 사용액이 없으면 bankAmount - vatIn 으로 계산 (통장 import 기본)
+          if (basis === '공급가액' && !hasVatValue && !userEdited.has(context.vatInIdx)) {
+            const candidate = deriveSupplyAmountCandidate(bankAmount);
+            cells[context.expenseIdx] = candidate.expenseAmount > 0 ? candidate.expenseAmount.toLocaleString('ko-KR') : '';
+            cells[context.vatInIdx] = candidate.vatIn > 0 ? candidate.vatIn.toLocaleString('ko-KR') : '';
+            reviewHints.push('매입부가세 후보값입니다. 증빙 기준 금액으로 다시 확인해 주세요.');
+            reviewRequiredCellIndexes.add(context.vatInIdx);
+          } else {
+            // 사업비 사용액이 없으면 bankAmount - vatIn 으로 계산 (통장 import 기본)
+            const derivedExpense = Math.max(bankAmount - Math.max(vat, 0), 0);
+            cells[context.expenseIdx] = derivedExpense > 0 ? derivedExpense.toLocaleString('ko-KR') : '';
+          }
+        } else if (hasVatValue && !hasExpenseValue && !userEdited.has(context.expenseIdx)) {
           const derivedExpense = Math.max(bankAmount - Math.max(vat, 0), 0);
           cells[context.expenseIdx] = derivedExpense > 0 ? derivedExpense.toLocaleString('ko-KR') : '';
         }
@@ -187,6 +238,7 @@ function deriveRowLocally(
       }
     }
   });
+  next = updateReviewSignals(next, reviewHints, reviewRequiredCellIndexes);
 
   let nextRunningBalance = runningBalance;
   if (includeBalance && context.balanceIdx >= 0 && (policy?.autoComputeBalance ?? true)) {

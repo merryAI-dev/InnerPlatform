@@ -665,6 +665,10 @@ export interface ImportRow {
   cells: string[];
   /** Validation error when trying to parse this row. */
   error?: string;
+  /** Human review notes for formula-derived candidates. */
+  reviewHints?: string[];
+  /** Column indexes that need explicit human confirmation. */
+  reviewRequiredCellIndexes?: number[];
   /** Column indices that the user has manually edited (derivation skips these). */
   userEditedCells?: Set<number>;
 }

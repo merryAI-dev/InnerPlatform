@@ -88,6 +88,8 @@ function normalizeExpenseSheetRows(rows: unknown): ImportRow[] | null {
     const candidate = row && typeof row === 'object' ? row as Partial<ImportRow> & {
       userEditedCellIndexes?: unknown;
       userEditedCells?: unknown;
+      reviewHints?: unknown;
+      reviewRequiredCellIndexes?: unknown;
     } : {};
     const rawUserEdited = Array.isArray(candidate.userEditedCellIndexes)
       ? candidate.userEditedCellIndexes
@@ -107,6 +109,16 @@ function normalizeExpenseSheetRows(rows: unknown): ImportRow[] | null {
       ...(candidate.entryKind ? { entryKind: candidate.entryKind } : {}),
       cells: Array.isArray(candidate.cells) ? candidate.cells.map((cell) => String(cell ?? '')) : [],
       ...(candidate.error ? { error: String(candidate.error) } : {}),
+      ...(Array.isArray(candidate.reviewHints)
+        ? { reviewHints: candidate.reviewHints.map((item) => String(item)) }
+        : {}),
+      ...(Array.isArray(candidate.reviewRequiredCellIndexes)
+        ? {
+            reviewRequiredCellIndexes: candidate.reviewRequiredCellIndexes
+              .map((value) => (typeof value === 'number' ? value : Number.parseInt(String(value), 10)))
+              .filter((value) => Number.isInteger(value) && value >= 0),
+          }
+        : {}),
       ...(userEditedCells.size > 0 ? { userEditedCells } : {}),
     } satisfies ImportRow;
   });
@@ -119,6 +131,10 @@ function serializeExpenseSheetRow(row: ImportRow) {
     ...(row.entryKind ? { entryKind: row.entryKind } : {}),
     cells: Array.isArray(row.cells) ? row.cells.map((c) => (c ?? '')) : [],
     ...(row.error ? { error: row.error } : {}),
+    ...(row.reviewHints && row.reviewHints.length > 0 ? { reviewHints: [...row.reviewHints] } : {}),
+    ...(row.reviewRequiredCellIndexes && row.reviewRequiredCellIndexes.length > 0
+      ? { reviewRequiredCellIndexes: [...row.reviewRequiredCellIndexes].sort((a, b) => a - b) }
+      : {}),
     ...(row.userEditedCells && row.userEditedCells.size > 0
       ? { userEditedCellIndexes: Array.from(row.userEditedCells).sort((a, b) => a - b) }
       : {}),
@@ -1251,10 +1267,15 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       defaultLedgerId,
       evidenceRequiredMap,
       policy: normalizeSettlementSheetPolicy(myProject?.settlementSheetPolicy, myProject?.fundInputMode),
+      basis: myProject?.basis,
     });
     const sanitizedRows = preparedRows.map((row) => ({
       ...row,
       cells: Array.isArray(row.cells) ? row.cells.map((c) => (c ?? '')) : [],
+      ...(row.reviewHints && row.reviewHints.length > 0 ? { reviewHints: [...row.reviewHints] } : {}),
+      ...(row.reviewRequiredCellIndexes && row.reviewRequiredCellIndexes.length > 0
+        ? { reviewRequiredCellIndexes: [...row.reviewRequiredCellIndexes] }
+        : {}),
       ...(row.userEditedCells && row.userEditedCells.size > 0
         ? { userEditedCells: new Set(row.userEditedCells) }
         : {}),

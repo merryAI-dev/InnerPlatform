@@ -121,6 +121,38 @@ describe('settlement-row-derivation', () => {
     expect(next[0]?.cells[9]).toBe('-110,000');
   });
 
+  it('derives supply-amount candidates from bank amount and marks vat as human review', () => {
+    const rowCells = createCells();
+    rowCells[10] = '110,000';
+    const row: ImportRow = {
+      tempId: 'supply-amount-candidate',
+      sourceTxId: 'bank:row-1',
+      cells: rowCells,
+    };
+    const next = deriveSettlementRows([row], { ...context, basis: '공급가액' }, { mode: 'cascade', rowIdx: 0 });
+
+    expect(next[0]?.cells[13]).toBe('100,000');
+    expect(next[0]?.cells[14]).toBe('10,000');
+    expect(next[0]?.reviewHints).toEqual(['매입부가세 후보값입니다. 증빙 기준 금액으로 다시 확인해 주세요.']);
+    expect(next[0]?.reviewRequiredCellIndexes).toEqual([14]);
+  });
+
+  it('does not split deposit rows into expense and vat candidates', () => {
+    const rowCells = createCells();
+    rowCells[10] = '5,000';
+    rowCells[11] = '5,000,000';
+    const row: ImportRow = {
+      tempId: 'deposit-row',
+      sourceTxId: 'bank:deposit-1',
+      cells: rowCells,
+    };
+    const next = deriveSettlementRows([row], { ...context, basis: '공급가액' }, { mode: 'cascade', rowIdx: 0 });
+
+    expect(next[0]?.cells[13]).toBe('');
+    expect(next[0]?.cells[14]).toBe('');
+    expect(next[0]?.reviewHints).toBeUndefined();
+  });
+
   it('keeps a cleared expense amount empty when the user explicitly cleared it', () => {
     const rowCells = createCells();
     rowCells[10] = '110,000';

@@ -9,6 +9,7 @@ import { detectKeyRuleContext, runKeyRules, type KeyRule } from '../../platform/
 import { grid2tsv, html2grid, isSpreadsheetHtml, parseTsvRows } from '../../platform/settlement-grid-clipboard';
 import { BUDGET_CODE_BOOK } from '../../data/budget-data';
 import type {
+  Basis,
   BudgetCodeEntry,
   Comment,
   Transaction,
@@ -154,6 +155,7 @@ export function ImportEditor({
   settlementSheetPolicy,
   pendingQuickInsert,
   onPendingQuickInsertHandled,
+  basis,
 }: {
   rows: ImportRow[];
   onChange: (rows: ImportRow[]) => void;
@@ -185,6 +187,7 @@ export function ImportEditor({
   settlementSheetPolicy?: SettlementSheetPolicy;
   pendingQuickInsert?: PendingQuickInsert | null;
   onPendingQuickInsertHandled?: () => void;
+  basis?: Basis;
 }) {
   const resolvedPolicy = useMemo(
     () => normalizeSettlementSheetPolicy(settlementSheetPolicy, workflowMode),
@@ -206,6 +209,10 @@ export function ImportEditor({
   );
   const quickEntryRowCount = useMemo(
     () => meaningfulRows.filter((row) => row.entryKind && row.entryKind !== 'STANDARD').length,
+    [meaningfulRows],
+  );
+  const reviewRequiredRowCount = useMemo(
+    () => meaningfulRows.filter((row) => (row.reviewHints?.length || 0) > 0).length,
     [meaningfulRows],
   );
   const noIdx = useMemo(
@@ -424,6 +431,7 @@ export function ImportEditor({
       if (!hasAnyValue) return false;
       return cells.some((cell, idx) => idx !== noIdx && String(cell || '').trim() === '');
     });
+    const firstReviewRow = meaningfulRows.findIndex((row) => (row.reviewHints?.length || 0) > 0);
     const firstManualRow = meaningfulRows.findIndex((row) => (row.userEditedCells?.size || 0) > 0);
     return [
       {
@@ -443,6 +451,14 @@ export function ImportEditor({
         description: '빈 셀이 남아 있어 검토가 필요한 행',
       },
       {
+        key: 'human_review',
+        label: '사람 확인',
+        count: reviewRequiredRowCount,
+        rowIdx: firstReviewRow >= 0 ? rows.findIndex((row) => row.tempId === meaningfulRows[firstReviewRow]?.tempId) : -1,
+        variant: 'outline' as const,
+        description: '수식 후보값이라 증빙 기준 재확인이 필요한 행',
+      },
+      {
         key: 'manual',
         label: '수동 수정',
         count: manuallyEditedRowCount,
@@ -451,7 +467,7 @@ export function ImportEditor({
         description: '원본/계산값에서 사용자가 직접 바꾼 행',
       },
     ];
-  }, [errorCount, manuallyEditedRowCount, meaningfulRows, missingCount, noIdx, rows]);
+  }, [errorCount, manuallyEditedRowCount, meaningfulRows, missingCount, noIdx, reviewRequiredRowCount, rows]);
 
   useEffect(() => {
     selectionRef.current = selection;
@@ -633,8 +649,8 @@ export function ImportEditor({
   }, [clearUploadDrafts, onUploadEvidenceDriveById, uploadDrafts, uploadTargetTxId]);
 
   const settlementDerivationContext = useMemo(
-    () => buildSettlementDerivationContext(projectId, defaultLedgerId, resolvedPolicy),
-    [projectId, defaultLedgerId, resolvedPolicy],
+    () => buildSettlementDerivationContext(projectId, defaultLedgerId, resolvedPolicy, basis),
+    [projectId, defaultLedgerId, resolvedPolicy, basis],
   );
 
   const updateCell = useCallback(

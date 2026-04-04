@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { BUDGET_CODE_BOOK } from '../../data/budget-data';
 import type {
+  Basis,
   BudgetCodeEntry,
   Comment,
   ProjectFundInputMode,
@@ -97,6 +98,7 @@ export interface SettlementLedgerProps {
   onFetchBudgetSuggestion?: (counterparty: string) => Promise<{ budgetCategory: string; budgetSubCategory: string } | null>;
   workflowMode?: ProjectFundInputMode;
   settlementSheetPolicy?: SettlementSheetPolicy;
+  basis?: Basis;
   pendingQuickInsert?: import('./ImportEditor').PendingQuickInsert | null;
   onPendingQuickInsertHandled?: () => void;
 }
@@ -134,6 +136,7 @@ export function SettlementLedgerPage({
   onFetchBudgetSuggestion,
   workflowMode = 'BANK_UPLOAD',
   settlementSheetPolicy,
+  basis,
   pendingQuickInsert,
   onPendingQuickInsertHandled,
 }: SettlementLedgerProps) {
@@ -727,6 +730,7 @@ export function SettlementLedgerPage({
             sourceTransactions={allTransactions}
             workflowMode={workflowMode}
             settlementSheetPolicy={settlementSheetPolicy}
+            basis={basis}
             pendingQuickInsert={pendingQuickInsert}
             onPendingQuickInsertHandled={onPendingQuickInsertHandled}
           />
@@ -899,6 +903,7 @@ export function SettlementLedgerPage({
           onFetchBudgetSuggestion={onFetchBudgetSuggestion}
           workflowMode={workflowMode}
           settlementSheetPolicy={settlementSheetPolicy}
+          basis={basis}
           pendingQuickInsert={pendingQuickInsert}
           onPendingQuickInsertHandled={onPendingQuickInsertHandled}
         />

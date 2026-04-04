@@ -843,6 +843,7 @@ export function PortalWeeklyExpensePage() {
           } : undefined}
           workflowMode={fundInputMode}
           settlementSheetPolicy={settlementSheetPolicy}
+          basis={myProject?.basis}
           pendingQuickInsert={pendingQuickInsert}
           onPendingQuickInsertHandled={() => setPendingQuickInsert(null)}
         />
