@@ -16,6 +16,46 @@
 이 프로그램의 단계는 AX이전의 DX단계로 아직 AI가 저희를 지원해주는 기능은 없지만 향후 이를 준비하기 위한 Base Camp로 기능합니다.  
 더불어 사용자 관점으로는 `예산 총괄 → 통장내역 정리 → 사업비 입력(주간) 검토 → 캐시플로(주간) 비교 → 주차 마감`을 하나의 흐름 속에서 안정적으로 운영하고 전사적으로 교차검증 가능한 데이터화 해주는 데 있습니다.
 
+## 중요 아키텍처 판단: Rust 계산 코어 도입 검토
+
+임원 보고용 결론은 간단합니다. **전면 Rust 재작성은 하지 않고, `정산/예산/cashflow 계산 코어`만 Rust로 분리하는 방향**이 가장 타당합니다.
+
+| 질문 | 판단 |
+| --- | --- |
+| 왜 지금 중요한가 | 전사 1,000명 규모에서 `지연`, `동시 수정 충돌`, `수식 신뢰성` 문제는 UI보다 계산 아키텍처 문제이기 때문 |
+| 전체를 Rust로 바꾸는가 | 아니오. UI/운영 화면은 React/TypeScript를 유지 |
+| Rust는 어디에 쓰는가 | `행 파생 계산`, `잔액 흐름`, `예산 소진`, `주차별 cashflow 집계`, `검증/정책 엔진` |
+| 기대 효과 | 대량 데이터에서도 예측 가능한 성능, 동일 입력에 대한 결정적 결과, 서버/브라우저 간 동일 계산 재사용 |
+| 선행 조건 | 수식 parity와 golden test를 먼저 확보해야 함 |
+
+핵심 메시지:
+- 현재 문제의 본질은 “화면이 느리다”가 아니라 “시트식 계산 규칙이 커졌을 때 신뢰성과 응답성이 함께 무너진다”는 점입니다.
+- 장기적으로는 **DB를 source of truth로 두고**, **서버 authoritative 계산 엔진을 두며**, **브라우저는 preview 즉시성을 담당**하는 구조가 가장 적합합니다.
+- Rust 전환은 바로 전체 교체가 아니라 `수식 parity 확보 → 계산 커널 분리 → 점진 교체` 순서로 진행해야 합니다.
+
+자세한 판단 근거는 [docs/architecture/rust-calculation-core-decision-2026-04-04.md](docs/architecture/rust-calculation-core-decision-2026-04-04.md)에 있습니다.
+
+## Whole Workbook 기준선 만들기
+
+계산 규칙을 코드로 옮기기 전에, 먼저 원본 워크북의 수식과 탭 의존성을 고정해야 합니다. 이를 위해 아래 스크립트를 추가했습니다.
+
+```bash
+npm run workbook:extract:formulas -- <path-to-workbook.xlsx> [outDir]
+```
+
+이 스크립트는 다음 artifact를 생성합니다.
+
+- `formula-inventory.json`
+- `workbook-plan.json`
+- `source-bug-ledger.json`
+- `all-formulas.csv`
+- `formula-summary.md`
+
+목적:
+- 워크북 전체 탭을 `CORE / GROUP / AUXILIARY / REFERENCE` wave로 분류
+- 수식 전수 추출과 source bug (`#REF!`) 분리
+- 이후 PR이 같은 기준선 위에서 진행되도록 freeze line 형성
+
 
 ## 주요 개선점: AS-IS vs TO-BE
 
