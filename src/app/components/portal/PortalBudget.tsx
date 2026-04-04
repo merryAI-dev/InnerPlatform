@@ -73,6 +73,19 @@ interface BudgetCodeImportPreview {
 
 type BudgetPlanImportTab = 'file' | 'paste';
 
+const BUDGET_IMPORT_GUIDE_ITEMS = [
+  '헤더에는 가능하면 `비목`, `세목`, `최초 승인 예산`을 그대로 넣어 주세요.',
+  '한 행에는 하나의 비목/세목 조합만 두고, 데이터 행의 병합 셀은 풀어 주세요.',
+  '개인단위와 계약클라이언트는 각각 별도 세목 행으로 나누어 주세요.',
+  '소계/합계/총계 행은 가져오기 전에 제거하면 가장 안정적입니다.',
+];
+
+const BUDGET_IMPORT_RECOVERY_GUIDE_ITEMS = [
+  '헤더를 한 줄로 정리하고 `비목`, `세목`, `최초 승인 예산`, `변경 예산`, `비고`처럼 명확히 써 주세요.',
+  '같은 비목이 이어져도 빈칸 대신 비목명을 반복해서 넣으면 인식이 더 안정적입니다.',
+  '설명용 안내 문구, 메모 열, 색상 강조는 남겨도 되지만 데이터 본문보다 위쪽 행은 줄여 주세요.',
+];
+
 function parseCsvCells(line: string): string[] {
   const cells: string[] = [];
   let current = '';
@@ -894,6 +907,14 @@ export function PortalBudget() {
                           ? `${budgetImportFileName} 파일을 읽어 미리보기를 준비했습니다.`
                           : '업로드 후 아래에서 시트와 반영 요약을 확인하세요.'}
                     </p>
+                    <div className="mt-3 rounded-md bg-muted/40 p-3">
+                      <p className="text-[11px] font-medium text-foreground">잘 읽히는 파일 형식</p>
+                      <ul className="mt-2 list-disc space-y-1 pl-4 text-[10px] text-muted-foreground">
+                        {BUDGET_IMPORT_GUIDE_ITEMS.map((item) => (
+                          <li key={`budget-import-file-guide-${item}`}>{item}</li>
+                        ))}
+                      </ul>
+                    </div>
                   </div>
                   {budgetImportSheets.length > 1 ? (
                     <div className="space-y-1">
@@ -917,17 +938,23 @@ export function PortalBudget() {
                   <div className="rounded-md border border-border/60 p-3 space-y-2">
                     <p className="text-[11px] font-medium">예산총괄 표를 그대로 복사해서 붙여넣을 수 있습니다.</p>
                     <p className="text-[10px] text-muted-foreground">
-                      `비목`, `세목`, `최초 승인 예산` 헤더가 들어 있으면 자동 인식합니다. 탭 복붙과 CSV 붙여넣기를 모두 지원합니다.
+                      탭 복붙과 CSV 붙여넣기를 모두 지원합니다. 다만 서식이 흔들릴수록 추정이 늘어나므로 아래 권장 형태에 맞추면 더 안정적으로 읽습니다.
                     </p>
+                    <ul className="list-disc space-y-1 pl-4 text-[10px] text-muted-foreground">
+                      {BUDGET_IMPORT_GUIDE_ITEMS.map((item) => (
+                        <li key={`budget-import-paste-guide-${item}`}>{item}</li>
+                      ))}
+                    </ul>
                     <div className="rounded-md bg-slate-950 px-3 py-2 font-mono text-[10px] text-slate-50 whitespace-pre-wrap">
-                      사업비 구분{'\t'}비목{'\t'}세목{'\t'}최초 승인 예산{'\t'}변경 예산{'\n'}
-                      직접사업비{'\t'}여비{'\t'}교통비{'\t'}100,000{'\t'}120,000
+                      비목{'\t'}세목{'\t'}최초 승인 예산{'\t'}변경 예산{'\t'}비고{'\n'}
+                      인건비{'\t'}개인단위{'\t'}1,000,000{'\t'}1,050,000{'\t'}내부 집행{'\n'}
+                      인건비{'\t'}계약클라이언트{'\t'}2,000,000{'\t'}2,100,000{'\t'}외부 계약
                     </div>
                   </div>
                   <Textarea
                     value={budgetImportText}
                     onChange={(event) => setBudgetImportText(event.target.value)}
-                    placeholder={'사업비 구분\t비목\t세목\t최초 승인 예산\t변경 예산\n직접사업비\t여비\t교통비\t100,000\t120,000'}
+                    placeholder={'비목\t세목\t최초 승인 예산\t변경 예산\t비고\n인건비\t개인단위\t1,000,000\t1,050,000\t내부 집행'}
                     className="min-h-[220px] text-[11px] font-mono"
                   />
                 </TabsContent>
@@ -959,10 +986,17 @@ export function PortalBudget() {
                     동일한 비목/세목 키는 덮어쓰고, 현재 화면에만 있는 기존 예산 항목은 삭제하지 않습니다.
                   </p>
                 ) : null}
-                {budgetImportParsed.aiAssistRecommended ? (
+                {budgetImportParsed.formatGuideRecommended ? (
                   <p className="mt-2 text-amber-600">
-                    서식 편차가 커서 일부 열을 추정했습니다. 반영 전 미리보기를 꼭 확인해 주세요. 필요하면 다음 단계에서 AI 보정 endpoint를 붙일 수 있습니다.
+                    현재 표는 일부 열을 추정해 읽었습니다. 아래 권장 형식으로 한 번 정리한 뒤 다시 가져오면 더 안정적으로 반영됩니다.
                   </p>
+                ) : null}
+                {budgetImportParsed.formatGuideRecommended ? (
+                  <ul className="mt-2 list-disc space-y-1 pl-4 text-amber-700">
+                    {BUDGET_IMPORT_RECOVERY_GUIDE_ITEMS.map((item) => (
+                      <li key={`budget-import-recovery-guide-${item}`}>{item}</li>
+                    ))}
+                  </ul>
                 ) : null}
                 {(budgetImportParsed.warnings || []).slice(0, 3).map((warning, warningIdx) => (
                   <p key={`budget-import-warning-${warningIdx}`} className="mt-2 text-amber-600">

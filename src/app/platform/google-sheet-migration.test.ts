@@ -174,7 +174,7 @@ describe('google-sheet-migration', () => {
       },
     ]);
     expect(result.confidence).toBe('low');
-    expect(result.aiAssistRecommended).toBe(true);
+    expect(result.formatGuideRecommended).toBe(true);
     expect(result.warnings?.length).toBeGreaterThan(0);
   });
 

@@ -26,7 +26,7 @@ export interface BudgetSheetImportPayload {
   codeBook: BudgetCodeEntry[];
   warnings?: string[];
   confidence?: 'high' | 'medium' | 'low';
-  aiAssistRecommended?: boolean;
+  formatGuideRecommended?: boolean;
   headerRowIndex?: number;
   headerRowCount?: number;
   detectedColumns?: Partial<Record<'category' | 'budgetCode' | 'subCode' | 'calcDesc' | 'initialBudget' | 'revisedBudget' | 'note', number>>;
@@ -522,9 +522,9 @@ export function parseBudgetPlanMatrix(matrix: string[][]): BudgetSheetImportPayl
     return {
       rows: [],
       codeBook: [],
-      warnings: ['표준 예산총괄 헤더를 찾지 못했습니다. 서식 확인 또는 AI 보정이 필요합니다.'],
+      warnings: ['표준 예산총괄 헤더를 찾지 못했습니다. 권장 헤더 이름과 열 순서로 정리한 뒤 다시 가져와 주세요.'],
       confidence: 'low',
-      aiAssistRecommended: true,
+      formatGuideRecommended: true,
     };
   }
   const budgetCodeIndex = header.matches.budgetCode?.index ?? -1;
@@ -539,10 +539,10 @@ export function parseBudgetPlanMatrix(matrix: string[][]): BudgetSheetImportPayl
       codeBook: [],
       warnings: [
         ...header.warnings,
-        '비목/세목/예산 열을 확정하지 못했습니다. 서식 확인 또는 AI 보정이 필요합니다.',
+        '비목/세목/예산 열을 확정하지 못했습니다. 헤더 이름과 행 구성을 맞춘 뒤 다시 가져와 주세요.',
       ],
       confidence: 'low',
-      aiAssistRecommended: true,
+      formatGuideRecommended: true,
       headerRowIndex: header.rowIndex,
       headerRowCount: header.headerRowCount,
       detectedColumns: Object.fromEntries(
@@ -594,7 +594,7 @@ export function parseBudgetPlanMatrix(matrix: string[][]): BudgetSheetImportPayl
     codeBook: buildBudgetCodeBook(rows),
     warnings: header.warnings,
     confidence: header.confidence,
-    aiAssistRecommended: header.confidence === 'low',
+    formatGuideRecommended: header.confidence === 'low',
     headerRowIndex: header.rowIndex,
     headerRowCount: header.headerRowCount,
     detectedColumns: Object.fromEntries(
