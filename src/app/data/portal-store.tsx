@@ -90,6 +90,9 @@ function normalizeExpenseSheetRows(rows: unknown): ImportRow[] | null {
       userEditedCells?: unknown;
       reviewHints?: unknown;
       reviewRequiredCellIndexes?: unknown;
+      reviewStatus?: unknown;
+      reviewFingerprint?: unknown;
+      reviewConfirmedAt?: unknown;
     } : {};
     const rawUserEdited = Array.isArray(candidate.userEditedCellIndexes)
       ? candidate.userEditedCellIndexes
@@ -119,6 +122,11 @@ function normalizeExpenseSheetRows(rows: unknown): ImportRow[] | null {
               .filter((value) => Number.isInteger(value) && value >= 0),
           }
         : {}),
+      ...(candidate.reviewStatus === 'pending' || candidate.reviewStatus === 'confirmed'
+        ? { reviewStatus: candidate.reviewStatus }
+        : {}),
+      ...(candidate.reviewFingerprint ? { reviewFingerprint: String(candidate.reviewFingerprint) } : {}),
+      ...(candidate.reviewConfirmedAt ? { reviewConfirmedAt: String(candidate.reviewConfirmedAt) } : {}),
       ...(userEditedCells.size > 0 ? { userEditedCells } : {}),
     } satisfies ImportRow;
   });
@@ -135,6 +143,9 @@ function serializeExpenseSheetRow(row: ImportRow) {
     ...(row.reviewRequiredCellIndexes && row.reviewRequiredCellIndexes.length > 0
       ? { reviewRequiredCellIndexes: [...row.reviewRequiredCellIndexes].sort((a, b) => a - b) }
       : {}),
+    ...(row.reviewStatus ? { reviewStatus: row.reviewStatus } : {}),
+    ...(row.reviewFingerprint ? { reviewFingerprint: row.reviewFingerprint } : {}),
+    ...(row.reviewConfirmedAt ? { reviewConfirmedAt: row.reviewConfirmedAt } : {}),
     ...(row.userEditedCells && row.userEditedCells.size > 0
       ? { userEditedCellIndexes: Array.from(row.userEditedCells).sort((a, b) => a - b) }
       : {}),
@@ -1276,6 +1287,9 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       ...(row.reviewRequiredCellIndexes && row.reviewRequiredCellIndexes.length > 0
         ? { reviewRequiredCellIndexes: [...row.reviewRequiredCellIndexes] }
         : {}),
+      ...(row.reviewStatus ? { reviewStatus: row.reviewStatus } : {}),
+      ...(row.reviewFingerprint ? { reviewFingerprint: row.reviewFingerprint } : {}),
+      ...(row.reviewConfirmedAt ? { reviewConfirmedAt: row.reviewConfirmedAt } : {}),
       ...(row.userEditedCells && row.userEditedCells.size > 0
         ? { userEditedCells: new Set(row.userEditedCells) }
         : {}),

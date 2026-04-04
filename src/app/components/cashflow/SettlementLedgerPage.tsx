@@ -47,6 +47,7 @@ import {
   clearImportDraftCache,
   serializeImportRows,
 } from '../../platform/settlement-draft-cache';
+import { countPendingImportRowReviews } from '../../platform/settlement-review';
 
 // ── Types ──
 
@@ -150,7 +151,7 @@ export function SettlementLedgerPage({
   const [lastAutoSavedAt, setLastAutoSavedAt] = useState('');
   const [lastCashflowSyncedAt, setLastCashflowSyncedAt] = useState('');
   const [sheetSaveState, setSheetSaveState] = useState<'idle' | 'dirty' | 'saving' | 'saved' | 'save_failed'>('idle');
-  const [cashflowSyncState, setCashflowSyncState] = useState<'idle' | 'pending' | 'syncing' | 'synced' | 'sync_failed'>('idle');
+  const [cashflowSyncState, setCashflowSyncState] = useState<'idle' | 'pending' | 'syncing' | 'synced' | 'sync_failed' | 'review_required'>('idle');
   const [downloadFrom, setDownloadFrom] = useState('');
   const [downloadTo, setDownloadTo] = useState('');
   const [revertConfirmOpen, setRevertConfirmOpen] = useState(false);
@@ -158,7 +159,13 @@ export function SettlementLedgerPage({
   const lastSyncedSheetRowsSignatureRef = useRef('');
   const pendingSheetRowsSyncRef = useRef<ImportRow[] | null>(null);
   const cloneImportRows = useCallback((input: ImportRow[]) => (
-    input.map((row) => ({ ...row, cells: [...row.cells] }))
+    input.map((row) => ({
+      ...row,
+      cells: [...row.cells],
+      ...(row.reviewHints ? { reviewHints: [...row.reviewHints] } : {}),
+      ...(row.reviewRequiredCellIndexes ? { reviewRequiredCellIndexes: [...row.reviewRequiredCellIndexes] } : {}),
+      ...(row.userEditedCells ? { userEditedCells: new Set(row.userEditedCells) } : {}),
+    }))
   ), []);
   const resolvedBudgetBook = useMemo(
     () => (budgetCodeBook && budgetCodeBook.length ? budgetCodeBook : BUDGET_CODE_BOOK),
@@ -213,7 +220,7 @@ export function SettlementLedgerPage({
       setImportRows(cloneImportRows(rows));
       setImportDirty(false);
       setSheetSaveState('saved');
-      setCashflowSyncState('synced');
+      setCashflowSyncState(countPendingImportRowReviews(rows) > 0 ? 'review_required' : 'synced');
       clearImportDraftCache(draftCacheKey);
     } else if (serializeImportRows(rows) === '') {
       setImportRows(transactionsToImportRows(projectTxs, yearWeeks));
@@ -477,6 +484,14 @@ export function SettlementLedgerPage({
     options?: { silent?: boolean },
   ) => {
     const silent = options?.silent ?? false;
+    const pendingReviewCount = countPendingImportRowReviews(rows);
+    if (pendingReviewCount > 0) {
+      setCashflowSyncState('review_required');
+      if (!silent) {
+        toast.message(`정산대장은 저장했지만 사람 확인 ${pendingReviewCount}건 때문에 캐시플로 동기화는 보류했습니다.`);
+      }
+      return false;
+    }
     setCashflowSyncing(true);
     setCashflowSyncState('syncing');
     try {
@@ -554,6 +569,7 @@ export function SettlementLedgerPage({
     if (sheetSaveState === 'saving') return '시트 저장 중...';
     if (sheetSaveState === 'save_failed') return '시트 저장 실패';
     if (importDirty || sheetSaveState === 'dirty') return '저장되지 않은 변경 있음';
+    if (cashflowSyncState === 'review_required') return '시트 저장됨 · 사람 확인 필요';
     if (cashflowSyncState === 'syncing') return '시트 저장됨 · 캐시플로 동기화 중...';
     if (cashflowSyncState === 'sync_failed') return '시트 저장됨 · 캐시플로 동기화 실패';
     if (cashflowSyncState === 'pending') {

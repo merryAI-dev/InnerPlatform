@@ -669,6 +669,12 @@ export interface ImportRow {
   reviewHints?: string[];
   /** Column indexes that need explicit human confirmation. */
   reviewRequiredCellIndexes?: number[];
+  /** Review workflow state for formula-derived candidates. */
+  reviewStatus?: 'pending' | 'confirmed';
+  /** Stable fingerprint of the candidate values that were reviewed. */
+  reviewFingerprint?: string;
+  /** ISO timestamp when the current candidate set was confirmed by a user. */
+  reviewConfirmedAt?: string;
   /** Column indices that the user has manually edited (derivation skips these). */
   userEditedCells?: Set<number>;
 }

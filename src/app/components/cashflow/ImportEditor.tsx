@@ -47,6 +47,10 @@ import {
   isSettlementCascadeColumn,
 } from '../../platform/settlement-row-derivation';
 import {
+  countConfirmedImportRowReviews,
+  countPendingImportRowReviews,
+} from '../../platform/settlement-review';
+import {
   findSimilarCounterparty,
   type CounterpartySuggestion,
 } from '../../platform/counterparty-normalizer';
@@ -212,7 +216,11 @@ export function ImportEditor({
     [meaningfulRows],
   );
   const reviewRequiredRowCount = useMemo(
-    () => meaningfulRows.filter((row) => (row.reviewHints?.length || 0) > 0).length,
+    () => countPendingImportRowReviews(meaningfulRows),
+    [meaningfulRows],
+  );
+  const reviewConfirmedRowCount = useMemo(
+    () => countConfirmedImportRowReviews(meaningfulRows),
     [meaningfulRows],
   );
   const noIdx = useMemo(
@@ -1495,6 +1503,16 @@ export function ImportEditor({
               {missingCount > 0 && (
                 <Badge variant="secondary" className="text-[10px] text-red-600">{missingCount}건 미입력</Badge>
               )}
+              {reviewRequiredRowCount > 0 && (
+                <Badge variant="outline" className="text-[10px] border-amber-200 bg-amber-50 text-amber-700">
+                  사람 확인 {reviewRequiredRowCount}건
+                </Badge>
+              )}
+              {reviewConfirmedRowCount > 0 && (
+                <Badge variant="outline" className="text-[10px] border-emerald-200 bg-emerald-50 text-emerald-700">
+                  확인 완료 {reviewConfirmedRowCount}건
+                </Badge>
+              )}
             </div>
             <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
               <span className="rounded-full border bg-background px-2 py-1">업로드 반영 {importedRowCount}건</span>
@@ -1509,7 +1527,7 @@ export function ImportEditor({
           </div>
           <div className="shrink-0 text-right text-[11px] text-muted-foreground">
             <div>행 왼쪽 배지에서 출처를 확인할 수 있습니다.</div>
-            <div>업로드, 직접 입력, 계산값 잠금 상태를 한눈에 구분합니다.</div>
+            <div>사람 확인이 필요한 후보값은 확인 완료 전까지 캐시플로 반영이 보류됩니다.</div>
           </div>
         </div>
         <div className="flex items-center justify-between gap-3 px-4 py-2 border-t bg-background/80">
@@ -1885,6 +1903,7 @@ export function ImportEditor({
                 <div>원본: 통장내역 또는 기존 저장값에서 온 셀</div>
                 <div>수정: 사용자가 직접 덮어쓴 셀</div>
                 <div>계산: 정책에 따라 자동 계산되고 잠긴 셀</div>
+                <div>검토/확인: 수식 후보값을 사람이 확인해야 하는 셀</div>
               </div>
             </div>
           </div>

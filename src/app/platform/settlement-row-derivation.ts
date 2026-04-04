@@ -1,6 +1,7 @@
 import { findWeekForDate, getYearMondayWeeks } from './cashflow-weeks';
 import { parseDate, parseNumber } from './csv-utils';
 import { importRowToTransaction, type ImportRow } from './settlement-csv';
+import { buildImportRowReviewFingerprint } from './settlement-review';
 import type { Basis, SettlementSheetPolicy } from '../data/types';
 
 export type SettlementDerivationMode = 'row' | 'cascade' | 'full';
@@ -84,14 +85,27 @@ function updateReviewSignals(
   const normalizedIndexes = Array.from(reviewRequiredCellIndexes.values())
     .filter((value) => Number.isInteger(value) && value >= 0)
     .sort((left, right) => left - right);
+  const reviewFingerprint = buildImportRowReviewFingerprint(row, normalizedHints, normalizedIndexes);
   const sameHints = JSON.stringify(row.reviewHints || []) === JSON.stringify(normalizedHints);
   const sameIndexes = JSON.stringify(row.reviewRequiredCellIndexes || []) === JSON.stringify(normalizedIndexes);
-  if (sameHints && sameIndexes) return row;
+  const sameFingerprint = (row.reviewFingerprint || '') === reviewFingerprint;
+  if (sameHints && sameIndexes && sameFingerprint) return row;
   const nextRow: ImportRow = { ...row };
-  if (normalizedHints.length > 0) nextRow.reviewHints = normalizedHints;
-  else delete nextRow.reviewHints;
-  if (normalizedIndexes.length > 0) nextRow.reviewRequiredCellIndexes = normalizedIndexes;
-  else delete nextRow.reviewRequiredCellIndexes;
+  if (normalizedHints.length > 0) {
+    nextRow.reviewHints = normalizedHints;
+    nextRow.reviewRequiredCellIndexes = normalizedIndexes;
+    nextRow.reviewFingerprint = reviewFingerprint;
+    if (!(row.reviewStatus === 'confirmed' && sameFingerprint)) {
+      nextRow.reviewStatus = 'pending';
+      delete nextRow.reviewConfirmedAt;
+    }
+  } else {
+    delete nextRow.reviewHints;
+    delete nextRow.reviewRequiredCellIndexes;
+    delete nextRow.reviewStatus;
+    delete nextRow.reviewFingerprint;
+    delete nextRow.reviewConfirmedAt;
+  }
   return nextRow;
 }
 

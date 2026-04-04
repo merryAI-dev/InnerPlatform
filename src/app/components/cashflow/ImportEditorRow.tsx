@@ -4,7 +4,7 @@ import type {
   ClipboardEvent as ReactClipboardEvent,
   MouseEvent as ReactMouseEvent,
 } from 'react';
-import { ExternalLink, GripVertical, Plus, Upload, X } from 'lucide-react';
+import { Check, ExternalLink, GripVertical, Plus, Upload, X } from 'lucide-react';
 import type { BudgetCodeEntry, Transaction, SettlementSheetPolicy } from '../../data/types';
 import { parseNumber } from '../../platform/csv-utils';
 import { isValidDriveUrl } from '../../platform/evidence-helpers';
@@ -13,6 +13,11 @@ import {
   SETTLEMENT_COLUMNS,
   type ImportRow,
 } from '../../platform/settlement-csv';
+import {
+  hasImportRowReviewRequirement,
+  isImportRowReviewConfirmed,
+  isImportRowReviewPending,
+} from '../../platform/settlement-review';
 import {
   buildCommentThreadKey,
   buildSheetRowCommentId,
@@ -235,7 +240,9 @@ function ImportEditorRow({
   onBudgetSuggestionAccepted?: (confidence: 'history' | 'codebook') => void;
 }) {
   const hasError = Boolean(row.error);
-  const hasReviewHint = (row.reviewHints?.length || 0) > 0;
+  const hasReviewHint = hasImportRowReviewRequirement(row);
+  const isReviewConfirmed = isImportRowReviewConfirmed(row);
+  const isReviewPending = isImportRowReviewPending(row);
   const reviewHintLabel = row.reviewHints?.[0] || '';
   const hasMissingCell = useMemo(() => {
     const cells = row.cells || [];
@@ -283,8 +290,11 @@ function ImportEditorRow({
     if (hasError) {
       return { label: '검토 필요', className: 'border-rose-200 bg-rose-50 text-rose-700' };
     }
-    if (hasReviewHint) {
+    if (isReviewPending) {
       return { label: '사람 확인', className: 'border-amber-200 bg-amber-50 text-amber-700' };
+    }
+    if (isReviewConfirmed) {
+      return { label: '확인 완료', className: 'border-emerald-200 bg-emerald-50 text-emerald-700' };
     }
     if ((row.userEditedCells?.size || 0) > 0) {
       return { label: '수정됨', className: 'border-teal-200 bg-teal-50 text-teal-700' };
@@ -293,7 +303,7 @@ function ImportEditorRow({
       return { label: '미입력', className: 'border-orange-200 bg-orange-50 text-orange-700' };
     }
     return null;
-  }, [hasError, hasMissingCell, hasReviewHint, row.userEditedCells]);
+  }, [hasError, hasMissingCell, isReviewConfirmed, isReviewPending, row.userEditedCells]);
   const isCellSelected = useCallback((colIdx: number) => {
     if (!selectionBounds || colIdx === noIdx) return false;
     return rowIdx >= selectionBounds.r1
@@ -325,7 +335,9 @@ function ImportEditorRow({
       return { label: '수정', className: 'bg-teal-100 text-teal-700' };
     }
     if (row.reviewRequiredCellIndexes?.includes(colIdx)) {
-      return { label: '검토', className: 'bg-amber-100 text-amber-700' };
+      return isReviewConfirmed
+        ? { label: '확인', className: 'bg-emerald-100 text-emerald-700' }
+        : { label: '검토', className: 'bg-amber-100 text-amber-700' };
     }
     const cellValue = String(row.cells[colIdx] || '').trim();
     if (
@@ -346,7 +358,7 @@ function ImportEditorRow({
       return { label: '원본', className: 'bg-slate-100 text-slate-600' };
     }
     return null;
-  }, [budgetCodeIdx, cashflowIdx, row.cells, row.reviewRequiredCellIndexes, row.sourceTxId, row.userEditedCells, subCodeIdx, weekIdx, isDerivedFieldLocked]);
+  }, [budgetCodeIdx, cashflowIdx, isReviewConfirmed, row.cells, row.reviewRequiredCellIndexes, row.sourceTxId, row.userEditedCells, subCodeIdx, weekIdx, isDerivedFieldLocked]);
   const renderCommentButton = useCallback((fieldLabel: string) => {
     const fieldKey = toFieldSlug(fieldLabel);
     const count = commentCountByCell.get(buildCommentThreadKey(commentTransactionId, fieldKey)) || 0;
@@ -447,10 +459,36 @@ function ImportEditorRow({
                 <X className="h-3.5 w-3.5" />
                 {settlementSheetPolicy.allowRowDelete ? '행 삭제' : '행 삭제 잠금'}
               </DropdownMenuItem>
+              {hasReviewHint && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRowChange((prev) => {
+                        if (!hasImportRowReviewRequirement(prev)) return prev;
+                        if (isImportRowReviewConfirmed(prev)) {
+                          const next: ImportRow = { ...prev, reviewStatus: 'pending' };
+                          delete next.reviewConfirmedAt;
+                          return next;
+                        }
+                        return {
+                          ...prev,
+                          reviewStatus: 'confirmed',
+                          reviewConfirmedAt: new Date().toISOString(),
+                        };
+                      });
+                    }}
+                  >
+                    <Check className="h-3.5 w-3.5" />
+                    {isReviewConfirmed ? '사람 확인 해제' : '사람 확인 완료'}
+                  </DropdownMenuItem>
+                </>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
-        {(hasError || hasMissingCell || hasReviewHint) && (
+        {(hasError || hasMissingCell || isReviewPending) && (
           <span
             className={`absolute right-1 top-1 h-1 w-1 rounded-full ${
               hasError || hasMissingCell ? 'bg-rose-500' : 'bg-amber-500'

@@ -135,6 +135,56 @@ describe('settlement-row-derivation', () => {
     expect(next[0]?.cells[14]).toBe('10,000');
     expect(next[0]?.reviewHints).toEqual(['매입부가세 후보값입니다. 증빙 기준 금액으로 다시 확인해 주세요.']);
     expect(next[0]?.reviewRequiredCellIndexes).toEqual([14]);
+    expect(next[0]?.reviewStatus).toBe('pending');
+    expect(next[0]?.reviewFingerprint).toBeTruthy();
+  });
+
+  it('preserves confirmed review status while the candidate values stay the same', () => {
+    const rowCells = createCells();
+    rowCells[10] = '110,000';
+    const first = deriveSettlementRows([
+      {
+        tempId: 'confirmed-review-row',
+        sourceTxId: 'bank:confirmed-1',
+        cells: rowCells,
+      },
+    ], { ...context, basis: '공급가액' }, { mode: 'cascade', rowIdx: 0 })[0];
+
+    const confirmed: ImportRow = {
+      ...(first as ImportRow),
+      reviewStatus: 'confirmed',
+      reviewConfirmedAt: '2026-04-04T04:00:00.000Z',
+    };
+    const next = deriveSettlementRows([confirmed], { ...context, basis: '공급가액' }, { mode: 'cascade', rowIdx: 0 });
+
+    expect(next[0]?.reviewStatus).toBe('confirmed');
+    expect(next[0]?.reviewConfirmedAt).toBe('2026-04-04T04:00:00.000Z');
+  });
+
+  it('resets confirmed review status when the candidate values change', () => {
+    const rowCells = createCells();
+    rowCells[10] = '110,000';
+    const first = deriveSettlementRows([
+      {
+        tempId: 'confirmed-review-reset-row',
+        sourceTxId: 'bank:confirmed-2',
+        cells: rowCells,
+      },
+    ], { ...context, basis: '공급가액' }, { mode: 'cascade', rowIdx: 0 })[0];
+
+    const changedCells = [...(first?.cells || createCells())];
+    changedCells[10] = '220,000';
+    const changed: ImportRow = {
+      ...(first as ImportRow),
+      cells: changedCells,
+      reviewStatus: 'confirmed',
+      reviewConfirmedAt: '2026-04-04T04:10:00.000Z',
+    };
+    const next = deriveSettlementRows([changed], { ...context, basis: '공급가액' }, { mode: 'cascade', rowIdx: 0 });
+
+    expect(next[0]?.reviewFingerprint).not.toBe(first?.reviewFingerprint);
+    expect(next[0]?.reviewStatus).toBe('pending');
+    expect(next[0]?.reviewConfirmedAt).toBeUndefined();
   });
 
   it('does not split deposit rows into expense and vat candidates', () => {
