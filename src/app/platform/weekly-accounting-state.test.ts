@@ -27,6 +27,7 @@ describe('weekly-accounting-state', () => {
 
     expect(state.closeDialogKind).toBe('warning');
     expect(state.expenseStatusLabel).toBe('사람 확인 2건');
+    expect(state.expenseStatusDescription).toContain('증빙');
   });
 
   it('returns confirm when both projection and expense are synced cleanly', () => {
@@ -42,5 +43,6 @@ describe('weekly-accounting-state', () => {
 
     expect(state.closeDialogKind).toBe('confirm');
     expect(state.expenseStatusLabel).toBe('동기화 완료');
+    expect(state.expenseStatusDescription).toContain('일치');
   });
 });

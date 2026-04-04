@@ -62,8 +62,14 @@ function pickLatestAuditMeta(props: {
   editedByName?: string;
   updatedAt?: string;
   updatedByName?: string;
+  syncAt?: string;
+  syncByName?: string;
+  syncTitle?: string;
 }) {
   const items = [
+    props.syncAt
+      ? { title: props.syncTitle || '최종 동기화 상태 반영', at: props.syncAt, byName: props.syncByName || '-' }
+      : null,
     props.updatedAt
       ? { title: '최종 제출 반영', at: props.updatedAt, byName: props.updatedByName || '-' }
       : null,
@@ -388,6 +394,17 @@ export function PortalSubmissionsPage() {
                     editedByName: status?.expenseEditedByName,
                     updatedAt: status?.expenseUpdatedAt,
                     updatedByName: status?.expenseUpdatedByName,
+                    syncAt: status?.expenseSyncUpdatedAt,
+                    syncByName: status?.expenseSyncUpdatedByName,
+                    syncTitle: status?.expenseSyncState === 'review_required'
+                      ? '최종 사람 확인 상태 반영'
+                      : status?.expenseSyncState === 'sync_failed'
+                        ? '최종 동기화 실패 반영'
+                        : status?.expenseSyncState === 'synced'
+                          ? '최종 동기화 완료 반영'
+                          : status?.expenseSyncState === 'pending'
+                            ? '최종 동기화 대기 반영'
+                            : undefined,
                   });
                   return (
                     <tr key={p.id} className="border-t border-border/30">
@@ -477,18 +494,23 @@ export function PortalSubmissionsPage() {
                             {expenseDone ? '제출 완료' : '미완료'}
                           </Button>
                           {expenseDone && (
-                            <Badge
-                              variant="outline"
-                              className={
-                                accountingState.expenseStatusTone === 'success'
-                                  ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
-                                  : accountingState.expenseStatusTone === 'danger'
-                                    ? 'border-rose-300 bg-rose-50 text-rose-700'
-                                    : 'border-amber-300 bg-amber-50 text-amber-700'
-                              }
-                            >
-                              {accountingState.expenseStatusLabel}
-                            </Badge>
+                            <div className="space-y-1">
+                              <Badge
+                                variant="outline"
+                                className={
+                                  accountingState.expenseStatusTone === 'success'
+                                    ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+                                    : accountingState.expenseStatusTone === 'danger'
+                                      ? 'border-rose-300 bg-rose-50 text-rose-700'
+                                      : 'border-amber-300 bg-amber-50 text-amber-700'
+                                }
+                              >
+                                {accountingState.expenseStatusLabel}
+                              </Badge>
+                              <div className="text-[9px] leading-4 text-muted-foreground">
+                                {accountingState.expenseStatusDescription}
+                              </div>
+                            </div>
                           )}
                           {expenseAudit && <AuditMetaLine {...expenseAudit} />}
                         </div>

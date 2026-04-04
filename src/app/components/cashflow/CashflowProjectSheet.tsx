@@ -164,6 +164,7 @@ export function CashflowProjectSheet({
     projectionDone: boolean;
     expenseDone: boolean;
     expenseStatusLabel?: string;
+    expenseStatusDescription?: string;
   } | null>(null);
   const [monthSaving, setMonthSaving] = useState(false);
 
@@ -517,6 +518,7 @@ export function CashflowProjectSheet({
         projectionDone: accountingState.projectionDone,
         expenseDone: accountingState.expenseDone,
         expenseStatusLabel: accountingState.expenseStatusLabel,
+        expenseStatusDescription: accountingState.expenseStatusDescription,
       });
     } catch (error) {
       console.error('[Cashflow] weekly submission status read failed:', error);
@@ -946,6 +948,11 @@ export function CashflowProjectSheet({
                   <span style={{ fontWeight: 700 }}>
                     {closeDialog.expenseStatusLabel}
                   </span>
+                </div>
+              )}
+              {closeDialog.expenseStatusDescription && (
+                <div className="rounded-lg border border-border/50 bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
+                  {closeDialog.expenseStatusDescription}
                 </div>
               )}
             </div>

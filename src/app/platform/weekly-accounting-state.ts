@@ -9,6 +9,7 @@ export interface WeeklyAccountingState {
   expenseReviewPendingCount: number;
   closeDialogKind: 'prerequisite' | 'warning' | 'confirm';
   expenseStatusLabel: string;
+  expenseStatusDescription: string;
   expenseStatusTone: 'muted' | 'warning' | 'danger' | 'success';
 }
 
@@ -28,6 +29,7 @@ export function resolveWeeklyAccountingState(
       expenseReviewPendingCount,
       closeDialogKind: 'prerequisite',
       expenseStatusLabel: expenseDone ? '저장됨' : '미완료',
+      expenseStatusDescription: expenseDone ? '정산대장은 저장되었지만 제출/동기화 확인이 더 필요합니다.' : '사업비 입력이 아직 제출 완료 상태가 아닙니다.',
       expenseStatusTone: expenseDone ? 'muted' : 'danger',
     };
   }
@@ -42,6 +44,7 @@ export function resolveWeeklyAccountingState(
       expenseStatusLabel: expenseReviewPendingCount > 0
         ? `사람 확인 ${expenseReviewPendingCount}건`
         : '사람 확인 필요',
+      expenseStatusDescription: '수식 후보값이 남아 있어 영수증/증빙 기준으로 다시 확인해야 합니다.',
       expenseStatusTone: 'warning',
     };
   }
@@ -54,6 +57,7 @@ export function resolveWeeklyAccountingState(
       expenseReviewPendingCount,
       closeDialogKind: 'warning',
       expenseStatusLabel: '동기화 실패',
+      expenseStatusDescription: '정산대장은 저장되었지만 캐시플로 실제값 반영이 실패했습니다.',
       expenseStatusTone: 'danger',
     };
   }
@@ -66,6 +70,7 @@ export function resolveWeeklyAccountingState(
       expenseReviewPendingCount,
       closeDialogKind: 'warning',
       expenseStatusLabel: '동기화 대기',
+      expenseStatusDescription: '정산대장은 저장되었고, 캐시플로 실제값 반영을 기다리는 상태입니다.',
       expenseStatusTone: 'warning',
     };
   }
@@ -77,6 +82,7 @@ export function resolveWeeklyAccountingState(
     expenseReviewPendingCount,
     closeDialogKind: 'confirm',
     expenseStatusLabel: '동기화 완료',
+    expenseStatusDescription: '정산대장과 캐시플로 실제값이 일치하는 상태입니다.',
     expenseStatusTone: 'success',
   };
 }
