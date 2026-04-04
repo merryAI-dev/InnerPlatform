@@ -41,6 +41,7 @@ import {
 } from '../../platform/navigation';
 import { addMonthsToYearMonth, getSeoulTodayIso } from '../../platform/business-days';
 import { normalizeProjectFundInputMode } from '../../data/types';
+import { rememberRecentPortalProject } from '../../platform/portal-recent-projects';
 
 // ═══════════════════════════════════════════════════════════════
 // PortalLayout — 사용자(PM) 전용 레이아웃
@@ -139,6 +140,11 @@ function PortalContent() {
     if (!portalUser) return myProject;
     return assignedProjects.find((project) => project.id === portalUser.projectId) || myProject;
   }, [assignedProjects, portalUser, myProject]);
+
+  useEffect(() => {
+    if (!currentProject?.id) return;
+    rememberRecentPortalProject(currentProject.id);
+  }, [currentProject?.id]);
 
   const currentProjectName = useMemo(() => {
     if (!portalUser?.projectId) return myProject?.name;

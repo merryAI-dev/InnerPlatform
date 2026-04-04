@@ -19,6 +19,7 @@ import {
   provisionProjectEvidenceDriveRootViaBff,
 } from '../../lib/platform-bff-client';
 import { isValidDriveUrl } from '../../platform/evidence-helpers';
+import { readRecentPortalProjectIds } from '../../platform/portal-recent-projects';
 
 const statusColors: Record<string, string> = {
   CONTRACT_PENDING: 'bg-amber-100 text-amber-700',
@@ -47,6 +48,7 @@ export function PortalProjectSettings() {
   const [projectSearch, setProjectSearch] = useState('');
   const [showSelectedOnly, setShowSelectedOnly] = useState(false);
   const [statusFilter, setStatusFilter] = useState<ProjectStatusFilter>('ALL');
+  const [recentProjectIds, setRecentProjectIds] = useState<string[]>([]);
   const [driveRootInputs, setDriveRootInputs] = useState<Record<string, string>>({});
   const [driveSavingProjectId, setDriveSavingProjectId] = useState('');
   const [driveProvisioningProjectId, setDriveProvisioningProjectId] = useState('');
@@ -85,6 +87,10 @@ export function PortalProjectSettings() {
     setPrimaryProjectId(resolvePrimaryProjectId(merged, portalUser?.projectId || authUser?.projectId) || '');
   }, [authUser, portalUser]);
 
+  useEffect(() => {
+    setRecentProjectIds(readRecentPortalProjectIds());
+  }, [portalUser?.projectId]);
+
   const allProjects = useMemo(() => projects, [projects]);
   const primaryProject = useMemo(
     () => allProjects.find((project) => project.id === primaryProjectId) || null,
@@ -94,6 +100,11 @@ export function PortalProjectSettings() {
     () => allProjects.filter((project) => projectIds.includes(project.id)),
     [allProjects, projectIds],
   );
+  const recentProjects = useMemo(() => {
+    return recentProjectIds
+      .map((projectId) => allProjects.find((project) => project.id === projectId) || null)
+      .filter((project): project is Project => Boolean(project));
+  }, [allProjects, recentProjectIds]);
   const searchedProjects = useMemo(() => {
     const keyword = projectSearch.trim().toLowerCase();
     if (!keyword) return allProjects;
@@ -378,6 +389,48 @@ export function PortalProjectSettings() {
 
             {allProjects.length > 0 && (
               <div className="space-y-2">
+                {recentProjects.length > 0 ? (
+                  <div className="rounded-lg border border-slate-200/80 bg-white/80 px-3 py-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-[11px] font-medium text-slate-900">최근 사용한 사업</p>
+                        <p className="mt-1 text-[10px] text-muted-foreground">최근 포털에서 열어본 사업을 빠르게 다시 선택할 수 있습니다.</p>
+                      </div>
+                      <Badge className="bg-slate-100 text-slate-700 text-[10px]">{recentProjects.length}개</Badge>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {recentProjects.map((project) => {
+                        const selected = projectIds.includes(project.id);
+                        const isPrimary = primaryProjectId === project.id;
+                        return (
+                          <div key={`recent-${project.id}`} className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-2 py-1.5">
+                            <button
+                              type="button"
+                              className="text-[11px] font-medium text-slate-900"
+                              onClick={() => toggleProject(project.id)}
+                            >
+                              {project.name}
+                            </button>
+                            {selected ? (
+                              <Badge className="bg-teal-600 text-white text-[10px]">선택됨</Badge>
+                            ) : null}
+                            {isPrimary ? (
+                              <Badge className="bg-amber-100 text-amber-800 text-[10px] border border-amber-200">주사업</Badge>
+                            ) : selected ? (
+                              <button
+                                type="button"
+                                className="text-[10px] text-amber-700 hover:text-amber-800"
+                                onClick={() => selectPrimary(project.id)}
+                              >
+                                주사업 지정
+                              </button>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
                 {primaryProject ? (
                   <div className="rounded-lg border border-amber-200/70 bg-amber-50/80 px-3 py-2 text-[11px] text-amber-900">
                     현재 주사업은 <strong>{primaryProject.name}</strong>입니다. 다른 사업으로 바꾸려면 선택한 사업 영역에서 바로 지정하면 됩니다.
