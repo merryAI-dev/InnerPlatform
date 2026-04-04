@@ -511,6 +511,7 @@ function ImportEditorRow({
         const isSettlementNote = col.csvHeader === '비고';
         const isDerivedLocked = isDerivedFieldLocked(col.csvHeader);
         const cellSource = resolveCellSource(colIdx, col.csvHeader);
+        const showCellBadge = Boolean(isDerivedLocked || cellSource);
         const hasAuthorOptions = (authorOptions || []).length > 0;
         return (
           <td
@@ -527,7 +528,7 @@ function ImportEditorRow({
             onMouseDown={() => onCellMouseDown(rowIdx, colIdx)}
             onMouseEnter={() => onCellMouseEnter(rowIdx, colIdx)}
           >
-            <div className="group relative">
+            <div className={`group relative ${showCellBadge ? 'pt-4' : ''}`}>
               {isReadOnly ? (
                 <span className="block pr-6 text-[10px] text-muted-foreground px-1">
                   {row.cells[colIdx]}
@@ -860,12 +861,12 @@ function ImportEditorRow({
                 />
               )}
               {isDerivedLocked && (
-                <span className="absolute left-1 bottom-0.5 rounded bg-muted px-1 text-[9px] text-muted-foreground">
+                <span className="absolute left-1 top-0.5 rounded bg-muted px-1 text-[9px] text-muted-foreground">
                   계산값
                 </span>
               )}
               {cellSource && !isDerivedLocked && (
-                <span className={`absolute left-1 bottom-0.5 rounded px-1 text-[9px] ${cellSource.className}`}>
+                <span className={`absolute left-1 top-0.5 rounded px-1 text-[9px] ${cellSource.className}`}>
                   {cellSource.label}
                 </span>
               )}

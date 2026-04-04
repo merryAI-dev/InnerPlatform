@@ -47,7 +47,23 @@ const PortalCashflowPage = lazy(() => import('./components/portal/PortalCashflow
 const PortalSubmissionsPage = lazy(() => import('./components/portal/PortalSubmissionsPage').then(m => ({ default: m.PortalSubmissionsPage })));
 const CareerProfilePage = lazy(() => import('./components/portal/CareerProfilePage').then(m => ({ default: m.CareerProfilePage })));
 const PortalTrainingPage = lazy(() => import('./components/portal/PortalTrainingPage').then(m => ({ default: m.PortalTrainingPage })));
-const PortalWeeklyExpensePage = lazy(() => import('./components/portal/PortalWeeklyExpensePage').then(m => ({ default: m.PortalWeeklyExpensePage })));
+function RouteChunkFallback() {
+  return (
+    <div className="flex min-h-[240px] items-center justify-center px-6 text-center text-sm text-muted-foreground">
+      페이지를 다시 불러오고 있습니다. 새로고침하거나 홈으로 이동한 뒤 다시 시도해 주세요.
+    </div>
+  );
+}
+
+const PortalWeeklyExpensePage = lazy(async () => {
+  try {
+    const module = await import('./components/portal/PortalWeeklyExpensePage');
+    return { default: module?.PortalWeeklyExpensePage ?? module?.default ?? RouteChunkFallback };
+  } catch (error) {
+    console.error('[routes] failed to load PortalWeeklyExpensePage:', error);
+    return { default: RouteChunkFallback };
+  }
+});
 const PortalBankStatementPage = lazy(() => import('./components/portal/PortalBankStatementPage').then(m => ({ default: m.PortalBankStatementPage })));
 const GuideChatPage = lazy(() => import('./components/guide-chat/GuideChatPage').then(m => ({ default: m.GuideChatPage })));
 
