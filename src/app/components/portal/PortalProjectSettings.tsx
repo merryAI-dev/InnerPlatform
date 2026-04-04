@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
 import { FolderKanban, AlertCircle, CheckCircle2, ExternalLink, Loader2, Search } from 'lucide-react';
 import { toast } from 'sonner';
@@ -27,6 +27,16 @@ const statusColors: Record<string, string> = {
   COMPLETED_PENDING_PAYMENT: 'bg-teal-100 text-teal-700',
 };
 
+const PROJECT_STATUS_FILTERS = [
+  'ALL',
+  'IN_PROGRESS',
+  'CONTRACT_PENDING',
+  'COMPLETED',
+  'COMPLETED_PENDING_PAYMENT',
+] as const;
+
+type ProjectStatusFilter = typeof PROJECT_STATUS_FILTERS[number];
+
 export function PortalProjectSettings() {
   const navigate = useNavigate();
   const { register, isRegistered, isLoading, portalUser, projects } = usePortalStore();
@@ -35,6 +45,8 @@ export function PortalProjectSettings() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [projectSearch, setProjectSearch] = useState('');
+  const [showSelectedOnly, setShowSelectedOnly] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<ProjectStatusFilter>('ALL');
   const [driveRootInputs, setDriveRootInputs] = useState<Record<string, string>>({});
   const [driveSavingProjectId, setDriveSavingProjectId] = useState('');
   const [driveProvisioningProjectId, setDriveProvisioningProjectId] = useState('');
@@ -82,7 +94,7 @@ export function PortalProjectSettings() {
     () => allProjects.filter((project) => projectIds.includes(project.id)),
     [allProjects, projectIds],
   );
-  const filteredProjects = useMemo(() => {
+  const searchedProjects = useMemo(() => {
     const keyword = projectSearch.trim().toLowerCase();
     if (!keyword) return allProjects;
     return allProjects.filter((project) => {
@@ -101,6 +113,13 @@ export function PortalProjectSettings() {
       return haystack.includes(keyword);
     });
   }, [allProjects, projectSearch]);
+  const filteredProjects = useMemo(() => {
+    return searchedProjects.filter((project) => {
+      if (showSelectedOnly && !projectIds.includes(project.id)) return false;
+      if (statusFilter !== 'ALL' && project.status !== statusFilter) return false;
+      return true;
+    });
+  }, [searchedProjects, showSelectedOnly, projectIds, statusFilter]);
   const visibleProjects = useMemo(() => {
     const sorted = [...filteredProjects].sort((left, right) => {
       const leftSelected = projectIds.includes(left.id);
@@ -121,6 +140,20 @@ export function PortalProjectSettings() {
     () => visibleProjects.filter((project) => !projectIds.includes(project.id)),
     [visibleProjects, projectIds],
   );
+  const filterCounts = useMemo(() => {
+    return PROJECT_STATUS_FILTERS.reduce<Record<ProjectStatusFilter, number>>((acc, filter) => {
+      acc[filter] = filter === 'ALL'
+        ? searchedProjects.length
+        : searchedProjects.filter((project) => project.status === filter).length;
+      return acc;
+    }, {
+      ALL: 0,
+      IN_PROGRESS: 0,
+      CONTRACT_PENDING: 0,
+      COMPLETED: 0,
+      COMPLETED_PENDING_PAYMENT: 0,
+    });
+  }, [searchedProjects]);
   const bffActor = useMemo(() => ({
     uid: authUser?.uid || portalUser?.id || 'portal-user',
     email: authUser?.email || portalUser?.email || '',
@@ -276,6 +309,26 @@ export function PortalProjectSettings() {
     return project.clientOrg || maybeName || '클라이언트 미지정';
   }
 
+  function getStatusFilterLabel(filter: ProjectStatusFilter): string {
+    if (filter === 'ALL') return '전체';
+    return PROJECT_STATUS_LABELS[filter] || filter;
+  }
+
+  function highlightKeyword(text: string, keyword: string): ReactNode {
+    const trimmed = keyword.trim();
+    if (!trimmed) return text;
+    const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`(${escaped})`, 'gi');
+    const parts = text.split(regex);
+    if (parts.length <= 1) return text;
+    const lowered = trimmed.toLowerCase();
+    return parts.map((part, index) => (
+      part.toLowerCase() === lowered
+        ? <mark key={`${part}-${index}`} className="rounded bg-amber-200/70 px-0.5 text-inherit">{part}</mark>
+        : <Fragment key={`${part}-${index}`}>{part}</Fragment>
+    ));
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-teal-50/30 dark:from-slate-950 dark:to-teal-950/10 flex items-center justify-center p-4">
       <div className="w-full max-w-3xl">
@@ -325,6 +378,11 @@ export function PortalProjectSettings() {
 
             {allProjects.length > 0 && (
               <div className="space-y-2">
+                {primaryProject ? (
+                  <div className="rounded-lg border border-amber-200/70 bg-amber-50/80 px-3 py-2 text-[11px] text-amber-900">
+                    현재 주사업은 <strong>{primaryProject.name}</strong>입니다. 다른 사업으로 바꾸려면 선택한 사업 영역에서 바로 지정하면 됩니다.
+                  </div>
+                ) : null}
                 <div className="relative">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
@@ -349,6 +407,30 @@ export function PortalProjectSettings() {
                       검색 지우기
                     </button>
                   ) : null}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    variant={showSelectedOnly ? 'default' : 'outline'}
+                    className={`h-8 text-[11px] ${showSelectedOnly ? 'bg-teal-600 hover:bg-teal-600/90' : ''}`}
+                    onClick={() => setShowSelectedOnly((prev) => !prev)}
+                  >
+                    선택한 사업만 보기
+                  </Button>
+                  {PROJECT_STATUS_FILTERS.map((filter) => {
+                    const active = statusFilter === filter;
+                    return (
+                      <Button
+                        key={filter}
+                        type="button"
+                        variant={active ? 'default' : 'outline'}
+                        className={`h-8 text-[11px] ${active ? 'bg-slate-900 hover:bg-slate-900/90 text-white' : ''}`}
+                        onClick={() => setStatusFilter(filter)}
+                      >
+                        {getStatusFilterLabel(filter)} {filterCounts[filter]}
+                      </Button>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -379,7 +461,7 @@ export function PortalProjectSettings() {
                   >
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-[13px]" style={{ fontWeight: 600 }}>{project.name}</span>
+                        <span className="text-[13px]" style={{ fontWeight: 600 }}>{highlightKeyword(project.name, projectSearch)}</span>
                         <Badge className={`text-[10px] ${statusColors[project.status] || 'bg-slate-100 text-slate-700'}`}>{statusLabel}</Badge>
                         <Badge className="bg-teal-600 text-white text-[10px]">
                           <CheckCircle2 className="mr-1 h-3 w-3" />
@@ -391,7 +473,7 @@ export function PortalProjectSettings() {
                           </Badge>
                         ) : null}
                       </div>
-                      <p className="text-[11px] text-muted-foreground">{getClientLabel(project)}</p>
+                      <p className="text-[11px] text-muted-foreground">{highlightKeyword(getClientLabel(project), projectSearch)}</p>
                       <p className="mt-1 text-[11px] text-teal-800">
                         {isPrimary ? '이 사업이 현재 기본 사업으로 저장됩니다.' : '선택된 사업입니다. 필요하면 주사업으로 바꾸세요.'}
                       </p>
@@ -440,7 +522,7 @@ export function PortalProjectSettings() {
                   >
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-[13px]" style={{ fontWeight: 600 }}>{project.name}</span>
+                        <span className="text-[13px]" style={{ fontWeight: 600 }}>{highlightKeyword(project.name, projectSearch)}</span>
                         <Badge className={`text-[10px] ${statusColors[project.status] || 'bg-slate-100 text-slate-700'}`}>{statusLabel}</Badge>
                         {selected ? (
                           <Badge className="bg-teal-600 text-white text-[10px]">
@@ -454,13 +536,17 @@ export function PortalProjectSettings() {
                           </Badge>
                         ) : null}
                       </div>
-                      <p className="text-[11px] text-muted-foreground">{getClientLabel(project)}</p>
+                      <p className="text-[11px] text-muted-foreground">{highlightKeyword(getClientLabel(project), projectSearch)}</p>
                       {selected ? (
                         <p className="mt-1 text-[11px] text-teal-800">
                           {isPrimary ? '이 사업이 현재 기본 사업으로 저장됩니다.' : '선택된 사업입니다. 필요하면 주사업으로 바꾸세요.'}
                         </p>
                       ) : (
-                        <p className="mt-1 text-[11px] text-muted-foreground">선택하면 내 사업 목록에 포함됩니다.</p>
+                        <p className="mt-1 text-[11px] text-muted-foreground">
+                          {project.managerName
+                            ? <>담당 {highlightKeyword(project.managerName, projectSearch)} · 선택하면 내 사업 목록에 포함됩니다.</>
+                            : '선택하면 내 사업 목록에 포함됩니다.'}
+                        </p>
                       )}
                     </div>
 
