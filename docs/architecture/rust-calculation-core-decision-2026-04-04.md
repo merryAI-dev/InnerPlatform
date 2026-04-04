@@ -117,6 +117,22 @@ Rust 계산 엔진은 다음 두 경로에서 재사용 가치가 높다.
 - 저장 후 다시 값이 바뀌는 경험을 줄일 수 있는 구조가 생긴다.
 - CMK 같은 사업별 예외에서 사용자가 지우거나 수정한 값을 계산기가 다시 덮어쓰지 않는다.
 
+## PR4 확장 원칙
+
+`사용내역` 행 파생만 Rust로 옮기면 제품 전체는 아직 하나의 계산 체인으로 보이지 않는다.
+
+그래서 다음 경계도 같은 커널 뒤로 붙인다.
+
+- `정산대장 reviewed rows -> cashflow 주차 actual sync payload`
+- `정산대장 reviewed rows -> 예산 비목/세목 actual rollup`
+
+중요한 점은 이 단계에서도 TypeScript를 바로 폐기하지 않는다는 것이다.
+
+- TypeScript는 계속 authoritative reference로 유지한다.
+- Rust는 같은 입력에 대해 같은 payload / 같은 rollup을 내는지 parity로 검증한다.
+- 예산 화면과 cashflow 동기화는 같은 amount 해석 규칙을 보게 만들어, `통장내역 -> 정산대장 -> 예산/cashflow`가 한 줄로 이어지게 한다.
+- 단, 사람의 명시적 수정/삭제는 계속 최우선으로 보존한다.
+
 ## 비고
 
 이번 결정은 “기술 취향”이 아니라 다음을 위한 결정이다.

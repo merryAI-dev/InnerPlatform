@@ -1,6 +1,6 @@
 use chrono::{Datelike, Duration, NaiveDate};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -14,6 +14,61 @@ pub struct KernelRequest {
 #[serde(rename_all = "camelCase")]
 pub struct KernelResponse {
     pub rows: Vec<KernelImportRow>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KernelYearWeek {
+    pub year_month: String,
+    pub week_no: usize,
+    pub week_start: String,
+    pub week_end: String,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KernelActualSyncRequest {
+    pub rows: Vec<KernelImportRow>,
+    pub year_weeks: Vec<KernelYearWeek>,
+    #[serde(default)]
+    pub persisted_rows: Option<Vec<KernelImportRow>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KernelActualSyncWeekPayload {
+    pub year_month: String,
+    pub week_no: usize,
+    pub amounts: BTreeMap<String, f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KernelActualSyncResponse {
+    pub weeks: Vec<KernelActualSyncWeekPayload>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KernelBudgetActualsRequest {
+    pub rows: Vec<KernelImportRow>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KernelBudgetActualItem {
+    pub budget_key: String,
+    pub budget_code: String,
+    pub sub_code: String,
+    pub amount: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KernelBudgetActualsResponse {
+    pub items: Vec<KernelBudgetActualItem>,
+    pub total: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -357,6 +412,72 @@ fn derive_week_label(raw_date: &str) -> String {
     find_week_for_date(date, &weeks).unwrap_or_default()
 }
 
+fn cashflow_in_line_ids() -> [&'static str; 5] {
+    [
+        "MYSC_PREPAY_IN",
+        "SALES_IN",
+        "SALES_VAT_IN",
+        "TEAM_SUPPORT_IN",
+        "BANK_INTEREST_IN",
+    ]
+}
+
+fn cashflow_all_line_ids() -> [&'static str; 12] {
+    [
+        "MYSC_PREPAY_IN",
+        "SALES_IN",
+        "SALES_VAT_IN",
+        "TEAM_SUPPORT_IN",
+        "BANK_INTEREST_IN",
+        "DIRECT_COST_OUT",
+        "INPUT_VAT_OUT",
+        "MYSC_LABOR_OUT",
+        "MYSC_PROFIT_OUT",
+        "SALES_VAT_OUT",
+        "TEAM_SUPPORT_OUT",
+        "BANK_INTEREST_OUT",
+    ]
+}
+
+fn parse_cashflow_line_label(raw: &str) -> Option<&'static str> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    match trimmed {
+        "MYSC선입금" | "MYSC선입금(입금필요시)" | "MYSC 선입금(입금필요시)" => Some("MYSC_PREPAY_IN"),
+        "매출액(입금)" | "매출액" => Some("SALES_IN"),
+        "매출부가세(입금)" | "매출부가세" => Some("SALES_VAT_IN"),
+        "팀지원금(입금)" => Some("TEAM_SUPPORT_IN"),
+        "은행이자(입금)" => Some("BANK_INTEREST_IN"),
+        "직접사업비(공급가액)" | "직접사업비" | "직접사업비(공급가액)+매입부가세" => Some("DIRECT_COST_OUT"),
+        "매입부가세" => Some("INPUT_VAT_OUT"),
+        "MYSC인건비" | "MYSC 인건비" => Some("MYSC_LABOR_OUT"),
+        "MYSC수익(간접비등)" | "MYSC 수익(간접비등)" | "MYSC수익" => Some("MYSC_PROFIT_OUT"),
+        "매출부가세(출금)" => Some("SALES_VAT_OUT"),
+        "팀지원금(출금)" => Some("TEAM_SUPPORT_OUT"),
+        "은행이자(출금)" => Some("BANK_INTEREST_OUT"),
+        _ => {
+            let stripped = trimmed.replace(' ', "");
+            match stripped.as_str() {
+                "MYSC선입금" | "MYSC선입금(입금필요시)" => Some("MYSC_PREPAY_IN"),
+                "매출액(입금)" | "매출액" => Some("SALES_IN"),
+                "매출부가세(입금)" | "매출부가세" => Some("SALES_VAT_IN"),
+                "팀지원금(입금)" => Some("TEAM_SUPPORT_IN"),
+                "은행이자(입금)" => Some("BANK_INTEREST_IN"),
+                "직접사업비(공급가액)" | "직접사업비" | "직접사업비(공급가액)+매입부가세" => Some("DIRECT_COST_OUT"),
+                "매입부가세" => Some("INPUT_VAT_OUT"),
+                "MYSC인건비" => Some("MYSC_LABOR_OUT"),
+                "MYSC수익(간접비등)" | "MYSC수익" => Some("MYSC_PROFIT_OUT"),
+                "매출부가세(출금)" => Some("SALES_VAT_OUT"),
+                "팀지원금(출금)" => Some("TEAM_SUPPORT_OUT"),
+                "은행이자(출금)" => Some("BANK_INTEREST_OUT"),
+                _ => None,
+            }
+        }
+    }
+}
+
 fn policy_auto_compute_expense_from_bank(policy: Option<&KernelSettlementSheetPolicy>) -> bool {
     policy
         .and_then(|policy| policy.auto_compute_expense_from_bank)
@@ -682,6 +803,220 @@ fn compute_running_seed(
     running
 }
 
+fn resolve_week_from_label(label: &str, year_weeks: &[KernelYearWeek]) -> Option<KernelYearWeek> {
+    if let Some(found) = year_weeks.iter().find(|week| week.label == label) {
+        return Some(found.clone());
+    }
+    let parts = label
+        .split('-')
+        .map(|part| part.trim().parse::<usize>().ok())
+        .collect::<Option<Vec<usize>>>()?;
+    if parts.len() != 3 {
+        return None;
+    }
+    let year = 2000 + parts[0] as i32;
+    let month = parts[1];
+    let week_no = parts[2];
+    let year_month = format!("{year}-{month:02}");
+    year_weeks
+        .iter()
+        .find(|week| week.year_month == year_month && week.week_no == week_no)
+        .cloned()
+}
+
+fn resolve_week_label_from_row(
+    row: &KernelImportRow,
+    _year_weeks: &[KernelYearWeek],
+    week_idx: Option<usize>,
+    date_idx: Option<usize>,
+) -> String {
+    let explicit = get_cell(&row.cells, week_idx);
+    if !explicit.trim().is_empty() {
+        return explicit.trim().to_string();
+    }
+    let raw_date = get_cell(&row.cells, date_idx);
+    derive_week_label(&raw_date)
+}
+
+fn resolve_actual_amount(
+    row: &KernelImportRow,
+    line_id: &str,
+    bank_amount_idx: Option<usize>,
+    expense_amount_idx: Option<usize>,
+    vat_in_idx: Option<usize>,
+) -> f64 {
+    let bank_amount = parse_amount(&row.cells, bank_amount_idx);
+    if cashflow_in_line_ids().contains(&line_id) {
+        return bank_amount;
+    }
+    if line_id == "INPUT_VAT_OUT" {
+        return parse_amount(&row.cells, vat_in_idx);
+    }
+    let expense_amount = parse_amount(&row.cells, expense_amount_idx);
+    if expense_amount != 0.0 {
+        expense_amount
+    } else {
+        bank_amount
+    }
+}
+
+fn resolve_budget_actual_amount(
+    row: &KernelImportRow,
+    cashflow_idx: Option<usize>,
+    bank_amount_idx: Option<usize>,
+    expense_amount_idx: Option<usize>,
+    vat_in_idx: Option<usize>,
+    deposit_idx: Option<usize>,
+    refund_idx: Option<usize>,
+) -> f64 {
+    let cashflow_label = get_cell(&row.cells, cashflow_idx);
+    let line_id = parse_cashflow_line_label(&cashflow_label);
+    let bank_amount = parse_amount(&row.cells, bank_amount_idx);
+    let expense_amount = parse_amount(&row.cells, expense_amount_idx);
+    let vat_in = parse_amount(&row.cells, vat_in_idx);
+    let deposit_amount = parse_amount(&row.cells, deposit_idx);
+    let refund_amount = parse_amount(&row.cells, refund_idx);
+
+    if matches!(line_id, Some(line) if cashflow_in_line_ids().contains(&line)) {
+        return 0.0;
+    }
+    if line_id == Some("INPUT_VAT_OUT") {
+        return vat_in;
+    }
+    if expense_amount > 0.0 {
+        return expense_amount;
+    }
+    if vat_in > 0.0 && bank_amount == 0.0 {
+        return vat_in;
+    }
+    if deposit_amount > 0.0 || refund_amount > 0.0 {
+        return 0.0;
+    }
+    bank_amount
+}
+
+pub fn build_settlement_actual_sync_payload(request: KernelActualSyncRequest) -> KernelActualSyncResponse {
+    let week_idx = Some(3usize);
+    let date_idx = Some(2usize);
+    let cashflow_idx = Some(8usize);
+    let bank_amount_idx = Some(10usize);
+    let expense_amount_idx = Some(13usize);
+    let vat_in_idx = Some(14usize);
+
+    let mut by_week: BTreeMap<String, BTreeMap<String, f64>> = BTreeMap::new();
+    let mut week_labels = BTreeSet::new();
+
+    let mut collect_week_labels = |rows: &[KernelImportRow]| {
+        for row in rows {
+            let label = resolve_week_label_from_row(row, &request.year_weeks, week_idx, date_idx);
+            if !label.is_empty() {
+                week_labels.insert(label);
+            }
+        }
+    };
+
+    collect_week_labels(&request.rows);
+    if let Some(persisted_rows) = request.persisted_rows.as_ref() {
+        collect_week_labels(persisted_rows);
+    }
+
+    for row in &request.rows {
+        let week_label = resolve_week_label_from_row(row, &request.year_weeks, week_idx, date_idx);
+        let cashflow_label = get_cell(&row.cells, cashflow_idx);
+        let Some(line_id) = parse_cashflow_line_label(&cashflow_label) else {
+            continue;
+        };
+        if week_label.is_empty() {
+            continue;
+        }
+        let amount = resolve_actual_amount(row, line_id, bank_amount_idx, expense_amount_idx, vat_in_idx);
+        if amount == 0.0 {
+            continue;
+        }
+        let bucket = by_week.entry(week_label).or_default();
+        *bucket.entry(line_id.to_string()).or_insert(0.0) += amount;
+    }
+
+    let mut zero_amounts = BTreeMap::new();
+    for line_id in cashflow_all_line_ids() {
+        zero_amounts.insert(line_id.to_string(), 0.0);
+    }
+
+    let mut weeks = week_labels
+        .into_iter()
+        .filter_map(|label| resolve_week_from_label(&label, &request.year_weeks))
+        .collect::<Vec<KernelYearWeek>>();
+    weeks.sort_by(|left, right| {
+        left.year_month
+            .cmp(&right.year_month)
+            .then(left.week_no.cmp(&right.week_no))
+    });
+
+    KernelActualSyncResponse {
+        weeks: weeks
+            .into_iter()
+            .map(|week| KernelActualSyncWeekPayload {
+                year_month: week.year_month,
+                week_no: week.week_no,
+                amounts: {
+                    let mut amounts = zero_amounts.clone();
+                    if let Some(found) = by_week.get(&week.label) {
+                        for (line_id, amount) in found {
+                            amounts.insert(line_id.clone(), *amount);
+                        }
+                    }
+                    amounts
+                },
+            })
+            .collect(),
+    }
+}
+
+pub fn aggregate_budget_actuals(request: KernelBudgetActualsRequest) -> KernelBudgetActualsResponse {
+    let budget_code_idx = Some(5usize);
+    let sub_code_idx = Some(6usize);
+    let cashflow_idx = Some(8usize);
+    let bank_amount_idx = Some(10usize);
+    let deposit_idx = Some(11usize);
+    let refund_idx = Some(12usize);
+    let expense_amount_idx = Some(13usize);
+    let vat_in_idx = Some(14usize);
+
+    let mut totals: BTreeMap<String, KernelBudgetActualItem> = BTreeMap::new();
+
+    for row in &request.rows {
+        let budget_code = get_cell(&row.cells, budget_code_idx).trim().to_string();
+        let sub_code = get_cell(&row.cells, sub_code_idx).trim().to_string();
+        if budget_code.is_empty() && sub_code.is_empty() {
+            continue;
+        }
+        let amount = resolve_budget_actual_amount(
+            row,
+            cashflow_idx,
+            bank_amount_idx,
+            expense_amount_idx,
+            vat_in_idx,
+            deposit_idx,
+            refund_idx,
+        );
+        if amount == 0.0 {
+            continue;
+        }
+        let budget_key = format!("{budget_code}|{sub_code}");
+        let entry = totals.entry(budget_key.clone()).or_insert(KernelBudgetActualItem {
+            budget_key: budget_key.clone(),
+            budget_code: budget_code.clone(),
+            sub_code: sub_code.clone(),
+            amount: 0.0,
+        });
+        entry.amount += amount;
+    }
+
+    let items = totals.into_values().collect::<Vec<KernelBudgetActualItem>>();
+    let total = items.iter().map(|item| item.amount).sum::<f64>();
+    KernelBudgetActualsResponse { items, total }
+}
+
 pub fn derive_settlement_rows(request: KernelRequest) -> KernelResponse {
     let mut rows = request.rows;
     if rows.is_empty() {
@@ -851,5 +1186,114 @@ mod tests {
         let row = &response.rows[0];
         assert_eq!(row.cells[13], "");
         assert_eq!(row.cells[10], "110,000");
+    }
+
+    #[test]
+    fn builds_actual_sync_payloads_from_rows() {
+        let mut out_cells = create_cells();
+        out_cells[2] = "2026-03-03".to_string();
+        out_cells[3] = "26-03-01".to_string();
+        out_cells[8] = "직접사업비".to_string();
+        out_cells[13] = "30,000".to_string();
+
+        let mut in_cells = create_cells();
+        in_cells[2] = "2026-03-04".to_string();
+        in_cells[3] = "26-03-01".to_string();
+        in_cells[8] = "매출액(입금)".to_string();
+        in_cells[10] = "250,000".to_string();
+
+        let response = build_settlement_actual_sync_payload(KernelActualSyncRequest {
+            rows: vec![
+                KernelImportRow {
+                    temp_id: "out-row".to_string(),
+                    source_tx_id: None,
+                    entry_kind: None,
+                    cells: out_cells,
+                    error: None,
+                    review_hints: None,
+                    review_required_cell_indexes: None,
+                    review_status: None,
+                    review_fingerprint: None,
+                    review_confirmed_at: None,
+                    user_edited_cells: None,
+                },
+                KernelImportRow {
+                    temp_id: "in-row".to_string(),
+                    source_tx_id: None,
+                    entry_kind: None,
+                    cells: in_cells,
+                    error: None,
+                    review_hints: None,
+                    review_required_cell_indexes: None,
+                    review_status: None,
+                    review_fingerprint: None,
+                    review_confirmed_at: None,
+                    user_edited_cells: None,
+                },
+            ],
+            year_weeks: vec![KernelYearWeek {
+                year_month: "2026-03".to_string(),
+                week_no: 1,
+                week_start: "2026-03-02".to_string(),
+                week_end: "2026-03-08".to_string(),
+                label: "26-03-01".to_string(),
+            }],
+            persisted_rows: None,
+        });
+
+        assert_eq!(response.weeks.len(), 1);
+        assert_eq!(response.weeks[0].amounts.get("DIRECT_COST_OUT").copied(), Some(30000.0));
+        assert_eq!(response.weeks[0].amounts.get("SALES_IN").copied(), Some(250000.0));
+    }
+
+    #[test]
+    fn aggregates_budget_actuals_from_rows() {
+        let mut direct_cells = create_cells();
+        direct_cells[5] = "회의비".to_string();
+        direct_cells[6] = "다과비".to_string();
+        direct_cells[8] = "직접사업비".to_string();
+        direct_cells[13] = "30,000".to_string();
+
+        let mut vat_cells = create_cells();
+        vat_cells[5] = "부가세".to_string();
+        vat_cells[6] = "매입부가세".to_string();
+        vat_cells[8] = "매입부가세".to_string();
+        vat_cells[14] = "3,000".to_string();
+
+        let response = aggregate_budget_actuals(KernelBudgetActualsRequest {
+            rows: vec![
+                KernelImportRow {
+                    temp_id: "direct".to_string(),
+                    source_tx_id: None,
+                    entry_kind: None,
+                    cells: direct_cells,
+                    error: None,
+                    review_hints: None,
+                    review_required_cell_indexes: None,
+                    review_status: None,
+                    review_fingerprint: None,
+                    review_confirmed_at: None,
+                    user_edited_cells: None,
+                },
+                KernelImportRow {
+                    temp_id: "vat".to_string(),
+                    source_tx_id: None,
+                    entry_kind: None,
+                    cells: vat_cells,
+                    error: None,
+                    review_hints: None,
+                    review_required_cell_indexes: None,
+                    review_status: None,
+                    review_fingerprint: None,
+                    review_confirmed_at: None,
+                    user_edited_cells: None,
+                },
+            ],
+        });
+
+        assert_eq!(response.total, 33000.0);
+        assert_eq!(response.items.len(), 2);
+        assert!(response.items.iter().any(|item| item.budget_key == "회의비|다과비" && item.amount == 30000.0));
+        assert!(response.items.iter().any(|item| item.budget_key == "부가세|매입부가세" && item.amount == 3000.0));
     }
 }

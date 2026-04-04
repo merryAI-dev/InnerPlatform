@@ -42,12 +42,11 @@ import {
   parseBudgetPlanImportText,
   selectBudgetPlanImportSheet,
 } from '../../platform/budget-plan-import';
+import { aggregateBudgetActualsFromSettlementRows } from '../../platform/budget-actuals';
 import { moveBudgetSubCode, moveBudgetSubCodeToIndex } from '../../platform/budget-code-book-order';
 import { buildBudgetLabelKey, normalizeBudgetLabel } from '../../platform/budget-labels';
-import { parseNumber } from '../../platform/csv-utils';
 import { parseBudgetPlanMatrix, planBudgetPlanMerge } from '../../platform/google-sheet-migration';
 import { parseLocalWorkbookFile, type LocalWorkbookSheet } from '../../platform/local-workbook';
-import { SETTLEMENT_COLUMNS } from '../../platform/settlement-csv';
 
 // ═══════════════════════════════════════════════════════════════
 // PortalBudget — 예산총괄 (리디자인 — 모바일 우선, 깨짐 방지)
@@ -298,20 +297,7 @@ export function PortalBudget() {
   }, [budgetPlanRows]);
 
   const spentMap = useMemo(() => {
-    const map = new Map<string, number>();
-    if (!expenseSheetRows) return map;
-    const budgetCodeIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '비목');
-    const subCodeIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '세목');
-    const bankAmountIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '통장에 찍힌 입/출금액');
-    if (budgetCodeIdx < 0 || subCodeIdx < 0 || bankAmountIdx < 0) return map;
-    for (const row of expenseSheetRows) {
-      const amount = parseNumber(String(row.cells[bankAmountIdx] || '')) ?? 0;
-      if (amount === 0) continue;
-      const key = buildBudgetLabelKey(row.cells[budgetCodeIdx], row.cells[subCodeIdx]);
-      if (key === '|') continue;
-      map.set(key, (map.get(key) || 0) + amount);
-    }
-    return map;
+    return aggregateBudgetActualsFromSettlementRows(expenseSheetRows);
   }, [expenseSheetRows]);
 
   const activeCodeBook = useMemo(
