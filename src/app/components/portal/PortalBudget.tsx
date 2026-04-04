@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, type DragEvent } from 'react';
+import { useState, useMemo, useCallback, useEffect, type DragEvent } from 'react';
 import {
   Lock, SlidersHorizontal, ChevronDown, ChevronRight,
   Calculator, Wallet, TrendingUp, Info,
@@ -16,6 +16,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { Textarea } from '../ui/textarea';
 import { PageHeader } from '../layout/PageHeader';
+import { useAuth } from '../../data/auth-store';
 import { usePortalStore } from '../../data/portal-store';
 import { toast } from 'sonner';
 import {
@@ -24,6 +25,18 @@ import {
 } from '../../data/budget-data';
 import type { BudgetPlanRow, BudgetCodeEntry, BudgetCodeRename } from '../../data/types';
 import { BASIS_LABELS } from '../../data/types';
+import { useFirebase } from '../../lib/firebase-context';
+import {
+  analyzeGoogleSheetImportViaBff,
+  isPlatformApiEnabled,
+  type GoogleSheetMigrationAnalysisResult,
+} from '../../lib/platform-bff-client';
+import {
+  buildBudgetImportAiMatrixSample,
+  buildBudgetImportAiRequestKey,
+  resolveBudgetImportAiSheetName,
+  shouldAnalyzeBudgetImportWithAi,
+} from '../../platform/budget-import-ai';
 import {
   mergeBudgetCodeBooks,
   parseBudgetPlanImportText,
@@ -191,8 +204,27 @@ function parseBudgetCodeImportText(text: string): BudgetCodeImportPreview {
   };
 }
 
+function resolveBudgetImportAnalysisError(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  return 'AI 보조 분석을 불러오지 못했습니다.';
+}
+
+function formatConfidenceLabel(value?: 'high' | 'medium' | 'low'): string {
+  switch (value) {
+    case 'high':
+      return '높음';
+    case 'medium':
+      return '중간';
+    default:
+      return '낮음';
+  }
+}
+
 export function PortalBudget() {
+  const { user: authUser } = useAuth();
+  const { orgId } = useFirebase();
   const {
+    portalUser,
     myProject,
     expenseSheetRows,
     budgetPlanRows,
@@ -225,12 +257,18 @@ export function PortalBudget() {
   const [budgetImportSheetName, setBudgetImportSheetName] = useState('');
   const [budgetImportLoading, setBudgetImportLoading] = useState(false);
   const [budgetImportApplying, setBudgetImportApplying] = useState(false);
+  const [budgetImportAiAnalysis, setBudgetImportAiAnalysis] = useState<GoogleSheetMigrationAnalysisResult | null>(null);
+  const [budgetImportAiLoading, setBudgetImportAiLoading] = useState(false);
+  const [budgetImportAiError, setBudgetImportAiError] = useState('');
+  const [budgetImportAiResolvedKey, setBudgetImportAiResolvedKey] = useState('');
   const [draggedSubCode, setDraggedSubCode] = useState<{ codeIdx: number; subIdx: number } | null>(null);
   const [dropTarget, setDropTarget] = useState<{
     codeIdx: number;
     subIdx: number;
     position: 'before' | 'after';
   } | null>(null);
+  const projectId = myProject?.id || '';
+  const platformApiEnabled = isPlatformApiEnabled();
 
   const meta = myProject ? {
     projectId: myProject.id,
@@ -311,16 +349,81 @@ export function PortalBudget() {
     () => budgetImportMergedCodeBook.reduce((sum, entry) => sum + entry.subCodes.length, 0),
     [budgetImportMergedCodeBook],
   );
-  const budgetImportConfidenceLabel = useMemo(() => {
-    switch (budgetImportParsed.confidence) {
-      case 'high':
-        return '높음';
-      case 'medium':
-        return '중간';
-      default:
-        return '낮음';
-    }
-  }, [budgetImportParsed.confidence]);
+  const budgetImportConfidenceLabel = useMemo(
+    () => formatConfidenceLabel(budgetImportParsed.confidence),
+    [budgetImportParsed.confidence],
+  );
+  const budgetImportAiConfidenceLabel = useMemo(
+    () => formatConfidenceLabel(budgetImportAiAnalysis?.confidence),
+    [budgetImportAiAnalysis?.confidence],
+  );
+  const bffActor = useMemo(() => ({
+    uid: authUser?.uid || portalUser?.id || 'portal-user',
+    email: authUser?.email || portalUser?.email || '',
+    role: authUser?.role || portalUser?.role || 'pm',
+    idToken: authUser?.idToken,
+    googleAccessToken: authUser?.googleAccessToken,
+  }), [
+    authUser?.uid,
+    authUser?.email,
+    authUser?.role,
+    authUser?.idToken,
+    authUser?.googleAccessToken,
+    portalUser?.id,
+    portalUser?.email,
+    portalUser?.role,
+  ]);
+  const budgetImportAiSheetName = useMemo(() => resolveBudgetImportAiSheetName({
+    tab: budgetImportTab,
+    selectedSheetName: budgetImportSelectedSheet?.name,
+    fileName: budgetImportFileName,
+  }), [
+    budgetImportFileName,
+    budgetImportSelectedSheet?.name,
+    budgetImportTab,
+  ]);
+  const budgetImportAiShouldRun = useMemo(() => shouldAnalyzeBudgetImportWithAi({
+    open: budgetImportOpen,
+    platformApiEnabled,
+    tenantId: orgId,
+    projectId,
+    matrix: budgetImportMatrix,
+    importedRowCount: budgetImportParsed.rows.length,
+    confidence: budgetImportParsed.confidence,
+    warningCount: budgetImportParsed.warnings?.length || 0,
+    formatGuideRecommended: budgetImportParsed.formatGuideRecommended,
+  }), [
+    budgetImportMatrix,
+    budgetImportOpen,
+    budgetImportParsed.confidence,
+    budgetImportParsed.formatGuideRecommended,
+    budgetImportParsed.rows.length,
+    budgetImportParsed.warnings?.length,
+    orgId,
+    platformApiEnabled,
+    projectId,
+  ]);
+  const budgetImportAiMatrixSample = useMemo(
+    () => buildBudgetImportAiMatrixSample(budgetImportMatrix),
+    [budgetImportMatrix],
+  );
+  const budgetImportAiKey = useMemo(() => (
+    budgetImportAiShouldRun && orgId && projectId
+      ? buildBudgetImportAiRequestKey({
+        tenantId: orgId,
+        projectId,
+        sheetName: budgetImportAiSheetName,
+        matrix: budgetImportAiMatrixSample,
+      })
+      : ''
+  ), [
+    budgetImportAiSheetName,
+    budgetImportAiShouldRun,
+    budgetImportAiMatrixSample,
+    orgId,
+    projectId,
+  ]);
+  const budgetImportShowAiPanel = budgetImportAiShouldRun || budgetImportAiLoading || Boolean(budgetImportAiAnalysis) || Boolean(budgetImportAiError);
 
   const formatInput = useCallback((value: string) => {
     const num = parseNumber(value);
@@ -341,6 +444,10 @@ export function PortalBudget() {
     setBudgetImportSheetName('');
     setBudgetImportLoading(false);
     setBudgetImportApplying(false);
+    setBudgetImportAiAnalysis(null);
+    setBudgetImportAiLoading(false);
+    setBudgetImportAiError('');
+    setBudgetImportAiResolvedKey('');
   }, []);
 
   const openBudgetImport = useCallback(() => {
@@ -581,6 +688,65 @@ export function PortalBudget() {
       setBudgetImportLoading(false);
     }
   }, []);
+
+  const rerunBudgetImportAiAnalysis = useCallback(() => {
+    setBudgetImportAiAnalysis(null);
+    setBudgetImportAiError('');
+    setBudgetImportAiResolvedKey('');
+  }, []);
+
+  useEffect(() => {
+    if (!budgetImportAiShouldRun || !budgetImportAiKey || !orgId || !projectId) {
+      setBudgetImportAiAnalysis(null);
+      setBudgetImportAiLoading(false);
+      setBudgetImportAiError('');
+      setBudgetImportAiResolvedKey('');
+      return undefined;
+    }
+    if (budgetImportAiResolvedKey === budgetImportAiKey || budgetImportAiLoading) return undefined;
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setBudgetImportAiLoading(true);
+      setBudgetImportAiError('');
+      setBudgetImportAiResolvedKey(budgetImportAiKey);
+      void analyzeGoogleSheetImportViaBff({
+        tenantId: orgId,
+        actor: bffActor,
+        projectId,
+        spreadsheetTitle: budgetImportFileName || '예산총괄 import',
+        selectedSheetName: budgetImportAiSheetName,
+        matrix: budgetImportAiMatrixSample,
+      }).then((result) => {
+        if (cancelled) return;
+        setBudgetImportAiAnalysis(result);
+      }).catch((error) => {
+        if (cancelled) return;
+        console.error('[PortalBudget] budget import AI analysis failed:', error);
+        setBudgetImportAiAnalysis(null);
+        setBudgetImportAiError(resolveBudgetImportAnalysisError(error));
+      }).finally(() => {
+        if (cancelled) return;
+        setBudgetImportAiLoading(false);
+      });
+    }, 450);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    bffActor,
+    budgetImportAiKey,
+    budgetImportAiLoading,
+    budgetImportAiResolvedKey,
+    budgetImportAiSheetName,
+    budgetImportAiShouldRun,
+    budgetImportFileName,
+    budgetImportAiMatrixSample,
+    orgId,
+    projectId,
+  ]);
 
   const buildCodeBookRenames = useCallback((): BudgetCodeRename[] => {
     if (!codeBookMode) return [];
@@ -1004,6 +1170,77 @@ export function PortalBudget() {
                   </p>
                 ))}
               </div>
+
+              {budgetImportShowAiPanel ? (
+                <div className="rounded-md border border-sky-200 bg-sky-50/80 p-3 text-[10px] text-sky-950">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <p className="text-[11px] font-medium">AI 보조 판독</p>
+                      {budgetImportAiAnalysis ? (
+                        <Badge variant="outline" className="border-sky-300 bg-white/80 text-[10px] text-sky-700">
+                          {budgetImportAiAnalysis.provider === 'anthropic' ? 'AI' : '기본 분석'} · 신뢰도 {budgetImportAiConfidenceLabel}
+                        </Badge>
+                      ) : null}
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-2 text-[10px] text-sky-700 hover:text-sky-900"
+                      onClick={rerunBudgetImportAiAnalysis}
+                      disabled={budgetImportAiLoading}
+                    >
+                      {budgetImportAiLoading ? '분석 중...' : '다시 분석'}
+                    </Button>
+                  </div>
+                  <p className="mt-2 text-sky-900">
+                    {budgetImportAiLoading
+                      ? '현재 표 구조를 다시 읽고 있습니다. 이 결과는 자동 반영 규칙을 바꾸지 않고, 어떤 형식으로 정리하면 더 안정적으로 읽히는지 설명합니다.'
+                      : budgetImportAiAnalysis?.summary || '현재 표 구조가 애매해 보여 추가 보조 분석을 준비했습니다.'}
+                  </p>
+                  {budgetImportAiError ? (
+                    <p className="mt-2 text-rose-600">{budgetImportAiError}</p>
+                  ) : null}
+                  {budgetImportAiAnalysis?.headerPreview && budgetImportAiAnalysis.headerPreview.length > 0 ? (
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {budgetImportAiAnalysis.headerPreview.slice(0, 6).map((header) => (
+                        <span
+                          key={`budget-import-ai-header-${header}`}
+                          className="rounded-full border border-sky-200 bg-white/80 px-2 py-0.5 text-[10px] text-sky-700"
+                        >
+                          {header}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                  {budgetImportAiAnalysis?.warnings && budgetImportAiAnalysis.warnings.length > 0 ? (
+                    <ul className="mt-2 list-disc space-y-1 pl-4 text-amber-700">
+                      {budgetImportAiAnalysis.warnings.slice(0, 3).map((warning) => (
+                        <li key={`budget-import-ai-warning-${warning}`}>{warning}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  {budgetImportAiAnalysis?.nextActions && budgetImportAiAnalysis.nextActions.length > 0 ? (
+                    <ul className="mt-2 list-disc space-y-1 pl-4 text-sky-800">
+                      {budgetImportAiAnalysis.nextActions.slice(0, 3).map((action) => (
+                        <li key={`budget-import-ai-next-${action}`}>{action}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  {budgetImportAiAnalysis?.suggestedMappings && budgetImportAiAnalysis.suggestedMappings.length > 0 ? (
+                    <div className="mt-3 rounded-md border border-sky-200 bg-white/80 p-2">
+                      <p className="text-[10px] font-medium text-sky-900">읽은 헤더 후보</p>
+                      <div className="mt-2 space-y-1">
+                        {budgetImportAiAnalysis.suggestedMappings.slice(0, 4).map((mapping) => (
+                          <p key={`budget-import-ai-mapping-${mapping.sourceHeader}-${mapping.platformField}`} className="text-[10px] text-sky-800">
+                            {mapping.sourceHeader} → {mapping.platformField}
+                          </p>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
 
               <div className="min-h-0 flex-1 overflow-auto rounded-md border border-border/60">
                 {budgetImportMergePlan.importedRows.length > 0 ? (
