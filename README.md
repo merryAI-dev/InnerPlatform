@@ -60,6 +60,36 @@ npm run workbook:extract:formulas -- <path-to-workbook.xlsx> [outDir]
 
 다음 구현 단계에 필요한 handoff packet은 [docs/architecture/workbook-phase-1-starter-pack-2026-04-04.md](docs/architecture/workbook-phase-1-starter-pack-2026-04-04.md)에 정리했습니다.
 
+## QA 피드백 Phase Hook
+
+Case-by-case로 QA를 잊어버리면 같은 실수가 반복되므로, phase를 시작하기 전에 피드백 tracker를 한 번 훑는 preflight hook을 둡니다.
+
+1. 최신 CSV를 memory snapshot으로 변환
+
+```bash
+npm run qa:feedback:ingest -- "/absolute/path/to/사업관리_기업관리_플랫폼_피드백_추적기.csv"
+```
+
+기본 출력:
+- `docs/operations/qa-feedback-memory.json`
+- `docs/operations/qa-feedback-memory.md`
+
+2. 작업 설명을 넣고 관련 QA 이슈를 preflight
+
+```bash
+npm run phase:preflight -- --task "PM 주간 사업비 입력과 캐시플로 저장 회귀를 먼저 잡는다" --project-type 사업관리플랫폼
+```
+
+이 훅은 다음을 출력합니다.
+- 작업 설명과 겹치는 QA 이슈 top match
+- 관련 feature area 빈도
+- 작업 전에 꼭 봐야 할 체크리스트
+
+원칙:
+- phase 시작 전에 한 번 훑고 시작
+- 완료 이슈도 회귀 후보로 본다
+- 가버넌스/정책 상태 이슈는 코드 수정 이슈와 분리해서 본다
+
 
 ## 주요 개선점: AS-IS vs TO-BE
 

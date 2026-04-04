@@ -31,6 +31,8 @@
     "firebase:fill-env": "bash scripts/firebase_fill_env_from_config.sh",
     "firebase:emulators:prepare": "bash scripts/firebase_emulator_bootstrap.sh",
     "firebase:emulators:start": "bash scripts/firebase_emulator_bootstrap.sh --start",
+    "qa:feedback:ingest": "npx tsx scripts/ingest_qa_feedback_tracker.ts",
+    "phase:preflight": "npx tsx scripts/phase_preflight_qa.ts",
     "workbook:extract:formulas": "npx tsx scripts/extract_workbook_formula_inventory.ts",
     "firestore:live-cutover": "npx tsx scripts/firestore_live_cutover.ts",
     "firestore:backup:schedule": "bash scripts/firestore_backup_schedule.sh",
