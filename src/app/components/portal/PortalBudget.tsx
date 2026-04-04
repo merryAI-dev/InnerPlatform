@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback, type DragEvent } from 'react';
 import {
   Lock, SlidersHorizontal, ChevronDown, ChevronRight,
   Calculator, Wallet, TrendingUp, Info,
-  ArrowUp, ArrowDown, Plus, Trash2, Settings, GripVertical,
+  ArrowUp, ArrowDown, Plus, Trash2, Settings, GripVertical, Upload,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
@@ -24,9 +24,16 @@ import {
 } from '../../data/budget-data';
 import type { BudgetPlanRow, BudgetCodeEntry, BudgetCodeRename } from '../../data/types';
 import { BASIS_LABELS } from '../../data/types';
+import {
+  mergeBudgetCodeBooks,
+  parseBudgetPlanImportText,
+  selectBudgetPlanImportSheet,
+} from '../../platform/budget-plan-import';
 import { moveBudgetSubCode, moveBudgetSubCodeToIndex } from '../../platform/budget-code-book-order';
 import { buildBudgetLabelKey, normalizeBudgetLabel } from '../../platform/budget-labels';
 import { parseNumber } from '../../platform/csv-utils';
+import { parseBudgetPlanMatrix, planBudgetPlanMerge } from '../../platform/google-sheet-migration';
+import { parseLocalWorkbookFile, type LocalWorkbookSheet } from '../../platform/local-workbook';
 import { SETTLEMENT_COLUMNS } from '../../platform/settlement-csv';
 
 // ═══════════════════════════════════════════════════════════════
@@ -63,6 +70,8 @@ interface BudgetCodeImportPreview {
   headerDetected: boolean;
   samplePairs: Array<{ code: string; subCode: string }>;
 }
+
+type BudgetPlanImportTab = 'file' | 'paste';
 
 function parseCsvCells(line: string): string[] {
   const cells: string[] = [];
@@ -195,6 +204,14 @@ export function PortalBudget() {
   const [codeBookImportText, setCodeBookImportText] = useState('');
   const [codeBookImportFileName, setCodeBookImportFileName] = useState('');
   const [codeBookReplaceMode, setCodeBookReplaceMode] = useState(false);
+  const [budgetImportOpen, setBudgetImportOpen] = useState(false);
+  const [budgetImportTab, setBudgetImportTab] = useState<BudgetPlanImportTab>('file');
+  const [budgetImportText, setBudgetImportText] = useState('');
+  const [budgetImportFileName, setBudgetImportFileName] = useState('');
+  const [budgetImportSheets, setBudgetImportSheets] = useState<LocalWorkbookSheet[]>([]);
+  const [budgetImportSheetName, setBudgetImportSheetName] = useState('');
+  const [budgetImportLoading, setBudgetImportLoading] = useState(false);
+  const [budgetImportApplying, setBudgetImportApplying] = useState(false);
   const [draggedSubCode, setDraggedSubCode] = useState<{ codeIdx: number; subIdx: number } | null>(null);
   const [dropTarget, setDropTarget] = useState<{
     codeIdx: number;
@@ -255,6 +272,32 @@ export function PortalBudget() {
     () => parseBudgetCodeImportText(codeBookImportText),
     [codeBookImportText],
   );
+  const budgetImportSelectedSheet = useMemo(
+    () => budgetImportSheets.find((sheet) => sheet.name === budgetImportSheetName) || budgetImportSheets[0] || null,
+    [budgetImportSheets, budgetImportSheetName],
+  );
+  const budgetImportMatrix = useMemo(
+    () => (budgetImportTab === 'paste'
+      ? parseBudgetPlanImportText(budgetImportText)
+      : (budgetImportSelectedSheet?.matrix || [])),
+    [budgetImportSelectedSheet?.matrix, budgetImportTab, budgetImportText],
+  );
+  const budgetImportParsed = useMemo(
+    () => parseBudgetPlanMatrix(budgetImportMatrix),
+    [budgetImportMatrix],
+  );
+  const budgetImportMergePlan = useMemo(
+    () => planBudgetPlanMerge(budgetPlanRows || [], budgetImportParsed.rows),
+    [budgetPlanRows, budgetImportParsed.rows],
+  );
+  const budgetImportMergedCodeBook = useMemo(
+    () => mergeBudgetCodeBooks(budgetCodeBook, budgetImportParsed.codeBook),
+    [budgetCodeBook, budgetImportParsed.codeBook],
+  );
+  const budgetImportMergedSubCodeCount = useMemo(
+    () => budgetImportMergedCodeBook.reduce((sum, entry) => sum + entry.subCodes.length, 0),
+    [budgetImportMergedCodeBook],
+  );
 
   const formatInput = useCallback((value: string) => {
     const num = parseNumber(value);
@@ -266,6 +309,27 @@ export function PortalBudget() {
     const trimmed = value.replace(/[^0-9.,-]/g, '');
     return formatInput(trimmed);
   }, [formatInput]);
+
+  const resetBudgetImport = useCallback(() => {
+    setBudgetImportTab('file');
+    setBudgetImportText('');
+    setBudgetImportFileName('');
+    setBudgetImportSheets([]);
+    setBudgetImportSheetName('');
+    setBudgetImportLoading(false);
+    setBudgetImportApplying(false);
+  }, []);
+
+  const openBudgetImport = useCallback(() => {
+    resetBudgetImport();
+    setBudgetImportOpen(true);
+  }, [resetBudgetImport]);
+
+  const closeBudgetImport = useCallback(() => {
+    if (budgetImportApplying) return;
+    setBudgetImportOpen(false);
+    resetBudgetImport();
+  }, [budgetImportApplying, resetBudgetImport]);
 
   const syncDraftRowCode = useCallback((prevCode: string, nextCode: string) => {
     if (!editMode) return;
@@ -474,6 +538,27 @@ export function PortalBudget() {
     }
   }, []);
 
+  const handleBudgetImportFile = useCallback(async (file: File | null) => {
+    if (!file) return;
+    setBudgetImportLoading(true);
+    try {
+      const sheets = await parseLocalWorkbookFile(file);
+      const preferredSheet = selectBudgetPlanImportSheet(sheets);
+      setBudgetImportFileName(file.name);
+      setBudgetImportSheets(sheets);
+      setBudgetImportSheetName(preferredSheet?.name || sheets[0]?.name || '');
+      setBudgetImportTab('file');
+      if (!preferredSheet) {
+        toast.error('가져올 시트를 찾지 못했습니다.');
+      }
+    } catch (error) {
+      console.error('[PortalBudget] budget import file parse failed:', error);
+      toast.error('예산 파일을 읽지 못했습니다. `.xls`/`.xlsx`/`.csv` 파일인지 확인해 주세요.');
+    } finally {
+      setBudgetImportLoading(false);
+    }
+  }, []);
+
   const buildCodeBookRenames = useCallback((): BudgetCodeRename[] => {
     if (!codeBookMode) return [];
     const renames: BudgetCodeRename[] = [];
@@ -541,6 +626,42 @@ export function PortalBudget() {
       setSettingsSaving(false);
     }
   }, [draftRows, draftCodeBook, saveBudgetPlanRows, saveBudgetCodeBook, editMode, codeBookMode, buildCodeBookRenames, codeBookReplaceMode]);
+
+  const applyBudgetImport = useCallback(async () => {
+    if (!saveBudgetPlanRows || !saveBudgetCodeBook) {
+      toast.error('예산 저장 기능이 연결되어 있지 않습니다.');
+      return;
+    }
+    if (budgetImportMergePlan.importedRows.length === 0) {
+      toast.error('가져올 예산 행을 먼저 준비해 주세요.');
+      return;
+    }
+
+    setBudgetImportApplying(true);
+    try {
+      await saveBudgetPlanRows(budgetImportMergePlan.mergedRows);
+      await saveBudgetCodeBook(budgetImportMergedCodeBook);
+      toast.success(
+        `예산 ${budgetImportMergePlan.summary.importedCount}건을 가져왔습니다. `
+        + `${budgetImportMergePlan.summary.updateCount}건 갱신, `
+        + `${budgetImportMergePlan.summary.createCount}건 추가, `
+        + `${budgetImportMergePlan.summary.unchangedCount}건은 그대로 유지했습니다.`,
+      );
+      setBudgetImportOpen(false);
+      resetBudgetImport();
+    } catch (error) {
+      console.error('[PortalBudget] budget import apply failed:', error);
+      toast.error('예산 가져오기에 실패했습니다.');
+    } finally {
+      setBudgetImportApplying(false);
+    }
+  }, [
+    budgetImportMergePlan,
+    budgetImportMergedCodeBook,
+    resetBudgetImport,
+    saveBudgetCodeBook,
+    saveBudgetPlanRows,
+  ]);
 
   const budgetItems = useMemo(() => {
     const items: BudgetRow[] = activeCodeBook.flatMap((entry, codeIdx) => (
@@ -699,6 +820,10 @@ export function PortalBudget() {
                 </>
               ) : !codeBookMode ? (
                 <>
+                  <Button variant="outline" size="sm" className="h-8 text-[12px] gap-1" onClick={openBudgetImport}>
+                    <Upload className="w-3.5 h-3.5" />
+                    예산 가져오기
+                  </Button>
                   <Button variant="default" size="sm" className="h-8 text-[12px] shadow-sm" onClick={startEdit}>
                     예산 편집
                   </Button>
@@ -711,6 +836,171 @@ export function PortalBudget() {
             </div>
           )}
         />
+
+        <Dialog open={budgetImportOpen} onOpenChange={(open) => !open && closeBudgetImport()}>
+          <DialogContent className="max-w-3xl max-h-[85vh] overflow-hidden">
+            <DialogHeader>
+              <DialogTitle className="text-[14px]">예산총괄 가져오기</DialogTitle>
+            </DialogHeader>
+            <div className="flex max-h-[calc(85vh-4rem)] flex-col gap-3">
+              <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
+                <p className="text-[11px] font-medium text-foreground">예산총괄 엑셀 또는 복붙 데이터를 미리본 뒤 안전하게 반영합니다.</p>
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  기본 동작은 merge입니다. 기존 예산 행은 유지하고, 같은 비목/세목은 갱신하며, 새 항목만 추가합니다.
+                </p>
+              </div>
+
+              <Tabs
+                value={budgetImportTab}
+                onValueChange={(value) => setBudgetImportTab(value as BudgetPlanImportTab)}
+                className="min-h-0 flex-1"
+              >
+                <TabsList className="grid w-full grid-cols-2">
+                  <TabsTrigger value="file" className="text-[11px]">엑셀/CSV 파일</TabsTrigger>
+                  <TabsTrigger value="paste" className="text-[11px]">엑셀 붙여넣기</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="file" className="space-y-3">
+                  <div className="rounded-md border border-border/60 p-3 space-y-2">
+                    <p className="text-[11px] font-medium">`.xls`, `.xlsx`, `.csv` 파일을 바로 읽습니다.</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      시트가 여러 개면 예산총괄로 보이는 탭을 먼저 고르고, 필요하면 아래에서 직접 시트를 바꿀 수 있습니다.
+                    </p>
+                  </div>
+                  <div className="rounded-md border border-dashed border-border/70 p-4">
+                    <input
+                      type="file"
+                      accept=".csv,.xlsx,.xls"
+                      className="block w-full text-[11px]"
+                      onChange={(event) => {
+                        void handleBudgetImportFile(event.target.files?.[0] || null);
+                        event.currentTarget.value = '';
+                      }}
+                    />
+                    <p className="mt-2 text-[10px] text-muted-foreground">
+                      {budgetImportLoading
+                        ? '파일을 읽는 중입니다...'
+                        : budgetImportFileName
+                          ? `${budgetImportFileName} 파일을 읽어 미리보기를 준비했습니다.`
+                          : '업로드 후 아래에서 시트와 반영 요약을 확인하세요.'}
+                    </p>
+                  </div>
+                  {budgetImportSheets.length > 1 ? (
+                    <div className="space-y-1">
+                      <p className="text-[10px] text-muted-foreground">가져올 시트</p>
+                      <select
+                        value={budgetImportSheetName}
+                        onChange={(event) => setBudgetImportSheetName(event.target.value)}
+                        className="h-9 w-full rounded-md border border-input bg-background px-3 text-[11px] outline-none"
+                      >
+                        {budgetImportSheets.map((sheet) => (
+                          <option key={sheet.name} value={sheet.name}>
+                            {sheet.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : null}
+                </TabsContent>
+
+                <TabsContent value="paste" className="space-y-3">
+                  <div className="rounded-md border border-border/60 p-3 space-y-2">
+                    <p className="text-[11px] font-medium">예산총괄 표를 그대로 복사해서 붙여넣을 수 있습니다.</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      `비목`, `세목`, `최초 승인 예산` 헤더가 들어 있으면 자동 인식합니다. 탭 복붙과 CSV 붙여넣기를 모두 지원합니다.
+                    </p>
+                    <div className="rounded-md bg-slate-950 px-3 py-2 font-mono text-[10px] text-slate-50 whitespace-pre-wrap">
+                      사업비 구분{'\t'}비목{'\t'}세목{'\t'}최초 승인 예산{'\t'}변경 예산{'\n'}
+                      직접사업비{'\t'}여비{'\t'}교통비{'\t'}100,000{'\t'}120,000
+                    </div>
+                  </div>
+                  <Textarea
+                    value={budgetImportText}
+                    onChange={(event) => setBudgetImportText(event.target.value)}
+                    placeholder={'사업비 구분\t비목\t세목\t최초 승인 예산\t변경 예산\n직접사업비\t여비\t교통비\t100,000\t120,000'}
+                    className="min-h-[220px] text-[11px] font-mono"
+                  />
+                </TabsContent>
+              </Tabs>
+
+              <div className="rounded-md border border-border/60 p-3 text-[10px] text-muted-foreground">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                  <span>가져온 행 {budgetImportMergePlan.summary.importedCount}건</span>
+                  <span>갱신 {budgetImportMergePlan.summary.updateCount}건</span>
+                  <span>신규 {budgetImportMergePlan.summary.createCount}건</span>
+                  <span>유지 {budgetImportMergePlan.summary.unchangedCount}건</span>
+                  <span>비목 {budgetImportMergedCodeBook.length}개</span>
+                  <span>세목 {budgetImportMergedSubCodeCount}건</span>
+                </div>
+                {budgetImportTab === 'file' && budgetImportFileName ? (
+                  <p className="mt-2">
+                    파일: <strong className="text-foreground">{budgetImportFileName}</strong>
+                    {budgetImportSelectedSheet ? ` / 시트: ${budgetImportSelectedSheet.name}` : ''}
+                  </p>
+                ) : null}
+                {budgetImportMatrix.length > 0 && budgetImportParsed.rows.length === 0 ? (
+                  <p className="mt-2 text-rose-600">
+                    예산총괄 헤더를 찾지 못했습니다. `비목`, `세목`, `최초 승인 예산` 열이 들어 있는지 확인해 주세요.
+                  </p>
+                ) : null}
+                {budgetImportMergePlan.importedRows.length > 0 ? (
+                  <p className="mt-2">
+                    동일한 비목/세목 키는 덮어쓰고, 현재 화면에만 있는 기존 예산 항목은 삭제하지 않습니다.
+                  </p>
+                ) : null}
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-auto rounded-md border border-border/60">
+                {budgetImportMergePlan.importedRows.length > 0 ? (
+                  <table className="w-full text-[11px]">
+                    <thead>
+                      <tr className="bg-muted/30">
+                        <th className="px-3 py-2 text-left" style={{ fontWeight: 600 }}>비목</th>
+                        <th className="px-3 py-2 text-left" style={{ fontWeight: 600 }}>세목</th>
+                        <th className="px-3 py-2 text-right" style={{ fontWeight: 600 }}>최초 승인 예산</th>
+                        <th className="px-3 py-2 text-right" style={{ fontWeight: 600 }}>변경 예산</th>
+                        <th className="px-3 py-2 text-left" style={{ fontWeight: 600 }}>특이사항</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {budgetImportMergePlan.importedRows.slice(0, 8).map((row, rowIdx) => (
+                        <tr key={`${buildBudgetLabelKey(row.budgetCode, row.subCode)}-${rowIdx}`} className="border-t border-border/40">
+                          <td className="px-3 py-2">{row.budgetCode}</td>
+                          <td className="px-3 py-2">{row.subCode}</td>
+                          <td className="px-3 py-2 text-right" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                            {fmtKRW(row.initialBudget)}
+                          </td>
+                          <td className="px-3 py-2 text-right" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                            {row.revisedBudget ? fmtKRW(row.revisedBudget) : '—'}
+                          </td>
+                          <td className="px-3 py-2 text-muted-foreground">{row.note || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  <div className="flex h-full min-h-[160px] items-center justify-center px-4 text-center text-[11px] text-muted-foreground">
+                    파일을 올리거나 예산총괄 표를 붙여넣으면 여기에서 반영 전 미리보기를 보여줍니다.
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-border/60">
+                <Button variant="outline" size="sm" className="h-8 text-[12px]" onClick={closeBudgetImport}>
+                  취소
+                </Button>
+                <Button
+                  size="sm"
+                  className="h-8 text-[12px]"
+                  onClick={applyBudgetImport}
+                  disabled={budgetImportApplying || budgetImportMergePlan.importedRows.length === 0}
+                >
+                  {budgetImportApplying ? '반영 중...' : '미리본 예산 반영'}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         <Dialog open={codeBookMode} onOpenChange={(open) => !open && cancelEdit()}>
           <DialogContent className="max-w-2xl max-h-[85vh] overflow-hidden">
