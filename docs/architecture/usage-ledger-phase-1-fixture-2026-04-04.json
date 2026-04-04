@@ -1,0 +1,1188 @@
+{
+  "workbookPath": "/Users/boram/InnerPlatform/tmp/spreadsheets/expense-sheet.xlsx",
+  "workbookSha256": "9ee7d582c898532ddb6f25fb8867ec4501dcb5074b96320fad2338f017f00868",
+  "sheetName": "사용내역(통장내역기준취소내역,불인정포함)",
+  "range": "4:12",
+  "relevantColumns": [
+    {
+      "column": "B",
+      "workbookLabel": "No.",
+      "appHeader": "No.",
+      "role": "display_order"
+    },
+    {
+      "column": "D",
+      "workbookLabel": "해당 주차",
+      "appHeader": "거래일시/해당 주차 seed",
+      "role": "date_seed"
+    },
+    {
+      "column": "E",
+      "workbookLabel": "지출구분",
+      "appHeader": "지출구분",
+      "role": "payment_method"
+    },
+    {
+      "column": "G",
+      "workbookLabel": "세목",
+      "appHeader": "세목",
+      "role": "budget_sub_category"
+    },
+    {
+      "column": "H",
+      "workbookLabel": "세세목",
+      "appHeader": "세세목",
+      "role": "budget_sub_sub_category"
+    },
+    {
+      "column": "I",
+      "workbookLabel": "cashflow항목",
+      "appHeader": "cashflow항목",
+      "role": "cashflow_line"
+    },
+    {
+      "column": "J",
+      "workbookLabel": "통장잔액",
+      "appHeader": "통장잔액",
+      "role": "running_balance"
+    },
+    {
+      "column": "K",
+      "workbookLabel": "통장에 찍힌 입/출금액",
+      "appHeader": "통장에 찍힌 입/출금액",
+      "role": "bank_amount"
+    },
+    {
+      "column": "L",
+      "workbookLabel": "입금액",
+      "appHeader": "입금액(사업비,공급가액,은행이자)",
+      "role": "deposit_amount"
+    },
+    {
+      "column": "M",
+      "workbookLabel": "매입부가세 반환",
+      "appHeader": "매입부가세 반환",
+      "role": "vat_refund"
+    },
+    {
+      "column": "N",
+      "workbookLabel": "사업비 사용액",
+      "appHeader": "사업비 사용액",
+      "role": "expense_amount"
+    },
+    {
+      "column": "O",
+      "workbookLabel": "매입부가세",
+      "appHeader": "매입부가세",
+      "role": "input_vat"
+    },
+    {
+      "column": "P",
+      "workbookLabel": "지급처",
+      "appHeader": "지급처",
+      "role": "counterparty"
+    },
+    {
+      "column": "Q",
+      "workbookLabel": "상세 적요",
+      "appHeader": "상세 적요",
+      "role": "memo"
+    }
+  ],
+  "headerRows": {
+    "row2": [
+      {
+        "column": "B",
+        "workbookLabel": "No.",
+        "raw": "No."
+      },
+      {
+        "column": "D",
+        "workbookLabel": "해당 주차",
+        "raw": "해당 주차\n26-1-1"
+      },
+      {
+        "column": "E",
+        "workbookLabel": "지출구분",
+        "raw": "지출구분"
+      },
+      {
+        "column": "G",
+        "workbookLabel": "세목",
+        "raw": "세목"
+      },
+      {
+        "column": "H",
+        "workbookLabel": "세세목",
+        "raw": "세세목\n(있을 시에만)"
+      },
+      {
+        "column": "I",
+        "workbookLabel": "cashflow항목",
+        "raw": "cashflow항목 \n(드롭다운 변경 X)"
+      },
+      {
+        "column": "J",
+        "workbookLabel": "통장잔액",
+        "raw": "통장잔액"
+      },
+      {
+        "column": "K",
+        "workbookLabel": "통장에 찍힌 입/출금액",
+        "raw": "통장에 찍힌\n입/출금액"
+      },
+      {
+        "column": "L",
+        "workbookLabel": "입금액",
+        "raw": "<입금합계>"
+      },
+      {
+        "column": "M",
+        "workbookLabel": "매입부가세 반환",
+        "raw": "<입금합계>"
+      },
+      {
+        "column": "N",
+        "workbookLabel": "사업비 사용액",
+        "raw": "<출금합계>"
+      },
+      {
+        "column": "O",
+        "workbookLabel": "매입부가세",
+        "raw": "<출금합계>"
+      },
+      {
+        "column": "P",
+        "workbookLabel": "지급처",
+        "raw": null
+      },
+      {
+        "column": "Q",
+        "workbookLabel": "상세 적요",
+        "raw": null
+      }
+    ],
+    "row3": [
+      {
+        "column": "B",
+        "appHeader": "No.",
+        "raw": "No."
+      },
+      {
+        "column": "D",
+        "appHeader": "거래일시/해당 주차 seed",
+        "raw": "해당 주차\n26-1-1"
+      },
+      {
+        "column": "E",
+        "appHeader": "지출구분",
+        "raw": "지출구분"
+      },
+      {
+        "column": "G",
+        "appHeader": "세목",
+        "raw": "세목"
+      },
+      {
+        "column": "H",
+        "appHeader": "세세목",
+        "raw": "세세목\n(있을 시에만)"
+      },
+      {
+        "column": "I",
+        "appHeader": "cashflow항목",
+        "raw": "cashflow항목 \n(드롭다운 변경 X)"
+      },
+      {
+        "column": "J",
+        "appHeader": "통장잔액",
+        "raw": "통장잔액"
+      },
+      {
+        "column": "K",
+        "appHeader": "통장에 찍힌 입/출금액",
+        "raw": "통장에 찍힌\n입/출금액"
+      },
+      {
+        "column": "L",
+        "appHeader": "입금액(사업비,공급가액,은행이자)",
+        "raw": "입금액\n(사업비, 공급가액,은행이자)"
+      },
+      {
+        "column": "M",
+        "appHeader": "매입부가세 반환",
+        "raw": "(결제액 반환시)\n매입부가세 반환(공급가액정산인 경우)"
+      },
+      {
+        "column": "N",
+        "appHeader": "사업비 사용액",
+        "raw": "사업비 사용액 \n(공급가액, 원천세, 매출부가세,은행이자)"
+      },
+      {
+        "column": "O",
+        "appHeader": "매입부가세",
+        "raw": "매입부가세\n(공급가액정산인 경우)"
+      },
+      {
+        "column": "P",
+        "appHeader": "지급처",
+        "raw": "지급처 \n(통장과 동일/\n영수증과 다를 시 두 상호 모두 기재)"
+      },
+      {
+        "column": "Q",
+        "appHeader": "상세 적요",
+        "raw": "상세 적요(지출결의 적요와 동일하게 작성필요)"
+      }
+    ]
+  },
+  "rows": [
+    {
+      "rowNumber": 4,
+      "cells": {
+        "B": {
+          "role": "display_order",
+          "appHeader": "No.",
+          "value": 1,
+          "formula": null,
+          "result": null
+        },
+        "D": {
+          "role": "date_seed",
+          "appHeader": "거래일시/해당 주차 seed",
+          "value": "2026-01-01T00:00:00.000Z",
+          "formula": null,
+          "result": null
+        },
+        "E": {
+          "role": "payment_method",
+          "appHeader": "지출구분",
+          "value": "계좌이체",
+          "formula": null,
+          "result": null
+        },
+        "G": {
+          "role": "budget_sub_category",
+          "appHeader": "세목",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "H": {
+          "role": "budget_sub_sub_category",
+          "appHeader": "세세목",
+          "value": "3.2회의비",
+          "formula": null,
+          "result": null
+        },
+        "I": {
+          "role": "cashflow_line",
+          "appHeader": "cashflow항목",
+          "value": "MYSC선입금(입금필요시)",
+          "formula": null,
+          "result": null
+        },
+        "J": {
+          "role": "running_balance",
+          "appHeader": "통장잔액",
+          "value": "{\"formula\":\"0-N4-O4+L4+M4\",\"result\":4995000}",
+          "formula": "=0-N4-O4+L4+M4",
+          "result": 4995000
+        },
+        "K": {
+          "role": "bank_amount",
+          "appHeader": "통장에 찍힌 입/출금액",
+          "value": 5000,
+          "formula": null,
+          "result": null
+        },
+        "L": {
+          "role": "deposit_amount",
+          "appHeader": "입금액(사업비,공급가액,은행이자)",
+          "value": 5000000,
+          "formula": null,
+          "result": null
+        },
+        "M": {
+          "role": "vat_refund",
+          "appHeader": "매입부가세 반환",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "N": {
+          "role": "expense_amount",
+          "appHeader": "사업비 사용액",
+          "value": "{\"formula\":\"$K$4/11*10\",\"result\":4545.454545,\"ref\":\"N4:N9\",\"shareType\":\"shared\"}",
+          "formula": "=$K$4/11*10",
+          "result": 4545.454545
+        },
+        "O": {
+          "role": "input_vat",
+          "appHeader": "매입부가세",
+          "value": "{\"formula\":\"K4-N4\",\"result\":454.5454545,\"ref\":\"O4:O9\",\"shareType\":\"shared\"}",
+          "formula": "=K4-N4",
+          "result": 454.5454545
+        },
+        "P": {
+          "role": "counterparty",
+          "appHeader": "지급처",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "Q": {
+          "role": "memo",
+          "appHeader": "상세 적요",
+          "value": null,
+          "formula": null,
+          "result": null
+        }
+      }
+    },
+    {
+      "rowNumber": 5,
+      "cells": {
+        "B": {
+          "role": "display_order",
+          "appHeader": "No.",
+          "value": 2,
+          "formula": null,
+          "result": null
+        },
+        "D": {
+          "role": "date_seed",
+          "appHeader": "거래일시/해당 주차 seed",
+          "value": "2026-01-01T00:00:00.000Z",
+          "formula": null,
+          "result": null
+        },
+        "E": {
+          "role": "payment_method",
+          "appHeader": "지출구분",
+          "value": "법인카드(뒷번호1)",
+          "formula": null,
+          "result": null
+        },
+        "G": {
+          "role": "budget_sub_category",
+          "appHeader": "세목",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "H": {
+          "role": "budget_sub_sub_category",
+          "appHeader": "세세목",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "I": {
+          "role": "cashflow_line",
+          "appHeader": "cashflow항목",
+          "value": "직접사업비(공급가액)",
+          "formula": null,
+          "result": null
+        },
+        "J": {
+          "role": "running_balance",
+          "appHeader": "통장잔액",
+          "value": "{\"formula\":\"J4-N5-O5+L5+M5\",\"result\":4985000,\"ref\":\"J5:J12\",\"shareType\":\"shared\"}",
+          "formula": "=J4-N5-O5+L5+M5",
+          "result": 4985000
+        },
+        "K": {
+          "role": "bank_amount",
+          "appHeader": "통장에 찍힌 입/출금액",
+          "value": 10000,
+          "formula": null,
+          "result": null
+        },
+        "L": {
+          "role": "deposit_amount",
+          "appHeader": "입금액(사업비,공급가액,은행이자)",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "M": {
+          "role": "vat_refund",
+          "appHeader": "매입부가세 반환",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "N": {
+          "role": "expense_amount",
+          "appHeader": "사업비 사용액",
+          "value": "{\"result\":4545.454545,\"sharedFormula\":\"N4\"}",
+          "formula": "=$K$4/11*10",
+          "result": 4545.454545
+        },
+        "O": {
+          "role": "input_vat",
+          "appHeader": "매입부가세",
+          "value": "{\"result\":5454.545455,\"sharedFormula\":\"O4\"}",
+          "formula": "=K5-N5",
+          "result": 5454.545455
+        },
+        "P": {
+          "role": "counterparty",
+          "appHeader": "지급처",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "Q": {
+          "role": "memo",
+          "appHeader": "상세 적요",
+          "value": null,
+          "formula": null,
+          "result": null
+        }
+      }
+    },
+    {
+      "rowNumber": 6,
+      "cells": {
+        "B": {
+          "role": "display_order",
+          "appHeader": "No.",
+          "value": 3,
+          "formula": null,
+          "result": null
+        },
+        "D": {
+          "role": "date_seed",
+          "appHeader": "거래일시/해당 주차 seed",
+          "value": "2026-01-01T00:00:00.000Z",
+          "formula": null,
+          "result": null
+        },
+        "E": {
+          "role": "payment_method",
+          "appHeader": "지출구분",
+          "value": "법인카드(뒷번호2)",
+          "formula": null,
+          "result": null
+        },
+        "G": {
+          "role": "budget_sub_category",
+          "appHeader": "세목",
+          "value": "1.1참여인력",
+          "formula": null,
+          "result": null
+        },
+        "H": {
+          "role": "budget_sub_sub_category",
+          "appHeader": "세세목",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "I": {
+          "role": "cashflow_line",
+          "appHeader": "cashflow항목",
+          "value": "MYSC인건비",
+          "formula": null,
+          "result": null
+        },
+        "J": {
+          "role": "running_balance",
+          "appHeader": "통장잔액",
+          "value": "{\"result\":4885000,\"sharedFormula\":\"J5\"}",
+          "formula": "=J5-N6-O6+L6+M6",
+          "result": 4885000
+        },
+        "K": {
+          "role": "bank_amount",
+          "appHeader": "통장에 찍힌 입/출금액",
+          "value": 100000,
+          "formula": null,
+          "result": null
+        },
+        "L": {
+          "role": "deposit_amount",
+          "appHeader": "입금액(사업비,공급가액,은행이자)",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "M": {
+          "role": "vat_refund",
+          "appHeader": "매입부가세 반환",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "N": {
+          "role": "expense_amount",
+          "appHeader": "사업비 사용액",
+          "value": "{\"result\":4545.454545,\"sharedFormula\":\"N4\"}",
+          "formula": "=$K$4/11*10",
+          "result": 4545.454545
+        },
+        "O": {
+          "role": "input_vat",
+          "appHeader": "매입부가세",
+          "value": "{\"result\":95454.54545,\"sharedFormula\":\"O4\"}",
+          "formula": "=K6-N6",
+          "result": 95454.54545
+        },
+        "P": {
+          "role": "counterparty",
+          "appHeader": "지급처",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "Q": {
+          "role": "memo",
+          "appHeader": "상세 적요",
+          "value": null,
+          "formula": null,
+          "result": null
+        }
+      }
+    },
+    {
+      "rowNumber": 7,
+      "cells": {
+        "B": {
+          "role": "display_order",
+          "appHeader": "No.",
+          "value": 4,
+          "formula": null,
+          "result": null
+        },
+        "D": {
+          "role": "date_seed",
+          "appHeader": "거래일시/해당 주차 seed",
+          "value": "2026-01-01T00:00:00.000Z",
+          "formula": null,
+          "result": null
+        },
+        "E": {
+          "role": "payment_method",
+          "appHeader": "지출구분",
+          "value": "계좌이체",
+          "formula": null,
+          "result": null
+        },
+        "G": {
+          "role": "budget_sub_category",
+          "appHeader": "세목",
+          "value": "2.4 오피스아워",
+          "formula": null,
+          "result": null
+        },
+        "H": {
+          "role": "budget_sub_sub_category",
+          "appHeader": "세세목",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "I": {
+          "role": "cashflow_line",
+          "appHeader": "cashflow항목",
+          "value": "MYSC수익(간접비등)",
+          "formula": null,
+          "result": null
+        },
+        "J": {
+          "role": "running_balance",
+          "appHeader": "통장잔액",
+          "value": "{\"result\":4835000,\"sharedFormula\":\"J5\"}",
+          "formula": "=J6-N7-O7+L7+M7",
+          "result": 4835000
+        },
+        "K": {
+          "role": "bank_amount",
+          "appHeader": "통장에 찍힌 입/출금액",
+          "value": 50000,
+          "formula": null,
+          "result": null
+        },
+        "L": {
+          "role": "deposit_amount",
+          "appHeader": "입금액(사업비,공급가액,은행이자)",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "M": {
+          "role": "vat_refund",
+          "appHeader": "매입부가세 반환",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "N": {
+          "role": "expense_amount",
+          "appHeader": "사업비 사용액",
+          "value": "{\"result\":4545.454545,\"sharedFormula\":\"N4\"}",
+          "formula": "=$K$4/11*10",
+          "result": 4545.454545
+        },
+        "O": {
+          "role": "input_vat",
+          "appHeader": "매입부가세",
+          "value": "{\"result\":45454.54545,\"sharedFormula\":\"O4\"}",
+          "formula": "=K7-N7",
+          "result": 45454.54545
+        },
+        "P": {
+          "role": "counterparty",
+          "appHeader": "지급처",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "Q": {
+          "role": "memo",
+          "appHeader": "상세 적요",
+          "value": null,
+          "formula": null,
+          "result": null
+        }
+      }
+    },
+    {
+      "rowNumber": 8,
+      "cells": {
+        "B": {
+          "role": "display_order",
+          "appHeader": "No.",
+          "value": 5,
+          "formula": null,
+          "result": null
+        },
+        "D": {
+          "role": "date_seed",
+          "appHeader": "거래일시/해당 주차 seed",
+          "value": "2026-01-01T00:00:00.000Z",
+          "formula": null,
+          "result": null
+        },
+        "E": {
+          "role": "payment_method",
+          "appHeader": "지출구분",
+          "value": "법인카드(뒷번호2)",
+          "formula": null,
+          "result": null
+        },
+        "G": {
+          "role": "budget_sub_category",
+          "appHeader": "세목",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "H": {
+          "role": "budget_sub_sub_category",
+          "appHeader": "세세목",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "I": {
+          "role": "cashflow_line",
+          "appHeader": "cashflow항목",
+          "value": "매출액(입금)",
+          "formula": null,
+          "result": null
+        },
+        "J": {
+          "role": "running_balance",
+          "appHeader": "통장잔액",
+          "value": "{\"result\":4805000,\"sharedFormula\":\"J5\"}",
+          "formula": "=J7-N8-O8+L8+M8",
+          "result": 4805000
+        },
+        "K": {
+          "role": "bank_amount",
+          "appHeader": "통장에 찍힌 입/출금액",
+          "value": 30000,
+          "formula": null,
+          "result": null
+        },
+        "L": {
+          "role": "deposit_amount",
+          "appHeader": "입금액(사업비,공급가액,은행이자)",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "M": {
+          "role": "vat_refund",
+          "appHeader": "매입부가세 반환",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "N": {
+          "role": "expense_amount",
+          "appHeader": "사업비 사용액",
+          "value": "{\"result\":4545.454545,\"sharedFormula\":\"N4\"}",
+          "formula": "=$K$4/11*10",
+          "result": 4545.454545
+        },
+        "O": {
+          "role": "input_vat",
+          "appHeader": "매입부가세",
+          "value": "{\"result\":25454.54545,\"sharedFormula\":\"O4\"}",
+          "formula": "=K8-N8",
+          "result": 25454.54545
+        },
+        "P": {
+          "role": "counterparty",
+          "appHeader": "지급처",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "Q": {
+          "role": "memo",
+          "appHeader": "상세 적요",
+          "value": null,
+          "formula": null,
+          "result": null
+        }
+      }
+    },
+    {
+      "rowNumber": 9,
+      "cells": {
+        "B": {
+          "role": "display_order",
+          "appHeader": "No.",
+          "value": 6,
+          "formula": null,
+          "result": null
+        },
+        "D": {
+          "role": "date_seed",
+          "appHeader": "거래일시/해당 주차 seed",
+          "value": "2026-01-01T00:00:00.000Z",
+          "formula": null,
+          "result": null
+        },
+        "E": {
+          "role": "payment_method",
+          "appHeader": "지출구분",
+          "value": "계좌이체",
+          "formula": null,
+          "result": null
+        },
+        "G": {
+          "role": "budget_sub_category",
+          "appHeader": "세목",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "H": {
+          "role": "budget_sub_sub_category",
+          "appHeader": "세세목",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "I": {
+          "role": "cashflow_line",
+          "appHeader": "cashflow항목",
+          "value": "매출부가세(입금)",
+          "formula": null,
+          "result": null
+        },
+        "J": {
+          "role": "running_balance",
+          "appHeader": "통장잔액",
+          "value": "{\"result\":4785000,\"sharedFormula\":\"J5\"}",
+          "formula": "=J8-N9-O9+L9+M9",
+          "result": 4785000
+        },
+        "K": {
+          "role": "bank_amount",
+          "appHeader": "통장에 찍힌 입/출금액",
+          "value": 20000,
+          "formula": null,
+          "result": null
+        },
+        "L": {
+          "role": "deposit_amount",
+          "appHeader": "입금액(사업비,공급가액,은행이자)",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "M": {
+          "role": "vat_refund",
+          "appHeader": "매입부가세 반환",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "N": {
+          "role": "expense_amount",
+          "appHeader": "사업비 사용액",
+          "value": "{\"result\":4545.454545,\"sharedFormula\":\"N4\"}",
+          "formula": "=$K$4/11*10",
+          "result": 4545.454545
+        },
+        "O": {
+          "role": "input_vat",
+          "appHeader": "매입부가세",
+          "value": "{\"result\":15454.54545,\"sharedFormula\":\"O4\"}",
+          "formula": "=K9-N9",
+          "result": 15454.54545
+        },
+        "P": {
+          "role": "counterparty",
+          "appHeader": "지급처",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "Q": {
+          "role": "memo",
+          "appHeader": "상세 적요",
+          "value": null,
+          "formula": null,
+          "result": null
+        }
+      }
+    },
+    {
+      "rowNumber": 10,
+      "cells": {
+        "B": {
+          "role": "display_order",
+          "appHeader": "No.",
+          "value": 7,
+          "formula": null,
+          "result": null
+        },
+        "D": {
+          "role": "date_seed",
+          "appHeader": "거래일시/해당 주차 seed",
+          "value": "2026-02-01T00:00:00.000Z",
+          "formula": null,
+          "result": null
+        },
+        "E": {
+          "role": "payment_method",
+          "appHeader": "지출구분",
+          "value": "계좌이체",
+          "formula": null,
+          "result": null
+        },
+        "G": {
+          "role": "budget_sub_category",
+          "appHeader": "세목",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "H": {
+          "role": "budget_sub_sub_category",
+          "appHeader": "세세목",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "I": {
+          "role": "cashflow_line",
+          "appHeader": "cashflow항목",
+          "value": "MYSC선입금(입금필요시)",
+          "formula": null,
+          "result": null
+        },
+        "J": {
+          "role": "running_balance",
+          "appHeader": "통장잔액",
+          "value": "{\"result\":4785000,\"sharedFormula\":\"J5\"}",
+          "formula": "=J9-N10-O10+L10+M10",
+          "result": 4785000
+        },
+        "K": {
+          "role": "bank_amount",
+          "appHeader": "통장에 찍힌 입/출금액",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "L": {
+          "role": "deposit_amount",
+          "appHeader": "입금액(사업비,공급가액,은행이자)",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "M": {
+          "role": "vat_refund",
+          "appHeader": "매입부가세 반환",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "N": {
+          "role": "expense_amount",
+          "appHeader": "사업비 사용액",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "O": {
+          "role": "input_vat",
+          "appHeader": "매입부가세",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "P": {
+          "role": "counterparty",
+          "appHeader": "지급처",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "Q": {
+          "role": "memo",
+          "appHeader": "상세 적요",
+          "value": null,
+          "formula": null,
+          "result": null
+        }
+      }
+    },
+    {
+      "rowNumber": 11,
+      "cells": {
+        "B": {
+          "role": "display_order",
+          "appHeader": "No.",
+          "value": 8,
+          "formula": null,
+          "result": null
+        },
+        "D": {
+          "role": "date_seed",
+          "appHeader": "거래일시/해당 주차 seed",
+          "value": "2026-02-01T00:00:00.000Z",
+          "formula": null,
+          "result": null
+        },
+        "E": {
+          "role": "payment_method",
+          "appHeader": "지출구분",
+          "value": "계좌이체",
+          "formula": null,
+          "result": null
+        },
+        "G": {
+          "role": "budget_sub_category",
+          "appHeader": "세목",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "H": {
+          "role": "budget_sub_sub_category",
+          "appHeader": "세세목",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "I": {
+          "role": "cashflow_line",
+          "appHeader": "cashflow항목",
+          "value": "팀지원금(입금)",
+          "formula": null,
+          "result": null
+        },
+        "J": {
+          "role": "running_balance",
+          "appHeader": "통장잔액",
+          "value": "{\"result\":4785000,\"sharedFormula\":\"J5\"}",
+          "formula": "=J10-N11-O11+L11+M11",
+          "result": 4785000
+        },
+        "K": {
+          "role": "bank_amount",
+          "appHeader": "통장에 찍힌 입/출금액",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "L": {
+          "role": "deposit_amount",
+          "appHeader": "입금액(사업비,공급가액,은행이자)",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "M": {
+          "role": "vat_refund",
+          "appHeader": "매입부가세 반환",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "N": {
+          "role": "expense_amount",
+          "appHeader": "사업비 사용액",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "O": {
+          "role": "input_vat",
+          "appHeader": "매입부가세",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "P": {
+          "role": "counterparty",
+          "appHeader": "지급처",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "Q": {
+          "role": "memo",
+          "appHeader": "상세 적요",
+          "value": null,
+          "formula": null,
+          "result": null
+        }
+      }
+    },
+    {
+      "rowNumber": 12,
+      "cells": {
+        "B": {
+          "role": "display_order",
+          "appHeader": "No.",
+          "value": 9,
+          "formula": null,
+          "result": null
+        },
+        "D": {
+          "role": "date_seed",
+          "appHeader": "거래일시/해당 주차 seed",
+          "value": "2026-02-01T00:00:00.000Z",
+          "formula": null,
+          "result": null
+        },
+        "E": {
+          "role": "payment_method",
+          "appHeader": "지출구분",
+          "value": "계좌이체",
+          "formula": null,
+          "result": null
+        },
+        "G": {
+          "role": "budget_sub_category",
+          "appHeader": "세목",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "H": {
+          "role": "budget_sub_sub_category",
+          "appHeader": "세세목",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "I": {
+          "role": "cashflow_line",
+          "appHeader": "cashflow항목",
+          "value": "팀지원금(출금)",
+          "formula": null,
+          "result": null
+        },
+        "J": {
+          "role": "running_balance",
+          "appHeader": "통장잔액",
+          "value": "{\"result\":4785000,\"sharedFormula\":\"J5\"}",
+          "formula": "=J11-N12-O12+L12+M12",
+          "result": 4785000
+        },
+        "K": {
+          "role": "bank_amount",
+          "appHeader": "통장에 찍힌 입/출금액",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "L": {
+          "role": "deposit_amount",
+          "appHeader": "입금액(사업비,공급가액,은행이자)",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "M": {
+          "role": "vat_refund",
+          "appHeader": "매입부가세 반환",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "N": {
+          "role": "expense_amount",
+          "appHeader": "사업비 사용액",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "O": {
+          "role": "input_vat",
+          "appHeader": "매입부가세",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "P": {
+          "role": "counterparty",
+          "appHeader": "지급처",
+          "value": null,
+          "formula": null,
+          "result": null
+        },
+        "Q": {
+          "role": "memo",
+          "appHeader": "상세 적요",
+          "value": null,
+          "formula": null,
+          "result": null
+        }
+      }
+    }
+  ],
+  "anomalies": [
+    {
+      "kind": "absolute_reference_pattern",
+      "cells": [
+        "N4",
+        "N5",
+        "N6",
+        "N7",
+        "N8",
+        "N9"
+      ],
+      "description": "사업비 사용액 열이 각 행의 K행이 아니라 절대참조 `$K$4/11*10`으로 고정되어 있습니다."
+    },
+    {
+      "kind": "running_balance_break",
+      "cells": [
+        "J13"
+      ],
+      "description": "통장잔액 연쇄 계산이 `#REF!`로 끊기며 이후 balance chain이 모두 전파 오류가 됩니다."
+    }
+  ]
+}

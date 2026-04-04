@@ -33,6 +33,7 @@
     "firebase:emulators:start": "bash scripts/firebase_emulator_bootstrap.sh --start",
     "qa:feedback:ingest": "npx tsx scripts/ingest_qa_feedback_tracker.ts",
     "phase:preflight": "npx tsx scripts/phase_preflight_qa.ts",
+    "phase1:extract:usage-ledger": "npx tsx scripts/extract_usage_ledger_phase1_fixture.ts",
     "workbook:extract:formulas": "npx tsx scripts/extract_workbook_formula_inventory.ts",
     "firestore:live-cutover": "npx tsx scripts/firestore_live_cutover.ts",
     "firestore:backup:schedule": "bash scripts/firestore_backup_schedule.sh",

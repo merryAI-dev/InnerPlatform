@@ -12,6 +12,7 @@
 
 - source workbook: `tmp/spreadsheets/expense-sheet.xlsx`
 - workbook SHA-256: `9ee7d582c898532ddb6f25fb8867ec4501dcb5074b96320fad2338f017f00868`
+- tracked freeze artifact: [workbook-freeze-line-2026-04-04.json](/Users/boram/InnerPlatform/docs/architecture/workbook-freeze-line-2026-04-04.json)
 - extraction command:
 
 ```bash
@@ -35,6 +36,12 @@ npm run workbook:extract:formulas -- /Users/boram/InnerPlatform/tmp/spreadsheets
 6. `비목별 증빙자료`
 
 그룹/보조 시트는 phase 1 범위에 넣지 않는다.
+
+## Phase 0 Review Link
+
+- [workbook-phase-0-review-2026-04-04.md](/Users/boram/InnerPlatform/docs/architecture/workbook-phase-0-review-2026-04-04.md)
+- [usage-ledger-rule-catalog-2026-04-04.md](/Users/boram/InnerPlatform/docs/architecture/usage-ledger-rule-catalog-2026-04-04.md)
+- [usage-ledger-phase-1-fixture-2026-04-04.json](/Users/boram/InnerPlatform/docs/architecture/usage-ledger-phase-1-fixture-2026-04-04.json)
 
 ## Known Source Issues
 

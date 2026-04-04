@@ -59,6 +59,7 @@ npm run workbook:extract:formulas -- <path-to-workbook.xlsx> [outDir]
 - 이후 PR이 같은 기준선 위에서 진행되도록 freeze line 형성
 
 다음 구현 단계에 필요한 handoff packet은 [docs/architecture/workbook-phase-1-starter-pack-2026-04-04.md](docs/architecture/workbook-phase-1-starter-pack-2026-04-04.md)에 정리했습니다.
+phase 0 review와 phase 1 rule catalog는 각각 [docs/architecture/workbook-phase-0-review-2026-04-04.md](docs/architecture/workbook-phase-0-review-2026-04-04.md), [docs/architecture/usage-ledger-rule-catalog-2026-04-04.md](docs/architecture/usage-ledger-rule-catalog-2026-04-04.md)에 정리했습니다.
 
 ## QA 피드백 Phase Hook
 

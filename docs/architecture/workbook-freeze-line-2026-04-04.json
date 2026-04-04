@@ -1,0 +1,35 @@
+{
+  "workbookPath": "/Users/boram/InnerPlatform/tmp/spreadsheets/expense-sheet.xlsx",
+  "workbookSha256": "9ee7d582c898532ddb6f25fb8867ec4501dcb5074b96320fad2338f017f00868",
+  "generatedAt": "2026-04-04T03:19:36.441Z",
+  "sheetCount": 17,
+  "sheetNames": [
+    "FAQ",
+    "안내사항기본정보",
+    "예산총괄시트",
+    "비목별 증빙자료",
+    "cashflow(사용내역 연동)",
+    "cashflow(e나라도움 시 가이드)",
+    "사용내역(통장내역기준취소내역,불인정포함)",
+    "정산보완요청",
+    "통장내역(MYSC법인계좌e나라도움제외)",
+    "인력투입률",
+    "(참고) 원천세 계산기",
+    "(옵션) 해외출장 비용사용내역 별도관리시트",
+    "그룹예산",
+    "그룹cashflow(지출대장 연동)",
+    "그룹지출대장(취소내역,불인정포함)",
+    "그룹통장내역",
+    "그룹최종정산제출"
+  ],
+  "formulaCount": 1879,
+  "sourceIssueCount": 73,
+  "sourceIssueCounts": {
+    "literal_formula_error": 11,
+    "propagated_formula_error": 62
+  },
+  "sourceIssueCountsByCode": {
+    "#REF!": 71,
+    "#N/A": 2
+  }
+}
