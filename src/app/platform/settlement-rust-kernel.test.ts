@@ -8,7 +8,7 @@ import { deriveSettlementRows } from './settlement-row-derivation';
 import type { SettlementDerivationContext, SettlementDerivationOptions } from './settlement-row-derivation';
 import { buildSettlementDerivationContext } from './settlement-sheet-prepare';
 import { parseNumber } from './csv-utils';
-import { getYearMondayWeeks } from './cashflow-weeks';
+import { getYearMondayWeeks, type MonthMondayWeek } from './cashflow-weeks';
 import { buildSettlementActualSyncPayload } from './settlement-sheet-sync';
 import { aggregateBudgetActualsFromSettlementRows } from './budget-actuals';
 import {
@@ -118,6 +118,7 @@ function deriveSettlementRowsViaRust(
 
 function buildSettlementActualSyncPayloadViaRust(
   rows: ImportRow[],
+  yearWeeks?: MonthMondayWeek[],
   persistedRows?: ImportRow[] | null,
 ): KernelActualSyncWeekJson[] {
   const executable = existsSync(rustBinaryPath) ? rustBinaryPath : null;
@@ -125,7 +126,7 @@ function buildSettlementActualSyncPayloadViaRust(
   const payload = {
     command: 'actualSync',
     rows: serializeRows(rows),
-    yearWeeks: getYearMondayWeeks(2026),
+    yearWeeks: yearWeeks || getYearMondayWeeks(2026),
     ...(persistedRows ? { persistedRows: serializeRows(persistedRows) } : {}),
   };
   const result = spawnSync(executable, {
@@ -238,6 +239,10 @@ describeRust('settlement-rust-kernel', () => {
   });
 
   it('matches TypeScript weekly actual sync payload generation', () => {
+    const yearWeeks: MonthMondayWeek[] = [
+      { yearMonth: '2026-03', weekNo: 1, weekStart: '2026-03-02', weekEnd: '2026-03-08', label: '26-03-01' },
+      { yearMonth: '2026-03', weekNo: 2, weekStart: '2026-03-09', weekEnd: '2026-03-15', label: '26-03-02' },
+    ];
     const base = Array.from({ length: 27 }, () => '');
     const directRow: ImportRow = {
       tempId: 'direct-row',
@@ -247,6 +252,7 @@ describeRust('settlement-rust-kernel', () => {
     directRow.cells[3] = '26-03-01';
     directRow.cells[8] = '직접사업비';
     directRow.cells[13] = '30,000';
+    directRow.cells[14] = '3,000';
 
     const salesRow: ImportRow = {
       tempId: 'sales-row',
@@ -255,7 +261,7 @@ describeRust('settlement-rust-kernel', () => {
     salesRow.cells[2] = '2026-03-04';
     salesRow.cells[3] = '26-03-01';
     salesRow.cells[8] = '매출액(입금)';
-    salesRow.cells[10] = '250,000';
+    salesRow.cells[11] = '250,000';
 
     const persistedRow: ImportRow = {
       tempId: 'persisted-row',
@@ -266,10 +272,14 @@ describeRust('settlement-rust-kernel', () => {
     persistedRow.cells[8] = '직접사업비';
     persistedRow.cells[10] = '20,000';
 
-    const tsPayload = buildSettlementActualSyncPayload([directRow, salesRow], getYearMondayWeeks(2026), [persistedRow]);
-    const rustPayload = buildSettlementActualSyncPayloadViaRust([directRow, salesRow], [persistedRow]);
+    const tsPayload = buildSettlementActualSyncPayload([directRow, salesRow], yearWeeks, [persistedRow]);
+    const rustPayload = buildSettlementActualSyncPayloadViaRust([directRow, salesRow], yearWeeks, [persistedRow]);
 
     expect(rustPayload).toEqual(tsPayload);
+    const marchWeek = tsPayload.find((item) => item.yearMonth === '2026-03' && item.weekNo === 1);
+    expect(marchWeek?.amounts.DIRECT_COST_OUT).toBe(30000);
+    expect(marchWeek?.amounts.INPUT_VAT_OUT).toBe(3000);
+    expect(marchWeek?.amounts.SALES_IN).toBe(250000);
   });
 
   it('matches TypeScript budget actual aggregation from settlement rows', () => {

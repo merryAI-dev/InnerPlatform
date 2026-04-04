@@ -1,6 +1,7 @@
 import { normalizeKey, normalizeSpace, parseDate, parseNumber, stableHash } from './csv-utils';
 import { findWeekForDate, getYearMondayWeeks } from './cashflow-weeks';
 import { SETTLEMENT_COLUMNS, createEmptyImportRow, type ImportRow } from './settlement-csv';
+import type { SettlementEntryKind } from '../data/types';
 
 // ── HTML-as-XLS parsing (KB, 신한 등 HTML 형식 은행 엑셀) ──
 
@@ -348,17 +349,39 @@ function resolveAmountColumnIndices(columns: string[], rows: BankStatementRow[])
   });
 }
 
-function pickAmount(cells: string[], amountIdxs: number[]): number | null {
-  let fallback: number | null = null;
+function inferEntryKindFromAmountCell(header: string, raw: string, parsed: number): SettlementEntryKind | undefined {
+  const key = cleanHeader(header);
+  const value = normalizeSpace(raw);
+  const hasParens = /^\(.*\)$/.test(value);
+  const isNegativeLiteral = /^-/.test(value) || hasParens || parsed < 0;
+
+  if (key.includes(cleanHeader('출금'))) return 'EXPENSE';
+  if (key.includes(cleanHeader('입금'))) return 'DEPOSIT';
+  if (key.includes(cleanHeader('입출금'))) {
+    if (isNegativeLiteral) return 'EXPENSE';
+    if (parsed > 0) return 'DEPOSIT';
+  }
+  if (isNegativeLiteral) return 'EXPENSE';
+  return undefined;
+}
+
+function pickAmount(
+  cells: string[],
+  amountIdxs: number[],
+  columns: string[],
+): { amount: number | null; entryKind?: SettlementEntryKind } {
+  let fallback: { amount: number; entryKind?: SettlementEntryKind } | null = null;
   for (const idx of amountIdxs) {
     const raw = String(cells[idx] || '');
     if (!isAmountLiteral(raw)) continue;
     const n = parseNumber(raw);
     if (n == null) continue;
-    if (fallback == null) fallback = n;
-    if (n !== 0) return n;
+    const entryKind = inferEntryKindFromAmountCell(columns[idx] || '', raw, n);
+    const amount = Math.abs(n);
+    if (fallback == null) fallback = { amount, entryKind };
+    if (n !== 0) return { amount, entryKind };
   }
-  return fallback;
+  return fallback || { amount: null };
 }
 
 export function normalizeBankStatementMatrix(matrix: string[][]): BankStatementSheet {
@@ -407,6 +430,7 @@ export function mapBankStatementsToImportRows(sheet: BankStatementSheet): Import
   const idxMemo = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '상세 적요');
   const idxBankAmount = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '통장에 찍힌 입/출금액');
   const idxBalance = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '통장잔액');
+  const idxDeposit = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '입금액(사업비,공급가액,은행이자)');
 
   const dateIdx = findFirstHeaderIndex(columns, ['거래일자', '거래일시', '거래일', '일자', '날짜', 'date']);
   const counterpartyIdxCandidates = (() => {
@@ -478,9 +502,14 @@ export function mapBankStatementsToImportRows(sheet: BankStatementSheet): Import
       cells[idxMemo] = detail;
     }
 
+    let inferredEntryKind: SettlementEntryKind | undefined;
     if (idxBankAmount >= 0 && amountIdxs.length > 0) {
-      const amount = pickAmount(rowCells, amountIdxs);
-      cells[idxBankAmount] = amount != null ? amount.toLocaleString('ko-KR') : '';
+      const resolvedAmount = pickAmount(rowCells, amountIdxs, columns);
+      inferredEntryKind = resolvedAmount.entryKind;
+      cells[idxBankAmount] = resolvedAmount.amount != null ? resolvedAmount.amount.toLocaleString('ko-KR') : '';
+      if (idxDeposit >= 0 && inferredEntryKind === 'DEPOSIT') {
+        cells[idxDeposit] = resolvedAmount.amount != null ? resolvedAmount.amount.toLocaleString('ko-KR') : '';
+      }
     }
 
     if (idxBalance >= 0 && balanceIdx >= 0) {
@@ -499,6 +528,7 @@ export function mapBankStatementsToImportRows(sheet: BankStatementSheet): Import
       ...base,
       tempId: base.tempId || `bank-${sourceKey}`,
       sourceTxId: `bank:${sourceKey}`,
+      ...(inferredEntryKind ? { entryKind: inferredEntryKind } : {}),
       cells,
     });
   }
@@ -543,6 +573,7 @@ export function mergeBankRowsIntoExpenseSheet(
     '지급처',
     '통장에 찍힌 입/출금액',
     '통장잔액',
+    '입금액(사업비,공급가액,은행이자)',
   ];
   const autoIdxs = autoHeaders
     .map((h) => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === h))
@@ -608,6 +639,7 @@ export function mergeBankRowsIntoExpenseSheet(
     merged.push({
       ...matchedExisting,
       ...(mappedRow.sourceTxId ? { sourceTxId: mappedRow.sourceTxId } : {}),
+      ...(mappedRow.entryKind ? { entryKind: mappedRow.entryKind } : {}),
       cells,
     });
   }

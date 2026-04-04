@@ -43,7 +43,7 @@ describe('buildSettlementActualSyncPayload', () => {
           ),
           8,
           '매출액(입금)',
-        ).map((cell, index) => (index === 10 ? '250,000' : cell)),
+        ).map((cell, index) => (index === 11 ? '250,000' : cell)),
       ),
     ];
 
@@ -55,6 +55,53 @@ describe('buildSettlementActualSyncPayload', () => {
     const marchWeek = payload.find((item) => item.yearMonth === '2026-03' && item.weekNo === 1);
     expect(marchWeek?.amounts.DIRECT_COST_OUT).toBe(110000);
     expect(marchWeek?.amounts.SALES_IN).toBe(250000);
+  });
+
+  it('splits outflow rows into primary out line and input vat out', () => {
+    const base = createEmptyCells();
+    const row = createRow(
+      withCell(
+        withCell(
+          withCell(base, 2, '2026-03-05'),
+          3,
+          '26-03-01',
+        ),
+        8,
+        '직접사업비(공급가액)+매입부가세',
+      ),
+    );
+    row.cells[13] = '100,000';
+    row.cells[14] = '10,000';
+
+    const payload = buildSettlementActualSyncPayload([row], [
+      { yearMonth: '2026-03', weekNo: 1, weekStart: '2026-03-02', weekEnd: '2026-03-08', label: '26-03-01' },
+    ]);
+
+    expect(payload[0]?.amounts.DIRECT_COST_OUT).toBe(100000);
+    expect(payload[0]?.amounts.INPUT_VAT_OUT).toBe(10000);
+  });
+
+  it('keeps inflow vat lines on the inflow side', () => {
+    const base = createEmptyCells();
+    const row = createRow(
+      withCell(
+        withCell(
+          withCell(base, 2, '2026-03-05'),
+          3,
+          '26-03-01',
+        ),
+        8,
+        '매출부가세(입금)',
+      ),
+    );
+    row.cells[11] = '20,000';
+
+    const payload = buildSettlementActualSyncPayload([row], [
+      { yearMonth: '2026-03', weekNo: 1, weekStart: '2026-03-02', weekEnd: '2026-03-08', label: '26-03-01' },
+    ]);
+
+    expect(payload[0]?.amounts.SALES_VAT_IN).toBe(20000);
+    expect(payload[0]?.amounts.INPUT_VAT_OUT).toBe(0);
   });
 
   it('prefers expense amount for outflow actuals and falls back to bank amount when missing', () => {

@@ -45,6 +45,8 @@ describe('bank statement helpers', () => {
 
   it('maps US-style bank export dates without dropping rows', () => {
     const dateIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '거래일시');
+    const bankAmountIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '통장에 찍힌 입/출금액');
+    const depositIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '입금액(사업비,공급가액,은행이자)');
     const rows = mapBankStatementsToImportRows({
       columns: ['거래일시', '적요', '출금금액', '입금금액', '잔액'],
       rows: [
@@ -69,5 +71,11 @@ describe('bank statement helpers', () => {
       '2026-01-04',
       '2026-03-19',
     ]);
+    expect(rows[0]?.entryKind).toBe('DEPOSIT');
+    expect(rows[0]?.cells[bankAmountIdx]).toBe('10,000,000');
+    expect(rows[0]?.cells[depositIdx]).toBe('10,000,000');
+    expect(rows[1]?.entryKind).toBe('EXPENSE');
+    expect(rows[1]?.cells[bankAmountIdx]).toBe('31,000');
+    expect(rows[1]?.cells[depositIdx]).toBe('');
   });
 });

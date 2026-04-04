@@ -844,20 +844,74 @@ fn resolve_actual_amount(
     bank_amount_idx: Option<usize>,
     expense_amount_idx: Option<usize>,
     vat_in_idx: Option<usize>,
+    deposit_idx: Option<usize>,
+    refund_idx: Option<usize>,
 ) -> f64 {
+    let amounts = resolve_cashflow_actual_line_amounts(
+        row,
+        bank_amount_idx,
+        expense_amount_idx,
+        vat_in_idx,
+        deposit_idx,
+        refund_idx,
+    );
+    amounts.get(line_id).copied().unwrap_or(0.0)
+}
+
+fn resolve_cashflow_actual_line_amounts(
+    row: &KernelImportRow,
+    bank_amount_idx: Option<usize>,
+    expense_amount_idx: Option<usize>,
+    vat_in_idx: Option<usize>,
+    deposit_idx: Option<usize>,
+    refund_idx: Option<usize>,
+) -> BTreeMap<String, f64> {
+    let cashflow_label = get_cell(&row.cells, Some(8usize));
+    let Some(line_id) = parse_cashflow_line_label(&cashflow_label) else {
+        return BTreeMap::new();
+    };
     let bank_amount = parse_amount(&row.cells, bank_amount_idx);
-    if cashflow_in_line_ids().contains(&line_id) {
-        return bank_amount;
-    }
-    if line_id == "INPUT_VAT_OUT" {
-        return parse_amount(&row.cells, vat_in_idx);
-    }
     let expense_amount = parse_amount(&row.cells, expense_amount_idx);
-    if expense_amount != 0.0 {
+    let vat_in = parse_amount(&row.cells, vat_in_idx);
+    let deposit_amount = parse_amount(&row.cells, deposit_idx);
+    let refund_amount = parse_amount(&row.cells, refund_idx);
+    let mut result = BTreeMap::new();
+
+    if cashflow_in_line_ids().contains(&line_id) {
+        let inflow_amount = if deposit_amount > 0.0 {
+            deposit_amount
+        } else if refund_amount > 0.0 {
+            refund_amount
+        } else {
+            bank_amount
+        };
+        if inflow_amount > 0.0 {
+            result.insert(line_id.to_string(), inflow_amount);
+        }
+        return result;
+    }
+
+    if line_id == "INPUT_VAT_OUT" {
+        if vat_in > 0.0 {
+            result.insert("INPUT_VAT_OUT".to_string(), vat_in);
+        }
+        return result;
+    }
+
+    let primary_out_amount = if expense_amount > 0.0 {
         expense_amount
+    } else if deposit_amount > 0.0 || refund_amount > 0.0 {
+        0.0
     } else {
         bank_amount
+    };
+    if primary_out_amount > 0.0 {
+        result.insert(line_id.to_string(), primary_out_amount);
     }
+    if vat_in > 0.0 {
+        result.insert("INPUT_VAT_OUT".to_string(), vat_in);
+    }
+    result
 }
 
 fn resolve_budget_actual_amount(
@@ -902,6 +956,8 @@ pub fn build_settlement_actual_sync_payload(request: KernelActualSyncRequest) ->
     let bank_amount_idx = Some(10usize);
     let expense_amount_idx = Some(13usize);
     let vat_in_idx = Some(14usize);
+    let deposit_idx = Some(11usize);
+    let refund_idx = Some(12usize);
 
     let mut by_week: BTreeMap<String, BTreeMap<String, f64>> = BTreeMap::new();
     let mut week_labels = BTreeSet::new();
@@ -929,12 +985,33 @@ pub fn build_settlement_actual_sync_payload(request: KernelActualSyncRequest) ->
         if week_label.is_empty() {
             continue;
         }
-        let amount = resolve_actual_amount(row, line_id, bank_amount_idx, expense_amount_idx, vat_in_idx);
-        if amount == 0.0 {
+        let resolved = resolve_cashflow_actual_line_amounts(
+            row,
+            bank_amount_idx,
+            expense_amount_idx,
+            vat_in_idx,
+            deposit_idx,
+            refund_idx,
+        );
+        let amount = resolve_actual_amount(
+            row,
+            line_id,
+            bank_amount_idx,
+            expense_amount_idx,
+            vat_in_idx,
+            deposit_idx,
+            refund_idx,
+        );
+        if resolved.is_empty() && amount == 0.0 {
             continue;
         }
         let bucket = by_week.entry(week_label).or_default();
-        *bucket.entry(line_id.to_string()).or_insert(0.0) += amount;
+        for (resolved_line_id, resolved_amount) in resolved {
+            if resolved_amount == 0.0 {
+                continue;
+            }
+            *bucket.entry(resolved_line_id).or_insert(0.0) += resolved_amount;
+        }
     }
 
     let mut zero_amounts = BTreeMap::new();

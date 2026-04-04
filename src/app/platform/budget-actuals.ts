@@ -1,45 +1,13 @@
 import type { Transaction } from '../data/types';
 import { buildBudgetLabelKey } from './budget-labels';
-import { parseNumber } from './csv-utils';
-import { parseCashflowLineLabel, SETTLEMENT_COLUMNS, type ImportRow } from './settlement-csv';
-
-const CASHFLOW_IN_LINE_IDS = new Set<string>([
-  'MYSC_PREPAY_IN',
-  'SALES_IN',
-  'SALES_VAT_IN',
-  'TEAM_SUPPORT_IN',
-  'BANK_INTEREST_IN',
-]);
+import { SETTLEMENT_COLUMNS, type ImportRow } from './settlement-csv';
+import {
+  resolveSettlementBudgetActualAmount,
+  type SettlementFlowAmountIndexes,
+} from './settlement-flow-amounts';
 
 function getSettlementColumnIndex(header: string): number {
   return SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === header);
-}
-
-function resolveSettlementBudgetActualAmount(
-  row: ImportRow,
-  indexes: {
-    cashflowIdx: number;
-    bankAmountIdx: number;
-    expenseAmountIdx: number;
-    vatInIdx: number;
-    depositIdx: number;
-    refundIdx: number;
-  },
-): number {
-  const cashflowLabel = indexes.cashflowIdx >= 0 ? String(row.cells[indexes.cashflowIdx] || '').trim() : '';
-  const lineId = parseCashflowLineLabel(cashflowLabel);
-  const bankAmount = indexes.bankAmountIdx >= 0 ? (parseNumber(row.cells[indexes.bankAmountIdx]) ?? 0) : 0;
-  const expenseAmount = indexes.expenseAmountIdx >= 0 ? (parseNumber(row.cells[indexes.expenseAmountIdx]) ?? 0) : 0;
-  const vatIn = indexes.vatInIdx >= 0 ? (parseNumber(row.cells[indexes.vatInIdx]) ?? 0) : 0;
-  const depositAmount = indexes.depositIdx >= 0 ? (parseNumber(row.cells[indexes.depositIdx]) ?? 0) : 0;
-  const refundAmount = indexes.refundIdx >= 0 ? (parseNumber(row.cells[indexes.refundIdx]) ?? 0) : 0;
-
-  if (lineId && CASHFLOW_IN_LINE_IDS.has(lineId)) return 0;
-  if (lineId === 'INPUT_VAT_OUT') return vatIn;
-  if (expenseAmount > 0) return expenseAmount;
-  if (vatIn > 0 && bankAmount === 0) return vatIn;
-  if (depositAmount > 0 || refundAmount > 0) return 0;
-  return bankAmount;
 }
 
 export function aggregateBudgetActualsFromSettlementRows(
@@ -48,7 +16,10 @@ export function aggregateBudgetActualsFromSettlementRows(
   const result = new Map<string, number>();
   if (!rows || rows.length === 0) return result;
 
-  const indexes = {
+  const indexes: SettlementFlowAmountIndexes & {
+    budgetCodeIdx: number;
+    subCodeIdx: number;
+  } = {
     budgetCodeIdx: getSettlementColumnIndex('비목'),
     subCodeIdx: getSettlementColumnIndex('세목'),
     cashflowIdx: getSettlementColumnIndex('cashflow항목'),

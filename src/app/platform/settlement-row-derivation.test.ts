@@ -203,6 +203,26 @@ describe('settlement-row-derivation', () => {
     expect(next[0]?.reviewHints).toBeUndefined();
   });
 
+  it('preserves imported deposit rows as inflow semantics', () => {
+    const rowCells = createCells();
+    rowCells[10] = '10,000,000';
+    rowCells[11] = '10,000,000';
+    rowCells[9] = '10,644,328';
+    const row: ImportRow = {
+      tempId: 'bank-import-deposit-row',
+      sourceTxId: 'bank:deposit-import-1',
+      entryKind: 'DEPOSIT',
+      cells: rowCells,
+    };
+
+    const next = deriveSettlementRows([row], { ...context, basis: '공급가액' }, { mode: 'cascade', rowIdx: 0 });
+
+    expect(next[0]?.cells[11]).toBe('10,000,000');
+    expect(next[0]?.cells[13]).toBe('');
+    expect(next[0]?.cells[14]).toBe('');
+    expect(next[0]?.cells[9]).toBe('10,644,328');
+  });
+
   it('keeps a cleared expense amount empty when the user explicitly cleared it', () => {
     const rowCells = createCells();
     rowCells[10] = '110,000';
