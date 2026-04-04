@@ -89,6 +89,95 @@ describe('google-sheet-migration', () => {
     ]);
   });
 
+  it('parses multi-row budget headers and carries forward blank 비목 rows', () => {
+    const matrix = [
+      ['프로젝트 정보', '', '', '예산 정보', '예산 정보', '메모'],
+      ['사업비 구분', '비목명', '세목명', '당초 예산', '수정 예산', '비고'],
+      ['직접사업비', '인건비', '개인단위', '100,000', '', '개인 기준'],
+      ['직접사업비', '', '계약클라이언트', '200,000', '210,000', '클라이언트 기준'],
+      ['직접사업비', '인건비', '소계', '300,000', '', ''],
+    ];
+
+    const result = parseBudgetPlanMatrix(matrix);
+
+    expect(result.rows).toEqual([
+      {
+        budgetCode: '인건비',
+        subCode: '개인단위',
+        initialBudget: 100000,
+        note: '개인 기준',
+      },
+      {
+        budgetCode: '인건비',
+        subCode: '계약클라이언트',
+        initialBudget: 200000,
+        revisedBudget: 210000,
+        note: '클라이언트 기준',
+      },
+    ]);
+    expect(result.confidence).toBe('high');
+  });
+
+  it('handles reordered columns and extra text columns around the budget fields', () => {
+    const matrix = [
+      ['안내', '이 시트는 수정 가능'],
+      ['계약클라이언트', '세목', '비목', '비고', '변경후 예산', '당초예산'],
+      ['KOICA', '교통비', '여비', '현장 방문', '150,000', '100,000'],
+      ['KOICA', '숙박비', '', '', '', '80,000'],
+    ];
+
+    const result = parseBudgetPlanMatrix(matrix);
+
+    expect(result.rows).toEqual([
+      {
+        budgetCode: '여비',
+        subCode: '교통비',
+        initialBudget: 100000,
+        revisedBudget: 150000,
+        note: '현장 방문',
+      },
+      {
+        budgetCode: '여비',
+        subCode: '숙박비',
+        initialBudget: 80000,
+      },
+    ]);
+    expect(result.codeBook).toEqual([
+      { code: '여비', subCodes: ['교통비', '숙박비'] },
+    ]);
+  });
+
+  it('surfaces low-confidence warnings when it has to infer budget columns', () => {
+    const matrix = [
+      ['메타', '예산안'],
+      ['항목A', '항목B', '금액1', '금액2', '설명'],
+      ['인건비', '개인단위', '100,000', '110,000', '내부안'],
+      ['', '계약클라이언트', '200,000', '210,000', '외부안'],
+    ];
+
+    const result = parseBudgetPlanMatrix(matrix);
+
+    expect(result.rows).toEqual([
+      {
+        budgetCode: '인건비',
+        subCode: '개인단위',
+        initialBudget: 100000,
+        revisedBudget: 110000,
+        note: '내부안',
+      },
+      {
+        budgetCode: '인건비',
+        subCode: '계약클라이언트',
+        initialBudget: 200000,
+        revisedBudget: 210000,
+        note: '외부안',
+      },
+    ]);
+    expect(result.confidence).toBe('low');
+    expect(result.aiAssistRecommended).toBe(true);
+    expect(result.warnings?.length).toBeGreaterThan(0);
+  });
+
   it('merges budget rows by 비목/세목 without dropping unmatched existing rows', () => {
     const existing = [
       { budgetCode: '여비', subCode: '교통비', initialBudget: 100000, note: '기존' },

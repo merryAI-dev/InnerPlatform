@@ -1,7 +1,7 @@
 import type { BudgetCodeEntry, BudgetPlanRow, CashflowSheetLineId, ProjectSheetSourceType } from '../data/types';
 import { normalizeBankStatementMatrix, type BankStatementSheet } from './bank-statement';
 import { buildBudgetLabelKey, normalizeBudgetLabel } from './budget-labels';
-import { normalizeSpace, parseNumber } from './csv-utils';
+import { normalizeKey, normalizeSpace, parseNumber } from './csv-utils';
 import { parseCashflowLineLabel } from './settlement-csv';
 
 export type GoogleSheetMigrationTarget =
@@ -24,6 +24,12 @@ export interface GoogleSheetMigrationDescriptor {
 export interface BudgetSheetImportPayload {
   rows: BudgetPlanRow[];
   codeBook: BudgetCodeEntry[];
+  warnings?: string[];
+  confidence?: 'high' | 'medium' | 'low';
+  aiAssistRecommended?: boolean;
+  headerRowIndex?: number;
+  headerRowCount?: number;
+  detectedColumns?: Partial<Record<'category' | 'budgetCode' | 'subCode' | 'calcDesc' | 'initialBudget' | 'revisedBudget' | 'note', number>>;
 }
 
 export interface EvidenceRuleImportPayload {
@@ -132,6 +138,289 @@ function isSubtotalLike(value: string): boolean {
   return normalized.includes('소계') || normalized.includes('총계') || normalized.includes('합계');
 }
 
+type BudgetPlanFieldKey =
+  | 'category'
+  | 'budgetCode'
+  | 'subCode'
+  | 'calcDesc'
+  | 'initialBudget'
+  | 'revisedBudget'
+  | 'note';
+
+interface BudgetPlanFieldMatch {
+  index: number;
+  source: 'header' | 'inferred';
+}
+
+interface BudgetPlanHeaderCandidate {
+  rowIndex: number;
+  headerRowCount: number;
+  headers: string[];
+  matches: Partial<Record<BudgetPlanFieldKey, BudgetPlanFieldMatch>>;
+  score: number;
+  confidence: 'high' | 'medium' | 'low';
+  warnings: string[];
+}
+
+const BUDGET_PLAN_FIELD_ALIASES: Record<BudgetPlanFieldKey, string[]> = {
+  category: ['사업비 구분', '구분', '대분류', '영역'],
+  budgetCode: ['비목', '비목명', 'budgetcategory', 'budgetcode', 'category'],
+  subCode: ['세목', '세목명', '세부 비목', 'budgetsubcategory', 'subcategory', 'detailcategory'],
+  calcDesc: ['산정 내역', '산정내역', '산출 내역', '산출내역', '세세목', '상세 내역', '상세내역'],
+  initialBudget: ['최초 승인 예산', '최초승인예산', '당초예산', '당초 예산', '초기예산', '초기 예산', '승인 예산', '최초 예산', '예산액'],
+  revisedBudget: ['변경 승인 예산', '변경승인예산', '변경 예산', '수정 예산', '조정 예산', '최종 예산', '변경후 예산', '변경후예산'],
+  note: ['특이사항', '비고', '메모', '참고', 'note'],
+};
+
+function normalizeBudgetHeaderKey(value: unknown): string {
+  return normalizeKey(normalizeHeader(String(value || '')).replace(/[<>]/g, ' '));
+}
+
+function synthesizeBudgetHeaders(headerRows: string[][]): string[] {
+  const colCount = Math.max(...headerRows.map((row) => row.length), 0);
+  const headers: string[] = [];
+  for (let colIdx = 0; colIdx < colCount; colIdx += 1) {
+    const parts: string[] = [];
+    headerRows.forEach((row) => {
+      const cleaned = normalizeHeader(String(row[colIdx] || ''));
+      if (cleaned && !parts.includes(cleaned)) parts.push(cleaned);
+    });
+    headers.push(parts.join(' > ') || `col_${colIdx + 1}`);
+  }
+  return headers;
+}
+
+function scoreBudgetHeaderAliasMatch(header: string, aliases: string[]): number {
+  const key = normalizeBudgetHeaderKey(header);
+  if (!key) return -1;
+  let bestScore = -1;
+  aliases.forEach((alias) => {
+    const aliasKey = normalizeBudgetHeaderKey(alias);
+    if (!aliasKey) return;
+    if (key === aliasKey) {
+      bestScore = Math.max(bestScore, 100 + aliasKey.length);
+      return;
+    }
+    if (key.includes(aliasKey)) {
+      bestScore = Math.max(bestScore, 70 + aliasKey.length);
+      return;
+    }
+    if (aliasKey.includes(key)) {
+      bestScore = Math.max(bestScore, 40 + key.length);
+    }
+  });
+  return bestScore;
+}
+
+function looksLikeNumberCell(raw: string): boolean {
+  const value = normalizeHeader(raw);
+  if (!value) return false;
+  if (parseNumber(value) == null) return false;
+  return /[0-9]/.test(value);
+}
+
+function buildBudgetColumnStats(rows: string[][], columnCount: number): Array<{
+  nonEmptyCount: number;
+  numericCount: number;
+  textCount: number;
+  distinctTextCount: number;
+}> {
+  return Array.from({ length: columnCount }, (_, colIdx) => {
+    const values = rows
+      .map((row) => normalizeHeader(String(row[colIdx] || '')))
+      .filter(Boolean);
+    const numericValues = values.filter((value) => looksLikeNumberCell(value));
+    const textValues = values.filter((value) => !looksLikeNumberCell(value) && !isSubtotalLike(value));
+    return {
+      nonEmptyCount: values.length,
+      numericCount: numericValues.length,
+      textCount: textValues.length,
+      distinctTextCount: new Set(textValues.map((value) => normalizeBudgetLabel(value) || value)).size,
+    };
+  });
+}
+
+function detectBudgetPlanFieldMatches(
+  headers: string[],
+  sampleRows: string[][],
+): Partial<Record<BudgetPlanFieldKey, BudgetPlanFieldMatch>> {
+  const matches: Partial<Record<BudgetPlanFieldKey, BudgetPlanFieldMatch>> = {};
+  const usedIndexes = new Set<number>();
+
+  const claimHeaderMatch = (field: BudgetPlanFieldKey) => {
+    const index = headers
+      .map((header, headerIdx) => ({
+        headerIdx,
+        score: usedIndexes.has(headerIdx) ? -1 : scoreBudgetHeaderAliasMatch(header, BUDGET_PLAN_FIELD_ALIASES[field]),
+      }))
+      .filter((candidate) => candidate.score >= 0)
+      .sort((left, right) => right.score - left.score || left.headerIdx - right.headerIdx)[0]?.headerIdx;
+    if (index != null) {
+      matches[field] = { index, source: 'header' };
+      usedIndexes.add(index);
+    }
+  };
+
+  (['category', 'budgetCode', 'subCode', 'calcDesc', 'initialBudget', 'revisedBudget', 'note'] as BudgetPlanFieldKey[])
+    .forEach(claimHeaderMatch);
+
+  const stats = buildBudgetColumnStats(sampleRows, headers.length);
+  const firstAmountIndex = Math.min(
+    matches.initialBudget?.index ?? Number.POSITIVE_INFINITY,
+    matches.revisedBudget?.index ?? Number.POSITIVE_INFINITY,
+  );
+
+  if (!matches.initialBudget) {
+    const index = stats
+      .map((stat, statIdx) => ({ stat, statIdx }))
+      .filter(({ statIdx, stat }) => !usedIndexes.has(statIdx) && stat.nonEmptyCount > 0 && stat.numericCount / stat.nonEmptyCount >= 0.6)
+      .sort((left, right) => (right.stat.numericCount - left.stat.numericCount) || (left.statIdx - right.statIdx))[0]?.statIdx;
+    if (index != null) {
+      matches.initialBudget = { index, source: 'inferred' };
+      usedIndexes.add(index);
+    }
+  }
+
+  if (!matches.revisedBudget) {
+    const index = stats
+      .map((stat, statIdx) => ({ stat, statIdx }))
+      .filter(({ statIdx, stat }) => !usedIndexes.has(statIdx) && stat.nonEmptyCount > 0 && stat.numericCount / stat.nonEmptyCount >= 0.5)
+      .sort((left, right) => (left.statIdx - right.statIdx) || (right.stat.numericCount - left.stat.numericCount))[0]?.statIdx;
+    if (index != null) {
+      matches.revisedBudget = { index, source: 'inferred' };
+      usedIndexes.add(index);
+    }
+  }
+
+  const textCandidates = stats
+    .map((stat, statIdx) => ({ stat, statIdx }))
+    .filter(({ statIdx, stat }) => {
+      if (usedIndexes.has(statIdx)) return false;
+      if (stat.nonEmptyCount === 0 || stat.textCount === 0) return false;
+      if (Number.isFinite(firstAmountIndex) && statIdx > firstAmountIndex + 1) return false;
+      return stat.textCount / stat.nonEmptyCount >= 0.5;
+    })
+    .sort((left, right) => {
+      if (left.statIdx !== right.statIdx) return left.statIdx - right.statIdx;
+      return right.stat.distinctTextCount - left.stat.distinctTextCount;
+    });
+
+  if (!matches.budgetCode && textCandidates[0]) {
+    matches.budgetCode = { index: textCandidates[0].statIdx, source: 'inferred' };
+    usedIndexes.add(textCandidates[0].statIdx);
+  }
+
+  if (!matches.subCode) {
+    const nextSubCandidate = textCandidates.find(({ statIdx }) => !usedIndexes.has(statIdx));
+    if (nextSubCandidate) {
+      matches.subCode = { index: nextSubCandidate.statIdx, source: 'inferred' };
+      usedIndexes.add(nextSubCandidate.statIdx);
+    }
+  }
+
+  if (!matches.note) {
+    const index = stats
+      .map((stat, statIdx) => ({ stat, statIdx }))
+      .filter(({ statIdx, stat }) => !usedIndexes.has(statIdx) && stat.textCount > 0 && stat.distinctTextCount > 1)
+      .sort((left, right) => {
+        const leftAfterAmount = left.statIdx > firstAmountIndex ? 1 : 0;
+        const rightAfterAmount = right.statIdx > firstAmountIndex ? 1 : 0;
+        if (leftAfterAmount !== rightAfterAmount) return rightAfterAmount - leftAfterAmount;
+        return right.stat.distinctTextCount - left.stat.distinctTextCount;
+      })[0]?.statIdx;
+    if (index != null) {
+      matches.note = { index, source: 'inferred' };
+      usedIndexes.add(index);
+    }
+  }
+
+  return matches;
+}
+
+function scoreBudgetPlanHeaderCandidate(
+  matrix: string[][],
+  rowIndex: number,
+  headerRowCount: number,
+): BudgetPlanHeaderCandidate {
+  const headerRows = matrix.slice(rowIndex, rowIndex + headerRowCount)
+    .map((row) => (row || []).map((cell) => normalizeHeader(String(cell || ''))));
+  const headers = synthesizeBudgetHeaders(headerRows);
+  const sampleRows = matrix
+    .slice(rowIndex + headerRowCount, rowIndex + headerRowCount + 12)
+    .map((row) => headers.map((_, colIdx) => normalizeHeader(String((row || [])[colIdx] || ''))))
+    .filter((row) => row.some(Boolean));
+  const matches = detectBudgetPlanFieldMatches(headers, sampleRows);
+
+  let score = 0;
+  const warnings: string[] = [];
+  const requiredFields: BudgetPlanFieldKey[] = ['budgetCode', 'subCode', 'initialBudget'];
+  requiredFields.forEach((field) => {
+    const match = matches[field];
+    if (!match) return;
+    score += match.source === 'header' ? 35 : 18;
+  });
+  (['revisedBudget', 'calcDesc', 'note', 'category'] as BudgetPlanFieldKey[]).forEach((field) => {
+    const match = matches[field];
+    if (!match) return;
+    score += match.source === 'header' ? 12 : 6;
+  });
+
+  if (!matches.budgetCode || !matches.subCode || !matches.initialBudget) {
+    score -= 50;
+  }
+
+  const amountIndex = matches.initialBudget?.index ?? -1;
+  const subCodeIndex = matches.subCode?.index ?? -1;
+  const plausibleDataRows = sampleRows.filter((row) => {
+    const subCodeValue = subCodeIndex >= 0 ? normalizeBudgetLabel(row[subCodeIndex] || '') : '';
+    const initialAmount = amountIndex >= 0 ? parseNumber(row[amountIndex] || '') : null;
+    return Boolean(subCodeValue) && initialAmount != null;
+  }).length;
+  score += plausibleDataRows * 4;
+
+  const inferredFields = Object.entries(matches)
+    .filter(([, match]) => match?.source === 'inferred')
+    .map(([field]) => field);
+  if (inferredFields.length > 0) {
+    warnings.push(`일부 열(${inferredFields.join(', ')})은 서식 패턴으로 추정했습니다.`);
+  }
+  if (plausibleDataRows === 0) {
+    warnings.push('헤더는 찾았지만 바로 아래 데이터 행에서 예산 패턴이 약합니다.');
+  }
+
+  const headerMatchedRequiredCount = requiredFields.filter((field) => matches[field]?.source === 'header').length;
+  const confidence: 'high' | 'medium' | 'low' = (
+    headerMatchedRequiredCount === requiredFields.length && plausibleDataRows >= 2
+  )
+    ? 'high'
+    : (headerMatchedRequiredCount >= 2 && requiredFields.every((field) => matches[field]) && plausibleDataRows >= 1 ? 'medium' : 'low');
+
+  return {
+    rowIndex,
+    headerRowCount,
+    headers,
+    matches,
+    score,
+    confidence,
+    warnings,
+  };
+}
+
+function detectBudgetPlanHeader(matrix: string[][]): BudgetPlanHeaderCandidate | null {
+  const scanLimit = Math.min(matrix.length, 25);
+  let best: BudgetPlanHeaderCandidate | null = null;
+  for (let rowIndex = 0; rowIndex < scanLimit; rowIndex += 1) {
+    for (let headerRowCount = 1; headerRowCount <= 3 && rowIndex + headerRowCount <= scanLimit; headerRowCount += 1) {
+      const candidate = scoreBudgetPlanHeaderCandidate(matrix, rowIndex, headerRowCount);
+      if (!best || candidate.score > best.score) {
+        best = candidate;
+      }
+    }
+  }
+  if (!best || best.score < 40) return null;
+  return best;
+}
+
 export function describeGoogleSheetMigrationTarget(sheetName: string): GoogleSheetMigrationDescriptor {
   const normalized = String(sheetName || '').trim();
   const isENaraCashflowGuide = normalized.includes('cashflow') && normalized.includes('이나라도움');
@@ -228,43 +517,68 @@ export function describeGoogleSheetMigrationTarget(sheetName: string): GoogleShe
 }
 
 export function parseBudgetPlanMatrix(matrix: string[][]): BudgetSheetImportPayload {
-  const headerRowIndex = findHeaderRow(matrix, ['비목', '세목', '최초 승인 예산'], 20);
-  if (headerRowIndex < 0) {
-    return { rows: [], codeBook: [] };
+  const header = detectBudgetPlanHeader(matrix);
+  if (!header) {
+    return {
+      rows: [],
+      codeBook: [],
+      warnings: ['표준 예산총괄 헤더를 찾지 못했습니다. 서식 확인 또는 AI 보정이 필요합니다.'],
+      confidence: 'low',
+      aiAssistRecommended: true,
+    };
   }
-  const headers = (matrix[headerRowIndex] || []).map((cell) => normalizeHeader(cell));
-  const budgetCodeIndex = findColumnIndex(headers, '비목');
-  const subCodeIndex = findColumnIndex(headers, '세목');
-  const calcDescIndex = findColumnIndex(headers, '산정 내역');
-  const initialBudgetIndex = findColumnIndex(headers, '최초 승인 예산');
-  const revisedBudgetIndex = findColumnIndex(headers, '변경 승인 예산') >= 0
-    ? findColumnIndex(headers, '변경 승인 예산')
-    : findColumnIndex(headers, '변경 예산');
-  const noteIndex = findColumnIndex(headers, '특이사항');
+  const budgetCodeIndex = header.matches.budgetCode?.index ?? -1;
+  const subCodeIndex = header.matches.subCode?.index ?? -1;
+  const calcDescIndex = header.matches.calcDesc?.index ?? -1;
+  const initialBudgetIndex = header.matches.initialBudget?.index ?? -1;
+  const revisedBudgetIndex = header.matches.revisedBudget?.index ?? -1;
+  const noteIndex = header.matches.note?.index ?? -1;
   if (budgetCodeIndex < 0 || subCodeIndex < 0 || initialBudgetIndex < 0) {
-    return { rows: [], codeBook: [] };
+    return {
+      rows: [],
+      codeBook: [],
+      warnings: [
+        ...header.warnings,
+        '비목/세목/예산 열을 확정하지 못했습니다. 서식 확인 또는 AI 보정이 필요합니다.',
+      ],
+      confidence: 'low',
+      aiAssistRecommended: true,
+      headerRowIndex: header.rowIndex,
+      headerRowCount: header.headerRowCount,
+      detectedColumns: Object.fromEntries(
+        Object.entries(header.matches).map(([field, match]) => [field, match?.index ?? -1]),
+      ) as BudgetSheetImportPayload['detectedColumns'],
+    };
   }
 
   const rows: BudgetPlanRow[] = [];
   let currentBudgetCode = '';
-  for (let rowIndex = headerRowIndex + 1; rowIndex < matrix.length; rowIndex += 1) {
+  for (let rowIndex = header.rowIndex + header.headerRowCount; rowIndex < matrix.length; rowIndex += 1) {
     const row = matrix[rowIndex] || [];
     const budgetCodeRaw = readCell(row, budgetCodeIndex);
     const subCodeRaw = readCell(row, subCodeIndex);
     const calcDescRaw = readCell(row, calcDescIndex);
     const noteRaw = readCell(row, noteIndex);
+    const initialBudgetRaw = readCell(row, initialBudgetIndex);
+    const revisedBudgetRaw = revisedBudgetIndex >= 0 ? readCell(row, revisedBudgetIndex) : '';
+
+    const rowText = row.map((cell) => normalizeHeader(String(cell || ''))).filter(Boolean);
+    if (rowText.length === 0) continue;
 
     if (budgetCodeRaw) {
       currentBudgetCode = budgetCodeRaw;
     }
     const budgetCode = normalizeBudgetLabel(budgetCodeRaw || currentBudgetCode);
     const subCode = normalizeBudgetLabel(subCodeRaw);
-    if (!budgetCode && !subCode && !calcDescRaw && !noteRaw) continue;
+    const initialBudget = parseNumber(initialBudgetRaw) ?? 0;
+    const revisedBudget = revisedBudgetRaw ? (parseNumber(revisedBudgetRaw) ?? 0) : 0;
+
+    const hasAnyAmount = initialBudgetRaw !== '' || revisedBudgetRaw !== '';
+    const looksLikeSectionRow = Boolean(budgetCodeRaw) && !subCodeRaw && !hasAnyAmount && !calcDescRaw && !noteRaw;
+    if (looksLikeSectionRow) continue;
+    if (!budgetCode && !subCode && !calcDescRaw && !noteRaw && !hasAnyAmount) continue;
     if (!budgetCode || !subCode) continue;
     if (isSubtotalLike(budgetCode) || isSubtotalLike(subCode)) continue;
-
-    const initialBudget = parseNumber(readCell(row, initialBudgetIndex)) ?? 0;
-    const revisedBudget = revisedBudgetIndex >= 0 ? (parseNumber(readCell(row, revisedBudgetIndex)) ?? 0) : 0;
     const note = [calcDescRaw, noteRaw].filter(Boolean).join(' | ').trim();
     rows.push({
       budgetCode,
@@ -278,6 +592,14 @@ export function parseBudgetPlanMatrix(matrix: string[][]): BudgetSheetImportPayl
   return {
     rows,
     codeBook: buildBudgetCodeBook(rows),
+    warnings: header.warnings,
+    confidence: header.confidence,
+    aiAssistRecommended: header.confidence === 'low',
+    headerRowIndex: header.rowIndex,
+    headerRowCount: header.headerRowCount,
+    detectedColumns: Object.fromEntries(
+      Object.entries(header.matches).map(([field, match]) => [field, match?.index ?? -1]),
+    ) as BudgetSheetImportPayload['detectedColumns'],
   };
 }
 

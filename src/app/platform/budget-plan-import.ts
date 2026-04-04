@@ -20,6 +20,10 @@ function scoreBudgetPlanSheet(sheet: LocalWorkbookSheet): number {
   const name = String(sheet.name || '').toLowerCase();
   const parsed = parseBudgetPlanMatrix(sheet.matrix);
   let score = parsed.rows.length * 10;
+  if (parsed.confidence === 'high') score += 120;
+  else if (parsed.confidence === 'medium') score += 60;
+  else if (parsed.rows.length > 0) score += 20;
+  if (parsed.aiAssistRecommended) score -= 15;
   if (name.includes('예산총괄')) score += 1000;
   else if (name.includes('그룹예산')) score += 900;
   else if (name.includes('예산')) score += 500;

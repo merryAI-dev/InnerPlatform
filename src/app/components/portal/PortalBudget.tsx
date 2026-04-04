@@ -298,6 +298,16 @@ export function PortalBudget() {
     () => budgetImportMergedCodeBook.reduce((sum, entry) => sum + entry.subCodes.length, 0),
     [budgetImportMergedCodeBook],
   );
+  const budgetImportConfidenceLabel = useMemo(() => {
+    switch (budgetImportParsed.confidence) {
+      case 'high':
+        return '높음';
+      case 'medium':
+        return '중간';
+      default:
+        return '낮음';
+    }
+  }, [budgetImportParsed.confidence]);
 
   const formatInput = useCallback((value: string) => {
     const num = parseNumber(value);
@@ -931,6 +941,7 @@ export function PortalBudget() {
                   <span>유지 {budgetImportMergePlan.summary.unchangedCount}건</span>
                   <span>비목 {budgetImportMergedCodeBook.length}개</span>
                   <span>세목 {budgetImportMergedSubCodeCount}건</span>
+                  <span>신뢰도 {budgetImportConfidenceLabel}</span>
                 </div>
                 {budgetImportTab === 'file' && budgetImportFileName ? (
                   <p className="mt-2">
@@ -948,6 +959,16 @@ export function PortalBudget() {
                     동일한 비목/세목 키는 덮어쓰고, 현재 화면에만 있는 기존 예산 항목은 삭제하지 않습니다.
                   </p>
                 ) : null}
+                {budgetImportParsed.aiAssistRecommended ? (
+                  <p className="mt-2 text-amber-600">
+                    서식 편차가 커서 일부 열을 추정했습니다. 반영 전 미리보기를 꼭 확인해 주세요. 필요하면 다음 단계에서 AI 보정 endpoint를 붙일 수 있습니다.
+                  </p>
+                ) : null}
+                {(budgetImportParsed.warnings || []).slice(0, 3).map((warning, warningIdx) => (
+                  <p key={`budget-import-warning-${warningIdx}`} className="mt-2 text-amber-600">
+                    {warning}
+                  </p>
+                ))}
               </div>
 
               <div className="min-h-0 flex-1 overflow-auto rounded-md border border-border/60">
