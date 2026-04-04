@@ -72,6 +72,13 @@ authoritative interpretation:
 - bank upload row에서 `사업비 사용액`이 주어지면 `매입부가세`를 역산할 수 있다.
 - direct-entry row에서는 사용자가 `사업비 사용액`과 `매입부가세`를 둘 다 명시할 수 있으므로, policy에 따라 자동계산은 보조 역할만 한다.
 
+HITL note:
+
+- 이 규칙은 **authoritative truth가 아니라 candidate derivation**이다.
+- 실제 운영에서는 영수증/세금계산서 기준 금액과 통장 금액이 깔끔하게 1:1 분해되지 않는 경우가 많다.
+- 따라서 `매입부가세 = 통장금액 - 공급가액`은 자동 제안은 가능하지만, 최종 저장/검증 단계에서는 `사람 확인 필요(HITL)` 상태를 거쳐야 한다.
+- phase 1 이후 validation은 `수식으로 계산 가능함`과 `업무상 맞는 금액임`을 같은 것으로 취급하지 않는다.
+
 ### Rule 3. Expense amount derivation
 
 source workbook sample은 `N4:N9 = $K$4/11*10`입니다.
@@ -87,6 +94,7 @@ authoritative interpretation:
 
 - 정책상 VAT split이 필요한 경우의 intended rule은 `expense_amount = bank_amount * 10 / 11` 또는 `expense_amount = bank_amount - input_vat` 계열일 가능성이 높다.
 - 정확한 선택은 golden fixture와 현행 앱 정책을 비교하면서 고정한다.
+- 다만 공급가액 자동 역산이 가능하더라도, 그 결과로 계산된 `매입부가세`는 반드시 HITL 검증 후보로 남긴다.
 
 ### Rule 4. Error propagation is not parity target
 
@@ -120,6 +128,7 @@ phase 1 interpretation:
 - VAT split 후 cashflow 반영
 - manual override 보존
 - direct-entry / bank-upload 정책 분기
+- formula-derived VAT에 대한 HITL 검증 경로 분리
 
 ## Acceptance For Phase 1 PR-1
 
@@ -129,3 +138,4 @@ phase 1 interpretation:
 - tracked fixture seed 기반 test가 추가된다.
 - `N4:N9` 절대참조 패턴은 anomaly로 격리된다.
 - `J13 이후` 오류 전파는 정상 규칙과 분리된다.
+- formula-derived `매입부가세`는 authoritative final truth로 자동 승격되지 않고, HITL review candidate로 남는다.

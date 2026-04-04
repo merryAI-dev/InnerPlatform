@@ -59,6 +59,7 @@ npm run workbook:extract:formulas -- /Users/boram/InnerPlatform/tmp/spreadsheets
 - 공급가액 / 사업비 사용액 / 매입부가세 파생 우선순위 고정
 - 취소/환입 포함 순액 계산 규칙 고정
 - golden fixture 기반 테스트 작성
+- formula-derived `매입부가세`를 HITL 검증 후보로 분리하는 기준 정의
 
 이번 페이즈에서 하지 않는 것:
 
@@ -76,12 +77,14 @@ phase 1은 아래가 모두 충족될 때만 종료한다.
 - source bug가 있는 행은 “원본 오류”로 분리되어 parity mismatch와 섞이지 않는다.
 - direct-entry 정책과 bank-upload 정책이 같은 authoritative engine 입력 모델로 수렴한다.
 - 다음 phase가 `예산총괄시트`로 넘어갈 수 있을 정도로 API/DTO 경계가 고정된다.
+- `매입부가세`가 수식으로 분해된 행은 parity 통과만으로 승인되지 않고, `사람 확인 필요(HITL)` 상태를 남길 수 있어야 한다.
 
 ## Blockers To Watch
 
 - 시트 수식이 깨져 있어도 업무상 정답이 암묵적으로 알려진 행이 있을 수 있다.
 - `cashflow(e나라도움 시 가이드)` 같은 guide 탭은 계산 규칙과 설명 규칙이 섞여 있다.
 - direct-entry 사업과 bank-upload 사업이 같은 `사용내역` 규칙을 모두 공유하지 않을 수 있다.
+- `공급가액` 자동 역산이 가능해도, 실제 `매입부가세`는 증빙 기준 금액과 차이가 날 수 있어 formula-only validation으로는 충분하지 않다.
 
 ## Handoff Rule
 
