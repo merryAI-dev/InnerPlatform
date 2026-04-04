@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildDriveProjectFolderName,
   buildDriveTransactionFolderName,
+  deriveEvidenceLabelFromFileName,
   extractDriveFolderId,
   inferEvidenceCategoryFromDocumentText,
   inferEvidenceCategoryFromFileName,
@@ -142,6 +143,28 @@ describe('google-drive helpers', () => {
     expect(patch.evidenceCompletedDesc).toBe('세금계산서, 입금확인서');
     expect(patch.evidencePendingDesc).toBeUndefined();
     expect(patch.evidenceMissing).toEqual([]);
+    expect(patch.evidenceStatus).toBe('COMPLETE');
+  });
+
+  it('keeps a readable filename-derived label when the category is unknown', () => {
+    expect(deriveEvidenceLabelFromFileName('20260404_현장확인메일_final.msg')).toBe('현장확인메일');
+
+    const patch = resolveEvidenceSyncPatch({
+      transaction: {
+        evidenceRequired: ['현장확인메일'],
+        evidenceCompletedDesc: '',
+        evidenceAutoListedDesc: '',
+        evidenceDriveLink: 'https://drive.google.com/drive/folders/fld-tx',
+      },
+      evidences: [
+        { fileName: '20260404_현장확인메일_final.msg', category: '기타', parserCategory: '기타' },
+      ],
+      folder: {
+        webViewLink: 'https://drive.google.com/drive/folders/fld-tx',
+      },
+    });
+
+    expect(patch.evidenceCompletedDesc).toBe('현장확인메일');
     expect(patch.evidenceStatus).toBe('COMPLETE');
   });
 

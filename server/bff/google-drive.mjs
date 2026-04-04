@@ -31,6 +31,17 @@ function normalizeEvidenceFileName(fileName) {
     .replace(/[_-]+/g, ' ');
 }
 
+function humanizeEvidenceStem(fileName) {
+  return normalizeEvidenceFileName(fileName)
+    .replace(/\.[^.]+$/, '')
+    .replace(/\b20\d{2}[._-]?\d{1,2}([._-]?\d{1,2})?\b/g, ' ')
+    .replace(/\b\d{6,8}\b/g, ' ')
+    .replace(/\b(v|ver)\d+\b/gi, ' ')
+    .replace(/\b(final|finals|draft|최종본?|수정본?)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim() || '기타';
+}
+
 function normalizeSegment(value, fallback) {
   const cleaned = String(value || '')
     .trim()
@@ -143,6 +154,12 @@ export function inferEvidenceCategoryFromFileName(fileName, fallback = '기타')
   return { category: matched.category, confidence: matched.confidence };
 }
 
+export function deriveEvidenceLabelFromFileName(fileName, fallback = '기타') {
+  const inferred = inferEvidenceCategoryFromFileName(fileName, fallback);
+  if (inferred.category && inferred.category !== fallback) return inferred.category;
+  return humanizeEvidenceStem(fileName) || fallback;
+}
+
 export function inferEvidenceCategoryFromDocumentText(documentText, fallback = '기타') {
   const normalized = String(documentText || '')
     .normalize('NFC')
@@ -161,7 +178,13 @@ export function inferEvidenceCategoryFromDocumentText(documentText, fallback = '
 
 export function buildEvidenceCompletedDesc(evidences) {
   const categories = (Array.isArray(evidences) ? evidences : [])
-    .map((evidence) => evidence.category || evidence.parserCategory || inferEvidenceCategoryFromFileName(evidence.fileName).category)
+    .map((evidence) => {
+      const explicit = readOptionalText(evidence?.category);
+      if (explicit && explicit !== '기타') return explicit;
+      const parsed = readOptionalText(evidence?.parserCategory);
+      if (parsed && parsed !== '기타') return parsed;
+      return deriveEvidenceLabelFromFileName(evidence?.fileName);
+    })
     .map((value) => String(value || '').trim())
     .filter(Boolean);
   return [...new Set(categories)].join(', ');

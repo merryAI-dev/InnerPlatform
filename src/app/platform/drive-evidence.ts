@@ -137,6 +137,18 @@ function sanitizeFileStem(value: string, fallback = '문서'): string {
   return normalizeSegment(String(value || '').replace(/\.[^.]+$/, ''), fallback);
 }
 
+function humanizeEvidenceStem(value: string): string {
+  const normalized = normalizeEvidenceFileName(value)
+    .replace(/\.[^.]+$/, '')
+    .replace(/\b20\d{2}[._-]?\d{1,2}([._-]?\d{1,2})?\b/g, ' ')
+    .replace(/\b\d{6,8}\b/g, ' ')
+    .replace(/\b(v|ver)\d+\b/gi, ' ')
+    .replace(/\b(final|finals|draft|최종본?|수정본?)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return normalized || '기타';
+}
+
 const CATEGORY_PATTERNS: Array<{ category: string; patterns: RegExp[] }> = [
   { category: 'ZOOM invoice', patterns: [/zoom\s*invoice/i] },
   { category: '심사결과보고서', patterns: [/심사\s*결과\s*보고서/i] },
@@ -235,9 +247,21 @@ export function suggestEvidenceUploadFileName(input: {
   return `${finalStem}${extension}`;
 }
 
+export function deriveEvidenceLabelFromFileName(fileName: string, fallback = '기타'): string {
+  const inferredCategory = inferEvidenceCategoryFromFileName(fileName, fallback);
+  if (inferredCategory && inferredCategory !== fallback) return inferredCategory;
+  return humanizeEvidenceStem(fileName) || fallback;
+}
+
 export function buildEvidenceCompletedDesc(evidences: Evidence[]): string {
   const categories = evidences
-    .map((evidence) => evidence.category || evidence.parserCategory || inferEvidenceCategoryFromFileName(evidence.fileName))
+    .map((evidence) => {
+      const explicit = String(evidence.category || '').trim();
+      if (explicit && explicit !== '기타') return explicit;
+      const parsed = String(evidence.parserCategory || '').trim();
+      if (parsed && parsed !== '기타') return parsed;
+      return deriveEvidenceLabelFromFileName(evidence.fileName);
+    })
     .map((value) => value.trim())
     .filter(Boolean);
   return [...new Set(categories)].join(', ');

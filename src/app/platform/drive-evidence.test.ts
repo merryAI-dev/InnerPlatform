@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildDriveTransactionFolderName,
   buildEvidenceCompletedDesc,
+  deriveEvidenceLabelFromFileName,
   inferEvidenceCategoryFromDocumentText,
   inferEvidenceCategoryFromFileName,
   parseDriveTransactionFolderName,
@@ -70,6 +71,13 @@ describe('drive evidence helpers', () => {
       { id: 'ev2', transactionId: 'tx1', fileName: 'attendance.xlsx', fileType: 'application/vnd.ms-excel', fileSize: 1, uploadedBy: 'u1', uploadedAt: '2026-03-11', category: '', parserCategory: '참석자명단', status: 'ACCEPTED' },
       { id: 'ev3', transactionId: 'tx1', fileName: '세금계산서_b.pdf', fileType: 'application/pdf', fileSize: 1, uploadedBy: 'u1', uploadedAt: '2026-03-11', category: '세금계산서', status: 'ACCEPTED' },
     ])).toBe('세금계산서, 참석자명단');
+  });
+
+  it('falls back to a human-readable label for unknown evidence filenames', () => {
+    expect(deriveEvidenceLabelFromFileName('20260404_현장확인메일_final.msg')).toBe('현장확인메일');
+    expect(buildEvidenceCompletedDesc([
+      { id: 'ev4', transactionId: 'tx1', fileName: '20260404_현장확인메일_final.msg', fileType: 'message/rfc822', fileSize: 1, uploadedBy: 'u1', uploadedAt: '2026-03-11', category: '기타', parserCategory: '기타', status: 'ACCEPTED' },
+    ])).toBe('현장확인메일');
   });
 
   it('suggests a normalized upload filename while keeping human review possible', () => {

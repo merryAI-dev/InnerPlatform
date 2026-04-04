@@ -24,7 +24,7 @@ import {
   resolveEvidenceCompletedDesc,
   resolveEvidenceCompletedManualDesc,
 } from '../../platform/evidence-helpers';
-import { buildDriveTransactionFolderName, inferEvidenceCategoryFromFileName, suggestEvidenceUploadFileName } from '../../platform/drive-evidence';
+import { buildDriveTransactionFolderName, deriveEvidenceLabelFromFileName, inferEvidenceCategoryFromFileName, suggestEvidenceUploadFileName } from '../../platform/drive-evidence';
 import {
   CASHFLOW_LINE_OPTIONS,
   SETTLEMENT_COLUMNS,
@@ -1886,16 +1886,19 @@ export function ImportEditor({
             });
             return files.map((file, index) => {
               const parserCategory = inferEvidenceCategoryFromFileName(file.name);
+              const initialCategory = parserCategory === '기타'
+                ? deriveEvidenceLabelFromFileName(file.name)
+                : parserCategory;
               const suggestedFileName = suggestEvidenceUploadFileName({
                 originalFileName: file.name,
-                category: parserCategory,
+                category: initialCategory,
                 transaction: sourceTransaction,
               });
               return {
                 id: `${batchId}-${index}-${file.name}`,
                 file,
                 objectUrl: URL.createObjectURL(file),
-                category: parserCategory,
+                category: initialCategory,
                 parserCategory,
                 suggestedFileName,
                 reviewedFileName: suggestedFileName,

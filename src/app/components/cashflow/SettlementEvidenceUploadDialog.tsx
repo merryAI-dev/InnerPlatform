@@ -122,7 +122,7 @@ export function SettlementEvidenceUploadDialog({
               <div className="rounded-xl border bg-background p-3">
                 <p className="text-[12px] font-semibold">파싱 결과</p>
                 <p className="mt-1 text-[11px] text-muted-foreground">
-                  파일명과 운영 규칙으로 자동 분류했습니다. 사람이 최종 확인해 주세요.
+                  파일명과 운영 규칙으로 자동 분류했습니다. 목록에 없는 증빙 종류는 아래에서 직접 입력해 주세요.
                 </p>
               </div>
               <div className="min-h-0 flex-1 space-y-2 overflow-auto pr-1">
@@ -181,18 +181,14 @@ export function SettlementEvidenceUploadDialog({
                     </div>
                     <div className="mt-2">
                       <label className="mb-1 block text-[10px] text-muted-foreground">문서 종류</label>
-                      <select
+                      <input
+                        list="evidence-document-categories"
                         value={draft.category}
                         className="h-8 w-full rounded-md border bg-background px-2 text-[11px]"
+                        placeholder="목록에서 고르거나 직접 입력"
                         onClick={(event) => event.stopPropagation()}
                         onChange={(event) => onUpdateDraftCategory(draft.id, event.target.value)}
-                      >
-                        {EVIDENCE_DOCUMENT_CATEGORIES.map((category) => (
-                          <option key={category} value={category}>
-                            {category}
-                          </option>
-                        ))}
-                      </select>
+                      />
                     </div>
                   </div>
                 ))}
@@ -200,6 +196,11 @@ export function SettlementEvidenceUploadDialog({
             </div>
           </div>
         </div>
+        <datalist id="evidence-document-categories">
+          {EVIDENCE_DOCUMENT_CATEGORIES.map((category) => (
+            <option key={category} value={category} />
+          ))}
+        </datalist>
         <DialogFooter className="border-t px-6 py-4">
           <Button variant="outline" onClick={onCancel} disabled={uploadingEvidence}>
             취소
