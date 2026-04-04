@@ -510,7 +510,7 @@ export function CashflowProjectSheet({
       const statusRef = doc(db, getOrgDocumentPath(orgId, 'weeklySubmissionStatus', statusId));
       const snap = await getDoc(statusRef);
       const status = snap.exists() ? (snap.data() as WeeklySubmissionStatus) : undefined;
-      const accountingState = resolveWeeklyAccountingState(status);
+      const accountingState = resolveWeeklyAccountingState(status, byWeekNo.get(weekNo));
 
       setCloseDialog({
         kind: accountingState.closeDialogKind,

@@ -22,19 +22,10 @@ import { STATE_LABELS, type ChangeRequestState } from '../../data/personnel-chan
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { getMonthMondayWeeks } from '../../platform/cashflow-weeks';
 import { addMonthsToYearMonth, getSeoulTodayIso } from '../../platform/business-days';
-import { resolveWeeklyAccountingState } from '../../platform/weekly-accounting-state';
+import { resolveWeeklyAccountingSnapshot, resolveWeeklyAccountingState } from '../../platform/weekly-accounting-state';
 
 function sortIsoDesc(a: string | undefined, b: string | undefined): number {
   return String(b || '').localeCompare(String(a || ''));
-}
-
-function hasWeekAmounts(values: Record<string, unknown> | undefined): boolean {
-  if (!values) return false;
-  return Object.values(values).some((value) => typeof value === 'number' && Number.isFinite(value) && value !== 0);
-}
-
-function resolveEditedState(manualValue: boolean | undefined, fallbackValue: boolean): boolean {
-  return typeof manualValue === 'boolean' ? manualValue : fallbackValue;
 }
 
 function formatKstDateTime(value: string | undefined): { date: string; time: string } | null {
@@ -378,11 +369,12 @@ export function PortalSubmissionsPage() {
                   const key = `${p.id}-${yearMonth}-w${selectedWeek?.weekNo || 1}`;
                   const status = statusMap.get(key);
                   const weekSheet = checklistWeekMap.get(p.id);
-                  const projectionDone = Boolean(status?.projectionUpdated);
-                  const expenseDone = Boolean(status?.expenseUpdated);
-                  const accountingState = resolveWeeklyAccountingState(status);
-                  const projectionEdited = resolveEditedState(status?.projectionEdited, hasWeekAmounts(weekSheet?.projection));
-                  const expenseEdited = resolveEditedState(status?.expenseEdited, hasWeekAmounts(weekSheet?.actual));
+                  const snapshot = resolveWeeklyAccountingSnapshot(status, weekSheet);
+                  const projectionDone = snapshot.projectionDone;
+                  const expenseDone = snapshot.expenseDone;
+                  const accountingState = resolveWeeklyAccountingState(status, weekSheet);
+                  const projectionEdited = snapshot.projectionEdited;
+                  const expenseEdited = snapshot.expenseEdited;
                   const projectionAudit = pickLatestAuditMeta({
                     editedAt: status?.projectionEditedAt,
                     editedByName: status?.projectionEditedByName,
@@ -626,14 +618,21 @@ export function PortalSubmissionsPage() {
               </thead>
               <tbody>
                 {monthWeeks.map((w) => {
-                  const meta = byWeekNo.get(w.weekNo);
-                  const pmSubmitted = Boolean(meta?.pmSubmitted);
-                  const adminClosed = Boolean(meta?.adminClosed);
+                  const weekDoc = myCashflowWeeks.find((item) => item.weekNo === w.weekNo);
+                  const statusDoc = statusMap.get(`${projectId}-${yearMonth}-w${w.weekNo}`);
+                  const snapshot = resolveWeeklyAccountingSnapshot(statusDoc, weekDoc);
+                  const accountingState = resolveWeeklyAccountingState(statusDoc, weekDoc);
+                  const pmSubmitted = snapshot.pmSubmitted;
+                  const adminClosed = snapshot.adminClosed;
                   const isThisWeek = todayYearMonth === yearMonth && todayIso >= w.weekStart && todayIso <= w.weekEnd;
                   const status = adminClosed
                     ? { label: '결산완료', cls: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' }
+                    : accountingState.closeDialogKind === 'warning'
+                      ? { label: accountingState.expenseStatusLabel, cls: 'bg-amber-500/15 text-amber-700 dark:text-amber-300' }
                     : pmSubmitted
                       ? { label: '작성완료', cls: 'bg-amber-500/15 text-amber-700 dark:text-amber-300' }
+                      : snapshot.projectionDone || snapshot.expenseDone
+                        ? { label: '저장됨', cls: 'bg-sky-500/15 text-sky-700 dark:text-sky-300' }
                       : { label: '미작성', cls: 'bg-slate-500/10 text-slate-600 dark:text-slate-300' };
 
                   return (

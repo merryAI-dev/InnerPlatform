@@ -1,6 +1,17 @@
-import type { WeeklySubmissionStatus } from '../data/types';
+import type { CashflowWeekSheet, WeeklySubmissionStatus } from '../data/types';
 
 export type WeeklyExpenseSyncState = 'idle' | 'pending' | 'review_required' | 'synced' | 'sync_failed';
+
+export interface WeeklyAccountingSnapshot {
+  projectionEdited: boolean;
+  projectionDone: boolean;
+  expenseEdited: boolean;
+  expenseDone: boolean;
+  expenseSyncState: WeeklyExpenseSyncState;
+  expenseReviewPendingCount: number;
+  pmSubmitted: boolean;
+  adminClosed: boolean;
+}
 
 export interface WeeklyAccountingState {
   projectionDone: boolean;
@@ -13,13 +24,48 @@ export interface WeeklyAccountingState {
   expenseStatusTone: 'muted' | 'warning' | 'danger' | 'success';
 }
 
+function hasWeekAmounts(values: Record<string, unknown> | undefined): boolean {
+  if (!values) return false;
+  return Object.values(values).some((value) => typeof value === 'number' && Number.isFinite(value) && value !== 0);
+}
+
+export function resolveWeeklyAccountingSnapshot(
+  status: WeeklySubmissionStatus | null | undefined,
+  weekSheet?: CashflowWeekSheet | null,
+): WeeklyAccountingSnapshot {
+  const projectionHasData = hasWeekAmounts(weekSheet?.projection);
+  const actualHasData = hasWeekAmounts(weekSheet?.actual);
+  const expenseSyncState = (
+    status?.expenseSyncState
+    || (actualHasData ? 'pending' : 'idle')
+  ) as WeeklyExpenseSyncState;
+  const expenseDone = typeof status?.expenseUpdated === 'boolean'
+    ? status.expenseUpdated
+    : (actualHasData || expenseSyncState !== 'idle');
+  return {
+    projectionEdited: typeof status?.projectionEdited === 'boolean'
+      ? status.projectionEdited
+      : projectionHasData,
+    projectionDone: typeof status?.projectionUpdated === 'boolean'
+      ? status.projectionUpdated
+      : (projectionHasData || Boolean(weekSheet?.pmSubmitted) || Boolean(weekSheet?.adminClosed)),
+    expenseEdited: typeof status?.expenseEdited === 'boolean'
+      ? status.expenseEdited
+      : actualHasData,
+    expenseDone,
+    expenseSyncState,
+    expenseReviewPendingCount: Math.max(0, Math.trunc(status?.expenseReviewPendingCount || 0)),
+    pmSubmitted: Boolean(weekSheet?.pmSubmitted),
+    adminClosed: Boolean(weekSheet?.adminClosed),
+  };
+}
+
 export function resolveWeeklyAccountingState(
   status: WeeklySubmissionStatus | null | undefined,
+  weekSheet?: CashflowWeekSheet | null,
 ): WeeklyAccountingState {
-  const projectionDone = Boolean(status?.projectionUpdated);
-  const expenseDone = Boolean(status?.expenseUpdated);
-  const expenseSyncState = (status?.expenseSyncState || 'idle') as WeeklyExpenseSyncState;
-  const expenseReviewPendingCount = Math.max(0, Math.trunc(status?.expenseReviewPendingCount || 0));
+  const snapshot = resolveWeeklyAccountingSnapshot(status, weekSheet);
+  const { projectionDone, expenseDone, expenseSyncState, expenseReviewPendingCount } = snapshot;
 
   if (!projectionDone || !expenseDone) {
     return {
