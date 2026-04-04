@@ -34,6 +34,8 @@
     "qa:feedback:ingest": "npx tsx scripts/ingest_qa_feedback_tracker.ts",
     "phase:preflight": "npx tsx scripts/phase_preflight_qa.ts",
     "phase1:extract:usage-ledger": "npx tsx scripts/extract_usage_ledger_phase1_fixture.ts",
+    "rust:settlement:build": "cargo build --quiet --manifest-path rust/spreadsheet-calculation-core/Cargo.toml",
+    "rust:settlement:test": "cargo test --manifest-path rust/spreadsheet-calculation-core/Cargo.toml",
     "workbook:extract:formulas": "npx tsx scripts/extract_workbook_formula_inventory.ts",
     "firestore:live-cutover": "npx tsx scripts/firestore_live_cutover.ts",
     "firestore:backup:schedule": "bash scripts/firestore_backup_schedule.sh",

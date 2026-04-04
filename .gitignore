@@ -4,6 +4,7 @@ dist/
 coverage/
 test-results/
 tmp/
+rust/**/target/
 *.log
 
 .vercel/
