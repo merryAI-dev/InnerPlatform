@@ -40,6 +40,11 @@ describe('drive evidence helpers', () => {
   it('covers expanded evidence document categories used by business teams', () => {
     expect(inferEvidenceCategoryFromFileName('2026 온드림 강의자료_v1.pdf')).toBe('강의자료');
     expect(inferEvidenceCategoryFromFileName('프로젝트 견적서_수정본.xlsx')).toBe('견적서');
+    expect(inferEvidenceCategoryFromFileName('전자세금계산서_4월.pdf')).toBe('세금계산서');
+    expect(inferEvidenceCategoryFromFileName('송금확인증_4월.pdf')).toBe('입금확인서');
+    expect(inferEvidenceCategoryFromFileName('지출결의서_초안.hwp')).toBe('지출결의');
+    expect(inferEvidenceCategoryFromFileName('거래명세표_4월.pdf')).toBe('거래명세서');
+    expect(inferEvidenceCategoryFromFileName('참석확인서_워크숍.pdf')).toBe('참석자명단');
     expect(inferEvidenceCategoryFromFileName('진행결과보고서_최종.pdf')).toBe('진행결과보고서');
     expect(inferEvidenceCategoryFromFileName('비용지급확인서_홍길동.pdf')).toBe('비용지급확인서');
     expect(inferEvidenceCategoryFromFileName('이체확인증_3월.png')).toBe('이체확인증');

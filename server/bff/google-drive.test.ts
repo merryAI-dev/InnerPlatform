@@ -35,6 +35,10 @@ describe('google-drive helpers', () => {
   it('supports the expanded evidence category dictionary from Merry operations', () => {
     expect(inferEvidenceCategoryFromFileName('강의자료_202603.pdf').category).toBe('강의자료');
     expect(inferEvidenceCategoryFromFileName('견적서_수정.xlsx').category).toBe('견적서');
+    expect(inferEvidenceCategoryFromFileName('전자세금계산서_4월.pdf').category).toBe('세금계산서');
+    expect(inferEvidenceCategoryFromFileName('송금확인증_4월.pdf').category).toBe('입금확인서');
+    expect(inferEvidenceCategoryFromFileName('지출결의서_초안.hwp').category).toBe('지출결의');
+    expect(inferEvidenceCategoryFromFileName('거래명세표_4월.pdf').category).toBe('거래명세서');
     expect(inferEvidenceCategoryFromFileName('비용지급확인서_홍길동.pdf').category).toBe('비용지급확인서');
     expect(inferEvidenceCategoryFromFileName('이체확인증_3월.pdf').category).toBe('이체확인증');
     expect(inferEvidenceCategoryFromFileName('진행결과보고서_최종.pdf').category).toBe('진행결과보고서');

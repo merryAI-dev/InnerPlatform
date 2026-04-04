@@ -4,6 +4,7 @@ import type { Transaction, TransactionState } from '../../data/types';
 import {
   computeEvidenceStatus,
   isValidDriveUrl,
+  resolveEvidenceChecklist,
   resolveEvidenceCompletedDesc,
   resolveEvidenceCompletedManualDesc,
 } from '../../platform/evidence-helpers';
@@ -71,6 +72,7 @@ export function SettlementTransactionRow({
   const autoCompletedDesc = tx.evidenceAutoListedDesc || '';
   const manualCompletedDesc = resolveEvidenceCompletedManualDesc(tx);
   const effectiveCompletedDesc = resolveEvidenceCompletedDesc(tx);
+  const evidenceChecklist = resolveEvidenceChecklist(tx);
   const expenseAudit = findLatestFieldEdit(tx, 'amounts.expenseAmount');
   const vatInAudit = findLatestFieldEdit(tx, 'amounts.vatIn');
   const suggestedFolderName = tx.evidenceDriveFolderName || buildDriveTransactionFolderName(tx);
@@ -79,6 +81,11 @@ export function SettlementTransactionRow({
     : tx.evidenceDriveSyncStatus === 'SYNCED'
       ? '동기화됨'
       : '';
+  const evidenceStatusBadge = evidenceChecklist.status === 'COMPLETE'
+    ? { label: '증빙완료', className: 'border-emerald-200 bg-emerald-50 text-emerald-700' }
+    : evidenceChecklist.status === 'PARTIAL'
+      ? { label: evidenceChecklist.missing.length > 0 ? `미완료 ${evidenceChecklist.missing.length}건` : '증빙 일부완료', className: 'border-amber-200 bg-amber-50 text-amber-700' }
+      : { label: '증빙미완료', className: 'border-rose-200 bg-rose-50 text-rose-700' };
 
   const runDriveAction = useCallback(async (
     action: 'provision' | 'sync',
@@ -315,6 +322,16 @@ export function SettlementTransactionRow({
       {textCell(tx.evidenceRequiredDesc, 'evidenceRequiredDesc')}
       <td className="px-1 py-0.5 border-b border-r align-top">
         <div className="min-w-[160px] space-y-1">
+          <div className="flex items-center gap-1.5">
+            <span className={`inline-flex rounded-full border px-1.5 py-0.5 text-[9px] font-medium ${evidenceStatusBadge.className}`}>
+              {evidenceStatusBadge.label}
+            </span>
+            {evidenceChecklist.missing.length > 0 && (
+              <span className="text-[9px] text-muted-foreground" title={evidenceChecklist.missing.join(', ')}>
+                {evidenceChecklist.missing.join(', ')}
+              </span>
+            )}
+          </div>
           <div
             className="rounded border border-dashed bg-muted/30 px-1 py-0.5 text-[10px]"
             title={autoCompletedDesc ? `드라이브 자동 집계: ${autoCompletedDesc}` : '동기화 후 드라이브 파일 기준으로 자동 집계됩니다.'}

@@ -2,13 +2,30 @@ import type { EvidenceStatus, Transaction } from '../data/types';
 
 function splitEvidenceDesc(raw: string): string[] {
   return raw
-    .split(',')
+    .split(/[,\n]/)
     .map((entry) => entry.trim())
     .filter(Boolean);
 }
 
-function normalizeEvidenceEntryKey(raw: string): string {
-  return raw.trim().toLowerCase();
+export function normalizeEvidenceEntryKey(raw: string): string {
+  const normalized = String(raw || '')
+    .normalize('NFC')
+    .trim()
+    .toLowerCase()
+    .replace(/[_\-\s()[\]{}]+/g, '');
+  if (!normalized) return '';
+  if (normalized.includes('zoominvoice')) return 'zoominvoice';
+  if (normalized.includes('표준재무제표증명') || normalized.includes('재무제표증명')) return '표준재무제표증명';
+  if (normalized.includes('전자세금계산서') || normalized.includes('세금계산서') || normalized.includes('taxinvoice')) return '세금계산서';
+  if (normalized.includes('입금확인증') || normalized.includes('입금확인서') || normalized.includes('입금증') || normalized.includes('depositconfirmation')) return '입금확인서';
+  if (normalized.includes('송금확인서') || normalized.includes('송금확인증')) return '입금확인서';
+  if (normalized.includes('이체확인증') || normalized.includes('이체확인서') || normalized.includes('계좌이체확인증') || normalized.includes('transferconfirmation')) return '이체확인증';
+  if (normalized.includes('지출결의서') || normalized.includes('지출결의') || normalized.includes('품의서')) return '지출결의';
+  if (normalized.includes('거래명세표') || normalized.includes('거래명세서') || normalized.includes('거래내역서') || normalized.includes('statement')) return '거래명세서';
+  if (normalized.includes('참석확인서') || normalized.includes('참석자명단') || normalized.includes('출석부') || normalized.includes('attendance')) return '참석자명단';
+  if (normalized.includes('해외송금영수증') || normalized.includes('wirereceipt') || normalized.includes('swift')) return '해외송금영수증';
+  if (normalized.includes('invoice')) return '세금계산서';
+  return normalized;
 }
 
 function mergeEvidenceDesc(...values: string[]): string {
@@ -48,35 +65,39 @@ export function resolveEvidenceCompletedDesc(tx: Transaction): string {
   return tx.evidenceCompletedDesc?.trim() || '';
 }
 
+export function resolveEvidenceChecklist(tx: Pick<
+  Transaction,
+  'evidenceRequired' | 'evidenceRequiredDesc' | 'evidenceDriveLink' | 'evidenceDriveFolderId' | 'evidenceCompletedDesc' | 'evidenceCompletedManualDesc' | 'evidenceAutoListedDesc'
+>): {
+  required: string[];
+  completed: string[];
+  missing: string[];
+  status: EvidenceStatus;
+  hasLink: boolean;
+} {
+  const required = Array.isArray(tx.evidenceRequired) && tx.evidenceRequired.length > 0
+    ? tx.evidenceRequired.map((entry) => String(entry || '').trim()).filter(Boolean)
+    : splitEvidenceDesc(String(tx.evidenceRequiredDesc || ''));
+  const completed = splitEvidenceDesc(resolveEvidenceCompletedDesc(tx as Transaction));
+  const completedKeys = new Set(completed.map(normalizeEvidenceEntryKey).filter(Boolean));
+  const missing = required.filter((entry) => {
+    const key = normalizeEvidenceEntryKey(entry);
+    if (!key) return true;
+    return !completedKeys.has(key);
+  });
+  const hasLink = !!tx.evidenceDriveLink?.trim() || !!tx.evidenceDriveFolderId?.trim();
+  const status: EvidenceStatus = required.length === 0
+    ? (hasLink && completed.length > 0 ? 'COMPLETE' : (hasLink || completed.length > 0 ? 'PARTIAL' : 'MISSING'))
+    : (missing.length === 0 && hasLink ? 'COMPLETE' : (hasLink || completed.length > 0 ? 'PARTIAL' : 'MISSING'));
+  return { required, completed, missing, status, hasLink };
+}
+
 /**
  * 증빙 상태 자동 계산
  * Transaction의 evidenceDriveLink, evidenceRequiredDesc, 자동 집계 + 수기 보정 기반
  */
 export function computeEvidenceStatus(tx: Transaction): EvidenceStatus {
-  const hasLink = !!tx.evidenceDriveLink?.trim() || !!tx.evidenceDriveFolderId?.trim();
-  const completedDesc = resolveEvidenceCompletedDesc(tx);
-
-  // evidenceRequired 배열이 비어있으면 기본 규칙 적용
-  if (tx.evidenceRequired.length === 0) {
-    // 텍스트 기반 판단: 완료 설명이 있거나 드라이브 링크가 있으면 COMPLETE
-    if (hasLink && completedDesc) return 'COMPLETE';
-    if (hasLink || completedDesc) return 'PARTIAL';
-    return 'MISSING';
-  }
-
-  // evidenceRequired 배열 기반 판단
-  const completed = completedDesc
-    .split(',')
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
-
-  const allDone = tx.evidenceRequired.every((req) =>
-    completed.some((c) => c.includes(req.toLowerCase())),
-  );
-
-  if (allDone && hasLink) return 'COMPLETE';
-  if (hasLink || completed.length > 0) return 'PARTIAL';
-  return 'MISSING';
+  return resolveEvidenceChecklist(tx).status;
 }
 
 /**
@@ -92,14 +113,7 @@ export function isValidDriveUrl(url: string): boolean {
  * evidenceRequired에서 completedDesc에 포함되지 않은 항목 반환
  */
 export function computeEvidenceMissing(tx: Transaction): string[] {
-  if (tx.evidenceRequired.length === 0) return [];
-  const completed = resolveEvidenceCompletedDesc(tx)
-    .split(',')
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
-  return tx.evidenceRequired.filter(
-    (req) => !completed.some((c) => c.includes(req.toLowerCase())),
-  );
+  return resolveEvidenceChecklist(tx).missing;
 }
 
 /**

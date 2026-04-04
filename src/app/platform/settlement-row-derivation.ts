@@ -1,5 +1,6 @@
 import { findWeekForDate, getYearMondayWeeks } from './cashflow-weeks';
 import { parseDate, parseNumber } from './csv-utils';
+import { resolveEvidenceChecklist } from './evidence-helpers';
 import { importRowToTransaction, type ImportRow } from './settlement-csv';
 import { buildImportRowReviewFingerprint } from './settlement-review';
 import type { Basis, SettlementSheetPolicy } from '../data/types';
@@ -52,18 +53,15 @@ export function isSettlementCascadeColumn(
 }
 
 function derivePendingEvidence(requiredDesc: string, completedDesc: string): string {
-  const required = String(requiredDesc || '')
-    .split(',')
-    .map((part) => part.trim())
-    .filter(Boolean);
-  if (required.length === 0) return '';
-  const completed = String(completedDesc || '')
-    .split(',')
-    .map((part) => part.trim().toLowerCase())
-    .filter(Boolean);
-  return required
-    .filter((item) => !completed.some((done) => done.includes(item.toLowerCase())))
-    .join(', ');
+  return resolveEvidenceChecklist({
+    evidenceRequired: [],
+    evidenceRequiredDesc: requiredDesc,
+    evidenceCompletedDesc: completedDesc,
+    evidenceCompletedManualDesc: '',
+    evidenceAutoListedDesc: '',
+    evidenceDriveLink: '',
+    evidenceDriveFolderId: '',
+  }).missing.join(', ');
 }
 
 function updateCells(

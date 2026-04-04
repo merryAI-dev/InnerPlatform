@@ -1,5 +1,6 @@
 import type { Transaction, TransactionState } from '../data/types';
 import { getMonthMondayWeeks, type MonthMondayWeek } from './cashflow-weeks';
+import { resolveEvidenceChecklist } from './evidence-helpers';
 export { normalizeBudgetLabel, buildBudgetLabelKey } from './budget-labels';
 
 // ── Number formatting ──
@@ -164,18 +165,15 @@ export const QUICK_EXPENSE_TEMPLATES: QuickExpenseTemplate[] = [
 // ── Evidence helpers ──
 
 export function derivePendingEvidence(requiredDesc: string, completedDesc: string): string {
-  const required = String(requiredDesc || '')
-    .split(',')
-    .map((part) => part.trim())
-    .filter(Boolean);
-  if (required.length === 0) return '';
-  const completed = String(completedDesc || '')
-    .split(',')
-    .map((part) => part.trim().toLowerCase())
-    .filter(Boolean);
-  return required
-    .filter((item) => !completed.some((done) => done.includes(item.toLowerCase())))
-    .join(', ');
+  return resolveEvidenceChecklist({
+    evidenceRequired: [],
+    evidenceRequiredDesc: requiredDesc,
+    evidenceCompletedDesc: completedDesc,
+    evidenceCompletedManualDesc: '',
+    evidenceAutoListedDesc: '',
+    evidenceDriveLink: '',
+    evidenceDriveFolderId: '',
+  }).missing.join(', ');
 }
 
 // ── Transaction state ──

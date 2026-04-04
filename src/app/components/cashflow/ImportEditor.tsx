@@ -1819,6 +1819,8 @@ export function ImportEditor({
                 budgetCodeIdx={budgetCodeIdx}
                 subCodeIdx={subCodeIdx}
                 evidenceIdx={evidenceIdx}
+                evidenceCompletedIdx={evidenceCompletedIdx}
+                evidencePendingIdx={evidencePendingIdx}
                 weekIdx={weekIdx}
                 cashflowIdx={cashflowIdx}
                 weekOptions={weekOptions}

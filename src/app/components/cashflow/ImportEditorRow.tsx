@@ -7,7 +7,7 @@ import type {
 import { Check, ExternalLink, GripVertical, Plus, Upload, X } from 'lucide-react';
 import type { BudgetCodeEntry, Transaction, SettlementSheetPolicy } from '../../data/types';
 import { parseNumber } from '../../platform/csv-utils';
-import { isValidDriveUrl } from '../../platform/evidence-helpers';
+import { isValidDriveUrl, resolveEvidenceChecklist } from '../../platform/evidence-helpers';
 import type { CounterpartySuggestion } from '../../platform/counterparty-normalizer';
 import {
   SETTLEMENT_COLUMNS,
@@ -179,6 +179,8 @@ function ImportEditorRow({
   budgetCodeIdx,
   subCodeIdx,
   evidenceIdx,
+  evidenceCompletedIdx,
+  evidencePendingIdx,
   weekIdx,
   cashflowIdx,
   weekOptions,
@@ -220,6 +222,8 @@ function ImportEditorRow({
   budgetCodeIdx: number;
   subCodeIdx: number;
   evidenceIdx: number;
+  evidenceCompletedIdx: number;
+  evidencePendingIdx: number;
   weekIdx: number;
   cashflowIdx: number;
   weekOptions: { value: string; label: string }[];
@@ -266,6 +270,10 @@ function ImportEditorRow({
     return entry ? entry.subCodes : [];
   }, [budgetCode, budgetCodeBook]);
   const rowLabel = `${rowIdx + 1}행`;
+  const driveLinkIdx = useMemo(
+    () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '증빙자료 드라이브'),
+    [],
+  );
   const commentTransactionId = row.sourceTxId || buildSheetRowCommentId(row.tempId);
   const [driveAction, setDriveAction] = useState<'' | 'provision' | 'sync'>('');
   const hasSourceTransaction = Boolean(persistedTransactionId);
@@ -279,6 +287,57 @@ function ImportEditorRow({
     : persistedTransaction?.evidenceDriveSyncStatus === 'SYNCED'
       ? '동기화됨'
       : '';
+  const evidenceChecklist = useMemo(() => resolveEvidenceChecklist({
+    evidenceRequired: persistedTransaction?.evidenceRequired || [],
+    evidenceRequiredDesc: persistedTransaction?.evidenceRequiredDesc || String(evidenceIdx >= 0 ? row.cells[evidenceIdx] || '' : ''),
+    evidenceCompletedDesc: persistedTransaction?.evidenceCompletedDesc || String(evidenceCompletedIdx >= 0 ? row.cells[evidenceCompletedIdx] || '' : ''),
+    evidenceCompletedManualDesc: persistedTransaction?.evidenceCompletedManualDesc,
+    evidenceAutoListedDesc: persistedTransaction?.evidenceAutoListedDesc,
+    evidenceDriveLink: persistedTransaction?.evidenceDriveLink || String(driveLinkIdx >= 0 ? row.cells[driveLinkIdx] || '' : ''),
+    evidenceDriveFolderId: persistedTransaction?.evidenceDriveFolderId,
+  }), [
+    driveLinkIdx,
+    evidenceCompletedIdx,
+    evidenceIdx,
+    persistedTransaction?.evidenceAutoListedDesc,
+    persistedTransaction?.evidenceCompletedDesc,
+    persistedTransaction?.evidenceCompletedManualDesc,
+    persistedTransaction?.evidenceDriveFolderId,
+    persistedTransaction?.evidenceDriveLink,
+    persistedTransaction?.evidenceRequired,
+    persistedTransaction?.evidenceRequiredDesc,
+    row.cells,
+  ]);
+  const evidenceStatusBadge = useMemo(() => {
+    if (evidenceChecklist.required.length === 0 && evidenceChecklist.completed.length === 0 && !evidenceChecklist.hasLink) return null;
+    if (evidenceChecklist.status === 'COMPLETE') {
+      return {
+        label: '증빙완료',
+        className: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+      };
+    }
+    if (evidenceChecklist.status === 'PARTIAL') {
+      return {
+        label: evidenceChecklist.missing.length > 0 ? `증빙 ${evidenceChecklist.missing.length}건 남음` : '증빙 일부완료',
+        className: 'border-amber-200 bg-amber-50 text-amber-700',
+      };
+    }
+    return {
+      label: '증빙미완료',
+      className: 'border-rose-200 bg-rose-50 text-rose-700',
+    };
+  }, [evidenceChecklist]);
+  const evidenceStatusTitle = useMemo(() => {
+    if (!evidenceStatusBadge) return '';
+    const pendingDesc = String(evidencePendingIdx >= 0 ? row.cells[evidencePendingIdx] || '' : '').trim();
+    const lines = [
+      evidenceChecklist.required.length > 0 ? `필수: ${evidenceChecklist.required.join(', ')}` : '',
+      evidenceChecklist.completed.length > 0 ? `완료: ${evidenceChecklist.completed.join(', ')}` : '완료: 없음',
+      evidenceChecklist.missing.length > 0 ? `미완료: ${evidenceChecklist.missing.join(', ')}` : '미완료: 없음',
+      pendingDesc ? `준비필요: ${pendingDesc}` : '',
+    ].filter(Boolean);
+    return lines.join('\n');
+  }, [evidenceChecklist, evidencePendingIdx, evidenceStatusBadge, row.cells]);
   const rowSourceBadge = useMemo(() => {
     if (isAdjustmentRow) return { label: '잔액 조정', className: 'border-amber-200 bg-amber-50 text-amber-700' };
     if (row.entryKind === 'DEPOSIT') return { label: '직접 입금', className: 'border-sky-200 bg-sky-50 text-sky-700' };
@@ -422,6 +481,14 @@ function ImportEditorRow({
                 className={`inline-flex rounded-full border px-1.5 py-0.5 text-[9px] leading-none ${rowEditStateBadge.className}`}
               >
                 {rowEditStateBadge.label}
+              </span>
+            )}
+            {evidenceStatusBadge && (
+              <span
+                title={evidenceStatusTitle}
+                className={`inline-flex rounded-full border px-1.5 py-0.5 text-[9px] leading-none ${evidenceStatusBadge.className}`}
+              >
+                {evidenceStatusBadge.label}
               </span>
             )}
             <span className="block text-[9px] text-muted-foreground">#{rowIdx + 1}</span>
@@ -927,6 +994,8 @@ export const MemoizedImportEditorRow = memo(ImportEditorRow, (prev, next) => {
     && prev.budgetCodeIdx === next.budgetCodeIdx
     && prev.subCodeIdx === next.subCodeIdx
     && prev.evidenceIdx === next.evidenceIdx
+    && prev.evidenceCompletedIdx === next.evidenceCompletedIdx
+    && prev.evidencePendingIdx === next.evidencePendingIdx
     && prev.weekIdx === next.weekIdx
     && prev.cashflowIdx === next.cashflowIdx
     && prev.weekOptions === next.weekOptions

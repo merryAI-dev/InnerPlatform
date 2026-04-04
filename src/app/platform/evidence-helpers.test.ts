@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   computeEvidenceMissing,
+  resolveEvidenceChecklist,
   computeEvidenceStatus,
   computeEvidenceSummary,
   isValidDriveUrl,
+  normalizeEvidenceEntryKey,
   resolveEvidenceCompletedDesc,
   resolveEvidenceCompletedManualDesc,
 } from './evidence-helpers';
@@ -303,6 +305,34 @@ describe('computeEvidenceMissing', () => {
       evidenceCompletedDesc: 'invoice attached',
     });
     expect(computeEvidenceMissing(tx)).toEqual([]);
+  });
+
+  it('matches normalized evidence aliases', () => {
+    const tx = makeTx({
+      evidenceRequired: ['전자세금계산서', '지출결의서', '참석확인서'],
+      evidenceCompletedDesc: '세금계산서, 지출결의, 참석자명단',
+    });
+    expect(computeEvidenceMissing(tx)).toEqual([]);
+  });
+});
+
+describe('evidence normalization', () => {
+  it('normalizes common evidence aliases to the same key', () => {
+    expect(normalizeEvidenceEntryKey('전자세금계산서')).toBe('세금계산서');
+    expect(normalizeEvidenceEntryKey('지출결의서')).toBe('지출결의');
+    expect(normalizeEvidenceEntryKey('참석확인서')).toBe('참석자명단');
+  });
+
+  it('builds a checklist snapshot for UI coloring', () => {
+    const checklist = resolveEvidenceChecklist(makeTx({
+      evidenceRequired: ['전자세금계산서', '입금확인증'],
+      evidenceCompletedDesc: '세금계산서',
+      evidenceDriveFolderId: 'folder-1',
+    }));
+
+    expect(checklist.status).toBe('PARTIAL');
+    expect(checklist.missing).toEqual(['입금확인증']);
+    expect(checklist.hasLink).toBe(true);
   });
 });
 
