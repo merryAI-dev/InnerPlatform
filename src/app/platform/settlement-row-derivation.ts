@@ -5,6 +5,16 @@ import type { SettlementSheetPolicy } from '../data/types';
 
 export type SettlementDerivationMode = 'row' | 'cascade' | 'full';
 
+export interface SettlementDerivationOptions {
+  mode: SettlementDerivationMode;
+  rowIdx?: number;
+  /**
+   * Phase-1 workbook parity replay sometimes needs to recompute balances from
+   * upstream inputs without trusting imported balance cells as anchors.
+   */
+  respectExplicitBalanceAnchors?: boolean;
+}
+
 export interface SettlementDerivationContext {
   projectId: string;
   defaultLedgerId: string;
@@ -84,6 +94,7 @@ function deriveRowLocally(
   context: SettlementDerivationContext,
   includeBalance: boolean,
   runningBalance: number,
+  respectExplicitBalanceAnchors: boolean,
 ): { row: ImportRow; nextRunningBalance: number } {
   let next = row;
   const userEdited = row.userEditedCells ?? new Set<number>();
@@ -190,11 +201,12 @@ function deriveRowLocally(
         ? (parseNumber(cells[context.expenseIdx]) ?? 0) + (parseNumber(cells[context.vatInIdx]) ?? 0)
         : 0;
 
-      if (explicitBalance != null) {
+      if (explicitBalance != null && respectExplicitBalanceAnchors) {
         nextRunningBalance = explicitBalance;
         return;
       }
 
+      let computedBalance = runningBalance;
       if (depositSum !== 0 || expenseSum !== 0) {
         if (
           (policy?.preset === 'DIRECT_ENTRY' || policy?.preset === 'BALANCE_TRACKING')
@@ -205,7 +217,10 @@ function deriveRowLocally(
           nextRunningBalance = runningBalance;
           return;
         }
-        nextRunningBalance += depositSum - expenseSum;
+        computedBalance += depositSum - expenseSum;
+      }
+      nextRunningBalance = computedBalance;
+      if (hasExistingBalance || depositSum !== 0 || expenseSum !== 0 || !respectExplicitBalanceAnchors) {
         cells[context.balanceIdx] = Number.isFinite(nextRunningBalance)
           ? nextRunningBalance.toLocaleString('ko-KR')
           : '';
@@ -232,6 +247,7 @@ function computeRunningSeed(
   rows: ImportRow[],
   endExclusive: number,
   context: SettlementDerivationContext,
+  respectExplicitBalanceAnchors: boolean,
 ): number {
   let running = 0;
   for (let index = 0; index < endExclusive; index += 1) {
@@ -246,7 +262,7 @@ function computeRunningSeed(
     const expenseSum = context.expenseIdx >= 0 && context.vatInIdx >= 0
       ? (parseNumber(cells[context.expenseIdx]) ?? 0) + (parseNumber(cells[context.vatInIdx]) ?? 0)
       : 0;
-    if (explicitBalance != null) {
+    if (explicitBalance != null && respectExplicitBalanceAnchors) {
       running = explicitBalance;
     } else if (depositSum !== 0 || expenseSum !== 0) {
       running += depositSum - expenseSum;
@@ -258,17 +274,22 @@ function computeRunningSeed(
 export function deriveSettlementRows(
   input: ImportRow[],
   context: SettlementDerivationContext,
-  options: {
-    mode: SettlementDerivationMode;
-    rowIdx?: number;
-  },
+  options: SettlementDerivationOptions,
 ): ImportRow[] {
   if (input.length === 0) return input;
+  const respectExplicitBalanceAnchors = options.respectExplicitBalanceAnchors ?? true;
   if (options.mode === 'full') {
     const nextRows = [...input];
     let running = 0;
     for (let index = 0; index < nextRows.length; index += 1) {
-      const derived = deriveRowLocally(nextRows[index], index, context, true, running);
+      const derived = deriveRowLocally(
+        nextRows[index],
+        index,
+        context,
+        true,
+        running,
+        respectExplicitBalanceAnchors,
+      );
       nextRows[index] = derived.row;
       running = derived.nextRunningBalance;
     }
@@ -279,13 +300,27 @@ export function deriveSettlementRows(
   const nextRows = [...input];
 
   if (options.mode === 'row') {
-    nextRows[targetRowIdx] = deriveRowLocally(nextRows[targetRowIdx], targetRowIdx, context, false, 0).row;
+    nextRows[targetRowIdx] = deriveRowLocally(
+      nextRows[targetRowIdx],
+      targetRowIdx,
+      context,
+      false,
+      0,
+      respectExplicitBalanceAnchors,
+    ).row;
     return nextRows;
   }
 
-  let running = computeRunningSeed(nextRows, targetRowIdx, context);
+  let running = computeRunningSeed(nextRows, targetRowIdx, context, respectExplicitBalanceAnchors);
   for (let index = targetRowIdx; index < nextRows.length; index += 1) {
-    const derived = deriveRowLocally(nextRows[index], index, context, true, running);
+    const derived = deriveRowLocally(
+      nextRows[index],
+      index,
+      context,
+      true,
+      running,
+      respectExplicitBalanceAnchors,
+    );
     nextRows[index] = derived.row;
     running = derived.nextRunningBalance;
   }

@@ -83,6 +83,24 @@ describe('settlement-row-derivation', () => {
     expect(next[1]?.cells[9]).toBe('70,000');
   });
 
+  it('can ignore explicit balance anchors during authoritative replay', () => {
+    const row1Cells = createCells();
+    row1Cells[11] = '100,000';
+    row1Cells[9] = '100,000';
+    const row2Cells = createCells();
+    row2Cells[13] = '30,000';
+    row2Cells[9] = '999,999';
+
+    const next = deriveSettlementRows(
+      [createRow(row1Cells), createRow(row2Cells)],
+      context,
+      { mode: 'full', respectExplicitBalanceAnchors: false },
+    );
+
+    expect(next[0]?.cells[9]).toBe('100,000');
+    expect(next[1]?.cells[9]).toBe('70,000');
+  });
+
   it('derives vatIn from expense amount when both bank and expense amounts are present', () => {
     const rowCells = createCells();
     rowCells[10] = '110,000'; // bankAmount
