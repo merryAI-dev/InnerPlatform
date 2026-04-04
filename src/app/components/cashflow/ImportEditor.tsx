@@ -3,7 +3,7 @@ import type {
   ClipboardEvent as ReactClipboardEvent,
   KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
-import { Loader2, Plus, RotateCcw, Save, X } from 'lucide-react';
+import { Loader2, Maximize2, Minimize2, Plus, RotateCcw, Save, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { detectKeyRuleContext, runKeyRules, type KeyRule } from '../../platform/settlement-grid-keymap';
 import { grid2tsv, html2grid, isSpreadsheetHtml, parseTsvRows } from '../../platform/settlement-grid-clipboard';
@@ -145,6 +145,7 @@ export function ImportEditor({
   budgetCodeBook,
   weekOptions,
   inline = false,
+  fullscreen = false,
   comments = [],
   currentUserId = 'pm',
   currentUserName = 'PM',
@@ -160,6 +161,7 @@ export function ImportEditor({
   pendingQuickInsert,
   onPendingQuickInsertHandled,
   basis,
+  onToggleFullscreen,
 }: {
   rows: ImportRow[];
   onChange: (rows: ImportRow[]) => void;
@@ -174,6 +176,7 @@ export function ImportEditor({
   budgetCodeBook?: BudgetCodeEntry[];
   weekOptions: { value: string; label: string }[];
   inline?: boolean;
+  fullscreen?: boolean;
   comments?: Comment[];
   currentUserId?: string;
   currentUserName?: string;
@@ -192,7 +195,19 @@ export function ImportEditor({
   pendingQuickInsert?: PendingQuickInsert | null;
   onPendingQuickInsertHandled?: () => void;
   basis?: Basis;
+  onToggleFullscreen?: () => void;
 }) {
+  const isInlineLayout = inline && !fullscreen;
+
+  useEffect(() => {
+    if (!fullscreen) return undefined;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [fullscreen]);
+
   const resolvedPolicy = useMemo(
     () => normalizeSettlementSheetPolicy(settlementSheetPolicy, workflowMode),
     [settlementSheetPolicy, workflowMode],
@@ -1436,7 +1451,13 @@ export function ImportEditor({
   }, [mappingDraft, onSaveEvidenceRequiredMap]);
 
   return (
-      <div className={inline ? 'relative border rounded-lg bg-background flex flex-col overflow-visible' : 'fixed inset-0 z-50 bg-background/95 flex flex-col'}>
+      <div
+        className={isInlineLayout
+          ? 'relative flex flex-col overflow-visible rounded-lg border bg-background'
+          : fullscreen
+            ? 'fixed inset-3 z-[70] flex flex-col overflow-hidden rounded-[28px] border bg-background/98 shadow-2xl backdrop-blur-xl'
+            : 'fixed inset-0 z-50 flex flex-col bg-background/95'}
+      >
       {authorListId && (
         <datalist id={authorListId}>
           {(authorOptions || []).map((name) => (
@@ -1445,7 +1466,7 @@ export function ImportEditor({
         </datalist>
       )}
       {/* Toolbar */}
-      <div className={`border-b bg-muted/20 shrink-0 ${inline ? 'sticky top-0 z-20' : ''}`}>
+      <div className={`shrink-0 border-b bg-muted/20 ${isInlineLayout ? 'sticky top-0 z-20' : ''}`}>
         <div className="flex items-start justify-between gap-4 px-4 py-3">
           <div className="min-w-0 space-y-2">
             <div className="flex items-center gap-2 flex-wrap">
@@ -1482,6 +1503,17 @@ export function ImportEditor({
           <div className="shrink-0 text-right text-[11px] text-muted-foreground">
             <div>행 왼쪽 배지에서 출처를 확인할 수 있습니다.</div>
             <div>사람 확인이 필요한 후보값은 확인 완료 전까지 캐시플로 반영이 보류됩니다.</div>
+            {onToggleFullscreen && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-2 h-7 text-[11px] shadow-sm"
+                onClick={onToggleFullscreen}
+              >
+                {fullscreen ? <Minimize2 className="mr-1 h-3.5 w-3.5" /> : <Maximize2 className="mr-1 h-3.5 w-3.5" />}
+                {fullscreen ? '기본 화면으로' : '전체 화면 편집'}
+              </Button>
+            )}
           </div>
         </div>
         <div className="flex items-center justify-between gap-3 px-4 py-2 border-t bg-background/80">
@@ -1665,7 +1697,7 @@ export function ImportEditor({
         </div>
         {/* Scrollable table */}
         <div
-          className={`min-w-0 flex-1 ${inline ? 'overflow-auto max-h-[calc(100vh-260px)]' : 'flex-1 overflow-auto'}`}
+          className={`min-w-0 flex-1 ${isInlineLayout ? 'overflow-auto max-h-[calc(100vh-260px)]' : 'flex-1 overflow-auto'}`}
           onPaste={handleTablePaste}
           onKeyDownCapture={handleTableKeyDown}
           tabIndex={0}

@@ -159,6 +159,7 @@ export function SettlementLedgerPage({
   const [cashflowSyncing, setCashflowSyncing] = useState(false);
   const [lastAutoSavedAt, setLastAutoSavedAt] = useState('');
   const [lastCashflowSyncedAt, setLastCashflowSyncedAt] = useState('');
+  const [editorFullscreen, setEditorFullscreen] = useState(false);
   const [sheetSaveState, setSheetSaveState] = useState<'idle' | 'dirty' | 'saving' | 'saved' | 'save_failed'>('idle');
   const [cashflowSyncState, setCashflowSyncState] = useState<'idle' | 'pending' | 'syncing' | 'synced' | 'sync_failed' | 'review_required'>('idle');
   const [downloadFrom, setDownloadFrom] = useState('');
@@ -834,6 +835,7 @@ export function SettlementLedgerPage({
             budgetCodeBook={resolvedBudgetBook}
             weekOptions={weekOptions}
             inline
+            fullscreen={editorFullscreen}
             comments={comments}
             currentUserId={currentUserId}
             currentUserName={currentUserName}
@@ -848,6 +850,7 @@ export function SettlementLedgerPage({
             basis={basis}
             pendingQuickInsert={pendingQuickInsert}
             onPendingQuickInsertHandled={onPendingQuickInsertHandled}
+            onToggleFullscreen={() => setEditorFullscreen((prev) => !prev)}
           />
         )}
         {revertConfirmDialog}
