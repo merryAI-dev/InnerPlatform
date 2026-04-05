@@ -4,12 +4,16 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import type { MonthMondayWeek } from './cashflow-weeks';
 import type { ImportRow } from './settlement-csv';
-import type {
-  KernelImportRowJson,
-  SettlementFlowSnapshot,
-  SettlementKernelFlowSnapshotResponse,
+import {
+  deserializeImportRowsFromKernel,
+  serializeImportRowsForKernel,
+  type KernelImportRowJson,
+  type SettlementFlowSnapshot,
 } from './settlement-kernel-contract';
-import type { SettlementDerivationContext, SettlementDerivationOptions } from './settlement-row-derivation';
+import type {
+  SettlementDerivationContext,
+  SettlementDerivationOptions,
+} from './settlement-row-derivation';
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(currentDir, '../../..');
@@ -33,38 +37,6 @@ interface KernelBudgetActualItemJson {
   budgetCode: string;
   subCode: string;
   amount: number;
-}
-
-function serializeRows(rows: ImportRow[]): KernelImportRowJson[] {
-  return rows.map((row) => ({
-    tempId: row.tempId,
-    ...(row.sourceTxId ? { sourceTxId: row.sourceTxId } : {}),
-    ...(row.entryKind ? { entryKind: row.entryKind } : {}),
-    cells: [...row.cells],
-    ...(row.error ? { error: row.error } : {}),
-    ...(row.reviewHints ? { reviewHints: [...row.reviewHints] } : {}),
-    ...(row.reviewRequiredCellIndexes ? { reviewRequiredCellIndexes: [...row.reviewRequiredCellIndexes] } : {}),
-    ...(row.reviewStatus ? { reviewStatus: row.reviewStatus } : {}),
-    ...(row.reviewFingerprint ? { reviewFingerprint: row.reviewFingerprint } : {}),
-    ...(row.reviewConfirmedAt ? { reviewConfirmedAt: row.reviewConfirmedAt } : {}),
-    ...(row.userEditedCells ? { userEditedCells: Array.from(row.userEditedCells).sort((a, b) => a - b) } : {}),
-  }));
-}
-
-function deserializeRows(rows: KernelImportRowJson[]): ImportRow[] {
-  return rows.map((row) => ({
-    tempId: row.tempId,
-    ...(row.sourceTxId ? { sourceTxId: row.sourceTxId } : {}),
-    ...(row.entryKind ? { entryKind: row.entryKind as ImportRow['entryKind'] } : {}),
-    cells: [...row.cells],
-    ...(row.error ? { error: row.error } : {}),
-    ...(row.reviewHints ? { reviewHints: [...row.reviewHints] } : {}),
-    ...(row.reviewRequiredCellIndexes ? { reviewRequiredCellIndexes: [...row.reviewRequiredCellIndexes] } : {}),
-    ...(row.reviewStatus ? { reviewStatus: row.reviewStatus } : {}),
-    ...(row.reviewFingerprint ? { reviewFingerprint: row.reviewFingerprint } : {}),
-    ...(row.reviewConfirmedAt ? { reviewConfirmedAt: row.reviewConfirmedAt } : {}),
-    ...(row.userEditedCells ? { userEditedCells: new Set(row.userEditedCells) } : {}),
-  }));
 }
 
 function runRustKernel(input: object): string {
@@ -92,11 +64,11 @@ export function deriveSettlementRowsViaRustKernel(
   options: SettlementDerivationOptions,
 ): ImportRow[] {
   const stdout = runRustKernel({
-    rows: serializeRows(rows),
+    rows: serializeImportRowsForKernel(rows),
     context,
     options,
   });
-  return deserializeRows((JSON.parse(stdout) as { rows: KernelImportRowJson[] }).rows);
+  return deserializeImportRowsFromKernel((JSON.parse(stdout) as { rows: KernelImportRowJson[] }).rows);
 }
 
 export function buildSettlementActualSyncPayloadViaRustKernel(
@@ -106,9 +78,9 @@ export function buildSettlementActualSyncPayloadViaRustKernel(
 ): KernelActualSyncWeekJson[] {
   const stdout = runRustKernel({
     command: 'actualSync',
-    rows: serializeRows(rows),
+    rows: serializeImportRowsForKernel(rows),
     yearWeeks,
-    ...(persistedRows ? { persistedRows: serializeRows(persistedRows) } : {}),
+    ...(persistedRows ? { persistedRows: serializeImportRowsForKernel(persistedRows) } : {}),
   });
   return (JSON.parse(stdout) as { weeks: KernelActualSyncWeekJson[] }).weeks;
 }
@@ -118,7 +90,7 @@ export function aggregateBudgetActualsViaRustKernel(
 ): { items: KernelBudgetActualItemJson[]; total: number } {
   const stdout = runRustKernel({
     command: 'budgetActuals',
-    rows: serializeRows(rows),
+    rows: serializeImportRowsForKernel(rows),
   });
   return JSON.parse(stdout) as { items: KernelBudgetActualItemJson[]; total: number };
 }
@@ -128,7 +100,7 @@ export function buildSettlementFlowSnapshotsViaRustKernel(
 ): SettlementFlowSnapshot[] {
   const stdout = runRustKernel({
     command: 'flowSnapshot',
-    rows: serializeRows(rows),
+    rows: serializeImportRowsForKernel(rows),
   });
-  return (JSON.parse(stdout) as SettlementKernelFlowSnapshotResponse).snapshots;
+  return (JSON.parse(stdout) as { snapshots: SettlementFlowSnapshot[] }).snapshots;
 }
