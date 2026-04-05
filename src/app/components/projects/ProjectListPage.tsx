@@ -2,8 +2,9 @@ import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import {
   Plus, Search, ArrowUpDown, Sparkles, CheckCircle2, ArrowRight,
-  FolderKanban,
+  FolderKanban, RotateCcw, Trash2,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { Card, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -24,6 +25,7 @@ import {
 import { PageHeader } from '../layout/PageHeader';
 import { useAuth } from '../../data/auth-store';
 import { canShowAdminNavItem } from '../../platform/admin-nav';
+import { resolveApiErrorMessage } from '../../platform/api-error-message';
 
 const statusColor: Record<string, string> = {
   CONTRACT_PENDING: 'bg-amber-100 text-amber-800',
@@ -45,7 +47,7 @@ type SortKey = 'name' | 'contractAmount' | 'profitRate' | 'budgetCurrentYear' | 
 type SortDir = 'asc' | 'desc';
 
 export function ProjectListPage() {
-  const { projects, ledgers, transactions } = useAppStore();
+  const { allProjects, restoreProject } = useAppStore();
   const { user } = useAuth();
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
@@ -56,15 +58,32 @@ export function ProjectListPage() {
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [activeTab, setActiveTab] = useState<string>('confirmed');
 
+  const activeProjects = useMemo(
+    () => allProjects.filter((project) => !project.trashedAt),
+    [allProjects],
+  );
+  const trashedProjects = useMemo(
+    () => allProjects.filter((project) => !!project.trashedAt),
+    [allProjects],
+  );
+  const confirmedProjects = useMemo(
+    () => activeProjects.filter((project) => project.phase === 'CONFIRMED'),
+    [activeProjects],
+  );
+  const prospectProjects = useMemo(
+    () => activeProjects.filter((project) => project.phase === 'PROSPECT'),
+    [activeProjects],
+  );
+  const baseProjects = activeTab === 'trash'
+    ? trashedProjects
+    : activeTab === 'confirmed'
+      ? confirmedProjects
+      : prospectProjects;
+
   const departments = useMemo(() => {
-    const depts = new Set(projects.map(p => p.department).filter(Boolean));
+    const depts = new Set(baseProjects.map((project) => project.department).filter(Boolean));
     return Array.from(depts).sort();
-  }, [projects]);
-
-  const confirmedProjects = useMemo(() => projects.filter(p => p.phase === 'CONFIRMED'), [projects]);
-  const prospectProjects = useMemo(() => projects.filter(p => p.phase === 'PROSPECT'), [projects]);
-
-  const baseProjects = activeTab === 'confirmed' ? confirmedProjects : prospectProjects;
+  }, [baseProjects]);
   const canCreateProject = canShowAdminNavItem(user?.role, '/projects/new');
 
   const filtered = useMemo(() => {
@@ -115,6 +134,15 @@ export function ProjectListPage() {
     }
   };
 
+  const handleRestore = async (project: Project) => {
+    try {
+      await restoreProject(project.id);
+      toast.success(`휴지통에서 복구됨: ${project.name}`);
+    } catch (error) {
+      toast.error(resolveApiErrorMessage(error, '프로젝트 복구에 실패했습니다.'));
+    }
+  };
+
   const renderProjectTable = (list: Project[]) => (
     <Card>
       <CardContent className="pt-0 pb-0">
@@ -160,6 +188,12 @@ export function ProjectListPage() {
                 </TableHead>
                 <TableHead className="text-right min-w-[80px]">수익금액</TableHead>
                 <TableHead className="min-w-[35px] text-center">정산</TableHead>
+                {activeTab === 'trash' && (
+                  <>
+                    <TableHead className="min-w-[90px]">삭제일</TableHead>
+                    <TableHead className="min-w-[90px] text-center">액션</TableHead>
+                  </>
+                )}
                 {activeTab === 'prospect' && (
                   <TableHead className="min-w-[60px] text-center">액션</TableHead>
                 )}
@@ -243,6 +277,23 @@ export function ProjectListPage() {
                       <span className="text-muted-foreground">X</span>
                     )}
                   </TableCell>
+                  {activeTab === 'trash' && (
+                    <>
+                      <TableCell className="text-[11px] text-muted-foreground whitespace-nowrap">
+                        {project.trashedAt ? project.trashedAt.slice(0, 10).replace(/-/g, '.') : '-'}
+                      </TableCell>
+                      <TableCell className="text-center" onClick={e => e.stopPropagation()}>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-6 text-[10px] gap-0.5 px-1.5"
+                          onClick={() => void handleRestore(project)}
+                        >
+                          복구 <RotateCcw className="w-3 h-3" />
+                        </Button>
+                      </TableCell>
+                    </>
+                  )}
                   {activeTab === 'prospect' && (
                     <TableCell className="text-center" onClick={e => e.stopPropagation()}>
                       <Button
@@ -259,7 +310,7 @@ export function ProjectListPage() {
               ))}
 
               {/* Totals Row */}
-              {list.length > 0 && (
+              {list.length > 0 && activeTab !== 'trash' && (
                 <TableRow className="bg-muted/50 border-t-2">
                   <TableCell colSpan={12} className="text-right text-sm" style={{ fontWeight: 600 }}>
                     합계
@@ -286,12 +337,14 @@ export function ProjectListPage() {
 
               {list.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={activeTab === 'prospect' ? 19 : 18} className="text-center py-12 text-muted-foreground">
+                  <TableCell colSpan={activeTab === 'trash' ? 20 : activeTab === 'prospect' ? 19 : 18} className="text-center py-12 text-muted-foreground">
                     {search || statusFilter !== 'ALL' || typeFilter !== 'ALL' || deptFilter !== 'ALL'
                       ? '검색 조건에 맞는 사업이 없습니다'
-                      : activeTab === 'prospect'
-                        ? (canCreateProject ? '예정 사업이 없습니다. 새 사업을 등록해보세요.' : '예정 사업이 없습니다.')
-                        : '확정 사업이 없습니다.'}
+                      : activeTab === 'trash'
+                        ? '휴지통이 비어 있습니다.'
+                        : activeTab === 'prospect'
+                          ? (canCreateProject ? '예정 사업이 없습니다. 새 사업을 등록해보세요.' : '예정 사업이 없습니다.')
+                          : '확정 사업이 없습니다.'}
                   </TableCell>
                 </TableRow>
               )}
@@ -309,7 +362,7 @@ export function ProjectListPage() {
         icon={FolderKanban}
         iconGradient="linear-gradient(135deg, #6366f1, #818cf8)"
         title="사업 통합 관리"
-        description={`전체 ${projects.length}개 사업 · 확정 ${confirmedProjects.length} / 예정 ${prospectProjects.length}`}
+        description={`활성 ${activeProjects.length}개 사업 · 확정 ${confirmedProjects.length} / 예정 ${prospectProjects.length} / 휴지통 ${trashedProjects.length}`}
         actions={
           canCreateProject ? (
             <div className="flex items-center gap-2">
@@ -351,6 +404,13 @@ export function ProjectListPage() {
             입찰/예정
             <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 py-0">
               {prospectProjects.length}
+            </Badge>
+          </TabsTrigger>
+          <TabsTrigger value="trash" className="gap-1.5">
+            <Trash2 className="w-3.5 h-3.5" />
+            휴지통
+            <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 py-0">
+              {trashedProjects.length}
             </Badge>
           </TabsTrigger>
         </TabsList>
@@ -414,6 +474,18 @@ export function ProjectListPage() {
                   <span style={{ fontWeight: 600 }}>입찰/예정 사업:</span> 사업 선정 후 1주일 이내에 기본 정보를 입력하세요.
                   정보가 충분히 입력되면 <Badge variant="outline" className="text-[10px] py-0 px-1 mx-0.5">확정</Badge> 버튼으로
                   확정 사업으로 전환할 수 있습니다.
+                </p>
+              </div>
+              {renderProjectTable(filtered)}
+            </>
+          )}
+        </TabsContent>
+        <TabsContent value="trash" className="mt-0">
+          {activeTab === 'trash' && (
+            <>
+              <div className="bg-muted/40 border rounded-lg p-3 mb-3">
+                <p className="text-xs text-muted-foreground">
+                  삭제된 프로젝트는 휴지통에 보관되며 복구할 수 있습니다. 복구하면 기존 프로젝트 상세/원장 연결은 그대로 유지됩니다.
                 </p>
               </div>
               {renderProjectTable(filtered)}

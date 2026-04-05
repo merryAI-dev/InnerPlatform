@@ -116,6 +116,22 @@ function readOptionalText(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+export function resolveProjectRegistrationSlackConfig(options = {}, env = process.env) {
+  const webhookUrl = readOptionalText(options.projectRegistrationSlackWebhookUrl)
+    || readOptionalText(env.PROJECT_REGISTRATION_SLACK_WEBHOOK_URL)
+    || undefined;
+  const botToken = readOptionalText(options.projectRegistrationSlackBotToken)
+    || readOptionalText(env.PROJECT_REGISTRATION_SLACK_BOT_TOKEN)
+    || readOptionalText(env.SLACK_ALERT_BOT_TOKEN)
+    || undefined;
+  const channelId = readOptionalText(options.projectRegistrationSlackChannelId)
+    || readOptionalText(env.PROJECT_REGISTRATION_SLACK_CHANNEL_ID)
+    || readOptionalText(env.SLACK_ALERT_CHANNEL_ID)
+    || 'C09BJ767XCM';
+
+  return { webhookUrl, botToken, channelId };
+}
+
 function truncateText(value, maxLength = 500) {
   const text = readOptionalText(value);
   if (!text) return '';
@@ -638,15 +654,8 @@ export function createBffApp(options = {}) {
   const clientErrorMaxAttempts = Number.isFinite(clientErrorMaxAttemptsRaw) && clientErrorMaxAttemptsRaw > 0 ? clientErrorMaxAttemptsRaw : 5;
   const workerSecret = readOptionalText(options.workerSecret || process.env.BFF_WORKER_SECRET || process.env.CRON_SECRET);
   const slackAlertService = options.slackAlertService || createSlackAlertService();
-  const projectRegistrationSlackService = options.projectRegistrationSlackService || createSlackAlertService({
-    webhookUrl: options.projectRegistrationSlackWebhookUrl || process.env.PROJECT_REGISTRATION_SLACK_WEBHOOK_URL,
-    botToken: options.projectRegistrationSlackBotToken
-      || process.env.PROJECT_REGISTRATION_SLACK_BOT_TOKEN
-      || process.env.SLACK_ALERT_BOT_TOKEN,
-    channelId: options.projectRegistrationSlackChannelId
-      || process.env.PROJECT_REGISTRATION_SLACK_CHANNEL_ID
-      || 'C09BJ767XCM',
-  });
+  const projectRegistrationSlackService = options.projectRegistrationSlackService
+    || createSlackAlertService(resolveProjectRegistrationSlackConfig(options));
 
   async function resolveMemberIdentity({ tenantId, actorId }) {
     const normalizedTenantId = readOptionalText(tenantId);

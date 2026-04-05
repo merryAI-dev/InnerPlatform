@@ -683,6 +683,56 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     expect(seenIds.size).toBe(3);
   });
 
+  it('moves projects to trash and restores them with version checks', async () => {
+    const created = await api
+      .post('/api/v1/projects')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-trash-project-001-create' })
+      .send({ id: 'p-trash-001', name: 'Trash Target Project' });
+
+    expect(created.status).toBe(201);
+
+    const trashed = await api
+      .post('/api/v1/projects/p-trash-001/trash')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-trash-project-001-trash' })
+      .send({ expectedVersion: 1, reason: '중복 등록 테스트' });
+
+    expect(trashed.status).toBe(200);
+    expect(trashed.body.version).toBe(2);
+    expect(typeof trashed.body.trashedAt).toBe('string');
+
+    const trashedSnap = await db.doc(`orgs/${tenantId}/projects/p-trash-001`).get();
+    expect(trashedSnap.exists).toBe(true);
+    expect(trashedSnap.data()).toMatchObject({
+      trashedById: actorId,
+      trashedReason: '중복 등록 테스트',
+    });
+    expect(typeof trashedSnap.data()?.trashedAt).toBe('string');
+
+    const restoreConflict = await api
+      .post('/api/v1/projects/p-trash-001/restore')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-trash-project-001-restore-conflict' })
+      .send({ expectedVersion: 1 });
+
+    expect(restoreConflict.status).toBe(409);
+
+    const restored = await api
+      .post('/api/v1/projects/p-trash-001/restore')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-trash-project-001-restore' })
+      .send({ expectedVersion: 2 });
+
+    expect(restored.status).toBe(200);
+    expect(restored.body.version).toBe(3);
+
+    const restoredSnap = await db.doc(`orgs/${tenantId}/projects/p-trash-001`).get();
+    expect(restoredSnap.exists).toBe(true);
+    expect(restoredSnap.data()).toMatchObject({
+      trashedAt: null,
+      trashedById: null,
+      trashedByEmail: null,
+      trashedReason: null,
+    });
+  });
+
   it('auto-provisions a default ledger when a transaction is created before ledger setup', async () => {
     await api
       .post('/api/v1/projects')

@@ -25,6 +25,7 @@ import {
   LEDGER_TEMPLATES,
 } from './mock-data';
 import { PARTICIPATION_ENTRIES } from './participation-data';
+import { mergeProjectMutationResult } from './project-store-mutation';
 import { resolveAppWriteStrategy } from './store-write-strategy';
 import { useFirebase } from '../lib/firebase-context';
 import { featureFlags } from '../config/feature-flags';
@@ -54,6 +55,8 @@ import {
   addCommentViaBff,
   addEvidenceViaBff,
   changeTransactionStateViaBff,
+  restoreProjectViaBff,
+  trashProjectViaBff,
   upsertLedgerViaBff,
   upsertProjectViaBff,
   upsertTransactionViaBff,
@@ -78,6 +81,7 @@ interface AppState {
   members: OrgMember[];
   templates: LedgerTemplate[];
   projects: Project[];
+  allProjects: Project[];
   ledgers: Ledger[];
   transactions: Transaction[];
   comments: Comment[];
@@ -92,6 +96,8 @@ interface AppActions {
   removeMember: (uid: string) => void;
   addProject: (p: Project) => Promise<void>;
   updateProject: (id: string, updates: Partial<Project>) => Promise<void>;
+  trashProject: (id: string, reason?: string) => Promise<void>;
+  restoreProject: (id: string) => Promise<void>;
   addLedger: (l: Ledger) => Promise<void>;
   addTransaction: (t: Transaction) => Promise<void>;
   updateTransaction: (id: string, updates: Partial<Transaction>) => Promise<void>;
@@ -320,14 +326,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const addProject = useCallback(async (p: Project) => {
     await runStoreMutation('addProject', async () => {
       if (writeStrategy.target === 'bff') {
-        await upsertProjectViaBff({
+        const result = await upsertProjectViaBff({
           tenantId: orgId,
           actor: bffActor,
           project: p,
         });
 
         if (writeStrategy.mirrorRemoteWritesLocally) {
-          setProjects((prev) => [...prev, p]);
+          setProjects((prev) => [...prev, mergeProjectMutationResult(p, result)]);
         }
         return;
       }
@@ -369,7 +375,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const existing = projects.find((project) => project.id === id);
         if (existing) {
           const merged = { ...existing, ...updates } as Project;
-          await upsertProjectViaBff({
+          const result = await upsertProjectViaBff({
             tenantId: orgId,
             actor: bffActor,
             project: {
@@ -377,10 +383,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
               expectedVersion: existing.version ?? 1,
             },
           });
-        }
 
-        if (writeStrategy.mirrorRemoteWritesLocally) {
-          setProjects((prev) => prev.map((p) => (p.id === id ? { ...p, ...updates } : p)));
+          if (writeStrategy.mirrorRemoteWritesLocally) {
+            setProjects((prev) => prev.map((project) => (
+              project.id === id
+                ? mergeProjectMutationResult(project, result, updates)
+                : project
+            )));
+          }
         }
         return;
       }
@@ -396,6 +406,89 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setProjects((prev) => prev.map((p) => (p.id === id ? { ...p, ...updates } : p)));
     });
   }, [runStoreMutation, writeStrategy, projects, orgId, bffActor, db, auditActor]);
+
+  const trashProject = useCallback(async (id: string, reason?: string) => {
+    await runStoreMutation('trashProject', async () => {
+      const existing = projects.find((project) => project.id === id);
+      if (!existing) return;
+      const timestamp = new Date().toISOString();
+      const normalizedReason = reason?.trim() || null;
+      const patch: Partial<Project> = {
+        trashedAt: timestamp,
+        trashedById: currentUser.uid,
+        trashedByEmail: currentUser.email || null,
+        trashedReason: normalizedReason,
+      };
+
+      if (writeStrategy.target === 'bff') {
+        const result = await trashProjectViaBff({
+          tenantId: orgId,
+          actor: bffActor,
+          projectId: id,
+          payload: {
+            expectedVersion: existing.version ?? 1,
+            reason: normalizedReason || undefined,
+          },
+        });
+
+        if (writeStrategy.mirrorRemoteWritesLocally) {
+          setProjects((prev) => prev.map((project) => (
+            project.id === id
+              ? mergeProjectMutationResult(project, result, patch)
+              : project
+          )));
+        }
+        return;
+      }
+
+      if (writeStrategy.target === 'firestore' && db) {
+        await upsertProject(db, orgId, { ...existing, ...patch }, auditActor);
+        return;
+      }
+
+      setProjects((prev) => prev.map((project) => (project.id === id ? { ...project, ...patch } : project)));
+    });
+  }, [runStoreMutation, projects, currentUser.uid, currentUser.email, writeStrategy, orgId, bffActor, db, auditActor]);
+
+  const restoreProject = useCallback(async (id: string) => {
+    await runStoreMutation('restoreProject', async () => {
+      const existing = projects.find((project) => project.id === id);
+      if (!existing) return;
+      const patch: Partial<Project> = {
+        trashedAt: null,
+        trashedById: null,
+        trashedByEmail: null,
+        trashedReason: null,
+      };
+
+      if (writeStrategy.target === 'bff') {
+        const result = await restoreProjectViaBff({
+          tenantId: orgId,
+          actor: bffActor,
+          projectId: id,
+          payload: {
+            expectedVersion: existing.version ?? 1,
+          },
+        });
+
+        if (writeStrategy.mirrorRemoteWritesLocally) {
+          setProjects((prev) => prev.map((project) => (
+            project.id === id
+              ? mergeProjectMutationResult(project, result, patch)
+              : project
+          )));
+        }
+        return;
+      }
+
+      if (writeStrategy.target === 'firestore' && db) {
+        await upsertProject(db, orgId, { ...existing, ...patch }, auditActor);
+        return;
+      }
+
+      setProjects((prev) => prev.map((project) => (project.id === id ? { ...project, ...patch } : project)));
+    });
+  }, [runStoreMutation, projects, writeStrategy, orgId, bffActor, db, auditActor]);
 
   const addLedger = useCallback(async (l: Ledger) => {
     await runStoreMutation('addLedger', async () => {
@@ -648,12 +741,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return ledgers.find((l) => l.id === id);
   }, [ledgers]);
 
+  const activeProjects = useMemo(
+    () => projects.filter((project) => !project.trashedAt),
+    [projects],
+  );
+
   const value: AppState & AppActions = {
     org: { ...ORGANIZATION, id: orgId, members },
     currentUser,
     members,
     templates: LEDGER_TEMPLATES,
-    projects,
+    projects: activeProjects,
+    allProjects: projects,
     ledgers,
     transactions,
     comments,
@@ -665,6 +764,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     removeMember,
     addProject,
     updateProject,
+    trashProject,
+    restoreProject,
     addLedger,
     addTransaction,
     updateTransaction,
