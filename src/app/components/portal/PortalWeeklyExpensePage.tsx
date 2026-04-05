@@ -17,6 +17,7 @@ import { useAuth } from '../../data/auth-store';
 import type { EvidenceUploadSelection, PendingQuickInsert } from '../cashflow/SettlementLedgerPage';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
+import { PortalMissionGuide } from './PortalMissionGuide';
 import {
   formatSettlementSheetPolicySummary,
   normalizeSettlementSheetPolicy,
@@ -68,6 +69,7 @@ import {
   AlertDialogTitle,
 } from '../ui/alert-dialog';
 import { resolvePortalHappyPath } from '../../platform/portal-happy-path';
+import { resolvePortalMissionProgress } from '../../platform/portal-mission-guide';
 const GoogleSheetMigrationWizard = lazy(
   () => import('./GoogleSheetMigrationWizard').then((module) => ({ default: module.GoogleSheetMigrationWizard })),
 );
@@ -128,6 +130,7 @@ export function PortalWeeklyExpensePage() {
     saveBudgetPlanRows,
     saveBudgetCodeBook,
     markSheetSourceApplied,
+    weeklySubmissionStatuses,
     upsertWeeklySubmissionStatus,
   } = usePortalStore();
   const { submitWeekAsPm, upsertWeekAmounts } = useCashflowWeeks();
@@ -174,6 +177,12 @@ export function PortalWeeklyExpensePage() {
   const isENaraProject = myProject?.settlementType === 'TYPE5' || myProject?.accountType === 'DEDICATED';
   const fundInputMode = normalizeProjectFundInputMode(myProject?.fundInputMode);
   const isDirectEntryMode = fundInputMode === 'DIRECT_ENTRY';
+  const missionProgress = useMemo(() => resolvePortalMissionProgress({
+    fundInputMode,
+    bankStatementRowCount: bankStatementCount,
+    expenseRowCount: expenseSheetRows?.length || 0,
+    weeklySubmissionStatuses,
+  }), [bankStatementCount, expenseSheetRows?.length, fundInputMode, weeklySubmissionStatuses]);
   const settlementSheetPolicy = useMemo(
     () => normalizeSettlementSheetPolicy(myProject?.settlementSheetPolicy, myProject?.fundInputMode),
     [myProject?.fundInputMode, myProject?.settlementSheetPolicy],
@@ -896,6 +905,8 @@ export function PortalWeeklyExpensePage() {
         <span>기본 폴더: {myProject?.evidenceDriveRootFolderId ? '준비됨' : '미설정'}</span>
         {isENaraProject && <span>TYPE5 / 전용계좌 프로젝트</span>}
       </div>
+
+      <PortalMissionGuide progress={missionProgress} compact />
 
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2 flex-wrap">

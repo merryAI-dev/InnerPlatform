@@ -22,6 +22,7 @@ async function loginAsAdmin(page: import('@playwright/test').Page) {
 test('1. PM can login via dev auth harness', async ({ page }) => {
   await loginAsPm(page);
   await expect(page.locator('body')).toBeVisible();
+  await expect(page.getByTestId('portal-mission-guide')).toBeVisible();
 });
 
 test('2. Admin can login via dev auth harness', async ({ page }) => {
@@ -62,6 +63,7 @@ test('7. PM can navigate away from bank statement page', async ({ page }) => {
   await loginAsPm(page);
   await page.goto('/portal/bank-statements');
   await expect(page.getByRole('heading', { name: '통장내역' })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId('portal-mission-guide')).toBeVisible();
 
   await page.getByRole('link', { name: '예산 편집' }).click();
   await expect(page).toHaveURL(/\/portal\/budget$/);

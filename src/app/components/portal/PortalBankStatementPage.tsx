@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
 import { Badge } from '../ui/badge';
+import { PortalMissionGuide } from './PortalMissionGuide';
 import { usePortalStore } from '../../data/portal-store';
 import {
   detectBankStatementProfile,
@@ -17,6 +18,8 @@ import {
 } from '../../platform/bank-statement';
 import { normalizeKey, parseCsv, parseNumber } from '../../platform/csv-utils';
 import { loadXlsx, warmXlsx } from '../../platform/lazy-heavy-modules';
+import { normalizeProjectFundInputMode } from '../../data/types';
+import { resolvePortalMissionProgress } from '../../platform/portal-mission-guide';
 
 function getAmountColumnIndexes(columns: string[]): Set<number> {
   return new Set(
@@ -43,7 +46,7 @@ function formatBankStatementRows(
 
 export function PortalBankStatementPage() {
   const navigate = useNavigate();
-  const { portalUser, myProject, bankStatementRows, saveBankStatementRows } = usePortalStore();
+  const { portalUser, myProject, bankStatementRows, saveBankStatementRows, expenseSheetRows, weeklySubmissionStatuses } = usePortalStore();
   const [columns, setColumns] = useState<string[]>(bankStatementRows?.columns || []);
   const [rows, setRows] = useState<BankStatementRow[]>(bankStatementRows?.rows || []);
   const [dirty, setDirty] = useState(false);
@@ -59,6 +62,12 @@ export function PortalBankStatementPage() {
   const bankProfile = useMemo(() => detectBankStatementProfile(columns, lastUploadedName), [columns, lastUploadedName]);
   const amountColIdxs = useMemo(() => getAmountColumnIndexes(columns), [columns]);
   const hasUploadedSheet = rows.length > 0 && columns.length > 0;
+  const missionProgress = useMemo(() => resolvePortalMissionProgress({
+    fundInputMode: normalizeProjectFundInputMode(myProject?.fundInputMode),
+    bankStatementRowCount: rows.length,
+    expenseRowCount: expenseSheetRows?.length || 0,
+    weeklySubmissionStatuses,
+  }), [expenseSheetRows?.length, myProject?.fundInputMode, rows.length, weeklySubmissionStatuses]);
 
   const formatAmount = useCallback((value: string) => {
     const trimmed = value.trim();
@@ -443,6 +452,8 @@ export function PortalBankStatementPage() {
           </div>
         </CardContent>
       </Card>
+
+      <PortalMissionGuide progress={missionProgress} compact />
 
       {hasUploadedSheet ? (
         <Card>

@@ -45,6 +45,15 @@ test('release gate: PM requested portal route survives login redirect', async ({
   await expect(page.getByRole('heading', { name: '예산 편집' })).toBeVisible();
 });
 
+test('release gate: PM dashboard shows guided mission flow', async ({ page }) => {
+  await loginAsPm(page);
+  await page.goto('/portal');
+
+  await expect(page.getByTestId('portal-mission-guide')).toBeVisible();
+  await expect(page.getByText('이번 주 미션')).toBeVisible();
+  await expect(page.getByTestId('portal-mission-active-step')).toBeVisible();
+});
+
 test('release gate: admin can move a project to trash and restore it', async ({ page }) => {
   await loginAsAdmin(page);
   await page.goto('/projects');

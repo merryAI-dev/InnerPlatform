@@ -18,6 +18,7 @@ import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
+import { PortalMissionGuide } from './PortalMissionGuide';
 import { usePortalStore } from '../../data/portal-store';
 import { useHrAnnouncements, HR_EVENT_LABELS, HR_EVENT_COLORS } from '../../data/hr-announcements-store';
 import { usePayroll } from '../../data/payroll-store';
@@ -32,6 +33,8 @@ import { addMonthsToYearMonth, getSeoulTodayIso } from '../../platform/business-
 import { useFirebase } from '../../lib/firebase-context';
 import { featureFlags } from '../../config/feature-flags';
 import { getOrgCollectionPath } from '../../lib/firebase';
+import { normalizeProjectFundInputMode } from '../../data/types';
+import { resolvePortalMissionProgress } from '../../platform/portal-mission-guide';
 
 // ═══════════════════════════════════════════════════════════════
 // PortalDashboard — 내 사업 현황
@@ -39,7 +42,7 @@ import { getOrgCollectionPath } from '../../lib/firebase';
 
 export function PortalDashboard() {
   const navigate = useNavigate();
-  const { isLoading, portalUser, myProject, changeRequests } = usePortalStore();
+  const { isLoading, portalUser, myProject, changeRequests, bankStatementRows, expenseSheetRows, weeklySubmissionStatuses } = usePortalStore();
   const { getProjectAlerts } = useHrAnnouncements();
   const { runs, monthlyCloses, acknowledgePayrollRun, acknowledgeMonthlyClose } = usePayroll();
   const { db, isOnline, orgId } = useFirebase();
@@ -115,6 +118,12 @@ export function PortalDashboard() {
   const myLedgers = (liveLedgers ?? LEDGERS).filter(l => l.projectId === myProject.id);
   const myTx = (liveTransactions ?? TRANSACTIONS).filter(t => t.projectId === myProject.id);
   const myChanges = changeRequests.filter(r => r.projectId === myProject.id);
+  const missionProgress = useMemo(() => resolvePortalMissionProgress({
+    fundInputMode: normalizeProjectFundInputMode(myProject.fundInputMode),
+    bankStatementRowCount: bankStatementRows?.rows?.length || 0,
+    expenseRowCount: expenseSheetRows?.length || 0,
+    weeklySubmissionStatuses,
+  }), [bankStatementRows?.rows?.length, expenseSheetRows?.length, myProject.fundInputMode, weeklySubmissionStatuses]);
 
   const today = getSeoulTodayIso();
   const yearMonth = today.slice(0, 7);
@@ -255,6 +264,8 @@ export function PortalDashboard() {
       )}
 
       {/* 사업 기본 정보 */}
+      <PortalMissionGuide progress={missionProgress} />
+
       <Card>
         <CardContent className="p-4">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-[11px]">
