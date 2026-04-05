@@ -6,7 +6,7 @@ import {
   SETTLEMENT_COLUMNS,
   type ImportRow,
 } from './settlement-csv';
-import { resolveSettlementCashflowActualLineAmounts, type SettlementFlowAmountIndexes } from './settlement-flow-amounts';
+import { resolveSettlementFlowSnapshot, type SettlementFlowAmountIndexes } from './settlement-flow-amounts';
 
 export interface SettlementActualSyncWeekPayload {
   yearMonth: string;
@@ -92,7 +92,7 @@ export function buildSettlementActualSyncPayload(
     const lineId = parseCashflowLineLabel(cashflowLabel);
     if (!lineId) continue;
     const target = byWeek.get(weekLabel) || {};
-    const resolvedAmounts = resolveSettlementCashflowActualLineAmounts(row, amountIndexes);
+    const resolvedAmounts = resolveSettlementFlowSnapshot(row, amountIndexes).cashflowActualLineAmounts;
     for (const [resolvedLineId, amount] of Object.entries(resolvedAmounts)) {
       if (!amount) continue;
       target[resolvedLineId] = (target[resolvedLineId] || 0) + amount;

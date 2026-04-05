@@ -194,4 +194,28 @@ describe('buildSettlementActualSyncPayload', () => {
     const marchWeek = payload.find((item) => item.yearMonth === '2026-03' && item.weekNo === 1);
     expect(marchWeek?.amounts.INPUT_VAT_OUT).toBe(3000);
   });
+
+  it('excludes bank-imported outflow rows until a human enters the split amounts', () => {
+    const base = createEmptyCells();
+    const row = createRow(
+      withCell(
+        withCell(
+          withCell(base, 2, '2026-03-03'),
+          3,
+          '26-03-01',
+        ),
+        8,
+        '직접사업비',
+      ).map((cell, index) => (index === 10 ? '110,000' : cell)),
+    );
+    row.sourceTxId = 'bank:expense-1';
+    row.entryKind = 'EXPENSE';
+
+    const payload = buildSettlementActualSyncPayload([row], [
+      { yearMonth: '2026-03', weekNo: 1, weekStart: '2026-03-02', weekEnd: '2026-03-08', label: '26-03-01' },
+    ]);
+
+    expect(payload[0]?.amounts.DIRECT_COST_OUT).toBe(0);
+    expect(payload[0]?.amounts.INPUT_VAT_OUT).toBe(0);
+  });
 });

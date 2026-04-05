@@ -4,6 +4,11 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import type { MonthMondayWeek } from './cashflow-weeks';
 import type { ImportRow } from './settlement-csv';
+import type {
+  KernelImportRowJson,
+  SettlementFlowSnapshot,
+  SettlementKernelFlowSnapshotResponse,
+} from './settlement-kernel-contract';
 import type { SettlementDerivationContext, SettlementDerivationOptions } from './settlement-row-derivation';
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
@@ -16,20 +21,6 @@ export const SETTLEMENT_RUST_KERNEL_PATHS = {
   cargoManifestPath,
   rustBinaryPath,
 } as const;
-
-interface KernelImportRowJson {
-  tempId: string;
-  sourceTxId?: string;
-  entryKind?: string;
-  cells: string[];
-  error?: string;
-  reviewHints?: string[];
-  reviewRequiredCellIndexes?: number[];
-  reviewStatus?: 'pending' | 'confirmed';
-  reviewFingerprint?: string;
-  reviewConfirmedAt?: string;
-  userEditedCells?: number[];
-}
 
 interface KernelActualSyncWeekJson {
   yearMonth: string;
@@ -130,4 +121,14 @@ export function aggregateBudgetActualsViaRustKernel(
     rows: serializeRows(rows),
   });
   return JSON.parse(stdout) as { items: KernelBudgetActualItemJson[]; total: number };
+}
+
+export function buildSettlementFlowSnapshotsViaRustKernel(
+  rows: ImportRow[],
+): SettlementFlowSnapshot[] {
+  const stdout = runRustKernel({
+    command: 'flowSnapshot',
+    rows: serializeRows(rows),
+  });
+  return (JSON.parse(stdout) as SettlementKernelFlowSnapshotResponse).snapshots;
 }

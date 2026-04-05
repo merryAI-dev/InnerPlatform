@@ -27,9 +27,20 @@ export interface SettlementRowFlowAmounts {
   refundAmount: number;
 }
 
+export interface SettlementFlowSnapshot extends SettlementRowFlowAmounts {
+  cashflowActualLineAmounts: Partial<Record<string, number>>;
+  budgetActualAmount: number;
+  manualOutflowPending: boolean;
+  reviewRequired: boolean;
+}
+
 function parseAmount(cells: string[], index: number): number {
   if (index < 0) return 0;
   return parseNumber(cells[index] || '') ?? 0;
+}
+
+function isBankImportedExpenseRow(row: ImportRow): boolean {
+  return String(row.sourceTxId || '').startsWith('bank:') && row.entryKind === 'EXPENSE';
 }
 
 export function resolveSettlementRowFlowAmounts(
@@ -47,56 +58,108 @@ export function resolveSettlementRowFlowAmounts(
   };
 }
 
+export function resolveSettlementFlowSnapshot(
+  row: ImportRow,
+  indexes: SettlementFlowAmountIndexes,
+): SettlementFlowSnapshot {
+  const amounts = resolveSettlementRowFlowAmounts(row, indexes);
+  const reviewRequired = row.reviewStatus === 'pending' || (row.reviewHints?.length || 0) > 0;
+  const isInflowLine = Boolean(amounts.lineId && CASHFLOW_IN_LINE_IDS.has(amounts.lineId));
+  const manualOutflowPending = isBankImportedExpenseRow(row) && (
+    !amounts.lineId
+    || (
+      amounts.lineId === 'INPUT_VAT_OUT'
+        ? amounts.vatIn <= 0
+        : !isInflowLine && amounts.expenseAmount <= 0
+    )
+  );
+
+  if (manualOutflowPending) {
+    return {
+      ...amounts,
+      cashflowActualLineAmounts: {},
+      budgetActualAmount: 0,
+      manualOutflowPending,
+      reviewRequired,
+    };
+  }
+
+  if (!amounts.lineId) {
+    return {
+      ...amounts,
+      cashflowActualLineAmounts: {},
+      budgetActualAmount: 0,
+      manualOutflowPending,
+      reviewRequired,
+    };
+  }
+
+  let cashflowActualLineAmounts: Partial<Record<string, number>> = {};
+  if (isInflowLine) {
+    const inflowAmount = amounts.depositAmount > 0
+      ? amounts.depositAmount
+      : amounts.refundAmount > 0
+        ? amounts.refundAmount
+        : amounts.bankAmount;
+    cashflowActualLineAmounts = inflowAmount > 0 ? { [amounts.lineId]: inflowAmount } : {};
+  } else if (amounts.lineId === 'INPUT_VAT_OUT') {
+    cashflowActualLineAmounts = amounts.vatIn > 0 ? { INPUT_VAT_OUT: amounts.vatIn } : {};
+  } else {
+    const primaryOutAmount = amounts.expenseAmount > 0
+      ? amounts.expenseAmount
+      : amounts.depositAmount > 0 || amounts.refundAmount > 0
+        ? 0
+        : amounts.bankAmount;
+    if (primaryOutAmount > 0) cashflowActualLineAmounts[amounts.lineId] = primaryOutAmount;
+    if (amounts.vatIn > 0) {
+      cashflowActualLineAmounts.INPUT_VAT_OUT = (cashflowActualLineAmounts.INPUT_VAT_OUT || 0) + amounts.vatIn;
+    }
+  }
+
+  let budgetActualAmount = 0;
+  if (isInflowLine) {
+    budgetActualAmount = 0;
+  } else if (amounts.lineId === 'INPUT_VAT_OUT') {
+    budgetActualAmount = amounts.vatIn;
+  } else if (amounts.expenseAmount > 0) {
+    budgetActualAmount = amounts.expenseAmount;
+  } else if (amounts.vatIn > 0 && amounts.bankAmount === 0) {
+    budgetActualAmount = amounts.vatIn;
+  } else if (amounts.depositAmount > 0 || amounts.refundAmount > 0) {
+    budgetActualAmount = 0;
+  } else {
+    budgetActualAmount = amounts.bankAmount;
+  }
+
+  return {
+    ...amounts,
+    cashflowActualLineAmounts,
+    budgetActualAmount,
+    manualOutflowPending,
+    reviewRequired,
+  };
+}
+
 export function resolveSettlementActualSyncAmount(
   row: ImportRow,
   indexes: SettlementFlowAmountIndexes,
 ): number {
-  const amounts = resolveSettlementCashflowActualLineAmounts(row, indexes);
-  const lineId = resolveSettlementRowFlowAmounts(row, indexes).lineId;
+  const snapshot = resolveSettlementFlowSnapshot(row, indexes);
+  const lineId = snapshot.lineId;
   if (!lineId) return 0;
-  return amounts[lineId] || 0;
+  return snapshot.cashflowActualLineAmounts[lineId] || 0;
 }
 
 export function resolveSettlementCashflowActualLineAmounts(
   row: ImportRow,
   indexes: SettlementFlowAmountIndexes,
 ): Partial<Record<string, number>> {
-  const amounts = resolveSettlementRowFlowAmounts(row, indexes);
-  if (!amounts.lineId) return {};
-
-  if (CASHFLOW_IN_LINE_IDS.has(amounts.lineId)) {
-    const inflowAmount = amounts.depositAmount > 0
-      ? amounts.depositAmount
-      : amounts.refundAmount > 0
-        ? amounts.refundAmount
-        : amounts.bankAmount;
-    return inflowAmount > 0 ? { [amounts.lineId]: inflowAmount } : {};
-  }
-
-  if (amounts.lineId === 'INPUT_VAT_OUT') {
-    return amounts.vatIn > 0 ? { INPUT_VAT_OUT: amounts.vatIn } : {};
-  }
-
-  const primaryOutAmount = amounts.expenseAmount > 0
-    ? amounts.expenseAmount
-    : amounts.depositAmount > 0 || amounts.refundAmount > 0
-      ? 0
-      : amounts.bankAmount;
-  const result: Partial<Record<string, number>> = {};
-  if (primaryOutAmount > 0) result[amounts.lineId] = primaryOutAmount;
-  if (amounts.vatIn > 0) result.INPUT_VAT_OUT = (result.INPUT_VAT_OUT || 0) + amounts.vatIn;
-  return result;
+  return resolveSettlementFlowSnapshot(row, indexes).cashflowActualLineAmounts;
 }
 
 export function resolveSettlementBudgetActualAmount(
   row: ImportRow,
   indexes: SettlementFlowAmountIndexes,
 ): number {
-  const amounts = resolveSettlementRowFlowAmounts(row, indexes);
-  if (amounts.lineId && CASHFLOW_IN_LINE_IDS.has(amounts.lineId)) return 0;
-  if (amounts.lineId === 'INPUT_VAT_OUT') return amounts.vatIn;
-  if (amounts.expenseAmount > 0) return amounts.expenseAmount;
-  if (amounts.vatIn > 0 && amounts.bankAmount === 0) return amounts.vatIn;
-  if (amounts.depositAmount > 0 || amounts.refundAmount > 0) return 0;
-  return amounts.bankAmount;
+  return resolveSettlementFlowSnapshot(row, indexes).budgetActualAmount;
 }

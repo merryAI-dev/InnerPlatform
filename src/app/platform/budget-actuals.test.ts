@@ -50,14 +50,43 @@ describe('budget-actuals from settlement rows', () => {
     expect(getTotalBudgetActualFromSettlementRows([createRow(cells)])).toBe(0);
   });
 
-  it('falls back to bank amount when no derived expense exists', () => {
+  it('falls back to bank amount when an outflow line exists but no derived expense exists', () => {
     const cells = createEmptyCells();
     cells[5] = '여비';
     cells[6] = '교통비';
+    cells[8] = '직접사업비';
     cells[10] = '15,000';
     const result = aggregateBudgetActualsFromSettlementRows([createRow(cells)]);
 
     expect(result.get('여비|교통비')).toBe(15000);
     expect(getTotalBudgetActualFromSettlementRows([createRow(cells)])).toBe(15000);
+  });
+
+  it('excludes bank-imported outflow rows until a human confirms the split', () => {
+    const cells = createEmptyCells();
+    cells[5] = '여비';
+    cells[6] = '교통비';
+    cells[8] = '직접사업비';
+    cells[10] = '15,000';
+    const row = createRow(cells);
+    row.sourceTxId = 'bank:expense-1';
+    row.entryKind = 'EXPENSE';
+
+    const result = aggregateBudgetActualsFromSettlementRows([row]);
+
+    expect(result.size).toBe(0);
+    expect(getTotalBudgetActualFromSettlementRows([row])).toBe(0);
+  });
+
+  it('excludes rows without a cashflow line until a human classifies them', () => {
+    const cells = createEmptyCells();
+    cells[5] = '여비';
+    cells[6] = '교통비';
+    cells[10] = '15,000';
+
+    const result = aggregateBudgetActualsFromSettlementRows([createRow(cells)]);
+
+    expect(result.size).toBe(0);
+    expect(getTotalBudgetActualFromSettlementRows([createRow(cells)])).toBe(0);
   });
 });

@@ -38,6 +38,33 @@ export interface SettlementKernelActualSyncResponse {
   weeks: SettlementActualSyncWeekPayload[];
 }
 
+export interface SettlementFlowSnapshot {
+  tempId: string;
+  sourceTxId?: string;
+  entryKind?: string;
+  budgetKey?: string;
+  budgetCode?: string;
+  subCode?: string;
+  lineId?: string;
+  bankAmount: number;
+  expenseAmount: number;
+  vatIn: number;
+  depositAmount: number;
+  refundAmount: number;
+  budgetActualAmount: number;
+  cashflowActualLineAmounts: Record<string, number>;
+  manualOutflowPending: boolean;
+}
+
+export interface SettlementKernelFlowSnapshotRequest {
+  command: 'flowSnapshot';
+  rows: KernelImportRowJson[];
+}
+
+export interface SettlementKernelFlowSnapshotResponse {
+  snapshots: SettlementFlowSnapshot[];
+}
+
 export function serializeImportRowsForKernel(rows: ImportRow[]): KernelImportRowJson[] {
   return rows.map((row) => ({
     tempId: row.tempId,

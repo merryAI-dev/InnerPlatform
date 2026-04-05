@@ -10,6 +10,7 @@ import { buildSettlementDerivationContext } from './settlement-sheet-prepare';
 import {
   aggregateBudgetActualsViaRustKernel,
   buildSettlementActualSyncPayloadViaRustKernel,
+  buildSettlementFlowSnapshotsViaRustKernel,
   deriveSettlementRowsViaRustKernel,
   SETTLEMENT_RUST_KERNEL_PATHS,
 } from './settlement-calculation-kernel.node';
@@ -17,6 +18,7 @@ import { parseNumber } from './csv-utils';
 import { getYearMondayWeeks, type MonthMondayWeek } from './cashflow-weeks';
 import { buildSettlementActualSyncPayload } from './settlement-sheet-sync';
 import { aggregateBudgetActualsFromSettlementRows } from './budget-actuals';
+import { resolveSettlementFlowSnapshot, type SettlementFlowAmountIndexes } from './settlement-flow-amounts';
 import {
   buildImportRowsFromUsageLedgerFixture,
   getUsageLedgerTrackedNormalReplayRows,
@@ -40,6 +42,15 @@ interface KernelBudgetActualItemJson {
   subCode: string;
   amount: number;
 }
+
+const flowIndexes: SettlementFlowAmountIndexes = {
+  cashflowIdx: 8,
+  bankAmountIdx: 10,
+  depositIdx: 11,
+  refundIdx: 12,
+  expenseAmountIdx: 13,
+  vatInIdx: 14,
+};
 
 function loadFixture(): UsageLedgerPhase1Fixture {
   const fixturePath = path.resolve(
@@ -233,5 +244,30 @@ describeRust('settlement-rust-kernel', () => {
       '회의비|다과비': 30000,
       '부가세|매입부가세': 3000,
     });
+  });
+
+  it('matches TypeScript flow snapshots for pending bank-imported outflow rows', () => {
+    const base = Array.from({ length: 27 }, () => '');
+    const pendingRow: ImportRow = {
+      tempId: 'pending-bank-row',
+      sourceTxId: 'bank:expense-1',
+      entryKind: 'EXPENSE',
+      cells: [...base],
+    };
+    pendingRow.cells[5] = '회의비';
+    pendingRow.cells[6] = '다과비';
+    pendingRow.cells[8] = '직접사업비';
+    pendingRow.cells[10] = '110,000';
+
+    const tsSnapshot = resolveSettlementFlowSnapshot(pendingRow, flowIndexes);
+    const rustSnapshot = buildSettlementFlowSnapshotsViaRustKernel([pendingRow])[0];
+
+    expect(rustSnapshot?.tempId).toBe(pendingRow.tempId);
+    expect(rustSnapshot?.lineId).toBe(tsSnapshot.lineId);
+    expect(rustSnapshot?.bankAmount).toBe(tsSnapshot.bankAmount);
+    expect(rustSnapshot?.budgetActualAmount).toBe(tsSnapshot.budgetActualAmount);
+    expect(rustSnapshot?.manualOutflowPending).toBe(tsSnapshot.manualOutflowPending);
+    expect(rustSnapshot?.cashflowActualLineAmounts).toEqual(tsSnapshot.cashflowActualLineAmounts);
+    expect(rustSnapshot?.budgetKey).toBe('회의비|다과비');
   });
 });

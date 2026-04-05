@@ -2,7 +2,7 @@ import type { Transaction } from '../data/types';
 import { buildBudgetLabelKey } from './budget-labels';
 import { SETTLEMENT_COLUMNS, type ImportRow } from './settlement-csv';
 import {
-  resolveSettlementBudgetActualAmount,
+  resolveSettlementFlowSnapshot,
   type SettlementFlowAmountIndexes,
 } from './settlement-flow-amounts';
 
@@ -37,7 +37,7 @@ export function aggregateBudgetActualsFromSettlementRows(
     const subCode = String(row.cells[indexes.subCodeIdx] || '');
     const key = buildBudgetLabelKey(budgetCode, subCode);
     if (key === '|') continue;
-    const amount = resolveSettlementBudgetActualAmount(row, indexes);
+    const amount = resolveSettlementFlowSnapshot(row, indexes).budgetActualAmount;
     if (amount === 0) continue;
     result.set(key, (result.get(key) || 0) + amount);
   }
