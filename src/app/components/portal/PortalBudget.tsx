@@ -43,7 +43,6 @@ import {
   selectBudgetPlanImportSheet,
 } from '../../platform/budget-plan-import';
 import {
-  aggregateBudgetActualsAuthoritatively,
   aggregateBudgetActualsFromSettlementRowsLocally,
 } from '../../platform/settlement-calculation-kernel';
 import { moveBudgetSubCode, moveBudgetSubCodeToIndex } from '../../platform/budget-code-book-order';
@@ -271,7 +270,6 @@ export function PortalBudget() {
   } | null>(null);
   const projectId = myProject?.id || '';
   const platformApiEnabled = isPlatformApiEnabled();
-
   const meta = myProject ? {
     projectId: myProject.id,
     projectName: myProject.name,
@@ -415,36 +413,8 @@ export function PortalBudget() {
   const budgetImportShowAiPanel = budgetImportAiShouldRun || budgetImportAiLoading || Boolean(budgetImportAiAnalysis) || Boolean(budgetImportAiError);
 
   useEffect(() => {
-    const fallback = aggregateBudgetActualsFromSettlementRowsLocally(expenseSheetRows);
-    setSpentMap(fallback);
-
-    if (!platformApiEnabled || !orgId || !projectId) {
-      return undefined;
-    }
-
-    let cancelled = false;
-    void aggregateBudgetActualsAuthoritatively({
-      rows: expenseSheetRows || [],
-      runtime: {
-        tenantId: orgId,
-        projectId,
-        actor: bffActor,
-      },
-    }).then((nextSpentMap) => {
-      if (!cancelled) {
-        setSpentMap(nextSpentMap);
-      }
-    }).catch((error) => {
-      if (!cancelled) {
-        console.error('[PortalBudget] authoritative spent map preview failed:', error);
-        setSpentMap(fallback);
-      }
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [bffActor, expenseSheetRows, orgId, platformApiEnabled, projectId]);
+    setSpentMap(aggregateBudgetActualsFromSettlementRowsLocally(expenseSheetRows));
+  }, [expenseSheetRows]);
 
   const formatInput = useCallback((value: string) => {
     const num = parseNumber(value);

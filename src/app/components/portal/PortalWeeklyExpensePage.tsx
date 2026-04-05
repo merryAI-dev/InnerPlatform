@@ -42,8 +42,8 @@ import {
 } from '../../lib/platform-bff-client';
 import { PlatformApiError } from '../../platform/api-client';
 import {
-  deriveSettlementRowsAuthoritatively as deriveSettlementRowsWithRuntime,
-  previewSettlementActualSyncAuthoritatively as previewSettlementActualSyncWithRuntime,
+  deriveSettlementRowsAuthoritatively,
+  previewSettlementActualSyncAuthoritatively,
 } from '../../platform/settlement-calculation-kernel';
 import {
   GoogleDriveBrowserUploadError,
@@ -54,8 +54,6 @@ import { splitLooseNameList } from '../../platform/name-list';
 import { resolveApiErrorMessage } from '../../platform/api-error-message';
 import { reportError } from '../../platform/observability';
 import { type ImportRow } from '../../platform/settlement-csv';
-import type { MonthMondayWeek } from '../../platform/cashflow-weeks';
-import type { SettlementDerivationContext, SettlementDerivationOptions } from '../../platform/settlement-row-derivation';
 import { readDevAuthHarnessConfig } from '../../platform/dev-harness';
 import { detectParticipationRisk } from '../../platform/participation-risk-rules';
 import { normalizeBudgetLabel } from '../../platform/budget-labels';
@@ -218,31 +216,18 @@ export function PortalWeeklyExpensePage() {
     portalUser?.email,
     portalUser?.role,
   ]);
-  const settlementKernelRuntime = useMemo(() => (
-    orgId && projectId
-      ? {
-        tenantId: orgId,
-        projectId,
-        actor: bffActor,
-      }
-      : null
-  ), [orgId, bffActor, projectId]);
-  const deriveRowsAuthoritatively = useMemo(() => (
-    async (rows: ImportRow[], context: SettlementDerivationContext, options: SettlementDerivationOptions) => deriveSettlementRowsWithRuntime({
-      rows,
-      context,
-      options,
-      runtime: settlementKernelRuntime,
-    })
-  ), [settlementKernelRuntime]);
-  const previewActualSyncAuthoritatively = useMemo(() => (
-    async (rows: ImportRow[], yearWeeks: MonthMondayWeek[], persistedRows?: ImportRow[] | null) => previewSettlementActualSyncWithRuntime({
-      rows,
-      yearWeeks,
-      persistedRows,
-      runtime: settlementKernelRuntime,
-    })
-  ), [settlementKernelRuntime]);
+  const deriveRowsAuthoritatively = async (rows: ImportRow[], context: Parameters<typeof deriveSettlementRowsAuthoritatively>[0]['context'], options: Parameters<typeof deriveSettlementRowsAuthoritatively>[0]['options']) => (
+    deriveSettlementRowsAuthoritatively({ rows, context, options })
+  );
+  const previewActualSyncAuthoritatively = async (
+    rows: ImportRow[],
+    yearWeeks: Parameters<typeof previewSettlementActualSyncAuthoritatively>[0]['yearWeeks'],
+    persistedRows?: ImportRow[] | null,
+  ) => previewSettlementActualSyncAuthoritatively({
+    rows,
+    yearWeeks,
+    persistedRows,
+  });
 
   const handleEvidenceDriveError = (error: unknown, actionLabel: string) => {
     reportError(error, {

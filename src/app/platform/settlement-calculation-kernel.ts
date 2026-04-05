@@ -1,11 +1,5 @@
 import type { MonthMondayWeek } from './cashflow-weeks';
-import {
-  deriveSettlementRowsViaBff,
-  isPlatformApiEnabled,
-  previewSettlementActualSyncViaBff,
-  previewSettlementFlowSnapshotsViaBff,
-  type ActorLike,
-} from '../lib/platform-bff-client';
+import type { ActorLike } from '../lib/platform-bff-client';
 import {
   aggregateBudgetActualsFromSettlementFlowSnapshots,
 } from './budget-actuals';
@@ -90,34 +84,12 @@ export function aggregateBudgetActualsFromSettlementRowsLocally(
   return getSettlementCalculationKernel().aggregateBudgetActuals(rows);
 }
 
-function canUseSettlementKernelRuntime(
-  runtime: SettlementKernelRuntimeConfig | null | undefined,
-): runtime is SettlementKernelRuntimeConfig {
-  return Boolean(
-    runtime
-      && isPlatformApiEnabled()
-      && runtime.tenantId
-      && runtime.projectId
-      && runtime.actor?.uid,
-  );
-}
-
 export async function deriveSettlementRowsAuthoritatively(params: {
   rows: ImportRow[];
   context: SettlementDerivationContext;
   options: SettlementDerivationOptions;
   runtime?: SettlementKernelRuntimeConfig | null;
 }): Promise<ImportRow[]> {
-  if (canUseSettlementKernelRuntime(params.runtime)) {
-    return deriveSettlementRowsViaBff({
-      tenantId: params.runtime.tenantId,
-      actor: params.runtime.actor,
-      projectId: params.runtime.projectId,
-      rows: params.rows,
-      context: params.context,
-      options: params.options,
-    });
-  }
   return deriveSettlementRowsLocally(params.rows, params.context, params.options);
 }
 
@@ -127,16 +99,6 @@ export async function previewSettlementActualSyncAuthoritatively(params: {
   persistedRows?: ImportRow[] | null;
   runtime?: SettlementKernelRuntimeConfig | null;
 }): Promise<SettlementActualSyncWeekPayload[]> {
-  if (canUseSettlementKernelRuntime(params.runtime)) {
-    return previewSettlementActualSyncViaBff({
-      tenantId: params.runtime.tenantId,
-      actor: params.runtime.actor,
-      projectId: params.runtime.projectId,
-      rows: params.rows,
-      yearWeeks: params.yearWeeks,
-      ...(params.persistedRows ? { persistedRows: params.persistedRows } : {}),
-    });
-  }
   return buildSettlementActualSyncPayloadLocally(params.rows, params.yearWeeks, params.persistedRows);
 }
 
@@ -144,22 +106,12 @@ export async function previewSettlementFlowSnapshotsAuthoritatively(params: {
   rows: ImportRow[] | null | undefined;
   runtime?: SettlementKernelRuntimeConfig | null;
 }): Promise<SettlementFlowSnapshot[]> {
-  const rows = params.rows || [];
-  if (canUseSettlementKernelRuntime(params.runtime)) {
-    return previewSettlementFlowSnapshotsViaBff({
-      tenantId: params.runtime.tenantId,
-      actor: params.runtime.actor,
-      projectId: params.runtime.projectId,
-      rows,
-    });
-  }
-  return buildSettlementFlowSnapshotsLocally(rows);
+  return buildSettlementFlowSnapshotsLocally(params.rows || []);
 }
 
 export async function aggregateBudgetActualsAuthoritatively(params: {
   rows: ImportRow[] | null | undefined;
   runtime?: SettlementKernelRuntimeConfig | null;
 }): Promise<Map<string, number>> {
-  const snapshots = await previewSettlementFlowSnapshotsAuthoritatively(params);
-  return aggregateBudgetActualsFromSettlementFlowSnapshots(snapshots);
+  return aggregateBudgetActualsFromSettlementRowsLocally(params.rows);
 }
