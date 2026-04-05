@@ -1,5 +1,4 @@
 import type { MonthMondayWeek } from './cashflow-weeks';
-import type { ActorLike } from '../lib/platform-bff-client';
 import {
   aggregateBudgetActualsFromSettlementFlowSnapshots,
 } from './budget-actuals';
@@ -35,12 +34,6 @@ export interface SettlementCalculationKernel {
   aggregateBudgetActuals: (
     rows: ImportRow[] | null | undefined,
   ) => Map<string, number>;
-}
-
-export interface SettlementKernelRuntimeConfig {
-  tenantId: string;
-  projectId: string;
-  actor: ActorLike;
 }
 
 const typeScriptSettlementCalculationKernel: SettlementCalculationKernel = {
@@ -82,36 +75,4 @@ export function aggregateBudgetActualsFromSettlementRowsLocally(
   rows: ImportRow[] | null | undefined,
 ): Map<string, number> {
   return getSettlementCalculationKernel().aggregateBudgetActuals(rows);
-}
-
-export async function deriveSettlementRowsAuthoritatively(params: {
-  rows: ImportRow[];
-  context: SettlementDerivationContext;
-  options: SettlementDerivationOptions;
-  runtime?: SettlementKernelRuntimeConfig | null;
-}): Promise<ImportRow[]> {
-  return deriveSettlementRowsLocally(params.rows, params.context, params.options);
-}
-
-export async function previewSettlementActualSyncAuthoritatively(params: {
-  rows: ImportRow[];
-  yearWeeks: MonthMondayWeek[];
-  persistedRows?: ImportRow[] | null;
-  runtime?: SettlementKernelRuntimeConfig | null;
-}): Promise<SettlementActualSyncWeekPayload[]> {
-  return buildSettlementActualSyncPayloadLocally(params.rows, params.yearWeeks, params.persistedRows);
-}
-
-export async function previewSettlementFlowSnapshotsAuthoritatively(params: {
-  rows: ImportRow[] | null | undefined;
-  runtime?: SettlementKernelRuntimeConfig | null;
-}): Promise<SettlementFlowSnapshot[]> {
-  return buildSettlementFlowSnapshotsLocally(params.rows || []);
-}
-
-export async function aggregateBudgetActualsAuthoritatively(params: {
-  rows: ImportRow[] | null | undefined;
-  runtime?: SettlementKernelRuntimeConfig | null;
-}): Promise<Map<string, number>> {
-  return aggregateBudgetActualsFromSettlementRowsLocally(params.rows);
 }

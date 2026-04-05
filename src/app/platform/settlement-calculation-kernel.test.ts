@@ -1,24 +1,13 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { ImportRow } from './settlement-csv';
 import type { SettlementDerivationContext } from './settlement-row-derivation';
 
-const platformBffMocks = vi.hoisted(() => ({
-  deriveSettlementRowsViaBff: vi.fn(),
-  isPlatformApiEnabled: vi.fn(() => false),
-  previewSettlementActualSyncViaBff: vi.fn(),
-  previewSettlementFlowSnapshotsViaBff: vi.fn(),
-}));
-
-vi.mock('../lib/platform-bff-client', () => ({
-  ...platformBffMocks,
-}));
-
 import { getYearMondayWeeks } from './cashflow-weeks';
 import {
-  aggregateBudgetActualsAuthoritatively,
-  deriveSettlementRowsAuthoritatively,
-  previewSettlementActualSyncAuthoritatively,
-  previewSettlementFlowSnapshotsAuthoritatively,
+  aggregateBudgetActualsFromSettlementRowsLocally,
+  buildSettlementActualSyncPayloadLocally,
+  buildSettlementFlowSnapshotsLocally,
+  deriveSettlementRowsLocally,
 } from './settlement-calculation-kernel';
 
 function createEmptyCells(): string[] {
@@ -51,59 +40,33 @@ function createDerivationContext(): SettlementDerivationContext {
 }
 
 describe('settlement-calculation-kernel', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    platformBffMocks.isPlatformApiEnabled.mockReturnValue(false);
+  it('does not expose authoritative wrappers or runtime config anymore', async () => {
+    const module = await import('./settlement-calculation-kernel');
+
+    expect('deriveSettlementRowsAuthoritatively' in module).toBe(false);
+    expect('previewSettlementActualSyncAuthoritatively' in module).toBe(false);
+    expect('previewSettlementFlowSnapshotsAuthoritatively' in module).toBe(false);
+    expect('aggregateBudgetActualsAuthoritatively' in module).toBe(false);
+    expect('SettlementKernelRuntimeConfig' in module).toBe(false);
   });
 
-  it('derives settlement rows locally even when runtime is provided', async () => {
-    platformBffMocks.isPlatformApiEnabled.mockReturnValue(true);
-    platformBffMocks.deriveSettlementRowsViaBff.mockResolvedValue([
-      { tempId: 'from-bff', cells: createEmptyCells() },
-    ] as ImportRow[]);
-
+  it('derives settlement rows locally through the primary kernel api', () => {
     const cells = createEmptyCells();
     cells[2] = '2025-01-06';
     cells[8] = '직접사업비';
     cells[10] = '33,000';
     cells[13] = '30,000';
 
-    const rows = await deriveSettlementRowsAuthoritatively({
-      rows: [createRow(cells)],
-      context: createDerivationContext(),
-      options: { mode: 'row' },
-      runtime: {
-        tenantId: 'mysc',
-        projectId: 'p001',
-        actor: { uid: 'u001', role: 'pm' },
-      },
-    });
+    const rows = deriveSettlementRowsLocally(
+      [createRow(cells)],
+      createDerivationContext(),
+      { mode: 'row' },
+    );
 
-    expect(platformBffMocks.deriveSettlementRowsViaBff).not.toHaveBeenCalled();
-    expect(rows.some((row) => row.tempId === 'from-bff')).toBe(false);
     expect(rows).toHaveLength(1);
   });
 
-  it('builds local flow snapshots even when runtime is provided', async () => {
-    platformBffMocks.isPlatformApiEnabled.mockReturnValue(true);
-    platformBffMocks.previewSettlementFlowSnapshotsViaBff.mockResolvedValue([{
-      tempId: 'from-bff',
-      sourceTxId: 'bank:expense-1',
-      entryKind: 'EXPENSE',
-      budgetKey: 'from-bff',
-      budgetCode: 'from-bff',
-      subCode: 'from-bff',
-      lineId: 'DIRECT_COST_OUT',
-      bankAmount: 1,
-      expenseAmount: 1,
-      vatIn: 0,
-      depositAmount: 0,
-      refundAmount: 0,
-      budgetActualAmount: 1,
-      cashflowActualLineAmounts: { DIRECT_COST_OUT: 1 },
-      manualOutflowPending: false,
-    }]);
-
+  it('builds local flow snapshots through the primary kernel api', () => {
     const cells = createEmptyCells();
     cells[5] = '회의비';
     cells[6] = '다과비';
@@ -111,16 +74,8 @@ describe('settlement-calculation-kernel', () => {
     cells[10] = '33,000';
     cells[13] = '30,000';
 
-    const snapshots = await previewSettlementFlowSnapshotsAuthoritatively({
-      rows: [createRow(cells)],
-      runtime: {
-        tenantId: 'mysc',
-        projectId: 'p001',
-        actor: { uid: 'u001', role: 'pm' },
-      },
-    });
+    const snapshots = buildSettlementFlowSnapshotsLocally([createRow(cells)]);
 
-    expect(platformBffMocks.previewSettlementFlowSnapshotsViaBff).not.toHaveBeenCalled();
     expect(snapshots).toHaveLength(1);
     expect(snapshots[0]).toMatchObject({
       budgetKey: '회의비|다과비',
@@ -131,14 +86,7 @@ describe('settlement-calculation-kernel', () => {
     });
   });
 
-  it('builds actual sync payloads locally even when runtime is provided', async () => {
-    platformBffMocks.isPlatformApiEnabled.mockReturnValue(true);
-    platformBffMocks.previewSettlementActualSyncViaBff.mockResolvedValue([{
-      yearMonth: '2099-12',
-      weekNo: 99,
-      amounts: { DIRECT_COST_OUT: 1 },
-    }]);
-
+  it('builds actual sync payloads locally through the primary kernel api', () => {
     const yearWeeks = getYearMondayWeeks(2025);
     const cells = createEmptyCells();
     cells[2] = '2025-01-06';
@@ -148,17 +96,8 @@ describe('settlement-calculation-kernel', () => {
     cells[13] = '30,000';
     cells[14] = '3,000';
 
-    const payload = await previewSettlementActualSyncAuthoritatively({
-      rows: [createRow(cells)],
-      yearWeeks,
-      runtime: {
-        tenantId: 'mysc',
-        projectId: 'p001',
-        actor: { uid: 'u001', role: 'pm' },
-      },
-    });
+    const payload = buildSettlementActualSyncPayloadLocally([createRow(cells)], yearWeeks);
 
-    expect(platformBffMocks.previewSettlementActualSyncViaBff).not.toHaveBeenCalled();
     expect(payload).toHaveLength(1);
     expect(payload[0]).toMatchObject({
       yearMonth: yearWeeks[0]?.yearMonth,
@@ -168,38 +107,13 @@ describe('settlement-calculation-kernel', () => {
     expect(payload[0]?.amounts.INPUT_VAT_OUT).toBe(3000);
   });
 
-  it('aggregates budget actuals locally even when runtime is provided', async () => {
-    platformBffMocks.isPlatformApiEnabled.mockReturnValue(true);
-    platformBffMocks.previewSettlementFlowSnapshotsViaBff.mockResolvedValue([{
-      tempId: 'from-bff',
-      sourceTxId: 'bank:expense-1',
-      entryKind: 'EXPENSE',
-      budgetKey: 'from-bff',
-      budgetCode: 'from-bff',
-      subCode: 'from-bff',
-      lineId: 'DIRECT_COST_OUT',
-      bankAmount: 1,
-      expenseAmount: 1,
-      vatIn: 0,
-      depositAmount: 0,
-      refundAmount: 0,
-      budgetActualAmount: 1,
-      cashflowActualLineAmounts: { DIRECT_COST_OUT: 1 },
-      manualOutflowPending: false,
-    }]);
-
-    const spentMap = await aggregateBudgetActualsAuthoritatively({
-      rows: [createRow([
+  it('aggregates budget actuals locally through the primary kernel api', () => {
+    const spentMap = aggregateBudgetActualsFromSettlementRowsLocally([
+      createRow([
         '', '', '2025-01-06', '25-01-1', '', '회의비', '다과비', '', '직접사업비', '', '33,000', '', '', '30,000', '3,000',
-      ])],
-      runtime: {
-        tenantId: 'mysc',
-        projectId: 'p001',
-        actor: { uid: 'u001', role: 'pm' },
-      },
-    });
+      ]),
+    ]);
 
-    expect(platformBffMocks.previewSettlementFlowSnapshotsViaBff).not.toHaveBeenCalled();
     expect(spentMap.get('회의비|다과비')).toBe(30000);
   });
 });

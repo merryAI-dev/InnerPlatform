@@ -42,8 +42,8 @@ import {
 } from '../../lib/platform-bff-client';
 import { PlatformApiError } from '../../platform/api-client';
 import {
-  deriveSettlementRowsAuthoritatively as deriveSettlementRowsLocally,
-  previewSettlementActualSyncAuthoritatively as previewSettlementActualSyncLocally,
+  deriveSettlementRowsLocally,
+  buildSettlementActualSyncPayloadLocally,
 } from '../../platform/settlement-calculation-kernel';
 import {
   GoogleDriveBrowserUploadError,
@@ -216,22 +216,16 @@ export function PortalWeeklyExpensePage() {
     portalUser?.email,
     portalUser?.role,
   ]);
-  const deriveRowsAuthoritatively = useCallback((
+  const deriveRowsWithLocalKernel = useCallback((
     rows: ImportRow[],
-    context: Parameters<typeof deriveSettlementRowsLocally>[0]['context'],
-    options: Parameters<typeof deriveSettlementRowsLocally>[0]['options'],
-  ) => (
-    deriveSettlementRowsLocally({ rows, context, options })
-  ), []);
-  const previewActualSyncAuthoritatively = useCallback((
+    context: Parameters<typeof deriveSettlementRowsLocally>[1],
+    options: Parameters<typeof deriveSettlementRowsLocally>[2],
+  ) => deriveSettlementRowsLocally(rows, context, options), []);
+  const previewActualSyncWithLocalKernel = useCallback((
     rows: ImportRow[],
-    yearWeeks: Parameters<typeof previewSettlementActualSyncLocally>[0]['yearWeeks'],
+    yearWeeks: Parameters<typeof buildSettlementActualSyncPayloadLocally>[1],
     persistedRows?: ImportRow[] | null,
-  ) => previewSettlementActualSyncLocally({
-    rows,
-    yearWeeks,
-    persistedRows,
-  }), []);
+  ) => buildSettlementActualSyncPayloadLocally(rows, yearWeeks, persistedRows), []);
 
   const handleEvidenceDriveError = (error: unknown, actionLabel: string) => {
     reportError(error, {
@@ -868,8 +862,8 @@ export function PortalWeeklyExpensePage() {
           onUpdateWeeklySubmissionStatus={upsertWeeklySubmissionStatus}
           pendingQuickInsert={pendingQuickInsert}
           onPendingQuickInsertHandled={() => setPendingQuickInsert(null)}
-          onDeriveRows={deriveRowsAuthoritatively}
-          onPreviewActualSyncPayload={previewActualSyncAuthoritatively}
+          onDeriveRows={deriveRowsWithLocalKernel}
+          onPreviewActualSyncPayload={previewActualSyncWithLocalKernel}
         />
       </Suspense>
       {googleSheetImportOpen && (
@@ -897,7 +891,7 @@ export function PortalWeeklyExpensePage() {
               saveEvidenceRequiredMap={saveEvidenceRequiredMap}
               markSheetSourceApplied={markSheetSourceApplied}
               upsertWeekAmounts={upsertWeekAmounts}
-              previewActualSyncPayload={previewActualSyncAuthoritatively}
+              previewActualSyncPayload={previewActualSyncWithLocalKernel}
             />
         </Suspense>
       )}
