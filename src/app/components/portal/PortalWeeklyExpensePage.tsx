@@ -29,9 +29,7 @@ import {
 import { toast } from 'sonner';
 import { useFirebase } from '../../lib/firebase-context';
 import {
-  deriveSettlementRowsViaBff,
   type ProvisionTransactionEvidenceDriveResult,
-  previewSettlementActualSyncViaBff,
   type SyncTransactionEvidenceDriveResult,
   type UploadTransactionEvidenceDriveResult,
   provisionProjectEvidenceDriveRootViaBff,
@@ -43,6 +41,10 @@ import {
   isPlatformApiEnabled,
 } from '../../lib/platform-bff-client';
 import { PlatformApiError } from '../../platform/api-client';
+import {
+  deriveSettlementRowsAuthoritatively as deriveSettlementRowsWithRuntime,
+  previewSettlementActualSyncAuthoritatively as previewSettlementActualSyncWithRuntime,
+} from '../../platform/settlement-calculation-kernel';
 import {
   GoogleDriveBrowserUploadError,
   uploadFileToGoogleDriveFolder,
@@ -216,30 +218,31 @@ export function PortalWeeklyExpensePage() {
     portalUser?.email,
     portalUser?.role,
   ]);
-  const deriveRowsViaRust = useMemo(() => (
-    isPlatformApiEnabled() && orgId && projectId
-      ? async (rows: ImportRow[], context: SettlementDerivationContext, options: SettlementDerivationOptions) => deriveSettlementRowsViaBff({
+  const settlementKernelRuntime = useMemo(() => (
+    orgId && projectId
+      ? {
         tenantId: orgId,
-        actor: bffActor,
         projectId,
-        rows,
-        context,
-        options,
-      })
-      : undefined
-  ), [orgId, bffActor, projectId]);
-  const previewActualSyncViaRust = useMemo(() => (
-    isPlatformApiEnabled() && orgId && projectId
-      ? async (rows: ImportRow[], yearWeeks: MonthMondayWeek[], persistedRows?: ImportRow[] | null) => previewSettlementActualSyncViaBff({
-        tenantId: orgId,
         actor: bffActor,
-        projectId,
-        rows,
-        yearWeeks,
-        persistedRows,
-      })
-      : undefined
+      }
+      : null
   ), [orgId, bffActor, projectId]);
+  const deriveRowsAuthoritatively = useMemo(() => (
+    async (rows: ImportRow[], context: SettlementDerivationContext, options: SettlementDerivationOptions) => deriveSettlementRowsWithRuntime({
+      rows,
+      context,
+      options,
+      runtime: settlementKernelRuntime,
+    })
+  ), [settlementKernelRuntime]);
+  const previewActualSyncAuthoritatively = useMemo(() => (
+    async (rows: ImportRow[], yearWeeks: MonthMondayWeek[], persistedRows?: ImportRow[] | null) => previewSettlementActualSyncWithRuntime({
+      rows,
+      yearWeeks,
+      persistedRows,
+      runtime: settlementKernelRuntime,
+    })
+  ), [settlementKernelRuntime]);
 
   const handleEvidenceDriveError = (error: unknown, actionLabel: string) => {
     reportError(error, {
@@ -876,8 +879,8 @@ export function PortalWeeklyExpensePage() {
           onUpdateWeeklySubmissionStatus={upsertWeeklySubmissionStatus}
           pendingQuickInsert={pendingQuickInsert}
           onPendingQuickInsertHandled={() => setPendingQuickInsert(null)}
-          onDeriveRows={deriveRowsViaRust}
-          onPreviewActualSyncPayload={previewActualSyncViaRust}
+          onDeriveRows={deriveRowsAuthoritatively}
+          onPreviewActualSyncPayload={previewActualSyncAuthoritatively}
         />
       </Suspense>
       {googleSheetImportOpen && (
@@ -905,7 +908,7 @@ export function PortalWeeklyExpensePage() {
               saveEvidenceRequiredMap={saveEvidenceRequiredMap}
               markSheetSourceApplied={markSheetSourceApplied}
               upsertWeekAmounts={upsertWeekAmounts}
-              previewActualSyncViaRust={previewActualSyncViaRust}
+              previewActualSyncViaRust={previewActualSyncAuthoritatively}
             />
         </Suspense>
       )}
