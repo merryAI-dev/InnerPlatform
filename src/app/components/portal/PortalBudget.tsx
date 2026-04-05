@@ -42,7 +42,10 @@ import {
   parseBudgetPlanImportText,
   selectBudgetPlanImportSheet,
 } from '../../platform/budget-plan-import';
-import { aggregateBudgetActualsFromSettlementRowsWithKernel } from '../../platform/settlement-calculation-kernel';
+import {
+  aggregateBudgetActualsAuthoritatively,
+  aggregateBudgetActualsFromSettlementRowsWithKernel,
+} from '../../platform/settlement-calculation-kernel';
 import { moveBudgetSubCode, moveBudgetSubCodeToIndex } from '../../platform/budget-code-book-order';
 import { buildBudgetLabelKey, normalizeBudgetLabel } from '../../platform/budget-labels';
 import { parseBudgetPlanMatrix, planBudgetPlanMerge } from '../../platform/google-sheet-migration';
@@ -296,9 +299,9 @@ export function PortalBudget() {
     return map;
   }, [budgetPlanRows]);
 
-  const spentMap = useMemo(() => {
-    return aggregateBudgetActualsFromSettlementRowsWithKernel(expenseSheetRows);
-  }, [expenseSheetRows]);
+  const [spentMap, setSpentMap] = useState<Map<string, number>>(
+    () => aggregateBudgetActualsFromSettlementRowsWithKernel(expenseSheetRows),
+  );
 
   const activeCodeBook = useMemo(
     () => budgetCodeBook,
@@ -410,6 +413,38 @@ export function PortalBudget() {
     projectId,
   ]);
   const budgetImportShowAiPanel = budgetImportAiShouldRun || budgetImportAiLoading || Boolean(budgetImportAiAnalysis) || Boolean(budgetImportAiError);
+
+  useEffect(() => {
+    const fallback = aggregateBudgetActualsFromSettlementRowsWithKernel(expenseSheetRows);
+    setSpentMap(fallback);
+
+    if (!platformApiEnabled || !orgId || !projectId) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    void aggregateBudgetActualsAuthoritatively({
+      rows: expenseSheetRows || [],
+      runtime: {
+        tenantId: orgId,
+        projectId,
+        actor: bffActor,
+      },
+    }).then((nextSpentMap) => {
+      if (!cancelled) {
+        setSpentMap(nextSpentMap);
+      }
+    }).catch((error) => {
+      if (!cancelled) {
+        console.error('[PortalBudget] authoritative spent map preview failed:', error);
+        setSpentMap(fallback);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [bffActor, expenseSheetRows, orgId, platformApiEnabled, projectId]);
 
   const formatInput = useCallback((value: string) => {
     const num = parseNumber(value);

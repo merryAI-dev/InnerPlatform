@@ -1,5 +1,6 @@
 import { parseNumber } from './csv-utils';
-import { parseCashflowLineLabel, type ImportRow } from './settlement-csv';
+import { buildBudgetLabelKey } from './budget-labels';
+import { parseCashflowLineLabel, SETTLEMENT_COLUMNS, type ImportRow } from './settlement-csv';
 
 const CASHFLOW_IN_LINE_IDS = new Set<string>([
   'MYSC_PREPAY_IN',
@@ -16,6 +17,8 @@ export interface SettlementFlowAmountIndexes {
   vatInIdx: number;
   depositIdx: number;
   refundIdx: number;
+  budgetCodeIdx?: number;
+  subCodeIdx?: number;
 }
 
 export interface SettlementRowFlowAmounts {
@@ -28,10 +31,16 @@ export interface SettlementRowFlowAmounts {
 }
 
 export interface SettlementFlowSnapshot extends SettlementRowFlowAmounts {
+  tempId: string;
+  sourceTxId?: string;
+  entryKind?: ImportRow['entryKind'];
+  budgetKey?: string;
+  budgetCode?: string;
+  subCode?: string;
   cashflowActualLineAmounts: Partial<Record<string, number>>;
   budgetActualAmount: number;
   manualOutflowPending: boolean;
-  reviewRequired: boolean;
+  reviewRequired?: boolean;
 }
 
 function parseAmount(cells: string[], index: number): number {
@@ -41,6 +50,23 @@ function parseAmount(cells: string[], index: number): number {
 
 function isBankImportedExpenseRow(row: ImportRow): boolean {
   return String(row.sourceTxId || '').startsWith('bank:') && row.entryKind === 'EXPENSE';
+}
+
+function getSettlementColumnIndex(header: string): number {
+  return SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === header);
+}
+
+export function getSettlementFlowAmountIndexes(): SettlementFlowAmountIndexes {
+  return {
+    budgetCodeIdx: getSettlementColumnIndex('비목'),
+    subCodeIdx: getSettlementColumnIndex('세목'),
+    cashflowIdx: getSettlementColumnIndex('cashflow항목'),
+    bankAmountIdx: getSettlementColumnIndex('통장에 찍힌 입/출금액'),
+    expenseAmountIdx: getSettlementColumnIndex('사업비 사용액'),
+    vatInIdx: getSettlementColumnIndex('매입부가세'),
+    depositIdx: getSettlementColumnIndex('입금액(사업비,공급가액,은행이자)'),
+    refundIdx: getSettlementColumnIndex('매입부가세 반환'),
+  };
 }
 
 export function resolveSettlementRowFlowAmounts(
@@ -63,6 +89,13 @@ export function resolveSettlementFlowSnapshot(
   indexes: SettlementFlowAmountIndexes,
 ): SettlementFlowSnapshot {
   const amounts = resolveSettlementRowFlowAmounts(row, indexes);
+  const budgetCode = typeof indexes.budgetCodeIdx === 'number' && indexes.budgetCodeIdx >= 0
+    ? String(row.cells[indexes.budgetCodeIdx] || '').trim()
+    : '';
+  const subCode = typeof indexes.subCodeIdx === 'number' && indexes.subCodeIdx >= 0
+    ? String(row.cells[indexes.subCodeIdx] || '').trim()
+    : '';
+  const budgetKey = budgetCode || subCode ? buildBudgetLabelKey(budgetCode, subCode) : '';
   const reviewRequired = row.reviewStatus === 'pending' || (row.reviewHints?.length || 0) > 0;
   const isInflowLine = Boolean(amounts.lineId && CASHFLOW_IN_LINE_IDS.has(amounts.lineId));
   const manualOutflowPending = isBankImportedExpenseRow(row) && (
@@ -76,6 +109,12 @@ export function resolveSettlementFlowSnapshot(
 
   if (manualOutflowPending) {
     return {
+      tempId: row.tempId,
+      ...(row.sourceTxId ? { sourceTxId: row.sourceTxId } : {}),
+      ...(row.entryKind ? { entryKind: row.entryKind } : {}),
+      ...(budgetKey ? { budgetKey } : {}),
+      ...(budgetCode ? { budgetCode } : {}),
+      ...(subCode ? { subCode } : {}),
       ...amounts,
       cashflowActualLineAmounts: {},
       budgetActualAmount: 0,
@@ -86,6 +125,12 @@ export function resolveSettlementFlowSnapshot(
 
   if (!amounts.lineId) {
     return {
+      tempId: row.tempId,
+      ...(row.sourceTxId ? { sourceTxId: row.sourceTxId } : {}),
+      ...(row.entryKind ? { entryKind: row.entryKind } : {}),
+      ...(budgetKey ? { budgetKey } : {}),
+      ...(budgetCode ? { budgetCode } : {}),
+      ...(subCode ? { subCode } : {}),
       ...amounts,
       cashflowActualLineAmounts: {},
       budgetActualAmount: 0,
@@ -132,12 +177,26 @@ export function resolveSettlementFlowSnapshot(
   }
 
   return {
+    tempId: row.tempId,
+    ...(row.sourceTxId ? { sourceTxId: row.sourceTxId } : {}),
+    ...(row.entryKind ? { entryKind: row.entryKind } : {}),
+    ...(budgetKey ? { budgetKey } : {}),
+    ...(budgetCode ? { budgetCode } : {}),
+    ...(subCode ? { subCode } : {}),
     ...amounts,
     cashflowActualLineAmounts,
     budgetActualAmount,
     manualOutflowPending,
     reviewRequired,
   };
+}
+
+export function buildSettlementFlowSnapshots(
+  rows: ImportRow[] | null | undefined,
+): SettlementFlowSnapshot[] {
+  if (!rows || rows.length === 0) return [];
+  const indexes = getSettlementFlowAmountIndexes();
+  return rows.map((row) => resolveSettlementFlowSnapshot(row, indexes));
 }
 
 export function resolveSettlementActualSyncAmount(

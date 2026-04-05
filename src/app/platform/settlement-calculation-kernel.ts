@@ -3,11 +3,16 @@ import {
   deriveSettlementRowsViaBff,
   isPlatformApiEnabled,
   previewSettlementActualSyncViaBff,
+  previewSettlementFlowSnapshotsViaBff,
   type ActorLike,
 } from '../lib/platform-bff-client';
 import {
-  aggregateBudgetActualsFromSettlementRows,
+  aggregateBudgetActualsFromSettlementFlowSnapshots,
 } from './budget-actuals';
+import {
+  buildSettlementFlowSnapshots,
+  type SettlementFlowSnapshot,
+} from './settlement-flow-amounts';
 import {
   deriveSettlementRows,
   type SettlementDerivationContext,
@@ -30,6 +35,9 @@ export interface SettlementCalculationKernel {
     yearWeeks: MonthMondayWeek[],
     persistedRows?: ImportRow[] | null,
   ) => SettlementActualSyncWeekPayload[];
+  buildFlowSnapshots: (
+    rows: ImportRow[] | null | undefined,
+  ) => SettlementFlowSnapshot[];
   aggregateBudgetActuals: (
     rows: ImportRow[] | null | undefined,
   ) => Map<string, number>;
@@ -44,7 +52,10 @@ export interface SettlementKernelRuntimeConfig {
 const typeScriptSettlementCalculationKernel: SettlementCalculationKernel = {
   deriveRows: deriveSettlementRows,
   buildActualSyncPayload: buildSettlementActualSyncPayload,
-  aggregateBudgetActuals: aggregateBudgetActualsFromSettlementRows,
+  buildFlowSnapshots: buildSettlementFlowSnapshots,
+  aggregateBudgetActuals: (rows) => aggregateBudgetActualsFromSettlementFlowSnapshots(
+    buildSettlementFlowSnapshots(rows),
+  ),
 };
 
 export function getSettlementCalculationKernel(): SettlementCalculationKernel {
@@ -65,6 +76,12 @@ export function buildSettlementActualSyncPayloadWithKernel(
   persistedRows?: ImportRow[] | null,
 ): SettlementActualSyncWeekPayload[] {
   return getSettlementCalculationKernel().buildActualSyncPayload(rows, yearWeeks, persistedRows);
+}
+
+export function buildSettlementFlowSnapshotsWithKernel(
+  rows: ImportRow[] | null | undefined,
+): SettlementFlowSnapshot[] {
+  return getSettlementCalculationKernel().buildFlowSnapshots(rows);
 }
 
 export function aggregateBudgetActualsFromSettlementRowsWithKernel(
@@ -121,4 +138,28 @@ export async function previewSettlementActualSyncAuthoritatively(params: {
     });
   }
   return buildSettlementActualSyncPayloadWithKernel(params.rows, params.yearWeeks, params.persistedRows);
+}
+
+export async function previewSettlementFlowSnapshotsAuthoritatively(params: {
+  rows: ImportRow[] | null | undefined;
+  runtime?: SettlementKernelRuntimeConfig | null;
+}): Promise<SettlementFlowSnapshot[]> {
+  const rows = params.rows || [];
+  if (canUseSettlementKernelRuntime(params.runtime)) {
+    return previewSettlementFlowSnapshotsViaBff({
+      tenantId: params.runtime.tenantId,
+      actor: params.runtime.actor,
+      projectId: params.runtime.projectId,
+      rows,
+    });
+  }
+  return buildSettlementFlowSnapshotsWithKernel(rows);
+}
+
+export async function aggregateBudgetActualsAuthoritatively(params: {
+  rows: ImportRow[] | null | undefined;
+  runtime?: SettlementKernelRuntimeConfig | null;
+}): Promise<Map<string, number>> {
+  const snapshots = await previewSettlementFlowSnapshotsAuthoritatively(params);
+  return aggregateBudgetActualsFromSettlementFlowSnapshots(snapshots);
 }

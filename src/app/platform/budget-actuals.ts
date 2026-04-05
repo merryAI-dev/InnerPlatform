@@ -1,48 +1,38 @@
 import type { Transaction } from '../data/types';
 import { buildBudgetLabelKey } from './budget-labels';
-import { SETTLEMENT_COLUMNS, type ImportRow } from './settlement-csv';
+import type { ImportRow } from './settlement-csv';
 import {
+  getSettlementFlowAmountIndexes,
   resolveSettlementFlowSnapshot,
-  type SettlementFlowAmountIndexes,
+  type SettlementFlowSnapshot,
 } from './settlement-flow-amounts';
 
-function getSettlementColumnIndex(header: string): number {
-  return SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === header);
+type SettlementBudgetActualSnapshot = Pick<SettlementFlowSnapshot, 'budgetKey' | 'budgetCode' | 'subCode' | 'budgetActualAmount'>;
+
+export function aggregateBudgetActualsFromSettlementFlowSnapshots(
+  snapshots: Iterable<SettlementBudgetActualSnapshot> | null | undefined,
+): Map<string, number> {
+  const result = new Map<string, number>();
+  if (!snapshots) return result;
+
+  for (const snapshot of snapshots) {
+    const key = snapshot.budgetKey || buildBudgetLabelKey(snapshot.budgetCode || '', snapshot.subCode || '');
+    if (key === '|') continue;
+    if (snapshot.budgetActualAmount === 0) continue;
+    result.set(key, (result.get(key) || 0) + snapshot.budgetActualAmount);
+  }
+
+  return result;
 }
 
 export function aggregateBudgetActualsFromSettlementRows(
   rows: ImportRow[] | null | undefined,
 ): Map<string, number> {
-  const result = new Map<string, number>();
-  if (!rows || rows.length === 0) return result;
-
-  const indexes: SettlementFlowAmountIndexes & {
-    budgetCodeIdx: number;
-    subCodeIdx: number;
-  } = {
-    budgetCodeIdx: getSettlementColumnIndex('비목'),
-    subCodeIdx: getSettlementColumnIndex('세목'),
-    cashflowIdx: getSettlementColumnIndex('cashflow항목'),
-    bankAmountIdx: getSettlementColumnIndex('통장에 찍힌 입/출금액'),
-    expenseAmountIdx: getSettlementColumnIndex('사업비 사용액'),
-    vatInIdx: getSettlementColumnIndex('매입부가세'),
-    depositIdx: getSettlementColumnIndex('입금액(사업비,공급가액,은행이자)'),
-    refundIdx: getSettlementColumnIndex('매입부가세 반환'),
-  };
-
-  if (indexes.budgetCodeIdx < 0 || indexes.subCodeIdx < 0) return result;
-
-  for (const row of rows) {
-    const budgetCode = String(row.cells[indexes.budgetCodeIdx] || '');
-    const subCode = String(row.cells[indexes.subCodeIdx] || '');
-    const key = buildBudgetLabelKey(budgetCode, subCode);
-    if (key === '|') continue;
-    const amount = resolveSettlementFlowSnapshot(row, indexes).budgetActualAmount;
-    if (amount === 0) continue;
-    result.set(key, (result.get(key) || 0) + amount);
-  }
-
-  return result;
+  if (!rows || rows.length === 0) return new Map<string, number>();
+  const indexes = getSettlementFlowAmountIndexes();
+  return aggregateBudgetActualsFromSettlementFlowSnapshots(
+    rows.map((row) => resolveSettlementFlowSnapshot(row, indexes)),
+  );
 }
 
 export function getTotalBudgetActualFromSettlementRows(
