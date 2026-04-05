@@ -25,8 +25,11 @@ import { buildSettlementActualSyncPayloadLocally } from '../../platform/settleme
 import type { SettlementDerivationContext, SettlementDerivationOptions } from '../../platform/settlement-row-derivation';
 import type { SettlementActualSyncWeekPayload } from '../../platform/settlement-sheet-sync';
 import {
+  resolveWeeklyAccountingSheetRowsHydration,
   resolveWeeklyAccountingProductStatus,
   resolveWeeklyAccountingProductStatusDomHooks,
+  serializeWeeklyAccountingImportRowsMaterially,
+  type WeeklyAccountingSheetRowsHydrationReason,
 } from '../../platform/weekly-accounting-state';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -51,7 +54,6 @@ import {
   readImportDraftCache,
   writeImportDraftCache,
   clearImportDraftCache,
-  serializeImportRows,
 } from '../../platform/settlement-draft-cache';
 import { countPendingImportRowReviews } from '../../platform/settlement-review';
 
@@ -184,8 +186,9 @@ export function SettlementLedgerPage({
   const [downloadTo, setDownloadTo] = useState('');
   const [revertConfirmOpen, setRevertConfirmOpen] = useState(false);
   const restoredDraftCacheKeyRef = useRef('');
-  const lastSyncedSheetRowsSignatureRef = useRef('');
-  const pendingSheetRowsSyncRef = useRef<ImportRow[] | null>(null);
+  const hasAppliedSheetRowsRef = useRef(false);
+  const pendingSheetRowsEchoSignatureRef = useRef<string | null>(null);
+  const pendingSheetRowsSyncRef = useRef<{ rows: ImportRow[] | null; reason: WeeklyAccountingSheetRowsHydrationReason } | null>(null);
   const cloneImportRows = useCallback((input: ImportRow[]) => (
     input.map((row) => ({
       ...row,
@@ -229,13 +232,9 @@ export function SettlementLedgerPage({
         toast.message('브라우저 임시 저장본을 복원했습니다.');
         return;
       }
+      restoredDraftCacheKeyRef.current = draftCacheKey;
     }
-    if (sheetRows && sheetRows.length > 0) {
-      setImportRows(cloneImportRows(sheetRows));
-      return;
-    }
-    setImportRows(transactionsToImportRows(projectTxs, yearWeeks));
-  }, [projectTxs, yearWeeks, importDirty, sheetRows, cloneImportRows, draftCacheKey]);
+  }, [draftCacheKey, importDirty]);
 
   useEffect(() => {
     if (!importDirty || !importRows || importRows.length === 0) return;
@@ -245,37 +244,59 @@ export function SettlementLedgerPage({
     return () => window.clearTimeout(timer);
   }, [draftCacheKey, importDirty, importRows]);
 
-  const applySheetRowsSync = useCallback((rows: ImportRow[] | null | undefined) => {
-    if (rows && rows.length > 0) {
-      setImportRows(cloneImportRows(rows));
-      setImportDirty(false);
-      setSheetSaveState('saved');
-      setCashflowSyncState(countPendingImportRowReviews(rows) > 0 ? 'review_required' : 'synced');
-      clearImportDraftCache(draftCacheKey);
-    } else if (serializeImportRows(rows) === '') {
-      setImportRows(transactionsToImportRows(projectTxs, yearWeeks));
-      setImportDirty(false);
-      setSheetSaveState('idle');
-      setCashflowSyncState('idle');
-      clearImportDraftCache(draftCacheKey);
+  const applySheetRowsSync = useCallback((rows: ImportRow[] | null | undefined, reason: WeeklyAccountingSheetRowsHydrationReason) => {
+    const hasPersistedRows = Boolean(rows && rows.length > 0);
+    const incomingRowsOrigin = reason === 'persistence_echo' || hasPersistedRows
+      ? 'persisted'
+      : 'fallback';
+    const incomingRows = reason === 'persistence_echo'
+      ? (rows ?? null)
+      : (rows && rows.length > 0 ? rows : transactionsToImportRows(projectTxs, yearWeeks));
+    const hydration = resolveWeeklyAccountingSheetRowsHydration({
+      reason,
+      currentRows: importRows,
+      incomingRows,
+      incomingRowsOrigin,
+      currentSaveState: sheetSaveState,
+      currentSyncState: cashflowSyncState,
+    });
+    if (hydration.shouldReplaceRows) {
+      setImportRows(cloneImportRows(incomingRows || []));
     }
-  }, [cloneImportRows, draftCacheKey, projectTxs, yearWeeks]);
+    setImportDirty(false);
+    setSheetSaveState(hydration.nextSaveState);
+    setCashflowSyncState(hydration.nextSyncState);
+    if (reason !== 'persistence_echo') {
+      clearImportDraftCache(draftCacheKey);
+    } else {
+      pendingSheetRowsEchoSignatureRef.current = null;
+    }
+    hasAppliedSheetRowsRef.current = true;
+  }, [cashflowSyncState, cloneImportRows, draftCacheKey, importRows, projectTxs, sheetSaveState, yearWeeks]);
 
   useEffect(() => {
-    const nextSignature = serializeImportRows(sheetRows);
-    if (nextSignature === lastSyncedSheetRowsSignatureRef.current) return;
-    lastSyncedSheetRowsSignatureRef.current = nextSignature;
+    const nextSignature = serializeWeeklyAccountingImportRowsMaterially(sheetRows);
 
     // 그리드 셀에 포커스가 있으면 리셋을 defer — 타이핑 중 백스페이스 끊김 방지
     const active = document.activeElement;
     const isCellFocused = active instanceof HTMLInputElement && active.getAttribute('data-cell-row') != null;
+    const isPersistenceEcho = pendingSheetRowsEchoSignatureRef.current !== null
+      && nextSignature === pendingSheetRowsEchoSignatureRef.current;
+    const reason: WeeklyAccountingSheetRowsHydrationReason = !hasAppliedSheetRowsRef.current
+      ? 'initial_hydrate'
+      : isPersistenceEcho
+        ? 'persistence_echo'
+        : 'active_sheet_switch_hydrate';
     if (isCellFocused) {
-      pendingSheetRowsSyncRef.current = sheetRows ?? null;
+      const syncRows = reason === 'persistence_echo'
+        ? (sheetRows ?? null)
+        : (sheetRows && sheetRows.length > 0 ? sheetRows : transactionsToImportRows(projectTxs, yearWeeks));
+      pendingSheetRowsSyncRef.current = { rows: syncRows, reason };
       return;
     }
 
-    applySheetRowsSync(sheetRows);
-  }, [sheetRows, applySheetRowsSync]);
+    applySheetRowsSync(sheetRows, reason);
+  }, [applySheetRowsSync, projectTxs, sheetRows, yearWeeks]);
 
   // 포커스가 그리드 밖으로 나갈 때 pending sync 적용
   useEffect(() => {
@@ -287,7 +308,7 @@ export function SettlementLedgerPage({
         if (isCellFocused) return; // 그리드 내 다른 셀로 이동한 경우 유지
         const pending = pendingSheetRowsSyncRef.current;
         pendingSheetRowsSyncRef.current = null;
-        applySheetRowsSync(pending);
+        applySheetRowsSync(pending.rows, pending.reason);
       });
     };
     document.addEventListener('focusout', handleFocusOut);
@@ -296,6 +317,8 @@ export function SettlementLedgerPage({
 
   const revertToSavedSnapshot = useCallback(() => {
     if (sheetSaving) return;
+    pendingSheetRowsEchoSignatureRef.current = null;
+    pendingSheetRowsSyncRef.current = null;
     if (sheetRows && sheetRows.length > 0) {
       setImportRows(cloneImportRows(sheetRows));
       setImportDirty(false);
@@ -303,6 +326,7 @@ export function SettlementLedgerPage({
       setCashflowSyncState('synced');
       clearImportDraftCache(draftCacheKey);
       toast.message('마지막 저장값으로 되돌렸습니다.');
+      hasAppliedSheetRowsRef.current = true;
       return;
     }
     setImportRows(transactionsToImportRows(projectTxs, yearWeeks));
@@ -311,6 +335,7 @@ export function SettlementLedgerPage({
     setCashflowSyncState('idle');
     clearImportDraftCache(draftCacheKey);
     toast.message('저장된 사업비 입력이 없어 기본값으로 되돌렸습니다.');
+    hasAppliedSheetRowsRef.current = true;
   }, [sheetSaving, sheetRows, cloneImportRows, projectTxs, yearWeeks, draftCacheKey]);
 
   const handleRevertToSaved = useCallback(() => {
@@ -550,6 +575,7 @@ export function SettlementLedgerPage({
     try {
       const persistedRows = await onSaveSheetRows(rows);
       const previewSourceRows = Array.isArray(persistedRows) ? persistedRows : rows;
+      pendingSheetRowsEchoSignatureRef.current = serializeWeeklyAccountingImportRowsMaterially(previewSourceRows);
       const payload = onPreviewActualSyncPayload
         ? await onPreviewActualSyncPayload(previewSourceRows, yearWeeks, sheetRows || null)
         : buildSettlementActualSyncPayloadLocally(previewSourceRows, yearWeeks, sheetRows || null);

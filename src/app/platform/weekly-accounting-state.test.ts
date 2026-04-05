@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  resolveWeeklyAccountingSheetRowsHydration,
   resolveWeeklyAccountingProductStatus,
   resolveWeeklyAccountingProductStatusDomHooks,
   resolveWeeklyAccountingSnapshot,
   resolveWeeklyAccountingState,
+  serializeWeeklyAccountingImportRowsMaterially,
 } from './weekly-accounting-state';
 
 describe('weekly-accounting-state', () => {
@@ -172,5 +174,58 @@ describe('weekly-accounting-state', () => {
     expect(snapshot.expenseEdited).toBe(true);
     expect(snapshot.expenseDone).toBe(true);
     expect(snapshot.expenseSyncState).toBe('pending');
+  });
+
+  it('keeps pending sync state stable across a persistence echo with only row identity changes', () => {
+    const currentRows = [{
+      tempId: 'local-1',
+      sourceTxId: 'tx-1',
+      cells: ['A', '100'],
+      reviewHints: ['사람 확인'],
+      reviewRequiredCellIndexes: [1],
+      reviewStatus: 'pending' as const,
+      reviewFingerprint: 'fingerprint',
+      reviewConfirmedAt: '2026-04-01T00:00:00Z',
+      userEditedCells: new Set([0]),
+    }];
+    const incomingRows = [{
+      tempId: 'remote-9',
+      sourceTxId: 'tx-1',
+      cells: ['A', '100'],
+      reviewHints: ['사람 확인'],
+      reviewRequiredCellIndexes: [1],
+      reviewStatus: 'pending' as const,
+      reviewFingerprint: 'fingerprint',
+      reviewConfirmedAt: '2026-04-01T00:00:00Z',
+    }];
+
+    const result = resolveWeeklyAccountingSheetRowsHydration({
+      reason: 'persistence_echo',
+      currentRows,
+      incomingRows,
+      incomingRowsOrigin: 'persisted',
+      currentSaveState: 'saved',
+      currentSyncState: 'pending',
+    });
+
+    expect(serializeWeeklyAccountingImportRowsMaterially(currentRows)).toBe(serializeWeeklyAccountingImportRowsMaterially(incomingRows));
+    expect(result.shouldReplaceRows).toBe(false);
+    expect(result.nextSaveState).toBe('saved');
+    expect(result.nextSyncState).toBe('pending');
+  });
+
+  it('treats an unchanged active-sheet hydrate as a semantic refresh instead of preserving stale sync state', () => {
+    const result = resolveWeeklyAccountingSheetRowsHydration({
+      reason: 'active_sheet_switch_hydrate',
+      currentRows: [],
+      incomingRows: [],
+      incomingRowsOrigin: 'fallback',
+      currentSaveState: 'pending',
+      currentSyncState: 'sync_failed',
+    });
+
+    expect(result.shouldReplaceRows).toBe(false);
+    expect(result.nextSaveState).toBe('idle');
+    expect(result.nextSyncState).toBe('idle');
   });
 });

@@ -1,6 +1,15 @@
 import type { CashflowWeekSheet, WeeklySubmissionStatus } from '../data/types';
+import type { ImportRow } from './settlement-csv';
+import { countPendingImportRowReviews } from './settlement-review';
 
 export type WeeklyExpenseSyncState = 'idle' | 'pending' | 'review_required' | 'synced' | 'sync_failed';
+export type WeeklyAccountingSheetRowsHydrationReason =
+  | 'initial_hydrate'
+  | 'active_sheet_switch_hydrate'
+  | 'explicit_revert'
+  | 'persistence_echo';
+export type WeeklyAccountingSheetRowsSaveState = 'idle' | 'dirty' | 'saving' | 'saved' | 'save_failed';
+export type WeeklyAccountingSheetRowsSyncState = WeeklyExpenseSyncState | 'syncing';
 export type WeeklyAccountingProductStatusKind =
   | 'save_pending'
   | 'save_synced'
@@ -32,6 +41,37 @@ export interface WeeklyAccountingSnapshot {
   adminClosed: boolean;
 }
 
+export interface WeeklyAccountingImportRowLike {
+  tempId?: string;
+  sourceTxId?: string;
+  entryKind?: ImportRow['entryKind'];
+  cells: string[];
+  error?: string;
+  reviewHints?: string[];
+  reviewRequiredCellIndexes?: number[];
+  reviewStatus?: ImportRow['reviewStatus'];
+  reviewFingerprint?: string;
+  reviewConfirmedAt?: string;
+  userEditedCells?: Set<number>;
+}
+
+export interface WeeklyAccountingSheetRowsHydrationInput {
+  reason: WeeklyAccountingSheetRowsHydrationReason;
+  currentRows: WeeklyAccountingImportRowLike[] | null | undefined;
+  incomingRows: WeeklyAccountingImportRowLike[] | null | undefined;
+  incomingRowsOrigin?: 'persisted' | 'fallback';
+  currentSaveState: WeeklyAccountingSheetRowsSaveState;
+  currentSyncState: WeeklyAccountingSheetRowsSyncState;
+}
+
+export interface WeeklyAccountingSheetRowsHydrationResult {
+  shouldReplaceRows: boolean;
+  nextSaveState: WeeklyAccountingSheetRowsSaveState;
+  nextSyncState: WeeklyAccountingSheetRowsSyncState;
+  currentSignature: string;
+  incomingSignature: string;
+}
+
 export interface WeeklyAccountingProductStatusInput {
   snapshot: WeeklyAccountingSnapshot;
   saveState?: 'idle' | 'dirty' | 'saving' | 'saved' | 'save_failed';
@@ -61,6 +101,76 @@ function formatReviewCountLabel(count: number): string {
 
 function toNonNegativeCount(value: number | undefined): number {
   return Math.max(0, Math.trunc(value || 0));
+}
+
+function normalizeStringList(values: string[] | undefined): string[] {
+  return Array.from(new Set((values || []).map((value) => value.trim()).filter(Boolean))).sort();
+}
+
+function normalizeNumberList(values: number[] | undefined): number[] {
+  return Array.from(new Set((values || []).filter((value) => Number.isInteger(value) && value >= 0))).sort((left, right) => left - right);
+}
+
+export function serializeWeeklyAccountingImportRowsMaterially(
+  rows: WeeklyAccountingImportRowLike[] | null | undefined,
+): string {
+  if (!rows || rows.length === 0) return '';
+  return JSON.stringify(rows.map((row) => ({
+    ...(row.sourceTxId ? { sourceTxId: row.sourceTxId } : {}),
+    ...(row.entryKind ? { entryKind: row.entryKind } : {}),
+    cells: Array.isArray(row.cells) ? row.cells.map((cell) => String(cell ?? '')) : [],
+    ...(row.error ? { error: row.error } : {}),
+    ...(normalizeStringList(row.reviewHints).length > 0 ? { reviewHints: normalizeStringList(row.reviewHints) } : {}),
+    ...(normalizeNumberList(row.reviewRequiredCellIndexes).length > 0
+      ? { reviewRequiredCellIndexes: normalizeNumberList(row.reviewRequiredCellIndexes) }
+      : {}),
+    ...(row.reviewStatus ? { reviewStatus: row.reviewStatus } : {}),
+    ...(row.reviewFingerprint ? { reviewFingerprint: row.reviewFingerprint } : {}),
+    ...(row.reviewConfirmedAt ? { reviewConfirmedAt: row.reviewConfirmedAt } : {}),
+  })));
+}
+
+function deriveHydratedSheetRowsState(
+  rows: WeeklyAccountingImportRowLike[] | null | undefined,
+  origin: 'persisted' | 'fallback' | undefined,
+): {
+  saveState: WeeklyAccountingSheetRowsSaveState;
+  syncState: WeeklyAccountingSheetRowsSyncState;
+} {
+  if (origin === 'fallback' || !rows || rows.length === 0) {
+    return { saveState: 'idle', syncState: 'idle' };
+  }
+  return {
+    saveState: 'saved',
+    syncState: countPendingImportRowReviews(rows) > 0 ? 'review_required' : 'synced',
+  };
+}
+
+export function resolveWeeklyAccountingSheetRowsHydration(
+  input: WeeklyAccountingSheetRowsHydrationInput,
+): WeeklyAccountingSheetRowsHydrationResult {
+  const currentSignature = serializeWeeklyAccountingImportRowsMaterially(input.currentRows);
+  const incomingSignature = serializeWeeklyAccountingImportRowsMaterially(input.incomingRows);
+  const materialEqual = currentSignature === incomingSignature;
+
+  if (input.reason === 'persistence_echo') {
+    return {
+      shouldReplaceRows: !materialEqual,
+      nextSaveState: input.currentSaveState,
+      nextSyncState: input.currentSyncState,
+      currentSignature,
+      incomingSignature,
+    };
+  }
+
+  const hydratedState = deriveHydratedSheetRowsState(input.incomingRows, input.incomingRowsOrigin);
+  return {
+    shouldReplaceRows: !materialEqual,
+    nextSaveState: hydratedState.saveState,
+    nextSyncState: hydratedState.syncState,
+    currentSignature,
+    incomingSignature,
+  };
 }
 
 export function resolveWeeklyAccountingProductStatus(
