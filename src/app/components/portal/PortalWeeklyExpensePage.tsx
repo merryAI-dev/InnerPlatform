@@ -216,12 +216,12 @@ export function PortalWeeklyExpensePage() {
     portalUser?.email,
     portalUser?.role,
   ]);
-  const deriveRowsWithLocalKernel = useCallback((
+  const deriveRowsWithLocalKernel = useCallback(async (
     rows: ImportRow[],
     context: Parameters<typeof deriveSettlementRowsLocally>[1],
     options: Parameters<typeof deriveSettlementRowsLocally>[2],
   ) => deriveSettlementRowsLocally(rows, context, options), []);
-  const previewActualSyncWithLocalKernel = useCallback((
+  const previewActualSyncWithLocalKernel = useCallback(async (
     rows: ImportRow[],
     yearWeeks: Parameters<typeof buildSettlementActualSyncPayloadLocally>[1],
     persistedRows?: ImportRow[] | null,

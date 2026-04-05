@@ -23,6 +23,12 @@ import {
 import { useAuth } from './auth-store';
 import type { CashflowSheetLineId, CashflowWeekSheet, VarianceFlag, VarianceFlagEvent } from './types';
 import { shouldCreateDocOnUpdateError } from './cashflow-weeks.helpers';
+import {
+  buildCashflowWeekUpdatePatch,
+  buildInitialCashflowWeekDoc,
+  normalizeWeekAmounts,
+  resolveWeekDocId,
+} from './cashflow-weeks.persistence';
 import { useFirebase } from '../lib/firebase-context';
 import { getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
 import { addMonthsToYearMonth, getSeoulTodayIso } from '../platform/business-days';
@@ -36,18 +42,6 @@ function normalizeRole(value: unknown): string {
 function canReadAll(role: unknown): boolean {
   const normalized = normalizeRole(role);
   return normalized === 'admin' || normalized === 'tenant_admin' || normalized === 'finance' || normalized === 'auditor';
-}
-
-function resolveWeekDocId(projectId: string, yearMonth: string, weekNo: number): string {
-  const safeProjectId = projectId.trim();
-  const safeYm = yearMonth.trim();
-  const safeNo = Math.max(1, Math.min(6, Math.trunc(weekNo)));
-  return `${safeProjectId}-${safeYm}-w${safeNo}`;
-}
-
-function clampAmount(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.trunc(value);
 }
 
 interface CashflowWeekState {
@@ -225,11 +219,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     if (!db && actor.source === 'dev_harness') {
       const id = resolveWeekDocId(projectId, ym, weekNo);
       const now = new Date().toISOString();
-      const normalizedAmounts = Object.fromEntries(
-        Object.entries(input.amounts || {})
-          .filter(([lineId]) => typeof lineId === 'string' && lineId.trim())
-          .map(([lineId, amountRaw]) => [lineId, clampAmount(Number(amountRaw))]),
-      ) as Partial<Record<CashflowSheetLineId, number>>;
+      const normalizedAmounts = normalizeWeekAmounts(input.amounts || {});
       setWeeks((prev) => {
         const existingIndex = prev.findIndex((sheet) => sheet.id === id);
         if (existingIndex >= 0) {
@@ -277,18 +267,14 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     const now = new Date().toISOString();
     const ref = doc(db, getOrgDocumentPath(orgId, 'cashflowWeeks', id));
 
-    const patch: Record<string, unknown> = {
-      tenantId: orgId,
-      updatedAt: now,
-      updatedByUid: actor.uid,
-      updatedByName: actor.name,
-    };
-    for (const [lineId, amountRaw] of Object.entries(input.amounts || {})) {
-      const lineKey = typeof lineId === 'string' ? lineId.trim() : '';
-      if (!lineKey) continue;
-      const amount = clampAmount(Number(amountRaw));
-      patch[`${input.mode}.${lineKey}`] = amount;
-    }
+    const patch = buildCashflowWeekUpdatePatch({
+      orgId,
+      actorUid: actor.uid,
+      actorName: actor.name,
+      mode: input.mode,
+      amounts: input.amounts || {},
+      now,
+    });
 
     const existingSnap = await getDoc(ref).catch(() => null);
     if (existingSnap?.exists()) {
@@ -296,30 +282,19 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const amounts: Partial<Record<CashflowSheetLineId, number>> = {};
-    for (const [lineId, amountRaw] of Object.entries(input.amounts || {})) {
-      const lineKey = typeof lineId === 'string' ? lineId.trim() : '';
-      if (!lineKey) continue;
-      amounts[lineKey as CashflowSheetLineId] = clampAmount(Number(amountRaw));
-    }
-
-    const initial: CashflowWeekSheet = {
-      id,
-      tenantId: orgId,
+    const initial: CashflowWeekSheet = buildInitialCashflowWeekDoc({
+      orgId,
+      actorUid: actor.uid,
+      actorName: actor.name,
       projectId,
       yearMonth: ym,
       weekNo,
       weekStart: def.weekStart,
       weekEnd: def.weekEnd,
-      projection: input.mode === 'projection' ? amounts : {},
-      actual: input.mode === 'actual' ? amounts : {},
-      pmSubmitted: false,
-      adminClosed: false,
-      createdAt: now,
-      updatedAt: now,
-      updatedByUid: actor.uid,
-      updatedByName: actor.name,
-    };
+      mode: input.mode,
+      amounts: input.amounts || {},
+      now,
+    });
     await setDoc(ref, initial, { merge: false });
   }, [db, orgId, user]);
 

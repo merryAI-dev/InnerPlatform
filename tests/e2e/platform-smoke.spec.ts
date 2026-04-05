@@ -4,6 +4,9 @@ import { test, expect } from '@playwright/test';
 async function loginAsPm(page: import('@playwright/test').Page) {
   await page.goto('/login');
   await page.getByRole('button', { name: 'PM 샘플 로그인' }).click();
+  if (page.url().includes('/workspace-select')) {
+    await page.getByRole('button', { name: 'PM 포털로 계속' }).click();
+  }
   await expect(page).toHaveURL(/\/portal(?:$|\/)/);
 }
 

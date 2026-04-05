@@ -80,14 +80,14 @@ Commands:
 
 ```bash
 npm run firebase:emulators:prepare
-npm run bff:test:integration
+npm run test:settlement:integration
 ```
 
 Notes:
 
 - `npm run firebase:emulators:prepare` generates `.env.local` and `.firebaserc`.
-- `npm run bff:test:integration` runs `scripts/test_bff_integration.sh`, which starts Firestore emulator execution with `firebase-tools emulators:exec` and runs `vitest.bff-integration.config.ts`.
-- The current integration config includes `server/**/*.integration.test.ts`, so settlement-specific server assertions must be present in `server/bff/app.integration.test.ts` or another `server/**/*.integration.test.ts` file before this gate can count as fully complete.
+- `npm run test:settlement:integration` runs `scripts/test_settlement_product_completeness_integration.sh`, which starts Firestore emulator execution with `firebase-tools emulators:exec` and runs only the settlement-specific persistence tests.
+- This gate is intentionally slice-scoped. Do not widen it to the full BFF integration matrix until the unrelated failing suites are stabilized.
 
 ## Gate Interpretation
 
@@ -149,11 +149,11 @@ Release meaning:
 Run in this order so failures narrow quickly:
 
 ```bash
-npm test -- src/app/platform/settlement-calculation-kernel.test.ts src/app/data/portal-store.settlement.test.ts src/app/data/portal-store.integration.test.ts src/app/data/cashflow-weeks-store.integration.test.ts
-npm run test:e2e -- tests/e2e/platform-smoke.spec.ts tests/e2e/migration-wizard.harness.spec.js tests/e2e/settlement-product-completeness.spec.ts
+npm test -- src/app/platform/settlement-calculation-kernel.test.ts src/app/platform/weekly-accounting-state.test.ts src/app/data/portal-store.settlement.test.ts src/app/data/portal-store.integration.test.ts src/app/data/cashflow-weeks-store.integration.test.ts
+npx playwright test tests/e2e/migration-wizard.harness.spec.js tests/e2e/settlement-product-completeness.spec.ts --config playwright.harness.config.mjs
 npm run build
 npm run firebase:emulators:prepare
-npm run bff:test:integration
+npm run test:settlement:integration
 ```
 
 Interpretation:

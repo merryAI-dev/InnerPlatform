@@ -29,3 +29,34 @@ jobs:
 
       - name: Production build
         run: npm run build
+
+  settlement-product-completeness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Settlement targeted vitest matrix
+        run: npx vitest run src/app/platform/settlement-*.test.ts src/app/platform/weekly-accounting-state.test.ts src/app/data/portal-store.settlement.test.ts src/app/data/portal-store.integration.test.ts src/app/data/cashflow-weeks-store.integration.test.ts
+
+      - name: Settlement product flow Playwright
+        run: npx playwright test tests/e2e/migration-wizard.harness.spec.js tests/e2e/settlement-product-completeness.spec.ts --config playwright.harness.config.mjs
+
+      - name: Settlement emulator-backed integration
+        run: npm run test:settlement:integration
