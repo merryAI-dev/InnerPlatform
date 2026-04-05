@@ -5,15 +5,19 @@ import {
   analyzeGoogleSheetImportViaBff,
   analyzeProjectRequestContractViaBff,
   changeTransactionStateViaBff,
+  deriveSettlementRowsViaBff,
   linkProjectEvidenceDriveRootViaBff,
   notifyProjectRequestRegistrationViaBff,
   overrideTransactionEvidenceDriveCategoriesViaBff,
+  previewSettlementActualSyncViaBff,
   previewGoogleSheetImportViaBff,
   processProjectRequestContractViaBff,
   provisionProjectEvidenceDriveRootViaBff,
   provisionTransactionEvidenceDriveViaBff,
   readPlatformApiRuntimeConfig,
+  restoreProjectViaBff,
   syncTransactionEvidenceDriveViaBff,
+  trashProjectViaBff,
   uploadProjectSheetSourceViaBff,
   uploadProjectRequestContractViaBff,
   toRequestActor,
@@ -77,6 +81,59 @@ describe('platform-bff-client', () => {
     expect(result.version).toBe(1);
   });
 
+  it('calls project trash and restore endpoints', async () => {
+    const client = asMockClient({
+      post: vi
+        .fn()
+        .mockResolvedValueOnce({
+          data: {
+            id: 'p001',
+            tenantId: 'mysc',
+            version: 2,
+            updatedAt: '2026-04-03T11:10:00.000Z',
+            trashedAt: '2026-04-03T11:10:00.000Z',
+          },
+        })
+        .mockResolvedValueOnce({
+          data: {
+            id: 'p001',
+            tenantId: 'mysc',
+            version: 3,
+            updatedAt: '2026-04-03T11:12:00.000Z',
+          },
+        }),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    const trashed = await trashProjectViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'admin' },
+      projectId: 'p001',
+      payload: { expectedVersion: 1, reason: '중복 등록' },
+      client,
+    });
+
+    const restored = await restoreProjectViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'admin' },
+      projectId: 'p001',
+      payload: { expectedVersion: 2 },
+      client,
+    });
+
+    expect(client.post).toHaveBeenNthCalledWith(1, '/api/v1/projects/p001/trash', expect.objectContaining({
+      tenantId: 'mysc',
+      body: { expectedVersion: 1, reason: '중복 등록' },
+    }));
+    expect(client.post).toHaveBeenNthCalledWith(2, '/api/v1/projects/p001/restore', expect.objectContaining({
+      tenantId: 'mysc',
+      body: { expectedVersion: 2 },
+    }));
+    expect(trashed.trashedAt).toBe('2026-04-03T11:10:00.000Z');
+    expect(restored.version).toBe(3);
+  });
+
   it('calls ledger/transaction endpoints', async () => {
     const client = asMockClient({
       post: vi
@@ -105,6 +162,119 @@ describe('platform-bff-client', () => {
     expect(tx.state).toBe('DRAFT');
   });
 
+  it('calls settlement derive endpoint and deserializes import rows', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({
+        data: {
+          rows: [{
+            tempId: 'imp-1',
+            sourceTxId: 'bank:expense-1',
+            entryKind: 'EXPENSE',
+            cells: ['1', '', '', '', '', '', '', '', '', '890,000', '110,000', '', '', '', '', '', '', '', '', ''],
+            reviewHints: ['매입부가세 후보값입니다. 증빙 기준 금액으로 다시 확인해 주세요.'],
+            reviewRequiredCellIndexes: [14],
+            reviewStatus: 'pending',
+            reviewFingerprint: 'fp-1',
+          }],
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    const rows = await deriveSettlementRowsViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm' },
+      projectId: 'p001',
+      rows: [{
+        tempId: 'imp-1',
+        sourceTxId: 'bank:expense-1',
+        entryKind: 'EXPENSE',
+        cells: Array.from({ length: 20 }, () => ''),
+      }],
+      context: {
+        projectId: 'p001',
+        defaultLedgerId: 'l001',
+        dateIdx: 2,
+        weekIdx: 3,
+        depositIdx: 11,
+        refundIdx: 12,
+        expenseIdx: 13,
+        vatInIdx: 14,
+        bankAmountIdx: 10,
+        balanceIdx: 9,
+        evidenceIdx: 17,
+        evidenceCompletedIdx: 18,
+        evidencePendingIdx: 19,
+      },
+      options: { mode: 'full' },
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/projects/p001/settlement/derive', expect.objectContaining({
+      tenantId: 'mysc',
+      body: expect.objectContaining({
+        rows: expect.arrayContaining([expect.objectContaining({ tempId: 'imp-1' })]),
+        options: { mode: 'full' },
+      }),
+    }));
+    expect(rows[0]?.reviewStatus).toBe('pending');
+    expect(rows[0]?.reviewRequiredCellIndexes).toEqual([14]);
+  });
+
+  it('calls settlement actual sync preview endpoint', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({
+        data: {
+          weeks: [{
+            yearMonth: '2026-03',
+            weekNo: 1,
+            amounts: {
+              DIRECT_COST_OUT: 100000,
+              INPUT_VAT_OUT: 10000,
+            },
+          }],
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    const weeks = await previewSettlementActualSyncViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm' },
+      projectId: 'p001',
+      rows: [{
+        tempId: 'imp-1',
+        cells: Array.from({ length: 20 }, () => ''),
+      }],
+      yearWeeks: [{
+        yearMonth: '2026-03',
+        weekNo: 1,
+        weekStart: '2026-03-02',
+        weekEnd: '2026-03-08',
+        label: '26-03-01',
+      }],
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/projects/p001/settlement/actual-sync-preview', expect.objectContaining({
+      tenantId: 'mysc',
+      body: expect.objectContaining({
+        rows: expect.any(Array),
+        yearWeeks: expect.any(Array),
+      }),
+    }));
+    expect(weeks).toEqual([{
+      yearMonth: '2026-03',
+      weekNo: 1,
+      amounts: {
+        DIRECT_COST_OUT: 100000,
+        INPUT_VAT_OUT: 10000,
+      },
+    }]);
+  });
+
   it('calls transaction state endpoint with expected version', async () => {
     const client = asMockClient({
       post: vi.fn(),
@@ -129,6 +299,100 @@ describe('platform-bff-client', () => {
       body: { newState: 'APPROVED', expectedVersion: 1, reason: undefined },
     }));
     expect(result.state).toBe('APPROVED');
+  });
+
+  it('calls settlement derive and actual sync preview endpoints', async () => {
+    const client = asMockClient({
+      post: vi
+        .fn()
+        .mockResolvedValueOnce({
+          data: {
+            rows: [{
+              tempId: 'row-1',
+              sourceTxId: 'bank:expense-import-1',
+              entryKind: 'EXPENSE',
+              cells: Array.from({ length: 26 }, (_, index) => (index === 10 ? '110,000' : '')),
+            }],
+          },
+        })
+        .mockResolvedValueOnce({
+          data: {
+            weeks: [{
+              yearMonth: '2026-03',
+              weekNo: 1,
+              amounts: { DIRECT_COST_OUT: 100000, INPUT_VAT_OUT: 10000 },
+            }],
+          },
+        }),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    const derived = await deriveSettlementRowsViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm' },
+      projectId: 'p001',
+      rows: [{
+        tempId: 'row-1',
+        sourceTxId: 'bank:expense-import-1',
+        entryKind: 'EXPENSE',
+        cells: Array.from({ length: 26 }, (_, index) => (index === 10 ? '110,000' : '')),
+      }],
+      context: {
+        projectId: 'p001',
+        defaultLedgerId: 'l001',
+        dateIdx: 2,
+        weekIdx: 3,
+        depositIdx: 11,
+        refundIdx: 12,
+        expenseIdx: 13,
+        vatInIdx: 14,
+        bankAmountIdx: 10,
+        balanceIdx: 9,
+        evidenceIdx: 17,
+        evidenceCompletedIdx: 18,
+        evidencePendingIdx: 19,
+      },
+      options: { mode: 'cascade', rowIdx: 0 },
+      client,
+    });
+
+    const preview = await previewSettlementActualSyncViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm' },
+      projectId: 'p001',
+      rows: [{
+        tempId: 'row-1',
+        cells: Array.from({ length: 26 }, (_, index) => {
+          if (index === 2) return '2026-03-03';
+          if (index === 3) return '26-03-01';
+          if (index === 8) return '직접사업비';
+          if (index === 13) return '100,000';
+          if (index === 14) return '10,000';
+          return '';
+        }),
+      }],
+      yearWeeks: [{
+        yearMonth: '2026-03',
+        weekNo: 1,
+        weekStart: '2026-03-02',
+        weekEnd: '2026-03-08',
+        label: '26-03-01',
+      }],
+      client,
+    });
+
+    expect(client.post).toHaveBeenNthCalledWith(1, '/api/v1/projects/p001/settlement/derive', expect.objectContaining({
+      tenantId: 'mysc',
+      body: expect.objectContaining({
+        options: { mode: 'cascade', rowIdx: 0 },
+      }),
+    }));
+    expect(client.post).toHaveBeenNthCalledWith(2, '/api/v1/projects/p001/settlement/actual-sync-preview', expect.objectContaining({
+      tenantId: 'mysc',
+    }));
+    expect(derived[0]?.sourceTxId).toBe('bank:expense-import-1');
+    expect(preview[0]?.amounts.DIRECT_COST_OUT).toBe(100000);
   });
 
   it('calls comment/evidence endpoints', async () => {

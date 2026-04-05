@@ -43,6 +43,8 @@ import {
   deleteSelectedRows,
 } from '../../platform/settlement-grid-actions';
 import {
+  type SettlementDerivationContext,
+  type SettlementDerivationOptions,
   isSettlementCascadeColumn,
 } from '../../platform/settlement-row-derivation';
 import { deriveSettlementRowsWithKernel } from '../../platform/settlement-calculation-kernel';
@@ -162,6 +164,7 @@ export function ImportEditor({
   onPendingQuickInsertHandled,
   basis,
   onToggleFullscreen,
+  onDeriveRows,
 }: {
   rows: ImportRow[];
   onChange: (rows: ImportRow[]) => void;
@@ -196,8 +199,15 @@ export function ImportEditor({
   onPendingQuickInsertHandled?: () => void;
   basis?: Basis;
   onToggleFullscreen?: () => void;
+  onDeriveRows?: (
+    rows: ImportRow[],
+    context: SettlementDerivationContext,
+    options: SettlementDerivationOptions,
+  ) => Promise<ImportRow[]>;
 }) {
   const isInlineLayout = inline && !fullscreen;
+  const deriveRequestSeq = useRef(0);
+  const [derivingRows, setDerivingRows] = useState(false);
 
   useEffect(() => {
     if (!fullscreen) return undefined;
@@ -630,6 +640,34 @@ export function ImportEditor({
     [projectId, defaultLedgerId, resolvedPolicy, basis],
   );
 
+  const applyDerivedRows = useCallback((
+    nextRows: ImportRow[],
+    options: SettlementDerivationOptions,
+  ) => {
+    if (!onDeriveRows) {
+      onChange(deriveSettlementRowsWithKernel(nextRows, settlementDerivationContext, options));
+      return;
+    }
+
+    onChange(nextRows);
+    const requestSeq = ++deriveRequestSeq.current;
+    setDerivingRows(true);
+    void onDeriveRows(nextRows, settlementDerivationContext, options)
+      .then((derivedRows) => {
+        if (requestSeq !== deriveRequestSeq.current) return;
+        onChange(derivedRows);
+      })
+      .catch((error) => {
+        if (requestSeq !== deriveRequestSeq.current) return;
+        console.error('[ImportEditor] Rust settlement derive failed:', error);
+        toast.error('정산 계산 엔진 호출에 실패했습니다. 입력값은 유지합니다.');
+      })
+      .finally(() => {
+        if (requestSeq !== deriveRequestSeq.current) return;
+        setDerivingRows(false);
+      });
+  }, [onChange, onDeriveRows, settlementDerivationContext]);
+
   const updateCell = useCallback(
     (rowIdx: number, colIdx: number, value: string) => {
       const next = updateImportRowAt(rows, rowIdx, (r) => {
@@ -645,7 +683,7 @@ export function ImportEditor({
         : isSettlementCascadeColumn(colIdx, settlementDerivationContext)
           ? 'cascade'
           : 'row';
-      onChange(deriveSettlementRowsWithKernel(next, settlementDerivationContext, { mode, rowIdx }));
+      applyDerivedRows(next, { mode, rowIdx });
 
       // 거래처 셀 변경 시 오타 탐지
       if (colIdx === counterpartyIdx && value.trim()) {
@@ -660,7 +698,7 @@ export function ImportEditor({
         }
       }
     },
-    [rows, onChange, cashflowIdx, settlementDerivationContext, counterpartyIdx],
+    [rows, cashflowIdx, settlementDerivationContext, counterpartyIdx, applyDerivedRows],
   );
 
   const updateRow = useCallback(
@@ -691,9 +729,9 @@ export function ImportEditor({
         }
         return updated;
       });
-      onChange(deriveSettlementRowsWithKernel(next, settlementDerivationContext, { mode: 'row', rowIdx }));
+      applyDerivedRows(next, { mode: 'row', rowIdx });
     },
-    [rows, onChange, budgetCodeIdx, subCodeIdx, evidenceIdx, evidenceRequiredMap, settlementDerivationContext, expenseIdx, bankAmountIdx],
+    [rows, budgetCodeIdx, subCodeIdx, evidenceIdx, evidenceRequiredMap, settlementDerivationContext, expenseIdx, bankAmountIdx, applyDerivedRows],
   );
 
   const normalizeRowNumbers = useCallback((input: ImportRow[]) => {
@@ -739,8 +777,8 @@ export function ImportEditor({
 
   const commitRows = useCallback((nextRows: ImportRow[], focusTarget?: { rowIdx: number; colIdx: number } | null) => {
     if (focusTarget) pendingFocusCell.current = focusTarget;
-    onChange(deriveSettlementRowsWithKernel(normalizeRowNumbers(nextRows), settlementDerivationContext, { mode: 'full' }));
-  }, [onChange, normalizeRowNumbers, settlementDerivationContext]);
+    applyDerivedRows(normalizeRowNumbers(nextRows), { mode: 'full' });
+  }, [normalizeRowNumbers, applyDerivedRows]);
 
   const addRow = useCallback(() => {
     const anchor = getSelectionAnchor();
@@ -1656,10 +1694,10 @@ export function ImportEditor({
             size="sm"
             className="h-7 text-[11px] gap-1 cursor-pointer shadow-sm"
             onClick={onSave}
-            disabled={validCount === 0 || saving}
+            disabled={validCount === 0 || saving || derivingRows}
           >
-            {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-            {saving ? '저장 중...' : `${validCount}건 저장`}
+            {saving || derivingRows ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+            {saving ? '저장 중...' : derivingRows ? 'Rust 계산 중...' : `${validCount}건 저장`}
           </Button>
         </div>
         </div>

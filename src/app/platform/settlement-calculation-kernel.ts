@@ -1,5 +1,11 @@
 import type { MonthMondayWeek } from './cashflow-weeks';
 import {
+  deriveSettlementRowsViaBff,
+  isPlatformApiEnabled,
+  previewSettlementActualSyncViaBff,
+  type ActorLike,
+} from '../lib/platform-bff-client';
+import {
   aggregateBudgetActualsFromSettlementRows,
 } from './budget-actuals';
 import {
@@ -27,6 +33,12 @@ export interface SettlementCalculationKernel {
   aggregateBudgetActuals: (
     rows: ImportRow[] | null | undefined,
   ) => Map<string, number>;
+}
+
+export interface SettlementKernelRuntimeConfig {
+  tenantId: string;
+  projectId: string;
+  actor: ActorLike;
 }
 
 const typeScriptSettlementCalculationKernel: SettlementCalculationKernel = {
@@ -59,4 +71,54 @@ export function aggregateBudgetActualsFromSettlementRowsWithKernel(
   rows: ImportRow[] | null | undefined,
 ): Map<string, number> {
   return getSettlementCalculationKernel().aggregateBudgetActuals(rows);
+}
+
+function canUseSettlementKernelRuntime(
+  runtime: SettlementKernelRuntimeConfig | null | undefined,
+): runtime is SettlementKernelRuntimeConfig {
+  return Boolean(
+    runtime
+      && isPlatformApiEnabled()
+      && runtime.tenantId
+      && runtime.projectId
+      && runtime.actor?.uid,
+  );
+}
+
+export async function deriveSettlementRowsAuthoritatively(params: {
+  rows: ImportRow[];
+  context: SettlementDerivationContext;
+  options: SettlementDerivationOptions;
+  runtime?: SettlementKernelRuntimeConfig | null;
+}): Promise<ImportRow[]> {
+  if (canUseSettlementKernelRuntime(params.runtime)) {
+    return deriveSettlementRowsViaBff({
+      tenantId: params.runtime.tenantId,
+      actor: params.runtime.actor,
+      projectId: params.runtime.projectId,
+      rows: params.rows,
+      context: params.context,
+      options: params.options,
+    });
+  }
+  return deriveSettlementRowsWithKernel(params.rows, params.context, params.options);
+}
+
+export async function previewSettlementActualSyncAuthoritatively(params: {
+  rows: ImportRow[];
+  yearWeeks: MonthMondayWeek[];
+  persistedRows?: ImportRow[] | null;
+  runtime?: SettlementKernelRuntimeConfig | null;
+}): Promise<SettlementActualSyncWeekPayload[]> {
+  if (canUseSettlementKernelRuntime(params.runtime)) {
+    return previewSettlementActualSyncViaBff({
+      tenantId: params.runtime.tenantId,
+      actor: params.runtime.actor,
+      projectId: params.runtime.projectId,
+      rows: params.rows,
+      yearWeeks: params.yearWeeks,
+      ...(params.persistedRows ? { persistedRows: params.persistedRows } : {}),
+    });
+  }
+  return buildSettlementActualSyncPayloadWithKernel(params.rows, params.yearWeeks, params.persistedRows);
 }

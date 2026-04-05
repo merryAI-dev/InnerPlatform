@@ -29,7 +29,9 @@ import {
 import { toast } from 'sonner';
 import { useFirebase } from '../../lib/firebase-context';
 import {
+  deriveSettlementRowsViaBff,
   type ProvisionTransactionEvidenceDriveResult,
+  previewSettlementActualSyncViaBff,
   type SyncTransactionEvidenceDriveResult,
   type UploadTransactionEvidenceDriveResult,
   provisionProjectEvidenceDriveRootViaBff,
@@ -50,6 +52,8 @@ import { splitLooseNameList } from '../../platform/name-list';
 import { resolveApiErrorMessage } from '../../platform/api-error-message';
 import { reportError } from '../../platform/observability';
 import { type ImportRow } from '../../platform/settlement-csv';
+import type { MonthMondayWeek } from '../../platform/cashflow-weeks';
+import type { SettlementDerivationContext, SettlementDerivationOptions } from '../../platform/settlement-row-derivation';
 import { readDevAuthHarnessConfig } from '../../platform/dev-harness';
 import { detectParticipationRisk } from '../../platform/participation-risk-rules';
 import { normalizeBudgetLabel } from '../../platform/budget-labels';
@@ -212,6 +216,30 @@ export function PortalWeeklyExpensePage() {
     portalUser?.email,
     portalUser?.role,
   ]);
+  const deriveRowsViaRust = useMemo(() => (
+    isPlatformApiEnabled() && orgId && projectId
+      ? async (rows: ImportRow[], context: SettlementDerivationContext, options: SettlementDerivationOptions) => deriveSettlementRowsViaBff({
+        tenantId: orgId,
+        actor: bffActor,
+        projectId,
+        rows,
+        context,
+        options,
+      })
+      : undefined
+  ), [orgId, bffActor, projectId]);
+  const previewActualSyncViaRust = useMemo(() => (
+    isPlatformApiEnabled() && orgId && projectId
+      ? async (rows: ImportRow[], yearWeeks: MonthMondayWeek[], persistedRows?: ImportRow[] | null) => previewSettlementActualSyncViaBff({
+        tenantId: orgId,
+        actor: bffActor,
+        projectId,
+        rows,
+        yearWeeks,
+        persistedRows,
+      })
+      : undefined
+  ), [orgId, bffActor, projectId]);
 
   const handleEvidenceDriveError = (error: unknown, actionLabel: string) => {
     reportError(error, {
@@ -848,6 +876,8 @@ export function PortalWeeklyExpensePage() {
           onUpdateWeeklySubmissionStatus={upsertWeeklySubmissionStatus}
           pendingQuickInsert={pendingQuickInsert}
           onPendingQuickInsertHandled={() => setPendingQuickInsert(null)}
+          onDeriveRows={deriveRowsViaRust}
+          onPreviewActualSyncPayload={previewActualSyncViaRust}
         />
       </Suspense>
       {googleSheetImportOpen && (
@@ -875,6 +905,7 @@ export function PortalWeeklyExpensePage() {
               saveEvidenceRequiredMap={saveEvidenceRequiredMap}
               markSheetSourceApplied={markSheetSourceApplied}
               upsertWeekAmounts={upsertWeekAmounts}
+              previewActualSyncViaRust={previewActualSyncViaRust}
             />
         </Suspense>
       )}

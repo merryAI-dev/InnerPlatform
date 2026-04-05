@@ -113,7 +113,7 @@ interface GoogleSheetMigrationWizardProps {
   sheetSources: ProjectSheetSourceSnapshot[];
   devHarnessEnabled: boolean;
   ensureGoogleWorkspaceAccess: () => Promise<string | null | undefined>;
-  saveExpenseSheetRows: (rows: ImportRow[]) => Promise<void>;
+  saveExpenseSheetRows: (rows: ImportRow[]) => Promise<ImportRow[] | void>;
   saveBudgetPlanRows: (rows: BudgetPlanRow[]) => Promise<void>;
   saveBudgetCodeBook: (rows: BudgetCodeEntry[], renames?: BudgetCodeRename[]) => Promise<void>;
   saveBankStatementRows: (sheet: BankStatementImportSheet) => Promise<void>;
@@ -126,6 +126,11 @@ interface GoogleSheetMigrationWizardProps {
     mode: 'projection' | 'actual';
     amounts: Record<string, number>;
   }) => Promise<void>;
+  previewActualSyncViaRust?: (
+    rows: ImportRow[],
+    yearWeeks: ReturnType<typeof getYearMondayWeeks>,
+    persistedRows?: ImportRow[] | null,
+  ) => Promise<ReturnType<typeof buildSettlementActualSyncPayloadWithKernel>>;
 }
 
 function getGoogleSheetWizardStepLabel(step: GoogleSheetWizardStep): string {
@@ -314,6 +319,7 @@ export function GoogleSheetMigrationWizard({
   saveEvidenceRequiredMap,
   markSheetSourceApplied,
   upsertWeekAmounts,
+  previewActualSyncViaRust,
 }: GoogleSheetMigrationWizardProps) {
   const [step, setStep] = useState<GoogleSheetWizardStep>('source');
   const [link, setLink] = useState('');
@@ -772,12 +778,19 @@ export function GoogleSheetMigrationWizard({
           const expenseRows = reviewState.expenseRows || [];
           if (expenseRows.length === 0) throw new Error('가져올 데이터 행이 없습니다.');
           const mergePlan = planGoogleSheetImportMerge(expenseSheetRows, expenseRows);
-          await saveExpenseSheetRows(mergePlan.mergedRows);
-          const actualPayload = buildSettlementActualSyncPayloadWithKernel(
-            mergePlan.mergedRows,
-            getYearMondayWeeks(new Date().getFullYear()),
-            expenseSheetRows,
-          );
+          const persistedRows = await saveExpenseSheetRows(mergePlan.mergedRows);
+          const actualPreviewRows = Array.isArray(persistedRows) ? persistedRows : mergePlan.mergedRows;
+          const actualPayload = previewActualSyncViaRust
+            ? await previewActualSyncViaRust(
+              actualPreviewRows,
+              getYearMondayWeeks(new Date().getFullYear()),
+              expenseSheetRows,
+            )
+            : buildSettlementActualSyncPayloadWithKernel(
+              actualPreviewRows,
+              getYearMondayWeeks(new Date().getFullYear()),
+              expenseSheetRows,
+            );
           let actualSyncFailed = false;
           if (actualPayload.length > 0) {
             const results = await Promise.allSettled(

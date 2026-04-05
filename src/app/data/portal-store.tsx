@@ -50,11 +50,20 @@ import {
   type BankStatementSheet,
 } from '../platform/bank-statement';
 import { normalizeSpace } from '../platform/csv-utils';
-import { prepareSettlementImportRows, pruneEmptySettlementRows } from '../platform/settlement-sheet-prepare';
+import {
+  buildSettlementDerivationContext,
+  prepareSettlementImportRows,
+  prepareSettlementImportRowsBase,
+  pruneEmptySettlementRows,
+} from '../platform/settlement-sheet-prepare';
 import { useAuth } from './auth-store';
 import { useFirebase } from '../lib/firebase-context';
 import { getAuthInstance, getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
-import { isPlatformApiEnabled, upsertProjectViaBff } from '../lib/platform-bff-client';
+import {
+  deriveSettlementRowsViaBff,
+  isPlatformApiEnabled,
+  upsertProjectViaBff,
+} from '../lib/platform-bff-client';
 import { duplicateExpenseSetAsDraft, withExpenseItems } from './portal-store.helpers';
 import { buildPortalProfilePatch, readMemberWorkspace, resolveMemberProjectAccessState } from './member-workspace';
 import { buildLegacyMemberDocId, mergeMemberRecordSources } from './member-documents';
@@ -212,7 +221,7 @@ interface PortalActions {
   createExpenseSheet: (name?: string) => Promise<string | null>;
   renameExpenseSheet: (sheetId: string, name: string) => Promise<boolean>;
   deleteExpenseSheet: (sheetId: string) => Promise<boolean>;
-  saveExpenseSheetRows: (rows: ImportRow[]) => Promise<void>;
+  saveExpenseSheetRows: (rows: ImportRow[]) => Promise<ImportRow[]>;
   saveBankStatementRows: (sheet: BankStatementSheet) => Promise<void>;
   saveBudgetPlanRows: (rows: BudgetPlanRow[]) => Promise<void>;
   saveBudgetCodeBook: (rows: BudgetCodeEntry[], renames?: BudgetCodeRename[]) => Promise<void>;
@@ -1275,13 +1284,41 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     const activeSheetName = sanitizeExpenseSheetName(activeSheet?.name, activeSheetId === 'default' ? '기본 탭' : '새 탭');
     const defaultLedgerId = ledgers.find((ledger) => ledger.projectId === portalUser?.projectId)?.id
       || (portalUser?.projectId ? `l-${portalUser.projectId}` : 'l-default');
-    const preparedRows = prepareSettlementImportRows(pruneEmptySettlementRows(rows), {
+    const preparedOptions = {
       projectId: portalUser?.projectId || '',
       defaultLedgerId,
       evidenceRequiredMap,
       policy: normalizeSettlementSheetPolicy(myProject?.settlementSheetPolicy, myProject?.fundInputMode),
       basis: myProject?.basis,
-    });
+    } as const;
+    const preparedBaseRows = prepareSettlementImportRowsBase(pruneEmptySettlementRows(rows), preparedOptions);
+    const preparedRows = (
+      isPlatformApiEnabled()
+      && orgId
+      && portalUser?.projectId
+      && authUser?.uid
+      && preparedBaseRows.length > 0
+    )
+      ? await deriveSettlementRowsViaBff({
+        tenantId: orgId,
+        actor: {
+          uid: authUser.uid,
+          email: authUser.email || portalUser?.email || '',
+          role: authUser.role || portalUser?.role || 'pm',
+          idToken: authUser.idToken,
+          googleAccessToken: authUser.googleAccessToken,
+        },
+        projectId: portalUser.projectId,
+        rows: preparedBaseRows,
+        context: buildSettlementDerivationContext(
+          preparedOptions.projectId,
+          preparedOptions.defaultLedgerId,
+          preparedOptions.policy,
+          preparedOptions.basis,
+        ),
+        options: { mode: 'full' },
+      })
+      : prepareSettlementImportRows(preparedBaseRows, preparedOptions);
     const sanitizedRows = preparedRows.map((row) => ({
       ...row,
       cells: Array.isArray(row.cells) ? row.cells.map((c) => (c ?? '')) : [],
@@ -1317,7 +1354,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         }
         return next;
       });
-      return;
+      return sanitizedRows as ImportRow[];
     }
     const payload = withTenantScope(orgId, {
       id: activeSheetId,
@@ -1335,6 +1372,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       { merge: true },
     );
     setExpenseSheetRows(sanitizedRows as ImportRow[]);
+    return sanitizedRows as ImportRow[];
   }, [
     db,
     orgId,
@@ -1348,6 +1386,16 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     evidenceRequiredMap,
     ledgers,
     isDevHarnessUser,
+    authUser?.uid,
+    authUser?.email,
+    authUser?.role,
+    authUser?.idToken,
+    authUser?.googleAccessToken,
+    portalUser?.email,
+    portalUser?.role,
+    myProject?.settlementSheetPolicy,
+    myProject?.fundInputMode,
+    myProject?.basis,
   ]);
 
   const saveBudgetPlanRows = useCallback(async (rows: BudgetPlanRow[]) => {

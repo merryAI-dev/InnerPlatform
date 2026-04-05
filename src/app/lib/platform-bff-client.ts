@@ -7,6 +7,16 @@ import type {
 } from '../data/types';
 import { PlatformApiClient } from '../platform/api-client';
 import type { RequestActor } from '../platform/request-context';
+import type { MonthMondayWeek } from '../platform/cashflow-weeks';
+import {
+  deserializeImportRowsFromKernel,
+  serializeImportRowsForKernel,
+  type SettlementKernelActualSyncResponse,
+  type SettlementKernelDeriveResponse,
+} from '../platform/settlement-kernel-contract';
+import type { ImportRow } from '../platform/settlement-csv';
+import type { SettlementDerivationContext, SettlementDerivationOptions } from '../platform/settlement-row-derivation';
+import type { SettlementActualSyncWeekPayload } from '../platform/settlement-sheet-sync';
 
 export interface PlatformApiRuntimeConfig {
   enabled: boolean;
@@ -26,6 +36,15 @@ export interface UpsertProjectPayload {
   name: string;
   expectedVersion?: number;
   [key: string]: unknown;
+}
+
+export interface TrashProjectPayload {
+  expectedVersion: number;
+  reason?: string;
+}
+
+export interface RestoreProjectPayload {
+  expectedVersion: number;
 }
 
 export interface UpsertLedgerPayload {
@@ -399,6 +418,46 @@ export async function upsertProjectViaBff(params: {
   return response.data;
 }
 
+export async function trashProjectViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  payload: TrashProjectPayload;
+  client?: PlatformApiClientLike;
+}): Promise<{ id: string; tenantId: string; version: number; updatedAt: string; trashedAt: string }> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<{ id: string; tenantId: string; version: number; updatedAt: string; trashedAt: string }>(
+    `/api/v1/projects/${params.projectId}/trash`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.payload,
+    },
+  );
+
+  return response.data;
+}
+
+export async function restoreProjectViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  payload: RestoreProjectPayload;
+  client?: PlatformApiClientLike;
+}): Promise<{ id: string; tenantId: string; version: number; updatedAt: string }> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<{ id: string; tenantId: string; version: number; updatedAt: string }>(
+    `/api/v1/projects/${params.projectId}/restore`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.payload,
+    },
+  );
+
+  return response.data;
+}
+
 export async function upsertLedgerViaBff(params: {
   tenantId: string;
   actor: ActorLike;
@@ -562,6 +621,60 @@ export async function analyzeGoogleSheetImportViaBff(params: {
     },
   );
   return normalizeGoogleSheetMigrationAnalysisResult(response.data);
+}
+
+export async function deriveSettlementRowsViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  rows: ImportRow[];
+  context: SettlementDerivationContext;
+  options: SettlementDerivationOptions;
+  client?: PlatformApiClientLike;
+}): Promise<ImportRow[]> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<SettlementKernelDeriveResponse>(
+    `/api/v1/projects/${params.projectId}/settlement/derive`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: {
+        rows: serializeImportRowsForKernel(params.rows),
+        context: params.context,
+        options: params.options,
+      },
+      timeoutMs: 15000,
+      retries: 0,
+    },
+  );
+  return deserializeImportRowsFromKernel(response.data.rows);
+}
+
+export async function previewSettlementActualSyncViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  rows: ImportRow[];
+  yearWeeks: MonthMondayWeek[];
+  persistedRows?: ImportRow[] | null;
+  client?: PlatformApiClientLike;
+}): Promise<SettlementActualSyncWeekPayload[]> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<SettlementKernelActualSyncResponse>(
+    `/api/v1/projects/${params.projectId}/settlement/actual-sync-preview`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: {
+        rows: serializeImportRowsForKernel(params.rows),
+        yearWeeks: params.yearWeeks,
+        ...(params.persistedRows ? { persistedRows: serializeImportRowsForKernel(params.persistedRows) } : {}),
+      },
+      timeoutMs: 15000,
+      retries: 0,
+    },
+  );
+  return response.data.weeks;
 }
 
 export async function uploadProjectSheetSourceViaBff(params: {

@@ -80,6 +80,65 @@ export const googleSheetImportAnalyzeSchema = z.object({
   matrix: z.array(z.array(z.string())).min(1),
 }).strict();
 
+const settlementKernelImportRowSchema = z.object({
+  tempId: NON_EMPTY_STRING,
+  sourceTxId: z.string().trim().optional(),
+  entryKind: z.enum(['STANDARD', 'EXPENSE', 'DEPOSIT', 'ADJUSTMENT']).optional(),
+  cells: z.array(z.string()),
+  error: z.string().trim().optional(),
+  reviewHints: z.array(z.string().trim()).optional(),
+  reviewRequiredCellIndexes: z.array(z.number().int().nonnegative()).optional(),
+  reviewStatus: z.enum(['pending', 'confirmed']).optional(),
+  reviewFingerprint: z.string().trim().optional(),
+  reviewConfirmedAt: z.string().trim().optional(),
+  userEditedCells: z.array(z.number().int().nonnegative()).optional(),
+}).strict();
+
+const settlementKernelPolicySchema = z.object({
+  preset: z.string().trim().optional(),
+  autoComputeExpenseFromBank: z.boolean().optional(),
+  autoComputeBankFromExpense: z.boolean().optional(),
+  autoComputeBalance: z.boolean().optional(),
+}).strict();
+
+export const settlementKernelDeriveSchema = z.object({
+  rows: z.array(settlementKernelImportRowSchema),
+  context: z.object({
+    projectId: NON_EMPTY_STRING,
+    defaultLedgerId: NON_EMPTY_STRING,
+    policy: settlementKernelPolicySchema.optional(),
+    basis: z.string().trim().optional(),
+    dateIdx: z.number().int(),
+    weekIdx: z.number().int(),
+    depositIdx: z.number().int(),
+    refundIdx: z.number().int(),
+    expenseIdx: z.number().int(),
+    vatInIdx: z.number().int(),
+    bankAmountIdx: z.number().int(),
+    balanceIdx: z.number().int(),
+    evidenceIdx: z.number().int(),
+    evidenceCompletedIdx: z.number().int(),
+    evidencePendingIdx: z.number().int(),
+  }).strict(),
+  options: z.object({
+    mode: z.enum(['row', 'cascade', 'full']),
+    rowIdx: z.number().int().nonnegative().optional(),
+    respectExplicitBalanceAnchors: z.boolean().optional(),
+  }).strict(),
+}).strict();
+
+export const settlementKernelActualSyncSchema = z.object({
+  rows: z.array(settlementKernelImportRowSchema),
+  yearWeeks: z.array(z.object({
+    yearMonth: NON_EMPTY_STRING,
+    weekNo: z.number().int().positive(),
+    weekStart: NON_EMPTY_STRING,
+    weekEnd: NON_EMPTY_STRING,
+    label: NON_EMPTY_STRING,
+  }).strict()),
+  persistedRows: z.array(settlementKernelImportRowSchema).optional(),
+}).strict();
+
 export const projectSheetSourceUploadSchema = z.object({
   sourceType: z.enum(['usage', 'budget', 'evidence_rules', 'cashflow', 'bank_statement']),
   sheetName: NON_EMPTY_STRING.max(200),

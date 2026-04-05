@@ -22,6 +22,8 @@ import {
 } from '../../platform/settlement-csv';
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { buildSettlementActualSyncPayloadWithKernel } from '../../platform/settlement-calculation-kernel';
+import type { SettlementDerivationContext, SettlementDerivationOptions } from '../../platform/settlement-row-derivation';
+import type { SettlementActualSyncWeekPayload } from '../../platform/settlement-sheet-sync';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import {
@@ -68,7 +70,7 @@ export interface SettlementLedgerProps {
   onSaveEvidenceRequiredMap?: (map: Record<string, string>) => void | Promise<void>;
   saving?: boolean;
   sheetRows?: ImportRow[] | null;
-  onSaveSheetRows?: (rows: ImportRow[]) => void | Promise<void>;
+  onSaveSheetRows?: (rows: ImportRow[]) => ImportRow[] | void | Promise<ImportRow[] | void>;
   autoSaveSheet?: boolean;
   authorOptions?: string[];
   budgetCodeBook?: BudgetCodeEntry[];
@@ -110,6 +112,16 @@ export interface SettlementLedgerProps {
   }) => void | Promise<void>;
   pendingQuickInsert?: import('./ImportEditor').PendingQuickInsert | null;
   onPendingQuickInsertHandled?: () => void;
+  onDeriveRows?: (
+    rows: ImportRow[],
+    context: SettlementDerivationContext,
+    options: SettlementDerivationOptions,
+  ) => Promise<ImportRow[]>;
+  onPreviewActualSyncPayload?: (
+    rows: ImportRow[],
+    yearWeeks: MonthMondayWeek[],
+    persistedRows?: ImportRow[] | null,
+  ) => Promise<SettlementActualSyncWeekPayload[]>;
 }
 
 // ── Main Component ──
@@ -149,6 +161,8 @@ export function SettlementLedgerPage({
   onUpdateWeeklySubmissionStatus,
   pendingQuickInsert,
   onPendingQuickInsertHandled,
+  onDeriveRows,
+  onPreviewActualSyncPayload,
 }: SettlementLedgerProps) {
   const { upsertWeekAmounts } = useCashflowWeeks();
   const [year, setYear] = useState(() => new Date().getFullYear());
@@ -530,8 +544,11 @@ export function SettlementLedgerPage({
     setSheetSaving(true);
     setSheetSaveState('saving');
     try {
-      await onSaveSheetRows(rows);
-      const payload = buildSettlementActualSyncPayloadWithKernel(rows, yearWeeks, sheetRows || null);
+      const persistedRows = await onSaveSheetRows(rows);
+      const previewSourceRows = Array.isArray(persistedRows) ? persistedRows : rows;
+      const payload = onPreviewActualSyncPayload
+        ? await onPreviewActualSyncPayload(previewSourceRows, yearWeeks, sheetRows || null)
+        : buildSettlementActualSyncPayloadWithKernel(previewSourceRows, yearWeeks, sheetRows || null);
       await updateWeeklyStatusesForPayload(payload, {
         expenseUpdated: true,
         expenseSyncState: 'pending',
@@ -542,16 +559,16 @@ export function SettlementLedgerPage({
       clearImportDraftCache(draftCacheKey);
       setLastAutoSavedAt(new Date().toISOString());
       if (!silent) toast.success('정산대장을 저장했습니다.');
-      return true;
+      return previewSourceRows;
     } catch (err) {
       console.error('[SettlementLedger] save sheet failed:', err);
       setSheetSaveState('save_failed');
       if (!silent) toast.error('정산대장 저장에 실패했습니다.');
-      return false;
+      return null;
     } finally {
       setSheetSaving(false);
     }
-  }, [draftCacheKey, onSaveSheetRows, sheetRows, updateWeeklyStatusesForPayload, yearWeeks]);
+  }, [draftCacheKey, onPreviewActualSyncPayload, onSaveSheetRows, sheetRows, updateWeeklyStatusesForPayload, yearWeeks]);
 
   const syncImportRowsToCashflow = useCallback(async (
     rows: ImportRow[],
@@ -560,7 +577,9 @@ export function SettlementLedgerPage({
     const silent = options?.silent ?? false;
     const pendingReviewCount = countPendingImportRowReviews(rows);
     const reviewCountsByWeekLabel = buildPendingReviewCountsByWeek(rows);
-    const payload = buildSettlementActualSyncPayloadWithKernel(rows, yearWeeks, sheetRows || null);
+    const payload = onPreviewActualSyncPayload
+      ? await onPreviewActualSyncPayload(rows, yearWeeks, sheetRows || null)
+      : buildSettlementActualSyncPayloadWithKernel(rows, yearWeeks, sheetRows || null);
     const weekLabelMap = buildPayloadWeekLabelMap();
     const blockedWeeks = payload.filter((week) => (
       reviewCountsByWeekLabel.get(weekLabelMap.get(`${week.yearMonth}:${week.weekNo}`) || '') || 0
@@ -625,16 +644,16 @@ export function SettlementLedgerPage({
     } finally {
       setCashflowSyncing(false);
     }
-  }, [buildPayloadWeekLabelMap, buildPendingReviewCountsByWeek, projectId, sheetRows, updateWeeklyStatusesForPayload, upsertWeekAmounts, yearWeeks]);
+  }, [buildPayloadWeekLabelMap, buildPendingReviewCountsByWeek, onPreviewActualSyncPayload, projectId, sheetRows, updateWeeklyStatusesForPayload, upsertWeekAmounts, yearWeeks]);
 
   const handleImportSave = useCallback(async (options?: { silent?: boolean; syncCashflow?: boolean }) => {
     if (!importRows) return;
     const silent = options?.silent ?? false;
     const syncCashflow = options?.syncCashflow ?? true;
-    const persisted = await persistImportRowsSnapshot(importRows, { silent });
-    if (!persisted) return;
+    const persistedRows = await persistImportRowsSnapshot(importRows, { silent });
+    if (!persistedRows) return;
     if (syncCashflow) {
-      await syncImportRowsToCashflow(importRows, { silent });
+      await syncImportRowsToCashflow(persistedRows, { silent });
     }
   }, [importRows, persistImportRowsSnapshot, syncImportRowsToCashflow]);
 
@@ -851,6 +870,7 @@ export function SettlementLedgerPage({
             pendingQuickInsert={pendingQuickInsert}
             onPendingQuickInsertHandled={onPendingQuickInsertHandled}
             onToggleFullscreen={() => setEditorFullscreen((prev) => !prev)}
+            onDeriveRows={onDeriveRows}
           />
         )}
         {revertConfirmDialog}
@@ -1024,6 +1044,7 @@ export function SettlementLedgerPage({
           basis={basis}
           pendingQuickInsert={pendingQuickInsert}
           onPendingQuickInsertHandled={onPendingQuickInsertHandled}
+          onDeriveRows={onDeriveRows}
         />
       )}
       {revertConfirmDialog}
