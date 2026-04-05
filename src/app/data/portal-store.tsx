@@ -51,16 +51,12 @@ import {
 } from '../platform/bank-statement';
 import { normalizeSpace } from '../platform/csv-utils';
 import {
-  buildSettlementDerivationContext,
-  prepareSettlementImportRows,
-  prepareSettlementImportRowsBase,
-  pruneEmptySettlementRows,
 } from '../platform/settlement-sheet-prepare';
+import { prepareExpenseSheetRowsForSave } from './portal-store.settlement';
 import { useAuth } from './auth-store';
 import { useFirebase } from '../lib/firebase-context';
 import { getAuthInstance, getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
 import {
-  deriveSettlementRowsViaBff,
   isPlatformApiEnabled,
   upsertProjectViaBff,
 } from '../lib/platform-bff-client';
@@ -1291,34 +1287,10 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       policy: normalizeSettlementSheetPolicy(myProject?.settlementSheetPolicy, myProject?.fundInputMode),
       basis: myProject?.basis,
     } as const;
-    const preparedBaseRows = prepareSettlementImportRowsBase(pruneEmptySettlementRows(rows), preparedOptions);
-    const preparedRows = (
-      isPlatformApiEnabled()
-      && orgId
-      && portalUser?.projectId
-      && authUser?.uid
-      && preparedBaseRows.length > 0
-    )
-      ? await deriveSettlementRowsViaBff({
-        tenantId: orgId,
-        actor: {
-          uid: authUser.uid,
-          email: authUser.email || portalUser?.email || '',
-          role: authUser.role || portalUser?.role || 'pm',
-          idToken: authUser.idToken,
-          googleAccessToken: authUser.googleAccessToken,
-        },
-        projectId: portalUser.projectId,
-        rows: preparedBaseRows,
-        context: buildSettlementDerivationContext(
-          preparedOptions.projectId,
-          preparedOptions.defaultLedgerId,
-          preparedOptions.policy,
-          preparedOptions.basis,
-        ),
-        options: { mode: 'full' },
-      })
-      : prepareSettlementImportRows(preparedBaseRows, preparedOptions);
+    const preparedRows = prepareExpenseSheetRowsForSave({
+      rows,
+      ...preparedOptions,
+    });
     const sanitizedRows = preparedRows.map((row) => ({
       ...row,
       cells: Array.isArray(row.cells) ? row.cells.map((c) => (c ?? '')) : [],
