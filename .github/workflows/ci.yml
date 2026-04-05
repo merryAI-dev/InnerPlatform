@@ -30,7 +30,7 @@ jobs:
       - name: Production build
         run: npm run build
 
-  settlement-product-completeness:
+  product-release-gates:
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -57,6 +57,9 @@ jobs:
 
       - name: Settlement product flow Playwright
         run: npx playwright test tests/e2e/migration-wizard.harness.spec.js tests/e2e/settlement-product-completeness.spec.ts --config playwright.harness.config.mjs
+
+      - name: Auth and projects critical flow Playwright
+        run: npx playwright test tests/e2e/product-release-gates.spec.ts --config playwright.harness.config.mjs
 
       - name: Settlement emulator-backed integration
         run: npm run test:settlement:integration
