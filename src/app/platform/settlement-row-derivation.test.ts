@@ -223,6 +223,24 @@ describe('settlement-row-derivation', () => {
     expect(next[0]?.cells[9]).toBe('10,644,328');
   });
 
+  it('keeps bank-imported outflow split cells empty until a human fills them', () => {
+    const rowCells = createCells();
+    rowCells[10] = '110,000';
+    rowCells[9] = '890,000';
+    const row: ImportRow = {
+      tempId: 'bank-import-expense-row',
+      sourceTxId: 'bank:expense-import-1',
+      entryKind: 'EXPENSE',
+      cells: rowCells,
+    };
+
+    const next = deriveSettlementRows([row], { ...context, basis: '공급가액' }, { mode: 'cascade', rowIdx: 0 });
+
+    expect(next[0]?.cells[13]).toBe('');
+    expect(next[0]?.cells[14]).toBe('');
+    expect(next[0]?.reviewHints).toBeUndefined();
+  });
+
   it('keeps a cleared expense amount empty when the user explicitly cleared it', () => {
     const rowCells = createCells();
     rowCells[10] = '110,000';

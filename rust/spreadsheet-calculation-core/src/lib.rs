@@ -294,6 +294,14 @@ fn derive_supply_amount_candidate(bank_amount: f64) -> (f64, f64) {
     (expense_amount, vat_in)
 }
 
+fn is_bank_imported_source_row(row: &KernelImportRow) -> bool {
+    row.source_tx_id
+        .as_deref()
+        .unwrap_or_default()
+        .starts_with("bank:")
+        && matches!(row.entry_kind.as_deref(), Some("EXPENSE") | Some("DEPOSIT"))
+}
+
 fn derive_pending_evidence(required_desc: &str, completed_desc: &str) -> String {
     let required = required_desc
         .split(',')
@@ -580,6 +588,7 @@ fn derive_row_locally(
         && bank_idx.is_some()
         && expense_idx.is_some()
         && vat_idx.is_some()
+        && !is_bank_imported_source_row(row)
     {
         let bank_amount = parse_amount(&next.cells, bank_idx);
         let deposit_sum = match (deposit_idx, refund_idx) {
@@ -1263,6 +1272,42 @@ mod tests {
         let row = &response.rows[0];
         assert_eq!(row.cells[13], "");
         assert_eq!(row.cells[10], "110,000");
+    }
+
+    #[test]
+    fn keeps_bank_imported_outflow_split_cells_empty_until_human_input() {
+        let mut cells = create_cells();
+        cells[9] = "890,000".to_string();
+        cells[10] = "110,000".to_string();
+        let response = derive_settlement_rows(KernelRequest {
+            rows: vec![KernelImportRow {
+                temp_id: "bank-import-expense-row".to_string(),
+                source_tx_id: Some("bank:expense-import-1".to_string()),
+                entry_kind: Some("EXPENSE".to_string()),
+                cells,
+                error: None,
+                review_hints: None,
+                review_required_cell_indexes: None,
+                review_status: None,
+                review_fingerprint: None,
+                review_confirmed_at: None,
+                user_edited_cells: None,
+            }],
+            context: KernelDerivationContext {
+                basis: Some("공급가액".to_string()),
+                ..base_context()
+            },
+            options: KernelDerivationOptions {
+                mode: "cascade".to_string(),
+                row_idx: Some(0),
+                respect_explicit_balance_anchors: Some(true),
+            },
+        });
+
+        let row = &response.rows[0];
+        assert_eq!(row.cells[13], "");
+        assert_eq!(row.cells[14], "");
+        assert!(row.review_hints.is_none());
     }
 
     #[test]

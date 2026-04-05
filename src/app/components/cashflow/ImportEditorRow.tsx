@@ -376,7 +376,11 @@ function ImportEditorRow({
     if (num == null) return value;
     return Number.isFinite(num) ? num.toLocaleString('ko-KR') : value;
   }, []);
+  const isManualPriorityOutflowField = useCallback((header: string) => (
+    header === '사업비 사용액' || header === '매입부가세'
+  ), []);
   const isDerivedFieldLocked = useCallback((header: string) => {
+    if (isManualPriorityOutflowField(header)) return false;
     if (header === '통장잔액') {
       return settlementSheetPolicy.readOnlyDerivedFields.includes('balance') && !isAdjustmentRow;
     }
@@ -385,7 +389,7 @@ function ImportEditorRow({
     if (header === '통장에 찍힌 입/출금액') return settlementSheetPolicy.readOnlyDerivedFields.includes('bankAmount');
     if (header === '매입부가세') return settlementSheetPolicy.readOnlyDerivedFields.includes('vatIn');
     return false;
-  }, [isAdjustmentRow, settlementSheetPolicy.readOnlyDerivedFields]);
+  }, [isAdjustmentRow, isManualPriorityOutflowField, settlementSheetPolicy.readOnlyDerivedFields]);
   const resolveCellSource = useCallback((colIdx: number, header: string) => {
     if (isDerivedFieldLocked(header)) {
       return { label: '계산', className: 'bg-slate-100 text-slate-600' };
@@ -575,15 +579,23 @@ function ImportEditorRow({
         const isCounterparty = col.csvHeader === '지급처';
         const isDriveLink = col.csvHeader === '증빙자료 드라이브';
         const isExpenseAmount = col.csvHeader === '사업비 사용액';
+        const isVatIn = col.csvHeader === '매입부가세';
         const isSettlementNote = col.csvHeader === '비고';
         const isDerivedLocked = isDerivedFieldLocked(col.csvHeader);
+        const isManualPriorityField = isManualPriorityOutflowField(col.csvHeader);
         const cellSource = resolveCellSource(colIdx, col.csvHeader);
         const showCellBadge = Boolean(isDerivedLocked || cellSource);
+        const cellToneClass = isExpenseAmount || isVatIn
+          ? 'bg-yellow-50/80 dark:bg-yellow-950/15'
+          : '';
+        const inputToneClass = isExpenseAmount || isVatIn
+          ? 'bg-yellow-50/90 dark:bg-yellow-950/20 ring-1 ring-inset ring-yellow-200/80 dark:ring-yellow-800/50 rounded'
+          : '';
         const hasAuthorOptions = (authorOptions || []).length > 0;
         return (
           <td
             key={colIdx}
-            className={`px-0.5 py-0.5 border-b border-r focus-within:bg-teal-50/20 focus-within:shadow-[inset_0_0_0_2px_rgba(20,184,166,0.8)] ${isCellSelected(colIdx)
+            className={`px-0.5 py-0.5 border-b border-r focus-within:bg-teal-50/20 focus-within:shadow-[inset_0_0_0_2px_rgba(20,184,166,0.8)] ${cellToneClass} ${isCellSelected(colIdx)
               ? 'bg-teal-50/40 dark:bg-teal-900/20 shadow-[inset_0_0_0_2px_rgba(20,184,166,0.7)]'
               : ''
             }`}
@@ -890,7 +902,7 @@ function ImportEditorRow({
                   <input
                     type="text"
                     value={row.cells[colIdx] || ''}
-                    className={`w-full outline-none text-[11px] px-1 py-0.5 ${isDerivedLocked ? 'bg-muted/40 text-muted-foreground cursor-not-allowed rounded' : 'bg-transparent'}`}
+                    className={`w-full outline-none text-[11px] px-1 py-0.5 ${isDerivedLocked ? 'bg-muted/40 text-muted-foreground cursor-not-allowed rounded' : inputToneClass}`}
                     data-cell-row={rowIdx}
                     data-cell-col={colIdx}
                     readOnly={isDerivedLocked}
@@ -908,7 +920,7 @@ function ImportEditorRow({
                 <input
                   type="text"
                   value={row.cells[colIdx] || ''}
-                  className={`w-full outline-none text-[11px] px-1 py-0.5 pr-6 ${isDerivedLocked ? 'bg-muted/40 text-muted-foreground cursor-not-allowed rounded' : 'bg-transparent'} ${hasError && colIdx === dateIdx && !row.cells[colIdx]
+                  className={`w-full outline-none text-[11px] px-1 py-0.5 pr-6 ${isDerivedLocked ? 'bg-muted/40 text-muted-foreground cursor-not-allowed rounded' : isManualPriorityField ? inputToneClass : 'bg-transparent'} ${hasError && colIdx === dateIdx && !row.cells[colIdx]
                     ? 'ring-1 ring-red-300 rounded'
                     : ''
                     }`}

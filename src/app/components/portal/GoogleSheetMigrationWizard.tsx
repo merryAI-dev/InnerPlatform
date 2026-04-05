@@ -59,7 +59,7 @@ import {
 } from '../../platform/google-sheet-migration';
 import { parseLocalWorkbookFile, type LocalWorkbookSheet } from '../../platform/local-workbook';
 import { reportError } from '../../platform/observability';
-import { buildSettlementActualSyncPayload } from '../../platform/settlement-sheet-sync';
+import { buildSettlementActualSyncPayloadWithKernel } from '../../platform/settlement-calculation-kernel';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import {
@@ -773,7 +773,7 @@ export function GoogleSheetMigrationWizard({
           if (expenseRows.length === 0) throw new Error('가져올 데이터 행이 없습니다.');
           const mergePlan = planGoogleSheetImportMerge(expenseSheetRows, expenseRows);
           await saveExpenseSheetRows(mergePlan.mergedRows);
-          const actualPayload = buildSettlementActualSyncPayload(
+          const actualPayload = buildSettlementActualSyncPayloadWithKernel(
             mergePlan.mergedRows,
             getYearMondayWeeks(new Date().getFullYear()),
             expenseSheetRows,

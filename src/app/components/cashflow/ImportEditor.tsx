@@ -43,9 +43,9 @@ import {
   deleteSelectedRows,
 } from '../../platform/settlement-grid-actions';
 import {
-  deriveSettlementRows,
   isSettlementCascadeColumn,
 } from '../../platform/settlement-row-derivation';
+import { deriveSettlementRowsWithKernel } from '../../platform/settlement-calculation-kernel';
 import {
   countConfirmedImportRowReviews,
   countPendingImportRowReviews,
@@ -645,7 +645,7 @@ export function ImportEditor({
         : isSettlementCascadeColumn(colIdx, settlementDerivationContext)
           ? 'cascade'
           : 'row';
-      onChange(deriveSettlementRows(next, settlementDerivationContext, { mode, rowIdx }));
+      onChange(deriveSettlementRowsWithKernel(next, settlementDerivationContext, { mode, rowIdx }));
 
       // 거래처 셀 변경 시 오타 탐지
       if (colIdx === counterpartyIdx && value.trim()) {
@@ -691,7 +691,7 @@ export function ImportEditor({
         }
         return updated;
       });
-      onChange(deriveSettlementRows(next, settlementDerivationContext, { mode: 'row', rowIdx }));
+      onChange(deriveSettlementRowsWithKernel(next, settlementDerivationContext, { mode: 'row', rowIdx }));
     },
     [rows, onChange, budgetCodeIdx, subCodeIdx, evidenceIdx, evidenceRequiredMap, settlementDerivationContext, expenseIdx, bankAmountIdx],
   );
@@ -739,7 +739,7 @@ export function ImportEditor({
 
   const commitRows = useCallback((nextRows: ImportRow[], focusTarget?: { rowIdx: number; colIdx: number } | null) => {
     if (focusTarget) pendingFocusCell.current = focusTarget;
-    onChange(deriveSettlementRows(normalizeRowNumbers(nextRows), settlementDerivationContext, { mode: 'full' }));
+    onChange(deriveSettlementRowsWithKernel(normalizeRowNumbers(nextRows), settlementDerivationContext, { mode: 'full' }));
   }, [onChange, normalizeRowNumbers, settlementDerivationContext]);
 
   const addRow = useCallback(() => {

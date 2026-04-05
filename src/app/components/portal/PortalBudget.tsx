@@ -42,7 +42,7 @@ import {
   parseBudgetPlanImportText,
   selectBudgetPlanImportSheet,
 } from '../../platform/budget-plan-import';
-import { aggregateBudgetActualsFromSettlementRows } from '../../platform/budget-actuals';
+import { aggregateBudgetActualsFromSettlementRowsWithKernel } from '../../platform/settlement-calculation-kernel';
 import { moveBudgetSubCode, moveBudgetSubCodeToIndex } from '../../platform/budget-code-book-order';
 import { buildBudgetLabelKey, normalizeBudgetLabel } from '../../platform/budget-labels';
 import { parseBudgetPlanMatrix, planBudgetPlanMerge } from '../../platform/google-sheet-migration';
@@ -297,7 +297,7 @@ export function PortalBudget() {
   }, [budgetPlanRows]);
 
   const spentMap = useMemo(() => {
-    return aggregateBudgetActualsFromSettlementRows(expenseSheetRows);
+    return aggregateBudgetActualsFromSettlementRowsWithKernel(expenseSheetRows);
   }, [expenseSheetRows]);
 
   const activeCodeBook = useMemo(

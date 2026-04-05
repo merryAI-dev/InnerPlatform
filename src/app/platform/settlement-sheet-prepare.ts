@@ -2,9 +2,9 @@ import { SETTLEMENT_COLUMNS, type ImportRow } from './settlement-csv';
 import type { Basis, SettlementSheetPolicy } from '../data/types';
 import { buildBudgetLabelKey, normalizeBudgetLabel } from './budget-labels';
 import {
-  deriveSettlementRows,
   type SettlementDerivationContext,
 } from './settlement-row-derivation';
+import { deriveSettlementRowsWithKernel } from './settlement-calculation-kernel';
 import { resolveEvidenceRequiredByRules } from './evidence-rules';
 
 function getColumnIndex(header: string): number {
@@ -106,6 +106,26 @@ export function prepareSettlementImportRows(
     basis?: Basis;
   },
 ): ImportRow[] {
+  const baseRows = prepareSettlementImportRowsBase(rows, options);
+  if (baseRows.length === 0) return [];
+
+  return deriveSettlementRowsWithKernel(
+    baseRows,
+    buildSettlementDerivationContext(options.projectId, options.defaultLedgerId, options.policy, options.basis),
+    { mode: 'full' },
+  );
+}
+
+export function prepareSettlementImportRowsBase(
+  rows: ImportRow[] | null | undefined,
+  options: {
+    projectId: string;
+    defaultLedgerId: string;
+    evidenceRequiredMap?: Record<string, string>;
+    policy?: SettlementSheetPolicy;
+    basis?: Basis;
+  },
+): ImportRow[] {
   const nonEmptyRows = pruneEmptySettlementRows(rows);
   if (nonEmptyRows.length === 0) return [];
 
@@ -141,9 +161,5 @@ export function prepareSettlementImportRows(
     return { ...row, cells };
   });
 
-  return deriveSettlementRows(
-    withEvidenceMap,
-    buildSettlementDerivationContext(options.projectId, options.defaultLedgerId, options.policy, options.basis),
-    { mode: 'full' },
-  );
+  return withEvidenceMap;
 }

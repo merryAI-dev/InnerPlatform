@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
@@ -7,6 +7,12 @@ import type { ImportRow } from './settlement-csv';
 import { deriveSettlementRows } from './settlement-row-derivation';
 import type { SettlementDerivationContext, SettlementDerivationOptions } from './settlement-row-derivation';
 import { buildSettlementDerivationContext } from './settlement-sheet-prepare';
+import {
+  aggregateBudgetActualsViaRustKernel,
+  buildSettlementActualSyncPayloadViaRustKernel,
+  deriveSettlementRowsViaRustKernel,
+  SETTLEMENT_RUST_KERNEL_PATHS,
+} from './settlement-calculation-kernel.node';
 import { parseNumber } from './csv-utils';
 import { getYearMondayWeeks, type MonthMondayWeek } from './cashflow-weeks';
 import { buildSettlementActualSyncPayload } from './settlement-sheet-sync';
@@ -19,23 +25,8 @@ import {
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(currentDir, '../../..');
-const cargoManifestPath = path.resolve(repoRoot, 'rust/spreadsheet-calculation-core/Cargo.toml');
-const rustBinaryPath = path.resolve(repoRoot, 'rust/spreadsheet-calculation-core/target/debug/spreadsheet-calculation-core');
+const cargoManifestPath = SETTLEMENT_RUST_KERNEL_PATHS.cargoManifestPath;
 const cargoAvailable = spawnSync('cargo', ['--version'], { cwd: repoRoot, encoding: 'utf8' }).status === 0;
-
-interface KernelImportRowJson {
-  tempId: string;
-  sourceTxId?: string;
-  entryKind?: string;
-  cells: string[];
-  error?: string;
-  reviewHints?: string[];
-  reviewRequiredCellIndexes?: number[];
-  reviewStatus?: 'pending' | 'confirmed';
-  reviewFingerprint?: string;
-  reviewConfirmedAt?: string;
-  userEditedCells?: number[];
-}
 
 interface KernelActualSyncWeekJson {
   yearMonth: string;
@@ -56,106 +47,6 @@ function loadFixture(): UsageLedgerPhase1Fixture {
     '../../../docs/architecture/usage-ledger-phase-1-fixture-2026-04-04.json',
   );
   return JSON.parse(readFileSync(fixturePath, 'utf8')) as UsageLedgerPhase1Fixture;
-}
-
-function serializeRows(rows: ImportRow[]): KernelImportRowJson[] {
-  return rows.map((row) => ({
-    tempId: row.tempId,
-    ...(row.sourceTxId ? { sourceTxId: row.sourceTxId } : {}),
-    ...(row.entryKind ? { entryKind: row.entryKind } : {}),
-    cells: [...row.cells],
-    ...(row.error ? { error: row.error } : {}),
-    ...(row.reviewHints ? { reviewHints: [...row.reviewHints] } : {}),
-    ...(row.reviewRequiredCellIndexes ? { reviewRequiredCellIndexes: [...row.reviewRequiredCellIndexes] } : {}),
-    ...(row.reviewStatus ? { reviewStatus: row.reviewStatus } : {}),
-    ...(row.reviewFingerprint ? { reviewFingerprint: row.reviewFingerprint } : {}),
-    ...(row.reviewConfirmedAt ? { reviewConfirmedAt: row.reviewConfirmedAt } : {}),
-    ...(row.userEditedCells ? { userEditedCells: Array.from(row.userEditedCells).sort((a, b) => a - b) } : {}),
-  }));
-}
-
-function deserializeRows(rows: KernelImportRowJson[]): ImportRow[] {
-  return rows.map((row) => ({
-    tempId: row.tempId,
-    ...(row.sourceTxId ? { sourceTxId: row.sourceTxId } : {}),
-    ...(row.entryKind ? { entryKind: row.entryKind as ImportRow['entryKind'] } : {}),
-    cells: [...row.cells],
-    ...(row.error ? { error: row.error } : {}),
-    ...(row.reviewHints ? { reviewHints: [...row.reviewHints] } : {}),
-    ...(row.reviewRequiredCellIndexes ? { reviewRequiredCellIndexes: [...row.reviewRequiredCellIndexes] } : {}),
-    ...(row.reviewStatus ? { reviewStatus: row.reviewStatus } : {}),
-    ...(row.reviewFingerprint ? { reviewFingerprint: row.reviewFingerprint } : {}),
-    ...(row.reviewConfirmedAt ? { reviewConfirmedAt: row.reviewConfirmedAt } : {}),
-    ...(row.userEditedCells ? { userEditedCells: new Set(row.userEditedCells) } : {}),
-  }));
-}
-
-function deriveSettlementRowsViaRust(
-  rows: ImportRow[],
-  context: SettlementDerivationContext,
-  options: SettlementDerivationOptions,
-): ImportRow[] {
-  const executable = existsSync(rustBinaryPath) ? rustBinaryPath : null;
-  if (!executable) {
-    throw new Error('Rust settlement kernel binary is not built.');
-  }
-  const payload = {
-    rows: serializeRows(rows),
-    context,
-    options,
-  };
-  const result = spawnSync(executable, {
-    cwd: repoRoot,
-    input: JSON.stringify(payload),
-    encoding: 'utf8',
-  });
-  if (result.status !== 0) {
-    throw new Error(`Rust settlement kernel failed: ${result.stderr || result.stdout}`);
-  }
-  const parsed = JSON.parse(result.stdout) as { rows: KernelImportRowJson[] };
-  return deserializeRows(parsed.rows);
-}
-
-function buildSettlementActualSyncPayloadViaRust(
-  rows: ImportRow[],
-  yearWeeks?: MonthMondayWeek[],
-  persistedRows?: ImportRow[] | null,
-): KernelActualSyncWeekJson[] {
-  const executable = existsSync(rustBinaryPath) ? rustBinaryPath : null;
-  if (!executable) throw new Error('Rust settlement kernel binary is not built.');
-  const payload = {
-    command: 'actualSync',
-    rows: serializeRows(rows),
-    yearWeeks: yearWeeks || getYearMondayWeeks(2026),
-    ...(persistedRows ? { persistedRows: serializeRows(persistedRows) } : {}),
-  };
-  const result = spawnSync(executable, {
-    cwd: repoRoot,
-    input: JSON.stringify(payload),
-    encoding: 'utf8',
-  });
-  if (result.status !== 0) {
-    throw new Error(`Rust settlement actual sync kernel failed: ${result.stderr || result.stdout}`);
-  }
-  return (JSON.parse(result.stdout) as { weeks: KernelActualSyncWeekJson[] }).weeks;
-}
-
-function aggregateBudgetActualsViaRust(rows: ImportRow[]): { items: KernelBudgetActualItemJson[]; total: number } {
-  const executable = existsSync(rustBinaryPath) ? rustBinaryPath : null;
-  if (!executable) throw new Error('Rust settlement kernel binary is not built.');
-  const payload = {
-    command: 'budgetActuals',
-    rows: serializeRows(rows),
-  };
-  const result = spawnSync(executable, {
-    cwd: repoRoot,
-    input: JSON.stringify(payload),
-    encoding: 'utf8',
-  });
-  if (result.status !== 0) {
-    throw new Error(`Rust budget actual kernel failed: ${result.stderr || result.stdout}`);
-  }
-  return JSON.parse(result.stdout) as { items: KernelBudgetActualItemJson[]; total: number };
 }
 
 function expectRowsToMatch(tsRows: ImportRow[], rustRows: ImportRow[]) {
@@ -208,7 +99,7 @@ describeRust('settlement-rust-kernel', () => {
     };
 
     const tsDerived = deriveSettlementRows(rows, context, options);
-    const rustDerived = deriveSettlementRowsViaRust(rows, context, options);
+    const rustDerived = deriveSettlementRowsViaRustKernel(rows, context, options);
 
     expectRowsToMatch(tsDerived, rustDerived);
   });
@@ -233,9 +124,28 @@ describeRust('settlement-rust-kernel', () => {
     const rows = [candidateRow, manualClearRow];
 
     const tsDerived = deriveSettlementRows(rows, context, options);
-    const rustDerived = deriveSettlementRowsViaRust(rows, context, options);
+    const rustDerived = deriveSettlementRowsViaRustKernel(rows, context, options);
 
     expectRowsToMatch(tsDerived, rustDerived);
+  });
+
+  it('matches TypeScript bank-import policy that keeps expense and vat blank for manual entry', () => {
+    const context = buildSettlementDerivationContext('proj-rust', 'ledger-rust', undefined, '공급가액');
+    const importedExpenseRow: ImportRow = {
+      tempId: 'bank-imported-expense-row',
+      sourceTxId: 'bank:expense-import-1',
+      entryKind: 'EXPENSE',
+      cells: Array.from({ length: 26 }, () => ''),
+    };
+    importedExpenseRow.cells[10] = '110,000';
+
+    const options: SettlementDerivationOptions = { mode: 'cascade', rowIdx: 0 };
+    const tsDerived = deriveSettlementRows([importedExpenseRow], context, options);
+    const rustDerived = deriveSettlementRowsViaRustKernel([importedExpenseRow], context, options);
+
+    expectRowsToMatch(tsDerived, rustDerived);
+    expect(rustDerived[0]?.cells[13]).toBe('');
+    expect(rustDerived[0]?.cells[14]).toBe('');
   });
 
   it('matches TypeScript weekly actual sync payload generation', () => {
@@ -273,7 +183,7 @@ describeRust('settlement-rust-kernel', () => {
     persistedRow.cells[10] = '20,000';
 
     const tsPayload = buildSettlementActualSyncPayload([directRow, salesRow], yearWeeks, [persistedRow]);
-    const rustPayload = buildSettlementActualSyncPayloadViaRust([directRow, salesRow], yearWeeks, [persistedRow]);
+    const rustPayload = buildSettlementActualSyncPayloadViaRustKernel([directRow, salesRow], yearWeeks, [persistedRow]);
 
     expect(rustPayload).toEqual(tsPayload);
     const marchWeek = tsPayload.find((item) => item.yearMonth === '2026-03' && item.weekNo === 1);
@@ -312,7 +222,7 @@ describeRust('settlement-rust-kernel', () => {
     inflowRow.cells[10] = '999,000';
 
     const tsActuals = aggregateBudgetActualsFromSettlementRows([directRow, vatRow, inflowRow]);
-    const rustActuals = aggregateBudgetActualsViaRust([directRow, vatRow, inflowRow]);
+    const rustActuals = aggregateBudgetActualsViaRustKernel([directRow, vatRow, inflowRow]);
 
     expect(rustActuals.total).toBe(33000);
     expect(rustActuals.items).toEqual([

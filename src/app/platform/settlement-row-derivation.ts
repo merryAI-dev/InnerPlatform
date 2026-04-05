@@ -113,6 +113,11 @@ function deriveSupplyAmountCandidate(bankAmount: number): { expenseAmount: numbe
   return { expenseAmount, vatIn };
 }
 
+function isBankImportedSourceRow(row: ImportRow): boolean {
+  return String(row.sourceTxId || '').startsWith('bank:')
+    && (row.entryKind === 'EXPENSE' || row.entryKind === 'DEPOSIT');
+}
+
 function deriveWeekLabel(rawDate: string): string {
   const datePart = rawDate.split(/\s+/)[0];
   let dateIso = parseDate(datePart);
@@ -188,6 +193,7 @@ function deriveRowLocally(
       && context.bankAmountIdx >= 0
       && context.expenseIdx >= 0
       && context.vatInIdx >= 0
+      && !isBankImportedSourceRow(row)
     ) {
       const bankAmount = parseNumber(cells[context.bankAmountIdx]) ?? 0;
       const depositSum = context.depositIdx >= 0 && context.refundIdx >= 0

@@ -386,4 +386,25 @@ describe('prepareSettlementImportRows', () => {
     expect(prepared[0].tempId).toBeTruthy();
     expect(prepared[0].tempId).toContain('sheet-import-');
   });
+
+  it('keeps bank-imported outflow rows blank in expense and vat fields on prepare', () => {
+    const row = makeRow({
+      '거래일시': '2026-03-05',
+      '지출구분': '계좌이체',
+      '통장에 찍힌 입/출금액': '110,000',
+      '통장잔액': '890,000',
+      '지급처': '테스트 상호',
+      '상세 적요': '통장 업로드 행',
+    });
+    row.sourceTxId = 'bank:test-1';
+    row.entryKind = 'EXPENSE';
+
+    const prepared = prepareSettlementImportRows(
+      [row],
+      { projectId: 'p', defaultLedgerId: 'l', basis: '공급가액' },
+    );
+
+    expect(readCell(prepared[0], '사업비 사용액')).toBe('');
+    expect(readCell(prepared[0], '매입부가세')).toBe('');
+  });
 });
