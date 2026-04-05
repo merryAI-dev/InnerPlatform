@@ -908,7 +908,7 @@ export function PortalWeeklyExpensePage() {
               saveEvidenceRequiredMap={saveEvidenceRequiredMap}
               markSheetSourceApplied={markSheetSourceApplied}
               upsertWeekAmounts={upsertWeekAmounts}
-              previewActualSyncViaRust={previewActualSyncAuthoritatively}
+              previewActualSyncPayload={previewActualSyncAuthoritatively}
             />
         </Suspense>
       )}

@@ -60,6 +60,7 @@ import {
 import { parseLocalWorkbookFile, type LocalWorkbookSheet } from '../../platform/local-workbook';
 import { reportError } from '../../platform/observability';
 import { buildSettlementActualSyncPayloadWithKernel } from '../../platform/settlement-calculation-kernel';
+import type { SettlementActualSyncWeekPayload } from '../../platform/settlement-sheet-sync';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import {
@@ -126,11 +127,11 @@ interface GoogleSheetMigrationWizardProps {
     mode: 'projection' | 'actual';
     amounts: Record<string, number>;
   }) => Promise<void>;
-  previewActualSyncViaRust?: (
+  previewActualSyncPayload?: (
     rows: ImportRow[],
     yearWeeks: ReturnType<typeof getYearMondayWeeks>,
     persistedRows?: ImportRow[] | null,
-  ) => Promise<ReturnType<typeof buildSettlementActualSyncPayloadWithKernel>>;
+  ) => Promise<SettlementActualSyncWeekPayload[]>;
 }
 
 function getGoogleSheetWizardStepLabel(step: GoogleSheetWizardStep): string {
@@ -319,7 +320,7 @@ export function GoogleSheetMigrationWizard({
   saveEvidenceRequiredMap,
   markSheetSourceApplied,
   upsertWeekAmounts,
-  previewActualSyncViaRust,
+  previewActualSyncPayload,
 }: GoogleSheetMigrationWizardProps) {
   const [step, setStep] = useState<GoogleSheetWizardStep>('source');
   const [link, setLink] = useState('');
@@ -780,8 +781,8 @@ export function GoogleSheetMigrationWizard({
           const mergePlan = planGoogleSheetImportMerge(expenseSheetRows, expenseRows);
           const persistedRows = await saveExpenseSheetRows(mergePlan.mergedRows);
           const actualPreviewRows = Array.isArray(persistedRows) ? persistedRows : mergePlan.mergedRows;
-          const actualPayload = previewActualSyncViaRust
-            ? await previewActualSyncViaRust(
+          const actualPayload = previewActualSyncPayload
+            ? await previewActualSyncPayload(
               actualPreviewRows,
               getYearMondayWeeks(new Date().getFullYear()),
               expenseSheetRows,
