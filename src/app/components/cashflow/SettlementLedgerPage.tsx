@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Download } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Download, Loader2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { BUDGET_CODE_BOOK } from '../../data/budget-data';
@@ -56,6 +56,7 @@ import {
   clearImportDraftCache,
 } from '../../platform/settlement-draft-cache';
 import { countPendingImportRowReviews } from '../../platform/settlement-review';
+import { loadExcelJs, warmExcelJs } from '../../platform/lazy-heavy-modules';
 
 // ── Types ──
 
@@ -188,6 +189,7 @@ export function SettlementLedgerPage({
   const [cashflowSyncState, setCashflowSyncState] = useState<'idle' | 'pending' | 'syncing' | 'synced' | 'sync_failed' | 'review_required'>('idle');
   const [downloadFrom, setDownloadFrom] = useState('');
   const [downloadTo, setDownloadTo] = useState('');
+  const [downloadPreparing, setDownloadPreparing] = useState(false);
   const [revertConfirmOpen, setRevertConfirmOpen] = useState(false);
   const restoredDraftCacheKeyRef = useRef('');
   const hasAppliedSheetRowsRef = useRef(false);
@@ -499,20 +501,25 @@ export function SettlementLedgerPage({
 
   // ── Excel Download ──
   const handleDownload = useCallback(async () => {
-    const ExcelJS = await import('exceljs');
-    const wb = new ExcelJS.Workbook();
-    const ws = wb.addWorksheet('정산대장');
-    const matrix = buildExportMatrix();
-    matrix.forEach((row) => ws.addRow(row));
-    ws.getRow(1).font = { bold: true };
-    ws.getRow(2).font = { bold: true };
-    ws.views = [{ state: 'frozen', ySplit: 2 }];
-    const buffer = await wb.xlsx.writeBuffer();
-    const blob = new Blob(
-      [buffer],
-      { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
-    );
-    triggerDownload(blob, `정산대장_${projectName}_${year}.xlsx`);
+    setDownloadPreparing(true);
+    try {
+      const ExcelJS = await loadExcelJs();
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet('정산대장');
+      const matrix = buildExportMatrix();
+      matrix.forEach((row) => ws.addRow(row));
+      ws.getRow(1).font = { bold: true };
+      ws.getRow(2).font = { bold: true };
+      ws.views = [{ state: 'frozen', ySplit: 2 }];
+      const buffer = await wb.xlsx.writeBuffer();
+      const blob = new Blob(
+        [buffer],
+        { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+      );
+      triggerDownload(blob, `정산대장_${projectName}_${year}.xlsx`);
+    } finally {
+      setDownloadPreparing(false);
+    }
   }, [buildExportMatrix, projectName, year]);
 
   const resolveWeekLabelForImportRow = useCallback((row: ImportRow): string => {
@@ -898,9 +905,12 @@ export function SettlementLedgerPage({
               size="sm"
               className="cursor-pointer shadow-sm hover:bg-muted/40"
               onClick={handleDownload}
+              onMouseEnter={() => warmExcelJs()}
+              onFocus={() => warmExcelJs()}
+              disabled={downloadPreparing}
             >
-              <Download className="h-4 w-4 mr-1" />
-              엑셀 다운로드
+              {downloadPreparing ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Download className="h-4 w-4 mr-1" />}
+              {downloadPreparing ? '엑셀 준비 중' : '엑셀 다운로드'}
             </Button>
             {autoSaveSheet && (
               <div
@@ -1017,9 +1027,12 @@ export function SettlementLedgerPage({
             size="sm"
             className="cursor-pointer shadow-sm hover:bg-muted/40"
             onClick={handleDownload}
+            onMouseEnter={() => warmExcelJs()}
+            onFocus={() => warmExcelJs()}
+            disabled={downloadPreparing}
             >
-              <Download className="h-4 w-4 mr-1" />
-              엑셀 다운로드
+              {downloadPreparing ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Download className="h-4 w-4 mr-1" />}
+              {downloadPreparing ? '엑셀 준비 중' : '엑셀 다운로드'}
             </Button>
             <input
               type="date"

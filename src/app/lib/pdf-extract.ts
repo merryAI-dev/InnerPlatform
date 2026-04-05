@@ -2,18 +2,14 @@ import type {
   TextItem,
   TextMarkedContent,
 } from 'pdfjs-dist/types/src/display/api';
+import { loadPdfJs } from '../platform/lazy-heavy-modules';
 
 /**
  * Client-side PDF text extraction using pdfjs-dist (Mozilla PDF.js).
  * Dynamically imported to avoid bundling ~2.5MB when unused.
  */
 export async function extractTextFromPdf(source: File | Blob | ArrayBuffer | Uint8Array): Promise<string> {
-  const pdfjsLib = await import('pdfjs-dist');
-
-  pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-    'pdfjs-dist/build/pdf.worker.min.mjs',
-    import.meta.url,
-  ).toString();
+  const pdfjsLib = await loadPdfJs();
 
   const data = source instanceof Uint8Array
     ? source

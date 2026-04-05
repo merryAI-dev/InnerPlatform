@@ -16,6 +16,7 @@ import {
   type GuideMetadata, type CalibrateResponse,
 } from '../../lib/guide-api';
 import { extractTextFromPdf } from '../../lib/pdf-extract';
+import { warmPdfJs } from '../../platform/lazy-heavy-modules';
 
 interface CalibrationMsg { role: 'user' | 'assistant'; content: string }
 
@@ -232,10 +233,21 @@ export function GuideUploadTab() {
           </div>
           <div className="space-y-1.5">
             <Label>파일 업로드 (.pdf, .txt, .md)</Label>
-            <Input type="file" accept=".pdf,.txt,.md" onChange={handleFile} />
+            <Input
+              type="file"
+              accept=".pdf,.txt,.md"
+              onClick={() => warmPdfJs()}
+              onFocus={() => warmPdfJs()}
+              onChange={handleFile}
+            />
             {extracting && (
               <p className="text-xs text-muted-foreground flex items-center gap-1">
                 <Loader2 className="w-3 h-3 animate-spin" /> PDF 텍스트 추출 중...
+              </p>
+            )}
+            {!extracting && (
+              <p className="text-xs text-muted-foreground">
+                PDF는 첫 업로드 때 분석 엔진을 먼저 준비한 뒤 내용을 읽습니다.
               </p>
             )}
           </div>

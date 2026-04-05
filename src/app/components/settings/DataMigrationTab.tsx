@@ -20,6 +20,7 @@ import {
 import { Separator } from '../ui/separator';
 import { useAppStore } from '../../data/store';
 import { resolveApiErrorMessage } from '../../platform/api-error-message';
+import { loadExcelJs, warmExcelJs } from '../../platform/lazy-heavy-modules';
 import {
   parseCsv, toCsv, escapeCsvCell, triggerDownload,
   normalizeSpace, normalizeKey, pickValue, parseNumber, parseDate, stableHash,
@@ -173,6 +174,7 @@ export function DataMigrationTab() {
   const [headerRowInput, setHeaderRowInput] = useState('1');
   const [isParsing, setIsParsing] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
+  const [templateDownloading, setTemplateDownloading] = useState(false);
   const [lastFileName, setLastFileName] = useState('');
   const [applySummary, setApplySummary] = useState<string>('');
   const [parseError, setParseError] = useState<string>('');
@@ -380,18 +382,23 @@ export function DataMigrationTab() {
 
   async function downloadTemplateXlsx() {
     const meta = SECTION_META[section];
-    const ExcelJS = await import('exceljs');
-    const wb = new ExcelJS.Workbook();
-    const ws = wb.addWorksheet(section);
-    ws.addRow(meta.templateHeaders);
-    ws.addRow(meta.templateSample);
-    const buffer = await wb.xlsx.writeBuffer();
-    triggerDownload(
-      new Blob([buffer as ArrayBuffer], {
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      }),
-      `migration-template-${section}.xlsx`,
-    );
+    setTemplateDownloading(true);
+    try {
+      const ExcelJS = await loadExcelJs();
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet(section);
+      ws.addRow(meta.templateHeaders);
+      ws.addRow(meta.templateSample);
+      const buffer = await wb.xlsx.writeBuffer();
+      triggerDownload(
+        new Blob([buffer as ArrayBuffer], {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        }),
+        `migration-template-${section}.xlsx`,
+      );
+    } finally {
+      setTemplateDownloading(false);
+    }
   }
 
   function downloadTemplateCsv() {
@@ -436,9 +443,17 @@ export function DataMigrationTab() {
                 <Download className="w-3.5 h-3.5" />
                 CSV 템플릿
               </Button>
-              <Button variant="outline" size="sm" className="gap-1.5" onClick={downloadTemplateXlsx}>
-                <FileSpreadsheet className="w-3.5 h-3.5" />
-                엑셀 템플릿
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                onClick={downloadTemplateXlsx}
+                onMouseEnter={() => warmExcelJs()}
+                onFocus={() => warmExcelJs()}
+                disabled={templateDownloading}
+              >
+                {templateDownloading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileSpreadsheet className="w-3.5 h-3.5" />}
+                {templateDownloading ? '엑셀 준비 중' : '엑셀 템플릿'}
               </Button>
               <Button
                 variant="outline"
@@ -459,6 +474,8 @@ export function DataMigrationTab() {
                   id="migration-file"
                   type="file"
                   accept=".csv,.xlsx,.xls"
+                  onClick={() => warmExcelJs()}
+                  onFocus={() => warmExcelJs()}
                   onChange={(e) => {
                     const file = e.target.files?.[0];
                     if (!file) return;
@@ -504,7 +521,7 @@ export function DataMigrationTab() {
             {isParsing && (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="w-4 h-4 animate-spin" />
-                파일 파싱 중...
+                파일 파싱 중... 첫 엑셀 업로드는 엔진 준비 때문에 조금 더 걸릴 수 있습니다.
               </div>
             )}
 
@@ -619,7 +636,7 @@ async function parseUploadFile(file: File): Promise<ParsedSheet[]> {
   }
 
   if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
-    const ExcelJS = await import('exceljs');
+    const ExcelJS = await loadExcelJs();
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(await file.arrayBuffer());
     return wb.worksheets.map((ws) => {

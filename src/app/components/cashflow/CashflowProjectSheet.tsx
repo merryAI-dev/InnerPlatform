@@ -37,6 +37,7 @@ import { hasUnsavedChanges } from './cashflow-unsaved';
 import { triggerDownload } from '../../platform/csv-utils';
 import { useFirebase } from '../../lib/firebase-context';
 import { getOrgDocumentPath } from '../../lib/firebase';
+import { loadExcelJs, warmExcelJs } from '../../platform/lazy-heavy-modules';
 
 function fmt(n: number): string {
   return n.toLocaleString('ko-KR');
@@ -177,6 +178,7 @@ export function CashflowProjectSheet({
     expenseStatusDescription?: string;
   } | null>(null);
   const [monthSavingMode, setMonthSavingMode] = useState<null | 'projection' | 'actual'>(null);
+  const [downloadPreparing, setDownloadPreparing] = useState(false);
 
   const hasDirty = useMemo(
     () => hasUnsavedChanges(weekSaveState) || Object.keys(drafts).length > 0,
@@ -331,24 +333,29 @@ export function CashflowProjectSheet({
   }, [derivedByMode, getEffectiveAmount, monthWeeks, yearMonth]);
 
   const handleDownload = useCallback(async () => {
-    const ExcelJS = await import('exceljs');
-    const wb = new ExcelJS.Workbook();
-    const addSheet = (label: string, tableMode: 'projection' | 'actual') => {
-      const ws = wb.addWorksheet(label);
-      const matrix = buildExportMatrix(tableMode);
-      matrix.forEach((row) => ws.addRow(row));
-      ws.getRow(1).font = { bold: true };
-      ws.getRow(2).font = { bold: true };
-      ws.views = [{ state: 'frozen', ySplit: 2 }];
-    };
-    addSheet('Projection', 'projection');
-    addSheet('Actual', 'actual');
-    const buffer = await wb.xlsx.writeBuffer();
-    const blob = new Blob(
-      [buffer],
-      { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
-    );
-    triggerDownload(blob, `프로젝트_캐시플로(주간)_${projectName}_${yearMonth}.xlsx`);
+    setDownloadPreparing(true);
+    try {
+      const ExcelJS = await loadExcelJs();
+      const wb = new ExcelJS.Workbook();
+      const addSheet = (label: string, tableMode: 'projection' | 'actual') => {
+        const ws = wb.addWorksheet(label);
+        const matrix = buildExportMatrix(tableMode);
+        matrix.forEach((row) => ws.addRow(row));
+        ws.getRow(1).font = { bold: true };
+        ws.getRow(2).font = { bold: true };
+        ws.views = [{ state: 'frozen', ySplit: 2 }];
+      };
+      addSheet('Projection', 'projection');
+      addSheet('Actual', 'actual');
+      const buffer = await wb.xlsx.writeBuffer();
+      const blob = new Blob(
+        [buffer],
+        { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+      );
+      triggerDownload(blob, `프로젝트_캐시플로(주간)_${projectName}_${yearMonth}.xlsx`);
+    } finally {
+      setDownloadPreparing(false);
+    }
   }, [buildExportMatrix, projectName, yearMonth]);
 
   const flushWeek = useCallback(async (input: {
@@ -837,8 +844,11 @@ export function CashflowProjectSheet({
               size="sm"
               className="h-8 text-[12px] gap-1.5"
               onClick={handleDownload}
+              onMouseEnter={() => warmExcelJs()}
+              onFocus={() => warmExcelJs()}
+              disabled={downloadPreparing}
             >
-              <Download className="w-3.5 h-3.5" /> 엑셀 다운로드
+              {downloadPreparing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />} {downloadPreparing ? '엑셀 준비 중' : '엑셀 다운로드'}
             </Button>
             <Button
               variant="default"

@@ -16,6 +16,7 @@ import {
   type BankStatementRow,
 } from '../../platform/bank-statement';
 import { normalizeKey, parseCsv, parseNumber } from '../../platform/csv-utils';
+import { loadXlsx, warmXlsx } from '../../platform/lazy-heavy-modules';
 
 function getAmountColumnIndexes(columns: string[]): Set<number> {
   return new Set(
@@ -50,6 +51,7 @@ export function PortalBankStatementPage() {
   const [lastUploadedName, setLastUploadedName] = useState('');
   const [lastSavedAt, setLastSavedAt] = useState('');
   const [dragActive, setDragActive] = useState(false);
+  const [uploadPreparing, setUploadPreparing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const projectName = myProject?.name || '내 사업';
@@ -97,7 +99,7 @@ export function PortalBankStatementPage() {
       // fallback to XLSX if HTML parse yields nothing
     }
 
-    const XLSX = await import('xlsx');
+    const XLSX = await loadXlsx();
     const buffer = new Uint8Array(await file.arrayBuffer());
     const workbook = XLSX.read(buffer, { type: 'array', cellDates: true, raw: false });
 
@@ -127,6 +129,10 @@ export function PortalBankStatementPage() {
     try {
       const name = file.name.toLowerCase();
       let matrix: string[][] = [];
+      const needsSpreadsheetEngine = name.endsWith('.xlsx') || name.endsWith('.xls');
+      if (needsSpreadsheetEngine) {
+        setUploadPreparing(true);
+      }
       if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
         matrix = await parseExcelToMatrix(file);
       } else if (name.endsWith('.csv')) {
@@ -148,10 +154,13 @@ export function PortalBankStatementPage() {
     } catch (err) {
       console.error('[BankStatement] upload parse failed:', err);
       toast.error('파일을 읽지 못했습니다. `.xls`/`.xlsx`/`.csv` 파일인지 확인해 주세요.');
+    } finally {
+      setUploadPreparing(false);
     }
   }, [parseExcelToMatrix, formatAmount]);
 
   const openFilePicker = useCallback(() => {
+    warmXlsx();
     fileInputRef.current?.click();
   }, []);
 
@@ -265,6 +274,9 @@ export function PortalBankStatementPage() {
     : lastSavedAt
       ? '최근 저장본이 현재 주간 사업비 탭과 동기화된 상태입니다.'
       : '이번 주 원본 파일을 먼저 올리면 주간 사업비 입력의 시작점이 준비됩니다.';
+  const uploadExperienceHint = uploadPreparing
+    ? '엑셀 엔진을 준비하고 있습니다. 첫 업로드는 잠시 더 걸릴 수 있습니다.'
+    : '엑셀 파일은 첫 업로드 때 엔진을 먼저 준비한 뒤 읽습니다.';
   const helperSteps = [
     {
       title: '1. 원본 업로드',
@@ -311,14 +323,17 @@ export function PortalBankStatementPage() {
             사업비 입력(주간)
             <ArrowRight className="h-4 w-4 ml-1" />
           </Button>
-          <Button size="sm" onClick={openFilePicker}>
-            <Upload className="h-4 w-4 mr-1" /> {hasUploadedSheet ? '파일 다시 업로드' : '엑셀 업로드'}
+          <Button size="sm" onClick={openFilePicker} disabled={uploadPreparing}>
+            {uploadPreparing ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Upload className="h-4 w-4 mr-1" />}
+            {uploadPreparing ? '엑셀 준비 중' : hasUploadedSheet ? '파일 다시 업로드' : '엑셀 업로드'}
           </Button>
           <input
             ref={fileInputRef}
             type="file"
             accept=".csv,.xlsx,.xls"
             className="hidden"
+            onClick={() => warmXlsx()}
+            onFocus={() => warmXlsx()}
             onChange={(e) => {
               const file = e.target.files?.[0];
               if (file) void handleFileUpload(file);
@@ -380,8 +395,8 @@ export function PortalBankStatementPage() {
                   </div>
                   <div className="flex flex-wrap items-center gap-3">
                     <Button size="sm" onClick={openFilePicker}>
-                      <Upload className="mr-1 h-4 w-4" />
-                      파일 선택
+                      {uploadPreparing ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Upload className="mr-1 h-4 w-4" />}
+                      {uploadPreparing ? '엑셀 준비 중' : '파일 선택'}
                     </Button>
                     <Button variant="outline" size="sm" onClick={() => navigate('/portal/weekly-expenses')}>
                       사업비 입력(주간) 먼저 보기
@@ -389,6 +404,7 @@ export function PortalBankStatementPage() {
                     </Button>
                     <span className="text-[11px] text-muted-foreground">지원 형식: `.csv`, `.xls`, `.xlsx`</span>
                   </div>
+                  <p className="text-[11px] text-muted-foreground">{uploadExperienceHint}</p>
                 </div>
               </div>
 
