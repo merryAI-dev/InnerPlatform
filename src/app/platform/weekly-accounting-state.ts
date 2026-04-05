@@ -16,6 +16,11 @@ export interface WeeklyAccountingProductStatus {
   auditTitle: string;
 }
 
+export interface WeeklyAccountingProductStatusDomHooks {
+  testId: string;
+  ariaLabel: string;
+}
+
 export interface WeeklyAccountingSnapshot {
   projectionEdited: boolean;
   projectionDone: boolean;
@@ -134,6 +139,15 @@ export function resolveWeeklyAccountingProductStatus(
     description: '정산대장이 아직 저장 완료되지 않았습니다.',
     tone: 'warning',
     auditTitle: '최종 저장 대기 반영',
+  };
+}
+
+export function resolveWeeklyAccountingProductStatusDomHooks(
+  status: WeeklyAccountingProductStatus,
+): WeeklyAccountingProductStatusDomHooks {
+  return {
+    testId: `weekly-accounting-product-status-${status.kind}`,
+    ariaLabel: `주간 정산 상태: ${status.label}`,
   };
 }
 

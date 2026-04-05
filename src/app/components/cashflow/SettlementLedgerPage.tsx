@@ -24,7 +24,10 @@ import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { buildSettlementActualSyncPayloadLocally } from '../../platform/settlement-calculation-kernel';
 import type { SettlementDerivationContext, SettlementDerivationOptions } from '../../platform/settlement-row-derivation';
 import type { SettlementActualSyncWeekPayload } from '../../platform/settlement-sheet-sync';
-import { resolveWeeklyAccountingProductStatus } from '../../platform/weekly-accounting-state';
+import {
+  resolveWeeklyAccountingProductStatus,
+  resolveWeeklyAccountingProductStatusDomHooks,
+} from '../../platform/weekly-accounting-state';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import {
@@ -722,6 +725,10 @@ export function SettlementLedgerPage({
     syncState: cashflowSyncState,
     reviewCount: pendingReviewCount,
   }), [cashflowSyncState, importDirty, pendingReviewCount, sheetSaveState]);
+  const weeklyAccountingStatusHooks = useMemo(
+    () => resolveWeeklyAccountingProductStatusDomHooks(weeklyAccountingStatus),
+    [weeklyAccountingStatus],
+  );
 
   // ── Inline edit handler with audit trail ──
   const handleUpdateTx = useCallback(
@@ -849,7 +856,11 @@ export function SettlementLedgerPage({
               엑셀 다운로드
             </Button>
             {autoSaveSheet && (
-              <div className="flex flex-col items-end gap-0.5 text-[10px] leading-4">
+              <div
+                className="flex flex-col items-end gap-0.5 text-[10px] leading-4"
+                data-testid={weeklyAccountingStatusHooks.testId}
+                aria-label={weeklyAccountingStatusHooks.ariaLabel}
+              >
                 <span className="text-muted-foreground">{autoSaveStatusLabel}</span>
                 <span
                   className={
@@ -978,7 +989,11 @@ export function SettlementLedgerPage({
               title="다운로드 종료일"
             />
             {autoSaveSheet && (
-              <div className="flex flex-col items-end gap-0.5 text-[10px] leading-4">
+              <div
+                className="flex flex-col items-end gap-0.5 text-[10px] leading-4"
+                data-testid={weeklyAccountingStatusHooks.testId}
+                aria-label={weeklyAccountingStatusHooks.ariaLabel}
+              >
                 <span className="text-muted-foreground">{autoSaveStatusLabel}</span>
                 <span
                   className={

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   resolveWeeklyAccountingProductStatus,
+  resolveWeeklyAccountingProductStatusDomHooks,
   resolveWeeklyAccountingSnapshot,
   resolveWeeklyAccountingState,
 } from './weekly-accounting-state';
@@ -129,6 +130,25 @@ describe('weekly-accounting-state', () => {
     expect(status.label).toBe('동기화 실패');
     expect(status.description).toContain('실패했습니다');
     expect(status.tone).toBe('danger');
+  });
+
+  it('exposes stable DOM hooks for product status assertions', () => {
+    const status = resolveWeeklyAccountingProductStatus({
+      snapshot: {
+        projectionEdited: true,
+        projectionDone: true,
+        expenseEdited: true,
+        expenseDone: true,
+        expenseSyncState: 'synced',
+        expenseReviewPendingCount: 0,
+        pmSubmitted: false,
+        adminClosed: false,
+      },
+    });
+    const hooks = resolveWeeklyAccountingProductStatusDomHooks(status);
+
+    expect(hooks.testId).toBe('weekly-accounting-product-status-save_synced');
+    expect(hooks.ariaLabel).toBe('주간 정산 상태: 동기화 완료');
   });
 
   it('derives effective done state from persisted week sheet data when manual flags are absent', () => {

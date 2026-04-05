@@ -23,6 +23,7 @@ import { getMonthMondayWeeks } from '../../platform/cashflow-weeks';
 import { addMonthsToYearMonth, getSeoulTodayIso } from '../../platform/business-days';
 import {
   resolveWeeklyAccountingProductStatus,
+  resolveWeeklyAccountingProductStatusDomHooks,
   resolveWeeklyAccountingSnapshot,
 } from '../../platform/weekly-accounting-state';
 
@@ -348,6 +349,7 @@ export function PortalSubmissionsPage() {
                   const expenseEdited = snapshot.expenseEdited;
                   const projectionInputLabel = projectionEdited ? '입력됨' : '미입력';
                   const expenseInputLabel = expenseEdited ? '입력됨' : '미입력';
+                  const accountingStatusHooks = resolveWeeklyAccountingProductStatusDomHooks(accountingStatus);
                   const projectionAudit = pickLatestAuditMeta({
                     editedAt: status?.projectionEditedAt,
                     editedByName: status?.projectionEditedByName,
@@ -370,7 +372,11 @@ export function PortalSubmissionsPage() {
                         <div className="text-[10px] text-muted-foreground">{p.shortName || p.id}</div>
                       </td>
                       <td className="px-3 py-3 align-top text-center">
-                        <div className="mx-auto flex max-w-[172px] flex-col items-stretch gap-2">
+                        <div
+                          className="mx-auto flex max-w-[172px] flex-col items-stretch gap-2"
+                          data-testid={accountingStatusHooks.testId}
+                          aria-label={accountingStatusHooks.ariaLabel}
+                        >
                           <div className="flex flex-wrap justify-center gap-1.5">
                             <Badge variant="outline" className={projectionEdited ? 'border-sky-300 bg-sky-50 text-sky-700' : 'border-slate-200 bg-slate-50 text-slate-600'}>
                               {projectionInputLabel}
