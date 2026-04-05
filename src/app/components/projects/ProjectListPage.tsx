@@ -203,6 +203,7 @@ export function ProjectListPage() {
               {list.map(p => (
                 <TableRow
                   key={p.id}
+                  data-testid={activeTab === 'trash' ? `project-trash-row-${p.id}` : `project-list-row-${p.id}`}
                   className="cursor-pointer hover:bg-accent/50"
                   onClick={() => navigate(`/projects/${p.id}`)}
                 >
@@ -280,14 +281,14 @@ export function ProjectListPage() {
                   {activeTab === 'trash' && (
                     <>
                       <TableCell className="text-[11px] text-muted-foreground whitespace-nowrap">
-                        {project.trashedAt ? project.trashedAt.slice(0, 10).replace(/-/g, '.') : '-'}
+                        {p.trashedAt ? p.trashedAt.slice(0, 10).replace(/-/g, '.') : '-'}
                       </TableCell>
                       <TableCell className="text-center" onClick={e => e.stopPropagation()}>
                         <Button
                           variant="outline"
                           size="sm"
                           className="h-6 text-[10px] gap-0.5 px-1.5"
-                          onClick={() => void handleRestore(project)}
+                          onClick={() => void handleRestore(p)}
                         >
                           복구 <RotateCcw className="w-3 h-3" />
                         </Button>
@@ -392,21 +393,21 @@ export function ProjectListPage() {
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
-          <TabsTrigger value="confirmed" className="gap-1.5">
+          <TabsTrigger value="confirmed" className="gap-1.5" data-testid="projects-tab-confirmed">
             <CheckCircle2 className="w-3.5 h-3.5" />
             확정 사업
             <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 py-0">
               {confirmedProjects.length}
             </Badge>
           </TabsTrigger>
-          <TabsTrigger value="prospect" className="gap-1.5">
+          <TabsTrigger value="prospect" className="gap-1.5" data-testid="projects-tab-prospect">
             <Sparkles className="w-3.5 h-3.5" />
             입찰/예정
             <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 py-0">
               {prospectProjects.length}
             </Badge>
           </TabsTrigger>
-          <TabsTrigger value="trash" className="gap-1.5">
+          <TabsTrigger value="trash" className="gap-1.5" data-testid="projects-tab-trash">
             <Trash2 className="w-3.5 h-3.5" />
             휴지통
             <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 py-0">

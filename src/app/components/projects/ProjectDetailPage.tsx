@@ -252,7 +252,7 @@ export function ProjectDetailPage() {
           {isTrashed ? (
             <AlertDialog>
               <AlertDialogTrigger asChild>
-                <Button size="sm" className="gap-1.5">
+                <Button size="sm" className="gap-1.5" data-testid="project-detail-restore">
                   <RotateCcw className="w-3.5 h-3.5" />
                   복구
                 </Button>
@@ -275,7 +275,7 @@ export function ProjectDetailPage() {
           ) : (
             <AlertDialog>
               <AlertDialogTrigger asChild>
-                <Button variant="destructive" size="sm" className="gap-1.5">
+                <Button variant="destructive" size="sm" className="gap-1.5" data-testid="project-detail-trash">
                   <Trash2 className="w-3.5 h-3.5" />
                   휴지통 이동
                 </Button>
