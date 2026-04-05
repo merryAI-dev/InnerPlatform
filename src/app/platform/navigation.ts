@@ -29,8 +29,7 @@ export function canEnterPortalWorkspace(role: unknown): boolean {
 }
 
 export function canChooseWorkspace(role: unknown): boolean {
-  const normalized = normalizeRole(role);
-  return !!normalized;
+  return isAdminSpaceRole(role);
 }
 
 export function shouldPromptWorkspaceSelection(
@@ -38,8 +37,7 @@ export function shouldPromptWorkspaceSelection(
   preferredWorkspace: unknown,
 ): boolean {
   if (!canChooseWorkspace(role)) return false;
-  // 항상 workspace 선택 화면 표시 — 사용자가 매번 admin/portal 선택 가능
-  return true;
+  return normalizeWorkspaceId(preferredWorkspace) == null;
 }
 
 export function resolveHomePath(role: unknown, preferredWorkspace?: WorkspaceId | unknown): HomePath {
@@ -88,6 +86,10 @@ interface PortalOnboardingRedirectInput {
   pathname: string;
 }
 
+function matchesPathPrefix(pathname: string, prefix: string): boolean {
+  return pathname === prefix || pathname.startsWith(`${prefix}/`);
+}
+
 /**
  * Decide whether we should force a portal user into onboarding.
  * Admin-space roles must never be forced into portal onboarding.
@@ -99,5 +101,5 @@ export function shouldForcePortalOnboarding(input: PortalOnboardingRedirectInput
   if (input.isRegistered) return false;
   // onboarding, project-settings, weekly-expenses는 미등록 상태에서도 접근 허용
   const bypassPaths = ['/portal/onboarding', '/portal/project-settings', '/portal/register-project', '/portal/weekly-expenses'];
-  return !bypassPaths.some((p) => input.pathname.includes(p));
+  return !bypassPaths.some((p) => matchesPathPrefix(input.pathname, p));
 }

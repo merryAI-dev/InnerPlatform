@@ -5,8 +5,36 @@ import {
   buildExpenseSheetPersistenceDoc,
   buildWeeklySubmissionStatusPatch,
 } from './portal-store.persistence';
+import {
+  areExpenseSheetRowsEqual,
+  reconcileExpenseSheetRowsFromSelection,
+  reconcileExpenseSheetTabsFromSnapshot,
+  shouldHydrateDevHarnessPortalSnapshot,
+} from './portal-store';
 
 const describeIfEmulator = process.env.FIRESTORE_EMULATOR_HOST ? describe : describe.skip;
+const settlementProjectId = 'p-settlement-it';
+
+function makeRow(overrides?: Partial<ImportRow>): ImportRow {
+  const cells = SETTLEMENT_COLUMNS.map(() => '');
+  cells[2] = '2026-03-05';
+  cells[5] = '여비';
+  cells[6] = '교통비';
+  cells[8] = '직접사업비';
+  cells[10] = '15,000';
+  cells[13] = '15,000';
+  cells[14] = '1,500';
+  cells[15] = 'KTX';
+  return {
+    tempId: 'row-001',
+    cells,
+    reviewHints: ['cashflow line needs confirmation'],
+    reviewRequiredCellIndexes: [8, 6],
+    reviewStatus: 'pending',
+    userEditedCells: new Set([10, 8]),
+    ...overrides,
+  };
+}
 
 describeIfEmulator('portal-store persistence integration (Firestore emulator)', () => {
   const tenantId = 'mysc';
@@ -30,27 +58,6 @@ describeIfEmulator('portal-store persistence integration (Firestore emulator)', 
     await clearCollection(`orgs/${tenantId}/projects/${projectId}/expense_sheets`);
     await clearCollection(`orgs/${tenantId}/weeklySubmissionStatus`);
   });
-
-  function makeRow(overrides?: Partial<ImportRow>): ImportRow {
-    const cells = SETTLEMENT_COLUMNS.map(() => '');
-    cells[2] = '2026-03-05';
-    cells[5] = '여비';
-    cells[6] = '교통비';
-    cells[8] = '직접사업비';
-    cells[10] = '15,000';
-    cells[13] = '15,000';
-    cells[14] = '1,500';
-    cells[15] = 'KTX';
-    return {
-      tempId: 'row-001',
-      cells,
-      reviewHints: ['cashflow line needs confirmation'],
-      reviewRequiredCellIndexes: [8, 6],
-      reviewStatus: 'pending',
-      userEditedCells: new Set([10, 8]),
-      ...overrides,
-    };
-  }
 
   it('persists expense sheet rows with the exact settlement document shape', async () => {
     const payload = buildExpenseSheetPersistenceDoc({
@@ -130,5 +137,65 @@ describeIfEmulator('portal-store persistence integration (Firestore emulator)', 
       expenseSyncUpdatedByName: 'PM 보람',
       expenseSyncUpdatedAt: '2026-04-05T10:05:00.000Z',
     });
+  });
+
+});
+
+describe('portal-store expense sheet reconciliation helpers', () => {
+  it('does not replace expense sheet rows when an unchanged snapshot echoes back', () => {
+    const currentRows = [makeRow({ tempId: 'row-unchanged' })];
+    const currentSheets = [{
+      id: 'default',
+      name: '기본 탭',
+      rows: currentRows,
+      order: 0,
+    }];
+    const nextSheets = [{
+      id: 'default',
+      name: '기본 탭',
+      rows: [makeRow({ tempId: 'row-unchanged' })],
+      order: 0,
+    }];
+
+    const result = reconcileExpenseSheetTabsFromSnapshot({
+      currentSheets,
+      nextSheets,
+      activeExpenseSheetId: 'default',
+    });
+
+    expect(result.sheetsChanged).toBe(false);
+    expect(result.expenseSheets).toBe(currentSheets);
+    expect(areExpenseSheetRowsEqual(currentRows, nextSheets[0].rows)).toBe(true);
+  });
+
+  it('keeps active-sheet switching separate from project hydration', () => {
+    const currentRows = [makeRow({ tempId: 'row-active' })];
+    const sheets = [
+      {
+        id: 'default',
+        name: '기본 탭',
+        rows: currentRows,
+        order: 0,
+      },
+      {
+        id: 'sheet-2',
+        name: '탭 2',
+        rows: [makeRow({ tempId: 'row-sheet-2' })],
+        order: 1,
+      },
+    ];
+
+    const selection = reconcileExpenseSheetRowsFromSelection({
+      expenseSheets: sheets,
+      activeExpenseSheetId: 'sheet-2',
+      currentRows,
+    });
+
+    expect(selection.rowsChanged).toBe(true);
+    expect(selection.expenseSheetRows).toEqual(sheets[1].rows);
+    expect(shouldHydrateDevHarnessPortalSnapshot({
+      projectId: settlementProjectId,
+      hydratedProjectId: settlementProjectId,
+    })).toBe(false);
   });
 });

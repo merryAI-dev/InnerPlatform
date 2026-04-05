@@ -188,13 +188,14 @@ function PortalContent() {
   }, [authLoading, isAuthenticated, authUser, location.pathname, navigate]);
 
   useEffect(() => {
+    if (authLoading) return;
     const role = authUser?.role;
     if (!isAuthenticated || !role || !canChooseWorkspace(role)) return;
     // admin/finance가 portal을 잠깐 방문할 때 workspace를 덮어쓰지 않음
     if (isAdminSpaceRole(role)) return;
     if (authUser?.lastWorkspace === 'portal') return;
     void setWorkspacePreference('portal', { persistDefault: false });
-  }, [authUser?.lastWorkspace, authUser?.role, isAuthenticated, setWorkspacePreference]);
+  }, [authLoading, authUser?.lastWorkspace, authUser?.role, isAuthenticated, setWorkspacePreference]);
 
   // 포털 미등록 시 온보딩으로 (인증은 되었지만 포털 사업 미선택)
   useEffect(() => {
@@ -204,7 +205,7 @@ function PortalContent() {
       role: authUser?.role,
       isRegistered,
       pathname: location.pathname,
-    })) {
+    }) && location.pathname !== '/portal/project-settings') {
       navigate('/portal/project-settings', { replace: true });
     }
   }, [authLoading, portalLoading, isAuthenticated, authUser?.role, isRegistered, location.pathname, navigate]);

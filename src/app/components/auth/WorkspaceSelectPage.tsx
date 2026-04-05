@@ -1,18 +1,20 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 import { ArrowRight, FolderKanban, Loader2, Shield } from 'lucide-react';
 import { Card, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
 import { useAuth } from '../../data/auth-store';
-import { canChooseWorkspace, resolvePostLoginPath } from '../../platform/navigation';
+import { canChooseWorkspace, resolvePostLoginPath, shouldPromptWorkspaceSelection } from '../../platform/navigation';
 import { canAccessAdminPath } from '../../platform/admin-nav';
 import type { WorkspaceId } from '../../data/member-workspace';
 
 export function WorkspaceSelectPage() {
+  const location = useLocation();
   const navigate = useNavigate();
   const { isAuthenticated, isLoading, user, setWorkspacePreference } = useAuth();
   const [pending, setPending] = useState<WorkspaceId | null>(null);
   const [error, setError] = useState('');
+  const redirectFrom = (location.state as { from?: string } | null)?.from;
 
   useEffect(() => {
     if (isLoading) return;
@@ -21,9 +23,13 @@ export function WorkspaceSelectPage() {
       return;
     }
     if (!canChooseWorkspace(user.role)) {
-      navigate(resolvePostLoginPath(user.role, user.defaultWorkspace ?? user.lastWorkspace), { replace: true });
+      navigate(resolvePostLoginPath(user.role, user.defaultWorkspace ?? user.lastWorkspace, redirectFrom), { replace: true });
+      return;
     }
-  }, [isAuthenticated, isLoading, navigate, user]);
+    if (!shouldPromptWorkspaceSelection(user.role, user.defaultWorkspace ?? user.lastWorkspace)) {
+      navigate(resolvePostLoginPath(user.role, user.defaultWorkspace ?? user.lastWorkspace, redirectFrom), { replace: true });
+    }
+  }, [isAuthenticated, isLoading, navigate, redirectFrom, user]);
 
   const handleSelect = async (workspace: WorkspaceId) => {
     if (!user) return;
@@ -35,10 +41,16 @@ export function WorkspaceSelectPage() {
       setError('공간 선택을 저장하지 못했습니다. 다시 시도해 주세요.');
       return;
     }
-    navigate(workspace === 'admin' ? '/' : '/portal', { replace: true });
+    navigate(resolvePostLoginPath(user.role, workspace, redirectFrom), { replace: true });
   };
 
-  if (isLoading || !isAuthenticated || !user || !canChooseWorkspace(user.role)) {
+  if (
+    isLoading
+    || !isAuthenticated
+    || !user
+    || !canChooseWorkspace(user.role)
+    || !shouldPromptWorkspaceSelection(user.role, user.defaultWorkspace ?? user.lastWorkspace)
+  ) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />

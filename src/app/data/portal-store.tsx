@@ -142,6 +142,85 @@ function normalizeExpenseSheetRows(rows: unknown): ImportRow[] | null {
   });
 }
 
+function serializeExpenseSheetRowsForComparison(rows: ImportRow[] | null | undefined): string {
+  if (!rows || rows.length === 0) return '[]';
+  return JSON.stringify(rows.map((row) => serializeExpenseSheetRowForPersistence(row)));
+}
+
+export function areExpenseSheetRowsEqual(
+  left: ImportRow[] | null | undefined,
+  right: ImportRow[] | null | undefined,
+): boolean {
+  return serializeExpenseSheetRowsForComparison(left) === serializeExpenseSheetRowsForComparison(right);
+}
+
+function serializeExpenseSheetTabForComparison(tab: ExpenseSheetTab): string {
+  return JSON.stringify({
+    id: tab.id,
+    name: tab.name,
+    order: tab.order,
+    createdAt: tab.createdAt || '',
+    updatedAt: tab.updatedAt || '',
+    rows: serializeExpenseSheetRowsForComparison(tab.rows),
+  });
+}
+
+export function areExpenseSheetTabsEqual(
+  left: ExpenseSheetTab[],
+  right: ExpenseSheetTab[],
+): boolean {
+  if (left.length !== right.length) return false;
+  for (let i = 0; i < left.length; i += 1) {
+    if (serializeExpenseSheetTabForComparison(left[i]) !== serializeExpenseSheetTabForComparison(right[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function resolveExpenseSheetFallbackId(expenseSheets: ExpenseSheetTab[]): string {
+  return expenseSheets.find((sheet) => sheet.id === 'default')?.id || expenseSheets[0]?.id || 'default';
+}
+
+export function reconcileExpenseSheetTabsFromSnapshot(params: {
+  currentSheets: ExpenseSheetTab[];
+  nextSheets: ExpenseSheetTab[];
+  activeExpenseSheetId: string;
+}) {
+  const nextActiveExpenseSheetId = params.nextSheets.some((sheet) => sheet.id === params.activeExpenseSheetId)
+    ? params.activeExpenseSheetId
+    : resolveExpenseSheetFallbackId(params.nextSheets);
+  return {
+    expenseSheets: areExpenseSheetTabsEqual(params.currentSheets, params.nextSheets)
+      ? params.currentSheets
+      : params.nextSheets,
+    activeExpenseSheetId: nextActiveExpenseSheetId,
+    sheetsChanged: !areExpenseSheetTabsEqual(params.currentSheets, params.nextSheets),
+    activeChanged: nextActiveExpenseSheetId !== params.activeExpenseSheetId,
+  };
+}
+
+export function reconcileExpenseSheetRowsFromSelection(params: {
+  expenseSheets: ExpenseSheetTab[];
+  activeExpenseSheetId: string;
+  currentRows: ImportRow[] | null;
+}) {
+  const activeSheet = params.expenseSheets.find((sheet) => sheet.id === params.activeExpenseSheetId) || null;
+  const nextRows = activeSheet?.rows || null;
+  const rowsChanged = !areExpenseSheetRowsEqual(params.currentRows, nextRows);
+  return {
+    expenseSheetRows: rowsChanged ? nextRows : params.currentRows,
+    rowsChanged,
+  };
+}
+
+export function shouldHydrateDevHarnessPortalSnapshot(params: {
+  projectId: string | null | undefined;
+  hydratedProjectId: string | null | undefined;
+}): boolean {
+  return !!params.projectId && params.projectId !== params.hydratedProjectId;
+}
+
 interface DevHarnessPortalSnapshot {
   activeExpenseSheetId?: string;
   expenseSheets?: Array<{
@@ -394,7 +473,22 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(false);
   const [isMemberLoading, setIsMemberLoading] = useState(true);
   const unsubsRef = useRef<Unsubscribe[]>([]);
-  const devHarnessHydratedRef = useRef(false);
+  const expenseSheetsRef = useRef<ExpenseSheetTab[]>([]);
+  const activeExpenseSheetIdRef = useRef(activeExpenseSheetId);
+  const expenseSheetRowsRef = useRef<ImportRow[] | null>(expenseSheetRows);
+  const devHarnessHydratedProjectIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    expenseSheetsRef.current = expenseSheets;
+  }, [expenseSheets]);
+
+  useEffect(() => {
+    activeExpenseSheetIdRef.current = activeExpenseSheetId;
+  }, [activeExpenseSheetId]);
+
+  useEffect(() => {
+    expenseSheetRowsRef.current = expenseSheetRows;
+  }, [expenseSheetRows]);
 
   const myProject = useMemo(() => {
     return portalUser ? projects.find((project) => project.id === portalUser.projectId) || null : null;
@@ -406,7 +500,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
-    if (!isDevHarnessUser || !portalUser?.projectId || !devHarnessHydratedRef.current) return;
+    if (!isDevHarnessUser || !portalUser?.projectId || devHarnessHydratedProjectIdRef.current !== portalUser.projectId) return;
     writeDevHarnessPortalSnapshot(portalUser.projectId, {
       activeExpenseSheetId,
       expenseSheets: expenseSheets.map((sheet) => ({
@@ -428,13 +522,13 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       return;
     }
     if (!isAuthenticated || !authUser) {
-      devHarnessHydratedRef.current = false;
+      devHarnessHydratedProjectIdRef.current = null;
       setPortalUser(null);
       setIsMemberLoading(false);
       return;
     }
     if (!canEnterPortalWorkspace(authUser.role)) {
-      devHarnessHydratedRef.current = false;
+      devHarnessHydratedProjectIdRef.current = null;
       setPortalUser(null);
       setIsMemberLoading(false);
       return;
@@ -456,7 +550,6 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         registeredAt: authUser.registeredAt || now,
       });
       setPortalUser(normalized);
-      devHarnessHydratedRef.current = true;
       setIsMemberLoading(false);
       return;
     }
@@ -604,13 +697,19 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     }
 
     if (isDevHarnessUser) {
+      const projectId = portalUser?.projectId || null;
+      if (!shouldHydrateDevHarnessPortalSnapshot({
+        projectId,
+        hydratedProjectId: devHarnessHydratedProjectIdRef.current,
+      })) {
+        setIsLoading(false);
+        return;
+      }
       const scopedIds = normalizeProjectIds([
         ...(Array.isArray(portalUser?.projectIds) ? portalUser.projectIds : []),
         portalUser?.projectId,
       ]);
-      const snapshot = portalUser?.projectId
-        ? readDevHarnessPortalSnapshot(portalUser.projectId)
-        : null;
+      const snapshot = projectId ? readDevHarnessPortalSnapshot(projectId) : null;
       const persistedExpenseSheets = (snapshot?.expenseSheets || [])
         .map((sheet, index) => ({
           id: String(sheet?.id || (index === 0 ? 'default' : `sheet-${index + 1}`)),
@@ -643,6 +742,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       setActiveExpenseSheetIdState(resolvedActiveSheet?.id || 'default');
       setExpenseSheetRows(resolvedActiveSheet?.rows || null);
       setWeeklySubmissionStatuses(Array.isArray(snapshot?.weeklySubmissionStatuses) ? snapshot.weeklySubmissionStatuses : []);
+      devHarnessHydratedProjectIdRef.current = projectId;
       setIsLoading(false);
       return;
     }
@@ -980,17 +1080,19 @@ export function PortalProvider({ children }: { children: ReactNode }) {
               if (a.order !== b.order) return a.order - b.order;
               return String(a.createdAt || a.updatedAt || '').localeCompare(String(b.createdAt || b.updatedAt || ''));
             });
-
-          setExpenseSheets(docs);
-          const fallbackId = docs.find((sheet) => sheet.id === 'default')?.id || docs[0]?.id || 'default';
-          const nextActiveId = docs.some((sheet) => sheet.id === activeExpenseSheetId)
-            ? activeExpenseSheetId
-            : fallbackId;
-          if (nextActiveId !== activeExpenseSheetId) {
-            setActiveExpenseSheetIdState(nextActiveId);
+          const nextState = reconcileExpenseSheetTabsFromSnapshot({
+            currentSheets: expenseSheetsRef.current,
+            nextSheets: docs,
+            activeExpenseSheetId: activeExpenseSheetIdRef.current,
+          });
+          if (nextState.sheetsChanged) {
+            expenseSheetsRef.current = nextState.expenseSheets;
+            setExpenseSheets(nextState.expenseSheets);
           }
-          const activeSheet = docs.find((sheet) => sheet.id === nextActiveId) || null;
-          setExpenseSheetRows(activeSheet?.rows || null);
+          if (nextState.activeChanged) {
+            activeExpenseSheetIdRef.current = nextState.activeExpenseSheetId;
+            setActiveExpenseSheetIdState(nextState.activeExpenseSheetId);
+          }
         }, (err) => {
           reportError(err, {
             message: '[PortalStore] expense sheet listen error:',
@@ -1121,7 +1223,19 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       unsubsRef.current.forEach((unsub) => unsub());
       unsubsRef.current = [];
     };
-  }, [authLoading, isMemberLoading, isAuthenticated, authUser, firestoreEnabled, db, orgId, portalUser?.projectId, scopedProjectIds, activeExpenseSheetId, isDevHarnessUser, portalUser?.projectIds]);
+  }, [authLoading, isMemberLoading, isAuthenticated, authUser, firestoreEnabled, db, orgId, portalUser?.projectId, scopedProjectIds, isDevHarnessUser, portalUser?.projectIds]);
+
+  useEffect(() => {
+    if (authLoading || isMemberLoading || !isAuthenticated || !authUser) return;
+    const selection = reconcileExpenseSheetRowsFromSelection({
+      expenseSheets,
+      activeExpenseSheetId,
+      currentRows: expenseSheetRows,
+    });
+    if (selection.rowsChanged) {
+      setExpenseSheetRows(selection.expenseSheetRows);
+    }
+  }, [authLoading, isMemberLoading, isAuthenticated, authUser, expenseSheets, activeExpenseSheetId, expenseSheetRows]);
 
   const persistExpenseSet = useCallback(async (set: ExpenseSet) => {
     if (!db) return;
@@ -1144,10 +1258,16 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   const setActiveExpenseSheet = useCallback((sheetId: string) => {
     const nextId = String(sheetId || '').trim();
     if (!nextId) return;
-    setActiveExpenseSheetIdState(nextId);
-    const activeSheet = expenseSheets.find((sheet) => sheet.id === nextId) || null;
-    setExpenseSheetRows(activeSheet?.rows || null);
-  }, [expenseSheets]);
+    if (activeExpenseSheetIdRef.current !== nextId) {
+      setActiveExpenseSheetIdState(nextId);
+    }
+    activeExpenseSheetIdRef.current = nextId;
+    const activeSheet = expenseSheetsRef.current.find((sheet) => sheet.id === nextId) || null;
+    const nextRows = activeSheet?.rows || null;
+    if (!areExpenseSheetRowsEqual(expenseSheetRowsRef.current, nextRows)) {
+      setExpenseSheetRows(nextRows);
+    }
+  }, []);
 
   const createExpenseSheet = useCallback(async (name?: string): Promise<string | null> => {
     if (isDevHarnessUser) {

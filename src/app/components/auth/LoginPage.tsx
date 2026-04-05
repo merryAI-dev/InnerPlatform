@@ -58,6 +58,7 @@ export function LoginPage() {
 
   // 이미 인증된 사용자는 역할에 맞는 페이지로 리다이렉트
   useEffect(() => {
+    if (isLoading) return;
     if (isAuthenticated && user) {
       if (shouldPromptWorkspaceSelection(user.role, user.defaultWorkspace ?? user.lastWorkspace)) {
         navigate('/workspace-select', { replace: true, state: redirectFrom ? { from: redirectFrom } : undefined });
@@ -70,7 +71,7 @@ export function LoginPage() {
       );
       navigate(target, { replace: true });
     }
-  }, [isAuthenticated, navigate, redirectFrom, user]);
+  }, [isAuthenticated, isLoading, navigate, redirectFrom, user]);
 
   if (isAuthenticated && user) return null;
 

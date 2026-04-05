@@ -41,10 +41,11 @@ describe('role classification', () => {
 });
 
 describe('workspace selection', () => {
-  it('all valid roles can choose workspace', () => {
-    for (const role of ALL_ROLES) {
-      expect(canChooseWorkspace(role), `${role} should choose workspace`).toBe(true);
-    }
+  it('only roles that can genuinely access both spaces can choose workspace', () => {
+    expect(canChooseWorkspace('admin')).toBe(true);
+    expect(canChooseWorkspace('finance')).toBe(true);
+    expect(canChooseWorkspace('pm')).toBe(false);
+    expect(canChooseWorkspace('viewer')).toBe(false);
   });
 
   it('empty/null/undefined cannot choose workspace', () => {
@@ -65,12 +66,13 @@ describe('workspace selection', () => {
 });
 
 describe('shouldPromptWorkspaceSelection', () => {
-  it('always prompts for valid roles (매번 workspace 선택)', () => {
-    for (const role of ALL_ROLES) {
-      expect(shouldPromptWorkspaceSelection(role, undefined), `${role} no pref`).toBe(true);
-      expect(shouldPromptWorkspaceSelection(role, 'portal'), `${role} portal`).toBe(true);
-      expect(shouldPromptWorkspaceSelection(role, 'admin'), `${role} admin`).toBe(true);
-    }
+  it('prompts only when a dual-space role has no preferred workspace yet', () => {
+    expect(shouldPromptWorkspaceSelection('admin', undefined)).toBe(true);
+    expect(shouldPromptWorkspaceSelection('finance', undefined)).toBe(true);
+    expect(shouldPromptWorkspaceSelection('admin', 'portal')).toBe(false);
+    expect(shouldPromptWorkspaceSelection('finance', 'admin')).toBe(false);
+    expect(shouldPromptWorkspaceSelection('pm', undefined)).toBe(false);
+    expect(shouldPromptWorkspaceSelection('viewer', undefined)).toBe(false);
   });
 
   it('does NOT prompt for empty role', () => {

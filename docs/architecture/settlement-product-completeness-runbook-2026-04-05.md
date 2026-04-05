@@ -9,7 +9,7 @@ Source documents:
 - `docs/superpowers/specs/2026-04-05-settlement-product-completeness-design.md`
 - `docs/superpowers/plans/2026-04-05-settlement-product-completeness.md`
 
-This gate is stricter than the current GitHub Actions workflow in `.github/workflows/ci.yml`, which today runs unit tests, policy verification, and build only. Until CI is expanded, treat this document as the authoritative release checklist for the settlement completeness slice.
+This gate is stricter than the current GitHub Actions workflow in `.github/workflows/ci.yml`, which today runs the settlement-targeted Vitest, Playwright harness, emulator integration, and build checks. Treat this document as the authoritative release checklist for whether those checks are sufficient to call the slice product-ready.
 
 ## Hard Gates
 
@@ -25,14 +25,15 @@ Purpose:
 Command:
 
 ```bash
-npm test -- src/app/platform/settlement-calculation-kernel.test.ts src/app/data/portal-store.settlement.test.ts src/app/data/portal-store.integration.test.ts src/app/data/cashflow-weeks-store.integration.test.ts
+npx vitest run src/app/platform/settlement-calculation-kernel.test.ts src/app/platform/weekly-accounting-state.test.ts src/app/platform/navigation.test.ts src/app/data/portal-store.settlement.test.ts src/app/data/portal-store.integration.test.ts src/app/data/cashflow-weeks-store.integration.test.ts
 ```
 
 Expected scope:
 
 - Pure calculation regression coverage
 - Browser/store settlement save preparation coverage
-- Settlement-specific browser integration coverage once the planned integration tests land
+- Settlement-specific browser integration coverage
+- Refresh-churn and workspace-selection continuity coverage
 
 ### Gate 2: Playwright Harness
 
@@ -51,6 +52,10 @@ Notes:
 
 - `npm run test:e2e` uses `playwright.harness.config.mjs`.
 - The harness starts `npm run dev` with `VITE_DEV_AUTH_HARNESS_ENABLED=true` and serves `http://localhost:4173`.
+- Passing Gate 2 now explicitly includes:
+  - `wizard apply -> reload -> rows restored`
+  - dirty weekly-expense edits are guarded before route navigation
+  - no hard reload on the weekly-expense happy path
 
 ### Gate 3: Production Build
 

@@ -30,13 +30,21 @@ async function applySampleExpenseSheet(page: import('@playwright/test').Page) {
   await expect(page.getByRole('dialog', { name: 'Google Sheets Migration Wizard' })).toBeHidden();
 }
 
-test('settlement product completeness: wizard apply completes without runtime failure and leaves editable rows', async ({ page }) => {
-  await loginAsPm(page);
-  await applySampleExpenseSheet(page);
-
+async function expectSampleRowsVisible(page: import('@playwright/test').Page) {
   await expect(page.locator('[value="KTX"]').first()).toBeVisible();
   await expect(page.locator('[value="카페 메리"]').first()).toBeVisible();
   await expect(page.getByText('예기치 못한 오류가 발생했습니다')).toHaveCount(0);
+}
+
+test('settlement product completeness: wizard apply survives reload and restores editable rows', async ({ page }) => {
+  await loginAsPm(page);
+  await applySampleExpenseSheet(page);
+
+  await expectSampleRowsVisible(page);
+
+  await page.reload();
+  await expect(page.getByRole('heading', { name: '사업비 입력(주간)' })).toBeVisible();
+  await expectSampleRowsVisible(page);
 });
 
 test('settlement product completeness: PM can continue to weekly cashflow after wizard apply', async ({ page }) => {
@@ -46,4 +54,24 @@ test('settlement product completeness: PM can continue to weekly cashflow after 
   await page.goto('/portal/cashflow');
   await expect(page.getByRole('heading', { name: '프로젝트 캐시플로(주간)' })).toBeVisible();
   await expect(page.getByText('예기치 못한 오류가 발생했습니다')).toHaveCount(0);
+});
+
+test('settlement product completeness: dirty weekly expense edits require confirmation before route navigation', async ({ page }) => {
+  await loginAsPm(page);
+  await applySampleExpenseSheet(page);
+
+  const firstCounterpartyCell = page.locator('[value="KTX"]').first();
+  await firstCounterpartyCell.fill('KTX-수정');
+
+  await page.getByRole('button', { name: /통장내역 (검토|열기)|기존 통장내역 가져오기/ }).click();
+  await expect(page.getByTestId('weekly-expense-unsaved-dialog')).toBeVisible();
+  await page.getByRole('button', { name: '계속 편집' }).click();
+  await expect(page.getByTestId('weekly-expense-unsaved-dialog')).toBeHidden();
+  await expect(page).toHaveURL(/\/portal\/weekly-expenses$/);
+
+  await firstCounterpartyCell.fill('KTX-재수정');
+  await page.getByRole('button', { name: /통장내역 (검토|열기)|기존 통장내역 가져오기/ }).click();
+  await expect(page.getByTestId('weekly-expense-unsaved-dialog')).toBeVisible();
+  await page.getByRole('button', { name: '변경 버리고 이동' }).click();
+  await expect(page).toHaveURL(/\/portal\/bank-statements$/);
 });

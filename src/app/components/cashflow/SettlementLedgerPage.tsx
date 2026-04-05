@@ -128,6 +128,7 @@ export interface SettlementLedgerProps {
     yearWeeks: MonthMondayWeek[],
     persistedRows?: ImportRow[] | null,
   ) => Promise<SettlementActualSyncWeekPayload[]>;
+  onDirtyStateChange?: (dirty: boolean) => void;
 }
 
 // ── Main Component ──
@@ -169,6 +170,7 @@ export function SettlementLedgerPage({
   onPendingQuickInsertHandled,
   onDeriveRows,
   onPreviewActualSyncPayload,
+  onDirtyStateChange,
 }: SettlementLedgerProps) {
   const { upsertWeekAmounts } = useCashflowWeeks();
   const [year, setYear] = useState(() => new Date().getFullYear());
@@ -712,6 +714,14 @@ export function SettlementLedgerPage({
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [importDirty]);
+
+  useEffect(() => {
+    onDirtyStateChange?.(importDirty || sheetSaveState === 'dirty' || sheetSaveState === 'saving');
+  }, [importDirty, onDirtyStateChange, sheetSaveState]);
+
+  useEffect(() => () => {
+    onDirtyStateChange?.(false);
+  }, [onDirtyStateChange]);
 
   const autoSaveStatusLabel = useMemo(() => {
     if (!autoSaveSheet) return '';

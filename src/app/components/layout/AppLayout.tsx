@@ -30,7 +30,7 @@ import { TenantSwitcher, TenantBadge } from '../settings/TenantSwitcher';
 
 function AppLayoutContent() {
   const { org, currentUser, transactions, participationEntries, dataSource } = useAppStore();
-  const { isAuthenticated, user: authUser, logout, setWorkspacePreference } = useAuth();
+  const { isAuthenticated, isLoading: authLoading, user: authUser, logout, setWorkspacePreference } = useAuth();
   const { getAllPendingCount: getHrPendingCount } = useHrAnnouncements();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -40,12 +40,14 @@ function AppLayoutContent() {
 
   // Auth guard — 미인증 시 로그인 페이지로
   useEffect(() => {
+    if (authLoading) return;
     if (!isAuthenticated) {
       navigate('/login', { replace: true, state: { from: currentPath } });
     }
-  }, [currentPath, isAuthenticated, navigate]);
+  }, [authLoading, currentPath, isAuthenticated, navigate]);
 
   useEffect(() => {
+    if (authLoading) return;
     const role = (authUser || currentUser)?.role;
     if (!isAuthenticated || !role) return;
     if (isPortalRole(role) && !canAccessAdminPath(role, location.pathname)) {
@@ -61,23 +63,24 @@ function AppLayoutContent() {
     if (!canAccessAdminPath(role, location.pathname)) {
       navigate(resolveHomePath(role, authUser?.defaultWorkspace ?? authUser?.lastWorkspace), { replace: true });
     }
-  }, [authUser, currentUser, isAuthenticated, location.pathname, navigate]);
+  }, [authLoading, authUser, currentUser, isAuthenticated, location.pathname, navigate]);
 
   useEffect(() => {
+    if (authLoading) return;
     const role = authUser?.role;
     if (!isAuthenticated || !role || !canChooseWorkspace(role)) return;
     // pm/viewer가 잠깐 admin 라우트에 들어와도 workspace를 덮어쓰지 않음
     if (isPortalRole(role)) return;
     if (authUser?.lastWorkspace === 'admin') return;
     void setWorkspacePreference('admin', { persistDefault: false });
-  }, [authUser?.lastWorkspace, authUser?.role, isAuthenticated, setWorkspacePreference]);
+  }, [authLoading, authUser?.lastWorkspace, authUser?.role, isAuthenticated, setWorkspacePreference]);
 
   // Close mobile sidebar on route change
   useEffect(() => {
     setMobileOpen(false);
   }, [location.pathname]);
 
-  if (!isAuthenticated) return null;
+  if (authLoading || !isAuthenticated) return null;
 
   // 인증된 사용자 정보 (authUser 우선, fallback currentUser)
   const displayUser = authUser || currentUser;

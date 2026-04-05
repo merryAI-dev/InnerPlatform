@@ -1,5 +1,5 @@
-import { lazy, Suspense, useCallback, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useBlocker, useLocation, useNavigate } from 'react-router';
 import {
   AlertTriangle,
   ArrowRight,
@@ -76,6 +76,7 @@ const SettlementLedgerPage = lazy(
 );
 
 export function PortalWeeklyExpensePage() {
+  const location = useLocation();
   const navigate = useNavigate();
   const { user: authUser, ensureGoogleWorkspaceAccess } = useAuth();
   const { orgId } = useFirebase();
@@ -115,6 +116,21 @@ export function PortalWeeklyExpensePage() {
   const [projectDriveProvisioning, setProjectDriveProvisioning] = useState(false);
   const [googleSheetImportOpen, setGoogleSheetImportOpen] = useState(false);
   const [pendingQuickInsert, setPendingQuickInsert] = useState<PendingQuickInsert | null>(null);
+  const [hasUnsavedSettlementChanges, setHasUnsavedSettlementChanges] = useState(false);
+  const [pendingUnsavedAction, setPendingUnsavedAction] = useState<null | {
+    kind: 'route';
+    path: string;
+    label: string;
+  } | {
+    kind: 'sheet';
+    sheetId: string;
+    sheetName: string;
+  } | {
+    kind: 'wizard';
+  } | {
+    kind: 'blocker';
+    label: string;
+  }>(null);
   const [participationRiskWarning, setParticipationRiskWarning] = useState<{
     yearMonth: string;
     weekNo: number;
@@ -134,6 +150,8 @@ export function PortalWeeklyExpensePage() {
     return visibleExpenseSheets.find((sheet) => sheet.id === activeExpenseSheetId)?.name || visibleExpenseSheets[0]?.name || '기본 탭';
   }, [visibleExpenseSheets, activeExpenseSheetId]);
   const bankStatementCount = bankStatementRows?.rows?.length || 0;
+  const allowBlockedNavigationRef = useRef(false);
+  const blocker = useBlocker(hasUnsavedSettlementChanges && !allowBlockedNavigationRef.current);
 
   const defaultLedgerId = useMemo(() => {
     const ledger = ledgers.find((l) => l.projectId === projectId);
@@ -227,7 +245,7 @@ export function PortalWeeklyExpensePage() {
     persistedRows?: ImportRow[] | null,
   ) => buildSettlementActualSyncPayloadLocally(rows, yearWeeks, persistedRows), []);
 
-  const handleEvidenceDriveError = (error: unknown, actionLabel: string) => {
+  const handleEvidenceDriveError = useCallback((error: unknown, actionLabel: string) => {
     reportError(error, {
       message: `[PortalWeeklyExpensePage] ${actionLabel} failed:`,
       options: {
@@ -246,7 +264,7 @@ export function PortalWeeklyExpensePage() {
       ? (error.message || `${actionLabel}에 실패했습니다.`)
       : `${actionLabel}에 실패했습니다.`;
     toast.error(resolveApiErrorMessage(error, fallback));
-  };
+  }, [bffActor.uid, projectId]);
 
   const queueQuickInsert = (kind: PendingQuickInsert['kind']) => {
     setPendingQuickInsert({
@@ -255,7 +273,7 @@ export function PortalWeeklyExpensePage() {
     });
   };
 
-  const resolveVersionFromApiError = (error: unknown): number | null => {
+  const resolveVersionFromApiError = useCallback((error: unknown): number | null => {
     if (!(error instanceof PlatformApiError)) return null;
     const bodyMessage = typeof error.body === 'object' && error.body && 'message' in (error.body as Record<string, unknown>)
       ? String((error.body as Record<string, unknown>).message || '')
@@ -266,9 +284,9 @@ export function PortalWeeklyExpensePage() {
     const actualMatch = source.match(/actual\s+(\d+)/i);
     if (actualMatch) return Number.parseInt(actualMatch[1], 10);
     return null;
-  };
+  }, []);
 
-  const applyProvisionedDriveState = async (
+  const applyProvisionedDriveState = useCallback(async (
     txId: string,
     result: ProvisionTransactionEvidenceDriveResult,
   ) => {
@@ -281,9 +299,9 @@ export function PortalWeeklyExpensePage() {
       evidenceDriveSyncStatus: result.syncStatus,
       updatedAt: result.updatedAt,
     });
-  };
+  }, [updateTransaction]);
 
-  const applySyncedEvidenceState = async (
+  const applySyncedEvidenceState = useCallback(async (
     txId: string,
     result: SyncTransactionEvidenceDriveResult | UploadTransactionEvidenceDriveResult,
   ) => {
@@ -305,9 +323,9 @@ export function PortalWeeklyExpensePage() {
       evidenceStatus: result.evidenceStatus,
       updatedAt: result.updatedAt,
     });
-  };
+  }, [updateTransaction]);
 
-  const ensureTransactionPersisted = async ({
+  const ensureTransactionPersisted = useCallback(async ({
     transaction,
     sourceTxId,
   }: {
@@ -374,9 +392,21 @@ export function PortalWeeklyExpensePage() {
       handleEvidenceDriveError(error, '거래 저장');
       return null;
     }
-  };
+  }, [
+    addTransaction,
+    authUser?.name,
+    bffActor,
+    defaultLedgerId,
+    handleEvidenceDriveError,
+    orgId,
+    portalUser?.name,
+    projectId,
+    resolveVersionFromApiError,
+    transactions,
+    updateTransaction,
+  ]);
 
-  const provisionEvidenceDrive = async (tx: Transaction) => {
+  const provisionEvidenceDrive = useCallback(async (tx: Transaction) => {
     if (tx.evidenceDriveFolderId) {
       const folderName = tx.evidenceDriveFolderName || '기존 증빙 폴더';
       toast.success(`이미 연결된 증빙 폴더를 사용합니다: ${folderName}`);
@@ -408,9 +438,9 @@ export function PortalWeeklyExpensePage() {
       handleEvidenceDriveError(error, '증빙 폴더 생성');
       throw error;
     }
-  };
+  }, [applyProvisionedDriveState, bffActor, handleEvidenceDriveError, myProject?.evidenceDriveRootFolderId, myProject?.evidenceDriveRootFolderName, myProject?.evidenceDriveSharedDriveId, orgId]);
 
-  const syncEvidenceDrive = async (tx: Transaction) => {
+  const syncEvidenceDrive = useCallback(async (tx: Transaction) => {
     try {
       const result = await syncTransactionEvidenceDriveViaBff({
         tenantId: orgId,
@@ -423,9 +453,9 @@ export function PortalWeeklyExpensePage() {
       handleEvidenceDriveError(error, '증빙 동기화');
       throw error;
     }
-  };
+  }, [applySyncedEvidenceState, bffActor, handleEvidenceDriveError, orgId]);
 
-  const provisionProjectDriveRoot = async () => {
+  const provisionProjectDriveRoot = useCallback(async () => {
     setProjectDriveProvisioning(true);
     try {
       const result = await provisionProjectEvidenceDriveRootViaBff({
@@ -440,9 +470,9 @@ export function PortalWeeklyExpensePage() {
     } finally {
       setProjectDriveProvisioning(false);
     }
-  };
+  }, [bffActor, handleEvidenceDriveError, orgId, projectId]);
 
-  const uploadEvidenceDrive = async (tx: Transaction, uploads: EvidenceUploadSelection[]) => {
+  const uploadEvidenceDrive = useCallback(async (tx: Transaction, uploads: EvidenceUploadSelection[]) => {
     try {
       const googleAccessToken = bffActor.googleAccessToken || await ensureGoogleWorkspaceAccess() || undefined;
       let workingTx = transactions.find((candidate) => candidate.id === tx.id) || tx;
@@ -554,7 +584,154 @@ export function PortalWeeklyExpensePage() {
       handleEvidenceDriveError(error, '증빙 업로드');
       throw error;
     }
-  };
+  }, [
+    applySyncedEvidenceState,
+    bffActor,
+    ensureGoogleWorkspaceAccess,
+    handleEvidenceDriveError,
+    orgId,
+    projectId,
+    provisionEvidenceDrive,
+    transactions,
+    updateTransaction,
+  ]);
+
+  const handleAddTransaction = useCallback((tx: Transaction) => {
+    void addTransaction(tx).catch((error) => {
+      toast.error(resolveApiErrorMessage(error, '거래 저장에 실패했습니다.'));
+    });
+  }, [addTransaction]);
+
+  const handleUpdateTransaction = useCallback((txId: string, updates: Partial<Transaction>) => {
+    void updateTransaction(txId, updates).catch((error) => {
+      toast.error(resolveApiErrorMessage(error, '거래 수정에 실패했습니다.'));
+    });
+  }, [updateTransaction]);
+
+  const handleSubmitWeek = useCallback(async ({ yearMonth, weekNo, txIds }: {
+    yearMonth: string;
+    weekNo: number;
+    txIds: string[];
+  }) => {
+    const riskCheck = detectParticipationRisk(participationEntries);
+    if (riskCheck.hasOverLimit) {
+      setParticipationRiskWarning({
+        yearMonth,
+        weekNo,
+        txIds,
+        overLimitMembers: riskCheck.overLimitMembers.map((m) => ({
+          memberName: m.memberName,
+          groupLabel: m.groupLabel,
+          totalRate: m.totalRate,
+        })),
+      });
+      return;
+    }
+    let updatedCount = 0;
+    try {
+      await submitWeekAsPm({ projectId, yearMonth, weekNo });
+      for (const txId of txIds) {
+        await changeTransactionState(txId, 'SUBMITTED');
+        updatedCount += 1;
+      }
+      toast.success(`${yearMonth} ${weekNo}주 제출 처리 완료`);
+    } catch (err) {
+      const fallback = updatedCount > 0
+        ? `주간 제출은 저장됐지만 거래 상태 ${updatedCount}/${txIds.length}건만 갱신했습니다.`
+        : '주간 제출 처리에 실패했습니다';
+      toast.error(resolveApiErrorMessage(err, fallback));
+      throw err;
+    }
+  }, [changeTransactionState, participationEntries, projectId, submitWeekAsPm]);
+
+  const handleChangeTransactionState = useCallback((txId: string, newState: TransactionState, reason?: string) => {
+    void changeTransactionState(txId, newState, reason).catch((error) => {
+      toast.error(resolveApiErrorMessage(error, '거래 상태 변경에 실패했습니다.'));
+    });
+  }, [changeTransactionState]);
+
+  const handleFetchBudgetSuggestion = useCallback(async (counterparty: string) => {
+    return fetchBudgetSuggestionViaBff({ tenantId: orgId, actor: bffActor, projectId, counterparty });
+  }, [bffActor, orgId, projectId]);
+
+  const handlePendingQuickInsertHandled = useCallback(() => {
+    setPendingQuickInsert(null);
+  }, []);
+
+  const openGoogleSheetImport = useCallback(() => {
+    setGoogleSheetImportOpen(true);
+  }, []);
+
+  useEffect(() => {
+    allowBlockedNavigationRef.current = false;
+  }, [location.key]);
+
+  useEffect(() => {
+    if (blocker.state !== 'blocked') return;
+    const nextPath = `${blocker.location.pathname || ''}${blocker.location.search || ''}${blocker.location.hash || ''}` || '다른 화면';
+    setPendingUnsavedAction((current) => current || {
+      kind: 'blocker',
+      label: nextPath,
+    });
+  }, [blocker]);
+
+  useEffect(() => {
+    if (blocker.state === 'blocked' && !hasUnsavedSettlementChanges) {
+      blocker.proceed();
+    }
+  }, [blocker, hasUnsavedSettlementChanges]);
+
+  const requestRouteNavigation = useCallback((path: string, label: string) => {
+    if (hasUnsavedSettlementChanges) {
+      setPendingUnsavedAction({ kind: 'route', path, label });
+      return;
+    }
+    navigate(path);
+  }, [hasUnsavedSettlementChanges, navigate]);
+
+  const requestSheetSwitch = useCallback((sheetId: string, sheetName: string) => {
+    if (sheetId === activeExpenseSheetId) return;
+    if (hasUnsavedSettlementChanges) {
+      setPendingUnsavedAction({ kind: 'sheet', sheetId, sheetName });
+      return;
+    }
+    setActiveExpenseSheet(sheetId);
+  }, [activeExpenseSheetId, hasUnsavedSettlementChanges, setActiveExpenseSheet]);
+
+  const requestWizardOpen = useCallback(() => {
+    if (hasUnsavedSettlementChanges) {
+      setPendingUnsavedAction({ kind: 'wizard' });
+      return;
+    }
+    openGoogleSheetImport();
+  }, [hasUnsavedSettlementChanges, openGoogleSheetImport]);
+
+  const resetUnsavedAction = useCallback(() => {
+    if (blocker.state === 'blocked') {
+      blocker.reset();
+    }
+    setPendingUnsavedAction(null);
+  }, [blocker]);
+
+  const confirmUnsavedAction = useCallback(() => {
+    const action = pendingUnsavedAction;
+    setPendingUnsavedAction(null);
+    if (!action) return;
+    if (action.kind === 'blocker') {
+      blocker.proceed();
+      return;
+    }
+    if (action.kind === 'sheet') {
+      setActiveExpenseSheet(action.sheetId);
+      return;
+    }
+    if (action.kind === 'wizard') {
+      openGoogleSheetImport();
+      return;
+    }
+    allowBlockedNavigationRef.current = true;
+    navigate(action.path);
+  }, [blocker, navigate, openGoogleSheetImport, pendingUnsavedAction, setActiveExpenseSheet]);
 
   if (!projectId) {
     return (
@@ -611,13 +788,13 @@ export function PortalWeeklyExpensePage() {
                   잔액 조정
                 </Button>
               )}
-              <Button variant="outline" size="sm" onClick={() => navigate('/portal/bank-statements')}>
+              <Button variant="outline" size="sm" onClick={() => requestRouteNavigation('/portal/bank-statements', '통장내역')}>
                 기존 통장내역 가져오기
                 <ArrowRight className="h-4 w-4" />
               </Button>
             </>
           ) : (
-            <Button size="sm" onClick={() => navigate('/portal/bank-statements')}>
+            <Button size="sm" onClick={() => requestRouteNavigation('/portal/bank-statements', '통장내역')}>
               {bankStatementCount > 0 ? '통장내역 검토' : '통장내역 열기'}
               <ArrowRight className="h-4 w-4" />
             </Button>
@@ -645,10 +822,10 @@ export function PortalWeeklyExpensePage() {
               기본 폴더 준비
             </Button>
           )}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => window.location.assign('/portal/project-settings')}
+            <Button
+              variant="outline"
+              size="sm"
+            onClick={() => requestRouteNavigation('/portal/project-settings', '사업 배정 수정')}
           >
             설정 열기
           </Button>
@@ -703,7 +880,7 @@ export function PortalWeeklyExpensePage() {
               variant={sheet.id === activeExpenseSheetId ? 'default' : 'outline'}
               size="sm"
               className="h-8 text-[11px]"
-              onClick={() => setActiveExpenseSheet(sheet.id)}
+              onClick={() => requestSheetSwitch(sheet.id, sheet.name)}
             >
               {sheet.name}
             </Button>
@@ -714,7 +891,7 @@ export function PortalWeeklyExpensePage() {
             variant="outline"
             size="sm"
             className="h-8 text-[11px] gap-1"
-            onClick={() => setGoogleSheetImportOpen(true)}
+            onClick={requestWizardOpen}
           >
             <FileSpreadsheet className="h-3.5 w-3.5" />
             {isDirectEntryMode ? '기존 시트 가져오기' : 'Migration Wizard'}
@@ -787,16 +964,8 @@ export function PortalWeeklyExpensePage() {
           projectName={projectName}
           transactions={transactions}
           defaultLedgerId={defaultLedgerId}
-          onAddTransaction={(tx) => {
-            void addTransaction(tx).catch((error) => {
-              toast.error(resolveApiErrorMessage(error, '거래 저장에 실패했습니다.'));
-            });
-          }}
-          onUpdateTransaction={(txId, updates) => {
-            void updateTransaction(txId, updates).catch((error) => {
-              toast.error(resolveApiErrorMessage(error, '거래 수정에 실패했습니다.'));
-            });
-          }}
+          onAddTransaction={handleAddTransaction}
+          onUpdateTransaction={handleUpdateTransaction}
           authorOptions={authorOptions}
           budgetCodeBook={effectiveBudgetCodeBook}
           hideYearControls
@@ -806,43 +975,8 @@ export function PortalWeeklyExpensePage() {
           onSaveEvidenceRequiredMap={saveEvidenceRequiredMap}
           sheetRows={expenseSheetRows}
           onSaveSheetRows={saveExpenseSheetRows}
-          onSubmitWeek={async ({ yearMonth, weekNo, txIds }) => {
-            // 참여율 이상 탐지 — 100% 초과 시 사용자에게 경고 (제출 차단 아님)
-            const riskCheck = detectParticipationRisk(participationEntries);
-            if (riskCheck.hasOverLimit) {
-              setParticipationRiskWarning({
-                yearMonth,
-                weekNo,
-                txIds,
-                overLimitMembers: riskCheck.overLimitMembers.map((m) => ({
-                  memberName: m.memberName,
-                  groupLabel: m.groupLabel,
-                  totalRate: m.totalRate,
-                })),
-              });
-              return; // 모달 확인 후 진행
-            }
-            let updatedCount = 0;
-            try {
-              await submitWeekAsPm({ projectId, yearMonth, weekNo });
-              for (const txId of txIds) {
-                await changeTransactionState(txId, 'SUBMITTED');
-                updatedCount += 1;
-              }
-              toast.success(`${yearMonth} ${weekNo}주 제출 처리 완료`);
-            } catch (err) {
-              const fallback = updatedCount > 0
-                ? `주간 제출은 저장됐지만 거래 상태 ${updatedCount}/${txIds.length}건만 갱신했습니다.`
-                : '주간 제출 처리에 실패했습니다';
-              toast.error(resolveApiErrorMessage(err, fallback));
-              throw err;
-            }
-          }}
-          onChangeTransactionState={(txId, newState, reason) => {
-            void changeTransactionState(txId, newState, reason).catch((error) => {
-              toast.error(resolveApiErrorMessage(error, '거래 상태 변경에 실패했습니다.'));
-            });
-          }}
+          onSubmitWeek={handleSubmitWeek}
+          onChangeTransactionState={handleChangeTransactionState}
           currentUserName={portalUser?.name || 'PM'}
           currentUserId={portalUser?.id || 'pm'}
           userRole={ledgerUserRole}
@@ -853,17 +987,16 @@ export function PortalWeeklyExpensePage() {
           onSyncEvidenceDrive={syncEvidenceDrive}
           onUploadEvidenceDrive={uploadEvidenceDrive}
           onEnsureTransactionPersisted={ensureTransactionPersisted}
-          onFetchBudgetSuggestion={isPlatformApiEnabled() ? async (counterparty) => {
-            return fetchBudgetSuggestionViaBff({ tenantId: orgId, actor: bffActor, projectId, counterparty });
-          } : undefined}
+          onFetchBudgetSuggestion={isPlatformApiEnabled() ? handleFetchBudgetSuggestion : undefined}
           workflowMode={fundInputMode}
           settlementSheetPolicy={settlementSheetPolicy}
           basis={myProject?.basis}
           onUpdateWeeklySubmissionStatus={upsertWeeklySubmissionStatus}
           pendingQuickInsert={pendingQuickInsert}
-          onPendingQuickInsertHandled={() => setPendingQuickInsert(null)}
+          onPendingQuickInsertHandled={handlePendingQuickInsertHandled}
           onDeriveRows={deriveRowsWithLocalKernel}
           onPreviewActualSyncPayload={previewActualSyncWithLocalKernel}
+          onDirtyStateChange={setHasUnsavedSettlementChanges}
         />
       </Suspense>
       {googleSheetImportOpen && (
@@ -895,6 +1028,26 @@ export function PortalWeeklyExpensePage() {
             />
         </Suspense>
       )}
+      <AlertDialog open={!!pendingUnsavedAction} onOpenChange={(open) => { if (!open) resetUnsavedAction(); }}>
+        <AlertDialogContent data-testid="weekly-expense-unsaved-dialog">
+          <AlertDialogHeader>
+            <AlertDialogTitle>저장되지 않은 사업비 입력이 있습니다</AlertDialogTitle>
+            <AlertDialogDescription>
+              지금 이동하면 저장되지 않은 사업비 입력(주간) 편집 내용이 유실될 수 있습니다.
+              {pendingUnsavedAction?.kind === 'sheet' && ` ${pendingUnsavedAction.sheetName} 탭으로 바꾸기 전에 먼저 저장하거나, 변경을 버릴지 확인해 주세요.`}
+              {pendingUnsavedAction?.kind === 'route' && ` ${pendingUnsavedAction.label} 화면으로 이동하기 전에 먼저 저장하거나, 변경을 버릴지 확인해 주세요.`}
+              {pendingUnsavedAction?.kind === 'wizard' && ' Migration Wizard를 열기 전에 현재 편집 내용을 먼저 저장하거나, 변경을 버릴지 확인해 주세요.'}
+              {pendingUnsavedAction?.kind === 'blocker' && ` ${pendingUnsavedAction.label} 화면으로 이동하면 현재 편집 내용이 유실될 수 있습니다.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>계속 편집</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmUnsavedAction}>
+              변경 버리고 이동
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       {/* 참여율 이상 탐지 경고 모달 */}
       <AlertDialog open={!!participationRiskWarning} onOpenChange={(open) => { if (!open) setParticipationRiskWarning(null); }}>
         <AlertDialogContent>

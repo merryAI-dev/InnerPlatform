@@ -31,4 +31,9 @@ test('dev auth harness can apply sample expense-sheet migration end-to-end', asy
   await expect(page.locator('[value=\"KTX\"]').first()).toBeVisible();
   await expect(page.locator('[value=\"카페 메리\"]').first()).toBeVisible();
   await expect(page.getByText('예기치 못한 오류가 발생했습니다')).toHaveCount(0);
+
+  await page.reload();
+  await expect(page.getByRole('heading', { name: '사업비 입력(주간)' })).toBeVisible();
+  await expect(page.locator('[value=\"KTX\"]').first()).toBeVisible();
+  await expect(page.locator('[value=\"카페 메리\"]').first()).toBeVisible();
 });
