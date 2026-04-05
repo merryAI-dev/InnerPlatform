@@ -24,6 +24,7 @@ import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { buildSettlementActualSyncPayloadLocally } from '../../platform/settlement-calculation-kernel';
 import type { SettlementDerivationContext, SettlementDerivationOptions } from '../../platform/settlement-row-derivation';
 import type { SettlementActualSyncWeekPayload } from '../../platform/settlement-sheet-sync';
+import { resolveWeeklyAccountingProductStatus } from '../../platform/weekly-accounting-state';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import {
@@ -702,6 +703,26 @@ export function SettlementLedgerPage({
     return lastAutoSavedAt ? `자동 저장 ${formatCommentTime(lastAutoSavedAt)}` : '자동 저장 대기';
   }, [autoSaveSheet, cashflowSyncState, importDirty, lastAutoSavedAt, lastCashflowSyncedAt, sheetSaveState]);
 
+  const pendingReviewCount = useMemo(() => countPendingImportRowReviews(importRows || []), [importRows]);
+
+  const weeklyAccountingStatus = useMemo(() => resolveWeeklyAccountingProductStatus({
+    snapshot: {
+      projectionEdited: importDirty,
+      projectionDone: true,
+      expenseEdited: importDirty,
+      expenseDone: sheetSaveState === 'saved' || cashflowSyncState === 'pending' || cashflowSyncState === 'syncing' || cashflowSyncState === 'synced' || cashflowSyncState === 'review_required' || cashflowSyncState === 'sync_failed',
+      expenseSyncState: cashflowSyncState === 'review_required' || cashflowSyncState === 'sync_failed' || cashflowSyncState === 'synced'
+        ? cashflowSyncState
+        : 'pending',
+      expenseReviewPendingCount: pendingReviewCount,
+      pmSubmitted: false,
+      adminClosed: false,
+    },
+    saveState: sheetSaveState,
+    syncState: cashflowSyncState,
+    reviewCount: pendingReviewCount,
+  }), [cashflowSyncState, importDirty, pendingReviewCount, sheetSaveState]);
+
   // ── Inline edit handler with audit trail ──
   const handleUpdateTx = useCallback(
     (txId: string, updates: Partial<Transaction>) => {
@@ -828,9 +849,25 @@ export function SettlementLedgerPage({
               엑셀 다운로드
             </Button>
             {autoSaveSheet && (
-              <span className="text-[10px] text-muted-foreground">
-                {autoSaveStatusLabel}
-              </span>
+              <div className="flex flex-col items-end gap-0.5 text-[10px] leading-4">
+                <span className="text-muted-foreground">{autoSaveStatusLabel}</span>
+                <span
+                  className={
+                    weeklyAccountingStatus.tone === 'success'
+                      ? 'font-semibold text-emerald-700 dark:text-emerald-300'
+                      : weeklyAccountingStatus.tone === 'danger'
+                        ? 'font-semibold text-rose-700 dark:text-rose-300'
+                        : weeklyAccountingStatus.tone === 'warning'
+                          ? 'font-semibold text-amber-700 dark:text-amber-300'
+                          : 'font-semibold text-muted-foreground'
+                  }
+                >
+                  {weeklyAccountingStatus.label}
+                </span>
+                <span className="max-w-[260px] text-right text-[9px] text-muted-foreground">
+                  {weeklyAccountingStatus.description}
+                </span>
+              </div>
             )}
           </div>
         </div>
@@ -941,9 +978,25 @@ export function SettlementLedgerPage({
               title="다운로드 종료일"
             />
             {autoSaveSheet && (
-              <span className="text-[10px] text-muted-foreground">
-                {autoSaveStatusLabel}
-              </span>
+              <div className="flex flex-col items-end gap-0.5 text-[10px] leading-4">
+                <span className="text-muted-foreground">{autoSaveStatusLabel}</span>
+                <span
+                  className={
+                    weeklyAccountingStatus.tone === 'success'
+                      ? 'font-semibold text-emerald-700 dark:text-emerald-300'
+                      : weeklyAccountingStatus.tone === 'danger'
+                        ? 'font-semibold text-rose-700 dark:text-rose-300'
+                        : weeklyAccountingStatus.tone === 'warning'
+                          ? 'font-semibold text-amber-700 dark:text-amber-300'
+                          : 'font-semibold text-muted-foreground'
+                  }
+                >
+                  {weeklyAccountingStatus.label}
+                </span>
+                <span className="max-w-[260px] text-right text-[9px] text-muted-foreground">
+                  {weeklyAccountingStatus.description}
+                </span>
+              </div>
             )}
         </div>
       </div>

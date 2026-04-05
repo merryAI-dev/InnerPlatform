@@ -1,6 +1,20 @@
 import type { CashflowWeekSheet, WeeklySubmissionStatus } from '../data/types';
 
 export type WeeklyExpenseSyncState = 'idle' | 'pending' | 'review_required' | 'synced' | 'sync_failed';
+export type WeeklyAccountingProductStatusKind =
+  | 'save_pending'
+  | 'save_synced'
+  | 'review_required'
+  | 'sync_failed'
+  | 'save_failed';
+
+export interface WeeklyAccountingProductStatus {
+  kind: WeeklyAccountingProductStatusKind;
+  label: string;
+  description: string;
+  tone: 'muted' | 'warning' | 'danger' | 'success';
+  auditTitle: string;
+}
 
 export interface WeeklyAccountingSnapshot {
   projectionEdited: boolean;
@@ -11,6 +25,13 @@ export interface WeeklyAccountingSnapshot {
   expenseReviewPendingCount: number;
   pmSubmitted: boolean;
   adminClosed: boolean;
+}
+
+export interface WeeklyAccountingProductStatusInput {
+  snapshot: WeeklyAccountingSnapshot;
+  saveState?: 'idle' | 'dirty' | 'saving' | 'saved' | 'save_failed';
+  syncState?: 'idle' | 'pending' | 'syncing' | 'synced' | 'review_required' | 'sync_failed';
+  reviewCount?: number;
 }
 
 export interface WeeklyAccountingState {
@@ -27,6 +48,93 @@ export interface WeeklyAccountingState {
 function hasWeekAmounts(values: Record<string, unknown> | undefined): boolean {
   if (!values) return false;
   return Object.values(values).some((value) => typeof value === 'number' && Number.isFinite(value) && value !== 0);
+}
+
+function formatReviewCountLabel(count: number): string {
+  return count > 0 ? `사람 확인 ${count}건` : '사람 확인 필요';
+}
+
+function toNonNegativeCount(value: number | undefined): number {
+  return Math.max(0, Math.trunc(value || 0));
+}
+
+export function resolveWeeklyAccountingProductStatus(
+  input: WeeklyAccountingProductStatusInput,
+): WeeklyAccountingProductStatus {
+  const reviewCount = toNonNegativeCount(input.reviewCount ?? input.snapshot.expenseReviewPendingCount);
+  const syncState = input.syncState ?? input.snapshot.expenseSyncState;
+  const saveState = input.saveState;
+  const expenseDone = input.snapshot.expenseDone || saveState === 'saved' || syncState === 'synced' || syncState === 'review_required' || syncState === 'sync_failed';
+
+  if (saveState === 'save_failed') {
+    return {
+      kind: 'save_failed',
+      label: '저장 실패',
+      description: '정산대장 저장이 실패했습니다. 변경 내용을 다시 저장해 주세요.',
+      tone: 'danger',
+      auditTitle: '최종 저장 실패 반영',
+    };
+  }
+
+  if (saveState === 'dirty' || saveState === 'saving' || (!expenseDone && saveState !== 'saved')) {
+    return {
+      kind: 'save_pending',
+      label: saveState === 'saving' ? '저장 중' : '저장 대기',
+      description: saveState === 'saving'
+        ? '정산대장을 저장하는 중입니다.'
+        : '정산대장이 아직 저장 완료되지 않았습니다.',
+      tone: 'warning',
+      auditTitle: '최종 저장 대기 반영',
+    };
+  }
+
+  if (syncState === 'review_required') {
+    return {
+      kind: 'review_required',
+      label: formatReviewCountLabel(reviewCount),
+      description: '수식 후보값이 남아 있어 영수증/증빙 기준으로 다시 확인해야 합니다.',
+      tone: 'warning',
+      auditTitle: '최종 사람 확인 상태 반영',
+    };
+  }
+
+  if (syncState === 'sync_failed') {
+    return {
+      kind: 'sync_failed',
+      label: '동기화 실패',
+      description: '정산대장은 저장되었지만 캐시플로 실제값 반영이 실패했습니다.',
+      tone: 'danger',
+      auditTitle: '최종 동기화 실패 반영',
+    };
+  }
+
+  if (syncState === 'synced') {
+    return {
+      kind: 'save_synced',
+      label: '동기화 완료',
+      description: '정산대장 저장과 캐시플로 실제값 반영이 모두 완료되었습니다.',
+      tone: 'success',
+      auditTitle: '최종 동기화 완료 반영',
+    };
+  }
+
+  if (syncState === 'pending' || syncState === 'syncing' || saveState === 'saved' || expenseDone) {
+    return {
+      kind: 'save_synced',
+      label: '저장 완료',
+      description: '정산대장은 저장되었고 캐시플로 실제값 반영을 기다리고 있습니다.',
+      tone: 'warning',
+      auditTitle: '최종 동기화 대기 반영',
+    };
+  }
+
+  return {
+    kind: 'save_pending',
+    label: '저장 대기',
+    description: '정산대장이 아직 저장 완료되지 않았습니다.',
+    tone: 'warning',
+    auditTitle: '최종 저장 대기 반영',
+  };
 }
 
 export function resolveWeeklyAccountingSnapshot(
@@ -66,6 +174,7 @@ export function resolveWeeklyAccountingState(
 ): WeeklyAccountingState {
   const snapshot = resolveWeeklyAccountingSnapshot(status, weekSheet);
   const { projectionDone, expenseDone, expenseSyncState, expenseReviewPendingCount } = snapshot;
+  const productStatus = resolveWeeklyAccountingProductStatus({ snapshot });
 
   if (!projectionDone || !expenseDone) {
     return {
@@ -74,50 +183,62 @@ export function resolveWeeklyAccountingState(
       expenseSyncState,
       expenseReviewPendingCount,
       closeDialogKind: 'prerequisite',
-      expenseStatusLabel: expenseDone ? '저장됨' : '미완료',
-      expenseStatusDescription: expenseDone ? '정산대장은 저장되었지만 제출/동기화 확인이 더 필요합니다.' : '사업비 입력이 아직 제출 완료 상태가 아닙니다.',
-      expenseStatusTone: expenseDone ? 'muted' : 'danger',
+      expenseStatusLabel: expenseDone ? productStatus.label : '미완료',
+      expenseStatusDescription: expenseDone
+        ? productStatus.description
+        : '사업비 입력이 아직 제출 완료 상태가 아닙니다.',
+      expenseStatusTone: expenseDone ? productStatus.tone : 'danger',
     };
   }
 
-  if (expenseSyncState === 'review_required') {
+  if (productStatus.kind === 'review_required') {
     return {
       projectionDone,
       expenseDone,
       expenseSyncState,
       expenseReviewPendingCount,
       closeDialogKind: 'warning',
-      expenseStatusLabel: expenseReviewPendingCount > 0
-        ? `사람 확인 ${expenseReviewPendingCount}건`
-        : '사람 확인 필요',
-      expenseStatusDescription: '수식 후보값이 남아 있어 영수증/증빙 기준으로 다시 확인해야 합니다.',
-      expenseStatusTone: 'warning',
+      expenseStatusLabel: productStatus.label,
+      expenseStatusDescription: productStatus.description,
+      expenseStatusTone: productStatus.tone,
     };
   }
 
-  if (expenseSyncState === 'sync_failed') {
+  if (productStatus.kind === 'sync_failed') {
     return {
       projectionDone,
       expenseDone,
       expenseSyncState,
       expenseReviewPendingCount,
       closeDialogKind: 'warning',
-      expenseStatusLabel: '동기화 실패',
-      expenseStatusDescription: '정산대장은 저장되었지만 캐시플로 실제값 반영이 실패했습니다.',
-      expenseStatusTone: 'danger',
+      expenseStatusLabel: productStatus.label,
+      expenseStatusDescription: productStatus.description,
+      expenseStatusTone: productStatus.tone,
     };
   }
 
-  if (expenseSyncState === 'pending' || expenseSyncState === 'idle') {
+  if (productStatus.kind === 'save_synced') {
+    if (expenseSyncState === 'synced') {
+      return {
+        projectionDone,
+        expenseDone,
+        expenseSyncState,
+        expenseReviewPendingCount,
+        closeDialogKind: 'confirm',
+        expenseStatusLabel: productStatus.label,
+        expenseStatusDescription: productStatus.description,
+        expenseStatusTone: productStatus.tone,
+      };
+    }
     return {
       projectionDone,
       expenseDone,
       expenseSyncState,
       expenseReviewPendingCount,
       closeDialogKind: 'warning',
-      expenseStatusLabel: '동기화 대기',
-      expenseStatusDescription: '정산대장은 저장되었고, 캐시플로 실제값 반영을 기다리는 상태입니다.',
-      expenseStatusTone: 'warning',
+      expenseStatusLabel: productStatus.label,
+      expenseStatusDescription: productStatus.description,
+      expenseStatusTone: productStatus.tone,
     };
   }
 
@@ -127,8 +248,8 @@ export function resolveWeeklyAccountingState(
     expenseSyncState,
     expenseReviewPendingCount,
     closeDialogKind: 'confirm',
-    expenseStatusLabel: '동기화 완료',
-    expenseStatusDescription: '정산대장과 캐시플로 실제값이 일치하는 상태입니다.',
-    expenseStatusTone: 'success',
+    expenseStatusLabel: productStatus.label,
+    expenseStatusDescription: productStatus.description,
+    expenseStatusTone: productStatus.tone,
   };
 }

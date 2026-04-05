@@ -21,7 +21,10 @@ import { STATE_LABELS, type ChangeRequestState } from '../../data/personnel-chan
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { getMonthMondayWeeks } from '../../platform/cashflow-weeks';
 import { addMonthsToYearMonth, getSeoulTodayIso } from '../../platform/business-days';
-import { resolveWeeklyAccountingSnapshot, resolveWeeklyAccountingState } from '../../platform/weekly-accounting-state';
+import {
+  resolveWeeklyAccountingProductStatus,
+  resolveWeeklyAccountingSnapshot,
+} from '../../platform/weekly-accounting-state';
 
 function sortIsoDesc(a: string | undefined, b: string | undefined): number {
   return String(b || '').localeCompare(String(a || ''));
@@ -340,7 +343,7 @@ export function PortalSubmissionsPage() {
                   const snapshot = resolveWeeklyAccountingSnapshot(status, weekSheet);
                   const projectionDone = snapshot.projectionDone;
                   const expenseDone = snapshot.expenseDone;
-                  const accountingState = resolveWeeklyAccountingState(status, weekSheet);
+                  const accountingStatus = resolveWeeklyAccountingProductStatus({ snapshot });
                   const projectionEdited = snapshot.projectionEdited;
                   const expenseEdited = snapshot.expenseEdited;
                   const projectionInputLabel = projectionEdited ? '입력됨' : '미입력';
@@ -358,15 +361,7 @@ export function PortalSubmissionsPage() {
                     updatedByName: status?.expenseUpdatedByName,
                     syncAt: status?.expenseSyncUpdatedAt,
                     syncByName: status?.expenseSyncUpdatedByName,
-                    syncTitle: status?.expenseSyncState === 'review_required'
-                      ? '최종 사람 확인 상태 반영'
-                      : status?.expenseSyncState === 'sync_failed'
-                        ? '최종 동기화 실패 반영'
-                        : status?.expenseSyncState === 'synced'
-                          ? '최종 동기화 완료 반영'
-                          : status?.expenseSyncState === 'pending'
-                            ? '최종 동기화 대기 반영'
-                            : undefined,
+                    syncTitle: accountingStatus.auditTitle,
                   });
                   return (
                     <tr key={p.id} className="border-t border-border/30">
@@ -410,14 +405,14 @@ export function PortalSubmissionsPage() {
                             <Badge
                               variant="outline"
                               className={
-                                accountingState.expenseStatusTone === 'success'
+                                accountingStatus.tone === 'success'
                                   ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
-                                  : accountingState.expenseStatusTone === 'danger'
+                                  : accountingStatus.tone === 'danger'
                                     ? 'border-rose-300 bg-rose-50 text-rose-700'
                                     : 'border-amber-300 bg-amber-50 text-amber-700'
                               }
                             >
-                              {accountingState.expenseStatusLabel}
+                              {accountingStatus.label}
                             </Badge>
                           </div>
                           <Button
@@ -435,7 +430,7 @@ export function PortalSubmissionsPage() {
                             {expenseDone ? '수동 보정: 미완료' : '수동 보정: 완료'}
                           </Button>
                           <div className="text-[9px] leading-4 text-muted-foreground">
-                            {accountingState.expenseStatusDescription}
+                            {accountingStatus.description}
                           </div>
                           {expenseAudit && <AuditMetaLine {...expenseAudit} />}
                         </div>
