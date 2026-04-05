@@ -50,6 +50,18 @@ describe('budget-actuals from settlement rows', () => {
     expect(getTotalBudgetActualFromSettlementRows([createRow(cells)])).toBe(0);
   });
 
+  it('excludes refund-driven inflow rows from budget spending', () => {
+    const cells = createEmptyCells();
+    cells[5] = '부가세';
+    cells[6] = '환급';
+    cells[8] = '매출부가세(입금)';
+    cells[12] = '20,000';
+    const result = aggregateBudgetActualsFromSettlementRows([createRow(cells)]);
+
+    expect(result.size).toBe(0);
+    expect(getTotalBudgetActualFromSettlementRows([createRow(cells)])).toBe(0);
+  });
+
   it('falls back to bank amount when an outflow line exists but no derived expense exists', () => {
     const cells = createEmptyCells();
     cells[5] = '여비';

@@ -70,4 +70,15 @@ describe('resolveSettlementFlowSnapshot', () => {
     expect(snapshot.cashflowActualLineAmounts).toEqual({ SALES_IN: 250000 });
     expect(snapshot.budgetActualAmount).toBe(0);
   });
+
+  it('uses refund amount for inflow-side vat refund rows', () => {
+    const cells = createEmptyCells();
+    cells[8] = '매출부가세(입금)';
+    cells[12] = '20,000';
+    const snapshot = resolveSettlementFlowSnapshot(createRow(cells), indexes);
+
+    expect(snapshot.manualOutflowPending).toBe(false);
+    expect(snapshot.cashflowActualLineAmounts).toEqual({ SALES_VAT_IN: 20000 });
+    expect(snapshot.budgetActualAmount).toBe(0);
+  });
 });

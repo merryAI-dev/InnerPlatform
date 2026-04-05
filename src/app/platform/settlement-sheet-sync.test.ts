@@ -104,6 +104,29 @@ describe('buildSettlementActualSyncPayload', () => {
     expect(payload[0]?.amounts.INPUT_VAT_OUT).toBe(0);
   });
 
+  it('uses refund amount for inflow-side vat refund rows', () => {
+    const base = createEmptyCells();
+    const row = createRow(
+      withCell(
+        withCell(
+          withCell(base, 2, '2026-03-05'),
+          3,
+          '26-03-01',
+        ),
+        8,
+        '매출부가세(입금)',
+      ),
+    );
+    row.cells[12] = '20,000';
+
+    const payload = buildSettlementActualSyncPayload([row], [
+      { yearMonth: '2026-03', weekNo: 1, weekStart: '2026-03-02', weekEnd: '2026-03-08', label: '26-03-01' },
+    ]);
+
+    expect(payload[0]?.amounts.SALES_VAT_IN).toBe(20000);
+    expect(payload[0]?.amounts.DIRECT_COST_OUT).toBe(0);
+  });
+
   it('prefers expense amount for outflow actuals and falls back to bank amount when missing', () => {
     const base = createEmptyCells();
     const expensePriorityRow = createRow(
@@ -178,6 +201,29 @@ describe('buildSettlementActualSyncPayload', () => {
     const clearedWeek = payload.find((item) => item.yearMonth === '2026-03' && item.weekNo === 2);
     expect(currentWeek?.amounts.DIRECT_COST_OUT).toBe(10000);
     expect(clearedWeek?.amounts.DIRECT_COST_OUT).toBe(0);
+  });
+
+  it('returns deterministic payloads when persisted rows are supplied repeatedly', () => {
+    const base = createEmptyCells();
+    const currentRows = [
+      createRow(withCell(withCell(withCell(base, 2, '2026-03-03'), 3, '26-03-01'), 8, '직접사업비').map((cell, index) => (
+        index === 13 ? '10,000' : cell
+      ))),
+    ];
+    const persistedRows = [
+      createRow(withCell(withCell(withCell(base, 2, '2026-03-12'), 3, '26-03-02'), 8, '직접사업비').map((cell, index) => (
+        index === 10 ? '20,000' : cell
+      ))),
+    ];
+    const yearWeeks = [
+      { yearMonth: '2026-03', weekNo: 1, weekStart: '2026-03-02', weekEnd: '2026-03-08', label: '26-03-01' },
+      { yearMonth: '2026-03', weekNo: 2, weekStart: '2026-03-09', weekEnd: '2026-03-15', label: '26-03-02' },
+    ];
+
+    const first = buildSettlementActualSyncPayload(currentRows, yearWeeks, persistedRows);
+    const second = buildSettlementActualSyncPayload(currentRows, yearWeeks, persistedRows);
+
+    expect(second).toEqual(first);
   });
 
   it('includes input vat out rows when building actual payloads', () => {

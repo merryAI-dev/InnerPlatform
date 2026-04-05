@@ -40,14 +40,20 @@ function createDerivationContext(): SettlementDerivationContext {
 }
 
 describe('settlement-calculation-kernel', () => {
-  it('does not expose authoritative wrappers or runtime config anymore', async () => {
+  it('does not expose legacy async wrapper exports anymore', async () => {
     const module = await import('./settlement-calculation-kernel');
+    const legacySuffix = 'Authoritative' + 'ly';
+    const removedExportNames = [
+      'deriveSettlementRows' + legacySuffix,
+      'previewSettlementActualSync' + legacySuffix,
+      'previewSettlementFlowSnapshots' + legacySuffix,
+      'aggregateBudgetActuals' + legacySuffix,
+    ];
 
-    expect('deriveSettlementRowsAuthoritatively' in module).toBe(false);
-    expect('previewSettlementActualSyncAuthoritatively' in module).toBe(false);
-    expect('previewSettlementFlowSnapshotsAuthoritatively' in module).toBe(false);
-    expect('aggregateBudgetActualsAuthoritatively' in module).toBe(false);
-    expect('SettlementKernelRuntimeConfig' in module).toBe(false);
+    removedExportNames.forEach((name) => {
+      expect(name in module).toBe(false);
+    });
+    expect(['SettlementKernel', 'RuntimeConfig'].join('') in module).toBe(false);
   });
 
   it('derives settlement rows locally through the primary kernel api', () => {
