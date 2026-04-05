@@ -3,6 +3,59 @@ import path from 'path'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 
+function getVendorChunkName(id: string): string | undefined {
+  if (!id.includes('node_modules')) return undefined
+
+  if (
+    id.includes('/react/') ||
+    id.includes('/react-dom/') ||
+    id.includes('/react-router/') ||
+    id.includes('/scheduler/') ||
+    id.includes('/@remix-run/router/')
+  ) {
+    return 'react-vendor'
+  }
+
+  if (id.includes('/firebase/')) {
+    return 'firebase-vendor'
+  }
+
+  if (
+    id.includes('/@radix-ui/') ||
+    id.includes('/cmdk/') ||
+    id.includes('/vaul/') ||
+    id.includes('/embla-carousel') ||
+    id.includes('/react-day-picker/') ||
+    id.includes('/input-otp/') ||
+    id.includes('/react-resizable-panels/')
+  ) {
+    return 'ui-vendor'
+  }
+
+  if (
+    id.includes('/@mui/') ||
+    id.includes('/@emotion/') ||
+    id.includes('/@popperjs/')
+  ) {
+    return 'mui-vendor'
+  }
+
+  if (
+    id.includes('/sonner/') ||
+    id.includes('/lucide-react/') ||
+    id.includes('/motion/') ||
+    id.includes('/date-fns/') ||
+    id.includes('/zod/') ||
+    id.includes('/clsx/') ||
+    id.includes('/class-variance-authority/') ||
+    id.includes('/tailwind-merge/')
+  ) {
+    return 'app-vendor'
+  }
+
+  return undefined
+}
+
 export default defineConfig({
   plugins: [
     // The React and Tailwind plugins are both required for Make, even if
@@ -14,6 +67,15 @@ export default defineConfig({
     alias: {
       // Alias @ to the src directory
       '@': path.resolve(__dirname, './src'),
+    },
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          return getVendorChunkName(id)
+        },
+      },
     },
   },
 
