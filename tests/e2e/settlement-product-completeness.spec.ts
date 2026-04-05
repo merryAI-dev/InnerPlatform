@@ -63,14 +63,14 @@ test('settlement product completeness: dirty weekly expense edits require confir
   const firstCounterpartyCell = page.locator('[value="KTX"]').first();
   await firstCounterpartyCell.fill('KTX-수정');
 
-  await page.getByRole('button', { name: /통장내역 (검토|열기)|기존 통장내역 가져오기/ }).click();
+  await page.getByTestId('weekly-expense-bank-statement-action').click();
   await expect(page.getByTestId('weekly-expense-unsaved-dialog')).toBeVisible();
   await page.getByRole('button', { name: '계속 편집' }).click();
   await expect(page.getByTestId('weekly-expense-unsaved-dialog')).toBeHidden();
   await expect(page).toHaveURL(/\/portal\/weekly-expenses$/);
 
   await firstCounterpartyCell.fill('KTX-재수정');
-  await page.getByRole('button', { name: /통장내역 (검토|열기)|기존 통장내역 가져오기/ }).click();
+  await page.getByTestId('weekly-expense-bank-statement-action').click();
   await expect(page.getByTestId('weekly-expense-unsaved-dialog')).toBeVisible();
   await page.getByRole('button', { name: '변경 버리고 이동' }).click();
   await expect(page).toHaveURL(/\/portal\/bank-statements$/);

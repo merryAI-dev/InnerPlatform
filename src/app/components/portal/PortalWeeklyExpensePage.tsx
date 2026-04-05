@@ -822,13 +822,22 @@ export function PortalWeeklyExpensePage() {
                   잔액 조정
                 </Button>
               )}
-              <Button variant="outline" size="sm" onClick={() => requestRouteNavigation('/portal/bank-statements', '통장내역')}>
+              <Button
+                variant="outline"
+                size="sm"
+                data-testid="weekly-expense-bank-statement-action"
+                onClick={() => requestRouteNavigation('/portal/bank-statements', '통장내역')}
+              >
                 기존 통장내역 가져오기
                 <ArrowRight className="h-4 w-4" />
               </Button>
             </>
           ) : (
-            <Button size="sm" onClick={() => requestRouteNavigation('/portal/bank-statements', '통장내역')}>
+            <Button
+              size="sm"
+              data-testid="weekly-expense-bank-statement-action"
+              onClick={() => requestRouteNavigation('/portal/bank-statements', '통장내역')}
+            >
               {bankStatementCount > 0 ? '통장내역 검토' : '통장내역 열기'}
               <ArrowRight className="h-4 w-4" />
             </Button>
