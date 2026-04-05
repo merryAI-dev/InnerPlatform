@@ -7,18 +7,6 @@ import type {
 } from '../data/types';
 import { PlatformApiClient } from '../platform/api-client';
 import type { RequestActor } from '../platform/request-context';
-import type { MonthMondayWeek } from '../platform/cashflow-weeks';
-import {
-  deserializeImportRowsFromKernel,
-  serializeImportRowsForKernel,
-  type SettlementFlowSnapshot,
-  type SettlementKernelActualSyncResponse,
-  type SettlementKernelDeriveResponse,
-  type SettlementKernelFlowSnapshotResponse,
-} from '../platform/settlement-kernel-contract';
-import type { ImportRow } from '../platform/settlement-csv';
-import type { SettlementDerivationContext, SettlementDerivationOptions } from '../platform/settlement-row-derivation';
-import type { SettlementActualSyncWeekPayload } from '../platform/settlement-sheet-sync';
 
 export interface PlatformApiRuntimeConfig {
   enabled: boolean;
@@ -623,83 +611,6 @@ export async function analyzeGoogleSheetImportViaBff(params: {
     },
   );
   return normalizeGoogleSheetMigrationAnalysisResult(response.data);
-}
-
-export async function deriveSettlementRowsViaBff(params: {
-  tenantId: string;
-  actor: ActorLike;
-  projectId: string;
-  rows: ImportRow[];
-  context: SettlementDerivationContext;
-  options: SettlementDerivationOptions;
-  client?: PlatformApiClientLike;
-}): Promise<ImportRow[]> {
-  const apiClient = resolveClient(params.client);
-  const response = await apiClient.post<SettlementKernelDeriveResponse>(
-    `/api/v1/projects/${params.projectId}/settlement/derive`,
-    {
-      tenantId: params.tenantId,
-      actor: toRequestActor(params.actor),
-      body: {
-        rows: serializeImportRowsForKernel(params.rows),
-        context: params.context,
-        options: params.options,
-      },
-      timeoutMs: 15000,
-      retries: 0,
-    },
-  );
-  return deserializeImportRowsFromKernel(response.data.rows);
-}
-
-export async function previewSettlementActualSyncViaBff(params: {
-  tenantId: string;
-  actor: ActorLike;
-  projectId: string;
-  rows: ImportRow[];
-  yearWeeks: MonthMondayWeek[];
-  persistedRows?: ImportRow[] | null;
-  client?: PlatformApiClientLike;
-}): Promise<SettlementActualSyncWeekPayload[]> {
-  const apiClient = resolveClient(params.client);
-  const response = await apiClient.post<SettlementKernelActualSyncResponse>(
-    `/api/v1/projects/${params.projectId}/settlement/actual-sync-preview`,
-    {
-      tenantId: params.tenantId,
-      actor: toRequestActor(params.actor),
-      body: {
-        rows: serializeImportRowsForKernel(params.rows),
-        yearWeeks: params.yearWeeks,
-        ...(params.persistedRows ? { persistedRows: serializeImportRowsForKernel(params.persistedRows) } : {}),
-      },
-      timeoutMs: 15000,
-      retries: 0,
-    },
-  );
-  return response.data.weeks;
-}
-
-export async function previewSettlementFlowSnapshotsViaBff(params: {
-  tenantId: string;
-  actor: ActorLike;
-  projectId: string;
-  rows: ImportRow[];
-  client?: PlatformApiClientLike;
-}): Promise<SettlementFlowSnapshot[]> {
-  const apiClient = resolveClient(params.client);
-  const response = await apiClient.post<SettlementKernelFlowSnapshotResponse>(
-    `/api/v1/projects/${params.projectId}/settlement/flow-snapshot-preview`,
-    {
-      tenantId: params.tenantId,
-      actor: toRequestActor(params.actor),
-      body: {
-        rows: serializeImportRowsForKernel(params.rows),
-      },
-      timeoutMs: 15000,
-      retries: 0,
-    },
-  );
-  return response.data.snapshots;
 }
 
 export async function uploadProjectSheetSourceViaBff(params: {

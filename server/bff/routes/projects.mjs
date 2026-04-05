@@ -18,9 +18,6 @@ import {
   projectUpsertSchema,
   googleSheetImportPreviewSchema,
   googleSheetImportAnalyzeSchema,
-  settlementKernelDeriveSchema,
-  settlementKernelActualSyncSchema,
-  settlementKernelFlowSnapshotSchema,
   projectSheetSourceUploadSchema,
   projectRequestContractAnalyzeSchema,
   projectRequestContractUploadSchema,
@@ -28,7 +25,6 @@ import {
   projectRestoreSchema,
   projectTrashSchema,
 } from '../schemas.mjs';
-import { createSettlementKernelService } from '../settlement-kernel.mjs';
 
 function trimSlackText(value, maxLength = 200) {
   const text = readOptionalText(value);
@@ -373,7 +369,6 @@ export function mountProjectRoutes(app, {
   projectRequestContractStorageService,
   projectSheetSourceStorageService,
   projectRegistrationSlackService,
-  settlementKernelService = createSettlementKernelService(),
 }) {
   // ── GET /api/v1/projects ─────────────────────────────────────────────────────
   app.get('/api/v1/projects', asyncHandler(async (req, res) => {
@@ -685,72 +680,6 @@ export function mountProjectRoutes(app, {
       matrix: parsed.matrix,
     });
     res.status(200).json(analysis);
-  }));
-
-  app.post('/api/v1/projects/:projectId/settlement/derive', asyncHandler(async (req, res) => {
-    const { tenantId } = req.context;
-    assertActorRoleAllowed(req, ROUTE_ROLES.readCore, 'derive settlement rows');
-    const { projectId } = req.params;
-    const parsed = parseWithSchema(settlementKernelDeriveSchema, req.body, 'Invalid settlement derive payload');
-
-    await ensureDocumentExists(db, `orgs/${tenantId}/projects/${projectId}`, `Project not found: ${projectId}`);
-
-    if (!settlementKernelService?.isAvailable?.()) {
-      throw createHttpError(503, 'Settlement kernel unavailable.', 'settlement_kernel_unavailable');
-    }
-
-    try {
-      const derived = settlementKernelService.deriveRows(parsed);
-      res.status(200).json(derived);
-    } catch (error) {
-      const statusCode = Number.isInteger(error?.statusCode) ? error.statusCode : 502;
-      const message = readOptionalText(error?.message) || 'Settlement kernel failed.';
-      throw createHttpError(statusCode, message, error?.code || 'settlement_kernel_failed');
-    }
-  }));
-
-  app.post('/api/v1/projects/:projectId/settlement/actual-sync-preview', asyncHandler(async (req, res) => {
-    const { tenantId } = req.context;
-    assertActorRoleAllowed(req, ROUTE_ROLES.readCore, 'preview settlement actual sync');
-    const { projectId } = req.params;
-    const parsed = parseWithSchema(settlementKernelActualSyncSchema, req.body, 'Invalid settlement actual sync payload');
-
-    await ensureDocumentExists(db, `orgs/${tenantId}/projects/${projectId}`, `Project not found: ${projectId}`);
-
-    if (!settlementKernelService?.isAvailable?.()) {
-      throw createHttpError(503, 'Settlement kernel unavailable.', 'settlement_kernel_unavailable');
-    }
-
-    try {
-      const preview = settlementKernelService.previewActualSync(parsed);
-      res.status(200).json(preview);
-    } catch (error) {
-      const statusCode = Number.isInteger(error?.statusCode) ? error.statusCode : 502;
-      const message = readOptionalText(error?.message) || 'Settlement kernel failed.';
-      throw createHttpError(statusCode, message, error?.code || 'settlement_kernel_failed');
-    }
-  }));
-
-  app.post('/api/v1/projects/:projectId/settlement/flow-snapshot-preview', asyncHandler(async (req, res) => {
-    const { tenantId } = req.context;
-    assertActorRoleAllowed(req, ROUTE_ROLES.readCore, 'preview settlement flow snapshot');
-    const { projectId } = req.params;
-    const parsed = parseWithSchema(settlementKernelFlowSnapshotSchema, req.body, 'Invalid settlement flow snapshot payload');
-
-    await ensureDocumentExists(db, `orgs/${tenantId}/projects/${projectId}`, `Project not found: ${projectId}`);
-
-    if (!settlementKernelService?.isAvailable?.()) {
-      throw createHttpError(503, 'Settlement kernel unavailable.', 'settlement_kernel_unavailable');
-    }
-
-    try {
-      const preview = settlementKernelService.previewFlowSnapshot(parsed);
-      res.status(200).json(preview);
-    } catch (error) {
-      const statusCode = Number.isInteger(error?.statusCode) ? error.statusCode : 502;
-      const message = readOptionalText(error?.message) || 'Settlement kernel failed.';
-      throw createHttpError(statusCode, message, error?.code || 'settlement_kernel_failed');
-    }
   }));
 
   // ── Sheet source upload ──────────────────────────────────────────────────────
