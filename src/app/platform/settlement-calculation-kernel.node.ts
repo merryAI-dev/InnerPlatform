@@ -1,3 +1,5 @@
+// Node-only adapter for parity and batch verification against the Rust binary.
+// Browser-facing settlement calculations stay in TypeScript.
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -20,7 +22,7 @@ const repoRoot = path.resolve(currentDir, '../../..');
 const cargoManifestPath = path.resolve(repoRoot, 'rust/spreadsheet-calculation-core/Cargo.toml');
 const rustBinaryPath = path.resolve(repoRoot, 'rust/spreadsheet-calculation-core/target/debug/spreadsheet-calculation-core');
 
-export const SETTLEMENT_RUST_KERNEL_PATHS = {
+export const SETTLEMENT_RUST_PARITY_PATHS = {
   repoRoot,
   cargoManifestPath,
   rustBinaryPath,
@@ -39,9 +41,9 @@ interface KernelBudgetActualItemJson {
   amount: number;
 }
 
-function runRustKernel(input: object): string {
+function runRustParityBinary(input: object): string {
   if (!existsSync(rustBinaryPath)) {
-    throw new Error('Rust settlement kernel binary is not built.');
+    throw new Error('Rust settlement parity binary is not built.');
   }
   const result = spawnSync(rustBinaryPath, {
     cwd: repoRoot,
@@ -49,12 +51,12 @@ function runRustKernel(input: object): string {
     encoding: 'utf8',
   });
   if (result.status !== 0) {
-    throw new Error(result.stderr || result.stdout || 'Rust settlement kernel failed.');
+    throw new Error(result.stderr || result.stdout || 'Rust settlement parity binary failed.');
   }
   return result.stdout;
 }
 
-export function settlementRustKernelAvailable(): boolean {
+export function settlementRustParityBinaryAvailable(): boolean {
   return existsSync(rustBinaryPath);
 }
 
@@ -63,7 +65,7 @@ export function deriveSettlementRowsViaRustKernel(
   context: SettlementDerivationContext,
   options: SettlementDerivationOptions,
 ): ImportRow[] {
-  const stdout = runRustKernel({
+  const stdout = runRustParityBinary({
     rows: serializeImportRowsForKernel(rows),
     context,
     options,
@@ -76,7 +78,7 @@ export function buildSettlementActualSyncPayloadViaRustKernel(
   yearWeeks: MonthMondayWeek[],
   persistedRows?: ImportRow[] | null,
 ): KernelActualSyncWeekJson[] {
-  const stdout = runRustKernel({
+  const stdout = runRustParityBinary({
     command: 'actualSync',
     rows: serializeImportRowsForKernel(rows),
     yearWeeks,
@@ -88,7 +90,7 @@ export function buildSettlementActualSyncPayloadViaRustKernel(
 export function aggregateBudgetActualsViaRustKernel(
   rows: ImportRow[],
 ): { items: KernelBudgetActualItemJson[]; total: number } {
-  const stdout = runRustKernel({
+  const stdout = runRustParityBinary({
     command: 'budgetActuals',
     rows: serializeImportRowsForKernel(rows),
   });
@@ -98,7 +100,7 @@ export function aggregateBudgetActualsViaRustKernel(
 export function buildSettlementFlowSnapshotsViaRustKernel(
   rows: ImportRow[],
 ): SettlementFlowSnapshot[] {
-  const stdout = runRustKernel({
+  const stdout = runRustParityBinary({
     command: 'flowSnapshot',
     rows: serializeImportRowsForKernel(rows),
   });

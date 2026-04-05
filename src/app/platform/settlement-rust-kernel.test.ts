@@ -12,7 +12,7 @@ import {
   buildSettlementActualSyncPayloadViaRustKernel,
   buildSettlementFlowSnapshotsViaRustKernel,
   deriveSettlementRowsViaRustKernel,
-  SETTLEMENT_RUST_KERNEL_PATHS,
+  SETTLEMENT_RUST_PARITY_PATHS,
 } from './settlement-calculation-kernel.node';
 import { parseNumber } from './csv-utils';
 import { getYearMondayWeeks, type MonthMondayWeek } from './cashflow-weeks';
@@ -27,7 +27,7 @@ import {
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(currentDir, '../../..');
-const cargoManifestPath = SETTLEMENT_RUST_KERNEL_PATHS.cargoManifestPath;
+const cargoManifestPath = SETTLEMENT_RUST_PARITY_PATHS.cargoManifestPath;
 const cargoAvailable = spawnSync('cargo', ['--version'], { cwd: repoRoot, encoding: 'utf8' }).status === 0;
 
 interface KernelActualSyncWeekJson {
@@ -88,6 +88,12 @@ function expectRowsToMatch(tsRows: ImportRow[], rustRows: ImportRow[]) {
 const describeRust = cargoAvailable ? describe : describe.skip;
 
 describeRust('settlement-rust-kernel', () => {
+  it('keeps the Rust bridge behind a node-only parity boundary', () => {
+    const browserKernelSource = readFileSync(path.resolve(currentDir, './settlement-calculation-kernel.ts'), 'utf8');
+    expect(browserKernelSource).not.toContain('settlement-calculation-kernel.node');
+    expect(browserKernelSource).not.toContain('ViaRustKernel');
+  });
+
   beforeAll(() => {
     const build = spawnSync('cargo', ['build', '--quiet', '--manifest-path', cargoManifestPath], {
       cwd: repoRoot,
