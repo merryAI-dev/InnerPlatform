@@ -47,7 +47,7 @@ import {
   type SettlementDerivationOptions,
   isSettlementCascadeColumn,
 } from '../../platform/settlement-row-derivation';
-import { deriveSettlementRowsWithKernel } from '../../platform/settlement-calculation-kernel';
+import { deriveSettlementRowsLocally } from '../../platform/settlement-calculation-kernel';
 import {
   countConfirmedImportRowReviews,
   countPendingImportRowReviews,
@@ -645,7 +645,7 @@ export function ImportEditor({
     options: SettlementDerivationOptions,
   ) => {
     if (!onDeriveRows) {
-      onChange(deriveSettlementRowsWithKernel(nextRows, settlementDerivationContext, options));
+      onChange(deriveSettlementRowsLocally(nextRows, settlementDerivationContext, options));
       return;
     }
 

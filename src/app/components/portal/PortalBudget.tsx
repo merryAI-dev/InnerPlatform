@@ -44,7 +44,7 @@ import {
 } from '../../platform/budget-plan-import';
 import {
   aggregateBudgetActualsAuthoritatively,
-  aggregateBudgetActualsFromSettlementRowsWithKernel,
+  aggregateBudgetActualsFromSettlementRowsLocally,
 } from '../../platform/settlement-calculation-kernel';
 import { moveBudgetSubCode, moveBudgetSubCodeToIndex } from '../../platform/budget-code-book-order';
 import { buildBudgetLabelKey, normalizeBudgetLabel } from '../../platform/budget-labels';
@@ -300,7 +300,7 @@ export function PortalBudget() {
   }, [budgetPlanRows]);
 
   const [spentMap, setSpentMap] = useState<Map<string, number>>(
-    () => aggregateBudgetActualsFromSettlementRowsWithKernel(expenseSheetRows),
+    () => aggregateBudgetActualsFromSettlementRowsLocally(expenseSheetRows),
   );
 
   const activeCodeBook = useMemo(
@@ -415,7 +415,7 @@ export function PortalBudget() {
   const budgetImportShowAiPanel = budgetImportAiShouldRun || budgetImportAiLoading || Boolean(budgetImportAiAnalysis) || Boolean(budgetImportAiError);
 
   useEffect(() => {
-    const fallback = aggregateBudgetActualsFromSettlementRowsWithKernel(expenseSheetRows);
+    const fallback = aggregateBudgetActualsFromSettlementRowsLocally(expenseSheetRows);
     setSpentMap(fallback);
 
     if (!platformApiEnabled || !orgId || !projectId) {

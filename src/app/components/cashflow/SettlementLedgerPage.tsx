@@ -21,7 +21,7 @@ import {
   type ImportRow,
 } from '../../platform/settlement-csv';
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
-import { buildSettlementActualSyncPayloadWithKernel } from '../../platform/settlement-calculation-kernel';
+import { buildSettlementActualSyncPayloadLocally } from '../../platform/settlement-calculation-kernel';
 import type { SettlementDerivationContext, SettlementDerivationOptions } from '../../platform/settlement-row-derivation';
 import type { SettlementActualSyncWeekPayload } from '../../platform/settlement-sheet-sync';
 import { Badge } from '../ui/badge';
@@ -548,7 +548,7 @@ export function SettlementLedgerPage({
       const previewSourceRows = Array.isArray(persistedRows) ? persistedRows : rows;
       const payload = onPreviewActualSyncPayload
         ? await onPreviewActualSyncPayload(previewSourceRows, yearWeeks, sheetRows || null)
-        : buildSettlementActualSyncPayloadWithKernel(previewSourceRows, yearWeeks, sheetRows || null);
+        : buildSettlementActualSyncPayloadLocally(previewSourceRows, yearWeeks, sheetRows || null);
       await updateWeeklyStatusesForPayload(payload, {
         expenseUpdated: true,
         expenseSyncState: 'pending',
@@ -579,7 +579,7 @@ export function SettlementLedgerPage({
     const reviewCountsByWeekLabel = buildPendingReviewCountsByWeek(rows);
     const payload = onPreviewActualSyncPayload
       ? await onPreviewActualSyncPayload(rows, yearWeeks, sheetRows || null)
-      : buildSettlementActualSyncPayloadWithKernel(rows, yearWeeks, sheetRows || null);
+      : buildSettlementActualSyncPayloadLocally(rows, yearWeeks, sheetRows || null);
     const weekLabelMap = buildPayloadWeekLabelMap();
     const blockedWeeks = payload.filter((week) => (
       reviewCountsByWeekLabel.get(weekLabelMap.get(`${week.yearMonth}:${week.weekNo}`) || '') || 0

@@ -59,7 +59,7 @@ import {
 } from '../../platform/google-sheet-migration';
 import { parseLocalWorkbookFile, type LocalWorkbookSheet } from '../../platform/local-workbook';
 import { reportError } from '../../platform/observability';
-import { buildSettlementActualSyncPayloadWithKernel } from '../../platform/settlement-calculation-kernel';
+import { buildSettlementActualSyncPayloadLocally } from '../../platform/settlement-calculation-kernel';
 import type { SettlementActualSyncWeekPayload } from '../../platform/settlement-sheet-sync';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -787,7 +787,7 @@ export function GoogleSheetMigrationWizard({
               getYearMondayWeeks(new Date().getFullYear()),
               expenseSheetRows,
             )
-            : buildSettlementActualSyncPayloadWithKernel(
+            : buildSettlementActualSyncPayloadLocally(
               actualPreviewRows,
               getYearMondayWeeks(new Date().getFullYear()),
               expenseSheetRows,

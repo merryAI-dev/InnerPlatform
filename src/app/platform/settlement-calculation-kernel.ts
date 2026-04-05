@@ -62,7 +62,7 @@ export function getSettlementCalculationKernel(): SettlementCalculationKernel {
   return typeScriptSettlementCalculationKernel;
 }
 
-export function deriveSettlementRowsWithKernel(
+export function deriveSettlementRowsLocally(
   rows: ImportRow[],
   context: SettlementDerivationContext,
   options: SettlementDerivationOptions,
@@ -70,7 +70,7 @@ export function deriveSettlementRowsWithKernel(
   return getSettlementCalculationKernel().deriveRows(rows, context, options);
 }
 
-export function buildSettlementActualSyncPayloadWithKernel(
+export function buildSettlementActualSyncPayloadLocally(
   rows: ImportRow[],
   yearWeeks: MonthMondayWeek[],
   persistedRows?: ImportRow[] | null,
@@ -78,13 +78,13 @@ export function buildSettlementActualSyncPayloadWithKernel(
   return getSettlementCalculationKernel().buildActualSyncPayload(rows, yearWeeks, persistedRows);
 }
 
-export function buildSettlementFlowSnapshotsWithKernel(
+export function buildSettlementFlowSnapshotsLocally(
   rows: ImportRow[] | null | undefined,
 ): SettlementFlowSnapshot[] {
   return getSettlementCalculationKernel().buildFlowSnapshots(rows);
 }
 
-export function aggregateBudgetActualsFromSettlementRowsWithKernel(
+export function aggregateBudgetActualsFromSettlementRowsLocally(
   rows: ImportRow[] | null | undefined,
 ): Map<string, number> {
   return getSettlementCalculationKernel().aggregateBudgetActuals(rows);
@@ -118,7 +118,7 @@ export async function deriveSettlementRowsAuthoritatively(params: {
       options: params.options,
     });
   }
-  return deriveSettlementRowsWithKernel(params.rows, params.context, params.options);
+  return deriveSettlementRowsLocally(params.rows, params.context, params.options);
 }
 
 export async function previewSettlementActualSyncAuthoritatively(params: {
@@ -137,7 +137,7 @@ export async function previewSettlementActualSyncAuthoritatively(params: {
       ...(params.persistedRows ? { persistedRows: params.persistedRows } : {}),
     });
   }
-  return buildSettlementActualSyncPayloadWithKernel(params.rows, params.yearWeeks, params.persistedRows);
+  return buildSettlementActualSyncPayloadLocally(params.rows, params.yearWeeks, params.persistedRows);
 }
 
 export async function previewSettlementFlowSnapshotsAuthoritatively(params: {
@@ -153,7 +153,7 @@ export async function previewSettlementFlowSnapshotsAuthoritatively(params: {
       rows,
     });
   }
-  return buildSettlementFlowSnapshotsWithKernel(rows);
+  return buildSettlementFlowSnapshotsLocally(rows);
 }
 
 export async function aggregateBudgetActualsAuthoritatively(params: {

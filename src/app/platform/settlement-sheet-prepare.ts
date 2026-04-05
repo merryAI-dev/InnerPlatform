@@ -4,7 +4,7 @@ import { buildBudgetLabelKey, normalizeBudgetLabel } from './budget-labels';
 import {
   type SettlementDerivationContext,
 } from './settlement-row-derivation';
-import { deriveSettlementRowsWithKernel } from './settlement-calculation-kernel';
+import { deriveSettlementRowsLocally } from './settlement-calculation-kernel';
 import { resolveEvidenceRequiredByRules } from './evidence-rules';
 
 function getColumnIndex(header: string): number {
@@ -109,7 +109,7 @@ export function prepareSettlementImportRows(
   const baseRows = prepareSettlementImportRowsBase(rows, options);
   if (baseRows.length === 0) return [];
 
-  return deriveSettlementRowsWithKernel(
+  return deriveSettlementRowsLocally(
     baseRows,
     buildSettlementDerivationContext(options.projectId, options.defaultLedgerId, options.policy, options.basis),
     { mode: 'full' },
