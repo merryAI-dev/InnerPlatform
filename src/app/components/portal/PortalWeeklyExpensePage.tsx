@@ -1,4 +1,4 @@
-import { lazy, Suspense, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import {
   AlertTriangle,
@@ -42,8 +42,8 @@ import {
 } from '../../lib/platform-bff-client';
 import { PlatformApiError } from '../../platform/api-client';
 import {
-  deriveSettlementRowsAuthoritatively,
-  previewSettlementActualSyncAuthoritatively,
+  deriveSettlementRowsAuthoritatively as deriveSettlementRowsLocally,
+  previewSettlementActualSyncAuthoritatively as previewSettlementActualSyncLocally,
 } from '../../platform/settlement-calculation-kernel';
 import {
   GoogleDriveBrowserUploadError,
@@ -216,18 +216,22 @@ export function PortalWeeklyExpensePage() {
     portalUser?.email,
     portalUser?.role,
   ]);
-  const deriveRowsAuthoritatively = async (rows: ImportRow[], context: Parameters<typeof deriveSettlementRowsAuthoritatively>[0]['context'], options: Parameters<typeof deriveSettlementRowsAuthoritatively>[0]['options']) => (
-    deriveSettlementRowsAuthoritatively({ rows, context, options })
-  );
-  const previewActualSyncAuthoritatively = async (
+  const deriveRowsAuthoritatively = useCallback((
     rows: ImportRow[],
-    yearWeeks: Parameters<typeof previewSettlementActualSyncAuthoritatively>[0]['yearWeeks'],
+    context: Parameters<typeof deriveSettlementRowsLocally>[0]['context'],
+    options: Parameters<typeof deriveSettlementRowsLocally>[0]['options'],
+  ) => (
+    deriveSettlementRowsLocally({ rows, context, options })
+  ), []);
+  const previewActualSyncAuthoritatively = useCallback((
+    rows: ImportRow[],
+    yearWeeks: Parameters<typeof previewSettlementActualSyncLocally>[0]['yearWeeks'],
     persistedRows?: ImportRow[] | null,
-  ) => previewSettlementActualSyncAuthoritatively({
+  ) => previewSettlementActualSyncLocally({
     rows,
     yearWeeks,
     persistedRows,
-  });
+  }), []);
 
   const handleEvidenceDriveError = (error: unknown, actionLabel: string) => {
     reportError(error, {
