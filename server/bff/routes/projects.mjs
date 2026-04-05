@@ -20,6 +20,7 @@ import {
   googleSheetImportAnalyzeSchema,
   settlementKernelDeriveSchema,
   settlementKernelActualSyncSchema,
+  settlementKernelFlowSnapshotSchema,
   projectSheetSourceUploadSchema,
   projectRequestContractAnalyzeSchema,
   projectRequestContractUploadSchema,
@@ -722,6 +723,28 @@ export function mountProjectRoutes(app, {
 
     try {
       const preview = settlementKernelService.previewActualSync(parsed);
+      res.status(200).json(preview);
+    } catch (error) {
+      const statusCode = Number.isInteger(error?.statusCode) ? error.statusCode : 502;
+      const message = readOptionalText(error?.message) || 'Settlement kernel failed.';
+      throw createHttpError(statusCode, message, error?.code || 'settlement_kernel_failed');
+    }
+  }));
+
+  app.post('/api/v1/projects/:projectId/settlement/flow-snapshot-preview', asyncHandler(async (req, res) => {
+    const { tenantId } = req.context;
+    assertActorRoleAllowed(req, ROUTE_ROLES.readCore, 'preview settlement flow snapshot');
+    const { projectId } = req.params;
+    const parsed = parseWithSchema(settlementKernelFlowSnapshotSchema, req.body, 'Invalid settlement flow snapshot payload');
+
+    await ensureDocumentExists(db, `orgs/${tenantId}/projects/${projectId}`, `Project not found: ${projectId}`);
+
+    if (!settlementKernelService?.isAvailable?.()) {
+      throw createHttpError(503, 'Settlement kernel unavailable.', 'settlement_kernel_unavailable');
+    }
+
+    try {
+      const preview = settlementKernelService.previewFlowSnapshot(parsed);
       res.status(200).json(preview);
     } catch (error) {
       const statusCode = Number.isInteger(error?.statusCode) ? error.statusCode : 502;

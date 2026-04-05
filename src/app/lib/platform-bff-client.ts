@@ -11,8 +11,10 @@ import type { MonthMondayWeek } from '../platform/cashflow-weeks';
 import {
   deserializeImportRowsFromKernel,
   serializeImportRowsForKernel,
+  type SettlementFlowSnapshot,
   type SettlementKernelActualSyncResponse,
   type SettlementKernelDeriveResponse,
+  type SettlementKernelFlowSnapshotResponse,
 } from '../platform/settlement-kernel-contract';
 import type { ImportRow } from '../platform/settlement-csv';
 import type { SettlementDerivationContext, SettlementDerivationOptions } from '../platform/settlement-row-derivation';
@@ -675,6 +677,29 @@ export async function previewSettlementActualSyncViaBff(params: {
     },
   );
   return response.data.weeks;
+}
+
+export async function previewSettlementFlowSnapshotsViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  rows: ImportRow[];
+  client?: PlatformApiClientLike;
+}): Promise<SettlementFlowSnapshot[]> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<SettlementKernelFlowSnapshotResponse>(
+    `/api/v1/projects/${params.projectId}/settlement/flow-snapshot-preview`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: {
+        rows: serializeImportRowsForKernel(params.rows),
+      },
+      timeoutMs: 15000,
+      retries: 0,
+    },
+  );
+  return response.data.snapshots;
 }
 
 export async function uploadProjectSheetSourceViaBff(params: {

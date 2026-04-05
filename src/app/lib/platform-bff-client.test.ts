@@ -10,6 +10,7 @@ import {
   notifyProjectRequestRegistrationViaBff,
   overrideTransactionEvidenceDriveCategoriesViaBff,
   previewSettlementActualSyncViaBff,
+  previewSettlementFlowSnapshotsViaBff,
   previewGoogleSheetImportViaBff,
   processProjectRequestContractViaBff,
   provisionProjectEvidenceDriveRootViaBff,
@@ -273,6 +274,53 @@ describe('platform-bff-client', () => {
         INPUT_VAT_OUT: 10000,
       },
     }]);
+  });
+
+  it('calls settlement flow snapshot preview endpoint', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({
+        data: {
+          snapshots: [{
+            tempId: 'imp-1',
+            sourceTxId: 'bank:expense-1',
+            entryKind: 'EXPENSE',
+            lineId: 'DIRECT_COST_OUT',
+            bankAmount: 110000,
+            expenseAmount: 0,
+            vatIn: 0,
+            depositAmount: 0,
+            refundAmount: 0,
+            budgetActualAmount: 0,
+            cashflowActualLineAmounts: {},
+            manualOutflowPending: true,
+          }],
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    const snapshots = await previewSettlementFlowSnapshotsViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm' },
+      projectId: 'p001',
+      rows: [{
+        tempId: 'imp-1',
+        sourceTxId: 'bank:expense-1',
+        entryKind: 'EXPENSE',
+        cells: Array.from({ length: 20 }, () => ''),
+      }],
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/projects/p001/settlement/flow-snapshot-preview', expect.objectContaining({
+      tenantId: 'mysc',
+      body: expect.objectContaining({
+        rows: expect.any(Array),
+      }),
+    }));
+    expect(snapshots[0]?.manualOutflowPending).toBe(true);
+    expect(snapshots[0]?.cashflowActualLineAmounts).toEqual({});
   });
 
   it('calls transaction state endpoint with expected version', async () => {

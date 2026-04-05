@@ -139,6 +139,14 @@ export const settlementKernelActualSyncSchema = z.object({
   persistedRows: z.array(settlementKernelImportRowSchema).optional(),
 }).strict();
 
+export const settlementKernelFlowSnapshotSchema = z.object({
+  rows: z.array(settlementKernelImportRowSchema),
+}).strict();
+
+export const settlementKernelFlowSnapshotSchema = z.object({
+  rows: z.array(settlementKernelImportRowSchema),
+}).strict();
+
 export const projectSheetSourceUploadSchema = z.object({
   sourceType: z.enum(['usage', 'budget', 'evidence_rules', 'cashflow', 'bank_statement']),
   sheetName: NON_EMPTY_STRING.max(200),

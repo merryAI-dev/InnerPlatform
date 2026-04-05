@@ -1,8 +1,9 @@
 use serde::Deserialize;
 use serde_json::Value;
 use spreadsheet_calculation_core::{
-    aggregate_budget_actuals, build_settlement_actual_sync_payload, derive_settlement_rows,
-    KernelActualSyncRequest, KernelBudgetActualsRequest, KernelRequest,
+    aggregate_budget_actuals, build_settlement_actual_sync_payload, build_settlement_flow_snapshots,
+    derive_settlement_rows, KernelActualSyncRequest, KernelBudgetActualsRequest,
+    KernelFlowSnapshotRequest, KernelRequest,
 };
 use std::io::{self, Read};
 
@@ -34,6 +35,12 @@ fn main() {
                 .expect("failed to parse budget actuals request");
             let response = aggregate_budget_actuals(request);
             serde_json::to_writer(io::stdout(), &response).expect("failed to write budget actuals response");
+        }
+        Some("flowSnapshot") => {
+            let request: KernelFlowSnapshotRequest = serde_json::from_value(raw)
+                .expect("failed to parse flow snapshot request");
+            let response = build_settlement_flow_snapshots(request);
+            serde_json::to_writer(io::stdout(), &response).expect("failed to write flow snapshot response");
         }
         _ => {
             let request: KernelRequest = serde_json::from_value(raw)

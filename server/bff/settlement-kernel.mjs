@@ -58,6 +58,12 @@ export function createSettlementKernelService(options = {}) {
     deriveRows(input) {
       return run(input);
     },
+    previewFlowSnapshot(input) {
+      return run({
+        command: 'flowSnapshot',
+        ...input,
+      });
+    },
     previewActualSync(input) {
       return run({
         command: 'actualSync',

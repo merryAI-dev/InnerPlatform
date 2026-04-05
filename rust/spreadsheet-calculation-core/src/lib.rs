@@ -73,6 +73,44 @@ pub struct KernelBudgetActualsResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct KernelFlowSnapshotRequest {
+    pub rows: Vec<KernelImportRow>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KernelFlowSnapshot {
+    pub temp_id: String,
+    #[serde(default)]
+    pub source_tx_id: Option<String>,
+    #[serde(default)]
+    pub entry_kind: Option<String>,
+    #[serde(default)]
+    pub budget_key: Option<String>,
+    #[serde(default)]
+    pub budget_code: Option<String>,
+    #[serde(default)]
+    pub sub_code: Option<String>,
+    #[serde(default)]
+    pub line_id: Option<String>,
+    pub bank_amount: f64,
+    pub expense_amount: f64,
+    pub vat_in: f64,
+    pub deposit_amount: f64,
+    pub refund_amount: f64,
+    pub budget_actual_amount: f64,
+    pub cashflow_actual_line_amounts: BTreeMap<String, f64>,
+    pub manual_outflow_pending: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KernelFlowSnapshotResponse {
+    pub snapshots: Vec<KernelFlowSnapshot>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct KernelImportRow {
     pub temp_id: String,
     #[serde(default)]
@@ -445,6 +483,114 @@ fn cashflow_all_line_ids() -> [&'static str; 12] {
         "TEAM_SUPPORT_OUT",
         "BANK_INTEREST_OUT",
     ]
+}
+
+fn is_manual_outflow_pending(
+    row: &KernelImportRow,
+    line_id: Option<&str>,
+    expense_amount: f64,
+    vat_in: f64,
+) -> bool {
+    if !is_bank_imported_source_row(row) || row.entry_kind.as_deref() != Some("EXPENSE") {
+        return false;
+    }
+    let Some(line_id) = line_id else {
+        return true;
+    };
+    if cashflow_in_line_ids().contains(&line_id) {
+        return false;
+    }
+    if line_id == "INPUT_VAT_OUT" {
+        return vat_in <= 0.0;
+    }
+    expense_amount <= 0.0
+}
+
+fn compute_cashflow_actual_line_amounts(
+    line_id: Option<&str>,
+    bank_amount: f64,
+    expense_amount: f64,
+    vat_in: f64,
+    deposit_amount: f64,
+    refund_amount: f64,
+    manual_outflow_pending: bool,
+) -> BTreeMap<String, f64> {
+    let Some(line_id) = line_id else {
+        return BTreeMap::new();
+    };
+    if manual_outflow_pending {
+        return BTreeMap::new();
+    }
+
+    let mut result = BTreeMap::new();
+    if cashflow_in_line_ids().contains(&line_id) {
+        let inflow_amount = if deposit_amount > 0.0 {
+            deposit_amount
+        } else if refund_amount > 0.0 {
+            refund_amount
+        } else {
+            bank_amount
+        };
+        if inflow_amount > 0.0 {
+            result.insert(line_id.to_string(), inflow_amount);
+        }
+        return result;
+    }
+
+    if line_id == "INPUT_VAT_OUT" {
+        if vat_in > 0.0 {
+            result.insert("INPUT_VAT_OUT".to_string(), vat_in);
+        }
+        return result;
+    }
+
+    let primary_out_amount = if expense_amount > 0.0 {
+        expense_amount
+    } else if deposit_amount > 0.0 || refund_amount > 0.0 {
+        0.0
+    } else {
+        bank_amount
+    };
+    if primary_out_amount > 0.0 {
+        result.insert(line_id.to_string(), primary_out_amount);
+    }
+    if vat_in > 0.0 {
+        result.insert("INPUT_VAT_OUT".to_string(), vat_in);
+    }
+    result
+}
+
+fn compute_budget_actual_amount(
+    line_id: Option<&str>,
+    bank_amount: f64,
+    expense_amount: f64,
+    vat_in: f64,
+    deposit_amount: f64,
+    refund_amount: f64,
+    manual_outflow_pending: bool,
+) -> f64 {
+    if manual_outflow_pending {
+        return 0.0;
+    }
+    if line_id.is_none() {
+        return 0.0;
+    }
+    if matches!(line_id, Some(line) if cashflow_in_line_ids().contains(&line)) {
+        return 0.0;
+    }
+    if line_id == Some("INPUT_VAT_OUT") {
+        return vat_in;
+    }
+    if expense_amount > 0.0 {
+        return expense_amount;
+    }
+    if vat_in > 0.0 && bank_amount == 0.0 {
+        return vat_in;
+    }
+    if deposit_amount > 0.0 || refund_amount > 0.0 {
+        return 0.0;
+    }
+    bank_amount
 }
 
 fn parse_cashflow_line_label(raw: &str) -> Option<&'static str> {
@@ -847,126 +993,73 @@ fn resolve_week_label_from_row(
     derive_week_label(&raw_date)
 }
 
-fn resolve_actual_amount(
-    row: &KernelImportRow,
-    line_id: &str,
-    bank_amount_idx: Option<usize>,
-    expense_amount_idx: Option<usize>,
-    vat_in_idx: Option<usize>,
-    deposit_idx: Option<usize>,
-    refund_idx: Option<usize>,
-) -> f64 {
-    let amounts = resolve_cashflow_actual_line_amounts(
-        row,
-        bank_amount_idx,
-        expense_amount_idx,
-        vat_in_idx,
-        deposit_idx,
-        refund_idx,
-    );
-    amounts.get(line_id).copied().unwrap_or(0.0)
-}
-
-fn resolve_cashflow_actual_line_amounts(
-    row: &KernelImportRow,
-    bank_amount_idx: Option<usize>,
-    expense_amount_idx: Option<usize>,
-    vat_in_idx: Option<usize>,
-    deposit_idx: Option<usize>,
-    refund_idx: Option<usize>,
-) -> BTreeMap<String, f64> {
+fn build_flow_snapshot(row: &KernelImportRow) -> KernelFlowSnapshot {
+    let budget_code = get_cell(&row.cells, Some(5usize)).trim().to_string();
+    let sub_code = get_cell(&row.cells, Some(6usize)).trim().to_string();
     let cashflow_label = get_cell(&row.cells, Some(8usize));
-    let Some(line_id) = parse_cashflow_line_label(&cashflow_label) else {
-        return BTreeMap::new();
-    };
-    let bank_amount = parse_amount(&row.cells, bank_amount_idx);
-    let expense_amount = parse_amount(&row.cells, expense_amount_idx);
-    let vat_in = parse_amount(&row.cells, vat_in_idx);
-    let deposit_amount = parse_amount(&row.cells, deposit_idx);
-    let refund_amount = parse_amount(&row.cells, refund_idx);
-    let mut result = BTreeMap::new();
-
-    if cashflow_in_line_ids().contains(&line_id) {
-        let inflow_amount = if deposit_amount > 0.0 {
-            deposit_amount
-        } else if refund_amount > 0.0 {
-            refund_amount
-        } else {
-            bank_amount
-        };
-        if inflow_amount > 0.0 {
-            result.insert(line_id.to_string(), inflow_amount);
-        }
-        return result;
-    }
-
-    if line_id == "INPUT_VAT_OUT" {
-        if vat_in > 0.0 {
-            result.insert("INPUT_VAT_OUT".to_string(), vat_in);
-        }
-        return result;
-    }
-
-    let primary_out_amount = if expense_amount > 0.0 {
-        expense_amount
-    } else if deposit_amount > 0.0 || refund_amount > 0.0 {
-        0.0
+    let line_id = parse_cashflow_line_label(&cashflow_label);
+    let bank_amount = parse_amount(&row.cells, Some(10usize));
+    let deposit_amount = parse_amount(&row.cells, Some(11usize));
+    let refund_amount = parse_amount(&row.cells, Some(12usize));
+    let expense_amount = parse_amount(&row.cells, Some(13usize));
+    let vat_in = parse_amount(&row.cells, Some(14usize));
+    let manual_outflow_pending = is_manual_outflow_pending(row, line_id, expense_amount, vat_in);
+    let cashflow_actual_line_amounts = compute_cashflow_actual_line_amounts(
+        line_id,
+        bank_amount,
+        expense_amount,
+        vat_in,
+        deposit_amount,
+        refund_amount,
+        manual_outflow_pending,
+    );
+    let budget_actual_amount = compute_budget_actual_amount(
+        line_id,
+        bank_amount,
+        expense_amount,
+        vat_in,
+        deposit_amount,
+        refund_amount,
+        manual_outflow_pending,
+    );
+    let budget_key = if budget_code.is_empty() && sub_code.is_empty() {
+        None
     } else {
-        bank_amount
+        Some(format!("{budget_code}|{sub_code}"))
     };
-    if primary_out_amount > 0.0 {
-        result.insert(line_id.to_string(), primary_out_amount);
+
+    KernelFlowSnapshot {
+        temp_id: row.temp_id.clone(),
+        source_tx_id: row.source_tx_id.clone(),
+        entry_kind: row.entry_kind.clone(),
+        budget_key,
+        budget_code: if budget_code.is_empty() { None } else { Some(budget_code) },
+        sub_code: if sub_code.is_empty() { None } else { Some(sub_code) },
+        line_id: line_id.map(|value| value.to_string()),
+        bank_amount,
+        expense_amount,
+        vat_in,
+        deposit_amount,
+        refund_amount,
+        budget_actual_amount,
+        cashflow_actual_line_amounts,
+        manual_outflow_pending,
     }
-    if vat_in > 0.0 {
-        result.insert("INPUT_VAT_OUT".to_string(), vat_in);
-    }
-    result
 }
 
-fn resolve_budget_actual_amount(
-    row: &KernelImportRow,
-    cashflow_idx: Option<usize>,
-    bank_amount_idx: Option<usize>,
-    expense_amount_idx: Option<usize>,
-    vat_in_idx: Option<usize>,
-    deposit_idx: Option<usize>,
-    refund_idx: Option<usize>,
-) -> f64 {
-    let cashflow_label = get_cell(&row.cells, cashflow_idx);
-    let line_id = parse_cashflow_line_label(&cashflow_label);
-    let bank_amount = parse_amount(&row.cells, bank_amount_idx);
-    let expense_amount = parse_amount(&row.cells, expense_amount_idx);
-    let vat_in = parse_amount(&row.cells, vat_in_idx);
-    let deposit_amount = parse_amount(&row.cells, deposit_idx);
-    let refund_amount = parse_amount(&row.cells, refund_idx);
-
-    if matches!(line_id, Some(line) if cashflow_in_line_ids().contains(&line)) {
-        return 0.0;
+pub fn build_settlement_flow_snapshots(request: KernelFlowSnapshotRequest) -> KernelFlowSnapshotResponse {
+    KernelFlowSnapshotResponse {
+        snapshots: request
+            .rows
+            .iter()
+            .map(build_flow_snapshot)
+            .collect::<Vec<KernelFlowSnapshot>>(),
     }
-    if line_id == Some("INPUT_VAT_OUT") {
-        return vat_in;
-    }
-    if expense_amount > 0.0 {
-        return expense_amount;
-    }
-    if vat_in > 0.0 && bank_amount == 0.0 {
-        return vat_in;
-    }
-    if deposit_amount > 0.0 || refund_amount > 0.0 {
-        return 0.0;
-    }
-    bank_amount
 }
 
 pub fn build_settlement_actual_sync_payload(request: KernelActualSyncRequest) -> KernelActualSyncResponse {
     let week_idx = Some(3usize);
     let date_idx = Some(2usize);
-    let cashflow_idx = Some(8usize);
-    let bank_amount_idx = Some(10usize);
-    let expense_amount_idx = Some(13usize);
-    let vat_in_idx = Some(14usize);
-    let deposit_idx = Some(11usize);
-    let refund_idx = Some(12usize);
 
     let mut by_week: BTreeMap<String, BTreeMap<String, f64>> = BTreeMap::new();
     let mut week_labels = BTreeSet::new();
@@ -987,35 +1080,15 @@ pub fn build_settlement_actual_sync_payload(request: KernelActualSyncRequest) ->
 
     for row in &request.rows {
         let week_label = resolve_week_label_from_row(row, &request.year_weeks, week_idx, date_idx);
-        let cashflow_label = get_cell(&row.cells, cashflow_idx);
-        let Some(line_id) = parse_cashflow_line_label(&cashflow_label) else {
-            continue;
-        };
         if week_label.is_empty() {
             continue;
         }
-        let resolved = resolve_cashflow_actual_line_amounts(
-            row,
-            bank_amount_idx,
-            expense_amount_idx,
-            vat_in_idx,
-            deposit_idx,
-            refund_idx,
-        );
-        let amount = resolve_actual_amount(
-            row,
-            line_id,
-            bank_amount_idx,
-            expense_amount_idx,
-            vat_in_idx,
-            deposit_idx,
-            refund_idx,
-        );
-        if resolved.is_empty() && amount == 0.0 {
+        let snapshot = build_flow_snapshot(row);
+        if snapshot.cashflow_actual_line_amounts.is_empty() {
             continue;
         }
         let bucket = by_week.entry(week_label).or_default();
-        for (resolved_line_id, resolved_amount) in resolved {
+        for (resolved_line_id, resolved_amount) in snapshot.cashflow_actual_line_amounts {
             if resolved_amount == 0.0 {
                 continue;
             }
@@ -1059,40 +1132,21 @@ pub fn build_settlement_actual_sync_payload(request: KernelActualSyncRequest) ->
 }
 
 pub fn aggregate_budget_actuals(request: KernelBudgetActualsRequest) -> KernelBudgetActualsResponse {
-    let budget_code_idx = Some(5usize);
-    let sub_code_idx = Some(6usize);
-    let cashflow_idx = Some(8usize);
-    let bank_amount_idx = Some(10usize);
-    let deposit_idx = Some(11usize);
-    let refund_idx = Some(12usize);
-    let expense_amount_idx = Some(13usize);
-    let vat_in_idx = Some(14usize);
-
     let mut totals: BTreeMap<String, KernelBudgetActualItem> = BTreeMap::new();
 
     for row in &request.rows {
-        let budget_code = get_cell(&row.cells, budget_code_idx).trim().to_string();
-        let sub_code = get_cell(&row.cells, sub_code_idx).trim().to_string();
-        if budget_code.is_empty() && sub_code.is_empty() {
+        let snapshot = build_flow_snapshot(row);
+        let Some(budget_key) = snapshot.budget_key.clone() else {
             continue;
-        }
-        let amount = resolve_budget_actual_amount(
-            row,
-            cashflow_idx,
-            bank_amount_idx,
-            expense_amount_idx,
-            vat_in_idx,
-            deposit_idx,
-            refund_idx,
-        );
+        };
+        let amount = snapshot.budget_actual_amount;
         if amount == 0.0 {
             continue;
         }
-        let budget_key = format!("{budget_code}|{sub_code}");
         let entry = totals.entry(budget_key.clone()).or_insert(KernelBudgetActualItem {
             budget_key: budget_key.clone(),
-            budget_code: budget_code.clone(),
-            sub_code: sub_code.clone(),
+            budget_code: snapshot.budget_code.clone().unwrap_or_default(),
+            sub_code: snapshot.sub_code.clone().unwrap_or_default(),
             amount: 0.0,
         });
         entry.amount += amount;
@@ -1366,6 +1420,58 @@ mod tests {
         assert_eq!(response.weeks.len(), 1);
         assert_eq!(response.weeks[0].amounts.get("DIRECT_COST_OUT").copied(), Some(30000.0));
         assert_eq!(response.weeks[0].amounts.get("SALES_IN").copied(), Some(250000.0));
+    }
+
+    #[test]
+    fn excludes_pending_bank_imported_outflow_rows_from_snapshots_and_actuals() {
+        let mut cells = create_cells();
+        cells[2] = "2026-03-03".to_string();
+        cells[3] = "26-03-01".to_string();
+        cells[5] = "회의비".to_string();
+        cells[6] = "다과비".to_string();
+        cells[8] = "직접사업비".to_string();
+        cells[10] = "110,000".to_string();
+
+        let row = KernelImportRow {
+            temp_id: "pending-bank-outflow".to_string(),
+            source_tx_id: Some("bank:expense-import-1".to_string()),
+            entry_kind: Some("EXPENSE".to_string()),
+            cells: cells.clone(),
+            error: None,
+            review_hints: None,
+            review_required_cell_indexes: None,
+            review_status: None,
+            review_fingerprint: None,
+            review_confirmed_at: None,
+            user_edited_cells: None,
+        };
+
+        let snapshots = build_settlement_flow_snapshots(KernelFlowSnapshotRequest {
+            rows: vec![row.clone()],
+        });
+        assert_eq!(snapshots.snapshots.len(), 1);
+        assert!(snapshots.snapshots[0].manual_outflow_pending);
+        assert_eq!(snapshots.snapshots[0].budget_actual_amount, 0.0);
+        assert!(snapshots.snapshots[0].cashflow_actual_line_amounts.is_empty());
+
+        let actual_response = build_settlement_actual_sync_payload(KernelActualSyncRequest {
+            rows: vec![row.clone()],
+            year_weeks: vec![KernelYearWeek {
+                year_month: "2026-03".to_string(),
+                week_no: 1,
+                week_start: "2026-03-02".to_string(),
+                week_end: "2026-03-08".to_string(),
+                label: "26-03-01".to_string(),
+            }],
+            persisted_rows: None,
+        });
+        assert_eq!(actual_response.weeks[0].amounts.get("DIRECT_COST_OUT").copied(), Some(0.0));
+
+        let budget_response = aggregate_budget_actuals(KernelBudgetActualsRequest {
+            rows: vec![row],
+        });
+        assert_eq!(budget_response.total, 0.0);
+        assert!(budget_response.items.is_empty());
     }
 
     #[test]
