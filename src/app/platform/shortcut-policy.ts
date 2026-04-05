@@ -15,6 +15,23 @@ export interface ShortcutGroup {
   shortcuts: Shortcut[];
 }
 
+function normalizeRole(value: unknown): string {
+  return typeof value === 'string' ? value.trim().toLowerCase() : '';
+}
+
+function canShowShortcutForRole(role: unknown, to: string): boolean {
+  const normalizedRole = normalizeRole(role);
+  if (!normalizedRole) return false;
+
+  // Shortcut discoverability stays curated even while admin routes are
+  // temporarily open to every signed-in role.
+  if (to === '/settings' || to === '/projects/new') {
+    return normalizedRole === 'admin';
+  }
+
+  return canShowAdminNavItem(role, to);
+}
+
 const BASE_GROUPS: ShortcutGroup[] = [
   {
     label: '글로벌',
@@ -48,8 +65,7 @@ export function getShortcutGroupsForRole(role: unknown): ShortcutGroup[] {
   return BASE_GROUPS
     .map((group) => ({
       ...group,
-      shortcuts: group.shortcuts.filter((s) => (s.to ? canShowAdminNavItem(role, s.to) : true)),
+      shortcuts: group.shortcuts.filter((s) => (s.to ? canShowShortcutForRole(role, s.to) : true)),
     }))
     .filter((group) => group.shortcuts.length > 0);
 }
-

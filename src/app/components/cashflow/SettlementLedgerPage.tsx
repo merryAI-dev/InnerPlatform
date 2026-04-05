@@ -129,6 +129,7 @@ export interface SettlementLedgerProps {
     persistedRows?: ImportRow[] | null,
   ) => Promise<SettlementActualSyncWeekPayload[]>;
   onDirtyStateChange?: (dirty: boolean) => void;
+  discardChangesRequestToken?: number;
 }
 
 // ── Main Component ──
@@ -171,6 +172,7 @@ export function SettlementLedgerPage({
   onDeriveRows,
   onPreviewActualSyncPayload,
   onDirtyStateChange,
+  discardChangesRequestToken = 0,
 }: SettlementLedgerProps) {
   const { upsertWeekAmounts } = useCashflowWeeks();
   const [year, setYear] = useState(() => new Date().getFullYear());
@@ -189,6 +191,7 @@ export function SettlementLedgerPage({
   const [revertConfirmOpen, setRevertConfirmOpen] = useState(false);
   const restoredDraftCacheKeyRef = useRef('');
   const hasAppliedSheetRowsRef = useRef(false);
+  const lastDiscardChangesRequestTokenRef = useRef(0);
   const pendingSheetRowsEchoSignatureRef = useRef<string | null>(null);
   const pendingSheetRowsSyncRef = useRef<{ rows: ImportRow[] | null; reason: WeeklyAccountingSheetRowsHydrationReason } | null>(null);
   const cloneImportRows = useCallback((input: ImportRow[]) => (
@@ -349,6 +352,14 @@ export function SettlementLedgerPage({
     setRevertConfirmOpen(false);
     revertToSavedSnapshot();
   }, [revertToSavedSnapshot]);
+
+  useEffect(() => {
+    if (!discardChangesRequestToken) return;
+    if (discardChangesRequestToken === lastDiscardChangesRequestTokenRef.current) return;
+    lastDiscardChangesRequestTokenRef.current = discardChangesRequestToken;
+    setRevertConfirmOpen(false);
+    revertToSavedSnapshot();
+  }, [discardChangesRequestToken, revertToSavedSnapshot]);
 
   const revertConfirmDialog = (
     <AlertDialog open={revertConfirmOpen} onOpenChange={setRevertConfirmOpen}>
