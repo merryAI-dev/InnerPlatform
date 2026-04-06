@@ -31,6 +31,7 @@ import {
   serializeWeeklyAccountingImportRowsMaterially,
   type WeeklyAccountingSheetRowsHydrationReason,
 } from '../../platform/weekly-accounting-state';
+import { resolveWeeklyExpenseAutosavePlan } from '../../platform/weekly-expense-save-policy';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import {
@@ -133,6 +134,8 @@ export interface SettlementLedgerProps {
   ) => Promise<SettlementActualSyncWeekPayload[]>;
   onDirtyStateChange?: (dirty: boolean) => void;
   discardChangesRequestToken?: number;
+  autoSaveIdleMs?: number;
+  autoSaveSyncCashflow?: boolean;
 }
 
 // ── Main Component ──
@@ -177,8 +180,9 @@ export function SettlementLedgerPage({
   onPreviewActualSyncPayload,
   onDirtyStateChange,
   discardChangesRequestToken = 0,
+  autoSaveIdleMs = 60_000,
+  autoSaveSyncCashflow = true,
 }: SettlementLedgerProps) {
-  const autoSaveSheet = saveMode === 'auto';
   const { upsertWeekAmounts } = useCashflowWeeks();
   const [year, setYear] = useState(() => new Date().getFullYear());
   const [collapsedWeeks, setCollapsedWeeks] = useState<Set<string>>(new Set());
@@ -711,13 +715,23 @@ export function SettlementLedgerPage({
     }
   }, [importRows, persistImportRowsSnapshot, syncImportRowsToCashflow]);
 
+  const autosavePlan = useMemo(() => resolveWeeklyExpenseAutosavePlan({
+    saveMode,
+    idleMs: autoSaveIdleMs,
+    syncCashflowOnAutoSave: autoSaveSyncCashflow,
+    importDirty,
+    hasImportRows: Boolean(importRows && importRows.length > 0),
+    hasSaveHandler: Boolean(onSaveSheetRows),
+    sheetSaving,
+  }), [autoSaveIdleMs, autoSaveSyncCashflow, importDirty, importRows, onSaveSheetRows, saveMode, sheetSaving]);
+
   useEffect(() => {
-    if (!autoSaveSheet || !importDirty || !importRows || !onSaveSheetRows || sheetSaving) return;
+    if (!autosavePlan.shouldSchedule) return;
     const timer = window.setTimeout(() => {
-      void handleImportSave({ silent: true, syncCashflow: true });
-    }, 60_000);
+      void handleImportSave({ silent: true, syncCashflow: autosavePlan.syncCashflow });
+    }, autosavePlan.idleMs);
     return () => window.clearTimeout(timer);
-  }, [autoSaveSheet, importDirty, importRows, onSaveSheetRows, sheetSaving, handleImportSave]);
+  }, [autosavePlan, handleImportSave]);
 
   useEffect(() => {
     if (!importDirty) return;

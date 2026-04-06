@@ -1166,6 +1166,8 @@ export function PortalWeeklyExpensePage() {
           hideYearControls
           hideCountBadge
           saveMode={weeklyExpenseSavePolicy.mode}
+          autoSaveIdleMs={weeklyExpenseSavePolicy.idleMs}
+          autoSaveSyncCashflow={weeklyExpenseSavePolicy.syncCashflowOnAutoSave}
           showSaveStatusButton={weeklyExpenseSavePolicy.showStatusButton}
           evidenceRequiredMap={evidenceRequiredMap}
           onSaveEvidenceRequiredMap={saveEvidenceRequiredMap}
