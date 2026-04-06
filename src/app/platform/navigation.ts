@@ -40,6 +40,13 @@ export function shouldPromptWorkspaceSelection(
   return normalizeWorkspaceId(preferredWorkspace) == null;
 }
 
+export function resolveActiveWorkspacePreference(
+  lastWorkspace?: WorkspaceId | unknown,
+  defaultWorkspace?: WorkspaceId | unknown,
+): WorkspaceId | undefined {
+  return normalizeWorkspaceId(lastWorkspace) ?? normalizeWorkspaceId(defaultWorkspace);
+}
+
 export function resolveHomePath(role: unknown, preferredWorkspace?: WorkspaceId | unknown): HomePath {
   const normalized = normalizeRole(role);
   if (!normalized) return '/portal';

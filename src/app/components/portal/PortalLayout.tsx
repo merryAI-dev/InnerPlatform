@@ -14,6 +14,7 @@ import {
   Sparkles,
   ArrowRight,
   Upload,
+  Shield,
 } from 'lucide-react';
 import { PortalProvider, usePortalStore } from '../../data/portal-store';
 import { useAuth } from '../../data/auth-store';
@@ -125,6 +126,11 @@ function PortalContent() {
     if (navigationHandlerRef.current?.({ path, label })) return;
     navigate(path);
   }, [navigate]);
+  const requestAdminNavigation = useCallback(() => {
+    if (navigationHandlerRef.current?.({ path: '/', label: '관리자 공간' })) return;
+    void setWorkspacePreference('admin', { persistDefault: false })
+      .finally(() => navigate('/'));
+  }, [navigate, setWorkspacePreference]);
 
   // ── 모든 hooks는 early return 전에 호출 ──
   const assignedProjects = useMemo(() => {
@@ -322,6 +328,22 @@ function PortalContent() {
               </div>
               <ArrowRight className="w-4 h-4 text-muted-foreground/40 group-hover:text-emerald-500 group-hover:translate-x-0.5 transition-all" />
             </button>
+
+            {isAdminSpaceRole(authUser?.role) && (
+              <button
+                onClick={requestAdminNavigation}
+                className="group relative flex items-center gap-4 p-5 rounded-2xl border border-border/60 bg-white/80 dark:bg-slate-800/60 backdrop-blur-sm hover:border-slate-300 hover:shadow-md hover:shadow-slate-500/5 transition-all duration-200 text-left"
+              >
+                <div className="shrink-0 flex items-center justify-center w-11 h-11 rounded-xl bg-slate-100 dark:bg-slate-900 text-slate-700 dark:text-slate-200 group-hover:scale-105 transition-transform">
+                  <Shield className="w-5 h-5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold">관리자 공간으로 이동</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">조직 운영, 사용자 관리, 전사 설정 화면으로 이동합니다</p>
+                </div>
+                <ArrowRight className="w-4 h-4 text-muted-foreground/40 group-hover:text-slate-500 group-hover:translate-x-0.5 transition-all" />
+              </button>
+            )}
           </div>
 
           {/* 로그아웃 */}
@@ -541,6 +563,17 @@ function PortalContent() {
               <span className="truncate">{currentProjectName || '사업 미선택'}</span>
             </div>
             <div className="flex items-center gap-1.5">
+              {isAdminSpaceRole(authUser?.role) && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1.5 border-slate-200/70 bg-white/80 text-slate-700 hover:bg-slate-50"
+                  onClick={requestAdminNavigation}
+                >
+                  <Shield className="w-3.5 h-3.5" />
+                  관리자 공간
+                </Button>
+              )}
               <Badge variant="outline" className="text-[10px] h-5 px-2">
                 {portalUser.role}
               </Badge>

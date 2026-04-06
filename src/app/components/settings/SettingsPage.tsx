@@ -27,7 +27,7 @@ import { TenantManagementTab } from './TenantManagementTab';
 import { TenantBrandingTab } from './TenantBrandingTab';
 import { PageHeader } from '../layout/PageHeader';
 import { useAuth } from '../../data/auth-store';
-import { resolveHomePath } from '../../platform/navigation';
+import { resolveActiveWorkspacePreference, resolveHomePath } from '../../platform/navigation';
 
 const DISPLAY_ROLES = ['admin', 'finance', 'pm'] as const;
 type DisplayRole = typeof DISPLAY_ROLES[number];
@@ -53,6 +53,7 @@ export function SettingsPage() {
   const initialTab = searchParams.get('tab') || 'org';
   const [tab, setTab] = useState(initialTab);
   const currentPath = `${location.pathname}${location.search}${location.hash}`;
+  const activeWorkspace = resolveActiveWorkspacePreference(user?.lastWorkspace, user?.defaultWorkspace);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -66,9 +67,9 @@ export function SettingsPage() {
     // Keep operational settings (Firebase/feature toggles, member management) admin-scoped.
     const allowed = role === 'admin';
     if (!allowed) {
-      navigate(resolveHomePath(role, user?.defaultWorkspace ?? user?.lastWorkspace), { replace: true });
+      navigate(resolveHomePath(role, activeWorkspace), { replace: true });
     }
-  }, [currentPath, isAuthenticated, navigate, user?.defaultWorkspace, user?.lastWorkspace, user?.role]);
+  }, [activeWorkspace, currentPath, isAuthenticated, navigate, user?.role]);
 
   if (!isAuthenticated) return null;
   if (!user) return null;

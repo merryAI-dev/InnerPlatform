@@ -45,6 +45,17 @@ test('release gate: PM requested portal route survives login redirect', async ({
   await expect(page.getByRole('heading', { name: '예산 편집' })).toBeVisible();
 });
 
+test('release gate: admin can switch from portal to admin home', async ({ page }) => {
+  await loginAsAdmin(page);
+  await page.goto('/portal');
+
+  await expect(page.getByRole('button', { name: '관리자 공간' })).toBeVisible();
+  await page.getByRole('button', { name: '관리자 공간' }).click();
+
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole('heading', { name: '사업 통합 대시보드' })).toBeVisible();
+});
+
 test('release gate: PM dashboard shows guided mission flow', async ({ page }) => {
   await loginAsPm(page);
   await page.goto('/portal');

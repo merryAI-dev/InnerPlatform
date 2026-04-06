@@ -5,7 +5,13 @@ import { Card, CardContent } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { useAuth } from '../../data/auth-store';
-import { canChooseWorkspace, resolvePostLoginPath, resolveRequestedRedirectPath, shouldPromptWorkspaceSelection } from '../../platform/navigation';
+import {
+  canChooseWorkspace,
+  resolveActiveWorkspacePreference,
+  resolvePostLoginPath,
+  resolveRequestedRedirectPath,
+  shouldPromptWorkspaceSelection,
+} from '../../platform/navigation';
 import { canAccessAdminPath } from '../../platform/admin-nav';
 import type { WorkspaceId } from '../../data/member-workspace';
 
@@ -19,6 +25,7 @@ export function WorkspaceSelectPage() {
     (location.state as { from?: string } | null)?.from,
     location.search,
   );
+  const activeWorkspace = resolveActiveWorkspacePreference(user?.lastWorkspace, user?.defaultWorkspace);
 
   useEffect(() => {
     if (isLoading) return;
@@ -27,13 +34,13 @@ export function WorkspaceSelectPage() {
       return;
     }
     if (!canChooseWorkspace(user.role)) {
-      navigate(resolvePostLoginPath(user.role, user.defaultWorkspace ?? user.lastWorkspace, redirectFrom), { replace: true });
+      navigate(resolvePostLoginPath(user.role, activeWorkspace, redirectFrom), { replace: true });
       return;
     }
-    if (!shouldPromptWorkspaceSelection(user.role, user.defaultWorkspace ?? user.lastWorkspace)) {
-      navigate(resolvePostLoginPath(user.role, user.defaultWorkspace ?? user.lastWorkspace, redirectFrom), { replace: true });
+    if (!shouldPromptWorkspaceSelection(user.role, activeWorkspace)) {
+      navigate(resolvePostLoginPath(user.role, activeWorkspace, redirectFrom), { replace: true });
     }
-  }, [isAuthenticated, isLoading, navigate, redirectFrom, user]);
+  }, [activeWorkspace, isAuthenticated, isLoading, navigate, redirectFrom, user]);
 
   const handleSelect = async (workspace: WorkspaceId) => {
     if (!user) return;
@@ -53,7 +60,7 @@ export function WorkspaceSelectPage() {
     || !isAuthenticated
     || !user
     || !canChooseWorkspace(user.role)
-    || !shouldPromptWorkspaceSelection(user.role, user.defaultWorkspace ?? user.lastWorkspace)
+    || !shouldPromptWorkspaceSelection(user.role, activeWorkspace)
   ) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -62,7 +69,7 @@ export function WorkspaceSelectPage() {
     );
   }
 
-  const currentWorkspace = user.defaultWorkspace ?? user.lastWorkspace;
+  const currentWorkspace = activeWorkspace;
   const canAccessAdmin = canAccessAdminPath(user.role, '/');
   const portalRequested = !!redirectFrom?.startsWith('/portal');
   const adminRequested = !!redirectFrom && !portalRequested;

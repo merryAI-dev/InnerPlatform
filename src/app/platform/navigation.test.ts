@@ -5,6 +5,7 @@ import {
   isAdminSpaceRole,
   isPortalRole,
   normalizeRequestedPath,
+  resolveActiveWorkspacePreference,
   resolveHomePath,
   resolveRequestedRedirectPath,
   resolvePostLoginPath,
@@ -80,6 +81,23 @@ describe('shouldPromptWorkspaceSelection', () => {
   it('does NOT prompt for empty role', () => {
     expect(shouldPromptWorkspaceSelection('', undefined)).toBe(false);
     expect(shouldPromptWorkspaceSelection(null, 'admin')).toBe(false);
+  });
+});
+
+describe('resolveActiveWorkspacePreference', () => {
+  it('prefers the last workspace for current-session routing', () => {
+    expect(resolveActiveWorkspacePreference('admin', 'portal')).toBe('admin');
+    expect(resolveActiveWorkspacePreference('portal', 'admin')).toBe('portal');
+  });
+
+  it('falls back to default workspace when no last workspace exists', () => {
+    expect(resolveActiveWorkspacePreference(undefined, 'portal')).toBe('portal');
+    expect(resolveActiveWorkspacePreference(undefined, 'admin')).toBe('admin');
+  });
+
+  it('ignores invalid workspace values', () => {
+    expect(resolveActiveWorkspacePreference('invalid', 'portal')).toBe('portal');
+    expect(resolveActiveWorkspacePreference(null, '')).toBeUndefined();
   });
 });
 

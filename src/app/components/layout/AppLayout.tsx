@@ -23,7 +23,7 @@ import { ScrollToTop } from './ScrollToTop';
 import { QuickActionFab } from './QuickActionFab';
 import { PageTransition } from './PageTransition';
 import { ErrorBoundary } from './ErrorBoundary';
-import { canChooseWorkspace, isPortalRole, resolveHomePath } from '../../platform/navigation';
+import { canChooseWorkspace, isPortalRole, resolveActiveWorkspacePreference, resolveHomePath } from '../../platform/navigation';
 import { canAccessAdminPath, canShowAdminNavItem } from '../../platform/admin-nav';
 import { NAV_GROUPS } from '../../platform/nav-config';
 import { TenantSwitcher, TenantBadge } from '../settings/TenantSwitcher';
@@ -37,6 +37,7 @@ function AppLayoutContent() {
   const location = useLocation();
   const navigate = useNavigate();
   const currentPath = `${location.pathname}${location.search}${location.hash}`;
+  const activeWorkspace = resolveActiveWorkspacePreference(authUser?.lastWorkspace, authUser?.defaultWorkspace);
 
   // Auth guard — 미인증 시 로그인 페이지로
   useEffect(() => {
@@ -61,9 +62,9 @@ function AppLayoutContent() {
     }
 
     if (!canAccessAdminPath(role, location.pathname)) {
-      navigate(resolveHomePath(role, authUser?.defaultWorkspace ?? authUser?.lastWorkspace), { replace: true });
+      navigate(resolveHomePath(role, activeWorkspace), { replace: true });
     }
-  }, [authLoading, authUser, currentUser, isAuthenticated, location.pathname, navigate]);
+  }, [activeWorkspace, authLoading, authUser, currentUser, isAuthenticated, location.pathname, navigate]);
 
   useEffect(() => {
     if (authLoading) return;

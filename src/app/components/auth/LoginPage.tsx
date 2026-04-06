@@ -10,7 +10,12 @@ import {
 import { Card, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
 import { useAuth } from '../../data/auth-store';
-import { resolvePostLoginPath, resolveRequestedRedirectPath, shouldPromptWorkspaceSelection } from '../../platform/navigation';
+import {
+  resolveActiveWorkspacePreference,
+  resolvePostLoginPath,
+  resolveRequestedRedirectPath,
+  shouldPromptWorkspaceSelection,
+} from '../../platform/navigation';
 import { readFirebaseEmulatorConfig } from '../../lib/firebase';
 import {
   buildPreviewAuthFallbackUrl,
@@ -49,6 +54,7 @@ export function LoginPage() {
   const previewBlockMessage = loginBlockedOnPreview
     ? buildPreviewAuthBlockedMessage(currentHost, import.meta.env)
     : '';
+  const activeWorkspace = resolveActiveWorkspacePreference(user?.lastWorkspace, user?.defaultWorkspace);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -65,18 +71,18 @@ export function LoginPage() {
   useEffect(() => {
     if (isLoading) return;
     if (isAuthenticated && user) {
-      if (shouldPromptWorkspaceSelection(user.role, user.defaultWorkspace ?? user.lastWorkspace)) {
+      if (shouldPromptWorkspaceSelection(user.role, activeWorkspace)) {
         navigate('/workspace-select', { replace: true, state: redirectFrom ? { from: redirectFrom } : undefined });
         return;
       }
       const target = resolvePostLoginPath(
         user.role,
-        user.defaultWorkspace ?? user.lastWorkspace,
+        activeWorkspace,
         redirectFrom,
       );
       navigate(target, { replace: true });
     }
-  }, [isAuthenticated, isLoading, navigate, redirectFrom, user]);
+  }, [activeWorkspace, isAuthenticated, isLoading, navigate, redirectFrom, user]);
 
   if (isAuthenticated && user) return null;
 
