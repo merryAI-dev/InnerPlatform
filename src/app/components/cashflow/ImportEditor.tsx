@@ -1493,7 +1493,7 @@ export function ImportEditor({
         className={isInlineLayout
           ? 'relative flex flex-col overflow-visible rounded-lg border bg-background'
           : fullscreen
-            ? 'fixed inset-3 z-[70] flex flex-col overflow-hidden rounded-[28px] border bg-background/98 shadow-2xl backdrop-blur-xl'
+            ? 'fixed inset-0 z-[120] flex h-dvh w-screen flex-col overflow-hidden rounded-none border-0 bg-background shadow-2xl'
             : 'fixed inset-0 z-50 flex flex-col bg-background/95'}
       >
       {authorListId && (

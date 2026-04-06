@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, useEffect, type DragEvent } from 'react';
-import { useNavigate } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 import {
   Lock, SlidersHorizontal, ChevronDown, ChevronRight,
   Calculator, Wallet, TrendingUp, Info,
@@ -44,6 +44,7 @@ import {
   parseBudgetPlanImportText,
   selectBudgetPlanImportSheet,
 } from '../../platform/budget-plan-import';
+import { parseNumber } from '../../platform/csv-utils';
 import {
   aggregateBudgetActualsFromSettlementRowsLocally,
 } from '../../platform/settlement-calculation-kernel';
@@ -226,6 +227,7 @@ function formatConfidenceLabel(value?: 'high' | 'medium' | 'low'): string {
 
 export function PortalBudget() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user: authUser } = useAuth();
   const { orgId } = useFirebase();
   const {
@@ -238,6 +240,7 @@ export function PortalBudget() {
     saveBudgetCodeBook,
     bankStatementRows,
     weeklySubmissionStatuses,
+    sheetSources,
   } = usePortalStore();
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [selectedRow, setSelectedRow] = useState<BudgetRow | null>(null);
@@ -264,6 +267,7 @@ export function PortalBudget() {
   const [budgetImportSheetName, setBudgetImportSheetName] = useState('');
   const [budgetImportLoading, setBudgetImportLoading] = useState(false);
   const [budgetImportApplying, setBudgetImportApplying] = useState(false);
+  const [budgetImportSavedSource, setBudgetImportSavedSource] = useState<ProjectSheetSourceSnapshot | null>(null);
   const [budgetImportAiAnalysis, setBudgetImportAiAnalysis] = useState<GoogleSheetMigrationAnalysisResult | null>(null);
   const [budgetImportAiLoading, setBudgetImportAiLoading] = useState(false);
   const [budgetImportAiError, setBudgetImportAiError] = useState('');
@@ -320,11 +324,19 @@ export function PortalBudget() {
     () => budgetImportSheets.find((sheet) => sheet.name === budgetImportSheetName) || budgetImportSheets[0] || null,
     [budgetImportSheets, budgetImportSheetName],
   );
+  const budgetSheetSources = useMemo(
+    () => sheetSources
+      .filter((source) => source.sourceType === 'budget' && Array.isArray(source.previewMatrix) && source.previewMatrix.length > 0)
+      .sort((left, right) => String(right.uploadedAt || '').localeCompare(String(left.uploadedAt || ''))),
+    [sheetSources],
+  );
   const budgetImportMatrix = useMemo(
-    () => (budgetImportTab === 'paste'
+    () => (budgetImportSavedSource?.previewMatrix && budgetImportSavedSource.previewMatrix.length > 0
+      ? budgetImportSavedSource.previewMatrix
+      : budgetImportTab === 'paste'
       ? parseBudgetPlanImportText(budgetImportText)
       : (budgetImportSelectedSheet?.matrix || [])),
-    [budgetImportSelectedSheet?.matrix, budgetImportTab, budgetImportText],
+    [budgetImportSavedSource?.previewMatrix, budgetImportSelectedSheet?.matrix, budgetImportTab, budgetImportText],
   );
   const budgetImportParsed = useMemo(
     () => parseBudgetPlanMatrix(budgetImportMatrix),
@@ -368,9 +380,11 @@ export function PortalBudget() {
   ]);
   const budgetImportAiSheetName = useMemo(() => resolveBudgetImportAiSheetName({
     tab: budgetImportTab,
-    selectedSheetName: budgetImportSelectedSheet?.name,
-    fileName: budgetImportFileName,
+    selectedSheetName: budgetImportSavedSource?.sheetName || budgetImportSelectedSheet?.name,
+    fileName: budgetImportSavedSource?.fileName || budgetImportFileName,
   }), [
+    budgetImportSavedSource?.fileName,
+    budgetImportSavedSource?.sheetName,
     budgetImportFileName,
     budgetImportSelectedSheet?.name,
     budgetImportTab,
@@ -445,6 +459,7 @@ export function PortalBudget() {
     setBudgetImportFileName('');
     setBudgetImportSheets([]);
     setBudgetImportSheetName('');
+    setBudgetImportSavedSource(null);
     setBudgetImportLoading(false);
     setBudgetImportApplying(false);
     setBudgetImportAiAnalysis(null);
@@ -675,6 +690,7 @@ export function PortalBudget() {
     if (!file) return;
     setBudgetImportLoading(true);
     try {
+      setBudgetImportSavedSource(null);
       const sheets = await parseLocalWorkbookFile(file);
       const preferredSheet = selectBudgetPlanImportSheet(sheets);
       setBudgetImportFileName(file.name);
@@ -690,6 +706,19 @@ export function PortalBudget() {
     } finally {
       setBudgetImportLoading(false);
     }
+  }, []);
+
+  const handleBudgetImportSavedSource = useCallback((source: ProjectSheetSourceSnapshot) => {
+    setBudgetImportSavedSource(source);
+    setBudgetImportTab('file');
+    setBudgetImportFileName(source.fileName || source.sheetName || '');
+    setBudgetImportSheets([]);
+    setBudgetImportSheetName(source.sheetName || '');
+    setBudgetImportText('');
+    setBudgetImportAiAnalysis(null);
+    setBudgetImportAiError('');
+    setBudgetImportAiResolvedKey('');
+    toast.success(`저장된 원본에서 ${source.sheetName} 예산 미리보기를 불러왔습니다.`);
   }, []);
 
   const rerunBudgetImportAiAnalysis = useCallback(() => {
@@ -1055,7 +1084,18 @@ export function PortalBudget() {
           )}
         />
 
-        <PortalMissionGuide progress={missionProgress} compact />
+        <PortalMissionGuide
+          progress={missionProgress}
+          compact
+          resolveStepAction={(step) => {
+            if (step.ctaPath === '/portal/budget' && location.pathname === '/portal/budget') {
+              return () => {
+                if (!editMode) startEdit();
+              };
+            }
+            return null;
+          }}
+        />
 
         <Card data-testid="portal-budget-guide" className="border-emerald-200/70 bg-gradient-to-br from-emerald-50 via-white to-teal-50/70">
           <CardContent className="flex flex-col gap-3 px-4 py-4 md:flex-row md:items-center md:justify-between">
@@ -1122,6 +1162,43 @@ export function PortalBudget() {
                 </TabsList>
 
                 <TabsContent value="file" className="space-y-3">
+                  {budgetSheetSources.length > 0 && (
+                    <div className="rounded-md border border-emerald-200/70 bg-emerald-50/60 p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <p className="text-[11px] font-medium text-foreground">최근 저장된 예산 원본</p>
+                          <p className="mt-1 text-[10px] text-muted-foreground">
+                            wizard에서 올린 예산 원본을 다시 업로드하지 않고 바로 가져올 수 있습니다.
+                          </p>
+                        </div>
+                        <Badge variant="outline" className="text-[10px]">{budgetSheetSources.length}건</Badge>
+                      </div>
+                      <div className="mt-3 space-y-2">
+                        {budgetSheetSources.slice(0, 3).map((source) => (
+                          <div
+                            key={`${source.sourceType}-${source.uploadedAt}-${source.sheetName}`}
+                            className="flex flex-col gap-2 rounded-md border border-emerald-200/70 bg-white/90 px-3 py-2 md:flex-row md:items-center md:justify-between"
+                          >
+                            <div className="min-w-0">
+                              <p className="truncate text-[11px] font-medium text-slate-900">{source.sheetName}</p>
+                              <p className="truncate text-[10px] text-muted-foreground">
+                                {source.fileName} · {source.rowCount}행 · {source.columnCount}열
+                              </p>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-7 text-[11px]"
+                              onClick={() => handleBudgetImportSavedSource(source)}
+                            >
+                              저장된 원본 가져오기
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   <div className="rounded-md border border-border/60 p-3 space-y-2">
                     <p className="text-[11px] font-medium">`.xls`, `.xlsx`, `.csv` 파일을 바로 읽습니다.</p>
                     <p className="text-[10px] text-muted-foreground">
@@ -1145,6 +1222,11 @@ export function PortalBudget() {
                           ? `${budgetImportFileName} 파일을 읽어 미리보기를 준비했습니다.`
                           : '업로드 후 아래에서 시트와 반영 요약을 확인하세요.'}
                     </p>
+                    {budgetImportSavedSource ? (
+                      <p className="mt-1 text-[10px] text-emerald-700">
+                        현재는 저장된 원본 `{budgetImportSavedSource.sheetName}` 미리보기를 사용 중입니다.
+                      </p>
+                    ) : null}
                     <div className="mt-3 rounded-md bg-muted/40 p-3">
                       <p className="text-[11px] font-medium text-foreground">잘 읽히는 파일 형식</p>
                       <ul className="mt-2 list-disc space-y-1 pl-4 text-[10px] text-muted-foreground">
@@ -1189,9 +1271,12 @@ export function PortalBudget() {
                       인건비{'\t'}계약클라이언트{'\t'}2,000,000{'\t'}2,100,000{'\t'}외부 계약
                     </div>
                   </div>
-                  <Textarea
+                    <Textarea
                     value={budgetImportText}
-                    onChange={(event) => setBudgetImportText(event.target.value)}
+                    onChange={(event) => {
+                      setBudgetImportSavedSource(null);
+                      setBudgetImportText(event.target.value);
+                    }}
                     placeholder={'비목\t세목\t최초 승인 예산\t변경 예산\t비고\n인건비\t개인단위\t1,000,000\t1,050,000\t내부 집행'}
                     className="min-h-[220px] text-[11px] font-mono"
                   />

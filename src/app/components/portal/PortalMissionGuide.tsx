@@ -16,9 +16,11 @@ function StepIcon({ step }: { step: PortalMissionStep }) {
 export function PortalMissionGuide({
   progress,
   compact = false,
+  resolveStepAction,
 }: {
   progress: PortalMissionProgress;
   compact?: boolean;
+  resolveStepAction?: (step: PortalMissionStep) => (() => void) | null | undefined;
 }) {
   const navigate = useNavigate();
 
@@ -53,6 +55,7 @@ export function PortalMissionGuide({
         <div className={cn('mt-4 grid gap-2', compact ? 'grid-cols-1' : 'md:grid-cols-3')}>
           {progress.steps.map((step) => {
             const isActive = step.id === progress.activeStep.id;
+            const resolvedAction = resolveStepAction?.(step) || null;
             return (
               <div
                 key={step.id}
@@ -78,7 +81,13 @@ export function PortalMissionGuide({
                   <Button
                     size="sm"
                     className="mt-3 h-8 gap-1.5 text-[11px]"
-                    onClick={() => navigate(step.ctaPath!)}
+                    onClick={() => {
+                      if (resolvedAction) {
+                        resolvedAction();
+                        return;
+                      }
+                      navigate(step.ctaPath!);
+                    }}
                   >
                     {step.ctaLabel}
                     <ChevronRight className="h-3.5 w-3.5" />

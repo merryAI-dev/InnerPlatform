@@ -228,4 +228,19 @@ describe('weekly-accounting-state', () => {
     expect(result.nextSaveState).toBe('idle');
     expect(result.nextSyncState).toBe('idle');
   });
+
+  it('does not replace dirty local weekly rows with an unrelated hydrate echo', () => {
+    const result = resolveWeeklyAccountingSheetRowsHydration({
+      reason: 'active_sheet_switch_hydrate',
+      currentRows: [{ tempId: 'local-1', cells: ['지급처', '120,000'] }],
+      incomingRows: [{ tempId: 'persisted-1', cells: ['지급처', '100,000'] }],
+      incomingRowsOrigin: 'persisted',
+      currentSaveState: 'dirty',
+      currentSyncState: 'pending',
+    });
+
+    expect(result.shouldReplaceRows).toBe(false);
+    expect(result.nextSaveState).toBe('dirty');
+    expect(result.nextSyncState).toBe('pending');
+  });
 });

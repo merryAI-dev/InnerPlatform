@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router';
 import {
   LayoutDashboard, Calculator,
@@ -76,6 +76,23 @@ const NAV_SECTIONS = [
   },
 ];
 
+type PortalNavigationAttempt = {
+  path: string;
+  label: string;
+};
+
+type PortalNavigationGuardValue = {
+  registerNavigationHandler: (handler: ((attempt: PortalNavigationAttempt) => boolean) | null) => void;
+};
+
+const PortalNavigationGuardContext = createContext<PortalNavigationGuardValue>({
+  registerNavigationHandler: () => {},
+});
+
+export function usePortalNavigationGuard() {
+  return useContext(PortalNavigationGuardContext);
+}
+
 function PortalContent() {
   const {
     isRegistered,
@@ -99,7 +116,15 @@ function PortalContent() {
   const location = useLocation();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const navigationHandlerRef = useRef<((attempt: PortalNavigationAttempt) => boolean) | null>(null);
   const currentPath = `${location.pathname}${location.search}${location.hash}`;
+  const registerNavigationHandler = useCallback((handler: ((attempt: PortalNavigationAttempt) => boolean) | null) => {
+    navigationHandlerRef.current = handler;
+  }, []);
+  const requestPortalNavigation = useCallback((path: string, label: string) => {
+    if (navigationHandlerRef.current?.({ path, label })) return;
+    navigate(path);
+  }, [navigate]);
 
   // ── 모든 hooks는 early return 전에 호출 ──
   const assignedProjects = useMemo(() => {
@@ -342,7 +367,8 @@ function PortalContent() {
   }
 
   return (
-    <TooltipProvider delayDuration={300}>
+    <PortalNavigationGuardContext.Provider value={{ registerNavigationHandler }}>
+      <TooltipProvider delayDuration={300}>
       <div className="flex h-screen w-full overflow-hidden relative">
         {/* ── Mobile overlay ── */}
         {mobileOpen && (
@@ -414,7 +440,7 @@ function PortalContent() {
                 size="sm"
                 variant="outline"
                 className="mt-2 h-6 text-[10px] w-full border-white/20 bg-white/8 text-slate-200 hover:bg-white/15"
-                onClick={() => navigate('/portal/project-settings')}
+                onClick={() => requestPortalNavigation('/portal/project-settings', '사업 배정 수정')}
               >
                 사업 배정 수정
               </Button>
@@ -441,6 +467,10 @@ function PortalContent() {
                             key={item.to}
                             to={item.to}
                             end={item.exact}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              requestPortalNavigation(item.to, item.label);
+                            }}
                             className={`
                               group relative flex items-center gap-2 rounded-md text-[12px] px-2.5 py-[7px] transition-all duration-100
                               ${active
@@ -529,7 +559,8 @@ function PortalContent() {
           </main>
         </div>
       </div>
-    </TooltipProvider>
+      </TooltipProvider>
+    </PortalNavigationGuardContext.Provider>
   );
 }
 
