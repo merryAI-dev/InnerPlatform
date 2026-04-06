@@ -78,7 +78,8 @@ export interface SettlementLedgerProps {
   saving?: boolean;
   sheetRows?: ImportRow[] | null;
   onSaveSheetRows?: (rows: ImportRow[]) => ImportRow[] | void | Promise<ImportRow[] | void>;
-  autoSaveSheet?: boolean;
+  saveMode?: 'auto' | 'manual';
+  showSaveStatusSurface?: boolean;
   authorOptions?: string[];
   budgetCodeBook?: BudgetCodeEntry[];
   hideYearControls?: boolean;
@@ -146,7 +147,8 @@ export function SettlementLedgerPage({
   onSaveEvidenceRequiredMap,
   sheetRows,
   onSaveSheetRows,
-  autoSaveSheet = false,
+  saveMode = 'manual',
+  showSaveStatusSurface = true,
   authorOptions,
   budgetCodeBook,
   hideYearControls = false,
@@ -175,6 +177,7 @@ export function SettlementLedgerPage({
   onDirtyStateChange,
   discardChangesRequestToken = 0,
 }: SettlementLedgerProps) {
+  const autoSaveSheet = saveMode === 'auto';
   const { upsertWeekAmounts } = useCashflowWeeks();
   const [year, setYear] = useState(() => new Date().getFullYear());
   const [collapsedWeeks, setCollapsedWeeks] = useState<Set<string>>(new Set());
@@ -733,8 +736,7 @@ export function SettlementLedgerPage({
     onDirtyStateChange?.(false);
   }, [onDirtyStateChange]);
 
-  const autoSaveStatusLabel = useMemo(() => {
-    if (!autoSaveSheet) return '';
+  const saveStatusLabel = useMemo(() => {
     if (sheetSaveState === 'saving') return '시트 저장 중...';
     if (sheetSaveState === 'save_failed') return '시트 저장 실패';
     if (importDirty || sheetSaveState === 'dirty') return '저장되지 않은 변경 있음';
@@ -749,8 +751,11 @@ export function SettlementLedgerPage({
     if (cashflowSyncState === 'synced' && lastCashflowSyncedAt) {
       return `시트 저장 ${formatCommentTime(lastAutoSavedAt || lastCashflowSyncedAt)} · 캐시플로 동기화 ${formatCommentTime(lastCashflowSyncedAt)}`;
     }
-    return lastAutoSavedAt ? `자동 저장 ${formatCommentTime(lastAutoSavedAt)}` : '자동 저장 대기';
-  }, [autoSaveSheet, cashflowSyncState, importDirty, lastAutoSavedAt, lastCashflowSyncedAt, sheetSaveState]);
+    if (lastAutoSavedAt) {
+      return `${saveMode === 'manual' ? '수동 저장' : '자동 저장'} ${formatCommentTime(lastAutoSavedAt)}`;
+    }
+    return saveMode === 'manual' ? '수동 저장만 사용' : '자동 저장 대기';
+  }, [cashflowSyncState, importDirty, lastAutoSavedAt, lastCashflowSyncedAt, saveMode, sheetSaveState]);
 
   const pendingReviewCount = useMemo(() => countPendingImportRowReviews(importRows || []), [importRows]);
 
@@ -775,13 +780,13 @@ export function SettlementLedgerPage({
     () => resolveWeeklyAccountingProductStatusDomHooks(weeklyAccountingStatus),
     [weeklyAccountingStatus],
   );
-  const autosaveStatusSummary = autoSaveSheet ? (
+  const saveStatusSummary = showSaveStatusSurface && onSaveSheetRows ? (
     <div
       className="w-full rounded-md border border-slate-200/80 bg-slate-50/80 px-3 py-2 md:ml-auto md:w-[320px] dark:border-slate-800 dark:bg-slate-900/40"
       data-testid={weeklyAccountingStatusHooks.testId}
       aria-label={weeklyAccountingStatusHooks.ariaLabel}
     >
-      <div className="truncate text-[10px] leading-4 text-muted-foreground">{autoSaveStatusLabel}</div>
+      <div className="truncate text-[10px] leading-4 text-muted-foreground">{saveStatusLabel}</div>
       <div
         className={
           weeklyAccountingStatus.tone === 'success'
@@ -928,7 +933,7 @@ export function SettlementLedgerPage({
               {downloadPreparing ? '엑셀 준비 중' : '엑셀 다운로드'}
             </Button>
           </div>
-          {autosaveStatusSummary}
+          {saveStatusSummary}
         </div>
 
         {importRows && (
@@ -1039,13 +1044,13 @@ export function SettlementLedgerPage({
               className="h-8 rounded-md border px-2 text-[11px] bg-background"
               title="다운로드 종료일"
             />
-            {autoSaveSheet && (
+            {showSaveStatusSurface && onSaveSheetRows && (
               <div
                 className="flex flex-col items-end gap-0.5 text-[10px] leading-4"
                 data-testid={weeklyAccountingStatusHooks.testId}
                 aria-label={weeklyAccountingStatusHooks.ariaLabel}
               >
-                <span className="text-muted-foreground">{autoSaveStatusLabel}</span>
+                <span className="text-muted-foreground">{saveStatusLabel}</span>
                 <span
                   className={
                     weeklyAccountingStatus.tone === 'success'
