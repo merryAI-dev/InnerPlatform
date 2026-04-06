@@ -30,4 +30,6 @@ scripts/etl/output/
 .env*.local
 .gstack/
 .claude/worktrees/
+.claude/memory/
 .pm-status/
+docs/superpowers/
