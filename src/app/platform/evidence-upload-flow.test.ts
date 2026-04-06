@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildEvidenceUploadDraftSeeds,
   buildImmediateEvidenceUploadState,
+  buildOptimisticUploadedEvidencePatch,
 } from './evidence-upload-flow';
 
 describe('buildEvidenceUploadDraftSeeds', () => {
@@ -56,5 +57,44 @@ describe('buildImmediateEvidenceUploadState', () => {
     expect(result.evidenceCompletedDesc).toBe('세금계산서, 입금확인증');
     expect(result.evidencePendingDesc).toBe('');
     expect(result.evidenceStatus).toBe('COMPLETE');
+  });
+});
+
+describe('buildOptimisticUploadedEvidencePatch', () => {
+  it('preserves the latest transaction version when building an optimistic upload patch', () => {
+    const patch = buildOptimisticUploadedEvidencePatch({
+      transaction: {
+        id: 'tx-1',
+        version: 7,
+        evidenceRequired: ['세금계산서'],
+        evidenceStatus: 'MISSING',
+        evidenceMissing: ['세금계산서'],
+        attachmentsCount: 0,
+        createdBy: 'pm',
+        createdAt: '2026-04-06T00:00:00.000Z',
+        updatedBy: 'pm',
+        updatedAt: '2026-04-06T00:00:00.000Z',
+        ledgerId: 'l1',
+        projectId: 'p1',
+        dateTime: '2026-04-06',
+        weekCode: '',
+        counterparty: '테스트',
+        amounts: { bankAmount: 0, inflowAmount: 0, expenseAmount: 0, vatAmount: 0 },
+        evidenceDriveFolderId: 'folder-1',
+        evidenceDriveFolderName: 'folder',
+        evidenceDriveLink: 'https://drive.google.com/folder',
+        evidenceDriveSharedDriveId: 'drive-1',
+      },
+      folderId: 'folder-1',
+      folderName: 'folder',
+      sharedDriveId: 'drive-1',
+      uploadedCategories: ['세금계산서'],
+      updatedAt: '2026-04-06T01:00:00.000Z',
+    });
+
+    expect(patch.version).toBe(7);
+    expect(patch.evidenceDriveSyncStatus).toBe('UPLOADED');
+    expect(patch.evidenceCompletedDesc).toBe('세금계산서');
+    expect(patch.evidencePendingDesc).toBe('');
   });
 });

@@ -56,7 +56,7 @@ import { splitLooseNameList } from '../../platform/name-list';
 import { resolveApiErrorMessage } from '../../platform/api-error-message';
 import { reportError } from '../../platform/observability';
 import { type ImportRow } from '../../platform/settlement-csv';
-import { applyUploadedEvidenceCategories } from '../../platform/evidence-helpers';
+import { buildOptimisticUploadedEvidencePatch } from '../../platform/evidence-upload-flow';
 import { readDevAuthHarnessConfig } from '../../platform/dev-harness';
 import { detectParticipationRisk } from '../../platform/participation-risk-rules';
 import { normalizeBudgetLabel } from '../../platform/budget-labels';
@@ -385,11 +385,11 @@ export function PortalWeeklyExpensePage() {
       evidenceDriveSharedDriveId: result.sharedDriveId || undefined,
       evidenceDriveSyncStatus: 'SYNCED',
       evidenceDriveLastSyncedAt: result.lastSyncedAt,
-      evidenceCompletedDesc: result.evidenceCompletedDesc || undefined,
-      evidenceCompletedManualDesc: result.evidenceCompletedManualDesc || undefined,
-      evidenceAutoListedDesc: result.evidenceAutoListedDesc || undefined,
-      evidencePendingDesc: result.evidencePendingDesc || undefined,
-      supportPendingDocs: result.supportPendingDocs || undefined,
+      evidenceCompletedDesc: result.evidenceCompletedDesc || '',
+      evidenceCompletedManualDesc: result.evidenceCompletedManualDesc || '',
+      evidenceAutoListedDesc: result.evidenceAutoListedDesc || '',
+      evidencePendingDesc: result.evidencePendingDesc || '',
+      supportPendingDocs: result.supportPendingDocs || '',
       evidenceMissing: result.evidenceMissing,
       evidenceStatus: result.evidenceStatus,
       updatedAt: result.updatedAt,
@@ -556,6 +556,7 @@ export function PortalWeeklyExpensePage() {
         sharedDriveId = provisioned.sharedDriveId || sharedDriveId;
         workingTx = {
           ...workingTx,
+          version: provisioned.version,
           evidenceDriveFolderId: provisioned.folderId,
           evidenceDriveFolderName: provisioned.folderName,
           evidenceDriveLink: provisioned.webViewLink || workingTx.evidenceDriveLink,
@@ -630,28 +631,15 @@ export function PortalWeeklyExpensePage() {
       }
 
       if (usedBrowserUpload) {
-        const optimisticEvidenceState = applyUploadedEvidenceCategories({
-          evidenceRequired: workingTx.evidenceRequired || [],
-          evidenceRequiredDesc: workingTx.evidenceRequiredDesc,
-          evidenceDriveLink: workingTx.evidenceDriveLink,
-          evidenceDriveFolderId: folderId,
-          evidenceCompletedDesc: workingTx.evidenceCompletedDesc,
-          evidenceCompletedManualDesc: workingTx.evidenceCompletedManualDesc,
-          evidenceAutoListedDesc: workingTx.evidenceAutoListedDesc,
-        }, uploads.map((upload) => String(upload.category || upload.parserCategory).trim()).filter(Boolean));
-        await updateTransaction(tx.id, {
-          evidenceDriveFolderId: folderId,
-          evidenceDriveFolderName: workingTx.evidenceDriveFolderName,
-          evidenceDriveLink: workingTx.evidenceDriveLink,
-          evidenceDriveSharedDriveId: sharedDriveId || workingTx.evidenceDriveSharedDriveId,
-          evidenceDriveSyncStatus: 'UPLOADED',
-          evidenceCompletedDesc: optimisticEvidenceState.evidenceCompletedDesc || undefined,
-          evidenceCompletedManualDesc: optimisticEvidenceState.evidenceCompletedManualDesc || undefined,
-          evidencePendingDesc: optimisticEvidenceState.evidencePendingDesc || undefined,
-          evidenceMissing: optimisticEvidenceState.evidenceMissing,
-          evidenceStatus: optimisticEvidenceState.evidenceStatus,
+        await updateTransaction(tx.id, buildOptimisticUploadedEvidencePatch({
+          transaction: workingTx,
+          folderId,
+          folderName: workingTx.evidenceDriveFolderName,
+          webViewLink: workingTx.evidenceDriveLink,
+          sharedDriveId: sharedDriveId || workingTx.evidenceDriveSharedDriveId,
+          uploadedCategories: uploads.map((upload) => String(upload.category || upload.parserCategory).trim()).filter(Boolean),
           updatedAt: new Date().toISOString(),
-        });
+        }));
         const uploadLabel = uploads.length === 1
           ? uploads[0]?.reviewedFileName || uploads[0]?.file.name || '파일 1건'
           : `${uploads[0]?.reviewedFileName || uploads[0]?.file.name || '파일'} 외 ${uploads.length - 1}건`;

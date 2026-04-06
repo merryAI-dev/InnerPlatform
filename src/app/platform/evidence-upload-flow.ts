@@ -76,3 +76,38 @@ export function buildImmediateEvidenceUploadState(input: {
     evidenceAutoListedDesc: input.evidenceAutoListedDesc,
   }, input.uploadedCategories);
 }
+
+export function buildOptimisticUploadedEvidencePatch(input: {
+  transaction: Transaction;
+  folderId: string;
+  folderName?: string;
+  webViewLink?: string;
+  sharedDriveId?: string;
+  uploadedCategories: string[];
+  updatedAt: string;
+}): Partial<Transaction> {
+  const immediate = buildImmediateEvidenceUploadState({
+    evidenceRequired: input.transaction.evidenceRequired,
+    evidenceRequiredDesc: input.transaction.evidenceRequiredDesc,
+    evidenceDriveLink: input.webViewLink || input.transaction.evidenceDriveLink,
+    evidenceDriveFolderId: input.folderId,
+    evidenceCompletedDesc: input.transaction.evidenceCompletedDesc,
+    evidenceCompletedManualDesc: input.transaction.evidenceCompletedManualDesc,
+    evidenceAutoListedDesc: input.transaction.evidenceAutoListedDesc,
+    uploadedCategories: input.uploadedCategories,
+  });
+  return {
+    version: input.transaction.version,
+    evidenceDriveFolderId: input.folderId,
+    evidenceDriveFolderName: input.folderName || input.transaction.evidenceDriveFolderName,
+    evidenceDriveLink: input.webViewLink || input.transaction.evidenceDriveLink,
+    evidenceDriveSharedDriveId: input.sharedDriveId || input.transaction.evidenceDriveSharedDriveId,
+    evidenceDriveSyncStatus: 'UPLOADED',
+    evidenceCompletedDesc: immediate.evidenceCompletedDesc,
+    evidenceCompletedManualDesc: immediate.evidenceCompletedManualDesc,
+    evidencePendingDesc: immediate.evidencePendingDesc,
+    evidenceMissing: immediate.evidenceMissing,
+    evidenceStatus: immediate.evidenceStatus,
+    updatedAt: input.updatedAt,
+  };
+}
