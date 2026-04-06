@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, ArrowRight, CheckCircle2, Clock3, FileWarning, Wallet } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Clock3, FileWarning, Wallet } from 'lucide-react';
 import type { BankImportIntakeItem, CashflowCategory } from '../../data/types';
 import { CASHFLOW_CATEGORY_LABELS } from '../../data/types';
-import { isBankImportManualFieldsComplete, selectWizardIntakeItems } from '../../platform/bank-import-triage';
+import { isBankImportManualFieldsComplete } from '../../platform/bank-import-triage';
+import { groupExpenseIntakeItemsForSurface, resolveBankImportWizardStatus } from '../../platform/bank-intake-surface';
 import { resolveEvidenceChecklist } from '../../platform/evidence-helpers';
 import { resolveEvidenceRequiredDesc } from '../../platform/settlement-sheet-prepare';
 import { Badge } from '../ui/badge';
@@ -16,6 +17,7 @@ interface BankImportTriageWizardProps {
   items: BankImportIntakeItem[];
   onSaveDraft: (id: string, updates: Partial<BankImportIntakeItem>) => Promise<void>;
   onProjectItem: (id: string, updates?: Partial<BankImportIntakeItem>) => Promise<void>;
+  onSyncEvidence?: (id: string, updates: Partial<BankImportIntakeItem>) => Promise<void>;
   evidenceRequiredMap: Record<string, string>;
 }
 
@@ -63,9 +65,15 @@ export function BankImportTriageWizard({
   items,
   onSaveDraft,
   onProjectItem,
+  onSyncEvidence,
   evidenceRequiredMap,
 }: BankImportTriageWizardProps) {
-  const wizardItems = useMemo(() => selectWizardIntakeItems(items), [items]);
+  const groupedItems = useMemo(() => groupExpenseIntakeItemsForSurface(items), [items]);
+  const wizardItems = useMemo(() => [
+    ...groupedItems.needsClassification,
+    ...groupedItems.reviewRequired,
+    ...groupedItems.pendingEvidence,
+  ], [groupedItems]);
   const [selectedId, setSelectedId] = useState<string | null>(wizardItems[0]?.id || null);
   const [drafts, setDrafts] = useState<Record<string, BankImportIntakeItem['manualFields']>>({});
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -108,6 +116,21 @@ export function BankImportTriageWizard({
     ...item.manualFields,
     ...(drafts[item.id] || {}),
   })).length;
+  const selectedStatus = selectedItem ? resolveBankImportWizardStatus({
+    ...selectedItem,
+    manualFields: activeManualFields || selectedItem.manualFields,
+  }) : null;
+
+  const advanceSelection = () => {
+    if (!selectedItem) return;
+    const currentIndex = wizardItems.findIndex((item) => item.id === selectedItem.id);
+    const nextItem = wizardItems[currentIndex + 1] || null;
+    if (nextItem) {
+      setSelectedId(nextItem.id);
+    } else {
+      onOpenChange(false);
+    }
+  };
 
   const saveCurrentDraft = async (advanceAfterSave: boolean) => {
     if (!selectedItem) return;
@@ -122,13 +145,7 @@ export function BankImportTriageWizard({
         updatedAt: new Date().toISOString(),
       });
       if (advanceAfterSave) {
-        const currentIndex = wizardItems.findIndex((item) => item.id === selectedItem.id);
-        const nextItem = wizardItems[currentIndex + 1] || null;
-        if (nextItem) {
-          setSelectedId(nextItem.id);
-        } else {
-          onOpenChange(false);
-        }
+        advanceSelection();
       }
     } finally {
       setSavingId(null);
@@ -143,9 +160,12 @@ export function BankImportTriageWizard({
     };
     setSavingId(selectedItem.id);
     try {
-      const currentIndex = wizardItems.findIndex((item) => item.id === selectedItem.id);
-      const nextItem = wizardItems[currentIndex + 1] || null;
-      if (isBankImportManualFieldsComplete(nextManualFields)) {
+      if (selectedStatus === 'PROJECTED_PENDING_EVIDENCE' && onSyncEvidence) {
+        await onSyncEvidence(selectedItem.id, {
+          manualFields: nextManualFields,
+          updatedAt: new Date().toISOString(),
+        });
+      } else if (isBankImportManualFieldsComplete(nextManualFields)) {
         await onProjectItem(selectedItem.id, {
           manualFields: nextManualFields,
           updatedAt: new Date().toISOString(),
@@ -156,15 +176,80 @@ export function BankImportTriageWizard({
           updatedAt: new Date().toISOString(),
         });
       }
-      if (nextItem) {
-        setSelectedId(nextItem.id);
-      } else {
-        onOpenChange(false);
-      }
+      advanceSelection();
     } finally {
       setSavingId(null);
     }
   };
+
+  const skipEvidenceForNow = () => {
+    advanceSelection();
+  };
+
+  const renderSection = (title: string, itemsForSection: BankImportIntakeItem[], emptyText: string) => (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between px-1">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">{title}</p>
+        <Badge variant="outline" className="text-[10px]">{itemsForSection.length}</Badge>
+      </div>
+      {itemsForSection.length === 0 ? (
+        <Card className="border-slate-200 bg-slate-50/70 shadow-none">
+          <CardContent className="p-3 text-[11px] leading-5 text-slate-500">
+            {emptyText}
+          </CardContent>
+        </Card>
+      ) : itemsForSection.map((item, index) => {
+        const tone = getMatchTone(item);
+        const ToneIcon = tone.icon;
+        const isSelected = item.id === selectedItem?.id;
+        const status = resolveBankImportWizardStatus({
+          ...item,
+          manualFields: {
+            ...item.manualFields,
+            ...(drafts[item.id] || {}),
+          },
+        });
+        const statusLabel = status === 'PROJECTED_PENDING_EVIDENCE'
+          ? '증빙 이어서'
+          : status === 'READY_TO_PROJECT'
+            ? '반영 준비'
+            : tone.label;
+        return (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => setSelectedId(item.id)}
+            data-testid={`bank-import-triage-item-${item.id}`}
+            className={`w-full rounded-2xl border px-3 py-3 text-left transition ${
+              isSelected
+                ? 'border-slate-900 bg-slate-900 text-white shadow-sm'
+                : 'border-slate-200 bg-white hover:border-slate-300'
+            }`}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Badge className={`text-[10px] ${isSelected ? 'border-white/20 bg-white/10 text-white' : tone.badgeClass}`}>
+                    <ToneIcon className="mr-1 h-3 w-3" />
+                    {statusLabel}
+                  </Badge>
+                </div>
+                <div>
+                  <p className={`text-[12px] font-semibold ${isSelected ? 'text-white' : 'text-slate-950'}`}>
+                    {index + 1}. {item.bankSnapshot.counterparty || '거래처 미확인'}
+                  </p>
+                  <p className={`text-[11px] ${isSelected ? 'text-slate-200' : 'text-slate-500'}`}>
+                    {item.bankSnapshot.dateTime} · {formatMoney(Math.abs(item.bankSnapshot.signedAmount))}원
+                  </p>
+                </div>
+              </div>
+              <ArrowRight className={`h-4 w-4 ${isSelected ? 'text-slate-200' : 'text-slate-400'}`} />
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -213,61 +298,20 @@ export function BankImportTriageWizard({
               </div>
             </div>
             <div className="h-[calc(100%-96px)] overflow-y-auto px-3 py-3">
-              <div className="space-y-2">
+              <div className="space-y-4">
                 {wizardItems.length === 0 ? (
                   <Card className="border-emerald-200 bg-emerald-50/70 shadow-none">
                     <CardContent className="p-4 text-[12px] leading-6 text-emerald-900">
                       이번 업로드에서 바로 사람이 처리할 거래는 없습니다.
                     </CardContent>
                   </Card>
-                ) : wizardItems.map((item, index) => {
-                  const tone = getMatchTone(item);
-                  const ToneIcon = tone.icon;
-                  const isSelected = item.id === selectedItem?.id;
-                  const isComplete = isBankImportManualFieldsComplete({
-                    ...item.manualFields,
-                    ...(drafts[item.id] || {}),
-                  });
-                  return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => setSelectedId(item.id)}
-                      data-testid={`bank-import-triage-item-${item.id}`}
-                      className={`w-full rounded-2xl border px-3 py-3 text-left transition ${
-                        isSelected
-                          ? 'border-slate-900 bg-slate-900 text-white shadow-sm'
-                          : 'border-slate-200 bg-white hover:border-slate-300'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="space-y-2">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <Badge className={`text-[10px] ${isSelected ? 'border-white/20 bg-white/10 text-white' : tone.badgeClass}`}>
-                              <ToneIcon className="mr-1 h-3 w-3" />
-                              {tone.label}
-                            </Badge>
-                            {isComplete && (
-                              <Badge className={isSelected ? 'border-emerald-300/20 bg-emerald-400/15 text-emerald-100' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}>
-                                <CheckCircle2 className="mr-1 h-3 w-3" />
-                                저장 준비
-                              </Badge>
-                            )}
-                          </div>
-                          <div>
-                            <p className={`text-[12px] font-semibold ${isSelected ? 'text-white' : 'text-slate-950'}`}>
-                              {index + 1}. {item.bankSnapshot.counterparty || '거래처 미확인'}
-                            </p>
-                            <p className={`text-[11px] ${isSelected ? 'text-slate-200' : 'text-slate-500'}`}>
-                              {item.bankSnapshot.dateTime} · {formatMoney(Math.abs(item.bankSnapshot.signedAmount))}원
-                            </p>
-                          </div>
-                        </div>
-                        <ArrowRight className={`h-4 w-4 ${isSelected ? 'text-slate-200' : 'text-slate-400'}`} />
-                      </div>
-                    </button>
-                  );
-                })}
+                ) : (
+                  <>
+                    {renderSection('분류 필요', groupedItems.needsClassification, '바로 입력이 필요한 거래가 없습니다.')}
+                    {renderSection('검토 필요', groupedItems.reviewRequired, '검토가 필요한 거래가 없습니다.')}
+                    {renderSection('증빙 미완료', groupedItems.pendingEvidence, '증빙 continuation이 필요한 거래가 없습니다.')}
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -429,9 +473,9 @@ export function BankImportTriageWizard({
                               <span className="text-[12px] text-slate-600">매칭 상태</span>
                               <Badge className={getMatchTone(selectedItem).badgeClass}>{getMatchTone(selectedItem).label}</Badge>
                             </div>
-                            <div className="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2">
+                          <div className="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2">
                               <span className="text-[12px] text-slate-600">주간 반영 상태</span>
-                              <Badge variant="outline">{selectedItem.projectionStatus}</Badge>
+                              <Badge variant="outline">{selectedStatus || selectedItem.projectionStatus}</Badge>
                             </div>
                             <div className="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2">
                               <span className="text-[12px] text-slate-600">증빙 상태</span>
@@ -480,6 +524,9 @@ export function BankImportTriageWizard({
                               placeholder="예: 출장신청서, 영수증"
                             />
                           </label>
+                          <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-3 text-[11px] leading-5 text-slate-600">
+                            증빙은 같은 루프에서 이어서 처리할 수 있지만 주간 반영의 blocker는 아닙니다. 지금은 완료 목록을 먼저 기록하고, 실제 파일 업로드는 이어지는 단계에서 계속해도 됩니다.
+                          </div>
                           {selectedItem.reviewReasons.length > 0 && (
                             <ul className="space-y-2">
                               {selectedItem.reviewReasons.map((reason) => (
@@ -498,9 +545,21 @@ export function BankImportTriageWizard({
                 <div className="border-t border-slate-200 bg-white px-6 py-4">
                   <div className="flex items-center justify-between gap-3">
                     <div className="text-[12px] text-slate-500">
-                      필수 입력을 저장하면 이 거래는 다음 단계에서 안전하게 주간 정산 projection으로 이어집니다.
+                      {selectedStatus === 'PROJECTED_PENDING_EVIDENCE'
+                        ? '주간 반영은 이미 끝났고, 지금은 증빙 continuation만 남아 있습니다.'
+                        : '필수 입력을 저장하면 이 거래는 안전하게 주간 정산 projection으로 이어집니다.'}
                     </div>
                     <div className="flex items-center gap-2">
+                      {selectedStatus === 'PROJECTED_PENDING_EVIDENCE' && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={savingId === selectedItem.id}
+                          onClick={skipEvidenceForNow}
+                        >
+                          증빙은 나중에
+                        </Button>
+                      )}
                       <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
                         최소화
                       </Button>
@@ -519,9 +578,11 @@ export function BankImportTriageWizard({
                         data-testid="bank-import-project-next"
                         onClick={() => void projectCurrentItem()}
                       >
-                        {isBankImportManualFieldsComplete(activeManualFields)
-                          ? (wizardItems.findIndex((item) => item.id === selectedItem.id) === wizardItems.length - 1 ? '반영 후 닫기' : '반영 후 다음 거래')
-                          : (wizardItems.findIndex((item) => item.id === selectedItem.id) === wizardItems.length - 1 ? '저장 후 닫기' : '저장 후 다음 거래')}
+                        {selectedStatus === 'PROJECTED_PENDING_EVIDENCE'
+                          ? (wizardItems.findIndex((item) => item.id === selectedItem.id) === wizardItems.length - 1 ? '증빙 저장 후 닫기' : '증빙 저장 후 다음 거래')
+                          : isBankImportManualFieldsComplete(activeManualFields)
+                            ? (wizardItems.findIndex((item) => item.id === selectedItem.id) === wizardItems.length - 1 ? '주간 반영 후 닫기' : '주간 반영 후 다음 거래')
+                            : (wizardItems.findIndex((item) => item.id === selectedItem.id) === wizardItems.length - 1 ? '저장 후 닫기' : '저장 후 다음 거래')}
                       </Button>
                     </div>
                   </div>
