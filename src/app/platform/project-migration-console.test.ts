@@ -11,6 +11,8 @@ import {
   describeMigrationAuditActionState,
   filterMigrationAuditConsoleRecords,
   findMigrationAuditRecord,
+  findDuplicateProjectsForMigrationAuditRecord,
+  findProposalProjectsForMigrationAuditRecord,
   groupMigrationAuditConsoleRecords,
   normalizeCicLabel,
   suggestProjectsForMigrationAuditRecord,
@@ -254,5 +256,79 @@ describe('project-migration-console', () => {
       tone: 'success',
       helper: '필요하면 등록 조직이나 연결 프로젝트만 조정하면 됩니다.',
     });
+  });
+
+  it('finds PM portal draft proposals that match the source row', () => {
+    const record = buildMigrationAuditConsoleRecords([
+      makeRow({
+        status: 'MISSING',
+        match: null,
+        candidate: makeCandidate({
+          businessName: '2026년 중장년 창업컨설팅 지원사업',
+          department: '투자센터',
+        }),
+      }),
+    ])[0];
+
+    const proposals = findProposalProjectsForMigrationAuditRecord(record, [
+      makeProject({
+        id: 'p-proposal',
+        name: '2026년 중장년 창업컨설팅 지원사업',
+        department: '투자센터',
+        registrationSource: 'pm_portal',
+        status: 'CONTRACT_PENDING',
+      }),
+      makeProject({
+        id: 'p-live',
+        name: '이미 운영 중인 사업',
+        department: '투자센터',
+        registrationSource: 'manual',
+        status: 'IN_PROGRESS',
+      }),
+    ]);
+
+    expect(proposals.map((project) => project.id)).toEqual(['p-proposal']);
+  });
+
+  it('finds non-trashed duplicate candidates around the same source row', () => {
+    const record = buildMigrationAuditConsoleRecords([
+      makeRow({
+        status: 'MISSING',
+        match: null,
+        candidate: makeCandidate({
+          businessName: '현대 모비스 CSV OI 컨설팅',
+          clientOrg: '현대 모비스',
+          department: '투자센터',
+        }),
+      }),
+    ])[0];
+
+    const duplicates = findDuplicateProjectsForMigrationAuditRecord(record, [
+      makeProject({
+        id: 'p-primary',
+        name: '현대 모비스 CSV OI 컨설팅',
+        officialContractName: '현대 모비스 CSV OI 컨설팅',
+        clientOrg: '현대 모비스',
+        department: '투자센터',
+        status: 'IN_PROGRESS',
+      }),
+      makeProject({
+        id: 'p-proposal',
+        name: '현대 모비스 CSV OI 컨설팅',
+        clientOrg: '현대 모비스',
+        department: '투자센터',
+        registrationSource: 'pm_portal',
+        status: 'CONTRACT_PENDING',
+      }),
+      makeProject({
+        id: 'p-trashed',
+        name: '현대 모비스 CSV OI 컨설팅',
+        clientOrg: '현대 모비스',
+        department: '투자센터',
+        trashedAt: '2026-04-06T00:00:00.000Z',
+      }),
+    ]);
+
+    expect(duplicates.map((project) => project.id)).toEqual(['p-primary', 'p-proposal']);
   });
 });

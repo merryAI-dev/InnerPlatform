@@ -68,6 +68,13 @@ function normalizeQuery(value: string): string {
   return normalizeText(value).toLowerCase();
 }
 
+function similarityIncludes(source: string, target: string): boolean {
+  const left = normalizeQuery(source).replace(/\s+/g, '');
+  const right = normalizeQuery(target).replace(/\s+/g, '');
+  if (!left || !right) return false;
+  return left.includes(right) || right.includes(left);
+}
+
 export function normalizeCicLabel(value: unknown): string {
   const normalized = normalizeText(value);
   return normalized || '미지정';
@@ -264,6 +271,70 @@ export function suggestProjectsForMigrationAuditRecord(
 
       return (normalizeText(left.officialContractName) || normalizeText(left.name))
         .localeCompare(normalizeText(right.officialContractName) || normalizeText(right.name), 'ko');
+    })
+    .slice(0, limit);
+}
+
+export function findProposalProjectsForMigrationAuditRecord(
+  record: MigrationAuditConsoleRecord | null,
+  projects: Project[],
+  limit = 5,
+): Project[] {
+  if (!record) return [];
+
+  return projects
+    .filter((project) => (
+      project.registrationSource === 'pm_portal'
+      && project.status === 'CONTRACT_PENDING'
+      && !project.trashedAt
+    ))
+    .filter((project) => (
+      similarityIncludes(record.sourceName, project.officialContractName || project.name)
+      || normalizeCicLabel(resolveProjectCic(project)) === record.cic
+    ))
+    .sort((left, right) => {
+      const leftNameMatch = Number(similarityIncludes(record.sourceName, left.officialContractName || left.name));
+      const rightNameMatch = Number(similarityIncludes(record.sourceName, right.officialContractName || right.name));
+      if (leftNameMatch !== rightNameMatch) return rightNameMatch - leftNameMatch;
+
+      const leftSameOrg = Number(normalizeText(left.clientOrg) === normalizeText(record.sourceClientOrg));
+      const rightSameOrg = Number(normalizeText(right.clientOrg) === normalizeText(record.sourceClientOrg));
+      if (leftSameOrg !== rightSameOrg) return rightSameOrg - leftSameOrg;
+
+      return normalizeText(left.officialContractName || left.name)
+        .localeCompare(normalizeText(right.officialContractName || right.name), 'ko');
+    })
+    .slice(0, limit);
+}
+
+export function findDuplicateProjectsForMigrationAuditRecord(
+  record: MigrationAuditConsoleRecord | null,
+  projects: Project[],
+  limit = 6,
+): Project[] {
+  if (!record) return [];
+
+  return projects
+    .filter((project) => !project.trashedAt)
+    .filter((project) => (
+      similarityIncludes(record.sourceName, project.officialContractName || project.name)
+      || (
+        normalizeText(record.sourceClientOrg)
+        && normalizeText(project.clientOrg) === normalizeText(record.sourceClientOrg)
+        && normalizeCicLabel(resolveProjectCic(project)) === record.cic
+      )
+    ))
+    .sort((left, right) => {
+      const leftContractMatch = Number(similarityIncludes(record.sourceName, left.officialContractName || left.name));
+      const rightContractMatch = Number(similarityIncludes(record.sourceName, right.officialContractName || right.name));
+      if (leftContractMatch !== rightContractMatch) return rightContractMatch - leftContractMatch;
+
+      const leftIsDraft = Number(left.registrationSource === 'pm_portal' && left.status === 'CONTRACT_PENDING');
+      const rightIsDraft = Number(right.registrationSource === 'pm_portal' && right.status === 'CONTRACT_PENDING');
+      if (leftIsDraft !== rightIsDraft) return leftIsDraft - rightIsDraft;
+
+      return normalizeText(left.officialContractName || left.name)
+        .localeCompare(normalizeText(right.officialContractName || right.name), 'ko');
     })
     .slice(0, limit);
 }

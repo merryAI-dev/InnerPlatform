@@ -22,7 +22,9 @@ import {
   buildMigrationAuditDenseRows,
   collectMigrationAuditCicOptions,
   filterMigrationAuditConsoleRecords,
+  findDuplicateProjectsForMigrationAuditRecord,
   findMigrationAuditRecord,
+  findProposalProjectsForMigrationAuditRecord,
   groupMigrationAuditConsoleRecords,
   normalizeCicLabel,
   suggestProjectsForMigrationAuditRecord,
@@ -106,7 +108,7 @@ function filterCurrentOnlyRows(
 }
 
 export function ProjectMigrationAuditPage() {
-  const { projects, currentUser, addProject, updateProject } = useAppStore();
+  const { projects, currentUser, addProject, updateProject, trashProject } = useAppStore();
   const { db, isOnline, orgId } = useFirebase();
   const navigate = useNavigate();
 
@@ -121,9 +123,15 @@ export function ProjectMigrationAuditPage() {
   const [selectedCic, setSelectedCic] = useState('미지정');
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [selectedProjectStatus, setSelectedProjectStatus] = useState<ProjectStatus>('CONTRACT_PENDING');
+  const [selectedProposalId, setSelectedProposalId] = useState('');
+  const [proposalDraftName, setProposalDraftName] = useState('');
+  const [proposalDraftOfficialContractName, setProposalDraftOfficialContractName] = useState('');
+  const [proposalDraftClientOrg, setProposalDraftClientOrg] = useState('');
   const [quickCreateName, setQuickCreateName] = useState('');
   const [linking, setLinking] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [savingProposal, setSavingProposal] = useState(false);
+  const [trashingProjectId, setTrashingProjectId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!db || !isOnline) {
@@ -212,6 +220,17 @@ export function ProjectMigrationAuditPage() {
     [activeRecord, projects],
   );
 
+  const proposalProjects = useMemo(
+    () => findProposalProjectsForMigrationAuditRecord(activeRecord, projects),
+    [activeRecord, projects],
+  );
+
+  const duplicateProjects = useMemo(() => {
+    const proposalIds = new Set(proposalProjects.map((project) => project.id));
+    return findDuplicateProjectsForMigrationAuditRecord(activeRecord, projects)
+      .filter((project) => !proposalIds.has(project.id));
+  }, [activeRecord, projects, proposalProjects]);
+
   const denseRows = useMemo(
     () => buildMigrationAuditDenseRows(filteredRecords, filteredCurrentRows),
     [filteredCurrentRows, filteredRecords],
@@ -229,6 +248,32 @@ export function ProjectMigrationAuditPage() {
     setSelectedProjectStatus(activeRecord.match?.project.status || 'CONTRACT_PENDING');
     setQuickCreateName(activeRecord.sourceName);
   }, [activeRecord?.id]);
+
+  useEffect(() => {
+    if (proposalProjects.length === 0) {
+      setSelectedProposalId('');
+      setProposalDraftName('');
+      setProposalDraftOfficialContractName('');
+      setProposalDraftClientOrg('');
+      return;
+    }
+
+    const target = proposalProjects.find((project) => project.id === selectedProposalId) || proposalProjects[0];
+    setSelectedProposalId(target.id);
+    setProposalDraftName(target.name || '');
+    setProposalDraftOfficialContractName(target.officialContractName || target.name || '');
+    setProposalDraftClientOrg(target.clientOrg || '');
+  }, [proposalProjects, selectedProposalId]);
+
+  const selectedProposalProject = useMemo(
+    () => proposalProjects.find((project) => project.id === selectedProposalId) || null,
+    [proposalProjects, selectedProposalId],
+  );
+
+  const selectedTargetProject = useMemo(
+    () => projects.find((project) => project.id === selectedProjectId) || null,
+    [projects, selectedProjectId],
+  );
 
   async function handleSyncApprovedScope() {
     if (!db || !isOnline) {
@@ -282,17 +327,19 @@ export function ProjectMigrationAuditPage() {
     }
     setLinking(true);
     try {
-      await updateProject(project.id, {
-        officialContractName: activeRecord.sourceName,
+      const projectPatch: Partial<Project> = {
         status: selectedProjectStatus,
         cic: selectedCic !== '미지정' ? selectedCic : undefined,
+        department: selectedCic !== '미지정' ? selectedCic : project.department,
+        teamName: selectedCic !== '미지정' ? selectedCic : project.teamName,
         updatedAt: new Date().toISOString(),
+      };
+      await updateProject(project.id, {
+        ...projectPatch,
       });
       await persistCandidateLink({
         ...project,
-        officialContractName: activeRecord.sourceName,
-        status: selectedProjectStatus,
-        cic: selectedCic !== '미지정' ? selectedCic : undefined,
+        ...projectPatch,
       });
       toast.success('이관 연결을 반영했습니다.', {
         description: `${activeRecord.sourceName} → ${project.officialContractName || project.name}`,
@@ -345,6 +392,73 @@ export function ProjectMigrationAuditPage() {
       });
     } finally {
       setCreating(false);
+    }
+  }
+
+  async function handleSaveProposalProject() {
+    if (!selectedProposalProject) {
+      toast.error('수정할 등록 제안 프로젝트를 먼저 선택해 주세요.');
+      return;
+    }
+    const nextName = proposalDraftName.trim();
+    const nextOfficialName = proposalDraftOfficialContractName.trim() || nextName;
+    if (!nextName) {
+      toast.error('프로젝트명을 입력해 주세요.');
+      return;
+    }
+
+    setSavingProposal(true);
+    try {
+      await updateProject(selectedProposalProject.id, {
+        name: nextName,
+        shortName: nextName,
+        officialContractName: nextOfficialName,
+        clientOrg: proposalDraftClientOrg.trim(),
+        department: selectedCic !== '미지정' ? selectedCic : undefined,
+        teamName: selectedCic !== '미지정' ? selectedCic : undefined,
+        cic: selectedCic !== '미지정' ? selectedCic : undefined,
+        updatedAt: new Date().toISOString(),
+      });
+      toast.success('등록 제안 프로젝트를 수정했습니다.', {
+        description: `${nextOfficialName} · ${selectedCic}`,
+      });
+    } catch (error) {
+      toast.error('등록 제안 프로젝트 수정 실패', {
+        description: error instanceof Error ? error.message : '다시 시도해 주세요.',
+      });
+    } finally {
+      setSavingProposal(false);
+    }
+  }
+
+  async function handleTrashProjectTarget(project: Project, reason: string) {
+    setTrashingProjectId(project.id);
+    try {
+      await trashProject(project.id, reason);
+      if (selectedProjectId === project.id) {
+        setSelectedProjectId('');
+      }
+      if (selectedProposalId === project.id) {
+        setSelectedProposalId('');
+      }
+      toast.success('프로젝트를 폐기했습니다.', {
+        description: `${project.officialContractName || project.name} · 휴지통 이동`,
+      });
+    } catch (error) {
+      toast.error('프로젝트 폐기 실패', {
+        description: error instanceof Error ? error.message : '다시 시도해 주세요.',
+      });
+    } finally {
+      setTrashingProjectId(null);
+    }
+  }
+
+  function handleChooseTargetProject(project: Project) {
+    setSelectedProjectId(project.id);
+    setSelectedProjectStatus(project.status);
+    const projectCic = normalizeCicLabel(resolveProjectCic(project));
+    if (projectCic) {
+      setSelectedCic(projectCic);
     }
   }
 
@@ -412,16 +526,37 @@ export function ProjectMigrationAuditPage() {
             selectedCic={selectedCic}
             onSelectedCicChange={setSelectedCic}
             suggestedProjects={suggestedProjects}
+            proposalProjects={proposalProjects}
+            duplicateProjects={duplicateProjects}
             selectedProjectId={selectedProjectId}
-            onSelectedProjectIdChange={setSelectedProjectId}
+            selectedTargetProject={selectedTargetProject}
+            onChooseTargetProject={handleChooseTargetProject}
             selectedProjectStatus={selectedProjectStatus}
             onSelectedProjectStatusChange={setSelectedProjectStatus}
             onApplyMatch={() => { void handleApplyMatch(); }}
+            selectedProposalId={selectedProposalId}
+            onSelectedProposalIdChange={setSelectedProposalId}
+            proposalDraftName={proposalDraftName}
+            onProposalDraftNameChange={setProposalDraftName}
+            proposalDraftOfficialContractName={proposalDraftOfficialContractName}
+            onProposalDraftOfficialContractNameChange={setProposalDraftOfficialContractName}
+            proposalDraftClientOrg={proposalDraftClientOrg}
+            onProposalDraftClientOrgChange={setProposalDraftClientOrg}
+            onSaveProposal={() => { void handleSaveProposalProject(); }}
+            onTrashProposal={() => {
+              if (!selectedProposalProject) return;
+              void handleTrashProjectTarget(selectedProposalProject, '이관 등록 제안 폐기');
+            }}
             quickCreateName={quickCreateName}
             onQuickCreateNameChange={setQuickCreateName}
             onQuickCreate={() => { void handleQuickCreate(); }}
             linking={linking}
             creating={creating}
+            savingProposal={savingProposal}
+            trashingProjectId={trashingProjectId}
+            onTrashDuplicate={(project) => {
+              void handleTrashProjectTarget(project, '이관 중복 프로젝트 폐기');
+            }}
           />
         </div>
       )}
