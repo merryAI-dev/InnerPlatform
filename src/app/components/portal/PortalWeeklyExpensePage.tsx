@@ -74,7 +74,7 @@ import {
 import { resolvePortalHappyPath } from '../../platform/portal-happy-path';
 import { resolvePortalMissionProgress } from '../../platform/portal-mission-guide';
 import { resolveWeeklyExpenseSavePolicy } from '../../platform/weekly-expense-save-policy';
-import { selectWizardIntakeItems } from '../../platform/bank-import-triage';
+import { groupExpenseIntakeItemsForSurface } from '../../platform/bank-intake-surface';
 import { usePortalNavigationGuard } from './PortalLayout';
 const GoogleSheetMigrationWizard = lazy(
   () => import('./GoogleSheetMigrationWizard').then((module) => ({ default: module.GoogleSheetMigrationWizard })),
@@ -141,8 +141,9 @@ export function PortalWeeklyExpensePage() {
     markSheetSourceApplied,
     weeklySubmissionStatuses,
     upsertWeeklySubmissionStatus,
-    updateExpenseIntakeItem,
+    saveExpenseIntakeDraft,
     projectExpenseIntakeItem,
+    syncExpenseIntakeEvidence,
   } = usePortalStore();
   const { submitWeekAsPm, upsertWeekAmounts } = useCashflowWeeks();
   const devHarnessConfig = readDevAuthHarnessConfig(import.meta.env, typeof window !== 'undefined' ? window.location : undefined);
@@ -196,7 +197,8 @@ export function PortalWeeklyExpensePage() {
     expenseRowCount: expenseSheetRows?.length || 0,
     weeklySubmissionStatuses,
   }), [bankStatementCount, expenseSheetRows?.length, fundInputMode, weeklySubmissionStatuses]);
-  const triageItems = useMemo(() => selectWizardIntakeItems(expenseIntakeItems), [expenseIntakeItems]);
+  const intakeSurface = useMemo(() => groupExpenseIntakeItemsForSurface(expenseIntakeItems), [expenseIntakeItems]);
+  const queueWorkCount = intakeSurface.needsClassification.length + intakeSurface.reviewRequired.length + intakeSurface.pendingEvidence.length;
   const expenseRowCount = expenseSheetRows?.length || 0;
   const weeklySetupPanel = useMemo(() => {
     if (!happyPath.canOpenWeeklyExpenses) {
@@ -1063,27 +1065,33 @@ export function PortalWeeklyExpensePage() {
         </CardContent>
       </Card>
 
-      {triageItems.length > 0 && (
+      {queueWorkCount > 0 && (
         <Card data-testid="weekly-intake-queue-strip" className="border-indigo-200/70 bg-gradient-to-r from-indigo-50 via-white to-cyan-50/70 shadow-sm">
           <CardContent className="flex flex-col gap-3 px-4 py-4 md:flex-row md:items-center md:justify-between">
             <div className="space-y-1">
               <p className="text-[11px] uppercase tracking-[0.18em] text-indigo-700">Intake Queue</p>
               <p className="text-[14px] font-semibold text-slate-900">
-                신규 거래 {triageItems.length}건이 아직 주간 반영 전입니다
+                분류와 증빙 continuation이 필요한 거래 {queueWorkCount}건이 남아 있습니다
               </p>
               <p className="text-[12px] leading-6 text-slate-600">
-                전체 시트를 다시 건드릴 필요 없이, 필요한 거래만 wizard에서 분류한 뒤 이 화면으로 안전하게 이어집니다.
+                전체 시트를 다시 건드릴 필요 없이, 필요한 거래만 wizard에서 분류하거나 증빙만 이어서 처리한 뒤 이 화면으로 안전하게 돌아옵니다.
               </p>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               <Badge className="border-amber-200 bg-amber-50 text-amber-700">
-                입력 필요 {triageItems.filter((item) => item.matchState === 'PENDING_INPUT').length}
+                분류 필요 {intakeSurface.needsClassification.length}
               </Badge>
               <Badge className="border-rose-200 bg-rose-50 text-rose-700">
-                검토 필요 {triageItems.filter((item) => item.matchState === 'REVIEW_REQUIRED').length}
+                검토 필요 {intakeSurface.reviewRequired.length}
+              </Badge>
+              <Badge className="border-sky-200 bg-sky-50 text-sky-700">
+                증빙 미완료 {intakeSurface.pendingEvidence.length}
               </Badge>
               <Button variant="outline" size="sm" onClick={() => requestRouteNavigation('/portal/bank-statements', '통장내역')}>
                 원본 보기
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setTriageWizardOpen(true)} disabled={intakeSurface.pendingEvidence.length === 0}>
+                증빙 이어서 하기
               </Button>
               <Button data-testid="weekly-intake-open-wizard" size="sm" onClick={() => setTriageWizardOpen(true)}>
                 신규 거래 처리
@@ -1257,8 +1265,9 @@ export function PortalWeeklyExpensePage() {
         open={triageWizardOpen}
         onOpenChange={setTriageWizardOpen}
         items={expenseIntakeItems}
-        onSaveDraft={updateExpenseIntakeItem}
+        onSaveDraft={saveExpenseIntakeDraft}
         onProjectItem={projectExpenseIntakeItem}
+        onSyncEvidence={syncExpenseIntakeEvidence}
         evidenceRequiredMap={evidenceRequiredMap}
       />
       <AlertDialog open={!!pendingUnsavedAction}>

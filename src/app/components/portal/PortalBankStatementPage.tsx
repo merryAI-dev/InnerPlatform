@@ -17,7 +17,7 @@ import {
   sanitizeHtmlMatrix,
   type BankStatementRow,
 } from '../../platform/bank-statement';
-import { selectWizardIntakeItems } from '../../platform/bank-import-triage';
+import { groupExpenseIntakeItemsForSurface } from '../../platform/bank-intake-surface';
 import { normalizeKey, parseCsv, parseNumber } from '../../platform/csv-utils';
 import { loadXlsx, warmXlsx } from '../../platform/lazy-heavy-modules';
 import { normalizeProjectFundInputMode } from '../../data/types';
@@ -56,8 +56,9 @@ export function PortalBankStatementPage() {
     expenseSheetRows,
     expenseIntakeItems,
     evidenceRequiredMap,
-    updateExpenseIntakeItem,
+    saveExpenseIntakeDraft,
     projectExpenseIntakeItem,
+    syncExpenseIntakeEvidence,
     weeklySubmissionStatuses,
   } = usePortalStore();
   const [columns, setColumns] = useState<string[]>(bankStatementRows?.columns || []);
@@ -82,7 +83,8 @@ export function PortalBankStatementPage() {
     expenseRowCount: expenseSheetRows?.length || 0,
     weeklySubmissionStatuses,
   }), [expenseSheetRows?.length, myProject?.fundInputMode, rows.length, weeklySubmissionStatuses]);
-  const triageItems = useMemo(() => selectWizardIntakeItems(expenseIntakeItems), [expenseIntakeItems]);
+  const intakeSurface = useMemo(() => groupExpenseIntakeItemsForSurface(expenseIntakeItems), [expenseIntakeItems]);
+  const queueWorkCount = intakeSurface.needsClassification.length + intakeSurface.reviewRequired.length + intakeSurface.pendingEvidence.length;
 
   const formatAmount = useCallback((value: string) => {
     const trimmed = value.trim();
@@ -510,18 +512,21 @@ export function PortalBankStatementPage() {
                 <div className="flex items-center gap-2 flex-wrap">
                   <p className="text-[13px] font-semibold text-slate-950">신규 거래 처리 Queue</p>
                   <Badge variant="outline" className="text-[10px]">
-                    총 {triageItems.length}건
+                    총 {queueWorkCount}건
                   </Badge>
                 </div>
                 <p className="text-[12px] leading-6 text-slate-600">
-                  업로드한 원본은 이제 전체 주간 시트를 다시 쓰지 않습니다. 신규 거래와 검토 필요 거래만 queue로 분리해서 사람이 필요한 입력만 처리합니다.
+                  업로드한 원본은 이제 전체 주간 시트를 다시 쓰지 않습니다. 분류와 검토, 증빙 continuation이 필요한 거래만 queue로 남기고 나머지는 기존 주간 입력을 보존합니다.
                 </p>
                 <div className="flex gap-2 flex-wrap">
                   <Badge className="border-amber-200 bg-amber-50 text-amber-700">
-                    입력 필요 {triageItems.filter((item) => item.matchState === 'PENDING_INPUT').length}
+                    분류 필요 {intakeSurface.needsClassification.length}
                   </Badge>
                   <Badge className="border-rose-200 bg-rose-50 text-rose-700">
-                    검토 필요 {triageItems.filter((item) => item.matchState === 'REVIEW_REQUIRED').length}
+                    검토 필요 {intakeSurface.reviewRequired.length}
+                  </Badge>
+                  <Badge className="border-sky-200 bg-sky-50 text-sky-700">
+                    증빙 미완료 {intakeSurface.pendingEvidence.length}
                   </Badge>
                 </div>
               </div>
@@ -529,7 +534,10 @@ export function PortalBankStatementPage() {
                 <Button variant="outline" size="sm" onClick={() => navigate('/portal/weekly-expenses')}>
                   주간 사업비에서 보기
                 </Button>
-                <Button data-testid="bank-import-open-wizard" size="sm" onClick={() => setTriageOpen(true)} disabled={triageItems.length === 0}>
+                <Button variant="outline" size="sm" onClick={() => setTriageOpen(true)} disabled={intakeSurface.pendingEvidence.length === 0}>
+                  증빙 이어서 하기
+                </Button>
+                <Button data-testid="bank-import-open-wizard" size="sm" onClick={() => setTriageOpen(true)} disabled={queueWorkCount === 0}>
                   신규 거래 처리 시작
                 </Button>
               </div>
@@ -611,8 +619,9 @@ export function PortalBankStatementPage() {
         open={triageOpen}
         onOpenChange={setTriageOpen}
         items={expenseIntakeItems}
-        onSaveDraft={updateExpenseIntakeItem}
+        onSaveDraft={saveExpenseIntakeDraft}
         onProjectItem={projectExpenseIntakeItem}
+        onSyncEvidence={syncExpenseIntakeEvidence}
         evidenceRequiredMap={evidenceRequiredMap}
       />
     </div>
