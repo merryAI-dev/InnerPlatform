@@ -45,6 +45,7 @@ import {
 } from '../ui/alert-dialog';
 import { ImportEditor } from './ImportEditor';
 export type { EvidenceUploadSelection, PendingQuickInsert } from './ImportEditor';
+import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { SettlementWeekSection } from './SettlementWeekSection';
 import {
   buildTransactionEditHistoryEntries,
@@ -79,7 +80,7 @@ export interface SettlementLedgerProps {
   sheetRows?: ImportRow[] | null;
   onSaveSheetRows?: (rows: ImportRow[]) => ImportRow[] | void | Promise<ImportRow[] | void>;
   saveMode?: 'auto' | 'manual';
-  showSaveStatusSurface?: boolean;
+  showSaveStatusButton?: boolean;
   authorOptions?: string[];
   budgetCodeBook?: BudgetCodeEntry[];
   hideYearControls?: boolean;
@@ -148,7 +149,7 @@ export function SettlementLedgerPage({
   sheetRows,
   onSaveSheetRows,
   saveMode = 'manual',
-  showSaveStatusSurface = true,
+  showSaveStatusButton = true,
   authorOptions,
   budgetCodeBook,
   hideYearControls = false,
@@ -780,30 +781,41 @@ export function SettlementLedgerPage({
     () => resolveWeeklyAccountingProductStatusDomHooks(weeklyAccountingStatus),
     [weeklyAccountingStatus],
   );
-  const saveStatusSummary = showSaveStatusSurface && onSaveSheetRows ? (
-    <div
-      className="w-full rounded-md border border-slate-200/80 bg-slate-50/80 px-3 py-2 md:ml-auto md:w-[320px] dark:border-slate-800 dark:bg-slate-900/40"
-      data-testid={weeklyAccountingStatusHooks.testId}
-      aria-label={weeklyAccountingStatusHooks.ariaLabel}
-    >
-      <div className="truncate text-[10px] leading-4 text-muted-foreground">{saveStatusLabel}</div>
-      <div
-        className={
-          weeklyAccountingStatus.tone === 'success'
-            ? 'truncate text-[11px] font-semibold leading-4 text-emerald-700 dark:text-emerald-300'
-            : weeklyAccountingStatus.tone === 'danger'
-              ? 'truncate text-[11px] font-semibold leading-4 text-rose-700 dark:text-rose-300'
-              : weeklyAccountingStatus.tone === 'warning'
-                ? 'truncate text-[11px] font-semibold leading-4 text-amber-700 dark:text-amber-300'
-                : 'truncate text-[11px] font-semibold leading-4 text-muted-foreground'
-        }
-      >
-        {weeklyAccountingStatus.label}
-      </div>
-      <div className="min-h-8 text-[9px] leading-4 text-muted-foreground">
-        {weeklyAccountingStatus.description}
-      </div>
-    </div>
+  const saveStatusButton = showSaveStatusButton && onSaveSheetRows ? (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          size="sm"
+          className="cursor-pointer shadow-sm hover:bg-muted/40"
+          data-testid={weeklyAccountingStatusHooks.testId}
+          aria-label={weeklyAccountingStatusHooks.ariaLabel}
+        >
+          <span className="mr-2 text-[11px]">{weeklyAccountingStatus.label}</span>
+          <span className="text-[10px] text-muted-foreground">저장 상태</span>
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-[320px] rounded-xl border border-slate-200/80 bg-background p-4 dark:border-slate-800">
+        <div className="space-y-1">
+          <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Save Status</p>
+          <p className="text-[11px] text-muted-foreground">{saveStatusLabel}</p>
+          <p
+            className={
+              weeklyAccountingStatus.tone === 'success'
+                ? 'text-[13px] font-semibold text-emerald-700 dark:text-emerald-300'
+                : weeklyAccountingStatus.tone === 'danger'
+                  ? 'text-[13px] font-semibold text-rose-700 dark:text-rose-300'
+                  : weeklyAccountingStatus.tone === 'warning'
+                    ? 'text-[13px] font-semibold text-amber-700 dark:text-amber-300'
+                    : 'text-[13px] font-semibold text-foreground'
+            }
+          >
+            {weeklyAccountingStatus.label}
+          </p>
+          <p className="text-[11px] leading-5 text-muted-foreground">{weeklyAccountingStatus.description}</p>
+        </div>
+      </PopoverContent>
+    </Popover>
   ) : null;
 
   // ── Inline edit handler with audit trail ──
@@ -933,7 +945,7 @@ export function SettlementLedgerPage({
               {downloadPreparing ? '엑셀 준비 중' : '엑셀 다운로드'}
             </Button>
           </div>
-          {saveStatusSummary}
+          {saveStatusButton}
         </div>
 
         {importRows && (
@@ -1044,31 +1056,7 @@ export function SettlementLedgerPage({
               className="h-8 rounded-md border px-2 text-[11px] bg-background"
               title="다운로드 종료일"
             />
-            {showSaveStatusSurface && onSaveSheetRows && (
-              <div
-                className="flex flex-col items-end gap-0.5 text-[10px] leading-4"
-                data-testid={weeklyAccountingStatusHooks.testId}
-                aria-label={weeklyAccountingStatusHooks.ariaLabel}
-              >
-                <span className="text-muted-foreground">{saveStatusLabel}</span>
-                <span
-                  className={
-                    weeklyAccountingStatus.tone === 'success'
-                      ? 'font-semibold text-emerald-700 dark:text-emerald-300'
-                      : weeklyAccountingStatus.tone === 'danger'
-                        ? 'font-semibold text-rose-700 dark:text-rose-300'
-                        : weeklyAccountingStatus.tone === 'warning'
-                          ? 'font-semibold text-amber-700 dark:text-amber-300'
-                          : 'font-semibold text-muted-foreground'
-                  }
-                >
-                  {weeklyAccountingStatus.label}
-                </span>
-                <span className="max-w-[260px] text-right text-[9px] text-muted-foreground">
-                  {weeklyAccountingStatus.description}
-                </span>
-              </div>
-            )}
+            {saveStatusButton}
         </div>
       </div>
 

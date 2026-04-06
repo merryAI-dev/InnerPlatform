@@ -6,7 +6,9 @@ describe('resolveWeeklyExpenseSavePolicy', () => {
   it('locks weekly expense editing to manual saves', () => {
     expect(resolveWeeklyExpenseSavePolicy()).toEqual({
       mode: 'manual',
-      showStatusSurface: true,
+      showStatusButton: true,
+      showInlineStatus: false,
+      guideMinimizable: true,
     });
   });
 });

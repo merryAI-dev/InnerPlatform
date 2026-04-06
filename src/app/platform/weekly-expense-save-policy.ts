@@ -2,12 +2,16 @@ export type WeeklyExpenseSaveMode = 'auto' | 'manual';
 
 export interface WeeklyExpenseSavePolicy {
   mode: WeeklyExpenseSaveMode;
-  showStatusSurface: boolean;
+  showStatusButton: boolean;
+  showInlineStatus: boolean;
+  guideMinimizable: boolean;
 }
 
 export function resolveWeeklyExpenseSavePolicy(): WeeklyExpenseSavePolicy {
   return {
     mode: 'manual',
-    showStatusSurface: true,
+    showStatusButton: true,
+    showInlineStatus: false,
+    guideMinimizable: true,
   };
 }
