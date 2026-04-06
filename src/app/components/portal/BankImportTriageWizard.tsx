@@ -116,6 +116,8 @@ export function BankImportTriageWizard({
     ...item.manualFields,
     ...(drafts[item.id] || {}),
   })).length;
+  const selectedItemIndex = selectedItem ? wizardItems.findIndex((item) => item.id === selectedItem.id) : -1;
+  const remainingItemCount = selectedItemIndex >= 0 ? Math.max(wizardItems.length - selectedItemIndex - 1, 0) : wizardItems.length;
   const selectedStatus = selectedItem ? resolveBankImportWizardStatus({
     ...selectedItem,
     manualFields: activeManualFields || selectedItem.manualFields,
@@ -222,24 +224,27 @@ export function BankImportTriageWizard({
             data-testid={`bank-import-triage-item-${item.id}`}
             className={`w-full rounded-2xl border px-3 py-3 text-left transition ${
               isSelected
-                ? 'border-slate-900 bg-slate-900 text-white shadow-sm'
-                : 'border-slate-200 bg-white hover:border-slate-300'
+                ? 'border-slate-900 bg-slate-900 text-white shadow-sm ring-1 ring-slate-900/10'
+                : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
             }`}
           >
             <div className="flex items-start justify-between gap-3">
-              <div className="space-y-2">
+              <div className="min-w-0 space-y-2">
                 <div className="flex items-center gap-2 flex-wrap">
                   <Badge className={`text-[10px] ${isSelected ? 'border-white/20 bg-white/10 text-white' : tone.badgeClass}`}>
                     <ToneIcon className="mr-1 h-3 w-3" />
                     {statusLabel}
                   </Badge>
+                  <span className={`text-[10px] tabular-nums ${isSelected ? 'text-slate-200' : 'text-slate-500'}`}>
+                    {formatMoney(Math.abs(item.bankSnapshot.signedAmount))}원
+                  </span>
                 </div>
                 <div>
-                  <p className={`text-[12px] font-semibold ${isSelected ? 'text-white' : 'text-slate-950'}`}>
+                  <p className={`truncate text-[12px] font-semibold ${isSelected ? 'text-white' : 'text-slate-950'}`}>
                     {index + 1}. {item.bankSnapshot.counterparty || '거래처 미확인'}
                   </p>
-                  <p className={`text-[11px] ${isSelected ? 'text-slate-200' : 'text-slate-500'}`}>
-                    {item.bankSnapshot.dateTime} · {formatMoney(Math.abs(item.bankSnapshot.signedAmount))}원
+                  <p className={`truncate text-[11px] ${isSelected ? 'text-slate-200' : 'text-slate-500'}`}>
+                    {item.bankSnapshot.dateTime} · {item.bankSnapshot.memo || '원본 메모 없음'}
                   </p>
                 </div>
               </div>
@@ -281,23 +286,16 @@ export function BankImportTriageWizard({
         <div className="grid flex-1 min-h-0 grid-cols-[320px_minmax(0,1fr)] bg-slate-50">
           <div className="flex min-h-0 flex-col border-r border-slate-200 bg-white">
             <div className="border-b border-slate-200 px-4 py-4">
-              <div className="grid grid-cols-2 gap-3">
-                <Card className="border-amber-200 bg-amber-50/70 shadow-none">
-                  <CardContent className="p-3">
-                    <p className="text-[11px] text-amber-700">입력 필요</p>
-                    <p className="mt-1 text-[18px] font-semibold text-slate-950">
-                      {wizardItems.filter((item) => item.matchState === 'PENDING_INPUT').length}
-                    </p>
-                  </CardContent>
-                </Card>
-                <Card className="border-rose-200 bg-rose-50/70 shadow-none">
-                  <CardContent className="p-3">
-                    <p className="text-[11px] text-rose-700">검토 필요</p>
-                    <p className="mt-1 text-[18px] font-semibold text-slate-950">
-                      {wizardItems.filter((item) => item.matchState === 'REVIEW_REQUIRED').length}
-                    </p>
-                  </CardContent>
-                </Card>
+              <div className="flex items-center gap-2 flex-wrap">
+                <Badge className="border-amber-200 bg-amber-50 text-amber-700">
+                  입력 필요 {wizardItems.filter((item) => item.matchState === 'PENDING_INPUT').length}
+                </Badge>
+                <Badge className="border-rose-200 bg-rose-50 text-rose-700">
+                  검토 필요 {wizardItems.filter((item) => item.matchState === 'REVIEW_REQUIRED').length}
+                </Badge>
+                <Badge className="border-sky-200 bg-sky-50 text-sky-700">
+                  증빙 이어서 {groupedItems.pendingEvidence.length}
+                </Badge>
               </div>
             </div>
             <div data-testid="bank-import-triage-queue-scroll" className="flex-1 min-h-0 overflow-y-auto px-3 py-3">
@@ -331,6 +329,29 @@ export function BankImportTriageWizard({
               </div>
             ) : (
               <>
+                <div className="border-b border-slate-200 bg-white/95 px-6 py-4 backdrop-blur supports-[backdrop-filter]:bg-white/85">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="space-y-1">
+                      <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">현재 선택 거래</p>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-[16px] font-semibold text-slate-950">
+                          {selectedItemIndex + 1}. {selectedItem.bankSnapshot.counterparty || '거래처 미확인'}
+                        </p>
+                        <Badge variant="outline" className="text-[10px]">
+                          {formatMoney(Math.abs(selectedItem.bankSnapshot.signedAmount))}원
+                        </Badge>
+                      </div>
+                      <p className="text-[12px] text-slate-600">
+                        {selectedItem.bankSnapshot.dateTime} · 남은 거래 {remainingItemCount}건
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Badge className={getMatchTone(selectedItem).badgeClass}>{getMatchTone(selectedItem).label}</Badge>
+                      <Badge variant="outline">{selectedStatus || selectedItem.projectionStatus}</Badge>
+                      <Badge variant="outline">{selectedItem.evidenceStatus}</Badge>
+                    </div>
+                  </div>
+                </div>
                 <div className="flex-1 overflow-y-auto px-6 py-6">
                   <div className="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
                     <div className="space-y-5">
@@ -545,12 +566,15 @@ export function BankImportTriageWizard({
                   </div>
                 </div>
 
-                <div className="border-t border-slate-200 bg-white px-6 py-4">
+                <div className="border-t border-slate-200 bg-white/95 px-6 py-4 shadow-[0_-12px_30px_rgba(15,23,42,0.06)] backdrop-blur supports-[backdrop-filter]:bg-white/90">
                   <div className="flex items-center justify-between gap-3">
-                    <div className="text-[12px] text-slate-500">
+                    <div className="space-y-1">
+                      <p className="text-[11px] uppercase tracking-[0.14em] text-slate-500">다음 액션</p>
+                      <div className="text-[12px] text-slate-600">
                       {selectedStatus === 'PROJECTED_PENDING_EVIDENCE'
                         ? '주간 반영은 이미 끝났고, 지금은 증빙 continuation만 남아 있습니다.'
                         : '필수 입력을 저장하면 이 거래는 안전하게 주간 정산 projection으로 이어집니다.'}
+                      </div>
                     </div>
                     <div className="flex items-center gap-2">
                       {selectedStatus === 'PROJECTED_PENDING_EVIDENCE' && (

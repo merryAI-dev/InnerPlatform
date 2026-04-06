@@ -71,6 +71,7 @@ test('bank upload triage wizard projects rows and survives reupload with differe
 
   await page.getByTestId('bank-import-open-wizard').click();
   await expect(page.getByTestId('bank-import-triage-wizard')).toBeVisible();
+  await expect(page.getByText('현재 선택 거래')).toBeVisible();
   const viewport = page.viewportSize();
   const wizardBox = await page.getByTestId('bank-import-triage-wizard').boundingBox();
   expect(viewport).not.toBeNull();
