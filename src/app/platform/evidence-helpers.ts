@@ -42,6 +42,15 @@ function mergeEvidenceDesc(...values: string[]): string {
   return merged.join(', ');
 }
 
+function resolveRequiredEvidenceEntries(input: {
+  evidenceRequired?: string[];
+  evidenceRequiredDesc?: string;
+}): string[] {
+  return Array.isArray(input.evidenceRequired) && input.evidenceRequired.length > 0
+    ? input.evidenceRequired.map((entry) => String(entry || '').trim()).filter(Boolean)
+    : splitEvidenceDesc(String(input.evidenceRequiredDesc || ''));
+}
+
 export function resolveEvidenceCompletedManualDesc(tx: Transaction): string {
   const manual = tx.evidenceCompletedManualDesc?.trim() || '';
   if (manual) return manual;
@@ -90,6 +99,80 @@ export function resolveEvidenceChecklist(tx: Pick<
     ? (hasLink && completed.length > 0 ? 'COMPLETE' : (hasLink || completed.length > 0 ? 'PARTIAL' : 'MISSING'))
     : (missing.length === 0 && hasLink ? 'COMPLETE' : (hasLink || completed.length > 0 ? 'PARTIAL' : 'MISSING'));
   return { required, completed, missing, status, hasLink };
+}
+
+export function resolvePreferredEvidenceUploadCategory(input: {
+  evidenceRequired?: string[];
+  requiredDesc?: string;
+  completedDesc?: string;
+  detectedCategory?: string;
+  fallback?: string;
+}): string {
+  const required = resolveRequiredEvidenceEntries({
+    evidenceRequired: input.evidenceRequired,
+    evidenceRequiredDesc: input.requiredDesc,
+  });
+  const completedKeys = new Set(splitEvidenceDesc(String(input.completedDesc || '')).map(normalizeEvidenceEntryKey).filter(Boolean));
+  const missingRequired = required.filter((entry) => !completedKeys.has(normalizeEvidenceEntryKey(entry)));
+  const detectedCategory = String(input.detectedCategory || '').trim();
+  const detectedKey = normalizeEvidenceEntryKey(detectedCategory);
+
+  if (detectedKey) {
+    const matchingMissing = missingRequired.find((entry) => normalizeEvidenceEntryKey(entry) === detectedKey);
+    if (matchingMissing) return matchingMissing;
+    const matchingRequired = required.find((entry) => normalizeEvidenceEntryKey(entry) === detectedKey);
+    if (matchingRequired) return matchingRequired;
+  }
+
+  if (missingRequired.length === 1) return missingRequired[0];
+  if (detectedCategory && detectedCategory !== '기타') return detectedCategory;
+  if (required.length === 1) return required[0];
+  return String(input.fallback || detectedCategory || '기타').trim() || '기타';
+}
+
+export function applyUploadedEvidenceCategories(
+  tx: Pick<
+    Transaction,
+    'evidenceRequired' | 'evidenceRequiredDesc' | 'evidenceDriveLink' | 'evidenceDriveFolderId' | 'evidenceCompletedDesc' | 'evidenceCompletedManualDesc' | 'evidenceAutoListedDesc'
+  >,
+  uploadedCategories: string[],
+): {
+  evidenceCompletedDesc: string;
+  evidenceCompletedManualDesc: string;
+  evidencePendingDesc: string;
+  evidenceMissing: string[];
+  evidenceStatus: EvidenceStatus;
+} {
+  const currentCompletedDesc = resolveEvidenceCompletedDesc(tx as Transaction);
+  const currentCompletedKeys = new Set(splitEvidenceDesc(currentCompletedDesc).map(normalizeEvidenceEntryKey).filter(Boolean));
+  const nextUploadedOnly = uploadedCategories.filter((entry) => {
+    const key = normalizeEvidenceEntryKey(entry);
+    return key && !currentCompletedKeys.has(key);
+  });
+  const nextManualDesc = mergeEvidenceDesc(
+    String(tx.evidenceCompletedManualDesc || ''),
+    nextUploadedOnly.join(', '),
+  );
+  const nextCompletedDesc = mergeEvidenceDesc(
+    currentCompletedDesc,
+    nextUploadedOnly.join(', '),
+  );
+  const checklist = resolveEvidenceChecklist({
+    evidenceRequired: tx.evidenceRequired,
+    evidenceRequiredDesc: tx.evidenceRequiredDesc,
+    evidenceDriveLink: tx.evidenceDriveLink,
+    evidenceDriveFolderId: tx.evidenceDriveFolderId,
+    evidenceCompletedDesc: nextCompletedDesc,
+    evidenceCompletedManualDesc: '',
+    evidenceAutoListedDesc: '',
+  });
+  return {
+    evidenceCompletedDesc: nextCompletedDesc,
+    evidenceCompletedManualDesc: nextManualDesc,
+    evidencePendingDesc: checklist.missing.join(', '),
+    evidenceMissing: checklist.missing,
+    evidenceStatus: checklist.status,
+  };
 }
 
 /**

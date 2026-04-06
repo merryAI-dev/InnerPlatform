@@ -409,7 +409,7 @@ export function SettlementTransactionRow({
                   ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
                   : 'border-sky-200 bg-sky-50 text-sky-700'
               }`}
-              title={tx.evidenceDriveSyncStatus === 'UPLOADED' ? '업로드는 완료됐고 목록 반영은 동기화 버튼에서 진행됩니다.' : 'Drive 폴더 파일 기준 완료 목록이 반영된 상태입니다.'}
+              title={tx.evidenceDriveSyncStatus === 'UPLOADED' ? '업로드는 완료됐고 완료 목록도 바로 반영된 상태입니다.' : 'Drive 폴더 파일 기준 완료 목록이 반영된 상태입니다.'}
             >
               {driveStatusLabel}
             </span>

@@ -8,6 +8,8 @@ import {
   normalizeEvidenceEntryKey,
   resolveEvidenceCompletedDesc,
   resolveEvidenceCompletedManualDesc,
+  resolvePreferredEvidenceUploadCategory,
+  applyUploadedEvidenceCategories,
 } from './evidence-helpers';
 
 // Helper to build a minimal Transaction-like object
@@ -333,6 +335,54 @@ describe('evidence normalization', () => {
     expect(checklist.status).toBe('PARTIAL');
     expect(checklist.missing).toEqual(['입금확인증']);
     expect(checklist.hasLink).toBe(true);
+  });
+});
+
+describe('resolvePreferredEvidenceUploadCategory', () => {
+  it('prefers the matching required evidence label over the parser label', () => {
+    expect(resolvePreferredEvidenceUploadCategory({
+      requiredDesc: '전자세금계산서, 참석확인서',
+      completedDesc: '',
+      detectedCategory: '세금계산서',
+      fallback: '세금계산서',
+    })).toBe('전자세금계산서');
+  });
+
+  it('uses the only remaining required evidence when the file name is ambiguous', () => {
+    expect(resolvePreferredEvidenceUploadCategory({
+      requiredDesc: '세금계산서, 입금확인증',
+      completedDesc: '세금계산서',
+      detectedCategory: '기타',
+      fallback: '기타',
+    })).toBe('입금확인증');
+  });
+});
+
+describe('applyUploadedEvidenceCategories', () => {
+  it('merges uploaded evidence into completed and pending lists immediately', () => {
+    const result = applyUploadedEvidenceCategories(makeTx({
+      evidenceRequired: ['전자세금계산서', '입금확인증'],
+      evidenceDriveFolderId: 'folder-1',
+      evidenceCompletedDesc: '전자세금계산서',
+    }), ['입금확인증']);
+
+    expect(result.evidenceCompletedDesc).toBe('전자세금계산서, 입금확인증');
+    expect(result.evidenceCompletedManualDesc).toBe('입금확인증');
+    expect(result.evidencePendingDesc).toBe('');
+    expect(result.evidenceMissing).toEqual([]);
+    expect(result.evidenceStatus).toBe('COMPLETE');
+  });
+
+  it('deduplicates aliases when uploaded categories overlap existing completed items', () => {
+    const result = applyUploadedEvidenceCategories(makeTx({
+      evidenceRequired: ['세금계산서'],
+      evidenceDriveLink: 'https://drive.google.com/folder/x',
+      evidenceCompletedDesc: '전자세금계산서',
+    }), ['세금계산서']);
+
+    expect(result.evidenceCompletedDesc).toBe('전자세금계산서');
+    expect(result.evidenceCompletedManualDesc).toBe('');
+    expect(result.evidenceStatus).toBe('COMPLETE');
   });
 });
 

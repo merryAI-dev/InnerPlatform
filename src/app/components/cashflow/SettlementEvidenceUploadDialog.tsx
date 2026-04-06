@@ -16,6 +16,7 @@ export interface EvidenceUploadDraft {
   objectUrl: string;
   category: string;
   parserCategory: string;
+  requiredCategory: string;
   suggestedFileName: string;
   reviewedFileName: string;
   previewType: 'pdf' | 'image' | 'other';
@@ -149,6 +150,11 @@ export function SettlementEvidenceUploadDialog({
                     <p className="mt-1 text-[10px] text-muted-foreground">
                       자동분류: {draft.parserCategory}
                     </p>
+                    {draft.requiredCategory && (
+                      <p className="mt-1 text-[10px] text-teal-700">
+                        필수 목록 일치: {draft.requiredCategory}
+                      </p>
+                    )}
                     <div className="mt-2 space-y-1.5">
                       <div>
                         <label className="mb-1 block text-[10px] text-muted-foreground">권장 파일명</label>

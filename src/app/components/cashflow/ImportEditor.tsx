@@ -22,9 +22,8 @@ import {
   computeEvidenceStatus,
   computeEvidenceSummary,
   resolveEvidenceCompletedDesc,
-  resolveEvidenceCompletedManualDesc,
 } from '../../platform/evidence-helpers';
-import { buildDriveTransactionFolderName, deriveEvidenceLabelFromFileName, inferEvidenceCategoryFromFileName, suggestEvidenceUploadFileName } from '../../platform/drive-evidence';
+import { buildEvidenceUploadDraftSeeds, buildImmediateEvidenceUploadState } from '../../platform/evidence-upload-flow';
 import {
   CASHFLOW_LINE_OPTIONS,
   SETTLEMENT_COLUMNS,
@@ -605,6 +604,25 @@ export function ImportEditor({
     }
   }, []);
 
+  const resolveUploadTargetContext = useCallback(() => {
+    if (!uploadTargetTxId) return null;
+    const rowIdx = rows.findIndex((row) => row.sourceTxId === uploadTargetTxId);
+    const row = rowIdx >= 0 ? rows[rowIdx] : null;
+    const sourceTransaction = sourceTransactionMap.get(uploadTargetTxId);
+    const requiredDesc = sourceTransaction?.evidenceRequiredDesc
+      || String(row && evidenceIdx >= 0 ? row.cells[evidenceIdx] || '' : '');
+    const completedDesc = sourceTransaction
+      ? resolveEvidenceCompletedDesc(sourceTransaction)
+      : String(row && evidenceCompletedIdx >= 0 ? row.cells[evidenceCompletedIdx] || '' : '');
+    return {
+      rowIdx,
+      row,
+      sourceTransaction,
+      requiredDesc,
+      completedDesc,
+    };
+  }, [uploadTargetTxId, rows, sourceTransactionMap, evidenceIdx, evidenceCompletedIdx]);
+
   const confirmEvidenceUpload = useCallback(async () => {
     if (!uploadTargetTxId || !onUploadEvidenceDriveById || uploadDrafts.length === 0) return;
     setUploadingEvidence(true);
@@ -619,11 +637,37 @@ export function ImportEditor({
           reviewedFileName: draft.reviewedFileName.trim() || draft.suggestedFileName,
         })),
       );
+      const uploadContext = resolveUploadTargetContext();
+      const uploadedCategories = uploadDrafts
+        .map((draft) => String(draft.category || draft.requiredCategory || draft.parserCategory).trim())
+        .filter(Boolean);
+      if (uploadContext?.row && uploadContext.rowIdx >= 0) {
+        const evidenceState = buildImmediateEvidenceUploadState({
+          evidenceRequired: uploadContext.sourceTransaction?.evidenceRequired || [],
+          evidenceRequiredDesc: uploadContext.requiredDesc,
+          evidenceDriveLink: uploadContext.sourceTransaction?.evidenceDriveLink || '',
+          evidenceDriveFolderId: uploadContext.sourceTransaction?.evidenceDriveFolderId || '',
+          evidenceCompletedDesc: uploadContext.completedDesc,
+          evidenceCompletedManualDesc: uploadContext.sourceTransaction?.evidenceCompletedManualDesc || '',
+          evidenceAutoListedDesc: uploadContext.sourceTransaction?.evidenceAutoListedDesc || '',
+          uploadedCategories,
+        });
+        onChange(updateImportRowAt(rows, uploadContext.rowIdx, (candidate) => {
+          const cells = [...candidate.cells];
+          if (evidenceCompletedIdx >= 0) {
+            cells[evidenceCompletedIdx] = evidenceState.evidenceCompletedDesc;
+          }
+          if (evidencePendingIdx >= 0) {
+            cells[evidencePendingIdx] = evidenceState.evidencePendingDesc;
+          }
+          return { ...candidate, cells };
+        }));
+      }
       const firstFileName = uploadedNames[0] || '증빙 파일';
       toast.success(
         uploadDrafts.length === 1
-          ? `업로드 완료 · Drive 폴더에 저장됨: ${firstFileName} · 목록 반영은 동기화 버튼에서 진행`
-          : `업로드 완료 · Drive 폴더에 저장됨: ${firstFileName} 외 ${uploadDrafts.length - 1}건 · 목록 반영은 동기화 버튼에서 진행`,
+          ? `업로드 완료 · Drive 폴더에 저장됨: ${firstFileName} · 완료 목록에 바로 반영됨`
+          : `업로드 완료 · Drive 폴더에 저장됨: ${firstFileName} 외 ${uploadDrafts.length - 1}건 · 완료 목록에 바로 반영됨`,
       );
       setUploadDialogOpen(false);
       clearUploadDrafts();
@@ -633,7 +677,17 @@ export function ImportEditor({
     } finally {
       setUploadingEvidence(false);
     }
-  }, [clearUploadDrafts, onUploadEvidenceDriveById, uploadDrafts, uploadTargetTxId]);
+  }, [
+    clearUploadDrafts,
+    evidenceCompletedIdx,
+    evidencePendingIdx,
+    onChange,
+    onUploadEvidenceDriveById,
+    resolveUploadTargetContext,
+    rows,
+    uploadDrafts,
+    uploadTargetTxId,
+  ]);
 
   const settlementDerivationContext = useMemo(
     () => buildSettlementDerivationContext(projectId, defaultLedgerId, resolvedPolicy, basis),
@@ -1914,6 +1968,17 @@ export function ImportEditor({
           if (!files.length || !uploadTargetTxId) return;
           const batchId = Date.now();
           const sourceTransaction = sourceTransactionMap.get(uploadTargetTxId);
+          const targetRow = rows.find((row) => row.sourceTxId === uploadTargetTxId);
+          const requiredDesc = sourceTransaction?.evidenceRequiredDesc
+            || String(targetRow && evidenceIdx >= 0 ? targetRow.cells[evidenceIdx] || '' : '');
+          const draftSeeds = buildEvidenceUploadDraftSeeds({
+            files: files.map((file) => ({ name: file.name, type: file.type })),
+            requiredDesc,
+            completedDesc: sourceTransaction
+              ? resolveEvidenceCompletedDesc(sourceTransaction)
+              : String(targetRow && evidenceCompletedIdx >= 0 ? targetRow.cells[evidenceCompletedIdx] || '' : ''),
+            transaction: sourceTransaction,
+          });
           setUploadDrafts((current) => {
             current.forEach((draft) => {
               try {
@@ -1923,23 +1988,16 @@ export function ImportEditor({
               }
             });
             return files.map((file, index) => {
-              const parserCategory = inferEvidenceCategoryFromFileName(file.name);
-              const initialCategory = parserCategory === '기타'
-                ? deriveEvidenceLabelFromFileName(file.name)
-                : parserCategory;
-              const suggestedFileName = suggestEvidenceUploadFileName({
-                originalFileName: file.name,
-                category: initialCategory,
-                transaction: sourceTransaction,
-              });
+              const seed = draftSeeds[index];
               return {
                 id: `${batchId}-${index}-${file.name}`,
                 file,
                 objectUrl: URL.createObjectURL(file),
-                category: initialCategory,
-                parserCategory,
-                suggestedFileName,
-                reviewedFileName: suggestedFileName,
+                category: seed?.category || '기타',
+                parserCategory: seed?.parserCategory || '기타',
+                requiredCategory: seed?.requiredCategory || '',
+                suggestedFileName: seed?.suggestedFileName || file.name,
+                reviewedFileName: seed?.suggestedFileName || file.name,
                 previewType: file.type === 'application/pdf'
                   ? 'pdf'
                   : (file.type.startsWith('image/') ? 'image' : 'other'),
