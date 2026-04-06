@@ -8,7 +8,7 @@
 
 - [x] Phase 1: Core domain contracts
 - [x] Phase 2: Intake persistence layer
-- [ ] Phase 3: Non-destructive bank upload
+- [x] Phase 3: Non-destructive bank upload
 - [ ] Phase 4: Triage wizard UI
 - [ ] Phase 5: Projection upsert by `sourceTxId`
 - [ ] Phase 6: Non-blocking evidence integration
@@ -63,7 +63,7 @@
 
 ## Phase 3: Non-Destructive Bank Upload
 
-**Status:** in progress
+**Status:** completed
 
 **Files**
 - `src/app/platform/bank-statement.ts`
@@ -80,7 +80,13 @@
 **Must-have regression**
 - reupload in different order does not delete or reset manual weekly rows
 
+**Verification**
+- `npx vitest run src/app/platform/bank-statement.test.ts src/app/data/portal-store.intake.test.ts src/app/data/portal-store.integration.test.ts`
+- `npm run build`
+
 ## Phase 4: Triage Wizard UI
+
+**Status:** in progress
 
 **Files**
 - `src/app/components/portal/BankImportTriageWizard.tsx`

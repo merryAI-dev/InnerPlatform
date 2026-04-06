@@ -45,8 +45,7 @@ import { SETTLEMENT_COLUMNS } from '../platform/settlement-csv';
 import type { ImportRow } from '../platform/settlement-csv';
 import {
   BANK_STATEMENT_COLUMNS,
-  mergeBankRowsIntoExpenseSheet,
-  mapBankStatementsToImportRows,
+  buildBankImportIntakeItemsFromBankSheet,
   type BankStatementRow,
   type BankStatementSheet,
 } from '../platform/bank-statement';
@@ -2005,11 +2004,27 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       cells: sanitizedColumns.map((_, colIdx) => normalizeSpace(String(Array.isArray(row?.cells) ? (row.cells[colIdx] ?? '') : ''))),
     }));
     const sanitizedSheet: BankStatementSheet = { columns: sanitizedColumns, rows: sanitizedRows as BankStatementRow[] };
-    const mappedExpenseRows = mapBankStatementsToImportRows(sanitizedSheet);
-    const nextExpenseRows = mergeBankRowsIntoExpenseSheet(expenseSheetRows, mappedExpenseRows);
+    const uploadBatchId = `bank-upload-${Date.now()}`;
+    const intakeItems = buildBankImportIntakeItemsFromBankSheet({
+      projectId: portalUser?.projectId || '',
+      sheet: sanitizedSheet,
+      existingItems: expenseIntakeItems,
+      existingRows: expenseSheetRows,
+      existingExpenseSheetId: activeExpenseSheetId || 'default',
+      lastUploadBatchId: uploadBatchId,
+      now,
+      updatedBy: portalUser?.name || authUser?.name || '',
+    });
     if (isDevHarnessUser || !db || !portalUser?.projectId) {
       setBankStatementRows(sanitizedSheet);
-      setExpenseSheetRows(nextExpenseRows);
+      setExpenseIntakeItems((prev) => {
+        const nextMap = new Map(prev.map((item) => [item.id, item] as const));
+        intakeItems.forEach((item) => {
+          nextMap.set(item.id, item);
+        });
+        return Array.from(nextMap.values())
+          .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')));
+      });
       return;
     }
     const payload = withTenantScope(orgId, {
@@ -2025,27 +2040,22 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       { merge: true },
     );
     setBankStatementRows(sanitizedSheet);
-
-    // Sync into expense sheet rows (통장내역 → 사용내역)
-    const activeSheet = expenseSheets.find((sheet) => sheet.id === activeExpenseSheetId) || null;
-    const activeSheetId = activeSheet?.id || activeExpenseSheetId || 'default';
-    const expensePayload = withTenantScope(orgId, {
-      id: activeSheetId,
-      projectId: portalUser.projectId,
-      name: sanitizeExpenseSheetName(activeSheet?.name, activeSheetId === 'default' ? '기본 탭' : '새 탭'),
-      order: activeSheet?.order || (activeSheetId === 'default' ? 0 : expenseSheets.length + 1),
-      rows: nextExpenseRows.map(serializeExpenseSheetRowForPersistence),
-      createdAt: activeSheet?.createdAt || now,
-      updatedAt: now,
-      updatedBy: portalUser.name || authUser?.name || '',
-    });
-    await setDoc(
-      doc(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/expense_sheets/${activeSheetId}`),
-      expensePayload,
-      { merge: true },
+    await Promise.all(
+      intakeItems.map((item) => setDoc(
+        doc(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/expense_intake/${item.id}`),
+        buildBankImportIntakeDoc({ orgId, item }),
+        { merge: true },
+      )),
     );
-    setExpenseSheetRows(nextExpenseRows);
-  }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name, expenseSheetRows, expenseSheets, activeExpenseSheetId, isDevHarnessUser]);
+    setExpenseIntakeItems((prev) => {
+      const nextMap = new Map(prev.map((item) => [item.id, item] as const));
+      intakeItems.forEach((item) => {
+        nextMap.set(item.id, item);
+      });
+      return Array.from(nextMap.values())
+        .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')));
+    });
+  }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name, expenseIntakeItems, expenseSheetRows, activeExpenseSheetId, isDevHarnessUser]);
 
   const upsertExpenseIntakeItems = useCallback(async (items: BankImportIntakeItem[]) => {
     if (!Array.isArray(items) || items.length === 0) return;

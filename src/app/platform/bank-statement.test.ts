@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildBankImportIntakeItemsFromBankSheet,
   detectBankStatementProfile,
   getBankStatementProfileLabel,
+  mergeBankRowsIntoExpenseSheet,
   mapBankStatementsToImportRows,
   normalizeBankStatementMatrix,
 } from './bank-statement';
-import { SETTLEMENT_COLUMNS } from './settlement-csv';
+import { SETTLEMENT_COLUMNS, createEmptyImportRow } from './settlement-csv';
 
 describe('bank statement helpers', () => {
   it('detects known bank profiles from headers and file name', () => {
@@ -77,5 +79,117 @@ describe('bank statement helpers', () => {
     expect(rows[1]?.entryKind).toBe('EXPENSE');
     expect(rows[1]?.cells[bankAmountIdx]).toBe('31,000');
     expect(rows[1]?.cells[depositIdx]).toBe('');
+  });
+
+  it('derives intake items that preserve existing manual weekly classification', () => {
+    const sheet = {
+      columns: ['통장번호', '거래일시', '적요', '의뢰인/수취인', '출금금액', '잔액'],
+      rows: [
+        {
+          tempId: 'bank-1',
+          cells: ['111-222-333', '2026-04-06 10:00', 'KTX 예매', '코레일', '15,000', '500,000'],
+        },
+      ],
+    };
+
+    const initialItems = buildBankImportIntakeItemsFromBankSheet({
+      projectId: 'p-1',
+      sheet,
+      lastUploadBatchId: 'batch-1',
+      now: '2026-04-06T00:00:00.000Z',
+      updatedBy: 'PM 보람',
+    });
+    const expenseAmountIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '사업비 사용액');
+    const budgetIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '비목');
+    const subBudgetIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '세목');
+    const cashflowIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === 'cashflow항목');
+    const existingRow = createEmptyImportRow();
+    existingRow.tempId = 'row-legacy';
+    existingRow.sourceTxId = initialItems[0].sourceTxId;
+    existingRow.cells[budgetIdx] = '여비';
+    existingRow.cells[subBudgetIdx] = '교통비';
+    existingRow.cells[cashflowIdx] = '직접사업비';
+    existingRow.cells[expenseAmountIdx] = '15,000';
+
+    const nextItems = buildBankImportIntakeItemsFromBankSheet({
+      projectId: 'p-1',
+      sheet,
+      existingRows: [existingRow],
+      existingExpenseSheetId: 'default',
+      lastUploadBatchId: 'batch-2',
+      now: '2026-04-06T01:00:00.000Z',
+      updatedBy: 'PM 보람',
+    });
+
+    expect(nextItems).toHaveLength(1);
+    expect(nextItems[0]).toMatchObject({
+      sourceTxId: initialItems[0].sourceTxId,
+      matchState: 'AUTO_CONFIRMED',
+      projectionStatus: 'PROJECTED_WITH_PENDING_EVIDENCE',
+      existingExpenseSheetId: 'default',
+      existingExpenseRowTempId: 'row-legacy',
+      manualFields: {
+        expenseAmount: 15000,
+        budgetCategory: '여비',
+        budgetSubCategory: '교통비',
+        cashflowCategory: 'OUTSOURCING',
+      },
+    });
+  });
+
+  it('does not fall back to row index when bank uploads arrive in a different order', () => {
+    const budgetIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '비목');
+    const dateIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '거래일시');
+    const counterpartyIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '지급처');
+    const bankAmountIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '통장에 찍힌 입/출금액');
+
+    const legacyManualRow = createEmptyImportRow();
+    legacyManualRow.tempId = 'manual-1';
+    legacyManualRow.cells[budgetIdx] = '여비';
+    legacyManualRow.cells[dateIdx] = '2026-04-01';
+    legacyManualRow.cells[counterpartyIdx] = '기존 수기행';
+    legacyManualRow.cells[bankAmountIdx] = '11,000';
+
+    const knownMappedRow = createEmptyImportRow();
+    knownMappedRow.tempId = 'bank-known';
+    knownMappedRow.sourceTxId = 'bank:known';
+    knownMappedRow.cells[budgetIdx] = '교통비';
+    knownMappedRow.cells[dateIdx] = '2026-04-02';
+    knownMappedRow.cells[counterpartyIdx] = '코레일';
+    knownMappedRow.cells[bankAmountIdx] = '22,000';
+
+    const reorderedUploadRows = [
+      {
+        ...createEmptyImportRow(),
+        tempId: 'bank-known-fresh',
+        sourceTxId: 'bank:known',
+        cells: (() => {
+          const cells = createEmptyImportRow().cells;
+          cells[dateIdx] = '2026-04-02';
+          cells[counterpartyIdx] = '코레일';
+          cells[bankAmountIdx] = '22,000';
+          return cells;
+        })(),
+      },
+      {
+        ...createEmptyImportRow(),
+        tempId: 'bank-new',
+        sourceTxId: 'bank:new',
+        cells: (() => {
+          const cells = createEmptyImportRow().cells;
+          cells[dateIdx] = '2026-04-03';
+          cells[counterpartyIdx] = '새 거래처';
+          cells[bankAmountIdx] = '33,000';
+          return cells;
+        })(),
+      },
+    ];
+
+    const merged = mergeBankRowsIntoExpenseSheet([legacyManualRow, knownMappedRow], reorderedUploadRows);
+
+    expect(merged[0].sourceTxId).toBe('bank:known');
+    expect(merged[0].cells[budgetIdx]).toBe('교통비');
+    expect(merged[1].sourceTxId).toBe('bank:new');
+    expect(merged[1].cells[budgetIdx]).toBe('');
   });
 });

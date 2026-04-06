@@ -1,7 +1,19 @@
-import { normalizeKey, normalizeSpace, parseDate, parseNumber, stableHash } from './csv-utils';
+import { normalizeKey, normalizeSpace, parseDate, parseNumber } from './csv-utils';
 import { findWeekForDate, getYearMondayWeeks } from './cashflow-weeks';
-import { SETTLEMENT_COLUMNS, createEmptyImportRow, type ImportRow } from './settlement-csv';
-import type { SettlementEntryKind } from '../data/types';
+import { SETTLEMENT_COLUMNS, createEmptyImportRow, parseCashflowLineLabel, type ImportRow } from './settlement-csv';
+import type {
+  BankImportIntakeItem,
+  BankImportManualFields,
+  BankImportSnapshot,
+  CashflowCategory,
+  EvidenceStatus,
+  SettlementEntryKind,
+} from '../data/types';
+import {
+  buildBankFingerprint,
+  resolveBankImportMatchState,
+  resolveBankImportProjectionStatus,
+} from './bank-import-triage';
 
 // ── HTML-as-XLS parsing (KB, 신한 등 HTML 형식 은행 엑셀) ──
 
@@ -384,6 +396,153 @@ function pickAmount(
   return fallback || { amount: null };
 }
 
+function inferCashflowCategoryFromLineLabel(rawLineLabel: string, signedAmount: number): CashflowCategory | undefined {
+  const lineId = parseCashflowLineLabel(rawLineLabel);
+  if (!lineId) return signedAmount >= 0 ? 'MISC_INCOME' : 'MISC_EXPENSE';
+  switch (lineId) {
+    case 'MYSC_PREPAY_IN':
+    case 'SALES_IN':
+      return 'CONTRACT_PAYMENT';
+    case 'SALES_VAT_IN':
+      return 'VAT_REFUND';
+    case 'TEAM_SUPPORT_IN':
+    case 'BANK_INTEREST_IN':
+      return 'MISC_INCOME';
+    case 'DIRECT_COST_OUT':
+      return 'OUTSOURCING';
+    case 'INPUT_VAT_OUT':
+    case 'SALES_VAT_OUT':
+      return 'TAX_PAYMENT';
+    case 'MYSC_LABOR_OUT':
+      return 'LABOR_COST';
+    case 'MYSC_PROFIT_OUT':
+    case 'TEAM_SUPPORT_OUT':
+    case 'BANK_INTEREST_OUT':
+      return 'MISC_EXPENSE';
+    default:
+      return signedAmount >= 0 ? 'MISC_INCOME' : 'MISC_EXPENSE';
+  }
+}
+
+function resolveEvidenceStatusFromExpenseRow(row: ImportRow | null | undefined): EvidenceStatus {
+  if (!row) return 'MISSING';
+  const completedIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '실제 구비 완료된 증빙자료 리스트');
+  const pendingIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '준비필요자료');
+  const completed = completedIdx >= 0 ? normalizeSpace(String(row.cells[completedIdx] || '')) : '';
+  const pending = pendingIdx >= 0 ? normalizeSpace(String(row.cells[pendingIdx] || '')) : '';
+  if (completed && !pending) return 'COMPLETE';
+  if (completed || pending) return 'PARTIAL';
+  return 'MISSING';
+}
+
+function extractManualFieldsFromExpenseRow(row: ImportRow | null | undefined): BankImportManualFields {
+  if (!row) return {};
+  const expenseAmountIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '사업비 사용액');
+  const budgetIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '비목');
+  const subBudgetIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '세목');
+  const cashflowIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === 'cashflow항목');
+  const noteIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '비고');
+  const completedIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '실제 구비 완료된 증빙자료 리스트');
+  const signedAmount = parseNumber(String(row.cells[SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '통장에 찍힌 입/출금액')] || '')) || 0;
+
+  const manualFields: BankImportManualFields = {};
+  const expenseAmount = expenseAmountIdx >= 0 ? parseNumber(String(row.cells[expenseAmountIdx] || '')) : null;
+  if (expenseAmount != null) manualFields.expenseAmount = expenseAmount;
+  if (budgetIdx >= 0) {
+    const value = normalizeSpace(String(row.cells[budgetIdx] || ''));
+    if (value) manualFields.budgetCategory = value;
+  }
+  if (subBudgetIdx >= 0) {
+    const value = normalizeSpace(String(row.cells[subBudgetIdx] || ''));
+    if (value) manualFields.budgetSubCategory = value;
+  }
+  if (cashflowIdx >= 0) {
+    const value = normalizeSpace(String(row.cells[cashflowIdx] || ''));
+    const category = inferCashflowCategoryFromLineLabel(value, signedAmount);
+    if (category) manualFields.cashflowCategory = category;
+  }
+  if (noteIdx >= 0) {
+    const value = normalizeSpace(String(row.cells[noteIdx] || ''));
+    if (value) manualFields.memo = value;
+  }
+  if (completedIdx >= 0) {
+    manualFields.evidenceCompletedDesc = String(row.cells[completedIdx] || '');
+  }
+  return manualFields;
+}
+
+function resolveBankSnapshotFromStatementRow(
+  sheet: BankStatementSheet,
+  bankRow: BankStatementRow,
+): BankImportSnapshot | null {
+  const columns = Array.isArray(sheet.columns) ? sheet.columns : [];
+  const allRows = Array.isArray(sheet.rows) ? sheet.rows : [];
+  const rowCells = Array.isArray(bankRow.cells) ? bankRow.cells : [];
+  const accountIdx = findFirstHeaderIndex(columns, ['통장번호', '계좌번호', '계좌']);
+  const dateIdx = findFirstHeaderIndex(columns, ['거래일자', '거래일시', '거래일', '일자', '날짜', 'date']);
+  const counterpartyIdxCandidates = (() => {
+    const groups = [
+      ['사용처', '가맹점', '상호', '거래처'],
+      ['의뢰인/수취인', '의뢰인수취인', '수취인', '의뢰인', '상대계좌명'],
+      ['내용', '거래내용'],
+      ['적요', '메모'],
+    ];
+    const seen = new Set<number>();
+    const ordered: number[] = [];
+    groups.forEach((aliases) => {
+      findHeaderIndicesByAliases(columns, aliases).forEach((idx) => {
+        if (!seen.has(idx)) {
+          seen.add(idx);
+          ordered.push(idx);
+        }
+      });
+    });
+    return ordered;
+  })();
+  const memoIdxCandidates = findHeaderIndicesByAliases(columns, ['적요', '메모', '내용', '거래내용', '상세적요']);
+  const balanceIdx = findFirstHeaderIndex(columns, ['잔액']);
+  const amountIdxs = resolveAmountColumnIndices(columns, allRows);
+
+  const rawDate = dateIdx >= 0
+    ? String(rowCells[dateIdx] || '')
+    : String(rowCells.find((value) => parseDateOnly(String(value || ''))) || '');
+  const normalizedDateTime = parseDateOnly(rawDate) || normalizeSpace(rawDate);
+  if (!normalizedDateTime) return null;
+
+  let counterparty = '';
+  for (const idx of counterpartyIdxCandidates) {
+    const value = normalizeSpace(String(rowCells[idx] || ''));
+    if (!value) continue;
+    counterparty = value;
+    break;
+  }
+
+  let memo = '';
+  for (const idx of memoIdxCandidates) {
+    const value = normalizeSpace(String(rowCells[idx] || ''));
+    if (!value) continue;
+    memo = value;
+    break;
+  }
+
+  const resolvedAmount = pickAmount(rowCells, amountIdxs, columns);
+  const signedAmount = resolvedAmount.amount == null
+    ? 0
+    : resolvedAmount.entryKind === 'DEPOSIT'
+      ? resolvedAmount.amount
+      : -Math.abs(resolvedAmount.amount);
+  const balanceAfter = balanceIdx >= 0 ? (parseNumber(String(rowCells[balanceIdx] || '')) || 0) : 0;
+
+  return {
+    accountNumber: accountIdx >= 0 ? normalizeSpace(String(rowCells[accountIdx] || '')) : '',
+    dateTime: normalizedDateTime,
+    counterparty,
+    memo,
+    signedAmount,
+    balanceAfter,
+  };
+}
+
 export function normalizeBankStatementMatrix(matrix: string[][]): BankStatementSheet {
   if (!matrix.length) return { columns: [], rows: [] };
   const headerIdx = findHeaderIndex(matrix);
@@ -518,11 +677,10 @@ export function mapBankStatementsToImportRows(sheet: BankStatementSheet): Import
       cells[idxBalance] = bal != null ? bal.toLocaleString('ko-KR') : normalizeSpace(String(rowCells[balanceIdx] || ''));
     }
 
-    const sourceKey = stableHash([
-      rawDate,
-      idxCounterparty >= 0 ? String(cells[idxCounterparty] || '') : '',
-      idxBankAmount >= 0 ? String(cells[idxBankAmount] || '') : '',
-    ].join('|'));
+    const bankSnapshot = resolveBankSnapshotFromStatementRow(sheet, bankRow);
+    const sourceKey = bankSnapshot
+      ? buildBankFingerprint(bankSnapshot)
+      : `${bankRow.tempId}-${nextRows.length + 1}`;
 
     nextRows.push({
       ...base,
@@ -543,6 +701,86 @@ export function mapBankStatementsToImportRows(sheet: BankStatementSheet): Import
   return nextRows;
 }
 
+export function buildBankImportIntakeItemsFromBankSheet(params: {
+  projectId: string;
+  sheet: BankStatementSheet;
+  existingItems?: BankImportIntakeItem[] | null;
+  existingRows?: ImportRow[] | null;
+  existingExpenseSheetId?: string;
+  lastUploadBatchId: string;
+  now: string;
+  updatedBy: string;
+}): BankImportIntakeItem[] {
+  const existingItems = Array.isArray(params.existingItems) ? params.existingItems : [];
+  const existingRows = Array.isArray(params.existingRows) ? params.existingRows : [];
+  const existingItemBySource = new Map(existingItems.map((item) => [item.sourceTxId, item] as const));
+  const existingRowBySource = new Map(
+    existingRows
+      .filter((row) => normalizeSpace(String(row.sourceTxId || '')))
+      .map((row) => [normalizeSpace(String(row.sourceTxId || '')), row] as const),
+  );
+  const duplicateCounts = new Map<string, number>();
+  const snapshots = (Array.isArray(params.sheet.rows) ? params.sheet.rows : [])
+    .map((row) => resolveBankSnapshotFromStatementRow(params.sheet, row))
+    .filter((snapshot): snapshot is BankImportSnapshot => snapshot !== null);
+  snapshots.forEach((snapshot) => {
+    const fingerprint = buildBankFingerprint(snapshot);
+    duplicateCounts.set(fingerprint, (duplicateCounts.get(fingerprint) || 0) + 1);
+  });
+
+  return snapshots.map((snapshot) => {
+    const bankFingerprint = buildBankFingerprint(snapshot);
+    const sourceTxId = `bank:${bankFingerprint}`;
+    const existingItem = existingItemBySource.get(sourceTxId) || null;
+    const existingRow = existingRowBySource.get(sourceTxId) || null;
+    const manualFields = existingItem?.manualFields || extractManualFieldsFromExpenseRow(existingRow);
+    const evidenceStatus = existingItem?.evidenceStatus || resolveEvidenceStatusFromExpenseRow(existingRow);
+    const matchState = resolveBankImportMatchState({
+      fingerprint: bankFingerprint,
+      incomingSourceTxId: sourceTxId,
+      bankSnapshot: snapshot,
+      manualFields,
+      existingItem,
+      conflictingCandidateCount: duplicateCounts.get(bankFingerprint) || 0,
+    });
+    const projectionStatus = resolveBankImportProjectionStatus({
+      matchState,
+      manualFields,
+      evidenceStatus,
+    });
+    const reviewReasons: string[] = [];
+    if ((duplicateCounts.get(bankFingerprint) || 0) > 1) {
+      reviewReasons.push('duplicate_fingerprint_in_upload');
+    }
+    if (matchState === 'REVIEW_REQUIRED' && reviewReasons.length === 0) {
+      reviewReasons.push('manual_review_required');
+    }
+
+    return {
+      id: existingItem?.id || bankFingerprint,
+      projectId: params.projectId,
+      sourceTxId,
+      bankFingerprint,
+      bankSnapshot: snapshot,
+      matchState,
+      projectionStatus,
+      evidenceStatus,
+      manualFields,
+      ...(existingItem?.existingExpenseSheetId || params.existingExpenseSheetId
+        ? { existingExpenseSheetId: existingItem?.existingExpenseSheetId || params.existingExpenseSheetId }
+        : {}),
+      ...(existingItem?.existingExpenseRowTempId || existingRow?.tempId
+        ? { existingExpenseRowTempId: existingItem?.existingExpenseRowTempId || existingRow?.tempId }
+        : {}),
+      reviewReasons: existingItem && reviewReasons.length === 0 ? existingItem.reviewReasons : reviewReasons,
+      lastUploadBatchId: params.lastUploadBatchId,
+      createdAt: existingItem?.createdAt || params.now,
+      updatedAt: params.now,
+      updatedBy: params.updatedBy,
+    };
+  });
+}
+
 function normalizeImportRow(row: ImportRow): ImportRow {
   return {
     tempId: row.tempId || `imp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -557,8 +795,8 @@ function normalizeImportRow(row: ImportRow): ImportRow {
 /**
  * Merge new bank-mapped rows into existing expense sheet rows.
  * - Rebuild rows from latest mapped bank rows (snapshot-style).
- * - Keep manual fields from matched existing rows.
- * - Drop unmatched existing rows so upload does not append forever.
+ * - Keep manual fields from matched existing rows by identity only.
+ * - Never rely on row order/index as a fallback matcher.
  */
 export function mergeBankRowsIntoExpenseSheet(
   existingRows: ImportRow[] | null | undefined,
@@ -611,20 +849,13 @@ export function mergeBankRowsIntoExpenseSheet(
     return bucket.find((row) => !usedExisting.has(row));
   };
 
-  const pickIndexFallback = (idx: number): ImportRow | undefined => {
-    const candidate = existing[idx];
-    if (!candidate || usedExisting.has(candidate)) return undefined;
-    return candidate;
-  };
-
   const merged: ImportRow[] = [];
-  for (const [idx, mappedRow] of mapped.entries()) {
+  for (const mappedRow of mapped) {
     const source = String(mappedRow.sourceTxId || '').trim();
     const key = rowKey(mappedRow);
     const matchedExisting = (
       (source ? takeFromBucket(existingBySourceBuckets.get(source)) : undefined)
       || (key ? takeFromBucket(existingByKeyBuckets.get(key)) : undefined)
-      || pickIndexFallback(idx)
     );
 
     if (!matchedExisting) {
