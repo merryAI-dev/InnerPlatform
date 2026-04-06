@@ -795,6 +795,46 @@ export interface WeeklySubmissionStatus {
   updatedByName?: string;
 }
 
+export type BankImportMatchState = 'AUTO_CONFIRMED' | 'PENDING_INPUT' | 'REVIEW_REQUIRED' | 'IGNORED';
+export type BankImportProjectionStatus = 'NOT_PROJECTED' | 'PROJECTED' | 'PROJECTED_WITH_PENDING_EVIDENCE';
+
+export interface BankImportSnapshot {
+  accountNumber: string;
+  dateTime: string;
+  counterparty: string;
+  memo: string;
+  signedAmount: number;
+  balanceAfter: number;
+}
+
+export interface BankImportManualFields {
+  expenseAmount?: number;
+  budgetCategory?: string;
+  budgetSubCategory?: string;
+  cashflowCategory?: CashflowCategory;
+  memo?: string;
+  evidenceCompletedDesc?: string;
+}
+
+export interface BankImportIntakeItem {
+  id: string;
+  projectId: string;
+  sourceTxId: string;
+  bankFingerprint: string;
+  bankSnapshot: BankImportSnapshot;
+  matchState: BankImportMatchState;
+  projectionStatus: BankImportProjectionStatus;
+  evidenceStatus: EvidenceStatus;
+  manualFields: BankImportManualFields;
+  existingExpenseSheetId?: string;
+  existingExpenseRowTempId?: string;
+  reviewReasons: string[];
+  lastUploadBatchId: string;
+  createdAt: string;
+  updatedAt: string;
+  updatedBy: string;
+}
+
 export interface BudgetPlanSnapshot {
   projectId: string;
   rows: BudgetPlanRow[];
