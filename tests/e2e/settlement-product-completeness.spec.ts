@@ -69,7 +69,7 @@ test('settlement product completeness: dirty weekly expense edits require confir
   await expect(page.getByTestId('weekly-expense-unsaved-dialog')).toBeHidden();
   await expect(page).toHaveURL(/\/portal\/weekly-expenses$/);
 
-  await firstCounterpartyCell.fill('KTX-재수정');
+  await page.locator('[value="KTX-수정"]').first().fill('KTX-재수정');
   await page.getByTestId('weekly-expense-bank-statement-action').click();
   await expect(page.getByTestId('weekly-expense-unsaved-dialog')).toBeVisible();
   await page.getByRole('button', { name: '변경 버리고 이동' }).click();
@@ -91,7 +91,7 @@ test('settlement product completeness: dirty weekly expense edits require confir
   await expect(page.getByTestId('weekly-expense-unsaved-dialog')).toBeHidden();
   await expect(page).toHaveURL(/\/portal\/weekly-expenses$/);
 
-  await firstCounterpartyCell.fill('KTX-사이드바재수정');
+  await page.locator('[value="KTX-사이드바수정"]').first().fill('KTX-사이드바재수정');
   await bankStatementNavLink.click();
   await expect(page.getByTestId('weekly-expense-unsaved-dialog')).toBeVisible();
   await page.getByRole('button', { name: '변경 버리고 이동' }).click();

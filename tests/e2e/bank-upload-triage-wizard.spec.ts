@@ -75,14 +75,16 @@ test('bank upload triage wizard projects rows and survives reupload with differe
   await page.getByTestId('bank-import-budget-category').fill('여비');
   await page.getByTestId('bank-import-budget-subcategory').fill('교통비');
   await page.getByTestId('bank-import-cashflow-category').selectOption('TRAVEL');
-  await page.getByTestId('bank-import-evidence-completed').fill('출장신청서');
+  await page.getByTestId('bank-import-evidence-completed').fill('출장신청서, 영수증');
   await page.getByTestId('bank-import-project-next').click();
 
   await page.getByTestId('bank-import-expense-amount').fill('22000');
   await page.getByTestId('bank-import-budget-category').fill('여비');
   await page.getByTestId('bank-import-budget-subcategory').fill('교통비');
   await page.getByTestId('bank-import-cashflow-category').selectOption('TRAVEL');
+  await page.getByTestId('bank-import-evidence-completed').fill('출장신청서, 영수증');
   await page.getByTestId('bank-import-project-next').click();
+  await page.getByRole('button', { name: '나중에 이어서 하기' }).click();
 
   await expect(page.getByTestId('bank-import-triage-wizard')).toBeHidden();
 
@@ -93,10 +95,11 @@ test('bank upload triage wizard projects rows and survives reupload with differe
   await expect(page.locator('input[value="카카오T"]').first()).toBeVisible();
   await expect(page.getByText('여비', { exact: true }).first()).toBeVisible();
   await expect(page.getByText('교통비', { exact: true }).first()).toBeVisible();
-  await expect(page.getByTestId('weekly-intake-queue-strip')).toHaveCount(0);
+  await expect(page.getByTestId('weekly-intake-queue-strip')).toContainText('증빙 미완료 2');
 
   await uploadBankSheet(page, [...originalRows].reverse());
-  await expect(page.getByTestId('bank-import-queue-summary')).toContainText('총 0건');
+  await expect(page.getByTestId('bank-import-queue-summary')).toContainText('총 2건');
+  await expect(page.getByTestId('bank-import-queue-summary')).toContainText('증빙 미완료 2');
 
   await page.goto('/portal/weekly-expenses');
   await expect(page.getByText('거래: 2건')).toBeVisible();
@@ -104,5 +107,46 @@ test('bank upload triage wizard projects rows and survives reupload with differe
   await expect(page.locator('input[value="카카오T"]').first()).toBeVisible();
   await expect(page.getByText('여비', { exact: true }).first()).toBeVisible();
   await expect(page.getByText('교통비', { exact: true }).first()).toBeVisible();
-  await expect(page.getByTestId('weekly-intake-queue-strip')).toHaveCount(0);
+  await expect(page.getByTestId('weekly-intake-queue-strip')).toContainText('증빙 미완료 2');
+});
+
+test('bank upload triage wizard lets PM project first and continue evidence later', async ({ page }) => {
+  await loginAsPm(page);
+
+  await uploadBankSheet(page, [
+    {
+      account: '111-222-333',
+      dateTime: '2026-04-08 09:10',
+      memo: 'KTX 예매',
+      counterparty: '코레일',
+      withdrawal: '18000',
+      balance: '460000',
+    },
+  ]);
+
+  await page.getByTestId('bank-import-open-wizard').click();
+  await expect(page.getByTestId('bank-import-triage-wizard')).toBeVisible();
+
+  await page.getByTestId('bank-import-expense-amount').fill('18000');
+  await page.getByTestId('bank-import-budget-category').fill('여비');
+  await page.getByTestId('bank-import-budget-subcategory').fill('교통비');
+  await page.getByTestId('bank-import-cashflow-category').selectOption('TRAVEL');
+  await page.getByTestId('bank-import-project-next').click();
+
+  await expect(page.getByTestId('bank-import-triage-wizard')).toBeHidden();
+
+  await page.goto('/portal/weekly-expenses');
+  await expect(page.getByTestId('weekly-intake-queue-strip')).toContainText('증빙 미완료 1');
+  await page.getByRole('button', { name: '증빙 이어서 하기' }).click();
+  await expect(page.getByTestId('bank-import-triage-wizard')).toBeVisible();
+
+  await page.getByTestId('bank-import-evidence-completed').fill('출장신청서, 영수증');
+  await page.getByTestId('bank-import-project-next').click();
+  await expect(page.getByTestId('bank-import-triage-wizard')).toBeHidden();
+
+  await expect(page.getByTestId('weekly-intake-queue-strip')).toContainText('증빙 미완료 1');
+  await expect(page.locator('input[value="코레일"]').first()).toBeVisible();
+  await page.getByRole('button', { name: '증빙 이어서 하기' }).click();
+  await expect(page.getByTestId('bank-import-triage-wizard')).toBeVisible();
+  await expect(page.getByTestId('bank-import-evidence-completed')).toHaveValue('출장신청서, 영수증');
 });

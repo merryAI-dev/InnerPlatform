@@ -172,6 +172,8 @@
 - wizard open
 - manual classification
 - skip evidence
+- resume wizard later
+- preserve evidence continuation draft
 - weekly reflection
 - reupload same rows in different order
 - verify human-entered values survive

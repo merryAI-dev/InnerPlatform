@@ -1,6 +1,6 @@
 # Product Release Gates Runbook
 
-Last updated: 2026-04-05
+Last updated: 2026-04-06
 
 ## Goal
 
@@ -22,8 +22,11 @@ Included flows:
 1. Settlement import/edit/save/reload and weekly handoff
    - spec: [`tests/e2e/settlement-product-completeness.spec.ts`](/Users/boram/InnerPlatform/tests/e2e/settlement-product-completeness.spec.ts)
    - harness: [`tests/e2e/migration-wizard.harness.spec.js`](/Users/boram/InnerPlatform/tests/e2e/migration-wizard.harness.spec.js)
-2. Bank upload triage wizard to weekly projection, including reupload in different order
+2. Bank upload triage wizard to weekly projection
    - spec: [`tests/e2e/bank-upload-triage-wizard.spec.ts`](/Users/boram/InnerPlatform/tests/e2e/bank-upload-triage-wizard.spec.ts)
+   - coverage:
+     - reupload in different order does not destroy projected weekly rows
+     - PM can project first, resume later, and preserve evidence continuation draft state
 3. Admin requested-route preservation across login
    - spec: [`tests/e2e/product-release-gates.spec.ts`](/Users/boram/InnerPlatform/tests/e2e/product-release-gates.spec.ts)
 4. PM requested-route preservation across login
