@@ -81,9 +81,6 @@ function AppLayoutContent() {
     setMobileOpen(false);
   }, [location.pathname]);
 
-  if (authLoading || !isAuthenticated) return null;
-
-  // 인증된 사용자 정보 (authUser 우선, fallback currentUser)
   const displayUser = authUser || currentUser;
   const navGroups = React.useMemo(() => {
     return NAV_GROUPS
@@ -118,6 +115,8 @@ function AppLayoutContent() {
   }, [participationEntries]);
 
   const totalAlerts = pendingCount + (participationDangerCount > 0 ? participationDangerCount : 0);
+
+  if (authLoading || !isAuthenticated) return null;
 
   function getBadgeCount(to: string): number | null {
     if (to === '/evidence' && missingEvidenceCount > 0) return missingEvidenceCount;

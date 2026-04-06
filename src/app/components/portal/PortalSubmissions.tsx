@@ -46,19 +46,19 @@ export function PortalSubmissions() {
   const [changeState, setChangeState] = useState<ChangeRequestState | 'ALL'>('ALL');
   const [query, setQuery] = useState('');
 
-  if (!portalUser || !myProject) return null;
-
   const myExpenseSets = useMemo(() => {
+    if (!myProject) return [];
     return expenseSets
       .filter((s) => s.projectId === myProject.id)
       .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
-  }, [expenseSets, myProject.id]);
+  }, [expenseSets, myProject]);
 
   const myChangeRequests = useMemo(() => {
+    if (!myProject) return [];
     return changeRequests
       .filter((r) => r.projectId === myProject.id)
       .sort((a, b) => String(b.requestedAt || '').localeCompare(String(a.requestedAt || '')));
-  }, [changeRequests, myProject.id]);
+  }, [changeRequests, myProject]);
 
   const expenseCounts = useMemo(() => computeExpenseSetStatusCounts(myExpenseSets), [myExpenseSets]);
   const changeCounts = useMemo(() => computeChangeRequestStateCounts(myChangeRequests), [myChangeRequests]);
@@ -88,6 +88,8 @@ export function PortalSubmissions() {
       );
     });
   }, [myChangeRequests, changeState, query]);
+
+  if (!portalUser || !myProject) return null;
 
   const Summary = ({ label, value, className }: { label: string; value: number; className: string }) => (
     <div className="text-center p-2.5 rounded-lg bg-muted/30">
@@ -294,4 +296,3 @@ export function PortalSubmissions() {
     </div>
   );
 }
-
