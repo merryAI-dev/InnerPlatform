@@ -710,18 +710,10 @@ export function SettlementLedgerPage({
   useEffect(() => {
     if (!autoSaveSheet || !importDirty || !importRows || !onSaveSheetRows || sheetSaving) return;
     const timer = window.setTimeout(() => {
-      void handleImportSave({ silent: true, syncCashflow: false });
-    }, 20_000);
-    return () => window.clearTimeout(timer);
-  }, [autoSaveSheet, importDirty, importRows, onSaveSheetRows, sheetSaving, handleImportSave]);
-
-  useEffect(() => {
-    if (!autoSaveSheet || importDirty || !importRows || sheetSaving || cashflowSyncing || cashflowSyncState !== 'pending') return;
-    const timer = window.setTimeout(() => {
-      void syncImportRowsToCashflow(importRows, { silent: true });
+      void handleImportSave({ silent: true, syncCashflow: true });
     }, 60_000);
     return () => window.clearTimeout(timer);
-  }, [autoSaveSheet, cashflowSyncState, cashflowSyncing, importDirty, importRows, sheetSaving, syncImportRowsToCashflow]);
+  }, [autoSaveSheet, importDirty, importRows, onSaveSheetRows, sheetSaving, handleImportSave]);
 
   useEffect(() => {
     if (!importDirty) return;
@@ -783,6 +775,31 @@ export function SettlementLedgerPage({
     () => resolveWeeklyAccountingProductStatusDomHooks(weeklyAccountingStatus),
     [weeklyAccountingStatus],
   );
+  const autosaveStatusSummary = autoSaveSheet ? (
+    <div
+      className="w-full rounded-md border border-slate-200/80 bg-slate-50/80 px-3 py-2 md:ml-auto md:w-[320px] dark:border-slate-800 dark:bg-slate-900/40"
+      data-testid={weeklyAccountingStatusHooks.testId}
+      aria-label={weeklyAccountingStatusHooks.ariaLabel}
+    >
+      <div className="truncate text-[10px] leading-4 text-muted-foreground">{autoSaveStatusLabel}</div>
+      <div
+        className={
+          weeklyAccountingStatus.tone === 'success'
+            ? 'truncate text-[11px] font-semibold leading-4 text-emerald-700 dark:text-emerald-300'
+            : weeklyAccountingStatus.tone === 'danger'
+              ? 'truncate text-[11px] font-semibold leading-4 text-rose-700 dark:text-rose-300'
+              : weeklyAccountingStatus.tone === 'warning'
+                ? 'truncate text-[11px] font-semibold leading-4 text-amber-700 dark:text-amber-300'
+                : 'truncate text-[11px] font-semibold leading-4 text-muted-foreground'
+        }
+      >
+        {weeklyAccountingStatus.label}
+      </div>
+      <div className="min-h-8 text-[9px] leading-4 text-muted-foreground">
+        {weeklyAccountingStatus.description}
+      </div>
+    </div>
+  ) : null;
 
   // ── Inline edit handler with audit trail ──
   const handleUpdateTx = useCallback(
@@ -866,8 +883,8 @@ export function SettlementLedgerPage({
   if (viewMode === 'sheet') {
     return (
       <div className="flex flex-col gap-3">
-        <div className="flex items-center justify-between gap-2 flex-wrap">
-          <div className="flex items-center gap-2">
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex items-center gap-2 flex-wrap">
             {!hideYearControls && (
               <>
                 <Button variant="outline" size="sm" className="hover:bg-muted/40 cursor-pointer" onClick={() => setYear((y) => y - 1)}>
@@ -884,8 +901,6 @@ export function SettlementLedgerPage({
                 {totalCount}건
               </Badge>
             )}
-          </div>
-          <div className="flex items-center gap-2 flex-wrap">
             <input
               type="date"
               value={downloadFrom}
@@ -912,32 +927,8 @@ export function SettlementLedgerPage({
               {downloadPreparing ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Download className="h-4 w-4 mr-1" />}
               {downloadPreparing ? '엑셀 준비 중' : '엑셀 다운로드'}
             </Button>
-            {autoSaveSheet && (
-              <div
-                className="flex flex-col items-end gap-0.5 text-[10px] leading-4"
-                data-testid={weeklyAccountingStatusHooks.testId}
-                aria-label={weeklyAccountingStatusHooks.ariaLabel}
-              >
-                <span className="text-muted-foreground">{autoSaveStatusLabel}</span>
-                <span
-                  className={
-                    weeklyAccountingStatus.tone === 'success'
-                      ? 'font-semibold text-emerald-700 dark:text-emerald-300'
-                      : weeklyAccountingStatus.tone === 'danger'
-                        ? 'font-semibold text-rose-700 dark:text-rose-300'
-                        : weeklyAccountingStatus.tone === 'warning'
-                          ? 'font-semibold text-amber-700 dark:text-amber-300'
-                          : 'font-semibold text-muted-foreground'
-                  }
-                >
-                  {weeklyAccountingStatus.label}
-                </span>
-                <span className="max-w-[260px] text-right text-[9px] text-muted-foreground">
-                  {weeklyAccountingStatus.description}
-                </span>
-              </div>
-            )}
           </div>
+          {autosaveStatusSummary}
         </div>
 
         {importRows && (

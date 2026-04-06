@@ -71,6 +71,7 @@ import {
 } from '../ui/alert-dialog';
 import { resolvePortalHappyPath } from '../../platform/portal-happy-path';
 import { resolvePortalMissionProgress } from '../../platform/portal-mission-guide';
+import { usePortalNavigationGuard } from './PortalLayout';
 const GoogleSheetMigrationWizard = lazy(
   () => import('./GoogleSheetMigrationWizard').then((module) => ({ default: module.GoogleSheetMigrationWizard })),
 );
@@ -100,6 +101,7 @@ type PendingUnsavedAction =
 export function PortalWeeklyExpensePage() {
   const location = useLocation();
   const navigate = useNavigate();
+  const { registerNavigationHandler } = usePortalNavigationGuard();
   const { user: authUser, ensureGoogleWorkspaceAccess } = useAuth();
   const { orgId } = useFirebase();
   const {
@@ -739,6 +741,19 @@ export function PortalWeeklyExpensePage() {
       label: nextPath,
     });
   }, [blocker]);
+
+  useEffect(() => {
+    registerNavigationHandler((attempt) => {
+      const nextPath = `${attempt.path || ''}` || '다른 화면';
+      const currentPath = `${location.pathname || ''}${location.search || ''}${location.hash || ''}`;
+      if (!hasUnsavedSettlementChanges || nextPath === currentPath) return false;
+      setPendingUnsavedAction({ kind: 'route', path: attempt.path, label: attempt.label });
+      return true;
+    });
+    return () => {
+      registerNavigationHandler(null);
+    };
+  }, [hasUnsavedSettlementChanges, location.hash, location.pathname, location.search, registerNavigationHandler]);
 
   useEffect(() => {
     if (!confirmedUnsavedAction || hasUnsavedSettlementChanges) return;

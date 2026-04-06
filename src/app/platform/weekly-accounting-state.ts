@@ -163,6 +163,19 @@ export function resolveWeeklyAccountingSheetRowsHydration(
     };
   }
 
+  if (
+    input.reason === 'active_sheet_switch_hydrate'
+    && (input.currentSaveState === 'dirty' || input.currentSaveState === 'saving')
+  ) {
+    return {
+      shouldReplaceRows: false,
+      nextSaveState: input.currentSaveState,
+      nextSyncState: input.currentSyncState,
+      currentSignature,
+      incomingSignature,
+    };
+  }
+
   const hydratedState = deriveHydratedSheetRowsState(input.incomingRows, input.incomingRowsOrigin);
   return {
     shouldReplaceRows: !materialEqual,
