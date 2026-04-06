@@ -10,12 +10,19 @@ import {
   Trash2,
 } from 'lucide-react';
 import type { Project, ProjectStatus } from '../../../data/types';
-import { PROJECT_STATUS_LABELS } from '../../../data/types';
+import {
+  ACCOUNT_TYPE_LABELS,
+  BASIS_LABELS,
+  PROJECT_FUND_INPUT_MODE_LABELS,
+  PROJECT_STATUS_LABELS,
+  SETTLEMENT_TYPE_LABELS,
+} from '../../../data/types';
 import {
   describeMigrationAuditActionState,
   type MigrationAuditConsoleRecord,
 } from '../../../platform/project-migration-console';
 import { resolveProjectCic } from '../../../platform/project-cic';
+import { formatStoredProjectAmount } from '../../../platform/project-contract-amount';
 import { Badge } from '../../ui/badge';
 import { Button } from '../../ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
@@ -80,6 +87,12 @@ function renderProjectMeta(project: Project): string {
     project.clientOrg || '',
   ].filter(Boolean);
   return parts.join(' · ');
+}
+
+function projectSourceLabel(project: Project): string {
+  if (project.registrationSource === 'pm_portal') return '포털 등록 제안';
+  if (project.registrationSource === 'migration_audit_quick_create') return '이관 빠른 등록';
+  return '기존 프로젝트';
 }
 
 export function MigrationAuditDetailPanel({
@@ -346,49 +359,6 @@ export function MigrationAuditDetailPanel({
           </div>
 
           <div className="space-y-4">
-            <Card className="border-slate-200 bg-slate-50/70 shadow-none">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-[14px] font-semibold">기존 프로젝트 후보</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                {suggestedProjects.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-slate-200 bg-white px-3 py-4 text-[12px] text-slate-600">
-                    자동 추천 후보가 없습니다. 등록 제안 프로젝트를 쓰거나 새 프로젝트를 바로 만들면 됩니다.
-                  </div>
-                ) : suggestedProjects.map((project) => (
-                  <button
-                    key={project.id}
-                    type="button"
-                    onClick={() => onChooseTargetProject(project)}
-                    className={`w-full rounded-2xl border px-3 py-3 text-left transition ${
-                      project.id === selectedProjectId
-                        ? 'border-slate-900 bg-slate-900 text-white shadow-sm'
-                        : 'border-slate-200 bg-white hover:border-slate-300'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className={`text-[12px] font-semibold ${project.id === selectedProjectId ? 'text-white' : 'text-slate-950'}`}>
-                            {projectLabel(project)}
-                          </p>
-                          {project.id === record.match?.project.id ? (
-                            <Badge className={project.id === selectedProjectId ? 'border-white/20 bg-white/10 text-white' : 'border border-emerald-200 bg-emerald-50 text-emerald-700'}>
-                              현재 연결
-                            </Badge>
-                          ) : null}
-                        </div>
-                        <p className={`mt-1 text-[11px] ${project.id === selectedProjectId ? 'text-slate-200' : 'text-slate-500'}`}>
-                          {renderProjectMeta(project)}
-                        </p>
-                      </div>
-                      <ArrowRight className={`h-4 w-4 ${project.id === selectedProjectId ? 'text-slate-200' : 'text-slate-400'}`} />
-                    </div>
-                  </button>
-                ))}
-              </CardContent>
-            </Card>
-
             <Card className="border-teal-200 bg-teal-50/70 shadow-none">
               <CardHeader className="pb-3">
                 <CardTitle className="text-[14px] font-semibold">새 프로젝트 직접 생성</CardTitle>
@@ -435,6 +405,32 @@ export function MigrationAuditDetailPanel({
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
+                {suggestedProjects.length > 0 ? (
+                  <div className="space-y-1.5">
+                    <Label className="text-slate-200">기존 프로젝트에서 선택</Label>
+                    <Select
+                      value={selectedTargetProject && suggestedProjects.some((project) => project.id === selectedTargetProject.id)
+                        ? selectedTargetProject.id
+                        : ''}
+                      onValueChange={(value) => {
+                        const next = suggestedProjects.find((project) => project.id === value);
+                        if (next) onChooseTargetProject(next);
+                      }}
+                    >
+                      <SelectTrigger className="h-9 border-white/15 bg-white/5 text-white">
+                        <SelectValue placeholder="기존 프로젝트 후보를 선택하세요" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {suggestedProjects.map((project) => (
+                          <SelectItem key={project.id} value={project.id}>
+                            {projectLabel(project)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ) : null}
+
                 <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-3">
                   <p className="text-[11px] text-slate-300">현재 선택된 연결 대상</p>
                   <p className="mt-1 text-[13px] font-semibold text-white">
@@ -444,6 +440,87 @@ export function MigrationAuditDetailPanel({
                     {selectedTargetProject ? renderProjectMeta(selectedTargetProject) : '기존 후보, 등록 제안, 새 프로젝트 중 하나를 먼저 고르세요.'}
                   </p>
                 </div>
+
+                {selectedTargetProject ? (
+                  <div className="space-y-3">
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3">
+                        <p className="text-[11px] text-slate-400">등록 프로젝트명</p>
+                        <p className="mt-1 text-[13px] font-medium text-white">{selectedTargetProject.name || '-'}</p>
+                      </div>
+                      <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3">
+                        <p className="text-[11px] text-slate-400">공식 계약명</p>
+                        <p className="mt-1 text-[13px] font-medium text-white">{selectedTargetProject.officialContractName || '-'}</p>
+                      </div>
+                      <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3">
+                        <p className="text-[11px] text-slate-400">발주기관</p>
+                        <p className="mt-1 text-[13px] font-medium text-white">{selectedTargetProject.clientOrg || '-'}</p>
+                      </div>
+                      <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3">
+                        <p className="text-[11px] text-slate-400">등록 조직</p>
+                        <p className="mt-1 text-[13px] font-medium text-white">{resolveProjectCic(selectedTargetProject) || selectedTargetProject.department || '-'}</p>
+                      </div>
+                      <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3">
+                        <p className="text-[11px] text-slate-400">담당자</p>
+                        <p className="mt-1 text-[13px] font-medium text-white">{selectedTargetProject.managerName || '-'}</p>
+                      </div>
+                      <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3">
+                        <p className="text-[11px] text-slate-400">프로젝트 출처</p>
+                        <p className="mt-1 text-[13px] font-medium text-white">{projectSourceLabel(selectedTargetProject)}</p>
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">재무 정보</p>
+                      <div className="mt-3 grid gap-3 md:grid-cols-2">
+                        <div className="rounded-xl border border-white/10 bg-black/10 px-3 py-3">
+                          <p className="text-[11px] text-slate-400">계약금액</p>
+                          <p className="mt-1 text-[13px] font-medium text-white">
+                            {formatStoredProjectAmount(selectedTargetProject.contractAmount, selectedTargetProject.financialInputFlags?.contractAmount)}
+                          </p>
+                        </div>
+                        <div className="rounded-xl border border-white/10 bg-black/10 px-3 py-3">
+                          <p className="text-[11px] text-slate-400">매출 부가세</p>
+                          <p className="mt-1 text-[13px] font-medium text-white">
+                            {formatStoredProjectAmount(selectedTargetProject.salesVatAmount, selectedTargetProject.financialInputFlags?.salesVatAmount)}
+                          </p>
+                        </div>
+                        <div className="rounded-xl border border-white/10 bg-black/10 px-3 py-3">
+                          <p className="text-[11px] text-slate-400">총수익</p>
+                          <p className="mt-1 text-[13px] font-medium text-white">
+                            {formatStoredProjectAmount(selectedTargetProject.totalRevenueAmount, selectedTargetProject.financialInputFlags?.totalRevenueAmount)}
+                          </p>
+                        </div>
+                        <div className="rounded-xl border border-white/10 bg-black/10 px-3 py-3">
+                          <p className="text-[11px] text-slate-400">지원금</p>
+                          <p className="mt-1 text-[13px] font-medium text-white">
+                            {formatStoredProjectAmount(selectedTargetProject.supportAmount, selectedTargetProject.financialInputFlags?.supportAmount)}
+                          </p>
+                        </div>
+                        <div className="rounded-xl border border-white/10 bg-black/10 px-3 py-3">
+                          <p className="text-[11px] text-slate-400">정산 유형</p>
+                          <p className="mt-1 text-[13px] font-medium text-white">{SETTLEMENT_TYPE_LABELS[selectedTargetProject.settlementType] || '-'}</p>
+                        </div>
+                        <div className="rounded-xl border border-white/10 bg-black/10 px-3 py-3">
+                          <p className="text-[11px] text-slate-400">정산 기준</p>
+                          <p className="mt-1 text-[13px] font-medium text-white">{BASIS_LABELS[selectedTargetProject.basis] || '-'}</p>
+                        </div>
+                        <div className="rounded-xl border border-white/10 bg-black/10 px-3 py-3">
+                          <p className="text-[11px] text-slate-400">통장 유형</p>
+                          <p className="mt-1 text-[13px] font-medium text-white">{ACCOUNT_TYPE_LABELS[selectedTargetProject.accountType] || '-'}</p>
+                        </div>
+                        <div className="rounded-xl border border-white/10 bg-black/10 px-3 py-3">
+                          <p className="text-[11px] text-slate-400">자금 입력 방식</p>
+                          <p className="mt-1 text-[13px] font-medium text-white">{PROJECT_FUND_INPUT_MODE_LABELS[selectedTargetProject.fundInputMode] || '-'}</p>
+                        </div>
+                        <div className="rounded-xl border border-white/10 bg-black/10 px-3 py-3 md:col-span-2">
+                          <p className="text-[11px] text-slate-400">입금 계획</p>
+                          <p className="mt-1 text-[13px] font-medium text-white">{selectedTargetProject.paymentPlanDesc || '-'}</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
 
                 <div className="grid gap-3 md:grid-cols-2">
                   <div className="space-y-1.5">
