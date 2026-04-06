@@ -1,4 +1,4 @@
-import { ArrowRight } from 'lucide-react';
+import { ArrowRight, Sparkles } from 'lucide-react';
 import { Badge } from '../../ui/badge';
 import { Card, CardContent } from '../../ui/card';
 import type { MigrationAuditConsoleRecord, MigrationAuditConsoleSections } from '../../../platform/project-migration-console';
@@ -95,6 +95,17 @@ export function MigrationAuditQueueRail({
   return (
     <Card className="border-slate-200/80 bg-white shadow-sm xl:sticky xl:top-24 xl:max-h-[calc(100vh-8rem)] xl:overflow-y-auto">
       <CardContent className="space-y-4 p-3">
+        <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-3 py-3">
+          <div className="flex items-center gap-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-slate-900 text-white">
+              <Sparkles className="h-4 w-4" />
+            </div>
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.14em] text-slate-500">작업 Queue</p>
+              <p className="text-[13px] font-semibold text-slate-950">먼저 처리할 행부터 선택</p>
+            </div>
+          </div>
+        </div>
         {renderSection('MISSING', sections.missing, selectedId, onSelect)}
         {renderSection('CANDIDATE', sections.candidate, selectedId, onSelect)}
         {renderSection('REGISTERED', sections.registered, selectedId, onSelect)}

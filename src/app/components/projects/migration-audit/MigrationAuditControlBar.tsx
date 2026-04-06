@@ -1,4 +1,4 @@
-import { AlertTriangle, Filter, Plus, RefreshCw, Search } from 'lucide-react';
+import { AlertTriangle, Plus, RefreshCw, Search } from 'lucide-react';
 import { Button } from '../../ui/button';
 import { Card, CardContent } from '../../ui/card';
 import { Input } from '../../ui/input';
@@ -10,7 +10,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../../ui/select';
-import type { MigrationAuditConsoleSummary } from '../../../platform/project-migration-console';
+import {
+  buildMigrationAuditOperatorSummary,
+  type MigrationAuditConsoleSummary,
+} from '../../../platform/project-migration-console';
 import type { ProjectMigrationStatus } from '../../../platform/project-migration-audit';
 
 interface MigrationAuditControlBarProps {
@@ -42,19 +45,63 @@ export function MigrationAuditControlBar({
   onSync,
   onStartQuickCreate,
 }: MigrationAuditControlBarProps) {
+  const operatorSummary = buildMigrationAuditOperatorSummary(summary);
   const metrics = [
-    { label: '미등록', value: summary.missing, tone: 'text-rose-600' },
-    { label: '후보 있음', value: summary.candidate, tone: 'text-amber-600' },
-    { label: '완료', value: summary.registered, tone: 'text-emerald-600' },
-    { label: '등록 조직 미지정', value: summary.unassignedCic, tone: 'text-slate-700' },
+    { label: '미등록', value: summary.missing, tone: 'border-rose-200 bg-rose-50 text-rose-700' },
+    { label: '후보 검토', value: summary.candidate, tone: 'border-amber-200 bg-amber-50 text-amber-700' },
+    { label: '연결 완료', value: summary.registered, tone: 'border-emerald-200 bg-emerald-50 text-emerald-700' },
+    { label: '등록 조직 미지정', value: summary.unassignedCic, tone: 'border-slate-200 bg-slate-50 text-slate-700' },
   ];
 
   return (
     <div className="space-y-4">
       <Card className="border-slate-200/80 bg-white/90 shadow-sm">
         <CardContent className="space-y-4 p-4">
-          <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
-            <div className="relative flex-1">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+            <div className="space-y-2">
+              <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">운영 포커스</p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-[20px] font-semibold tracking-[-0.03em] text-slate-950">{operatorSummary.headline}</h2>
+                <Badge variant="outline" className="border-sky-200 bg-sky-50 text-sky-700">
+                  완료율 {summary.completionRatio == null ? '-' : `${summary.completionRatio.toFixed(1)}%`}
+                </Badge>
+              </div>
+              <p className="text-[12px] leading-6 text-slate-600">{operatorSummary.caption}</p>
+            </div>
+
+            <div className="flex shrink-0 items-center gap-2">
+              <Button type="button" variant="outline" className="gap-1.5" onClick={onStartQuickCreate}>
+                <Plus className="h-3.5 w-3.5" />
+                빠른 등록 시작
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={syncDisabled || syncPending}
+                className="gap-1.5"
+                onClick={onSync}
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${syncPending ? 'animate-spin' : ''}`} />
+                기준 다시 적재
+              </Button>
+            </div>
+          </div>
+
+          <div className="flex gap-2 flex-wrap">
+            {metrics.map((metric) => (
+              <Badge key={metric.label} className={`h-8 gap-1 rounded-full border px-3 text-[11px] ${metric.tone}`}>
+                <span>{metric.label}</span>
+                <span className="font-semibold">{metric.value}</span>
+              </Badge>
+            ))}
+            <Badge variant="outline" className="h-8 gap-1 rounded-full border-slate-200 bg-white px-3 text-[11px] text-slate-700">
+              전체 {summary.total}건
+            </Badge>
+          </div>
+
+          <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_220px_180px]">
+            <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={search}
@@ -64,7 +111,7 @@ export function MigrationAuditControlBar({
               />
             </div>
             <Select value={cicFilter} onValueChange={onCicFilterChange}>
-              <SelectTrigger className="w-full xl:w-[220px]">
+              <SelectTrigger>
                 <SelectValue placeholder="등록 조직" />
               </SelectTrigger>
               <SelectContent>
@@ -75,72 +122,22 @@ export function MigrationAuditControlBar({
               </SelectContent>
             </Select>
             <Select value={statusFilter} onValueChange={(value) => onStatusFilterChange(value as 'ALL' | ProjectMigrationStatus)}>
-              <SelectTrigger className="w-full xl:w-[180px]">
+              <SelectTrigger>
                 <SelectValue placeholder="상태" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="ALL">전체 상태</SelectItem>
                 <SelectItem value="MISSING">미등록</SelectItem>
-                <SelectItem value="CANDIDATE">후보 있음</SelectItem>
+                <SelectItem value="CANDIDATE">후보 검토</SelectItem>
                 <SelectItem value="REGISTERED">완료</SelectItem>
               </SelectContent>
             </Select>
-            <Button type="button" variant="outline" className="gap-1.5" onClick={onStartQuickCreate}>
-              <Plus className="h-3.5 w-3.5" />
-              새 프로젝트 빠른 등록
-            </Button>
           </div>
 
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-            {metrics.map((metric) => (
-              <Card key={metric.label} className="border-slate-200 bg-slate-50/70 shadow-none">
-                <CardContent className="p-4">
-                  <p className="text-[11px] text-muted-foreground">{metric.label}</p>
-                  <p className={`mt-2 text-2xl font-semibold ${metric.tone}`}>{metric.value}</p>
-                </CardContent>
-              </Card>
-            ))}
-            <Card className="border-sky-200/80 bg-sky-50/70 shadow-none">
-              <CardContent className="flex h-full flex-col justify-between gap-3 p-4">
-                <div>
-                  <p className="text-[11px] text-sky-700">완료율</p>
-                  <p className="mt-2 text-2xl font-semibold text-slate-950">
-                    {summary.completionRatio == null ? '-' : `${summary.completionRatio.toFixed(1)}%`}
-                  </p>
-                </div>
-                <Badge variant="outline" className="w-fit border-sky-200 bg-white text-sky-700">
-                  {summary.registered}/{summary.total}
-                </Badge>
-              </CardContent>
-            </Card>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card className="border-amber-200/70 bg-amber-50/70 shadow-sm">
-        <CardContent className="flex flex-col gap-3 p-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-start gap-3 text-[12px] text-amber-900">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-            <div>
-              <p className="font-medium">이 화면은 대조표보다 queue 중심으로 봅니다.</p>
-              <p className="mt-1 text-amber-800/90">좌측에서 미등록 또는 후보 행을 먼저 고르고, 우측 detail panel에서 연결 또는 빠른 등록을 끝내세요.</p>
-            </div>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={syncDisabled || syncPending}
-              className="gap-1.5 border-amber-300 bg-white text-amber-900 hover:bg-white"
-              onClick={onSync}
-            >
-              <RefreshCw className={`h-3.5 w-3.5 ${syncPending ? 'animate-spin' : ''}`} />
-              기준 다시 적재
-            </Button>
-            <div className="flex items-center gap-1.5 text-[11px] text-amber-800/80">
-              <Filter className="h-3.5 w-3.5" />
-              선택한 등록 조직과 상태 기준으로 queue와 표가 함께 좁혀집니다.
+          <div className="rounded-xl border border-amber-200 bg-amber-50/70 px-3 py-3 text-[12px] text-amber-900">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <p>좌측 queue에서 먼저 고르고, 우측에서 연결 또는 빠른 등록만 끝내면 됩니다.</p>
             </div>
           </div>
         </CardContent>

@@ -1,6 +1,9 @@
 import { ArrowRight, CheckCircle2, FolderPlus, Link2, Loader2 } from 'lucide-react';
 import type { Project } from '../../../data/types';
-import type { MigrationAuditConsoleRecord } from '../../../platform/project-migration-console';
+import {
+  describeMigrationAuditActionState,
+  type MigrationAuditConsoleRecord,
+} from '../../../platform/project-migration-console';
 import { resolveProjectCic } from '../../../platform/project-cic';
 import { Badge } from '../../ui/badge';
 import { Button } from '../../ui/button';
@@ -68,6 +71,12 @@ export function MigrationAuditDetailPanel({
     : record.status === 'CANDIDATE'
       ? 'border-amber-200 bg-amber-50 text-amber-700'
       : 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  const actionState = describeMigrationAuditActionState(record);
+  const actionToneClass = actionState.tone === 'danger'
+    ? 'border-rose-200 bg-rose-50 text-rose-700'
+    : actionState.tone === 'warning'
+      ? 'border-amber-200 bg-amber-50 text-amber-700'
+      : 'border-emerald-200 bg-emerald-50 text-emerald-700';
 
   return (
     <div className="space-y-4 xl:sticky xl:top-24">
@@ -86,10 +95,10 @@ export function MigrationAuditDetailPanel({
                 {record.sourceDepartment || '담당조직 없음'} · {record.sourceClientOrg || '발주기관 없음'}
               </p>
             </div>
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-right">
-              <p className="text-[11px] text-slate-500">현재 매칭</p>
-              <p className="mt-1 text-[13px] font-semibold text-slate-950">{record.matchLabel}</p>
-              <p className="mt-1 text-[11px] text-slate-500">{record.nextActionLabel}</p>
+            <div className={`rounded-2xl border px-4 py-3 text-right ${actionToneClass}`}>
+              <p className="text-[11px]">현재 결정</p>
+              <p className="mt-1 text-[14px] font-semibold">{actionState.label}</p>
+              <p className="mt-1 text-[11px] opacity-90">{actionState.helper}</p>
             </div>
           </div>
         </CardHeader>
@@ -126,6 +135,9 @@ export function MigrationAuditDetailPanel({
                     ))}
                   </SelectContent>
                 </Select>
+                <p className="text-[11px] leading-5 text-slate-500">
+                  가장 가까운 후보만 노출합니다. 없으면 바로 우측에서 새 프로젝트를 만들면 됩니다.
+                </p>
               </div>
               <div className="space-y-1.5">
                 <Label>연결 후 상태</Label>
@@ -177,6 +189,9 @@ export function MigrationAuditDetailPanel({
                 {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderPlus className="h-4 w-4" />}
                 새 프로젝트 등록 후 즉시 연결
               </Button>
+              <p className="text-[11px] leading-5 text-slate-500">
+                최소 입력은 이름과 등록 조직뿐입니다. 상세 정보는 프로젝트 상세에서 나중에 보강하면 됩니다.
+              </p>
             </CardContent>
           </Card>
         </CardContent>
@@ -184,7 +199,7 @@ export function MigrationAuditDetailPanel({
 
       <Card className="border-slate-200/80 bg-white shadow-sm">
         <CardHeader>
-          <CardTitle className="text-[14px] font-semibold">현재 판단 요약</CardTitle>
+          <CardTitle className="text-[14px] font-semibold">판단 요약</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-3 md:grid-cols-3">
           <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
@@ -198,14 +213,14 @@ export function MigrationAuditDetailPanel({
           <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
             <p className="text-[11px] text-slate-500">다음 액션</p>
             <div className="mt-1 flex items-center gap-1.5 text-[13px] font-medium text-slate-950">
-              <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-              {record.nextActionLabel}
+              <CheckCircle2 className={`h-4 w-4 ${record.status === 'REGISTERED' ? 'text-emerald-600' : 'text-amber-600'}`} />
+              {actionState.label}
             </div>
           </div>
           <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3 md:col-span-3">
             <div className="flex items-center gap-1.5 text-[12px] text-slate-600">
               <ArrowRight className="h-3.5 w-3.5" />
-              연결을 반영하면 선택한 프로젝트의 계약명과 CIC가 이 row 기준으로 정리됩니다.
+              연결을 반영하면 원본 사업명과 등록 조직이 선택한 프로젝트 기준으로 즉시 정리됩니다.
             </div>
           </div>
         </CardContent>

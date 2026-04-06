@@ -3,10 +3,12 @@ import type { Project } from '../data/types';
 import type { ProjectMigrationCandidate } from '../data/project-migration-candidates';
 import type { ProjectMigrationAuditRow, ProjectMigrationCurrentRow } from './project-migration-audit';
 import {
+  buildMigrationAuditOperatorSummary,
   buildMigrationAuditConsoleRecords,
   buildMigrationAuditCicSelectionOptions,
   buildMigrationAuditDenseRows,
   collectMigrationAuditCicOptions,
+  describeMigrationAuditActionState,
   filterMigrationAuditConsoleRecords,
   findMigrationAuditRecord,
   groupMigrationAuditConsoleRecords,
@@ -217,5 +219,40 @@ describe('project-migration-console', () => {
     expect(denseRows).toHaveLength(2);
     expect(denseRows[0].kind).toBe('source');
     expect(denseRows[1].kind).toBe('current-only');
+  });
+
+  it('builds an operator summary that prioritizes missing work over completed rows', () => {
+    const summary = buildMigrationAuditOperatorSummary({
+      total: 25,
+      missing: 12,
+      candidate: 3,
+      registered: 10,
+      unassignedCic: 8,
+      completionRatio: 40,
+    });
+
+    expect(summary.headline).toBe('지금 먼저 처리할 15건');
+    expect(summary.caption).toContain('미등록 12건');
+    expect(summary.caption).toContain('후보 검토 3건');
+  });
+
+  it('describes detail panel action state for missing and completed records', () => {
+    const missingRecord = buildMigrationAuditConsoleRecords([
+      makeRow({ status: 'MISSING', match: null }),
+    ])[0];
+    const registeredRecord = buildMigrationAuditConsoleRecords([
+      makeRow({ status: 'REGISTERED' }),
+    ])[0];
+
+    expect(describeMigrationAuditActionState(missingRecord)).toMatchObject({
+      label: '등록 필요',
+      tone: 'danger',
+      helper: '기존 프로젝트에 연결하거나 새 프로젝트를 만들어야 합니다.',
+    });
+    expect(describeMigrationAuditActionState(registeredRecord)).toMatchObject({
+      label: '연결 완료',
+      tone: 'success',
+      helper: '필요하면 등록 조직이나 연결 프로젝트만 조정하면 됩니다.',
+    });
   });
 });

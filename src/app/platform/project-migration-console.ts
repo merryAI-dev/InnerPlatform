@@ -36,6 +36,17 @@ export interface MigrationAuditConsoleSummary {
   completionRatio: number | null;
 }
 
+export interface MigrationAuditOperatorSummary {
+  headline: string;
+  caption: string;
+}
+
+export interface MigrationAuditActionState {
+  tone: 'danger' | 'warning' | 'success';
+  label: string;
+  helper: string;
+}
+
 export interface MigrationAuditDenseRow {
   id: string;
   kind: 'source' | 'current-only';
@@ -152,6 +163,50 @@ export function summarizeMigrationAuditConsole(
     registered,
     unassignedCic,
     completionRatio: total > 0 ? (registered / total) * 100 : null,
+  };
+}
+
+export function buildMigrationAuditOperatorSummary(
+  summary: MigrationAuditConsoleSummary,
+): MigrationAuditOperatorSummary {
+  const actionableCount = summary.missing + summary.candidate;
+  if (actionableCount > 0) {
+    const parts: string[] = [];
+    if (summary.missing > 0) parts.push(`미등록 ${summary.missing}건`);
+    if (summary.candidate > 0) parts.push(`후보 검토 ${summary.candidate}건`);
+    return {
+      headline: `지금 먼저 처리할 ${actionableCount}건`,
+      caption: parts.join(' · '),
+    };
+  }
+
+  return {
+    headline: '지금 처리할 항목은 없습니다',
+    caption: `완료 ${summary.registered}건 · 등록 조직 미지정 ${summary.unassignedCic}건`,
+  };
+}
+
+export function describeMigrationAuditActionState(
+  record: MigrationAuditConsoleRecord,
+): MigrationAuditActionState {
+  if (record.status === 'MISSING') {
+    return {
+      tone: 'danger',
+      label: '등록 필요',
+      helper: '기존 프로젝트에 연결하거나 새 프로젝트를 만들어야 합니다.',
+    };
+  }
+  if (record.status === 'CANDIDATE') {
+    return {
+      tone: 'warning',
+      label: '후보 검토 필요',
+      helper: '추천 후보를 확인하고 사람이 최종 연결을 확정해야 합니다.',
+    };
+  }
+  return {
+    tone: 'success',
+    label: '연결 완료',
+    helper: '필요하면 등록 조직이나 연결 프로젝트만 조정하면 됩니다.',
   };
 }
 

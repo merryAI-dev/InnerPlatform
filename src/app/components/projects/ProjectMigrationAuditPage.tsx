@@ -348,7 +348,7 @@ export function ProjectMigrationAuditPage() {
     }
   }
 
-  const pageDescription = `이관 대상 ${records.length}건을 CIC와 queue 기준으로 운영합니다. 완료율 ${formatRatio(summary.completionRatio)}, 미등록 ${summary.missing}, 후보 있음 ${summary.candidate}`;
+  const pageDescription = `이관 대상 ${records.length}건을 queue 기준으로 먼저 정리합니다. 완료율 ${formatRatio(summary.completionRatio)}, 미등록 ${summary.missing}, 후보 검토 ${summary.candidate}`;
 
   return (
     <div className="space-y-6">

@@ -43,7 +43,7 @@ export function MigrationAuditDenseTable({
   return (
     <Card className="border-slate-200/80 bg-white shadow-sm">
       <CardHeader className="border-b border-slate-200 pb-4">
-        <CardTitle className="text-[14px] font-semibold">통합대조표</CardTitle>
+        <CardTitle className="text-[14px] font-semibold">전체 대조표</CardTitle>
       </CardHeader>
       <CardContent className="p-0">
         <Table>
