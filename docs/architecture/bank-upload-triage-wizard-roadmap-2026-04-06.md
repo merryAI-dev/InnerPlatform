@@ -7,7 +7,7 @@
 ## Phase Order
 
 - [x] Phase 1: Core domain contracts
-- [ ] Phase 2: Intake persistence layer
+- [x] Phase 2: Intake persistence layer
 - [ ] Phase 3: Non-destructive bank upload
 - [ ] Phase 4: Triage wizard UI
 - [ ] Phase 5: Projection upsert by `sourceTxId`
@@ -40,7 +40,7 @@
 
 ## Phase 2: Intake Persistence Layer
 
-**Status:** in progress
+**Status:** completed
 
 **Files**
 - `src/app/data/portal-store.intake.ts`
@@ -57,7 +57,13 @@
 - manual fields preserved exactly
 - optional evidence fields normalized consistently
 
+**Verification**
+- `npx vitest run src/app/data/portal-store.intake.test.ts src/app/data/portal-store.integration.test.ts`
+- `npm run build`
+
 ## Phase 3: Non-Destructive Bank Upload
+
+**Status:** in progress
 
 **Files**
 - `src/app/platform/bank-statement.ts`

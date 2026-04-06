@@ -15,6 +15,7 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore';
 import type {
+  BankImportIntakeItem,
   BudgetPlanRow,
   BudgetCodeEntry,
   BudgetCodeRename,
@@ -60,6 +61,10 @@ import {
   sanitizeExpenseSheetName,
   serializeExpenseSheetRowForPersistence,
 } from './portal-store.persistence';
+import {
+  buildBankImportIntakeDoc,
+  normalizeBankImportIntakeItem,
+} from './portal-store.intake';
 import { useAuth } from './auth-store';
 import { useFirebase } from '../lib/firebase-context';
 import { getAuthInstance, getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
@@ -225,6 +230,7 @@ export function shouldHydrateDevHarnessPortalSnapshot(params: {
 
 interface DevHarnessPortalSnapshot {
   activeExpenseSheetId?: string;
+  expenseIntakeItems?: unknown[];
   expenseSheets?: Array<{
     id?: string;
     name?: string;
@@ -281,6 +287,7 @@ interface PortalState {
   comments: Comment[];
   evidenceRequiredMap: Record<string, string>;
   sheetSources: ProjectSheetSourceSnapshot[];
+  expenseIntakeItems: BankImportIntakeItem[];
   expenseSheets: ExpenseSheetTab[];
   activeExpenseSheetId: string;
   expenseSheetRows: ImportRow[] | null;
@@ -314,6 +321,9 @@ interface PortalActions {
   addComment: (comment: Comment) => Promise<void>;
   saveEvidenceRequiredMap: (map: Record<string, string>) => Promise<void>;
   markSheetSourceApplied: (input: { sourceType: ProjectSheetSourceType; applyTarget: string }) => Promise<void>;
+  upsertExpenseIntakeItems: (items: BankImportIntakeItem[]) => Promise<void>;
+  updateExpenseIntakeItem: (id: string, updates: Partial<BankImportIntakeItem>) => Promise<void>;
+  projectExpenseIntakeItem: (id: string) => Promise<void>;
   setActiveExpenseSheet: (sheetId: string) => void;
   createExpenseSheet: (name?: string) => Promise<string | null>;
   renameExpenseSheet: (sheetId: string, name: string) => Promise<boolean>;
@@ -463,6 +473,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   const [comments, setComments] = useState<Comment[]>([]);
   const [evidenceRequiredMap, setEvidenceRequiredMap] = useState<Record<string, string>>({});
   const [sheetSources, setSheetSources] = useState<ProjectSheetSourceSnapshot[]>([]);
+  const [expenseIntakeItems, setExpenseIntakeItems] = useState<BankImportIntakeItem[]>([]);
   const [expenseSheets, setExpenseSheets] = useState<ExpenseSheetTab[]>([]);
   const [activeExpenseSheetId, setActiveExpenseSheetIdState] = useState('default');
   const [expenseSheetRows, setExpenseSheetRows] = useState<ImportRow[] | null>(null);
@@ -505,6 +516,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     if (!isDevHarnessUser || !portalUser?.projectId || devHarnessHydratedProjectIdRef.current !== portalUser.projectId) return;
     writeDevHarnessPortalSnapshot(portalUser.projectId, {
       activeExpenseSheetId,
+      expenseIntakeItems,
       expenseSheets: expenseSheets.map((sheet) => ({
         id: sheet.id,
         name: sheet.name,
@@ -516,7 +528,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       sheetSources,
       weeklySubmissionStatuses,
     });
-  }, [activeExpenseSheetId, expenseSheets, isDevHarnessUser, portalUser?.projectId, sheetSources, weeklySubmissionStatuses]);
+  }, [activeExpenseSheetId, expenseIntakeItems, expenseSheets, isDevHarnessUser, portalUser?.projectId, sheetSources, weeklySubmissionStatuses]);
 
   useEffect(() => {
     if (authLoading) {
@@ -740,6 +752,13 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       setComments([]);
       setEvidenceRequiredMap((prev) => prev || {});
       setSheetSources(Array.isArray(snapshot?.sheetSources) ? snapshot.sheetSources : []);
+      setExpenseIntakeItems(
+        Array.isArray(snapshot?.expenseIntakeItems)
+          ? snapshot.expenseIntakeItems
+            .map((item) => normalizeBankImportIntakeItem(item))
+            .filter((item): item is BankImportIntakeItem => item !== null)
+          : [],
+      );
       setExpenseSheets(persistedExpenseSheets);
       setActiveExpenseSheetIdState(resolvedActiveSheet?.id || 'default');
       setExpenseSheetRows(resolvedActiveSheet?.rows || null);
@@ -761,6 +780,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       setActiveExpenseSheetIdState('default');
       setEvidenceRequiredMap({});
       setSheetSources([]);
+      setExpenseIntakeItems([]);
       setExpenseSheetRows(null);
       setWeeklySubmissionStatuses([]);
       setIsLoading(false);
@@ -823,6 +843,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       setChangeRequests(CHANGE_REQUESTS);
       setParticipationEntries([]);
       setTransactions([]);
+      setExpenseIntakeItems([]);
       setWeeklySubmissionStatuses([]);
       ledgerReady = true;
       expenseReady = true;
@@ -1051,6 +1072,33 @@ export function PortalProvider({ children }: { children: ReactNode }) {
             },
           });
           setSheetSources([]);
+        }),
+      );
+
+      unsubsRef.current.push(
+        onSnapshot(collection(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/expense_intake`), (snap) => {
+          const nextItems = snap.docs
+            .map((docItem) => normalizeBankImportIntakeItem({ id: docItem.id, ...docItem.data() }))
+            .filter((item): item is BankImportIntakeItem => item !== null)
+            .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')));
+          setExpenseIntakeItems(nextItems);
+        }, (err) => {
+          reportError(err, {
+            message: '[PortalStore] expense intake listen error:',
+            options: {
+              level: 'error',
+              tags: {
+                surface: 'portal_store',
+                action: 'expense_intake_listen',
+              },
+              extra: {
+                orgId,
+                actorId: authUser.uid,
+                projectId: portalUser.projectId,
+              },
+            },
+          });
+          setExpenseIntakeItems([]);
         }),
       );
 
@@ -1999,6 +2047,87 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     setExpenseSheetRows(nextExpenseRows);
   }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name, expenseSheetRows, expenseSheets, activeExpenseSheetId, isDevHarnessUser]);
 
+  const upsertExpenseIntakeItems = useCallback(async (items: BankImportIntakeItem[]) => {
+    if (!Array.isArray(items) || items.length === 0) return;
+    const normalizedItems = items
+      .map((item) => normalizeBankImportIntakeItem(item))
+      .filter((item): item is BankImportIntakeItem => item !== null);
+    if (normalizedItems.length === 0) return;
+
+    if (isDevHarnessUser || !db || !portalUser?.projectId) {
+      setExpenseIntakeItems((prev) => {
+        const nextMap = new Map(prev.map((item) => [item.id, item] as const));
+        normalizedItems.forEach((item) => {
+          nextMap.set(item.id, item);
+        });
+        return Array.from(nextMap.values())
+          .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')));
+      });
+      return;
+    }
+
+    await Promise.all(
+      normalizedItems.map((item) => setDoc(
+        doc(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/expense_intake/${item.id}`),
+        buildBankImportIntakeDoc({ orgId, item }),
+        { merge: true },
+      )),
+    );
+  }, [db, isDevHarnessUser, orgId, portalUser?.projectId]);
+
+  const updateExpenseIntakeItem = useCallback(async (id: string, updates: Partial<BankImportIntakeItem>) => {
+    const currentItem = expenseIntakeItems.find((item) => item.id === id);
+    if (!currentItem) return;
+
+    const mergedCandidate = normalizeBankImportIntakeItem({
+      ...currentItem,
+      ...updates,
+      manualFields: {
+        ...currentItem.manualFields,
+        ...(updates.manualFields || {}),
+      },
+    });
+    if (!mergedCandidate) return;
+
+    if (isDevHarnessUser || !db || !portalUser?.projectId) {
+      setExpenseIntakeItems((prev) => prev
+        .map((item) => (item.id === id ? mergedCandidate : item))
+        .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || ''))));
+      return;
+    }
+
+    await setDoc(
+      doc(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/expense_intake/${id}`),
+      buildBankImportIntakeDoc({ orgId, item: mergedCandidate }),
+      { merge: true },
+    );
+  }, [db, expenseIntakeItems, isDevHarnessUser, orgId, portalUser?.projectId]);
+
+  const projectExpenseIntakeItem = useCallback(async (id: string) => {
+    const currentItem = expenseIntakeItems.find((item) => item.id === id);
+    if (!currentItem) return;
+    const projected = normalizeBankImportIntakeItem({
+      ...currentItem,
+      projectionStatus: currentItem.evidenceStatus === 'COMPLETE'
+        ? 'PROJECTED'
+        : 'PROJECTED_WITH_PENDING_EVIDENCE',
+    });
+    if (!projected) return;
+
+    if (isDevHarnessUser || !db || !portalUser?.projectId) {
+      setExpenseIntakeItems((prev) => prev
+        .map((item) => (item.id === id ? projected : item))
+        .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || ''))));
+      return;
+    }
+
+    await setDoc(
+      doc(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/expense_intake/${id}`),
+      buildBankImportIntakeDoc({ orgId, item: projected }),
+      { merge: true },
+    );
+  }, [db, expenseIntakeItems, isDevHarnessUser, orgId, portalUser?.projectId]);
+
   const persistTransaction = useCallback(async (txData: Transaction) => {
     if (!db) return;
     await setDoc(
@@ -2501,6 +2630,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     comments,
     evidenceRequiredMap,
     sheetSources,
+    expenseIntakeItems,
     expenseSheets,
     activeExpenseSheetId,
     expenseSheetRows,
@@ -2526,6 +2656,9 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     addComment,
     saveEvidenceRequiredMap,
     markSheetSourceApplied,
+    upsertExpenseIntakeItems,
+    updateExpenseIntakeItem,
+    projectExpenseIntakeItem,
     setActiveExpenseSheet,
     createExpenseSheet,
     renameExpenseSheet,

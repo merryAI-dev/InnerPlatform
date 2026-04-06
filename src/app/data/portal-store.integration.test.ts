@@ -5,6 +5,8 @@ import {
   buildExpenseSheetPersistenceDoc,
   buildWeeklySubmissionStatusPatch,
 } from './portal-store.persistence';
+import { buildBankImportIntakeDoc } from './portal-store.intake';
+import type { BankImportIntakeItem } from './types';
 import {
   areExpenseSheetRowsEqual,
   reconcileExpenseSheetRowsFromSelection,
@@ -36,6 +38,38 @@ function makeRow(overrides?: Partial<ImportRow>): ImportRow {
   };
 }
 
+function makeIntakeItem(overrides: Partial<BankImportIntakeItem> = {}): BankImportIntakeItem {
+  return {
+    id: 'bank-fp-001',
+    projectId: settlementProjectId,
+    sourceTxId: 'bank:bank-fp-001',
+    bankFingerprint: 'bank-fp-001',
+    bankSnapshot: {
+      accountNumber: '111-222-333',
+      dateTime: '2026-04-06T09:00:00+09:00',
+      counterparty: '메리 사업팀',
+      memo: '법인카드 결제',
+      signedAmount: -120000,
+      balanceAfter: 910000,
+    },
+    matchState: 'PENDING_INPUT',
+    projectionStatus: 'NOT_PROJECTED',
+    evidenceStatus: 'MISSING',
+    manualFields: {
+      expenseAmount: 120000,
+      budgetCategory: '여비',
+      budgetSubCategory: '교통비',
+      cashflowCategory: 'TRAVEL',
+    },
+    reviewReasons: [],
+    lastUploadBatchId: 'batch-1',
+    createdAt: '2026-04-06T00:00:00.000Z',
+    updatedAt: '2026-04-06T00:00:00.000Z',
+    updatedBy: 'PM 보람',
+    ...overrides,
+  };
+}
+
 describeIfEmulator('portal-store persistence integration (Firestore emulator)', () => {
   const tenantId = 'mysc';
   const projectId = 'p-settlement-it';
@@ -51,11 +85,13 @@ describeIfEmulator('portal-store persistence integration (Firestore emulator)', 
 
   beforeEach(async () => {
     await clearCollection(`orgs/${tenantId}/projects/${projectId}/expense_sheets`);
+    await clearCollection(`orgs/${tenantId}/projects/${projectId}/expense_intake`);
     await clearCollection(`orgs/${tenantId}/weeklySubmissionStatus`);
   });
 
   afterAll(async () => {
     await clearCollection(`orgs/${tenantId}/projects/${projectId}/expense_sheets`);
+    await clearCollection(`orgs/${tenantId}/projects/${projectId}/expense_intake`);
     await clearCollection(`orgs/${tenantId}/weeklySubmissionStatus`);
   });
 
@@ -136,6 +172,34 @@ describeIfEmulator('portal-store persistence integration (Firestore emulator)', 
       expenseReviewPendingCount: 0,
       expenseSyncUpdatedByName: 'PM 보람',
       expenseSyncUpdatedAt: '2026-04-05T10:05:00.000Z',
+    });
+  });
+
+  it('persists expense intake items as a project-scoped authoritative intake layer', async () => {
+    const payload = buildBankImportIntakeDoc({
+      orgId: tenantId,
+      item: makeIntakeItem(),
+    });
+
+    await db.doc(`orgs/${tenantId}/projects/${projectId}/expense_intake/bank-fp-001`).set(payload, { merge: true });
+
+    const stored = await db.doc(`orgs/${tenantId}/projects/${projectId}/expense_intake/bank-fp-001`).get();
+    expect(stored.exists).toBe(true);
+    expect(stored.data()).toMatchObject({
+      tenantId,
+      id: 'bank-fp-001',
+      projectId,
+      sourceTxId: 'bank:bank-fp-001',
+      matchState: 'PENDING_INPUT',
+      projectionStatus: 'NOT_PROJECTED',
+      evidenceStatus: 'MISSING',
+      manualFields: {
+        expenseAmount: 120000,
+        budgetCategory: '여비',
+        budgetSubCategory: '교통비',
+        cashflowCategory: 'TRAVEL',
+      },
+      reviewReasons: [],
     });
   });
 
