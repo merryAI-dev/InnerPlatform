@@ -183,19 +183,15 @@ export function MigrationAuditDetailPanel({
               </CardContent>
             </Card>
 
-            <Card className="border-sky-200 bg-sky-50/70 shadow-none">
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between gap-2">
-                  <CardTitle className="text-[14px] font-semibold">등록 제안 프로젝트 검토</CardTitle>
-                  <Badge variant="outline" className="bg-white">{proposalProjects.length}건</Badge>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {proposalProjects.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-sky-200 bg-white/80 px-3 py-4 text-[12px] text-slate-600">
-                    PM 포털에서 먼저 등록된 제안 프로젝트가 없습니다. 기존 프로젝트 연결이나 우측 빠른 등록으로 해결하면 됩니다.
+            {proposalProjects.length > 0 ? (
+              <Card className="border-sky-200 bg-sky-50/70 shadow-none">
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <CardTitle className="text-[14px] font-semibold">등록 제안 프로젝트 검토</CardTitle>
+                    <Badge variant="outline" className="bg-white">{proposalProjects.length}건</Badge>
                   </div>
-                ) : (
+                </CardHeader>
+                <CardContent className="space-y-4">
                   <>
                     <div className="space-y-2">
                       {proposalProjects.map((project) => {
@@ -295,60 +291,58 @@ export function MigrationAuditDetailPanel({
                       </div>
                     ) : null}
                   </>
-                )}
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            ) : null}
 
-            <Card className="border-amber-200 bg-amber-50/70 shadow-none">
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between gap-2">
-                  <CardTitle className="text-[14px] font-semibold">중복 의심 프로젝트</CardTitle>
-                  <Badge variant="outline" className="bg-white">{duplicateProjects.length}건</Badge>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                {duplicateProjects.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-amber-200 bg-white/80 px-3 py-4 text-[12px] text-slate-600">
-                    현재 row 기준으로 정리할 중복 의심 프로젝트가 없습니다.
+            {duplicateProjects.length > 0 ? (
+              <Card className="border-amber-200 bg-amber-50/70 shadow-none">
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <CardTitle className="text-[14px] font-semibold">중복 의심 프로젝트</CardTitle>
+                    <Badge variant="outline" className="bg-white">{duplicateProjects.length}건</Badge>
                   </div>
-                ) : duplicateProjects.map((project) => (
-                  <div key={project.id} className="rounded-2xl border border-amber-100 bg-white px-3 py-3">
-                    <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                      <div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="text-[12px] font-semibold text-slate-950">{projectLabel(project)}</p>
-                          {project.id === selectedProjectId ? (
-                            <Badge className="border border-emerald-200 bg-emerald-50 text-emerald-700">
-                              현재 연결 대상
-                            </Badge>
-                          ) : null}
-                          {project.registrationSource === 'pm_portal' ? (
-                            <Badge variant="outline">포털 등록</Badge>
-                          ) : null}
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {duplicateProjects.map((project) => (
+                    <div key={project.id} className="rounded-2xl border border-amber-100 bg-white px-3 py-3">
+                      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-[12px] font-semibold text-slate-950">{projectLabel(project)}</p>
+                            {project.id === selectedProjectId ? (
+                              <Badge className="border border-emerald-200 bg-emerald-50 text-emerald-700">
+                                현재 연결 대상
+                              </Badge>
+                            ) : null}
+                            {project.registrationSource === 'pm_portal' ? (
+                              <Badge variant="outline">포털 등록</Badge>
+                            ) : null}
+                          </div>
+                          <p className="mt-1 text-[11px] text-slate-500">{renderProjectMeta(project)}</p>
                         </div>
-                        <p className="mt-1 text-[11px] text-slate-500">{renderProjectMeta(project)}</p>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        <Button type="button" variant="outline" className="h-9 gap-1.5" onClick={() => onChooseTargetProject(project)}>
-                          <Link2 className="h-4 w-4" />
-                          연결 대상으로 사용
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="h-9 gap-1.5 border-rose-200 text-rose-700 hover:bg-rose-50 hover:text-rose-800"
-                          onClick={() => onTrashDuplicate(project)}
-                          disabled={trashingProjectId === project.id}
-                        >
-                          {trashingProjectId === project.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                          중복 폐기
-                        </Button>
+                        <div className="flex flex-wrap gap-2">
+                          <Button type="button" variant="outline" className="h-9 gap-1.5" onClick={() => onChooseTargetProject(project)}>
+                            <Link2 className="h-4 w-4" />
+                            연결 대상으로 사용
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="h-9 gap-1.5 border-rose-200 text-rose-700 hover:bg-rose-50 hover:text-rose-800"
+                            onClick={() => onTrashDuplicate(project)}
+                            disabled={trashingProjectId === project.id}
+                          >
+                            {trashingProjectId === project.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                            중복 폐기
+                          </Button>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
+                  ))}
+                </CardContent>
+              </Card>
+            ) : null}
           </div>
 
           <div className="space-y-4">
