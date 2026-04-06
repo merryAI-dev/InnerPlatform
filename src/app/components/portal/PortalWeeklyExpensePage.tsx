@@ -71,6 +71,7 @@ import {
 } from '../ui/alert-dialog';
 import { resolvePortalHappyPath } from '../../platform/portal-happy-path';
 import { resolvePortalMissionProgress } from '../../platform/portal-mission-guide';
+import { resolveWeeklyExpenseSavePolicy } from '../../platform/weekly-expense-save-policy';
 import { usePortalNavigationGuard } from './PortalLayout';
 const GoogleSheetMigrationWizard = lazy(
   () => import('./GoogleSheetMigrationWizard').then((module) => ({ default: module.GoogleSheetMigrationWizard })),
@@ -102,6 +103,7 @@ export function PortalWeeklyExpensePage() {
   const location = useLocation();
   const navigate = useNavigate();
   const { registerNavigationHandler } = usePortalNavigationGuard();
+  const weeklyExpenseSavePolicy = resolveWeeklyExpenseSavePolicy();
   const { user: authUser, ensureGoogleWorkspaceAccess } = useAuth();
   const { orgId } = useFirebase();
   const {
@@ -1120,7 +1122,8 @@ export function PortalWeeklyExpensePage() {
           budgetCodeBook={effectiveBudgetCodeBook}
           hideYearControls
           hideCountBadge
-          autoSaveSheet
+          saveMode={weeklyExpenseSavePolicy.mode}
+          showSaveStatusSurface={weeklyExpenseSavePolicy.showStatusSurface}
           evidenceRequiredMap={evidenceRequiredMap}
           onSaveEvidenceRequiredMap={saveEvidenceRequiredMap}
           sheetRows={expenseSheetRows}
