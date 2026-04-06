@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { upsertExpenseSheetProjectionRowBySourceTxId, upsertExpenseSheetTabRows } from './portal-store.persistence';
+import {
+  patchExpenseSheetProjectionEvidenceBySourceTxId,
+  upsertExpenseSheetProjectionRowBySourceTxId,
+  upsertExpenseSheetTabRows,
+} from './portal-store.persistence';
 import type { BankImportIntakeItem } from './types';
 
 function makeIntakeItem(overrides: Partial<BankImportIntakeItem> = {}): BankImportIntakeItem {
@@ -138,5 +142,33 @@ describe('upsertExpenseSheetProjectionRowBySourceTxId', () => {
     expect(result.rows).toHaveLength(2);
     expect(result.rows[1]?.sourceTxId).toBe('bank:fp-1');
     expect(result.projectedRow.tempId).toContain('bank-fp-1');
+  });
+
+  it('patches evidence fields without overwriting manual classification fields', () => {
+    const cells = Array.from({ length: 27 }, () => '');
+    cells[5] = '여비';
+    cells[6] = '교통비';
+    cells[10] = '15,000';
+
+    const result = patchExpenseSheetProjectionEvidenceBySourceTxId({
+      rows: [
+        {
+          tempId: 'row-1',
+          sourceTxId: 'bank:fp-1',
+          cells,
+        },
+      ],
+      sourceTxId: 'bank:fp-1',
+      evidenceRequiredDesc: '출장신청서, 영수증',
+      evidenceCompletedDesc: '출장신청서',
+      evidenceStatus: 'PARTIAL',
+    });
+
+    expect(result.rows[0]?.cells[17]).toBe('출장신청서, 영수증');
+    expect(result.rows[0]?.cells[18]).toBe('출장신청서');
+    expect(result.rows[0]?.cells[19]).toBe('영수증');
+    expect(result.rows[0]?.cells[5]).toBe('여비');
+    expect(result.rows[0]?.cells[6]).toBe('교통비');
+    expect(result.rows[0]?.cells[10]).toBe('15,000');
   });
 });

@@ -1,7 +1,7 @@
 import { createEmptyImportRow, SETTLEMENT_COLUMNS, type ImportRow } from '../platform/settlement-csv';
 import { findWeekForDate, getYearMondayWeeks } from '../platform/cashflow-weeks';
 import { resolveEvidenceChecklist } from '../platform/evidence-helpers';
-import type { BankImportIntakeItem, CashflowCategory, WeeklySubmissionStatus } from './types';
+import type { BankImportIntakeItem, CashflowCategory, EvidenceStatus, WeeklySubmissionStatus } from './types';
 
 interface ExpenseSheetTabSnapshot {
   id: string;
@@ -242,6 +242,52 @@ export function upsertExpenseSheetProjectionRowBySourceTxId(params: {
   return {
     rows: nextRows,
     projectedRow,
+  };
+}
+
+export function patchExpenseSheetProjectionEvidenceBySourceTxId(params: {
+  rows: ImportRow[] | null | undefined;
+  sourceTxId: string;
+  evidenceRequiredDesc: string;
+  evidenceCompletedDesc: string;
+  evidenceStatus: EvidenceStatus;
+}) {
+  const currentRows = Array.isArray(params.rows) ? [...params.rows] : [];
+  const targetIndex = currentRows.findIndex((row) => String(row.sourceTxId || '').trim() === params.sourceTxId);
+  if (targetIndex < 0) {
+    return {
+      rows: currentRows,
+      patchedRow: null,
+    };
+  }
+
+  const row = currentRows[targetIndex];
+  const cells = [...row.cells];
+  const requiredIdx = findColumnIndex('필수증빙자료 리스트');
+  const completedIdx = findColumnIndex('실제 구비 완료된 증빙자료 리스트');
+  const pendingIdx = findColumnIndex('준비필요자료');
+  const checklist = resolveEvidenceChecklist({
+    evidenceRequiredDesc: params.evidenceRequiredDesc,
+    evidenceCompletedDesc: params.evidenceCompletedDesc,
+    evidenceCompletedManualDesc: params.evidenceCompletedDesc,
+    evidenceAutoListedDesc: '',
+    evidenceDriveLink: '',
+    evidenceDriveFolderId: '',
+  });
+
+  if (requiredIdx >= 0) cells[requiredIdx] = params.evidenceRequiredDesc;
+  if (completedIdx >= 0) cells[completedIdx] = params.evidenceCompletedDesc;
+  if (pendingIdx >= 0) cells[pendingIdx] = checklist.missing.join(', ');
+
+  const patchedRow: ImportRow = {
+    ...row,
+    cells,
+  };
+  currentRows[targetIndex] = patchedRow;
+
+  return {
+    rows: currentRows,
+    patchedRow,
   };
 }
 
