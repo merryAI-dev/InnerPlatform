@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
 import { Badge } from '../ui/badge';
-import { PortalMissionGuide } from './PortalMissionGuide';
+import { PortalMissionGuideLauncher } from './PortalMissionGuideLauncher';
 import { BankImportTriageWizard } from './BankImportTriageWizard';
 import { usePortalStore } from '../../data/portal-store';
 import {
@@ -546,7 +546,7 @@ export function PortalBankStatementPage() {
         </Card>
       )}
 
-      <PortalMissionGuide progress={missionProgress} compact />
+      <PortalMissionGuideLauncher guideId="bank-statements" progress={missionProgress} />
 
       {hasUploadedSheet ? (
         <Card>

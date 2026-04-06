@@ -5,7 +5,7 @@ import { PageHeader } from '../layout/PageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
-import { PortalMissionGuide } from './PortalMissionGuide';
+import { PortalMissionGuideLauncher } from './PortalMissionGuideLauncher';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -313,7 +313,7 @@ export function PortalSubmissionsPage() {
         )}
       />
 
-      <PortalMissionGuide progress={missionProgress} compact />
+      <PortalMissionGuideLauncher guideId="submissions" progress={missionProgress} />
 
       <Card data-testid="portal-submissions-guide" className="border-teal-200/70 bg-gradient-to-br from-teal-50 via-white to-emerald-50/70">
         <CardContent className="flex flex-col gap-3 px-4 py-4 md:flex-row md:items-center md:justify-between">

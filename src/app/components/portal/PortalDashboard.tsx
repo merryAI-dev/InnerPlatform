@@ -18,7 +18,7 @@ import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
-import { PortalMissionGuide } from './PortalMissionGuide';
+import { PortalMissionGuideLauncher } from './PortalMissionGuideLauncher';
 import { usePortalStore } from '../../data/portal-store';
 import { useHrAnnouncements, HR_EVENT_LABELS, HR_EVENT_COLORS } from '../../data/hr-announcements-store';
 import { usePayroll } from '../../data/payroll-store';
@@ -310,7 +310,7 @@ export function PortalDashboard() {
       />
 
       {/* 사업 기본 정보 */}
-      <PortalMissionGuide progress={missionProgress} />
+      <PortalMissionGuideLauncher guideId="dashboard" progress={missionProgress} />
 
       <Card>
         <CardContent className="p-4">

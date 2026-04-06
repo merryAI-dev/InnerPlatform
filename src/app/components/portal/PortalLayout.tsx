@@ -15,6 +15,8 @@ import {
   ArrowRight,
   Upload,
   Shield,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { PortalProvider, usePortalStore } from '../../data/portal-store';
 import { useAuth } from '../../data/auth-store';
@@ -90,6 +92,28 @@ const PortalNavigationGuardContext = createContext<PortalNavigationGuardValue>({
   registerNavigationHandler: () => {},
 });
 
+const PORTAL_SIDEBAR_STORAGE_KEY = 'mysc-portal-sidebar-collapsed';
+
+function readPortalSidebarCollapsed(uid?: string | null): boolean {
+  const normalizedUid = String(uid || '').trim();
+  if (!normalizedUid || typeof localStorage === 'undefined') return false;
+  try {
+    return localStorage.getItem(`${PORTAL_SIDEBAR_STORAGE_KEY}:${normalizedUid}`) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function writePortalSidebarCollapsed(uid: string | null | undefined, collapsed: boolean) {
+  const normalizedUid = String(uid || '').trim();
+  if (!normalizedUid || typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(`${PORTAL_SIDEBAR_STORAGE_KEY}:${normalizedUid}`, collapsed ? 'true' : 'false');
+  } catch {
+    // ignore localStorage failures
+  }
+}
+
 export function usePortalNavigationGuard() {
   return useContext(PortalNavigationGuardContext);
 }
@@ -117,6 +141,7 @@ function PortalContent() {
   const location = useLocation();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   const navigationHandlerRef = useRef<((attempt: PortalNavigationAttempt) => boolean) | null>(null);
   const currentPath = `${location.pathname}${location.search}${location.hash}`;
   const registerNavigationHandler = useCallback((handler: ((attempt: PortalNavigationAttempt) => boolean) | null) => {
@@ -176,6 +201,18 @@ function PortalContent() {
     if (!currentProject?.id) return;
     rememberRecentPortalProject(currentProject.id);
   }, [currentProject?.id]);
+
+  useEffect(() => {
+    setCollapsed(readPortalSidebarCollapsed(authUser?.uid));
+  }, [authUser?.uid]);
+
+  const toggleSidebar = useCallback(() => {
+    setCollapsed((prev) => {
+      const next = !prev;
+      writePortalSidebarCollapsed(authUser?.uid, next);
+      return next;
+    });
+  }, [authUser?.uid]);
 
   const currentProjectName = useMemo(() => {
     if (!portalUser?.projectId) return myProject?.name;
@@ -399,32 +436,34 @@ function PortalContent() {
 
         {/* ── Sidebar ── */}
         <aside className={`
-          w-[240px] flex flex-col shrink-0 z-50
+          ${collapsed ? 'w-[60px]' : 'w-[240px]'} flex flex-col shrink-0 z-50
           fixed inset-y-0 left-0 lg:relative
-          transition-transform duration-200
+          transition-all duration-200
           ${mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
           bg-sidebar/90 backdrop-blur-xl border-r border-white/10
         `}>
           {/* Brand */}
-          <div className="flex items-center gap-2.5 h-[48px] px-3">
+          <div className={`flex items-center gap-2.5 h-[48px] px-3 ${collapsed ? 'justify-center' : ''}`}>
             <div
               className="flex items-center justify-center w-8 h-8 rounded-lg shrink-0"
               style={{ background: 'linear-gradient(135deg, #0d9488 0%, #059669 100%)' }}
             >
               <FolderKanban className="w-4 h-4 text-white" />
             </div>
-            <div className="overflow-hidden flex-1">
-              <p className="text-[11px] text-white truncate" style={{ fontWeight: 700 }}>
-                사업비 관리 포털
-              </p>
-              <p className="text-[9px] text-slate-500 truncate tracking-wider" style={{ textTransform: 'uppercase' }}>
-                Project Member
-              </p>
-            </div>
+            {!collapsed && (
+              <div className="overflow-hidden flex-1">
+                <p className="text-[11px] text-white truncate" style={{ fontWeight: 700 }}>
+                  사업비 관리 포털
+                </p>
+                <p className="text-[9px] text-slate-500 truncate tracking-wider" style={{ textTransform: 'uppercase' }}>
+                  Project Member
+                </p>
+              </div>
+            )}
           </div>
 
           {/* 사업 정보 카드 */}
-          {myProject && (
+          {myProject && !collapsed && (
             <div className="mx-2.5 mb-2 p-2.5 rounded-xl bg-white/8 border border-white/20">
               <p className="text-[10px] text-slate-500 mb-0.5">내 사업</p>
               {projectOptions.length > 0 ? (
@@ -469,6 +508,29 @@ function PortalContent() {
             </div>
           )}
 
+          {myProject && collapsed && (
+            <div className="mx-2.5 mb-2">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-9 w-9 border-white/20 bg-white/8 text-slate-200 hover:bg-white/15"
+                    onClick={() => requestPortalNavigation('/portal/project-settings', '사업 배정 수정')}
+                  >
+                    <FolderKanban className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="right" className="text-[11px]">
+                  <div className="space-y-1">
+                    <p className="font-medium text-slate-900">{currentProjectName || '사업 미선택'}</p>
+                    <p className="text-slate-500">사업 배정 수정</p>
+                  </div>
+                </TooltipContent>
+              </Tooltip>
+            </div>
+          )}
+
           {/* Navigation */}
           <nav className="flex-1 py-1 overflow-y-auto">
             <div className="space-y-3 px-2">
@@ -477,14 +539,16 @@ function PortalContent() {
                 if (visibleItems.length === 0) return null;
                 return (
                   <div key={section.title} className="space-y-1">
-                    <p className="px-2.5 text-[10px] text-slate-500 tracking-wide" style={{ fontWeight: 700 }}>
-                      {section.title}
-                    </p>
+                    {!collapsed && (
+                      <p className="px-2.5 text-[10px] text-slate-500 tracking-wide" style={{ fontWeight: 700 }}>
+                        {section.title}
+                      </p>
+                    )}
                     <div className="space-y-px">
                       {visibleItems.map((item) => {
                         const active = isActive(item.to, item.exact);
                         const badge = getBadge(item.to);
-                        return (
+                        const navLink = (
                           <NavLink
                             key={item.to}
                             to={item.to}
@@ -494,25 +558,44 @@ function PortalContent() {
                               requestPortalNavigation(item.to, item.label);
                             }}
                             className={`
-                              group relative flex items-center gap-2 rounded-md text-[12px] px-2.5 py-[7px] transition-all duration-100
+                              group relative flex items-center gap-2 rounded-md text-[12px] transition-all duration-100
+                              ${collapsed ? 'justify-center h-9 w-full px-0' : 'px-2.5 py-[7px]'}
                               ${active
                                 ? 'bg-teal-500/18 text-white backdrop-blur-sm'
                                 : 'text-slate-400 hover:text-slate-200 hover:bg-white/8'
                               }
                             `}
                           >
-                            {active && (
+                            {active && !collapsed && (
                               <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-3.5 rounded-r bg-teal-400" />
                             )}
                             <item.icon className={`w-[15px] h-[15px] shrink-0 ${active ? 'text-teal-400' : 'text-slate-600 group-hover:text-slate-400'}`} />
-                            <span style={{ fontWeight: active ? 500 : 400 }}>{item.label}</span>
-                            {badge !== null && (
-                              <span className="ml-auto flex items-center justify-center min-w-[16px] h-[16px] rounded-full bg-teal-500/90 text-[9px] text-white px-1" style={{ fontWeight: 700 }}>
-                                {badge}
-                              </span>
+                            {!collapsed && (
+                              <>
+                                <span style={{ fontWeight: active ? 500 : 400 }}>{item.label}</span>
+                                {badge !== null && (
+                                  <span className="ml-auto flex items-center justify-center min-w-[16px] h-[16px] rounded-full bg-teal-500/90 text-[9px] text-white px-1" style={{ fontWeight: 700 }}>
+                                    {badge}
+                                  </span>
+                                )}
+                              </>
                             )}
                           </NavLink>
                         );
+                        if (collapsed) {
+                          return (
+                            <Tooltip key={item.to}>
+                              <TooltipTrigger asChild>{navLink}</TooltipTrigger>
+                              <TooltipContent side="right" className="text-[11px]">
+                                <div className="flex items-center gap-2">
+                                  <span>{item.label}</span>
+                                  {badge !== null && <span className="text-teal-500">{badge}</span>}
+                                </div>
+                              </TooltipContent>
+                            </Tooltip>
+                          );
+                        }
+                        return navLink;
                       })}
                     </div>
                   </div>
@@ -524,30 +607,52 @@ function PortalContent() {
 
           {/* Footer */}
           <div className="border-t border-white/10 p-2 space-y-1.5">
-            <DarkModeToggle collapsed={false} />
-            <div className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-white/8 border border-white/10">
-              <div
-                className="w-6 h-6 rounded-md flex items-center justify-center shrink-0 text-[10px] text-white"
-                style={{ fontWeight: 700, background: 'linear-gradient(135deg, #0d9488, #059669)' }}
-              >
-                {portalUser.name.charAt(0)}
+            <DarkModeToggle collapsed={collapsed} />
+            {!collapsed ? (
+              <div className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-white/8 border border-white/10">
+                <div
+                  className="w-6 h-6 rounded-md flex items-center justify-center shrink-0 text-[10px] text-white"
+                  style={{ fontWeight: 700, background: 'linear-gradient(135deg, #0d9488, #059669)' }}
+                >
+                  {portalUser.name.charAt(0)}
+                </div>
+                <div className="overflow-hidden flex-1">
+                  <p className="text-[11px] text-slate-300 truncate" style={{ fontWeight: 500 }}>{portalUser.name}</p>
+                  <p className="text-[9px] text-slate-600">{portalUser.role}</p>
+                </div>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => { portalLogout(); authLogout(); navigate('/login'); }}
+                      className="p-1 rounded hover:bg-white/15 text-slate-500 hover:text-slate-300 transition-colors"
+                    >
+                      <LogOut className="w-3.5 h-3.5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="text-[11px]">로그아웃</TooltipContent>
+                </Tooltip>
               </div>
-              <div className="overflow-hidden flex-1">
-                <p className="text-[11px] text-slate-300 truncate" style={{ fontWeight: 500 }}>{portalUser.name}</p>
-                <p className="text-[9px] text-slate-600">{portalUser.role}</p>
+            ) : (
+              <div className="flex flex-col items-center gap-2">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => { portalLogout(); authLogout(); navigate('/login'); }}
+                      className="flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-white/8 text-slate-400 hover:bg-white/15 hover:text-slate-200 transition-colors"
+                    >
+                      <LogOut className="w-3.5 h-3.5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right" className="text-[11px]">로그아웃</TooltipContent>
+                </Tooltip>
               </div>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    onClick={() => { portalLogout(); authLogout(); navigate('/login'); }}
-                    className="p-1 rounded hover:bg-white/15 text-slate-500 hover:text-slate-300 transition-colors"
-                  >
-                    <LogOut className="w-3.5 h-3.5" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="top" className="text-[11px]">로그아웃</TooltipContent>
-              </Tooltip>
-            </div>
+            )}
+            <button
+              onClick={toggleSidebar}
+              className="w-full flex items-center justify-center h-7 rounded-md text-slate-500 hover:text-slate-300 hover:bg-white/10 transition-colors"
+            >
+              {collapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronLeft className="w-3.5 h-3.5" />}
+            </button>
           </div>
         </aside>
 

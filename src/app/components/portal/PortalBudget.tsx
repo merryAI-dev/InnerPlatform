@@ -8,7 +8,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
-import { PortalMissionGuide } from './PortalMissionGuide';
+import { PortalMissionGuideLauncher } from './PortalMissionGuideLauncher';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '../ui/dialog';
@@ -1084,9 +1084,9 @@ export function PortalBudget() {
           )}
         />
 
-        <PortalMissionGuide
+        <PortalMissionGuideLauncher
+          guideId="budget"
           progress={missionProgress}
-          compact
           resolveStepAction={(step) => {
             if (step.ctaPath === '/portal/budget' && location.pathname === '/portal/budget') {
               return () => {

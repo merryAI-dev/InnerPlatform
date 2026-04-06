@@ -18,7 +18,7 @@ import type { EvidenceUploadSelection, PendingQuickInsert } from '../cashflow/Se
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Card, CardContent } from '../ui/card';
-import { PortalMissionGuide } from './PortalMissionGuide';
+import { PortalMissionGuideLauncher } from './PortalMissionGuideLauncher';
 import { BankImportTriageWizard } from './BankImportTriageWizard';
 import {
   formatSettlementSheetPolicySummary,
@@ -156,7 +156,6 @@ export function PortalWeeklyExpensePage() {
   const [confirmedUnsavedAction, setConfirmedUnsavedAction] = useState<PendingUnsavedAction | null>(null);
   const [discardChangesRequestToken, setDiscardChangesRequestToken] = useState(0);
   const [allowUnsavedNavigation, setAllowUnsavedNavigation] = useState(false);
-  const [missionGuideCollapsed, setMissionGuideCollapsed] = useState(false);
   const [participationRiskWarning, setParticipationRiskWarning] = useState<{
     yearMonth: string;
     weekNo: number;
@@ -997,40 +996,7 @@ export function PortalWeeklyExpensePage() {
         {isENaraProject && <span>TYPE5 / 전용계좌 프로젝트</span>}
       </div>
 
-      {missionGuideCollapsed ? (
-        <Card data-testid="portal-mission-guide-collapsed" className="border-indigo-200/70 bg-gradient-to-r from-indigo-50 via-white to-teal-50/70 shadow-sm">
-          <CardContent className="flex items-center justify-between gap-3 px-4 py-3">
-            <div className="min-w-0">
-              <p className="text-[11px] uppercase tracking-[0.16em] text-indigo-700">Guided Start</p>
-              <p className="truncate text-[12px] text-slate-700">{missionProgress.currentLabel}</p>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8 text-[11px]"
-              onClick={() => setMissionGuideCollapsed(false)}
-            >
-              가이드 다시 보기
-            </Button>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="space-y-2">
-          {weeklyExpenseSavePolicy.guideMinimizable && (
-            <div className="flex justify-end">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 text-[11px] text-muted-foreground"
-                onClick={() => setMissionGuideCollapsed(true)}
-              >
-                가이드 최소화
-              </Button>
-            </div>
-          )}
-          <PortalMissionGuide progress={missionProgress} compact />
-        </div>
-      )}
+      <PortalMissionGuideLauncher guideId="weekly-expenses" progress={missionProgress} />
 
       <Card data-testid="weekly-expense-setup-panel" className={weeklySetupPanel.toneClass}>
         <CardContent className="flex flex-col gap-3 px-4 py-4 md:flex-row md:items-center md:justify-between">
