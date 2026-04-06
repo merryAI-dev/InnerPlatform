@@ -1,5 +1,6 @@
 import type { ProjectMigrationCandidate } from '../data/project-migration-candidates';
 import type { Project } from '../data/types';
+import { getProjectRegistrationCicOptions, resolveProjectCic } from './project-cic';
 import type {
   ProjectMigrationAuditRow,
   ProjectMigrationCurrentRow,
@@ -159,8 +160,9 @@ export function collectMigrationAuditCicOptions(
   currentRows: ProjectMigrationCurrentRow[],
 ): string[] {
   const values = new Set<string>();
+  getProjectRegistrationCicOptions().forEach((cic) => values.add(cic));
   records.forEach((record) => values.add(record.cic));
-  currentRows.forEach((row) => values.add(normalizeCicLabel(row.project.cic)));
+  currentRows.forEach((row) => values.add(normalizeCicLabel(resolveProjectCic(row.project))));
   return Array.from(values).sort((left, right) => left.localeCompare(right, 'ko'));
 }
 
@@ -191,8 +193,8 @@ export function suggestProjectsForMigrationAuditRecord(
   const normalizedSource = normalizeQuery(record.sourceName);
   return [...projects]
     .sort((left, right) => {
-      const leftSameCic = normalizeCicLabel(left.cic) === record.cic;
-      const rightSameCic = normalizeCicLabel(right.cic) === record.cic;
+      const leftSameCic = normalizeCicLabel(resolveProjectCic(left)) === record.cic;
+      const rightSameCic = normalizeCicLabel(resolveProjectCic(right)) === record.cic;
       if (leftSameCic !== rightSameCic) return leftSameCic ? -1 : 1;
 
       const leftScore = Number(
@@ -234,7 +236,7 @@ export function buildMigrationAuditDenseRows(
       id: `current-${row.project.id}`,
       kind: 'current-only' as const,
       status: 'MISSING' as const,
-      cic: normalizeCicLabel(row.project.cic),
+      cic: normalizeCicLabel(resolveProjectCic(row.project)),
       sourceName: normalizeText(row.project.officialContractName) || normalizeText(row.project.name) || '이름 없음',
       projectLabel: normalizeText(row.project.officialContractName) || normalizeText(row.project.name) || '이름 없음',
       candidateCount: 0,

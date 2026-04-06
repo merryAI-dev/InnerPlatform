@@ -154,7 +154,18 @@ describe('project-migration-console', () => {
       { project: makeProject({ id: 'p-2', cic: 'CIC-B' }), status: 'MISSING', match: null },
     ];
 
-    expect(collectMigrationAuditCicOptions(records, currentRows)).toEqual(['CIC-A', 'CIC-B']);
+    expect(collectMigrationAuditCicOptions(records, currentRows)).toEqual(['CIC-A', 'CIC-B', 'CIC1', 'CIC2', 'CIC3', 'CIC4']);
+  });
+
+  it('falls back to project department when explicit cic is missing', () => {
+    const records = buildMigrationAuditConsoleRecords([
+      makeRow({ candidate: makeCandidate({ cic: 'CIC-A' }) }),
+    ]);
+    const currentRows: ProjectMigrationCurrentRow[] = [
+      { project: makeProject({ id: 'p-2', cic: undefined, department: 'CIC3' }), status: 'MISSING', match: null },
+    ];
+
+    expect(collectMigrationAuditCicOptions(records, currentRows)).toEqual(['CIC-A', 'CIC1', 'CIC2', 'CIC3', 'CIC4']);
   });
 
   it('builds cic selection options with a single 미지정 entry', () => {

@@ -28,6 +28,7 @@ import {
   suggestProjectsForMigrationAuditRecord,
   summarizeMigrationAuditConsole,
 } from '../../platform/project-migration-console';
+import { resolveProjectCic } from '../../platform/project-cic';
 import { buildQuickMigrationProject } from '../../platform/project-migration-quick-create';
 import { PageHeader } from '../layout/PageHeader';
 import { Card, CardContent } from '../ui/card';
@@ -90,7 +91,7 @@ function filterCurrentOnlyRows(
   return rows.filter((row) => {
     if (row.match) return false;
     if (statusFilter !== 'ALL' && statusFilter !== 'MISSING') return false;
-    const projectCic = normalizeCicLabel(row.project.cic);
+    const projectCic = normalizeCicLabel(resolveProjectCic(row.project));
     if (cicFilter !== 'ALL' && projectCic !== cicFilter) return false;
     if (!normalizedQuery) return true;
     const haystack = [

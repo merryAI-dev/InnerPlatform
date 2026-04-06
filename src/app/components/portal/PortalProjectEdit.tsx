@@ -35,6 +35,7 @@ import {
   type AccountType,
 } from '../../data/types';
 import { PROJECT_DEPARTMENT_OPTIONS } from '../../data/project-department-options';
+import { resolveProjectCic } from '../../platform/project-cic';
 import {
   createEmptyProjectFinancialInputFlags,
   hasExplicitProjectAmountInput,
@@ -169,6 +170,7 @@ export function PortalProjectEdit() {
           officialContractName: form.officialContractName.trim(),
           type: form.type,
           department: form.department,
+          cic: resolveProjectCic({ cic: myProject.cic, department: form.department }),
           clientOrg: form.clientOrg.trim(),
           contractAmount: form.contractAmount,
           salesVatAmount: form.salesVatAmount,

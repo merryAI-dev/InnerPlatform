@@ -1,6 +1,7 @@
 import { ArrowRight, CheckCircle2, FolderPlus, Link2, Loader2 } from 'lucide-react';
 import type { Project } from '../../../data/types';
 import type { MigrationAuditConsoleRecord } from '../../../platform/project-migration-console';
+import { resolveProjectCic } from '../../../platform/project-cic';
 import { Badge } from '../../ui/badge';
 import { Button } from '../../ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
@@ -120,7 +121,7 @@ export function MigrationAuditDetailPanel({
                   <SelectContent>
                     {suggestedProjects.map((project) => (
                       <SelectItem key={project.id} value={project.id}>
-                        {(project.officialContractName || project.name)} · {project.cic || '미지정'}
+                        {(project.officialContractName || project.name)} · {resolveProjectCic(project) || '미지정'}
                       </SelectItem>
                     ))}
                   </SelectContent>

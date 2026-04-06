@@ -51,6 +51,7 @@ import {
 } from '../platform/bank-statement';
 import { normalizeSpace } from '../platform/csv-utils';
 import { isBankImportManualFieldsComplete, resolveBankImportProjectionStatus } from '../platform/bank-import-triage';
+import { resolveProjectCic } from '../platform/project-cic';
 import {
   resolveEvidenceRequiredDesc,
 } from '../platform/settlement-sheet-prepare';
@@ -1981,6 +1982,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       settlementGuide: payload.settlementGuide,
       contractDocument: payload.contractDocument,
       department: payload.department,
+      cic: resolveProjectCic({ department: payload.department }),
       teamName: payload.teamName,
       managerId: authUser.uid,
       managerName: payload.managerName || authUser.name || portalUser?.name || '',
