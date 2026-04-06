@@ -1,0 +1,246 @@
+import type { ProjectMigrationCandidate } from '../data/project-migration-candidates';
+import type { Project } from '../data/types';
+import type {
+  ProjectMigrationAuditRow,
+  ProjectMigrationCurrentRow,
+  ProjectMigrationProjectMatch,
+  ProjectMigrationStatus,
+} from './project-migration-audit';
+
+export interface MigrationAuditConsoleRecord {
+  id: string;
+  candidate: ProjectMigrationCandidate;
+  status: ProjectMigrationStatus;
+  cic: string;
+  sourceName: string;
+  sourceDepartment: string;
+  sourceClientOrg: string;
+  match: ProjectMigrationProjectMatch | null;
+  matchLabel: string;
+  nextActionLabel: string;
+}
+
+export interface MigrationAuditConsoleSections {
+  missing: MigrationAuditConsoleRecord[];
+  candidate: MigrationAuditConsoleRecord[];
+  registered: MigrationAuditConsoleRecord[];
+}
+
+export interface MigrationAuditConsoleSummary {
+  total: number;
+  missing: number;
+  candidate: number;
+  registered: number;
+  unassignedCic: number;
+  completionRatio: number | null;
+}
+
+export interface MigrationAuditDenseRow {
+  id: string;
+  kind: 'source' | 'current-only';
+  status: ProjectMigrationStatus;
+  cic: string;
+  sourceName: string;
+  projectLabel: string;
+  candidateCount: number;
+  lastActionLabel: string;
+  recordId?: string;
+  projectId?: string;
+}
+
+function normalizeText(value: unknown): string {
+  return String(value || '').trim();
+}
+
+function normalizeQuery(value: string): string {
+  return normalizeText(value).toLowerCase();
+}
+
+export function normalizeCicLabel(value: unknown): string {
+  const normalized = normalizeText(value);
+  return normalized || '미지정';
+}
+
+function getMatchLabel(match: ProjectMigrationProjectMatch | null): string {
+  if (!match) return '등록 필요';
+  return normalizeText(match.project.officialContractName) || normalizeText(match.project.name) || '이름 없음';
+}
+
+function getNextActionLabel(status: ProjectMigrationStatus, match: ProjectMigrationProjectMatch | null): string {
+  if (status === 'REGISTERED') return '완료';
+  if (!match) return '새 프로젝트 등록 또는 기존 프로젝트 연결';
+  if (match.exact) return '완료';
+  return '후보 검토 후 연결';
+}
+
+export function buildMigrationAuditConsoleRecords(
+  rows: ProjectMigrationAuditRow[],
+): MigrationAuditConsoleRecord[] {
+  return rows.map((row) => ({
+    id: row.candidate.id,
+    candidate: row.candidate,
+    status: row.status,
+    cic: normalizeCicLabel(row.candidate.cic),
+    sourceName: row.candidate.businessName,
+    sourceDepartment: row.candidate.department,
+    sourceClientOrg: row.candidate.clientOrg,
+    match: row.match,
+    matchLabel: getMatchLabel(row.match),
+    nextActionLabel: getNextActionLabel(row.status, row.match),
+  }));
+}
+
+export function filterMigrationAuditConsoleRecords(
+  records: MigrationAuditConsoleRecord[],
+  options: {
+    cic: string;
+    status: 'ALL' | ProjectMigrationStatus;
+    query: string;
+  },
+): MigrationAuditConsoleRecord[] {
+  const query = normalizeQuery(options.query);
+  return records.filter((record) => {
+    if (options.cic !== 'ALL' && record.cic !== options.cic) return false;
+    if (options.status !== 'ALL' && record.status !== options.status) return false;
+    if (!query) return true;
+
+    const haystack = [
+      record.sourceName,
+      record.sourceDepartment,
+      record.sourceClientOrg,
+      record.cic,
+      record.matchLabel,
+      record.match?.project.managerName,
+      record.match?.project.department,
+    ].map(normalizeText).join(' ').toLowerCase();
+
+    return haystack.includes(query);
+  });
+}
+
+function sortRecords(records: MigrationAuditConsoleRecord[]): MigrationAuditConsoleRecord[] {
+  return [...records].sort((left, right) => {
+    const cicCompare = left.cic.localeCompare(right.cic, 'ko');
+    if (cicCompare !== 0) return cicCompare;
+    return left.sourceName.localeCompare(right.sourceName, 'ko');
+  });
+}
+
+export function groupMigrationAuditConsoleRecords(
+  records: MigrationAuditConsoleRecord[],
+): MigrationAuditConsoleSections {
+  return {
+    missing: sortRecords(records.filter((record) => record.status === 'MISSING')),
+    candidate: sortRecords(records.filter((record) => record.status === 'CANDIDATE')),
+    registered: sortRecords(records.filter((record) => record.status === 'REGISTERED')),
+  };
+}
+
+export function summarizeMigrationAuditConsole(
+  records: MigrationAuditConsoleRecord[],
+): MigrationAuditConsoleSummary {
+  const total = records.length;
+  const missing = records.filter((record) => record.status === 'MISSING').length;
+  const candidate = records.filter((record) => record.status === 'CANDIDATE').length;
+  const registered = records.filter((record) => record.status === 'REGISTERED').length;
+  const unassignedCic = records.filter((record) => record.cic === '미지정').length;
+  return {
+    total,
+    missing,
+    candidate,
+    registered,
+    unassignedCic,
+    completionRatio: total > 0 ? (registered / total) * 100 : null,
+  };
+}
+
+export function collectMigrationAuditCicOptions(
+  records: MigrationAuditConsoleRecord[],
+  currentRows: ProjectMigrationCurrentRow[],
+): string[] {
+  const values = new Set<string>();
+  records.forEach((record) => values.add(record.cic));
+  currentRows.forEach((row) => values.add(normalizeCicLabel(row.project.cic)));
+  return Array.from(values).sort((left, right) => left.localeCompare(right, 'ko'));
+}
+
+export function buildMigrationAuditCicSelectionOptions(cicOptions: string[]): string[] {
+  return Array.from(new Set([...cicOptions, '미지정']))
+    .sort((left, right) => {
+      if (left === '미지정') return 1;
+      if (right === '미지정') return -1;
+      return left.localeCompare(right, 'ko');
+    });
+}
+
+export function findMigrationAuditRecord(
+  records: MigrationAuditConsoleRecord[],
+  recordId: string | null | undefined,
+): MigrationAuditConsoleRecord | null {
+  if (!recordId) return records[0] || null;
+  return records.find((record) => record.id === recordId) || records[0] || null;
+}
+
+export function suggestProjectsForMigrationAuditRecord(
+  record: MigrationAuditConsoleRecord | null,
+  projects: Project[],
+  limit = 5,
+): Project[] {
+  if (!record) return [];
+
+  const normalizedSource = normalizeQuery(record.sourceName);
+  return [...projects]
+    .sort((left, right) => {
+      const leftSameCic = normalizeCicLabel(left.cic) === record.cic;
+      const rightSameCic = normalizeCicLabel(right.cic) === record.cic;
+      if (leftSameCic !== rightSameCic) return leftSameCic ? -1 : 1;
+
+      const leftScore = Number(
+        normalizeQuery(left.name).includes(normalizedSource)
+        || normalizeQuery(left.officialContractName || '').includes(normalizedSource),
+      );
+      const rightScore = Number(
+        normalizeQuery(right.name).includes(normalizedSource)
+        || normalizeQuery(right.officialContractName || '').includes(normalizedSource),
+      );
+      if (leftScore !== rightScore) return rightScore - leftScore;
+
+      return (normalizeText(left.officialContractName) || normalizeText(left.name))
+        .localeCompare(normalizeText(right.officialContractName) || normalizeText(right.name), 'ko');
+    })
+    .slice(0, limit);
+}
+
+export function buildMigrationAuditDenseRows(
+  records: MigrationAuditConsoleRecord[],
+  currentRows: ProjectMigrationCurrentRow[],
+): MigrationAuditDenseRow[] {
+  const sourceRows = records.map((record) => ({
+    id: record.id,
+    kind: 'source' as const,
+    status: record.status,
+    cic: record.cic,
+    sourceName: record.sourceName,
+    projectLabel: record.matchLabel,
+    candidateCount: record.status === 'CANDIDATE' ? 1 : 0,
+    lastActionLabel: record.nextActionLabel,
+    recordId: record.id,
+    projectId: record.match?.project.id,
+  }));
+
+  const currentOnlyRows = currentRows
+    .filter((row) => row.match == null)
+    .map((row) => ({
+      id: `current-${row.project.id}`,
+      kind: 'current-only' as const,
+      status: 'MISSING' as const,
+      cic: normalizeCicLabel(row.project.cic),
+      sourceName: normalizeText(row.project.officialContractName) || normalizeText(row.project.name) || '이름 없음',
+      projectLabel: normalizeText(row.project.officialContractName) || normalizeText(row.project.name) || '이름 없음',
+      candidateCount: 0,
+      lastActionLabel: '이관 범위 밖 프로젝트 확인',
+      projectId: row.project.id,
+    }));
+
+  return [...sourceRows, ...currentOnlyRows];
+}

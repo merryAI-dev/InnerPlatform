@@ -1,5 +1,6 @@
 export interface ProjectMigrationCandidate {
   id: string;
+  cic?: string;
   department: string;
   coreMembers: string;
   groupwareProjectName: string;
@@ -32,6 +33,7 @@ export function normalizeProjectMigrationCandidate(
 ): ProjectMigrationCandidate {
   return {
     id,
+    cic: readString(raw.cic) || undefined,
     department: readString(raw.department),
     coreMembers: readString(raw.coreMembers),
     groupwareProjectName: readString(raw.groupwareProjectName),

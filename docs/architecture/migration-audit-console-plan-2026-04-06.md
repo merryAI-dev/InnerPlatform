@@ -17,11 +17,11 @@
 - Modify: `src/app/data/project-migration-candidates.ts`
 - Test: `src/app/platform/project-migration-audit.test.ts`
 
-- [ ] Add `cic?: string` to `Project` and `ProjectMigrationCandidate`
-- [ ] Normalize `cic` from Firestore candidate docs
-- [ ] Extend project-migration test fixtures to accept `cic`
-- [ ] Add a unit test that CIC can flow through a candidate/project fixture without changing existing matching behavior
-- [ ] Commit
+- [x] Add `cic?: string` to `Project` and `ProjectMigrationCandidate`
+- [x] Normalize `cic` from Firestore candidate docs
+- [x] Extend project-migration test fixtures to accept `cic`
+- [x] Add a unit test that CIC can flow through a candidate/project fixture without changing existing matching behavior
+- [x] Commit
 
 ### Task 2: Add queue/detail helper layer
 
@@ -29,15 +29,15 @@
 - Create: `src/app/platform/project-migration-console.ts`
 - Test: `src/app/platform/project-migration-console.test.ts`
 
-- [ ] Implement console helper types for queue sections, selected record detail, and duplicate suggestions
-- [ ] Implement CIC-aware filtering and section counts
-- [ ] Implement “same CIC first, then similar name” duplicate suggestion ordering
-- [ ] Add tests for:
+- [x] Implement console helper types for queue sections, selected record detail, and duplicate suggestions
+- [x] Implement CIC-aware filtering and section counts
+- [x] Implement “same CIC first, then similar name” duplicate suggestion ordering
+- [x] Add tests for:
   - queue grouping by status
   - CIC filtering
   - selected detail model
   - duplicate suggestion ordering
-- [ ] Commit
+- [x] Commit
 
 ### Task 3: Add quick-create project builder
 
@@ -45,17 +45,17 @@
 - Create: `src/app/platform/project-migration-quick-create.ts`
 - Test: `src/app/platform/project-migration-quick-create.test.ts`
 
-- [ ] Implement `buildQuickMigrationProject(...)`
-- [ ] Include stable defaults for required `Project` fields
-- [ ] Use `candidate.businessName` as `officialContractName`
-- [ ] Use quick-create `name` as `project.name`
-- [ ] Use selected CIC as `project.cic`
-- [ ] Add tests for:
+- [x] Implement `buildQuickMigrationProject(...)`
+- [x] Include stable defaults for required `Project` fields
+- [x] Use `candidate.businessName` as `officialContractName`
+- [x] Use quick-create `name` as `project.name`
+- [x] Use selected CIC as `project.cic`
+- [x] Add tests for:
   - required defaults
   - slug generation
   - contract name propagation
   - CIC propagation
-- [ ] Commit
+- [x] Commit
 
 ### Task 4: Split the page into UI components
 
@@ -66,17 +66,17 @@
 - Create: `src/app/components/projects/migration-audit/MigrationAuditDetailPanel.tsx`
 - Create: `src/app/components/projects/migration-audit/MigrationAuditDenseTable.tsx`
 
-- [ ] Move KPI + filters into `MigrationAuditControlBar`
-- [ ] Add queue rail with `미등록 / 후보 있음 / 완료`
-- [ ] Add detail panel with:
+- [x] Move KPI + filters into `MigrationAuditControlBar`
+- [x] Add queue rail with `미등록 / 후보 있음 / 완료`
+- [x] Add detail panel with:
   - source info
   - current match
   - existing project connect action
   - quick-create action
-- [ ] Move dense inspection table into `MigrationAuditDenseTable`
-- [ ] Keep existing sync-approved-scope capability, but visually demote it
-- [ ] Add `data-testid` hooks for the new console surfaces
-- [ ] Commit
+- [x] Move dense inspection table into `MigrationAuditDenseTable`
+- [x] Keep existing sync-approved-scope capability, but visually demote it
+- [x] Add `data-testid` hooks for the new console surfaces
+- [x] Commit
 
 ### Task 5: Implement quick-create + instant match in the page
 
@@ -85,13 +85,13 @@
 - Reuse: `src/app/data/store.tsx`
 - Reuse: `src/app/platform/project-migration-quick-create.ts`
 
-- [ ] Wire quick-create submit to `addProject`
-- [ ] After creation, immediately write `manualProjectId/manualProjectName/migrationUpdatedAt/migrationUpdatedBy` to candidate doc
-- [ ] Keep the current selection stable after creation
-- [ ] Refresh local state via existing project/candidate subscriptions rather than ad-hoc reload logic
-- [ ] Show duplicate suggestions before create
-- [ ] Require CIC selection if the current row is `미지정`
-- [ ] Commit
+- [x] Wire quick-create submit to `addProject`
+- [x] After creation, immediately write `manualProjectId/manualProjectName/migrationUpdatedAt/migrationUpdatedBy` to candidate doc
+- [x] Keep the current selection stable after creation
+- [x] Refresh local state via existing project/candidate subscriptions rather than ad-hoc reload logic
+- [x] Show duplicate suggestions before create
+- [x] Require CIC selection if the current row is `미지정`
+- [x] Commit
 
 ### Task 6: Add tests for page behavior
 
@@ -100,7 +100,7 @@
 - Create or modify: page/component tests if present
 - Modify: `tests/e2e/product-release-gates.spec.ts`
 
-- [ ] Add helper-level tests for console model and quick-create
+- [x] Add helper-level tests for console model and quick-create
 - [ ] Add page-level test coverage where practical for selection and quick-create state
 - [ ] Add Playwright release gate that:
   - opens `/projects/migration-audit`

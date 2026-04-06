@@ -462,6 +462,7 @@ export interface Project {
   version?: number;
   slug: string;        // URL-safe unique key
   orgId: string;
+  cic?: string;
   registrationSource?: string;
   trashedAt?: string | null;
   trashedById?: string | null;
