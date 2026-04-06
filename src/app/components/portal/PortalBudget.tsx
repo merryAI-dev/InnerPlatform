@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback, useEffect, type DragEvent } from 'react';
+import { useNavigate } from 'react-router';
 import {
   Lock, SlidersHorizontal, ChevronDown, ChevronRight,
   Calculator, Wallet, TrendingUp, Info,
@@ -7,6 +8,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
+import { PortalMissionGuide } from './PortalMissionGuide';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '../ui/dialog';
@@ -24,7 +26,7 @@ import {
   type BudgetRow,
 } from '../../data/budget-data';
 import type { BudgetPlanRow, BudgetCodeEntry, BudgetCodeRename } from '../../data/types';
-import { BASIS_LABELS } from '../../data/types';
+import { BASIS_LABELS, normalizeProjectFundInputMode } from '../../data/types';
 import { useFirebase } from '../../lib/firebase-context';
 import {
   analyzeGoogleSheetImportViaBff,
@@ -49,6 +51,7 @@ import { moveBudgetSubCode, moveBudgetSubCodeToIndex } from '../../platform/budg
 import { buildBudgetLabelKey, normalizeBudgetLabel } from '../../platform/budget-labels';
 import { parseBudgetPlanMatrix, planBudgetPlanMerge } from '../../platform/google-sheet-migration';
 import { parseLocalWorkbookFile, type LocalWorkbookSheet } from '../../platform/local-workbook';
+import { resolvePortalMissionProgress } from '../../platform/portal-mission-guide';
 
 // ═══════════════════════════════════════════════════════════════
 // PortalBudget — 예산총괄 (리디자인 — 모바일 우선, 깨짐 방지)
@@ -222,6 +225,7 @@ function formatConfidenceLabel(value?: 'high' | 'medium' | 'low'): string {
 }
 
 export function PortalBudget() {
+  const navigate = useNavigate();
   const { user: authUser } = useAuth();
   const { orgId } = useFirebase();
   const {
@@ -232,6 +236,8 @@ export function PortalBudget() {
     budgetCodeBook,
     saveBudgetPlanRows,
     saveBudgetCodeBook,
+    bankStatementRows,
+    weeklySubmissionStatuses,
   } = usePortalStore();
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [selectedRow, setSelectedRow] = useState<BudgetRow | null>(null);
@@ -411,6 +417,12 @@ export function PortalBudget() {
     projectId,
   ]);
   const budgetImportShowAiPanel = budgetImportAiShouldRun || budgetImportAiLoading || Boolean(budgetImportAiAnalysis) || Boolean(budgetImportAiError);
+  const missionProgress = useMemo(() => resolvePortalMissionProgress({
+    fundInputMode: normalizeProjectFundInputMode(myProject?.fundInputMode),
+    bankStatementRowCount: bankStatementRows?.rows?.length || 0,
+    expenseRowCount: expenseSheetRows?.length || 0,
+    weeklySubmissionStatuses,
+  }), [bankStatementRows?.rows?.length, expenseSheetRows?.length, myProject?.fundInputMode, weeklySubmissionStatuses]);
 
   useEffect(() => {
     setSpentMap(aggregateBudgetActualsFromSettlementRowsLocally(expenseSheetRows));
@@ -969,6 +981,32 @@ export function PortalBudget() {
       };
     });
   }, [groups.groupMap, total.effectiveBudget]);
+  const budgetGuide = useMemo(() => {
+    const hasBudgetRows = (budgetPlanRows || []).length > 0;
+    const hasActualRows = spentMap.size > 0;
+    if (!hasBudgetRows) {
+      return {
+        title: '예산 구조를 먼저 넣어야 실제값 비교가 시작됩니다',
+        description: '엑셀에서 예산총괄을 가져오거나 직접 편집해서 비목과 세목 구조를 만들면, 이후 주간 사업비 실제값이 자동으로 붙습니다.',
+        primaryLabel: '예산 가져오기',
+        secondaryLabel: '예산 편집',
+      };
+    }
+    if (!hasActualRows) {
+      return {
+        title: '예산 구조는 준비됐고 이제 실제값 연결만 남았습니다',
+        description: '주간 사업비 입력 또는 통장내역 반영이 시작되면 이 화면에서 비목별 소진율과 실제 집행액을 바로 확인할 수 있습니다.',
+        primaryLabel: '사업비 입력(주간) 열기',
+        secondaryLabel: '통장내역 열기',
+      };
+    }
+    return {
+      title: '예산과 실제값이 같은 기준으로 움직이고 있습니다',
+      description: '이 화면은 주간 사업비 저장본을 기준으로 즉시 갱신됩니다. 구조 수정은 여기서, 실제값 보정은 주간 사업비 화면에서 이어가세요.',
+      primaryLabel: '예산 편집',
+      secondaryLabel: '사업비 입력(주간) 열기',
+    };
+  }, [budgetPlanRows, spentMap]);
 
   const getEffectiveBudget = useCallback((row: BudgetRow) => {
     return row.revisedAug > 0 ? row.revisedAug : row.initialBudget;
@@ -1016,6 +1054,49 @@ export function PortalBudget() {
             </div>
           )}
         />
+
+        <PortalMissionGuide progress={missionProgress} compact />
+
+        <Card data-testid="portal-budget-guide" className="border-emerald-200/70 bg-gradient-to-br from-emerald-50 via-white to-teal-50/70">
+          <CardContent className="flex flex-col gap-3 px-4 py-4 md:flex-row md:items-center md:justify-between">
+            <div className="space-y-1">
+              <p className="text-[11px] uppercase tracking-[0.18em] text-emerald-700">Budget Guide</p>
+              <p className="text-[14px] font-semibold text-slate-900">{budgetGuide.title}</p>
+              <p className="text-[12px] leading-6 text-slate-600">{budgetGuide.description}</p>
+            </div>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              <Button
+                size="sm"
+                onClick={() => {
+                  if (budgetGuide.primaryLabel === '예산 가져오기') {
+                    openBudgetImport();
+                    return;
+                  }
+                  if (budgetGuide.primaryLabel === '사업비 입력(주간) 열기') {
+                    navigate('/portal/weekly-expenses');
+                    return;
+                  }
+                  startEdit();
+                }}
+              >
+                {budgetGuide.primaryLabel}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  if (budgetGuide.secondaryLabel === '통장내역 열기') {
+                    navigate('/portal/bank-statements');
+                    return;
+                  }
+                  navigate('/portal/weekly-expenses');
+                }}
+              >
+                {budgetGuide.secondaryLabel}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
 
         <Dialog open={budgetImportOpen} onOpenChange={(open) => !open && closeBudgetImport()}>
           <DialogContent className="max-w-3xl max-h-[85vh] overflow-hidden">

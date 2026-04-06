@@ -81,7 +81,15 @@ test('7. PM can navigate away from bank statement page', async ({ page }) => {
 test('8. PM can access budget page', async ({ page }) => {
   await loginAsPm(page);
   await page.goto('/portal/budget');
-  await expect(page.locator('body')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId('portal-budget-guide')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId('portal-mission-guide')).toBeVisible();
+});
+
+test('8-1. PM can access submissions page with guided status surface', async ({ page }) => {
+  await loginAsPm(page);
+  await page.goto('/portal/submissions');
+  await expect(page.getByTestId('portal-submissions-guide')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId('portal-mission-guide')).toBeVisible();
 });
 
 // ── 9. Audit log ──
