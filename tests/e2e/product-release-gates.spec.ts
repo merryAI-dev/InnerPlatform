@@ -54,6 +54,15 @@ test('release gate: PM dashboard shows guided mission flow', async ({ page }) =>
   await expect(page.getByTestId('portal-mission-active-step')).toBeVisible();
 });
 
+test('release gate: PM weekly expense keeps next-action and trust surfaces visible', async ({ page }) => {
+  await loginAsPm(page);
+  await page.goto('/portal/weekly-expenses');
+
+  await expect(page.getByTestId('portal-mission-guide')).toBeVisible();
+  await expect(page.getByTestId('weekly-expense-setup-panel')).toBeVisible();
+  await expect(page.locator('[data-testid^="weekly-accounting-product-status-"]').first()).toBeVisible();
+});
+
 test('release gate: admin can move a project to trash and restore it', async ({ page }) => {
   await loginAsAdmin(page);
   await page.goto('/projects');

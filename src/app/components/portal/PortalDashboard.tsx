@@ -64,13 +64,36 @@ export function PortalDashboard() {
 
   if (!myProject || !portalUser) {
     return (
-      <div className="text-center py-16">
-        <AlertTriangle className="w-10 h-10 mx-auto text-muted-foreground/30 mb-3" />
-        <p className="text-[14px] text-muted-foreground">사업이 선택되지 않았습니다.</p>
-        <Button variant="outline" className="mt-4" onClick={() => navigate('/portal/project-settings')}>
-          사업 선택하기
-        </Button>
-      </div>
+      <Card data-testid="portal-dashboard-blocked-state" className="border-amber-200/70 bg-gradient-to-br from-amber-50 via-white to-orange-50/70">
+        <CardContent className="p-6">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+            <div className="max-w-2xl space-y-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-amber-500 text-white shadow-sm">
+                <AlertTriangle className="h-5 w-5" />
+              </div>
+              <div className="space-y-2">
+                <h1 className="text-[22px] font-extrabold tracking-[-0.03em] text-slate-900">첫 사업 연결이 아직 끝나지 않았습니다</h1>
+                <p className="text-[13px] leading-6 text-slate-600">
+                  PM 포털은 배정된 사업을 기준으로 이번 주 정산, 통장내역, 예산 반영을 이어갑니다. 사업이 보이지 않으면 먼저 연결 상태를 확인하세요.
+                </p>
+              </div>
+              <div className="grid gap-2 text-[11px] text-slate-600 sm:grid-cols-3">
+                <div className="rounded-xl border bg-white/90 px-3 py-3">1. 관리자에게 내 사업 배정을 요청합니다.</div>
+                <div className="rounded-xl border bg-white/90 px-3 py-3">2. 주사업을 선택하면 이번 주 미션이 자동으로 열립니다.</div>
+                <div className="rounded-xl border bg-white/90 px-3 py-3">3. 연결 후 통장내역 또는 주간 사업비부터 시작합니다.</div>
+              </div>
+            </div>
+            <div className="flex shrink-0 flex-col gap-2">
+              <Button className="gap-2" onClick={() => navigate('/portal/project-settings')}>
+                사업 연결 확인하기
+              </Button>
+              <Button variant="outline" className="gap-2" onClick={() => navigate('/portal/change-requests')}>
+                관리자에게 요청 남기기
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
     );
   }
 
@@ -171,7 +194,7 @@ export function PortalDashboard() {
             안녕하세요, {portalUser.name}님
           </h1>
           <p className="text-[12px] text-muted-foreground mt-0.5">
-            {myProject.name}의 사업 관리 현황입니다
+            {myProject.name}의 이번 주 운영 현황입니다. 지금 할 일: {missionProgress.currentLabel}
           </p>
         </div>
         <Badge className="text-[10px] h-5 px-2 bg-teal-100 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300">

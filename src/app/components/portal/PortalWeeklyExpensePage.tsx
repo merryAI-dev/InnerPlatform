@@ -17,6 +17,7 @@ import { useAuth } from '../../data/auth-store';
 import type { EvidenceUploadSelection, PendingQuickInsert } from '../cashflow/SettlementLedgerPage';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
+import { Card, CardContent } from '../ui/card';
 import { PortalMissionGuide } from './PortalMissionGuide';
 import {
   formatSettlementSheetPolicySummary,
@@ -183,6 +184,53 @@ export function PortalWeeklyExpensePage() {
     expenseRowCount: expenseSheetRows?.length || 0,
     weeklySubmissionStatuses,
   }), [bankStatementCount, expenseSheetRows?.length, fundInputMode, weeklySubmissionStatuses]);
+  const weeklySetupPanel = useMemo(() => {
+    if (!happyPath.canOpenWeeklyExpenses) {
+      return {
+        title: '주간 사업비를 시작하려면 먼저 사업 연결이 필요합니다',
+        description: '사업 배정이 끝나면 이번 주 미션, 정산 탭, 통장내역 연동이 같은 기준으로 열립니다.',
+        toneClass: 'border-amber-200/70 bg-amber-50/70',
+        actionLabel: '사업 설정 열기',
+        actionKind: 'settings' as const,
+      };
+    }
+    if (!isDirectEntryMode && bankStatementCount === 0) {
+      return {
+        title: '이번 주 원본이 아직 없습니다',
+        description: '통장내역을 먼저 올리면 이 탭이 자동 분류와 사람 확인 기준으로 바로 이어집니다.',
+        toneClass: 'border-indigo-200/70 bg-indigo-50/70',
+        actionLabel: '통장내역 열기',
+        actionKind: 'bank' as const,
+      };
+    }
+    if (!happyPath.canUseEvidenceWorkflow) {
+      return {
+        title: '증빙 폴더 연결을 마치면 제출 흐름이 더 빨라집니다',
+        description: '기본 폴더를 준비하면 행 저장 후 바로 증빙 폴더 생성, 업로드, 동기화를 이어갈 수 있습니다.',
+        toneClass: 'border-amber-200/70 bg-amber-50/70',
+        actionLabel: '기본 폴더 준비',
+        actionKind: 'drive' as const,
+      };
+    }
+    return {
+      title: '이번 주 정산 흐름이 준비되었습니다',
+      description: '상단 미션과 우측 저장 상태를 보며 이 탭에서 바로 입력, 저장, 반영 확인까지 이어가세요.',
+      toneClass: 'border-emerald-200/70 bg-emerald-50/70',
+      actionLabel: missionProgress.activeStep.ctaPath && missionProgress.activeStep.ctaPath !== '/portal/weekly-expenses'
+        ? missionProgress.activeStep.ctaLabel
+        : null,
+      actionKind: missionProgress.activeStep.ctaPath === '/portal/bank-statements'
+        ? 'bank'
+        : null,
+    };
+  }, [
+    bankStatementCount,
+    happyPath.canOpenWeeklyExpenses,
+    happyPath.canUseEvidenceWorkflow,
+    isDirectEntryMode,
+    missionProgress.activeStep.ctaLabel,
+    missionProgress.activeStep.ctaPath,
+  ]);
   const settlementSheetPolicy = useMemo(
     () => normalizeSettlementSheetPolicy(myProject?.settlementSheetPolicy, myProject?.fundInputMode),
     [myProject?.fundInputMode, myProject?.settlementSheetPolicy],
@@ -769,8 +817,17 @@ export function PortalWeeklyExpensePage() {
 
   if (!projectId) {
     return (
-      <div className="p-6 text-[12px] text-muted-foreground">
-        배정된 사업이 없습니다. 관리자에게 사업 배정을 요청하세요.
+      <div className="rounded-2xl border border-amber-200/70 bg-gradient-to-br from-amber-50 via-white to-orange-50/70 p-6">
+        <div className="max-w-2xl space-y-3">
+          <h1 className="text-[20px] font-extrabold tracking-[-0.03em] text-slate-900">주간 사업비 화면을 열 준비가 아직 끝나지 않았습니다</h1>
+          <p className="text-[13px] leading-6 text-slate-600">
+            사업 배정이 끝나면 이번 주 입력 탭, 통장내역, 증빙 흐름을 같은 기준으로 이어서 사용할 수 있습니다.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" onClick={() => navigate('/portal/project-settings')}>사업 연결 확인하기</Button>
+            <Button variant="outline" size="sm" onClick={() => navigate('/portal')}>포털 홈으로 이동</Button>
+          </div>
+        </div>
       </div>
     );
   }
@@ -916,6 +973,39 @@ export function PortalWeeklyExpensePage() {
       </div>
 
       <PortalMissionGuide progress={missionProgress} compact />
+
+      <Card data-testid="weekly-expense-setup-panel" className={weeklySetupPanel.toneClass}>
+        <CardContent className="flex flex-col gap-3 px-4 py-4 md:flex-row md:items-center md:justify-between">
+          <div className="space-y-1">
+            <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Next Action</p>
+            <p className="text-[14px] font-semibold text-slate-900">{weeklySetupPanel.title}</p>
+            <p className="text-[12px] leading-6 text-slate-600">{weeklySetupPanel.description}</p>
+          </div>
+          {weeklySetupPanel.actionLabel && (
+            <div className="shrink-0">
+              {weeklySetupPanel.actionKind === 'drive' ? (
+                <Button
+                  size="sm"
+                  onClick={() => void provisionProjectDriveRoot()}
+                  disabled={projectDriveProvisioning || !happyPath.canOpenWeeklyExpenses}
+                >
+                  {projectDriveProvisioning ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderPlus className="h-4 w-4" />}
+                  {weeklySetupPanel.actionLabel}
+                </Button>
+              ) : weeklySetupPanel.actionKind === 'settings' ? (
+                <Button size="sm" onClick={() => requestRouteNavigation('/portal/project-settings', '사업 배정 수정')}>
+                  {weeklySetupPanel.actionLabel}
+                </Button>
+              ) : (
+                <Button size="sm" onClick={() => requestRouteNavigation('/portal/bank-statements', '통장내역')}>
+                  {weeklySetupPanel.actionLabel}
+                  <ArrowRight className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2 flex-wrap">

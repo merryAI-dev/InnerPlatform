@@ -56,6 +56,8 @@ test('6. PM can access weekly expense page', async ({ page }) => {
   await loginAsPm(page);
   await page.goto('/portal/weekly-expenses');
   await expect(page.getByRole('heading', { name: '사업비 입력(주간)' })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId('weekly-expense-setup-panel')).toBeVisible();
+  await expect(page.locator('[data-testid^="weekly-accounting-product-status-"]').first()).toBeVisible();
 });
 
 // ── 7. Portal bank statement -> other pages ──
@@ -64,6 +66,7 @@ test('7. PM can navigate away from bank statement page', async ({ page }) => {
   await page.goto('/portal/bank-statements');
   await expect(page.getByRole('heading', { name: '통장내역' })).toBeVisible({ timeout: 15_000 });
   await expect(page.getByTestId('portal-mission-guide')).toBeVisible();
+  await expect(page.getByTestId('bank-statement-trust-surface')).toBeVisible();
 
   await page.getByRole('link', { name: '예산 편집' }).click();
   await expect(page).toHaveURL(/\/portal\/budget$/);

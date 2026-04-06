@@ -50,7 +50,7 @@ describe('weekly-accounting-state', () => {
 
     expect(state.closeDialogKind).toBe('confirm');
     expect(state.expenseStatusLabel).toBe('동기화 완료');
-    expect(state.expenseStatusDescription).toContain('완료');
+    expect(state.expenseStatusDescription).toContain('끝났');
   });
 
   it('exposes a persistent save-pending product status before expense save completes', () => {
@@ -68,8 +68,8 @@ describe('weekly-accounting-state', () => {
     });
 
     expect(status.kind).toBe('save_pending');
-    expect(status.label).toBe('저장 대기');
-    expect(status.description).toContain('저장 완료');
+    expect(status.label).toBe('저장 전 초안');
+    expect(status.description).toContain('기준본');
     expect(status.tone).toBe('warning');
   });
 
@@ -130,7 +130,7 @@ describe('weekly-accounting-state', () => {
 
     expect(status.kind).toBe('sync_failed');
     expect(status.label).toBe('동기화 실패');
-    expect(status.description).toContain('실패했습니다');
+    expect(status.description).toContain('다시 확인');
     expect(status.tone).toBe('danger');
   });
 

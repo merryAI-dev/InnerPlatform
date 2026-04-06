@@ -185,7 +185,7 @@ export function resolveWeeklyAccountingProductStatus(
     return {
       kind: 'save_failed',
       label: '저장 실패',
-      description: '정산대장 저장이 실패했습니다. 변경 내용을 다시 저장해 주세요.',
+      description: '입력 내용은 유지되고 있지만 서버 기준본 저장이 끝나지 않았습니다. 같은 화면에서 다시 저장해 주세요.',
       tone: 'danger',
       auditTitle: '최종 저장 실패 반영',
     };
@@ -194,10 +194,10 @@ export function resolveWeeklyAccountingProductStatus(
   if (saveState === 'dirty' || saveState === 'saving' || (!expenseDone && saveState !== 'saved')) {
     return {
       kind: 'save_pending',
-      label: saveState === 'saving' ? '저장 중' : '저장 대기',
+      label: saveState === 'saving' ? '저장 중' : '저장 전 초안',
       description: saveState === 'saving'
-        ? '정산대장을 저장하는 중입니다.'
-        : '정산대장이 아직 저장 완료되지 않았습니다.',
+        ? '주간 정산 기준본을 저장하고 있습니다.'
+        : '현재 편집 내용은 아직 주간 정산 기준본으로 확정되지 않았습니다.',
       tone: 'warning',
       auditTitle: '최종 저장 대기 반영',
     };
@@ -207,7 +207,7 @@ export function resolveWeeklyAccountingProductStatus(
     return {
       kind: 'review_required',
       label: formatReviewCountLabel(reviewCount),
-      description: '수식 후보값이 남아 있어 영수증/증빙 기준으로 다시 확인해야 합니다.',
+      description: '일부 행은 자동 분류가 끝나지 않았습니다. 영수증과 증빙을 확인한 뒤 사람 확인을 마쳐야 최종 반영됩니다.',
       tone: 'warning',
       auditTitle: '최종 사람 확인 상태 반영',
     };
@@ -217,7 +217,7 @@ export function resolveWeeklyAccountingProductStatus(
     return {
       kind: 'sync_failed',
       label: '동기화 실패',
-      description: '정산대장은 저장되었지만 캐시플로 실제값 반영이 실패했습니다.',
+      description: '정산대장은 저장되었지만 캐시플로 실제값 반영이 끝나지 않았습니다. 새로고침하지 말고 같은 화면에서 다시 확인해 주세요.',
       tone: 'danger',
       auditTitle: '최종 동기화 실패 반영',
     };
@@ -227,7 +227,7 @@ export function resolveWeeklyAccountingProductStatus(
     return {
       kind: 'save_synced',
       label: '동기화 완료',
-      description: '정산대장 저장과 캐시플로 실제값 반영이 모두 완료되었습니다.',
+      description: '정산대장 저장과 캐시플로 실제값 반영이 모두 끝났습니다.',
       tone: 'success',
       auditTitle: '최종 동기화 완료 반영',
     };
@@ -237,7 +237,7 @@ export function resolveWeeklyAccountingProductStatus(
     return {
       kind: 'save_synced',
       label: '저장 완료',
-      description: '정산대장은 저장되었고 캐시플로 실제값 반영을 기다리고 있습니다.',
+      description: '정산대장은 저장되었고 캐시플로 실제값 반영을 이어서 처리하는 중입니다.',
       tone: 'warning',
       auditTitle: '최종 동기화 대기 반영',
     };
@@ -245,8 +245,8 @@ export function resolveWeeklyAccountingProductStatus(
 
   return {
     kind: 'save_pending',
-    label: '저장 대기',
-    description: '정산대장이 아직 저장 완료되지 않았습니다.',
+    label: '저장 전 초안',
+    description: '현재 편집 내용은 아직 주간 정산 기준본으로 확정되지 않았습니다.',
     tone: 'warning',
     auditTitle: '최종 저장 대기 반영',
   };

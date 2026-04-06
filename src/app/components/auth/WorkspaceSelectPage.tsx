@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
-import { ArrowRight, FolderKanban, Loader2, Shield } from 'lucide-react';
+import { ArrowRight, CheckCircle2, FolderKanban, Loader2, Shield, Sparkles } from 'lucide-react';
 import { Card, CardContent } from '../ui/card';
+import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { useAuth } from '../../data/auth-store';
 import { canChooseWorkspace, resolvePostLoginPath, shouldPromptWorkspaceSelection } from '../../platform/navigation';
@@ -60,6 +61,8 @@ export function WorkspaceSelectPage() {
 
   const currentWorkspace = user.defaultWorkspace ?? user.lastWorkspace;
   const canAccessAdmin = canAccessAdminPath(user.role, '/');
+  const portalRequested = !!redirectFrom?.startsWith('/portal');
+  const adminRequested = !!redirectFrom && !portalRequested;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-indigo-50/30 to-teal-50/20 dark:from-slate-950 dark:via-indigo-950/10 dark:to-teal-950/10 flex items-center justify-center p-4">
@@ -91,6 +94,11 @@ export function WorkspaceSelectPage() {
                   설정, 사용자 관리, 조직 단위 운영 화면으로 이동합니다.
                 </p>
               </div>
+              <div className="space-y-2 text-[11px] text-slate-600">
+                <div className="flex items-center gap-2"><CheckCircle2 className="h-3.5 w-3.5 text-slate-500" /> 프로젝트, 권한, 운영 설정 관리</div>
+                <div className="flex items-center gap-2"><CheckCircle2 className="h-3.5 w-3.5 text-slate-500" /> 조직 단위 대시보드와 감사 흐름 확인</div>
+                {adminRequested && <Badge variant="outline" className="w-fit">요청한 화면과 가장 가까운 공간</Badge>}
+              </div>
               <Button
                 className="w-full h-11 gap-2"
                 variant={currentWorkspace === 'admin' ? 'default' : 'outline'}
@@ -116,6 +124,16 @@ export function WorkspaceSelectPage() {
                 <p className="mt-1 text-[12px] text-muted-foreground">
                   예산 편집, 통장내역, 주간 사업비 같은 PM 실무 화면으로 이동합니다.
                 </p>
+              </div>
+              <div className="space-y-2 text-[11px] text-slate-600">
+                <div className="flex items-center gap-2"><CheckCircle2 className="h-3.5 w-3.5 text-teal-600" /> 이번 주 미션과 다음 행동이 바로 보임</div>
+                <div className="flex items-center gap-2"><CheckCircle2 className="h-3.5 w-3.5 text-teal-600" /> 통장내역, 사업비 입력, 예산 반영을 한 흐름으로 진행</div>
+                {(portalRequested || !canAccessAdmin) && (
+                  <Badge variant="outline" className="w-fit border-teal-200 bg-teal-50 text-teal-700">
+                    <Sparkles className="mr-1 h-3 w-3" />
+                    추천
+                  </Badge>
+                )}
               </div>
               <Button
                 className="w-full h-11 gap-2"

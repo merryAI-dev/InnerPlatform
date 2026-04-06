@@ -277,12 +277,32 @@ export function PortalBankStatementPage() {
     return () => window.clearTimeout(timer);
   }, [dirty, saving, saveBankStatementRows, columns.length, persistSheet]);
 
-  const roleNotice = 'PM 기준 화면입니다. 저장하면 통장내역이 주간 사업비 시트에 자동 반영됩니다.';
-  const syncNotice = dirty
-    ? '변경사항이 저장 전 상태입니다. 저장하면 현재 주간 사업비 탭으로 반영됩니다.'
-    : lastSavedAt
-      ? '최근 저장본이 현재 주간 사업비 탭과 동기화된 상태입니다.'
-      : '이번 주 원본 파일을 먼저 올리면 주간 사업비 입력의 시작점이 준비됩니다.';
+  const trustSurface = saving
+    ? {
+      label: '저장 중',
+      description: '현재 수정한 통장내역을 주간 사업비 기준본으로 저장하고 있습니다.',
+      toneClass: 'border-indigo-200/70 bg-indigo-50/60',
+    }
+    : dirty
+      ? {
+        label: '저장 전 초안',
+        description: '수정한 통장내역이 아직 기준본으로 저장되지 않았습니다. 저장 후 주간 사업비 탭으로 이어집니다.',
+        toneClass: 'border-amber-200/70 bg-amber-50/60',
+      }
+      : hasUploadedSheet
+        ? {
+          label: lastSavedAt ? '주간 시트 반영 완료' : '현재 저장본 사용 중',
+          description: lastSavedAt
+            ? '최근 저장본이 현재 주간 사업비 탭과 같은 기준으로 유지되고 있습니다.'
+            : '이미 저장된 통장내역 기준본을 열어 검토하고 있습니다.',
+          toneClass: 'border-emerald-200/70 bg-emerald-50/60',
+        }
+        : {
+          label: '원본 업로드 대기',
+          description: '이번 주 원본 파일을 먼저 올리면 주간 사업비 입력의 시작점이 준비됩니다.',
+          toneClass: 'border-slate-200/80 bg-slate-50/80',
+        };
+  const roleNotice = 'PM 화면 기준입니다. 이 화면의 저장본이 주간 사업비 입력과 같은 기준으로 이어집니다.';
   const uploadExperienceHint = uploadPreparing
     ? '엑셀 엔진을 준비하고 있습니다. 첫 업로드는 잠시 더 걸릴 수 있습니다.'
     : '엑셀 파일은 첫 업로드 때 엔진을 먼저 준비한 뒤 읽습니다.';
@@ -303,9 +323,22 @@ export function PortalBankStatementPage() {
 
   if (!ready) {
     return (
-      <div className="p-6 text-[12px] text-muted-foreground">
-        배정된 사업이 없습니다. 관리자에게 사업 배정을 요청하세요.
-      </div>
+      <Card className="border-amber-200/70 bg-gradient-to-br from-amber-50 via-white to-orange-50/70">
+        <CardContent className="p-6">
+          <div className="max-w-2xl space-y-3">
+            <h1 className="text-[20px] font-extrabold tracking-[-0.03em] text-slate-900">통장내역을 시작하려면 먼저 사업 연결이 필요합니다</h1>
+            <p className="text-[13px] leading-6 text-slate-600">
+              배정된 사업이 있어야 이번 주 원본 파일을 올리고, 주간 사업비 기준본으로 이어갈 수 있습니다.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" onClick={() => navigate('/portal/project-settings')}>사업 연결 확인하기</Button>
+              <Button variant="outline" size="sm" onClick={() => navigate('/portal/weekly-expenses')}>
+                주간 사업비 화면 보기
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
     );
   }
 
@@ -369,7 +402,7 @@ export function PortalBankStatementPage() {
       </div>
 
       {!hasUploadedSheet && (
-        <Card className="border-teal-200/80 bg-gradient-to-br from-teal-50/90 via-white to-emerald-50/60">
+        <Card data-testid="bank-statement-empty-state" className="border-teal-200/80 bg-gradient-to-br from-teal-50/90 via-white to-emerald-50/60">
           <CardContent className="p-5">
             <div className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(280px,0.65fr)]">
               <div
@@ -396,6 +429,7 @@ export function PortalBankStatementPage() {
                       <FileSpreadsheet className="h-5 w-5" />
                     </div>
                     <div className="space-y-2">
+                      <p className="text-[11px] uppercase tracking-[0.18em] text-teal-700">Mission 1</p>
                       <p className="text-[18px] font-semibold text-slate-900">이번 주 통장내역부터 올리세요</p>
                       <p className="max-w-2xl text-[13px] leading-6 text-slate-600">
                         원본 파일을 올리면 표는 그대로 유지한 채 이 화면에서 검토하고, 저장 후 바로 사업비 입력(주간)으로 이어서 정리할 수 있습니다.
@@ -435,18 +469,18 @@ export function PortalBankStatementPage() {
         </Card>
       )}
 
-      <Card className="border-amber-200/70 bg-amber-50/60">
+      <Card data-testid="bank-statement-trust-surface" className={trustSurface.toneClass}>
         <CardContent className="px-4 py-3">
           <div className="flex items-start gap-2">
             <ShieldAlert className="mt-0.5 h-4 w-4 text-amber-700" />
             <div className="space-y-1 text-[12px] text-amber-900">
-              <p className="font-semibold">통장내역 정책 안내</p>
+              <p className="font-semibold">반영 상태 · {trustSurface.label}</p>
+              <p>{trustSurface.description}</p>
               <p>{roleNotice}</p>
               <p>
                 현재 프로필: {getBankStatementProfileLabel(bankProfile)}
                 {lastUploadedName ? ` · 최근 파일: ${lastUploadedName}` : ''}
               </p>
-              <p>{syncNotice}</p>
               {lastSavedAt && <p className="text-[11px] text-amber-800/80">마지막 자동저장: {lastSavedAt.slice(0, 16).replace('T', ' ')}</p>}
             </div>
           </div>

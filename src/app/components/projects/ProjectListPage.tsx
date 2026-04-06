@@ -85,6 +85,7 @@ export function ProjectListPage() {
     return Array.from(depts).sort();
   }, [baseProjects]);
   const canCreateProject = canShowAdminNavItem(user?.role, '/projects/new');
+  const hasActiveFilters = !!search || statusFilter !== 'ALL' || typeFilter !== 'ALL' || deptFilter !== 'ALL';
 
   const filtered = useMemo(() => {
     let result = baseProjects.filter(p => {
@@ -141,6 +142,96 @@ export function ProjectListPage() {
     } catch (error) {
       toast.error(resolveApiErrorMessage(error, '프로젝트 복구에 실패했습니다.'));
     }
+  };
+
+  const resetFilters = () => {
+    setSearch('');
+    setStatusFilter('ALL');
+    setTypeFilter('ALL');
+    setDeptFilter('ALL');
+  };
+
+  const renderEmptyState = () => {
+    if (hasActiveFilters) {
+      return (
+        <Card data-testid="projects-empty-state" className="border-slate-200/80 bg-slate-50/80">
+          <CardContent className="flex min-h-[260px] items-center justify-center p-6">
+            <div className="max-w-md text-center">
+              <p className="text-[18px] font-semibold text-slate-900">검색 조건에 맞는 사업이 없습니다</p>
+              <p className="mt-2 text-[13px] leading-6 text-slate-600">
+                필터를 초기화하고 전체 포트폴리오를 다시 보거나, 필요한 경우 새 사업을 바로 등록할 수 있습니다.
+              </p>
+              <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                <Button size="sm" onClick={resetFilters}>필터 초기화</Button>
+                {canCreateProject && (
+                  <Button variant="outline" size="sm" onClick={() => navigate('/projects/new?phase=CONFIRMED')}>
+                    새 사업 등록
+                  </Button>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      );
+    }
+
+    const stateByTab = activeTab === 'prospect'
+      ? {
+        eyebrow: 'Pipeline Start',
+        title: '첫 예정 사업을 등록해보세요',
+        description: '입찰 단계부터 기본 정보를 쌓아두면 선정 직후 확정 전환과 정산 준비가 훨씬 빨라집니다.',
+        primaryLabel: canCreateProject ? '예정 사업 등록' : null,
+        primaryAction: () => navigate('/projects/new?phase=PROSPECT'),
+        secondaryLabel: canCreateProject ? '확정 사업 보기' : null,
+        secondaryAction: () => setActiveTab('confirmed'),
+      }
+      : activeTab === 'trash'
+        ? {
+          eyebrow: 'Clean Slate',
+          title: '휴지통이 비어 있습니다',
+          description: '삭제된 프로젝트가 생기면 이 탭에서 복구할 수 있습니다. 지금은 활성 포트폴리오만 관리 중입니다.',
+          primaryLabel: '확정 사업 보기',
+          primaryAction: () => setActiveTab('confirmed'),
+          secondaryLabel: canCreateProject ? '예정 사업 보기' : null,
+          secondaryAction: () => setActiveTab('prospect'),
+        }
+        : {
+          eyebrow: 'Portfolio Start',
+          title: '확정 사업 포트폴리오를 시작하세요',
+          description: '외부 고객에게 실제로 제공되는 사업 운영은 여기서 시작됩니다. 첫 확정 사업을 등록하거나 예정 사업을 확정으로 전환하세요.',
+          primaryLabel: canCreateProject ? '확정 사업 등록' : null,
+          primaryAction: () => navigate('/projects/new?phase=CONFIRMED'),
+          secondaryLabel: '입찰/예정 보기',
+          secondaryAction: () => setActiveTab('prospect'),
+        };
+
+    return (
+      <Card data-testid="projects-empty-state" className="border-indigo-200/70 bg-gradient-to-br from-indigo-50 via-white to-teal-50/70">
+        <CardContent className="p-6">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+            <div className="max-w-2xl space-y-3">
+              <p className="text-[11px] uppercase tracking-[0.18em] text-indigo-700">{stateByTab.eyebrow}</p>
+              <div className="space-y-2">
+                <h2 className="text-[22px] font-extrabold tracking-[-0.03em] text-slate-900">{stateByTab.title}</h2>
+                <p className="text-[13px] leading-6 text-slate-600">{stateByTab.description}</p>
+              </div>
+            </div>
+            <div className="flex shrink-0 flex-col gap-2">
+              {stateByTab.primaryLabel && (
+                <Button size="sm" onClick={stateByTab.primaryAction}>
+                  {stateByTab.primaryLabel}
+                </Button>
+              )}
+              {stateByTab.secondaryLabel && stateByTab.secondaryAction && (
+                <Button variant="outline" size="sm" onClick={stateByTab.secondaryAction}>
+                  {stateByTab.secondaryLabel}
+                </Button>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
   };
 
   const renderProjectTable = (list: Project[]) => (
@@ -464,32 +555,35 @@ export function ProjectListPage() {
         </Card>
 
         <TabsContent value="confirmed" className="mt-0">
-          {activeTab === 'confirmed' && renderProjectTable(filtered)}
+          {activeTab === 'confirmed' && (filtered.length === 0 ? renderEmptyState() : renderProjectTable(filtered))}
         </TabsContent>
         <TabsContent value="prospect" className="mt-0">
           {activeTab === 'prospect' && (
             <>
-              {/* Prospect guide */}
-              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-3">
-                <p className="text-xs text-amber-800">
-                  <span style={{ fontWeight: 600 }}>입찰/예정 사업:</span> 사업 선정 후 1주일 이내에 기본 정보를 입력하세요.
-                  정보가 충분히 입력되면 <Badge variant="outline" className="text-[10px] py-0 px-1 mx-0.5">확정</Badge> 버튼으로
-                  확정 사업으로 전환할 수 있습니다.
-                </p>
-              </div>
-              {renderProjectTable(filtered)}
+              {filtered.length > 0 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-3">
+                  <p className="text-xs text-amber-800">
+                    <span style={{ fontWeight: 600 }}>입찰/예정 사업:</span> 사업 선정 후 1주일 이내에 기본 정보를 입력하세요.
+                    정보가 충분히 입력되면 <Badge variant="outline" className="text-[10px] py-0 px-1 mx-0.5">확정</Badge> 버튼으로
+                    확정 사업으로 전환할 수 있습니다.
+                  </p>
+                </div>
+              )}
+              {filtered.length === 0 ? renderEmptyState() : renderProjectTable(filtered)}
             </>
           )}
         </TabsContent>
         <TabsContent value="trash" className="mt-0">
           {activeTab === 'trash' && (
             <>
-              <div className="bg-muted/40 border rounded-lg p-3 mb-3">
-                <p className="text-xs text-muted-foreground">
-                  삭제된 프로젝트는 휴지통에 보관되며 복구할 수 있습니다. 복구하면 기존 프로젝트 상세/원장 연결은 그대로 유지됩니다.
-                </p>
-              </div>
-              {renderProjectTable(filtered)}
+              {filtered.length > 0 && (
+                <div className="bg-muted/40 border rounded-lg p-3 mb-3">
+                  <p className="text-xs text-muted-foreground">
+                    삭제된 프로젝트는 휴지통에 보관되며 복구할 수 있습니다. 복구하면 기존 프로젝트 상세/원장 연결은 그대로 유지됩니다.
+                  </p>
+                </div>
+              )}
+              {filtered.length === 0 ? renderEmptyState() : renderProjectTable(filtered)}
             </>
           )}
         </TabsContent>
