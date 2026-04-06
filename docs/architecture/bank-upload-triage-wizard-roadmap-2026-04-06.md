@@ -9,7 +9,7 @@
 - [x] Phase 1: Core domain contracts
 - [x] Phase 2: Intake persistence layer
 - [x] Phase 3: Non-destructive bank upload
-- [ ] Phase 4: Triage wizard UI
+- [x] Phase 4: Triage wizard UI
 - [ ] Phase 5: Projection upsert by `sourceTxId`
 - [ ] Phase 6: Non-blocking evidence integration
 - [ ] Phase 7: QA and release gates
@@ -86,7 +86,7 @@
 
 ## Phase 4: Triage Wizard UI
 
-**Status:** in progress
+**Status:** completed
 
 **Files**
 - `src/app/components/portal/BankImportTriageWizard.tsx`
@@ -109,7 +109,13 @@
 - no hover-only controls
 - evidence secondary, not primary
 
+**Verification**
+- `npx vitest run src/app/platform/bank-statement.test.ts src/app/data/portal-store.intake.test.ts src/app/data/portal-store.integration.test.ts`
+- `npm run build`
+
 ## Phase 5: Projection Upsert By Source Identity
+
+**Status:** in progress
 
 **Files**
 - `src/app/data/portal-store.persistence.ts`

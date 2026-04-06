@@ -19,6 +19,7 @@ import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Card, CardContent } from '../ui/card';
 import { PortalMissionGuide } from './PortalMissionGuide';
+import { BankImportTriageWizard } from './BankImportTriageWizard';
 import {
   formatSettlementSheetPolicySummary,
   normalizeSettlementSheetPolicy,
@@ -73,6 +74,7 @@ import {
 import { resolvePortalHappyPath } from '../../platform/portal-happy-path';
 import { resolvePortalMissionProgress } from '../../platform/portal-mission-guide';
 import { resolveWeeklyExpenseSavePolicy } from '../../platform/weekly-expense-save-policy';
+import { selectWizardIntakeItems } from '../../platform/bank-import-triage';
 import { usePortalNavigationGuard } from './PortalLayout';
 const GoogleSheetMigrationWizard = lazy(
   () => import('./GoogleSheetMigrationWizard').then((module) => ({ default: module.GoogleSheetMigrationWizard })),
@@ -116,6 +118,7 @@ export function PortalWeeklyExpensePage() {
     updateTransaction,
     changeTransactionState,
     evidenceRequiredMap,
+    expenseIntakeItems,
     sheetSources,
     saveEvidenceRequiredMap,
     expenseSheets,
@@ -138,11 +141,13 @@ export function PortalWeeklyExpensePage() {
     markSheetSourceApplied,
     weeklySubmissionStatuses,
     upsertWeeklySubmissionStatus,
+    updateExpenseIntakeItem,
   } = usePortalStore();
   const { submitWeekAsPm, upsertWeekAmounts } = useCashflowWeeks();
   const devHarnessConfig = readDevAuthHarnessConfig(import.meta.env, typeof window !== 'undefined' ? window.location : undefined);
   const [projectDriveProvisioning, setProjectDriveProvisioning] = useState(false);
   const [googleSheetImportOpen, setGoogleSheetImportOpen] = useState(false);
+  const [triageWizardOpen, setTriageWizardOpen] = useState(false);
   const [pendingQuickInsert, setPendingQuickInsert] = useState<PendingQuickInsert | null>(null);
   const [hasUnsavedSettlementChanges, setHasUnsavedSettlementChanges] = useState(false);
   const [pendingUnsavedAction, setPendingUnsavedAction] = useState<PendingUnsavedAction | null>(null);
@@ -190,6 +195,7 @@ export function PortalWeeklyExpensePage() {
     expenseRowCount: expenseSheetRows?.length || 0,
     weeklySubmissionStatuses,
   }), [bankStatementCount, expenseSheetRows?.length, fundInputMode, weeklySubmissionStatuses]);
+  const triageItems = useMemo(() => selectWizardIntakeItems(expenseIntakeItems), [expenseIntakeItems]);
   const weeklySetupPanel = useMemo(() => {
     if (!happyPath.canOpenWeeklyExpenses) {
       return {
@@ -1055,6 +1061,36 @@ export function PortalWeeklyExpensePage() {
         </CardContent>
       </Card>
 
+      {triageItems.length > 0 && (
+        <Card className="border-indigo-200/70 bg-gradient-to-r from-indigo-50 via-white to-cyan-50/70 shadow-sm">
+          <CardContent className="flex flex-col gap-3 px-4 py-4 md:flex-row md:items-center md:justify-between">
+            <div className="space-y-1">
+              <p className="text-[11px] uppercase tracking-[0.18em] text-indigo-700">Intake Queue</p>
+              <p className="text-[14px] font-semibold text-slate-900">
+                신규 거래 {triageItems.length}건이 아직 주간 반영 전입니다
+              </p>
+              <p className="text-[12px] leading-6 text-slate-600">
+                전체 시트를 다시 건드릴 필요 없이, 필요한 거래만 wizard에서 분류한 뒤 이 화면으로 안전하게 이어집니다.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Badge className="border-amber-200 bg-amber-50 text-amber-700">
+                입력 필요 {triageItems.filter((item) => item.matchState === 'PENDING_INPUT').length}
+              </Badge>
+              <Badge className="border-rose-200 bg-rose-50 text-rose-700">
+                검토 필요 {triageItems.filter((item) => item.matchState === 'REVIEW_REQUIRED').length}
+              </Badge>
+              <Button variant="outline" size="sm" onClick={() => requestRouteNavigation('/portal/bank-statements', '통장내역')}>
+                원본 보기
+              </Button>
+              <Button size="sm" onClick={() => setTriageWizardOpen(true)}>
+                신규 거래 처리
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2 flex-wrap">
           {visibleExpenseSheets.map((sheet) => (
@@ -1215,6 +1251,12 @@ export function PortalWeeklyExpensePage() {
             />
         </Suspense>
       )}
+      <BankImportTriageWizard
+        open={triageWizardOpen}
+        onOpenChange={setTriageWizardOpen}
+        items={expenseIntakeItems}
+        onSaveDraft={updateExpenseIntakeItem}
+      />
       <AlertDialog open={!!pendingUnsavedAction}>
         <AlertDialogContent
           data-testid="weekly-expense-unsaved-dialog"

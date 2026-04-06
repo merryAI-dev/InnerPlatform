@@ -6,6 +6,7 @@ import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { PortalMissionGuide } from './PortalMissionGuide';
+import { BankImportTriageWizard } from './BankImportTriageWizard';
 import { usePortalStore } from '../../data/portal-store';
 import {
   detectBankStatementProfile,
@@ -16,6 +17,7 @@ import {
   sanitizeHtmlMatrix,
   type BankStatementRow,
 } from '../../platform/bank-statement';
+import { selectWizardIntakeItems } from '../../platform/bank-import-triage';
 import { normalizeKey, parseCsv, parseNumber } from '../../platform/csv-utils';
 import { loadXlsx, warmXlsx } from '../../platform/lazy-heavy-modules';
 import { normalizeProjectFundInputMode } from '../../data/types';
@@ -46,7 +48,16 @@ function formatBankStatementRows(
 
 export function PortalBankStatementPage() {
   const navigate = useNavigate();
-  const { portalUser, myProject, bankStatementRows, saveBankStatementRows, expenseSheetRows, weeklySubmissionStatuses } = usePortalStore();
+  const {
+    portalUser,
+    myProject,
+    bankStatementRows,
+    saveBankStatementRows,
+    expenseSheetRows,
+    expenseIntakeItems,
+    updateExpenseIntakeItem,
+    weeklySubmissionStatuses,
+  } = usePortalStore();
   const [columns, setColumns] = useState<string[]>(bankStatementRows?.columns || []);
   const [rows, setRows] = useState<BankStatementRow[]>(bankStatementRows?.rows || []);
   const [dirty, setDirty] = useState(false);
@@ -55,6 +66,7 @@ export function PortalBankStatementPage() {
   const [lastSavedAt, setLastSavedAt] = useState('');
   const [dragActive, setDragActive] = useState(false);
   const [uploadPreparing, setUploadPreparing] = useState(false);
+  const [triageOpen, setTriageOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const projectName = myProject?.name || '내 사업';
@@ -68,6 +80,7 @@ export function PortalBankStatementPage() {
     expenseRowCount: expenseSheetRows?.length || 0,
     weeklySubmissionStatuses,
   }), [expenseSheetRows?.length, myProject?.fundInputMode, rows.length, weeklySubmissionStatuses]);
+  const triageItems = useMemo(() => selectWizardIntakeItems(expenseIntakeItems), [expenseIntakeItems]);
 
   const formatAmount = useCallback((value: string) => {
     const trimmed = value.trim();
@@ -286,14 +299,14 @@ export function PortalBankStatementPage() {
     : dirty
       ? {
         label: '저장 전 초안',
-        description: '수정한 통장내역이 아직 기준본으로 저장되지 않았습니다. 저장 후 주간 사업비 탭으로 이어집니다.',
+        description: '수정한 통장내역이 아직 intake 기준본으로 저장되지 않았습니다. 저장 후 신규 거래 queue가 준비됩니다.',
         toneClass: 'border-amber-200/70 bg-amber-50/60',
       }
       : hasUploadedSheet
         ? {
-          label: lastSavedAt ? '주간 시트 반영 완료' : '현재 저장본 사용 중',
+          label: lastSavedAt ? '업로드 기준본 저장 완료' : '현재 저장본 사용 중',
           description: lastSavedAt
-            ? '최근 저장본이 현재 주간 사업비 탭과 같은 기준으로 유지되고 있습니다.'
+            ? '최근 저장본에서 신규 거래와 검토 필요 거래가 intake queue로 분리됩니다.'
             : '이미 저장된 통장내역 기준본을 열어 검토하고 있습니다.',
           toneClass: 'border-emerald-200/70 bg-emerald-50/60',
         }
@@ -302,7 +315,7 @@ export function PortalBankStatementPage() {
           description: '이번 주 원본 파일을 먼저 올리면 주간 사업비 입력의 시작점이 준비됩니다.',
           toneClass: 'border-slate-200/80 bg-slate-50/80',
         };
-  const roleNotice = 'PM 화면 기준입니다. 이 화면의 저장본이 주간 사업비 입력과 같은 기준으로 이어집니다.';
+  const roleNotice = 'PM 화면 기준입니다. 이 화면의 저장본은 신규 거래 triage queue와 주간 사업비 입력의 기준점이 됩니다.';
   const uploadExperienceHint = uploadPreparing
     ? '엑셀 엔진을 준비하고 있습니다. 첫 업로드는 잠시 더 걸릴 수 있습니다.'
     : '엑셀 파일은 첫 업로드 때 엔진을 먼저 준비한 뒤 읽습니다.';
@@ -487,6 +500,42 @@ export function PortalBankStatementPage() {
         </CardContent>
       </Card>
 
+      {hasUploadedSheet && (
+        <Card className="border-slate-200 bg-white shadow-sm">
+          <CardContent className="p-4">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="text-[13px] font-semibold text-slate-950">신규 거래 처리 Queue</p>
+                  <Badge variant="outline" className="text-[10px]">
+                    총 {triageItems.length}건
+                  </Badge>
+                </div>
+                <p className="text-[12px] leading-6 text-slate-600">
+                  업로드한 원본은 이제 전체 주간 시트를 다시 쓰지 않습니다. 신규 거래와 검토 필요 거래만 queue로 분리해서 사람이 필요한 입력만 처리합니다.
+                </p>
+                <div className="flex gap-2 flex-wrap">
+                  <Badge className="border-amber-200 bg-amber-50 text-amber-700">
+                    입력 필요 {triageItems.filter((item) => item.matchState === 'PENDING_INPUT').length}
+                  </Badge>
+                  <Badge className="border-rose-200 bg-rose-50 text-rose-700">
+                    검토 필요 {triageItems.filter((item) => item.matchState === 'REVIEW_REQUIRED').length}
+                  </Badge>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={() => navigate('/portal/weekly-expenses')}>
+                  주간 사업비에서 보기
+                </Button>
+                <Button size="sm" onClick={() => setTriageOpen(true)} disabled={triageItems.length === 0}>
+                  신규 거래 처리 시작
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <PortalMissionGuide progress={missionProgress} compact />
 
       {hasUploadedSheet ? (
@@ -555,6 +604,13 @@ export function PortalBankStatementPage() {
           </CardContent>
         </Card>
       )}
+
+      <BankImportTriageWizard
+        open={triageOpen}
+        onOpenChange={setTriageOpen}
+        items={expenseIntakeItems}
+        onSaveDraft={updateExpenseIntakeItem}
+      />
     </div>
   );
 }
