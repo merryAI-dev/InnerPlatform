@@ -81,7 +81,7 @@ export function buildMigrationAuditConsoleRecords(
     id: row.candidate.id,
     candidate: row.candidate,
     status: row.status,
-    cic: normalizeCicLabel(row.candidate.cic),
+    cic: normalizeCicLabel(resolveProjectCic(row.candidate)),
     sourceName: row.candidate.businessName,
     sourceDepartment: row.candidate.department,
     sourceClientOrg: row.candidate.clientOrg,

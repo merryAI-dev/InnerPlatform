@@ -152,9 +152,24 @@ describe('project-migration-console', () => {
     ]);
     const currentRows: ProjectMigrationCurrentRow[] = [
       { project: makeProject({ id: 'p-2', cic: 'CIC-B' }), status: 'MISSING', match: null },
+      { project: makeProject({ id: 'p-3', cic: undefined, department: '투자센터' }), status: 'MISSING', match: null },
     ];
 
-    expect(collectMigrationAuditCicOptions(records, currentRows)).toEqual(['CIC-A', 'CIC-B', 'CIC1', 'CIC2', 'CIC3', 'CIC4']);
+    expect(collectMigrationAuditCicOptions(records, currentRows)).toEqual([
+      '개발협력센터',
+      '글로벌센터',
+      '조인트액션',
+      '투자센터',
+      'AXR팀',
+      'CI그룹',
+      'CIC-A',
+      'CIC-B',
+      'CIC1',
+      'CIC2',
+      'CIC3',
+      'CIC4',
+      'DXR팀',
+    ]);
   });
 
   it('falls back to project department when explicit cic is missing', () => {
@@ -162,10 +177,18 @@ describe('project-migration-console', () => {
       makeRow({ candidate: makeCandidate({ cic: 'CIC-A' }) }),
     ]);
     const currentRows: ProjectMigrationCurrentRow[] = [
-      { project: makeProject({ id: 'p-2', cic: undefined, department: 'CIC3' }), status: 'MISSING', match: null },
+      { project: makeProject({ id: 'p-2', cic: undefined, department: '투자센터' }), status: 'MISSING', match: null },
     ];
 
-    expect(collectMigrationAuditCicOptions(records, currentRows)).toEqual(['CIC-A', 'CIC1', 'CIC2', 'CIC3', 'CIC4']);
+    expect(collectMigrationAuditCicOptions(records, currentRows)).toContain('투자센터');
+  });
+
+  it('falls back to candidate department when candidate cic is missing', () => {
+    const records = buildMigrationAuditConsoleRecords([
+      makeRow({ candidate: makeCandidate({ cic: '', department: '투자센터' }) }),
+    ]);
+
+    expect(records[0].cic).toBe('투자센터');
   });
 
   it('builds cic selection options with a single 미지정 entry', () => {

@@ -46,7 +46,7 @@ export function MigrationAuditControlBar({
     { label: '미등록', value: summary.missing, tone: 'text-rose-600' },
     { label: '후보 있음', value: summary.candidate, tone: 'text-amber-600' },
     { label: '완료', value: summary.registered, tone: 'text-emerald-600' },
-    { label: 'CIC 미지정', value: summary.unassignedCic, tone: 'text-slate-700' },
+    { label: '등록 조직 미지정', value: summary.unassignedCic, tone: 'text-slate-700' },
   ];
 
   return (
@@ -59,16 +59,16 @@ export function MigrationAuditControlBar({
               <Input
                 value={search}
                 onChange={(event) => onSearchChange(event.target.value)}
-                placeholder="원본 사업명, 플랫폼 프로젝트, 발주기관, CIC로 검색"
+                placeholder="원본 사업명, 플랫폼 프로젝트, 발주기관, 등록 조직으로 검색"
                 className="pl-9"
               />
             </div>
             <Select value={cicFilter} onValueChange={onCicFilterChange}>
               <SelectTrigger className="w-full xl:w-[220px]">
-                <SelectValue placeholder="CIC" />
+                <SelectValue placeholder="등록 조직" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="ALL">전체 CIC</SelectItem>
+                <SelectItem value="ALL">전체 등록 조직</SelectItem>
                 {cicOptions.map((cic) => (
                   <SelectItem key={cic} value={cic}>{cic}</SelectItem>
                 ))}
@@ -140,7 +140,7 @@ export function MigrationAuditControlBar({
             </Button>
             <div className="flex items-center gap-1.5 text-[11px] text-amber-800/80">
               <Filter className="h-3.5 w-3.5" />
-              선택한 CIC와 상태 기준으로 queue와 표가 함께 좁혀집니다.
+              선택한 등록 조직과 상태 기준으로 queue와 표가 함께 좁혀집니다.
             </div>
           </div>
         </CardContent>

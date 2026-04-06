@@ -316,7 +316,7 @@ export function ProjectMigrationAuditPage() {
       return;
     }
     if (selectedCic === '미지정') {
-      toast.error('새 프로젝트를 만들기 전에 CIC를 선택해 주세요.');
+      toast.error('새 프로젝트를 만들기 전에 등록 조직을 선택해 주세요.');
       return;
     }
 

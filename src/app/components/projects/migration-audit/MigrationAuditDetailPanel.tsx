@@ -100,10 +100,10 @@ export function MigrationAuditDetailPanel({
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="space-y-1.5">
-                <Label>CIC</Label>
+                <Label>등록 조직</Label>
                 <Select value={selectedCic} onValueChange={onSelectedCicChange}>
                   <SelectTrigger>
-                    <SelectValue placeholder="CIC 선택" />
+                    <SelectValue placeholder="등록 조직 선택" />
                   </SelectTrigger>
                   <SelectContent>
                     {availableCicOptions.map((cic) => (
@@ -164,10 +164,10 @@ export function MigrationAuditDetailPanel({
                 />
               </div>
               <div className="space-y-1.5">
-                <Label>등록 CIC</Label>
+                <Label>등록 조직</Label>
                 <Select value={selectedCic} onValueChange={onSelectedCicChange}>
                   <SelectTrigger>
-                    <SelectValue placeholder="CIC 선택" />
+                    <SelectValue placeholder="등록 조직 선택" />
                   </SelectTrigger>
                   <SelectContent>
                     {availableCicOptions.map((cic) => (

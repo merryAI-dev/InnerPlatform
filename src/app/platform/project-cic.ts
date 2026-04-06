@@ -14,16 +14,9 @@ export function normalizeStoredCic(value: unknown): string | undefined {
 export function deriveProjectCicFromDepartment(department: unknown): string | undefined {
   const normalized = normalizeRaw(department);
   if (!normalized || normalized === '미지정') return undefined;
-
-  if (/^cic\s*\d+$/i.test(normalized)) {
-    return normalized.toUpperCase().replace(/\s+/g, '');
-  }
-
-  if (/cic/i.test(normalized)) {
-    return normalized;
-  }
-
-  return undefined;
+  return /^cic\s*\d+$/i.test(normalized)
+    ? normalized.toUpperCase().replace(/\s+/g, '')
+    : normalized;
 }
 
 export function resolveProjectCic(projectLike: Pick<Project, 'cic' | 'department'> | { cic?: string; department?: string }): string | undefined {

@@ -12,7 +12,8 @@ describe('project-cic', () => {
     expect(deriveProjectCicFromDepartment('CIC2')).toBe('CIC2');
     expect(deriveProjectCicFromDepartment('cic 3')).toBe('CIC3');
     expect(deriveProjectCicFromDepartment('C-스템CIC')).toBe('C-스템CIC');
-    expect(deriveProjectCicFromDepartment('개발협력센터')).toBeUndefined();
+    expect(deriveProjectCicFromDepartment('개발협력센터')).toBe('개발협력센터');
+    expect(deriveProjectCicFromDepartment('투자센터')).toBe('투자센터');
   });
 
   it('prefers explicit cic and falls back to department-derived cic', () => {
@@ -21,7 +22,19 @@ describe('project-cic', () => {
     expect(resolveProjectCic({ department: '미지정' })).toBeUndefined();
   });
 
-  it('exposes CIC options from the project registration source list', () => {
-    expect(getProjectRegistrationCicOptions()).toEqual(['CIC1', 'CIC2', 'CIC3', 'CIC4']);
+  it('exposes registration organization options from the project registration source list', () => {
+    expect(getProjectRegistrationCicOptions()).toEqual([
+      '개발협력센터',
+      '글로벌센터',
+      '조인트액션',
+      '투자센터',
+      'AXR팀',
+      'CI그룹',
+      'CIC1',
+      'CIC2',
+      'CIC3',
+      'CIC4',
+      'DXR팀',
+    ]);
   });
 });

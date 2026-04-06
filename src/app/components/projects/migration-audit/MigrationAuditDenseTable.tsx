@@ -50,7 +50,7 @@ export function MigrationAuditDenseTable({
           <TableHeader>
             <TableRow>
               <TableHead className="min-w-[88px]">상태</TableHead>
-              <TableHead className="min-w-[100px]">CIC</TableHead>
+              <TableHead className="min-w-[100px]">등록 조직</TableHead>
               <TableHead className="min-w-[220px]">원본 사업명</TableHead>
               <TableHead className="min-w-[220px]">현재 플랫폼 프로젝트</TableHead>
               <TableHead className="min-w-[80px] text-center">후보 수</TableHead>
