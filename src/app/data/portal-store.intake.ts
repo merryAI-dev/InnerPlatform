@@ -124,6 +124,20 @@ export function normalizeBankImportIntakeItem(value: unknown): BankImportIntakeI
   };
 }
 
+export function mergeBankImportIntakeItem(
+  currentItem: BankImportIntakeItem,
+  updates: Partial<BankImportIntakeItem>,
+): BankImportIntakeItem | null {
+  return normalizeBankImportIntakeItem({
+    ...currentItem,
+    ...updates,
+    manualFields: {
+      ...currentItem.manualFields,
+      ...(updates.manualFields || {}),
+    },
+  });
+}
+
 export function buildBankImportIntakeDoc(params: {
   orgId: string;
   item: BankImportIntakeItem;

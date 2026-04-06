@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { BankImportIntakeItem } from './types';
 import {
   buildBankImportIntakeDoc,
+  mergeBankImportIntakeItem,
   normalizeBankImportIntakeItem,
   serializeBankImportIntakeItemForPersistence,
 } from './portal-store.intake';
@@ -126,5 +127,35 @@ describe('portal-store intake persistence', () => {
     });
     expect(built).not.toHaveProperty('existingExpenseSheetId');
     expect(built).not.toHaveProperty('existingExpenseRowTempId');
+  });
+
+  it('merges projection draft updates without dropping existing manual fields', () => {
+    const merged = mergeBankImportIntakeItem(makeItem({
+      manualFields: {
+        expenseAmount: 120000,
+        budgetCategory: '여비',
+        budgetSubCategory: '',
+        cashflowCategory: 'TRAVEL',
+        memo: '기존 메모',
+      },
+    }), {
+      manualFields: {
+        budgetSubCategory: '교통비',
+        evidenceCompletedDesc: '출장신청서',
+      },
+      updatedAt: '2026-04-06T01:00:00.000Z',
+    });
+
+    expect(merged).toEqual(expect.objectContaining({
+      updatedAt: '2026-04-06T01:00:00.000Z',
+      manualFields: expect.objectContaining({
+        expenseAmount: 120000,
+        budgetCategory: '여비',
+        budgetSubCategory: '교통비',
+        cashflowCategory: 'TRAVEL',
+        memo: '기존 메모',
+        evidenceCompletedDesc: '출장신청서',
+      }),
+    }));
   });
 });

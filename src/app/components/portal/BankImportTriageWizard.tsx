@@ -15,7 +15,7 @@ interface BankImportTriageWizardProps {
   onOpenChange: (open: boolean) => void;
   items: BankImportIntakeItem[];
   onSaveDraft: (id: string, updates: Partial<BankImportIntakeItem>) => Promise<void>;
-  onProjectItem: (id: string) => Promise<void>;
+  onProjectItem: (id: string, updates?: Partial<BankImportIntakeItem>) => Promise<void>;
   evidenceRequiredMap: Record<string, string>;
 }
 
@@ -143,14 +143,18 @@ export function BankImportTriageWizard({
     };
     setSavingId(selectedItem.id);
     try {
-      await onSaveDraft(selectedItem.id, {
-        manualFields: nextManualFields,
-        updatedAt: new Date().toISOString(),
-      });
       const currentIndex = wizardItems.findIndex((item) => item.id === selectedItem.id);
       const nextItem = wizardItems[currentIndex + 1] || null;
       if (isBankImportManualFieldsComplete(nextManualFields)) {
-        await onProjectItem(selectedItem.id);
+        await onProjectItem(selectedItem.id, {
+          manualFields: nextManualFields,
+          updatedAt: new Date().toISOString(),
+        });
+      } else {
+        await onSaveDraft(selectedItem.id, {
+          manualFields: nextManualFields,
+          updatedAt: new Date().toISOString(),
+        });
       }
       if (nextItem) {
         setSelectedId(nextItem.id);
@@ -164,7 +168,7 @@ export function BankImportTriageWizard({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[1200px] w-[calc(100vw-2rem)] h-[min(88vh,860px)] overflow-hidden p-0 gap-0">
+      <DialogContent data-testid="bank-import-triage-wizard" className="max-w-[1200px] w-[calc(100vw-2rem)] h-[min(88vh,860px)] overflow-hidden p-0 gap-0">
         <DialogHeader className="border-b border-slate-200 bg-white px-6 py-4">
           <div className="flex items-start justify-between gap-4">
             <div className="space-y-2">
@@ -229,6 +233,7 @@ export function BankImportTriageWizard({
                       key={item.id}
                       type="button"
                       onClick={() => setSelectedId(item.id)}
+                      data-testid={`bank-import-triage-item-${item.id}`}
                       className={`w-full rounded-2xl border px-3 py-3 text-left transition ${
                         isSelected
                           ? 'border-slate-900 bg-slate-900 text-white shadow-sm'
@@ -326,6 +331,7 @@ export function BankImportTriageWizard({
                             <label className="space-y-2">
                               <span className="text-[11px] font-medium text-slate-600">사업비 사용액</span>
                               <input
+                                data-testid="bank-import-expense-amount"
                                 value={activeManualFields.expenseAmount ?? ''}
                                 onChange={(event) => setDrafts((prev) => ({
                                   ...prev,
@@ -342,6 +348,7 @@ export function BankImportTriageWizard({
                             <label className="space-y-2">
                               <span className="text-[11px] font-medium text-slate-600">비목</span>
                               <input
+                                data-testid="bank-import-budget-category"
                                 value={activeManualFields.budgetCategory || ''}
                                 onChange={(event) => setDrafts((prev) => ({
                                   ...prev,
@@ -357,6 +364,7 @@ export function BankImportTriageWizard({
                             <label className="space-y-2">
                               <span className="text-[11px] font-medium text-slate-600">세목</span>
                               <input
+                                data-testid="bank-import-budget-subcategory"
                                 value={activeManualFields.budgetSubCategory || ''}
                                 onChange={(event) => setDrafts((prev) => ({
                                   ...prev,
@@ -372,6 +380,7 @@ export function BankImportTriageWizard({
                             <label className="space-y-2">
                               <span className="text-[11px] font-medium text-slate-600">cashflow 항목</span>
                               <select
+                                data-testid="bank-import-cashflow-category"
                                 value={activeManualFields.cashflowCategory || ''}
                                 onChange={(event) => setDrafts((prev) => ({
                                   ...prev,
@@ -394,6 +403,7 @@ export function BankImportTriageWizard({
                           <label className="space-y-2">
                             <span className="text-[11px] font-medium text-slate-600">메모</span>
                             <textarea
+                              data-testid="bank-import-memo"
                               value={activeManualFields.memo || ''}
                               onChange={(event) => setDrafts((prev) => ({
                                 ...prev,
@@ -457,6 +467,7 @@ export function BankImportTriageWizard({
                           <label className="space-y-2">
                             <span className="text-[11px] font-medium text-slate-600">구비 완료된 증빙자료 리스트</span>
                             <textarea
+                              data-testid="bank-import-evidence-completed"
                               value={activeManualFields.evidenceCompletedDesc || ''}
                               onChange={(event) => setDrafts((prev) => ({
                                 ...prev,
@@ -497,6 +508,7 @@ export function BankImportTriageWizard({
                         variant="outline"
                         size="sm"
                         disabled={savingId === selectedItem.id}
+                        data-testid="bank-import-save-draft"
                         onClick={() => void saveCurrentDraft(false)}
                       >
                         {savingId === selectedItem.id ? '저장 중...' : '임시 저장'}
@@ -504,6 +516,7 @@ export function BankImportTriageWizard({
                       <Button
                         size="sm"
                         disabled={savingId === selectedItem.id}
+                        data-testid="bank-import-project-next"
                         onClick={() => void projectCurrentItem()}
                       >
                         {isBankImportManualFieldsComplete(activeManualFields)

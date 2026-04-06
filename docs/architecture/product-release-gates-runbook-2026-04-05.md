@@ -22,11 +22,13 @@ Included flows:
 1. Settlement import/edit/save/reload and weekly handoff
    - spec: [`tests/e2e/settlement-product-completeness.spec.ts`](/Users/boram/InnerPlatform/tests/e2e/settlement-product-completeness.spec.ts)
    - harness: [`tests/e2e/migration-wizard.harness.spec.js`](/Users/boram/InnerPlatform/tests/e2e/migration-wizard.harness.spec.js)
-2. Admin requested-route preservation across login
+2. Bank upload triage wizard to weekly projection, including reupload in different order
+   - spec: [`tests/e2e/bank-upload-triage-wizard.spec.ts`](/Users/boram/InnerPlatform/tests/e2e/bank-upload-triage-wizard.spec.ts)
+3. Admin requested-route preservation across login
    - spec: [`tests/e2e/product-release-gates.spec.ts`](/Users/boram/InnerPlatform/tests/e2e/product-release-gates.spec.ts)
-3. PM requested-route preservation across login
+4. PM requested-route preservation across login
    - spec: [`tests/e2e/product-release-gates.spec.ts`](/Users/boram/InnerPlatform/tests/e2e/product-release-gates.spec.ts)
-4. Admin project trash and restore
+5. Admin project trash and restore
    - spec: [`tests/e2e/product-release-gates.spec.ts`](/Users/boram/InnerPlatform/tests/e2e/product-release-gates.spec.ts)
 
 ## Gate Policy
@@ -40,7 +42,7 @@ Included flows:
 Run the product gate Playwright specs:
 
 ```bash
-npx playwright test tests/e2e/migration-wizard.harness.spec.js tests/e2e/settlement-product-completeness.spec.ts tests/e2e/product-release-gates.spec.ts --config playwright.harness.config.mjs
+npx playwright test tests/e2e/migration-wizard.harness.spec.js tests/e2e/settlement-product-completeness.spec.ts tests/e2e/bank-upload-triage-wizard.spec.ts tests/e2e/product-release-gates.spec.ts --config playwright.harness.config.mjs
 ```
 
 ## Next Gate Candidates

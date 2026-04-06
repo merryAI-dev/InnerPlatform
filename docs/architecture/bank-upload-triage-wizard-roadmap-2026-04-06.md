@@ -12,7 +12,7 @@
 - [x] Phase 4: Triage wizard UI
 - [x] Phase 5: Projection upsert by `sourceTxId`
 - [x] Phase 6: Non-blocking evidence integration
-- [ ] Phase 7: QA and release gates
+- [x] Phase 7: QA and release gates
 
 ## Phase 1: Core Domain Contracts
 
@@ -158,7 +158,7 @@
 
 ## Phase 7: QA And Release Gates
 
-**Status:** in progress
+**Status:** completed
 
 **Files**
 - `tests/e2e/bank-upload-triage-wizard.spec.ts`
@@ -175,6 +175,11 @@
 - weekly reflection
 - reupload same rows in different order
 - verify human-entered values survive
+
+**Verification**
+- `npx vitest run src/app/data/portal-store.intake.test.ts src/app/data/portal-store.persistence.test.ts src/app/platform/bank-statement.test.ts src/app/data/portal-store.integration.test.ts`
+- `npx playwright test tests/e2e/bank-upload-triage-wizard.spec.ts --config playwright.harness.config.mjs`
+- `npm run build`
 
 ## Engineering Guardrails
 

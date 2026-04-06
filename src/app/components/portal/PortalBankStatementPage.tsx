@@ -503,7 +503,7 @@ export function PortalBankStatementPage() {
       </Card>
 
       {hasUploadedSheet && (
-        <Card className="border-slate-200 bg-white shadow-sm">
+        <Card data-testid="bank-import-queue-summary" className="border-slate-200 bg-white shadow-sm">
           <CardContent className="p-4">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="space-y-2">
@@ -529,7 +529,7 @@ export function PortalBankStatementPage() {
                 <Button variant="outline" size="sm" onClick={() => navigate('/portal/weekly-expenses')}>
                   주간 사업비에서 보기
                 </Button>
-                <Button size="sm" onClick={() => setTriageOpen(true)} disabled={triageItems.length === 0}>
+                <Button data-testid="bank-import-open-wizard" size="sm" onClick={() => setTriageOpen(true)} disabled={triageItems.length === 0}>
                   신규 거래 처리 시작
                 </Button>
               </div>

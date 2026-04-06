@@ -66,6 +66,7 @@ import {
 } from './portal-store.persistence';
 import {
   buildBankImportIntakeDoc,
+  mergeBankImportIntakeItem,
   normalizeBankImportIntakeItem,
 } from './portal-store.intake';
 import { useAuth } from './auth-store';
@@ -326,7 +327,7 @@ interface PortalActions {
   markSheetSourceApplied: (input: { sourceType: ProjectSheetSourceType; applyTarget: string }) => Promise<void>;
   upsertExpenseIntakeItems: (items: BankImportIntakeItem[]) => Promise<void>;
   updateExpenseIntakeItem: (id: string, updates: Partial<BankImportIntakeItem>) => Promise<void>;
-  projectExpenseIntakeItem: (id: string) => Promise<void>;
+  projectExpenseIntakeItem: (id: string, updates?: Partial<BankImportIntakeItem>) => Promise<void>;
   setActiveExpenseSheet: (sheetId: string) => void;
   createExpenseSheet: (name?: string) => Promise<string | null>;
   renameExpenseSheet: (sheetId: string, name: string) => Promise<boolean>;
@@ -2101,14 +2102,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     const currentItem = expenseIntakeItems.find((item) => item.id === id);
     if (!currentItem) return;
 
-    const mergedCandidate = normalizeBankImportIntakeItem({
-      ...currentItem,
-      ...updates,
-      manualFields: {
-        ...currentItem.manualFields,
-        ...(updates.manualFields || {}),
-      },
-    });
+    const mergedCandidate = mergeBankImportIntakeItem(currentItem, updates);
     if (!mergedCandidate) return;
 
     if (isDevHarnessUser || !db || !portalUser?.projectId) {
@@ -2128,34 +2122,36 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || ''))));
   }, [db, expenseIntakeItems, isDevHarnessUser, orgId, portalUser?.projectId]);
 
-  const projectExpenseIntakeItem = useCallback(async (id: string) => {
+  const projectExpenseIntakeItem = useCallback(async (id: string, updates?: Partial<BankImportIntakeItem>) => {
     const currentItem = expenseIntakeItems.find((item) => item.id === id);
     if (!currentItem) return;
-    if (!isBankImportManualFieldsComplete(currentItem.manualFields)) return;
+    const mergedCandidate = updates ? mergeBankImportIntakeItem(currentItem, updates) : currentItem;
+    if (!mergedCandidate) return;
+    if (!isBankImportManualFieldsComplete(mergedCandidate.manualFields)) return;
     const now = new Date().toISOString();
     const evidenceRequiredDesc = resolveEvidenceRequiredDesc(
       evidenceRequiredMap,
-      currentItem.manualFields.budgetCategory || '',
-      currentItem.manualFields.budgetSubCategory || '',
+      mergedCandidate.manualFields.budgetCategory || '',
+      mergedCandidate.manualFields.budgetSubCategory || '',
     );
     const evidenceChecklist = resolveEvidenceChecklist({
       evidenceRequiredDesc,
-      evidenceCompletedDesc: currentItem.manualFields.evidenceCompletedDesc || '',
-      evidenceCompletedManualDesc: currentItem.manualFields.evidenceCompletedDesc || '',
+      evidenceCompletedDesc: mergedCandidate.manualFields.evidenceCompletedDesc || '',
+      evidenceCompletedManualDesc: mergedCandidate.manualFields.evidenceCompletedDesc || '',
       evidenceAutoListedDesc: '',
       evidenceDriveLink: '',
       evidenceDriveFolderId: '',
     });
     const normalizedProjectedItem = normalizeBankImportIntakeItem({
-      ...currentItem,
+      ...mergedCandidate,
       matchState: 'AUTO_CONFIRMED',
       projectionStatus: resolveBankImportProjectionStatus({
         matchState: 'AUTO_CONFIRMED',
-        manualFields: currentItem.manualFields,
+        manualFields: mergedCandidate.manualFields,
         evidenceStatus: evidenceChecklist.status,
       }),
       evidenceStatus: evidenceChecklist.status,
-      existingExpenseSheetId: currentItem.existingExpenseSheetId || activeExpenseSheetIdRef.current || 'default',
+      existingExpenseSheetId: mergedCandidate.existingExpenseSheetId || activeExpenseSheetIdRef.current || 'default',
       updatedAt: now,
     });
     if (!normalizedProjectedItem) return;

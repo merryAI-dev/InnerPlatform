@@ -197,6 +197,7 @@ export function PortalWeeklyExpensePage() {
     weeklySubmissionStatuses,
   }), [bankStatementCount, expenseSheetRows?.length, fundInputMode, weeklySubmissionStatuses]);
   const triageItems = useMemo(() => selectWizardIntakeItems(expenseIntakeItems), [expenseIntakeItems]);
+  const expenseRowCount = expenseSheetRows?.length || 0;
   const weeklySetupPanel = useMemo(() => {
     if (!happyPath.canOpenWeeklyExpenses) {
       return {
@@ -979,7 +980,7 @@ export function PortalWeeklyExpensePage() {
             <div className="text-[10px] uppercase tracking-wide text-muted-foreground">이번 탭</div>
             <div className="mt-1 text-sm font-semibold">{activeSheetName}</div>
             <div className="mt-1 text-[11px] text-muted-foreground">
-              {transactions.length}건의 거래와 연결되어 있습니다.
+              {expenseRowCount}건의 거래와 연결되어 있습니다.
             </div>
           </div>
         </div>
@@ -989,7 +990,7 @@ export function PortalWeeklyExpensePage() {
         {!isDirectEntryMode && <span>통장내역: {bankStatementCount > 0 ? `${bankStatementCount}건 연결됨` : '업로드 필요'}</span>}
         {isDirectEntryMode && <span>입력 방식: 직접 입력</span>}
         <span>시트 정책: {formatSettlementSheetPolicySummary(settlementSheetPolicy)}</span>
-        <span>거래: {transactions.length}건</span>
+        <span>거래: {expenseRowCount}건</span>
         <span>기본 폴더: {myProject?.evidenceDriveRootFolderId ? '준비됨' : '미설정'}</span>
         {isENaraProject && <span>TYPE5 / 전용계좌 프로젝트</span>}
       </div>
@@ -1063,7 +1064,7 @@ export function PortalWeeklyExpensePage() {
       </Card>
 
       {triageItems.length > 0 && (
-        <Card className="border-indigo-200/70 bg-gradient-to-r from-indigo-50 via-white to-cyan-50/70 shadow-sm">
+        <Card data-testid="weekly-intake-queue-strip" className="border-indigo-200/70 bg-gradient-to-r from-indigo-50 via-white to-cyan-50/70 shadow-sm">
           <CardContent className="flex flex-col gap-3 px-4 py-4 md:flex-row md:items-center md:justify-between">
             <div className="space-y-1">
               <p className="text-[11px] uppercase tracking-[0.18em] text-indigo-700">Intake Queue</p>
@@ -1084,7 +1085,7 @@ export function PortalWeeklyExpensePage() {
               <Button variant="outline" size="sm" onClick={() => requestRouteNavigation('/portal/bank-statements', '통장내역')}>
                 원본 보기
               </Button>
-              <Button size="sm" onClick={() => setTriageWizardOpen(true)}>
+              <Button data-testid="weekly-intake-open-wizard" size="sm" onClick={() => setTriageWizardOpen(true)}>
                 신규 거래 처리
               </Button>
             </div>
