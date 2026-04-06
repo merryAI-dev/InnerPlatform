@@ -255,7 +255,7 @@ export function BankImportTriageWizard({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         data-testid="bank-import-triage-wizard"
-        className="!top-0 !left-0 !translate-x-0 !translate-y-0 !w-screen !max-w-none sm:!max-w-none !h-[100dvh] rounded-none border-0 p-0 gap-0 overflow-hidden data-[state=open]:zoom-in-100 data-[state=closed]:zoom-out-100"
+        className="!top-0 !left-0 !translate-x-0 !translate-y-0 !w-screen !max-w-none sm:!max-w-none !h-[100dvh] !flex !flex-col rounded-none border-0 p-0 gap-0 overflow-hidden data-[state=open]:zoom-in-100 data-[state=closed]:zoom-out-100"
       >
         <DialogHeader className="border-b border-slate-200 bg-white px-6 py-4">
           <div className="flex items-start justify-between gap-4">
@@ -278,8 +278,8 @@ export function BankImportTriageWizard({
           </div>
         </DialogHeader>
 
-        <div className="grid h-full min-h-0 grid-cols-[320px_minmax(0,1fr)] bg-slate-50">
-          <div className="border-r border-slate-200 bg-white">
+        <div className="grid flex-1 min-h-0 grid-cols-[320px_minmax(0,1fr)] bg-slate-50">
+          <div className="flex min-h-0 flex-col border-r border-slate-200 bg-white">
             <div className="border-b border-slate-200 px-4 py-4">
               <div className="grid grid-cols-2 gap-3">
                 <Card className="border-amber-200 bg-amber-50/70 shadow-none">
@@ -300,7 +300,7 @@ export function BankImportTriageWizard({
                 </Card>
               </div>
             </div>
-            <div className="h-[calc(100%-96px)] overflow-y-auto px-3 py-3">
+            <div data-testid="bank-import-triage-queue-scroll" className="flex-1 min-h-0 overflow-y-auto px-3 py-3">
               <div className="space-y-4">
                 {wizardItems.length === 0 ? (
                   <Card className="border-emerald-200 bg-emerald-50/70 shadow-none">

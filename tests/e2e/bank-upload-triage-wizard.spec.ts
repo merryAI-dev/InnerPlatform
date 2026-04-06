@@ -157,3 +157,37 @@ test('bank upload triage wizard lets PM project first and continue evidence late
   await expect(page.getByTestId('bank-import-triage-wizard')).toBeVisible();
   await expect(page.getByTestId('bank-import-evidence-completed')).toHaveValue('출장신청서, 영수증');
 });
+
+test('bank upload triage wizard keeps the left queue scrollable in fullscreen mode', async ({ page }) => {
+  await loginAsPm(page);
+
+  const rows = Array.from({ length: 40 }, (_, index) => ({
+    account: '111-222-333',
+    dateTime: `2026-04-${String((index % 28) + 1).padStart(2, '0')} 09:${String(index % 60).padStart(2, '0')}`,
+    memo: `거래 ${index + 1}`,
+    counterparty: `거래처 ${index + 1}`,
+    withdrawal: String(10000 + index * 100),
+    balance: String(900000 - index * 100),
+  }));
+
+  await uploadBankSheet(page, rows);
+  await page.getByTestId('bank-import-open-wizard').click();
+  await expect(page.getByTestId('bank-import-triage-wizard')).toBeVisible();
+
+  const scrollState = await page.evaluate(() => {
+    const scroller = document.querySelector('[data-testid="bank-import-triage-queue-scroll"]') as HTMLElement | null;
+    if (!scroller) return null;
+    const before = scroller.scrollTop;
+    scroller.scrollTop = 240;
+    return {
+      clientHeight: scroller.clientHeight,
+      scrollHeight: scroller.scrollHeight,
+      before,
+      after: scroller.scrollTop,
+    };
+  });
+
+  expect(scrollState).not.toBeNull();
+  expect(scrollState!.scrollHeight).toBeGreaterThan(scrollState!.clientHeight);
+  expect(scrollState!.after).toBeGreaterThan(scrollState!.before);
+});
