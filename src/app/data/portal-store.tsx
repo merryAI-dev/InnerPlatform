@@ -49,6 +49,7 @@ import {
   type BankStatementRow,
   type BankStatementSheet,
 } from '../platform/bank-statement';
+import { normalizeSpace } from '../platform/csv-utils';
 import {
 } from '../platform/settlement-sheet-prepare';
 import { prepareExpenseSheetRowsForSave } from './portal-store.settlement';

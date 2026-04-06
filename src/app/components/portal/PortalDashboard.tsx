@@ -35,6 +35,11 @@ import { featureFlags } from '../../config/feature-flags';
 import { getOrgCollectionPath } from '../../lib/firebase';
 import { normalizeProjectFundInputMode } from '../../data/types';
 import { resolvePortalMissionProgress } from '../../platform/portal-mission-guide';
+import {
+  isPayrollLiquidityRiskStatus,
+  resolveProjectPayrollLiquidity,
+  type PayrollLiquidityQueueItem,
+} from '../../platform/payroll-liquidity';
 
 // ═══════════════════════════════════════════════════════════════
 // PortalDashboard — 내 사업 현황
@@ -184,6 +189,17 @@ export function PortalDashboard() {
   const totalOut = myTx.filter(t => t.direction === 'OUT').reduce((s, t) => s + t.amounts.bankAmount, 0);
   const balance = totalIn - totalOut;
   const burnRate = myProject.contractAmount > 0 ? totalOut / myProject.contractAmount : 0;
+  const payrollQueueItems = useMemo(() => resolveProjectPayrollLiquidity({
+    project: myProject,
+    runs,
+    transactions: myTx,
+    today,
+  }), [myProject, myTx, runs, today]);
+  const payrollRiskItems = useMemo(
+    () => payrollQueueItems.filter((item) => isPayrollLiquidityRiskStatus(item.status)),
+    [payrollQueueItems],
+  );
+  const payrollDetail = payrollQueueItems[0] || null;
 
   return (
     <div className="space-y-5">
@@ -285,6 +301,13 @@ export function PortalDashboard() {
           </CardContent>
         </Card>
       )}
+
+      <PortalPayrollQueueCard
+        item={payrollDetail}
+        riskItems={payrollRiskItems}
+        onOpenDetail={() => navigate('/portal/payroll')}
+        onOpenBankStatements={() => navigate('/portal/bank-statements')}
+      />
 
       {/* 사업 기본 정보 */}
       <PortalMissionGuide progress={missionProgress} />
@@ -400,5 +423,105 @@ export function PortalDashboard() {
         </Card>
       </div>
     </div>
+  );
+}
+
+const PORTAL_PAYROLL_BADGE_STYLES: Record<PayrollLiquidityQueueItem['status'], string> = {
+  insufficient_balance: 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300',
+  payment_unconfirmed: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
+  baseline_missing: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
+  balance_unknown: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
+  clear: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
+};
+
+function portalPayrollLabel(status: PayrollLiquidityQueueItem['status']) {
+  if (status === 'insufficient_balance') return '잔액 부족 위험';
+  if (status === 'payment_unconfirmed') return '지급 확인 필요';
+  if (status === 'baseline_missing') return '기준 지급액 없음';
+  if (status === 'balance_unknown') return '잔액 데이터 없음';
+  return '이번 지급 창 안정';
+}
+
+function PortalPayrollQueueCard({
+  item,
+  riskItems,
+  onOpenDetail,
+  onOpenBankStatements,
+}: {
+  item: PayrollLiquidityQueueItem | null;
+  riskItems: PayrollLiquidityQueueItem[];
+  onOpenDetail: () => void;
+  onOpenBankStatements: () => void;
+}) {
+  return (
+    <Card data-testid="portal-payroll-liquidity-card" className="border-border/60 shadow-sm">
+      <CardHeader className="pb-2">
+        <CardTitle className="flex items-center justify-between gap-2 text-[13px]">
+          <span className="flex items-center gap-2">
+            <div className="flex h-7 w-7 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-300">
+              <CircleDollarSign className="h-4 w-4" />
+            </div>
+            인건비 지급 Queue
+          </span>
+          <Button variant="outline" size="sm" className="h-7 text-[11px]" onClick={onOpenDetail}>
+            상세 보기
+          </Button>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3 pt-0">
+        {!item ? (
+          <div className="rounded-xl border border-dashed border-border/60 bg-muted/20 px-4 py-4 text-[12px] text-muted-foreground">
+            활성 지급 창이 열리면 지급일 D-3부터 D+3까지 잔액 위험을 여기서 바로 확인할 수 있습니다.
+          </div>
+        ) : riskItems.length > 0 ? (
+          riskItems.map((risk) => (
+            <div key={risk.runId} className="rounded-xl border border-rose-200/60 bg-rose-50/60 px-4 py-3 dark:border-rose-900/40 dark:bg-rose-950/10">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div className="min-w-0 space-y-1">
+                  <div className="flex items-center gap-2">
+                    <Badge className={`text-[10px] ${PORTAL_PAYROLL_BADGE_STYLES[risk.status]}`}>
+                      {portalPayrollLabel(risk.status)}
+                    </Badge>
+                    <span className="text-[11px] text-muted-foreground">
+                      지급일 {risk.plannedPayDate}
+                    </span>
+                  </div>
+                  <p className="text-[13px] text-foreground" style={{ fontWeight: 700 }}>
+                    예상 인건비 {risk.expectedPayrollAmount !== null ? `${fmtShort(risk.expectedPayrollAmount)}원` : '-'} · 최저 잔액 {risk.worstBalance !== null ? `${fmtShort(risk.worstBalance)}원` : '-'}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">{risk.statusReason}</p>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <Button size="sm" className="h-8 text-[11px] gap-1.5" onClick={onOpenBankStatements}>
+                    통장내역 열기
+                  </Button>
+                  <Button size="sm" variant="outline" className="h-8 text-[11px] gap-1.5" onClick={onOpenDetail}>
+                    지급 상세
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ))
+        ) : item.status === 'clear' ? (
+          <div className="rounded-xl border border-emerald-200/60 bg-emerald-50/60 px-4 py-4 dark:border-emerald-900/40 dark:bg-emerald-950/10">
+            <p className="text-[12px] text-emerald-800 dark:text-emerald-200" style={{ fontWeight: 700 }}>
+              이번 지급 창에는 바로 대응이 필요한 위험이 없습니다.
+            </p>
+            <p className="mt-1 text-[11px] text-emerald-700/90 dark:text-emerald-300/90">
+              지급일 {item.plannedPayDate} · 예상 인건비 {item.expectedPayrollAmount !== null ? `${fmtShort(item.expectedPayrollAmount)}원` : '-'} · 현재 잔액 {item.currentBalance !== null ? `${fmtShort(item.currentBalance)}원` : '-'}
+            </p>
+          </div>
+        ) : (
+          <div className="rounded-xl border border-slate-200/70 bg-slate-50/80 px-4 py-4 dark:border-slate-800 dark:bg-slate-900/30">
+            <p className="text-[12px] text-slate-800 dark:text-slate-100" style={{ fontWeight: 700 }}>
+              이번 지급 창은 열렸지만 아직 판정 기준이 충분하지 않습니다.
+            </p>
+            <p className="mt-1 text-[11px] text-slate-600 dark:text-slate-300">
+              {item.statusReason}
+            </p>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }

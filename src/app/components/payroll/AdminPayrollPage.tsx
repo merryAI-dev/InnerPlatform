@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router';
 import {
   CircleDollarSign,
   CalendarCheck2,
@@ -21,6 +22,11 @@ import { usePayroll } from '../../data/payroll-store';
 import type { PayrollPaidStatus } from '../../data/types';
 import { addDays, addMonthsToYearMonth, getSeoulTodayIso } from '../../platform/business-days';
 import { fmtShort } from '../../data/budget-data';
+import {
+  isPayrollLiquidityRiskStatus,
+  resolvePayrollLiquidityQueue,
+  type PayrollLiquidityQueueItem,
+} from '../../platform/payroll-liquidity';
 
 const PAID_COLORS: Record<PayrollPaidStatus, string> = {
   UNKNOWN: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400',
@@ -36,7 +42,24 @@ function paidLabel(status: PayrollPaidStatus): string {
   return '미확인';
 }
 
+const LIQUIDITY_STATUS_STYLES: Record<PayrollLiquidityQueueItem['status'], string> = {
+  insufficient_balance: 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300',
+  payment_unconfirmed: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
+  baseline_missing: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
+  balance_unknown: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
+  clear: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
+};
+
+function payrollLiquidityLabel(status: PayrollLiquidityQueueItem['status']): string {
+  if (status === 'insufficient_balance') return '잔액 부족 위험';
+  if (status === 'payment_unconfirmed') return '지급 확인 필요';
+  if (status === 'baseline_missing') return '기준 지급액 없음';
+  if (status === 'balance_unknown') return '잔액 데이터 없음';
+  return '안정';
+}
+
 export function AdminPayrollPage() {
+  const navigate = useNavigate();
   const { projects, transactions } = useAppStore();
   const {
     schedules,
@@ -88,6 +111,21 @@ export function AdminPayrollPage() {
     const pendingAck = list.filter((c) => c.status === 'DONE' && !c.acknowledged).length;
     return { done, pendingAck };
   }, [projects, closeByProjectPrev, monthlyCloses]);
+
+  const liquidityQueue = useMemo(() => resolvePayrollLiquidityQueue({
+    projects,
+    runs,
+    transactions,
+    today,
+  }), [projects, runs, transactions, today]);
+  const liquidityRiskQueue = useMemo(
+    () => liquidityQueue.filter((item) => isPayrollLiquidityRiskStatus(item.status)),
+    [liquidityQueue],
+  );
+  const liquiditySetupQueue = useMemo(
+    () => liquidityQueue.filter((item) => !isPayrollLiquidityRiskStatus(item.status) && item.status !== 'clear'),
+    [liquidityQueue],
+  );
 
   function getMatchedPayrollTxIds(projectId: string, plannedPayDate?: string): string[] {
     if (!plannedPayDate) return [];
@@ -200,6 +238,83 @@ export function AdminPayrollPage() {
         </TabsList>
 
         <TabsContent value="payroll" className="mt-3 space-y-3">
+          <Card data-testid="admin-payroll-liquidity-queue">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-[13px] flex items-center justify-between gap-2">
+                <span>인건비 지급 Queue</span>
+                <Badge variant="outline" className="text-[10px]">
+                  위험 {liquidityRiskQueue.length}건
+                </Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-0 space-y-3">
+              <p className="text-[11px] text-muted-foreground">
+                지급일 D-3부터 D+3까지 잔액과 지급 확정 여부를 함께 봅니다. 정상 예정건은 숨기고, 바로 개입이 필요한 건만 올립니다.
+              </p>
+
+              {liquidityRiskQueue.length === 0 ? (
+                <div className="rounded-xl border border-emerald-200/60 bg-emerald-50/60 px-4 py-4 text-[12px] text-emerald-800">
+                  현재 열린 지급 창에서 즉시 대응이 필요한 인건비 위험은 없습니다.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {liquidityRiskQueue.map((item) => (
+                    <div
+                      key={item.runId}
+                      className="rounded-xl border border-border/60 bg-muted/20 px-4 py-3"
+                    >
+                      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                        <div className="min-w-0 space-y-1.5">
+                          <div className="flex items-center gap-2">
+                            <p className="text-[13px] text-foreground" style={{ fontWeight: 700 }}>
+                              {item.projectShortName}
+                            </p>
+                            <Badge className={`text-[10px] ${LIQUIDITY_STATUS_STYLES[item.status]}`}>
+                              {payrollLiquidityLabel(item.status)}
+                            </Badge>
+                          </div>
+                          <p className="text-[11px] text-muted-foreground">
+                            지급일 {item.plannedPayDate} · 예상 인건비 {item.expectedPayrollAmount !== null ? `${fmtShort(item.expectedPayrollAmount)}원` : '-'} · 최저 잔액 {item.worstBalance !== null ? `${fmtShort(item.worstBalance)}원` : '-'}
+                          </p>
+                          <p className="text-[11px] text-muted-foreground">{item.statusReason}</p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-8 text-[11px]"
+                            onClick={() => setTxDialogProjectId(item.projectId)}
+                          >
+                            후보내역 보기
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-8 text-[11px]"
+                            onClick={() => navigate(`/projects/${item.projectId}`)}
+                          >
+                            프로젝트 열기
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {liquiditySetupQueue.length > 0 && (
+                <div className="rounded-xl border border-slate-200/70 bg-slate-50/70 px-4 py-3">
+                  <p className="text-[11px] text-slate-700" style={{ fontWeight: 700 }}>
+                    설정 보완 필요 {liquiditySetupQueue.length}건
+                  </p>
+                  <p className="mt-1 text-[11px] text-slate-600">
+                    직전 확정 지급액 또는 잔액 데이터가 부족한 사업은 대시보드 위험열에 올리지 않고 여기서만 보입니다.
+                  </p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-[13px]">프로젝트별 인건비 상태 ({yearMonth})</CardTitle>
