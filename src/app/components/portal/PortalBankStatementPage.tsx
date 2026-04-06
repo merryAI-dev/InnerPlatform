@@ -538,7 +538,7 @@ export function PortalBankStatementPage() {
                   증빙 이어서 하기
                 </Button>
                 <Button data-testid="bank-import-open-wizard" size="sm" onClick={() => setTriageOpen(true)} disabled={queueWorkCount === 0}>
-                  신규 거래 처리 시작
+                  분류/검토 열기
                 </Button>
               </div>
             </div>

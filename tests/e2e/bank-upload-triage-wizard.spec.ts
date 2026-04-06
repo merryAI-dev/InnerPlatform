@@ -67,6 +67,7 @@ test('bank upload triage wizard projects rows and survives reupload with differe
 
   await uploadBankSheet(page, originalRows);
   await expect(page.getByTestId('bank-import-queue-summary')).toContainText('총 2건');
+  await expect(page.getByRole('button', { name: '분류/검토 열기' })).toBeVisible();
 
   await page.getByTestId('bank-import-open-wizard').click();
   await expect(page.getByTestId('bank-import-triage-wizard')).toBeVisible();

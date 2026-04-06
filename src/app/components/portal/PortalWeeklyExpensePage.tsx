@@ -1094,7 +1094,7 @@ export function PortalWeeklyExpensePage() {
                 증빙 이어서 하기
               </Button>
               <Button data-testid="weekly-intake-open-wizard" size="sm" onClick={() => setTriageWizardOpen(true)}>
-                신규 거래 처리
+                분류/검토 열기
               </Button>
             </div>
           </CardContent>
