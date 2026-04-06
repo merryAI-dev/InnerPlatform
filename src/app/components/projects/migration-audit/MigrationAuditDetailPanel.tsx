@@ -152,9 +152,6 @@ export function MigrationAuditDetailPanel({
               <CardTitle className="text-[14px] font-semibold">새 프로젝트 빠른 등록</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="rounded-xl border border-sky-200 bg-white/80 px-3 py-3 text-[12px] text-slate-600">
-                이 row의 계약명은 자동으로 <span className="font-medium text-slate-950">{record.sourceName}</span> 으로 반영됩니다.
-              </div>
               <div className="space-y-1.5">
                 <Label>프로젝트명</Label>
                 <Input
