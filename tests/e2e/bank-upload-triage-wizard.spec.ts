@@ -71,6 +71,12 @@ test('bank upload triage wizard projects rows and survives reupload with differe
 
   await page.getByTestId('bank-import-open-wizard').click();
   await expect(page.getByTestId('bank-import-triage-wizard')).toBeVisible();
+  const viewport = page.viewportSize();
+  const wizardBox = await page.getByTestId('bank-import-triage-wizard').boundingBox();
+  expect(viewport).not.toBeNull();
+  expect(wizardBox).not.toBeNull();
+  expect(wizardBox!.width).toBeGreaterThan((viewport?.width || 0) * 0.99);
+  expect(wizardBox!.height).toBeGreaterThan((viewport?.height || 0) * 0.99);
 
   await page.getByTestId('bank-import-expense-amount').fill('15000');
   await page.getByTestId('bank-import-budget-category').fill('여비');

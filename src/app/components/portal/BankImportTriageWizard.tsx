@@ -255,7 +255,7 @@ export function BankImportTriageWizard({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         data-testid="bank-import-triage-wizard"
-        className="max-w-none w-[calc(100vw-1rem)] h-[calc(100vh-1rem)] sm:w-[calc(100vw-2rem)] sm:h-[calc(100vh-2rem)] overflow-hidden p-0 gap-0"
+        className="!top-0 !left-0 !translate-x-0 !translate-y-0 !w-screen !max-w-none sm:!max-w-none !h-[100dvh] rounded-none border-0 p-0 gap-0 overflow-hidden data-[state=open]:zoom-in-100 data-[state=closed]:zoom-out-100"
       >
         <DialogHeader className="border-b border-slate-200 bg-white px-6 py-4">
           <div className="flex items-start justify-between gap-4">
