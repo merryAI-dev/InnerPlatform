@@ -10,9 +10,10 @@ import {
 import { Card, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
 import { useAuth } from '../../data/auth-store';
-import { resolvePostLoginPath, shouldPromptWorkspaceSelection } from '../../platform/navigation';
+import { resolvePostLoginPath, resolveRequestedRedirectPath, shouldPromptWorkspaceSelection } from '../../platform/navigation';
 import { readFirebaseEmulatorConfig } from '../../lib/firebase';
 import {
+  buildPreviewAuthFallbackUrl,
   buildPreviewAuthBlockedMessage,
   readPreviewAuthGuardConfig,
   shouldBlockFirebasePopupAuth,
@@ -36,7 +37,10 @@ export function LoginPage() {
     user,
   } = useAuth();
   const [error, setError] = useState('');
-  const redirectFrom = (location.state as { from?: string } | null)?.from;
+  const redirectFrom = resolveRequestedRedirectPath(
+    (location.state as { from?: string } | null)?.from,
+    location.search,
+  );
   const emulatorConfig = readFirebaseEmulatorConfig(import.meta.env);
   const previewAuthConfig = readPreviewAuthGuardConfig(import.meta.env);
   const currentHost = typeof window !== 'undefined' ? window.location.hostname : '';
@@ -134,7 +138,7 @@ export function LoginPage() {
                             type="button"
                             variant="outline"
                             className="h-8 border-amber-300 bg-white px-3 text-[11px] text-amber-900 hover:bg-amber-100"
-                            onClick={() => window.location.assign(previewAuthConfig.fallbackUrl)}
+                            onClick={() => window.location.assign(buildPreviewAuthFallbackUrl(previewAuthConfig.fallbackUrl, redirectFrom))}
                           >
                             고정 preview로 이동
                           </Button>

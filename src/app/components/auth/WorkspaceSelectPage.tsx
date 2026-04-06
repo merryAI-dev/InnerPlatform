@@ -5,7 +5,7 @@ import { Card, CardContent } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { useAuth } from '../../data/auth-store';
-import { canChooseWorkspace, resolvePostLoginPath, shouldPromptWorkspaceSelection } from '../../platform/navigation';
+import { canChooseWorkspace, resolvePostLoginPath, resolveRequestedRedirectPath, shouldPromptWorkspaceSelection } from '../../platform/navigation';
 import { canAccessAdminPath } from '../../platform/admin-nav';
 import type { WorkspaceId } from '../../data/member-workspace';
 
@@ -15,7 +15,10 @@ export function WorkspaceSelectPage() {
   const { isAuthenticated, isLoading, user, setWorkspacePreference } = useAuth();
   const [pending, setPending] = useState<WorkspaceId | null>(null);
   const [error, setError] = useState('');
-  const redirectFrom = (location.state as { from?: string } | null)?.from;
+  const redirectFrom = resolveRequestedRedirectPath(
+    (location.state as { from?: string } | null)?.from,
+    location.search,
+  );
 
   useEffect(() => {
     if (isLoading) return;

@@ -4,7 +4,9 @@ import {
   canEnterPortalWorkspace,
   isAdminSpaceRole,
   isPortalRole,
+  normalizeRequestedPath,
   resolveHomePath,
+  resolveRequestedRedirectPath,
   resolvePostLoginPath,
   shouldPromptWorkspaceSelection,
   shouldForcePortalOnboarding,
@@ -178,6 +180,27 @@ describe('resolvePostLoginPath', () => {
 
   it('empty role requesting portal path → fallback (canEnterPortalWorkspace false)', () => {
     expect(resolvePostLoginPath('', undefined, '/portal/budget')).toBe('/portal');
+  });
+});
+
+describe('requested redirect restoration', () => {
+  it('normalizes requested path values', () => {
+    expect(normalizeRequestedPath('/users')).toBe('/users');
+    expect(normalizeRequestedPath('/login')).toBe('');
+    expect(normalizeRequestedPath('/workspace-select')).toBe('');
+    expect(normalizeRequestedPath('https://example.com/users')).toBe('');
+  });
+
+  it('prefers location.state.from when present', () => {
+    expect(resolveRequestedRedirectPath('/users', '?redirect=%2Fsettings')).toBe('/users');
+  });
+
+  it('falls back to redirect query when state is empty', () => {
+    expect(resolveRequestedRedirectPath(undefined, '?redirect=%2Fusers%3Ftab%3Dmembers')).toBe('/users?tab=members');
+  });
+
+  it('ignores invalid redirect query', () => {
+    expect(resolveRequestedRedirectPath(undefined, '?redirect=https://evil.example.com')).toBe('');
   });
 });
 

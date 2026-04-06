@@ -23,6 +23,14 @@ function normalizeUrl(value: unknown): string {
   }
 }
 
+function normalizeRedirectPath(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  if (!trimmed.startsWith('/')) return '';
+  if (trimmed === '/login' || trimmed === '/workspace-select') return '';
+  return trimmed;
+}
+
 export interface PreviewAuthGuardConfig {
   allowedHosts: string[];
   fallbackUrl: string;
@@ -44,6 +52,19 @@ export function readPreviewAuthGuardConfig(
     allowedHosts: Array.from(allowedHosts),
     fallbackUrl,
   };
+}
+
+export function buildPreviewAuthFallbackUrl(
+  fallbackUrl: unknown,
+  requestedPath?: unknown,
+): string {
+  const normalizedFallback = normalizeUrl(fallbackUrl);
+  if (!normalizedFallback) return '';
+  const redirect = normalizeRedirectPath(requestedPath);
+  if (!redirect) return normalizedFallback;
+  const url = new URL(normalizedFallback);
+  url.searchParams.set('redirect', redirect);
+  return url.toString();
 }
 
 export function isLocalAuthHost(hostname: unknown): boolean {

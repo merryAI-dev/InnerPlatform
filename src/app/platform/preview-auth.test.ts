@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildPreviewAuthFallbackUrl,
   buildPreviewAuthBlockedMessage,
   isLocalAuthHost,
   isStableVercelAliasHost,
@@ -52,5 +53,19 @@ describe('preview-auth', () => {
       'inner-platform-bbig48qgr-merryai-devs-projects.vercel.app',
       { VITE_FIREBASE_AUTH_FALLBACK_URL: 'https://inner-platform-git-ft-izzie-merryai-devs-projects.vercel.app' },
     )).toContain('고정 preview 주소');
+  });
+
+  it('preserves requested path when building preview fallback url', () => {
+    expect(buildPreviewAuthFallbackUrl(
+      'https://inner-platform.vercel.app',
+      '/users?tab=members',
+    )).toBe('https://inner-platform.vercel.app/?redirect=%2Fusers%3Ftab%3Dmembers');
+  });
+
+  it('ignores invalid redirect paths when building preview fallback url', () => {
+    expect(buildPreviewAuthFallbackUrl(
+      'https://inner-platform.vercel.app',
+      'https://evil.example.com',
+    )).toBe('https://inner-platform.vercel.app');
   });
 });

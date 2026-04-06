@@ -51,12 +51,23 @@ export function resolveHomePath(role: unknown, preferredWorkspace?: WorkspaceId 
   return '/portal';
 }
 
-function normalizeRequestedPath(value: unknown): string {
+export function normalizeRequestedPath(value: unknown): string {
   if (typeof value !== 'string') return '';
   const trimmed = value.trim();
   if (!trimmed.startsWith('/')) return '';
   if (trimmed === '/login' || trimmed === '/workspace-select') return '';
   return trimmed;
+}
+
+export function resolveRequestedRedirectPath(
+  stateFrom?: unknown,
+  search?: unknown,
+): string {
+  const fromState = normalizeRequestedPath(stateFrom);
+  if (fromState) return fromState;
+  const searchText = typeof search === 'string' ? search : '';
+  const params = new URLSearchParams(searchText);
+  return normalizeRequestedPath(params.get('redirect'));
 }
 
 export function resolvePostLoginPath(
