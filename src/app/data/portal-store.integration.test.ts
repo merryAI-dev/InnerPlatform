@@ -11,6 +11,7 @@ import {
   areExpenseSheetRowsEqual,
   reconcileExpenseSheetRowsFromSelection,
   reconcileExpenseSheetTabsFromSnapshot,
+  syncExpenseIntakeEvidenceState,
   shouldHydrateDevHarnessPortalSnapshot,
 } from './portal-store';
 
@@ -261,5 +262,55 @@ describe('portal-store expense sheet reconciliation helpers', () => {
       projectId: settlementProjectId,
       hydratedProjectId: settlementProjectId,
     })).toBe(false);
+  });
+
+  it('updates intake evidence and projected weekly evidence fields without replacing the row', () => {
+    const projectedItem = makeIntakeItem({
+      matchState: 'AUTO_CONFIRMED',
+      projectionStatus: 'PROJECTED_WITH_PENDING_EVIDENCE',
+      existingExpenseSheetId: 'default',
+      existingExpenseRowTempId: 'row-001',
+      manualFields: {
+        expenseAmount: 120000,
+        budgetCategory: '여비',
+        budgetSubCategory: '교통비',
+        cashflowCategory: 'TRAVEL',
+      },
+    });
+
+    const projectedRows = [makeRow({
+      tempId: 'row-001',
+      sourceTxId: 'bank:bank-fp-001',
+    })];
+
+    const result = syncExpenseIntakeEvidenceState({
+      item: projectedItem,
+      updates: {
+        manualFields: {
+          evidenceCompletedDesc: '출장신청서',
+        },
+      },
+      evidenceRequiredMap: {
+        '여비|교통비': '출장신청서, 영수증',
+      },
+      expenseSheets: [{
+        id: 'default',
+        name: '기본 탭',
+        rows: projectedRows,
+        order: 0,
+      }],
+      activeExpenseSheetId: 'default',
+      activeRows: projectedRows,
+      now: '2026-04-06T01:00:00.000Z',
+    });
+
+    expect(result.item.manualFields.evidenceCompletedDesc).toBe('출장신청서');
+    expect(result.item.evidenceStatus).toBe('PARTIAL');
+    expect(result.expenseSheets[0]?.rows[0]?.sourceTxId).toBe('bank:bank-fp-001');
+    expect(result.expenseSheets[0]?.rows[0]?.cells[17]).toBe('출장신청서, 영수증');
+    expect(result.expenseSheets[0]?.rows[0]?.cells[18]).toBe('출장신청서');
+    expect(result.expenseSheets[0]?.rows[0]?.cells[19]).toBe('영수증');
+    expect(result.expenseSheets[0]?.rows[0]?.cells[5]).toBe('여비');
+    expect(result.activeRows?.[0]?.tempId).toBe('row-001');
   });
 });
