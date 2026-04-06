@@ -55,6 +55,7 @@ import {
 import { prepareExpenseSheetRowsForSave } from './portal-store.settlement';
 import {
   buildExpenseSheetPersistenceDoc,
+  upsertExpenseSheetTabRows,
   buildWeeklySubmissionStatusPatch,
   sanitizeExpenseSheetName,
   serializeExpenseSheetRowForPersistence,
@@ -1488,44 +1489,33 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     }));
     if (isDevHarnessUser || !db || !portalUser?.projectId) {
       setExpenseSheetRows(sanitizedRows as ImportRow[]);
-      setExpenseSheets((prev) => {
-        const next = [...prev];
-        const index = next.findIndex((sheet) => sheet.id === activeSheetId);
-        const draftSheet = {
-          id: activeSheetId,
-          name: activeSheetName,
-          rows: sanitizedRows as ImportRow[],
-          order: activeSheet?.order || (activeSheetId === 'default' ? 0 : next.length + 1),
-          createdAt: activeSheet?.createdAt || now,
-          updatedAt: now,
-        };
-        if (index >= 0) {
-          next[index] = draftSheet;
-        } else {
-          next.push(draftSheet);
-        }
-        return next;
-      });
+      setExpenseSheets((prev) => upsertExpenseSheetTabRows({
+        sheets: prev,
+        sheetId: activeSheetId,
+        sheetName: activeSheetName,
+        order: activeSheet?.order || (activeSheetId === 'default' ? 0 : prev.length + 1),
+        rows: sanitizedRows as ImportRow[],
+        now,
+        createdAt: activeSheet?.createdAt,
+      }));
       writeDevHarnessPortalSnapshot(portalUser?.projectId || '', {
         activeExpenseSheetId: activeSheetId,
-        expenseSheets: [
-          ...expenseSheets.filter((sheet) => sheet.id !== activeSheetId).map((sheet) => ({
+        expenseSheets: upsertExpenseSheetTabRows({
+          sheets: expenseSheets.map((sheet) => ({
             id: sheet.id,
             name: sheet.name,
-            rows: sheet.rows,
+            rows: sheet.rows || [],
             order: sheet.order,
             createdAt: sheet.createdAt,
             updatedAt: sheet.updatedAt,
           })),
-          {
-            id: activeSheetId,
-            name: activeSheetName,
-            rows: sanitizedRows as ImportRow[],
-            order: activeSheet?.order || (activeSheetId === 'default' ? 0 : expenseSheets.length + 1),
-            createdAt: activeSheet?.createdAt || now,
-            updatedAt: now,
-          },
-        ].sort((a, b) => a.order - b.order),
+          sheetId: activeSheetId,
+          sheetName: activeSheetName,
+          order: activeSheet?.order || (activeSheetId === 'default' ? 0 : expenseSheets.length + 1),
+          rows: sanitizedRows as ImportRow[],
+          now,
+          createdAt: activeSheet?.createdAt,
+        }),
         sheetSources,
         weeklySubmissionStatuses,
       });
@@ -1547,6 +1537,17 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       payload,
       { merge: true },
     );
+    const nextSheets = upsertExpenseSheetTabRows({
+      sheets: expenseSheetsRef.current,
+      sheetId: activeSheetId,
+      sheetName: activeSheetName,
+      order: activeSheet?.order || (activeSheetId === 'default' ? 0 : expenseSheetsRef.current.length + 1),
+      rows: sanitizedRows as ImportRow[],
+      now,
+      createdAt: activeSheet?.createdAt,
+    });
+    expenseSheetsRef.current = nextSheets;
+    setExpenseSheets(nextSheets);
     setExpenseSheetRows(sanitizedRows as ImportRow[]);
     return sanitizedRows as ImportRow[];
   }, [

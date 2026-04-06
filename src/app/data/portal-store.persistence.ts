@@ -1,6 +1,15 @@
 import type { ImportRow } from '../platform/settlement-csv';
 import type { WeeklySubmissionStatus } from './types';
 
+interface ExpenseSheetTabSnapshot {
+  id: string;
+  name: string;
+  order: number;
+  rows: ImportRow[];
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export function serializeExpenseSheetRowForPersistence(row: ImportRow) {
   return {
     tempId: row.tempId || `imp-${Date.now()}`,
@@ -48,6 +57,36 @@ export function buildExpenseSheetPersistenceDoc(params: {
     updatedAt: params.now,
     updatedBy: params.updatedBy,
   };
+}
+
+export function upsertExpenseSheetTabRows(params: {
+  sheets: ExpenseSheetTabSnapshot[];
+  sheetId: string;
+  sheetName: string;
+  order: number;
+  rows: ImportRow[];
+  now: string;
+  createdAt?: string;
+}): ExpenseSheetTabSnapshot[] {
+  const nextSheet: ExpenseSheetTabSnapshot = {
+    id: params.sheetId,
+    name: sanitizeExpenseSheetName(params.sheetName, params.sheetId === 'default' ? '기본 탭' : '새 탭'),
+    order: params.order,
+    rows: params.rows,
+    createdAt: params.createdAt || params.now,
+    updatedAt: params.now,
+  };
+  const nextSheets = [...params.sheets];
+  const index = nextSheets.findIndex((sheet) => sheet.id === params.sheetId);
+  if (index >= 0) {
+    nextSheets[index] = nextSheet;
+  } else {
+    nextSheets.push(nextSheet);
+  }
+  return nextSheets.sort((left, right) => {
+    if (left.order !== right.order) return left.order - right.order;
+    return String(left.createdAt || left.updatedAt || '').localeCompare(String(right.createdAt || right.updatedAt || ''));
+  });
 }
 
 export function buildWeeklySubmissionStatusPatch(params: {
