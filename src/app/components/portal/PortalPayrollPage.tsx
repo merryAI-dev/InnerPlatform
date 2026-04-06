@@ -1,5 +1,13 @@
-import { useMemo, useState } from 'react';
-import { CalendarDays, CheckCircle2, CircleDollarSign, Info, AlertTriangle } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router';
+import { CalendarDays, CheckCircle2, CircleDollarSign, Info, AlertTriangle, ArrowRight } from 'lucide-react';
+import {
+  collection,
+  onSnapshot,
+  query,
+  where,
+  type Unsubscribe,
+} from 'firebase/firestore';
 import { toast } from 'sonner';
 import { PageHeader } from '../layout/PageHeader';
 import { Card, CardContent } from '../ui/card';
@@ -9,9 +17,17 @@ import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { usePortalStore } from '../../data/portal-store';
 import { usePayroll } from '../../data/payroll-store';
+import { TRANSACTIONS } from '../../data/mock-data';
 import { addMonthsToYearMonth, computePlannedPayDate, getSeoulTodayIso, subtractBusinessDays } from '../../platform/business-days';
+import { fmtShort } from '../../data/budget-data';
+import { featureFlags } from '../../config/feature-flags';
+import { useFirebase } from '../../lib/firebase-context';
+import { getOrgCollectionPath } from '../../lib/firebase';
+import type { Transaction } from '../../data/types';
+import { resolveProjectPayrollLiquidity, type PayrollLiquidityQueueItem } from '../../platform/payroll-liquidity';
 
 export function PortalPayrollPage() {
+  const navigate = useNavigate();
   const { portalUser, myProject } = usePortalStore();
   const {
     schedules,
@@ -21,6 +37,9 @@ export function PortalPayrollPage() {
     acknowledgePayrollRun,
     acknowledgeMonthlyClose,
   } = usePayroll();
+  const { db, isOnline, orgId } = useFirebase();
+  const firestoreEnabled = featureFlags.firestoreCoreEnabled && isOnline && !!db;
+  const [liveTransactions, setLiveTransactions] = useState<Transaction[] | null>(null);
 
   const today = getSeoulTodayIso();
   const yearMonth = today.slice(0, 7);
@@ -30,6 +49,10 @@ export function PortalPayrollPage() {
   const schedule = useMemo(() => schedules.find((s) => s.projectId === projectId) || null, [projectId, schedules]);
   const run = useMemo(() => runs.find((r) => r.projectId === projectId && r.yearMonth === yearMonth) || null, [projectId, runs, yearMonth]);
   const monthlyClosePrev = useMemo(() => monthlyCloses.find((c) => c.projectId === projectId && c.yearMonth === prevYearMonth) || null, [monthlyCloses, prevYearMonth, projectId]);
+  const projectTransactions = useMemo(() => {
+    const source = liveTransactions ?? TRANSACTIONS;
+    return source.filter((tx) => tx.projectId === projectId);
+  }, [liveTransactions, projectId]);
 
   const [dayInput, setDayInput] = useState<string>(schedule ? String(schedule.dayOfMonth) : '');
   const day = Math.max(1, Math.min(31, Number.parseInt(dayInput || '0', 10) || 0));
@@ -43,6 +66,42 @@ export function PortalPayrollPage() {
 
   const needsPayrollAck = !!(run && today >= run.noticeDate && !run.acknowledged);
   const needsMonthlyCloseAck = !!(monthlyClosePrev && monthlyClosePrev.status === 'DONE' && !monthlyClosePrev.acknowledged);
+  const queueItems = useMemo(() => (
+    myProject
+      ? resolveProjectPayrollLiquidity({
+          project: myProject,
+          runs,
+          transactions: projectTransactions,
+          today,
+        })
+      : []
+  ), [myProject, projectTransactions, runs, today]);
+  const activeQueueItem = queueItems[0] || null;
+
+  useEffect(() => {
+    if (!projectId || !firestoreEnabled || !db) {
+      setLiveTransactions(null);
+      return;
+    }
+
+    const unsubs: Unsubscribe[] = [];
+    const txQuery = query(
+      collection(db, getOrgCollectionPath(orgId, 'transactions')),
+      where('projectId', '==', projectId),
+    );
+
+    unsubs.push(
+      onSnapshot(txQuery, (snap) => {
+        setLiveTransactions(snap.docs.map((doc) => doc.data() as Transaction));
+      }, (err) => {
+        console.error('[PortalPayrollPage] transactions listen error:', err);
+        toast.error('인건비 지급용 거래 내역을 불러오지 못했습니다');
+        setLiveTransactions(null);
+      }),
+    );
+
+    return () => unsubs.forEach((unsub) => unsub());
+  }, [db, firestoreEnabled, orgId, projectId]);
 
   async function onSave() {
     if (!projectId) return;
@@ -86,8 +145,8 @@ export function PortalPayrollPage() {
       <PageHeader
         icon={CircleDollarSign}
         iconGradient="linear-gradient(135deg, #0d9488 0%, #059669 100%)"
-        title="인건비 지급일 & 공지"
-        description="사업별 인건비 지급일을 등록하면, 지급일 3영업일 전에 공지가 자동으로 노출됩니다."
+        title="인건비 지급 준비"
+        description="지급일을 등록해 두면 지급 창 D-3부터 D+3까지 잔액 여력과 지급 확정 상태를 함께 점검할 수 있습니다."
         badge={myProject?.shortName || myProject?.id || ''}
       />
 
@@ -142,6 +201,12 @@ export function PortalPayrollPage() {
           </CardContent>
         </Card>
       )}
+
+      <PortalPayrollLiquidityDetail
+        item={activeQueueItem}
+        onOpenBankStatements={() => navigate('/portal/bank-statements')}
+        onOpenWeeklyExpenses={() => navigate('/portal/weekly-expenses')}
+      />
 
       <Card>
         <CardContent className="p-4 space-y-4">
@@ -216,6 +281,11 @@ export function PortalPayrollPage() {
                 <p style={{ fontWeight: 800 }} className="mt-1">{run.paidStatus}</p>
               </div>
             </div>
+            {!activeQueueItem && (
+              <p className="mt-3 text-[11px] text-muted-foreground">
+                현재는 지급 창 바깥입니다. 지급일 3일 전부터 이 화면에 잔액 strip과 위험 상태가 자동으로 열립니다.
+              </p>
+            )}
           </CardContent>
         </Card>
       )}
@@ -223,3 +293,117 @@ export function PortalPayrollPage() {
   );
 }
 
+const PAYROLL_STATUS_STYLES: Record<PayrollLiquidityQueueItem['status'], string> = {
+  insufficient_balance: 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300',
+  payment_unconfirmed: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
+  baseline_missing: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
+  balance_unknown: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
+  clear: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
+};
+
+function payrollStatusLabel(status: PayrollLiquidityQueueItem['status']) {
+  if (status === 'insufficient_balance') return '잔액 부족 위험';
+  if (status === 'payment_unconfirmed') return '지급 확인 필요';
+  if (status === 'baseline_missing') return '기준 지급액 없음';
+  if (status === 'balance_unknown') return '잔액 데이터 없음';
+  return '이번 지급 창 안정';
+}
+
+function PortalPayrollLiquidityDetail({
+  item,
+  onOpenBankStatements,
+  onOpenWeeklyExpenses,
+}: {
+  item: PayrollLiquidityQueueItem | null;
+  onOpenBankStatements: () => void;
+  onOpenWeeklyExpenses: () => void;
+}) {
+  if (!item) {
+    return (
+      <Card data-testid="portal-payroll-detail-empty">
+        <CardContent className="p-4">
+          <p className="text-[13px] text-foreground" style={{ fontWeight: 700 }}>
+            이번 지급 창이 아직 열리지 않았습니다.
+          </p>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            지급일 D-3부터 D+3까지 잔액 strip과 위험 경고가 자동으로 이 화면에 열립니다.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card data-testid="portal-payroll-liquidity-detail">
+      <CardContent className="p-4 space-y-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2">
+              <Badge className={`text-[10px] ${PAYROLL_STATUS_STYLES[item.status]}`}>
+                {payrollStatusLabel(item.status)}
+              </Badge>
+              <span className="text-[11px] text-muted-foreground">
+                지급 창 {item.windowStart} ~ {item.windowEnd}
+              </span>
+            </div>
+            <p className="text-[16px] text-foreground" style={{ fontWeight: 800, letterSpacing: '-0.02em' }}>
+              지급일 {item.plannedPayDate}
+            </p>
+            <p className="text-[11px] text-muted-foreground">{item.statusReason}</p>
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-[11px] lg:min-w-[260px]">
+            <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2.5">
+              <p className="text-muted-foreground">직전 확정 지급액</p>
+              <p className="mt-1 text-foreground" style={{ fontWeight: 700 }}>
+                {item.expectedPayrollAmount !== null ? `${fmtShort(item.expectedPayrollAmount)}원` : '-'}
+              </p>
+            </div>
+            <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2.5">
+              <p className="text-muted-foreground">현재 잔액</p>
+              <p className="mt-1 text-foreground" style={{ fontWeight: 700 }}>
+                {item.currentBalance !== null ? `${fmtShort(item.currentBalance)}원` : '-'}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <p className="text-[12px] text-foreground" style={{ fontWeight: 700 }}>
+            D-3 ~ D+3 잔액 strip
+          </p>
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-7">
+            {item.dayBalances.map((entry) => {
+              const isRisk = item.expectedPayrollAmount !== null
+                && entry.balance !== null
+                && entry.balance < item.expectedPayrollAmount;
+              return (
+                <div
+                  key={entry.date}
+                  className={`rounded-xl border px-3 py-3 ${
+                    isRisk
+                      ? 'border-rose-200/70 bg-rose-50/70 dark:border-rose-900/40 dark:bg-rose-950/10'
+                      : 'border-border/60 bg-muted/20'
+                  }`}
+                >
+                  <p className="text-[10px] text-muted-foreground">{entry.date.slice(5)}</p>
+                  <p className="mt-1 text-[12px] text-foreground" style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                    {entry.balance !== null ? `${fmtShort(entry.balance)}원` : '-'}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" className="h-8 text-[11px] gap-1.5" onClick={onOpenBankStatements}>
+            통장내역 열기 <ArrowRight className="h-3.5 w-3.5" />
+          </Button>
+          <Button size="sm" variant="outline" className="h-8 text-[11px] gap-1.5" onClick={onOpenWeeklyExpenses}>
+            사업비 입력(주간) 열기 <ArrowRight className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}

@@ -48,6 +48,11 @@ import {
 import { getSeoulTodayIso } from '../../platform/business-days';
 import { findWeekForDate, getMonthMondayWeeks } from '../../platform/cashflow-weeks';
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
+import {
+  isPayrollLiquidityRiskStatus,
+  resolvePayrollLiquidityQueue,
+  type PayrollLiquidityQueueItem,
+} from '../../platform/payroll-liquidity';
 
 function fmt(value: unknown) {
   const n = toFiniteNumber(value);
@@ -99,6 +104,22 @@ const txStateStyles: Record<string, { bg: string; text: string }> = {
   APPROVED: { bg: 'bg-emerald-50 dark:bg-emerald-950/30', text: 'text-emerald-700 dark:text-emerald-400' },
   REJECTED: { bg: 'bg-rose-50 dark:bg-rose-950/30', text: 'text-rose-700 dark:text-rose-400' },
 };
+
+const payrollQueueBadgeStyles: Record<PayrollLiquidityQueueItem['status'], string> = {
+  insufficient_balance: 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300',
+  payment_unconfirmed: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
+  baseline_missing: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
+  balance_unknown: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
+  clear: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
+};
+
+function payrollQueueLabel(status: PayrollLiquidityQueueItem['status']) {
+  if (status === 'insufficient_balance') return '잔액 부족 위험';
+  if (status === 'payment_unconfirmed') return '지급 확인 필요';
+  if (status === 'baseline_missing') return '기준 지급액 없음';
+  if (status === 'balance_unknown') return '잔액 데이터 없음';
+  return '안정';
+}
 
 // ── KPI Metric Card ──
 function MetricCard({ icon: Icon, label, value, sub, accent, onClick }: {
@@ -172,6 +193,12 @@ export function DashboardPage() {
     const unconfirmed = thisMonth.filter((r) => today >= r.plannedPayDate && r.paidStatus !== 'CONFIRMED').length;
     return { due, unacked, unconfirmed };
   }, [runs, today, yearMonth]);
+  const payrollRiskQueue = useMemo(() => resolvePayrollLiquidityQueue({
+    projects,
+    runs,
+    transactions,
+    today,
+  }).filter((item) => isPayrollLiquidityRiskStatus(item.status)), [projects, runs, transactions, today]);
 
   const hrSummary = useMemo(() => {
     const unresolved = announcements.filter((a) => !a.resolved);
@@ -422,7 +449,7 @@ export function DashboardPage() {
       )}
 
       {/* HR + Payroll Highlights */}
-      {(hrSummary.unresolved.length > 0 || payrollSummary.due > 0 || payrollSummary.unacked > 0) && (
+      {(hrSummary.unresolved.length > 0 || payrollRiskQueue.length > 0) && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <Card className="shadow-sm border-border/50">
             <CardHeader className="pb-2">
@@ -481,7 +508,7 @@ export function DashboardPage() {
                   <div className="w-6 h-6 rounded-md bg-emerald-50 dark:bg-emerald-950/40 flex items-center justify-center">
                     <CircleDollarSign className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                   </div>
-                  인건비/월간정산 (요약)
+                  인건비 지급 Queue
                 </span>
                 <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => navigate('/payroll')}>
                   운영 보기
@@ -490,25 +517,39 @@ export function DashboardPage() {
             </CardHeader>
             <CardContent className="space-y-2">
               <div className="text-[11px] text-muted-foreground">
-                기준 월: <span style={{ fontWeight: 700 }} className="text-foreground">{yearMonth}</span>
+                기준일: <span style={{ fontWeight: 700 }} className="text-foreground">{today}</span>
               </div>
-              <div className="grid grid-cols-3 gap-2">
-                {[
-                  { label: '공지 대상', value: payrollSummary.due, color: '#4f46e5' },
-                  { label: '미인지', value: payrollSummary.unacked, color: '#e11d48' },
-                  { label: '미확정', value: payrollSummary.unconfirmed, color: '#d97706' },
-                ].map((k) => (
-                  <div key={k.label} className="p-2.5 rounded-lg bg-muted/30 border border-border/40 text-center">
-                    <p className="text-[9px] text-muted-foreground">{k.label}</p>
-                    <p className="text-[16px]" style={{ fontWeight: 800, color: k.value > 0 ? k.color : undefined }}>
-                      {k.value}
-                    </p>
-                  </div>
-                ))}
-              </div>
-              <p className="text-[10px] text-muted-foreground">
-                지급일 3영업일 전부터 PM 확인이 필요하며, 거래 자동매칭 후 Admin이 지급을 확정합니다.
-              </p>
+              {payrollRiskQueue.length === 0 ? (
+                <div className="rounded-lg border border-emerald-200/60 bg-emerald-50/50 p-3 text-[12px] text-emerald-800">
+                  현재 열린 지급 창에서 바로 대응이 필요한 인건비 위험은 없습니다.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {payrollRiskQueue.slice(0, 3).map((item) => (
+                    <div
+                      key={item.runId}
+                      className="rounded-lg border border-border/40 bg-muted/30 p-3"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-[12px] truncate" style={{ fontWeight: 700 }}>
+                            {item.projectShortName} · {item.plannedPayDate}
+                          </p>
+                          <p className="text-[10px] text-muted-foreground truncate">
+                            예상 {item.expectedPayrollAmount !== null ? `${fmt(item.expectedPayrollAmount)}원` : '-'} · 최저 잔액 {item.worstBalance !== null ? `${fmt(item.worstBalance)}원` : '-'}
+                          </p>
+                        </div>
+                        <Badge className={`text-[9px] h-4 px-1.5 shrink-0 ${payrollQueueBadgeStyles[item.status]}`}>
+                          {payrollQueueLabel(item.status)}
+                        </Badge>
+                      </div>
+                    </div>
+                  ))}
+                  {payrollRiskQueue.length > 3 && (
+                    <p className="text-[10px] text-muted-foreground">외 {payrollRiskQueue.length - 3}건</p>
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
