@@ -55,7 +55,9 @@ export function PortalBankStatementPage() {
     saveBankStatementRows,
     expenseSheetRows,
     expenseIntakeItems,
+    evidenceRequiredMap,
     updateExpenseIntakeItem,
+    projectExpenseIntakeItem,
     weeklySubmissionStatuses,
   } = usePortalStore();
   const [columns, setColumns] = useState<string[]>(bankStatementRows?.columns || []);
@@ -610,6 +612,8 @@ export function PortalBankStatementPage() {
         onOpenChange={setTriageOpen}
         items={expenseIntakeItems}
         onSaveDraft={updateExpenseIntakeItem}
+        onProjectItem={projectExpenseIntakeItem}
+        evidenceRequiredMap={evidenceRequiredMap}
       />
     </div>
   );

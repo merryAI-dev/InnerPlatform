@@ -50,11 +50,15 @@ import {
   type BankStatementSheet,
 } from '../platform/bank-statement';
 import { normalizeSpace } from '../platform/csv-utils';
+import { isBankImportManualFieldsComplete, resolveBankImportProjectionStatus } from '../platform/bank-import-triage';
 import {
+  resolveEvidenceRequiredDesc,
 } from '../platform/settlement-sheet-prepare';
+import { resolveEvidenceChecklist } from '../platform/evidence-helpers';
 import { prepareExpenseSheetRowsForSave } from './portal-store.settlement';
 import {
   buildExpenseSheetPersistenceDoc,
+  upsertExpenseSheetProjectionRowBySourceTxId,
   upsertExpenseSheetTabRows,
   buildWeeklySubmissionStatusPatch,
   sanitizeExpenseSheetName,
@@ -2083,6 +2087,14 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         { merge: true },
       )),
     );
+    setExpenseIntakeItems((prev) => {
+      const nextMap = new Map(prev.map((item) => [item.id, item] as const));
+      normalizedItems.forEach((item) => {
+        nextMap.set(item.id, item);
+      });
+      return Array.from(nextMap.values())
+        .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')));
+    });
   }, [db, isDevHarnessUser, orgId, portalUser?.projectId]);
 
   const updateExpenseIntakeItem = useCallback(async (id: string, updates: Partial<BankImportIntakeItem>) => {
@@ -2111,32 +2123,108 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       buildBankImportIntakeDoc({ orgId, item: mergedCandidate }),
       { merge: true },
     );
+    setExpenseIntakeItems((prev) => prev
+      .map((item) => (item.id === id ? mergedCandidate : item))
+      .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || ''))));
   }, [db, expenseIntakeItems, isDevHarnessUser, orgId, portalUser?.projectId]);
 
   const projectExpenseIntakeItem = useCallback(async (id: string) => {
     const currentItem = expenseIntakeItems.find((item) => item.id === id);
     if (!currentItem) return;
-    const projected = normalizeBankImportIntakeItem({
-      ...currentItem,
-      projectionStatus: currentItem.evidenceStatus === 'COMPLETE'
-        ? 'PROJECTED'
-        : 'PROJECTED_WITH_PENDING_EVIDENCE',
+    if (!isBankImportManualFieldsComplete(currentItem.manualFields)) return;
+    const now = new Date().toISOString();
+    const evidenceRequiredDesc = resolveEvidenceRequiredDesc(
+      evidenceRequiredMap,
+      currentItem.manualFields.budgetCategory || '',
+      currentItem.manualFields.budgetSubCategory || '',
+    );
+    const evidenceChecklist = resolveEvidenceChecklist({
+      evidenceRequiredDesc,
+      evidenceCompletedDesc: currentItem.manualFields.evidenceCompletedDesc || '',
+      evidenceCompletedManualDesc: currentItem.manualFields.evidenceCompletedDesc || '',
+      evidenceAutoListedDesc: '',
+      evidenceDriveLink: '',
+      evidenceDriveFolderId: '',
     });
-    if (!projected) return;
+    const normalizedProjectedItem = normalizeBankImportIntakeItem({
+      ...currentItem,
+      matchState: 'AUTO_CONFIRMED',
+      projectionStatus: resolveBankImportProjectionStatus({
+        matchState: 'AUTO_CONFIRMED',
+        manualFields: currentItem.manualFields,
+        evidenceStatus: evidenceChecklist.status,
+      }),
+      evidenceStatus: evidenceChecklist.status,
+      existingExpenseSheetId: currentItem.existingExpenseSheetId || activeExpenseSheetIdRef.current || 'default',
+      updatedAt: now,
+    });
+    if (!normalizedProjectedItem) return;
+    const targetSheetId = normalizedProjectedItem.existingExpenseSheetId || activeExpenseSheetIdRef.current || 'default';
+    const targetSheet = expenseSheetsRef.current.find((sheet) => sheet.id === targetSheetId) || null;
+    const targetRows = targetSheet?.rows || (targetSheetId === activeExpenseSheetIdRef.current ? expenseSheetRowsRef.current : null);
+    const projection = upsertExpenseSheetProjectionRowBySourceTxId({
+      rows: targetRows,
+      item: normalizedProjectedItem,
+      evidenceRequiredDesc,
+    });
+    const projectedItem = normalizeBankImportIntakeItem({
+      ...normalizedProjectedItem,
+      existingExpenseSheetId: targetSheetId,
+      existingExpenseRowTempId: projection.projectedRow.tempId,
+    });
+    if (!projectedItem) return;
+    const nextSheets = upsertExpenseSheetTabRows({
+      sheets: expenseSheetsRef.current,
+      sheetId: targetSheetId,
+      sheetName: sanitizeExpenseSheetName(targetSheet?.name, targetSheetId === 'default' ? '기본 탭' : '새 탭'),
+      order: targetSheet?.order || (targetSheetId === 'default' ? 0 : expenseSheetsRef.current.length + 1),
+      rows: projection.rows,
+      now,
+      createdAt: targetSheet?.createdAt,
+    });
 
     if (isDevHarnessUser || !db || !portalUser?.projectId) {
+      expenseSheetsRef.current = nextSheets;
+      setExpenseSheets(nextSheets);
+      if (targetSheetId === activeExpenseSheetIdRef.current) {
+        setExpenseSheetRows(projection.rows);
+      }
       setExpenseIntakeItems((prev) => prev
-        .map((item) => (item.id === id ? projected : item))
+        .map((item) => (item.id === id ? projectedItem : item))
         .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || ''))));
       return;
     }
 
+    const expensePayload = buildExpenseSheetPersistenceDoc({
+      orgId,
+      projectId: portalUser.projectId,
+      activeSheetId: targetSheetId,
+      activeSheetName: sanitizeExpenseSheetName(targetSheet?.name, targetSheetId === 'default' ? '기본 탭' : '새 탭'),
+      order: targetSheet?.order || (targetSheetId === 'default' ? 0 : expenseSheetsRef.current.length + 1),
+      rows: projection.rows,
+      createdAt: targetSheet?.createdAt,
+      now,
+      updatedBy: portalUser.name || authUser?.name || '',
+    });
     await setDoc(
-      doc(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/expense_intake/${id}`),
-      buildBankImportIntakeDoc({ orgId, item: projected }),
+      doc(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/expense_sheets/${targetSheetId}`),
+      expensePayload,
       { merge: true },
     );
-  }, [db, expenseIntakeItems, isDevHarnessUser, orgId, portalUser?.projectId]);
+    await setDoc(
+      doc(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/expense_intake/${id}`),
+      buildBankImportIntakeDoc({ orgId, item: projectedItem }),
+      { merge: true },
+    );
+    expenseSheetsRef.current = nextSheets;
+    setExpenseSheets(nextSheets);
+    if (targetSheetId === activeExpenseSheetIdRef.current) {
+      setExpenseSheetRows(projection.rows);
+    }
+    setExpenseIntakeItems((prev) => prev
+      .map((item) => (item.id === id ? projectedItem : item))
+      .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || ''))));
+  }, [activeExpenseSheetId, authUser?.name, db, evidenceRequiredMap, expenseIntakeItems, isDevHarnessUser, orgId, portalUser?.name, portalUser?.projectId]);
 
   const persistTransaction = useCallback(async (txData: Transaction) => {
     if (!db) return;

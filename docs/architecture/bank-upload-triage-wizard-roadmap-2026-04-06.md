@@ -10,8 +10,8 @@
 - [x] Phase 2: Intake persistence layer
 - [x] Phase 3: Non-destructive bank upload
 - [x] Phase 4: Triage wizard UI
-- [ ] Phase 5: Projection upsert by `sourceTxId`
-- [ ] Phase 6: Non-blocking evidence integration
+- [x] Phase 5: Projection upsert by `sourceTxId`
+- [x] Phase 6: Non-blocking evidence integration
 - [ ] Phase 7: QA and release gates
 
 ## Phase 1: Core Domain Contracts
@@ -115,7 +115,7 @@
 
 ## Phase 5: Projection Upsert By Source Identity
 
-**Status:** in progress
+**Status:** completed
 
 **Files**
 - `src/app/data/portal-store.persistence.ts`
@@ -132,7 +132,13 @@
 - update manual fields from intake state
 - never replace unrelated rows
 
+**Verification**
+- `npx vitest run src/app/data/portal-store.persistence.test.ts src/app/platform/bank-statement.test.ts src/app/data/portal-store.intake.test.ts src/app/data/portal-store.integration.test.ts`
+- `npm run build`
+
 ## Phase 6: Evidence Integration Without Blocking Projection
+
+**Status:** completed
 
 **Files**
 - `src/app/components/portal/BankImportTriageWizard.tsx`
@@ -146,7 +152,13 @@
 - `PROJECTED_WITH_PENDING_EVIDENCE` state
 - immediate completed/pending evidence list update
 
+**Verification**
+- `npx vitest run src/app/data/portal-store.persistence.test.ts src/app/platform/bank-statement.test.ts src/app/data/portal-store.intake.test.ts src/app/data/portal-store.integration.test.ts`
+- `npm run build`
+
 ## Phase 7: QA And Release Gates
+
+**Status:** in progress
 
 **Files**
 - `tests/e2e/bank-upload-triage-wizard.spec.ts`

@@ -1,5 +1,7 @@
-import type { ImportRow } from '../platform/settlement-csv';
-import type { WeeklySubmissionStatus } from './types';
+import { createEmptyImportRow, SETTLEMENT_COLUMNS, type ImportRow } from '../platform/settlement-csv';
+import { findWeekForDate, getYearMondayWeeks } from '../platform/cashflow-weeks';
+import { resolveEvidenceChecklist } from '../platform/evidence-helpers';
+import type { BankImportIntakeItem, CashflowCategory, WeeklySubmissionStatus } from './types';
 
 interface ExpenseSheetTabSnapshot {
   id: string;
@@ -8,6 +10,133 @@ interface ExpenseSheetTabSnapshot {
   rows: ImportRow[];
   createdAt?: string;
   updatedAt?: string;
+}
+
+function findColumnIndex(header: string): number {
+  return SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === header);
+}
+
+function cashflowCategoryToRowLabel(category: CashflowCategory | undefined): string {
+  switch (category) {
+    case 'CONTRACT_PAYMENT':
+    case 'INTERIM_PAYMENT':
+    case 'FINAL_PAYMENT':
+      return '매출액(입금)';
+    case 'LABOR_COST':
+      return 'MYSC인건비';
+    case 'TAX_PAYMENT':
+      return '매입부가세';
+    case 'VAT_REFUND':
+      return '매출부가세(입금)';
+    case 'MISC_INCOME':
+      return '팀지원금(입금)';
+    case 'OUTSOURCING':
+    case 'EQUIPMENT':
+    case 'TRAVEL':
+    case 'SUPPLIES':
+    case 'COMMUNICATION':
+    case 'RENT':
+    case 'UTILITY':
+    case 'INSURANCE':
+    case 'MISC_EXPENSE':
+    default:
+      return '직접사업비';
+  }
+}
+
+function buildProjectionRowFromIntake(
+  item: BankImportIntakeItem,
+  existingRow?: ImportRow | null,
+  evidenceRequiredDesc?: string,
+): ImportRow {
+  const base = existingRow ? {
+    ...existingRow,
+    cells: Array.isArray(existingRow.cells)
+      ? SETTLEMENT_COLUMNS.map((_, index) => String(existingRow.cells[index] ?? ''))
+      : SETTLEMENT_COLUMNS.map(() => ''),
+  } : createEmptyImportRow();
+  const cells = [...base.cells];
+  const dateIdx = findColumnIndex('거래일시');
+  const weekIdx = findColumnIndex('해당 주차');
+  const budgetIdx = findColumnIndex('비목');
+  const subBudgetIdx = findColumnIndex('세목');
+  const cashflowIdx = findColumnIndex('cashflow항목');
+  const balanceIdx = findColumnIndex('통장잔액');
+  const bankAmountIdx = findColumnIndex('통장에 찍힌 입/출금액');
+  const depositIdx = findColumnIndex('입금액(사업비,공급가액,은행이자)');
+  const expenseIdx = findColumnIndex('사업비 사용액');
+  const counterpartyIdx = findColumnIndex('지급처');
+  const memoIdx = findColumnIndex('상세 적요');
+  const completedIdx = findColumnIndex('실제 구비 완료된 증빙자료 리스트');
+  const pendingIdx = findColumnIndex('준비필요자료');
+  const requiredIdx = findColumnIndex('필수증빙자료 리스트');
+  const evidenceChecklist = resolveEvidenceChecklist({
+    evidenceRequiredDesc,
+    evidenceCompletedDesc: item.manualFields.evidenceCompletedDesc || '',
+    evidenceCompletedManualDesc: item.manualFields.evidenceCompletedDesc || '',
+    evidenceAutoListedDesc: '',
+    evidenceDriveLink: '',
+    evidenceDriveFolderId: '',
+  });
+
+  const dateOnly = String(item.bankSnapshot.dateTime || '').slice(0, 10);
+  if (dateIdx >= 0) cells[dateIdx] = dateOnly;
+  if (weekIdx >= 0 && dateOnly) {
+    const year = Number.parseInt(dateOnly.slice(0, 4), 10);
+    const weeks = getYearMondayWeeks(Number.isFinite(year) ? year : new Date().getFullYear());
+    cells[weekIdx] = findWeekForDate(dateOnly, weeks)?.label || '';
+  }
+  if (budgetIdx >= 0) cells[budgetIdx] = item.manualFields.budgetCategory || '';
+  if (subBudgetIdx >= 0) cells[subBudgetIdx] = item.manualFields.budgetSubCategory || '';
+  if (cashflowIdx >= 0) cells[cashflowIdx] = cashflowCategoryToRowLabel(item.manualFields.cashflowCategory);
+  if (balanceIdx >= 0) {
+    cells[balanceIdx] = Number.isFinite(item.bankSnapshot.balanceAfter)
+      ? item.bankSnapshot.balanceAfter.toLocaleString('ko-KR')
+      : '';
+  }
+  if (bankAmountIdx >= 0) {
+    cells[bankAmountIdx] = Number.isFinite(item.bankSnapshot.signedAmount)
+      ? Math.abs(item.bankSnapshot.signedAmount).toLocaleString('ko-KR')
+      : '';
+  }
+  if (depositIdx >= 0) {
+    cells[depositIdx] = item.bankSnapshot.signedAmount > 0
+      ? Math.abs(item.bankSnapshot.signedAmount).toLocaleString('ko-KR')
+      : '';
+  }
+  if (expenseIdx >= 0) {
+    cells[expenseIdx] = Number.isFinite(item.manualFields.expenseAmount)
+      ? Number(item.manualFields.expenseAmount).toLocaleString('ko-KR')
+      : '';
+  }
+  if (counterpartyIdx >= 0) cells[counterpartyIdx] = item.bankSnapshot.counterparty || '';
+  if (memoIdx >= 0) cells[memoIdx] = item.manualFields.memo || item.bankSnapshot.memo || '';
+  if (requiredIdx >= 0) cells[requiredIdx] = evidenceRequiredDesc || '';
+  if (completedIdx >= 0) cells[completedIdx] = item.manualFields.evidenceCompletedDesc || '';
+  if (pendingIdx >= 0) cells[pendingIdx] = evidenceChecklist.missing.join(', ');
+
+  const noIdx = findColumnIndex('No.');
+  const projectedRow: ImportRow = {
+    ...base,
+    tempId: existingRow?.tempId || `bank-${item.bankFingerprint}`,
+    sourceTxId: item.sourceTxId,
+    entryKind: item.bankSnapshot.signedAmount >= 0 ? 'DEPOSIT' : 'EXPENSE',
+    cells,
+    userEditedCells: new Set([
+      budgetIdx,
+      subBudgetIdx,
+      cashflowIdx,
+      expenseIdx,
+      memoIdx,
+      completedIdx,
+    ].filter((index) => index >= 0)),
+    reviewHints: [],
+    reviewRequiredCellIndexes: [],
+    reviewStatus: undefined,
+    reviewFingerprint: undefined,
+    reviewConfirmedAt: undefined,
+  };
+  return projectedRow;
 }
 
 export function serializeExpenseSheetRowForPersistence(row: ImportRow) {
@@ -87,6 +216,33 @@ export function upsertExpenseSheetTabRows(params: {
     if (left.order !== right.order) return left.order - right.order;
     return String(left.createdAt || left.updatedAt || '').localeCompare(String(right.createdAt || right.updatedAt || ''));
   });
+}
+
+export function upsertExpenseSheetProjectionRowBySourceTxId(params: {
+  rows: ImportRow[] | null | undefined;
+  item: BankImportIntakeItem;
+  evidenceRequiredDesc?: string;
+}) {
+  const currentRows = Array.isArray(params.rows) ? [...params.rows] : [];
+  const targetIndex = currentRows.findIndex((row) => String(row.sourceTxId || '').trim() === params.item.sourceTxId);
+  const existingRow = targetIndex >= 0 ? currentRows[targetIndex] : null;
+  const projectedRow = buildProjectionRowFromIntake(params.item, existingRow, params.evidenceRequiredDesc);
+  const nextRows = [...currentRows];
+  if (targetIndex >= 0) {
+    nextRows[targetIndex] = projectedRow;
+  } else {
+    nextRows.push(projectedRow);
+  }
+  const noIdx = findColumnIndex('No.');
+  if (noIdx >= 0) {
+    nextRows.forEach((row, index) => {
+      row.cells[noIdx] = String(index + 1);
+    });
+  }
+  return {
+    rows: nextRows,
+    projectedRow,
+  };
 }
 
 export function buildWeeklySubmissionStatusPatch(params: {

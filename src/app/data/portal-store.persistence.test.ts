@@ -1,5 +1,39 @@
 import { describe, expect, it } from 'vitest';
-import { upsertExpenseSheetTabRows } from './portal-store.persistence';
+import { upsertExpenseSheetProjectionRowBySourceTxId, upsertExpenseSheetTabRows } from './portal-store.persistence';
+import type { BankImportIntakeItem } from './types';
+
+function makeIntakeItem(overrides: Partial<BankImportIntakeItem> = {}): BankImportIntakeItem {
+  return {
+    id: 'intake-1',
+    projectId: 'p-1',
+    sourceTxId: 'bank:fp-1',
+    bankFingerprint: 'fp-1',
+    bankSnapshot: {
+      accountNumber: '111-222-333',
+      dateTime: '2026-04-07',
+      counterparty: '코레일',
+      memo: 'KTX 예매',
+      signedAmount: -15000,
+      balanceAfter: 500000,
+    },
+    matchState: 'AUTO_CONFIRMED',
+    projectionStatus: 'PROJECTED_WITH_PENDING_EVIDENCE',
+    evidenceStatus: 'MISSING',
+    manualFields: {
+      expenseAmount: 15000,
+      budgetCategory: '여비',
+      budgetSubCategory: '교통비',
+      cashflowCategory: 'TRAVEL',
+      memo: '서울 이동',
+    },
+    reviewReasons: [],
+    lastUploadBatchId: 'batch-1',
+    createdAt: '2026-04-06T00:00:00.000Z',
+    updatedAt: '2026-04-06T00:00:00.000Z',
+    updatedBy: 'pm',
+    ...overrides,
+  };
+}
 
 describe('upsertExpenseSheetTabRows', () => {
   it('replaces the active sheet rows immediately after save so selection reconcile does not fall back to stale rows', () => {
@@ -57,5 +91,52 @@ describe('upsertExpenseSheetTabRows', () => {
     expect(next).toHaveLength(2);
     expect(next[1]?.id).toBe('sheet-2');
     expect(next[1]?.rows).toHaveLength(1);
+  });
+});
+
+describe('upsertExpenseSheetProjectionRowBySourceTxId', () => {
+  it('updates only the matched bank-origin row and keeps unrelated rows intact', () => {
+    const result = upsertExpenseSheetProjectionRowBySourceTxId({
+      rows: [
+        {
+          tempId: 'manual-1',
+          cells: ['수기 행'],
+        },
+        {
+          tempId: 'row-bank',
+          sourceTxId: 'bank:fp-1',
+          cells: Array.from({ length: 27 }, () => ''),
+        },
+      ],
+      item: makeIntakeItem(),
+      evidenceRequiredDesc: '출장신청서, 영수증',
+    });
+
+    expect(result.rows).toHaveLength(2);
+    expect(result.rows[0]?.tempId).toBe('manual-1');
+    expect(result.projectedRow.sourceTxId).toBe('bank:fp-1');
+    expect(result.projectedRow.cells[5]).toBe('여비');
+    expect(result.projectedRow.cells[6]).toBe('교통비');
+    expect(result.projectedRow.cells[8]).toBe('직접사업비');
+    expect(result.projectedRow.cells[10]).toBe('15,000');
+    expect(result.projectedRow.cells[15]).toBe('코레일');
+    expect(result.projectedRow.cells[17]).toBe('출장신청서, 영수증');
+    expect(result.projectedRow.cells[19]).toBe('출장신청서, 영수증');
+  });
+
+  it('inserts a new bank-origin row when the source transaction is not projected yet', () => {
+    const result = upsertExpenseSheetProjectionRowBySourceTxId({
+      rows: [
+        {
+          tempId: 'manual-1',
+          cells: ['수기 행'],
+        },
+      ],
+      item: makeIntakeItem(),
+    });
+
+    expect(result.rows).toHaveLength(2);
+    expect(result.rows[1]?.sourceTxId).toBe('bank:fp-1');
+    expect(result.projectedRow.tempId).toContain('bank-fp-1');
   });
 });

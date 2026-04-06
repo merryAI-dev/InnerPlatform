@@ -3,6 +3,8 @@ import { AlertTriangle, ArrowRight, CheckCircle2, Clock3, FileWarning, Wallet } 
 import type { BankImportIntakeItem, CashflowCategory } from '../../data/types';
 import { CASHFLOW_CATEGORY_LABELS } from '../../data/types';
 import { isBankImportManualFieldsComplete, selectWizardIntakeItems } from '../../platform/bank-import-triage';
+import { resolveEvidenceChecklist } from '../../platform/evidence-helpers';
+import { resolveEvidenceRequiredDesc } from '../../platform/settlement-sheet-prepare';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
@@ -13,6 +15,8 @@ interface BankImportTriageWizardProps {
   onOpenChange: (open: boolean) => void;
   items: BankImportIntakeItem[];
   onSaveDraft: (id: string, updates: Partial<BankImportIntakeItem>) => Promise<void>;
+  onProjectItem: (id: string) => Promise<void>;
+  evidenceRequiredMap: Record<string, string>;
 }
 
 const CASHFLOW_OPTIONS: CashflowCategory[] = [
@@ -58,6 +62,8 @@ export function BankImportTriageWizard({
   onOpenChange,
   items,
   onSaveDraft,
+  onProjectItem,
+  evidenceRequiredMap,
 }: BankImportTriageWizardProps) {
   const wizardItems = useMemo(() => selectWizardIntakeItems(items), [items]);
   const [selectedId, setSelectedId] = useState<string | null>(wizardItems[0]?.id || null);
@@ -82,6 +88,21 @@ export function BankImportTriageWizard({
       ...(drafts[selectedItem.id] || {}),
     }
     : null;
+  const requiredEvidenceDesc = selectedItem && activeManualFields
+    ? resolveEvidenceRequiredDesc(
+      evidenceRequiredMap,
+      activeManualFields.budgetCategory || '',
+      activeManualFields.budgetSubCategory || '',
+    )
+    : '';
+  const evidenceChecklist = useMemo(() => resolveEvidenceChecklist({
+    evidenceRequiredDesc: requiredEvidenceDesc,
+    evidenceCompletedDesc: activeManualFields?.evidenceCompletedDesc || '',
+    evidenceCompletedManualDesc: activeManualFields?.evidenceCompletedDesc || '',
+    evidenceAutoListedDesc: '',
+    evidenceDriveLink: '',
+    evidenceDriveFolderId: '',
+  }), [activeManualFields?.evidenceCompletedDesc, requiredEvidenceDesc]);
 
   const completedCount = wizardItems.filter((item) => isBankImportManualFieldsComplete({
     ...item.manualFields,
@@ -108,6 +129,33 @@ export function BankImportTriageWizard({
         } else {
           onOpenChange(false);
         }
+      }
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const projectCurrentItem = async () => {
+    if (!selectedItem) return;
+    const nextManualFields = {
+      ...selectedItem.manualFields,
+      ...(drafts[selectedItem.id] || {}),
+    };
+    setSavingId(selectedItem.id);
+    try {
+      await onSaveDraft(selectedItem.id, {
+        manualFields: nextManualFields,
+        updatedAt: new Date().toISOString(),
+      });
+      const currentIndex = wizardItems.findIndex((item) => item.id === selectedItem.id);
+      const nextItem = wizardItems[currentIndex + 1] || null;
+      if (isBankImportManualFieldsComplete(nextManualFields)) {
+        await onProjectItem(selectedItem.id);
+      }
+      if (nextItem) {
+        setSelectedId(nextItem.id);
+      } else {
+        onOpenChange(false);
       }
     } finally {
       setSavingId(null);
@@ -385,8 +433,43 @@ export function BankImportTriageWizard({
 
                       <Card className="border-slate-200 shadow-none">
                         <CardContent className="space-y-3 p-5">
-                          <p className="text-[13px] font-semibold text-slate-950">운영 메모</p>
-                          {selectedItem.reviewReasons.length > 0 ? (
+                          <p className="text-[13px] font-semibold text-slate-950">증빙 체크리스트</p>
+                          <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+                            <p className="text-[11px] text-slate-500">필수 증빙</p>
+                            <p className="mt-1 text-[12px] leading-6 text-slate-900">
+                              {requiredEvidenceDesc || '현재 분류 기준으로 자동 판단된 필수 증빙이 없습니다.'}
+                            </p>
+                          </div>
+                          <div className="grid gap-3 md:grid-cols-2">
+                            <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+                              <p className="text-[11px] text-slate-500">완료된 증빙</p>
+                              <p className="mt-1 text-[12px] leading-6 text-slate-900">
+                                {evidenceChecklist.completed.join(', ') || '아직 없음'}
+                              </p>
+                            </div>
+                            <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+                              <p className="text-[11px] text-slate-500">아직 필요한 증빙</p>
+                              <p className="mt-1 text-[12px] leading-6 text-slate-900">
+                                {evidenceChecklist.missing.join(', ') || '없음'}
+                              </p>
+                            </div>
+                          </div>
+                          <label className="space-y-2">
+                            <span className="text-[11px] font-medium text-slate-600">구비 완료된 증빙자료 리스트</span>
+                            <textarea
+                              value={activeManualFields.evidenceCompletedDesc || ''}
+                              onChange={(event) => setDrafts((prev) => ({
+                                ...prev,
+                                [selectedItem.id]: {
+                                  ...activeManualFields,
+                                  evidenceCompletedDesc: event.target.value,
+                                },
+                              }))}
+                              className="min-h-[72px] w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-[13px] outline-none transition focus:border-slate-400"
+                              placeholder="예: 출장신청서, 영수증"
+                            />
+                          </label>
+                          {selectedItem.reviewReasons.length > 0 && (
                             <ul className="space-y-2">
                               {selectedItem.reviewReasons.map((reason) => (
                                 <li key={reason} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] text-slate-700">
@@ -394,10 +477,6 @@ export function BankImportTriageWizard({
                                 </li>
                               ))}
                             </ul>
-                          ) : (
-                            <p className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-[12px] leading-6 text-slate-600">
-                              이번 단계에서는 필수 입력을 먼저 저장하고, 증빙 업로드는 다음 단계에서 같은 흐름에 이어 붙입니다.
-                            </p>
                           )}
                         </CardContent>
                       </Card>
@@ -425,9 +504,11 @@ export function BankImportTriageWizard({
                       <Button
                         size="sm"
                         disabled={savingId === selectedItem.id}
-                        onClick={() => void saveCurrentDraft(true)}
+                        onClick={() => void projectCurrentItem()}
                       >
-                        {wizardItems.findIndex((item) => item.id === selectedItem.id) === wizardItems.length - 1 ? '저장 후 닫기' : '저장 후 다음 거래'}
+                        {isBankImportManualFieldsComplete(activeManualFields)
+                          ? (wizardItems.findIndex((item) => item.id === selectedItem.id) === wizardItems.length - 1 ? '반영 후 닫기' : '반영 후 다음 거래')
+                          : (wizardItems.findIndex((item) => item.id === selectedItem.id) === wizardItems.length - 1 ? '저장 후 닫기' : '저장 후 다음 거래')}
                       </Button>
                     </div>
                   </div>

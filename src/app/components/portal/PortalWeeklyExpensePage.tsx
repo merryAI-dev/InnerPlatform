@@ -142,6 +142,7 @@ export function PortalWeeklyExpensePage() {
     weeklySubmissionStatuses,
     upsertWeeklySubmissionStatus,
     updateExpenseIntakeItem,
+    projectExpenseIntakeItem,
   } = usePortalStore();
   const { submitWeekAsPm, upsertWeekAmounts } = useCashflowWeeks();
   const devHarnessConfig = readDevAuthHarnessConfig(import.meta.env, typeof window !== 'undefined' ? window.location : undefined);
@@ -1256,6 +1257,8 @@ export function PortalWeeklyExpensePage() {
         onOpenChange={setTriageWizardOpen}
         items={expenseIntakeItems}
         onSaveDraft={updateExpenseIntakeItem}
+        onProjectItem={projectExpenseIntakeItem}
+        evidenceRequiredMap={evidenceRequiredMap}
       />
       <AlertDialog open={!!pendingUnsavedAction}>
         <AlertDialogContent
