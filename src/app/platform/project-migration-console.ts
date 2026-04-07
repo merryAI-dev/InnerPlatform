@@ -157,9 +157,10 @@ export function groupMigrationAuditConsoleRecords(
 
 export function summarizeMigrationAuditConsole(
   records: MigrationAuditConsoleRecord[],
+  currentOnlyMissingCount = 0,
 ): MigrationAuditConsoleSummary {
-  const total = records.length;
-  const missing = records.filter((record) => record.status === 'MISSING').length;
+  const total = records.length + currentOnlyMissingCount;
+  const missing = records.filter((record) => record.status === 'MISSING').length + currentOnlyMissingCount;
   const candidate = records.filter((record) => record.status === 'CANDIDATE').length;
   const registered = records.filter((record) => record.status === 'REGISTERED').length;
   const unassignedCic = records.filter((record) => record.cic === '미지정').length;

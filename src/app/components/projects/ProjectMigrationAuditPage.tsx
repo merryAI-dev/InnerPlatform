@@ -196,8 +196,8 @@ export function ProjectMigrationAuditPage() {
   );
 
   const summary = useMemo(
-    () => summarizeMigrationAuditConsole(filteredRecords),
-    [filteredRecords],
+    () => summarizeMigrationAuditConsole(filteredRecords, filteredCurrentRows.length),
+    [filteredCurrentRows.length, filteredRecords],
   );
 
   const cicOptions = useMemo(
@@ -517,8 +517,10 @@ export function ProjectMigrationAuditPage() {
         <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
           <MigrationAuditQueueRail
             sections={sections}
+            currentOnlyRows={filteredCurrentRows}
             selectedId={activeRecord?.id || null}
             onSelect={setSelectedRecordId}
+            onOpenCurrentOnlyProject={(projectId) => navigate(`/projects/${projectId}`)}
           />
           <MigrationAuditDetailPanel
             record={activeRecord}

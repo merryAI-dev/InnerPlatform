@@ -150,6 +150,18 @@ describe('project-migration-console', () => {
     expect(summary.completionRatio).toBeCloseTo(33.3, 0);
   });
 
+  it('counts current-only missing rows inside the missing summary bucket', () => {
+    const records = buildMigrationAuditConsoleRecords([
+      makeRow({ status: 'REGISTERED' }),
+    ]);
+
+    const summary = summarizeMigrationAuditConsole(records, 2);
+    expect(summary.total).toBe(3);
+    expect(summary.missing).toBe(2);
+    expect(summary.registered).toBe(1);
+    expect(summary.completionRatio).toBeCloseTo(33.3, 0);
+  });
+
   it('collects cic options from source and current rows', () => {
     const records = buildMigrationAuditConsoleRecords([
       makeRow({ candidate: makeCandidate({ cic: 'CIC-A' }) }),
