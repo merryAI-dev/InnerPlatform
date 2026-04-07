@@ -392,22 +392,22 @@ export function MigrationAuditDetailPanel({
               </CardContent>
             </Card>
 
-            <Card className="border-slate-900 bg-slate-950 text-white shadow-sm">
+            <Card className="border-slate-200 bg-white shadow-sm">
               <CardHeader className="pb-3">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <CardTitle className="text-[14px] font-semibold text-white">최종 연결 확정</CardTitle>
-                    <p className="mt-1 text-[12px] leading-6 text-slate-300">
+                    <CardTitle className="text-[14px] font-semibold text-slate-950">최종 연결 확정</CardTitle>
+                    <p className="mt-1 text-[12px] leading-6 text-slate-600">
                       이 row를 어떤 프로젝트로 귀속할지 마지막 한 번만 결정하면 됩니다.
                     </p>
                   </div>
-                  <ShieldAlert className="h-5 w-5 text-slate-400" />
+                  <ShieldAlert className="h-5 w-5 text-slate-500" />
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
                 {suggestedProjects.length > 0 ? (
                   <div className="space-y-1.5">
-                    <Label className="text-slate-200">기존 프로젝트에서 선택</Label>
+                    <Label className="text-slate-700">기존 프로젝트에서 선택</Label>
                     <Select
                       value={selectedTargetProject && suggestedProjects.some((project) => project.id === selectedTargetProject.id)
                         ? selectedTargetProject.id
@@ -417,7 +417,7 @@ export function MigrationAuditDetailPanel({
                         if (next) onChooseTargetProject(next);
                       }}
                     >
-                      <SelectTrigger className="h-9 border-white/15 bg-white/5 text-white">
+                      <SelectTrigger className="h-9 border-slate-200 bg-white text-slate-950">
                         <SelectValue placeholder="기존 프로젝트 후보를 선택하세요" />
                       </SelectTrigger>
                       <SelectContent>
@@ -431,12 +431,12 @@ export function MigrationAuditDetailPanel({
                   </div>
                 ) : null}
 
-                <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-3">
-                  <p className="text-[11px] text-slate-300">현재 선택된 연결 대상</p>
-                  <p className="mt-1 text-[13px] font-semibold text-white">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3">
+                  <p className="text-[11px] text-slate-500">현재 선택된 연결 대상</p>
+                  <p className="mt-1 text-[13px] font-semibold text-slate-950">
                     {selectedTargetProject ? projectLabel(selectedTargetProject) : '아직 선택되지 않음'}
                   </p>
-                  <p className="mt-1 text-[11px] text-slate-400">
+                  <p className="mt-1 text-[11px] text-slate-600">
                     {selectedTargetProject ? renderProjectMeta(selectedTargetProject) : '기존 후보, 등록 제안, 새 프로젝트 중 하나를 먼저 고르세요.'}
                   </p>
                 </div>
@@ -444,78 +444,78 @@ export function MigrationAuditDetailPanel({
                 {selectedTargetProject ? (
                   <div className="space-y-3">
                     <div className="grid gap-3 md:grid-cols-2">
-                      <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3">
-                        <p className="text-[11px] text-slate-400">등록 프로젝트명</p>
-                        <p className="mt-1 text-[13px] font-medium text-white">{selectedTargetProject.name || '-'}</p>
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+                        <p className="text-[11px] text-slate-500">등록 프로젝트명</p>
+                        <p className="mt-1 text-[13px] font-medium text-slate-950">{selectedTargetProject.name || '-'}</p>
                       </div>
-                      <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3">
-                        <p className="text-[11px] text-slate-400">공식 계약명</p>
-                        <p className="mt-1 text-[13px] font-medium text-white">{selectedTargetProject.officialContractName || '-'}</p>
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+                        <p className="text-[11px] text-slate-500">공식 계약명</p>
+                        <p className="mt-1 text-[13px] font-medium text-slate-950">{selectedTargetProject.officialContractName || '-'}</p>
                       </div>
-                      <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3">
-                        <p className="text-[11px] text-slate-400">발주기관</p>
-                        <p className="mt-1 text-[13px] font-medium text-white">{selectedTargetProject.clientOrg || '-'}</p>
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+                        <p className="text-[11px] text-slate-500">발주기관</p>
+                        <p className="mt-1 text-[13px] font-medium text-slate-950">{selectedTargetProject.clientOrg || '-'}</p>
                       </div>
-                      <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3">
-                        <p className="text-[11px] text-slate-400">등록 조직</p>
-                        <p className="mt-1 text-[13px] font-medium text-white">{resolveProjectCic(selectedTargetProject) || selectedTargetProject.department || '-'}</p>
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+                        <p className="text-[11px] text-slate-500">등록 조직</p>
+                        <p className="mt-1 text-[13px] font-medium text-slate-950">{resolveProjectCic(selectedTargetProject) || selectedTargetProject.department || '-'}</p>
                       </div>
-                      <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3">
-                        <p className="text-[11px] text-slate-400">담당자</p>
-                        <p className="mt-1 text-[13px] font-medium text-white">{selectedTargetProject.managerName || '-'}</p>
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+                        <p className="text-[11px] text-slate-500">담당자</p>
+                        <p className="mt-1 text-[13px] font-medium text-slate-950">{selectedTargetProject.managerName || '-'}</p>
                       </div>
-                      <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3">
-                        <p className="text-[11px] text-slate-400">프로젝트 출처</p>
-                        <p className="mt-1 text-[13px] font-medium text-white">{projectSourceLabel(selectedTargetProject)}</p>
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+                        <p className="text-[11px] text-slate-500">프로젝트 출처</p>
+                        <p className="mt-1 text-[13px] font-medium text-slate-950">{projectSourceLabel(selectedTargetProject)}</p>
                       </div>
                     </div>
 
-                    <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-3">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">재무 정보</p>
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">재무 정보</p>
                       <div className="mt-3 grid gap-3 md:grid-cols-2">
-                        <div className="rounded-xl border border-white/10 bg-black/10 px-3 py-3">
-                          <p className="text-[11px] text-slate-400">계약금액</p>
-                          <p className="mt-1 text-[13px] font-medium text-white">
+                        <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+                          <p className="text-[11px] text-slate-500">계약금액</p>
+                          <p className="mt-1 text-[13px] font-medium text-slate-950">
                             {formatStoredProjectAmount(selectedTargetProject.contractAmount, selectedTargetProject.financialInputFlags?.contractAmount)}
                           </p>
                         </div>
-                        <div className="rounded-xl border border-white/10 bg-black/10 px-3 py-3">
-                          <p className="text-[11px] text-slate-400">매출 부가세</p>
-                          <p className="mt-1 text-[13px] font-medium text-white">
+                        <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+                          <p className="text-[11px] text-slate-500">매출 부가세</p>
+                          <p className="mt-1 text-[13px] font-medium text-slate-950">
                             {formatStoredProjectAmount(selectedTargetProject.salesVatAmount, selectedTargetProject.financialInputFlags?.salesVatAmount)}
                           </p>
                         </div>
-                        <div className="rounded-xl border border-white/10 bg-black/10 px-3 py-3">
-                          <p className="text-[11px] text-slate-400">총수익</p>
-                          <p className="mt-1 text-[13px] font-medium text-white">
+                        <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+                          <p className="text-[11px] text-slate-500">총수익</p>
+                          <p className="mt-1 text-[13px] font-medium text-slate-950">
                             {formatStoredProjectAmount(selectedTargetProject.totalRevenueAmount, selectedTargetProject.financialInputFlags?.totalRevenueAmount)}
                           </p>
                         </div>
-                        <div className="rounded-xl border border-white/10 bg-black/10 px-3 py-3">
-                          <p className="text-[11px] text-slate-400">지원금</p>
-                          <p className="mt-1 text-[13px] font-medium text-white">
+                        <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+                          <p className="text-[11px] text-slate-500">지원금</p>
+                          <p className="mt-1 text-[13px] font-medium text-slate-950">
                             {formatStoredProjectAmount(selectedTargetProject.supportAmount, selectedTargetProject.financialInputFlags?.supportAmount)}
                           </p>
                         </div>
-                        <div className="rounded-xl border border-white/10 bg-black/10 px-3 py-3">
-                          <p className="text-[11px] text-slate-400">정산 유형</p>
-                          <p className="mt-1 text-[13px] font-medium text-white">{SETTLEMENT_TYPE_LABELS[selectedTargetProject.settlementType] || '-'}</p>
+                        <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+                          <p className="text-[11px] text-slate-500">정산 유형</p>
+                          <p className="mt-1 text-[13px] font-medium text-slate-950">{SETTLEMENT_TYPE_LABELS[selectedTargetProject.settlementType] || '-'}</p>
                         </div>
-                        <div className="rounded-xl border border-white/10 bg-black/10 px-3 py-3">
-                          <p className="text-[11px] text-slate-400">정산 기준</p>
-                          <p className="mt-1 text-[13px] font-medium text-white">{BASIS_LABELS[selectedTargetProject.basis] || '-'}</p>
+                        <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+                          <p className="text-[11px] text-slate-500">정산 기준</p>
+                          <p className="mt-1 text-[13px] font-medium text-slate-950">{BASIS_LABELS[selectedTargetProject.basis] || '-'}</p>
                         </div>
-                        <div className="rounded-xl border border-white/10 bg-black/10 px-3 py-3">
-                          <p className="text-[11px] text-slate-400">통장 유형</p>
-                          <p className="mt-1 text-[13px] font-medium text-white">{ACCOUNT_TYPE_LABELS[selectedTargetProject.accountType] || '-'}</p>
+                        <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+                          <p className="text-[11px] text-slate-500">통장 유형</p>
+                          <p className="mt-1 text-[13px] font-medium text-slate-950">{ACCOUNT_TYPE_LABELS[selectedTargetProject.accountType] || '-'}</p>
                         </div>
-                        <div className="rounded-xl border border-white/10 bg-black/10 px-3 py-3">
-                          <p className="text-[11px] text-slate-400">자금 입력 방식</p>
-                          <p className="mt-1 text-[13px] font-medium text-white">{PROJECT_FUND_INPUT_MODE_LABELS[selectedTargetProject.fundInputMode] || '-'}</p>
+                        <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+                          <p className="text-[11px] text-slate-500">자금 입력 방식</p>
+                          <p className="mt-1 text-[13px] font-medium text-slate-950">{PROJECT_FUND_INPUT_MODE_LABELS[selectedTargetProject.fundInputMode] || '-'}</p>
                         </div>
-                        <div className="rounded-xl border border-white/10 bg-black/10 px-3 py-3 md:col-span-2">
-                          <p className="text-[11px] text-slate-400">입금 계획</p>
-                          <p className="mt-1 text-[13px] font-medium text-white">{selectedTargetProject.paymentPlanDesc || '-'}</p>
+                        <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 md:col-span-2">
+                          <p className="text-[11px] text-slate-500">입금 계획</p>
+                          <p className="mt-1 text-[13px] font-medium text-slate-950">{selectedTargetProject.paymentPlanDesc || '-'}</p>
                         </div>
                       </div>
                     </div>
@@ -524,9 +524,9 @@ export function MigrationAuditDetailPanel({
 
                 <div className="grid gap-3 md:grid-cols-2">
                   <div className="space-y-1.5">
-                    <Label className="text-slate-200">등록 조직</Label>
+                    <Label className="text-slate-700">등록 조직</Label>
                     <Select value={selectedCic} onValueChange={onSelectedCicChange}>
-                      <SelectTrigger className="h-9 border-white/15 bg-white/5 text-white">
+                      <SelectTrigger className="h-9 border-slate-200 bg-white text-slate-950">
                         <SelectValue placeholder="등록 조직 선택" />
                       </SelectTrigger>
                       <SelectContent>
@@ -537,9 +537,9 @@ export function MigrationAuditDetailPanel({
                     </Select>
                   </div>
                   <div className="space-y-1.5">
-                    <Label className="text-slate-200">연결 후 상태</Label>
+                    <Label className="text-slate-700">연결 후 상태</Label>
                     <Select value={selectedProjectStatus} onValueChange={(value) => onSelectedProjectStatusChange(value as ProjectStatus)}>
-                      <SelectTrigger className="h-9 border-white/15 bg-white/5 text-white">
+                      <SelectTrigger className="h-9 border-slate-200 bg-white text-slate-950">
                         <SelectValue placeholder="프로젝트 상태" />
                       </SelectTrigger>
                       <SelectContent>
@@ -556,7 +556,7 @@ export function MigrationAuditDetailPanel({
                   연결 확정
                 </Button>
 
-                <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-[12px] text-slate-300">
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-[12px] text-slate-600">
                   <div className="flex items-start gap-2">
                     <ArrowRight className="mt-0.5 h-4 w-4 shrink-0" />
                     <p>등록 제안은 여기서 바로 수정하거나 폐기할 수 있고, 중복 의심 프로젝트도 정리한 뒤 같은 화면에서 연결을 끝낼 수 있습니다.</p>
