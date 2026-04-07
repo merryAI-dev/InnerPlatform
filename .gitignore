@@ -29,6 +29,7 @@ scripts/etl/output/
 .gitnexus
 .env*.local
 .gstack/
+.worktrees/
 .claude/worktrees/
 .claude/memory/
 .pm-status/

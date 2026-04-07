@@ -160,7 +160,10 @@ export function MigrationAuditDetailPanel({
                 </Badge>
                 <Badge variant="outline">{selectedCic}</Badge>
               </div>
-              <CardTitle className="text-[20px] font-semibold tracking-[-0.03em] text-slate-950">
+              <CardTitle
+                className="text-[20px] font-semibold tracking-[-0.03em] text-slate-950"
+                data-testid="migration-audit-selected-source-title"
+              >
                 {record.sourceName}
               </CardTitle>
               <p className="text-[12px] leading-6 text-slate-600">
@@ -215,6 +218,7 @@ export function MigrationAuditDetailPanel({
                             key={project.id}
                             type="button"
                             onClick={() => onSelectedProposalIdChange(project.id)}
+                            data-testid={`migration-audit-proposal-${project.id}`}
                             className={`w-full rounded-2xl border px-3 py-3 text-left transition ${
                               selected
                                 ? 'border-sky-400 bg-white shadow-sm'
@@ -277,7 +281,14 @@ export function MigrationAuditDetailPanel({
                           </div>
                         </div>
                         <div className="flex flex-wrap gap-2">
-                          <Button type="button" variant="outline" className="h-9 gap-1.5" onClick={onSaveProposal} disabled={savingProposal}>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="h-9 gap-1.5"
+                            onClick={onSaveProposal}
+                            disabled={savingProposal}
+                            data-testid="migration-audit-save-proposal"
+                          >
                             {savingProposal ? <Loader2 className="h-4 w-4 animate-spin" /> : <PencilLine className="h-4 w-4" />}
                             제안 수정 저장
                           </Button>
@@ -286,6 +297,7 @@ export function MigrationAuditDetailPanel({
                             variant="outline"
                             className="h-9 gap-1.5"
                             onClick={() => onChooseTargetProject(selectedProposal)}
+                            data-testid="migration-audit-choose-proposal-target"
                           >
                             <Link2 className="h-4 w-4" />
                             이 제안으로 연결
@@ -296,6 +308,7 @@ export function MigrationAuditDetailPanel({
                             className="h-9 gap-1.5 border-rose-200 text-rose-700 hover:bg-rose-50 hover:text-rose-800"
                             onClick={onTrashProposal}
                             disabled={trashingProjectId === selectedProposal.id}
+                            data-testid="migration-audit-trash-proposal"
                           >
                             {trashingProjectId === selectedProposal.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                             제안 폐기
@@ -306,7 +319,18 @@ export function MigrationAuditDetailPanel({
                   </>
                 </CardContent>
               </Card>
-            ) : null}
+            ) : (
+              <Card className="border-slate-200 bg-slate-50/70 shadow-none">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-[14px] font-semibold">등록 제안 프로젝트 검토</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-5 text-[12px] text-slate-500">
+                    현재 이 행에서 바로 검토할 등록 제안 프로젝트는 없습니다.
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             {duplicateProjects.length > 0 ? (
               <Card className="border-amber-200 bg-amber-50/70 shadow-none">
@@ -318,7 +342,11 @@ export function MigrationAuditDetailPanel({
                 </CardHeader>
                 <CardContent className="space-y-2">
                   {duplicateProjects.map((project) => (
-                    <div key={project.id} className="rounded-2xl border border-amber-100 bg-white px-3 py-3">
+                    <div
+                      key={project.id}
+                      className="rounded-2xl border border-amber-100 bg-white px-3 py-3"
+                      data-testid={`migration-audit-duplicate-${project.id}`}
+                    >
                       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                         <div>
                           <div className="flex flex-wrap items-center gap-2">
@@ -355,7 +383,18 @@ export function MigrationAuditDetailPanel({
                   ))}
                 </CardContent>
               </Card>
-            ) : null}
+            ) : (
+              <Card className="border-slate-200 bg-slate-50/70 shadow-none">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-[14px] font-semibold">중복 의심 프로젝트</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-5 text-[12px] text-slate-500">
+                    같은 화면에서 바로 정리할 중복 의심 프로젝트는 아직 없습니다.
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </div>
 
           <div className="space-y-4">
@@ -551,7 +590,13 @@ export function MigrationAuditDetailPanel({
                   </div>
                 </div>
 
-                <Button type="button" className="h-10 w-full gap-1.5 bg-white text-slate-950 hover:bg-slate-100" onClick={onApplyMatch} disabled={!selectedProjectId || linking}>
+                <Button
+                  type="button"
+                  className="h-10 w-full gap-1.5 bg-white text-slate-950 hover:bg-slate-100"
+                  onClick={onApplyMatch}
+                  disabled={!selectedProjectId || linking}
+                  data-testid="migration-audit-connect-primary"
+                >
                   {linking ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
                   연결 확정
                 </Button>
