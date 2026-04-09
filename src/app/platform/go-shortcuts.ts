@@ -3,7 +3,6 @@ const GO_SHORTCUT_TARGETS = {
   p: '/projects',
   c: '/cashflow',
   e: '/evidence',
-  a: '/audit',
   s: '/settings',
 } as const;
 

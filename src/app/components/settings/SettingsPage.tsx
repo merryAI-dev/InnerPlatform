@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
-  Settings, Users, BookOpen, Building2, Plus, Database, Upload, MessageCircle, Palette, Shield,
+  Settings, Users, BookOpen, Building2, Plus, Upload, Shield,
 } from 'lucide-react';
 import { ROLE_META } from '../../platform/role-meta';
 import { hasPermission, type PlatformPermission } from '../../platform/rbac';
@@ -20,17 +20,15 @@ import {
   CASHFLOW_CATEGORY_LABELS, SETTLEMENT_TYPE_LABELS, BASIS_LABELS,
   type CashflowCategory,
 } from '../../data/types';
-import { FirebaseSetup } from './FirebaseSetup';
 import { DataMigrationTab } from './DataMigrationTab';
-import { GuideUploadTab } from '../guide-chat/GuideUploadTab';
-import { TenantManagementTab } from './TenantManagementTab';
-import { TenantBrandingTab } from './TenantBrandingTab';
 import { PageHeader } from '../layout/PageHeader';
 import { useAuth } from '../../data/auth-store';
 import { resolveActiveWorkspacePreference, resolveHomePath } from '../../platform/navigation';
 
 const DISPLAY_ROLES = ['admin', 'finance', 'pm'] as const;
 type DisplayRole = typeof DISPLAY_ROLES[number];
+const PRIMARY_SETTINGS_TABS = ['org', 'members', 'templates', 'migration', 'permissions'] as const;
+const PRIMARY_SETTINGS_TAB_SET = new Set<string>(PRIMARY_SETTINGS_TABS);
 
 const PERMISSION_LABELS: Partial<Record<PlatformPermission, string>> = {
   'project:write':       '프로젝트 생성/수정',
@@ -50,7 +48,8 @@ export function SettingsPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const searchParams = new URLSearchParams(location.search);
-  const initialTab = searchParams.get('tab') || 'org';
+  const requestedTab = searchParams.get('tab') || 'org';
+  const initialTab = PRIMARY_SETTINGS_TAB_SET.has(requestedTab) ? requestedTab : 'org';
   const [tab, setTab] = useState(initialTab);
   const currentPath = `${location.pathname}${location.search}${location.hash}`;
   const activeWorkspace = resolveActiveWorkspacePreference(user?.lastWorkspace, user?.defaultWorkspace);
@@ -81,16 +80,27 @@ export function SettingsPage() {
         icon={Settings}
         iconGradient="linear-gradient(135deg, #4f46e5, #6366f1)"
         title="설정"
-        description="조직, 구성원, 원장 템플릿, Firebase 연결 관리"
+        description="운영에 필요한 조직, 구성원, 템플릿, 권한 설정만 관리합니다"
       />
+
+      <Card className="border-slate-200/80 bg-slate-50/70">
+        <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
+          <div className="space-y-1">
+            <p className="text-[12px] font-semibold text-slate-900">운영 설정 범위</p>
+            <p className="text-[12px] leading-6 text-slate-600">
+              1차 운영 surface에서는 조직 정보, 구성원, 원장 템플릿, 데이터 마이그레이션, 권한 매트릭스만 노출합니다.
+            </p>
+          </div>
+          <Badge variant="outline" className="h-7 self-start border-slate-300 bg-white px-3 text-[11px] text-slate-700">
+            Primary Admin Settings
+          </Badge>
+        </CardContent>
+      </Card>
 
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="org" className="gap-1.5">
             <Building2 className="w-3.5 h-3.5" /> 조직 정보
-          </TabsTrigger>
-          <TabsTrigger value="firebase" className="gap-1.5">
-            <Database className="w-3.5 h-3.5" /> Firebase
           </TabsTrigger>
           <TabsTrigger value="members" className="gap-1.5">
             <Users className="w-3.5 h-3.5" /> 구성원
@@ -104,19 +114,6 @@ export function SettingsPage() {
           <TabsTrigger value="permissions" className="gap-1.5">
             <Shield className="w-3.5 h-3.5" /> 권한 설정
           </TabsTrigger>
-          <TabsTrigger value="guide" className="gap-1.5">
-            <MessageCircle className="w-3.5 h-3.5" /> 사업비 가이드
-          </TabsTrigger>
-          {user.role === 'admin' && (
-            <>
-              <TabsTrigger value="tenants" className="gap-1.5">
-                <Building2 className="w-3.5 h-3.5" /> 테넌트 관리
-              </TabsTrigger>
-              <TabsTrigger value="branding" className="gap-1.5">
-                <Palette className="w-3.5 h-3.5" /> 브랜딩/기능
-              </TabsTrigger>
-            </>
-          )}
         </TabsList>
 
         {/* Organization */}
@@ -151,11 +148,6 @@ export function SettingsPage() {
               </div>
             </CardContent>
           </Card>
-        </TabsContent>
-
-        {/* Firebase */}
-        <TabsContent value="firebase">
-          <FirebaseSetup />
         </TabsContent>
 
         {/* Members */}
@@ -303,23 +295,6 @@ export function SettingsPage() {
             </CardContent>
           </Card>
         </TabsContent>
-
-        {/* Guide Q&A */}
-        <TabsContent value="guide">
-          <GuideUploadTab />
-        </TabsContent>
-
-        {/* Tenant management (admin only) */}
-        {user.role === 'admin' && (
-          <>
-            <TabsContent value="tenants">
-              <TenantManagementTab />
-            </TabsContent>
-            <TabsContent value="branding">
-              <TenantBrandingTab />
-            </TabsContent>
-          </>
-        )}
       </Tabs>
     </div>
   );

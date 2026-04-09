@@ -11,9 +11,9 @@ import { canShowAdminNavItem } from '../../platform/admin-nav';
 const QUICK_ACTIONS = [
   {
     icon: FolderKanban,
-    label: '사업 등록',
-    desc: '새 사업을 위저드로 등록',
-    path: '/projects/new',
+    label: '프로젝트 확인',
+    desc: '운영 중인 사업과 원장을 바로 확인',
+    path: '/projects',
     color: '#4f46e5',
   },
   {

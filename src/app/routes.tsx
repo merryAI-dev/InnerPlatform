@@ -13,7 +13,7 @@ const ProjectListPage = lazy(() => import('./components/projects/ProjectListPage
 const ProjectMigrationAuditPage = lazy(() => import('./components/projects/ProjectMigrationAuditPage').then(m => ({ default: m.ProjectMigrationAuditPage })));
 const ProjectDetailPage = lazy(() => import('./components/projects/ProjectDetailPage').then(m => ({ default: m.ProjectDetailPage })));
 const ProjectWizardPage = lazy(() => import('./components/projects/ProjectWizardPage').then(m => ({ default: m.ProjectWizardPage })));
-const ProjectRequestApprovalPage = lazy(() => import('./components/projects/ProjectRequestApprovalPage').then(m => ({ default: m.ProjectRequestApprovalPage })));
+const ProjectRegisterRedirectPage = lazy(() => import('./components/projects/ProjectRegisterRedirectPage').then(m => ({ default: m.ProjectRegisterRedirectPage })));
 const LedgerDetailPage = lazy(() => import('./components/ledgers/LedgerDetailPage').then(m => ({ default: m.LedgerDetailPage })));
 const CashflowPage = lazy(() => import('./components/cashflow/CashflowPage').then(m => ({ default: m.CashflowPage })));
 const ProjectCashflowSheetPage = lazy(() => import('./components/cashflow/ProjectCashflowSheetPage').then(m => ({ default: m.ProjectCashflowSheetPage })));
@@ -96,7 +96,7 @@ export const router = createBrowserRouter([
       },
       { path: 'projects', element: <S C={ProjectListPage} /> },
       { path: 'projects/migration-audit', element: <S C={ProjectMigrationAuditPage} /> },
-      { path: 'projects/new', element: <S C={ProjectRequestApprovalPage} /> },
+      { path: 'projects/new', element: <S C={ProjectRegisterRedirectPage} /> },
       { path: 'projects/:projectId', element: <S C={ProjectDetailPage} /> },
       { path: 'projects/:projectId/edit', element: <S C={ProjectWizardPage} /> },
       { path: 'projects/:projectId/ledgers/:ledgerId', element: <S C={LedgerDetailPage} /> },

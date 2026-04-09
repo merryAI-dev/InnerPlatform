@@ -25,7 +25,7 @@ function canShowShortcutForRole(role: unknown, to: string): boolean {
 
   // Shortcut discoverability stays curated even while admin routes are
   // temporarily open to every signed-in role.
-  if (to === '/settings' || to === '/projects/new') {
+  if (to === '/settings') {
     return normalizedRole === 'admin';
   }
 
@@ -48,14 +48,12 @@ const BASE_GROUPS: ShortcutGroup[] = [
       { keys: ['G', 'P'], desc: '프로젝트 목록으로 이동', to: '/projects' },
       { keys: ['G', 'C'], desc: '캐시플로로 이동', to: '/cashflow' },
       { keys: ['G', 'E'], desc: '증빙/정산으로 이동', to: '/evidence' },
-      { keys: ['G', 'A'], desc: '감사로그로 이동', to: '/audit' },
       { keys: ['G', 'S'], desc: '설정으로 이동', to: '/settings' },
     ],
   },
   {
     label: '작업',
     shortcuts: [
-      { keys: ['N'], desc: '새 사업 등록', to: '/projects/new' },
       { keys: ['⌘', 'Enter'], desc: '폼 제출 / 확인' },
     ],
   },

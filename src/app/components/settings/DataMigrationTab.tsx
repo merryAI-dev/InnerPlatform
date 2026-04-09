@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { Link } from 'react-router';
 import {
   CheckCircle2,
   Download,
@@ -436,6 +437,21 @@ export function DataMigrationTab() {
               <p className="text-sm" style={{ fontWeight: 600 }}>{SECTION_META[section].label}</p>
               <p className="text-xs text-muted-foreground">{SECTION_META[section].description}</p>
               <p className="text-xs text-muted-foreground">{SECTION_META[section].requiredHint}</p>
+            </div>
+
+            <div className="flex items-center justify-between rounded-md border border-slate-200 bg-slate-50/70 p-3">
+              <div className="space-y-1">
+                <p className="text-sm font-semibold text-slate-900">이관 점검 보수 경로</p>
+                <p className="text-xs text-slate-600">
+                  프로젝트 이관 점검 콘솔은 설정 탭에서만 유지합니다. 일상 운영 메뉴에서는 숨겨집니다.
+                </p>
+              </div>
+              <Link
+                to="/projects/migration-audit"
+                className="inline-flex h-8 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-900 transition-colors hover:bg-slate-100"
+              >
+                이관 점검 열기
+              </Link>
             </div>
 
             <div className="flex flex-wrap gap-2">
