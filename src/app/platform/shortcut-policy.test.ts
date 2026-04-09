@@ -9,7 +9,7 @@ describe('shortcut policy', () => {
   it('shows admin-only shortcuts for admin roles', () => {
     const descs = flattenDescriptions(getShortcutGroupsForRole('admin'));
     expect(descs).toContain('설정으로 이동');
-    expect(descs).toContain('새 사업 등록');
+    expect(descs).not.toContain('새 사업 등록');
   });
 
   it('filters out settings/new-project for finance', () => {

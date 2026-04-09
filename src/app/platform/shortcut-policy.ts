@@ -25,7 +25,7 @@ function canShowShortcutForRole(role: unknown, to: string): boolean {
 
   // Shortcut discoverability stays curated even while admin routes are
   // temporarily open to every signed-in role.
-  if (to === '/settings' || to === '/projects/new') {
+  if (to === '/settings') {
     return normalizedRole === 'admin';
   }
 
@@ -54,7 +54,6 @@ const BASE_GROUPS: ShortcutGroup[] = [
   {
     label: '작업',
     shortcuts: [
-      { keys: ['N'], desc: '새 사업 등록', to: '/projects/new' },
       { keys: ['⌘', 'Enter'], desc: '폼 제출 / 확인' },
     ],
   },

@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import {
-  Plus, Search, ArrowUpDown, Sparkles, CheckCircle2, ArrowRight,
+  Search, ArrowUpDown, Sparkles, CheckCircle2, ArrowRight,
   FolderKanban, RotateCcw, Trash2,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -19,12 +19,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { useAppStore } from '../../data/store';
 import {
   PROJECT_STATUS_LABELS, PROJECT_TYPE_LABELS, PROJECT_TYPE_SHORT_LABELS,
-  SETTLEMENT_TYPE_SHORT, ACCOUNT_TYPE_LABELS,
+  SETTLEMENT_TYPE_SHORT,
   type ProjectStatus, type ProjectType, type Project,
 } from '../../data/types';
 import { PageHeader } from '../layout/PageHeader';
-import { useAuth } from '../../data/auth-store';
-import { canShowAdminNavItem } from '../../platform/admin-nav';
 import { resolveApiErrorMessage } from '../../platform/api-error-message';
 
 const statusColor: Record<string, string> = {
@@ -38,17 +36,11 @@ function fmtFull(n: number) {
   return n.toLocaleString('ko-KR');
 }
 
-function fmtPercent(n: number) {
-  if (n === 0) return '-';
-  return (n * 100).toFixed(2) + '%';
-}
-
-type SortKey = 'name' | 'contractAmount' | 'profitRate' | 'budgetCurrentYear' | 'status';
+type SortKey = 'name' | 'contractAmount' | 'status';
 type SortDir = 'asc' | 'desc';
 
 export function ProjectListPage() {
   const { allProjects, restoreProject } = useAppStore();
-  const { user } = useAuth();
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
@@ -84,7 +76,6 @@ export function ProjectListPage() {
     const depts = new Set(baseProjects.map((project) => project.department).filter(Boolean));
     return Array.from(depts).sort();
   }, [baseProjects]);
-  const canCreateProject = canShowAdminNavItem(user?.role, '/projects/new');
   const hasActiveFilters = !!search || statusFilter !== 'ALL' || typeFilter !== 'ALL' || deptFilter !== 'ALL';
 
   const filtered = useMemo(() => {
@@ -109,8 +100,6 @@ export function ProjectListPage() {
       switch (sortKey) {
         case 'name': cmp = a.name.localeCompare(b.name); break;
         case 'contractAmount': cmp = a.contractAmount - b.contractAmount; break;
-        case 'profitRate': cmp = a.profitRate - b.profitRate; break;
-        case 'budgetCurrentYear': cmp = a.budgetCurrentYear - b.budgetCurrentYear; break;
         case 'status': cmp = a.status.localeCompare(b.status); break;
       }
       return sortDir === 'desc' ? -cmp : cmp;
@@ -118,13 +107,6 @@ export function ProjectListPage() {
 
     return result;
   }, [baseProjects, search, statusFilter, typeFilter, deptFilter, sortKey, sortDir]);
-
-  const totals = useMemo(() => ({
-    totalContract: filtered.reduce((s, p) => s + p.contractAmount, 0),
-    totalBudget2026: filtered.reduce((s, p) => s + p.budgetCurrentYear, 0),
-    totalTaxInvoice: filtered.reduce((s, p) => s + p.taxInvoiceAmount, 0),
-    totalProfit: filtered.filter(p => p.profitAmount > 0).reduce((s, p) => s + p.profitAmount, 0),
-  }), [filtered]);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -152,82 +134,37 @@ export function ProjectListPage() {
   };
 
   const renderEmptyState = () => {
-    if (hasActiveFilters) {
-      return (
-        <Card data-testid="projects-empty-state" className="border-slate-200/80 bg-slate-50/80">
-          <CardContent className="flex min-h-[260px] items-center justify-center p-6">
-            <div className="max-w-md text-center">
-              <p className="text-[18px] font-semibold text-slate-900">검색 조건에 맞는 사업이 없습니다</p>
-              <p className="mt-2 text-[13px] leading-6 text-slate-600">
-                필터를 초기화하고 전체 포트폴리오를 다시 보거나, 필요한 경우 새 사업을 바로 등록할 수 있습니다.
-              </p>
-              <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-                <Button size="sm" onClick={resetFilters}>필터 초기화</Button>
-                {canCreateProject && (
-                  <Button variant="outline" size="sm" onClick={() => navigate('/projects/new?phase=CONFIRMED')}>
-                    새 사업 등록
-                  </Button>
-                )}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      );
-    }
-
-    const stateByTab = activeTab === 'prospect'
+    const stateByTab = hasActiveFilters
       ? {
-        eyebrow: 'Pipeline Start',
-        title: '첫 예정 사업을 등록해보세요',
-        description: '입찰 단계부터 기본 정보를 쌓아두면 선정 직후 확정 전환과 정산 준비가 훨씬 빨라집니다.',
-        primaryLabel: canCreateProject ? '예정 사업 등록' : null,
-        primaryAction: () => navigate('/projects/new?phase=PROSPECT'),
-        secondaryLabel: canCreateProject ? '확정 사업 보기' : null,
-        secondaryAction: () => setActiveTab('confirmed'),
+        title: '검색 조건에 맞는 사업이 없습니다',
+        description: '필터를 초기화하고 전체 포트폴리오를 다시 확인해 주세요.',
       }
-      : activeTab === 'trash'
+      : activeTab === 'prospect'
         ? {
-          eyebrow: 'Clean Slate',
-          title: '휴지통이 비어 있습니다',
-          description: '삭제된 프로젝트가 생기면 이 탭에서 복구할 수 있습니다. 지금은 활성 포트폴리오만 관리 중입니다.',
-          primaryLabel: '확정 사업 보기',
-          primaryAction: () => setActiveTab('confirmed'),
-          secondaryLabel: canCreateProject ? '예정 사업 보기' : null,
-          secondaryAction: () => setActiveTab('prospect'),
+          title: '입찰/예정 사업이 없습니다',
+          description: '등록 제안은 포털에서 접수되고, 여기서는 예정 사업을 검토하고 확정으로 전환합니다.',
         }
-        : {
-          eyebrow: 'Portfolio Start',
-          title: '확정 사업 포트폴리오를 시작하세요',
-          description: '외부 고객에게 실제로 제공되는 사업 운영은 여기서 시작됩니다. 첫 확정 사업을 등록하거나 예정 사업을 확정으로 전환하세요.',
-          primaryLabel: canCreateProject ? '확정 사업 등록' : null,
-          primaryAction: () => navigate('/projects/new?phase=CONFIRMED'),
-          secondaryLabel: '입찰/예정 보기',
-          secondaryAction: () => setActiveTab('prospect'),
-        };
+        : activeTab === 'trash'
+          ? {
+            title: '휴지통이 비어 있습니다',
+            description: '삭제된 프로젝트가 생기면 이 탭에서 복구할 수 있습니다.',
+          }
+          : {
+            title: '확정 사업이 없습니다',
+            description: '프로젝트가 생성되면 이 탭에서 운영 현황과 원장을 바로 확인할 수 있습니다.',
+          };
 
     return (
-      <Card data-testid="projects-empty-state" className="border-indigo-200/70 bg-gradient-to-br from-indigo-50 via-white to-teal-50/70">
-        <CardContent className="p-6">
-          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-            <div className="max-w-2xl space-y-3">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-indigo-700">{stateByTab.eyebrow}</p>
-              <div className="space-y-2">
-                <h2 className="text-[22px] font-extrabold tracking-[-0.03em] text-slate-900">{stateByTab.title}</h2>
-                <p className="text-[13px] leading-6 text-slate-600">{stateByTab.description}</p>
+      <Card data-testid="projects-empty-state" className="border-slate-200/80 bg-slate-50/70">
+        <CardContent className="flex min-h-[220px] items-center justify-center p-6">
+          <div className="max-w-md text-center">
+            <h2 className="text-[20px] font-semibold tracking-[-0.03em] text-slate-900">{stateByTab.title}</h2>
+            <p className="mt-2 text-[13px] leading-6 text-slate-600">{stateByTab.description}</p>
+            {hasActiveFilters && (
+              <div className="mt-4">
+                <Button size="sm" onClick={resetFilters}>필터 초기화</Button>
               </div>
-            </div>
-            <div className="flex shrink-0 flex-col gap-2">
-              {stateByTab.primaryLabel && (
-                <Button size="sm" onClick={stateByTab.primaryAction}>
-                  {stateByTab.primaryLabel}
-                </Button>
-              )}
-              {stateByTab.secondaryLabel && stateByTab.secondaryAction && (
-                <Button variant="outline" size="sm" onClick={stateByTab.secondaryAction}>
-                  {stateByTab.secondaryLabel}
-                </Button>
-              )}
-            </div>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -241,43 +178,25 @@ export function ProjectListPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="min-w-[60px]">담당조직</TableHead>
-                <TableHead className="min-w-[70px]">등록명</TableHead>
-                <TableHead className="min-w-[50px]">통장</TableHead>
+                <TableHead className="min-w-[90px]">담당조직</TableHead>
                 <TableHead className="min-w-[200px] cursor-pointer" onClick={() => handleSort('name')}>
                   <span className="flex items-center gap-1">
                     사업명 <ArrowUpDown className="w-3 h-3" />
                   </span>
                 </TableHead>
-                <TableHead className="min-w-[80px]">발주기관</TableHead>
-                <TableHead className="min-w-[80px]">사업유형</TableHead>
-                <TableHead className="min-w-[55px]">정산</TableHead>
-                <TableHead className="min-w-[70px]">팀(팀장)</TableHead>
-                <TableHead className="min-w-[70px]">담당자</TableHead>
+                <TableHead className="min-w-[120px]">발주기관</TableHead>
                 <TableHead className="cursor-pointer" onClick={() => handleSort('status')}>
                   <span className="flex items-center gap-1">
                     상태 <ArrowUpDown className="w-3 h-3" />
                   </span>
                 </TableHead>
                 <TableHead className="min-w-[90px]">계약기간</TableHead>
-                <TableHead className="min-w-[80px]">입금계획</TableHead>
+                <TableHead className="min-w-[80px]">담당자</TableHead>
                 <TableHead className="text-right min-w-[100px] cursor-pointer" onClick={() => handleSort('contractAmount')}>
                   <span className="flex items-center justify-end gap-1">
                     총 사업비 <ArrowUpDown className="w-3 h-3" />
                   </span>
                 </TableHead>
-                <TableHead className="text-right min-w-[100px] cursor-pointer" onClick={() => handleSort('budgetCurrentYear')}>
-                  <span className="flex items-center justify-end gap-1">
-                    2026년 예산 <ArrowUpDown className="w-3 h-3" />
-                  </span>
-                </TableHead>
-                <TableHead className="text-right min-w-[80px]">세금계산서</TableHead>
-                <TableHead className="text-right min-w-[60px] cursor-pointer" onClick={() => handleSort('profitRate')}>
-                  <span className="flex items-center justify-end gap-1">
-                    수익률 <ArrowUpDown className="w-3 h-3" />
-                  </span>
-                </TableHead>
-                <TableHead className="text-right min-w-[80px]">수익금액</TableHead>
                 <TableHead className="min-w-[35px] text-center">정산</TableHead>
                 {activeTab === 'trash' && (
                   <>
@@ -301,37 +220,11 @@ export function ProjectListPage() {
                   <TableCell className="text-[11px] text-muted-foreground whitespace-nowrap">
                     {p.department || '-'}
                   </TableCell>
-                  <TableCell className="text-[11px] text-muted-foreground max-w-[80px] truncate">
-                    {p.groupwareName || '-'}
-                  </TableCell>
-                  <TableCell className="text-[11px]">
-                    <span className={`inline-flex rounded px-1 py-0 text-[10px] ${
-                      p.accountType === 'DEDICATED'
-                        ? 'bg-blue-50 text-blue-700'
-                        : p.accountType === 'OPERATING'
-                          ? 'bg-slate-100 text-slate-700'
-                          : 'bg-gray-100 text-gray-600'
-                    }`}>
-                      {ACCOUNT_TYPE_LABELS[p.accountType]}
-                    </span>
-                  </TableCell>
                   <TableCell style={{ fontWeight: 500 }} className="max-w-[220px] truncate text-sm">
                     {p.name}
                   </TableCell>
                   <TableCell className="text-[11px] whitespace-nowrap">{p.clientOrg || '-'}</TableCell>
-                  <TableCell className="text-[11px] text-muted-foreground whitespace-nowrap">
-                    {PROJECT_TYPE_SHORT_LABELS[p.type]}
-                  </TableCell>
                   <TableCell className="text-[11px] whitespace-nowrap">
-                    {SETTLEMENT_TYPE_SHORT[p.settlementType]}
-                  </TableCell>
-                  <TableCell className="text-[11px] text-muted-foreground max-w-[80px] truncate">
-                    {p.teamName || '-'}
-                  </TableCell>
-                  <TableCell className="text-[11px] whitespace-nowrap">
-                    {p.managerName || '-'}
-                  </TableCell>
-                  <TableCell>
                     <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] whitespace-nowrap ${statusColor[p.status]}`}>
                       {PROJECT_STATUS_LABELS[p.status]}
                     </span>
@@ -340,27 +233,11 @@ export function ProjectListPage() {
                     {p.contractStart ? `${p.contractStart.replace(/-/g, '.')}` : '-'}
                     {p.contractEnd ? ` ~ ${p.contractEnd.replace(/-/g, '.')}` : ''}
                   </TableCell>
-                  <TableCell className="text-[11px] text-muted-foreground max-w-[80px] truncate">
-                    {p.paymentPlanDesc || '-'}
+                  <TableCell className="text-[11px] whitespace-nowrap">
+                    {p.managerName || '-'}
                   </TableCell>
                   <TableCell className="text-right text-sm whitespace-nowrap">
                     {p.contractAmount > 0 ? fmtFull(p.contractAmount) : '-'}
-                  </TableCell>
-                  <TableCell className="text-right text-sm whitespace-nowrap">
-                    {p.budgetCurrentYear > 0 ? fmtFull(p.budgetCurrentYear) : '-'}
-                  </TableCell>
-                  <TableCell className="text-right text-sm whitespace-nowrap">
-                    {p.taxInvoiceAmount > 0 ? fmtFull(p.taxInvoiceAmount) : '-'}
-                  </TableCell>
-                  <TableCell className="text-right text-sm whitespace-nowrap">
-                    {p.profitRate > 0 ? (
-                      <span className={p.profitRate >= 0.1 ? 'text-emerald-700' : p.profitRate >= 0.05 ? 'text-amber-700' : 'text-red-600'}>
-                        {fmtPercent(p.profitRate)}
-                      </span>
-                    ) : '-'}
-                  </TableCell>
-                  <TableCell className="text-right text-sm whitespace-nowrap">
-                    {p.profitAmount > 0 ? fmtFull(p.profitAmount) : '-'}
                   </TableCell>
                   <TableCell className="text-center text-sm">
                     {p.isSettled ? (
@@ -401,41 +278,15 @@ export function ProjectListPage() {
                 </TableRow>
               ))}
 
-              {/* Totals Row */}
-              {list.length > 0 && activeTab !== 'trash' && (
-                <TableRow className="bg-muted/50 border-t-2">
-                  <TableCell colSpan={12} className="text-right text-sm" style={{ fontWeight: 600 }}>
-                    합계
-                  </TableCell>
-                  <TableCell className="text-right text-sm whitespace-nowrap" style={{ fontWeight: 600 }}>
-                    {fmtFull(totals.totalContract)}
-                  </TableCell>
-                  <TableCell className="text-right text-sm whitespace-nowrap" style={{ fontWeight: 600 }}>
-                    {fmtFull(totals.totalBudget2026)}
-                  </TableCell>
-                  <TableCell className="text-right text-sm whitespace-nowrap" style={{ fontWeight: 600 }}>
-                    {fmtFull(totals.totalTaxInvoice)}
-                  </TableCell>
-                  <TableCell className="text-right text-sm" style={{ fontWeight: 600 }}>
-                    -
-                  </TableCell>
-                  <TableCell className="text-right text-sm whitespace-nowrap" style={{ fontWeight: 600 }}>
-                    {fmtFull(totals.totalProfit)}
-                  </TableCell>
-                  <TableCell />
-                  {activeTab === 'prospect' && <TableCell />}
-                </TableRow>
-              )}
-
               {list.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={activeTab === 'trash' ? 20 : activeTab === 'prospect' ? 19 : 18} className="text-center py-12 text-muted-foreground">
+                  <TableCell colSpan={activeTab === 'trash' ? 10 : activeTab === 'prospect' ? 9 : 8} className="text-center py-12 text-muted-foreground">
                     {search || statusFilter !== 'ALL' || typeFilter !== 'ALL' || deptFilter !== 'ALL'
                       ? '검색 조건에 맞는 사업이 없습니다'
                       : activeTab === 'trash'
                         ? '휴지통이 비어 있습니다.'
                         : activeTab === 'prospect'
-                          ? (canCreateProject ? '예정 사업이 없습니다. 새 사업을 등록해보세요.' : '예정 사업이 없습니다.')
+                          ? '예정 사업이 없습니다.'
                           : '확정 사업이 없습니다.'}
                   </TableCell>
                 </TableRow>
@@ -455,30 +306,6 @@ export function ProjectListPage() {
         iconGradient="linear-gradient(135deg, #6366f1, #818cf8)"
         title="사업 통합 관리"
         description={`활성 ${activeProjects.length}개 사업 · 확정 ${confirmedProjects.length} / 예정 ${prospectProjects.length} / 휴지통 ${trashedProjects.length}`}
-        actions={
-          canCreateProject ? (
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => navigate('/projects/new?phase=PROSPECT')}
-                className="gap-1.5 h-8 text-[11px]"
-              >
-                <Sparkles className="w-3.5 h-3.5" />
-                예정 등록
-              </Button>
-              <Button
-                size="sm"
-                onClick={() => navigate('/projects/new?phase=CONFIRMED')}
-                className="gap-1.5 h-8 text-[11px]"
-                style={{ background: 'linear-gradient(135deg, #4f46e5, #6366f1)' }}
-              >
-                <Plus className="w-3.5 h-3.5" />
-                확정 등록
-              </Button>
-            </div>
-          ) : undefined
-        }
       />
 
       {/* Tabs */}
@@ -558,34 +385,10 @@ export function ProjectListPage() {
           {activeTab === 'confirmed' && (filtered.length === 0 ? renderEmptyState() : renderProjectTable(filtered))}
         </TabsContent>
         <TabsContent value="prospect" className="mt-0">
-          {activeTab === 'prospect' && (
-            <>
-              {filtered.length > 0 && (
-                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-3">
-                  <p className="text-xs text-amber-800">
-                    <span style={{ fontWeight: 600 }}>입찰/예정 사업:</span> 사업 선정 후 1주일 이내에 기본 정보를 입력하세요.
-                    정보가 충분히 입력되면 <Badge variant="outline" className="text-[10px] py-0 px-1 mx-0.5">확정</Badge> 버튼으로
-                    확정 사업으로 전환할 수 있습니다.
-                  </p>
-                </div>
-              )}
-              {filtered.length === 0 ? renderEmptyState() : renderProjectTable(filtered)}
-            </>
-          )}
+          {activeTab === 'prospect' && (filtered.length === 0 ? renderEmptyState() : renderProjectTable(filtered))}
         </TabsContent>
         <TabsContent value="trash" className="mt-0">
-          {activeTab === 'trash' && (
-            <>
-              {filtered.length > 0 && (
-                <div className="bg-muted/40 border rounded-lg p-3 mb-3">
-                  <p className="text-xs text-muted-foreground">
-                    삭제된 프로젝트는 휴지통에 보관되며 복구할 수 있습니다. 복구하면 기존 프로젝트 상세/원장 연결은 그대로 유지됩니다.
-                  </p>
-                </div>
-              )}
-              {filtered.length === 0 ? renderEmptyState() : renderProjectTable(filtered)}
-            </>
-          )}
+          {activeTab === 'trash' && (filtered.length === 0 ? renderEmptyState() : renderProjectTable(filtered))}
         </TabsContent>
       </Tabs>
     </div>

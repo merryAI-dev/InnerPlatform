@@ -10,6 +10,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '../ui/accordion';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '../ui/table';
@@ -493,141 +494,6 @@ export function ProjectDetailPage() {
         </Card>
       </div>
 
-      {/* Additional Details */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">계약 정보</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2 text-sm">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">계약기간</span>
-                <span>{project.contractStart || '-'} ~ {project.contractEnd || '-'}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">입금계획</span>
-                <span>{project.paymentPlanDesc || '-'}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">잔금 입금</span>
-                <span>{project.finalPaymentNote || '-'}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">정산 여부</span>
-                <span className={project.isSettled ? 'text-green-600' : 'text-muted-foreground'}>
-                  {project.isSettled ? 'O (완료)' : 'X (미정산)'}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">세금계산서 금액</span>
-                <span>{taxInvoiceAmount > 0 ? fmt(taxInvoiceAmount) + '원' : '-'}</span>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">담당 정보</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2 text-sm">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">담당조직</span>
-                <span>{project.department}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">팀(팀장)</span>
-                <span>{project.teamName || '-'}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">메인 담당자</span>
-                <span>{project.managerName || '-'}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">그룹웨어 등록명</span>
-                <span>{project.groupwareName || '-'}</span>
-              </div>
-              {project.participantCondition && (
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">참여기업 조건</span>
-                  <span className="text-right max-w-[200px]">{project.participantCondition}</span>
-                </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base">참여 인력 현황</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {projectParticipationEntries.length === 0 ? (
-            <div className="rounded-lg border border-dashed px-4 py-6 text-sm text-muted-foreground">
-              연동된 참여 인력이 없습니다. 프로젝트 팀 정보를 저장하면 이 영역과 PM 인력 현황이 같은 데이터를 보여줍니다.
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>이름</TableHead>
-                  <TableHead>참여율</TableHead>
-                  <TableHead>기간</TableHead>
-                  <TableHead>정산 체계</TableHead>
-                  <TableHead>연동 상태</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {projectParticipationEntries.map((entry) => (
-                  <TableRow key={entry.id}>
-                    <TableCell>{entry.memberName || '-'}</TableCell>
-                    <TableCell>{entry.rate ? `${entry.rate}%` : '-'}</TableCell>
-                    <TableCell>
-                      {[entry.periodStart, entry.periodEnd].filter(Boolean).join(' ~ ') || '-'}
-                    </TableCell>
-                    <TableCell>{entry.settlementSystem || '-'}</TableCell>
-                    <TableCell>
-                      <Badge variant={entry.source === 'PROJECT_TEAM_SYNC' ? 'secondary' : 'outline'}>
-                        {entry.source === 'PROJECT_TEAM_SYNC' ? '프로젝트 팀 연동' : '수동 입력'}
-                      </Badge>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Payment Plan */}
-      {(project.paymentPlan.contract > 0 || project.paymentPlan.interim > 0 || project.paymentPlan.final > 0) && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">입금 계획</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-3 gap-4">
-              {[
-                { label: '선금/계약금', amount: project.paymentPlan.contract },
-                { label: '중도금', amount: project.paymentPlan.interim },
-                { label: '잔금', amount: project.paymentPlan.final },
-              ].filter(item => item.amount > 0).map(item => (
-                <div key={item.label} className="text-center p-3 rounded-lg bg-muted/50">
-                  <p className="text-xs text-muted-foreground">{item.label}</p>
-                  <p className="text-lg" style={{ fontWeight: 600 }}>{fmtShort(item.amount)}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {contractAmount > 0 ? ((item.amount / contractAmount) * 100).toFixed(0) : 0}%
-                  </p>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
       {/* Ledgers */}
       <div>
         <div className="flex items-center justify-between mb-3">
@@ -688,6 +554,135 @@ export function ProjectDetailPage() {
           </div>
         )}
       </div>
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">보조 정보</CardTitle>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <Accordion type="multiple" className="w-full">
+            <AccordionItem value="project-detail-contract">
+              <AccordionTrigger className="text-[13px]">계약 및 담당 정보</AccordionTrigger>
+              <AccordionContent>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between gap-4">
+                      <span className="text-muted-foreground">계약기간</span>
+                      <span>{project.contractStart || '-'} ~ {project.contractEnd || '-'}</span>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <span className="text-muted-foreground">입금계획</span>
+                      <span className="text-right">{project.paymentPlanDesc || '-'}</span>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <span className="text-muted-foreground">잔금 입금</span>
+                      <span className="text-right">{project.finalPaymentNote || '-'}</span>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <span className="text-muted-foreground">정산 여부</span>
+                      <span className={project.isSettled ? 'text-green-600' : 'text-muted-foreground'}>
+                        {project.isSettled ? 'O (완료)' : 'X (미정산)'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <span className="text-muted-foreground">세금계산서 금액</span>
+                      <span>{taxInvoiceAmount > 0 ? fmt(taxInvoiceAmount) + '원' : '-'}</span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between gap-4">
+                      <span className="text-muted-foreground">담당조직</span>
+                      <span>{project.department}</span>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <span className="text-muted-foreground">팀(팀장)</span>
+                      <span>{project.teamName || '-'} </span>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <span className="text-muted-foreground">메인 담당자</span>
+                      <span>{project.managerName || '-'}</span>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <span className="text-muted-foreground">그룹웨어 등록명</span>
+                      <span>{project.groupwareName || '-'}</span>
+                    </div>
+                    {project.participantCondition && (
+                      <div className="flex justify-between gap-4">
+                        <span className="text-muted-foreground">참여기업 조건</span>
+                        <span className="max-w-[240px] text-right">{project.participantCondition}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+
+            <AccordionItem value="project-detail-participation">
+              <AccordionTrigger className="text-[13px]">참여 인력 현황</AccordionTrigger>
+              <AccordionContent>
+                {projectParticipationEntries.length === 0 ? (
+                  <div className="rounded-lg border border-dashed px-4 py-6 text-sm text-muted-foreground">
+                    연동된 참여 인력이 없습니다. 프로젝트 팀 정보를 저장하면 이 영역과 PM 인력 현황이 같은 데이터를 보여줍니다.
+                  </div>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>이름</TableHead>
+                        <TableHead>참여율</TableHead>
+                        <TableHead>기간</TableHead>
+                        <TableHead>정산 체계</TableHead>
+                        <TableHead>연동 상태</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {projectParticipationEntries.map((entry) => (
+                        <TableRow key={entry.id}>
+                          <TableCell>{entry.memberName || '-'}</TableCell>
+                          <TableCell>{entry.rate ? `${entry.rate}%` : '-'}</TableCell>
+                          <TableCell>
+                            {[entry.periodStart, entry.periodEnd].filter(Boolean).join(' ~ ') || '-'}
+                          </TableCell>
+                          <TableCell>{entry.settlementSystem || '-'}</TableCell>
+                          <TableCell>
+                            <Badge variant={entry.source === 'PROJECT_TEAM_SYNC' ? 'secondary' : 'outline'}>
+                              {entry.source === 'PROJECT_TEAM_SYNC' ? '프로젝트 팀 연동' : '수동 입력'}
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </AccordionContent>
+            </AccordionItem>
+
+            {(project.paymentPlan.contract > 0 || project.paymentPlan.interim > 0 || project.paymentPlan.final > 0) && (
+              <AccordionItem value="project-detail-payment-plan">
+                <AccordionTrigger className="text-[13px]">입금 계획</AccordionTrigger>
+                <AccordionContent>
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                    {[
+                      { label: '선금/계약금', amount: project.paymentPlan.contract },
+                      { label: '중도금', amount: project.paymentPlan.interim },
+                      { label: '잔금', amount: project.paymentPlan.final },
+                    ].filter((item) => item.amount > 0).map((item) => (
+                      <div key={item.label} className="rounded-lg bg-muted/50 p-3 text-center">
+                        <p className="text-xs text-muted-foreground">{item.label}</p>
+                        <p className="text-lg" style={{ fontWeight: 600 }}>{fmtShort(item.amount)}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {contractAmount > 0 ? ((item.amount / contractAmount) * 100).toFixed(0) : 0}%
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </AccordionContent>
+              </AccordionItem>
+            )}
+          </Accordion>
+        </CardContent>
+      </Card>
 
       {/* Create Ledger Dialog */}
       <Dialog open={showLedgerDialog} onOpenChange={setShowLedgerDialog}>

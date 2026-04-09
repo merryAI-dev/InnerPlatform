@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router';
 import {
   LayoutDashboard, FolderKanban, BarChart3, FileCheck, Shield,
   ClipboardList, Settings, Search, ArrowRight, ListChecks,
-  Plus, Zap, Clock, AlertTriangle, Users, Hash,
+  Zap, Clock, AlertTriangle, Users, Hash,
 } from 'lucide-react';
 import { Dialog, DialogContent } from '../ui/dialog';
 import { useAppStore } from '../../data/store';
@@ -102,10 +102,6 @@ export function CommandPalette() {
         return;
       }
 
-      if (key === 'n' && canShowAdminNavItem(user?.role, '/projects/new')) {
-        e.preventDefault();
-        go('/projects/new');
-      }
     }
     document.addEventListener('keydown', handleKeyDown);
     return () => {
@@ -118,7 +114,6 @@ export function CommandPalette() {
     const nav: CommandItem[] = [
       { id: 'nav-dash', icon: LayoutDashboard, label: '대시보드', path: '/', category: '탐색', action: () => go('/'), keywords: ['dashboard', '홈'] },
       { id: 'nav-proj', icon: FolderKanban, label: '프로젝트 목록', path: '/projects', category: '탐색', action: () => go('/projects'), keywords: ['project', '사업'] },
-      { id: 'nav-new', icon: Plus, label: '새 사업 등록', path: '/projects/new', category: '빠른 작업', action: () => go('/projects/new'), keywords: ['new', '생성', '등록'] },
       { id: 'nav-cash', icon: BarChart3, label: '캐시플로 추출', path: '/cashflow', category: '탐색', action: () => go('/cashflow'), keywords: ['cashflow', '현금흐름', '엑셀', '다운로드', 'export'] },
       { id: 'nav-evi', icon: FileCheck, label: '증빙/정산 관리', path: '/evidence', category: '탐색', action: () => go('/evidence'), keywords: ['evidence', '증빙'] },
       { id: 'nav-approval', icon: ListChecks, label: '승인 대기열', path: '/approvals', category: '탐색', action: () => go('/approvals'), keywords: ['approval', '승인', '대기열'] },

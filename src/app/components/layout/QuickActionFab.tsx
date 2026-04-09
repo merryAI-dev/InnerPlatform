@@ -1,14 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router';
 import {
-  Plus, X, FolderKanban, BarChart3, FileCheck,
+  Plus, X, BarChart3, FileCheck,
   Shield, Zap,
 } from 'lucide-react';
 import { useAuth } from '../../data/auth-store';
 import { canShowAdminNavItem } from '../../platform/admin-nav';
 
 const ACTIONS = [
-  { icon: FolderKanban, label: '새 사업 등록', path: '/projects/new', color: '#4f46e5' },
   { icon: BarChart3, label: '캐시플로 추출', path: '/cashflow', color: '#0d9488' },
   { icon: FileCheck, label: '증빙/정산', path: '/evidence', color: '#f59e0b' },
   { icon: Shield, label: '승인 대기열', path: '/approvals', color: '#7c3aed' },

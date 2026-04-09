@@ -17,6 +17,7 @@ import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
 import { Textarea } from '../ui/textarea';
+import { ProjectRequestApprovalSection } from '../projects/ProjectRequestApprovalPage';
 import { useAppStore } from '../../data/store';
 import {
   EXPENSE_SETS,
@@ -207,6 +208,8 @@ export function AdminApprovalPage() {
           </CardContent>
         </Card>
       )}
+
+      <ProjectRequestApprovalSection compact />
 
       <section className="space-y-3">
         <div className="flex items-center gap-2">
