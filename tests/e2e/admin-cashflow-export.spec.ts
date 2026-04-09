@@ -32,7 +32,6 @@ test('admin can access cashflow export page and trigger workbook download', asyn
   await expect(page.getByRole('heading', { name: '경영기획실 전용 캐시플로 추출 화면' })).toBeVisible();
   await expect(page.getByTestId('cashflow-export-step-range')).toBeVisible();
   await expect(page.getByTestId('cashflow-export-step-period')).toBeVisible();
-  await expect(page.getByTestId('cashflow-export-action-summary')).toContainText('지금 내려받을 결과');
   await expect(page.getByTestId('cashflow-export-download')).toBeEnabled();
   await expect(page.locator('[data-testid^="cashflow-export-row-"]').first()).toBeVisible();
 
@@ -65,6 +64,15 @@ test('admin can filter cashflow export targets by settlement basis', async ({ pa
   await expect(page.getByTestId('cashflow-export-step-basis')).toContainText('공급대가');
   await expect(page.getByText('현대 모비스 CSV OI 컨설팅')).toBeVisible();
   await expect(page.locator('[data-testid^="cashflow-export-row-"]')).toHaveCount(1);
+});
+
+test('admin cashflow export uses a monochrome hierarchy for filter cards', async ({ page }) => {
+  await loginAsAdmin(page);
+  await page.goto('/cashflow');
+
+  await expect(page.getByTestId('cashflow-export-step-range')).toHaveClass(/bg-stone-50/);
+  await expect(page.getByTestId('cashflow-export-step-project')).toHaveClass(/bg-stone-50/);
+  await expect(page.getByTestId('cashflow-export-step-range')).toHaveClass(/border-stone-200/);
 });
 
 test('pm is redirected away from admin cashflow export route', async ({ page }) => {
