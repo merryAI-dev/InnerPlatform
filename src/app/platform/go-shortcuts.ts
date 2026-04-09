@@ -1,6 +1,7 @@
 const GO_SHORTCUT_TARGETS = {
   d: '/',
   p: '/projects',
+  m: '/projects/migration-audit',
   c: '/cashflow',
   e: '/evidence',
   s: '/settings',

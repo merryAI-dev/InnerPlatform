@@ -441,9 +441,9 @@ export function DataMigrationTab() {
 
             <div className="flex items-center justify-between rounded-md border border-slate-200 bg-slate-50/70 p-3">
               <div className="space-y-1">
-                <p className="text-sm font-semibold text-slate-900">이관 점검 보수 경로</p>
+                <p className="text-sm font-semibold text-slate-900">사업이관 바로가기</p>
                 <p className="text-xs text-slate-600">
-                  프로젝트 이관 점검 콘솔은 설정 탭에서만 유지합니다. 일상 운영 메뉴에서는 숨겨집니다.
+                  프로젝트 이관 콘솔은 사업이관 메뉴와 설정 탭 양쪽에서 바로 열 수 있습니다.
                 </p>
               </div>
               <Link

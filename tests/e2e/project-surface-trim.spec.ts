@@ -45,6 +45,15 @@ test('settings migration tab links to the maintenance-only migration audit surfa
   await expect(page).toHaveURL(/\/projects\/migration-audit$/);
 });
 
+test('admin navigation restores the migration audit menu', async ({ page }) => {
+  await loginAsAdmin(page);
+  await page.goto('/');
+
+  await expect(page.getByRole('link', { name: '사업이관' })).toBeVisible();
+  await page.getByRole('link', { name: '사업이관' }).click();
+  await expect(page).toHaveURL(/\/projects\/migration-audit$/);
+});
+
 test('project detail defaults to summary and ledger while secondary sections stay collapsed', async ({ page }) => {
   await loginAsAdmin(page);
   await page.goto('/projects');
