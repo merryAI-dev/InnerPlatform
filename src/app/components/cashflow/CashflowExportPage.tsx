@@ -266,8 +266,8 @@ export function CashflowExportPage() {
       <Card>
         <CardContent className="p-8 text-center space-y-2">
           <FileSpreadsheet className="w-8 h-8 mx-auto text-muted-foreground/40" />
-          <p className="text-[13px]" style={{ fontWeight: 600 }}>캐시플로 추출 권한이 없습니다.</p>
-          <p className="text-[12px] text-muted-foreground">이 화면은 관리자와 재경팀만 사용할 수 있습니다.</p>
+          <p className="text-[13px]" style={{ fontWeight: 600 }}>경영기획실 전용 캐시플로 추출 권한이 없습니다.</p>
+          <p className="text-[12px] text-muted-foreground">이 화면은 관리자와 경영기획실 담당자만 사용할 수 있습니다.</p>
         </CardContent>
       </Card>
     );
@@ -278,8 +278,8 @@ export function CashflowExportPage() {
       <PageHeader
         icon={BarChart3}
         iconGradient="linear-gradient(135deg, #0f766e 0%, #14b8a6 100%)"
-        title="캐시플로 추출"
-        description="재경팀 엑셀 후처리를 위한 연간·기간별 캐시플로 추출 화면"
+        title="경영기획실 전용 캐시플로 추출 화면"
+        description="경영기획실 엑셀 후처리를 위한 연간·기간별 캐시플로 추출 화면"
         badge={scope === 'single' ? '사업별' : '전체사업'}
         actions={(
           <Button
@@ -399,7 +399,7 @@ export function CashflowExportPage() {
             step="4"
             icon={FileSpreadsheet}
             label="워크북 형식"
-            helper="재경팀 후처리 방식에 맞춰 통합 시트 또는 사업별 시트를 선택합니다."
+            helper="경영기획실 후처리 방식에 맞춰 통합 시트 또는 사업별 시트를 선택합니다."
             value={workbookVariantLabel}
             testId="cashflow-export-step-variant"
             toneClass="border-rose-200/80 bg-rose-50/70"
@@ -624,7 +624,7 @@ export function CashflowExportPage() {
           <div>
             <p className="text-[12px]" style={{ fontWeight: 600 }}>기존 사업별 주간 시트도 유지됩니다.</p>
             <p className="text-[12px] text-muted-foreground">
-              사업 상세에서는 월 단위 입력과 검토를 계속하고, 이 화면에서는 재경팀용 일괄 추출만 처리합니다.
+              사업 상세에서는 월 단위 입력과 검토를 계속하고, 이 화면에서는 경영기획실 전용 일괄 추출만 처리합니다.
             </p>
           </div>
           <Button variant="outline" size="sm" className="gap-1.5 h-8 text-[12px]" onClick={() => navigate('/projects')}>
