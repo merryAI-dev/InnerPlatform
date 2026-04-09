@@ -34,6 +34,14 @@ describe('admin nav access control', () => {
     expect(canAccessAdminPath('viewer', '/approvals')).toBe(false);
   });
 
+  it('restores migration audit as an admin-only menu route', () => {
+    expect(canShowAdminNavItem('admin', '/projects/migration-audit')).toBe(true);
+    expect(canShowAdminNavItem('finance', '/projects/migration-audit')).toBe(false);
+    expect(canShowAdminNavItem('pm', '/projects/migration-audit')).toBe(false);
+    expect(canAccessAdminPath('admin', '/projects/migration-audit')).toBe(true);
+    expect(canAccessAdminPath('finance', '/projects/migration-audit')).toBe(false);
+  });
+
   it('still rejects empty or unknown roles from admin nav', () => {
     expect(canShowAdminNavItem('', '/')).toBe(false);
     expect(canShowAdminNavItem(undefined, '/')).toBe(false);

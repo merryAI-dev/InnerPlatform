@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import {
   LayoutDashboard, FolderKanban, BarChart3, FileCheck, Shield,
-  ClipboardList, Settings, Search, ArrowRight, ListChecks,
+  ClipboardList, Settings, Search, ArrowRight, ListChecks, ArrowLeftRight,
   Zap, Clock, AlertTriangle, Users, Hash,
 } from 'lucide-react';
 import { Dialog, DialogContent } from '../ui/dialog';
@@ -114,6 +114,7 @@ export function CommandPalette() {
     const nav: CommandItem[] = [
       { id: 'nav-dash', icon: LayoutDashboard, label: '대시보드', path: '/', category: '탐색', action: () => go('/'), keywords: ['dashboard', '홈'] },
       { id: 'nav-proj', icon: FolderKanban, label: '프로젝트 목록', path: '/projects', category: '탐색', action: () => go('/projects'), keywords: ['project', '사업'] },
+      { id: 'nav-migration', icon: ArrowLeftRight, label: '사업이관', path: '/projects/migration-audit', category: '탐색', action: () => go('/projects/migration-audit'), keywords: ['migration', '이관', '점검', 'audit'] },
       { id: 'nav-cash', icon: BarChart3, label: '캐시플로 추출', path: '/cashflow', category: '탐색', action: () => go('/cashflow'), keywords: ['cashflow', '현금흐름', '엑셀', '다운로드', 'export'] },
       { id: 'nav-evi', icon: FileCheck, label: '증빙/정산 관리', path: '/evidence', category: '탐색', action: () => go('/evidence'), keywords: ['evidence', '증빙'] },
       { id: 'nav-approval', icon: ListChecks, label: '승인 대기열', path: '/approvals', category: '탐색', action: () => go('/approvals'), keywords: ['approval', '승인', '대기열'] },
