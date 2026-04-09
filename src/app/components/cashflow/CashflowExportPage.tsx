@@ -54,10 +54,10 @@ function sanitizeFilePart(value: string): string {
   return value.replace(/[\\/:*?"<>|]/g, '-').trim();
 }
 
-const strongFieldBaseClass = 'h-10 rounded-xl bg-white text-[12px] font-semibold text-slate-950 shadow-[0_1px_2px_rgba(15,23,42,0.08)] transition-colors focus-visible:ring-4 [&_svg]:size-4 [&_svg]:!opacity-100 [&_svg]:text-slate-700';
-const activeDisabledFieldClass = 'border-slate-300 bg-slate-100 text-slate-500 shadow-none [&_svg]:text-slate-500';
-const monochromeSurfaceClass = 'border-slate-300 bg-slate-50';
-const monochromeBadgeClass = 'border-slate-300 bg-slate-100 text-slate-800';
+const strongFieldBaseClass = 'h-10 rounded-lg border-2 bg-white text-[12px] font-medium text-zinc-950 shadow-none transition-colors focus-visible:ring-2 [&_svg]:size-4 [&_svg]:!opacity-100 [&_svg]:text-stone-500';
+const activeDisabledFieldClass = 'border-stone-200 bg-stone-100 text-stone-500 shadow-none [&_svg]:text-stone-400';
+const monochromeSurfaceClass = 'border-stone-200 bg-stone-50';
+const monochromeBadgeClass = 'border-stone-200 bg-stone-100 text-stone-700';
 
 function SelectionField(props: {
   step: string;
@@ -71,21 +71,21 @@ function SelectionField(props: {
 }) {
   const { step, icon: Icon, label, helper, value, testId, toneClass, children } = props;
   return (
-    <div data-testid={testId} className={`space-y-3 rounded-2xl border p-3 shadow-sm ${toneClass}`}>
+    <div data-testid={testId} className={`space-y-3 rounded-xl border p-4 ${toneClass}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-2">
-          <div className="mt-0.5 flex h-8 min-w-8 items-center justify-center rounded-xl border border-slate-200/80 bg-white text-[11px] font-semibold text-slate-800 shadow-sm">
+          <div className="mt-0.5 flex h-7 min-w-7 items-center justify-center rounded-lg border border-stone-200 bg-white text-[10px] font-medium text-stone-700">
             {step}
           </div>
-          <div className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200/80 bg-white shadow-sm">
-            <Icon className="h-4 w-4 text-slate-800" />
+          <div className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-lg border border-stone-200 bg-white">
+            <Icon className="h-3.5 w-3.5 text-stone-600" />
           </div>
           <div className="min-w-0">
-            <Label className="text-[12px] font-bold text-slate-950">{label}</Label>
-            <p className="mt-0.5 text-[11px] leading-5 text-slate-700">{helper}</p>
+            <Label className="text-[12px] font-semibold text-zinc-950">{label}</Label>
+            <p className="mt-0.5 text-[11px] leading-5 text-stone-600">{helper}</p>
           </div>
         </div>
-        <Badge variant="outline" className="max-w-[48%] truncate border-slate-200 bg-white text-[11px] font-medium text-slate-800 shadow-sm">
+        <Badge variant="outline" className="max-w-[48%] truncate rounded-md border-stone-200 bg-stone-100 text-[11px] font-medium text-stone-700">
           {value}
         </Badge>
       </div>
@@ -266,11 +266,11 @@ export function CashflowExportPage() {
 
   if (!canExport) {
     return (
-      <Card>
+        <Card>
         <CardContent className="p-8 text-center space-y-2">
           <FileSpreadsheet className="w-8 h-8 mx-auto text-muted-foreground/40" />
-          <p className="text-[13px]" style={{ fontWeight: 600 }}>경영기획실 전용 캐시플로 추출 권한이 없습니다.</p>
-          <p className="text-[12px] text-muted-foreground">이 화면은 관리자와 경영기획실 담당자만 사용할 수 있습니다.</p>
+          <p className="text-[13px] font-semibold text-zinc-950">경영기획실 전용 캐시플로 추출 권한이 없습니다.</p>
+          <p className="text-[12px] text-stone-600">이 화면은 관리자와 경영기획실 담당자만 사용할 수 있습니다.</p>
         </CardContent>
       </Card>
     );
@@ -280,7 +280,7 @@ export function CashflowExportPage() {
     <div className="space-y-4" data-testid="cashflow-export-page">
       <PageHeader
         icon={BarChart3}
-        iconGradient="linear-gradient(135deg, #334155 0%, #64748b 100%)"
+        iconGradient="linear-gradient(135deg, #fafaf9 0%, #f5f5f4 100%)"
         title="경영기획실 전용 캐시플로 추출 화면"
         description="경영기획실 엑셀 후처리를 위한 연간·기간별 캐시플로 추출 화면"
         badge={scope === 'single' ? '사업별' : '전체사업'}
@@ -290,7 +290,7 @@ export function CashflowExportPage() {
             data-testid="cashflow-export-download"
             onClick={handleDownload}
             disabled={downloadPreparing || projectInputs.length === 0 || yearMonths.length === 0}
-            className="h-8 gap-1.5 bg-slate-900 text-[12px] text-white hover:bg-slate-800"
+            className="h-8 gap-1.5 rounded-lg border border-stone-900 bg-stone-900 text-[12px] text-white hover:bg-stone-800"
           >
             {downloadPreparing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
             {downloadPreparing ? '준비 중' : '엑셀 다운로드'}
@@ -298,12 +298,12 @@ export function CashflowExportPage() {
         )}
       />
 
-      <Card className="border-slate-300 bg-slate-50/95">
+      <Card className="border-stone-200 bg-white shadow-none">
         <CardHeader className="pb-3">
           <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
             <div>
-              <CardTitle className="text-[14px] text-slate-950">추출 조건</CardTitle>
-              <p className="mt-1 text-[12px] leading-6 text-slate-700">
+              <CardTitle className="text-[14px] font-semibold text-zinc-950">추출 조건</CardTitle>
+              <p className="mt-1 text-[12px] leading-6 text-stone-600">
                 순서대로 범위, 사업, 기간, 형식을 고르면 바로 엑셀을 내려받을 수 있습니다.
               </p>
             </div>
@@ -334,7 +334,7 @@ export function CashflowExportPage() {
             >
               <SelectTrigger
                 data-testid="cashflow-export-scope"
-                className={`${strongFieldBaseClass} border-slate-400 hover:border-slate-500 focus-visible:ring-slate-200`}
+                className={`${strongFieldBaseClass} border-stone-300 hover:border-stone-400 focus-visible:ring-stone-200`}
                 style={{ borderWidth: 2 }}
               >
                 <SelectValue />
@@ -364,7 +364,7 @@ export function CashflowExportPage() {
                 data-testid="cashflow-export-project"
                 className={`${strongFieldBaseClass} ${
                   scope === 'single'
-                    ? 'border-slate-400 hover:border-slate-500 focus-visible:ring-slate-200'
+                    ? 'border-stone-300 hover:border-stone-400 focus-visible:ring-stone-200'
                     : activeDisabledFieldClass
                 }`}
                 style={{ borderWidth: 2 }}
@@ -399,7 +399,7 @@ export function CashflowExportPage() {
             >
               <SelectTrigger
                 data-testid="cashflow-export-basis"
-                className={`${strongFieldBaseClass} border-slate-400 hover:border-slate-500 focus-visible:ring-slate-200`}
+                className={`${strongFieldBaseClass} border-stone-300 hover:border-stone-400 focus-visible:ring-stone-200`}
                 style={{ borderWidth: 2 }}
               >
                 <SelectValue />
@@ -430,7 +430,7 @@ export function CashflowExportPage() {
             >
               <SelectTrigger
                 data-testid="cashflow-export-range-mode"
-                className={`${strongFieldBaseClass} border-slate-400 hover:border-slate-500 focus-visible:ring-slate-200`}
+                className={`${strongFieldBaseClass} border-stone-300 hover:border-stone-400 focus-visible:ring-stone-200`}
                 style={{ borderWidth: 2 }}
               >
                 <SelectValue />
@@ -466,7 +466,7 @@ export function CashflowExportPage() {
             >
               <SelectTrigger
                 data-testid="cashflow-export-variant"
-                className={`${strongFieldBaseClass} border-slate-400 hover:border-slate-500 focus-visible:ring-slate-200`}
+                className={`${strongFieldBaseClass} border-stone-300 hover:border-stone-400 focus-visible:ring-stone-200`}
                 style={{ borderWidth: 2 }}
               >
                 <SelectValue />
@@ -493,7 +493,7 @@ export function CashflowExportPage() {
                 <SelectTrigger
                   id="cashflow-export-year"
                   data-testid="cashflow-export-year"
-                  className={`${strongFieldBaseClass} border-slate-400 hover:border-slate-500 focus-visible:ring-slate-200`}
+                  className={`${strongFieldBaseClass} border-stone-300 hover:border-stone-400 focus-visible:ring-stone-200`}
                   style={{ borderWidth: 2 }}
                 >
                   <SelectValue />
@@ -522,7 +522,7 @@ export function CashflowExportPage() {
                   type="month"
                   value={startYearMonth}
                   onChange={(event) => setStartYearMonth(event.target.value)}
-                  className="h-10 rounded-xl border-2 border-slate-400 bg-white text-[12px] font-semibold text-slate-950 shadow-[0_1px_2px_rgba(15,23,42,0.08)] focus-visible:ring-4 focus-visible:ring-slate-200"
+                  className="h-10 rounded-lg border-2 border-stone-300 bg-white text-[12px] font-medium text-zinc-950 shadow-none focus-visible:ring-2 focus-visible:ring-stone-200"
                 />
               </SelectionField>
               <SelectionField
@@ -540,7 +540,7 @@ export function CashflowExportPage() {
                   type="month"
                   value={endYearMonth}
                   onChange={(event) => setEndYearMonth(event.target.value)}
-                  className="h-10 rounded-xl border-2 border-slate-400 bg-white text-[12px] font-semibold text-slate-950 shadow-[0_1px_2px_rgba(15,23,42,0.08)] focus-visible:ring-4 focus-visible:ring-slate-200"
+                  className="h-10 rounded-lg border-2 border-stone-300 bg-white text-[12px] font-medium text-zinc-950 shadow-none focus-visible:ring-2 focus-visible:ring-stone-200"
                 />
               </SelectionField>
             </>
@@ -549,54 +549,54 @@ export function CashflowExportPage() {
       </Card>
 
       <div className="grid gap-3 md:grid-cols-3">
-        <Card className="border-slate-300 bg-slate-50">
+        <Card className="border-stone-200 bg-stone-50 shadow-none">
           <CardContent className="p-4 space-y-1">
             <div className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-xl border border-slate-300 bg-white shadow-sm">
-                <Layers3 className="h-4 w-4 text-slate-700" />
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-stone-200 bg-white">
+                <Layers3 className="h-4 w-4 text-stone-600" />
               </div>
-              <p className="text-[11px] text-slate-700">대상 사업</p>
+              <p className="text-[11px] text-stone-600">대상 사업</p>
             </div>
-            <p className="text-[24px] text-slate-900" style={{ fontWeight: 800 }}>{projectRows.length}</p>
-            <p className="text-[11px] text-slate-700">{scope === 'single' ? '선택한 사업 1건 기준' : '전체 사업 기준'}</p>
+            <p className="text-[22px] font-semibold text-zinc-950">{projectRows.length}</p>
+            <p className="text-[11px] text-stone-600">{scope === 'single' ? '선택한 사업 1건 기준' : '전체 사업 기준'}</p>
           </CardContent>
         </Card>
-        <Card className="border-slate-300 bg-slate-50">
+        <Card className="border-stone-200 bg-stone-50 shadow-none">
           <CardContent className="p-4 space-y-1">
             <div className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-xl border border-slate-300 bg-white shadow-sm">
-                <CheckCircle2 className="h-4 w-4 text-slate-700" />
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-stone-200 bg-white">
+                <CheckCircle2 className="h-4 w-4 text-stone-600" />
               </div>
-              <p className="text-[11px] text-slate-700">업데이트된 사업</p>
+              <p className="text-[11px] text-stone-600">업데이트된 사업</p>
             </div>
-            <p className="text-[24px] text-slate-900" style={{ fontWeight: 800 }}>{updatedCount}</p>
-            <p className="text-[11px] text-slate-700">선택 기간 내 캐시플로 시트 존재</p>
+            <p className="text-[22px] font-semibold text-zinc-950">{updatedCount}</p>
+            <p className="text-[11px] text-stone-600">선택 기간 내 캐시플로 시트 존재</p>
           </CardContent>
         </Card>
-        <Card className="border-slate-300 bg-slate-50">
+        <Card className="border-stone-200 bg-stone-50 shadow-none">
           <CardContent className="p-4 space-y-1">
             <div className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-xl border border-slate-300 bg-white shadow-sm">
-                <CalendarRange className="h-4 w-4 text-slate-700" />
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-stone-200 bg-white">
+                <CalendarRange className="h-4 w-4 text-stone-600" />
               </div>
-              <p className="text-[11px] text-slate-700">미업데이트 사업</p>
+              <p className="text-[11px] text-stone-600">미업데이트 사업</p>
             </div>
-            <p className="text-[24px] text-slate-900" style={{ fontWeight: 800 }}>{missingCount}</p>
-            <p className="text-[11px] text-slate-700">{periodSummary || '기간을 선택해 주세요'}</p>
+            <p className="text-[22px] font-semibold text-zinc-950">{missingCount}</p>
+            <p className="text-[11px] text-stone-600">{periodSummary || '기간을 선택해 주세요'}</p>
           </CardContent>
         </Card>
       </div>
 
-      <Card className="border-slate-200/80">
+      <Card className="border-stone-200 bg-white shadow-none">
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <CardTitle className="text-[14px] text-slate-950">추출 대상 사업</CardTitle>
-              <p className="mt-1 text-[12px] text-slate-700">
+              <CardTitle className="text-[14px] font-semibold text-zinc-950">추출 대상 사업</CardTitle>
+              <p className="mt-1 text-[12px] text-stone-600">
                 {periodSummary || '기간 미선택'} · 월당 5주 고정 슬롯으로 다운로드됩니다.
               </p>
             </div>
-            <Badge variant="outline" className="border-slate-300 bg-white text-[11px] text-slate-800">
+            <Badge variant="outline" className="rounded-md border-stone-200 bg-stone-100 text-[11px] text-stone-700">
               {scope === 'single' ? '사업별' : workbookVariant === 'combined' ? '통합 시트' : '개별 시트'}
             </Badge>
           </div>
@@ -605,34 +605,34 @@ export function CashflowExportPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>사업명</TableHead>
-                <TableHead>담당자</TableHead>
-                <TableHead>상태</TableHead>
-                <TableHead>주차 문서 수</TableHead>
-                <TableHead>최근 업데이트</TableHead>
-                <TableHead className="text-right">이동</TableHead>
+                <TableHead className="text-[11px] font-medium text-stone-500">사업명</TableHead>
+                <TableHead className="text-[11px] font-medium text-stone-500">담당자</TableHead>
+                <TableHead className="text-[11px] font-medium text-stone-500">상태</TableHead>
+                <TableHead className="text-[11px] font-medium text-stone-500">주차 문서 수</TableHead>
+                <TableHead className="text-[11px] font-medium text-stone-500">최근 업데이트</TableHead>
+                <TableHead className="text-right text-[11px] font-medium text-stone-500">이동</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {projectRows.map((row) => (
                 <TableRow key={row.id} data-testid={`cashflow-export-row-${row.id}`}>
-                  <TableCell style={{ fontWeight: 600 }}>{row.name}</TableCell>
-                  <TableCell className="text-slate-700">{row.managerName}</TableCell>
+                  <TableCell className="font-medium text-zinc-950">{row.name}</TableCell>
+                  <TableCell className="text-stone-600">{row.managerName}</TableCell>
                   <TableCell>
                     <Badge
                       variant="outline"
-                      className={row.updated ? 'border-slate-400 bg-slate-200 text-slate-900' : 'border-slate-300 bg-white text-slate-700'}
+                      className={row.updated ? 'rounded-md border-stone-300 bg-stone-200 text-stone-800' : 'rounded-md border-stone-200 bg-white text-stone-600'}
                     >
                       {row.updated ? '업데이트됨' : '미업데이트'}
                     </Badge>
                   </TableCell>
-                  <TableCell>{row.weekCount}</TableCell>
-                  <TableCell className="text-slate-700">{formatDateTime(row.latestUpdatedAt)}</TableCell>
+                  <TableCell className="text-zinc-950">{row.weekCount}</TableCell>
+                  <TableCell className="text-stone-600">{formatDateTime(row.latestUpdatedAt)}</TableCell>
                   <TableCell className="text-right">
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="h-8 gap-1.5 border border-slate-300 bg-white text-[11px] text-slate-900 hover:bg-slate-100"
+                      className="h-8 gap-1.5 rounded-lg border border-stone-200 bg-white text-[11px] text-zinc-900 hover:bg-stone-50"
                       onClick={() => navigate(`/cashflow/projects/${row.id}`)}
                     >
                       <ExternalLink className="w-3.5 h-3.5" />
@@ -653,15 +653,15 @@ export function CashflowExportPage() {
         </CardContent>
       </Card>
 
-      <Card className="border-dashed">
+      <Card className="border-stone-200 bg-stone-50 shadow-none">
         <CardContent className="p-4 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <div>
-            <p className="text-[12px]" style={{ fontWeight: 600 }}>기존 사업별 주간 시트도 유지됩니다.</p>
-            <p className="text-[12px] text-muted-foreground">
+            <p className="text-[12px] font-semibold text-zinc-950">기존 사업별 주간 시트도 유지됩니다.</p>
+            <p className="text-[12px] text-stone-600">
               사업 상세에서는 월 단위 입력과 검토를 계속하고, 이 화면에서는 경영기획실 전용 일괄 추출만 처리합니다.
             </p>
           </div>
-          <Button variant="outline" size="sm" className="gap-1.5 h-8 text-[12px]" onClick={() => navigate('/projects')}>
+          <Button variant="outline" size="sm" className="h-8 gap-1.5 rounded-lg border-stone-200 bg-white text-[12px] text-zinc-900 hover:bg-stone-100" onClick={() => navigate('/projects')}>
             프로젝트로 이동
             <ExternalLink className="w-3.5 h-3.5" />
           </Button>

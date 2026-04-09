@@ -70,9 +70,9 @@ test('admin cashflow export uses a monochrome hierarchy for filter cards', async
   await loginAsAdmin(page);
   await page.goto('/cashflow');
 
-  await expect(page.getByTestId('cashflow-export-step-range')).toHaveClass(/bg-slate-50/);
-  await expect(page.getByTestId('cashflow-export-step-project')).toHaveClass(/bg-slate-50/);
-  await expect(page.getByTestId('cashflow-export-step-range')).toHaveClass(/border-slate-300/);
+  await expect(page.getByTestId('cashflow-export-step-range')).toHaveClass(/bg-stone-50/);
+  await expect(page.getByTestId('cashflow-export-step-project')).toHaveClass(/bg-stone-50/);
+  await expect(page.getByTestId('cashflow-export-step-range')).toHaveClass(/border-stone-200/);
 });
 
 test('pm is redirected away from admin cashflow export route', async ({ page }) => {
