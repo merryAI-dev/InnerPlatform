@@ -33,6 +33,10 @@ export function mountCashflowExportRoutes(app, { db, rbacPolicy }) {
         .filter((project) => !project.trashedAt);
     }
 
+    if (payload.basis) {
+      projects = projects.filter((project) => project.basis === payload.basis);
+    }
+
     if (projects.length === 0) {
       throw createHttpError(404, '추출할 프로젝트가 없습니다.', 'not_found');
     }

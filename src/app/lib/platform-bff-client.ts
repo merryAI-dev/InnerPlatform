@@ -892,6 +892,7 @@ export async function exportCashflowWorkbookViaBff(params: {
   body: {
     scope: 'all' | 'single';
     projectId?: string;
+    basis?: '공급가액' | '공급대가' | 'NONE';
     startYearMonth: string;
     endYearMonth: string;
     variant: 'single-project' | 'combined' | 'multi-sheet';
