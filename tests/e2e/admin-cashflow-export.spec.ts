@@ -32,6 +32,8 @@ test('admin can access cashflow export page and trigger workbook download', asyn
   await expect(page.getByRole('heading', { name: '경영기획실 전용 캐시플로 추출 화면' })).toBeVisible();
   await expect(page.getByTestId('cashflow-export-step-range')).toBeVisible();
   await expect(page.getByTestId('cashflow-export-step-period')).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: '이번주 작성' })).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: '최근 업데이트(Projection)' })).toBeVisible();
   await expect(page.getByTestId('cashflow-export-download')).toBeEnabled();
   await expect(page.locator('[data-testid^="cashflow-export-row-"]').first()).toBeVisible();
 

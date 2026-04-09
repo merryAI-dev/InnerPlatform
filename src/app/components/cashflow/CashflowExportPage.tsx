@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
+import { collection, limit, onSnapshot, query, where } from 'firebase/firestore';
 import {
   BarChart3,
   CalendarRange,
@@ -24,6 +25,7 @@ import { useAppStore } from '../../data/store';
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { useAuth } from '../../data/auth-store';
 import { useFirebase } from '../../lib/firebase-context';
+import { getOrgCollectionPath } from '../../lib/firebase';
 import { triggerDownload } from '../../platform/csv-utils';
 import { loadExcelJs } from '../../platform/lazy-heavy-modules';
 import { exportCashflowWorkbookViaBff, isPlatformApiEnabled } from '../../lib/platform-bff-client';
@@ -34,8 +36,10 @@ import {
   type CashflowExportProjectInput,
   type CashflowExportWorkbookVariant,
 } from '../../platform/cashflow-export';
+import { buildCashflowExportProjectRows } from '../../platform/cashflow-export-surface';
+import { getSeoulTodayIso } from '../../platform/business-days';
 import { hasPermission } from '../../platform/rbac';
-import { BASIS_LABELS, type Basis } from '../../data/types';
+import { BASIS_LABELS, type Basis, type WeeklySubmissionStatus } from '../../data/types';
 
 function formatDateTime(value?: string): string {
   if (!value) return '-';
@@ -87,7 +91,7 @@ export function CashflowExportPage() {
   const { projects, transactions } = useAppStore();
   const { weeks, yearMonth } = useCashflowWeeks();
   const { user } = useAuth();
-  const { orgId } = useFirebase();
+  const { db, orgId } = useFirebase();
   const [scope, setScope] = useState<'all' | 'single'>('all');
   const [selectedProjectId, setSelectedProjectId] = useState<string>('ALL');
   const [basisFilter, setBasisFilter] = useState<'ALL' | Basis>('ALL');
@@ -97,6 +101,7 @@ export function CashflowExportPage() {
   const [endYearMonth, setEndYearMonth] = useState<string>(`${yearMonth.slice(0, 4)}-12`);
   const [multiProjectVariant, setMultiProjectVariant] = useState<'combined' | 'multi-sheet'>('combined');
   const [downloadPreparing, setDownloadPreparing] = useState(false);
+  const [weeklySubmissionStatuses, setWeeklySubmissionStatuses] = useState<WeeklySubmissionStatus[]>([]);
 
   const canExport = hasPermission((user?.role || 'viewer') as any, 'cashflow:export');
   const bffEnabled = isPlatformApiEnabled();
@@ -135,6 +140,7 @@ export function CashflowExportPage() {
   }, [basisFilter, scopedProjects]);
 
   const targetYearMonths = useMemo(() => new Set(yearMonths), [yearMonths]);
+  const todayIso = getSeoulTodayIso();
 
   const projectInputs = useMemo<CashflowExportProjectInput[]>(() => {
     return targetProjects.map((project) => ({
@@ -146,24 +152,13 @@ export function CashflowExportPage() {
     }));
   }, [targetProjects, targetYearMonths, transactions, weeks]);
 
-  const projectRows = useMemo(() => {
-    return targetProjects.map((project) => {
-      const projectWeeks = weeks.filter((week) => week.projectId === project.id && targetYearMonths.has(week.yearMonth));
-      const latestUpdatedAt = projectWeeks.reduce<string | undefined>((latest, week) => {
-        if (!week.updatedAt) return latest;
-        if (!latest || week.updatedAt > latest) return week.updatedAt;
-        return latest;
-      }, undefined);
-      return {
-        id: project.id,
-        name: project.name,
-        managerName: project.managerName,
-        updated: projectWeeks.length > 0,
-        latestUpdatedAt,
-        weekCount: projectWeeks.length,
-      };
-    });
-  }, [targetProjects, targetYearMonths, weeks]);
+  const projectRows = useMemo(() => buildCashflowExportProjectRows({
+    projects: targetProjects,
+    weeks,
+    weeklySubmissionStatuses,
+    targetYearMonths: yearMonths,
+    todayIso,
+  }), [targetProjects, todayIso, weeklySubmissionStatuses, weeks, yearMonths]);
 
   const updatedCount = projectRows.filter((row) => row.updated).length;
   const missingCount = projectRows.length - updatedCount;
@@ -185,6 +180,42 @@ export function CashflowExportPage() {
       setSelectedProjectId(sortedProjects[0].id);
     }
   }, [scope, selectedProjectId, sortedProjects]);
+
+  useEffect(() => {
+    if (!db) {
+      setWeeklySubmissionStatuses([]);
+      return;
+    }
+
+    const currentYearMonth = todayIso.slice(0, 7);
+    const rangedYearMonths = [...yearMonths, currentYearMonth].filter((value) => /^\d{4}-\d{2}$/.test(value)).sort();
+    const startYearMonth = rangedYearMonths[0];
+    const endYearMonth = rangedYearMonths[rangedYearMonths.length - 1];
+    if (!startYearMonth || !endYearMonth) {
+      setWeeklySubmissionStatuses([]);
+      return;
+    }
+
+    const base = collection(db, getOrgCollectionPath(orgId, 'weeklySubmissionStatus'));
+    const q = query(
+      base,
+      where('yearMonth', '>=', startYearMonth),
+      where('yearMonth', '<=', endYearMonth),
+      limit(2500),
+    );
+
+    const unsubscribe = onSnapshot(q, (snap) => {
+      const list = snap.docs.map((docItem) => {
+        const data = docItem.data() as WeeklySubmissionStatus;
+        return { ...data, id: data.id || docItem.id };
+      });
+      setWeeklySubmissionStatuses(list);
+    }, () => {
+      setWeeklySubmissionStatuses([]);
+    });
+
+    return () => unsubscribe();
+  }, [db, orgId, todayIso, yearMonths]);
 
   async function handleDownload() {
     if (!canExport) {
@@ -585,8 +616,8 @@ export function CashflowExportPage() {
                 <TableHead className="text-[11px] font-medium text-stone-500">사업명</TableHead>
                 <TableHead className="text-[11px] font-medium text-stone-500">담당자</TableHead>
                 <TableHead className="text-[11px] font-medium text-stone-500">상태</TableHead>
-                <TableHead className="text-[11px] font-medium text-stone-500">주차 문서 수</TableHead>
-                <TableHead className="text-[11px] font-medium text-stone-500">최근 업데이트</TableHead>
+                <TableHead className="text-[11px] font-medium text-stone-500">이번주 작성</TableHead>
+                <TableHead className="text-[11px] font-medium text-stone-500">최근 업데이트(Projection)</TableHead>
                 <TableHead className="text-right text-[11px] font-medium text-stone-500">이동</TableHead>
               </TableRow>
             </TableHeader>
@@ -603,8 +634,15 @@ export function CashflowExportPage() {
                       {row.updated ? '업데이트됨' : '미업데이트'}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-zinc-950">{row.weekCount}</TableCell>
-                  <TableCell className="text-stone-600">{formatDateTime(row.latestUpdatedAt)}</TableCell>
+                  <TableCell>
+                    <Badge
+                      variant="outline"
+                      className={row.currentWeekUpdated ? 'rounded-md border-stone-300 bg-stone-200 text-stone-800' : 'rounded-md border-stone-200 bg-white text-stone-600'}
+                    >
+                      {row.currentWeekLabel} · {row.currentWeekUpdated ? '작성됨' : '미작성'}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-stone-600">{formatDateTime(row.latestProjectionUpdatedAt)}</TableCell>
                   <TableCell className="text-right">
                     <Button
                       variant="ghost"
