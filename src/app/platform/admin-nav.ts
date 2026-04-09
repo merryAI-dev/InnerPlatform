@@ -1,6 +1,6 @@
 import navPolicyJson from '../../../policies/nav-policy.json';
 
-export const ADMIN_OPEN_TO_ALL_ROLES = true;
+export const ADMIN_OPEN_TO_ALL_ROLES = false;
 
 function normalizeRole(value: unknown): string {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
@@ -8,10 +8,6 @@ function normalizeRole(value: unknown): string {
 
 // nav-policy.json 기반으로 역할별 허용 경로 Set 동적 생성
 const FULL_ACCESS_ROLES = new Set(navPolicyJson.fullAccessRoles);
-const KNOWN_ROLES = new Set([
-  ...navPolicyJson.fullAccessRoles,
-  ...Object.keys(navPolicyJson.routePermissions),
-]);
 
 const ROUTE_PERMISSIONS_BY_ROLE: Record<string, Set<string>> = Object.fromEntries(
   Object.entries(navPolicyJson.routePermissions).map(([role, routes]) => [
@@ -29,8 +25,6 @@ const ROUTE_PERMISSIONS_BY_ROLE: Record<string, Set<string>> = Object.fromEntrie
 export function canShowAdminNavItem(role: unknown, to: string): boolean {
   const normalized = normalizeRole(role);
   if (!normalized) return false;
-
-  if (ADMIN_OPEN_TO_ALL_ROLES) return KNOWN_ROLES.has(normalized);
 
   if (FULL_ACCESS_ROLES.has(normalized)) return true;
 

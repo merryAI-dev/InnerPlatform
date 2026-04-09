@@ -14,6 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog';
 import { Textarea } from '../ui/textarea';
 import { PageHeader } from '../layout/PageHeader';
+import { useAppStore } from '../../data/store';
 import {
   EXPENSE_SETS, EXPENSE_STATUS_LABELS, EXPENSE_STATUS_COLORS,
   fmtKRW, fmtShort,
@@ -23,7 +24,6 @@ import {
   CHANGE_REQUESTS, STATE_LABELS,
   type ChangeRequest, type ChangeRequestState,
 } from '../../data/personnel-change-data';
-import { PROJECTS } from '../../data/mock-data';
 import { toast } from 'sonner';
 
 // ═══════════════════════════════════════════════════════════════
@@ -50,6 +50,7 @@ const stateColors: Record<ChangeRequestState, string> = {
 
 export function AdminApprovalPage() {
   const navigate = useNavigate();
+  const { projects } = useAppStore();
   const [activeTab, setActiveTab] = useState('expenses');
   const [expenseSets, setExpenseSets] = useState<ExpenseSet[]>(EXPENSE_SETS);
   const [changeReqs, setChangeReqs] = useState<ChangeRequest[]>(CHANGE_REQUESTS);
@@ -64,9 +65,9 @@ export function AdminApprovalPage() {
 
   const projectMap = useMemo(() => {
     const m = new Map<string, string>();
-    PROJECTS.forEach(p => m.set(p.id, p.name));
+    projects.forEach(p => m.set(p.id, p.name));
     return m;
-  }, []);
+  }, [projects]);
 
   // Pending items
   const pendingExpenses = expenseSets.filter(s => s.status === 'SUBMITTED');

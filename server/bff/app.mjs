@@ -86,6 +86,7 @@ import { mountLedgerRoutes } from './routes/ledgers.mjs';
 import { mountTransactionRoutes } from './routes/transactions.mjs';
 import { mountAuditRoutes } from './routes/audit.mjs';
 import { mountMemberRoutes } from './routes/members.mjs';
+import { mountCashflowExportRoutes } from './routes/cashflow-exports.mjs';
 
 function createHttpError(statusCode, message, code = 'request_error') {
   const error = new Error(message);
@@ -1346,6 +1347,7 @@ export function createBffApp(options = {}) {
     projectRequestContractAiService, projectRequestContractStorageService,
     projectSheetSourceStorageService, projectRegistrationSlackService,
   });
+  mountCashflowExportRoutes(app, { db, rbacPolicy });
   mountLedgerRoutes(app, { db, now, idempotencyService, auditChainService, piiProtector });
   mountTransactionRoutes(app, { db, now, idempotencyService, auditChainService, piiProtector, rbacPolicy, driveService });
   mountAuditRoutes(app, { db, auditChainService });

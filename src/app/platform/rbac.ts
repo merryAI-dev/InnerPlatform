@@ -15,6 +15,7 @@ export type PlatformPermission =
   | 'transaction:submit'
   | 'transaction:approve'
   | 'transaction:reject'
+  | 'cashflow:export'
   | 'comment:read'
   | 'comment:write'
   | 'evidence:read'
@@ -40,6 +41,7 @@ const KNOWN_PERMISSIONS = new Set<PlatformPermission>([
   'transaction:submit',
   'transaction:approve',
   'transaction:reject',
+  'cashflow:export',
   'comment:read',
   'comment:write',
   'evidence:read',

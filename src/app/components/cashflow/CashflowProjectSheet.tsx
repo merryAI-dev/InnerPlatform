@@ -38,6 +38,8 @@ import { triggerDownload } from '../../platform/csv-utils';
 import { useFirebase } from '../../lib/firebase-context';
 import { getOrgDocumentPath } from '../../lib/firebase';
 import { loadExcelJs, warmExcelJs } from '../../platform/lazy-heavy-modules';
+import { buildCashflowExportWorkbookSpec } from '../../platform/cashflow-export';
+import { exportCashflowWorkbookViaBff, isPlatformApiEnabled } from '../../lib/platform-bff-client';
 
 function fmt(n: number): string {
   return n.toLocaleString('ko-KR');
@@ -335,28 +337,59 @@ export function CashflowProjectSheet({
   const handleDownload = useCallback(async () => {
     setDownloadPreparing(true);
     try {
-      const ExcelJS = await loadExcelJs();
-      const wb = new ExcelJS.Workbook();
-      const addSheet = (label: string, tableMode: 'projection' | 'actual') => {
-        const ws = wb.addWorksheet(label);
-        const matrix = buildExportMatrix(tableMode);
-        matrix.forEach((row) => ws.addRow(row));
-        ws.getRow(1).font = { bold: true };
-        ws.getRow(2).font = { bold: true };
-        ws.views = [{ state: 'frozen', ySplit: 2 }];
-      };
-      addSheet('Projection', 'projection');
-      addSheet('Actual', 'actual');
-      const buffer = await wb.xlsx.writeBuffer();
-      const blob = new Blob(
-        [buffer],
-        { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
-      );
-      triggerDownload(blob, `프로젝트_캐시플로(주간)_${projectName}_${yearMonth}.xlsx`);
+      if (isPlatformApiEnabled() && user) {
+        const response = await exportCashflowWorkbookViaBff({
+          tenantId: orgId,
+          actor: {
+            uid: user.uid,
+            email: user.email,
+            role: user.role,
+            idToken: user.idToken,
+            googleAccessToken: user.googleAccessToken,
+          },
+          body: {
+            scope: 'single',
+            projectId,
+            startYearMonth: yearMonth,
+            endYearMonth: yearMonth,
+            variant: 'single-project',
+          },
+        });
+        triggerDownload(response.blob, response.fileName);
+      } else {
+        const ExcelJS = await loadExcelJs();
+        const workbookSpec = buildCashflowExportWorkbookSpec({
+          variant: 'single-project',
+          projects: [
+            {
+              projectId,
+              projectName,
+              weeks: projectWeeks,
+              transactions: transactions.filter((tx) => tx.projectId === projectId && tx.dateTime.slice(0, 7) === yearMonth),
+            },
+          ],
+          yearMonths: [yearMonth],
+        });
+        const workbook = new ExcelJS.Workbook();
+        for (const sheet of workbookSpec.sheets) {
+          const worksheet = workbook.addWorksheet(sheet.name);
+          sheet.rows.forEach((row) => worksheet.addRow(row));
+          worksheet.views = [{ state: 'frozen', ySplit: 2 }];
+        }
+        const buffer = await workbook.xlsx.writeBuffer();
+        const blob = new Blob(
+          [buffer],
+          { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+        );
+        triggerDownload(blob, `프로젝트_캐시플로(주간)_${projectName}_${yearMonth}.xlsx`);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '엑셀 다운로드에 실패했습니다.';
+      toast.error(message);
     } finally {
       setDownloadPreparing(false);
     }
-  }, [buildExportMatrix, projectName, yearMonth]);
+  }, [orgId, projectId, projectName, projectWeeks, transactions, user, yearMonth]);
 
   const flushWeek = useCallback(async (input: {
     weekNo: number;

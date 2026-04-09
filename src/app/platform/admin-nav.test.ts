@@ -1,49 +1,29 @@
 import { describe, expect, it } from 'vitest';
 import { ADMIN_OPEN_TO_ALL_ROLES, canAccessAdminPath, canShowAdminNavItem } from './admin-nav';
 
-const ALL_ROLES = ['admin', 'finance', 'pm', 'viewer'] as const;
-const SAMPLE_ADMIN_PATHS = [
-  '/',
-  '/projects',
-  '/projects/new',
-  '/projects/migration-audit',
-  '/cashflow',
-  '/evidence',
-  '/payroll',
-  '/budget-summary',
-  '/expense-management',
-  '/approvals',
-  '/users',
-  '/audit',
-  '/settings',
-  '/participation',
-  '/koica-personnel',
-  '/personnel-changes',
-  '/hr-announcements',
-  '/portal',
-] as const;
-
-describe('admin nav temporary open access', () => {
-  it('keeps the temporary admin-open flag enabled', () => {
-    expect(ADMIN_OPEN_TO_ALL_ROLES).toBe(true);
+describe('admin nav access control', () => {
+  it('disables the admin-open bypass so route permissions control access', () => {
+    expect(ADMIN_OPEN_TO_ALL_ROLES).toBe(false);
   });
 
-  it('shows all admin nav items to all signed-in roles', () => {
-    for (const role of ALL_ROLES) {
-      for (const path of SAMPLE_ADMIN_PATHS) {
-        expect(canShowAdminNavItem(role, path), `${role} should see ${path}`).toBe(true);
-      }
-    }
+  it('keeps dashboard visible but restricts cashflow to finance and admin', () => {
+    expect(canShowAdminNavItem('admin', '/')).toBe(true);
+    expect(canShowAdminNavItem('finance', '/')).toBe(true);
+    expect(canShowAdminNavItem('pm', '/')).toBe(true);
+    expect(canShowAdminNavItem('viewer', '/')).toBe(true);
+
+    expect(canShowAdminNavItem('admin', '/cashflow')).toBe(true);
+    expect(canShowAdminNavItem('finance', '/cashflow')).toBe(true);
+    expect(canShowAdminNavItem('pm', '/cashflow')).toBe(false);
+    expect(canShowAdminNavItem('viewer', '/cashflow')).toBe(false);
   });
 
-  it('allows all signed-in roles to access canonical admin paths', () => {
-    for (const role of ALL_ROLES) {
-      expect(canAccessAdminPath(role, '/projects/migration-audit')).toBe(true);
-      expect(canAccessAdminPath(role, '/settings')).toBe(true);
-      expect(canAccessAdminPath(role, '/users')).toBe(true);
-      expect(canAccessAdminPath(role, '/projects/p-123/edit')).toBe(true);
-      expect(canAccessAdminPath(role, '/cashflow/projects/p-1')).toBe(true);
-    }
+  it('allows finance to access finance export surfaces but not admin settings', () => {
+    expect(canAccessAdminPath('finance', '/cashflow')).toBe(true);
+    expect(canAccessAdminPath('finance', '/cashflow/projects/p-1')).toBe(true);
+    expect(canAccessAdminPath('finance', '/approvals')).toBe(true);
+    expect(canAccessAdminPath('finance', '/settings')).toBe(false);
+    expect(canAccessAdminPath('finance', '/users')).toBe(false);
   });
 
   it('still rejects empty or unknown roles from admin nav', () => {

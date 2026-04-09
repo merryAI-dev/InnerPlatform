@@ -170,6 +170,29 @@ export const memberRoleUpdateSchema = z.object({
   reason: z.string().trim().min(1).max(500).optional(),
 }).strict();
 
+export const cashflowExportSchema = z.object({
+  scope: z.enum(['all', 'single']),
+  projectId: z.string().trim().optional(),
+  startYearMonth: z.string().trim().regex(/^\d{4}-\d{2}$/),
+  endYearMonth: z.string().trim().regex(/^\d{4}-\d{2}$/),
+  variant: z.enum(['single-project', 'combined', 'multi-sheet']),
+}).strict().superRefine((value, ctx) => {
+  if (value.scope === 'single' && !value.projectId) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['projectId'],
+      message: 'projectId is required when scope=single',
+    });
+  }
+  if (value.scope === 'all' && value.variant === 'single-project') {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['variant'],
+      message: 'single-project variant requires scope=single',
+    });
+  }
+});
+
 export const genericWriteSchema = z.object({
   entityType: NON_EMPTY_STRING,
   entityId: NON_EMPTY_STRING.optional(),

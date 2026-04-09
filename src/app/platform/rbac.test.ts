@@ -42,7 +42,10 @@ describe('rbac helpers', () => {
 
   it('grants finance approvals and admin tenant management based on policy', () => {
     expect(hasPermission('finance', 'transaction:approve')).toBe(true);
+    expect(hasPermission('finance', 'cashflow:export')).toBe(true);
     expect(hasPermission('admin', 'tenant:manage')).toBe(true);
+    expect(hasPermission('pm', 'cashflow:export')).toBe(false);
+    expect(hasPermission('viewer', 'cashflow:export')).toBe(false);
   });
 
   it('keeps viewer least-privileged but allows evidence drive workflows', () => {

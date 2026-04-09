@@ -343,6 +343,14 @@ export function DashboardPage() {
           <div className="flex items-center gap-2">
             <UpdateReminderBadge />
             <Button
+              onClick={() => navigate('/cashflow')}
+              size="sm"
+              variant="outline"
+              className="gap-1.5 h-8 text-[11px] rounded-lg"
+            >
+              캐시플로 추출 <ArrowRight className="w-3 h-3" />
+            </Button>
+            <Button
               onClick={() => navigate('/projects')}
               size="sm"
               className="gap-1.5 h-8 text-[11px] rounded-lg"
