@@ -217,6 +217,90 @@ function buildModeSectionRows(params: {
   return rows;
 }
 
+function buildWideModeSectionRows(params: {
+  yearMonths: string[];
+  mode: CashflowExportMode;
+  weekIndex: Map<string, Map<number, CashflowWeekSheet>>;
+}): CashflowExportRows {
+  const modeLabel = params.mode === 'projection' ? 'Projection' : 'Actual';
+  const monthColumns = params.yearMonths.map((yearMonth) => {
+    const slots = buildCashflowWeekSlots(yearMonth);
+    const weeksByWeekNo = params.weekIndex.get(yearMonth) || new Map<number, CashflowWeekSheet>();
+    const slotAmounts = slots.map((slot) => getWeekAmounts(weeksByWeekNo.get(slot.weekNo), params.mode));
+    const weekTotals = slotAmounts.map((amounts) => computeCashflowTotals(amounts));
+    const rowTotals = createLineTotals();
+    for (const lineId of CASHFLOW_ALL_LINES) {
+      rowTotals[lineId] = slotAmounts.reduce((acc, amounts) => acc + (Number(amounts[lineId]) || 0), 0);
+    }
+    return {
+      yearMonth,
+      slots,
+      slotAmounts,
+      weekTotals,
+      rowTotals,
+      totalIn: weekTotals.reduce((acc, week) => acc + week.totalIn, 0),
+      totalOut: weekTotals.reduce((acc, week) => acc + week.totalOut, 0),
+      totalNet: weekTotals.reduce((acc, week) => acc + week.net, 0),
+    };
+  });
+
+  const headerRow: CashflowExportCell[] = ['항목'];
+  const periodRow: CashflowExportCell[] = ['기간'];
+  for (const month of monthColumns) {
+    for (const slot of month.slots) {
+      headerRow.push(slot.label);
+      periodRow.push(slot.present ? `${slot.weekStart} ~ ${slot.weekEnd}` : '');
+    }
+    headerRow.push(`${month.yearMonth} 합계`);
+    periodRow.push('');
+  }
+
+  const rows: CashflowExportRows = [];
+  rows.push([modeLabel]);
+  rows.push(headerRow);
+  rows.push(periodRow);
+  rows.push([]);
+  rows.push([`입금 (${modeLabel})`, ...Array(headerRow.length - 1).fill('')]);
+  for (const lineId of CASHFLOW_IN_LINES) {
+    const row: CashflowExportCell[] = [CASHFLOW_SHEET_LINE_LABELS[lineId]];
+    for (const month of monthColumns) {
+      row.push(...month.slotAmounts.map((amounts) => Number(amounts[lineId]) || 0));
+      row.push(month.rowTotals[lineId] || 0);
+    }
+    rows.push(row);
+  }
+
+  const inTotalRow: CashflowExportCell[] = ['입금 합계'];
+  for (const month of monthColumns) {
+    inTotalRow.push(...month.weekTotals.map((week) => week.totalIn), month.totalIn);
+  }
+  rows.push(inTotalRow);
+  rows.push([]);
+  rows.push([`출금 (${modeLabel})`, ...Array(headerRow.length - 1).fill('')]);
+  for (const lineId of CASHFLOW_OUT_LINES) {
+    const row: CashflowExportCell[] = [CASHFLOW_SHEET_LINE_LABELS[lineId]];
+    for (const month of monthColumns) {
+      row.push(...month.slotAmounts.map((amounts) => Number(amounts[lineId]) || 0));
+      row.push(month.rowTotals[lineId] || 0);
+    }
+    rows.push(row);
+  }
+
+  const outTotalRow: CashflowExportCell[] = ['출금 합계'];
+  for (const month of monthColumns) {
+    outTotalRow.push(...month.weekTotals.map((week) => week.totalOut), month.totalOut);
+  }
+  rows.push(outTotalRow);
+
+  const netRow: CashflowExportCell[] = ['잔액'];
+  for (const month of monthColumns) {
+    netRow.push(...month.weekTotals.map((week) => week.net), month.totalNet);
+  }
+  rows.push(netRow);
+
+  return rows;
+}
+
 function buildProjectWorkbookRows(params: {
   project: CashflowExportProjectInput;
   yearMonths: string[];
@@ -236,6 +320,20 @@ function buildProjectWorkbookRows(params: {
   }
   rows.push(['기간', yearMonthSummary || '']);
   rows.push([]);
+
+  if (params.yearMonths.length > 1) {
+    rows.push(...buildWideModeSectionRows({
+      yearMonths: params.yearMonths,
+      mode: params.includeBothModes ? 'projection' : (params.mode || 'projection'),
+      weekIndex,
+    }));
+    if (params.includeBothModes) {
+      rows.push([]);
+      rows.push(...buildWideModeSectionRows({ yearMonths: params.yearMonths, mode: 'actual', weekIndex }));
+    }
+    rows.push([]);
+    return rows;
+  }
 
   for (const yearMonth of params.yearMonths) {
     const slots = buildCashflowWeekSlots(yearMonth);
