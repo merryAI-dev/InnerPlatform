@@ -67,6 +67,16 @@ test('admin can filter cashflow export targets by settlement basis', async ({ pa
   await expect(page.locator('[data-testid^="cashflow-export-row-"]')).toHaveCount(1);
 });
 
+test('admin cashflow export uses a monochrome hierarchy for filter cards and summary surfaces', async ({ page }) => {
+  await loginAsAdmin(page);
+  await page.goto('/cashflow');
+
+  await expect(page.getByTestId('cashflow-export-step-range')).toHaveClass(/bg-slate-50/);
+  await expect(page.getByTestId('cashflow-export-step-project')).toHaveClass(/bg-slate-50/);
+  await expect(page.getByTestId('cashflow-export-step-range')).toHaveClass(/border-slate-300/);
+  await expect(page.getByTestId('cashflow-export-action-summary')).toHaveClass(/bg-slate-50/);
+});
+
 test('pm is redirected away from admin cashflow export route', async ({ page }) => {
   await loginAsPm(page);
   await page.goto('/cashflow');
