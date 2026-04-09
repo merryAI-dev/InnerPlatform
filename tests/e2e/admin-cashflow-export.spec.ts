@@ -42,6 +42,31 @@ test('admin can access cashflow export page and trigger workbook download', asyn
   expect(download.suggestedFilename()).toContain('캐시플로_추출');
 });
 
+test('admin cashflow export controls have strong field boundaries and visible dropdown affordances', async ({ page }) => {
+  await loginAsAdmin(page);
+  await page.goto('/cashflow');
+
+  const scopeTrigger = page.getByTestId('cashflow-export-scope');
+  const variantTrigger = page.getByTestId('cashflow-export-variant');
+
+  await expect(scopeTrigger).toHaveCSS('border-top-width', '2px');
+  await expect(variantTrigger).toHaveCSS('border-top-width', '2px');
+  await expect(scopeTrigger.locator('svg').last()).toHaveCSS('opacity', '1');
+  await expect(variantTrigger.locator('svg').last()).toHaveCSS('opacity', '1');
+});
+
+test('admin can filter cashflow export targets by settlement basis', async ({ page }) => {
+  await loginAsAdmin(page);
+  await page.goto('/cashflow');
+
+  await page.getByTestId('cashflow-export-basis').click();
+  await page.getByRole('option', { name: '공급대가' }).click();
+
+  await expect(page.getByTestId('cashflow-export-step-basis')).toContainText('공급대가');
+  await expect(page.getByText('현대 모비스 CSV OI 컨설팅')).toBeVisible();
+  await expect(page.locator('[data-testid^="cashflow-export-row-"]')).toHaveCount(1);
+});
+
 test('pm is redirected away from admin cashflow export route', async ({ page }) => {
   await loginAsPm(page);
   await page.goto('/cashflow');
