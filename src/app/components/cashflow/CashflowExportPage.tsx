@@ -57,7 +57,6 @@ function sanitizeFilePart(value: string): string {
 const strongFieldBaseClass = 'h-10 rounded-lg border-2 bg-white text-[12px] font-medium text-zinc-950 shadow-none transition-colors focus-visible:ring-2 [&_svg]:size-4 [&_svg]:!opacity-100 [&_svg]:text-stone-500';
 const activeDisabledFieldClass = 'border-stone-200 bg-stone-100 text-stone-500 shadow-none [&_svg]:text-stone-400';
 const monochromeSurfaceClass = 'border-stone-200 bg-stone-50';
-const monochromeBadgeClass = 'border-stone-200 bg-stone-100 text-stone-700';
 
 function SelectionField(props: {
   step: string;
@@ -69,25 +68,14 @@ function SelectionField(props: {
   toneClass: string;
   children: ReactNode;
 }) {
-  const { step, icon: Icon, label, helper, value, testId, toneClass, children } = props;
+  const { icon: Icon, label, testId, toneClass, children } = props;
   return (
-    <div data-testid={testId} className={`space-y-3 rounded-xl border p-4 ${toneClass}`}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-start gap-2">
-          <div className="mt-0.5 flex h-7 min-w-7 items-center justify-center rounded-lg border border-stone-200 bg-white text-[10px] font-medium text-stone-700">
-            {step}
-          </div>
-          <div className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-lg border border-stone-200 bg-white">
-            <Icon className="h-3.5 w-3.5 text-stone-600" />
-          </div>
-          <div className="min-w-0">
-            <Label className="text-[12px] font-semibold text-zinc-950">{label}</Label>
-            <p className="mt-0.5 text-[11px] leading-5 text-stone-600">{helper}</p>
-          </div>
+    <div data-testid={testId} className={`space-y-2 rounded-xl border p-3 ${toneClass}`}>
+      <div className="flex items-center gap-2">
+        <div className="flex h-6 w-6 items-center justify-center rounded-md border border-stone-200 bg-white">
+          <Icon className="h-3.5 w-3.5 text-stone-600" />
         </div>
-        <Badge variant="outline" className="max-w-[48%] truncate rounded-md border-stone-200 bg-stone-100 text-[11px] font-medium text-stone-700">
-          {value}
-        </Badge>
+        <Label className="text-[11px] font-medium tracking-[0.01em] text-stone-700">{label}</Label>
       </div>
       {children}
     </div>
@@ -300,23 +288,12 @@ export function CashflowExportPage() {
 
       <Card className="border-stone-200 bg-white shadow-none">
         <CardHeader className="pb-3">
-          <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-            <div>
-              <CardTitle className="text-[14px] font-semibold text-zinc-950">추출 조건</CardTitle>
-              <p className="mt-1 text-[12px] leading-6 text-stone-600">
-                순서대로 범위, 사업, 기간, 형식을 고르면 바로 엑셀을 내려받을 수 있습니다.
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Badge className={monochromeBadgeClass}>범위 · {scope === 'single' ? '사업별' : '전체 사업'}</Badge>
-              <Badge className={monochromeBadgeClass}>대상 · {projectSelectionLabel}</Badge>
-              <Badge className={monochromeBadgeClass}>정산 기준 · {basisFilterLabel}</Badge>
-              <Badge className={monochromeBadgeClass}>기간 · {periodSummary || '미선택'}</Badge>
-              <Badge className={monochromeBadgeClass}>형식 · {workbookVariantLabel}</Badge>
-            </div>
-          </div>
+          <CardTitle className="text-[14px] font-semibold text-zinc-950">추출 설정</CardTitle>
+          <p className="text-[12px] text-stone-600">
+            {scope === 'single' ? '사업별' : '전체 사업'} · {projectSelectionLabel} · {basisFilterLabel} · {periodSummary || '기간 미선택'} · {workbookVariantLabel}
+          </p>
         </CardHeader>
-        <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <SelectionField
             step="1"
             icon={Layers3}
