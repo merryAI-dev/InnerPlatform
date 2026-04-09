@@ -6,7 +6,7 @@ import type {
   TransactionState,
 } from '../data/types';
 import { PlatformApiClient } from '../platform/api-client';
-import type { RequestActor } from '../platform/request-context';
+import { buildStandardHeaders, type RequestActor } from '../platform/request-context';
 
 export interface PlatformApiRuntimeConfig {
   enabled: boolean;
@@ -858,6 +858,68 @@ export async function overrideTransactionEvidenceDriveCategoriesViaBff(params: {
 
 export function isPlatformApiEnabled(): boolean {
   return featureFlags.platformApiEnabled;
+}
+
+function resolveBinaryErrorMessage(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) return '파일 다운로드 요청에 실패했습니다.';
+  try {
+    const parsed = JSON.parse(trimmed) as { message?: string; error?: string };
+    return parsed.message || parsed.error || trimmed;
+  } catch {
+    return trimmed;
+  }
+}
+
+function parseContentDispositionFileName(headerValue: string | null): string {
+  const value = String(headerValue || '').trim();
+  if (!value) return '';
+  const utf8Match = value.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1]);
+    } catch {
+      return utf8Match[1];
+    }
+  }
+  const basicMatch = value.match(/filename="([^"]+)"/i) || value.match(/filename=([^;]+)/i);
+  return basicMatch?.[1]?.trim() || '';
+}
+
+export async function exportCashflowWorkbookViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  body: {
+    scope: 'all' | 'single';
+    projectId?: string;
+    startYearMonth: string;
+    endYearMonth: string;
+    variant: 'single-project' | 'combined' | 'multi-sheet';
+  };
+}): Promise<{ blob: Blob; fileName: string }> {
+  const config = readPlatformApiRuntimeConfig();
+  const headers = buildStandardHeaders({
+    tenantId: params.tenantId,
+    actor: toRequestActor(params.actor),
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+    },
+  });
+  const response = await fetch(`${config.baseUrl}/api/v1/cashflow-exports`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(params.body),
+  });
+
+  if (!response.ok) {
+    throw new Error(resolveBinaryErrorMessage(await response.text()));
+  }
+
+  return {
+    blob: await response.blob(),
+    fileName: parseContentDispositionFileName(response.headers.get('content-disposition')) || 'cashflow-export.xlsx',
+  };
 }
 
 // ─── Budget Suggestion ───────────────────────────────────────────────────────

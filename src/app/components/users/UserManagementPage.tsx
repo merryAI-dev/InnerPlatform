@@ -581,7 +581,7 @@ export function UserManagementPage() {
               <div className="p-3 rounded-lg bg-muted/40 text-[10px] text-muted-foreground space-y-1">
                 <p style={{ fontWeight: 600 }}>역할별 권한:</p>
                 <p><span className="text-foreground" style={{ fontWeight: 500 }}>관리자</span> — 모든 사업·재무·사용자 관리 권한</p>
-                <p><span className="text-foreground" style={{ fontWeight: 500 }}>재무팀</span> — 모든 사업의 재무 조회·승인 권한</p>
+                <p><span className="text-foreground" style={{ fontWeight: 500 }}>재무팀</span> — 모든 사업의 재무 조회·승인·캐시플로 추출 권한</p>
                 <p><span className="text-foreground" style={{ fontWeight: 500 }}>PM</span> — 배정된 사업의 재무·인력 관리 권한</p>
                 <p><span className="text-foreground" style={{ fontWeight: 500 }}>감사</span> — 모든 사업 읽기 전용 + 감사로그</p>
               </div>

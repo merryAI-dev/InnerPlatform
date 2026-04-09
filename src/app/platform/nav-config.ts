@@ -33,7 +33,7 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: '재무관리',
     items: [
-      { to: '/cashflow', icon: BarChart3, label: '캐시플로' },
+      { to: '/cashflow', icon: BarChart3, label: '캐시플로 추출' },
       { to: '/evidence', icon: FileCheck, label: '증빙/정산' },
       { to: '/bank-reconciliation', icon: ArrowLeftRight, label: '은행 대조' },
       { to: '/payroll', icon: CircleDollarSign, label: '인건비/월간정산', accent: true },

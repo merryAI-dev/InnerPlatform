@@ -9,9 +9,9 @@ import { canShowAdminNavItem } from '../../platform/admin-nav';
 
 const ACTIONS = [
   { icon: FolderKanban, label: '새 사업 등록', path: '/projects/new', color: '#4f46e5' },
-  { icon: BarChart3, label: '캐시플로', path: '/cashflow', color: '#0d9488' },
+  { icon: BarChart3, label: '캐시플로 추출', path: '/cashflow', color: '#0d9488' },
   { icon: FileCheck, label: '증빙/정산', path: '/evidence', color: '#f59e0b' },
-  { icon: Shield, label: '참여율 관리', path: '/participation', color: '#7c3aed' },
+  { icon: Shield, label: '승인 대기열', path: '/approvals', color: '#7c3aed' },
 ];
 
 export function QuickActionFab() {
