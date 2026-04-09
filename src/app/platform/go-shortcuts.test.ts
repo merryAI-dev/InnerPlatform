@@ -7,7 +7,6 @@ describe('go shortcuts', () => {
     expect(resolveGoShortcutTarget('p')).toBe('/projects');
     expect(resolveGoShortcutTarget('c')).toBe('/cashflow');
     expect(resolveGoShortcutTarget('e')).toBe('/evidence');
-    expect(resolveGoShortcutTarget('a')).toBe('/audit');
     expect(resolveGoShortcutTarget('s')).toBe('/settings');
   });
 
@@ -17,6 +16,7 @@ describe('go shortcuts', () => {
   });
 
   it('returns null for unsupported tokens', () => {
+    expect(resolveGoShortcutTarget('a')).toBeNull();
     expect(resolveGoShortcutTarget('x')).toBeNull();
     expect(resolveGoShortcutTarget('')).toBeNull();
     expect(resolveGoShortcutTarget('  ')).toBeNull();

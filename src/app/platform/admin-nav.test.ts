@@ -22,8 +22,16 @@ describe('admin nav access control', () => {
     expect(canAccessAdminPath('finance', '/cashflow')).toBe(true);
     expect(canAccessAdminPath('finance', '/cashflow/projects/p-1')).toBe(true);
     expect(canAccessAdminPath('finance', '/approvals')).toBe(true);
+    expect(canAccessAdminPath('finance', '/audit')).toBe(false);
     expect(canAccessAdminPath('finance', '/settings')).toBe(false);
     expect(canAccessAdminPath('finance', '/users')).toBe(false);
+  });
+
+  it('keeps approval queue scoped to admin and finance', () => {
+    expect(canAccessAdminPath('admin', '/approvals')).toBe(true);
+    expect(canAccessAdminPath('finance', '/approvals')).toBe(true);
+    expect(canAccessAdminPath('pm', '/approvals')).toBe(false);
+    expect(canAccessAdminPath('viewer', '/approvals')).toBe(false);
   });
 
   it('still rejects empty or unknown roles from admin nav', () => {

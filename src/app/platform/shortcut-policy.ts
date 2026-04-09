@@ -48,7 +48,6 @@ const BASE_GROUPS: ShortcutGroup[] = [
       { keys: ['G', 'P'], desc: '프로젝트 목록으로 이동', to: '/projects' },
       { keys: ['G', 'C'], desc: '캐시플로로 이동', to: '/cashflow' },
       { keys: ['G', 'E'], desc: '증빙/정산으로 이동', to: '/evidence' },
-      { keys: ['G', 'A'], desc: '감사로그로 이동', to: '/audit' },
       { keys: ['G', 'S'], desc: '설정으로 이동', to: '/settings' },
     ],
   },

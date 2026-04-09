@@ -161,11 +161,13 @@ describe('resolvePostLoginPath', () => {
   });
 
   it('finance falls back for admin-only paths outside its route permissions', () => {
+    expect(resolvePostLoginPath('finance', undefined, '/audit')).toBe('/');
     expect(resolvePostLoginPath('finance', undefined, '/users')).toBe('/');
     expect(resolvePostLoginPath('finance', undefined, '/settings')).toBe('/');
   });
 
   it('pm falls back to portal for admin-only paths', () => {
+    expect(resolvePostLoginPath('pm', undefined, '/approvals')).toBe('/portal');
     expect(resolvePostLoginPath('pm', undefined, '/settings')).toBe('/portal');
     expect(resolvePostLoginPath('pm', undefined, '/users')).toBe('/portal');
   });

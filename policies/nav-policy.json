@@ -12,7 +12,6 @@
       "/budget-summary",
       "/expense-management",
       "/approvals",
-      "/audit",
       "/claude-sdk-help",
       "/portal"
     ],
@@ -23,7 +22,6 @@
       "/board",
       "/evidence",
       "/expense-management",
-      "/approvals",
       "/claude-sdk-help",
       "/portal"
     ],
