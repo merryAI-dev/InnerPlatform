@@ -190,17 +190,6 @@ export function CashflowExportPage() {
     : workbookVariant === 'combined'
       ? '전체 사업 통합 시트'
       : '전체 사업 개별 시트';
-  const downloadSummaryLines = [
-    scope === 'single'
-      ? `선택 사업 1건 · ${projectSelectionLabel}`
-      : `전체 사업 ${projectRows.length}건`,
-    `정산 기준 · ${basisFilterLabel}`,
-    `${periodSummary || '기간 미선택'} · 월당 5주 고정 슬롯`,
-    scope === 'single'
-      ? '시트 구성 · Projection / Actual'
-      : `시트 구성 · ${workbookVariantLabel}`,
-  ];
-
   useEffect(() => {
     if (scope !== 'single') return;
     const selectedExists = sortedProjects.some((project) => project.id === selectedProjectId);
@@ -556,31 +545,6 @@ export function CashflowExportPage() {
               </SelectionField>
             </>
           )}
-        </CardContent>
-      </Card>
-
-      <Card data-testid="cashflow-export-action-summary" className="border-slate-300 bg-slate-50 text-slate-950 shadow-sm">
-        <CardContent className="flex flex-col gap-4 p-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="space-y-1.5">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">지금 내려받을 결과</p>
-            <p className="text-[18px] font-semibold text-slate-950">
-              {scope === 'single' ? projectSelectionLabel : workbookVariantLabel}
-            </p>
-            <div className="flex flex-wrap gap-2 text-[12px] text-slate-700">
-              {downloadSummaryLines.map((line) => (
-                <span key={line} className="rounded-full border border-slate-300 bg-white px-3 py-1">
-                  {line}
-                </span>
-              ))}
-            </div>
-          </div>
-          <div className="rounded-2xl border border-slate-300 bg-white p-3 text-[12px] leading-6 text-slate-700">
-            <p className="font-semibold text-slate-950">클릭 순서</p>
-            <p>1. 범위 선택</p>
-            <p>2. 사업 또는 전체 범위 확인</p>
-            <p>3. 기간 지정</p>
-            <p>4. 시트 형식 선택 후 다운로드</p>
-          </div>
         </CardContent>
       </Card>
 
