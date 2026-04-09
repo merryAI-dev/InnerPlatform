@@ -172,5 +172,71 @@ describe('cashflow-export', () => {
     expect(findRow(multi.sheets[0].rows, '매출액(입금)')).toEqual(['매출액(입금)', 120, 0, 0, 0, 0, 120]);
     expect(findRow(multi.sheets[1].rows, '매출액(입금)')).toEqual(['매출액(입금)', 220, 0, 0, 0, 0, 220]);
   });
-});
 
+  it('builds year-range exports as a single wide matrix instead of stacked month blocks', () => {
+    const janSlots = buildCashflowWeekSlots('2026-01');
+    const febSlots = buildCashflowWeekSlots('2026-02');
+    const project = {
+      projectId: 'proj-wide',
+      projectName: '가로형 프로젝트',
+      weeks: [
+        createWeekSheet({
+          projectId: 'proj-wide',
+          yearMonth: '2026-01',
+          weekNo: 1,
+          weekStart: janSlots[0].weekStart,
+          weekEnd: janSlots[0].weekEnd,
+          projection: { SALES_IN: 100, DIRECT_COST_OUT: 25 },
+        }),
+        createWeekSheet({
+          projectId: 'proj-wide',
+          yearMonth: '2026-02',
+          weekNo: 1,
+          weekStart: febSlots[0].weekStart,
+          weekEnd: febSlots[0].weekEnd,
+          projection: { SALES_IN: 200, DIRECT_COST_OUT: 50 },
+        }),
+      ],
+      transactions: [],
+    };
+
+    const workbook = buildCashflowExportWorkbookSpec({
+      variant: 'single-project',
+      projects: [project],
+      yearMonths: ['2026-01', '2026-02'],
+    });
+
+    const projectionRows = workbook.sheets[0].rows;
+    const headerRow = projectionRows.find((row) => row[0] === '항목');
+    const periodRow = projectionRows.find((row) => row[0] === '기간' && row.length > 4);
+    const salesRow = findRow(projectionRows, '매출액(입금)');
+    const directCostRow = findRow(projectionRows, '직접사업비');
+
+    expect(projectionRows.filter((row) => row[0] === '매출액(입금)')).toHaveLength(1);
+    expect(headerRow).toEqual([
+      '항목',
+      '26-1-1', '26-1-2', '26-1-3', '26-1-4', '26-1-5', '2026-01 합계',
+      '26-2-1', '26-2-2', '26-2-3', '26-2-4', febSlots[4].label, '2026-02 합계',
+    ]);
+    expect(periodRow?.slice(0, 8)).toEqual([
+      '기간',
+      '2025-12-31 ~ 2026-01-06',
+      '2026-01-07 ~ 2026-01-13',
+      '2026-01-14 ~ 2026-01-20',
+      '2026-01-21 ~ 2026-01-27',
+      '2026-01-28 ~ 2026-02-03',
+      '',
+      '2026-02-04 ~ 2026-02-10',
+    ]);
+    expect(salesRow).toEqual([
+      '매출액(입금)',
+      100, 0, 0, 0, 0, 100,
+      200, 0, 0, 0, 0, 200,
+    ]);
+    expect(directCostRow).toEqual([
+      '직접사업비',
+      25, 0, 0, 0, 0, 25,
+      50, 0, 0, 0, 0, 50,
+    ]);
+  });
+});

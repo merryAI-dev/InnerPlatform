@@ -255,6 +255,82 @@ function buildModeSectionRows({ yearMonth, mode, slots, weeksByWeekNo }) {
   return rows;
 }
 
+function buildWideModeSectionRows({ yearMonths, mode, weekIndex }) {
+  const modeLabel = mode === 'projection' ? 'Projection' : 'Actual';
+  const monthColumns = yearMonths.map((yearMonth) => {
+    const slots = buildCashflowWeekSlots(yearMonth);
+    const weeksByWeekNo = weekIndex.get(yearMonth) || new Map();
+    const slotAmounts = slots.map((slot) => getWeekAmounts(weeksByWeekNo.get(slot.weekNo), mode));
+    const weekTotals = slotAmounts.map((amounts) => computeCashflowTotals(amounts));
+    const rowTotals = createLineTotals();
+    for (const lineId of CASHFLOW_ALL_LINES) {
+      rowTotals[lineId] = slotAmounts.reduce((acc, amounts) => acc + (Number(amounts[lineId]) || 0), 0);
+    }
+    return {
+      yearMonth,
+      slots,
+      slotAmounts,
+      weekTotals,
+      rowTotals,
+      totalIn: weekTotals.reduce((acc, week) => acc + week.totalIn, 0),
+      totalOut: weekTotals.reduce((acc, week) => acc + week.totalOut, 0),
+      totalNet: weekTotals.reduce((acc, week) => acc + week.net, 0),
+    };
+  });
+
+  const headerRow = ['항목'];
+  const periodRow = ['기간'];
+  for (const month of monthColumns) {
+    for (const slot of month.slots) {
+      headerRow.push(slot.label);
+      periodRow.push(slot.present ? `${slot.weekStart} ~ ${slot.weekEnd}` : '');
+    }
+    headerRow.push(`${month.yearMonth} 합계`);
+    periodRow.push('');
+  }
+
+  const rows = [];
+  rows.push([modeLabel]);
+  rows.push(headerRow);
+  rows.push(periodRow);
+  rows.push([]);
+  rows.push([`입금 (${modeLabel})`, ...Array(headerRow.length - 1).fill('')]);
+  for (const lineId of CASHFLOW_IN_LINES) {
+    const row = [CASHFLOW_SHEET_LINE_LABELS[lineId]];
+    for (const month of monthColumns) {
+      row.push(...month.slotAmounts.map((amounts) => Number(amounts[lineId]) || 0));
+      row.push(month.rowTotals[lineId] || 0);
+    }
+    rows.push(row);
+  }
+  const inTotalRow = ['입금 합계'];
+  for (const month of monthColumns) {
+    inTotalRow.push(...month.weekTotals.map((week) => week.totalIn), month.totalIn);
+  }
+  rows.push(inTotalRow);
+  rows.push([]);
+  rows.push([`출금 (${modeLabel})`, ...Array(headerRow.length - 1).fill('')]);
+  for (const lineId of CASHFLOW_OUT_LINES) {
+    const row = [CASHFLOW_SHEET_LINE_LABELS[lineId]];
+    for (const month of monthColumns) {
+      row.push(...month.slotAmounts.map((amounts) => Number(amounts[lineId]) || 0));
+      row.push(month.rowTotals[lineId] || 0);
+    }
+    rows.push(row);
+  }
+  const outTotalRow = ['출금 합계'];
+  for (const month of monthColumns) {
+    outTotalRow.push(...month.weekTotals.map((week) => week.totalOut), month.totalOut);
+  }
+  rows.push(outTotalRow);
+  const netRow = ['잔액'];
+  for (const month of monthColumns) {
+    netRow.push(...month.weekTotals.map((week) => week.net), month.totalNet);
+  }
+  rows.push(netRow);
+  return rows;
+}
+
 function buildProjectWorkbookRows({ project, yearMonths, includeBothModes, mode }) {
   const rows = [];
   const projectTitle = normalizeProjectTitle(project);
@@ -266,6 +342,19 @@ function buildProjectWorkbookRows({ project, yearMonths, includeBothModes, mode 
   }
   rows.push(['기간', summarizeCashflowYearMonths(yearMonths)]);
   rows.push([]);
+  if (yearMonths.length > 1) {
+    rows.push(...buildWideModeSectionRows({
+      yearMonths,
+      mode: includeBothModes ? 'projection' : (mode || 'projection'),
+      weekIndex,
+    }));
+    if (includeBothModes) {
+      rows.push([]);
+      rows.push(...buildWideModeSectionRows({ yearMonths, mode: 'actual', weekIndex }));
+    }
+    rows.push([]);
+    return rows;
+  }
   for (const yearMonth of yearMonths) {
     const slots = buildCashflowWeekSlots(yearMonth);
     const monthWeeks = weekIndex.get(yearMonth) || new Map();

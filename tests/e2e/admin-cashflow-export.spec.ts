@@ -30,6 +30,9 @@ test('admin can access cashflow export page and trigger workbook download', asyn
   await expect(page).toHaveURL(/\/cashflow$/);
   await expect(page.getByTestId('cashflow-export-page')).toBeVisible();
   await expect(page.getByRole('heading', { name: '캐시플로 추출' })).toBeVisible();
+  await expect(page.getByTestId('cashflow-export-step-range')).toBeVisible();
+  await expect(page.getByTestId('cashflow-export-step-period')).toBeVisible();
+  await expect(page.getByTestId('cashflow-export-action-summary')).toContainText('지금 내려받을 결과');
   await expect(page.getByTestId('cashflow-export-download')).toBeEnabled();
   await expect(page.locator('[data-testid^="cashflow-export-row-"]').first()).toBeVisible();
 
