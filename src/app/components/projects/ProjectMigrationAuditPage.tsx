@@ -275,6 +275,11 @@ export function ProjectMigrationAuditPage() {
     [projects, selectedProjectId],
   );
 
+  // Resolve console invariants:
+  // 1. Trashing the selected proposal clears proposal draft inputs.
+  // 2. Trashing the selected target project clears stale target selection state.
+  // 3. Changing the active record rehydrates proposal drafts from visible candidates only.
+  // 4. Choosing a project with no resolved CIC must not silently overwrite the current CIC choice.
   async function handleSyncApprovedScope() {
     if (!db || !isOnline) {
       toast.error('Firebase 연결 후 다시 시도해 주세요.');
@@ -437,9 +442,13 @@ export function ProjectMigrationAuditPage() {
       await trashProject(project.id, reason);
       if (selectedProjectId === project.id) {
         setSelectedProjectId('');
+        setSelectedProjectStatus('CONTRACT_PENDING');
       }
       if (selectedProposalId === project.id) {
         setSelectedProposalId('');
+        setProposalDraftName('');
+        setProposalDraftOfficialContractName('');
+        setProposalDraftClientOrg('');
       }
       toast.success('프로젝트를 폐기했습니다.', {
         description: `${project.officialContractName || project.name} · 휴지통 이동`,
@@ -457,7 +466,7 @@ export function ProjectMigrationAuditPage() {
     setSelectedProjectId(project.id);
     setSelectedProjectStatus(project.status);
     const projectCic = normalizeCicLabel(resolveProjectCic(project));
-    if (projectCic) {
+    if (projectCic !== '미지정') {
       setSelectedCic(projectCic);
     }
   }

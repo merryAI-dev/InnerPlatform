@@ -302,6 +302,41 @@ describe('project-migration-console', () => {
     expect(proposals.map((project) => project.id)).toEqual(['p-proposal']);
   });
 
+  it('prefers same client org proposal candidates before name-only matches from another org', () => {
+    const record = buildMigrationAuditConsoleRecords([
+      makeRow({
+        status: 'MISSING',
+        match: null,
+        candidate: makeCandidate({
+          businessName: '현대 모비스 CSV OI 컨설팅',
+          clientOrg: '현대 모비스',
+          department: '투자센터',
+        }),
+      }),
+    ])[0];
+
+    const proposals = findProposalProjectsForMigrationAuditRecord(record, [
+      makeProject({
+        id: 'p-name-only',
+        name: '현대 모비스 CSV OI 컨설팅 운영안',
+        clientOrg: '다른 기관',
+        department: '투자센터',
+        registrationSource: 'pm_portal',
+        status: 'CONTRACT_PENDING',
+      }),
+      makeProject({
+        id: 'p-org-match',
+        name: '완전히 다른 이름',
+        clientOrg: '현대 모비스',
+        department: '투자센터',
+        registrationSource: 'pm_portal',
+        status: 'CONTRACT_PENDING',
+      }),
+    ]);
+
+    expect(proposals.map((project) => project.id)).toEqual(['p-org-match', 'p-name-only']);
+  });
+
   it('finds non-trashed duplicate candidates around the same source row', () => {
     const record = buildMigrationAuditConsoleRecords([
       makeRow({
@@ -342,5 +377,39 @@ describe('project-migration-console', () => {
     ]);
 
     expect(duplicates.map((project) => project.id)).toEqual(['p-primary', 'p-proposal']);
+  });
+
+  it('prefers live duplicate candidates before draft proposals when both are plausible matches', () => {
+    const record = buildMigrationAuditConsoleRecords([
+      makeRow({
+        status: 'MISSING',
+        match: null,
+        candidate: makeCandidate({
+          businessName: '현대 모비스 CSV OI 컨설팅',
+          clientOrg: '현대 모비스',
+          department: '투자센터',
+        }),
+      }),
+    ])[0];
+
+    const duplicates = findDuplicateProjectsForMigrationAuditRecord(record, [
+      makeProject({
+        id: 'p-draft-name-match',
+        name: '현대 모비스 CSV OI 컨설팅',
+        clientOrg: '현대 모비스',
+        department: '투자센터',
+        registrationSource: 'pm_portal',
+        status: 'CONTRACT_PENDING',
+      }),
+      makeProject({
+        id: 'p-live-org-match',
+        name: '운영 관리안',
+        clientOrg: '현대 모비스',
+        department: '투자센터',
+        status: 'IN_PROGRESS',
+      }),
+    ]);
+
+    expect(duplicates.map((project) => project.id)).toEqual(['p-live-org-match', 'p-draft-name-match']);
   });
 });

@@ -123,6 +123,7 @@ export function MigrationAuditQueueRail({
                 key={`current-only-${row.project.id}`}
                 type="button"
                 onClick={() => onOpenCurrentOnlyProject(row.project.id)}
+                data-testid={`migration-audit-current-only-${row.project.id}`}
                 className="w-full rounded-2xl border border-slate-200 bg-slate-50/80 px-3 py-3 text-left transition hover:border-slate-300 hover:bg-white"
               >
                 <div className="flex items-start justify-between gap-3">
@@ -136,7 +137,7 @@ export function MigrationAuditQueueRail({
                         {row.project.officialContractName || row.project.name}
                       </p>
                       <p className="text-[11px] text-slate-500">
-                        비교 기준 원본 없음 · 프로젝트 상세에서 정리
+                        비교 기준 원본 없음 · 프로젝트 상세에서 직접 정리
                       </p>
                     </div>
                   </div>

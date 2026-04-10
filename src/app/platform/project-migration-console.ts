@@ -75,6 +75,17 @@ function similarityIncludes(source: string, target: string): boolean {
   return left.includes(right) || right.includes(left);
 }
 
+function hasSameClientOrg(sourceClientOrg: string, project: Project): boolean {
+  const source = normalizeText(sourceClientOrg);
+  const target = normalizeText(project.clientOrg);
+  if (!source || !target) return false;
+  return source === target;
+}
+
+function isDraftProposalProject(project: Project): boolean {
+  return project.registrationSource === 'pm_portal' && project.status === 'CONTRACT_PENDING';
+}
+
 export function normalizeCicLabel(value: unknown): string {
   const normalized = normalizeText(value);
   return normalized || '미지정';
@@ -291,16 +302,21 @@ export function findProposalProjectsForMigrationAuditRecord(
     ))
     .filter((project) => (
       similarityIncludes(record.sourceName, project.officialContractName || project.name)
+      || hasSameClientOrg(record.sourceClientOrg, project)
       || normalizeCicLabel(resolveProjectCic(project)) === record.cic
     ))
     .sort((left, right) => {
+      const leftSameOrg = Number(hasSameClientOrg(record.sourceClientOrg, left));
+      const rightSameOrg = Number(hasSameClientOrg(record.sourceClientOrg, right));
+      if (leftSameOrg !== rightSameOrg) return rightSameOrg - leftSameOrg;
+
       const leftNameMatch = Number(similarityIncludes(record.sourceName, left.officialContractName || left.name));
       const rightNameMatch = Number(similarityIncludes(record.sourceName, right.officialContractName || right.name));
       if (leftNameMatch !== rightNameMatch) return rightNameMatch - leftNameMatch;
 
-      const leftSameOrg = Number(normalizeText(left.clientOrg) === normalizeText(record.sourceClientOrg));
-      const rightSameOrg = Number(normalizeText(right.clientOrg) === normalizeText(record.sourceClientOrg));
-      if (leftSameOrg !== rightSameOrg) return rightSameOrg - leftSameOrg;
+      const leftSameCic = Number(normalizeCicLabel(resolveProjectCic(left)) === record.cic);
+      const rightSameCic = Number(normalizeCicLabel(resolveProjectCic(right)) === record.cic);
+      if (leftSameCic !== rightSameCic) return rightSameCic - leftSameCic;
 
       return normalizeText(left.officialContractName || left.name)
         .localeCompare(normalizeText(right.officialContractName || right.name), 'ko');
@@ -319,20 +335,25 @@ export function findDuplicateProjectsForMigrationAuditRecord(
     .filter((project) => !project.trashedAt)
     .filter((project) => (
       similarityIncludes(record.sourceName, project.officialContractName || project.name)
-      || (
-        normalizeText(record.sourceClientOrg)
-        && normalizeText(project.clientOrg) === normalizeText(record.sourceClientOrg)
-        && normalizeCicLabel(resolveProjectCic(project)) === record.cic
-      )
+      || hasSameClientOrg(record.sourceClientOrg, project)
+      || normalizeCicLabel(resolveProjectCic(project)) === record.cic
     ))
     .sort((left, right) => {
+      const leftLiveScore = Number(!isDraftProposalProject(left));
+      const rightLiveScore = Number(!isDraftProposalProject(right));
+      if (leftLiveScore !== rightLiveScore) return rightLiveScore - leftLiveScore;
+
+      const leftSameOrg = Number(hasSameClientOrg(record.sourceClientOrg, left));
+      const rightSameOrg = Number(hasSameClientOrg(record.sourceClientOrg, right));
+      if (leftSameOrg !== rightSameOrg) return rightSameOrg - leftSameOrg;
+
       const leftContractMatch = Number(similarityIncludes(record.sourceName, left.officialContractName || left.name));
       const rightContractMatch = Number(similarityIncludes(record.sourceName, right.officialContractName || right.name));
       if (leftContractMatch !== rightContractMatch) return rightContractMatch - leftContractMatch;
 
-      const leftIsDraft = Number(left.registrationSource === 'pm_portal' && left.status === 'CONTRACT_PENDING');
-      const rightIsDraft = Number(right.registrationSource === 'pm_portal' && right.status === 'CONTRACT_PENDING');
-      if (leftIsDraft !== rightIsDraft) return leftIsDraft - rightIsDraft;
+      const leftSameCic = Number(normalizeCicLabel(resolveProjectCic(left)) === record.cic);
+      const rightSameCic = Number(normalizeCicLabel(resolveProjectCic(right)) === record.cic);
+      if (leftSameCic !== rightSameCic) return rightSameCic - leftSameCic;
 
       return normalizeText(left.officialContractName || left.name)
         .localeCompare(normalizeText(right.officialContractName || right.name), 'ko');

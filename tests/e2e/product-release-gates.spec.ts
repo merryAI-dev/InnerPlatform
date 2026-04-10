@@ -42,7 +42,7 @@ test('release gate: PM requested portal route survives login redirect', async ({
   await completeWorkspaceSelectionIfNeeded(page);
 
   await expect(page).toHaveURL(/\/portal\/budget$/);
-  await expect(page.getByRole('heading', { name: '예산 편집' })).toBeVisible();
+  await expect(page.getByTestId('portal-budget-guide')).toBeVisible();
 });
 
 test('release gate: admin can switch from portal to admin home', async ({ page }) => {
@@ -61,7 +61,7 @@ test('release gate: PM dashboard shows guided mission flow', async ({ page }) =>
   await page.goto('/portal');
 
   await expect(page.getByTestId('portal-mission-guide')).toBeVisible();
-  await expect(page.getByText('이번 주 미션')).toBeVisible();
+  await expect(page.getByTestId('portal-mission-guide').getByRole('heading', { name: '이번 주 미션' })).toBeVisible();
   await expect(page.getByTestId('portal-mission-active-step')).toBeVisible();
 });
 
@@ -121,4 +121,31 @@ test('release gate: admin can move a project to trash and restore it', async ({ 
   await page.getByTestId('projects-tab-trash').click();
   await page.getByPlaceholder('사업명, 발주기관, 담당자 검색...').fill(projectName);
   await expect(page.getByTestId(`project-trash-row-${projectId}`)).toHaveCount(0);
+});
+
+test('release gate: admin can open migration resolve console and inspect a row', async ({ page }) => {
+  await loginAsAdmin(page);
+  await page.goto('/projects/migration-audit');
+
+  const firstQueueItem = page.locator('[data-testid^="migration-audit-queue-item-"]').first();
+  const firstCurrentOnlyItem = page.locator('[data-testid^="migration-audit-current-only-"]').first();
+
+  if (await firstQueueItem.count()) {
+    await expect(firstQueueItem).toBeVisible();
+    await firstQueueItem.click();
+
+    await expect(page.getByTestId('migration-audit-detail-panel')).toBeVisible();
+    await expect(page.getByTestId('migration-audit-selected-source-title')).toBeVisible();
+    await expect(page.getByTestId('migration-audit-connect-primary')).toBeVisible();
+    return;
+  }
+
+  if (await firstCurrentOnlyItem.count()) {
+    await expect(firstCurrentOnlyItem).toBeVisible();
+    await firstCurrentOnlyItem.click();
+    await expect(page).toHaveURL(/\/projects\/[^/]+$/);
+    return;
+  }
+
+  await expect(page.getByText('먼저 처리할 행부터 선택')).toBeVisible();
 });
