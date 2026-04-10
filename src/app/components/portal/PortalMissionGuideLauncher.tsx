@@ -37,7 +37,7 @@ export function PortalMissionGuideLauncher({
   useEffect(() => {
     const acknowledged = readPortalGuideAcknowledged(scope);
     setDontShowAgain(acknowledged);
-    setOpen(!acknowledged);
+    setOpen(false);
   }, [scope]);
 
   const handleOpenChange = (nextOpen: boolean) => {
@@ -50,7 +50,8 @@ export function PortalMissionGuideLauncher({
   return (
     <>
       <div
-        data-testid={`portal-mission-guide-launcher-${guideId}`}
+        data-testid="portal-mission-guide"
+        data-guide-launcher-id={guideId}
         className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-indigo-200/70 bg-gradient-to-r from-indigo-50/90 via-white to-teal-50/70 px-4 py-3 shadow-sm"
       >
         <div className="min-w-0 space-y-1">
