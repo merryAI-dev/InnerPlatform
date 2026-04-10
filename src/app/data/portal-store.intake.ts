@@ -1,3 +1,4 @@
+import { resolveBankImportProjectionStatus } from '../platform/bank-import-triage';
 import type { BankImportIntakeItem, BankImportManualFields, BankImportSnapshot } from './types';
 
 function normalizeString(value: unknown): string {
@@ -14,6 +15,22 @@ function normalizeManualFields(value: unknown): BankImportManualFields {
   if (Number.isFinite(candidate.expenseAmount)) next.expenseAmount = Number(candidate.expenseAmount);
   if (normalizeString(candidate.budgetCategory)) next.budgetCategory = normalizeString(candidate.budgetCategory);
   if (normalizeString(candidate.budgetSubCategory)) next.budgetSubCategory = normalizeString(candidate.budgetSubCategory);
+  if (
+    candidate.cashflowLineId === 'MYSC_PREPAY_IN'
+    || candidate.cashflowLineId === 'SALES_IN'
+    || candidate.cashflowLineId === 'SALES_VAT_IN'
+    || candidate.cashflowLineId === 'TEAM_SUPPORT_IN'
+    || candidate.cashflowLineId === 'BANK_INTEREST_IN'
+    || candidate.cashflowLineId === 'DIRECT_COST_OUT'
+    || candidate.cashflowLineId === 'INPUT_VAT_OUT'
+    || candidate.cashflowLineId === 'MYSC_LABOR_OUT'
+    || candidate.cashflowLineId === 'MYSC_PROFIT_OUT'
+    || candidate.cashflowLineId === 'SALES_VAT_OUT'
+    || candidate.cashflowLineId === 'TEAM_SUPPORT_OUT'
+    || candidate.cashflowLineId === 'BANK_INTEREST_OUT'
+  ) {
+    next.cashflowLineId = candidate.cashflowLineId;
+  }
   if (
     candidate.cashflowCategory === 'CONTRACT_PAYMENT'
     || candidate.cashflowCategory === 'INTERIM_PAYMENT'
@@ -136,6 +153,49 @@ export function mergeBankImportIntakeItem(
       ...(updates.manualFields || {}),
     },
   });
+}
+
+function sortBankImportIntakeItems(items: BankImportIntakeItem[]): BankImportIntakeItem[] {
+  return [...items].sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')));
+}
+
+export function reconcileBankImportUploadItems(
+  currentItems: BankImportIntakeItem[],
+  rebuiltItems: BankImportIntakeItem[],
+): BankImportIntakeItem[] {
+  const currentById = new Map(currentItems.map((item) => [item.id, item] as const));
+  const currentBySourceTxId = new Map(currentItems.map((item) => [item.sourceTxId, item] as const));
+  const nextMap = new Map(currentItems.map((item) => [item.id, item] as const));
+
+  rebuiltItems.forEach((rebuiltItem) => {
+    const currentItem = currentById.get(rebuiltItem.id) || currentBySourceTxId.get(rebuiltItem.sourceTxId) || null;
+    if (!currentItem) {
+      nextMap.set(rebuiltItem.id, rebuiltItem);
+      return;
+    }
+
+    const preservedManualFields = Object.keys(currentItem.manualFields || {}).length > 0
+      ? { ...currentItem.manualFields }
+      : { ...rebuiltItem.manualFields };
+    const evidenceStatus = currentItem.evidenceStatus || rebuiltItem.evidenceStatus;
+    const reconciled = normalizeBankImportIntakeItem({
+      ...rebuiltItem,
+      manualFields: preservedManualFields,
+      evidenceStatus,
+      projectionStatus: resolveBankImportProjectionStatus({
+        matchState: rebuiltItem.matchState,
+        manualFields: preservedManualFields,
+        evidenceStatus,
+      }),
+      existingExpenseSheetId: currentItem.existingExpenseSheetId || rebuiltItem.existingExpenseSheetId,
+      existingExpenseRowTempId: currentItem.existingExpenseRowTempId || rebuiltItem.existingExpenseRowTempId,
+      createdAt: currentItem.createdAt || rebuiltItem.createdAt,
+    }) || rebuiltItem;
+
+    nextMap.set(reconciled.id, reconciled);
+  });
+
+  return sortBankImportIntakeItems(Array.from(nextMap.values()));
 }
 
 export function buildBankImportIntakeDoc(params: {

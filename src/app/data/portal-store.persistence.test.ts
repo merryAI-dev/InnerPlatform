@@ -128,6 +128,30 @@ describe('upsertExpenseSheetProjectionRowBySourceTxId', () => {
     expect(result.projectedRow.cells[19]).toBe('출장신청서, 영수증');
   });
 
+  it('prefers explicit cashflow line ids over legacy category fallbacks when projecting rows', () => {
+    const result = upsertExpenseSheetProjectionRowBySourceTxId({
+      rows: [
+        {
+          tempId: 'row-bank',
+          sourceTxId: 'bank:fp-1',
+          cells: Array.from({ length: 27 }, () => ''),
+        },
+      ],
+      item: makeIntakeItem({
+        manualFields: {
+          expenseAmount: 15000,
+          budgetCategory: '인건비',
+          budgetSubCategory: '강사비',
+          cashflowCategory: 'TRAVEL',
+          cashflowLineId: 'MYSC_LABOR_OUT',
+        },
+      }),
+      evidenceRequiredDesc: '계약서',
+    });
+
+    expect(result.projectedRow.cells[8]).toBe('MYSC 인건비');
+  });
+
   it('inserts a new bank-origin row when the source transaction is not projected yet', () => {
     const result = upsertExpenseSheetProjectionRowBySourceTxId({
       rows: [

@@ -2,6 +2,7 @@ import { lazy, Suspense, type ComponentType } from 'react';
 import { createBrowserRouter } from 'react-router';
 import { AppLayout } from './components/layout/AppLayout';
 import { PortalLayout } from './components/portal/PortalLayout';
+import { loadLazyRouteModule } from './platform/lazy-route';
 
 // Lazy-loaded pages — each becomes a separate chunk
 const LoginPage = lazy(() => import('./components/auth/LoginPage').then(m => ({ default: m.LoginPage })));
@@ -44,7 +45,12 @@ const PortalProjectRegister = lazy(() => import('./components/portal/PortalProje
 const PortalProjectEdit = lazy(() => import('./components/portal/PortalProjectEdit').then(m => ({ default: m.PortalProjectEdit })));
 const PortalPayrollPage = lazy(() => import('./components/portal/PortalPayrollPage').then(m => ({ default: m.PortalPayrollPage })));
 const PortalCashflowPage = lazy(() => import('./components/portal/PortalCashflowPage').then(m => ({ default: m.PortalCashflowPage })));
-const PortalSubmissionsPage = lazy(() => import('./components/portal/PortalSubmissionsPage').then(m => ({ default: m.PortalSubmissionsPage })));
+const PortalSubmissionsPage = lazy(() => loadLazyRouteModule(
+  () => import('./components/portal/PortalSubmissionsPage'),
+  'PortalSubmissionsPage',
+  RouteChunkFallback,
+  '[routes] failed to load PortalSubmissionsPage:',
+));
 const CareerProfilePage = lazy(() => import('./components/portal/CareerProfilePage').then(m => ({ default: m.CareerProfilePage })));
 const PortalTrainingPage = lazy(() => import('./components/portal/PortalTrainingPage').then(m => ({ default: m.PortalTrainingPage })));
 function RouteChunkFallback() {
@@ -55,15 +61,12 @@ function RouteChunkFallback() {
   );
 }
 
-const PortalWeeklyExpensePage = lazy(async () => {
-  try {
-    const module = await import('./components/portal/PortalWeeklyExpensePage');
-    return { default: module?.PortalWeeklyExpensePage ?? module?.default ?? RouteChunkFallback };
-  } catch (error) {
-    console.error('[routes] failed to load PortalWeeklyExpensePage:', error);
-    return { default: RouteChunkFallback };
-  }
-});
+const PortalWeeklyExpensePage = lazy(() => loadLazyRouteModule(
+  () => import('./components/portal/PortalWeeklyExpensePage'),
+  'PortalWeeklyExpensePage',
+  RouteChunkFallback,
+  '[routes] failed to load PortalWeeklyExpensePage:',
+));
 const PortalBankStatementPage = lazy(() => import('./components/portal/PortalBankStatementPage').then(m => ({ default: m.PortalBankStatementPage })));
 const GuideChatPage = lazy(() => import('./components/guide-chat/GuideChatPage').then(m => ({ default: m.GuideChatPage })));
 

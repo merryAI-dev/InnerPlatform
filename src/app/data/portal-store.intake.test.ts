@@ -4,6 +4,7 @@ import {
   buildBankImportIntakeDoc,
   mergeBankImportIntakeItem,
   normalizeBankImportIntakeItem,
+  reconcileBankImportUploadItems,
   serializeBankImportIntakeItemForPersistence,
 } from './portal-store.intake';
 
@@ -156,6 +157,54 @@ describe('portal-store intake persistence', () => {
         memo: '기존 메모',
         evidenceCompletedDesc: '출장신청서',
       }),
+    }));
+  });
+
+  it('preserves the latest manual fields when a bank upload rebuilds an existing intake item', () => {
+    const current = makeItem({
+      manualFields: {
+        expenseAmount: 120000,
+        budgetCategory: '여비',
+        budgetSubCategory: '교통비',
+        cashflowCategory: 'TRAVEL',
+        cashflowLineId: 'DIRECT_COST_OUT',
+        memo: '사람이 직접 수정한 메모',
+        evidenceCompletedDesc: '출장신청서',
+      },
+      updatedAt: '2026-04-06T01:00:00.000Z',
+    });
+    const rebuilt = makeItem({
+      bankSnapshot: {
+        accountNumber: '111-222-333',
+        dateTime: '2026-04-06 10:00',
+        counterparty: '메리 사업팀',
+        memo: '재업로드된 통장 메모',
+        signedAmount: -120000,
+        balanceAfter: 890000,
+      },
+      manualFields: {},
+      evidenceStatus: 'MISSING',
+      updatedAt: '2026-04-06T02:00:00.000Z',
+      lastUploadBatchId: 'batch-2',
+    });
+
+    const reconciled = reconcileBankImportUploadItems([current], [rebuilt]);
+
+    expect(reconciled).toHaveLength(1);
+    expect(reconciled[0]).toEqual(expect.objectContaining({
+      bankSnapshot: expect.objectContaining({
+        memo: '재업로드된 통장 메모',
+        balanceAfter: 890000,
+      }),
+      lastUploadBatchId: 'batch-2',
+      manualFields: expect.objectContaining({
+        budgetCategory: '여비',
+        budgetSubCategory: '교통비',
+        cashflowLineId: 'DIRECT_COST_OUT',
+        memo: '사람이 직접 수정한 메모',
+        evidenceCompletedDesc: '출장신청서',
+      }),
+      evidenceStatus: 'MISSING',
     }));
   });
 });

@@ -14,6 +14,7 @@ import {
   resolveBankImportMatchState,
   resolveBankImportProjectionStatus,
 } from './bank-import-triage';
+import { mapCashflowLineToCategory } from './bank-import-cashflow';
 
 // ── HTML-as-XLS parsing (KB, 신한 등 HTML 형식 은행 엑셀) ──
 
@@ -398,30 +399,7 @@ function pickAmount(
 
 function inferCashflowCategoryFromLineLabel(rawLineLabel: string, signedAmount: number): CashflowCategory | undefined {
   const lineId = parseCashflowLineLabel(rawLineLabel);
-  if (!lineId) return signedAmount >= 0 ? 'MISC_INCOME' : 'MISC_EXPENSE';
-  switch (lineId) {
-    case 'MYSC_PREPAY_IN':
-    case 'SALES_IN':
-      return 'CONTRACT_PAYMENT';
-    case 'SALES_VAT_IN':
-      return 'VAT_REFUND';
-    case 'TEAM_SUPPORT_IN':
-    case 'BANK_INTEREST_IN':
-      return 'MISC_INCOME';
-    case 'DIRECT_COST_OUT':
-      return 'OUTSOURCING';
-    case 'INPUT_VAT_OUT':
-    case 'SALES_VAT_OUT':
-      return 'TAX_PAYMENT';
-    case 'MYSC_LABOR_OUT':
-      return 'LABOR_COST';
-    case 'MYSC_PROFIT_OUT':
-    case 'TEAM_SUPPORT_OUT':
-    case 'BANK_INTEREST_OUT':
-      return 'MISC_EXPENSE';
-    default:
-      return signedAmount >= 0 ? 'MISC_INCOME' : 'MISC_EXPENSE';
-  }
+  return mapCashflowLineToCategory(lineId, signedAmount >= 0 ? 'IN' : 'OUT');
 }
 
 function resolveEvidenceStatusFromExpenseRow(row: ImportRow | null | undefined): EvidenceStatus {
@@ -458,7 +436,9 @@ function extractManualFieldsFromExpenseRow(row: ImportRow | null | undefined): B
   }
   if (cashflowIdx >= 0) {
     const value = normalizeSpace(String(row.cells[cashflowIdx] || ''));
+    const lineId = parseCashflowLineLabel(value);
     const category = inferCashflowCategoryFromLineLabel(value, signedAmount);
+    if (lineId) manualFields.cashflowLineId = lineId;
     if (category) manualFields.cashflowCategory = category;
   }
   if (noteIdx >= 0) {
