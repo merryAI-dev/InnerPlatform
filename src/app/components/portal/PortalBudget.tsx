@@ -1155,11 +1155,11 @@ export function PortalBudget() {
         </Card>
 
         <Dialog open={budgetImportOpen} onOpenChange={(open) => !open && closeBudgetImport()}>
-          <DialogContent className="max-w-3xl max-h-[85vh] overflow-hidden">
-            <DialogHeader>
+          <DialogContent className="max-w-3xl max-h-[85vh] overflow-hidden flex flex-col">
+            <DialogHeader className="shrink-0">
               <DialogTitle className="text-[14px]">예산총괄 가져오기</DialogTitle>
             </DialogHeader>
-            <div className="flex max-h-[calc(85vh-4rem)] flex-col gap-3">
+            <div className="min-h-0 flex flex-1 flex-col gap-3 overflow-hidden">
               <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
                 <p className="text-[11px] font-medium text-foreground">예산총괄 엑셀 또는 복붙 데이터를 미리본 뒤 안전하게 반영합니다.</p>
                 <p className="mt-1 text-[10px] text-muted-foreground">
@@ -1170,14 +1170,14 @@ export function PortalBudget() {
               <Tabs
                 value={budgetImportTab}
                 onValueChange={(value) => setBudgetImportTab(value as BudgetPlanImportTab)}
-                className="min-h-0 flex-1"
+                className="min-h-0 flex flex-1 flex-col overflow-hidden"
               >
                 <TabsList className="grid w-full grid-cols-2">
                   <TabsTrigger value="file" className="text-[11px]">엑셀/CSV 파일</TabsTrigger>
                   <TabsTrigger value="paste" className="text-[11px]">엑셀 붙여넣기</TabsTrigger>
                 </TabsList>
 
-                <TabsContent value="file" className="space-y-3">
+                <TabsContent value="file" className="mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
                   {budgetSheetSources.length > 0 && (
                     <div className="rounded-md border border-emerald-200/70 bg-emerald-50/60 p-3">
                       <div className="flex items-center justify-between gap-2">
@@ -1270,7 +1270,7 @@ export function PortalBudget() {
                   ) : null}
                 </TabsContent>
 
-                <TabsContent value="paste" className="space-y-3">
+                <TabsContent value="paste" className="mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
                   <div className="rounded-md border border-border/60 p-3 space-y-2">
                     <p className="text-[11px] font-medium">예산총괄 표를 그대로 복사해서 붙여넣을 수 있습니다.</p>
                     <p className="text-[10px] text-muted-foreground">
@@ -1450,7 +1450,7 @@ export function PortalBudget() {
                 )}
               </div>
 
-              <div className="flex justify-end gap-2 pt-2 border-t border-border/60">
+              <div className="flex shrink-0 justify-end gap-2 border-t border-border/60 pt-2">
                 <Button variant="outline" size="sm" className="h-8 text-[12px]" onClick={closeBudgetImport}>
                   취소
                 </Button>
@@ -1468,25 +1468,25 @@ export function PortalBudget() {
         </Dialog>
 
         <Dialog open={codeBookMode} onOpenChange={(open) => !open && cancelEdit()}>
-          <DialogContent className="max-w-2xl max-h-[85vh] overflow-hidden">
-            <DialogHeader>
+          <DialogContent className="max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
+            <DialogHeader className="shrink-0">
               <DialogTitle className="text-[14px]">예산 항목 구조 관리</DialogTitle>
             </DialogHeader>
-            <div className="flex max-h-[calc(85vh-4rem)] flex-col gap-3">
+            <div className="min-h-0 flex flex-1 flex-col gap-3 overflow-hidden">
               <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
                 <p className="text-[11px] font-medium text-foreground">현재 예산 표에 쓰이는 비목/세목 구조를 관리합니다.</p>
                 <p className="mt-1 text-[10px] text-muted-foreground">
                   숫자 편집과 별개 흐름입니다. 붙여넣기 또는 CSV 가져오기는 현재 구조 초안을 교체하고, 저장 전까지는 실제 예산에 반영되지 않습니다.
                 </p>
               </div>
-              <Tabs value={codeBookEditorTab} onValueChange={(value) => setCodeBookEditorTab(value as 'manual' | 'paste' | 'csv')} className="min-h-0 flex-1">
+              <Tabs value={codeBookEditorTab} onValueChange={(value) => setCodeBookEditorTab(value as 'manual' | 'paste' | 'csv')} className="min-h-0 flex flex-1 flex-col overflow-hidden">
                 <TabsList className="grid w-full grid-cols-3">
                   <TabsTrigger value="manual" className="text-[11px]">직접 수정</TabsTrigger>
                   <TabsTrigger value="paste" className="text-[11px]">엑셀 붙여넣기</TabsTrigger>
                   <TabsTrigger value="csv" className="text-[11px]">CSV 가져오기</TabsTrigger>
                 </TabsList>
 
-                <TabsContent value="manual" className="min-h-0 flex-1 space-y-3">
+                <TabsContent value="manual" className="mt-3 min-h-0 flex flex-1 flex-col space-y-3 overflow-hidden">
                   <div className="flex items-center justify-between">
                     <div className="space-y-1">
                       <p className="text-[11px] text-muted-foreground">세목은 드래그해서 순서를 바꿀 수 있습니다.</p>
@@ -1595,7 +1595,7 @@ export function PortalBudget() {
                   </div>
                 </TabsContent>
 
-                <TabsContent value="paste" className="space-y-3">
+                <TabsContent value="paste" className="mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
                   <div className="rounded-md border border-border/60 p-3 space-y-2">
                     <p className="text-[11px] font-medium">엑셀에서 두 열을 그대로 복사해 붙여넣을 수 있습니다.</p>
                     <p className="text-[10px] text-muted-foreground">
@@ -1647,7 +1647,7 @@ export function PortalBudget() {
                   </div>
                 </TabsContent>
 
-                <TabsContent value="csv" className="space-y-3">
+                <TabsContent value="csv" className="mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
                   <div className="rounded-md border border-border/60 p-3 space-y-2">
                     <p className="text-[11px] font-medium">CSV 예시는 이 화면 안에서 바로 확인할 수 있습니다.</p>
                     <div className="rounded-md bg-slate-950 px-3 py-2 font-mono text-[10px] text-slate-50 whitespace-pre-wrap">
