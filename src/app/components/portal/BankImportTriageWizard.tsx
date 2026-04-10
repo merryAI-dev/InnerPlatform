@@ -1,9 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, ArrowRight, Clock3, FileWarning, Wallet } from 'lucide-react';
-import type { BankImportIntakeItem, CashflowCategory } from '../../data/types';
-import { CASHFLOW_CATEGORY_LABELS } from '../../data/types';
+import type { BankImportIntakeItem } from '../../data/types';
 import { isBankImportManualFieldsComplete } from '../../platform/bank-import-triage';
 import { groupExpenseIntakeItemsForSurface, resolveBankImportWizardStatus } from '../../platform/bank-intake-surface';
+import {
+  resolveBankImportCashflowLineId,
+  resolveBankImportCashflowOptionsForAmount,
+  resolveBankImportCashflowSelection,
+} from '../../platform/bank-import-cashflow';
 import { resolveEvidenceChecklist } from '../../platform/evidence-helpers';
 import { resolveEvidenceRequiredDesc } from '../../platform/settlement-sheet-prepare';
 import { Badge } from '../ui/badge';
@@ -20,25 +24,6 @@ interface BankImportTriageWizardProps {
   onSyncEvidence?: (id: string, updates: Partial<BankImportIntakeItem>) => Promise<void>;
   evidenceRequiredMap: Record<string, string>;
 }
-
-const CASHFLOW_OPTIONS: CashflowCategory[] = [
-  'CONTRACT_PAYMENT',
-  'INTERIM_PAYMENT',
-  'FINAL_PAYMENT',
-  'LABOR_COST',
-  'OUTSOURCING',
-  'EQUIPMENT',
-  'TRAVEL',
-  'SUPPLIES',
-  'COMMUNICATION',
-  'RENT',
-  'UTILITY',
-  'TAX_PAYMENT',
-  'VAT_REFUND',
-  'INSURANCE',
-  'MISC_INCOME',
-  'MISC_EXPENSE',
-];
 
 function formatMoney(value: number): string {
   return value.toLocaleString('ko-KR');
@@ -122,6 +107,10 @@ export function BankImportTriageWizard({
     ...selectedItem,
     manualFields: activeManualFields || selectedItem.manualFields,
   }) : null;
+  const cashflowOptions = useMemo(
+    () => (selectedItem ? resolveBankImportCashflowOptionsForAmount(selectedItem.bankSnapshot.signedAmount) : []),
+    [selectedItem],
+  );
 
   const advanceSelection = () => {
     if (!selectedItem) return;
@@ -449,20 +438,28 @@ export function BankImportTriageWizard({
                               <span className="text-[11px] font-medium text-slate-600">cashflow 항목</span>
                               <select
                                 data-testid="bank-import-cashflow-category"
-                                value={activeManualFields.cashflowCategory || ''}
+                                value={resolveBankImportCashflowLineId(activeManualFields, selectedItem.bankSnapshot.signedAmount) || ''}
                                 onChange={(event) => setDrafts((prev) => ({
                                   ...prev,
                                   [selectedItem.id]: {
                                     ...activeManualFields,
-                                    cashflowCategory: event.target.value as CashflowCategory,
+                                    ...(event.target.value
+                                      ? resolveBankImportCashflowSelection(
+                                          event.target.value as typeof cashflowOptions[number]['value'],
+                                          selectedItem.bankSnapshot.signedAmount,
+                                        )
+                                      : {
+                                          cashflowLineId: undefined,
+                                          cashflowCategory: undefined,
+                                        }),
                                   },
                                 }))}
                                 className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-[13px] outline-none transition focus:border-slate-400"
                               >
                                 <option value="">선택하세요</option>
-                                {CASHFLOW_OPTIONS.map((option) => (
-                                  <option key={option} value={option}>
-                                    {CASHFLOW_CATEGORY_LABELS[option]}
+                                {cashflowOptions.map((option) => (
+                                  <option key={option.value} value={option.value}>
+                                    {option.label}
                                   </option>
                                 ))}
                               </select>

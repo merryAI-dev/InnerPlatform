@@ -70,6 +70,7 @@ import {
   buildBankImportIntakeDoc,
   mergeBankImportIntakeItem,
   normalizeBankImportIntakeItem,
+  reconcileBankImportUploadItems,
 } from './portal-store.intake';
 import { useAuth } from './auth-store';
 import { useFirebase } from '../lib/firebase-context';
@@ -571,10 +572,15 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(false);
   const [isMemberLoading, setIsMemberLoading] = useState(true);
   const unsubsRef = useRef<Unsubscribe[]>([]);
+  const expenseIntakeItemsRef = useRef<BankImportIntakeItem[]>([]);
   const expenseSheetsRef = useRef<ExpenseSheetTab[]>([]);
   const activeExpenseSheetIdRef = useRef(activeExpenseSheetId);
   const expenseSheetRowsRef = useRef<ImportRow[] | null>(expenseSheetRows);
   const devHarnessHydratedProjectIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    expenseIntakeItemsRef.current = expenseIntakeItems;
+  }, [expenseIntakeItems]);
 
   useEffect(() => {
     expenseSheetsRef.current = expenseSheets;
@@ -2095,23 +2101,18 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     const intakeItems = buildBankImportIntakeItemsFromBankSheet({
       projectId: portalUser?.projectId || '',
       sheet: sanitizedSheet,
-      existingItems: expenseIntakeItems,
-      existingRows: expenseSheetRows,
-      existingExpenseSheetId: activeExpenseSheetId || 'default',
+      existingItems: expenseIntakeItemsRef.current,
+      existingRows: expenseSheetRowsRef.current,
+      existingExpenseSheetId: activeExpenseSheetIdRef.current || 'default',
       lastUploadBatchId: uploadBatchId,
       now,
       updatedBy: portalUser?.name || authUser?.name || '',
     });
+    const reconciledIntakeItems = reconcileBankImportUploadItems(expenseIntakeItemsRef.current, intakeItems);
     if (isDevHarnessUser || !db || !portalUser?.projectId) {
       setBankStatementRows(sanitizedSheet);
-      setExpenseIntakeItems((prev) => {
-        const nextMap = new Map(prev.map((item) => [item.id, item] as const));
-        intakeItems.forEach((item) => {
-          nextMap.set(item.id, item);
-        });
-        return Array.from(nextMap.values())
-          .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')));
-      });
+      expenseIntakeItemsRef.current = reconciledIntakeItems;
+      setExpenseIntakeItems(reconciledIntakeItems);
       return;
     }
     const payload = withTenantScope(orgId, {
@@ -2128,21 +2129,15 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     );
     setBankStatementRows(sanitizedSheet);
     await Promise.all(
-      intakeItems.map((item) => setDoc(
+      reconciledIntakeItems.map((item) => setDoc(
         doc(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/expense_intake/${item.id}`),
         buildBankImportIntakeDoc({ orgId, item }),
         { merge: true },
       )),
     );
-    setExpenseIntakeItems((prev) => {
-      const nextMap = new Map(prev.map((item) => [item.id, item] as const));
-      intakeItems.forEach((item) => {
-        nextMap.set(item.id, item);
-      });
-      return Array.from(nextMap.values())
-        .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')));
-    });
-  }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name, expenseIntakeItems, expenseSheetRows, activeExpenseSheetId, isDevHarnessUser]);
+    expenseIntakeItemsRef.current = reconciledIntakeItems;
+    setExpenseIntakeItems(reconciledIntakeItems);
+  }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name, isDevHarnessUser]);
 
   const upsertExpenseIntakeItems = useCallback(async (items: BankImportIntakeItem[]) => {
     if (!Array.isArray(items) || items.length === 0) return;
@@ -2153,12 +2148,14 @@ export function PortalProvider({ children }: { children: ReactNode }) {
 
     if (isDevHarnessUser || !db || !portalUser?.projectId) {
       setExpenseIntakeItems((prev) => {
-        const nextMap = new Map(prev.map((item) => [item.id, item] as const));
+        const nextMap = new Map(expenseIntakeItemsRef.current.map((item) => [item.id, item] as const));
         normalizedItems.forEach((item) => {
           nextMap.set(item.id, item);
         });
-        return Array.from(nextMap.values())
+        const nextItems = Array.from(nextMap.values())
           .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')));
+        expenseIntakeItemsRef.current = nextItems;
+        return nextItems;
       });
       return;
     }
@@ -2171,26 +2168,30 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       )),
     );
     setExpenseIntakeItems((prev) => {
-      const nextMap = new Map(prev.map((item) => [item.id, item] as const));
+      const nextMap = new Map(expenseIntakeItemsRef.current.map((item) => [item.id, item] as const));
       normalizedItems.forEach((item) => {
         nextMap.set(item.id, item);
       });
-      return Array.from(nextMap.values())
+      const nextItems = Array.from(nextMap.values())
         .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')));
+      expenseIntakeItemsRef.current = nextItems;
+      return nextItems;
     });
   }, [db, isDevHarnessUser, orgId, portalUser?.projectId]);
 
   const saveExpenseIntakeDraft = useCallback(async (id: string, updates: Partial<BankImportIntakeItem>) => {
-    const currentItem = expenseIntakeItems.find((item) => item.id === id);
+    const currentItem = expenseIntakeItemsRef.current.find((item) => item.id === id);
     if (!currentItem) return;
 
     const mergedCandidate = mergeBankImportIntakeItem(currentItem, updates);
     if (!mergedCandidate) return;
 
     if (isDevHarnessUser || !db || !portalUser?.projectId) {
-      setExpenseIntakeItems((prev) => prev
+      const nextItems = expenseIntakeItemsRef.current
         .map((item) => (item.id === id ? mergedCandidate : item))
-        .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || ''))));
+        .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')));
+      expenseIntakeItemsRef.current = nextItems;
+      setExpenseIntakeItems(nextItems);
       return;
     }
 
@@ -2199,15 +2200,17 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       buildBankImportIntakeDoc({ orgId, item: mergedCandidate }),
       { merge: true },
     );
-    setExpenseIntakeItems((prev) => prev
+    const nextItems = expenseIntakeItemsRef.current
       .map((item) => (item.id === id ? mergedCandidate : item))
-      .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || ''))));
-  }, [db, expenseIntakeItems, isDevHarnessUser, orgId, portalUser?.projectId]);
+      .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')));
+    expenseIntakeItemsRef.current = nextItems;
+    setExpenseIntakeItems(nextItems);
+  }, [db, isDevHarnessUser, orgId, portalUser?.projectId]);
 
   const updateExpenseIntakeItem = saveExpenseIntakeDraft;
 
   const projectExpenseIntakeItem = useCallback(async (id: string, updates?: Partial<BankImportIntakeItem>) => {
-    const currentItem = expenseIntakeItems.find((item) => item.id === id);
+    const currentItem = expenseIntakeItemsRef.current.find((item) => item.id === id);
     if (!currentItem) return;
     const mergedCandidate = updates ? mergeBankImportIntakeItem(currentItem, updates) : currentItem;
     if (!mergedCandidate) return;
@@ -2269,9 +2272,11 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       if (targetSheetId === activeExpenseSheetIdRef.current) {
         setExpenseSheetRows(projection.rows);
       }
-      setExpenseIntakeItems((prev) => prev
+      const nextItems = expenseIntakeItemsRef.current
         .map((item) => (item.id === id ? projectedItem : item))
-        .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || ''))));
+        .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')));
+      expenseIntakeItemsRef.current = nextItems;
+      setExpenseIntakeItems(nextItems);
       return;
     }
 
@@ -2301,13 +2306,15 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     if (targetSheetId === activeExpenseSheetIdRef.current) {
       setExpenseSheetRows(projection.rows);
     }
-    setExpenseIntakeItems((prev) => prev
+    const nextItems = expenseIntakeItemsRef.current
       .map((item) => (item.id === id ? projectedItem : item))
-      .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || ''))));
-  }, [activeExpenseSheetId, authUser?.name, db, evidenceRequiredMap, expenseIntakeItems, isDevHarnessUser, orgId, portalUser?.name, portalUser?.projectId]);
+      .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')));
+    expenseIntakeItemsRef.current = nextItems;
+    setExpenseIntakeItems(nextItems);
+  }, [authUser?.name, db, evidenceRequiredMap, isDevHarnessUser, orgId, portalUser?.name, portalUser?.projectId]);
 
   const syncExpenseIntakeEvidence = useCallback(async (id: string, updates: Partial<BankImportIntakeItem>) => {
-    const currentItem = expenseIntakeItems.find((item) => item.id === id);
+    const currentItem = expenseIntakeItemsRef.current.find((item) => item.id === id);
     if (!currentItem) return;
 
     const now = new Date().toISOString();
@@ -2327,9 +2334,11 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       if (activeExpenseSheetIdRef.current === (nextState.item.existingExpenseSheetId || activeExpenseSheetIdRef.current)) {
         setExpenseSheetRows(nextState.activeRows);
       }
-      setExpenseIntakeItems((prev) => prev
+      const nextItems = expenseIntakeItemsRef.current
         .map((item) => (item.id === id ? nextState.item : item))
-        .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || ''))));
+        .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')));
+      expenseIntakeItemsRef.current = nextItems;
+      setExpenseIntakeItems(nextItems);
       return;
     }
 
@@ -2364,10 +2373,12 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     if (activeExpenseSheetIdRef.current === targetSheetId) {
       setExpenseSheetRows(nextState.activeRows);
     }
-    setExpenseIntakeItems((prev) => prev
+    const nextItems = expenseIntakeItemsRef.current
       .map((item) => (item.id === id ? nextState.item : item))
-      .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || ''))));
-  }, [authUser?.name, db, evidenceRequiredMap, expenseIntakeItems, isDevHarnessUser, orgId, portalUser?.name, portalUser?.projectId]);
+      .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')));
+    expenseIntakeItemsRef.current = nextItems;
+    setExpenseIntakeItems(nextItems);
+  }, [authUser?.name, db, evidenceRequiredMap, isDevHarnessUser, orgId, portalUser?.name, portalUser?.projectId]);
 
   const persistTransaction = useCallback(async (txData: Transaction) => {
     if (!db) return;

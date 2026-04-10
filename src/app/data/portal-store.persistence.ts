@@ -1,7 +1,13 @@
-import { createEmptyImportRow, SETTLEMENT_COLUMNS, type ImportRow } from '../platform/settlement-csv';
+import {
+  createEmptyImportRow,
+  getCashflowLineLabelForExport,
+  SETTLEMENT_COLUMNS,
+  type ImportRow,
+} from '../platform/settlement-csv';
 import { findWeekForDate, getYearMondayWeeks } from '../platform/cashflow-weeks';
 import { resolveEvidenceChecklist } from '../platform/evidence-helpers';
-import type { BankImportIntakeItem, CashflowCategory, EvidenceStatus, WeeklySubmissionStatus } from './types';
+import { resolveBankImportCashflowLineId } from '../platform/bank-import-cashflow';
+import type { BankImportIntakeItem, EvidenceStatus, WeeklySubmissionStatus } from './types';
 
 interface ExpenseSheetTabSnapshot {
   id: string;
@@ -14,34 +20,6 @@ interface ExpenseSheetTabSnapshot {
 
 function findColumnIndex(header: string): number {
   return SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === header);
-}
-
-function cashflowCategoryToRowLabel(category: CashflowCategory | undefined): string {
-  switch (category) {
-    case 'CONTRACT_PAYMENT':
-    case 'INTERIM_PAYMENT':
-    case 'FINAL_PAYMENT':
-      return '매출액(입금)';
-    case 'LABOR_COST':
-      return 'MYSC인건비';
-    case 'TAX_PAYMENT':
-      return '매입부가세';
-    case 'VAT_REFUND':
-      return '매출부가세(입금)';
-    case 'MISC_INCOME':
-      return '팀지원금(입금)';
-    case 'OUTSOURCING':
-    case 'EQUIPMENT':
-    case 'TRAVEL':
-    case 'SUPPLIES':
-    case 'COMMUNICATION':
-    case 'RENT':
-    case 'UTILITY':
-    case 'INSURANCE':
-    case 'MISC_EXPENSE':
-    default:
-      return '직접사업비';
-  }
 }
 
 function buildProjectionRowFromIntake(
@@ -88,7 +66,11 @@ function buildProjectionRowFromIntake(
   }
   if (budgetIdx >= 0) cells[budgetIdx] = item.manualFields.budgetCategory || '';
   if (subBudgetIdx >= 0) cells[subBudgetIdx] = item.manualFields.budgetSubCategory || '';
-  if (cashflowIdx >= 0) cells[cashflowIdx] = cashflowCategoryToRowLabel(item.manualFields.cashflowCategory);
+  if (cashflowIdx >= 0) {
+    cells[cashflowIdx] = getCashflowLineLabelForExport(
+      resolveBankImportCashflowLineId(item.manualFields, item.bankSnapshot.signedAmount),
+    );
+  }
   if (balanceIdx >= 0) {
     cells[balanceIdx] = Number.isFinite(item.bankSnapshot.balanceAfter)
       ? item.bankSnapshot.balanceAfter.toLocaleString('ko-KR')

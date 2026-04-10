@@ -29,7 +29,7 @@ export function isBankImportManualFieldsComplete(fields: BankImportManualFields 
   return Number.isFinite(fields.expenseAmount)
     && Boolean(normalizeSpace(fields.budgetCategory || ''))
     && Boolean(normalizeSpace(fields.budgetSubCategory || ''))
-    && Boolean(fields.cashflowCategory);
+    && Boolean(fields.cashflowLineId || fields.cashflowCategory);
 }
 
 function hasCriticalBankDrift(

@@ -812,6 +812,7 @@ export interface BankImportManualFields {
   expenseAmount?: number;
   budgetCategory?: string;
   budgetSubCategory?: string;
+  cashflowLineId?: CashflowSheetLineId;
   cashflowCategory?: CashflowCategory;
   memo?: string;
   evidenceCompletedDesc?: string;

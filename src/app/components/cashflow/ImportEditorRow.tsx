@@ -32,6 +32,7 @@ import {
   toFieldSlug,
 } from '../../platform/settlement-grid-helpers';
 import { resolveEvidenceRequiredDesc } from '../../platform/settlement-sheet-prepare';
+import { resolveSelectPopupPosition } from './select-popup-position';
 import { Button } from '../ui/button';
 import {
   DropdownMenu,
@@ -70,20 +71,32 @@ function SelectCell({
 }) {
   const btnRef = useRef<HTMLButtonElement | null>(null);
   const [popupRect, setPopupRect] = useState<{ left: number; top: number } | null>(null);
+  const popupWidth = 160;
+  const popupHeight = Math.min(320, 32 * (options.length + 1));
 
   useLayoutEffect(() => {
     if (!isOpen) return;
     const rect = btnRef.current?.getBoundingClientRect();
     if (!rect) return;
-    setPopupRect({ left: rect.left, top: rect.bottom + 4 });
-  }, [isOpen]);
+    setPopupRect(resolveSelectPopupPosition({
+      triggerRect: rect,
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+      popupWidth,
+      popupHeight,
+    }));
+  }, [isOpen, popupHeight, popupWidth]);
 
   useEffect(() => {
     if (!isOpen) return;
     const update = () => {
       const rect = btnRef.current?.getBoundingClientRect();
       if (!rect) return;
-      setPopupRect({ left: rect.left, top: rect.bottom + 4 });
+      setPopupRect(resolveSelectPopupPosition({
+        triggerRect: rect,
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+        popupWidth,
+        popupHeight,
+      }));
     };
     window.addEventListener('scroll', update, true);
     window.addEventListener('resize', update);
@@ -91,7 +104,7 @@ function SelectCell({
       window.removeEventListener('scroll', update, true);
       window.removeEventListener('resize', update);
     };
-  }, [isOpen]);
+  }, [isOpen, popupHeight, popupWidth]);
 
   const openPicker = (e: ReactMouseEvent<HTMLButtonElement>) => {
     e.preventDefault();
