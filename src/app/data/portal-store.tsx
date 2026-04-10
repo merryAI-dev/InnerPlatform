@@ -86,6 +86,7 @@ import { includesProject, normalizeProjectIds, resolvePrimaryProjectId } from '.
 import { canEnterPortalWorkspace } from '../platform/navigation';
 import { readDevAuthHarnessConfig } from '../platform/dev-harness';
 import { reportError } from '../platform/observability';
+import { validateBudgetCodeBookDraft } from '../platform/budget-code-book-validation';
 import { buildBudgetLabelKey, normalizeBudgetLabel } from '../platform/budget-labels';
 
 export interface PortalUser {
@@ -1738,11 +1739,11 @@ export function PortalProvider({ children }: { children: ReactNode }) {
 
   const saveBudgetCodeBook = useCallback(async (rows: BudgetCodeEntry[], renames: BudgetCodeRename[] = []) => {
     const now = new Date().toISOString();
-    const sanitized = normalizeBudgetCodeBook(rows);
-    if (sanitized.length === 0) {
-      toast.error('비목/세목이 비어 있습니다.');
-      return;
+    const validation = validateBudgetCodeBookDraft(rows);
+    if (!validation.isValid) {
+      throw new Error(validation.errors[0] || '비목/세목 구조를 확인해 주세요.');
     }
+    const sanitized = normalizeBudgetCodeBook(rows);
     if (isDevHarnessUser || !db || !portalUser?.projectId) {
       setBudgetCodeBook(sanitized);
       return;

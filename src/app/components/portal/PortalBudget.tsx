@@ -49,6 +49,7 @@ import {
   aggregateBudgetActualsFromSettlementRowsLocally,
 } from '../../platform/settlement-calculation-kernel';
 import { moveBudgetSubCode, moveBudgetSubCodeToIndex } from '../../platform/budget-code-book-order';
+import { validateBudgetCodeBookDraft } from '../../platform/budget-code-book-validation';
 import { buildBudgetLabelKey, normalizeBudgetLabel } from '../../platform/budget-labels';
 import { parseBudgetPlanMatrix, planBudgetPlanMerge } from '../../platform/google-sheet-migration';
 import { parseLocalWorkbookFile, type LocalWorkbookSheet } from '../../platform/local-workbook';
@@ -320,6 +321,10 @@ export function PortalBudget() {
     () => parseBudgetCodeImportText(codeBookImportText),
     [codeBookImportText],
   );
+  const codeBookValidation = useMemo(
+    () => validateBudgetCodeBookDraft(draftCodeBook),
+    [draftCodeBook],
+  );
   const budgetImportSelectedSheet = useMemo(
     () => budgetImportSheets.find((sheet) => sheet.name === budgetImportSheetName) || budgetImportSheets[0] || null,
     [budgetImportSheets, budgetImportSheetName],
@@ -561,6 +566,10 @@ export function PortalBudget() {
       const copy = prev.map((c) => ({ code: c.code, subCodes: [...c.subCodes] }));
       const entry = copy[idx];
       if (!entry) return prev;
+      if (entry.subCodes.length <= 1) {
+        toast.error('각 비목에는 세목이 최소 1개 필요합니다.');
+        return prev;
+      }
       const removed = entry.subCodes[subIdx] || '';
       entry.subCodes = entry.subCodes.filter((_, i) => i !== subIdx);
       if (entry.code && removed) removeDraftRows(entry.code, removed);
@@ -806,6 +815,13 @@ export function PortalBudget() {
 
   const saveSettings = useCallback(async () => {
     if (!saveBudgetPlanRows && !saveBudgetCodeBook) return;
+    if (codeBookMode) {
+      const validation = validateBudgetCodeBookDraft(draftCodeBook);
+      if (!validation.isValid) {
+        toast.error(validation.errors[0] || '비목/세목 구조를 확인해 주세요.');
+        return;
+      }
+    }
     const normalized: BudgetPlanRow[] = editMode ? draftRows.map((row) => {
       const budgetCode = normalizeBudgetLabel(String(row.budgetCode || '').trim());
       const subCode = normalizeBudgetLabel(String(row.subCode || '').trim());
@@ -1477,6 +1493,9 @@ export function PortalBudget() {
                       {codeBookReplaceMode ? (
                         <p className="text-[10px] text-amber-600">가져온 구조 초안이 반영된 상태입니다. 저장하면 현재 비목/세목 구조가 교체됩니다.</p>
                       ) : null}
+                      {!codeBookValidation.isValid ? (
+                        <p className="text-[10px] text-rose-600">{codeBookValidation.errors[0]}</p>
+                      ) : null}
                     </div>
                     <Button variant="outline" size="sm" className="h-7 text-[11px] gap-1" onClick={addBudgetCode}>
                       <Plus className="w-3.5 h-3.5" />
@@ -1689,7 +1708,12 @@ export function PortalBudget() {
                 <Button variant="outline" size="sm" className="h-8 text-[12px]" onClick={cancelEdit}>
                   취소
                 </Button>
-                <Button size="sm" className="h-8 text-[12px]" onClick={saveSettings} disabled={settingsSaving}>
+                <Button
+                  size="sm"
+                  className="h-8 text-[12px]"
+                  onClick={saveSettings}
+                  disabled={settingsSaving || !codeBookValidation.isValid}
+                >
                   {settingsSaving ? '저장 중...' : '저장'}
                 </Button>
               </div>
