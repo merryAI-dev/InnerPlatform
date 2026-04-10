@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useBlocker, useLocation, useNavigate } from 'react-router';
+import { useNavigate } from 'react-router';
 import {
   AlertTriangle,
   ArrowRight,
@@ -75,7 +75,6 @@ import { resolvePortalHappyPath } from '../../platform/portal-happy-path';
 import { resolvePortalMissionProgress } from '../../platform/portal-mission-guide';
 import { resolveWeeklyExpenseSavePolicy } from '../../platform/weekly-expense-save-policy';
 import { groupExpenseIntakeItemsForSurface } from '../../platform/bank-intake-surface';
-import { usePortalNavigationGuard } from './PortalLayout';
 const GoogleSheetMigrationWizard = lazy(
   () => import('./GoogleSheetMigrationWizard').then((module) => ({ default: module.GoogleSheetMigrationWizard })),
 );
@@ -83,29 +82,8 @@ const SettlementLedgerPage = lazy(
   () => import('../cashflow/SettlementLedgerPage').then((module) => ({ default: module.SettlementLedgerPage })),
 );
 
-type PendingUnsavedAction =
-  | {
-    kind: 'route';
-    path: string;
-    label: string;
-  }
-  | {
-    kind: 'sheet';
-    sheetId: string;
-    sheetName: string;
-  }
-  | {
-    kind: 'wizard';
-  }
-  | {
-    kind: 'blocker';
-    label: string;
-  };
-
 export function PortalWeeklyExpensePage() {
-  const location = useLocation();
   const navigate = useNavigate();
-  const { registerNavigationHandler } = usePortalNavigationGuard();
   const weeklyExpenseSavePolicy = resolveWeeklyExpenseSavePolicy();
   const { user: authUser, ensureGoogleWorkspaceAccess } = useAuth();
   const { orgId } = useFirebase();
@@ -151,11 +129,7 @@ export function PortalWeeklyExpensePage() {
   const [googleSheetImportOpen, setGoogleSheetImportOpen] = useState(false);
   const [triageWizardOpen, setTriageWizardOpen] = useState(false);
   const [pendingQuickInsert, setPendingQuickInsert] = useState<PendingQuickInsert | null>(null);
-  const [hasUnsavedSettlementChanges, setHasUnsavedSettlementChanges] = useState(false);
-  const [pendingUnsavedAction, setPendingUnsavedAction] = useState<PendingUnsavedAction | null>(null);
-  const [confirmedUnsavedAction, setConfirmedUnsavedAction] = useState<PendingUnsavedAction | null>(null);
-  const [discardChangesRequestToken, setDiscardChangesRequestToken] = useState(0);
-  const [allowUnsavedNavigation, setAllowUnsavedNavigation] = useState(false);
+  const [, setHasUnsavedSettlementChanges] = useState(false);
   const [participationRiskWarning, setParticipationRiskWarning] = useState<{
     yearMonth: string;
     weekNo: number;
@@ -175,7 +149,6 @@ export function PortalWeeklyExpensePage() {
     return visibleExpenseSheets.find((sheet) => sheet.id === activeExpenseSheetId)?.name || visibleExpenseSheets[0]?.name || '기본 탭';
   }, [visibleExpenseSheets, activeExpenseSheetId]);
   const bankStatementCount = bankStatementRows?.rows?.length || 0;
-  const blocker = useBlocker(hasUnsavedSettlementChanges && !allowUnsavedNavigation);
 
   const defaultLedgerId = useMemo(() => {
     const ledger = ledgers.find((l) => l.projectId === projectId);
@@ -738,106 +711,18 @@ export function PortalWeeklyExpensePage() {
     setGoogleSheetImportOpen(true);
   }, []);
 
-  useEffect(() => {
-    setAllowUnsavedNavigation(false);
-  }, [location.key]);
-
-  useEffect(() => {
-    if (blocker.state !== 'blocked') return;
-    const nextPath = `${blocker.location.pathname || ''}${blocker.location.search || ''}${blocker.location.hash || ''}` || '다른 화면';
-    setPendingUnsavedAction((current) => current || {
-      kind: 'blocker',
-      label: nextPath,
-    });
-  }, [blocker]);
-
-  useEffect(() => {
-    registerNavigationHandler((attempt) => {
-      const nextPath = `${attempt.path || ''}` || '다른 화면';
-      const currentPath = `${location.pathname || ''}${location.search || ''}${location.hash || ''}`;
-      if (!hasUnsavedSettlementChanges || nextPath === currentPath) return false;
-      setPendingUnsavedAction({ kind: 'route', path: attempt.path, label: attempt.label });
-      return true;
-    });
-    return () => {
-      registerNavigationHandler(null);
-    };
-  }, [hasUnsavedSettlementChanges, location.hash, location.pathname, location.search, registerNavigationHandler]);
-
-  useEffect(() => {
-    if (!confirmedUnsavedAction || hasUnsavedSettlementChanges) return;
-
-    if (confirmedUnsavedAction.kind === 'blocker') {
-      setAllowUnsavedNavigation(true);
-      blocker.proceed();
-      setConfirmedUnsavedAction(null);
-      return;
-    }
-
-    if (confirmedUnsavedAction.kind === 'sheet') {
-      setActiveExpenseSheet(confirmedUnsavedAction.sheetId);
-      setConfirmedUnsavedAction(null);
-      return;
-    }
-
-    if (confirmedUnsavedAction.kind === 'wizard') {
-      openGoogleSheetImport();
-      setConfirmedUnsavedAction(null);
-      return;
-    }
-
-    setAllowUnsavedNavigation(true);
-    navigate(confirmedUnsavedAction.path);
-    setConfirmedUnsavedAction(null);
-  }, [
-    blocker,
-    confirmedUnsavedAction,
-    hasUnsavedSettlementChanges,
-    navigate,
-    openGoogleSheetImport,
-    setActiveExpenseSheet,
-  ]);
-
   const requestRouteNavigation = useCallback((path: string, label: string) => {
-    if (hasUnsavedSettlementChanges) {
-      setPendingUnsavedAction({ kind: 'route', path, label });
-      return;
-    }
     navigate(path);
-  }, [hasUnsavedSettlementChanges, navigate]);
+  }, [navigate]);
 
   const requestSheetSwitch = useCallback((sheetId: string, sheetName: string) => {
     if (sheetId === activeExpenseSheetId) return;
-    if (hasUnsavedSettlementChanges) {
-      setPendingUnsavedAction({ kind: 'sheet', sheetId, sheetName });
-      return;
-    }
     setActiveExpenseSheet(sheetId);
-  }, [activeExpenseSheetId, hasUnsavedSettlementChanges, setActiveExpenseSheet]);
+  }, [activeExpenseSheetId, setActiveExpenseSheet]);
 
   const requestWizardOpen = useCallback(() => {
-    if (hasUnsavedSettlementChanges) {
-      setPendingUnsavedAction({ kind: 'wizard' });
-      return;
-    }
     openGoogleSheetImport();
-  }, [hasUnsavedSettlementChanges, openGoogleSheetImport]);
-
-  const resetUnsavedAction = useCallback(() => {
-    if (blocker.state === 'blocked') {
-      blocker.reset();
-    }
-    setPendingUnsavedAction(null);
-    setConfirmedUnsavedAction(null);
-  }, [blocker]);
-
-  const confirmUnsavedAction = useCallback(() => {
-    const action = pendingUnsavedAction;
-    setPendingUnsavedAction(null);
-    if (!action) return;
-    setConfirmedUnsavedAction(action);
-    setDiscardChangesRequestToken((current) => current + 1);
-  }, [pendingUnsavedAction]);
+  }, [openGoogleSheetImport]);
 
   if (!projectId) {
     return (
@@ -1195,7 +1080,7 @@ export function PortalWeeklyExpensePage() {
           onDeriveRows={deriveRowsWithLocalKernel}
           onPreviewActualSyncPayload={previewActualSyncWithLocalKernel}
           onDirtyStateChange={setHasUnsavedSettlementChanges}
-          discardChangesRequestToken={discardChangesRequestToken}
+          discardChangesRequestToken={0}
         />
       </Suspense>
       {googleSheetImportOpen && (
@@ -1236,30 +1121,6 @@ export function PortalWeeklyExpensePage() {
         onSyncEvidence={syncExpenseIntakeEvidence}
         evidenceRequiredMap={evidenceRequiredMap}
       />
-      <AlertDialog open={!!pendingUnsavedAction}>
-        <AlertDialogContent
-          data-testid="weekly-expense-unsaved-dialog"
-          onEscapeKeyDown={resetUnsavedAction}
-          onInteractOutside={(event) => event.preventDefault()}
-        >
-          <AlertDialogHeader>
-            <AlertDialogTitle>저장되지 않은 사업비 입력이 있습니다</AlertDialogTitle>
-            <AlertDialogDescription>
-              지금 이동하면 저장되지 않은 사업비 입력(주간) 편집 내용이 유실될 수 있습니다.
-              {pendingUnsavedAction?.kind === 'sheet' && ` ${pendingUnsavedAction.sheetName} 탭으로 바꾸기 전에 먼저 저장하거나, 변경을 버릴지 확인해 주세요.`}
-              {pendingUnsavedAction?.kind === 'route' && ` ${pendingUnsavedAction.label} 화면으로 이동하기 전에 먼저 저장하거나, 변경을 버릴지 확인해 주세요.`}
-              {pendingUnsavedAction?.kind === 'wizard' && ' Migration Wizard를 열기 전에 현재 편집 내용을 먼저 저장하거나, 변경을 버릴지 확인해 주세요.'}
-              {pendingUnsavedAction?.kind === 'blocker' && ` ${pendingUnsavedAction.label} 화면으로 이동하면 현재 편집 내용이 유실될 수 있습니다.`}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={resetUnsavedAction}>계속 편집</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmUnsavedAction}>
-              변경 버리고 이동
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
       {/* 참여율 이상 탐지 경고 모달 */}
       <AlertDialog open={!!participationRiskWarning} onOpenChange={(open) => { if (!open) setParticipationRiskWarning(null); }}>
         <AlertDialogContent>
