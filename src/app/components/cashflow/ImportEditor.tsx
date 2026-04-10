@@ -5,7 +5,7 @@ import type {
 } from 'react';
 import { Loader2, Maximize2, Minimize2, Plus, RotateCcw, Save, X } from 'lucide-react';
 import { toast } from 'sonner';
-import { detectKeyRuleContext, runKeyRules, type KeyRule } from '../../platform/settlement-grid-keymap';
+import { detectKeyRuleContext, runKeyRules, shouldHandleGridDeletion, type KeyRule } from '../../platform/settlement-grid-keymap';
 import { grid2tsv, html2grid, isSpreadsheetHtml, parseTsvRows } from '../../platform/settlement-grid-clipboard';
 import { BUDGET_CODE_BOOK } from '../../data/budget-data';
 import type {
@@ -1269,7 +1269,7 @@ export function ImportEditor({
       {
         combo: [{ key: 'Delete' }, { key: 'Backspace' }],
         run: (_ev, ruleCtx) => {
-          if (ruleCtx.isTextEditingTarget && !ruleCtx.hasMultiCellSelection && ruleCtx.inputHasPartialSelection) return false;
+          if (!shouldHandleGridDeletion(ruleCtx)) return false;
           if (!getActiveSelectionBounds()) return false;
           _ev.preventDefault();
           void clearSelectedCells();
