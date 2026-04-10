@@ -44,6 +44,12 @@ export function runKeyRules(e: KeyboardEvent, rules: KeyRule[], ctx: KeyRuleCont
   return false;
 }
 
+export function shouldHandleGridDeletion(ctx: KeyRuleContext): boolean {
+  if (ctx.hasMultiCellSelection) return true;
+  if (ctx.isTextEditingTarget) return false;
+  return true;
+}
+
 export function detectKeyRuleContext(e: KeyboardEvent): KeyRuleContext {
   const target = e.target as HTMLElement | null;
   const isTextEditingTarget = Boolean(

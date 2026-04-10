@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { matchKeyCombo, runKeyRules, type KeyRule, type KeyRuleContext } from './settlement-grid-keymap';
+import {
+  matchKeyCombo,
+  runKeyRules,
+  shouldHandleGridDeletion,
+  type KeyRule,
+  type KeyRuleContext,
+} from './settlement-grid-keymap';
 
 function fakeKeyEvent(overrides: Partial<KeyboardEvent> = {}): KeyboardEvent {
   return {
@@ -94,6 +100,24 @@ describe('settlement-grid-keymap', () => {
       const result = runKeyRules(fakeKeyEvent({ key: 'Backspace' }), rules, baseCtx);
       expect(result).toBe(true);
       expect(called).toBe(true);
+    });
+  });
+
+  describe('shouldHandleGridDeletion', () => {
+    it('does not hijack backspace while typing in a single input cell', () => {
+      expect(shouldHandleGridDeletion({
+        isTextEditingTarget: true,
+        hasMultiCellSelection: false,
+        inputHasPartialSelection: false,
+      })).toBe(false);
+    });
+
+    it('still allows grid deletion for multi-cell selections', () => {
+      expect(shouldHandleGridDeletion({
+        isTextEditingTarget: true,
+        hasMultiCellSelection: true,
+        inputHasPartialSelection: false,
+      })).toBe(true);
     });
   });
 });
