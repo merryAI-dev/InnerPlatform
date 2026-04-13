@@ -28,6 +28,13 @@ describe('firestore rules policy alignment', () => {
   it('bootstrap admin emails match auth-bootstrap defaults', () => {
     expect(DEFAULT_BOOTSTRAP_ADMIN_EMAILS).toContain('admin@mysc.co.kr');
     expect(DEFAULT_BOOTSTRAP_ADMIN_EMAILS).toContain('ai@mysc.co.kr');
+    expect(DEFAULT_BOOTSTRAP_ADMIN_EMAILS).toContain('ylee@mysc.co.kr');
+    expect(DEFAULT_BOOTSTRAP_ADMIN_EMAILS).toContain('jyoo@mysc.co.kr');
+    expect(DEFAULT_BOOTSTRAP_ADMIN_EMAILS).toContain('jslee@mysc.co.kr');
+    expect(DEFAULT_BOOTSTRAP_ADMIN_EMAILS).toContain('jhsong@mysc.co.kr');
+    expect(DEFAULT_BOOTSTRAP_ADMIN_EMAILS).toContain('jybaek@mysc.co.kr');
+    expect(DEFAULT_BOOTSTRAP_ADMIN_EMAILS).toContain('fin@mysc.co.kr');
+    expect(DEFAULT_BOOTSTRAP_ADMIN_EMAILS).toContain('hwkim@mysc.co.kr');
   });
 
   // ── canWrite roles (admin, finance, pm — viewer excluded) ──
