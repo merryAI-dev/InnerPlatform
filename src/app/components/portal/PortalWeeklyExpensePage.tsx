@@ -18,7 +18,6 @@ import type { EvidenceUploadSelection, PendingQuickInsert } from '../cashflow/Se
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Card, CardContent } from '../ui/card';
-import { PortalMissionGuideLauncher } from './PortalMissionGuideLauncher';
 import { BankImportTriageWizard } from './BankImportTriageWizard';
 import {
   formatSettlementSheetPolicySummary,
@@ -75,6 +74,7 @@ import { resolvePortalHappyPath } from '../../platform/portal-happy-path';
 import { resolvePortalMissionProgress } from '../../platform/portal-mission-guide';
 import { resolveWeeklyExpenseSavePolicy } from '../../platform/weekly-expense-save-policy';
 import { groupExpenseIntakeItemsForSurface } from '../../platform/bank-intake-surface';
+import { cn } from '../ui/utils';
 const GoogleSheetMigrationWizard = lazy(
   () => import('./GoogleSheetMigrationWizard').then((module) => ({ default: module.GoogleSheetMigrationWizard })),
 );
@@ -172,6 +172,16 @@ export function PortalWeeklyExpensePage() {
   const intakeSurface = useMemo(() => groupExpenseIntakeItemsForSurface(expenseIntakeItems), [expenseIntakeItems]);
   const queueWorkCount = intakeSurface.needsClassification.length + intakeSurface.reviewRequired.length + intakeSurface.pendingEvidence.length;
   const expenseRowCount = expenseSheetRows?.length || 0;
+  const sourceStatusTitle = isDirectEntryMode
+    ? '직접작성 기준으로 입력 중'
+    : bankStatementCount > 0
+      ? `통장내역 기준본 ${bankStatementCount}건 연결됨`
+      : '통장내역 기준본이 아직 없습니다';
+  const sourceStatusDescription = isDirectEntryMode
+    ? '이 프로젝트는 통장 업로드 없이 표에서 바로 입력합니다. 저장 후 반영 상태만 확인하면 됩니다.'
+    : bankStatementCount > 0
+      ? '통장내역 저장본이 현재 탭 입력과 신규 거래 분류의 기준입니다. 원본을 다시 보면 이 기준에서 이어집니다.'
+      : '통장내역을 먼저 저장해야 이 화면에서 분류, 입력, 저장 흐름이 같은 기준으로 이어집니다.';
   const weeklySetupPanel = useMemo(() => {
     if (!happyPath.canOpenWeeklyExpenses) {
       return {
@@ -768,7 +778,9 @@ export function PortalWeeklyExpensePage() {
           <p className="text-[12px] text-muted-foreground">
             {isDirectEntryMode
               ? '이 표에서 바로 입금, 지출, 조정을 입력하고 잔액 흐름을 이어가세요.'
-              : '필요한 준비는 버튼에서 바로 처리하고, 아래 표에서 바로 입력을 이어가세요.'}
+              : bankStatementCount > 0
+                ? '통장내역 기준본에서 이어서 작업합니다. 이 화면에서 분류 확인, 행 입력, 저장까지 바로 마무리하세요.'
+                : '통장내역 기준본을 먼저 만들면 이 화면에서 바로 입력과 저장을 이어갈 수 있습니다.'}
           </p>
           <p className="text-[11px] text-muted-foreground">
             현재 정책: {formatSettlementSheetPolicySummary(settlementSheetPolicy)}
@@ -840,92 +852,118 @@ export function PortalWeeklyExpensePage() {
           </Button>
           </div>
         </div>
-        <div className="mt-4 grid gap-3 md:grid-cols-4">
-          <div className="rounded-xl border bg-slate-50/70 px-3 py-3">
-            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">작업 방식</div>
-            <div className="mt-1 text-sm font-semibold">{PROJECT_FUND_INPUT_MODE_LABELS[fundInputMode]}</div>
-            <div className="mt-1 text-[11px] text-muted-foreground">
-              {isDirectEntryMode ? '표에서 바로 기록하고 계산을 검토합니다.' : '통장내역 업로드 후 사용내역을 정리합니다.'}
+        <div className="mt-4 grid gap-3 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]">
+          <Card data-testid="weekly-expense-setup-panel" className={weeklySetupPanel.toneClass}>
+            <CardContent className="px-4 py-4">
+              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                <div className="space-y-2">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">지금 해야 할 일</p>
+                    <p className="mt-1 text-[15px] font-semibold text-slate-900">{weeklySetupPanel.title}</p>
+                  </div>
+                  <p className="max-w-2xl text-[12px] leading-6 text-slate-600">{weeklySetupPanel.description}</p>
+                  <div className="flex flex-wrap gap-2">
+                    {!isDirectEntryMode && (
+                      <Badge variant="outline" className="bg-white/80 text-[10px] text-slate-700">
+                        통장내역 기준본 {bankStatementCount > 0 ? `${bankStatementCount}건 연결` : '미준비'}
+                      </Badge>
+                    )}
+                    <Badge variant="outline" className="bg-white/80 text-[10px] text-slate-700">
+                      현재 탭 {activeSheetName}
+                    </Badge>
+                    <Badge variant="outline" className="bg-white/80 text-[10px] text-slate-700">
+                      거래 {expenseRowCount}건
+                    </Badge>
+                  </div>
+                </div>
+                {weeklySetupPanel.actionLabel && (
+                  <div className="shrink-0">
+                    {weeklySetupPanel.actionKind === 'drive' ? (
+                      <Button
+                        size="sm"
+                        onClick={() => void provisionProjectDriveRoot()}
+                        disabled={projectDriveProvisioning || !happyPath.canOpenWeeklyExpenses}
+                      >
+                        {projectDriveProvisioning ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderPlus className="h-4 w-4" />}
+                        {weeklySetupPanel.actionLabel}
+                      </Button>
+                    ) : weeklySetupPanel.actionKind === 'settings' ? (
+                      <Button size="sm" onClick={() => requestRouteNavigation('/portal/project-settings', '사업 배정 수정')}>
+                        {weeklySetupPanel.actionLabel}
+                      </Button>
+                    ) : (
+                      <Button size="sm" onClick={() => requestRouteNavigation('/portal/bank-statements', '통장내역')}>
+                        {weeklySetupPanel.actionLabel}
+                        <ArrowRight className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="grid gap-3">
+            <div className="rounded-xl border bg-slate-50/80 px-4 py-3">
+              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                {isDirectEntryMode ? '입력 기준' : '통장내역 기준본'}
+              </div>
+              <div className="mt-1 text-sm font-semibold text-slate-900">{sourceStatusTitle}</div>
+              <div className="mt-1 text-[11px] leading-5 text-muted-foreground">{sourceStatusDescription}</div>
             </div>
-          </div>
-          <div className="rounded-xl border bg-slate-50/70 px-3 py-3">
-            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">정산 정책</div>
-            <div className="mt-1 text-sm font-semibold">{settlementSheetPolicy.preset === 'STANDARD' ? '표준형' : settlementSheetPolicy.preset === 'DIRECT_ENTRY' ? '직접 입력형' : '잔액 추적형'}</div>
-            <div className="mt-1 text-[11px] text-muted-foreground">{formatSettlementSheetPolicySummary(settlementSheetPolicy)}</div>
-          </div>
-          <div className="rounded-xl border bg-slate-50/70 px-3 py-3">
-            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">원본 준비</div>
-            <div className="mt-1 text-sm font-semibold">
-              {!isDirectEntryMode ? (bankStatementCount > 0 ? `${bankStatementCount}건 연결됨` : '업로드 필요') : '직접 입력 진행'}
-            </div>
-            <div className="mt-1 text-[11px] text-muted-foreground">
-              기본 폴더 {myProject?.evidenceDriveRootFolderId ? '준비됨' : '미설정'}
-            </div>
-          </div>
-          <div className="rounded-xl border bg-slate-50/70 px-3 py-3">
-            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">이번 탭</div>
-            <div className="mt-1 text-sm font-semibold">{activeSheetName}</div>
-            <div className="mt-1 text-[11px] text-muted-foreground">
-              {expenseRowCount}건의 거래와 연결되어 있습니다.
+            <div className="rounded-xl border bg-slate-50/80 px-4 py-3">
+              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">현재 입력 탭</div>
+              <div className="mt-1 text-sm font-semibold text-slate-900">{activeSheetName}</div>
+              <div className="mt-1 text-[11px] leading-5 text-muted-foreground">
+                {expenseRowCount}건의 거래와 연결되어 있고, 시트 정책은 {formatSettlementSheetPolicySummary(settlementSheetPolicy)}입니다.
+              </div>
             </div>
           </div>
         </div>
+
+        <div className="mt-3 grid gap-2 md:grid-cols-3">
+          {missionProgress.steps.map((step) => {
+            const statusLabel = step.status === 'complete'
+              ? '완료'
+              : step.status === 'attention'
+                ? '확인 필요'
+                : step.status === 'active'
+                  ? '진행 중'
+                  : '다음 단계';
+            return (
+              <div
+                key={step.id}
+                className={cn(
+                  'rounded-xl border px-4 py-3 transition-colors',
+                  step.status === 'complete' && 'border-emerald-200 bg-emerald-50/70',
+                  step.status === 'attention' && 'border-amber-200 bg-amber-50/80',
+                  step.status === 'active' && 'border-slate-300 bg-white shadow-sm',
+                  step.status === 'locked' && 'border-slate-200 bg-slate-50/70',
+                )}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[11px] font-semibold text-slate-900">{step.order}. {step.title}</p>
+                  <Badge variant="outline" className="bg-white/80 text-[10px] text-slate-700">
+                    {statusLabel}
+                  </Badge>
+                </div>
+                <p className="mt-2 text-[11px] leading-5 text-slate-600">{step.description}</p>
+              </div>
+            );
+          })}
+        </div>
       </div>
-
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border bg-muted/10 px-4 py-3 text-[11px] text-muted-foreground">
-        {!isDirectEntryMode && <span>통장내역: {bankStatementCount > 0 ? `${bankStatementCount}건 연결됨` : '업로드 필요'}</span>}
-        {isDirectEntryMode && <span>입력 방식: 직접 입력</span>}
-        <span>시트 정책: {formatSettlementSheetPolicySummary(settlementSheetPolicy)}</span>
-        <span>거래: {expenseRowCount}건</span>
-        <span>기본 폴더: {myProject?.evidenceDriveRootFolderId ? '준비됨' : '미설정'}</span>
-        {isENaraProject && <span>TYPE5 / 전용계좌 프로젝트</span>}
-      </div>
-
-      <PortalMissionGuideLauncher guideId="weekly-expenses" progress={missionProgress} />
-
-      <Card data-testid="weekly-expense-setup-panel" className={weeklySetupPanel.toneClass}>
-        <CardContent className="flex flex-col gap-3 px-4 py-4 md:flex-row md:items-center md:justify-between">
-          <div className="space-y-1">
-            <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Next Action</p>
-            <p className="text-[14px] font-semibold text-slate-900">{weeklySetupPanel.title}</p>
-            <p className="text-[12px] leading-6 text-slate-600">{weeklySetupPanel.description}</p>
-          </div>
-          {weeklySetupPanel.actionLabel && (
-            <div className="shrink-0">
-              {weeklySetupPanel.actionKind === 'drive' ? (
-                <Button
-                  size="sm"
-                  onClick={() => void provisionProjectDriveRoot()}
-                  disabled={projectDriveProvisioning || !happyPath.canOpenWeeklyExpenses}
-                >
-                  {projectDriveProvisioning ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderPlus className="h-4 w-4" />}
-                  {weeklySetupPanel.actionLabel}
-                </Button>
-              ) : weeklySetupPanel.actionKind === 'settings' ? (
-                <Button size="sm" onClick={() => requestRouteNavigation('/portal/project-settings', '사업 배정 수정')}>
-                  {weeklySetupPanel.actionLabel}
-                </Button>
-              ) : (
-                <Button size="sm" onClick={() => requestRouteNavigation('/portal/bank-statements', '통장내역')}>
-                  {weeklySetupPanel.actionLabel}
-                  <ArrowRight className="h-4 w-4" />
-                </Button>
-              )}
-            </div>
-          )}
-        </CardContent>
-      </Card>
 
       {queueWorkCount > 0 && (
         <Card data-testid="weekly-intake-queue-strip" className="border-indigo-200/70 bg-gradient-to-r from-indigo-50 via-white to-cyan-50/70 shadow-sm">
           <CardContent className="flex flex-col gap-3 px-4 py-4 md:flex-row md:items-center md:justify-between">
             <div className="space-y-1">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-indigo-700">Intake Queue</p>
+              <p className="text-[11px] uppercase tracking-[0.18em] text-indigo-700">미처리 거래</p>
               <p className="text-[14px] font-semibold text-slate-900">
-                분류와 증빙 continuation이 필요한 거래 {queueWorkCount}건이 남아 있습니다
+                통장내역에서 아직 정리되지 않은 거래 {queueWorkCount}건이 남아 있습니다
               </p>
               <p className="text-[12px] leading-6 text-slate-600">
-                전체 시트를 다시 건드릴 필요 없이, 필요한 거래만 wizard에서 분류하거나 증빙만 이어서 처리한 뒤 이 화면으로 안전하게 돌아옵니다.
+                표 전체를 다시 볼 필요 없이, 필요한 거래만 wizard에서 분류하거나 검토한 뒤 다시 이 화면으로 돌아와 입력을 이어가면 됩니다.
               </p>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
