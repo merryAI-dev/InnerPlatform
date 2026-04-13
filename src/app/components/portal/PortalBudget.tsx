@@ -1299,7 +1299,7 @@ export function PortalBudget() {
                 </TabsContent>
               </Tabs>
 
-              <div className="rounded-md border border-border/60 p-3 text-[10px] text-muted-foreground">
+              <div className="rounded-md border border-border/60 p-3 text-[10px]">
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
                   <span>가져온 행 {budgetImportMergePlan.summary.importedCount}건</span>
                   <span>갱신 {budgetImportMergePlan.summary.updateCount}건</span>
@@ -1309,36 +1309,41 @@ export function PortalBudget() {
                   <span>세목 {budgetImportMergedSubCodeCount}건</span>
                   <span>신뢰도 {budgetImportConfidenceLabel}</span>
                 </div>
-                {budgetImportTab === 'file' && budgetImportFileName ? (
-                  <p className="mt-2">
-                    파일: <strong className="text-foreground">{budgetImportFileName}</strong>
-                    {budgetImportSelectedSheet ? ` / 시트: ${budgetImportSelectedSheet.name}` : ''}
-                  </p>
-                ) : null}
-                {budgetImportMatrix.length > 0 && budgetImportParsed.rows.length === 0 ? (
-                  <p className="mt-2 text-rose-600">
-                    예산총괄 헤더를 찾지 못했습니다. `비목`, `세목`, `최초 승인 예산` 열이 들어 있는지 확인해 주세요.
-                  </p>
-                ) : null}
-                {budgetImportMergePlan.importedRows.length > 0 ? (
-                  <p className="mt-2">
-                    동일한 비목/세목 키는 덮어쓰고, 현재 화면에만 있는 기존 예산 항목은 삭제하지 않습니다.
-                  </p>
-                ) : null}
+                <div className="mt-2 space-y-2 text-muted-foreground leading-[1.65] break-words">
+                  {budgetImportTab === 'file' && budgetImportFileName ? (
+                    <p>
+                      파일: <strong className="text-foreground">{budgetImportFileName}</strong>
+                      {budgetImportSelectedSheet ? ` / 시트: ${budgetImportSelectedSheet.name}` : ''}
+                    </p>
+                  ) : null}
+                  {budgetImportMatrix.length > 0 && budgetImportParsed.rows.length === 0 ? (
+                    <p className="text-rose-600">
+                      예산총괄 헤더를 찾지 못했습니다. `비목`, `세목`, `최초 승인 예산` 열이 들어 있는지 확인해 주세요.
+                    </p>
+                  ) : null}
+                  {budgetImportMergePlan.importedRows.length > 0 ? (
+                    <p>
+                      동일한 비목/세목 키는 덮어쓰고, 현재 화면에만 있는 기존 예산 항목은 삭제하지 않습니다.
+                    </p>
+                  ) : null}
+                </div>
                 {budgetImportParsed.formatGuideRecommended ? (
-                  <p className="mt-2 text-amber-600">
-                    현재 표는 일부 열을 추정해 읽었습니다. 아래 권장 형식으로 한 번 정리한 뒤 다시 가져오면 더 안정적으로 반영됩니다.
-                  </p>
-                ) : null}
-                {budgetImportParsed.formatGuideRecommended ? (
-                  <ul className="mt-2 list-disc space-y-1 pl-4 text-amber-700">
-                    {BUDGET_IMPORT_RECOVERY_GUIDE_ITEMS.map((item) => (
-                      <li key={`budget-import-recovery-guide-${item}`}>{item}</li>
-                    ))}
-                  </ul>
+                  <div className="mt-3 rounded-md border border-amber-200/80 bg-amber-50/70 px-3 py-2">
+                    <p className="text-amber-700 leading-[1.65] break-words">
+                      현재 표는 일부 열을 추정해 읽었습니다. 아래 권장 형식으로 한 번 정리한 뒤 다시 가져오면 더 안정적으로 반영됩니다.
+                    </p>
+                    <ul className="mt-2 list-disc space-y-2 pl-4 text-amber-700 leading-[1.65] break-words">
+                      {BUDGET_IMPORT_RECOVERY_GUIDE_ITEMS.map((item) => (
+                        <li key={`budget-import-recovery-guide-${item}`}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
                 ) : null}
                 {(budgetImportParsed.warnings || []).slice(0, 3).map((warning, warningIdx) => (
-                  <p key={`budget-import-warning-${warningIdx}`} className="mt-2 text-amber-600">
+                  <p
+                    key={`budget-import-warning-${warningIdx}`}
+                    className="mt-2 text-amber-700 leading-[1.65] break-words"
+                  >
                     {warning}
                   </p>
                 ))}
