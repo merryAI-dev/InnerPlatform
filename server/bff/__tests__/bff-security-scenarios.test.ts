@@ -270,46 +270,47 @@ describe('Auth 보안 시나리오', () => {
   });
 
   // -----------------------------------------------------------------------
-  // 1-3. 역할 에스컬레이션 (토큰 role vs 헤더 role 불일치)
+  // 1-3. Firebase 토큰 사용 시 역할/이메일은 헤더가 아니라 토큰을 기준으로 한다.
   // -----------------------------------------------------------------------
 
-  describe('역할 에스컬레이션 시도', () => {
-    it('viewer 토큰으로 admin 역할 주장 → 403 role_mismatch', async () => {
-      await expect(
-        resolveRequestIdentity({
-          authMode: 'firebase_required',
-          readHeaderValue: createHeaders({
-            authorization: 'Bearer valid-token',
-            'x-tenant-id': 'mysc',
-            'x-actor-role': 'admin',
-          }),
-          verifyToken: makeVerifyToken({
-            uid: 'viewer-user-123',
-            tenantId: 'mysc',
-            role: 'viewer',
-            email: 'viewer@mysc.co.kr',
-          }),
+  describe('Firebase 토큰 + 헤더 불일치', () => {
+    it('viewer 토큰으로 admin 헤더를 보내도 토큰 role을 사용한다', async () => {
+      const identity = await resolveRequestIdentity({
+        authMode: 'firebase_required',
+        readHeaderValue: createHeaders({
+          authorization: 'Bearer valid-token',
+          'x-tenant-id': 'mysc',
+          'x-actor-role': 'admin',
         }),
-      ).rejects.toMatchObject({ statusCode: 403, code: 'role_mismatch' });
+        verifyToken: makeVerifyToken({
+          uid: 'viewer-user-123',
+          tenantId: 'mysc',
+          role: 'viewer',
+          email: 'viewer@mysc.co.kr',
+        }),
+      });
+
+      expect(identity.actorRole).toBe('pm');
+      expect(identity.actorEmail).toBe('viewer@mysc.co.kr');
     });
 
-    it('pm 토큰으로 finance 역할 주장 → 403 role_mismatch', async () => {
-      await expect(
-        resolveRequestIdentity({
-          authMode: 'firebase_required',
-          readHeaderValue: createHeaders({
-            authorization: 'Bearer valid-token',
-            'x-tenant-id': 'mysc',
-            'x-actor-role': 'finance',
-          }),
-          verifyToken: makeVerifyToken({
-            uid: 'pm-user-456',
-            tenantId: 'mysc',
-            role: 'pm',
-            email: 'pm@mysc.co.kr',
-          }),
+    it('pm 토큰에 finance 헤더를 섞어도 토큰 role을 유지한다', async () => {
+      const identity = await resolveRequestIdentity({
+        authMode: 'firebase_required',
+        readHeaderValue: createHeaders({
+          authorization: 'Bearer valid-token',
+          'x-tenant-id': 'mysc',
+          'x-actor-role': 'finance',
         }),
-      ).rejects.toMatchObject({ statusCode: 403, code: 'role_mismatch' });
+        verifyToken: makeVerifyToken({
+          uid: 'pm-user-456',
+          tenantId: 'mysc',
+          role: 'pm',
+          email: 'pm@mysc.co.kr',
+        }),
+      });
+
+      expect(identity.actorRole).toBe('pm');
     });
   });
 
@@ -355,23 +356,23 @@ describe('Auth 보안 시나리오', () => {
       ).rejects.toMatchObject({ statusCode: 403, code: 'actor_mismatch' });
     });
 
-    it('이메일 위조 (토큰 email과 헤더 email 불일치) → 403 email_mismatch', async () => {
-      await expect(
-        resolveRequestIdentity({
-          authMode: 'firebase_required',
-          readHeaderValue: createHeaders({
-            authorization: 'Bearer valid-token',
-            'x-tenant-id': 'mysc',
-            'x-actor-email': 'spoofed@mysc.co.kr',
-          }),
-          verifyToken: makeVerifyToken({
-            uid: 'user-x',
-            tenantId: 'mysc',
-            role: 'pm',
-            email: 'real@mysc.co.kr',
-          }),
+    it('이메일 헤더를 위조해도 토큰 email을 사용한다', async () => {
+      const identity = await resolveRequestIdentity({
+        authMode: 'firebase_required',
+        readHeaderValue: createHeaders({
+          authorization: 'Bearer valid-token',
+          'x-tenant-id': 'mysc',
+          'x-actor-email': 'spoofed@mysc.co.kr',
         }),
-      ).rejects.toMatchObject({ statusCode: 403, code: 'email_mismatch' });
+        verifyToken: makeVerifyToken({
+          uid: 'user-x',
+          tenantId: 'mysc',
+          role: 'pm',
+          email: 'real@mysc.co.kr',
+        }),
+      });
+
+      expect(identity.actorEmail).toBe('real@mysc.co.kr');
     });
   });
 

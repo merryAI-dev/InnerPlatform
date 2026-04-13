@@ -1262,6 +1262,70 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     expect(roleChangeLog).toBeTruthy();
   });
 
+  it('uses member fallback for firebase auth when token role is missing and ignores spoofed header role', async () => {
+    await db.doc(`orgs/${tenantId}/members/u-firebase-roleless`).set({
+      uid: 'u-firebase-roleless',
+      tenantId,
+      role: 'pm',
+      email: 'roleless@mysc.co.kr',
+      updatedAt: new Date().toISOString(),
+    });
+
+    await db.doc(`orgs/${tenantId}/members/u-target`).set({
+      uid: 'u-target',
+      tenantId,
+      role: 'viewer',
+      email: 'target@example.com',
+      updatedAt: new Date().toISOString(),
+    });
+
+    const firebaseApi = request(createBffApp({
+      projectId,
+      workerSecret,
+      db,
+      authMode: 'firebase_required',
+      tokenVerifier: async () => ({
+        uid: 'u-firebase-roleless',
+        tenantId,
+        email: 'roleless@mysc.co.kr',
+      }),
+    }));
+
+    const denied = await firebaseApi
+      .patch('/api/v1/members/u-target/role')
+      .set({
+        authorization: 'Bearer firebase-token',
+        'x-tenant-id': tenantId,
+        'x-actor-id': 'u-firebase-roleless',
+        'x-actor-role': 'admin',
+        'x-actor-email': 'spoofed@mysc.co.kr',
+        'idempotency-key': 'idem-firebase-roleless-denied',
+      })
+      .send({ role: 'finance', reason: 'spoofed header should not escalate' });
+
+    expect(denied.status).toBe(403);
+
+    await db.doc(`orgs/${tenantId}/members/u-firebase-roleless`).set({
+      role: 'admin',
+      updatedAt: new Date().toISOString(),
+    }, { merge: true });
+
+    const allowed = await firebaseApi
+      .patch('/api/v1/members/u-target/role')
+      .set({
+        authorization: 'Bearer firebase-token',
+        'x-tenant-id': tenantId,
+        'x-actor-id': 'u-firebase-roleless',
+        'x-actor-role': 'pm',
+        'x-actor-email': 'spoofed@mysc.co.kr',
+        'idempotency-key': 'idem-firebase-roleless-allowed',
+      })
+      .send({ role: 'finance', reason: 'member fallback admin should allow' });
+
+    expect(allowed.status).toBe(200);
+    expect(allowed.body.role).toBe('finance');
+  });
+
   it('blocks demoting the last remaining admin (lockout protection)', async () => {
     await db.doc(`orgs/${tenantId}/members/u-admin-1`).set({
       uid: 'u-admin-1',
