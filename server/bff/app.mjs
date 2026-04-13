@@ -510,7 +510,7 @@ function assertActorPermissionAllowed(policy, req, requiredPermission, action) {
   }
 }
 
-async function resolveApiRequestContext(req, {
+export async function resolveApiRequestContext(req, {
   authMode,
   verifyToken,
   resolveMemberIdentity,
@@ -532,12 +532,12 @@ async function resolveApiRequestContext(req, {
   let actorRole = identity.actorRole;
   let actorEmail = identity.actorEmail;
 
-  if ((!actorRole || !actorEmail) && identity.source === 'firebase' && typeof resolveMemberIdentity === 'function') {
+  if (identity.source === 'firebase' && typeof resolveMemberIdentity === 'function') {
     const memberIdentity = await resolveMemberIdentity({
       tenantId: identity.tenantId,
       actorId: identity.actorId,
     });
-    actorRole = actorRole || normalizeRole(memberIdentity?.role) || undefined;
+    actorRole = normalizeRole(memberIdentity?.role) || actorRole || undefined;
     actorEmail = actorEmail || readOptionalText(memberIdentity?.email).toLowerCase() || undefined;
   }
 

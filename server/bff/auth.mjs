@@ -159,18 +159,7 @@ export async function resolveRequestIdentity(params) {
     throw createAuthError(403, 'Header actor does not match token subject', 'actor_mismatch');
   }
 
-  const claimRole = extractRoleFromClaims(claims);
-  const headerRole = normalizeRole(readHeader(readHeaderValue, 'x-actor-role'));
-  if (claimRole && headerRole && claimRole !== headerRole) {
-    throw createAuthError(403, 'Header role does not match token role', 'role_mismatch');
-  }
-
   const claimEmail = normalizeEmail(claims?.email || '');
-  const headerEmail = normalizeEmail(readHeader(readHeaderValue, 'x-actor-email'));
-  if (claimEmail && headerEmail && claimEmail !== headerEmail) {
-    throw createAuthError(403, 'Header email does not match token email', 'email_mismatch');
-  }
-
   const allowedDomains = parseAllowedEmailDomains(process.env.BFF_ALLOWED_EMAIL_DOMAINS);
   if (!claimEmail) {
     throw createAuthError(403, 'Token does not include a valid email', 'missing_email');
@@ -179,13 +168,14 @@ export async function resolveRequestIdentity(params) {
     throw createAuthError(403, 'Email domain is not allowed', 'email_domain_not_allowed');
   }
 
+  const claimRole = extractRoleFromClaims(claims);
   const resolvedTenantId = assertTenantId(claimTenantId || headerTenantId);
   return {
     source: 'firebase',
     tenantId: resolvedTenantId,
     actorId: claimActorId,
-    actorRole: claimRole || headerRole || undefined,
-    actorEmail: claimEmail || headerEmail || undefined,
+    actorRole: claimRole || undefined,
+    actorEmail: claimEmail || undefined,
     tokenClaims: claims,
   };
 }

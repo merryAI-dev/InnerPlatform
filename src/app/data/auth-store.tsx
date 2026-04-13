@@ -27,6 +27,7 @@ import {
   type RoleDirectoryEntry,
 } from './auth-helpers';
 import { isBootstrapAdminEmail } from './auth-bootstrap';
+import { resolveEffectiveAuthRole } from './auth-role-resolution';
 import { buildLegacyMemberDocId, mergeMemberRecordSources } from './member-documents';
 import { normalizeProjectIds, resolvePrimaryProjectId } from './project-assignment';
 import {
@@ -261,12 +262,11 @@ function mapFirebaseUserToAuthUser(
     mergedProjectIds,
     workspace.portalProfile?.projectId || member?.projectId,
   );
-  const role =
-    isBootstrapAdminEmail(normalizedEmail)
-      ? 'admin'
-      : toUserRole(member?.role) ||
-        resolveRoleFromDirectory(firebaseUser.email || '', ROLE_DIRECTORY) ||
-        'pm';
+  const role = resolveEffectiveAuthRole({
+    memberRole: member?.role,
+    directoryRole: resolveRoleFromDirectory(firebaseUser.email || '', ROLE_DIRECTORY),
+    bootstrapAdmin: isBootstrapAdminEmail(normalizedEmail),
+  });
   return {
     uid: firebaseUser.uid,
     name: member?.name || firebaseUser.displayName || '사용자',
@@ -327,13 +327,12 @@ async function upsertMemberFromFirebase(
     uid: firebaseUser.uid,
     name: firebaseUser.displayName || existing?.name || '사용자',
     email: normalizedEmail,
-    role:
-      bootstrapAdmin
-        ? 'admin'
-        : toUserRole(roleFromClaims) ||
-          toUserRole(existing?.role) ||
-          resolveRoleFromDirectory(firebaseUser.email || '', ROLE_DIRECTORY) ||
-          'pm',
+    role: resolveEffectiveAuthRole({
+      memberRole: existing?.role,
+      claimRole: roleFromClaims,
+      directoryRole: resolveRoleFromDirectory(firebaseUser.email || '', ROLE_DIRECTORY),
+      bootstrapAdmin,
+    }),
     tenantId,
     status: existing?.status || 'ACTIVE',
     projectId: primaryProjectId,
