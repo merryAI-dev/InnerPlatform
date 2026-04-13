@@ -1326,6 +1326,111 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     expect(allowed.body.role).toBe('finance');
   });
 
+  it('lists auth governance rows merged from auth users and member docs', async () => {
+    await db.doc(`orgs/${tenantId}/members/jslee_mysc_co_kr`).set({
+      uid: 'jslee_mysc_co_kr',
+      tenantId,
+      role: 'admin',
+      email: 'jslee@mysc.co.kr',
+      name: 'Legacy JS',
+    });
+    await db.doc(`orgs/${tenantId}/members/u-jslee`).set({
+      uid: 'u-jslee',
+      tenantId,
+      role: 'pm',
+      email: 'jslee@mysc.co.kr',
+      name: 'Canonical JS',
+      status: 'ACTIVE',
+    });
+
+    const governanceApi = request(createBffApp({
+      projectId,
+      workerSecret,
+      db,
+      authAdminService: {
+        listUsers: async () => ({
+          users: [{
+            uid: 'u-jslee',
+            email: 'jslee@mysc.co.kr',
+            displayName: 'JS Lee',
+            disabled: false,
+            customClaims: { role: 'pm', tenantId },
+          }],
+        }),
+      },
+    }));
+
+    const response = await governanceApi
+      .get('/api/v1/admin/auth-governance/users')
+      .set(defaultHeaders);
+
+    expect(response.status).toBe(200);
+    const row = response.body.items.find((item: any) => item.email === 'jslee@mysc.co.kr');
+    expect(row).toBeTruthy();
+    expect(row).toMatchObject({
+      authUid: 'u-jslee',
+      effectiveRole: 'pm',
+      driftFlags: expect.arrayContaining(['duplicate_member_docs', 'legacy_role_mismatch', 'bootstrap_admin_not_adopted']),
+    });
+    expect(response.body.summary.duplicateMemberDocs).toBeGreaterThanOrEqual(1);
+  });
+
+  it('deep syncs canonical member, legacy member, and custom claims together', async () => {
+    await db.doc(`orgs/${tenantId}/members/jhsong_mysc_co_kr`).set({
+      uid: 'jhsong_mysc_co_kr',
+      tenantId,
+      role: 'pm',
+      email: 'jhsong@mysc.co.kr',
+      name: 'Legacy Song',
+      status: 'ACTIVE',
+      projectIds: ['p-sync-1'],
+    });
+
+    const setCustomUserClaims = vi.fn(async () => {});
+    const governanceApi = request(createBffApp({
+      projectId,
+      workerSecret,
+      db,
+      authAdminService: {
+        listUsers: async () => ({
+          users: [{
+            uid: 'u-jhsong',
+            email: 'jhsong@mysc.co.kr',
+            displayName: 'JH Song',
+            disabled: false,
+            customClaims: { role: 'pm', tenantId },
+          }],
+        }),
+        setCustomUserClaims,
+      },
+    }));
+
+    const response = await governanceApi
+      .post('/api/v1/admin/auth-governance/users/jhsong%40mysc.co.kr/deep-sync')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-auth-governance-sync-001' })
+      .send({ role: 'admin', reason: 'cashflow export alignment' });
+
+    expect(response.status).toBe(200);
+    expect(response.body.role).toBe('admin');
+    expect(response.body.mirroredLegacyCount).toBe(1);
+
+    const canonicalSnap = await db.doc(`orgs/${tenantId}/members/u-jhsong`).get();
+    expect(canonicalSnap.data()).toMatchObject({
+      uid: 'u-jhsong',
+      email: 'jhsong@mysc.co.kr',
+      role: 'admin',
+      projectIds: ['p-sync-1'],
+    });
+
+    const legacySnap = await db.doc(`orgs/${tenantId}/members/jhsong_mysc_co_kr`).get();
+    expect(legacySnap.data()).toMatchObject({
+      role: 'admin',
+      canonicalUid: 'u-jhsong',
+    });
+
+    expect(setCustomUserClaims).toHaveBeenCalledWith('u-jhsong', { role: 'admin', tenantId });
+  });
+
   it('blocks demoting the last remaining admin (lockout protection)', async () => {
     await db.doc(`orgs/${tenantId}/members/u-admin-1`).set({
       uid: 'u-admin-1',

@@ -97,6 +97,24 @@ export function createFirebaseTokenVerifier(options = {}) {
   return async (token) => auth.verifyIdToken(token, true);
 }
 
+export function createFirebaseAuthAdminService(options = {}) {
+  const app = getOrInitAdminApp({ projectId: options.projectId });
+  const auth = getAuth(app);
+
+  return {
+    async listUsers(maxResults = 1000, pageToken) {
+      return auth.listUsers(maxResults, pageToken);
+    },
+    async getUserByEmail(email) {
+      return auth.getUserByEmail(email);
+    },
+    async setCustomUserClaims(uid, claims) {
+      await auth.setCustomUserClaims(uid, claims);
+      return claims;
+    },
+  };
+}
+
 function resolveIdentityFromHeaders({ readHeaderValue }) {
   const tenantId = assertTenantId(readHeader(readHeaderValue, 'x-tenant-id'));
   const actorId = normalizeActorId(readHeader(readHeaderValue, 'x-actor-id'));
