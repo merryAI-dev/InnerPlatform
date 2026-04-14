@@ -762,9 +762,6 @@ export function PortalWeeklyExpensePage() {
                 ? '통장내역 기준본에서 이어서 작업합니다. 이 화면에서 분류 확인, 행 입력, 저장까지 바로 마무리하세요.'
                 : '통장내역 기준본을 먼저 만들면 이 화면에서 바로 입력과 저장을 이어갈 수 있습니다.'}
           </p>
-          <p className="text-[11px] text-muted-foreground">
-            현재 정책: {formatSettlementSheetPolicySummary(settlementSheetPolicy)}
-          </p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
           {isDirectEntryMode ? (
@@ -901,38 +898,40 @@ export function PortalWeeklyExpensePage() {
           </div>
         </div>
 
-        <div className="mt-3 grid gap-2 md:grid-cols-3">
-          {missionProgress.steps.map((step) => {
-            const statusLabel = step.status === 'complete'
-              ? '완료'
-              : step.status === 'attention'
-                ? '확인 필요'
-                : step.status === 'active'
-                  ? '진행 중'
-                  : '다음 단계';
-            return (
-              <div
-                key={step.id}
-                className={cn(
-                  'rounded-xl border px-4 py-3 transition-colors',
-                  step.status === 'complete' && 'border-emerald-200 bg-emerald-50/70',
-                  step.status === 'attention' && 'border-amber-200 bg-amber-50/80',
-                  step.status === 'active' && 'border-slate-300 bg-white shadow-sm',
-                  step.status === 'locked' && 'border-slate-200 bg-slate-50/70',
-                )}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-[11px] font-semibold text-slate-900">{step.order}. {step.title}</p>
-                  <Badge variant="outline" className="bg-white/80 text-[10px] text-slate-700">
-                    {statusLabel}
-                  </Badge>
-                </div>
-                <p className="mt-2 text-[11px] leading-5 text-slate-600">{step.description}</p>
-              </div>
-            );
-          })}
-        </div>
       </div>
+      {weeklySetupPanel && (
+      <Card data-testid="weekly-expense-setup-panel" className={weeklySetupPanel.toneClass}>
+        <CardContent className="flex flex-col gap-3 px-4 py-4 md:flex-row md:items-center md:justify-between">
+          <div className="space-y-1">
+            <p className="text-[14px] font-semibold text-slate-900">{weeklySetupPanel.title}</p>
+            <p className="text-[12px] leading-6 text-slate-600">{weeklySetupPanel.description}</p>
+          </div>
+          {weeklySetupPanel.actionLabel && (
+            <div className="shrink-0">
+              {weeklySetupPanel.actionKind === 'drive' ? (
+                <Button
+                  size="sm"
+                  onClick={() => void provisionProjectDriveRoot()}
+                  disabled={projectDriveProvisioning || !happyPath.canOpenWeeklyExpenses}
+                >
+                  {projectDriveProvisioning ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderPlus className="h-4 w-4" />}
+                  {weeklySetupPanel.actionLabel}
+                </Button>
+              ) : weeklySetupPanel.actionKind === 'settings' ? (
+                <Button size="sm" onClick={() => requestRouteNavigation('/portal/project-settings', '사업 배정 수정')}>
+                  {weeklySetupPanel.actionLabel}
+                </Button>
+              ) : (
+                <Button size="sm" onClick={() => requestRouteNavigation('/portal/bank-statements', '통장내역')}>
+                  {weeklySetupPanel.actionLabel}
+                  <ArrowRight className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+      )}
 
       {queueWorkCount > 0 && (
         <Card data-testid="weekly-intake-queue-strip" className="border-indigo-200/70 bg-gradient-to-r from-indigo-50 via-white to-cyan-50/70 shadow-sm">

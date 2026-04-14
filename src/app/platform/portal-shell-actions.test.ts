@@ -12,7 +12,6 @@ describe('portal shell actions', () => {
       ],
       topNavItems: [
         { to: '/portal', label: '내 사업 현황' },
-        { to: '/portal/submissions', label: '내 제출 현황' },
         { to: '/portal/cashflow', label: '캐시플로(주간)' },
       ],
     });

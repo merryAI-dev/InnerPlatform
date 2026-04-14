@@ -226,9 +226,7 @@ export function PortalProjectEdit() {
         </Button>
         <div>
           <h1 className="text-xl font-bold">프로젝트 정보 수정</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            현재 프로젝트: {myProject.name}
-          </p>
+          <p className="text-xs text-muted-foreground mt-0.5">{myProject.name}</p>
         </div>
       </div>
 

@@ -7,7 +7,6 @@ import {
   Plus, Pencil,
   CircleDollarSign,
   BarChart3,
-  ClipboardList,
   Loader2,
   Settings2,
   FileSpreadsheet,
@@ -80,7 +79,6 @@ const NAV_SECTIONS = [
     title: '마이메뉴',
     items: [
       { to: '/portal', icon: LayoutDashboard, label: '내 사업 현황', exact: true },
-      { to: '/portal/submissions', icon: ClipboardList, label: '내 제출 현황' },
       { to: '/portal/payroll', icon: CircleDollarSign, label: '인건비/공지', accent: true, hidden: true },
     ],
   },
@@ -827,8 +825,7 @@ function PortalContent() {
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                 <div className="flex min-w-0 items-center gap-3">
                   <div className="min-w-0">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">My Work</p>
-                    <div className="mt-1 flex items-center gap-2">
+                    <div className="flex items-center gap-2">
                       <h1 className="truncate text-[20px] font-semibold tracking-[-0.03em] text-slate-950">{currentSectionLabel}</h1>
                       <Badge className="h-5 rounded-full bg-[#e8f0fb] px-2 text-[10px] font-semibold text-[#1b4f8f]">
                         {portalUser.role}
@@ -934,8 +931,7 @@ function PortalContent() {
                       return;
                     }
                     if (item.kind === 'project' && item.projectId) {
-                      void setActiveProject(item.projectId).then((changed) => {
-                        if (!changed) return;
+                      void setActiveProject(item.projectId).finally(() => {
                         requestPortalNavigation(item.to, item.label);
                       });
                       return;

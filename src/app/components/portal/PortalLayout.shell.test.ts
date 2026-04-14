@@ -13,6 +13,7 @@ describe('PortalLayout shell actions', () => {
     expect(portalLayoutSource).toContain('setCommandOpen(true)');
     expect(portalLayoutSource).toContain('빠른 이동, 담당 사업, 화면 검색');
     expect(portalLayoutSource).toContain("item.kind === 'project'");
+    expect(portalLayoutSource).not.toContain('if (!changed) return;');
   });
 
   it('wires a user menu with profile, admin access, and logout', () => {
@@ -26,5 +27,10 @@ describe('PortalLayout shell actions', () => {
     expect(portalLayoutSource).toContain('MyscWordmark');
     expect(portalLayoutSource).not.toContain('MYSC Workspace');
     expect(portalLayoutSource).not.toContain('Project Operations');
+    expect(portalLayoutSource).not.toContain('My Work');
+  });
+
+  it('drops a separate submissions tab once submission status is absorbed into the dashboard', () => {
+    expect(portalLayoutSource).not.toContain("/portal/submissions");
   });
 });

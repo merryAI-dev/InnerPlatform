@@ -30,4 +30,11 @@ describe('PortalDashboard layout compaction', () => {
     expect(portalDashboardSource).toContain('md:grid-cols-2 xl:grid-cols-4');
     expect(portalDashboardSource).not.toContain('CardTitle className="text-[13px] text-slate-900">자금 요약');
   });
+
+  it('absorbs submissions into the dashboard and drops duplicate submission blocks', () => {
+    expect(portalDashboardSource).toContain('내 제출 현황');
+    expect(portalDashboardSource).toContain('제출 상태를 한 번에 확인합니다.');
+    expect(portalDashboardSource).not.toContain('인력변경 신청');
+    expect(portalDashboardSource).not.toContain('사업비 입력(주간) 작성/제출');
+  });
 });
