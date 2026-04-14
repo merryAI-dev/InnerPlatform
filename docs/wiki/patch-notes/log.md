@@ -4,6 +4,10 @@
 - pages: [portal-submissions](./pages/portal-submissions.md), [portal-bank-statement](./pages/portal-bank-statement.md), [portal-weekly-expense](./pages/portal-weekly-expense.md), [portal-register-project](./pages/portal-register-project.md), [portal-cashflow](./pages/portal-cashflow.md), [portal-project-settings](./pages/portal-project-settings.md), [portal-edit-project](./pages/portal-edit-project.md)
 - summary: 남은 포털 화면들에서 helper copy, role notice, 중복 상태 bar, `-` placeholder를 걷어내고 작업면 중심의 더 얇은 운영 화면으로 정리했다.
 
+## [2026-04-14] patch-note | portal-submissions | enterprise tone alignment
+- pages: [portal-submissions](./pages/portal-submissions.md)
+- summary: 내 제출 현황의 header slab, ledger table, 상태칩, 탭, 보조 카드 톤을 portal dashboard와 같은 Salesforce형 enterprise palette로 맞췄다.
+
 ## [2026-04-14] bootstrap | patch-notes-wiki | 초기 위키 scaffold
 - pages: [portal-weekly-expense](./pages/portal-weekly-expense.md), [portal-bank-statement](./pages/portal-bank-statement.md), [portal-budget](./pages/portal-budget.md), [portal-register-project](./pages/portal-register-project.md), [portal-submissions](./pages/portal-submissions.md), [admin-cashflow-export](./pages/admin-cashflow-export.md), [admin-cashflow-project-sheet](./pages/admin-cashflow-project-sheet.md), [admin-users-auth-governance](./pages/admin-users-auth-governance.md)
 - summary: GitHub 내부에 화면 단위 누적 패치노트 위키 구조를 신설했다.
