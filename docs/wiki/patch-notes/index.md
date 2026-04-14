@@ -6,11 +6,15 @@
 
 | Page | Route | Last Updated | 현재 구현 체크포인트 |
 | --- | --- | --- | --- |
+| [portal-dashboard](./pages/portal-dashboard.md) | `/portal` | 2026-04-14 | 가이드 제거, 현재 상태 중심, 최소 CTA 유지 |
 | [portal-weekly-expense](./pages/portal-weekly-expense.md) | `/portal/weekly-expenses` | 2026-04-14 | 기준본에서 이어쓰기, 저장 상태 구분, overwrite/backspace 복구 |
 | [portal-bank-statement](./pages/portal-bank-statement.md) | `/portal/bank-statements` | 2026-04-14 | 원본 업로드, intake queue 정리, 사업비 입력으로 이어가기 |
 | [portal-budget](./pages/portal-budget.md) | `/portal/budget` | 2026-04-14 | 가져오기 미리보기, 긴 모달 스크롤, 구조 저장 보호 |
+| [portal-onboarding](./pages/portal-onboarding.md) | `/login`, `/workspace-select` | 2026-04-14 | Guided Start 제거, 빠른 인증/진입 유지 |
 | [portal-register-project](./pages/portal-register-project.md) | `/portal/register-project` | 2026-04-14 | 직접입력형 자금 흐름, 초안 저장, 계약 예외 처리 |
 | [portal-submissions](./pages/portal-submissions.md) | `/portal/submissions` | 2026-04-14 | 수요일 기준 작성 여부, projection 수정 기준 표시 |
+| [admin-dashboard](./pages/admin-dashboard.md) | `/` | 2026-04-14 | 작성 가이드 제거, KPI/이동 액션 중심 |
+| [admin-participation](./pages/admin-participation.md) | `/participation` | 2026-04-14 | 프로토콜 가이드 제거, 검증 결과 중심 |
 | [admin-cashflow-export](./pages/admin-cashflow-export.md) | `/cashflow` | 2026-04-14 | 사업별/전체 추출, 정산 기준 필터, projection-only export |
 | [admin-cashflow-project-sheet](./pages/admin-cashflow-project-sheet.md) | `/cashflow/projects/:projectId` | 2026-04-14 | compare mode, close 흐름, 주간 snapshot 해석 |
 | [admin-users-auth-governance](./pages/admin-users-auth-governance.md) | `/users` | 2026-04-14 | drift 확인, deep sync, auth/member 정렬 운영 |
@@ -24,8 +28,12 @@
 ## High Attention
 
 - [portal-weekly-expense](./pages/portal-weekly-expense.md)
+- [portal-dashboard](./pages/portal-dashboard.md)
 - [portal-budget](./pages/portal-budget.md)
 - [portal-bank-statement](./pages/portal-bank-statement.md)
+- [portal-onboarding](./pages/portal-onboarding.md)
+- [admin-dashboard](./pages/admin-dashboard.md)
+- [admin-participation](./pages/admin-participation.md)
 - [admin-cashflow-export](./pages/admin-cashflow-export.md)
 - [admin-cashflow-project-sheet](./pages/admin-cashflow-project-sheet.md)
 - [admin-users-auth-governance](./pages/admin-users-auth-governance.md)
@@ -36,3 +44,5 @@
 - QA memory JSON: [qa-feedback-memory.json](../../operations/qa-feedback-memory.json)
 - 설계 문서: [2026-04-14-page-patch-notes-wiki-design.md](../../operations/2026-04-14-page-patch-notes-wiki-design.md)
 - 구현 계획: [2026-04-14-page-patch-notes-wiki-plan.md](../../operations/2026-04-14-page-patch-notes-wiki-plan.md)
+- 가이드 단순화 설계: [2026-04-14-guide-simplify-and-patchnote-hook-design.md](../../operations/2026-04-14-guide-simplify-and-patchnote-hook-design.md)
+- 가이드 단순화 계획: [2026-04-14-guide-simplify-and-patchnote-hook-plan.md](../../operations/2026-04-14-guide-simplify-and-patchnote-hook-plan.md)

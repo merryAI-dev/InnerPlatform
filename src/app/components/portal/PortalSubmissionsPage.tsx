@@ -5,7 +5,6 @@ import { PageHeader } from '../layout/PageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
-import { PortalMissionGuideLauncher } from './PortalMissionGuideLauncher';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,8 +27,6 @@ import {
   resolveWeeklyAccountingProductStatusDomHooks,
   resolveWeeklyAccountingSnapshot,
 } from '../../platform/weekly-accounting-state';
-import { resolvePortalMissionProgress } from '../../platform/portal-mission-guide';
-import { normalizeProjectFundInputMode } from '../../data/types';
 
 function sortIsoDesc(a: string | undefined, b: string | undefined): number {
   return String(b || '').localeCompare(String(a || ''));
@@ -127,8 +124,6 @@ export function PortalSubmissionsPage() {
     changeRequests,
     weeklySubmissionStatuses,
     upsertWeeklySubmissionStatus,
-    bankStatementRows,
-    expenseSheetRows,
   } = usePortalStore();
   const { getWeeksForProject, weeks } = useCashflowWeeks();
 
@@ -212,38 +207,6 @@ export function PortalSubmissionsPage() {
     base.setDate(base.getDate() + 4);
     return base.toISOString().slice(0, 10);
   }, [selectedWeek]);
-  const missionProgress = useMemo(() => resolvePortalMissionProgress({
-    fundInputMode: normalizeProjectFundInputMode(myProject?.fundInputMode),
-    bankStatementRowCount: bankStatementRows?.rows?.length || 0,
-    expenseRowCount: expenseSheetRows?.length || 0,
-    weeklySubmissionStatuses,
-  }), [bankStatementRows?.rows?.length, expenseSheetRows?.length, myProject?.fundInputMode, weeklySubmissionStatuses]);
-  const submissionsGuide = useMemo(() => {
-    const targetWeekLabel = selectedWeek?.label || '이번 주';
-    const hasTrackedProjects = assignedProjects.length > 0;
-    const hasChangeRequests = filteredChanges.length > 0;
-    if (!hasTrackedProjects) {
-      return {
-        title: '제출 상태를 보려면 먼저 연결된 사업이 필요합니다',
-        description: '사업이 연결되면 이번 주 체크리스트와 제출 진행 상태를 같은 화면에서 확인할 수 있습니다.',
-        primaryLabel: '사업 연결 확인하기',
-        primaryPath: '/portal/project-settings',
-        secondaryLabel: '포털 홈으로 이동',
-        secondaryPath: '/portal',
-      };
-    }
-    return {
-      title: `${targetWeekLabel} 제출 상태를 여기서 끝까지 확인합니다`,
-      description: hasChangeRequests
-        ? '주간 제출 상태와 인력변경 신청을 같은 화면에서 보고, 막힌 항목은 바로 해당 입력 화면으로 이동해 해결할 수 있습니다.'
-        : '주간 제출 상태는 자동 반영을 기준으로 갱신됩니다. 이상 징후가 있으면 같은 화면에서 바로 확인하고 입력 화면으로 이어가세요.',
-      primaryLabel: '사업비 입력(주간) 열기',
-      primaryPath: '/portal/weekly-expenses',
-      secondaryLabel: '내 사업 현황 보기',
-      secondaryPath: '/portal',
-    };
-  }, [assignedProjects.length, filteredChanges.length, selectedWeek?.label]);
-
   const statusMap = useMemo(() => {
     const map = new Map<string, typeof weeklySubmissionStatuses[number]>();
     weeklySubmissionStatuses.forEach((s) => {
@@ -313,26 +276,6 @@ export function PortalSubmissionsPage() {
           </Button>
         )}
       />
-
-      <PortalMissionGuideLauncher guideId="submissions" progress={missionProgress} />
-
-      <Card data-testid="portal-submissions-guide" className="border-teal-200/70 bg-gradient-to-br from-teal-50 via-white to-emerald-50/70">
-        <CardContent className="flex flex-col gap-3 px-4 py-4 md:flex-row md:items-center md:justify-between">
-          <div className="space-y-1">
-            <p className="text-[11px] uppercase tracking-[0.18em] text-teal-700">Submission Guide</p>
-            <p className="text-[14px] font-semibold text-slate-900">{submissionsGuide.title}</p>
-            <p className="text-[12px] leading-6 text-slate-600">{submissionsGuide.description}</p>
-          </div>
-          <div className="flex shrink-0 flex-wrap gap-2">
-            <Button size="sm" onClick={() => navigate(submissionsGuide.primaryPath)}>
-              {submissionsGuide.primaryLabel}
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => navigate(submissionsGuide.secondaryPath)}>
-              {submissionsGuide.secondaryLabel}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
 
       {/* Weekly submission checklist */}
       <Card>

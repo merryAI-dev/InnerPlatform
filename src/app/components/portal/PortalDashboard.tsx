@@ -18,7 +18,6 @@ import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
-import { PortalMissionGuideLauncher } from './PortalMissionGuideLauncher';
 import { usePortalStore } from '../../data/portal-store';
 import { useHrAnnouncements, HR_EVENT_LABELS, HR_EVENT_COLORS } from '../../data/hr-announcements-store';
 import { usePayroll } from '../../data/payroll-store';
@@ -33,8 +32,6 @@ import { addMonthsToYearMonth, getSeoulTodayIso } from '../../platform/business-
 import { useFirebase } from '../../lib/firebase-context';
 import { featureFlags } from '../../config/feature-flags';
 import { getOrgCollectionPath } from '../../lib/firebase';
-import { normalizeProjectFundInputMode } from '../../data/types';
-import { resolvePortalMissionProgress } from '../../platform/portal-mission-guide';
 import {
   isPayrollLiquidityRiskStatus,
   resolveProjectPayrollLiquidity,
@@ -47,7 +44,7 @@ import {
 
 export function PortalDashboard() {
   const navigate = useNavigate();
-  const { isLoading, portalUser, myProject, changeRequests, bankStatementRows, expenseSheetRows, weeklySubmissionStatuses } = usePortalStore();
+  const { isLoading, portalUser, myProject, changeRequests } = usePortalStore();
   const { getProjectAlerts } = useHrAnnouncements();
   const { runs, monthlyCloses, acknowledgePayrollRun, acknowledgeMonthlyClose } = usePayroll();
   const { db, isOnline, orgId } = useFirebase();
@@ -81,11 +78,6 @@ export function PortalDashboard() {
                 <p className="text-[13px] leading-6 text-slate-600">
                   PM 포털은 배정된 사업을 기준으로 이번 주 정산, 통장내역, 예산 반영을 이어갑니다. 사업이 보이지 않으면 먼저 연결 상태를 확인하세요.
                 </p>
-              </div>
-              <div className="grid gap-2 text-[11px] text-slate-600 sm:grid-cols-3">
-                <div className="rounded-xl border bg-white/90 px-3 py-3">1. 관리자에게 내 사업 배정을 요청합니다.</div>
-                <div className="rounded-xl border bg-white/90 px-3 py-3">2. 주사업을 선택하면 이번 주 미션이 자동으로 열립니다.</div>
-                <div className="rounded-xl border bg-white/90 px-3 py-3">3. 연결 후 통장내역 또는 주간 사업비부터 시작합니다.</div>
               </div>
             </div>
             <div className="flex shrink-0 flex-col gap-2">
@@ -146,12 +138,6 @@ export function PortalDashboard() {
   const myLedgers = (liveLedgers ?? LEDGERS).filter(l => l.projectId === myProject.id);
   const myTx = (liveTransactions ?? TRANSACTIONS).filter(t => t.projectId === myProject.id);
   const myChanges = changeRequests.filter(r => r.projectId === myProject.id);
-  const missionProgress = useMemo(() => resolvePortalMissionProgress({
-    fundInputMode: normalizeProjectFundInputMode(myProject.fundInputMode),
-    bankStatementRowCount: bankStatementRows?.rows?.length || 0,
-    expenseRowCount: expenseSheetRows?.length || 0,
-    weeklySubmissionStatuses,
-  }), [bankStatementRows?.rows?.length, expenseSheetRows?.length, myProject.fundInputMode, weeklySubmissionStatuses]);
 
   const today = getSeoulTodayIso();
   const yearMonth = today.slice(0, 7);
@@ -210,7 +196,7 @@ export function PortalDashboard() {
             안녕하세요, {portalUser.name}님
           </h1>
           <p className="text-[12px] text-muted-foreground mt-0.5">
-            {myProject.name}의 이번 주 운영 현황입니다. 지금 할 일: {missionProgress.currentLabel}
+            {myProject.name}의 현재 운영 현황입니다.
           </p>
         </div>
         <Badge className="text-[10px] h-5 px-2 bg-teal-100 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300">
@@ -308,9 +294,6 @@ export function PortalDashboard() {
         onOpenDetail={() => navigate('/portal/payroll')}
         onOpenBankStatements={() => navigate('/portal/bank-statements')}
       />
-
-      {/* 사업 기본 정보 */}
-      <PortalMissionGuideLauncher guideId="dashboard" progress={missionProgress} />
 
       <Card>
         <CardContent className="p-4">
