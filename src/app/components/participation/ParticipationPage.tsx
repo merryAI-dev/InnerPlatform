@@ -2,7 +2,7 @@ import { PageHeader } from '../layout/PageHeader';
 import { useState, useMemo } from 'react';
 import {
   Users, AlertTriangle, ShieldAlert, Shield,
-  ChevronDown, ChevronUp, Search, Info,
+  Search,
   UserCheck, FolderKanban, Download,
   AlertCircle, CheckCircle2, XCircle, Eye, Network,
 } from 'lucide-react';
@@ -99,79 +99,6 @@ interface ProjectParticipationView {
   entries: ParticipationEntry[];
   totalRate: number;
   memberCount: number;
-}
-
-// ── Protocol Guide ──
-
-function ProtocolGuide() {
-  const [expanded, setExpanded] = useState(false);
-  return (
-    <div className="rounded-xl border border-indigo-200/60 bg-gradient-to-r from-indigo-50/40 to-violet-50/20 overflow-hidden">
-      <div className="flex items-center justify-between px-4 py-3">
-        <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-lg bg-indigo-100 flex items-center justify-center">
-            <Info className="w-3.5 h-3.5 text-indigo-600" />
-          </div>
-          <span className="text-[13px] text-indigo-900" style={{ fontWeight: 600 }}>4단계 프로토콜 가이드</span>
-        </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setExpanded(!expanded)}
-          className="h-7 w-7 p-0 text-indigo-500 hover:text-indigo-700 hover:bg-indigo-100"
-        >
-          {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-        </Button>
-      </div>
-      {expanded && (
-        <CardContent className="pt-0 pb-4">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 text-xs">
-            <div className="border rounded-lg p-3 bg-card">
-              <div className="flex items-center gap-1.5 mb-1.5">
-                <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-[10px] flex items-center justify-center" style={{ fontWeight: 700 }}>1</span>
-                <span style={{ fontWeight: 600 }}>사업담당 조직 내 인원으로 서류인력 꾸리기</span>
-              </div>
-              <p className="text-muted-foreground ml-7">동일 조직(CIC/그룹) 내 인원의 참여율을 우선 배정</p>
-            </div>
-            <div className="border rounded-lg p-3 bg-card">
-              <div className="flex items-center gap-1.5 mb-1.5">
-                <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-[10px] flex items-center justify-center" style={{ fontWeight: 700 }}>2</span>
-                <span style={{ fontWeight: 600 }}>참여율 부족 시 체크포인트</span>
-              </div>
-              <ul className="space-y-1 text-muted-foreground ml-7">
-                <li><span className="text-foreground" style={{ fontWeight: 500 }}>동일 기관?</span> → 100% 초과 불가</li>
-                <li><span className="text-foreground" style={{ fontWeight: 500 }}>시스템 정산?</span> → e나라도움 내 교차검증 주의</li>
-                <li><span className="text-foreground" style={{ fontWeight: 500 }}>회계사정산?</span> → 동일 기관만 확인, 타 기관과 교차 낮음</li>
-                <li><span className="text-foreground" style={{ fontWeight: 500 }}>민간사업?</span> → 교차검증 대상 아님</li>
-              </ul>
-            </div>
-            <div className="border rounded-lg p-3 bg-card">
-              <div className="flex items-center gap-1.5 mb-1.5">
-                <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-[10px] flex items-center justify-center" style={{ fontWeight: 700 }}>3</span>
-                <span style={{ fontWeight: 600 }}>타 조직 구성원 필요 시</span>
-              </div>
-              <ul className="space-y-1 text-muted-foreground ml-7">
-                <li>아래 <span className="text-foreground" style={{ fontWeight: 500 }}>인원별 현황 탭</span>에서 가용 인력 선별</li>
-                <li>CIC/그룹 대표 간 합의 → <span className="text-foreground" style={{ fontWeight: 500 }}>확정 즉시 기입</span></li>
-              </ul>
-            </div>
-            <div className="border rounded-lg p-3 bg-card">
-              <div className="flex items-center gap-1.5 mb-1.5">
-                <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-[10px] flex items-center justify-center" style={{ fontWeight: 700 }}>4</span>
-                <span style={{ fontWeight: 600 }}>기존인력 조정 필요 시</span>
-              </div>
-              <div className="ml-7 space-y-1">
-                <p className="text-muted-foreground">참여율 반납/교체 → 조직장 간 협의 → 3번 반복</p>
-                <p className="text-red-600" style={{ fontWeight: 500 }}>
-                  <AlertTriangle className="w-3 h-3 inline mr-0.5" />서류 제출 전 확정 가능성 높은 사업은 미리 기입!
-                </p>
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      )}
-    </div>
-  );
 }
 
 // ── Member Detail Dialog ──
@@ -517,9 +444,6 @@ export function ParticipationPage() {
             결과 JSON
           </Button>
         </div>
-
-        <ProtocolGuide />
-
         {/* KPI Cards */}
         <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
           <Card>

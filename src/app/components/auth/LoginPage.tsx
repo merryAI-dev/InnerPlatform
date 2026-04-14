@@ -5,7 +5,6 @@ import {
   ArrowRight,
   AlertCircle,
   Loader2,
-  Sparkles,
 } from 'lucide-react';
 import { Card, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
@@ -213,24 +212,6 @@ export function LoginPage() {
             </div>
           </CardContent>
         </Card>
-
-        <div className="mt-4 rounded-2xl border border-indigo-200/70 bg-white/80 px-4 py-4 shadow-sm">
-          <div className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-indigo-600 text-white">
-              <Sparkles className="h-4 w-4" />
-            </div>
-            <div>
-              <p className="text-[11px] uppercase tracking-[0.18em] text-indigo-700">Guided Start</p>
-              <p className="text-[13px] font-semibold text-slate-900">로그인 후 3분 안에 첫 작업을 시작합니다</p>
-            </div>
-          </div>
-          <div className="mt-3 grid gap-2 text-[11px] text-slate-600 sm:grid-cols-3">
-            <div className="rounded-xl border bg-slate-50/70 px-3 py-3">1. 회사 계정으로 로그인합니다.</div>
-            <div className="rounded-xl border bg-slate-50/70 px-3 py-3">2. 관리자 공간 또는 PM 포털을 고릅니다.</div>
-            <div className="rounded-xl border bg-slate-50/70 px-3 py-3">3. 화면이 곧바로 이번 주 다음 행동을 안내합니다.</div>
-          </div>
-        </div>
-
         {/* Footer */}
         <p className="text-center text-[10px] text-muted-foreground/60 mt-6">
           MYSC 사업관리통합플랫폼 v1.0

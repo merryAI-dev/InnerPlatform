@@ -17,6 +17,10 @@ import {
   Shield,
   ChevronLeft,
   ChevronRight,
+  Search,
+  Bell,
+  UserCircle2,
+  User,
 } from 'lucide-react';
 import { PortalProvider, usePortalStore } from '../../data/portal-store';
 import { useAuth } from '../../data/auth-store';
@@ -32,19 +36,39 @@ import {
   SelectValue,
 } from '../ui/select';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '../ui/dropdown-menu';
+import {
+  CommandDialog,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+  CommandShortcut,
+} from '../ui/command';
 import { DarkModeToggle } from '../layout/DarkModeToggle';
 import { PageTransition } from '../layout/PageTransition';
 import { ErrorBoundary } from '../layout/ErrorBoundary';
+import { MyscWordmark } from '../brand/MyscWordmark';
 import {
   canChooseWorkspace,
   canEnterPortalWorkspace,
   isAdminSpaceRole,
-  resolveHomePath,
   shouldForcePortalOnboarding,
 } from '../../platform/navigation';
 import { addMonthsToYearMonth, getSeoulTodayIso } from '../../platform/business-days';
 import { normalizeProjectFundInputMode } from '../../data/types';
 import { rememberRecentPortalProject } from '../../platform/portal-recent-projects';
+import { buildPortalShellCommandItems, buildPortalShellNotificationItems } from '../../platform/portal-shell-actions';
 
 // ═══════════════════════════════════════════════════════════════
 // PortalLayout — 사용자(PM) 전용 레이아웃
@@ -142,6 +166,7 @@ function PortalContent() {
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [commandOpen, setCommandOpen] = useState(false);
   const navigationHandlerRef = useRef<((attempt: PortalNavigationAttempt) => boolean) | null>(null);
   const currentPath = `${location.pathname}${location.search}${location.hash}`;
   const registerNavigationHandler = useCallback((handler: ((attempt: PortalNavigationAttempt) => boolean) | null) => {
@@ -156,6 +181,11 @@ function PortalContent() {
     void setWorkspacePreference('admin', { persistDefault: false })
       .finally(() => navigate('/'));
   }, [navigate, setWorkspacePreference]);
+  const handleLogout = useCallback(() => {
+    portalLogout();
+    authLogout();
+    navigate('/login');
+  }, [authLogout, navigate, portalLogout]);
 
   // ── 모든 hooks는 early return 전에 호출 ──
   const assignedProjects = useMemo(() => {
@@ -230,6 +260,17 @@ function PortalContent() {
       }),
     }))
   ), [currentFundInputMode]);
+  const topNavItems = useMemo(() => navSections.flatMap((section) => section.items), [navSections]);
+  const currentSectionLabel = useMemo(() => {
+    const current = topNavItems.find((item) => isActive(item.to, item.exact));
+    return current?.label || '내 사업 현황';
+  }, [topNavItems, location.pathname]);
+  const shellCommandItems = useMemo(() => buildPortalShellCommandItems({
+    role: authUser?.role,
+    currentProject: currentProject ? { id: currentProject.id, name: currentProject.name } : null,
+    assignedProjects: assignedProjects.map((project) => ({ id: project.id, name: project.name })),
+    topNavItems: topNavItems.map((item) => ({ to: item.to, label: item.label })),
+  }), [assignedProjects, authUser?.role, currentProject, topNavItems]);
 
 
   // 미인증 시 로그인으로
@@ -282,6 +323,25 @@ function PortalContent() {
   useEffect(() => {
     setMobileOpen(false);
   }, [location.pathname]);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      const isEditable = !!target && (
+        target.tagName === 'INPUT'
+        || target.tagName === 'TEXTAREA'
+        || target.isContentEditable
+      );
+      if (isEditable) return;
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setCommandOpen((prev) => !prev);
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   if (authLoading || portalLoading) {
     return (
@@ -411,6 +471,11 @@ function PortalContent() {
     const monthly = closePrev && closePrev.status === 'DONE' && !closePrev.acknowledged ? 1 : 0;
     return payroll + monthly;
   })();
+  const notificationItems = buildPortalShellNotificationItems({
+    pendingChanges,
+    hrAlertCount,
+    payrollPendingCount,
+  });
   function isActive(to: string, exact?: boolean) {
     if (exact) return location.pathname === to;
     return location.pathname.startsWith(to);
@@ -434,31 +499,21 @@ function PortalContent() {
           <div className="fixed inset-0 bg-black/30 backdrop-blur-sm z-40 lg:hidden" onClick={() => setMobileOpen(false)} />
         )}
 
-        {/* ── Sidebar ── */}
+        {/* ── Mobile drawer ── */}
         <aside className={`
           ${collapsed ? 'w-[60px]' : 'w-[240px]'} flex flex-col shrink-0 z-50
-          fixed inset-y-0 left-0 lg:relative
+          fixed inset-y-0 left-0 lg:hidden
           transition-all duration-200
-          ${mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
+          ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}
           bg-sidebar/90 backdrop-blur-xl border-r border-white/10
         `}>
           {/* Brand */}
           <div className={`flex items-center gap-2.5 h-[48px] px-3 ${collapsed ? 'justify-center' : ''}`}>
-            <div
-              className="flex items-center justify-center w-8 h-8 rounded-lg shrink-0"
-              style={{ background: 'linear-gradient(135deg, #0d9488 0%, #059669 100%)' }}
-            >
-              <FolderKanban className="w-4 h-4 text-white" />
+            <div className="inline-flex items-center rounded-lg bg-white px-2 py-1 shadow-sm">
+              <MyscWordmark />
             </div>
             {!collapsed && (
-              <div className="overflow-hidden flex-1">
-                <p className="text-[11px] text-white truncate" style={{ fontWeight: 700 }}>
-                  사업비 관리 포털
-                </p>
-                <p className="text-[9px] text-slate-500 truncate tracking-wider" style={{ textTransform: 'uppercase' }}>
-                  Project Member
-                </p>
-              </div>
+              <div className="flex-1" />
             )}
           </div>
 
@@ -657,37 +712,199 @@ function PortalContent() {
         </aside>
 
         {/* ── Main ── */}
-        <div className="flex-1 flex flex-col min-w-0 bg-background">
-          {/* Top bar */}
-          <header className="glass sticky top-0 z-30 flex items-center justify-between h-[48px] border-b border-glass-border px-5 shrink-0">
-            <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
-              <button className="lg:hidden p-1 rounded hover:bg-muted" onClick={() => setMobileOpen(true)}>
-                <Menu className="w-4 h-4" />
+        <div className="flex-1 flex flex-col min-w-0 bg-slate-50">
+          <header className="sticky top-0 z-30 shrink-0 border-b border-slate-200 bg-white shadow-[0_1px_0_rgba(15,23,42,0.04)]">
+            <div className="flex h-14 items-center gap-3 border-b border-slate-200 bg-[#0f2747] px-4 text-white md:px-6">
+              <button
+                className="rounded-md p-1.5 text-slate-200 transition-colors hover:bg-white/10 lg:hidden"
+                onClick={() => setMobileOpen(true)}
+              >
+                <Menu className="h-4 w-4" />
               </button>
-              <FolderKanban className="w-3.5 h-3.5" />
-              <span className="truncate">{currentProjectName || '사업 미선택'}</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              {isAdminSpaceRole(authUser?.role) && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8 gap-1.5 border-slate-200/70 bg-white/80 text-slate-700 hover:bg-slate-50"
-                  onClick={requestAdminNavigation}
+              <div className="flex min-w-0 items-center gap-2">
+                <div className="inline-flex items-center rounded-lg bg-white px-2 py-1 shadow-sm">
+                  <MyscWordmark className="shrink-0" />
+                </div>
+              </div>
+              <div className="hidden flex-1 items-center justify-center px-4 md:flex">
+                <button
+                  type="button"
+                  onClick={() => setCommandOpen(true)}
+                  className="flex h-10 w-full max-w-xl items-center gap-2 rounded-xl border border-white/15 bg-white/8 px-3 text-left text-slate-200 transition-colors hover:bg-white/12"
                 >
-                  <Shield className="w-3.5 h-3.5" />
-                  관리자 공간
-                </Button>
-              )}
-              <Badge variant="outline" className="text-[10px] h-5 px-2">
-                {portalUser.role}
-              </Badge>
+                  <Search className="h-4 w-4 text-slate-300" />
+                  <span className="truncate text-[12px] text-slate-300">빠른 이동, 담당 사업, 화면 검색</span>
+                  <span className="ml-auto rounded-md border border-white/15 bg-white/8 px-2 py-1 text-[10px] font-semibold text-slate-300">
+                    ⌘K
+                  </span>
+                </button>
+              </div>
+              <div className="ml-auto flex items-center gap-1.5">
+                {isAdminSpaceRole(authUser?.role) && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="hidden h-8 border-white/15 bg-white/8 text-[11px] text-white hover:bg-white/12 md:inline-flex"
+                    onClick={requestAdminNavigation}
+                  >
+                    <Shield className="mr-1 h-3.5 w-3.5" />
+                    관리자 공간
+                  </Button>
+                )}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label="알림 메뉴 열기"
+                      className="relative rounded-md p-2 text-slate-200 transition-colors hover:bg-white/10"
+                    >
+                      <Bell className="h-4 w-4" />
+                      {notificationItems.length > 0 && (
+                        <span className="absolute right-1 top-1 inline-flex h-2 w-2 rounded-full bg-amber-400" />
+                      )}
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-72 text-[12px]">
+                    <DropdownMenuLabel>알림</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    {notificationItems.length === 0 ? (
+                      <DropdownMenuItem disabled>처리할 알림 없음</DropdownMenuItem>
+                    ) : (
+                      <DropdownMenuGroup>
+                        {notificationItems.map((item) => (
+                          <DropdownMenuItem
+                            key={item.id}
+                            onClick={() => requestPortalNavigation(item.to, item.label)}
+                            className="flex flex-col items-start gap-0.5 py-2"
+                          >
+                            <span className="font-medium text-slate-900">{item.label}</span>
+                            <span className="text-[11px] text-slate-500">{item.description}</span>
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuGroup>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label="사용자 메뉴 열기"
+                      className="rounded-md p-2 text-slate-200 transition-colors hover:bg-white/10"
+                    >
+                      <UserCircle2 className="h-4 w-4" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-64 text-[12px]">
+                    <DropdownMenuLabel className="space-y-0.5">
+                      <div className="text-[12px] font-semibold text-slate-900">{portalUser.name}</div>
+                      <div className="text-[11px] font-normal text-slate-500">{authUser?.email || ''}</div>
+                    </DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuGroup>
+                      <DropdownMenuItem onClick={() => requestPortalNavigation('/portal/career-profile', '내 프로필')}>
+                        <User className="h-4 w-4" />
+                        내 프로필
+                      </DropdownMenuItem>
+                      {isAdminSpaceRole(authUser?.role) && (
+                        <DropdownMenuItem onClick={requestAdminNavigation}>
+                          <Shield className="h-4 w-4" />
+                          관리자 공간
+                        </DropdownMenuItem>
+                      )}
+                    </DropdownMenuGroup>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={handleLogout}>
+                      <LogOut className="h-4 w-4" />
+                      로그아웃
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-3 px-4 py-3 md:px-6 lg:gap-0">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">My Work</p>
+                    <div className="mt-1 flex items-center gap-2">
+                      <h1 className="truncate text-[20px] font-semibold tracking-[-0.03em] text-slate-950">{currentSectionLabel}</h1>
+                      <Badge className="h-5 rounded-full bg-[#e8f0fb] px-2 text-[10px] font-semibold text-[#1b4f8f]">
+                        {portalUser.role}
+                      </Badge>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  {projectOptions.length > 0 ? (
+                    <Select
+                      value={selectedProjectOptionValue}
+                      onValueChange={(value) => {
+                        if (value && value !== portalUser?.projectId) {
+                          setActiveProject(value);
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="h-10 min-w-[220px] rounded-xl border-slate-300 bg-white text-[12px] font-medium text-slate-900 shadow-sm">
+                        <SelectValue placeholder="사업 선택" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {projectOptions.map((project) => (
+                          <SelectItem key={project.id} value={project.id}>
+                            {project.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <div className="flex h-10 items-center rounded-xl border border-slate-300 bg-white px-3 text-[12px] font-medium text-slate-900 shadow-sm">
+                      {currentProjectName || '사업 미선택'}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="-mx-4 overflow-x-auto px-4 pb-1 pt-1 md:-mx-6 md:px-6">
+                <nav className="flex min-w-max items-center gap-1">
+                  {topNavItems.map((item) => {
+                    const active = isActive(item.to, item.exact);
+                    const badge = getBadge(item.to);
+                    return (
+                      <NavLink
+                        key={item.to}
+                        to={item.to}
+                        end={item.exact}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          requestPortalNavigation(item.to, item.label);
+                        }}
+                        className={`group inline-flex h-10 items-center gap-2 rounded-t-xl border-b-2 px-3 text-[12px] font-medium transition-colors ${
+                          active
+                            ? 'border-[#1b6dff] text-[#1b4f8f]'
+                            : 'border-transparent text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        <item.icon className={`h-3.5 w-3.5 ${active ? 'text-[#1b6dff]' : 'text-slate-400 group-hover:text-slate-600'}`} />
+                        <span className="whitespace-nowrap">
+                          {item.label.replace('(주간)', '')}
+                        </span>
+                        {badge !== null && (
+                          <span className="inline-flex min-w-[18px] items-center justify-center rounded-full bg-slate-100 px-1.5 text-[10px] font-semibold text-slate-700">
+                            {badge}
+                          </span>
+                        )}
+                      </NavLink>
+                    );
+                  })}
+                </nav>
+              </div>
             </div>
           </header>
 
           {/* Content */}
           <main className="flex-1 overflow-y-auto">
-            <div className="p-5 max-w-[1400px] mx-auto">
+            <div className="mx-auto max-w-[1480px] p-4 md:p-6">
               <PageTransition>
                 <ErrorBoundary homePath="/portal" resetKey={location.pathname}>
                   <Outlet />
@@ -696,6 +913,48 @@ function PortalContent() {
             </div>
           </main>
         </div>
+        <CommandDialog
+          open={commandOpen}
+          onOpenChange={setCommandOpen}
+          title="포털 빠른 이동"
+          description="포털 업무와 현재 사업 작업을 빠르게 찾아 이동합니다."
+        >
+          <CommandInput placeholder="업무, 담당 사업, 캐시플로, 제출 상태 검색..." />
+          <CommandList>
+            <CommandEmpty>일치하는 화면이 없습니다.</CommandEmpty>
+            <CommandGroup heading="빠른 이동">
+              {shellCommandItems.map((item) => (
+                <CommandItem
+                  key={item.id}
+                  value={`${item.label} ${item.description} ${item.keywords.join(' ')}`}
+                  onSelect={() => {
+                    setCommandOpen(false);
+                    if (item.kind === 'admin') {
+                      requestAdminNavigation();
+                      return;
+                    }
+                    if (item.kind === 'project' && item.projectId) {
+                      void setActiveProject(item.projectId).then((changed) => {
+                        if (!changed) return;
+                        requestPortalNavigation(item.to, item.label);
+                      });
+                      return;
+                    }
+                    requestPortalNavigation(item.to, item.label);
+                  }}
+                  className="flex items-center gap-3"
+                >
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <span className="text-[12px] font-medium text-slate-900">{item.label}</span>
+                    <span className="text-[11px] text-slate-500">{item.description}</span>
+                  </div>
+                  <CommandShortcut>{item.category}</CommandShortcut>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+            <CommandSeparator />
+          </CommandList>
+        </CommandDialog>
       </div>
       </TooltipProvider>
     </PortalNavigationGuardContext.Provider>

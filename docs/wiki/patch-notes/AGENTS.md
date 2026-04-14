@@ -21,6 +21,7 @@
 6. 한 문서에 코드를 길게 복제하지 않는다. 구현 근거는 파일 경로와 테스트 경로로 연결한다.
 7. 체크리스트는 개발 구현 단위가 아니라 사용자가 체감하는 기능 단위로 쓴다.
 8. 기능이 추가되거나 제거되면 `Recent Changes`뿐 아니라 `Current Feature Checklist`도 같이 갱신한다.
+9. mapped surface가 바뀌면 pre-commit hook이 대응 `pages/*.md`와 `log.md` staging을 요구한다.
 
 ## Page Template
 
@@ -52,6 +53,7 @@
 3. `log.md` append
 4. 새 seed가 생기면 `index.md` 갱신
 5. 사용자 체감 기능이 바뀌었다면 체크리스트를 먼저 고친다.
+6. hook이 막히면 우회보다 대응 page 문서와 `log.md`를 먼저 갱신한다.
 
 ### QA 입력 후
 

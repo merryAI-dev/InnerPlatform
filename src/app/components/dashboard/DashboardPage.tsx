@@ -32,7 +32,6 @@ import {
   type ProjectType,
 } from '../../data/types';
 import {
-  DashboardGuidePanel,
   ValidationSummaryCard,
   ProjectValidationBadge,
   UpdateReminderBadge,
@@ -363,7 +362,6 @@ export function DashboardPage() {
       />
 
       <WelcomeBanner />
-      <DashboardGuidePanel />
 
       {/* KPI Metrics */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">

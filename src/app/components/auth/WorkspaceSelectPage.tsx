@@ -136,7 +136,7 @@ export function WorkspaceSelectPage() {
                 </p>
               </div>
               <div className="space-y-2 text-[11px] text-slate-600">
-                <div className="flex items-center gap-2"><CheckCircle2 className="h-3.5 w-3.5 text-teal-600" /> 이번 주 미션과 다음 행동이 바로 보임</div>
+                <div className="flex items-center gap-2"><CheckCircle2 className="h-3.5 w-3.5 text-teal-600" /> 주요 실무 화면으로 바로 이동</div>
                 <div className="flex items-center gap-2"><CheckCircle2 className="h-3.5 w-3.5 text-teal-600" /> 통장내역, 사업비 입력, 예산 반영을 한 흐름으로 진행</div>
                 {(portalRequested || !canAccessAdmin) && (
                   <Badge variant="outline" className="w-fit border-teal-200 bg-teal-50 text-teal-700">
