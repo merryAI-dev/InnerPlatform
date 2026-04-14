@@ -106,3 +106,7 @@
 ## [2026-04-14] patch-note | portal-weekly-expense | navigation guard와 bank wizard 회귀 복구
 - pages: [portal-weekly-expense](./pages/portal-weekly-expense.md)
 - summary: 미저장 사업비 입력 편집은 화면 이동 전에 확인 다이얼로그로 막도록 복구했고, bank import triage wizard의 cashflow category 선택과 fullscreen/주간입력 연계 E2E도 다시 통과하도록 정리했다.
+
+## [2026-04-14] patch-note | portal-monochrome-sweep | teal/emerald 기본 액션 제거
+- pages: [portal-dashboard](./pages/portal-dashboard.md), [portal-bank-statement](./pages/portal-bank-statement.md), [portal-budget](./pages/portal-budget.md)
+- summary: 포털 핵심 화면의 기본 버튼, active state, 배지, empty state 강조색을 teal/emerald에서 navy/slate 중심 monochrome 팔레트로 통일했다.

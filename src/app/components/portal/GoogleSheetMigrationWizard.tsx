@@ -1075,7 +1075,7 @@ function GoogleSheetImportDialog({
                       isActive
                         ? 'border-sky-300 bg-sky-50 text-sky-950'
                         : isDone
-                          ? 'border-emerald-200 bg-emerald-50 text-emerald-950'
+                          ? 'border-slate-300 bg-slate-100 text-slate-900'
                           : 'border-slate-200 bg-slate-50 text-slate-600'
                     }`}
                     disabled={navigationLocked}
@@ -1091,7 +1091,7 @@ function GoogleSheetImportDialog({
                       isActive
                         ? 'border-sky-300 bg-white text-sky-700'
                         : isDone
-                          ? 'border-emerald-300 bg-white text-emerald-700'
+                          ? 'border-slate-300 bg-white text-slate-700'
                           : 'border-slate-300 bg-white text-slate-500'
                     }`}>
                       {isDone ? <CheckCircle2 className="h-3.5 w-3.5" /> : index + 1}
@@ -1183,9 +1183,9 @@ function GoogleSheetImportDialog({
                       </div>
                     )}
                     {preview && (
-                      <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-[11px] text-emerald-950">
+                      <div className="mt-4 rounded-xl border border-slate-300 bg-slate-100 px-3 py-3 text-[11px] text-slate-900">
                         <p className="font-semibold">{preview.spreadsheetTitle}</p>
-                        <p className="mt-1 text-emerald-900/80">
+                        <p className="mt-1 text-slate-700">
                           총 {preview.availableSheets.length}개 탭을 확인했습니다. 다음 단계에서 탭별 성격을 보고 선택할 수 있습니다.
                         </p>
                       </div>
@@ -1236,7 +1236,7 @@ function GoogleSheetImportDialog({
                               업로드: {source.uploadedAt ? source.uploadedAt.slice(0, 10) : '-'}
                             </p>
                             {source.lastAppliedAt && (
-                              <p className="mt-1 text-emerald-700">
+                              <p className="mt-1 text-slate-700">
                                 마지막 반영: {source.lastAppliedAt.slice(0, 10)}
                               </p>
                             )}
@@ -1806,7 +1806,7 @@ function GoogleSheetMigrationAiPanel({
             </div>
           )}
           {safeAnalysis.nextActions.length > 0 && (
-            <PanelList title="바로 해볼 일" items={safeAnalysis.nextActions} tone="emerald" />
+            <PanelList title="바로 해볼 일" items={safeAnalysis.nextActions} tone="slate" />
           )}
         </div>
       ) : (
@@ -1823,13 +1823,11 @@ function PanelList({
 }: {
   title: string;
   items: string[];
-  tone?: 'slate' | 'amber' | 'emerald';
+  tone?: 'slate' | 'amber';
 }) {
   const toneClasses = tone === 'amber'
     ? 'border-amber-200 bg-amber-50 text-amber-950'
-    : tone === 'emerald'
-      ? 'border-emerald-200 bg-emerald-50 text-emerald-950'
-      : 'border-slate-200 bg-slate-50 text-slate-900';
+    : 'border-slate-200 bg-slate-50 text-slate-900';
 
   return (
     <div className={`rounded-lg border px-3 py-3 ${toneClasses}`}>

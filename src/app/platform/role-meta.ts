@@ -11,8 +11,8 @@ export interface RoleMeta {
 }
 
 export const ROLE_META: Record<UserRole, RoleMeta> = {
-  admin:  { label: '관리자', badgeClass: 'bg-purple-100 text-purple-800', Icon: ShieldCheck },
-  finance: { label: '재무팀', badgeClass: 'bg-blue-100 text-blue-800', Icon: Activity },
-  pm:     { label: 'PM', badgeClass: 'bg-green-100 text-green-800', Icon: FolderKanban },
-  viewer: { label: 'PM', badgeClass: 'bg-green-100 text-green-800', Icon: FolderKanban },
+  admin:  { label: '관리자', badgeClass: 'bg-slate-200 text-slate-800', Icon: ShieldCheck },
+  finance: { label: '재무팀', badgeClass: 'bg-blue-100 text-blue-900', Icon: Activity },
+  pm:     { label: 'PM', badgeClass: 'bg-slate-100 text-slate-800', Icon: FolderKanban },
+  viewer: { label: 'PM', badgeClass: 'bg-slate-100 text-slate-800', Icon: FolderKanban },
 };
