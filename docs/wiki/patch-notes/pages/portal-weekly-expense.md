@@ -30,6 +30,7 @@
 
 ## Recent Changes
 
+- [2026-04-14] 상단 setup panel이 필요 없는 상태에서는 카드를 숨기도록 null guard를 넣어 `toneClass` 런타임 오류를 제거했다.
 - [2026-04-14] 미저장 편집이 남은 상태에서 통장내역이나 사이드바로 이동하면 확인 다이얼로그를 띄우도록 복구했다.
 - [2026-04-14] bank import triage wizard의 cashflow category 선택값을 정리하고, fullscreen wizard와 주간 입력 화면 간 회귀 E2E를 다시 통과시켰다.
 - [2026-04-14] `현재 정책` 문구와 하단 summary bar를 제거해 헤더 한 곳에서만 상태를 읽도록 정리했다.
