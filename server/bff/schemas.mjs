@@ -173,6 +173,7 @@ export const memberRoleUpdateSchema = z.object({
 export const cashflowExportSchema = z.object({
   scope: z.enum(['all', 'single']),
   projectId: z.string().trim().optional(),
+  accountType: z.enum(['DEDICATED', 'OPERATING', 'NONE']).optional(),
   basis: z.enum(['공급가액', '공급대가', 'NONE']).optional(),
   startYearMonth: z.string().trim().regex(/^\d{4}-\d{2}$/),
   endYearMonth: z.string().trim().regex(/^\d{4}-\d{2}$/),

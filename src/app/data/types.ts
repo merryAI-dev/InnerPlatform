@@ -156,7 +156,7 @@ export function normalizeBasis(raw: unknown): Basis {
 export const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
   DEDICATED: '전용계좌 사업(이나라도움)',
   OPERATING: '전용계좌(이나라도움x)',
-  NONE: '해당없음',
+  NONE: '일반 사업',
 };
 
 export const PROJECT_FUND_INPUT_MODE_LABELS: Record<ProjectFundInputMode, string> = {

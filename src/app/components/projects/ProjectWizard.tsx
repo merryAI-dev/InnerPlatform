@@ -517,7 +517,7 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
                     <div className="text-xs text-muted-foreground mt-1">
                       {at === 'DEDICATED' && '이나라도움 전용계좌로 관리합니다'}
                       {at === 'OPERATING' && '전용계좌를 사용하지만 이나라도움은 사용하지 않습니다'}
-                      {at === 'NONE' && '해당없음으로 관리합니다'}
+                      {at === 'NONE' && '일반 사업으로 관리합니다'}
                     </div>
                   </button>
                 ))}
