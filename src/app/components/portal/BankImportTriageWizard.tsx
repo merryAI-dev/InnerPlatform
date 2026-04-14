@@ -289,8 +289,8 @@ export function BankImportTriageWizard({
             <div data-testid="bank-import-triage-queue-scroll" className="flex-1 min-h-0 overflow-y-auto px-3 py-3">
               <div className="space-y-4">
                 {wizardItems.length === 0 ? (
-                  <Card className="border-emerald-200 bg-emerald-50/70 shadow-none">
-                    <CardContent className="p-4 text-[12px] leading-6 text-emerald-900">
+                  <Card className="border-slate-300 bg-slate-100 shadow-none">
+                    <CardContent className="p-4 text-[12px] leading-6 text-slate-800">
                       이번 업로드에서 바로 사람이 처리할 거래는 없습니다.
                     </CardContent>
                   </Card>

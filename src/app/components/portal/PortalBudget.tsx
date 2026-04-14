@@ -1085,7 +1085,7 @@ export function PortalBudget() {
 
                 <TabsContent value="file" className="mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
                   {budgetSheetSources.length > 0 && (
-                    <div className="rounded-md border border-emerald-200/70 bg-emerald-50/60 p-3">
+                    <div className="rounded-md border border-slate-300/80 bg-slate-100 p-3">
                       <div className="flex items-center justify-between gap-2">
                         <div>
                           <p className="text-[11px] font-medium text-foreground">최근 저장된 예산 원본</p>
@@ -1099,7 +1099,7 @@ export function PortalBudget() {
                         {budgetSheetSources.slice(0, 3).map((source) => (
                           <div
                             key={`${source.sourceType}-${source.uploadedAt}-${source.sheetName}`}
-                            className="flex flex-col gap-2 rounded-md border border-emerald-200/70 bg-white/90 px-3 py-2 md:flex-row md:items-center md:justify-between"
+                            className="flex flex-col gap-2 rounded-md border border-slate-300/80 bg-white/90 px-3 py-2 md:flex-row md:items-center md:justify-between"
                           >
                             <div className="min-w-0">
                               <p className="truncate text-[11px] font-medium text-slate-900">{source.sheetName}</p>
@@ -1145,7 +1145,7 @@ export function PortalBudget() {
                           : '업로드 후 아래에서 시트와 반영 요약을 확인하세요.'}
                     </p>
                     {budgetImportSavedSource ? (
-                      <p className="mt-1 text-[10px] text-emerald-700">
+                      <p className="mt-1 text-[10px] text-slate-700">
                         현재는 저장된 원본 `{budgetImportSavedSource.sheetName}` 미리보기를 사용 중입니다.
                       </p>
                     ) : null}
@@ -1856,7 +1856,7 @@ export function PortalBudget() {
                                 <div className="flex flex-col items-end leading-tight">
                                   <div>{fmtKRW(effective)}</div>
                                   {hasRevised && delta !== 0 && (
-                                    <div className={`text-[9px] mt-0.5 inline-flex items-center gap-1 ${deltaUp ? 'text-emerald-600' : 'text-rose-600'}`}>
+                                    <div className={`text-[9px] mt-0.5 inline-flex items-center gap-1 ${deltaUp ? 'text-slate-700' : 'text-rose-600'}`}>
                                       {deltaUp ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
                                       {deltaUp ? '증액' : '감액'} {fmtKRW(Math.abs(delta))}
                                     </div>

@@ -72,14 +72,14 @@ function issueToneClassName(tone: 'neutral' | 'warn' | 'danger') {
 function accountingToneBadgeClassName(tone: 'muted' | 'warning' | 'danger' | 'success') {
   if (tone === 'danger') return 'border-rose-200 bg-rose-50 text-rose-700';
   if (tone === 'warning') return 'border-amber-200 bg-amber-50 text-amber-700';
-  if (tone === 'success') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  if (tone === 'success') return 'border-slate-300 bg-slate-100 text-slate-700';
   return 'border-slate-200 bg-slate-50 text-slate-700';
 }
 
 function submissionBadgeClassName(tone: 'neutral' | 'warning' | 'danger' | 'success') {
   if (tone === 'danger') return 'border-rose-200 bg-rose-50 text-rose-700';
   if (tone === 'warning') return 'border-amber-200 bg-amber-50 text-amber-700';
-  if (tone === 'success') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  if (tone === 'success') return 'border-slate-300 bg-slate-100 text-slate-700';
   return 'border-slate-200 bg-slate-50 text-slate-700';
 }
 
@@ -342,7 +342,7 @@ export function PortalDashboard() {
                         <div className="mt-1 text-[14px] font-semibold text-slate-900">{dashboardSurface.projection.label}</div>
                         <div className="mt-1 text-[11px] text-slate-500">{dashboardSurface.projection.detail}</div>
                       </div>
-                      <Badge variant="outline" className={`rounded-full ${dashboardSurface.projection.label === '미작성' ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+                      <Badge variant="outline" className={`rounded-full ${dashboardSurface.projection.label === '미작성' ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-slate-300 bg-slate-100 text-slate-700'}`}>
                         {dashboardSurface.projection.label}
                       </Badge>
                     </div>
@@ -565,7 +565,7 @@ const PORTAL_PAYROLL_BADGE_STYLES: Record<PayrollLiquidityQueueItem['status'], s
   payment_unconfirmed: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
   baseline_missing: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
   balance_unknown: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
-  clear: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
+  clear: 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200',
 };
 
 function portalPayrollLabel(status: PayrollLiquidityQueueItem['status']) {
@@ -592,7 +592,7 @@ function PortalPayrollQueueCard({
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center justify-between gap-2 text-[13px]">
           <span className="flex items-center gap-2">
-            <div className="flex h-7 w-7 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-300">
+            <div className="flex h-7 w-7 items-center justify-center rounded-xl bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200">
               <CircleDollarSign className="h-4 w-4" />
             </div>
             인건비 지급 Queue
@@ -637,11 +637,11 @@ function PortalPayrollQueueCard({
             </div>
           ))
         ) : item.status === 'clear' ? (
-          <div className="rounded-xl border border-emerald-200/60 bg-emerald-50/60 px-4 py-4 dark:border-emerald-900/40 dark:bg-emerald-950/10">
-            <p className="text-[12px] text-emerald-800 dark:text-emerald-200" style={{ fontWeight: 700 }}>
+          <div className="rounded-xl border border-slate-300/80 bg-slate-100 px-4 py-4 dark:border-slate-700 dark:bg-slate-900/40">
+            <p className="text-[12px] text-slate-800 dark:text-slate-100" style={{ fontWeight: 700 }}>
               이번 지급 창에는 바로 대응이 필요한 위험이 없습니다.
             </p>
-            <p className="mt-1 text-[11px] text-emerald-700/90 dark:text-emerald-300/90">
+            <p className="mt-1 text-[11px] text-slate-600 dark:text-slate-300">
               지급일 {item.plannedPayDate} · 예상 인건비 {item.expectedPayrollAmount !== null ? `${fmtShort(item.expectedPayrollAmount)}원` : '-'} · 현재 잔액 {item.currentBalance !== null ? `${fmtShort(item.currentBalance)}원` : '-'}
             </p>
           </div>

@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-04-14] patch-note | portal-weekly-expense | setup panel null guard
+- pages: [portal-weekly-expense](./pages/portal-weekly-expense.md)
+- summary: 주간 사업비 입력 화면에서 setup panel이 필요 없는 상태에도 `toneClass`를 읽던 렌더 경로를 조건부 렌더로 바꿔 런타임 오류를 제거했다.
+
 ## [2026-04-14] patch-note | portal-minimal-sweep | 빈 상태/가이드/placeholder 감산
 - pages: [portal-submissions](./pages/portal-submissions.md), [portal-bank-statement](./pages/portal-bank-statement.md), [portal-weekly-expense](./pages/portal-weekly-expense.md), [portal-register-project](./pages/portal-register-project.md), [portal-cashflow](./pages/portal-cashflow.md), [portal-project-settings](./pages/portal-project-settings.md), [portal-edit-project](./pages/portal-edit-project.md)
 - summary: 남은 포털 화면들에서 helper copy, role notice, 중복 상태 bar, `-` placeholder를 걷어내고 작업면 중심의 더 얇은 운영 화면으로 정리했다.
@@ -106,3 +110,7 @@
 ## [2026-04-14] patch-note | portal-weekly-expense | navigation guard와 bank wizard 회귀 복구
 - pages: [portal-weekly-expense](./pages/portal-weekly-expense.md)
 - summary: 미저장 사업비 입력 편집은 화면 이동 전에 확인 다이얼로그로 막도록 복구했고, bank import triage wizard의 cashflow category 선택과 fullscreen/주간입력 연계 E2E도 다시 통과하도록 정리했다.
+
+## [2026-04-14] patch-note | portal-monochrome-sweep | teal/emerald 기본 액션 제거
+- pages: [portal-dashboard](./pages/portal-dashboard.md), [portal-bank-statement](./pages/portal-bank-statement.md), [portal-budget](./pages/portal-budget.md)
+- summary: 포털 핵심 화면의 기본 버튼, active state, 배지, empty state 강조색을 teal/emerald에서 navy/slate 중심 monochrome 팔레트로 통일했다.

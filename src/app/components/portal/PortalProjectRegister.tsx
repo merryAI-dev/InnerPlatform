@@ -230,7 +230,7 @@ function confidenceLabel(confidence: ProjectRequestContractAnalysis['fields'][An
 }
 
 function confidenceBadgeClass(confidence: ProjectRequestContractAnalysis['fields'][AnalysisFieldKey]['confidence']) {
-  if (confidence === 'high') return 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300';
+  if (confidence === 'high') return 'bg-slate-200 text-slate-700 dark:text-slate-200';
   if (confidence === 'medium') return 'bg-amber-500/15 text-amber-700 dark:text-amber-300';
   return 'bg-slate-500/15 text-slate-700 dark:text-slate-300';
 }
@@ -241,10 +241,10 @@ function resolveContractUploadUiState(
 ) {
   if (contractAnalysisState === 'extracting') {
     return {
-      cardClass: 'border-teal-300 bg-teal-50/70 dark:border-teal-700/50 dark:bg-teal-950/20',
-      surfaceClass: 'border-teal-300/70 bg-white/85 dark:border-teal-700/50 dark:bg-teal-950/30',
-      badgeClass: 'bg-teal-500/15 text-teal-700 dark:text-teal-300',
-      buttonClass: 'bg-teal-600 text-white hover:bg-teal-700',
+      cardClass: 'border-slate-300 bg-slate-100 dark:border-slate-700 dark:bg-slate-900/30',
+      surfaceClass: 'border-slate-300/70 bg-white/85 dark:border-slate-700 dark:bg-slate-900/40',
+      badgeClass: 'bg-slate-200 text-slate-700 dark:text-slate-200',
+      buttonClass: 'bg-blue-900 text-white hover:bg-blue-950',
       statusLabel: 'PDF 텍스트 추출 중',
       title: '계약서를 읽는 중입니다',
       description: 'PDF 텍스트를 먼저 추출한 뒤, AI 초안 생성 단계로 넘어갑니다.',
@@ -253,10 +253,10 @@ function resolveContractUploadUiState(
   }
   if (contractAnalysisState === 'analyzing') {
     return {
-      cardClass: 'border-teal-300 bg-teal-50/70 dark:border-teal-700/50 dark:bg-teal-950/20',
-      surfaceClass: 'border-teal-300/70 bg-white/85 dark:border-teal-700/50 dark:bg-teal-950/30',
-      badgeClass: 'bg-teal-500/15 text-teal-700 dark:text-teal-300',
-      buttonClass: 'bg-teal-600 text-white hover:bg-teal-700',
+      cardClass: 'border-slate-300 bg-slate-100 dark:border-slate-700 dark:bg-slate-900/30',
+      surfaceClass: 'border-slate-300/70 bg-white/85 dark:border-slate-700 dark:bg-slate-900/40',
+      badgeClass: 'bg-slate-200 text-slate-700 dark:text-slate-200',
+      buttonClass: 'bg-blue-900 text-white hover:bg-blue-950',
       statusLabel: 'AI 초안 생성 중',
       title: '기본 정보를 채우는 중입니다',
       description: '공식 계약명, 계약 대상, 기간, 금액을 자동으로 읽어 초안을 만들고 있습니다.',
@@ -265,10 +265,10 @@ function resolveContractUploadUiState(
   }
   if (hasContractDocument && contractAnalysisState === 'ready') {
     return {
-      cardClass: 'border-emerald-300 bg-emerald-50/80 dark:border-emerald-700/50 dark:bg-emerald-950/20',
-      surfaceClass: 'border-emerald-300/70 bg-white/90 dark:border-emerald-700/50 dark:bg-emerald-950/30',
-      badgeClass: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
-      buttonClass: 'bg-emerald-600 text-white hover:bg-emerald-700',
+      cardClass: 'border-slate-300 bg-slate-100 dark:border-slate-700 dark:bg-slate-900/30',
+      surfaceClass: 'border-slate-300/70 bg-white/90 dark:border-slate-700 dark:bg-slate-900/40',
+      badgeClass: 'bg-slate-200 text-slate-700 dark:text-slate-200',
+      buttonClass: 'bg-blue-900 text-white hover:bg-blue-950',
       statusLabel: '업로드 및 초안 생성 완료',
       title: '계약서 업로드가 완료됐습니다',
       description: '오른쪽 AI 초안을 확인하고, 아래 단계에서 사람 기준으로 한 번만 검토하면 됩니다.',
@@ -300,10 +300,10 @@ function resolveContractUploadUiState(
     };
   }
   return {
-    cardClass: 'border-teal-200 bg-gradient-to-br from-teal-50/80 via-white to-cyan-50/70 dark:border-teal-800/40 dark:from-teal-950/20 dark:via-background dark:to-cyan-950/10',
-    surfaceClass: 'border-teal-200/80 bg-white/90 dark:border-teal-800/40 dark:bg-teal-950/20',
-    badgeClass: 'bg-teal-500/15 text-teal-700 dark:text-teal-300',
-    buttonClass: 'bg-teal-600 text-white hover:bg-teal-700',
+    cardClass: 'border-slate-300 bg-gradient-to-br from-slate-100 via-white to-slate-200/70 dark:border-slate-700 dark:from-slate-900/30 dark:via-background dark:to-slate-950/20',
+    surfaceClass: 'border-slate-300/80 bg-white/90 dark:border-slate-700 dark:bg-slate-900/30',
+    badgeClass: 'bg-slate-200 text-slate-700 dark:text-slate-200',
+    buttonClass: 'bg-blue-900 text-white hover:bg-blue-950',
     statusLabel: '선택 사항',
     title: '계약서 PDF를 올리면 AI가 기본값을 채워줍니다',
     description: '건너뛰어도 괜찮아요! 다음 단계에서 직접 입력할 수 있습니다.',
@@ -738,12 +738,12 @@ export function PortalProjectRegister() {
               type="button"
               className={[
                 'flex-1 rounded-xl border px-3 py-3 text-left transition-colors',
-                'border-teal-500/40 bg-teal-50 text-teal-700 dark:border-teal-700 dark:bg-teal-950/30 dark:text-teal-300',
+                'border-slate-400 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-200',
               ].join(' ')}
             >
               <div className="flex items-center gap-2">
                 <div
-                  className="flex h-7 w-7 items-center justify-center rounded-full bg-teal-500 text-white text-[10px]"
+                  className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-900 text-white text-[10px]"
                   style={{ fontWeight: 700 }}
                 >
                   {currentStepIdx + 1}
@@ -781,9 +781,9 @@ export function PortalProjectRegister() {
                   className={[
                     'rounded-xl border px-3 py-3 text-left transition-colors',
                     active
-                      ? 'border-teal-500/40 bg-teal-50 text-teal-700 dark:border-teal-700 dark:bg-teal-950/30 dark:text-teal-300'
+                      ? 'border-slate-400 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-200'
                       : done
-                        ? 'border-emerald-500/20 bg-emerald-50 text-emerald-700 dark:border-emerald-800/40 dark:bg-emerald-950/20 dark:text-emerald-300'
+                        ? 'border-slate-300 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-900/30 dark:text-slate-200'
                         : 'border-border/60 bg-background text-foreground',
                   ].join(' ')}
                 >
@@ -791,7 +791,7 @@ export function PortalProjectRegister() {
                     <div
                       className={[
                         'flex h-7 w-7 items-center justify-center rounded-full text-[10px]',
-                        done ? 'bg-emerald-500 text-white' : active ? 'bg-teal-500 text-white' : 'bg-muted text-muted-foreground',
+                        done ? 'bg-slate-700 text-white' : active ? 'bg-blue-900 text-white' : 'bg-muted text-muted-foreground',
                       ].join(' ')}
                       style={{ fontWeight: 700 }}
                     >
@@ -811,7 +811,7 @@ export function PortalProjectRegister() {
       <Card className="border-border/60">
         <CardHeader className="pb-2">
           <div className="flex items-center gap-2">
-            <CurrentStepIcon className="h-4 w-4 text-teal-600" />
+            <CurrentStepIcon className="h-4 w-4 text-slate-700" />
             <CardTitle className="text-[15px]" style={{ fontWeight: 700 }}>{currentStep.label}</CardTitle>
           </div>
           <p className="text-[11px] text-muted-foreground">{currentStep.desc}</p>
@@ -828,7 +828,7 @@ export function PortalProjectRegister() {
                     </Badge>
                   </div>
                   <p className="text-[11px] text-muted-foreground">
-                    계약서 PDF를 올리면 AI가 기본 정보를 채워줍니다. <span className="font-semibold text-teal-600 dark:text-teal-400">건너뛰어도 괜찮아요!</span>
+                    계약서 PDF를 올리면 AI가 기본 정보를 채워줍니다. <span className="font-semibold text-slate-700 dark:text-slate-200">건너뛰어도 괜찮아요!</span>
                   </p>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -865,7 +865,7 @@ export function PortalProjectRegister() {
                       </Button>
                       <button
                         type="button"
-                        className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-teal-200 bg-teal-50 px-4 py-2.5 text-[13px] font-semibold text-teal-700 transition-colors hover:bg-teal-100 dark:border-teal-800 dark:bg-teal-950/30 dark:text-teal-300 dark:hover:bg-teal-950/50"
+                        className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-slate-100 px-4 py-2.5 text-[13px] font-semibold text-slate-700 transition-colors hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-200 dark:hover:bg-slate-900/60"
                         onClick={() => {
                           const basicIdx = STEPS.findIndex((s) => s.key === 'basic');
                           setHighestVisitedIdx((prev) => Math.max(prev, basicIdx));
@@ -896,7 +896,7 @@ export function PortalProjectRegister() {
                               href={form.contractDocument.downloadURL}
                               target="_blank"
                               rel="noreferrer"
-                              className="inline-flex h-8 items-center rounded-md border border-border px-3 text-[11px] text-teal-600 transition-colors hover:bg-teal-50 dark:hover:bg-teal-950/20"
+                              className="inline-flex h-8 items-center rounded-md border border-border px-3 text-[11px] text-slate-700 transition-colors hover:bg-slate-100 dark:hover:bg-slate-900/30"
                             >
                               업로드된 파일 보기
                             </a>
@@ -916,7 +916,7 @@ export function PortalProjectRegister() {
                         </div>
                       </div>
                     ) : (
-                      <div className="mt-4 rounded-xl border border-teal-200/60 bg-teal-50/50 px-4 py-3 text-[11px] text-teal-700 dark:border-teal-800/40 dark:bg-teal-950/20 dark:text-teal-300">
+                      <div className="mt-4 rounded-xl border border-slate-300 bg-slate-100 px-4 py-3 text-[11px] text-slate-700 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-200">
                         <span className="font-semibold">PDF 없이도 진행 가능!</span> 위의 <span className="font-medium">&quot;PDF 없이 직접 입력하기&quot;</span> 버튼을 눌러 다음 단계로 넘어가세요.
                       </div>
                     )}
@@ -924,7 +924,7 @@ export function PortalProjectRegister() {
 
                   <div className="rounded-xl border border-border/60 bg-muted/20 p-4">
                     <div className="flex items-center gap-2 text-[12px]" style={{ fontWeight: 600 }}>
-                      <Sparkles className="h-4 w-4 text-teal-600" />
+                      <Sparkles className="h-4 w-4 text-slate-700" />
                       2. AI 기본값 채우기
                     </div>
                     <div className="mt-2 text-[11px] text-muted-foreground">
@@ -932,7 +932,7 @@ export function PortalProjectRegister() {
                     </div>
                     <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
                       <Badge className="border-0 bg-slate-500/15 text-slate-700 dark:text-slate-300">사람 검토 필수</Badge>
-                      <Badge className="border-0 bg-teal-500/15 text-teal-700 dark:text-teal-300">담당팀/정산유형은 수동 선택</Badge>
+                      <Badge className="border-0 bg-slate-200 text-slate-700 dark:text-slate-200">담당팀/정산유형은 수동 선택</Badge>
                     </div>
                   </div>
                 </CardContent>
@@ -943,7 +943,7 @@ export function PortalProjectRegister() {
                   <div className="flex items-center justify-between gap-2">
                     <CardTitle className="text-[13px]">Merry의 분석 초안</CardTitle>
                     {analysis ? (
-                      <Badge className="border-0 bg-teal-500/15 text-teal-700 dark:text-teal-300">
+                      <Badge className="border-0 bg-slate-200 text-slate-700 dark:text-slate-200">
                         {analysis.provider === 'anthropic' ? 'Merry의 분석' : 'Merry 기본 분석'}
                       </Badge>
                     ) : null}
@@ -952,7 +952,7 @@ export function PortalProjectRegister() {
                 <CardContent className="space-y-3">
                   {contractAnalysisState === 'extracting' || contractAnalysisState === 'analyzing' ? (
                     <div className="rounded-xl border border-border/60 bg-muted/20 px-4 py-6 text-center">
-                      <Loader2 className="mx-auto h-5 w-5 animate-spin text-teal-600" />
+                      <Loader2 className="mx-auto h-5 w-5 animate-spin text-slate-700" />
                       <p className="mt-3 text-[12px]" style={{ fontWeight: 600 }}>
                         {contractAnalysisState === 'extracting' ? 'PDF 텍스트 추출 중…' : 'AI가 계약서 초안을 만들고 있습니다…'}
                       </p>
@@ -962,10 +962,10 @@ export function PortalProjectRegister() {
                     </div>
                   ) : analysis ? (
                     <>
-                      <div className="rounded-xl bg-teal-50 px-3 py-3 text-[11px] text-teal-800 dark:bg-teal-950/20 dark:text-teal-200">
+                      <div className="rounded-xl bg-slate-100 px-3 py-3 text-[11px] text-slate-800 dark:bg-slate-900/40 dark:text-slate-200">
                         <div className="flex items-center justify-between gap-2">
                           <span style={{ fontWeight: 600 }}>AI 요약</span>
-                          <span className="text-[10px] text-teal-700/80 dark:text-teal-200/80">{analysis.extractedAt.slice(0, 16).replace('T', ' ')}</span>
+                          <span className="text-[10px] text-slate-600 dark:text-slate-300">{analysis.extractedAt.slice(0, 16).replace('T', ' ')}</span>
                         </div>
                         <p className="mt-2 leading-5">{analysis.summary}</p>
                       </div>
@@ -1005,7 +1005,7 @@ export function PortalProjectRegister() {
                         </div>
                       ) : null}
 
-                      <div className="rounded-xl border border-teal-200 bg-teal-50/70 px-3 py-3 text-[11px] text-teal-800 dark:border-teal-800/40 dark:bg-teal-950/20 dark:text-teal-200">
+                      <div className="rounded-xl border border-slate-300 bg-slate-100 px-3 py-3 text-[11px] text-slate-800 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-200">
                         Merry의 분석 초안은 이미 다음 단계의 기본 정보에 반영되었습니다. 아래 단계에서 사람 기준으로 바로 수정해 주세요.
                       </div>
                     </>
@@ -1146,7 +1146,7 @@ export function PortalProjectRegister() {
           {step === 'financial' && (
             <div className="space-y-4">
               {isInvestmentProject ? (
-                <div className="rounded-xl border border-teal-200 bg-teal-50/70 px-3 py-3 text-[11px] text-teal-800 dark:border-teal-800/40 dark:bg-teal-950/20 dark:text-teal-200">
+                <div className="rounded-xl border border-slate-300 bg-slate-100 px-3 py-3 text-[11px] text-slate-800 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-200">
                   투자조합운용 프로젝트는 재무정보에 작성할 내용이 없으면 공란으로 제출해도 됩니다.
                 </div>
               ) : null}
@@ -1666,7 +1666,7 @@ function ReviewRow({ label, value, highlight }: { label: string; value: string; 
   return (
     <div className="flex items-start gap-2 text-[11px]">
       <span className="w-[88px] shrink-0 text-muted-foreground">{label}</span>
-      <span className={highlight ? 'text-teal-600 dark:text-teal-400' : ''} style={{ fontWeight: highlight ? 600 : 500 }}>
+      <span className={highlight ? 'text-slate-700 dark:text-slate-200' : ''} style={{ fontWeight: highlight ? 600 : 500 }}>
         {text}
       </span>
     </div>

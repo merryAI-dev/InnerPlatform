@@ -301,7 +301,7 @@ export function PortalBankStatementPage() {
           description: lastSavedAt
             ? '최근 저장본에서 신규 거래와 검토 필요 거래가 intake queue로 분리됩니다.'
             : '이미 저장된 통장내역 기준본을 열어 검토하고 있습니다.',
-          toneClass: 'border-emerald-200/70 bg-emerald-50/60',
+          toneClass: 'border-slate-300/80 bg-slate-100',
         }
         : {
           label: '원본 업로드 대기',
@@ -393,11 +393,11 @@ export function PortalBankStatementPage() {
       </div>
 
       {!hasUploadedSheet && (
-        <Card data-testid="bank-statement-empty-state" className="border-teal-200/80 bg-gradient-to-br from-teal-50/90 via-white to-emerald-50/60">
+        <Card data-testid="bank-statement-empty-state" className="border-slate-300/80 bg-gradient-to-br from-slate-100 via-white to-slate-200/70">
           <CardContent className="p-5">
             <div
               className={`rounded-2xl border-2 border-dashed p-6 transition-colors ${
-                dragActive ? 'border-teal-500 bg-teal-50' : 'border-teal-200/80 bg-white/80'
+                dragActive ? 'border-blue-800 bg-slate-100' : 'border-slate-300/80 bg-white/80'
               }`}
               onDragEnter={(event) => {
                 event.preventDefault();
@@ -415,7 +415,7 @@ export function PortalBankStatementPage() {
             >
               <div className="flex h-full flex-col justify-between gap-5">
                 <div className="space-y-3">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-teal-600 text-white shadow-sm">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-900 text-white shadow-sm">
                     <FileSpreadsheet className="h-5 w-5" />
                   </div>
                   <div className="space-y-2">
@@ -534,7 +534,7 @@ export function PortalBankStatementPage() {
                       {columns.map((_, colIdx) => (
                         <td
                           key={colIdx}
-                          className="px-1.5 py-1 border-r border-border/30 focus-within:bg-teal-50/20 focus-within:shadow-[inset_0_0_0_2px_rgba(20,184,166,0.8)]"
+                          className="px-1.5 py-1 border-r border-border/30 focus-within:bg-slate-100 focus-within:shadow-[inset_0_0_0_2px_rgba(30,41,59,0.8)]"
                         >
                           <input
                             type="text"

@@ -843,56 +843,58 @@ export function PortalWeeklyExpensePage() {
           </Button>
           </div>
         </div>
-        <div className="mt-4 grid gap-3 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]">
-          <Card data-testid="weekly-expense-setup-panel" className={weeklySetupPanel.toneClass}>
-            <CardContent className="px-4 py-4">
-              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                <div className="space-y-2">
-                  <div>
-                    <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">지금 해야 할 일</p>
-                    <p className="mt-1 text-[15px] font-semibold text-slate-900">{weeklySetupPanel.title}</p>
-                  </div>
-                  <p className="max-w-2xl text-[12px] leading-6 text-slate-600">{weeklySetupPanel.description}</p>
-                  <div className="flex flex-wrap gap-2">
-                    {!isDirectEntryMode && (
+        <div className={`mt-4 grid gap-3 ${weeklySetupPanel ? 'xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]' : ''}`}>
+          {weeklySetupPanel ? (
+            <Card data-testid="weekly-expense-setup-panel" className={weeklySetupPanel.toneClass}>
+              <CardContent className="px-4 py-4">
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div className="space-y-2">
+                    <div>
+                      <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">지금 해야 할 일</p>
+                      <p className="mt-1 text-[15px] font-semibold text-slate-900">{weeklySetupPanel.title}</p>
+                    </div>
+                    <p className="max-w-2xl text-[12px] leading-6 text-slate-600">{weeklySetupPanel.description}</p>
+                    <div className="flex flex-wrap gap-2">
+                      {!isDirectEntryMode && (
+                        <Badge variant="outline" className="bg-white/80 text-[10px] text-slate-700">
+                          통장내역 기준본 {bankStatementCount > 0 ? `${bankStatementCount}건 연결` : '미준비'}
+                        </Badge>
+                      )}
                       <Badge variant="outline" className="bg-white/80 text-[10px] text-slate-700">
-                        통장내역 기준본 {bankStatementCount > 0 ? `${bankStatementCount}건 연결` : '미준비'}
+                        현재 탭 {activeSheetName}
                       </Badge>
-                    )}
-                    <Badge variant="outline" className="bg-white/80 text-[10px] text-slate-700">
-                      현재 탭 {activeSheetName}
-                    </Badge>
-                    <Badge variant="outline" className="bg-white/80 text-[10px] text-slate-700">
-                      거래: {expenseRowCount}건
-                    </Badge>
+                      <Badge variant="outline" className="bg-white/80 text-[10px] text-slate-700">
+                        거래: {expenseRowCount}건
+                      </Badge>
+                    </div>
                   </div>
+                  {weeklySetupPanel.actionLabel && (
+                    <div className="shrink-0">
+                      {weeklySetupPanel.actionKind === 'drive' ? (
+                        <Button
+                          size="sm"
+                          onClick={() => void provisionProjectDriveRoot()}
+                          disabled={projectDriveProvisioning || !happyPath.canOpenWeeklyExpenses}
+                        >
+                          {projectDriveProvisioning ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderPlus className="h-4 w-4" />}
+                          {weeklySetupPanel.actionLabel}
+                        </Button>
+                      ) : weeklySetupPanel.actionKind === 'settings' ? (
+                        <Button size="sm" onClick={() => requestRouteNavigation('/portal/project-settings', '사업 배정 수정')}>
+                          {weeklySetupPanel.actionLabel}
+                        </Button>
+                      ) : (
+                        <Button size="sm" onClick={() => requestRouteNavigation('/portal/bank-statements', '통장내역')}>
+                          {weeklySetupPanel.actionLabel}
+                          <ArrowRight className="h-4 w-4" />
+                        </Button>
+                      )}
+                    </div>
+                  )}
                 </div>
-                {weeklySetupPanel.actionLabel && (
-                  <div className="shrink-0">
-                    {weeklySetupPanel.actionKind === 'drive' ? (
-                      <Button
-                        size="sm"
-                        onClick={() => void provisionProjectDriveRoot()}
-                        disabled={projectDriveProvisioning || !happyPath.canOpenWeeklyExpenses}
-                      >
-                        {projectDriveProvisioning ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderPlus className="h-4 w-4" />}
-                        {weeklySetupPanel.actionLabel}
-                      </Button>
-                    ) : weeklySetupPanel.actionKind === 'settings' ? (
-                      <Button size="sm" onClick={() => requestRouteNavigation('/portal/project-settings', '사업 배정 수정')}>
-                        {weeklySetupPanel.actionLabel}
-                      </Button>
-                    ) : (
-                      <Button size="sm" onClick={() => requestRouteNavigation('/portal/bank-statements', '통장내역')}>
-                        {weeklySetupPanel.actionLabel}
-                        <ArrowRight className="h-4 w-4" />
-                      </Button>
-                    )}
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          ) : null}
 
           <div className="grid gap-3">
             <div className="rounded-xl border bg-slate-50/80 px-4 py-3">

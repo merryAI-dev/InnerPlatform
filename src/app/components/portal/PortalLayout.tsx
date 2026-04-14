@@ -365,11 +365,11 @@ function PortalContent() {
 
   if (!isRegistered || !portalUser) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-teal-50/30 dark:from-slate-950 dark:via-slate-900 dark:to-teal-950/20 flex items-center justify-center px-6">
+      <div className="min-h-screen bg-gradient-to-br from-slate-100 via-white to-slate-200/60 dark:from-slate-950 dark:via-slate-900 dark:to-slate-900 flex items-center justify-center px-6">
         <div className="max-w-lg w-full">
           {/* 환영 헤더 */}
           <div className="text-center mb-8">
-            <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-teal-500 to-emerald-600 shadow-lg shadow-teal-500/20 mb-4">
+            <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-slate-700 to-blue-900 shadow-lg shadow-slate-500/20 mb-4">
               <Sparkles className="w-7 h-7 text-white" />
             </div>
             <h1 className="text-xl font-bold tracking-tight">
@@ -384,7 +384,7 @@ function PortalContent() {
           <div className="grid gap-3">
             <button
               onClick={() => navigate('/portal/project-settings')}
-              className="group relative flex items-center gap-4 p-5 rounded-2xl border border-border/60 bg-white/80 dark:bg-slate-800/60 backdrop-blur-sm hover:border-teal-300 hover:shadow-md hover:shadow-teal-500/5 transition-all duration-200 text-left"
+              className="group relative flex items-center gap-4 p-5 rounded-2xl border border-border/60 bg-white/80 dark:bg-slate-800/60 backdrop-blur-sm hover:border-slate-300 hover:shadow-md hover:shadow-slate-500/5 transition-all duration-200 text-left"
             >
               <div className="shrink-0 flex items-center justify-center w-11 h-11 rounded-xl bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 group-hover:scale-105 transition-transform">
                 <FolderKanban className="w-5 h-5" />
@@ -393,7 +393,7 @@ function PortalContent() {
                 <p className="text-sm font-semibold">기존 사업 선택</p>
                 <p className="text-xs text-muted-foreground mt-0.5">이미 등록된 사업에서 선택하여 시작합니다</p>
               </div>
-              <ArrowRight className="w-4 h-4 text-muted-foreground/40 group-hover:text-teal-500 group-hover:translate-x-0.5 transition-all" />
+              <ArrowRight className="w-4 h-4 text-muted-foreground/40 group-hover:text-slate-600 group-hover:translate-x-0.5 transition-all" />
             </button>
 
             <button
@@ -412,16 +412,16 @@ function PortalContent() {
 
             <button
               onClick={() => navigate('/portal/register-project')}
-              className="group relative flex items-center gap-4 p-5 rounded-2xl border border-border/60 bg-white/80 dark:bg-slate-800/60 backdrop-blur-sm hover:border-emerald-300 hover:shadow-md hover:shadow-emerald-500/5 transition-all duration-200 text-left"
+              className="group relative flex items-center gap-4 p-5 rounded-2xl border border-border/60 bg-white/80 dark:bg-slate-800/60 backdrop-blur-sm hover:border-slate-400 hover:shadow-md hover:shadow-slate-500/5 transition-all duration-200 text-left"
             >
-              <div className="shrink-0 flex items-center justify-center w-11 h-11 rounded-xl bg-emerald-50 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400 group-hover:scale-105 transition-transform">
+              <div className="shrink-0 flex items-center justify-center w-11 h-11 rounded-xl bg-slate-100 dark:bg-slate-900 text-slate-700 dark:text-slate-300 group-hover:scale-105 transition-transform">
                 <Plus className="w-5 h-5" />
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold">새 사업 등록</p>
                 <p className="text-xs text-muted-foreground mt-0.5">새로운 사업을 제안하고 등록을 시작합니다</p>
               </div>
-              <ArrowRight className="w-4 h-4 text-muted-foreground/40 group-hover:text-emerald-500 group-hover:translate-x-0.5 transition-all" />
+              <ArrowRight className="w-4 h-4 text-muted-foreground/40 group-hover:text-slate-600 group-hover:translate-x-0.5 transition-all" />
             </button>
 
             {isAdminSpaceRole(authUser?.role) && (
@@ -545,7 +545,7 @@ function PortalContent() {
                 </p>
               )}
               <div className="flex items-center gap-1.5 mt-1">
-                <Badge className="text-[8px] h-3.5 px-1 bg-teal-500/20 text-teal-300 border-0">
+                <Badge className="text-[8px] h-3.5 px-1 bg-slate-200 text-slate-700 border-0">
                   {currentProject?.clientOrg || ''}
                 </Badge>
                 <span className="text-[9px] text-slate-600">{currentProject?.department || ''}</span>
@@ -614,20 +614,20 @@ function PortalContent() {
                               group relative flex items-center gap-2 rounded-md text-[12px] transition-all duration-100
                               ${collapsed ? 'justify-center h-9 w-full px-0' : 'px-2.5 py-[7px]'}
                               ${active
-                                ? 'bg-teal-500/18 text-white backdrop-blur-sm'
+                                ? 'bg-blue-900 text-white backdrop-blur-sm'
                                 : 'text-slate-400 hover:text-slate-200 hover:bg-white/8'
                               }
                             `}
                           >
                             {active && !collapsed && (
-                              <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-3.5 rounded-r bg-teal-400" />
+                              <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-3.5 rounded-r bg-slate-300" />
                             )}
-                            <item.icon className={`w-[15px] h-[15px] shrink-0 ${active ? 'text-teal-400' : 'text-slate-600 group-hover:text-slate-400'}`} />
+                            <item.icon className={`w-[15px] h-[15px] shrink-0 ${active ? 'text-blue-200' : 'text-slate-600 group-hover:text-slate-400'}`} />
                             {!collapsed && (
                               <>
                                 <span style={{ fontWeight: active ? 500 : 400 }}>{item.label}</span>
                                 {badge !== null && (
-                                  <span className="ml-auto flex items-center justify-center min-w-[16px] h-[16px] rounded-full bg-teal-500/90 text-[9px] text-white px-1" style={{ fontWeight: 700 }}>
+                                  <span className="ml-auto flex items-center justify-center min-w-[16px] h-[16px] rounded-full bg-blue-800 text-[9px] text-white px-1" style={{ fontWeight: 700 }}>
                                     {badge}
                                   </span>
                                 )}
@@ -642,7 +642,7 @@ function PortalContent() {
                               <TooltipContent side="right" className="text-[11px]">
                                 <div className="flex items-center gap-2">
                                   <span>{item.label}</span>
-                                  {badge !== null && <span className="text-teal-500">{badge}</span>}
+                                  {badge !== null && <span className="text-blue-700">{badge}</span>}
                                 </div>
                               </TooltipContent>
                             </Tooltip>
@@ -665,7 +665,7 @@ function PortalContent() {
               <div className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-white/8 border border-white/10">
                 <div
                   className="w-6 h-6 rounded-md flex items-center justify-center shrink-0 text-[10px] text-white"
-                  style={{ fontWeight: 700, background: 'linear-gradient(135deg, #0d9488, #059669)' }}
+                  style={{ fontWeight: 700, background: 'linear-gradient(135deg, #334155, #0f172a)' }}
                 >
                   {portalUser.name.charAt(0)}
                 </div>
