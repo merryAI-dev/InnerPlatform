@@ -16,4 +16,8 @@ describe('PortalWeeklyExpensePage flow layout', () => {
     expect(weeklyExpenseSource).toContain('지금 해야 할 일');
     expect(weeklyExpenseSource).not.toContain('Next Action');
   });
+
+  it('guards the setup panel so the page can render when no setup action is needed', () => {
+    expect(weeklyExpenseSource).toMatch(/\{weeklySetupPanel \? \(\s*<Card data-testid="weekly-expense-setup-panel" className=\{weeklySetupPanel\.toneClass\}>/);
+  });
 });
