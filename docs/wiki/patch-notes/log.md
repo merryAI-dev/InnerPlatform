@@ -102,3 +102,7 @@
 ## [2026-04-14] patch-note | portal-dashboard-submission-merge | 제출 상태 홈 흡수
 - pages: [portal-dashboard](./pages/portal-dashboard.md), [portal-submissions](./pages/portal-submissions.md)
 - summary: `내 제출 현황`의 핵심 제출 상태를 `/portal` 홈 안으로 흡수하고, 중복이던 `인력변경 신청`, `주간 제출 체크`, `사업비 입력(주간) 작성/제출` 블록은 홈 통합 섹션 밖으로 뺐다.
+
+## [2026-04-14] patch-note | portal-weekly-expense | navigation guard와 bank wizard 회귀 복구
+- pages: [portal-weekly-expense](./pages/portal-weekly-expense.md)
+- summary: 미저장 사업비 입력 편집은 화면 이동 전에 확인 다이얼로그로 막도록 복구했고, bank import triage wizard의 cashflow category 선택과 fullscreen/주간입력 연계 E2E도 다시 통과하도록 정리했다.

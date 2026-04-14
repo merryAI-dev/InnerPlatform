@@ -1,6 +1,34 @@
-import type { BankImportManualFields, CashflowCategory, CashflowSheetLineId, Direction } from '../data/types';
+import {
+  CASHFLOW_CATEGORY_LABELS,
+  type BankImportManualFields,
+  type CashflowCategory,
+  type CashflowSheetLineId,
+  type Direction,
+} from '../data/types';
 import { CASHFLOW_IN_LINES, CASHFLOW_OUT_LINES, mapCategoryToSheetLine } from './cashflow-sheet';
 import { CASHFLOW_LINE_OPTIONS } from './settlement-csv';
+
+const IN_CASHFLOW_CATEGORIES: CashflowCategory[] = [
+  'CONTRACT_PAYMENT',
+  'INTERIM_PAYMENT',
+  'FINAL_PAYMENT',
+  'VAT_REFUND',
+  'MISC_INCOME',
+];
+
+const OUT_CASHFLOW_CATEGORIES: CashflowCategory[] = [
+  'LABOR_COST',
+  'OUTSOURCING',
+  'EQUIPMENT',
+  'TRAVEL',
+  'SUPPLIES',
+  'COMMUNICATION',
+  'RENT',
+  'UTILITY',
+  'TAX_PAYMENT',
+  'INSURANCE',
+  'MISC_EXPENSE',
+];
 
 function resolveDirectionForAmount(signedAmount: number): Direction {
   return signedAmount >= 0 ? 'IN' : 'OUT';
@@ -41,14 +69,29 @@ export function resolveBankImportCashflowOptionsForAmount(signedAmount: number) 
   return CASHFLOW_LINE_OPTIONS.filter((option) => allowed.has(option.value));
 }
 
+export function resolveBankImportCashflowCategoryOptionsForAmount(signedAmount: number) {
+  const categories = signedAmount >= 0 ? IN_CASHFLOW_CATEGORIES : OUT_CASHFLOW_CATEGORIES;
+  return categories.map((category) => ({
+    value: category,
+    label: CASHFLOW_CATEGORY_LABELS[category],
+  }));
+}
+
+function isCashflowCategory(value: string): value is CashflowCategory {
+  return value in CASHFLOW_CATEGORY_LABELS;
+}
+
 export function resolveBankImportCashflowSelection(
-  lineId: CashflowSheetLineId,
+  lineIdOrCategory: CashflowSheetLineId | CashflowCategory,
   signedAmount: number,
 ): Pick<BankImportManualFields, 'cashflowLineId' | 'cashflowCategory'> {
   const direction = resolveDirectionForAmount(signedAmount);
+  const category = isCashflowCategory(lineIdOrCategory)
+    ? lineIdOrCategory
+    : mapCashflowLineToCategory(lineIdOrCategory, direction);
   return {
-    cashflowLineId: lineId,
-    cashflowCategory: mapCashflowLineToCategory(lineId, direction),
+    cashflowLineId: mapCategoryToSheetLine(direction, category),
+    cashflowCategory: category,
   };
 }
 

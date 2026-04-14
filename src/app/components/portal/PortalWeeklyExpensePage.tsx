@@ -73,7 +73,7 @@ import {
 import { resolvePortalHappyPath } from '../../platform/portal-happy-path';
 import { resolveWeeklyExpenseSavePolicy } from '../../platform/weekly-expense-save-policy';
 import { groupExpenseIntakeItemsForSurface } from '../../platform/bank-intake-surface';
-import { cn } from '../ui/utils';
+import { usePortalNavigationGuard } from './PortalLayout';
 const GoogleSheetMigrationWizard = lazy(
   () => import('./GoogleSheetMigrationWizard').then((module) => ({ default: module.GoogleSheetMigrationWizard })),
 );
@@ -83,6 +83,7 @@ const SettlementLedgerPage = lazy(
 
 export function PortalWeeklyExpensePage() {
   const navigate = useNavigate();
+  const { registerNavigationHandler } = usePortalNavigationGuard();
   const weeklyExpenseSavePolicy = resolveWeeklyExpenseSavePolicy();
   const { user: authUser, ensureGoogleWorkspaceAccess } = useAuth();
   const { orgId } = useFirebase();
@@ -127,7 +128,8 @@ export function PortalWeeklyExpensePage() {
   const [googleSheetImportOpen, setGoogleSheetImportOpen] = useState(false);
   const [triageWizardOpen, setTriageWizardOpen] = useState(false);
   const [pendingQuickInsert, setPendingQuickInsert] = useState<PendingQuickInsert | null>(null);
-  const [, setHasUnsavedSettlementChanges] = useState(false);
+  const [hasUnsavedSettlementChanges, setHasUnsavedSettlementChanges] = useState(false);
+  const [pendingNavigationAttempt, setPendingNavigationAttempt] = useState<{ path: string; label: string } | null>(null);
   const [participationRiskWarning, setParticipationRiskWarning] = useState<{
     yearMonth: string;
     weekNo: number;
@@ -213,7 +215,6 @@ export function PortalWeeklyExpensePage() {
     () => normalizeSettlementSheetPolicy(myProject?.settlementSheetPolicy, myProject?.fundInputMode),
     [myProject?.fundInputMode, myProject?.settlementSheetPolicy],
   );
-
   const effectiveBudgetCodeBook = useMemo(() => {
     const orderedCodes: string[] = [];
     const subCodesByCode = new Map<string, Set<string>>();
@@ -702,8 +703,21 @@ export function PortalWeeklyExpensePage() {
   }, []);
 
   const requestRouteNavigation = useCallback((path: string, label: string) => {
+    if (hasUnsavedSettlementChanges) {
+      setPendingNavigationAttempt({ path, label });
+      return;
+    }
     navigate(path);
-  }, [navigate]);
+  }, [hasUnsavedSettlementChanges, navigate]);
+
+  useEffect(() => {
+    registerNavigationHandler((attempt) => {
+      if (!hasUnsavedSettlementChanges) return false;
+      setPendingNavigationAttempt(attempt);
+      return true;
+    });
+    return () => registerNavigationHandler(null);
+  }, [hasUnsavedSettlementChanges, registerNavigationHandler]);
 
   const requestSheetSwitch = useCallback((sheetId: string, sheetName: string) => {
     if (sheetId === activeExpenseSheetId) return;
@@ -849,7 +863,7 @@ export function PortalWeeklyExpensePage() {
                       현재 탭 {activeSheetName}
                     </Badge>
                     <Badge variant="outline" className="bg-white/80 text-[10px] text-slate-700">
-                      거래 {expenseRowCount}건
+                      거래: {expenseRowCount}건
                     </Badge>
                   </div>
                 </div>
@@ -899,39 +913,6 @@ export function PortalWeeklyExpensePage() {
         </div>
 
       </div>
-      {weeklySetupPanel && (
-      <Card data-testid="weekly-expense-setup-panel" className={weeklySetupPanel.toneClass}>
-        <CardContent className="flex flex-col gap-3 px-4 py-4 md:flex-row md:items-center md:justify-between">
-          <div className="space-y-1">
-            <p className="text-[14px] font-semibold text-slate-900">{weeklySetupPanel.title}</p>
-            <p className="text-[12px] leading-6 text-slate-600">{weeklySetupPanel.description}</p>
-          </div>
-          {weeklySetupPanel.actionLabel && (
-            <div className="shrink-0">
-              {weeklySetupPanel.actionKind === 'drive' ? (
-                <Button
-                  size="sm"
-                  onClick={() => void provisionProjectDriveRoot()}
-                  disabled={projectDriveProvisioning || !happyPath.canOpenWeeklyExpenses}
-                >
-                  {projectDriveProvisioning ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderPlus className="h-4 w-4" />}
-                  {weeklySetupPanel.actionLabel}
-                </Button>
-              ) : weeklySetupPanel.actionKind === 'settings' ? (
-                <Button size="sm" onClick={() => requestRouteNavigation('/portal/project-settings', '사업 배정 수정')}>
-                  {weeklySetupPanel.actionLabel}
-                </Button>
-              ) : (
-                <Button size="sm" onClick={() => requestRouteNavigation('/portal/bank-statements', '통장내역')}>
-                  {weeklySetupPanel.actionLabel}
-                  <ArrowRight className="h-4 w-4" />
-                </Button>
-              )}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-      )}
 
       {queueWorkCount > 0 && (
         <Card data-testid="weekly-intake-queue-strip" className="border-indigo-200/70 bg-gradient-to-r from-indigo-50 via-white to-cyan-50/70 shadow-sm">
@@ -1187,6 +1168,35 @@ export function PortalWeeklyExpensePage() {
               }}
             >
               이해했습니다, 제출
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={!!pendingNavigationAttempt}
+        onOpenChange={(open) => {
+          if (!open) setPendingNavigationAttempt(null);
+        }}
+      >
+        <AlertDialogContent data-testid="weekly-expense-unsaved-dialog">
+          <AlertDialogHeader>
+            <AlertDialogTitle>저장되지 않은 사업비 입력이 있습니다</AlertDialogTitle>
+            <AlertDialogDescription>
+              지금 이동하면 저장되지 않은 사업비 입력(주간) 편집 내용이 유실될 수 있습니다.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setPendingNavigationAttempt(null)}>계속 편집</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (!pendingNavigationAttempt) return;
+                const nextPath = pendingNavigationAttempt.path;
+                setPendingNavigationAttempt(null);
+                navigate(nextPath);
+              }}
+            >
+              변경 버리고 이동
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
