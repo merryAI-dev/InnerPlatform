@@ -208,6 +208,7 @@ describe('resolvePortalEntryPath', () => {
   it('routes portal logins through project-select while preserving the requested portal path', () => {
     expect(resolvePortalEntryPath('pm', undefined, '/portal/budget')).toBe('/portal/project-select?redirect=%2Fportal%2Fbudget');
     expect(resolvePortalEntryPath('admin', 'portal', '/portal/cashflow')).toBe('/portal/project-select?redirect=%2Fportal%2Fcashflow');
+    expect(resolvePortalEntryPath('pm', undefined, '/portal/project-select?redirect=%2Fportal%2Fbudget')).toBe('/portal/project-select?redirect=%2Fportal%2Fbudget');
     expect(resolvePortalEntryPath('admin', 'admin', '/settings')).toBe('/settings');
   });
 });

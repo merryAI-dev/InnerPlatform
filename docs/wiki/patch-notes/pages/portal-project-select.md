@@ -26,6 +26,7 @@
 
 ## Recent Changes
 
+- [2026-04-14] 이미 `project-select?redirect=...` 형태인 진입 URL은 redirect query를 보존하도록 라우팅 안정성을 보강했다.
 - [2026-04-14] 포털 진입을 `/portal/project-select` step으로 분리하고 세션 active project 선택 흐름을 신설했다.
 
 ## Related Files

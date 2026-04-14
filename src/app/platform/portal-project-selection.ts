@@ -93,9 +93,10 @@ export function resolveActivePortalProjectId(input: {
 export function resolvePortalProjectSelectPath(requestedPath?: string): string {
   const pathname = typeof requestedPath === 'string' ? requestedPath.trim() : '';
   if (!isPortalPath(pathname)) return PORTAL_PROJECT_SELECT_PATH;
-  if (pathname === PORTAL_PROJECT_SELECT_PATH || pathname.startsWith(`${PORTAL_PROJECT_SELECT_PATH}?`)) {
+  if (pathname === PORTAL_PROJECT_SELECT_PATH) {
     return PORTAL_PROJECT_SELECT_PATH;
   }
+  if (pathname.startsWith(`${PORTAL_PROJECT_SELECT_PATH}?`)) return pathname;
   return `${PORTAL_PROJECT_SELECT_PATH}?redirect=${encodeURIComponent(pathname)}`;
 }
 

@@ -73,6 +73,7 @@ describe('portal project selection helpers', () => {
   it('wraps portal routes for project selection and preserves current work routes on switch', () => {
     expect(resolvePortalProjectSelectPath('/portal/budget')).toBe('/portal/project-select?redirect=%2Fportal%2Fbudget');
     expect(resolvePortalProjectSelectPath('/portal/project-select')).toBe('/portal/project-select');
+    expect(resolvePortalProjectSelectPath('/portal/project-select?redirect=%2Fportal%2Fbudget')).toBe('/portal/project-select?redirect=%2Fportal%2Fbudget');
     expect(resolvePortalProjectSwitchPath('/portal/cashflow')).toBe('/portal/cashflow');
     expect(resolvePortalProjectSwitchPath('/portal/project-select')).toBe('/portal');
     expect(resolvePortalProjectSwitchPath('/portal/project-select?redirect=%2Fportal%2Fbudget')).toBe('/portal');

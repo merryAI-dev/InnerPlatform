@@ -90,3 +90,7 @@
 ## [2026-04-14] patch-note | portal-project-select-shell | 포털 진입 사업 선택 step 신설
 - pages: [portal-project-select](./pages/portal-project-select.md), [portal-dashboard](./pages/portal-dashboard.md)
 - summary: 로그인 후 포털 진입을 `project-select` step으로 라우팅하고, 상단 search는 메뉴 이동이 아니라 담당 사업 전환과 관리자 공간 이탈만 담당하도록 정리했다.
+
+## [2026-04-14] patch-note | portal-project-select-redirect | wrapped redirect 보존
+- pages: [portal-project-select](./pages/portal-project-select.md)
+- summary: 이미 `project-select?redirect=...` 형태인 포털 진입 URL을 다시 해석할 때도 redirect query를 지우지 않도록 안정성을 보강했다.
