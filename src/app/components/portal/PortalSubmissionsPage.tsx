@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { AlertTriangle, BarChart3, ChevronLeft, ChevronRight, ClipboardList, ExternalLink, Loader2, Users } from 'lucide-react';
-import { PageHeader } from '../layout/PageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -63,15 +62,15 @@ function pickLatestAuditMeta(props: {
 }) {
   const items = [
     props.syncAt
-      ? { title: props.syncTitle || '최종 동기화 상태 반영', at: props.syncAt, byName: props.syncByName || '-' }
+      ? { title: props.syncTitle || '최종 동기화 상태 반영', at: props.syncAt, byName: props.syncByName }
       : null,
     props.updatedAt
-      ? { title: '최종 제출 반영', at: props.updatedAt, byName: props.updatedByName || '-' }
+      ? { title: '최종 제출 반영', at: props.updatedAt, byName: props.updatedByName }
       : null,
     props.editedAt
-      ? { title: '최종 수정 상태 반영', at: props.editedAt, byName: props.editedByName || '-' }
+      ? { title: '최종 수정 상태 반영', at: props.editedAt, byName: props.editedByName }
       : null,
-  ].filter(Boolean) as Array<{ title: string; at: string; byName: string }>;
+  ].filter(Boolean) as Array<{ title: string; at: string; byName?: string }>;
 
   if (items.length === 0) return null;
   items.sort((left, right) => String(right.at).localeCompare(String(left.at)));
@@ -92,10 +91,10 @@ function AuditMetaLine(props: {
       {formatted && (
         <div className="mt-0.5">
           <div>{formatted.date}</div>
-          <div>{formatted.time} · {props.byName || '-'}</div>
+          <div>{props.byName ? `${formatted.time} · ${props.byName}` : formatted.time}</div>
         </div>
       )}
-      {!formatted && <div className="mt-0.5">{props.byName || '-'}</div>}
+      {!formatted && props.byName && <div className="mt-0.5">{props.byName}</div>}
     </div>
   );
 }
@@ -264,18 +263,17 @@ export function PortalSubmissionsPage() {
 
   return (
     <div className="space-y-5">
-      <PageHeader
-        icon={ClipboardList}
-        iconGradient="linear-gradient(135deg, #0d9488 0%, #14b8a6 100%)"
-        title="내 제출 현황"
-        description="제출한 항목의 진행 상태(제출/승인/반려)를 한 곳에서 확인합니다."
-        badge={myProject.shortName || myProject.id}
-        actions={(
-          <Button variant="outline" size="sm" className="h-8 text-[12px] gap-1.5" onClick={() => navigate('/portal')}>
-            <ExternalLink className="w-3.5 h-3.5" /> 대시보드로
-          </Button>
-        )}
-      />
+      <div className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
+        <div className="flex items-center gap-2">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-900 text-white">
+            <ClipboardList className="h-4 w-4" />
+          </div>
+          <div className="min-w-0">
+            <h1 className="text-[18px] font-semibold text-slate-950">내 제출 현황</h1>
+            <p className="mt-1 text-[11px] text-muted-foreground">{myProject.name}</p>
+          </div>
+        </div>
+      </div>
 
       {/* Weekly submission checklist */}
       <Card>
@@ -317,16 +315,6 @@ export function PortalSubmissionsPage() {
               </span>
             )}
           </div>
-
-          <div className="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
-            <span className="inline-flex items-center rounded-full bg-emerald-600/12 px-2 py-0.5 text-emerald-800 dark:text-emerald-200" style={{ fontWeight: 700 }}>
-              실제 저장 데이터 기준 자동 반영
-            </span>
-            <span className="inline-flex items-center rounded-full bg-green-600/12 px-2 py-0.5 text-green-800 dark:text-green-200" style={{ fontWeight: 700 }}>
-              필요시만 수동 보정
-            </span>
-          </div>
-
           <div className="overflow-x-auto">
             <table className="min-w-[720px] w-full text-[11px]">
               <thead>
@@ -446,13 +434,8 @@ export function PortalSubmissionsPage() {
                 })}
                 {assignedProjects.length === 0 && (
                   <tr>
-                    <td colSpan={3} className="px-4 py-6">
-                      <div className="rounded-xl border border-dashed bg-slate-50/80 px-4 py-6 text-center">
-                        <p className="text-[14px] font-semibold text-slate-900">아직 추적 중인 제출 대상이 없습니다</p>
-                        <p className="mt-2 text-[12px] leading-6 text-muted-foreground">
-                          연결된 사업이 생기면 이번 주 제출 체크가 자동으로 나타납니다. 먼저 사업 연결 상태를 확인하세요.
-                        </p>
-                      </div>
+                    <td colSpan={3} className="px-4 py-6 text-center text-[12px] text-muted-foreground">
+                      표시할 사업이 없습니다.
                     </td>
                   </tr>
                 )}
@@ -508,11 +491,8 @@ export function PortalSubmissionsPage() {
                   </div>
                 ))}
                 {filteredChanges.length === 0 && (
-                  <div className="rounded-xl border border-dashed bg-slate-50/80 px-4 py-6 text-center">
-                    <p className="text-[14px] font-semibold text-slate-900">해당 상태의 인력변경 신청이 없습니다</p>
-                    <p className="mt-2 text-[12px] leading-6 text-muted-foreground">
-                      이번 주에 새 신청이 생기면 여기에 바로 보입니다. 상세 신청은 인력변경 화면에서 계속 관리할 수 있습니다.
-                    </p>
+                  <div className="rounded-xl border border-dashed bg-slate-50/80 px-4 py-4 text-center text-[12px] text-muted-foreground">
+                    표시할 신청이 없습니다.
                   </div>
                 )}
               </div>

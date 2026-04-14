@@ -10,7 +10,10 @@
 | [portal-weekly-expense](./pages/portal-weekly-expense.md) | `/portal/weekly-expenses` | 2026-04-14 | 기준본에서 이어쓰기, 저장 상태 구분, overwrite/backspace 복구 |
 | [portal-bank-statement](./pages/portal-bank-statement.md) | `/portal/bank-statements` | 2026-04-14 | 원본 업로드, intake queue 정리, 사업비 입력으로 이어가기 |
 | [portal-budget](./pages/portal-budget.md) | `/portal/budget` | 2026-04-14 | 가져오기 미리보기, 긴 모달 스크롤, 구조 저장 보호 |
+| [portal-cashflow](./pages/portal-cashflow.md) | `/portal/cashflow` | 2026-04-14 | compact import action, projection 작업면 중심 |
 | [portal-onboarding](./pages/portal-onboarding.md) | `/login`, `/workspace-select` | 2026-04-14 | Guided Start 제거, 빠른 인증/진입 유지 |
+| [portal-project-settings](./pages/portal-project-settings.md) | `/portal/project-settings` | 2026-04-14 | 검색/선택/저장 중심, 상태 배너 제거 |
+| [portal-edit-project](./pages/portal-edit-project.md) | `/portal/edit-project` | 2026-04-14 | 중복 subtitle 제거, 폼 진입 단순화 |
 | [portal-register-project](./pages/portal-register-project.md) | `/portal/register-project` | 2026-04-14 | 직접입력형 자금 흐름, 초안 저장, 계약 예외 처리 |
 | [portal-submissions](./pages/portal-submissions.md) | `/portal/submissions` | 2026-04-14 | 수요일 기준 작성 여부, projection 수정 기준 표시 |
 | [admin-dashboard](./pages/admin-dashboard.md) | `/` | 2026-04-14 | 작성 가이드 제거, KPI/이동 액션 중심 |

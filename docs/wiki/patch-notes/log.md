@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-04-14] patch-note | portal-minimal-sweep | 빈 상태/가이드/placeholder 감산
+- pages: [portal-submissions](./pages/portal-submissions.md), [portal-bank-statement](./pages/portal-bank-statement.md), [portal-weekly-expense](./pages/portal-weekly-expense.md), [portal-register-project](./pages/portal-register-project.md), [portal-cashflow](./pages/portal-cashflow.md), [portal-project-settings](./pages/portal-project-settings.md), [portal-edit-project](./pages/portal-edit-project.md)
+- summary: 남은 포털 화면들에서 helper copy, role notice, 중복 상태 bar, `-` placeholder를 걷어내고 작업면 중심의 더 얇은 운영 화면으로 정리했다.
+
 ## [2026-04-14] bootstrap | patch-notes-wiki | 초기 위키 scaffold
 - pages: [portal-weekly-expense](./pages/portal-weekly-expense.md), [portal-bank-statement](./pages/portal-bank-statement.md), [portal-budget](./pages/portal-budget.md), [portal-register-project](./pages/portal-register-project.md), [portal-submissions](./pages/portal-submissions.md), [admin-cashflow-export](./pages/admin-cashflow-export.md), [admin-cashflow-project-sheet](./pages/admin-cashflow-project-sheet.md), [admin-users-auth-governance](./pages/admin-users-auth-governance.md)
 - summary: GitHub 내부에 화면 단위 누적 패치노트 위키 구조를 신설했다.
@@ -54,6 +58,14 @@
 ## [2026-04-14] patch-note | portal-dashboard-shell | 검색/알림/사용자 액션 연결
 - pages: [portal-dashboard](./pages/portal-dashboard.md)
 - summary: 상단 search, bell, user affordance를 실제 command palette와 dropdown action으로 연결해 관리자 이동, 내 프로필, 로그아웃, 처리할 알림 확인이 가능하도록 마감했다.
+
+## [2026-04-14] patch-note | portal-dashboard-shell | section label 감산
+- pages: [portal-dashboard](./pages/portal-dashboard.md)
+- summary: 상단 shell에서 정보량이 없는 `My Work` 보조 라벨을 제거하고 현재 화면명만 남겨 더 미니멀한 heading 구조로 정리했다.
+
+## [2026-04-14] patch-note | portal-dashboard-shell | 현재 사업 검색 이동 보정
+- pages: [portal-dashboard](./pages/portal-dashboard.md)
+- summary: command search에서 현재 담당 사업을 선택했을 때 `setActiveProject` no-op 때문에 이동이 막히던 문제를 제거했다.
 
 ## [2026-04-14] patch-note | portal-dashboard-brand-slab | 로고 교체와 단일 헤더 슬랩
 - pages: [portal-dashboard](./pages/portal-dashboard.md)
