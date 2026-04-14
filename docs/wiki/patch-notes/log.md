@@ -50,3 +50,7 @@
 ## [2026-04-14] patch-note | portal-dashboard | 0건 운영 정보 축소와 주간 상태 전면 배치
 - pages: [portal-dashboard](./pages/portal-dashboard.md)
 - summary: 0건 운영 알림과 설정성 바로가기를 걷어내고, 이번 주 Projection 작성 여부·최근 Projection 수정일·사업비 입력 상태를 홈 첫 화면에서 바로 보이도록 압축했다.
+
+## [2026-04-14] patch-note | portal-dashboard-shell | 검색/알림/사용자 액션 연결
+- pages: [portal-dashboard](./pages/portal-dashboard.md)
+- summary: 상단 search, bell, user affordance를 실제 command palette와 dropdown action으로 연결해 관리자 이동, 내 프로필, 로그아웃, 처리할 알림 확인이 가능하도록 마감했다.

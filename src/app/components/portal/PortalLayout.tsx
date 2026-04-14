@@ -20,6 +20,7 @@ import {
   Search,
   Bell,
   UserCircle2,
+  User,
 } from 'lucide-react';
 import { PortalProvider, usePortalStore } from '../../data/portal-store';
 import { useAuth } from '../../data/auth-store';
@@ -35,6 +36,25 @@ import {
   SelectValue,
 } from '../ui/select';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '../ui/dropdown-menu';
+import {
+  CommandDialog,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+  CommandShortcut,
+} from '../ui/command';
 import { DarkModeToggle } from '../layout/DarkModeToggle';
 import { PageTransition } from '../layout/PageTransition';
 import { ErrorBoundary } from '../layout/ErrorBoundary';
@@ -42,12 +62,12 @@ import {
   canChooseWorkspace,
   canEnterPortalWorkspace,
   isAdminSpaceRole,
-  resolveHomePath,
   shouldForcePortalOnboarding,
 } from '../../platform/navigation';
 import { addMonthsToYearMonth, getSeoulTodayIso } from '../../platform/business-days';
 import { normalizeProjectFundInputMode } from '../../data/types';
 import { rememberRecentPortalProject } from '../../platform/portal-recent-projects';
+import { buildPortalShellCommandItems, buildPortalShellNotificationItems } from '../../platform/portal-shell-actions';
 
 // ═══════════════════════════════════════════════════════════════
 // PortalLayout — 사용자(PM) 전용 레이아웃
@@ -145,6 +165,7 @@ function PortalContent() {
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [commandOpen, setCommandOpen] = useState(false);
   const navigationHandlerRef = useRef<((attempt: PortalNavigationAttempt) => boolean) | null>(null);
   const currentPath = `${location.pathname}${location.search}${location.hash}`;
   const registerNavigationHandler = useCallback((handler: ((attempt: PortalNavigationAttempt) => boolean) | null) => {
@@ -159,6 +180,11 @@ function PortalContent() {
     void setWorkspacePreference('admin', { persistDefault: false })
       .finally(() => navigate('/'));
   }, [navigate, setWorkspacePreference]);
+  const handleLogout = useCallback(() => {
+    portalLogout();
+    authLogout();
+    navigate('/login');
+  }, [authLogout, navigate, portalLogout]);
 
   // ── 모든 hooks는 early return 전에 호출 ──
   const assignedProjects = useMemo(() => {
@@ -238,6 +264,11 @@ function PortalContent() {
     const current = topNavItems.find((item) => isActive(item.to, item.exact));
     return current?.label || '내 사업 현황';
   }, [topNavItems, location.pathname]);
+  const shellCommandItems = useMemo(() => buildPortalShellCommandItems({
+    role: authUser?.role,
+    currentProject: currentProject ? { id: currentProject.id, name: currentProject.name } : null,
+    topNavItems: topNavItems.map((item) => ({ to: item.to, label: item.label })),
+  }), [authUser?.role, currentProject, topNavItems]);
 
 
   // 미인증 시 로그인으로
@@ -290,6 +321,25 @@ function PortalContent() {
   useEffect(() => {
     setMobileOpen(false);
   }, [location.pathname]);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      const isEditable = !!target && (
+        target.tagName === 'INPUT'
+        || target.tagName === 'TEXTAREA'
+        || target.isContentEditable
+      );
+      if (isEditable) return;
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setCommandOpen((prev) => !prev);
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   if (authLoading || portalLoading) {
     return (
@@ -419,6 +469,11 @@ function PortalContent() {
     const monthly = closePrev && closePrev.status === 'DONE' && !closePrev.acknowledged ? 1 : 0;
     return payroll + monthly;
   })();
+  const notificationItems = buildPortalShellNotificationItems({
+    pendingChanges,
+    hrAlertCount,
+    payrollPendingCount,
+  });
   function isActive(to: string, exact?: boolean) {
     if (exact) return location.pathname === to;
     return location.pathname.startsWith(to);
@@ -684,10 +739,17 @@ function PortalContent() {
                 </div>
               </div>
               <div className="hidden flex-1 items-center justify-center px-4 md:flex">
-                <div className="flex h-10 w-full max-w-xl items-center gap-2 rounded-xl border border-white/15 bg-white/8 px-3 text-slate-200">
+                <button
+                  type="button"
+                  onClick={() => setCommandOpen(true)}
+                  className="flex h-10 w-full max-w-xl items-center gap-2 rounded-xl border border-white/15 bg-white/8 px-3 text-left text-slate-200 transition-colors hover:bg-white/12"
+                >
                   <Search className="h-4 w-4 text-slate-300" />
-                  <span className="truncate text-[12px] text-slate-300">Search projects, submissions, budgets...</span>
-                </div>
+                  <span className="truncate text-[12px] text-slate-300">빠른 이동, 사업, 제출, 캐시플로 검색</span>
+                  <span className="ml-auto rounded-md border border-white/15 bg-white/8 px-2 py-1 text-[10px] font-semibold text-slate-300">
+                    ⌘K
+                  </span>
+                </button>
               </div>
               <div className="ml-auto flex items-center gap-1.5">
                 {isAdminSpaceRole(authUser?.role) && (
@@ -701,12 +763,75 @@ function PortalContent() {
                     관리자 공간
                   </Button>
                 )}
-                <button className="rounded-md p-2 text-slate-200 transition-colors hover:bg-white/10">
-                  <Bell className="h-4 w-4" />
-                </button>
-                <button className="rounded-md p-2 text-slate-200 transition-colors hover:bg-white/10">
-                  <UserCircle2 className="h-4 w-4" />
-                </button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label="알림 메뉴 열기"
+                      className="relative rounded-md p-2 text-slate-200 transition-colors hover:bg-white/10"
+                    >
+                      <Bell className="h-4 w-4" />
+                      {notificationItems.length > 0 && (
+                        <span className="absolute right-1 top-1 inline-flex h-2 w-2 rounded-full bg-amber-400" />
+                      )}
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-72 text-[12px]">
+                    <DropdownMenuLabel>알림</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    {notificationItems.length === 0 ? (
+                      <DropdownMenuItem disabled>처리할 알림 없음</DropdownMenuItem>
+                    ) : (
+                      <DropdownMenuGroup>
+                        {notificationItems.map((item) => (
+                          <DropdownMenuItem
+                            key={item.id}
+                            onClick={() => requestPortalNavigation(item.to, item.label)}
+                            className="flex flex-col items-start gap-0.5 py-2"
+                          >
+                            <span className="font-medium text-slate-900">{item.label}</span>
+                            <span className="text-[11px] text-slate-500">{item.description}</span>
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuGroup>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label="사용자 메뉴 열기"
+                      className="rounded-md p-2 text-slate-200 transition-colors hover:bg-white/10"
+                    >
+                      <UserCircle2 className="h-4 w-4" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-64 text-[12px]">
+                    <DropdownMenuLabel className="space-y-0.5">
+                      <div className="text-[12px] font-semibold text-slate-900">{portalUser.name}</div>
+                      <div className="text-[11px] font-normal text-slate-500">{authUser?.email || ''}</div>
+                    </DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuGroup>
+                      <DropdownMenuItem onClick={() => requestPortalNavigation('/portal/career-profile', '내 프로필')}>
+                        <User className="h-4 w-4" />
+                        내 프로필
+                      </DropdownMenuItem>
+                      {isAdminSpaceRole(authUser?.role) && (
+                        <DropdownMenuItem onClick={requestAdminNavigation}>
+                          <Shield className="h-4 w-4" />
+                          관리자 공간
+                        </DropdownMenuItem>
+                      )}
+                    </DropdownMenuGroup>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={handleLogout}>
+                      <LogOut className="h-4 w-4" />
+                      로그아웃
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             </div>
 
@@ -807,6 +932,41 @@ function PortalContent() {
             </div>
           </main>
         </div>
+        <CommandDialog
+          open={commandOpen}
+          onOpenChange={setCommandOpen}
+          title="포털 빠른 이동"
+          description="포털 업무와 현재 사업 작업을 빠르게 찾아 이동합니다."
+        >
+          <CommandInput placeholder="업무, 사업, 캐시플로, 제출 상태 검색..." />
+          <CommandList>
+            <CommandEmpty>일치하는 화면이 없습니다.</CommandEmpty>
+            <CommandGroup heading="빠른 이동">
+              {shellCommandItems.map((item) => (
+                <CommandItem
+                  key={item.id}
+                  value={`${item.label} ${item.description} ${item.keywords.join(' ')}`}
+                  onSelect={() => {
+                    setCommandOpen(false);
+                    if (item.kind === 'admin') {
+                      requestAdminNavigation();
+                      return;
+                    }
+                    requestPortalNavigation(item.to, item.label);
+                  }}
+                  className="flex items-center gap-3"
+                >
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <span className="text-[12px] font-medium text-slate-900">{item.label}</span>
+                    <span className="text-[11px] text-slate-500">{item.description}</span>
+                  </div>
+                  <CommandShortcut>{item.category}</CommandShortcut>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+            <CommandSeparator />
+          </CommandList>
+        </CommandDialog>
       </div>
       </TooltipProvider>
     </PortalNavigationGuardContext.Provider>
