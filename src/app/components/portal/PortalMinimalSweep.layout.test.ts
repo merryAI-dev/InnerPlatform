@@ -30,11 +30,33 @@ describe('portal minimal sweep', () => {
     expect(bankStatementSource).not.toContain('사업비 입력(주간) 먼저 보기');
   });
 
+  it('restores direct bank-to-weekly-expense continuation and removes queue-first controls', () => {
+    expect(bankStatementSource).toContain('사업비 입력(주간)으로 이어가기');
+    expect(bankStatementSource).not.toContain('신규 거래 처리 Queue');
+    expect(bankStatementSource).not.toContain('분류/검토 열기');
+    expect(bankStatementSource).not.toContain('증빙 이어서 하기');
+    expect(bankStatementSource).not.toContain('주간 사업비에서 보기');
+  });
+
+  it('removes operator-facing special template actions from bank statements', () => {
+    expect(bankStatementSource).not.toContain('환수 행');
+    expect(bankStatementSource).not.toContain('선사용금');
+    expect(bankStatementSource).not.toContain('특이건');
+    expect(bankStatementSource).not.toContain('addSpecialTemplateRow(');
+  });
+
   it('removes redundant policy and bottom summary bars from weekly expenses', () => {
     expect(weeklyExpenseSource).not.toContain('현재 정책:');
     expect(weeklyExpenseSource).not.toContain('<span>시트 정책:');
     expect(weeklyExpenseSource).not.toContain('<span>거래:');
     expect(weeklyExpenseSource).not.toContain('<span>기본 폴더:');
+  });
+
+  it('removes the weekly expense queue strip and queue-first wizard CTA', () => {
+    expect(weeklyExpenseSource).not.toContain('weekly-intake-queue-strip');
+    expect(weeklyExpenseSource).not.toContain('통장내역에서 아직 정리되지 않은 거래');
+    expect(weeklyExpenseSource).not.toContain('분류/검토 열기');
+    expect(weeklyExpenseSource).not.toContain('증빙 이어서 하기');
   });
 
   it('turns cashflow migration guidance into a compact action instead of a top explainer card', () => {
