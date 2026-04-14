@@ -38,3 +38,7 @@
 - pages: [portal-submissions](./pages/portal-submissions.md)
 - commits: `afc2098`
 - summary: 이번주 작성 여부와 최근 업데이트(Projection) 기준을 화면에서 더 명확하게 읽히도록 정리했다.
+
+## [2026-04-14] patch-note | patch-notes-wiki | 라우트 전반 문서 커버리지 확장
+- pages: admin/portal 주요 운영 화면 전체
+- summary: seed 8개를 넘어서 현재 실제 라우트에 연결된 운영 화면을 거의 전부 체크리스트 문서로 확장했다.
