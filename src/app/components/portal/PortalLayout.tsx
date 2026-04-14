@@ -826,7 +826,7 @@ function PortalContent() {
                 <div className="flex min-w-0 items-center gap-3">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                      <h1 className="truncate text-[20px] font-semibold tracking-[-0.03em] text-slate-950">{currentSectionLabel}</h1>
+                      <p className="truncate text-[20px] font-semibold tracking-[-0.03em] text-slate-950">{currentSectionLabel}</p>
                       <Badge className="h-5 rounded-full bg-[#e8f0fb] px-2 text-[10px] font-semibold text-[#1b4f8f]">
                         {portalUser.role}
                       </Badge>
