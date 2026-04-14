@@ -102,7 +102,11 @@ export function resolvePortalProjectSelectPath(requestedPath?: string): string {
 export function resolvePortalProjectSwitchPath(pathname?: string): string {
   const normalizedPath = typeof pathname === 'string' ? pathname.trim() : '';
   if (!isPortalPath(normalizedPath)) return PORTAL_PROJECT_SWITCH_FALLBACK_PATH;
-  if (normalizedPath === PORTAL_PROJECT_SELECT_PATH || normalizedPath.startsWith(`${PORTAL_PROJECT_SELECT_PATH}/`)) {
+  if (
+    normalizedPath === PORTAL_PROJECT_SELECT_PATH
+    || normalizedPath.startsWith(`${PORTAL_PROJECT_SELECT_PATH}/`)
+    || normalizedPath.startsWith(`${PORTAL_PROJECT_SELECT_PATH}?`)
+  ) {
     return PORTAL_PROJECT_SWITCH_FALLBACK_PATH;
   }
   return normalizedPath || PORTAL_PROJECT_SWITCH_FALLBACK_PATH;

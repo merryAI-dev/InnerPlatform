@@ -2,24 +2,20 @@ import { describe, expect, it } from 'vitest';
 import { buildPortalShellCommandItems, buildPortalShellNotificationItems } from './portal-shell-actions';
 
 describe('portal shell actions', () => {
-  it('builds search commands for core portal work and current project', () => {
+  it('builds project switch items only plus the admin escape hatch', () => {
     const items = buildPortalShellCommandItems({
       role: 'admin',
+      currentPath: '/portal/budget',
       currentProject: { id: 'project-1', name: '2026 더큰 제주' },
-      assignedProjects: [
+      availableProjects: [
         { id: 'project-1', name: '2026 더큰 제주' },
         { id: 'project-2', name: '현대 모비스 CSV OI 컨설팅' },
       ],
-      topNavItems: [
-        { to: '/portal', label: '내 사업 현황' },
-        { to: '/portal/submissions', label: '내 제출 현황' },
-        { to: '/portal/cashflow', label: '캐시플로(주간)' },
-      ],
     });
 
-    expect(items.some((item) => item.id === 'portal:/portal/cashflow')).toBe(true);
+    expect(items.some((item) => item.kind === 'portal')).toBe(false);
     expect(items.some((item) => item.id === 'project:project-1')).toBe(true);
-    expect(items.some((item) => item.id === 'project:project-2' && item.projectId === 'project-2')).toBe(true);
+    expect(items.find((item) => item.id === 'project:project-2')?.to).toBe('/portal/budget');
     expect(items.some((item) => item.id === 'admin:home')).toBe(true);
   });
 

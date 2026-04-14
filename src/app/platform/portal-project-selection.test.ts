@@ -75,5 +75,6 @@ describe('portal project selection helpers', () => {
     expect(resolvePortalProjectSelectPath('/portal/project-select')).toBe('/portal/project-select');
     expect(resolvePortalProjectSwitchPath('/portal/cashflow')).toBe('/portal/cashflow');
     expect(resolvePortalProjectSwitchPath('/portal/project-select')).toBe('/portal');
+    expect(resolvePortalProjectSwitchPath('/portal/project-select?redirect=%2Fportal%2Fbudget')).toBe('/portal');
   });
 });

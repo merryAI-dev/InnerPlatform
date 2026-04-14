@@ -6,6 +6,7 @@ import {
   isPortalRole,
   normalizeRequestedPath,
   resolveActiveWorkspacePreference,
+  resolvePortalEntryPath,
   resolveHomePath,
   resolveRequestedRedirectPath,
   resolvePostLoginPath,
@@ -203,6 +204,14 @@ describe('resolvePostLoginPath', () => {
   });
 });
 
+describe('resolvePortalEntryPath', () => {
+  it('routes portal logins through project-select while preserving the requested portal path', () => {
+    expect(resolvePortalEntryPath('pm', undefined, '/portal/budget')).toBe('/portal/project-select?redirect=%2Fportal%2Fbudget');
+    expect(resolvePortalEntryPath('admin', 'portal', '/portal/cashflow')).toBe('/portal/project-select?redirect=%2Fportal%2Fcashflow');
+    expect(resolvePortalEntryPath('admin', 'admin', '/settings')).toBe('/settings');
+  });
+});
+
 describe('requested redirect restoration', () => {
   it('normalizes requested path values', () => {
     expect(normalizeRequestedPath('/users')).toBe('/users');
@@ -237,8 +246,8 @@ describe('shouldForcePortalOnboarding', () => {
     })).toBe(true);
   });
 
-  it('does NOT force on bypass paths (onboarding, project-settings, weekly-expenses)', () => {
-    const bypassPaths = ['/portal/onboarding', '/portal/project-settings', '/portal/register-project', '/portal/weekly-expenses'];
+  it('does NOT force on bypass paths (onboarding, project-settings, project-select, weekly-expenses)', () => {
+    const bypassPaths = ['/portal/onboarding', '/portal/project-settings', '/portal/project-select', '/portal/register-project', '/portal/weekly-expenses'];
     for (const pathname of bypassPaths) {
       expect(shouldForcePortalOnboarding({
         isAuthenticated: true, role: 'pm', isRegistered: false, pathname,

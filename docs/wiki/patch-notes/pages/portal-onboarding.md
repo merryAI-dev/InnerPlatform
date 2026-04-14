@@ -25,6 +25,7 @@
 
 ## Recent Changes
 
+- [2026-04-14] PM 포털 진입을 바로 `/portal`로 보내지 않고 `/portal/project-select` step을 거친 뒤 세션 기준 사업을 고르게 바꿨다.
 - [2026-04-14] 로그인 화면의 `Guided Start` 블록을 제거했다.
 - [2026-04-14] workspace 선택 화면의 PM 안내 문구를 더 직접적으로 정리했다.
 

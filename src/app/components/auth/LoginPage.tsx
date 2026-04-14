@@ -11,7 +11,7 @@ import { Button } from '../ui/button';
 import { useAuth } from '../../data/auth-store';
 import {
   resolveActiveWorkspacePreference,
-  resolvePostLoginPath,
+  resolvePortalEntryPath,
   resolveRequestedRedirectPath,
   shouldPromptWorkspaceSelection,
 } from '../../platform/navigation';
@@ -74,7 +74,7 @@ export function LoginPage() {
         navigate('/workspace-select', { replace: true, state: redirectFrom ? { from: redirectFrom } : undefined });
         return;
       }
-      const target = resolvePostLoginPath(
+      const target = resolvePortalEntryPath(
         user.role,
         activeWorkspace,
         redirectFrom,

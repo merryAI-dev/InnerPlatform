@@ -1,3 +1,5 @@
+import { resolvePortalProjectSwitchPath } from './portal-project-selection';
+
 export interface PortalShellNavItem {
   to: string;
   label: string;
@@ -28,34 +30,20 @@ export interface PortalShellNotificationItem {
 
 export function buildPortalShellCommandItems(input: {
   role: string | null | undefined;
+  currentPath: string;
   currentProject?: PortalShellProjectItem | null;
-  assignedProjects?: PortalShellProjectItem[];
-  topNavItems: PortalShellNavItem[];
+  availableProjects: PortalShellProjectItem[];
 }): PortalShellCommandItem[] {
-  const navItems = input.topNavItems.map((item) => ({
-    id: `portal:${item.to}`,
-    label: item.label.replace('(주간)', ''),
-    description: `${item.label.replace('(주간)', '')} 화면으로 이동`,
-    category: '업무' as const,
-    kind: 'portal' as const,
-    to: item.to,
-    keywords: [item.label, item.to],
-  }));
-
-  const projectPool = (input.assignedProjects && input.assignedProjects.length > 0)
-    ? input.assignedProjects
-    : input.currentProject
-      ? [input.currentProject]
-      : [];
-  const projectItems = projectPool.map((project) => ({
+  const switchPath = resolvePortalProjectSwitchPath(input.currentPath);
+  const projectItems = input.availableProjects.map((project) => ({
     id: `project:${project.id}`,
     label: project.name,
-    description: input.currentProject?.id === project.id ? '현재 담당 사업으로 이동' : '담당 사업으로 전환하고 이동',
+    description: input.currentProject?.id === project.id ? '현재 작업 사업입니다.' : '현재 화면을 유지한 채 이 사업으로 전환',
     category: '사업' as const,
     kind: 'project' as const,
-    to: '/portal',
+    to: switchPath,
     projectId: project.id,
-    keywords: [project.name, project.id, '담당 사업', '사업 전환', input.currentProject?.id === project.id ? '현재 사업' : '내 사업'],
+    keywords: [project.name, project.id, '담당 사업', '사업 전환', '현재 화면 유지'],
   }));
 
   const adminItems = String(input.role || '').toLowerCase() === 'admin' || String(input.role || '').toLowerCase() === 'finance'
@@ -70,7 +58,7 @@ export function buildPortalShellCommandItems(input: {
     }]
     : [];
 
-  return [...navItems, ...projectItems, ...adminItems];
+  return [...projectItems, ...adminItems];
 }
 
 export function buildPortalShellNotificationItems(input: {

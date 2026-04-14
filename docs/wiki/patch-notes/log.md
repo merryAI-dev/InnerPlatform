@@ -86,3 +86,7 @@
 ## [2026-04-14] patch-note | portal-session-active-project | 세션 사업 전환과 진입 step 분리
 - pages: [portal-weekly-expense](./pages/portal-weekly-expense.md), [portal-bank-statement](./pages/portal-bank-statement.md), [portal-submissions](./pages/portal-submissions.md)
 - summary: 저장된 주사업과 별도로 session active project를 도입하고, 포털 진입을 `project-select` step으로 분리해 같은 화면을 유지한 채 사업 전환이 가능하도록 정리했다.
+
+## [2026-04-14] patch-note | portal-project-select-shell | 포털 진입 사업 선택 step 신설
+- pages: [portal-project-select](./pages/portal-project-select.md), [portal-dashboard](./pages/portal-dashboard.md)
+- summary: 로그인 후 포털 진입을 `project-select` step으로 라우팅하고, 상단 search는 메뉴 이동이 아니라 담당 사업 전환과 관리자 공간 이탈만 담당하도록 정리했다.

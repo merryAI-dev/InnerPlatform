@@ -59,6 +59,7 @@ import { DarkModeToggle } from '../layout/DarkModeToggle';
 import { PageTransition } from '../layout/PageTransition';
 import { ErrorBoundary } from '../layout/ErrorBoundary';
 import { MyscWordmark } from '../brand/MyscWordmark';
+import { normalizeProjectIds } from '../../data/project-assignment';
 import {
   canChooseWorkspace,
   canEnterPortalWorkspace,
@@ -69,6 +70,10 @@ import { addMonthsToYearMonth, getSeoulTodayIso } from '../../platform/business-
 import { normalizeProjectFundInputMode } from '../../data/types';
 import { rememberRecentPortalProject } from '../../platform/portal-recent-projects';
 import { buildPortalShellCommandItems, buildPortalShellNotificationItems } from '../../platform/portal-shell-actions';
+import {
+  resolvePortalProjectCandidates,
+  resolvePortalProjectSelectPath,
+} from '../../platform/portal-project-selection';
 
 // ═══════════════════════════════════════════════════════════════
 // PortalLayout — 사용자(PM) 전용 레이아웃
@@ -144,6 +149,7 @@ export function usePortalNavigationGuard() {
 
 function PortalContent() {
   const {
+    activeProjectId,
     isRegistered,
     isLoading: portalLoading,
     portalUser,
@@ -151,7 +157,7 @@ function PortalContent() {
     logout: portalLogout,
     changeRequests,
     projects,
-    setActiveProject,
+    setSessionActiveProject,
   } = usePortalStore();
   const {
     isAuthenticated,
@@ -188,44 +194,41 @@ function PortalContent() {
   }, [authLogout, navigate, portalLogout]);
 
   // ── 모든 hooks는 early return 전에 호출 ──
+  const assignedProjectIds = useMemo(() => normalizeProjectIds([
+    ...(Array.isArray(portalUser?.projectIds) ? portalUser.projectIds : []),
+    portalUser?.projectId,
+    ...(Array.isArray(authUser?.projectIds) ? authUser.projectIds : []),
+    authUser?.projectId,
+  ]), [authUser?.projectId, authUser?.projectIds, portalUser?.projectId, portalUser?.projectIds]);
+  const candidateProjects = useMemo(() => resolvePortalProjectCandidates({
+    role: authUser?.role,
+    authUid: authUser?.uid,
+    assignedProjectIds,
+    projects,
+  }), [assignedProjectIds, authUser?.role, authUser?.uid, projects]);
   const assignedProjects = useMemo(() => {
-    if (!portalUser) return [];
-    if (!Array.isArray(portalUser.projectIds) || portalUser.projectIds.length === 0) {
-      return myProject ? [myProject] : [];
-    }
-    const pool = projects.length ? projects : [];
-    const mapped = portalUser.projectIds
-      .map((id) => pool.find((project) => project.id === id) || null)
-      .filter((project): project is NonNullable<typeof project> => !!project);
-    if (mapped.length > 0) return mapped;
+    if (candidateProjects.priorityProjects.length > 0) return candidateProjects.priorityProjects;
     return myProject ? [myProject] : [];
-  }, [portalUser, projects, myProject]);
+  }, [candidateProjects.priorityProjects, myProject]);
 
   const projectOptions = useMemo(() => {
-    if (!portalUser) return [];
-    const ids = Array.isArray(portalUser.projectIds) && portalUser.projectIds.length
-      ? portalUser.projectIds
-      : portalUser.projectId ? [portalUser.projectId] : [];
-    return ids
-      .map((id) => {
-        const project = projects.find((p) => p.id === id) || null;
-        if (project && project.status !== 'CONTRACT_PENDING') return null;
-        const fallbackName = portalUser.projectNames?.[id];
-        if (!project && !fallbackName) return null;
-        return { id, name: project?.name || fallbackName || id };
-      })
-      .filter((item): item is { id: string; name: string } => item !== null);
-  }, [portalUser, projects]);
-
-  const selectedProjectOptionValue = useMemo(() => {
-    if (!portalUser?.projectId) return '';
-    return projectOptions.some((item) => item.id === portalUser.projectId) ? portalUser.projectId : '';
-  }, [portalUser?.projectId, projectOptions]);
+    return candidateProjects.searchProjects.map((project) => ({
+      id: project.id,
+      name: project.name,
+    }));
+  }, [candidateProjects.searchProjects]);
 
   const currentProject = useMemo(() => {
-    if (!portalUser) return myProject;
-    return assignedProjects.find((project) => project.id === portalUser.projectId) || myProject;
-  }, [assignedProjects, portalUser, myProject]);
+    if (activeProjectId) {
+      return candidateProjects.searchProjects.find((project) => project.id === activeProjectId) || myProject;
+    }
+    return myProject || candidateProjects.priorityProjects[0] || candidateProjects.searchProjects[0] || null;
+  }, [activeProjectId, candidateProjects.priorityProjects, candidateProjects.searchProjects, myProject]);
+
+  const selectedProjectOptionValue = useMemo(() => {
+    if (!currentProject?.id) return '';
+    return projectOptions.some((item) => item.id === currentProject.id) ? currentProject.id : '';
+  }, [currentProject?.id, projectOptions]);
 
   useEffect(() => {
     if (!currentProject?.id) return;
@@ -244,11 +247,9 @@ function PortalContent() {
     });
   }, [authUser?.uid]);
 
-  const currentProjectName = useMemo(() => {
-    if (!portalUser?.projectId) return myProject?.name;
-    const fromOptions = projectOptions.find((opt) => opt.id === portalUser.projectId)?.name;
-    return fromOptions || myProject?.name;
-  }, [portalUser?.projectId, projectOptions, myProject?.name]);
+  const currentProjectName = currentProject?.name || myProject?.name || '';
+  const portalDisplayName = portalUser?.name || authUser?.name || '사용자';
+  const portalDisplayRole = portalUser?.role || authUser?.role || 'pm';
   const currentFundInputMode = normalizeProjectFundInputMode(currentProject?.fundInputMode);
   const navSections = useMemo(() => (
     NAV_SECTIONS.map((section) => ({
@@ -267,10 +268,16 @@ function PortalContent() {
   }, [topNavItems, location.pathname]);
   const shellCommandItems = useMemo(() => buildPortalShellCommandItems({
     role: authUser?.role,
+    currentPath,
     currentProject: currentProject ? { id: currentProject.id, name: currentProject.name } : null,
-    assignedProjects: assignedProjects.map((project) => ({ id: project.id, name: project.name })),
-    topNavItems: topNavItems.map((item) => ({ to: item.to, label: item.label })),
-  }), [assignedProjects, authUser?.role, currentProject, topNavItems]);
+    availableProjects: projectOptions,
+  }), [authUser?.role, currentPath, currentProject, projectOptions]);
+  const switchProjectInPlace = useCallback((projectId: string, targetPath = currentPath) => {
+    void setSessionActiveProject(projectId).then((ok: boolean) => {
+      if (!ok) return;
+      requestPortalNavigation(targetPath, currentSectionLabel);
+    });
+  }, [currentPath, currentSectionLabel, requestPortalNavigation, setSessionActiveProject]);
 
 
   // 미인증 시 로그인으로
@@ -314,10 +321,30 @@ function PortalContent() {
       role: authUser?.role,
       isRegistered,
       pathname: location.pathname,
-    }) && location.pathname !== '/portal/project-settings') {
-      navigate('/portal/project-settings', { replace: true });
+    })) {
+      navigate('/portal/onboarding', { replace: true });
     }
   }, [authLoading, portalLoading, isAuthenticated, authUser?.role, isRegistered, location.pathname, navigate]);
+
+  useEffect(() => {
+    if (authLoading || portalLoading) return;
+    if (!isAuthenticated || !canEnterPortalWorkspace(authUser?.role)) return;
+    if (location.pathname === '/portal/project-select') return;
+    if (location.pathname === '/portal/project-settings' || location.pathname === '/portal/register-project') return;
+    if (!isRegistered && (location.pathname === '/portal/onboarding' || location.pathname === '/portal/weekly-expenses')) return;
+    if (activeProjectId) return;
+    navigate(resolvePortalProjectSelectPath(currentPath), { replace: true });
+  }, [
+    activeProjectId,
+    authLoading,
+    authUser?.role,
+    currentPath,
+    isAuthenticated,
+    isRegistered,
+    location.pathname,
+    navigate,
+    portalLoading,
+  ]);
 
   // Close mobile sidebar on navigation
   useEffect(() => {
@@ -354,6 +381,10 @@ function PortalContent() {
     );
   }
 
+  if (location.pathname === '/portal/project-select' && canEnterPortalWorkspace(authUser?.role)) {
+    return <Outlet />;
+  }
+
   const standaloneOnboarding = (
     (location.pathname.includes('/portal/onboarding')
       || location.pathname.includes('/portal/project-settings')
@@ -365,7 +396,7 @@ function PortalContent() {
     return <Outlet />;
   }
 
-  if (!isRegistered || !portalUser) {
+  if (!portalUser && !isAdminSpaceRole(authUser?.role)) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-teal-50/30 dark:from-slate-950 dark:via-slate-900 dark:to-teal-950/20 flex items-center justify-center px-6">
         <div className="max-w-lg w-full">
@@ -464,7 +495,8 @@ function PortalContent() {
     const today = getSeoulTodayIso();
     const yearMonth = today.slice(0, 7);
     const prevYearMonth = addMonthsToYearMonth(yearMonth, -1);
-    const projectId = portalUser.projectId;
+    const projectId = currentProject?.id;
+    if (!projectId) return 0;
     const run = runs.find((r) => r.projectId === projectId && r.yearMonth === yearMonth);
     const closePrev = monthlyCloses.find((c) => c.projectId === projectId && c.yearMonth === prevYearMonth);
     const payroll = run && today >= run.noticeDate && !run.acknowledged ? 1 : 0;
@@ -518,15 +550,15 @@ function PortalContent() {
           </div>
 
           {/* 사업 정보 카드 */}
-          {myProject && !collapsed && (
+          {currentProject && !collapsed && (
             <div className="mx-2.5 mb-2 p-2.5 rounded-xl bg-white/8 border border-white/20">
               <p className="text-[10px] text-slate-500 mb-0.5">내 사업</p>
               {projectOptions.length > 0 ? (
                 <Select
                   value={selectedProjectOptionValue}
                   onValueChange={(value) => {
-                    if (value && value !== portalUser?.projectId) {
-                      setActiveProject(value);
+                    if (value && value !== currentProject?.id) {
+                      switchProjectInPlace(value);
                     }
                   }}
                 >
@@ -543,7 +575,7 @@ function PortalContent() {
                 </Select>
               ) : (
                 <p className="text-[11px] text-white truncate" style={{ fontWeight: 600 }}>
-                  {myProject.name.length > 28 ? myProject.name.slice(0, 28) + '...' : myProject.name}
+                  {currentProjectName.length > 28 ? currentProjectName.slice(0, 28) + '...' : currentProjectName}
                 </p>
               )}
               <div className="flex items-center gap-1.5 mt-1">
@@ -563,7 +595,7 @@ function PortalContent() {
             </div>
           )}
 
-          {myProject && collapsed && (
+          {currentProject && collapsed && (
             <div className="mx-2.5 mb-2">
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -669,11 +701,11 @@ function PortalContent() {
                   className="w-6 h-6 rounded-md flex items-center justify-center shrink-0 text-[10px] text-white"
                   style={{ fontWeight: 700, background: 'linear-gradient(135deg, #0d9488, #059669)' }}
                 >
-                  {portalUser.name.charAt(0)}
+                  {portalDisplayName.charAt(0)}
                 </div>
                 <div className="overflow-hidden flex-1">
-                  <p className="text-[11px] text-slate-300 truncate" style={{ fontWeight: 500 }}>{portalUser.name}</p>
-                  <p className="text-[9px] text-slate-600">{portalUser.role}</p>
+                  <p className="text-[11px] text-slate-300 truncate" style={{ fontWeight: 500 }}>{portalDisplayName}</p>
+                  <p className="text-[9px] text-slate-600">{portalDisplayRole}</p>
                 </div>
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -729,11 +761,12 @@ function PortalContent() {
               <div className="hidden flex-1 items-center justify-center px-4 md:flex">
                 <button
                   type="button"
+                  data-testid="portal-project-switch-trigger"
                   onClick={() => setCommandOpen(true)}
                   className="flex h-10 w-full max-w-xl items-center gap-2 rounded-xl border border-white/15 bg-white/8 px-3 text-left text-slate-200 transition-colors hover:bg-white/12"
                 >
                   <Search className="h-4 w-4 text-slate-300" />
-                  <span className="truncate text-[12px] text-slate-300">빠른 이동, 담당 사업, 화면 검색</span>
+                  <span className="truncate text-[12px] text-slate-300">담당 사업 검색 또는 전환</span>
                   <span className="ml-auto rounded-md border border-white/15 bg-white/8 px-2 py-1 text-[10px] font-semibold text-slate-300">
                     ⌘K
                   </span>
@@ -797,7 +830,7 @@ function PortalContent() {
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="w-64 text-[12px]">
                     <DropdownMenuLabel className="space-y-0.5">
-                      <div className="text-[12px] font-semibold text-slate-900">{portalUser.name}</div>
+                      <div className="text-[12px] font-semibold text-slate-900">{portalDisplayName}</div>
                       <div className="text-[11px] font-normal text-slate-500">{authUser?.email || ''}</div>
                     </DropdownMenuLabel>
                     <DropdownMenuSeparator />
@@ -831,7 +864,7 @@ function PortalContent() {
                     <div className="mt-1 flex items-center gap-2">
                       <h1 className="truncate text-[20px] font-semibold tracking-[-0.03em] text-slate-950">{currentSectionLabel}</h1>
                       <Badge className="h-5 rounded-full bg-[#e8f0fb] px-2 text-[10px] font-semibold text-[#1b4f8f]">
-                        {portalUser.role}
+                        {portalDisplayRole}
                       </Badge>
                     </div>
                   </div>
@@ -841,8 +874,8 @@ function PortalContent() {
                     <Select
                       value={selectedProjectOptionValue}
                       onValueChange={(value) => {
-                        if (value && value !== portalUser?.projectId) {
-                          setActiveProject(value);
+                        if (value && value !== currentProject?.id) {
+                          switchProjectInPlace(value);
                         }
                       }}
                     >
@@ -916,13 +949,13 @@ function PortalContent() {
         <CommandDialog
           open={commandOpen}
           onOpenChange={setCommandOpen}
-          title="포털 빠른 이동"
-          description="포털 업무와 현재 사업 작업을 빠르게 찾아 이동합니다."
+          title="사업 전환"
+          description="지금 보고 있는 화면을 유지한 채 다른 사업으로 전환합니다."
         >
-          <CommandInput placeholder="업무, 담당 사업, 캐시플로, 제출 상태 검색..." />
+          <CommandInput placeholder="담당 사업 검색 또는 전환..." />
           <CommandList>
-            <CommandEmpty>일치하는 화면이 없습니다.</CommandEmpty>
-            <CommandGroup heading="빠른 이동">
+            <CommandEmpty>일치하는 사업이 없습니다.</CommandEmpty>
+            <CommandGroup heading="사업 전환">
               {shellCommandItems.map((item) => (
                 <CommandItem
                   key={item.id}
@@ -934,13 +967,9 @@ function PortalContent() {
                       return;
                     }
                     if (item.kind === 'project' && item.projectId) {
-                      void setActiveProject(item.projectId).then((changed) => {
-                        if (!changed) return;
-                        requestPortalNavigation(item.to, item.label);
-                      });
+                      switchProjectInPlace(item.projectId, item.to);
                       return;
                     }
-                    requestPortalNavigation(item.to, item.label);
                   }}
                   className="flex items-center gap-3"
                 >

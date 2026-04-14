@@ -36,6 +36,7 @@ const NotFoundPage = lazy(() => import('./components/layout/NotFoundPage').then(
 
 // Portal pages
 const PortalOnboarding = lazy(() => import('./components/portal/PortalOnboarding').then(m => ({ default: m.PortalOnboarding })));
+const PortalProjectSelectPage = lazy(() => import('./components/portal/PortalProjectSelectPage').then(m => ({ default: m.PortalProjectSelectPage })));
 const PortalProjectSettings = lazy(() => import('./components/portal/PortalProjectSettings').then(m => ({ default: m.PortalProjectSettings })));
 const PortalDashboard = lazy(() => import('./components/portal/PortalDashboard').then(m => ({ default: m.PortalDashboard })));
 const PortalBudget = lazy(() => import('./components/portal/PortalBudget').then(m => ({ default: m.PortalBudget })));
@@ -138,6 +139,7 @@ export const router = createBrowserRouter([
         ],
       },
       { path: 'onboarding', element: <S C={PortalOnboarding} /> },
+      { path: 'project-select', element: <S C={PortalProjectSelectPage} /> },
       { path: 'project-settings', element: <S C={PortalProjectSettings} /> },
       { path: 'submissions', element: <S C={PortalSubmissionsPage} /> },
       { path: 'payroll', element: <S C={PortalPayrollPage} /> },
