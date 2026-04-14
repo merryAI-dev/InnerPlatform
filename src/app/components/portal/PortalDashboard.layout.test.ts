@@ -8,13 +8,26 @@ const portalDashboardSource = readFileSync(
 );
 
 describe('PortalDashboard layout compaction', () => {
-  it('replaces generic alert rails with current-week accounting status copy', () => {
-    expect(portalDashboardSource).toContain('이번 주 정산 상태');
+  it('keeps project detail and weekly status inside one unified slab', () => {
+    expect(portalDashboardSource).toContain('프로젝트 상세');
+    expect(portalDashboardSource).toContain('이번 주 작업 상태');
     expect(portalDashboardSource).toContain('최근 Projection 수정');
-    expect(portalDashboardSource).not.toContain('운영 알림');
+    expect(portalDashboardSource).toContain('items-stretch gap-4 xl:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)]');
   });
 
   it('drops the separate operating shortcuts card to keep the page compact', () => {
     expect(portalDashboardSource).not.toContain('운영 바로가기');
+    expect(portalDashboardSource).not.toContain('이번 주 바로 작업');
+    expect(portalDashboardSource).not.toContain('프로젝트 설정');
+    expect(portalDashboardSource).not.toContain('사업비 입력 열기');
+  });
+
+  it('drops explanatory paragraph copy from the hero slab', () => {
+    expect(portalDashboardSource).not.toContain('발주기관, 정산 기준, 예산 흐름과 현재 작업 상태를 한 화면에서 확인합니다.');
+  });
+
+  it('moves the finance summary into the hero slab under the project title', () => {
+    expect(portalDashboardSource).toContain('md:grid-cols-2 xl:grid-cols-4');
+    expect(portalDashboardSource).not.toContain('CardTitle className="text-[13px] text-slate-900">자금 요약');
   });
 });

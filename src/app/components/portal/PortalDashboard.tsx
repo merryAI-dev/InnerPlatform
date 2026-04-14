@@ -1,13 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import {
-  Calculator, ArrowRight,
   TrendingUp, AlertTriangle,
-  CheckCircle2, CircleDollarSign,
-  ArrowUpRight, ArrowDownRight, BarChart3,
+  CheckCircle2, CircleDollarSign, ShieldCheck,
+  BarChart3,
   Loader2,
-  FileSpreadsheet,
-  ClipboardList,
 } from 'lucide-react';
 import {
   collection,
@@ -28,7 +25,6 @@ import { fmtShort } from '../../data/budget-data';
 import {
   PROJECT_STATUS_LABELS, SETTLEMENT_TYPE_SHORT, BASIS_LABELS,
   type Transaction,
-  normalizeProjectFundInputMode,
 } from '../../data/types';
 import { addMonthsToYearMonth, getSeoulTodayIso } from '../../platform/business-days';
 import { useFirebase } from '../../lib/firebase-context';
@@ -210,142 +206,135 @@ export function PortalDashboard() {
     hrAlertCount: hrAlerts.length,
     payrollRiskCount: payrollRiskItems.length,
   }), [hrAlerts.length, myChanges, myProject.id, payrollRiskItems.length, today, weeklySubmissionStatuses]);
-  const currentFundInputMode = normalizeProjectFundInputMode(myProject.fundInputMode);
   const shouldShowPayrollQueue = Boolean(payrollDetail && payrollDetail.status !== 'clear');
-  const primaryActions = currentFundInputMode === 'DIRECT_ENTRY'
-    ? [
-      { label: '사업비 입력', description: '이번 주 정산대장을 바로 입력하고 저장합니다.', to: '/portal/weekly-expenses', icon: FileSpreadsheet },
-      { label: '캐시플로', description: `${dashboardSurface.currentWeekLabel} Projection을 확인하고 수정합니다.`, to: '/portal/cashflow', icon: BarChart3 },
-      { label: '내 제출 현황', description: '이번 주 Projection과 사업비 입력 작성 여부를 확인합니다.', to: '/portal/submissions', icon: ClipboardList },
-      { label: '예산 편집', description: '예산 구조와 실제 집행 기준을 정리합니다.', to: '/portal/budget', icon: Calculator },
-    ]
-    : [
-      { label: '통장내역', description: '원본 업로드와 분류가 필요한 거래를 먼저 정리합니다.', to: '/portal/bank-statements', icon: CircleDollarSign },
-      { label: '사업비 입력', description: '주간 입력과 저장 상태를 정리합니다.', to: '/portal/weekly-expenses', icon: FileSpreadsheet },
-      { label: '캐시플로', description: `${dashboardSurface.currentWeekLabel} Projection을 확인하고 수정합니다.`, to: '/portal/cashflow', icon: BarChart3 },
-      { label: '내 제출 현황', description: '이번 주 Projection과 사업비 입력 작성 여부를 확인합니다.', to: '/portal/submissions', icon: ClipboardList },
-    ];
+  const financeSummaryItems = [
+    { label: '총 입금', value: fmtShort(totalIn) },
+    { label: '총 출금', value: fmtShort(totalOut) },
+    { label: '잔액', value: fmtShort(balance) },
+    { label: '소진율', value: `${(burnRate * 100).toFixed(1)}%` },
+  ];
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.9fr)_minmax(300px,0.9fr)]">
-        <Card className="border-slate-200 bg-white shadow-sm">
-          <CardContent className="p-5 md:p-6">
-            <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge className="h-5 rounded-full bg-[#e8f0fb] px-2 text-[10px] font-semibold text-[#1b4f8f]">
-                    {PROJECT_STATUS_LABELS[myProject.status]}
-                  </Badge>
-                  <Badge variant="outline" className="h-5 rounded-full border-slate-300 px-2 text-[10px] font-semibold text-slate-600">
-                    {SETTLEMENT_TYPE_SHORT[myProject.settlementType]}
-                  </Badge>
-                  <Badge variant="outline" className="h-5 rounded-full border-slate-300 px-2 text-[10px] font-semibold text-slate-600">
-                    {BASIS_LABELS[myProject.basis]}
-                  </Badge>
-                </div>
-                <h2 className="mt-3 truncate text-[30px] font-semibold tracking-[-0.04em] text-slate-950">
-                  {myProject.name}
-                </h2>
-                <p className="mt-2 text-[13px] leading-6 text-slate-600">
-                  {portalUser.name}님이 담당 중인 사업입니다. 발주기관, 정산 기준, 예산 흐름과 현재 작업 상태를 한 화면에서 확인합니다.
-                </p>
-                <div className="mt-4 grid gap-3 text-[12px] text-slate-600 sm:grid-cols-3">
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
-                    <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">발주기관</div>
-                    <div className="mt-1 text-[13px] font-semibold text-slate-900">{myProject.clientOrg || '-'}</div>
+      <Card className="border-slate-300 bg-slate-200/80 shadow-sm">
+        <CardContent className="p-5 md:p-6">
+          <div className="space-y-5">
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge className="h-5 rounded-full bg-[#e8f0fb] px-2 text-[10px] font-semibold text-[#1b4f8f]">
+                  {PROJECT_STATUS_LABELS[myProject.status]}
+                </Badge>
+                <Badge variant="outline" className="h-5 rounded-full border-slate-300 px-2 text-[10px] font-semibold text-slate-600">
+                  {SETTLEMENT_TYPE_SHORT[myProject.settlementType]}
+                </Badge>
+                <Badge variant="outline" className="h-5 rounded-full border-slate-300 px-2 text-[10px] font-semibold text-slate-600">
+                  {BASIS_LABELS[myProject.basis]}
+                </Badge>
+              </div>
+              <h2 className="text-[30px] font-semibold tracking-[-0.04em] text-slate-950">
+                {myProject.name}
+              </h2>
+            </div>
+
+            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+              {financeSummaryItems.map((item) => (
+                <div
+                  key={item.label}
+                  className="rounded-xl border border-slate-300 bg-white px-4 py-3 shadow-[0_1px_0_rgba(15,23,42,0.03)]"
+                >
+                  <div className="text-[12px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                    {item.label}
                   </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
-                    <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">사업비 총액</div>
-                    <div className="mt-1 text-[13px] font-semibold text-slate-900">
+                  <div
+                    className="mt-2 text-[23px] font-semibold tracking-[-0.03em] text-slate-950"
+                    style={{ fontVariantNumeric: 'tabular-nums' }}
+                  >
+                    {item.value}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="grid items-stretch gap-4 xl:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)]">
+              <div className="h-full rounded-2xl border border-slate-300 bg-slate-300/35 px-4 py-4">
+                <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">프로젝트 상세</div>
+                <div className="space-y-2">
+                  <div className="rounded-xl border border-slate-300 bg-white px-4 py-3">
+                    <div className="text-[11px] font-medium text-slate-600">발주기관</div>
+                    <div className="mt-1 text-[14px] font-semibold text-slate-900">{myProject.clientOrg || '-'}</div>
+                  </div>
+                  <div className="rounded-xl border border-slate-300 bg-white px-4 py-3">
+                    <div className="text-[11px] font-medium text-slate-600">담당자</div>
+                    <div className="mt-1 text-[14px] font-semibold text-slate-900">{portalUser.name}</div>
+                  </div>
+                  <div className="rounded-xl border border-slate-300 bg-white px-4 py-3">
+                    <div className="text-[11px] font-medium text-slate-600">사업비 총액</div>
+                    <div className="mt-1 text-[14px] font-semibold text-slate-900">
                       {myProject.contractAmount > 0 ? `${fmtShort(myProject.contractAmount)}원` : '-'}
                     </div>
                   </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
-                    <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">이번 주 Projection</div>
-                    <div className="mt-1 text-[13px] font-semibold text-slate-900">
+                  <div className="rounded-xl border border-slate-300 bg-white px-4 py-3">
+                    <div className="text-[11px] font-medium text-slate-600">이번 주 Projection</div>
+                    <div className="mt-1 text-[14px] font-semibold text-slate-900">
                       {dashboardSurface.currentWeekLabel} · {dashboardSurface.projection.label}
                     </div>
                   </div>
                 </div>
               </div>
-              <div className="flex shrink-0 flex-wrap gap-2">
-                <Button
-                  variant="outline"
-                  className="h-10 rounded-xl border-slate-300 bg-white px-4 text-[12px] font-semibold text-slate-800 hover:bg-slate-50"
-                  onClick={() => navigate('/portal/project-settings')}
-                >
-                  프로젝트 설정
-                </Button>
-                <Button
-                  className="h-10 rounded-xl bg-[#1b4f8f] px-4 text-[12px] font-semibold text-white hover:bg-[#163f72]"
-                  onClick={() => navigate('/portal/weekly-expenses')}
-                >
-                  사업비 입력 열기
-                </Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
 
-        <Card className="border-slate-200 bg-white shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-[13px] font-semibold text-slate-900">이번 주 정산 상태</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4 pt-0">
-            <div className="space-y-3">
-              <div className="flex items-start justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
-                <div>
-                  <div className="text-[11px] font-medium text-slate-600">이번 주 Projection</div>
-                  <div className="mt-1 text-[13px] font-semibold text-slate-900">{dashboardSurface.projection.label}</div>
-                  <div className="mt-1 text-[11px] text-slate-500">{dashboardSurface.projection.detail}</div>
-                </div>
-                <Badge variant="outline" className={`rounded-full ${dashboardSurface.projection.label === '미작성' ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
-                  {dashboardSurface.projection.label}
-                </Badge>
-              </div>
-
-              <div className="flex items-start justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
-                <div>
-                  <div className="text-[11px] font-medium text-slate-600">최근 Projection 수정</div>
-                  <div className="mt-1 text-[13px] font-semibold text-slate-900">
-                    {formatKstDateTime(dashboardSurface.projection.latestUpdatedAt)}
+              <div className="h-full rounded-2xl border border-slate-300 bg-slate-300/35 px-4 py-4">
+                <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">이번 주 작업 상태</div>
+                <div className="space-y-2">
+                  <div className="rounded-xl border border-slate-300 bg-white px-4 py-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-[11px] font-medium text-slate-600">Projection</div>
+                        <div className="mt-1 text-[14px] font-semibold text-slate-900">{dashboardSurface.projection.label}</div>
+                        <div className="mt-1 text-[11px] text-slate-500">{dashboardSurface.projection.detail}</div>
+                      </div>
+                      <Badge variant="outline" className={`rounded-full ${dashboardSurface.projection.label === '미작성' ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+                        {dashboardSurface.projection.label}
+                      </Badge>
+                    </div>
                   </div>
+                  <div className="rounded-xl border border-slate-300 bg-white px-4 py-3">
+                    <div className="text-[11px] font-medium text-slate-600">최근 Projection 수정</div>
+                    <div className="mt-1 text-[14px] font-semibold text-slate-900">
+                      {formatKstDateTime(dashboardSurface.projection.latestUpdatedAt)}
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-slate-300 bg-white px-4 py-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-[11px] font-medium text-slate-600">사업비 입력</div>
+                        <div className="mt-1 text-[14px] font-semibold text-slate-900">{dashboardSurface.expense.label}</div>
+                        <div className="mt-1 text-[11px] text-slate-500">{dashboardSurface.expense.detail}</div>
+                      </div>
+                      <Badge variant="outline" className={`rounded-full ${accountingToneBadgeClassName(dashboardSurface.expense.tone)}`}>
+                        {dashboardSurface.expense.label}
+                      </Badge>
+                    </div>
+                  </div>
+                  {dashboardSurface.visibleIssues.length > 0 && (
+                    <div className="flex flex-wrap gap-2 pt-2">
+                      {dashboardSurface.visibleIssues.map((item) => (
+                        <button
+                          key={item.label}
+                          className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-[11px] font-semibold transition-colors ${issueToneClassName(item.tone)}`}
+                          onClick={() => navigate(item.to)}
+                        >
+                          <span>{item.label}</span>
+                          <span>{item.count}건</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              </div>
-
-              <div className="flex items-start justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
-                <div>
-                  <div className="text-[11px] font-medium text-slate-600">사업비 입력</div>
-                  <div className="mt-1 text-[13px] font-semibold text-slate-900">{dashboardSurface.expense.label}</div>
-                  <div className="mt-1 text-[11px] text-slate-500">{dashboardSurface.expense.detail}</div>
-                </div>
-                <Badge variant="outline" className={`rounded-full ${accountingToneBadgeClassName(dashboardSurface.expense.tone)}`}>
-                  {dashboardSurface.expense.label}
-                </Badge>
               </div>
             </div>
-
-            {dashboardSurface.visibleIssues.length > 0 && (
-              <div className="space-y-2">
-                <div className="text-[11px] font-medium text-slate-600">처리 필요</div>
-                <div className="flex flex-wrap gap-2">
-                  {dashboardSurface.visibleIssues.map((item) => (
-                    <button
-                      key={item.label}
-                      className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-[11px] font-semibold transition-colors ${issueToneClassName(item.tone)}`}
-                      onClick={() => navigate(item.to)}
-                    >
-                      <span>{item.label}</span>
-                      <span>{item.count}건</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* 중요 공지 (인건비 / 월간정산 / 퇴사·전배) */}
       {(needsPayrollAck || needsMonthlyCloseAck || hrAlerts.length > 0) && (
@@ -440,55 +429,6 @@ export function PortalDashboard() {
         />
       )}
 
-      {/* 재무 KPI */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {[
-          { label: '총 입금', value: fmtShort(totalIn), icon: ArrowUpRight },
-          { label: '총 출금', value: fmtShort(totalOut), icon: ArrowDownRight },
-          { label: '잔액', value: fmtShort(balance), icon: TrendingUp },
-          { label: '소진율', value: `${(burnRate * 100).toFixed(1)}%`, icon: BarChart3 },
-        ].map(k => (
-          <Card key={k.label} className="border-slate-200 bg-white shadow-sm">
-            <CardContent className="flex items-center gap-3 p-4">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#e8f0fb] text-[#1b4f8f]">
-                <k.icon className="h-4 w-4" />
-              </div>
-              <div>
-                <p className="text-[10px] uppercase tracking-[0.14em] text-slate-500">{k.label}</p>
-                <p className="mt-1 text-[22px] font-semibold tracking-[-0.03em] text-slate-950" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                  {k.value}
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-
-      <Card className="border-slate-200 bg-white shadow-sm">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-[13px] text-slate-900">이번 주 바로 작업</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-2 pt-0 md:grid-cols-2 xl:grid-cols-4">
-          {primaryActions.map((action) => (
-            <button
-              key={action.label}
-              className="group rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left transition-colors hover:bg-slate-100"
-              onClick={() => navigate(action.to)}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-[#1b4f8f] shadow-sm ring-1 ring-slate-200">
-                  <action.icon className="h-4 w-4" />
-                </div>
-                <ArrowRight className="mt-1 h-4 w-4 text-slate-400 transition-transform group-hover:translate-x-0.5" />
-              </div>
-              <div className="mt-4">
-                <p className="text-[14px] font-semibold text-slate-950">{action.label}</p>
-                <p className="mt-1 text-[12px] leading-6 text-slate-600">{action.description}</p>
-              </div>
-            </button>
-          ))}
-        </CardContent>
-      </Card>
     </div>
   );
 }

@@ -13,9 +13,10 @@ export interface PortalShellCommandItem {
   label: string;
   description: string;
   category: '업무' | '사업' | '관리';
-  kind: 'portal' | 'admin';
+  kind: 'portal' | 'admin' | 'project';
   to: string;
   keywords: string[];
+  projectId?: string;
 }
 
 export interface PortalShellNotificationItem {
@@ -28,6 +29,7 @@ export interface PortalShellNotificationItem {
 export function buildPortalShellCommandItems(input: {
   role: string | null | undefined;
   currentProject?: PortalShellProjectItem | null;
+  assignedProjects?: PortalShellProjectItem[];
   topNavItems: PortalShellNavItem[];
 }): PortalShellCommandItem[] {
   const navItems = input.topNavItems.map((item) => ({
@@ -40,15 +42,21 @@ export function buildPortalShellCommandItems(input: {
     keywords: [item.label, item.to],
   }));
 
-  const projectItems = input.currentProject ? [{
-    id: `project:${input.currentProject.id}`,
-    label: input.currentProject.name,
-    description: '현재 선택된 사업 기준으로 작업 화면 열기',
+  const projectPool = (input.assignedProjects && input.assignedProjects.length > 0)
+    ? input.assignedProjects
+    : input.currentProject
+      ? [input.currentProject]
+      : [];
+  const projectItems = projectPool.map((project) => ({
+    id: `project:${project.id}`,
+    label: project.name,
+    description: input.currentProject?.id === project.id ? '현재 담당 사업으로 이동' : '담당 사업으로 전환하고 이동',
     category: '사업' as const,
-    kind: 'portal' as const,
+    kind: 'project' as const,
     to: '/portal',
-    keywords: [input.currentProject.name, input.currentProject.id, '현재 사업'],
-  }] : [];
+    projectId: project.id,
+    keywords: [project.name, project.id, '담당 사업', '사업 전환', input.currentProject?.id === project.id ? '현재 사업' : '내 사업'],
+  }));
 
   const adminItems = String(input.role || '').toLowerCase() === 'admin' || String(input.role || '').toLowerCase() === 'finance'
     ? [{

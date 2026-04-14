@@ -58,6 +58,7 @@ import {
 import { DarkModeToggle } from '../layout/DarkModeToggle';
 import { PageTransition } from '../layout/PageTransition';
 import { ErrorBoundary } from '../layout/ErrorBoundary';
+import { MyscWordmark } from '../brand/MyscWordmark';
 import {
   canChooseWorkspace,
   canEnterPortalWorkspace,
@@ -267,8 +268,9 @@ function PortalContent() {
   const shellCommandItems = useMemo(() => buildPortalShellCommandItems({
     role: authUser?.role,
     currentProject: currentProject ? { id: currentProject.id, name: currentProject.name } : null,
+    assignedProjects: assignedProjects.map((project) => ({ id: project.id, name: project.name })),
     topNavItems: topNavItems.map((item) => ({ to: item.to, label: item.label })),
-  }), [authUser?.role, currentProject, topNavItems]);
+  }), [assignedProjects, authUser?.role, currentProject, topNavItems]);
 
 
   // 미인증 시 로그인으로
@@ -507,21 +509,11 @@ function PortalContent() {
         `}>
           {/* Brand */}
           <div className={`flex items-center gap-2.5 h-[48px] px-3 ${collapsed ? 'justify-center' : ''}`}>
-            <div
-              className="flex items-center justify-center w-8 h-8 rounded-lg shrink-0"
-              style={{ background: 'linear-gradient(135deg, #0d9488 0%, #059669 100%)' }}
-            >
-              <FolderKanban className="w-4 h-4 text-white" />
+            <div className="inline-flex items-center rounded-lg bg-white px-2 py-1 shadow-sm">
+              <MyscWordmark />
             </div>
             {!collapsed && (
-              <div className="overflow-hidden flex-1">
-                <p className="text-[11px] text-white truncate" style={{ fontWeight: 700 }}>
-                  MYSC Workspace
-                </p>
-                <p className="text-[9px] text-slate-500 truncate tracking-wider" style={{ textTransform: 'uppercase' }}>
-                  Project Ops
-                </p>
-              </div>
+              <div className="flex-1" />
             )}
           </div>
 
@@ -730,12 +722,8 @@ function PortalContent() {
                 <Menu className="h-4 w-4" />
               </button>
               <div className="flex min-w-0 items-center gap-2">
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#1d4f91]">
-                  <FolderKanban className="h-4 w-4" />
-                </div>
-                <div className="min-w-0">
-                  <p className="truncate text-[13px] font-semibold tracking-[0.01em]">MYSC Workspace</p>
-                  <p className="truncate text-[10px] text-slate-300">Project Operations</p>
+                <div className="inline-flex items-center rounded-lg bg-white px-2 py-1 shadow-sm">
+                  <MyscWordmark className="shrink-0" />
                 </div>
               </div>
               <div className="hidden flex-1 items-center justify-center px-4 md:flex">
@@ -745,7 +733,7 @@ function PortalContent() {
                   className="flex h-10 w-full max-w-xl items-center gap-2 rounded-xl border border-white/15 bg-white/8 px-3 text-left text-slate-200 transition-colors hover:bg-white/12"
                 >
                   <Search className="h-4 w-4 text-slate-300" />
-                  <span className="truncate text-[12px] text-slate-300">빠른 이동, 사업, 제출, 캐시플로 검색</span>
+                  <span className="truncate text-[12px] text-slate-300">빠른 이동, 담당 사업, 화면 검색</span>
                   <span className="ml-auto rounded-md border border-white/15 bg-white/8 px-2 py-1 text-[10px] font-semibold text-slate-300">
                     ⌘K
                   </span>
@@ -874,13 +862,6 @@ function PortalContent() {
                       {currentProjectName || '사업 미선택'}
                     </div>
                   )}
-                  <Button
-                    size="sm"
-                    className="h-10 rounded-xl bg-[#1b4f8f] px-4 text-[12px] font-semibold text-white hover:bg-[#163f72]"
-                    onClick={() => requestPortalNavigation('/portal/weekly-expenses', '사업비 입력(주간)')}
-                  >
-                    사업비 입력
-                  </Button>
                 </div>
               </div>
 
@@ -938,7 +919,7 @@ function PortalContent() {
           title="포털 빠른 이동"
           description="포털 업무와 현재 사업 작업을 빠르게 찾아 이동합니다."
         >
-          <CommandInput placeholder="업무, 사업, 캐시플로, 제출 상태 검색..." />
+          <CommandInput placeholder="업무, 담당 사업, 캐시플로, 제출 상태 검색..." />
           <CommandList>
             <CommandEmpty>일치하는 화면이 없습니다.</CommandEmpty>
             <CommandGroup heading="빠른 이동">
@@ -950,6 +931,13 @@ function PortalContent() {
                     setCommandOpen(false);
                     if (item.kind === 'admin') {
                       requestAdminNavigation();
+                      return;
+                    }
+                    if (item.kind === 'project' && item.projectId) {
+                      void setActiveProject(item.projectId).then((changed) => {
+                        if (!changed) return;
+                        requestPortalNavigation(item.to, item.label);
+                      });
                       return;
                     }
                     requestPortalNavigation(item.to, item.label);
