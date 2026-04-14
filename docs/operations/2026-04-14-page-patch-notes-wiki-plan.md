@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** GitHub 저장소 안에 페이지별 누적 패치노트 위키를 만들고, 최근 운영 영향이 큰 화면 8개의 seed 문서를 초기화한다.
+**Goal:** GitHub 저장소 안에 페이지별 누적 패치노트 위키를 만들고, 최근 운영 영향이 큰 화면 8개의 seed 문서를 `사용자 체감 기능 체크리스트`와 함께 초기화한다.
 
-**Architecture:** `docs/wiki/patch-notes/`를 위키 루트로 두고 `index.md`, `log.md`, `AGENTS.md`, `pages/*.md`를 함께 관리한다. 변경이 특정 화면 UX에 영향을 주면 해당 page 문서와 `log.md`를 같이 갱신하는 운영 규칙을 문서화한다.
+**Architecture:** `docs/wiki/patch-notes/`를 위키 루트로 두고 `index.md`, `log.md`, `AGENTS.md`, `pages/*.md`를 함께 관리한다. 각 page 문서는 최근 변경 기록과 별도로 `Current Feature Checklist`를 가져서 비개발자가 지금 실제로 되는 기능을 바로 확인할 수 있게 한다.
 
 **Tech Stack:** Markdown, git history, existing repo docs under `docs/operations`, source files in `src/app/components/*`
 

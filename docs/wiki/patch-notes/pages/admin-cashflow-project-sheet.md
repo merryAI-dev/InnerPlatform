@@ -15,6 +15,15 @@
 - 주간 accounting snapshot과 audit trail이 화면 해석의 근거가 된다.
 - dirty state와 close 정책이 강하게 엮여 있어 변경 영향 범위가 넓다.
 
+## Current Feature Checklist
+
+- [x] 사업별 projection 확인 가능
+- [x] actual과 compare mode 확인 가능
+- [x] 제출 및 마감 흐름 처리 가능
+- [x] dirty state 경고와 저장 차단 정책 존재
+- [x] 주간 accounting snapshot과 audit trail 확인 가능
+- [x] project 단위 export 흐름과 연결됨
+
 ## Recent Changes
 
 - [2026-04-09] admin export 흐름과 project sheet의 workbook contract를 더 밀접하게 맞췄다.

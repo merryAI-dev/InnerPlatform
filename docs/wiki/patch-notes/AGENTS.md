@@ -9,6 +9,7 @@
 - `index.md`: 전체 탐색 진입점
 - `log.md`: append-only 시간순 기록
 - `pages/*.md`: 화면 단위 누적 문서
+- 각 `pages/*.md`는 `현재 구현 체크리스트`를 포함한다.
 
 ## Authoring Rules
 
@@ -18,6 +19,8 @@
 4. 문장은 마케팅 문구가 아니라 사실 중심 운영 기록으로 쓴다.
 5. 가능하면 관련 파일, 테스트, QA 문맥, 대표 커밋을 함께 남긴다.
 6. 한 문서에 코드를 길게 복제하지 않는다. 구현 근거는 파일 경로와 테스트 경로로 연결한다.
+7. 체크리스트는 개발 구현 단위가 아니라 사용자가 체감하는 기능 단위로 쓴다.
+8. 기능이 추가되거나 제거되면 `Recent Changes`뿐 아니라 `Current Feature Checklist`도 같이 갱신한다.
 
 ## Page Template
 
@@ -32,6 +35,7 @@
 
 - `Purpose`
 - `Current UX Summary`
+- `Current Feature Checklist`
 - `Recent Changes`
 - `Known Notes`
 - `Related Files`
@@ -47,6 +51,7 @@
 2. 대응 `pages/*.md` 갱신
 3. `log.md` append
 4. 새 seed가 생기면 `index.md` 갱신
+5. 사용자 체감 기능이 바뀌었다면 체크리스트를 먼저 고친다.
 
 ### QA 입력 후
 
@@ -60,6 +65,7 @@
 - `last updated`가 너무 오래된 핵심 화면이 있는가
 - `Related Files`가 현재 코드와 어긋나는가
 - 동일한 변경이 여러 문서에서 충돌되게 서술되는가
+- 체크리스트가 현재 구현 상태와 어긋나지 않는가
 
 ## Naming Rules
 

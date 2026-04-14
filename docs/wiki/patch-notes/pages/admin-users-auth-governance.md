@@ -15,6 +15,15 @@
 - drift가 있는 사용자를 찾고 개별 또는 일괄 deep sync를 수행한다.
 - shallow role 편집이 아니라 canonical member, legacy member, custom claim을 함께 정렬하는 운영 surface다.
 
+## Current Feature Checklist
+
+- [x] 사용자별 auth/member/claim 상태 비교 가능
+- [x] drift 사용자 식별 가능
+- [x] 개별 deep sync 가능
+- [x] 필터 기준 bulk deep sync 가능
+- [x] canonical member, legacy member, custom claim 정렬 가능
+- [x] 캐시플로 권한 이슈 조사에 활용 가능
+
 ## Recent Changes
 
 - [2026-04-13] 기존 `/users` 사용자 목록을 auth governance 대시보드로 교체했다.

@@ -16,6 +16,17 @@
 - 화면은 분석 대시보드가 아니라 다운로드 중심 운영 surface로 유지한다.
 - 권한은 `admin`과 `finance`가 동일하게 `cashflow:export`를 가진다.
 
+## Current Feature Checklist
+
+- [x] 사업별 단건 추출 가능
+- [x] 전체 사업 일괄 추출 가능
+- [x] 연간 범위 일괄 추출 가능
+- [x] 시작월~종료월 기간 지정 가능
+- [x] 정산 기준별 필터 가능
+- [x] projection만 export
+- [x] `admin`과 `finance` 모두 접근 가능
+- [ ] actual export 지원
+
 ## Recent Changes
 
 - [2026-04-09] browser workbook 생성 대신 server-side export 기준으로 구조를 정리했다.
