@@ -72,3 +72,4 @@
 - 파일명은 kebab-case
 - route/공간 의미가 드러나도록 `portal-*`, `admin-*` prefix 사용
 - 도메인 문서보다 화면 문서를 우선 생성
+- redirect나 alias route는 가능하면 기존 대표 화면 문서에 흡수하고, 별도 작업면이 있는 화면만 새 문서를 만든다.
