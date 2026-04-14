@@ -38,3 +38,47 @@
 - pages: [portal-submissions](./pages/portal-submissions.md)
 - commits: `afc2098`
 - summary: 이번주 작성 여부와 최근 업데이트(Projection) 기준을 화면에서 더 명확하게 읽히도록 정리했다.
+
+## [2026-04-14] patch-note | guide-simplify-and-hook | 설명성 UI 축소와 patch-note guard 추가
+- pages: [portal-dashboard](./pages/portal-dashboard.md), [portal-weekly-expense](./pages/portal-weekly-expense.md), [portal-bank-statement](./pages/portal-bank-statement.md), [portal-budget](./pages/portal-budget.md), [portal-submissions](./pages/portal-submissions.md), [portal-onboarding](./pages/portal-onboarding.md), [admin-dashboard](./pages/admin-dashboard.md), [admin-participation](./pages/admin-participation.md)
+- summary: 주요 운영 화면에서 미션/가이드/프로토콜 패널을 제거하고, 대응 patch-note page와 log가 같이 staged되지 않으면 커밋을 막는 hook을 추가했다.
+
+## [2026-04-14] patch-note | portal-dashboard-saas-shell | 상단 workspace형 SaaS 재편
+- pages: [portal-dashboard](./pages/portal-dashboard.md)
+- summary: 내사업 현황을 좌측 포털형 툴에서 상단 workspace bar, 앱 탭, 사업 전환 rail을 가진 cold enterprise SaaS 구조로 재편했다.
+
+## [2026-04-14] patch-note | portal-dashboard | 0건 운영 정보 축소와 주간 상태 전면 배치
+- pages: [portal-dashboard](./pages/portal-dashboard.md)
+- summary: 0건 운영 알림과 설정성 바로가기를 걷어내고, 이번 주 Projection 작성 여부·최근 Projection 수정일·사업비 입력 상태를 홈 첫 화면에서 바로 보이도록 압축했다.
+
+## [2026-04-14] patch-note | portal-dashboard-shell | 검색/알림/사용자 액션 연결
+- pages: [portal-dashboard](./pages/portal-dashboard.md)
+- summary: 상단 search, bell, user affordance를 실제 command palette와 dropdown action으로 연결해 관리자 이동, 내 프로필, 로그아웃, 처리할 알림 확인이 가능하도록 마감했다.
+
+## [2026-04-14] patch-note | portal-dashboard-brand-slab | 로고 교체와 단일 헤더 슬랩
+- pages: [portal-dashboard](./pages/portal-dashboard.md)
+- summary: 상단 폴더 아이콘을 MYSC 로고로 교체하고 workspace 문구를 제거했으며, 첫 화면의 사업 정보와 주간 상태를 한 장의 세로형 헤더 슬랩으로 다시 묶었다.
+
+## [2026-04-14] patch-note | portal-dashboard-minimal-pass | 중복 CTA 제거와 단일 세로 흐름
+- pages: [portal-dashboard](./pages/portal-dashboard.md)
+- summary: 홈 첫 화면에서 중복 이동 버튼과 작업 카드 묶음을 제거하고, 상태 slab와 자금 요약만 남는 더 미니멀한 세로 흐름으로 압축했다.
+
+## [2026-04-14] patch-note | portal-dashboard-two-axis-hero | 상세/주간상태 한 판 통합
+- pages: [portal-dashboard](./pages/portal-dashboard.md)
+- summary: 자금 요약을 사업명 아래 4칸으로 올리고, 같은 hero 안에서 좌측 프로젝트 상세와 우측 이번 주 작업 상태가 한 번에 보이도록 재구성했다.
+
+## [2026-04-14] patch-note | portal-dashboard-finance-typography | 자금 요약 가독성 정리
+- pages: [portal-dashboard](./pages/portal-dashboard.md)
+- summary: 자금 요약 4칸의 장식 아이콘을 제거하고 라벨과 숫자 크기를 키워 더 미니멀하고 읽기 쉬운 밀도로 다듬었다.
+
+## [2026-04-14] patch-note | portal-dashboard-balance-tone | 좌우 비중과 gray hierarchy 조정
+- pages: [portal-dashboard](./pages/portal-dashboard.md)
+- summary: 프로젝트 상세와 이번 주 작업 상태의 좌우 비중을 다시 맞추고, hero 내부에 slate 회색 계층을 추가해 덜 허옇고 더 전문적인 운영툴 톤으로 정리했다.
+
+## [2026-04-14] patch-note | portal-dashboard-white-boxes | 흰 박스 유지와 배경 대비 강화
+- pages: [portal-dashboard](./pages/portal-dashboard.md)
+- summary: 정보 박스는 다시 흰색으로 통일하고, hero 바탕 회색만 더 진하게 조정해 박스 대비와 가독성을 높였다.
+
+## [2026-04-14] patch-note | portal-shell-project-search | 담당 사업 검색 전환 지원
+- pages: [portal-dashboard](./pages/portal-dashboard.md)
+- summary: 헤더의 중복 `사업비 입력` 버튼을 제거하고, 상단 command search가 담당 사업 전체를 검색해 선택 시 해당 사업으로 전환 후 이동하도록 확장했다.

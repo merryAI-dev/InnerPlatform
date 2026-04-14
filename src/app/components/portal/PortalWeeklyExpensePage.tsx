@@ -71,7 +71,6 @@ import {
   AlertDialogTitle,
 } from '../ui/alert-dialog';
 import { resolvePortalHappyPath } from '../../platform/portal-happy-path';
-import { resolvePortalMissionProgress } from '../../platform/portal-mission-guide';
 import { resolveWeeklyExpenseSavePolicy } from '../../platform/weekly-expense-save-policy';
 import { groupExpenseIntakeItemsForSurface } from '../../platform/bank-intake-surface';
 import { cn } from '../ui/utils';
@@ -117,7 +116,6 @@ export function PortalWeeklyExpensePage() {
     saveBudgetPlanRows,
     saveBudgetCodeBook,
     markSheetSourceApplied,
-    weeklySubmissionStatuses,
     upsertWeeklySubmissionStatus,
     saveExpenseIntakeDraft,
     projectExpenseIntakeItem,
@@ -163,12 +161,6 @@ export function PortalWeeklyExpensePage() {
   const isENaraProject = myProject?.settlementType === 'TYPE5' || myProject?.accountType === 'DEDICATED';
   const fundInputMode = normalizeProjectFundInputMode(myProject?.fundInputMode);
   const isDirectEntryMode = fundInputMode === 'DIRECT_ENTRY';
-  const missionProgress = useMemo(() => resolvePortalMissionProgress({
-    fundInputMode,
-    bankStatementRowCount: bankStatementCount,
-    expenseRowCount: expenseSheetRows?.length || 0,
-    weeklySubmissionStatuses,
-  }), [bankStatementCount, expenseSheetRows?.length, fundInputMode, weeklySubmissionStatuses]);
   const intakeSurface = useMemo(() => groupExpenseIntakeItemsForSurface(expenseIntakeItems), [expenseIntakeItems]);
   const queueWorkCount = intakeSurface.needsClassification.length + intakeSurface.reviewRequired.length + intakeSurface.pendingEvidence.length;
   const expenseRowCount = expenseSheetRows?.length || 0;
@@ -186,7 +178,7 @@ export function PortalWeeklyExpensePage() {
     if (!happyPath.canOpenWeeklyExpenses) {
       return {
         title: '주간 사업비를 시작하려면 먼저 사업 연결이 필요합니다',
-        description: '사업 배정이 끝나면 이번 주 미션, 정산 탭, 통장내역 연동이 같은 기준으로 열립니다.',
+        description: '사업 배정이 끝나면 이 화면과 통장내역, 예산 화면을 같은 기준으로 사용할 수 있습니다.',
         toneClass: 'border-amber-200/70 bg-amber-50/70',
         actionLabel: '사업 설정 열기',
         actionKind: 'settings' as const,
@@ -210,24 +202,12 @@ export function PortalWeeklyExpensePage() {
         actionKind: 'drive' as const,
       };
     }
-    return {
-      title: '이번 주 정산 흐름이 준비되었습니다',
-      description: '상단 미션과 우측 저장 상태를 보며 이 탭에서 바로 입력, 저장, 반영 확인까지 이어가세요.',
-      toneClass: 'border-emerald-200/70 bg-emerald-50/70',
-      actionLabel: missionProgress.activeStep.ctaPath && missionProgress.activeStep.ctaPath !== '/portal/weekly-expenses'
-        ? missionProgress.activeStep.ctaLabel
-        : null,
-      actionKind: missionProgress.activeStep.ctaPath === '/portal/bank-statements'
-        ? 'bank'
-        : null,
-    };
+    return null;
   }, [
     bankStatementCount,
     happyPath.canOpenWeeklyExpenses,
     happyPath.canUseEvidenceWorkflow,
     isDirectEntryMode,
-    missionProgress.activeStep.ctaLabel,
-    missionProgress.activeStep.ctaPath,
   ]);
   const settlementSheetPolicy = useMemo(
     () => normalizeSettlementSheetPolicy(myProject?.settlementSheetPolicy, myProject?.fundInputMode),

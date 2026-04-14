@@ -5,7 +5,6 @@ import { toast } from 'sonner';
 import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
 import { Badge } from '../ui/badge';
-import { PortalMissionGuideLauncher } from './PortalMissionGuideLauncher';
 import { BankImportTriageWizard } from './BankImportTriageWizard';
 import { usePortalStore } from '../../data/portal-store';
 import {
@@ -20,8 +19,6 @@ import {
 import { groupExpenseIntakeItemsForSurface } from '../../platform/bank-intake-surface';
 import { normalizeKey, parseCsv, parseNumber } from '../../platform/csv-utils';
 import { loadXlsx, warmXlsx } from '../../platform/lazy-heavy-modules';
-import { normalizeProjectFundInputMode } from '../../data/types';
-import { resolvePortalMissionProgress } from '../../platform/portal-mission-guide';
 
 function getAmountColumnIndexes(columns: string[]): Set<number> {
   return new Set(
@@ -53,13 +50,11 @@ export function PortalBankStatementPage() {
     myProject,
     bankStatementRows,
     saveBankStatementRows,
-    expenseSheetRows,
     expenseIntakeItems,
     evidenceRequiredMap,
     saveExpenseIntakeDraft,
     projectExpenseIntakeItem,
     syncExpenseIntakeEvidence,
-    weeklySubmissionStatuses,
   } = usePortalStore();
   const [columns, setColumns] = useState<string[]>(bankStatementRows?.columns || []);
   const [rows, setRows] = useState<BankStatementRow[]>(bankStatementRows?.rows || []);
@@ -77,12 +72,6 @@ export function PortalBankStatementPage() {
   const bankProfile = useMemo(() => detectBankStatementProfile(columns, lastUploadedName), [columns, lastUploadedName]);
   const amountColIdxs = useMemo(() => getAmountColumnIndexes(columns), [columns]);
   const hasUploadedSheet = rows.length > 0 && columns.length > 0;
-  const missionProgress = useMemo(() => resolvePortalMissionProgress({
-    fundInputMode: normalizeProjectFundInputMode(myProject?.fundInputMode),
-    bankStatementRowCount: rows.length,
-    expenseRowCount: expenseSheetRows?.length || 0,
-    weeklySubmissionStatuses,
-  }), [expenseSheetRows?.length, myProject?.fundInputMode, rows.length, weeklySubmissionStatuses]);
   const intakeSurface = useMemo(() => groupExpenseIntakeItemsForSurface(expenseIntakeItems), [expenseIntakeItems]);
   const queueWorkCount = intakeSurface.needsClassification.length + intakeSurface.reviewRequired.length + intakeSurface.pendingEvidence.length;
 
@@ -545,8 +534,6 @@ export function PortalBankStatementPage() {
           </CardContent>
         </Card>
       )}
-
-      <PortalMissionGuideLauncher guideId="bank-statements" progress={missionProgress} />
 
       {hasUploadedSheet ? (
         <Card>

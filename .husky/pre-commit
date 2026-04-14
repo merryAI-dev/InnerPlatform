@@ -8,6 +8,11 @@ INS=${INS:-0}
 DEL=${DEL:-0}
 TOTAL=$((INS + DEL))
 
+node scripts/check_patch_notes_guard.mjs
+if [ $? -ne 0 ]; then
+  exit 1
+fi
+
 if [ "$TOTAL" -gt 1500 ]; then
   echo "\033[31m⚠ XL COMMIT: ${TOTAL} LOC staged (${INS}+ / ${DEL}-)\033[0m"
   echo "\033[31m  Consider splitting into smaller commits for easier review/rollback.\033[0m"
