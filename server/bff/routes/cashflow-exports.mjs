@@ -7,6 +7,17 @@ function encodeContentDisposition(fileName) {
   return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
 }
 
+function nextYearMonth(yearMonth) {
+  const match = /^(\d{4})-(\d{2})$/.exec(String(yearMonth || '').trim());
+  if (!match) return '';
+  const year = Number.parseInt(match[1], 10);
+  const month = Number.parseInt(match[2], 10);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return '';
+  const nextMonth = month === 12 ? 1 : month + 1;
+  const nextYear = month === 12 ? year + 1 : year;
+  return `${String(nextYear).padStart(4, '0')}-${String(nextMonth).padStart(2, '0')}`;
+}
+
 export function mountCashflowExportRoutes(app, { db, rbacPolicy }) {
   app.post('/api/v1/cashflow-exports', asyncHandler(async (req, res) => {
     const { tenantId } = req.context;
@@ -33,7 +44,9 @@ export function mountCashflowExportRoutes(app, { db, rbacPolicy }) {
         .filter((project) => !project.trashedAt);
     }
 
-    if (payload.basis) {
+    if (payload.accountType) {
+      projects = projects.filter((project) => project.accountType === payload.accountType);
+    } else if (payload.basis) {
       projects = projects.filter((project) => project.basis === payload.basis);
     }
 
@@ -41,7 +54,7 @@ export function mountCashflowExportRoutes(app, { db, rbacPolicy }) {
       throw createHttpError(404, '추출할 프로젝트가 없습니다.', 'not_found');
     }
 
-    const weekQuery = db.collection(`orgs/${tenantId}/cashflowWeeks`)
+    const weekQuery = db.collection(`orgs/${tenantId}/cashflow_weeks`)
       .where('yearMonth', '>=', yearMonths[0])
       .where('yearMonth', '<=', yearMonths[yearMonths.length - 1]);
     const weekSnap = await weekQuery.get();
@@ -53,11 +66,34 @@ export function mountCashflowExportRoutes(app, { db, rbacPolicy }) {
       weeksByProject.set(week.projectId, bucket);
     }
 
+    const transactionProjectIds = new Set(projects.map((project) => project.id));
+    const transactionYearMonths = new Set(yearMonths);
+    const transactionsByProject = new Map();
+    const txRangeStart = `${yearMonths[0]}-01`;
+    const txRangeEndExclusive = `${nextYearMonth(yearMonths[yearMonths.length - 1])}-01`;
+    let txQuery = db.collection(`orgs/${tenantId}/transactions`)
+      .where('dateTime', '>=', txRangeStart)
+      .where('dateTime', '<', txRangeEndExclusive);
+    if (payload.scope === 'single' && projects[0]?.id) {
+      txQuery = txQuery.where('projectId', '==', projects[0].id);
+    }
+    const txSnap = await txQuery.get();
+    for (const doc of txSnap.docs) {
+      const transaction = { id: doc.id, ...doc.data() };
+      if (!transactionProjectIds.has(transaction.projectId)) continue;
+      const transactionYearMonth = typeof transaction.dateTime === 'string' ? transaction.dateTime.slice(0, 7) : '';
+      if (!transactionYearMonths.has(transactionYearMonth)) continue;
+      const bucket = transactionsByProject.get(transaction.projectId) || [];
+      bucket.push(transaction);
+      transactionsByProject.set(transaction.projectId, bucket);
+    }
+
     const exportProjects = projects.map((project) => ({
       id: project.id,
       name: project.name,
       shortName: project.shortName,
       weeks: weeksByProject.get(project.id) || [],
+      transactions: transactionsByProject.get(project.id) || [],
     }));
 
     const buffer = await buildCashflowExportWorkbookBuffer({

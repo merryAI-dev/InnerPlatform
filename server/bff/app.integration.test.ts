@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
+import ExcelJS from 'exceljs';
 import { createBffApp } from './app.mjs';
 import { createFirestoreDb } from './firestore.mjs';
 
@@ -19,6 +20,33 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
   const db = createFirestoreDb({ projectId });
   const app = createBffApp({ projectId, workerSecret });
   const api = request(app);
+
+  function parseBinaryResponse(res: any, callback: (err: Error | null, body?: Buffer) => void) {
+    const chunks: Buffer[] = [];
+    res.on('data', (chunk: Buffer | string) => {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    });
+    res.on('end', () => callback(null, Buffer.concat(chunks)));
+    res.on('error', callback);
+  }
+
+  async function downloadCashflowExport(body: Record<string, unknown>) {
+    return api
+      .post('/api/v1/cashflow-exports')
+      .set({
+        ...defaultHeaders,
+        'idempotency-key': `idem-cashflow-export-${Math.random().toString(16).slice(2)}`,
+      })
+      .buffer(true)
+      .parse(parseBinaryResponse)
+      .send(body);
+  }
+
+  async function readWorkbook(buffer: Buffer) {
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer);
+    return workbook;
+  }
 
   async function clearCollection(path: string): Promise<void> {
     const snap = await db.collection(path).get();
@@ -49,6 +77,7 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       'change_events',
       'views',
       'members',
+      'cashflow_weeks',
       'outbox_deliveries',
       'idempotency_keys',
       'relation_rules',
@@ -760,6 +789,161 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     expect(ledgerSnap.exists).toBe(true);
     expect(ledgerSnap.data()?.projectId).toBe('p-auto-ledger-001');
     expect(ledgerSnap.data()?.name).toBe('전용통장 원장');
+  });
+
+  it('exports non-zero cashflow values from cashflow_weeks', async () => {
+    await api
+      .post('/api/v1/projects')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-cashflow-project-001' })
+      .send({
+        id: 'p-cashflow-001',
+        name: 'Cashflow Project',
+        accountType: 'DEDICATED',
+      });
+
+    await db.doc(`orgs/${tenantId}/cashflow_weeks/p-cashflow-001-2026-01-w1`).set({
+      projectId: 'p-cashflow-001',
+      yearMonth: '2026-01',
+      weekNo: 1,
+      weekStart: '2025-12-31',
+      weekEnd: '2026-01-06',
+      projection: { SALES_IN: 1250 },
+      actual: { SALES_IN: 900 },
+      createdAt: '2026-01-02T00:00:00.000Z',
+      updatedAt: '2026-01-03T00:00:00.000Z',
+    });
+
+    await db.doc(`orgs/${tenantId}/transactions/tx-cashflow-001`).set({
+      id: 'tx-cashflow-001',
+      projectId: 'p-cashflow-001',
+      dateTime: '2026-01-05',
+      amount: 1250,
+      createdAt: '2026-01-05T00:00:00.000Z',
+      updatedAt: '2026-01-05T00:00:00.000Z',
+    }, { merge: true });
+
+    const response = await downloadCashflowExport({
+      scope: 'single',
+      projectId: 'p-cashflow-001',
+      startYearMonth: '2026-01',
+      endYearMonth: '2026-01',
+      variant: 'single-project',
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers['content-type']).toContain('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+
+    const workbook = await readWorkbook(response.body);
+    const worksheet = workbook.getWorksheet('Projection');
+    const rows = worksheet.getSheetValues().filter(Boolean).map((row) => (Array.isArray(row) ? row.slice(1) : []));
+    expect(rows[0]).toEqual(['사업', 'Cashflow Project', '사업 ID', 'p-cashflow-001', '거래 수', 1]);
+    const salesRow = rows.find((row) => row[0] === '매출액(입금)');
+
+    expect(salesRow).toBeTruthy();
+    expect(salesRow).toEqual([
+      '매출액(입금)',
+      1250, 0, 0, 0, 0,
+    ]);
+  });
+
+  it('filters exported projects by accountType', async () => {
+    await api
+      .post('/api/v1/projects')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-cashflow-project-002a' })
+      .send({
+        id: 'p-cashflow-002a',
+        name: 'Dedicated Project',
+        accountType: 'DEDICATED',
+      });
+
+    await api
+      .post('/api/v1/projects')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-cashflow-project-002b' })
+      .send({
+        id: 'p-cashflow-002b',
+        name: 'Operating Project',
+        accountType: 'OPERATING',
+      });
+
+    await db.doc(`orgs/${tenantId}/cashflow_weeks/p-cashflow-002a-2026-01-w1`).set({
+      projectId: 'p-cashflow-002a',
+      yearMonth: '2026-01',
+      weekNo: 1,
+      weekStart: '2025-12-31',
+      weekEnd: '2026-01-06',
+      projection: { SALES_IN: 700 },
+      actual: { SALES_IN: 500 },
+      createdAt: '2026-01-02T00:00:00.000Z',
+      updatedAt: '2026-01-03T00:00:00.000Z',
+    });
+
+    await db.doc(`orgs/${tenantId}/cashflow_weeks/p-cashflow-002b-2026-01-w1`).set({
+      projectId: 'p-cashflow-002b',
+      yearMonth: '2026-01',
+      weekNo: 1,
+      weekStart: '2025-12-31',
+      weekEnd: '2026-01-06',
+      projection: { SALES_IN: 900 },
+      actual: { SALES_IN: 600 },
+      createdAt: '2026-01-02T00:00:00.000Z',
+      updatedAt: '2026-01-03T00:00:00.000Z',
+    });
+
+    await db.doc(`orgs/${tenantId}/transactions/tx-cashflow-002a`).set({
+      id: 'tx-cashflow-002a',
+      projectId: 'p-cashflow-002a',
+      dateTime: '2026-01-04',
+      amount: 700,
+      createdAt: '2026-01-04T00:00:00.000Z',
+      updatedAt: '2026-01-04T00:00:00.000Z',
+    }, { merge: true });
+
+    const response = await downloadCashflowExport({
+      scope: 'all',
+      accountType: 'DEDICATED',
+      startYearMonth: '2026-01',
+      endYearMonth: '2026-01',
+      variant: 'multi-sheet',
+    });
+
+    expect(response.status).toBe(200);
+
+    const workbook = await readWorkbook(response.body);
+    expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual(['Dedicated Project']);
+
+    const worksheet = workbook.getWorksheet('Dedicated Project');
+    const rows = worksheet.getSheetValues().filter(Boolean).map((row) => (Array.isArray(row) ? row.slice(1) : []));
+    expect(rows[0]).toEqual(['사업', 'Dedicated Project', '사업 ID', 'p-cashflow-002a', '거래 수', 1]);
+    const salesRow = rows.find((row) => row[0] === '매출액(입금)');
+
+    expect(salesRow).toEqual([
+      '매출액(입금)',
+      700, 0, 0, 0, 0,
+    ]);
+  });
+
+  it('accepts legacy basis payloads for export requests', async () => {
+    await api
+      .post('/api/v1/projects')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-cashflow-project-legacy-basis' })
+      .send({
+        id: 'p-cashflow-legacy-basis',
+        name: 'Legacy Basis Project',
+        basis: '공급가액',
+        accountType: 'NONE',
+      });
+
+    const response = await downloadCashflowExport({
+      scope: 'all',
+      basis: '공급가액',
+      startYearMonth: '2026-01',
+      endYearMonth: '2026-01',
+      variant: 'multi-sheet',
+    });
+
+    expect(response.status).toBe(200);
+    const workbook = await readWorkbook(response.body);
+    expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual(['Legacy Basis Project']);
   });
 
   it('enforces deterministic state transitions and version checks', async () => {

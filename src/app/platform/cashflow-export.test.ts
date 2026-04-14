@@ -103,11 +103,16 @@ describe('cashflow-export', () => {
 
     expect(workbook.sheets.map((sheet) => sheet.name)).toEqual(['Projection', 'Actual']);
     expect(workbook.sheets[0].rows[0]).toEqual(['사업', '프로젝트 A', '사업 ID', 'proj-a', '거래 수', 0]);
-    expect(findRow(workbook.sheets[0].rows, '매출액(입금)')).toEqual(['매출액(입금)', 100, 200, 0, 0, 0, 300]);
-    expect(findRow(workbook.sheets[1].rows, '매출액(입금)')).toEqual(['매출액(입금)', 80, 150, 0, 0, 0, 230]);
-    expect(findRow(workbook.sheets[0].rows, '직접사업비')).toEqual(['직접사업비', 10, 0, 0, 0, 0, 10]);
-    expect(findRow(workbook.sheets[1].rows, '직접사업비')).toEqual(['직접사업비', 20, 0, 0, 0, 0, 20]);
-    expect(findRow(workbook.sheets[0].rows, '매출액(입금)')?.[5]).toBe(0);
+    expect(workbook.sheets[0].rows.some((row) => row[0] === '기간')).toBe(false);
+    expect(workbook.sheets[0].rows.some((row) => row[0] === '2026-01')).toBe(false);
+    expect(workbook.sheets[0].rows.some((row) => row[0] === '2026-01 · Projection')).toBe(false);
+    expect(findRow(workbook.sheets[0].rows, '항목')).toEqual(['항목', ...slots.map((slot) => slot.label)]);
+    expect(findRow(workbook.sheets[0].rows, '매출액(입금)')).toEqual(['매출액(입금)', 100, 200, 0, 0, 0]);
+    expect(findRow(workbook.sheets[1].rows, '매출액(입금)')).toEqual(['매출액(입금)', 80, 150, 0, 0, 0]);
+    expect(findRow(workbook.sheets[0].rows, '직접사업비')).toEqual(['직접사업비', 10, 0, 0, 0, 0]);
+    expect(findRow(workbook.sheets[1].rows, '직접사업비')).toEqual(['직접사업비', 20, 0, 0, 0, 0]);
+    expect(findRow(workbook.sheets[0].rows, '입금 합계')).toEqual(['입금 합계', 100, 200, 0, 0, 0]);
+    expect(findRow(workbook.sheets[0].rows, '출금 합계')).toEqual(['출금 합계', 10, 0, 0, 0, 0]);
   });
 
   it('builds combined and multi-sheet workbooks for multiple projects', () => {
@@ -158,6 +163,7 @@ describe('cashflow-export', () => {
     });
     expect(combined.sheets).toHaveLength(1);
     expect(combined.sheets[0].name).toBe('전체 사업');
+    expect(combined.sheets[0].rows.some((row) => row[0] === '대상 기간')).toBe(false);
     expect(combined.sheets[0].rows.some((row) => row.includes('알파 프로젝트'))).toBe(true);
     expect(combined.sheets[0].rows.some((row) => row.includes('브라보 프로젝트'))).toBe(true);
 
@@ -169,8 +175,8 @@ describe('cashflow-export', () => {
 
     expect(multi.sheets).toHaveLength(2);
     expect(multi.sheets.map((sheet) => sheet.name)).toEqual(['Alpha', 'Alpha (2)']);
-    expect(findRow(multi.sheets[0].rows, '매출액(입금)')).toEqual(['매출액(입금)', 120, 0, 0, 0, 0, 120]);
-    expect(findRow(multi.sheets[1].rows, '매출액(입금)')).toEqual(['매출액(입금)', 220, 0, 0, 0, 0, 220]);
+    expect(findRow(multi.sheets[0].rows, '매출액(입금)')).toEqual(['매출액(입금)', 120, 0, 0, 0, 0]);
+    expect(findRow(multi.sheets[1].rows, '매출액(입금)')).toEqual(['매출액(입금)', 220, 0, 0, 0, 0]);
   });
 
   it('builds year-range exports as a single wide matrix instead of stacked month blocks', () => {
@@ -208,35 +214,27 @@ describe('cashflow-export', () => {
 
     const projectionRows = workbook.sheets[0].rows;
     const headerRow = projectionRows.find((row) => row[0] === '항목');
-    const periodRow = projectionRows.find((row) => row[0] === '기간' && row.length > 4);
     const salesRow = findRow(projectionRows, '매출액(입금)');
     const directCostRow = findRow(projectionRows, '직접사업비');
 
     expect(projectionRows.filter((row) => row[0] === '매출액(입금)')).toHaveLength(1);
     expect(headerRow).toEqual([
       '항목',
-      '26-1-1', '26-1-2', '26-1-3', '26-1-4', '26-1-5', '2026-01 합계',
-      '26-2-1', '26-2-2', '26-2-3', '26-2-4', febSlots[4].label, '2026-02 합계',
+      '26-1-1', '26-1-2', '26-1-3', '26-1-4', '26-1-5',
+      '26-2-1', '26-2-2', '26-2-3', '26-2-4', febSlots[4].label,
     ]);
-    expect(periodRow?.slice(0, 8)).toEqual([
-      '기간',
-      '2025-12-31 ~ 2026-01-06',
-      '2026-01-07 ~ 2026-01-13',
-      '2026-01-14 ~ 2026-01-20',
-      '2026-01-21 ~ 2026-01-27',
-      '2026-01-28 ~ 2026-02-03',
-      '',
-      '2026-02-04 ~ 2026-02-10',
-    ]);
+    expect(projectionRows.some((row) => row[0] === '기간')).toBe(false);
+    expect(projectionRows.some((row) => row[0] === 'Projection')).toBe(false);
+    expect(projectionRows.some((row) => row[0] === 'Actual')).toBe(false);
     expect(salesRow).toEqual([
       '매출액(입금)',
-      100, 0, 0, 0, 0, 100,
-      200, 0, 0, 0, 0, 200,
+      100, 0, 0, 0, 0,
+      200, 0, 0, 0, 0,
     ]);
     expect(directCostRow).toEqual([
       '직접사업비',
-      25, 0, 0, 0, 0, 25,
-      50, 0, 0, 0, 0, 50,
+      25, 0, 0, 0, 0,
+      50, 0, 0, 0, 0,
     ]);
   });
 });

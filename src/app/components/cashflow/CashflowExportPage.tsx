@@ -27,6 +27,7 @@ import { useAuth } from '../../data/auth-store';
 import { useFirebase } from '../../lib/firebase-context';
 import { getOrgCollectionPath } from '../../lib/firebase';
 import { triggerDownload } from '../../platform/csv-utils';
+import { filterCashflowExportTargetProjects } from '../../platform/cashflow-export-filters';
 import { loadExcelJs } from '../../platform/lazy-heavy-modules';
 import { exportCashflowWorkbookViaBff, isPlatformApiEnabled } from '../../lib/platform-bff-client';
 import {
@@ -39,7 +40,7 @@ import {
 import { buildCashflowExportProjectRows } from '../../platform/cashflow-export-surface';
 import { getSeoulTodayIso } from '../../platform/business-days';
 import { hasPermission } from '../../platform/rbac';
-import { BASIS_LABELS, type Basis, type WeeklySubmissionStatus } from '../../data/types';
+import { ACCOUNT_TYPE_LABELS, type AccountType, type WeeklySubmissionStatus } from '../../data/types';
 
 function formatDateTime(value?: string): string {
   if (!value) return '-';
@@ -94,12 +95,12 @@ export function CashflowExportPage() {
   const { db, orgId } = useFirebase();
   const [scope, setScope] = useState<'all' | 'single'>('all');
   const [selectedProjectId, setSelectedProjectId] = useState<string>('ALL');
-  const [basisFilter, setBasisFilter] = useState<'ALL' | Basis>('ALL');
+  const [accountTypeFilter, setAccountTypeFilter] = useState<'ALL' | AccountType>('ALL');
   const [rangeMode, setRangeMode] = useState<'year' | 'custom'>('year');
   const [selectedYear, setSelectedYear] = useState<string>(yearMonth.slice(0, 4));
   const [startYearMonth, setStartYearMonth] = useState<string>(`${yearMonth.slice(0, 4)}-01`);
   const [endYearMonth, setEndYearMonth] = useState<string>(`${yearMonth.slice(0, 4)}-12`);
-  const [multiProjectVariant, setMultiProjectVariant] = useState<'combined' | 'multi-sheet'>('combined');
+  const [multiProjectVariant, setMultiProjectVariant] = useState<'combined' | 'multi-sheet'>('multi-sheet');
   const [downloadPreparing, setDownloadPreparing] = useState(false);
   const [weeklySubmissionStatuses, setWeeklySubmissionStatuses] = useState<WeeklySubmissionStatus[]>([]);
 
@@ -128,16 +129,13 @@ export function CashflowExportPage() {
     return expandCashflowYearMonthRange(startYearMonth, endYearMonth);
   }, [endYearMonth, rangeMode, selectedYear, startYearMonth]);
 
-  const scopedProjects = useMemo(() => {
-    if (scope === 'single') {
-      return sortedProjects.filter((project) => project.id === selectedProjectId);
-    }
-    return sortedProjects;
-  }, [scope, selectedProjectId, sortedProjects]);
-
   const targetProjects = useMemo(() => {
-    return scopedProjects.filter((project) => basisFilter === 'ALL' || project.basis === basisFilter);
-  }, [basisFilter, scopedProjects]);
+    return filterCashflowExportTargetProjects(sortedProjects, {
+      scope,
+      selectedProjectId,
+      accountTypeFilter,
+    });
+  }, [accountTypeFilter, scope, selectedProjectId, sortedProjects]);
 
   const targetYearMonths = useMemo(() => new Set(yearMonths), [yearMonths]);
   const todayIso = getSeoulTodayIso();
@@ -164,7 +162,7 @@ export function CashflowExportPage() {
   const missingCount = projectRows.length - updatedCount;
   const workbookVariant: CashflowExportWorkbookVariant = scope === 'single' ? 'single-project' : multiProjectVariant;
   const periodSummary = summarizeCashflowYearMonths(yearMonths);
-  const basisFilterLabel = basisFilter === 'ALL' ? '전체 기준' : BASIS_LABELS[basisFilter];
+  const accountTypeFilterLabel = accountTypeFilter === 'ALL' ? '전체 통장 유형' : ACCOUNT_TYPE_LABELS[accountTypeFilter];
   const projectSelectionLabel = scope === 'single'
     ? (sortedProjects.find((project) => project.id === selectedProjectId)?.name || '사업을 선택해 주세요')
     : '전체 사업';
@@ -242,7 +240,7 @@ export function CashflowExportPage() {
           body: {
             scope,
             projectId: scope === 'single' ? projectInputs[0]?.projectId : undefined,
-            basis: basisFilter === 'ALL' ? undefined : basisFilter,
+            accountType: accountTypeFilter === 'ALL' ? undefined : accountTypeFilter,
             startYearMonth: yearMonths[0],
             endYearMonth: yearMonths[yearMonths.length - 1],
             variant: workbookVariant,
@@ -321,7 +319,7 @@ export function CashflowExportPage() {
         <CardHeader className="pb-3">
           <CardTitle className="text-[14px] font-semibold text-zinc-950">추출 설정</CardTitle>
           <p className="text-[12px] text-stone-600">
-            {scope === 'single' ? '사업별' : '전체 사업'} · {projectSelectionLabel} · {basisFilterLabel} · {periodSummary || '기간 미선택'} · {workbookVariantLabel}
+            {scope === 'single' ? '사업별' : '전체 사업'} · {projectSelectionLabel} · {accountTypeFilterLabel} · {periodSummary || '기간 미선택'} · {workbookVariantLabel}
           </p>
         </CardHeader>
         <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -391,32 +389,32 @@ export function CashflowExportPage() {
           <SelectionField
             step="2B"
             icon={BarChart3}
-            label="정산 기준"
-            helper="프로젝트 등록 시 선택한 정산 기준별로 추출 대상을 걸러냅니다."
-            value={basisFilterLabel}
-            testId="cashflow-export-step-basis"
+            label="통장 유형"
+            helper="프로젝트 등록 시 선택한 통장 유형별로 추출 대상을 걸러냅니다."
+            value={accountTypeFilterLabel}
+            testId="cashflow-export-step-account-type"
             toneClass={monochromeSurfaceClass}
           >
             <Select
-              value={basisFilter}
+              value={accountTypeFilter}
               onValueChange={(value) => {
-                if (value === 'ALL' || value === '공급가액' || value === '공급대가' || value === 'NONE') {
-                  setBasisFilter(value);
+                if (value === 'ALL' || value === 'DEDICATED' || value === 'OPERATING' || value === 'NONE') {
+                  setAccountTypeFilter(value as 'ALL' | AccountType);
                 }
               }}
             >
               <SelectTrigger
-                data-testid="cashflow-export-basis"
+                data-testid="cashflow-export-account-type"
                 className={`${strongFieldBaseClass} border-stone-300 hover:border-stone-400 focus-visible:ring-stone-200`}
                 style={{ borderWidth: 2 }}
               >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="ALL">전체 기준</SelectItem>
-                <SelectItem value="공급가액">공급가액</SelectItem>
-                <SelectItem value="공급대가">공급대가</SelectItem>
-                <SelectItem value="NONE">해당없음</SelectItem>
+                <SelectItem value="ALL">전체 통장 유형</SelectItem>
+                {Object.entries(ACCOUNT_TYPE_LABELS).map(([value, label]) => (
+                  <SelectItem key={value} value={value}>{label}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </SelectionField>
@@ -468,7 +466,7 @@ export function CashflowExportPage() {
                 }
                 if (value === 'combined' || value === 'multi-sheet') {
                   setScope('all');
-                  setMultiProjectVariant(value);
+                  setMultiProjectVariant(value as 'combined' | 'multi-sheet');
                 }
               }}
             >

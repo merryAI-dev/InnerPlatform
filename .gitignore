@@ -27,6 +27,7 @@ scripts/etl/output/
 *.xlsx
 .env.vercel.production
 .gitnexus
+.worktrees/
 .env*.local
 .gstack/
 .claude/worktrees/

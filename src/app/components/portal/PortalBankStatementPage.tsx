@@ -334,7 +334,7 @@ export function PortalBankStatementPage() {
     },
     {
       title: '3. 주간 사업비로 반영',
-      description: '저장 후 현재 탭의 사업비 입력(주간)에서 바로 이어서 작업합니다.',
+      description: '저장 후 사업비 입력(주간)에서 같은 기준본으로 바로 이어서 입력하고 저장합니다.',
     },
   ];
 
@@ -379,7 +379,7 @@ export function PortalBankStatementPage() {
         </div>
         <div className="flex items-center justify-end gap-2 flex-wrap">
           <Button variant="outline" size="sm" onClick={() => navigate('/portal/weekly-expenses')}>
-            사업비 입력(주간)
+            사업비 입력(주간)으로 이어가기
             <ArrowRight className="h-4 w-4 ml-1" />
           </Button>
           <Button size="sm" onClick={openFilePicker} disabled={uploadPreparing}>
@@ -449,7 +449,7 @@ export function PortalBankStatementPage() {
                       <p className="text-[11px] uppercase tracking-[0.18em] text-teal-700">Mission 1</p>
                       <p className="text-[18px] font-semibold text-slate-900">이번 주 통장내역부터 올리세요</p>
                       <p className="max-w-2xl text-[13px] leading-6 text-slate-600">
-                        원본 파일을 올리면 표는 그대로 유지한 채 이 화면에서 검토하고, 저장 후 바로 사업비 입력(주간)으로 이어서 정리할 수 있습니다.
+                        원본 파일을 올리면 이 화면에서 먼저 검토하고, 저장 후 같은 기준본으로 사업비 입력(주간)에서 바로 이어서 정리할 수 있습니다.
                       </p>
                     </div>
                   </div>
@@ -459,7 +459,7 @@ export function PortalBankStatementPage() {
                       {uploadPreparing ? '엑셀 준비 중' : '파일 선택'}
                     </Button>
                     <Button variant="outline" size="sm" onClick={() => navigate('/portal/weekly-expenses')}>
-                      사업비 입력(주간) 먼저 보기
+                      사업비 입력(주간)으로 이어가기
                       <ArrowRight className="ml-1 h-4 w-4" />
                     </Button>
                     <span className="text-[11px] text-muted-foreground">지원 형식: `.csv`, `.xls`, `.xlsx`</span>

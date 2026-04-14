@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import ExcelJS from 'exceljs';
+import { parseWithSchema, cashflowExportSchema } from './schemas.mjs';
 import {
   buildCashflowExportFileName,
   buildCashflowExportWorkbookBuffer,
@@ -19,6 +20,16 @@ describe('cashflow export bff helper', () => {
       yearMonths: ['2026-01', '2026-02'],
       variant: 'single-project',
     })).toContain('알파 프로젝트');
+  });
+
+  it('accepts legacy basis export requests during the compatibility window', () => {
+    expect(() => parseWithSchema(cashflowExportSchema, {
+      scope: 'all',
+      basis: '공급가액',
+      startYearMonth: '2026-01',
+      endYearMonth: '2026-01',
+      variant: 'multi-sheet',
+    })).not.toThrow();
   });
 
   it('creates a non-empty xlsx buffer', async () => {
@@ -52,6 +63,50 @@ describe('cashflow export bff helper', () => {
 
     expect(buffer.length).toBeGreaterThan(1000);
     expect(buffer.subarray(0, 2).toString()).toBe('PK');
+  });
+
+  it('keeps the single-project metadata row aligned with the app workbook spec', async () => {
+    const buffer = await buildCashflowExportWorkbookBuffer({
+      variant: 'single-project',
+      yearMonths: ['2026-01'],
+      projects: [
+        {
+          id: 'proj-a',
+          name: '알파 프로젝트',
+          shortName: '알파',
+          transactions: [],
+          weeks: [],
+        },
+      ],
+    });
+
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer);
+    const worksheet = workbook.getWorksheet('Projection');
+    const rows = worksheet.getSheetValues().filter(Boolean).map((row) => Array.isArray(row) ? row.slice(1) : []);
+
+    expect(rows[0]).toEqual(['사업', '알파 프로젝트', '사업 ID', 'proj-a', '거래 수', 0]);
+  });
+
+  it('omits top-level period metadata from combined exports', async () => {
+    const buffer = await buildCashflowExportWorkbookBuffer({
+      variant: 'combined',
+      yearMonths: ['2026-01'],
+      projects: [
+        {
+          id: 'proj-a',
+          name: '알파 프로젝트',
+          weeks: [],
+        },
+      ],
+    });
+
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer);
+    const worksheet = workbook.getWorksheet('전체 사업');
+    const rows = worksheet.getSheetValues().filter(Boolean).map((row) => Array.isArray(row) ? row.slice(1) : []);
+
+    expect(rows.some((row) => row[0] === '대상 기간')).toBe(false);
   });
 
   it('renders annual single-project exports as a horizontal worksheet', async () => {
@@ -106,13 +161,16 @@ describe('cashflow export bff helper', () => {
     expect(rows.filter((row) => row[0] === '매출액(입금)')).toHaveLength(1);
     expect(headerRow).toEqual([
       '항목',
-      '26-1-1', '26-1-2', '26-1-3', '26-1-4', '26-1-5', '2026-01 합계',
-      '26-2-1', '26-2-2', '26-2-3', '26-2-4', '2026-02-w5', '2026-02 합계',
+      '26-1-1', '26-1-2', '26-1-3', '26-1-4', '26-1-5',
+      '26-2-1', '26-2-2', '26-2-3', '26-2-4', '26-2-5',
     ]);
+    expect(rows.some((row) => row[0] === '기간')).toBe(false);
+    expect(rows.some((row) => row[0] === 'Projection')).toBe(false);
+    expect(rows.some((row) => row[0] === 'Actual')).toBe(false);
     expect(salesRow).toEqual([
       '매출액(입금)',
-      100, 0, 0, 0, 0, 100,
-      200, 0, 0, 0, 0, 200,
+      100, 0, 0, 0, 0,
+      200, 0, 0, 0, 0,
     ]);
   });
 });
