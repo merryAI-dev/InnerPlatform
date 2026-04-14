@@ -13,7 +13,7 @@ interface ExpenseSheetTabSnapshot {
   id: string;
   name: string;
   order: number;
-  rows: ImportRow[];
+  rows: ImportRow[] | null;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -49,6 +49,7 @@ function buildProjectionRowFromIntake(
   const pendingIdx = findColumnIndex('준비필요자료');
   const requiredIdx = findColumnIndex('필수증빙자료 리스트');
   const evidenceChecklist = resolveEvidenceChecklist({
+    evidenceRequired: [],
     evidenceRequiredDesc,
     evidenceCompletedDesc: item.manualFields.evidenceCompletedDesc || '',
     evidenceCompletedManualDesc: item.manualFields.evidenceCompletedDesc || '',
@@ -175,7 +176,7 @@ export function upsertExpenseSheetTabRows(params: {
   sheetId: string;
   sheetName: string;
   order: number;
-  rows: ImportRow[];
+  rows: ImportRow[] | null;
   now: string;
   createdAt?: string;
 }): ExpenseSheetTabSnapshot[] {
@@ -249,6 +250,7 @@ export function patchExpenseSheetProjectionEvidenceBySourceTxId(params: {
   const completedIdx = findColumnIndex('실제 구비 완료된 증빙자료 리스트');
   const pendingIdx = findColumnIndex('준비필요자료');
   const checklist = resolveEvidenceChecklist({
+    evidenceRequired: [],
     evidenceRequiredDesc: params.evidenceRequiredDesc,
     evidenceCompletedDesc: params.evidenceCompletedDesc,
     evidenceCompletedManualDesc: params.evidenceCompletedDesc,

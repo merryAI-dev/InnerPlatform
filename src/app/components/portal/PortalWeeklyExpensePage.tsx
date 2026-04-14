@@ -87,6 +87,7 @@ export function PortalWeeklyExpensePage() {
   const { user: authUser, ensureGoogleWorkspaceAccess } = useAuth();
   const { orgId } = useFirebase();
   const {
+    activeProjectId,
     portalUser,
     myProject,
     ledgers,
@@ -135,7 +136,7 @@ export function PortalWeeklyExpensePage() {
     overLimitMembers: { memberName: string; groupLabel: string; totalRate: number }[];
   } | null>(null);
 
-  const projectId = portalUser?.projectId || '';
+  const projectId = activeProjectId || myProject?.id || '';
   const projectName = myProject?.name || '내 사업';
   const ledgerUserRole = portalUser?.role === 'pm' ? 'pm' : 'admin';
   const visibleExpenseSheets = useMemo(() => (
@@ -209,6 +210,46 @@ export function PortalWeeklyExpensePage() {
     happyPath.canUseEvidenceWorkflow,
     isDirectEntryMode,
   ]);
+  const resolvedWeeklySetupPanel = weeklySetupPanel || {
+    title: '이번 주 입력 기준이 준비되었습니다',
+    description: '현재 탭에서 거래를 입력하고 저장하면 통장내역과 증빙 흐름을 같은 기준으로 이어갈 수 있습니다.',
+    toneClass: 'border-emerald-200/70 bg-emerald-50/70',
+    actionLabel: '',
+    actionKind: 'bank' as const,
+  };
+  const missionProgress = useMemo(() => ({
+    steps: [
+      {
+        id: 'assignment',
+        order: 1,
+        title: '사업 연결',
+        description: happyPath.canOpenWeeklyExpenses
+          ? '사업 연결이 끝나 현재 화면과 통장내역, 예산 화면을 같은 기준으로 사용합니다.'
+          : '사업 연결이 끝나야 이 화면과 통장내역, 예산 화면을 같은 기준으로 사용할 수 있습니다.',
+        status: happyPath.canOpenWeeklyExpenses ? 'complete' : 'attention',
+      },
+      {
+        id: 'source',
+        order: 2,
+        title: isDirectEntryMode ? '직접 입력 기준 준비' : '통장내역 기준본 준비',
+        description: isDirectEntryMode
+          ? '이 프로젝트는 통장 업로드 없이 표에서 바로 입력합니다.'
+          : bankStatementCount > 0
+            ? `통장내역 기준본 ${bankStatementCount}건이 현재 입력 기준으로 연결되어 있습니다.`
+            : '통장내역을 먼저 저장하면 자동 분류와 검토 흐름이 같은 기준으로 이어집니다.',
+        status: isDirectEntryMode || bankStatementCount > 0 ? 'complete' : 'active',
+      },
+      {
+        id: 'entry',
+        order: 3,
+        title: '주간 입력 진행',
+        description: expenseRowCount > 0
+          ? `현재 탭 ${activeSheetName}에서 ${expenseRowCount}건을 이어서 정리할 수 있습니다.`
+          : '현재 탭에서 거래를 입력하고 저장하면 제출 및 증빙 흐름으로 이어집니다.',
+        status: expenseRowCount > 0 ? 'active' : 'locked',
+      },
+    ] as const,
+  }), [activeSheetName, bankStatementCount, expenseRowCount, happyPath.canOpenWeeklyExpenses, isDirectEntryMode]);
   const settlementSheetPolicy = useMemo(
     () => normalizeSettlementSheetPolicy(myProject?.settlementSheetPolicy, myProject?.fundInputMode),
     [myProject?.fundInputMode, myProject?.settlementSheetPolicy],
@@ -833,15 +874,15 @@ export function PortalWeeklyExpensePage() {
           </div>
         </div>
         <div className="mt-4 grid gap-3 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]">
-          <Card data-testid="weekly-expense-setup-panel" className={weeklySetupPanel.toneClass}>
+          <Card data-testid="weekly-expense-setup-panel" className={resolvedWeeklySetupPanel.toneClass}>
             <CardContent className="px-4 py-4">
               <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                 <div className="space-y-2">
                   <div>
                     <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">지금 해야 할 일</p>
-                    <p className="mt-1 text-[15px] font-semibold text-slate-900">{weeklySetupPanel.title}</p>
+                    <p className="mt-1 text-[15px] font-semibold text-slate-900">{resolvedWeeklySetupPanel.title}</p>
                   </div>
-                  <p className="max-w-2xl text-[12px] leading-6 text-slate-600">{weeklySetupPanel.description}</p>
+                  <p className="max-w-2xl text-[12px] leading-6 text-slate-600">{resolvedWeeklySetupPanel.description}</p>
                   <div className="flex flex-wrap gap-2">
                     {!isDirectEntryMode && (
                       <Badge variant="outline" className="bg-white/80 text-[10px] text-slate-700">
@@ -856,24 +897,24 @@ export function PortalWeeklyExpensePage() {
                     </Badge>
                   </div>
                 </div>
-                {weeklySetupPanel.actionLabel && (
+                {resolvedWeeklySetupPanel.actionLabel && (
                   <div className="shrink-0">
-                    {weeklySetupPanel.actionKind === 'drive' ? (
+                    {resolvedWeeklySetupPanel.actionKind === 'drive' ? (
                       <Button
                         size="sm"
                         onClick={() => void provisionProjectDriveRoot()}
                         disabled={projectDriveProvisioning || !happyPath.canOpenWeeklyExpenses}
                       >
                         {projectDriveProvisioning ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderPlus className="h-4 w-4" />}
-                        {weeklySetupPanel.actionLabel}
+                        {resolvedWeeklySetupPanel.actionLabel}
                       </Button>
-                    ) : weeklySetupPanel.actionKind === 'settings' ? (
+                    ) : resolvedWeeklySetupPanel.actionKind === 'settings' ? (
                       <Button size="sm" onClick={() => requestRouteNavigation('/portal/project-settings', '사업 배정 수정')}>
-                        {weeklySetupPanel.actionLabel}
+                        {resolvedWeeklySetupPanel.actionLabel}
                       </Button>
                     ) : (
                       <Button size="sm" onClick={() => requestRouteNavigation('/portal/bank-statements', '통장내역')}>
-                        {weeklySetupPanel.actionLabel}
+                        {resolvedWeeklySetupPanel.actionLabel}
                         <ArrowRight className="h-4 w-4" />
                       </Button>
                     )}

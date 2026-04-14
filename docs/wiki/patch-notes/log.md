@@ -82,3 +82,7 @@
 ## [2026-04-14] patch-note | portal-shell-project-search | 담당 사업 검색 전환 지원
 - pages: [portal-dashboard](./pages/portal-dashboard.md)
 - summary: 헤더의 중복 `사업비 입력` 버튼을 제거하고, 상단 command search가 담당 사업 전체를 검색해 선택 시 해당 사업으로 전환 후 이동하도록 확장했다.
+
+## [2026-04-14] patch-note | portal-session-active-project | 세션 사업 전환과 진입 step 분리
+- pages: [portal-weekly-expense](./pages/portal-weekly-expense.md), [portal-bank-statement](./pages/portal-bank-statement.md), [portal-submissions](./pages/portal-submissions.md)
+- summary: 저장된 주사업과 별도로 session active project를 도입하고, 포털 진입을 `project-select` step으로 분리해 같은 화면을 유지한 채 사업 전환이 가능하도록 정리했다.

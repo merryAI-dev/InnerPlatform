@@ -77,6 +77,7 @@ import { useFirebase } from '../lib/firebase-context';
 import { getAuthInstance, getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
 import {
   isPlatformApiEnabled,
+  type UpsertProjectPayload,
   upsertProjectViaBff,
 } from '../lib/platform-bff-client';
 import { duplicateExpenseSetAsDraft, withExpenseItems } from './portal-store.helpers';
@@ -89,6 +90,10 @@ import { readDevAuthHarnessConfig } from '../platform/dev-harness';
 import { reportError } from '../platform/observability';
 import { validateBudgetCodeBookDraft } from '../platform/budget-code-book-validation';
 import { buildBudgetLabelKey, normalizeBudgetLabel } from '../platform/budget-labels';
+import {
+  resolveActivePortalProjectId,
+  resolvePortalProjectCandidates,
+} from '../platform/portal-project-selection';
 
 export interface PortalUser {
   id: string;
@@ -99,6 +104,12 @@ export interface PortalUser {
   projectIds: string[];
   projectNames?: Record<string, string>;
   registeredAt: string;
+}
+
+const ACTIVE_PORTAL_PROJECT_STORAGE_KEY = 'mysc-portal-active-project';
+
+function getActivePortalProjectStorageKey(uid: string | null | undefined): string {
+  return `${ACTIVE_PORTAL_PROJECT_STORAGE_KEY}:${String(uid || '').trim()}`;
 }
 
 function normalizePortalRole(value: unknown): string {
@@ -308,6 +319,7 @@ export function syncExpenseIntakeEvidenceState(params: {
     mergedCandidate.manualFields.budgetSubCategory || '',
   );
   const evidenceChecklist = resolveEvidenceChecklist({
+    evidenceRequired: [],
     evidenceRequiredDesc,
     evidenceCompletedDesc: mergedCandidate.manualFields.evidenceCompletedDesc || '',
     evidenceCompletedManualDesc: mergedCandidate.manualFields.evidenceCompletedDesc || '',
@@ -361,6 +373,7 @@ interface PortalState {
   isRegistered: boolean;
   isLoading: boolean;
   portalUser: PortalUser | null;
+  activeProjectId: string;
   projects: Project[];
   ledgers: Ledger[];
   myProject: Project | null;
@@ -388,7 +401,7 @@ interface PortalActions {
       projectIds?: string[];
     },
   ) => Promise<boolean>;
-  setActiveProject: (projectId: string) => Promise<boolean>;
+  setSessionActiveProject: (projectId: string) => Promise<boolean>;
   logout: () => void;
   addExpenseSet: (set: ExpenseSet) => void;
   updateExpenseSet: (id: string, updates: Partial<ExpenseSet>) => void;
@@ -549,6 +562,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   const firestoreEnabled = isOnline && !!db;
 
   const [portalUser, setPortalUser] = useState<PortalUser | null>(null);
+  const [activeProjectIdState, setActiveProjectIdState] = useState('');
 
   const [expenseSets, setExpenseSets] = useState<ExpenseSet[]>(EXPENSE_SETS);
   const [changeRequests, setChangeRequests] = useState<ChangeRequest[]>(CHANGE_REQUESTS);
@@ -594,18 +608,71 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     expenseSheetRowsRef.current = expenseSheetRows;
   }, [expenseSheetRows]);
 
-  const myProject = useMemo(() => {
-    return portalUser ? projects.find((project) => project.id === portalUser.projectId) || null : null;
-  }, [portalUser, projects]);
-
-  const scopedProjectIds = useMemo(
-    () => normalizeProjectIds([...(Array.isArray(portalUser?.projectIds) ? portalUser?.projectIds : []), portalUser?.projectId]),
-    [portalUser?.projectIds, portalUser?.projectId],
+  const assignedProjectIds = useMemo(
+    () => normalizeProjectIds([
+      ...(Array.isArray(portalUser?.projectIds) ? portalUser.projectIds : []),
+      portalUser?.projectId,
+      ...(Array.isArray(authUser?.projectIds) ? authUser.projectIds : []),
+      authUser?.projectId,
+    ]),
+    [authUser?.projectId, authUser?.projectIds, portalUser?.projectId, portalUser?.projectIds],
   );
 
+  const portalProjectCandidates = useMemo(() => resolvePortalProjectCandidates({
+    role: authUser?.role || portalUser?.role,
+    authUid: authUser?.uid,
+    assignedProjectIds,
+    projects,
+  }), [assignedProjectIds, authUser?.role, authUser?.uid, portalUser?.role, projects]);
+
+  const scopedProjectIds = useMemo(
+    () => portalProjectCandidates.searchProjects.map((project) => project.id),
+    [portalProjectCandidates.searchProjects],
+  );
+
+  const activeProjectId = useMemo(() => resolveActivePortalProjectId({
+    activeProjectId: activeProjectIdState,
+    primaryProjectId: portalUser?.projectId || authUser?.projectId || '',
+    candidateProjectIds: scopedProjectIds,
+  }), [activeProjectIdState, authUser?.projectId, portalUser?.projectId, scopedProjectIds]);
+
+  const myProject = useMemo(() => {
+    if (!activeProjectId) return null;
+    return projects.find((project) => project.id === activeProjectId) || null;
+  }, [activeProjectId, projects]);
+  const currentProjectId = activeProjectId;
+
   useEffect(() => {
-    if (!isDevHarnessUser || !portalUser?.projectId || devHarnessHydratedProjectIdRef.current !== portalUser.projectId) return;
-    writeDevHarnessPortalSnapshot(portalUser.projectId, {
+    const uid = authUser?.uid;
+    if (!uid || typeof sessionStorage === 'undefined') {
+      setActiveProjectIdState('');
+      return;
+    }
+    try {
+      setActiveProjectIdState(sessionStorage.getItem(getActivePortalProjectStorageKey(uid)) || '');
+    } catch {
+      setActiveProjectIdState('');
+    }
+  }, [authUser?.uid]);
+
+  useEffect(() => {
+    const uid = authUser?.uid;
+    if (!uid || typeof sessionStorage === 'undefined') return;
+    const storageKey = getActivePortalProjectStorageKey(uid);
+    try {
+      if (activeProjectId) {
+        sessionStorage.setItem(storageKey, activeProjectId);
+      } else {
+        sessionStorage.removeItem(storageKey);
+      }
+    } catch {
+      // ignore sessionStorage failures
+    }
+  }, [activeProjectId, authUser?.uid]);
+
+  useEffect(() => {
+    if (!isDevHarnessUser || !activeProjectId || devHarnessHydratedProjectIdRef.current !== activeProjectId) return;
+    writeDevHarnessPortalSnapshot(activeProjectId, {
       activeExpenseSheetId,
       expenseIntakeItems,
       expenseSheets: expenseSheets.map((sheet) => ({
@@ -619,7 +686,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       sheetSources,
       weeklySubmissionStatuses,
     });
-  }, [activeExpenseSheetId, expenseIntakeItems, expenseSheets, isDevHarnessUser, portalUser?.projectId, sheetSources, weeklySubmissionStatuses]);
+  }, [activeExpenseSheetId, activeProjectId, expenseIntakeItems, expenseSheets, isDevHarnessUser, sheetSources, weeklySubmissionStatuses]);
 
   useEffect(() => {
     if (authLoading) {
@@ -628,12 +695,14 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     }
     if (!isAuthenticated || !authUser) {
       devHarnessHydratedProjectIdRef.current = null;
+      setActiveProjectIdState('');
       setPortalUser(null);
       setIsMemberLoading(false);
       return;
     }
     if (!canEnterPortalWorkspace(authUser.role)) {
       devHarnessHydratedProjectIdRef.current = null;
+      setActiveProjectIdState('');
       setPortalUser(null);
       setIsMemberLoading(false);
       return;
@@ -802,7 +871,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     }
 
     if (isDevHarnessUser) {
-      const projectId = portalUser?.projectId || null;
+      const projectId = currentProjectId || null;
       if (!shouldHydrateDevHarnessPortalSnapshot({
         projectId,
         hydratedProjectId: devHarnessHydratedProjectIdRef.current,
@@ -812,7 +881,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       }
       const scopedIds = normalizeProjectIds([
         ...(Array.isArray(portalUser?.projectIds) ? portalUser.projectIds : []),
-        portalUser?.projectId,
+        currentProjectId,
       ]);
       const snapshot = projectId ? readDevHarnessPortalSnapshot(projectId) : null;
       const persistedExpenseSheets = (snapshot?.expenseSheets || [])
@@ -928,7 +997,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       ),
     );
 
-    if (!portalUser?.projectId) {
+    if (!currentProjectId) {
       setLedgers([]);
       setExpenseSets(EXPENSE_SETS);
       setChangeRequests(CHANGE_REQUESTS);
@@ -945,21 +1014,21 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     } else {
       const ledgerQuery = query(
         collection(db, getOrgCollectionPath(orgId, 'ledgers')),
-        where('projectId', '==', portalUser.projectId),
+        where('projectId', '==', currentProjectId),
       );
       const expenseQuery = query(
         collection(db, getOrgCollectionPath(orgId, 'expenseSets')),
-        where('projectId', '==', portalUser.projectId),
+        where('projectId', '==', currentProjectId),
       );
 
       const changeRequestQuery = query(
         collection(db, getOrgCollectionPath(orgId, 'changeRequests')),
-        where('projectId', '==', portalUser.projectId),
+        where('projectId', '==', currentProjectId),
       );
 
       const participationQuery = query(
         collection(db, getOrgCollectionPath(orgId, 'partEntries')),
-        where('projectId', '==', portalUser.projectId),
+        where('projectId', '==', currentProjectId),
       );
 
       unsubsRef.current.push(
@@ -975,7 +1044,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           if (!isPermissionDenied(err)) {
             toast.error('원장 데이터를 불러오지 못했습니다');
           }
-          setLedgers(LEDGERS.filter((l) => l.projectId === portalUser.projectId));
+          setLedgers(LEDGERS.filter((l) => l.projectId === currentProjectId));
           ledgerReady = true;
           markReady();
         }),
@@ -1026,7 +1095,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           if (!isPermissionDenied(err)) {
             toast.error('인력 데이터를 불러오지 못했습니다. 기본 데이터를 표시합니다.');
           }
-          setParticipationEntries(PARTICIPATION_ENTRIES.filter((entry) => entry.projectId === portalUser.projectId));
+          setParticipationEntries(PARTICIPATION_ENTRIES.filter((entry) => entry.projectId === currentProjectId));
           partReady = true;
           markReady();
         }),
@@ -1034,33 +1103,33 @@ export function PortalProvider({ children }: { children: ReactNode }) {
 
       const txQuery = query(
         collection(db, getOrgCollectionPath(orgId, 'transactions')),
-        where('projectId', '==', portalUser.projectId),
+        where('projectId', '==', currentProjectId),
       );
       const commentQuery = query(
         collection(db, getOrgCollectionPath(orgId, 'comments')),
-        where('projectId', '==', portalUser.projectId),
+        where('projectId', '==', currentProjectId),
       );
 
-      const evidenceMapRef = doc(db, getOrgDocumentPath(orgId, 'budgetEvidenceMaps', portalUser.projectId));
+      const evidenceMapRef = doc(db, getOrgDocumentPath(orgId, 'budgetEvidenceMaps', currentProjectId));
       const sheetSourceCollection = collection(
         db,
-        `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/sheet_sources`,
+        `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/sheet_sources`,
       );
       const expenseSheetCollection = collection(
         db,
-        `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/expense_sheets`,
+        `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/expense_sheets`,
       );
       const bankStatementRef = doc(
         db,
-        `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/bank_statements/default`,
+        `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/bank_statements/default`,
       );
       const budgetPlanRef = doc(
         db,
-        `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/budget_summary/default`,
+        `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/budget_summary/default`,
       );
       const budgetCodeBookRef = doc(
         db,
-        `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/budget_code_book/default`,
+        `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/budget_code_book/default`,
       );
       const weeklySubmissionBase = collection(db, getOrgCollectionPath(orgId, 'weeklySubmissionStatus'));
 
@@ -1077,7 +1146,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           if (!isPermissionDenied(err)) {
             toast.error('거래 데이터를 불러오지 못했습니다');
           }
-          setTransactions(TRANSACTIONS.filter((t) => t.projectId === portalUser.projectId));
+          setTransactions(TRANSACTIONS.filter((t) => t.projectId === currentProjectId));
           txReady = true;
           markReady();
         }),
@@ -1126,7 +1195,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
 	                  : [];
 	              return {
 	                sourceType: (data.sourceType || docItem.id) as ProjectSheetSourceType,
-	                projectId: String(data.projectId || portalUser.projectId || ''),
+	                projectId: String(data.projectId || currentProjectId || ''),
                 sheetName: String(data.sheetName || ''),
                 fileName: String(data.fileName || ''),
                 storagePath: String(data.storagePath || ''),
@@ -1158,7 +1227,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
               extra: {
                 orgId,
                 actorId: authUser.uid,
-                projectId: portalUser.projectId,
+                projectId: currentProjectId,
               },
             },
           });
@@ -1167,7 +1236,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       );
 
       unsubsRef.current.push(
-        onSnapshot(collection(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/expense_intake`), (snap) => {
+        onSnapshot(collection(db, `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/expense_intake`), (snap) => {
           const nextItems = snap.docs
             .map((docItem) => normalizeBankImportIntakeItem({ id: docItem.id, ...docItem.data() }))
             .filter((item): item is BankImportIntakeItem => item !== null)
@@ -1185,7 +1254,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
               extra: {
                 orgId,
                 actorId: authUser.uid,
-                projectId: portalUser.projectId,
+                projectId: currentProjectId,
               },
             },
           });
@@ -1246,7 +1315,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
               extra: {
                 orgId,
                 actorId: authUser.uid,
-                projectId: portalUser.projectId,
+                projectId: currentProjectId,
               },
             },
           });
@@ -1293,7 +1362,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
               extra: {
                 orgId,
                 actorId: authUser.uid,
-                projectId: portalUser.projectId,
+                projectId: currentProjectId,
               },
             },
           });
@@ -1364,7 +1433,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       unsubsRef.current.forEach((unsub) => unsub());
       unsubsRef.current = [];
     };
-  }, [authLoading, isMemberLoading, isAuthenticated, authUser, firestoreEnabled, db, orgId, portalUser?.projectId, scopedProjectIds, isDevHarnessUser, portalUser?.projectIds]);
+  }, [authLoading, isMemberLoading, isAuthenticated, authUser, currentProjectId, firestoreEnabled, db, orgId, scopedProjectIds, isDevHarnessUser, portalUser?.projectIds]);
 
   useEffect(() => {
     if (authLoading || isMemberLoading || !isAuthenticated || !authUser) return;
@@ -1430,7 +1499,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       setExpenseSheetRows([]);
       return id;
     }
-    if (!db || !portalUser?.projectId) {
+    if (!db || !currentProjectId) {
       toast.error('Firestore 연결이 필요합니다. 관리자에게 문의해 주세요.');
       return null;
     }
@@ -1440,22 +1509,22 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       ? Math.max(...expenseSheets.map((sheet) => (Number.isFinite(sheet.order) ? sheet.order : 0))) + 1
       : 1;
     await setDoc(
-      doc(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/expense_sheets/${id}`),
+      doc(db, `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/expense_sheets/${id}`),
       withTenantScope(orgId, {
         id,
-        projectId: portalUser.projectId,
+        projectId: currentProjectId,
         name: sanitizeExpenseSheetName(name, `탭 ${expenseSheets.length + 1}`),
         order: nextOrder,
         rows: [] as ImportRow[],
         createdAt: now,
         updatedAt: now,
-        updatedBy: portalUser.name || authUser?.name || '',
+        updatedBy: portalUser?.name || authUser?.name || '',
       }),
       { merge: true },
     );
     setActiveExpenseSheetIdState(id);
     return id;
-  }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name, expenseSheets, isDevHarnessUser]);
+  }, [currentProjectId, db, orgId, portalUser?.name, authUser?.name, expenseSheets, isDevHarnessUser]);
 
   const renameExpenseSheet = useCallback(async (sheetId: string, name: string): Promise<boolean> => {
     if (isDevHarnessUser) {
@@ -1469,7 +1538,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       )));
       return true;
     }
-    if (!db || !portalUser?.projectId) {
+    if (!db || !currentProjectId) {
       toast.error('Firestore 연결이 필요합니다. 관리자에게 문의해 주세요.');
       return false;
     }
@@ -1477,18 +1546,18 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     const nextName = sanitizeExpenseSheetName(name, '');
     if (!id || !nextName) return false;
     await setDoc(
-      doc(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/expense_sheets/${id}`),
+      doc(db, `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/expense_sheets/${id}`),
       withTenantScope(orgId, {
         id,
-        projectId: portalUser.projectId,
+        projectId: currentProjectId,
         name: nextName,
         updatedAt: new Date().toISOString(),
-        updatedBy: portalUser.name || authUser?.name || '',
+        updatedBy: portalUser?.name || authUser?.name || '',
       }),
       { merge: true },
     );
     return true;
-  }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name, isDevHarnessUser]);
+  }, [currentProjectId, db, orgId, portalUser?.name, authUser?.name, isDevHarnessUser]);
 
   const deleteExpenseSheet = useCallback(async (sheetId: string): Promise<boolean> => {
     if (isDevHarnessUser) {
@@ -1507,7 +1576,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       }
       return true;
     }
-    if (!db || !portalUser?.projectId) {
+    if (!db || !currentProjectId) {
       toast.error('Firestore 연결이 필요합니다. 관리자에게 문의해 주세요.');
       return false;
     }
@@ -1518,10 +1587,10 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       return false;
     }
     await setDoc(
-      doc(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/expense_sheets/${id}`),
+      doc(db, `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/expense_sheets/${id}`),
       withTenantScope(orgId, {
         id,
-        projectId: portalUser.projectId,
+        projectId: currentProjectId,
         deletedAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       }),
@@ -1532,31 +1601,31 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       setActiveExpenseSheetIdState(fallback);
     }
     return true;
-  }, [db, orgId, portalUser?.projectId, expenseSheets, activeExpenseSheetId, isDevHarnessUser]);
+  }, [currentProjectId, db, orgId, expenseSheets, activeExpenseSheetId, isDevHarnessUser]);
 
   const saveEvidenceRequiredMap = useCallback(async (map: Record<string, string>) => {
     if (isDevHarnessUser) {
       setEvidenceRequiredMap(map);
       return;
     }
-    if (!db || !portalUser?.projectId) {
+    if (!db || !currentProjectId) {
       toast.error('Firestore 연결이 필요합니다. 관리자에게 문의해 주세요.');
       return;
     }
     const now = new Date().toISOString();
     const payload = withTenantScope(orgId, {
-      projectId: portalUser.projectId,
+      projectId: currentProjectId,
       map,
       updatedAt: now,
-      updatedBy: portalUser.name || authUser?.name || '',
+      updatedBy: portalUser?.name || authUser?.name || '',
     });
     await setDoc(
-      doc(db, getOrgDocumentPath(orgId, 'budgetEvidenceMaps', portalUser.projectId)),
+      doc(db, getOrgDocumentPath(orgId, 'budgetEvidenceMaps', currentProjectId)),
       payload,
       { merge: true },
     );
     setEvidenceRequiredMap(map);
-  }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name, expenseSheetRows, isDevHarnessUser]);
+  }, [currentProjectId, db, orgId, portalUser?.name, authUser?.name, expenseSheetRows, isDevHarnessUser]);
 
   const markSheetSourceApplied = useCallback(async (input: {
     sourceType: ProjectSheetSourceType;
@@ -1566,7 +1635,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     const applyTarget = normalizeSpace(String(input.applyTarget || ''));
     if (!sourceType || !applyTarget) return;
     const now = new Date().toISOString();
-    if (isDevHarnessUser || !db || !portalUser?.projectId) {
+    if (isDevHarnessUser || !db || !currentProjectId) {
       setSheetSources((prev) => prev.map((item) => (
         item.sourceType === sourceType
           ? {
@@ -1581,28 +1650,28 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       return;
     }
     await setDoc(
-      doc(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/sheet_sources/${sourceType}`),
+      doc(db, `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/sheet_sources/${sourceType}`),
       withTenantScope(orgId, {
-        projectId: portalUser.projectId,
+        projectId: currentProjectId,
         sourceType,
         applyTarget,
         lastAppliedAt: now,
         updatedAt: now,
-        updatedBy: portalUser.name || authUser?.name || '',
+        updatedBy: portalUser?.name || authUser?.name || '',
       }),
       { merge: true },
     );
-  }, [authUser?.name, db, isDevHarnessUser, orgId, portalUser?.name, portalUser?.projectId]);
+  }, [authUser?.name, currentProjectId, db, isDevHarnessUser, orgId, portalUser?.name]);
 
   const saveExpenseSheetRows = useCallback(async (rows: ImportRow[]) => {
     const now = new Date().toISOString();
     const activeSheet = expenseSheets.find((sheet) => sheet.id === activeExpenseSheetId) || null;
     const activeSheetId = activeSheet?.id || activeExpenseSheetId || 'default';
     const activeSheetName = sanitizeExpenseSheetName(activeSheet?.name, activeSheetId === 'default' ? '기본 탭' : '새 탭');
-    const defaultLedgerId = ledgers.find((ledger) => ledger.projectId === portalUser?.projectId)?.id
-      || (portalUser?.projectId ? `l-${portalUser.projectId}` : 'l-default');
+    const defaultLedgerId = ledgers.find((ledger) => ledger.projectId === currentProjectId)?.id
+      || (currentProjectId ? `l-${currentProjectId}` : 'l-default');
     const preparedOptions = {
-      projectId: portalUser?.projectId || '',
+      projectId: currentProjectId || '',
       defaultLedgerId,
       evidenceRequiredMap,
       policy: normalizeSettlementSheetPolicy(myProject?.settlementSheetPolicy, myProject?.fundInputMode),
@@ -1626,7 +1695,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         ? { userEditedCells: new Set(row.userEditedCells) }
         : {}),
     }));
-    if (isDevHarnessUser || !db || !portalUser?.projectId) {
+    if (isDevHarnessUser || !db || !currentProjectId) {
       setExpenseSheetRows(sanitizedRows as ImportRow[]);
       setExpenseSheets((prev) => upsertExpenseSheetTabRows({
         sheets: prev,
@@ -1637,7 +1706,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         now,
         createdAt: activeSheet?.createdAt,
       }));
-      writeDevHarnessPortalSnapshot(portalUser?.projectId || '', {
+      writeDevHarnessPortalSnapshot(currentProjectId || '', {
         activeExpenseSheetId: activeSheetId,
         expenseSheets: upsertExpenseSheetTabRows({
           sheets: expenseSheets.map((sheet) => ({
@@ -1662,17 +1731,17 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     }
     const payload = buildExpenseSheetPersistenceDoc({
       orgId,
-      projectId: portalUser.projectId,
+      projectId: currentProjectId,
       activeSheetId,
       activeSheetName,
       order: activeSheet?.order || (activeSheetId === 'default' ? 0 : expenseSheets.length + 1),
       rows: sanitizedRows as ImportRow[],
       createdAt: activeSheet?.createdAt,
       now,
-      updatedBy: portalUser.name || authUser?.name || '',
+      updatedBy: portalUser?.name || authUser?.name || '',
     });
     await setDoc(
-      doc(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/expense_sheets/${activeSheetId}`),
+      doc(db, `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/expense_sheets/${activeSheetId}`),
       payload,
       { merge: true },
     );
@@ -1692,7 +1761,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   }, [
     db,
     orgId,
-    portalUser?.projectId,
+    currentProjectId,
     portalUser?.name,
     authUser?.name,
     activeExpenseSheetId,
@@ -1725,23 +1794,23 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       revisedBudget: Number.isFinite(row.revisedBudget ?? NaN) ? row.revisedBudget : 0,
       ...(row.note ? { note: row.note } : {}),
     }));
-    if (isDevHarnessUser || !db || !portalUser?.projectId) {
+    if (isDevHarnessUser || !db || !currentProjectId) {
       setBudgetPlanRows(sanitizedRows as BudgetPlanRow[]);
       return;
     }
     const payload = withTenantScope(orgId, {
-      projectId: portalUser.projectId,
+      projectId: currentProjectId,
       rows: sanitizedRows,
       updatedAt: now,
-      updatedBy: portalUser.name || authUser?.name || '',
+      updatedBy: portalUser?.name || authUser?.name || '',
     });
     await setDoc(
-      doc(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/budget_summary/default`),
+      doc(db, `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/budget_summary/default`),
       payload,
       { merge: true },
     );
     setBudgetPlanRows(sanitizedRows as BudgetPlanRow[]);
-  }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name, isDevHarnessUser]);
+  }, [currentProjectId, db, orgId, portalUser?.name, authUser?.name, isDevHarnessUser]);
 
   const saveBudgetCodeBook = useCallback(async (rows: BudgetCodeEntry[], renames: BudgetCodeRename[] = []) => {
     const now = new Date().toISOString();
@@ -1750,18 +1819,18 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       throw new Error(validation.errors[0] || '비목/세목 구조를 확인해 주세요.');
     }
     const sanitized = normalizeBudgetCodeBook(rows);
-    if (isDevHarnessUser || !db || !portalUser?.projectId) {
+    if (isDevHarnessUser || !db || !currentProjectId) {
       setBudgetCodeBook(sanitized);
       return;
     }
     const payload = withTenantScope(orgId, {
-      projectId: portalUser.projectId,
+      projectId: currentProjectId,
       codes: sanitized,
       updatedAt: now,
-      updatedBy: portalUser.name || authUser?.name || '',
+      updatedBy: portalUser?.name || authUser?.name || '',
     });
     await setDoc(
-      doc(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/budget_code_book/default`),
+      doc(db, `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/budget_code_book/default`),
       payload,
       { merge: true },
     );
@@ -1779,13 +1848,13 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     });
     if (renameMap.size === 0) return;
 
-    const budgetPlanRef = doc(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/budget_summary/default`);
+    const budgetPlanRef = doc(db, `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/budget_summary/default`);
     const expenseSheetRef = doc(
       db,
-      `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/expense_sheets/${activeExpenseSheetId || 'default'}`,
+      `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/expense_sheets/${activeExpenseSheetId || 'default'}`,
     );
-    const evidenceMapRef = doc(db, getOrgDocumentPath(orgId, 'budgetEvidenceMaps', portalUser.projectId));
-    const updatedBy = portalUser.name || authUser?.name || '';
+    const evidenceMapRef = doc(db, getOrgDocumentPath(orgId, 'budgetEvidenceMaps', currentProjectId));
+    const updatedBy = portalUser?.name || authUser?.name || '';
 
     if (budgetPlanRows && budgetPlanRows.length > 0) {
       let touched = false;
@@ -1800,7 +1869,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         await setDoc(
           budgetPlanRef,
           withTenantScope(orgId, {
-            projectId: portalUser.projectId,
+            projectId: currentProjectId,
             rows: nextRows.map((row) => ({
               budgetCode: row.budgetCode || '',
               subCode: row.subCode || '',
@@ -1836,7 +1905,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           await setDoc(
             expenseSheetRef,
             withTenantScope(orgId, {
-              projectId: portalUser.projectId,
+              projectId: currentProjectId,
               rows: nextRows.map(serializeExpenseSheetRowForPersistence),
               updatedAt: now,
               updatedBy,
@@ -1871,7 +1940,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         await setDoc(
           evidenceMapRef,
           withTenantScope(orgId, {
-            projectId: portalUser.projectId,
+            projectId: currentProjectId,
             map: nextMap,
             updatedAt: now,
             updatedBy,
@@ -1881,7 +1950,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         setEvidenceRequiredMap(nextMap);
       }
     }
-  }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name, activeExpenseSheetId, isDevHarnessUser]);
+  }, [currentProjectId, db, orgId, portalUser?.name, authUser?.name, activeExpenseSheetId, isDevHarnessUser]);
 
   const upsertWeeklySubmissionStatus = useCallback(async (input: {
     projectId: string;
@@ -2016,7 +2085,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           role: authUser.role,
           idToken,
         },
-        project,
+        project: { ...project } as UpsertProjectPayload,
       });
     } else {
       await setDoc(doc(db, getOrgDocumentPath(orgId, 'projects', projectId)), withTenantScope(orgId, project), { merge: true });
@@ -2099,7 +2168,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     const sanitizedSheet: BankStatementSheet = { columns: sanitizedColumns, rows: sanitizedRows as BankStatementRow[] };
     const uploadBatchId = `bank-upload-${Date.now()}`;
     const intakeItems = buildBankImportIntakeItemsFromBankSheet({
-      projectId: portalUser?.projectId || '',
+      projectId: currentProjectId || '',
       sheet: sanitizedSheet,
       existingItems: expenseIntakeItemsRef.current,
       existingRows: expenseSheetRowsRef.current,
@@ -2109,35 +2178,35 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       updatedBy: portalUser?.name || authUser?.name || '',
     });
     const reconciledIntakeItems = reconcileBankImportUploadItems(expenseIntakeItemsRef.current, intakeItems);
-    if (isDevHarnessUser || !db || !portalUser?.projectId) {
+    if (isDevHarnessUser || !db || !currentProjectId) {
       setBankStatementRows(sanitizedSheet);
       expenseIntakeItemsRef.current = reconciledIntakeItems;
       setExpenseIntakeItems(reconciledIntakeItems);
       return;
     }
     const payload = withTenantScope(orgId, {
-      projectId: portalUser.projectId,
+      projectId: currentProjectId,
       columns: sanitizedColumns,
       rows: sanitizedRows,
       updatedAt: now,
-      updatedBy: portalUser.name || authUser?.name || '',
+      updatedBy: portalUser?.name || authUser?.name || '',
     });
     await setDoc(
-      doc(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/bank_statements/default`),
+      doc(db, `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/bank_statements/default`),
       payload,
       { merge: true },
     );
     setBankStatementRows(sanitizedSheet);
     await Promise.all(
       reconciledIntakeItems.map((item) => setDoc(
-        doc(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/expense_intake/${item.id}`),
+        doc(db, `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/expense_intake/${item.id}`),
         buildBankImportIntakeDoc({ orgId, item }),
         { merge: true },
       )),
     );
     expenseIntakeItemsRef.current = reconciledIntakeItems;
     setExpenseIntakeItems(reconciledIntakeItems);
-  }, [db, orgId, portalUser?.projectId, portalUser?.name, authUser?.name, isDevHarnessUser]);
+  }, [currentProjectId, db, orgId, portalUser?.name, authUser?.name, isDevHarnessUser]);
 
   const upsertExpenseIntakeItems = useCallback(async (items: BankImportIntakeItem[]) => {
     if (!Array.isArray(items) || items.length === 0) return;
@@ -2146,7 +2215,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       .filter((item): item is BankImportIntakeItem => item !== null);
     if (normalizedItems.length === 0) return;
 
-    if (isDevHarnessUser || !db || !portalUser?.projectId) {
+    if (isDevHarnessUser || !db || !currentProjectId) {
       setExpenseIntakeItems((prev) => {
         const nextMap = new Map(expenseIntakeItemsRef.current.map((item) => [item.id, item] as const));
         normalizedItems.forEach((item) => {
@@ -2162,7 +2231,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
 
     await Promise.all(
       normalizedItems.map((item) => setDoc(
-        doc(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/expense_intake/${item.id}`),
+        doc(db, `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/expense_intake/${item.id}`),
         buildBankImportIntakeDoc({ orgId, item }),
         { merge: true },
       )),
@@ -2177,7 +2246,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       expenseIntakeItemsRef.current = nextItems;
       return nextItems;
     });
-  }, [db, isDevHarnessUser, orgId, portalUser?.projectId]);
+  }, [currentProjectId, db, isDevHarnessUser, orgId]);
 
   const saveExpenseIntakeDraft = useCallback(async (id: string, updates: Partial<BankImportIntakeItem>) => {
     const currentItem = expenseIntakeItemsRef.current.find((item) => item.id === id);
@@ -2186,7 +2255,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     const mergedCandidate = mergeBankImportIntakeItem(currentItem, updates);
     if (!mergedCandidate) return;
 
-    if (isDevHarnessUser || !db || !portalUser?.projectId) {
+    if (isDevHarnessUser || !db || !currentProjectId) {
       const nextItems = expenseIntakeItemsRef.current
         .map((item) => (item.id === id ? mergedCandidate : item))
         .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')));
@@ -2196,7 +2265,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     }
 
     await setDoc(
-      doc(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/expense_intake/${id}`),
+      doc(db, `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/expense_intake/${id}`),
       buildBankImportIntakeDoc({ orgId, item: mergedCandidate }),
       { merge: true },
     );
@@ -2205,7 +2274,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')));
     expenseIntakeItemsRef.current = nextItems;
     setExpenseIntakeItems(nextItems);
-  }, [db, isDevHarnessUser, orgId, portalUser?.projectId]);
+  }, [currentProjectId, db, isDevHarnessUser, orgId]);
 
   const updateExpenseIntakeItem = saveExpenseIntakeDraft;
 
@@ -2222,6 +2291,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       mergedCandidate.manualFields.budgetSubCategory || '',
     );
     const evidenceChecklist = resolveEvidenceChecklist({
+      evidenceRequired: [],
       evidenceRequiredDesc,
       evidenceCompletedDesc: mergedCandidate.manualFields.evidenceCompletedDesc || '',
       evidenceCompletedManualDesc: mergedCandidate.manualFields.evidenceCompletedDesc || '',
@@ -2266,7 +2336,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       createdAt: targetSheet?.createdAt,
     });
 
-    if (isDevHarnessUser || !db || !portalUser?.projectId) {
+    if (isDevHarnessUser || !db || !currentProjectId) {
       expenseSheetsRef.current = nextSheets;
       setExpenseSheets(nextSheets);
       if (targetSheetId === activeExpenseSheetIdRef.current) {
@@ -2282,22 +2352,22 @@ export function PortalProvider({ children }: { children: ReactNode }) {
 
     const expensePayload = buildExpenseSheetPersistenceDoc({
       orgId,
-      projectId: portalUser.projectId,
+      projectId: currentProjectId,
       activeSheetId: targetSheetId,
       activeSheetName: sanitizeExpenseSheetName(targetSheet?.name, targetSheetId === 'default' ? '기본 탭' : '새 탭'),
       order: targetSheet?.order || (targetSheetId === 'default' ? 0 : expenseSheetsRef.current.length + 1),
       rows: projection.rows,
       createdAt: targetSheet?.createdAt,
       now,
-      updatedBy: portalUser.name || authUser?.name || '',
+      updatedBy: portalUser?.name || authUser?.name || '',
     });
     await setDoc(
-      doc(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/expense_sheets/${targetSheetId}`),
+      doc(db, `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/expense_sheets/${targetSheetId}`),
       expensePayload,
       { merge: true },
     );
     await setDoc(
-      doc(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/expense_intake/${id}`),
+      doc(db, `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/expense_intake/${id}`),
       buildBankImportIntakeDoc({ orgId, item: projectedItem }),
       { merge: true },
     );
@@ -2311,7 +2381,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')));
     expenseIntakeItemsRef.current = nextItems;
     setExpenseIntakeItems(nextItems);
-  }, [authUser?.name, db, evidenceRequiredMap, isDevHarnessUser, orgId, portalUser?.name, portalUser?.projectId]);
+  }, [authUser?.name, currentProjectId, db, evidenceRequiredMap, isDevHarnessUser, orgId, portalUser?.name]);
 
   const syncExpenseIntakeEvidence = useCallback(async (id: string, updates: Partial<BankImportIntakeItem>) => {
     const currentItem = expenseIntakeItemsRef.current.find((item) => item.id === id);
@@ -2328,7 +2398,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       now,
     });
 
-    if (isDevHarnessUser || !db || !portalUser?.projectId) {
+    if (isDevHarnessUser || !db || !currentProjectId) {
       expenseSheetsRef.current = nextState.expenseSheets;
       setExpenseSheets(nextState.expenseSheets);
       if (activeExpenseSheetIdRef.current === (nextState.item.existingExpenseSheetId || activeExpenseSheetIdRef.current)) {
@@ -2343,7 +2413,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     }
 
     await setDoc(
-      doc(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/expense_intake/${id}`),
+      doc(db, `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/expense_intake/${id}`),
       buildBankImportIntakeDoc({ orgId, item: nextState.item }),
       { merge: true },
     );
@@ -2352,17 +2422,17 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     const targetSheet = nextState.expenseSheets.find((sheet) => sheet.id === targetSheetId) || null;
     if (targetSheet?.rows) {
       await setDoc(
-        doc(db, `${getOrgDocumentPath(orgId, 'projects', portalUser.projectId)}/expense_sheets/${targetSheetId}`),
+        doc(db, `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/expense_sheets/${targetSheetId}`),
         buildExpenseSheetPersistenceDoc({
           orgId,
-          projectId: portalUser.projectId,
+          projectId: currentProjectId,
           activeSheetId: targetSheetId,
           activeSheetName: sanitizeExpenseSheetName(targetSheet.name, targetSheetId === 'default' ? '기본 탭' : '새 탭'),
           order: targetSheet.order,
           rows: targetSheet.rows,
           createdAt: targetSheet.createdAt,
           now,
-          updatedBy: portalUser.name || authUser?.name || '',
+          updatedBy: portalUser?.name || authUser?.name || '',
         }),
         { merge: true },
       );
@@ -2378,7 +2448,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')));
     expenseIntakeItemsRef.current = nextItems;
     setExpenseIntakeItems(nextItems);
-  }, [authUser?.name, db, evidenceRequiredMap, isDevHarnessUser, orgId, portalUser?.name, portalUser?.projectId]);
+  }, [authUser?.name, currentProjectId, db, evidenceRequiredMap, isDevHarnessUser, orgId, portalUser?.name]);
 
   const persistTransaction = useCallback(async (txData: Transaction) => {
     if (!db) return;
@@ -2478,7 +2548,9 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           createdAt: member?.createdAt || authUser.registeredAt || now,
           lastLoginAt: now,
         }, { merge: true });
-        setPortalUser(candidate.role !== memberRole ? { ...candidate, role: memberRole } : candidate);
+        const nextPortalUser = candidate.role !== memberRole ? { ...candidate, role: memberRole } : candidate;
+        setPortalUser(nextPortalUser);
+        setActiveProjectIdState(nextPortalUser.projectId);
       } catch (err) {
         console.error('[PortalStore] register member sync error:', err);
         setPortalUser(previousPortalUser);
@@ -2489,94 +2561,25 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       }
     } else {
       setPortalUser(candidate);
+      setActiveProjectIdState(candidate.projectId);
     }
 
     return true;
   }, [authUser, firestoreEnabled, db, orgId, portalUser, isDevHarnessUser]);
 
-  const setActiveProject = useCallback(async (projectId: string): Promise<boolean> => {
-    if (isDevHarnessUser) {
-      const target = projectId.trim();
-      if (!target || !portalUser) return false;
-      const allowedIds = normalizeProjectIds([
-        ...(Array.isArray(portalUser.projectIds) ? portalUser.projectIds : []),
-        portalUser.projectId,
-      ]);
-      if (!includesProject(allowedIds, target)) {
-        toast.error('배정되지 않은 사업입니다.');
-        return false;
-      }
-      setPortalUser({
-        ...portalUser,
-        projectId: target,
-      });
-      return true;
-    }
-    if (!firestoreEnabled || !db) {
-      toast.error('Firestore 연결이 필요합니다. 관리자에게 문의해 주세요.');
-      return false;
-    }
+  const setSessionActiveProject = useCallback(async (projectId: string): Promise<boolean> => {
     const target = projectId.trim();
     if (!target) return false;
-    if (!portalUser) return false;
-    const allowedIds = normalizeProjectIds([
-      ...(Array.isArray(portalUser.projectIds) ? portalUser.projectIds : []),
-      portalUser.projectId,
-    ]);
-    if (!includesProject(allowedIds, target)) {
-      toast.error('배정되지 않은 사업입니다.');
+    if (!includesProject(scopedProjectIds, target)) {
+      toast.error('선택 가능한 사업이 아닙니다.');
       return false;
     }
-
-    const previousUser = portalUser;
-    const nextUser: PortalUser = {
-      ...portalUser,
-      projectId: target,
-    };
-
-    if (authUser) {
-      setIsMemberLoading(true);
-      try {
-        const now = new Date().toISOString();
-        const { canonicalRef, member } = await loadPortalMemberRecord(db, orgId, authUser);
-        await setDoc(canonicalRef, {
-          uid: authUser.uid,
-          name: authUser.name || nextUser.name,
-          email: authUser.email || nextUser.email,
-          role: typeof member?.role === 'string' && member.role.trim()
-            ? normalizePortalRole(member.role)
-            : normalizePortalRole(nextUser.role),
-          tenantId: orgId,
-          status: typeof member?.status === 'string' && member.status.trim() ? member.status : 'ACTIVE',
-          ...buildPortalProfilePatch({
-            projectId: target,
-            projectIds: nextUser.projectIds,
-            projectNames: nextUser.projectNames,
-            updatedAt: now,
-            updatedByUid: authUser.uid,
-            updatedByName: authUser.name || nextUser.name,
-          }),
-          updatedAt: now,
-          createdAt: member?.createdAt || authUser.registeredAt || now,
-          lastLoginAt: now,
-        }, { merge: true });
-        setPortalUser(nextUser);
-      } catch (err) {
-        console.error('[PortalStore] setActiveProject member sync error:', err);
-        setPortalUser(previousUser);
-        toast.error('주사업 변경을 저장하지 못했습니다.');
-        return false;
-      } finally {
-        setIsMemberLoading(false);
-      }
-    } else {
-      setPortalUser(nextUser);
-    }
-
+    setActiveProjectIdState(target);
     return true;
-  }, [portalUser, firestoreEnabled, db, authUser, orgId, isDevHarnessUser]);
+  }, [scopedProjectIds]);
 
   const logout = useCallback(() => {
+    setActiveProjectIdState('');
     setPortalUser(null);
   }, []);
 
@@ -2841,7 +2844,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   }, [firestoreEnabled, persistTransaction, portalUser?.id, portalUser?.name, transactions]);
 
   const addComment = useCallback(async (comment: Comment) => {
-    if (!portalUser?.projectId) {
+    if (!currentProjectId) {
       toast.error('사업 정보가 없어 메모를 저장할 수 없습니다.');
       return;
     }
@@ -2851,7 +2854,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       || comment.sheetRowId?.startsWith('sheet-row:');
     const payload = withTenantScope(orgId, {
       ...comment,
-      projectId: comment.projectId || portalUser.projectId,
+      projectId: comment.projectId || currentProjectId,
       targetType: isSheetRowComment ? 'expense_sheet_row' : (comment.targetType || 'transaction'),
       ...(isSheetRowComment ? { sheetRowId: comment.sheetRowId || comment.transactionId } : {}),
     });
@@ -2866,12 +2869,13 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     }
 
     setComments((prev) => [...prev, payload as Comment]);
-  }, [db, firestoreEnabled, orgId, portalUser?.projectId]);
+  }, [currentProjectId, db, firestoreEnabled, orgId]);
 
   const value: PortalState & PortalActions = {
     isRegistered: !!portalUser,
     isLoading: isLoading || isMemberLoading,
     portalUser,
+    activeProjectId,
     projects,
     ledgers,
     myProject,
@@ -2891,7 +2895,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     budgetCodeBook,
     weeklySubmissionStatuses,
     register,
-    setActiveProject,
+    setSessionActiveProject,
     logout,
     addExpenseSet,
     updateExpenseSet,

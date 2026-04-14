@@ -28,7 +28,7 @@ import { resolveProjectPayrollLiquidity, type PayrollLiquidityQueueItem } from '
 
 export function PortalPayrollPage() {
   const navigate = useNavigate();
-  const { portalUser, myProject } = usePortalStore();
+  const { activeProjectId, myProject } = usePortalStore();
   const {
     schedules,
     runs,
@@ -45,7 +45,7 @@ export function PortalPayrollPage() {
   const yearMonth = today.slice(0, 7);
   const prevYearMonth = addMonthsToYearMonth(yearMonth, -1);
 
-  const projectId = portalUser?.projectId || myProject?.id || '';
+  const projectId = activeProjectId || myProject?.id || '';
   const schedule = useMemo(() => schedules.find((s) => s.projectId === projectId) || null, [projectId, schedules]);
   const run = useMemo(() => runs.find((r) => r.projectId === projectId && r.yearMonth === yearMonth) || null, [projectId, runs, yearMonth]);
   const monthlyClosePrev = useMemo(() => monthlyCloses.find((c) => c.projectId === projectId && c.yearMonth === prevYearMonth) || null, [monthlyCloses, prevYearMonth, projectId]);
