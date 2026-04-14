@@ -42,3 +42,7 @@
 ## [2026-04-14] patch-note | guide-simplify-and-hook | 설명성 UI 축소와 patch-note guard 추가
 - pages: [portal-dashboard](./pages/portal-dashboard.md), [portal-weekly-expense](./pages/portal-weekly-expense.md), [portal-bank-statement](./pages/portal-bank-statement.md), [portal-budget](./pages/portal-budget.md), [portal-submissions](./pages/portal-submissions.md), [portal-onboarding](./pages/portal-onboarding.md), [admin-dashboard](./pages/admin-dashboard.md), [admin-participation](./pages/admin-participation.md)
 - summary: 주요 운영 화면에서 미션/가이드/프로토콜 패널을 제거하고, 대응 patch-note page와 log가 같이 staged되지 않으면 커밋을 막는 hook을 추가했다.
+
+## [2026-04-14] patch-note | portal-dashboard-saas-shell | 상단 workspace형 SaaS 재편
+- pages: [portal-dashboard](./pages/portal-dashboard.md)
+- summary: 내사업 현황을 좌측 포털형 툴에서 상단 workspace bar, 앱 탭, 사업 전환 rail을 가진 cold enterprise SaaS 구조로 재편했다.

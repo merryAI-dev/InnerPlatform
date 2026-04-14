@@ -17,6 +17,9 @@ import {
   Shield,
   ChevronLeft,
   ChevronRight,
+  Search,
+  Bell,
+  UserCircle2,
 } from 'lucide-react';
 import { PortalProvider, usePortalStore } from '../../data/portal-store';
 import { useAuth } from '../../data/auth-store';
@@ -230,6 +233,11 @@ function PortalContent() {
       }),
     }))
   ), [currentFundInputMode]);
+  const topNavItems = useMemo(() => navSections.flatMap((section) => section.items), [navSections]);
+  const currentSectionLabel = useMemo(() => {
+    const current = topNavItems.find((item) => isActive(item.to, item.exact));
+    return current?.label || '내 사업 현황';
+  }, [topNavItems, location.pathname]);
 
 
   // 미인증 시 로그인으로
@@ -434,12 +442,12 @@ function PortalContent() {
           <div className="fixed inset-0 bg-black/30 backdrop-blur-sm z-40 lg:hidden" onClick={() => setMobileOpen(false)} />
         )}
 
-        {/* ── Sidebar ── */}
+        {/* ── Mobile drawer ── */}
         <aside className={`
           ${collapsed ? 'w-[60px]' : 'w-[240px]'} flex flex-col shrink-0 z-50
-          fixed inset-y-0 left-0 lg:relative
+          fixed inset-y-0 left-0 lg:hidden
           transition-all duration-200
-          ${mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
+          ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}
           bg-sidebar/90 backdrop-blur-xl border-r border-white/10
         `}>
           {/* Brand */}
@@ -453,10 +461,10 @@ function PortalContent() {
             {!collapsed && (
               <div className="overflow-hidden flex-1">
                 <p className="text-[11px] text-white truncate" style={{ fontWeight: 700 }}>
-                  사업비 관리 포털
+                  MYSC Workspace
                 </p>
                 <p className="text-[9px] text-slate-500 truncate tracking-wider" style={{ textTransform: 'uppercase' }}>
-                  Project Member
+                  Project Ops
                 </p>
               </div>
             )}
@@ -657,37 +665,140 @@ function PortalContent() {
         </aside>
 
         {/* ── Main ── */}
-        <div className="flex-1 flex flex-col min-w-0 bg-background">
-          {/* Top bar */}
-          <header className="glass sticky top-0 z-30 flex items-center justify-between h-[48px] border-b border-glass-border px-5 shrink-0">
-            <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
-              <button className="lg:hidden p-1 rounded hover:bg-muted" onClick={() => setMobileOpen(true)}>
-                <Menu className="w-4 h-4" />
+        <div className="flex-1 flex flex-col min-w-0 bg-slate-50">
+          <header className="sticky top-0 z-30 shrink-0 border-b border-slate-200 bg-white shadow-[0_1px_0_rgba(15,23,42,0.04)]">
+            <div className="flex h-14 items-center gap-3 border-b border-slate-200 bg-[#0f2747] px-4 text-white md:px-6">
+              <button
+                className="rounded-md p-1.5 text-slate-200 transition-colors hover:bg-white/10 lg:hidden"
+                onClick={() => setMobileOpen(true)}
+              >
+                <Menu className="h-4 w-4" />
               </button>
-              <FolderKanban className="w-3.5 h-3.5" />
-              <span className="truncate">{currentProjectName || '사업 미선택'}</span>
+              <div className="flex min-w-0 items-center gap-2">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#1d4f91]">
+                  <FolderKanban className="h-4 w-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className="truncate text-[13px] font-semibold tracking-[0.01em]">MYSC Workspace</p>
+                  <p className="truncate text-[10px] text-slate-300">Project Operations</p>
+                </div>
+              </div>
+              <div className="hidden flex-1 items-center justify-center px-4 md:flex">
+                <div className="flex h-10 w-full max-w-xl items-center gap-2 rounded-xl border border-white/15 bg-white/8 px-3 text-slate-200">
+                  <Search className="h-4 w-4 text-slate-300" />
+                  <span className="truncate text-[12px] text-slate-300">Search projects, submissions, budgets...</span>
+                </div>
+              </div>
+              <div className="ml-auto flex items-center gap-1.5">
+                {isAdminSpaceRole(authUser?.role) && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="hidden h-8 border-white/15 bg-white/8 text-[11px] text-white hover:bg-white/12 md:inline-flex"
+                    onClick={requestAdminNavigation}
+                  >
+                    <Shield className="mr-1 h-3.5 w-3.5" />
+                    관리자 공간
+                  </Button>
+                )}
+                <button className="rounded-md p-2 text-slate-200 transition-colors hover:bg-white/10">
+                  <Bell className="h-4 w-4" />
+                </button>
+                <button className="rounded-md p-2 text-slate-200 transition-colors hover:bg-white/10">
+                  <UserCircle2 className="h-4 w-4" />
+                </button>
+              </div>
             </div>
-            <div className="flex items-center gap-1.5">
-              {isAdminSpaceRole(authUser?.role) && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8 gap-1.5 border-slate-200/70 bg-white/80 text-slate-700 hover:bg-slate-50"
-                  onClick={requestAdminNavigation}
-                >
-                  <Shield className="w-3.5 h-3.5" />
-                  관리자 공간
-                </Button>
-              )}
-              <Badge variant="outline" className="text-[10px] h-5 px-2">
-                {portalUser.role}
-              </Badge>
+
+            <div className="flex flex-col gap-3 px-4 py-3 md:px-6 lg:gap-0">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">My Work</p>
+                    <div className="mt-1 flex items-center gap-2">
+                      <h1 className="truncate text-[20px] font-semibold tracking-[-0.03em] text-slate-950">{currentSectionLabel}</h1>
+                      <Badge className="h-5 rounded-full bg-[#e8f0fb] px-2 text-[10px] font-semibold text-[#1b4f8f]">
+                        {portalUser.role}
+                      </Badge>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  {projectOptions.length > 0 ? (
+                    <Select
+                      value={selectedProjectOptionValue}
+                      onValueChange={(value) => {
+                        if (value && value !== portalUser?.projectId) {
+                          setActiveProject(value);
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="h-10 min-w-[220px] rounded-xl border-slate-300 bg-white text-[12px] font-medium text-slate-900 shadow-sm">
+                        <SelectValue placeholder="사업 선택" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {projectOptions.map((project) => (
+                          <SelectItem key={project.id} value={project.id}>
+                            {project.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <div className="flex h-10 items-center rounded-xl border border-slate-300 bg-white px-3 text-[12px] font-medium text-slate-900 shadow-sm">
+                      {currentProjectName || '사업 미선택'}
+                    </div>
+                  )}
+                  <Button
+                    size="sm"
+                    className="h-10 rounded-xl bg-[#1b4f8f] px-4 text-[12px] font-semibold text-white hover:bg-[#163f72]"
+                    onClick={() => requestPortalNavigation('/portal/weekly-expenses', '사업비 입력(주간)')}
+                  >
+                    사업비 입력
+                  </Button>
+                </div>
+              </div>
+
+              <div className="-mx-4 overflow-x-auto px-4 pb-1 pt-1 md:-mx-6 md:px-6">
+                <nav className="flex min-w-max items-center gap-1">
+                  {topNavItems.map((item) => {
+                    const active = isActive(item.to, item.exact);
+                    const badge = getBadge(item.to);
+                    return (
+                      <NavLink
+                        key={item.to}
+                        to={item.to}
+                        end={item.exact}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          requestPortalNavigation(item.to, item.label);
+                        }}
+                        className={`group inline-flex h-10 items-center gap-2 rounded-t-xl border-b-2 px-3 text-[12px] font-medium transition-colors ${
+                          active
+                            ? 'border-[#1b6dff] text-[#1b4f8f]'
+                            : 'border-transparent text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        <item.icon className={`h-3.5 w-3.5 ${active ? 'text-[#1b6dff]' : 'text-slate-400 group-hover:text-slate-600'}`} />
+                        <span className="whitespace-nowrap">
+                          {item.label.replace('(주간)', '')}
+                        </span>
+                        {badge !== null && (
+                          <span className="inline-flex min-w-[18px] items-center justify-center rounded-full bg-slate-100 px-1.5 text-[10px] font-semibold text-slate-700">
+                            {badge}
+                          </span>
+                        )}
+                      </NavLink>
+                    );
+                  })}
+                </nav>
+              </div>
             </div>
           </header>
 
           {/* Content */}
           <main className="flex-1 overflow-y-auto">
-            <div className="p-5 max-w-[1400px] mx-auto">
+            <div className="mx-auto max-w-[1480px] p-4 md:p-6">
               <PageTransition>
                 <ErrorBoundary homePath="/portal" resetKey={location.pathname}>
                   <Outlet />

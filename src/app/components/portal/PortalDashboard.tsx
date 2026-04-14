@@ -2,10 +2,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import {
   Calculator, Users, ArrowRightLeft, ArrowRight,
-  TrendingUp, TrendingDown, Clock, AlertTriangle,
+  TrendingUp, Clock, AlertTriangle,
   CheckCircle2, CircleDollarSign,
   ArrowUpRight, ArrowDownRight, BarChart3,
   Loader2,
+  FileSpreadsheet,
+  ClipboardList,
+  ShieldCheck,
 } from 'lucide-react';
 import {
   collection,
@@ -66,11 +69,11 @@ export function PortalDashboard() {
 
   if (!myProject || !portalUser) {
     return (
-      <Card data-testid="portal-dashboard-blocked-state" className="border-amber-200/70 bg-gradient-to-br from-amber-50 via-white to-orange-50/70">
+      <Card data-testid="portal-dashboard-blocked-state" className="border-slate-200 bg-white shadow-sm">
         <CardContent className="p-6">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div className="max-w-2xl space-y-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-amber-500 text-white shadow-sm">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#1b4f8f] text-white shadow-sm">
                 <AlertTriangle className="h-5 w-5" />
               </div>
               <div className="space-y-2">
@@ -186,40 +189,122 @@ export function PortalDashboard() {
     [payrollQueueItems],
   );
   const payrollDetail = payrollQueueItems[0] || null;
+  const summaryAlerts = [
+    { label: '인력변경 요청', value: myChanges.filter((change) => change.state === 'SUBMITTED').length, tone: 'neutral' as const },
+    { label: '미확인 공지', value: hrAlerts.length, tone: hrAlerts.length > 0 ? 'warn' as const : 'neutral' as const },
+    { label: '인건비 Queue', value: payrollRiskItems.length, tone: payrollRiskItems.length > 0 ? 'danger' as const : 'neutral' as const },
+  ];
+  const primaryActions = [
+    { label: '사업비 입력', description: '주간 입력과 저장 상태 정리', to: '/portal/weekly-expenses', icon: FileSpreadsheet },
+    { label: '내 제출 현황', description: '이번 주 작성 여부와 제출 상태 확인', to: '/portal/submissions', icon: ClipboardList },
+    { label: '예산 편집', description: '예산 구조와 실제 집행 기준 확인', to: '/portal/budget', icon: Calculator },
+    { label: '통장내역', description: '원본 업로드와 intake queue 정리', to: '/portal/bank-statements', icon: CircleDollarSign },
+  ];
 
   return (
-    <div className="space-y-5">
-      {/* Welcome */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-[20px]" style={{ fontWeight: 800, letterSpacing: '-0.03em' }}>
-            안녕하세요, {portalUser.name}님
-          </h1>
-          <p className="text-[12px] text-muted-foreground mt-0.5">
-            {myProject.name}의 현재 운영 현황입니다.
-          </p>
-        </div>
-        <Badge className="text-[10px] h-5 px-2 bg-teal-100 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300">
-          {PROJECT_STATUS_LABELS[myProject.status]}
-        </Badge>
+    <div className="space-y-6">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.9fr)_minmax(300px,0.9fr)]">
+        <Card className="border-slate-200 bg-white shadow-sm">
+          <CardContent className="p-5 md:p-6">
+            <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge className="h-5 rounded-full bg-[#e8f0fb] px-2 text-[10px] font-semibold text-[#1b4f8f]">
+                    {PROJECT_STATUS_LABELS[myProject.status]}
+                  </Badge>
+                  <Badge variant="outline" className="h-5 rounded-full border-slate-300 px-2 text-[10px] font-semibold text-slate-600">
+                    {SETTLEMENT_TYPE_SHORT[myProject.settlementType]}
+                  </Badge>
+                  <Badge variant="outline" className="h-5 rounded-full border-slate-300 px-2 text-[10px] font-semibold text-slate-600">
+                    {BASIS_LABELS[myProject.basis]}
+                  </Badge>
+                </div>
+                <h2 className="mt-3 truncate text-[30px] font-semibold tracking-[-0.04em] text-slate-950">
+                  {myProject.name}
+                </h2>
+                <p className="mt-2 text-[13px] leading-6 text-slate-600">
+                  {portalUser.name}님이 담당 중인 사업입니다. 발주기관, 정산 기준, 예산 흐름과 현재 작업 상태를 한 화면에서 확인합니다.
+                </p>
+                <div className="mt-4 grid gap-3 text-[12px] text-slate-600 sm:grid-cols-3">
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">발주기관</div>
+                    <div className="mt-1 text-[13px] font-semibold text-slate-900">{myProject.clientOrg || '-'}</div>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">사업비 총액</div>
+                    <div className="mt-1 text-[13px] font-semibold text-slate-900">
+                      {myProject.contractAmount > 0 ? `${fmtShort(myProject.contractAmount)}원` : '-'}
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">최근 이동</div>
+                    <div className="mt-1 text-[13px] font-semibold text-slate-900">내 사업 현황</div>
+                  </div>
+                </div>
+              </div>
+              <div className="flex shrink-0 flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  className="h-10 rounded-xl border-slate-300 bg-white px-4 text-[12px] font-semibold text-slate-800 hover:bg-slate-50"
+                  onClick={() => navigate('/portal/project-settings')}
+                >
+                  프로젝트 설정
+                </Button>
+                <Button
+                  className="h-10 rounded-xl bg-[#1b4f8f] px-4 text-[12px] font-semibold text-white hover:bg-[#163f72]"
+                  onClick={() => navigate('/portal/weekly-expenses')}
+                >
+                  사업비 입력 열기
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-slate-200 bg-white shadow-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-[13px] font-semibold text-slate-900">운영 알림</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 pt-0">
+            {summaryAlerts.map((item) => (
+              <div key={item.label} className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+                <div>
+                  <div className="text-[11px] font-medium text-slate-600">{item.label}</div>
+                  <div className="mt-1 text-[12px] font-semibold text-slate-900">
+                    {item.value > 0 ? `${item.value}건 확인 필요` : '현재 처리 필요 없음'}
+                  </div>
+                </div>
+                <div className={`rounded-full px-2 py-1 text-[10px] font-semibold ${
+                  item.tone === 'danger'
+                    ? 'bg-rose-100 text-rose-700'
+                    : item.tone === 'warn'
+                      ? 'bg-amber-100 text-amber-700'
+                      : 'bg-slate-200 text-slate-700'
+                }`}>
+                  {item.value}
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
       </div>
 
       {/* 중요 공지 (인건비 / 월간정산 / 퇴사·전배) */}
       {(needsPayrollAck || needsMonthlyCloseAck || hrAlerts.length > 0) && (
-        <Card className="border-amber-200/60 dark:border-amber-800/40 bg-amber-50/50 dark:bg-amber-950/10">
+        <Card className="border-slate-200 bg-white shadow-sm">
           <CardContent className="p-4 space-y-3">
             <div className="flex items-start gap-2.5">
-              <Clock className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-[#1b4f8f]" />
               <div className="min-w-0">
-                <p className="text-[12px]" style={{ fontWeight: 800 }}>중요 공지</p>
-                <p className="text-[11px] text-muted-foreground mt-0.5">
+                <p className="text-[12px]" style={{ fontWeight: 800 }}>운영 확인 필요</p>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
                   인건비 지급/월간정산 확인, 인력변경(퇴사·전배 등) 관련 공지를 확인해주세요.
                 </p>
               </div>
             </div>
 
             {needsPayrollAck && payrollRun && (
-              <div className="p-3 rounded-lg bg-background border border-amber-200/50 dark:border-amber-800/40 flex items-center justify-between gap-3">
+              <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
                 <div className="min-w-0">
                   <p className="text-[12px]" style={{ fontWeight: 700 }}>
                     인건비 지급 예정: {payrollRun.plannedPayDate}
@@ -239,7 +324,7 @@ export function PortalDashboard() {
             )}
 
             {needsMonthlyCloseAck && monthlyClosePrev && (
-              <div className="p-3 rounded-lg bg-background border border-amber-200/50 dark:border-amber-800/40 flex items-center justify-between gap-3">
+              <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
                 <div className="min-w-0">
                   <p className="text-[12px]" style={{ fontWeight: 700 }}>
                     월간 정산 완료 확인: {monthlyClosePrev.yearMonth}
@@ -259,7 +344,7 @@ export function PortalDashboard() {
             )}
 
             {hrAlerts.length > 0 && (
-              <div className="p-3 rounded-lg bg-background border border-amber-200/50 dark:border-amber-800/40">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                 <div className="flex items-center justify-between gap-3 mb-2">
                   <p className="text-[12px]" style={{ fontWeight: 700 }}>인사 공지 (미확인)</p>
                   <Button variant="outline" size="sm" className="h-7 text-[11px]" onClick={() => navigate('/portal/change-requests')}>
@@ -295,50 +380,22 @@ export function PortalDashboard() {
         onOpenBankStatements={() => navigate('/portal/bank-statements')}
       />
 
-      <Card>
-        <CardContent className="p-4">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-[11px]">
-            <div>
-              <span className="text-muted-foreground">발주기관</span>
-              <p style={{ fontWeight: 600 }} className="mt-0.5">{myProject.clientOrg || '-'}</p>
-            </div>
-            <div>
-              <span className="text-muted-foreground">정산유형</span>
-              <p style={{ fontWeight: 600 }} className="mt-0.5">{SETTLEMENT_TYPE_SHORT[myProject.settlementType]}</p>
-            </div>
-            <div>
-              <span className="text-muted-foreground">정산기준</span>
-              <p style={{ fontWeight: 600 }} className="mt-0.5">{BASIS_LABELS[myProject.basis]}</p>
-            </div>
-            <div>
-              <span className="text-muted-foreground">사업비 총액</span>
-              <p style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }} className="mt-0.5">
-                {myProject.contractAmount > 0 ? fmtShort(myProject.contractAmount) + '원' : '-'}
-              </p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
       {/* 재무 KPI */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {[
-          { label: '총 입금', value: fmtShort(totalIn), icon: ArrowUpRight, gradient: 'linear-gradient(135deg, #0d9488 0%, #059669 100%)', color: '#059669' },
-          { label: '총 출금', value: fmtShort(totalOut), icon: ArrowDownRight, gradient: 'linear-gradient(135deg, #e11d48 0%, #f43f5e 100%)', color: '#e11d48' },
-          { label: '잔액', value: fmtShort(balance), icon: TrendingUp, gradient: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)', color: '#4f46e5' },
-          { label: '소진율', value: (burnRate * 100).toFixed(1) + '%', icon: BarChart3, gradient: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)', color: '#d97706' },
+          { label: '총 입금', value: fmtShort(totalIn), icon: ArrowUpRight },
+          { label: '총 출금', value: fmtShort(totalOut), icon: ArrowDownRight },
+          { label: '잔액', value: fmtShort(balance), icon: TrendingUp },
+          { label: '소진율', value: `${(burnRate * 100).toFixed(1)}%`, icon: BarChart3 },
         ].map(k => (
-          <Card key={k.label}>
-            <CardContent className="p-3 flex items-center gap-3">
-              <div
-                className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
-                style={{ background: k.gradient }}
-              >
-                <k.icon className="w-4 h-4 text-white" />
+          <Card key={k.label} className="border-slate-200 bg-white shadow-sm">
+            <CardContent className="flex items-center gap-3 p-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#e8f0fb] text-[#1b4f8f]">
+                <k.icon className="h-4 w-4" />
               </div>
               <div>
-                <p className="text-[10px] text-muted-foreground">{k.label}</p>
-                <p className="text-[16px]" style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: k.color }}>
+                <p className="text-[10px] uppercase tracking-[0.14em] text-slate-500">{k.label}</p>
+                <p className="mt-1 text-[22px] font-semibold tracking-[-0.03em] text-slate-950" style={{ fontVariantNumeric: 'tabular-nums' }}>
                   {k.value}
                 </p>
               </div>
@@ -348,60 +405,78 @@ export function PortalDashboard() {
       </div>
 
       {/* 소진율 바 */}
-      <Card>
+      <Card className="border-slate-200 bg-white shadow-sm">
         <CardContent className="p-4">
           <div className="flex items-center justify-between mb-2">
             <span className="text-[12px]" style={{ fontWeight: 600 }}>예산 소진율</span>
-            <span className="text-[12px]" style={{ fontWeight: 700, color: burnRate > 0.7 ? '#e11d48' : '#059669' }}>
+            <span className="text-[12px] font-semibold text-slate-800">
               {(burnRate * 100).toFixed(1)}%
             </span>
           </div>
-          <div className="w-full h-3 rounded-full bg-muted overflow-hidden">
+          <div className="h-3 w-full overflow-hidden rounded-full bg-slate-200">
             <div
-              className="h-full rounded-full transition-all"
+              className="h-full rounded-full bg-[#1b4f8f] transition-all"
               style={{
                 width: `${Math.min(burnRate * 100, 100)}%`,
-                background: burnRate > 0.7 ? '#e11d48' : burnRate > 0.4 ? '#f59e0b' : '#059669',
               }}
             />
           </div>
-          <div className="flex justify-between mt-1.5 text-[10px] text-muted-foreground">
+          <div className="mt-1.5 flex justify-between text-[10px] text-muted-foreground">
             <span>출금: {fmtKRW(totalOut)}원</span>
             <span>총 예산: {fmtKRW(myProject.contractAmount)}원</span>
           </div>
         </CardContent>
       </Card>
 
-      {/* 할 일 / 빠른 액션 */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-[13px] flex items-center gap-1.5">
-              <Clock className="w-4 h-4 text-amber-500" />
-              할 일 & 빠른 액션
-            </CardTitle>
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
+        <Card className="border-slate-200 bg-white shadow-sm">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-[13px] text-slate-900">현재 작업</CardTitle>
           </CardHeader>
-          <CardContent className="pt-0 space-y-2">
-            {/* 빠른 링크 */}
-            <div className="pt-1 space-y-1">
-              {[
-                { label: '예산 편집', icon: Calculator, to: '/portal/budget', color: '#0d9488' },
-                { label: '인력변경 신청하기', icon: ArrowRightLeft, to: '/portal/change-requests', color: '#7c3aed' },
-                { label: '인력 현황 보기', icon: Users, to: '/portal/personnel', color: '#059669' },
-              ].map(a => (
+          <CardContent className="grid gap-2 pt-0 md:grid-cols-2">
+            {primaryActions.map((action) => (
+              <button
+                key={action.label}
+                className="group rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left transition-colors hover:bg-slate-100"
+                onClick={() => navigate(action.to)}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-[#1b4f8f] shadow-sm ring-1 ring-slate-200">
+                    <action.icon className="h-4 w-4" />
+                  </div>
+                  <ArrowRight className="mt-1 h-4 w-4 text-slate-400 transition-transform group-hover:translate-x-0.5" />
+                </div>
+                <div className="mt-4">
+                  <p className="text-[14px] font-semibold text-slate-950">{action.label}</p>
+                  <p className="mt-1 text-[12px] leading-6 text-slate-600">{action.description}</p>
+                </div>
+              </button>
+            ))}
+          </CardContent>
+        </Card>
+
+        <Card className="border-slate-200 bg-white shadow-sm">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-[13px] text-slate-900">운영 바로가기</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 pt-0">
+            {[
+              { label: '인력변경 신청', icon: ArrowRightLeft, to: '/portal/change-requests' },
+              { label: '인력 현황', icon: Users, to: '/portal/personnel' },
+              { label: '프로젝트 설정', icon: ShieldCheck, to: '/portal/project-settings' },
+            ].map((a) => (
                 <button
                   key={a.label}
-                  className="w-full flex items-center gap-2.5 p-2.5 rounded-lg hover:bg-muted/40 transition-colors text-left"
+                  className="flex w-full items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-left transition-colors hover:bg-slate-100"
                   onClick={() => navigate(a.to)}
                 >
-                  <div className="w-7 h-7 rounded-md flex items-center justify-center shrink-0" style={{ background: `${a.color}12` }}>
-                    <a.icon className="w-3.5 h-3.5" style={{ color: a.color }} />
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white text-[#1b4f8f] shadow-sm ring-1 ring-slate-200">
+                    <a.icon className="h-4 w-4" />
                   </div>
-                  <span className="text-[11px]" style={{ fontWeight: 500 }}>{a.label}</span>
-                  <ArrowRight className="w-3 h-3 text-muted-foreground ml-auto" />
+                  <span className="text-[12px] font-medium text-slate-800">{a.label}</span>
+                  <ArrowRight className="ml-auto h-3.5 w-3.5 text-slate-400" />
                 </button>
-              ))}
-            </div>
+            ))}
           </CardContent>
         </Card>
       </div>
