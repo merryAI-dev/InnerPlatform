@@ -29,4 +29,8 @@ describe('PortalLayout shell actions', () => {
     expect(portalLayoutSource).not.toContain('Project Operations');
     expect(portalLayoutSource).not.toContain('My Work');
   });
+
+  it('drops a separate submissions tab once submission status is absorbed into the dashboard', () => {
+    expect(portalLayoutSource).not.toContain("/portal/submissions");
+  });
 });

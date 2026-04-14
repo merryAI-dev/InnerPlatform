@@ -98,3 +98,7 @@
 ## [2026-04-14] patch-note | portal-shell-project-search | 담당 사업 검색 전환 지원
 - pages: [portal-dashboard](./pages/portal-dashboard.md)
 - summary: 헤더의 중복 `사업비 입력` 버튼을 제거하고, 상단 command search가 담당 사업 전체를 검색해 선택 시 해당 사업으로 전환 후 이동하도록 확장했다.
+
+## [2026-04-14] patch-note | portal-dashboard-submission-merge | 제출 상태 홈 흡수
+- pages: [portal-dashboard](./pages/portal-dashboard.md), [portal-submissions](./pages/portal-submissions.md)
+- summary: `내 제출 현황`의 핵심 제출 상태를 `/portal` 홈 안으로 흡수하고, 중복이던 `인력변경 신청`, `주간 제출 체크`, `사업비 입력(주간) 작성/제출` 블록은 홈 통합 섹션 밖으로 뺐다.

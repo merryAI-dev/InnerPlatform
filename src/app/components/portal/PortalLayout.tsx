@@ -7,7 +7,6 @@ import {
   Plus, Pencil,
   CircleDollarSign,
   BarChart3,
-  ClipboardList,
   Loader2,
   Settings2,
   FileSpreadsheet,
@@ -80,7 +79,6 @@ const NAV_SECTIONS = [
     title: '마이메뉴',
     items: [
       { to: '/portal', icon: LayoutDashboard, label: '내 사업 현황', exact: true },
-      { to: '/portal/submissions', icon: ClipboardList, label: '내 제출 현황' },
       { to: '/portal/payroll', icon: CircleDollarSign, label: '인건비/공지', accent: true, hidden: true },
     ],
   },
