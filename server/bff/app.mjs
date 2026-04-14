@@ -2,6 +2,7 @@ import express from 'express';
 import { randomUUID } from 'node:crypto';
 import { createFirestoreDb, isFirestoreEmulatorEnabled, resolveProjectId } from './firestore.mjs';
 import {
+  createFirebaseAuthAdminService,
   createFirebaseTokenVerifier,
   resolveAuthMode,
   resolveRequestIdentity,
@@ -510,7 +511,7 @@ function assertActorPermissionAllowed(policy, req, requiredPermission, action) {
   }
 }
 
-async function resolveApiRequestContext(req, {
+export async function resolveApiRequestContext(req, {
   authMode,
   verifyToken,
   resolveMemberIdentity,
@@ -532,12 +533,12 @@ async function resolveApiRequestContext(req, {
   let actorRole = identity.actorRole;
   let actorEmail = identity.actorEmail;
 
-  if ((!actorRole || !actorEmail) && identity.source === 'firebase' && typeof resolveMemberIdentity === 'function') {
+  if (identity.source === 'firebase' && typeof resolveMemberIdentity === 'function') {
     const memberIdentity = await resolveMemberIdentity({
       tenantId: identity.tenantId,
       actorId: identity.actorId,
     });
-    actorRole = actorRole || normalizeRole(memberIdentity?.role) || undefined;
+    actorRole = normalizeRole(memberIdentity?.role) || actorRole || undefined;
     actorEmail = actorEmail || readOptionalText(memberIdentity?.email).toLowerCase() || undefined;
   }
 
@@ -629,6 +630,7 @@ export function createBffApp(options = {}) {
   const db = options.db || createFirestoreDb({ projectId });
   const authMode = options.authMode || resolveAuthMode();
   const verifyToken = options.tokenVerifier || createFirebaseTokenVerifier({ projectId });
+  const authAdminService = options.authAdminService || createFirebaseAuthAdminService({ projectId });
   const idempotencyService = createIdempotencyService(db);
   const auditChainService = createAuditChainService(db, { now });
   const piiProtector = options.piiProtector || createPiiProtector();
@@ -1351,7 +1353,15 @@ export function createBffApp(options = {}) {
   mountLedgerRoutes(app, { db, now, idempotencyService, auditChainService, piiProtector });
   mountTransactionRoutes(app, { db, now, idempotencyService, auditChainService, piiProtector, rbacPolicy, driveService });
   mountAuditRoutes(app, { db, auditChainService });
-  mountMemberRoutes(app, { db, now, idempotencyService, auditChainService, piiProtector, rbacPolicy });
+  mountMemberRoutes(app, {
+    db,
+    now,
+    idempotencyService,
+    auditChainService,
+    piiProtector,
+    rbacPolicy,
+    authAdminService,
+  });
 
   // ── Guide Q&A chatbot ──
   mountGuideChatRoutes(app, {

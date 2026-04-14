@@ -5,6 +5,8 @@ import {
   analyzeGoogleSheetImportViaBff,
   analyzeProjectRequestContractViaBff,
   changeTransactionStateViaBff,
+  deepSyncAuthGovernanceUserViaBff,
+  fetchAuthGovernanceUsersViaBff,
   linkProjectEvidenceDriveRootViaBff,
   notifyProjectRequestRegistrationViaBff,
   overrideTransactionEvidenceDriveCategoriesViaBff,
@@ -219,6 +221,76 @@ describe('platform-bff-client', () => {
 
     expect(comment.id).toBe('c001');
     expect(evidence.id).toBe('ev001');
+  });
+
+  it('fetches auth governance users through the bff client', async () => {
+    const client = asMockClient({
+      post: vi.fn(),
+      get: vi.fn(async () => ({
+        data: {
+          items: [{ identityKey: 'jslee@mysc.co.kr', email: 'jslee@mysc.co.kr', driftFlags: ['missing_auth'] }],
+          summary: {
+            total: 1,
+            needsDeepSync: 1,
+            missingAuth: 1,
+            missingCanonicalMember: 0,
+            duplicateMemberDocs: 0,
+            bootstrapCandidates: 1,
+          },
+        },
+      })),
+      request: vi.fn(),
+    });
+
+    const response = await fetchAuthGovernanceUsersViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u-admin', role: 'admin', idToken: 'token-1' },
+      client,
+    });
+
+    expect(client.get).toHaveBeenCalledWith('/api/v1/admin/auth-governance/users', expect.objectContaining({
+      tenantId: 'mysc',
+      actor: expect.objectContaining({ id: 'u-admin', role: 'admin', idToken: 'token-1' }),
+    }));
+    expect(response.summary.total).toBe(1);
+  });
+
+  it('posts a deep sync request for an auth governance user', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({
+        data: {
+          identityKey: 'jslee@mysc.co.kr',
+          email: 'jslee@mysc.co.kr',
+          canonicalDocId: 'uid-jslee',
+          role: 'admin',
+          mirroredLegacyCount: 1,
+          claimsUpdated: true,
+          updatedAt: '2026-04-13T06:30:00.000Z',
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    const response = await deepSyncAuthGovernanceUserViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u-admin', role: 'admin', idToken: 'token-1' },
+      identityKey: 'jslee@mysc.co.kr',
+      role: 'admin',
+      reason: 'cashflow export alignment',
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith(
+      '/api/v1/admin/auth-governance/users/jslee%40mysc.co.kr/deep-sync',
+      expect.objectContaining({
+        body: {
+          role: 'admin',
+          reason: 'cashflow export alignment',
+        },
+      }),
+    );
+    expect(response.claimsUpdated).toBe(true);
   });
 
   it('calls project request contract analysis endpoint', async () => {

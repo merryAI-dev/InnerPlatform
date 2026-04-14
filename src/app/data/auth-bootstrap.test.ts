@@ -6,6 +6,13 @@ describe('auth bootstrap admins', () => {
     const emails = parseBootstrapAdminEmails({});
     expect(emails).toContain('admin@mysc.co.kr');
     expect(emails).toContain('ai@mysc.co.kr');
+    expect(emails).toContain('ylee@mysc.co.kr');
+    expect(emails).toContain('jyoo@mysc.co.kr');
+    expect(emails).toContain('jslee@mysc.co.kr');
+    expect(emails).toContain('jhsong@mysc.co.kr');
+    expect(emails).toContain('jybaek@mysc.co.kr');
+    expect(emails).toContain('fin@mysc.co.kr');
+    expect(emails).toContain('hwkim@mysc.co.kr');
   });
 
   it('merges and normalizes env bootstrap admin emails', () => {

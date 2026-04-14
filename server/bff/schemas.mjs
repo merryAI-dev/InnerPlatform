@@ -170,6 +170,8 @@ export const memberRoleUpdateSchema = z.object({
   reason: z.string().trim().min(1).max(500).optional(),
 }).strict();
 
+export const memberDeepSyncSchema = memberRoleUpdateSchema;
+
 export const cashflowExportSchema = z.object({
   scope: z.enum(['all', 'single']),
   projectId: z.string().trim().optional(),

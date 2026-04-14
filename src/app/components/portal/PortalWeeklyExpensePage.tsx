@@ -71,10 +71,9 @@ import {
   AlertDialogTitle,
 } from '../ui/alert-dialog';
 import { resolvePortalHappyPath } from '../../platform/portal-happy-path';
-import { resolvePortalMissionProgress } from '../../platform/portal-mission-guide';
 import { resolveWeeklyExpenseSavePolicy } from '../../platform/weekly-expense-save-policy';
 import { groupExpenseIntakeItemsForSurface } from '../../platform/bank-intake-surface';
-import { cn } from '../ui/utils';
+import { usePortalNavigationGuard } from './PortalLayout';
 const GoogleSheetMigrationWizard = lazy(
   () => import('./GoogleSheetMigrationWizard').then((module) => ({ default: module.GoogleSheetMigrationWizard })),
 );
@@ -84,6 +83,7 @@ const SettlementLedgerPage = lazy(
 
 export function PortalWeeklyExpensePage() {
   const navigate = useNavigate();
+  const { registerNavigationHandler } = usePortalNavigationGuard();
   const weeklyExpenseSavePolicy = resolveWeeklyExpenseSavePolicy();
   const { user: authUser, ensureGoogleWorkspaceAccess } = useAuth();
   const { orgId } = useFirebase();
@@ -117,7 +117,6 @@ export function PortalWeeklyExpensePage() {
     saveBudgetPlanRows,
     saveBudgetCodeBook,
     markSheetSourceApplied,
-    weeklySubmissionStatuses,
     upsertWeeklySubmissionStatus,
     saveExpenseIntakeDraft,
     projectExpenseIntakeItem,
@@ -129,7 +128,8 @@ export function PortalWeeklyExpensePage() {
   const [googleSheetImportOpen, setGoogleSheetImportOpen] = useState(false);
   const [triageWizardOpen, setTriageWizardOpen] = useState(false);
   const [pendingQuickInsert, setPendingQuickInsert] = useState<PendingQuickInsert | null>(null);
-  const [, setHasUnsavedSettlementChanges] = useState(false);
+  const [hasUnsavedSettlementChanges, setHasUnsavedSettlementChanges] = useState(false);
+  const [pendingNavigationAttempt, setPendingNavigationAttempt] = useState<{ path: string; label: string } | null>(null);
   const [participationRiskWarning, setParticipationRiskWarning] = useState<{
     yearMonth: string;
     weekNo: number;
@@ -163,12 +163,6 @@ export function PortalWeeklyExpensePage() {
   const isENaraProject = myProject?.settlementType === 'TYPE5' || myProject?.accountType === 'DEDICATED';
   const fundInputMode = normalizeProjectFundInputMode(myProject?.fundInputMode);
   const isDirectEntryMode = fundInputMode === 'DIRECT_ENTRY';
-  const missionProgress = useMemo(() => resolvePortalMissionProgress({
-    fundInputMode,
-    bankStatementRowCount: bankStatementCount,
-    expenseRowCount: expenseSheetRows?.length || 0,
-    weeklySubmissionStatuses,
-  }), [bankStatementCount, expenseSheetRows?.length, fundInputMode, weeklySubmissionStatuses]);
   const intakeSurface = useMemo(() => groupExpenseIntakeItemsForSurface(expenseIntakeItems), [expenseIntakeItems]);
   const queueWorkCount = intakeSurface.needsClassification.length + intakeSurface.reviewRequired.length + intakeSurface.pendingEvidence.length;
   const expenseRowCount = expenseSheetRows?.length || 0;
@@ -186,7 +180,7 @@ export function PortalWeeklyExpensePage() {
     if (!happyPath.canOpenWeeklyExpenses) {
       return {
         title: '주간 사업비를 시작하려면 먼저 사업 연결이 필요합니다',
-        description: '사업 배정이 끝나면 이번 주 미션, 정산 탭, 통장내역 연동이 같은 기준으로 열립니다.',
+        description: '사업 배정이 끝나면 이 화면과 통장내역, 예산 화면을 같은 기준으로 사용할 수 있습니다.',
         toneClass: 'border-amber-200/70 bg-amber-50/70',
         actionLabel: '사업 설정 열기',
         actionKind: 'settings' as const,
@@ -210,30 +204,17 @@ export function PortalWeeklyExpensePage() {
         actionKind: 'drive' as const,
       };
     }
-    return {
-      title: '이번 주 정산 흐름이 준비되었습니다',
-      description: '상단 미션과 우측 저장 상태를 보며 이 탭에서 바로 입력, 저장, 반영 확인까지 이어가세요.',
-      toneClass: 'border-emerald-200/70 bg-emerald-50/70',
-      actionLabel: missionProgress.activeStep.ctaPath && missionProgress.activeStep.ctaPath !== '/portal/weekly-expenses'
-        ? missionProgress.activeStep.ctaLabel
-        : null,
-      actionKind: missionProgress.activeStep.ctaPath === '/portal/bank-statements'
-        ? 'bank'
-        : null,
-    };
+    return null;
   }, [
     bankStatementCount,
     happyPath.canOpenWeeklyExpenses,
     happyPath.canUseEvidenceWorkflow,
     isDirectEntryMode,
-    missionProgress.activeStep.ctaLabel,
-    missionProgress.activeStep.ctaPath,
   ]);
   const settlementSheetPolicy = useMemo(
     () => normalizeSettlementSheetPolicy(myProject?.settlementSheetPolicy, myProject?.fundInputMode),
     [myProject?.fundInputMode, myProject?.settlementSheetPolicy],
   );
-
   const effectiveBudgetCodeBook = useMemo(() => {
     const orderedCodes: string[] = [];
     const subCodesByCode = new Map<string, Set<string>>();
@@ -722,8 +703,21 @@ export function PortalWeeklyExpensePage() {
   }, []);
 
   const requestRouteNavigation = useCallback((path: string, label: string) => {
+    if (hasUnsavedSettlementChanges) {
+      setPendingNavigationAttempt({ path, label });
+      return;
+    }
     navigate(path);
-  }, [navigate]);
+  }, [hasUnsavedSettlementChanges, navigate]);
+
+  useEffect(() => {
+    registerNavigationHandler((attempt) => {
+      if (!hasUnsavedSettlementChanges) return false;
+      setPendingNavigationAttempt(attempt);
+      return true;
+    });
+    return () => registerNavigationHandler(null);
+  }, [hasUnsavedSettlementChanges, registerNavigationHandler]);
 
   const requestSheetSwitch = useCallback((sheetId: string, sheetName: string) => {
     if (sheetId === activeExpenseSheetId) return;
@@ -781,9 +775,6 @@ export function PortalWeeklyExpensePage() {
               : bankStatementCount > 0
                 ? '통장내역 기준본에서 이어서 작업합니다. 이 화면에서 분류 확인, 행 입력, 저장까지 바로 마무리하세요.'
                 : '통장내역 기준본을 먼저 만들면 이 화면에서 바로 입력과 저장을 이어갈 수 있습니다.'}
-          </p>
-          <p className="text-[11px] text-muted-foreground">
-            현재 정책: {formatSettlementSheetPolicySummary(settlementSheetPolicy)}
           </p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
@@ -873,7 +864,7 @@ export function PortalWeeklyExpensePage() {
                         현재 탭 {activeSheetName}
                       </Badge>
                       <Badge variant="outline" className="bg-white/80 text-[10px] text-slate-700">
-                        거래 {expenseRowCount}건
+                        거래: {expenseRowCount}건
                       </Badge>
                     </div>
                   </div>
@@ -923,37 +914,6 @@ export function PortalWeeklyExpensePage() {
           </div>
         </div>
 
-        <div className="mt-3 grid gap-2 md:grid-cols-3">
-          {missionProgress.steps.map((step) => {
-            const statusLabel = step.status === 'complete'
-              ? '완료'
-              : step.status === 'attention'
-                ? '확인 필요'
-                : step.status === 'active'
-                  ? '진행 중'
-                  : '다음 단계';
-            return (
-              <div
-                key={step.id}
-                className={cn(
-                  'rounded-xl border px-4 py-3 transition-colors',
-                  step.status === 'complete' && 'border-emerald-200 bg-emerald-50/70',
-                  step.status === 'attention' && 'border-amber-200 bg-amber-50/80',
-                  step.status === 'active' && 'border-slate-300 bg-white shadow-sm',
-                  step.status === 'locked' && 'border-slate-200 bg-slate-50/70',
-                )}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-[11px] font-semibold text-slate-900">{step.order}. {step.title}</p>
-                  <Badge variant="outline" className="bg-white/80 text-[10px] text-slate-700">
-                    {statusLabel}
-                  </Badge>
-                </div>
-                <p className="mt-2 text-[11px] leading-5 text-slate-600">{step.description}</p>
-              </div>
-            );
-          })}
-        </div>
       </div>
 
       {queueWorkCount > 0 && (
@@ -1210,6 +1170,35 @@ export function PortalWeeklyExpensePage() {
               }}
             >
               이해했습니다, 제출
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={!!pendingNavigationAttempt}
+        onOpenChange={(open) => {
+          if (!open) setPendingNavigationAttempt(null);
+        }}
+      >
+        <AlertDialogContent data-testid="weekly-expense-unsaved-dialog">
+          <AlertDialogHeader>
+            <AlertDialogTitle>저장되지 않은 사업비 입력이 있습니다</AlertDialogTitle>
+            <AlertDialogDescription>
+              지금 이동하면 저장되지 않은 사업비 입력(주간) 편집 내용이 유실될 수 있습니다.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setPendingNavigationAttempt(null)}>계속 편집</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (!pendingNavigationAttempt) return;
+                const nextPath = pendingNavigationAttempt.path;
+                setPendingNavigationAttempt(null);
+                navigate(nextPath);
+              }}
+            >
+              변경 버리고 이동
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

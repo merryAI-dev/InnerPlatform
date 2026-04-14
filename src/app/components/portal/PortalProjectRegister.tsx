@@ -1,5 +1,4 @@
 import {
-  AlertTriangle,
   ArrowLeft,
   ArrowRight,
   Building2,
@@ -441,7 +440,7 @@ export function PortalProjectRegister() {
     [form.teamMembersDetailed],
   );
   const teamMembersSummary = useMemo(
-    () => formatProjectTeamMembersSummary(normalizedTeamMembers, form.teamMembers),
+    () => cleanSummaryText(formatProjectTeamMembersSummary(normalizedTeamMembers, form.teamMembers)),
     [normalizedTeamMembers, form.teamMembers],
   );
   const canProceed = () => {
@@ -483,11 +482,11 @@ export function PortalProjectRegister() {
 
   const syncTeamMembers = (members: ProjectTeamMemberAssignment[]) => {
     const normalized = normalizeProjectTeamMembers(members);
-    const summary = formatProjectTeamMembersSummary(normalized, '');
+    const summary = cleanSummaryText(formatProjectTeamMembersSummary(normalized, ''));
     setForm((prev) => ({
       ...prev,
       teamMembersDetailed: members,
-      teamMembers: summary === '-' ? '' : summary,
+      teamMembers: summary,
     }));
   };
 
@@ -622,7 +621,7 @@ export function PortalProjectRegister() {
         financialInputFlags,
         settlementSheetPolicy: normalizeSettlementSheetPolicy(form.settlementSheetPolicy, form.fundInputMode),
         teamMembersDetailed: normalizedTeamMembers,
-        teamMembers: teamMembersSummary === '-' ? '' : teamMembersSummary,
+        teamMembers: teamMembersSummary,
       };
       const createdId = await createProjectRequest(payload);
       if (!createdId) {
@@ -1480,29 +1479,21 @@ export function PortalProjectRegister() {
 
           {step === 'review' && (
             <div className="space-y-4">
-              <div className="rounded-xl border border-amber-200/70 bg-amber-50 px-4 py-3 text-[11px] text-amber-800 dark:border-amber-800/50 dark:bg-amber-950/20 dark:text-amber-200">
-                <div className="flex items-center gap-2" style={{ fontWeight: 600 }}>
-                  <AlertTriangle className="h-4 w-4" />
-                  제출 전 최종 확인
-                </div>
-                <p className="mt-1">계약서 공식 명칭, 등록 프로젝트명, 계약금액, 기간을 한 번 더 확인한 뒤 제출해 주세요.</p>
-              </div>
-
               <div className="grid gap-3 lg:grid-cols-2">
                 <SummaryCard title="기본 정보">
-                  <ReviewRow label="신청자" value={portalUser?.name || authUser?.name || '-'} />
-                  <ReviewRow label="담당팀" value={form.department || '-'} />
-                  <ReviewRow label="공식 계약명" value={form.officialContractName || '-'} />
-                  <ReviewRow label="등록명" value={form.name || '-'} />
+                  <ReviewRow label="신청자" value={portalUser?.name || authUser?.name || ''} />
+                  <ReviewRow label="담당팀" value={form.department || ''} />
+                  <ReviewRow label="공식 계약명" value={form.officialContractName || ''} />
+                  <ReviewRow label="등록명" value={form.name || ''} />
                   <ReviewRow label="프로젝트 유형" value={PROJECT_TYPE_LABELS[form.type]} />
-                  <ReviewRow label="계약 대상" value={form.clientOrg || '-'} />
-                  <ReviewRow label="프로젝트 목적" value={form.projectPurpose || '-'} />
-                  <ReviewRow label="주요 내용" value={form.description || '-'} />
+                  <ReviewRow label="계약 대상" value={form.clientOrg || ''} />
+                  <ReviewRow label="프로젝트 목적" value={form.projectPurpose || ''} />
+                  <ReviewRow label="주요 내용" value={form.description || ''} />
                 </SummaryCard>
 
                 <SummaryCard title="재무 정보">
-                  <ReviewRow label="계약 시작일" value={form.contractStart || '-'} />
-                  <ReviewRow label="계약 종료일" value={form.contractEnd || '-'} />
+                  <ReviewRow label="계약 시작일" value={form.contractStart || ''} />
+                  <ReviewRow label="계약 종료일" value={form.contractEnd || ''} />
                   <ReviewRow label="계약금액" value={formatStoredProjectAmount(form.contractAmount, financialInputFlags.contractAmount)} highlight />
                   <ReviewRow label="매출 부가세" value={formatStoredProjectAmount(form.salesVatAmount, financialInputFlags.salesVatAmount)} />
                   <ReviewRow label="총수익" value={formatStoredProjectAmount(form.totalRevenueAmount, financialInputFlags.totalRevenueAmount)} />
@@ -1512,23 +1503,23 @@ export function PortalProjectRegister() {
                   <ReviewRow label="통장 유형" value={ACCOUNT_TYPE_LABELS[form.accountType]} />
                   <ReviewRow label="자금 입력 방식" value={PROJECT_FUND_INPUT_MODE_LABELS[form.fundInputMode]} />
                   <ReviewRow label="정산 시트 정책" value={formatSettlementSheetPolicySummary(form.settlementSheetPolicy)} />
-                  <ReviewRow label="입금 계획" value={form.paymentPlanDesc || '-'} />
-                  <ReviewRow label="사업비 수령/정산" value={form.settlementGuide || '-'} />
+                  <ReviewRow label="입금 계획" value={form.paymentPlanDesc || ''} />
+                  <ReviewRow label="사업비 수령/정산" value={form.settlementGuide || ''} />
                 </SummaryCard>
 
                 <SummaryCard title="팀 구성">
-                  <ReviewRow label="PM" value={form.managerName || '-'} />
+                  <ReviewRow label="PM" value={form.managerName || ''} />
                   <ReviewRow label="팀원" value={teamMembersSummary} />
-                  <ReviewRow label="참여조건" value={form.participantCondition || '-'} />
-                  <ReviewRow label="참고사항" value={form.note || '-'} />
+                  <ReviewRow label="참여조건" value={form.participantCondition || ''} />
+                  <ReviewRow label="참고사항" value={form.note || ''} />
                 </SummaryCard>
 
                 <SummaryCard title="계약서 및 AI 초안">
                   {form.contractDocument ? (
                     <>
                       <ReviewRow label="첨부 파일" value={form.contractDocument.name} />
-                      <ReviewRow label="AI 요약" value={analysis?.summary || '-'} />
-                      <ReviewRow label="확인 필요" value={analysis?.warnings.join(', ') || '-'} />
+                      <ReviewRow label="AI 요약" value={analysis?.summary || ''} />
+                      <ReviewRow label="확인 필요" value={analysis?.warnings.join(', ') || ''} />
                     </>
                   ) : (
                     <p className="text-[12px] text-muted-foreground">계약서 없이 등록합니다</p>
@@ -1619,6 +1610,12 @@ function FieldEvidence({
   );
 }
 
+function cleanSummaryText(value: string | null | undefined) {
+  const text = String(value || '').trim();
+  if (!text || text === '-' || text === '—') return '';
+  return text;
+}
+
 function SuggestedField({
   label,
   field,
@@ -1628,7 +1625,8 @@ function SuggestedField({
 }) {
   const value = typeof field.value === 'number'
     ? `${fmtKRW(field.value)}원`
-    : field.value || '-';
+    : cleanSummaryText(String(field.value || ''));
+  if (!value) return null;
   return (
     <div className="rounded-lg bg-muted/30 px-3 py-2 text-[11px]">
       <div className="flex items-center justify-between gap-2">
@@ -1663,11 +1661,13 @@ function SummaryCard({
 }
 
 function ReviewRow({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
+  const text = cleanSummaryText(value);
+  if (!text) return null;
   return (
     <div className="flex items-start gap-2 text-[11px]">
       <span className="w-[88px] shrink-0 text-muted-foreground">{label}</span>
       <span className={highlight ? 'text-teal-600 dark:text-teal-400' : ''} style={{ fontWeight: highlight ? 600 : 500 }}>
-        {value}
+        {text}
       </span>
     </div>
   );

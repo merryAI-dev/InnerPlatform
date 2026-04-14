@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { Upload, Save, Plus, Loader2, ArrowRight, ShieldAlert, Trash2, CheckCircle2, FileSpreadsheet } from 'lucide-react';
+import { Upload, Save, Plus, Loader2, ArrowRight, ShieldAlert, Trash2, FileSpreadsheet } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
 import { Badge } from '../ui/badge';
-import { PortalMissionGuideLauncher } from './PortalMissionGuideLauncher';
 import { BankImportTriageWizard } from './BankImportTriageWizard';
 import { usePortalStore } from '../../data/portal-store';
 import {
@@ -20,8 +19,6 @@ import {
 import { groupExpenseIntakeItemsForSurface } from '../../platform/bank-intake-surface';
 import { normalizeKey, parseCsv, parseNumber } from '../../platform/csv-utils';
 import { loadXlsx, warmXlsx } from '../../platform/lazy-heavy-modules';
-import { normalizeProjectFundInputMode } from '../../data/types';
-import { resolvePortalMissionProgress } from '../../platform/portal-mission-guide';
 
 function getAmountColumnIndexes(columns: string[]): Set<number> {
   return new Set(
@@ -53,13 +50,11 @@ export function PortalBankStatementPage() {
     myProject,
     bankStatementRows,
     saveBankStatementRows,
-    expenseSheetRows,
     expenseIntakeItems,
     evidenceRequiredMap,
     saveExpenseIntakeDraft,
     projectExpenseIntakeItem,
     syncExpenseIntakeEvidence,
-    weeklySubmissionStatuses,
   } = usePortalStore();
   const [columns, setColumns] = useState<string[]>(bankStatementRows?.columns || []);
   const [rows, setRows] = useState<BankStatementRow[]>(bankStatementRows?.rows || []);
@@ -77,12 +72,6 @@ export function PortalBankStatementPage() {
   const bankProfile = useMemo(() => detectBankStatementProfile(columns, lastUploadedName), [columns, lastUploadedName]);
   const amountColIdxs = useMemo(() => getAmountColumnIndexes(columns), [columns]);
   const hasUploadedSheet = rows.length > 0 && columns.length > 0;
-  const missionProgress = useMemo(() => resolvePortalMissionProgress({
-    fundInputMode: normalizeProjectFundInputMode(myProject?.fundInputMode),
-    bankStatementRowCount: rows.length,
-    expenseRowCount: expenseSheetRows?.length || 0,
-    weeklySubmissionStatuses,
-  }), [expenseSheetRows?.length, myProject?.fundInputMode, rows.length, weeklySubmissionStatuses]);
   const intakeSurface = useMemo(() => groupExpenseIntakeItemsForSurface(expenseIntakeItems), [expenseIntakeItems]);
   const queueWorkCount = intakeSurface.needsClassification.length + intakeSurface.reviewRequired.length + intakeSurface.pendingEvidence.length;
 
@@ -319,24 +308,9 @@ export function PortalBankStatementPage() {
           description: '이번 주 원본 파일을 먼저 올리면 주간 사업비 입력의 시작점이 준비됩니다.',
           toneClass: 'border-slate-200/80 bg-slate-50/80',
         };
-  const roleNotice = 'PM 화면 기준입니다. 이 화면의 저장본은 신규 거래 triage queue와 주간 사업비 입력의 기준점이 됩니다.';
   const uploadExperienceHint = uploadPreparing
     ? '엑셀 엔진을 준비하고 있습니다. 첫 업로드는 잠시 더 걸릴 수 있습니다.'
     : '엑셀 파일은 첫 업로드 때 엔진을 먼저 준비한 뒤 읽습니다.';
-  const helperSteps = [
-    {
-      title: '1. 원본 업로드',
-      description: '은행/카드 엑셀 또는 CSV를 올려 이번 주 원본을 불러옵니다.',
-    },
-    {
-      title: '2. 필요한 행만 보정',
-      description: '행 추가, 환수 행, 선사용금, 특이건만 보조로 정리합니다.',
-    },
-    {
-      title: '3. 주간 사업비로 반영',
-      description: '저장 후 사업비 입력(주간)에서 같은 기준본으로 바로 이어서 입력하고 저장합니다.',
-    },
-  ];
 
   if (!ready) {
     return (
@@ -421,65 +395,44 @@ export function PortalBankStatementPage() {
       {!hasUploadedSheet && (
         <Card data-testid="bank-statement-empty-state" className="border-teal-200/80 bg-gradient-to-br from-teal-50/90 via-white to-emerald-50/60">
           <CardContent className="p-5">
-            <div className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(280px,0.65fr)]">
-              <div
-                className={`rounded-2xl border-2 border-dashed p-6 transition-colors ${
-                  dragActive ? 'border-teal-500 bg-teal-50' : 'border-teal-200/80 bg-white/80'
-                }`}
-                onDragEnter={(event) => {
-                  event.preventDefault();
-                  setDragActive(true);
-                }}
-                onDragOver={(event) => {
-                  event.preventDefault();
-                  setDragActive(true);
-                }}
-                onDragLeave={(event) => {
-                  event.preventDefault();
-                  setDragActive(false);
-                }}
-                onDrop={handleDrop}
-              >
-                <div className="flex h-full flex-col justify-between gap-5">
-                  <div className="space-y-3">
-                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-teal-600 text-white shadow-sm">
-                      <FileSpreadsheet className="h-5 w-5" />
-                    </div>
-                    <div className="space-y-2">
-                      <p className="text-[11px] uppercase tracking-[0.18em] text-teal-700">Mission 1</p>
-                      <p className="text-[18px] font-semibold text-slate-900">이번 주 통장내역부터 올리세요</p>
-                      <p className="max-w-2xl text-[13px] leading-6 text-slate-600">
-                        원본 파일을 올리면 이 화면에서 먼저 검토하고, 저장 후 같은 기준본으로 사업비 입력(주간)에서 바로 이어서 정리할 수 있습니다.
-                      </p>
-                    </div>
+            <div
+              className={`rounded-2xl border-2 border-dashed p-6 transition-colors ${
+                dragActive ? 'border-teal-500 bg-teal-50' : 'border-teal-200/80 bg-white/80'
+              }`}
+              onDragEnter={(event) => {
+                event.preventDefault();
+                setDragActive(true);
+              }}
+              onDragOver={(event) => {
+                event.preventDefault();
+                setDragActive(true);
+              }}
+              onDragLeave={(event) => {
+                event.preventDefault();
+                setDragActive(false);
+              }}
+              onDrop={handleDrop}
+            >
+              <div className="flex h-full flex-col justify-between gap-5">
+                <div className="space-y-3">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-teal-600 text-white shadow-sm">
+                    <FileSpreadsheet className="h-5 w-5" />
                   </div>
-                  <div className="flex flex-wrap items-center gap-3">
-                    <Button size="sm" onClick={openFilePicker}>
-                      {uploadPreparing ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Upload className="mr-1 h-4 w-4" />}
-                      {uploadPreparing ? '엑셀 준비 중' : '파일 선택'}
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={() => navigate('/portal/weekly-expenses')}>
-                      사업비 입력(주간)으로 이어가기
-                      <ArrowRight className="ml-1 h-4 w-4" />
-                    </Button>
-                    <span className="text-[11px] text-muted-foreground">지원 형식: `.csv`, `.xls`, `.xlsx`</span>
+                  <div className="space-y-2">
+                    <p className="text-[18px] font-semibold text-slate-900">이번 주 통장내역을 업로드하세요</p>
+                    <p className="max-w-2xl text-[13px] leading-6 text-slate-600">
+                      원본 파일을 올린 뒤 필요한 거래만 정리하면 됩니다.
+                    </p>
                   </div>
-                  <p className="text-[11px] text-muted-foreground">{uploadExperienceHint}</p>
                 </div>
-              </div>
-
-              <div className="grid gap-3">
-                {helperSteps.map((step) => (
-                  <div key={step.title} className="rounded-2xl border border-white/80 bg-white/80 px-4 py-3 shadow-sm">
-                    <div className="flex items-start gap-3">
-                      <CheckCircle2 className="mt-0.5 h-4 w-4 text-teal-600" />
-                      <div className="space-y-1">
-                        <p className="text-[12px] font-semibold text-slate-900">{step.title}</p>
-                        <p className="text-[11px] leading-5 text-slate-600">{step.description}</p>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+                <div className="flex flex-wrap items-center gap-3">
+                  <Button size="sm" onClick={openFilePicker}>
+                    {uploadPreparing ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Upload className="mr-1 h-4 w-4" />}
+                    {uploadPreparing ? '엑셀 준비 중' : '파일 선택'}
+                  </Button>
+                  <span className="text-[11px] text-muted-foreground">지원 형식: `.csv`, `.xls`, `.xlsx`</span>
+                </div>
+                <p className="text-[11px] text-muted-foreground">{uploadExperienceHint}</p>
               </div>
             </div>
           </CardContent>
@@ -493,7 +446,6 @@ export function PortalBankStatementPage() {
             <div className="space-y-1 text-[12px] text-amber-900">
               <p className="font-semibold">반영 상태 · {trustSurface.label}</p>
               <p>{trustSurface.description}</p>
-              <p>{roleNotice}</p>
               <p>
                 현재 프로필: {getBankStatementProfileLabel(bankProfile)}
                 {lastUploadedName ? ` · 최근 파일: ${lastUploadedName}` : ''}
@@ -545,8 +497,6 @@ export function PortalBankStatementPage() {
           </CardContent>
         </Card>
       )}
-
-      <PortalMissionGuideLauncher guideId="bank-statements" progress={missionProgress} />
 
       {hasUploadedSheet ? (
         <Card>

@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { AlertTriangle, BarChart3, ChevronLeft, ChevronRight, ClipboardList, ExternalLink, Loader2, Users } from 'lucide-react';
-import { PageHeader } from '../layout/PageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
-import { PortalMissionGuideLauncher } from './PortalMissionGuideLauncher';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,8 +26,6 @@ import {
   resolveWeeklyAccountingProductStatusDomHooks,
   resolveWeeklyAccountingSnapshot,
 } from '../../platform/weekly-accounting-state';
-import { resolvePortalMissionProgress } from '../../platform/portal-mission-guide';
-import { normalizeProjectFundInputMode } from '../../data/types';
 
 function sortIsoDesc(a: string | undefined, b: string | undefined): number {
   return String(b || '').localeCompare(String(a || ''));
@@ -66,15 +62,15 @@ function pickLatestAuditMeta(props: {
 }) {
   const items = [
     props.syncAt
-      ? { title: props.syncTitle || '최종 동기화 상태 반영', at: props.syncAt, byName: props.syncByName || '-' }
+      ? { title: props.syncTitle || '최종 동기화 상태 반영', at: props.syncAt, byName: props.syncByName }
       : null,
     props.updatedAt
-      ? { title: '최종 제출 반영', at: props.updatedAt, byName: props.updatedByName || '-' }
+      ? { title: '최종 제출 반영', at: props.updatedAt, byName: props.updatedByName }
       : null,
     props.editedAt
-      ? { title: '최종 수정 상태 반영', at: props.editedAt, byName: props.editedByName || '-' }
+      ? { title: '최종 수정 상태 반영', at: props.editedAt, byName: props.editedByName }
       : null,
-  ].filter(Boolean) as Array<{ title: string; at: string; byName: string }>;
+  ].filter(Boolean) as Array<{ title: string; at: string; byName?: string }>;
 
   if (items.length === 0) return null;
   items.sort((left, right) => String(right.at).localeCompare(String(left.at)));
@@ -95,10 +91,10 @@ function AuditMetaLine(props: {
       {formatted && (
         <div className="mt-0.5">
           <div>{formatted.date}</div>
-          <div>{formatted.time} · {props.byName || '-'}</div>
+          <div>{props.byName ? `${formatted.time} · ${props.byName}` : formatted.time}</div>
         </div>
       )}
-      {!formatted && <div className="mt-0.5">{props.byName || '-'}</div>}
+      {!formatted && props.byName && <div className="mt-0.5">{props.byName}</div>}
     </div>
   );
 }
@@ -112,10 +108,14 @@ const CHANGE_TABS: Array<{ label: string; value: ChangeRequestState | 'ALL' }> =
 ];
 
 const pendingStatusButtonClassName =
-  'h-7 rounded-full border-emerald-200/90 bg-emerald-50/80 px-2 text-[10px] text-emerald-800 hover:bg-emerald-100 dark:border-emerald-900/60 dark:bg-emerald-950/15 dark:text-emerald-200 dark:hover:bg-emerald-900/30';
+  'h-7 rounded-full border-slate-300 bg-white px-2 text-[10px] text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800';
 
 const completedStatusButtonClassName =
-  'h-7 rounded-full border-emerald-300 bg-emerald-600/16 px-2 text-[10px] text-emerald-900 hover:bg-emerald-600/20 dark:border-emerald-700/80 dark:bg-emerald-400/22 dark:text-emerald-50 dark:hover:bg-emerald-400/28';
+  'h-7 rounded-full border-[#c8d7ea] bg-[#eef4fb] px-2 text-[10px] text-[#1f4a7d] hover:bg-[#e4eef9] dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700';
+
+const surfaceCardClassName = 'border-slate-200/90 bg-white shadow-sm shadow-slate-950/5';
+const outlineActionButtonClassName = 'h-8 rounded-lg border-slate-300 bg-white text-[11px] text-slate-700 hover:bg-slate-50';
+const tableHeadCellClassName = 'px-3 py-2 text-[10px] uppercase tracking-[0.08em] text-slate-500';
 
 export function PortalSubmissionsPage() {
   const navigate = useNavigate();
@@ -127,8 +127,6 @@ export function PortalSubmissionsPage() {
     changeRequests,
     weeklySubmissionStatuses,
     upsertWeeklySubmissionStatus,
-    bankStatementRows,
-    expenseSheetRows,
   } = usePortalStore();
   const { getWeeksForProject, weeks } = useCashflowWeeks();
 
@@ -212,38 +210,6 @@ export function PortalSubmissionsPage() {
     base.setDate(base.getDate() + 4);
     return base.toISOString().slice(0, 10);
   }, [selectedWeek]);
-  const missionProgress = useMemo(() => resolvePortalMissionProgress({
-    fundInputMode: normalizeProjectFundInputMode(myProject?.fundInputMode),
-    bankStatementRowCount: bankStatementRows?.rows?.length || 0,
-    expenseRowCount: expenseSheetRows?.length || 0,
-    weeklySubmissionStatuses,
-  }), [bankStatementRows?.rows?.length, expenseSheetRows?.length, myProject?.fundInputMode, weeklySubmissionStatuses]);
-  const submissionsGuide = useMemo(() => {
-    const targetWeekLabel = selectedWeek?.label || '이번 주';
-    const hasTrackedProjects = assignedProjects.length > 0;
-    const hasChangeRequests = filteredChanges.length > 0;
-    if (!hasTrackedProjects) {
-      return {
-        title: '제출 상태를 보려면 먼저 연결된 사업이 필요합니다',
-        description: '사업이 연결되면 이번 주 체크리스트와 제출 진행 상태를 같은 화면에서 확인할 수 있습니다.',
-        primaryLabel: '사업 연결 확인하기',
-        primaryPath: '/portal/project-settings',
-        secondaryLabel: '포털 홈으로 이동',
-        secondaryPath: '/portal',
-      };
-    }
-    return {
-      title: `${targetWeekLabel} 제출 상태를 여기서 끝까지 확인합니다`,
-      description: hasChangeRequests
-        ? '주간 제출 상태와 인력변경 신청을 같은 화면에서 보고, 막힌 항목은 바로 해당 입력 화면으로 이동해 해결할 수 있습니다.'
-        : '주간 제출 상태는 자동 반영을 기준으로 갱신됩니다. 이상 징후가 있으면 같은 화면에서 바로 확인하고 입력 화면으로 이어가세요.',
-      primaryLabel: '사업비 입력(주간) 열기',
-      primaryPath: '/portal/weekly-expenses',
-      secondaryLabel: '내 사업 현황 보기',
-      secondaryPath: '/portal',
-    };
-  }, [assignedProjects.length, filteredChanges.length, selectedWeek?.label]);
-
   const statusMap = useMemo(() => {
     const map = new Map<string, typeof weeklySubmissionStatuses[number]>();
     weeklySubmissionStatuses.forEach((s) => {
@@ -301,67 +267,48 @@ export function PortalSubmissionsPage() {
 
   return (
     <div className="space-y-5">
-      <PageHeader
-        icon={ClipboardList}
-        iconGradient="linear-gradient(135deg, #0d9488 0%, #14b8a6 100%)"
-        title="내 제출 현황"
-        description="제출한 항목의 진행 상태(제출/승인/반려)를 한 곳에서 확인합니다."
-        badge={myProject.shortName || myProject.id}
-        actions={(
-          <Button variant="outline" size="sm" className="h-8 text-[12px] gap-1.5" onClick={() => navigate('/portal')}>
-            <ExternalLink className="w-3.5 h-3.5" /> 대시보드로
-          </Button>
-        )}
-      />
-
-      <PortalMissionGuideLauncher guideId="submissions" progress={missionProgress} />
-
-      <Card data-testid="portal-submissions-guide" className="border-teal-200/70 bg-gradient-to-br from-teal-50 via-white to-emerald-50/70">
-        <CardContent className="flex flex-col gap-3 px-4 py-4 md:flex-row md:items-center md:justify-between">
-          <div className="space-y-1">
-            <p className="text-[11px] uppercase tracking-[0.18em] text-teal-700">Submission Guide</p>
-            <p className="text-[14px] font-semibold text-slate-900">{submissionsGuide.title}</p>
-            <p className="text-[12px] leading-6 text-slate-600">{submissionsGuide.description}</p>
+      <div className="rounded-[22px] border border-slate-200/90 bg-white px-5 py-4 shadow-sm shadow-slate-950/5">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-900 text-white shadow-sm shadow-slate-950/10">
+            <ClipboardList className="h-4 w-4" />
           </div>
-          <div className="flex shrink-0 flex-wrap gap-2">
-            <Button size="sm" onClick={() => navigate(submissionsGuide.primaryPath)}>
-              {submissionsGuide.primaryLabel}
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => navigate(submissionsGuide.secondaryPath)}>
-              {submissionsGuide.secondaryLabel}
-            </Button>
+          <div className="min-w-0">
+            <h1 className="text-[20px] font-semibold tracking-[-0.03em] text-slate-950">내 제출 현황</h1>
+            <p className="mt-1 text-[11px] font-medium text-slate-500">{myProject.shortName || myProject.id}</p>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       {/* Weekly submission checklist */}
-      <Card>
-        <CardHeader className="pb-2">
+      <Card className={surfaceCardClassName}>
+        <CardHeader className="border-b border-slate-200/80 pb-3">
           <div className="flex items-center justify-between gap-3">
-            <CardTitle className="text-[13px] flex items-center gap-1.5">
-              <BarChart3 className="w-4 h-4 text-emerald-600" />
+            <CardTitle className="flex items-center gap-1.5 text-[13px] font-semibold text-slate-950">
+              <BarChart3 className="w-4 h-4 text-[#1f4a7d]" />
               주간 제출 체크
             </CardTitle>
             <div className="flex items-center gap-1.5">
-              <Button variant="outline" size="sm" className="h-7 text-[11px] gap-1" onClick={goPrevMonth}>
+              <Button variant="outline" size="sm" className={outlineActionButtonClassName} onClick={goPrevMonth}>
                 <ChevronLeft className="w-3 h-3" /> 이전
               </Button>
-              <Button variant="outline" size="sm" className="h-7 text-[11px] gap-1" onClick={goNextMonth}>
+              <Button variant="outline" size="sm" className={outlineActionButtonClassName} onClick={goNextMonth}>
                 다음 <ChevronRight className="w-3 h-3" />
               </Button>
             </div>
           </div>
         </CardHeader>
-        <CardContent className="pt-0 space-y-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[11px] text-muted-foreground">{yearMonth}</span>
+        <CardContent className="space-y-4 pt-4">
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200/80 bg-slate-50/80 px-3 py-3">
+            <span className="text-[11px] font-semibold text-slate-600">{yearMonth}</span>
             <div className="flex flex-wrap gap-1.5">
               {monthWeeks.map((w) => (
                 <Button
                   key={w.weekNo}
                   variant={selectedWeekNo === w.weekNo ? 'default' : 'outline'}
                   size="sm"
-                  className="h-6 text-[10px]"
+                  className={selectedWeekNo === w.weekNo
+                    ? 'h-7 rounded-lg bg-slate-900 px-2.5 text-[10px] text-white hover:bg-slate-900/90'
+                    : 'h-7 rounded-lg border-slate-300 bg-white px-2.5 text-[10px] text-slate-700 hover:bg-slate-50'}
                   onClick={() => setSelectedWeekNo(w.weekNo)}
                 >
                   {w.label}
@@ -369,28 +316,18 @@ export function PortalSubmissionsPage() {
               ))}
             </div>
             {selectedWeek && (
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-[10px] font-medium text-slate-500">
                 기간 {selectedWeek.weekStart} ~ {selectedWeek.weekEnd} · 마감 {weekDeadline} 24:00
               </span>
             )}
           </div>
-
-          <div className="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
-            <span className="inline-flex items-center rounded-full bg-emerald-600/12 px-2 py-0.5 text-emerald-800 dark:text-emerald-200" style={{ fontWeight: 700 }}>
-              실제 저장 데이터 기준 자동 반영
-            </span>
-            <span className="inline-flex items-center rounded-full bg-green-600/12 px-2 py-0.5 text-green-800 dark:text-green-200" style={{ fontWeight: 700 }}>
-              필요시만 수동 보정
-            </span>
-          </div>
-
           <div className="overflow-x-auto">
             <table className="min-w-[720px] w-full text-[11px]">
               <thead>
-                <tr className="bg-muted/30">
-                  <th className="px-3 py-2 text-left" style={{ fontWeight: 700, minWidth: 180 }}>사업명</th>
-                  <th className="px-3 py-2 text-center" style={{ fontWeight: 700, minWidth: 180 }}>Projection 업데이트</th>
-                  <th className="px-3 py-2 text-center" style={{ fontWeight: 700, minWidth: 180 }}>사업비 입력</th>
+                <tr className="border-y border-slate-200 bg-slate-100/90">
+                  <th className={`${tableHeadCellClassName} text-left`} style={{ minWidth: 180 }}>사업명</th>
+                  <th className={`${tableHeadCellClassName} text-center`} style={{ minWidth: 180 }}>Projection 업데이트</th>
+                  <th className={`${tableHeadCellClassName} text-center`} style={{ minWidth: 180 }}>사업비 입력</th>
                 </tr>
               </thead>
               <tbody>
@@ -423,22 +360,22 @@ export function PortalSubmissionsPage() {
                     syncTitle: accountingStatus.auditTitle,
                   });
                   return (
-                    <tr key={p.id} className="border-t border-border/30">
-                      <td className="px-3 py-3 align-top">
-                        <div className="text-[12px]" style={{ fontWeight: 700 }}>{p.name}</div>
-                        <div className="text-[10px] text-muted-foreground">{p.shortName || p.id}</div>
+                    <tr key={p.id} className="border-t border-slate-200/70 transition-colors hover:bg-slate-50/70">
+                      <td className="px-3 py-3.5 align-top">
+                        <div className="text-[12px] font-semibold text-slate-950">{p.name}</div>
+                        <div className="mt-1 text-[10px] font-medium text-slate-500">{p.shortName || p.id}</div>
                       </td>
-                      <td className="px-3 py-3 align-top text-center">
+                      <td className="px-3 py-3.5 align-top text-center">
                         <div
                           className="mx-auto flex max-w-[172px] flex-col items-stretch gap-2"
                           data-testid={accountingStatusHooks.testId}
                           aria-label={accountingStatusHooks.ariaLabel}
                         >
                           <div className="flex flex-wrap justify-center gap-1.5">
-                            <Badge variant="outline" className={projectionEdited ? 'border-sky-300 bg-sky-50 text-sky-700' : 'border-slate-200 bg-slate-50 text-slate-600'}>
+                            <Badge variant="outline" className={projectionEdited ? 'border-[#c8d7ea] bg-[#eef4fb] text-[#1f4a7d]' : 'border-slate-200 bg-slate-50 text-slate-600'}>
                               {projectionInputLabel}
                             </Badge>
-                            <Badge variant="outline" className={projectionDone ? 'border-emerald-300 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-600'}>
+                            <Badge variant="outline" className={projectionDone ? 'border-[#c8d7ea] bg-[#eef4fb] text-[#1f4a7d]' : 'border-slate-200 bg-slate-50 text-slate-600'}>
                               {projectionDone ? '제출 완료' : '미완료'}
                             </Badge>
                           </div>
@@ -459,20 +396,20 @@ export function PortalSubmissionsPage() {
                           {projectionAudit && <AuditMetaLine {...projectionAudit} />}
                         </div>
                       </td>
-                      <td className="px-3 py-3 align-top text-center">
+                      <td className="px-3 py-3.5 align-top text-center">
                         <div className="mx-auto flex max-w-[172px] flex-col items-stretch gap-2">
                           <div className="flex flex-wrap justify-center gap-1.5">
-                            <Badge variant="outline" className={expenseEdited ? 'border-sky-300 bg-sky-50 text-sky-700' : 'border-slate-200 bg-slate-50 text-slate-600'}>
+                            <Badge variant="outline" className={expenseEdited ? 'border-[#c8d7ea] bg-[#eef4fb] text-[#1f4a7d]' : 'border-slate-200 bg-slate-50 text-slate-600'}>
                               {expenseInputLabel}
                             </Badge>
                             <Badge
                               variant="outline"
                               className={
                                 accountingStatus.tone === 'success'
-                                  ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+                                  ? 'border-[#c8d7ea] bg-[#eef4fb] text-[#1f4a7d]'
                                   : accountingStatus.tone === 'danger'
-                                    ? 'border-rose-300 bg-rose-50 text-rose-700'
-                                    : 'border-amber-300 bg-amber-50 text-amber-700'
+                                    ? 'border-rose-200 bg-rose-50 text-rose-700'
+                                    : 'border-amber-200 bg-amber-50 text-amber-700'
                               }
                             >
                               {accountingStatus.label}
@@ -492,7 +429,7 @@ export function PortalSubmissionsPage() {
                           >
                             {expenseDone ? '수동 보정: 미완료' : '수동 보정: 완료'}
                           </Button>
-                          <div className="text-[9px] leading-4 text-muted-foreground">
+                          <div className="rounded-lg bg-slate-50 px-2 py-1 text-[9px] leading-4 text-slate-500">
                             {accountingStatus.description}
                           </div>
                           {expenseAudit && <AuditMetaLine {...expenseAudit} />}
@@ -503,13 +440,8 @@ export function PortalSubmissionsPage() {
                 })}
                 {assignedProjects.length === 0 && (
                   <tr>
-                    <td colSpan={3} className="px-4 py-6">
-                      <div className="rounded-xl border border-dashed bg-slate-50/80 px-4 py-6 text-center">
-                        <p className="text-[14px] font-semibold text-slate-900">아직 추적 중인 제출 대상이 없습니다</p>
-                        <p className="mt-2 text-[12px] leading-6 text-muted-foreground">
-                          연결된 사업이 생기면 이번 주 제출 체크가 자동으로 나타납니다. 먼저 사업 연결 상태를 확인하세요.
-                        </p>
-                      </div>
+                    <td colSpan={3} className="px-4 py-6 text-center text-[12px] text-slate-500">
+                      표시할 사업이 없습니다.
                     </td>
                   </tr>
                 )}
@@ -520,23 +452,23 @@ export function PortalSubmissionsPage() {
       </Card>
 
       {/* Change Requests */}
-      <Card>
-        <CardHeader className="pb-2">
+      <Card className={surfaceCardClassName}>
+        <CardHeader className="border-b border-slate-200/80 pb-3">
           <div className="flex items-center justify-between gap-3">
-            <CardTitle className="text-[13px] flex items-center gap-1.5">
-              <Users className="w-4 h-4 text-violet-500" />
+            <CardTitle className="flex items-center gap-1.5 text-[13px] font-semibold text-slate-950">
+              <Users className="w-4 h-4 text-[#1f4a7d]" />
               인력변경 신청
             </CardTitle>
-            <Button variant="outline" size="sm" className="h-7 text-[11px] gap-1" onClick={() => navigate('/portal/change-requests')}>
+            <Button variant="outline" size="sm" className={outlineActionButtonClassName} onClick={() => navigate('/portal/change-requests')}>
               상세 보기 <ExternalLink className="w-3 h-3" />
             </Button>
           </div>
         </CardHeader>
-        <CardContent className="pt-0">
+        <CardContent className="pt-4">
           <Tabs value={changeTab} onValueChange={(v) => setChangeTab(v as any)}>
-            <TabsList className="w-full flex flex-wrap justify-start">
+            <TabsList className="flex w-full flex-wrap justify-start rounded-xl bg-slate-100 p-1">
               {CHANGE_TABS.map((t) => (
-                <TabsTrigger key={t.value} value={t.value} className="text-[11px]">
+                <TabsTrigger key={t.value} value={t.value} className="rounded-lg text-[11px] text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-950 data-[state=active]:shadow-sm">
                   {t.label}
                 </TabsTrigger>
               ))}
@@ -544,20 +476,20 @@ export function PortalSubmissionsPage() {
             <TabsContent value={changeTab} className="mt-3">
               <div className="space-y-2">
                 {filteredChanges.slice(0, 10).map((c) => (
-                  <div key={c.id} className="p-3 rounded-lg border border-border/50 hover:bg-muted/20 transition-colors">
+                  <div key={c.id} className="rounded-xl border border-slate-200/80 bg-white p-3 shadow-sm shadow-slate-950/5 transition-colors hover:bg-slate-50/70">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="text-[12px] truncate" style={{ fontWeight: 700 }}>{c.title}</p>
-                        <p className="text-[10px] text-muted-foreground mt-0.5">
+                        <p className="truncate text-[12px] font-semibold text-slate-950">{c.title}</p>
+                        <p className="mt-0.5 text-[10px] font-medium text-slate-500">
                           적용일 {c.effectiveDate} · 요청 {String(c.requestedAt || '').slice(0, 10)}
                         </p>
                       </div>
-                      <Badge variant="outline" className="text-[9px] h-4 px-1.5 shrink-0">
+                      <Badge variant="outline" className="h-5 shrink-0 border-slate-200 bg-slate-50 px-1.5 text-[9px] text-slate-700">
                         {STATE_LABELS[c.state]}
                       </Badge>
                     </div>
                     {(c.state === 'REJECTED' || c.state === 'REVISION_REQUESTED') && c.reviewComment && (
-                      <div className="mt-2 p-2 rounded-md bg-amber-50 dark:bg-amber-950/20 border border-amber-200/60 dark:border-amber-800/40 text-[10px] text-amber-800 dark:text-amber-200">
+                      <div className="mt-2 rounded-lg border border-amber-200/70 bg-amber-50 px-2 py-2 text-[10px] text-amber-800 dark:border-amber-800/40 dark:bg-amber-950/20 dark:text-amber-200">
                         {c.state === 'REJECTED' ? '반려 사유: ' : '수정 요청: '}
                         {c.reviewComment}
                       </div>
@@ -565,11 +497,8 @@ export function PortalSubmissionsPage() {
                   </div>
                 ))}
                 {filteredChanges.length === 0 && (
-                  <div className="rounded-xl border border-dashed bg-slate-50/80 px-4 py-6 text-center">
-                    <p className="text-[14px] font-semibold text-slate-900">해당 상태의 인력변경 신청이 없습니다</p>
-                    <p className="mt-2 text-[12px] leading-6 text-muted-foreground">
-                      이번 주에 새 신청이 생기면 여기에 바로 보입니다. 상세 신청은 인력변경 화면에서 계속 관리할 수 있습니다.
-                    </p>
+                  <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/80 px-4 py-4 text-center text-[12px] text-slate-500">
+                    표시할 신청이 없습니다.
                   </div>
                 )}
               </div>
@@ -579,28 +508,28 @@ export function PortalSubmissionsPage() {
       </Card>
 
       {/* Weekly Expense Input */}
-      <Card>
-        <CardHeader className="pb-2">
+      <Card className={surfaceCardClassName}>
+        <CardHeader className="border-b border-slate-200/80 pb-3">
           <div className="flex items-center justify-between gap-3">
-            <CardTitle className="text-[13px] flex items-center gap-1.5">
-              <BarChart3 className="w-4 h-4 text-teal-600" />
+            <CardTitle className="flex items-center gap-1.5 text-[13px] font-semibold text-slate-950">
+              <BarChart3 className="w-4 h-4 text-[#1f4a7d]" />
               사업비 입력(주간) 작성/제출
             </CardTitle>
-            <Button variant="outline" size="sm" className="h-7 text-[11px] gap-1" onClick={() => navigate('/portal/weekly-expenses')}>
+            <Button variant="outline" size="sm" className={outlineActionButtonClassName} onClick={() => navigate('/portal/weekly-expenses')}>
               입력 열기 <ExternalLink className="w-3 h-3" />
             </Button>
           </div>
         </CardHeader>
-        <CardContent className="pt-0">
-          <div className="flex items-center justify-between gap-2 mb-3">
-            <div className="text-[11px] text-muted-foreground">
+        <CardContent className="pt-4">
+          <div className="mb-4 flex items-center justify-between gap-2 rounded-xl border border-slate-200/80 bg-slate-50/80 px-3 py-3">
+            <div className="text-[11px] font-semibold text-slate-600">
               {yearMonth} 기준
             </div>
             <div className="flex items-center gap-1.5">
-              <Button variant="outline" size="sm" className="h-7 text-[11px] gap-1" onClick={goPrevMonth}>
+              <Button variant="outline" size="sm" className={outlineActionButtonClassName} onClick={goPrevMonth}>
                 <ChevronLeft className="w-3 h-3" /> 이전
               </Button>
-              <Button variant="outline" size="sm" className="h-7 text-[11px] gap-1" onClick={goNextMonth}>
+              <Button variant="outline" size="sm" className={outlineActionButtonClassName} onClick={goNextMonth}>
                 다음 <ChevronRight className="w-3 h-3" />
               </Button>
             </div>
@@ -609,10 +538,10 @@ export function PortalSubmissionsPage() {
           <div className="overflow-x-auto">
             <table className="min-w-[720px] w-full text-[11px]">
               <thead>
-                <tr className="bg-muted/30">
-                  <th className="px-3 py-2 text-left" style={{ fontWeight: 700, minWidth: 160 }}>주차</th>
-                  <th className="px-3 py-2 text-center" style={{ fontWeight: 700, minWidth: 120 }}>상태</th>
-                  <th className="px-3 py-2 text-left" style={{ fontWeight: 700, minWidth: 220 }}>기간</th>
+                <tr className="border-y border-slate-200 bg-slate-100/90">
+                  <th className={`${tableHeadCellClassName} text-left`} style={{ minWidth: 160 }}>주차</th>
+                  <th className={`${tableHeadCellClassName} text-center`} style={{ minWidth: 120 }}>상태</th>
+                  <th className={`${tableHeadCellClassName} text-left`} style={{ minWidth: 220 }}>기간</th>
                 </tr>
               </thead>
               <tbody>
@@ -625,21 +554,21 @@ export function PortalSubmissionsPage() {
                   const adminClosed = snapshot.adminClosed;
                   const isThisWeek = todayYearMonth === yearMonth && todayIso >= w.weekStart && todayIso <= w.weekEnd;
                   const status = adminClosed
-                    ? { label: '결산완료', cls: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' }
+                    ? { label: '결산완료', cls: 'border border-[#c8d7ea] bg-[#eef4fb] text-[#1f4a7d]' }
                     : accountingState.closeDialogKind === 'warning'
-                      ? { label: accountingState.expenseStatusLabel, cls: 'bg-amber-500/15 text-amber-700 dark:text-amber-300' }
+                      ? { label: accountingState.expenseStatusLabel, cls: 'border border-amber-200 bg-amber-50 text-amber-700' }
                     : pmSubmitted
-                      ? { label: '작성완료', cls: 'bg-amber-500/15 text-amber-700 dark:text-amber-300' }
+                      ? { label: '작성완료', cls: 'border border-[#c8d7ea] bg-[#eef4fb] text-[#1f4a7d]' }
                       : snapshot.projectionDone || snapshot.expenseDone
-                        ? { label: '저장됨', cls: 'bg-sky-500/15 text-sky-700 dark:text-sky-300' }
-                      : { label: '미작성', cls: 'bg-slate-500/10 text-slate-600 dark:text-slate-300' };
+                        ? { label: '저장됨', cls: 'border border-slate-200 bg-slate-100 text-slate-700' }
+                      : { label: '미작성', cls: 'border border-slate-200 bg-white text-slate-600' };
 
                   return (
-                    <tr key={w.weekNo} className={`border-t border-border/30 ${isThisWeek ? 'bg-teal-50/30 dark:bg-teal-950/10' : ''}`}>
+                    <tr key={w.weekNo} className={`border-t border-slate-200/70 transition-colors hover:bg-slate-50/70 ${isThisWeek ? 'bg-[#eef4fb]' : ''}`}>
                       <td className="px-3 py-2">
-                        <span style={{ fontWeight: 700 }}>{w.label}</span>
+                        <span className="font-semibold text-slate-950">{w.label}</span>
                         {isThisWeek && (
-                          <Badge className="ml-2 h-4 px-1 text-[9px] bg-teal-500/15 text-teal-700 dark:text-teal-300 border-0">이번 주</Badge>
+                          <Badge className="ml-2 h-4 border-0 bg-[#d9e7f6] px-1 text-[9px] text-[#1f4a7d]">이번 주</Badge>
                         )}
                       </td>
                       <td className="px-3 py-2 text-center">
@@ -647,7 +576,7 @@ export function PortalSubmissionsPage() {
                           {status.label}
                         </span>
                       </td>
-                      <td className="px-3 py-2 text-muted-foreground" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                      <td className="px-3 py-2 text-slate-500" style={{ fontVariantNumeric: 'tabular-nums' }}>
                         {w.weekStart} ~ {w.weekEnd}
                       </td>
                     </tr>
@@ -655,7 +584,7 @@ export function PortalSubmissionsPage() {
                 })}
                 {monthWeeks.length === 0 && (
                   <tr>
-                    <td className="px-3 py-8 text-center text-[12px] text-muted-foreground" colSpan={3}>
+                    <td className="px-3 py-8 text-center text-[12px] text-slate-500" colSpan={3}>
                       주차 정보가 없습니다.
                     </td>
                   </tr>

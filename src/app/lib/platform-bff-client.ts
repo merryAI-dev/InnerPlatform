@@ -147,6 +147,64 @@ export interface ProjectRequestRegistrationNotificationResult {
   reason?: string;
 }
 
+export type AuthGovernanceDriftFlag =
+  | 'missing_auth'
+  | 'missing_canonical_member'
+  | 'legacy_only'
+  | 'duplicate_member_docs'
+  | 'legacy_role_mismatch'
+  | 'claim_mismatch'
+  | 'bootstrap_admin_not_adopted';
+
+export interface AuthGovernanceMemberSnapshot {
+  docId: string;
+  uid: string;
+  email: string;
+  role: string;
+  status: string | null;
+  name: string;
+}
+
+export interface AuthGovernanceUserRow {
+  identityKey: string;
+  email: string;
+  authUid: string | null;
+  displayName: string;
+  authDisabled: boolean;
+  bootstrapAdmin: boolean;
+  claimRole: string | null;
+  claimTenantId: string | null;
+  canonicalMember: AuthGovernanceMemberSnapshot | null;
+  legacyMembers: AuthGovernanceMemberSnapshot[];
+  effectiveRole: string;
+  driftFlags: AuthGovernanceDriftFlag[];
+  needsDeepSync: boolean;
+}
+
+export interface AuthGovernanceSummary {
+  total: number;
+  needsDeepSync: number;
+  missingAuth: number;
+  missingCanonicalMember: number;
+  duplicateMemberDocs: number;
+  bootstrapCandidates: number;
+}
+
+export interface AuthGovernanceDirectoryResult {
+  items: AuthGovernanceUserRow[];
+  summary: AuthGovernanceSummary;
+}
+
+export interface AuthGovernanceDeepSyncResult {
+  identityKey: string;
+  email: string;
+  canonicalDocId: string;
+  role: string;
+  mirroredLegacyCount: number;
+  claimsUpdated: boolean;
+  updatedAt: string;
+}
+
 function normalizeStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value
@@ -539,6 +597,47 @@ export async function addEvidenceViaBff(params: {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
       body: params.evidence,
+    },
+  );
+  return response.data;
+}
+
+export async function fetchAuthGovernanceUsersViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  client?: PlatformApiClientLike;
+}): Promise<AuthGovernanceDirectoryResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.get<AuthGovernanceDirectoryResult>(
+    '/api/v1/admin/auth-governance/users',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      timeoutMs: 10000,
+    },
+  );
+  return response.data;
+}
+
+export async function deepSyncAuthGovernanceUserViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  identityKey: string;
+  role: string;
+  reason?: string;
+  client?: PlatformApiClientLike;
+}): Promise<AuthGovernanceDeepSyncResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<AuthGovernanceDeepSyncResult>(
+    `/api/v1/admin/auth-governance/users/${encodeURIComponent(params.identityKey)}/deep-sync`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: {
+        role: params.role,
+        ...(params.reason ? { reason: params.reason } : {}),
+      },
+      timeoutMs: 10000,
     },
   );
   return response.data;
