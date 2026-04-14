@@ -1,14 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import {
-  Calculator, Users, ArrowRightLeft, ArrowRight,
-  TrendingUp, Clock, AlertTriangle,
+  Calculator, ArrowRight,
+  TrendingUp, AlertTriangle,
   CheckCircle2, CircleDollarSign,
   ArrowUpRight, ArrowDownRight, BarChart3,
   Loader2,
   FileSpreadsheet,
   ClipboardList,
-  ShieldCheck,
 } from 'lucide-react';
 import {
   collection,
@@ -24,12 +23,12 @@ import { Button } from '../ui/button';
 import { usePortalStore } from '../../data/portal-store';
 import { useHrAnnouncements, HR_EVENT_LABELS, HR_EVENT_COLORS } from '../../data/hr-announcements-store';
 import { usePayroll } from '../../data/payroll-store';
-import { TRANSACTIONS, LEDGERS } from '../../data/mock-data';
-import { fmtKRW, fmtShort } from '../../data/budget-data';
+import { TRANSACTIONS } from '../../data/mock-data';
+import { fmtShort } from '../../data/budget-data';
 import {
   PROJECT_STATUS_LABELS, SETTLEMENT_TYPE_SHORT, BASIS_LABELS,
-  type Ledger,
   type Transaction,
+  normalizeProjectFundInputMode,
 } from '../../data/types';
 import { addMonthsToYearMonth, getSeoulTodayIso } from '../../platform/business-days';
 import { useFirebase } from '../../lib/firebase-context';
@@ -40,20 +39,50 @@ import {
   resolveProjectPayrollLiquidity,
   type PayrollLiquidityQueueItem,
 } from '../../platform/payroll-liquidity';
+import { buildPortalDashboardSurface } from '../../platform/portal-dashboard-surface';
 
 // ═══════════════════════════════════════════════════════════════
 // PortalDashboard — 내 사업 현황
 // ═══════════════════════════════════════════════════════════════
 
+function formatKstDateTime(value: string | undefined): string {
+  if (!value) return '아직 수정 없음';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '아직 수정 없음';
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(date);
+  const pick = (type: string) => parts.find((part) => part.type === type)?.value || '--';
+  return `${pick('year')}-${pick('month')}-${pick('day')} ${pick('hour')}:${pick('minute')} KST`;
+}
+
+function issueToneClassName(tone: 'neutral' | 'warn' | 'danger') {
+  if (tone === 'danger') return 'border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100';
+  if (tone === 'warn') return 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100';
+  return 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100';
+}
+
+function accountingToneBadgeClassName(tone: 'muted' | 'warning' | 'danger' | 'success') {
+  if (tone === 'danger') return 'border-rose-200 bg-rose-50 text-rose-700';
+  if (tone === 'warning') return 'border-amber-200 bg-amber-50 text-amber-700';
+  if (tone === 'success') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  return 'border-slate-200 bg-slate-50 text-slate-700';
+}
+
 export function PortalDashboard() {
   const navigate = useNavigate();
-  const { isLoading, portalUser, myProject, changeRequests } = usePortalStore();
+  const { isLoading, portalUser, myProject, changeRequests, weeklySubmissionStatuses } = usePortalStore();
   const { getProjectAlerts } = useHrAnnouncements();
   const { runs, monthlyCloses, acknowledgePayrollRun, acknowledgeMonthlyClose } = usePayroll();
   const { db, isOnline, orgId } = useFirebase();
   const firestoreEnabled = featureFlags.firestoreCoreEnabled && isOnline && !!db;
 
-  const [liveLedgers, setLiveLedgers] = useState<Ledger[] | null>(null);
   const [liveTransactions, setLiveTransactions] = useState<Transaction[] | null>(null);
 
   if (isLoading) {
@@ -99,30 +128,15 @@ export function PortalDashboard() {
 
   useEffect(() => {
     if (!firestoreEnabled || !db) {
-      setLiveLedgers(null);
       setLiveTransactions(null);
       return;
     }
 
     const unsubs: Unsubscribe[] = [];
 
-    const ledgersQuery = query(
-      collection(db, getOrgCollectionPath(orgId, 'ledgers')),
-      where('projectId', '==', myProject.id),
-    );
     const txQuery = query(
       collection(db, getOrgCollectionPath(orgId, 'transactions')),
       where('projectId', '==', myProject.id),
-    );
-
-    unsubs.push(
-      onSnapshot(ledgersQuery, (snap) => {
-        setLiveLedgers(snap.docs.map((d) => d.data() as Ledger));
-      }, (err) => {
-        console.error('[PortalDashboard] ledgers listen error:', err);
-        toast.error('장부 데이터를 불러오지 못했습니다');
-        setLiveLedgers(null);
-      }),
     );
 
     unsubs.push(
@@ -138,7 +152,6 @@ export function PortalDashboard() {
     return () => unsubs.forEach((u) => u());
   }, [db, firestoreEnabled, orgId, myProject.id]);
 
-  const myLedgers = (liveLedgers ?? LEDGERS).filter(l => l.projectId === myProject.id);
   const myTx = (liveTransactions ?? TRANSACTIONS).filter(t => t.projectId === myProject.id);
   const myChanges = changeRequests.filter(r => r.projectId === myProject.id);
 
@@ -189,17 +202,29 @@ export function PortalDashboard() {
     [payrollQueueItems],
   );
   const payrollDetail = payrollQueueItems[0] || null;
-  const summaryAlerts = [
-    { label: '인력변경 요청', value: myChanges.filter((change) => change.state === 'SUBMITTED').length, tone: 'neutral' as const },
-    { label: '미확인 공지', value: hrAlerts.length, tone: hrAlerts.length > 0 ? 'warn' as const : 'neutral' as const },
-    { label: '인건비 Queue', value: payrollRiskItems.length, tone: payrollRiskItems.length > 0 ? 'danger' as const : 'neutral' as const },
-  ];
-  const primaryActions = [
-    { label: '사업비 입력', description: '주간 입력과 저장 상태 정리', to: '/portal/weekly-expenses', icon: FileSpreadsheet },
-    { label: '내 제출 현황', description: '이번 주 작성 여부와 제출 상태 확인', to: '/portal/submissions', icon: ClipboardList },
-    { label: '예산 편집', description: '예산 구조와 실제 집행 기준 확인', to: '/portal/budget', icon: Calculator },
-    { label: '통장내역', description: '원본 업로드와 intake queue 정리', to: '/portal/bank-statements', icon: CircleDollarSign },
-  ];
+  const dashboardSurface = useMemo(() => buildPortalDashboardSurface({
+    projectId: myProject.id,
+    weeklySubmissionStatuses,
+    todayIso: today,
+    changeRequestCount: myChanges.filter((change) => change.state === 'SUBMITTED').length,
+    hrAlertCount: hrAlerts.length,
+    payrollRiskCount: payrollRiskItems.length,
+  }), [hrAlerts.length, myChanges, myProject.id, payrollRiskItems.length, today, weeklySubmissionStatuses]);
+  const currentFundInputMode = normalizeProjectFundInputMode(myProject.fundInputMode);
+  const shouldShowPayrollQueue = Boolean(payrollDetail && payrollDetail.status !== 'clear');
+  const primaryActions = currentFundInputMode === 'DIRECT_ENTRY'
+    ? [
+      { label: '사업비 입력', description: '이번 주 정산대장을 바로 입력하고 저장합니다.', to: '/portal/weekly-expenses', icon: FileSpreadsheet },
+      { label: '캐시플로', description: `${dashboardSurface.currentWeekLabel} Projection을 확인하고 수정합니다.`, to: '/portal/cashflow', icon: BarChart3 },
+      { label: '내 제출 현황', description: '이번 주 Projection과 사업비 입력 작성 여부를 확인합니다.', to: '/portal/submissions', icon: ClipboardList },
+      { label: '예산 편집', description: '예산 구조와 실제 집행 기준을 정리합니다.', to: '/portal/budget', icon: Calculator },
+    ]
+    : [
+      { label: '통장내역', description: '원본 업로드와 분류가 필요한 거래를 먼저 정리합니다.', to: '/portal/bank-statements', icon: CircleDollarSign },
+      { label: '사업비 입력', description: '주간 입력과 저장 상태를 정리합니다.', to: '/portal/weekly-expenses', icon: FileSpreadsheet },
+      { label: '캐시플로', description: `${dashboardSurface.currentWeekLabel} Projection을 확인하고 수정합니다.`, to: '/portal/cashflow', icon: BarChart3 },
+      { label: '내 제출 현황', description: '이번 주 Projection과 사업비 입력 작성 여부를 확인합니다.', to: '/portal/submissions', icon: ClipboardList },
+    ];
 
   return (
     <div className="space-y-6">
@@ -237,8 +262,10 @@ export function PortalDashboard() {
                     </div>
                   </div>
                   <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
-                    <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">최근 이동</div>
-                    <div className="mt-1 text-[13px] font-semibold text-slate-900">내 사업 현황</div>
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">이번 주 Projection</div>
+                    <div className="mt-1 text-[13px] font-semibold text-slate-900">
+                      {dashboardSurface.currentWeekLabel} · {dashboardSurface.projection.label}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -263,28 +290,59 @@ export function PortalDashboard() {
 
         <Card className="border-slate-200 bg-white shadow-sm">
           <CardHeader className="pb-2">
-            <CardTitle className="text-[13px] font-semibold text-slate-900">운영 알림</CardTitle>
+            <CardTitle className="text-[13px] font-semibold text-slate-900">이번 주 정산 상태</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3 pt-0">
-            {summaryAlerts.map((item) => (
-              <div key={item.label} className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+          <CardContent className="space-y-4 pt-0">
+            <div className="space-y-3">
+              <div className="flex items-start justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
                 <div>
-                  <div className="text-[11px] font-medium text-slate-600">{item.label}</div>
-                  <div className="mt-1 text-[12px] font-semibold text-slate-900">
-                    {item.value > 0 ? `${item.value}건 확인 필요` : '현재 처리 필요 없음'}
+                  <div className="text-[11px] font-medium text-slate-600">이번 주 Projection</div>
+                  <div className="mt-1 text-[13px] font-semibold text-slate-900">{dashboardSurface.projection.label}</div>
+                  <div className="mt-1 text-[11px] text-slate-500">{dashboardSurface.projection.detail}</div>
+                </div>
+                <Badge variant="outline" className={`rounded-full ${dashboardSurface.projection.label === '미작성' ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+                  {dashboardSurface.projection.label}
+                </Badge>
+              </div>
+
+              <div className="flex items-start justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+                <div>
+                  <div className="text-[11px] font-medium text-slate-600">최근 Projection 수정</div>
+                  <div className="mt-1 text-[13px] font-semibold text-slate-900">
+                    {formatKstDateTime(dashboardSurface.projection.latestUpdatedAt)}
                   </div>
                 </div>
-                <div className={`rounded-full px-2 py-1 text-[10px] font-semibold ${
-                  item.tone === 'danger'
-                    ? 'bg-rose-100 text-rose-700'
-                    : item.tone === 'warn'
-                      ? 'bg-amber-100 text-amber-700'
-                      : 'bg-slate-200 text-slate-700'
-                }`}>
-                  {item.value}
+              </div>
+
+              <div className="flex items-start justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+                <div>
+                  <div className="text-[11px] font-medium text-slate-600">사업비 입력</div>
+                  <div className="mt-1 text-[13px] font-semibold text-slate-900">{dashboardSurface.expense.label}</div>
+                  <div className="mt-1 text-[11px] text-slate-500">{dashboardSurface.expense.detail}</div>
+                </div>
+                <Badge variant="outline" className={`rounded-full ${accountingToneBadgeClassName(dashboardSurface.expense.tone)}`}>
+                  {dashboardSurface.expense.label}
+                </Badge>
+              </div>
+            </div>
+
+            {dashboardSurface.visibleIssues.length > 0 && (
+              <div className="space-y-2">
+                <div className="text-[11px] font-medium text-slate-600">처리 필요</div>
+                <div className="flex flex-wrap gap-2">
+                  {dashboardSurface.visibleIssues.map((item) => (
+                    <button
+                      key={item.label}
+                      className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-[11px] font-semibold transition-colors ${issueToneClassName(item.tone)}`}
+                      onClick={() => navigate(item.to)}
+                    >
+                      <span>{item.label}</span>
+                      <span>{item.count}건</span>
+                    </button>
+                  ))}
                 </div>
               </div>
-            ))}
+            )}
           </CardContent>
         </Card>
       </div>
@@ -373,12 +431,14 @@ export function PortalDashboard() {
         </Card>
       )}
 
-      <PortalPayrollQueueCard
-        item={payrollDetail}
-        riskItems={payrollRiskItems}
-        onOpenDetail={() => navigate('/portal/payroll')}
-        onOpenBankStatements={() => navigate('/portal/bank-statements')}
-      />
+      {shouldShowPayrollQueue && (
+        <PortalPayrollQueueCard
+          item={payrollDetail}
+          riskItems={payrollRiskItems}
+          onOpenDetail={() => navigate('/portal/payroll')}
+          onOpenBankStatements={() => navigate('/portal/bank-statements')}
+        />
+      )}
 
       {/* 재무 KPI */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -404,82 +464,31 @@ export function PortalDashboard() {
         ))}
       </div>
 
-      {/* 소진율 바 */}
       <Card className="border-slate-200 bg-white shadow-sm">
-        <CardContent className="p-4">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[12px]" style={{ fontWeight: 600 }}>예산 소진율</span>
-            <span className="text-[12px] font-semibold text-slate-800">
-              {(burnRate * 100).toFixed(1)}%
-            </span>
-          </div>
-          <div className="h-3 w-full overflow-hidden rounded-full bg-slate-200">
-            <div
-              className="h-full rounded-full bg-[#1b4f8f] transition-all"
-              style={{
-                width: `${Math.min(burnRate * 100, 100)}%`,
-              }}
-            />
-          </div>
-          <div className="mt-1.5 flex justify-between text-[10px] text-muted-foreground">
-            <span>출금: {fmtKRW(totalOut)}원</span>
-            <span>총 예산: {fmtKRW(myProject.contractAmount)}원</span>
-          </div>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-[13px] text-slate-900">이번 주 바로 작업</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-2 pt-0 md:grid-cols-2 xl:grid-cols-4">
+          {primaryActions.map((action) => (
+            <button
+              key={action.label}
+              className="group rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left transition-colors hover:bg-slate-100"
+              onClick={() => navigate(action.to)}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-[#1b4f8f] shadow-sm ring-1 ring-slate-200">
+                  <action.icon className="h-4 w-4" />
+                </div>
+                <ArrowRight className="mt-1 h-4 w-4 text-slate-400 transition-transform group-hover:translate-x-0.5" />
+              </div>
+              <div className="mt-4">
+                <p className="text-[14px] font-semibold text-slate-950">{action.label}</p>
+                <p className="mt-1 text-[12px] leading-6 text-slate-600">{action.description}</p>
+              </div>
+            </button>
+          ))}
         </CardContent>
       </Card>
-
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
-        <Card className="border-slate-200 bg-white shadow-sm">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-[13px] text-slate-900">현재 작업</CardTitle>
-          </CardHeader>
-          <CardContent className="grid gap-2 pt-0 md:grid-cols-2">
-            {primaryActions.map((action) => (
-              <button
-                key={action.label}
-                className="group rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left transition-colors hover:bg-slate-100"
-                onClick={() => navigate(action.to)}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-[#1b4f8f] shadow-sm ring-1 ring-slate-200">
-                    <action.icon className="h-4 w-4" />
-                  </div>
-                  <ArrowRight className="mt-1 h-4 w-4 text-slate-400 transition-transform group-hover:translate-x-0.5" />
-                </div>
-                <div className="mt-4">
-                  <p className="text-[14px] font-semibold text-slate-950">{action.label}</p>
-                  <p className="mt-1 text-[12px] leading-6 text-slate-600">{action.description}</p>
-                </div>
-              </button>
-            ))}
-          </CardContent>
-        </Card>
-
-        <Card className="border-slate-200 bg-white shadow-sm">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-[13px] text-slate-900">운영 바로가기</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 pt-0">
-            {[
-              { label: '인력변경 신청', icon: ArrowRightLeft, to: '/portal/change-requests' },
-              { label: '인력 현황', icon: Users, to: '/portal/personnel' },
-              { label: '프로젝트 설정', icon: ShieldCheck, to: '/portal/project-settings' },
-            ].map((a) => (
-                <button
-                  key={a.label}
-                  className="flex w-full items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-left transition-colors hover:bg-slate-100"
-                  onClick={() => navigate(a.to)}
-                >
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white text-[#1b4f8f] shadow-sm ring-1 ring-slate-200">
-                    <a.icon className="h-4 w-4" />
-                  </div>
-                  <span className="text-[12px] font-medium text-slate-800">{a.label}</span>
-                  <ArrowRight className="ml-auto h-3.5 w-3.5 text-slate-400" />
-                </button>
-            ))}
-          </CardContent>
-        </Card>
-      </div>
     </div>
   );
 }
