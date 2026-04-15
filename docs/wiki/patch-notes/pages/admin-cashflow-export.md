@@ -3,7 +3,7 @@
 - route: `/cashflow`
 - primary users: admin, finance, 경영기획실
 - status: active
-- last updated: 2026-04-14
+- last updated: 2026-04-15
 
 ## Purpose
 
@@ -15,6 +15,7 @@
 - 사업별 단건 추출과 전체 사업 일괄 추출을 같은 contract 위에서 다룬다.
 - 화면은 분석 대시보드가 아니라 다운로드 중심 운영 surface로 유지한다.
 - 권한은 `admin`과 `finance`가 동일하게 `cashflow:export`를 가진다.
+- workbook 라벨은 공용 cashflow policy 기준을 사용한다.
 
 ## Current Feature Checklist
 
@@ -25,10 +26,12 @@
 - [x] 정산 기준별 필터 가능
 - [x] projection만 export
 - [x] `admin`과 `finance` 모두 접근 가능
+- [x] export 라벨이 공용 cashflow policy 기준을 따름
 - [ ] actual export 지원
 
 ## Recent Changes
 
+- [2026-04-15] BFF export가 공용 cashflow policy 데이터를 읽어 line label을 출력하도록 정리했다.
 - [2026-04-09] browser workbook 생성 대신 server-side export 기준으로 구조를 정리했다.
 - [2026-04-09] 화면 명칭을 `경영기획실 전용 캐시플로 추출 화면`으로 바꾸고 운영툴형 단일 화면으로 재편했다.
 - [2026-04-09] 정산 기준 필터를 추가해 `공급가액`, `공급대가`, `해당없음` 기준으로 추출 대상을 좁힐 수 있게 했다.
@@ -40,6 +43,7 @@
 - 이 화면은 대시보드가 아니라 추출 도구다.
 - actual은 추출 대상이 아니며 현재 모든 형식에서 projection만 내려간다.
 - 캐시플로 추출 권한은 시스템 전체로 보면 `admin > finance`지만, 이 기능만 놓고 보면 `admin = finance`다.
+- export 라벨 변경은 화면 wording 변경이 아니라 공용 policy 변경으로 다뤄야 한다.
 
 ## Related Files
 

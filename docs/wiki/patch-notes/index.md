@@ -21,6 +21,7 @@
 | [admin-cashflow-export](./pages/admin-cashflow-export.md) | `/cashflow` | 2026-04-14 | 사업별/전체 추출, 정산 기준 필터, projection-only export |
 | [admin-cashflow-project-sheet](./pages/admin-cashflow-project-sheet.md) | `/cashflow/projects/:projectId` | 2026-04-14 | compare mode, close 흐름, 주간 snapshot 해석 |
 | [admin-users-auth-governance](./pages/admin-users-auth-governance.md) | `/users` | 2026-04-14 | drift 확인, deep sync, auth/member 정렬 운영 |
+| [shared-label-policy](./pages/shared-label-policy.md) | `shared / policy` | 2026-04-15 | cashflow label↔enum↔line id↔export 기준 통합 |
 
 ## How To Use
 
@@ -40,6 +41,7 @@
 - [admin-cashflow-export](./pages/admin-cashflow-export.md)
 - [admin-cashflow-project-sheet](./pages/admin-cashflow-project-sheet.md)
 - [admin-users-auth-governance](./pages/admin-users-auth-governance.md)
+- [shared-label-policy](./pages/shared-label-policy.md)
 
 ## Related Repo Context
 

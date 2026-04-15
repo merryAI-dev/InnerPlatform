@@ -1,0 +1,106 @@
+{
+  "categoryEntries": [
+    { "category": "CONTRACT_PAYMENT", "label": "계약금", "defaultLineIds": { "IN": "SALES_IN" } },
+    { "category": "INTERIM_PAYMENT", "label": "중도금", "defaultLineIds": { "IN": "SALES_IN" } },
+    { "category": "FINAL_PAYMENT", "label": "잔금", "defaultLineIds": { "IN": "SALES_IN" } },
+    { "category": "LABOR_COST", "label": "인건비", "defaultLineIds": { "OUT": "MYSC_LABOR_OUT" } },
+    { "category": "OUTSOURCING", "label": "외주비", "defaultLineIds": { "OUT": "DIRECT_COST_OUT" } },
+    { "category": "EQUIPMENT", "label": "장비구입비", "defaultLineIds": { "OUT": "DIRECT_COST_OUT" } },
+    { "category": "TRAVEL", "label": "출장비", "defaultLineIds": { "OUT": "DIRECT_COST_OUT" } },
+    { "category": "SUPPLIES", "label": "소모품비", "defaultLineIds": { "OUT": "DIRECT_COST_OUT" } },
+    { "category": "COMMUNICATION", "label": "통신비", "defaultLineIds": { "OUT": "DIRECT_COST_OUT" } },
+    { "category": "RENT", "label": "임차료", "defaultLineIds": { "OUT": "DIRECT_COST_OUT" } },
+    { "category": "UTILITY", "label": "공과금", "defaultLineIds": { "OUT": "DIRECT_COST_OUT" } },
+    { "category": "TAX_PAYMENT", "label": "세금납부", "defaultLineIds": { "OUT": "SALES_VAT_OUT" } },
+    { "category": "VAT_REFUND", "label": "부가세환급", "defaultLineIds": { "IN": "SALES_VAT_IN" } },
+    { "category": "INSURANCE", "label": "보험료", "defaultLineIds": { "OUT": "DIRECT_COST_OUT" } },
+    { "category": "MISC_INCOME", "label": "기타수입", "defaultLineIds": { "IN": "BANK_INTEREST_IN" } },
+    { "category": "MISC_EXPENSE", "label": "기타지출", "defaultLineIds": { "OUT": "DIRECT_COST_OUT" } }
+  ],
+  "lineEntries": [
+    {
+      "lineId": "MYSC_PREPAY_IN",
+      "label": "MYSC 선입금(잔금 등 입금 필요 시)",
+      "direction": "IN",
+      "defaultCategory": "CONTRACT_PAYMENT",
+      "aliases": ["MYSC선입금", "MYSC선입금(입금필요시)", "MYSC 선입금(입금필요시)"]
+    },
+    {
+      "lineId": "SALES_IN",
+      "label": "매출액(입금)",
+      "direction": "IN",
+      "defaultCategory": "CONTRACT_PAYMENT",
+      "aliases": ["매출액"]
+    },
+    {
+      "lineId": "SALES_VAT_IN",
+      "label": "매출부가세(입금)",
+      "direction": "IN",
+      "defaultCategory": "VAT_REFUND",
+      "aliases": ["매출부가세"]
+    },
+    {
+      "lineId": "TEAM_SUPPORT_IN",
+      "label": "팀지원금(입금)",
+      "direction": "IN",
+      "defaultCategory": "MISC_INCOME",
+      "aliases": []
+    },
+    {
+      "lineId": "BANK_INTEREST_IN",
+      "label": "은행이자(입금)",
+      "direction": "IN",
+      "defaultCategory": "MISC_INCOME",
+      "aliases": []
+    },
+    {
+      "lineId": "DIRECT_COST_OUT",
+      "label": "직접사업비",
+      "direction": "OUT",
+      "defaultCategory": "OUTSOURCING",
+      "aliases": ["직접사업비(공급가액)", "직접사업비(공급가액)+매입부가세"]
+    },
+    {
+      "lineId": "INPUT_VAT_OUT",
+      "label": "매입부가세",
+      "direction": "OUT",
+      "defaultCategory": "TAX_PAYMENT",
+      "aliases": []
+    },
+    {
+      "lineId": "MYSC_LABOR_OUT",
+      "label": "MYSC 인건비",
+      "direction": "OUT",
+      "defaultCategory": "LABOR_COST",
+      "aliases": ["MYSC인건비"]
+    },
+    {
+      "lineId": "MYSC_PROFIT_OUT",
+      "label": "MYSC 수익(간접비 등)",
+      "direction": "OUT",
+      "defaultCategory": "MISC_EXPENSE",
+      "aliases": ["MYSC수익(간접비등)", "MYSC 수익(간접비등)", "MYSC수익"]
+    },
+    {
+      "lineId": "SALES_VAT_OUT",
+      "label": "매출부가세(출금)",
+      "direction": "OUT",
+      "defaultCategory": "TAX_PAYMENT",
+      "aliases": []
+    },
+    {
+      "lineId": "TEAM_SUPPORT_OUT",
+      "label": "팀지원금(출금)",
+      "direction": "OUT",
+      "defaultCategory": "MISC_EXPENSE",
+      "aliases": []
+    },
+    {
+      "lineId": "BANK_INTEREST_OUT",
+      "label": "은행이자(출금)",
+      "direction": "OUT",
+      "defaultCategory": "MISC_EXPENSE",
+      "aliases": []
+    }
+  ]
+}

@@ -21,7 +21,7 @@
 6. 한 문서에 코드를 길게 복제하지 않는다. 구현 근거는 파일 경로와 테스트 경로로 연결한다.
 7. 체크리스트는 개발 구현 단위가 아니라 사용자가 체감하는 기능 단위로 쓴다.
 8. 기능이 추가되거나 제거되면 `Recent Changes`뿐 아니라 `Current Feature Checklist`도 같이 갱신한다.
-9. mapped surface가 바뀌면 pre-commit hook이 대응 `pages/*.md`와 `log.md` staging을 요구한다.
+9. mapped surface나 정책 source of truth가 바뀌면 pre-commit hook이 대응 `pages/*.md`와 `log.md` staging을 요구한다.
 
 ## Page Template
 
@@ -72,5 +72,5 @@
 ## Naming Rules
 
 - 파일명은 kebab-case
-- route/공간 의미가 드러나도록 `portal-*`, `admin-*` prefix 사용
+- route/공간 의미가 드러나도록 `portal-*`, `admin-*`, `shared-*` prefix 사용
 - 도메인 문서보다 화면 문서를 우선 생성

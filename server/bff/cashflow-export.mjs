@@ -1,39 +1,10 @@
 import ExcelJS from 'exceljs';
-
-const CASHFLOW_IN_LINES = [
-  'MYSC_PREPAY_IN',
-  'SALES_IN',
-  'SALES_VAT_IN',
-  'TEAM_SUPPORT_IN',
-  'BANK_INTEREST_IN',
-];
-
-const CASHFLOW_OUT_LINES = [
-  'DIRECT_COST_OUT',
-  'INPUT_VAT_OUT',
-  'MYSC_LABOR_OUT',
-  'MYSC_PROFIT_OUT',
-  'SALES_VAT_OUT',
-  'TEAM_SUPPORT_OUT',
-  'BANK_INTEREST_OUT',
-];
-
-const CASHFLOW_ALL_LINES = [...CASHFLOW_IN_LINES, ...CASHFLOW_OUT_LINES];
-
-const CASHFLOW_SHEET_LINE_LABELS = {
-  MYSC_PREPAY_IN: 'MYSC 선입금(잔금 등 입금 필요 시)',
-  SALES_IN: '매출액(입금)',
-  SALES_VAT_IN: '매출부가세(입금)',
-  TEAM_SUPPORT_IN: '팀지원금(입금)',
-  BANK_INTEREST_IN: '은행이자(입금)',
-  DIRECT_COST_OUT: '직접사업비',
-  INPUT_VAT_OUT: '매입부가세',
-  MYSC_LABOR_OUT: 'MYSC 인건비',
-  MYSC_PROFIT_OUT: 'MYSC 수익(간접비 등)',
-  SALES_VAT_OUT: '매출부가세(출금)',
-  TEAM_SUPPORT_OUT: '팀지원금(출금)',
-  BANK_INTEREST_OUT: '은행이자(출금)',
-};
+import {
+  CASHFLOW_ALL_LINES,
+  CASHFLOW_IN_LINES,
+  CASHFLOW_OUT_LINES,
+  getCashflowLineLabel,
+} from './cashflow-policy.mjs';
 
 function normalizeSpace(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
@@ -236,13 +207,13 @@ function buildModeSectionRows({ yearMonth, mode, slots, weeksByWeekNo }) {
   rows.push([`입금 (${modeLabel})`, ...Array(slots.length).fill('')]);
   for (const lineId of CASHFLOW_IN_LINES) {
     const values = slotAmounts.map((amounts) => Number(amounts[lineId]) || 0);
-    rows.push([CASHFLOW_SHEET_LINE_LABELS[lineId], ...values]);
+    rows.push([getCashflowLineLabel(lineId), ...values]);
   }
   rows.push(['입금 합계', ...weekTotals.map((week) => week.totalIn)]);
   rows.push([`출금 (${modeLabel})`, ...Array(slots.length).fill('')]);
   for (const lineId of CASHFLOW_OUT_LINES) {
     const values = slotAmounts.map((amounts) => Number(amounts[lineId]) || 0);
-    rows.push([CASHFLOW_SHEET_LINE_LABELS[lineId], ...values]);
+    rows.push([getCashflowLineLabel(lineId), ...values]);
   }
   rows.push(['출금 합계', ...weekTotals.map((week) => week.totalOut)]);
   rows.push(['잔액', ...weekTotals.map((week) => week.net)]);
@@ -275,7 +246,7 @@ function buildWideModeSectionRows({ yearMonths, mode, weekIndex }) {
   rows.push(headerRow);
   rows.push([`입금 (${modeLabel})`, ...Array(headerRow.length - 1).fill('')]);
   for (const lineId of CASHFLOW_IN_LINES) {
-    const row = [CASHFLOW_SHEET_LINE_LABELS[lineId]];
+    const row = [getCashflowLineLabel(lineId)];
     for (const month of monthColumns) {
       row.push(...month.slotAmounts.map((amounts) => Number(amounts[lineId]) || 0));
     }
@@ -288,7 +259,7 @@ function buildWideModeSectionRows({ yearMonths, mode, weekIndex }) {
   rows.push(inTotalRow);
   rows.push([`출금 (${modeLabel})`, ...Array(headerRow.length - 1).fill('')]);
   for (const lineId of CASHFLOW_OUT_LINES) {
-    const row = [CASHFLOW_SHEET_LINE_LABELS[lineId]];
+    const row = [getCashflowLineLabel(lineId)];
     for (const month of monthColumns) {
       row.push(...month.slotAmounts.map((amounts) => Number(amounts[lineId]) || 0));
     }

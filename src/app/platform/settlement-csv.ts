@@ -8,66 +8,24 @@ import type {
   SettlementEntryKind,
   SettlementSheetPolicy,
 } from '../data/types';
-import { CASHFLOW_SHEET_LINE_LABELS } from '../data/types';
 import type { MonthMondayWeek } from './cashflow-weeks';
 import { findWeekForDate, getYearMondayWeeks } from './cashflow-weeks';
 import { pickValue, parseNumber, parseDate, stableHash, normalizeSpace, normalizeKey } from './csv-utils';
+import { getCashflowLineLabel, listCashflowLineOptions, parseCashflowLineLabelAlias } from './policies/cashflow-policy';
 
 // ── Cashflow line label ↔ id mapping ──
 
-const LABEL_TO_LINE_ID: Record<string, CashflowSheetLineId> = {};
-const LINE_ID_TO_LABEL: Record<string, string> = {};
-for (const [id, label] of Object.entries(CASHFLOW_SHEET_LINE_LABELS)) {
-  LABEL_TO_LINE_ID[label] = id as CashflowSheetLineId;
-  LINE_ID_TO_LABEL[id] = label;
-}
-// Short alias mapping for CSV import flexibility
-const CASHFLOW_LABEL_ALIASES: Record<string, CashflowSheetLineId> = {
-  'MYSC선입금': 'MYSC_PREPAY_IN',
-  'MYSC선입금(입금필요시)': 'MYSC_PREPAY_IN',
-  'MYSC 선입금(입금필요시)': 'MYSC_PREPAY_IN',
-  '매출액(입금)': 'SALES_IN',
-  '매출액': 'SALES_IN',
-  '매출부가세(입금)': 'SALES_VAT_IN',
-  '매출부가세': 'SALES_VAT_IN',
-  '팀지원금(입금)': 'TEAM_SUPPORT_IN',
-  '은행이자(입금)': 'BANK_INTEREST_IN',
-  '직접사업비(공급가액)': 'DIRECT_COST_OUT',
-  '직접사업비': 'DIRECT_COST_OUT',
-  '직접사업비(공급가액)+매입부가세': 'DIRECT_COST_OUT',
-  '매입부가세': 'INPUT_VAT_OUT',
-  'MYSC인건비': 'MYSC_LABOR_OUT',
-  'MYSC 인건비': 'MYSC_LABOR_OUT',
-  'MYSC수익(간접비등)': 'MYSC_PROFIT_OUT',
-  'MYSC 수익(간접비등)': 'MYSC_PROFIT_OUT',
-  'MYSC수익': 'MYSC_PROFIT_OUT',
-  '매출부가세(출금)': 'SALES_VAT_OUT',
-  '팀지원금(출금)': 'TEAM_SUPPORT_OUT',
-  '은행이자(출금)': 'BANK_INTEREST_OUT',
-};
-
 export function parseCashflowLineLabel(raw: string): CashflowSheetLineId | undefined {
-  if (!raw) return undefined;
-  const trimmed = normalizeSpace(raw);
-  if (LABEL_TO_LINE_ID[trimmed]) return LABEL_TO_LINE_ID[trimmed];
-  if (CASHFLOW_LABEL_ALIASES[trimmed]) return CASHFLOW_LABEL_ALIASES[trimmed];
-  // Fuzzy: strip spaces/parens and check again
-  const stripped = trimmed.replace(/\s+/g, '');
-  for (const [alias, id] of Object.entries(CASHFLOW_LABEL_ALIASES)) {
-    if (alias.replace(/\s+/g, '') === stripped) return id;
-  }
-  return undefined;
+  return parseCashflowLineLabelAlias(normalizeSpace(raw));
 }
 
 export function getCashflowLineLabelForExport(lineId: CashflowSheetLineId | string | undefined): string {
   if (!lineId) return '';
-  return LINE_ID_TO_LABEL[lineId] || lineId;
+  return getCashflowLineLabel(lineId as CashflowSheetLineId) || lineId;
 }
 
 /** All valid cashflow line labels for dropdown. */
-export const CASHFLOW_LINE_OPTIONS: { value: CashflowSheetLineId; label: string }[] = (
-  Object.entries(CASHFLOW_SHEET_LINE_LABELS) as [CashflowSheetLineId, string][]
-).map(([value, label]) => ({ value, label }));
+export const CASHFLOW_LINE_OPTIONS: { value: CashflowSheetLineId; label: string }[] = listCashflowLineOptions();
 
 // ── CSV column definitions ──
 
