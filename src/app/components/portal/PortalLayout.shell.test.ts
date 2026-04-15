@@ -38,4 +38,9 @@ describe('PortalLayout shell actions', () => {
   it('drops a separate submissions tab once submission status is absorbed into the dashboard', () => {
     expect(portalLayoutSource).not.toContain("/portal/submissions");
   });
+
+  it('keeps onboarding bypass routes aligned with navigation policy', () => {
+    expect(portalLayoutSource).toContain("location.pathname.includes('/portal/register-project')");
+    expect(portalLayoutSource).not.toContain("location.pathname !== '/portal/project-settings'");
+  });
 });
