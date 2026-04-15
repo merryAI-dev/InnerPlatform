@@ -24,6 +24,10 @@ const SURFACE_TO_PATCH_NOTE_RULES = [
     page: 'docs/wiki/patch-notes/pages/portal-dashboard.md',
   },
   {
+    match: 'src/app/data/payroll-store.tsx',
+    page: 'docs/wiki/patch-notes/pages/portal-dashboard.md',
+  },
+  {
     match: 'src/app/components/participation/ParticipationPage.tsx',
     page: 'docs/wiki/patch-notes/pages/admin-participation.md',
   },
