@@ -347,7 +347,156 @@ workbook 저장이 프로젝트의 공식 운영 상태가 되게 만든다.
 - 첫 배포 시 전 사용자 강제 전환
 - legacy 코드 즉시 삭제
 
-## 최종 성공 기준
+## 마일스톤별 성공 기준
+
+이 계획은 마지막 한 번의 “완료”로 관리하면 안 된다.  
+각 Phase가 끝날 때마다 **다음 단계로 넘어가도 되는지**를 따로 판단해야 한다.
+
+아래 기준은 PM 기준의 Go/No-Go gate다.
+
+### Milestone 0. 방향과 보호 규칙 고정
+
+이 마일스톤의 질문:
+“팀이 같은 제품을 만들고 있는가?”
+
+성공 기준:
+- [ ] workbook 전환의 목표가 `사업비 입력(주간)` 1차 전환으로 고정되어 있다.
+- [ ] 기존 `통장내역 → triage → 주간입력` 흐름을 유지한다는 원칙이 문서에 명시되어 있다.
+- [ ] 정책 셀은 수정 가능하지만 추가/삭제 불가라는 규칙이 문서와 이슈에 박혀 있다.
+- [ ] feature flag 기반 rollout 순서가 정의되어 있다.
+- [ ] 이 작업을 관리할 이슈 트랙이 분리되어 있다.
+
+증빙 자료:
+- 개발 계획서
+- execution map
+- policy record
+- GitHub issue set
+
+Go/No-Go:
+- 이 기준이 없으면 구현 착수 금지
+
+### Milestone 1. 내부 workbook 토대 완성
+
+이 마일스톤의 질문:
+“지금 데이터를 workbook이라는 새 틀로 안전하게 읽을 수 있는가?”
+
+성공 기준:
+- [ ] 현재 주간 사업비 데이터를 workbook 구조로 변환할 수 있다.
+- [ ] 프로젝트별 기본 workbook skeleton이 일관되게 생성된다.
+- [ ] 아직 화면을 바꾸지 않아도 내부적으로 workbook state를 만들 수 있다.
+- [ ] 기존 주간 사업비 저장/조회 흐름에 회귀가 없다.
+
+증빙 자료:
+- `ProjectWorkbook` 타입/테스트
+- legacy adapter 테스트
+- portal-store integration/persistence 테스트
+
+Go/No-Go:
+- 기존 데이터가 workbook으로 안정적으로 읽히지 않으면 UI 전환 금지
+
+### Milestone 2. 저장 차단 규칙 완성
+
+이 마일스톤의 질문:
+“잘못된 workbook이 공식 상태로 들어가는 것을 시스템이 막을 수 있는가?”
+
+성공 기준:
+- [ ] 보호된 정책 셀을 삭제하려는 시도를 막을 수 있다.
+- [ ] 공식 출력 매핑이 깨진 workbook은 저장이 차단된다.
+- [ ] 브라우저와 서버가 같은 validation 결과를 사용한다.
+- [ ] workbook 저장 경로와 version conflict 응답 형식이 정해져 있다.
+
+증빙 자료:
+- Rust workbook schema / validation 테스트
+- TS/Rust contract 테스트
+- BFF save/load 테스트
+
+Go/No-Go:
+- 잘못된 workbook 저장을 막지 못하면 workbook을 사용자에게 노출 금지
+
+### Milestone 3. Opt-in 화면 전환 성공
+
+이 마일스톤의 질문:
+“새 workbook 화면을 켜도 기존 운영 플로우가 안 깨지는가?”
+
+성공 기준:
+- [ ] feature flag가 꺼져 있으면 기존 화면이 그대로 보인다.
+- [ ] feature flag가 켜져 있으면 workbook shell이 weekly expense 화면에 나타난다.
+- [ ] bank triage wizard 버튼과 intake queue가 그대로 보인다.
+- [ ] 증빙 업로드/드라이브 연결 흐름이 그대로 보인다.
+- [ ] 운영팀이 “화면은 달라졌지만 처리 순서는 그대로”라고 설명할 수 있다.
+
+증빙 자료:
+- flow-layout 테스트
+- bank intake surface 테스트
+- weekly expense smoke / e2e 확인
+
+Go/No-Go:
+- triage나 증빙 흐름이 사라지면 rollout 중단
+
+### Milestone 4. workbook이 공식 운영 기준이 됨
+
+이 마일스톤의 질문:
+“이제 workbook 저장 결과를 프로젝트의 공식 상태라고 불러도 되는가?”
+
+성공 기준:
+- [ ] workbook 저장 후 공식 주간 행이 다시 계산된다.
+- [ ] workbook 저장 후 cashflow 값이 같은 프로젝트 기준으로 갱신된다.
+- [ ] workbook 저장 후 제출 준비 상태가 다시 계산된다.
+- [ ] workbook 저장 후 admin 모니터링도 같은 기준을 읽는다.
+- [ ] PM이 바꾼 정책/수식이 실제 운영 결과에 반영된다.
+
+증빙 자료:
+- workbook output mapping 테스트
+- cashflow / settlement kernel 테스트
+- BFF fan-out 테스트
+- 샘플 프로젝트 비교 스크린샷 또는 QA 기록
+
+Go/No-Go:
+- weekly/cashflow/submission/admin 중 하나라도 다른 기준을 읽으면 default-on 전환 금지
+
+### Milestone 5. 여러 명이 함께 써도 안전함
+
+이 마일스톤의 질문:
+“같은 프로젝트를 여러 명이 수정해도 운영 사고 없이 쓸 수 있는가?”
+
+성공 기준:
+- [ ] 오래된 화면에서 저장하면 version conflict로 처리된다.
+- [ ] 어떤 셀이 충돌했는지 사용자에게 보여줄 수 있다.
+- [ ] 정책 변경 시 `forward_only`와 `recalc_all`을 선택할 수 있다.
+- [ ] 브라우저 계산과 서버 계산이 parity 기준을 통과한다.
+
+증빙 자료:
+- workbook conflict 테스트
+- workbook replay 테스트
+- Rust parity 테스트
+
+Go/No-Go:
+- 충돌 감지가 안 되거나 parity가 흔들리면 다수 사용자 rollout 금지
+
+### Milestone 6. 단계적 rollout 준비 완료
+
+이 마일스톤의 질문:
+“이제 제한된 범위에서 켜고 운영 문서로 설명할 수 있는가?”
+
+성공 기준:
+- [ ] shadow mode에서 기존 결과와 workbook 결과 비교 기록이 있다.
+- [ ] opt-in rollout 기준이 문서로 정리되어 있다.
+- [ ] default-on 전환 조건이 문서화되어 있다.
+- [ ] README, wiki, patch note가 함께 갱신되어 있다.
+- [ ] legacy cleanup이 별도 후속 계획으로 분리되어 있다.
+
+증빙 자료:
+- patch note
+- rollout 문서
+- QA 비교 기록
+- README / 운영 문서
+
+Go/No-Go:
+- 운영팀이 문서만 보고 rollout 순서를 설명할 수 없으면 기본값 전환 금지
+
+## 최종 Release Gate
+
+아래 여덟 가지가 모두 맞아야 “1차 전환 성공”으로 본다.
 
 - [ ] PM이 주간 사업비를 프로젝트용 공식 시트처럼 운영할 수 있다.
 - [ ] 기존 통장내역/triage/증빙 흐름이 유지된다.
