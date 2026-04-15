@@ -44,6 +44,7 @@ function formatBankStatementRows(
 export function PortalBankStatementPage() {
   const navigate = useNavigate();
   const {
+    activeProjectId,
     portalUser,
     myProject,
     bankStatementRows,
@@ -60,7 +61,7 @@ export function PortalBankStatementPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const projectName = myProject?.name || '내 사업';
-  const ready = useMemo(() => Boolean(portalUser?.projectId), [portalUser?.projectId]);
+  const ready = useMemo(() => Boolean(activeProjectId || myProject?.id), [activeProjectId, myProject?.id]);
   const bankProfile = useMemo(() => detectBankStatementProfile(columns, lastUploadedName), [columns, lastUploadedName]);
   const amountColIdxs = useMemo(() => getAmountColumnIndexes(columns), [columns]);
   const hasUploadedSheet = rows.length > 0 && columns.length > 0;

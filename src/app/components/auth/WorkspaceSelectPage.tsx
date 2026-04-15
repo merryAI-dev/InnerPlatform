@@ -10,6 +10,7 @@ import {
   resolveActiveWorkspacePreference,
   resolvePostLoginPath,
   resolveRequestedRedirectPath,
+  resolveWorkspaceSelectionPath,
   shouldPromptWorkspaceSelection,
 } from '../../platform/navigation';
 import { canAccessAdminPath } from '../../platform/admin-nav';
@@ -52,7 +53,7 @@ export function WorkspaceSelectPage() {
       setError('공간 선택을 저장하지 못했습니다. 다시 시도해 주세요.');
       return;
     }
-    navigate(resolvePostLoginPath(user.role, workspace, redirectFrom), { replace: true });
+    navigate(resolveWorkspaceSelectionPath(user.role, workspace, redirectFrom), { replace: true });
   };
 
   if (

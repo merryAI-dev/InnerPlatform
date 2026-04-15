@@ -86,6 +86,7 @@ export function PortalWeeklyExpensePage() {
   const { user: authUser, ensureGoogleWorkspaceAccess } = useAuth();
   const { orgId } = useFirebase();
   const {
+    activeProjectId,
     portalUser,
     myProject,
     ledgers,
@@ -130,7 +131,7 @@ export function PortalWeeklyExpensePage() {
     overLimitMembers: { memberName: string; groupLabel: string; totalRate: number }[];
   } | null>(null);
 
-  const projectId = portalUser?.projectId || '';
+  const projectId = activeProjectId || myProject?.id || '';
   const projectName = myProject?.name || '내 사업';
   const ledgerUserRole = portalUser?.role === 'pm' ? 'pm' : 'admin';
   const visibleExpenseSheets = useMemo(() => (

@@ -1,24 +1,15 @@
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
-import { FolderKanban, AlertCircle, CheckCircle2, ExternalLink, Loader2, Search } from 'lucide-react';
-import { toast } from 'sonner';
+import { AlertCircle, CheckCircle2, FolderKanban, Loader2, Search } from 'lucide-react';
 import { Card, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Input } from '../ui/input';
 import { usePortalStore } from '../../data/portal-store';
-import { PROJECT_STATUS_LABELS, PROJECT_TYPE_LABELS, type Project } from '../../data/types';
+import { PROJECT_STATUS_LABELS, type Project } from '../../data/types';
 import { normalizeProjectIds, resolvePrimaryProjectId } from '../../data/project-assignment';
 import { useAuth } from '../../data/auth-store';
 import { canEnterPortalWorkspace } from '../../platform/navigation';
-import { useFirebase } from '../../lib/firebase-context';
-import { PlatformApiError } from '../../platform/api-client';
-import { resolvePortalHappyPath } from '../../platform/portal-happy-path';
-import {
-  linkProjectEvidenceDriveRootViaBff,
-  provisionProjectEvidenceDriveRootViaBff,
-} from '../../lib/platform-bff-client';
-import { isValidDriveUrl } from '../../platform/evidence-helpers';
 
 const statusColors: Record<string, string> = {
   CONTRACT_PENDING: 'bg-amber-100 text-amber-700',
@@ -41,15 +32,11 @@ export function PortalProjectSettings() {
   const navigate = useNavigate();
   const { register, isRegistered, isLoading, portalUser, projects } = usePortalStore();
   const { user: authUser, isAuthenticated, isLoading: authLoading } = useAuth();
-  const { orgId } = useFirebase();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [projectSearch, setProjectSearch] = useState('');
   const [showSelectedOnly, setShowSelectedOnly] = useState(false);
   const [statusFilter, setStatusFilter] = useState<ProjectStatusFilter>('ALL');
-  const [driveRootInputs, setDriveRootInputs] = useState<Record<string, string>>({});
-  const [driveSavingProjectId, setDriveSavingProjectId] = useState('');
-  const [driveProvisioningProjectId, setDriveProvisioningProjectId] = useState('');
   const [projectIds, setProjectIds] = useState<string[]>(() => normalizeProjectIds([
     ...(Array.isArray(portalUser?.projectIds) ? portalUser?.projectIds : []),
     portalUser?.projectId,
@@ -90,21 +77,15 @@ export function PortalProjectSettings() {
     () => allProjects.find((project) => project.id === primaryProjectId) || null,
     [allProjects, primaryProjectId],
   );
-  const selectedProjects = useMemo(
-    () => allProjects.filter((project) => projectIds.includes(project.id)),
-    [allProjects, projectIds],
-  );
   const searchedProjects = useMemo(() => {
     const keyword = projectSearch.trim().toLowerCase();
     if (!keyword) return allProjects;
     return allProjects.filter((project) => {
       const statusLabel = PROJECT_STATUS_LABELS[project.status] || project.status;
-      const projectTypeLabel = PROJECT_TYPE_LABELS[project.projectType] || project.projectType || '';
       const haystack = [
         project.name,
         getClientLabel(project),
         statusLabel,
-        projectTypeLabel,
         project.managerName || '',
         String(project.contractStart || ''),
       ]
@@ -154,30 +135,47 @@ export function PortalProjectSettings() {
       COMPLETED_PENDING_PAYMENT: 0,
     });
   }, [searchedProjects]);
-  const bffActor = useMemo(() => ({
-    uid: authUser?.uid || portalUser?.id || 'portal-user',
-    email: authUser?.email || portalUser?.email || '',
-    role: authUser?.role || portalUser?.role || 'pm',
-    idToken: authUser?.idToken,
-  }), [authUser?.uid, authUser?.email, authUser?.role, authUser?.idToken, portalUser?.id, portalUser?.email, portalUser?.role]);
-
-  const happyPath = useMemo(() => resolvePortalHappyPath({
-    authUser,
-    portalUser,
-    project: primaryProject,
-  }), [authUser, portalUser, primaryProject]);
 
   useEffect(() => {
-    setDriveRootInputs((prev) => {
-      const next = { ...prev };
-      for (const project of allProjects) {
-        if (next[project.id] === undefined) {
-          next[project.id] = project.evidenceDriveRootFolderLink || '';
-        }
-      }
-      return next;
-    });
-  }, [allProjects]);
+    if (projectIds.includes(primaryProjectId)) return;
+    setPrimaryProjectId(resolvePrimaryProjectId(projectIds, projectIds[0]) || '');
+  }, [primaryProjectId, projectIds]);
+
+  if (isLoading || authLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+        <div className="text-center">
+          <Loader2 className="w-5 h-5 mx-auto animate-spin text-muted-foreground" />
+          <p className="mt-2 text-[12px] text-muted-foreground">사업 목록을 불러오는 중...</p>
+        </div>
+      </div>
+    );
+  }
+
+  function getClientLabel(project: Project) {
+    const maybeName = (project as unknown as { clientName?: string }).clientName;
+    return project.clientOrg || maybeName || '클라이언트 미지정';
+  }
+
+  function getStatusFilterLabel(filter: ProjectStatusFilter): string {
+    if (filter === 'ALL') return '전체';
+    return PROJECT_STATUS_LABELS[filter] || filter;
+  }
+
+  function highlightKeyword(text: string, keyword: string): ReactNode {
+    const trimmed = keyword.trim();
+    if (!trimmed) return text;
+    const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`(${escaped})`, 'gi');
+    const parts = text.split(regex);
+    if (parts.length <= 1) return text;
+    const lowered = trimmed.toLowerCase();
+    return parts.map((part, index) => (
+      part.toLowerCase() === lowered
+        ? <mark key={`${part}-${index}`} className="rounded bg-amber-200/70 px-0.5 text-inherit">{part}</mark>
+        : <Fragment key={`${part}-${index}`}>{part}</Fragment>
+    ));
+  }
 
   const toggleProject = (projectId: string) => {
     setError('');
@@ -234,101 +232,6 @@ export function PortalProjectSettings() {
     navigate('/portal', { replace: true });
   };
 
-  const handleSaveDriveRoot = async (projectId: string) => {
-    const value = (driveRootInputs[projectId] || '').trim();
-    if (!value) {
-      toast.error('Google Drive 폴더 링크를 입력해 주세요.');
-      return;
-    }
-
-    setDriveSavingProjectId(projectId);
-    try {
-      const result = await linkProjectEvidenceDriveRootViaBff({
-        tenantId: orgId,
-        actor: bffActor,
-        projectId,
-        value,
-      });
-      setDriveRootInputs((prev) => ({
-        ...prev,
-        [projectId]: result.webViewLink || value,
-      }));
-      toast.success(`증빙 드라이브 연결 완료: ${result.folderName}`);
-    } catch (err) {
-      console.error('[PortalProjectSettings] save drive root failed:', err);
-      if (err instanceof PlatformApiError) {
-        const body = err.body as Record<string, unknown> | null;
-        toast.error(String(body?.message || err.message || '드라이브 설정 저장에 실패했습니다.'));
-      } else {
-        toast.error('드라이브 설정 저장에 실패했습니다.');
-      }
-    } finally {
-      setDriveSavingProjectId('');
-    }
-  };
-
-  const handleProvisionDriveRoot = async (projectId: string) => {
-    setDriveProvisioningProjectId(projectId);
-    try {
-      const result = await provisionProjectEvidenceDriveRootViaBff({
-        tenantId: orgId,
-        actor: bffActor,
-        projectId,
-      });
-      setDriveRootInputs((prev) => ({
-        ...prev,
-        [projectId]: result.webViewLink || prev[projectId] || '',
-      }));
-      toast.success(`기본 증빙 폴더 생성 완료: ${result.folderName}`);
-    } catch (err) {
-      console.error('[PortalProjectSettings] provision drive root failed:', err);
-      if (err instanceof PlatformApiError) {
-        const body = err.body as Record<string, unknown> | null;
-        toast.error(String(body?.message || err.message || '기본 폴더 생성에 실패했습니다.'));
-      } else {
-        toast.error('기본 폴더 생성에 실패했습니다.');
-      }
-    } finally {
-      setDriveProvisioningProjectId('');
-    }
-  };
-
-  if (isLoading || authLoading) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center p-4">
-        <div className="text-center">
-          <Loader2 className="w-5 h-5 mx-auto animate-spin text-muted-foreground" />
-          <p className="mt-2 text-[12px] text-muted-foreground">사업 목록을 불러오는 중...</p>
-        </div>
-      </div>
-    );
-  }
-
-  function getClientLabel(project: Project) {
-    const maybeName = (project as unknown as { clientName?: string }).clientName;
-    return project.clientOrg || maybeName || '클라이언트 미지정';
-  }
-
-  function getStatusFilterLabel(filter: ProjectStatusFilter): string {
-    if (filter === 'ALL') return '전체';
-    return PROJECT_STATUS_LABELS[filter] || filter;
-  }
-
-  function highlightKeyword(text: string, keyword: string): ReactNode {
-    const trimmed = keyword.trim();
-    if (!trimmed) return text;
-    const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const regex = new RegExp(`(${escaped})`, 'gi');
-    const parts = text.split(regex);
-    if (parts.length <= 1) return text;
-    const lowered = trimmed.toLowerCase();
-    return parts.map((part, index) => (
-      part.toLowerCase() === lowered
-        ? <mark key={`${part}-${index}`} className="rounded bg-amber-200/70 px-0.5 text-inherit">{part}</mark>
-        : <Fragment key={`${part}-${index}`}>{part}</Fragment>
-    ));
-  }
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-teal-50/30 dark:from-slate-950 dark:to-teal-950/10 flex items-center justify-center p-4">
       <div className="w-full max-w-3xl">
@@ -340,7 +243,7 @@ export function PortalProjectSettings() {
             {isRegistered ? '사업 배정 수정' : '포털 시작하기'}
           </h1>
           <p className="text-[12px] text-muted-foreground">
-            내 사업을 선택하고 주사업을 지정하세요.
+            선택한 사업 중 주사업만 저장하세요.
           </p>
         </div>
 
@@ -359,14 +262,36 @@ export function PortalProjectSettings() {
               </div>
             )}
 
+            <div className="rounded-xl border border-teal-200/70 bg-teal-50/80 px-4 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-[11px] text-teal-700" style={{ fontWeight: 700 }}>현재 선택 상태</p>
+                  <p className="text-[13px] text-slate-900" style={{ fontWeight: 700 }}>
+                    {projectIds.length > 0 ? `${projectIds.length}개 사업 선택됨` : '아직 선택한 사업이 없습니다'}
+                  </p>
+                </div>
+                <Badge className="bg-white text-teal-700 border border-teal-200 text-[10px]">
+                  {primaryProject ? `주사업: ${primaryProject.name}` : '주사업 미선택'}
+                </Badge>
+              </div>
+              <p className="mt-2 text-[11px] text-teal-800/80">
+                주사업을 저장하면 포털에 즉시 반영됩니다.
+              </p>
+            </div>
+
             {allProjects.length > 0 && (
               <div className="space-y-2">
+                {primaryProject ? (
+                  <div className="rounded-lg border border-amber-200/70 bg-amber-50/80 px-3 py-2 text-[11px] text-amber-900">
+                    현재 주사업은 <strong>{primaryProject.name}</strong>입니다. 다른 사업으로 바꾸려면 목록에서 주사업을 다시 지정하세요.
+                  </div>
+                ) : null}
                 <div className="relative">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
                     value={projectSearch}
                     onChange={(event) => setProjectSearch(event.target.value)}
-                    placeholder="사업명, 클라이언트, 유형, 담당자로 검색"
+                    placeholder="사업명, 클라이언트, 담당자로 검색"
                     className="h-10 pl-9 text-[12px]"
                   />
                 </div>
@@ -453,7 +378,7 @@ export function PortalProjectSettings() {
                       </div>
                       <p className="text-[11px] text-muted-foreground">{highlightKeyword(getClientLabel(project), projectSearch)}</p>
                       <p className="mt-1 text-[11px] text-teal-800">
-                        {isPrimary ? '이 사업이 현재 기본 사업으로 저장됩니다.' : '선택된 사업입니다. 필요하면 주사업으로 바꾸세요.'}
+                        {isPrimary ? '이 사업이 현재 주사업으로 저장됩니다.' : '선택된 사업입니다. 필요하면 주사업으로 지정하세요.'}
                       </p>
                     </div>
 
@@ -517,7 +442,7 @@ export function PortalProjectSettings() {
                       <p className="text-[11px] text-muted-foreground">{highlightKeyword(getClientLabel(project), projectSearch)}</p>
                       {selected ? (
                         <p className="mt-1 text-[11px] text-teal-800">
-                          {isPrimary ? '이 사업이 현재 기본 사업으로 저장됩니다.' : '선택된 사업입니다. 필요하면 주사업으로 바꾸세요.'}
+                          {isPrimary ? '이 사업이 현재 주사업으로 저장됩니다.' : '선택된 사업입니다. 필요하면 주사업으로 지정하세요.'}
                         </p>
                       ) : (
                         <p className="mt-1 text-[11px] text-muted-foreground">
@@ -560,106 +485,16 @@ export function PortalProjectSettings() {
               )}
             </div>
 
-            {selectedProjects.length > 0 && (
-              <div className="rounded-xl border border-slate-200/80 bg-slate-50/80 px-4 py-4 space-y-3">
-                <div className="flex items-start justify-between gap-3 flex-wrap">
-                  <div>
-                    <p className="text-[12px] text-slate-900" style={{ fontWeight: 800 }}>증빙 드라이브 연결</p>
-                    <p className="text-[11px] text-muted-foreground mt-1">
-                      사업별 루트 폴더 링크를 저장하면 정산 화면에서 거래별 하위 폴더를 자동 생성합니다.
-                    </p>
-                  </div>
-                  <Badge className="bg-white text-slate-700 border border-slate-200 text-[10px]">
-                    사업별 Firestore 저장
-                  </Badge>
-                </div>
-
-                <div className="space-y-3">
-                  {selectedProjects.map((project) => {
-                    const inputValue = driveRootInputs[project.id] || '';
-                    const configured = !!project.evidenceDriveRootFolderId;
-                    const isSavingDrive = driveSavingProjectId === project.id;
-                    const isProvisioningDrive = driveProvisioningProjectId === project.id;
-                    return (
-                      <div key={`drive-${project.id}`} className="rounded-lg border border-white/70 bg-white px-3 py-3 shadow-sm">
-                        <div className="flex items-center justify-between gap-2 flex-wrap">
-                          <div>
-                            <p className="text-[12px]" style={{ fontWeight: 700 }}>{project.name}</p>
-                            <p className="text-[11px] text-muted-foreground">
-                              {configured
-                                ? `연결됨 · ${project.evidenceDriveRootFolderName || project.evidenceDriveRootFolderId}`
-                                : '아직 루트 폴더가 연결되지 않았습니다'}
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Badge className={`text-[10px] ${configured ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-700'}`}>
-                              {configured ? '설정됨' : '미설정'}
-                            </Badge>
-                            {isValidDriveUrl(project.evidenceDriveRootFolderLink || '') && (
-                              <a
-                                href={project.evidenceDriveRootFolderLink}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-blue-600 hover:text-blue-700"
-                                title="Google Drive에서 열기"
-                              >
-                                <ExternalLink className="h-4 w-4" />
-                              </a>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="mt-3 flex flex-wrap items-center gap-2">
-                          <Button
-                            type="button"
-                            variant={configured ? 'outline' : 'default'}
-                            className="h-9 text-[11px]"
-                            disabled={isSavingDrive || isProvisioningDrive}
-                            onClick={() => void handleProvisionDriveRoot(project.id)}
-                          >
-                            {isProvisioningDrive ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            ) : (
-                              configured ? '기본 폴더 재확인' : '기본 폴더 자동 생성'
-                            )}
-                          </Button>
-                          <input
-                            type="text"
-                            value={inputValue}
-                            placeholder="Google Drive 폴더 링크 또는 폴더 ID"
-                            className="flex-1 rounded-md border border-slate-200 bg-white px-3 py-2 text-[12px] outline-none focus:border-teal-400"
-                            onChange={(e) => {
-                              const nextValue = e.target.value;
-                              setDriveRootInputs((prev) => ({ ...prev, [project.id]: nextValue }));
-                            }}
-                          />
-                          <Button
-                            type="button"
-                            className="h-9 text-[11px]"
-                            disabled={isSavingDrive || isProvisioningDrive || !inputValue.trim()}
-                            onClick={() => void handleSaveDriveRoot(project.id)}
-                          >
-                            {isSavingDrive ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : '드라이브 저장'}
-                          </Button>
-                        </div>
-                        <p className="mt-2 text-[11px] text-muted-foreground">
-                          기본값은 상위 Shared Drive 아래에 사업명 기준 폴더를 자동 생성하고, 예외 케이스만 수동 링크로 덮어쓸 수 있습니다.
-                        </p>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
             <div className="flex items-center justify-between pt-2">
-              <p className="text-[11px] text-muted-foreground">변경 사항은 저장 후 즉시 반영됩니다.</p>
+              <p className="text-[11px] text-muted-foreground">
+                주사업을 저장하면 포털이 즉시 갱신됩니다. {primaryProject ? `현재 주사업은 ${primaryProject.name}입니다.` : '주사업을 먼저 선택해 주세요.'}
+              </p>
               <Button
                 className="h-9 text-[12px]"
                 onClick={handleSave}
                 disabled={saving || allProjects.length === 0 || projectIds.length === 0}
               >
-                {saving ? '저장 중...' : `선택 저장${primaryProject ? ` · ${primaryProject.name}` : ''}`}
+                {saving ? '저장 중...' : '주사업 저장'}
               </Button>
             </div>
           </CardContent>

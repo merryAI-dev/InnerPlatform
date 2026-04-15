@@ -120,6 +120,7 @@ const tableHeadCellClassName = 'px-3 py-2 text-[10px] uppercase tracking-[0.08em
 export function PortalSubmissionsPage() {
   const navigate = useNavigate();
   const {
+    activeProjectId,
     isLoading,
     portalUser,
     myProject,
@@ -150,7 +151,7 @@ export function PortalSubmissionsPage() {
   const todayIso = getSeoulTodayIso();
   const [yearMonth, setYearMonth] = useState(() => todayIso.slice(0, 7));
   const todayYearMonth = todayIso.slice(0, 7);
-  const projectId = portalUser?.projectId || myProject?.id || '';
+  const projectId = activeProjectId || myProject?.id || '';
 
   const myChanges = useMemo(() => {
     if (!projectId) return [];

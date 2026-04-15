@@ -1,5 +1,6 @@
 import { normalizeWorkspaceId, type WorkspaceId } from '../data/member-workspace';
 import { canAccessAdminPath } from './admin-nav';
+import { resolvePortalProjectSelectPath } from './portal-project-selection';
 
 export type HomePath = '/' | '/portal';
 
@@ -97,6 +98,45 @@ export function resolvePostLoginPath(
   return fallback;
 }
 
+export function resolvePortalEntryPath(
+  role: unknown,
+  preferredWorkspace: WorkspaceId | unknown,
+  requestedPath?: unknown,
+): string {
+  const target = resolvePostLoginPath(role, preferredWorkspace, requestedPath);
+  if (target === '/portal' || target.startsWith('/portal/')) {
+    return resolvePortalProjectSelectPath(target);
+  }
+  return target;
+}
+
+export function resolveWorkspaceSelectionPath(
+  role: unknown,
+  selectedWorkspace: WorkspaceId | unknown,
+  requestedPath?: unknown,
+): string {
+  const normalizedWorkspace = normalizeWorkspaceId(selectedWorkspace);
+  const normalizedPath = normalizeRequestedPath(requestedPath);
+
+  if (normalizedWorkspace === 'portal') {
+    const portalRequested = normalizedPath.startsWith('/portal/')
+      ? normalizedPath
+      : undefined;
+    return portalRequested
+      ? resolvePortalEntryPath(role, normalizedWorkspace, portalRequested)
+      : resolvePortalProjectSelectPath();
+  }
+
+  if (normalizedWorkspace === 'admin') {
+    const adminRequested = normalizedPath && !normalizedPath.startsWith('/portal/')
+      ? normalizedPath
+      : undefined;
+    return resolvePostLoginPath(role, normalizedWorkspace, adminRequested);
+  }
+
+  return resolvePostLoginPath(role, selectedWorkspace, requestedPath);
+}
+
 interface PortalOnboardingRedirectInput {
   isAuthenticated: boolean;
   role: unknown;
@@ -118,6 +158,6 @@ export function shouldForcePortalOnboarding(input: PortalOnboardingRedirectInput
   if (!canEnterPortalWorkspace(input.role)) return false;
   if (input.isRegistered) return false;
   // onboarding, project-settings, weekly-expenses는 미등록 상태에서도 접근 허용
-  const bypassPaths = ['/portal/onboarding', '/portal/project-settings', '/portal/register-project', '/portal/weekly-expenses'];
+  const bypassPaths = ['/portal/onboarding', '/portal/project-settings', '/portal/project-select', '/portal/register-project', '/portal/weekly-expenses'];
   return !bypassPaths.some((p) => matchesPathPrefix(input.pathname, p));
 }

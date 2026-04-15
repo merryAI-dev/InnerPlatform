@@ -17,6 +17,7 @@ export function PortalCashflowPage() {
   const { user: authUser, ensureGoogleWorkspaceAccess } = useAuth();
   const { orgId } = useFirebase();
   const {
+    activeProjectId,
     portalUser,
     myProject,
     transactions,
@@ -36,7 +37,7 @@ export function PortalCashflowPage() {
   const devHarnessConfig = readDevAuthHarnessConfig(import.meta.env, typeof window !== 'undefined' ? window.location : undefined);
   const [googleSheetImportOpen, setGoogleSheetImportOpen] = useState(false);
 
-  const projectId = portalUser?.projectId || '';
+  const projectId = activeProjectId || myProject?.id || '';
   const projectName = myProject?.name || '내 사업';
   const activeSheetName = '캐시플로우 Projection';
 

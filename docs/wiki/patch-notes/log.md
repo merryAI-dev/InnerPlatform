@@ -103,6 +103,22 @@
 - pages: [portal-dashboard](./pages/portal-dashboard.md)
 - summary: 헤더의 중복 `사업비 입력` 버튼을 제거하고, 상단 command search가 담당 사업 전체를 검색해 선택 시 해당 사업으로 전환 후 이동하도록 확장했다.
 
+## [2026-04-14] patch-note | portal-session-active-project | 세션 사업 전환과 진입 step 분리
+- pages: [portal-weekly-expense](./pages/portal-weekly-expense.md), [portal-bank-statement](./pages/portal-bank-statement.md), [portal-submissions](./pages/portal-submissions.md)
+- summary: 저장된 주사업과 별도로 session active project를 도입하고, 포털 진입을 `project-select` step으로 분리해 같은 화면을 유지한 채 사업 전환이 가능하도록 정리했다.
+
+## [2026-04-14] patch-note | portal-project-select-shell | 포털 진입 사업 선택 step 신설
+- pages: [portal-project-select](./pages/portal-project-select.md), [portal-dashboard](./pages/portal-dashboard.md)
+- summary: 로그인 후 포털 진입을 `project-select` step으로 라우팅하고, 상단 search는 메뉴 이동이 아니라 담당 사업 전환과 관리자 공간 이탈만 담당하도록 정리했다.
+
+## [2026-04-14] patch-note | portal-project-select-redirect | wrapped redirect 보존
+- pages: [portal-project-select](./pages/portal-project-select.md)
+- summary: 이미 `project-select?redirect=...` 형태인 포털 진입 URL을 다시 해석할 때도 redirect query를 지우지 않도록 안정성을 보강했다.
+
+## [2026-04-15] patch-note | portal-onboarding-workspace-choice | 명시적 workspace 선택 우선
+- pages: [portal-onboarding](./pages/portal-onboarding.md), [portal-project-select](./pages/portal-project-select.md)
+- summary: workspace 선택 화면에서는 이전 admin redirect를 무조건 재사용하지 않고, 사용자가 고른 공간과 같은 성격의 경로만 유지하도록 정리했다.
+
 ## [2026-04-14] patch-note | portal-dashboard-submission-merge | 제출 상태 홈 흡수
 - pages: [portal-dashboard](./pages/portal-dashboard.md), [portal-submissions](./pages/portal-submissions.md)
 - summary: `내 제출 현황`의 핵심 제출 상태를 `/portal` 홈 안으로 흡수하고, 중복이던 `인력변경 신청`, `주간 제출 체크`, `사업비 입력(주간) 작성/제출` 블록은 홈 통합 섹션 밖으로 뺐다.
