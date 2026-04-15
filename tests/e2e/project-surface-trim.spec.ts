@@ -29,11 +29,15 @@ test('projects new redirects admins to the portal project registration flow', as
   await expect(page).toHaveURL(/\/portal\/register-project\?phase=PROSPECT$/);
 });
 
-test('approval queue includes project registration requests', async ({ page }) => {
+test('approval queue promotes project registration review as a decision console', async ({ page }) => {
   await loginAsAdmin(page);
   await page.goto('/approvals');
 
-  await expect(page.getByText('사업 등록 요청').first()).toBeVisible();
+  await expect(page.getByText('사업 등록 심사').first()).toBeVisible();
+  await expect(page.getByTestId('project-request-inbox')).toBeVisible();
+  await expect(page.getByTestId('project-request-detail')).toBeVisible();
+  await expect(page.getByTestId('project-request-decision-rail')).toBeVisible();
+  await expect(page.getByText('결정 패널').first()).toBeVisible();
 });
 
 test('settings migration tab links to the maintenance-only migration audit surface', async ({ page }) => {

@@ -28,6 +28,7 @@ test('approval queue is a single operator surface without history tab', async ({
   await loginAsAdmin(page);
   await page.goto('/approvals');
 
+  await expect(page.getByText('사업 등록 심사').first()).toBeVisible();
   await expect(page.getByText('승인 대기 항목').first()).toBeVisible();
   await expect(page.getByText('사업비 승인 대기').first()).toBeVisible();
   await expect(page.getByText('인력변경 승인 대기').first()).toBeVisible();

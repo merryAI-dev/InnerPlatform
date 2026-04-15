@@ -164,9 +164,20 @@ export function AdminApprovalPage() {
         icon={CheckCircle2}
         iconGradient="linear-gradient(135deg, #0f766e, #14b8a6)"
         title="승인 대기열"
-        description="승인 대기 중인 사업비 세트와 인력변경 요청만 모아 빠르게 처리합니다"
+        description="프로젝트 등록 승인부터 먼저 정리한 뒤 사업비 세트와 인력변경 요청을 처리합니다"
         badge={`대기 ${totalPending}건`}
       />
+
+      <Card className="border-teal-200/80 bg-gradient-to-r from-teal-50 via-white to-slate-50">
+        <CardContent className="flex flex-col gap-3 p-5 lg:flex-row lg:items-center lg:justify-between">
+          <div className="space-y-1">
+            <p className="text-[11px] uppercase tracking-[0.08em] text-teal-700" style={{ fontWeight: 700 }}>대표 검토</p>
+            <h2 className="text-[22px] tracking-[-0.04em] text-slate-950" style={{ fontWeight: 800 }}>사업 등록 심사</h2>
+            <p className="text-[12px] leading-6 text-slate-600">프로젝트 등록 승인부터 먼저 정리합니다. 계약 근거, 재무/정산, 검토 메모를 한 화면에서 보고 결정합니다.</p>
+          </div>
+          <Badge className="border-0 bg-teal-600 text-white">등록 승인 우선</Badge>
+        </CardContent>
+      </Card>
 
       <Card className="border-slate-200/80 bg-gradient-to-r from-slate-50 via-white to-teal-50/70">
         <CardContent className="flex flex-col gap-4 p-4 lg:flex-row lg:items-center lg:justify-between">
