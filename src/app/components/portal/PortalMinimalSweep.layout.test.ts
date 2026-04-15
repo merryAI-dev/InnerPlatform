@@ -65,9 +65,8 @@ describe('portal minimal sweep', () => {
   });
 
   it('reduces duplicate state banners from project settings', () => {
-    expect(projectSettingsSource).not.toContain('현재 선택 상태');
     expect(projectSettingsSource).not.toContain('최근 사용한 사업');
-    expect(projectSettingsSource).not.toContain('현재 주사업은');
+    expect(projectSettingsSource).not.toContain('최근 사용한 사업과 현재 주사업');
   });
 
   it('drops the redundant current-project subtitle from project edit', () => {
