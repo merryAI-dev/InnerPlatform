@@ -5,7 +5,6 @@ import { toast } from 'sonner';
 import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
 import { Badge } from '../ui/badge';
-import { BankImportTriageWizard } from './BankImportTriageWizard';
 import { usePortalStore } from '../../data/portal-store';
 import {
   detectBankStatementProfile,
@@ -16,7 +15,6 @@ import {
   sanitizeHtmlMatrix,
   type BankStatementRow,
 } from '../../platform/bank-statement';
-import { groupExpenseIntakeItemsForSurface } from '../../platform/bank-intake-surface';
 import { normalizeKey, parseCsv, parseNumber } from '../../platform/csv-utils';
 import { loadXlsx, warmXlsx } from '../../platform/lazy-heavy-modules';
 
@@ -50,11 +48,6 @@ export function PortalBankStatementPage() {
     myProject,
     bankStatementRows,
     saveBankStatementRows,
-    expenseIntakeItems,
-    evidenceRequiredMap,
-    saveExpenseIntakeDraft,
-    projectExpenseIntakeItem,
-    syncExpenseIntakeEvidence,
   } = usePortalStore();
   const [columns, setColumns] = useState<string[]>(bankStatementRows?.columns || []);
   const [rows, setRows] = useState<BankStatementRow[]>(bankStatementRows?.rows || []);
@@ -64,7 +57,6 @@ export function PortalBankStatementPage() {
   const [lastSavedAt, setLastSavedAt] = useState('');
   const [dragActive, setDragActive] = useState(false);
   const [uploadPreparing, setUploadPreparing] = useState(false);
-  const [triageOpen, setTriageOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const projectName = myProject?.name || '내 사업';
@@ -72,8 +64,6 @@ export function PortalBankStatementPage() {
   const bankProfile = useMemo(() => detectBankStatementProfile(columns, lastUploadedName), [columns, lastUploadedName]);
   const amountColIdxs = useMemo(() => getAmountColumnIndexes(columns), [columns]);
   const hasUploadedSheet = rows.length > 0 && columns.length > 0;
-  const intakeSurface = useMemo(() => groupExpenseIntakeItemsForSurface(expenseIntakeItems), [expenseIntakeItems]);
-  const queueWorkCount = intakeSurface.needsClassification.length + intakeSurface.reviewRequired.length + intakeSurface.pendingEvidence.length;
 
   const formatAmount = useCallback((value: string) => {
     const trimmed = value.trim();
@@ -94,14 +84,6 @@ export function PortalBankStatementPage() {
     setColumns([]);
     setRows([]);
   }, [bankStatementRows, dirty, formatAmount]);
-
-  const findColumnIndex = useCallback((aliases: string[]) => {
-    const normalizedAliases = aliases.map((alias) => normalizeKey(alias));
-    return columns.findIndex((column) => {
-      const key = normalizeKey(column);
-      return normalizedAliases.some((alias) => key === alias || key.includes(alias));
-    });
-  }, [columns]);
 
   const parseExcelToMatrix = useCallback(async (file: File): Promise<string[][]> => {
     // KB 등 HTML-as-XLS 감지: 파일 앞부분이 HTML 태그로 시작하면 HTML 파서 사용
@@ -196,38 +178,6 @@ export function PortalBankStatementPage() {
     setDirty(true);
   }, [rows, columns]);
 
-  const addSpecialTemplateRow = useCallback((kind: 'corp-card-refund' | 'prepaid-in' | 'special-case') => {
-    if (columns.length === 0) {
-      toast.message('먼저 통장내역 파일을 업로드해 주세요.');
-      return;
-    }
-    const nextRow: BankStatementRow = { tempId: `bank-${Date.now()}`, cells: columns.map(() => '') };
-    const dateIdx = findColumnIndex(['거래일시', '거래일자', '거래일', '일자', '날짜']);
-    const memoIdx = findColumnIndex(['적요', '메모', '내용', '거래내용', '내통장표시내용']);
-    const counterpartyIdx = findColumnIndex(['의뢰인/수취인', '의뢰인', '수취인', '상대계좌명', '거래처']);
-    const inIdx = findColumnIndex(['입금금액', '입금', '입금액']);
-    const outIdx = findColumnIndex(['출금금액', '출금', '출금액']);
-
-    if (dateIdx >= 0) nextRow.cells[dateIdx] = new Date().toISOString().slice(0, 10);
-
-    if (kind === 'corp-card-refund') {
-      if (memoIdx >= 0) nextRow.cells[memoIdx] = '개인법인카드 사용 환수';
-      if (counterpartyIdx >= 0) nextRow.cells[counterpartyIdx] = '개인법인카드 환수';
-      if (inIdx >= 0) nextRow.cells[inIdx] = '';
-    } else if (kind === 'prepaid-in') {
-      if (memoIdx >= 0) nextRow.cells[memoIdx] = '선사용금 입금';
-      if (counterpartyIdx >= 0) nextRow.cells[counterpartyIdx] = '선사용금';
-      if (inIdx >= 0) nextRow.cells[inIdx] = '';
-    } else {
-      if (memoIdx >= 0) nextRow.cells[memoIdx] = '특이 건 수기 관리';
-      if (counterpartyIdx >= 0) nextRow.cells[counterpartyIdx] = '수기 입력';
-      if (outIdx >= 0) nextRow.cells[outIdx] = '';
-    }
-
-    setRows((prev) => [...prev, nextRow]);
-    setDirty(true);
-  }, [columns, findColumnIndex]);
-
   const removeRow = useCallback((rowIdx: number) => {
     setRows((prev) => prev.filter((_, idx) => idx !== rowIdx));
     setDirty(true);
@@ -292,16 +242,16 @@ export function PortalBankStatementPage() {
     : dirty
       ? {
         label: '저장 전 초안',
-        description: '수정한 통장내역이 아직 intake 기준본으로 저장되지 않았습니다. 저장 후 신규 거래 queue가 준비됩니다.',
+        description: '수정한 통장내역이 아직 주간 사업비 기준본으로 저장되지 않았습니다. 저장 후 바로 사업비 입력으로 이어갈 수 있습니다.',
         toneClass: 'border-amber-200/70 bg-amber-50/60',
       }
       : hasUploadedSheet
         ? {
           label: lastSavedAt ? '업로드 기준본 저장 완료' : '현재 저장본 사용 중',
           description: lastSavedAt
-            ? '최근 저장본에서 신규 거래와 검토 필요 거래가 intake queue로 분리됩니다.'
+            ? '최근 저장본을 기준으로 사업비 입력 화면에서 바로 이어서 작업할 수 있습니다.'
             : '이미 저장된 통장내역 기준본을 열어 검토하고 있습니다.',
-          toneClass: 'border-emerald-200/70 bg-emerald-50/60',
+          toneClass: 'border-slate-300/80 bg-slate-100',
         }
         : {
           label: '원본 업로드 대기',
@@ -376,15 +326,6 @@ export function PortalBankStatementPage() {
           <Button variant="outline" size="sm" onClick={addRow} disabled={!hasUploadedSheet}>
             <Plus className="h-4 w-4 mr-1" /> 행 추가
           </Button>
-          <Button variant="outline" size="sm" onClick={() => addSpecialTemplateRow('corp-card-refund')} disabled={!hasUploadedSheet}>
-            환수 행
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => addSpecialTemplateRow('prepaid-in')} disabled={!hasUploadedSheet}>
-            선사용금
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => addSpecialTemplateRow('special-case')} disabled={!hasUploadedSheet}>
-            특이건
-          </Button>
           <Button variant="outline" size="sm" onClick={handleSave} disabled={saving || !hasUploadedSheet}>
             {saving ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Save className="h-4 w-4 mr-1" />}
             저장
@@ -456,48 +397,6 @@ export function PortalBankStatementPage() {
         </CardContent>
       </Card>
 
-      {hasUploadedSheet && (
-        <Card data-testid="bank-import-queue-summary" className="border-slate-200 bg-white shadow-sm">
-          <CardContent className="p-4">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div className="space-y-2">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <p className="text-[13px] font-semibold text-slate-950">신규 거래 처리 Queue</p>
-                  <Badge variant="outline" className="text-[10px]">
-                    총 {queueWorkCount}건
-                  </Badge>
-                </div>
-                <p className="text-[12px] leading-6 text-slate-600">
-                  업로드한 원본은 이제 전체 주간 시트를 다시 쓰지 않습니다. 분류와 검토, 증빙 continuation이 필요한 거래만 queue로 남기고 나머지는 기존 주간 입력을 보존합니다.
-                </p>
-                <div className="flex gap-2 flex-wrap">
-                  <Badge className="border-amber-200 bg-amber-50 text-amber-700">
-                    분류 필요 {intakeSurface.needsClassification.length}
-                  </Badge>
-                  <Badge className="border-rose-200 bg-rose-50 text-rose-700">
-                    검토 필요 {intakeSurface.reviewRequired.length}
-                  </Badge>
-                  <Badge className="border-sky-200 bg-sky-50 text-sky-700">
-                    증빙 미완료 {intakeSurface.pendingEvidence.length}
-                  </Badge>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={() => navigate('/portal/weekly-expenses')}>
-                  주간 사업비에서 보기
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => setTriageOpen(true)} disabled={intakeSurface.pendingEvidence.length === 0}>
-                  증빙 이어서 하기
-                </Button>
-                <Button data-testid="bank-import-open-wizard" size="sm" onClick={() => setTriageOpen(true)} disabled={queueWorkCount === 0}>
-                  분류/검토 열기
-                </Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
       {hasUploadedSheet ? (
         <Card>
           <CardContent className="p-0">
@@ -565,15 +464,6 @@ export function PortalBankStatementPage() {
         </Card>
       )}
 
-      <BankImportTriageWizard
-        open={triageOpen}
-        onOpenChange={setTriageOpen}
-        items={expenseIntakeItems}
-        onSaveDraft={saveExpenseIntakeDraft}
-        onProjectItem={projectExpenseIntakeItem}
-        onSyncEvidence={syncExpenseIntakeEvidence}
-        evidenceRequiredMap={evidenceRequiredMap}
-      />
     </div>
   );
 }
