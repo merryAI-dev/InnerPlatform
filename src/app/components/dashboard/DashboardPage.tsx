@@ -1,7 +1,6 @@
 import { useMemo } from 'react';
 import { SystemHealthPanel, ActivityFeed } from './SystemHealthPanel';
 import { computeMemberSummaries } from '../../data/participation-data';
-import { WelcomeBanner } from './WelcomeBanner';
 import { PageHeader } from '../layout/PageHeader';
 import { useNavigate } from 'react-router';
 import {
@@ -31,12 +30,6 @@ import {
   TX_STATE_LABELS,
   type ProjectType,
 } from '../../data/types';
-import {
-  ValidationSummaryCard,
-  ProjectValidationBadge,
-  UpdateReminderBadge,
-  validateProject,
-} from './DashboardGuide';
 import {
   buildDashboardCashflowRollups,
   compareSafeLocaleAsc,
@@ -177,7 +170,7 @@ function AlertStrip({ icon: Icon, label, count, color, onClick }: {
 }
 
 export function DashboardPage() {
-  const { projects, transactions, ledgers, participationEntries } = useAppStore();
+  const { projects, transactions, participationEntries } = useAppStore();
   const navigate = useNavigate();
   const { announcements, getUnacknowledgedCount: getHrUnacked } = useHrAnnouncements();
   const { runs } = usePayroll();
@@ -238,19 +231,6 @@ export function DashboardPage() {
       pid => !thisWeekTxProjectIds.has(pid) && !thisWeekSheetProjectIds.has(pid),
     ).length;
   }, [projects, transactions, cashflowWeeks, today]);
-
-  const validations = useMemo(() => {
-    return projects.map(p => {
-      const hasLedger = ledgers.some(l => l.projectId === p.id);
-      return validateProject(p, transactions, hasLedger);
-    });
-  }, [projects, transactions, ledgers]);
-
-  const validationMap = useMemo(() => {
-    const m: Record<string, typeof validations[0]> = {};
-    validations.forEach(v => { m[v.projectId] = v; });
-    return m;
-  }, [validations]);
 
   const kpis = useMemo(() => {
     const confirmed = projects.filter(p => p.phase === 'CONFIRMED');
@@ -340,7 +320,6 @@ export function DashboardPage() {
         description={`전사 사업관리 현황 모니터링 · ${projects.length}개 사업 추적 중`}
         actions={
           <div className="flex items-center gap-2">
-            <UpdateReminderBadge />
             <Button
               onClick={() => navigate('/cashflow')}
               size="sm"
@@ -360,8 +339,6 @@ export function DashboardPage() {
           </div>
         }
       />
-
-      <WelcomeBanner />
 
       {/* KPI Metrics */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -892,7 +869,6 @@ export function DashboardPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-10 text-[10px]">검증</TableHead>
                     <TableHead className="min-w-[150px] text-[10px]">사업명</TableHead>
                     <TableHead className="text-[10px]">상태</TableHead>
                     <TableHead className="text-right text-[10px]">사업비</TableHead>
@@ -908,9 +884,6 @@ export function DashboardPage() {
                         className="cursor-pointer hover:bg-muted/50 transition-colors h-9"
                         onClick={() => navigate(`/projects/${p.id}`)}
                       >
-                        <TableCell className="py-1 text-center" onClick={e => e.stopPropagation()}>
-                          {validationMap[p.id] && <ProjectValidationBadge validation={validationMap[p.id]} />}
-                        </TableCell>
                         <TableCell className="py-1">
                           <div className="flex items-center gap-1 text-[11px]" style={{ fontWeight: 500 }}>
                             {p.phase === 'PROSPECT' && <Sparkles className="w-3 h-3 text-amber-500 shrink-0" />}
@@ -955,54 +928,50 @@ export function DashboardPage() {
         </div>
       </div>
 
-      {/* Validation + Recent Transactions */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <ValidationSummaryCard validations={validations} />
-
-        <Card className="shadow-sm border-border/50">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-[13px] flex items-center gap-2">
-              <div className="w-6 h-6 rounded-md bg-teal-50 dark:bg-teal-950/40 flex items-center justify-center">
-                <CircleDollarSign className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-              </div>
-              최근 거래
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="text-[10px]">일자</TableHead>
-                  <TableHead className="text-[10px]">거래처</TableHead>
-                  <TableHead className="text-right text-[10px]">금액</TableHead>
-                  <TableHead className="text-[10px]">상태</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {recentTx.map(t => {
-                  const txSt = txStateStyles[t.state];
-                  return (
-                    <TableRow key={t.id} className="hover:bg-muted/50 h-9">
-                      <TableCell className="py-1 text-[10px] text-muted-foreground whitespace-nowrap">{t.dateTime.slice(5)}</TableCell>
-                      <TableCell className="py-1 text-[11px] max-w-[90px] truncate">{t.counterparty}</TableCell>
-                      <TableCell className="py-1 text-right text-[11px] whitespace-nowrap" style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
-                        <span className={t.direction === 'IN' ? 'text-emerald-600' : 'text-rose-600'}>
-                          {t.direction === 'IN' ? '+' : '-'}{fmt(t.amounts?.bankAmount)}
-                        </span>
-                      </TableCell>
-                      <TableCell className="py-1">
-                        <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] ${txSt?.bg || ''} ${txSt?.text || ''}`} style={{ fontWeight: 500 }}>
-                          {TX_STATE_LABELS[t.state]}
-                        </span>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      </div>
+      {/* Recent Transactions */}
+      <Card className="shadow-sm border-border/50">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-[13px] flex items-center gap-2">
+            <div className="w-6 h-6 rounded-md bg-teal-50 dark:bg-teal-950/40 flex items-center justify-center">
+              <CircleDollarSign className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+            </div>
+            최근 거래
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="text-[10px]">일자</TableHead>
+                <TableHead className="text-[10px]">거래처</TableHead>
+                <TableHead className="text-right text-[10px]">금액</TableHead>
+                <TableHead className="text-[10px]">상태</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {recentTx.map(t => {
+                const txSt = txStateStyles[t.state];
+                return (
+                  <TableRow key={t.id} className="hover:bg-muted/50 h-9">
+                    <TableCell className="py-1 text-[10px] text-muted-foreground whitespace-nowrap">{t.dateTime.slice(5)}</TableCell>
+                    <TableCell className="py-1 text-[11px] max-w-[90px] truncate">{t.counterparty}</TableCell>
+                    <TableCell className="py-1 text-right text-[11px] whitespace-nowrap" style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                      <span className={t.direction === 'IN' ? 'text-emerald-600' : 'text-rose-600'}>
+                        {t.direction === 'IN' ? '+' : '-'}{fmt(t.amounts?.bankAmount)}
+                      </span>
+                    </TableCell>
+                    <TableCell className="py-1">
+                      <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] ${txSt?.bg || ''} ${txSt?.text || ''}`} style={{ fontWeight: 500 }}>
+                        {TX_STATE_LABELS[t.state]}
+                      </span>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
 
       {/* Summary Footer */}
       <div className="rounded-lg border border-border/40 bg-muted/30 p-4">

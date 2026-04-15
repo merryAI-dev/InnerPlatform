@@ -3,7 +3,7 @@
 - route: `/`
 - primary users: 관리자, 운영 PM
 - status: active
-- last updated: 2026-04-14
+- last updated: 2026-04-15
 
 ## Purpose
 
@@ -19,11 +19,12 @@
 
 - [x] 전사 KPI와 상태 확인 가능
 - [x] 프로젝트 목록과 캐시플로 추출로 바로 이동 가능
-- [x] 작성 가이드 패널 없이 운영 수치 중심 화면 유지
+- [x] 작성 가이드, 웰컴, validation/reminder 보조 표면 없이 운영 수치 중심 화면 유지
 - [ ] 요약 카드 우선순위와 시각적 밀도는 추가 조정 여지 있음
 
 ## Recent Changes
 
+- [2026-04-15] 웰컴 배너, validation summary, validation badge, update reminder를 제거해 첫 화면을 KPI와 관제 블록만 남는 운영판으로 더 압축했다.
 - [2026-04-14] `대시보드 작성 가이드` 패널을 제거해 메인 화면을 단순화했다.
 
 ## Known Notes
@@ -40,6 +41,7 @@
 ## Related Tests
 
 - `src/app/components/dashboard/dashboard-rollups.test.ts`
+- `src/app/components/dashboard/DashboardPage.shell.test.ts`
 
 ## Related QA / Ops Context
 
@@ -47,5 +49,5 @@
 
 ## Next Watch Points
 
-- 제거된 가이드 패널 없이도 핵심 액션 발견성이 충분한지
+- 웰컴/검증 표면 제거 뒤에도 `캐시플로 추출`, `전체 프로젝트` 진입성이 충분한지
 - 대시보드 보조 컴포넌트가 다시 설명성 패널로 되돌아가지 않는지

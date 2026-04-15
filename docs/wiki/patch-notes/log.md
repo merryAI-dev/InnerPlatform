@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-04-15] patch-note | admin-dashboard | 웰컴/검증 표면 제거
+- pages: [admin-dashboard](./pages/admin-dashboard.md)
+- summary: 어드민 첫 화면에서 웰컴 배너와 validation/reminder 보조 UI를 제거하고 KPI, 리스크, 집계, 작업 진입만 남는 운영판으로 더 압축했다.
+
 ## [2026-04-14] patch-note | portal-bank-statement | queue-first flow rollback
 - pages: [portal-bank-statement](./pages/portal-bank-statement.md), [portal-weekly-expense](./pages/portal-weekly-expense.md)
 - summary: QA 반응이 좋지 않았던 신규 거래 queue와 triage wizard 강제 흐름을 제거하고, 통장내역 저장본에서 바로 주간 사업비 입력으로 이어가는 단일 handoff로 복귀했다.
