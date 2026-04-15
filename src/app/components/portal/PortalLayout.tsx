@@ -142,6 +142,10 @@ function writePortalSidebarCollapsed(uid: string | null | undefined, collapsed: 
   }
 }
 
+function buildPortalNavTestId(path: string) {
+  return `portal-nav-${path.replace(/^\/+/, '').replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '')}`;
+}
+
 export function usePortalNavigationGuard() {
   return useContext(PortalNavigationGuardContext);
 }
@@ -632,6 +636,7 @@ function PortalContent() {
                             key={item.to}
                             to={item.to}
                             end={item.exact}
+                            data-testid={buildPortalNavTestId(item.to)}
                             onClick={(event) => {
                               event.preventDefault();
                               requestPortalNavigation(item.to, item.label);
@@ -899,6 +904,7 @@ function PortalContent() {
                         key={item.to}
                         to={item.to}
                         end={item.exact}
+                        data-testid={buildPortalNavTestId(item.to)}
                         onClick={(event) => {
                           event.preventDefault();
                           requestPortalNavigation(item.to, item.label);

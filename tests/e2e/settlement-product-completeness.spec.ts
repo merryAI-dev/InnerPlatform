@@ -117,7 +117,7 @@ test('settlement product completeness: dirty weekly expense edits require confir
   const firstCounterpartyCell = page.locator('[value="KTX"]').first();
   await firstCounterpartyCell.fill('KTX-사이드바수정');
 
-  const bankStatementNavLink = page.getByRole('link', { name: '통장내역' });
+  const bankStatementNavLink = page.getByTestId('portal-nav-portal-bank-statements');
 
   await bankStatementNavLink.click();
   await expect(page.getByTestId('weekly-expense-unsaved-dialog')).toBeVisible();

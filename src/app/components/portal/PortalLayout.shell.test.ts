@@ -45,4 +45,10 @@ describe('PortalLayout shell actions', () => {
     expect(portalLayoutSource).toContain("navigate('/portal/weekly-expenses')");
     expect(portalLayoutSource).toContain("navigate('/portal/register-project')");
   });
+
+  it('exposes stable portal navigation test ids for release-gate flows', () => {
+    expect(portalLayoutSource).toContain('function buildPortalNavTestId');
+    expect(portalLayoutSource).toContain('data-testid={buildPortalNavTestId(item.to)}');
+    expect(portalLayoutSource).toContain("portal-nav-${path");
+  });
 });
