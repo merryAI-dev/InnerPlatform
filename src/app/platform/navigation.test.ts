@@ -10,6 +10,7 @@ import {
   resolveHomePath,
   resolveRequestedRedirectPath,
   resolvePostLoginPath,
+  resolveWorkspaceSelectionPath,
   shouldPromptWorkspaceSelection,
   shouldForcePortalOnboarding,
 } from './navigation';
@@ -210,6 +211,18 @@ describe('resolvePortalEntryPath', () => {
     expect(resolvePortalEntryPath('admin', 'portal', '/portal/cashflow')).toBe('/portal/project-select?redirect=%2Fportal%2Fcashflow');
     expect(resolvePortalEntryPath('pm', undefined, '/portal/project-select?redirect=%2Fportal%2Fbudget')).toBe('/portal/project-select?redirect=%2Fportal%2Fbudget');
     expect(resolvePortalEntryPath('admin', 'admin', '/settings')).toBe('/settings');
+  });
+});
+
+describe('resolveWorkspaceSelectionPath', () => {
+  it('keeps only portal redirects when the user explicitly selects portal space', () => {
+    expect(resolveWorkspaceSelectionPath('admin', 'portal', '/settings')).toBe('/portal/project-select');
+    expect(resolveWorkspaceSelectionPath('admin', 'portal', '/portal/budget')).toBe('/portal/project-select?redirect=%2Fportal%2Fbudget');
+  });
+
+  it('keeps only admin redirects when the user explicitly selects admin space', () => {
+    expect(resolveWorkspaceSelectionPath('admin', 'admin', '/portal/budget')).toBe('/');
+    expect(resolveWorkspaceSelectionPath('finance', 'admin', '/cashflow')).toBe('/cashflow');
   });
 });
 

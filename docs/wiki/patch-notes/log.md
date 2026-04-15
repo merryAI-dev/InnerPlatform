@@ -94,3 +94,7 @@
 ## [2026-04-14] patch-note | portal-project-select-redirect | wrapped redirect 보존
 - pages: [portal-project-select](./pages/portal-project-select.md)
 - summary: 이미 `project-select?redirect=...` 형태인 포털 진입 URL을 다시 해석할 때도 redirect query를 지우지 않도록 안정성을 보강했다.
+
+## [2026-04-15] patch-note | portal-onboarding-workspace-choice | 명시적 workspace 선택 우선
+- pages: [portal-onboarding](./pages/portal-onboarding.md), [portal-project-select](./pages/portal-project-select.md)
+- summary: workspace 선택 화면에서는 이전 admin redirect를 무조건 재사용하지 않고, 사용자가 고른 공간과 같은 성격의 경로만 유지하도록 정리했다.

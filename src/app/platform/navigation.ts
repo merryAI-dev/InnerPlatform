@@ -110,6 +110,33 @@ export function resolvePortalEntryPath(
   return target;
 }
 
+export function resolveWorkspaceSelectionPath(
+  role: unknown,
+  selectedWorkspace: WorkspaceId | unknown,
+  requestedPath?: unknown,
+): string {
+  const normalizedWorkspace = normalizeWorkspaceId(selectedWorkspace);
+  const normalizedPath = normalizeRequestedPath(requestedPath);
+
+  if (normalizedWorkspace === 'portal') {
+    const portalRequested = normalizedPath.startsWith('/portal/')
+      ? normalizedPath
+      : undefined;
+    return portalRequested
+      ? resolvePortalEntryPath(role, normalizedWorkspace, portalRequested)
+      : resolvePortalProjectSelectPath();
+  }
+
+  if (normalizedWorkspace === 'admin') {
+    const adminRequested = normalizedPath && !normalizedPath.startsWith('/portal/')
+      ? normalizedPath
+      : undefined;
+    return resolvePostLoginPath(role, normalizedWorkspace, adminRequested);
+  }
+
+  return resolvePostLoginPath(role, selectedWorkspace, requestedPath);
+}
+
 interface PortalOnboardingRedirectInput {
   isAuthenticated: boolean;
   role: unknown;

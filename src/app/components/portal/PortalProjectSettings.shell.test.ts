@@ -14,6 +14,8 @@ describe('PortalProjectSettings shell contract', () => {
     expect(portalProjectSettingsSource).toContain("navigate('/portal', { replace: true });");
     expect(portalProjectSettingsSource).toContain('선택한 사업만 보기');
     expect(portalProjectSettingsSource).toContain('주사업으로 지정');
+    expect(portalProjectSettingsSource).toContain('사업명, 클라이언트, 담당자로 검색');
+    expect(portalProjectSettingsSource).not.toContain('사업명, 클라이언트, 유형, 담당자로 검색');
     expect(portalProjectSettingsSource).not.toContain('최근 사용한 사업');
     expect(portalProjectSettingsSource).not.toContain('증빙 드라이브 연결');
     expect(portalProjectSettingsSource).not.toContain('기본 폴더 자동 생성');

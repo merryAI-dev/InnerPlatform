@@ -3,7 +3,7 @@
 - route: `/login`, `/workspace-select`
 - primary users: 전체 사용자
 - status: active
-- last updated: 2026-04-14
+- last updated: 2026-04-15
 
 ## Purpose
 
@@ -25,6 +25,7 @@
 
 ## Recent Changes
 
+- [2026-04-15] workspace 선택 화면에서 사용자가 `관리자 공간` 또는 `PM 포털 공간`을 명시적으로 고르면, 그 공간에 맞는 redirect만 유지하도록 정리했다.
 - [2026-04-14] PM 포털 진입을 바로 `/portal`로 보내지 않고 `/portal/project-select` step을 거친 뒤 세션 기준 사업을 고르게 바꿨다.
 - [2026-04-14] 로그인 화면의 `Guided Start` 블록을 제거했다.
 - [2026-04-14] workspace 선택 화면의 PM 안내 문구를 더 직접적으로 정리했다.

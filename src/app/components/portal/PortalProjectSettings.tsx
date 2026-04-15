@@ -291,7 +291,7 @@ export function PortalProjectSettings() {
                   <Input
                     value={projectSearch}
                     onChange={(event) => setProjectSearch(event.target.value)}
-                    placeholder="사업명, 클라이언트, 유형, 담당자로 검색"
+                    placeholder="사업명, 클라이언트, 담당자로 검색"
                     className="h-10 pl-9 text-[12px]"
                   />
                 </div>
