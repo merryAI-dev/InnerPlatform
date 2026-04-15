@@ -148,6 +148,18 @@ function matchesPathPrefix(pathname: string, prefix: string): boolean {
   return pathname === prefix || pathname.startsWith(`${prefix}/`);
 }
 
+const PORTAL_STANDALONE_ENTRY_PATHS = [
+  '/portal/onboarding',
+  '/portal/project-settings',
+  '/portal/project-select',
+  '/portal/register-project',
+  '/portal/weekly-expenses',
+] as const;
+
+export function isPortalStandaloneEntryPath(pathname: string): boolean {
+  return PORTAL_STANDALONE_ENTRY_PATHS.some((path) => matchesPathPrefix(pathname, path));
+}
+
 /**
  * Decide whether we should force a portal user into onboarding.
  * Admin-space roles must never be forced into portal onboarding.
@@ -157,7 +169,5 @@ export function shouldForcePortalOnboarding(input: PortalOnboardingRedirectInput
   if (isAdminSpaceRole(input.role)) return false;
   if (!canEnterPortalWorkspace(input.role)) return false;
   if (input.isRegistered) return false;
-  // onboarding, project-settings, weekly-expenses는 미등록 상태에서도 접근 허용
-  const bypassPaths = ['/portal/onboarding', '/portal/project-settings', '/portal/project-select', '/portal/register-project', '/portal/weekly-expenses'];
-  return !bypassPaths.some((p) => matchesPathPrefix(input.pathname, p));
+  return !isPortalStandaloneEntryPath(input.pathname);
 }

@@ -26,6 +26,8 @@
 
 ## Recent Changes
 
+- [2026-04-15] 포털 시작 선택 카드는 standalone entry path 정책을 공통 helper로 보게 정리했고, deep route 진입 후에도 fallback 선택 화면이 다시 덮이지 않도록 복구했다.
+- [2026-04-15] `기존 사업 선택`은 `사업 배정 수정`이 아니라 실제 세션 사업 선택 단계인 `/portal/project-select`로 연결되게 바꿨다.
 - [2026-04-15] workspace 선택 화면에서 사용자가 `관리자 공간` 또는 `PM 포털 공간`을 명시적으로 고르면, 그 공간에 맞는 redirect만 유지하도록 정리했다.
 - [2026-04-14] PM 포털 진입을 바로 `/portal`로 보내지 않고 `/portal/project-select` step을 거친 뒤 세션 기준 사업을 고르게 바꿨다.
 - [2026-04-15] 포털 미등록 상태에서 온보딩 선택 카드를 눌렀을 때 `register-project`와 `weekly-expenses`가 강제 리다이렉트에 다시 덮이지 않도록 bypass 경로를 `shouldForcePortalOnboarding` 정책과 맞췄다.

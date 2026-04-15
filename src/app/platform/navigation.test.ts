@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   canChooseWorkspace,
   canEnterPortalWorkspace,
+  isPortalStandaloneEntryPath,
   isAdminSpaceRole,
   isPortalRole,
   normalizeRequestedPath,
@@ -244,6 +245,18 @@ describe('requested redirect restoration', () => {
 
   it('ignores invalid redirect query', () => {
     expect(resolveRequestedRedirectPath(undefined, '?redirect=https://evil.example.com')).toBe('');
+  });
+});
+
+describe('portal standalone entry paths', () => {
+  it('treats onboarding-related portal routes as standalone entry surfaces', () => {
+    expect(isPortalStandaloneEntryPath('/portal/onboarding')).toBe(true);
+    expect(isPortalStandaloneEntryPath('/portal/project-select')).toBe(true);
+    expect(isPortalStandaloneEntryPath('/portal/project-settings')).toBe(true);
+    expect(isPortalStandaloneEntryPath('/portal/weekly-expenses')).toBe(true);
+    expect(isPortalStandaloneEntryPath('/portal/register-project')).toBe(true);
+    expect(isPortalStandaloneEntryPath('/portal')).toBe(false);
+    expect(isPortalStandaloneEntryPath('/portal/budget')).toBe(false);
   });
 });
 
