@@ -655,6 +655,7 @@ export interface ProjectRequest {
   reviewedBy?: string;
   reviewedByName?: string;
   reviewedAt?: string;
+  reviewComment?: string;
   rejectedReason?: string;
   approvedProjectId?: string;
   createdAt?: string;

@@ -67,6 +67,11 @@ function getConfidenceLabel(confidence: ProjectRequestReviewAnalysisHighlight['c
   return '저신뢰';
 }
 
+function formatReviewTimestamp(value?: string): string {
+  if (!value) return '-';
+  return value.replace('T', ' ').slice(0, 16).replace(/-/g, '.');
+}
+
 function ReviewFieldRow({ item }: { item: ProjectRequestReviewItem }) {
   return (
     <div className="rounded-lg border border-border/60 bg-white/70 p-3">
@@ -153,7 +158,7 @@ function useProjectRequests() {
     mode: 'approve' | 'reject';
     request: ProjectRequest | null;
   }>({ open: false, mode: 'approve', request: null });
-  const [rejectReason, setRejectReason] = useState('');
+  const [reviewComment, setReviewComment] = useState('');
   const [saving, setSaving] = useState(false);
 
   const canApprove = useMemo(() => {
@@ -186,12 +191,12 @@ function useProjectRequests() {
 
   const openApprove = (request: ProjectRequest) => {
     setConfirmState({ open: true, mode: 'approve', request });
-    setRejectReason('');
+    setReviewComment('');
   };
 
   const openReject = (request: ProjectRequest) => {
     setConfirmState({ open: true, mode: 'reject', request });
-    setRejectReason('');
+    setReviewComment('');
   };
 
   const handleConfirm = async () => {
@@ -204,6 +209,7 @@ function useProjectRequests() {
     setSaving(true);
     try {
       const now = new Date().toISOString();
+      const trimmedReviewComment = reviewComment.trim();
       if (confirmState.mode === 'approve') {
         await setDoc(
           doc(db, getOrgDocumentPath(orgId, 'projectRequests', req.id)),
@@ -212,6 +218,7 @@ function useProjectRequests() {
             reviewedBy: user?.uid || '',
             reviewedByName: user?.name || '',
             reviewedAt: now,
+            reviewComment: trimmedReviewComment || null,
             updatedAt: now,
           },
           { merge: true },
@@ -224,14 +231,15 @@ function useProjectRequests() {
             reviewedBy: user?.uid || '',
             reviewedByName: user?.name || '',
             reviewedAt: now,
-            rejectedReason: rejectReason.trim(),
+            reviewComment: trimmedReviewComment || null,
+            rejectedReason: trimmedReviewComment || '',
             updatedAt: now,
           },
           { merge: true },
         );
       }
       setConfirmState({ open: false, mode: 'approve', request: null });
-      setRejectReason('');
+      setReviewComment('');
     } catch (err) {
       console.error('[ProjectRequest] action failed:', err);
       const role = user?.role || 'unknown';
@@ -246,12 +254,12 @@ function useProjectRequests() {
     requests,
     loading,
     confirmState,
-    rejectReason,
+    reviewComment,
     saving,
     canApprove,
     openApprove,
     openReject,
-    setRejectReason,
+    setReviewComment,
     setConfirmState,
     handleConfirm,
   };
@@ -259,12 +267,15 @@ function useProjectRequests() {
 
 function ProjectRequestApprovalDialog({
   confirmState,
-  rejectReason,
+  reviewComment,
   saving,
-  setRejectReason,
+  setReviewComment,
   setConfirmState,
   handleConfirm,
 }: ReturnType<typeof useProjectRequests>) {
+  const requiresReviewComment = confirmState.mode === 'reject';
+  const confirmDisabled = saving || (requiresReviewComment && reviewComment.trim().length === 0);
+
   return (
     <AlertDialog open={confirmState.open} onOpenChange={(open) => setConfirmState((prev) => ({ ...prev, open }))}>
       <AlertDialogContent>
@@ -277,17 +288,18 @@ function ProjectRequestApprovalDialog({
             승인 시 등록 요청 상태만 갱신되고, 실제 프로젝트 생성은 후속 워크플로에서 이어집니다.
           </AlertDialogDescription>
         </AlertDialogHeader>
-        {confirmState.mode === 'reject' && (
-          <Textarea
-            value={rejectReason}
-            onChange={(event) => setRejectReason(event.target.value)}
-            placeholder="반려 사유를 입력하세요 (선택)"
-            className="min-h-[90px]"
-          />
+        <Textarea
+          value={reviewComment}
+          onChange={(event) => setReviewComment(event.target.value)}
+          placeholder={confirmState.mode === 'approve' ? '승인 메모를 입력하세요 (선택)' : '반려 사유를 입력하세요 (선택)'}
+          className="min-h-[90px]"
+        />
+        {requiresReviewComment && (
+          <p className="text-[11px] text-muted-foreground">반려 시에는 사유를 남겨야 감사 이력이 완성됩니다.</p>
         )}
         <AlertDialogFooter>
           <AlertDialogCancel>취소</AlertDialogCancel>
-          <AlertDialogAction onClick={handleConfirm} disabled={saving}>
+          <AlertDialogAction onClick={handleConfirm} disabled={confirmDisabled}>
             {saving ? '처리 중...' : '확인'}
           </AlertDialogAction>
         </AlertDialogFooter>
@@ -310,6 +322,45 @@ function ProjectRequestReviewCard({
   onReject: (request: ProjectRequest) => void;
 }) {
   const model = useMemo(() => buildProjectRequestReviewModel(request), [request]);
+  const reviewHistoryItems: ProjectRequestReviewItem[] = [
+    {
+      key: 'requestedBy',
+      label: '요청자',
+      value: request.requestedByName || request.requestedByEmail || '-',
+      status: 'ready',
+      note: request.requestedByEmail || undefined,
+    },
+    {
+      key: 'requestedAt',
+      label: '접수 시각',
+      value: formatReviewTimestamp(request.requestedAt),
+      status: 'ready',
+    },
+    {
+      key: 'reviewedBy',
+      label: '검토자',
+      value: request.reviewedByName || '-',
+      status: request.reviewedByName ? 'ready' : 'needs-check',
+      note: request.status === 'PENDING' ? '아직 승인/반려 전입니다.' : undefined,
+    },
+    {
+      key: 'reviewedAt',
+      label: '검토 시각',
+      value: formatReviewTimestamp(request.reviewedAt),
+      status: request.reviewedAt ? 'ready' : 'needs-check',
+    },
+    {
+      key: 'reviewComment',
+      label: request.status === 'REJECTED' ? '반려 사유' : '검토 메모',
+      value: request.reviewComment || request.rejectedReason || '-',
+      status: request.reviewComment || request.rejectedReason ? 'ready' : 'needs-check',
+      note: request.status === 'PENDING'
+        ? '승인 또는 반려 시 검토 메모를 남길 수 있습니다.'
+        : request.status === 'APPROVED'
+          ? '승인 판단 근거를 메모로 남길 수 있습니다.'
+          : undefined,
+    },
+  ];
 
   return (
     <Card className={`border-slate-200/80 shadow-sm ${compact ? 'bg-white/90' : 'bg-white'}`}>
@@ -430,6 +481,13 @@ function ProjectRequestReviewCard({
           </div>
         </section>
 
+        <section data-testid="project-request-review-history" className="rounded-xl border border-border/60 bg-slate-50/80 p-4">
+          <p className="text-[12px]" style={{ fontWeight: 700 }}>검토 이력</p>
+          <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+            {reviewHistoryItems.map((item) => <ReviewFieldRow key={item.key} item={item} />)}
+          </div>
+        </section>
+
         {request.payload.contractDocument?.downloadURL && (
           <div className="rounded-xl border border-border/60 bg-slate-50/80 p-3 text-[11px] text-muted-foreground">
             첨부 계약서:
@@ -482,7 +540,38 @@ function ProjectRequestReviewCard({
 export function ProjectRequestApprovalSection({ compact = false }: ProjectRequestApprovalSectionProps) {
   const state = useProjectRequests();
   const { requests, loading, canApprove, openApprove, openReject } = state;
-  const pendingCount = requests.filter((request) => request.status === 'PENDING').length;
+  const pendingRequests = requests.filter((request) => request.status === 'PENDING');
+  const resolvedRequests = requests
+    .filter((request) => request.status !== 'PENDING')
+    .slice()
+    .sort((left, right) => String(right.reviewedAt || right.requestedAt).localeCompare(String(left.reviewedAt || left.requestedAt)));
+  const pendingCount = pendingRequests.length;
+
+  const renderRequestGroup = (title: string, description: string, items: ProjectRequest[]) => (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-[12px] font-semibold text-slate-900">{title}</p>
+          <p className="text-[11px] text-slate-500">{description}</p>
+        </div>
+        <Badge variant="secondary" className="text-[10px]">
+          {items.length}건
+        </Badge>
+      </div>
+      <div className="space-y-3">
+        {items.map((req) => (
+          <ProjectRequestReviewCard
+            key={req.id}
+            request={req}
+            compact={compact}
+            canApprove={canApprove}
+            onApprove={openApprove}
+            onReject={openReject}
+          />
+        ))}
+      </div>
+    </div>
+  );
 
   return (
     <section className="space-y-3">
@@ -490,7 +579,7 @@ export function ProjectRequestApprovalSection({ compact = false }: ProjectReques
         <ClipboardCheck className="h-4 w-4 text-teal-600" />
         <div>
           <h2 className="text-[15px] font-semibold text-slate-900">사업 등록 요청</h2>
-          <p className="text-[11px] text-slate-500">포털에서 제출된 등록 제안을 계약 AI 분석, 재무/정산, 체크리스트와 함께 처리합니다</p>
+          <p className="text-[11px] text-slate-500">포털 등록 제안을 계약 AI 분석, 재무/정산, 체크리스트, 검토 이력과 함께 처리합니다</p>
         </div>
         <Badge className="ml-auto bg-teal-100 text-teal-800">{pendingCount}건 대기</Badge>
       </div>
@@ -510,24 +599,24 @@ export function ProjectRequestApprovalSection({ compact = false }: ProjectReques
             </CardHeader>
           )}
           <CardContent className={compact ? 'p-4' : 'pt-0'}>
-            <div className="space-y-3">
-              {requests.map((req) => (
-                <ProjectRequestReviewCard
-                  key={req.id}
-                  request={req}
-                  compact={compact}
-                  canApprove={canApprove}
-                  onApprove={openApprove}
-                  onReject={openReject}
-                />
-              ))}
-
-              {requests.length === 0 && (
-                <div className="py-8 text-center text-[12px] text-muted-foreground">
-                  접수된 사업 등록 요청이 없습니다.
-                </div>
-              )}
-            </div>
+            {requests.length === 0 ? (
+              <div className="py-8 text-center text-[12px] text-muted-foreground">
+                접수된 사업 등록 요청이 없습니다.
+              </div>
+            ) : (
+              <div className="space-y-5">
+                {pendingRequests.length > 0 && renderRequestGroup(
+                  '대기 중인 요청',
+                  '지금 승인/반려해야 하는 등록 요청을 먼저 검토합니다.',
+                  pendingRequests,
+                )}
+                {resolvedRequests.length > 0 && renderRequestGroup(
+                  '처리 완료 이력',
+                  '누가 언제 어떤 메모로 처리했는지 감사 관점에서 다시 확인합니다.',
+                  resolvedRequests,
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
@@ -544,7 +633,7 @@ export function ProjectRequestApprovalPage() {
         icon={ClipboardCheck}
         iconGradient="linear-gradient(135deg, #0f766e 0%, #14b8a6 100%)"
         title="사업 등록 승인"
-        description="포털에서 접수된 사업 등록 요청을 승인/반려합니다."
+        description="포털 등록 요청을 승인/반려하고, 검토 이력을 감사 관점에서 다시 확인합니다."
         badge="승인 큐"
       />
       <ProjectRequestApprovalSection compact />
