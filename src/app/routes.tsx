@@ -143,6 +143,7 @@ export const router = createBrowserRouter([
     path: '/portal',
     element: <PortalEntryRouteShell />,
     children: [
+      { path: 'onboarding', element: <S C={PortalOnboarding} /> },
       { path: 'project-select', element: <S C={PortalProjectSelectPage} /> },
     ],
   },
@@ -160,7 +161,6 @@ export const router = createBrowserRouter([
           { path: ':postId', element: <S C={BoardPostPage} /> },
         ],
       },
-      { path: 'onboarding', element: <S C={PortalOnboarding} /> },
       { path: 'project-settings', element: <S C={PortalProjectSettings} /> },
       { path: 'submissions', element: <Navigate to="/portal" replace /> },
       { path: 'payroll', element: <S C={PortalPayrollPage} /> },

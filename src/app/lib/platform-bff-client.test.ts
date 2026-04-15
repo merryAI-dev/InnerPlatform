@@ -7,6 +7,7 @@ import {
   changeTransactionStateViaBff,
   deepSyncAuthGovernanceUserViaBff,
   fetchPortalEntryContextViaBff,
+  fetchPortalOnboardingContextViaBff,
   fetchAuthGovernanceUsersViaBff,
   linkProjectEvidenceDriveRootViaBff,
   notifyProjectRequestRegistrationViaBff,
@@ -19,6 +20,7 @@ import {
   restoreProjectViaBff,
   syncTransactionEvidenceDriveViaBff,
   trashProjectViaBff,
+  upsertPortalRegistrationViaBff,
   uploadProjectSheetSourceViaBff,
   uploadProjectRequestContractViaBff,
   toRequestActor,
@@ -162,6 +164,81 @@ describe('platform-bff-client', () => {
       body: { projectId: 'p002' },
     }));
     expect(result.activeProjectId).toBe('p002');
+  });
+
+  it('calls portal onboarding context endpoint', async () => {
+    const client = asMockClient({
+      post: vi.fn(),
+      get: vi.fn(async () => ({
+        data: {
+          registrationState: 'unregistered',
+          activeProjectId: '',
+          projects: [
+            {
+              id: 'p003',
+              name: 'Project 3',
+              status: 'CONTRACT_PENDING',
+              clientOrg: 'MYSC',
+              managerName: '데이나',
+              department: 'AXR',
+            },
+          ],
+        },
+      })),
+      request: vi.fn(),
+    });
+
+    const result = await fetchPortalOnboardingContextViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm', idToken: 'token-abc' },
+      client,
+    });
+
+    expect(client.get).toHaveBeenCalledWith('/api/v1/portal/onboarding-context', expect.objectContaining({
+      tenantId: 'mysc',
+    }));
+    expect(result.registrationState).toBe('unregistered');
+    expect(result.projects[0]?.id).toBe('p003');
+  });
+
+  it('calls portal registration endpoint', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({
+        data: {
+          ok: true,
+          registrationState: 'registered',
+          activeProjectId: 'p003',
+          projectIds: ['p003', 'p004'],
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    const result = await upsertPortalRegistrationViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm', idToken: 'token-abc' },
+      registration: {
+        name: '보람',
+        email: 'boram@mysc.co.kr',
+        role: 'pm',
+        projectId: 'p003',
+        projectIds: ['p003', 'p004'],
+      },
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/portal/registration', expect.objectContaining({
+      tenantId: 'mysc',
+      body: {
+        name: '보람',
+        email: 'boram@mysc.co.kr',
+        role: 'pm',
+        projectId: 'p003',
+        projectIds: ['p003', 'p004'],
+      },
+    }));
+    expect(result.activeProjectId).toBe('p003');
   });
 
   it('calls project trash and restore endpoints', async () => {

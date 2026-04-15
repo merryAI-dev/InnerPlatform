@@ -176,6 +176,14 @@ export const portalSessionProjectSchema = z.object({
   projectId: NON_EMPTY_STRING,
 }).strict();
 
+export const portalRegistrationSchema = z.object({
+  name: NON_EMPTY_STRING,
+  email: NON_EMPTY_STRING,
+  role: NON_EMPTY_STRING.optional(),
+  projectId: z.string().trim().optional(),
+  projectIds: z.array(NON_EMPTY_STRING).min(1),
+}).strict();
+
 export const cashflowExportSchema = z.object({
   scope: z.enum(['all', 'single']),
   projectId: z.string().trim().optional(),

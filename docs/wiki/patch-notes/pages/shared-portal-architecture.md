@@ -22,7 +22,9 @@
 - [x] 포털은 fetch-first, realtime allowlist-only 원칙을 채택함
 - [x] route-scoped provider split이 1차 이행 과제로 정의됨
 - [x] `/portal/project-select` entry surface가 portal workspace shell 밖의 lightweight entry shell로 분리됨
+- [x] `/portal/onboarding`도 같은 lightweight entry shell과 BFF contract로 이동함
 - [x] entry surface는 `entry-context` read model + `session-project` command API를 사용함
+- [x] onboarding surface는 `onboarding-context` read model + `portal/registration` command API를 사용함
 - [x] portal dashboard / submissions / weekly expense / bank statement / payroll summary read model 이행 계획이 정의됨
 - [x] critical write path를 command API로 이동하는 단계가 플랜에 포함됨
 - [x] App 루트 broad provider tree가 admin/portal route shell로 분리됨
@@ -37,6 +39,7 @@
 - [2026-04-15] 포털 문제의 본질을 Firestore 자체가 아니라 클라이언트의 분산된 data access policy로 명시했다.
 - [2026-04-15] Phase 1 구현으로 App 루트 broad provider를 admin/portal route shell로 분리하고, `portal-safe`/`admin-live` access mode를 route provider에서 주입하도록 바꿨다.
 - [2026-04-15] Phase 1a 구현으로 `/portal/project-select`를 lightweight entry shell로 분리하고, portal store bootstrap 대신 BFF `entry-context`/`session-project` 계약을 쓰도록 옮겼다.
+- [2026-04-15] follow-up으로 `/portal/onboarding`도 같은 entry shell과 BFF `onboarding-context`/`portal/registration` 계약으로 옮겨, 포털 entry surface의 핵심 경계를 일치시켰다.
 - [2026-04-15] entry hardening과 함께 self-hosted Pretendard + immutable asset cache 정책을 추가해, HAR에서 보인 entry surface 네트워크 낭비를 줄이는 방향으로 첫 조치를 넣었다.
 
 ## Known Notes

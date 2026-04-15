@@ -6,7 +6,7 @@ import {
   readOptionalText,
   ROUTE_ROLES,
 } from '../bff-utils.mjs';
-import { parseWithSchema, portalSessionProjectSchema } from '../schemas.mjs';
+import { parseWithSchema, portalRegistrationSchema, portalSessionProjectSchema } from '../schemas.mjs';
 
 function readLooseProjectId(value) {
   if (typeof value === 'string') return value.trim();
@@ -22,10 +22,32 @@ function normalizeProjectIds(values) {
   ));
 }
 
-function resolvePrimaryProjectId(projectIds, preferredProjectId) {
+export function resolvePrimaryProjectId(projectIds, preferredProjectId) {
   const preferred = readOptionalText(preferredProjectId);
   if (preferred && projectIds.includes(preferred)) return preferred;
   return projectIds[0] || '';
+}
+
+export function buildPortalProfilePatch({ projectId, projectIds, updatedAt, updatedByUid, updatedByName }) {
+  const normalizedProjectIds = normalizeProjectIds([
+    ...(Array.isArray(projectIds) ? projectIds : []),
+    projectId,
+  ]);
+  const primaryProjectId = resolvePrimaryProjectId(normalizedProjectIds, projectId);
+
+  return {
+    defaultWorkspace: 'portal',
+    lastWorkspace: 'portal',
+    projectId: primaryProjectId || '',
+    projectIds: normalizedProjectIds,
+    portalProfile: {
+      ...(primaryProjectId ? { projectId: primaryProjectId } : {}),
+      projectIds: normalizedProjectIds,
+      updatedAt,
+      ...(readOptionalText(updatedByUid) ? { updatedByUid: readOptionalText(updatedByUid) } : {}),
+      ...(readOptionalText(updatedByName) ? { updatedByName: readOptionalText(updatedByName) } : {}),
+    },
+  };
 }
 
 function canReadAllPortalProjects(role) {
@@ -137,6 +159,28 @@ async function listPortalEntryProjects({ db, tenantId, actorId, role, memberProj
   });
 }
 
+async function listPortalOnboardingProjects({ db, tenantId }) {
+  const snapshot = await db.collection(`orgs/${tenantId}/projects`).get();
+  return snapshot.docs
+    .map((doc) => ({ id: doc.id, ...(doc.data() || {}) }))
+    .filter((project) => !readOptionalText(project?.trashedAt))
+    .map((project) => normalizePortalEntryProject(project))
+    .filter((project) => project.id)
+    .sort((left, right) => left.name.localeCompare(right.name, 'ko'));
+}
+
+async function assertVisibleProjectsExist({ db, tenantId, projectIds }) {
+  const normalized = normalizeProjectIds(projectIds);
+  const snapshots = await Promise.all(
+    normalized.map((projectId) => db.doc(`orgs/${tenantId}/projects/${projectId}`).get()),
+  );
+  const missing = snapshots.find((snapshot) => !snapshot.exists || readOptionalText(snapshot.data()?.trashedAt));
+  if (missing) {
+    throw createHttpError(400, '선택한 사업 중 사용할 수 없는 항목이 있습니다.', 'project_invalid');
+  }
+  return normalized;
+}
+
 export function mountPortalEntryRoutes(app, { db, createMutatingRoute, idempotencyService }) {
   app.get('/api/v1/portal/entry-context', asyncHandler(async (req, res) => {
     assertActorRoleAllowed(req, ROUTE_ROLES.readCore, 'read portal entry context');
@@ -162,6 +206,26 @@ export function mountPortalEntryRoutes(app, { db, createMutatingRoute, idempoten
       activeProjectId: memberAccess.activeProjectId,
       priorityProjectIds: projectList.priorityProjectIds,
       projects: projectList.projects,
+    });
+  }));
+
+  app.get('/api/v1/portal/onboarding-context', asyncHandler(async (req, res) => {
+    assertActorRoleAllowed(req, ROUTE_ROLES.readCore, 'read portal onboarding context');
+    const { tenantId, actorId, actorRole } = req.context;
+    const memberSnapshot = await db.doc(`orgs/${tenantId}/members/${actorId}`).get();
+    const member = memberSnapshot.exists ? (memberSnapshot.data() || {}) : null;
+    const memberAccess = resolvePortalEntryMemberAccess(member);
+    const role = normalizeRole(readOptionalText(member?.role) || actorRole || 'pm');
+    const projects = await listPortalOnboardingProjects({ db, tenantId });
+
+    res.status(200).json({
+      registrationState: resolvePortalEntryRegistrationState({
+        role,
+        memberExists: memberSnapshot.exists,
+        projectIds: memberAccess.projectIds,
+      }),
+      activeProjectId: memberAccess.activeProjectId,
+      projects,
     });
   }));
 
@@ -198,6 +262,61 @@ export function mountPortalEntryRoutes(app, { db, createMutatingRoute, idempoten
       body: {
         ok: true,
         activeProjectId: targetProjectId,
+      },
+    };
+  }));
+
+  app.post('/api/v1/portal/registration', createMutatingRoute(idempotencyService, async (req) => {
+    assertActorRoleAllowed(req, ROUTE_ROLES.readCore, 'register portal project access');
+    const { tenantId, actorId, actorRole } = req.context;
+    const parsed = parseWithSchema(
+      portalRegistrationSchema,
+      req.body,
+      'Invalid portal registration payload',
+    );
+    const now = new Date().toISOString();
+    const normalizedProjectIds = await assertVisibleProjectsExist({
+      db,
+      tenantId,
+      projectIds: parsed.projectIds,
+    });
+    const primaryProjectId = resolvePrimaryProjectId(normalizedProjectIds, parsed.projectId);
+
+    if (!primaryProjectId) {
+      throw createHttpError(400, '최소 1개 이상의 사업을 선택해 주세요.', 'project_required');
+    }
+
+    const memberRef = db.doc(`orgs/${tenantId}/members/${actorId}`);
+    const memberSnapshot = await memberRef.get();
+    const existingMember = memberSnapshot.exists ? (memberSnapshot.data() || {}) : {};
+    const memberRole = normalizeRole(readOptionalText(existingMember.role) || parsed.role || actorRole || 'pm');
+
+    await memberRef.set({
+      uid: actorId,
+      name: readOptionalText(parsed.name) || readOptionalText(existingMember.name),
+      email: readOptionalText(parsed.email) || readOptionalText(existingMember.email),
+      role: memberRole,
+      tenantId,
+      status: readOptionalText(existingMember.status) || 'ACTIVE',
+      ...buildPortalProfilePatch({
+        projectId: primaryProjectId,
+        projectIds: normalizedProjectIds,
+        updatedAt: now,
+        updatedByUid: actorId,
+        updatedByName: readOptionalText(parsed.name) || readOptionalText(existingMember.name),
+      }),
+      updatedAt: now,
+      createdAt: readOptionalText(existingMember.createdAt) || now,
+      lastLoginAt: now,
+    }, { merge: true });
+
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        registrationState: 'registered',
+        activeProjectId: primaryProjectId,
+        projectIds: normalizedProjectIds,
       },
     };
   }));

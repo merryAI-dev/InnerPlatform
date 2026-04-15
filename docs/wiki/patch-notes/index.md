@@ -12,7 +12,7 @@
 | [portal-bank-statement](./pages/portal-bank-statement.md) | `/portal/bank-statements` | 2026-04-14 | 원본 업로드, intake queue 정리, 사업비 입력으로 이어가기 |
 | [portal-budget](./pages/portal-budget.md) | `/portal/budget` | 2026-04-14 | 가져오기 미리보기, 긴 모달 스크롤, 구조 저장 보호 |
 | [portal-cashflow](./pages/portal-cashflow.md) | `/portal/cashflow` | 2026-04-14 | compact import action, projection 작업면 중심 |
-| [portal-onboarding](./pages/portal-onboarding.md) | `/login`, `/workspace-select` | 2026-04-14 | Guided Start 제거, 빠른 인증/진입 유지 |
+| [portal-onboarding](./pages/portal-onboarding.md) | `/login`, `/workspace-select`, `/portal/onboarding` | 2026-04-15 | lightweight entry shell, onboarding-context, registration command |
 | [portal-project-select](./pages/portal-project-select.md) | `/portal/project-select` | 2026-04-15 | lightweight entry shell, BFF entry-context, session project switch |
 | [portal-project-settings](./pages/portal-project-settings.md) | `/portal/project-settings` | 2026-04-14 | 검색/선택/저장 중심, 상태 배너 제거 |
 | [portal-edit-project](./pages/portal-edit-project.md) | `/portal/edit-project` | 2026-04-14 | 중복 subtitle 제거, 폼 진입 단순화 |

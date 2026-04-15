@@ -23,5 +23,7 @@ describe('route-scoped provider architecture', () => {
     expect(routesSource).toContain('<AdminRouteProviders><AppLayout /></AdminRouteProviders>');
     expect(routesSource).toContain('<PortalRouteProviders><PortalLayout /></PortalRouteProviders>');
     expect(routesSource).toContain('<PortalEntryLayout />');
+    expect(routesSource).toContain("{ path: 'onboarding', element: <S C={PortalOnboarding} /> }");
+    expect(routesSource).toContain("{ path: 'project-select', element: <S C={PortalProjectSelectPage} /> }");
   });
 });

@@ -118,9 +118,22 @@ export interface PortalEntryContextResult {
   projects: PortalEntryProjectSummary[];
 }
 
+export interface PortalOnboardingContextResult {
+  registrationState: 'registered' | 'unregistered';
+  activeProjectId: string;
+  projects: PortalEntryProjectSummary[];
+}
+
 export interface PortalSessionProjectResult {
   ok: boolean;
   activeProjectId: string;
+}
+
+export interface PortalRegistrationResult {
+  ok: boolean;
+  registrationState: 'registered';
+  activeProjectId: string;
+  projectIds: string[];
 }
 
 export interface GoogleSheetMigrationAnalysisSuggestion {
@@ -1002,6 +1015,23 @@ export async function fetchPortalEntryContextViaBff(params: {
   return response.data;
 }
 
+export async function fetchPortalOnboardingContextViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  client?: PlatformApiClientLike;
+}): Promise<PortalOnboardingContextResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.get<PortalOnboardingContextResult>(
+    '/api/v1/portal/onboarding-context',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      timeoutMs: 8000,
+    },
+  );
+  return response.data;
+}
+
 export async function switchPortalSessionProjectViaBff(params: {
   tenantId: string;
   actor: ActorLike;
@@ -1017,6 +1047,31 @@ export async function switchPortalSessionProjectViaBff(params: {
       body: {
         projectId: params.projectId,
       },
+      timeoutMs: 8000,
+    },
+  );
+  return response.data;
+}
+
+export async function upsertPortalRegistrationViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  registration: {
+    name: string;
+    email: string;
+    role?: string;
+    projectId?: string;
+    projectIds: string[];
+  };
+  client?: PlatformApiClientLike;
+}): Promise<PortalRegistrationResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<PortalRegistrationResult>(
+    '/api/v1/portal/registration',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.registration,
       timeoutMs: 8000,
     },
   );
