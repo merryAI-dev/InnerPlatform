@@ -118,7 +118,7 @@ export function resolveAdminMonitoringIssues(input: Partial<AdminMonitoringCount
       label: '캐시플로 편차',
       count: normalizeCount(input.cashflowVarianceCount),
       severity: 'warning',
-      to: '/cashflow',
+      to: '/cashflow/analytics',
       detail: `${normalizeCount(input.cashflowVarianceCount)}개 사업에서 시트 편차가 감지되었습니다.`,
     } : null,
     normalizeCount(input.hrAlertCount) > 0 ? {
@@ -150,7 +150,7 @@ export function resolveAdminMonitoringIssues(input: Partial<AdminMonitoringCount
       label: '미입력 PM',
       count: normalizeCount(input.missingPmCount),
       severity: 'warning',
-      to: '/cashflow',
+      to: '/cashflow/weekly',
       detail: `${normalizeCount(input.missingPmCount)}개 사업에 이번 주 PM 입력이 없습니다.`,
     } : null,
     normalizeCount(input.staleProjectCount) > 0 ? {

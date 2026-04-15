@@ -235,7 +235,7 @@ export function DashboardPage() {
               variant="outline"
               className="h-8 gap-1.5 rounded-lg text-[11px]"
             >
-              캐시플로 추출 <ArrowRight className="h-3 w-3" />
+              캐시플로 모니터링 <ArrowRight className="h-3 w-3" />
             </Button>
             <Button
               onClick={() => navigate('/projects')}

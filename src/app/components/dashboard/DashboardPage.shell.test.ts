@@ -13,9 +13,11 @@ describe('DashboardPage shell contract', () => {
     expect(dashboardPageSource).toContain('SystemHealthPanel');
     expect(dashboardPageSource).toContain('ActivityFeed');
     expect(dashboardPageSource).toContain('캐시플로 관제');
+    expect(dashboardPageSource).toContain('캐시플로 모니터링');
     expect(dashboardPageSource).toContain('증빙 큐');
     expect(dashboardPageSource).toContain('승인 큐');
     expect(dashboardPageSource).toContain('프로젝트 정리');
+    expect(dashboardPageSource).not.toContain('캐시플로 추출');
     expect(dashboardPageSource).not.toContain('전체 사업');
     expect(dashboardPageSource).not.toContain('최근 거래');
     expect(dashboardPageSource).not.toContain('캐시플로 이상치');

@@ -61,8 +61,8 @@ describe('admin monitoring helper', () => {
     ]);
     expect(issues.map((issue) => issue.to)).toEqual([
       '/participation',
-      '/cashflow',
-      '/cashflow',
+      '/cashflow/analytics',
+      '/cashflow/weekly',
       '/projects',
     ]);
   });
