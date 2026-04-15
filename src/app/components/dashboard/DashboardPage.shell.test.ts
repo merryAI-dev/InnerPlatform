@@ -8,13 +8,23 @@ const dashboardPageSource = readFileSync(
 );
 
 describe('DashboardPage shell contract', () => {
-  it('keeps the admin landing page focused on operational surfaces only', () => {
-    expect(dashboardPageSource).toContain('캐시플로 추출');
-    expect(dashboardPageSource).toContain('전체 프로젝트');
-    expect(dashboardPageSource).not.toContain("import { WelcomeBanner } from './WelcomeBanner';");
-    expect(dashboardPageSource).not.toContain('UpdateReminderBadge');
-    expect(dashboardPageSource).not.toContain('ValidationSummaryCard');
-    expect(dashboardPageSource).not.toContain('ProjectValidationBadge');
-    expect(dashboardPageSource).not.toContain("text-[10px]\">검증</TableHead>");
+  it('keeps the admin landing page anomaly-first with monitoring queue and tool CTAs', () => {
+    expect(dashboardPageSource).toContain('AdminMonitoringQueue');
+    expect(dashboardPageSource).toContain('SystemHealthPanel');
+    expect(dashboardPageSource).toContain('ActivityFeed');
+    expect(dashboardPageSource).toContain('캐시플로 관제');
+    expect(dashboardPageSource).toContain('증빙 큐');
+    expect(dashboardPageSource).toContain('승인 큐');
+    expect(dashboardPageSource).toContain('프로젝트 정리');
+    expect(dashboardPageSource).not.toContain('전체 사업');
+    expect(dashboardPageSource).not.toContain('최근 거래');
+    expect(dashboardPageSource).not.toContain('캐시플로 이상치');
+    expect(dashboardPageSource).not.toContain('인사 공지 (홈)');
+    expect(dashboardPageSource).not.toContain('인건비 지급 Queue');
+    expect(dashboardPageSource).not.toContain('MetricCard');
+    expect(dashboardPageSource).not.toContain('AlertStrip');
+    expect(dashboardPageSource).not.toContain('deptBreakdown');
+    expect(dashboardPageSource).not.toContain('typeBreakdown');
+    expect(dashboardPageSource).not.toContain('cashflowTrend');
   });
 });

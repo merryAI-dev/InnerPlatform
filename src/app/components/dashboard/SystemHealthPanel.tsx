@@ -1,8 +1,8 @@
 import { useMemo } from 'react';
+import { useNavigate } from 'react-router';
 import {
   Activity, CheckCircle2, AlertTriangle, XCircle,
-  Database, Shield, FileText, Clock, ArrowUp, ArrowDown,
-  TrendingUp, Server, Zap,
+  Database, Shield, FileText, Clock, ChevronRight, Zap,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Progress } from '../ui/progress';
@@ -17,11 +17,13 @@ interface HealthMetric {
   status: 'healthy' | 'warning' | 'critical';
   value: string;
   detail: string;
+  to: string;
   progress?: number;
 }
 
 export function SystemHealthPanel() {
   const { projects, transactions, ledgers, participationEntries, dataSource } = useAppStore();
+  const navigate = useNavigate();
 
   const metrics = useMemo<HealthMetric[]>(() => {
     const confirmed = projects.filter(p => p.phase === 'CONFIRMED');
@@ -47,6 +49,7 @@ export function SystemHealthPanel() {
         status: dataSource === 'firestore' ? 'healthy' : 'warning',
         value: dataSource === 'firestore' ? '실시간 동기화' : '로컬 모드',
         detail: dataSource === 'firestore' ? 'Firestore 연결 정상' : 'Firebase 미연결',
+        to: '/settings',
       },
       {
         id: 'ledger-coverage',
@@ -55,6 +58,7 @@ export function SystemHealthPanel() {
         status: ledgerCoverage >= 90 ? 'healthy' : ledgerCoverage >= 70 ? 'warning' : 'critical',
         value: `${ledgerCoverage}%`,
         detail: `${withLedger.length}/${confirmed.length} 사업 원장 연결`,
+        to: '/projects',
         progress: ledgerCoverage,
       },
       {
@@ -64,6 +68,7 @@ export function SystemHealthPanel() {
         status: evidenceCoverage >= 80 ? 'healthy' : evidenceCoverage >= 50 ? 'warning' : 'critical',
         value: `${evidenceCoverage}%`,
         detail: `${completeTx.length}/${approvedTx.length} 승인 거래 증빙 완료`,
+        to: '/evidence',
         progress: evidenceCoverage,
       },
       {
@@ -73,6 +78,7 @@ export function SystemHealthPanel() {
         status: pendingCount === 0 ? 'healthy' : pendingCount <= 3 ? 'warning' : 'critical',
         value: `${pendingCount}건`,
         detail: pendingCount === 0 ? '미처리 건 없음' : `${pendingCount}건 승인 필요`,
+        to: '/approvals',
       },
       {
         id: 'participation-risk',
@@ -81,6 +87,7 @@ export function SystemHealthPanel() {
         status: dangerCount === 0 ? (warningCount === 0 ? 'healthy' : 'warning') : 'critical',
         value: dangerCount > 0 ? `${dangerCount}명 위험` : warningCount > 0 ? `${warningCount}명 주의` : '정상',
         detail: dangerCount > 0 ? `${dangerCount}명 100% 초과` : '위험 인원 없음',
+        to: '/participation',
       },
       {
         id: 'rejected-tx',
@@ -89,6 +96,7 @@ export function SystemHealthPanel() {
         status: rejectedCount === 0 ? 'healthy' : 'critical',
         value: `${rejectedCount}건`,
         detail: rejectedCount === 0 ? '반려 건 없음' : `${rejectedCount}건 재처리 필요`,
+        to: '/audit',
       },
     ];
   }, [projects, transactions, ledgers, participationEntries, dataSource]);
@@ -131,11 +139,17 @@ export function SystemHealthPanel() {
       </CardHeader>
       <CardContent className="space-y-2">
         {metrics.map(m => (
-          <div key={m.id} className={`flex items-center gap-3 p-2 rounded-lg transition-colors ${statusBg[m.status]}`}>
+          <button
+            key={m.id}
+            type="button"
+            onClick={() => navigate(m.to)}
+            className={`group flex w-full items-center gap-3 rounded-lg p-2 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 ${statusBg[m.status]}`}
+            aria-label={`${m.label} 열기`}
+          >
             <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${statusDot[m.status]}`} />
-            <m.icon className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+            <m.icon className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
             <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2">
                 <span className="text-[11px] text-slate-700" style={{ fontWeight: 500 }}>{m.label}</span>
                 <span className="text-[11px]" style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{m.value}</span>
               </div>
@@ -144,9 +158,10 @@ export function SystemHealthPanel() {
                   <Progress value={m.progress} className="h-1" />
                 </div>
               )}
-              <p className="text-[9px] text-muted-foreground mt-0.5">{m.detail}</p>
+              <p className="mt-0.5 text-[9px] text-muted-foreground">{m.detail}</p>
             </div>
-          </div>
+            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-60 transition-transform group-hover:translate-x-0.5 group-hover:opacity-100" />
+          </button>
         ))}
       </CardContent>
     </Card>
