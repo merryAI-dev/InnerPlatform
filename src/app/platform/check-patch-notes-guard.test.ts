@@ -27,6 +27,15 @@ describe('resolveRequiredPatchNotePages', () => {
     ]);
   });
 
+  it('maps shared policy files to the shared label policy page', () => {
+    expect(
+      resolveRequiredPatchNotePages([
+        'src/app/policies/cashflow-policy.json',
+        'src/app/platform/policies/cashflow-policy.ts',
+      ]),
+    ).toEqual(['docs/wiki/patch-notes/pages/shared-label-policy.md']);
+  });
+
   it('returns an empty list for unrelated infra changes', () => {
     expect(
       resolveRequiredPatchNotePages([

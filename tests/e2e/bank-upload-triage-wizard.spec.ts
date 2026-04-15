@@ -1,12 +1,46 @@
 import { test, expect, type Page } from '@playwright/test';
 
+const TEST_PROJECT_ID = 'p001';
+const TEST_USER = {
+  source: 'dev_harness',
+  uid: 'u002',
+  name: '데이나',
+  email: 'dana@mysc.co.kr',
+  role: 'pm',
+  tenantId: 'org001',
+  projectId: TEST_PROJECT_ID,
+  projectIds: [TEST_PROJECT_ID],
+  defaultWorkspace: 'portal',
+  lastWorkspace: 'portal',
+};
+
 async function loginAsPm(page: Page) {
-  await page.goto('/login');
-  await page.getByRole('button', { name: 'PM 샘플 로그인' }).click();
-  if (page.url().includes('/workspace-select')) {
-    await page.getByRole('button', { name: 'PM 포털로 계속' }).click();
+  await seedHarnessProject(page);
+  await page.goto('/portal');
+  await page.waitForURL((url) => url.pathname.startsWith('/portal'));
+}
+
+async function seedHarnessProject(page: Page) {
+  await page.addInitScript((session) => {
+    window.localStorage.setItem('mysc-auth-user', JSON.stringify(session));
+    window.localStorage.setItem('mysc-dev-auth-harness', JSON.stringify(session));
+    window.localStorage.setItem('MYSC_ACTIVE_TENANT', session.tenantId);
+    window.sessionStorage.setItem(`mysc-portal-active-project:${session.uid}`, session.projectId);
+  }, TEST_USER);
+}
+
+async function ensureProjectSelected(page: Page) {
+  if (page.url().includes('/portal/project-select')) {
+    const startButton = page.locator('[data-testid^="portal-project-start-"]').first();
+    await expect(startButton).toBeVisible();
+    await startButton.click();
   }
-  await expect(page).toHaveURL(/\/portal(?:$|\/)/);
+  await expect(page).toHaveURL(/\/portal(?!\/project-select)(?:$|\/)/);
+}
+
+async function openPortalPath(page: Page, path: string) {
+  await page.goto(path);
+  await ensureProjectSelected(page);
 }
 
 function buildBankCsv(rows: Array<{
@@ -32,7 +66,7 @@ function buildBankCsv(rows: Array<{
 }
 
 async function uploadBankSheet(page: Page, rows: Parameters<typeof buildBankCsv>[0]) {
-  await page.goto('/portal/bank-statements');
+  await openPortalPath(page, '/portal/bank-statements');
   await expect(page.getByRole('heading', { name: '통장내역' })).toBeVisible();
   await page.locator('input[type="file"]').setInputFiles({
     name: 'bank-statement.csv',
@@ -40,10 +74,10 @@ async function uploadBankSheet(page: Page, rows: Parameters<typeof buildBankCsv>
     buffer: buildBankCsv(rows),
   });
   await page.getByRole('button', { name: '저장' }).click();
-  await expect(page.getByTestId('bank-import-queue-summary')).toBeVisible();
+  await expect(page.getByRole('button', { name: '사업비 입력(주간)으로 이어가기' })).toBeVisible();
 }
 
-test('bank upload triage wizard projects rows and survives reupload with different order', async ({ page }) => {
+test('bank upload flows directly into weekly expenses and survives reupload with different order', async ({ page }) => {
   await loginAsPm(page);
 
   const originalRows = [
@@ -66,59 +100,24 @@ test('bank upload triage wizard projects rows and survives reupload with differe
   ];
 
   await uploadBankSheet(page, originalRows);
-  await expect(page.getByTestId('bank-import-queue-summary')).toContainText('총 2건');
-  await expect(page.getByRole('button', { name: '분류/검토 열기' })).toBeVisible();
-
-  await page.getByTestId('bank-import-open-wizard').click();
-  await expect(page.getByTestId('bank-import-triage-wizard')).toBeVisible();
-  await expect(page.getByText('현재 선택 거래')).toBeVisible();
-  const viewport = page.viewportSize();
-  const wizardBox = await page.getByTestId('bank-import-triage-wizard').boundingBox();
-  expect(viewport).not.toBeNull();
-  expect(wizardBox).not.toBeNull();
-  expect(wizardBox!.width).toBeGreaterThan((viewport?.width || 0) * 0.99);
-  expect(wizardBox!.height).toBeGreaterThan((viewport?.height || 0) * 0.99);
-
-  await page.getByTestId('bank-import-expense-amount').fill('15000');
-  await page.getByTestId('bank-import-budget-category').fill('여비');
-  await page.getByTestId('bank-import-budget-subcategory').fill('교통비');
-  await page.getByTestId('bank-import-cashflow-category').selectOption('TRAVEL');
-  await page.getByTestId('bank-import-evidence-completed').fill('출장신청서, 영수증');
-  await page.getByTestId('bank-import-project-next').click();
-
-  await page.getByTestId('bank-import-expense-amount').fill('22000');
-  await page.getByTestId('bank-import-budget-category').fill('여비');
-  await page.getByTestId('bank-import-budget-subcategory').fill('교통비');
-  await page.getByTestId('bank-import-cashflow-category').selectOption('TRAVEL');
-  await page.getByTestId('bank-import-evidence-completed').fill('출장신청서, 영수증');
-  await page.getByTestId('bank-import-project-next').click();
-  await page.getByRole('button', { name: '나중에 이어서 하기' }).click();
-
-  await expect(page.getByTestId('bank-import-triage-wizard')).toBeHidden();
-
-  await page.goto('/portal/weekly-expenses');
+  await expect(page.getByText('신규 거래 처리 Queue')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '분류/검토 열기' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '증빙 이어서 하기' })).toHaveCount(0);
+  await page.getByRole('button', { name: '사업비 입력(주간)으로 이어가기' }).click();
   await expect(page.getByRole('heading', { name: '사업비 입력(주간)' })).toBeVisible();
   await expect(page.getByText('거래: 2건')).toBeVisible();
   await expect(page.locator('input[value="코레일"]').first()).toBeVisible();
   await expect(page.locator('input[value="카카오T"]').first()).toBeVisible();
-  await expect(page.getByText('여비', { exact: true }).first()).toBeVisible();
-  await expect(page.getByText('교통비', { exact: true }).first()).toBeVisible();
-  await expect(page.getByTestId('weekly-intake-queue-strip')).toContainText('증빙 미완료 2');
+  await expect(page.getByText('신규 거래 처리 Queue')).toHaveCount(0);
 
   await uploadBankSheet(page, [...originalRows].reverse());
-  await expect(page.getByTestId('bank-import-queue-summary')).toContainText('총 2건');
-  await expect(page.getByTestId('bank-import-queue-summary')).toContainText('증빙 미완료 2');
-
-  await page.goto('/portal/weekly-expenses');
+  await page.getByRole('button', { name: '사업비 입력(주간)으로 이어가기' }).click();
   await expect(page.getByText('거래: 2건')).toBeVisible();
   await expect(page.locator('input[value="코레일"]').first()).toBeVisible();
   await expect(page.locator('input[value="카카오T"]').first()).toBeVisible();
-  await expect(page.getByText('여비', { exact: true }).first()).toBeVisible();
-  await expect(page.getByText('교통비', { exact: true }).first()).toBeVisible();
-  await expect(page.getByTestId('weekly-intake-queue-strip')).toContainText('증빙 미완료 2');
 });
 
-test('bank upload triage wizard lets PM project first and continue evidence later', async ({ page }) => {
+test('bank upload keeps direct handoff CTA and removes queue actions', async ({ page }) => {
   await loginAsPm(page);
 
   await uploadBankSheet(page, [
@@ -132,63 +131,30 @@ test('bank upload triage wizard lets PM project first and continue evidence late
     },
   ]);
 
-  await page.getByTestId('bank-import-open-wizard').click();
-  await expect(page.getByTestId('bank-import-triage-wizard')).toBeVisible();
-
-  await page.getByTestId('bank-import-expense-amount').fill('18000');
-  await page.getByTestId('bank-import-budget-category').fill('여비');
-  await page.getByTestId('bank-import-budget-subcategory').fill('교통비');
-  await page.getByTestId('bank-import-cashflow-category').selectOption('TRAVEL');
-  await page.getByTestId('bank-import-project-next').click();
-
-  await expect(page.getByTestId('bank-import-triage-wizard')).toBeHidden();
-
-  await page.goto('/portal/weekly-expenses');
-  await expect(page.getByTestId('weekly-intake-queue-strip')).toContainText('증빙 미완료 1');
-  await page.getByRole('button', { name: '증빙 이어서 하기' }).click();
-  await expect(page.getByTestId('bank-import-triage-wizard')).toBeVisible();
-
-  await page.getByTestId('bank-import-evidence-completed').fill('출장신청서, 영수증');
-  await page.getByTestId('bank-import-project-next').click();
-  await expect(page.getByTestId('bank-import-triage-wizard')).toBeHidden();
-
-  await expect(page.getByTestId('weekly-intake-queue-strip')).toContainText('증빙 미완료 1');
-  await expect(page.locator('input[value="코레일"]').first()).toBeVisible();
-  await page.getByRole('button', { name: '증빙 이어서 하기' }).click();
-  await expect(page.getByTestId('bank-import-triage-wizard')).toBeVisible();
-  await expect(page.getByTestId('bank-import-evidence-completed')).toHaveValue('출장신청서, 영수증');
+  await expect(page.getByRole('button', { name: '사업비 입력(주간)으로 이어가기' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '분류/검토 열기' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '증빙 이어서 하기' })).toHaveCount(0);
+  await expect(page.getByText('신규 거래 처리 Queue')).toHaveCount(0);
 });
 
-test('bank upload triage wizard keeps the left queue scrollable in fullscreen mode', async ({ page }) => {
+test('bank upload empty and saved states stay on direct handoff flow', async ({ page }) => {
   await loginAsPm(page);
+  await openPortalPath(page, '/portal/bank-statements');
+  await expect(page.getByTestId('bank-statement-empty-state')).toBeVisible();
+  await expect(page.getByRole('button', { name: '사업비 입력(주간)으로 이어가기' })).toBeVisible();
+  await expect(page.getByText('신규 거래 처리 Queue')).toHaveCount(0);
 
-  const rows = Array.from({ length: 40 }, (_, index) => ({
-    account: '111-222-333',
-    dateTime: `2026-04-${String((index % 28) + 1).padStart(2, '0')} 09:${String(index % 60).padStart(2, '0')}`,
-    memo: `거래 ${index + 1}`,
-    counterparty: `거래처 ${index + 1}`,
-    withdrawal: String(10000 + index * 100),
-    balance: String(900000 - index * 100),
-  }));
+  await uploadBankSheet(page, [
+    {
+      account: '111-222-333',
+      dateTime: '2026-04-14 11:10',
+      memo: '회의비',
+      counterparty: '카페 메리',
+      withdrawal: '12000',
+      balance: '448000',
+    },
+  ]);
 
-  await uploadBankSheet(page, rows);
-  await page.getByTestId('bank-import-open-wizard').click();
-  await expect(page.getByTestId('bank-import-triage-wizard')).toBeVisible();
-
-  const scrollState = await page.evaluate(() => {
-    const scroller = document.querySelector('[data-testid="bank-import-triage-queue-scroll"]') as HTMLElement | null;
-    if (!scroller) return null;
-    const before = scroller.scrollTop;
-    scroller.scrollTop = 240;
-    return {
-      clientHeight: scroller.clientHeight,
-      scrollHeight: scroller.scrollHeight,
-      before,
-      after: scroller.scrollTop,
-    };
-  });
-
-  expect(scrollState).not.toBeNull();
-  expect(scrollState!.scrollHeight).toBeGreaterThan(scrollState!.clientHeight);
-  expect(scrollState!.after).toBeGreaterThan(scrollState!.before);
+  await expect(page.getByText(/업로드 기준본 저장 완료|현재 저장본 사용 중/)).toBeVisible();
+  await expect(page.getByText('신규 거래 처리 Queue')).toHaveCount(0);
 });

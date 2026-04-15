@@ -1,16 +1,50 @@
 import { test, expect } from '@playwright/test';
 
+const TEST_PROJECT_ID = 'p001';
+const TEST_USER = {
+  source: 'dev_harness',
+  uid: 'u002',
+  name: '데이나',
+  email: 'dana@mysc.co.kr',
+  role: 'pm',
+  tenantId: 'org001',
+  projectId: TEST_PROJECT_ID,
+  projectIds: [TEST_PROJECT_ID],
+  defaultWorkspace: 'portal',
+  lastWorkspace: 'portal',
+};
+
 async function loginAsPm(page: import('@playwright/test').Page) {
-  await page.goto('/login');
-  await page.getByRole('button', { name: 'PM 샘플 로그인' }).click();
-  if (page.url().includes('/workspace-select')) {
-    await page.getByRole('button', { name: 'PM 포털로 계속' }).click();
+  await seedHarnessProject(page);
+  await page.goto('/portal');
+  await page.waitForURL((url) => url.pathname.startsWith('/portal'));
+}
+
+async function seedHarnessProject(page: import('@playwright/test').Page) {
+  await page.addInitScript((session) => {
+    window.localStorage.setItem('mysc-auth-user', JSON.stringify(session));
+    window.localStorage.setItem('mysc-dev-auth-harness', JSON.stringify(session));
+    window.localStorage.setItem('MYSC_ACTIVE_TENANT', session.tenantId);
+    window.sessionStorage.setItem(`mysc-portal-active-project:${session.uid}`, session.projectId);
+  }, TEST_USER);
+}
+
+async function ensureProjectSelected(page: import('@playwright/test').Page) {
+  if (page.url().includes('/portal/project-select')) {
+    const startButton = page.locator('[data-testid^="portal-project-start-"]').first();
+    await expect(startButton).toBeVisible();
+    await startButton.click();
   }
-  await expect(page).toHaveURL(/\/portal(?:$|\/)/);
+  await expect(page).toHaveURL(/\/portal(?!\/project-select)(?:$|\/)/);
+}
+
+async function openPortalPath(page: import('@playwright/test').Page, path: string) {
+  await page.goto(path);
+  await ensureProjectSelected(page);
 }
 
 async function applySampleExpenseSheet(page: import('@playwright/test').Page) {
-  await page.goto('/portal/weekly-expenses');
+  await openPortalPath(page, '/portal/weekly-expenses');
   await expect(page.getByRole('heading', { name: '사업비 입력(주간)' })).toBeVisible();
 
   await page.getByRole('button', { name: 'Migration Wizard' }).click();

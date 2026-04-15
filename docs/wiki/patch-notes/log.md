@@ -8,6 +8,10 @@
 - pages: [portal-bank-statement](./pages/portal-bank-statement.md), [portal-weekly-expense](./pages/portal-weekly-expense.md)
 - summary: QA 반응이 좋지 않았던 신규 거래 queue와 triage wizard 강제 흐름을 제거하고, 통장내역 저장본에서 바로 주간 사업비 입력으로 이어가는 단일 handoff로 복귀했다.
 
+## [2026-04-15] patch-note | shared-label-policy | cashflow label enum policy 통합
+- pages: [shared-label-policy](./pages/shared-label-policy.md), [admin-cashflow-export](./pages/admin-cashflow-export.md), [portal-bank-statement](./pages/portal-bank-statement.md)
+- summary: `cashflow`의 화면 라벨, 내부 enum, sheet line id, export 라벨 기준을 JSON source of truth와 policy API로 통합했다.
+
 ## [2026-04-14] patch-note | portal-minimal-sweep | 빈 상태/가이드/placeholder 감산
 - pages: [portal-submissions](./pages/portal-submissions.md), [portal-bank-statement](./pages/portal-bank-statement.md), [portal-weekly-expense](./pages/portal-weekly-expense.md), [portal-register-project](./pages/portal-register-project.md), [portal-cashflow](./pages/portal-cashflow.md), [portal-project-settings](./pages/portal-project-settings.md), [portal-edit-project](./pages/portal-edit-project.md)
 - summary: 남은 포털 화면들에서 helper copy, role notice, 중복 상태 bar, `-` placeholder를 걷어내고 작업면 중심의 더 얇은 운영 화면으로 정리했다.

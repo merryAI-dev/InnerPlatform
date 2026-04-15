@@ -3,6 +3,8 @@
 // Firestore 스키마와 1:1 매핑
 // ═══════════════════════════════════════════════════════════════
 
+import cashflowPolicyData from '../policies/cashflow-policy.json';
+
 // ── Enums ──
 
 export type UserRole = 'admin' | 'finance' | 'pm' | 'viewer';
@@ -56,24 +58,9 @@ export type CashflowCategory =
   | 'MISC_INCOME'         // 기타수입
   | 'MISC_EXPENSE';       // 기타지출
 
-export const CASHFLOW_CATEGORY_LABELS: Record<CashflowCategory, string> = {
-  CONTRACT_PAYMENT: '계약금',
-  INTERIM_PAYMENT: '중도금',
-  FINAL_PAYMENT: '잔금',
-  LABOR_COST: '인건비',
-  OUTSOURCING: '외주비',
-  EQUIPMENT: '장비구입비',
-  TRAVEL: '출장비',
-  SUPPLIES: '소모품비',
-  COMMUNICATION: '통신비',
-  RENT: '임차료',
-  UTILITY: '공과금',
-  TAX_PAYMENT: '세금납부',
-  VAT_REFUND: '부가세환급',
-  INSURANCE: '보험료',
-  MISC_INCOME: '기타수입',
-  MISC_EXPENSE: '기타지출',
-};
+export const CASHFLOW_CATEGORY_LABELS: Record<CashflowCategory, string> = Object.fromEntries(
+  cashflowPolicyData.categoryEntries.map((entry) => [entry.category, entry.label]),
+) as Record<CashflowCategory, string>;
 
 export const PROJECT_STATUS_LABELS: Record<ProjectStatus, string> = {
   CONTRACT_PENDING: '계약전',
@@ -1021,20 +1008,9 @@ export type CashflowSheetLineId =
   | 'TEAM_SUPPORT_OUT'      // 팀지원금(출금)
   | 'BANK_INTEREST_OUT';    // 은행이자(출금)
 
-export const CASHFLOW_SHEET_LINE_LABELS: Record<CashflowSheetLineId, string> = {
-  MYSC_PREPAY_IN: 'MYSC 선입금(잔금 등 입금 필요 시)',
-  SALES_IN: '매출액(입금)',
-  SALES_VAT_IN: '매출부가세(입금)',
-  TEAM_SUPPORT_IN: '팀지원금(입금)',
-  BANK_INTEREST_IN: '은행이자(입금)',
-  DIRECT_COST_OUT: '직접사업비',
-  INPUT_VAT_OUT: '매입부가세',
-  MYSC_LABOR_OUT: 'MYSC 인건비',
-  MYSC_PROFIT_OUT: 'MYSC 수익(간접비 등)',
-  SALES_VAT_OUT: '매출부가세(출금)',
-  TEAM_SUPPORT_OUT: '팀지원금(출금)',
-  BANK_INTEREST_OUT: '은행이자(출금)',
-};
+export const CASHFLOW_SHEET_LINE_LABELS: Record<CashflowSheetLineId, string> = Object.fromEntries(
+  cashflowPolicyData.lineEntries.map((entry) => [entry.lineId, entry.label]),
+) as Record<CashflowSheetLineId, string>;
 
 export interface CashflowWeekSheet {
   /** doc id = `${projectId}-${yearMonth}-w${weekNo}` */
