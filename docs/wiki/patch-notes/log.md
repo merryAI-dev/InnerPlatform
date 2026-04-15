@@ -138,3 +138,7 @@
 ## [2026-04-15] patch-note | portal-bank-statement, portal-weekly-expense | direct handoff row projection
 - pages: [portal-bank-statement](./pages/portal-bank-statement.md), [portal-weekly-expense](./pages/portal-weekly-expense.md)
 - summary: 통장내역 저장 시 신규 은행 행을 현재 주간 사업비 탭으로 바로 merge하도록 바꿔, Queue 없이 `통장내역 -> 사업비 입력(주간)` 운영 경로가 실제로 이어지게 복구했다.
+
+## [2026-04-15] patch-note | portal-cashflow, portal-dashboard | PM cashflow listen hardening
+- pages: [portal-cashflow](./pages/portal-cashflow.md), [portal-dashboard](./pages/portal-dashboard.md)
+- summary: PM용 cashflow 주차 구독은 Firestore에서 project 기준으로만 listen하고, 연도 범위는 클라이언트에서 필터링하도록 바꿔 PM 포털 부팅이 cashflow composite index drift에 직접 막히지 않게 보강했다.
