@@ -40,7 +40,15 @@ describe('PortalLayout shell actions', () => {
   });
 
   it('keeps onboarding bypass routes aligned with navigation policy', () => {
-    expect(portalLayoutSource).toContain("location.pathname.includes('/portal/register-project')");
-    expect(portalLayoutSource).not.toContain("location.pathname !== '/portal/project-settings'");
+    expect(portalLayoutSource).toContain('isPortalStandaloneEntryPath');
+    expect(portalLayoutSource).toContain("navigate('/portal/project-select')");
+    expect(portalLayoutSource).toContain("navigate('/portal/weekly-expenses')");
+    expect(portalLayoutSource).toContain("navigate('/portal/register-project')");
+  });
+
+  it('exposes stable portal navigation test ids for release-gate flows', () => {
+    expect(portalLayoutSource).toContain('function buildPortalNavTestId');
+    expect(portalLayoutSource).toContain('data-testid={buildPortalNavTestId(item.to)}');
+    expect(portalLayoutSource).toContain("portal-nav-${path");
   });
 });

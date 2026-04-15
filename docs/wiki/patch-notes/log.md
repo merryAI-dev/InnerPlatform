@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-04-15] patch-note | portal-onboarding, portal-project-select | 시작 카드 실제 라우트 복구
+- pages: [portal-onboarding](./pages/portal-onboarding.md), [portal-project-select](./pages/portal-project-select.md)
+- summary: 포털 시작 선택 카드가 deep route에서도 fallback 선택 화면에 다시 덮이지 않도록 standalone entry 경로 판정을 layout과 navigation 정책에서 공통화했고, `기존 사업 선택`은 실제 사업 선택 step으로 연결했다.
+
 ## [2026-04-15] patch-note | portal-onboarding | 선택 카드 실제 이동 복구
 - pages: [portal-onboarding](./pages/portal-onboarding.md)
 - summary: 포털 미등록 사용자가 온보딩 선택 카드에서 `기존 사업 선택`, `증빙 업로드`, `새 사업 등록`을 눌렀을 때 강제 온보딩 리다이렉트에 다시 덮이지 않고 실제 다음 화면으로 이동하도록 복구했다.

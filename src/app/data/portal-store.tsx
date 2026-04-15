@@ -516,6 +516,24 @@ function normalizePortalUser(candidate: Partial<PortalUser> | null | undefined):
   };
 }
 
+function arePortalUsersEqual(left: PortalUser | null, right: PortalUser | null): boolean {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  if (
+    left.id !== right.id
+    || left.name !== right.name
+    || left.email !== right.email
+    || left.role !== right.role
+    || left.projectId !== right.projectId
+    || left.registeredAt !== right.registeredAt
+  ) {
+    return false;
+  }
+  if (left.projectIds.length !== right.projectIds.length) return false;
+  if (left.projectIds.some((projectId, index) => projectId !== right.projectIds[index])) return false;
+  return JSON.stringify(left.projectNames || {}) === JSON.stringify(right.projectNames || {});
+}
+
 type StoredPortalMember = Omit<Partial<PortalUser>, 'projectIds' | 'projectId'> & {
   projectIds?: Array<string | { id?: string; name?: string }>;
   projectId?: string | { id?: string; name?: string };
@@ -740,7 +758,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         projectIds,
         registeredAt: authUser.registeredAt || now,
       });
-      setPortalUser(normalized);
+      setPortalUser((previous) => (arePortalUsersEqual(previous, normalized) ? previous : normalized));
       setIsMemberLoading(false);
       return;
     }
@@ -839,7 +857,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
             },
           });
         }
-        setPortalUser(normalized);
+        setPortalUser((previous) => (arePortalUsersEqual(previous, normalized) ? previous : normalized));
       } catch (err) {
         reportError(err, {
           message: '[PortalStore] member load failed:',

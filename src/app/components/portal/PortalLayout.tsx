@@ -62,6 +62,7 @@ import { normalizeProjectIds } from '../../data/project-assignment';
 import {
   canChooseWorkspace,
   canEnterPortalWorkspace,
+  isPortalStandaloneEntryPath,
   isAdminSpaceRole,
   shouldForcePortalOnboarding,
 } from '../../platform/navigation';
@@ -139,6 +140,10 @@ function writePortalSidebarCollapsed(uid: string | null | undefined, collapsed: 
   } catch {
     // ignore localStorage failures
   }
+}
+
+function buildPortalNavTestId(path: string) {
+  return `portal-nav-${path.replace(/^\/+/, '').replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '')}`;
 }
 
 export function usePortalNavigationGuard() {
@@ -383,15 +388,7 @@ function PortalContent() {
     return <Outlet />;
   }
 
-  const standaloneOnboarding = (
-    (location.pathname.includes('/portal/onboarding')
-      || location.pathname.includes('/portal/project-settings')
-      || location.pathname.includes('/portal/weekly-expenses')
-      || location.pathname.includes('/portal/register-project')) &&
-    !isRegistered &&
-    canEnterPortalWorkspace(authUser?.role)
-  );
-  if (standaloneOnboarding) {
+  if (isPortalStandaloneEntryPath(location.pathname) && !isAdminSpaceRole(authUser?.role)) {
     return <Outlet />;
   }
 
@@ -415,7 +412,7 @@ function PortalContent() {
           {/* 선택 카드 */}
           <div className="grid gap-3">
             <button
-              onClick={() => navigate('/portal/project-settings')}
+              onClick={() => navigate('/portal/project-select')}
               className="group relative flex items-center gap-4 p-5 rounded-2xl border border-border/60 bg-white/80 dark:bg-slate-800/60 backdrop-blur-sm hover:border-teal-300 hover:shadow-md hover:shadow-teal-500/5 transition-all duration-200 text-left"
             >
               <div className="shrink-0 flex items-center justify-center w-11 h-11 rounded-xl bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 group-hover:scale-105 transition-transform">
@@ -639,6 +636,7 @@ function PortalContent() {
                             key={item.to}
                             to={item.to}
                             end={item.exact}
+                            data-testid={buildPortalNavTestId(item.to)}
                             onClick={(event) => {
                               event.preventDefault();
                               requestPortalNavigation(item.to, item.label);
@@ -906,6 +904,7 @@ function PortalContent() {
                         key={item.to}
                         to={item.to}
                         end={item.exact}
+                        data-testid={buildPortalNavTestId(item.to)}
                         onClick={(event) => {
                           event.preventDefault();
                           requestPortalNavigation(item.to, item.label);

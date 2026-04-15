@@ -26,6 +26,8 @@
 
 ## Recent Changes
 
+- [2026-04-15] 포털 시작 fallback 카드의 `기존 사업 선택` CTA를 이 화면으로 직접 연결해, 사업 배정 수정 화면이 아니라 세션 사업 선택 step으로 바로 진입하게 정리했다.
+- [2026-04-15] standalone entry path를 layout과 navigation helper에서 같이 보도록 맞춰, 미등록 사용자가 이 경로로 이동한 뒤 다시 fallback 선택 화면에 덮이지 않도록 복구했다.
 - [2026-04-14] 이미 `project-select?redirect=...` 형태인 진입 URL은 redirect query를 보존하도록 라우팅 안정성을 보강했다.
 - [2026-04-14] 포털 진입을 `/portal/project-select` step으로 분리하고 세션 active project 선택 흐름을 신설했다.
 

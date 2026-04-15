@@ -110,24 +110,24 @@ test('settlement product completeness: dirty weekly expense edits require confir
   await expect(page).toHaveURL(/\/portal\/bank-statements$/);
 });
 
-test('settlement product completeness: dirty weekly expense edits require confirmation before sidebar navigation', async ({ page }) => {
+test('settlement product completeness: dirty weekly expense edits require confirmation before secondary route navigation', async ({ page }) => {
   await loginAsPm(page);
   await applySampleExpenseSheet(page);
 
   const firstCounterpartyCell = page.locator('[value="KTX"]').first();
   await firstCounterpartyCell.fill('KTX-사이드바수정');
 
-  const bankStatementNavLink = page.getByRole('link', { name: '통장내역' });
+  const settingsButton = page.getByRole('button', { name: '설정 열기' });
 
-  await bankStatementNavLink.click();
+  await settingsButton.click();
   await expect(page.getByTestId('weekly-expense-unsaved-dialog')).toBeVisible();
   await page.getByRole('button', { name: '계속 편집' }).click();
   await expect(page.getByTestId('weekly-expense-unsaved-dialog')).toBeHidden();
   await expect(page).toHaveURL(/\/portal\/weekly-expenses$/);
 
   await page.locator('[value="KTX-사이드바수정"]').first().fill('KTX-사이드바재수정');
-  await bankStatementNavLink.click();
+  await settingsButton.click();
   await expect(page.getByTestId('weekly-expense-unsaved-dialog')).toBeVisible();
   await page.getByRole('button', { name: '변경 버리고 이동' }).click();
-  await expect(page).toHaveURL(/\/portal\/bank-statements$/);
+  await expect(page).toHaveURL(/\/portal\/project-settings$/);
 });
