@@ -36,6 +36,14 @@ describe('resolveRequiredPatchNotePages', () => {
     ).toEqual(['docs/wiki/patch-notes/pages/shared-label-policy.md']);
   });
 
+  it('maps portal bootstrap store changes to the shared portal architecture page', () => {
+    expect(
+      resolveRequiredPatchNotePages([
+        'src/app/data/portal-store.tsx',
+      ]),
+    ).toEqual(['docs/wiki/patch-notes/pages/shared-portal-architecture.md']);
+  });
+
   it('returns an empty list for unrelated infra changes', () => {
     expect(
       resolveRequiredPatchNotePages([

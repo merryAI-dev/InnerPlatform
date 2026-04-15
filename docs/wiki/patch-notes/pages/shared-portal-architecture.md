@@ -25,6 +25,7 @@
 - [x] critical write path를 command API로 이동하는 단계가 플랜에 포함됨
 - [x] App 루트 broad provider tree가 admin/portal route shell로 분리됨
 - [x] route shell이 explicit Firestore access mode를 주입하고 store는 pathname self-inference를 하지 않음
+- [x] `portal-store`가 `project catalog`, `current project scope`, `weekly submission scope`를 분리해 자기유발 bootstrap loop를 줄이도록 재구성됨
 - [ ] admin summary surface cutover까지 완료됨
 - [ ] 포털의 broad Firestore direct read가 완전히 제거됨
 
@@ -34,6 +35,7 @@
 - [2026-04-15] 6~8주 RFC에서 route-scoped provider split, read model API, critical write command, admin summary cutover 순서를 고정했다.
 - [2026-04-15] 포털 문제의 본질을 Firestore 자체가 아니라 클라이언트의 분산된 data access policy로 명시했다.
 - [2026-04-15] Phase 1 구현으로 App 루트 broad provider를 admin/portal route shell로 분리하고, `portal-safe`/`admin-live` access mode를 route provider에서 주입하도록 바꿨다.
+- [2026-04-15] `portal-store`의 단일 bootstrap effect를 `projects catalog`, `project-scoped fetch`, `weekly submission fetch`로 분리하고, 동일한 project snapshot은 state를 다시 밀지 않게 만들어 PM 포털의 반복 fetch loop 후보를 줄였다.
 
 ## Known Notes
 
@@ -61,9 +63,11 @@
 - 반복적인 Firestore `Listen 400`, 포털 flicker, route/provider coupling 이슈가 누적되며 단기 핫픽스로는 한계가 분명해졌다.
 - 운영 화면이 raw Firestore query를 직접 조합하는 구조를 줄이고, 읽기 계약을 BFF로 모으는 것이 장기 안정화의 핵심으로 정리됐다.
 - 이번 phase는 provider를 옮기는 수준이 아니라, route shell이 data access policy를 명시적으로 주입하게 만든 첫 구조 변경이다.
+- 포털 홈이 번쩍이거나 Firestore `Listen/channel` 요청이 계속 누적되면, 먼저 `portal-store`가 다시 `projects`와 `scopedProjectIds`를 한 effect에서 함께 다루고 있지 않은지 본다.
 
 ## Next Watch Points
 
 - Phase 0~1이 실제로 broad provider tree를 얼마나 줄이는지
+- `portal-store` bootstrap이 다시 단일 effect로 합쳐지지 않는지
 - read model endpoint가 raw model drift 없이 유지되는지
 - 새 포털 기능이 다시 Firestore direct path로 들어오지 않는지

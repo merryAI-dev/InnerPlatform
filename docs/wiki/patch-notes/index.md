@@ -23,7 +23,7 @@
 | [admin-cashflow-project-sheet](./pages/admin-cashflow-project-sheet.md) | `/cashflow/projects/:projectId` | 2026-04-14 | compare mode, close 흐름, 주간 snapshot 해석 |
 | [admin-users-auth-governance](./pages/admin-users-auth-governance.md) | `/users` | 2026-04-14 | drift 확인, deep sync, auth/member 정렬 운영 |
 | [shared-label-policy](./pages/shared-label-policy.md) | `shared / policy` | 2026-04-15 | cashflow label↔enum↔line id↔export 기준 통합 |
-| [shared-portal-architecture](./pages/shared-portal-architecture.md) | `shared / architecture` | 2026-04-15 | Firestore 유지, BFF/API-first, route-scoped provider split 방향 |
+| [shared-portal-architecture](./pages/shared-portal-architecture.md) | `shared / architecture` | 2026-04-15 | Firestore 유지, BFF/API-first, route-scoped provider split과 portal bootstrap loop 분리 |
 
 ## How To Use
 
