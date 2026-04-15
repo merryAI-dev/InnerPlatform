@@ -620,12 +620,21 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     [authUser?.projectId, authUser?.projectIds, portalUser?.projectId, portalUser?.projectIds],
   );
 
+  const candidateProjectsSource = useMemo(() => {
+    if (!isDevHarnessUser || projects.length > 0) return projects;
+    if (authUser?.role === 'admin' || authUser?.role === 'finance') {
+      return PROJECTS;
+    }
+    const assignedIds = new Set(assignedProjectIds);
+    return PROJECTS.filter((project) => assignedIds.has(project.id));
+  }, [assignedProjectIds, authUser?.role, isDevHarnessUser, projects]);
+
   const portalProjectCandidates = useMemo(() => resolvePortalProjectCandidates({
     role: authUser?.role || portalUser?.role,
     authUid: authUser?.uid,
     assignedProjectIds,
-    projects,
-  }), [assignedProjectIds, authUser?.role, authUser?.uid, portalUser?.role, projects]);
+    projects: candidateProjectsSource,
+  }), [assignedProjectIds, authUser?.role, authUser?.uid, candidateProjectsSource, portalUser?.role]);
 
   const scopedProjectIds = useMemo(
     () => portalProjectCandidates.searchProjects.map((project) => project.id),
