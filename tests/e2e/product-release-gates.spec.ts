@@ -1,5 +1,41 @@
 import { test, expect, type Page } from '@playwright/test';
 
+const TEST_TENANT_ID = 'org001';
+const PM_TEST_PROJECT_ID = 'p001';
+const PM_TEST_USER = {
+  source: 'dev_harness' as const,
+  uid: 'u002',
+  name: '데이나',
+  email: 'dana@mysc.co.kr',
+  role: 'pm' as const,
+  tenantId: TEST_TENANT_ID,
+  projectId: PM_TEST_PROJECT_ID,
+  projectIds: [PM_TEST_PROJECT_ID],
+  defaultWorkspace: 'portal' as const,
+  lastWorkspace: 'portal' as const,
+};
+const ADMIN_TEST_USER = {
+  source: 'dev_harness' as const,
+  uid: 'u001',
+  name: '변민욱',
+  email: 'admin@mysc.co.kr',
+  role: 'admin' as const,
+  tenantId: TEST_TENANT_ID,
+  defaultWorkspace: 'admin' as const,
+  lastWorkspace: 'admin' as const,
+};
+
+async function seedHarnessSession(page: Page, session: typeof PM_TEST_USER | typeof ADMIN_TEST_USER) {
+  await page.addInitScript((payload) => {
+    window.localStorage.setItem('mysc-auth-user', JSON.stringify(payload));
+    window.localStorage.setItem('mysc-dev-auth-harness', JSON.stringify(payload));
+    window.localStorage.setItem('MYSC_ACTIVE_TENANT', payload.tenantId);
+    if (payload.projectId) {
+      window.sessionStorage.setItem(`mysc-portal-active-project:${payload.uid}`, payload.projectId);
+    }
+  }, session);
+}
+
 async function completeWorkspaceSelectionIfNeeded(page: Page) {
   if (!page.url().includes('/workspace-select')) return;
 
@@ -11,23 +47,32 @@ async function completeWorkspaceSelectionIfNeeded(page: Page) {
   await page.getByRole('button', { name: 'PM 포털로 계속' }).click();
 }
 
+async function ensurePortalProjectSelected(page: Page) {
+  if (!page.url().includes('/portal/project-select')) return;
+  const startButton = page.locator('[data-testid^="portal-project-start-"]').first();
+  await expect(startButton).toBeVisible();
+  await startButton.click();
+}
+
 async function loginAsAdmin(page: Page) {
-  await page.goto('/login');
-  await page.getByRole('button', { name: '관리자 샘플 로그인' }).click();
+  await seedHarnessSession(page, ADMIN_TEST_USER);
+  await page.goto('/');
   await completeWorkspaceSelectionIfNeeded(page);
 }
 
 async function loginAsPm(page: Page) {
-  await page.goto('/login');
-  await page.getByRole('button', { name: 'PM 샘플 로그인' }).click();
+  await seedHarnessSession(page, PM_TEST_USER);
+  await page.goto('/portal');
   await completeWorkspaceSelectionIfNeeded(page);
+  await ensurePortalProjectSelected(page);
 }
 
 test('release gate: admin requested route survives login redirect', async ({ page }) => {
   await page.goto('/projects');
   await expect(page).toHaveURL(/\/login$/);
 
-  await page.getByRole('button', { name: '관리자 샘플 로그인' }).click();
+  await seedHarnessSession(page, ADMIN_TEST_USER);
+  await page.goto('/projects');
   await completeWorkspaceSelectionIfNeeded(page);
 
   await expect(page).toHaveURL(/\/projects$/);
@@ -38,8 +83,10 @@ test('release gate: PM requested portal route survives login redirect', async ({
   await page.goto('/portal/budget');
   await expect(page).toHaveURL(/\/login$/);
 
-  await page.getByRole('button', { name: 'PM 샘플 로그인' }).click();
+  await seedHarnessSession(page, PM_TEST_USER);
+  await page.goto('/portal/budget');
   await completeWorkspaceSelectionIfNeeded(page);
+  await ensurePortalProjectSelected(page);
 
   await expect(page).toHaveURL(/\/portal\/budget$/);
   await expect(page.getByRole('heading', { name: '예산 편집' })).toBeVisible();
