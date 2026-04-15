@@ -4,6 +4,10 @@
 - pages: [portal-onboarding](./pages/portal-onboarding.md)
 - summary: 포털 미등록 사용자가 온보딩 선택 카드에서 `기존 사업 선택`, `증빙 업로드`, `새 사업 등록`을 눌렀을 때 강제 온보딩 리다이렉트에 다시 덮이지 않고 실제 다음 화면으로 이동하도록 복구했다.
 
+## [2026-04-15] patch-note | portal-dashboard, portal-payroll | residual portal listen 제거
+- pages: [portal-dashboard](./pages/portal-dashboard.md), [portal-payroll](./pages/portal-payroll.md)
+- summary: `/portal` 홈과 인건비 화면이 직접 붙이던 `transactions` realtime listener를 제거하고, 포털 경로에서는 route-aware safe fetch만 사용하도록 고정했다.
+
 ## [2026-04-15] patch-note | portal-dashboard | PM safe fetch stabilization
 - pages: [portal-dashboard](./pages/portal-dashboard.md), [portal-bank-statement](./pages/portal-bank-statement.md), [portal-weekly-expense](./pages/portal-weekly-expense.md)
 - summary: PM/viewer 포털 경로의 portal store, board, training, HR surface는 역할 기반 safe fetch 모드로 전환해 반복 Firestore Listen 400이 포털 전체를 재시도 루프로 흔드는 구조를 줄였다.

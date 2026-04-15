@@ -8,10 +8,9 @@ import {
 } from 'lucide-react';
 import {
   collection,
-  onSnapshot,
+  getDocs,
   query,
   where,
-  type Unsubscribe,
 } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
@@ -140,24 +139,28 @@ export function PortalDashboard() {
       return;
     }
 
-    const unsubs: Unsubscribe[] = [];
+    let isCancelled = false;
 
     const txQuery = query(
       collection(db, getOrgCollectionPath(orgId, 'transactions')),
       where('projectId', '==', myProject.id),
     );
 
-    unsubs.push(
-      onSnapshot(txQuery, (snap) => {
+    void getDocs(txQuery)
+      .then((snap) => {
+        if (isCancelled) return;
         setLiveTransactions(snap.docs.map((d) => d.data() as Transaction));
-      }, (err) => {
-        console.error('[PortalDashboard] transactions listen error:', err);
+      })
+      .catch((err) => {
+        if (isCancelled) return;
+        console.error('[PortalDashboard] transactions fetch error:', err);
         toast.error('거래 데이터를 불러오지 못했습니다');
         setLiveTransactions(null);
-      }),
-    );
+      });
 
-    return () => unsubs.forEach((u) => u());
+    return () => {
+      isCancelled = true;
+    };
   }, [db, firestoreEnabled, orgId, myProject.id]);
 
   const myTx = (liveTransactions ?? TRANSACTIONS).filter(t => t.projectId === myProject.id);

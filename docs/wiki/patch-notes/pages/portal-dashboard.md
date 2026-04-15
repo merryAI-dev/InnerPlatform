@@ -48,6 +48,7 @@
 - [x] PM 홈 부팅이 cashflow 주차 listener의 연도 범위 index 상태에 직접 막히지 않음
 - [x] PM 포털 전역 payroll listener가 compound query 없이 project 기준 listen으로 동작함
 - [x] PM 포털 주요 운영 데이터는 safe fetch 모드에서 realtime listen 없이도 부팅 가능
+- [x] 포털 홈의 거래 집계는 direct `onSnapshot` 없이 fetch 기반으로 로드됨
 - [x] 자금 요약 4칸이 사업명 바로 아래에서 한 번에 확인 가능
 - [x] 프로젝트 상세와 이번 주 작업 상태를 한 slab 안의 좌우 축으로 확인 가능
 - [x] 좌우 패널 비중이 상태 정보 기준으로 재조정됨
@@ -76,6 +77,7 @@
 - [2026-04-15] PM 홈은 전역 cashflow 주차 구독이 project 기준 query만 사용하도록 바꿔, cashflow composite index drift가 있어도 포털 첫 화면 전체가 Listen 400 재시도로 흔들리지 않게 보강했다.
 - [2026-04-15] PM 포털 전역 payroll 구독도 `projectId + orderBy` 복합 listen을 제거하고 project 기준 listen 뒤 클라이언트 정렬로 단순화해, 남아 있던 Listen 400 후보를 더 줄였다.
 - [2026-04-15] PM/viewer 경로의 portal/board/hr/training 운영 surface는 역할 기반 safe fetch 모드에서 일회성 조회를 사용하도록 바꿔, 반복 Firestore Listen 400이 포털 전체를 흔드는 구조를 더 줄였다.
+- [2026-04-15] 포털 홈이 직접 붙이던 `transactions` realtime listener를 제거하고, `/portal` 경로에서는 거래 집계도 fetch 기반으로만 읽게 바꿨다.
 - [2026-04-14] `내 제출 현황`을 홈 하단의 compact 제출 상태 표로 흡수했고, 별도 탭과 직접 진입 라우트는 홈으로 정리했다.
 - [2026-04-14] 제출 통합 블록에서는 `인력변경 신청`, `사업비 입력(주간) 작성/제출`, `주간 제출 체크` 같은 중복 섹션을 제외하고 현재 주차 기준 핵심 상태만 남겼다.
 - [2026-04-14] 상단을 Salesforce 계열 SaaS처럼 `workspace bar + app tabs + project switcher` 구조로 재편했다.
