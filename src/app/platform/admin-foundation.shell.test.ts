@@ -22,5 +22,7 @@ describe('admin monitoring foundation shell contract', () => {
 
   it('registers a dedicated cashflow export route under the admin shell', () => {
     expect(routesSource).toContain("{ path: 'cashflow/export', element: <S C={CashflowExportPage} /> }");
+    expect(routesSource).toContain("{ path: 'cashflow/weekly', element: <S C={CashflowWeeklyPage} /> }");
+    expect(routesSource).toContain("{ path: 'cashflow/analytics', element: <S C={CashflowAnalyticsPage} /> }");
   });
 });

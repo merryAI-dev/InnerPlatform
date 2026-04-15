@@ -17,6 +17,8 @@ const ProjectWizardPage = lazy(() => import('./components/projects/ProjectWizard
 const ProjectRegisterRedirectPage = lazy(() => import('./components/projects/ProjectRegisterRedirectPage').then(m => ({ default: m.ProjectRegisterRedirectPage })));
 const LedgerDetailPage = lazy(() => import('./components/ledgers/LedgerDetailPage').then(m => ({ default: m.LedgerDetailPage })));
 const CashflowPage = lazy(() => import('./components/cashflow/CashflowPage').then(m => ({ default: m.CashflowPage })));
+const CashflowWeeklyPage = lazy(() => import('./components/cashflow/CashflowWeeklyPage').then(m => ({ default: m.CashflowWeeklyPage })));
+const CashflowAnalyticsPage = lazy(() => import('./components/cashflow/CashflowAnalyticsPage').then(m => ({ default: m.CashflowAnalyticsPage })));
 const CashflowExportPage = lazy(() => import('./components/cashflow/CashflowExportPage').then(m => ({ default: m.CashflowExportPage })));
 const ProjectCashflowSheetPage = lazy(() => import('./components/cashflow/ProjectCashflowSheetPage').then(m => ({ default: m.ProjectCashflowSheetPage })));
 const EvidenceQueuePage = lazy(() => import('./components/evidence/EvidenceQueuePage').then(m => ({ default: m.EvidenceQueuePage })));
@@ -100,6 +102,8 @@ export const router = createBrowserRouter([
       { path: 'projects/:projectId/edit', element: <S C={ProjectWizardPage} /> },
       { path: 'projects/:projectId/ledgers/:ledgerId', element: <S C={LedgerDetailPage} /> },
       { path: 'cashflow', element: <S C={CashflowPage} /> },
+      { path: 'cashflow/weekly', element: <S C={CashflowWeeklyPage} /> },
+      { path: 'cashflow/analytics', element: <S C={CashflowAnalyticsPage} /> },
       { path: 'cashflow/export', element: <S C={CashflowExportPage} /> },
       { path: 'cashflow/projects', element: <S C={CashflowPage} /> },
       { path: 'cashflow/projects/:projectId', element: <S C={ProjectCashflowSheetPage} /> },
