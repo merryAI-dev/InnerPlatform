@@ -110,3 +110,7 @@
 ## [2026-04-14] patch-note | portal-weekly-expense | navigation guard와 bank wizard 회귀 복구
 - pages: [portal-weekly-expense](./pages/portal-weekly-expense.md)
 - summary: 미저장 사업비 입력 편집은 화면 이동 전에 확인 다이얼로그로 막도록 복구했고, bank import triage wizard의 cashflow category 선택과 fullscreen/주간입력 연계 E2E도 다시 통과하도록 정리했다.
+
+## [2026-04-15] patch-note | portal-bank-statement, portal-weekly-expense | direct handoff row projection
+- pages: [portal-bank-statement](./pages/portal-bank-statement.md), [portal-weekly-expense](./pages/portal-weekly-expense.md)
+- summary: 통장내역 저장 시 신규 은행 행을 현재 주간 사업비 탭으로 바로 merge하도록 바꿔, Queue 없이 `통장내역 -> 사업비 입력(주간)` 운영 경로가 실제로 이어지게 복구했다.

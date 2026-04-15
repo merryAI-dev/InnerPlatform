@@ -3,7 +3,7 @@
 - route: `/portal/weekly-expenses`
 - primary users: PM, 실무 입력 담당자
 - status: active
-- last updated: 2026-04-14
+- last updated: 2026-04-15
 
 ## Purpose
 
@@ -30,6 +30,7 @@
 
 ## Recent Changes
 
+- [2026-04-15] 통장내역 저장 직후 신규 은행 행이 현재 주간 사업비 탭에 바로 나타나도록 연결했다. 별도 Queue나 triage wizard 없이 이 화면에서 바로 편집을 이어간다.
 - [2026-04-14] 미처리 거래 queue strip과 triage wizard 진입을 제거하고, 통장내역 저장본에서 바로 현재 탭 입력으로 이어가는 흐름으로 롤백했다.
 - [2026-04-14] 미저장 편집이 남은 상태에서 통장내역이나 사이드바로 이동하면 확인 다이얼로그를 띄우도록 복구했다.
 - [2026-04-14] bank import triage wizard의 cashflow category 선택값을 정리하고, fullscreen wizard와 주간 입력 화면 간 회귀 E2E를 다시 통과시켰다.

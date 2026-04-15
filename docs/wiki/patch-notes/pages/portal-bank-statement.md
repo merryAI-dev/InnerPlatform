@@ -3,7 +3,7 @@
 - route: `/portal/bank-statements`
 - primary users: PM, 운영 입력 담당자
 - status: active
-- last updated: 2026-04-14
+- last updated: 2026-04-15
 
 ## Purpose
 
@@ -28,6 +28,7 @@
 
 ## Recent Changes
 
+- [2026-04-15] 통장내역 저장 시 업로드한 은행 행을 현재 주간 사업비 탭 행으로 바로 merge하도록 바꿨다. Queue 없이 `통장내역 -> 사업비 입력(주간)` direct handoff가 이어진다.
 - [2026-04-14] `신규 거래 처리 Queue` 카드와 queue-first wizard 액션을 제거하고, 통장내역 저장본에서 바로 사업비 입력으로 이어지는 단일 흐름으로 롤백했다.
 - [2026-04-14] 환수행, 선사용금, 특이건 보조 행 추가 액션을 현재 operator-facing 화면에서 제외했다.
 - [2026-04-14] 빈 초기 화면에서 walkthrough 3단계와 role notice를 제거하고 업로드 박스 하나로 압축했다.
