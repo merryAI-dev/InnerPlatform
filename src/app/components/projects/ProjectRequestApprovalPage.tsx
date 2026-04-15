@@ -27,16 +27,11 @@ import {
 } from '../ui/alert-dialog';
 import { Textarea } from '../ui/textarea';
 import {
-  ACCOUNT_TYPE_LABELS,
-  BASIS_LABELS,
-  PROJECT_STATUS_LABELS,
   PROJECT_TYPE_LABELS,
-  SETTLEMENT_TYPE_LABELS,
   type ProjectRequest,
 } from '../../data/types';
 import { getOrgCollectionPath, getOrgDocumentPath } from '../../lib/firebase';
-import { formatProjectTeamMembersSummary } from '../../platform/project-team-members';
-import { formatStoredProjectAmount } from '../../platform/project-contract-amount';
+import { buildProjectRequestReviewModel, type ProjectRequestReviewItem, type ProjectRequestReviewGroup, type ProjectRequestReviewAnalysisHighlight } from '../../platform/project-request-review';
 
 const STATUS_BADGES: Record<ProjectRequest['status'], string> = {
   PENDING: 'bg-amber-500/15 text-amber-700 dark:text-amber-300',
@@ -46,6 +41,106 @@ const STATUS_BADGES: Record<ProjectRequest['status'], string> = {
 
 interface ProjectRequestApprovalSectionProps {
   compact?: boolean;
+}
+
+const REVIEW_ITEM_STYLES: Record<ProjectRequestReviewItem['status'], string> = {
+  ready: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300',
+  'needs-check': 'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300',
+  missing: 'bg-rose-100 text-rose-800 dark:bg-rose-950/40 dark:text-rose-300',
+};
+
+const REVIEW_BADGE_STYLES: Record<ProjectRequestReviewItem['status'], string> = {
+  ready: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300',
+  'needs-check': 'bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-300',
+  missing: 'bg-rose-50 text-rose-700 dark:bg-rose-950/30 dark:text-rose-300',
+};
+
+function getItemStatusLabel(status: ProjectRequestReviewItem['status']): string {
+  if (status === 'ready') return '확인됨';
+  if (status === 'needs-check') return '확인 필요';
+  return '누락';
+}
+
+function getConfidenceLabel(confidence: ProjectRequestReviewAnalysisHighlight['confidence']): string {
+  if (confidence === 'high') return '고신뢰';
+  if (confidence === 'medium') return '중신뢰';
+  return '저신뢰';
+}
+
+function ReviewFieldRow({ item }: { item: ProjectRequestReviewItem }) {
+  return (
+    <div className="rounded-lg border border-border/60 bg-white/70 p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground">{item.label}</p>
+          <p className="mt-1 whitespace-pre-line text-[12px] text-slate-900" style={{ fontWeight: 500 }}>
+            {item.value}
+          </p>
+          {item.note && (
+            <p className="mt-1 text-[10px] leading-5 text-muted-foreground">{item.note}</p>
+          )}
+        </div>
+        <Badge className={`shrink-0 border-0 text-[9px] h-5 px-1.5 ${REVIEW_BADGE_STYLES[item.status]}`}>
+          {getItemStatusLabel(item.status)}
+        </Badge>
+      </div>
+    </div>
+  );
+}
+
+function ReviewGroupCard({ group }: { group: ProjectRequestReviewGroup }) {
+  return (
+    <div className="rounded-xl border border-border/60 bg-slate-50/70 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[12px]" style={{ fontWeight: 700 }}>{group.label}</p>
+        <Badge variant="secondary" className="text-[9px] px-1.5 py-0 h-5">
+          {group.items.filter((item) => item.status !== 'ready').length}건 확인
+        </Badge>
+      </div>
+      <div className="mt-3 grid gap-2 md:grid-cols-2">
+        {group.items.map((item) => <ReviewFieldRow key={item.key} item={item} />)}
+      </div>
+    </div>
+  );
+}
+
+function ReviewAnalysisHighlightCard({ highlight }: { highlight: ProjectRequestReviewAnalysisHighlight }) {
+  return (
+    <div className="rounded-lg border border-border/60 bg-white/80 p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground">{highlight.label}</p>
+          <p className="mt-1 text-[12px] text-slate-900" style={{ fontWeight: 500 }}>{highlight.value}</p>
+          <p className="mt-1 text-[10px] leading-5 text-muted-foreground">{highlight.evidence}</p>
+        </div>
+        <div className="flex flex-col items-end gap-1 shrink-0">
+          <Badge className={`border-0 text-[9px] h-5 px-1.5 ${REVIEW_BADGE_STYLES[highlight.status]}`}>
+            {getItemStatusLabel(highlight.status)}
+          </Badge>
+          <Badge variant="secondary" className="text-[9px] px-1.5 py-0 h-5">
+            {getConfidenceLabel(highlight.confidence)}
+          </Badge>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ReviewFactCard({ item }: { item: ProjectRequestReviewItem }) {
+  return (
+    <div className="rounded-lg border border-border/60 bg-white/80 p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground">{item.label}</p>
+          <p className="mt-1 text-[13px] text-slate-900" style={{ fontWeight: 600 }}>{item.value}</p>
+          {item.note && <p className="mt-1 text-[10px] leading-5 text-muted-foreground">{item.note}</p>}
+        </div>
+        <Badge className={`shrink-0 border-0 text-[9px] h-5 px-1.5 ${REVIEW_BADGE_STYLES[item.status]}`}>
+          {getItemStatusLabel(item.status)}
+        </Badge>
+      </div>
+    </div>
+  );
 }
 
 function useProjectRequests() {
@@ -201,6 +296,189 @@ function ProjectRequestApprovalDialog({
   );
 }
 
+function ProjectRequestReviewCard({
+  request,
+  compact,
+  canApprove,
+  onApprove,
+  onReject,
+}: {
+  request: ProjectRequest;
+  compact: boolean;
+  canApprove: boolean;
+  onApprove: (request: ProjectRequest) => void;
+  onReject: (request: ProjectRequest) => void;
+}) {
+  const model = useMemo(() => buildProjectRequestReviewModel(request), [request]);
+
+  return (
+    <Card className={`border-slate-200/80 shadow-sm ${compact ? 'bg-white/90' : 'bg-white'}`}>
+      <CardHeader className={compact ? 'pb-3' : 'pb-4'}>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <CardTitle className="text-[15px]" style={{ fontWeight: 700 }}>
+                {model.summary.title}
+              </CardTitle>
+              <Badge className="border-0 bg-teal-100 text-teal-800 text-[10px]">
+                {model.summary.decisionLabel}
+              </Badge>
+              <Badge className={`border-0 text-[10px] ${STATUS_BADGES[request.status]}`}>
+                {request.status === 'PENDING' ? '대기' : request.status === 'APPROVED' ? '승인' : '반려'}
+              </Badge>
+            </div>
+            <p className="mt-1 text-[11px] text-muted-foreground">{model.summary.subtitle}</p>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              {PROJECT_TYPE_LABELS[request.payload.type]} · {request.payload.clientOrg || '-'} · {request.payload.department || '-'}
+            </p>
+          </div>
+        </div>
+      </CardHeader>
+
+      <CardContent className="space-y-4 pt-0">
+        <section data-testid="project-request-review-summary" className="rounded-xl border border-border/60 bg-slate-50/80 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-[12px]" style={{ fontWeight: 700 }}>리뷰 요약</p>
+              <p className="mt-1 text-[12px] text-muted-foreground">
+                누락 {model.summary.missingCount}건 · 확인 필요 {model.summary.needsCheckCount}건
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {model.badges.map((badge) => (
+                <Badge
+                  key={badge.label}
+                  className={`border-0 text-[10px] ${badge.tone === 'critical'
+                    ? 'bg-rose-100 text-rose-700'
+                    : badge.tone === 'warning'
+                      ? 'bg-amber-100 text-amber-700'
+                      : badge.tone === 'success'
+                        ? 'bg-emerald-100 text-emerald-700'
+                        : 'bg-slate-100 text-slate-700'}`}
+                >
+                  {badge.label}
+                </Badge>
+              ))}
+            </div>
+          </div>
+
+          {model.missingFields.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {model.missingFields.slice(0, 6).map((item) => (
+                <Badge key={item.key} className="border-0 bg-rose-50 text-rose-700 text-[10px]">
+                  {item.label}
+                </Badge>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section data-testid="project-request-review-analysis" className="rounded-xl border border-border/60 bg-white p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-[12px]" style={{ fontWeight: 700 }}>AI 계약 분석</p>
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                {model.analysis.available ? '계약서 초안과 검토 포인트를 함께 보여줍니다.' : '계약서 AI 분석이 아직 없습니다.'}
+              </p>
+            </div>
+            <Badge variant="secondary" className="text-[10px]">
+              {model.analysis.providerLabel} · {model.analysis.model}
+            </Badge>
+          </div>
+          <div className="mt-3 rounded-lg border border-teal-200/60 bg-teal-50/60 p-3">
+            <p className="text-[12px] text-teal-900" style={{ fontWeight: 600 }}>{model.analysis.summary}</p>
+          </div>
+          <div className="mt-3 grid gap-2 md:grid-cols-2">
+            <div className="rounded-lg border border-border/60 bg-slate-50/70 p-3">
+              <p className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground">확인 필요</p>
+              <ul className="mt-2 space-y-1 text-[11px] text-slate-700">
+                {model.analysis.warnings.map((warning) => (
+                  <li key={warning}>• {warning}</li>
+                ))}
+              </ul>
+            </div>
+            <div className="rounded-lg border border-border/60 bg-slate-50/70 p-3">
+              <p className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground">다음 행동</p>
+              <ul className="mt-2 space-y-1 text-[11px] text-slate-700">
+                {model.analysis.nextActions.map((action) => (
+                  <li key={action}>• {action}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+          {model.analysis.highlights.length > 0 && (
+            <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+              {model.analysis.highlights.map((highlight) => (
+                <ReviewAnalysisHighlightCard key={String(highlight.key)} highlight={highlight} />
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section data-testid="project-request-review-facts" className="rounded-xl border border-border/60 bg-slate-50/80 p-4">
+          <p className="text-[12px]" style={{ fontWeight: 700 }}>핵심 재무/정산</p>
+          <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+            {model.facts.financial.map((item) => <ReviewFactCard key={item.key} item={item} />)}
+            {model.facts.settlement.map((item) => <ReviewFactCard key={item.key} item={item} />)}
+          </div>
+        </section>
+
+        <section data-testid="project-request-review-checklist" className="rounded-xl border border-border/60 bg-white p-4">
+          <p className="text-[12px]" style={{ fontWeight: 700 }}>승인 체크리스트</p>
+          <div className="mt-3 space-y-3">
+            {model.checklistGroups.map((group) => <ReviewGroupCard key={group.key} group={group} />)}
+          </div>
+        </section>
+
+        {request.payload.contractDocument?.downloadURL && (
+          <div className="rounded-xl border border-border/60 bg-slate-50/80 p-3 text-[11px] text-muted-foreground">
+            첨부 계약서:
+            {' '}
+            <a
+              href={request.payload.contractDocument.downloadURL}
+              target="_blank"
+              rel="noreferrer"
+              className="underline underline-offset-2"
+            >
+              {request.payload.contractDocument.name}
+            </a>
+          </div>
+        )}
+
+        {request.status === 'REJECTED' && request.rejectedReason && (
+          <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700">
+            반려 사유: {request.rejectedReason}
+          </div>
+        )}
+
+        {request.status === 'PENDING' && (
+          <div className="flex items-center gap-2 pt-1">
+            <Button
+              size="sm"
+              className="h-7 text-[11px]"
+              onClick={() => onApprove(request)}
+              disabled={!canApprove}
+            >
+              <CheckCircle2 className="mr-1 h-3 w-3" />
+              승인
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-[11px]"
+              onClick={() => onReject(request)}
+              disabled={!canApprove}
+            >
+              <XCircle className="mr-1 h-3 w-3" />
+              반려
+            </Button>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export function ProjectRequestApprovalSection({ compact = false }: ProjectRequestApprovalSectionProps) {
   const state = useProjectRequests();
   const { requests, loading, canApprove, openApprove, openReject } = state;
@@ -212,7 +490,7 @@ export function ProjectRequestApprovalSection({ compact = false }: ProjectReques
         <ClipboardCheck className="h-4 w-4 text-teal-600" />
         <div>
           <h2 className="text-[15px] font-semibold text-slate-900">사업 등록 요청</h2>
-          <p className="text-[11px] text-slate-500">포털에서 제출된 등록 제안을 같은 승인 큐에서 처리합니다</p>
+          <p className="text-[11px] text-slate-500">포털에서 제출된 등록 제안을 계약 AI 분석, 재무/정산, 체크리스트와 함께 처리합니다</p>
         </div>
         <Badge className="ml-auto bg-teal-100 text-teal-800">{pendingCount}건 대기</Badge>
       </div>
@@ -234,158 +512,14 @@ export function ProjectRequestApprovalSection({ compact = false }: ProjectReques
           <CardContent className={compact ? 'p-4' : 'pt-0'}>
             <div className="space-y-3">
               {requests.map((req) => (
-                <div key={req.id} className="rounded-lg border border-border/60 p-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-[13px] font-semibold text-slate-900">{req.payload.name}</p>
-                      <p className="text-[11px] text-muted-foreground">
-                        {PROJECT_TYPE_LABELS[req.payload.type]} · {req.payload.clientOrg || '-'}
-                      </p>
-                      <p className="mt-1 text-[10px] text-muted-foreground">
-                        요청자 {req.requestedByName || '-'} · {req.requestedAt?.slice(0, 10) || '-'}
-                      </p>
-                    </div>
-                    <Badge className={`text-[9px] h-4 px-1.5 border-0 ${STATUS_BADGES[req.status]}`}>
-                      {req.status === 'PENDING' ? '대기' : req.status === 'APPROVED' ? '승인' : '반려'}
-                    </Badge>
-                  </div>
-
-                  <div className="mt-3 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
-                    <span>계약기간 {req.payload.contractStart || '-'} ~ {req.payload.contractEnd || '-'}</span>
-                    <span>계약금액 {formatStoredProjectAmount(req.payload.contractAmount, req.payload.financialInputFlags?.contractAmount)}</span>
-                    <span>상태 {PROJECT_STATUS_LABELS.CONTRACT_PENDING}</span>
-                  </div>
-
-                  <div className="mt-3 grid grid-cols-1 gap-2 text-[10px] text-muted-foreground md:grid-cols-2">
-                    <div className="flex items-center gap-2">
-                      <span className="min-w-[80px]">공식계약명</span>
-                      <span className="text-foreground/80">{req.payload.officialContractName || '-'}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="min-w-[80px]">등록명</span>
-                      <span className="text-foreground/80">{req.payload.name || '-'}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="min-w-[80px]">담당조직</span>
-                      <span className="text-foreground/80">{req.payload.department || '-'}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="min-w-[80px]">담당자</span>
-                      <span className="text-foreground/80">{req.payload.managerName || '-'}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="min-w-[80px]">팀원</span>
-                      <span className="whitespace-pre-line text-foreground/80">
-                        {formatProjectTeamMembersSummary(req.payload.teamMembersDetailed, req.payload.teamMembers, '\n')}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="min-w-[80px]">계약대상</span>
-                      <span className="text-foreground/80">{req.payload.clientOrg || '-'}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="min-w-[80px]">참여조건</span>
-                      <span className="text-foreground/80">{req.payload.participantCondition || '-'}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="min-w-[80px]">매출부가세</span>
-                      <span className="text-foreground/80">
-                        {formatStoredProjectAmount(req.payload.salesVatAmount, req.payload.financialInputFlags?.salesVatAmount)}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="min-w-[80px]">총수익</span>
-                      <span className="text-foreground/80">
-                        {formatStoredProjectAmount(req.payload.totalRevenueAmount, req.payload.financialInputFlags?.totalRevenueAmount)}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="min-w-[80px]">지원금</span>
-                      <span className="text-foreground/80">
-                        {formatStoredProjectAmount(req.payload.supportAmount, req.payload.financialInputFlags?.supportAmount)}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="min-w-[80px]">정산유형</span>
-                      <span className="text-foreground/80">
-                        {req.payload.settlementType ? SETTLEMENT_TYPE_LABELS[req.payload.settlementType] : '-'}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="min-w-[80px]">기준</span>
-                      <span className="text-foreground/80">
-                        {req.payload.basis ? BASIS_LABELS[req.payload.basis] : '-'}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="min-w-[80px]">계좌유형</span>
-                      <span className="text-foreground/80">
-                        {req.payload.accountType ? ACCOUNT_TYPE_LABELS[req.payload.accountType] : '-'}
-                      </span>
-                    </div>
-                    <div className="flex items-start gap-2 md:col-span-2">
-                      <span className="min-w-[80px]">목적</span>
-                      <span className="text-foreground/80">{req.payload.projectPurpose || '-'}</span>
-                    </div>
-                    <div className="flex items-start gap-2 md:col-span-2">
-                      <span className="min-w-[80px]">주요내용</span>
-                      <span className="text-foreground/80">{req.payload.description || '-'}</span>
-                    </div>
-                    <div className="flex items-start gap-2 md:col-span-2">
-                      <span className="min-w-[80px]">수령/정산</span>
-                      <span className="text-foreground/80">{req.payload.settlementGuide || '-'}</span>
-                    </div>
-                    <div className="flex items-start gap-2 md:col-span-2">
-                      <span className="min-w-[80px]">첨부</span>
-                      {req.payload.contractDocument?.downloadURL ? (
-                        <a
-                          href={req.payload.contractDocument.downloadURL}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-foreground/80 underline underline-offset-2"
-                        >
-                          {req.payload.contractDocument.name}
-                        </a>
-                      ) : (
-                        <span className="text-foreground/80">-</span>
-                      )}
-                    </div>
-                    <div className="flex items-start gap-2 md:col-span-2">
-                      <span className="min-w-[80px]">비고</span>
-                      <span className="text-foreground/80">{req.payload.note || '-'}</span>
-                    </div>
-                  </div>
-
-                  {req.status === 'REJECTED' && req.rejectedReason && (
-                    <div className="mt-2 text-[10px] text-rose-600">
-                      반려 사유: {req.rejectedReason}
-                    </div>
-                  )}
-
-                  {req.status === 'PENDING' && (
-                    <div className="mt-3 flex items-center gap-2">
-                      <Button
-                        size="sm"
-                        className="h-7 text-[11px]"
-                        onClick={() => openApprove(req)}
-                        disabled={!canApprove}
-                      >
-                        <CheckCircle2 className="mr-1 h-3 w-3" />
-                        승인
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-7 text-[11px]"
-                        onClick={() => openReject(req)}
-                        disabled={!canApprove}
-                      >
-                        <XCircle className="mr-1 h-3 w-3" />
-                        반려
-                      </Button>
-                    </div>
-                  )}
-                </div>
+                <ProjectRequestReviewCard
+                  key={req.id}
+                  request={req}
+                  compact={compact}
+                  canApprove={canApprove}
+                  onApprove={openApprove}
+                  onReject={openReject}
+                />
               ))}
 
               {requests.length === 0 && (

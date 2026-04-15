@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import {
   Search, ArrowUpDown, Sparkles, CheckCircle2, ArrowRight,
-  FolderKanban, RotateCcw, Trash2,
+  FolderKanban, RotateCcw, Trash2, FileText, Clock, AlertTriangle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardContent } from '../ui/card';
@@ -40,7 +40,7 @@ type SortKey = 'name' | 'contractAmount' | 'status';
 type SortDir = 'asc' | 'desc';
 
 export function ProjectListPage() {
-  const { allProjects, restoreProject } = useAppStore();
+  const { allProjects, restoreProject, ledgers, transactions } = useAppStore();
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
@@ -49,6 +49,7 @@ export function ProjectListPage() {
   const [sortKey, setSortKey] = useState<SortKey>('contractAmount');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [activeTab, setActiveTab] = useState<string>('confirmed');
+  const [monitoringPreset, setMonitoringPreset] = useState<'all' | 'no-ledger' | 'pending-approval' | 'missing-evidence'>('all');
 
   const activeProjects = useMemo(
     () => allProjects.filter((project) => !project.trashedAt),
@@ -66,20 +67,48 @@ export function ProjectListPage() {
     () => activeProjects.filter((project) => project.phase === 'PROSPECT'),
     [activeProjects],
   );
-  const baseProjects = activeTab === 'trash'
+  const tabProjects = activeTab === 'trash'
     ? trashedProjects
     : activeTab === 'confirmed'
       ? confirmedProjects
       : prospectProjects;
 
+  const projectTransactions = useMemo(() => {
+    const map = new Map<string, typeof transactions>();
+    transactions.forEach((transaction) => {
+      const list = map.get(transaction.projectId) || [];
+      list.push(transaction);
+      map.set(transaction.projectId, list);
+    });
+    return map;
+  }, [transactions]);
+
+  const monitoringCounts = useMemo(() => {
+    const noLedger = activeProjects.filter((project) => project.phase === 'CONFIRMED' && !ledgers.some((ledger) => ledger.projectId === project.id)).length;
+    const pendingApproval = activeProjects.filter((project) => (projectTransactions.get(project.id) || []).some((transaction) => transaction.state === 'SUBMITTED')).length;
+    const missingEvidence = activeProjects.filter((project) => (projectTransactions.get(project.id) || []).some((transaction) => transaction.evidenceStatus !== 'COMPLETE' && transaction.state !== 'REJECTED')).length;
+    return { noLedger, pendingApproval, missingEvidence };
+  }, [activeProjects, ledgers, projectTransactions]);
+
+  const monitoringProjects = useMemo(() => {
+    if (monitoringPreset === 'all') return tabProjects;
+    if (monitoringPreset === 'no-ledger') {
+      return tabProjects.filter((project) => project.phase === 'CONFIRMED' && !ledgers.some((ledger) => ledger.projectId === project.id));
+    }
+    if (monitoringPreset === 'pending-approval') {
+      return tabProjects.filter((project) => (projectTransactions.get(project.id) || []).some((transaction) => transaction.state === 'SUBMITTED'));
+    }
+    return tabProjects.filter((project) => (projectTransactions.get(project.id) || []).some((transaction) => transaction.evidenceStatus !== 'COMPLETE' && transaction.state !== 'REJECTED'));
+  }, [ledgers, monitoringPreset, projectTransactions, tabProjects]);
+
   const departments = useMemo(() => {
-    const depts = new Set(baseProjects.map((project) => project.department).filter(Boolean));
+    const depts = new Set(monitoringProjects.map((project) => project.department).filter(Boolean));
     return Array.from(depts).sort();
-  }, [baseProjects]);
+  }, [monitoringProjects]);
   const hasActiveFilters = !!search || statusFilter !== 'ALL' || typeFilter !== 'ALL' || deptFilter !== 'ALL';
 
   const filtered = useMemo(() => {
-    let result = baseProjects.filter(p => {
+    let result = monitoringProjects.filter(p => {
       if (search) {
         const q = search.toLowerCase();
         const matches = p.name.toLowerCase().includes(q)
@@ -106,7 +135,14 @@ export function ProjectListPage() {
     });
 
     return result;
-  }, [baseProjects, search, statusFilter, typeFilter, deptFilter, sortKey, sortDir]);
+  }, [monitoringProjects, search, statusFilter, typeFilter, deptFilter, sortKey, sortDir]);
+
+  const handleMonitoringPreset = (preset: 'all' | 'no-ledger' | 'pending-approval' | 'missing-evidence') => {
+    setMonitoringPreset(preset);
+    if (preset !== 'all' && activeTab === 'trash') {
+      setActiveTab('confirmed');
+    }
+  };
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -308,8 +344,72 @@ export function ProjectListPage() {
         description={`활성 ${activeProjects.length}개 사업 · 확정 ${confirmedProjects.length} / 예정 ${prospectProjects.length} / 휴지통 ${trashedProjects.length}`}
       />
 
+      <Card className="border-slate-200/80 bg-gradient-to-r from-slate-50 via-white to-teal-50/70">
+        <CardContent className="p-4">
+          <div className="flex flex-wrap items-center gap-2" data-testid="project-monitoring-presets">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">모니터링 프리셋</span>
+            <Button
+              variant={monitoringPreset === 'all' ? 'default' : 'outline'}
+              size="sm"
+              className="h-8 gap-1.5 text-[11px]"
+              onClick={() => handleMonitoringPreset('all')}
+            >
+              <FolderKanban className="h-3.5 w-3.5" />
+              전체
+            </Button>
+            <Button
+              variant={monitoringPreset === 'no-ledger' ? 'default' : 'outline'}
+              size="sm"
+              className="h-8 gap-1.5 text-[11px]"
+              onClick={() => handleMonitoringPreset('no-ledger')}
+              data-testid="project-monitoring-preset-no-ledger"
+            >
+              <FileText className="h-3.5 w-3.5" />
+              원장 없음
+              <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 py-0">
+                {monitoringCounts.noLedger}
+              </Badge>
+            </Button>
+            <Button
+              variant={monitoringPreset === 'pending-approval' ? 'default' : 'outline'}
+              size="sm"
+              className="h-8 gap-1.5 text-[11px]"
+              onClick={() => handleMonitoringPreset('pending-approval')}
+              data-testid="project-monitoring-preset-pending-approval"
+            >
+              <Clock className="h-3.5 w-3.5" />
+              승인 대기
+              <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 py-0">
+                {monitoringCounts.pendingApproval}
+              </Badge>
+            </Button>
+            <Button
+              variant={monitoringPreset === 'missing-evidence' ? 'default' : 'outline'}
+              size="sm"
+              className="h-8 gap-1.5 text-[11px]"
+              onClick={() => handleMonitoringPreset('missing-evidence')}
+              data-testid="project-monitoring-preset-missing-evidence"
+            >
+              <AlertTriangle className="h-3.5 w-3.5" />
+              증빙 미제출
+              <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 py-0">
+                {monitoringCounts.missingEvidence}
+              </Badge>
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) => {
+          setActiveTab(value);
+          if (value === 'trash') {
+            setMonitoringPreset('all');
+          }
+        }}
+      >
         <TabsList>
           <TabsTrigger value="confirmed" className="gap-1.5" data-testid="projects-tab-confirmed">
             <CheckCircle2 className="w-3.5 h-3.5" />
