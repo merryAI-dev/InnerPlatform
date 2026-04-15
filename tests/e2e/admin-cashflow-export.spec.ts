@@ -25,11 +25,11 @@ async function loginAsPm(page: Page) {
 
 test('admin can access cashflow export page and trigger workbook download', async ({ page }) => {
   await loginAsAdmin(page);
-  await page.goto('/cashflow');
+  await page.goto('/cashflow/export');
 
-  await expect(page).toHaveURL(/\/cashflow$/);
+  await expect(page).toHaveURL(/\/cashflow\/export$/);
   await expect(page.getByTestId('cashflow-export-page')).toBeVisible();
-  await expect(page.getByRole('heading', { name: '경영기획실 전용 캐시플로 추출 화면' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '캐시플로 내보내기' })).toBeVisible();
   await expect(page.getByTestId('cashflow-export-step-range')).toBeVisible();
   await expect(page.getByTestId('cashflow-export-step-period')).toBeVisible();
   await expect(page.getByRole('columnheader', { name: '이번주 작성' })).toBeVisible();
@@ -45,7 +45,7 @@ test('admin can access cashflow export page and trigger workbook download', asyn
 
 test('admin cashflow export controls have strong field boundaries and visible dropdown affordances', async ({ page }) => {
   await loginAsAdmin(page);
-  await page.goto('/cashflow');
+  await page.goto('/cashflow/export');
 
   const scopeTrigger = page.getByTestId('cashflow-export-scope');
   const variantTrigger = page.getByTestId('cashflow-export-variant');
@@ -56,21 +56,30 @@ test('admin cashflow export controls have strong field boundaries and visible dr
   await expect(variantTrigger.locator('svg').last()).toHaveCSS('opacity', '1');
 });
 
-test('admin can filter cashflow export targets by settlement basis', async ({ page }) => {
+test('admin can reach the cashflow monitoring hub before using export tools', async ({ page }) => {
   await loginAsAdmin(page);
   await page.goto('/cashflow');
 
-  await page.getByTestId('cashflow-export-basis').click();
-  await page.getByRole('option', { name: '공급대가' }).click();
+  await expect(page).toHaveURL(/\/cashflow$/);
+  await expect(page.getByRole('heading', { name: '캐시플로 모니터링 허브' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '열기' }).first()).toBeVisible();
+  await expect(page.getByRole('button', { name: '엑셀 내보내기 열기' })).toBeVisible();
+});
 
-  await expect(page.getByTestId('cashflow-export-step-basis')).toContainText('공급대가');
-  await expect(page.getByText('현대 모비스 CSV OI 컨설팅')).toBeVisible();
-  await expect(page.locator('[data-testid^="cashflow-export-row-"]')).toHaveCount(1);
+test('admin can filter cashflow export targets by account type', async ({ page }) => {
+  await loginAsAdmin(page);
+  await page.goto('/cashflow/export');
+
+  await page.getByTestId('cashflow-export-account-type').click();
+  await page.getByRole('option', { name: '일반 사업' }).click();
+
+  await expect(page.getByTestId('cashflow-export-step-account-type')).toContainText('일반 사업');
+  await expect(page.locator('[data-testid^="cashflow-export-row-"]').first()).toBeVisible();
 });
 
 test('admin cashflow export uses a monochrome hierarchy for filter cards', async ({ page }) => {
   await loginAsAdmin(page);
-  await page.goto('/cashflow');
+  await page.goto('/cashflow/export');
 
   await expect(page.getByTestId('cashflow-export-step-range')).toHaveClass(/bg-stone-50/);
   await expect(page.getByTestId('cashflow-export-step-project')).toHaveClass(/bg-stone-50/);
@@ -81,6 +90,6 @@ test('pm is redirected away from admin cashflow export route', async ({ page }) 
   await loginAsPm(page);
   await page.goto('/cashflow');
 
-  await expect(page).toHaveURL(/\/portal$/);
+  await expect(page).toHaveURL(/\/portal\/project-select\?redirect=%2Fportal$/);
   await expect(page.getByTestId('cashflow-export-page')).toHaveCount(0);
 });
