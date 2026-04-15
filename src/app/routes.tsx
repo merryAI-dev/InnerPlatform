@@ -1,6 +1,7 @@
 import { lazy, Suspense, type ComponentType } from 'react';
 import { createBrowserRouter, Navigate } from 'react-router';
 import { AppLayout } from './components/layout/AppLayout';
+import { PortalEntryLayout } from './components/portal/PortalEntryLayout';
 import { PortalLayout } from './components/portal/PortalLayout';
 import { AdminRouteProviders } from './data/admin-route-providers';
 import { PortalRouteProviders } from './data/portal-route-providers';
@@ -87,6 +88,10 @@ function PortalRouteShell() {
   return <PortalRouteProviders><PortalLayout /></PortalRouteProviders>;
 }
 
+function PortalEntryRouteShell() {
+  return <PortalEntryLayout />;
+}
+
 export const router = createBrowserRouter([
   // ── Login ──
   { path: '/login', element: <S C={LoginPage} /> },
@@ -134,6 +139,13 @@ export const router = createBrowserRouter([
       { path: '*', element: <S C={NotFoundPage} /> },
     ],
   },
+  {
+    path: '/portal',
+    element: <PortalEntryRouteShell />,
+    children: [
+      { path: 'project-select', element: <S C={PortalProjectSelectPage} /> },
+    ],
+  },
   // ── Portal (사용자/PM 전용) ──
   {
     path: '/portal',
@@ -149,7 +161,6 @@ export const router = createBrowserRouter([
         ],
       },
       { path: 'onboarding', element: <S C={PortalOnboarding} /> },
-      { path: 'project-select', element: <S C={PortalProjectSelectPage} /> },
       { path: 'project-settings', element: <S C={PortalProjectSettings} /> },
       { path: 'submissions', element: <Navigate to="/portal" replace /> },
       { path: 'payroll', element: <S C={PortalPayrollPage} /> },

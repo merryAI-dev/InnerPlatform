@@ -172,6 +172,10 @@ export const memberRoleUpdateSchema = z.object({
 
 export const memberDeepSyncSchema = memberRoleUpdateSchema;
 
+export const portalSessionProjectSchema = z.object({
+  projectId: NON_EMPTY_STRING,
+}).strict();
+
 export const cashflowExportSchema = z.object({
   scope: z.enum(['all', 'single']),
   projectId: z.string().trim().optional(),

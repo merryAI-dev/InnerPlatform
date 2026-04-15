@@ -9,6 +9,7 @@ export interface PortalProjectCandidateSet {
 const PORTAL_PATH_PREFIX = '/portal';
 const PORTAL_PROJECT_SELECT_PATH = '/portal/project-select';
 const PORTAL_PROJECT_SWITCH_FALLBACK_PATH = '/portal';
+const ACTIVE_PORTAL_PROJECT_STORAGE_KEY = 'mysc-portal-active-project';
 const ADMIN_PROJECT_ROLES = new Set<UserRole>(['admin', 'finance']);
 
 function normalizeRole(role: unknown): UserRole | null {
@@ -45,6 +46,37 @@ function sortProjects(projects: Project[]): Project[] {
 
 function isPortalPath(pathname: string): boolean {
   return pathname === PORTAL_PATH_PREFIX || pathname.startsWith(`${PORTAL_PATH_PREFIX}/`);
+}
+
+export function getActivePortalProjectStorageKey(uid: string | null | undefined): string {
+  return `${ACTIVE_PORTAL_PROJECT_STORAGE_KEY}:${String(uid || '').trim()}`;
+}
+
+export function readSessionActivePortalProjectId(uid: string | null | undefined): string {
+  if (typeof sessionStorage === 'undefined') return '';
+  try {
+    return sessionStorage.getItem(getActivePortalProjectStorageKey(uid)) || '';
+  } catch {
+    return '';
+  }
+}
+
+export function writeSessionActivePortalProjectId(
+  uid: string | null | undefined,
+  projectId: string | null | undefined,
+): void {
+  if (typeof sessionStorage === 'undefined') return;
+  const storageKey = getActivePortalProjectStorageKey(uid);
+  const normalizedProjectId = typeof projectId === 'string' ? projectId.trim() : '';
+  try {
+    if (normalizedProjectId) {
+      sessionStorage.setItem(storageKey, normalizedProjectId);
+    } else {
+      sessionStorage.removeItem(storageKey);
+    }
+  } catch {
+    // ignore sessionStorage failures
+  }
 }
 
 export function resolvePortalProjectCandidates(input: {

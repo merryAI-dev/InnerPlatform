@@ -83,6 +83,7 @@ import { createSlackAlertService } from './slack-alerts.mjs';
 import { updateCounterpartyHistory, lookupCounterpartyHistory } from './counterparty-budget-history.mjs';
 
 import { mountProjectRoutes } from './routes/projects.mjs';
+import { mountPortalEntryRoutes } from './routes/portal-entry.mjs';
 import { mountLedgerRoutes } from './routes/ledgers.mjs';
 import { mountTransactionRoutes } from './routes/transactions.mjs';
 import { mountAuditRoutes } from './routes/audit.mjs';
@@ -1349,6 +1350,7 @@ export function createBffApp(options = {}) {
     projectRequestContractAiService, projectRequestContractStorageService,
     projectSheetSourceStorageService, projectRegistrationSlackService,
   });
+  mountPortalEntryRoutes(app, { db, createMutatingRoute, idempotencyService });
   mountCashflowExportRoutes(app, { db, rbacPolicy });
   mountLedgerRoutes(app, { db, now, idempotencyService, auditChainService, piiProtector });
   mountTransactionRoutes(app, { db, now, idempotencyService, auditChainService, piiProtector, rbacPolicy, driveService });

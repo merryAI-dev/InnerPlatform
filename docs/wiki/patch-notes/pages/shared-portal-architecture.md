@@ -21,6 +21,8 @@
 - [x] `Firestore direct 유지`와 `전면 재플랫폼`은 비교안으로만 정리됨
 - [x] 포털은 fetch-first, realtime allowlist-only 원칙을 채택함
 - [x] route-scoped provider split이 1차 이행 과제로 정의됨
+- [x] `/portal/project-select` entry surface가 portal workspace shell 밖의 lightweight entry shell로 분리됨
+- [x] entry surface는 `entry-context` read model + `session-project` command API를 사용함
 - [x] portal dashboard / submissions / weekly expense / bank statement / payroll summary read model 이행 계획이 정의됨
 - [x] critical write path를 command API로 이동하는 단계가 플랜에 포함됨
 - [x] App 루트 broad provider tree가 admin/portal route shell로 분리됨
@@ -34,6 +36,8 @@
 - [2026-04-15] 6~8주 RFC에서 route-scoped provider split, read model API, critical write command, admin summary cutover 순서를 고정했다.
 - [2026-04-15] 포털 문제의 본질을 Firestore 자체가 아니라 클라이언트의 분산된 data access policy로 명시했다.
 - [2026-04-15] Phase 1 구현으로 App 루트 broad provider를 admin/portal route shell로 분리하고, `portal-safe`/`admin-live` access mode를 route provider에서 주입하도록 바꿨다.
+- [2026-04-15] Phase 1a 구현으로 `/portal/project-select`를 lightweight entry shell로 분리하고, portal store bootstrap 대신 BFF `entry-context`/`session-project` 계약을 쓰도록 옮겼다.
+- [2026-04-15] entry hardening과 함께 self-hosted Pretendard + immutable asset cache 정책을 추가해, HAR에서 보인 entry surface 네트워크 낭비를 줄이는 방향으로 첫 조치를 넣었다.
 
 ## Known Notes
 
@@ -46,10 +50,15 @@
 - `docs/operations/2026-04-15-portal-hybrid-stabilization-plan.md`
 - `src/app/App.tsx`
 - `src/app/routes.tsx`
+- `src/app/components/portal/PortalEntryLayout.tsx`
 - `src/app/data/admin-route-providers.tsx`
 - `src/app/data/portal-route-providers.tsx`
 - `src/app/data/firestore-realtime-mode.ts`
 - `src/app/data/portal-store.tsx`
+- `src/app/lib/platform-bff-client.ts`
+- `server/bff/routes/portal-entry.mjs`
+- `src/styles/fonts.css`
+- `vercel.json`
 - `src/app/data/payroll-store.tsx`
 - `src/app/data/cashflow-weeks-store.tsx`
 - `src/app/data/board-store.tsx`
@@ -61,9 +70,11 @@
 - 반복적인 Firestore `Listen 400`, 포털 flicker, route/provider coupling 이슈가 누적되며 단기 핫픽스로는 한계가 분명해졌다.
 - 운영 화면이 raw Firestore query를 직접 조합하는 구조를 줄이고, 읽기 계약을 BFF로 모으는 것이 장기 안정화의 핵심으로 정리됐다.
 - 이번 phase는 provider를 옮기는 수준이 아니라, route shell이 data access policy를 명시적으로 주입하게 만든 첫 구조 변경이다.
+- Phase 1a는 실제 HAR 병목이 나온 `project-select` entry surface를 우선 잘라낸 것으로, 장기 RFC를 화면 단위 read model 이행으로 연결하는 첫 concrete slice다.
 
 ## Next Watch Points
 
 - Phase 0~1이 실제로 broad provider tree를 얼마나 줄이는지
+- entry surface가 다시 Firestore direct read/write path를 끌어오지 않는지
 - read model endpoint가 raw model drift 없이 유지되는지
 - 새 포털 기능이 다시 Firestore direct path로 들어오지 않는지

@@ -15,10 +15,13 @@ describe('route-scoped provider architecture', () => {
     expect(appSource).not.toContain('<CareerProfileProvider>');
   });
 
-  it('mounts dedicated admin and portal provider wrappers in routes', () => {
+  it('mounts dedicated admin, portal workspace, and portal entry wrappers in routes', () => {
     expect(routesSource).toContain('AdminRouteProviders');
     expect(routesSource).toContain('PortalRouteProviders');
+    expect(routesSource).toContain('PortalEntryLayout');
+    expect(routesSource).toContain('function PortalEntryRouteShell()');
     expect(routesSource).toContain('<AdminRouteProviders><AppLayout /></AdminRouteProviders>');
     expect(routesSource).toContain('<PortalRouteProviders><PortalLayout /></PortalRouteProviders>');
+    expect(routesSource).toContain('<PortalEntryLayout />');
   });
 });

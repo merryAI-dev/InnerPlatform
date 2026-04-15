@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-04-15] patch-note | portal-project-select, shared-portal-architecture | HAR entry hardening
+- pages: [portal-project-select](./pages/portal-project-select.md), [shared-portal-architecture](./pages/shared-portal-architecture.md)
+- summary: HAR 기준으로 Firestore channel churn이 심했던 `/portal/project-select`를 portal workspace shell 밖의 lightweight entry shell로 분리하고, portal store bootstrap 대신 BFF `entry-context`/`session-project` 계약을 사용하도록 옮겼다. 동시에 self-hosted Pretendard와 immutable asset cache 정책을 적용해 entry surface 초기 네트워크 낭비를 줄이기 시작했다.
+
 ## [2026-04-15] patch-note | shared-portal-architecture | route-scoped provider and access policy split
 - pages: [shared-portal-architecture](./pages/shared-portal-architecture.md), [portal-dashboard](./pages/portal-dashboard.md), [portal-payroll](./pages/portal-payroll.md)
 - summary: App 루트 broad provider tree를 admin/portal route shell로 분리하고, 각 shell이 `admin-live` 또는 `portal-safe` Firestore access mode를 주입하도록 바꿨다. provider들은 더 이상 `window.location`이나 pathname hook으로 realtime 여부를 스스로 판단하지 않는다.

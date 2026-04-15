@@ -95,8 +95,10 @@ import { validateBudgetCodeBookDraft } from '../platform/budget-code-book-valida
 import { buildBudgetLabelKey, normalizeBudgetLabel } from '../platform/budget-labels';
 import { useFirestoreAccessPolicy } from './firestore-realtime-mode';
 import {
+  readSessionActivePortalProjectId,
   resolveActivePortalProjectId,
   resolvePortalProjectCandidates,
+  writeSessionActivePortalProjectId,
 } from '../platform/portal-project-selection';
 
 export interface PortalUser {
@@ -108,12 +110,6 @@ export interface PortalUser {
   projectIds: string[];
   projectNames?: Record<string, string>;
   registeredAt: string;
-}
-
-const ACTIVE_PORTAL_PROJECT_STORAGE_KEY = 'mysc-portal-active-project';
-
-function getActivePortalProjectStorageKey(uid: string | null | undefined): string {
-  return `${ACTIVE_PORTAL_PROJECT_STORAGE_KEY}:${String(uid || '').trim()}`;
 }
 
 function normalizePortalRole(value: unknown): string {
@@ -680,26 +676,13 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       setActiveProjectIdState('');
       return;
     }
-    try {
-      setActiveProjectIdState(sessionStorage.getItem(getActivePortalProjectStorageKey(uid)) || '');
-    } catch {
-      setActiveProjectIdState('');
-    }
+    setActiveProjectIdState(readSessionActivePortalProjectId(uid));
   }, [authUser?.uid]);
 
   useEffect(() => {
     const uid = authUser?.uid;
-    if (!uid || typeof sessionStorage === 'undefined') return;
-    const storageKey = getActivePortalProjectStorageKey(uid);
-    try {
-      if (activeProjectId) {
-        sessionStorage.setItem(storageKey, activeProjectId);
-      } else {
-        sessionStorage.removeItem(storageKey);
-      }
-    } catch {
-      // ignore sessionStorage failures
-    }
+    if (!uid) return;
+    writeSessionActivePortalProjectId(uid, activeProjectId);
   }, [activeProjectId, authUser?.uid]);
 
   useEffect(() => {

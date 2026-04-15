@@ -6,6 +6,7 @@ import {
   analyzeProjectRequestContractViaBff,
   changeTransactionStateViaBff,
   deepSyncAuthGovernanceUserViaBff,
+  fetchPortalEntryContextViaBff,
   fetchAuthGovernanceUsersViaBff,
   linkProjectEvidenceDriveRootViaBff,
   notifyProjectRequestRegistrationViaBff,
@@ -21,6 +22,7 @@ import {
   uploadProjectSheetSourceViaBff,
   uploadProjectRequestContractViaBff,
   toRequestActor,
+  switchPortalSessionProjectViaBff,
   uploadTransactionEvidenceDriveViaBff,
   upsertLedgerViaBff,
   type PlatformApiClientLike,
@@ -42,6 +44,26 @@ describe('platform-bff-client', () => {
       enabled: false,
       baseUrl: 'http://127.0.0.1:8787',
     });
+  });
+
+  it('falls back to the current browser origin when no API base is configured', () => {
+    const previousWindow = globalThis.window;
+    vi.stubGlobal('window', {
+      location: {
+        origin: 'https://inner-platform.vercel.app',
+      },
+    });
+
+    expect(readPlatformApiRuntimeConfig({})).toEqual({
+      enabled: false,
+      baseUrl: 'https://inner-platform.vercel.app',
+    });
+
+    if (previousWindow === undefined) {
+      delete (globalThis as { window?: unknown }).window;
+    } else {
+      vi.stubGlobal('window', previousWindow);
+    }
   });
 
   it('normalizes actor shape', () => {
@@ -79,6 +101,67 @@ describe('platform-bff-client', () => {
       body: { id: 'p001', name: 'Project 1' },
     }));
     expect(result.version).toBe(1);
+  });
+
+  it('calls portal entry context endpoint', async () => {
+    const client = asMockClient({
+      post: vi.fn(),
+      get: vi.fn(async () => ({
+        data: {
+          registrationState: 'registered',
+          activeProjectId: 'p001',
+          projects: [
+            {
+              id: 'p001',
+              name: 'Project 1',
+              status: 'IN_PROGRESS',
+              clientOrg: 'MYSC',
+              managerName: '보람',
+              department: 'AXR',
+            },
+          ],
+        },
+      })),
+      request: vi.fn(),
+    });
+
+    const result = await fetchPortalEntryContextViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm', idToken: 'token-abc' },
+      client,
+    });
+
+    expect(client.get).toHaveBeenCalledWith('/api/v1/portal/entry-context', expect.objectContaining({
+      tenantId: 'mysc',
+    }));
+    expect(result.activeProjectId).toBe('p001');
+    expect(result.projects).toHaveLength(1);
+  });
+
+  it('calls portal session project switch endpoint', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({
+        data: {
+          ok: true,
+          activeProjectId: 'p002',
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    const result = await switchPortalSessionProjectViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm', idToken: 'token-abc' },
+      projectId: 'p002',
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/portal/session-project', expect.objectContaining({
+      tenantId: 'mysc',
+      body: { projectId: 'p002' },
+    }));
+    expect(result.activeProjectId).toBe('p002');
   });
 
   it('calls project trash and restore endpoints', async () => {

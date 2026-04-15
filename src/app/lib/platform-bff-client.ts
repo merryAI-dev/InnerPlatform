@@ -101,6 +101,28 @@ export interface GoogleSheetImportPreviewResult {
   matrix: string[][];
 }
 
+export interface PortalEntryProjectSummary {
+  id: string;
+  name: string;
+  status: string;
+  clientOrg: string;
+  managerName: string;
+  department: string;
+  type?: string;
+}
+
+export interface PortalEntryContextResult {
+  registrationState: 'registered' | 'unregistered';
+  activeProjectId: string;
+  priorityProjectIds: string[];
+  projects: PortalEntryProjectSummary[];
+}
+
+export interface PortalSessionProjectResult {
+  ok: boolean;
+  activeProjectId: string;
+}
+
 export interface GoogleSheetMigrationAnalysisSuggestion {
   sourceHeader: string;
   platformField: string;
@@ -405,8 +427,15 @@ export interface PlatformApiClientLike {
 
 const DEFAULT_BFF_BASE_URL = 'http://127.0.0.1:8787';
 
+function resolveRuntimeBaseUrl(): string {
+  if (typeof window !== 'undefined' && typeof window.location?.origin === 'string' && window.location.origin.trim()) {
+    return window.location.origin.trim().replace(/\/$/, '');
+  }
+  return DEFAULT_BFF_BASE_URL;
+}
+
 function normalizeBaseUrl(value: unknown): string {
-  if (typeof value !== 'string' || !value.trim()) return DEFAULT_BFF_BASE_URL;
+  if (typeof value !== 'string' || !value.trim()) return resolveRuntimeBaseUrl();
   return value.trim().replace(/\/$/, '');
 }
 
@@ -951,6 +980,44 @@ export async function overrideTransactionEvidenceDriveCategoriesViaBff(params: {
       body: params.overrides,
       retries: 0,
       timeoutMs: 15000,
+    },
+  );
+  return response.data;
+}
+
+export async function fetchPortalEntryContextViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  client?: PlatformApiClientLike;
+}): Promise<PortalEntryContextResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.get<PortalEntryContextResult>(
+    '/api/v1/portal/entry-context',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      timeoutMs: 8000,
+    },
+  );
+  return response.data;
+}
+
+export async function switchPortalSessionProjectViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  client?: PlatformApiClientLike;
+}): Promise<PortalSessionProjectResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<PortalSessionProjectResult>(
+    '/api/v1/portal/session-project',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: {
+        projectId: params.projectId,
+      },
+      timeoutMs: 8000,
     },
   );
   return response.data;

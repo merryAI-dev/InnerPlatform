@@ -1,18 +1,25 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
-import { ArrowRight, CheckCircle2, FolderKanban, Loader2, Search } from 'lucide-react';
+import { AlertCircle, ArrowRight, CheckCircle2, FolderKanban, Loader2, Search } from 'lucide-react';
 import { useAuth } from '../../data/auth-store';
-import { usePortalStore } from '../../data/portal-store';
-import { normalizeProjectIds } from '../../data/project-assignment';
-import { PROJECT_STATUS_LABELS, type Project } from '../../data/types';
+import { getDefaultOrgId } from '../../lib/firebase';
+import {
+  createPlatformApiClient,
+  fetchPortalEntryContextViaBff,
+  switchPortalSessionProjectViaBff,
+  type PortalEntryContextResult,
+  type PortalEntryProjectSummary,
+} from '../../lib/platform-bff-client';
+import { PROJECT_STATUS_LABELS } from '../../data/types';
 import {
   canEnterPortalWorkspace,
   isAdminSpaceRole,
   resolveRequestedRedirectPath,
 } from '../../platform/navigation';
 import {
-  resolvePortalProjectCandidates,
+  readSessionActivePortalProjectId,
   resolvePortalProjectSwitchPath,
+  writeSessionActivePortalProjectId,
 } from '../../platform/portal-project-selection';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -23,7 +30,7 @@ function normalizeSearchValue(value: string): string {
   return value.trim().toLowerCase();
 }
 
-function matchesProjectSearch(project: Project, query: string): boolean {
+function matchesProjectSearch(project: PortalEntryProjectSummary, query: string): boolean {
   if (!query) return true;
   const haystack = [
     project.name,
@@ -38,18 +45,18 @@ function matchesProjectSearch(project: Project, query: string): boolean {
 }
 
 function ProjectStartCard(props: {
-  project: Project;
+  project: PortalEntryProjectSummary;
   activeProjectId: string;
   pendingProjectId: string;
   onStart: (projectId: string) => void;
 }) {
   const { project, activeProjectId, pendingProjectId, onStart } = props;
-  const statusLabel = PROJECT_STATUS_LABELS[project.status] || project.status;
+  const statusLabel = PROJECT_STATUS_LABELS[project.status as keyof typeof PROJECT_STATUS_LABELS] || project.status;
   const isCurrent = activeProjectId === project.id;
   const isPending = pendingProjectId === project.id;
 
   return (
-    <Card className={`border-border/60 shadow-sm ${isCurrent ? 'border-teal-300 bg-teal-50/70' : 'bg-white'}`}>
+    <Card className={`border-border/60 shadow-sm ${isCurrent ? 'border-blue-300 bg-blue-50/70' : 'bg-white'}`}>
       <CardContent className="space-y-4 p-5">
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
@@ -58,7 +65,7 @@ function ProjectStartCard(props: {
               {statusLabel}
             </Badge>
             {isCurrent && (
-              <Badge className="bg-teal-600 text-[10px] text-white">
+              <Badge className="bg-blue-900 text-[10px] text-white">
                 현재 선택
               </Badge>
             )}
@@ -73,7 +80,7 @@ function ProjectStartCard(props: {
         <Button
           type="button"
           data-testid={`portal-project-start-${project.id}`}
-          className="h-10 gap-2"
+          className="h-10 gap-2 bg-blue-900 hover:bg-blue-950"
           disabled={isPending}
           onClick={() => onStart(project.id)}
         >
@@ -89,66 +96,106 @@ export function PortalProjectSelectPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const { isAuthenticated, isLoading: authLoading, user: authUser } = useAuth();
-  const {
-    isRegistered,
-    isLoading: portalLoading,
-    portalUser,
-    activeProjectId,
-    projects,
-    setSessionActiveProject,
-  } = usePortalStore();
+  const [entryContext, setEntryContext] = useState<PortalEntryContextResult | null>(null);
+  const [pageLoading, setPageLoading] = useState(true);
+  const [pageError, setPageError] = useState('');
   const [search, setSearch] = useState('');
   const [pendingProjectId, setPendingProjectId] = useState('');
+  const [activeProjectId, setActiveProjectId] = useState('');
+
+  const apiClient = useMemo(() => createPlatformApiClient(import.meta.env), []);
 
   const currentPath = `${location.pathname}${location.search}${location.hash}`;
   const redirectTarget = resolvePortalProjectSwitchPath(
     resolveRequestedRedirectPath(undefined, location.search) || '/portal',
   );
-  const assignedProjectIds = useMemo(() => normalizeProjectIds([
-    ...(Array.isArray(portalUser?.projectIds) ? portalUser.projectIds : []),
-    portalUser?.projectId,
-    ...(Array.isArray(authUser?.projectIds) ? authUser.projectIds : []),
-    authUser?.projectId,
-  ]), [authUser?.projectId, authUser?.projectIds, portalUser?.projectId, portalUser?.projectIds]);
-  const candidateProjects = useMemo(() => resolvePortalProjectCandidates({
-    role: authUser?.role,
-    authUid: authUser?.uid,
-    assignedProjectIds,
-    projects,
-  }), [assignedProjectIds, authUser?.role, authUser?.uid, projects]);
+  const tenantId = authUser?.tenantId || getDefaultOrgId();
+  const projects = entryContext?.projects || [];
+  const priorityProjectIds = entryContext?.priorityProjectIds || [];
   const normalizedQuery = normalizeSearchValue(search);
-  const filteredSearchProjects = useMemo(() => (
-    candidateProjects.searchProjects.filter((project) => matchesProjectSearch(project, normalizedQuery))
-  ), [candidateProjects.searchProjects, normalizedQuery]);
-  const showPrioritySection = candidateProjects.priorityProjects.length > 0 && !isAdminSpaceRole(authUser?.role);
-  const visibleSearchProjects = useMemo(() => (
-    normalizedQuery || !showPrioritySection ? filteredSearchProjects : []
-  ), [filteredSearchProjects, normalizedQuery, showPrioritySection]);
 
   useEffect(() => {
-    if (authLoading || portalLoading) return;
-    if (!isAuthenticated) {
+    if (authLoading) return;
+    if (!isAuthenticated || !authUser) {
       navigate('/login', { replace: true, state: { from: currentPath } });
       return;
     }
-    if (!canEnterPortalWorkspace(authUser?.role)) {
+    if (!canEnterPortalWorkspace(authUser.role)) {
       navigate('/', { replace: true });
       return;
     }
-    if (!isRegistered && !isAdminSpaceRole(authUser?.role)) {
-      navigate('/portal/onboarding', { replace: true });
-    }
-  }, [authLoading, authUser?.role, currentPath, isAuthenticated, isRegistered, navigate, portalLoading]);
+
+    let cancelled = false;
+    setPageLoading(true);
+    setPageError('');
+
+    void fetchPortalEntryContextViaBff({
+      tenantId,
+      actor: authUser,
+      client: apiClient,
+    })
+      .then((context) => {
+        if (cancelled) return;
+        setEntryContext(context);
+        const sessionProjectId = readSessionActivePortalProjectId(authUser.uid) || context.activeProjectId;
+        setActiveProjectId(sessionProjectId);
+        if (context.registrationState === 'unregistered' && !isAdminSpaceRole(authUser.role)) {
+          navigate('/portal/onboarding', { replace: true });
+        }
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.error('[PortalProjectSelectPage] entry-context fetch failed:', error);
+        setPageError('사업 선택 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setPageLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [apiClient, authLoading, authUser, currentPath, isAuthenticated, navigate, tenantId]);
+
+  const priorityProjects = useMemo(
+    () => projects.filter((project) => priorityProjectIds.includes(project.id)),
+    [priorityProjectIds, projects],
+  );
+  const filteredSearchProjects = useMemo(
+    () => projects.filter((project) => matchesProjectSearch(project, normalizedQuery)),
+    [normalizedQuery, projects],
+  );
+  const showPrioritySection = priorityProjects.length > 0 && !isAdminSpaceRole(authUser?.role);
+  const visibleSearchProjects = useMemo(
+    () => (normalizedQuery || !showPrioritySection ? filteredSearchProjects : []),
+    [filteredSearchProjects, normalizedQuery, showPrioritySection],
+  );
 
   const handleStart = async (projectId: string) => {
+    if (!authUser) return;
     setPendingProjectId(projectId);
-    const ok = await setSessionActiveProject(projectId);
-    setPendingProjectId('');
-    if (!ok) return;
-    navigate(redirectTarget, { replace: true });
+    setPageError('');
+    try {
+      const result = await switchPortalSessionProjectViaBff({
+        tenantId,
+        actor: authUser,
+        projectId,
+        client: apiClient,
+      });
+      writeSessionActivePortalProjectId(authUser.uid, result.activeProjectId);
+      setActiveProjectId(result.activeProjectId);
+      navigate(redirectTarget, { replace: true });
+    } catch (error) {
+      console.error('[PortalProjectSelectPage] session project switch failed:', error);
+      setPageError('사업 선택을 저장하지 못했습니다. 다시 시도해 주세요.');
+    } finally {
+      setPendingProjectId('');
+    }
   };
 
-  if (authLoading || portalLoading) {
+  if (authLoading || pageLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50">
         <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
@@ -159,11 +206,11 @@ export function PortalProjectSelectPage() {
   return (
     <div
       data-testid="portal-project-select-page"
-      className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-teal-50/40 px-4 py-8 md:px-6"
+      className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 px-4 py-8 md:px-6"
     >
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
         <div className="space-y-3">
-          <div className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-teal-600 text-white shadow-lg shadow-teal-500/20">
+          <div className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-900 text-white shadow-lg shadow-blue-900/15">
             <FolderKanban className="h-7 w-7" />
           </div>
           <div className="space-y-1.5">
@@ -177,6 +224,13 @@ export function PortalProjectSelectPage() {
           </div>
         </div>
 
+        {pageError && (
+          <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-[12px] text-rose-700">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            <span>{pageError}</span>
+          </div>
+        )}
+
         <Card className="border-border/60 shadow-sm">
           <CardContent className="space-y-4 p-5">
             <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5">
@@ -189,9 +243,9 @@ export function PortalProjectSelectPage() {
               />
             </div>
             <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-              <Badge variant="outline">{candidateProjects.searchProjects.length}개 검색 가능</Badge>
+              <Badge variant="outline">{projects.length}개 검색 가능</Badge>
               {activeProjectId ? (
-                <span className="inline-flex items-center gap-1 text-teal-700">
+                <span className="inline-flex items-center gap-1 text-blue-900">
                   <CheckCircle2 className="h-3.5 w-3.5" />
                   현재 세션 사업이 이미 선택되어 있습니다.
                 </span>
@@ -209,7 +263,7 @@ export function PortalProjectSelectPage() {
               <p className="mt-1 text-[12px] text-muted-foreground">지금 바로 시작할 수 있는 담당 사업입니다.</p>
             </div>
             <div className="grid gap-4 md:grid-cols-2">
-              {candidateProjects.priorityProjects.map((project) => (
+              {priorityProjects.map((project) => (
                 <ProjectStartCard
                   key={project.id}
                   project={project}
