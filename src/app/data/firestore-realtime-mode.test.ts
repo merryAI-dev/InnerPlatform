@@ -22,4 +22,11 @@ describe('firestore realtime mode', () => {
     expect(shouldUseSafeFetchMode('viewer')).toBe(true);
     expect(shouldUseSafeFetchMode('admin')).toBe(false);
   });
+
+  it('forces safe fetch mode on portal routes even for privileged roles', () => {
+    expect(canUseRealtimeListeners('admin', '/portal')).toBe(false);
+    expect(canUseRealtimeListeners('finance', '/portal/payroll')).toBe(false);
+    expect(shouldUseSafeFetchMode('admin', '/portal')).toBe(true);
+    expect(canUseRealtimeListeners('admin', '/admin')).toBe(true);
+  });
 });

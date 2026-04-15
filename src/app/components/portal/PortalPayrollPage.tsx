@@ -3,10 +3,9 @@ import { useNavigate } from 'react-router';
 import { CalendarDays, CheckCircle2, CircleDollarSign, Info, AlertTriangle, ArrowRight } from 'lucide-react';
 import {
   collection,
-  onSnapshot,
+  getDocs,
   query,
   where,
-  type Unsubscribe,
 } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { PageHeader } from '../layout/PageHeader';
@@ -84,23 +83,27 @@ export function PortalPayrollPage() {
       return;
     }
 
-    const unsubs: Unsubscribe[] = [];
+    let isCancelled = false;
     const txQuery = query(
       collection(db, getOrgCollectionPath(orgId, 'transactions')),
       where('projectId', '==', projectId),
     );
 
-    unsubs.push(
-      onSnapshot(txQuery, (snap) => {
+    void getDocs(txQuery)
+      .then((snap) => {
+        if (isCancelled) return;
         setLiveTransactions(snap.docs.map((doc) => doc.data() as Transaction));
-      }, (err) => {
-        console.error('[PortalPayrollPage] transactions listen error:', err);
+      })
+      .catch((err) => {
+        if (isCancelled) return;
+        console.error('[PortalPayrollPage] transactions fetch error:', err);
         toast.error('인건비 지급용 거래 내역을 불러오지 못했습니다');
         setLiveTransactions(null);
-      }),
-    );
+      });
 
-    return () => unsubs.forEach((unsub) => unsub());
+    return () => {
+      isCancelled = true;
+    };
   }, [db, firestoreEnabled, orgId, projectId]);
 
   async function onSave() {
