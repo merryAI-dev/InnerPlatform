@@ -20,6 +20,7 @@ import { featureFlags } from '../config/feature-flags';
 import { getOrgCollectionPath } from '../lib/firebase';
 import { toast } from 'sonner';
 import { canUseRealtimeListeners } from './firestore-realtime-mode';
+import { useRealtimeRoutePathname } from './realtime-route';
 
 // ── State / Actions ──
 
@@ -57,7 +58,8 @@ export function TrainingProvider({ children }: { children: ReactNode }) {
 
   const firestoreEnabled = featureFlags.firestoreCoreEnabled && !!db;
   const tenantId = orgId;
-  const liveMode = canUseRealtimeListeners(authUser?.role);
+  const pathname = useRealtimeRoutePathname();
+  const liveMode = canUseRealtimeListeners(authUser?.role, pathname);
 
   // Firestore 실시간 구독
   useEffect(() => {

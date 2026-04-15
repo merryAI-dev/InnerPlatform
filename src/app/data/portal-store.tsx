@@ -94,6 +94,7 @@ import { reportError } from '../platform/observability';
 import { validateBudgetCodeBookDraft } from '../platform/budget-code-book-validation';
 import { buildBudgetLabelKey, normalizeBudgetLabel } from '../platform/budget-labels';
 import { canUseRealtimeListeners } from './firestore-realtime-mode';
+import { useRealtimeRoutePathname } from './realtime-route';
 import {
   resolveActivePortalProjectId,
   resolvePortalProjectCandidates,
@@ -672,9 +673,10 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     return projects.find((project) => project.id === activeProjectId) || null;
   }, [activeProjectId, projects]);
   const currentProjectId = activeProjectId;
+  const pathname = useRealtimeRoutePathname();
   const livePortalMode = useMemo(
-    () => canUseRealtimeListeners(portalUser?.role || authUser?.role),
-    [authUser?.role, portalUser?.role],
+    () => canUseRealtimeListeners(portalUser?.role || authUser?.role, pathname),
+    [authUser?.role, pathname, portalUser?.role],
   );
 
   useEffect(() => {

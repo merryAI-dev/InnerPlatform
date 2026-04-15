@@ -78,6 +78,7 @@
 - [2026-04-15] PM 포털 전역 payroll 구독도 `projectId + orderBy` 복합 listen을 제거하고 project 기준 listen 뒤 클라이언트 정렬로 단순화해, 남아 있던 Listen 400 후보를 더 줄였다.
 - [2026-04-15] PM/viewer 경로의 portal/board/hr/training 운영 surface는 역할 기반 safe fetch 모드에서 일회성 조회를 사용하도록 바꿔, 반복 Firestore Listen 400이 포털 전체를 흔드는 구조를 더 줄였다.
 - [2026-04-15] 포털 홈이 직접 붙이던 `transactions` realtime listener를 제거하고, `/portal` 경로에서는 거래 집계도 fetch 기반으로만 읽게 바꿨다.
+- [2026-04-15] 포털 전역 provider들이 `window.location.pathname`를 한 번 읽고 끝내는 대신 route change를 구독하도록 바꿔, admin/live 판단이 이전 화면 기준으로 고정된 채 `/portal`에서 realtime listen이 다시 살아나는 문제를 막았다.
 - [2026-04-14] `내 제출 현황`을 홈 하단의 compact 제출 상태 표로 흡수했고, 별도 탭과 직접 진입 라우트는 홈으로 정리했다.
 - [2026-04-14] 제출 통합 블록에서는 `인력변경 신청`, `사업비 입력(주간) 작성/제출`, `주간 제출 체크` 같은 중복 섹션을 제외하고 현재 주차 기준 핵심 상태만 남겼다.
 - [2026-04-14] 상단을 Salesforce 계열 SaaS처럼 `workspace bar + app tabs + project switcher` 구조로 재편했다.

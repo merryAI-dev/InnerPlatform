@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-04-15] patch-note | portal-dashboard | route-aware realtime mode fix
+- pages: [portal-dashboard](./pages/portal-dashboard.md)
+- summary: 포털 전역 provider가 route 변경으로 다시 평가되지 않아 이전 admin/live mode가 `/portal`에서도 남아 있던 문제를 수정하고, pathname 구독 기반으로 safe fetch 판단이 즉시 갱신되도록 바꿨다.
+
 ## [2026-04-15] patch-note | portal-onboarding, portal-project-select | 시작 카드 실제 라우트 복구
 - pages: [portal-onboarding](./pages/portal-onboarding.md), [portal-project-select](./pages/portal-project-select.md)
 - summary: 포털 시작 선택 카드가 deep route에서도 fallback 선택 화면에 다시 덮이지 않도록 standalone entry 경로 판정을 layout과 navigation 정책에서 공통화했고, `기존 사업 선택`은 실제 사업 선택 step으로 연결했다.

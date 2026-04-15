@@ -35,6 +35,7 @@ import {
 } from '../platform/business-days';
 import { sortMonthlyClosesByYearMonth, sortPayrollRunsByPlannedPayDate } from './payroll.helpers';
 import { canUseRealtimeListeners } from './firestore-realtime-mode';
+import { useRealtimeRoutePathname } from './realtime-route';
 
 const DEFAULT_TIMEZONE = 'Asia/Seoul';
 const DEFAULT_LEAD_DAYS = 3;
@@ -73,7 +74,8 @@ export function PayrollProvider({ children }: { children: ReactNode }) {
 
   const role = user?.role;
   const myProjectId = user?.projectId || '';
-  const readAll = canUseRealtimeListeners(role);
+  const pathname = useRealtimeRoutePathname();
+  const readAll = canUseRealtimeListeners(role, pathname);
 
   useEffect(() => {
     unsubsRef.current.forEach((u) => u());
