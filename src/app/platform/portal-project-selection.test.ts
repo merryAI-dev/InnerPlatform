@@ -4,6 +4,7 @@ import {
   resolveActivePortalProjectId,
   resolvePortalProjectCandidates,
   resolvePortalProjectSelectPath,
+  serializePortalProjectScope,
   resolvePortalProjectSwitchPath,
 } from './portal-project-selection';
 
@@ -77,5 +78,16 @@ describe('portal project selection helpers', () => {
     expect(resolvePortalProjectSwitchPath('/portal/cashflow')).toBe('/portal/cashflow');
     expect(resolvePortalProjectSwitchPath('/portal/project-select')).toBe('/portal');
     expect(resolvePortalProjectSwitchPath('/portal/project-select?redirect=%2Fportal%2Fbudget')).toBe('/portal');
+  });
+
+  it('serializes project scope from ids only so unrelated project metadata churn does not change the scope key', () => {
+    const initialScope = serializePortalProjectScope([' p-assigned ', 'p-managed', 'p-assigned']);
+    const sameIdsDifferentObjects = serializePortalProjectScope(['p-managed', 'p-assigned']);
+    const changedScope = serializePortalProjectScope(['p-managed', 'p-other']);
+
+    expect(initialScope).toBe('p-assigned|p-managed');
+    expect(sameIdsDifferentObjects).toBe('p-assigned|p-managed');
+    expect(changedScope).toBe('p-managed|p-other');
+    expect(initialScope).not.toBe(changedScope);
   });
 });

@@ -95,6 +95,7 @@ import { buildBudgetLabelKey, normalizeBudgetLabel } from '../platform/budget-la
 import {
   resolveActivePortalProjectId,
   resolvePortalProjectCandidates,
+  serializePortalProjectScope,
 } from '../platform/portal-project-selection';
 
 export interface PortalUser {
@@ -639,6 +640,10 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   const scopedProjectIds = useMemo(
     () => portalProjectCandidates.searchProjects.map((project) => project.id),
     [portalProjectCandidates.searchProjects],
+  );
+  const scopedProjectIdsSignature = useMemo(
+    () => serializePortalProjectScope(scopedProjectIds),
+    [scopedProjectIds],
   );
 
   const activeProjectId = useMemo(() => resolveActivePortalProjectId({
@@ -1444,7 +1449,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       unsubsRef.current.forEach((unsub) => unsub());
       unsubsRef.current = [];
     };
-  }, [authLoading, isMemberLoading, isAuthenticated, authUser, currentProjectId, firestoreEnabled, db, orgId, scopedProjectIds, isDevHarnessUser, portalUser?.projectIds]);
+  }, [authLoading, isMemberLoading, isAuthenticated, authUser, currentProjectId, firestoreEnabled, db, orgId, scopedProjectIdsSignature, isDevHarnessUser, portalUser?.projectIds]);
 
   useEffect(() => {
     if (authLoading || isMemberLoading || !isAuthenticated || !authUser) return;

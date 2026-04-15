@@ -90,6 +90,12 @@ export function resolveActivePortalProjectId(input: {
   return candidateProjectIds[0] || '';
 }
 
+export function serializePortalProjectScope(projectIds?: string[]): string {
+  return [...normalizeProjectIds(projectIds || [])]
+    .sort((left, right) => left.localeCompare(right, 'ko'))
+    .join('|');
+}
+
 export function resolvePortalProjectSelectPath(requestedPath?: string): string {
   const pathname = typeof requestedPath === 'string' ? requestedPath.trim() : '';
   if (!isPortalPath(pathname)) return PORTAL_PROJECT_SELECT_PATH;
