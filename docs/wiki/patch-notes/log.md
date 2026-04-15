@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-04-15] patch-note | portal-dashboard | payroll listen hardening
+- pages: [portal-dashboard](./pages/portal-dashboard.md)
+- summary: PM 포털 전역 payroll provider가 `projectId + orderBy` 복합 listen 없이 동작하도록 단순화해 남아 있던 Firestore Listen 400 후보를 추가로 제거했다.
+
 ## [2026-04-15] patch-note | admin-dashboard | 웰컴/검증 표면 제거
 - pages: [admin-dashboard](./pages/admin-dashboard.md)
 - summary: 어드민 첫 화면에서 웰컴 배너와 validation/reminder 보조 UI를 제거하고 KPI, 리스크, 집계, 작업 진입만 남는 운영판으로 더 압축했다.

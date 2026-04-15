@@ -31,6 +31,7 @@ import {
   getSeoulTodayIso,
   subtractBusinessDays,
 } from '../platform/business-days';
+import { sortMonthlyClosesByYearMonth, sortPayrollRunsByPlannedPayDate } from './payroll.helpers';
 
 function normalizeRole(value: unknown): string {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
@@ -122,12 +123,12 @@ export function PayrollProvider({ children }: { children: ReactNode }) {
       );
       unsubsRef.current.push(
         onSnapshot(runsQuery, (snap) => {
-          setRuns(snap.docs.map((d) => d.data() as PayrollRun));
+          setRuns(sortPayrollRunsByPlannedPayDate(snap.docs.map((d) => d.data() as PayrollRun)));
         }, (err) => console.error('[Payroll] runs listen error:', err)),
       );
       unsubsRef.current.push(
         onSnapshot(closeQuery, (snap) => {
-          setMonthlyCloses(snap.docs.map((d) => d.data() as MonthlyClose));
+          setMonthlyCloses(sortMonthlyClosesByYearMonth(snap.docs.map((d) => d.data() as MonthlyClose)));
         }, (err) => console.error('[Payroll] monthly closes listen error:', err)),
       );
 
@@ -142,13 +143,11 @@ export function PayrollProvider({ children }: { children: ReactNode }) {
       const runQuery = query(
         collection(db, getOrgCollectionPath(orgId, 'payrollRuns')),
         where('projectId', '==', myProjectId),
-        orderBy('plannedPayDate', 'desc'),
         limit(36),
       );
       const closeQuery = query(
         collection(db, getOrgCollectionPath(orgId, 'monthlyCloses')),
         where('projectId', '==', myProjectId),
-        orderBy('yearMonth', 'desc'),
         limit(18),
       );
 
@@ -163,12 +162,12 @@ export function PayrollProvider({ children }: { children: ReactNode }) {
       );
       unsubsRef.current.push(
         onSnapshot(runQuery, (snap) => {
-          setRuns(snap.docs.map((d) => d.data() as PayrollRun));
+          setRuns(sortPayrollRunsByPlannedPayDate(snap.docs.map((d) => d.data() as PayrollRun)));
         }, (err) => console.error('[Payroll] runs listen error:', err)),
       );
       unsubsRef.current.push(
         onSnapshot(closeQuery, (snap) => {
-          setMonthlyCloses(snap.docs.map((d) => d.data() as MonthlyClose));
+          setMonthlyCloses(sortMonthlyClosesByYearMonth(snap.docs.map((d) => d.data() as MonthlyClose)));
         }, (err) => console.error('[Payroll] monthly closes listen error:', err)),
       );
     } else {
