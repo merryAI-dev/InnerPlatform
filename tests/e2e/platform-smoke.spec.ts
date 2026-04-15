@@ -22,7 +22,8 @@ async function loginAsAdmin(page: import('@playwright/test').Page) {
 test('1. PM can login via dev auth harness', async ({ page }) => {
   await loginAsPm(page);
   await expect(page.locator('body')).toBeVisible();
-  await expect(page.getByTestId('portal-mission-guide')).toBeVisible();
+  await expect(page.getByRole('heading', { name: '오늘 작업할 사업 선택' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '이 사업으로 시작' })).toBeVisible();
 });
 
 test('2. Admin can login via dev auth harness', async ({ page }) => {
@@ -65,14 +66,15 @@ test('7. PM can navigate away from bank statement page', async ({ page }) => {
   await loginAsPm(page);
   await page.goto('/portal/bank-statements');
   await expect(page.getByRole('heading', { name: '통장내역' })).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByTestId('portal-mission-guide')).toBeVisible();
+  await expect(page.getByTestId('portal-mission-guide')).toHaveCount(0);
   await expect(page.getByTestId('bank-statement-trust-surface')).toBeVisible();
+  await expect(page.getByRole('button', { name: '사업비 입력(주간)으로 이어가기' })).toBeVisible();
 
   await page.getByRole('link', { name: '예산 편집' }).click();
   await expect(page).toHaveURL(/\/portal\/budget$/);
   await expect(page.getByRole('heading', { name: '예산 편집' })).toBeVisible({ timeout: 15_000 });
 
-  await page.getByRole('link', { name: '캐시플로(주간)' }).click();
+  await page.getByRole('link', { name: '캐시플로' }).click();
   await expect(page).toHaveURL(/\/portal\/cashflow$/);
   await expect(page.getByRole('heading', { name: '프로젝트 캐시플로(주간)' })).toBeVisible({ timeout: 15_000 });
 });
@@ -81,15 +83,17 @@ test('7. PM can navigate away from bank statement page', async ({ page }) => {
 test('8. PM can access budget page', async ({ page }) => {
   await loginAsPm(page);
   await page.goto('/portal/budget');
-  await expect(page.getByTestId('portal-budget-guide')).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByTestId('portal-mission-guide')).toBeVisible();
+  await expect(page.getByRole('heading', { name: '예산 편집' })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId('portal-mission-guide')).toHaveCount(0);
 });
 
-test('8-1. PM can access submissions page with guided status surface', async ({ page }) => {
+test('8-1. PM submissions route redirects to dashboard submission surface', async ({ page }) => {
   await loginAsPm(page);
   await page.goto('/portal/submissions');
-  await expect(page.getByTestId('portal-submissions-guide')).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByTestId('portal-mission-guide')).toBeVisible();
+  await expect(page).toHaveURL(/\/portal$/);
+  await expect(page.getByRole('heading', { name: '내 제출 현황' })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText('프로젝트 상세')).toBeVisible();
+  await expect(page.getByTestId('portal-mission-guide')).toHaveCount(0);
 });
 
 // ── 9. Audit log ──

@@ -1,15 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import { canUseRealtimeListeners, normalizeRealtimeRole, shouldUseSafeFetchMode } from './firestore-realtime-mode';
+import { normalizeRealtimeRole, resolveFirestoreAccessPolicy } from './firestore-realtime-mode';
 
 describe('firestore realtime mode', () => {
-  it('allows live listeners only for privileged roles', () => {
-    expect(canUseRealtimeListeners('admin')).toBe(true);
-    expect(canUseRealtimeListeners('tenant_admin')).toBe(true);
-    expect(canUseRealtimeListeners('finance')).toBe(true);
-    expect(canUseRealtimeListeners('auditor')).toBe(true);
-    expect(canUseRealtimeListeners('pm')).toBe(false);
-    expect(canUseRealtimeListeners('viewer')).toBe(false);
-    expect(canUseRealtimeListeners('')).toBe(false);
+  it('allows realtime and read-all only for privileged roles on admin routes', () => {
+    expect(resolveFirestoreAccessPolicy('admin-live', 'admin')).toMatchObject({
+      allowRealtimeListeners: true,
+      allowPrivilegedReadAll: true,
+      useSafeFetchMode: false,
+    });
+    expect(resolveFirestoreAccessPolicy('admin-live', 'finance')).toMatchObject({
+      allowRealtimeListeners: true,
+      allowPrivilegedReadAll: true,
+      useSafeFetchMode: false,
+    });
+    expect(resolveFirestoreAccessPolicy('admin-live', 'pm')).toMatchObject({
+      allowRealtimeListeners: false,
+      allowPrivilegedReadAll: false,
+      useSafeFetchMode: true,
+    });
   });
 
   it('normalizes role strings', () => {
@@ -17,16 +25,21 @@ describe('firestore realtime mode', () => {
     expect(normalizeRealtimeRole(null)).toBe('');
   });
 
-  it('routes PM roles to safe fetch mode', () => {
-    expect(shouldUseSafeFetchMode('pm')).toBe(true);
-    expect(shouldUseSafeFetchMode('viewer')).toBe(true);
-    expect(shouldUseSafeFetchMode('admin')).toBe(false);
-  });
-
   it('forces safe fetch mode on portal routes even for privileged roles', () => {
-    expect(canUseRealtimeListeners('admin', '/portal')).toBe(false);
-    expect(canUseRealtimeListeners('finance', '/portal/payroll')).toBe(false);
-    expect(shouldUseSafeFetchMode('admin', '/portal')).toBe(true);
-    expect(canUseRealtimeListeners('admin', '/admin')).toBe(true);
+    expect(resolveFirestoreAccessPolicy('portal-safe', 'admin')).toMatchObject({
+      allowRealtimeListeners: false,
+      allowPrivilegedReadAll: false,
+      useSafeFetchMode: true,
+    });
+    expect(resolveFirestoreAccessPolicy('portal-safe', 'finance')).toMatchObject({
+      allowRealtimeListeners: false,
+      allowPrivilegedReadAll: false,
+      useSafeFetchMode: true,
+    });
+    expect(resolveFirestoreAccessPolicy('safe', 'admin')).toMatchObject({
+      allowRealtimeListeners: false,
+      allowPrivilegedReadAll: false,
+      useSafeFetchMode: true,
+    });
   });
 });

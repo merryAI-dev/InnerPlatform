@@ -18,8 +18,7 @@ import { useFirebase } from '../lib/firebase-context';
 import { featureFlags } from '../config/feature-flags';
 import { getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
 import { buildProjectAlerts, deriveAffectedProjectIds } from './hr-announcements.helpers';
-import { canUseRealtimeListeners } from './firestore-realtime-mode';
-import { useRealtimeRoutePathname } from './realtime-route';
+import { useFirestoreAccessPolicy } from './firestore-realtime-mode';
 
 export type HrEventType = 'RESIGNATION' | 'LEAVE' | 'TRANSFER' | 'ROLE_CHANGE' | 'RETURN';
 
@@ -204,9 +203,8 @@ const INITIAL_ALERTS: ProjectChangeAlert[] = [
 export function HrAnnouncementProvider({ children }: { children: ReactNode }) {
   const { isAuthenticated, isLoading: authLoading, user } = useAuth();
   const { db, isOnline, orgId } = useFirebase();
-  const pathname = useRealtimeRoutePathname();
   const firestoreEnabled = featureFlags.firestoreCoreEnabled && isOnline && !!db;
-  const liveMode = canUseRealtimeListeners(user?.role, pathname);
+  const { allowRealtimeListeners: liveMode } = useFirestoreAccessPolicy(user?.role);
 
   const [announcements, setAnnouncements] = useState<HrAnnouncement[]>(INITIAL_ANNOUNCEMENTS);
   const [alerts, setAlerts] = useState<ProjectChangeAlert[]>(INITIAL_ALERTS);

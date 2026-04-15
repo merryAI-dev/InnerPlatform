@@ -20,8 +20,7 @@ import type { BoardChannel, BoardComment, BoardPost } from './types';
 import { getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
 import { useFirebase } from '../lib/firebase-context';
 import { buildVoteDelta, normalizeTags } from './board.helpers';
-import { canUseRealtimeListeners } from './firestore-realtime-mode';
-import { useRealtimeRoutePathname } from './realtime-route';
+import { useFirestoreAccessPolicy } from './firestore-realtime-mode';
 
 type VoteDirection = 'up' | 'down';
 
@@ -91,9 +90,8 @@ const INITIAL_POSTS: BoardPost[] = [
 export function BoardProvider({ children }: { children: ReactNode }) {
   const { db, isOnline, orgId } = useFirebase();
   const { user } = useAuth();
-  const pathname = useRealtimeRoutePathname();
   const firestoreEnabled = featureFlags.firestoreCoreEnabled && isOnline && !!db && !!user?.uid;
-  const liveMode = canUseRealtimeListeners(user?.role, pathname);
+  const { allowRealtimeListeners: liveMode } = useFirestoreAccessPolicy(user?.role);
 
   const [posts, setPosts] = useState<BoardPost[]>(INITIAL_POSTS);
   const [localVotesByPostId, setLocalVotesByPostId] = useState<Record<string, -1 | 0 | 1>>({});
