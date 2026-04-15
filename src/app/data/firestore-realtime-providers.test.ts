@@ -13,11 +13,12 @@ const providerFiles = [
 
 describe('route-aware firestore realtime providers', () => {
   for (const file of providerFiles) {
-    it(`${file} uses route-aware realtime mode`, () => {
+    it(`${file} consumes injected firestore access policy`, () => {
       const source = readFileSync(resolve(import.meta.dirname, file), 'utf8');
 
-      expect(source).toContain('useRealtimeRoutePathname');
-      expect(source).toMatch(/canUseRealtimeListeners\([^,\n]+,\s*pathname\)/);
+      expect(source).toContain('useFirestoreAccessPolicy');
+      expect(source).not.toContain('useRealtimeRoutePathname');
+      expect(source).not.toContain('canUseRealtimeListeners(');
     });
   }
 });

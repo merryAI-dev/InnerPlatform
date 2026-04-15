@@ -1,5 +1,13 @@
 # Patch Notes Log
 
+## [2026-04-15] patch-note | shared-portal-architecture | route-scoped provider and access policy split
+- pages: [shared-portal-architecture](./pages/shared-portal-architecture.md), [portal-dashboard](./pages/portal-dashboard.md), [portal-payroll](./pages/portal-payroll.md)
+- summary: App 루트 broad provider tree를 admin/portal route shell로 분리하고, 각 shell이 `admin-live` 또는 `portal-safe` Firestore access mode를 주입하도록 바꿨다. provider들은 더 이상 `window.location`이나 pathname hook으로 realtime 여부를 스스로 판단하지 않는다.
+
+## [2026-04-15] patch-note | shared-portal-architecture | 포털 안정화 장기안 정리
+- pages: [shared-portal-architecture](./pages/shared-portal-architecture.md)
+- summary: 포털 안정화의 기본안을 `Firestore 유지 + BFF/API-first hybrid`로 고정하고, 6~8주 동안 provider split, read model API, critical write command, admin summary cutover 순서를 따르는 RFC와 실행 계획을 문서화했다.
+
 ## [2026-04-15] patch-note | portal-dashboard | route-aware realtime mode fix
 - pages: [portal-dashboard](./pages/portal-dashboard.md)
 - summary: 포털 전역 provider가 route 변경으로 다시 평가되지 않아 이전 admin/live mode가 `/portal`에서도 남아 있던 문제를 수정하고, pathname 구독 기반으로 safe fetch 판단이 즉시 갱신되도록 바꿨다.

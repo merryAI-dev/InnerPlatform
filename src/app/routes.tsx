@@ -2,6 +2,8 @@ import { lazy, Suspense, type ComponentType } from 'react';
 import { createBrowserRouter, Navigate } from 'react-router';
 import { AppLayout } from './components/layout/AppLayout';
 import { PortalLayout } from './components/portal/PortalLayout';
+import { AdminRouteProviders } from './data/admin-route-providers';
+import { PortalRouteProviders } from './data/portal-route-providers';
 import { loadLazyRouteModule } from './platform/lazy-route';
 
 // Lazy-loaded pages — each becomes a separate chunk
@@ -77,6 +79,14 @@ function S({ C }: { C: ComponentType }) {
   );
 }
 
+function AdminRouteShell() {
+  return <AdminRouteProviders><AppLayout /></AdminRouteProviders>;
+}
+
+function PortalRouteShell() {
+  return <PortalRouteProviders><PortalLayout /></PortalRouteProviders>;
+}
+
 export const router = createBrowserRouter([
   // ── Login ──
   { path: '/login', element: <S C={LoginPage} /> },
@@ -84,7 +94,7 @@ export const router = createBrowserRouter([
   // ── Admin (관리자) ──
   {
     path: '/',
-    Component: AppLayout,
+    element: <AdminRouteShell />,
     children: [
       { index: true, element: <S C={DashboardPage} /> },
       // ── Company Board (전사 게시판) ──
@@ -127,7 +137,7 @@ export const router = createBrowserRouter([
   // ── Portal (사용자/PM 전용) ──
   {
     path: '/portal',
-    Component: PortalLayout,
+    element: <PortalRouteShell />,
     children: [
       { index: true, element: <S C={PortalDashboard} /> },
       // ── Company Board (전사 게시판) ──

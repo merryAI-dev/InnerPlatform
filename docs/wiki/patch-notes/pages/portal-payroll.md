@@ -23,11 +23,13 @@
 - [x] 월간 정산 완료 확인 처리 가능
 - [x] 프로젝트 거래 내역을 기준으로 지급 여력 상태 계산 가능
 - [x] `/portal/payroll`에서는 realtime listen 없이 fetch 기반으로 안정적으로 부팅 가능
+- [x] 지급 화면도 route shell이 주입한 `portal-safe` access mode만 소비함
 
 ## Recent Changes
 
 - [2026-04-15] 포털 경로에서는 `transactions`를 `onSnapshot`으로 구독하지 않고 `getDocs` 일회성 조회로 읽도록 바꿨다.
 - [2026-04-15] 반복 Firestore `Listen 400` 재시도 후보를 줄이기 위해 지급 화면도 `/portal` safe fetch 정책을 따르게 했다.
+- [2026-04-15] 지급 화면은 pathname 기반 realtime 추론을 제거하고, route shell에서 주입한 access policy를 기준으로 read-all/realtime 여부를 결정하도록 바꿨다.
 
 ## Related Files
 

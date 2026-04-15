@@ -35,8 +35,7 @@ import { getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
 import { addMonthsToYearMonth, getSeoulTodayIso } from '../platform/business-days';
 import { getMonthMondayWeeks } from '../platform/cashflow-weeks';
 import { normalizeProjectIds } from './project-assignment';
-import { canUseRealtimeListeners } from './firestore-realtime-mode';
-import { useRealtimeRoutePathname } from './realtime-route';
+import { useFirestoreAccessPolicy } from './firestore-realtime-mode';
 
 interface CashflowWeekState {
   yearMonth: string; // selected month ("YYYY-MM")
@@ -90,8 +89,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     () => normalizeProjectIds([...(Array.isArray(user?.projectIds) ? user?.projectIds : []), myProjectId]),
     [user?.projectIds, myProjectId],
   );
-  const pathname = useRealtimeRoutePathname();
-  const readAll = canUseRealtimeListeners(role, pathname);
+  const { allowPrivilegedReadAll: readAll } = useFirestoreAccessPolicy(role);
 
   const [yearMonth, setYearMonthState] = useState(() => getSeoulTodayIso().slice(0, 7));
   const [weeks, setWeeks] = useState<CashflowWeekSheet[]>([]);
