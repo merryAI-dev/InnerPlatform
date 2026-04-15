@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useCallback, useEffect, use
 import {
   collection,
   doc,
+  getDocs,
   onSnapshot,
   orderBy,
   query,
@@ -17,6 +18,7 @@ import { useFirebase } from '../lib/firebase-context';
 import { featureFlags } from '../config/feature-flags';
 import { getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
 import { buildProjectAlerts, deriveAffectedProjectIds } from './hr-announcements.helpers';
+import { canUseRealtimeListeners } from './firestore-realtime-mode';
 
 export type HrEventType = 'RESIGNATION' | 'LEAVE' | 'TRANSFER' | 'ROLE_CHANGE' | 'RETURN';
 
@@ -202,6 +204,7 @@ export function HrAnnouncementProvider({ children }: { children: ReactNode }) {
   const { isAuthenticated, isLoading: authLoading, user } = useAuth();
   const { db, isOnline, orgId } = useFirebase();
   const firestoreEnabled = featureFlags.firestoreCoreEnabled && isOnline && !!db;
+  const liveMode = canUseRealtimeListeners(user?.role);
 
   const [announcements, setAnnouncements] = useState<HrAnnouncement[]>(INITIAL_ANNOUNCEMENTS);
   const [alerts, setAlerts] = useState<ProjectChangeAlert[]>(INITIAL_ALERTS);
@@ -233,29 +236,42 @@ export function HrAnnouncementProvider({ children }: { children: ReactNode }) {
       orderBy('createdAt', 'desc'),
     );
 
-    unsubsRef.current.push(
-      onSnapshot(announcementQuery, (snap) => {
-        const list = snap.docs.map((docItem) => docItem.data() as HrAnnouncement);
-        setAnnouncements(list);
-      }, (err) => {
-        console.error('[HR] announcements listen error:', err);
-      }),
-    );
+    if (liveMode) {
+      unsubsRef.current.push(
+        onSnapshot(announcementQuery, (snap) => {
+          const list = snap.docs.map((docItem) => docItem.data() as HrAnnouncement);
+          setAnnouncements(list);
+        }, (err) => {
+          console.error('[HR] announcements listen error:', err);
+        }),
+      );
 
-    unsubsRef.current.push(
-      onSnapshot(alertQuery, (snap) => {
-        const list = snap.docs.map((docItem) => docItem.data() as ProjectChangeAlert);
-        setAlerts(list);
-      }, (err) => {
-        console.error('[HR] alerts listen error:', err);
-      }),
-    );
+      unsubsRef.current.push(
+        onSnapshot(alertQuery, (snap) => {
+          const list = snap.docs.map((docItem) => docItem.data() as ProjectChangeAlert);
+          setAlerts(list);
+        }, (err) => {
+          console.error('[HR] alerts listen error:', err);
+        }),
+      );
+    } else {
+      void getDocs(announcementQuery).then((snap) => {
+        setAnnouncements(snap.docs.map((docItem) => docItem.data() as HrAnnouncement));
+      }).catch((err) => {
+        console.error('[HR] announcements fetch error:', err);
+      });
+      void getDocs(alertQuery).then((snap) => {
+        setAlerts(snap.docs.map((docItem) => docItem.data() as ProjectChangeAlert));
+      }).catch((err) => {
+        console.error('[HR] alerts fetch error:', err);
+      });
+    }
 
     return () => {
       unsubsRef.current.forEach((unsub) => unsub());
       unsubsRef.current = [];
     };
-  }, [authLoading, isAuthenticated, user, firestoreEnabled, db, orgId]);
+  }, [authLoading, isAuthenticated, user, firestoreEnabled, db, orgId, liveMode]);
 
   const createAnnouncement = useCallback((
     data: Omit<HrAnnouncement, 'id' | 'announcedAt' | 'affectedProjectIds' | 'resolved'>,

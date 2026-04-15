@@ -12,6 +12,7 @@ import {
   collection,
   doc,
   getDoc,
+  getDocs,
   limit,
   onSnapshot,
   query,
@@ -34,15 +35,7 @@ import { getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
 import { addMonthsToYearMonth, getSeoulTodayIso } from '../platform/business-days';
 import { getMonthMondayWeeks } from '../platform/cashflow-weeks';
 import { normalizeProjectIds } from './project-assignment';
-
-function normalizeRole(value: unknown): string {
-  return typeof value === 'string' ? value.trim().toLowerCase() : '';
-}
-
-function canReadAll(role: unknown): boolean {
-  const normalized = normalizeRole(role);
-  return normalized === 'admin' || normalized === 'tenant_admin' || normalized === 'finance' || normalized === 'auditor';
-}
+import { canUseRealtimeListeners } from './firestore-realtime-mode';
 
 interface CashflowWeekState {
   yearMonth: string; // selected month ("YYYY-MM")
@@ -96,7 +89,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     () => normalizeProjectIds([...(Array.isArray(user?.projectIds) ? user?.projectIds : []), myProjectId]),
     [user?.projectIds, myProjectId],
   );
-  const readAll = canReadAll(role);
+  const readAll = canUseRealtimeListeners(role);
 
   const [yearMonth, setYearMonthState] = useState(() => getSeoulTodayIso().slice(0, 7));
   const [weeks, setWeeks] = useState<CashflowWeekSheet[]>([]);
@@ -166,26 +159,40 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
           limit(2500),
         ));
 
-    unsubsRef.current.push(
-      onSnapshot(q, (snap) => {
-        const docs = (readAll
-          ? snap.docs.map((d) => d.data() as CashflowWeekSheet)
-          : filterCashflowWeeksForYear(
-            snap.docs.map((d) => d.data() as CashflowWeekSheet),
-            yearMonth,
-          ));
+    if (readAll) {
+      unsubsRef.current.push(
+        onSnapshot(q, (snap) => {
+          const docs = snap.docs.map((d) => d.data() as CashflowWeekSheet);
+          docs.sort((a, b) => {
+            if (a.projectId !== b.projectId) return String(a.projectId).localeCompare(String(b.projectId));
+            return (a.weekNo || 0) - (b.weekNo || 0);
+          });
+          setWeeks(docs);
+          setIsLoading(false);
+        }, (err) => {
+          console.error('[CashflowWeeks] listen error:', err);
+          setWeeks([]);
+          setIsLoading(false);
+        }),
+      );
+    } else {
+      void getDocs(q).then((snap) => {
+        const docs = filterCashflowWeeksForYear(
+          snap.docs.map((d) => d.data() as CashflowWeekSheet),
+          yearMonth,
+        );
         docs.sort((a, b) => {
           if (a.projectId !== b.projectId) return String(a.projectId).localeCompare(String(b.projectId));
           return (a.weekNo || 0) - (b.weekNo || 0);
         });
         setWeeks(docs);
         setIsLoading(false);
-      }, (err) => {
-        console.error('[CashflowWeeks] listen error:', err);
+      }).catch((err) => {
+        console.error('[CashflowWeeks] fetch error:', err);
         setWeeks([]);
         setIsLoading(false);
-      }),
-    );
+      });
+    }
 
     return () => {
       unsubsRef.current.forEach((u) => u());

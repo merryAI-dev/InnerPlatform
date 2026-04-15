@@ -11,6 +11,8 @@ import React, {
 import {
   collection,
   doc,
+  getDoc,
+  getDocs,
   limit,
   onSnapshot,
   orderBy,
@@ -32,15 +34,7 @@ import {
   subtractBusinessDays,
 } from '../platform/business-days';
 import { sortMonthlyClosesByYearMonth, sortPayrollRunsByPlannedPayDate } from './payroll.helpers';
-
-function normalizeRole(value: unknown): string {
-  return typeof value === 'string' ? value.trim().toLowerCase() : '';
-}
-
-function canReadAll(role: unknown): boolean {
-  const normalized = normalizeRole(role);
-  return normalized === 'admin' || normalized === 'tenant_admin' || normalized === 'finance' || normalized === 'auditor';
-}
+import { canUseRealtimeListeners } from './firestore-realtime-mode';
 
 const DEFAULT_TIMEZONE = 'Asia/Seoul';
 const DEFAULT_LEAD_DAYS = 3;
@@ -79,7 +73,7 @@ export function PayrollProvider({ children }: { children: ReactNode }) {
 
   const role = user?.role;
   const myProjectId = user?.projectId || '';
-  const readAll = canReadAll(role);
+  const readAll = canUseRealtimeListeners(role);
 
   useEffect(() => {
     unsubsRef.current.forEach((u) => u());
@@ -151,25 +145,19 @@ export function PayrollProvider({ children }: { children: ReactNode }) {
         limit(18),
       );
 
-      unsubsRef.current.push(
-        onSnapshot(scheduleRef, (snap) => {
-          if (!snap.exists()) {
-            setSchedules([]);
-            return;
-          }
-          setSchedules([snap.data() as PayrollSchedule]);
-        }, (err) => console.error('[Payroll] schedule listen error:', err)),
-      );
-      unsubsRef.current.push(
-        onSnapshot(runQuery, (snap) => {
-          setRuns(sortPayrollRunsByPlannedPayDate(snap.docs.map((d) => d.data() as PayrollRun)));
-        }, (err) => console.error('[Payroll] runs listen error:', err)),
-      );
-      unsubsRef.current.push(
-        onSnapshot(closeQuery, (snap) => {
-          setMonthlyCloses(sortMonthlyClosesByYearMonth(snap.docs.map((d) => d.data() as MonthlyClose)));
-        }, (err) => console.error('[Payroll] monthly closes listen error:', err)),
-      );
+      void getDoc(scheduleRef).then((snap) => {
+        if (!snap.exists()) {
+          setSchedules([]);
+          return;
+        }
+        setSchedules([snap.data() as PayrollSchedule]);
+      }).catch((err) => console.error('[Payroll] schedule fetch error:', err));
+      void getDocs(runQuery).then((snap) => {
+        setRuns(sortPayrollRunsByPlannedPayDate(snap.docs.map((d) => d.data() as PayrollRun)));
+      }).catch((err) => console.error('[Payroll] runs fetch error:', err));
+      void getDocs(closeQuery).then((snap) => {
+        setMonthlyCloses(sortMonthlyClosesByYearMonth(snap.docs.map((d) => d.data() as MonthlyClose)));
+      }).catch((err) => console.error('[Payroll] monthly closes fetch error:', err));
     } else {
       setSchedules([]);
       setRuns([]);

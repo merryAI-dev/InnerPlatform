@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import {
   collection,
   doc,
+  getDocs,
   increment,
   limit,
   onSnapshot,
@@ -19,6 +20,7 @@ import type { BoardChannel, BoardComment, BoardPost } from './types';
 import { getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
 import { useFirebase } from '../lib/firebase-context';
 import { buildVoteDelta, normalizeTags } from './board.helpers';
+import { canUseRealtimeListeners } from './firestore-realtime-mode';
 
 type VoteDirection = 'up' | 'down';
 
@@ -89,6 +91,7 @@ export function BoardProvider({ children }: { children: ReactNode }) {
   const { db, isOnline, orgId } = useFirebase();
   const { user } = useAuth();
   const firestoreEnabled = featureFlags.firestoreCoreEnabled && isOnline && !!db && !!user?.uid;
+  const liveMode = canUseRealtimeListeners(user?.role);
 
   const [posts, setPosts] = useState<BoardPost[]>(INITIAL_POSTS);
   const [localVotesByPostId, setLocalVotesByPostId] = useState<Record<string, -1 | 0 | 1>>({});
@@ -119,20 +122,28 @@ export function BoardProvider({ children }: { children: ReactNode }) {
       limit(300),
     );
 
-    unsubsRef.current.push(
-      onSnapshot(postsQuery, (snap) => {
-        const list = snap.docs.map((d) => d.data() as BoardPost);
-        setPosts(list);
-      }, (err) => {
-        console.error('[Board] posts listen error:', err);
-      }),
-    );
+    if (liveMode) {
+      unsubsRef.current.push(
+        onSnapshot(postsQuery, (snap) => {
+          const list = snap.docs.map((d) => d.data() as BoardPost);
+          setPosts(list);
+        }, (err) => {
+          console.error('[Board] posts listen error:', err);
+        }),
+      );
+    } else {
+      void getDocs(postsQuery).then((snap) => {
+        setPosts(snap.docs.map((d) => d.data() as BoardPost));
+      }).catch((err) => {
+        console.error('[Board] posts fetch error:', err);
+      });
+    }
 
     return () => {
       unsubsRef.current.forEach((unsub) => unsub());
       unsubsRef.current = [];
     };
-  }, [firestoreEnabled, db, orgId]);
+  }, [firestoreEnabled, db, orgId, liveMode]);
 
   const createPost = useCallback(async (data: {
     title: string;

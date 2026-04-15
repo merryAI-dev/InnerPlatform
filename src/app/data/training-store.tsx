@@ -3,6 +3,7 @@ import {
   collection,
   doc,
   addDoc,
+  getDocs,
   updateDoc,
   onSnapshot,
   query,
@@ -18,6 +19,7 @@ import { useFirebase } from '../lib/firebase-context';
 import { featureFlags } from '../config/feature-flags';
 import { getOrgCollectionPath } from '../lib/firebase';
 import { toast } from 'sonner';
+import { canUseRealtimeListeners } from './firestore-realtime-mode';
 
 // ── State / Actions ──
 
@@ -55,53 +57,66 @@ export function TrainingProvider({ children }: { children: ReactNode }) {
 
   const firestoreEnabled = featureFlags.firestoreCoreEnabled && !!db;
   const tenantId = orgId;
+  const liveMode = canUseRealtimeListeners(authUser?.role);
 
   // Firestore 실시간 구독
   useEffect(() => {
     if (!firestoreEnabled || !db || !authUser) return;
 
+    const coursesRef = collection(db, getOrgCollectionPath(tenantId, 'trainingCourses'));
+    const enrollRef = collection(db, getOrgCollectionPath(tenantId, 'trainingEnrollments'));
     const unsubs: Unsubscribe[] = [];
 
-    // 강의 목록 구독
-    const coursesRef = collection(db, getOrgCollectionPath(tenantId, 'trainingCourses'));
-    unsubs.push(
-      onSnapshot(query(coursesRef, orderBy('startDate', 'desc')), (snap) => {
-        setCourses(snap.docs.map((d) => ({ id: d.id, ...d.data() } as TrainingCourse)));
-      }, (err) => {
-        console.error('[Training] courses subscription error:', err);
-        setCourses(MOCK_TRAINING_COURSES);
-      })
-    );
-
-    // 내 수강 신청 구독 (portal용)
-    const enrollRef = collection(db, getOrgCollectionPath(tenantId, 'trainingEnrollments'));
-    unsubs.push(
-      onSnapshot(
-        query(enrollRef, where('memberId', '==', authUser.uid)),
-        (snap) => {
-          setMyEnrollments(snap.docs.map((d) => ({ id: d.id, ...d.data() } as TrainingEnrollment)));
-        },
-        (err) => {
-          console.error('[Training] myEnrollments subscription error:', err);
-          setMyEnrollments(MOCK_TRAINING_ENROLLMENTS.filter((e) => e.memberId === authUser.uid));
-        }
-      )
-    );
-
-    // 전체 수강 신청 구독 (admin용)
-    if (authUser.role === 'admin' || authUser.role === 'tenant_admin') {
+    if (liveMode) {
       unsubs.push(
-        onSnapshot(query(enrollRef, orderBy('enrolledAt', 'desc')), (snap) => {
-          setAllEnrollments(snap.docs.map((d) => ({ id: d.id, ...d.data() } as TrainingEnrollment)));
+        onSnapshot(query(coursesRef, orderBy('startDate', 'desc')), (snap) => {
+          setCourses(snap.docs.map((d) => ({ id: d.id, ...d.data() } as TrainingCourse)));
         }, (err) => {
-          console.error('[Training] allEnrollments subscription error:', err);
-          setAllEnrollments(MOCK_TRAINING_ENROLLMENTS);
+          console.error('[Training] courses subscription error:', err);
+          setCourses(MOCK_TRAINING_COURSES);
         })
       );
+
+      unsubs.push(
+        onSnapshot(
+          query(enrollRef, where('memberId', '==', authUser.uid)),
+          (snap) => {
+            setMyEnrollments(snap.docs.map((d) => ({ id: d.id, ...d.data() } as TrainingEnrollment)));
+          },
+          (err) => {
+            console.error('[Training] myEnrollments subscription error:', err);
+            setMyEnrollments(MOCK_TRAINING_ENROLLMENTS.filter((e) => e.memberId === authUser.uid));
+          }
+        )
+      );
+
+      if (authUser.role === 'admin' || authUser.role === 'tenant_admin') {
+        unsubs.push(
+          onSnapshot(query(enrollRef, orderBy('enrolledAt', 'desc')), (snap) => {
+            setAllEnrollments(snap.docs.map((d) => ({ id: d.id, ...d.data() } as TrainingEnrollment)));
+          }, (err) => {
+            console.error('[Training] allEnrollments subscription error:', err);
+            setAllEnrollments(MOCK_TRAINING_ENROLLMENTS);
+          })
+        );
+      }
+    } else {
+      void getDocs(query(coursesRef, orderBy('startDate', 'desc'))).then((snap) => {
+        setCourses(snap.docs.map((d) => ({ id: d.id, ...d.data() } as TrainingCourse)));
+      }).catch((err) => {
+        console.error('[Training] courses fetch error:', err);
+        setCourses(MOCK_TRAINING_COURSES);
+      });
+      void getDocs(query(enrollRef, where('memberId', '==', authUser.uid))).then((snap) => {
+        setMyEnrollments(snap.docs.map((d) => ({ id: d.id, ...d.data() } as TrainingEnrollment)));
+      }).catch((err) => {
+        console.error('[Training] myEnrollments fetch error:', err);
+        setMyEnrollments(MOCK_TRAINING_ENROLLMENTS.filter((e) => e.memberId === authUser.uid));
+      });
     }
 
     return () => unsubs.forEach((u) => u());
-  }, [authUser?.uid, authUser?.role, firestoreEnabled, db, tenantId]);
+  }, [authUser?.uid, authUser?.role, firestoreEnabled, db, tenantId, liveMode]);
 
   // Local fallback: 내 수강 초기화
   useEffect(() => {

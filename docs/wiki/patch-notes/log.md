@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-04-15] patch-note | portal-dashboard | PM safe fetch stabilization
+- pages: [portal-dashboard](./pages/portal-dashboard.md), [portal-bank-statement](./pages/portal-bank-statement.md), [portal-weekly-expense](./pages/portal-weekly-expense.md)
+- summary: PM/viewer 포털 경로의 portal store, board, training, HR surface는 역할 기반 safe fetch 모드로 전환해 반복 Firestore Listen 400이 포털 전체를 재시도 루프로 흔드는 구조를 줄였다.
+
 ## [2026-04-15] patch-note | portal-dashboard | payroll listen hardening
 - pages: [portal-dashboard](./pages/portal-dashboard.md)
 - summary: PM 포털 전역 payroll provider가 `projectId + orderBy` 복합 listen 없이 동작하도록 단순화해 남아 있던 Firestore Listen 400 후보를 추가로 제거했다.
