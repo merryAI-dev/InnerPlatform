@@ -2,7 +2,7 @@ import type { LucideIcon } from 'lucide-react';
 import {
   LayoutDashboard, FolderKanban, BarChart3,
   FileCheck, Settings, Shield, ClipboardList, ClipboardCheck,
-  Calculator, Wallet, ExternalLink,
+  Calculator, Wallet, ExternalLink, UserCog,
   ListChecks, MessagesSquare,
   CircleDollarSign, ArrowLeftRight,
 } from 'lucide-react';
@@ -32,7 +32,7 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: '재무관리',
     items: [
-      { to: '/cashflow', icon: BarChart3, label: '캐시플로 추출' },
+      { to: '/cashflow', icon: BarChart3, label: '캐시플로 모니터링' },
       { to: '/evidence', icon: FileCheck, label: '증빙/정산' },
       { to: '/bank-reconciliation', icon: ArrowLeftRight, label: '은행 대조' },
       { to: '/payroll', icon: CircleDollarSign, label: '인건비/월간정산', accent: true },
@@ -52,6 +52,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: '시스템',
     items: [
       { to: '/approvals', icon: ListChecks, label: '승인 대기열', accent: true },
+      { to: '/users', icon: UserCog, label: '권한/사용자' },
       { to: '/settings', icon: Settings, label: '설정' },
       { to: '/portal', icon: ExternalLink, label: '사용자 포털' },
     ],
