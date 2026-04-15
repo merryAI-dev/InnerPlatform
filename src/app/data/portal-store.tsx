@@ -46,6 +46,8 @@ import type { ImportRow } from '../platform/settlement-csv';
 import {
   BANK_STATEMENT_COLUMNS,
   buildBankImportIntakeItemsFromBankSheet,
+  mapBankStatementsToImportRows,
+  mergeBankRowsIntoExpenseSheet,
   type BankStatementRow,
   type BankStatementSheet,
 } from '../platform/bank-statement';
@@ -2166,18 +2168,26 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       cells: sanitizedColumns.map((_, colIdx) => normalizeSpace(String(Array.isArray(row?.cells) ? (row.cells[colIdx] ?? '') : ''))),
     }));
     const sanitizedSheet: BankStatementSheet = { columns: sanitizedColumns, rows: sanitizedRows as BankStatementRow[] };
+    const targetSheetId = activeExpenseSheetIdRef.current || 'default';
+    const targetSheet = expenseSheetsRef.current.find((sheetItem) => sheetItem.id === targetSheetId) || null;
+    const targetRows = targetSheet?.rows || (targetSheetId === 'default' ? expenseSheetRowsRef.current : []);
+    const mergedExpenseRows = mergeBankRowsIntoExpenseSheet(
+      targetRows,
+      mapBankStatementsToImportRows(sanitizedSheet),
+    );
     const uploadBatchId = `bank-upload-${Date.now()}`;
     const intakeItems = buildBankImportIntakeItemsFromBankSheet({
       projectId: currentProjectId || '',
       sheet: sanitizedSheet,
       existingItems: expenseIntakeItemsRef.current,
-      existingRows: expenseSheetRowsRef.current,
-      existingExpenseSheetId: activeExpenseSheetIdRef.current || 'default',
+      existingRows: targetRows,
+      existingExpenseSheetId: targetSheetId,
       lastUploadBatchId: uploadBatchId,
       now,
       updatedBy: portalUser?.name || authUser?.name || '',
     });
     const reconciledIntakeItems = reconcileBankImportUploadItems(expenseIntakeItemsRef.current, intakeItems);
+    await saveExpenseSheetRows(mergedExpenseRows);
     if (isDevHarnessUser || !db || !currentProjectId) {
       setBankStatementRows(sanitizedSheet);
       expenseIntakeItemsRef.current = reconciledIntakeItems;
@@ -2206,7 +2216,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     );
     expenseIntakeItemsRef.current = reconciledIntakeItems;
     setExpenseIntakeItems(reconciledIntakeItems);
-  }, [currentProjectId, db, orgId, portalUser?.name, authUser?.name, isDevHarnessUser]);
+  }, [authUser?.name, currentProjectId, db, isDevHarnessUser, orgId, portalUser?.name, saveExpenseSheetRows]);
 
   const upsertExpenseIntakeItems = useCallback(async (items: BankImportIntakeItem[]) => {
     if (!Array.isArray(items) || items.length === 0) return;

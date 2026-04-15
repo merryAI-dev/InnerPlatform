@@ -192,4 +192,37 @@ describe('bank statement helpers', () => {
     expect(merged[1].sourceTxId).toBe('bank:new');
     expect(merged[1].cells[budgetIdx]).toBe('');
   });
+
+  it('projects uploaded bank rows straight into weekly expense rows for direct handoff', () => {
+    const dateIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '거래일시');
+    const counterpartyIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '지급처');
+    const bankAmountIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '통장에 찍힌 입/출금액');
+    const budgetIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '비목');
+
+    const legacyManualRow = createEmptyImportRow();
+    legacyManualRow.tempId = 'manual-1';
+    legacyManualRow.cells[budgetIdx] = '출장비';
+    legacyManualRow.cells[dateIdx] = '2026-04-01';
+    legacyManualRow.cells[counterpartyIdx] = '수기 입력 건';
+    legacyManualRow.cells[bankAmountIdx] = '11,000';
+
+    const merged = mergeBankRowsIntoExpenseSheet(
+      [legacyManualRow],
+      mapBankStatementsToImportRows({
+        columns: ['거래일시', '적요', '의뢰인/수취인', '출금금액', '잔액'],
+        rows: [
+          {
+            tempId: 'bank-1',
+            cells: ['2026-04-08 09:00', 'KTX 예매', '코레일', '15,000', '500,000'],
+          },
+        ],
+      }),
+    );
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0].sourceTxId).toMatch(/^bank:/);
+    expect(merged[0].cells[dateIdx]).toBe('2026-04-08');
+    expect(merged[0].cells[counterpartyIdx]).toBe('코레일');
+    expect(merged[0].cells[bankAmountIdx]).toBe('15,000');
+  });
 });

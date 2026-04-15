@@ -18,7 +18,6 @@ import type { EvidenceUploadSelection, PendingQuickInsert } from '../cashflow/Se
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Card, CardContent } from '../ui/card';
-import { BankImportTriageWizard } from './BankImportTriageWizard';
 import {
   formatSettlementSheetPolicySummary,
   normalizeSettlementSheetPolicy,
@@ -72,7 +71,6 @@ import {
 } from '../ui/alert-dialog';
 import { resolvePortalHappyPath } from '../../platform/portal-happy-path';
 import { resolveWeeklyExpenseSavePolicy } from '../../platform/weekly-expense-save-policy';
-import { groupExpenseIntakeItemsForSurface } from '../../platform/bank-intake-surface';
 import { usePortalNavigationGuard } from './PortalLayout';
 const GoogleSheetMigrationWizard = lazy(
   () => import('./GoogleSheetMigrationWizard').then((module) => ({ default: module.GoogleSheetMigrationWizard })),
@@ -97,7 +95,6 @@ export function PortalWeeklyExpensePage() {
     updateTransaction,
     changeTransactionState,
     evidenceRequiredMap,
-    expenseIntakeItems,
     sheetSources,
     saveEvidenceRequiredMap,
     expenseSheets,
@@ -119,15 +116,11 @@ export function PortalWeeklyExpensePage() {
     saveBudgetCodeBook,
     markSheetSourceApplied,
     upsertWeeklySubmissionStatus,
-    saveExpenseIntakeDraft,
-    projectExpenseIntakeItem,
-    syncExpenseIntakeEvidence,
   } = usePortalStore();
   const { submitWeekAsPm, upsertWeekAmounts } = useCashflowWeeks();
   const devHarnessConfig = readDevAuthHarnessConfig(import.meta.env, typeof window !== 'undefined' ? window.location : undefined);
   const [projectDriveProvisioning, setProjectDriveProvisioning] = useState(false);
   const [googleSheetImportOpen, setGoogleSheetImportOpen] = useState(false);
-  const [triageWizardOpen, setTriageWizardOpen] = useState(false);
   const [pendingQuickInsert, setPendingQuickInsert] = useState<PendingQuickInsert | null>(null);
   const [hasUnsavedSettlementChanges, setHasUnsavedSettlementChanges] = useState(false);
   const [pendingNavigationAttempt, setPendingNavigationAttempt] = useState<{ path: string; label: string } | null>(null);
@@ -164,8 +157,6 @@ export function PortalWeeklyExpensePage() {
   const isENaraProject = myProject?.settlementType === 'TYPE5' || myProject?.accountType === 'DEDICATED';
   const fundInputMode = normalizeProjectFundInputMode(myProject?.fundInputMode);
   const isDirectEntryMode = fundInputMode === 'DIRECT_ENTRY';
-  const intakeSurface = useMemo(() => groupExpenseIntakeItemsForSurface(expenseIntakeItems), [expenseIntakeItems]);
-  const queueWorkCount = intakeSurface.needsClassification.length + intakeSurface.reviewRequired.length + intakeSurface.pendingEvidence.length;
   const expenseRowCount = expenseSheetRows?.length || 0;
   const sourceStatusTitle = isDirectEntryMode
     ? '직접작성 기준으로 입력 중'
@@ -175,8 +166,8 @@ export function PortalWeeklyExpensePage() {
   const sourceStatusDescription = isDirectEntryMode
     ? '이 프로젝트는 통장 업로드 없이 표에서 바로 입력합니다. 저장 후 반영 상태만 확인하면 됩니다.'
     : bankStatementCount > 0
-      ? '통장내역 저장본이 현재 탭 입력과 신규 거래 분류의 기준입니다. 원본을 다시 보면 이 기준에서 이어집니다.'
-      : '통장내역을 먼저 저장해야 이 화면에서 분류, 입력, 저장 흐름이 같은 기준으로 이어집니다.';
+      ? '통장내역 저장본이 현재 탭 입력의 기준입니다. 원본 화면에서 바로 이어와 같은 기준으로 저장과 반영을 진행합니다.'
+      : '통장내역을 먼저 저장해야 이 화면에서 같은 기준으로 입력과 저장을 이어갈 수 있습니다.';
   const weeklySetupPanel = useMemo(() => {
     if (!happyPath.canOpenWeeklyExpenses) {
       return {
@@ -917,42 +908,6 @@ export function PortalWeeklyExpensePage() {
 
       </div>
 
-      {queueWorkCount > 0 && (
-        <Card data-testid="weekly-intake-queue-strip" className="border-indigo-200/70 bg-gradient-to-r from-indigo-50 via-white to-cyan-50/70 shadow-sm">
-          <CardContent className="flex flex-col gap-3 px-4 py-4 md:flex-row md:items-center md:justify-between">
-            <div className="space-y-1">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-indigo-700">미처리 거래</p>
-              <p className="text-[14px] font-semibold text-slate-900">
-                통장내역에서 아직 정리되지 않은 거래 {queueWorkCount}건이 남아 있습니다
-              </p>
-              <p className="text-[12px] leading-6 text-slate-600">
-                표 전체를 다시 볼 필요 없이, 필요한 거래만 wizard에서 분류하거나 검토한 뒤 다시 이 화면으로 돌아와 입력을 이어가면 됩니다.
-              </p>
-            </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <Badge className="border-amber-200 bg-amber-50 text-amber-700">
-                분류 필요 {intakeSurface.needsClassification.length}
-              </Badge>
-              <Badge className="border-rose-200 bg-rose-50 text-rose-700">
-                검토 필요 {intakeSurface.reviewRequired.length}
-              </Badge>
-              <Badge className="border-sky-200 bg-sky-50 text-sky-700">
-                증빙 미완료 {intakeSurface.pendingEvidence.length}
-              </Badge>
-              <Button variant="outline" size="sm" onClick={() => requestRouteNavigation('/portal/bank-statements', '통장내역')}>
-                원본 보기
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => setTriageWizardOpen(true)} disabled={intakeSurface.pendingEvidence.length === 0}>
-                증빙 이어서 하기
-              </Button>
-              <Button data-testid="weekly-intake-open-wizard" size="sm" onClick={() => setTriageWizardOpen(true)}>
-                분류/검토 열기
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2 flex-wrap">
           {visibleExpenseSheets.map((sheet) => (
@@ -1113,15 +1068,6 @@ export function PortalWeeklyExpensePage() {
             />
         </Suspense>
       )}
-      <BankImportTriageWizard
-        open={triageWizardOpen}
-        onOpenChange={setTriageWizardOpen}
-        items={expenseIntakeItems}
-        onSaveDraft={saveExpenseIntakeDraft}
-        onProjectItem={projectExpenseIntakeItem}
-        onSyncEvidence={syncExpenseIntakeEvidence}
-        evidenceRequiredMap={evidenceRequiredMap}
-      />
       {/* 참여율 이상 탐지 경고 모달 */}
       <AlertDialog open={!!participationRiskWarning} onOpenChange={(open) => { if (!open) setParticipationRiskWarning(null); }}>
         <AlertDialogContent>
