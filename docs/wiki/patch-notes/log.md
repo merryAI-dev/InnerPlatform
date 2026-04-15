@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-04-15] patch-note | shared-portal-architecture | portal bootstrap fetch loop split
+- pages: [shared-portal-architecture](./pages/shared-portal-architecture.md)
+- summary: `portal-store`의 단일 bootstrap effect를 `projects catalog`, `current project scope`, `weekly submission scope`로 분리하고, 동일한 project snapshot은 다시 state에 밀지 않도록 해 `/portal` 진입 시 반복 fetch/listen churn 후보를 줄였다.
+
 ## [2026-04-15] patch-note | shared-portal-architecture | route-scoped provider and access policy split
 - pages: [shared-portal-architecture](./pages/shared-portal-architecture.md), [portal-dashboard](./pages/portal-dashboard.md), [portal-payroll](./pages/portal-payroll.md)
 - summary: App 루트 broad provider tree를 admin/portal route shell로 분리하고, 각 shell이 `admin-live` 또는 `portal-safe` Firestore access mode를 주입하도록 바꿨다. provider들은 더 이상 `window.location`이나 pathname hook으로 realtime 여부를 스스로 판단하지 않는다.

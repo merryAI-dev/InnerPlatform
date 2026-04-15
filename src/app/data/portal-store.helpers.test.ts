@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ExpenseSet } from './budget-data';
+import type { Project } from './types';
+import { areProjectsEqual } from './portal-store';
 import {
   computeExpenseTotals,
   duplicateExpenseSetAsDraft,
@@ -40,6 +42,47 @@ const baseSet: ExpenseSet = {
   totalGross: 1100,
 };
 
+const baseProject: Project = {
+  id: 'p001',
+  slug: 'project-001',
+  orgId: 'mysc',
+  name: '테스트 사업',
+  status: 'IN_PROGRESS',
+  type: 'C1',
+  phase: 'CONFIRMED',
+  contractAmount: 1000000,
+  contractStart: '2026-01-01',
+  contractEnd: '2026-12-31',
+  settlementType: 'TYPE2',
+  basis: '공급대가',
+  accountType: 'OPERATING',
+  paymentPlan: {
+    contract: 300000,
+    interim: 300000,
+    final: 400000,
+  },
+  paymentPlanDesc: '계약금 30 / 중도금 30 / 잔금 40',
+  clientOrg: '테스트 발주기관',
+  groupwareName: '테스트 그룹웨어명',
+  participantCondition: '참여기업 조건',
+  contractType: '일반',
+  department: '사업부',
+  teamName: 'PM팀',
+  managerId: 'u001',
+  managerName: '보람',
+  budgetCurrentYear: 1000000,
+  taxInvoiceAmount: 0,
+  profitRate: 0.1,
+  profitAmount: 100000,
+  isSettled: false,
+  finalPaymentNote: '',
+  confirmerName: '센터장',
+  lastCheckedAt: '2026-01-01T00:00:00Z',
+  cashflowDiffNote: '',
+  createdAt: '2026-01-01T00:00:00Z',
+  updatedAt: '2026-01-01T00:00:00Z',
+};
+
 describe('portal-store helpers', () => {
   it('computes totals from items', () => {
     const totals = computeExpenseTotals([
@@ -78,5 +121,19 @@ describe('portal-store helpers', () => {
     expect(duplicated.items[0].id).toBe('ei-dup-1');
     expect(duplicated.items[0].setId).toBe('es-dup-1');
     expect(duplicated.rejectedReason).toBeUndefined();
+  });
+
+  it('treats stable project snapshots as equal even when objects are recreated', () => {
+    const left = [{ ...baseProject, financialInputFlags: { contractAmount: true } }];
+    const right = [{ ...baseProject, financialInputFlags: { contractAmount: true } }];
+
+    expect(areProjectsEqual(left, right)).toBe(true);
+  });
+
+  it('detects materially changed project snapshots', () => {
+    const left = [{ ...baseProject }];
+    const right = [{ ...baseProject, updatedAt: '2026-01-02T00:00:00Z' }];
+
+    expect(areProjectsEqual(left, right)).toBe(false);
   });
 });
