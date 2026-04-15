@@ -22,7 +22,7 @@ import {
 } from 'firebase/firestore';
 import { useAuth } from './auth-store';
 import type { CashflowSheetLineId, CashflowWeekSheet, VarianceFlag, VarianceFlagEvent } from './types';
-import { shouldCreateDocOnUpdateError } from './cashflow-weeks.helpers';
+import { filterCashflowWeeksForYear, shouldCreateDocOnUpdateError } from './cashflow-weeks.helpers';
 import {
   buildCashflowWeekUpdatePatch,
   buildInitialCashflowWeekDoc,
@@ -142,14 +142,11 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     setIsLoading(true);
 
     const base = collection(db, getOrgCollectionPath(orgId, 'cashflowWeeks'));
-    const year = yearMonth.slice(0, 4);
-    const yearStart = `${year}-01`;
-    const yearEnd = `${year}-12`;
     const q = readAll
       ? query(
         base,
-        where('yearMonth', '>=', yearStart),
-        where('yearMonth', '<=', yearEnd),
+        where('yearMonth', '>=', `${yearMonth.slice(0, 4)}-01`),
+        where('yearMonth', '<=', `${yearMonth.slice(0, 4)}-12`),
         limit(2500),
       )
       : (projectIds.length > 0
@@ -157,27 +154,26 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
           ? query(
             base,
             where('projectId', '==', projectIds[0]),
-            where('yearMonth', '>=', yearStart),
-            where('yearMonth', '<=', yearEnd),
             limit(2500),
           )
           : query(
             base,
             where('projectId', 'in', projectIds.slice(0, 10)),
-            where('yearMonth', '>=', yearStart),
-            where('yearMonth', '<=', yearEnd),
             limit(2500),
           ))
         : query(
           base,
-          where('yearMonth', '>=', yearStart),
-          where('yearMonth', '<=', yearEnd),
           limit(2500),
         ));
 
     unsubsRef.current.push(
       onSnapshot(q, (snap) => {
-        const docs = snap.docs.map((d) => d.data() as CashflowWeekSheet);
+        const docs = (readAll
+          ? snap.docs.map((d) => d.data() as CashflowWeekSheet)
+          : filterCashflowWeeksForYear(
+            snap.docs.map((d) => d.data() as CashflowWeekSheet),
+            yearMonth,
+          ));
         docs.sort((a, b) => {
           if (a.projectId !== b.projectId) return String(a.projectId).localeCompare(String(b.projectId));
           return (a.weekNo || 0) - (b.weekNo || 0);

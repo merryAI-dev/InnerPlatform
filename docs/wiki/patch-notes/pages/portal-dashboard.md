@@ -3,7 +3,7 @@
 - route: `/portal`
 - primary users: PM
 - status: active
-- last updated: 2026-04-14
+- last updated: 2026-04-15
 
 ## Purpose
 
@@ -45,6 +45,7 @@
 - [x] 프로젝트 정보와 주간 상태를 첫 화면 한 장의 헤더 슬랩에서 확인 가능
 - [x] 상단에 MYSC 로고만 남기고 부가 workspace 문구는 제거됨
 - [x] 첫 화면에서 중복 바로가기 CTA 없이 상태와 요약 정보 중심으로 확인 가능
+- [x] PM 홈 부팅이 cashflow 주차 listener의 연도 범위 index 상태에 직접 막히지 않음
 - [x] 자금 요약 4칸이 사업명 바로 아래에서 한 번에 확인 가능
 - [x] 프로젝트 상세와 이번 주 작업 상태를 한 slab 안의 좌우 축으로 확인 가능
 - [x] 좌우 패널 비중이 상태 정보 기준으로 재조정됨
@@ -70,6 +71,7 @@
 - [2026-04-14] 헤더 우측의 중복 `사업비 입력` CTA를 제거하고, command search가 담당 사업 전체를 검색해 해당 사업으로 바로 전환되도록 확장했다.
 - [2026-04-14] command search에서 현재 담당 사업을 선택해도 이동이 막히지 않도록 `setActiveProject` no-op 케이스를 정리했다.
 - [2026-04-14] 상단 shell의 `My Work` 보조 라벨을 제거하고 현재 화면명만 남겼다.
+- [2026-04-15] PM 홈은 전역 cashflow 주차 구독이 project 기준 query만 사용하도록 바꿔, cashflow composite index drift가 있어도 포털 첫 화면 전체가 Listen 400 재시도로 흔들리지 않게 보강했다.
 - [2026-04-14] `내 제출 현황`을 홈 하단의 compact 제출 상태 표로 흡수했고, 별도 탭과 직접 진입 라우트는 홈으로 정리했다.
 - [2026-04-14] 제출 통합 블록에서는 `인력변경 신청`, `사업비 입력(주간) 작성/제출`, `주간 제출 체크` 같은 중복 섹션을 제외하고 현재 주차 기준 핵심 상태만 남겼다.
 - [2026-04-14] 상단을 Salesforce 계열 SaaS처럼 `workspace bar + app tabs + project switcher` 구조로 재편했다.
