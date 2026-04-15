@@ -27,6 +27,7 @@ import {
   type Transaction,
 } from '../../data/types';
 import { addMonthsToYearMonth, getSeoulTodayIso } from '../../platform/business-days';
+import { resolveCurrentCashflowWeek } from '../../platform/cashflow-export-surface';
 import { useFirebase } from '../../lib/firebase-context';
 import { featureFlags } from '../../config/feature-flags';
 import { getOrgCollectionPath } from '../../lib/firebase';
@@ -36,6 +37,10 @@ import {
   type PayrollLiquidityQueueItem,
 } from '../../platform/payroll-liquidity';
 import { buildPortalDashboardSurface } from '../../platform/portal-dashboard-surface';
+import {
+  resolveWeeklyAccountingProductStatus,
+  resolveWeeklyAccountingSnapshot,
+} from '../../platform/weekly-accounting-state';
 
 // ═══════════════════════════════════════════════════════════════
 // PortalDashboard — 내 사업 현황
@@ -71,9 +76,16 @@ function accountingToneBadgeClassName(tone: 'muted' | 'warning' | 'danger' | 'su
   return 'border-slate-200 bg-slate-50 text-slate-700';
 }
 
+function submissionBadgeClassName(tone: 'neutral' | 'warning' | 'danger' | 'success') {
+  if (tone === 'danger') return 'border-rose-200 bg-rose-50 text-rose-700';
+  if (tone === 'warning') return 'border-amber-200 bg-amber-50 text-amber-700';
+  if (tone === 'success') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  return 'border-slate-200 bg-slate-50 text-slate-700';
+}
+
 export function PortalDashboard() {
   const navigate = useNavigate();
-  const { isLoading, portalUser, myProject, changeRequests, weeklySubmissionStatuses } = usePortalStore();
+  const { isLoading, portalUser, myProject, weeklySubmissionStatuses, projects } = usePortalStore();
   const { getProjectAlerts } = useHrAnnouncements();
   const { runs, monthlyCloses, acknowledgePayrollRun, acknowledgeMonthlyClose } = usePayroll();
   const { db, isOnline, orgId } = useFirebase();
@@ -149,7 +161,6 @@ export function PortalDashboard() {
   }, [db, firestoreEnabled, orgId, myProject.id]);
 
   const myTx = (liveTransactions ?? TRANSACTIONS).filter(t => t.projectId === myProject.id);
-  const myChanges = changeRequests.filter(r => r.projectId === myProject.id);
 
   const today = getSeoulTodayIso();
   const yearMonth = today.slice(0, 7);
@@ -198,14 +209,53 @@ export function PortalDashboard() {
     [payrollQueueItems],
   );
   const payrollDetail = payrollQueueItems[0] || null;
+  const assignedProjects = useMemo(() => {
+    if (!portalUser) return myProject ? [myProject] : [];
+    const projectIds = Array.isArray(portalUser.projectIds) && portalUser.projectIds.length > 0
+      ? portalUser.projectIds
+      : portalUser.projectId ? [portalUser.projectId] : [];
+    const projectMap = new Map(projects.map((project) => [project.id, project]));
+    const ordered = projectIds
+      .map((projectId) => projectMap.get(projectId))
+      .filter((project): project is NonNullable<typeof project> => Boolean(project));
+    if (ordered.length > 0) return ordered;
+    return myProject ? [myProject] : [];
+  }, [myProject, portalUser, projects]);
+  const currentWeek = useMemo(() => resolveCurrentCashflowWeek(today), [today]);
+  const weeklyStatusMap = useMemo(() => {
+    const map = new Map<string, typeof weeklySubmissionStatuses[number]>();
+    weeklySubmissionStatuses.forEach((status) => {
+      map.set(`${status.projectId}-${status.yearMonth}-w${status.weekNo}`, status);
+    });
+    return map;
+  }, [weeklySubmissionStatuses]);
+  const dashboardSubmissionRows = useMemo(() => {
+    if (!currentWeek) return [];
+    return assignedProjects.map((project) => {
+      const status = weeklyStatusMap.get(`${project.id}-${currentWeek.yearMonth}-w${currentWeek.weekNo}`);
+      const snapshot = resolveWeeklyAccountingSnapshot(status);
+      const expenseStatus = resolveWeeklyAccountingProductStatus({ snapshot });
+      return {
+        id: project.id,
+        name: project.name,
+        shortName: project.shortName || project.id,
+        projectionInputLabel: snapshot.projectionEdited ? '입력됨' : '미입력',
+        projectionDoneLabel: snapshot.projectionDone ? '제출 완료' : '미완료',
+        expenseLabel: expenseStatus.label,
+        expenseTone: expenseStatus.tone === 'muted'
+          ? 'neutral'
+          : expenseStatus.tone,
+        latestProjectionUpdatedAt: status?.projectionUpdatedAt || status?.projectionEditedAt,
+      };
+    });
+  }, [assignedProjects, currentWeek, weeklyStatusMap]);
   const dashboardSurface = useMemo(() => buildPortalDashboardSurface({
     projectId: myProject.id,
     weeklySubmissionStatuses,
     todayIso: today,
-    changeRequestCount: myChanges.filter((change) => change.state === 'SUBMITTED').length,
     hrAlertCount: hrAlerts.length,
     payrollRiskCount: payrollRiskItems.length,
-  }), [hrAlerts.length, myChanges, myProject.id, payrollRiskItems.length, today, weeklySubmissionStatuses]);
+  }), [hrAlerts.length, myProject.id, payrollRiskItems.length, today, weeklySubmissionStatuses]);
   const shouldShowPayrollQueue = Boolean(payrollDetail && payrollDetail.status !== 'clear');
   const financeSummaryItems = [
     { label: '총 입금', value: fmtShort(totalIn) },
@@ -332,6 +382,83 @@ export function PortalDashboard() {
                 </div>
               </div>
             </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-slate-300 bg-white shadow-sm">
+        <CardHeader className="border-b border-slate-200/80 pb-3">
+          <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+            <div className="space-y-1">
+              <CardTitle className="text-[15px] font-semibold tracking-[-0.02em] text-slate-950">
+                내 제출 현황
+              </CardTitle>
+              <p className="text-[11px] text-slate-500">
+                제출 상태를 한 번에 확인합니다.
+              </p>
+            </div>
+            {currentWeek && (
+              <div className="text-[11px] font-medium text-slate-500">
+                {currentWeek.label} · {currentWeek.weekStart} ~ {currentWeek.weekEnd}
+              </div>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent className="pt-4">
+          <div className="overflow-x-auto">
+            <table className="min-w-[720px] w-full text-[11px]">
+              <thead>
+                <tr className="border-y border-slate-200 bg-slate-100/90">
+                  <th className="px-3 py-2 text-left text-[10px] uppercase tracking-[0.08em] text-slate-500" style={{ minWidth: 220 }}>
+                    사업
+                  </th>
+                  <th className="px-3 py-2 text-left text-[10px] uppercase tracking-[0.08em] text-slate-500" style={{ minWidth: 180 }}>
+                    Projection
+                  </th>
+                  <th className="px-3 py-2 text-left text-[10px] uppercase tracking-[0.08em] text-slate-500" style={{ minWidth: 180 }}>
+                    사업비 입력
+                  </th>
+                  <th className="px-3 py-2 text-left text-[10px] uppercase tracking-[0.08em] text-slate-500" style={{ minWidth: 180 }}>
+                    최근 Projection 수정
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {dashboardSubmissionRows.map((row) => (
+                  <tr key={row.id} className="border-t border-slate-200/70 transition-colors hover:bg-slate-50/70">
+                    <td className="px-3 py-3 align-top">
+                      <div className="text-[12px] font-semibold text-slate-950">{row.name}</div>
+                      <div className="mt-1 text-[10px] font-medium text-slate-500">{row.shortName}</div>
+                    </td>
+                    <td className="px-3 py-3 align-top">
+                      <div className="flex flex-wrap gap-1.5">
+                        <Badge variant="outline" className={submissionBadgeClassName(row.projectionInputLabel === '입력됨' ? 'success' : 'neutral')}>
+                          {row.projectionInputLabel}
+                        </Badge>
+                        <Badge variant="outline" className={submissionBadgeClassName(row.projectionDoneLabel === '제출 완료' ? 'success' : 'warning')}>
+                          {row.projectionDoneLabel}
+                        </Badge>
+                      </div>
+                    </td>
+                    <td className="px-3 py-3 align-top">
+                      <Badge variant="outline" className={submissionBadgeClassName(row.expenseTone)}>
+                        {row.expenseLabel}
+                      </Badge>
+                    </td>
+                    <td className="px-3 py-3 align-top text-[11px] font-medium text-slate-600">
+                      {formatKstDateTime(row.latestProjectionUpdatedAt)}
+                    </td>
+                  </tr>
+                ))}
+                {dashboardSubmissionRows.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="px-4 py-6 text-center text-[12px] text-slate-500">
+                      이번 주 기준 제출 상태를 표시할 사업이 없습니다.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </CardContent>
       </Card>

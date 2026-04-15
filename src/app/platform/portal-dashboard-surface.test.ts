@@ -24,7 +24,6 @@ describe('portal dashboard surface', () => {
       projectId: 'project-1',
       weeklySubmissionStatuses: [makeStatus()],
       todayIso: '2026-04-08',
-      changeRequestCount: 0,
       hrAlertCount: 0,
       payrollRiskCount: 0,
     });
@@ -41,13 +40,11 @@ describe('portal dashboard surface', () => {
       projectId: 'project-1',
       weeklySubmissionStatuses: [makeStatus({ projectionEdited: true, projectionUpdated: true })],
       todayIso: '2026-04-08',
-      changeRequestCount: 2,
       hrAlertCount: 0,
       payrollRiskCount: 1,
     });
 
     expect(surface.visibleIssues).toEqual([
-      { label: '인력변경 요청', count: 2, tone: 'neutral', to: '/portal/change-requests' },
       { label: '인건비 Queue', count: 1, tone: 'danger', to: '/portal/payroll' },
     ]);
   });

@@ -1,5 +1,5 @@
 import { lazy, Suspense, type ComponentType } from 'react';
-import { createBrowserRouter } from 'react-router';
+import { createBrowserRouter, Navigate } from 'react-router';
 import { AppLayout } from './components/layout/AppLayout';
 import { PortalLayout } from './components/portal/PortalLayout';
 import { loadLazyRouteModule } from './platform/lazy-route';
@@ -46,12 +46,6 @@ const PortalProjectRegister = lazy(() => import('./components/portal/PortalProje
 const PortalProjectEdit = lazy(() => import('./components/portal/PortalProjectEdit').then(m => ({ default: m.PortalProjectEdit })));
 const PortalPayrollPage = lazy(() => import('./components/portal/PortalPayrollPage').then(m => ({ default: m.PortalPayrollPage })));
 const PortalCashflowPage = lazy(() => import('./components/portal/PortalCashflowPage').then(m => ({ default: m.PortalCashflowPage })));
-const PortalSubmissionsPage = lazy(() => loadLazyRouteModule(
-  () => import('./components/portal/PortalSubmissionsPage'),
-  'PortalSubmissionsPage',
-  RouteChunkFallback,
-  '[routes] failed to load PortalSubmissionsPage:',
-));
 const CareerProfilePage = lazy(() => import('./components/portal/CareerProfilePage').then(m => ({ default: m.CareerProfilePage })));
 const PortalTrainingPage = lazy(() => import('./components/portal/PortalTrainingPage').then(m => ({ default: m.PortalTrainingPage })));
 function RouteChunkFallback() {
@@ -141,7 +135,7 @@ export const router = createBrowserRouter([
       { path: 'onboarding', element: <S C={PortalOnboarding} /> },
       { path: 'project-select', element: <S C={PortalProjectSelectPage} /> },
       { path: 'project-settings', element: <S C={PortalProjectSettings} /> },
-      { path: 'submissions', element: <S C={PortalSubmissionsPage} /> },
+      { path: 'submissions', element: <Navigate to="/portal" replace /> },
       { path: 'payroll', element: <S C={PortalPayrollPage} /> },
       { path: 'cashflow', element: <S C={PortalCashflowPage} /> },
       { path: 'budget', element: <S C={PortalBudget} /> },

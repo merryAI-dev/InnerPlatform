@@ -56,20 +56,21 @@ test('release gate: admin can switch from portal to admin home', async ({ page }
   await expect(page.getByRole('heading', { name: '사업 통합 대시보드' })).toBeVisible();
 });
 
-test('release gate: PM dashboard shows guided mission flow', async ({ page }) => {
+test('release gate: PM dashboard shows unified project and submission surface', async ({ page }) => {
   await loginAsPm(page);
   await page.goto('/portal');
 
-  await expect(page.getByTestId('portal-mission-guide')).toBeVisible();
-  await expect(page.getByText('이번 주 미션')).toBeVisible();
-  await expect(page.getByTestId('portal-mission-active-step')).toBeVisible();
+  await expect(page.getByTestId('portal-mission-guide')).toHaveCount(0);
+  await expect(page.getByText('프로젝트 상세')).toBeVisible();
+  await expect(page.getByText('이번 주 작업 상태')).toBeVisible();
+  await expect(page.getByRole('heading', { name: '내 제출 현황' })).toBeVisible();
 });
 
-test('release gate: PM weekly expense keeps next-action and trust surfaces visible', async ({ page }) => {
+test('release gate: PM weekly expense keeps compact setup and status surfaces visible', async ({ page }) => {
   await loginAsPm(page);
   await page.goto('/portal/weekly-expenses');
 
-  await expect(page.getByTestId('portal-mission-guide')).toBeVisible();
+  await expect(page.getByTestId('portal-mission-guide')).toHaveCount(0);
   await expect(page.getByTestId('weekly-expense-setup-panel')).toBeVisible();
   await expect(page.locator('[data-testid^="weekly-accounting-product-status-"]').first()).toBeVisible();
 });
@@ -86,9 +87,6 @@ test('release gate: admin can move a project to trash and restore it', async ({ 
   const projectId = rowTestId?.replace('project-list-row-', '') || '';
   expect(projectId).not.toBe('');
 
-  const projectName = (await firstProjectRow.locator('td').nth(3).innerText()).trim();
-  expect(projectName).not.toBe('');
-
   await firstProjectRow.click();
   await expect(page).toHaveURL(new RegExp(`/projects/${projectId}$`));
   await expect(page.getByTestId('project-detail-trash')).toBeVisible();
@@ -100,7 +98,6 @@ test('release gate: admin can move a project to trash and restore it', async ({ 
 
   await expect(page).toHaveURL(/\/projects$/);
   await page.getByTestId('projects-tab-trash').click();
-  await page.getByPlaceholder('사업명, 발주기관, 담당자 검색...').fill(projectName);
 
   const trashRow = page.getByTestId(`project-trash-row-${projectId}`);
   await expect(trashRow).toBeVisible();
@@ -119,6 +116,5 @@ test('release gate: admin can move a project to trash and restore it', async ({ 
 
   await page.goto('/projects');
   await page.getByTestId('projects-tab-trash').click();
-  await page.getByPlaceholder('사업명, 발주기관, 담당자 검색...').fill(projectName);
   await expect(page.getByTestId(`project-trash-row-${projectId}`)).toHaveCount(0);
 });

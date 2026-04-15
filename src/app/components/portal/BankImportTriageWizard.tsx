@@ -4,8 +4,7 @@ import type { BankImportIntakeItem } from '../../data/types';
 import { isBankImportManualFieldsComplete } from '../../platform/bank-import-triage';
 import { groupExpenseIntakeItemsForSurface, resolveBankImportWizardStatus } from '../../platform/bank-intake-surface';
 import {
-  resolveBankImportCashflowLineId,
-  resolveBankImportCashflowOptionsForAmount,
+  resolveBankImportCashflowCategoryOptionsForAmount,
   resolveBankImportCashflowSelection,
 } from '../../platform/bank-import-cashflow';
 import { resolveEvidenceChecklist } from '../../platform/evidence-helpers';
@@ -108,7 +107,7 @@ export function BankImportTriageWizard({
     manualFields: activeManualFields || selectedItem.manualFields,
   }) : null;
   const cashflowOptions = useMemo(
-    () => (selectedItem ? resolveBankImportCashflowOptionsForAmount(selectedItem.bankSnapshot.signedAmount) : []),
+    () => (selectedItem ? resolveBankImportCashflowCategoryOptionsForAmount(selectedItem.bankSnapshot.signedAmount) : []),
     [selectedItem],
   );
 
@@ -249,7 +248,7 @@ export function BankImportTriageWizard({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         data-testid="bank-import-triage-wizard"
-        className="!top-0 !left-0 !translate-x-0 !translate-y-0 !w-screen !max-w-none sm:!max-w-none !h-[100dvh] !flex !flex-col rounded-none border-0 p-0 gap-0 overflow-hidden data-[state=open]:zoom-in-100 data-[state=closed]:zoom-out-100"
+        className="!top-0 !left-0 !translate-x-0 !translate-y-0 !w-screen !max-w-none sm:!max-w-none !h-screen !min-h-screen !max-h-none !flex !flex-col rounded-none border-0 p-0 gap-0 overflow-hidden data-[state=open]:zoom-in-100 data-[state=closed]:zoom-out-100"
       >
         <DialogHeader className="border-b border-slate-200 bg-white px-6 py-4">
           <div className="flex items-start justify-between gap-4">
@@ -438,7 +437,7 @@ export function BankImportTriageWizard({
                               <span className="text-[11px] font-medium text-slate-600">cashflow 항목</span>
                               <select
                                 data-testid="bank-import-cashflow-category"
-                                value={resolveBankImportCashflowLineId(activeManualFields, selectedItem.bankSnapshot.signedAmount) || ''}
+                                value={activeManualFields?.cashflowCategory || ''}
                                 onChange={(event) => setDrafts((prev) => ({
                                   ...prev,
                                   [selectedItem.id]: {

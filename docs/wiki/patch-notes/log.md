@@ -1,5 +1,13 @@
 # Patch Notes Log
 
+## [2026-04-14] patch-note | portal-minimal-sweep | 빈 상태/가이드/placeholder 감산
+- pages: [portal-submissions](./pages/portal-submissions.md), [portal-bank-statement](./pages/portal-bank-statement.md), [portal-weekly-expense](./pages/portal-weekly-expense.md), [portal-register-project](./pages/portal-register-project.md), [portal-cashflow](./pages/portal-cashflow.md), [portal-project-settings](./pages/portal-project-settings.md), [portal-edit-project](./pages/portal-edit-project.md)
+- summary: 남은 포털 화면들에서 helper copy, role notice, 중복 상태 bar, `-` placeholder를 걷어내고 작업면 중심의 더 얇은 운영 화면으로 정리했다.
+
+## [2026-04-14] patch-note | portal-submissions | enterprise tone alignment
+- pages: [portal-submissions](./pages/portal-submissions.md)
+- summary: 내 제출 현황의 header slab, ledger table, 상태칩, 탭, 보조 카드 톤을 portal dashboard와 같은 Salesforce형 enterprise palette로 맞췄다.
+
 ## [2026-04-14] bootstrap | patch-notes-wiki | 초기 위키 scaffold
 - pages: [portal-weekly-expense](./pages/portal-weekly-expense.md), [portal-bank-statement](./pages/portal-bank-statement.md), [portal-budget](./pages/portal-budget.md), [portal-register-project](./pages/portal-register-project.md), [portal-submissions](./pages/portal-submissions.md), [admin-cashflow-export](./pages/admin-cashflow-export.md), [admin-cashflow-project-sheet](./pages/admin-cashflow-project-sheet.md), [admin-users-auth-governance](./pages/admin-users-auth-governance.md)
 - summary: GitHub 내부에 화면 단위 누적 패치노트 위키 구조를 신설했다.
@@ -55,6 +63,14 @@
 - pages: [portal-dashboard](./pages/portal-dashboard.md)
 - summary: 상단 search, bell, user affordance를 실제 command palette와 dropdown action으로 연결해 관리자 이동, 내 프로필, 로그아웃, 처리할 알림 확인이 가능하도록 마감했다.
 
+## [2026-04-14] patch-note | portal-dashboard-shell | section label 감산
+- pages: [portal-dashboard](./pages/portal-dashboard.md)
+- summary: 상단 shell에서 정보량이 없는 `My Work` 보조 라벨을 제거하고 현재 화면명만 남겨 더 미니멀한 heading 구조로 정리했다.
+
+## [2026-04-14] patch-note | portal-dashboard-shell | 현재 사업 검색 이동 보정
+- pages: [portal-dashboard](./pages/portal-dashboard.md)
+- summary: command search에서 현재 담당 사업을 선택했을 때 `setActiveProject` no-op 때문에 이동이 막히던 문제를 제거했다.
+
 ## [2026-04-14] patch-note | portal-dashboard-brand-slab | 로고 교체와 단일 헤더 슬랩
 - pages: [portal-dashboard](./pages/portal-dashboard.md)
 - summary: 상단 폴더 아이콘을 MYSC 로고로 교체하고 workspace 문구를 제거했으며, 첫 화면의 사업 정보와 주간 상태를 한 장의 세로형 헤더 슬랩으로 다시 묶었다.
@@ -98,3 +114,11 @@
 ## [2026-04-15] patch-note | portal-onboarding-workspace-choice | 명시적 workspace 선택 우선
 - pages: [portal-onboarding](./pages/portal-onboarding.md), [portal-project-select](./pages/portal-project-select.md)
 - summary: workspace 선택 화면에서는 이전 admin redirect를 무조건 재사용하지 않고, 사용자가 고른 공간과 같은 성격의 경로만 유지하도록 정리했다.
+
+## [2026-04-14] patch-note | portal-dashboard-submission-merge | 제출 상태 홈 흡수
+- pages: [portal-dashboard](./pages/portal-dashboard.md), [portal-submissions](./pages/portal-submissions.md)
+- summary: `내 제출 현황`의 핵심 제출 상태를 `/portal` 홈 안으로 흡수하고, 중복이던 `인력변경 신청`, `주간 제출 체크`, `사업비 입력(주간) 작성/제출` 블록은 홈 통합 섹션 밖으로 뺐다.
+
+## [2026-04-14] patch-note | portal-weekly-expense | navigation guard와 bank wizard 회귀 복구
+- pages: [portal-weekly-expense](./pages/portal-weekly-expense.md)
+- summary: 미저장 사업비 입력 편집은 화면 이동 전에 확인 다이얼로그로 막도록 복구했고, bank import triage wizard의 cashflow category 선택과 fullscreen/주간입력 연계 E2E도 다시 통과하도록 정리했다.

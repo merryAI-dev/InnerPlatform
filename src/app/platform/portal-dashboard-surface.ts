@@ -35,7 +35,6 @@ export function buildPortalDashboardSurface(input: {
   projectId: string;
   weeklySubmissionStatuses: WeeklySubmissionStatus[];
   todayIso: string;
-  changeRequestCount: number;
   hrAlertCount: number;
   payrollRiskCount: number;
 }): PortalDashboardSurface {
@@ -60,12 +59,6 @@ export function buildPortalDashboardSurface(input: {
 
   const currentWeekLabel = currentWeek ? `${currentWeek.weekNo}주차` : '-';
   const visibleIssues: PortalDashboardIssue[] = [
-    {
-      label: '인력변경 요청',
-      count: input.changeRequestCount,
-      tone: 'neutral',
-      to: '/portal/change-requests',
-    },
     {
       label: '미확인 공지',
       count: input.hrAlertCount,
