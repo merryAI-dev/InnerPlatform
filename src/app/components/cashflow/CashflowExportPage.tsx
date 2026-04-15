@@ -286,8 +286,8 @@ export function CashflowExportPage() {
         <Card>
         <CardContent className="p-8 text-center space-y-2">
           <FileSpreadsheet className="w-8 h-8 mx-auto text-muted-foreground/40" />
-          <p className="text-[13px] font-semibold text-zinc-950">경영기획실 전용 캐시플로 추출 권한이 없습니다.</p>
-          <p className="text-[12px] text-stone-600">이 화면은 관리자와 경영기획실 담당자만 사용할 수 있습니다.</p>
+          <p className="text-[13px] font-semibold text-zinc-950">캐시플로 내보내기 권한이 없습니다.</p>
+          <p className="text-[12px] text-stone-600">이 보조 도구는 관리자와 경영기획실 담당자만 사용할 수 있습니다.</p>
         </CardContent>
       </Card>
     );
@@ -298,9 +298,9 @@ export function CashflowExportPage() {
       <PageHeader
         icon={BarChart3}
         iconGradient="linear-gradient(135deg, #fafaf9 0%, #f5f5f4 100%)"
-        title="경영기획실 전용 캐시플로 추출 화면"
-        description="경영기획실 엑셀 후처리를 위한 연간·기간별 캐시플로 추출 화면"
-        badge={scope === 'single' ? '사업별' : '전체사업'}
+        title="캐시플로 내보내기"
+        description="모니터링 허브에서 상태를 확인한 뒤 필요한 범위를 엑셀로 추출합니다."
+        badge={scope === 'single' ? '사업별 추출' : '전체 추출'}
         badgeVariant="outline"
         actions={(
           <Button
@@ -317,7 +317,7 @@ export function CashflowExportPage() {
 
       <Card className="border-stone-200 bg-white shadow-none">
         <CardHeader className="pb-3">
-          <CardTitle className="text-[14px] font-semibold text-zinc-950">추출 설정</CardTitle>
+          <CardTitle className="text-[14px] font-semibold text-zinc-950">내보내기 설정</CardTitle>
           <p className="text-[12px] text-stone-600">
             {scope === 'single' ? '사업별' : '전체 사업'} · {projectSelectionLabel} · {accountTypeFilterLabel} · {periodSummary || '기간 미선택'} · {workbookVariantLabel}
           </p>
@@ -669,9 +669,9 @@ export function CashflowExportPage() {
       <Card className="border-stone-200 bg-stone-50 shadow-none">
         <CardContent className="p-4 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <div>
-            <p className="text-[12px] font-semibold text-zinc-950">기존 사업별 주간 시트도 유지됩니다.</p>
+            <p className="text-[12px] font-semibold text-zinc-950">기존 주간 시트와 모니터링 흐름은 그대로 유지됩니다.</p>
             <p className="text-[12px] text-stone-600">
-              사업 상세에서는 월 단위 입력과 검토를 계속하고, 이 화면에서는 경영기획실 전용 일괄 추출만 처리합니다.
+              사업 상세에서는 월 단위 입력과 검토를 계속하고, 이 화면에서는 필요한 범위의 내보내기만 처리합니다.
             </p>
           </div>
           <Button variant="outline" size="sm" className="h-8 gap-1.5 rounded-lg border-stone-200 bg-white text-[12px] text-zinc-900 hover:bg-stone-100" onClick={() => navigate('/projects')}>
