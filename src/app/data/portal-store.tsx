@@ -5,6 +5,7 @@ import {
   doc,
   documentId,
   getDoc,
+  getDocs,
   limit,
   onSnapshot,
   query,
@@ -92,6 +93,7 @@ import { readDevAuthHarnessConfig } from '../platform/dev-harness';
 import { reportError } from '../platform/observability';
 import { validateBudgetCodeBookDraft } from '../platform/budget-code-book-validation';
 import { buildBudgetLabelKey, normalizeBudgetLabel } from '../platform/budget-labels';
+import { canUseRealtimeListeners } from './firestore-realtime-mode';
 import {
   resolveActivePortalProjectId,
   resolvePortalProjectCandidates,
@@ -652,6 +654,10 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     return projects.find((project) => project.id === activeProjectId) || null;
   }, [activeProjectId, projects]);
   const currentProjectId = activeProjectId;
+  const livePortalMode = useMemo(
+    () => canUseRealtimeListeners(portalUser?.role || authUser?.role),
+    [authUser?.role, portalUser?.role],
+  );
 
   useEffect(() => {
     const uid = authUser?.uid;
@@ -860,6 +866,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     unsubsRef.current.forEach((unsub) => unsub());
     unsubsRef.current = [];
+    let cancelled = false;
 
     if (authLoading || isMemberLoading || !isAuthenticated || !authUser) {
       setProjects([]);
@@ -968,45 +975,55 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     const markReady = () => {
       if (projectReady && ledgerReady && expenseReady && changeReady && partReady && txReady) setIsLoading(false);
     };
-
-    // 전사 프로젝트 전체 표시 — 분기 없이 항상 전체 조회
-    unsubsRef.current.push(
-      onSnapshot(
-        query(collection(db, getOrgCollectionPath(orgId, 'projects')), limit(500)),
-        (snap) => {
-          const map = new Map<string, Project>();
-          snap.docs.forEach((docItem) => {
-            const data = docItem.data() as Project;
-            const id = data.id || docItem.id;
-            map.set(id, { ...data, id });
-          });
-          setProjects(Array.from(map.values()).sort((a, b) =>
-            String(a.name || '').localeCompare(String(b.name || '')),
-          ));
-          projectReady = true;
-          markReady();
+    const ifActive = (action: () => void) => {
+      if (!cancelled) action();
+    };
+    const handleProjectsResult = (docs: Array<{ id: string; data(): unknown }>) => {
+      ifActive(() => {
+        const map = new Map<string, Project>();
+        docs.forEach((docItem) => {
+          const data = docItem.data() as Project;
+          const id = data.id || docItem.id;
+          map.set(id, { ...data, id });
+        });
+        setProjects(Array.from(map.values()).sort((a, b) =>
+          String(a.name || '').localeCompare(String(b.name || '')),
+        ));
+        projectReady = true;
+        markReady();
+      });
+    };
+    const handleProjectsError = (err: unknown) => {
+      reportError(err, {
+        message: '[PortalStore] projects listen error:',
+        options: {
+          level: 'error',
+          tags: {
+            surface: 'portal_store',
+            action: 'projects_listen',
+          },
+          extra: {
+            orgId,
+            actorId: authUser.uid,
+          },
         },
-        (err) => {
-          reportError(err, {
-            message: '[PortalStore] projects listen error:',
-            options: {
-              level: 'error',
-              tags: {
-                surface: 'portal_store',
-                action: 'projects_listen',
-              },
-              extra: {
-                orgId,
-                actorId: authUser.uid,
-              },
-            },
-          });
-          setProjects([]);
-          projectReady = true;
-          markReady();
-        },
-      ),
-    );
+      });
+      ifActive(() => {
+        setProjects([]);
+        projectReady = true;
+        markReady();
+      });
+    };
+    const projectsQuery = query(collection(db, getOrgCollectionPath(orgId, 'projects')), limit(500));
+    if (livePortalMode) {
+      unsubsRef.current.push(
+        onSnapshot(projectsQuery, (snap) => handleProjectsResult(snap.docs), handleProjectsError),
+      );
+    } else {
+      getDocs(projectsQuery)
+        .then((snap) => handleProjectsResult(snap.docs))
+        .catch(handleProjectsError);
+    }
 
     if (!currentProjectId) {
       setLedgers([]);
@@ -1041,76 +1058,84 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         collection(db, getOrgCollectionPath(orgId, 'partEntries')),
         where('projectId', '==', currentProjectId),
       );
-
-      unsubsRef.current.push(
-        onSnapshot(ledgerQuery, (snap) => {
-          const list = snap.docs
+      const handleLedgerResult = (docs: Array<{ data(): unknown }>) => {
+        ifActive(() => {
+          const list = docs
             .map((docItem) => docItem.data() as Ledger)
             .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
           setLedgers(list);
           ledgerReady = true;
           markReady();
-        }, (err) => {
-          console.error('[PortalStore] ledgers listen error:', err);
-          if (!isPermissionDenied(err)) {
-            toast.error('원장 데이터를 불러오지 못했습니다');
-          }
+        });
+      };
+      const handleLedgerError = (err: unknown) => {
+        console.error('[PortalStore] ledgers listen error:', err);
+        if (!isPermissionDenied(err)) {
+          toast.error('원장 데이터를 불러오지 못했습니다');
+        }
+        ifActive(() => {
           setLedgers(LEDGERS.filter((l) => l.projectId === currentProjectId));
           ledgerReady = true;
           markReady();
-        }),
-      );
-
-      unsubsRef.current.push(
-        onSnapshot(expenseQuery, (snap) => {
-          const list = snap.docs
+        });
+      };
+      const handleExpenseResult = (docs: Array<{ data(): unknown }>) => {
+        ifActive(() => {
+          const list = docs
             .map((docItem) => docItem.data() as ExpenseSet)
             .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
           setExpenseSets(list);
           expenseReady = true;
           markReady();
-        }, (err) => {
-          console.error('[PortalStore] expenseSets listen error:', err);
-          toast.error('사업비 데이터를 불러오지 못했습니다');
+        });
+      };
+      const handleExpenseError = (err: unknown) => {
+        console.error('[PortalStore] expenseSets listen error:', err);
+        toast.error('사업비 데이터를 불러오지 못했습니다');
+        ifActive(() => {
           expenseReady = true;
           markReady();
-        }),
-      );
-
-      unsubsRef.current.push(
-        onSnapshot(changeRequestQuery, (snap) => {
-          const list = snap.docs
+        });
+      };
+      const handleChangeRequestResult = (docs: Array<{ data(): unknown }>) => {
+        ifActive(() => {
+          const list = docs
             .map((docItem) => docItem.data() as ChangeRequest)
             .sort((a, b) => String(b.requestedAt || '').localeCompare(String(a.requestedAt || '')));
           setChangeRequests(list);
           changeReady = true;
           markReady();
-        }, (err) => {
-          console.error('[PortalStore] changeRequests listen error:', err);
-          toast.error('인력변경 데이터를 불러오지 못했습니다');
+        });
+      };
+      const handleChangeRequestError = (err: unknown) => {
+        console.error('[PortalStore] changeRequests listen error:', err);
+        toast.error('인력변경 데이터를 불러오지 못했습니다');
+        ifActive(() => {
           changeReady = true;
           markReady();
-        }),
-      );
-
-      unsubsRef.current.push(
-        onSnapshot(participationQuery, (snap) => {
-          const list = snap.docs
+        });
+      };
+      const handleParticipationResult = (docs: Array<{ data(): unknown }>) => {
+        ifActive(() => {
+          const list = docs
             .map((docItem) => docItem.data() as ParticipationEntry)
             .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
           setParticipationEntries(list);
           partReady = true;
           markReady();
-        }, (err) => {
-          console.error('[PortalStore] participation entries listen error:', err);
-          if (!isPermissionDenied(err)) {
-            toast.error('인력 데이터를 불러오지 못했습니다. 기본 데이터를 표시합니다.');
-          }
+        });
+      };
+      const handleParticipationError = (err: unknown) => {
+        console.error('[PortalStore] participation entries listen error:', err);
+        if (!isPermissionDenied(err)) {
+          toast.error('인력 데이터를 불러오지 못했습니다. 기본 데이터를 표시합니다.');
+        }
+        ifActive(() => {
           setParticipationEntries(PARTICIPATION_ENTRIES.filter((entry) => entry.projectId === currentProjectId));
           partReady = true;
           markReady();
-        }),
-      );
+        });
+      };
 
       const txQuery = query(
         collection(db, getOrgCollectionPath(orgId, 'transactions')),
@@ -1143,139 +1168,140 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/budget_code_book/default`,
       );
       const weeklySubmissionBase = collection(db, getOrgCollectionPath(orgId, 'weeklySubmissionStatus'));
-
-      unsubsRef.current.push(
-        onSnapshot(txQuery, (snap) => {
-          const list = snap.docs
+      const handleTransactionResult = (docs: Array<{ data(): unknown }>) => {
+        ifActive(() => {
+          const list = docs
             .map((docItem) => docItem.data() as Transaction)
             .sort((a, b) => String(b.dateTime || '').localeCompare(String(a.dateTime || '')));
           setTransactions(list);
           txReady = true;
           markReady();
-        }, (err) => {
-          console.error('[PortalStore] transactions listen error:', err);
-          if (!isPermissionDenied(err)) {
-            toast.error('거래 데이터를 불러오지 못했습니다');
-          }
+        });
+      };
+      const handleTransactionError = (err: unknown) => {
+        console.error('[PortalStore] transactions listen error:', err);
+        if (!isPermissionDenied(err)) {
+          toast.error('거래 데이터를 불러오지 못했습니다');
+        }
+        ifActive(() => {
           setTransactions(TRANSACTIONS.filter((t) => t.projectId === currentProjectId));
           txReady = true;
           markReady();
-        }),
-      );
-
-      unsubsRef.current.push(
-        onSnapshot(commentQuery, (snap) => {
-          const list = snap.docs
+        });
+      };
+      const handleCommentResult = (docs: Array<{ data(): unknown }>) => {
+        ifActive(() => {
+          const list = docs
             .map((docItem) => docItem.data() as Comment)
             .sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
           setComments(list);
-        }, (err) => {
-          console.error('[PortalStore] comments listen error:', err);
-          setComments([]);
-        }),
-      );
-
-      unsubsRef.current.push(
-        onSnapshot(evidenceMapRef, (snap) => {
+        });
+      };
+      const handleCommentError = (err: unknown) => {
+        console.error('[PortalStore] comments listen error:', err);
+        ifActive(() => setComments([]));
+      };
+      const handleEvidenceMapResult = (snap: { exists(): boolean; data(): unknown }) => {
+        ifActive(() => {
           if (!snap.exists()) {
             setEvidenceRequiredMap({});
             return;
           }
           const data = snap.data() as { map?: Record<string, string> };
           setEvidenceRequiredMap(data?.map || {});
-        }, (err) => {
-          console.error('[PortalStore] evidence map listen error:', err);
-          setEvidenceRequiredMap({});
-        }),
-      );
-
-	      unsubsRef.current.push(
-	        onSnapshot(sheetSourceCollection, (snap) => {
-	          const list = snap.docs
-	            .map((docItem) => {
-	              const data = docItem.data() as Partial<ProjectSheetSourceSnapshot> & {
-	                previewMatrixRows?: Array<{ cells?: unknown }>;
-	              };
-	              const previewMatrix = Array.isArray(data.previewMatrix)
-	                ? data.previewMatrix.map((row) => (Array.isArray(row) ? row.map((cell) => String(cell ?? '')) : []))
-	                : Array.isArray(data.previewMatrixRows)
-	                  ? data.previewMatrixRows.map((row) => {
-	                      const cells = row && typeof row === 'object' ? row.cells : undefined;
-	                      return Array.isArray(cells) ? cells.map((cell) => String(cell ?? '')) : [];
-	                    })
-	                  : [];
-	              return {
-	                sourceType: (data.sourceType || docItem.id) as ProjectSheetSourceType,
-	                projectId: String(data.projectId || currentProjectId || ''),
+        });
+      };
+      const handleEvidenceMapError = (err: unknown) => {
+        console.error('[PortalStore] evidence map listen error:', err);
+        ifActive(() => setEvidenceRequiredMap({}));
+      };
+      const handleSheetSourceResult = (docs: Array<{ id: string; data(): unknown }>) => {
+        ifActive(() => {
+          const list = docs
+            .map((docItem) => {
+              const data = docItem.data() as Partial<ProjectSheetSourceSnapshot> & {
+                previewMatrixRows?: Array<{ cells?: unknown }>;
+              };
+              const previewMatrix = Array.isArray(data.previewMatrix)
+                ? data.previewMatrix.map((row) => (Array.isArray(row) ? row.map((cell) => String(cell ?? '')) : []))
+                : Array.isArray(data.previewMatrixRows)
+                  ? data.previewMatrixRows.map((row) => {
+                      const cells = row && typeof row === 'object' ? row.cells : undefined;
+                      return Array.isArray(cells) ? cells.map((cell) => String(cell ?? '')) : [];
+                    })
+                  : [];
+              return {
+                sourceType: (data.sourceType || docItem.id) as ProjectSheetSourceType,
+                projectId: String(data.projectId || currentProjectId || ''),
                 sheetName: String(data.sheetName || ''),
                 fileName: String(data.fileName || ''),
                 storagePath: String(data.storagePath || ''),
                 downloadURL: String(data.downloadURL || ''),
                 contentType: String(data.contentType || ''),
                 uploadedAt: String(data.uploadedAt || ''),
-	                rowCount: Number.isFinite(Number(data.rowCount)) ? Number(data.rowCount) : 0,
-	                columnCount: Number.isFinite(Number(data.columnCount)) ? Number(data.columnCount) : 0,
-	                matchedColumns: Array.isArray(data.matchedColumns) ? data.matchedColumns.map((value) => String(value || '')) : [],
-	                unmatchedColumns: Array.isArray(data.unmatchedColumns) ? data.unmatchedColumns.map((value) => String(value || '')) : [],
-	                previewMatrix,
-	                ...(data.applyTarget ? { applyTarget: String(data.applyTarget) } : {}),
-	                ...(data.lastAppliedAt ? { lastAppliedAt: String(data.lastAppliedAt) } : {}),
-	                ...(data.updatedAt ? { updatedAt: String(data.updatedAt) } : {}),
+                rowCount: Number.isFinite(Number(data.rowCount)) ? Number(data.rowCount) : 0,
+                columnCount: Number.isFinite(Number(data.columnCount)) ? Number(data.columnCount) : 0,
+                matchedColumns: Array.isArray(data.matchedColumns) ? data.matchedColumns.map((value) => String(value || '')) : [],
+                unmatchedColumns: Array.isArray(data.unmatchedColumns) ? data.unmatchedColumns.map((value) => String(value || '')) : [],
+                previewMatrix,
+                ...(data.applyTarget ? { applyTarget: String(data.applyTarget) } : {}),
+                ...(data.lastAppliedAt ? { lastAppliedAt: String(data.lastAppliedAt) } : {}),
+                ...(data.updatedAt ? { updatedAt: String(data.updatedAt) } : {}),
                 ...(data.updatedBy ? { updatedBy: String(data.updatedBy) } : {}),
               } satisfies ProjectSheetSourceSnapshot;
             })
             .sort((a, b) => String(b.uploadedAt || '').localeCompare(String(a.uploadedAt || '')));
           setSheetSources(list);
-        }, (err) => {
-          reportError(err, {
-            message: '[PortalStore] sheet source listen error:',
-            options: {
-              level: 'error',
-              tags: {
-                surface: 'portal_store',
-                action: 'sheet_source_listen',
-              },
-              extra: {
-                orgId,
-                actorId: authUser.uid,
-                projectId: currentProjectId,
-              },
+        });
+      };
+      const handleSheetSourceError = (err: unknown) => {
+        reportError(err, {
+          message: '[PortalStore] sheet source listen error:',
+          options: {
+            level: 'error',
+            tags: {
+              surface: 'portal_store',
+              action: 'sheet_source_listen',
             },
-          });
-          setSheetSources([]);
-        }),
-      );
-
-      unsubsRef.current.push(
-        onSnapshot(collection(db, `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/expense_intake`), (snap) => {
-          const nextItems = snap.docs
-            .map((docItem) => normalizeBankImportIntakeItem({ id: docItem.id, ...docItem.data() }))
+            extra: {
+              orgId,
+              actorId: authUser.uid,
+              projectId: currentProjectId,
+            },
+          },
+        });
+        ifActive(() => setSheetSources([]));
+      };
+      const handleExpenseIntakeResult = (docs: Array<{ id: string; data(): unknown }>) => {
+        ifActive(() => {
+          const nextItems = docs
+            .map((docItem) => normalizeBankImportIntakeItem({ id: docItem.id, ...(docItem.data() as Record<string, unknown>) }))
             .filter((item): item is BankImportIntakeItem => item !== null)
             .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')));
           setExpenseIntakeItems(nextItems);
-        }, (err) => {
-          reportError(err, {
-            message: '[PortalStore] expense intake listen error:',
-            options: {
-              level: 'error',
-              tags: {
-                surface: 'portal_store',
-                action: 'expense_intake_listen',
-              },
-              extra: {
-                orgId,
-                actorId: authUser.uid,
-                projectId: currentProjectId,
-              },
+        });
+      };
+      const handleExpenseIntakeError = (err: unknown) => {
+        reportError(err, {
+          message: '[PortalStore] expense intake listen error:',
+          options: {
+            level: 'error',
+            tags: {
+              surface: 'portal_store',
+              action: 'expense_intake_listen',
             },
-          });
-          setExpenseIntakeItems([]);
-        }),
-      );
-
-      unsubsRef.current.push(
-        onSnapshot(expenseSheetCollection, (snap) => {
-          const docs = snap.docs
+            extra: {
+              orgId,
+              actorId: authUser.uid,
+              projectId: currentProjectId,
+            },
+          },
+        });
+        ifActive(() => setExpenseIntakeItems([]));
+      };
+      const handleExpenseSheetResult = (docs: Array<{ id: string; data(): unknown }>) => {
+        ifActive(() => {
+          const nextDocs = docs
             .map<ExpenseSheetTab | null>((docItem) => {
               const data = docItem.data() as {
                 name?: string;
@@ -1286,7 +1312,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
                 deletedAt?: string;
               };
               if (data?.deletedAt) return null;
-              const nextSheet: ExpenseSheetTab = {
+              return {
                 id: docItem.id,
                 name: sanitizeExpenseSheetName(data?.name, docItem.id === 'default' ? '기본 탭' : '새 탭'),
                 rows: normalizeExpenseSheetRows(data?.rows),
@@ -1294,7 +1320,6 @@ export function PortalProvider({ children }: { children: ReactNode }) {
                 createdAt: data?.createdAt,
                 updatedAt: data?.updatedAt,
               };
-              return nextSheet;
             })
             .filter((sheet): sheet is ExpenseSheetTab => sheet !== null)
             .sort((a, b) => {
@@ -1303,7 +1328,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
             });
           const nextState = reconcileExpenseSheetTabsFromSnapshot({
             currentSheets: expenseSheetsRef.current,
-            nextSheets: docs,
+            nextSheets: nextDocs,
             activeExpenseSheetId: activeExpenseSheetIdRef.current,
           });
           if (nextState.sheetsChanged) {
@@ -1314,29 +1339,31 @@ export function PortalProvider({ children }: { children: ReactNode }) {
             activeExpenseSheetIdRef.current = nextState.activeExpenseSheetId;
             setActiveExpenseSheetIdState(nextState.activeExpenseSheetId);
           }
-        }, (err) => {
-          reportError(err, {
-            message: '[PortalStore] expense sheet listen error:',
-            options: {
-              level: 'error',
-              tags: {
-                surface: 'portal_store',
-                action: 'expense_sheet_listen',
-              },
-              extra: {
-                orgId,
-                actorId: authUser.uid,
-                projectId: currentProjectId,
-              },
+        });
+      };
+      const handleExpenseSheetError = (err: unknown) => {
+        reportError(err, {
+          message: '[PortalStore] expense sheet listen error:',
+          options: {
+            level: 'error',
+            tags: {
+              surface: 'portal_store',
+              action: 'expense_sheet_listen',
             },
-          });
+            extra: {
+              orgId,
+              actorId: authUser.uid,
+              projectId: currentProjectId,
+            },
+          },
+        });
+        ifActive(() => {
           setExpenseSheets([]);
           setExpenseSheetRows(null);
-        }),
-      );
-
-      unsubsRef.current.push(
-        onSnapshot(bankStatementRef, (snap) => {
+        });
+      };
+      const handleBankStatementResult = (snap: { exists(): boolean; data(): unknown }) => {
+        ifActive(() => {
           if (!snap.exists()) {
             setBankStatementRows(null);
             return;
@@ -1361,42 +1388,42 @@ export function PortalProvider({ children }: { children: ReactNode }) {
               : columns.map(() => ''),
           }));
           setBankStatementRows({ columns, rows });
-        }, (err) => {
-          reportError(err, {
-            message: '[PortalStore] bank statement listen error:',
-            options: {
-              level: 'error',
-              tags: {
-                surface: 'portal_store',
-                action: 'bank_statement_listen',
-              },
-              extra: {
-                orgId,
-                actorId: authUser.uid,
-                projectId: currentProjectId,
-              },
+        });
+      };
+      const handleBankStatementError = (err: unknown) => {
+        reportError(err, {
+          message: '[PortalStore] bank statement listen error:',
+          options: {
+            level: 'error',
+            tags: {
+              surface: 'portal_store',
+              action: 'bank_statement_listen',
             },
-          });
-          setBankStatementRows(null);
-        }),
-      );
-
-      unsubsRef.current.push(
-        onSnapshot(budgetPlanRef, (snap) => {
+            extra: {
+              orgId,
+              actorId: authUser.uid,
+              projectId: currentProjectId,
+            },
+          },
+        });
+        ifActive(() => setBankStatementRows(null));
+      };
+      const handleBudgetPlanResult = (snap: { exists(): boolean; data(): unknown }) => {
+        ifActive(() => {
           if (!snap.exists()) {
             setBudgetPlanRows(null);
             return;
           }
           const data = snap.data() as { rows?: BudgetPlanRow[] };
           setBudgetPlanRows(Array.isArray(data?.rows) ? data.rows : null);
-        }, (err) => {
-          console.error('[PortalStore] budget plan listen error:', err);
-          setBudgetPlanRows(null);
-        }),
-      );
-
-      unsubsRef.current.push(
-        onSnapshot(budgetCodeBookRef, (snap) => {
+        });
+      };
+      const handleBudgetPlanError = (err: unknown) => {
+        console.error('[PortalStore] budget plan listen error:', err);
+        ifActive(() => setBudgetPlanRows(null));
+      };
+      const handleBudgetCodeBookResult = (snap: { exists(): boolean; data(): unknown }) => {
+        ifActive(() => {
           if (!snap.exists()) {
             setBudgetCodeBook(BUDGET_CODE_BOOK);
             return;
@@ -1407,44 +1434,92 @@ export function PortalProvider({ children }: { children: ReactNode }) {
             : (BUDGET_CODE_BOOK as unknown as BudgetCodeEntry[]);
           const normalized = normalizeBudgetCodeBook(source);
           setBudgetCodeBook(normalized.length > 0 ? normalized : normalizeBudgetCodeBook(BUDGET_CODE_BOOK as unknown as BudgetCodeEntry[]));
-        }, (err) => {
-          console.error('[PortalStore] budget code book listen error:', err);
-          setBudgetCodeBook(normalizeBudgetCodeBook(BUDGET_CODE_BOOK as unknown as BudgetCodeEntry[]));
-        }),
-      );
+        });
+      };
+      const handleBudgetCodeBookError = (err: unknown) => {
+        console.error('[PortalStore] budget code book listen error:', err);
+        ifActive(() => setBudgetCodeBook(normalizeBudgetCodeBook(BUDGET_CODE_BOOK as unknown as BudgetCodeEntry[])));
+      };
+      const handleWeeklySubmissionResult = (docs: Array<{ id: string; data(): unknown }>) => {
+        ifActive(() => {
+          const list = docs.map((d) => {
+            const data = d.data() as WeeklySubmissionStatus;
+            return { ...data, id: data.id || d.id };
+          });
+          list.sort((a, b) => {
+            if (a.projectId !== b.projectId) return String(a.projectId).localeCompare(String(b.projectId));
+            if (a.yearMonth !== b.yearMonth) return String(b.yearMonth || '').localeCompare(String(a.yearMonth || ''));
+            return (a.weekNo || 0) - (b.weekNo || 0);
+          });
+          setWeeklySubmissionStatuses(list);
+        });
+      };
+      const handleWeeklySubmissionError = (err: unknown) => {
+        console.error('[PortalStore] weekly submission listen error:', err);
+        ifActive(() => setWeeklySubmissionStatuses([]));
+      };
 
-      if (scopedProjectIds.length > 0) {
-        const weekQuery = scopedProjectIds.length === 1
-          ? query(weeklySubmissionBase, where('projectId', '==', scopedProjectIds[0]))
-          : query(weeklySubmissionBase, where('projectId', 'in', scopedProjectIds.slice(0, 10)));
-
+      if (livePortalMode) {
+        unsubsRef.current.push(onSnapshot(ledgerQuery, (snap) => handleLedgerResult(snap.docs), handleLedgerError));
+        unsubsRef.current.push(onSnapshot(expenseQuery, (snap) => handleExpenseResult(snap.docs), handleExpenseError));
+        unsubsRef.current.push(onSnapshot(changeRequestQuery, (snap) => handleChangeRequestResult(snap.docs), handleChangeRequestError));
+        unsubsRef.current.push(onSnapshot(participationQuery, (snap) => handleParticipationResult(snap.docs), handleParticipationError));
+        unsubsRef.current.push(onSnapshot(txQuery, (snap) => handleTransactionResult(snap.docs), handleTransactionError));
+        unsubsRef.current.push(onSnapshot(commentQuery, (snap) => handleCommentResult(snap.docs), handleCommentError));
+        unsubsRef.current.push(onSnapshot(evidenceMapRef, handleEvidenceMapResult, handleEvidenceMapError));
+        unsubsRef.current.push(onSnapshot(sheetSourceCollection, (snap) => handleSheetSourceResult(snap.docs), handleSheetSourceError));
         unsubsRef.current.push(
-          onSnapshot(weekQuery, (snap) => {
-            const list = snap.docs.map((d) => {
-              const data = d.data() as WeeklySubmissionStatus;
-              return { ...data, id: data.id || d.id };
-            });
-            list.sort((a, b) => {
-              if (a.projectId !== b.projectId) return String(a.projectId).localeCompare(String(b.projectId));
-              if (a.yearMonth !== b.yearMonth) return String(b.yearMonth || '').localeCompare(String(a.yearMonth || ''));
-              return (a.weekNo || 0) - (b.weekNo || 0);
-            });
-            setWeeklySubmissionStatuses(list);
-          }, (err) => {
-            console.error('[PortalStore] weekly submission listen error:', err);
-            setWeeklySubmissionStatuses([]);
-          }),
+          onSnapshot(
+            collection(db, `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/expense_intake`),
+            (snap) => handleExpenseIntakeResult(snap.docs),
+            handleExpenseIntakeError,
+          ),
         );
+        unsubsRef.current.push(onSnapshot(expenseSheetCollection, (snap) => handleExpenseSheetResult(snap.docs), handleExpenseSheetError));
+        unsubsRef.current.push(onSnapshot(bankStatementRef, handleBankStatementResult, handleBankStatementError));
+        unsubsRef.current.push(onSnapshot(budgetPlanRef, handleBudgetPlanResult, handleBudgetPlanError));
+        unsubsRef.current.push(onSnapshot(budgetCodeBookRef, handleBudgetCodeBookResult, handleBudgetCodeBookError));
+        if (scopedProjectIds.length > 0) {
+          const weekQuery = scopedProjectIds.length === 1
+            ? query(weeklySubmissionBase, where('projectId', '==', scopedProjectIds[0]))
+            : query(weeklySubmissionBase, where('projectId', 'in', scopedProjectIds.slice(0, 10)));
+          unsubsRef.current.push(onSnapshot(weekQuery, (snap) => handleWeeklySubmissionResult(snap.docs), handleWeeklySubmissionError));
+        } else {
+          setWeeklySubmissionStatuses([]);
+        }
       } else {
-        setWeeklySubmissionStatuses([]);
+        getDocs(ledgerQuery).then((snap) => handleLedgerResult(snap.docs)).catch(handleLedgerError);
+        getDocs(expenseQuery).then((snap) => handleExpenseResult(snap.docs)).catch(handleExpenseError);
+        getDocs(changeRequestQuery).then((snap) => handleChangeRequestResult(snap.docs)).catch(handleChangeRequestError);
+        getDocs(participationQuery).then((snap) => handleParticipationResult(snap.docs)).catch(handleParticipationError);
+        getDocs(txQuery).then((snap) => handleTransactionResult(snap.docs)).catch(handleTransactionError);
+        getDocs(commentQuery).then((snap) => handleCommentResult(snap.docs)).catch(handleCommentError);
+        getDoc(evidenceMapRef).then(handleEvidenceMapResult).catch(handleEvidenceMapError);
+        getDocs(sheetSourceCollection).then((snap) => handleSheetSourceResult(snap.docs)).catch(handleSheetSourceError);
+        getDocs(collection(db, `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/expense_intake`))
+          .then((snap) => handleExpenseIntakeResult(snap.docs))
+          .catch(handleExpenseIntakeError);
+        getDocs(expenseSheetCollection).then((snap) => handleExpenseSheetResult(snap.docs)).catch(handleExpenseSheetError);
+        getDoc(bankStatementRef).then(handleBankStatementResult).catch(handleBankStatementError);
+        getDoc(budgetPlanRef).then(handleBudgetPlanResult).catch(handleBudgetPlanError);
+        getDoc(budgetCodeBookRef).then(handleBudgetCodeBookResult).catch(handleBudgetCodeBookError);
+        if (scopedProjectIds.length > 0) {
+          const weekQuery = scopedProjectIds.length === 1
+            ? query(weeklySubmissionBase, where('projectId', '==', scopedProjectIds[0]))
+            : query(weeklySubmissionBase, where('projectId', 'in', scopedProjectIds.slice(0, 10)));
+          getDocs(weekQuery).then((snap) => handleWeeklySubmissionResult(snap.docs)).catch(handleWeeklySubmissionError);
+        } else {
+          setWeeklySubmissionStatuses([]);
+        }
       }
     }
 
     return () => {
+      cancelled = true;
       unsubsRef.current.forEach((unsub) => unsub());
       unsubsRef.current = [];
     };
-  }, [authLoading, isMemberLoading, isAuthenticated, authUser, currentProjectId, firestoreEnabled, db, orgId, scopedProjectIds, isDevHarnessUser, portalUser?.projectIds]);
+  }, [authLoading, isMemberLoading, isAuthenticated, authUser, currentProjectId, firestoreEnabled, db, orgId, scopedProjectIds, isDevHarnessUser, portalUser?.projectIds, livePortalMode]);
 
   useEffect(() => {
     if (authLoading || isMemberLoading || !isAuthenticated || !authUser) return;

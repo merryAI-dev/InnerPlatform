@@ -25,12 +25,14 @@
 - [x] 직접작성 사업도 같은 흐름에서 다룰 수 있음
 - [x] 환수행, 선사용금, 특이건 보조 액션 없이 기본 표 편집 흐름만 유지
 - [x] `cashflow항목` label과 내부 enum은 공용 policy 기준으로 해석됨
+- [x] PM 포털 safe fetch 모드에서도 통장내역 화면 진입과 direct handoff 부팅 가능
 - [ ] 마지막 행 드롭다운 잘림 이슈 완전 해소 확인 필요
 
 ## Recent Changes
 
 - [2026-04-15] `cashflow항목` line label/alias/category 해석이 공용 policy 레이어를 통하도록 정리했다.
 - [2026-04-15] 통장내역 저장 시 업로드한 은행 행을 현재 주간 사업비 탭 행으로 바로 merge하도록 바꿨다. Queue 없이 `통장내역 -> 사업비 입력(주간)` direct handoff가 이어진다.
+- [2026-04-15] PM 역할에서는 portal store가 realtime listen 대신 safe fetch로 초기 데이터를 불러오도록 바꿔, 포털 부팅 시 반복 Listen 400이 통장내역 화면까지 전파되는 위험을 줄였다.
 - [2026-04-14] 포털 session active project를 따라 현재 사업이 바뀌어도 같은 화면에서 다른 사업 통장내역을 바로 이어서 볼 수 있게 했다.
 - [2026-04-14] `신규 거래 처리 Queue` 카드와 queue-first wizard 액션을 제거하고, 통장내역 저장본에서 바로 사업비 입력으로 이어지는 단일 흐름으로 롤백했다.
 - [2026-04-14] 환수행, 선사용금, 특이건 보조 행 추가 액션을 현재 operator-facing 화면에서 제외했다.
