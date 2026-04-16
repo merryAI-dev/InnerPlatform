@@ -3,6 +3,9 @@ export type AdminMonitoringSeverity = 'critical' | 'warning' | 'info';
 export type AdminMonitoringIssueKey =
   | 'missing_evidence'
   | 'payroll_risk'
+  | 'payroll_review_pending'
+  | 'payroll_missing_candidate'
+  | 'payroll_final_unconfirmed'
   | 'participation_risk'
   | 'data_source'
   | 'cashflow_variance'
@@ -25,6 +28,9 @@ export interface AdminMonitoringCounts {
   dataSourceHealthy: boolean;
   missingEvidenceCount: number;
   payrollRiskCount: number;
+  payrollReviewPendingCount: number;
+  payrollMissingCandidateCount: number;
+  payrollFinalUnconfirmedCount: number;
   participationRiskCount: number;
   pendingApprovalCount: number;
   rejectedTransactionCount: number;
@@ -52,14 +58,17 @@ const SEVERITY_WEIGHT: Record<AdminMonitoringSeverity, number> = {
 const ISSUE_PRIORITY: Record<AdminMonitoringIssueKey, number> = {
   missing_evidence: 0,
   payroll_risk: 1,
-  participation_risk: 2,
-  data_source: 3,
-  cashflow_variance: 4,
-  hr_alerts: 5,
-  pending_approvals: 6,
-  rejected_transactions: 7,
-  missing_pm: 8,
-  stale_projects: 9,
+  payroll_missing_candidate: 2,
+  participation_risk: 3,
+  data_source: 4,
+  payroll_review_pending: 5,
+  cashflow_variance: 6,
+  missing_pm: 7,
+  hr_alerts: 8,
+  pending_approvals: 9,
+  payroll_final_unconfirmed: 10,
+  rejected_transactions: 11,
+  stale_projects: 12,
 };
 
 function normalizeCount(value: unknown): number {
@@ -67,15 +76,14 @@ function normalizeCount(value: unknown): number {
   return Number.isFinite(count) && count > 0 ? Math.trunc(count) : 0;
 }
 
-function buildIssue(blueprint: IssueBlueprint): AdminMonitoringIssue & { score: number } {
+function buildIssue(blueprint: IssueBlueprint): AdminMonitoringIssue {
   return {
     ...blueprint,
-    score: SEVERITY_WEIGHT[blueprint.severity] + (blueprint.count * 10) - ISSUE_PRIORITY[blueprint.key],
   };
 }
 
 export function resolveAdminMonitoringIssues(input: Partial<AdminMonitoringCounts>): AdminMonitoringIssue[] {
-  const issues: Array<AdminMonitoringIssue & { score: number }> = [];
+  const issues: AdminMonitoringIssue[] = [];
 
   if (input.dataSourceHealthy === false) {
     issues.push(buildIssue({
@@ -105,6 +113,14 @@ export function resolveAdminMonitoringIssues(input: Partial<AdminMonitoringCount
       to: '/payroll',
       detail: `${normalizeCount(input.payrollRiskCount)}건 지급 위험이 감지되었습니다.`,
     } : null,
+    normalizeCount(input.payrollMissingCandidateCount) > 0 ? {
+      key: 'payroll_missing_candidate',
+      label: '인건비 후보 없음',
+      count: normalizeCount(input.payrollMissingCandidateCount),
+      severity: 'critical',
+      to: '/payroll',
+      detail: `${normalizeCount(input.payrollMissingCandidateCount)}건에서 PM이 확인할 지급 후보를 찾지 못했습니다.`,
+    } : null,
     normalizeCount(input.participationRiskCount) > 0 ? {
       key: 'participation_risk',
       label: '참여율 위험',
@@ -120,6 +136,14 @@ export function resolveAdminMonitoringIssues(input: Partial<AdminMonitoringCount
       severity: 'warning',
       to: '/cashflow/analytics',
       detail: `${normalizeCount(input.cashflowVarianceCount)}개 사업에서 시트 편차가 감지되었습니다.`,
+    } : null,
+    normalizeCount(input.payrollReviewPendingCount) > 0 ? {
+      key: 'payroll_review_pending',
+      label: 'PM 검토 대기',
+      count: normalizeCount(input.payrollReviewPendingCount),
+      severity: 'warning',
+      to: '/payroll',
+      detail: `${normalizeCount(input.payrollReviewPendingCount)}건 인건비 적요 검토가 아직 완료되지 않았습니다.`,
     } : null,
     normalizeCount(input.hrAlertCount) > 0 ? {
       key: 'hr_alerts',
@@ -153,6 +177,14 @@ export function resolveAdminMonitoringIssues(input: Partial<AdminMonitoringCount
       to: '/cashflow/weekly',
       detail: `${normalizeCount(input.missingPmCount)}개 사업에 이번 주 PM 입력이 없습니다.`,
     } : null,
+    normalizeCount(input.payrollFinalUnconfirmedCount) > 0 ? {
+      key: 'payroll_final_unconfirmed',
+      label: '최종 확정 대기',
+      count: normalizeCount(input.payrollFinalUnconfirmedCount),
+      severity: 'warning',
+      to: '/payroll',
+      detail: `${normalizeCount(input.payrollFinalUnconfirmedCount)}건은 PM 검토 후 최종 확정이 남아 있습니다.`,
+    } : null,
     normalizeCount(input.staleProjectCount) > 0 ? {
       key: 'stale_projects',
       label: '갱신 지연',
@@ -170,9 +202,10 @@ export function resolveAdminMonitoringIssues(input: Partial<AdminMonitoringCount
 
   return issues
     .sort((left, right) => (
-      right.score - left.score
-      || right.count - left.count
+      SEVERITY_WEIGHT[right.severity] - SEVERITY_WEIGHT[left.severity]
       || ISSUE_PRIORITY[left.key] - ISSUE_PRIORITY[right.key]
+      || right.count - left.count
+      || left.label.localeCompare(right.label)
     ))
-    .map(({ score: _score, ...issue }) => issue);
+    .map((issue) => issue);
 }

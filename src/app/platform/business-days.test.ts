@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  addBusinessDays,
   addMonthsToYearMonth,
   clampDayOfMonth,
   computePlannedPayDate,
@@ -11,6 +12,11 @@ describe('business-days', () => {
   it('subtractBusinessDays skips weekends (Mon - 3 business days = Wed prev week)', () => {
     // 2026-02-02 is Monday.
     expect(subtractBusinessDays('2026-02-02', 3)).toBe('2026-01-28');
+  });
+
+  it('addBusinessDays skips weekends in the forward direction', () => {
+    // 2026-04-24 is Friday.
+    expect(addBusinessDays('2026-04-24', 3)).toBe('2026-04-29');
   });
 
   it('daysInMonth handles leap years', () => {
@@ -33,4 +39,3 @@ describe('business-days', () => {
     expect(addMonthsToYearMonth('2026-01', -1)).toBe('2025-12');
   });
 });
-

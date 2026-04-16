@@ -3,7 +3,7 @@
 - route: `/portal`
 - primary users: PM
 - status: active
-- last updated: 2026-04-15
+- last updated: 2026-04-16
 
 ## Purpose
 
@@ -61,6 +61,7 @@
 
 ## Recent Changes
 
+- [2026-04-16] PM 홈과 인건비 운영면에서 `PM 검토 대기 → Admin 최종 확정 대기 → 지급 확정 완료` 흐름을 같은 문구와 상태칩으로 통일했고, 포털 scoped payroll 데이터도 realtime snapshot을 따라가도록 바꿨다.
 - [2026-04-14] 포털 진입을 `/portal/project-select` step으로 분리하고, 상단 search를 메뉴 이동이 아닌 담당 사업 전환 중심으로 바꿨다.
 - [2026-04-14] `운영 알림`, `운영 바로가기`, 별도 소진율 바처럼 반복되거나 0건인 정보 박스를 걷어냈다.
 - [2026-04-14] 첫 화면 우측 패널을 `이번 주 정산 상태`로 바꾸고 Projection 작성 여부, 최근 Projection 수정일, 사업비 입력 상태를 전면 배치했다.

@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-04-16] patch-note | portal-payroll, portal-dashboard, admin-dashboard | payroll review loop and realtime finish-state polish
+- pages: [portal-payroll](./pages/portal-payroll.md), [portal-dashboard](./pages/portal-dashboard.md), [admin-dashboard](./pages/admin-dashboard.md)
+- summary: PM 적요 판단, Admin 최종 확정, 지급 완료 상태를 같은 용어와 badge 체계로 통일했고, scoped payroll store를 realtime snapshot으로 바꿔 Admin 확정이 PM 포털에도 즉시 반영되도록 정리했다.
+
 ## [2026-04-15] patch-note | shared-portal-architecture | portal bootstrap fetch loop split
 - pages: [shared-portal-architecture](./pages/shared-portal-architecture.md)
 - summary: `portal-store`의 단일 bootstrap effect를 `projects catalog`, `current project scope`, `weekly submission scope`로 분리하고, 동일한 project snapshot은 다시 state에 밀지 않도록 해 `/portal` 진입 시 반복 fetch/listen churn 후보를 줄였다.

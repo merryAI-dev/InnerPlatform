@@ -3,6 +3,7 @@ node_modules/
 dist/
 coverage/
 test-results/
+.playwright-cli/
 tmp/
 rust/**/target/
 *.log

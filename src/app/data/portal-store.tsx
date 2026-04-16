@@ -665,6 +665,9 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     expenseSheetRowsRef.current = expenseSheetRows;
   }, [expenseSheetRows]);
 
+  const authUserProjectIdsKey = (authUser?.projectIds || []).join('|');
+  const portalUserProjectIdsKey = (portalUser?.projectIds || []).join('|');
+
   const assignedProjectIds = useMemo(
     () => normalizeProjectIds([
       ...(Array.isArray(portalUser?.projectIds) ? portalUser.projectIds : []),
@@ -672,8 +675,9 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       ...(Array.isArray(authUser?.projectIds) ? authUser.projectIds : []),
       authUser?.projectId,
     ]),
-    [authUser?.projectId, authUser?.projectIds, portalUser?.projectId, portalUser?.projectIds],
+    [authUser?.projectId, authUserProjectIdsKey, portalUser?.projectId, portalUserProjectIdsKey],
   );
+  const assignedProjectIdsKey = assignedProjectIds.join('|');
 
   const candidateProjectsSource = useMemo(() => {
     if (!isDevHarnessUser || projects.length > 0) return projects;
@@ -682,25 +686,26 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     }
     const assignedIds = new Set(assignedProjectIds);
     return PROJECTS.filter((project) => assignedIds.has(project.id));
-  }, [assignedProjectIds, authUser?.role, isDevHarnessUser, projects]);
+  }, [assignedProjectIdsKey, authUser?.role, isDevHarnessUser, projects]);
 
   const portalProjectCandidates = useMemo(() => resolvePortalProjectCandidates({
     role: authUser?.role || portalUser?.role,
     authUid: authUser?.uid,
     assignedProjectIds,
     projects: candidateProjectsSource,
-  }), [assignedProjectIds, authUser?.role, authUser?.uid, candidateProjectsSource, portalUser?.role]);
+  }), [assignedProjectIdsKey, authUser?.role, authUser?.uid, candidateProjectsSource, portalUser?.role]);
 
   const scopedProjectIds = useMemo(
     () => portalProjectCandidates.searchProjects.map((project) => project.id),
     [portalProjectCandidates.searchProjects],
   );
+  const scopedProjectIdsKey = scopedProjectIds.join('|');
 
   const activeProjectId = useMemo(() => resolveActivePortalProjectId({
     activeProjectId: activeProjectIdState,
     primaryProjectId: portalUser?.projectId || authUser?.projectId || '',
     candidateProjectIds: scopedProjectIds,
-  }), [activeProjectIdState, authUser?.projectId, portalUser?.projectId, scopedProjectIds]);
+  }), [activeProjectIdState, authUser?.projectId, portalUser?.projectId, scopedProjectIdsKey]);
 
   const myProject = useMemo(() => {
     if (!activeProjectId) return null;
@@ -1581,7 +1586,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       projectScopeUnsubsRef.current.forEach((unsub) => unsub());
       projectScopeUnsubsRef.current = [];
     };
-  }, [authLoading, isMemberLoading, isAuthenticated, authUser, currentProjectId, firestoreEnabled, db, orgId, isDevHarnessUser, portalUser?.projectIds, livePortalMode]);
+  }, [authLoading, isMemberLoading, isAuthenticated, authUser, currentProjectId, firestoreEnabled, db, orgId, scopedProjectIdsKey, isDevHarnessUser, portalUserProjectIdsKey, livePortalMode]);
 
   useEffect(() => {
     weeklySubmissionUnsubsRef.current.forEach((unsub) => unsub());
@@ -1642,7 +1647,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       weeklySubmissionUnsubsRef.current.forEach((unsub) => unsub());
       weeklySubmissionUnsubsRef.current = [];
     };
-  }, [authLoading, isMemberLoading, isAuthenticated, authUser, firestoreEnabled, db, orgId, isDevHarnessUser, scopedProjectIds, livePortalMode]);
+  }, [authLoading, isMemberLoading, isAuthenticated, authUser, firestoreEnabled, db, orgId, isDevHarnessUser, scopedProjectIdsKey, livePortalMode]);
 
   useEffect(() => {
     if (authLoading || isMemberLoading || !isAuthenticated || !authUser) return;

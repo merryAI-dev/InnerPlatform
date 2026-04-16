@@ -32,6 +32,7 @@
     "firebase:fill-env": "bash scripts/firebase_fill_env_from_config.sh",
     "firebase:emulators:prepare": "bash scripts/firebase_emulator_bootstrap.sh",
     "firebase:emulators:start": "bash scripts/firebase_emulator_bootstrap.sh --start",
+    "seed:payroll:emulator-smoke": "npx tsx scripts/seed_payroll_emulator_smoke.ts",
     "qa:feedback:ingest": "npx tsx scripts/ingest_qa_feedback_tracker.ts",
     "phase:preflight": "npx tsx scripts/phase_preflight_qa.ts",
     "phase1:extract:usage-ledger": "npx tsx scripts/extract_usage_ledger_phase1_fixture.ts",

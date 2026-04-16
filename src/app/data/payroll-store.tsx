@@ -10,9 +10,8 @@ import React, {
 } from 'react';
 import {
   collection,
+  deleteField,
   doc,
-  getDoc,
-  getDocs,
   limit,
   onSnapshot,
   orderBy,
@@ -23,7 +22,14 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore';
 import { useAuth } from './auth-store';
-import type { MonthlyClose, PayrollRun, PayrollSchedule } from './types';
+import type {
+  MonthlyClose,
+  PayrollPaidStatus,
+  PayrollReviewCandidate,
+  PayrollReviewStatus,
+  PayrollRun,
+  PayrollSchedule,
+} from './types';
 import { featureFlags } from '../config/feature-flags';
 import { useFirebase } from '../lib/firebase-context';
 import { getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
@@ -33,11 +39,34 @@ import {
   getSeoulTodayIso,
   subtractBusinessDays,
 } from '../platform/business-days';
-import { sortMonthlyClosesByYearMonth, sortPayrollRunsByPlannedPayDate } from './payroll.helpers';
+import {
+  mergeMonthlyCloseState,
+  mergePayrollRunState,
+  mergePayrollScheduleState,
+  sortMonthlyClosesByYearMonth,
+  sortPayrollRunsByPlannedPayDate,
+} from './payroll.helpers';
 import { useFirestoreAccessPolicy } from './firestore-realtime-mode';
 
 const DEFAULT_TIMEZONE = 'Asia/Seoul';
 const DEFAULT_LEAD_DAYS = 3;
+
+export function sanitizePayrollReviewCandidate(candidate: PayrollReviewCandidate): PayrollReviewCandidate {
+  return {
+    txId: candidate.txId,
+    detectedFrom: candidate.detectedFrom,
+    signals: candidate.signals,
+    decision: candidate.decision,
+    ...(candidate.decidedAt ? { decidedAt: candidate.decidedAt } : {}),
+    ...(candidate.decidedByUid ? { decidedByUid: candidate.decidedByUid } : {}),
+    ...(candidate.decidedByName ? { decidedByName: candidate.decidedByName } : {}),
+    ...(candidate.note ? { note: candidate.note } : {}),
+  };
+}
+
+export function sanitizePayrollReviewCandidates(candidates: PayrollReviewCandidate[]): PayrollReviewCandidate[] {
+  return candidates.map((candidate) => sanitizePayrollReviewCandidate(candidate));
+}
 
 interface PayrollState {
   schedules: PayrollSchedule[];
@@ -49,6 +78,13 @@ interface PayrollActions {
   upsertSchedule: (input: { projectId: string; dayOfMonth: number; active?: boolean }) => Promise<void>;
   acknowledgePayrollRun: (runId: string) => Promise<void>;
   confirmPayrollPaid: (runId: string, matchedTxIds?: string[]) => Promise<void>;
+  savePayrollReview: (input: {
+    runId: string;
+    reviewCandidates: PayrollReviewCandidate[];
+    pmReviewStatus: PayrollReviewStatus;
+    paidStatus: PayrollPaidStatus;
+    missingCandidateAlertAt?: string;
+  }) => Promise<void>;
   markMonthlyCloseDone: (input: { projectId: string; yearMonth: string }) => Promise<void>;
   acknowledgeMonthlyClose: (closeId: string) => Promise<void>;
   getProjectRun: (projectId: string, yearMonth: string) => PayrollRun | undefined;
@@ -145,19 +181,25 @@ export function PayrollProvider({ children }: { children: ReactNode }) {
         limit(18),
       );
 
-      void getDoc(scheduleRef).then((snap) => {
-        if (!snap.exists()) {
-          setSchedules([]);
-          return;
-        }
-        setSchedules([snap.data() as PayrollSchedule]);
-      }).catch((err) => console.error('[Payroll] schedule fetch error:', err));
-      void getDocs(runQuery).then((snap) => {
-        setRuns(sortPayrollRunsByPlannedPayDate(snap.docs.map((d) => d.data() as PayrollRun)));
-      }).catch((err) => console.error('[Payroll] runs fetch error:', err));
-      void getDocs(closeQuery).then((snap) => {
-        setMonthlyCloses(sortMonthlyClosesByYearMonth(snap.docs.map((d) => d.data() as MonthlyClose)));
-      }).catch((err) => console.error('[Payroll] monthly closes fetch error:', err));
+      unsubsRef.current.push(
+        onSnapshot(scheduleRef, (snap) => {
+          if (!snap.exists()) {
+            setSchedules([]);
+            return;
+          }
+          setSchedules([snap.data() as PayrollSchedule]);
+        }, (err) => console.error('[Payroll] scoped schedule listen error:', err)),
+      );
+      unsubsRef.current.push(
+        onSnapshot(runQuery, (snap) => {
+          setRuns(sortPayrollRunsByPlannedPayDate(snap.docs.map((d) => d.data() as PayrollRun)));
+        }, (err) => console.error('[Payroll] scoped runs listen error:', err)),
+      );
+      unsubsRef.current.push(
+        onSnapshot(closeQuery, (snap) => {
+          setMonthlyCloses(sortMonthlyClosesByYearMonth(snap.docs.map((d) => d.data() as MonthlyClose)));
+        }, (err) => console.error('[Payroll] scoped monthly closes listen error:', err)),
+      );
     } else {
       setSchedules([]);
       setRuns([]);
@@ -199,6 +241,7 @@ export function PayrollProvider({ children }: { children: ReactNode }) {
     };
 
     await setDoc(doc(db, getOrgDocumentPath(orgId, 'payrollSchedules', projectId)), schedule, { merge: true });
+    setSchedules((current) => mergePayrollScheduleState(current, schedule));
 
     // Ensure current + next month run docs exist so the UI is responsive even before the daily worker runs.
     const today = getSeoulTodayIso();
@@ -221,6 +264,20 @@ export function PayrollProvider({ children }: { children: ReactNode }) {
           noticeLeadBusinessDays: DEFAULT_LEAD_DAYS,
           updatedAt: now,
         } as Partial<PayrollRun> as any);
+        setRuns((current) => {
+          const existing = current.find((entry) => entry.id === runId);
+          if (!existing) return current;
+          return mergePayrollRunState(current, {
+            ...existing,
+            tenantId: orgId,
+            projectId,
+            yearMonth,
+            plannedPayDate,
+            noticeDate,
+            noticeLeadBusinessDays: DEFAULT_LEAD_DAYS,
+            updatedAt: now,
+          });
+        });
       } catch {
         const run: PayrollRun = {
           id: runId,
@@ -233,10 +290,13 @@ export function PayrollProvider({ children }: { children: ReactNode }) {
           acknowledged: false,
           paidStatus: 'UNKNOWN',
           matchedTxIds: [],
+          reviewCandidates: [],
+          pmReviewStatus: 'PENDING',
           createdAt: now,
           updatedAt: now,
         };
         await setDoc(runRef, run, { merge: true });
+        setRuns((current) => mergePayrollRunState(current, run));
       }
     }
   }, [db, orgId, user]);
@@ -256,6 +316,18 @@ export function PayrollProvider({ children }: { children: ReactNode }) {
       acknowledgedByName: actor.name,
       updatedAt: now,
     } as Partial<PayrollRun> as any);
+    setRuns((current) => {
+      const existing = current.find((entry) => entry.id === id);
+      if (!existing) return current;
+      return mergePayrollRunState(current, {
+        ...existing,
+        acknowledged: true,
+        acknowledgedAt: now,
+        acknowledgedByUid: actor.uid,
+        acknowledgedByName: actor.name,
+        updatedAt: now,
+      });
+    });
   }, [db, orgId, user]);
 
   const confirmPayrollPaid = useCallback(async (runId: string, matchedTxIds?: string[]): Promise<void> => {
@@ -265,15 +337,89 @@ export function PayrollProvider({ children }: { children: ReactNode }) {
     const id = runId.trim();
     if (!id) return;
     const now = new Date().toISOString();
+    const run = runs.find((entry) => entry.id === id);
+    const matchedFromReview = run?.reviewCandidates
+      ?.filter((candidate) => candidate.decision === 'PAYROLL')
+      .map((candidate) => candidate.txId);
+    const safeMatchedTxIds = Array.isArray(matchedTxIds) && matchedTxIds.length > 0
+      ? matchedTxIds
+      : matchedFromReview;
+
     await updateDoc(doc(db, getOrgDocumentPath(orgId, 'payrollRuns', id)), {
       tenantId: orgId,
       paidStatus: 'CONFIRMED',
-      ...(Array.isArray(matchedTxIds) ? { matchedTxIds: matchedTxIds.slice(0, 30) } : null),
+      ...(Array.isArray(safeMatchedTxIds) ? { matchedTxIds: safeMatchedTxIds.slice(0, 30) } : null),
       confirmedAt: now,
       confirmedByUid: actor.uid,
       confirmedByName: actor.name,
       updatedAt: now,
     } as Partial<PayrollRun> as any);
+    setRuns((current) => {
+      const existing = current.find((entry) => entry.id === id);
+      if (!existing) return current;
+      return mergePayrollRunState(current, {
+        ...existing,
+        paidStatus: 'CONFIRMED',
+        matchedTxIds: Array.isArray(safeMatchedTxIds) ? safeMatchedTxIds.slice(0, 30) : existing.matchedTxIds,
+        confirmedAt: now,
+        confirmedByUid: actor.uid,
+        confirmedByName: actor.name,
+        updatedAt: now,
+      });
+    });
+  }, [db, orgId, runs, user]);
+
+  const savePayrollReview = useCallback(async (input: {
+    runId: string;
+    reviewCandidates: PayrollReviewCandidate[];
+    pmReviewStatus: PayrollReviewStatus;
+    paidStatus: PayrollPaidStatus;
+    missingCandidateAlertAt?: string;
+  }): Promise<void> => {
+    if (!db) return;
+    const actor = user;
+    if (!actor) return;
+    const runId = input.runId.trim();
+    if (!runId) return;
+    const now = new Date().toISOString();
+    const completed = input.pmReviewStatus === 'COMPLETED';
+    const reviewCandidates = sanitizePayrollReviewCandidates(input.reviewCandidates);
+
+    await updateDoc(doc(db, getOrgDocumentPath(orgId, 'payrollRuns', runId)), {
+      tenantId: orgId,
+      reviewCandidates,
+      pmReviewStatus: input.pmReviewStatus,
+      paidStatus: input.paidStatus,
+      missingCandidateAlertAt: input.missingCandidateAlertAt ?? deleteField(),
+      pmReviewCompletedAt: completed ? now : deleteField(),
+      pmReviewCompletedByUid: completed ? actor.uid : deleteField(),
+      pmReviewCompletedByName: completed && actor.name ? actor.name : deleteField(),
+      updatedAt: now,
+    } as Partial<PayrollRun> as any);
+    setRuns((current) => {
+      const existing = current.find((entry) => entry.id === runId);
+      if (!existing) return current;
+      return mergePayrollRunState(current, {
+        ...existing,
+        reviewCandidates,
+        pmReviewStatus: input.pmReviewStatus,
+        paidStatus: input.paidStatus,
+        ...(input.missingCandidateAlertAt ? { missingCandidateAlertAt: input.missingCandidateAlertAt } : {}),
+        ...(!input.missingCandidateAlertAt ? { missingCandidateAlertAt: undefined } : {}),
+        ...(completed
+          ? {
+              pmReviewCompletedAt: now,
+              pmReviewCompletedByUid: actor.uid,
+              pmReviewCompletedByName: actor.name,
+            }
+          : {
+              pmReviewCompletedAt: undefined,
+              pmReviewCompletedByUid: undefined,
+              pmReviewCompletedByName: undefined,
+            }),
+        updatedAt: now,
+      });
+    });
   }, [db, orgId, user]);
 
   const markMonthlyCloseDone = useCallback(async (input: { projectId: string; yearMonth: string }): Promise<void> => {
@@ -314,7 +460,24 @@ export function PayrollProvider({ children }: { children: ReactNode }) {
         updatedAt: now,
       };
       await setDoc(closeRef, docData, { merge: true });
+      setMonthlyCloses((current) => mergeMonthlyCloseState(current, docData));
+      return;
     }
+    setMonthlyCloses((current) => {
+      const existing = current.find((entry) => entry.id === closeId);
+      if (!existing) return current;
+      return mergeMonthlyCloseState(current, {
+        ...existing,
+        tenantId: orgId,
+        projectId,
+        yearMonth,
+        status: 'DONE',
+        doneAt: now,
+        doneByUid: actor.uid,
+        doneByName: actor.name,
+        updatedAt: now,
+      });
+    });
   }, [db, orgId, user]);
 
   const acknowledgeMonthlyClose = useCallback(async (closeId: string): Promise<void> => {
@@ -332,6 +495,18 @@ export function PayrollProvider({ children }: { children: ReactNode }) {
       acknowledgedByName: actor.name,
       updatedAt: now,
     } as Partial<MonthlyClose> as any);
+    setMonthlyCloses((current) => {
+      const existing = current.find((entry) => entry.id === id);
+      if (!existing) return current;
+      return mergeMonthlyCloseState(current, {
+        ...existing,
+        acknowledged: true,
+        acknowledgedAt: now,
+        acknowledgedByUid: actor.uid,
+        acknowledgedByName: actor.name,
+        updatedAt: now,
+      });
+    });
   }, [db, orgId, user]);
 
   const getProjectRun = useCallback((projectId: string, yearMonth: string) => {
@@ -351,6 +526,7 @@ export function PayrollProvider({ children }: { children: ReactNode }) {
     upsertSchedule,
     acknowledgePayrollRun,
     confirmPayrollPaid,
+    savePayrollReview,
     markMonthlyCloseDone,
     acknowledgeMonthlyClose,
     getProjectRun,
@@ -362,6 +538,7 @@ export function PayrollProvider({ children }: { children: ReactNode }) {
     upsertSchedule,
     acknowledgePayrollRun,
     confirmPayrollPaid,
+    savePayrollReview,
     markMonthlyCloseDone,
     acknowledgeMonthlyClose,
     getProjectRun,

@@ -931,6 +931,21 @@ export interface BoardVote {
 
 export type PayrollPaidStatus = 'UNKNOWN' | 'AUTO_MATCHED' | 'CONFIRMED' | 'MISSING';
 
+export type PayrollCandidateReviewDecision = 'PENDING' | 'PAYROLL' | 'NOT_PAYROLL' | 'HOLD';
+
+export type PayrollReviewStatus = 'PENDING' | 'COMPLETED' | 'MISSING_CANDIDATE';
+
+export interface PayrollReviewCandidate {
+  txId: string;
+  detectedFrom: 'rule_engine' | 'future_llm';
+  signals: string[];
+  decision: PayrollCandidateReviewDecision;
+  decidedAt?: string;
+  decidedByUid?: string;
+  decidedByName?: string;
+  note?: string;
+}
+
 export interface PayrollSchedule {
   /** doc id = projectId */
   id: string;
@@ -963,6 +978,12 @@ export interface PayrollRun {
   acknowledgedByName?: string;
   paidStatus: PayrollPaidStatus;
   matchedTxIds?: string[];
+  reviewCandidates?: PayrollReviewCandidate[];
+  pmReviewStatus?: PayrollReviewStatus;
+  pmReviewCompletedAt?: string;
+  pmReviewCompletedByUid?: string;
+  pmReviewCompletedByName?: string;
+  missingCandidateAlertAt?: string;
   confirmedAt?: string;
   confirmedByUid?: string;
   confirmedByName?: string;

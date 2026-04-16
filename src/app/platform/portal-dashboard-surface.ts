@@ -71,7 +71,7 @@ export function buildPortalDashboardSurface(input: {
       tone: 'danger',
       to: '/portal/payroll',
     },
-  ].filter((item) => item.count > 0);
+  ].filter((item): item is PortalDashboardIssue => item.count > 0);
 
   return {
     currentWeekLabel,

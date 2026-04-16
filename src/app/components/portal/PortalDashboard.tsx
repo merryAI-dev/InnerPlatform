@@ -5,6 +5,7 @@ import {
   CheckCircle2, CircleDollarSign, ShieldCheck,
   BarChart3,
   Loader2,
+  ArrowRight,
 } from 'lucide-react';
 import {
   collection,
@@ -35,11 +36,16 @@ import {
   resolveProjectPayrollLiquidity,
   type PayrollLiquidityQueueItem,
 } from '../../platform/payroll-liquidity';
+import { resolvePayrollRunReview } from '../../platform/payroll-review';
 import { buildPortalDashboardSurface } from '../../platform/portal-dashboard-surface';
 import {
   resolveWeeklyAccountingProductStatus,
   resolveWeeklyAccountingSnapshot,
 } from '../../platform/weekly-accounting-state';
+import {
+  getPayrollReviewStatusLabel,
+  getPayrollReviewStatusTone,
+} from '../../platform/payroll-display';
 
 // ═══════════════════════════════════════════════════════════════
 // PortalDashboard — 내 사업 현황
@@ -91,6 +97,158 @@ export function PortalDashboard() {
   const firestoreEnabled = featureFlags.firestoreCoreEnabled && isOnline && !!db;
 
   const [liveTransactions, setLiveTransactions] = useState<Transaction[] | null>(null);
+  const [transactionsFetchState, setTransactionsFetchState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const projectId = myProject?.id || '';
+
+  useEffect(() => {
+    if (!projectId || !firestoreEnabled || !db) {
+      setLiveTransactions(null);
+      setTransactionsFetchState('ready');
+      return;
+    }
+
+    let isCancelled = false;
+    setTransactionsFetchState('loading');
+
+    const txQuery = query(
+      collection(db, getOrgCollectionPath(orgId, 'transactions')),
+      where('projectId', '==', projectId),
+    );
+
+    void getDocs(txQuery)
+      .then((snap) => {
+        if (isCancelled) return;
+        setLiveTransactions(snap.docs.map((d) => d.data() as Transaction));
+        setTransactionsFetchState('ready');
+      })
+      .catch((err) => {
+        if (isCancelled) return;
+        console.error('[PortalDashboard] transactions fetch error:', err);
+        toast.error('거래 데이터를 불러오지 못했습니다');
+        setLiveTransactions(null);
+        setTransactionsFetchState('error');
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [db, firestoreEnabled, orgId, projectId]);
+
+  const myTx = (liveTransactions ?? (!firestoreEnabled ? TRANSACTIONS : [])).filter(t => t.projectId === projectId);
+
+  const today = getSeoulTodayIso();
+  const yearMonth = today.slice(0, 7);
+  const prevYearMonth = addMonthsToYearMonth(yearMonth, -1);
+  const payrollRun = runs.find((r) => r.projectId === projectId && r.yearMonth === yearMonth) || null;
+  const monthlyClosePrev = monthlyCloses.find((c) => c.projectId === projectId && c.yearMonth === prevYearMonth) || null;
+  const hrAlerts = projectId ? getProjectAlerts(projectId).filter((a) => !a.acknowledged) : [];
+  const needsPayrollAck = !!(payrollRun && today >= payrollRun.noticeDate && !payrollRun.acknowledged);
+  const needsMonthlyCloseAck = !!(monthlyClosePrev && monthlyClosePrev.status === 'DONE' && !monthlyClosePrev.acknowledged);
+
+  async function onAckPayroll() {
+    if (!payrollRun) return;
+    try {
+      await acknowledgePayrollRun(payrollRun.id);
+      toast.success('공지 확인이 기록되었습니다');
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err?.message || '확인 처리에 실패했습니다');
+    }
+  }
+
+  async function onAckMonthlyClose() {
+    if (!monthlyClosePrev) return;
+    try {
+      await acknowledgeMonthlyClose(monthlyClosePrev.id);
+      toast.success('월간 정산 확인이 기록되었습니다');
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err?.message || '확인 처리에 실패했습니다');
+    }
+  }
+
+  // 재무 KPI
+  const totalIn = myTx.filter(t => t.direction === 'IN').reduce((s, t) => s + t.amounts.bankAmount, 0);
+  const totalOut = myTx.filter(t => t.direction === 'OUT').reduce((s, t) => s + t.amounts.bankAmount, 0);
+  const balance = totalIn - totalOut;
+  const burnRate = myProject && myProject.contractAmount > 0 ? totalOut / myProject.contractAmount : 0;
+  const payrollQueueItems = useMemo(() => (
+    myProject
+      ? resolveProjectPayrollLiquidity({
+          project: myProject,
+          runs,
+          transactions: myTx,
+          today,
+        })
+      : []
+  ), [myProject, myTx, runs, today]);
+  const payrollRiskItems = useMemo(
+    () => payrollQueueItems.filter((item) => isPayrollLiquidityRiskStatus(item.status)),
+    [payrollQueueItems],
+  );
+  const payrollDetail = payrollQueueItems[0] || null;
+  const payrollReview = useMemo(() => (
+    payrollRun && transactionsFetchState === 'ready'
+      ? resolvePayrollRunReview({
+          run: payrollRun,
+          transactions: myTx,
+          today,
+        })
+      : null
+  ), [myTx, payrollRun, today, transactionsFetchState]);
+  const needsPayrollReviewAttention = Boolean(
+    payrollReview?.needsPmReview
+      || payrollReview?.hasMissingCandidate
+      || payrollReview?.needsAdminConfirm,
+  );
+  const assignedProjects = useMemo(() => {
+    if (!portalUser) return myProject ? [myProject] : [];
+    const projectIds = Array.isArray(portalUser.projectIds) && portalUser.projectIds.length > 0
+      ? portalUser.projectIds
+      : portalUser.projectId ? [portalUser.projectId] : [];
+    const projectMap = new Map(projects.map((project) => [project.id, project]));
+    const ordered = projectIds
+      .map((projectId) => projectMap.get(projectId))
+      .filter((project): project is NonNullable<typeof project> => Boolean(project));
+    if (ordered.length > 0) return ordered;
+    return myProject ? [myProject] : [];
+  }, [myProject, portalUser, projects]);
+  const currentWeek = useMemo(() => resolveCurrentCashflowWeek(today), [today]);
+  const weeklyStatusMap = useMemo(() => {
+    const map = new Map<string, typeof weeklySubmissionStatuses[number]>();
+    weeklySubmissionStatuses.forEach((status) => {
+      map.set(`${status.projectId}-${status.yearMonth}-w${status.weekNo}`, status);
+    });
+    return map;
+  }, [weeklySubmissionStatuses]);
+  const dashboardSubmissionRows = useMemo(() => {
+    if (!currentWeek) return [];
+    return assignedProjects.map((project) => {
+      const status = weeklyStatusMap.get(`${project.id}-${currentWeek.yearMonth}-w${currentWeek.weekNo}`);
+      const snapshot = resolveWeeklyAccountingSnapshot(status);
+      const expenseStatus = resolveWeeklyAccountingProductStatus({ snapshot });
+      return {
+        id: project.id,
+        name: project.name,
+        shortName: project.shortName || project.id,
+        projectionInputLabel: snapshot.projectionEdited ? '입력됨' : '미입력',
+        projectionDoneLabel: snapshot.projectionDone ? '제출 완료' : '미완료',
+        expenseLabel: expenseStatus.label,
+        expenseTone: (expenseStatus.tone === 'muted'
+          ? 'neutral'
+          : expenseStatus.tone) as 'neutral' | 'warning' | 'danger' | 'success',
+        latestProjectionUpdatedAt: status?.projectionUpdatedAt || status?.projectionEditedAt,
+      };
+    });
+  }, [assignedProjects, currentWeek, weeklyStatusMap]);
+  const dashboardSurface = useMemo(() => buildPortalDashboardSurface({
+    projectId,
+    weeklySubmissionStatuses,
+    todayIso: today,
+    hrAlertCount: hrAlerts.length,
+    payrollRiskCount: payrollRiskItems.length,
+  }), [hrAlerts.length, payrollRiskItems.length, projectId, today, weeklySubmissionStatuses]);
+  const shouldShowPayrollQueue = Boolean(payrollDetail && payrollDetail.status !== 'clear');
 
   if (isLoading) {
     return (
@@ -132,134 +290,6 @@ export function PortalDashboard() {
       </Card>
     );
   }
-
-  useEffect(() => {
-    if (!firestoreEnabled || !db) {
-      setLiveTransactions(null);
-      return;
-    }
-
-    let isCancelled = false;
-
-    const txQuery = query(
-      collection(db, getOrgCollectionPath(orgId, 'transactions')),
-      where('projectId', '==', myProject.id),
-    );
-
-    void getDocs(txQuery)
-      .then((snap) => {
-        if (isCancelled) return;
-        setLiveTransactions(snap.docs.map((d) => d.data() as Transaction));
-      })
-      .catch((err) => {
-        if (isCancelled) return;
-        console.error('[PortalDashboard] transactions fetch error:', err);
-        toast.error('거래 데이터를 불러오지 못했습니다');
-        setLiveTransactions(null);
-      });
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [db, firestoreEnabled, orgId, myProject.id]);
-
-  const myTx = (liveTransactions ?? TRANSACTIONS).filter(t => t.projectId === myProject.id);
-
-  const today = getSeoulTodayIso();
-  const yearMonth = today.slice(0, 7);
-  const prevYearMonth = addMonthsToYearMonth(yearMonth, -1);
-  const payrollRun = runs.find((r) => r.projectId === myProject.id && r.yearMonth === yearMonth) || null;
-  const monthlyClosePrev = monthlyCloses.find((c) => c.projectId === myProject.id && c.yearMonth === prevYearMonth) || null;
-  const hrAlerts = getProjectAlerts(myProject.id).filter((a) => !a.acknowledged);
-  const needsPayrollAck = !!(payrollRun && today >= payrollRun.noticeDate && !payrollRun.acknowledged);
-  const needsMonthlyCloseAck = !!(monthlyClosePrev && monthlyClosePrev.status === 'DONE' && !monthlyClosePrev.acknowledged);
-
-  async function onAckPayroll() {
-    if (!payrollRun) return;
-    try {
-      await acknowledgePayrollRun(payrollRun.id);
-      toast.success('공지 확인이 기록되었습니다');
-    } catch (err: any) {
-      console.error(err);
-      toast.error(err?.message || '확인 처리에 실패했습니다');
-    }
-  }
-
-  async function onAckMonthlyClose() {
-    if (!monthlyClosePrev) return;
-    try {
-      await acknowledgeMonthlyClose(monthlyClosePrev.id);
-      toast.success('월간 정산 확인이 기록되었습니다');
-    } catch (err: any) {
-      console.error(err);
-      toast.error(err?.message || '확인 처리에 실패했습니다');
-    }
-  }
-
-  // 재무 KPI
-  const totalIn = myTx.filter(t => t.direction === 'IN').reduce((s, t) => s + t.amounts.bankAmount, 0);
-  const totalOut = myTx.filter(t => t.direction === 'OUT').reduce((s, t) => s + t.amounts.bankAmount, 0);
-  const balance = totalIn - totalOut;
-  const burnRate = myProject.contractAmount > 0 ? totalOut / myProject.contractAmount : 0;
-  const payrollQueueItems = useMemo(() => resolveProjectPayrollLiquidity({
-    project: myProject,
-    runs,
-    transactions: myTx,
-    today,
-  }), [myProject, myTx, runs, today]);
-  const payrollRiskItems = useMemo(
-    () => payrollQueueItems.filter((item) => isPayrollLiquidityRiskStatus(item.status)),
-    [payrollQueueItems],
-  );
-  const payrollDetail = payrollQueueItems[0] || null;
-  const assignedProjects = useMemo(() => {
-    if (!portalUser) return myProject ? [myProject] : [];
-    const projectIds = Array.isArray(portalUser.projectIds) && portalUser.projectIds.length > 0
-      ? portalUser.projectIds
-      : portalUser.projectId ? [portalUser.projectId] : [];
-    const projectMap = new Map(projects.map((project) => [project.id, project]));
-    const ordered = projectIds
-      .map((projectId) => projectMap.get(projectId))
-      .filter((project): project is NonNullable<typeof project> => Boolean(project));
-    if (ordered.length > 0) return ordered;
-    return myProject ? [myProject] : [];
-  }, [myProject, portalUser, projects]);
-  const currentWeek = useMemo(() => resolveCurrentCashflowWeek(today), [today]);
-  const weeklyStatusMap = useMemo(() => {
-    const map = new Map<string, typeof weeklySubmissionStatuses[number]>();
-    weeklySubmissionStatuses.forEach((status) => {
-      map.set(`${status.projectId}-${status.yearMonth}-w${status.weekNo}`, status);
-    });
-    return map;
-  }, [weeklySubmissionStatuses]);
-  const dashboardSubmissionRows = useMemo(() => {
-    if (!currentWeek) return [];
-    return assignedProjects.map((project) => {
-      const status = weeklyStatusMap.get(`${project.id}-${currentWeek.yearMonth}-w${currentWeek.weekNo}`);
-      const snapshot = resolveWeeklyAccountingSnapshot(status);
-      const expenseStatus = resolveWeeklyAccountingProductStatus({ snapshot });
-      return {
-        id: project.id,
-        name: project.name,
-        shortName: project.shortName || project.id,
-        projectionInputLabel: snapshot.projectionEdited ? '입력됨' : '미입력',
-        projectionDoneLabel: snapshot.projectionDone ? '제출 완료' : '미완료',
-        expenseLabel: expenseStatus.label,
-        expenseTone: expenseStatus.tone === 'muted'
-          ? 'neutral'
-          : expenseStatus.tone,
-        latestProjectionUpdatedAt: status?.projectionUpdatedAt || status?.projectionEditedAt,
-      };
-    });
-  }, [assignedProjects, currentWeek, weeklyStatusMap]);
-  const dashboardSurface = useMemo(() => buildPortalDashboardSurface({
-    projectId: myProject.id,
-    weeklySubmissionStatuses,
-    todayIso: today,
-    hrAlertCount: hrAlerts.length,
-    payrollRiskCount: payrollRiskItems.length,
-  }), [hrAlerts.length, myProject.id, payrollRiskItems.length, today, weeklySubmissionStatuses]);
-  const shouldShowPayrollQueue = Boolean(payrollDetail && payrollDetail.status !== 'clear');
   const financeSummaryItems = [
     { label: '총 입금', value: fmtShort(totalIn) },
     { label: '총 출금', value: fmtShort(totalOut) },
@@ -546,6 +576,66 @@ export function PortalDashboard() {
                 </div>
               </div>
             )}
+          </CardContent>
+        </Card>
+      )}
+
+      {needsPayrollReviewAttention && payrollReview && (
+        <Card data-testid="portal-payroll-review-card" className="border-border/60 shadow-sm">
+          <CardContent className="p-4 space-y-3">
+            <div className="flex items-start gap-2.5">
+              <CircleDollarSign className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+              <div className="min-w-0">
+                <p className="text-[12px]" style={{ fontWeight: 800 }}>인건비 적요 검토</p>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                  통장 적요를 먼저 보고 PM이 1차 판단을 남기면, 그 다음 Admin이 월 지급만 최종 확정합니다.
+                </p>
+              </div>
+            </div>
+
+            <div className={`rounded-xl border px-4 py-3 ${
+              payrollReview.hasMissingCandidate
+                ? 'border-rose-200 bg-rose-50'
+                : payrollReview.needsAdminConfirm
+                  ? 'border-emerald-200 bg-emerald-50'
+                  : 'border-amber-200 bg-amber-50'
+            }`}>
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge className={`text-[10px] ${getPayrollReviewStatusTone(payrollReview.pmReviewStatus)}`}>
+                  {payrollReview.needsAdminConfirm
+                    ? 'Admin 최종 확정 대기'
+                    : getPayrollReviewStatusLabel(payrollReview.pmReviewStatus)}
+                </Badge>
+                <Badge variant="outline" className="text-[10px] border-white/70 bg-white/70 text-slate-700">
+                  후보 {payrollReview.candidateCount}건
+                </Badge>
+                {payrollReview.pendingDecisionCount > 0 && (
+                  <Badge variant="outline" className="text-[10px] border-white/70 bg-white/70 text-slate-700">
+                    남은 판단 {payrollReview.pendingDecisionCount}건
+                  </Badge>
+                )}
+              </div>
+              <p className="text-[12px]" style={{ fontWeight: 700 }}>
+                {payrollReview.hasMissingCandidate
+                  ? '이번 달 인건비 후보가 없습니다'
+                  : payrollReview.needsAdminConfirm
+                    ? 'Admin 최종 확정 대기'
+                    : `PM 1차 검토 필요 · 남은 판단 ${payrollReview.pendingDecisionCount}건`}
+              </p>
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                {payrollReview.hasMissingCandidate
+                  ? '후보 없음은 정상 종료가 아닙니다. 통장내역을 직접 보고 적요를 확인해 주세요.'
+                  : payrollReview.needsAdminConfirm
+                    ? 'PM 검토가 끝났습니다. Admin이 월 지급 확정만 남겨둔 상태입니다.'
+                    : `${payrollReview.candidateCount}건 후보가 잡혔습니다. 맞음/아님/보류로 먼저 닫아 주세요.`}
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end">
+              <Button size="sm" className="h-8 text-[11px] gap-1.5" onClick={() => navigate('/portal/payroll')}>
+                인건비 검토 열기 <ArrowRight className="h-3.5 w-3.5" />
+              </Button>
+            </div>
           </CardContent>
         </Card>
       )}

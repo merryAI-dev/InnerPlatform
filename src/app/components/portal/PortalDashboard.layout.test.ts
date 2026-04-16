@@ -37,4 +37,10 @@ describe('PortalDashboard layout compaction', () => {
     expect(portalDashboardSource).not.toContain('인력변경 신청');
     expect(portalDashboardSource).not.toContain('사업비 입력(주간) 작성/제출');
   });
+
+  it('surfaces payroll memo-review attention directly on the dashboard', () => {
+    expect(portalDashboardSource).toContain('인건비 적요 검토');
+    expect(portalDashboardSource).toContain('PM 1차 검토 필요');
+    expect(portalDashboardSource).toContain('인건비 검토 열기');
+  });
 });

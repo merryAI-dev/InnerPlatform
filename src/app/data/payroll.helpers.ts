@@ -1,4 +1,4 @@
-import type { MonthlyClose, PayrollRun } from './types';
+import type { MonthlyClose, PayrollRun, PayrollSchedule } from './types';
 
 export function sortPayrollRunsByPlannedPayDate(rows: PayrollRun[]): PayrollRun[] {
   return [...rows].sort((a, b) => {
@@ -16,4 +16,23 @@ export function sortMonthlyClosesByYearMonth(rows: MonthlyClose[]): MonthlyClose
     if (yearMonthCompare !== 0) return yearMonthCompare;
     return String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''));
   });
+}
+
+export function mergePayrollRunState(rows: PayrollRun[], next: PayrollRun): PayrollRun[] {
+  const filtered = rows.filter((row) => row.id !== next.id);
+  return sortPayrollRunsByPlannedPayDate([...filtered, next]);
+}
+
+export function mergePayrollScheduleState(rows: PayrollSchedule[], next: PayrollSchedule): PayrollSchedule[] {
+  const filtered = rows.filter((row) => row.id !== next.id);
+  return [...filtered, next].sort((a, b) => {
+    const updatedCompare = String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''));
+    if (updatedCompare !== 0) return updatedCompare;
+    return String(a.projectId || '').localeCompare(String(b.projectId || ''));
+  });
+}
+
+export function mergeMonthlyCloseState(rows: MonthlyClose[], next: MonthlyClose): MonthlyClose[] {
+  const filtered = rows.filter((row) => row.id !== next.id);
+  return sortMonthlyClosesByYearMonth([...filtered, next]);
 }

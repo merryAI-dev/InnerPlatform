@@ -22,6 +22,8 @@ describe('firebase org path builders', () => {
   it('builds org-scoped collection paths', () => {
     expect(getOrgCollectionPath('mysc', 'projects')).toBe('orgs/mysc/projects');
     expect(getOrgCollectionPath('org001', 'transactions')).toBe('orgs/org001/transactions');
+    expect(getOrgCollectionPath('mysc', 'payrollSchedules')).toBe('orgs/mysc/payroll_schedules');
+    expect(getOrgCollectionPath('mysc', 'payrollRuns')).toBe('orgs/mysc/payroll_runs');
     expect(getOrgCollectionPath('mysc', 'careerProfiles')).toBe('orgs/mysc/careerProfiles');
     expect(getOrgCollectionPath('mysc', 'trainingCourses')).toBe('orgs/mysc/trainingCourses');
     expect(getOrgCollectionPath('mysc', 'trainingEnrollments')).toBe('orgs/mysc/trainingEnrollments');
@@ -29,6 +31,8 @@ describe('firebase org path builders', () => {
 
   it('builds org-scoped document paths', () => {
     expect(getOrgDocumentPath('mysc', 'projects', 'p001')).toBe('orgs/mysc/projects/p001');
+    expect(getOrgDocumentPath('mysc', 'payrollSchedules', 'p002')).toBe('orgs/mysc/payroll_schedules/p002');
+    expect(getOrgDocumentPath('mysc', 'payrollRuns', 'p002-2026-04')).toBe('orgs/mysc/payroll_runs/p002-2026-04');
   });
 });
 

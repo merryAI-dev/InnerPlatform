@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { CalendarDays, CheckCircle2, CircleDollarSign, Info, AlertTriangle, ArrowRight } from 'lucide-react';
+import { CalendarDays, CheckCircle2, CircleDollarSign, Info, AlertTriangle, ArrowRight, CircleHelp, SearchCheck } from 'lucide-react';
 import {
   collection,
   getDocs,
@@ -22,12 +22,25 @@ import { fmtShort } from '../../data/budget-data';
 import { featureFlags } from '../../config/feature-flags';
 import { useFirebase } from '../../lib/firebase-context';
 import { getOrgCollectionPath } from '../../lib/firebase';
-import type { Transaction } from '../../data/types';
+import type { PayrollCandidateReviewDecision, Transaction } from '../../data/types';
 import { resolveProjectPayrollLiquidity, type PayrollLiquidityQueueItem } from '../../platform/payroll-liquidity';
+import {
+  payrollReviewSnapshotMatches,
+  resolvePayrollRunReview,
+  toPayrollReviewSnapshot,
+} from '../../platform/payroll-review';
+import {
+  getPayrollDecisionLabel,
+  getPayrollDecisionTone,
+  getPayrollPaidStatusLabel,
+  getPayrollPaidStatusTone,
+  getPayrollReviewStatusLabel,
+  getPayrollReviewStatusTone,
+} from '../../platform/payroll-display';
 
 export function PortalPayrollPage() {
   const navigate = useNavigate();
-  const { activeProjectId, myProject } = usePortalStore();
+  const { activeProjectId, myProject, portalUser } = usePortalStore();
   const {
     schedules,
     runs,
@@ -35,10 +48,13 @@ export function PortalPayrollPage() {
     upsertSchedule,
     acknowledgePayrollRun,
     acknowledgeMonthlyClose,
+    savePayrollReview,
   } = usePayroll();
   const { db, isOnline, orgId } = useFirebase();
   const firestoreEnabled = featureFlags.firestoreCoreEnabled && isOnline && !!db;
   const [liveTransactions, setLiveTransactions] = useState<Transaction[] | null>(null);
+  const [transactionsFetchState, setTransactionsFetchState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [decisionSavingTxId, setDecisionSavingTxId] = useState<string | null>(null);
 
   const today = getSeoulTodayIso();
   const yearMonth = today.slice(0, 7);
@@ -49,12 +65,27 @@ export function PortalPayrollPage() {
   const run = useMemo(() => runs.find((r) => r.projectId === projectId && r.yearMonth === yearMonth) || null, [projectId, runs, yearMonth]);
   const monthlyClosePrev = useMemo(() => monthlyCloses.find((c) => c.projectId === projectId && c.yearMonth === prevYearMonth) || null, [monthlyCloses, prevYearMonth, projectId]);
   const projectTransactions = useMemo(() => {
-    const source = liveTransactions ?? TRANSACTIONS;
+    const source = liveTransactions ?? (!firestoreEnabled ? TRANSACTIONS : []);
     return source.filter((tx) => tx.projectId === projectId);
-  }, [liveTransactions, projectId]);
+  }, [firestoreEnabled, liveTransactions, projectId]);
 
   const [dayInput, setDayInput] = useState<string>(schedule ? String(schedule.dayOfMonth) : '');
   const day = Math.max(1, Math.min(31, Number.parseInt(dayInput || '0', 10) || 0));
+  const reviewState = useMemo(() => (
+    run && transactionsFetchState === 'ready'
+      ? resolvePayrollRunReview({
+          run,
+          transactions: projectTransactions,
+          today,
+        })
+      : null
+  ), [projectTransactions, run, today, transactionsFetchState]);
+  const reviewRows = useMemo(() => (
+    reviewState?.reviewCandidates.map((candidate) => ({
+      candidate,
+      tx: projectTransactions.find((tx) => tx.id === candidate.txId) || null,
+    })) || []
+  ), [projectTransactions, reviewState]);
 
   const preview = useMemo(() => {
     if (!day || day < 1 || day > 31) return null;
@@ -76,14 +107,27 @@ export function PortalPayrollPage() {
       : []
   ), [myProject, projectTransactions, runs, today]);
   const activeQueueItem = queueItems[0] || null;
+  const reviewStatusLabel = reviewState ? (
+    reviewState.paidStatus === 'CONFIRMED'
+      ? '지급 확정 완료'
+      : reviewState.needsAdminConfirm
+      ? 'Admin 최종 확정 대기'
+      : getPayrollReviewStatusLabel(reviewState.pmReviewStatus)
+  ) : null;
+
+  useEffect(() => {
+    setDayInput(schedule ? String(schedule.dayOfMonth) : '');
+  }, [projectId, schedule?.dayOfMonth]);
 
   useEffect(() => {
     if (!projectId || !firestoreEnabled || !db) {
       setLiveTransactions(null);
+      setTransactionsFetchState('ready');
       return;
     }
 
     let isCancelled = false;
+    setTransactionsFetchState('loading');
     const txQuery = query(
       collection(db, getOrgCollectionPath(orgId, 'transactions')),
       where('projectId', '==', projectId),
@@ -93,18 +137,32 @@ export function PortalPayrollPage() {
       .then((snap) => {
         if (isCancelled) return;
         setLiveTransactions(snap.docs.map((doc) => doc.data() as Transaction));
+        setTransactionsFetchState('ready');
       })
       .catch((err) => {
         if (isCancelled) return;
         console.error('[PortalPayrollPage] transactions fetch error:', err);
         toast.error('인건비 지급용 거래 내역을 불러오지 못했습니다');
         setLiveTransactions(null);
+        setTransactionsFetchState('error');
       });
 
     return () => {
       isCancelled = true;
     };
   }, [db, firestoreEnabled, orgId, projectId]);
+
+  useEffect(() => {
+    if (!run || !reviewState) return;
+    if (payrollReviewSnapshotMatches(run, reviewState)) return;
+
+    void savePayrollReview({
+      runId: run.id,
+      ...toPayrollReviewSnapshot(reviewState),
+    }).catch((err) => {
+      console.error('[PortalPayrollPage] payroll review sync error:', err);
+    });
+  }, [reviewState, run, savePayrollReview]);
 
   async function onSave() {
     if (!projectId) return;
@@ -140,6 +198,44 @@ export function PortalPayrollPage() {
     } catch (err: any) {
       console.error(err);
       toast.error(err?.message || '확인 처리에 실패했습니다');
+    }
+  }
+
+  async function onDecideCandidate(txId: string, decision: PayrollCandidateReviewDecision) {
+    if (!run || !reviewState || !portalUser) return;
+    const now = new Date().toISOString();
+    const nextCandidates = reviewState.reviewCandidates.map((candidate) => (
+      candidate.txId === txId
+        ? {
+            ...candidate,
+            decision,
+            decidedAt: now,
+            decidedByUid: portalUser.id,
+            decidedByName: portalUser.name,
+          }
+        : candidate
+    ));
+    const nextReview = resolvePayrollRunReview({
+      run: {
+        ...run,
+        reviewCandidates: nextCandidates,
+      },
+      transactions: projectTransactions,
+      today,
+    });
+
+    setDecisionSavingTxId(txId);
+    try {
+      await savePayrollReview({
+        runId: run.id,
+        ...toPayrollReviewSnapshot(nextReview),
+      });
+      toast.success('인건비 적요 판단을 저장했습니다');
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err?.message || '판단 저장에 실패했습니다');
+    } finally {
+      setDecisionSavingTxId(null);
     }
   }
 
@@ -201,6 +297,237 @@ export function PortalPayrollPage() {
                 </div>
               </div>
             )}
+          </CardContent>
+        </Card>
+      )}
+
+      {run && transactionsFetchState === 'loading' && (
+        <Card data-testid="portal-payroll-review-loading" className="border-border/60 shadow-sm">
+          <CardContent className="p-4">
+            <p className="text-[13px] text-foreground" style={{ fontWeight: 700 }}>인건비 적요 검토</p>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              거래 후보를 불러오는 중입니다. 로딩이 끝나면 PM 1차 검토 카드가 열립니다.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {run && transactionsFetchState === 'error' && (
+        <Card data-testid="portal-payroll-review-fetch-error" className="border-rose-200/60 bg-rose-50/50 shadow-sm">
+          <CardContent className="p-4">
+            <p className="text-[13px] text-foreground" style={{ fontWeight: 700 }}>인건비 적요 검토</p>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              거래 후보를 불러오지 못해 아직 인건비 판단을 저장하지 않았습니다. 잠시 후 다시 시도해 주세요.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {run && reviewState && (
+        <Card data-testid="portal-payroll-review-console" className="border-border/60 shadow-sm">
+          <CardContent className="p-4 space-y-4">
+            <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <SearchCheck className="w-4 h-4 text-teal-600" />
+                  <p className="text-[13px] text-foreground" style={{ fontWeight: 700 }}>인건비 적요 검토</p>
+                  <Badge variant="outline" className="text-[10px]">PM 1차 검토</Badge>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  시스템이 먼저 인건비 의심 거래를 잡고, PM이 통장 적요를 보고 맞음/아님/보류를 판단합니다.
+                </p>
+              </div>
+            </div>
+
+            <div className={`rounded-xl border px-4 py-3 ${
+              reviewState.paidStatus === 'CONFIRMED'
+                ? 'border-emerald-200/70 bg-emerald-50/70'
+                : reviewState.hasMissingCandidate
+                ? 'border-rose-200/70 bg-rose-50/70'
+                : reviewState.needsAdminConfirm
+                  ? 'border-emerald-200/70 bg-emerald-50/70'
+                  : 'border-amber-200/70 bg-amber-50/70'
+            }`}>
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge className={`text-[10px] ${
+                  reviewState.paidStatus === 'CONFIRMED' || reviewState.needsAdminConfirm
+                    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
+                    : getPayrollReviewStatusTone(reviewState.pmReviewStatus)
+                }`}>
+                  {reviewStatusLabel}
+                </Badge>
+                <Badge variant="outline" className="border-white/70 bg-white/80 text-[10px] text-slate-700">
+                  지급 창 {reviewState.windowStart} ~ {reviewState.windowEnd}
+                </Badge>
+              </div>
+              <p className="mt-2 text-[13px] text-foreground" style={{ fontWeight: 700 }}>
+                {reviewState.paidStatus === 'CONFIRMED'
+                  ? '이번 달 인건비 지급이 최종 확정되었습니다'
+                  : reviewState.hasMissingCandidate
+                  ? '이번 달에는 인건비 후보를 찾지 못했습니다'
+                  : reviewState.needsAdminConfirm
+                    ? 'PM 판단이 끝났고 이제 Admin 최종 확정만 남았습니다'
+                    : reviewState.pendingDecisionCount > 0
+                      ? `지금 ${reviewState.pendingDecisionCount}건을 판단해 주세요`
+                      : 'PM 판단이 저장되었습니다'}
+              </p>
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                {reviewState.paidStatus === 'CONFIRMED'
+                  ? 'PM 판단과 Admin 확정이 모두 끝났습니다. 다음 지급 창 전까지는 기준 지급액과 통장 흐름만 점검하면 됩니다.'
+                  : reviewState.hasMissingCandidate
+                  ? '후보 없음은 정상 종료가 아닙니다. 통장내역을 직접 보고 적요를 확인한 뒤 Admin에 알려 주세요.'
+                  : reviewState.needsAdminConfirm
+                    ? '거래 단위 판단은 끝났습니다. Admin이 월 지급 여부를 최종 확정할 때까지 상태를 유지합니다.'
+                    : '원본 적요를 보고 맞음, 아님, 보류 중 하나로 닫아 주세요. 미판단이나 보류가 남아 있으면 Admin이 확정할 수 없습니다.'}
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 text-[11px] md:grid-cols-4">
+                <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2.5">
+                  <p className="text-muted-foreground">후보</p>
+                  <p className="mt-1 text-foreground" style={{ fontWeight: 700 }}>{reviewState.candidateCount}건</p>
+                </div>
+                <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2.5">
+                  <p className="text-muted-foreground">남은 판단</p>
+                  <p className="mt-1 text-foreground" style={{ fontWeight: 700 }}>{reviewState.pendingDecisionCount}건</p>
+                </div>
+                <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2.5">
+                  <p className="text-muted-foreground">인건비 판단</p>
+                  <p className="mt-1 text-foreground" style={{ fontWeight: 700 }}>{reviewState.payrollDecisionCount}건</p>
+                </div>
+                <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2.5">
+                  <p className="text-muted-foreground">지급 상태</p>
+                  <div className="mt-1">
+                    <Badge className={`text-[10px] ${getPayrollPaidStatusTone(reviewState.paidStatus)}`}>
+                      {getPayrollPaidStatusLabel(reviewState.paidStatus)}
+                    </Badge>
+                  </div>
+                </div>
+            </div>
+
+            {reviewState.hasMissingCandidate && (
+              <div className="rounded-xl border border-rose-200/70 bg-rose-50/70 px-4 py-3">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 text-rose-600" />
+                  <div className="min-w-0">
+                    <p className="text-[12px] text-rose-900" style={{ fontWeight: 700 }}>이번 달 인건비 후보가 없습니다</p>
+                    <p className="mt-1 text-[11px] text-rose-800/80">
+                      후보 없음은 정상 종료가 아니라 이상 신호입니다. 통장내역에서 적요를 직접 확인한 뒤 Admin에 알려 주세요.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {reviewState.needsAdminConfirm && (
+              <div className="rounded-xl border border-emerald-200/70 bg-emerald-50/70 px-4 py-3">
+                <div className="flex items-start gap-2">
+                  <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600" />
+                  <div className="min-w-0">
+                    <p className="text-[12px] text-emerald-900" style={{ fontWeight: 700 }}>Admin 최종 확정 대기</p>
+                    <p className="mt-1 text-[11px] text-emerald-800/80">
+                      PM 1차 검토가 끝났습니다. 이제 Admin이 월 지급 확정만 하면 됩니다.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {reviewRows.length === 0 ? (
+              <div className="rounded-xl border border-border/60 bg-muted/20 px-4 py-4 text-[12px] text-muted-foreground">
+                <div className="flex items-start gap-2">
+                  <CircleHelp className="mt-0.5 h-4 w-4" />
+                  <div className="min-w-0">
+                    <p className="text-foreground" style={{ fontWeight: 700 }}>검토할 후보가 아직 없습니다</p>
+                    <p className="mt-1">
+                      지급 창 안에서는 통장 적요를 직접 확인해야 합니다. 통장내역을 열어 월 급여/인건비 지급 흔적을 먼저 점검해 주세요.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {reviewRows.map(({ candidate, tx }) => {
+                  return (
+                    <div key={candidate.txId} className="rounded-xl border border-border/60 bg-muted/20 px-4 py-3">
+                      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                        <div className="min-w-0 space-y-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-[12px] text-foreground" style={{ fontWeight: 700 }}>
+                              {tx?.counterparty || candidate.txId}
+                            </p>
+                            <Badge variant="outline" className={`text-[10px] ${getPayrollDecisionTone(candidate.decision)}`}>
+                              {getPayrollDecisionLabel(candidate.decision)}
+                            </Badge>
+                            {candidate.signals.map((signal) => (
+                              <Badge key={signal} variant="secondary" className="text-[10px]">
+                                {signal.replace('cashflow:', '항목 ').replace('memo:', '메모 ').replace('counterparty:', '거래처 ')}
+                              </Badge>
+                            ))}
+                          </div>
+                          <p className="text-[11px] text-muted-foreground">
+                            {tx?.dateTime || '-'} · {tx ? `${fmtShort(tx.amounts.bankAmount)}원` : '-'}
+                          </p>
+                          <p className="text-[11px] text-foreground">
+                            {tx?.memo?.trim() ? tx.memo : '적요 없음'}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 flex-wrap items-center gap-2">
+                          <Button
+                            size="sm"
+                            className={`h-8 text-[11px] ${
+                              candidate.decision === 'PAYROLL'
+                                ? 'bg-emerald-600 text-white hover:bg-emerald-600/90'
+                                : ''
+                            }`}
+                            variant={candidate.decision === 'PAYROLL' ? 'default' : 'outline'}
+                            disabled={decisionSavingTxId === candidate.txId}
+                            onClick={() => onDecideCandidate(candidate.txId, 'PAYROLL')}
+                          >
+                            맞음
+                          </Button>
+                          <Button
+                            size="sm"
+                            className={`h-8 text-[11px] ${
+                              candidate.decision === 'NOT_PAYROLL'
+                                ? 'border-rose-600 bg-rose-600 text-white hover:bg-rose-600/90 hover:text-white'
+                                : ''
+                            }`}
+                            variant={candidate.decision === 'NOT_PAYROLL' ? 'default' : 'outline'}
+                            disabled={decisionSavingTxId === candidate.txId}
+                            onClick={() => onDecideCandidate(candidate.txId, 'NOT_PAYROLL')}
+                          >
+                            아님
+                          </Button>
+                          <Button
+                            size="sm"
+                            className={`h-8 text-[11px] ${
+                              candidate.decision === 'HOLD'
+                                ? 'border-amber-500 bg-amber-500 text-white hover:bg-amber-500/90 hover:text-white'
+                                : ''
+                            }`}
+                            variant={candidate.decision === 'HOLD' ? 'default' : 'outline'}
+                            disabled={decisionSavingTxId === candidate.txId}
+                            onClick={() => onDecideCandidate(candidate.txId, 'HOLD')}
+                          >
+                            보류
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Button size="sm" className="h-8 text-[11px] gap-1.5" onClick={() => navigate('/portal/bank-statements')}>
+                통장내역 열기 <ArrowRight className="h-3.5 w-3.5" />
+              </Button>
+              <Button size="sm" variant="outline" className="h-8 text-[11px] gap-1.5" onClick={() => navigate('/portal/weekly-expenses')}>
+                사업비 입력(주간) 열기 <ArrowRight className="h-3.5 w-3.5" />
+              </Button>
+            </div>
           </CardContent>
         </Card>
       )}
@@ -281,7 +608,11 @@ export function PortalPayrollPage() {
               </div>
               <div className="p-3 rounded-lg bg-muted/30 border border-border/50">
                 <p className="text-muted-foreground">지급 상태</p>
-                <p style={{ fontWeight: 800 }} className="mt-1">{run.paidStatus}</p>
+                <div className="mt-1">
+                  <Badge className={`text-[10px] ${getPayrollPaidStatusTone(run.paidStatus)}`}>
+                    {getPayrollPaidStatusLabel(run.paidStatus)}
+                  </Badge>
+                </div>
               </div>
             </div>
             {!activeQueueItem && (

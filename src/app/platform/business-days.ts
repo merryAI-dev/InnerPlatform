@@ -26,13 +26,24 @@ export function subtractBusinessDays(date: string, businessDays: number): string
   if (!Number.isInteger(businessDays) || businessDays < 0) {
     throw new Error(`businessDays must be a non-negative integer (got ${businessDays})`);
   }
+  return addBusinessDays(date, -businessDays);
+}
+
+export function addBusinessDays(date: string, businessDays: number): string {
+  if (!Number.isInteger(businessDays)) {
+    throw new Error(`businessDays must be an integer (got ${businessDays})`);
+  }
+  if (businessDays === 0) return date;
 
   let cursor = toUtcDate(date);
-  let remaining = businessDays;
+  let remaining = Math.abs(businessDays);
+  const step = businessDays > 0 ? 1 : -1;
+
   while (remaining > 0) {
-    cursor = new Date(cursor.getTime() - 24 * 60 * 60 * 1000);
+    cursor = new Date(cursor.getTime() + step * 24 * 60 * 60 * 1000);
     if (!isWeekendUtc(cursor)) remaining -= 1;
   }
+
   return formatIsoDateUtc(cursor);
 }
 

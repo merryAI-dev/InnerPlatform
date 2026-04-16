@@ -23,6 +23,7 @@ import { findWeekForDate, getMonthMondayWeeks } from '../../platform/cashflow-we
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { isPayrollLiquidityRiskStatus, resolvePayrollLiquidityQueue } from '../../platform/payroll-liquidity';
 import { resolveAdminMonitoringIssues } from '../../platform/admin-monitoring';
+import { resolvePayrollReviewQueue } from '../../platform/payroll-review';
 
 function MonitoringToolCard(props: {
   icon: typeof BarChart3;
@@ -110,6 +111,26 @@ export function DashboardPage() {
       today,
     }).filter((item) => isPayrollLiquidityRiskStatus(item.status)).length
   ), [projects, runs, transactions, today]);
+  const payrollReviewQueue = useMemo(() => (
+    resolvePayrollReviewQueue({
+      projects,
+      runs,
+      transactions,
+      today,
+    })
+  ), [projects, runs, transactions, today]);
+
+  const payrollReviewPendingCount = useMemo(() => (
+    payrollReviewQueue.filter((item) => item.needsPmReview).length
+  ), [payrollReviewQueue]);
+
+  const payrollMissingCandidateCount = useMemo(() => (
+    payrollReviewQueue.filter((item) => item.hasMissingCandidate).length
+  ), [payrollReviewQueue]);
+
+  const payrollFinalUnconfirmedCount = useMemo(() => (
+    payrollReviewQueue.filter((item) => item.needsAdminConfirm).length
+  ), [payrollReviewQueue]);
 
   const missingPmCount = useMemo(() => {
     const monthWeeks = getMonthMondayWeeks(yearMonth);
@@ -153,10 +174,18 @@ export function DashboardPage() {
     }).summary.varianceProjectCount
   ), [cashflowWeeks, projects, transactions, yearMonth]);
 
+  const payrollMonitoringCount = payrollRiskCount
+    + payrollReviewPendingCount
+    + payrollMissingCandidateCount
+    + payrollFinalUnconfirmedCount;
+
   const monitoringIssues = useMemo(() => resolveAdminMonitoringIssues({
     dataSourceHealthy: dataSource === 'firestore',
     missingEvidenceCount,
     payrollRiskCount,
+    payrollReviewPendingCount,
+    payrollMissingCandidateCount,
+    payrollFinalUnconfirmedCount,
     participationRiskCount,
     pendingApprovalCount,
     rejectedTransactionCount,
@@ -171,6 +200,9 @@ export function DashboardPage() {
     missingPmCount,
     participationRiskCount,
     payrollRiskCount,
+    payrollReviewPendingCount,
+    payrollMissingCandidateCount,
+    payrollFinalUnconfirmedCount,
     pendingApprovalCount,
     rejectedTransactionCount,
     staleProjectCount,
@@ -187,6 +219,16 @@ export function DashboardPage() {
       to: '/cashflow',
       accentClass: 'bg-sky-50 text-sky-600 dark:bg-sky-950/40 dark:text-sky-300',
       icon: BarChart3,
+    },
+    {
+      key: 'payroll',
+      label: '인건비 관제',
+      detail: `검토대기 ${payrollReviewPendingCount} · 후보없음 ${payrollMissingCandidateCount} · 최종미확정 ${payrollFinalUnconfirmedCount}`,
+      count: payrollMonitoringCount,
+      countLabel: '이상',
+      to: '/payroll',
+      accentClass: 'bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-300',
+      icon: Clock,
     },
     {
       key: 'evidence',
