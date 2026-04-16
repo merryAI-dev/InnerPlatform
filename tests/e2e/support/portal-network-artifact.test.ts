@@ -37,8 +37,10 @@ describe('portal network artifact file output', () => {
   it('keeps the Playwright harness on localhost origin and preserves artifact dir support', () => {
     const configSource = readFileSync(new URL('../../../playwright.harness.config.mjs', import.meta.url), 'utf8');
 
-    expect(configSource).toContain("const PORTAL_ORIGIN = 'http://localhost:4173'");
-    expect(configSource).toContain("const PORTAL_HOST = 'localhost'");
+    expect(configSource).toContain("const DEFAULT_PORTAL_HOST = 'localhost';");
+    expect(configSource).toContain("const DEFAULT_PORTAL_PORT = '4173';");
+    expect(configSource).toContain('const PORTAL_HOST = process.env.PORTAL_HARNESS_HOST || DEFAULT_PORTAL_HOST;');
+    expect(configSource).toContain('const PORTAL_PORT = process.env.PORTAL_HARNESS_PORT || DEFAULT_PORTAL_PORT;');
     expect(configSource).toContain('process.env.PORTAL_NETWORK_ARTIFACT_DIR ||= path.resolve');
     expect(configSource).not.toContain('127.0.0.1');
   });

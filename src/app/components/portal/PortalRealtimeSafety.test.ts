@@ -20,7 +20,15 @@ describe('portal realtime safety', () => {
     expect(portalDashboardSource).not.toContain('query(');
     expect(portalDashboardSource).not.toContain('where(');
     expect(portalDashboardSource).not.toContain('onSnapshot(');
-    expect(portalDashboardSource).toContain('transactions');
+  });
+
+  it('keeps the portal dashboard summary-first and raw-surface free', () => {
+    expect(portalDashboardSource).not.toMatch(/\bweeklySubmissionStatuses\b/);
+    expect(portalDashboardSource).not.toMatch(/\bprojects\b/);
+    expect(portalDashboardSource).not.toMatch(/\btransactions\b/);
+    expect(portalDashboardSource).not.toMatch(/\bgetProjectAlerts\b/);
+    expect(portalDashboardSource).not.toMatch(/\bruns\b/);
+    expect(portalDashboardSource).not.toMatch(/\bmonthlyCloses\b/);
   });
 
   it('does not fan out raw transaction reads from the portal payroll page', () => {

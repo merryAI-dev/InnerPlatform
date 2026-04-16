@@ -16,6 +16,18 @@ describe('portal entry read boundary', () => {
     expect(dashboardSource).toContain('createPlatformApiClient(import.meta.env)');
     expect(dashboardSource).toContain('fetchPortalDashboardSummaryViaBff');
     expect(dashboardSource).toContain('dashboardSummary');
+    const portalStoreDestructure = dashboardSource.match(
+      /const\s*\{([\s\S]*?)\}\s*=\s*usePortalStore\(\);/,
+    );
+
+    expect(portalStoreDestructure?.[1]).toBeDefined();
+    const destructuredPortalStoreFields = portalStoreDestructure?.[1]
+      ?.split(',')
+      .map((field) => field.trim())
+      .filter(Boolean)
+      .sort();
+
+    expect(destructuredPortalStoreFields).toEqual(['isLoading', 'myProject', 'portalUser']);
   });
 
   it('hydrates payroll surface from the portal payroll summary BFF contract', () => {

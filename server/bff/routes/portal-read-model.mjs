@@ -4,7 +4,7 @@ import {
   resolvePortalEntryRegistrationState,
   selectPortalEntryProjects,
 } from './portal-entry.mjs';
-import { addDays, getSeoulTodayIso } from '../payroll-worker.mjs';
+import { addDays, addMonthsToYearMonth, getSeoulTodayIso } from '../payroll-worker.mjs';
 
 function pad2(value) {
   return String(value).padStart(2, '0');
@@ -105,6 +105,9 @@ function normalizeProjectSummary(project) {
     department: readOptionalText(value.department) || undefined,
     status: readOptionalText(value.status) || undefined,
     type: readOptionalText(value.type) || undefined,
+    settlementType: readOptionalText(value.settlementType) || undefined,
+    basis: readOptionalText(value.basis) || undefined,
+    contractAmount: Number.isFinite(Number(value.contractAmount)) ? Number(value.contractAmount) : undefined,
   };
 }
 
@@ -121,6 +124,9 @@ function normalizeWeeklySubmissionStatus(status) {
     expenseReviewPendingCount: Number.isFinite(Number(value.expenseReviewPendingCount))
       ? Math.max(0, Number(value.expenseReviewPendingCount))
       : 0,
+    projectionEditedAt: readOptionalText(value.projectionEditedAt) || undefined,
+    projectionUpdatedAt: readOptionalText(value.projectionUpdatedAt) || undefined,
+    expenseUpdatedAt: readOptionalText(value.expenseUpdatedAt) || undefined,
     updatedAt: readOptionalText(value.updatedAt) || undefined,
   };
 }
@@ -193,7 +199,7 @@ function resolveWeeklyAccountingProductStatus(snapshot) {
   };
 }
 
-function resolvePortalAccountingStatus(status, currentWeek) {
+function resolvePortalAccountingStatus(status, currentWeek, latestProjectionUpdatedAt) {
   const snapshot = buildWeeklyAccountingSnapshot(status);
   const productStatus = resolveWeeklyAccountingProductStatus(snapshot);
   return {
@@ -203,7 +209,7 @@ function resolvePortalAccountingStatus(status, currentWeek) {
       detail: currentWeek
         ? `${currentWeek.weekNo}주차 · ${snapshot.projectionDone ? '제출 완료' : '미제출'}`
         : '이번 주 주차를 찾지 못했습니다.',
-      latestUpdatedAt: status?.updatedAt || status?.projectionUpdatedAt || undefined,
+      latestUpdatedAt: latestProjectionUpdatedAt,
     },
     expense: {
       label: productStatus.label,
@@ -213,6 +219,13 @@ function resolvePortalAccountingStatus(status, currentWeek) {
       tone: productStatus.tone,
     },
   };
+}
+
+function findLatestProjectionUpdatedAt(statuses) {
+  return (Array.isArray(statuses) ? statuses : [])
+    .map((status) => normalizeWeeklySubmissionStatus(status).projectionUpdatedAt)
+    .filter(Boolean)
+    .sort((left, right) => String(right).localeCompare(String(left)))[0];
 }
 
 function resolvePayrollLiquidityStatus({
@@ -417,6 +430,123 @@ function chooseActiveExpenseSheet(expenseSheets) {
   return expenseSheets.find((sheet) => sheet.id === 'default') || expenseSheets[0];
 }
 
+function formatShortAmount(value) {
+  const amount = Number.isFinite(Number(value)) ? Number(value) : 0;
+  const abs = Math.abs(amount);
+  if (abs >= 1e9) return `${(amount / 1e8).toFixed(0)}억`;
+  if (abs >= 1e8) return `${(amount / 1e8).toFixed(2)}억`;
+  if (abs >= 1e4) return `${Math.round(amount / 1e4).toLocaleString('ko-KR')}만`;
+  return amount.toLocaleString('ko-KR');
+}
+
+function sumProjectBankAmounts(transactions, projectId, direction) {
+  return (Array.isArray(transactions) ? transactions : [])
+    .filter((tx) => readOptionalText(tx?.projectId) === projectId && readOptionalText(tx?.direction) === direction)
+    .reduce((sum, tx) => {
+      const bankAmount = Number.isFinite(Number(tx?.amounts?.bankAmount)) ? Number(tx.amounts.bankAmount) : 0;
+      return sum + bankAmount;
+    }, 0);
+}
+
+function buildDashboardFinanceSummaryItems({ project, transactions }) {
+  const totalIn = sumProjectBankAmounts(transactions, project.id, 'IN');
+  const totalOut = sumProjectBankAmounts(transactions, project.id, 'OUT');
+  const balance = totalIn - totalOut;
+  const contractAmount = Number.isFinite(Number(project?.contractAmount)) ? Number(project.contractAmount) : 0;
+  const burnRate = contractAmount > 0 ? totalOut / contractAmount : 0;
+
+  return [
+    { label: '총 입금', value: formatShortAmount(totalIn) },
+    { label: '총 출금', value: formatShortAmount(totalOut) },
+    { label: '잔액', value: formatShortAmount(balance) },
+    { label: '소진율', value: `${(burnRate * 100).toFixed(1)}%` },
+  ];
+}
+
+function buildDashboardSubmissionRows({ projects, weeklyStatuses, currentWeek }) {
+  if (!currentWeek) return [];
+
+  const statusMap = new Map(
+    (Array.isArray(weeklyStatuses) ? weeklyStatuses : []).map((status) => [
+      `${status.projectId}-${status.yearMonth}-w${status.weekNo}`,
+      status,
+    ]),
+  );
+
+  return (Array.isArray(projects) ? projects : []).map((project) => {
+    const normalizedProject = normalizeProjectSummary(project);
+    const status = statusMap.get(`${normalizedProject.id}-${currentWeek.yearMonth}-w${currentWeek.weekNo}`);
+    const snapshot = buildWeeklyAccountingSnapshot(status);
+    const expenseStatus = resolveWeeklyAccountingProductStatus(snapshot);
+
+    return {
+      id: normalizedProject.id,
+      name: normalizedProject.name,
+      shortName: normalizedProject.shortName || normalizedProject.id,
+      projectionInputLabel: snapshot.projectionEdited ? '입력됨' : '미입력',
+      projectionDoneLabel: snapshot.projectionDone ? '제출 완료' : '미완료',
+      expenseLabel: expenseStatus.label,
+      expenseTone: expenseStatus.tone === 'muted' ? 'neutral' : expenseStatus.tone,
+      latestProjectionUpdatedAt: status?.projectionUpdatedAt || status?.projectionEditedAt || status?.updatedAt,
+    };
+  });
+}
+
+function buildDashboardHrAlertPreview({ alerts, projectId }) {
+  const visibleAlerts = (Array.isArray(alerts) ? alerts : [])
+    .filter((alert) => readOptionalText(alert?.projectId) === projectId && !Boolean(alert?.acknowledged))
+    .sort((a, b) => String(b?.createdAt || '').localeCompare(String(a?.createdAt || '')));
+
+  return {
+    count: visibleAlerts.length,
+    items: visibleAlerts.slice(0, 3).map((alert) => ({
+      id: readOptionalText(alert?.id),
+      employeeName: readOptionalText(alert?.employeeName) || '-',
+      eventType: readOptionalText(alert?.eventType) || 'UNKNOWN',
+      effectiveDate: readOptionalText(alert?.effectiveDate) || '',
+      projectId,
+    })),
+    overflowCount: Math.max(0, visibleAlerts.length - 3),
+  };
+}
+
+function buildDashboardNoticeSummary({ projectId, todayIso, payrollRuns, monthlyCloses, hrAlerts }) {
+  const yearMonth = typeof todayIso === 'string' ? todayIso.slice(0, 7) : '';
+  const previousYearMonth = /^\d{4}-\d{2}$/.test(yearMonth)
+    ? addMonthsToYearMonth(yearMonth, -1)
+    : '';
+  const payrollRun = (Array.isArray(payrollRuns) ? payrollRuns : []).find((run) => (
+    readOptionalText(run?.projectId) === projectId
+    && readOptionalText(run?.yearMonth) === yearMonth
+  )) || null;
+  const monthlyClose = (Array.isArray(monthlyCloses) ? monthlyCloses : []).find((close) => (
+    readOptionalText(close?.projectId) === projectId
+    && readOptionalText(close?.yearMonth) === previousYearMonth
+  )) || null;
+  const hrAlertPreview = buildDashboardHrAlertPreview({
+    alerts: hrAlerts,
+    projectId,
+  });
+
+  return {
+    payrollAck: payrollRun && todayIso >= readOptionalText(payrollRun.noticeDate) && !Boolean(payrollRun.acknowledged)
+      ? {
+          runId: readOptionalText(payrollRun.id),
+          plannedPayDate: readOptionalText(payrollRun.plannedPayDate),
+          noticeDate: readOptionalText(payrollRun.noticeDate),
+        }
+      : null,
+    monthlyCloseAck: monthlyClose && readOptionalText(monthlyClose.status) === 'DONE' && !Boolean(monthlyClose.acknowledged)
+      ? {
+          closeId: readOptionalText(monthlyClose.id),
+          yearMonth: readOptionalText(monthlyClose.yearMonth),
+          doneAt: readOptionalText(monthlyClose.doneAt) || undefined,
+        }
+      : null,
+    hrAlerts: hrAlertPreview,
+  };
+}
+
 export function buildPortalDashboardSummary(input) {
   const project = normalizeProjectSummary(input.project);
   const currentWeek = resolveCurrentCashflowWeek(input.todayIso || getSeoulTodayIso());
@@ -427,9 +557,19 @@ export function buildPortalDashboardSummary(input) {
   const currentStatus = currentWeek
     ? projectStatuses.find((status) => status.yearMonth === currentWeek.yearMonth && status.weekNo === currentWeek.weekNo)
     : undefined;
+  const latestProjectionUpdatedAt = readOptionalText(input.projectionLatestUpdatedAt)
+    || findLatestProjectionUpdatedAt(input.projectWeeklySubmissionStatuses)
+    || findLatestProjectionUpdatedAt(projectStatuses);
+  const accountingStatus = resolvePortalAccountingStatus(currentStatus, currentWeek, latestProjectionUpdatedAt);
   const payrollRiskCount = Math.max(0, Number(input.payrollRiskCount) || 0);
   const hrAlertCount = Math.max(0, Number(input.hrAlertCount) || 0);
   const visibleProjects = Math.max(0, Number(input.visibleProjects) || 0);
+  const orderedProjects = [
+    project,
+    ...(Array.isArray(input.projects) ? input.projects : [])
+      .map((entry) => normalizeProjectSummary(entry))
+      .filter((entry) => entry.id && entry.id !== project.id),
+  ];
   const visibleIssues = [
     {
       label: '미확인 공지',
@@ -444,6 +584,12 @@ export function buildPortalDashboardSummary(input) {
       to: '/portal/payroll',
     },
   ].filter((item) => item.count > 0);
+  const payrollQueue = resolveProjectPayrollLiquidity({
+    project,
+    runs: Array.isArray(input.payrollRuns) ? input.payrollRuns : [],
+    transactions: Array.isArray(input.transactions) ? input.transactions : [],
+    today: input.todayIso || getSeoulTodayIso(),
+  });
 
   return {
     project,
@@ -453,9 +599,40 @@ export function buildPortalDashboardSummary(input) {
       hrAlertCount,
       currentWeekLabel: currentWeek ? `${currentWeek.weekNo}주차` : '-',
     },
+    currentWeek: currentWeek
+      ? {
+          label: currentWeek.label,
+          weekStart: currentWeek.weekStart,
+          weekEnd: currentWeek.weekEnd,
+          yearMonth: currentWeek.yearMonth,
+          weekNo: currentWeek.weekNo,
+        }
+      : null,
     surface: {
-      ...resolvePortalAccountingStatus(currentStatus, currentWeek),
+      ...accountingStatus,
       visibleIssues,
+    },
+    financeSummaryItems: buildDashboardFinanceSummaryItems({
+      project: input.project && typeof input.project === 'object'
+        ? { ...(input.project || {}), id: project.id }
+        : project,
+      transactions: input.transactions,
+    }),
+    submissionRows: buildDashboardSubmissionRows({
+      projects: orderedProjects,
+      weeklyStatuses,
+      currentWeek,
+    }),
+    notices: buildDashboardNoticeSummary({
+      projectId: project.id,
+      todayIso: input.todayIso || getSeoulTodayIso(),
+      payrollRuns: input.payrollRuns,
+      monthlyCloses: input.monthlyCloses,
+      hrAlerts: input.hrAlerts,
+    }),
+    payrollQueue: {
+      item: payrollQueue[0] || null,
+      riskItems: payrollQueue.filter((item) => item.status === 'insufficient_balance' || item.status === 'payment_unconfirmed'),
     },
   };
 }
@@ -622,16 +799,18 @@ async function loadWeeklySubmissionStatuses(db, tenantId, projectId) {
 }
 
 async function loadPayrollData(db, tenantId, projectId) {
-  const [scheduleSnap, runsSnap, txSnap] = await Promise.all([
+  const [scheduleSnap, runsSnap, txSnap, closeSnap] = await Promise.all([
     db.doc(`orgs/${tenantId}/payroll_schedules/${projectId}`).get(),
     db.collection(`orgs/${tenantId}/payroll_runs`).where('projectId', '==', projectId).get(),
     db.collection(`orgs/${tenantId}/transactions`).where('projectId', '==', projectId).get(),
+    db.collection(`orgs/${tenantId}/monthly_closes`).where('projectId', '==', projectId).get(),
   ]);
 
   return {
     payrollSchedule: scheduleSnap.exists ? { id: scheduleSnap.id, ...(scheduleSnap.data() || {}) } : null,
     payrollRuns: runsSnap.docs.map((doc) => ({ id: doc.id, ...(doc.data() || {}) })),
     transactions: txSnap.docs.map((doc) => ({ id: doc.id, ...(doc.data() || {}) })),
+    monthlyCloses: closeSnap.docs.map((doc) => ({ id: doc.id, ...(doc.data() || {}) })),
   };
 }
 
@@ -652,8 +831,18 @@ async function loadWeeklyExpenseData(db, tenantId, projectId) {
   };
 }
 
-function readHrAnnouncementCount(announcements) {
-  return announcements.filter((announcement) => !Boolean(announcement.resolved)).length;
+async function loadWeeklySubmissionStatusesForProjects(db, tenantId, projectIds, currentWeek) {
+  const uniqueProjectIds = Array.from(new Set((Array.isArray(projectIds) ? projectIds : []).filter(Boolean)));
+  if (!uniqueProjectIds.length || !currentWeek) return [];
+
+  const statusSnap = await db.collection(`orgs/${tenantId}/weekly_submission_status`)
+    .where('yearMonth', '==', currentWeek.yearMonth)
+    .where('weekNo', '==', currentWeek.weekNo)
+    .get();
+  const visibleProjectIds = new Set(uniqueProjectIds);
+  return statusSnap.docs
+    .map((doc) => ({ id: doc.id, ...(doc.data() || {}) }))
+    .filter((status) => visibleProjectIds.has(readOptionalText(status?.projectId)));
 }
 
 export function mountPortalReadModelRoutes(app, { db }) {
@@ -666,24 +855,55 @@ export function mountPortalReadModelRoutes(app, { db }) {
       actorId,
       actorRole,
     );
-    const activeProjectDoc = activeProjectId
-      ? await db.doc(`orgs/${tenantId}/projects/${activeProjectId}`).get()
+    const requestedProjectId = readOptionalText(req.query?.projectId);
+    const visibleProjectMap = new Map(selectedProjects.projects.map((project) => [project.id, project]));
+    if (requestedProjectId && !visibleProjectMap.has(requestedProjectId)) {
+      throw createHttpError(403, '선택 가능한 사업이 아닙니다.', 'project_forbidden');
+    }
+
+    const targetProjectId = requestedProjectId || activeProjectId;
+    const targetProjectFallback = (targetProjectId ? visibleProjectMap.get(targetProjectId) : null) || activeProject || null;
+    const activeProjectDoc = targetProjectId
+      ? await db.doc(`orgs/${tenantId}/projects/${targetProjectId}`).get()
       : null;
     const currentProject = activeProjectDoc?.exists
       ? { id: activeProjectDoc.id, ...(activeProjectDoc.data() || {}) }
-      : activeProject || null;
+      : targetProjectFallback;
     if (!currentProject) {
-      throw createHttpError(404, '활성 사업을 찾을 수 없습니다.', 'project_not_found');
+      throw createHttpError(
+        404,
+        requestedProjectId ? '선택한 사업을 찾을 수 없습니다.' : '활성 사업을 찾을 수 없습니다.',
+        'project_not_found',
+      );
     }
 
     const todayIso = getSeoulTodayIso();
-    const weeklyStatuses = await loadWeeklySubmissionStatuses(db, tenantId, currentProject.id);
-    const payrollData = await loadPayrollData(db, tenantId, currentProject.id);
-    const hrAnnouncementsSnap = await db.collection(`orgs/${tenantId}/hr_announcements`).get();
-    const hrAlertCount = readHrAnnouncementCount(hrAnnouncementsSnap.docs.map((doc) => ({ id: doc.id, ...(doc.data() || {}) })));
+    const dashboardProjectIds = Array.from(new Set([
+      currentProject.id,
+      ...selectedProjects.projects.map((project) => project.id).filter(Boolean),
+    ]));
+    const currentWeek = resolveCurrentCashflowWeek(todayIso);
+    const [weeklyStatuses, currentProjectWeeklyStatuses, payrollData, hrAlertsSnap] = await Promise.all([
+      loadWeeklySubmissionStatusesForProjects(db, tenantId, dashboardProjectIds, currentWeek),
+      loadWeeklySubmissionStatuses(db, tenantId, currentProject.id),
+      loadPayrollData(db, tenantId, currentProject.id),
+      db.collection(`orgs/${tenantId}/project_change_alerts`).where('projectId', '==', currentProject.id).get(),
+    ]);
+    const hrAlerts = hrAlertsSnap.docs.map((doc) => ({ id: doc.id, ...(doc.data() || {}) }));
+    const hrAlertCount = buildDashboardHrAlertPreview({
+      alerts: hrAlerts,
+      projectId: currentProject.id,
+    }).count;
     const dashboard = buildPortalDashboardSummary({
       project: currentProject,
+      projects: selectedProjects.projects,
       todayIso,
+      transactions: payrollData.transactions,
+      payrollRuns: payrollData.payrollRuns,
+      monthlyCloses: payrollData.monthlyCloses,
+      hrAlerts,
+      projectWeeklySubmissionStatuses: currentProjectWeeklyStatuses,
+      projectionLatestUpdatedAt: findLatestProjectionUpdatedAt(currentProjectWeeklyStatuses),
       weeklySubmissionStatuses: weeklyStatuses,
       payrollRiskCount: resolveProjectPayrollLiquidity({
         project: normalizeProjectSummary(currentProject),

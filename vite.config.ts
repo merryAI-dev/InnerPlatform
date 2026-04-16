@@ -4,10 +4,14 @@ import path from 'path'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import {
+  buildDevHarnessPortalBankStatementsSummary,
+  buildDevHarnessPortalDashboardSummary,
   buildDevHarnessPortalEntryContext,
   buildDevHarnessPortalOnboardingContext,
+  buildDevHarnessPortalPayrollSummary,
   buildDevHarnessPortalRegistrationResult,
   buildDevHarnessPortalSessionProjectResult,
+  buildDevHarnessPortalWeeklyExpensesSummary,
 } from './src/app/platform/dev-harness-portal-api'
 
 function getVendorChunkName(id: string): string | undefined {
@@ -89,6 +93,120 @@ function writeJson(res: ServerResponse, statusCode: number, payload: unknown) {
   res.end(JSON.stringify(payload))
 }
 
+export async function resolveDevHarnessPortalApiResponse(params: {
+  enabled: boolean
+  method: string
+  url: string
+  actorId: string
+  actorRole: string
+  readBody: () => Promise<unknown>
+}): Promise<{
+  handled: boolean
+  statusCode?: number
+  payload?: unknown
+}> {
+  const method = String(params.method || 'GET').toUpperCase()
+  const requestUrl = new URL(params.url || '/', 'http://localhost')
+  const pathName = requestUrl.pathname
+
+  if (!params.enabled || !pathName.startsWith('/api/v1/portal/')) {
+    return { handled: false }
+  }
+
+  try {
+    if (method === 'GET' && pathName === '/api/v1/portal/entry-context') {
+      return {
+        handled: true,
+        statusCode: 200,
+        payload: buildDevHarnessPortalEntryContext({ actorId: params.actorId, actorRole: params.actorRole }),
+      }
+    }
+
+    if (method === 'GET' && pathName === '/api/v1/portal/onboarding-context') {
+      return {
+        handled: true,
+        statusCode: 200,
+        payload: buildDevHarnessPortalOnboardingContext({ actorRole: params.actorRole }),
+      }
+    }
+
+    if (method === 'GET' && pathName === '/api/v1/portal/dashboard-summary') {
+      return {
+        handled: true,
+        statusCode: 200,
+        payload: buildDevHarnessPortalDashboardSummary({
+          actorId: params.actorId,
+          actorRole: params.actorRole,
+          projectId: requestUrl.searchParams.get('projectId') || '',
+        }),
+      }
+    }
+
+    if (method === 'GET' && pathName === '/api/v1/portal/payroll-summary') {
+      return {
+        handled: true,
+        statusCode: 200,
+        payload: buildDevHarnessPortalPayrollSummary({
+          actorId: params.actorId,
+          actorRole: params.actorRole,
+        }),
+      }
+    }
+
+    if (method === 'GET' && pathName === '/api/v1/portal/weekly-expenses-summary') {
+      return {
+        handled: true,
+        statusCode: 200,
+        payload: buildDevHarnessPortalWeeklyExpensesSummary({
+          actorId: params.actorId,
+          actorRole: params.actorRole,
+        }),
+      }
+    }
+
+    if (method === 'GET' && pathName === '/api/v1/portal/bank-statements-summary') {
+      return {
+        handled: true,
+        statusCode: 200,
+        payload: buildDevHarnessPortalBankStatementsSummary({
+          actorId: params.actorId,
+          actorRole: params.actorRole,
+        }),
+      }
+    }
+
+    if (method === 'POST' && pathName === '/api/v1/portal/session-project') {
+      const body = await params.readBody() as { projectId?: string }
+      return {
+        handled: true,
+        statusCode: 200,
+        payload: buildDevHarnessPortalSessionProjectResult(body.projectId || ''),
+      }
+    }
+
+    if (method === 'POST' && pathName === '/api/v1/portal/registration') {
+      const body = await params.readBody() as { projectId?: string; projectIds?: string[] }
+      return {
+        handled: true,
+        statusCode: 200,
+        payload: buildDevHarnessPortalRegistrationResult(body),
+      }
+    }
+  } catch (error) {
+    const code = error instanceof Error ? error.message : 'dev_harness_portal_api_error'
+    return {
+      handled: true,
+      statusCode: 400,
+      payload: {
+        error: code,
+        message: code,
+      },
+    }
+  }
+
+  return { handled: false }
+}
+
 function devHarnessPortalApiPlugin(): PluginOption {
   return {
     name: 'dev-harness-portal-api',
@@ -96,48 +214,24 @@ function devHarnessPortalApiPlugin(): PluginOption {
       server.middlewares.use(async (req, res, next) => {
         const enabled = String(process.env.VITE_DEV_AUTH_HARNESS_ENABLED || '').trim().toLowerCase() === 'true'
         const method = String(req.method || 'GET').toUpperCase()
-        const pathName = String(req.url || '').split('?')[0]
 
-        if (!enabled || !pathName.startsWith('/api/v1/portal/')) {
+        const actorId = typeof req.headers['x-actor-id'] === 'string' ? req.headers['x-actor-id'] : ''
+        const actorRole = typeof req.headers['x-actor-role'] === 'string' ? req.headers['x-actor-role'] : ''
+        const response = await resolveDevHarnessPortalApiResponse({
+          enabled,
+          method,
+          url: req.url || '/',
+          actorId,
+          actorRole,
+          readBody: async () => readRequestBody(req),
+        })
+
+        if (!response.handled) {
           next()
           return
         }
 
-        const actorId = typeof req.headers['x-actor-id'] === 'string' ? req.headers['x-actor-id'] : ''
-        const actorRole = typeof req.headers['x-actor-role'] === 'string' ? req.headers['x-actor-role'] : ''
-
-        try {
-          if (method === 'GET' && pathName === '/api/v1/portal/entry-context') {
-            writeJson(res, 200, buildDevHarnessPortalEntryContext({ actorId, actorRole }))
-            return
-          }
-
-          if (method === 'GET' && pathName === '/api/v1/portal/onboarding-context') {
-            writeJson(res, 200, buildDevHarnessPortalOnboardingContext({ actorRole }))
-            return
-          }
-
-          if (method === 'POST' && pathName === '/api/v1/portal/session-project') {
-            const body = await readRequestBody(req) as { projectId?: string }
-            writeJson(res, 200, buildDevHarnessPortalSessionProjectResult(body.projectId || ''))
-            return
-          }
-
-          if (method === 'POST' && pathName === '/api/v1/portal/registration') {
-            const body = await readRequestBody(req) as { projectId?: string; projectIds?: string[] }
-            writeJson(res, 200, buildDevHarnessPortalRegistrationResult(body))
-            return
-          }
-        } catch (error) {
-          const code = error instanceof Error ? error.message : 'dev_harness_portal_api_error'
-          writeJson(res, 400, {
-            error: code,
-            message: code,
-          })
-          return
-        }
-
-        next()
+        writeJson(res, response.statusCode || 200, response.payload)
       })
     },
   }
