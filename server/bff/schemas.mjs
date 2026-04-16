@@ -118,6 +118,12 @@ export const portalWeeklySubmissionSubmitSchema = z.object({
   transactionIds: z.array(NON_EMPTY_STRING),
 }).strict();
 
+export const cashflowWeekCloseSchema = z.object({
+  projectId: NON_EMPTY_STRING,
+  yearMonth: z.string().trim().regex(/^\d{4}-\d{2}$/),
+  weekNo: z.number().int().positive(),
+}).strict();
+
 export const projectSheetSourceUploadSchema = z.object({
   sourceType: z.enum(['usage', 'budget', 'evidence_rules', 'cashflow', 'bank_statement']),
   sheetName: NON_EMPTY_STRING.max(200),

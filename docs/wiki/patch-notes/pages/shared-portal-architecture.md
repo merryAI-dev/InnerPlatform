@@ -37,6 +37,7 @@
 - [x] phase 0 network gate foundation의 CI/doc cutover가 완료되어, canonical gate command와 JSON artifact path가 release evidence 기준으로 고정됨
 - [x] phase 2 첫 command-authority slice로 weekly expense save path가 `portal/weekly-expenses/save` server-owned write boundary를 사용함
 - [x] phase 2 둘째 command-authority slice로 PM weekly submit path가 `portal/weekly-submissions/submit` server-owned write boundary를 사용함
+- [x] phase 2 셋째 command-authority slice로 admin cashflow week close path가 `/api/v1/cashflow/weeks/close` server-owned write boundary를 사용함
 - [x] critical write path를 command API로 이동하는 단계가 플랜에 포함됨
 - [x] App 루트 broad provider tree가 admin/portal route shell로 분리됨
 - [x] route shell이 explicit Firestore access mode를 주입하고 store는 pathname self-inference를 하지 않음
@@ -68,6 +69,7 @@
 - [2026-04-16] 위 slice는 targeted tests, production build, canonical `phase0:portal:network-gate`를 모두 통과했고 `/portal/weekly-expenses`를 포함한 required portal routes에서 `listen=0 write=0 listen400=0 consoleErrors=0` budget을 유지했다.
 - [2026-04-16] phase 2 둘째 write slice로 `/api/v1/portal/weekly-submissions/submit` command route를 추가하고, `PortalWeeklyExpensePage`의 PM 제출 흐름이 더 이상 `submitWeekAsPm` + per-transaction state patch를 분리 호출하지 않도록 잘랐다.
 - [2026-04-16] 위 제출 slice도 targeted tests, production build, canonical `phase0:portal:network-gate`를 다시 통과했고 required portal routes budget을 유지했다.
+- [2026-04-16] phase 2 셋째 write slice로 `/api/v1/cashflow/weeks/close` command route를 추가하고, `CashflowProjectSheet`의 admin 마감 흐름이 더 이상 `closeWeekAsAdmin` direct write path에 의존하지 않도록 옮겼다. route response, dev harness response, client contract의 summary shape도 `closedWeek`로 일치시켜 command result contract를 고정했다.
 - [2026-04-16] phase1 close 과정에서 `project-select` smoke 실패 원인을 `VITE_PLATFORM_API_BASE_URL`이 local harness에서 죽어 있는 `127.0.0.1:8787`을 계속 가리키던 drift로 확정했고, harness 모드에서는 현재 Vite origin을 우선 사용하도록 정리했다.
 - [2026-04-16] broad smoke에서 보였던 `ProjectDetailPage` dynamic import failure와 webserver refusal은 별도 제품 회귀가 아니라 같은 harness drift/worker churn의 false negative로 분리했고, Playwright harness를 serial worker + local API base 고정 계약으로 잠갔다.
 - [2026-04-16] phase1 close 과정에서 `/portal/submissions -> /portal` 경로의 dashboard summary null-safety 회귀도 같이 수정해, broad smoke와 release gate를 실제 제품 상태 기준으로 다시 green으로 닫았다.

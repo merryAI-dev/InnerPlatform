@@ -23,9 +23,11 @@
 - [x] dirty state 경고와 저장 차단 정책 존재
 - [x] 주간 accounting snapshot과 audit trail 확인 가능
 - [x] project 단위 export 흐름과 연결됨
+- [x] admin 주간 마감은 `/api/v1/cashflow/weeks/close` command boundary를 통해 server-owned close path를 사용함
 
 ## Recent Changes
 
+- [2026-04-16] admin 주간 마감이 `closeWeekAsAdmin` direct write path 대신 `/api/v1/cashflow/weeks/close` BFF command를 통하도록 옮겼다. `CashflowProjectSheet`는 command 결과를 store에 apply하고, dev harness와 client contract도 같은 응답 shape로 잠갔다.
 - [2026-04-09] admin export 흐름과 project sheet의 workbook contract를 더 밀접하게 맞췄다.
 - [2026-04-05] lazy heavy module 로딩 안정화를 넣었다.
 - [2026-04-04] compare mode, guide preview, weekly accounting snapshot, audit trail, soft gate를 강화했다.

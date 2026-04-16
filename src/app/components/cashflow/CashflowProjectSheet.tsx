@@ -40,6 +40,30 @@ import { getOrgDocumentPath } from '../../lib/firebase';
 import { loadExcelJs, warmExcelJs } from '../../platform/lazy-heavy-modules';
 import { buildCashflowExportWorkbookSpec } from '../../platform/cashflow-export';
 import { exportCashflowWorkbookViaBff, isPlatformApiEnabled } from '../../lib/platform-bff-client';
+import * as platformBffClientModule from '../../lib/platform-bff-client';
+
+type CashflowWeekCloseCommandResult = {
+  cashflowWeek: CashflowWeekSheet;
+  summary?: {
+    closedWeek?: boolean;
+  };
+};
+
+const closeCashflowWeekViaBff = platformBffClientModule.closeCashflowWeekViaBff as undefined | ((params: {
+  tenantId: string;
+  actor: {
+    uid: string;
+    email?: string;
+    role?: string;
+    idToken?: string;
+    googleAccessToken?: string;
+  };
+  command: {
+    projectId: string;
+    yearMonth: string;
+    weekNo: number;
+  };
+}) => Promise<CashflowWeekCloseCommandResult>);
 
 function fmt(n: number): string {
   return n.toLocaleString('ko-KR');
@@ -100,7 +124,7 @@ export function CashflowProjectSheet({
     goNextMonth,
     upsertWeekAmounts,
     submitWeekAsPm,
-    closeWeekAsAdmin,
+    applyClosedCashflowWeek,
   } = useCashflowWeeks();
 
   const monthWeeks = useMemo(() => getMonthMondayWeeks(yearMonth), [yearMonth]);
@@ -570,7 +594,25 @@ export function CashflowProjectSheet({
     setCloseBusy(true);
     try {
       await flushWeek({ weekNo, mode: 'projection', silent: false });
-      await closeWeekAsAdmin({ projectId, yearMonth, weekNo });
+      if (!orgId || !user?.uid || !closeCashflowWeekViaBff) {
+        throw new Error('cashflow_week_close_command_unavailable');
+      }
+      const result = await closeCashflowWeekViaBff({
+        tenantId: orgId,
+        actor: {
+          uid: user.uid,
+          email: user.email,
+          role: user.role,
+          idToken: user.idToken,
+          googleAccessToken: user.googleAccessToken,
+        },
+        command: {
+          projectId,
+          yearMonth,
+          weekNo,
+        },
+      });
+      applyClosedCashflowWeek(result.cashflowWeek);
       toast.success('결산완료 처리했습니다.');
     } catch (e) {
       toast.error('결산완료 처리에 실패했습니다.');
@@ -578,7 +620,7 @@ export function CashflowProjectSheet({
       setCloseBusy(false);
       setCloseDialog(null);
     }
-  }, [closeWeekAsAdmin, flushWeek, projectId, yearMonth]);
+  }, [applyClosedCashflowWeek, flushWeek, orgId, projectId, user, yearMonth]);
 
   const handleStartCloseWeek = useCallback(async (weekNo: number) => {
     if (!db) {

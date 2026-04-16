@@ -5,6 +5,7 @@ import {
   analyzeGoogleSheetImportViaBff,
   analyzeProjectRequestContractViaBff,
   changeTransactionStateViaBff,
+  closeCashflowWeekViaBff,
   deepSyncAuthGovernanceUserViaBff,
   fetchPortalEntryContextViaBff,
   fetchPortalOnboardingContextViaBff,
@@ -357,6 +358,50 @@ describe('platform-bff-client', () => {
     }));
     expect(result.cashflowWeek.pmSubmitted).toBe(true);
     expect(result.summary.submittedTransactionCount).toBe(1);
+  });
+
+  it('calls cashflow week close command endpoint', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({
+        data: {
+          cashflowWeek: {
+            id: 'p001-2026-04-w3',
+            projectId: 'p001',
+            yearMonth: '2026-04',
+            weekNo: 3,
+            adminClosed: true,
+            adminClosedAt: '2026-04-16T14:00:00.000Z',
+          },
+          summary: {
+            closedWeek: true,
+          },
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    const result = await closeCashflowWeekViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'admin-1', role: 'admin', idToken: 'token-abc' },
+      command: {
+        projectId: 'p001',
+        yearMonth: '2026-04',
+        weekNo: 3,
+      },
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/cashflow/weeks/close', expect.objectContaining({
+      tenantId: 'mysc',
+      body: expect.objectContaining({
+        projectId: 'p001',
+        yearMonth: '2026-04',
+        weekNo: 3,
+      }),
+    }));
+    expect(result.cashflowWeek.adminClosed).toBe(true);
+    expect(result.summary.closedWeek).toBe(true);
   });
 
   it('calls portal payroll summary endpoint', async () => {

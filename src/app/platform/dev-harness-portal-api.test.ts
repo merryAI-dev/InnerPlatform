@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { resolveDevHarnessPortalApiResponse } from '../../../vite.config';
 import {
   buildDevHarnessPortalBankStatementsSummary,
+  buildDevHarnessPortalCloseCashflowWeekResult,
   buildDevHarnessPortalDashboardSummary,
   buildDevHarnessPortalEntryContext,
   buildDevHarnessPortalOnboardingContext,
@@ -226,6 +227,29 @@ describe('dev harness portal api helpers', () => {
     });
   });
 
+  it('builds a cashflow week close command result for a visible admin project', () => {
+    const result = buildDevHarnessPortalCloseCashflowWeekResult({
+      actorId: 'admin-1',
+      actorRole: 'admin',
+      command: {
+        projectId: 'p001',
+        yearMonth: '2026-04',
+        weekNo: 3,
+      },
+    });
+
+    expect(result.cashflowWeek).toMatchObject({
+      id: 'p001-2026-04-w3',
+      projectId: 'p001',
+      yearMonth: '2026-04',
+      weekNo: 3,
+      adminClosed: true,
+    });
+    expect(result.summary).toEqual({
+      closedWeek: true,
+    });
+  });
+
   it('handles phase1 read-model summary routes through the vite dev harness router', async () => {
     const [payroll, weeklyExpenses, bankStatements] = await Promise.all([
       resolveDevHarnessPortalApiResponse({
@@ -351,6 +375,36 @@ describe('dev harness portal api helpers', () => {
         ],
         summary: {
           submittedTransactionCount: 1,
+        },
+      },
+    });
+  });
+
+  it('handles cashflow week close through the vite dev harness router', async () => {
+    const response = await resolveDevHarnessPortalApiResponse({
+      enabled: true,
+      method: 'POST',
+      url: '/api/v1/cashflow/weeks/close',
+      actorId: 'admin-1',
+      actorRole: 'admin',
+      readBody: async () => ({
+        projectId: 'p001',
+        yearMonth: '2026-04',
+        weekNo: 3,
+      }),
+    });
+
+    expect(response).toMatchObject({
+      handled: true,
+      statusCode: 200,
+      payload: {
+        cashflowWeek: {
+          id: 'p001-2026-04-w3',
+          projectId: 'p001',
+          adminClosed: true,
+        },
+        summary: {
+          closedWeek: true,
         },
       },
     });

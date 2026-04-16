@@ -259,6 +259,28 @@ type PortalWeeklySubmissionSubmitResult = {
   };
 };
 
+type CloseCashflowWeekCommand = {
+  projectId: string;
+  yearMonth: string;
+  weekNo: number;
+};
+
+type CloseCashflowWeekResult = {
+  cashflowWeek: {
+    id: string;
+    projectId: string;
+    yearMonth: string;
+    weekNo: number;
+    adminClosed: true;
+    adminClosedAt: string;
+    adminClosedByUid: string;
+    version: number;
+  };
+  summary: {
+    closedWeek: true;
+  };
+};
+
 const PRIVILEGED_ROLES = new Set(['admin', 'finance']);
 const DEV_HARNESS_TODAY_ISO = '2026-04-16';
 const DEV_HARNESS_UPDATED_AT = '2026-04-16T12:00:00.000Z';
@@ -729,6 +751,36 @@ export function buildDevHarnessPortalSubmitWeeklySubmissionResult(params: {
     })),
     summary: {
       submittedTransactionCount: transactionIds.length,
+    },
+  };
+}
+
+export function buildDevHarnessPortalCloseCashflowWeekResult(params: {
+  actorId?: string;
+  actorRole?: string;
+  command: CloseCashflowWeekCommand;
+}): CloseCashflowWeekResult {
+  const command = params.command;
+  const actorId = normalizeText(params.actorId) || ORG_MEMBERS.find((member) => member.role === 'admin')?.uid || 'admin-1';
+  const { currentProject } = resolveHarnessProjectContext({
+    actorId,
+    actorRole: params.actorRole,
+    projectId: command.projectId,
+  });
+
+  return {
+    cashflowWeek: {
+      id: `${currentProject.id}-${command.yearMonth}-w${command.weekNo}`,
+      projectId: currentProject.id,
+      yearMonth: command.yearMonth,
+      weekNo: command.weekNo,
+      adminClosed: true,
+      adminClosedAt: DEV_HARNESS_UPDATED_AT,
+      adminClosedByUid: actorId,
+      version: 8,
+    },
+    summary: {
+      closedWeek: true,
     },
   };
 }

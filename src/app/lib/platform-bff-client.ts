@@ -450,6 +450,26 @@ export interface PortalWeeklySubmissionSubmitResult {
   };
 }
 
+export interface CloseCashflowWeekCommand {
+  projectId: string;
+  yearMonth: string;
+  weekNo: number;
+}
+
+export interface CloseCashflowWeekResult {
+  cashflowWeek: Pick<
+    CashflowWeekSheet,
+    'id' | 'projectId' | 'yearMonth' | 'weekNo' | 'adminClosed' | 'adminClosedAt'
+  > & {
+    adminClosedByUid?: string;
+    adminClosedByName?: string;
+    version?: number;
+  };
+  summary: {
+    closedWeek: boolean;
+  };
+}
+
 export interface PortalRegistrationResult {
   ok: boolean;
   registrationState: 'registered';
@@ -1438,6 +1458,25 @@ export async function submitPortalWeeklySubmissionViaBff(params: {
   const apiClient = resolveClient(params.client);
   const response = await apiClient.post<PortalWeeklySubmissionSubmitResult>(
     '/api/v1/portal/weekly-submissions/submit',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.command,
+      timeoutMs: 8000,
+    },
+  );
+  return response.data;
+}
+
+export async function closeCashflowWeekViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  command: CloseCashflowWeekCommand;
+  client?: PlatformApiClientLike;
+}): Promise<CloseCashflowWeekResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<CloseCashflowWeekResult>(
+    '/api/v1/cashflow/weeks/close',
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),

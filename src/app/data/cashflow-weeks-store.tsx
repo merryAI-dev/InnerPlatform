@@ -70,6 +70,7 @@ interface CashflowWeekActions {
     varianceHistory: VarianceFlagEvent[];
   }) => Promise<void>;
   applyWeeklyExpenseCommandWeeks: (items: CashflowWeekSheet[]) => void;
+  applyClosedCashflowWeek: (item: CashflowWeekSheet) => void;
   getWeeksForProject: (projectId: string) => CashflowWeekSheet[];
 }
 
@@ -473,6 +474,19 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const applyClosedCashflowWeek = useCallback((item: CashflowWeekSheet) => {
+    if (!item?.id) return;
+    setWeeks((prev) => {
+      const byId = new Map(prev.map((existing) => [existing.id, existing]));
+      byId.set(item.id, { ...(byId.get(item.id) || {}), ...item });
+      return Array.from(byId.values()).sort((left, right) => {
+        if (left.yearMonth !== right.yearMonth) return left.yearMonth.localeCompare(right.yearMonth);
+        if (left.weekNo !== right.weekNo) return left.weekNo - right.weekNo;
+        return left.id.localeCompare(right.id);
+      });
+    });
+  }, []);
+
   const getWeeksForProject = useCallback((projectId: string): CashflowWeekSheet[] => {
     const pid = projectId.trim();
     if (!pid) return [];
@@ -492,6 +506,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     closeWeekAsAdmin,
     updateVarianceFlag,
     applyWeeklyExpenseCommandWeeks,
+    applyClosedCashflowWeek,
     getWeeksForProject,
   }), [
     yearMonth,
@@ -506,6 +521,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     closeWeekAsAdmin,
     updateVarianceFlag,
     applyWeeklyExpenseCommandWeeks,
+    applyClosedCashflowWeek,
     getWeeksForProject,
   ]);
 

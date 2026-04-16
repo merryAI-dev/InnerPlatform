@@ -5,6 +5,7 @@ import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import {
   buildDevHarnessPortalBankStatementsSummary,
+  buildDevHarnessPortalCloseCashflowWeekResult,
   buildDevHarnessPortalDashboardSummary,
   buildDevHarnessPortalEntryContext,
   buildDevHarnessPortalOnboardingContext,
@@ -110,8 +111,10 @@ export async function resolveDevHarnessPortalApiResponse(params: {
   const method = String(params.method || 'GET').toUpperCase()
   const requestUrl = new URL(params.url || '/', 'http://localhost')
   const pathName = requestUrl.pathname
+  const isPortalRoute = pathName.startsWith('/api/v1/portal/')
+  const isCashflowWeekCloseRoute = pathName === '/api/v1/cashflow/weeks/close'
 
-  if (!params.enabled || !pathName.startsWith('/api/v1/portal/')) {
+  if (!params.enabled || (!isPortalRoute && !isCashflowWeekCloseRoute)) {
     return { handled: false }
   }
 
@@ -199,6 +202,19 @@ export async function resolveDevHarnessPortalApiResponse(params: {
           actorId: params.actorId,
           actorRole: params.actorRole,
           command: body as Parameters<typeof buildDevHarnessPortalSubmitWeeklySubmissionResult>[0]['command'],
+        }),
+      }
+    }
+
+    if (method === 'POST' && pathName === '/api/v1/cashflow/weeks/close') {
+      const body = await params.readBody()
+      return {
+        handled: true,
+        statusCode: 200,
+        payload: buildDevHarnessPortalCloseCashflowWeekResult({
+          actorId: params.actorId,
+          actorRole: params.actorRole,
+          command: body as Parameters<typeof buildDevHarnessPortalCloseCashflowWeekResult>[0]['command'],
         }),
       }
     }

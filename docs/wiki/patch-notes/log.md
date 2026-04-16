@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-04-16] patch-note | admin-cashflow-project-sheet, shared-portal-architecture | admin weekly close command authority slice
+- pages: [admin-cashflow-project-sheet](./pages/admin-cashflow-project-sheet.md), [shared-portal-architecture](./pages/shared-portal-architecture.md)
+- summary: phase 2 셋째 write slice로 `/api/v1/cashflow/weeks/close` command boundary를 추가해, admin 주간 마감 시 `CashflowProjectSheet`가 더 이상 `closeWeekAsAdmin` direct write path를 직접 호출하지 않도록 정리했다. command 결과는 store에 apply되고, dev harness와 BFF route의 summary contract도 `closedWeek` 기준으로 일치시킨 뒤 targeted tests, build, canonical `phase0:portal:network-gate`를 다시 green으로 닫았다.
+
 ## [2026-04-16] patch-note | portal-weekly-expense, shared-portal-architecture | PM weekly submit command authority slice
 - pages: [portal-weekly-expense](./pages/portal-weekly-expense.md), [shared-portal-architecture](./pages/shared-portal-architecture.md)
 - summary: phase 2 둘째 write slice로 `portal/weekly-submissions/submit` command boundary를 추가해, PM 주간 제출 시 cashflow week `pmSubmitted` 처리와 선택 거래 `SUBMITTED` 전환을 더 이상 클라이언트가 분리 호출하지 않도록 정리했다. `PortalWeeklyExpensePage`의 일반 제출과 참여율 경고 확인 후 제출 모두 같은 command path를 사용하고, build와 canonical `phase0:portal:network-gate`도 다시 green으로 닫았다.
