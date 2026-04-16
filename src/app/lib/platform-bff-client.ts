@@ -8,6 +8,8 @@ import type {
   ProjectRequestContractAnalysis,
   SettlementType,
   TransactionState,
+  VarianceFlag,
+  VarianceFlagEvent,
   WeeklySubmissionStatus,
 } from '../data/types';
 import { PlatformApiClient } from '../platform/api-client';
@@ -483,6 +485,20 @@ export interface UpsertCashflowWeekResult {
   summary: {
     mode: 'projection' | 'actual';
     updatedLineCount: number;
+  };
+}
+
+export interface UpdateCashflowWeekVarianceCommand {
+  sheetId: string;
+  varianceFlag: VarianceFlag | undefined;
+  varianceHistory: VarianceFlagEvent[];
+}
+
+export interface UpdateCashflowWeekVarianceResult {
+  cashflowWeek: CashflowWeekSheet;
+  summary: {
+    hasVarianceFlag: boolean;
+    varianceHistoryCount: number;
   };
 }
 
@@ -1549,6 +1565,25 @@ export async function upsertCashflowWeekViaBff(params: {
   const apiClient = resolveClient(params.client);
   const response = await apiClient.post<UpsertCashflowWeekResult>(
     '/api/v1/cashflow/weeks/upsert',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.command,
+      timeoutMs: 8000,
+    },
+  );
+  return response.data;
+}
+
+export async function updateCashflowWeekVarianceViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  command: UpdateCashflowWeekVarianceCommand;
+  client?: PlatformApiClientLike;
+}): Promise<UpdateCashflowWeekVarianceResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<UpdateCashflowWeekVarianceResult>(
+    '/api/v1/cashflow/weeks/variance-flag',
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),

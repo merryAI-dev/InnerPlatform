@@ -16,6 +16,7 @@ import {
   buildDevHarnessPortalSaveWeeklyExpenseResult,
   buildDevHarnessPortalSubmitWeeklySubmissionResult,
   buildDevHarnessPortalSessionProjectResult,
+  buildDevHarnessPortalVarianceFlagResult,
   buildDevHarnessPortalWeeklyExpensesSummary,
 } from './src/app/platform/dev-harness-portal-api'
 
@@ -116,8 +117,9 @@ export async function resolveDevHarnessPortalApiResponse(params: {
   const isPortalRoute = pathName.startsWith('/api/v1/portal/')
   const isCashflowWeekCloseRoute = pathName === '/api/v1/cashflow/weeks/close'
   const isCashflowWeekUpsertRoute = pathName === '/api/v1/cashflow/weeks/upsert'
+  const isCashflowWeekVarianceRoute = pathName === '/api/v1/cashflow/weeks/variance-flag'
 
-  if (!params.enabled || (!isPortalRoute && !isCashflowWeekCloseRoute && !isCashflowWeekUpsertRoute)) {
+  if (!params.enabled || (!isPortalRoute && !isCashflowWeekCloseRoute && !isCashflowWeekUpsertRoute && !isCashflowWeekVarianceRoute)) {
     return { handled: false }
   }
 
@@ -244,6 +246,19 @@ export async function resolveDevHarnessPortalApiResponse(params: {
           actorId: params.actorId,
           actorRole: params.actorRole,
           command: body as Parameters<typeof buildDevHarnessPortalUpsertCashflowWeekResult>[0]['command'],
+        }),
+      }
+    }
+
+    if (method === 'POST' && pathName === '/api/v1/cashflow/weeks/variance-flag') {
+      const body = await params.readBody()
+      return {
+        handled: true,
+        statusCode: 200,
+        payload: buildDevHarnessPortalVarianceFlagResult({
+          actorId: params.actorId,
+          actorRole: params.actorRole,
+          command: body as Parameters<typeof buildDevHarnessPortalVarianceFlagResult>[0]['command'],
         }),
       }
     }

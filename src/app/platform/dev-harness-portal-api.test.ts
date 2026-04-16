@@ -11,6 +11,7 @@ import {
   buildDevHarnessPortalRegistrationResult,
   buildDevHarnessPortalSaveWeeklyExpenseResult,
   buildDevHarnessPortalSubmitWeeklySubmissionResult,
+  buildDevHarnessPortalVarianceFlagResult,
   buildDevHarnessPortalUpsertCashflowWeekResult,
   buildDevHarnessPortalSessionProjectResult,
   buildDevHarnessPortalWeeklyExpensesSummary,
@@ -287,6 +288,45 @@ describe('dev harness portal api helpers', () => {
     });
   });
 
+  it('builds a cashflow week variance command result for a visible admin project', () => {
+    const result = buildDevHarnessPortalVarianceFlagResult({
+      actorId: 'admin-1',
+      actorRole: 'admin',
+      command: {
+        sheetId: 'p001-2026-04-w3',
+        varianceFlag: {
+          status: 'OPEN',
+          reason: '증빙 불일치',
+          flaggedBy: '관리자',
+          flaggedByUid: 'admin-1',
+          flaggedAt: '2026-04-16T18:59:00.000Z',
+        },
+        varianceHistory: [
+          {
+            id: 'vf-1',
+            action: 'FLAG',
+            actor: '관리자',
+            actorUid: 'admin-1',
+            content: '증빙 불일치',
+            timestamp: '2026-04-16T18:59:00.000Z',
+          },
+        ],
+      },
+    });
+
+    expect(result.cashflowWeek).toMatchObject({
+      id: 'p001-2026-04-w3',
+      varianceFlag: {
+        status: 'OPEN',
+        reason: '증빙 불일치',
+      },
+    });
+    expect(result.summary).toEqual({
+      hasVarianceFlag: true,
+      varianceHistoryCount: 1,
+    });
+  });
+
   it('builds a bank handoff command result for a visible PM project', () => {
     const result = buildDevHarnessPortalBankStatementHandoffResult({
       actorId: 'u002',
@@ -539,6 +579,54 @@ describe('dev harness portal api helpers', () => {
         summary: {
           mode: 'actual',
           updatedLineCount: 1,
+        },
+      },
+    });
+  });
+
+  it('handles cashflow week variance updates through the vite dev harness router', async () => {
+    const response = await resolveDevHarnessPortalApiResponse({
+      enabled: true,
+      method: 'POST',
+      url: '/api/v1/cashflow/weeks/variance-flag',
+      actorId: 'admin-1',
+      actorRole: 'admin',
+      readBody: async () => ({
+        sheetId: 'p001-2026-04-w3',
+        varianceFlag: {
+          status: 'OPEN',
+          reason: '증빙 불일치',
+          flaggedBy: '관리자',
+          flaggedByUid: 'admin-1',
+          flaggedAt: '2026-04-16T18:59:00.000Z',
+        },
+        varianceHistory: [
+          {
+            id: 'vf-1',
+            action: 'FLAG',
+            actor: '관리자',
+            actorUid: 'admin-1',
+            content: '증빙 불일치',
+            timestamp: '2026-04-16T18:59:00.000Z',
+          },
+        ],
+      }),
+    });
+
+    expect(response).toMatchObject({
+      handled: true,
+      statusCode: 200,
+      payload: {
+        cashflowWeek: {
+          id: 'p001-2026-04-w3',
+          varianceFlag: {
+            status: 'OPEN',
+            reason: '증빙 불일치',
+          },
+        },
+        summary: {
+          hasVarianceFlag: true,
+          varianceHistoryCount: 1,
         },
       },
     });

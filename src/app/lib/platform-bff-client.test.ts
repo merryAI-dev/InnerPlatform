@@ -26,6 +26,7 @@ import {
   savePortalWeeklyExpenseViaBff,
   handoffPortalBankStatementViaBff,
   submitPortalWeeklySubmissionViaBff,
+  updateCashflowWeekVarianceViaBff,
   syncTransactionEvidenceDriveViaBff,
   trashProjectViaBff,
   upsertPortalRegistrationViaBff,
@@ -469,6 +470,77 @@ describe('platform-bff-client', () => {
     expect(result.summary).toEqual({
       mode: 'projection',
       updatedLineCount: 1,
+    });
+  });
+
+  it('calls cashflow week variance command endpoint', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({
+        data: {
+          cashflowWeek: {
+            id: 'p001-2026-04-w3',
+            projectId: 'p001',
+            yearMonth: '2026-04',
+            weekNo: 3,
+            varianceFlag: {
+              status: 'OPEN',
+              reason: '증빙 불일치',
+            },
+            varianceHistory: [
+              {
+                id: 'vf-1',
+                action: 'FLAG',
+                actor: '관리자',
+                content: '증빙 불일치',
+                timestamp: '2026-04-16T18:59:00.000Z',
+              },
+            ],
+          },
+          summary: {
+            hasVarianceFlag: true,
+            varianceHistoryCount: 1,
+          },
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    const result = await updateCashflowWeekVarianceViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'admin-1', role: 'admin' },
+      command: {
+        sheetId: 'p001-2026-04-w3',
+        varianceFlag: {
+          status: 'OPEN',
+          reason: '증빙 불일치',
+          flaggedBy: '관리자',
+          flaggedByUid: 'admin-1',
+          flaggedAt: '2026-04-16T18:59:00.000Z',
+        },
+        varianceHistory: [
+          {
+            id: 'vf-1',
+            action: 'FLAG',
+            actor: '관리자',
+            actorUid: 'admin-1',
+            content: '증빙 불일치',
+            timestamp: '2026-04-16T18:59:00.000Z',
+          },
+        ],
+      },
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/cashflow/weeks/variance-flag', expect.objectContaining({
+      tenantId: 'mysc',
+      body: expect.objectContaining({
+        sheetId: 'p001-2026-04-w3',
+      }),
+    }));
+    expect(result.summary).toEqual({
+      hasVarianceFlag: true,
+      varianceHistoryCount: 1,
     });
   });
 

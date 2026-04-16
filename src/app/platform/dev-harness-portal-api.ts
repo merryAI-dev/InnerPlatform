@@ -309,6 +309,50 @@ type UpsertCashflowWeekResult = {
   };
 };
 
+type CashflowWeekVarianceFlagCommand = {
+  sheetId: string;
+  varianceFlag?: {
+    status: 'OPEN' | 'REPLIED' | 'RESOLVED';
+    reason: string;
+    flaggedBy: string;
+    flaggedByUid?: string;
+    flaggedAt: string;
+    pmReply?: string;
+    pmRepliedBy?: string;
+    pmRepliedByUid?: string;
+    pmRepliedAt?: string;
+    resolvedBy?: string;
+    resolvedByUid?: string;
+    resolvedAt?: string;
+  };
+  varianceHistory: Array<{
+    id: string;
+    action: 'FLAG' | 'REPLY' | 'RESOLVE';
+    actor: string;
+    actorUid?: string;
+    content: string;
+    timestamp: string;
+  }>;
+};
+
+type CashflowWeekVarianceFlagResult = {
+  cashflowWeek: {
+    id: string;
+    projectId: string;
+    yearMonth: string;
+    weekNo: number;
+    varianceFlag?: CashflowWeekVarianceFlagCommand['varianceFlag'] | null;
+    varianceHistory: CashflowWeekVarianceFlagCommand['varianceHistory'];
+    updatedAt: string;
+    updatedByUid: string;
+    version: number;
+  };
+  summary: {
+    hasVarianceFlag: boolean;
+    varianceHistoryCount: number;
+  };
+};
+
 type PortalBankStatementHandoffCommand = {
   projectId: string;
   activeSheetId: string;
@@ -375,6 +419,17 @@ function resolvePrimaryProjectId(projectIds: string[], preferredProjectId?: stri
   const preferred = normalizeText(preferredProjectId);
   if (preferred && projectIds.includes(preferred)) return preferred;
   return projectIds[0] || '';
+}
+
+function resolveCashflowWeekIdParts(sheetId: string): { projectId: string; yearMonth: string; weekNo: number } | null {
+  const normalized = normalizeText(sheetId);
+  const match = normalized.match(/^(.*)-(\d{4}-\d{2})-w(\d+)$/);
+  if (!match) return null;
+  return {
+    projectId: match[1],
+    yearMonth: match[2],
+    weekNo: Number.parseInt(match[3], 10),
+  };
 }
 
 function resolveDefaultPmProjectId(): string {
@@ -848,6 +903,39 @@ export function buildDevHarnessPortalCloseCashflowWeekResult(params: {
     },
     summary: {
       closedWeek: true,
+    },
+  };
+}
+
+export function buildDevHarnessPortalVarianceFlagResult(params: {
+  actorId?: string;
+  actorRole?: string;
+  command: CashflowWeekVarianceFlagCommand;
+}): CashflowWeekVarianceFlagResult {
+  const command = params.command;
+  const actorId = normalizeText(params.actorId) || ORG_MEMBERS.find((member) => member.role === 'admin')?.uid || 'admin-1';
+  const sheetParts = resolveCashflowWeekIdParts(command.sheetId);
+  const { currentProject } = resolveHarnessProjectContext({
+    actorId,
+    actorRole: params.actorRole,
+    projectId: sheetParts?.projectId || undefined,
+  });
+
+  return {
+    cashflowWeek: {
+      id: normalizeText(command.sheetId) || `${currentProject.id}-2026-04-w3`,
+      projectId: sheetParts?.projectId || currentProject.id,
+      yearMonth: sheetParts?.yearMonth || '2026-04',
+      weekNo: sheetParts?.weekNo || 3,
+      varianceFlag: command.varianceFlag,
+      varianceHistory: Array.isArray(command.varianceHistory) ? command.varianceHistory : [],
+      updatedAt: DEV_HARNESS_UPDATED_AT,
+      updatedByUid: actorId,
+      version: 6,
+    },
+    summary: {
+      hasVarianceFlag: Boolean(command.varianceFlag),
+      varianceHistoryCount: Array.isArray(command.varianceHistory) ? command.varianceHistory.length : 0,
     },
   };
 }

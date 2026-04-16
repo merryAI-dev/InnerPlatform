@@ -132,6 +132,36 @@ export const cashflowWeekUpsertSchema = z.object({
   amounts: z.record(z.string().trim().min(1), z.number()),
 }).strict();
 
+const varianceFlagSchema = z.object({
+  status: z.enum(['OPEN', 'REPLIED', 'RESOLVED']),
+  reason: NON_EMPTY_STRING,
+  flaggedBy: NON_EMPTY_STRING,
+  flaggedByUid: z.string().trim().max(200).optional(),
+  flaggedAt: NON_EMPTY_STRING,
+  pmReply: z.string().trim().optional(),
+  pmRepliedBy: z.string().trim().optional(),
+  pmRepliedByUid: z.string().trim().max(200).optional(),
+  pmRepliedAt: z.string().trim().optional(),
+  resolvedBy: z.string().trim().optional(),
+  resolvedByUid: z.string().trim().max(200).optional(),
+  resolvedAt: z.string().trim().optional(),
+}).strict();
+
+const varianceFlagEventSchema = z.object({
+  id: NON_EMPTY_STRING,
+  action: z.enum(['FLAG', 'REPLY', 'RESOLVE']),
+  actor: NON_EMPTY_STRING,
+  actorUid: z.string().trim().max(200).optional(),
+  content: NON_EMPTY_STRING,
+  timestamp: NON_EMPTY_STRING,
+}).strict();
+
+export const cashflowWeekVarianceFlagSchema = z.object({
+  sheetId: NON_EMPTY_STRING,
+  varianceFlag: varianceFlagSchema.nullish(),
+  varianceHistory: z.array(varianceFlagEventSchema),
+}).strict();
+
 export const portalBankStatementHandoffSchema = z.object({
   projectId: NON_EMPTY_STRING,
   activeSheetId: NON_EMPTY_STRING,

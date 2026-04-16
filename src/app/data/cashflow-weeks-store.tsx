@@ -35,6 +35,7 @@ import {
   isPlatformApiEnabled,
   submitPortalWeeklySubmissionViaBff,
   upsertCashflowWeekViaBff,
+  updateCashflowWeekVarianceViaBff,
 } from '../lib/platform-bff-client';
 import { useFirebase } from '../lib/firebase-context';
 import { getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
@@ -528,8 +529,32 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     varianceFlag: VarianceFlag | undefined;
     varianceHistory: VarianceFlagEvent[];
   }): Promise<void> => {
+    const actor = user;
+    const sheetId = input.sheetId.trim();
+    if (!sheetId) return;
+
+    if (actor && isPlatformApiEnabled() && actor.uid && updateCashflowWeekVarianceViaBff) {
+      const result = await updateCashflowWeekVarianceViaBff({
+        tenantId: orgId,
+        actor: {
+          uid: actor.uid,
+          email: actor.email,
+          role: actor.role,
+          idToken: actor.idToken,
+          googleAccessToken: actor.googleAccessToken,
+        },
+        command: {
+          sheetId,
+          varianceFlag: input.varianceFlag ?? null,
+          varianceHistory: input.varianceHistory,
+        },
+      });
+      setWeeks((prev) => mergeCashflowWeekItem(prev, result.cashflowWeek as CashflowWeekSheet));
+      return;
+    }
+
     if (!db) return;
-    const ref = doc(db, getOrgDocumentPath(orgId, 'cashflowWeeks', input.sheetId));
+    const ref = doc(db, getOrgDocumentPath(orgId, 'cashflowWeeks', sheetId));
     const now = new Date().toISOString();
     await updateDoc(ref, {
       varianceFlag: input.varianceFlag ?? null,
@@ -537,7 +562,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
       updatedAt: now,
       tenantId: orgId,
     } as any);
-  }, [db, orgId]);
+  }, [db, orgId, user]);
 
   const applyWeeklyExpenseCommandWeeks = useCallback((items: CashflowWeekSheet[]) => {
     const nextItems = Array.isArray(items) ? items : [];
