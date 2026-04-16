@@ -38,9 +38,9 @@ describe('PortalDashboard layout compaction', () => {
     expect(portalDashboardSource).not.toContain('사업비 입력(주간) 작성/제출');
   });
 
-  it('surfaces payroll memo-review attention directly on the dashboard', () => {
-    expect(portalDashboardSource).toContain('인건비 적요 검토');
-    expect(portalDashboardSource).toContain('PM 1차 검토 필요');
-    expect(portalDashboardSource).toContain('인건비 검토 열기');
+  it('keeps an always-visible payroll CTA on the dashboard', () => {
+    expect(portalDashboardSource).toContain('이번 달 인건비 확인');
+    expect(portalDashboardSource).toContain('인건비/공지 열기');
+    expect(portalDashboardSource).toContain('지급일이 아직 없으면 여기서 먼저 등록하세요.');
   });
 });

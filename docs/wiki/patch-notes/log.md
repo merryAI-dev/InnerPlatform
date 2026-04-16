@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-04-16] patch-note | portal-dashboard, portal-payroll | payroll entry visibility recovery
+- pages: [portal-dashboard](./pages/portal-dashboard.md), [portal-payroll](./pages/portal-payroll.md)
+- summary: 포털 사이드바의 `인건비/공지`를 숨김 없이 노출하고, `/portal` 홈에도 상태형 `이번 달 인건비 확인` CTA를 상시 배치해 인건비 화면 발견성을 복구했다.
+
 ## [2026-04-16] patch-note | portal-payroll, portal-dashboard, admin-dashboard | payroll review loop and realtime finish-state polish
 - pages: [portal-payroll](./pages/portal-payroll.md), [portal-dashboard](./pages/portal-dashboard.md), [admin-dashboard](./pages/admin-dashboard.md)
 - summary: PM 적요 판단, Admin 최종 확정, 지급 완료 상태를 같은 용어와 badge 체계로 통일했고, scoped payroll store를 realtime snapshot으로 바꿔 Admin 확정이 PM 포털에도 즉시 반영되도록 정리했다.

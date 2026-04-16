@@ -43,6 +43,8 @@ import {
   resolveWeeklyAccountingSnapshot,
 } from '../../platform/weekly-accounting-state';
 import {
+  getPayrollPaidStatusLabel,
+  getPayrollPaidStatusTone,
   getPayrollReviewStatusLabel,
   getPayrollReviewStatusTone,
 } from '../../platform/payroll-display';
@@ -92,7 +94,7 @@ export function PortalDashboard() {
   const navigate = useNavigate();
   const { isLoading, portalUser, myProject, weeklySubmissionStatuses, projects } = usePortalStore();
   const { getProjectAlerts } = useHrAnnouncements();
-  const { runs, monthlyCloses, acknowledgePayrollRun, acknowledgeMonthlyClose } = usePayroll();
+  const { schedules, runs, monthlyCloses, acknowledgePayrollRun, acknowledgeMonthlyClose } = usePayroll();
   const { db, isOnline, orgId } = useFirebase();
   const firestoreEnabled = featureFlags.firestoreCoreEnabled && isOnline && !!db;
 
@@ -139,6 +141,7 @@ export function PortalDashboard() {
   const today = getSeoulTodayIso();
   const yearMonth = today.slice(0, 7);
   const prevYearMonth = addMonthsToYearMonth(yearMonth, -1);
+  const payrollSchedule = schedules.find((schedule) => schedule.projectId === projectId) || null;
   const payrollRun = runs.find((r) => r.projectId === projectId && r.yearMonth === yearMonth) || null;
   const monthlyClosePrev = monthlyCloses.find((c) => c.projectId === projectId && c.yearMonth === prevYearMonth) || null;
   const hrAlerts = projectId ? getProjectAlerts(projectId).filter((a) => !a.acknowledged) : [];
@@ -196,11 +199,6 @@ export function PortalDashboard() {
         })
       : null
   ), [myTx, payrollRun, today, transactionsFetchState]);
-  const needsPayrollReviewAttention = Boolean(
-    payrollReview?.needsPmReview
-      || payrollReview?.hasMissingCandidate
-      || payrollReview?.needsAdminConfirm,
-  );
   const assignedProjects = useMemo(() => {
     if (!portalUser) return myProject ? [myProject] : [];
     const projectIds = Array.isArray(portalUser.projectIds) && portalUser.projectIds.length > 0
@@ -249,6 +247,93 @@ export function PortalDashboard() {
     payrollRiskCount: payrollRiskItems.length,
   }), [hrAlerts.length, payrollRiskItems.length, projectId, today, weeklySubmissionStatuses]);
   const shouldShowPayrollQueue = Boolean(payrollDetail && payrollDetail.status !== 'clear');
+  const payrollEntrySurface = useMemo(() => {
+    if (payrollReview) {
+      if (payrollReview.paidStatus === 'CONFIRMED') {
+        return {
+          badgeLabel: '지급 확정 완료',
+          badgeClassName: getPayrollPaidStatusTone(payrollReview.paidStatus),
+          cardClassName: 'border-emerald-200 bg-emerald-50/60',
+          title: '이번 달 인건비가 확정되었습니다',
+          detail: `지급일 ${payrollReview.plannedPayDate} · 인건비 ${payrollReview.payrollDecisionCount}건이 확인되었습니다.`,
+          helper: '인건비/공지에서 공지 기록과 이번 달 검토 결과를 다시 확인할 수 있습니다.',
+        };
+      }
+
+      if (payrollReview.hasMissingCandidate) {
+        return {
+          badgeLabel: '후보 없음',
+          badgeClassName: getPayrollPaidStatusTone(payrollReview.paidStatus),
+          cardClassName: 'border-rose-200 bg-rose-50/60',
+          title: '이번 달 인건비 후보를 찾지 못했습니다',
+          detail: `지급일 ${payrollReview.plannedPayDate} · 후보 없음도 확인 대상입니다.`,
+          helper: '후보 없음은 정상 종료가 아닙니다. 통장 적요를 보고 직접 확인해 주세요.',
+        };
+      }
+
+      if (payrollReview.needsAdminConfirm) {
+        return {
+          badgeLabel: 'Admin 최종 확정 대기',
+          badgeClassName: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
+          cardClassName: 'border-emerald-200 bg-emerald-50/60',
+          title: 'PM 검토가 끝났습니다',
+          detail: `지급일 ${payrollReview.plannedPayDate} · 인건비 ${payrollReview.payrollDecisionCount}건이 남았습니다.`,
+          helper: '이제 Admin이 월 지급을 최종 확정하면 이번 달 상태가 닫힙니다.',
+        };
+      }
+
+      if (payrollReview.needsPmReview) {
+        return {
+          badgeLabel: getPayrollReviewStatusLabel(payrollReview.pmReviewStatus),
+          badgeClassName: getPayrollReviewStatusTone(payrollReview.pmReviewStatus),
+          cardClassName: 'border-amber-200 bg-amber-50/60',
+          title: '이번 달 인건비 적요를 확인하세요',
+          detail: `지급일 ${payrollReview.plannedPayDate} · 남은 판단 ${payrollReview.pendingDecisionCount}건`,
+          helper: `${payrollReview.candidateCount}건 후보가 잡혔습니다. 맞음/아님/보류로 먼저 닫아 주세요.`,
+        };
+      }
+
+      return {
+        badgeLabel: getPayrollPaidStatusLabel(payrollReview.paidStatus),
+        badgeClassName: getPayrollPaidStatusTone(payrollReview.paidStatus),
+        cardClassName: 'border-blue-200 bg-blue-50/60',
+        title: '이번 달 인건비 확인',
+        detail: `지급일 ${payrollReview.plannedPayDate} · 현재 상태를 계속 확인할 수 있습니다.`,
+        helper: '공지, 적요 검토, 최종 확정 상태를 한 곳에서 확인하세요.',
+      };
+    }
+
+    if (payrollRun) {
+      return {
+        badgeLabel: '이번 달 일정 확인',
+        badgeClassName: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
+        cardClassName: 'border-blue-200 bg-blue-50/60',
+        title: '이번 달 인건비 확인',
+        detail: `지급일 ${payrollRun.plannedPayDate} · 공지일 ${payrollRun.noticeDate}`,
+        helper: '지급 창이 열리면 후보 적요와 월간 정산 확인 상태가 여기에 이어집니다.',
+      };
+    }
+
+    if (payrollSchedule) {
+      return {
+        badgeLabel: '지급일 설정 완료',
+        badgeClassName: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
+        cardClassName: 'border-slate-200 bg-slate-50/80',
+        title: '이번 달 인건비 일정과 공지를 확인하세요',
+        detail: `매월 ${payrollSchedule.dayOfMonth}일 기준으로 지급 창과 공지가 열립니다.`,
+        helper: '지급 창 D-3부터 후보 적요와 월간 정산 확인 상태를 계속 표시합니다.',
+      };
+    }
+
+    return {
+      badgeLabel: '지급일 설정 필요',
+      badgeClassName: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
+      cardClassName: 'border-amber-200 bg-amber-50/60',
+      title: '이번 달 인건비 확인',
+      detail: '지급일이 아직 없으면 여기서 먼저 등록하세요.',
+      helper: '지급일을 등록하면 공지일, 적요 검토, 최종 확정 흐름이 홈에도 이어집니다.',
+    };
+  }, [payrollReview, payrollRun, payrollSchedule]);
 
   if (isLoading) {
     return (
@@ -580,65 +665,52 @@ export function PortalDashboard() {
         </Card>
       )}
 
-      {needsPayrollReviewAttention && payrollReview && (
-        <Card data-testid="portal-payroll-review-card" className="border-border/60 shadow-sm">
+      <Card data-testid="portal-payroll-entry-card" className={`${payrollEntrySurface.cardClassName} shadow-sm`}>
           <CardContent className="p-4 space-y-3">
             <div className="flex items-start gap-2.5">
               <CircleDollarSign className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
               <div className="min-w-0">
-                <p className="text-[12px]" style={{ fontWeight: 800 }}>인건비 적요 검토</p>
+                <p className="text-[12px]" style={{ fontWeight: 800 }}>이번 달 인건비 확인</p>
                 <p className="mt-0.5 text-[11px] text-muted-foreground">
                   통장 적요를 먼저 보고 PM이 1차 판단을 남기면, 그 다음 Admin이 월 지급만 최종 확정합니다.
                 </p>
               </div>
             </div>
 
-            <div className={`rounded-xl border px-4 py-3 ${
-              payrollReview.hasMissingCandidate
-                ? 'border-rose-200 bg-rose-50'
-                : payrollReview.needsAdminConfirm
-                  ? 'border-emerald-200 bg-emerald-50'
-                  : 'border-amber-200 bg-amber-50'
-            }`}>
+            <div className="rounded-xl border border-white/70 bg-white/80 px-4 py-3">
               <div className="flex flex-wrap items-center gap-2">
-                <Badge className={`text-[10px] ${getPayrollReviewStatusTone(payrollReview.pmReviewStatus)}`}>
-                  {payrollReview.needsAdminConfirm
-                    ? 'Admin 최종 확정 대기'
-                    : getPayrollReviewStatusLabel(payrollReview.pmReviewStatus)}
+                <Badge className={`text-[10px] ${payrollEntrySurface.badgeClassName}`}>
+                  {payrollEntrySurface.badgeLabel}
                 </Badge>
-                <Badge variant="outline" className="text-[10px] border-white/70 bg-white/70 text-slate-700">
-                  후보 {payrollReview.candidateCount}건
-                </Badge>
-                {payrollReview.pendingDecisionCount > 0 && (
+                {payrollReview && (
+                  <Badge variant="outline" className="text-[10px] border-white/70 bg-white/70 text-slate-700">
+                    후보 {payrollReview.candidateCount}건
+                  </Badge>
+                )}
+                {payrollReview?.pendingDecisionCount ? (
                   <Badge variant="outline" className="text-[10px] border-white/70 bg-white/70 text-slate-700">
                     남은 판단 {payrollReview.pendingDecisionCount}건
                   </Badge>
-                )}
+                ) : null}
               </div>
               <p className="text-[12px]" style={{ fontWeight: 700 }}>
-                {payrollReview.hasMissingCandidate
-                  ? '이번 달 인건비 후보가 없습니다'
-                  : payrollReview.needsAdminConfirm
-                    ? 'Admin 최종 확정 대기'
-                    : `PM 1차 검토 필요 · 남은 판단 ${payrollReview.pendingDecisionCount}건`}
+                {payrollEntrySurface.title}
               </p>
               <p className="mt-1 text-[11px] text-muted-foreground">
-                {payrollReview.hasMissingCandidate
-                  ? '후보 없음은 정상 종료가 아닙니다. 통장내역을 직접 보고 적요를 확인해 주세요.'
-                  : payrollReview.needsAdminConfirm
-                    ? 'PM 검토가 끝났습니다. Admin이 월 지급 확정만 남겨둔 상태입니다.'
-                    : `${payrollReview.candidateCount}건 후보가 잡혔습니다. 맞음/아님/보류로 먼저 닫아 주세요.`}
+                {payrollEntrySurface.detail}
+              </p>
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                {payrollEntrySurface.helper}
               </p>
             </div>
 
             <div className="flex items-center justify-end">
               <Button size="sm" className="h-8 text-[11px] gap-1.5" onClick={() => navigate('/portal/payroll')}>
-                인건비 검토 열기 <ArrowRight className="h-3.5 w-3.5" />
+                인건비/공지 열기 <ArrowRight className="h-3.5 w-3.5" />
               </Button>
             </div>
           </CardContent>
-        </Card>
-      )}
+      </Card>
 
       {shouldShowPayrollQueue && (
         <PortalPayrollQueueCard

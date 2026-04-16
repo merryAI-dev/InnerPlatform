@@ -85,7 +85,7 @@ const NAV_SECTIONS = [
     title: '마이메뉴',
     items: [
       { to: '/portal', icon: LayoutDashboard, label: '내 사업 현황', exact: true },
-      { to: '/portal/payroll', icon: CircleDollarSign, label: '인건비/공지', accent: true, hidden: true },
+      { to: '/portal/payroll', icon: CircleDollarSign, label: '인건비/공지', accent: true },
     ],
   },
   {

@@ -8,6 +8,12 @@ const portalLayoutSource = readFileSync(
 );
 
 describe('PortalLayout shell actions', () => {
+  it('keeps payroll entry visible in the primary portal navigation', () => {
+    expect(portalLayoutSource).toContain("to: '/portal/payroll'");
+    expect(portalLayoutSource).toContain("label: '인건비/공지'");
+    expect(portalLayoutSource).not.toContain("label: '인건비/공지', accent: true, hidden: true");
+  });
+
   it('turns the top search into a project switcher', () => {
     expect(portalLayoutSource).toContain('CommandDialog');
     expect(portalLayoutSource).toContain('setCommandOpen(true)');
