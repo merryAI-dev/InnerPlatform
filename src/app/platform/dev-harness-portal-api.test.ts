@@ -7,6 +7,7 @@ import {
   buildDevHarnessPortalOnboardingContext,
   buildDevHarnessPortalPayrollSummary,
   buildDevHarnessPortalRegistrationResult,
+  buildDevHarnessPortalSaveWeeklyExpenseResult,
   buildDevHarnessPortalSessionProjectResult,
   buildDevHarnessPortalWeeklyExpensesSummary,
 } from './dev-harness-portal-api';
@@ -111,6 +112,81 @@ describe('dev harness portal api helpers', () => {
     expect(bankStatements.handoffContext.nextPath).toBe('/portal/weekly-expenses');
   });
 
+  it('builds a weekly expense save command result for a visible PM project', () => {
+    const result = buildDevHarnessPortalSaveWeeklyExpenseResult({
+      actorId: 'u002',
+      actorRole: 'pm',
+      command: {
+        projectId: 'p001',
+        activeSheetId: 'default',
+        activeSheetName: '기본 탭',
+        order: 0,
+        expectedVersion: 2,
+        rows: [
+          {
+            tempId: 'row-1',
+            cells: ['담당자', '1', '2026-04-14', '04-4-3'],
+          },
+        ],
+        syncPlan: [
+          {
+            yearMonth: '2026-04',
+            weekNo: 3,
+            amounts: { DIRECT_COST_OUT: 120000 },
+            reviewPendingCount: 0,
+          },
+          {
+            yearMonth: '2026-04',
+            weekNo: 4,
+            amounts: { DIRECT_COST_OUT: 50000 },
+            reviewPendingCount: 1,
+          },
+        ],
+      },
+    });
+
+    expect(result.sheet).toMatchObject({
+      id: 'default',
+      projectId: 'p001',
+      version: 3,
+      rowCount: 1,
+    });
+    expect(result.syncSummary).toEqual({
+      expenseSyncState: 'review_required',
+      expenseReviewPendingCount: 1,
+      syncedWeekCount: 1,
+      reviewRequiredWeekCount: 1,
+    });
+    expect(result.weeklySubmissionStatuses).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        projectId: 'p001',
+        yearMonth: '2026-04',
+        weekNo: 3,
+        expenseSyncState: 'synced',
+        expenseReviewPendingCount: 0,
+      }),
+      expect.objectContaining({
+        projectId: 'p001',
+        yearMonth: '2026-04',
+        weekNo: 4,
+        expenseSyncState: 'review_required',
+        expenseReviewPendingCount: 1,
+      }),
+    ]));
+    expect(result.cashflowWeeks).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'p001-2026-04-w3',
+        projectId: 'p001',
+        actual: { DIRECT_COST_OUT: 120000 },
+      }),
+      expect.objectContaining({
+        id: 'p001-2026-04-w4',
+        projectId: 'p001',
+        actual: { DIRECT_COST_OUT: 50000 },
+      }),
+    ]));
+  });
+
   it('handles phase1 read-model summary routes through the vite dev harness router', async () => {
     const [payroll, weeklyExpenses, bankStatements] = await Promise.all([
       resolveDevHarnessPortalApiResponse({
@@ -153,6 +229,54 @@ describe('dev harness portal api helpers', () => {
       handled: true,
       statusCode: 200,
       payload: { handoffContext: { ready: true, nextPath: '/portal/weekly-expenses' } },
+    });
+  });
+
+  it('handles weekly expense save through the vite dev harness router', async () => {
+    const response = await resolveDevHarnessPortalApiResponse({
+      enabled: true,
+      method: 'POST',
+      url: '/api/v1/portal/weekly-expenses/save',
+      actorId: 'u002',
+      actorRole: 'pm',
+      readBody: async () => ({
+        projectId: 'p001',
+        activeSheetId: 'default',
+        activeSheetName: '기본 탭',
+        order: 0,
+        expectedVersion: 2,
+        rows: [
+          {
+            tempId: 'row-1',
+            cells: ['담당자', '1', '2026-04-14', '04-4-3'],
+          },
+        ],
+        syncPlan: [
+          {
+            yearMonth: '2026-04',
+            weekNo: 3,
+            amounts: { DIRECT_COST_OUT: 120000 },
+            reviewPendingCount: 0,
+          },
+        ],
+      }),
+    });
+
+    expect(response).toMatchObject({
+      handled: true,
+      statusCode: 200,
+      payload: {
+        sheet: {
+          id: 'default',
+          projectId: 'p001',
+        },
+        syncSummary: {
+          expenseSyncState: 'synced',
+          expenseReviewPendingCount: 0,
+          syncedWeekCount: 1,
+          reviewRequiredWeekCount: 0,
+        },
+      },
     });
   });
 });

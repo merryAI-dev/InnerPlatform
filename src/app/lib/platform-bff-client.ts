@@ -2,11 +2,13 @@ import { featureFlags, parseFeatureFlag } from '../config/feature-flags';
 import type {
   AccountType,
   Basis,
+  CashflowWeekSheet,
   ProjectSheetSourceSnapshot,
   ProjectSheetSourceType,
   ProjectRequestContractAnalysis,
   SettlementType,
   TransactionState,
+  WeeklySubmissionStatus,
 } from '../data/types';
 import { PlatformApiClient } from '../platform/api-client';
 import { readDevAuthHarnessConfig } from '../platform/dev-harness';
@@ -366,6 +368,58 @@ export interface PortalBankStatementsSummaryResult {
     sheetCount: number;
   };
   registrationState?: 'registered' | 'unregistered';
+}
+
+export interface PortalWeeklyExpenseSaveCommandRow {
+  tempId: string;
+  sourceTxId?: string;
+  entryKind?: string;
+  cells: string[];
+  error?: string;
+  userEditedCells?: number[];
+  reviewHints?: string[];
+  reviewRequiredCellIndexes?: number[];
+  reviewStatus?: string;
+  reviewFingerprint?: string;
+  reviewConfirmedAt?: string;
+}
+
+export interface PortalWeeklyExpenseSaveCommandSyncPlanItem {
+  yearMonth: string;
+  weekNo: number;
+  amounts: Record<string, number>;
+  reviewPendingCount: number;
+}
+
+export interface PortalWeeklyExpenseSaveCommand {
+  projectId: string;
+  activeSheetId: string;
+  activeSheetName: string;
+  order: number;
+  expectedVersion?: number;
+  rows: PortalWeeklyExpenseSaveCommandRow[];
+  syncPlan: PortalWeeklyExpenseSaveCommandSyncPlanItem[];
+}
+
+export interface PortalWeeklyExpenseSaveResult {
+  sheet: {
+    id: string;
+    projectId: string;
+    name?: string;
+    version: number;
+    rowCount: number;
+    rows?: PortalWeeklyExpenseSaveCommandRow[];
+    updatedAt: string;
+    updatedBy?: string;
+  };
+  weeklySubmissionStatuses: WeeklySubmissionStatus[];
+  cashflowWeeks: Array<Pick<CashflowWeekSheet, 'id' | 'projectId' | 'yearMonth' | 'weekNo' | 'actual' | 'updatedAt'>>;
+  syncSummary: {
+    expenseSyncState: 'pending' | 'review_required' | 'synced' | 'sync_failed';
+    expenseReviewPendingCount: number;
+    syncedWeekCount: number;
+    reviewRequiredWeekCount: number;
+  };
 }
 
 export interface PortalRegistrationResult {
@@ -1322,6 +1376,25 @@ export async function fetchPortalWeeklyExpensesSummaryViaBff(params: {
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
+      timeoutMs: 8000,
+    },
+  );
+  return response.data;
+}
+
+export async function savePortalWeeklyExpenseViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  command: PortalWeeklyExpenseSaveCommand;
+  client?: PlatformApiClientLike;
+}): Promise<PortalWeeklyExpenseSaveResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<PortalWeeklyExpenseSaveResult>(
+    '/api/v1/portal/weekly-expenses/save',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.command,
       timeoutMs: 8000,
     },
   );

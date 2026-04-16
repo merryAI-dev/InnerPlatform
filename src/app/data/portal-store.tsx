@@ -80,6 +80,7 @@ import { useFirebase } from '../lib/firebase-context';
 import { getAuthInstance, getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
 import {
   isPlatformApiEnabled,
+  type PortalWeeklyExpenseSaveResult,
   type UpsertProjectPayload,
   upsertProjectViaBff,
 } from '../lib/platform-bff-client';
@@ -185,6 +186,7 @@ function serializeExpenseSheetTabForComparison(tab: ExpenseSheetTab): string {
     id: tab.id,
     name: tab.name,
     order: tab.order,
+    version: tab.version || 0,
     createdAt: tab.createdAt || '',
     updatedAt: tab.updatedAt || '',
     rows: serializeExpenseSheetRowsForComparison(tab.rows),
@@ -255,6 +257,7 @@ interface DevHarnessPortalSnapshot {
     name?: string;
     rows?: unknown;
     order?: number;
+    version?: number;
     createdAt?: string;
     updatedAt?: string;
   }>;
@@ -288,6 +291,7 @@ export interface ExpenseSheetTab {
   name: string;
   rows: ImportRow[] | null;
   order: number;
+  version?: number;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -428,6 +432,13 @@ interface PortalActions {
   renameExpenseSheet: (sheetId: string, name: string) => Promise<boolean>;
   deleteExpenseSheet: (sheetId: string) => Promise<boolean>;
   saveExpenseSheetRows: (rows: ImportRow[]) => Promise<ImportRow[]>;
+  applyWeeklyExpenseSaveResult: (input: {
+    result: PortalWeeklyExpenseSaveResult;
+    rows: ImportRow[];
+    activeSheetId: string;
+    activeSheetName: string;
+    order: number;
+  }) => void;
   saveBankStatementRows: (sheet: BankStatementSheet) => Promise<void>;
   saveBudgetPlanRows: (rows: BudgetPlanRow[]) => Promise<void>;
   saveBudgetCodeBook: (rows: BudgetCodeEntry[], renames?: BudgetCodeRename[]) => Promise<void>;
@@ -695,6 +706,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         name: sheet.name,
         rows: sheet.rows,
         order: sheet.order,
+        version: sheet.version,
         createdAt: sheet.createdAt,
         updatedAt: sheet.updatedAt,
       })),
@@ -909,6 +921,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           ),
           rows: normalizeExpenseSheetRows(sheet?.rows),
           order: Number.isFinite(sheet?.order) ? Number(sheet.order) : index,
+          ...(Number.isFinite(sheet?.version) ? { version: Number(sheet.version) } : {}),
           ...(sheet?.createdAt ? { createdAt: String(sheet.createdAt) } : {}),
           ...(sheet?.updatedAt ? { updatedAt: String(sheet.updatedAt) } : {}),
         }))
@@ -1305,6 +1318,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
                 name?: string;
                 rows?: ImportRow[];
                 order?: number;
+                version?: number;
                 createdAt?: string;
                 updatedAt?: string;
                 deletedAt?: string;
@@ -1315,6 +1329,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
                 name: sanitizeExpenseSheetName(data?.name, docItem.id === 'default' ? '기본 탭' : '새 탭'),
                 rows: normalizeExpenseSheetRows(data?.rows),
                 order: Number.isFinite(Number(data?.order)) ? Number(data?.order) : (docItem.id === 'default' ? 0 : 999),
+                ...(Number.isFinite(Number(data?.version)) ? { version: Number(data?.version) } : {}),
                 createdAt: data?.createdAt,
                 updatedAt: data?.updatedAt,
               };
@@ -1868,6 +1883,53 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     myProject?.fundInputMode,
     myProject?.basis,
   ]);
+
+  const applyWeeklyExpenseSaveResult = useCallback((input: {
+    result: PortalWeeklyExpenseSaveResult;
+    rows: ImportRow[];
+    activeSheetId: string;
+    activeSheetName: string;
+    order: number;
+  }) => {
+    const { result } = input;
+    const normalizedRows = normalizeExpenseSheetRows(input.rows) || [];
+    const nextSheets = upsertExpenseSheetTabRows({
+      sheets: expenseSheetsRef.current,
+      sheetId: input.activeSheetId || result.sheet.id,
+      sheetName: sanitizeExpenseSheetName(
+        result.sheet.name || input.activeSheetName,
+        input.activeSheetId === 'default' ? '기본 탭' : '새 탭',
+      ),
+      order: Number.isFinite(input.order)
+        ? input.order
+        : (expenseSheetsRef.current.find((sheet) => sheet.id === (input.activeSheetId || result.sheet.id))?.order || 0),
+      rows: normalizedRows,
+      now: result.sheet.updatedAt,
+      createdAt: expenseSheetsRef.current.find((sheet) => sheet.id === (input.activeSheetId || result.sheet.id))?.createdAt,
+    }).map((sheet) => (
+      sheet.id === (input.activeSheetId || result.sheet.id)
+        ? { ...sheet, version: result.sheet.version }
+        : sheet
+    ));
+
+    expenseSheetsRef.current = nextSheets;
+    setExpenseSheets(nextSheets);
+
+    if (activeExpenseSheetIdRef.current === (input.activeSheetId || result.sheet.id)) {
+      expenseSheetRowsRef.current = normalizedRows;
+      setExpenseSheetRows(normalizedRows);
+    }
+
+    const replacedWeekKeys = new Set(
+      (result.weeklySubmissionStatuses || []).map((item) => `${item.projectId}:${item.yearMonth}:${item.weekNo}`),
+    );
+    setWeeklySubmissionStatuses((prev) => (
+      prev
+        .filter((item) => !replacedWeekKeys.has(`${item.projectId}:${item.yearMonth}:${item.weekNo}`))
+        .concat(result.weeklySubmissionStatuses || [])
+        .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')))
+    ));
+  }, []);
 
   const saveBudgetPlanRows = useCallback(async (rows: BudgetPlanRow[]) => {
     const now = new Date().toISOString();
@@ -3014,6 +3076,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     renameExpenseSheet,
     deleteExpenseSheet,
     saveExpenseSheetRows,
+    applyWeeklyExpenseSaveResult,
     saveBankStatementRows,
     saveBudgetPlanRows,
     saveBudgetCodeBook,

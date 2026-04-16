@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-04-16] patch-note | portal-weekly-expense, shared-portal-architecture | weekly expense command authority slice
+- pages: [portal-weekly-expense](./pages/portal-weekly-expense.md), [shared-portal-architecture](./pages/shared-portal-architecture.md)
+- summary: phase 2 첫 write slice로 `portal/weekly-expenses/save` command boundary를 추가해 주간 입력 저장 시 expense sheet, weekly submission 상태, cashflow actual 반영을 더 이상 클라이언트가 쪼개서 직접 쓰지 않도록 정리했다. `SettlementLedgerPage`와 `PortalWeeklyExpensePage`는 single-command orchestration으로 옮겼고, dev harness contract와 canonical `phase0:portal:network-gate`까지 함께 green으로 닫았다.
+
 ## [2026-04-16] patch-note | shared-portal-architecture | phase0 portal network gate CI handoff
 - pages: [shared-portal-architecture](./pages/shared-portal-architecture.md)
 - summary: phase 0 network gate foundation 기준으로 CI workflow와 운영 문서가 canonical `phase0:portal:network-gate` command 및 `artifacts/portal-network-gate.json` artifact path를 single-source-of-truth로 고정했다. workflow의 conditional fallback과 duplicated legacy release-gate steps를 제거해, 이제 canonical gate 결과와 uploaded artifact만이 portal network/runtime release evidence가 된다.

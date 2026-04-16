@@ -10,6 +10,7 @@ import {
   buildDevHarnessPortalOnboardingContext,
   buildDevHarnessPortalPayrollSummary,
   buildDevHarnessPortalRegistrationResult,
+  buildDevHarnessPortalSaveWeeklyExpenseResult,
   buildDevHarnessPortalSessionProjectResult,
   buildDevHarnessPortalWeeklyExpensesSummary,
 } from './src/app/platform/dev-harness-portal-api'
@@ -171,6 +172,19 @@ export async function resolveDevHarnessPortalApiResponse(params: {
         payload: buildDevHarnessPortalBankStatementsSummary({
           actorId: params.actorId,
           actorRole: params.actorRole,
+        }),
+      }
+    }
+
+    if (method === 'POST' && pathName === '/api/v1/portal/weekly-expenses/save') {
+      const body = await params.readBody()
+      return {
+        handled: true,
+        statusCode: 200,
+        payload: buildDevHarnessPortalSaveWeeklyExpenseResult({
+          actorId: params.actorId,
+          actorRole: params.actorRole,
+          command: body as Parameters<typeof buildDevHarnessPortalSaveWeeklyExpenseResult>[0]['command'],
         }),
       }
     }

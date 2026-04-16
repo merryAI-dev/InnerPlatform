@@ -35,6 +35,7 @@
 - [x] phase 1a로 portal dashboard / payroll / weekly-expenses / bank-statements summary endpoint와 클라이언트 contract가 추가됨
 - [x] finance-grade master plan이 이전 `next plan`을 supersede하고, phase 0 gate foundation을 먼저 land하는 순서로 재정렬됨
 - [x] phase 0 network gate foundation의 CI/doc cutover가 완료되어, canonical gate command와 JSON artifact path가 release evidence 기준으로 고정됨
+- [x] phase 2 첫 command-authority slice로 weekly expense save path가 `portal/weekly-expenses/save` server-owned write boundary를 사용함
 - [x] critical write path를 command API로 이동하는 단계가 플랜에 포함됨
 - [x] App 루트 broad provider tree가 admin/portal route shell로 분리됨
 - [x] route shell이 explicit Firestore access mode를 주입하고 store는 pathname self-inference를 하지 않음
@@ -62,6 +63,8 @@
 - [2026-04-15] entry hardening과 함께 self-hosted Pretendard + immutable asset cache 정책을 추가해, HAR에서 보인 entry surface 네트워크 낭비를 줄이는 방향으로 첫 조치를 넣었다.
 - [2026-04-16] phase 1 read-model slice로 `/api/v1/portal/dashboard-summary`, `/api/v1/portal/payroll-summary`, `/api/v1/portal/weekly-expenses-summary`, `/api/v1/portal/bank-statements-summary` endpoint와 대응 client contract를 추가했다.
 - [2026-04-16] portal dashboard / payroll / weekly-expenses / bank-statements는 위 summary endpoint를 우선 읽고, store state는 fallback 또는 write path 쪽으로만 남기는 방향으로 cutover를 시작했다.
+- [2026-04-16] phase 2 첫 write slice로 `/api/v1/portal/weekly-expenses/save` command route를 추가하고, `PortalWeeklyExpensePage` / `SettlementLedgerPage`가 expense sheet 저장, weekly submission 상태 반영, cashflow week actual 갱신을 하나의 command boundary로 위임하도록 옮겼다.
+- [2026-04-16] 위 slice는 targeted tests, production build, canonical `phase0:portal:network-gate`를 모두 통과했고 `/portal/weekly-expenses`를 포함한 required portal routes에서 `listen=0 write=0 listen400=0 consoleErrors=0` budget을 유지했다.
 - [2026-04-16] phase1 close 과정에서 `project-select` smoke 실패 원인을 `VITE_PLATFORM_API_BASE_URL`이 local harness에서 죽어 있는 `127.0.0.1:8787`을 계속 가리키던 drift로 확정했고, harness 모드에서는 현재 Vite origin을 우선 사용하도록 정리했다.
 - [2026-04-16] broad smoke에서 보였던 `ProjectDetailPage` dynamic import failure와 webserver refusal은 별도 제품 회귀가 아니라 같은 harness drift/worker churn의 false negative로 분리했고, Playwright harness를 serial worker + local API base 고정 계약으로 잠갔다.
 - [2026-04-16] phase1 close 과정에서 `/portal/submissions -> /portal` 경로의 dashboard summary null-safety 회귀도 같이 수정해, broad smoke와 release gate를 실제 제품 상태 기준으로 다시 green으로 닫았다.
@@ -93,6 +96,7 @@
 - `src/app/data/portal-store.tsx`
 - `src/app/lib/platform-bff-client.ts`
 - `server/bff/routes/portal-entry.mjs`
+- `server/bff/routes/portal-weekly-expense-commands.mjs`
 - `src/styles/fonts.css`
 - `vercel.json`
 - `src/app/data/payroll-store.tsx`

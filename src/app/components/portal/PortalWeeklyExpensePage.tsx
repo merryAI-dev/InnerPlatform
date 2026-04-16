@@ -14,7 +14,12 @@ import {
 import { usePortalStore } from '../../data/portal-store';
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { useAuth } from '../../data/auth-store';
-import type { EvidenceUploadSelection, PendingQuickInsert } from '../cashflow/SettlementLedgerPage';
+import type {
+  EvidenceUploadSelection,
+  PendingQuickInsert,
+  WeeklyExpenseSaveCommandInput,
+  WeeklyExpenseSaveCommandResult,
+} from '../cashflow/SettlementLedgerPage';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Card, CardContent } from '../ui/card';
@@ -43,6 +48,7 @@ import {
   uploadTransactionEvidenceDriveViaBff,
   fetchBudgetSuggestionViaBff,
   isPlatformApiEnabled,
+  savePortalWeeklyExpenseViaBff,
 } from '../../lib/platform-bff-client';
 import { PlatformApiError } from '../../platform/api-client';
 import {
@@ -110,7 +116,8 @@ export function PortalWeeklyExpensePage() {
     deleteExpenseSheet,
     expenseSheetRows,
     bankStatementRows,
-    saveExpenseSheetRows,
+    saveExpenseSheetRows: persistExpenseSheetRows,
+    applyWeeklyExpenseSaveResult,
     comments,
     addComment,
     participationEntries,
@@ -120,9 +127,12 @@ export function PortalWeeklyExpensePage() {
     saveBudgetPlanRows,
     saveBudgetCodeBook,
     markSheetSourceApplied,
-    upsertWeeklySubmissionStatus,
   } = usePortalStore();
-  const { submitWeekAsPm, upsertWeekAmounts } = useCashflowWeeks();
+  const {
+    submitWeekAsPm,
+    upsertWeekAmounts: persistWeekAmounts,
+    applyWeeklyExpenseCommandWeeks,
+  } = useCashflowWeeks();
   const devHarnessConfig = readDevAuthHarnessConfig(import.meta.env, typeof window !== 'undefined' ? window.location : undefined);
   const [projectDriveProvisioning, setProjectDriveProvisioning] = useState(false);
   const [googleSheetImportOpen, setGoogleSheetImportOpen] = useState(false);
@@ -147,6 +157,12 @@ export function PortalWeeklyExpensePage() {
   const activeSheetName = useMemo(() => {
     return visibleExpenseSheets.find((sheet) => sheet.id === activeExpenseSheetId)?.name || visibleExpenseSheets[0]?.name || '기본 탭';
   }, [visibleExpenseSheets, activeExpenseSheetId]);
+  const activeSheetOrder = useMemo(() => (
+    visibleExpenseSheets.find((sheet) => sheet.id === activeExpenseSheetId)?.order || visibleExpenseSheets[0]?.order || 0
+  ), [visibleExpenseSheets, activeExpenseSheetId]);
+  const activeSheetVersion = useMemo(() => (
+    visibleExpenseSheets.find((sheet) => sheet.id === activeExpenseSheetId)?.version
+  ), [visibleExpenseSheets, activeExpenseSheetId]);
   const bankStatementCount = bankStatementRows?.rows?.length || 0;
   const projectReadModel = useMemo(() => resolvePortalProjectReadModel({
     summaryProject: weeklySummary?.project,
@@ -313,6 +329,63 @@ export function PortalWeeklyExpensePage() {
     yearWeeks: Parameters<typeof buildSettlementActualSyncPayloadLocally>[1],
     persistedRows?: ImportRow[] | null,
   ) => buildSettlementActualSyncPayloadLocally(rows, yearWeeks, persistedRows), []);
+
+  const handleSaveWeeklyExpense = useCallback(async (
+    command: WeeklyExpenseSaveCommandInput,
+  ): Promise<WeeklyExpenseSaveCommandResult> => {
+    if (!orgId || !bffActor.uid) {
+      throw new Error('weekly_expense_save_context_missing');
+    }
+    const result = await savePortalWeeklyExpenseViaBff({
+      tenantId: orgId,
+      actor: bffActor,
+      command: {
+        ...command,
+        expectedVersion: command.expectedVersion ?? activeSheetVersion ?? 0,
+        rows: command.rows.map((row) => ({
+          tempId: row.tempId,
+          ...(row.sourceTxId ? { sourceTxId: row.sourceTxId } : {}),
+          ...(row.entryKind ? { entryKind: row.entryKind } : {}),
+          cells: Array.isArray(row.cells) ? row.cells.map((cell) => String(cell ?? '')) : [],
+          ...(row.error ? { error: row.error } : {}),
+          ...(row.userEditedCells && row.userEditedCells.size > 0
+            ? { userEditedCells: Array.from(row.userEditedCells).sort((left, right) => left - right) }
+            : {}),
+          ...(row.reviewHints && row.reviewHints.length > 0 ? { reviewHints: [...row.reviewHints] } : {}),
+          ...(row.reviewRequiredCellIndexes && row.reviewRequiredCellIndexes.length > 0
+            ? { reviewRequiredCellIndexes: [...row.reviewRequiredCellIndexes] }
+            : {}),
+          ...(row.reviewStatus ? { reviewStatus: row.reviewStatus } : {}),
+          ...(row.reviewFingerprint ? { reviewFingerprint: row.reviewFingerprint } : {}),
+          ...(row.reviewConfirmedAt ? { reviewConfirmedAt: row.reviewConfirmedAt } : {}),
+        })),
+      },
+      client: apiClient,
+    });
+    applyWeeklyExpenseSaveResult({
+      result,
+      rows: command.rows,
+      activeSheetId: command.activeSheetId,
+      activeSheetName: command.activeSheetName,
+      order: command.order,
+    });
+    applyWeeklyExpenseCommandWeeks(result.cashflowWeeks as CashflowWeekSheet[]);
+    return {
+      sheet: {
+        ...result.sheet,
+      },
+      weeklySubmissionStatuses: result.weeklySubmissionStatuses,
+      cashflowWeeks: result.cashflowWeeks as CashflowWeekSheet[],
+      syncSummary: result.syncSummary,
+    };
+  }, [
+    activeSheetVersion,
+    apiClient,
+    applyWeeklyExpenseCommandWeeks,
+    applyWeeklyExpenseSaveResult,
+    bffActor,
+    orgId,
+  ]);
 
   const handleEvidenceDriveError = useCallback((error: unknown, actionLabel: string) => {
     reportError(error, {
@@ -1041,6 +1114,10 @@ export function PortalWeeklyExpensePage() {
           projectName={projectName}
           transactions={transactions}
           defaultLedgerId={defaultLedgerId}
+          activeSheetId={activeExpenseSheetId}
+          activeSheetName={activeSheetName}
+          activeSheetOrder={activeSheetOrder}
+          expectedSheetVersion={activeSheetVersion}
           onAddTransaction={handleAddTransaction}
           onUpdateTransaction={handleUpdateTransaction}
           authorOptions={authorOptions}
@@ -1054,7 +1131,7 @@ export function PortalWeeklyExpensePage() {
           evidenceRequiredMap={evidenceRequiredMap}
           onSaveEvidenceRequiredMap={saveEvidenceRequiredMap}
           sheetRows={expenseSheetRows}
-          onSaveSheetRows={saveExpenseSheetRows}
+          onSaveWeeklyExpense={handleSaveWeeklyExpense}
           onSubmitWeek={handleSubmitWeek}
           onChangeTransactionState={handleChangeTransactionState}
           currentUserName={portalUser?.name || 'PM'}
@@ -1071,7 +1148,6 @@ export function PortalWeeklyExpensePage() {
           workflowMode={fundInputMode}
           settlementSheetPolicy={settlementSheetPolicy}
           basis={myProject?.basis}
-          onUpdateWeeklySubmissionStatus={upsertWeeklySubmissionStatus}
           pendingQuickInsert={pendingQuickInsert}
           onPendingQuickInsertHandled={handlePendingQuickInsertHandled}
           onDeriveRows={deriveRowsWithLocalKernel}
@@ -1098,13 +1174,13 @@ export function PortalWeeklyExpensePage() {
               sheetSources={sheetSources}
               devHarnessEnabled={devHarnessConfig.enabled}
               ensureGoogleWorkspaceAccess={ensureGoogleWorkspaceAccess}
-              saveExpenseSheetRows={saveExpenseSheetRows}
+              saveExpenseSheetRows={persistExpenseSheetRows}
               saveBudgetPlanRows={saveBudgetPlanRows}
               saveBudgetCodeBook={saveBudgetCodeBook}
               saveBankStatementRows={saveBankStatementRows}
               saveEvidenceRequiredMap={saveEvidenceRequiredMap}
               markSheetSourceApplied={markSheetSourceApplied}
-              upsertWeekAmounts={upsertWeekAmounts}
+              upsertWeekAmounts={persistWeekAmounts}
               previewActualSyncPayload={previewActualSyncWithLocalKernel}
             />
         </Suspense>

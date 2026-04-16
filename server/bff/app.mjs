@@ -85,6 +85,7 @@ import { updateCounterpartyHistory, lookupCounterpartyHistory } from './counterp
 import { mountProjectRoutes } from './routes/projects.mjs';
 import { mountPortalEntryRoutes } from './routes/portal-entry.mjs';
 import { mountPortalReadModelRoutes } from './routes/portal-read-model.mjs';
+import { mountPortalWeeklyExpenseCommandRoutes } from './routes/portal-weekly-expense-commands.mjs';
 import { mountLedgerRoutes } from './routes/ledgers.mjs';
 import { mountTransactionRoutes } from './routes/transactions.mjs';
 import { mountAuditRoutes } from './routes/audit.mjs';
@@ -1353,6 +1354,13 @@ export function createBffApp(options = {}) {
   });
   mountPortalEntryRoutes(app, { db, createMutatingRoute, idempotencyService });
   mountPortalReadModelRoutes(app, { db });
+  mountPortalWeeklyExpenseCommandRoutes(app, {
+    db,
+    now,
+    idempotencyService,
+    createMutatingRoute,
+    auditChainService,
+  });
   mountCashflowExportRoutes(app, { db, rbacPolicy });
   mountLedgerRoutes(app, { db, now, idempotencyService, auditChainService, piiProtector });
   mountTransactionRoutes(app, { db, now, idempotencyService, auditChainService, piiProtector, rbacPolicy, driveService });

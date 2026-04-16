@@ -22,6 +22,7 @@ import {
   provisionTransactionEvidenceDriveViaBff,
   readPlatformApiRuntimeConfig,
   restoreProjectViaBff,
+  savePortalWeeklyExpenseViaBff,
   syncTransactionEvidenceDriveViaBff,
   trashProjectViaBff,
   upsertPortalRegistrationViaBff,
@@ -236,6 +237,70 @@ describe('platform-bff-client', () => {
     });
     expect(result.financeSummaryItems[0]).toEqual({ label: '총 입금', value: '300만' });
     expect(result.submissionRows[0]?.expenseTone).toBe('success');
+  });
+
+  it('calls portal weekly expense save command endpoint', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({
+        data: {
+          sheet: {
+            id: 'default',
+            projectId: 'p001',
+            version: 3,
+            rowCount: 2,
+            updatedAt: '2026-04-16T12:00:00.000Z',
+          },
+          weeklySubmissionStatuses: [],
+          cashflowWeeks: [],
+          syncSummary: {
+            expenseSyncState: 'review_required',
+            expenseReviewPendingCount: 1,
+            syncedWeekCount: 1,
+            reviewRequiredWeekCount: 1,
+          },
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    const result = await savePortalWeeklyExpenseViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm', idToken: 'token-abc' },
+      command: {
+        projectId: 'p001',
+        activeSheetId: 'default',
+        activeSheetName: '기본 탭',
+        order: 0,
+        expectedVersion: 2,
+        rows: [
+          {
+            tempId: 'row-1',
+            cells: ['담당자', '1', '2026-04-14', '04-4-3'],
+          },
+        ],
+        syncPlan: [
+          {
+            yearMonth: '2026-04',
+            weekNo: 3,
+            amounts: { DIRECT_COST_OUT: 120000 },
+            reviewPendingCount: 0,
+          },
+        ],
+      },
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/portal/weekly-expenses/save', expect.objectContaining({
+      tenantId: 'mysc',
+      body: expect.objectContaining({
+        projectId: 'p001',
+        activeSheetId: 'default',
+        expectedVersion: 2,
+      }),
+    }));
+    expect(result.sheet.version).toBe(3);
+    expect(result.syncSummary.expenseSyncState).toBe('review_required');
   });
 
   it('calls portal payroll summary endpoint', async () => {

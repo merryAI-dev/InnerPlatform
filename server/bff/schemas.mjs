@@ -94,6 +94,23 @@ const settlementKernelImportRowSchema = z.object({
   userEditedCells: z.array(z.number().int().nonnegative()).optional(),
 }).strict();
 
+const weeklyExpenseSaveSyncPlanSchema = z.object({
+  yearMonth: z.string().trim().regex(/^\d{4}-\d{2}$/),
+  weekNo: z.number().int().positive(),
+  amounts: z.record(z.string().trim().min(1), z.number()),
+  reviewPendingCount: z.number().int().nonnegative(),
+}).strict();
+
+export const portalWeeklyExpenseSaveSchema = z.object({
+  projectId: NON_EMPTY_STRING,
+  activeSheetId: NON_EMPTY_STRING,
+  activeSheetName: NON_EMPTY_STRING.max(200),
+  order: z.number().int().nonnegative(),
+  expectedVersion: z.number().int().nonnegative(),
+  rows: z.array(settlementKernelImportRowSchema),
+  syncPlan: z.array(weeklyExpenseSaveSyncPlanSchema),
+}).strict();
+
 export const projectSheetSourceUploadSchema = z.object({
   sourceType: z.enum(['usage', 'budget', 'evidence_rules', 'cashflow', 'bank_statement']),
   sheetName: NON_EMPTY_STRING.max(200),

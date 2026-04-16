@@ -181,8 +181,57 @@ type PortalBankStatementsSummaryResult = {
   registrationState: 'registered' | 'unregistered';
 };
 
+type PortalWeeklyExpenseSaveCommand = {
+  projectId: string;
+  activeSheetId: string;
+  activeSheetName: string;
+  order: number;
+  expectedVersion: number;
+  rows: Array<{
+    tempId: string;
+    cells: string[];
+    userEditedCells?: number[];
+    reviewHints?: string[];
+    reviewRequiredCellIndexes?: number[];
+    reviewStatus?: string;
+  }>;
+  syncPlan: Array<{
+    yearMonth: string;
+    weekNo: number;
+    amounts: Record<string, number>;
+    reviewPendingCount: number;
+  }>;
+};
+
+type PortalWeeklyExpenseSaveResult = {
+  sheet: {
+    id: string;
+    projectId: string;
+    name: string;
+    version: number;
+    rowCount: number;
+    updatedAt: string;
+  };
+  weeklySubmissionStatuses: WeeklySubmissionStatus[];
+  cashflowWeeks: Array<{
+    id: string;
+    projectId: string;
+    yearMonth: string;
+    weekNo: number;
+    actual: Record<string, number>;
+    updatedAt: string;
+  }>;
+  syncSummary: {
+    expenseSyncState: 'pending' | 'review_required' | 'synced' | 'sync_failed';
+    expenseReviewPendingCount: number;
+    syncedWeekCount: number;
+    reviewRequiredWeekCount: number;
+  };
+};
+
 const PRIVILEGED_ROLES = new Set(['admin', 'finance']);
 const DEV_HARNESS_TODAY_ISO = '2026-04-16';
+const DEV_HARNESS_UPDATED_AT = '2026-04-16T12:00:00.000Z';
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
@@ -557,6 +606,62 @@ export function buildDevHarnessPortalWeeklyExpensesSummary(params: {
       nextPath: '/portal/bank-statements',
     },
     registrationState: context.registrationState,
+  };
+}
+
+export function buildDevHarnessPortalSaveWeeklyExpenseResult(params: {
+  actorId?: string;
+  actorRole?: string;
+  command: PortalWeeklyExpenseSaveCommand;
+}): PortalWeeklyExpenseSaveResult {
+  const command = params.command;
+  const { currentProject } = resolveHarnessProjectContext({
+    actorId: params.actorId,
+    actorRole: params.actorRole,
+    projectId: command.projectId,
+  });
+  const syncPlan = Array.isArray(command.syncPlan) ? command.syncPlan : [];
+  const weeklySubmissionStatuses = syncPlan.map((item) => ({
+    id: `${currentProject.id}-${item.yearMonth}-w${item.weekNo}`,
+    projectId: currentProject.id,
+    yearMonth: item.yearMonth,
+    weekNo: item.weekNo,
+    expenseEdited: true,
+    expenseUpdated: true,
+    expenseSyncState: item.reviewPendingCount > 0 ? 'review_required' : 'synced',
+    expenseReviewPendingCount: item.reviewPendingCount,
+    expenseUpdatedAt: DEV_HARNESS_UPDATED_AT,
+    updatedAt: DEV_HARNESS_UPDATED_AT,
+  } satisfies WeeklySubmissionStatus));
+  const cashflowWeeks = syncPlan.map((item) => ({
+    id: `${currentProject.id}-${item.yearMonth}-w${item.weekNo}`,
+    projectId: currentProject.id,
+    yearMonth: item.yearMonth,
+    weekNo: item.weekNo,
+    actual: item.amounts,
+    updatedAt: DEV_HARNESS_UPDATED_AT,
+  }));
+  const reviewRequiredWeekCount = syncPlan.filter((item) => item.reviewPendingCount > 0).length;
+  const syncedWeekCount = syncPlan.filter((item) => item.reviewPendingCount <= 0).length;
+  const expenseReviewPendingCount = syncPlan.reduce((sum, item) => sum + Math.max(0, Number(item.reviewPendingCount) || 0), 0);
+
+  return {
+    sheet: {
+      id: command.activeSheetId,
+      projectId: currentProject.id,
+      name: command.activeSheetName,
+      version: Math.max(1, Number(command.expectedVersion) + 1),
+      rowCount: Array.isArray(command.rows) ? command.rows.length : 0,
+      updatedAt: DEV_HARNESS_UPDATED_AT,
+    },
+    weeklySubmissionStatuses,
+    cashflowWeeks,
+    syncSummary: {
+      expenseSyncState: reviewRequiredWeekCount > 0 ? 'review_required' : 'synced',
+      expenseReviewPendingCount,
+      syncedWeekCount,
+      reviewRequiredWeekCount,
+    },
   };
 }
 
