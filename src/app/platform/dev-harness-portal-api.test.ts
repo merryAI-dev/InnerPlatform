@@ -7,6 +7,7 @@ import {
   buildDevHarnessPortalDashboardSummary,
   buildDevHarnessPortalEntryContext,
   buildDevHarnessPortalExpenseIntakeDraftResult,
+  buildDevHarnessPortalExpenseIntakeProjectResult,
   buildDevHarnessPortalOnboardingContext,
   buildDevHarnessPortalPayrollSummary,
   buildDevHarnessPortalRegistrationResult,
@@ -263,6 +264,50 @@ describe('dev harness portal api helpers', () => {
     expect(result.summary).toEqual({
       updatedManualFieldCount: 2,
       version: 3,
+    });
+  });
+
+  it('builds an expense intake project command result for a visible PM project', () => {
+    const result = buildDevHarnessPortalExpenseIntakeProjectResult({
+      actorId: 'u002',
+      actorRole: 'pm',
+      command: {
+        projectId: 'p001',
+        intakeId: 'fp-1',
+        updates: {
+          manualFields: {
+            budgetCategory: '여비',
+            budgetSubCategory: '숙박',
+            cashflowLineId: 'DIRECT_COST_OUT',
+            expenseAmount: 125000,
+            evidenceCompletedDesc: '출장신청서',
+          },
+          reviewReasons: ['manual_review_required'],
+        },
+      },
+    });
+
+    expect(result.expenseIntakeItem).toMatchObject({
+      id: 'fp-1',
+      projectId: 'p001',
+      matchState: 'AUTO_CONFIRMED',
+      evidenceStatus: 'PARTIAL',
+      existingExpenseSheetId: 'default',
+      existingExpenseRowTempId: 'bank-fp-1',
+      version: 4,
+    });
+    expect(result.expenseSheet).toMatchObject({
+      id: 'default',
+      projectId: 'p001',
+      rowCount: 1,
+      version: 2,
+    });
+    expect(result.summary).toEqual({
+      projectId: 'p001',
+      intakeId: 'fp-1',
+      targetSheetId: 'default',
+      projectedRowTempId: 'bank-fp-1',
+      version: 4,
     });
   });
 
@@ -585,6 +630,52 @@ describe('dev harness portal api helpers', () => {
         summary: {
           updatedManualFieldCount: 1,
           version: 3,
+        },
+      },
+    });
+  });
+
+  it('handles expense intake project through the vite dev harness router', async () => {
+    const response = await resolveDevHarnessPortalApiResponse({
+      enabled: true,
+      method: 'POST',
+      url: '/api/v1/portal/expense-intake/project',
+      actorId: 'u002',
+      actorRole: 'pm',
+      readBody: async () => ({
+        projectId: 'p001',
+        intakeId: 'fp-1',
+        updates: {
+          manualFields: {
+            budgetCategory: '여비',
+            budgetSubCategory: '숙박',
+            cashflowLineId: 'DIRECT_COST_OUT',
+            expenseAmount: 125000,
+            evidenceCompletedDesc: '출장신청서',
+          },
+          reviewReasons: ['manual_review_required'],
+        },
+      }),
+    });
+
+    expect(response).toMatchObject({
+      handled: true,
+      statusCode: 200,
+      payload: {
+        expenseIntakeItem: {
+          id: 'fp-1',
+          projectId: 'p001',
+          existingExpenseSheetId: 'default',
+          existingExpenseRowTempId: 'bank-fp-1',
+        },
+        expenseSheet: {
+          id: 'default',
+          rowCount: 1,
+        },
+        summary: {
+          targetSheetId: 'default',
+          projectedRowTempId: 'bank-fp-1',
+          version: 4,
         },
       },
     });

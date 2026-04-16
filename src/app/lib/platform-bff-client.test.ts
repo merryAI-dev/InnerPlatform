@@ -21,6 +21,7 @@ import {
   processProjectRequestContractViaBff,
   provisionProjectEvidenceDriveRootViaBff,
   savePortalExpenseIntakeDraftViaBff,
+  savePortalExpenseIntakeProjectViaBff,
   provisionTransactionEvidenceDriveViaBff,
   readPlatformApiRuntimeConfig,
   restoreProjectViaBff,
@@ -436,6 +437,96 @@ describe('platform-bff-client', () => {
     }));
     expect(result.expenseIntakeItem.manualFields.budgetSubCategory).toBe('숙박');
     expect(result.summary.updatedManualFieldCount).toBe(1);
+  });
+
+  it('calls portal expense intake project command endpoint', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({
+        data: {
+          expenseIntakeItem: {
+            id: 'fp-1',
+            projectId: 'p001',
+            sourceTxId: 'bank:fp-1',
+            bankFingerprint: 'fp-1',
+            bankSnapshot: {
+              accountNumber: '123-456',
+              dateTime: '2026-04-16 09:00',
+              counterparty: '테스트 상호',
+              memo: '기존 메모',
+              signedAmount: -125000,
+              balanceAfter: 900000,
+            },
+            matchState: 'AUTO_CONFIRMED',
+            projectionStatus: 'PROJECTED_WITH_PENDING_EVIDENCE',
+            evidenceStatus: 'PARTIAL',
+            manualFields: {
+              expenseAmount: 125000,
+              budgetCategory: '여비',
+              budgetSubCategory: '숙박',
+              cashflowLineId: 'DIRECT_COST_OUT',
+              evidenceCompletedDesc: '출장신청서',
+            },
+            existingExpenseSheetId: 'default',
+            existingExpenseRowTempId: 'bank-fp-1',
+            reviewReasons: ['manual_review_required'],
+            lastUploadBatchId: 'batch-1',
+            createdAt: '2026-04-16T18:00:00.000Z',
+            updatedAt: '2026-04-16T19:10:00.000Z',
+            updatedBy: 'u001',
+            version: 4,
+          },
+          expenseSheet: {
+            id: 'default',
+            projectId: 'p001',
+            name: '기본 탭',
+            order: 0,
+            rowCount: 1,
+            rows: [{ tempId: 'bank-fp-1', sourceTxId: 'bank:fp-1', cells: ['담당자'] }],
+            updatedAt: '2026-04-16T19:10:00.000Z',
+            updatedBy: 'u001',
+            version: 2,
+          },
+          projectedRow: { tempId: 'bank-fp-1', sourceTxId: 'bank:fp-1', cells: ['담당자'] },
+          summary: {
+            projectId: 'p001',
+            intakeId: 'fp-1',
+            targetSheetId: 'default',
+            projectedRowTempId: 'bank-fp-1',
+            version: 4,
+          },
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    const result = await savePortalExpenseIntakeProjectViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm', idToken: 'token-abc' },
+      command: {
+        projectId: 'p001',
+        intakeId: 'fp-1',
+        updates: {
+          manualFields: {
+            memo: '수정 메모',
+            evidenceCompletedDesc: '출장신청서',
+          },
+          reviewReasons: ['manual_review_required'],
+        },
+      },
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/portal/expense-intake/project', expect.objectContaining({
+      tenantId: 'mysc',
+      body: expect.objectContaining({
+        projectId: 'p001',
+        intakeId: 'fp-1',
+      }),
+    }));
+    expect(result.expenseIntakeItem.existingExpenseRowTempId).toBe('bank-fp-1');
+    expect(result.expenseSheet.rows).toHaveLength(1);
+    expect(result.summary.targetSheetId).toBe('default');
   });
 
   it('calls cashflow week close command endpoint', async () => {

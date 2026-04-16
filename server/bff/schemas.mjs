@@ -211,19 +211,27 @@ const bankImportManualFieldsSchema = z.object({
   evidenceCompletedDesc: z.string().optional(),
 }).strict();
 
+const portalExpenseIntakeUpdatesSchema = z.object({
+  manualFields: bankImportManualFieldsSchema.optional(),
+  existingExpenseSheetId: NON_EMPTY_STRING.nullish(),
+  existingExpenseRowTempId: NON_EMPTY_STRING.nullish(),
+  matchState: z.enum(['AUTO_CONFIRMED', 'PENDING_INPUT', 'REVIEW_REQUIRED', 'IGNORED']).optional(),
+  projectionStatus: z.enum(['NOT_PROJECTED', 'PROJECTED', 'PROJECTED_WITH_PENDING_EVIDENCE']).optional(),
+  evidenceStatus: z.enum(['MISSING', 'PARTIAL', 'COMPLETE']).optional(),
+  reviewReasons: z.array(NON_EMPTY_STRING).optional(),
+  lastUploadBatchId: NON_EMPTY_STRING.optional(),
+}).strict();
+
 export const portalExpenseIntakeDraftSaveSchema = z.object({
   projectId: NON_EMPTY_STRING,
   intakeId: NON_EMPTY_STRING,
-  updates: z.object({
-    manualFields: bankImportManualFieldsSchema.optional(),
-    existingExpenseSheetId: NON_EMPTY_STRING.nullish(),
-    existingExpenseRowTempId: NON_EMPTY_STRING.nullish(),
-    matchState: z.enum(['AUTO_CONFIRMED', 'PENDING_INPUT', 'REVIEW_REQUIRED', 'IGNORED']).optional(),
-    projectionStatus: z.enum(['NOT_PROJECTED', 'PROJECTED', 'PROJECTED_WITH_PENDING_EVIDENCE']).optional(),
-    evidenceStatus: z.enum(['MISSING', 'PARTIAL', 'COMPLETE']).optional(),
-    reviewReasons: z.array(NON_EMPTY_STRING).optional(),
-    lastUploadBatchId: NON_EMPTY_STRING.optional(),
-  }).strict(),
+  updates: portalExpenseIntakeUpdatesSchema,
+}).strict();
+
+export const portalExpenseIntakeProjectSchema = z.object({
+  projectId: NON_EMPTY_STRING,
+  intakeId: NON_EMPTY_STRING,
+  updates: portalExpenseIntakeUpdatesSchema.optional(),
 }).strict();
 
 export const projectSheetSourceUploadSchema = z.object({

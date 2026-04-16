@@ -285,6 +285,46 @@ type PortalExpenseIntakeDraftSaveResult = {
   };
 };
 
+type PortalExpenseIntakeProjectCommand = {
+  projectId: string;
+  intakeId: string;
+  updates?: PortalExpenseIntakeDraftSaveCommand['updates'];
+};
+
+type PortalExpenseIntakeProjectResult = {
+  expenseIntakeItem: PortalExpenseIntakeDraftSaveResult['expenseIntakeItem'];
+  expenseSheet: {
+    id: string;
+    projectId: string;
+    name?: string;
+    order?: number;
+    version: number;
+    rowCount: number;
+    rows?: Array<{
+      tempId: string;
+      sourceTxId?: string;
+      entryKind?: string;
+      cells: string[];
+    }>;
+    updatedAt: string;
+    updatedBy?: string;
+    createdAt?: string;
+  };
+  projectedRow: {
+    tempId: string;
+    sourceTxId?: string;
+    entryKind?: string;
+    cells: string[];
+  };
+  summary: {
+    projectId: string;
+    intakeId: string;
+    targetSheetId: string;
+    projectedRowTempId: string;
+    version: number;
+  };
+};
+
 type PortalWeeklySubmissionSubmitCommand = {
   projectId: string;
   yearMonth: string;
@@ -951,6 +991,94 @@ export function buildDevHarnessPortalExpenseIntakeDraftResult(params: {
     summary: {
       updatedManualFieldCount: Object.keys(manualFields).length,
       version: 3,
+    },
+  };
+}
+
+export function buildDevHarnessPortalExpenseIntakeProjectResult(params: {
+  actorId?: string;
+  actorRole?: string;
+  command: PortalExpenseIntakeProjectCommand;
+}): PortalExpenseIntakeProjectResult {
+  const command = params.command;
+  const actorId = normalizeText(params.actorId) || ORG_MEMBERS.find((member) => member.role === 'pm')?.uid || 'u002';
+  const { currentProject } = resolveHarnessProjectContext({
+    actorId,
+    actorRole: params.actorRole,
+    projectId: command.projectId,
+  });
+  const updates = command.updates && typeof command.updates === 'object' ? command.updates : {};
+  const manualFields = updates.manualFields && typeof updates.manualFields === 'object' ? updates.manualFields : {};
+  const targetSheetId = normalizeText(updates.existingExpenseSheetId) || 'default';
+  const projectedRowTempId = `bank-${normalizeText(command.intakeId) || 'fp-1'}`;
+  const evidenceStatus = normalizeText(manualFields.evidenceCompletedDesc) ? 'PARTIAL' : 'MISSING';
+
+  return {
+    expenseIntakeItem: {
+      id: normalizeText(command.intakeId) || 'fp-1',
+      projectId: currentProject.id,
+      sourceTxId: `bank:${normalizeText(command.intakeId) || 'fp-1'}`,
+      bankFingerprint: normalizeText(command.intakeId) || 'fp-1',
+      bankSnapshot: {
+        accountNumber: '123-456',
+        dateTime: '2026-04-16 09:00',
+        counterparty: '테스트 상호',
+        memo: '기존 메모',
+        signedAmount: -125000,
+        balanceAfter: 900000,
+      },
+      matchState: 'AUTO_CONFIRMED',
+      projectionStatus: 'PROJECTED_WITH_PENDING_EVIDENCE',
+      evidenceStatus,
+      manualFields: {
+        ...(typeof manualFields.expenseAmount === 'number' ? { expenseAmount: manualFields.expenseAmount } : {}),
+        ...(manualFields.budgetCategory ? { budgetCategory: manualFields.budgetCategory } : {}),
+        ...(manualFields.budgetSubCategory ? { budgetSubCategory: manualFields.budgetSubCategory } : {}),
+        ...(manualFields.cashflowLineId ? { cashflowLineId: manualFields.cashflowLineId } : {}),
+        ...(manualFields.cashflowCategory ? { cashflowCategory: manualFields.cashflowCategory } : {}),
+        ...(manualFields.memo ? { memo: manualFields.memo } : {}),
+        ...(manualFields.evidenceCompletedDesc ? { evidenceCompletedDesc: manualFields.evidenceCompletedDesc } : {}),
+      },
+      existingExpenseSheetId: targetSheetId,
+      existingExpenseRowTempId: projectedRowTempId,
+      reviewReasons: Array.isArray(updates.reviewReasons) ? updates.reviewReasons.map((reason) => normalizeText(reason)).filter(Boolean) : [],
+      lastUploadBatchId: normalizeText(updates.lastUploadBatchId) || 'batch-1',
+      createdAt: '2026-04-16T18:00:00.000Z',
+      updatedAt: DEV_HARNESS_UPDATED_AT,
+      updatedBy: actorId,
+      version: 4,
+    },
+    expenseSheet: {
+      id: targetSheetId,
+      projectId: currentProject.id,
+      name: targetSheetId === 'default' ? '기본 탭' : '새 탭',
+      order: targetSheetId === 'default' ? 0 : 1,
+      rowCount: 1,
+      rows: [
+        {
+          tempId: projectedRowTempId,
+          sourceTxId: `bank:${normalizeText(command.intakeId) || 'fp-1'}`,
+          entryKind: 'EXPENSE',
+          cells: ['담당자'],
+        },
+      ],
+      updatedAt: DEV_HARNESS_UPDATED_AT,
+      updatedBy: actorId,
+      createdAt: '2026-04-16T18:00:00.000Z',
+      version: 2,
+    },
+    projectedRow: {
+      tempId: projectedRowTempId,
+      sourceTxId: `bank:${normalizeText(command.intakeId) || 'fp-1'}`,
+      entryKind: 'EXPENSE',
+      cells: ['담당자'],
+    },
+    summary: {
+      projectId: currentProject.id,
+      intakeId: normalizeText(command.intakeId) || 'fp-1',
+      targetSheetId,
+      projectedRowTempId,
+      version: 4,
     },
   };
 }

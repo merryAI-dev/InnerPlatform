@@ -451,6 +451,38 @@ export interface PortalExpenseIntakeDraftSaveResult {
   };
 }
 
+export interface PortalExpenseIntakeProjectCommand {
+  projectId: string;
+  intakeId: string;
+  updates?: PortalExpenseIntakeDraftSaveCommand['updates'];
+}
+
+export interface PortalExpenseIntakeProjectResult {
+  expenseIntakeItem: BankImportIntakeItem & {
+    version: number;
+  };
+  expenseSheet: {
+    id: string;
+    projectId: string;
+    name?: string;
+    order?: number;
+    version: number;
+    rowCount: number;
+    rows?: PortalWeeklyExpenseSaveCommandRow[];
+    updatedAt: string;
+    updatedBy?: string;
+    createdAt?: string;
+  };
+  projectedRow: PortalWeeklyExpenseSaveCommandRow;
+  summary: {
+    projectId: string;
+    intakeId: string;
+    targetSheetId: string;
+    projectedRowTempId: string;
+    version: number;
+  };
+}
+
 export interface PortalWeeklySubmissionSubmitCommand {
   projectId: string;
   yearMonth: string;
@@ -1554,6 +1586,25 @@ export async function savePortalExpenseIntakeDraftViaBff(params: {
   const apiClient = resolveClient(params.client);
   const response = await apiClient.post<PortalExpenseIntakeDraftSaveResult>(
     '/api/v1/portal/expense-intake/draft',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.command,
+      timeoutMs: 8000,
+    },
+  );
+  return response.data;
+}
+
+export async function savePortalExpenseIntakeProjectViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  command: PortalExpenseIntakeProjectCommand;
+  client?: PlatformApiClientLike;
+}): Promise<PortalExpenseIntakeProjectResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<PortalExpenseIntakeProjectResult>(
+    '/api/v1/portal/expense-intake/project',
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),

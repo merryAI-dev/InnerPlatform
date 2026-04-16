@@ -13,6 +13,7 @@ import {
   buildDevHarnessPortalEntryContext,
   buildDevHarnessPortalOnboardingContext,
   buildDevHarnessPortalPayrollSummary,
+  buildDevHarnessPortalExpenseIntakeProjectResult,
   buildDevHarnessPortalRegistrationResult,
   buildDevHarnessPortalSaveWeeklyExpenseResult,
   buildDevHarnessPortalSubmitWeeklySubmissionResult,
@@ -208,6 +209,19 @@ export async function resolveDevHarnessPortalApiResponse(params: {
           actorId: params.actorId,
           actorRole: params.actorRole,
           command: body as Parameters<typeof buildDevHarnessPortalExpenseIntakeDraftResult>[0]['command'],
+        }),
+      }
+    }
+
+    if (method === 'POST' && pathName === '/api/v1/portal/expense-intake/project') {
+      const body = await params.readBody()
+      return {
+        handled: true,
+        statusCode: 200,
+        payload: buildDevHarnessPortalExpenseIntakeProjectResult({
+          actorId: params.actorId,
+          actorRole: params.actorRole,
+          command: body as Parameters<typeof buildDevHarnessPortalExpenseIntakeProjectResult>[0]['command'],
         }),
       }
     }

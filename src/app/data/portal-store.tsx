@@ -82,6 +82,7 @@ import {
   handoffPortalBankStatementViaBff,
   isPlatformApiEnabled,
   savePortalExpenseIntakeDraftViaBff,
+  savePortalExpenseIntakeProjectViaBff,
   type PortalBankStatementHandoffResult,
   type PortalWeeklyExpenseSaveResult,
   type UpsertProjectPayload,
@@ -2623,15 +2624,74 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       now,
       createdAt: targetSheet?.createdAt,
     });
-
-    if (isDevHarnessUser || !db || !currentProjectId) {
+    const applyProjectedState = (nextItem: BankImportIntakeItem) => {
       expenseSheetsRef.current = nextSheets;
       setExpenseSheets(nextSheets);
       if (targetSheetId === activeExpenseSheetIdRef.current) {
         setExpenseSheetRows(projection.rows);
       }
       const nextItems = expenseIntakeItemsRef.current
-        .map((item) => (item.id === id ? projectedItem : item))
+        .map((item) => (item.id === id ? nextItem : item))
+        .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')));
+      expenseIntakeItemsRef.current = nextItems;
+      setExpenseIntakeItems(nextItems);
+    };
+
+    if (isDevHarnessUser || !db || !currentProjectId) {
+      applyProjectedState(projectedItem);
+      return;
+    }
+
+    if (isPlatformApiEnabled() && authUser) {
+      const idToken = authUser.idToken || await getAuthInstance()?.currentUser?.getIdToken() || undefined;
+      const result = await savePortalExpenseIntakeProjectViaBff({
+        tenantId: orgId,
+        actor: {
+          uid: authUser.uid,
+          email: authUser.email,
+          role: authUser.role,
+          idToken,
+        },
+        command: {
+          projectId: currentProjectId,
+          intakeId: id,
+          updates: {
+            manualFields: { ...projectedItem.manualFields },
+            existingExpenseSheetId: targetSheetId,
+            ...(Array.isArray(projectedItem.reviewReasons) ? { reviewReasons: [...projectedItem.reviewReasons] } : {}),
+            ...(projectedItem.lastUploadBatchId ? { lastUploadBatchId: projectedItem.lastUploadBatchId } : {}),
+          },
+        },
+      });
+      const resultSheetId = result.expenseSheet.id || targetSheetId;
+      const normalizedRows = normalizeExpenseSheetRows(result.expenseSheet.rows) || projection.rows;
+      const nextSheetsFromResult = upsertExpenseSheetTabRows({
+        sheets: expenseSheetsRef.current,
+        sheetId: resultSheetId,
+        sheetName: sanitizeExpenseSheetName(
+          result.expenseSheet.name || targetSheet?.name,
+          resultSheetId === 'default' ? '기본 탭' : '새 탭',
+        ),
+        order: typeof result.expenseSheet.order === 'number'
+          ? result.expenseSheet.order
+          : (targetSheet?.order || (resultSheetId === 'default' ? 0 : expenseSheetsRef.current.length + 1)),
+        rows: normalizedRows,
+        now: result.expenseSheet.updatedAt || now,
+        createdAt: result.expenseSheet.createdAt || targetSheet?.createdAt,
+      }).map((sheet) => (
+        sheet.id === resultSheetId
+          ? { ...sheet, ...(typeof result.expenseSheet.version === 'number' ? { version: result.expenseSheet.version } : {}) }
+          : sheet
+      ));
+      expenseSheetsRef.current = nextSheetsFromResult;
+      setExpenseSheets(nextSheetsFromResult);
+      if (resultSheetId === activeExpenseSheetIdRef.current) {
+        expenseSheetRowsRef.current = normalizedRows;
+        setExpenseSheetRows(normalizedRows);
+      }
+      const normalizedResultItem = normalizeBankImportIntakeItem(result.expenseIntakeItem) || projectedItem;
+      const nextItems = expenseIntakeItemsRef.current
+        .map((item) => (item.id === id ? normalizedResultItem : item))
         .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')));
       expenseIntakeItemsRef.current = nextItems;
       setExpenseIntakeItems(nextItems);
@@ -2659,17 +2719,8 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       buildBankImportIntakeDoc({ orgId, item: projectedItem }),
       { merge: true },
     );
-    expenseSheetsRef.current = nextSheets;
-    setExpenseSheets(nextSheets);
-    if (targetSheetId === activeExpenseSheetIdRef.current) {
-      setExpenseSheetRows(projection.rows);
-    }
-    const nextItems = expenseIntakeItemsRef.current
-      .map((item) => (item.id === id ? projectedItem : item))
-      .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')));
-    expenseIntakeItemsRef.current = nextItems;
-    setExpenseIntakeItems(nextItems);
-  }, [authUser?.name, currentProjectId, db, evidenceRequiredMap, isDevHarnessUser, orgId, portalUser?.name]);
+    applyProjectedState(projectedItem);
+  }, [authUser, currentProjectId, db, evidenceRequiredMap, isDevHarnessUser, orgId, portalUser?.name]);
 
   const syncExpenseIntakeEvidence = useCallback(async (id: string, updates: Partial<BankImportIntakeItem>) => {
     const currentItem = expenseIntakeItemsRef.current.find((item) => item.id === id);
