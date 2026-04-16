@@ -29,6 +29,7 @@
 ## Recent Changes
 
 - [2026-04-14] 포털 session active project를 따라 제출 현황이 현재 선택한 사업 기준으로 즉시 바뀌도록 맞췄다.
+- [2026-04-16] phase1 smoke에서 `/portal/submissions`가 홈으로 돌아온 뒤 dashboard summary read-model fallback 때문에 깨지던 회귀를 수정해, redirected submission surface가 다시 안정적으로 홈에 흡수되도록 복구했다.
 - [2026-04-14] header slab, 표 헤더, 상태칩, 탭, 보조 카드 톤을 dashboard와 같은 Salesforce형 enterprise palette로 정리했다.
 - [2026-04-14] 상단 설명 header, helper badge, 빈 상태 코칭 문구를 걷어내고 상태표/신청목록만 남겼다.
 - [2026-04-14] 제출/수정 audit line에서 이름이 없을 때 `-` placeholder를 찍지 않도록 정리했다.

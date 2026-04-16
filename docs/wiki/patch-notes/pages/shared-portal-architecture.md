@@ -3,7 +3,7 @@
 - route: `shared / architecture`
 - primary users: 운영자, 개발자, QA, 의사결정자
 - status: draft-active
-- last updated: 2026-04-15
+- last updated: 2026-04-16
 
 ## Purpose
 
@@ -32,6 +32,7 @@
 - [x] entry surface는 `entry-context` read model + `session-project` command API를 사용함
 - [x] onboarding surface는 `onboarding-context` read model + `portal/registration` command API를 사용함
 - [x] portal dashboard / submissions / weekly expense / bank statement / payroll summary read model 이행 계획이 정의됨
+- [x] phase 1a로 portal dashboard / payroll / weekly-expenses / bank-statements summary endpoint와 클라이언트 contract가 추가됨
 - [x] critical write path를 command API로 이동하는 단계가 플랜에 포함됨
 - [x] App 루트 broad provider tree가 admin/portal route shell로 분리됨
 - [x] route shell이 explicit Firestore access mode를 주입하고 store는 pathname self-inference를 하지 않음
@@ -40,6 +41,7 @@
 
 ## Recent Changes
 
+- [2026-04-16] portal hardening work now uses a main-agent orchestration model with subagents handling isolated implementation slices, and the required review loop / metrics / branch discipline is captured in a dedicated operations doc.
 - [2026-04-15] 포털 안정화 장기안으로 `Firestore 유지 + BFF/API-first hybrid`를 채택했다.
 - [2026-04-15] `Firestore direct 유지`, `AWS full replatform`, `AWS + Cloudflare hybrid`를 같은 기준으로 비교하고, 현재 권고 순서를 `하이브리드 안정화 -> AWS core backend -> 필요 시 Cloudflare edge layer`로 정리했다.
 - [2026-04-15] `client-direct architecture`를 끝내기 위해 지금 닫아야 할 결정과, 구현 단계에서 닫을 결정, 후속 인프라 결정으로 미룰 항목을 별도 decision-point 문서로 정리했다.
@@ -53,6 +55,11 @@
 - [2026-04-15] Phase 1a 구현으로 `/portal/project-select`를 lightweight entry shell로 분리하고, portal store bootstrap 대신 BFF `entry-context`/`session-project` 계약을 쓰도록 옮겼다.
 - [2026-04-15] follow-up으로 `/portal/onboarding`도 같은 entry shell과 BFF `onboarding-context`/`portal/registration` 계약으로 옮겨, 포털 entry surface의 핵심 경계를 일치시켰다.
 - [2026-04-15] entry hardening과 함께 self-hosted Pretendard + immutable asset cache 정책을 추가해, HAR에서 보인 entry surface 네트워크 낭비를 줄이는 방향으로 첫 조치를 넣었다.
+- [2026-04-16] phase 1 read-model slice로 `/api/v1/portal/dashboard-summary`, `/api/v1/portal/payroll-summary`, `/api/v1/portal/weekly-expenses-summary`, `/api/v1/portal/bank-statements-summary` endpoint와 대응 client contract를 추가했다.
+- [2026-04-16] portal dashboard / payroll / weekly-expenses / bank-statements는 위 summary endpoint를 우선 읽고, store state는 fallback 또는 write path 쪽으로만 남기는 방향으로 cutover를 시작했다.
+- [2026-04-16] phase1 close 과정에서 `project-select` smoke 실패 원인을 `VITE_PLATFORM_API_BASE_URL`이 local harness에서 죽어 있는 `127.0.0.1:8787`을 계속 가리키던 drift로 확정했고, harness 모드에서는 현재 Vite origin을 우선 사용하도록 정리했다.
+- [2026-04-16] broad smoke에서 보였던 `ProjectDetailPage` dynamic import failure와 webserver refusal은 별도 제품 회귀가 아니라 같은 harness drift/worker churn의 false negative로 분리했고, Playwright harness를 serial worker + local API base 고정 계약으로 잠갔다.
+- [2026-04-16] phase1 close 과정에서 `/portal/submissions -> /portal` 경로의 dashboard summary null-safety 회귀도 같이 수정해, broad smoke와 release gate를 실제 제품 상태 기준으로 다시 green으로 닫았다.
 
 ## Known Notes
 
@@ -63,6 +70,7 @@
 
 ## Related Files
 
+- `docs/operations/2026-04-16-portal-hardening-orchestration-model.md`
 - `docs/architecture/portal-stabilization-hybrid-rfc-2026-04-15.md`
 - `docs/architecture/portal-platform-options-2026-04-15.md`
 - `docs/architecture/client-direct-exit-decision-points-2026-04-15.md`
@@ -89,6 +97,7 @@
 
 ## Related QA / Ops Context
 
+- Portal hardening slices are now expected to be assigned one at a time, with the main agent holding integration and verification responsibility across route, read-model, write-path, and release-gate changes.
 - 반복적인 Firestore `Listen 400`, 포털 flicker, route/provider coupling 이슈가 누적되며 단기 핫픽스로는 한계가 분명해졌다.
 - 운영 화면이 raw Firestore query를 직접 조합하는 구조를 줄이고, 읽기 계약을 BFF로 모으는 것이 장기 안정화의 핵심으로 정리됐다.
 - 이번 phase는 provider를 옮기는 수준이 아니라, route shell이 data access policy를 명시적으로 주입하게 만든 첫 구조 변경이다.
@@ -96,6 +105,8 @@
 
 ## Next Watch Points
 
+- Slice boundaries stay narrow enough that one subagent can finish a change without cross-slice edits.
+- Main-agent verification continues to require the real smoke and HAR metrics, not just unit test success.
 - Phase 0~1이 실제로 broad provider tree를 얼마나 줄이는지
 - entry surface가 다시 Firestore direct read/write path를 끌어오지 않는지
 - read model endpoint가 raw model drift 없이 유지되는지

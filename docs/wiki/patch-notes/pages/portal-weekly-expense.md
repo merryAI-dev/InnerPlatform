@@ -3,7 +3,7 @@
 - route: `/portal/weekly-expenses`
 - primary users: PM, 실무 입력 담당자
 - status: active
-- last updated: 2026-04-15
+- last updated: 2026-04-16
 
 ## Purpose
 
@@ -27,6 +27,7 @@
 - [x] overwrite/backspace 입력 가능
 - [x] 통장내역 저장본에서 queue-first wizard 없이 바로 주간 입력으로 이어가기 가능
 - [x] PM 포털 safe fetch 모드에서도 주간 입력 화면 부팅 가능
+- [x] 주간 입력 화면은 `weekly-expenses-summary` BFF contract로 프로젝트 header와 handoff surface를 우선 읽음
 - [ ] 입력 보조 드롭다운/팝오버 잘림 이슈 완전 해소 확인 필요
 
 ## Recent Changes
@@ -34,6 +35,7 @@
 - [2026-04-14] 포털 session active project 전환과 함께 현재 사업 기준 입력 상태 요약과 진행 step strip을 안정적으로 다시 연결했다.
 - [2026-04-15] 통장내역 저장 직후 신규 은행 행이 현재 주간 사업비 탭에 바로 나타나도록 연결했다. 별도 Queue나 triage wizard 없이 이 화면에서 바로 편집을 이어간다.
 - [2026-04-15] PM 역할에서는 portal store가 주요 운영 데이터를 realtime listen 대신 safe fetch로 초기 로딩해, 포털 부팅 중 반복 Listen 400이 사업비 입력 화면까지 흔드는 구조를 줄였다.
+- [2026-04-16] `/portal/weekly-expenses`는 `weekly-expenses-summary` BFF endpoint를 추가해 프로젝트 header와 handoff surface를 raw store shape보다 summary contract 기준으로 우선 렌더링하도록 옮기기 시작했다.
 - [2026-04-14] 미처리 거래 queue strip과 triage wizard 진입을 제거하고, 통장내역 저장본에서 바로 현재 탭 입력으로 이어가는 흐름으로 롤백했다.
 - [2026-04-14] 미저장 편집이 남은 상태에서 통장내역이나 사이드바로 이동하면 확인 다이얼로그를 띄우도록 복구했다.
 - [2026-04-14] bank import triage wizard의 cashflow category 선택값을 정리하고, fullscreen wizard와 주간 입력 화면 간 회귀 E2E를 다시 통과시켰다.
