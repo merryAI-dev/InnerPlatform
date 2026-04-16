@@ -7,6 +7,7 @@ import {
   buildDevHarnessPortalBankStatementsSummary,
   buildDevHarnessPortalBankStatementHandoffResult,
   buildDevHarnessPortalCloseCashflowWeekResult,
+  buildDevHarnessPortalExpenseIntakeDraftResult,
   buildDevHarnessPortalUpsertCashflowWeekResult,
   buildDevHarnessPortalDashboardSummary,
   buildDevHarnessPortalEntryContext,
@@ -194,6 +195,19 @@ export async function resolveDevHarnessPortalApiResponse(params: {
           actorId: params.actorId,
           actorRole: params.actorRole,
           command: body as Parameters<typeof buildDevHarnessPortalSaveWeeklyExpenseResult>[0]['command'],
+        }),
+      }
+    }
+
+    if (method === 'POST' && pathName === '/api/v1/portal/expense-intake/draft') {
+      const body = await params.readBody()
+      return {
+        handled: true,
+        statusCode: 200,
+        payload: buildDevHarnessPortalExpenseIntakeDraftResult({
+          actorId: params.actorId,
+          actorRole: params.actorRole,
+          command: body as Parameters<typeof buildDevHarnessPortalExpenseIntakeDraftResult>[0]['command'],
         }),
       }
     }

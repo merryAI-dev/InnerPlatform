@@ -6,6 +6,7 @@ import {
   buildDevHarnessPortalCloseCashflowWeekResult,
   buildDevHarnessPortalDashboardSummary,
   buildDevHarnessPortalEntryContext,
+  buildDevHarnessPortalExpenseIntakeDraftResult,
   buildDevHarnessPortalOnboardingContext,
   buildDevHarnessPortalPayrollSummary,
   buildDevHarnessPortalRegistrationResult,
@@ -227,6 +228,41 @@ describe('dev harness portal api helpers', () => {
     ]);
     expect(result.summary).toEqual({
       submittedTransactionCount: 2,
+    });
+  });
+
+  it('builds an expense intake draft save command result for a visible PM project', () => {
+    const result = buildDevHarnessPortalExpenseIntakeDraftResult({
+      actorId: 'u002',
+      actorRole: 'pm',
+      command: {
+        projectId: 'p001',
+        intakeId: 'fp-1',
+        updates: {
+          manualFields: {
+            budgetSubCategory: '숙박',
+            evidenceCompletedDesc: '출장신청서',
+          },
+          reviewReasons: ['manual_review_required', 'evidence_missing'],
+        },
+      },
+    });
+
+    expect(result.expenseIntakeItem).toMatchObject({
+      id: 'fp-1',
+      projectId: 'p001',
+      sourceTxId: 'bank:fp-1',
+      manualFields: {
+        budgetSubCategory: '숙박',
+        evidenceCompletedDesc: '출장신청서',
+      },
+      reviewReasons: ['manual_review_required', 'evidence_missing'],
+      updatedBy: 'u002',
+      version: 3,
+    });
+    expect(result.summary).toEqual({
+      updatedManualFieldCount: 2,
+      version: 3,
     });
   });
 
@@ -510,6 +546,45 @@ describe('dev harness portal api helpers', () => {
         ],
         summary: {
           submittedTransactionCount: 1,
+        },
+      },
+    });
+  });
+
+  it('handles expense intake draft saves through the vite dev harness router', async () => {
+    const response = await resolveDevHarnessPortalApiResponse({
+      enabled: true,
+      method: 'POST',
+      url: '/api/v1/portal/expense-intake/draft',
+      actorId: 'u002',
+      actorRole: 'pm',
+      readBody: async () => ({
+        projectId: 'p001',
+        intakeId: 'fp-1',
+        updates: {
+          manualFields: {
+            budgetSubCategory: '숙박',
+          },
+          reviewReasons: ['manual_review_required'],
+        },
+      }),
+    });
+
+    expect(response).toMatchObject({
+      handled: true,
+      statusCode: 200,
+      payload: {
+        expenseIntakeItem: {
+          id: 'fp-1',
+          projectId: 'p001',
+          manualFields: {
+            budgetSubCategory: '숙박',
+          },
+          reviewReasons: ['manual_review_required'],
+        },
+        summary: {
+          updatedManualFieldCount: 1,
+          version: 3,
         },
       },
     });

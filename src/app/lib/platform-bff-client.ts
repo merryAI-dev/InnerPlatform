@@ -1,6 +1,8 @@
 import { featureFlags, parseFeatureFlag } from '../config/feature-flags';
 import type {
   AccountType,
+  BankImportIntakeItem,
+  BankImportManualFields,
   Basis,
   CashflowWeekSheet,
   ProjectSheetSourceSnapshot,
@@ -421,6 +423,31 @@ export interface PortalWeeklyExpenseSaveResult {
     expenseReviewPendingCount: number;
     syncedWeekCount: number;
     reviewRequiredWeekCount: number;
+  };
+}
+
+export interface PortalExpenseIntakeDraftSaveCommand {
+  projectId: string;
+  intakeId: string;
+  updates: {
+    manualFields?: BankImportManualFields;
+    existingExpenseSheetId?: string | null;
+    existingExpenseRowTempId?: string | null;
+    matchState?: BankImportIntakeItem['matchState'];
+    projectionStatus?: BankImportIntakeItem['projectionStatus'];
+    evidenceStatus?: BankImportIntakeItem['evidenceStatus'];
+    reviewReasons?: string[];
+    lastUploadBatchId?: string;
+  };
+}
+
+export interface PortalExpenseIntakeDraftSaveResult {
+  expenseIntakeItem: BankImportIntakeItem & {
+    version: number;
+  };
+  summary: {
+    updatedManualFieldCount: number;
+    version: number;
   };
 }
 
@@ -1508,6 +1535,25 @@ export async function savePortalWeeklyExpenseViaBff(params: {
   const apiClient = resolveClient(params.client);
   const response = await apiClient.post<PortalWeeklyExpenseSaveResult>(
     '/api/v1/portal/weekly-expenses/save',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.command,
+      timeoutMs: 8000,
+    },
+  );
+  return response.data;
+}
+
+export async function savePortalExpenseIntakeDraftViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  command: PortalExpenseIntakeDraftSaveCommand;
+  client?: PlatformApiClientLike;
+}): Promise<PortalExpenseIntakeDraftSaveResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<PortalExpenseIntakeDraftSaveResult>(
+    '/api/v1/portal/expense-intake/draft',
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),

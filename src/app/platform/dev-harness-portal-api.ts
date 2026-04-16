@@ -229,6 +229,62 @@ type PortalWeeklyExpenseSaveResult = {
   };
 };
 
+type PortalExpenseIntakeDraftSaveCommand = {
+  projectId: string;
+  intakeId: string;
+  updates: {
+    manualFields?: {
+      expenseAmount?: number;
+      budgetCategory?: string;
+      budgetSubCategory?: string;
+      cashflowLineId?: string;
+      cashflowCategory?: string;
+      memo?: string;
+      evidenceCompletedDesc?: string;
+    };
+    existingExpenseSheetId?: string | null;
+    existingExpenseRowTempId?: string | null;
+    matchState?: 'AUTO_CONFIRMED' | 'PENDING_INPUT' | 'REVIEW_REQUIRED' | 'IGNORED';
+    projectionStatus?: 'NOT_PROJECTED' | 'PROJECTED' | 'PROJECTED_WITH_PENDING_EVIDENCE';
+    evidenceStatus?: 'MISSING' | 'PARTIAL' | 'COMPLETE';
+    reviewReasons?: string[];
+    lastUploadBatchId?: string;
+  };
+};
+
+type PortalExpenseIntakeDraftSaveResult = {
+  expenseIntakeItem: {
+    id: string;
+    projectId: string;
+    sourceTxId: string;
+    bankFingerprint: string;
+    bankSnapshot: {
+      accountNumber: string;
+      dateTime: string;
+      counterparty: string;
+      memo: string;
+      signedAmount: number;
+      balanceAfter: number;
+    };
+    matchState: 'AUTO_CONFIRMED' | 'PENDING_INPUT' | 'REVIEW_REQUIRED' | 'IGNORED';
+    projectionStatus: 'NOT_PROJECTED' | 'PROJECTED' | 'PROJECTED_WITH_PENDING_EVIDENCE';
+    evidenceStatus: 'MISSING' | 'PARTIAL' | 'COMPLETE';
+    manualFields: Record<string, string | number>;
+    existingExpenseSheetId?: string;
+    existingExpenseRowTempId?: string;
+    reviewReasons: string[];
+    lastUploadBatchId: string;
+    createdAt: string;
+    updatedAt: string;
+    updatedBy: string;
+    version: number;
+  };
+  summary: {
+    updatedManualFieldCount: number;
+    version: number;
+  };
+};
+
 type PortalWeeklySubmissionSubmitCommand = {
   projectId: string;
   yearMonth: string;
@@ -835,6 +891,66 @@ export function buildDevHarnessPortalSaveWeeklyExpenseResult(params: {
       expenseReviewPendingCount,
       syncedWeekCount,
       reviewRequiredWeekCount,
+    },
+  };
+}
+
+export function buildDevHarnessPortalExpenseIntakeDraftResult(params: {
+  actorId?: string;
+  actorRole?: string;
+  command: PortalExpenseIntakeDraftSaveCommand;
+}): PortalExpenseIntakeDraftSaveResult {
+  const command = params.command;
+  const actorId = normalizeText(params.actorId) || ORG_MEMBERS.find((member) => member.role === 'pm')?.uid || 'u002';
+  const { currentProject } = resolveHarnessProjectContext({
+    actorId,
+    actorRole: params.actorRole,
+    projectId: command.projectId,
+  });
+  const updates = command.updates && typeof command.updates === 'object' ? command.updates : {};
+  const manualFields = updates.manualFields && typeof updates.manualFields === 'object' ? updates.manualFields : {};
+  const reviewReasons = Array.isArray(updates.reviewReasons)
+    ? updates.reviewReasons.map((reason) => normalizeText(reason)).filter(Boolean)
+    : [];
+
+  return {
+    expenseIntakeItem: {
+      id: normalizeText(command.intakeId) || 'fp-1',
+      projectId: currentProject.id,
+      sourceTxId: `bank:${normalizeText(command.intakeId) || 'fp-1'}`,
+      bankFingerprint: normalizeText(command.intakeId) || 'fp-1',
+      bankSnapshot: {
+        accountNumber: '123-456',
+        dateTime: '2026-04-16 09:00',
+        counterparty: '테스트 상호',
+        memo: '기존 메모',
+        signedAmount: -125000,
+        balanceAfter: 900000,
+      },
+      matchState: updates.matchState || 'PENDING_INPUT',
+      projectionStatus: updates.projectionStatus || 'NOT_PROJECTED',
+      evidenceStatus: updates.evidenceStatus || 'MISSING',
+      manualFields: {
+        ...(manualFields.budgetCategory ? { budgetCategory: manualFields.budgetCategory } : {}),
+        ...(manualFields.budgetSubCategory ? { budgetSubCategory: manualFields.budgetSubCategory } : {}),
+        ...(manualFields.memo ? { memo: manualFields.memo } : {}),
+        ...(manualFields.evidenceCompletedDesc ? { evidenceCompletedDesc: manualFields.evidenceCompletedDesc } : {}),
+        ...(typeof manualFields.expenseAmount === 'number' ? { expenseAmount: manualFields.expenseAmount } : {}),
+        ...(manualFields.cashflowLineId ? { cashflowLineId: manualFields.cashflowLineId } : {}),
+        ...(manualFields.cashflowCategory ? { cashflowCategory: manualFields.cashflowCategory } : {}),
+      },
+      ...(updates.existingExpenseSheetId ? { existingExpenseSheetId: updates.existingExpenseSheetId } : {}),
+      ...(updates.existingExpenseRowTempId ? { existingExpenseRowTempId: updates.existingExpenseRowTempId } : {}),
+      reviewReasons,
+      lastUploadBatchId: normalizeText(updates.lastUploadBatchId) || 'batch-1',
+      createdAt: '2026-04-16T18:00:00.000Z',
+      updatedAt: DEV_HARNESS_UPDATED_AT,
+      updatedBy: actorId,
+      version: 3,
+    },
+    summary: {
+      updatedManualFieldCount: Object.keys(manualFields).length,
+      version: 3,
     },
   };
 }

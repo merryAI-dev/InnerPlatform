@@ -81,6 +81,7 @@ import { getAuthInstance, getOrgCollectionPath, getOrgDocumentPath } from '../li
 import {
   handoffPortalBankStatementViaBff,
   isPlatformApiEnabled,
+  savePortalExpenseIntakeDraftViaBff,
   type PortalBankStatementHandoffResult,
   type PortalWeeklyExpenseSaveResult,
   type UpsertProjectPayload,
@@ -2509,12 +2510,49 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     const mergedCandidate = mergeBankImportIntakeItem(currentItem, updates);
     if (!mergedCandidate) return;
 
-    if (isDevHarnessUser || !db || !currentProjectId) {
+    const applyNextItems = (nextItem: BankImportIntakeItem) => {
       const nextItems = expenseIntakeItemsRef.current
-        .map((item) => (item.id === id ? mergedCandidate : item))
+        .map((item) => (item.id === id ? nextItem : item))
         .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')));
       expenseIntakeItemsRef.current = nextItems;
       setExpenseIntakeItems(nextItems);
+    };
+
+    if (isDevHarnessUser || !db || !currentProjectId) {
+      applyNextItems(mergedCandidate);
+      return;
+    }
+
+    if (isPlatformApiEnabled() && authUser) {
+      const idToken = authUser.idToken || await getAuthInstance()?.currentUser?.getIdToken() || undefined;
+      const result = await savePortalExpenseIntakeDraftViaBff({
+        tenantId: orgId,
+        actor: {
+          uid: authUser.uid,
+          email: authUser.email,
+          role: authUser.role,
+          idToken,
+        },
+        command: {
+          projectId: currentProjectId,
+          intakeId: id,
+          updates: {
+            ...(updates.manualFields ? { manualFields: { ...updates.manualFields } } : {}),
+            ...(updates.existingExpenseSheetId !== undefined
+              ? { existingExpenseSheetId: updates.existingExpenseSheetId ?? null }
+              : {}),
+            ...(updates.existingExpenseRowTempId !== undefined
+              ? { existingExpenseRowTempId: updates.existingExpenseRowTempId ?? null }
+              : {}),
+            ...(updates.matchState ? { matchState: updates.matchState } : {}),
+            ...(updates.projectionStatus ? { projectionStatus: updates.projectionStatus } : {}),
+            ...(updates.evidenceStatus ? { evidenceStatus: updates.evidenceStatus } : {}),
+            ...(Array.isArray(updates.reviewReasons) ? { reviewReasons: [...updates.reviewReasons] } : {}),
+            ...(updates.lastUploadBatchId ? { lastUploadBatchId: updates.lastUploadBatchId } : {}),
+          },
+        },
+      });
+      applyNextItems(normalizeBankImportIntakeItem(result.expenseIntakeItem) || mergedCandidate);
       return;
     }
 
@@ -2523,12 +2561,8 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       buildBankImportIntakeDoc({ orgId, item: mergedCandidate }),
       { merge: true },
     );
-    const nextItems = expenseIntakeItemsRef.current
-      .map((item) => (item.id === id ? mergedCandidate : item))
-      .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')));
-    expenseIntakeItemsRef.current = nextItems;
-    setExpenseIntakeItems(nextItems);
-  }, [currentProjectId, db, isDevHarnessUser, orgId]);
+    applyNextItems(mergedCandidate);
+  }, [authUser, currentProjectId, db, isDevHarnessUser, orgId]);
 
   const updateExpenseIntakeItem = saveExpenseIntakeDraft;
 

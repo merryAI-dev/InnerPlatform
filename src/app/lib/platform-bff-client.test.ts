@@ -20,6 +20,7 @@ import {
   previewGoogleSheetImportViaBff,
   processProjectRequestContractViaBff,
   provisionProjectEvidenceDriveRootViaBff,
+  savePortalExpenseIntakeDraftViaBff,
   provisionTransactionEvidenceDriveViaBff,
   readPlatformApiRuntimeConfig,
   restoreProjectViaBff,
@@ -361,6 +362,80 @@ describe('platform-bff-client', () => {
     }));
     expect(result.cashflowWeek.pmSubmitted).toBe(true);
     expect(result.summary.submittedTransactionCount).toBe(1);
+  });
+
+  it('calls portal expense intake draft save command endpoint', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({
+        data: {
+          expenseIntakeItem: {
+            id: 'fp-1',
+            projectId: 'p001',
+            sourceTxId: 'bank:fp-1',
+            bankFingerprint: 'fp-1',
+            bankSnapshot: {
+              accountNumber: '123-456',
+              dateTime: '2026-04-16 09:00',
+              counterparty: '테스트 상호',
+              memo: '기존 메모',
+              signedAmount: -125000,
+              balanceAfter: 900000,
+            },
+            matchState: 'PENDING_INPUT',
+            projectionStatus: 'NOT_PROJECTED',
+            evidenceStatus: 'MISSING',
+            manualFields: {
+              budgetCategory: '여비',
+              budgetSubCategory: '숙박',
+            },
+            reviewReasons: ['manual_review_required'],
+            lastUploadBatchId: 'batch-1',
+            createdAt: '2026-04-16T18:00:00.000Z',
+            updatedAt: '2026-04-16T19:00:00.000Z',
+            updatedBy: 'u001',
+            version: 3,
+          },
+          summary: {
+            updatedManualFieldCount: 1,
+            version: 3,
+          },
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    const result = await savePortalExpenseIntakeDraftViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm', idToken: 'token-abc' },
+      command: {
+        projectId: 'p001',
+        intakeId: 'fp-1',
+        updates: {
+          manualFields: {
+            budgetSubCategory: '숙박',
+          },
+          reviewReasons: ['manual_review_required'],
+        },
+      },
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/portal/expense-intake/draft', expect.objectContaining({
+      tenantId: 'mysc',
+      body: expect.objectContaining({
+        projectId: 'p001',
+        intakeId: 'fp-1',
+        updates: {
+          manualFields: {
+            budgetSubCategory: '숙박',
+          },
+          reviewReasons: ['manual_review_required'],
+        },
+      }),
+    }));
+    expect(result.expenseIntakeItem.manualFields.budgetSubCategory).toBe('숙박');
+    expect(result.summary.updatedManualFieldCount).toBe(1);
   });
 
   it('calls cashflow week close command endpoint', async () => {
