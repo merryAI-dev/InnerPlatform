@@ -164,7 +164,7 @@ export function PortalPayrollPage() {
         iconGradient="linear-gradient(135deg, #0d9488 0%, #059669 100%)"
         title="인건비 지급 준비"
         description="지급일을 등록해 두면 지급 창 D-3부터 D+3까지 잔액 여력과 지급 확정 상태를 함께 점검할 수 있습니다."
-        badge={payrollSummary?.project.shortName || myProject?.shortName || myProject?.id || ''}
+        badge={payrollSummary?.project?.shortName || myProject?.shortName || myProject?.id || ''}
       />
 
       {(needsPayrollAck || needsMonthlyCloseAck) && (

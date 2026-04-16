@@ -34,15 +34,18 @@
 - [x] portal dashboard / submissions / weekly expense / bank statement / payroll summary read model 이행 계획이 정의됨
 - [x] phase 1a로 portal dashboard / payroll / weekly-expenses / bank-statements summary endpoint와 클라이언트 contract가 추가됨
 - [x] finance-grade master plan이 이전 `next plan`을 supersede하고, phase 0 gate foundation을 먼저 land하는 순서로 재정렬됨
+- [x] phase 0 network gate foundation의 CI/doc cutover가 완료되어, canonical gate command와 JSON artifact path가 release evidence 기준으로 고정됨
 - [x] critical write path를 command API로 이동하는 단계가 플랜에 포함됨
 - [x] App 루트 broad provider tree가 admin/portal route shell로 분리됨
 - [x] route shell이 explicit Firestore access mode를 주입하고 store는 pathname self-inference를 하지 않음
+- [x] CI가 `phase0:portal:network-gate` command를 직접 호출하고 artifact를 발행하는 최종 cutover가 닫힘
 - [ ] admin summary surface cutover까지 완료됨
 - [ ] 포털의 broad Firestore direct read가 완전히 제거됨
 
 ## Recent Changes
 
 - [2026-04-16] portal hardening work now uses a main-agent orchestration model with subagents handling isolated implementation slices, and the required review loop / metrics / branch discipline is captured in a dedicated operations doc.
+- [2026-04-16] phase 0 network gate foundation 기준으로 CI workflow가 canonical `phase0:portal:network-gate` command와 `artifacts/portal-network-gate.json` artifact path를 직접 source of truth로 사용하도록 닫았다. 기존 conditional fallback과 duplicated release-gate steps는 workflow에서 제거됐다.
 - [2026-04-16] 기존 `portal production hardening next plan`은 finance-grade 기준으로는 약하다고 판단해 supersede했다. 새 master plan은 `phase 0 gate foundation -> read boundary completion -> command authority -> backup automation -> reviewed reconciliation -> production enforcement` 순서를 강제하고, `network/runtime/recovery evidence` 없이는 어떤 phase도 완료라고 부르지 않도록 못 박았다.
 - [2026-04-15] 포털 안정화 장기안으로 `Firestore 유지 + BFF/API-first hybrid`를 채택했다.
 - [2026-04-15] `Firestore direct 유지`, `AWS full replatform`, `AWS + Cloudflare hybrid`를 같은 기준으로 비교하고, 현재 권고 순서를 `하이브리드 안정화 -> AWS core backend -> 필요 시 Cloudflare edge layer`로 정리했다.
@@ -110,6 +113,7 @@
 
 - Slice boundaries stay narrow enough that one subagent can finish a change without cross-slice edits.
 - Main-agent verification continues to require the real smoke and HAR metrics, not just unit test success.
+- portal network artifact가 실제 release blocker evidence로 계속 남는지
 - Phase 0~1이 실제로 broad provider tree를 얼마나 줄이는지
 - entry surface가 다시 Firestore direct read/write path를 끌어오지 않는지
 - read model endpoint가 raw model drift 없이 유지되는지

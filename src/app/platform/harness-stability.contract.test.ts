@@ -16,7 +16,12 @@ describe('phase1 harness stability contracts', () => {
   it('runs the local harness serially to avoid dev-server churn false negatives', () => {
     expect(playwrightHarnessConfigSource).toContain('workers: 1');
     expect(playwrightHarnessConfigSource).toContain("fullyParallel: false");
-    expect(playwrightHarnessConfigSource).toContain('VITE_PLATFORM_API_BASE_URL=http://localhost:4173');
+    expect(playwrightHarnessConfigSource).toContain("const PORTAL_ORIGIN = 'http://localhost:4173';");
+    expect(playwrightHarnessConfigSource).toMatch(/baseURL:\s*PORTAL_ORIGIN/);
+    expect(playwrightHarnessConfigSource).toMatch(
+      /VITE_PLATFORM_API_BASE_URL=\$\{PORTAL_ORIGIN\}\s+npm run dev -- --host \$\{PORTAL_HOST\} --port 4173/,
+    );
+    expect(playwrightHarnessConfigSource).toContain('url: `${PORTAL_ORIGIN}/login`,');
   });
 
   it('exposes dev-harness portal entry endpoints from the vite server', () => {

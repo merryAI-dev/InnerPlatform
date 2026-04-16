@@ -134,6 +134,14 @@ subagent 책임:
 
 이 phase는 더 이상 `마지막 polish`가 아니다. 나머지 phase를 신뢰하려면 먼저 들어가야 한다.
 
+현재 상태:
+
+- status: `in progress`
+- Slice A/B/C/D로 분해해 병렬 구현 중이다.
+- Slice D 기준으로 CI와 문서는 canonical gate cutover를 완료했다.
+- CI는 이제 `phase0:portal:network-gate`만 실행하고 `artifacts/portal-network-gate.json`을 release evidence로 업로드한다.
+- legacy release-gate fallback path는 workflow source of truth에서 제거됐다.
+
 목표:
 
 - CI가 canonical validation script를 직접 호출
@@ -147,6 +155,7 @@ subagent 책임:
 - stable routes별 connection budget 문서와 테스트 존재
 - CI artifact에 route network summary 저장
 - `build green` 단독으로는 merge 불가
+- canonical gate가 legacy duplicated steps를 완전히 대체함
 
 merge blocker:
 

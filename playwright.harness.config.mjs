@@ -1,4 +1,10 @@
+import path from 'node:path';
 import { defineConfig } from '@playwright/test';
+
+process.env.PORTAL_NETWORK_ARTIFACT_DIR ||= path.resolve('test-results/portal-network-artifacts');
+
+const PORTAL_ORIGIN = 'http://localhost:4173';
+const PORTAL_HOST = 'localhost';
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -10,12 +16,13 @@ export default defineConfig({
   fullyParallel: false,
   retries: 0,
   use: {
-    baseURL: 'http://localhost:4173',
+    // Keep the localhost origin stable for auth/session storage semantics.
+    baseURL: PORTAL_ORIGIN,
     trace: 'on-first-retry',
   },
   webServer: {
-    command: 'VITE_DEV_AUTH_HARNESS_ENABLED=true VITE_PLATFORM_API_BASE_URL=http://localhost:4173 npm run dev -- --host localhost --port 4173',
-    url: 'http://localhost:4173/login',
+    command: `VITE_DEV_AUTH_HARNESS_ENABLED=true VITE_PLATFORM_API_BASE_URL=${PORTAL_ORIGIN} npm run dev -- --host ${PORTAL_HOST} --port 4173`,
+    url: `${PORTAL_ORIGIN}/login`,
     timeout: 120_000,
     reuseExistingServer: !process.env.CI,
   },

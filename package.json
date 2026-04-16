@@ -34,6 +34,7 @@
     "firebase:emulators:start": "bash scripts/firebase_emulator_bootstrap.sh --start",
     "qa:feedback:ingest": "npx tsx scripts/ingest_qa_feedback_tracker.ts",
     "phase:preflight": "npx tsx scripts/phase_preflight_qa.ts",
+    "phase0:portal:network-gate": "npx tsx scripts/portal_network_gate.ts",
     "phase1:portal:validation-gate": "npx tsx scripts/phase1_portal_validation_gate.ts",
     "phase1:extract:usage-ledger": "npx tsx scripts/extract_usage_ledger_phase1_fixture.ts",
     "rust:settlement:build": "cargo build --quiet --manifest-path rust/spreadsheet-calculation-core/Cargo.toml",

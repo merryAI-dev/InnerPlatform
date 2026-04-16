@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { recordPortalNetworkArtifact } from './support/portal-network-artifact';
 
 // ── Helper: dev auth harness login ──
 async function loginAsPm(page: import('@playwright/test').Page) {
@@ -34,85 +35,161 @@ test('2. Admin can login via dev auth harness', async ({ page }) => {
 // ── 3. Dashboard ──
 test('3. Admin dashboard loads with project stats', async ({ page }) => {
   await loginAsAdmin(page);
-  await page.goto('/');
-  await expect(page.getByText('대시보드').first()).toBeVisible({ timeout: 15_000 });
+  await recordPortalNetworkArtifact(
+    page,
+    { suiteId: 'platform-smoke', routeId: 'admin-dashboard', pathname: '/' },
+    async () => {
+      await page.goto('/');
+      await expect(page.getByText('대시보드').first()).toBeVisible({ timeout: 15_000 });
+    },
+  );
 });
 
 // ── 4. Project list ──
 test('4. Admin can view project list', async ({ page }) => {
   await loginAsAdmin(page);
-  await page.goto('/projects');
-  await expect(page.getByText('프로젝트').first()).toBeVisible({ timeout: 15_000 });
+  await recordPortalNetworkArtifact(
+    page,
+    { suiteId: 'platform-smoke', routeId: 'admin-projects', pathname: '/projects' },
+    async () => {
+      await page.goto('/projects');
+      await expect(page.getByText('프로젝트').first()).toBeVisible({ timeout: 15_000 });
+    },
+  );
 });
 
 // ── 5. Cashflow ──
 test('5. Admin can navigate to cashflow page', async ({ page }) => {
   await loginAsAdmin(page);
-  await page.goto('/cashflow');
-  await expect(page.locator('body')).toBeVisible({ timeout: 15_000 });
+  await recordPortalNetworkArtifact(
+    page,
+    { suiteId: 'platform-smoke', routeId: 'admin-cashflow', pathname: '/cashflow' },
+    async () => {
+      await page.goto('/cashflow');
+      await expect(page.locator('body')).toBeVisible({ timeout: 15_000 });
+    },
+  );
 });
 
 // ── 6. Portal weekly expenses ──
 test('6. PM can access weekly expense page', async ({ page }) => {
   await loginAsPm(page);
-  await page.goto('/portal/weekly-expenses');
-  await expect(page.getByRole('heading', { name: '사업비 입력(주간)' })).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByTestId('weekly-expense-setup-panel')).toBeVisible();
-  await expect(page.locator('[data-testid^="weekly-accounting-product-status-"]').first()).toBeVisible();
+  await recordPortalNetworkArtifact(
+    page,
+    { suiteId: 'platform-smoke', routeId: 'portal-weekly-expenses', pathname: '/portal/weekly-expenses' },
+    async () => {
+      await page.goto('/portal/weekly-expenses');
+      await expect(page.getByRole('heading', { name: '사업비 입력(주간)' })).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByTestId('weekly-expense-setup-panel')).toBeVisible();
+      await expect(page.locator('[data-testid^="weekly-accounting-product-status-"]').first()).toBeVisible();
+    },
+  );
 });
 
 // ── 7. Portal bank statement -> other pages ──
 test('7. PM can navigate away from bank statement page', async ({ page }) => {
   await loginAsPm(page);
-  await page.goto('/portal/bank-statements');
-  await expect(page.getByRole('heading', { name: '통장내역' })).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByTestId('portal-mission-guide')).toHaveCount(0);
-  await expect(page.getByTestId('bank-statement-trust-surface')).toBeVisible();
-  await expect(page.getByRole('button', { name: '사업비 입력(주간)으로 이어가기' })).toBeVisible();
+  await recordPortalNetworkArtifact(
+    page,
+    { suiteId: 'platform-smoke', routeId: 'portal-bank-statements', pathname: '/portal/bank-statements' },
+    async () => {
+      await page.goto('/portal/bank-statements');
+      await expect(page.getByRole('heading', { name: '통장내역' })).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByTestId('portal-mission-guide')).toHaveCount(0);
+      await expect(page.getByTestId('bank-statement-trust-surface')).toBeVisible();
+      await expect(page.getByRole('button', { name: '사업비 입력(주간)으로 이어가기' })).toBeVisible();
 
-  await page.getByRole('link', { name: '예산 편집' }).click();
-  await expect(page).toHaveURL(/\/portal\/budget$/);
-  await expect(page.getByRole('heading', { name: '예산 편집' })).toBeVisible({ timeout: 15_000 });
+      await page.getByRole('link', { name: '예산 편집' }).click();
+      await expect(page).toHaveURL(/\/portal\/budget$/);
+      await expect(page.getByRole('heading', { name: '예산 편집' })).toBeVisible({ timeout: 15_000 });
 
-  await page.getByRole('link', { name: '캐시플로' }).click();
-  await expect(page).toHaveURL(/\/portal\/cashflow$/);
-  await expect(page.getByRole('heading', { name: '프로젝트 캐시플로(주간)' })).toBeVisible({ timeout: 15_000 });
+      await page.getByRole('link', { name: '캐시플로' }).click();
+      await expect(page).toHaveURL(/\/portal\/cashflow$/);
+      await expect(page.getByRole('heading', { name: '프로젝트 캐시플로(주간)' })).toBeVisible({ timeout: 15_000 });
+    },
+  );
 });
 
 // ── 8. Portal budget ──
 test('8. PM can access budget page', async ({ page }) => {
   await loginAsPm(page);
-  await page.goto('/portal/budget');
-  await expect(page.getByRole('heading', { name: '예산 편집' })).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByTestId('portal-mission-guide')).toHaveCount(0);
+  await recordPortalNetworkArtifact(
+    page,
+    { suiteId: 'platform-smoke', routeId: 'portal-budget', pathname: '/portal/budget' },
+    async () => {
+      await page.goto('/portal/budget');
+      await expect(page.getByRole('heading', { name: '예산 편집' })).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByTestId('portal-mission-guide')).toHaveCount(0);
+    },
+  );
 });
 
 test('8-1. PM submissions route redirects to dashboard submission surface', async ({ page }) => {
   await loginAsPm(page);
-  await page.goto('/portal/submissions');
-  await expect(page).toHaveURL(/\/portal$/);
-  await expect(page.getByRole('heading', { name: '내 제출 현황' })).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByText('프로젝트 상세')).toBeVisible();
-  await expect(page.getByTestId('portal-mission-guide')).toHaveCount(0);
+  await recordPortalNetworkArtifact(
+    page,
+    { suiteId: 'platform-smoke', routeId: 'portal-submissions', pathname: '/portal/submissions' },
+    async () => {
+      await page.goto('/portal/submissions');
+      await expect(page).toHaveURL(/\/portal$/);
+      await expect(page.getByRole('heading', { name: '내 제출 현황' })).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByText('프로젝트 상세')).toBeVisible();
+      await expect(page.getByTestId('portal-mission-guide')).toHaveCount(0);
+    },
+  );
+});
+
+test('8-2. PM can access payroll page', async ({ page }) => {
+  await loginAsPm(page);
+  await recordPortalNetworkArtifact(
+    page,
+    { suiteId: 'platform-smoke', routeId: 'portal-payroll', pathname: '/portal/payroll' },
+    async () => {
+      await page.goto('/portal/payroll');
+      await expect(page).toHaveURL(/\/portal\/payroll$/);
+      await expect(page.getByText('인건비 지급일 등록')).toBeVisible({ timeout: 15_000 });
+      await expect(
+        page.getByTestId('portal-payroll-liquidity-detail').or(page.getByTestId('portal-payroll-detail-empty')),
+      ).toBeVisible();
+    },
+  );
 });
 
 // ── 9. Audit log ──
 test('9. Admin can view audit log', async ({ page }) => {
   await loginAsAdmin(page);
-  await page.goto('/audit');
-  await expect(page.getByText('감사 로그').first()).toBeVisible({ timeout: 15_000 });
+  await recordPortalNetworkArtifact(
+    page,
+    { suiteId: 'platform-smoke', routeId: 'admin-audit', pathname: '/audit' },
+    async () => {
+      await page.goto('/audit');
+      await expect(page.getByText('감사 로그').first()).toBeVisible({ timeout: 15_000 });
+    },
+  );
 });
 
 // ── 10. Settings ──
 test('10. Admin can access settings', async ({ page }) => {
   await loginAsAdmin(page);
-  await page.goto('/settings');
-  await expect(page.locator('body')).toBeVisible({ timeout: 15_000 });
+  await recordPortalNetworkArtifact(
+    page,
+    { suiteId: 'platform-smoke', routeId: 'admin-settings', pathname: '/settings' },
+    async () => {
+      await page.goto('/settings');
+      await expect(page.locator('body')).toBeVisible({ timeout: 15_000 });
+    },
+  );
 });
 
 // ── 11. 404 handling ──
 test('11. Unknown route shows 404 page', async ({ page }) => {
   await loginAsAdmin(page);
-  await page.goto('/nonexistent-page');
-  await expect(page.getByText(/404|찾을 수 없|존재하지 않/).first()).toBeVisible({ timeout: 15_000 });
+  await recordPortalNetworkArtifact(
+    page,
+    { suiteId: 'platform-smoke', routeId: 'admin-404', pathname: '/nonexistent-page' },
+    async () => {
+      await page.goto('/nonexistent-page');
+      await expect(page.getByText(/404|찾을 수 없|존재하지 않/).first()).toBeVisible({ timeout: 15_000 });
+    },
+  );
 });

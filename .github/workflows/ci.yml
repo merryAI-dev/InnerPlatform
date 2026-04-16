@@ -52,14 +52,13 @@ jobs:
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
 
-      - name: Settlement targeted vitest matrix
-        run: npx vitest run src/app/platform/settlement-*.test.ts src/app/platform/weekly-accounting-state.test.ts src/app/data/portal-store.settlement.test.ts src/app/data/portal-store.integration.test.ts src/app/data/cashflow-weeks-store.integration.test.ts
+      - name: Portal network gate
+        run: npm run phase0:portal:network-gate -- --json-out artifacts/portal-network-gate.json
 
-      - name: Settlement product flow Playwright
-        run: npx playwright test tests/e2e/migration-wizard.harness.spec.js tests/e2e/settlement-product-completeness.spec.ts tests/e2e/bank-upload-triage-wizard.spec.ts --config playwright.harness.config.mjs
-
-      - name: Auth and projects critical flow Playwright
-        run: npx playwright test tests/e2e/product-release-gates.spec.ts --config playwright.harness.config.mjs
-
-      - name: Settlement emulator-backed integration
-        run: npm run test:settlement:integration
+      - name: Upload portal gate artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: portal-network-gate
+          path: artifacts/portal-network-gate.json
+          if-no-files-found: error

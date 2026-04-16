@@ -48,11 +48,12 @@ Goal: keep portal hardening work in this repo split between one main agent that 
 
 ## Canonical Validation Command
 
-- Local single source of truth:
-  - `npm run phase1:portal:validation-gate -- --json-out artifacts/phase1-portal-validation-gate.json`
-- The script runs the phase1 unit/contract set, broad portal smoke + release gates, and production build in that order.
-- The JSON artifact is the handoff object the main agent reads before claiming a slice is stable.
-- Do not duplicate these commands in ad-hoc notes or subagent briefs. Reference the one script instead.
+- Phase 0 target single source of truth:
+  - `npm run phase0:portal:network-gate -- --json-out artifacts/portal-network-gate.json`
+- CI is now wired to prefer that canonical command and publish the JSON artifact as `portal-network-gate`.
+- CI now calls that canonical command directly and no longer keeps a conditional fallback lane in the workflow.
+- The JSON artifact is the handoff object the main agent reads before claiming the phase 0 network/runtime gate is stable.
+- Do not duplicate these commands in ad-hoc notes or subagent briefs. Reference the canonical script name and artifact path instead.
 
 ## Branch and PR Discipline
 
