@@ -8,6 +8,10 @@ import {
   deepSyncAuthGovernanceUserViaBff,
   fetchPortalEntryContextViaBff,
   fetchPortalOnboardingContextViaBff,
+  fetchPortalDashboardSummaryViaBff,
+  fetchPortalPayrollSummaryViaBff,
+  fetchPortalWeeklyExpensesSummaryViaBff,
+  fetchPortalBankStatementsSummaryViaBff,
   fetchAuthGovernanceUsersViaBff,
   linkProjectEvidenceDriveRootViaBff,
   notifyProjectRequestRegistrationViaBff,
@@ -53,12 +57,37 @@ describe('platform-bff-client', () => {
     vi.stubGlobal('window', {
       location: {
         origin: 'https://inner-platform.vercel.app',
+        hostname: 'inner-platform.vercel.app',
       },
     });
 
     expect(readPlatformApiRuntimeConfig({})).toEqual({
       enabled: false,
       baseUrl: 'https://inner-platform.vercel.app',
+    });
+
+    if (previousWindow === undefined) {
+      delete (globalThis as { window?: unknown }).window;
+    } else {
+      vi.stubGlobal('window', previousWindow);
+    }
+  });
+
+  it('prefers the current browser origin when the dev auth harness is enabled on localhost', () => {
+    const previousWindow = globalThis.window;
+    vi.stubGlobal('window', {
+      location: {
+        origin: 'http://localhost:4173',
+        hostname: 'localhost',
+      },
+    });
+
+    expect(readPlatformApiRuntimeConfig({
+      VITE_DEV_AUTH_HARNESS_ENABLED: 'true',
+      VITE_PLATFORM_API_BASE_URL: 'http://127.0.0.1:8787',
+    })).toEqual({
+      enabled: false,
+      baseUrl: 'http://localhost:4173',
     });
 
     if (previousWindow === undefined) {
@@ -138,6 +167,138 @@ describe('platform-bff-client', () => {
     }));
     expect(result.activeProjectId).toBe('p001');
     expect(result.projects).toHaveLength(1);
+  });
+
+  it('calls portal dashboard summary endpoint', async () => {
+    const client = asMockClient({
+      post: vi.fn(),
+      get: vi.fn(async () => ({
+        data: {
+          project: { id: 'p001', name: 'Project 1', managerName: '보람' },
+          summary: {
+            payrollRiskCount: 1,
+            visibleProjects: 3,
+          },
+          surface: {
+            currentWeekLabel: '3주차',
+            projection: { label: '작성됨', detail: '3주차 · 제출 완료', latestUpdatedAt: '2026-04-16T09:00:00.000Z' },
+            expense: { label: '지급 여력 양호', detail: '3주차 · 지급 여력 양호', tone: 'success' },
+            visibleIssues: [],
+          },
+        },
+      })),
+      request: vi.fn(),
+    });
+
+    const result = await fetchPortalDashboardSummaryViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm', idToken: 'token-abc' },
+      client,
+    });
+
+    expect(client.get).toHaveBeenCalledWith('/api/v1/portal/dashboard-summary', expect.objectContaining({
+      tenantId: 'mysc',
+    }));
+    expect(result.summary.payrollRiskCount).toBe(1);
+  });
+
+  it('calls portal payroll summary endpoint', async () => {
+    const client = asMockClient({
+      post: vi.fn(),
+      get: vi.fn(async () => ({
+        data: {
+          project: { id: 'p001', name: 'Project 1', managerName: '보람' },
+          summary: {
+            queueCount: 1,
+            riskCount: 1,
+            status: 'payment_unconfirmed',
+          },
+          schedule: { id: 'p001', dayOfMonth: 25, timezone: 'Asia/Seoul', noticeLeadBusinessDays: 3, active: true },
+          currentRun: {
+            id: 'p001-2026-04',
+            projectId: 'p001',
+            yearMonth: '2026-04',
+            plannedPayDate: '2026-04-25',
+            noticeDate: '2026-04-22',
+            noticeLeadBusinessDays: 3,
+            acknowledged: false,
+            paidStatus: 'MISSING',
+            currentBalance: null,
+            worstBalance: null,
+            status: 'payment_unconfirmed',
+            statusReason: '지급일이 지났지만 아직 지급 확정이 기록되지 않았습니다.',
+            dayBalances: [],
+          },
+        },
+      })),
+      request: vi.fn(),
+    });
+
+    const result = await fetchPortalPayrollSummaryViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm', idToken: 'token-abc' },
+      client,
+    });
+
+    expect(client.get).toHaveBeenCalledWith('/api/v1/portal/payroll-summary', expect.objectContaining({
+      tenantId: 'mysc',
+    }));
+    expect(result.summary.queueCount).toBe(1);
+  });
+
+  it('calls portal weekly-expenses summary endpoint', async () => {
+    const client = asMockClient({
+      post: vi.fn(),
+      get: vi.fn(async () => ({
+        data: {
+          project: { id: 'p001', name: 'Project 1', managerName: '보람' },
+          summary: {
+            currentWeekLabel: '3주차',
+            expenseReviewPendingCount: 2,
+          },
+          expenseSheet: { activeSheetId: 'default', activeSheetName: '기본 탭', sheetCount: 2, rowCount: 10 },
+          bankStatement: { rowCount: 4, columnCount: 8, profile: 'general' },
+          handoff: { canOpenWeeklyExpenses: true, canUseEvidenceWorkflow: false, nextPath: '/portal/bank-statements' },
+        },
+      })),
+      request: vi.fn(),
+    });
+
+    const result = await fetchPortalWeeklyExpensesSummaryViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm', idToken: 'token-abc' },
+      client,
+    });
+
+    expect(client.get).toHaveBeenCalledWith('/api/v1/portal/weekly-expenses-summary', expect.objectContaining({
+      tenantId: 'mysc',
+    }));
+    expect(result.handoff.canOpenWeeklyExpenses).toBe(true);
+  });
+
+  it('calls portal bank-statements summary endpoint', async () => {
+    const client = asMockClient({
+      post: vi.fn(),
+      get: vi.fn(async () => ({
+        data: {
+          project: { id: 'p001', name: 'Project 1', managerName: '보람' },
+          bankStatement: { rowCount: 4, columnCount: 8, profile: 'general', lastSavedAt: '2026-04-16T09:00:00.000Z' },
+          handoffContext: { ready: true, reason: '저장된 통장내역이 있습니다.', nextPath: '/portal/weekly-expenses' },
+        },
+      })),
+      request: vi.fn(),
+    });
+
+    const result = await fetchPortalBankStatementsSummaryViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm', idToken: 'token-abc' },
+      client,
+    });
+
+    expect(client.get).toHaveBeenCalledWith('/api/v1/portal/bank-statements-summary', expect.objectContaining({
+      tenantId: 'mysc',
+    }));
+    expect(result.handoffContext.ready).toBe(true);
   });
 
   it('calls portal session project switch endpoint', async () => {

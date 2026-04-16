@@ -30,6 +30,9 @@ import {
 import { toast } from 'sonner';
 import { useFirebase } from '../../lib/firebase-context';
 import {
+  createPlatformApiClient,
+  fetchPortalWeeklyExpensesSummaryViaBff,
+  type PortalWeeklyExpensesSummaryResult,
   type ProvisionTransactionEvidenceDriveResult,
   type SyncTransactionEvidenceDriveResult,
   type UploadTransactionEvidenceDriveResult,
@@ -72,6 +75,7 @@ import {
 import { resolvePortalHappyPath } from '../../platform/portal-happy-path';
 import { resolveWeeklyExpenseSavePolicy } from '../../platform/weekly-expense-save-policy';
 import { usePortalNavigationGuard } from './PortalLayout';
+import { resolvePortalProjectReadModel } from './portal-read-model';
 const GoogleSheetMigrationWizard = lazy(
   () => import('./GoogleSheetMigrationWizard').then((module) => ({ default: module.GoogleSheetMigrationWizard })),
 );
@@ -85,6 +89,7 @@ export function PortalWeeklyExpensePage() {
   const weeklyExpenseSavePolicy = resolveWeeklyExpenseSavePolicy();
   const { user: authUser, ensureGoogleWorkspaceAccess } = useAuth();
   const { orgId } = useFirebase();
+  const apiClient = useMemo(() => createPlatformApiClient(import.meta.env), []);
   const {
     activeProjectId,
     portalUser,
@@ -121,6 +126,7 @@ export function PortalWeeklyExpensePage() {
   const devHarnessConfig = readDevAuthHarnessConfig(import.meta.env, typeof window !== 'undefined' ? window.location : undefined);
   const [projectDriveProvisioning, setProjectDriveProvisioning] = useState(false);
   const [googleSheetImportOpen, setGoogleSheetImportOpen] = useState(false);
+  const [weeklySummary, setWeeklySummary] = useState<PortalWeeklyExpensesSummaryResult | null>(null);
   const [pendingQuickInsert, setPendingQuickInsert] = useState<PendingQuickInsert | null>(null);
   const [hasUnsavedSettlementChanges, setHasUnsavedSettlementChanges] = useState(false);
   const [pendingNavigationAttempt, setPendingNavigationAttempt] = useState<{ path: string; label: string } | null>(null);
@@ -132,7 +138,6 @@ export function PortalWeeklyExpensePage() {
   } | null>(null);
 
   const projectId = activeProjectId || myProject?.id || '';
-  const projectName = myProject?.name || '내 사업';
   const ledgerUserRole = portalUser?.role === 'pm' ? 'pm' : 'admin';
   const visibleExpenseSheets = useMemo(() => (
     expenseSheets.length > 0
@@ -143,11 +148,39 @@ export function PortalWeeklyExpensePage() {
     return visibleExpenseSheets.find((sheet) => sheet.id === activeExpenseSheetId)?.name || visibleExpenseSheets[0]?.name || '기본 탭';
   }, [visibleExpenseSheets, activeExpenseSheetId]);
   const bankStatementCount = bankStatementRows?.rows?.length || 0;
+  const projectReadModel = useMemo(() => resolvePortalProjectReadModel({
+    summaryProject: weeklySummary?.project,
+    fallbackProject: myProject,
+    activeProjectId,
+  }), [activeProjectId, myProject, weeklySummary?.project]);
+  const projectName = projectReadModel.projectName;
 
   const defaultLedgerId = useMemo(() => {
     const ledger = ledgers.find((l) => l.projectId === projectId);
     return ledger?.id || `l-${projectId}`;
   }, [projectId, ledgers]);
+  useEffect(() => {
+    if (!authUser?.uid || !orgId) return;
+    let cancelled = false;
+
+    void fetchPortalWeeklyExpensesSummaryViaBff({
+      tenantId: orgId,
+      actor: authUser,
+      client: apiClient,
+    })
+      .then((summary) => {
+        if (!cancelled) setWeeklySummary(summary);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          console.warn('[PortalWeeklyExpensePage] weekly-expenses-summary fetch failed; using store fallback:', error);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [apiClient, authUser, orgId]);
   const happyPath = useMemo(() => resolvePortalHappyPath({
     authUser,
     portalUser,
@@ -744,6 +777,11 @@ export function PortalWeeklyExpensePage() {
           <div className="space-y-1">
           <div className="flex items-center gap-2 flex-wrap">
             <h2 className="text-base font-bold">사업비 입력(주간)</h2>
+            {projectReadModel.statusLabel && (
+              <Badge variant="outline" className="text-[10px]">
+                {projectReadModel.statusLabel}
+              </Badge>
+            )}
             <Badge variant="secondary" className="text-[10px]">
               현재 탭: {activeSheetName}
             </Badge>
@@ -768,6 +806,9 @@ export function PortalWeeklyExpensePage() {
                 ? '통장내역 기준본에서 이어서 작업합니다. 이 화면에서 분류 확인, 행 입력, 저장까지 바로 마무리하세요.'
                 : '통장내역 기준본을 먼저 만들면 이 화면에서 바로 입력과 저장을 이어갈 수 있습니다.'}
           </p>
+          {projectReadModel.projectMetaLabel && (
+            <p className="text-[11px] text-muted-foreground">{projectReadModel.projectName} · {projectReadModel.projectMetaLabel}</p>
+          )}
           </div>
           <div className="flex items-center gap-2 flex-wrap">
           {isDirectEntryMode ? (

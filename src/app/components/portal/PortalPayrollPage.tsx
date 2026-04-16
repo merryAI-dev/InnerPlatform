@@ -1,12 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { CalendarDays, CheckCircle2, CircleDollarSign, Info, AlertTriangle, ArrowRight } from 'lucide-react';
-import {
-  collection,
-  getDocs,
-  query,
-  where,
-} from 'firebase/firestore';
 import { toast } from 'sonner';
 import { PageHeader } from '../layout/PageHeader';
 import { Card, CardContent } from '../ui/card';
@@ -14,20 +8,25 @@ import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
+import { useAuth } from '../../data/auth-store';
 import { usePortalStore } from '../../data/portal-store';
 import { usePayroll } from '../../data/payroll-store';
-import { TRANSACTIONS } from '../../data/mock-data';
+import { useFirebase } from '../../lib/firebase-context';
+import {
+  createPlatformApiClient,
+  fetchPortalPayrollSummaryViaBff,
+  type PortalPayrollSummaryResult,
+} from '../../lib/platform-bff-client';
 import { addMonthsToYearMonth, computePlannedPayDate, getSeoulTodayIso, subtractBusinessDays } from '../../platform/business-days';
 import { fmtShort } from '../../data/budget-data';
-import { featureFlags } from '../../config/feature-flags';
-import { useFirebase } from '../../lib/firebase-context';
-import { getOrgCollectionPath } from '../../lib/firebase';
-import type { Transaction } from '../../data/types';
 import { resolveProjectPayrollLiquidity, type PayrollLiquidityQueueItem } from '../../platform/payroll-liquidity';
+import { resolvePortalProjectReadModel } from './portal-read-model';
 
 export function PortalPayrollPage() {
   const navigate = useNavigate();
-  const { activeProjectId, myProject } = usePortalStore();
+  const { user: authUser } = useAuth();
+  const { activeProjectId, myProject, transactions } = usePortalStore();
+  const { orgId } = useFirebase();
   const {
     schedules,
     runs,
@@ -36,22 +35,31 @@ export function PortalPayrollPage() {
     acknowledgePayrollRun,
     acknowledgeMonthlyClose,
   } = usePayroll();
-  const { db, isOnline, orgId } = useFirebase();
-  const firestoreEnabled = featureFlags.firestoreCoreEnabled && isOnline && !!db;
-  const [liveTransactions, setLiveTransactions] = useState<Transaction[] | null>(null);
+  const apiClient = useMemo(() => createPlatformApiClient(import.meta.env), []);
+  const [payrollSummary, setPayrollSummary] = useState<PortalPayrollSummaryResult | null>(null);
 
   const today = getSeoulTodayIso();
   const yearMonth = today.slice(0, 7);
   const prevYearMonth = addMonthsToYearMonth(yearMonth, -1);
 
   const projectId = activeProjectId || myProject?.id || '';
-  const schedule = useMemo(() => schedules.find((s) => s.projectId === projectId) || null, [projectId, schedules]);
-  const run = useMemo(() => runs.find((r) => r.projectId === projectId && r.yearMonth === yearMonth) || null, [projectId, runs, yearMonth]);
+  const projectReadModel = useMemo(() => resolvePortalProjectReadModel({
+    summaryProject: payrollSummary?.project,
+    fallbackProject: myProject,
+    activeProjectId: projectId,
+  }), [myProject, payrollSummary?.project, projectId]);
+  const schedule = useMemo(
+    () => payrollSummary?.schedule ?? (schedules.find((s) => s.projectId === projectId) || null),
+    [payrollSummary?.schedule, projectId, schedules],
+  );
+  const run = useMemo(
+    () => payrollSummary?.currentRun ?? (runs.find((r) => r.projectId === projectId && r.yearMonth === yearMonth) || null),
+    [payrollSummary?.currentRun, projectId, runs, yearMonth],
+  );
   const monthlyClosePrev = useMemo(() => monthlyCloses.find((c) => c.projectId === projectId && c.yearMonth === prevYearMonth) || null, [monthlyCloses, prevYearMonth, projectId]);
   const projectTransactions = useMemo(() => {
-    const source = liveTransactions ?? TRANSACTIONS;
-    return source.filter((tx) => tx.projectId === projectId);
-  }, [liveTransactions, projectId]);
+    return transactions.filter((tx) => tx.projectId === projectId);
+  }, [projectId, transactions]);
 
   const [dayInput, setDayInput] = useState<string>(schedule ? String(schedule.dayOfMonth) : '');
   const day = Math.max(1, Math.min(31, Number.parseInt(dayInput || '0', 10) || 0));
@@ -75,36 +83,42 @@ export function PortalPayrollPage() {
         })
       : []
   ), [myProject, projectTransactions, runs, today]);
-  const activeQueueItem = queueItems[0] || null;
+  const activeQueueItem = useMemo(() => {
+    const summaryQueueItem = payrollSummary?.queue?.[0];
+    if (summaryQueueItem) return {
+      ...summaryQueueItem,
+      projectShortName: summaryQueueItem.projectShortName || summaryQueueItem.projectId,
+    } satisfies PayrollLiquidityQueueItem;
+    return queueItems[0] || null;
+  }, [payrollSummary?.queue, queueItems]);
 
   useEffect(() => {
-    if (!projectId || !firestoreEnabled || !db) {
-      setLiveTransactions(null);
-      return;
-    }
+    if (!authUser?.uid || !orgId) return;
+    let cancelled = false;
 
-    let isCancelled = false;
-    const txQuery = query(
-      collection(db, getOrgCollectionPath(orgId, 'transactions')),
-      where('projectId', '==', projectId),
-    );
-
-    void getDocs(txQuery)
-      .then((snap) => {
-        if (isCancelled) return;
-        setLiveTransactions(snap.docs.map((doc) => doc.data() as Transaction));
+    void fetchPortalPayrollSummaryViaBff({
+      tenantId: orgId,
+      actor: authUser,
+      client: apiClient,
+    })
+      .then((summary) => {
+        if (!cancelled) setPayrollSummary(summary);
       })
-      .catch((err) => {
-        if (isCancelled) return;
-        console.error('[PortalPayrollPage] transactions fetch error:', err);
-        toast.error('인건비 지급용 거래 내역을 불러오지 못했습니다');
-        setLiveTransactions(null);
+      .catch((error) => {
+        if (!cancelled) {
+          console.warn('[PortalPayrollPage] payroll-summary fetch failed; using store fallback:', error);
+        }
       });
 
     return () => {
-      isCancelled = true;
+      cancelled = true;
     };
-  }, [db, firestoreEnabled, orgId, projectId]);
+  }, [apiClient, authUser, orgId]);
+
+  useEffect(() => {
+    if (!schedule || dayInput) return;
+    setDayInput(String(schedule.dayOfMonth));
+  }, [dayInput, schedule]);
 
   async function onSave() {
     if (!projectId) return;
@@ -150,7 +164,7 @@ export function PortalPayrollPage() {
         iconGradient="linear-gradient(135deg, #0d9488 0%, #059669 100%)"
         title="인건비 지급 준비"
         description="지급일을 등록해 두면 지급 창 D-3부터 D+3까지 잔액 여력과 지급 확정 상태를 함께 점검할 수 있습니다."
-        badge={myProject?.shortName || myProject?.id || ''}
+        badge={payrollSummary?.project.shortName || myProject?.shortName || myProject?.id || ''}
       />
 
       {(needsPayrollAck || needsMonthlyCloseAck) && (
@@ -213,15 +227,23 @@ export function PortalPayrollPage() {
 
       <Card>
         <CardContent className="p-4 space-y-4">
-          <div className="flex items-center gap-2">
-            <CalendarDays className="w-4 h-4 text-teal-600" />
-            <p className="text-[13px]" style={{ fontWeight: 700 }}>인건비 지급일 등록</p>
-            {schedule ? (
-              <Badge className="text-[10px] bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">설정됨</Badge>
-            ) : (
-              <Badge variant="outline" className="text-[10px]">미설정</Badge>
-            )}
-          </div>
+            <div className="flex items-center gap-2">
+              <CalendarDays className="w-4 h-4 text-teal-600" />
+              <p className="text-[13px]" style={{ fontWeight: 700 }}>인건비 지급일 등록</p>
+              {projectReadModel.statusLabel && (
+                <Badge variant="outline" className="text-[10px]">
+                  {projectReadModel.statusLabel}
+                </Badge>
+              )}
+              {schedule ? (
+                <Badge className="text-[10px] bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">설정됨</Badge>
+              ) : (
+                <Badge variant="outline" className="text-[10px]">미설정</Badge>
+              )}
+            </div>
+          {projectReadModel.projectMetaLabel && (
+            <p className="text-[11px] text-muted-foreground">{projectReadModel.projectName} · {projectReadModel.projectMetaLabel}</p>
+          )}
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div className="md:col-span-1">

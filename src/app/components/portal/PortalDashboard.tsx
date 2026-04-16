@@ -6,30 +6,26 @@ import {
   BarChart3,
   Loader2,
 } from 'lucide-react';
-import {
-  collection,
-  getDocs,
-  query,
-  where,
-} from 'firebase/firestore';
 import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { usePortalStore } from '../../data/portal-store';
+import { useAuth } from '../../data/auth-store';
 import { useHrAnnouncements, HR_EVENT_LABELS, HR_EVENT_COLORS } from '../../data/hr-announcements-store';
 import { usePayroll } from '../../data/payroll-store';
-import { TRANSACTIONS } from '../../data/mock-data';
 import { fmtShort } from '../../data/budget-data';
 import {
   PROJECT_STATUS_LABELS, SETTLEMENT_TYPE_SHORT, BASIS_LABELS,
-  type Transaction,
 } from '../../data/types';
 import { addMonthsToYearMonth, getSeoulTodayIso } from '../../platform/business-days';
 import { resolveCurrentCashflowWeek } from '../../platform/cashflow-export-surface';
 import { useFirebase } from '../../lib/firebase-context';
-import { featureFlags } from '../../config/feature-flags';
-import { getOrgCollectionPath } from '../../lib/firebase';
+import {
+  createPlatformApiClient,
+  fetchPortalDashboardSummaryViaBff,
+  type PortalDashboardSummaryResult,
+} from '../../lib/platform-bff-client';
 import {
   isPayrollLiquidityRiskStatus,
   resolveProjectPayrollLiquidity,
@@ -40,6 +36,7 @@ import {
   resolveWeeklyAccountingProductStatus,
   resolveWeeklyAccountingSnapshot,
 } from '../../platform/weekly-accounting-state';
+import { resolvePortalProjectReadModel } from './portal-read-model';
 
 // ═══════════════════════════════════════════════════════════════
 // PortalDashboard — 내 사업 현황
@@ -84,13 +81,42 @@ function submissionBadgeClassName(tone: 'neutral' | 'warning' | 'danger' | 'succ
 
 export function PortalDashboard() {
   const navigate = useNavigate();
-  const { isLoading, portalUser, myProject, weeklySubmissionStatuses, projects } = usePortalStore();
+  const { user: authUser } = useAuth();
+  const { isLoading, portalUser, myProject, weeklySubmissionStatuses, projects, transactions } = usePortalStore();
   const { getProjectAlerts } = useHrAnnouncements();
   const { runs, monthlyCloses, acknowledgePayrollRun, acknowledgeMonthlyClose } = usePayroll();
-  const { db, isOnline, orgId } = useFirebase();
-  const firestoreEnabled = featureFlags.firestoreCoreEnabled && isOnline && !!db;
+  const { orgId } = useFirebase();
+  const apiClient = useMemo(() => createPlatformApiClient(import.meta.env), []);
+  const [dashboardSummary, setDashboardSummary] = useState<PortalDashboardSummaryResult | null>(null);
 
-  const [liveTransactions, setLiveTransactions] = useState<Transaction[] | null>(null);
+  useEffect(() => {
+    if (!authUser?.uid || !orgId) return;
+    let cancelled = false;
+
+    void fetchPortalDashboardSummaryViaBff({
+      tenantId: orgId,
+      actor: authUser,
+      client: apiClient,
+    })
+      .then((summary) => {
+        if (!cancelled) setDashboardSummary(summary);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          console.warn('[PortalDashboard] dashboard-summary fetch failed; using store fallback:', error);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [apiClient, authUser, orgId]);
+
+  const projectReadModel = useMemo(() => resolvePortalProjectReadModel({
+    summaryProject: dashboardSummary?.project,
+    fallbackProject: myProject,
+    activeProjectId: myProject?.id,
+  }), [dashboardSummary?.project, myProject]);
 
   if (isLoading) {
     return (
@@ -133,37 +159,7 @@ export function PortalDashboard() {
     );
   }
 
-  useEffect(() => {
-    if (!firestoreEnabled || !db) {
-      setLiveTransactions(null);
-      return;
-    }
-
-    let isCancelled = false;
-
-    const txQuery = query(
-      collection(db, getOrgCollectionPath(orgId, 'transactions')),
-      where('projectId', '==', myProject.id),
-    );
-
-    void getDocs(txQuery)
-      .then((snap) => {
-        if (isCancelled) return;
-        setLiveTransactions(snap.docs.map((d) => d.data() as Transaction));
-      })
-      .catch((err) => {
-        if (isCancelled) return;
-        console.error('[PortalDashboard] transactions fetch error:', err);
-        toast.error('거래 데이터를 불러오지 못했습니다');
-        setLiveTransactions(null);
-      });
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [db, firestoreEnabled, orgId, myProject.id]);
-
-  const myTx = (liveTransactions ?? TRANSACTIONS).filter(t => t.projectId === myProject.id);
+  const myTx = transactions.filter((t) => t.projectId === myProject.id);
 
   const today = getSeoulTodayIso();
   const yearMonth = today.slice(0, 7);
@@ -252,13 +248,13 @@ export function PortalDashboard() {
       };
     });
   }, [assignedProjects, currentWeek, weeklyStatusMap]);
-  const dashboardSurface = useMemo(() => buildPortalDashboardSurface({
+  const dashboardSurface = useMemo(() => dashboardSummary?.surface ?? buildPortalDashboardSurface({
     projectId: myProject.id,
     weeklySubmissionStatuses,
     todayIso: today,
     hrAlertCount: hrAlerts.length,
     payrollRiskCount: payrollRiskItems.length,
-  }), [hrAlerts.length, myProject.id, payrollRiskItems.length, today, weeklySubmissionStatuses]);
+  }), [dashboardSummary?.surface, hrAlerts.length, myProject.id, payrollRiskItems.length, today, weeklySubmissionStatuses]);
   const shouldShowPayrollQueue = Boolean(payrollDetail && payrollDetail.status !== 'clear');
   const financeSummaryItems = [
     { label: '총 입금', value: fmtShort(totalIn) },
@@ -275,7 +271,7 @@ export function PortalDashboard() {
             <div className="space-y-3">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge className="h-5 rounded-full bg-[#e8f0fb] px-2 text-[10px] font-semibold text-[#1b4f8f]">
-                  {PROJECT_STATUS_LABELS[myProject.status]}
+                  {projectReadModel.statusLabel || PROJECT_STATUS_LABELS[myProject.status]}
                 </Badge>
                 <Badge variant="outline" className="h-5 rounded-full border-slate-300 px-2 text-[10px] font-semibold text-slate-600">
                   {SETTLEMENT_TYPE_SHORT[myProject.settlementType]}
@@ -285,7 +281,7 @@ export function PortalDashboard() {
                 </Badge>
               </div>
               <h2 className="text-[30px] font-semibold tracking-[-0.04em] text-slate-950">
-                {myProject.name}
+                {projectReadModel.projectName}
               </h2>
             </div>
 
@@ -314,11 +310,15 @@ export function PortalDashboard() {
                 <div className="space-y-2">
                   <div className="rounded-xl border border-slate-300 bg-white px-4 py-3">
                     <div className="text-[11px] font-medium text-slate-600">발주기관</div>
-                    <div className="mt-1 text-[14px] font-semibold text-slate-900">{myProject.clientOrg || '-'}</div>
+                    <div className="mt-1 text-[14px] font-semibold text-slate-900">
+                      {projectReadModel.clientOrg || myProject.clientOrg || '-'}
+                    </div>
                   </div>
                   <div className="rounded-xl border border-slate-300 bg-white px-4 py-3">
                     <div className="text-[11px] font-medium text-slate-600">담당자</div>
-                    <div className="mt-1 text-[14px] font-semibold text-slate-900">{portalUser.name}</div>
+                    <div className="mt-1 text-[14px] font-semibold text-slate-900">
+                      {projectReadModel.managerName || portalUser.name}
+                    </div>
                   </div>
                   <div className="rounded-xl border border-slate-300 bg-white px-4 py-3">
                     <div className="text-[11px] font-medium text-slate-600">사업비 총액</div>

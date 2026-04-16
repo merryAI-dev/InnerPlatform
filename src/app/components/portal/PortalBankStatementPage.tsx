@@ -6,6 +6,13 @@ import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { usePortalStore } from '../../data/portal-store';
+import { useAuth } from '../../data/auth-store';
+import { useFirebase } from '../../lib/firebase-context';
+import {
+  createPlatformApiClient,
+  fetchPortalBankStatementsSummaryViaBff,
+  type PortalBankStatementsSummaryResult,
+} from '../../lib/platform-bff-client';
 import {
   detectBankStatementProfile,
   getBankStatementProfileLabel,
@@ -17,6 +24,7 @@ import {
 } from '../../platform/bank-statement';
 import { normalizeKey, parseCsv, parseNumber } from '../../platform/csv-utils';
 import { loadXlsx, warmXlsx } from '../../platform/lazy-heavy-modules';
+import { resolvePortalProjectReadModel } from './portal-read-model';
 
 function getAmountColumnIndexes(columns: string[]): Set<number> {
   return new Set(
@@ -43,6 +51,9 @@ function formatBankStatementRows(
 
 export function PortalBankStatementPage() {
   const navigate = useNavigate();
+  const { user: authUser } = useAuth();
+  const { orgId } = useFirebase();
+  const apiClient = useMemo(() => createPlatformApiClient(import.meta.env), []);
   const {
     activeProjectId,
     portalUser,
@@ -56,11 +67,17 @@ export function PortalBankStatementPage() {
   const [saving, setSaving] = useState(false);
   const [lastUploadedName, setLastUploadedName] = useState('');
   const [lastSavedAt, setLastSavedAt] = useState('');
+  const [bankStatementsSummary, setBankStatementsSummary] = useState<PortalBankStatementsSummaryResult | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [uploadPreparing, setUploadPreparing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const projectName = myProject?.name || '내 사업';
+  const projectReadModel = useMemo(() => resolvePortalProjectReadModel({
+    summaryProject: bankStatementsSummary?.project,
+    fallbackProject: myProject,
+    activeProjectId,
+  }), [activeProjectId, bankStatementsSummary?.project, myProject]);
+  const projectName = projectReadModel.projectName;
   const ready = useMemo(() => Boolean(activeProjectId || myProject?.id), [activeProjectId, myProject?.id]);
   const bankProfile = useMemo(() => detectBankStatementProfile(columns, lastUploadedName), [columns, lastUploadedName]);
   const amountColIdxs = useMemo(() => getAmountColumnIndexes(columns), [columns]);
@@ -85,6 +102,29 @@ export function PortalBankStatementPage() {
     setColumns([]);
     setRows([]);
   }, [bankStatementRows, dirty, formatAmount]);
+
+  useEffect(() => {
+    if (!authUser?.uid || !orgId) return;
+    let cancelled = false;
+
+    void fetchPortalBankStatementsSummaryViaBff({
+      tenantId: orgId,
+      actor: authUser,
+      client: apiClient,
+    })
+      .then((summary) => {
+        if (!cancelled) setBankStatementsSummary(summary);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          console.warn('[PortalBankStatementPage] bank-statements-summary fetch failed; using store fallback:', error);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [apiClient, authUser, orgId]);
 
   const parseExcelToMatrix = useCallback(async (file: File): Promise<string[][]> => {
     // KB 등 HTML-as-XLS 감지: 파일 앞부분이 HTML 태그로 시작하면 HTML 파서 사용
@@ -290,6 +330,11 @@ export function PortalBankStatementPage() {
         <div className="space-y-1">
           <div className="flex items-center gap-2 flex-wrap">
             <h1 className="text-[18px]" style={{ fontWeight: 700 }}>통장내역</h1>
+            {projectReadModel.statusLabel && (
+              <Badge variant="outline" className="text-[10px]">
+                {projectReadModel.statusLabel}
+              </Badge>
+            )}
             <Badge variant={hasUploadedSheet ? 'secondary' : 'outline'} className="text-[10px]">
               {hasUploadedSheet ? `${rows.length}건 불러옴` : '업로드 전'}
             </Badge>
@@ -301,6 +346,9 @@ export function PortalBankStatementPage() {
             </Badge>
           </div>
           <p className="text-[12px] text-muted-foreground">{projectName} · 카드/통장 내역 업로드</p>
+          {projectReadModel.ready && projectReadModel.projectMetaLabel && (
+            <p className="text-[11px] text-muted-foreground">{projectReadModel.projectMetaLabel}</p>
+          )}
         </div>
         <div className="flex items-center justify-end gap-2 flex-wrap">
           <Button variant="outline" size="sm" onClick={() => navigate('/portal/weekly-expenses')}>
