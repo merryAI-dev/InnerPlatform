@@ -30,7 +30,12 @@ import {
   normalizeWeekAmounts,
   resolveWeekDocId,
 } from './cashflow-weeks.persistence';
-import { isPlatformApiEnabled, upsertCashflowWeekViaBff } from '../lib/platform-bff-client';
+import {
+  closeCashflowWeekViaBff,
+  isPlatformApiEnabled,
+  submitPortalWeeklySubmissionViaBff,
+  upsertCashflowWeekViaBff,
+} from '../lib/platform-bff-client';
 import { useFirebase } from '../lib/firebase-context';
 import { getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
 import { addMonthsToYearMonth, getSeoulTodayIso } from '../platform/business-days';
@@ -358,13 +363,35 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     yearMonth: string;
     weekNo: number;
   }): Promise<void> => {
-    if (!db) return;
     const actor = user;
     if (!actor) return;
     const projectId = input.projectId.trim();
     const ym = input.yearMonth.trim();
     const weekNo = Math.max(1, Math.min(6, Math.trunc(input.weekNo)));
     if (!projectId || !/^\d{4}-\d{2}$/.test(ym)) return;
+
+    if (isPlatformApiEnabled() && actor.uid && submitPortalWeeklySubmissionViaBff) {
+      const result = await submitPortalWeeklySubmissionViaBff({
+        tenantId: orgId,
+        actor: {
+          uid: actor.uid,
+          email: actor.email,
+          role: actor.role,
+          idToken: actor.idToken,
+          googleAccessToken: actor.googleAccessToken,
+        },
+        command: {
+          projectId,
+          yearMonth: ym,
+          weekNo,
+          transactionIds: [],
+        },
+      });
+      setWeeks((prev) => mergeCashflowWeekItem(prev, result.cashflowWeek as CashflowWeekSheet));
+      return;
+    }
+
+    if (!db) return;
 
     const monthWeeks = getMonthMondayWeeks(ym);
     const def = monthWeeks.find((w) => w.weekNo === weekNo);
@@ -419,13 +446,34 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     yearMonth: string;
     weekNo: number;
   }): Promise<void> => {
-    if (!db) return;
     const actor = user;
     if (!actor) return;
     const projectId = input.projectId.trim();
     const ym = input.yearMonth.trim();
     const weekNo = Math.max(1, Math.min(6, Math.trunc(input.weekNo)));
     if (!projectId || !/^\d{4}-\d{2}$/.test(ym)) return;
+
+    if (isPlatformApiEnabled() && actor.uid && closeCashflowWeekViaBff) {
+      const result = await closeCashflowWeekViaBff({
+        tenantId: orgId,
+        actor: {
+          uid: actor.uid,
+          email: actor.email,
+          role: actor.role,
+          idToken: actor.idToken,
+          googleAccessToken: actor.googleAccessToken,
+        },
+        command: {
+          projectId,
+          yearMonth: ym,
+          weekNo,
+        },
+      });
+      setWeeks((prev) => mergeCashflowWeekItem(prev, result.cashflowWeek as CashflowWeekSheet));
+      return;
+    }
+
+    if (!db) return;
 
     const monthWeeks = getMonthMondayWeeks(ym);
     const def = monthWeeks.find((w) => w.weekNo === weekNo);
