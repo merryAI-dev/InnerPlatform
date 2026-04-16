@@ -3,7 +3,7 @@
 - route: `/portal`
 - primary users: PM
 - status: active
-- last updated: 2026-04-15
+- last updated: 2026-04-16
 
 ## Purpose
 
@@ -51,6 +51,7 @@
 - [x] 포털 홈의 거래 집계는 direct `onSnapshot` 없이 fetch 기반으로 로드됨
 - [x] 포털 홈은 route shell이 주입한 `portal-safe` access mode를 기준으로 부팅됨
 - [x] 포털 store는 pathname이나 `window.location`을 읽어 realtime 여부를 스스로 판단하지 않음
+- [x] 포털 홈은 `dashboard-summary` BFF read model contract를 우선 사용해 프로젝트 상태와 이번 주 작업 상태를 읽음
 - [x] 자금 요약 4칸이 사업명 바로 아래에서 한 번에 확인 가능
 - [x] 프로젝트 상세와 이번 주 작업 상태를 한 slab 안의 좌우 축으로 확인 가능
 - [x] 좌우 패널 비중이 상태 정보 기준으로 재조정됨
@@ -82,6 +83,8 @@
 - [2026-04-15] 포털 홈이 직접 붙이던 `transactions` realtime listener를 제거하고, `/portal` 경로에서는 거래 집계도 fetch 기반으로만 읽게 바꿨다.
 - [2026-04-15] 포털 전역 provider들이 `window.location.pathname`를 한 번 읽고 끝내는 대신 route change를 구독하도록 바꿔, admin/live 판단이 이전 화면 기준으로 고정된 채 `/portal`에서 realtime listen이 다시 살아나는 문제를 막았다.
 - [2026-04-15] App 루트 broad provider를 route shell로 분리하고, 포털은 `portal-safe` access mode를 주입받아 store가 URL self-inference 없이 동일한 fetch 정책을 따르게 정리했다.
+- [2026-04-16] `/portal`은 `dashboard-summary` BFF endpoint를 추가해 프로젝트 상태와 이번 주 작업 상태를 raw page 계산보다 summary contract 기준으로 우선 렌더링하도록 옮기기 시작했다.
+- [2026-04-16] phase1 smoke에서 `/portal/submissions -> /portal` 리다이렉트가 `dashboardSummary?.project.clientOrg` null-safety 누락 때문에 터지던 회귀를 수정했고, 프로젝트 상세는 read model fallback을 안전하게 읽도록 정리했다.
 - [2026-04-14] `내 제출 현황`을 홈 하단의 compact 제출 상태 표로 흡수했고, 별도 탭과 직접 진입 라우트는 홈으로 정리했다.
 - [2026-04-14] 제출 통합 블록에서는 `인력변경 신청`, `사업비 입력(주간) 작성/제출`, `주간 제출 체크` 같은 중복 섹션을 제외하고 현재 주차 기준 핵심 상태만 남겼다.
 - [2026-04-14] 상단을 Salesforce 계열 SaaS처럼 `workspace bar + app tabs + project switcher` 구조로 재편했다.

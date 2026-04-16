@@ -42,6 +42,14 @@ Included flows:
 
 ## Local Reproduction
 
+For the phase1 portal lane, use the canonical validation gate first:
+
+```bash
+npm run phase1:portal:validation-gate -- --json-out artifacts/phase1-portal-validation-gate.json
+```
+
+For the broader legacy product gate, run the Playwright specs directly:
+
 Run the product gate Playwright specs:
 
 ```bash

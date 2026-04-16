@@ -37,4 +37,10 @@ describe('PortalDashboard layout compaction', () => {
     expect(portalDashboardSource).not.toContain('인력변경 신청');
     expect(portalDashboardSource).not.toContain('사업비 입력(주간) 작성/제출');
   });
+
+  it('reads project detail labels through the read-model fallback instead of dereferencing summary project blindly', () => {
+    expect(portalDashboardSource).toContain('projectReadModel.clientOrg || myProject.clientOrg || \'-\'');
+    expect(portalDashboardSource).toContain('projectReadModel.managerName || portalUser.name');
+    expect(portalDashboardSource).not.toContain('dashboardSummary?.project.clientOrg');
+  });
 });

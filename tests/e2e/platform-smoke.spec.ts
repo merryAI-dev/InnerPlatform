@@ -23,7 +23,7 @@ test('1. PM can login via dev auth harness', async ({ page }) => {
   await loginAsPm(page);
   await expect(page.locator('body')).toBeVisible();
   await expect(page.getByRole('heading', { name: '오늘 작업할 사업 선택' })).toBeVisible();
-  await expect(page.getByRole('button', { name: '이 사업으로 시작' })).toBeVisible();
+  await expect(page.locator('[data-testid^="portal-project-start-"]').first()).toBeVisible();
 });
 
 test('2. Admin can login via dev auth harness', async ({ page }) => {

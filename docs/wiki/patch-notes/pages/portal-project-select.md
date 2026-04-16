@@ -34,6 +34,8 @@
 - [2026-04-15] standalone entry path를 layout과 navigation helper에서 같이 보도록 맞춰, 미등록 사용자가 이 경로로 이동한 뒤 다시 fallback 선택 화면에 덮이지 않도록 복구했다.
 - [2026-04-15] HAR 기준으로 Firestore `Listen/Write channel`이 과도하게 열리던 병목을 줄이기 위해, 이 화면을 lightweight entry shell로 분리하고 `entry-context`/`session-project` BFF 경로로 교체했다.
 - [2026-04-15] 외부 font CSS import를 제거하고 self-hosted Pretendard + immutable asset cache 정책을 같이 적용해 entry surface 초기 요청 무게를 줄였다.
+- [2026-04-16] phase1 smoke에서 `entry-context` fetch가 계속 실패하던 원인을 로컬 dev harness의 API base URL drift로 확정했고, harness 모드에서는 `VITE_PLATFORM_API_BASE_URL`보다 현재 Vite origin을 우선 사용하도록 고쳤다.
+- [2026-04-16] Playwright harness도 `VITE_PLATFORM_API_BASE_URL=http://localhost:4173`를 명시하고 serial worker로 고정해, `project-select` 실패와 `ProjectDetailPage` dynamic import false negative가 같은 harness drift에서 재발하지 않게 정리했다.
 - [2026-04-14] 이미 `project-select?redirect=...` 형태인 진입 URL은 redirect query를 보존하도록 라우팅 안정성을 보강했다.
 - [2026-04-14] 포털 진입을 `/portal/project-select` step으로 분리하고 세션 active project 선택 흐름을 신설했다.
 
@@ -43,6 +45,8 @@
 - `src/app/components/portal/PortalEntryLayout.tsx`
 - `src/app/components/portal/PortalLayout.tsx`
 - `src/app/lib/platform-bff-client.ts`
+- `src/app/platform/dev-harness-portal-api.ts`
+- `src/app/platform/harness-stability.contract.test.ts`
 - `src/app/platform/navigation.ts`
 - `src/app/platform/portal-project-selection.ts`
 - `server/bff/routes/portal-entry.mjs`
@@ -54,6 +58,8 @@
 - `src/app/components/portal/PortalProjectSelectPage.shell.test.ts`
 - `src/app/routes.provider-scope.test.ts`
 - `src/app/lib/platform-bff-client.test.ts`
+- `src/app/platform/dev-harness-portal-api.test.ts`
+- `src/app/platform/harness-stability.contract.test.ts`
 - `src/app/vercel.cache-policy.contract.test.ts`
 - `src/app/platform/navigation.test.ts`
 - `src/app/platform/portal-project-selection.test.ts`

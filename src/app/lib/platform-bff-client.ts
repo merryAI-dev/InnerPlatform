@@ -7,6 +7,7 @@ import type {
   TransactionState,
 } from '../data/types';
 import { PlatformApiClient } from '../platform/api-client';
+import { readDevAuthHarnessConfig } from '../platform/dev-harness';
 import { buildStandardHeaders, type RequestActor } from '../platform/request-context';
 
 export interface PlatformApiRuntimeConfig {
@@ -127,6 +128,155 @@ export interface PortalOnboardingContextResult {
 export interface PortalSessionProjectResult {
   ok: boolean;
   activeProjectId: string;
+}
+
+export interface PortalReadModelProjectSummary {
+  id: string;
+  name: string;
+  shortName?: string;
+  managerName?: string;
+  clientOrg?: string;
+  department?: string;
+  status?: string;
+  type?: string;
+}
+
+export interface PortalDashboardSummaryResult {
+  project: PortalReadModelProjectSummary;
+  summary: {
+    payrollRiskCount: number;
+    visibleProjects: number;
+    hrAlertCount: number;
+    currentWeekLabel: string;
+  };
+  surface: {
+    currentWeekLabel: string;
+    projection: {
+      label: string;
+      detail: string;
+      latestUpdatedAt?: string;
+    };
+    expense: {
+      label: string;
+      detail: string;
+      tone: 'muted' | 'warning' | 'danger' | 'success';
+    };
+    visibleIssues: Array<{
+      label: string;
+      count: number;
+      tone: 'neutral' | 'warn' | 'danger';
+      to: string;
+    }>;
+  };
+  registrationState?: 'registered' | 'unregistered';
+}
+
+export interface PortalPayrollSummaryResult {
+  project: PortalReadModelProjectSummary;
+  schedule: {
+    id: string;
+    projectId: string;
+    dayOfMonth: number;
+    timezone: string;
+    noticeLeadBusinessDays: number;
+    active: boolean;
+  };
+  currentRun: {
+    id: string;
+    projectId: string;
+    yearMonth: string;
+    plannedPayDate: string;
+    noticeDate: string;
+    noticeLeadBusinessDays: number;
+    acknowledged: boolean;
+    paidStatus: string;
+    expectedPayrollAmount: number | null;
+    baselineRunId: string | null;
+    status: string;
+    statusReason: string;
+    dayBalances: Array<{ date: string; balance: number | null }>;
+    worstBalance: number | null;
+    currentBalance: number | null;
+  } | null;
+  summary: {
+    queueCount: number;
+    riskCount: number;
+    status: string;
+    statusReason: string;
+  };
+  queue: Array<{
+    projectId: string;
+    projectName: string;
+    projectShortName: string;
+    runId: string;
+    yearMonth: string;
+    plannedPayDate: string;
+    windowStart: string;
+    windowEnd: string;
+    expectedPayrollAmount: number | null;
+    baselineRunId: string | null;
+    status: string;
+    statusReason: string;
+    dayBalances: Array<{ date: string; balance: number | null }>;
+    worstBalance: number | null;
+    currentBalance: number | null;
+    paidStatus: string;
+    acknowledged: boolean;
+  }>;
+  registrationState?: 'registered' | 'unregistered';
+}
+
+export interface PortalWeeklyExpensesSummaryResult {
+  project: PortalReadModelProjectSummary;
+  summary: {
+    currentWeekLabel: string;
+    expenseReviewPendingCount: number;
+  };
+  expenseSheet: {
+    activeSheetId: string;
+    activeSheetName: string;
+    sheetCount: number;
+    rowCount: number;
+  };
+  bankStatement: {
+    rowCount: number;
+    columnCount: number;
+    profile: string;
+    lastSavedAt?: string;
+  };
+  sheetSources: Array<{
+    sourceType: string;
+    sheetName: string;
+    fileName: string;
+    rowCount: number;
+    columnCount: number;
+    uploadedAt?: string;
+  }>;
+  handoff: {
+    canOpenWeeklyExpenses: boolean;
+    canUseEvidenceWorkflow: boolean;
+    nextPath: string;
+  };
+  registrationState?: 'registered' | 'unregistered';
+}
+
+export interface PortalBankStatementsSummaryResult {
+  project: PortalReadModelProjectSummary;
+  bankStatement: {
+    rowCount: number;
+    columnCount: number;
+    profile: string;
+    lastSavedAt?: string;
+  };
+  handoffContext: {
+    ready: boolean;
+    reason: string;
+    nextPath: string;
+    activeExpenseSheetId: string;
+    activeExpenseSheetName: string;
+    sheetCount: number;
+  };
+  registrationState?: 'registered' | 'unregistered';
 }
 
 export interface PortalRegistrationResult {
@@ -455,9 +605,14 @@ function normalizeBaseUrl(value: unknown): string {
 export function readPlatformApiRuntimeConfig(
   env: Record<string, unknown> = import.meta.env,
 ): PlatformApiRuntimeConfig {
+  const devHarnessConfig = readDevAuthHarnessConfig(env);
+  const baseUrl = devHarnessConfig.enabled
+    ? resolveRuntimeBaseUrl()
+    : normalizeBaseUrl(env.VITE_PLATFORM_API_BASE_URL);
+
   return {
     enabled: parseFeatureFlag(env.VITE_PLATFORM_API_ENABLED, false),
-    baseUrl: normalizeBaseUrl(env.VITE_PLATFORM_API_BASE_URL),
+    baseUrl,
   };
 }
 
@@ -1023,6 +1178,74 @@ export async function fetchPortalOnboardingContextViaBff(params: {
   const apiClient = resolveClient(params.client);
   const response = await apiClient.get<PortalOnboardingContextResult>(
     '/api/v1/portal/onboarding-context',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      timeoutMs: 8000,
+    },
+  );
+  return response.data;
+}
+
+export async function fetchPortalDashboardSummaryViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  client?: PlatformApiClientLike;
+}): Promise<PortalDashboardSummaryResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.get<PortalDashboardSummaryResult>(
+    '/api/v1/portal/dashboard-summary',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      timeoutMs: 8000,
+    },
+  );
+  return response.data;
+}
+
+export async function fetchPortalPayrollSummaryViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  client?: PlatformApiClientLike;
+}): Promise<PortalPayrollSummaryResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.get<PortalPayrollSummaryResult>(
+    '/api/v1/portal/payroll-summary',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      timeoutMs: 8000,
+    },
+  );
+  return response.data;
+}
+
+export async function fetchPortalWeeklyExpensesSummaryViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  client?: PlatformApiClientLike;
+}): Promise<PortalWeeklyExpensesSummaryResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.get<PortalWeeklyExpensesSummaryResult>(
+    '/api/v1/portal/weekly-expenses-summary',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      timeoutMs: 8000,
+    },
+  );
+  return response.data;
+}
+
+export async function fetchPortalBankStatementsSummaryViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  client?: PlatformApiClientLike;
+}): Promise<PortalBankStatementsSummaryResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.get<PortalBankStatementsSummaryResult>(
+    '/api/v1/portal/bank-statements-summary',
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),

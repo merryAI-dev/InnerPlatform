@@ -1,5 +1,17 @@
 # Patch Notes Log
 
+## [2026-04-16] patch-note | shared-portal-architecture | portal hardening orchestration model
+- pages: [shared-portal-architecture](./pages/shared-portal-architecture.md)
+- summary: 포털 하드닝 작업을 main-agent orchestration + subagent implementation slices 모델로 고정하고, task slicing, review loop, required test metrics, branch/PR discipline를 운영 문서로 분리했다.
+
+## [2026-04-16] patch-note | portal-project-select, portal-dashboard, portal-submissions, shared-portal-architecture | phase1 smoke closure and harness drift fix
+- pages: [portal-project-select](./pages/portal-project-select.md), [portal-dashboard](./pages/portal-dashboard.md), [portal-submissions](./pages/portal-submissions.md), [shared-portal-architecture](./pages/shared-portal-architecture.md)
+- summary: phase1 close 과정에서 `project-select` entry-context 실패 원인을 local dev harness의 API base URL drift로 확정했고, harness 모드에서는 현재 Vite origin을 우선 사용하도록 고쳤다. 동시에 Playwright harness를 serial worker + local API base 고정 계약으로 잠가 webserver refusal과 `ProjectDetailPage` dynamic import false negative를 분리했고, `/portal/submissions -> /portal` 경로에서 터지던 dashboard summary null-safety 회귀도 수정해 broad smoke와 release gate를 다시 green으로 닫았다.
+
+## [2026-04-16] patch-note | portal-dashboard, portal-payroll, portal-weekly-expense, portal-bank-statement, shared-portal-architecture | portal read model phase1
+- pages: [portal-dashboard](./pages/portal-dashboard.md), [portal-payroll](./pages/portal-payroll.md), [portal-weekly-expense](./pages/portal-weekly-expense.md), [portal-bank-statement](./pages/portal-bank-statement.md), [shared-portal-architecture](./pages/shared-portal-architecture.md)
+- summary: 포털 1차 read boundary를 BFF summary 계약으로 옮겨 `/portal`, `인건비`, `사업비 입력(주간)`, `통장내역`이 페이지 레벨 direct Firestore summary 해석 대신 `dashboard-summary`, `payroll-summary`, `weekly-expenses-summary`, `bank-statements-summary`를 우선 사용하도록 정리했다. entry shell과 route-scoped provider split 다음 단계로, 포털 read model API-first 전환을 실제 화면 계약에 연결한 첫 파동이다.
+
 ## [2026-04-16] patch-note | shared-portal-architecture | internal production SaaS 운영 기준 보정
 - pages: [shared-portal-architecture](./pages/shared-portal-architecture.md)
 - summary: `1000명 규모 내부 production SaaS` 기준으로 stable lane을 기본값으로 두고, low-risk 예외 경로만 owner/expiry/remove condition과 함께 time-boxed 허용하도록 운영 정책을 보정했다.
