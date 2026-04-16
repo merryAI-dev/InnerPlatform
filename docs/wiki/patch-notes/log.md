@@ -1,5 +1,29 @@
 # Patch Notes Log
 
+## [2026-04-16] patch-note | shared-portal-architecture | internal production SaaS 운영 기준 보정
+- pages: [shared-portal-architecture](./pages/shared-portal-architecture.md)
+- summary: `1000명 규모 내부 production SaaS` 기준으로 stable lane을 기본값으로 두고, low-risk 예외 경로만 owner/expiry/remove condition과 함께 time-boxed 허용하도록 운영 정책을 보정했다.
+
+## [2026-04-16] patch-note | shared-portal-architecture | Firestore + GCS backup/restore 추가
+- pages: [shared-portal-architecture](./pages/shared-portal-architecture.md)
+- summary: Firestore를 source of truth로 유지하면서 GCS를 운영 백업 기준 저장소로 쓰는 daily/weekly/monthly export, retention, restore target, restore drill 계획을 추가했다.
+
+## [2026-04-16] patch-note | shared-portal-architecture | emergency ledger reviewed reconciliation plan 추가
+- pages: [shared-portal-architecture](./pages/shared-portal-architecture.md)
+- summary: 장애 시 emergency ledger sheet에서는 CRUD를 허용하되, 플랫폼 복귀는 baseline snapshot 대비 diff를 사람이 검토한 뒤 승인 반영하는 reviewed reconciliation import 모델로 정리했다.
+
+## [2026-04-15] patch-note | shared-portal-architecture | client-direct exit ballot and execution plan
+- pages: [shared-portal-architecture](./pages/shared-portal-architecture.md)
+- summary: `client-direct architecture` 종료를 위해 사람이 실제로 결정해야 하는 항목을 6개 ballot로 압축했고, 현재 권장 선택을 기준으로 `포털 + admin summary`, `fetch-first`, `heavy summary만 materialize`, `핵심 write만 command API 우선`, `강한 release gate`, `이후 AWS core backend 검토`를 전제로 한 8주 실행 플랜을 추가했다.
+
+## [2026-04-15] patch-note | shared-portal-architecture | client-direct 종료 의사결정 포인트 정리
+- pages: [shared-portal-architecture](./pages/shared-portal-architecture.md)
+- summary: `client-direct architecture`를 끝내기 위해 닫아야 할 의사결정 포인트를 `read boundary`, `write boundary`, `realtime policy`, `session/auth authority`, `cache/invalidation`, `release/ownership` 기준으로 분해했고, 지금 결정할 항목과 구현 중 닫을 항목, 후속 인프라 결정으로 미룰 항목을 구분했다.
+
+## [2026-04-15] patch-note | shared-portal-architecture | platform option 비교 문서 추가
+- pages: [shared-portal-architecture](./pages/shared-portal-architecture.md)
+- summary: 포털 장기 안정화 관점에서 `Firestore direct 유지`, `AWS full replatform`, `AWS + Cloudflare hybrid`를 비교하는 아키텍처 문서를 추가했고, 현재 권고 순서를 `Firestore 유지 + BFF/API-first hybrid -> AWS core backend -> 필요 시 Cloudflare edge layer`로 정리했다.
+
 ## [2026-04-15] patch-note | portal-onboarding, shared-portal-architecture | onboarding entry shell hardening
 - pages: [portal-onboarding](./pages/portal-onboarding.md), [shared-portal-architecture](./pages/shared-portal-architecture.md)
 - summary: `/portal/onboarding`도 portal workspace shell 밖의 lightweight entry shell로 옮기고, 사업 목록 읽기와 등록 저장을 BFF `onboarding-context`/`portal/registration` 계약으로 분리했다. 이제 포털 entry surface의 핵심 두 화면이 같은 fetch-first 경계를 공유한다.
