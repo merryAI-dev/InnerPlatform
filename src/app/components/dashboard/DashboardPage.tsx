@@ -24,6 +24,7 @@ import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { isPayrollLiquidityRiskStatus, resolvePayrollLiquidityQueue } from '../../platform/payroll-liquidity';
 import { resolveAdminMonitoringIssues } from '../../platform/admin-monitoring';
 import { resolvePayrollReviewQueue } from '../../platform/payroll-review';
+import { resolvePayrollCashflowAlignment } from '../../platform/payroll-cashflow-alignment';
 
 function MonitoringToolCard(props: {
   icon: typeof BarChart3;
@@ -108,9 +109,19 @@ export function DashboardPage() {
       projects,
       runs,
       transactions,
+      cashflowWeeks,
       today,
     }).filter((item) => isPayrollLiquidityRiskStatus(item.status)).length
-  ), [projects, runs, transactions, today]);
+  ), [cashflowWeeks, projects, runs, transactions, today]);
+  const payrollLiquidityQueue = useMemo(() => (
+    resolvePayrollLiquidityQueue({
+      projects,
+      runs,
+      transactions,
+      cashflowWeeks,
+      today,
+    })
+  ), [cashflowWeeks, projects, runs, transactions, today]);
   const payrollReviewQueue = useMemo(() => (
     resolvePayrollReviewQueue({
       projects,
@@ -131,6 +142,30 @@ export function DashboardPage() {
   const payrollFinalUnconfirmedCount = useMemo(() => (
     payrollReviewQueue.filter((item) => item.needsAdminConfirm).length
   ), [payrollReviewQueue]);
+  const currentMonthPayrollRuns = useMemo(() => (
+    runs.filter((run) => run.yearMonth === yearMonth)
+  ), [runs, yearMonth]);
+  const payrollAlignments = useMemo(() => (
+    currentMonthPayrollRuns.map((run) => resolvePayrollCashflowAlignment({
+      run,
+      cashflowWeeks,
+    }))
+  ), [cashflowWeeks, currentMonthPayrollRuns]);
+  const payrollPmAmountMissingCount = useMemo(() => (
+    payrollAlignments.filter((alignment) => alignment.flags.includes('pm_amount_missing')).length
+  ), [payrollAlignments]);
+  const payrollProjectionMissingCount = useMemo(() => (
+    payrollAlignments.filter((alignment) => alignment.flags.includes('cashflow_projection_missing')).length
+  ), [payrollAlignments]);
+  const payrollAmountMismatchCount = useMemo(() => (
+    payrollAlignments.filter((alignment) => alignment.flags.includes('amount_mismatch')).length
+  ), [payrollAlignments]);
+  const payrollProjectionShortfallCount = useMemo(() => (
+    payrollLiquidityQueue.filter((item) => item.projectionBalanceInsufficient).length
+  ), [payrollLiquidityQueue]);
+  const payrollPmShortfallCount = useMemo(() => (
+    payrollLiquidityQueue.filter((item) => item.pmBalanceInsufficient).length
+  ), [payrollLiquidityQueue]);
 
   const missingPmCount = useMemo(() => {
     const monthWeeks = getMonthMondayWeeks(yearMonth);
@@ -175,6 +210,11 @@ export function DashboardPage() {
   ), [cashflowWeeks, projects, transactions, yearMonth]);
 
   const payrollMonitoringCount = payrollRiskCount
+    + payrollPmAmountMissingCount
+    + payrollProjectionMissingCount
+    + payrollAmountMismatchCount
+    + payrollProjectionShortfallCount
+    + payrollPmShortfallCount
     + payrollReviewPendingCount
     + payrollMissingCandidateCount
     + payrollFinalUnconfirmedCount;
@@ -183,6 +223,11 @@ export function DashboardPage() {
     dataSourceHealthy: dataSource === 'firestore',
     missingEvidenceCount,
     payrollRiskCount,
+    payrollPmAmountMissingCount,
+    payrollProjectionMissingCount,
+    payrollAmountMismatchCount,
+    payrollProjectionShortfallCount,
+    payrollPmShortfallCount,
     payrollReviewPendingCount,
     payrollMissingCandidateCount,
     payrollFinalUnconfirmedCount,
@@ -199,6 +244,11 @@ export function DashboardPage() {
     missingEvidenceCount,
     missingPmCount,
     participationRiskCount,
+    payrollAmountMismatchCount,
+    payrollPmAmountMissingCount,
+    payrollPmShortfallCount,
+    payrollProjectionMissingCount,
+    payrollProjectionShortfallCount,
     payrollRiskCount,
     payrollReviewPendingCount,
     payrollMissingCandidateCount,
@@ -223,7 +273,7 @@ export function DashboardPage() {
     {
       key: 'payroll',
       label: '인건비 관제',
-      detail: `검토대기 ${payrollReviewPendingCount} · 후보없음 ${payrollMissingCandidateCount} · 최종미확정 ${payrollFinalUnconfirmedCount}`,
+      detail: `불일치 ${payrollAmountMismatchCount} · PM미입력 ${payrollPmAmountMissingCount} · Projection부족 ${payrollProjectionShortfallCount}`,
       count: payrollMonitoringCount,
       countLabel: '이상',
       to: '/payroll',

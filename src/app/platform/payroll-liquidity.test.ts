@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { PayrollRun, Project, Transaction } from '../data/types';
+import type { CashflowWeekSheet, PayrollRun, Project, Transaction } from '../data/types';
 import {
   isPayrollLiquidityRiskStatus,
   resolveProjectPayrollLiquidity,
@@ -9,7 +9,8 @@ import {
 function createProject(id: string, name = '테스트 사업'): Project {
   return {
     id,
-    tenantId: 'org-1',
+    slug: id,
+    orgId: 'org-1',
     shortName: id,
     name,
     clientOrg: '',
@@ -26,24 +27,30 @@ function createProject(id: string, name = '테스트 사업'): Project {
     settlementType: 'TYPE1',
     basis: '공급가액',
     accountType: 'OPERATING',
+    paymentPlan: {
+      contract: 0,
+      interim: 0,
+      final: 0,
+    },
     paymentPlanDesc: '',
-    settlementGuide: '',
-    projectPurpose: '',
-    managerName: '',
-    teamName: '',
-    teamMembers: '',
+    groupwareName: '',
     participantCondition: '',
-    note: '',
+    contractType: '',
+    projectPurpose: '',
+    settlementGuide: '',
+    teamName: '',
+    managerId: 'u1',
+    managerName: '',
     contractDocument: null,
     budgetCurrentYear: 0,
-    budgetTotal: 0,
     taxInvoiceAmount: 0,
-    currentYearSales: 0,
-    currentYearInvoiced: 0,
-    outstandingReceivables: 0,
-    expectedDepositDate: '',
     profitAmount: 0,
     profitRate: 0,
+    isSettled: false,
+    finalPaymentNote: '',
+    confirmerName: '',
+    lastCheckedAt: '2026-01-01T00:00:00.000Z',
+    cashflowDiffNote: '',
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
   };
@@ -86,7 +93,78 @@ function createTransaction(input: Partial<Transaction> & Pick<Transaction, 'id' 
   };
 }
 
+function createWeek(input: Partial<CashflowWeekSheet> & Pick<CashflowWeekSheet, 'id' | 'projectId' | 'yearMonth' | 'weekNo' | 'weekStart' | 'weekEnd'>): CashflowWeekSheet {
+  const {
+    id,
+    projectId,
+    yearMonth,
+    weekNo,
+    weekStart,
+    weekEnd,
+    ...rest
+  } = input;
+  return {
+    id,
+    tenantId: 'org-1',
+    projectId,
+    yearMonth,
+    weekNo,
+    weekStart,
+    weekEnd,
+    projection: {},
+    actual: {},
+    pmSubmitted: false,
+    adminClosed: false,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    ...rest,
+  };
+}
+
 describe('payroll-liquidity', () => {
+  it('tracks projection shortfall and PM shortfall separately for the planned pay-date week', () => {
+    const project = createProject('p-1');
+    const currentRun = createRun({
+      id: 'run-current',
+      projectId: project.id,
+      yearMonth: '2026-04',
+      plannedPayDate: '2026-04-16',
+      pmExpectedPayrollAmount: 3500000,
+    });
+    const balanceTx = createTransaction({
+      id: 'tx-balance',
+      projectId: project.id,
+      dateTime: '2026-04-15T10:00:00.000Z',
+      amounts: { bankAmount: 200000, depositAmount: 0, expenseAmount: 200000, vatIn: 0, vatOut: 0, vatRefund: 0, balanceAfter: 3200000 },
+    });
+
+    const [item] = resolveProjectPayrollLiquidity({
+      project,
+      runs: [currentRun],
+      transactions: [balanceTx],
+      cashflowWeeks: [
+        createWeek({
+          id: 'p-1-2026-04-w3',
+          projectId: project.id,
+          yearMonth: '2026-04',
+          weekNo: 3,
+          weekStart: '2026-04-15',
+          weekEnd: '2026-04-21',
+          projection: {
+            MYSC_LABOR_OUT: 3100000,
+          },
+        }),
+      ],
+      today: '2026-04-16',
+    });
+
+    expect(item.cashflowProjectedPayrollAmount).toBe(3100000);
+    expect(item.pmExpectedPayrollAmount).toBe(3500000);
+    expect(item.projectionBalanceInsufficient).toBe(false);
+    expect(item.pmBalanceInsufficient).toBe(true);
+    expect(item.status).toBe('insufficient_balance');
+  });
+
   it('uses the latest confirmed payroll run as the expected payroll baseline', () => {
     const project = createProject('p-1');
     const baselineTx = createTransaction({
@@ -115,6 +193,7 @@ describe('payroll-liquidity', () => {
       project,
       runs: [baselineRun, currentRun],
       transactions: [baselineTx],
+      cashflowWeeks: [],
       today: '2026-03-24',
     });
 
@@ -135,6 +214,7 @@ describe('payroll-liquidity', () => {
       project,
       runs: [currentRun],
       transactions: [],
+      cashflowWeeks: [],
       today: '2026-03-24',
     });
 
@@ -175,6 +255,7 @@ describe('payroll-liquidity', () => {
       project,
       runs: [baselineRun, currentRun],
       transactions: [baselineTx, balanceTx],
+      cashflowWeeks: [],
       today: '2026-03-24',
     });
 
@@ -215,6 +296,7 @@ describe('payroll-liquidity', () => {
       project,
       runs: [baselineRun, currentRun],
       transactions: [baselineTx, balanceTx],
+      cashflowWeeks: [],
       today: '2026-03-26',
     });
 
@@ -255,6 +337,7 @@ describe('payroll-liquidity', () => {
       project,
       runs: [baselineRun, currentRun],
       transactions: [baselineTx, balanceTx],
+      cashflowWeeks: [],
       today: '2026-03-24',
     });
 

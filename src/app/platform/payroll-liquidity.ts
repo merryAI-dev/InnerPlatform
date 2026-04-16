@@ -1,5 +1,10 @@
 import { addDays } from './business-days';
-import type { PayrollRun, PayrollPaidStatus, Project, Transaction } from '../data/types';
+import type { CashflowWeekSheet, PayrollRun, PayrollPaidStatus, Project, Transaction } from '../data/types';
+import {
+  resolvePayrollCashflowAlignment,
+  type PayrollCashflowAlertFlag,
+  type PayrollCashflowReferenceWeek,
+} from './payroll-cashflow-alignment';
 
 export type PayrollLiquidityStatus =
   | 'insufficient_balance'
@@ -31,12 +36,22 @@ export interface PayrollLiquidityQueueItem {
   currentBalance: number | null;
   paidStatus: PayrollPaidStatus;
   acknowledged: boolean;
+  pmExpectedPayrollAmount: number | null;
+  cashflowProjectedPayrollAmount: number | null;
+  projectionReferenceWeek: PayrollCashflowReferenceWeek | null;
+  payrollAlertFlags: PayrollCashflowAlertFlag[];
+  pmAmountMissing: boolean;
+  cashflowProjectionMissing: boolean;
+  amountMismatch: boolean;
+  projectionBalanceInsufficient: boolean;
+  pmBalanceInsufficient: boolean;
 }
 
 interface ResolvePayrollLiquidityInput {
   projects: Project[];
   runs: PayrollRun[];
   transactions: Transaction[];
+  cashflowWeeks?: CashflowWeekSheet[];
   today: string;
 }
 
@@ -44,6 +59,7 @@ interface ResolveProjectPayrollLiquidityInput {
   project: Project;
   runs: PayrollRun[];
   transactions: Transaction[];
+  cashflowWeeks?: CashflowWeekSheet[];
   today: string;
 }
 
@@ -105,22 +121,39 @@ function resolveStatus(args: {
   today: string;
   activeRun: PayrollRun;
   expectedPayrollAmount: number | null;
+  baselineBalanceInsufficient: boolean;
+  projectionBalanceInsufficient: boolean;
+  pmBalanceInsufficient: boolean;
   dayBalances: PayrollLiquidityDayBalance[];
 }): Pick<PayrollLiquidityQueueItem, 'status' | 'statusReason' | 'worstBalance' | 'currentBalance'> {
-  const { today, activeRun, expectedPayrollAmount, dayBalances } = args;
+  const {
+    today,
+    activeRun,
+    expectedPayrollAmount,
+    baselineBalanceInsufficient,
+    projectionBalanceInsufficient,
+    pmBalanceInsufficient,
+    dayBalances,
+  } = args;
   const knownBalances = dayBalances
     .map((entry) => entry.balance)
     .filter((value): value is number => typeof value === 'number');
   const currentBalance = findBalanceForDay(dayBalances, today);
   const worstBalance = knownBalances.length ? Math.min(...knownBalances) : null;
-  const insufficient = expectedPayrollAmount !== null
-    && knownBalances.some((balance) => balance < expectedPayrollAmount);
+  const insufficient = baselineBalanceInsufficient || projectionBalanceInsufficient || pmBalanceInsufficient;
   const paymentUnconfirmed = today >= activeRun.plannedPayDate && activeRun.paidStatus !== 'CONFIRMED';
 
   if (insufficient) {
+    const insufficiencyReason = projectionBalanceInsufficient && pmBalanceInsufficient
+      ? '캐시플로 Projection 금액과 PM 입력 금액 모두 현재 잔액보다 큽니다.'
+      : baselineBalanceInsufficient
+        ? 'D-3~D+3 구간에 예상 인건비보다 잔액이 낮습니다.'
+      : projectionBalanceInsufficient
+        ? '캐시플로 Projection 기준 인건비보다 잔액이 낮습니다.'
+        : 'PM 입력 인건비 금액보다 잔액이 낮습니다.';
     return {
       status: 'insufficient_balance',
-      statusReason: 'D-3~D+3 구간에 예상 인건비보다 잔액이 낮습니다.',
+      statusReason: insufficiencyReason,
       worstBalance,
       currentBalance,
     };
@@ -174,8 +207,10 @@ export function resolveProjectPayrollLiquidity({
   project,
   runs,
   transactions,
+  cashflowWeeks,
   today,
 }: ResolveProjectPayrollLiquidityInput): PayrollLiquidityQueueItem[] {
+  const safeCashflowWeeks = cashflowWeeks || [];
   const projectRuns = runs
     .filter((run) => run.projectId === project.id)
     .sort((a, b) => a.plannedPayDate.localeCompare(b.plannedPayDate));
@@ -191,15 +226,38 @@ export function resolveProjectPayrollLiquidity({
   return activeRuns
     .map((activeRun) => {
       const baselineRun = findBaselineRun(projectRuns, activeRun);
-      const expectedPayrollAmount = computeExpectedPayrollAmount(baselineRun, approvedTransactions);
+      const baselineExpectedPayrollAmount = computeExpectedPayrollAmount(baselineRun, approvedTransactions);
+      const alignment = resolvePayrollCashflowAlignment({
+        run: activeRun,
+        cashflowWeeks: safeCashflowWeeks,
+      });
+      const pmExpectedPayrollAmount = alignment.pmExpectedPayrollAmount;
+      const cashflowProjectedPayrollAmount = alignment.cashflowProjectedPayrollAmount;
+      const usesBaselineExpectedAmount = pmExpectedPayrollAmount === null && cashflowProjectedPayrollAmount === null;
+      const expectedPayrollAmount = pmExpectedPayrollAmount
+        ?? cashflowProjectedPayrollAmount
+        ?? baselineExpectedPayrollAmount;
       const dayBalances = buildDayWindow(activeRun.plannedPayDate).map((day) => ({
         date: day,
         balance: findLatestBalanceOnOrBefore(approvedTransactions, day),
       }));
+      const knownBalances = dayBalances
+        .map((entry) => entry.balance)
+        .filter((value): value is number => typeof value === 'number');
+      const projectionBalanceInsufficient = cashflowProjectedPayrollAmount !== null
+        && knownBalances.some((balance) => balance < cashflowProjectedPayrollAmount);
+      const pmBalanceInsufficient = pmExpectedPayrollAmount !== null
+        && knownBalances.some((balance) => balance < pmExpectedPayrollAmount);
+      const baselineBalanceInsufficient = usesBaselineExpectedAmount
+        && baselineExpectedPayrollAmount !== null
+        && knownBalances.some((balance) => balance < baselineExpectedPayrollAmount);
       const { status, statusReason, worstBalance, currentBalance } = resolveStatus({
         today,
         activeRun,
         expectedPayrollAmount,
+        baselineBalanceInsufficient,
+        projectionBalanceInsufficient,
+        pmBalanceInsufficient,
         dayBalances,
       });
       return {
@@ -220,6 +278,15 @@ export function resolveProjectPayrollLiquidity({
         currentBalance,
         paidStatus: activeRun.paidStatus,
         acknowledged: activeRun.acknowledged,
+        pmExpectedPayrollAmount,
+        cashflowProjectedPayrollAmount,
+        projectionReferenceWeek: alignment.referenceWeek,
+        payrollAlertFlags: alignment.flags,
+        pmAmountMissing: alignment.flags.includes('pm_amount_missing'),
+        cashflowProjectionMissing: alignment.flags.includes('cashflow_projection_missing'),
+        amountMismatch: alignment.flags.includes('amount_mismatch'),
+        projectionBalanceInsufficient,
+        pmBalanceInsufficient,
       } satisfies PayrollLiquidityQueueItem;
     })
     .sort((a, b) => {
@@ -233,10 +300,18 @@ export function resolvePayrollLiquidityQueue({
   projects,
   runs,
   transactions,
+  cashflowWeeks,
   today,
 }: ResolvePayrollLiquidityInput): PayrollLiquidityQueueItem[] {
+  const safeCashflowWeeks = cashflowWeeks || [];
   return projects
-    .flatMap((project) => resolveProjectPayrollLiquidity({ project, runs, transactions, today }))
+    .flatMap((project) => resolveProjectPayrollLiquidity({
+      project,
+      runs,
+      transactions,
+      cashflowWeeks: safeCashflowWeeks,
+      today,
+    }))
     .sort((a, b) => {
       const priorityDelta = STATUS_PRIORITY[a.status] - STATUS_PRIORITY[b.status];
       if (priorityDelta !== 0) return priorityDelta;

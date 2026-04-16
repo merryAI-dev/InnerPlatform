@@ -984,6 +984,10 @@ export interface PayrollRun {
   pmReviewCompletedByUid?: string;
   pmReviewCompletedByName?: string;
   missingCandidateAlertAt?: string;
+  pmExpectedPayrollAmount?: number;
+  pmExpectedPayrollAmountUpdatedAt?: string;
+  pmExpectedPayrollAmountUpdatedByUid?: string;
+  pmExpectedPayrollAmountUpdatedByName?: string;
   confirmedAt?: string;
   confirmedByUid?: string;
   confirmedByName?: string;

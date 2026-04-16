@@ -16,6 +16,7 @@ import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { usePortalStore } from '../../data/portal-store';
 import { usePayroll } from '../../data/payroll-store';
+import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { TRANSACTIONS } from '../../data/mock-data';
 import { addMonthsToYearMonth, computePlannedPayDate, getSeoulTodayIso, subtractBusinessDays } from '../../platform/business-days';
 import { fmtShort } from '../../data/budget-data';
@@ -24,6 +25,7 @@ import { useFirebase } from '../../lib/firebase-context';
 import { getOrgCollectionPath } from '../../lib/firebase';
 import type { PayrollCandidateReviewDecision, Transaction } from '../../data/types';
 import { resolveProjectPayrollLiquidity, type PayrollLiquidityQueueItem } from '../../platform/payroll-liquidity';
+import { resolvePayrollCashflowAlignment } from '../../platform/payroll-cashflow-alignment';
 import {
   payrollReviewSnapshotMatches,
   resolvePayrollRunReview,
@@ -48,13 +50,16 @@ export function PortalPayrollPage() {
     upsertSchedule,
     acknowledgePayrollRun,
     acknowledgeMonthlyClose,
+    savePayrollExpectedAmount,
     savePayrollReview,
   } = usePayroll();
+  const { weeks: cashflowWeeks } = useCashflowWeeks();
   const { db, isOnline, orgId } = useFirebase();
   const firestoreEnabled = featureFlags.firestoreCoreEnabled && isOnline && !!db;
   const [liveTransactions, setLiveTransactions] = useState<Transaction[] | null>(null);
   const [transactionsFetchState, setTransactionsFetchState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [decisionSavingTxId, setDecisionSavingTxId] = useState<string | null>(null);
+  const [pmAmountInput, setPmAmountInput] = useState('');
 
   const today = getSeoulTodayIso();
   const yearMonth = today.slice(0, 7);
@@ -96,16 +101,25 @@ export function PortalPayrollPage() {
 
   const needsPayrollAck = !!(run && today >= run.noticeDate && !run.acknowledged);
   const needsMonthlyCloseAck = !!(monthlyClosePrev && monthlyClosePrev.status === 'DONE' && !monthlyClosePrev.acknowledged);
+  const cashflowAlignment = useMemo(() => (
+    run
+      ? resolvePayrollCashflowAlignment({
+          run,
+          cashflowWeeks,
+        })
+      : null
+  ), [cashflowWeeks, run]);
   const queueItems = useMemo(() => (
     myProject
       ? resolveProjectPayrollLiquidity({
           project: myProject,
           runs,
           transactions: projectTransactions,
+          cashflowWeeks,
           today,
         })
       : []
-  ), [myProject, projectTransactions, runs, today]);
+  ), [cashflowWeeks, myProject, projectTransactions, runs, today]);
   const activeQueueItem = queueItems[0] || null;
   const reviewStatusLabel = reviewState ? (
     reviewState.paidStatus === 'CONFIRMED'
@@ -118,6 +132,14 @@ export function PortalPayrollPage() {
   useEffect(() => {
     setDayInput(schedule ? String(schedule.dayOfMonth) : '');
   }, [projectId, schedule?.dayOfMonth]);
+
+  useEffect(() => {
+    setPmAmountInput(
+      run?.pmExpectedPayrollAmount !== undefined && run?.pmExpectedPayrollAmount !== null
+        ? String(run.pmExpectedPayrollAmount)
+        : '',
+    );
+  }, [run?.id, run?.pmExpectedPayrollAmount]);
 
   useEffect(() => {
     if (!projectId || !firestoreEnabled || !db) {
@@ -236,6 +258,26 @@ export function PortalPayrollPage() {
       toast.error(err?.message || '판단 저장에 실패했습니다');
     } finally {
       setDecisionSavingTxId(null);
+    }
+  }
+
+  async function onSavePmExpectedAmount() {
+    if (!run) return;
+    const normalized = pmAmountInput.replace(/[^0-9]/g, '');
+    const amount = normalized ? Number.parseInt(normalized, 10) : null;
+    if (amount !== null && (!Number.isFinite(amount) || amount < 0)) {
+      toast.error('인건비 금액은 0원 이상이어야 합니다');
+      return;
+    }
+    try {
+      await savePayrollExpectedAmount({
+        runId: run.id,
+        pmExpectedPayrollAmount: amount,
+      });
+      toast.success(amount === null ? 'PM 입력 금액을 비웠습니다' : 'PM 입력 금액을 저장했습니다');
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err?.message || 'PM 입력 금액 저장에 실패했습니다');
     }
   }
 
@@ -378,8 +420,115 @@ export function PortalPayrollPage() {
                   ? '후보 없음은 정상 종료가 아닙니다. 통장내역을 직접 보고 적요를 확인한 뒤 Admin에 알려 주세요.'
                   : reviewState.needsAdminConfirm
                     ? '거래 단위 판단은 끝났습니다. Admin이 월 지급 여부를 최종 확정할 때까지 상태를 유지합니다.'
-                    : '원본 적요를 보고 맞음, 아님, 보류 중 하나로 닫아 주세요. 미판단이나 보류가 남아 있으면 Admin이 확정할 수 없습니다.'}
+                  : '원본 적요를 보고 맞음, 아님, 보류 중 하나로 닫아 주세요. 미판단이나 보류가 남아 있으면 Admin이 확정할 수 없습니다.'}
               </p>
+            </div>
+
+            <div className="rounded-xl border border-border/60 bg-muted/20 px-4 py-4 space-y-3">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                <div className="space-y-1">
+                  <p className="text-[12px] text-foreground" style={{ fontWeight: 700 }}>이번 달 금액 대조</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    PM 입력 금액과 캐시플로 Projection을 plannedPayDate 기준 주차로 비교합니다.
+                  </p>
+                </div>
+                <div className="flex items-end gap-2">
+                  <div className="space-y-1">
+                    <Label className="text-[11px]">PM 입력 금액</Label>
+                    <Input
+                      className="h-9 w-[160px] text-[12px]"
+                      inputMode="numeric"
+                      value={pmAmountInput}
+                      placeholder="예: 3100000"
+                      onChange={(event) => setPmAmountInput(event.target.value.replace(/[^0-9]/g, '').slice(0, 12))}
+                    />
+                  </div>
+                  <Button size="sm" className="h-9 text-[12px]" onClick={onSavePmExpectedAmount}>
+                    저장
+                  </Button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-2 md:grid-cols-3 text-[11px]">
+                <div className="rounded-lg border border-border/60 bg-background px-3 py-2.5">
+                  <p className="text-muted-foreground">PM 입력 금액</p>
+                  <p className="mt-1 text-foreground" style={{ fontWeight: 700 }}>
+                    {cashflowAlignment?.pmExpectedPayrollAmount !== null && cashflowAlignment?.pmExpectedPayrollAmount !== undefined
+                      ? `${fmtShort(cashflowAlignment.pmExpectedPayrollAmount)}원`
+                      : '-'}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-border/60 bg-background px-3 py-2.5">
+                  <p className="text-muted-foreground">캐시플로 Projection</p>
+                  <p className="mt-1 text-foreground" style={{ fontWeight: 700 }}>
+                    {cashflowAlignment?.cashflowProjectedPayrollAmount !== null && cashflowAlignment?.cashflowProjectedPayrollAmount !== undefined
+                      ? `${fmtShort(cashflowAlignment.cashflowProjectedPayrollAmount)}원`
+                      : '-'}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-border/60 bg-background px-3 py-2.5">
+                  <p className="text-muted-foreground">참조 주차</p>
+                  <p className="mt-1 text-foreground" style={{ fontWeight: 700 }}>
+                    {cashflowAlignment?.referenceWeek ? cashflowAlignment.referenceWeek.weekLabel : '-'}
+                  </p>
+                  <p className="mt-1 text-[10px] text-muted-foreground">
+                    {cashflowAlignment?.referenceWeek
+                      ? `${cashflowAlignment.referenceWeek.weekStart} ~ ${cashflowAlignment.referenceWeek.weekEnd}`
+                      : 'plannedPayDate 기준 주차를 찾지 못했습니다.'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <Badge variant="outline" className={`text-[10px] ${
+                  cashflowAlignment?.flags.includes('amount_mismatch')
+                    ? 'border-rose-200 bg-rose-50 text-rose-700'
+                    : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                }`}>
+                  금액 불일치 {cashflowAlignment?.flags.includes('amount_mismatch') ? '있음' : '없음'}
+                </Badge>
+                <Badge variant="outline" className={`text-[10px] ${
+                  activeQueueItem?.projectionBalanceInsufficient
+                    ? 'border-rose-200 bg-rose-50 text-rose-700'
+                    : 'border-slate-200 bg-slate-50 text-slate-700'
+                }`}>
+                  Projection 기준 잔액 {activeQueueItem?.projectionBalanceInsufficient ? '부족' : '정상'}
+                </Badge>
+                <Badge variant="outline" className={`text-[10px] ${
+                  activeQueueItem?.pmBalanceInsufficient
+                    ? 'border-rose-200 bg-rose-50 text-rose-700'
+                    : 'border-slate-200 bg-slate-50 text-slate-700'
+                }`}>
+                  PM 기준 잔액 {activeQueueItem?.pmBalanceInsufficient ? '부족' : '정상'}
+                </Badge>
+              </div>
+
+              {(cashflowAlignment?.flags.includes('pm_amount_missing')
+                || cashflowAlignment?.flags.includes('cashflow_projection_missing')
+                || cashflowAlignment?.flags.includes('amount_mismatch')
+                || activeQueueItem?.projectionBalanceInsufficient
+                || activeQueueItem?.pmBalanceInsufficient) && (
+                <div className="rounded-xl border border-rose-200/70 bg-rose-50/70 px-4 py-3">
+                  <p className="text-[12px] text-rose-900" style={{ fontWeight: 700 }}>금액 대조 경고</p>
+                  <div className="mt-2 space-y-1 text-[11px] text-rose-800/80">
+                    {cashflowAlignment?.flags.includes('pm_amount_missing') && (
+                      <p>PM 입력 금액이 아직 없습니다. 이번 달 지급 금액을 먼저 입력해 주세요.</p>
+                    )}
+                    {cashflowAlignment?.flags.includes('cashflow_projection_missing') && (
+                      <p>캐시플로 Projection에서 MYSC 인건비 금액을 찾지 못했습니다.</p>
+                    )}
+                    {cashflowAlignment?.flags.includes('amount_mismatch') && (
+                      <p>금액 불일치: PM 입력 금액과 캐시플로 Projection 금액이 다릅니다.</p>
+                    )}
+                    {activeQueueItem?.projectionBalanceInsufficient && (
+                      <p>Projection 기준 잔액이 부족합니다. Admin과 PM에게 동시에 경고됩니다.</p>
+                    )}
+                    {activeQueueItem?.pmBalanceInsufficient && (
+                      <p>PM 기준 잔액이 부족합니다. 입력한 지급 금액으로는 현재 잔액이 모자랍니다.</p>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-2 text-[11px] md:grid-cols-4">
@@ -685,11 +834,23 @@ function PortalPayrollLiquidityDetail({
             </p>
             <p className="text-[11px] text-muted-foreground">{item.statusReason}</p>
           </div>
-          <div className="grid grid-cols-2 gap-2 text-[11px] lg:min-w-[260px]">
+          <div className="grid grid-cols-2 gap-2 text-[11px] lg:min-w-[380px]">
             <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2.5">
               <p className="text-muted-foreground">직전 확정 지급액</p>
               <p className="mt-1 text-foreground" style={{ fontWeight: 700 }}>
                 {item.expectedPayrollAmount !== null ? `${fmtShort(item.expectedPayrollAmount)}원` : '-'}
+              </p>
+            </div>
+            <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2.5">
+              <p className="text-muted-foreground">PM 입력 금액</p>
+              <p className="mt-1 text-foreground" style={{ fontWeight: 700 }}>
+                {item.pmExpectedPayrollAmount !== null ? `${fmtShort(item.pmExpectedPayrollAmount)}원` : '-'}
+              </p>
+            </div>
+            <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2.5">
+              <p className="text-muted-foreground">캐시플로 Projection</p>
+              <p className="mt-1 text-foreground" style={{ fontWeight: 700 }}>
+                {item.cashflowProjectedPayrollAmount !== null ? `${fmtShort(item.cashflowProjectedPayrollAmount)}원` : '-'}
               </p>
             </div>
             <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2.5">
@@ -699,6 +860,23 @@ function PortalPayrollLiquidityDetail({
               </p>
             </div>
           </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2 text-[11px]">
+          {item.projectionReferenceWeek && (
+            <Badge variant="outline" className="text-[10px]">
+              참조 주차 {item.projectionReferenceWeek.weekLabel} · {item.projectionReferenceWeek.weekStart} ~ {item.projectionReferenceWeek.weekEnd}
+            </Badge>
+          )}
+          <Badge variant="outline" className={`text-[10px] ${item.amountMismatch ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+            금액 불일치 {item.amountMismatch ? '있음' : '없음'}
+          </Badge>
+          <Badge variant="outline" className={`text-[10px] ${item.projectionBalanceInsufficient ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+            Projection 기준 잔액 {item.projectionBalanceInsufficient ? '부족' : '정상'}
+          </Badge>
+          <Badge variant="outline" className={`text-[10px] ${item.pmBalanceInsufficient ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+            PM 기준 잔액 {item.pmBalanceInsufficient ? '부족' : '정상'}
+          </Badge>
         </div>
 
         <div className="space-y-2">

@@ -10,6 +10,11 @@ describe('admin monitoring helper', () => {
       rejectedTransactionCount: 1,
       hrAlertCount: 3,
       payrollRiskCount: 5,
+      payrollPmAmountMissingCount: 1,
+      payrollProjectionMissingCount: 2,
+      payrollAmountMismatchCount: 3,
+      payrollProjectionShortfallCount: 4,
+      payrollPmShortfallCount: 2,
       payrollMissingCandidateCount: 2,
       payrollReviewPendingCount: 4,
       payrollFinalUnconfirmedCount: 1,
@@ -21,7 +26,12 @@ describe('admin monitoring helper', () => {
 
     expect(issues.map((issue) => issue.key)).toEqual([
       'missing_evidence',
+      'payroll_amount_mismatch',
+      'payroll_projection_shortfall',
       'payroll_risk',
+      'payroll_projection_missing',
+      'payroll_pm_amount_missing',
+      'payroll_pm_shortfall',
       'payroll_missing_candidate',
       'participation_risk',
       'data_source',
@@ -50,6 +60,12 @@ describe('admin monitoring helper', () => {
       severity: 'warning',
       to: '/payroll',
     });
+    expect(issues.find((issue) => issue.key === 'payroll_amount_mismatch')).toMatchObject({
+      label: '인건비 금액 불일치',
+      count: 3,
+      severity: 'critical',
+      to: '/payroll',
+    });
     expect(issues.find((issue) => issue.key === 'payroll_final_unconfirmed')).toMatchObject({
       label: '최종 확정 대기',
       count: 1,
@@ -71,6 +87,11 @@ describe('admin monitoring helper', () => {
       rejectedTransactionCount: 0,
       hrAlertCount: 0,
       payrollRiskCount: 0,
+      payrollPmAmountMissingCount: 0,
+      payrollProjectionMissingCount: 0,
+      payrollAmountMismatchCount: 0,
+      payrollProjectionShortfallCount: 0,
+      payrollPmShortfallCount: 0,
       payrollMissingCandidateCount: 0,
       payrollReviewPendingCount: 0,
       payrollFinalUnconfirmedCount: 0,

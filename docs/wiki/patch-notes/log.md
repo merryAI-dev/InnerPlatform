@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-04-16] patch-note | portal-payroll, portal-dashboard, admin-dashboard | payroll amount vs projection monitoring
+- pages: [portal-payroll](./pages/portal-payroll.md), [portal-dashboard](./pages/portal-dashboard.md), [admin-dashboard](./pages/admin-dashboard.md)
+- summary: PM이 이번 달 인건비 금액을 입력하고 cashflow projection 주차의 `MYSC 인건비`와 비교하도록 바꿨고, 금액 불일치와 각 기준별 잔액 부족을 포털 홈, 포털 지급 화면, 어드민 관제면에서 함께 보이도록 정리했다.
+
 ## [2026-04-16] patch-note | portal-dashboard, portal-payroll | payroll entry visibility recovery
 - pages: [portal-dashboard](./pages/portal-dashboard.md), [portal-payroll](./pages/portal-payroll.md)
 - summary: 포털 사이드바의 `인건비/공지`를 숨김 없이 노출하고, `/portal` 홈에도 상태형 `이번 달 인건비 확인` CTA를 상시 배치해 인건비 화면 발견성을 복구했다.

@@ -20,6 +20,7 @@ import { Button } from '../ui/button';
 import { usePortalStore } from '../../data/portal-store';
 import { useHrAnnouncements, HR_EVENT_LABELS, HR_EVENT_COLORS } from '../../data/hr-announcements-store';
 import { usePayroll } from '../../data/payroll-store';
+import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { TRANSACTIONS } from '../../data/mock-data';
 import { fmtShort } from '../../data/budget-data';
 import {
@@ -48,6 +49,7 @@ import {
   getPayrollReviewStatusLabel,
   getPayrollReviewStatusTone,
 } from '../../platform/payroll-display';
+import { resolvePayrollCashflowAlignment } from '../../platform/payroll-cashflow-alignment';
 
 // ═══════════════════════════════════════════════════════════════
 // PortalDashboard — 내 사업 현황
@@ -95,6 +97,7 @@ export function PortalDashboard() {
   const { isLoading, portalUser, myProject, weeklySubmissionStatuses, projects } = usePortalStore();
   const { getProjectAlerts } = useHrAnnouncements();
   const { schedules, runs, monthlyCloses, acknowledgePayrollRun, acknowledgeMonthlyClose } = usePayroll();
+  const { weeks: cashflowWeeks } = useCashflowWeeks();
   const { db, isOnline, orgId } = useFirebase();
   const firestoreEnabled = featureFlags.firestoreCoreEnabled && isOnline && !!db;
 
@@ -181,10 +184,11 @@ export function PortalDashboard() {
           project: myProject,
           runs,
           transactions: myTx,
+          cashflowWeeks,
           today,
         })
       : []
-  ), [myProject, myTx, runs, today]);
+  ), [cashflowWeeks, myProject, myTx, runs, today]);
   const payrollRiskItems = useMemo(
     () => payrollQueueItems.filter((item) => isPayrollLiquidityRiskStatus(item.status)),
     [payrollQueueItems],
@@ -199,6 +203,14 @@ export function PortalDashboard() {
         })
       : null
   ), [myTx, payrollRun, today, transactionsFetchState]);
+  const payrollAlignment = useMemo(() => (
+    payrollRun
+      ? resolvePayrollCashflowAlignment({
+          run: payrollRun,
+          cashflowWeeks,
+        })
+      : null
+  ), [cashflowWeeks, payrollRun]);
   const assignedProjects = useMemo(() => {
     if (!portalUser) return myProject ? [myProject] : [];
     const projectIds = Array.isArray(portalUser.projectIds) && portalUser.projectIds.length > 0
@@ -249,6 +261,50 @@ export function PortalDashboard() {
   const shouldShowPayrollQueue = Boolean(payrollDetail && payrollDetail.status !== 'clear');
   const payrollEntrySurface = useMemo(() => {
     if (payrollReview) {
+      if (payrollAlignment?.flags.includes('pm_amount_missing')) {
+        return {
+          badgeLabel: 'PM 입력 금액 필요',
+          badgeClassName: 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300',
+          cardClassName: 'border-rose-200 bg-rose-50/60',
+          title: '이번 달 인건비 금액을 먼저 입력하세요',
+          detail: `지급일 ${payrollReview.plannedPayDate} · PM 입력 금액이 아직 없습니다.`,
+          helper: '인건비/공지에서 이번 달 지급 금액을 입력해야 Projection과 잔액을 비교할 수 있습니다.',
+        };
+      }
+
+      if (payrollAlignment?.flags.includes('cashflow_projection_missing')) {
+        return {
+          badgeLabel: 'Projection 없음',
+          badgeClassName: 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300',
+          cardClassName: 'border-rose-200 bg-rose-50/60',
+          title: '캐시플로 Projection 인건비 금액이 비어 있습니다',
+          detail: `지급일 ${payrollReview.plannedPayDate} · ${payrollAlignment.referenceWeek?.weekLabel || '해당 주차'} 기준`,
+          helper: '사업비 Cashflow Projection의 MYSC 인건비 금액을 먼저 채워 주세요.',
+        };
+      }
+
+      if (payrollAlignment?.flags.includes('amount_mismatch')) {
+        return {
+          badgeLabel: '금액 불일치',
+          badgeClassName: 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300',
+          cardClassName: 'border-rose-200 bg-rose-50/60',
+          title: 'PM 입력 금액과 캐시플로 Projection이 다릅니다',
+          detail: `PM ${payrollAlignment.pmExpectedPayrollAmount !== null ? `${fmtShort(payrollAlignment.pmExpectedPayrollAmount)}원` : '-'} · Projection ${payrollAlignment.cashflowProjectedPayrollAmount !== null ? `${fmtShort(payrollAlignment.cashflowProjectedPayrollAmount)}원` : '-'}`,
+          helper: '둘 중 어느 값이 맞는지 확인하고 맞춰 주세요.',
+        };
+      }
+
+      if (payrollDetail?.projectionBalanceInsufficient || payrollDetail?.pmBalanceInsufficient) {
+        return {
+          badgeLabel: '잔액 부족 경고',
+          badgeClassName: 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300',
+          cardClassName: 'border-rose-200 bg-rose-50/60',
+          title: '이번 달 인건비 지급 잔액이 부족합니다',
+          detail: `Projection ${payrollDetail.projectionBalanceInsufficient ? '부족' : '정상'} · PM ${payrollDetail.pmBalanceInsufficient ? '부족' : '정상'}`,
+          helper: '통장 잔액과 이번 주 projection 금액을 함께 점검해 주세요.',
+        };
+      }
+
       if (payrollReview.paidStatus === 'CONFIRMED') {
         return {
           badgeLabel: '지급 확정 완료',
@@ -333,7 +389,7 @@ export function PortalDashboard() {
       detail: '지급일이 아직 없으면 여기서 먼저 등록하세요.',
       helper: '지급일을 등록하면 공지일, 적요 검토, 최종 확정 흐름이 홈에도 이어집니다.',
     };
-  }, [payrollReview, payrollRun, payrollSchedule]);
+  }, [payrollAlignment, payrollDetail, payrollReview, payrollRun, payrollSchedule]);
 
   if (isLoading) {
     return (
@@ -786,7 +842,11 @@ function PortalPayrollQueueCard({
                     </span>
                   </div>
                   <p className="text-[13px] text-foreground" style={{ fontWeight: 700 }}>
-                    예상 인건비 {risk.expectedPayrollAmount !== null ? `${fmtShort(risk.expectedPayrollAmount)}원` : '-'} · 최저 잔액 {risk.worstBalance !== null ? `${fmtShort(risk.worstBalance)}원` : '-'}
+                    PM {risk.pmExpectedPayrollAmount !== null ? `${fmtShort(risk.pmExpectedPayrollAmount)}원` : '-'}
+                    {' · '}
+                    Projection {risk.cashflowProjectedPayrollAmount !== null ? `${fmtShort(risk.cashflowProjectedPayrollAmount)}원` : '-'}
+                    {' · '}
+                    최저 잔액 {risk.worstBalance !== null ? `${fmtShort(risk.worstBalance)}원` : '-'}
                   </p>
                   <p className="text-[11px] text-muted-foreground">{risk.statusReason}</p>
                 </div>
@@ -807,7 +867,13 @@ function PortalPayrollQueueCard({
               이번 지급 창에는 바로 대응이 필요한 위험이 없습니다.
             </p>
             <p className="mt-1 text-[11px] text-emerald-700/90 dark:text-emerald-300/90">
-              지급일 {item.plannedPayDate} · 예상 인건비 {item.expectedPayrollAmount !== null ? `${fmtShort(item.expectedPayrollAmount)}원` : '-'} · 현재 잔액 {item.currentBalance !== null ? `${fmtShort(item.currentBalance)}원` : '-'}
+              지급일 {item.plannedPayDate}
+              {' · '}
+              PM {item.pmExpectedPayrollAmount !== null ? `${fmtShort(item.pmExpectedPayrollAmount)}원` : '-'}
+              {' · '}
+              Projection {item.cashflowProjectedPayrollAmount !== null ? `${fmtShort(item.cashflowProjectedPayrollAmount)}원` : '-'}
+              {' · '}
+              현재 잔액 {item.currentBalance !== null ? `${fmtShort(item.currentBalance)}원` : '-'}
             </p>
           </div>
         ) : (

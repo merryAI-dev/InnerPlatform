@@ -2,6 +2,11 @@ export type AdminMonitoringSeverity = 'critical' | 'warning' | 'info';
 
 export type AdminMonitoringIssueKey =
   | 'missing_evidence'
+  | 'payroll_pm_amount_missing'
+  | 'payroll_projection_missing'
+  | 'payroll_amount_mismatch'
+  | 'payroll_projection_shortfall'
+  | 'payroll_pm_shortfall'
   | 'payroll_risk'
   | 'payroll_review_pending'
   | 'payroll_missing_candidate'
@@ -28,6 +33,11 @@ export interface AdminMonitoringCounts {
   dataSourceHealthy: boolean;
   missingEvidenceCount: number;
   payrollRiskCount: number;
+  payrollPmAmountMissingCount: number;
+  payrollProjectionMissingCount: number;
+  payrollAmountMismatchCount: number;
+  payrollProjectionShortfallCount: number;
+  payrollPmShortfallCount: number;
   payrollReviewPendingCount: number;
   payrollMissingCandidateCount: number;
   payrollFinalUnconfirmedCount: number;
@@ -57,18 +67,23 @@ const SEVERITY_WEIGHT: Record<AdminMonitoringSeverity, number> = {
 
 const ISSUE_PRIORITY: Record<AdminMonitoringIssueKey, number> = {
   missing_evidence: 0,
-  payroll_risk: 1,
-  payroll_missing_candidate: 2,
-  participation_risk: 3,
-  data_source: 4,
-  payroll_review_pending: 5,
-  cashflow_variance: 6,
-  missing_pm: 7,
-  hr_alerts: 8,
-  pending_approvals: 9,
-  payroll_final_unconfirmed: 10,
-  rejected_transactions: 11,
-  stale_projects: 12,
+  payroll_amount_mismatch: 1,
+  payroll_projection_shortfall: 2,
+  payroll_risk: 3,
+  payroll_projection_missing: 4,
+  payroll_pm_amount_missing: 5,
+  payroll_pm_shortfall: 6,
+  payroll_missing_candidate: 7,
+  participation_risk: 8,
+  data_source: 9,
+  payroll_review_pending: 10,
+  cashflow_variance: 11,
+  missing_pm: 12,
+  hr_alerts: 13,
+  pending_approvals: 14,
+  payroll_final_unconfirmed: 15,
+  rejected_transactions: 16,
+  stale_projects: 17,
 };
 
 function normalizeCount(value: unknown): number {
@@ -105,6 +120,22 @@ export function resolveAdminMonitoringIssues(input: Partial<AdminMonitoringCount
       to: '/evidence',
       detail: `${normalizeCount(input.missingEvidenceCount)}건 증빙이 아직 완료되지 않았습니다.`,
     } : null,
+    normalizeCount(input.payrollAmountMismatchCount) > 0 ? {
+      key: 'payroll_amount_mismatch',
+      label: '인건비 금액 불일치',
+      count: normalizeCount(input.payrollAmountMismatchCount),
+      severity: 'critical',
+      to: '/payroll',
+      detail: `${normalizeCount(input.payrollAmountMismatchCount)}개 사업에서 PM 입력 금액과 캐시플로 Projection이 다릅니다.`,
+    } : null,
+    normalizeCount(input.payrollProjectionShortfallCount) > 0 ? {
+      key: 'payroll_projection_shortfall',
+      label: 'Projection 기준 잔액 부족',
+      count: normalizeCount(input.payrollProjectionShortfallCount),
+      severity: 'critical',
+      to: '/payroll',
+      detail: `${normalizeCount(input.payrollProjectionShortfallCount)}개 사업에서 Projection 기준 인건비 잔액이 부족합니다.`,
+    } : null,
     normalizeCount(input.payrollRiskCount) > 0 ? {
       key: 'payroll_risk',
       label: '인건비 위험',
@@ -112,6 +143,30 @@ export function resolveAdminMonitoringIssues(input: Partial<AdminMonitoringCount
       severity: 'critical',
       to: '/payroll',
       detail: `${normalizeCount(input.payrollRiskCount)}건 지급 위험이 감지되었습니다.`,
+    } : null,
+    normalizeCount(input.payrollProjectionMissingCount) > 0 ? {
+      key: 'payroll_projection_missing',
+      label: 'Projection 금액 없음',
+      count: normalizeCount(input.payrollProjectionMissingCount),
+      severity: 'critical',
+      to: '/payroll',
+      detail: `${normalizeCount(input.payrollProjectionMissingCount)}개 사업에서 참조할 캐시플로 Projection이 없습니다.`,
+    } : null,
+    normalizeCount(input.payrollPmAmountMissingCount) > 0 ? {
+      key: 'payroll_pm_amount_missing',
+      label: 'PM 입력 금액 없음',
+      count: normalizeCount(input.payrollPmAmountMissingCount),
+      severity: 'critical',
+      to: '/payroll',
+      detail: `${normalizeCount(input.payrollPmAmountMissingCount)}개 사업에서 PM이 이번 달 인건비 금액을 아직 입력하지 않았습니다.`,
+    } : null,
+    normalizeCount(input.payrollPmShortfallCount) > 0 ? {
+      key: 'payroll_pm_shortfall',
+      label: 'PM 기준 잔액 부족',
+      count: normalizeCount(input.payrollPmShortfallCount),
+      severity: 'critical',
+      to: '/payroll',
+      detail: `${normalizeCount(input.payrollPmShortfallCount)}개 사업에서 PM 입력 인건비 기준 잔액이 부족합니다.`,
     } : null,
     normalizeCount(input.payrollMissingCandidateCount) > 0 ? {
       key: 'payroll_missing_candidate',

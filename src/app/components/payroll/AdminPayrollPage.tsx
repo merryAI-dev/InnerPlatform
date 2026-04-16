@@ -19,6 +19,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { useAppStore } from '../../data/store';
 import { usePayroll } from '../../data/payroll-store';
+import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import type {
   PayrollCandidateReviewDecision,
   PayrollPaidStatus,
@@ -34,6 +35,7 @@ import {
   type PayrollLiquidityQueueItem,
 } from '../../platform/payroll-liquidity';
 import { resolvePayrollRunReview } from '../../platform/payroll-review';
+import { resolvePayrollCashflowAlignment } from '../../platform/payroll-cashflow-alignment';
 import {
   getPayrollDecisionLabel,
   getPayrollDecisionTone,
@@ -124,6 +126,7 @@ function getFinalConfirmMatchedTxIds(run?: PayrollRun | null): string[] {
 export function AdminPayrollPage() {
   const navigate = useNavigate();
   const { projects, transactions } = useAppStore();
+  const { weeks: cashflowWeeks } = useCashflowWeeks();
   const {
     schedules,
     runs,
@@ -202,13 +205,33 @@ export function AdminPayrollPage() {
       finalConfirm: list.filter((run) => canFinalizePayroll(run)).length,
     };
   }, [effectiveRunByProject, projects]);
+  const alignmentByProject = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof resolvePayrollCashflowAlignment>>();
+    for (const project of projects) {
+      const run = effectiveRunByProject.get(project.id) || runByProject.get(project.id);
+      if (!run) continue;
+      map.set(project.id, resolvePayrollCashflowAlignment({
+        run,
+        cashflowWeeks,
+      }));
+    }
+    return map;
+  }, [cashflowWeeks, effectiveRunByProject, projects, runByProject]);
 
   const liquidityQueue = useMemo(() => resolvePayrollLiquidityQueue({
     projects,
     runs,
     transactions,
+    cashflowWeeks,
     today,
-  }), [projects, runs, transactions, today]);
+  }), [cashflowWeeks, projects, runs, transactions, today]);
+  const liquidityByProject = useMemo(() => {
+    const map = new Map<string, PayrollLiquidityQueueItem>();
+    liquidityQueue.forEach((item) => {
+      map.set(item.projectId, item);
+    });
+    return map;
+  }, [liquidityQueue]);
   const liquidityRiskQueue = useMemo(
     () => liquidityQueue.filter((item) => isPayrollLiquidityRiskStatus(item.status)),
     [liquidityQueue],
@@ -232,12 +255,21 @@ export function AdminPayrollPage() {
     const reviewCandidateByTxId = new Map(
       getReviewCandidates(run).map((candidate) => [candidate.txId, candidate]),
     );
+    const alignment = run
+      ? resolvePayrollCashflowAlignment({
+          run,
+          cashflowWeeks,
+        })
+      : null;
+    const liquidity = liquidityByProject.get(projectId) || null;
     const txList = transactions
       .filter((t) => candidateIds.includes(t.id))
       .sort((a, b) => a.dateTime.localeCompare(b.dateTime));
     return {
       project,
       run,
+      alignment,
+      liquidity,
       txList,
       candidateIds,
       reviewSummary,
@@ -245,7 +277,7 @@ export function AdminPayrollPage() {
       canFinalize: canFinalizePayroll(run),
       finalConfirmBlockReason: getFinalConfirmBlockReason(run),
     };
-  }, [effectiveRunByProject, projects, runByProject, transactions, txDialogProjectId]);
+  }, [cashflowWeeks, effectiveRunByProject, liquidityByProject, projects, runByProject, transactions, txDialogProjectId]);
 
   async function onConfirmPaid(projectId: string) {
     const run = effectiveRunByProject.get(projectId) || runByProject.get(projectId);
@@ -380,8 +412,25 @@ export function AdminPayrollPage() {
                             </Badge>
                           </div>
                           <p className="text-[11px] text-muted-foreground">
-                            지급일 {item.plannedPayDate} · 예상 인건비 {item.expectedPayrollAmount !== null ? `${fmtShort(item.expectedPayrollAmount)}원` : '-'} · 최저 잔액 {item.worstBalance !== null ? `${fmtShort(item.worstBalance)}원` : '-'}
+                            지급일 {item.plannedPayDate}
+                            {' · '}
+                            PM 입력 금액 {item.pmExpectedPayrollAmount !== null ? `${fmtShort(item.pmExpectedPayrollAmount)}원` : '-'}
+                            {' · '}
+                            Projection 금액 {item.cashflowProjectedPayrollAmount !== null ? `${fmtShort(item.cashflowProjectedPayrollAmount)}원` : '-'}
+                            {' · '}
+                            최저 잔액 {item.worstBalance !== null ? `${fmtShort(item.worstBalance)}원` : '-'}
                           </p>
+                          <div className="flex flex-wrap gap-1.5">
+                            <Badge variant="outline" className={`text-[10px] ${item.amountMismatch ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+                              금액 불일치 {item.amountMismatch ? '있음' : '없음'}
+                            </Badge>
+                            <Badge variant="outline" className={`text-[10px] ${item.projectionBalanceInsufficient ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+                              Projection 기준 잔액 {item.projectionBalanceInsufficient ? '부족' : '정상'}
+                            </Badge>
+                            <Badge variant="outline" className={`text-[10px] ${item.pmBalanceInsufficient ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+                              PM 기준 잔액 {item.pmBalanceInsufficient ? '부족' : '정상'}
+                            </Badge>
+                          </div>
                           <p className="text-[11px] text-muted-foreground">{item.statusReason}</p>
                         </div>
                         <div className="flex shrink-0 items-center gap-2">
@@ -414,7 +463,7 @@ export function AdminPayrollPage() {
                     설정 보완 필요 {liquiditySetupQueue.length}건
                   </p>
                   <p className="mt-1 text-[11px] text-slate-600">
-                    직전 확정 지급액 또는 잔액 데이터가 부족한 사업은 대시보드 위험열에 올리지 않고 여기서만 보입니다.
+                    PM 입력 금액, Projection 금액, 잔액 데이터가 부족한 사업은 대시보드 위험열 대신 여기서 먼저 점검합니다.
                   </p>
                 </div>
               )}
@@ -435,6 +484,9 @@ export function AdminPayrollPage() {
                       <TableHead className="text-[11px]">공지일(3영업일)</TableHead>
                       <TableHead className="text-[11px]">인지</TableHead>
                       <TableHead className="text-[11px]">지급</TableHead>
+                      <TableHead className="text-[11px]">PM 입력 금액</TableHead>
+                      <TableHead className="text-[11px]">Projection 금액</TableHead>
+                      <TableHead className="text-[11px]">금액 불일치</TableHead>
                       <TableHead className="text-[11px]">PM 검토</TableHead>
                       <TableHead className="text-[11px] text-right">액션</TableHead>
                     </TableRow>
@@ -449,6 +501,8 @@ export function AdminPayrollPage() {
                     const ack = run?.acknowledged;
                     const showAckWarn = run ? (today >= run.noticeDate && !ack) : false;
                     const canFinalize = canFinalizePayroll(run);
+                    const alignment = alignmentByProject.get(p.id) || null;
+                    const liquidity = liquidityByProject.get(p.id) || null;
                     return (
                       <TableRow key={p.id}>
                         <TableCell className="text-[11px]" style={{ fontWeight: 600 }}>
@@ -486,8 +540,43 @@ export function AdminPayrollPage() {
                               {run.matchedTxIds?.length
                                 ? `${run.matchedTxIds.length}건 매칭`
                                 : `${getReviewCandidates(run).length}건 후보`}
+                            </div>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-[11px]">
+                          {alignment?.pmExpectedPayrollAmount !== null && alignment?.pmExpectedPayrollAmount !== undefined
+                            ? `${fmtShort(alignment.pmExpectedPayrollAmount)}원`
+                            : <span className="text-rose-600">미입력</span>}
+                        </TableCell>
+                        <TableCell className="text-[11px]">
+                          <div>
+                            {alignment?.cashflowProjectedPayrollAmount !== null && alignment?.cashflowProjectedPayrollAmount !== undefined
+                              ? `${fmtShort(alignment.cashflowProjectedPayrollAmount)}원`
+                              : <span className="text-rose-600">없음</span>}
                           </div>
-                        )}
+                          {alignment?.referenceWeek && (
+                            <div className="text-[10px] text-muted-foreground mt-1">
+                              {alignment.referenceWeek.weekLabel}
+                            </div>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-[11px]">
+                          <div className="space-y-1">
+                            <Badge variant="outline" className={`text-[10px] ${
+                              alignment?.flags.includes('amount_mismatch')
+                                ? 'border-rose-200 bg-rose-50 text-rose-700'
+                                : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                            }`}>
+                              {alignment?.flags.includes('amount_mismatch') ? '불일치' : '일치'}
+                            </Badge>
+                            {(liquidity?.projectionBalanceInsufficient || liquidity?.pmBalanceInsufficient) && (
+                              <div className="text-[10px] text-rose-700">
+                                {liquidity?.projectionBalanceInsufficient ? 'Projection 부족' : ''}
+                                {liquidity?.projectionBalanceInsufficient && liquidity?.pmBalanceInsufficient ? ' · ' : ''}
+                                {liquidity?.pmBalanceInsufficient ? 'PM 부족' : ''}
+                              </div>
+                            )}
+                          </div>
                         </TableCell>
                         <TableCell className="text-[11px]">
                           {!run ? (
@@ -530,7 +619,7 @@ export function AdminPayrollPage() {
                   })}
                   {projects.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={8} className="text-center text-[12px] text-muted-foreground py-8">
+                      <TableCell colSpan={11} className="text-center text-[12px] text-muted-foreground py-8">
                         프로젝트가 없습니다
                       </TableCell>
                     </TableRow>
@@ -641,6 +730,43 @@ export function AdminPayrollPage() {
               지급 예정일: <span className="text-foreground" style={{ fontWeight: 700 }}>{txDialog?.run?.plannedPayDate || '-'}</span>
               <span className="mx-2">·</span>
               범위: 지급일 ±3영업일
+            </div>
+
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-3 text-[11px]">
+              <div className="rounded-lg border border-border/50 bg-muted/30 p-3">
+                <p className="text-muted-foreground">PM 입력 금액</p>
+                <p className="mt-1 text-foreground" style={{ fontWeight: 700 }}>
+                  {txDialog?.alignment?.pmExpectedPayrollAmount !== null && txDialog?.alignment?.pmExpectedPayrollAmount !== undefined
+                    ? `${fmtShort(txDialog.alignment.pmExpectedPayrollAmount)}원`
+                    : '미입력'}
+                </p>
+              </div>
+              <div className="rounded-lg border border-border/50 bg-muted/30 p-3">
+                <p className="text-muted-foreground">Projection 금액</p>
+                <p className="mt-1 text-foreground" style={{ fontWeight: 700 }}>
+                  {txDialog?.alignment?.cashflowProjectedPayrollAmount !== null && txDialog?.alignment?.cashflowProjectedPayrollAmount !== undefined
+                    ? `${fmtShort(txDialog.alignment.cashflowProjectedPayrollAmount)}원`
+                    : '없음'}
+                </p>
+                {txDialog?.alignment?.referenceWeek && (
+                  <p className="mt-1 text-[10px] text-muted-foreground">
+                    {txDialog.alignment.referenceWeek.weekLabel}
+                  </p>
+                )}
+              </div>
+              <div className="rounded-lg border border-border/50 bg-muted/30 p-3">
+                <p className="text-muted-foreground">금액 불일치</p>
+                <p className="mt-1 text-foreground" style={{ fontWeight: 700 }}>
+                  {txDialog?.alignment?.flags.includes('amount_mismatch') ? '있음' : '없음'}
+                </p>
+                {(txDialog?.liquidity?.projectionBalanceInsufficient || txDialog?.liquidity?.pmBalanceInsufficient) && (
+                  <p className="mt-1 text-[10px] text-rose-700">
+                    {txDialog?.liquidity?.projectionBalanceInsufficient ? 'Projection 부족' : ''}
+                    {txDialog?.liquidity?.projectionBalanceInsufficient && txDialog?.liquidity?.pmBalanceInsufficient ? ' · ' : ''}
+                    {txDialog?.liquidity?.pmBalanceInsufficient ? 'PM 부족' : ''}
+                  </p>
+                )}
+              </div>
             </div>
 
             <div className="rounded-lg border border-border/50 bg-muted/30 p-3">

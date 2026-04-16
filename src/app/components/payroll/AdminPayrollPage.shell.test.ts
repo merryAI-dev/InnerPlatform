@@ -10,6 +10,9 @@ const adminPayrollSource = readFileSync(
 describe('AdminPayrollPage review console shell', () => {
   it('keeps admin on final confirmation only after PM review state is visible', () => {
     expect(adminPayrollSource).toContain('PM 검토');
+    expect(adminPayrollSource).toContain('PM 입력 금액');
+    expect(adminPayrollSource).toContain('Projection 금액');
+    expect(adminPayrollSource).toContain('금액 불일치');
     expect(adminPayrollSource).toContain('후보 없음');
     expect(adminPayrollSource).toContain('최종 확정');
     expect(adminPayrollSource).toContain('PM이 원본 적요를 먼저 검토');

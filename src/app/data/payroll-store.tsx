@@ -78,6 +78,10 @@ interface PayrollActions {
   upsertSchedule: (input: { projectId: string; dayOfMonth: number; active?: boolean }) => Promise<void>;
   acknowledgePayrollRun: (runId: string) => Promise<void>;
   confirmPayrollPaid: (runId: string, matchedTxIds?: string[]) => Promise<void>;
+  savePayrollExpectedAmount: (input: {
+    runId: string;
+    pmExpectedPayrollAmount: number | null;
+  }) => Promise<void>;
   savePayrollReview: (input: {
     runId: string;
     reviewCandidates: PayrollReviewCandidate[];
@@ -369,6 +373,51 @@ export function PayrollProvider({ children }: { children: ReactNode }) {
     });
   }, [db, orgId, runs, user]);
 
+  const savePayrollExpectedAmount = useCallback(async (input: {
+    runId: string;
+    pmExpectedPayrollAmount: number | null;
+  }): Promise<void> => {
+    if (!db) return;
+    const actor = user;
+    if (!actor) return;
+    const runId = input.runId.trim();
+    if (!runId) return;
+    const now = new Date().toISOString();
+    const normalizedAmount = Number.isFinite(input.pmExpectedPayrollAmount)
+      ? Math.max(0, Math.trunc(input.pmExpectedPayrollAmount as number))
+      : null;
+
+    await updateDoc(doc(db, getOrgDocumentPath(orgId, 'payrollRuns', runId)), {
+      tenantId: orgId,
+      pmExpectedPayrollAmount: normalizedAmount ?? deleteField(),
+      pmExpectedPayrollAmountUpdatedAt: normalizedAmount !== null ? now : deleteField(),
+      pmExpectedPayrollAmountUpdatedByUid: normalizedAmount !== null ? actor.uid : deleteField(),
+      pmExpectedPayrollAmountUpdatedByName: normalizedAmount !== null && actor.name ? actor.name : deleteField(),
+      updatedAt: now,
+    } as Partial<PayrollRun> as any);
+    setRuns((current) => {
+      const existing = current.find((entry) => entry.id === runId);
+      if (!existing) return current;
+      return mergePayrollRunState(current, {
+        ...existing,
+        ...(normalizedAmount !== null
+          ? {
+              pmExpectedPayrollAmount: normalizedAmount,
+              pmExpectedPayrollAmountUpdatedAt: now,
+              pmExpectedPayrollAmountUpdatedByUid: actor.uid,
+              pmExpectedPayrollAmountUpdatedByName: actor.name,
+            }
+          : {
+              pmExpectedPayrollAmount: undefined,
+              pmExpectedPayrollAmountUpdatedAt: undefined,
+              pmExpectedPayrollAmountUpdatedByUid: undefined,
+              pmExpectedPayrollAmountUpdatedByName: undefined,
+            }),
+        updatedAt: now,
+      });
+    });
+  }, [db, orgId, user]);
+
   const savePayrollReview = useCallback(async (input: {
     runId: string;
     reviewCandidates: PayrollReviewCandidate[];
@@ -526,6 +575,7 @@ export function PayrollProvider({ children }: { children: ReactNode }) {
     upsertSchedule,
     acknowledgePayrollRun,
     confirmPayrollPaid,
+    savePayrollExpectedAmount,
     savePayrollReview,
     markMonthlyCloseDone,
     acknowledgeMonthlyClose,
@@ -538,6 +588,7 @@ export function PayrollProvider({ children }: { children: ReactNode }) {
     upsertSchedule,
     acknowledgePayrollRun,
     confirmPayrollPaid,
+    savePayrollExpectedAmount,
     savePayrollReview,
     markMonthlyCloseDone,
     acknowledgeMonthlyClose,
