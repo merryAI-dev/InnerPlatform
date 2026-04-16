@@ -456,6 +456,14 @@ export interface CloseCashflowWeekCommand {
   weekNo: number;
 }
 
+export interface UpsertCashflowWeekCommand {
+  projectId: string;
+  yearMonth: string;
+  weekNo: number;
+  mode: 'projection' | 'actual';
+  amounts: Partial<Record<CashflowSheetLineId, number>>;
+}
+
 export interface CloseCashflowWeekResult {
   cashflowWeek: Pick<
     CashflowWeekSheet,
@@ -467,6 +475,14 @@ export interface CloseCashflowWeekResult {
   };
   summary: {
     closedWeek: boolean;
+  };
+}
+
+export interface UpsertCashflowWeekResult {
+  cashflowWeek: CashflowWeekSheet;
+  summary: {
+    mode: 'projection' | 'actual';
+    updatedLineCount: number;
   };
 }
 
@@ -1514,6 +1530,25 @@ export async function closeCashflowWeekViaBff(params: {
   const apiClient = resolveClient(params.client);
   const response = await apiClient.post<CloseCashflowWeekResult>(
     '/api/v1/cashflow/weeks/close',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.command,
+      timeoutMs: 8000,
+    },
+  );
+  return response.data;
+}
+
+export async function upsertCashflowWeekViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  command: UpsertCashflowWeekCommand;
+  client?: PlatformApiClientLike;
+}): Promise<UpsertCashflowWeekResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<UpsertCashflowWeekResult>(
+    '/api/v1/cashflow/weeks/upsert',
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),

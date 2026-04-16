@@ -124,6 +124,14 @@ export const cashflowWeekCloseSchema = z.object({
   weekNo: z.number().int().positive(),
 }).strict();
 
+export const cashflowWeekUpsertSchema = z.object({
+  projectId: NON_EMPTY_STRING,
+  yearMonth: z.string().trim().regex(/^\d{4}-\d{2}$/),
+  weekNo: z.number().int().positive(),
+  mode: z.enum(['projection', 'actual']),
+  amounts: z.record(z.string().trim().min(1), z.number()),
+}).strict();
+
 export const portalBankStatementHandoffSchema = z.object({
   projectId: NON_EMPTY_STRING,
   activeSheetId: NON_EMPTY_STRING,

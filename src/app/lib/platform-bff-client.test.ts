@@ -34,6 +34,7 @@ import {
   toRequestActor,
   switchPortalSessionProjectViaBff,
   uploadTransactionEvidenceDriveViaBff,
+  upsertCashflowWeekViaBff,
   upsertLedgerViaBff,
   type PlatformApiClientLike,
   upsertProjectViaBff,
@@ -403,6 +404,72 @@ describe('platform-bff-client', () => {
     }));
     expect(result.cashflowWeek.adminClosed).toBe(true);
     expect(result.summary.closedWeek).toBe(true);
+  });
+
+  it('calls cashflow week upsert command endpoint', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({
+        data: {
+          cashflowWeek: {
+            id: 'p001-2026-04-w3',
+            projectId: 'p001',
+            yearMonth: '2026-04',
+            weekNo: 3,
+            weekStart: '2026-04-15',
+            weekEnd: '2026-04-21',
+            projection: {
+              SALES_IN: 250000,
+            },
+            actual: {},
+            pmSubmitted: false,
+            adminClosed: false,
+            updatedAt: '2026-04-16T18:40:00.000Z',
+            version: 5,
+          },
+          summary: {
+            mode: 'projection',
+            updatedLineCount: 1,
+          },
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    const result = await upsertCashflowWeekViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'pm-1', role: 'pm', idToken: 'token-abc' },
+      command: {
+        projectId: 'p001',
+        yearMonth: '2026-04',
+        weekNo: 3,
+        mode: 'projection',
+        amounts: {
+          SALES_IN: 250000,
+        },
+      },
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/cashflow/weeks/upsert', expect.objectContaining({
+      tenantId: 'mysc',
+      body: expect.objectContaining({
+        projectId: 'p001',
+        yearMonth: '2026-04',
+        weekNo: 3,
+        mode: 'projection',
+        amounts: {
+          SALES_IN: 250000,
+        },
+      }),
+    }));
+    expect(result.cashflowWeek.projection).toEqual({
+      SALES_IN: 250000,
+    });
+    expect(result.summary).toEqual({
+      mode: 'projection',
+      updatedLineCount: 1,
+    });
   });
 
   it('calls portal bank statement handoff command endpoint', async () => {

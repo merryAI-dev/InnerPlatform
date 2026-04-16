@@ -7,6 +7,7 @@ import {
   buildDevHarnessPortalBankStatementsSummary,
   buildDevHarnessPortalBankStatementHandoffResult,
   buildDevHarnessPortalCloseCashflowWeekResult,
+  buildDevHarnessPortalUpsertCashflowWeekResult,
   buildDevHarnessPortalDashboardSummary,
   buildDevHarnessPortalEntryContext,
   buildDevHarnessPortalOnboardingContext,
@@ -114,8 +115,9 @@ export async function resolveDevHarnessPortalApiResponse(params: {
   const pathName = requestUrl.pathname
   const isPortalRoute = pathName.startsWith('/api/v1/portal/')
   const isCashflowWeekCloseRoute = pathName === '/api/v1/cashflow/weeks/close'
+  const isCashflowWeekUpsertRoute = pathName === '/api/v1/cashflow/weeks/upsert'
 
-  if (!params.enabled || (!isPortalRoute && !isCashflowWeekCloseRoute)) {
+  if (!params.enabled || (!isPortalRoute && !isCashflowWeekCloseRoute && !isCashflowWeekUpsertRoute)) {
     return { handled: false }
   }
 
@@ -229,6 +231,19 @@ export async function resolveDevHarnessPortalApiResponse(params: {
           actorId: params.actorId,
           actorRole: params.actorRole,
           command: body as Parameters<typeof buildDevHarnessPortalCloseCashflowWeekResult>[0]['command'],
+        }),
+      }
+    }
+
+    if (method === 'POST' && pathName === '/api/v1/cashflow/weeks/upsert') {
+      const body = await params.readBody()
+      return {
+        handled: true,
+        statusCode: 200,
+        payload: buildDevHarnessPortalUpsertCashflowWeekResult({
+          actorId: params.actorId,
+          actorRole: params.actorRole,
+          command: body as Parameters<typeof buildDevHarnessPortalUpsertCashflowWeekResult>[0]['command'],
         }),
       }
     }

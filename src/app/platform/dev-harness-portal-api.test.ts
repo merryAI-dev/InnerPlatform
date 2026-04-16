@@ -11,6 +11,7 @@ import {
   buildDevHarnessPortalRegistrationResult,
   buildDevHarnessPortalSaveWeeklyExpenseResult,
   buildDevHarnessPortalSubmitWeeklySubmissionResult,
+  buildDevHarnessPortalUpsertCashflowWeekResult,
   buildDevHarnessPortalSessionProjectResult,
   buildDevHarnessPortalWeeklyExpensesSummary,
 } from './dev-harness-portal-api';
@@ -251,6 +252,41 @@ describe('dev harness portal api helpers', () => {
     });
   });
 
+  it('builds a cashflow week upsert command result for a visible PM project', () => {
+    const result = buildDevHarnessPortalUpsertCashflowWeekResult({
+      actorId: 'u002',
+      actorRole: 'pm',
+      command: {
+        projectId: 'p001',
+        yearMonth: '2026-04',
+        weekNo: 3,
+        mode: 'projection',
+        amounts: {
+          SALES_IN: 250000,
+          DIRECT_COST_OUT: 80000,
+        },
+      },
+    });
+
+    expect(result.cashflowWeek).toMatchObject({
+      id: 'p001-2026-04-w3',
+      projectId: 'p001',
+      yearMonth: '2026-04',
+      weekNo: 3,
+      projection: {
+        SALES_IN: 250000,
+        DIRECT_COST_OUT: 80000,
+      },
+      actual: {},
+      pmSubmitted: false,
+      adminClosed: false,
+    });
+    expect(result.summary).toEqual({
+      mode: 'projection',
+      updatedLineCount: 2,
+    });
+  });
+
   it('builds a bank handoff command result for a visible PM project', () => {
     const result = buildDevHarnessPortalBankStatementHandoffResult({
       actorId: 'u002',
@@ -464,6 +500,45 @@ describe('dev harness portal api helpers', () => {
         },
         summary: {
           closedWeek: true,
+        },
+      },
+    });
+  });
+
+  it('handles cashflow week upsert through the vite dev harness router', async () => {
+    const response = await resolveDevHarnessPortalApiResponse({
+      enabled: true,
+      method: 'POST',
+      url: '/api/v1/cashflow/weeks/upsert',
+      actorId: 'u002',
+      actorRole: 'pm',
+      readBody: async () => ({
+        projectId: 'p001',
+        yearMonth: '2026-04',
+        weekNo: 3,
+        mode: 'actual',
+        amounts: {
+          DIRECT_COST_OUT: 91000,
+        },
+      }),
+    });
+
+    expect(response).toMatchObject({
+      handled: true,
+      statusCode: 200,
+      payload: {
+        cashflowWeek: {
+          id: 'p001-2026-04-w3',
+          projectId: 'p001',
+          actual: {
+            DIRECT_COST_OUT: 91000,
+          },
+          pmSubmitted: false,
+          adminClosed: false,
+        },
+        summary: {
+          mode: 'actual',
+          updatedLineCount: 1,
         },
       },
     });

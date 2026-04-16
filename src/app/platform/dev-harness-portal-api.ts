@@ -281,6 +281,34 @@ type CloseCashflowWeekResult = {
   };
 };
 
+type UpsertCashflowWeekCommand = {
+  projectId: string;
+  yearMonth: string;
+  weekNo: number;
+  mode: 'projection' | 'actual';
+  amounts: Record<string, number>;
+};
+
+type UpsertCashflowWeekResult = {
+  cashflowWeek: {
+    id: string;
+    projectId: string;
+    yearMonth: string;
+    weekNo: number;
+    projection: Record<string, number>;
+    actual: Record<string, number>;
+    pmSubmitted: boolean;
+    adminClosed: boolean;
+    updatedAt: string;
+    updatedByUid: string;
+    version: number;
+  };
+  summary: {
+    mode: 'projection' | 'actual';
+    updatedLineCount: number;
+  };
+};
+
 type PortalBankStatementHandoffCommand = {
   projectId: string;
   activeSheetId: string;
@@ -820,6 +848,40 @@ export function buildDevHarnessPortalCloseCashflowWeekResult(params: {
     },
     summary: {
       closedWeek: true,
+    },
+  };
+}
+
+export function buildDevHarnessPortalUpsertCashflowWeekResult(params: {
+  actorId?: string;
+  actorRole?: string;
+  command: UpsertCashflowWeekCommand;
+}): UpsertCashflowWeekResult {
+  const command = params.command;
+  const actorId = normalizeText(params.actorId) || ORG_MEMBERS.find((member) => member.role === 'admin')?.uid || 'admin-1';
+  const { currentProject } = resolveHarnessProjectContext({
+    actorId,
+    actorRole: params.actorRole,
+    projectId: command.projectId,
+  });
+
+  return {
+    cashflowWeek: {
+      id: `${currentProject.id}-${command.yearMonth}-w${command.weekNo}`,
+      projectId: currentProject.id,
+      yearMonth: command.yearMonth,
+      weekNo: command.weekNo,
+      projection: command.mode === 'projection' ? { ...command.amounts } : {},
+      actual: command.mode === 'actual' ? { ...command.amounts } : {},
+      pmSubmitted: false,
+      adminClosed: false,
+      updatedAt: DEV_HARNESS_UPDATED_AT,
+      updatedByUid: actorId,
+      version: 6,
+    },
+    summary: {
+      mode: command.mode,
+      updatedLineCount: Object.keys(command.amounts || {}).length,
     },
   };
 }
