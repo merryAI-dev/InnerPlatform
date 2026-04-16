@@ -470,6 +470,43 @@ export interface CloseCashflowWeekResult {
   };
 }
 
+export interface PortalBankStatementHandoffCommandRow {
+  tempId: string;
+  cells: string[];
+  sourceTxId?: string;
+}
+
+export interface PortalBankStatementHandoffCommand {
+  projectId: string;
+  activeSheetId: string;
+  activeSheetName: string;
+  order: number;
+  columns: string[];
+  rows: PortalBankStatementHandoffCommandRow[];
+}
+
+export interface PortalBankStatementHandoffResult {
+  bankStatement: {
+    rowCount: number;
+    columnCount: number;
+    updatedAt: string;
+  };
+  sheet: {
+    id: string;
+    projectId: string;
+    name?: string;
+    rowCount: number;
+    version: number;
+    updatedAt: string;
+  };
+  rows: PortalBankStatementHandoffCommandRow[];
+  expenseIntakeItems: Array<{
+    id: string;
+    projectId: string;
+    sourceTxId: string;
+  }>;
+}
+
 export interface PortalRegistrationResult {
   ok: boolean;
   registrationState: 'registered';
@@ -1477,6 +1514,25 @@ export async function closeCashflowWeekViaBff(params: {
   const apiClient = resolveClient(params.client);
   const response = await apiClient.post<CloseCashflowWeekResult>(
     '/api/v1/cashflow/weeks/close',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.command,
+      timeoutMs: 8000,
+    },
+  );
+  return response.data;
+}
+
+export async function handoffPortalBankStatementViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  command: PortalBankStatementHandoffCommand;
+  client?: PlatformApiClientLike;
+}): Promise<PortalBankStatementHandoffResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<PortalBankStatementHandoffResult>(
+    '/api/v1/portal/bank-statements/handoff',
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),

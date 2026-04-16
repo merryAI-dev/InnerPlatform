@@ -124,6 +124,15 @@ export const cashflowWeekCloseSchema = z.object({
   weekNo: z.number().int().positive(),
 }).strict();
 
+export const portalBankStatementHandoffSchema = z.object({
+  projectId: NON_EMPTY_STRING,
+  activeSheetId: NON_EMPTY_STRING,
+  activeSheetName: NON_EMPTY_STRING.max(200),
+  order: z.number().int().nonnegative(),
+  columns: z.array(z.string()),
+  rows: z.array(settlementKernelImportRowSchema),
+}).strict();
+
 export const projectSheetSourceUploadSchema = z.object({
   sourceType: z.enum(['usage', 'budget', 'evidence_rules', 'cashflow', 'bank_statement']),
   sheetName: NON_EMPTY_STRING.max(200),

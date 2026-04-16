@@ -79,7 +79,9 @@ import { useAuth } from './auth-store';
 import { useFirebase } from '../lib/firebase-context';
 import { getAuthInstance, getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
 import {
+  handoffPortalBankStatementViaBff,
   isPlatformApiEnabled,
+  type PortalBankStatementHandoffResult,
   type PortalWeeklyExpenseSaveResult,
   type UpsertProjectPayload,
   upsertProjectViaBff,
@@ -2366,13 +2368,76 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       updatedBy: portalUser?.name || authUser?.name || '',
     });
     const reconciledIntakeItems = reconcileBankImportUploadItems(expenseIntakeItemsRef.current, intakeItems);
-    await saveExpenseSheetRows(mergedExpenseRows);
     if (isDevHarnessUser || !db || !currentProjectId) {
+      await saveExpenseSheetRows(mergedExpenseRows);
       setBankStatementRows(sanitizedSheet);
       expenseIntakeItemsRef.current = reconciledIntakeItems;
       setExpenseIntakeItems(reconciledIntakeItems);
       return;
     }
+    if (isPlatformApiEnabled() && authUser) {
+      const idToken = authUser.idToken || await getAuthInstance()?.currentUser?.getIdToken() || undefined;
+      const result = await handoffPortalBankStatementViaBff({
+        tenantId: orgId,
+        actor: {
+          uid: authUser.uid,
+          email: authUser.email,
+          role: authUser.role,
+          idToken,
+        },
+        command: {
+          projectId: currentProjectId,
+          activeSheetId: targetSheetId,
+          activeSheetName: sanitizeExpenseSheetName(
+            targetSheet?.name,
+            targetSheetId === 'default' ? '기본 탭' : '새 탭',
+          ),
+          order: targetSheet?.order || (targetSheetId === 'default' ? 0 : expenseSheetsRef.current.length + 1),
+          columns: sanitizedColumns,
+          rows: sanitizedRows,
+        },
+      });
+      const normalizedRows = normalizeExpenseSheetRows(result.rows) || mergedExpenseRows;
+      const nextSheets = upsertExpenseSheetTabRows({
+        sheets: expenseSheetsRef.current,
+        sheetId: result.sheet.id || targetSheetId,
+        sheetName: sanitizeExpenseSheetName(
+          result.sheet.name || targetSheet?.name,
+          targetSheetId === 'default' ? '기본 탭' : '새 탭',
+        ),
+        order: targetSheet?.order || (targetSheetId === 'default' ? 0 : expenseSheetsRef.current.length + 1),
+        rows: normalizedRows,
+        now: result.sheet.updatedAt || now,
+        createdAt: targetSheet?.createdAt,
+      }).map((sheetItem) => (
+        sheetItem.id === (result.sheet.id || targetSheetId)
+          ? {
+              ...sheetItem,
+              ...(typeof result.sheet.version === 'number' ? { version: result.sheet.version } : {}),
+            }
+          : sheetItem
+      ));
+      expenseSheetsRef.current = nextSheets;
+      setExpenseSheets(nextSheets);
+      if (targetSheetId === activeExpenseSheetIdRef.current) {
+        expenseSheetRowsRef.current = normalizedRows;
+        setExpenseSheetRows(normalizedRows);
+      }
+      setBankStatementRows(sanitizedSheet);
+      const normalizedReturnedIntakeItems = Array.isArray(result.expenseIntakeItems)
+        ? result.expenseIntakeItems
+            .map((item) => normalizeBankImportIntakeItem(item))
+            .filter((item): item is BankImportIntakeItem => Boolean(item))
+        : [];
+      const nextIntakeItems = reconcileBankImportUploadItems(
+        expenseIntakeItemsRef.current,
+        normalizedReturnedIntakeItems.length > 0 ? normalizedReturnedIntakeItems : reconciledIntakeItems,
+      );
+      expenseIntakeItemsRef.current = nextIntakeItems;
+      setExpenseIntakeItems(nextIntakeItems);
+      return;
+    }
+    await saveExpenseSheetRows(mergedExpenseRows);
     const payload = withTenantScope(orgId, {
       projectId: currentProjectId,
       columns: sanitizedColumns,

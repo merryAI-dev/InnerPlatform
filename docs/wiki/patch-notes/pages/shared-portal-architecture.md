@@ -38,6 +38,7 @@
 - [x] phase 2 첫 command-authority slice로 weekly expense save path가 `portal/weekly-expenses/save` server-owned write boundary를 사용함
 - [x] phase 2 둘째 command-authority slice로 PM weekly submit path가 `portal/weekly-submissions/submit` server-owned write boundary를 사용함
 - [x] phase 2 셋째 command-authority slice로 admin cashflow week close path가 `/api/v1/cashflow/weeks/close` server-owned write boundary를 사용함
+- [x] phase 2 넷째 command-authority slice로 portal bank statement handoff path가 `portal/bank-statements/handoff` server-owned write boundary를 사용함
 - [x] critical write path를 command API로 이동하는 단계가 플랜에 포함됨
 - [x] App 루트 broad provider tree가 admin/portal route shell로 분리됨
 - [x] route shell이 explicit Firestore access mode를 주입하고 store는 pathname self-inference를 하지 않음
@@ -49,6 +50,7 @@
 
 - [2026-04-16] portal hardening work now uses a main-agent orchestration model with subagents handling isolated implementation slices, and the required review loop / metrics / branch discipline is captured in a dedicated operations doc.
 - [2026-04-16] phase 0 network gate foundation 기준으로 CI workflow가 canonical `phase0:portal:network-gate` command와 `artifacts/portal-network-gate.json` artifact path를 직접 source of truth로 사용하도록 닫았다. 기존 conditional fallback과 duplicated release-gate steps는 workflow에서 제거됐다.
+- [2026-04-16] phase 2 넷째 write slice로 `portal/bank-statements/handoff` command boundary를 추가해, bank statement 기준본 저장과 expense sheet merge, expense intake rebuild를 더 이상 PM 클라이언트가 직접 fan-out write로 수행하지 않도록 정리했다. targeted tests, build, canonical `phase0:portal:network-gate`까지 다시 green으로 닫았다.
 - [2026-04-16] 기존 `portal production hardening next plan`은 finance-grade 기준으로는 약하다고 판단해 supersede했다. 새 master plan은 `phase 0 gate foundation -> read boundary completion -> command authority -> backup automation -> reviewed reconciliation -> production enforcement` 순서를 강제하고, `network/runtime/recovery evidence` 없이는 어떤 phase도 완료라고 부르지 않도록 못 박았다.
 - [2026-04-15] 포털 안정화 장기안으로 `Firestore 유지 + BFF/API-first hybrid`를 채택했다.
 - [2026-04-15] `Firestore direct 유지`, `AWS full replatform`, `AWS + Cloudflare hybrid`를 같은 기준으로 비교하고, 현재 권고 순서를 `하이브리드 안정화 -> AWS core backend -> 필요 시 Cloudflare edge layer`로 정리했다.

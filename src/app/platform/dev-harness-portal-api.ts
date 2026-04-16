@@ -281,6 +281,45 @@ type CloseCashflowWeekResult = {
   };
 };
 
+type PortalBankStatementHandoffCommand = {
+  projectId: string;
+  activeSheetId: string;
+  activeSheetName: string;
+  order: number;
+  columns: string[];
+  rows: Array<{
+    tempId: string;
+    cells: string[];
+    sourceTxId?: string;
+  }>;
+};
+
+type PortalBankStatementHandoffResult = {
+  bankStatement: {
+    rowCount: number;
+    columnCount: number;
+    updatedAt: string;
+  };
+  sheet: {
+    id: string;
+    projectId: string;
+    name: string;
+    rowCount: number;
+    version: number;
+    updatedAt: string;
+  };
+  rows: Array<{
+    tempId: string;
+    sourceTxId: string;
+    cells: string[];
+  }>;
+  expenseIntakeItems: Array<{
+    id: string;
+    projectId: string;
+    sourceTxId: string;
+  }>;
+};
+
 const PRIVILEGED_ROLES = new Set(['admin', 'finance']);
 const DEV_HARNESS_TODAY_ISO = '2026-04-16';
 const DEV_HARNESS_UPDATED_AT = '2026-04-16T12:00:00.000Z';
@@ -782,6 +821,46 @@ export function buildDevHarnessPortalCloseCashflowWeekResult(params: {
     summary: {
       closedWeek: true,
     },
+  };
+}
+
+export function buildDevHarnessPortalBankStatementHandoffResult(params: {
+  actorId?: string;
+  actorRole?: string;
+  command: PortalBankStatementHandoffCommand;
+}): PortalBankStatementHandoffResult {
+  const command = params.command;
+  const { currentProject } = resolveHarnessProjectContext({
+    actorId: params.actorId,
+    actorRole: params.actorRole,
+    projectId: command.projectId,
+  });
+  const rows = (Array.isArray(command.rows) ? command.rows : []).map((row, index) => ({
+    tempId: row.tempId,
+    sourceTxId: row.sourceTxId || `bank:${index + 1}`,
+    cells: row.cells,
+  }));
+
+  return {
+    bankStatement: {
+      rowCount: rows.length,
+      columnCount: Array.isArray(command.columns) ? command.columns.length : 0,
+      updatedAt: DEV_HARNESS_UPDATED_AT,
+    },
+    sheet: {
+      id: command.activeSheetId,
+      projectId: currentProject.id,
+      name: command.activeSheetName,
+      rowCount: rows.length,
+      version: 3,
+      updatedAt: DEV_HARNESS_UPDATED_AT,
+    },
+    rows,
+    expenseIntakeItems: rows.map((row, index) => ({
+      id: `intake-${index + 1}`,
+      projectId: currentProject.id,
+      sourceTxId: row.sourceTxId,
+    })),
   };
 }
 

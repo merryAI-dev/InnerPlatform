@@ -5,6 +5,7 @@ import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import {
   buildDevHarnessPortalBankStatementsSummary,
+  buildDevHarnessPortalBankStatementHandoffResult,
   buildDevHarnessPortalCloseCashflowWeekResult,
   buildDevHarnessPortalDashboardSummary,
   buildDevHarnessPortalEntryContext,
@@ -202,6 +203,19 @@ export async function resolveDevHarnessPortalApiResponse(params: {
           actorId: params.actorId,
           actorRole: params.actorRole,
           command: body as Parameters<typeof buildDevHarnessPortalSubmitWeeklySubmissionResult>[0]['command'],
+        }),
+      }
+    }
+
+    if (method === 'POST' && pathName === '/api/v1/portal/bank-statements/handoff') {
+      const body = await params.readBody()
+      return {
+        handled: true,
+        statusCode: 200,
+        payload: buildDevHarnessPortalBankStatementHandoffResult({
+          actorId: params.actorId,
+          actorRole: params.actorRole,
+          command: body as Parameters<typeof buildDevHarnessPortalBankStatementHandoffResult>[0]['command'],
         }),
       }
     }

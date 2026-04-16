@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { resolveDevHarnessPortalApiResponse } from '../../../vite.config';
 import {
   buildDevHarnessPortalBankStatementsSummary,
+  buildDevHarnessPortalBankStatementHandoffResult,
   buildDevHarnessPortalCloseCashflowWeekResult,
   buildDevHarnessPortalDashboardSummary,
   buildDevHarnessPortalEntryContext,
@@ -247,6 +248,64 @@ describe('dev harness portal api helpers', () => {
     });
     expect(result.summary).toEqual({
       closedWeek: true,
+    });
+  });
+
+  it('builds a bank handoff command result for a visible PM project', () => {
+    const result = buildDevHarnessPortalBankStatementHandoffResult({
+      actorId: 'u002',
+      actorRole: 'pm',
+      command: {
+        projectId: 'p001',
+        activeSheetId: 'default',
+        activeSheetName: '기본 탭',
+        order: 0,
+        columns: ['통장번호', '거래일시'],
+        rows: [{ tempId: 'bank-1', cells: ['111-222', '2026-04-16'] }],
+      },
+    });
+
+    expect(result.bankStatement).toMatchObject({
+      rowCount: 1,
+      columnCount: 2,
+    });
+    expect(result.sheet).toMatchObject({
+      id: 'default',
+      projectId: 'p001',
+    });
+    expect(result.expenseIntakeItems).toHaveLength(1);
+  });
+
+  it('handles bank handoff through the vite dev harness router', async () => {
+    const response = await resolveDevHarnessPortalApiResponse({
+      enabled: true,
+      method: 'POST',
+      url: '/api/v1/portal/bank-statements/handoff',
+      actorId: 'u002',
+      actorRole: 'pm',
+      readBody: async () => ({
+        projectId: 'p001',
+        activeSheetId: 'default',
+        activeSheetName: '기본 탭',
+        order: 0,
+        columns: ['통장번호', '거래일시'],
+        rows: [{ tempId: 'bank-1', cells: ['111-222', '2026-04-16'] }],
+      }),
+    });
+
+    expect(response).toMatchObject({
+      handled: true,
+      statusCode: 200,
+      payload: {
+        bankStatement: {
+          rowCount: 1,
+          columnCount: 2,
+        },
+        sheet: {
+          id: 'default',
+          projectId: 'p001',
+        },
+      },
     });
   });
 

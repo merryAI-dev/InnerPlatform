@@ -24,6 +24,7 @@ import {
   readPlatformApiRuntimeConfig,
   restoreProjectViaBff,
   savePortalWeeklyExpenseViaBff,
+  handoffPortalBankStatementViaBff,
   submitPortalWeeklySubmissionViaBff,
   syncTransactionEvidenceDriveViaBff,
   trashProjectViaBff,
@@ -402,6 +403,57 @@ describe('platform-bff-client', () => {
     }));
     expect(result.cashflowWeek.adminClosed).toBe(true);
     expect(result.summary.closedWeek).toBe(true);
+  });
+
+  it('calls portal bank statement handoff command endpoint', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({
+        data: {
+          bankStatement: {
+            rowCount: 1,
+            columnCount: 7,
+            updatedAt: '2026-04-16T15:00:00.000Z',
+          },
+          sheet: {
+            id: 'default',
+            projectId: 'p001',
+            name: '기본 탭',
+            rowCount: 1,
+            version: 3,
+            updatedAt: '2026-04-16T15:00:00.000Z',
+          },
+          rows: [{ tempId: 'row-1', sourceTxId: 'bank:abc', cells: ['담당자'] }],
+          expenseIntakeItems: [{ id: 'abc', projectId: 'p001', sourceTxId: 'bank:abc' }],
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    const result = await handoffPortalBankStatementViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm', idToken: 'token-abc' },
+      command: {
+        projectId: 'p001',
+        activeSheetId: 'default',
+        activeSheetName: '기본 탭',
+        order: 0,
+        columns: ['통장번호', '거래일시'],
+        rows: [{ tempId: 'bank-1', cells: ['111-222', '2026-04-16'] }],
+      },
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/portal/bank-statements/handoff', expect.objectContaining({
+      tenantId: 'mysc',
+      body: expect.objectContaining({
+        projectId: 'p001',
+        activeSheetId: 'default',
+      }),
+    }));
+    expect(result.bankStatement.rowCount).toBe(1);
+    expect(result.sheet.version).toBe(3);
+    expect(result.expenseIntakeItems).toHaveLength(1);
   });
 
   it('calls portal payroll summary endpoint', async () => {
