@@ -171,6 +171,61 @@ export const portalBankStatementHandoffSchema = z.object({
   rows: z.array(settlementKernelImportRowSchema),
 }).strict();
 
+const bankImportManualFieldsSchema = z.object({
+  expenseAmount: z.number().finite().optional(),
+  budgetCategory: z.string().trim().optional(),
+  budgetSubCategory: z.string().trim().optional(),
+  cashflowLineId: z.enum([
+    'MYSC_PREPAY_IN',
+    'SALES_IN',
+    'SALES_VAT_IN',
+    'TEAM_SUPPORT_IN',
+    'BANK_INTEREST_IN',
+    'DIRECT_COST_OUT',
+    'INPUT_VAT_OUT',
+    'MYSC_LABOR_OUT',
+    'MYSC_PROFIT_OUT',
+    'SALES_VAT_OUT',
+    'TEAM_SUPPORT_OUT',
+    'BANK_INTEREST_OUT',
+  ]).optional(),
+  cashflowCategory: z.enum([
+    'CONTRACT_PAYMENT',
+    'INTERIM_PAYMENT',
+    'FINAL_PAYMENT',
+    'LABOR_COST',
+    'OUTSOURCING',
+    'EQUIPMENT',
+    'TRAVEL',
+    'SUPPLIES',
+    'COMMUNICATION',
+    'RENT',
+    'UTILITY',
+    'TAX_PAYMENT',
+    'VAT_REFUND',
+    'INSURANCE',
+    'MISC_INCOME',
+    'MISC_EXPENSE',
+  ]).optional(),
+  memo: z.string().trim().optional(),
+  evidenceCompletedDesc: z.string().optional(),
+}).strict();
+
+export const portalExpenseIntakeDraftSaveSchema = z.object({
+  projectId: NON_EMPTY_STRING,
+  intakeId: NON_EMPTY_STRING,
+  updates: z.object({
+    manualFields: bankImportManualFieldsSchema.optional(),
+    existingExpenseSheetId: NON_EMPTY_STRING.nullish(),
+    existingExpenseRowTempId: NON_EMPTY_STRING.nullish(),
+    matchState: z.enum(['AUTO_CONFIRMED', 'PENDING_INPUT', 'REVIEW_REQUIRED', 'IGNORED']).optional(),
+    projectionStatus: z.enum(['NOT_PROJECTED', 'PROJECTED', 'PROJECTED_WITH_PENDING_EVIDENCE']).optional(),
+    evidenceStatus: z.enum(['MISSING', 'PARTIAL', 'COMPLETE']).optional(),
+    reviewReasons: z.array(NON_EMPTY_STRING).optional(),
+    lastUploadBatchId: NON_EMPTY_STRING.optional(),
+  }).strict(),
+}).strict();
+
 export const projectSheetSourceUploadSchema = z.object({
   sourceType: z.enum(['usage', 'budget', 'evidence_rules', 'cashflow', 'bank_statement']),
   sheetName: NON_EMPTY_STRING.max(200),
