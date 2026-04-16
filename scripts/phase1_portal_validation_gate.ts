@@ -46,7 +46,7 @@ export const PHASE1_PORTAL_VALIDATION_STEPS: Phase1PortalValidationStep[] = [
   {
     name: 'phase1 platform smoke and release gate e2e',
     command:
-      'CI=1 npx playwright test tests/e2e/platform-smoke.spec.ts tests/e2e/product-release-gates.spec.ts --config playwright.harness.config.mjs',
+      'CI=1 PORTAL_HARNESS_PORT=4273 npx playwright test tests/e2e/platform-smoke.spec.ts tests/e2e/product-release-gates.spec.ts --config playwright.harness.config.mjs',
   },
   {
     name: 'phase1 production build',

@@ -1,46 +1,24 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
-import {
-  TrendingUp, AlertTriangle,
-  CheckCircle2, CircleDollarSign, ShieldCheck,
-  BarChart3,
-  Loader2,
-} from 'lucide-react';
+import { AlertTriangle, CheckCircle2, CircleDollarSign, Loader2, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
-import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
+import { Card, CardContent, CardHeader } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { usePortalStore } from '../../data/portal-store';
 import { useAuth } from '../../data/auth-store';
-import { useHrAnnouncements, HR_EVENT_LABELS, HR_EVENT_COLORS } from '../../data/hr-announcements-store';
-import { usePayroll } from '../../data/payroll-store';
 import { fmtShort } from '../../data/budget-data';
+import { HR_EVENT_COLORS, HR_EVENT_LABELS } from '../../data/hr-announcements-store';
+import { usePayroll } from '../../data/payroll-store';
 import {
   PROJECT_STATUS_LABELS, SETTLEMENT_TYPE_SHORT, BASIS_LABELS,
 } from '../../data/types';
-import { addMonthsToYearMonth, getSeoulTodayIso } from '../../platform/business-days';
-import { resolveCurrentCashflowWeek } from '../../platform/cashflow-export-surface';
 import { useFirebase } from '../../lib/firebase-context';
 import {
   createPlatformApiClient,
   fetchPortalDashboardSummaryViaBff,
   type PortalDashboardSummaryResult,
 } from '../../lib/platform-bff-client';
-import {
-  isPayrollLiquidityRiskStatus,
-  resolveProjectPayrollLiquidity,
-  type PayrollLiquidityQueueItem,
-} from '../../platform/payroll-liquidity';
-import { buildPortalDashboardSurface } from '../../platform/portal-dashboard-surface';
-import {
-  resolveWeeklyAccountingProductStatus,
-  resolveWeeklyAccountingSnapshot,
-} from '../../platform/weekly-accounting-state';
-import { resolvePortalProjectReadModel } from './portal-read-model';
-
-// ═══════════════════════════════════════════════════════════════
-// PortalDashboard — 내 사업 현황
-// ═══════════════════════════════════════════════════════════════
 
 function formatKstDateTime(value: string | undefined): string {
   if (!value) return '아직 수정 없음';
@@ -79,44 +57,142 @@ function submissionBadgeClassName(tone: 'neutral' | 'warning' | 'danger' | 'succ
   return 'border-slate-200 bg-slate-50 text-slate-700';
 }
 
+type DashboardPayrollQueueItem = NonNullable<PortalDashboardSummaryResult['payrollQueue']['item']>;
+type DashboardSummaryRequestState = {
+  projectId: string;
+  status: 'idle' | 'loading' | 'ready' | 'error';
+};
+
+const PORTAL_PAYROLL_BADGE_STYLES: Record<string, string> = {
+  insufficient_balance: 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300',
+  payment_unconfirmed: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
+  baseline_missing: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
+  balance_unknown: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
+  clear: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
+};
+
+function portalPayrollLabel(status: string) {
+  if (status === 'insufficient_balance') return '잔액 부족 위험';
+  if (status === 'payment_unconfirmed') return '지급 확인 필요';
+  if (status === 'baseline_missing') return '기준 지급액 없음';
+  if (status === 'balance_unknown') return '잔액 데이터 없음';
+  return '이번 지급 창 안정';
+}
+
+function PortalDashboardSummaryStateCard({
+  description,
+  loading,
+  title,
+}: {
+  description: string;
+  loading: boolean;
+  title: string;
+}) {
+  return (
+    <Card className="border-slate-200 bg-white shadow-sm">
+      <CardContent className="p-6">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+          <div className={`flex h-11 w-11 items-center justify-center rounded-2xl ${loading ? 'bg-slate-100 text-slate-600' : 'bg-rose-50 text-rose-600'}`}>
+            {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <AlertTriangle className="h-5 w-5" />}
+          </div>
+          <div className="space-y-1.5">
+            <h2 className="text-[18px] font-semibold tracking-[-0.03em] text-slate-950">{title}</h2>
+            <p className="text-[12px] leading-6 text-slate-600">{description}</p>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export function PortalDashboard() {
   const navigate = useNavigate();
+  const { isLoading, portalUser, myProject } = usePortalStore();
   const { user: authUser } = useAuth();
-  const { isLoading, portalUser, myProject, weeklySubmissionStatuses, projects, transactions } = usePortalStore();
-  const { getProjectAlerts } = useHrAnnouncements();
-  const { runs, monthlyCloses, acknowledgePayrollRun, acknowledgeMonthlyClose } = usePayroll();
+  const { acknowledgePayrollRun, acknowledgeMonthlyClose } = usePayroll();
   const { orgId } = useFirebase();
   const apiClient = useMemo(() => createPlatformApiClient(import.meta.env), []);
   const [dashboardSummary, setDashboardSummary] = useState<PortalDashboardSummaryResult | null>(null);
+  const [dashboardSummaryRequestState, setDashboardSummaryRequestState] = useState<DashboardSummaryRequestState>({
+    projectId: '',
+    status: 'idle',
+  });
+  const currentProjectId = myProject?.id || '';
+  const currentProjectIdRef = useRef(currentProjectId);
+  const latestDashboardSummaryRequestIdRef = useRef(0);
+  const activeDashboardSummary = dashboardSummary?.project?.id === currentProjectId
+    ? dashboardSummary
+    : null;
+  currentProjectIdRef.current = currentProjectId;
+
+  async function refreshDashboardSummary(options?: {
+    mode?: 'blocking' | 'background';
+    projectId?: string;
+  }) {
+    const targetProjectId = options?.projectId ?? currentProjectId;
+    if (!authUser?.uid || !orgId || !targetProjectId) return null;
+    const requestId = latestDashboardSummaryRequestIdRef.current + 1;
+    latestDashboardSummaryRequestIdRef.current = requestId;
+    if ((options?.mode ?? 'background') === 'blocking') {
+      setDashboardSummaryRequestState({
+        projectId: targetProjectId,
+        status: 'loading',
+      });
+    }
+
+    try {
+      const summary = await fetchPortalDashboardSummaryViaBff({
+        tenantId: orgId,
+        actor: authUser,
+        projectId: targetProjectId,
+        client: apiClient,
+      });
+      if (latestDashboardSummaryRequestIdRef.current === requestId) {
+        setDashboardSummary(summary);
+        setDashboardSummaryRequestState({
+          projectId: targetProjectId,
+          status: summary.project?.id === targetProjectId ? 'ready' : 'error',
+        });
+        if (summary.project?.id !== targetProjectId) {
+          console.warn('[PortalDashboard] dashboard-summary project mismatch:', {
+            expectedProjectId: targetProjectId,
+            receivedProjectId: summary.project?.id,
+          });
+        }
+      }
+      return summary;
+    } catch (error) {
+      if (latestDashboardSummaryRequestIdRef.current === requestId) {
+        console.warn('[PortalDashboard] dashboard-summary fetch failed:', error);
+        setDashboardSummaryRequestState({
+          projectId: targetProjectId,
+          status: 'error',
+        });
+      }
+      return null;
+    }
+  }
 
   useEffect(() => {
-    if (!authUser?.uid || !orgId) return;
-    let cancelled = false;
-
-    void fetchPortalDashboardSummaryViaBff({
-      tenantId: orgId,
-      actor: authUser,
-      client: apiClient,
-    })
-      .then((summary) => {
-        if (!cancelled) setDashboardSummary(summary);
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          console.warn('[PortalDashboard] dashboard-summary fetch failed; using store fallback:', error);
-        }
+    if (!authUser?.uid || !orgId || !currentProjectId) {
+      setDashboardSummary(null);
+      setDashboardSummaryRequestState({
+        projectId: '',
+        status: 'idle',
       });
+      return undefined;
+    }
+
+    setDashboardSummary((current) => (current?.project?.id === currentProjectId ? current : null));
+    void refreshDashboardSummary({
+      mode: 'blocking',
+      projectId: currentProjectId,
+    });
 
     return () => {
-      cancelled = true;
+      latestDashboardSummaryRequestIdRef.current += 1;
     };
-  }, [apiClient, authUser, orgId]);
-
-  const projectReadModel = useMemo(() => resolvePortalProjectReadModel({
-    summaryProject: dashboardSummary?.project,
-    fallbackProject: myProject,
-    activeProjectId: myProject?.id,
-  }), [dashboardSummary?.project, myProject]);
+  }, [apiClient, authUser, currentProjectId, orgId]);
 
   if (isLoading) {
     return (
@@ -159,109 +235,125 @@ export function PortalDashboard() {
     );
   }
 
-  const myTx = transactions.filter((t) => t.projectId === myProject.id);
+  const activeSummaryRequestStatus = dashboardSummaryRequestState.projectId === currentProjectId
+    ? dashboardSummaryRequestState.status
+    : (!activeDashboardSummary && Boolean(currentProjectId) ? 'loading' : 'idle');
 
-  const today = getSeoulTodayIso();
-  const yearMonth = today.slice(0, 7);
-  const prevYearMonth = addMonthsToYearMonth(yearMonth, -1);
-  const payrollRun = runs.find((r) => r.projectId === myProject.id && r.yearMonth === yearMonth) || null;
-  const monthlyClosePrev = monthlyCloses.find((c) => c.projectId === myProject.id && c.yearMonth === prevYearMonth) || null;
-  const hrAlerts = getProjectAlerts(myProject.id).filter((a) => !a.acknowledged);
-  const needsPayrollAck = !!(payrollRun && today >= payrollRun.noticeDate && !payrollRun.acknowledged);
-  const needsMonthlyCloseAck = !!(monthlyClosePrev && monthlyClosePrev.status === 'DONE' && !monthlyClosePrev.acknowledged);
+  if (!activeDashboardSummary && activeSummaryRequestStatus === 'loading') {
+    return (
+      <PortalDashboardSummaryStateCard
+        loading
+        title="대시보드 요약을 불러오는 중입니다."
+        description="선택한 사업의 최신 운영 요약을 확인한 뒤 대시보드를 표시합니다."
+      />
+    );
+  }
+
+  if (!activeDashboardSummary && activeSummaryRequestStatus === 'error') {
+    return (
+      <PortalDashboardSummaryStateCard
+        loading={false}
+        title="대시보드 요약을 지금 불러올 수 없습니다."
+        description="요약 데이터가 준비되지 않아 현재 상태를 추정해서 보여주지 않습니다. 잠시 후 다시 확인해주세요."
+      />
+    );
+  }
+
+  const summaryProject = activeDashboardSummary?.project;
+  const projectStatusLabel = summaryProject?.status
+    ? PROJECT_STATUS_LABELS[summaryProject.status as keyof typeof PROJECT_STATUS_LABELS] || summaryProject.status
+    : '-';
+  const projectSettlementLabel = summaryProject?.settlementType
+    ? SETTLEMENT_TYPE_SHORT[summaryProject.settlementType as keyof typeof SETTLEMENT_TYPE_SHORT] || summaryProject.settlementType
+    : '-';
+  const projectBasisLabel = summaryProject?.basis
+    ? BASIS_LABELS[summaryProject.basis as keyof typeof BASIS_LABELS] || summaryProject.basis
+    : '-';
+  const projectContractAmount = typeof summaryProject?.contractAmount === 'number' && summaryProject.contractAmount > 0
+    ? `${fmtShort(summaryProject.contractAmount)}원`
+    : '-';
+  const dashboardSurface = activeDashboardSummary?.surface;
+  const financeSummaryItems = activeDashboardSummary?.financeSummaryItems ?? [
+    { label: '총 입금', value: '-' },
+    { label: '총 출금', value: '-' },
+    { label: '잔액', value: '-' },
+    { label: '소진율', value: '-' },
+  ];
+  const dashboardSubmissionRows = activeDashboardSummary?.submissionRows ?? [];
+  const currentWeek = activeDashboardSummary?.currentWeek;
+  const issueItems = activeDashboardSummary?.surface?.visibleIssues ?? [];
+  const notices = activeDashboardSummary?.notices ?? {
+    payrollAck: null,
+    monthlyCloseAck: null,
+    hrAlerts: {
+      count: 0,
+      items: [],
+      overflowCount: 0,
+    },
+  };
+  const payrollQueue = activeDashboardSummary?.payrollQueue ?? {
+    item: null,
+    riskItems: [],
+  };
+  const shouldShowPayrollQueue = Boolean(payrollQueue.item && payrollQueue.item.status !== 'clear');
 
   async function onAckPayroll() {
-    if (!payrollRun) return;
+    const targetProjectId = currentProjectId;
+    const targetRunId = notices.payrollAck?.runId;
+    if (!targetRunId) return;
     try {
-      await acknowledgePayrollRun(payrollRun.id);
+      await acknowledgePayrollRun(targetRunId);
+      setDashboardSummary((current) => {
+        if (!current) return current;
+        if (current.project?.id !== targetProjectId) return current;
+        if (current.notices.payrollAck?.runId !== targetRunId) return current;
+        return {
+          ...current,
+          notices: {
+            ...current.notices,
+            payrollAck: null,
+          },
+        };
+      });
+      await refreshDashboardSummary({
+        mode: 'background',
+        projectId: currentProjectIdRef.current || targetProjectId,
+      });
       toast.success('공지 확인이 기록되었습니다');
-    } catch (err: any) {
-      console.error(err);
-      toast.error(err?.message || '확인 처리에 실패했습니다');
+    } catch (error: any) {
+      console.error(error);
+      toast.error(error?.message || '확인 처리에 실패했습니다');
     }
   }
 
   async function onAckMonthlyClose() {
-    if (!monthlyClosePrev) return;
+    const targetProjectId = currentProjectId;
+    const targetCloseId = notices.monthlyCloseAck?.closeId;
+    if (!targetCloseId) return;
     try {
-      await acknowledgeMonthlyClose(monthlyClosePrev.id);
+      await acknowledgeMonthlyClose(targetCloseId);
+      setDashboardSummary((current) => {
+        if (!current) return current;
+        if (current.project?.id !== targetProjectId) return current;
+        if (current.notices.monthlyCloseAck?.closeId !== targetCloseId) return current;
+        return {
+          ...current,
+          notices: {
+            ...current.notices,
+            monthlyCloseAck: null,
+          },
+        };
+      });
+      await refreshDashboardSummary({
+        mode: 'background',
+        projectId: currentProjectIdRef.current || targetProjectId,
+      });
       toast.success('월간 정산 확인이 기록되었습니다');
-    } catch (err: any) {
-      console.error(err);
-      toast.error(err?.message || '확인 처리에 실패했습니다');
+    } catch (error: any) {
+      console.error(error);
+      toast.error(error?.message || '확인 처리에 실패했습니다');
     }
   }
-
-  // 재무 KPI
-  const totalIn = myTx.filter(t => t.direction === 'IN').reduce((s, t) => s + t.amounts.bankAmount, 0);
-  const totalOut = myTx.filter(t => t.direction === 'OUT').reduce((s, t) => s + t.amounts.bankAmount, 0);
-  const balance = totalIn - totalOut;
-  const burnRate = myProject.contractAmount > 0 ? totalOut / myProject.contractAmount : 0;
-  const payrollQueueItems = useMemo(() => resolveProjectPayrollLiquidity({
-    project: myProject,
-    runs,
-    transactions: myTx,
-    today,
-  }), [myProject, myTx, runs, today]);
-  const payrollRiskItems = useMemo(
-    () => payrollQueueItems.filter((item) => isPayrollLiquidityRiskStatus(item.status)),
-    [payrollQueueItems],
-  );
-  const payrollDetail = payrollQueueItems[0] || null;
-  const assignedProjects = useMemo(() => {
-    if (!portalUser) return myProject ? [myProject] : [];
-    const projectIds = Array.isArray(portalUser.projectIds) && portalUser.projectIds.length > 0
-      ? portalUser.projectIds
-      : portalUser.projectId ? [portalUser.projectId] : [];
-    const projectMap = new Map(projects.map((project) => [project.id, project]));
-    const ordered = projectIds
-      .map((projectId) => projectMap.get(projectId))
-      .filter((project): project is NonNullable<typeof project> => Boolean(project));
-    if (ordered.length > 0) return ordered;
-    return myProject ? [myProject] : [];
-  }, [myProject, portalUser, projects]);
-  const currentWeek = useMemo(() => resolveCurrentCashflowWeek(today), [today]);
-  const weeklyStatusMap = useMemo(() => {
-    const map = new Map<string, typeof weeklySubmissionStatuses[number]>();
-    weeklySubmissionStatuses.forEach((status) => {
-      map.set(`${status.projectId}-${status.yearMonth}-w${status.weekNo}`, status);
-    });
-    return map;
-  }, [weeklySubmissionStatuses]);
-  const dashboardSubmissionRows = useMemo(() => {
-    if (!currentWeek) return [];
-    return assignedProjects.map((project) => {
-      const status = weeklyStatusMap.get(`${project.id}-${currentWeek.yearMonth}-w${currentWeek.weekNo}`);
-      const snapshot = resolveWeeklyAccountingSnapshot(status);
-      const expenseStatus = resolveWeeklyAccountingProductStatus({ snapshot });
-      return {
-        id: project.id,
-        name: project.name,
-        shortName: project.shortName || project.id,
-        projectionInputLabel: snapshot.projectionEdited ? '입력됨' : '미입력',
-        projectionDoneLabel: snapshot.projectionDone ? '제출 완료' : '미완료',
-        expenseLabel: expenseStatus.label,
-        expenseTone: expenseStatus.tone === 'muted'
-          ? 'neutral'
-          : expenseStatus.tone,
-        latestProjectionUpdatedAt: status?.projectionUpdatedAt || status?.projectionEditedAt,
-      };
-    });
-  }, [assignedProjects, currentWeek, weeklyStatusMap]);
-  const dashboardSurface = useMemo(() => dashboardSummary?.surface ?? buildPortalDashboardSurface({
-    projectId: myProject.id,
-    weeklySubmissionStatuses,
-    todayIso: today,
-    hrAlertCount: hrAlerts.length,
-    payrollRiskCount: payrollRiskItems.length,
-  }), [dashboardSummary?.surface, hrAlerts.length, myProject.id, payrollRiskItems.length, today, weeklySubmissionStatuses]);
-  const shouldShowPayrollQueue = Boolean(payrollDetail && payrollDetail.status !== 'clear');
-  const financeSummaryItems = [
-    { label: '총 입금', value: fmtShort(totalIn) },
-    { label: '총 출금', value: fmtShort(totalOut) },
-    { label: '잔액', value: fmtShort(balance) },
-    { label: '소진율', value: `${(burnRate * 100).toFixed(1)}%` },
-  ];
 
   return (
     <div className="space-y-6">
@@ -271,17 +363,17 @@ export function PortalDashboard() {
             <div className="space-y-3">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge className="h-5 rounded-full bg-[#e8f0fb] px-2 text-[10px] font-semibold text-[#1b4f8f]">
-                  {projectReadModel.statusLabel || PROJECT_STATUS_LABELS[myProject.status]}
+                  {projectStatusLabel}
                 </Badge>
                 <Badge variant="outline" className="h-5 rounded-full border-slate-300 px-2 text-[10px] font-semibold text-slate-600">
-                  {SETTLEMENT_TYPE_SHORT[myProject.settlementType]}
+                  {projectSettlementLabel}
                 </Badge>
                 <Badge variant="outline" className="h-5 rounded-full border-slate-300 px-2 text-[10px] font-semibold text-slate-600">
-                  {BASIS_LABELS[myProject.basis]}
+                  {projectBasisLabel}
                 </Badge>
               </div>
               <h2 className="text-[30px] font-semibold tracking-[-0.04em] text-slate-950">
-                {projectReadModel.projectName}
+                {summaryProject?.name || '내 사업'}
               </h2>
             </div>
 
@@ -311,25 +403,25 @@ export function PortalDashboard() {
                   <div className="rounded-xl border border-slate-300 bg-white px-4 py-3">
                     <div className="text-[11px] font-medium text-slate-600">발주기관</div>
                     <div className="mt-1 text-[14px] font-semibold text-slate-900">
-                      {projectReadModel.clientOrg || myProject.clientOrg || '-'}
+                      {summaryProject?.clientOrg || '-'}
                     </div>
                   </div>
                   <div className="rounded-xl border border-slate-300 bg-white px-4 py-3">
                     <div className="text-[11px] font-medium text-slate-600">담당자</div>
                     <div className="mt-1 text-[14px] font-semibold text-slate-900">
-                      {projectReadModel.managerName || portalUser.name}
+                      {summaryProject?.managerName || '-'}
                     </div>
                   </div>
                   <div className="rounded-xl border border-slate-300 bg-white px-4 py-3">
                     <div className="text-[11px] font-medium text-slate-600">사업비 총액</div>
                     <div className="mt-1 text-[14px] font-semibold text-slate-900">
-                      {myProject.contractAmount > 0 ? `${fmtShort(myProject.contractAmount)}원` : '-'}
+                      {projectContractAmount}
                     </div>
                   </div>
                   <div className="rounded-xl border border-slate-300 bg-white px-4 py-3">
                     <div className="text-[11px] font-medium text-slate-600">이번 주 Projection</div>
                     <div className="mt-1 text-[14px] font-semibold text-slate-900">
-                      {dashboardSurface.currentWeekLabel} · {dashboardSurface.projection.label}
+                      {dashboardSurface?.currentWeekLabel || '-'} · {dashboardSurface?.projection?.label || '미작성'}
                     </div>
                   </div>
                 </div>
@@ -342,35 +434,35 @@ export function PortalDashboard() {
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <div className="text-[11px] font-medium text-slate-600">Projection</div>
-                        <div className="mt-1 text-[14px] font-semibold text-slate-900">{dashboardSurface.projection.label}</div>
-                        <div className="mt-1 text-[11px] text-slate-500">{dashboardSurface.projection.detail}</div>
+                        <div className="mt-1 text-[14px] font-semibold text-slate-900">{dashboardSurface?.projection?.label || '미작성'}</div>
+                        <div className="mt-1 text-[11px] text-slate-500">{dashboardSurface?.projection?.detail || '이번 주 제출 상태를 확인하지 못했습니다.'}</div>
                       </div>
-                      <Badge variant="outline" className={`rounded-full ${dashboardSurface.projection.label === '미작성' ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
-                        {dashboardSurface.projection.label}
+                      <Badge variant="outline" className={`rounded-full ${(dashboardSurface?.projection?.label || '미작성') === '미작성' ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+                        {dashboardSurface?.projection?.label || '미작성'}
                       </Badge>
                     </div>
                   </div>
                   <div className="rounded-xl border border-slate-300 bg-white px-4 py-3">
                     <div className="text-[11px] font-medium text-slate-600">최근 Projection 수정</div>
                     <div className="mt-1 text-[14px] font-semibold text-slate-900">
-                      {formatKstDateTime(dashboardSurface.projection.latestUpdatedAt)}
+                      {formatKstDateTime(dashboardSurface?.projection?.latestUpdatedAt)}
                     </div>
                   </div>
                   <div className="rounded-xl border border-slate-300 bg-white px-4 py-3">
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <div className="text-[11px] font-medium text-slate-600">사업비 입력</div>
-                        <div className="mt-1 text-[14px] font-semibold text-slate-900">{dashboardSurface.expense.label}</div>
-                        <div className="mt-1 text-[11px] text-slate-500">{dashboardSurface.expense.detail}</div>
+                        <div className="mt-1 text-[14px] font-semibold text-slate-900">{dashboardSurface?.expense?.label || '확인 필요'}</div>
+                        <div className="mt-1 text-[11px] text-slate-500">{dashboardSurface?.expense?.detail || '사업비 입력 상태를 확인하지 못했습니다.'}</div>
                       </div>
-                      <Badge variant="outline" className={`rounded-full ${accountingToneBadgeClassName(dashboardSurface.expense.tone)}`}>
-                        {dashboardSurface.expense.label}
+                      <Badge variant="outline" className={`rounded-full ${accountingToneBadgeClassName(dashboardSurface?.expense?.tone || 'muted')}`}>
+                        {dashboardSurface?.expense?.label || '확인 필요'}
                       </Badge>
                     </div>
                   </div>
-                  {dashboardSurface.visibleIssues.length > 0 && (
+                  {issueItems.length > 0 && (
                     <div className="flex flex-wrap gap-2 pt-2">
-                      {dashboardSurface.visibleIssues.map((item) => (
+                      {issueItems.map((item) => (
                         <button
                           key={item.label}
                           className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-[11px] font-semibold transition-colors ${issueToneClassName(item.tone)}`}
@@ -393,18 +485,16 @@ export function PortalDashboard() {
         <CardHeader className="border-b border-slate-200/80 pb-3">
           <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
             <div className="space-y-1">
-              <CardTitle className="text-[15px] font-semibold tracking-[-0.02em] text-slate-950">
+              <h2 className="text-[15px] font-semibold tracking-[-0.02em] text-slate-950">
                 내 제출 현황
-              </CardTitle>
+              </h2>
               <p className="text-[11px] text-slate-500">
                 제출 상태를 한 번에 확인합니다.
               </p>
             </div>
-            {currentWeek && (
-              <div className="text-[11px] font-medium text-slate-500">
-                {currentWeek.label} · {currentWeek.weekStart} ~ {currentWeek.weekEnd}
-              </div>
-            )}
+            <div className="text-[11px] font-medium text-slate-500">
+              {currentWeek ? `${currentWeek.label} · ${currentWeek.weekStart} ~ ${currentWeek.weekEnd}` : '-'}
+            </div>
           </div>
         </CardHeader>
         <CardContent className="pt-4">
@@ -466,8 +556,7 @@ export function PortalDashboard() {
         </CardContent>
       </Card>
 
-      {/* 중요 공지 (인건비 / 월간정산 / 퇴사·전배) */}
-      {(needsPayrollAck || needsMonthlyCloseAck || hrAlerts.length > 0) && (
+      {(notices.payrollAck || notices.monthlyCloseAck || notices.hrAlerts.items.length > 0) && (
         <Card className="border-slate-200 bg-white shadow-sm">
           <CardContent className="p-4 space-y-3">
             <div className="flex items-start gap-2.5">
@@ -480,68 +569,60 @@ export function PortalDashboard() {
               </div>
             </div>
 
-            {needsPayrollAck && payrollRun && (
+            {notices.payrollAck && (
               <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
                 <div className="min-w-0">
                   <p className="text-[12px]" style={{ fontWeight: 700 }}>
-                    인건비 지급 예정: {payrollRun.plannedPayDate}
+                    인건비 지급 예정: {notices.payrollAck.plannedPayDate}
                   </p>
                   <p className="text-[10px] text-muted-foreground">
-                    공지일: {payrollRun.noticeDate} (지급일 3영업일 전)
+                    공지일: {notices.payrollAck.noticeDate} (지급일 3영업일 전)
                   </p>
                 </div>
-                <Button
-                  size="sm"
-                  className="h-8 text-[12px] gap-1.5 shrink-0"
-                  onClick={onAckPayroll}
-                >
+                <Button size="sm" className="h-8 text-[12px] gap-1.5 shrink-0" onClick={onAckPayroll}>
                   <CheckCircle2 className="w-3.5 h-3.5" /> 확인했습니다
                 </Button>
               </div>
             )}
 
-            {needsMonthlyCloseAck && monthlyClosePrev && (
+            {notices.monthlyCloseAck && (
               <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
                 <div className="min-w-0">
                   <p className="text-[12px]" style={{ fontWeight: 700 }}>
-                    월간 정산 완료 확인: {monthlyClosePrev.yearMonth}
+                    월간 정산 완료 확인: {notices.monthlyCloseAck.yearMonth}
                   </p>
                   <p className="text-[10px] text-muted-foreground">
-                    완료일: {monthlyClosePrev.doneAt ? new Date(monthlyClosePrev.doneAt).toLocaleDateString('ko-KR') : '-'}
+                    완료일: {notices.monthlyCloseAck.doneAt ? new Date(notices.monthlyCloseAck.doneAt).toLocaleDateString('ko-KR') : '-'}
                   </p>
                 </div>
-                <Button
-                  size="sm"
-                  className="h-8 text-[12px] gap-1.5 shrink-0"
-                  onClick={onAckMonthlyClose}
-                >
+                <Button size="sm" className="h-8 text-[12px] gap-1.5 shrink-0" onClick={onAckMonthlyClose}>
                   <CheckCircle2 className="w-3.5 h-3.5" /> 확인했습니다
                 </Button>
               </div>
             )}
 
-            {hrAlerts.length > 0 && (
+            {notices.hrAlerts.items.length > 0 && (
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                <div className="flex items-center justify-between gap-3 mb-2">
+                <div className="mb-2 flex items-center justify-between gap-3">
                   <p className="text-[12px]" style={{ fontWeight: 700 }}>인사 공지 (미확인)</p>
                   <Button variant="outline" size="sm" className="h-7 text-[11px]" onClick={() => navigate('/portal/change-requests')}>
                     확인하러 가기
                   </Button>
                 </div>
                 <div className="space-y-1.5">
-                  {hrAlerts.slice(0, 3).map((a) => (
-                    <div key={a.id} className="flex items-center justify-between gap-2 text-[11px]">
+                  {notices.hrAlerts.items.map((item) => (
+                    <div key={item.id} className="flex items-center justify-between gap-2 text-[11px]">
                       <div className="min-w-0">
-                        <span className={`text-[9px] h-4 px-1.5 inline-flex items-center rounded ${HR_EVENT_COLORS[a.eventType]}`}>
-                          {HR_EVENT_LABELS[a.eventType]}
+                        <span className={`inline-flex h-4 items-center rounded px-1.5 text-[9px] ${HR_EVENT_COLORS[item.eventType as keyof typeof HR_EVENT_COLORS] || 'bg-slate-100 text-slate-700'}`}>
+                          {HR_EVENT_LABELS[item.eventType as keyof typeof HR_EVENT_LABELS] || item.eventType}
                         </span>
-                        <span className="ml-2 truncate">{a.employeeName} · {a.effectiveDate}</span>
+                        <span className="ml-2 truncate">{item.employeeName} · {item.effectiveDate}</span>
                       </div>
-                      <Badge variant="outline" className="text-[10px] shrink-0">{a.projectId}</Badge>
+                      <Badge variant="outline" className="shrink-0 text-[10px]">{item.projectId}</Badge>
                     </div>
                   ))}
-                  {hrAlerts.length > 3 && (
-                    <p className="text-[10px] text-muted-foreground">외 {hrAlerts.length - 3}건</p>
+                  {notices.hrAlerts.overflowCount > 0 && (
+                    <p className="text-[10px] text-muted-foreground">외 {notices.hrAlerts.overflowCount}건</p>
                   )}
                 </div>
               </div>
@@ -552,31 +633,14 @@ export function PortalDashboard() {
 
       {shouldShowPayrollQueue && (
         <PortalPayrollQueueCard
-          item={payrollDetail}
-          riskItems={payrollRiskItems}
+          item={payrollQueue.item}
+          riskItems={payrollQueue.riskItems}
           onOpenDetail={() => navigate('/portal/payroll')}
           onOpenBankStatements={() => navigate('/portal/bank-statements')}
         />
       )}
-
     </div>
   );
-}
-
-const PORTAL_PAYROLL_BADGE_STYLES: Record<PayrollLiquidityQueueItem['status'], string> = {
-  insufficient_balance: 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300',
-  payment_unconfirmed: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
-  baseline_missing: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
-  balance_unknown: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
-  clear: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
-};
-
-function portalPayrollLabel(status: PayrollLiquidityQueueItem['status']) {
-  if (status === 'insufficient_balance') return '잔액 부족 위험';
-  if (status === 'payment_unconfirmed') return '지급 확인 필요';
-  if (status === 'baseline_missing') return '기준 지급액 없음';
-  if (status === 'balance_unknown') return '잔액 데이터 없음';
-  return '이번 지급 창 안정';
 }
 
 function PortalPayrollQueueCard({
@@ -585,15 +649,15 @@ function PortalPayrollQueueCard({
   onOpenDetail,
   onOpenBankStatements,
 }: {
-  item: PayrollLiquidityQueueItem | null;
-  riskItems: PayrollLiquidityQueueItem[];
+  item: DashboardPayrollQueueItem | null;
+  riskItems: DashboardPayrollQueueItem[];
   onOpenDetail: () => void;
   onOpenBankStatements: () => void;
 }) {
   return (
     <Card data-testid="portal-payroll-liquidity-card" className="border-border/60 shadow-sm">
       <CardHeader className="pb-2">
-        <CardTitle className="flex items-center justify-between gap-2 text-[13px]">
+        <h2 className="flex items-center justify-between gap-2 text-[13px]" style={{ fontWeight: 700 }}>
           <span className="flex items-center gap-2">
             <div className="flex h-7 w-7 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-300">
               <CircleDollarSign className="h-4 w-4" />
@@ -603,7 +667,7 @@ function PortalPayrollQueueCard({
           <Button variant="outline" size="sm" className="h-7 text-[11px]" onClick={onOpenDetail}>
             상세 보기
           </Button>
-        </CardTitle>
+        </h2>
       </CardHeader>
       <CardContent className="space-y-3 pt-0">
         {!item ? (
@@ -616,12 +680,10 @@ function PortalPayrollQueueCard({
               <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                 <div className="min-w-0 space-y-1">
                   <div className="flex items-center gap-2">
-                    <Badge className={`text-[10px] ${PORTAL_PAYROLL_BADGE_STYLES[risk.status]}`}>
+                    <Badge className={`text-[10px] ${PORTAL_PAYROLL_BADGE_STYLES[risk.status] || PORTAL_PAYROLL_BADGE_STYLES.clear}`}>
                       {portalPayrollLabel(risk.status)}
                     </Badge>
-                    <span className="text-[11px] text-muted-foreground">
-                      지급일 {risk.plannedPayDate}
-                    </span>
+                    <span className="text-[11px] text-muted-foreground">지급일 {risk.plannedPayDate}</span>
                   </div>
                   <p className="text-[13px] text-foreground" style={{ fontWeight: 700 }}>
                     예상 인건비 {risk.expectedPayrollAmount !== null ? `${fmtShort(risk.expectedPayrollAmount)}원` : '-'} · 최저 잔액 {risk.worstBalance !== null ? `${fmtShort(risk.worstBalance)}원` : '-'}

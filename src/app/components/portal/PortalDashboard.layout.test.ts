@@ -7,6 +7,10 @@ const portalDashboardSource = readFileSync(
   'utf8',
 );
 
+function expectSourceToMatchAny(...patterns: RegExp[]) {
+  expect(patterns.some((pattern) => pattern.test(portalDashboardSource))).toBe(true);
+}
+
 describe('PortalDashboard layout compaction', () => {
   it('keeps project detail and weekly status inside one unified slab', () => {
     expect(portalDashboardSource).toContain('프로젝트 상세');
@@ -38,9 +42,44 @@ describe('PortalDashboard layout compaction', () => {
     expect(portalDashboardSource).not.toContain('사업비 입력(주간) 작성/제출');
   });
 
-  it('reads project detail labels through the read-model fallback instead of dereferencing summary project blindly', () => {
-    expect(portalDashboardSource).toContain('projectReadModel.clientOrg || myProject.clientOrg || \'-\'');
-    expect(portalDashboardSource).toContain('projectReadModel.managerName || portalUser.name');
-    expect(portalDashboardSource).not.toContain('dashboardSummary?.project.clientOrg');
+  it('reads hero and project detail fields from the BFF summary project instead of store fallbacks', () => {
+    expect(portalDashboardSource).toContain("const activeDashboardSummary = dashboardSummary?.project?.id === currentProjectId");
+    expectSourceToMatchAny(
+      /const\s+\w+\s*=\s*activeDashboardSummary\?\.project;/,
+      /activeDashboardSummary\?\.project\?\.clientOrg/,
+    );
+    expectSourceToMatchAny(
+      /summaryProject\?\.clientOrg\s*\|\|\s*'-'/,
+      /activeDashboardSummary\?\.project\?\.clientOrg\s*\|\|\s*'-'/,
+    );
+    expectSourceToMatchAny(
+      /summaryProject\?\.managerName\s*\|\|\s*'-'/,
+      /activeDashboardSummary\?\.project\?\.managerName\s*\|\|\s*'-'/,
+    );
+    expectSourceToMatchAny(/summaryProject\?\.contractAmount/, /activeDashboardSummary\?\.project\?\.contractAmount/);
+    expectSourceToMatchAny(/summaryProject\?\.settlementType/, /activeDashboardSummary\?\.project\?\.settlementType/);
+    expectSourceToMatchAny(/summaryProject\?\.basis/, /activeDashboardSummary\?\.project\?\.basis/);
+    expectSourceToMatchAny(/summaryProject\?\.status/, /activeDashboardSummary\?\.project\?\.status/);
+    expect(portalDashboardSource).not.toContain('projectReadModel.clientOrg || myProject.clientOrg || \'-\'');
+    expect(portalDashboardSource).not.toContain('projectReadModel.managerName || portalUser.name');
+    expect(portalDashboardSource).not.toContain('myProject.contractAmount');
+    expect(portalDashboardSource).not.toContain('myProject.settlementType');
+    expect(portalDashboardSource).not.toContain('myProject.basis');
+    expect(portalDashboardSource).not.toContain('PROJECT_STATUS_LABELS[myProject.status]');
+  });
+
+  it('reads dashboard status blocks from the summary contract instead of rebuilding local dashboard surfaces', () => {
+    expectSourceToMatchAny(
+      /const\s+\w+\s*=\s*activeDashboardSummary\?\.surface;/,
+      /activeDashboardSummary\?\.surface\?\.projection\?\.label/,
+    );
+    expectSourceToMatchAny(/dashboardSurface\?\.projection/, /activeDashboardSummary\?\.surface\?\.projection/);
+    expectSourceToMatchAny(/dashboardSurface\?\.expense/, /activeDashboardSummary\?\.surface\?\.expense/);
+    expectSourceToMatchAny(/dashboardSurface\?\.currentWeekLabel/, /activeDashboardSummary\?\.surface\?\.currentWeekLabel/);
+    expect(portalDashboardSource).not.toContain('buildPortalDashboardSurface(');
+    expect(portalDashboardSource).not.toContain('resolveProjectPayrollLiquidity(');
+    expect(portalDashboardSource).not.toContain('resolveCurrentCashflowWeek(');
+    expect(portalDashboardSource).not.toContain('resolveWeeklyAccountingSnapshot(');
+    expect(portalDashboardSource).not.toContain('resolveWeeklyAccountingProductStatus(');
   });
 });

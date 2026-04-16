@@ -43,7 +43,7 @@ export const PORTAL_NETWORK_GATE_UNIT_CONTRACT_FILES = [
 export const PORTAL_NETWORK_GATE_COMMANDS = {
   unitContract: `npm test -- ${PORTAL_NETWORK_GATE_UNIT_CONTRACT_FILES.join(' ')}`,
   smoke:
-    'CI=1 npx playwright test tests/e2e/platform-smoke.spec.ts tests/e2e/product-release-gates.spec.ts --config playwright.harness.config.mjs',
+    'CI=1 PORTAL_HARNESS_PORT=4273 npx playwright test tests/e2e/platform-smoke.spec.ts tests/e2e/product-release-gates.spec.ts --config playwright.harness.config.mjs',
   build: 'npm run build',
 } as const;
 

@@ -1,9 +1,11 @@
 import { featureFlags, parseFeatureFlag } from '../config/feature-flags';
 import type {
   AccountType,
+  Basis,
   ProjectSheetSourceSnapshot,
   ProjectSheetSourceType,
   ProjectRequestContractAnalysis,
+  SettlementType,
   TransactionState,
 } from '../data/types';
 import { PlatformApiClient } from '../platform/api-client';
@@ -139,6 +141,9 @@ export interface PortalReadModelProjectSummary {
   department?: string;
   status?: string;
   type?: string;
+  settlementType?: SettlementType;
+  basis?: Basis;
+  contractAmount?: number;
 }
 
 export interface PortalDashboardSummaryResult {
@@ -149,6 +154,13 @@ export interface PortalDashboardSummaryResult {
     hrAlertCount: number;
     currentWeekLabel: string;
   };
+  currentWeek: {
+    label: string;
+    weekStart: string;
+    weekEnd: string;
+    yearMonth: string;
+    weekNo: number;
+  } | null;
   surface: {
     currentWeekLabel: string;
     projection: {
@@ -166,6 +178,83 @@ export interface PortalDashboardSummaryResult {
       count: number;
       tone: 'neutral' | 'warn' | 'danger';
       to: string;
+    }>;
+  };
+  financeSummaryItems: Array<{
+    label: string;
+    value: string;
+  }>;
+  submissionRows: Array<{
+    id: string;
+    name: string;
+    shortName: string;
+    projectionInputLabel: string;
+    projectionDoneLabel: string;
+    expenseLabel: string;
+    expenseTone: 'neutral' | 'warning' | 'danger' | 'success';
+    latestProjectionUpdatedAt?: string;
+  }>;
+  notices: {
+    payrollAck: {
+      runId: string;
+      plannedPayDate: string;
+      noticeDate: string;
+    } | null;
+    monthlyCloseAck: {
+      closeId: string;
+      yearMonth: string;
+      doneAt?: string;
+    } | null;
+    hrAlerts: {
+      count: number;
+      items: Array<{
+        id: string;
+        employeeName: string;
+        eventType: string;
+        effectiveDate: string;
+        projectId: string;
+      }>;
+      overflowCount: number;
+    };
+  };
+  payrollQueue: {
+    item: {
+      projectId: string;
+      projectName: string;
+      projectShortName: string;
+      runId: string;
+      yearMonth: string;
+      plannedPayDate: string;
+      windowStart: string;
+      windowEnd: string;
+      expectedPayrollAmount: number | null;
+      baselineRunId: string | null;
+      status: string;
+      statusReason: string;
+      dayBalances: Array<{ date: string; balance: number | null }>;
+      worstBalance: number | null;
+      currentBalance: number | null;
+      paidStatus: string;
+      acknowledged: boolean;
+    } | null;
+    riskItems: Array<{
+      projectId: string;
+      projectName: string;
+      projectShortName: string;
+      runId: string;
+      yearMonth: string;
+      plannedPayDate: string;
+      windowStart: string;
+      windowEnd: string;
+      expectedPayrollAmount: number | null;
+      baselineRunId: string | null;
+      status: string;
+      statusReason: string;
+      dayBalances: Array<{ date: string; balance: number | null }>;
+      worstBalance: number | null;
+      currentBalance: number | null;
+      paidStatus: string;
+      acknowledged: boolean;
     }>;
   };
   registrationState?: 'registered' | 'unregistered';
@@ -1190,11 +1279,12 @@ export async function fetchPortalOnboardingContextViaBff(params: {
 export async function fetchPortalDashboardSummaryViaBff(params: {
   tenantId: string;
   actor: ActorLike;
+  projectId: string;
   client?: PlatformApiClientLike;
 }): Promise<PortalDashboardSummaryResult> {
   const apiClient = resolveClient(params.client);
   const response = await apiClient.get<PortalDashboardSummaryResult>(
-    '/api/v1/portal/dashboard-summary',
+    `/api/v1/portal/dashboard-summary?projectId=${encodeURIComponent(params.projectId)}`,
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),

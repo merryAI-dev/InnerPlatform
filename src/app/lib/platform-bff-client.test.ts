@@ -174,7 +174,15 @@ describe('platform-bff-client', () => {
       post: vi.fn(),
       get: vi.fn(async () => ({
         data: {
-          project: { id: 'p001', name: 'Project 1', managerName: '보람' },
+          project: {
+            id: 'p001',
+            name: 'Project 1',
+            managerName: '보람',
+            clientOrg: 'MYSC',
+            settlementType: 'TYPE1',
+            basis: '공급가액',
+            contractAmount: 3000000,
+          },
           summary: {
             payrollRiskCount: 1,
             visibleProjects: 3,
@@ -185,6 +193,24 @@ describe('platform-bff-client', () => {
             expense: { label: '지급 여력 양호', detail: '3주차 · 지급 여력 양호', tone: 'success' },
             visibleIssues: [],
           },
+          financeSummaryItems: [
+            { label: '총 입금', value: '300만' },
+            { label: '총 출금', value: '125만' },
+            { label: '잔액', value: '175만' },
+            { label: '소진율', value: '41.7%' },
+          ],
+          submissionRows: [
+            {
+              id: 'p001',
+              name: 'Project 1',
+              shortName: 'P1',
+              projectionInputLabel: '입력됨',
+              projectionDoneLabel: '제출 완료',
+              expenseLabel: '동기화 완료',
+              expenseTone: 'success',
+              latestProjectionUpdatedAt: '2026-04-16T09:00:00.000Z',
+            },
+          ],
         },
       })),
       request: vi.fn(),
@@ -193,13 +219,23 @@ describe('platform-bff-client', () => {
     const result = await fetchPortalDashboardSummaryViaBff({
       tenantId: 'mysc',
       actor: { uid: 'u001', role: 'pm', idToken: 'token-abc' },
+      projectId: 'p001',
       client,
     });
 
-    expect(client.get).toHaveBeenCalledWith('/api/v1/portal/dashboard-summary', expect.objectContaining({
+    expect(client.get).toHaveBeenCalledWith('/api/v1/portal/dashboard-summary?projectId=p001', expect.objectContaining({
       tenantId: 'mysc',
     }));
     expect(result.summary.payrollRiskCount).toBe(1);
+    expect(result.project).toMatchObject({
+      clientOrg: 'MYSC',
+      managerName: '보람',
+      settlementType: 'TYPE1',
+      basis: '공급가액',
+      contractAmount: 3000000,
+    });
+    expect(result.financeSummaryItems[0]).toEqual({ label: '총 입금', value: '300만' });
+    expect(result.submissionRows[0]?.expenseTone).toBe('success');
   });
 
   it('calls portal payroll summary endpoint', async () => {
