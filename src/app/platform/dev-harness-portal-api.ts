@@ -229,6 +229,36 @@ type PortalWeeklyExpenseSaveResult = {
   };
 };
 
+type PortalWeeklySubmissionSubmitCommand = {
+  projectId: string;
+  yearMonth: string;
+  weekNo: number;
+  transactionIds: string[];
+};
+
+type PortalWeeklySubmissionSubmitResult = {
+  cashflowWeek: {
+    id: string;
+    projectId: string;
+    yearMonth: string;
+    weekNo: number;
+    pmSubmitted: true;
+    pmSubmittedAt: string;
+    pmSubmittedByUid: string;
+  };
+  transactions: Array<{
+    id: string;
+    state: 'SUBMITTED';
+    submittedAt: string;
+    submittedBy: string;
+    updatedAt: string;
+    version: number;
+  }>;
+  summary: {
+    submittedTransactionCount: number;
+  };
+};
+
 const PRIVILEGED_ROLES = new Set(['admin', 'finance']);
 const DEV_HARNESS_TODAY_ISO = '2026-04-16';
 const DEV_HARNESS_UPDATED_AT = '2026-04-16T12:00:00.000Z';
@@ -661,6 +691,44 @@ export function buildDevHarnessPortalSaveWeeklyExpenseResult(params: {
       expenseReviewPendingCount,
       syncedWeekCount,
       reviewRequiredWeekCount,
+    },
+  };
+}
+
+export function buildDevHarnessPortalSubmitWeeklySubmissionResult(params: {
+  actorId?: string;
+  actorRole?: string;
+  command: PortalWeeklySubmissionSubmitCommand;
+}): PortalWeeklySubmissionSubmitResult {
+  const command = params.command;
+  const actorId = normalizeText(params.actorId) || ORG_MEMBERS.find((member) => member.role === 'pm')?.uid || 'u002';
+  const { currentProject } = resolveHarnessProjectContext({
+    actorId,
+    actorRole: params.actorRole,
+    projectId: command.projectId,
+  });
+  const transactionIds = Array.isArray(command.transactionIds) ? command.transactionIds.filter((id) => normalizeText(id)) : [];
+
+  return {
+    cashflowWeek: {
+      id: `${currentProject.id}-${command.yearMonth}-w${command.weekNo}`,
+      projectId: currentProject.id,
+      yearMonth: command.yearMonth,
+      weekNo: command.weekNo,
+      pmSubmitted: true,
+      pmSubmittedAt: DEV_HARNESS_UPDATED_AT,
+      pmSubmittedByUid: actorId,
+    },
+    transactions: transactionIds.map((id) => ({
+      id,
+      state: 'SUBMITTED',
+      submittedAt: DEV_HARNESS_UPDATED_AT,
+      submittedBy: actorId,
+      updatedAt: DEV_HARNESS_UPDATED_AT,
+      version: 4,
+    })),
+    summary: {
+      submittedTransactionCount: transactionIds.length,
     },
   };
 }

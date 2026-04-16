@@ -422,6 +422,34 @@ export interface PortalWeeklyExpenseSaveResult {
   };
 }
 
+export interface PortalWeeklySubmissionSubmitCommand {
+  projectId: string;
+  yearMonth: string;
+  weekNo: number;
+  transactionIds: string[];
+}
+
+export interface PortalWeeklySubmissionSubmitResult {
+  cashflowWeek: Pick<
+    CashflowWeekSheet,
+    'id' | 'projectId' | 'yearMonth' | 'weekNo' | 'pmSubmitted' | 'pmSubmittedAt'
+  > & {
+    pmSubmittedByUid?: string;
+    pmSubmittedByName?: string;
+  };
+  transactions: Array<{
+    id: string;
+    state: TransactionState | 'SUBMITTED';
+    submittedAt?: string;
+    submittedBy?: string;
+    updatedAt?: string;
+    version?: number;
+  }>;
+  summary: {
+    submittedTransactionCount: number;
+  };
+}
+
 export interface PortalRegistrationResult {
   ok: boolean;
   registrationState: 'registered';
@@ -1391,6 +1419,25 @@ export async function savePortalWeeklyExpenseViaBff(params: {
   const apiClient = resolveClient(params.client);
   const response = await apiClient.post<PortalWeeklyExpenseSaveResult>(
     '/api/v1/portal/weekly-expenses/save',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.command,
+      timeoutMs: 8000,
+    },
+  );
+  return response.data;
+}
+
+export async function submitPortalWeeklySubmissionViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  command: PortalWeeklySubmissionSubmitCommand;
+  client?: PlatformApiClientLike;
+}): Promise<PortalWeeklySubmissionSubmitResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<PortalWeeklySubmissionSubmitResult>(
+    '/api/v1/portal/weekly-submissions/submit',
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),

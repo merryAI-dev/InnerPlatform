@@ -23,6 +23,7 @@ import {
   readPlatformApiRuntimeConfig,
   restoreProjectViaBff,
   savePortalWeeklyExpenseViaBff,
+  submitPortalWeeklySubmissionViaBff,
   syncTransactionEvidenceDriveViaBff,
   trashProjectViaBff,
   upsertPortalRegistrationViaBff,
@@ -301,6 +302,61 @@ describe('platform-bff-client', () => {
     }));
     expect(result.sheet.version).toBe(3);
     expect(result.syncSummary.expenseSyncState).toBe('review_required');
+  });
+
+  it('calls portal weekly submission submit command endpoint', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({
+        data: {
+          cashflowWeek: {
+            id: 'p001-2026-04-w3',
+            projectId: 'p001',
+            yearMonth: '2026-04',
+            weekNo: 3,
+            pmSubmitted: true,
+            pmSubmittedAt: '2026-04-16T13:00:00.000Z',
+          },
+          transactions: [
+            {
+              id: 'tx-1',
+              state: 'SUBMITTED',
+              submittedAt: '2026-04-16T13:00:00.000Z',
+              updatedAt: '2026-04-16T13:00:00.000Z',
+              version: 4,
+            },
+          ],
+          summary: {
+            submittedTransactionCount: 1,
+          },
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    const result = await submitPortalWeeklySubmissionViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm', idToken: 'token-abc' },
+      command: {
+        projectId: 'p001',
+        yearMonth: '2026-04',
+        weekNo: 3,
+        transactionIds: ['tx-1'],
+      },
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/portal/weekly-submissions/submit', expect.objectContaining({
+      tenantId: 'mysc',
+      body: expect.objectContaining({
+        projectId: 'p001',
+        yearMonth: '2026-04',
+        weekNo: 3,
+        transactionIds: ['tx-1'],
+      }),
+    }));
+    expect(result.cashflowWeek.pmSubmitted).toBe(true);
+    expect(result.summary.submittedTransactionCount).toBe(1);
   });
 
   it('calls portal payroll summary endpoint', async () => {

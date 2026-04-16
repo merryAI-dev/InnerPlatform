@@ -8,7 +8,7 @@
 | --- | --- | --- | --- |
 | [portal-dashboard](./pages/portal-dashboard.md) | `/portal` | 2026-04-15 | 포털 홈 safe fetch, 현재 상태 중심, 최소 CTA 유지 |
 | [portal-payroll](./pages/portal-payroll.md) | `/portal/payroll` | 2026-04-15 | 포털 경로 fetch 기반 거래 조회, 지급일/공지 확인 유지 |
-| [portal-weekly-expense](./pages/portal-weekly-expense.md) | `/portal/weekly-expenses` | 2026-04-16 | summary read model + weekly expense command authority 첫 slice |
+| [portal-weekly-expense](./pages/portal-weekly-expense.md) | `/portal/weekly-expenses` | 2026-04-16 | summary read model + save/submit command authority slices |
 | [portal-bank-statement](./pages/portal-bank-statement.md) | `/portal/bank-statements` | 2026-04-14 | 원본 업로드, intake queue 정리, 사업비 입력으로 이어가기 |
 | [portal-budget](./pages/portal-budget.md) | `/portal/budget` | 2026-04-14 | 가져오기 미리보기, 긴 모달 스크롤, 구조 저장 보호 |
 | [portal-cashflow](./pages/portal-cashflow.md) | `/portal/cashflow` | 2026-04-14 | compact import action, projection 작업면 중심 |

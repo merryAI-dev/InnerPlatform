@@ -111,6 +111,13 @@ export const portalWeeklyExpenseSaveSchema = z.object({
   syncPlan: z.array(weeklyExpenseSaveSyncPlanSchema),
 }).strict();
 
+export const portalWeeklySubmissionSubmitSchema = z.object({
+  projectId: NON_EMPTY_STRING,
+  yearMonth: z.string().trim().regex(/^\d{4}-\d{2}$/),
+  weekNo: z.number().int().positive(),
+  transactionIds: z.array(NON_EMPTY_STRING),
+}).strict();
+
 export const projectSheetSourceUploadSchema = z.object({
   sourceType: z.enum(['usage', 'budget', 'evidence_rules', 'cashflow', 'bank_statement']),
   sheetName: NON_EMPTY_STRING.max(200),

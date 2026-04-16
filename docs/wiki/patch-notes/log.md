@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-04-16] patch-note | portal-weekly-expense, shared-portal-architecture | PM weekly submit command authority slice
+- pages: [portal-weekly-expense](./pages/portal-weekly-expense.md), [shared-portal-architecture](./pages/shared-portal-architecture.md)
+- summary: phase 2 둘째 write slice로 `portal/weekly-submissions/submit` command boundary를 추가해, PM 주간 제출 시 cashflow week `pmSubmitted` 처리와 선택 거래 `SUBMITTED` 전환을 더 이상 클라이언트가 분리 호출하지 않도록 정리했다. `PortalWeeklyExpensePage`의 일반 제출과 참여율 경고 확인 후 제출 모두 같은 command path를 사용하고, build와 canonical `phase0:portal:network-gate`도 다시 green으로 닫았다.
+
 ## [2026-04-16] patch-note | portal-weekly-expense, shared-portal-architecture | weekly expense command authority slice
 - pages: [portal-weekly-expense](./pages/portal-weekly-expense.md), [shared-portal-architecture](./pages/shared-portal-architecture.md)
 - summary: phase 2 첫 write slice로 `portal/weekly-expenses/save` command boundary를 추가해 주간 입력 저장 시 expense sheet, weekly submission 상태, cashflow actual 반영을 더 이상 클라이언트가 쪼개서 직접 쓰지 않도록 정리했다. `SettlementLedgerPage`와 `PortalWeeklyExpensePage`는 single-command orchestration으로 옮겼고, dev harness contract와 canonical `phase0:portal:network-gate`까지 함께 green으로 닫았다.

@@ -439,6 +439,14 @@ interface PortalActions {
     activeSheetName: string;
     order: number;
   }) => void;
+  applyWeeklySubmissionCommandResult: (items: Array<{
+    id: string;
+    state?: string;
+    submittedBy?: string;
+    submittedAt?: string;
+    updatedAt?: string;
+    version?: number;
+  }>) => void;
   saveBankStatementRows: (sheet: BankStatementSheet) => Promise<void>;
   saveBudgetPlanRows: (rows: BudgetPlanRow[]) => Promise<void>;
   saveBudgetCodeBook: (rows: BudgetCodeEntry[], renames?: BudgetCodeRename[]) => Promise<void>;
@@ -1931,6 +1939,33 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     ));
   }, []);
 
+  const applyWeeklySubmissionCommandResult = useCallback((items: Array<{
+    id: string;
+    state?: string;
+    submittedBy?: string;
+    submittedAt?: string;
+    updatedAt?: string;
+    version?: number;
+  }>) => {
+    const normalizedItems = Array.isArray(items)
+      ? items.filter((item) => item && typeof item.id === 'string' && item.id.trim())
+      : [];
+    if (normalizedItems.length === 0) return;
+    const nextById = new Map(normalizedItems.map((item) => [item.id, item]));
+    setTransactions((prev) => prev.map((tx) => {
+      const incoming = nextById.get(tx.id);
+      if (!incoming) return tx;
+      return {
+        ...tx,
+        ...(incoming.state ? { state: incoming.state as TransactionState } : {}),
+        ...(incoming.submittedBy ? { submittedBy: incoming.submittedBy } : {}),
+        ...(incoming.submittedAt ? { submittedAt: incoming.submittedAt } : {}),
+        ...(incoming.updatedAt ? { updatedAt: incoming.updatedAt } : {}),
+        ...(typeof incoming.version === 'number' ? { version: incoming.version } : {}),
+      };
+    }));
+  }, []);
+
   const saveBudgetPlanRows = useCallback(async (rows: BudgetPlanRow[]) => {
     const now = new Date().toISOString();
     const sanitizedRows = rows.map((row) => ({
@@ -3077,6 +3112,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     deleteExpenseSheet,
     saveExpenseSheetRows,
     applyWeeklyExpenseSaveResult,
+    applyWeeklySubmissionCommandResult,
     saveBankStatementRows,
     saveBudgetPlanRows,
     saveBudgetCodeBook,

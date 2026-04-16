@@ -39,6 +39,7 @@ import {
   fetchPortalWeeklyExpensesSummaryViaBff,
   type PortalWeeklyExpensesSummaryResult,
   type ProvisionTransactionEvidenceDriveResult,
+  submitPortalWeeklySubmissionViaBff,
   type SyncTransactionEvidenceDriveResult,
   type UploadTransactionEvidenceDriveResult,
   provisionProjectEvidenceDriveRootViaBff,
@@ -118,6 +119,7 @@ export function PortalWeeklyExpensePage() {
     bankStatementRows,
     saveExpenseSheetRows: persistExpenseSheetRows,
     applyWeeklyExpenseSaveResult,
+    applyWeeklySubmissionCommandResult,
     comments,
     addComment,
     participationEntries,
@@ -129,7 +131,6 @@ export function PortalWeeklyExpensePage() {
     markSheetSourceApplied,
   } = usePortalStore();
   const {
-    submitWeekAsPm,
     upsertWeekAmounts: persistWeekAmounts,
     applyWeeklyExpenseCommandWeeks,
   } = useCashflowWeeks();
@@ -765,22 +766,28 @@ export function PortalWeeklyExpensePage() {
       });
       return;
     }
-    let updatedCount = 0;
+    if (!orgId || !bffActor.uid || !submitPortalWeeklySubmissionViaBff) {
+      throw new Error('weekly_submit_command_unavailable');
+    }
     try {
-      await submitWeekAsPm({ projectId, yearMonth, weekNo });
-      for (const txId of txIds) {
-        await changeTransactionState(txId, 'SUBMITTED');
-        updatedCount += 1;
-      }
+      const result = await submitPortalWeeklySubmissionViaBff({
+        tenantId: orgId,
+        actor: bffActor,
+        command: {
+          projectId,
+          yearMonth,
+          weekNo,
+          transactionIds: txIds,
+        },
+        client: apiClient,
+      });
+      applyWeeklySubmissionCommandResult(result.transactions || []);
       toast.success(`${yearMonth} ${weekNo}주 제출 처리 완료`);
     } catch (err) {
-      const fallback = updatedCount > 0
-        ? `주간 제출은 저장됐지만 거래 상태 ${updatedCount}/${txIds.length}건만 갱신했습니다.`
-        : '주간 제출 처리에 실패했습니다';
-      toast.error(resolveApiErrorMessage(err, fallback));
+      toast.error(resolveApiErrorMessage(err, '주간 제출 처리에 실패했습니다'));
       throw err;
     }
-  }, [changeTransactionState, participationEntries, projectId, submitWeekAsPm]);
+  }, [apiClient, applyWeeklySubmissionCommandResult, bffActor, orgId, participationEntries, projectId]);
 
   const handleChangeTransactionState = useCallback((txId: string, newState: TransactionState, reason?: string) => {
     void changeTransactionState(txId, newState, reason).catch((error) => {
@@ -1217,19 +1224,10 @@ export function PortalWeeklyExpensePage() {
                 if (!participationRiskWarning) return;
                 const { yearMonth, weekNo, txIds } = participationRiskWarning;
                 setParticipationRiskWarning(null);
-                let updatedCount = 0;
                 try {
-                  await submitWeekAsPm({ projectId, yearMonth, weekNo });
-                  for (const txId of txIds) {
-                    await changeTransactionState(txId, 'SUBMITTED');
-                    updatedCount += 1;
-                  }
-                  toast.success(`${yearMonth} ${weekNo}주 제출 처리 완료`);
+                  await handleSubmitWeek({ yearMonth, weekNo, txIds });
                 } catch (err) {
-                  const fallback = updatedCount > 0
-                    ? `주간 제출은 저장됐지만 거래 상태 ${updatedCount}/${txIds.length}건만 갱신했습니다.`
-                    : '주간 제출 처리에 실패했습니다';
-                  toast.error(resolveApiErrorMessage(err, fallback));
+                  toast.error(resolveApiErrorMessage(err, '주간 제출 처리에 실패했습니다'));
                 }
               }}
             >

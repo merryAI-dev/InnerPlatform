@@ -8,6 +8,7 @@ import {
   buildDevHarnessPortalPayrollSummary,
   buildDevHarnessPortalRegistrationResult,
   buildDevHarnessPortalSaveWeeklyExpenseResult,
+  buildDevHarnessPortalSubmitWeeklySubmissionResult,
   buildDevHarnessPortalSessionProjectResult,
   buildDevHarnessPortalWeeklyExpensesSummary,
 } from './dev-harness-portal-api';
@@ -187,6 +188,44 @@ describe('dev harness portal api helpers', () => {
     ]));
   });
 
+  it('builds a weekly submission submit command result for a visible PM project', () => {
+    const result = buildDevHarnessPortalSubmitWeeklySubmissionResult({
+      actorId: 'u002',
+      actorRole: 'pm',
+      command: {
+        projectId: 'p001',
+        yearMonth: '2026-04',
+        weekNo: 3,
+        transactionIds: ['tx-1', 'tx-2'],
+      },
+    });
+
+    expect(result.cashflowWeek).toMatchObject({
+      id: 'p001-2026-04-w3',
+      projectId: 'p001',
+      yearMonth: '2026-04',
+      weekNo: 3,
+      pmSubmitted: true,
+    });
+    expect(result.transactions).toEqual([
+      expect.objectContaining({
+        id: 'tx-1',
+        state: 'SUBMITTED',
+        submittedBy: 'u002',
+        version: 4,
+      }),
+      expect.objectContaining({
+        id: 'tx-2',
+        state: 'SUBMITTED',
+        submittedBy: 'u002',
+        version: 4,
+      }),
+    ]);
+    expect(result.summary).toEqual({
+      submittedTransactionCount: 2,
+    });
+  });
+
   it('handles phase1 read-model summary routes through the vite dev harness router', async () => {
     const [payroll, weeklyExpenses, bankStatements] = await Promise.all([
       resolveDevHarnessPortalApiResponse({
@@ -275,6 +314,43 @@ describe('dev harness portal api helpers', () => {
           expenseReviewPendingCount: 0,
           syncedWeekCount: 1,
           reviewRequiredWeekCount: 0,
+        },
+      },
+    });
+  });
+
+  it('handles weekly submission submit through the vite dev harness router', async () => {
+    const response = await resolveDevHarnessPortalApiResponse({
+      enabled: true,
+      method: 'POST',
+      url: '/api/v1/portal/weekly-submissions/submit',
+      actorId: 'u002',
+      actorRole: 'pm',
+      readBody: async () => ({
+        projectId: 'p001',
+        yearMonth: '2026-04',
+        weekNo: 3,
+        transactionIds: ['tx-1'],
+      }),
+    });
+
+    expect(response).toMatchObject({
+      handled: true,
+      statusCode: 200,
+      payload: {
+        cashflowWeek: {
+          id: 'p001-2026-04-w3',
+          projectId: 'p001',
+          pmSubmitted: true,
+        },
+        transactions: [
+          expect.objectContaining({
+            id: 'tx-1',
+            state: 'SUBMITTED',
+          }),
+        ],
+        summary: {
+          submittedTransactionCount: 1,
         },
       },
     });
