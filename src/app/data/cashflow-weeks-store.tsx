@@ -27,9 +27,9 @@ import { filterCashflowWeeksForYear, shouldCreateDocOnUpdateError } from './cash
 import {
   buildCashflowWeekUpdatePatch,
   buildInitialCashflowWeekDoc,
-  normalizeWeekAmounts,
   resolveWeekDocId,
 } from './cashflow-weeks.persistence';
+import { applyWeekAmountsToLocalWeeks } from './cashflow-weeks.local-state';
 import { useFirebase } from '../lib/firebase-context';
 import { getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
 import { addMonthsToYearMonth, getSeoulTodayIso } from '../platform/business-days';
@@ -220,47 +220,21 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     if (!def) return;
 
     if (!db && actor.source === 'dev_harness') {
-      const id = resolveWeekDocId(projectId, ym, weekNo);
       const now = new Date().toISOString();
-      const normalizedAmounts = normalizeWeekAmounts(input.amounts || {});
-      setWeeks((prev) => {
-        const existingIndex = prev.findIndex((sheet) => sheet.id === id);
-        if (existingIndex >= 0) {
-          const next = [...prev];
-          const current = next[existingIndex];
-          next[existingIndex] = {
-            ...current,
-            [input.mode]: {
-              ...current[input.mode],
-              ...normalizedAmounts,
-            },
-            updatedAt: now,
-            updatedByUid: actor.uid,
-            updatedByName: actor.name,
-          };
-          return next;
-        }
-        return [
-          ...prev,
-          {
-            id,
-            tenantId: orgId,
-            projectId,
-            yearMonth: ym,
-            weekNo,
-            weekStart: def.weekStart,
-            weekEnd: def.weekEnd,
-            projection: input.mode === 'projection' ? normalizedAmounts : {},
-            actual: input.mode === 'actual' ? normalizedAmounts : {},
-            pmSubmitted: false,
-            adminClosed: false,
-            createdAt: now,
-            updatedAt: now,
-            updatedByUid: actor.uid,
-            updatedByName: actor.name,
-          },
-        ];
-      });
+      setWeeks((prev) => applyWeekAmountsToLocalWeeks({
+        weeks: prev,
+        orgId,
+        actorUid: actor.uid,
+        actorName: actor.name,
+        projectId,
+        yearMonth: ym,
+        weekNo,
+        weekStart: def.weekStart,
+        weekEnd: def.weekEnd,
+        mode: input.mode,
+        amounts: input.amounts || {},
+        now,
+      }));
       return;
     }
 
@@ -282,6 +256,20 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     const existingSnap = await getDoc(ref).catch(() => null);
     if (existingSnap?.exists()) {
       await updateDoc(ref, patch as any);
+      setWeeks((prev) => applyWeekAmountsToLocalWeeks({
+        weeks: prev,
+        orgId,
+        actorUid: actor.uid,
+        actorName: actor.name,
+        projectId,
+        yearMonth: ym,
+        weekNo,
+        weekStart: def.weekStart,
+        weekEnd: def.weekEnd,
+        mode: input.mode,
+        amounts: input.amounts || {},
+        now,
+      }));
       return;
     }
 
@@ -299,6 +287,20 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
       now,
     });
     await setDoc(ref, initial, { merge: false });
+    setWeeks((prev) => applyWeekAmountsToLocalWeeks({
+      weeks: prev,
+      orgId,
+      actorUid: actor.uid,
+      actorName: actor.name,
+      projectId,
+      yearMonth: ym,
+      weekNo,
+      weekStart: def.weekStart,
+      weekEnd: def.weekEnd,
+      mode: input.mode,
+      amounts: input.amounts || {},
+      now,
+    }));
   }, [db, orgId, user]);
 
   const upsertLineAmount = useCallback(async (input: {
