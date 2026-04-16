@@ -61,5 +61,6 @@
 - client-direct 종료 의사결정 포인트: [client-direct-exit-decision-points-2026-04-15.md](../../architecture/client-direct-exit-decision-points-2026-04-15.md)
 - 포털 하이브리드 실행 계획: [2026-04-15-portal-hybrid-stabilization-plan.md](../../operations/2026-04-15-portal-hybrid-stabilization-plan.md)
 - client-direct 종료 실행 계획: [2026-04-15-client-direct-exit-plan.md](../../operations/2026-04-15-client-direct-exit-plan.md)
+- Finance-grade 포털 마스터 실행 계획: [2026-04-16-finance-grade-portal-stabilization-master-plan.md](../../operations/2026-04-16-finance-grade-portal-stabilization-master-plan.md)
 - Firestore + GCS backup/restore 계획: [2026-04-16-firestore-gcs-backup-restore-plan.md](../../operations/2026-04-16-firestore-gcs-backup-restore-plan.md)
 - Emergency ledger reviewed reconciliation 계획: [2026-04-16-emergency-ledger-reviewed-reconciliation-plan.md](../../operations/2026-04-16-emergency-ledger-reviewed-reconciliation-plan.md)

@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-04-16] patch-note | shared-portal-architecture | finance-grade portal stabilization master plan
+- pages: [shared-portal-architecture](./pages/shared-portal-architecture.md)
+- summary: 기존 `portal production hardening next plan`이 finance / ledger 서비스 기준에는 약하다고 보고, `phase 0 gate foundation`을 먼저 land하는 finance-grade master plan으로 교체했다. 새 계획은 network correctness, command authority, GCS backup automation, emergency ledger reviewed reconciliation, production enforcement를 hard gate와 rollback 조건까지 포함해 순서대로 강제한다.
+
 ## [2026-04-16] patch-note | shared-portal-architecture | portal hardening orchestration model
 - pages: [shared-portal-architecture](./pages/shared-portal-architecture.md)
 - summary: 포털 하드닝 작업을 main-agent orchestration + subagent implementation slices 모델로 고정하고, task slicing, review loop, required test metrics, branch/PR discipline를 운영 문서로 분리했다.

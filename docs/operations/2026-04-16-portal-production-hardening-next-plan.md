@@ -1,5 +1,15 @@
 # 2026-04-16 Portal Production Hardening Next Plan
 
+> superseded by [2026-04-16-finance-grade-portal-stabilization-master-plan.md](./2026-04-16-finance-grade-portal-stabilization-master-plan.md)
+
+이 문서는 초기 phase ordering 메모로 남겨두되, 현재 기준의 authoritative execution plan은 위 master plan이다.
+
+대체 이유:
+
+- finance / ledger 서비스 기준의 acceptance bar가 더 높아졌음
+- `Phase 5에서 gate를 붙인다`는 기존 순서가 약했음
+- network correctness / backup freshness / recovery evidence가 더 앞단에서 강제되어야 함
+
 기준 문서:
 
 - [portal-stabilization-hybrid-rfc-2026-04-15.md](../architecture/portal-stabilization-hybrid-rfc-2026-04-15.md)
@@ -8,7 +18,7 @@
 - [2026-04-16-firestore-gcs-backup-restore-plan.md](./2026-04-16-firestore-gcs-backup-restore-plan.md)
 - [2026-04-16-emergency-ledger-reviewed-reconciliation-plan.md](./2026-04-16-emergency-ledger-reviewed-reconciliation-plan.md)
 
-## Goal
+## Legacy Goal
 
 현재 문서로 고정한 `Firestore + BFF/API-first + GCS backup + reviewed reconciliation` 방향을 실제 구현 단계로 내려, 포털을 `1000명 규모 내부 production SaaS` 기준으로 안정화한다.
 

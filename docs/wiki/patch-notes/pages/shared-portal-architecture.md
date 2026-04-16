@@ -33,6 +33,7 @@
 - [x] onboarding surface는 `onboarding-context` read model + `portal/registration` command API를 사용함
 - [x] portal dashboard / submissions / weekly expense / bank statement / payroll summary read model 이행 계획이 정의됨
 - [x] phase 1a로 portal dashboard / payroll / weekly-expenses / bank-statements summary endpoint와 클라이언트 contract가 추가됨
+- [x] finance-grade master plan이 이전 `next plan`을 supersede하고, phase 0 gate foundation을 먼저 land하는 순서로 재정렬됨
 - [x] critical write path를 command API로 이동하는 단계가 플랜에 포함됨
 - [x] App 루트 broad provider tree가 admin/portal route shell로 분리됨
 - [x] route shell이 explicit Firestore access mode를 주입하고 store는 pathname self-inference를 하지 않음
@@ -42,6 +43,7 @@
 ## Recent Changes
 
 - [2026-04-16] portal hardening work now uses a main-agent orchestration model with subagents handling isolated implementation slices, and the required review loop / metrics / branch discipline is captured in a dedicated operations doc.
+- [2026-04-16] 기존 `portal production hardening next plan`은 finance-grade 기준으로는 약하다고 판단해 supersede했다. 새 master plan은 `phase 0 gate foundation -> read boundary completion -> command authority -> backup automation -> reviewed reconciliation -> production enforcement` 순서를 강제하고, `network/runtime/recovery evidence` 없이는 어떤 phase도 완료라고 부르지 않도록 못 박았다.
 - [2026-04-15] 포털 안정화 장기안으로 `Firestore 유지 + BFF/API-first hybrid`를 채택했다.
 - [2026-04-15] `Firestore direct 유지`, `AWS full replatform`, `AWS + Cloudflare hybrid`를 같은 기준으로 비교하고, 현재 권고 순서를 `하이브리드 안정화 -> AWS core backend -> 필요 시 Cloudflare edge layer`로 정리했다.
 - [2026-04-15] `client-direct architecture`를 끝내기 위해 지금 닫아야 할 결정과, 구현 단계에서 닫을 결정, 후속 인프라 결정으로 미룰 항목을 별도 decision-point 문서로 정리했다.
@@ -71,6 +73,7 @@
 ## Related Files
 
 - `docs/operations/2026-04-16-portal-hardening-orchestration-model.md`
+- `docs/operations/2026-04-16-finance-grade-portal-stabilization-master-plan.md`
 - `docs/architecture/portal-stabilization-hybrid-rfc-2026-04-15.md`
 - `docs/architecture/portal-platform-options-2026-04-15.md`
 - `docs/architecture/client-direct-exit-decision-points-2026-04-15.md`
