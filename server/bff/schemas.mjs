@@ -142,11 +142,24 @@ const budgetCodeRenameSchema = z.object({
   toSub: z.string(),
 }).strict();
 
+const budgetPlanRowSchema = z.object({
+  budgetCode: z.string(),
+  subCode: z.string(),
+  initialBudget: z.number().finite(),
+  revisedBudget: z.number().finite().optional(),
+  note: z.string().trim().optional(),
+}).strict();
+
 export const portalBudgetCodeBookSaveSchema = z.object({
   projectId: NON_EMPTY_STRING,
   activeSheetId: z.string().trim().optional(),
   rows: z.array(budgetCodeEntrySchema),
   renames: z.array(budgetCodeRenameSchema).optional(),
+}).strict();
+
+export const portalBudgetPlanSaveSchema = z.object({
+  projectId: NON_EMPTY_STRING,
+  rows: z.array(budgetPlanRowSchema),
 }).strict();
 
 export const cashflowWeekCloseSchema = z.object({
