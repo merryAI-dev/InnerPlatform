@@ -14,8 +14,14 @@ describe('PortalWeeklyExpensePage flow layout', () => {
 
   it('makes direct-entry projects explicitly use the weekly sheet or excel template instead of bank upload wording', () => {
     expect(weeklyExpenseSource).toContain('주간 사업비 시트 또는 엑셀 템플릿으로 직접 입력');
-    expect(weeklyExpenseSource).toContain('엑셀/시트 불러오기');
     expect(weeklyExpenseSource).not.toContain('기존 시트 가져오기');
+  });
+
+  it('removes top-level import and sheet-management actions from the weekly expense header', () => {
+    expect(weeklyExpenseSource).not.toContain('엑셀/시트 불러오기');
+    expect(weeklyExpenseSource).not.toContain('탭 추가');
+    expect(weeklyExpenseSource).not.toContain('이름 변경');
+    expect(weeklyExpenseSource).not.toContain('탭 삭제');
   });
 
   it('uses a Korean first-action heading instead of the previous English label', () => {

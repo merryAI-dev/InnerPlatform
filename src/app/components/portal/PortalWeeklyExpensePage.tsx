@@ -4,12 +4,9 @@ import {
   AlertTriangle,
   ArrowRight,
   ExternalLink,
-  FileSpreadsheet,
   FolderPlus,
   Loader2,
-  Plus,
   Send,
-  Settings2,
 } from 'lucide-react';
 import { usePortalStore } from '../../data/portal-store';
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
@@ -100,9 +97,6 @@ export function PortalWeeklyExpensePage() {
     expenseSheets,
     activeExpenseSheetId,
     setActiveExpenseSheet,
-    createExpenseSheet,
-    renameExpenseSheet,
-    deleteExpenseSheet,
     expenseSheetRows,
     bankStatementRows,
     saveExpenseSheetRows,
@@ -690,10 +684,6 @@ export function PortalWeeklyExpensePage() {
     setPendingQuickInsert(null);
   }, []);
 
-  const openGoogleSheetImport = useCallback(() => {
-    setGoogleSheetImportOpen(true);
-  }, []);
-
   const requestRouteNavigation = useCallback((path: string, label: string) => {
     if (hasUnsavedSettlementChanges) {
       setPendingNavigationAttempt({ path, label });
@@ -711,14 +701,10 @@ export function PortalWeeklyExpensePage() {
     return () => registerNavigationHandler(null);
   }, [hasUnsavedSettlementChanges, registerNavigationHandler]);
 
-  const requestSheetSwitch = useCallback((sheetId: string, sheetName: string) => {
+  const requestSheetSwitch = useCallback((sheetId: string) => {
     if (sheetId === activeExpenseSheetId) return;
     setActiveExpenseSheet(sheetId);
   }, [activeExpenseSheetId, setActiveExpenseSheet]);
-
-  const requestWizardOpen = useCallback(() => {
-    openGoogleSheetImport();
-  }, [openGoogleSheetImport]);
 
   if (!projectId) {
     return (
@@ -916,67 +902,11 @@ export function PortalWeeklyExpensePage() {
               variant={sheet.id === activeExpenseSheetId ? 'default' : 'outline'}
               size="sm"
               className="h-8 text-[11px]"
-              onClick={() => requestSheetSwitch(sheet.id, sheet.name)}
+              onClick={() => requestSheetSwitch(sheet.id)}
             >
               {sheet.name}
             </Button>
           ))}
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 text-[11px] gap-1"
-            onClick={requestWizardOpen}
-          >
-            <FileSpreadsheet className="h-3.5 w-3.5" />
-            {isDirectEntryMode ? '엑셀/시트 불러오기' : 'Migration Wizard'}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 text-[11px] gap-1"
-            onClick={async () => {
-              const raw = window.prompt('새 탭 이름을 입력하세요.', `탭 ${visibleExpenseSheets.length + 1}`);
-              if (raw == null) return;
-              const trimmed = raw.trim();
-              if (!trimmed) return;
-              const created = await createExpenseSheet(trimmed);
-              if (created) toast.success('새 탭을 만들었습니다.');
-            }}
-          >
-            <Plus className="h-3.5 w-3.5" />
-            탭 추가
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 text-[11px] gap-1"
-            onClick={async () => {
-              const raw = window.prompt('탭 이름을 수정하세요.', activeSheetName);
-              if (raw == null) return;
-              const trimmed = raw.trim();
-              if (!trimmed) return;
-              const ok = await renameExpenseSheet(activeExpenseSheetId || visibleExpenseSheets[0]?.id || 'default', trimmed);
-              if (ok) toast.success('탭 이름을 수정했습니다.');
-            }}
-          >
-            <Settings2 className="h-3.5 w-3.5" />
-            이름 변경
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 text-[11px]"
-            disabled={visibleExpenseSheets.length <= 1}
-            onClick={async () => {
-              const targetId = activeExpenseSheetId || visibleExpenseSheets[0]?.id || 'default';
-              const ok = await deleteExpenseSheet(targetId);
-              if (ok) toast.success('탭을 삭제했습니다.');
-            }}
-          >
-            탭 삭제
-          </Button>
         </div>
       </div>
 
