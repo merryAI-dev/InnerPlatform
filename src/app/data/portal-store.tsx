@@ -552,6 +552,34 @@ async function savePortalWeeklySubmissionStatusViaBff(params: {
   });
 }
 
+async function savePortalBudgetCodeBookViaBff(params: {
+  tenantId: string;
+  actor: {
+    uid: string;
+    email?: string;
+    role?: string;
+    idToken?: string;
+  };
+  command: {
+    projectId: string;
+    rows: BudgetCodeEntry[];
+    renames: BudgetCodeRename[];
+  };
+}): Promise<void> {
+  const apiClient = createPlatformApiClient();
+  await apiClient.post('/api/v1/portal/budget/code-book/save', {
+    tenantId: params.tenantId,
+    actor: {
+      id: params.actor.uid,
+      email: params.actor.email,
+      role: params.actor.role,
+      ...(params.actor.idToken ? { idToken: params.actor.idToken } : {}),
+    },
+    body: params.command,
+    timeoutMs: 8000,
+  });
+}
+
 function stripUndefinedDeep<T>(value: T): T {
   if (Array.isArray(value)) {
     return value
@@ -2067,7 +2095,33 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       throw new Error(validation.errors[0] || '비목/세목 구조를 확인해 주세요.');
     }
     const sanitized = normalizeBudgetCodeBook(rows);
-    if (isDevHarnessUser || !db || !currentProjectId) {
+    if (!currentProjectId) {
+      setBudgetCodeBook(sanitized);
+      return;
+    }
+    if (isPlatformApiEnabled() && !isDevHarnessUser) {
+      if (!authUser) {
+        throw new Error('Platform API requires an authenticated actor for budget code book updates.');
+      }
+      const idToken = authUser.idToken || await getAuthInstance()?.currentUser?.getIdToken() || undefined;
+      await savePortalBudgetCodeBookViaBff({
+        tenantId: orgId,
+        actor: {
+          uid: authUser.uid,
+          email: authUser.email,
+          role: authUser.role,
+          idToken,
+        },
+        command: {
+          projectId: currentProjectId,
+          rows: sanitized,
+          renames: [...renames],
+        },
+      });
+      setBudgetCodeBook(sanitized);
+      return;
+    }
+    if (isDevHarnessUser || !db) {
       setBudgetCodeBook(sanitized);
       return;
     }
@@ -2077,11 +2131,11 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       updatedAt: now,
       updatedBy: portalUser?.name || authUser?.name || '',
     });
-    await setDoc(
-      doc(db, `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/budget_code_book/default`),
-      payload,
-      { merge: true },
-    );
+      await setDoc(
+        doc(db, `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/budget_code_book/default`),
+        payload,
+        { merge: true },
+      );
     setBudgetCodeBook(sanitized);
 
     if (renames.length === 0) return;

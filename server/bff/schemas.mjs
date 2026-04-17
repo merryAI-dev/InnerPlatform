@@ -130,6 +130,25 @@ export const portalWeeklySubmissionStatusUpsertSchema = z.object({
   expenseReviewPendingCount: z.number().int().nonnegative().optional(),
 }).strict();
 
+const budgetCodeEntrySchema = z.object({
+  code: z.string(),
+  subCodes: z.array(z.string()),
+}).strict();
+
+const budgetCodeRenameSchema = z.object({
+  fromCode: z.string(),
+  fromSub: z.string(),
+  toCode: z.string(),
+  toSub: z.string(),
+}).strict();
+
+export const portalBudgetCodeBookSaveSchema = z.object({
+  projectId: NON_EMPTY_STRING,
+  activeSheetId: z.string().trim().optional(),
+  rows: z.array(budgetCodeEntrySchema),
+  renames: z.array(budgetCodeRenameSchema).optional(),
+}).strict();
+
 export const cashflowWeekCloseSchema = z.object({
   projectId: NON_EMPTY_STRING,
   yearMonth: z.string().trim().regex(/^\d{4}-\d{2}$/),
