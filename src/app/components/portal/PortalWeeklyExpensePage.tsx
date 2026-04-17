@@ -963,11 +963,11 @@ export function PortalWeeklyExpensePage() {
       </Suspense>
       {isSettlementSaving && (
         <div className="fixed inset-0 z-[140] flex items-center justify-center bg-background/80 backdrop-blur-sm">
-          <div className="flex flex-col items-center gap-3 rounded-2xl border bg-background px-6 py-7 shadow-2xl">
-            <Loader2 className="h-6 w-6 animate-spin text-primary" />
+          <div className="flex min-h-[22rem] w-[min(92vw,56rem)] max-w-none flex-col items-center justify-center gap-6 rounded-[28px] border bg-background px-8 py-10 shadow-2xl sm:px-12 sm:py-12">
+            <Loader2 className="h-10 w-10 animate-spin text-primary" />
             <div className="text-center">
-              <p className="text-sm font-semibold text-foreground">사업비 입력을 저장하고 있습니다</p>
-              <p className="mt-1 text-xs text-muted-foreground">저장이 끝날 때까지 잠시 기다려 주세요.</p>
+              <p className="text-2xl font-bold tracking-[-0.03em] text-foreground sm:text-[2rem]">사업비 입력을 저장하고 있습니다</p>
+              <p className="mt-3 text-base leading-8 text-muted-foreground sm:text-lg">저장이 끝날 때까지 잠시 기다려 주세요.</p>
             </div>
           </div>
         </div>

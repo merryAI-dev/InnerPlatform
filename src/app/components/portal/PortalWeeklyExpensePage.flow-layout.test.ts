@@ -28,6 +28,8 @@ describe('PortalWeeklyExpensePage flow layout', () => {
     expect(weeklyExpenseSource).toContain('if (isSettlementSaving) return;');
     expect(weeklyExpenseSource).toContain('사업비 입력을 저장하고 있습니다');
     expect(weeklyExpenseSource).toContain('저장이 끝날 때까지 잠시 기다려 주세요.');
+    expect(weeklyExpenseSource).toContain('w-[min(92vw,56rem)] max-w-none');
+    expect(weeklyExpenseSource).toContain('min-h-[22rem]');
   });
 
   it('renders the unsaved-changes dialog as a large centered modal surface', () => {

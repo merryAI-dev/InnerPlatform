@@ -152,11 +152,17 @@ export function resolveWeeklyAccountingSheetRowsHydration(
   const currentSignature = serializeWeeklyAccountingImportRowsMaterially(input.currentRows);
   const incomingSignature = serializeWeeklyAccountingImportRowsMaterially(input.incomingRows);
   const materialEqual = currentSignature === incomingSignature;
+  const hydratedState = deriveHydratedSheetRowsState(input.incomingRows, input.incomingRowsOrigin);
 
   if (input.reason === 'persistence_echo') {
     return {
       shouldReplaceRows: !materialEqual,
-      nextSaveState: input.currentSaveState,
+      nextSaveState:
+        input.currentSaveState === 'dirty'
+        || input.currentSaveState === 'saving'
+        || input.currentSaveState === 'save_failed'
+          ? hydratedState.saveState
+          : input.currentSaveState,
       nextSyncState: input.currentSyncState,
       currentSignature,
       incomingSignature,
@@ -175,8 +181,6 @@ export function resolveWeeklyAccountingSheetRowsHydration(
       incomingSignature,
     };
   }
-
-  const hydratedState = deriveHydratedSheetRowsState(input.incomingRows, input.incomingRowsOrigin);
   return {
     shouldReplaceRows: !materialEqual,
     nextSaveState: hydratedState.saveState,
@@ -204,7 +208,7 @@ export function resolveWeeklyAccountingProductStatus(
     };
   }
 
-  if (saveState === 'dirty' || saveState === 'saving' || (!expenseDone && saveState !== 'saved')) {
+  if (saveState === 'dirty' || saveState === 'saving' || !expenseDone) {
     return {
       kind: 'save_pending',
       label: saveState === 'saving' ? '저장 중' : '저장 전 초안',

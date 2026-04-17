@@ -214,13 +214,31 @@ describe('weekly-accounting-state', () => {
     expect(result.nextSyncState).toBe('pending');
   });
 
+  it('normalizes stale dirty save state when a persistence echo confirms the rows were saved', () => {
+    const currentRows = [{ tempId: 'local-1', sourceTxId: 'tx-1', cells: ['A', '100'] }];
+    const incomingRows = [{ tempId: 'remote-9', sourceTxId: 'tx-1', cells: ['A', '100'] }];
+
+    const result = resolveWeeklyAccountingSheetRowsHydration({
+      reason: 'persistence_echo',
+      currentRows,
+      incomingRows,
+      incomingRowsOrigin: 'persisted',
+      currentSaveState: 'dirty',
+      currentSyncState: 'synced',
+    });
+
+    expect(result.shouldReplaceRows).toBe(false);
+    expect(result.nextSaveState).toBe('saved');
+    expect(result.nextSyncState).toBe('synced');
+  });
+
   it('treats an unchanged active-sheet hydrate as a semantic refresh instead of preserving stale sync state', () => {
     const result = resolveWeeklyAccountingSheetRowsHydration({
       reason: 'active_sheet_switch_hydrate',
       currentRows: [],
       incomingRows: [],
       incomingRowsOrigin: 'fallback',
-      currentSaveState: 'pending',
+      currentSaveState: 'idle',
       currentSyncState: 'sync_failed',
     });
 
