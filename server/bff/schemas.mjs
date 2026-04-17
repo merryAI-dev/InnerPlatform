@@ -162,6 +162,11 @@ export const portalBudgetPlanSaveSchema = z.object({
   rows: z.array(budgetPlanRowSchema),
 }).strict();
 
+export const portalEvidenceRequiredMapSaveSchema = z.object({
+  projectId: NON_EMPTY_STRING,
+  map: z.record(z.string().trim().min(1), z.string()),
+}).strict();
+
 export const cashflowWeekCloseSchema = z.object({
   projectId: NON_EMPTY_STRING,
   yearMonth: z.string().trim().regex(/^\d{4}-\d{2}$/),
