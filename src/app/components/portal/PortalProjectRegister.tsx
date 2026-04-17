@@ -456,13 +456,14 @@ export function PortalProjectRegister() {
   };
   const updateFundInputMode = (nextMode: ProjectFundInputMode) => {
     setForm((prev) => {
-      const shouldResetPolicy = prev.settlementSheetPolicy.preset === getDefaultSettlementSheetPolicyForFundInputMode(prev.fundInputMode).preset;
+      const currentPolicy = prev.settlementSheetPolicy || getDefaultSettlementSheetPolicyForFundInputMode(prev.fundInputMode);
+      const shouldResetPolicy = currentPolicy.preset === getDefaultSettlementSheetPolicyForFundInputMode(prev.fundInputMode).preset;
       return {
         ...prev,
         fundInputMode: nextMode,
         settlementSheetPolicy: shouldResetPolicy
           ? getDefaultSettlementSheetPolicyForFundInputMode(nextMode)
-          : prev.settlementSheetPolicy,
+          : currentPolicy,
       };
     });
   };
@@ -1295,14 +1296,14 @@ export function PortalProjectRegister() {
                   </Select>
                   <p className="mt-1 text-[10px] text-muted-foreground">
                     {form.fundInputMode === 'DIRECT_ENTRY'
-                      ? '통장내역 없이 주간 표에서 바로 입금/지출을 입력합니다.'
+                      ? '통장내역 없이 주간 사업비 시트 또는 엑셀 템플릿으로 직접 입력합니다.'
                       : '통장내역 업로드 후 주간 표로 이어서 작업합니다.'}
                   </p>
                 </div>
               </div>
 
               <SettlementSheetPolicyFields
-                policy={form.settlementSheetPolicy}
+                policy={form.settlementSheetPolicy || getDefaultSettlementSheetPolicyForFundInputMode(form.fundInputMode)}
                 onChange={(next) => update('settlementSheetPolicy', next)}
               />
 
@@ -1502,7 +1503,18 @@ export function PortalProjectRegister() {
                   <ReviewRow label="정산 기준" value={BASIS_LABELS[form.basis]} />
                   <ReviewRow label="통장 유형" value={ACCOUNT_TYPE_LABELS[form.accountType]} />
                   <ReviewRow label="자금 입력 방식" value={PROJECT_FUND_INPUT_MODE_LABELS[form.fundInputMode]} />
-                  <ReviewRow label="정산 시트 정책" value={formatSettlementSheetPolicySummary(form.settlementSheetPolicy)} />
+                  <ReviewRow
+                    label="입력 경로"
+                    value={form.fundInputMode === 'DIRECT_ENTRY'
+                      ? '주간 사업비 시트 또는 엑셀 템플릿으로 직접 입력'
+                      : '통장내역 업로드 후 주간 사업비 시트로 이어서 입력'}
+                  />
+                  <ReviewRow
+                    label="정산 시트 정책"
+                    value={formatSettlementSheetPolicySummary(
+                      form.settlementSheetPolicy || getDefaultSettlementSheetPolicyForFundInputMode(form.fundInputMode),
+                    )}
+                  />
                   <ReviewRow label="입금 계획" value={form.paymentPlanDesc || ''} />
                   <ReviewRow label="사업비 수령/정산" value={form.settlementGuide || ''} />
                 </SummaryCard>

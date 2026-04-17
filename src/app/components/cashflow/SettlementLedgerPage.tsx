@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Download, Loader2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Download, Loader2, Upload } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { BUDGET_CODE_BOOK } from '../../data/budget-data';
@@ -20,10 +20,12 @@ import {
   transactionsToImportRows,
   type ImportRow,
 } from '../../platform/settlement-csv';
+import { parseLocalWorkbookFile } from '../../platform/local-workbook';
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { buildSettlementActualSyncPayloadLocally } from '../../platform/settlement-calculation-kernel';
 import type { SettlementDerivationContext, SettlementDerivationOptions } from '../../platform/settlement-row-derivation';
 import type { SettlementActualSyncWeekPayload } from '../../platform/settlement-sheet-sync';
+import { normalizeSettlementWorkbookToImportRows } from '../../platform/settlement-workbook-import';
 import {
   resolveWeeklyAccountingSheetRowsHydration,
   resolveWeeklyAccountingProductStatus,
@@ -44,7 +46,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '../ui/alert-dialog';
-import { ImportEditor } from './ImportEditor';
+import { ImportEditor, type EvidenceUploadSelection } from './ImportEditor';
 export type { EvidenceUploadSelection, PendingQuickInsert } from './ImportEditor';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { SettlementWeekSection } from './SettlementWeekSection';
@@ -184,6 +186,7 @@ export function SettlementLedgerPage({
   autoSaveSyncCashflow = true,
 }: SettlementLedgerProps) {
   const { upsertWeekAmounts } = useCashflowWeeks();
+  const isDirectEntryMode = workflowMode === 'DIRECT_ENTRY';
   const [year, setYear] = useState(() => new Date().getFullYear());
   const [collapsedWeeks, setCollapsedWeeks] = useState<Set<string>>(new Set());
   const [importRows, setImportRows] = useState<ImportRow[] | null>(null);
@@ -198,7 +201,9 @@ export function SettlementLedgerPage({
   const [downloadFrom, setDownloadFrom] = useState('');
   const [downloadTo, setDownloadTo] = useState('');
   const [downloadPreparing, setDownloadPreparing] = useState(false);
+  const [directEntryUploading, setDirectEntryUploading] = useState(false);
   const [revertConfirmOpen, setRevertConfirmOpen] = useState(false);
+  const directEntryUploadInputRef = useRef<HTMLInputElement | null>(null);
   const restoredDraftCacheKeyRef = useRef('');
   const hasAppliedSheetRowsRef = useRef(false);
   const lastDiscardChangesRequestTokenRef = useRef(0);
@@ -322,6 +327,7 @@ export function SettlementLedgerPage({
         const isCellFocused = active instanceof HTMLInputElement && active.getAttribute('data-cell-row') != null;
         if (isCellFocused) return; // 그리드 내 다른 셀로 이동한 경우 유지
         const pending = pendingSheetRowsSyncRef.current;
+        if (!pending) return;
         pendingSheetRowsSyncRef.current = null;
         applySheetRowsSync(pending.rows, pending.reason);
       });
@@ -678,7 +684,7 @@ export function SettlementLedgerPage({
         });
         setCashflowSyncState('sync_failed');
         if (!silent) toast.message('정산대장은 저장되었지만 캐시플로 업데이트에 실패했습니다.');
-        return false;
+        return 'sync_failed' as const;
       }
       if (syncableWeeks.length > 0) {
         await updateWeeklyStatusesForPayload(syncableWeeks, {
@@ -698,7 +704,7 @@ export function SettlementLedgerPage({
           toast.success('캐시플로 실제값까지 동기화했습니다.');
         }
       }
-      return blockedWeeks.length === 0;
+      return blockedWeeks.length > 0 ? ('review_required' as const) : ('synced' as const);
     } finally {
       setCashflowSyncing(false);
     }
@@ -714,6 +720,53 @@ export function SettlementLedgerPage({
       await syncImportRowsToCashflow(persistedRows, { silent });
     }
   }, [importRows, persistImportRowsSnapshot, syncImportRowsToCashflow]);
+
+  const applyDirectEntryWorkbookRows = useCallback(async (rows: ImportRow[], sheetName: string) => {
+    const nextRows = cloneImportRows(rows);
+    setImportRows(nextRows);
+    setImportDirty(true);
+    setSheetSaveState('dirty');
+    const persistedRows = await persistImportRowsSnapshot(nextRows, { silent: true });
+    if (!persistedRows) {
+      toast.error(`작성본 업로드는 완료됐지만 저장에 실패했습니다: ${sheetName}`);
+      return;
+    }
+    const syncOutcome = await syncImportRowsToCashflow(persistedRows, { silent: true });
+    if (syncOutcome === 'synced') {
+      toast.success(`작성본 ${persistedRows.length}건을 저장하고 캐시플로 actual까지 반영했습니다.`);
+      return;
+    }
+    if (syncOutcome === 'review_required') {
+      toast.message(`작성본 ${persistedRows.length}건을 저장했고, 사람 확인이 필요한 주차는 검토 후 actual에 반영됩니다.`);
+      return;
+    }
+    toast.error(`작성본 ${persistedRows.length}건은 저장했지만 캐시플로 actual 반영은 다시 확인이 필요합니다.`);
+  }, [cloneImportRows, persistImportRowsSnapshot, syncImportRowsToCashflow]);
+
+  const handleDirectEntryWorkbookFile = useCallback(async (file: File) => {
+    setDirectEntryUploading(true);
+    try {
+      const sheets = await parseLocalWorkbookFile(file);
+      const normalized = normalizeSettlementWorkbookToImportRows(sheets);
+      if (!normalized) {
+        toast.error('정산대장 형식을 찾지 못했습니다. 엑셀 템플릿 또는 저장한 CSV/XLSX 파일을 확인해 주세요.');
+        return;
+      }
+      await applyDirectEntryWorkbookRows(normalized.rows, normalized.sheetName);
+    } catch (error) {
+      console.error('[SettlementLedger] direct-entry workbook upload failed:', error);
+      toast.error(resolveApiErrorMessage(error, '작성본 업로드에 실패했습니다.'));
+    } finally {
+      setDirectEntryUploading(false);
+      if (directEntryUploadInputRef.current) {
+        directEntryUploadInputRef.current.value = '';
+      }
+    }
+  }, [applyDirectEntryWorkbookRows]);
+
+  const openDirectEntryUploadPicker = useCallback(() => {
+    directEntryUploadInputRef.current?.click();
+  }, []);
 
   const autosavePlan = useMemo(() => resolveWeeklyExpenseAutosavePlan({
     saveMode,
@@ -754,17 +807,17 @@ export function SettlementLedgerPage({
   const saveStatusLabel = useMemo(() => {
     if (sheetSaveState === 'saving') return '시트 저장 중...';
     if (sheetSaveState === 'save_failed') return '시트 저장 실패';
-    if (importDirty || sheetSaveState === 'dirty') return '저장되지 않은 변경 있음';
-    if (cashflowSyncState === 'review_required') return '시트 저장됨 · 사람 확인 필요';
-    if (cashflowSyncState === 'syncing') return '시트 저장됨 · 캐시플로 동기화 중...';
-    if (cashflowSyncState === 'sync_failed') return '시트 저장됨 · 캐시플로 동기화 실패';
+    if (importDirty || sheetSaveState === 'dirty') return '저장 전 초안';
+    if (cashflowSyncState === 'review_required') return '저장 완료 · 사람 확인 필요';
+    if (cashflowSyncState === 'syncing') return '저장 완료 · actual 반영 중';
+    if (cashflowSyncState === 'sync_failed') return '저장 완료 · actual 반영 실패';
     if (cashflowSyncState === 'pending') {
       return lastAutoSavedAt
-        ? `시트 저장 ${formatCommentTime(lastAutoSavedAt)} · 캐시플로 동기화 대기`
-        : '시트 저장됨 · 캐시플로 동기화 대기';
+        ? `저장 완료 ${formatCommentTime(lastAutoSavedAt)} · actual 반영 대기`
+        : '저장 완료 · actual 반영 대기';
     }
     if (cashflowSyncState === 'synced' && lastCashflowSyncedAt) {
-      return `시트 저장 ${formatCommentTime(lastAutoSavedAt || lastCashflowSyncedAt)} · 캐시플로 동기화 ${formatCommentTime(lastCashflowSyncedAt)}`;
+      return `동기화 완료 ${formatCommentTime(lastCashflowSyncedAt)}`;
     }
     if (lastAutoSavedAt) {
       return `${saveMode === 'manual' ? '수동 저장' : '자동 저장'} ${formatCommentTime(lastAutoSavedAt)}`;
@@ -956,8 +1009,33 @@ export function SettlementLedgerPage({
               disabled={downloadPreparing}
             >
               {downloadPreparing ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Download className="h-4 w-4 mr-1" />}
-              {downloadPreparing ? '엑셀 준비 중' : '엑셀 다운로드'}
+              {downloadPreparing ? '엑셀 준비 중' : (isDirectEntryMode ? '엑셀 템플릿 다운로드' : '엑셀 다운로드')}
             </Button>
+            {isDirectEntryMode && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="cursor-pointer shadow-sm hover:bg-muted/40"
+                onClick={openDirectEntryUploadPicker}
+                disabled={directEntryUploading || sheetSaving}
+              >
+                {directEntryUploading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Upload className="h-4 w-4 mr-1" />}
+                {directEntryUploading ? '작성본 반영 중' : '작성본 업로드'}
+              </Button>
+            )}
+            {isDirectEntryMode && (
+              <input
+                ref={directEntryUploadInputRef}
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                className="hidden"
+                onChange={(event) => {
+                  const file = event.currentTarget.files?.[0];
+                  if (!file) return;
+                  void handleDirectEntryWorkbookFile(file);
+                }}
+              />
+            )}
           </div>
           {saveStatusButton}
         </div>
@@ -1054,8 +1132,20 @@ export function SettlementLedgerPage({
             disabled={downloadPreparing}
             >
               {downloadPreparing ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Download className="h-4 w-4 mr-1" />}
-              {downloadPreparing ? '엑셀 준비 중' : '엑셀 다운로드'}
+              {downloadPreparing ? '엑셀 준비 중' : (isDirectEntryMode ? '엑셀 템플릿 다운로드' : '엑셀 다운로드')}
             </Button>
+            {isDirectEntryMode && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="cursor-pointer shadow-sm hover:bg-muted/40"
+                onClick={openDirectEntryUploadPicker}
+                disabled={directEntryUploading || sheetSaving}
+              >
+                {directEntryUploading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Upload className="h-4 w-4 mr-1" />}
+                {directEntryUploading ? '작성본 반영 중' : '작성본 업로드'}
+              </Button>
+            )}
             <input
               type="date"
               value={downloadFrom}
@@ -1070,6 +1160,19 @@ export function SettlementLedgerPage({
               className="h-8 rounded-md border px-2 text-[11px] bg-background"
               title="다운로드 종료일"
             />
+            {isDirectEntryMode && (
+              <input
+                ref={directEntryUploadInputRef}
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                className="hidden"
+                onChange={(event) => {
+                  const file = event.currentTarget.files?.[0];
+                  if (!file) return;
+                  void handleDirectEntryWorkbookFile(file);
+                }}
+              />
+            )}
             {saveStatusButton}
         </div>
       </div>

@@ -411,7 +411,7 @@ export function PortalProjectEdit() {
               </Select>
               <p className="mt-1 text-[10px] text-muted-foreground">
                 {form.fundInputMode === 'DIRECT_ENTRY'
-                  ? '통장내역 없이 주간 표에서 바로 입력합니다.'
+                  ? '통장내역 없이 주간 사업비 시트 또는 엑셀 템플릿으로 직접 입력합니다.'
                   : '통장내역 업로드 후 주간 표로 이어서 작업합니다.'}
               </p>
             </div>

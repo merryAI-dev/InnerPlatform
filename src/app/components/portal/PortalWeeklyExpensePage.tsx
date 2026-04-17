@@ -164,7 +164,7 @@ export function PortalWeeklyExpensePage() {
       ? `통장내역 기준본 ${bankStatementCount}건 연결됨`
       : '통장내역 기준본이 아직 없습니다';
   const sourceStatusDescription = isDirectEntryMode
-    ? '이 프로젝트는 통장 업로드 없이 표에서 바로 입력합니다. 저장 후 반영 상태만 확인하면 됩니다.'
+    ? '이 프로젝트는 통장 업로드 없이 주간 사업비 시트 또는 엑셀 템플릿으로 직접 입력합니다. 저장 후 actual 반영 상태까지 같은 화면에서 확인합니다.'
     : bankStatementCount > 0
       ? '통장내역 저장본이 현재 탭 입력의 기준입니다. 원본 화면에서 바로 이어와 같은 기준으로 저장과 반영을 진행합니다.'
       : '통장내역을 먼저 저장해야 이 화면에서 같은 기준으로 입력과 저장을 이어갈 수 있습니다.';
@@ -763,7 +763,7 @@ export function PortalWeeklyExpensePage() {
           </div>
           <p className="text-[12px] text-muted-foreground">
             {isDirectEntryMode
-              ? '이 표에서 바로 입금, 지출, 조정을 입력하고 잔액 흐름을 이어가세요.'
+              ? '주간 사업비 시트 또는 엑셀 템플릿으로 직접 입력하고, 저장 후 actual 반영 상태까지 확인하세요.'
               : bankStatementCount > 0
                 ? '통장내역 기준본에서 이어서 작업합니다. 이 화면에서 분류 확인, 행 입력, 저장까지 바로 마무리하세요.'
                 : '통장내역 기준본을 먼저 만들면 이 화면에서 바로 입력과 저장을 이어갈 수 있습니다.'}
@@ -930,7 +930,7 @@ export function PortalWeeklyExpensePage() {
             onClick={requestWizardOpen}
           >
             <FileSpreadsheet className="h-3.5 w-3.5" />
-            {isDirectEntryMode ? '기존 시트 가져오기' : 'Migration Wizard'}
+            {isDirectEntryMode ? '엑셀/시트 불러오기' : 'Migration Wizard'}
           </Button>
           <Button
             variant="outline"

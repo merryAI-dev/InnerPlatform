@@ -78,4 +78,9 @@ describe('portal minimal sweep', () => {
     expect(projectRegisterSource).not.toContain("|| '-'");
     expect(projectRegisterSource).not.toContain("field.value || '-'");
   });
+
+  it('explains direct-entry as weekly sheet or excel-template input in register and edit flows', () => {
+    expect(projectRegisterSource).toContain('주간 사업비 시트 또는 엑셀 템플릿으로 직접 입력합니다.');
+    expect(projectEditSource).toContain('주간 사업비 시트 또는 엑셀 템플릿으로 직접 입력합니다.');
+  });
 });
