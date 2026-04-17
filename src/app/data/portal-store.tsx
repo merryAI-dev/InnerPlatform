@@ -580,6 +580,33 @@ async function savePortalBudgetCodeBookViaBff(params: {
   });
 }
 
+async function savePortalBudgetPlanViaBff(params: {
+  tenantId: string;
+  actor: {
+    uid: string;
+    email?: string;
+    role?: string;
+    idToken?: string;
+  };
+  command: {
+    projectId: string;
+    rows: BudgetPlanRow[];
+  };
+}): Promise<void> {
+  const apiClient = createPlatformApiClient();
+  await apiClient.post('/api/v1/portal/budget/plan/save', {
+    tenantId: params.tenantId,
+    actor: {
+      id: params.actor.uid,
+      email: params.actor.email,
+      role: params.actor.role,
+      ...(params.actor.idToken ? { idToken: params.actor.idToken } : {}),
+    },
+    body: params.command,
+    timeoutMs: 8000,
+  });
+}
+
 function stripUndefinedDeep<T>(value: T): T {
   if (Array.isArray(value)) {
     return value
@@ -2071,6 +2098,27 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       ...(row.note ? { note: row.note } : {}),
     }));
     if (isDevHarnessUser || !db || !currentProjectId) {
+      setBudgetPlanRows(sanitizedRows as BudgetPlanRow[]);
+      return;
+    }
+    if (isPlatformApiEnabled() && !isDevHarnessUser) {
+      if (!authUser) {
+        throw new Error('Platform API requires an authenticated actor for budget plan saves.');
+      }
+      const idToken = authUser.idToken || await getAuthInstance()?.currentUser?.getIdToken() || undefined;
+      await savePortalBudgetPlanViaBff({
+        tenantId: orgId,
+        actor: {
+          uid: authUser.uid,
+          email: authUser.email,
+          role: authUser.role,
+          idToken,
+        },
+        command: {
+          projectId: currentProjectId,
+          rows: sanitizedRows,
+        },
+      });
       setBudgetPlanRows(sanitizedRows as BudgetPlanRow[]);
       return;
     }
