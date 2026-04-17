@@ -135,6 +135,7 @@ export interface SettlementLedgerProps {
     persistedRows?: ImportRow[] | null,
   ) => Promise<SettlementActualSyncWeekPayload[]>;
   onDirtyStateChange?: (dirty: boolean) => void;
+  onSavingStateChange?: (saving: boolean) => void;
   discardChangesRequestToken?: number;
   autoSaveIdleMs?: number;
   autoSaveSyncCashflow?: boolean;
@@ -181,6 +182,7 @@ export function SettlementLedgerPage({
   onDeriveRows,
   onPreviewActualSyncPayload,
   onDirtyStateChange,
+  onSavingStateChange,
   discardChangesRequestToken = 0,
   autoSaveIdleMs = 60_000,
   autoSaveSyncCashflow = true,
@@ -797,12 +799,20 @@ export function SettlementLedgerPage({
   }, [importDirty]);
 
   useEffect(() => {
-    onDirtyStateChange?.(importDirty || sheetSaveState === 'dirty' || sheetSaveState === 'saving');
+    onDirtyStateChange?.(importDirty || sheetSaveState === 'dirty');
   }, [importDirty, onDirtyStateChange, sheetSaveState]);
+
+  useEffect(() => {
+    onSavingStateChange?.(sheetSaveState === 'saving');
+  }, [onSavingStateChange, sheetSaveState]);
 
   useEffect(() => () => {
     onDirtyStateChange?.(false);
   }, [onDirtyStateChange]);
+
+  useEffect(() => () => {
+    onSavingStateChange?.(false);
+  }, [onSavingStateChange]);
 
   const saveStatusLabel = useMemo(() => {
     if (sheetSaveState === 'saving') return '시트 저장 중...';

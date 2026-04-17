@@ -518,6 +518,8 @@ function PortalContent() {
     return null;
   }
 
+  const useWidePortalCanvas = location.pathname === '/portal/weekly-expenses';
+
   return (
     <PortalNavigationGuardContext.Provider value={{ registerNavigationHandler }}>
       <TooltipProvider delayDuration={300}>
@@ -934,7 +936,7 @@ function PortalContent() {
 
           {/* Content */}
           <main className="flex-1 overflow-y-auto">
-            <div className="mx-auto max-w-[1480px] p-4 md:p-6">
+            <div className={useWidePortalCanvas ? 'mx-auto w-full max-w-none px-3 py-4 md:px-5 md:py-6 xl:px-8' : 'mx-auto max-w-[1480px] p-4 md:p-6'}>
               <PageTransition>
                 <ErrorBoundary homePath="/portal" resetKey={location.pathname}>
                   <Outlet />

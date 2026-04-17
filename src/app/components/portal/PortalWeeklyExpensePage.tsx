@@ -117,6 +117,7 @@ export function PortalWeeklyExpensePage() {
   const [googleSheetImportOpen, setGoogleSheetImportOpen] = useState(false);
   const [pendingQuickInsert, setPendingQuickInsert] = useState<PendingQuickInsert | null>(null);
   const [hasUnsavedSettlementChanges, setHasUnsavedSettlementChanges] = useState(false);
+  const [isSettlementSaving, setIsSettlementSaving] = useState(false);
   const [pendingNavigationAttempt, setPendingNavigationAttempt] = useState<{ path: string; label: string } | null>(null);
   const [participationRiskWarning, setParticipationRiskWarning] = useState<{
     yearMonth: string;
@@ -152,16 +153,6 @@ export function PortalWeeklyExpensePage() {
   const fundInputMode = normalizeProjectFundInputMode(myProject?.fundInputMode);
   const isDirectEntryMode = fundInputMode === 'DIRECT_ENTRY';
   const expenseRowCount = expenseSheetRows?.length || 0;
-  const sourceStatusTitle = isDirectEntryMode
-    ? '직접작성 기준으로 입력 중'
-    : bankStatementCount > 0
-      ? `통장내역 기준본 ${bankStatementCount}건 연결됨`
-      : '통장내역 기준본이 아직 없습니다';
-  const sourceStatusDescription = isDirectEntryMode
-    ? '이 프로젝트는 통장 업로드 없이 주간 사업비 시트 또는 엑셀 템플릿으로 직접 입력합니다. 저장 후 actual 반영 상태까지 같은 화면에서 확인합니다.'
-    : bankStatementCount > 0
-      ? '통장내역 저장본이 현재 탭 입력의 기준입니다. 원본 화면에서 바로 이어와 같은 기준으로 저장과 반영을 진행합니다.'
-      : '통장내역을 먼저 저장해야 이 화면에서 같은 기준으로 입력과 저장을 이어갈 수 있습니다.';
   const weeklySetupPanel = useMemo(() => {
     if (!happyPath.canOpenWeeklyExpenses) {
       return {
@@ -685,21 +676,33 @@ export function PortalWeeklyExpensePage() {
   }, []);
 
   const requestRouteNavigation = useCallback((path: string, label: string) => {
+    if (isSettlementSaving) return;
     if (hasUnsavedSettlementChanges) {
       setPendingNavigationAttempt({ path, label });
       return;
     }
     navigate(path);
-  }, [hasUnsavedSettlementChanges, navigate]);
+  }, [hasUnsavedSettlementChanges, isSettlementSaving, navigate]);
 
   useEffect(() => {
     registerNavigationHandler((attempt) => {
+      if (isSettlementSaving) return true;
       if (!hasUnsavedSettlementChanges) return false;
       setPendingNavigationAttempt(attempt);
       return true;
     });
     return () => registerNavigationHandler(null);
-  }, [hasUnsavedSettlementChanges, registerNavigationHandler]);
+  }, [hasUnsavedSettlementChanges, isSettlementSaving, registerNavigationHandler]);
+
+  useEffect(() => {
+    if (!isSettlementSaving) return;
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isSettlementSaving]);
 
   const requestSheetSwitch = useCallback((sheetId: string) => {
     if (sheetId === activeExpenseSheetId) return;
@@ -724,38 +727,50 @@ export function PortalWeeklyExpensePage() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="rounded-2xl border bg-background px-5 py-4 shadow-sm">
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div className="space-y-1">
-          <div className="flex items-center gap-2 flex-wrap">
-            <h2 className="text-base font-bold">사업비 입력(주간)</h2>
-            <Badge variant="secondary" className="text-[10px]">
-              현재 탭: {activeSheetName}
-            </Badge>
-            <Badge variant="outline" className="text-[10px]">
-              {PROJECT_FUND_INPUT_MODE_LABELS[fundInputMode]}
-            </Badge>
-            {bankStatementCount > 0 && !isDirectEntryMode && (
+    <div className="space-y-3">
+      <div className="rounded-2xl border bg-background/95 px-5 py-4 shadow-sm">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <div className="min-w-0 flex-1 space-y-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="text-base font-bold">사업비 입력(주간)</h2>
               <Badge variant="outline" className="text-[10px]">
-                통장내역 {bankStatementCount}건 연결
+                {PROJECT_FUND_INPUT_MODE_LABELS[fundInputMode]}
               </Badge>
-            )}
-            {isENaraProject && (
+              {isENaraProject && (
+                <Badge variant="outline" className="text-[10px]">
+                  TYPE5 / 전용계좌
+                </Badge>
+              )}
+            </div>
+            <p className="max-w-4xl text-[12px] text-muted-foreground">
+              {isDirectEntryMode
+                ? '주간 사업비 시트 또는 엑셀 템플릿으로 직접 입력하고, 저장 후 actual 반영 상태까지 같은 작업면에서 확인합니다.'
+                : bankStatementCount > 0
+                  ? '통장내역 기준본에서 이어서 작업합니다. 이 화면에서 분류 확인, 행 입력, 저장까지 바로 마무리하세요.'
+                  : '통장내역 기준본을 먼저 만들면 이 화면에서 바로 입력과 저장을 이어갈 수 있습니다.'}
+            </p>
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border bg-slate-50/80 px-3 py-2.5">
+              <Badge variant="secondary" className="text-[10px]">
+                현재 탭: {activeSheetName}
+              </Badge>
               <Badge variant="outline" className="text-[10px]">
-                TYPE5 / 전용계좌
+                거래 {expenseRowCount}건
               </Badge>
-            )}
+              {!isDirectEntryMode && (
+                <Badge variant="outline" className="text-[10px]">
+                  {bankStatementCount > 0 ? `통장내역 ${bankStatementCount}건 연결` : '통장내역 기준본 미준비'}
+                </Badge>
+              )}
+              <span className="text-[11px] text-muted-foreground">
+                {isDirectEntryMode
+                  ? '원본 입력은 이 화면입니다.'
+                  : bankStatementCount > 0
+                    ? '원본 기준과 같은 흐름으로 저장과 actual 반영을 이어갑니다.'
+                    : '원본 기준본을 준비하면 이 화면에서 바로 이어서 저장할 수 있습니다.'}
+              </span>
+            </div>
           </div>
-          <p className="text-[12px] text-muted-foreground">
-            {isDirectEntryMode
-              ? '주간 사업비 시트 또는 엑셀 템플릿으로 직접 입력하고, 저장 후 actual 반영 상태까지 확인하세요.'
-              : bankStatementCount > 0
-                ? '통장내역 기준본에서 이어서 작업합니다. 이 화면에서 분류 확인, 행 입력, 저장까지 바로 마무리하세요.'
-                : '통장내역 기준본을 먼저 만들면 이 화면에서 바로 입력과 저장을 이어갈 수 있습니다.'}
-          </p>
-          </div>
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-2 flex-wrap xl:justify-end">
           {isDirectEntryMode ? (
             <>
               <Button size="sm" onClick={() => queueQuickInsert('DEPOSIT')}>
@@ -821,30 +836,15 @@ export function PortalWeeklyExpensePage() {
           </Button>
           </div>
         </div>
-        <div className={`mt-4 grid gap-3 ${weeklySetupPanel ? 'xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]' : ''}`}>
+          <div className={`mt-4 grid gap-3 ${weeklySetupPanel ? 'xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]' : ''}`}>
           {weeklySetupPanel ? (
             <Card data-testid="weekly-expense-setup-panel" className={weeklySetupPanel.toneClass}>
-              <CardContent className="px-4 py-4">
-                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                  <div className="space-y-2">
-                    <div>
-                      <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">지금 해야 할 일</p>
-                      <p className="mt-1 text-[15px] font-semibold text-slate-900">{weeklySetupPanel.title}</p>
-                    </div>
-                    <p className="max-w-2xl text-[12px] leading-6 text-slate-600">{weeklySetupPanel.description}</p>
-                    <div className="flex flex-wrap gap-2">
-                      {!isDirectEntryMode && (
-                        <Badge variant="outline" className="bg-white/80 text-[10px] text-slate-700">
-                          통장내역 기준본 {bankStatementCount > 0 ? `${bankStatementCount}건 연결` : '미준비'}
-                        </Badge>
-                      )}
-                      <Badge variant="outline" className="bg-white/80 text-[10px] text-slate-700">
-                        현재 탭 {activeSheetName}
-                      </Badge>
-                      <Badge variant="outline" className="bg-white/80 text-[10px] text-slate-700">
-                        거래: {expenseRowCount}건
-                      </Badge>
-                    </div>
+              <CardContent className="px-4 py-3">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="min-w-0 space-y-1.5">
+                    <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">지금 해야 할 일</p>
+                    <p className="text-[15px] font-semibold text-slate-900">{weeklySetupPanel.title}</p>
+                    <p className="max-w-4xl text-[12px] leading-6 text-slate-600">{weeklySetupPanel.description}</p>
                   </div>
                   {weeklySetupPanel.actionLabel && (
                     <div className="shrink-0">
@@ -874,20 +874,11 @@ export function PortalWeeklyExpensePage() {
             </Card>
           ) : null}
 
-          <div className="grid gap-3">
-            <div className="rounded-xl border bg-slate-50/80 px-4 py-3">
-              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                {isDirectEntryMode ? '입력 기준' : '통장내역 기준본'}
-              </div>
-              <div className="mt-1 text-sm font-semibold text-slate-900">{sourceStatusTitle}</div>
-              <div className="mt-1 text-[11px] leading-5 text-muted-foreground">{sourceStatusDescription}</div>
-            </div>
-            <div className="rounded-xl border bg-slate-50/80 px-4 py-3">
-              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">현재 입력 탭</div>
-              <div className="mt-1 text-sm font-semibold text-slate-900">{activeSheetName}</div>
-              <div className="mt-1 text-[11px] leading-5 text-muted-foreground">
-                {expenseRowCount}건의 거래와 연결되어 있고, 시트 정책은 {formatSettlementSheetPolicySummary(settlementSheetPolicy)}입니다.
-              </div>
+          <div className="rounded-xl border bg-slate-50/80 px-4 py-3">
+            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">입력 정책</div>
+            <div className="mt-1 text-sm font-semibold text-slate-900">{formatSettlementSheetPolicySummary(settlementSheetPolicy)}</div>
+            <div className="mt-1 text-[11px] leading-5 text-muted-foreground">
+              {expenseRowCount}건의 거래를 현재 탭에서 관리하고 있고, 저장 후 actual 반영 상태를 같은 화면에서 확인합니다.
             </div>
           </div>
         </div>
@@ -966,9 +957,21 @@ export function PortalWeeklyExpensePage() {
           onDeriveRows={deriveRowsWithLocalKernel}
           onPreviewActualSyncPayload={previewActualSyncWithLocalKernel}
           onDirtyStateChange={setHasUnsavedSettlementChanges}
+          onSavingStateChange={setIsSettlementSaving}
           discardChangesRequestToken={0}
         />
       </Suspense>
+      {isSettlementSaving && (
+        <div className="fixed inset-0 z-[140] flex items-center justify-center bg-background/80 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-3 rounded-2xl border bg-background px-6 py-7 shadow-2xl">
+            <Loader2 className="h-6 w-6 animate-spin text-primary" />
+            <div className="text-center">
+              <p className="text-sm font-semibold text-foreground">사업비 입력을 저장하고 있습니다</p>
+              <p className="mt-1 text-xs text-muted-foreground">저장이 끝날 때까지 잠시 기다려 주세요.</p>
+            </div>
+          </div>
+        </div>
+      )}
       {googleSheetImportOpen && (
         <Suspense fallback={null}>
             <GoogleSheetMigrationWizard

@@ -24,9 +24,21 @@ describe('PortalWeeklyExpensePage flow layout', () => {
     expect(weeklyExpenseSource).not.toContain('탭 삭제');
   });
 
+  it('shows a blocking full-screen saving overlay instead of the unsaved-changes dialog while save is in flight', () => {
+    expect(weeklyExpenseSource).toContain('if (isSettlementSaving) return;');
+    expect(weeklyExpenseSource).toContain('사업비 입력을 저장하고 있습니다');
+    expect(weeklyExpenseSource).toContain('저장이 끝날 때까지 잠시 기다려 주세요.');
+  });
+
   it('uses a Korean first-action heading instead of the previous English label', () => {
     expect(weeklyExpenseSource).toContain('지금 해야 할 일');
     expect(weeklyExpenseSource).not.toContain('Next Action');
+  });
+
+  it('compresses status chrome into a single operator bar and keeps the work surface wide', () => {
+    expect(weeklyExpenseSource).toContain('원본 입력은 이 화면입니다.');
+    expect(weeklyExpenseSource).toContain('max-w-4xl text-[12px] text-muted-foreground');
+    expect(weeklyExpenseSource).not.toContain('현재 입력 탭');
   });
 
   it('guards the setup panel so the page can render when no setup action is needed', () => {

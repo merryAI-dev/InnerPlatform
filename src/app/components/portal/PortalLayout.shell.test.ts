@@ -57,4 +57,9 @@ describe('PortalLayout shell actions', () => {
     expect(portalLayoutSource).toContain('data-testid={buildPortalNavTestId(item.to)}');
     expect(portalLayoutSource).toContain("portal-nav-${path");
   });
+
+  it('uses a wider content canvas for the weekly expense work surface', () => {
+    expect(portalLayoutSource).toContain("const useWidePortalCanvas = location.pathname === '/portal/weekly-expenses';");
+    expect(portalLayoutSource).toContain("mx-auto w-full max-w-none px-3 py-4 md:px-5 md:py-6 xl:px-8");
+  });
 });

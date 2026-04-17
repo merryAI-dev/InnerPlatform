@@ -19,4 +19,13 @@ describe('SettlementLedgerPage direct-entry workbook flow', () => {
     expect(settlementLedgerSource).toContain('normalizeSettlementWorkbookToImportRows');
     expect(settlementLedgerSource).toContain('syncImportRowsToCashflow');
   });
+
+  it('only reports dirty navigation state for real unsaved drafts, not while a save request is in flight', () => {
+    expect(settlementLedgerSource).toContain("onDirtyStateChange?.(importDirty || sheetSaveState === 'dirty')");
+    expect(settlementLedgerSource).not.toContain("onDirtyStateChange?.(importDirty || sheetSaveState === 'dirty' || sheetSaveState === 'saving')");
+  });
+
+  it('emits a separate saving-state signal while the sheet save request is in flight', () => {
+    expect(settlementLedgerSource).toContain("onSavingStateChange?.(sheetSaveState === 'saving')");
+  });
 });
