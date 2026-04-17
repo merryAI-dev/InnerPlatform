@@ -257,6 +257,67 @@ describe('portal transaction finance-write command routes', () => {
     expect(response.body.transaction.approvedBy).toBeUndefined();
   });
 
+  it('accepts legacy draft transactions that do not yet carry a version field', async () => {
+    const db = createFakeDb({
+      'orgs/mysc/projects/p001': { id: 'p001', name: '알파 프로젝트' },
+      'orgs/mysc/ledgers/ledger-1': { id: 'ledger-1', projectId: 'p001', name: '기본 원장' },
+      'orgs/mysc/transactions/tx-legacy': {
+        id: 'tx-legacy',
+        tenantId: 'mysc',
+        projectId: 'p001',
+        ledgerId: 'ledger-1',
+        counterparty: '레거시 거래처',
+        state: 'DRAFT',
+        dateTime: '2026-04-17T08:30:00+09:00',
+        weekCode: '2026-W16',
+        direction: 'OUT',
+        method: 'CORP_CARD_1',
+        cashflowCategory: 'SUPPLIES',
+        cashflowLabel: '소모품비',
+        memo: '레거시 메모',
+        amounts: {
+          bankAmount: -18000,
+          depositAmount: 0,
+          expenseAmount: 18000,
+          vatIn: 0,
+          vatOut: 0,
+          vatRefund: 0,
+          balanceAfter: 982000,
+        },
+        evidenceRequired: [],
+        evidenceStatus: 'MISSING',
+        evidenceMissing: [],
+        attachmentsCount: 0,
+        createdBy: 'pm-old',
+        createdAt: '2026-04-17T08:00:00.000Z',
+        updatedBy: 'pm-old',
+        updatedAt: '2026-04-17T08:00:00.000Z',
+      },
+    });
+    const app = createApp(db, []);
+
+    const response = await request(app)
+      .post('/api/v1/portal/transactions/finance-write')
+      .set('idempotency-key', 'idem-finance-write-legacy-update')
+      .send({
+        id: 'tx-legacy',
+        projectId: 'p001',
+        ledgerId: 'ledger-1',
+        expectedVersion: 1,
+        patch: {
+          memo: '레거시 메모 수정',
+        },
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body.transaction).toMatchObject({
+      id: 'tx-legacy',
+      version: 2,
+      state: 'DRAFT',
+      memo: '레거시 메모 수정',
+    });
+  });
+
   it('rejects lifecycle-owned fields in the portal finance patch', async () => {
     const db = createFakeDb({
       'orgs/mysc/projects/p001': { id: 'p001', name: '알파 프로젝트' },

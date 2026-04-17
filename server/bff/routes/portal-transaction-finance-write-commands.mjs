@@ -25,7 +25,7 @@ const REQUIRED_CREATE_FIELDS = [
 ];
 
 function readCurrentVersion(current) {
-  return Number.isInteger(current?.version) && current.version > 0 ? current.version : 0;
+  return Number.isInteger(current?.version) && current.version > 0 ? current.version : 1;
 }
 
 function parseFinanceWritePayload(body) {

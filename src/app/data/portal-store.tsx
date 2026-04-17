@@ -79,6 +79,7 @@ import { useAuth } from './auth-store';
 import { useFirebase } from '../lib/firebase-context';
 import { getAuthInstance, getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
 import {
+  changeTransactionStateViaBff,
   handoffPortalBankStatementViaBff,
   isPlatformApiEnabled,
   savePortalExpenseIntakeBulkUpsertViaBff,
@@ -120,6 +121,10 @@ export interface PortalUser {
   projectIds: string[];
   projectNames?: Record<string, string>;
   registeredAt: string;
+}
+
+interface PortalTransactionMutationOptions {
+  platformMirror?: boolean;
 }
 
 function normalizePortalRole(value: unknown): string {
@@ -425,8 +430,8 @@ interface PortalActions {
   duplicateExpenseSet: (setId: string) => void;
   addChangeRequest: (req: ChangeRequest) => void;
   submitChangeRequest: (id: string) => Promise<boolean>;
-  addTransaction: (tx: Transaction) => Promise<void>;
-  updateTransaction: (id: string, updates: Partial<Transaction>) => Promise<void>;
+  addTransaction: (tx: Transaction, options?: PortalTransactionMutationOptions) => Promise<void>;
+  updateTransaction: (id: string, updates: Partial<Transaction>, options?: PortalTransactionMutationOptions) => Promise<void>;
   changeTransactionState: (id: string, newState: TransactionState, reason?: string) => Promise<void>;
   addComment: (comment: Comment) => Promise<void>;
   saveEvidenceRequiredMap: (map: Record<string, string>) => Promise<void>;
@@ -497,10 +502,6 @@ function withTenantScope<T extends object>(orgId: string, payload: T): T & { ten
     ...payload,
     tenantId: orgId,
   };
-}
-
-function shouldTreatAsPlatformTransactionMirror(transaction: Transaction | Partial<Transaction>): boolean {
-  return Number.isFinite(transaction.version);
 }
 
 function mergePortalTransactionFinanceWriteResult(
@@ -1216,7 +1217,12 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       const handleTransactionResult = (docs: Array<{ data(): unknown }>) => {
         ifActive(() => {
           const list = docs
-            .map((docItem) => docItem.data() as Transaction)
+            .map((docItem) => {
+              const transaction = docItem.data() as Transaction;
+              return Number.isFinite(transaction.version)
+                ? transaction
+                : { ...transaction, version: 1 };
+            })
             .sort((a, b) => String(b.dateTime || '').localeCompare(String(a.dateTime || '')));
           setTransactions(list);
           txReady = true;
@@ -3227,7 +3233,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     }
   }, [firestoreEnabled, db, portalUser?.name, persistChangeRequest]);
 
-  const addTransaction = useCallback(async (txData: Transaction) => {
+  const addTransaction = useCallback(async (txData: Transaction, options?: PortalTransactionMutationOptions) => {
     let committedTx = txData;
 
     if (firestoreEnabled) {
@@ -3236,7 +3242,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           if (!authUser) {
             throw new Error('Platform API requires an authenticated actor for transaction finance writes.');
           }
-          if (!shouldTreatAsPlatformTransactionMirror(txData)) {
+          if (!options?.platformMirror) {
             const idToken = authUser.idToken || await getAuthInstance()?.currentUser?.getIdToken() || undefined;
             const result = await savePortalTransactionFinanceWriteViaBff({
               tenantId: orgId,
@@ -3268,7 +3274,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     setTransactions((prev) => [committedTx, ...prev.filter((tx) => tx.id !== committedTx.id)]);
   }, [authUser, firestoreEnabled, isDevHarnessUser, orgId, persistTransaction]);
 
-  const updateTransaction = useCallback(async (id: string, updates: Partial<Transaction>) => {
+  const updateTransaction = useCallback(async (id: string, updates: Partial<Transaction>, options?: PortalTransactionMutationOptions) => {
     const now = new Date().toISOString();
     const currentTx = transactions.find((t) => t.id === id);
     if (!currentTx) return;
@@ -3281,7 +3287,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           if (!authUser) {
             throw new Error('Platform API requires an authenticated actor for transaction finance writes.');
           }
-          if (!shouldTreatAsPlatformTransactionMirror(updates)) {
+          if (!options?.platformMirror) {
             const patch = toPortalTransactionFinancePatch(updates);
             if (Object.keys(patch).length > 0) {
               const idToken = authUser.idToken || await getAuthInstance()?.currentUser?.getIdToken() || undefined;
@@ -3297,7 +3303,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
                   id,
                   projectId: currentTx.projectId,
                   ledgerId: currentTx.ledgerId,
-                  ...(Number.isFinite(currentTx.version) ? { expectedVersion: Number(currentTx.version) } : {}),
+                  expectedVersion: Number.isFinite(currentTx.version) ? Number(currentTx.version) : 1,
                   patch,
                 },
               });
@@ -3336,10 +3342,38 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       stateUpdates.rejectedReason = reason;
     }
     const nextTx: Transaction = { ...currentTx, ...stateUpdates };
+    let committedTx = nextTx;
 
     if (firestoreEnabled) {
       try {
-        await persistTransaction(nextTx);
+        if (isPlatformApiEnabled() && !isDevHarnessUser) {
+          if (!authUser) {
+            throw new Error('Platform API requires an authenticated actor for transaction state changes.');
+          }
+          const idToken = authUser.idToken || await getAuthInstance()?.currentUser?.getIdToken() || undefined;
+          const result = await changeTransactionStateViaBff({
+            tenantId: orgId,
+            actor: {
+              uid: authUser.uid,
+              email: authUser.email,
+              role: authUser.role,
+              idToken,
+            },
+            transactionId: id,
+            newState,
+            expectedVersion: Number.isFinite(currentTx.version) ? Number(currentTx.version) : 1,
+            reason,
+          });
+          committedTx = {
+            ...nextTx,
+            state: result.state as TransactionState,
+            rejectedReason: result.rejectedReason ?? undefined,
+            version: result.version,
+            updatedAt: result.updatedAt,
+          };
+        } else {
+          await persistTransaction(nextTx);
+        }
       } catch (err) {
         console.error('[PortalStore] changeTransactionState error:', err);
         toast.error('거래 상태 변경에 실패했습니다');
@@ -3347,8 +3381,8 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    setTransactions((prev) => prev.map((t) => (t.id === id ? nextTx : t)));
-  }, [firestoreEnabled, persistTransaction, portalUser?.id, portalUser?.name, transactions]);
+    setTransactions((prev) => prev.map((t) => (t.id === id ? committedTx : t)));
+  }, [authUser, firestoreEnabled, isDevHarnessUser, orgId, persistTransaction, portalUser?.id, portalUser?.name, transactions]);
 
   const addComment = useCallback(async (comment: Comment) => {
     if (!currentProjectId) {

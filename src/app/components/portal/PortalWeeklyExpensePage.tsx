@@ -441,7 +441,7 @@ export function PortalWeeklyExpensePage() {
       evidenceDriveSharedDriveId: result.sharedDriveId || undefined,
       evidenceDriveSyncStatus: result.syncStatus,
       updatedAt: result.updatedAt,
-    });
+    }, { platformMirror: true });
   }, [updateTransaction]);
 
   const applySyncedEvidenceState = useCallback(async (
@@ -465,7 +465,7 @@ export function PortalWeeklyExpensePage() {
       evidenceMissing: result.evidenceMissing,
       evidenceStatus: result.evidenceStatus,
       updatedAt: result.updatedAt,
-    });
+    }, { platformMirror: true });
   }, [updateTransaction]);
 
   const ensureTransactionPersisted = useCallback(async ({
@@ -526,9 +526,9 @@ export function PortalWeeklyExpensePage() {
         state: result.state as TransactionState,
       };
       if (existingTx) {
-        await updateTransaction(txId, syncedTx);
+        await updateTransaction(txId, syncedTx, { platformMirror: true });
       } else {
-        await addTransaction(syncedTx);
+        await addTransaction(syncedTx, { platformMirror: true });
       }
       return txId;
     } catch (error) {
