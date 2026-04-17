@@ -325,6 +325,49 @@ type PortalExpenseIntakeProjectResult = {
   };
 };
 
+type PortalExpenseIntakeEvidenceSyncCommand = {
+  projectId: string;
+  intakeId: string;
+  updates?: {
+    manualFields?: {
+      evidenceCompletedDesc?: string;
+    };
+  };
+};
+
+type PortalExpenseIntakeEvidenceSyncResult = {
+  expenseIntakeItem: PortalExpenseIntakeDraftSaveResult['expenseIntakeItem'];
+  expenseSheet: {
+    id?: string;
+    projectId?: string;
+    name?: string;
+    order?: number;
+    version?: number;
+    rowCount?: number;
+    rows?: Array<{
+      tempId: string;
+      sourceTxId?: string;
+      entryKind?: string;
+      cells: string[];
+    }>;
+    updatedAt?: string;
+    updatedBy?: string;
+    createdAt?: string;
+  };
+  patchedRow?: {
+    tempId: string;
+    sourceTxId?: string;
+    entryKind?: string;
+    cells: string[];
+  };
+  summary: {
+    targetSheetId: string;
+    patchedRowTempId: string | null;
+    rowPatched: boolean;
+    version: number;
+  };
+};
+
 type PortalWeeklySubmissionSubmitCommand = {
   projectId: string;
   yearMonth: string;
@@ -1079,6 +1122,38 @@ export function buildDevHarnessPortalExpenseIntakeProjectResult(params: {
       targetSheetId,
       projectedRowTempId,
       version: 4,
+    },
+  };
+}
+
+export function buildDevHarnessPortalExpenseIntakeEvidenceSyncResult(params: {
+  actorId?: string;
+  actorRole?: string;
+  command: PortalExpenseIntakeEvidenceSyncCommand;
+}): PortalExpenseIntakeEvidenceSyncResult {
+  const projected = buildDevHarnessPortalExpenseIntakeProjectResult({
+    actorId: params.actorId,
+    actorRole: params.actorRole,
+    command: {
+      projectId: params.command.projectId,
+      intakeId: params.command.intakeId,
+      updates: {
+        manualFields: {
+          evidenceCompletedDesc: params.command.updates?.manualFields?.evidenceCompletedDesc || '',
+        },
+      },
+    },
+  });
+
+  return {
+    expenseIntakeItem: projected.expenseIntakeItem,
+    expenseSheet: projected.expenseSheet,
+    patchedRow: projected.projectedRow,
+    summary: {
+      targetSheetId: projected.summary.targetSheetId,
+      patchedRowTempId: projected.summary.projectedRowTempId,
+      rowPatched: true,
+      version: projected.summary.version,
     },
   };
 }

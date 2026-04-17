@@ -82,6 +82,7 @@ import {
   handoffPortalBankStatementViaBff,
   isPlatformApiEnabled,
   savePortalExpenseIntakeDraftViaBff,
+  savePortalExpenseIntakeEvidenceSyncViaBff,
   savePortalExpenseIntakeProjectViaBff,
   type PortalBankStatementHandoffResult,
   type PortalWeeklyExpenseSaveResult,
@@ -2745,6 +2746,66 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       }
       const nextItems = expenseIntakeItemsRef.current
         .map((item) => (item.id === id ? nextState.item : item))
+        .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')));
+      expenseIntakeItemsRef.current = nextItems;
+      setExpenseIntakeItems(nextItems);
+      return;
+    }
+
+    if (isPlatformApiEnabled()) {
+      if (!authUser) {
+        throw new Error('Platform API requires an authenticated actor for expense intake evidence sync.');
+      }
+      const idToken = authUser.idToken || await getAuthInstance()?.currentUser?.getIdToken() || undefined;
+      const result = await savePortalExpenseIntakeEvidenceSyncViaBff({
+        tenantId: orgId,
+        actor: {
+          uid: authUser.uid,
+          email: authUser.email,
+          role: authUser.role,
+          idToken,
+        },
+        command: {
+          projectId: currentProjectId,
+          intakeId: id,
+          updates: {
+            manualFields: {
+              evidenceCompletedDesc: nextState.item.manualFields.evidenceCompletedDesc || '',
+            },
+          },
+        },
+      });
+      const resultSheetId = result.expenseSheet.id || (nextState.item.existingExpenseSheetId || activeExpenseSheetIdRef.current || 'default');
+      const normalizedRows = normalizeExpenseSheetRows(result.expenseSheet.rows)
+        || nextState.expenseSheets.find((sheet) => sheet.id === resultSheetId)?.rows
+        || (resultSheetId === activeExpenseSheetIdRef.current ? nextState.activeRows : null);
+      const nextSheetsFromResult = upsertExpenseSheetTabRows({
+        sheets: expenseSheetsRef.current,
+        sheetId: resultSheetId,
+        sheetName: sanitizeExpenseSheetName(
+          result.expenseSheet.name || nextState.expenseSheets.find((sheet) => sheet.id === resultSheetId)?.name,
+          resultSheetId === 'default' ? '기본 탭' : '새 탭',
+        ),
+        order: typeof result.expenseSheet.order === 'number'
+          ? result.expenseSheet.order
+          : (nextState.expenseSheets.find((sheet) => sheet.id === resultSheetId)?.order || (resultSheetId === 'default' ? 0 : expenseSheetsRef.current.length + 1)),
+        rows: normalizedRows || [],
+        now: result.expenseSheet.updatedAt || now,
+        createdAt: result.expenseSheet.createdAt || nextState.expenseSheets.find((sheet) => sheet.id === resultSheetId)?.createdAt,
+      }).map((sheet) => (
+        sheet.id === resultSheetId
+          ? { ...sheet, ...(typeof result.expenseSheet.version === 'number' ? { version: result.expenseSheet.version } : {}) }
+          : sheet
+      ));
+      expenseSheetsRef.current = nextSheetsFromResult;
+      setExpenseSheets(nextSheetsFromResult);
+      if (resultSheetId === activeExpenseSheetIdRef.current) {
+        expenseSheetRowsRef.current = normalizedRows || null;
+        setExpenseSheetRows(normalizedRows || null);
+      }
+      const normalizedResultItem = normalizeBankImportIntakeItem(result.expenseIntakeItem) || nextState.item;
+      const nextItems = expenseIntakeItemsRef.current
+        .map((item) => (item.id === id ? normalizedResultItem : item))
         .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')));
       expenseIntakeItemsRef.current = nextItems;
       setExpenseIntakeItems(nextItems);

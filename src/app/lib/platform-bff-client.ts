@@ -483,6 +483,41 @@ export interface PortalExpenseIntakeProjectResult {
   };
 }
 
+export interface PortalExpenseIntakeEvidenceSyncCommand {
+  projectId: string;
+  intakeId: string;
+  updates?: {
+    manualFields?: {
+      evidenceCompletedDesc?: string;
+    };
+  };
+}
+
+export interface PortalExpenseIntakeEvidenceSyncResult {
+  expenseIntakeItem: BankImportIntakeItem & {
+    version: number;
+  };
+  expenseSheet: {
+    id?: string;
+    projectId?: string;
+    name?: string;
+    order?: number;
+    version?: number;
+    rowCount?: number;
+    rows?: PortalWeeklyExpenseSaveCommandRow[];
+    updatedAt?: string;
+    updatedBy?: string;
+    createdAt?: string;
+  };
+  patchedRow?: PortalWeeklyExpenseSaveCommandRow;
+  summary: {
+    targetSheetId: string;
+    patchedRowTempId: string | null;
+    rowPatched: boolean;
+    version: number;
+  };
+}
+
 export interface PortalWeeklySubmissionSubmitCommand {
   projectId: string;
   yearMonth: string;
@@ -1605,6 +1640,25 @@ export async function savePortalExpenseIntakeProjectViaBff(params: {
   const apiClient = resolveClient(params.client);
   const response = await apiClient.post<PortalExpenseIntakeProjectResult>(
     '/api/v1/portal/expense-intake/project',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.command,
+      timeoutMs: 8000,
+    },
+  );
+  return response.data;
+}
+
+export async function savePortalExpenseIntakeEvidenceSyncViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  command: PortalExpenseIntakeEvidenceSyncCommand;
+  client?: PlatformApiClientLike;
+}): Promise<PortalExpenseIntakeEvidenceSyncResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<PortalExpenseIntakeEvidenceSyncResult>(
+    '/api/v1/portal/expense-intake/evidence-sync',
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),

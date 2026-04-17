@@ -234,6 +234,18 @@ export const portalExpenseIntakeProjectSchema = z.object({
   updates: portalExpenseIntakeUpdatesSchema.optional(),
 }).strict();
 
+const portalExpenseIntakeEvidenceSyncUpdatesSchema = z.object({
+  manualFields: z.object({
+    evidenceCompletedDesc: z.string().optional(),
+  }).strict().optional(),
+}).strict().optional();
+
+export const portalExpenseIntakeEvidenceSyncSchema = z.object({
+  projectId: NON_EMPTY_STRING,
+  intakeId: NON_EMPTY_STRING,
+  updates: portalExpenseIntakeEvidenceSyncUpdatesSchema,
+}).strict();
+
 export const projectSheetSourceUploadSchema = z.object({
   sourceType: z.enum(['usage', 'budget', 'evidence_rules', 'cashflow', 'bank_statement']),
   sheetName: NON_EMPTY_STRING.max(200),

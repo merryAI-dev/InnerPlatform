@@ -21,7 +21,7 @@ import {
   processProjectRequestContractViaBff,
   provisionProjectEvidenceDriveRootViaBff,
   savePortalExpenseIntakeDraftViaBff,
-  savePortalExpenseIntakeProjectViaBff,
+  savePortalExpenseIntakeEvidenceSyncViaBff,
   provisionTransactionEvidenceDriveViaBff,
   readPlatformApiRuntimeConfig,
   restoreProjectViaBff,
@@ -439,7 +439,7 @@ describe('platform-bff-client', () => {
     expect(result.summary.updatedManualFieldCount).toBe(1);
   });
 
-  it('calls portal expense intake project command endpoint', async () => {
+  it('calls portal expense intake evidence sync command endpoint', async () => {
     const client = asMockClient({
       post: vi.fn(async () => ({
         data: {
@@ -500,7 +500,7 @@ describe('platform-bff-client', () => {
       request: vi.fn(),
     });
 
-    const result = await savePortalExpenseIntakeProjectViaBff({
+    const result = await savePortalExpenseIntakeEvidenceSyncViaBff({
       tenantId: 'mysc',
       actor: { uid: 'u001', role: 'pm', idToken: 'token-abc' },
       command: {
@@ -517,7 +517,7 @@ describe('platform-bff-client', () => {
       client,
     });
 
-    expect(client.post).toHaveBeenCalledWith('/api/v1/portal/expense-intake/project', expect.objectContaining({
+    expect(client.post).toHaveBeenCalledWith('/api/v1/portal/expense-intake/evidence-sync', expect.objectContaining({
       tenantId: 'mysc',
       body: expect.objectContaining({
         projectId: 'p001',

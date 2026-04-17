@@ -7,6 +7,7 @@ import {
   buildDevHarnessPortalDashboardSummary,
   buildDevHarnessPortalEntryContext,
   buildDevHarnessPortalExpenseIntakeDraftResult,
+  buildDevHarnessPortalExpenseIntakeEvidenceSyncResult,
   buildDevHarnessPortalExpenseIntakeProjectResult,
   buildDevHarnessPortalOnboardingContext,
   buildDevHarnessPortalPayrollSummary,
@@ -192,6 +193,65 @@ describe('dev harness portal api helpers', () => {
         actual: { DIRECT_COST_OUT: 50000 },
       }),
     ]));
+  });
+
+  it('builds an expense intake evidence sync command result for a visible PM project', () => {
+    const result = buildDevHarnessPortalExpenseIntakeEvidenceSyncResult({
+      actorId: 'u002',
+      actorRole: 'pm',
+      command: {
+        projectId: 'p001',
+        intakeId: 'fp-1',
+        updates: {
+          manualFields: {
+            budgetSubCategory: '숙박',
+            evidenceCompletedDesc: '출장신청서',
+          },
+          reviewReasons: ['manual_review_required'],
+        },
+      },
+    });
+
+    expect(result.expenseIntakeItem).toMatchObject({
+      id: 'fp-1',
+      projectId: 'p001',
+      existingExpenseSheetId: 'default',
+      existingExpenseRowTempId: 'bank-fp-1',
+    });
+    expect(result.expenseSheet.rows).toHaveLength(1);
+    expect(result.summary.targetSheetId).toBe('default');
+  });
+
+  it('handles evidence sync requests through the vite dev harness router', async () => {
+    const response = await resolveDevHarnessPortalApiResponse({
+      enabled: true,
+      method: 'POST',
+      url: '/api/v1/portal/expense-intake/evidence-sync',
+      actorId: 'u002',
+      actorRole: 'pm',
+      readBody: async () => ({
+        projectId: 'p001',
+        intakeId: 'fp-1',
+        updates: {
+          manualFields: {
+            budgetSubCategory: '숙박',
+            evidenceCompletedDesc: '출장신청서',
+          },
+        },
+      }),
+    });
+
+    expect(response.handled).toBe(true);
+    expect(response.statusCode).toBe(200);
+    expect(response.payload).toMatchObject({
+      expenseIntakeItem: {
+        id: 'fp-1',
+        projectId: 'p001',
+      },
+      expenseSheet: {
+        id: 'default',
+      },
+    });
   });
 
   it('builds a weekly submission submit command result for a visible PM project', () => {
