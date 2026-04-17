@@ -634,6 +634,34 @@ async function savePortalEvidenceRequiredMapViaBff(params: {
   });
 }
 
+async function savePortalSheetSourceAppliedViaBff(params: {
+  tenantId: string;
+  actor: {
+    uid: string;
+    email?: string;
+    role?: string;
+    idToken?: string;
+  };
+  command: {
+    projectId: string;
+    sourceType: ProjectSheetSourceType;
+    applyTarget: string;
+  };
+}): Promise<void> {
+  const apiClient = createPlatformApiClient();
+  await apiClient.post('/api/v1/portal/sheet-source/apply', {
+    tenantId: params.tenantId,
+    actor: {
+      id: params.actor.uid,
+      email: params.actor.email,
+      role: params.actor.role,
+      ...(params.actor.idToken ? { idToken: params.actor.idToken } : {}),
+    },
+    body: params.command,
+    timeoutMs: 8000,
+  });
+}
+
 function stripUndefinedDeep<T>(value: T): T {
   if (Array.isArray(value)) {
     return value
@@ -1912,7 +1940,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     const applyTarget = normalizeSpace(String(input.applyTarget || ''));
     if (!sourceType || !applyTarget) return;
     const now = new Date().toISOString();
-    if (isDevHarnessUser || !db || !currentProjectId) {
+    const applyLocalSheetSourceState = () => {
       setSheetSources((prev) => prev.map((item) => (
         item.sourceType === sourceType
           ? {
@@ -1924,6 +1952,31 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           }
           : item
       )));
+    };
+    if (isPlatformApiEnabled() && !isDevHarnessUser) {
+      if (!authUser) {
+        throw new Error('Platform API requires an authenticated actor for sheet source apply.');
+      }
+      const idToken = authUser.idToken || await getAuthInstance()?.currentUser?.getIdToken() || undefined;
+      await savePortalSheetSourceAppliedViaBff({
+        tenantId: orgId,
+        actor: {
+          uid: authUser.uid,
+          email: authUser.email,
+          role: authUser.role,
+          idToken,
+        },
+        command: {
+          projectId: currentProjectId || '',
+          sourceType,
+          applyTarget,
+        },
+      });
+      applyLocalSheetSourceState();
+      return;
+    }
+    if (isDevHarnessUser || !db || !currentProjectId) {
+      applyLocalSheetSourceState();
       return;
     }
     await setDoc(
@@ -1938,7 +1991,8 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       }),
       { merge: true },
     );
-  }, [authUser?.name, currentProjectId, db, isDevHarnessUser, orgId, portalUser?.name]);
+    applyLocalSheetSourceState();
+  }, [authUser, currentProjectId, db, isDevHarnessUser, orgId, portalUser?.name]);
 
   const saveExpenseSheetRows = useCallback(async (rows: ImportRow[]) => {
     const now = new Date().toISOString();
