@@ -87,6 +87,7 @@ import { mountPortalEntryRoutes } from './routes/portal-entry.mjs';
 import { mountPortalReadModelRoutes } from './routes/portal-read-model.mjs';
 import { mountPortalWeeklyExpenseCommandRoutes } from './routes/portal-weekly-expense-commands.mjs';
 import { mountPortalWeeklySubmissionCommandRoutes } from './routes/portal-weekly-submission-commands.mjs';
+import { mountPortalWeeklySubmissionStatusCommandRoutes } from './routes/portal-weekly-submission-status-commands.mjs';
 import { mountPortalBankStatementHandoffCommandRoutes } from './routes/portal-bank-statement-handoff-commands.mjs';
 import { mountPortalExpenseIntakeDraftCommandRoutes } from './routes/portal-expense-intake-draft-commands.mjs';
 import { mountPortalExpenseIntakeBulkUpsertCommandRoutes } from './routes/portal-expense-intake-bulk-upsert-commands.mjs';
@@ -1372,6 +1373,13 @@ export function createBffApp(options = {}) {
     auditChainService,
   });
   mountPortalWeeklySubmissionCommandRoutes(app, {
+    db,
+    now,
+    idempotencyService,
+    createMutatingRoute,
+    auditChainService,
+  });
+  mountPortalWeeklySubmissionStatusCommandRoutes(app, {
     db,
     now,
     idempotencyService,

@@ -80,6 +80,7 @@ import { useFirebase } from '../lib/firebase-context';
 import { getAuthInstance, getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
 import {
   changeTransactionStateViaBff,
+  createPlatformApiClient,
   handoffPortalBankStatementViaBff,
   isPlatformApiEnabled,
   savePortalExpenseIntakeBulkUpsertViaBff,
@@ -515,6 +516,40 @@ function mergePortalTransactionFinanceWriteResult(
     version: result.transaction.version,
     updatedAt: result.transaction.updatedAt || current.updatedAt,
   };
+}
+
+async function savePortalWeeklySubmissionStatusViaBff(params: {
+  tenantId: string;
+  actor: {
+    uid: string;
+    email?: string;
+    role?: string;
+    idToken?: string;
+  };
+  command: {
+    projectId: string;
+    yearMonth: string;
+    weekNo: number;
+    projectionEdited?: boolean;
+    projectionUpdated?: boolean;
+    expenseEdited?: boolean;
+    expenseUpdated?: boolean;
+    expenseSyncState?: 'pending' | 'review_required' | 'synced' | 'sync_failed';
+    expenseReviewPendingCount?: number;
+  };
+}): Promise<void> {
+  const apiClient = createPlatformApiClient();
+  await apiClient.post('/api/v1/portal/weekly-submission-status/upsert', {
+    tenantId: params.tenantId,
+    actor: {
+      id: params.actor.uid,
+      email: params.actor.email,
+      role: params.actor.role,
+      ...(params.actor.idToken ? { idToken: params.actor.idToken } : {}),
+    },
+    body: params.command,
+    timeoutMs: 8000,
+  });
 }
 
 function stripUndefinedDeep<T>(value: T): T {
@@ -2176,10 +2211,6 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     expenseSyncState?: 'pending' | 'review_required' | 'synced' | 'sync_failed';
     expenseReviewPendingCount?: number;
   }) => {
-    if (!db) {
-      toast.error('Firestore 연결이 필요합니다. 관리자에게 문의해 주세요.');
-      return;
-    }
     const projectId = input.projectId?.trim();
     const yearMonth = input.yearMonth?.trim();
     const weekNo = Math.max(1, Math.min(6, Math.trunc(input.weekNo)));
@@ -2188,7 +2219,6 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     const now = new Date().toISOString();
     const updatedBy = portalUser?.name || authUser?.name || '';
     const id = `${projectId}-${yearMonth}-w${weekNo}`;
-    const ref = doc(db, getOrgDocumentPath(orgId, 'weeklySubmissionStatus', id));
     const patch: WeeklySubmissionStatus = buildWeeklySubmissionStatusPatch({
       orgId,
       projectId,
@@ -2204,13 +2234,45 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       expenseReviewPendingCount: input.expenseReviewPendingCount,
     });
     try {
-      await setDoc(ref, patch, { merge: true });
+      if (isPlatformApiEnabled() && !isDevHarnessUser) {
+        if (!authUser) {
+          throw new Error('Platform API requires an authenticated actor for weekly submission status updates.');
+        }
+        const idToken = authUser.idToken || await getAuthInstance()?.currentUser?.getIdToken() || undefined;
+        await savePortalWeeklySubmissionStatusViaBff({
+          tenantId: orgId,
+          actor: {
+            uid: authUser.uid,
+            email: authUser.email,
+            role: authUser.role,
+            idToken,
+          },
+          command: {
+            projectId,
+            yearMonth,
+            weekNo,
+            projectionEdited: input.projectionEdited,
+            projectionUpdated: input.projectionUpdated,
+            expenseEdited: input.expenseEdited,
+            expenseUpdated: input.expenseUpdated,
+            expenseSyncState: input.expenseSyncState,
+            expenseReviewPendingCount: input.expenseReviewPendingCount,
+          },
+        });
+      } else {
+        if (!db) {
+          toast.error('Firestore 연결이 필요합니다. 관리자에게 문의해 주세요.');
+          return;
+        }
+        const ref = doc(db, getOrgDocumentPath(orgId, 'weeklySubmissionStatus', id));
+        await setDoc(ref, patch, { merge: true });
+      }
     } catch (err) {
       console.error('[PortalStore] weeklySubmissionStatus save failed:', err);
       toast.error('주간 제출 상태 저장에 실패했습니다.');
       throw err;
     }
-  }, [db, orgId, portalUser?.name, authUser?.name]);
+  }, [authUser, db, isDevHarnessUser, orgId, portalUser?.name]);
 
   const createProjectRequest = useCallback(async (payload: ProjectRequestPayload): Promise<string | null> => {
     if (!db || !authUser) {

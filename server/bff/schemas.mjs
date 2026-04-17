@@ -118,6 +118,18 @@ export const portalWeeklySubmissionSubmitSchema = z.object({
   transactionIds: z.array(NON_EMPTY_STRING),
 }).strict();
 
+export const portalWeeklySubmissionStatusUpsertSchema = z.object({
+  projectId: NON_EMPTY_STRING,
+  yearMonth: z.string().trim().regex(/^\d{4}-\d{2}$/),
+  weekNo: z.number().int().positive(),
+  projectionEdited: z.boolean().optional(),
+  projectionUpdated: z.boolean().optional(),
+  expenseEdited: z.boolean().optional(),
+  expenseUpdated: z.boolean().optional(),
+  expenseSyncState: z.enum(['pending', 'review_required', 'synced', 'sync_failed']).optional(),
+  expenseReviewPendingCount: z.number().int().nonnegative().optional(),
+}).strict();
+
 export const cashflowWeekCloseSchema = z.object({
   projectId: NON_EMPTY_STRING,
   yearMonth: z.string().trim().regex(/^\d{4}-\d{2}$/),
