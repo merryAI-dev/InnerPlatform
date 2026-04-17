@@ -4,6 +4,7 @@ import { buildPortalDashboardSurface } from './portal-dashboard-surface';
 import type {
   BankImportMatchState,
   BankImportSnapshot,
+  Transaction,
   WeeklySubmissionStatus,
 } from '../data/types';
 
@@ -391,6 +392,61 @@ type PortalExpenseIntakeEvidenceSyncResult = {
     targetSheetId: string;
     patchedRowTempId: string | null;
     rowPatched: boolean;
+    version: number;
+  };
+};
+
+type PortalTransactionFinanceWriteCommand = {
+  id: string;
+  projectId: string;
+  ledgerId: string;
+  expectedVersion?: number;
+  patch: Partial<Pick<Transaction,
+    | 'dateTime'
+    | 'weekCode'
+    | 'direction'
+    | 'entryKind'
+    | 'method'
+    | 'cashflowCategory'
+    | 'cashflowLabel'
+    | 'budgetCategory'
+    | 'budgetSubCategory'
+    | 'budgetSubSubCategory'
+    | 'counterparty'
+    | 'memo'
+    | 'amounts'
+    | 'evidenceRequired'
+    | 'evidenceStatus'
+    | 'evidenceMissing'
+    | 'attachmentsCount'
+    | 'author'
+    | 'evidenceRequiredDesc'
+    | 'evidenceCompletedDesc'
+    | 'evidenceCompletedManualDesc'
+    | 'evidencePendingDesc'
+    | 'evidenceDriveLink'
+    | 'evidenceDriveSharedDriveId'
+    | 'evidenceDriveFolderId'
+    | 'evidenceDriveFolderName'
+    | 'evidenceDriveSyncStatus'
+    | 'evidenceDriveLastSyncedAt'
+    | 'evidenceAutoListedDesc'
+    | 'supportPendingDocs'
+    | 'eNaraRegistered'
+    | 'eNaraExecuted'
+    | 'vatSettlementDone'
+    | 'settlementComplete'
+    | 'settlementNote'
+  >>;
+};
+
+type PortalTransactionFinanceWriteResult = {
+  transaction: Transaction;
+  summary: {
+    id: string;
+    projectId: string;
+    ledgerId: string;
+    created: boolean;
     version: number;
   };
 };
@@ -1206,6 +1262,87 @@ export function buildDevHarnessPortalExpenseIntakeBulkUpsertResult(params: {
     summary: {
       projectId: currentProject.id,
       upsertedCount: Array.isArray(command.items) ? command.items.length : 0,
+    },
+  };
+}
+
+export function buildDevHarnessPortalTransactionFinanceWriteResult(params: {
+  actorId?: string;
+  actorRole?: string;
+  command: PortalTransactionFinanceWriteCommand;
+}): PortalTransactionFinanceWriteResult {
+  const command = params.command;
+  const actorId = normalizeText(params.actorId) || ORG_MEMBERS.find((member) => member.role === 'pm')?.uid || 'u002';
+  const { currentProject } = resolveHarnessProjectContext({
+    actorId,
+    actorRole: params.actorRole,
+    projectId: command.projectId,
+  });
+  const existingVersion = Number.isFinite(command.expectedVersion) ? Number(command.expectedVersion) : 0;
+  const created = existingVersion < 1;
+  const version = created ? 1 : existingVersion + 1;
+
+  return {
+    transaction: {
+      id: normalizeText(command.id) || `tx-${Date.now()}`,
+      projectId: currentProject.id,
+      ledgerId: normalizeText(command.ledgerId) || `${currentProject.id}-ledger-1`,
+      state: 'DRAFT',
+      dateTime: command.patch.dateTime || DEV_HARNESS_UPDATED_AT,
+      weekCode: command.patch.weekCode || '2026-W16',
+      direction: command.patch.direction || 'OUT',
+      entryKind: command.patch.entryKind,
+      method: command.patch.method || 'TRANSFER',
+      cashflowCategory: command.patch.cashflowCategory || 'MISC_EXPENSE',
+      cashflowLabel: command.patch.cashflowLabel || '운영비',
+      budgetCategory: command.patch.budgetCategory,
+      counterparty: command.patch.counterparty || '거래처',
+      memo: command.patch.memo || '',
+      amounts: command.patch.amounts || {
+        bankAmount: 0,
+        depositAmount: 0,
+        expenseAmount: 0,
+        vatIn: 0,
+        vatOut: 0,
+        vatRefund: 0,
+        balanceAfter: 0,
+      },
+      evidenceRequired: Array.isArray(command.patch.evidenceRequired) ? [...command.patch.evidenceRequired] : [],
+      evidenceStatus: command.patch.evidenceStatus || 'MISSING',
+      evidenceMissing: Array.isArray(command.patch.evidenceMissing) ? [...command.patch.evidenceMissing] : [],
+      attachmentsCount: typeof command.patch.attachmentsCount === 'number' ? command.patch.attachmentsCount : 0,
+      createdBy: created ? actorId : 'pm-old',
+      createdAt: created ? DEV_HARNESS_UPDATED_AT : '2026-04-17T08:00:00.000Z',
+      updatedBy: actorId,
+      updatedAt: DEV_HARNESS_UPDATED_AT,
+      version,
+      ...(command.patch.author !== undefined ? { author: command.patch.author } : {}),
+      ...(command.patch.budgetSubCategory !== undefined ? { budgetSubCategory: command.patch.budgetSubCategory } : {}),
+      ...(command.patch.budgetSubSubCategory !== undefined ? { budgetSubSubCategory: command.patch.budgetSubSubCategory } : {}),
+      ...(command.patch.evidenceRequiredDesc !== undefined ? { evidenceRequiredDesc: command.patch.evidenceRequiredDesc } : {}),
+      ...(command.patch.evidenceCompletedDesc !== undefined ? { evidenceCompletedDesc: command.patch.evidenceCompletedDesc } : {}),
+      ...(command.patch.evidenceCompletedManualDesc !== undefined ? { evidenceCompletedManualDesc: command.patch.evidenceCompletedManualDesc } : {}),
+      ...(command.patch.evidencePendingDesc !== undefined ? { evidencePendingDesc: command.patch.evidencePendingDesc } : {}),
+      ...(command.patch.evidenceDriveLink !== undefined ? { evidenceDriveLink: command.patch.evidenceDriveLink } : {}),
+      ...(command.patch.evidenceDriveSharedDriveId !== undefined ? { evidenceDriveSharedDriveId: command.patch.evidenceDriveSharedDriveId } : {}),
+      ...(command.patch.evidenceDriveFolderId !== undefined ? { evidenceDriveFolderId: command.patch.evidenceDriveFolderId } : {}),
+      ...(command.patch.evidenceDriveFolderName !== undefined ? { evidenceDriveFolderName: command.patch.evidenceDriveFolderName } : {}),
+      ...(command.patch.evidenceDriveSyncStatus !== undefined ? { evidenceDriveSyncStatus: command.patch.evidenceDriveSyncStatus } : {}),
+      ...(command.patch.evidenceDriveLastSyncedAt !== undefined ? { evidenceDriveLastSyncedAt: command.patch.evidenceDriveLastSyncedAt } : {}),
+      ...(command.patch.evidenceAutoListedDesc !== undefined ? { evidenceAutoListedDesc: command.patch.evidenceAutoListedDesc } : {}),
+      ...(command.patch.supportPendingDocs !== undefined ? { supportPendingDocs: command.patch.supportPendingDocs } : {}),
+      ...(command.patch.eNaraRegistered !== undefined ? { eNaraRegistered: command.patch.eNaraRegistered } : {}),
+      ...(command.patch.eNaraExecuted !== undefined ? { eNaraExecuted: command.patch.eNaraExecuted } : {}),
+      ...(command.patch.vatSettlementDone !== undefined ? { vatSettlementDone: command.patch.vatSettlementDone } : {}),
+      ...(command.patch.settlementComplete !== undefined ? { settlementComplete: command.patch.settlementComplete } : {}),
+      ...(command.patch.settlementNote !== undefined ? { settlementNote: command.patch.settlementNote } : {}),
+    },
+    summary: {
+      id: normalizeText(command.id) || `tx-${Date.now()}`,
+      projectId: currentProject.id,
+      ledgerId: normalizeText(command.ledgerId) || `${currentProject.id}-ledger-1`,
+      created,
+      version,
     },
   };
 }

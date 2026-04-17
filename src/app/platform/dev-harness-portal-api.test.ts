@@ -10,6 +10,7 @@ import {
   buildDevHarnessPortalExpenseIntakeBulkUpsertResult,
   buildDevHarnessPortalExpenseIntakeEvidenceSyncResult,
   buildDevHarnessPortalExpenseIntakeProjectResult,
+  buildDevHarnessPortalTransactionFinanceWriteResult,
   buildDevHarnessPortalOnboardingContext,
   buildDevHarnessPortalPayrollSummary,
   buildDevHarnessPortalRegistrationResult,
@@ -404,6 +405,48 @@ describe('dev harness portal api helpers', () => {
       intakeId: 'fp-1',
       targetSheetId: 'default',
       projectedRowTempId: 'bank-fp-1',
+      version: 4,
+    });
+  });
+
+  it('builds a portal transaction finance-write result without taking lifecycle ownership', () => {
+    const result = buildDevHarnessPortalTransactionFinanceWriteResult({
+      actorId: 'u002',
+      actorRole: 'pm',
+      command: {
+        id: 'tx-portal-1',
+        projectId: 'p001',
+        ledgerId: 'ledger-1',
+        expectedVersion: 3,
+        patch: {
+          counterparty: '수정 거래처',
+          memo: '수정 메모',
+          attachmentsCount: 2,
+          evidenceStatus: 'PARTIAL',
+          evidenceMissing: ['세금계산서'],
+          supportPendingDocs: '세금계산서',
+        },
+      },
+    });
+
+    expect(result.transaction).toMatchObject({
+      id: 'tx-portal-1',
+      projectId: 'p001',
+      ledgerId: 'ledger-1',
+      state: 'DRAFT',
+      counterparty: '수정 거래처',
+      memo: '수정 메모',
+      attachmentsCount: 2,
+      evidenceStatus: 'PARTIAL',
+      supportPendingDocs: '세금계산서',
+      version: 4,
+      updatedBy: 'u002',
+    });
+    expect(result.transaction.submittedBy).toBeUndefined();
+    expect(result.transaction.approvedBy).toBeUndefined();
+    expect(result.summary).toMatchObject({
+      id: 'tx-portal-1',
+      created: false,
       version: 4,
     });
   });

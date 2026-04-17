@@ -23,6 +23,7 @@ import {
   savePortalExpenseIntakeDraftViaBff,
   savePortalExpenseIntakeBulkUpsertViaBff,
   savePortalExpenseIntakeEvidenceSyncViaBff,
+  savePortalTransactionFinanceWriteViaBff,
   provisionTransactionEvidenceDriveViaBff,
   readPlatformApiRuntimeConfig,
   restoreProjectViaBff,
@@ -1160,6 +1161,68 @@ describe('platform-bff-client', () => {
       body: { newState: 'APPROVED', expectedVersion: 1, reason: undefined },
     }));
     expect(result.state).toBe('APPROVED');
+  });
+
+  it('calls portal transaction finance-write endpoint with a narrow finance patch', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({
+        data: {
+          transaction: {
+            id: 'tx001',
+            projectId: 'p001',
+            ledgerId: 'l001',
+            state: 'DRAFT',
+            counterparty: 'vendor',
+            memo: 'patched memo',
+            version: 2,
+            updatedAt: '2026-04-17T09:00:00.000Z',
+          },
+          summary: {
+            id: 'tx001',
+            projectId: 'p001',
+            ledgerId: 'l001',
+            created: false,
+            version: 2,
+          },
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    const result = await savePortalTransactionFinanceWriteViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm' },
+      command: {
+        id: 'tx001',
+        projectId: 'p001',
+        ledgerId: 'l001',
+        expectedVersion: 1,
+        patch: {
+          counterparty: 'vendor',
+          memo: 'patched memo',
+          attachmentsCount: 2,
+        },
+      },
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/portal/transactions/finance-write', expect.objectContaining({
+      tenantId: 'mysc',
+      body: {
+        id: 'tx001',
+        projectId: 'p001',
+        ledgerId: 'l001',
+        expectedVersion: 1,
+        patch: {
+          counterparty: 'vendor',
+          memo: 'patched memo',
+          attachmentsCount: 2,
+        },
+      },
+    }));
+    expect(result.transaction.version).toBe(2);
+    expect(result.summary.created).toBe(false);
   });
 
   it('calls comment/evidence endpoints', async () => {

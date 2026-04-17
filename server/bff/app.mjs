@@ -92,6 +92,7 @@ import { mountPortalExpenseIntakeDraftCommandRoutes } from './routes/portal-expe
 import { mountPortalExpenseIntakeBulkUpsertCommandRoutes } from './routes/portal-expense-intake-bulk-upsert-commands.mjs';
 import { mountPortalExpenseIntakeEvidenceSyncCommandRoutes } from './routes/portal-expense-intake-evidence-sync-commands.mjs';
 import { mountPortalExpenseIntakeProjectCommandRoutes } from './routes/portal-expense-intake-project-commands.mjs';
+import { mountPortalTransactionFinanceWriteCommandRoutes } from './routes/portal-transaction-finance-write-commands.mjs';
 import { mountCashflowWeekUpsertCommandRoutes } from './routes/cashflow-week-upsert-commands.mjs';
 import { mountCashflowWeekVarianceCommandRoutes } from './routes/cashflow-week-variance-commands.mjs';
 import { mountCashflowWeekCloseCommandRoutes } from './routes/cashflow-week-close-commands.mjs';
@@ -1404,6 +1405,13 @@ export function createBffApp(options = {}) {
     auditChainService,
   });
   mountPortalExpenseIntakeProjectCommandRoutes(app, {
+    db,
+    now,
+    idempotencyService,
+    createMutatingRoute,
+    auditChainService,
+  });
+  mountPortalTransactionFinanceWriteCommandRoutes(app, {
     db,
     now,
     idempotencyService,

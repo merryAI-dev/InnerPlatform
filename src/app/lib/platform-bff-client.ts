@@ -12,6 +12,7 @@ import type {
   ProjectSheetSourceType,
   ProjectRequestContractAnalysis,
   SettlementType,
+  Transaction,
   TransactionState,
   VarianceFlag,
   VarianceFlagEvent,
@@ -19,6 +20,7 @@ import type {
 } from '../data/types';
 import { PlatformApiClient } from '../platform/api-client';
 import { readDevAuthHarnessConfig } from '../platform/dev-harness';
+import { buildDevHarnessPortalTransactionFinanceWriteResult } from '../platform/dev-harness-portal-api';
 import { buildStandardHeaders, type RequestActor } from '../platform/request-context';
 
 export interface PlatformApiRuntimeConfig {
@@ -63,6 +65,72 @@ export interface UpsertTransactionPayload {
   ledgerId: string;
   counterparty: string;
   expectedVersion?: number;
+}
+
+type PortalTransactionFinanceEditableFields = Pick<Transaction,
+  | 'dateTime'
+  | 'weekCode'
+  | 'direction'
+  | 'entryKind'
+  | 'method'
+  | 'cashflowCategory'
+  | 'cashflowLabel'
+  | 'budgetCategory'
+  | 'budgetSubCategory'
+  | 'budgetSubSubCategory'
+  | 'counterparty'
+  | 'memo'
+  | 'amounts'
+  | 'evidenceRequired'
+  | 'evidenceStatus'
+  | 'evidenceMissing'
+  | 'attachmentsCount'
+  | 'author'
+  | 'evidenceRequiredDesc'
+  | 'evidenceCompletedDesc'
+  | 'evidenceCompletedManualDesc'
+  | 'evidencePendingDesc'
+  | 'evidenceDriveLink'
+  | 'evidenceDriveSharedDriveId'
+  | 'evidenceDriveFolderId'
+  | 'evidenceDriveFolderName'
+  | 'evidenceDriveSyncStatus'
+  | 'evidenceDriveLastSyncedAt'
+  | 'evidenceAutoListedDesc'
+  | 'supportPendingDocs'
+  | 'eNaraRegistered'
+  | 'eNaraExecuted'
+  | 'vatSettlementDone'
+  | 'settlementComplete'
+  | 'settlementNote'
+>;
+
+export type PortalTransactionFinancePatch = Partial<PortalTransactionFinanceEditableFields>;
+
+export interface PortalTransactionFinanceWriteCommand {
+  id: string;
+  projectId: string;
+  ledgerId: string;
+  expectedVersion?: number;
+  patch: PortalTransactionFinancePatch;
+}
+
+export interface PortalTransactionFinanceWriteResult {
+  transaction: Partial<Transaction> & {
+    id: string;
+    projectId: string;
+    ledgerId: string;
+    state: TransactionState;
+    version: number;
+    updatedAt: string;
+  };
+  summary: {
+    id: string;
+    projectId: string;
+    ledgerId: string;
+    created: boolean;
+    version: number;
+  };
 }
 
 export interface CreateCommentPayload {
@@ -1028,6 +1096,60 @@ function encodeHeaderValue(value: string): string {
   return encodeURIComponent(value);
 }
 
+const PORTAL_TRANSACTION_FINANCE_PATCH_FIELDS = [
+  'dateTime',
+  'weekCode',
+  'direction',
+  'entryKind',
+  'method',
+  'cashflowCategory',
+  'cashflowLabel',
+  'budgetCategory',
+  'budgetSubCategory',
+  'budgetSubSubCategory',
+  'counterparty',
+  'memo',
+  'amounts',
+  'evidenceRequired',
+  'evidenceStatus',
+  'evidenceMissing',
+  'attachmentsCount',
+  'author',
+  'evidenceRequiredDesc',
+  'evidenceCompletedDesc',
+  'evidenceCompletedManualDesc',
+  'evidencePendingDesc',
+  'evidenceDriveLink',
+  'evidenceDriveSharedDriveId',
+  'evidenceDriveFolderId',
+  'evidenceDriveFolderName',
+  'evidenceDriveSyncStatus',
+  'evidenceDriveLastSyncedAt',
+  'evidenceAutoListedDesc',
+  'supportPendingDocs',
+  'eNaraRegistered',
+  'eNaraExecuted',
+  'vatSettlementDone',
+  'settlementComplete',
+  'settlementNote',
+] as const satisfies ReadonlyArray<keyof PortalTransactionFinanceEditableFields>;
+
+export function toPortalTransactionFinancePatch(
+  transaction: Partial<Transaction>,
+): PortalTransactionFinancePatch {
+  return PORTAL_TRANSACTION_FINANCE_PATCH_FIELDS.reduce<PortalTransactionFinancePatch>((patch, field) => {
+    const value = transaction[field];
+    if (value !== undefined) {
+      patch[field] = value;
+    }
+    return patch;
+  }, {});
+}
+
+function shouldUseDevHarnessPortalFinanceWrite(client?: PlatformApiClientLike): boolean {
+  return !client && readDevAuthHarnessConfig(import.meta.env).enabled;
+}
+
 export async function upsertProjectViaBff(params: {
   tenantId: string;
   actor: ActorLike;
@@ -1138,6 +1260,33 @@ export async function changeTransactionStateViaBff(params: {
     },
   );
 
+  return response.data;
+}
+
+export async function savePortalTransactionFinanceWriteViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  command: PortalTransactionFinanceWriteCommand;
+  client?: PlatformApiClientLike;
+}): Promise<PortalTransactionFinanceWriteResult> {
+  if (shouldUseDevHarnessPortalFinanceWrite(params.client)) {
+    return buildDevHarnessPortalTransactionFinanceWriteResult({
+      actorId: params.actor.uid,
+      actorRole: params.actor.role,
+      command: params.command,
+    });
+  }
+
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<PortalTransactionFinanceWriteResult>(
+    '/api/v1/portal/transactions/finance-write',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.command,
+      timeoutMs: 8000,
+    },
+  );
   return response.data;
 }
 
