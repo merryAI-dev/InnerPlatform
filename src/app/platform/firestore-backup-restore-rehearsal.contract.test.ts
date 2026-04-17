@@ -1,3 +1,8 @@
+import { readFileSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { spawnSync } from 'node:child_process';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -104,5 +109,62 @@ describe('firestore backup restore rehearsal contract', () => {
         },
       ),
     ).toThrow(/cannot restore from a dry-run backup manifest/i);
+  });
+
+  it('writes a machine-readable rehearsal plan when the CLI receives --manifest and --json-out', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'firestore-restore-rehearsal-'));
+    const manifestPath = join(tempDir, 'backup-manifest.json');
+    const jsonOutPath = join(tempDir, 'restore-rehearsal-plan.json');
+    const scriptPath = resolve(process.cwd(), 'scripts/firestore_backup_restore_rehearsal.ts');
+
+    writeFileSync(manifestPath, `${JSON.stringify(backupManifest, null, 2)}\n`, 'utf8');
+
+    const result = spawnSync(
+      'npx',
+      [
+        'tsx',
+        scriptPath,
+        '--manifest',
+        manifestPath,
+        '--dry-run',
+        '--json-out',
+        jsonOutPath,
+      ],
+      {
+        cwd: process.cwd(),
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          FIRESTORE_RESTORE_LOCATION: 'asia-northeast3',
+          FIRESTORE_RESTORE_DATABASE_ID: 'reh-finance-20260417',
+          FIRESTORE_RESTORE_DELETE_AFTER_VERIFY: 'true',
+        },
+      },
+    );
+
+    expect(result.status).toBe(0);
+
+    const written = JSON.parse(readFileSync(jsonOutPath, 'utf8')) as {
+      projectId: string;
+      sourceDatabaseId: string;
+      restoreDatabaseId: string;
+      location: string;
+      sourceUriPrefix: string;
+      deleteAfterVerify: boolean;
+      createDatabaseCommand: string;
+      importCommand: string;
+      deleteDatabaseCommand: string;
+    };
+
+    expect(written.projectId).toBe('finance-prod');
+    expect(written.sourceDatabaseId).toBe('finance-db');
+    expect(written.restoreDatabaseId).toBe('reh-finance-20260417');
+    expect(written.location).toBe('asia-northeast3');
+    expect(written.sourceUriPrefix).toBe(backupManifest.outputUriPrefix);
+    expect(written.deleteAfterVerify).toBe(true);
+    expect(written.createDatabaseCommand).toContain('gcloud firestore databases create');
+    expect(written.importCommand).toContain('gcloud firestore import');
+    expect(written.deleteDatabaseCommand).toContain('gcloud firestore databases delete');
+    expect(result.stdout).toContain('"restoreDatabaseId": "reh-finance-20260417"');
   });
 });
