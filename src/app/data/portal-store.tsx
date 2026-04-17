@@ -81,6 +81,7 @@ import { getAuthInstance, getOrgCollectionPath, getOrgDocumentPath } from '../li
 import {
   handoffPortalBankStatementViaBff,
   isPlatformApiEnabled,
+  savePortalExpenseIntakeBulkUpsertViaBff,
   savePortalExpenseIntakeDraftViaBff,
   savePortalExpenseIntakeEvidenceSyncViaBff,
   savePortalExpenseIntakeProjectViaBff,
@@ -2472,10 +2473,10 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       .filter((item): item is BankImportIntakeItem => item !== null);
     if (normalizedItems.length === 0) return;
 
-    if (isDevHarnessUser || !db || !currentProjectId) {
-      setExpenseIntakeItems((prev) => {
+    const commitExpenseIntakeItems = (nextIncomingItems: BankImportIntakeItem[]) => {
+      setExpenseIntakeItems(() => {
         const nextMap = new Map(expenseIntakeItemsRef.current.map((item) => [item.id, item] as const));
-        normalizedItems.forEach((item) => {
+        nextIncomingItems.forEach((item) => {
           nextMap.set(item.id, item);
         });
         const nextItems = Array.from(nextMap.values())
@@ -2483,6 +2484,44 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         expenseIntakeItemsRef.current = nextItems;
         return nextItems;
       });
+    };
+
+    if (isDevHarnessUser || !db || !currentProjectId) {
+      commitExpenseIntakeItems(normalizedItems);
+      return;
+    }
+
+    if (isPlatformApiEnabled()) {
+      if (!authUser) return;
+      const idToken = authUser.idToken || await getAuthInstance()?.currentUser?.getIdToken() || undefined;
+      const result = await savePortalExpenseIntakeBulkUpsertViaBff({
+        tenantId: orgId,
+        actor: {
+          uid: authUser.uid,
+          email: authUser.email,
+          role: authUser.role,
+          idToken,
+        },
+        command: {
+          projectId: currentProjectId,
+          items: normalizedItems.map((item) => ({
+            id: item.id,
+            sourceTxId: item.sourceTxId,
+            bankFingerprint: item.bankFingerprint,
+            bankSnapshot: item.bankSnapshot,
+            matchState: item.matchState,
+            manualFields: item.manualFields,
+            lastUploadBatchId: item.lastUploadBatchId,
+            createdAt: item.createdAt,
+            updatedAt: item.updatedAt,
+            updatedBy: item.updatedBy,
+          })),
+        },
+      });
+      if (Number(result.summary?.upsertedCount || 0) !== normalizedItems.length) {
+        throw new Error('expense_intake_bulk_upsert_count_mismatch');
+      }
+      commitExpenseIntakeItems(normalizedItems);
       return;
     }
 
@@ -2493,17 +2532,8 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         { merge: true },
       )),
     );
-    setExpenseIntakeItems((prev) => {
-      const nextMap = new Map(expenseIntakeItemsRef.current.map((item) => [item.id, item] as const));
-      normalizedItems.forEach((item) => {
-        nextMap.set(item.id, item);
-      });
-      const nextItems = Array.from(nextMap.values())
-        .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')));
-      expenseIntakeItemsRef.current = nextItems;
-      return nextItems;
-    });
-  }, [currentProjectId, db, isDevHarnessUser, orgId]);
+    commitExpenseIntakeItems(normalizedItems);
+  }, [authUser, currentProjectId, db, isDevHarnessUser, orgId]);
 
   const saveExpenseIntakeDraft = useCallback(async (id: string, updates: Partial<BankImportIntakeItem>) => {
     const currentItem = expenseIntakeItemsRef.current.find((item) => item.id === id);

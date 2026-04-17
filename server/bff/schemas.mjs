@@ -211,6 +211,33 @@ const bankImportManualFieldsSchema = z.object({
   evidenceCompletedDesc: z.string().optional(),
 }).strict();
 
+const bankImportSnapshotSchema = z.object({
+  accountNumber: NON_EMPTY_STRING,
+  dateTime: NON_EMPTY_STRING,
+  counterparty: NON_EMPTY_STRING,
+  memo: NON_EMPTY_STRING,
+  signedAmount: z.number(),
+  balanceAfter: z.number(),
+}).strict();
+
+export const portalExpenseIntakeBulkUpsertItemSchema = z.object({
+  id: NON_EMPTY_STRING,
+  sourceTxId: NON_EMPTY_STRING,
+  bankFingerprint: NON_EMPTY_STRING,
+  bankSnapshot: bankImportSnapshotSchema,
+  matchState: z.enum(['AUTO_CONFIRMED', 'PENDING_INPUT', 'REVIEW_REQUIRED', 'IGNORED']),
+  manualFields: bankImportManualFieldsSchema,
+  lastUploadBatchId: NON_EMPTY_STRING,
+  createdAt: NON_EMPTY_STRING,
+  updatedAt: NON_EMPTY_STRING,
+  updatedBy: NON_EMPTY_STRING,
+}).strict();
+
+export const portalExpenseIntakeBulkUpsertSchema = z.object({
+  projectId: NON_EMPTY_STRING,
+  items: z.array(portalExpenseIntakeBulkUpsertItemSchema),
+}).strict();
+
 const portalExpenseIntakeUpdatesSchema = z.object({
   manualFields: bankImportManualFieldsSchema.optional(),
   existingExpenseSheetId: NON_EMPTY_STRING.nullish(),

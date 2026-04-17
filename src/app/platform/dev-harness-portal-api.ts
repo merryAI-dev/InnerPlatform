@@ -1,7 +1,11 @@
 import { ORG_MEMBERS, PROJECTS } from '../data/mock-data';
 import { resolveCurrentCashflowWeek } from './cashflow-export-surface';
 import { buildPortalDashboardSurface } from './portal-dashboard-surface';
-import type { WeeklySubmissionStatus } from '../data/types';
+import type {
+  BankImportMatchState,
+  BankImportSnapshot,
+  WeeklySubmissionStatus,
+} from '../data/types';
 
 type PortalEntryProjectSummary = {
   id: string;
@@ -325,6 +329,29 @@ type PortalExpenseIntakeProjectResult = {
   };
 };
 
+type PortalExpenseIntakeBulkUpsertCommand = {
+  projectId: string;
+  items: Array<{
+    id: string;
+    sourceTxId: string;
+    bankFingerprint: string;
+    bankSnapshot: BankImportSnapshot;
+    matchState: BankImportMatchState;
+    manualFields: BankImportManualFields;
+    lastUploadBatchId: string;
+    createdAt: string;
+    updatedAt: string;
+    updatedBy: string;
+  }>;
+};
+
+type PortalExpenseIntakeBulkUpsertResult = {
+  summary: {
+    projectId: string;
+    upsertedCount: number;
+  };
+};
+
 type PortalExpenseIntakeEvidenceSyncCommand = {
   projectId: string;
   intakeId: string;
@@ -645,7 +672,11 @@ function resolveHarnessProjectContext(params: {
 
 function buildHarnessProjectReadModel(
   project: PortalEntryProjectSummary,
-  projectRecord?: Record<string, unknown>,
+  projectRecord?: {
+    settlementType?: unknown;
+    basis?: unknown;
+    contractAmount?: unknown;
+  },
 ): PortalDashboardSummaryResult['project'] {
   return {
     ...project,
@@ -1154,6 +1185,27 @@ export function buildDevHarnessPortalExpenseIntakeEvidenceSyncResult(params: {
       patchedRowTempId: projected.summary.projectedRowTempId,
       rowPatched: true,
       version: projected.summary.version,
+    },
+  };
+}
+
+export function buildDevHarnessPortalExpenseIntakeBulkUpsertResult(params: {
+  actorId?: string;
+  actorRole?: string;
+  command: PortalExpenseIntakeBulkUpsertCommand;
+}): PortalExpenseIntakeBulkUpsertResult {
+  const command = params.command;
+  const actorId = normalizeText(params.actorId) || ORG_MEMBERS.find((member) => member.role === 'pm')?.uid || 'u002';
+  const { currentProject } = resolveHarnessProjectContext({
+    actorId,
+    actorRole: params.actorRole,
+    projectId: command.projectId,
+  });
+
+  return {
+    summary: {
+      projectId: currentProject.id,
+      upsertedCount: Array.isArray(command.items) ? command.items.length : 0,
     },
   };
 }

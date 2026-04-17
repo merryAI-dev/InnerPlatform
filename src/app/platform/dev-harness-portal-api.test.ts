@@ -7,6 +7,7 @@ import {
   buildDevHarnessPortalDashboardSummary,
   buildDevHarnessPortalEntryContext,
   buildDevHarnessPortalExpenseIntakeDraftResult,
+  buildDevHarnessPortalExpenseIntakeBulkUpsertResult,
   buildDevHarnessPortalExpenseIntakeEvidenceSyncResult,
   buildDevHarnessPortalExpenseIntakeProjectResult,
   buildDevHarnessPortalOnboardingContext,
@@ -324,6 +325,42 @@ describe('dev harness portal api helpers', () => {
     expect(result.summary).toEqual({
       updatedManualFieldCount: 2,
       version: 3,
+    });
+  });
+
+  it('builds an expense intake bulk upsert command result for a visible PM project', () => {
+    const result = buildDevHarnessPortalExpenseIntakeBulkUpsertResult({
+      actorId: 'u002',
+      actorRole: 'pm',
+      command: {
+        projectId: 'p001',
+        items: [
+          {
+            id: 'fp-1',
+            sourceTxId: 'bank:fp-1',
+            bankFingerprint: 'fp-1',
+            bankSnapshot: {
+              accountNumber: '111-222-333',
+              dateTime: '2026-04-17T08:00:00.000Z',
+              counterparty: '가맹점',
+              memo: '카드 결제',
+              signedAmount: -120000,
+              balanceAfter: 910000,
+            },
+            matchState: 'PENDING_INPUT',
+            manualFields: {},
+            lastUploadBatchId: 'batch-1',
+            createdAt: '2026-04-17T08:10:00.000Z',
+            updatedAt: '2026-04-17T08:15:00.000Z',
+            updatedBy: 'pm-old',
+          },
+        ],
+      },
+    });
+
+    expect(result.summary).toEqual({
+      projectId: 'p001',
+      upsertedCount: 1,
     });
   });
 
@@ -690,6 +727,51 @@ describe('dev harness portal api helpers', () => {
         summary: {
           updatedManualFieldCount: 1,
           version: 3,
+        },
+      },
+    });
+  });
+
+  it('handles expense intake bulk upsert through the vite dev harness router', async () => {
+    const response = await resolveDevHarnessPortalApiResponse({
+      enabled: true,
+      method: 'POST',
+      url: '/api/v1/portal/expense-intake/bulk-upsert',
+      actorId: 'u002',
+      actorRole: 'pm',
+      readBody: async () => ({
+        projectId: 'p001',
+        items: [
+          {
+            id: 'fp-1',
+            sourceTxId: 'bank:fp-1',
+            bankFingerprint: 'fp-1',
+            bankSnapshot: {
+              accountNumber: '111-222-333',
+              dateTime: '2026-04-17T08:00:00.000Z',
+              counterparty: '가맹점',
+              memo: '카드 결제',
+              signedAmount: -120000,
+              balanceAfter: 910000,
+            },
+            matchState: 'PENDING_INPUT',
+            manualFields: {},
+            lastUploadBatchId: 'batch-1',
+            createdAt: '2026-04-17T08:10:00.000Z',
+            updatedAt: '2026-04-17T08:15:00.000Z',
+            updatedBy: 'pm-old',
+          },
+        ],
+      }),
+    });
+
+    expect(response).toMatchObject({
+      handled: true,
+      statusCode: 200,
+      payload: {
+        summary: {
+          projectId: 'p001',
+          upsertedCount: 1,
         },
       },
     });

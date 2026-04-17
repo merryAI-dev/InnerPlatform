@@ -2,9 +2,12 @@ import { featureFlags, parseFeatureFlag } from '../config/feature-flags';
 import type {
   AccountType,
   BankImportIntakeItem,
+  BankImportMatchState,
   BankImportManualFields,
+  BankImportSnapshot,
   Basis,
   CashflowWeekSheet,
+  CashflowSheetLineId,
   ProjectSheetSourceSnapshot,
   ProjectSheetSourceType,
   ProjectRequestContractAnalysis,
@@ -515,6 +518,29 @@ export interface PortalExpenseIntakeEvidenceSyncResult {
     patchedRowTempId: string | null;
     rowPatched: boolean;
     version: number;
+  };
+}
+
+export interface PortalExpenseIntakeBulkUpsertCommand {
+  projectId: string;
+  items: Array<{
+    id: string;
+    sourceTxId: string;
+    bankFingerprint: string;
+    bankSnapshot: BankImportSnapshot;
+    matchState: BankImportMatchState;
+    manualFields: BankImportManualFields;
+    lastUploadBatchId: string;
+    createdAt: string;
+    updatedAt: string;
+    updatedBy: string;
+  }>;
+}
+
+export interface PortalExpenseIntakeBulkUpsertResult {
+  summary: {
+    projectId: string;
+    upsertedCount: number;
   };
 }
 
@@ -1659,6 +1685,25 @@ export async function savePortalExpenseIntakeEvidenceSyncViaBff(params: {
   const apiClient = resolveClient(params.client);
   const response = await apiClient.post<PortalExpenseIntakeEvidenceSyncResult>(
     '/api/v1/portal/expense-intake/evidence-sync',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.command,
+      timeoutMs: 8000,
+    },
+  );
+  return response.data;
+}
+
+export async function savePortalExpenseIntakeBulkUpsertViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  command: PortalExpenseIntakeBulkUpsertCommand;
+  client?: PlatformApiClientLike;
+}): Promise<PortalExpenseIntakeBulkUpsertResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<PortalExpenseIntakeBulkUpsertResult>(
+    '/api/v1/portal/expense-intake/bulk-upsert',
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),

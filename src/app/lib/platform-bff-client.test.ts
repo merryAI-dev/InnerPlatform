@@ -21,6 +21,7 @@ import {
   processProjectRequestContractViaBff,
   provisionProjectEvidenceDriveRootViaBff,
   savePortalExpenseIntakeDraftViaBff,
+  savePortalExpenseIntakeBulkUpsertViaBff,
   savePortalExpenseIntakeEvidenceSyncViaBff,
   provisionTransactionEvidenceDriveViaBff,
   readPlatformApiRuntimeConfig,
@@ -244,6 +245,99 @@ describe('platform-bff-client', () => {
     });
     expect(result.financeSummaryItems[0]).toEqual({ label: '총 입금', value: '300만' });
     expect(result.submissionRows[0]?.expenseTone).toBe('success');
+  });
+
+  it('calls the expense intake bulk upsert endpoint', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({
+        data: {
+          summary: {
+            projectId: 'p001',
+            upsertedCount: 1,
+          },
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    const result = await savePortalExpenseIntakeBulkUpsertViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm' },
+      command: {
+        projectId: 'p001',
+        items: [
+          {
+            id: 'abc',
+            sourceTxId: 'bank:abc',
+            bankFingerprint: 'fp-abc',
+            bankSnapshot: {
+              accountNumber: '111-222-333',
+              dateTime: '2026-04-17T08:00:00.000Z',
+              counterparty: '가맹점',
+              memo: '카드 결제',
+              signedAmount: -120000,
+              balanceAfter: 910000,
+            },
+            matchState: 'PENDING_INPUT',
+            manualFields: {
+              budgetCategory: '여비',
+              budgetSubCategory: '교통비',
+            },
+            lastUploadBatchId: 'batch-1',
+            createdAt: '2026-04-17T08:10:00.000Z',
+            updatedAt: '2026-04-17T08:15:00.000Z',
+            updatedBy: 'pm-old',
+          },
+        ],
+      },
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/portal/expense-intake/bulk-upsert', expect.objectContaining({
+      tenantId: 'mysc',
+      body: {
+        projectId: 'p001',
+        items: [
+          {
+            id: 'abc',
+            sourceTxId: 'bank:abc',
+            bankFingerprint: 'fp-abc',
+            bankSnapshot: {
+              accountNumber: '111-222-333',
+              dateTime: '2026-04-17T08:00:00.000Z',
+              counterparty: '가맹점',
+              memo: '카드 결제',
+              signedAmount: -120000,
+              balanceAfter: 910000,
+            },
+            matchState: 'PENDING_INPUT',
+            manualFields: {
+              budgetCategory: '여비',
+              budgetSubCategory: '교통비',
+            },
+            lastUploadBatchId: 'batch-1',
+            createdAt: '2026-04-17T08:10:00.000Z',
+            updatedAt: '2026-04-17T08:15:00.000Z',
+            updatedBy: 'pm-old',
+          },
+        ],
+      },
+    }));
+    const postMock = client.post as unknown as {
+      mock: {
+        calls: Array<[string, { body: { items: Array<Record<string, unknown>> } }]>;
+      };
+    };
+    const forwardedItem = postMock.mock.calls[0]?.[1]?.body?.items?.[0];
+    expect(forwardedItem).not.toHaveProperty('projectId');
+    expect(forwardedItem).not.toHaveProperty('projectionStatus');
+    expect(forwardedItem).not.toHaveProperty('evidenceStatus');
+    expect(forwardedItem).not.toHaveProperty('reviewReasons');
+    expect(result.summary).toEqual({
+      projectId: 'p001',
+      upsertedCount: 1,
+    });
   });
 
   it('calls portal weekly expense save command endpoint', async () => {

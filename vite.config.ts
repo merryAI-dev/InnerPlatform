@@ -8,6 +8,7 @@ import {
   buildDevHarnessPortalBankStatementHandoffResult,
   buildDevHarnessPortalCloseCashflowWeekResult,
   buildDevHarnessPortalExpenseIntakeDraftResult,
+  buildDevHarnessPortalExpenseIntakeBulkUpsertResult,
   buildDevHarnessPortalUpsertCashflowWeekResult,
   buildDevHarnessPortalDashboardSummary,
   buildDevHarnessPortalEntryContext,
@@ -210,6 +211,19 @@ export async function resolveDevHarnessPortalApiResponse(params: {
           actorId: params.actorId,
           actorRole: params.actorRole,
           command: body as Parameters<typeof buildDevHarnessPortalExpenseIntakeDraftResult>[0]['command'],
+        }),
+      }
+    }
+
+    if (method === 'POST' && pathName === '/api/v1/portal/expense-intake/bulk-upsert') {
+      const body = await params.readBody()
+      return {
+        handled: true,
+        statusCode: 200,
+        payload: buildDevHarnessPortalExpenseIntakeBulkUpsertResult({
+          actorId: params.actorId,
+          actorRole: params.actorRole,
+          command: body as Parameters<typeof buildDevHarnessPortalExpenseIntakeBulkUpsertResult>[0]['command'],
         }),
       }
     }
