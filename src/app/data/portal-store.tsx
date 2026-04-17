@@ -607,6 +607,33 @@ async function savePortalBudgetPlanViaBff(params: {
   });
 }
 
+async function savePortalEvidenceRequiredMapViaBff(params: {
+  tenantId: string;
+  actor: {
+    uid: string;
+    email?: string;
+    role?: string;
+    idToken?: string;
+  };
+  command: {
+    projectId: string;
+    map: Record<string, string>;
+  };
+}): Promise<void> {
+  const apiClient = createPlatformApiClient();
+  await apiClient.post('/api/v1/portal/evidence-required-map/save', {
+    tenantId: params.tenantId,
+    actor: {
+      id: params.actor.uid,
+      email: params.actor.email,
+      role: params.actor.role,
+      ...(params.actor.idToken ? { idToken: params.actor.idToken } : {}),
+    },
+    body: params.command,
+    timeoutMs: 8000,
+  });
+}
+
 function stripUndefinedDeep<T>(value: T): T {
   if (Array.isArray(value)) {
     return value
@@ -1839,6 +1866,27 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     }
     if (!db || !currentProjectId) {
       toast.error('Firestore 연결이 필요합니다. 관리자에게 문의해 주세요.');
+      return;
+    }
+    if (isPlatformApiEnabled() && !isDevHarnessUser) {
+      if (!authUser) {
+        throw new Error('Platform API requires an authenticated actor for evidence requirement saves.');
+      }
+      const idToken = authUser.idToken || await getAuthInstance()?.currentUser?.getIdToken() || undefined;
+      await savePortalEvidenceRequiredMapViaBff({
+        tenantId: orgId,
+        actor: {
+          uid: authUser.uid,
+          email: authUser.email,
+          role: authUser.role,
+          idToken,
+        },
+        command: {
+          projectId: currentProjectId,
+          map,
+        },
+      });
+      setEvidenceRequiredMap(map);
       return;
     }
     const now = new Date().toISOString();
