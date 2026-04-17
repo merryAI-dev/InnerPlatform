@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
+import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const VALID_TIERS = new Set(['daily', 'weekly', 'monthly']);
@@ -25,6 +27,11 @@ function resolveDateStamp(now) {
   const iso = (now || new Date()).toISOString().replace(/\.\d{3}Z$/, 'Z');
   const datePath = iso.slice(0, 10).replace(/-/g, '/');
   return { iso: iso.replace(/:/g, '-'), datePath };
+}
+
+function normalizeJsonOutPath(rawValue) {
+  const value = readEnvText(rawValue);
+  return value || '';
 }
 
 export function resolveFirestoreBackupExportConfig(env = process.env, now = new Date()) {
@@ -116,12 +123,63 @@ export function buildFirestoreBackupExportArgs(config) {
   ];
 }
 
+export function buildFirestoreBackupExportManifest(config, now = config?.now || new Date()) {
+  return {
+    generatedAt: (now || new Date()).toISOString(),
+    projectId: config.projectId,
+    databaseId: config.databaseId,
+    tier: config.tier,
+    bucketUri: config.bucketUri,
+    outputUriPrefix: buildFirestoreBackupExportPrefix(config),
+    command: buildFirestoreBackupExportCommand(config),
+    collectionIds: Array.isArray(config.collectionIds) ? [...config.collectionIds] : [],
+    snapshotTime: config.snapshotTime || '',
+    asyncExport: !!config.asyncExport,
+    dryRun: !!config.dryRun,
+  };
+}
+
+function parseCliArgs(argv) {
+  const args = Array.isArray(argv) ? argv : [];
+  let dryRun = false;
+  let jsonOutPath = '';
+
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (arg === '--dry-run') {
+      dryRun = true;
+      continue;
+    }
+    if (arg === '--json-out') {
+      jsonOutPath = normalizeJsonOutPath(args[i + 1]);
+      if (jsonOutPath) i += 1;
+      continue;
+    }
+    if (arg.startsWith('--json-out=')) {
+      jsonOutPath = normalizeJsonOutPath(arg.slice('--json-out='.length));
+    }
+  }
+
+  return { dryRun, jsonOutPath };
+}
+
+function writeFirestoreBackupExportManifest(jsonOutPath, manifest) {
+  if (!jsonOutPath) return;
+  mkdirSync(dirname(jsonOutPath), { recursive: true });
+  writeFileSync(jsonOutPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+}
+
 async function runCli() {
-  const args = process.argv.slice(2);
-  const dryRunArg = args.includes('--dry-run');
+  const { dryRun: dryRunArg, jsonOutPath } = parseCliArgs(process.argv.slice(2));
   const config = resolveFirestoreBackupExportConfig(process.env, new Date());
   const command = buildFirestoreBackupExportCommand(config);
   const shouldDryRun = dryRunArg || config.dryRun;
+  const manifest = buildFirestoreBackupExportManifest({
+    ...config,
+    dryRun: shouldDryRun,
+  }, new Date());
+
+  writeFirestoreBackupExportManifest(jsonOutPath, manifest);
 
   if (shouldDryRun) {
     console.log(command);
