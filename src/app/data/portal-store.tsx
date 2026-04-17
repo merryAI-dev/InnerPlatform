@@ -734,13 +734,13 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     try {
       if (activeProjectId) {
         sessionStorage.setItem(storageKey, activeProjectId);
-      } else {
+      } else if (scopedProjectIds.length > 0) {
         sessionStorage.removeItem(storageKey);
       }
     } catch {
       // ignore sessionStorage failures
     }
-  }, [activeProjectId, authUser?.uid]);
+  }, [activeProjectId, authUser?.uid, scopedProjectIdsKey]);
 
   useEffect(() => {
     if (!isDevHarnessUser || !activeProjectId || devHarnessHydratedProjectIdRef.current !== activeProjectId) return;

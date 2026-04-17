@@ -14,4 +14,10 @@ describe('portal-store realtime safety', () => {
     expect(portalStoreSource).toContain('scopedProjectIdsKey, isDevHarnessUser, portalUserProjectIdsKey, livePortalMode');
     expect(portalStoreSource).not.toContain('scopedProjectIds, isDevHarnessUser, portalUser?.projectIds, livePortalMode');
   });
+
+  it('does not clear the session active project before portal candidates are hydrated', () => {
+    expect(portalStoreSource).toContain("if (activeProjectId) {");
+    expect(portalStoreSource).toContain("} else if (scopedProjectIds.length > 0) {");
+    expect(portalStoreSource).toContain('sessionStorage.removeItem(storageKey);');
+  });
 });
