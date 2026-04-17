@@ -410,6 +410,12 @@ export const projectSheetSourceUploadSchema = z.object({
   applyTarget: z.string().trim().max(120).optional(),
 }).strict();
 
+export const portalSheetSourceApplySchema = z.object({
+  projectId: NON_EMPTY_STRING,
+  sourceType: z.enum(['usage', 'budget', 'evidence_rules', 'cashflow', 'bank_statement']),
+  applyTarget: NON_EMPTY_STRING.max(120),
+}).strict();
+
 export const clientErrorIngestSchema = z.object({
   eventType: z.enum(['exception', 'message']).optional(),
   message: NON_EMPTY_STRING.max(4000),
