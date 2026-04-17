@@ -41,6 +41,7 @@
     "rust:settlement:test": "cargo test --manifest-path rust/spreadsheet-calculation-core/Cargo.toml",
     "workbook:extract:formulas": "npx tsx scripts/extract_workbook_formula_inventory.ts",
     "firestore:backup:export": "npx tsx scripts/firestore_backup_export.ts",
+    "firestore:backup:retention": "npx tsx scripts/firestore_backup_retention.ts",
     "firestore:backup:restore-rehearsal": "npx tsx scripts/firestore_backup_restore_rehearsal.ts",
     "firestore:live-cutover": "npx tsx scripts/firestore_live_cutover.ts",
     "firestore:backup:schedule": "bash scripts/firestore_backup_schedule.sh",
