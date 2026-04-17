@@ -30,6 +30,13 @@ describe('PortalWeeklyExpensePage flow layout', () => {
     expect(weeklyExpenseSource).toContain('저장이 끝날 때까지 잠시 기다려 주세요.');
   });
 
+  it('renders the unsaved-changes dialog as a large centered modal surface', () => {
+    expect(weeklyExpenseSource).toContain('data-testid="weekly-expense-unsaved-dialog"');
+    expect(weeklyExpenseSource).toContain('w-[min(92vw,56rem)] max-w-none');
+    expect(weeklyExpenseSource).toContain('min-h-[22rem]');
+    expect(weeklyExpenseSource).toContain('items-center gap-4 text-center');
+  });
+
   it('uses a Korean first-action heading instead of the previous English label', () => {
     expect(weeklyExpenseSource).toContain('지금 해야 할 일');
     expect(weeklyExpenseSource).not.toContain('Next Action');

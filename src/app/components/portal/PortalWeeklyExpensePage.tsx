@@ -1061,16 +1061,28 @@ export function PortalWeeklyExpensePage() {
           if (!open) setPendingNavigationAttempt(null);
         }}
       >
-        <AlertDialogContent data-testid="weekly-expense-unsaved-dialog">
-          <AlertDialogHeader>
-            <AlertDialogTitle>저장되지 않은 사업비 입력이 있습니다</AlertDialogTitle>
-            <AlertDialogDescription>
+        <AlertDialogContent
+          data-testid="weekly-expense-unsaved-dialog"
+          className="w-[min(92vw,56rem)] max-w-none overflow-hidden rounded-[28px] p-0 sm:max-w-none"
+        >
+          <div className="flex min-h-[22rem] flex-col items-center justify-center gap-8 px-8 py-10 text-center sm:px-12 sm:py-12">
+          <AlertDialogHeader className="items-center gap-4 text-center">
+            <AlertDialogTitle className="text-2xl font-bold tracking-[-0.03em] text-slate-950 sm:text-[2rem]">
+              저장되지 않은 사업비 입력이 있습니다
+            </AlertDialogTitle>
+            <AlertDialogDescription className="max-w-2xl text-base leading-8 text-slate-600 sm:text-lg">
               지금 이동하면 저장되지 않은 사업비 입력(주간) 편집 내용이 유실될 수 있습니다.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setPendingNavigationAttempt(null)}>계속 편집</AlertDialogCancel>
+          <AlertDialogFooter className="w-full items-center justify-center gap-3 sm:flex-row sm:justify-center">
+            <AlertDialogCancel
+              className="h-12 min-w-[11rem] rounded-xl px-6 text-sm font-semibold"
+              onClick={() => setPendingNavigationAttempt(null)}
+            >
+              계속 편집
+            </AlertDialogCancel>
             <AlertDialogAction
+              className="h-12 min-w-[12rem] rounded-xl px-6 text-sm font-semibold"
               onClick={() => {
                 if (!pendingNavigationAttempt) return;
                 const nextPath = pendingNavigationAttempt.path;
@@ -1081,6 +1093,7 @@ export function PortalWeeklyExpensePage() {
               변경 버리고 이동
             </AlertDialogAction>
           </AlertDialogFooter>
+          </div>
         </AlertDialogContent>
       </AlertDialog>
     </div>
