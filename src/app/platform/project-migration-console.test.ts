@@ -105,17 +105,18 @@ describe('project-migration-console', () => {
       [
         makeProject({ id: 'p-1', name: '에코스타트업', cic: 'CIC-A' }),
         makeProject({ id: 'p-2', name: '기후테크', cic: 'CIC-B', executiveReviewStatus: 'REVISION_REJECTED' }),
-        makeProject({ id: 'p-3', registrationSource: 'manual' }),
+        makeProject({ id: 'p-3', registrationSource: 'manual', name: '기존 등록 사업', cic: 'CIC-C' }),
       ],
       [
         makeRequest({ approvedProjectId: 'p-1', payload: { ...makeRequest().payload, department: 'CIC-A' } }),
       ],
     );
 
-    expect(records).toHaveLength(2);
-    expect(records.map((record) => record.id)).toEqual(['p-1', 'p-2']);
+    expect(records).toHaveLength(3);
+    expect(records.map((record) => record.id)).toEqual(['p-1', 'p-2', 'p-3']);
     expect(records[0].status).toBe('PENDING');
     expect(records[1].status).toBe('REVISION_REJECTED');
+    expect(records[2].status).toBe('APPROVED');
   });
 
   it('filters by cic and review status', () => {
@@ -135,23 +136,24 @@ describe('project-migration-console', () => {
     expect(filtered[0].project.id).toBe('p-2');
   });
 
-  it('summarizes review queue counts by executive outcome', () => {
+  it('summarizes review queue counts by executive outcome across all projects', () => {
     const records = buildMigrationAuditConsoleRecords(
       [
         makeProject({ id: 'p-1', executiveReviewStatus: 'APPROVED' }),
         makeProject({ id: 'p-2', executiveReviewStatus: 'REVISION_REJECTED' }),
         makeProject({ id: 'p-3', executiveReviewStatus: 'DUPLICATE_DISCARDED' }),
         makeProject({ id: 'p-4' }),
+        makeProject({ id: 'p-5', registrationSource: 'manual' }),
       ],
       [],
     );
 
     const summary = summarizeMigrationAuditConsole(records);
     expect(summary.pending).toBe(1);
-    expect(summary.approved).toBe(1);
+    expect(summary.approved).toBe(2);
     expect(summary.rejected).toBe(1);
     expect(summary.discarded).toBe(1);
-    expect(summary.total).toBe(4);
+    expect(summary.total).toBe(5);
   });
 
   it('collects cic options from PM portal projects only', () => {

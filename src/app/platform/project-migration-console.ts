@@ -52,6 +52,7 @@ function deriveProjectRequestMap(requests: ProjectRequest[]): Map<string, Projec
 }
 
 export function deriveMigrationAuditStatus(project: Project): MigrationAuditConsoleStatus {
+  if (project.registrationSource !== 'pm_portal') return 'APPROVED';
   return project.executiveReviewStatus || 'PENDING';
 }
 
@@ -73,7 +74,7 @@ export function buildMigrationAuditConsoleRecords(
   const requestMap = deriveProjectRequestMap(requests);
 
   return projects
-    .filter((project) => project.registrationSource === 'pm_portal' && !project.trashedAt)
+    .filter((project) => !project.trashedAt)
     .map((project) => {
       const request = requestMap.get(project.id) || null;
       return {

@@ -24,6 +24,10 @@ function formatRequestedAt(value: string) {
   return String(value || '').slice(0, 10).replace(/-/g, '.');
 }
 
+function getSourceLabel(record: MigrationAuditConsoleRecord) {
+  return record.project.registrationSource === 'pm_portal' ? 'PM 등록' : '기존 등록';
+}
+
 export function MigrationAuditQueueRail({
   records,
   selectedId,
@@ -75,6 +79,9 @@ export function MigrationAuditQueueRail({
                       </Badge>
                       <Badge variant="outline" className={`text-[10px] ${selected ? 'border-white/20 text-white' : 'border-slate-200 text-slate-600'}`}>
                         {item.cic}
+                      </Badge>
+                      <Badge variant="outline" className={`text-[10px] ${selected ? 'border-white/20 text-white' : 'border-slate-200 text-slate-600'}`}>
+                        {getSourceLabel(item)}
                       </Badge>
                     </div>
                     <div className="space-y-1">
