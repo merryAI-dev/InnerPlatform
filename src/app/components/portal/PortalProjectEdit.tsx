@@ -188,6 +188,13 @@ function mergeContractAnalysisIntoForm(
 function resolveExecutiveBanner(project: Project, request: ProjectRequest | null) {
   const status = project.executiveReviewStatus || request?.reviewOutcome || 'PENDING';
   const reason = project.executiveReviewComment || request?.rejectedReason || request?.reviewComment || '';
+  if (status === 'APPROVED') {
+    return {
+      tone: 'neutral' as const,
+      title: '리뷰 완료',
+      description: '임원 리뷰가 완료된 프로젝트입니다. 이후 보완이 필요하면 같은 화면에서 수정하고 다시 리뷰 흐름을 이어갈 수 있습니다.',
+    };
+  }
   if (status === 'REVISION_REJECTED') {
     return {
       tone: 'warning' as const,
@@ -205,8 +212,8 @@ function resolveExecutiveBanner(project: Project, request: ProjectRequest | null
   if (status === 'PENDING' && project.registrationSource === 'pm_portal') {
     return {
       tone: 'neutral' as const,
-      title: '임원 재검토 대기',
-      description: '현재 수정본이 임원 심사 큐에 올라가 있습니다. 필요한 보완만 저장하고, 다시 제출은 필요한 경우에만 누르세요.',
+      title: '임원 리뷰 대기',
+      description: '현재 수정본이 임원 리뷰 큐에 올라가 있습니다. 필요한 보완만 저장하고, 다시 제출은 필요한 경우에만 누르세요.',
     };
   }
   return null;
@@ -432,7 +439,7 @@ export function PortalProjectEdit() {
     try {
       await persistProject();
       toast.success('프로젝트 정보가 저장되었습니다.', {
-        description: '반려 상태라면 내용을 더 보완한 뒤 “수정 후 다시 제출”로 임원 큐에 다시 올리세요.',
+        description: '반려 상태라면 내용을 더 보완한 뒤 “수정 후 다시 제출”로 임원 리뷰 큐에 다시 올리세요.',
       });
     } catch (err) {
       toast.error('저장에 실패했습니다. 다시 시도해주세요.');
@@ -444,7 +451,7 @@ export function PortalProjectEdit() {
 
   const handleResubmit = async () => {
     if (!orgId || !authUser?.uid || !myProject || !requestDoc) {
-      toast.error('다시 제출할 심사 요청 정보를 찾지 못했습니다.');
+      toast.error('다시 제출할 리뷰 요청 정보를 찾지 못했습니다.');
       return;
     }
 
@@ -518,7 +525,7 @@ export function PortalProjectEdit() {
       }
 
       toast.success('수정 후 다시 제출했습니다.', {
-        description: '임원 심사 큐에서 이 프로젝트를 다시 확인할 수 있습니다.',
+        description: '임원 리뷰 큐에서 이 프로젝트를 다시 확인할 수 있습니다.',
       });
       setResubmitComment('');
     } catch (error) {
@@ -605,7 +612,7 @@ export function PortalProjectEdit() {
             </div>
             <div className="min-w-0 flex-1">
               <p className="text-[11px] font-semibold uppercase tracking-[0.18em]">
-                {canResubmit ? '반려 사유' : '검토 상태'}
+                {canResubmit ? '반려 사유' : '리뷰 상태'}
               </p>
               <h2 className="mt-1 text-[17px] font-semibold">{executiveBanner.title}</h2>
               <p className="mt-2 whitespace-pre-wrap text-[13px] leading-6">{executiveBanner.description}</p>
@@ -616,14 +623,14 @@ export function PortalProjectEdit() {
                     <Textarea
                       value={resubmitComment}
                       onChange={(event) => setResubmitComment(event.target.value)}
-                      placeholder="보완한 내용을 임원이 바로 이해할 수 있게 짧게 남길 수 있습니다."
+                      placeholder="보완한 내용을 임원 리뷰에서 바로 이해할 수 있게 짧게 남길 수 있습니다."
                       className="mt-2 min-h-[88px] border-white/70 bg-white/85 text-[13px] text-slate-900"
                     />
                   </div>
                   <div className="rounded-2xl border border-white/60 bg-white/70 p-4">
                     <p className="text-[11px] font-semibold uppercase tracking-[0.16em]">다음 액션</p>
                     <p className="mt-2 text-[12px] leading-6 text-slate-700">
-                      수정사항을 저장한 뒤 아래 footer의 <span className="font-semibold text-slate-950">수정 후 다시 제출</span>을 누르면 임원 심사 큐로 즉시 복귀합니다.
+                      수정사항을 저장한 뒤 아래 footer의 <span className="font-semibold text-slate-950">수정 후 다시 제출</span>을 누르면 임원 리뷰 큐로 즉시 복귀합니다.
                     </p>
                   </div>
                 </div>
@@ -722,7 +729,7 @@ export function PortalProjectEdit() {
                 </div>
               ) : (
                 <p className="mt-3 text-[13px] leading-6 text-slate-600">
-                  계약서 PDF를 새로 올리면 admin 심사 dossier에도 같은 파일과 분석 요약이 바로 보입니다.
+                  계약서 PDF를 새로 올리면 admin 리뷰 dossier에도 같은 파일과 분석 요약이 바로 보입니다.
                 </p>
               )}
             </div>
@@ -936,7 +943,7 @@ export function PortalProjectEdit() {
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">저장 및 재제출</p>
               <p className="mt-1 text-[12px] leading-6 text-slate-600">
-                저장은 초안을 유지하고, <span className="font-semibold text-slate-950">수정 후 다시 제출</span>은 같은 프로젝트를 임원 심사 큐로 되돌립니다.
+                저장은 초안을 유지하고, <span className="font-semibold text-slate-950">수정 후 다시 제출</span>은 같은 프로젝트를 임원 리뷰 큐로 되돌립니다.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">

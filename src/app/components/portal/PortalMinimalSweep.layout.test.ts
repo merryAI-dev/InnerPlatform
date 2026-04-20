@@ -87,7 +87,10 @@ describe('portal minimal sweep', () => {
   it('lets rejected pm projects recover from the edit screen with contract upload and resubmission', () => {
     expect(projectEditSource).toContain('수정 후 다시 제출');
     expect(projectEditSource).toContain('반려 사유');
+    expect(projectEditSource).toContain('리뷰 완료');
+    expect(projectEditSource).toContain('임원 리뷰 대기');
     expect(projectEditSource).toContain('계약서 PDF');
     expect(projectEditSource).toContain('processProjectRequestContractViaBff');
+    expect(projectEditSource).not.toContain('임원 심사 큐');
   });
 });
