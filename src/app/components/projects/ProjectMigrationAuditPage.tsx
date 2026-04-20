@@ -1,158 +1,130 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router';
-import { FolderSearch, Loader2 } from 'lucide-react';
-import { collection, doc, onSnapshot, setDoc } from 'firebase/firestore';
+import { ClipboardCheck, Loader2 } from 'lucide-react';
+import {
+  collection,
+  doc,
+  onSnapshot,
+  orderBy,
+  query,
+  setDoc,
+} from 'firebase/firestore';
 import { toast } from 'sonner';
-import { normalizeProjectMigrationCandidate } from '../../data/project-migration-candidates';
 import { useAppStore } from '../../data/store';
-import { type Project, type ProjectStatus } from '../../data/types';
-import { getOrgCollectionPath } from '../../lib/firebase';
+import type {
+  ProjectExecutiveReviewStatus,
+  ProjectRequest,
+} from '../../data/types';
+import { getOrgCollectionPath, getOrgDocumentPath } from '../../lib/firebase';
 import { useFirebase } from '../../lib/firebase-context';
 import {
-  buildProjectMigrationAuditRows,
-  buildProjectMigrationCurrentRows,
-  type ProjectMigrationCurrentRow,
-  type ProjectMigrationStatus,
-} from '../../platform/project-migration-audit';
-import {
+  type MigrationAuditConsoleStatus,
   buildMigrationAuditConsoleRecords,
-  buildMigrationAuditCicSelectionOptions,
   collectMigrationAuditCicOptions,
   filterMigrationAuditConsoleRecords,
   findMigrationAuditRecord,
-  findProposalProjectsForMigrationAuditRecord,
-  groupMigrationAuditConsoleRecords,
-  normalizeCicLabel,
   summarizeMigrationAuditConsole,
 } from '../../platform/project-migration-console';
-import { resolveProjectCic } from '../../platform/project-cic';
 import { PageHeader } from '../layout/PageHeader';
 import { Card, CardContent } from '../ui/card';
 import { MigrationAuditControlBar } from './migration-audit/MigrationAuditControlBar';
 import { MigrationAuditQueueRail } from './migration-audit/MigrationAuditQueueRail';
 import { MigrationAuditDetailPanel } from './migration-audit/MigrationAuditDetailPanel';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../ui/alert-dialog';
+import { Textarea } from '../ui/textarea';
 
-function filterCurrentOnlyRows(
-  rows: ProjectMigrationCurrentRow[],
-  cicFilter: string,
-  statusFilter: 'ALL' | ProjectMigrationStatus,
-  query: string,
-): ProjectMigrationCurrentRow[] {
-  const normalizedQuery = String(query || '').trim().toLowerCase();
-  return rows.filter((row) => {
-    if (row.match) return false;
-    if (statusFilter !== 'ALL' && statusFilter !== 'MISSING') return false;
-    const projectCic = normalizeCicLabel(resolveProjectCic(row.project));
-    if (cicFilter !== 'ALL' && projectCic !== cicFilter) return false;
-    if (!normalizedQuery) return true;
-    const haystack = [
-      row.project.name,
-      row.project.officialContractName,
-      row.project.clientOrg,
-      row.project.department,
-      projectCic,
-    ].join(' ').toLowerCase();
-    return haystack.includes(normalizedQuery);
-  });
+type ReviewActionMode = 'approve' | 'reject' | 'discard';
+
+function getReviewDialogTitle(mode: ReviewActionMode): string {
+  if (mode === 'approve') return '이 프로젝트를 승인할까요?';
+  if (mode === 'reject') return '수정 요청 후 반려할까요?';
+  return '이 프로젝트를 중복·폐기할까요?';
+}
+
+function getReviewDialogDescription(mode: ReviewActionMode): string {
+  if (mode === 'approve') return 'PM이 올린 원문을 기준으로 이 프로젝트를 우리 시스템 등록 대상으로 확정합니다.';
+  if (mode === 'reject') return '수정이 필요한 이유를 남기고 PM이 다시 보완하도록 돌려보냅니다.';
+  return '중복 또는 폐기 대상으로 정리하고, 왜 그렇게 판단했는지 메모를 남깁니다.';
+}
+
+function toExecutiveStatus(mode: ReviewActionMode): ProjectExecutiveReviewStatus {
+  if (mode === 'approve') return 'APPROVED';
+  if (mode === 'reject') return 'REVISION_REJECTED';
+  return 'DUPLICATE_DISCARDED';
 }
 
 export function ProjectMigrationAuditPage() {
-  const { projects, currentUser, updateProject, trashProject } = useAppStore();
+  const { projects, currentUser, updateProject } = useAppStore();
   const { db, isOnline, orgId } = useFirebase();
-  const navigate = useNavigate();
 
-  const [sourceProjects, setSourceProjects] = useState<ReturnType<typeof normalizeProjectMigrationCandidate>[]>([]);
-  const [isSourceLoading, setIsSourceLoading] = useState(true);
-
+  const [requests, setRequests] = useState<ProjectRequest[]>([]);
+  const [loadingRequests, setLoadingRequests] = useState(true);
   const [cicFilter, setCicFilter] = useState('ALL');
-  const [statusFilter, setStatusFilter] = useState<'ALL' | ProjectMigrationStatus>('ALL');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | MigrationAuditConsoleStatus>('ALL');
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
-  const [selectedCic, setSelectedCic] = useState('미지정');
-  const [selectedProjectId, setSelectedProjectId] = useState('');
-  const [selectedProjectStatus, setSelectedProjectStatus] = useState<ProjectStatus>('CONTRACT_PENDING');
-  const [selectedProposalId, setSelectedProposalId] = useState('');
-  const [proposalDraftName, setProposalDraftName] = useState('');
-  const [proposalDraftOfficialContractName, setProposalDraftOfficialContractName] = useState('');
-  const [proposalDraftClientOrg, setProposalDraftClientOrg] = useState('');
-  const [linking, setLinking] = useState(false);
-  const [savingProposal, setSavingProposal] = useState(false);
-  const [trashingProjectId, setTrashingProjectId] = useState<string | null>(null);
+  const [actionMode, setActionMode] = useState<ReviewActionMode | null>(null);
+  const [reviewComment, setReviewComment] = useState('');
+  const [acting, setActing] = useState(false);
 
   useEffect(() => {
     if (!db || !isOnline) {
-      setSourceProjects([]);
-      setIsSourceLoading(false);
+      setRequests([]);
+      setLoadingRequests(false);
       return undefined;
     }
 
-    setIsSourceLoading(true);
-    const ref = collection(db, getOrgCollectionPath(orgId, 'projectDashboardProjects'));
+    setLoadingRequests(true);
+    const requestQuery = query(
+      collection(db, getOrgCollectionPath(orgId, 'projectRequests')),
+      orderBy('requestedAt', 'desc'),
+    );
+
     const unsubscribe = onSnapshot(
-      ref,
+      requestQuery,
       (snapshot) => {
-        const next = snapshot.docs
-          .map((docSnap) => normalizeProjectMigrationCandidate(docSnap.id, docSnap.data() as Record<string, unknown>))
-          .sort((left, right) => left.businessName.localeCompare(right.businessName, 'ko'));
-        setSourceProjects(next);
-        setIsSourceLoading(false);
+        const next = snapshot.docs.map((docSnap) => docSnap.data() as ProjectRequest);
+        setRequests(next);
+        setLoadingRequests(false);
       },
       (error) => {
-        console.error('[ProjectMigrationAuditPage] project dashboard listen error:', error);
-        setSourceProjects([]);
-        setIsSourceLoading(false);
+        console.error('[ProjectMigrationAuditPage] project request listen error:', error);
+        setRequests([]);
+        setLoadingRequests(false);
       },
     );
 
     return () => unsubscribe();
   }, [db, isOnline, orgId]);
 
-  const rows = useMemo(
-    () => buildProjectMigrationAuditRows(sourceProjects, projects),
-    [projects, sourceProjects],
-  );
-
-  const currentRows = useMemo(
-    () => buildProjectMigrationCurrentRows(rows, projects),
-    [projects, rows],
-  );
-
   const records = useMemo(
-    () => buildMigrationAuditConsoleRecords(rows),
-    [rows],
+    () => buildMigrationAuditConsoleRecords(projects, requests),
+    [projects, requests],
   );
 
   const filteredRecords = useMemo(
-      () => filterMigrationAuditConsoleRecords(records, {
-        cic: cicFilter,
-        status: statusFilter,
-        query: '',
-      }),
+    () => filterMigrationAuditConsoleRecords(records, {
+      cic: cicFilter,
+      status: statusFilter,
+    }),
     [cicFilter, records, statusFilter],
   );
 
-  const filteredCurrentRows = useMemo(
-    () => filterCurrentOnlyRows(currentRows, cicFilter, statusFilter, ''),
-    [cicFilter, currentRows, statusFilter],
-  );
-
-  const sections = useMemo(
-    () => groupMigrationAuditConsoleRecords(filteredRecords),
+  const summary = useMemo(
+    () => summarizeMigrationAuditConsole(filteredRecords),
     [filteredRecords],
   );
 
-  const summary = useMemo(
-    () => summarizeMigrationAuditConsole(filteredRecords, filteredCurrentRows.length),
-    [filteredCurrentRows.length, filteredRecords],
-  );
-
   const cicOptions = useMemo(
-    () => collectMigrationAuditCicOptions(records, currentRows),
-    [currentRows, records],
-  );
-
-  const cicSelectionOptions = useMemo(
-    () => buildMigrationAuditCicSelectionOptions(cicOptions),
-    [cicOptions],
+    () => collectMigrationAuditCicOptions(records),
+    [records],
   );
 
   const activeRecord = useMemo(
@@ -160,182 +132,88 @@ export function ProjectMigrationAuditPage() {
     [filteredRecords, selectedRecordId],
   );
 
-  const proposalProjects = useMemo(
-    () => findProposalProjectsForMigrationAuditRecord(activeRecord, projects),
-    [activeRecord, projects],
-  );
-
   useEffect(() => {
-    if (!activeRecord) return;
+    if (!activeRecord) {
+      setSelectedRecordId(null);
+      return;
+    }
     setSelectedRecordId(activeRecord.id);
   }, [activeRecord]);
 
-  useEffect(() => {
-    if (!activeRecord) return;
-    setSelectedCic(activeRecord.cic);
-    setSelectedProjectId(activeRecord.match?.project.id || '');
-    setSelectedProjectStatus(activeRecord.match?.project.status || 'CONTRACT_PENDING');
-  }, [activeRecord?.id]);
+  async function handleConfirmAction() {
+    if (!activeRecord || !actionMode) return;
 
-  useEffect(() => {
-    if (proposalProjects.length === 0) {
-      setSelectedProposalId('');
-      setProposalDraftName('');
-      setProposalDraftOfficialContractName('');
-      setProposalDraftClientOrg('');
-      return;
-    }
-
-    const target = proposalProjects.find((project) => project.id === selectedProposalId) || proposalProjects[0];
-    setSelectedProposalId(target.id);
-    setProposalDraftName(target.name || '');
-    setProposalDraftOfficialContractName(target.officialContractName || target.name || '');
-    setProposalDraftClientOrg(target.clientOrg || '');
-    setSelectedProjectId(target.id);
-    setSelectedProjectStatus(target.status || 'CONTRACT_PENDING');
-  }, [proposalProjects, selectedProposalId]);
-
-  const selectedProposalProject = useMemo(
-    () => proposalProjects.find((project) => project.id === selectedProposalId) || null,
-    [proposalProjects, selectedProposalId],
-  );
-
-  const selectedTargetProject = useMemo(
-    () => projects.find((project) => project.id === selectedProjectId) || null,
-    [projects, selectedProjectId],
-  );
-
-  async function persistCandidateLink(project: Project) {
-    if (!db || !isOnline || !activeRecord) {
-      throw new Error('Firebase 연결 후 다시 시도해 주세요.');
-    }
+    const nextExecutiveStatus = toExecutiveStatus(actionMode);
     const now = new Date().toISOString();
-    await setDoc(
-      doc(db, getOrgCollectionPath(orgId, 'projectDashboardProjects'), activeRecord.candidate.id),
-      {
-        cic: selectedCic !== '미지정' ? selectedCic : '',
-        manualProjectId: project.id,
-        manualProjectName: project.officialContractName || project.name,
-        migrationUpdatedAt: now,
-        migrationUpdatedBy: currentUser.name || currentUser.email || currentUser.uid,
+    const trimmedComment = reviewComment.trim();
+    const reviewerName = currentUser?.name || currentUser?.email || '관리자';
+    const reviewerId = currentUser?.uid || '';
+
+    setActing(true);
+    try {
+      await updateProject(activeRecord.project.id, {
+        executiveReviewStatus: nextExecutiveStatus,
+        executiveReviewedAt: now,
+        executiveReviewedById: reviewerId,
+        executiveReviewedByName: reviewerName,
+        executiveReviewComment: trimmedComment,
         updatedAt: now,
-      },
-      { merge: true },
-    );
-  }
+      });
 
-  async function handleApplyMatch() {
-    if (!activeRecord || !selectedProjectId) {
-      toast.error('연결할 프로젝트를 먼저 선택해 주세요.');
-      return;
-    }
-    const project = projects.find((item) => item.id === selectedProjectId);
-    if (!project) {
-      toast.error('선택한 프로젝트를 찾지 못했습니다.');
-      return;
-    }
-    setLinking(true);
-    try {
-      const projectPatch: Partial<Project> = {
-        status: selectedProjectStatus,
-        cic: selectedCic !== '미지정' ? selectedCic : undefined,
-        department: selectedCic !== '미지정' ? selectedCic : project.department,
-        teamName: selectedCic !== '미지정' ? selectedCic : project.teamName,
-        updatedAt: new Date().toISOString(),
-      };
-      await updateProject(project.id, {
-        ...projectPatch,
-      });
-      await persistCandidateLink({
-        ...project,
-        ...projectPatch,
-      });
-      toast.success('이관 연결을 반영했습니다.', {
-        description: `${activeRecord.sourceName} → ${project.officialContractName || project.name}`,
-      });
-    } catch (error) {
-      toast.error('이관 연결 반영 실패', {
-        description: error instanceof Error ? error.message : '다시 시도해 주세요.',
-      });
-    } finally {
-      setLinking(false);
-    }
-  }
-
-  async function handleSaveProposalProject() {
-    if (!selectedProposalProject) {
-      toast.error('수정할 등록 제안 프로젝트를 먼저 선택해 주세요.');
-      return;
-    }
-    const nextName = proposalDraftName.trim();
-    const nextOfficialName = proposalDraftOfficialContractName.trim() || nextName;
-    if (!nextName) {
-      toast.error('프로젝트명을 입력해 주세요.');
-      return;
-    }
-
-    setSavingProposal(true);
-    try {
-      await updateProject(selectedProposalProject.id, {
-        name: nextName,
-        shortName: nextName,
-        officialContractName: nextOfficialName,
-        clientOrg: proposalDraftClientOrg.trim(),
-        department: selectedCic !== '미지정' ? selectedCic : undefined,
-        teamName: selectedCic !== '미지정' ? selectedCic : undefined,
-        cic: selectedCic !== '미지정' ? selectedCic : undefined,
-        updatedAt: new Date().toISOString(),
-      });
-      toast.success('등록 제안 프로젝트를 수정했습니다.', {
-        description: `${nextOfficialName} · ${selectedCic}`,
-      });
-    } catch (error) {
-      toast.error('등록 제안 프로젝트 수정 실패', {
-        description: error instanceof Error ? error.message : '다시 시도해 주세요.',
-      });
-    } finally {
-      setSavingProposal(false);
-    }
-  }
-
-  async function handleTrashProjectTarget(project: Project, reason: string) {
-    setTrashingProjectId(project.id);
-    try {
-      await trashProject(project.id, reason);
-      if (selectedProjectId === project.id) {
-        setSelectedProjectId('');
+      if (db && activeRecord.request) {
+        await setDoc(
+          doc(db, getOrgDocumentPath(orgId, 'projectRequests', activeRecord.request.id)),
+          {
+            status: actionMode === 'approve' ? 'APPROVED' : 'REJECTED',
+            reviewOutcome: nextExecutiveStatus === 'APPROVED' ? 'APPROVED' : nextExecutiveStatus,
+            reviewedBy: reviewerId,
+            reviewedByName: reviewerName,
+            reviewedAt: now,
+            reviewComment: trimmedComment || null,
+            rejectedReason: actionMode === 'approve' ? null : trimmedComment || null,
+            updatedAt: now,
+          },
+          { merge: true },
+        );
       }
-      if (selectedProposalId === project.id) {
-        setSelectedProposalId('');
-      }
-      toast.success('프로젝트를 폐기했습니다.', {
-        description: `${project.officialContractName || project.name} · 휴지통 이동`,
-      });
+
+      toast.success(
+        actionMode === 'approve'
+          ? '프로젝트를 승인했습니다.'
+          : actionMode === 'reject'
+            ? '수정 요청 후 반려로 처리했습니다.'
+            : '중복·폐기로 처리했습니다.',
+        {
+          description: activeRecord.title,
+        },
+      );
+      setActionMode(null);
+      setReviewComment('');
     } catch (error) {
-      toast.error('프로젝트 폐기 실패', {
+      toast.error('임원 결정 저장 실패', {
         description: error instanceof Error ? error.message : '다시 시도해 주세요.',
       });
     } finally {
-      setTrashingProjectId(null);
+      setActing(false);
     }
   }
 
-  const pageDescription = `PM이 등록한 프로젝트 원문을 CIC 단위로 검색하고, 우측 심사 패널에서 예산·인력까지 확인한 뒤 임원 결정만 내리면 됩니다.`;
+  const pageDescription = 'PM이 포털에서 등록한 프로젝트를 CIC와 상태 기준으로 좁힌 뒤, 우측에서 원문·예산·등록 인력을 그대로 읽고 임원 승인만 내리는 콘솔입니다.';
 
   return (
     <div className="space-y-6">
       <PageHeader
-        icon={FolderSearch}
+        icon={ClipboardCheck}
         iconGradient="linear-gradient(135deg, #0f766e 0%, #0ea5e9 100%)"
-        title="프로젝트 마이그레이션 운영 콘솔"
+        title="PM 등록 프로젝트 심사"
         description={pageDescription}
-        badge="Firestore"
+        badge="Executive Review"
       />
 
       {!db || !isOnline ? (
         <Card>
           <CardContent className="p-4 text-[12px] text-muted-foreground">
-            Firebase 연결이 없어서 원본/현재 프로젝트 컬렉션을 읽지 못했습니다. Firestore 연결 후 다시 확인해 주세요.
+            Firebase 연결이 없어서 PM 등록 프로젝트와 접수 이력을 읽지 못했습니다. Firestore 연결 후 다시 확인해 주세요.
           </CardContent>
         </Card>
       ) : null}
@@ -349,56 +227,76 @@ export function ProjectMigrationAuditPage() {
         summary={summary}
       />
 
-      {isSourceLoading ? (
+      {loadingRequests ? (
         <Card>
           <CardContent className="flex items-center justify-center gap-2 py-16 text-[12px] text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
-            원본 대시보드 프로젝트를 불러오는 중입니다…
+            PM 등록 프로젝트와 접수 이력을 불러오는 중입니다…
           </CardContent>
         </Card>
       ) : (
         <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
           <div data-testid="migration-review-queue">
             <MigrationAuditQueueRail
-              sections={sections}
-              currentOnlyRows={filteredCurrentRows}
+              records={filteredRecords}
               selectedId={activeRecord?.id || null}
               onSelect={setSelectedRecordId}
-              onOpenCurrentOnlyProject={(projectId) => navigate(`/projects/${projectId}`)}
             />
           </div>
           <div data-testid="migration-review-dossier">
             <MigrationAuditDetailPanel
               record={activeRecord}
-              cicOptions={cicSelectionOptions}
-              selectedCic={selectedCic}
-              onSelectedCicChange={setSelectedCic}
-              proposalProjects={proposalProjects}
-              selectedProjectId={selectedProjectId}
-              selectedTargetProject={selectedTargetProject}
-              onApplyMatch={() => { void handleApplyMatch(); }}
-              selectedProposalId={selectedProposalId}
-              proposalDraftName={proposalDraftName}
-              onProposalDraftNameChange={setProposalDraftName}
-              proposalDraftOfficialContractName={proposalDraftOfficialContractName}
-              onProposalDraftOfficialContractNameChange={setProposalDraftOfficialContractName}
-              proposalDraftClientOrg={proposalDraftClientOrg}
-              onProposalDraftClientOrgChange={setProposalDraftClientOrg}
-              onSaveProposal={() => { void handleSaveProposalProject(); }}
-              onTrashProposal={() => {
-                if (!selectedProposalProject) return;
-                void handleTrashProjectTarget(selectedProposalProject, '이관 등록 제안 폐기');
+              acting={acting}
+              onApprove={() => {
+                setActionMode('approve');
+                setReviewComment(activeRecord?.project.executiveReviewComment || '');
               }}
-              linking={linking}
-              savingProposal={savingProposal}
-              trashingProjectId={trashingProjectId}
-              onTrashDuplicate={(project) => {
-                void handleTrashProjectTarget(project, '이관 중복 프로젝트 폐기');
+              onReject={() => {
+                setActionMode('reject');
+                setReviewComment(activeRecord?.project.executiveReviewComment || '');
+              }}
+              onDiscard={() => {
+                setActionMode('discard');
+                setReviewComment(activeRecord?.project.executiveReviewComment || '');
               }}
             />
           </div>
         </div>
       )}
+
+      <AlertDialog open={!!actionMode} onOpenChange={(open) => {
+        if (!open) {
+          setActionMode(null);
+          setReviewComment('');
+        }
+      }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{getReviewDialogTitle(actionMode || 'approve')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {getReviewDialogDescription(actionMode || 'approve')}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-2">
+            <p className="text-[12px] font-medium text-slate-700">검토 메모</p>
+            <Textarea
+              value={reviewComment}
+              onChange={(event) => setReviewComment(event.target.value)}
+              placeholder={actionMode === 'approve' ? '승인 판단 근거를 남길 수 있습니다.' : 'PM이 수정하거나 폐기 판단을 이해할 수 있도록 메모를 남겨 주세요.'}
+              className="min-h-[120px]"
+            />
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={acting}>취소</AlertDialogCancel>
+            <AlertDialogAction onClick={(event) => {
+              event.preventDefault();
+              void handleConfirmAction();
+            }} disabled={acting}>
+              {acting ? '저장 중...' : actionMode === 'approve' ? '승인 저장' : actionMode === 'reject' ? '반려 저장' : '폐기 저장'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

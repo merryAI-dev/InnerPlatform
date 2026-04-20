@@ -7,15 +7,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../../ui/select';
-import type { MigrationAuditConsoleSummary } from '../../../platform/project-migration-console';
-import type { ProjectMigrationStatus } from '../../../platform/project-migration-audit';
+import type {
+  MigrationAuditConsoleStatus,
+  MigrationAuditConsoleSummary,
+} from '../../../platform/project-migration-console';
 
 interface MigrationAuditControlBarProps {
   cicOptions: string[];
   cicFilter: string;
   onCicFilterChange: (value: string) => void;
-  statusFilter: 'ALL' | ProjectMigrationStatus;
-  onStatusFilterChange: (value: 'ALL' | ProjectMigrationStatus) => void;
+  statusFilter: 'ALL' | MigrationAuditConsoleStatus;
+  onStatusFilterChange: (value: 'ALL' | MigrationAuditConsoleStatus) => void;
   summary: MigrationAuditConsoleSummary;
 }
 
@@ -37,21 +39,24 @@ export function MigrationAuditControlBar({
               PM 등록 프로젝트 심사
             </h2>
             <p className="mt-1 text-[12px] leading-6 text-slate-600">
-              CIC와 상태만 먼저 좁힌 뒤, 우측에서 PM 원문과 예산·인력을 읽고 임원 판단을 내립니다.
+              CIC와 상태만 먼저 좁힌 뒤, 우측에서 PM이 포털에서 입력한 내용을 그대로 읽고 임원 판단을 내립니다.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
             <Badge variant="outline" className="h-9 rounded-full border-slate-200 bg-slate-50 px-3 text-[11px] text-slate-700">
               전체 {summary.total}건
             </Badge>
-            <Badge className="h-9 rounded-full border border-rose-200 bg-rose-50 px-3 text-[11px] text-rose-700">
-              연결 필요 {summary.missing}
-            </Badge>
             <Badge className="h-9 rounded-full border border-amber-200 bg-amber-50 px-3 text-[11px] text-amber-700">
-              검토중 {summary.candidate}
+              검토 대기 {summary.pending}
             </Badge>
             <Badge className="h-9 rounded-full border border-emerald-200 bg-emerald-50 px-3 text-[11px] text-emerald-700">
-              완료 {summary.registered}
+              승인 완료 {summary.approved}
+            </Badge>
+            <Badge className="h-9 rounded-full border border-rose-200 bg-rose-50 px-3 text-[11px] text-rose-700">
+              반려 {summary.rejected}
+            </Badge>
+            <Badge className="h-9 rounded-full border border-slate-300 bg-slate-100 px-3 text-[11px] text-slate-700">
+              폐기 {summary.discarded}
             </Badge>
           </div>
         </div>
@@ -74,15 +79,16 @@ export function MigrationAuditControlBar({
 
           <div className="space-y-1.5">
             <p className="text-[12px] font-semibold text-slate-600">상태 필터</p>
-            <Select value={statusFilter} onValueChange={(value) => onStatusFilterChange(value as 'ALL' | ProjectMigrationStatus)}>
+            <Select value={statusFilter} onValueChange={(value) => onStatusFilterChange(value as 'ALL' | MigrationAuditConsoleStatus)}>
               <SelectTrigger className="h-14 rounded-2xl border-2 border-slate-300 bg-white px-4 text-[15px] font-medium shadow-sm">
                 <SelectValue placeholder="전체 상태" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="ALL">전체 상태</SelectItem>
-                <SelectItem value="MISSING">연결 필요</SelectItem>
-                <SelectItem value="CANDIDATE">검토중</SelectItem>
-                <SelectItem value="REGISTERED">완료</SelectItem>
+                <SelectItem value="PENDING">검토 대기</SelectItem>
+                <SelectItem value="APPROVED">승인 완료</SelectItem>
+                <SelectItem value="REVISION_REJECTED">수정 요청 후 반려</SelectItem>
+                <SelectItem value="DUPLICATE_DISCARDED">중복·폐기</SelectItem>
               </SelectContent>
             </Select>
           </div>

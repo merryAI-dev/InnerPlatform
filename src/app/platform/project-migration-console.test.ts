@@ -1,21 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import type { Project } from '../data/types';
-import type { ProjectMigrationCandidate } from '../data/project-migration-candidates';
-import type { ProjectMigrationAuditRow, ProjectMigrationCurrentRow } from './project-migration-audit';
+import type { Project, ProjectRequest } from '../data/types';
 import {
-  buildMigrationAuditOperatorSummary,
   buildMigrationAuditConsoleRecords,
-  buildMigrationAuditCicSelectionOptions,
-  buildMigrationAuditDenseRows,
   collectMigrationAuditCicOptions,
   describeMigrationAuditActionState,
   filterMigrationAuditConsoleRecords,
   findMigrationAuditRecord,
-  findDuplicateProjectsForMigrationAuditRecord,
-  findProposalProjectsForMigrationAuditRecord,
-  groupMigrationAuditConsoleRecords,
   normalizeCicLabel,
-  suggestProjectsForMigrationAuditRecord,
   summarizeMigrationAuditConsole,
 } from './project-migration-console';
 
@@ -55,34 +46,48 @@ function makeProject(overrides: Partial<Project> = {}): Project {
     cashflowDiffNote: '',
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
+    registrationSource: 'pm_portal',
     ...overrides,
   };
 }
 
-function makeCandidate(overrides: Partial<ProjectMigrationCandidate> = {}): ProjectMigrationCandidate {
+function makeRequest(overrides: Partial<ProjectRequest> = {}): ProjectRequest {
   return {
-    id: 'c-1',
-    cic: 'CIC-A',
-    department: '개발협력센터',
-    coreMembers: '',
-    groupwareProjectName: '',
-    accountLabel: '운영통장',
-    businessName: '원본 사업',
-    clientOrg: 'KOICA',
-    ...overrides,
-  };
-}
-
-function makeRow(overrides: Partial<ProjectMigrationAuditRow> = {}): ProjectMigrationAuditRow {
-  const project = makeProject({ name: '원본 사업', cic: 'CIC-A' });
-  return {
-    candidate: makeCandidate(),
-    status: 'REGISTERED',
-    match: {
-      project,
-      score: 100,
-      exact: true,
-      reasons: ['계약명 일치'],
+    id: 'pr-1',
+    tenantId: 'mysc',
+    status: 'APPROVED',
+    reviewOutcome: 'APPROVED',
+    requestedBy: 'u-1',
+    requestedByName: '변민욱',
+    requestedByEmail: 'pm@example.com',
+    requestedAt: '2026-04-20T08:00:00.000Z',
+    approvedProjectId: 'p-1',
+    payload: {
+      name: '기본 프로젝트',
+      officialContractName: '기본 프로젝트 공식명',
+      type: 'C1',
+      description: '설명',
+      clientOrg: 'KOICA',
+      department: 'CIC-A',
+      contractAmount: 10000000,
+      salesVatAmount: 0,
+      totalRevenueAmount: 10000000,
+      supportAmount: 0,
+      contractStart: '2026-01-01',
+      contractEnd: '2026-12-31',
+      settlementType: 'TYPE1',
+      basis: '공급가액',
+      accountType: 'OPERATING',
+      paymentPlanDesc: '계약금 100%',
+      settlementGuide: '',
+      projectPurpose: '목적',
+      managerName: '변민욱',
+      teamName: 'CIC-A',
+      teamMembers: '변민욱',
+      participantCondition: '',
+      note: '',
+      contractDocument: null,
+      contractAnalysis: null,
     },
     ...overrides,
   };
@@ -95,263 +100,110 @@ describe('project-migration-console', () => {
     expect(normalizeCicLabel('CIC-A')).toBe('CIC-A');
   });
 
-  it('groups rows by actionable status', () => {
-    const records = buildMigrationAuditConsoleRecords([
-      makeRow({ status: 'MISSING', candidate: makeCandidate({ id: 'c-1', businessName: '미등록' }), match: null }),
-      makeRow({ status: 'CANDIDATE', candidate: makeCandidate({ id: 'c-2', businessName: '후보' }), match: makeRow().match }),
-      makeRow({ status: 'REGISTERED', candidate: makeCandidate({ id: 'c-3', businessName: '완료' }) }),
-    ]);
+  it('builds review queue records from PM portal projects only', () => {
+    const records = buildMigrationAuditConsoleRecords(
+      [
+        makeProject({ id: 'p-1', name: '에코스타트업', cic: 'CIC-A' }),
+        makeProject({ id: 'p-2', name: '기후테크', cic: 'CIC-B', executiveReviewStatus: 'REVISION_REJECTED' }),
+        makeProject({ id: 'p-3', registrationSource: 'manual' }),
+      ],
+      [
+        makeRequest({ approvedProjectId: 'p-1', payload: { ...makeRequest().payload, department: 'CIC-A' } }),
+      ],
+    );
 
-    const grouped = groupMigrationAuditConsoleRecords(records);
-    expect(grouped.missing).toHaveLength(1);
-    expect(grouped.candidate).toHaveLength(1);
-    expect(grouped.registered).toHaveLength(1);
+    expect(records).toHaveLength(2);
+    expect(records.map((record) => record.id)).toEqual(['p-1', 'p-2']);
+    expect(records[0].status).toBe('PENDING');
+    expect(records[1].status).toBe('REVISION_REJECTED');
   });
 
-  it('filters by cic and search query', () => {
-    const records = buildMigrationAuditConsoleRecords([
-      makeRow({ candidate: makeCandidate({ id: 'c-1', cic: 'CIC-A', businessName: '에코스타트업' }) }),
-      makeRow({ candidate: makeCandidate({ id: 'c-2', cic: 'CIC-B', businessName: '기후테크' }) }),
-    ]);
+  it('filters by cic and review status', () => {
+    const records = buildMigrationAuditConsoleRecords(
+      [
+        makeProject({ id: 'p-1', name: '에코스타트업', cic: 'CIC-A' }),
+        makeProject({ id: 'p-2', name: '기후테크', cic: 'CIC-B', executiveReviewStatus: 'APPROVED' }),
+      ],
+      [],
+    );
 
     const filtered = filterMigrationAuditConsoleRecords(records, {
       cic: 'CIC-B',
-      status: 'ALL',
-      query: '기후',
+      status: 'APPROVED',
     });
     expect(filtered).toHaveLength(1);
-    expect(filtered[0].candidate.id).toBe('c-2');
+    expect(filtered[0].project.id).toBe('p-2');
   });
 
-  it('prefers same-cic projects in duplicate suggestions', () => {
-    const record = buildMigrationAuditConsoleRecords([
-      makeRow({ candidate: makeCandidate({ businessName: '에코스타트업', cic: 'CIC-A' }) }),
-    ])[0];
-
-    const suggestions = suggestProjectsForMigrationAuditRecord(record, [
-      makeProject({ id: 'p-1', name: '에코스타트업 운영', cic: 'CIC-B' }),
-      makeProject({ id: 'p-2', name: '에코스타트업 운영', cic: 'CIC-A' }),
-    ]);
-
-    expect(suggestions[0].id).toBe('p-2');
-  });
-
-  it('summarizes queue counts and completion ratio', () => {
-    const records = buildMigrationAuditConsoleRecords([
-      makeRow({ status: 'MISSING', match: null }),
-      makeRow({ status: 'CANDIDATE' }),
-      makeRow({ status: 'REGISTERED' }),
-    ]);
-
-    const summary = summarizeMigrationAuditConsole(records);
-    expect(summary.missing).toBe(1);
-    expect(summary.candidate).toBe(1);
-    expect(summary.registered).toBe(1);
-    expect(summary.completionRatio).toBeCloseTo(33.3, 0);
-  });
-
-  it('describes missing records as 연결 필요 instead of 미등록', () => {
-    const action = describeMigrationAuditActionState(
-      buildMigrationAuditConsoleRecords([
-        makeRow({ status: 'MISSING', match: null }),
-      ])[0],
+  it('summarizes review queue counts by executive outcome', () => {
+    const records = buildMigrationAuditConsoleRecords(
+      [
+        makeProject({ id: 'p-1', executiveReviewStatus: 'APPROVED' }),
+        makeProject({ id: 'p-2', executiveReviewStatus: 'REVISION_REJECTED' }),
+        makeProject({ id: 'p-3', executiveReviewStatus: 'DUPLICATE_DISCARDED' }),
+        makeProject({ id: 'p-4' }),
+      ],
+      [],
     );
 
-    expect(action.label).toBe('연결 필요');
-    expect(action.helper).toContain('내부 연결');
+    const summary = summarizeMigrationAuditConsole(records);
+    expect(summary.pending).toBe(1);
+    expect(summary.approved).toBe(1);
+    expect(summary.rejected).toBe(1);
+    expect(summary.discarded).toBe(1);
+    expect(summary.total).toBe(4);
   });
 
-  it('counts current-only missing rows inside the missing summary bucket', () => {
-    const records = buildMigrationAuditConsoleRecords([
-      makeRow({ status: 'REGISTERED' }),
-    ]);
+  it('collects cic options from PM portal projects only', () => {
+    const records = buildMigrationAuditConsoleRecords(
+      [
+        makeProject({ id: 'p-1', cic: 'CIC-A', department: 'CIC-A' }),
+        makeProject({ id: 'p-2', cic: undefined, department: '투자센터' }),
+      ],
+      [],
+    );
 
-    const summary = summarizeMigrationAuditConsole(records, 2);
-    expect(summary.total).toBe(3);
-    expect(summary.missing).toBe(2);
-    expect(summary.registered).toBe(1);
-    expect(summary.completionRatio).toBeCloseTo(33.3, 0);
-  });
-
-  it('collects cic options from source and current rows', () => {
-    const records = buildMigrationAuditConsoleRecords([
-      makeRow({ candidate: makeCandidate({ cic: 'CIC-A' }) }),
-    ]);
-    const currentRows: ProjectMigrationCurrentRow[] = [
-      { project: makeProject({ id: 'p-2', cic: 'CIC-B' }), status: 'MISSING', match: null },
-      { project: makeProject({ id: 'p-3', cic: undefined, department: '투자센터' }), status: 'MISSING', match: null },
-    ];
-
-    expect(collectMigrationAuditCicOptions(records, currentRows)).toEqual([
-      '개발협력센터',
-      '글로벌센터',
-      '조인트액션',
-      '투자센터',
-      'AXR팀',
-      'CI그룹',
-      'CIC-A',
-      'CIC-B',
-      'CIC1',
-      'CIC2',
-      'CIC3',
-      'CIC4',
-      'DXR팀',
-    ]);
-  });
-
-  it('falls back to project department when explicit cic is missing', () => {
-    const records = buildMigrationAuditConsoleRecords([
-      makeRow({ candidate: makeCandidate({ cic: 'CIC-A' }) }),
-    ]);
-    const currentRows: ProjectMigrationCurrentRow[] = [
-      { project: makeProject({ id: 'p-2', cic: undefined, department: '투자센터' }), status: 'MISSING', match: null },
-    ];
-
-    expect(collectMigrationAuditCicOptions(records, currentRows)).toContain('투자센터');
-  });
-
-  it('falls back to candidate department when candidate cic is missing', () => {
-    const records = buildMigrationAuditConsoleRecords([
-      makeRow({ candidate: makeCandidate({ cic: '', department: '투자센터' }) }),
-    ]);
-
-    expect(records[0].cic).toBe('투자센터');
-  });
-
-  it('builds cic selection options with a single 미지정 entry', () => {
-    expect(buildMigrationAuditCicSelectionOptions(['CIC-A', '미지정', 'CIC-A'])).toEqual(['CIC-A', '미지정']);
+    expect(collectMigrationAuditCicOptions(records)).toEqual(['투자센터', 'CIC-A']);
   });
 
   it('falls back to the first record when selected id is missing', () => {
-    const records = buildMigrationAuditConsoleRecords([
-      makeRow({ candidate: makeCandidate({ id: 'c-1' }) }),
-      makeRow({ candidate: makeCandidate({ id: 'c-2' }) }),
-    ]);
+    const records = buildMigrationAuditConsoleRecords(
+      [
+        makeProject({ id: 'p-1', name: '첫번째' }),
+        makeProject({ id: 'p-2', name: '두번째' }),
+      ],
+      [],
+    );
 
-    expect(findMigrationAuditRecord(records, 'missing')?.id).toBe('c-1');
-    expect(findMigrationAuditRecord(records, 'c-2')?.id).toBe('c-2');
+    expect(findMigrationAuditRecord(records, 'missing')?.id).toBe('p-1');
+    expect(findMigrationAuditRecord(records, 'p-2')?.id).toBe('p-2');
   });
 
-  it('builds dense rows for source and current-only items', () => {
-    const records = buildMigrationAuditConsoleRecords([
-      makeRow({ candidate: makeCandidate({ id: 'c-1' }) }),
-    ]);
-    const currentRows: ProjectMigrationCurrentRow[] = [
-      { project: makeProject({ id: 'p-2', name: '현재만', cic: 'CIC-B' }), status: 'MISSING', match: null },
-    ];
+  it('describes action state as executive review progress instead of migration matching', () => {
+    const pendingRecord = buildMigrationAuditConsoleRecords(
+      [makeProject({ id: 'p-1' })],
+      [],
+    )[0];
+    const approvedRecord = buildMigrationAuditConsoleRecords(
+      [makeProject({ id: 'p-2', executiveReviewStatus: 'APPROVED' })],
+      [],
+    )[0];
+    const discardedRecord = buildMigrationAuditConsoleRecords(
+      [makeProject({ id: 'p-3', executiveReviewStatus: 'DUPLICATE_DISCARDED' })],
+      [],
+    )[0];
 
-    const denseRows = buildMigrationAuditDenseRows(records, currentRows);
-    expect(denseRows).toHaveLength(2);
-    expect(denseRows[0].kind).toBe('source');
-    expect(denseRows[1].kind).toBe('current-only');
-  });
-
-  it('builds an operator summary that prioritizes missing work over completed rows', () => {
-    const summary = buildMigrationAuditOperatorSummary({
-      total: 25,
-      missing: 12,
-      candidate: 3,
-      registered: 10,
-      unassignedCic: 8,
-      completionRatio: 40,
+    expect(describeMigrationAuditActionState(pendingRecord)).toMatchObject({
+      label: '검토 대기',
+      tone: 'warning',
     });
-
-    expect(summary.headline).toBe('지금 먼저 처리할 15건');
-    expect(summary.caption).toContain('미등록 12건');
-    expect(summary.caption).toContain('후보 검토 3건');
-  });
-
-  it('describes detail panel action state for missing and completed records', () => {
-    const missingRecord = buildMigrationAuditConsoleRecords([
-      makeRow({ status: 'MISSING', match: null }),
-    ])[0];
-    const registeredRecord = buildMigrationAuditConsoleRecords([
-      makeRow({ status: 'REGISTERED' }),
-    ])[0];
-
-    expect(describeMigrationAuditActionState(missingRecord)).toMatchObject({
-      label: '연결 필요',
-      tone: 'danger',
-      helper: 'PM이 올린 사업은 있지만 우리 시스템 프로젝트와 아직 내부 연결이 없습니다.',
-    });
-    expect(describeMigrationAuditActionState(registeredRecord)).toMatchObject({
-      label: '연결 완료',
+    expect(describeMigrationAuditActionState(approvedRecord)).toMatchObject({
+      label: '승인 완료',
       tone: 'success',
-      helper: '필요하면 등록 조직이나 연결 프로젝트만 조정하면 됩니다.',
     });
-  });
-
-  it('finds PM portal draft proposals that match the source row', () => {
-    const record = buildMigrationAuditConsoleRecords([
-      makeRow({
-        status: 'MISSING',
-        match: null,
-        candidate: makeCandidate({
-          businessName: '2026년 중장년 창업컨설팅 지원사업',
-          department: '투자센터',
-        }),
-      }),
-    ])[0];
-
-    const proposals = findProposalProjectsForMigrationAuditRecord(record, [
-      makeProject({
-        id: 'p-proposal',
-        name: '2026년 중장년 창업컨설팅 지원사업',
-        department: '투자센터',
-        registrationSource: 'pm_portal',
-        status: 'CONTRACT_PENDING',
-      }),
-      makeProject({
-        id: 'p-live',
-        name: '이미 운영 중인 사업',
-        department: '투자센터',
-        registrationSource: 'manual',
-        status: 'IN_PROGRESS',
-      }),
-    ]);
-
-    expect(proposals.map((project) => project.id)).toEqual(['p-proposal']);
-  });
-
-  it('finds non-trashed duplicate candidates around the same source row', () => {
-    const record = buildMigrationAuditConsoleRecords([
-      makeRow({
-        status: 'MISSING',
-        match: null,
-        candidate: makeCandidate({
-          businessName: '현대 모비스 CSV OI 컨설팅',
-          clientOrg: '현대 모비스',
-          department: '투자센터',
-        }),
-      }),
-    ])[0];
-
-    const duplicates = findDuplicateProjectsForMigrationAuditRecord(record, [
-      makeProject({
-        id: 'p-primary',
-        name: '현대 모비스 CSV OI 컨설팅',
-        officialContractName: '현대 모비스 CSV OI 컨설팅',
-        clientOrg: '현대 모비스',
-        department: '투자센터',
-        status: 'IN_PROGRESS',
-      }),
-      makeProject({
-        id: 'p-proposal',
-        name: '현대 모비스 CSV OI 컨설팅',
-        clientOrg: '현대 모비스',
-        department: '투자센터',
-        registrationSource: 'pm_portal',
-        status: 'CONTRACT_PENDING',
-      }),
-      makeProject({
-        id: 'p-trashed',
-        name: '현대 모비스 CSV OI 컨설팅',
-        clientOrg: '현대 모비스',
-        department: '투자센터',
-        trashedAt: '2026-04-06T00:00:00.000Z',
-      }),
-    ]);
-
-    expect(duplicates.map((project) => project.id)).toEqual(['p-primary', 'p-proposal']);
+    expect(describeMigrationAuditActionState(discardedRecord)).toMatchObject({
+      label: '중복·폐기',
+      tone: 'neutral',
+    });
   });
 });

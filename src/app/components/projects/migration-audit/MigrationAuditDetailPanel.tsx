@@ -1,93 +1,68 @@
 import {
   CheckCircle2,
   Loader2,
-  PencilLine,
+  RefreshCcw,
   Trash2,
 } from 'lucide-react';
-import type { Project } from '../../../data/types';
-import {
-  PROJECT_STATUS_LABELS,
-} from '../../../data/types';
+import type { MigrationAuditConsoleRecord } from '../../../platform/project-migration-console';
 import {
   describeMigrationAuditActionState,
-  type MigrationAuditConsoleRecord,
+  getMigrationAuditStatusLabel,
 } from '../../../platform/project-migration-console';
 import { buildMigrationReviewDossier } from '../../../platform/project-migration-review-dossier';
 import { Badge } from '../../ui/badge';
 import { Button } from '../../ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
-import { Input } from '../../ui/input';
-import { Label } from '../../ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '../../ui/select';
 
 interface MigrationAuditDetailPanelProps {
   record: MigrationAuditConsoleRecord | null;
-  cicOptions: string[];
-  selectedCic: string;
-  onSelectedCicChange: (value: string) => void;
-  proposalProjects: Project[];
-  selectedProjectId: string;
-  selectedTargetProject: Project | null;
-  onApplyMatch: () => void;
-  selectedProposalId: string;
-  proposalDraftName: string;
-  onProposalDraftNameChange: (value: string) => void;
-  proposalDraftOfficialContractName: string;
-  onProposalDraftOfficialContractNameChange: (value: string) => void;
-  proposalDraftClientOrg: string;
-  onProposalDraftClientOrgChange: (value: string) => void;
-  onSaveProposal: () => void;
-  onTrashProposal: () => void;
-  linking: boolean;
-  savingProposal: boolean;
-  trashingProjectId: string | null;
-  onTrashDuplicate: (project: Project) => void;
+  acting: boolean;
+  onApprove: () => void;
+  onReject: () => void;
+  onDiscard: () => void;
+}
+
+function statusStripClass(tone: 'warning' | 'success' | 'danger' | 'neutral') {
+  if (tone === 'success') return 'border-emerald-200 bg-emerald-50/90 text-emerald-900';
+  if (tone === 'danger') return 'border-rose-200 bg-rose-50/90 text-rose-900';
+  if (tone === 'neutral') return 'border-slate-300 bg-slate-100 text-slate-900';
+  return 'border-amber-200 bg-amber-50/90 text-amber-900';
+}
+
+function DetailFact({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+      <p className="text-[11px] text-slate-500">{label}</p>
+      <p className="mt-1 whitespace-pre-wrap text-[13px] leading-6 font-medium text-slate-950">{value}</p>
+    </div>
+  );
 }
 
 export function MigrationAuditDetailPanel({
   record,
-  cicOptions,
-  selectedCic,
-  onSelectedCicChange,
-  proposalProjects,
-  selectedProjectId,
-  selectedTargetProject,
-  onApplyMatch,
-  selectedProposalId,
-  proposalDraftName,
-  onProposalDraftNameChange,
-  proposalDraftOfficialContractName,
-  onProposalDraftOfficialContractNameChange,
-  proposalDraftClientOrg,
-  onProposalDraftClientOrgChange,
-  onSaveProposal,
-  onTrashProposal,
-  linking,
-  savingProposal,
-  trashingProjectId,
-  onTrashDuplicate,
+  acting,
+  onApprove,
+  onReject,
+  onDiscard,
 }: MigrationAuditDetailPanelProps) {
-  const availableCicOptions = Array.from(new Set(cicOptions));
-  const selectedProposal = proposalProjects.find((project) => project.id === selectedProposalId) || null;
-  const reviewProject = selectedProposal || selectedTargetProject || record?.match?.project || null;
-  const dossier = record ? buildMigrationReviewDossier(record, reviewProject) : null;
-  const actionState = record ? describeMigrationAuditActionState(record) : null;
-
   if (!record) {
     return (
       <Card className="border-slate-200/80 bg-white shadow-sm" data-testid="migration-review-dossier">
         <CardContent className="py-24 text-center text-[12px] text-muted-foreground">
-          좌측 리스트에서 프로젝트 하나를 고르면, 여기서 PM 원문과 예산/인력을 읽고 임원 결정을 끝낼 수 있습니다.
+          좌측 대기함에서 PM 등록 프로젝트 하나를 고르면, 여기서 포털 원문과 예산·인력을 바로 읽고 임원 결정을 끝낼 수 있습니다.
         </CardContent>
       </Card>
     );
   }
+
+  const dossier = buildMigrationReviewDossier(record.project, record.request);
+  const actionState = describeMigrationAuditActionState(record);
 
   return (
     <Card
@@ -98,202 +73,150 @@ export function MigrationAuditDetailPanel({
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-center gap-2">
             <Badge className="border border-slate-200 bg-slate-50 text-slate-700">
-              {record.status === 'MISSING' ? '연결 필요' : record.status === 'CANDIDATE' ? '검토중' : '완료'}
+              {getMigrationAuditStatusLabel(record.status)}
             </Badge>
-            <Badge variant="outline">{selectedCic}</Badge>
-            <Badge variant="outline">{record.sourceClientOrg || '발주기관 미지정'}</Badge>
+            <Badge variant="outline">{record.cic}</Badge>
+            <Badge variant="outline">{record.clientOrg || '발주기관 미지정'}</Badge>
           </div>
-          <div className="flex flex-col gap-2 xl:flex-row xl:items-start xl:justify-between">
+
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
             <div>
               <CardTitle className="text-[24px] font-semibold tracking-[-0.03em] text-slate-950">
-                {record.sourceName}
+                {record.title}
               </CardTitle>
               <p className="mt-1 text-[12px] leading-6 text-slate-600">
-                PM이 포털에서 입력한 프로젝트 수정 원문, 예산, 등록 인력을 기준으로 심사합니다.
+                PM이 포털에서 입력한 내용을 그대로 펼쳐서 보여줍니다. 임원은 우측 원문을 읽고 승인, 수정 요청 후 반려, 중복·폐기만 결정하면 됩니다.
               </p>
             </div>
-            {actionState ? (
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                <p className="text-[11px] text-slate-500">현재 판단</p>
-                <p className="mt-1 text-[14px] font-semibold text-slate-950">{actionState.label}</p>
-                <p className="mt-1 text-[11px] text-slate-600">{actionState.helper}</p>
-              </div>
-            ) : null}
+
+            <div className={`rounded-2xl border px-4 py-3 ${statusStripClass(actionState.tone)}`}>
+              <p className="text-[11px] uppercase tracking-[0.08em]">현재 판단</p>
+              <p className="mt-1 text-[14px] font-semibold">{actionState.label}</p>
+              <p className="mt-1 text-[11px] leading-5">{actionState.helper}</p>
+            </div>
           </div>
         </div>
       </CardHeader>
 
-      <CardContent className="flex h-[calc(100%-116px)] flex-col p-0">
+      <CardContent className="flex h-[calc(100%-124px)] flex-col p-0">
         <div className="flex-1 space-y-6 overflow-y-auto px-6 py-6">
-          {dossier ? (
-            <>
-              <section className="space-y-4 rounded-3xl border border-slate-200 bg-slate-50/80 p-5">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">PM 등록 원문</p>
-                    <p className="mt-1 text-[15px] font-semibold text-slate-950">
-                      {selectedProposal ? '포털 프로젝트 수정 내용' : 'PM이 입력한 등록 원문'}
-                    </p>
-                  </div>
-                  <Badge variant="outline">
-                    {reviewProject ? (PROJECT_STATUS_LABELS[reviewProject.status] || '상태 미지정') : '연결 전'}
-                  </Badge>
-                </div>
+          <section className="space-y-4 rounded-3xl border border-slate-200 bg-slate-50/80 p-5">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">PM 등록 원문</p>
+              <p className="mt-1 text-[15px] font-semibold text-slate-950">PM 포털 프로젝트 수정 화면 내용</p>
+            </div>
+            <div className="grid gap-4 xl:grid-cols-2">
+              <DetailFact label="프로젝트명" value={dossier.headerTitle} />
+              <DetailFact label="정식 계약명" value={dossier.identity.officialContractName} />
+              <DetailFact label="발주기관" value={dossier.identity.clientOrg} />
+              <DetailFact label="등록 조직(CIC)" value={dossier.identity.cic} />
+              <DetailFact label="담당 PM" value={dossier.identity.pmName} />
+              <DetailFact label="담당조직" value={dossier.identity.department} />
+            </div>
+          </section>
 
-                <div className="grid gap-4 xl:grid-cols-2">
-                  <div className="space-y-1.5">
-                    <Label>프로젝트명</Label>
-                    <Input
-                      value={selectedProposal ? proposalDraftName : dossier?.headerTitle || ''}
-                      onChange={(event) => onProposalDraftNameChange(event.target.value)}
-                      readOnly={!selectedProposal}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label>정식 계약명</Label>
-                    <Input
-                      value={selectedProposal ? proposalDraftOfficialContractName : dossier?.identity.officialContractName || ''}
-                      onChange={(event) => onProposalDraftOfficialContractNameChange(event.target.value)}
-                      readOnly={!selectedProposal}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label>발주기관</Label>
-                    <Input
-                      value={selectedProposal ? proposalDraftClientOrg : dossier?.identity.clientOrg || ''}
-                      onChange={(event) => onProposalDraftClientOrgChange(event.target.value)}
-                      readOnly={!selectedProposal}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label>등록 조직</Label>
-                    <Select value={selectedCic} onValueChange={onSelectedCicChange}>
-                      <SelectTrigger className="h-10">
-                        <SelectValue placeholder="CIC 선택" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {availableCicOptions.map((cic) => (
-                          <SelectItem key={cic} value={cic}>{cic}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label>담당 PM</Label>
-                    <Input value={dossier?.identity.pmName || '-'} readOnly />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label>담당조직</Label>
-                    <Input value={dossier?.identity.department || '-'} readOnly />
-                  </div>
-                </div>
-              </section>
+          <section className="space-y-3">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">계약 및 운영 정보</p>
+              <p className="mt-1 text-[14px] font-semibold text-slate-950">프로젝트 수정 화면 기준 핵심 항목</p>
+            </div>
+            <div className="grid gap-3 xl:grid-cols-2">
+              <DetailFact label="사업 유형" value={dossier.contract.projectTypeLabel} />
+              <DetailFact label="사업 기간" value={dossier.contract.periodLabel} />
+              <DetailFact label="정산 유형" value={dossier.contract.settlementTypeLabel} />
+              <DetailFact label="정산 기준" value={dossier.contract.basisLabel} />
+              <DetailFact label="통장 유형" value={dossier.contract.accountTypeLabel} />
+              <DetailFact label="자금 입력 방식" value={dossier.contract.fundInputModeLabel} />
+            </div>
+          </section>
 
-              <section className="space-y-3">
+          <section className="space-y-3">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">예산</p>
+              <p className="mt-1 text-[14px] font-semibold text-slate-950">PM이 입력한 예산과 재무 기준</p>
+            </div>
+            <div className="grid gap-3 xl:grid-cols-2">
+              <DetailFact label="총사업비" value={dossier.budget.contractAmountLabel} />
+              <DetailFact label="매출부가세" value={dossier.budget.salesVatAmountLabel} />
+              <DetailFact label="총수익" value={dossier.budget.totalRevenueAmountLabel} />
+              <DetailFact label="지원금" value={dossier.budget.supportAmountLabel} />
+              <DetailFact label="입금 계획" value={dossier.budget.paymentPlanDesc} />
+            </div>
+          </section>
+
+          <section className="space-y-3">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">등록 인력</p>
+              <p className="mt-1 text-[14px] font-semibold text-slate-950">PM이 등록한 팀과 참여 인력</p>
+            </div>
+            <div className="rounded-3xl border border-slate-200 bg-white p-5">
+              <div className="grid gap-4 xl:grid-cols-[220px_minmax(0,1fr)]">
                 <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">계약 및 운영 정보</p>
-                  <p className="mt-1 text-[14px] font-semibold text-slate-950">프로젝트 수정 화면 기준 핵심 항목</p>
+                  <p className="text-[11px] text-slate-500">팀명</p>
+                  <p className="mt-1 text-[13px] font-semibold text-slate-950">{dossier.people.teamName}</p>
                 </div>
-                <div className="grid gap-3 xl:grid-cols-2">
-                  <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                    <p className="text-[11px] text-slate-500">사업 유형</p>
-                    <p className="mt-1 text-[13px] font-medium text-slate-950">{dossier?.contract.projectTypeLabel || '-'}</p>
-                  </div>
-                  <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                    <p className="text-[11px] text-slate-500">사업 기간</p>
-                    <p className="mt-1 text-[13px] font-medium text-slate-950">{dossier?.contract.periodLabel || '-'}</p>
-                  </div>
-                  <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                    <p className="text-[11px] text-slate-500">정산 유형</p>
-                    <p className="mt-1 text-[13px] font-medium text-slate-950">{dossier?.contract.settlementTypeLabel || '-'}</p>
-                  </div>
-                  <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                    <p className="text-[11px] text-slate-500">정산 기준</p>
-                    <p className="mt-1 text-[13px] font-medium text-slate-950">{dossier?.contract.basisLabel || '-'}</p>
-                  </div>
-                  <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                    <p className="text-[11px] text-slate-500">통장 유형</p>
-                    <p className="mt-1 text-[13px] font-medium text-slate-950">{dossier?.contract.accountTypeLabel || '-'}</p>
-                  </div>
-                  <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                    <p className="text-[11px] text-slate-500">자금 입력 방식</p>
-                    <p className="mt-1 text-[13px] font-medium text-slate-950">{dossier?.contract.fundInputModeLabel || '-'}</p>
-                  </div>
-                </div>
-              </section>
-
-              <section className="space-y-3">
                 <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">예산</p>
-                  <p className="mt-1 text-[14px] font-semibold text-slate-950">PM이 입력한 재무 기준을 그대로 확인</p>
-                </div>
-                <div className="grid gap-3 xl:grid-cols-3">
-                  <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                    <p className="text-[11px] text-slate-500">총사업비</p>
-                    <p className="mt-1 text-[13px] font-medium text-slate-950">{dossier?.budget.contractAmountLabel || '-'}</p>
-                  </div>
-                  <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                    <p className="text-[11px] text-slate-500">매출부가세</p>
-                    <p className="mt-1 text-[13px] font-medium text-slate-950">{dossier?.budget.salesVatAmountLabel || '-'}</p>
-                  </div>
-                  <div className="rounded-2xl border border-slate-200 bg-white p-4 xl:col-span-1">
-                    <p className="text-[11px] text-slate-500">입금 계획</p>
-                    <p className="mt-1 text-[13px] font-medium text-slate-950">{dossier?.budget.paymentPlanDesc || '-'}</p>
-                  </div>
-                </div>
-              </section>
-
-              <section className="space-y-3">
-                <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">등록 인력</p>
-                  <p className="mt-1 text-[14px] font-semibold text-slate-950">PM이 등록한 팀과 참여 인력</p>
-                </div>
-                <div className="rounded-3xl border border-slate-200 bg-white p-5">
-                  <div className="grid gap-4 xl:grid-cols-[220px_minmax(0,1fr)]">
-                    <div>
-                      <p className="text-[11px] text-slate-500">팀명</p>
-                      <p className="mt-1 text-[13px] font-semibold text-slate-950">{dossier?.people.teamName || '-'}</p>
+                  <p className="text-[11px] text-slate-500">등록 인력</p>
+                  {dossier.people.members.length > 0 ? (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {dossier.people.members.map((member) => (
+                        <Badge key={member} variant="outline" className="h-auto rounded-full px-3 py-1 text-[11px]">
+                          {member}
+                        </Badge>
+                      ))}
                     </div>
-                    <div>
-                      <p className="text-[11px] text-slate-500">등록 인력</p>
-                      {dossier?.people.members.length ? (
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {dossier.people.members.map((member) => (
-                            <Badge key={member} variant="outline" className="h-auto rounded-full px-3 py-1 text-[11px]">
-                              {member}
-                            </Badge>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="mt-1 text-[12px] text-slate-500">등록 인력 정보 없음</p>
-                      )}
-                    </div>
-                  </div>
+                  ) : (
+                    <p className="mt-2 text-[12px] text-slate-500">등록 인력 정보 없음</p>
+                  )}
                 </div>
-              </section>
+              </div>
+            </div>
+          </section>
 
-              <section className="space-y-3">
-                <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">목적 및 메모</p>
-                  <p className="mt-1 text-[14px] font-semibold text-slate-950">임원이 판단할 때 필요한 원문 설명</p>
-                </div>
-                <div className="grid gap-3 xl:grid-cols-2">
-                  <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                    <p className="text-[11px] text-slate-500">프로젝트 목적</p>
-                    <p className="mt-2 whitespace-pre-wrap text-[13px] leading-6 text-slate-900">{dossier?.notes.projectPurpose || '-'}</p>
-                  </div>
-                  <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                    <p className="text-[11px] text-slate-500">참여 조건 / 비고</p>
-                    <p className="mt-2 whitespace-pre-wrap text-[13px] leading-6 text-slate-900">{dossier?.notes.participantCondition || '-'}</p>
-                  </div>
-                </div>
-              </section>
-            </>
-          ) : (
-            <section className="rounded-3xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
-              <p className="text-[12px] text-slate-500">
-                아직 심사할 프로젝트 원문이 없습니다. 좌측에서 PM 등록 제안이나 연결 대상을 고르면 상세 정보가 표시됩니다.
-              </p>
+          <section className="space-y-3">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">목적 및 메모</p>
+              <p className="mt-1 text-[14px] font-semibold text-slate-950">임원이 판단할 때 필요한 원문 설명</p>
+            </div>
+            <div className="grid gap-3 xl:grid-cols-2">
+              <DetailFact label="프로젝트 목적" value={dossier.notes.projectPurpose} />
+              <DetailFact label="참여 조건" value={dossier.notes.participantCondition} />
+              <DetailFact label="상세 설명" value={dossier.notes.description} />
+              <DetailFact label="비고" value={dossier.notes.note} />
+            </div>
+          </section>
+
+          <section className="space-y-3">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">접수 및 검토 이력</p>
+              <p className="mt-1 text-[14px] font-semibold text-slate-950">누가 언제 올렸고, 누가 어떤 메모를 남겼는지 봅니다</p>
+            </div>
+            <div className="grid gap-3 xl:grid-cols-2">
+              <DetailFact label="요청자" value={dossier.audit.requestedByName} />
+              <DetailFact label="접수일" value={dossier.audit.requestedAt} />
+              <DetailFact label="검토자" value={dossier.audit.reviewedByName} />
+              <DetailFact label="검토일" value={dossier.audit.reviewedAt} />
+              <div className="xl:col-span-2">
+                <DetailFact label="검토 메모" value={dossier.audit.reviewComment} />
+              </div>
+            </div>
+          </section>
+
+          {(dossier.analysis.summary !== '-' || dossier.analysis.warnings.length > 0 || dossier.analysis.nextActions.length > 0) && (
+            <section className="space-y-3">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">계약 분석 보조 정보</p>
+                <p className="mt-1 text-[14px] font-semibold text-slate-950">계약 원문 분석이 있으면 같이 봅니다</p>
+              </div>
+              <div className="grid gap-3">
+                <DetailFact label="AI/휴리스틱 요약" value={dossier.analysis.summary} />
+                {dossier.analysis.warnings.length > 0 && (
+                  <DetailFact label="주의 사항" value={dossier.analysis.warnings.map((warning) => `• ${warning}`).join('\n')} />
+                )}
+                {dossier.analysis.nextActions.length > 0 && (
+                  <DetailFact label="다음 행동" value={dossier.analysis.nextActions.map((action) => `• ${action}`).join('\n')} />
+                )}
+              </div>
             </section>
           )}
         </div>
@@ -306,45 +229,26 @@ export function MigrationAuditDetailPanel({
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">임원 결정</p>
               <p className="mt-1 text-[12px] text-slate-600">
-                우측 원문을 충분히 읽은 뒤 이 제안을 우리 사업으로 승인하거나, 수정 요청 후 반려하거나, 중복으로 폐기합니다.
+                상단이나 좌측이 아니라 여기서만 승인, 수정 요청 후 반려, 중복·폐기를 결정합니다.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                className="h-10 gap-1.5"
-                onClick={onApplyMatch}
-                disabled={!selectedProjectId || linking}
-              >
-                {linking ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-                우리 사업으로 승인
+              <Button type="button" className="h-10 gap-1.5" onClick={onApprove} disabled={acting || record.status === 'APPROVED'}>
+                {acting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                승인
               </Button>
-              <Button
-                type="button"
-                variant="outline"
-                className="h-10 gap-1.5"
-                onClick={onSaveProposal}
-                disabled={!selectedProposal || savingProposal}
-              >
-                {savingProposal ? <Loader2 className="h-4 w-4 animate-spin" /> : <PencilLine className="h-4 w-4" />}
+              <Button type="button" variant="outline" className="h-10 gap-1.5" onClick={onReject} disabled={acting || record.status === 'REVISION_REJECTED'}>
+                {acting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
                 수정 요청 후 반려
               </Button>
               <Button
                 type="button"
                 variant="outline"
                 className="h-10 gap-1.5 border-rose-200 text-rose-700 hover:bg-rose-50 hover:text-rose-800"
-                onClick={() => {
-                  if (selectedProposal) {
-                    onTrashProposal();
-                    return;
-                  }
-                  if (selectedTargetProject) {
-                    onTrashDuplicate(selectedTargetProject);
-                  }
-                }}
-                disabled={(!selectedProposal && !selectedTargetProject) || (!!selectedProposal && trashingProjectId === selectedProposal.id)}
+                onClick={onDiscard}
+                disabled={acting || record.status === 'DUPLICATE_DISCARDED'}
               >
-                {trashingProjectId ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                {acting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                 중복·폐기
               </Button>
             </div>

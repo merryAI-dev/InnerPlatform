@@ -9,7 +9,7 @@ const detailSource = readFileSync(resolve(import.meta.dirname, 'migration-audit/
 const compositeSource = [pageSource, controlBarSource, queueSource, detailSource].join('\n');
 
 describe('ProjectMigrationAuditPage shell contract', () => {
-  it('presents the migration review console as a search-first master detail approval surface', () => {
+  it('presents the page as a PM registration executive approval console', () => {
     expect(pageSource).toContain('data-testid="migration-review-queue"');
     expect(pageSource).toContain('data-testid="migration-review-dossier"');
     expect(compositeSource).toContain('data-testid="migration-review-search-bar"');
@@ -18,13 +18,17 @@ describe('ProjectMigrationAuditPage shell contract', () => {
     expect(compositeSource).toContain('상태 필터');
     expect(compositeSource).toContain('h-14');
     expect(compositeSource).toContain('border-2 border-slate-300');
-    expect(compositeSource).toContain('우리 사업으로 승인');
+    expect(compositeSource).toContain('승인');
     expect(compositeSource).toContain('수정 요청 후 반려');
     expect(compositeSource).toContain('중복·폐기');
-    expect(compositeSource).toContain('연결 필요');
-    expect(compositeSource).toContain('기존 시스템에만 있는 프로젝트');
-    expect(compositeSource).toContain('PM 등록 없음');
+    expect(compositeSource).toContain('PM 등록 프로젝트 심사');
+    expect(compositeSource).toContain('PM이 포털에서 입력한 내용을 그대로');
     expect(compositeSource).not.toContain('사업명으로 검색');
+    expect(compositeSource).not.toContain('우리 사업으로 승인');
+    expect(compositeSource).not.toContain('연결 필요');
+    expect(compositeSource).not.toContain('연결 완료');
+    expect(compositeSource).not.toContain('기존 시스템에만 있는 프로젝트');
+    expect(compositeSource).not.toContain('PM 등록 없음');
     expect(compositeSource).not.toContain('검토 후보');
     expect(compositeSource).not.toContain('비교할 다른 프로젝트 후보');
     expect(compositeSource).not.toContain('빠른 등록 시작');

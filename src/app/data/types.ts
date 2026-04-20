@@ -451,6 +451,11 @@ export interface Project {
   orgId: string;
   cic?: string;
   registrationSource?: string;
+  executiveReviewStatus?: ProjectExecutiveReviewStatus;
+  executiveReviewedAt?: string;
+  executiveReviewedById?: string;
+  executiveReviewedByName?: string;
+  executiveReviewComment?: string;
   trashedAt?: string | null;
   trashedById?: string | null;
   trashedByEmail?: string | null;
@@ -520,6 +525,8 @@ export interface Project {
 }
 
 export type ProjectRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+export type ProjectExecutiveReviewStatus = 'PENDING' | 'APPROVED' | 'REVISION_REJECTED' | 'DUPLICATE_DISCARDED';
+export type ProjectRequestReviewOutcome = 'APPROVED' | 'REVISION_REJECTED' | 'DUPLICATE_DISCARDED';
 
 export interface FileAttachment {
   path: string;
@@ -634,6 +641,7 @@ export interface ProjectRequest {
   id: string;
   tenantId?: string;
   status: ProjectRequestStatus;
+  reviewOutcome?: ProjectRequestReviewOutcome;
   payload: ProjectRequestPayload;
   requestedBy: string;
   requestedByName: string;

@@ -5,9 +5,8 @@ import {
   PROJECT_TYPE_LABELS,
   SETTLEMENT_TYPE_LABELS,
   type Project,
+  type ProjectRequest,
 } from '../data/types';
-import type { MigrationAuditConsoleRecord } from './project-migration-console';
-import { formatStoredProjectAmount } from './project-contract-amount';
 import {
   formatProjectTeamMemberLine,
   normalizeProjectTeamMembers,
@@ -34,14 +33,30 @@ export interface MigrationReviewDossier {
     contractAmountLabel: string;
     salesVatAmountLabel: string;
     paymentPlanDesc: string;
+    totalRevenueAmountLabel: string;
+    supportAmountLabel: string;
   };
   people: {
     teamName: string;
     members: string[];
   };
   notes: {
+    description: string;
     projectPurpose: string;
     participantCondition: string;
+    note: string;
+  };
+  audit: {
+    requestedByName: string;
+    requestedAt: string;
+    reviewedByName: string;
+    reviewedAt: string;
+    reviewComment: string;
+  };
+  analysis: {
+    summary: string;
+    warnings: string[];
+    nextActions: string[];
   };
 }
 
@@ -50,47 +65,75 @@ function readable(value: string | null | undefined, fallback = '-') {
   return normalized || fallback;
 }
 
+function formatStoredProjectAmount(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return '-';
+  return `${Number(value).toLocaleString('ko-KR')}원`;
+}
+
+function formatDate(value: string | null | undefined): string {
+  const normalized = readable(value, '');
+  if (!normalized) return '-';
+  return normalized.slice(0, 10).replace(/-/g, '.');
+}
+
 export function buildMigrationReviewDossier(
-  record: MigrationAuditConsoleRecord,
-  project: Project | null,
+  project: Project,
+  request: ProjectRequest | null,
 ): MigrationReviewDossier {
-  const coreMembers = readable(record.candidate.coreMembers, '');
-  const candidateMembers = coreMembers
-    .split(/[,\n]/)
-    .map((member) => member.trim())
-    .filter(Boolean);
+  const payload = request?.payload;
+  const rawMembers = payload?.teamMembersDetailed || project.teamMembersDetailed;
+  const members = rawMembers && rawMembers.length > 0
+    ? normalizeProjectTeamMembers(rawMembers).map(formatProjectTeamMemberLine)
+    : readable(payload?.teamMembers, '')
+        .split(/[,\n]/)
+        .map((member) => member.trim())
+        .filter(Boolean);
 
   return {
-    headerTitle: readable(project?.name || record.sourceName),
+    headerTitle: readable(project.name),
     identity: {
-      clientOrg: readable(project?.clientOrg || record.sourceClientOrg),
-      cic: readable(project?.cic || project?.department || record.cic),
-      pmName: readable(project?.managerName || record.candidate.coreMembers),
-      department: readable(project?.department || record.sourceDepartment),
-      officialContractName: readable(project?.officialContractName || project?.name || record.candidate.groupwareProjectName),
+      clientOrg: readable(payload?.clientOrg || project.clientOrg),
+      cic: readable(project.cic || payload?.department || project.department),
+      pmName: readable(payload?.managerName || project.managerName),
+      department: readable(payload?.department || project.department),
+      officialContractName: readable(payload?.officialContractName || project.officialContractName || project.name),
     },
     contract: {
-      projectTypeLabel: project ? (PROJECT_TYPE_LABELS[project.type] || readable(project.type)) : '-',
-      periodLabel: project ? `${readable(project.contractStart)} ~ ${readable(project.contractEnd)}` : '-',
-      settlementTypeLabel: project ? (SETTLEMENT_TYPE_LABELS[project.settlementType] || '-') : '-',
-      basisLabel: project ? (BASIS_LABELS[project.basis] || '-') : '-',
-      accountTypeLabel: project ? (ACCOUNT_TYPE_LABELS[project.accountType] || '-') : readable(record.candidate.accountLabel),
-      fundInputModeLabel: project ? (PROJECT_FUND_INPUT_MODE_LABELS[project.fundInputMode || 'BANK_UPLOAD'] || '-') : '-',
+      projectTypeLabel: PROJECT_TYPE_LABELS[payload?.type || project.type] || readable(payload?.type || project.type),
+      periodLabel: `${readable(payload?.contractStart || project.contractStart)} ~ ${readable(payload?.contractEnd || project.contractEnd)}`,
+      settlementTypeLabel: SETTLEMENT_TYPE_LABELS[payload?.settlementType || project.settlementType] || '-',
+      basisLabel: BASIS_LABELS[payload?.basis || project.basis] || '-',
+      accountTypeLabel: ACCOUNT_TYPE_LABELS[payload?.accountType || project.accountType] || '-',
+      fundInputModeLabel: PROJECT_FUND_INPUT_MODE_LABELS[payload?.fundInputMode || project.fundInputMode || 'BANK_UPLOAD'] || '-',
     },
     budget: {
-      contractAmountLabel: project ? formatStoredProjectAmount(project.contractAmount, true) : '-',
-      salesVatAmountLabel: project ? formatStoredProjectAmount(project.salesVatAmount, project.salesVatAmount != null) : '-',
-      paymentPlanDesc: project ? readable(project.paymentPlanDesc) : '-',
+      contractAmountLabel: formatStoredProjectAmount(payload?.contractAmount ?? project.contractAmount),
+      salesVatAmountLabel: formatStoredProjectAmount(payload?.salesVatAmount ?? project.salesVatAmount),
+      paymentPlanDesc: readable(payload?.paymentPlanDesc || project.paymentPlanDesc),
+      totalRevenueAmountLabel: formatStoredProjectAmount(payload?.totalRevenueAmount ?? project.totalRevenueAmount),
+      supportAmountLabel: formatStoredProjectAmount(payload?.supportAmount ?? project.supportAmount),
     },
     people: {
-      teamName: readable(project?.teamName || record.cic),
-      members: project
-        ? normalizeProjectTeamMembers(project.teamMembersDetailed).map(formatProjectTeamMemberLine)
-        : (candidateMembers.length ? candidateMembers : ['등록 인력 정보 없음']),
+      teamName: readable(payload?.teamName || project.teamName),
+      members,
     },
     notes: {
-      projectPurpose: readable(project?.projectPurpose),
-      participantCondition: readable(project?.participantCondition),
+      description: readable(payload?.description || project.description),
+      projectPurpose: readable(payload?.projectPurpose || project.projectPurpose),
+      participantCondition: readable(payload?.participantCondition || project.participantCondition),
+      note: readable(payload?.note),
+    },
+    audit: {
+      requestedByName: readable(request?.requestedByName),
+      requestedAt: formatDate(request?.requestedAt),
+      reviewedByName: readable(project.executiveReviewedByName || request?.reviewedByName),
+      reviewedAt: formatDate(project.executiveReviewedAt || request?.reviewedAt),
+      reviewComment: readable(project.executiveReviewComment || request?.reviewComment || request?.rejectedReason),
+    },
+    analysis: {
+      summary: readable(payload?.contractAnalysis?.summary),
+      warnings: payload?.contractAnalysis?.warnings || [],
+      nextActions: payload?.contractAnalysis?.nextActions || [],
     },
   };
 }
