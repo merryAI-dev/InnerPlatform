@@ -22,8 +22,6 @@
 | [admin-cashflow-project-sheet](./pages/admin-cashflow-project-sheet.md) | `/cashflow/projects/:projectId` | 2026-04-14 | compare mode, close 흐름, 주간 snapshot 해석 |
 | [admin-users-auth-governance](./pages/admin-users-auth-governance.md) | `/users` | 2026-04-14 | drift 확인, deep sync, auth/member 정렬 운영 |
 | [shared-label-policy](./pages/shared-label-policy.md) | `shared / policy` | 2026-04-15 | cashflow label↔enum↔line id↔export 기준 통합 |
-| [shared-portal-architecture](./pages/shared-portal-architecture.md) | `shared / architecture` | 2026-04-15 | Firestore 유지, BFF/API-first, bootstrap loop postmortem과 안정화 guardrail |
-| [shared-migration-retrospective](./pages/shared-migration-retrospective.md) | `shared / retrospective` | 2026-04-20 | 강제 spreadsheet migration 회고, translate-first/admin-first 판단 기록 |
 
 ## How To Use
 
@@ -44,8 +42,6 @@
 - [admin-cashflow-project-sheet](./pages/admin-cashflow-project-sheet.md)
 - [admin-users-auth-governance](./pages/admin-users-auth-governance.md)
 - [shared-label-policy](./pages/shared-label-policy.md)
-- [shared-portal-architecture](./pages/shared-portal-architecture.md)
-- [shared-migration-retrospective](./pages/shared-migration-retrospective.md)
 
 ## Related Repo Context
 
@@ -55,5 +51,3 @@
 - 구현 계획: [2026-04-14-page-patch-notes-wiki-plan.md](../../operations/2026-04-14-page-patch-notes-wiki-plan.md)
 - 가이드 단순화 설계: [2026-04-14-guide-simplify-and-patchnote-hook-design.md](../../operations/2026-04-14-guide-simplify-and-patchnote-hook-design.md)
 - 가이드 단순화 계획: [2026-04-14-guide-simplify-and-patchnote-hook-plan.md](../../operations/2026-04-14-guide-simplify-and-patchnote-hook-plan.md)
-- 포털 하이브리드 RFC: [portal-stabilization-hybrid-rfc-2026-04-15.md](../../architecture/portal-stabilization-hybrid-rfc-2026-04-15.md)
-- 포털 하이브리드 실행 계획: [2026-04-15-portal-hybrid-stabilization-plan.md](../../operations/2026-04-15-portal-hybrid-stabilization-plan.md)
