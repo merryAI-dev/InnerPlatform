@@ -23,6 +23,8 @@ describe('ProjectMigrationAuditPage shell contract', () => {
     expect(compositeSource).toContain('중복·폐기');
     expect(compositeSource).toContain('PM 등록 프로젝트 심사');
     expect(compositeSource).toContain('PM이 포털에서 입력한 내용을 그대로');
+    expect(compositeSource).toContain('기존 등록 프로젝트는 읽기 전용 참고 화면입니다. 별도 승인 액션은 보여주지 않습니다.');
+    expect(compositeSource).toContain('읽기 전용');
     expect(compositeSource).not.toContain('사업명으로 검색');
     expect(compositeSource).not.toContain('우리 사업으로 승인');
     expect(compositeSource).not.toContain('연결 필요');
