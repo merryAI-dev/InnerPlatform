@@ -1,5 +1,37 @@
 # Patch Notes Log
 
+## [2026-04-20] patch-note | shared-migration-retrospective | 실행 원칙과 overlay roadmap 추가
+- pages: [shared-migration-retrospective](./pages/shared-migration-retrospective.md)
+- summary: 회고를 실제 실행 기준으로 바꾸기 위해 `원문 정본 우선`, `대체보다 번역`, `admin-first / PM-thin`, `metadata-first storage`, `parity gate cutover`의 5개 실행 원칙과 issue/roadmap 스냅샷을 문서에 추가하고, 상세 실행 문서 `docs/superpowers/plans/2026-04-20-spreadsheet-overlay-transition-roadmap.md`를 연결했다.
+
+## [2026-04-20] patch-note | shared-migration-retrospective | LLM Wiki 배경과 후속 방향 추가
+- pages: [shared-migration-retrospective](./pages/shared-migration-retrospective.md)
+- summary: `LLM Wiki` 패턴이 왜 이번 회고 판단의 직접적 배경이 되었는지 정리하고, 현재까지의 마이그레이션 매몰비용을 버리지 않으면서 `spreadsheet as canonical source + app as overlay/governance layer`로 플랫폼을 재정의하는 후속 방향을 추가했다.
+
+## [2026-04-20] patch-note | shared-migration-retrospective | centralize-first 가정 재검토
+- pages: [shared-migration-retrospective](./pages/shared-migration-retrospective.md)
+- summary: `데이터를 꼭 플랫폼 안으로 모아야 한다`는 전제가 전통적인 SaaS 사고에 더 가깝고, 이 프로젝트에서는 `spreadsheet as canonical source + app as overlay/governance layer`가 더 AI-native했을 수 있다는 판단과 `PM thick app` 축소 원칙을 추가했다.
+
+## [2026-04-20] patch-note | shared-migration-retrospective | 강제 spreadsheet migration 회고
+- pages: [shared-migration-retrospective](./pages/shared-migration-retrospective.md)
+- summary: 이번 일을 신규 제품보다 기존 스프레드시트 운영체계의 강제 migration으로 재해석하고, 초기에는 replace-first portal보다 `file-first intake + admin review + export parity`가 더 AI-native한 wedge였다는 회고를 문답 형태로 기록했다.
+
+## [2026-04-20] patch-note | shared-migration-retrospective | office-hours / ceo-review verdict 추가
+- pages: [shared-migration-retrospective](./pages/shared-migration-retrospective.md)
+- summary: 시트 형식이 표준화돼 있다는 전제에서는 `standardized spreadsheet-first + crawler + md/json converter + admin/PM viewing harness`가 Firestore-first 앱보다 더 AI-native하고 장기적인 방향일 수 있다는 판단을 `Office Hours`, `CEO Review`, `fatal assumption` 섹션으로 추가했다.
+
+## [2026-04-20] patch-note | shared-migration-retrospective | gstack verdict 추가
+- pages: [shared-migration-retrospective](./pages/shared-migration-retrospective.md)
+- summary: `gstack` 관점에서도 중심 bet은 `PM thick app`보다 `표준 시트 + admin agent console + PM thin viewer`에 두는 편이 더 적합하다는 판단을 `Gstack Verdict` 섹션으로 추가했다.
+
+## [2026-04-15] patch-note | shared-portal-architecture | portal bootstrap loop postmortem
+- pages: [shared-portal-architecture](./pages/shared-portal-architecture.md)
+- summary: `portal-store` bootstrap이 `projects -> scopedProjectIds -> weekly submission fetch`를 다시 흔드는 self-trigger 구조였음을 포스트모템으로 남기고, 이후에는 state write boundary와 fetch scope를 분리하는 운영 규칙을 명시했다.
+
+## [2026-04-15] patch-note | shared-portal-architecture | 포털 안정화 장기안 정리
+- pages: [shared-portal-architecture](./pages/shared-portal-architecture.md)
+- summary: 포털 안정화의 기본안을 `Firestore 유지 + BFF/API-first hybrid`로 고정하고, 6~8주 동안 provider split, read model API, critical write command, admin summary cutover 순서를 따르는 RFC와 실행 계획을 문서화했다.
+
 ## [2026-04-15] patch-note | portal-onboarding | 선택 카드 실제 이동 복구
 - pages: [portal-onboarding](./pages/portal-onboarding.md)
 - summary: 포털 미등록 사용자가 온보딩 선택 카드에서 `기존 사업 선택`, `증빙 업로드`, `새 사업 등록`을 눌렀을 때 강제 온보딩 리다이렉트에 다시 덮이지 않고 실제 다음 화면으로 이동하도록 복구했다.
