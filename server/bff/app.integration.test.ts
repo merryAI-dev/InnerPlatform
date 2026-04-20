@@ -425,6 +425,74 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     });
   });
 
+  it('also resubmits an executive-rejected legacy project back to pending', async () => {
+    const reviewApi = request(createBffApp({
+      projectId,
+      workerSecret,
+      db,
+    }));
+
+    await db.doc(`orgs/${tenantId}/projects/p_exec_review_legacy_001`).set({
+      id: 'p_exec_review_legacy_001',
+      tenantId,
+      name: '기존 등록 재제출 테스트 사업',
+      registrationSource: 'legacy_import',
+      executiveReviewStatus: 'REVISION_REJECTED',
+      executiveReviewedAt: '2026-04-20T09:00:00.000Z',
+      executiveReviewedById: 'u-old',
+      executiveReviewedByName: '대표A',
+      executiveReviewComment: '기존 등록 사업도 다시 제출 가능해야 합니다',
+      executiveReviewHistory: [
+        {
+          status: 'REVISION_REJECTED',
+          previousStatus: 'APPROVED',
+          reviewedAt: '2026-04-20T09:00:00.000Z',
+          reviewedById: 'u-old',
+          reviewedByName: '대표A',
+          reviewComment: '기존 등록 사업도 다시 제출 가능해야 합니다',
+        },
+      ],
+      createdAt: '2026-04-20T08:00:00.000Z',
+      updatedAt: '2026-04-20T09:00:00.000Z',
+    }, { merge: true });
+
+    await db.doc(`orgs/${tenantId}/project_requests/pr_exec_review_legacy_001`).set({
+      id: 'pr_exec_review_legacy_001',
+      tenantId,
+      status: 'REJECTED',
+      reviewOutcome: 'REVISION_REJECTED',
+      approvedProjectId: 'p_exec_review_legacy_001',
+      rejectedReason: '기존 등록 사업도 다시 제출 가능해야 합니다',
+      payload: {
+        name: '기존 등록 재제출 테스트 사업',
+        officialContractName: '기존 등록 재제출 테스트 사업',
+        clientOrg: 'KOICA',
+        department: 'CIC1',
+        managerName: '변민욱',
+        teamName: 'AXR팀',
+      },
+      createdAt: '2026-04-20T08:00:00.000Z',
+      updatedAt: '2026-04-20T09:00:00.000Z',
+    }, { merge: true });
+
+    const response = await reviewApi
+      .post('/api/v1/projects/p_exec_review_legacy_001/executive-review/resubmit')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-executive-review-legacy-001-resubmit' })
+      .send({
+        requestId: 'pr_exec_review_legacy_001',
+        reviewComment: '기존 등록 사업도 수정 후 다시 제출',
+        reviewerName: '변민욱',
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      ok: true,
+      projectId: 'p_exec_review_legacy_001',
+      requestId: 'pr_exec_review_legacy_001',
+      reviewStatus: 'PENDING',
+    });
+  });
+
   it('persists explicit zero contract amounts through project upsert', async () => {
     const response = await api
       .post('/api/v1/projects')

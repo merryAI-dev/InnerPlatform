@@ -1100,9 +1100,6 @@ export function mountProjectRoutes(app, {
     const reviewerName = readOptionalText(parsed.reviewerName) || readOptionalText(actorEmail) || actorId;
     const now = new Date().toISOString();
     const currentProject = await ensureDocumentExists(db, projectPath, `Project not found: ${projectId}`);
-    if (readOptionalText(currentProject.registrationSource) !== 'pm_portal') {
-      throw createHttpError(409, 'Only PM portal-created projects can be resubmitted for executive review', 'invalid_review_target');
-    }
 
     const previousStatus = readOptionalText(currentProject.executiveReviewStatus) || 'PENDING';
     const currentHistory = Array.isArray(currentProject.executiveReviewHistory) ? currentProject.executiveReviewHistory : [];
