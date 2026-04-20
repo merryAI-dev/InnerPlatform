@@ -1,15 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { FolderSearch, Loader2 } from 'lucide-react';
-import type { Firestore } from 'firebase/firestore';
-import { collection, doc, getDocs, onSnapshot, setDoc, writeBatch } from 'firebase/firestore';
+import { collection, doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { normalizeProjectMigrationCandidate } from '../../data/project-migration-candidates';
 import { useAppStore } from '../../data/store';
 import { type Project, type ProjectStatus } from '../../data/types';
 import { getOrgCollectionPath } from '../../lib/firebase';
 import { useFirebase } from '../../lib/firebase-context';
-import { APPROVED_PROJECT_DASHBOARD_SCOPE, buildApprovedProjectDashboardSyncPlan } from '../../platform/project-dashboard-scope';
 import {
   buildProjectMigrationAuditRows,
   buildProjectMigrationCurrentRows,
@@ -19,7 +17,6 @@ import {
 import {
   buildMigrationAuditConsoleRecords,
   buildMigrationAuditCicSelectionOptions,
-  buildMigrationAuditDenseRows,
   collectMigrationAuditCicOptions,
   filterMigrationAuditConsoleRecords,
   findDuplicateProjectsForMigrationAuditRecord,
@@ -31,57 +28,11 @@ import {
   summarizeMigrationAuditConsole,
 } from '../../platform/project-migration-console';
 import { resolveProjectCic } from '../../platform/project-cic';
-import { buildQuickMigrationProject } from '../../platform/project-migration-quick-create';
 import { PageHeader } from '../layout/PageHeader';
 import { Card, CardContent } from '../ui/card';
-import { Button } from '../ui/button';
 import { MigrationAuditControlBar } from './migration-audit/MigrationAuditControlBar';
 import { MigrationAuditQueueRail } from './migration-audit/MigrationAuditQueueRail';
 import { MigrationAuditDetailPanel } from './migration-audit/MigrationAuditDetailPanel';
-import { MigrationAuditDenseTable } from './migration-audit/MigrationAuditDenseTable';
-
-const PROJECT_DASHBOARD_SYNC_BATCH_LIMIT = 400;
-
-async function syncApprovedProjectDashboardScope(
-  db: Firestore,
-  orgId: string,
-): Promise<{ upserted: number; deleted: number }> {
-  const collectionPath = getOrgCollectionPath(orgId, 'projectDashboardProjects');
-  const ref = collection(db, collectionPath);
-  const snapshot = await getDocs(ref);
-  const plan = buildApprovedProjectDashboardSyncPlan(
-    orgId,
-    snapshot.docs.map((docSnap) => docSnap.id),
-  );
-  const operations = [
-    ...plan.candidates.map((candidate) => ({ type: 'set' as const, id: candidate.id, candidate })),
-    ...plan.deleteIds.map((id) => ({ type: 'delete' as const, id })),
-  ];
-
-  for (let index = 0; index < operations.length; index += PROJECT_DASHBOARD_SYNC_BATCH_LIMIT) {
-    const batch = writeBatch(db);
-    const chunk = operations.slice(index, index + PROJECT_DASHBOARD_SYNC_BATCH_LIMIT);
-    for (const operation of chunk) {
-      const targetRef = doc(db, collectionPath, operation.id);
-      if (operation.type === 'set') {
-        batch.set(targetRef, operation.candidate, { merge: false });
-      } else {
-        batch.delete(targetRef);
-      }
-    }
-    await batch.commit();
-  }
-
-  return {
-    upserted: plan.candidates.length,
-    deleted: plan.deleteIds.length,
-  };
-}
-
-function formatRatio(value: number | null): string {
-  if (value == null) return '기준 없음';
-  return `${value.toFixed(1)}%`;
-}
 
 function filterCurrentOnlyRows(
   rows: ProjectMigrationCurrentRow[],
@@ -108,13 +59,12 @@ function filterCurrentOnlyRows(
 }
 
 export function ProjectMigrationAuditPage() {
-  const { projects, currentUser, addProject, updateProject, trashProject } = useAppStore();
+  const { projects, currentUser, updateProject, trashProject } = useAppStore();
   const { db, isOnline, orgId } = useFirebase();
   const navigate = useNavigate();
 
   const [sourceProjects, setSourceProjects] = useState<ReturnType<typeof normalizeProjectMigrationCandidate>[]>([]);
   const [isSourceLoading, setIsSourceLoading] = useState(true);
-  const [isSyncingScope, setIsSyncingScope] = useState(false);
 
   const [search, setSearch] = useState('');
   const [cicFilter, setCicFilter] = useState('ALL');
@@ -127,9 +77,7 @@ export function ProjectMigrationAuditPage() {
   const [proposalDraftName, setProposalDraftName] = useState('');
   const [proposalDraftOfficialContractName, setProposalDraftOfficialContractName] = useState('');
   const [proposalDraftClientOrg, setProposalDraftClientOrg] = useState('');
-  const [quickCreateName, setQuickCreateName] = useState('');
   const [linking, setLinking] = useState(false);
-  const [creating, setCreating] = useState(false);
   const [savingProposal, setSavingProposal] = useState(false);
   const [trashingProjectId, setTrashingProjectId] = useState<string | null>(null);
 
@@ -231,11 +179,6 @@ export function ProjectMigrationAuditPage() {
       .filter((project) => !proposalIds.has(project.id));
   }, [activeRecord, projects, proposalProjects]);
 
-  const denseRows = useMemo(
-    () => buildMigrationAuditDenseRows(filteredRecords, filteredCurrentRows),
-    [filteredCurrentRows, filteredRecords],
-  );
-
   useEffect(() => {
     if (!activeRecord) return;
     setSelectedRecordId(activeRecord.id);
@@ -246,7 +189,6 @@ export function ProjectMigrationAuditPage() {
     setSelectedCic(activeRecord.cic);
     setSelectedProjectId(activeRecord.match?.project.id || '');
     setSelectedProjectStatus(activeRecord.match?.project.status || 'CONTRACT_PENDING');
-    setQuickCreateName(activeRecord.sourceName);
   }, [activeRecord?.id]);
 
   useEffect(() => {
@@ -263,6 +205,8 @@ export function ProjectMigrationAuditPage() {
     setProposalDraftName(target.name || '');
     setProposalDraftOfficialContractName(target.officialContractName || target.name || '');
     setProposalDraftClientOrg(target.clientOrg || '');
+    setSelectedProjectId(target.id);
+    setSelectedProjectStatus(target.status || 'CONTRACT_PENDING');
   }, [proposalProjects, selectedProposalId]);
 
   const selectedProposalProject = useMemo(
@@ -274,27 +218,6 @@ export function ProjectMigrationAuditPage() {
     () => projects.find((project) => project.id === selectedProjectId) || null,
     [projects, selectedProjectId],
   );
-
-  async function handleSyncApprovedScope() {
-    if (!db || !isOnline) {
-      toast.error('Firebase 연결 후 다시 시도해 주세요.');
-      return;
-    }
-    setIsSyncingScope(true);
-    try {
-      const result = await syncApprovedProjectDashboardScope(db, orgId);
-      toast.success(`비교 기준 ${APPROVED_PROJECT_DASHBOARD_SCOPE.length}건 반영 완료`, {
-        description: `source ${result.upserted}건 저장, 기존 범위 밖 ${result.deleted}건 정리`,
-      });
-    } catch (error) {
-      console.error('[ProjectMigrationAuditPage] project dashboard sync error:', error);
-      toast.error('비교 기준 적재 실패', {
-        description: error instanceof Error ? error.message : 'Firestore 쓰기 권한을 확인해 주세요.',
-      });
-    } finally {
-      setIsSyncingScope(false);
-    }
-  }
 
   async function persistCandidateLink(project: Project) {
     if (!db || !isOnline || !activeRecord) {
@@ -350,48 +273,6 @@ export function ProjectMigrationAuditPage() {
       });
     } finally {
       setLinking(false);
-    }
-  }
-
-  async function handleQuickCreate() {
-    if (!activeRecord) {
-      toast.error('선택된 row가 없습니다.');
-      return;
-    }
-    if (!quickCreateName.trim()) {
-      toast.error('프로젝트명을 입력해 주세요.');
-      return;
-    }
-    if (selectedCic === '미지정') {
-      toast.error('새 프로젝트를 만들기 전에 등록 조직을 선택해 주세요.');
-      return;
-    }
-
-    setCreating(true);
-    try {
-      const project = buildQuickMigrationProject({
-        orgId,
-        candidate: activeRecord.candidate,
-        name: quickCreateName,
-        cic: selectedCic,
-        actor: {
-          uid: currentUser.uid,
-          name: currentUser.name || currentUser.email || '운영자',
-        },
-      });
-      await addProject(project);
-      await persistCandidateLink(project);
-      setSelectedProjectId(project.id);
-      setSelectedProjectStatus(project.status);
-      toast.success('새 프로젝트를 등록하고 즉시 연결했습니다.', {
-        description: `${project.name} · ${selectedCic}`,
-      });
-    } catch (error) {
-      toast.error('새 프로젝트 등록 실패', {
-        description: error instanceof Error ? error.message : '다시 시도해 주세요.',
-      });
-    } finally {
-      setCreating(false);
     }
   }
 
@@ -462,7 +343,7 @@ export function ProjectMigrationAuditPage() {
     }
   }
 
-  const pageDescription = `이관 대상 ${records.length}건을 queue 기준으로 먼저 정리합니다. 완료율 ${formatRatio(summary.completionRatio)}, 미등록 ${summary.missing}, 후보 검토 ${summary.candidate}`;
+  const pageDescription = `PM이 등록한 프로젝트 원문을 CIC 단위로 검색하고, 우측 심사 패널에서 예산·인력까지 확인한 뒤 임원 결정만 내리면 됩니다.`;
 
   return (
     <div className="space-y-6">
@@ -491,19 +372,6 @@ export function ProjectMigrationAuditPage() {
         statusFilter={statusFilter}
         onStatusFilterChange={setStatusFilter}
         summary={summary}
-        syncDisabled={!db || !isOnline}
-        syncPending={isSyncingScope}
-        onSync={() => { void handleSyncApprovedScope(); }}
-        onStartQuickCreate={() => {
-          const target = activeRecord
-            ?? sections.missing[0]
-            ?? sections.candidate[0]
-            ?? filteredRecords[0]
-            ?? null;
-          if (!target) return;
-          setSelectedRecordId(target.id);
-          setQuickCreateName(target.sourceName);
-        }}
       />
 
       {isSourceLoading ? (
@@ -515,60 +383,50 @@ export function ProjectMigrationAuditPage() {
         </Card>
       ) : (
         <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
-          <MigrationAuditQueueRail
-            sections={sections}
-            currentOnlyRows={filteredCurrentRows}
-            selectedId={activeRecord?.id || null}
-            onSelect={setSelectedRecordId}
-            onOpenCurrentOnlyProject={(projectId) => navigate(`/projects/${projectId}`)}
-          />
-          <MigrationAuditDetailPanel
-            record={activeRecord}
-            cicOptions={cicSelectionOptions}
-            selectedCic={selectedCic}
-            onSelectedCicChange={setSelectedCic}
-            suggestedProjects={suggestedProjects}
-            proposalProjects={proposalProjects}
-            duplicateProjects={duplicateProjects}
-            selectedProjectId={selectedProjectId}
-            selectedTargetProject={selectedTargetProject}
-            onChooseTargetProject={handleChooseTargetProject}
-            selectedProjectStatus={selectedProjectStatus}
-            onSelectedProjectStatusChange={setSelectedProjectStatus}
-            onApplyMatch={() => { void handleApplyMatch(); }}
-            selectedProposalId={selectedProposalId}
-            onSelectedProposalIdChange={setSelectedProposalId}
-            proposalDraftName={proposalDraftName}
-            onProposalDraftNameChange={setProposalDraftName}
-            proposalDraftOfficialContractName={proposalDraftOfficialContractName}
-            onProposalDraftOfficialContractNameChange={setProposalDraftOfficialContractName}
-            proposalDraftClientOrg={proposalDraftClientOrg}
-            onProposalDraftClientOrgChange={setProposalDraftClientOrg}
-            onSaveProposal={() => { void handleSaveProposalProject(); }}
-            onTrashProposal={() => {
-              if (!selectedProposalProject) return;
-              void handleTrashProjectTarget(selectedProposalProject, '이관 등록 제안 폐기');
-            }}
-            quickCreateName={quickCreateName}
-            onQuickCreateNameChange={setQuickCreateName}
-            onQuickCreate={() => { void handleQuickCreate(); }}
-            linking={linking}
-            creating={creating}
-            savingProposal={savingProposal}
-            trashingProjectId={trashingProjectId}
-            onTrashDuplicate={(project) => {
-              void handleTrashProjectTarget(project, '이관 중복 프로젝트 폐기');
-            }}
-          />
+          <div data-testid="migration-review-queue">
+            <MigrationAuditQueueRail
+              sections={sections}
+              currentOnlyRows={filteredCurrentRows}
+              selectedId={activeRecord?.id || null}
+              onSelect={setSelectedRecordId}
+              onOpenCurrentOnlyProject={(projectId) => navigate(`/projects/${projectId}`)}
+            />
+          </div>
+          <div data-testid="migration-review-dossier">
+            <MigrationAuditDetailPanel
+              record={activeRecord}
+              cicOptions={cicSelectionOptions}
+              selectedCic={selectedCic}
+              onSelectedCicChange={setSelectedCic}
+              suggestedProjects={suggestedProjects}
+              proposalProjects={proposalProjects}
+              duplicateProjects={duplicateProjects}
+              selectedProjectId={selectedProjectId}
+              selectedTargetProject={selectedTargetProject}
+              onChooseTargetProject={handleChooseTargetProject}
+              onApplyMatch={() => { void handleApplyMatch(); }}
+              selectedProposalId={selectedProposalId}
+              proposalDraftName={proposalDraftName}
+              onProposalDraftNameChange={setProposalDraftName}
+              proposalDraftOfficialContractName={proposalDraftOfficialContractName}
+              onProposalDraftOfficialContractNameChange={setProposalDraftOfficialContractName}
+              proposalDraftClientOrg={proposalDraftClientOrg}
+              onProposalDraftClientOrgChange={setProposalDraftClientOrg}
+              onSaveProposal={() => { void handleSaveProposalProject(); }}
+              onTrashProposal={() => {
+                if (!selectedProposalProject) return;
+                void handleTrashProjectTarget(selectedProposalProject, '이관 등록 제안 폐기');
+              }}
+              linking={linking}
+              savingProposal={savingProposal}
+              trashingProjectId={trashingProjectId}
+              onTrashDuplicate={(project) => {
+                void handleTrashProjectTarget(project, '이관 중복 프로젝트 폐기');
+              }}
+            />
+          </div>
         </div>
       )}
-
-      <MigrationAuditDenseTable
-        rows={denseRows}
-        selectedRecordId={activeRecord?.id || null}
-        onSelectRecord={setSelectedRecordId}
-        onOpenProject={(projectId) => navigate(`/projects/${projectId}`)}
-      />
     </div>
   );
 }
