@@ -94,4 +94,17 @@ describe('buildMigrationReviewDossier', () => {
     expect(dossier.notes.projectPurpose).toContain('성과 확산');
     expect(dossier.notes.participantCondition).toContain('공동참여');
   });
+
+  it('falls back to PM candidate information when no registered project exists yet', () => {
+    const dossier = buildMigrationReviewDossier(record, null);
+
+    expect(dossier.headerTitle).toBe('2026 다자간협력');
+    expect(dossier.identity.clientOrg).toBe('KOICA');
+    expect(dossier.identity.cic).toBe('CIC1');
+    expect(dossier.identity.pmName).toContain('홍길동');
+    expect(dossier.identity.officialContractName).toBe('2026 다자간협력 운영');
+    expect(dossier.contract.accountTypeLabel).toBe('운영통장');
+    expect(dossier.people.members[0]).toContain('홍길동');
+    expect(dossier.notes.projectPurpose).toBe('-');
+  });
 });

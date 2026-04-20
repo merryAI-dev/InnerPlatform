@@ -31,12 +31,9 @@ interface MigrationAuditDetailPanelProps {
   cicOptions: string[];
   selectedCic: string;
   onSelectedCicChange: (value: string) => void;
-  suggestedProjects: Project[];
   proposalProjects: Project[];
-  duplicateProjects: Project[];
   selectedProjectId: string;
   selectedTargetProject: Project | null;
-  onChooseTargetProject: (project: Project) => void;
   onApplyMatch: () => void;
   selectedProposalId: string;
   proposalDraftName: string;
@@ -53,26 +50,14 @@ interface MigrationAuditDetailPanelProps {
   onTrashDuplicate: (project: Project) => void;
 }
 
-function uniqueProjects(projects: Project[]) {
-  const seen = new Set<string>();
-  return projects.filter((project) => {
-    if (seen.has(project.id)) return false;
-    seen.add(project.id);
-    return true;
-  });
-}
-
 export function MigrationAuditDetailPanel({
   record,
   cicOptions,
   selectedCic,
   onSelectedCicChange,
-  suggestedProjects,
   proposalProjects,
-  duplicateProjects,
   selectedProjectId,
   selectedTargetProject,
-  onChooseTargetProject,
   onApplyMatch,
   selectedProposalId,
   proposalDraftName,
@@ -91,13 +76,8 @@ export function MigrationAuditDetailPanel({
   const availableCicOptions = Array.from(new Set(cicOptions));
   const selectedProposal = proposalProjects.find((project) => project.id === selectedProposalId) || null;
   const reviewProject = selectedProposal || selectedTargetProject || record?.match?.project || null;
-  const dossier = record && reviewProject ? buildMigrationReviewDossier(record, reviewProject) : null;
+  const dossier = record ? buildMigrationReviewDossier(record, reviewProject) : null;
   const actionState = record ? describeMigrationAuditActionState(record) : null;
-  const relatedProjects = uniqueProjects([
-    ...proposalProjects,
-    ...duplicateProjects,
-    ...suggestedProjects,
-  ]).filter((project) => project.id !== reviewProject?.id);
 
   if (!record) {
     return (
@@ -118,7 +98,7 @@ export function MigrationAuditDetailPanel({
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-center gap-2">
             <Badge className="border border-slate-200 bg-slate-50 text-slate-700">
-              {record.status === 'MISSING' ? '미등록' : record.status === 'CANDIDATE' ? '검토중' : '완료'}
+              {record.status === 'MISSING' ? '연결 필요' : record.status === 'CANDIDATE' ? '검토중' : '완료'}
             </Badge>
             <Badge variant="outline">{selectedCic}</Badge>
             <Badge variant="outline">{record.sourceClientOrg || '발주기관 미지정'}</Badge>
@@ -145,18 +125,18 @@ export function MigrationAuditDetailPanel({
 
       <CardContent className="flex h-[calc(100%-116px)] flex-col p-0">
         <div className="flex-1 space-y-6 overflow-y-auto px-6 py-6">
-          {reviewProject ? (
+          {dossier ? (
             <>
               <section className="space-y-4 rounded-3xl border border-slate-200 bg-slate-50/80 p-5">
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">PM 등록 원문</p>
                     <p className="mt-1 text-[15px] font-semibold text-slate-950">
-                      {selectedProposal ? '포털 프로젝트 수정 내용' : '검토 대상 프로젝트 정보'}
+                      {selectedProposal ? '포털 프로젝트 수정 내용' : 'PM이 입력한 등록 원문'}
                     </p>
                   </div>
                   <Badge variant="outline">
-                    {PROJECT_STATUS_LABELS[reviewProject.status] || '상태 미지정'}
+                    {reviewProject ? (PROJECT_STATUS_LABELS[reviewProject.status] || '상태 미지정') : '연결 전'}
                   </Badge>
                 </div>
 
@@ -316,47 +296,6 @@ export function MigrationAuditDetailPanel({
               </p>
             </section>
           )}
-
-          {relatedProjects.length > 0 ? (
-            <section className="space-y-3">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">검토 후보</p>
-                <p className="mt-1 text-[14px] font-semibold text-slate-950">비교할 다른 프로젝트 후보</p>
-              </div>
-              <div className="space-y-2">
-                {relatedProjects.map((project) => {
-                  const selected = selectedProjectId === project.id;
-                  const isDuplicate = duplicateProjects.some((candidate) => candidate.id === project.id);
-                  return (
-                    <button
-                      key={project.id}
-                      type="button"
-                      onClick={() => onChooseTargetProject(project)}
-                      className={`w-full rounded-3xl border px-4 py-4 text-left transition ${
-                        selected ? 'border-slate-900 bg-slate-900 text-white shadow-sm' : 'border-slate-200 bg-white hover:border-slate-300'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="space-y-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className={`text-[13px] font-semibold ${selected ? 'text-white' : 'text-slate-950'}`}>
-                              {project.officialContractName || project.name}
-                            </p>
-                            <Badge variant="outline" className={selected ? 'border-white/20 text-white' : ''}>
-                              {project.registrationSource === 'pm_portal' ? '포털 등록' : isDuplicate ? '중복 후보' : '기존 프로젝트'}
-                            </Badge>
-                          </div>
-                          <p className={`text-[11px] ${selected ? 'text-slate-200' : 'text-slate-500'}`}>
-                            {project.clientOrg || '발주기관 미지정'} · {project.managerName || '담당 PM 미지정'}
-                          </p>
-                        </div>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </section>
-          ) : null}
         </div>
 
         <div

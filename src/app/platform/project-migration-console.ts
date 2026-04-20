@@ -81,7 +81,7 @@ export function normalizeCicLabel(value: unknown): string {
 }
 
 function getMatchLabel(match: ProjectMigrationProjectMatch | null): string {
-  if (!match) return '등록 필요';
+  if (!match) return '연결 필요';
   return normalizeText(match.project.officialContractName) || normalizeText(match.project.name) || '이름 없음';
 }
 
@@ -200,8 +200,8 @@ export function describeMigrationAuditActionState(
   if (record.status === 'MISSING') {
     return {
       tone: 'danger',
-      label: '등록 필요',
-      helper: '기존 프로젝트에 연결하거나 새 프로젝트를 만들어야 합니다.',
+      label: '연결 필요',
+      helper: 'PM이 올린 사업은 있지만 우리 시스템 프로젝트와 아직 내부 연결이 없습니다.',
     };
   }
   if (record.status === 'CANDIDATE') {

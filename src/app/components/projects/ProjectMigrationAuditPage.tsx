@@ -19,12 +19,10 @@ import {
   buildMigrationAuditCicSelectionOptions,
   collectMigrationAuditCicOptions,
   filterMigrationAuditConsoleRecords,
-  findDuplicateProjectsForMigrationAuditRecord,
   findMigrationAuditRecord,
   findProposalProjectsForMigrationAuditRecord,
   groupMigrationAuditConsoleRecords,
   normalizeCicLabel,
-  suggestProjectsForMigrationAuditRecord,
   summarizeMigrationAuditConsole,
 } from '../../platform/project-migration-console';
 import { resolveProjectCic } from '../../platform/project-cic';
@@ -66,7 +64,6 @@ export function ProjectMigrationAuditPage() {
   const [sourceProjects, setSourceProjects] = useState<ReturnType<typeof normalizeProjectMigrationCandidate>[]>([]);
   const [isSourceLoading, setIsSourceLoading] = useState(true);
 
-  const [search, setSearch] = useState('');
   const [cicFilter, setCicFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState<'ALL' | ProjectMigrationStatus>('ALL');
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
@@ -125,17 +122,17 @@ export function ProjectMigrationAuditPage() {
   );
 
   const filteredRecords = useMemo(
-    () => filterMigrationAuditConsoleRecords(records, {
-      cic: cicFilter,
-      status: statusFilter,
-      query: search,
-    }),
-    [cicFilter, records, search, statusFilter],
+      () => filterMigrationAuditConsoleRecords(records, {
+        cic: cicFilter,
+        status: statusFilter,
+        query: '',
+      }),
+    [cicFilter, records, statusFilter],
   );
 
   const filteredCurrentRows = useMemo(
-    () => filterCurrentOnlyRows(currentRows, cicFilter, statusFilter, search),
-    [cicFilter, currentRows, search, statusFilter],
+    () => filterCurrentOnlyRows(currentRows, cicFilter, statusFilter, ''),
+    [cicFilter, currentRows, statusFilter],
   );
 
   const sections = useMemo(
@@ -163,21 +160,10 @@ export function ProjectMigrationAuditPage() {
     [filteredRecords, selectedRecordId],
   );
 
-  const suggestedProjects = useMemo(
-    () => suggestProjectsForMigrationAuditRecord(activeRecord, projects.filter((project) => !project.trashedAt)),
-    [activeRecord, projects],
-  );
-
   const proposalProjects = useMemo(
     () => findProposalProjectsForMigrationAuditRecord(activeRecord, projects),
     [activeRecord, projects],
   );
-
-  const duplicateProjects = useMemo(() => {
-    const proposalIds = new Set(proposalProjects.map((project) => project.id));
-    return findDuplicateProjectsForMigrationAuditRecord(activeRecord, projects)
-      .filter((project) => !proposalIds.has(project.id));
-  }, [activeRecord, projects, proposalProjects]);
 
   useEffect(() => {
     if (!activeRecord) return;
@@ -334,15 +320,6 @@ export function ProjectMigrationAuditPage() {
     }
   }
 
-  function handleChooseTargetProject(project: Project) {
-    setSelectedProjectId(project.id);
-    setSelectedProjectStatus(project.status);
-    const projectCic = normalizeCicLabel(resolveProjectCic(project));
-    if (projectCic) {
-      setSelectedCic(projectCic);
-    }
-  }
-
   const pageDescription = `PM이 등록한 프로젝트 원문을 CIC 단위로 검색하고, 우측 심사 패널에서 예산·인력까지 확인한 뒤 임원 결정만 내리면 됩니다.`;
 
   return (
@@ -367,8 +344,6 @@ export function ProjectMigrationAuditPage() {
         cicOptions={cicOptions}
         cicFilter={cicFilter}
         onCicFilterChange={setCicFilter}
-        search={search}
-        onSearchChange={setSearch}
         statusFilter={statusFilter}
         onStatusFilterChange={setStatusFilter}
         summary={summary}
@@ -398,12 +373,9 @@ export function ProjectMigrationAuditPage() {
               cicOptions={cicSelectionOptions}
               selectedCic={selectedCic}
               onSelectedCicChange={setSelectedCic}
-              suggestedProjects={suggestedProjects}
               proposalProjects={proposalProjects}
-              duplicateProjects={duplicateProjects}
               selectedProjectId={selectedProjectId}
               selectedTargetProject={selectedTargetProject}
-              onChooseTargetProject={handleChooseTargetProject}
               onApplyMatch={() => { void handleApplyMatch(); }}
               selectedProposalId={selectedProposalId}
               proposalDraftName={proposalDraftName}

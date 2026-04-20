@@ -150,6 +150,17 @@ describe('project-migration-console', () => {
     expect(summary.completionRatio).toBeCloseTo(33.3, 0);
   });
 
+  it('describes missing records as 연결 필요 instead of 미등록', () => {
+    const action = describeMigrationAuditActionState(
+      buildMigrationAuditConsoleRecords([
+        makeRow({ status: 'MISSING', match: null }),
+      ])[0],
+    );
+
+    expect(action.label).toBe('연결 필요');
+    expect(action.helper).toContain('내부 연결');
+  });
+
   it('counts current-only missing rows inside the missing summary bucket', () => {
     const records = buildMigrationAuditConsoleRecords([
       makeRow({ status: 'REGISTERED' }),
@@ -259,9 +270,9 @@ describe('project-migration-console', () => {
     ])[0];
 
     expect(describeMigrationAuditActionState(missingRecord)).toMatchObject({
-      label: '등록 필요',
+      label: '연결 필요',
       tone: 'danger',
-      helper: '기존 프로젝트에 연결하거나 새 프로젝트를 만들어야 합니다.',
+      helper: 'PM이 올린 사업은 있지만 우리 시스템 프로젝트와 아직 내부 연결이 없습니다.',
     });
     expect(describeMigrationAuditActionState(registeredRecord)).toMatchObject({
       label: '연결 완료',

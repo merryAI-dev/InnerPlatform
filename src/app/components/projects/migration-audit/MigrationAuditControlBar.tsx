@@ -1,7 +1,5 @@
-import { Search } from 'lucide-react';
 import { Badge } from '../../ui/badge';
 import { Card, CardContent } from '../../ui/card';
-import { Input } from '../../ui/input';
 import {
   Select,
   SelectContent,
@@ -16,8 +14,6 @@ interface MigrationAuditControlBarProps {
   cicOptions: string[];
   cicFilter: string;
   onCicFilterChange: (value: string) => void;
-  search: string;
-  onSearchChange: (value: string) => void;
   statusFilter: 'ALL' | ProjectMigrationStatus;
   onStatusFilterChange: (value: 'ALL' | ProjectMigrationStatus) => void;
   summary: MigrationAuditConsoleSummary;
@@ -27,8 +23,6 @@ export function MigrationAuditControlBar({
   cicOptions,
   cicFilter,
   onCicFilterChange,
-  search,
-  onSearchChange,
   statusFilter,
   onStatusFilterChange,
   summary,
@@ -43,7 +37,7 @@ export function MigrationAuditControlBar({
               PM 등록 프로젝트 심사
             </h2>
             <p className="mt-1 text-[12px] leading-6 text-slate-600">
-              PM이 등록한 사업명을 먼저 검색하고, CIC와 상태로 좁힌 뒤 우측에서 원문을 검토합니다.
+              CIC와 상태만 먼저 좁힌 뒤, 우측에서 PM 원문과 예산·인력을 읽고 임원 판단을 내립니다.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -51,7 +45,7 @@ export function MigrationAuditControlBar({
               전체 {summary.total}건
             </Badge>
             <Badge className="h-9 rounded-full border border-rose-200 bg-rose-50 px-3 text-[11px] text-rose-700">
-              미등록 {summary.missing}
+              연결 필요 {summary.missing}
             </Badge>
             <Badge className="h-9 rounded-full border border-amber-200 bg-amber-50 px-3 text-[11px] text-amber-700">
               검토중 {summary.candidate}
@@ -62,21 +56,11 @@ export function MigrationAuditControlBar({
           </div>
         </div>
 
-        <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_220px_180px]">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <Input
-              value={search}
-              onChange={(event) => onSearchChange(event.target.value)}
-              placeholder="사업명으로 검색"
-              className="h-11 rounded-2xl border-slate-200 pl-10 text-[13px]"
-            />
-          </div>
-
+        <div className="grid gap-4 xl:grid-cols-[minmax(280px,360px)_minmax(280px,360px)]">
           <div className="space-y-1.5">
-            <p className="text-[11px] font-medium text-slate-500">CIC 필터</p>
+            <p className="text-[12px] font-semibold text-slate-600">CIC 필터</p>
             <Select value={cicFilter} onValueChange={onCicFilterChange}>
-              <SelectTrigger className="h-11 rounded-2xl border-slate-200 text-[13px]">
+              <SelectTrigger className="h-14 rounded-2xl border-2 border-slate-300 bg-white px-4 text-[15px] font-medium shadow-sm">
                 <SelectValue placeholder="전체 CIC" />
               </SelectTrigger>
               <SelectContent>
@@ -89,14 +73,14 @@ export function MigrationAuditControlBar({
           </div>
 
           <div className="space-y-1.5">
-            <p className="text-[11px] font-medium text-slate-500">상태 필터</p>
+            <p className="text-[12px] font-semibold text-slate-600">상태 필터</p>
             <Select value={statusFilter} onValueChange={(value) => onStatusFilterChange(value as 'ALL' | ProjectMigrationStatus)}>
-              <SelectTrigger className="h-11 rounded-2xl border-slate-200 text-[13px]">
+              <SelectTrigger className="h-14 rounded-2xl border-2 border-slate-300 bg-white px-4 text-[15px] font-medium shadow-sm">
                 <SelectValue placeholder="전체 상태" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="ALL">전체 상태</SelectItem>
-                <SelectItem value="MISSING">미등록</SelectItem>
+                <SelectItem value="MISSING">연결 필요</SelectItem>
                 <SelectItem value="CANDIDATE">검토중</SelectItem>
                 <SelectItem value="REGISTERED">완료</SelectItem>
               </SelectContent>

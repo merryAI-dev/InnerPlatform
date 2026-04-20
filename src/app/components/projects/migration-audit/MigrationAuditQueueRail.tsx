@@ -18,7 +18,7 @@ interface MigrationAuditQueueRailProps {
 }
 
 function statusLabel(status: MigrationAuditConsoleRecord['status']) {
-  if (status === 'MISSING') return '미등록';
+  if (status === 'MISSING') return '연결 필요';
   if (status === 'CANDIDATE') return '검토중';
   return '완료';
 }
@@ -118,7 +118,7 @@ export function MigrationAuditQueueRail({
           {currentOnlyRows.length > 0 ? (
             <div className="pt-3">
               <p className="px-1 pb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                현재 프로젝트만 존재
+                기존 시스템에만 있는 프로젝트
               </p>
               <div className="space-y-2">
                 {currentOnlyRows.map((row) => (
@@ -131,7 +131,7 @@ export function MigrationAuditQueueRail({
                     <div className="flex items-start justify-between gap-3">
                       <div className="space-y-2">
                         <div className="flex items-center gap-2">
-                          <Badge className="border border-slate-200 bg-white text-[10px] text-slate-700">현재만 존재</Badge>
+                          <Badge className="border border-slate-200 bg-white text-[10px] text-slate-700">PM 등록 없음</Badge>
                           <Badge variant="outline" className="text-[10px] text-slate-600">
                             {normalizeCicLabel(resolveProjectCic(row.project))}
                           </Badge>
