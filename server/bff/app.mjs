@@ -85,6 +85,22 @@ import { updateCounterpartyHistory, lookupCounterpartyHistory } from './counterp
 import { mountProjectRoutes } from './routes/projects.mjs';
 import { mountPortalEntryRoutes } from './routes/portal-entry.mjs';
 import { mountPortalReadModelRoutes } from './routes/portal-read-model.mjs';
+import { mountPortalWeeklyExpenseCommandRoutes } from './routes/portal-weekly-expense-commands.mjs';
+import { mountPortalWeeklySubmissionCommandRoutes } from './routes/portal-weekly-submission-commands.mjs';
+import { mountPortalWeeklySubmissionStatusCommandRoutes } from './routes/portal-weekly-submission-status-commands.mjs';
+import { mountPortalBankStatementHandoffCommandRoutes } from './routes/portal-bank-statement-handoff-commands.mjs';
+import { mountPortalBudgetCodeBookCommandRoutes } from './routes/portal-budget-code-book-commands.mjs';
+import { mountPortalBudgetPlanCommandRoutes } from './routes/portal-budget-plan-commands.mjs';
+import { mountPortalEvidenceRequiredMapCommandRoutes } from './routes/portal-evidence-required-map-commands.mjs';
+import { mountPortalSheetSourceApplyCommandRoutes } from './routes/portal-sheet-source-apply-commands.mjs';
+import { mountPortalExpenseIntakeDraftCommandRoutes } from './routes/portal-expense-intake-draft-commands.mjs';
+import { mountPortalExpenseIntakeBulkUpsertCommandRoutes } from './routes/portal-expense-intake-bulk-upsert-commands.mjs';
+import { mountPortalExpenseIntakeEvidenceSyncCommandRoutes } from './routes/portal-expense-intake-evidence-sync-commands.mjs';
+import { mountPortalExpenseIntakeProjectCommandRoutes } from './routes/portal-expense-intake-project-commands.mjs';
+import { mountPortalTransactionFinanceWriteCommandRoutes } from './routes/portal-transaction-finance-write-commands.mjs';
+import { mountCashflowWeekUpsertCommandRoutes } from './routes/cashflow-week-upsert-commands.mjs';
+import { mountCashflowWeekVarianceCommandRoutes } from './routes/cashflow-week-variance-commands.mjs';
+import { mountCashflowWeekCloseCommandRoutes } from './routes/cashflow-week-close-commands.mjs';
 import { mountLedgerRoutes } from './routes/ledgers.mjs';
 import { mountTransactionRoutes } from './routes/transactions.mjs';
 import { mountAuditRoutes } from './routes/audit.mjs';
@@ -1353,6 +1369,116 @@ export function createBffApp(options = {}) {
   });
   mountPortalEntryRoutes(app, { db, createMutatingRoute, idempotencyService });
   mountPortalReadModelRoutes(app, { db });
+  mountPortalWeeklyExpenseCommandRoutes(app, {
+    db,
+    now,
+    idempotencyService,
+    createMutatingRoute,
+    auditChainService,
+  });
+  mountPortalWeeklySubmissionCommandRoutes(app, {
+    db,
+    now,
+    idempotencyService,
+    createMutatingRoute,
+    auditChainService,
+  });
+  mountPortalWeeklySubmissionStatusCommandRoutes(app, {
+    db,
+    now,
+    idempotencyService,
+    createMutatingRoute,
+    auditChainService,
+  });
+  mountPortalBudgetCodeBookCommandRoutes(app, {
+    db,
+    now,
+    idempotencyService,
+    createMutatingRoute,
+    auditChainService,
+  });
+  mountPortalEvidenceRequiredMapCommandRoutes(app, {
+    db,
+    now,
+    idempotencyService,
+    createMutatingRoute,
+    auditChainService,
+  });
+  mountPortalSheetSourceApplyCommandRoutes(app, {
+    db,
+    now,
+    idempotencyService,
+    createMutatingRoute,
+    auditChainService,
+  });
+  mountPortalBudgetPlanCommandRoutes(app, {
+    db,
+    now,
+    idempotencyService,
+    createMutatingRoute,
+    auditChainService,
+  });
+  mountPortalBankStatementHandoffCommandRoutes(app, {
+    db,
+    now,
+    idempotencyService,
+    createMutatingRoute,
+    auditChainService,
+  });
+  mountPortalExpenseIntakeDraftCommandRoutes(app, {
+    db,
+    now,
+    idempotencyService,
+    createMutatingRoute,
+    auditChainService,
+  });
+  mountPortalExpenseIntakeBulkUpsertCommandRoutes(app, {
+    db,
+    idempotencyService,
+    createMutatingRoute,
+  });
+  mountPortalExpenseIntakeEvidenceSyncCommandRoutes(app, {
+    db,
+    now,
+    idempotencyService,
+    createMutatingRoute,
+    auditChainService,
+  });
+  mountPortalExpenseIntakeProjectCommandRoutes(app, {
+    db,
+    now,
+    idempotencyService,
+    createMutatingRoute,
+    auditChainService,
+  });
+  mountPortalTransactionFinanceWriteCommandRoutes(app, {
+    db,
+    now,
+    idempotencyService,
+    createMutatingRoute,
+    auditChainService,
+  });
+  mountCashflowWeekUpsertCommandRoutes(app, {
+    db,
+    now,
+    idempotencyService,
+    createMutatingRoute,
+    auditChainService,
+  });
+  mountCashflowWeekVarianceCommandRoutes(app, {
+    db,
+    now,
+    idempotencyService,
+    createMutatingRoute,
+    auditChainService,
+  });
+  mountCashflowWeekCloseCommandRoutes(app, {
+    db,
+    now,
+    idempotencyService,
+    createMutatingRoute,
+    auditChainService,
+  });
   mountCashflowExportRoutes(app, { db, rbacPolicy });
   mountLedgerRoutes(app, { db, now, idempotencyService, auditChainService, piiProtector });
   mountTransactionRoutes(app, { db, now, idempotencyService, auditChainService, piiProtector, rbacPolicy, driveService });

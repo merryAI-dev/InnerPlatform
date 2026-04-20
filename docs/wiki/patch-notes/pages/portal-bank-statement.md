@@ -31,6 +31,7 @@
 
 ## Recent Changes
 
+- [2026-04-16] 통장내역 저장은 `portal/bank-statements/handoff` command boundary를 통해 bank statement 기준본 저장, expense sheet merge, expense intake 재구성을 한 번에 서버가 소유하도록 옮겼다. PM 포털은 더 이상 이 handoff를 client-direct write fan-out으로 수행하지 않는다.
 - [2026-04-15] `cashflow항목` line label/alias/category 해석이 공용 policy 레이어를 통하도록 정리했다.
 - [2026-04-15] 통장내역 저장 시 업로드한 은행 행을 현재 주간 사업비 탭 행으로 바로 merge하도록 바꿨다. Queue 없이 `통장내역 -> 사업비 입력(주간)` direct handoff가 이어진다.
 - [2026-04-15] PM 역할에서는 portal store가 realtime listen 대신 safe fetch로 초기 데이터를 불러오도록 바꿔, 포털 부팅 시 반복 Listen 400이 통장내역 화면까지 전파되는 위험을 줄였다.

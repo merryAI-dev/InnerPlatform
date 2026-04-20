@@ -1,15 +1,26 @@
 import { featureFlags, parseFeatureFlag } from '../config/feature-flags';
 import type {
   AccountType,
+  BankImportIntakeItem,
+  BankImportMatchState,
+  BankImportManualFields,
+  BankImportSnapshot,
   Basis,
+  CashflowWeekSheet,
+  CashflowSheetLineId,
   ProjectSheetSourceSnapshot,
   ProjectSheetSourceType,
   ProjectRequestContractAnalysis,
   SettlementType,
+  Transaction,
   TransactionState,
+  VarianceFlag,
+  VarianceFlagEvent,
+  WeeklySubmissionStatus,
 } from '../data/types';
 import { PlatformApiClient } from '../platform/api-client';
 import { readDevAuthHarnessConfig } from '../platform/dev-harness';
+import { buildDevHarnessPortalTransactionFinanceWriteResult } from '../platform/dev-harness-portal-api';
 import { buildStandardHeaders, type RequestActor } from '../platform/request-context';
 
 export interface PlatformApiRuntimeConfig {
@@ -54,6 +65,72 @@ export interface UpsertTransactionPayload {
   ledgerId: string;
   counterparty: string;
   expectedVersion?: number;
+}
+
+type PortalTransactionFinanceEditableFields = Pick<Transaction,
+  | 'dateTime'
+  | 'weekCode'
+  | 'direction'
+  | 'entryKind'
+  | 'method'
+  | 'cashflowCategory'
+  | 'cashflowLabel'
+  | 'budgetCategory'
+  | 'budgetSubCategory'
+  | 'budgetSubSubCategory'
+  | 'counterparty'
+  | 'memo'
+  | 'amounts'
+  | 'evidenceRequired'
+  | 'evidenceStatus'
+  | 'evidenceMissing'
+  | 'attachmentsCount'
+  | 'author'
+  | 'evidenceRequiredDesc'
+  | 'evidenceCompletedDesc'
+  | 'evidenceCompletedManualDesc'
+  | 'evidencePendingDesc'
+  | 'evidenceDriveLink'
+  | 'evidenceDriveSharedDriveId'
+  | 'evidenceDriveFolderId'
+  | 'evidenceDriveFolderName'
+  | 'evidenceDriveSyncStatus'
+  | 'evidenceDriveLastSyncedAt'
+  | 'evidenceAutoListedDesc'
+  | 'supportPendingDocs'
+  | 'eNaraRegistered'
+  | 'eNaraExecuted'
+  | 'vatSettlementDone'
+  | 'settlementComplete'
+  | 'settlementNote'
+>;
+
+export type PortalTransactionFinancePatch = Partial<PortalTransactionFinanceEditableFields>;
+
+export interface PortalTransactionFinanceWriteCommand {
+  id: string;
+  projectId: string;
+  ledgerId: string;
+  expectedVersion?: number;
+  patch: PortalTransactionFinancePatch;
+}
+
+export interface PortalTransactionFinanceWriteResult {
+  transaction: Partial<Transaction> & {
+    id: string;
+    projectId: string;
+    ledgerId: string;
+    state: TransactionState;
+    version: number;
+    updatedAt: string;
+  };
+  summary: {
+    id: string;
+    projectId: string;
+    ledgerId: string;
+    created: boolean;
+    version: number;
+  };
 }
 
 export interface CreateCommentPayload {
@@ -366,6 +443,288 @@ export interface PortalBankStatementsSummaryResult {
     sheetCount: number;
   };
   registrationState?: 'registered' | 'unregistered';
+}
+
+export interface PortalWeeklyExpenseSaveCommandRow {
+  tempId: string;
+  sourceTxId?: string;
+  entryKind?: string;
+  cells: string[];
+  error?: string;
+  userEditedCells?: number[];
+  reviewHints?: string[];
+  reviewRequiredCellIndexes?: number[];
+  reviewStatus?: string;
+  reviewFingerprint?: string;
+  reviewConfirmedAt?: string;
+}
+
+export interface PortalWeeklyExpenseSaveCommandSyncPlanItem {
+  yearMonth: string;
+  weekNo: number;
+  amounts: Record<string, number>;
+  reviewPendingCount: number;
+}
+
+export interface PortalWeeklyExpenseSaveCommand {
+  projectId: string;
+  activeSheetId: string;
+  activeSheetName: string;
+  order: number;
+  expectedVersion?: number;
+  rows: PortalWeeklyExpenseSaveCommandRow[];
+  syncPlan: PortalWeeklyExpenseSaveCommandSyncPlanItem[];
+}
+
+export interface PortalWeeklyExpenseSaveResult {
+  sheet: {
+    id: string;
+    projectId: string;
+    name?: string;
+    version: number;
+    rowCount: number;
+    rows?: PortalWeeklyExpenseSaveCommandRow[];
+    updatedAt: string;
+    updatedBy?: string;
+  };
+  weeklySubmissionStatuses: WeeklySubmissionStatus[];
+  cashflowWeeks: Array<Pick<CashflowWeekSheet, 'id' | 'projectId' | 'yearMonth' | 'weekNo' | 'actual' | 'updatedAt'>>;
+  syncSummary: {
+    expenseSyncState: 'pending' | 'review_required' | 'synced' | 'sync_failed';
+    expenseReviewPendingCount: number;
+    syncedWeekCount: number;
+    reviewRequiredWeekCount: number;
+  };
+}
+
+export interface PortalExpenseIntakeDraftSaveCommand {
+  projectId: string;
+  intakeId: string;
+  updates: {
+    manualFields?: BankImportManualFields;
+    existingExpenseSheetId?: string | null;
+    existingExpenseRowTempId?: string | null;
+    matchState?: BankImportIntakeItem['matchState'];
+    projectionStatus?: BankImportIntakeItem['projectionStatus'];
+    evidenceStatus?: BankImportIntakeItem['evidenceStatus'];
+    reviewReasons?: string[];
+    lastUploadBatchId?: string;
+  };
+}
+
+export interface PortalExpenseIntakeDraftSaveResult {
+  expenseIntakeItem: BankImportIntakeItem & {
+    version: number;
+  };
+  summary: {
+    updatedManualFieldCount: number;
+    version: number;
+  };
+}
+
+export interface PortalExpenseIntakeProjectCommand {
+  projectId: string;
+  intakeId: string;
+  updates?: PortalExpenseIntakeDraftSaveCommand['updates'];
+}
+
+export interface PortalExpenseIntakeProjectResult {
+  expenseIntakeItem: BankImportIntakeItem & {
+    version: number;
+  };
+  expenseSheet: {
+    id: string;
+    projectId: string;
+    name?: string;
+    order?: number;
+    version: number;
+    rowCount: number;
+    rows?: PortalWeeklyExpenseSaveCommandRow[];
+    updatedAt: string;
+    updatedBy?: string;
+    createdAt?: string;
+  };
+  projectedRow: PortalWeeklyExpenseSaveCommandRow;
+  summary: {
+    projectId: string;
+    intakeId: string;
+    targetSheetId: string;
+    projectedRowTempId: string;
+    version: number;
+  };
+}
+
+export interface PortalExpenseIntakeEvidenceSyncCommand {
+  projectId: string;
+  intakeId: string;
+  updates?: {
+    manualFields?: {
+      evidenceCompletedDesc?: string;
+    };
+  };
+}
+
+export interface PortalExpenseIntakeEvidenceSyncResult {
+  expenseIntakeItem: BankImportIntakeItem & {
+    version: number;
+  };
+  expenseSheet: {
+    id?: string;
+    projectId?: string;
+    name?: string;
+    order?: number;
+    version?: number;
+    rowCount?: number;
+    rows?: PortalWeeklyExpenseSaveCommandRow[];
+    updatedAt?: string;
+    updatedBy?: string;
+    createdAt?: string;
+  };
+  patchedRow?: PortalWeeklyExpenseSaveCommandRow;
+  summary: {
+    targetSheetId: string;
+    patchedRowTempId: string | null;
+    rowPatched: boolean;
+    version: number;
+  };
+}
+
+export interface PortalExpenseIntakeBulkUpsertCommand {
+  projectId: string;
+  items: Array<{
+    id: string;
+    sourceTxId: string;
+    bankFingerprint: string;
+    bankSnapshot: BankImportSnapshot;
+    matchState: BankImportMatchState;
+    manualFields: BankImportManualFields;
+    lastUploadBatchId: string;
+    createdAt: string;
+    updatedAt: string;
+    updatedBy: string;
+  }>;
+}
+
+export interface PortalExpenseIntakeBulkUpsertResult {
+  summary: {
+    projectId: string;
+    upsertedCount: number;
+  };
+}
+
+export interface PortalWeeklySubmissionSubmitCommand {
+  projectId: string;
+  yearMonth: string;
+  weekNo: number;
+  transactionIds: string[];
+}
+
+export interface PortalWeeklySubmissionSubmitResult {
+  cashflowWeek: Pick<
+    CashflowWeekSheet,
+    'id' | 'projectId' | 'yearMonth' | 'weekNo' | 'pmSubmitted' | 'pmSubmittedAt'
+  > & {
+    pmSubmittedByUid?: string;
+    pmSubmittedByName?: string;
+  };
+  transactions: Array<{
+    id: string;
+    state: TransactionState | 'SUBMITTED';
+    submittedAt?: string;
+    submittedBy?: string;
+    updatedAt?: string;
+    version?: number;
+  }>;
+  summary: {
+    submittedTransactionCount: number;
+  };
+}
+
+export interface CloseCashflowWeekCommand {
+  projectId: string;
+  yearMonth: string;
+  weekNo: number;
+}
+
+export interface UpsertCashflowWeekCommand {
+  projectId: string;
+  yearMonth: string;
+  weekNo: number;
+  mode: 'projection' | 'actual';
+  amounts: Partial<Record<CashflowSheetLineId, number>>;
+}
+
+export interface CloseCashflowWeekResult {
+  cashflowWeek: Pick<
+    CashflowWeekSheet,
+    'id' | 'projectId' | 'yearMonth' | 'weekNo' | 'adminClosed' | 'adminClosedAt'
+  > & {
+    adminClosedByUid?: string;
+    adminClosedByName?: string;
+    version?: number;
+  };
+  summary: {
+    closedWeek: boolean;
+  };
+}
+
+export interface UpsertCashflowWeekResult {
+  cashflowWeek: CashflowWeekSheet;
+  summary: {
+    mode: 'projection' | 'actual';
+    updatedLineCount: number;
+  };
+}
+
+export interface UpdateCashflowWeekVarianceCommand {
+  sheetId: string;
+  varianceFlag: VarianceFlag | undefined;
+  varianceHistory: VarianceFlagEvent[];
+}
+
+export interface UpdateCashflowWeekVarianceResult {
+  cashflowWeek: CashflowWeekSheet;
+  summary: {
+    hasVarianceFlag: boolean;
+    varianceHistoryCount: number;
+  };
+}
+
+export interface PortalBankStatementHandoffCommandRow {
+  tempId: string;
+  cells: string[];
+  sourceTxId?: string;
+}
+
+export interface PortalBankStatementHandoffCommand {
+  projectId: string;
+  activeSheetId: string;
+  activeSheetName: string;
+  order: number;
+  columns: string[];
+  rows: PortalBankStatementHandoffCommandRow[];
+}
+
+export interface PortalBankStatementHandoffResult {
+  bankStatement: {
+    rowCount: number;
+    columnCount: number;
+    updatedAt: string;
+  };
+  sheet: {
+    id: string;
+    projectId: string;
+    name?: string;
+    rowCount: number;
+    version: number;
+    updatedAt: string;
+  };
+  rows: PortalBankStatementHandoffCommandRow[];
+  expenseIntakeItems: Array<{
+    id: string;
+    projectId: string;
+    sourceTxId: string;
+  }>;
 }
 
 export interface PortalRegistrationResult {
@@ -737,6 +1096,60 @@ function encodeHeaderValue(value: string): string {
   return encodeURIComponent(value);
 }
 
+const PORTAL_TRANSACTION_FINANCE_PATCH_FIELDS = [
+  'dateTime',
+  'weekCode',
+  'direction',
+  'entryKind',
+  'method',
+  'cashflowCategory',
+  'cashflowLabel',
+  'budgetCategory',
+  'budgetSubCategory',
+  'budgetSubSubCategory',
+  'counterparty',
+  'memo',
+  'amounts',
+  'evidenceRequired',
+  'evidenceStatus',
+  'evidenceMissing',
+  'attachmentsCount',
+  'author',
+  'evidenceRequiredDesc',
+  'evidenceCompletedDesc',
+  'evidenceCompletedManualDesc',
+  'evidencePendingDesc',
+  'evidenceDriveLink',
+  'evidenceDriveSharedDriveId',
+  'evidenceDriveFolderId',
+  'evidenceDriveFolderName',
+  'evidenceDriveSyncStatus',
+  'evidenceDriveLastSyncedAt',
+  'evidenceAutoListedDesc',
+  'supportPendingDocs',
+  'eNaraRegistered',
+  'eNaraExecuted',
+  'vatSettlementDone',
+  'settlementComplete',
+  'settlementNote',
+] as const satisfies ReadonlyArray<keyof PortalTransactionFinanceEditableFields>;
+
+export function toPortalTransactionFinancePatch(
+  transaction: Partial<Transaction>,
+): PortalTransactionFinancePatch {
+  return PORTAL_TRANSACTION_FINANCE_PATCH_FIELDS.reduce<PortalTransactionFinancePatch>((patch, field) => {
+    const value = transaction[field];
+    if (value !== undefined) {
+      patch[field] = value;
+    }
+    return patch;
+  }, {});
+}
+
+function shouldUseDevHarnessPortalFinanceWrite(client?: PlatformApiClientLike): boolean {
+  return !client && readDevAuthHarnessConfig(import.meta.env).enabled;
+}
+
 export async function upsertProjectViaBff(params: {
   tenantId: string;
   actor: ActorLike;
@@ -847,6 +1260,33 @@ export async function changeTransactionStateViaBff(params: {
     },
   );
 
+  return response.data;
+}
+
+export async function savePortalTransactionFinanceWriteViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  command: PortalTransactionFinanceWriteCommand;
+  client?: PlatformApiClientLike;
+}): Promise<PortalTransactionFinanceWriteResult> {
+  if (shouldUseDevHarnessPortalFinanceWrite(params.client)) {
+    return buildDevHarnessPortalTransactionFinanceWriteResult({
+      actorId: params.actor.uid,
+      actorRole: params.actor.role,
+      command: params.command,
+    });
+  }
+
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<PortalTransactionFinanceWriteResult>(
+    '/api/v1/portal/transactions/finance-write',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.command,
+      timeoutMs: 8000,
+    },
+  );
   return response.data;
 }
 
@@ -1322,6 +1762,196 @@ export async function fetchPortalWeeklyExpensesSummaryViaBff(params: {
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
+      timeoutMs: 8000,
+    },
+  );
+  return response.data;
+}
+
+export async function savePortalWeeklyExpenseViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  command: PortalWeeklyExpenseSaveCommand;
+  client?: PlatformApiClientLike;
+}): Promise<PortalWeeklyExpenseSaveResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<PortalWeeklyExpenseSaveResult>(
+    '/api/v1/portal/weekly-expenses/save',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.command,
+      timeoutMs: 8000,
+    },
+  );
+  return response.data;
+}
+
+export async function savePortalExpenseIntakeDraftViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  command: PortalExpenseIntakeDraftSaveCommand;
+  client?: PlatformApiClientLike;
+}): Promise<PortalExpenseIntakeDraftSaveResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<PortalExpenseIntakeDraftSaveResult>(
+    '/api/v1/portal/expense-intake/draft',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.command,
+      timeoutMs: 8000,
+    },
+  );
+  return response.data;
+}
+
+export async function savePortalExpenseIntakeProjectViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  command: PortalExpenseIntakeProjectCommand;
+  client?: PlatformApiClientLike;
+}): Promise<PortalExpenseIntakeProjectResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<PortalExpenseIntakeProjectResult>(
+    '/api/v1/portal/expense-intake/project',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.command,
+      timeoutMs: 8000,
+    },
+  );
+  return response.data;
+}
+
+export async function savePortalExpenseIntakeEvidenceSyncViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  command: PortalExpenseIntakeEvidenceSyncCommand;
+  client?: PlatformApiClientLike;
+}): Promise<PortalExpenseIntakeEvidenceSyncResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<PortalExpenseIntakeEvidenceSyncResult>(
+    '/api/v1/portal/expense-intake/evidence-sync',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.command,
+      timeoutMs: 8000,
+    },
+  );
+  return response.data;
+}
+
+export async function savePortalExpenseIntakeBulkUpsertViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  command: PortalExpenseIntakeBulkUpsertCommand;
+  client?: PlatformApiClientLike;
+}): Promise<PortalExpenseIntakeBulkUpsertResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<PortalExpenseIntakeBulkUpsertResult>(
+    '/api/v1/portal/expense-intake/bulk-upsert',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.command,
+      timeoutMs: 8000,
+    },
+  );
+  return response.data;
+}
+
+export async function submitPortalWeeklySubmissionViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  command: PortalWeeklySubmissionSubmitCommand;
+  client?: PlatformApiClientLike;
+}): Promise<PortalWeeklySubmissionSubmitResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<PortalWeeklySubmissionSubmitResult>(
+    '/api/v1/portal/weekly-submissions/submit',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.command,
+      timeoutMs: 8000,
+    },
+  );
+  return response.data;
+}
+
+export async function closeCashflowWeekViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  command: CloseCashflowWeekCommand;
+  client?: PlatformApiClientLike;
+}): Promise<CloseCashflowWeekResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<CloseCashflowWeekResult>(
+    '/api/v1/cashflow/weeks/close',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.command,
+      timeoutMs: 8000,
+    },
+  );
+  return response.data;
+}
+
+export async function upsertCashflowWeekViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  command: UpsertCashflowWeekCommand;
+  client?: PlatformApiClientLike;
+}): Promise<UpsertCashflowWeekResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<UpsertCashflowWeekResult>(
+    '/api/v1/cashflow/weeks/upsert',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.command,
+      timeoutMs: 8000,
+    },
+  );
+  return response.data;
+}
+
+export async function updateCashflowWeekVarianceViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  command: UpdateCashflowWeekVarianceCommand;
+  client?: PlatformApiClientLike;
+}): Promise<UpdateCashflowWeekVarianceResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<UpdateCashflowWeekVarianceResult>(
+    '/api/v1/cashflow/weeks/variance-flag',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.command,
+      timeoutMs: 8000,
+    },
+  );
+  return response.data;
+}
+
+export async function handoffPortalBankStatementViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  command: PortalBankStatementHandoffCommand;
+  client?: PlatformApiClientLike;
+}): Promise<PortalBankStatementHandoffResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<PortalBankStatementHandoffResult>(
+    '/api/v1/portal/bank-statements/handoff',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.command,
       timeoutMs: 8000,
     },
   );

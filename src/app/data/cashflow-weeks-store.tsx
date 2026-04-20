@@ -30,6 +30,13 @@ import {
   normalizeWeekAmounts,
   resolveWeekDocId,
 } from './cashflow-weeks.persistence';
+import {
+  closeCashflowWeekViaBff,
+  isPlatformApiEnabled,
+  submitPortalWeeklySubmissionViaBff,
+  upsertCashflowWeekViaBff,
+  updateCashflowWeekVarianceViaBff,
+} from '../lib/platform-bff-client';
 import { useFirebase } from '../lib/firebase-context';
 import { getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
 import { addMonthsToYearMonth, getSeoulTodayIso } from '../platform/business-days';
@@ -69,6 +76,8 @@ interface CashflowWeekActions {
     varianceFlag: VarianceFlag | undefined;
     varianceHistory: VarianceFlagEvent[];
   }) => Promise<void>;
+  applyWeeklyExpenseCommandWeeks: (items: CashflowWeekSheet[]) => void;
+  applyClosedCashflowWeek: (item: CashflowWeekSheet) => void;
   getWeeksForProject: (projectId: string) => CashflowWeekSheet[];
 }
 
@@ -77,6 +86,16 @@ if (!_g.__MYSC_CASHFLOW_WEEKS_CTX__) {
   _g.__MYSC_CASHFLOW_WEEKS_CTX__ = createContext<(CashflowWeekState & CashflowWeekActions) | null>(null);
 }
 const CashflowWeekContext: React.Context<(CashflowWeekState & CashflowWeekActions) | null> = _g.__MYSC_CASHFLOW_WEEKS_CTX__;
+
+function mergeCashflowWeekItem(prev: CashflowWeekSheet[], item: CashflowWeekSheet): CashflowWeekSheet[] {
+  const byId = new Map(prev.map((existing) => [existing.id, existing]));
+  byId.set(item.id, { ...(byId.get(item.id) || {}), ...item });
+  return Array.from(byId.values()).sort((left, right) => {
+    if (left.yearMonth !== right.yearMonth) return left.yearMonth.localeCompare(right.yearMonth);
+    if (left.weekNo !== right.weekNo) return left.weekNo - right.weekNo;
+    return left.id.localeCompare(right.id);
+  });
+}
 
 export function CashflowWeekProvider({ children }: { children: ReactNode }) {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
@@ -219,6 +238,28 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     const def = monthWeeks.find((w) => w.weekNo === weekNo);
     if (!def) return;
 
+    if (isPlatformApiEnabled() && actor.uid && upsertCashflowWeekViaBff) {
+      const result = await upsertCashflowWeekViaBff({
+        tenantId: orgId,
+        actor: {
+          uid: actor.uid,
+          email: actor.email,
+          role: actor.role,
+          idToken: actor.idToken,
+          googleAccessToken: actor.googleAccessToken,
+        },
+        command: {
+          projectId,
+          yearMonth: ym,
+          weekNo,
+          mode: input.mode,
+          amounts: input.amounts || {},
+        },
+      });
+      setWeeks((prev) => mergeCashflowWeekItem(prev, result.cashflowWeek as CashflowWeekSheet));
+      return;
+    }
+
     if (!db && actor.source === 'dev_harness') {
       const id = resolveWeekDocId(projectId, ym, weekNo);
       const now = new Date().toISOString();
@@ -323,13 +364,35 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     yearMonth: string;
     weekNo: number;
   }): Promise<void> => {
-    if (!db) return;
     const actor = user;
     if (!actor) return;
     const projectId = input.projectId.trim();
     const ym = input.yearMonth.trim();
     const weekNo = Math.max(1, Math.min(6, Math.trunc(input.weekNo)));
     if (!projectId || !/^\d{4}-\d{2}$/.test(ym)) return;
+
+    if (isPlatformApiEnabled() && actor.uid && submitPortalWeeklySubmissionViaBff) {
+      const result = await submitPortalWeeklySubmissionViaBff({
+        tenantId: orgId,
+        actor: {
+          uid: actor.uid,
+          email: actor.email,
+          role: actor.role,
+          idToken: actor.idToken,
+          googleAccessToken: actor.googleAccessToken,
+        },
+        command: {
+          projectId,
+          yearMonth: ym,
+          weekNo,
+          transactionIds: [],
+        },
+      });
+      setWeeks((prev) => mergeCashflowWeekItem(prev, result.cashflowWeek as CashflowWeekSheet));
+      return;
+    }
+
+    if (!db) return;
 
     const monthWeeks = getMonthMondayWeeks(ym);
     const def = monthWeeks.find((w) => w.weekNo === weekNo);
@@ -384,13 +447,34 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     yearMonth: string;
     weekNo: number;
   }): Promise<void> => {
-    if (!db) return;
     const actor = user;
     if (!actor) return;
     const projectId = input.projectId.trim();
     const ym = input.yearMonth.trim();
     const weekNo = Math.max(1, Math.min(6, Math.trunc(input.weekNo)));
     if (!projectId || !/^\d{4}-\d{2}$/.test(ym)) return;
+
+    if (isPlatformApiEnabled() && actor.uid && closeCashflowWeekViaBff) {
+      const result = await closeCashflowWeekViaBff({
+        tenantId: orgId,
+        actor: {
+          uid: actor.uid,
+          email: actor.email,
+          role: actor.role,
+          idToken: actor.idToken,
+          googleAccessToken: actor.googleAccessToken,
+        },
+        command: {
+          projectId,
+          yearMonth: ym,
+          weekNo,
+        },
+      });
+      setWeeks((prev) => mergeCashflowWeekItem(prev, result.cashflowWeek as CashflowWeekSheet));
+      return;
+    }
+
+    if (!db) return;
 
     const monthWeeks = getMonthMondayWeeks(ym);
     const def = monthWeeks.find((w) => w.weekNo === weekNo);
@@ -445,8 +529,32 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     varianceFlag: VarianceFlag | undefined;
     varianceHistory: VarianceFlagEvent[];
   }): Promise<void> => {
+    const actor = user;
+    const sheetId = input.sheetId.trim();
+    if (!sheetId) return;
+
+    if (actor && isPlatformApiEnabled() && actor.uid && updateCashflowWeekVarianceViaBff) {
+      const result = await updateCashflowWeekVarianceViaBff({
+        tenantId: orgId,
+        actor: {
+          uid: actor.uid,
+          email: actor.email,
+          role: actor.role,
+          idToken: actor.idToken,
+          googleAccessToken: actor.googleAccessToken,
+        },
+        command: {
+          sheetId,
+          varianceFlag: input.varianceFlag ?? null,
+          varianceHistory: input.varianceHistory,
+        },
+      });
+      setWeeks((prev) => mergeCashflowWeekItem(prev, result.cashflowWeek as CashflowWeekSheet));
+      return;
+    }
+
     if (!db) return;
-    const ref = doc(db, getOrgDocumentPath(orgId, 'cashflowWeeks', input.sheetId));
+    const ref = doc(db, getOrgDocumentPath(orgId, 'cashflowWeeks', sheetId));
     const now = new Date().toISOString();
     await updateDoc(ref, {
       varianceFlag: input.varianceFlag ?? null,
@@ -454,7 +562,28 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
       updatedAt: now,
       tenantId: orgId,
     } as any);
-  }, [db, orgId]);
+  }, [db, orgId, user]);
+
+  const applyWeeklyExpenseCommandWeeks = useCallback((items: CashflowWeekSheet[]) => {
+    const nextItems = Array.isArray(items) ? items : [];
+    if (nextItems.length === 0) return;
+    setWeeks((prev) => {
+      const byId = new Map(prev.map((item) => [item.id, item]));
+      nextItems.forEach((item) => {
+        byId.set(item.id, { ...(byId.get(item.id) || {}), ...item });
+      });
+      return Array.from(byId.values()).sort((left, right) => {
+        if (left.yearMonth !== right.yearMonth) return left.yearMonth.localeCompare(right.yearMonth);
+        if (left.weekNo !== right.weekNo) return left.weekNo - right.weekNo;
+        return left.id.localeCompare(right.id);
+      });
+    });
+  }, []);
+
+  const applyClosedCashflowWeek = useCallback((item: CashflowWeekSheet) => {
+    if (!item?.id) return;
+    setWeeks((prev) => mergeCashflowWeekItem(prev, item));
+  }, []);
 
   const getWeeksForProject = useCallback((projectId: string): CashflowWeekSheet[] => {
     const pid = projectId.trim();
@@ -474,6 +603,8 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     submitWeekAsPm,
     closeWeekAsAdmin,
     updateVarianceFlag,
+    applyWeeklyExpenseCommandWeeks,
+    applyClosedCashflowWeek,
     getWeeksForProject,
   }), [
     yearMonth,
@@ -487,6 +618,8 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     submitWeekAsPm,
     closeWeekAsAdmin,
     updateVarianceFlag,
+    applyWeeklyExpenseCommandWeeks,
+    applyClosedCashflowWeek,
     getWeeksForProject,
   ]);
 

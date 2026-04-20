@@ -14,7 +14,12 @@ import {
 import { usePortalStore } from '../../data/portal-store';
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { useAuth } from '../../data/auth-store';
-import type { EvidenceUploadSelection, PendingQuickInsert } from '../cashflow/SettlementLedgerPage';
+import type {
+  EvidenceUploadSelection,
+  PendingQuickInsert,
+  WeeklyExpenseSaveCommandInput,
+  WeeklyExpenseSaveCommandResult,
+} from '../cashflow/SettlementLedgerPage';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Card, CardContent } from '../ui/card';
@@ -34,6 +39,7 @@ import {
   fetchPortalWeeklyExpensesSummaryViaBff,
   type PortalWeeklyExpensesSummaryResult,
   type ProvisionTransactionEvidenceDriveResult,
+  submitPortalWeeklySubmissionViaBff,
   type SyncTransactionEvidenceDriveResult,
   type UploadTransactionEvidenceDriveResult,
   provisionProjectEvidenceDriveRootViaBff,
@@ -43,6 +49,7 @@ import {
   uploadTransactionEvidenceDriveViaBff,
   fetchBudgetSuggestionViaBff,
   isPlatformApiEnabled,
+  savePortalWeeklyExpenseViaBff,
 } from '../../lib/platform-bff-client';
 import { PlatformApiError } from '../../platform/api-client';
 import {
@@ -110,7 +117,9 @@ export function PortalWeeklyExpensePage() {
     deleteExpenseSheet,
     expenseSheetRows,
     bankStatementRows,
-    saveExpenseSheetRows,
+    saveExpenseSheetRows: persistExpenseSheetRows,
+    applyWeeklyExpenseSaveResult,
+    applyWeeklySubmissionCommandResult,
     comments,
     addComment,
     participationEntries,
@@ -120,9 +129,11 @@ export function PortalWeeklyExpensePage() {
     saveBudgetPlanRows,
     saveBudgetCodeBook,
     markSheetSourceApplied,
-    upsertWeeklySubmissionStatus,
   } = usePortalStore();
-  const { submitWeekAsPm, upsertWeekAmounts } = useCashflowWeeks();
+  const {
+    upsertWeekAmounts: persistWeekAmounts,
+    applyWeeklyExpenseCommandWeeks,
+  } = useCashflowWeeks();
   const devHarnessConfig = readDevAuthHarnessConfig(import.meta.env, typeof window !== 'undefined' ? window.location : undefined);
   const [projectDriveProvisioning, setProjectDriveProvisioning] = useState(false);
   const [googleSheetImportOpen, setGoogleSheetImportOpen] = useState(false);
@@ -147,6 +158,12 @@ export function PortalWeeklyExpensePage() {
   const activeSheetName = useMemo(() => {
     return visibleExpenseSheets.find((sheet) => sheet.id === activeExpenseSheetId)?.name || visibleExpenseSheets[0]?.name || '기본 탭';
   }, [visibleExpenseSheets, activeExpenseSheetId]);
+  const activeSheetOrder = useMemo(() => (
+    visibleExpenseSheets.find((sheet) => sheet.id === activeExpenseSheetId)?.order || visibleExpenseSheets[0]?.order || 0
+  ), [visibleExpenseSheets, activeExpenseSheetId]);
+  const activeSheetVersion = useMemo(() => (
+    visibleExpenseSheets.find((sheet) => sheet.id === activeExpenseSheetId)?.version
+  ), [visibleExpenseSheets, activeExpenseSheetId]);
   const bankStatementCount = bankStatementRows?.rows?.length || 0;
   const projectReadModel = useMemo(() => resolvePortalProjectReadModel({
     summaryProject: weeklySummary?.project,
@@ -314,6 +331,63 @@ export function PortalWeeklyExpensePage() {
     persistedRows?: ImportRow[] | null,
   ) => buildSettlementActualSyncPayloadLocally(rows, yearWeeks, persistedRows), []);
 
+  const handleSaveWeeklyExpense = useCallback(async (
+    command: WeeklyExpenseSaveCommandInput,
+  ): Promise<WeeklyExpenseSaveCommandResult> => {
+    if (!orgId || !bffActor.uid) {
+      throw new Error('weekly_expense_save_context_missing');
+    }
+    const result = await savePortalWeeklyExpenseViaBff({
+      tenantId: orgId,
+      actor: bffActor,
+      command: {
+        ...command,
+        expectedVersion: command.expectedVersion ?? activeSheetVersion ?? 0,
+        rows: command.rows.map((row) => ({
+          tempId: row.tempId,
+          ...(row.sourceTxId ? { sourceTxId: row.sourceTxId } : {}),
+          ...(row.entryKind ? { entryKind: row.entryKind } : {}),
+          cells: Array.isArray(row.cells) ? row.cells.map((cell) => String(cell ?? '')) : [],
+          ...(row.error ? { error: row.error } : {}),
+          ...(row.userEditedCells && row.userEditedCells.size > 0
+            ? { userEditedCells: Array.from(row.userEditedCells).sort((left, right) => left - right) }
+            : {}),
+          ...(row.reviewHints && row.reviewHints.length > 0 ? { reviewHints: [...row.reviewHints] } : {}),
+          ...(row.reviewRequiredCellIndexes && row.reviewRequiredCellIndexes.length > 0
+            ? { reviewRequiredCellIndexes: [...row.reviewRequiredCellIndexes] }
+            : {}),
+          ...(row.reviewStatus ? { reviewStatus: row.reviewStatus } : {}),
+          ...(row.reviewFingerprint ? { reviewFingerprint: row.reviewFingerprint } : {}),
+          ...(row.reviewConfirmedAt ? { reviewConfirmedAt: row.reviewConfirmedAt } : {}),
+        })),
+      },
+      client: apiClient,
+    });
+    applyWeeklyExpenseSaveResult({
+      result,
+      rows: command.rows,
+      activeSheetId: command.activeSheetId,
+      activeSheetName: command.activeSheetName,
+      order: command.order,
+    });
+    applyWeeklyExpenseCommandWeeks(result.cashflowWeeks as CashflowWeekSheet[]);
+    return {
+      sheet: {
+        ...result.sheet,
+      },
+      weeklySubmissionStatuses: result.weeklySubmissionStatuses,
+      cashflowWeeks: result.cashflowWeeks as CashflowWeekSheet[],
+      syncSummary: result.syncSummary,
+    };
+  }, [
+    activeSheetVersion,
+    apiClient,
+    applyWeeklyExpenseCommandWeeks,
+    applyWeeklyExpenseSaveResult,
+    bffActor,
+    orgId,
+  ]);
+
   const handleEvidenceDriveError = useCallback((error: unknown, actionLabel: string) => {
     reportError(error, {
       message: `[PortalWeeklyExpensePage] ${actionLabel} failed:`,
@@ -367,7 +441,7 @@ export function PortalWeeklyExpensePage() {
       evidenceDriveSharedDriveId: result.sharedDriveId || undefined,
       evidenceDriveSyncStatus: result.syncStatus,
       updatedAt: result.updatedAt,
-    });
+    }, { platformMirror: true });
   }, [updateTransaction]);
 
   const applySyncedEvidenceState = useCallback(async (
@@ -391,7 +465,7 @@ export function PortalWeeklyExpensePage() {
       evidenceMissing: result.evidenceMissing,
       evidenceStatus: result.evidenceStatus,
       updatedAt: result.updatedAt,
-    });
+    }, { platformMirror: true });
   }, [updateTransaction]);
 
   const ensureTransactionPersisted = useCallback(async ({
@@ -452,9 +526,9 @@ export function PortalWeeklyExpensePage() {
         state: result.state as TransactionState,
       };
       if (existingTx) {
-        await updateTransaction(txId, syncedTx);
+        await updateTransaction(txId, syncedTx, { platformMirror: true });
       } else {
-        await addTransaction(syncedTx);
+        await addTransaction(syncedTx, { platformMirror: true });
       }
       return txId;
     } catch (error) {
@@ -692,22 +766,28 @@ export function PortalWeeklyExpensePage() {
       });
       return;
     }
-    let updatedCount = 0;
+    if (!orgId || !bffActor.uid || !submitPortalWeeklySubmissionViaBff) {
+      throw new Error('weekly_submit_command_unavailable');
+    }
     try {
-      await submitWeekAsPm({ projectId, yearMonth, weekNo });
-      for (const txId of txIds) {
-        await changeTransactionState(txId, 'SUBMITTED');
-        updatedCount += 1;
-      }
+      const result = await submitPortalWeeklySubmissionViaBff({
+        tenantId: orgId,
+        actor: bffActor,
+        command: {
+          projectId,
+          yearMonth,
+          weekNo,
+          transactionIds: txIds,
+        },
+        client: apiClient,
+      });
+      applyWeeklySubmissionCommandResult(result.transactions || []);
       toast.success(`${yearMonth} ${weekNo}주 제출 처리 완료`);
     } catch (err) {
-      const fallback = updatedCount > 0
-        ? `주간 제출은 저장됐지만 거래 상태 ${updatedCount}/${txIds.length}건만 갱신했습니다.`
-        : '주간 제출 처리에 실패했습니다';
-      toast.error(resolveApiErrorMessage(err, fallback));
+      toast.error(resolveApiErrorMessage(err, '주간 제출 처리에 실패했습니다'));
       throw err;
     }
-  }, [changeTransactionState, participationEntries, projectId, submitWeekAsPm]);
+  }, [apiClient, applyWeeklySubmissionCommandResult, bffActor, orgId, participationEntries, projectId]);
 
   const handleChangeTransactionState = useCallback((txId: string, newState: TransactionState, reason?: string) => {
     void changeTransactionState(txId, newState, reason).catch((error) => {
@@ -1041,6 +1121,10 @@ export function PortalWeeklyExpensePage() {
           projectName={projectName}
           transactions={transactions}
           defaultLedgerId={defaultLedgerId}
+          activeSheetId={activeExpenseSheetId}
+          activeSheetName={activeSheetName}
+          activeSheetOrder={activeSheetOrder}
+          expectedSheetVersion={activeSheetVersion}
           onAddTransaction={handleAddTransaction}
           onUpdateTransaction={handleUpdateTransaction}
           authorOptions={authorOptions}
@@ -1054,7 +1138,7 @@ export function PortalWeeklyExpensePage() {
           evidenceRequiredMap={evidenceRequiredMap}
           onSaveEvidenceRequiredMap={saveEvidenceRequiredMap}
           sheetRows={expenseSheetRows}
-          onSaveSheetRows={saveExpenseSheetRows}
+          onSaveWeeklyExpense={handleSaveWeeklyExpense}
           onSubmitWeek={handleSubmitWeek}
           onChangeTransactionState={handleChangeTransactionState}
           currentUserName={portalUser?.name || 'PM'}
@@ -1071,7 +1155,6 @@ export function PortalWeeklyExpensePage() {
           workflowMode={fundInputMode}
           settlementSheetPolicy={settlementSheetPolicy}
           basis={myProject?.basis}
-          onUpdateWeeklySubmissionStatus={upsertWeeklySubmissionStatus}
           pendingQuickInsert={pendingQuickInsert}
           onPendingQuickInsertHandled={handlePendingQuickInsertHandled}
           onDeriveRows={deriveRowsWithLocalKernel}
@@ -1098,13 +1181,13 @@ export function PortalWeeklyExpensePage() {
               sheetSources={sheetSources}
               devHarnessEnabled={devHarnessConfig.enabled}
               ensureGoogleWorkspaceAccess={ensureGoogleWorkspaceAccess}
-              saveExpenseSheetRows={saveExpenseSheetRows}
+              saveExpenseSheetRows={persistExpenseSheetRows}
               saveBudgetPlanRows={saveBudgetPlanRows}
               saveBudgetCodeBook={saveBudgetCodeBook}
               saveBankStatementRows={saveBankStatementRows}
               saveEvidenceRequiredMap={saveEvidenceRequiredMap}
               markSheetSourceApplied={markSheetSourceApplied}
-              upsertWeekAmounts={upsertWeekAmounts}
+              upsertWeekAmounts={persistWeekAmounts}
               previewActualSyncPayload={previewActualSyncWithLocalKernel}
             />
         </Suspense>
@@ -1141,19 +1224,10 @@ export function PortalWeeklyExpensePage() {
                 if (!participationRiskWarning) return;
                 const { yearMonth, weekNo, txIds } = participationRiskWarning;
                 setParticipationRiskWarning(null);
-                let updatedCount = 0;
                 try {
-                  await submitWeekAsPm({ projectId, yearMonth, weekNo });
-                  for (const txId of txIds) {
-                    await changeTransactionState(txId, 'SUBMITTED');
-                    updatedCount += 1;
-                  }
-                  toast.success(`${yearMonth} ${weekNo}주 제출 처리 완료`);
+                  await handleSubmitWeek({ yearMonth, weekNo, txIds });
                 } catch (err) {
-                  const fallback = updatedCount > 0
-                    ? `주간 제출은 저장됐지만 거래 상태 ${updatedCount}/${txIds.length}건만 갱신했습니다.`
-                    : '주간 제출 처리에 실패했습니다';
-                  toast.error(resolveApiErrorMessage(err, fallback));
+                  toast.error(resolveApiErrorMessage(err, '주간 제출 처리에 실패했습니다'));
                 }
               }}
             >

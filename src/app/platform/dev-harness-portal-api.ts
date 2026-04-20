@@ -1,7 +1,12 @@
 import { ORG_MEMBERS, PROJECTS } from '../data/mock-data';
 import { resolveCurrentCashflowWeek } from './cashflow-export-surface';
 import { buildPortalDashboardSurface } from './portal-dashboard-surface';
-import type { WeeklySubmissionStatus } from '../data/types';
+import type {
+  BankImportMatchState,
+  BankImportSnapshot,
+  Transaction,
+  WeeklySubmissionStatus,
+} from '../data/types';
 
 type PortalEntryProjectSummary = {
   id: string;
@@ -181,8 +186,437 @@ type PortalBankStatementsSummaryResult = {
   registrationState: 'registered' | 'unregistered';
 };
 
+type PortalWeeklyExpenseSaveCommand = {
+  projectId: string;
+  activeSheetId: string;
+  activeSheetName: string;
+  order: number;
+  expectedVersion: number;
+  rows: Array<{
+    tempId: string;
+    cells: string[];
+    userEditedCells?: number[];
+    reviewHints?: string[];
+    reviewRequiredCellIndexes?: number[];
+    reviewStatus?: string;
+  }>;
+  syncPlan: Array<{
+    yearMonth: string;
+    weekNo: number;
+    amounts: Record<string, number>;
+    reviewPendingCount: number;
+  }>;
+};
+
+type PortalWeeklyExpenseSaveResult = {
+  sheet: {
+    id: string;
+    projectId: string;
+    name: string;
+    version: number;
+    rowCount: number;
+    updatedAt: string;
+  };
+  weeklySubmissionStatuses: WeeklySubmissionStatus[];
+  cashflowWeeks: Array<{
+    id: string;
+    projectId: string;
+    yearMonth: string;
+    weekNo: number;
+    actual: Record<string, number>;
+    updatedAt: string;
+  }>;
+  syncSummary: {
+    expenseSyncState: 'pending' | 'review_required' | 'synced' | 'sync_failed';
+    expenseReviewPendingCount: number;
+    syncedWeekCount: number;
+    reviewRequiredWeekCount: number;
+  };
+};
+
+type PortalExpenseIntakeDraftSaveCommand = {
+  projectId: string;
+  intakeId: string;
+  updates: {
+    manualFields?: {
+      expenseAmount?: number;
+      budgetCategory?: string;
+      budgetSubCategory?: string;
+      cashflowLineId?: string;
+      cashflowCategory?: string;
+      memo?: string;
+      evidenceCompletedDesc?: string;
+    };
+    existingExpenseSheetId?: string | null;
+    existingExpenseRowTempId?: string | null;
+    matchState?: 'AUTO_CONFIRMED' | 'PENDING_INPUT' | 'REVIEW_REQUIRED' | 'IGNORED';
+    projectionStatus?: 'NOT_PROJECTED' | 'PROJECTED' | 'PROJECTED_WITH_PENDING_EVIDENCE';
+    evidenceStatus?: 'MISSING' | 'PARTIAL' | 'COMPLETE';
+    reviewReasons?: string[];
+    lastUploadBatchId?: string;
+  };
+};
+
+type PortalExpenseIntakeDraftSaveResult = {
+  expenseIntakeItem: {
+    id: string;
+    projectId: string;
+    sourceTxId: string;
+    bankFingerprint: string;
+    bankSnapshot: {
+      accountNumber: string;
+      dateTime: string;
+      counterparty: string;
+      memo: string;
+      signedAmount: number;
+      balanceAfter: number;
+    };
+    matchState: 'AUTO_CONFIRMED' | 'PENDING_INPUT' | 'REVIEW_REQUIRED' | 'IGNORED';
+    projectionStatus: 'NOT_PROJECTED' | 'PROJECTED' | 'PROJECTED_WITH_PENDING_EVIDENCE';
+    evidenceStatus: 'MISSING' | 'PARTIAL' | 'COMPLETE';
+    manualFields: Record<string, string | number>;
+    existingExpenseSheetId?: string;
+    existingExpenseRowTempId?: string;
+    reviewReasons: string[];
+    lastUploadBatchId: string;
+    createdAt: string;
+    updatedAt: string;
+    updatedBy: string;
+    version: number;
+  };
+  summary: {
+    updatedManualFieldCount: number;
+    version: number;
+  };
+};
+
+type PortalExpenseIntakeProjectCommand = {
+  projectId: string;
+  intakeId: string;
+  updates?: PortalExpenseIntakeDraftSaveCommand['updates'];
+};
+
+type PortalExpenseIntakeProjectResult = {
+  expenseIntakeItem: PortalExpenseIntakeDraftSaveResult['expenseIntakeItem'];
+  expenseSheet: {
+    id: string;
+    projectId: string;
+    name?: string;
+    order?: number;
+    version: number;
+    rowCount: number;
+    rows?: Array<{
+      tempId: string;
+      sourceTxId?: string;
+      entryKind?: string;
+      cells: string[];
+    }>;
+    updatedAt: string;
+    updatedBy?: string;
+    createdAt?: string;
+  };
+  projectedRow: {
+    tempId: string;
+    sourceTxId?: string;
+    entryKind?: string;
+    cells: string[];
+  };
+  summary: {
+    projectId: string;
+    intakeId: string;
+    targetSheetId: string;
+    projectedRowTempId: string;
+    version: number;
+  };
+};
+
+type PortalExpenseIntakeBulkUpsertCommand = {
+  projectId: string;
+  items: Array<{
+    id: string;
+    sourceTxId: string;
+    bankFingerprint: string;
+    bankSnapshot: BankImportSnapshot;
+    matchState: BankImportMatchState;
+    manualFields: BankImportManualFields;
+    lastUploadBatchId: string;
+    createdAt: string;
+    updatedAt: string;
+    updatedBy: string;
+  }>;
+};
+
+type PortalExpenseIntakeBulkUpsertResult = {
+  summary: {
+    projectId: string;
+    upsertedCount: number;
+  };
+};
+
+type PortalExpenseIntakeEvidenceSyncCommand = {
+  projectId: string;
+  intakeId: string;
+  updates?: {
+    manualFields?: {
+      evidenceCompletedDesc?: string;
+    };
+  };
+};
+
+type PortalExpenseIntakeEvidenceSyncResult = {
+  expenseIntakeItem: PortalExpenseIntakeDraftSaveResult['expenseIntakeItem'];
+  expenseSheet: {
+    id?: string;
+    projectId?: string;
+    name?: string;
+    order?: number;
+    version?: number;
+    rowCount?: number;
+    rows?: Array<{
+      tempId: string;
+      sourceTxId?: string;
+      entryKind?: string;
+      cells: string[];
+    }>;
+    updatedAt?: string;
+    updatedBy?: string;
+    createdAt?: string;
+  };
+  patchedRow?: {
+    tempId: string;
+    sourceTxId?: string;
+    entryKind?: string;
+    cells: string[];
+  };
+  summary: {
+    targetSheetId: string;
+    patchedRowTempId: string | null;
+    rowPatched: boolean;
+    version: number;
+  };
+};
+
+type PortalTransactionFinanceWriteCommand = {
+  id: string;
+  projectId: string;
+  ledgerId: string;
+  expectedVersion?: number;
+  patch: Partial<Pick<Transaction,
+    | 'dateTime'
+    | 'weekCode'
+    | 'direction'
+    | 'entryKind'
+    | 'method'
+    | 'cashflowCategory'
+    | 'cashflowLabel'
+    | 'budgetCategory'
+    | 'budgetSubCategory'
+    | 'budgetSubSubCategory'
+    | 'counterparty'
+    | 'memo'
+    | 'amounts'
+    | 'evidenceRequired'
+    | 'evidenceStatus'
+    | 'evidenceMissing'
+    | 'attachmentsCount'
+    | 'author'
+    | 'evidenceRequiredDesc'
+    | 'evidenceCompletedDesc'
+    | 'evidenceCompletedManualDesc'
+    | 'evidencePendingDesc'
+    | 'evidenceDriveLink'
+    | 'evidenceDriveSharedDriveId'
+    | 'evidenceDriveFolderId'
+    | 'evidenceDriveFolderName'
+    | 'evidenceDriveSyncStatus'
+    | 'evidenceDriveLastSyncedAt'
+    | 'evidenceAutoListedDesc'
+    | 'supportPendingDocs'
+    | 'eNaraRegistered'
+    | 'eNaraExecuted'
+    | 'vatSettlementDone'
+    | 'settlementComplete'
+    | 'settlementNote'
+  >>;
+};
+
+type PortalTransactionFinanceWriteResult = {
+  transaction: Transaction;
+  summary: {
+    id: string;
+    projectId: string;
+    ledgerId: string;
+    created: boolean;
+    version: number;
+  };
+};
+
+type PortalWeeklySubmissionSubmitCommand = {
+  projectId: string;
+  yearMonth: string;
+  weekNo: number;
+  transactionIds: string[];
+};
+
+type PortalWeeklySubmissionSubmitResult = {
+  cashflowWeek: {
+    id: string;
+    projectId: string;
+    yearMonth: string;
+    weekNo: number;
+    pmSubmitted: true;
+    pmSubmittedAt: string;
+    pmSubmittedByUid: string;
+  };
+  transactions: Array<{
+    id: string;
+    state: 'SUBMITTED';
+    submittedAt: string;
+    submittedBy: string;
+    updatedAt: string;
+    version: number;
+  }>;
+  summary: {
+    submittedTransactionCount: number;
+  };
+};
+
+type CloseCashflowWeekCommand = {
+  projectId: string;
+  yearMonth: string;
+  weekNo: number;
+};
+
+type CloseCashflowWeekResult = {
+  cashflowWeek: {
+    id: string;
+    projectId: string;
+    yearMonth: string;
+    weekNo: number;
+    adminClosed: true;
+    adminClosedAt: string;
+    adminClosedByUid: string;
+    version: number;
+  };
+  summary: {
+    closedWeek: true;
+  };
+};
+
+type UpsertCashflowWeekCommand = {
+  projectId: string;
+  yearMonth: string;
+  weekNo: number;
+  mode: 'projection' | 'actual';
+  amounts: Record<string, number>;
+};
+
+type UpsertCashflowWeekResult = {
+  cashflowWeek: {
+    id: string;
+    projectId: string;
+    yearMonth: string;
+    weekNo: number;
+    projection: Record<string, number>;
+    actual: Record<string, number>;
+    pmSubmitted: boolean;
+    adminClosed: boolean;
+    updatedAt: string;
+    updatedByUid: string;
+    version: number;
+  };
+  summary: {
+    mode: 'projection' | 'actual';
+    updatedLineCount: number;
+  };
+};
+
+type CashflowWeekVarianceFlagCommand = {
+  sheetId: string;
+  varianceFlag?: {
+    status: 'OPEN' | 'REPLIED' | 'RESOLVED';
+    reason: string;
+    flaggedBy: string;
+    flaggedByUid?: string;
+    flaggedAt: string;
+    pmReply?: string;
+    pmRepliedBy?: string;
+    pmRepliedByUid?: string;
+    pmRepliedAt?: string;
+    resolvedBy?: string;
+    resolvedByUid?: string;
+    resolvedAt?: string;
+  };
+  varianceHistory: Array<{
+    id: string;
+    action: 'FLAG' | 'REPLY' | 'RESOLVE';
+    actor: string;
+    actorUid?: string;
+    content: string;
+    timestamp: string;
+  }>;
+};
+
+type CashflowWeekVarianceFlagResult = {
+  cashflowWeek: {
+    id: string;
+    projectId: string;
+    yearMonth: string;
+    weekNo: number;
+    varianceFlag?: CashflowWeekVarianceFlagCommand['varianceFlag'] | null;
+    varianceHistory: CashflowWeekVarianceFlagCommand['varianceHistory'];
+    updatedAt: string;
+    updatedByUid: string;
+    version: number;
+  };
+  summary: {
+    hasVarianceFlag: boolean;
+    varianceHistoryCount: number;
+  };
+};
+
+type PortalBankStatementHandoffCommand = {
+  projectId: string;
+  activeSheetId: string;
+  activeSheetName: string;
+  order: number;
+  columns: string[];
+  rows: Array<{
+    tempId: string;
+    cells: string[];
+    sourceTxId?: string;
+  }>;
+};
+
+type PortalBankStatementHandoffResult = {
+  bankStatement: {
+    rowCount: number;
+    columnCount: number;
+    updatedAt: string;
+  };
+  sheet: {
+    id: string;
+    projectId: string;
+    name: string;
+    rowCount: number;
+    version: number;
+    updatedAt: string;
+  };
+  rows: Array<{
+    tempId: string;
+    sourceTxId: string;
+    cells: string[];
+  }>;
+  expenseIntakeItems: Array<{
+    id: string;
+    projectId: string;
+    sourceTxId: string;
+  }>;
+};
+
 const PRIVILEGED_ROLES = new Set(['admin', 'finance']);
 const DEV_HARNESS_TODAY_ISO = '2026-04-16';
+const DEV_HARNESS_UPDATED_AT = '2026-04-16T12:00:00.000Z';
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
@@ -207,6 +641,17 @@ function resolvePrimaryProjectId(projectIds: string[], preferredProjectId?: stri
   const preferred = normalizeText(preferredProjectId);
   if (preferred && projectIds.includes(preferred)) return preferred;
   return projectIds[0] || '';
+}
+
+function resolveCashflowWeekIdParts(sheetId: string): { projectId: string; yearMonth: string; weekNo: number } | null {
+  const normalized = normalizeText(sheetId);
+  const match = normalized.match(/^(.*)-(\d{4}-\d{2})-w(\d+)$/);
+  if (!match) return null;
+  return {
+    projectId: match[1],
+    yearMonth: match[2],
+    weekNo: Number.parseInt(match[3], 10),
+  };
 }
 
 function resolveDefaultPmProjectId(): string {
@@ -283,7 +728,11 @@ function resolveHarnessProjectContext(params: {
 
 function buildHarnessProjectReadModel(
   project: PortalEntryProjectSummary,
-  projectRecord?: Record<string, unknown>,
+  projectRecord?: {
+    settlementType?: unknown;
+    basis?: unknown;
+    contractAmount?: unknown;
+  },
 ): PortalDashboardSummaryResult['project'] {
   return {
     ...project,
@@ -557,6 +1006,519 @@ export function buildDevHarnessPortalWeeklyExpensesSummary(params: {
       nextPath: '/portal/bank-statements',
     },
     registrationState: context.registrationState,
+  };
+}
+
+export function buildDevHarnessPortalSaveWeeklyExpenseResult(params: {
+  actorId?: string;
+  actorRole?: string;
+  command: PortalWeeklyExpenseSaveCommand;
+}): PortalWeeklyExpenseSaveResult {
+  const command = params.command;
+  const { currentProject } = resolveHarnessProjectContext({
+    actorId: params.actorId,
+    actorRole: params.actorRole,
+    projectId: command.projectId,
+  });
+  const syncPlan = Array.isArray(command.syncPlan) ? command.syncPlan : [];
+  const weeklySubmissionStatuses = syncPlan.map((item) => ({
+    id: `${currentProject.id}-${item.yearMonth}-w${item.weekNo}`,
+    projectId: currentProject.id,
+    yearMonth: item.yearMonth,
+    weekNo: item.weekNo,
+    expenseEdited: true,
+    expenseUpdated: true,
+    expenseSyncState: item.reviewPendingCount > 0 ? 'review_required' : 'synced',
+    expenseReviewPendingCount: item.reviewPendingCount,
+    expenseUpdatedAt: DEV_HARNESS_UPDATED_AT,
+    updatedAt: DEV_HARNESS_UPDATED_AT,
+  } satisfies WeeklySubmissionStatus));
+  const cashflowWeeks = syncPlan.map((item) => ({
+    id: `${currentProject.id}-${item.yearMonth}-w${item.weekNo}`,
+    projectId: currentProject.id,
+    yearMonth: item.yearMonth,
+    weekNo: item.weekNo,
+    actual: item.amounts,
+    updatedAt: DEV_HARNESS_UPDATED_AT,
+  }));
+  const reviewRequiredWeekCount = syncPlan.filter((item) => item.reviewPendingCount > 0).length;
+  const syncedWeekCount = syncPlan.filter((item) => item.reviewPendingCount <= 0).length;
+  const expenseReviewPendingCount = syncPlan.reduce((sum, item) => sum + Math.max(0, Number(item.reviewPendingCount) || 0), 0);
+
+  return {
+    sheet: {
+      id: command.activeSheetId,
+      projectId: currentProject.id,
+      name: command.activeSheetName,
+      version: Math.max(1, Number(command.expectedVersion) + 1),
+      rowCount: Array.isArray(command.rows) ? command.rows.length : 0,
+      updatedAt: DEV_HARNESS_UPDATED_AT,
+    },
+    weeklySubmissionStatuses,
+    cashflowWeeks,
+    syncSummary: {
+      expenseSyncState: reviewRequiredWeekCount > 0 ? 'review_required' : 'synced',
+      expenseReviewPendingCount,
+      syncedWeekCount,
+      reviewRequiredWeekCount,
+    },
+  };
+}
+
+export function buildDevHarnessPortalExpenseIntakeDraftResult(params: {
+  actorId?: string;
+  actorRole?: string;
+  command: PortalExpenseIntakeDraftSaveCommand;
+}): PortalExpenseIntakeDraftSaveResult {
+  const command = params.command;
+  const actorId = normalizeText(params.actorId) || ORG_MEMBERS.find((member) => member.role === 'pm')?.uid || 'u002';
+  const { currentProject } = resolveHarnessProjectContext({
+    actorId,
+    actorRole: params.actorRole,
+    projectId: command.projectId,
+  });
+  const updates = command.updates && typeof command.updates === 'object' ? command.updates : {};
+  const manualFields = updates.manualFields && typeof updates.manualFields === 'object' ? updates.manualFields : {};
+  const reviewReasons = Array.isArray(updates.reviewReasons)
+    ? updates.reviewReasons.map((reason) => normalizeText(reason)).filter(Boolean)
+    : [];
+
+  return {
+    expenseIntakeItem: {
+      id: normalizeText(command.intakeId) || 'fp-1',
+      projectId: currentProject.id,
+      sourceTxId: `bank:${normalizeText(command.intakeId) || 'fp-1'}`,
+      bankFingerprint: normalizeText(command.intakeId) || 'fp-1',
+      bankSnapshot: {
+        accountNumber: '123-456',
+        dateTime: '2026-04-16 09:00',
+        counterparty: '테스트 상호',
+        memo: '기존 메모',
+        signedAmount: -125000,
+        balanceAfter: 900000,
+      },
+      matchState: updates.matchState || 'PENDING_INPUT',
+      projectionStatus: updates.projectionStatus || 'NOT_PROJECTED',
+      evidenceStatus: updates.evidenceStatus || 'MISSING',
+      manualFields: {
+        ...(manualFields.budgetCategory ? { budgetCategory: manualFields.budgetCategory } : {}),
+        ...(manualFields.budgetSubCategory ? { budgetSubCategory: manualFields.budgetSubCategory } : {}),
+        ...(manualFields.memo ? { memo: manualFields.memo } : {}),
+        ...(manualFields.evidenceCompletedDesc ? { evidenceCompletedDesc: manualFields.evidenceCompletedDesc } : {}),
+        ...(typeof manualFields.expenseAmount === 'number' ? { expenseAmount: manualFields.expenseAmount } : {}),
+        ...(manualFields.cashflowLineId ? { cashflowLineId: manualFields.cashflowLineId } : {}),
+        ...(manualFields.cashflowCategory ? { cashflowCategory: manualFields.cashflowCategory } : {}),
+      },
+      ...(updates.existingExpenseSheetId ? { existingExpenseSheetId: updates.existingExpenseSheetId } : {}),
+      ...(updates.existingExpenseRowTempId ? { existingExpenseRowTempId: updates.existingExpenseRowTempId } : {}),
+      reviewReasons,
+      lastUploadBatchId: normalizeText(updates.lastUploadBatchId) || 'batch-1',
+      createdAt: '2026-04-16T18:00:00.000Z',
+      updatedAt: DEV_HARNESS_UPDATED_AT,
+      updatedBy: actorId,
+      version: 3,
+    },
+    summary: {
+      updatedManualFieldCount: Object.keys(manualFields).length,
+      version: 3,
+    },
+  };
+}
+
+export function buildDevHarnessPortalExpenseIntakeProjectResult(params: {
+  actorId?: string;
+  actorRole?: string;
+  command: PortalExpenseIntakeProjectCommand;
+}): PortalExpenseIntakeProjectResult {
+  const command = params.command;
+  const actorId = normalizeText(params.actorId) || ORG_MEMBERS.find((member) => member.role === 'pm')?.uid || 'u002';
+  const { currentProject } = resolveHarnessProjectContext({
+    actorId,
+    actorRole: params.actorRole,
+    projectId: command.projectId,
+  });
+  const updates = command.updates && typeof command.updates === 'object' ? command.updates : {};
+  const manualFields = updates.manualFields && typeof updates.manualFields === 'object' ? updates.manualFields : {};
+  const targetSheetId = normalizeText(updates.existingExpenseSheetId) || 'default';
+  const projectedRowTempId = `bank-${normalizeText(command.intakeId) || 'fp-1'}`;
+  const evidenceStatus = normalizeText(manualFields.evidenceCompletedDesc) ? 'PARTIAL' : 'MISSING';
+
+  return {
+    expenseIntakeItem: {
+      id: normalizeText(command.intakeId) || 'fp-1',
+      projectId: currentProject.id,
+      sourceTxId: `bank:${normalizeText(command.intakeId) || 'fp-1'}`,
+      bankFingerprint: normalizeText(command.intakeId) || 'fp-1',
+      bankSnapshot: {
+        accountNumber: '123-456',
+        dateTime: '2026-04-16 09:00',
+        counterparty: '테스트 상호',
+        memo: '기존 메모',
+        signedAmount: -125000,
+        balanceAfter: 900000,
+      },
+      matchState: 'AUTO_CONFIRMED',
+      projectionStatus: 'PROJECTED_WITH_PENDING_EVIDENCE',
+      evidenceStatus,
+      manualFields: {
+        ...(typeof manualFields.expenseAmount === 'number' ? { expenseAmount: manualFields.expenseAmount } : {}),
+        ...(manualFields.budgetCategory ? { budgetCategory: manualFields.budgetCategory } : {}),
+        ...(manualFields.budgetSubCategory ? { budgetSubCategory: manualFields.budgetSubCategory } : {}),
+        ...(manualFields.cashflowLineId ? { cashflowLineId: manualFields.cashflowLineId } : {}),
+        ...(manualFields.cashflowCategory ? { cashflowCategory: manualFields.cashflowCategory } : {}),
+        ...(manualFields.memo ? { memo: manualFields.memo } : {}),
+        ...(manualFields.evidenceCompletedDesc ? { evidenceCompletedDesc: manualFields.evidenceCompletedDesc } : {}),
+      },
+      existingExpenseSheetId: targetSheetId,
+      existingExpenseRowTempId: projectedRowTempId,
+      reviewReasons: Array.isArray(updates.reviewReasons) ? updates.reviewReasons.map((reason) => normalizeText(reason)).filter(Boolean) : [],
+      lastUploadBatchId: normalizeText(updates.lastUploadBatchId) || 'batch-1',
+      createdAt: '2026-04-16T18:00:00.000Z',
+      updatedAt: DEV_HARNESS_UPDATED_AT,
+      updatedBy: actorId,
+      version: 4,
+    },
+    expenseSheet: {
+      id: targetSheetId,
+      projectId: currentProject.id,
+      name: targetSheetId === 'default' ? '기본 탭' : '새 탭',
+      order: targetSheetId === 'default' ? 0 : 1,
+      rowCount: 1,
+      rows: [
+        {
+          tempId: projectedRowTempId,
+          sourceTxId: `bank:${normalizeText(command.intakeId) || 'fp-1'}`,
+          entryKind: 'EXPENSE',
+          cells: ['담당자'],
+        },
+      ],
+      updatedAt: DEV_HARNESS_UPDATED_AT,
+      updatedBy: actorId,
+      createdAt: '2026-04-16T18:00:00.000Z',
+      version: 2,
+    },
+    projectedRow: {
+      tempId: projectedRowTempId,
+      sourceTxId: `bank:${normalizeText(command.intakeId) || 'fp-1'}`,
+      entryKind: 'EXPENSE',
+      cells: ['담당자'],
+    },
+    summary: {
+      projectId: currentProject.id,
+      intakeId: normalizeText(command.intakeId) || 'fp-1',
+      targetSheetId,
+      projectedRowTempId,
+      version: 4,
+    },
+  };
+}
+
+export function buildDevHarnessPortalExpenseIntakeEvidenceSyncResult(params: {
+  actorId?: string;
+  actorRole?: string;
+  command: PortalExpenseIntakeEvidenceSyncCommand;
+}): PortalExpenseIntakeEvidenceSyncResult {
+  const projected = buildDevHarnessPortalExpenseIntakeProjectResult({
+    actorId: params.actorId,
+    actorRole: params.actorRole,
+    command: {
+      projectId: params.command.projectId,
+      intakeId: params.command.intakeId,
+      updates: {
+        manualFields: {
+          evidenceCompletedDesc: params.command.updates?.manualFields?.evidenceCompletedDesc || '',
+        },
+      },
+    },
+  });
+
+  return {
+    expenseIntakeItem: projected.expenseIntakeItem,
+    expenseSheet: projected.expenseSheet,
+    patchedRow: projected.projectedRow,
+    summary: {
+      targetSheetId: projected.summary.targetSheetId,
+      patchedRowTempId: projected.summary.projectedRowTempId,
+      rowPatched: true,
+      version: projected.summary.version,
+    },
+  };
+}
+
+export function buildDevHarnessPortalExpenseIntakeBulkUpsertResult(params: {
+  actorId?: string;
+  actorRole?: string;
+  command: PortalExpenseIntakeBulkUpsertCommand;
+}): PortalExpenseIntakeBulkUpsertResult {
+  const command = params.command;
+  const actorId = normalizeText(params.actorId) || ORG_MEMBERS.find((member) => member.role === 'pm')?.uid || 'u002';
+  const { currentProject } = resolveHarnessProjectContext({
+    actorId,
+    actorRole: params.actorRole,
+    projectId: command.projectId,
+  });
+
+  return {
+    summary: {
+      projectId: currentProject.id,
+      upsertedCount: Array.isArray(command.items) ? command.items.length : 0,
+    },
+  };
+}
+
+export function buildDevHarnessPortalTransactionFinanceWriteResult(params: {
+  actorId?: string;
+  actorRole?: string;
+  command: PortalTransactionFinanceWriteCommand;
+}): PortalTransactionFinanceWriteResult {
+  const command = params.command;
+  const actorId = normalizeText(params.actorId) || ORG_MEMBERS.find((member) => member.role === 'pm')?.uid || 'u002';
+  const { currentProject } = resolveHarnessProjectContext({
+    actorId,
+    actorRole: params.actorRole,
+    projectId: command.projectId,
+  });
+  const existingVersion = Number.isFinite(command.expectedVersion) ? Number(command.expectedVersion) : 0;
+  const created = existingVersion < 1;
+  const version = created ? 1 : existingVersion + 1;
+
+  return {
+    transaction: {
+      id: normalizeText(command.id) || `tx-${Date.now()}`,
+      projectId: currentProject.id,
+      ledgerId: normalizeText(command.ledgerId) || `${currentProject.id}-ledger-1`,
+      state: 'DRAFT',
+      dateTime: command.patch.dateTime || DEV_HARNESS_UPDATED_AT,
+      weekCode: command.patch.weekCode || '2026-W16',
+      direction: command.patch.direction || 'OUT',
+      entryKind: command.patch.entryKind,
+      method: command.patch.method || 'TRANSFER',
+      cashflowCategory: command.patch.cashflowCategory || 'MISC_EXPENSE',
+      cashflowLabel: command.patch.cashflowLabel || '운영비',
+      budgetCategory: command.patch.budgetCategory,
+      counterparty: command.patch.counterparty || '거래처',
+      memo: command.patch.memo || '',
+      amounts: command.patch.amounts || {
+        bankAmount: 0,
+        depositAmount: 0,
+        expenseAmount: 0,
+        vatIn: 0,
+        vatOut: 0,
+        vatRefund: 0,
+        balanceAfter: 0,
+      },
+      evidenceRequired: Array.isArray(command.patch.evidenceRequired) ? [...command.patch.evidenceRequired] : [],
+      evidenceStatus: command.patch.evidenceStatus || 'MISSING',
+      evidenceMissing: Array.isArray(command.patch.evidenceMissing) ? [...command.patch.evidenceMissing] : [],
+      attachmentsCount: typeof command.patch.attachmentsCount === 'number' ? command.patch.attachmentsCount : 0,
+      createdBy: created ? actorId : 'pm-old',
+      createdAt: created ? DEV_HARNESS_UPDATED_AT : '2026-04-17T08:00:00.000Z',
+      updatedBy: actorId,
+      updatedAt: DEV_HARNESS_UPDATED_AT,
+      version,
+      ...(command.patch.author !== undefined ? { author: command.patch.author } : {}),
+      ...(command.patch.budgetSubCategory !== undefined ? { budgetSubCategory: command.patch.budgetSubCategory } : {}),
+      ...(command.patch.budgetSubSubCategory !== undefined ? { budgetSubSubCategory: command.patch.budgetSubSubCategory } : {}),
+      ...(command.patch.evidenceRequiredDesc !== undefined ? { evidenceRequiredDesc: command.patch.evidenceRequiredDesc } : {}),
+      ...(command.patch.evidenceCompletedDesc !== undefined ? { evidenceCompletedDesc: command.patch.evidenceCompletedDesc } : {}),
+      ...(command.patch.evidenceCompletedManualDesc !== undefined ? { evidenceCompletedManualDesc: command.patch.evidenceCompletedManualDesc } : {}),
+      ...(command.patch.evidencePendingDesc !== undefined ? { evidencePendingDesc: command.patch.evidencePendingDesc } : {}),
+      ...(command.patch.evidenceDriveLink !== undefined ? { evidenceDriveLink: command.patch.evidenceDriveLink } : {}),
+      ...(command.patch.evidenceDriveSharedDriveId !== undefined ? { evidenceDriveSharedDriveId: command.patch.evidenceDriveSharedDriveId } : {}),
+      ...(command.patch.evidenceDriveFolderId !== undefined ? { evidenceDriveFolderId: command.patch.evidenceDriveFolderId } : {}),
+      ...(command.patch.evidenceDriveFolderName !== undefined ? { evidenceDriveFolderName: command.patch.evidenceDriveFolderName } : {}),
+      ...(command.patch.evidenceDriveSyncStatus !== undefined ? { evidenceDriveSyncStatus: command.patch.evidenceDriveSyncStatus } : {}),
+      ...(command.patch.evidenceDriveLastSyncedAt !== undefined ? { evidenceDriveLastSyncedAt: command.patch.evidenceDriveLastSyncedAt } : {}),
+      ...(command.patch.evidenceAutoListedDesc !== undefined ? { evidenceAutoListedDesc: command.patch.evidenceAutoListedDesc } : {}),
+      ...(command.patch.supportPendingDocs !== undefined ? { supportPendingDocs: command.patch.supportPendingDocs } : {}),
+      ...(command.patch.eNaraRegistered !== undefined ? { eNaraRegistered: command.patch.eNaraRegistered } : {}),
+      ...(command.patch.eNaraExecuted !== undefined ? { eNaraExecuted: command.patch.eNaraExecuted } : {}),
+      ...(command.patch.vatSettlementDone !== undefined ? { vatSettlementDone: command.patch.vatSettlementDone } : {}),
+      ...(command.patch.settlementComplete !== undefined ? { settlementComplete: command.patch.settlementComplete } : {}),
+      ...(command.patch.settlementNote !== undefined ? { settlementNote: command.patch.settlementNote } : {}),
+    },
+    summary: {
+      id: normalizeText(command.id) || `tx-${Date.now()}`,
+      projectId: currentProject.id,
+      ledgerId: normalizeText(command.ledgerId) || `${currentProject.id}-ledger-1`,
+      created,
+      version,
+    },
+  };
+}
+
+export function buildDevHarnessPortalSubmitWeeklySubmissionResult(params: {
+  actorId?: string;
+  actorRole?: string;
+  command: PortalWeeklySubmissionSubmitCommand;
+}): PortalWeeklySubmissionSubmitResult {
+  const command = params.command;
+  const actorId = normalizeText(params.actorId) || ORG_MEMBERS.find((member) => member.role === 'pm')?.uid || 'u002';
+  const { currentProject } = resolveHarnessProjectContext({
+    actorId,
+    actorRole: params.actorRole,
+    projectId: command.projectId,
+  });
+  const transactionIds = Array.isArray(command.transactionIds) ? command.transactionIds.filter((id) => normalizeText(id)) : [];
+
+  return {
+    cashflowWeek: {
+      id: `${currentProject.id}-${command.yearMonth}-w${command.weekNo}`,
+      projectId: currentProject.id,
+      yearMonth: command.yearMonth,
+      weekNo: command.weekNo,
+      pmSubmitted: true,
+      pmSubmittedAt: DEV_HARNESS_UPDATED_AT,
+      pmSubmittedByUid: actorId,
+    },
+    transactions: transactionIds.map((id) => ({
+      id,
+      state: 'SUBMITTED',
+      submittedAt: DEV_HARNESS_UPDATED_AT,
+      submittedBy: actorId,
+      updatedAt: DEV_HARNESS_UPDATED_AT,
+      version: 4,
+    })),
+    summary: {
+      submittedTransactionCount: transactionIds.length,
+    },
+  };
+}
+
+export function buildDevHarnessPortalCloseCashflowWeekResult(params: {
+  actorId?: string;
+  actorRole?: string;
+  command: CloseCashflowWeekCommand;
+}): CloseCashflowWeekResult {
+  const command = params.command;
+  const actorId = normalizeText(params.actorId) || ORG_MEMBERS.find((member) => member.role === 'admin')?.uid || 'admin-1';
+  const { currentProject } = resolveHarnessProjectContext({
+    actorId,
+    actorRole: params.actorRole,
+    projectId: command.projectId,
+  });
+
+  return {
+    cashflowWeek: {
+      id: `${currentProject.id}-${command.yearMonth}-w${command.weekNo}`,
+      projectId: currentProject.id,
+      yearMonth: command.yearMonth,
+      weekNo: command.weekNo,
+      adminClosed: true,
+      adminClosedAt: DEV_HARNESS_UPDATED_AT,
+      adminClosedByUid: actorId,
+      version: 8,
+    },
+    summary: {
+      closedWeek: true,
+    },
+  };
+}
+
+export function buildDevHarnessPortalVarianceFlagResult(params: {
+  actorId?: string;
+  actorRole?: string;
+  command: CashflowWeekVarianceFlagCommand;
+}): CashflowWeekVarianceFlagResult {
+  const command = params.command;
+  const actorId = normalizeText(params.actorId) || ORG_MEMBERS.find((member) => member.role === 'admin')?.uid || 'admin-1';
+  const sheetParts = resolveCashflowWeekIdParts(command.sheetId);
+  const { currentProject } = resolveHarnessProjectContext({
+    actorId,
+    actorRole: params.actorRole,
+    projectId: sheetParts?.projectId || undefined,
+  });
+
+  return {
+    cashflowWeek: {
+      id: normalizeText(command.sheetId) || `${currentProject.id}-2026-04-w3`,
+      projectId: sheetParts?.projectId || currentProject.id,
+      yearMonth: sheetParts?.yearMonth || '2026-04',
+      weekNo: sheetParts?.weekNo || 3,
+      varianceFlag: command.varianceFlag,
+      varianceHistory: Array.isArray(command.varianceHistory) ? command.varianceHistory : [],
+      updatedAt: DEV_HARNESS_UPDATED_AT,
+      updatedByUid: actorId,
+      version: 6,
+    },
+    summary: {
+      hasVarianceFlag: Boolean(command.varianceFlag),
+      varianceHistoryCount: Array.isArray(command.varianceHistory) ? command.varianceHistory.length : 0,
+    },
+  };
+}
+
+export function buildDevHarnessPortalUpsertCashflowWeekResult(params: {
+  actorId?: string;
+  actorRole?: string;
+  command: UpsertCashflowWeekCommand;
+}): UpsertCashflowWeekResult {
+  const command = params.command;
+  const actorId = normalizeText(params.actorId) || ORG_MEMBERS.find((member) => member.role === 'admin')?.uid || 'admin-1';
+  const { currentProject } = resolveHarnessProjectContext({
+    actorId,
+    actorRole: params.actorRole,
+    projectId: command.projectId,
+  });
+
+  return {
+    cashflowWeek: {
+      id: `${currentProject.id}-${command.yearMonth}-w${command.weekNo}`,
+      projectId: currentProject.id,
+      yearMonth: command.yearMonth,
+      weekNo: command.weekNo,
+      projection: command.mode === 'projection' ? { ...command.amounts } : {},
+      actual: command.mode === 'actual' ? { ...command.amounts } : {},
+      pmSubmitted: false,
+      adminClosed: false,
+      updatedAt: DEV_HARNESS_UPDATED_AT,
+      updatedByUid: actorId,
+      version: 6,
+    },
+    summary: {
+      mode: command.mode,
+      updatedLineCount: Object.keys(command.amounts || {}).length,
+    },
+  };
+}
+
+export function buildDevHarnessPortalBankStatementHandoffResult(params: {
+  actorId?: string;
+  actorRole?: string;
+  command: PortalBankStatementHandoffCommand;
+}): PortalBankStatementHandoffResult {
+  const command = params.command;
+  const { currentProject } = resolveHarnessProjectContext({
+    actorId: params.actorId,
+    actorRole: params.actorRole,
+    projectId: command.projectId,
+  });
+  const rows = (Array.isArray(command.rows) ? command.rows : []).map((row, index) => ({
+    tempId: row.tempId,
+    sourceTxId: row.sourceTxId || `bank:${index + 1}`,
+    cells: row.cells,
+  }));
+
+  return {
+    bankStatement: {
+      rowCount: rows.length,
+      columnCount: Array.isArray(command.columns) ? command.columns.length : 0,
+      updatedAt: DEV_HARNESS_UPDATED_AT,
+    },
+    sheet: {
+      id: command.activeSheetId,
+      projectId: currentProject.id,
+      name: command.activeSheetName,
+      rowCount: rows.length,
+      version: 3,
+      updatedAt: DEV_HARNESS_UPDATED_AT,
+    },
+    rows,
+    expenseIntakeItems: rows.map((row, index) => ({
+      id: `intake-${index + 1}`,
+      projectId: currentProject.id,
+      sourceTxId: row.sourceTxId,
+    })),
   };
 }
 

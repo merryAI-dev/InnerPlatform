@@ -28,6 +28,8 @@
 - [x] 통장내역 저장본에서 queue-first wizard 없이 바로 주간 입력으로 이어가기 가능
 - [x] PM 포털 safe fetch 모드에서도 주간 입력 화면 부팅 가능
 - [x] 주간 입력 화면은 `weekly-expenses-summary` BFF contract로 프로젝트 header와 handoff surface를 우선 읽음
+- [x] 주간 입력 저장은 `portal/weekly-expenses/save` command boundary를 통해 expense sheet, submission 상태, cashflow actual 반영을 한 번에 위임함
+- [x] PM 주간 제출은 `portal/weekly-submissions/submit` command boundary를 통해 cashflow week submit과 거래 상태 제출을 한 번에 위임함
 - [ ] 입력 보조 드롭다운/팝오버 잘림 이슈 완전 해소 확인 필요
 
 ## Recent Changes
@@ -36,6 +38,8 @@
 - [2026-04-15] 통장내역 저장 직후 신규 은행 행이 현재 주간 사업비 탭에 바로 나타나도록 연결했다. 별도 Queue나 triage wizard 없이 이 화면에서 바로 편집을 이어간다.
 - [2026-04-15] PM 역할에서는 portal store가 주요 운영 데이터를 realtime listen 대신 safe fetch로 초기 로딩해, 포털 부팅 중 반복 Listen 400이 사업비 입력 화면까지 흔드는 구조를 줄였다.
 - [2026-04-16] `/portal/weekly-expenses`는 `weekly-expenses-summary` BFF endpoint를 추가해 프로젝트 header와 handoff surface를 raw store shape보다 summary contract 기준으로 우선 렌더링하도록 옮기기 시작했다.
+- [2026-04-16] `portal/weekly-expenses/save` command route를 추가해 expense sheet 저장, weekly submission 상태 갱신, cashflow actual 반영을 single-command orchestration으로 위임했다. `SettlementLedgerPage`와 `PortalWeeklyExpensePage`는 더 이상 세 저장 경로를 클라이언트에서 분리 호출하지 않는다.
+- [2026-04-16] `portal/weekly-submissions/submit` command route를 추가해 PM 주간 제출 시 cashflow week `pmSubmitted` 처리와 선택 거래 `SUBMITTED` 전환을 single-command orchestration으로 위임했다. 참여율 경고 확인 후 제출 흐름도 같은 command path를 재사용한다.
 - [2026-04-14] 미처리 거래 queue strip과 triage wizard 진입을 제거하고, 통장내역 저장본에서 바로 현재 탭 입력으로 이어가는 흐름으로 롤백했다.
 - [2026-04-14] 미저장 편집이 남은 상태에서 통장내역이나 사이드바로 이동하면 확인 다이얼로그를 띄우도록 복구했다.
 - [2026-04-14] bank import triage wizard의 cashflow category 선택값을 정리하고, fullscreen wizard와 주간 입력 화면 간 회귀 E2E를 다시 통과시켰다.
@@ -49,19 +53,28 @@
 ## Known Notes
 
 - 사업비 입력(주간)은 통장내역, submission 상태, 캐시플로 actual 반영까지 여러 화면과 직접 연결된다.
+- server-owned write boundary는 닫혔지만, sync plan 계산 자체는 아직 클라이언트가 만든 값을 서버에 전달한다. 계산 로직까지 서버 권위로 옮기는 건 다음 command-authority slice다.
 - "사람이 입력해야 하는 필드"의 overwrite/backspace는 반복 회귀 포인트라 다음 변경 시 가장 먼저 확인해야 한다.
 
 ## Related Files
 
 - `src/app/components/portal/PortalWeeklyExpensePage.tsx`
+- `src/app/components/cashflow/SettlementLedgerPage.tsx`
 - `src/app/components/portal/PortalBankStatementPage.tsx`
+- `server/bff/routes/portal-weekly-expense-commands.mjs`
+- `server/bff/routes/portal-weekly-submission-commands.mjs`
+- `src/app/lib/platform-bff-client.ts`
 - `src/app/routes.tsx`
 
 ## Related Tests
 
 - `src/app/components/portal/PortalWeeklyExpensePage.flow-layout.test.ts`
+- `src/app/components/portal/PortalWeeklyExpenseCommandBoundary.shell.test.ts`
+- `src/app/components/portal/PortalWeeklySubmitCommandBoundary.shell.test.ts`
 - `src/app/platform/portal-happy-path.test.ts`
 - `src/app/platform/weekly-expense-save-policy.test.ts`
+- `server/bff/routes/portal-weekly-expense-commands.test.mjs`
+- `server/bff/routes/portal-weekly-submission-commands.test.mjs`
 - `src/app/platform/bank-import-triage.test.ts`
 - `src/app/data/portal-store.integration.test.ts`
 

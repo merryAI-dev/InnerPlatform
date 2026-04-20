@@ -2,11 +2,22 @@ import { describe, expect, it } from 'vitest';
 import { resolveDevHarnessPortalApiResponse } from '../../../vite.config';
 import {
   buildDevHarnessPortalBankStatementsSummary,
+  buildDevHarnessPortalBankStatementHandoffResult,
+  buildDevHarnessPortalCloseCashflowWeekResult,
   buildDevHarnessPortalDashboardSummary,
   buildDevHarnessPortalEntryContext,
+  buildDevHarnessPortalExpenseIntakeDraftResult,
+  buildDevHarnessPortalExpenseIntakeBulkUpsertResult,
+  buildDevHarnessPortalExpenseIntakeEvidenceSyncResult,
+  buildDevHarnessPortalExpenseIntakeProjectResult,
+  buildDevHarnessPortalTransactionFinanceWriteResult,
   buildDevHarnessPortalOnboardingContext,
   buildDevHarnessPortalPayrollSummary,
   buildDevHarnessPortalRegistrationResult,
+  buildDevHarnessPortalSaveWeeklyExpenseResult,
+  buildDevHarnessPortalSubmitWeeklySubmissionResult,
+  buildDevHarnessPortalVarianceFlagResult,
+  buildDevHarnessPortalUpsertCashflowWeekResult,
   buildDevHarnessPortalSessionProjectResult,
   buildDevHarnessPortalWeeklyExpensesSummary,
 } from './dev-harness-portal-api';
@@ -111,6 +122,490 @@ describe('dev harness portal api helpers', () => {
     expect(bankStatements.handoffContext.nextPath).toBe('/portal/weekly-expenses');
   });
 
+  it('builds a weekly expense save command result for a visible PM project', () => {
+    const result = buildDevHarnessPortalSaveWeeklyExpenseResult({
+      actorId: 'u002',
+      actorRole: 'pm',
+      command: {
+        projectId: 'p001',
+        activeSheetId: 'default',
+        activeSheetName: '기본 탭',
+        order: 0,
+        expectedVersion: 2,
+        rows: [
+          {
+            tempId: 'row-1',
+            cells: ['담당자', '1', '2026-04-14', '04-4-3'],
+          },
+        ],
+        syncPlan: [
+          {
+            yearMonth: '2026-04',
+            weekNo: 3,
+            amounts: { DIRECT_COST_OUT: 120000 },
+            reviewPendingCount: 0,
+          },
+          {
+            yearMonth: '2026-04',
+            weekNo: 4,
+            amounts: { DIRECT_COST_OUT: 50000 },
+            reviewPendingCount: 1,
+          },
+        ],
+      },
+    });
+
+    expect(result.sheet).toMatchObject({
+      id: 'default',
+      projectId: 'p001',
+      version: 3,
+      rowCount: 1,
+    });
+    expect(result.syncSummary).toEqual({
+      expenseSyncState: 'review_required',
+      expenseReviewPendingCount: 1,
+      syncedWeekCount: 1,
+      reviewRequiredWeekCount: 1,
+    });
+    expect(result.weeklySubmissionStatuses).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        projectId: 'p001',
+        yearMonth: '2026-04',
+        weekNo: 3,
+        expenseSyncState: 'synced',
+        expenseReviewPendingCount: 0,
+      }),
+      expect.objectContaining({
+        projectId: 'p001',
+        yearMonth: '2026-04',
+        weekNo: 4,
+        expenseSyncState: 'review_required',
+        expenseReviewPendingCount: 1,
+      }),
+    ]));
+    expect(result.cashflowWeeks).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'p001-2026-04-w3',
+        projectId: 'p001',
+        actual: { DIRECT_COST_OUT: 120000 },
+      }),
+      expect.objectContaining({
+        id: 'p001-2026-04-w4',
+        projectId: 'p001',
+        actual: { DIRECT_COST_OUT: 50000 },
+      }),
+    ]));
+  });
+
+  it('builds an expense intake evidence sync command result for a visible PM project', () => {
+    const result = buildDevHarnessPortalExpenseIntakeEvidenceSyncResult({
+      actorId: 'u002',
+      actorRole: 'pm',
+      command: {
+        projectId: 'p001',
+        intakeId: 'fp-1',
+        updates: {
+          manualFields: {
+            budgetSubCategory: '숙박',
+            evidenceCompletedDesc: '출장신청서',
+          },
+          reviewReasons: ['manual_review_required'],
+        },
+      },
+    });
+
+    expect(result.expenseIntakeItem).toMatchObject({
+      id: 'fp-1',
+      projectId: 'p001',
+      existingExpenseSheetId: 'default',
+      existingExpenseRowTempId: 'bank-fp-1',
+    });
+    expect(result.expenseSheet.rows).toHaveLength(1);
+    expect(result.summary.targetSheetId).toBe('default');
+  });
+
+  it('handles evidence sync requests through the vite dev harness router', async () => {
+    const response = await resolveDevHarnessPortalApiResponse({
+      enabled: true,
+      method: 'POST',
+      url: '/api/v1/portal/expense-intake/evidence-sync',
+      actorId: 'u002',
+      actorRole: 'pm',
+      readBody: async () => ({
+        projectId: 'p001',
+        intakeId: 'fp-1',
+        updates: {
+          manualFields: {
+            budgetSubCategory: '숙박',
+            evidenceCompletedDesc: '출장신청서',
+          },
+        },
+      }),
+    });
+
+    expect(response.handled).toBe(true);
+    expect(response.statusCode).toBe(200);
+    expect(response.payload).toMatchObject({
+      expenseIntakeItem: {
+        id: 'fp-1',
+        projectId: 'p001',
+      },
+      expenseSheet: {
+        id: 'default',
+      },
+    });
+  });
+
+  it('builds a weekly submission submit command result for a visible PM project', () => {
+    const result = buildDevHarnessPortalSubmitWeeklySubmissionResult({
+      actorId: 'u002',
+      actorRole: 'pm',
+      command: {
+        projectId: 'p001',
+        yearMonth: '2026-04',
+        weekNo: 3,
+        transactionIds: ['tx-1', 'tx-2'],
+      },
+    });
+
+    expect(result.cashflowWeek).toMatchObject({
+      id: 'p001-2026-04-w3',
+      projectId: 'p001',
+      yearMonth: '2026-04',
+      weekNo: 3,
+      pmSubmitted: true,
+    });
+    expect(result.transactions).toEqual([
+      expect.objectContaining({
+        id: 'tx-1',
+        state: 'SUBMITTED',
+        submittedBy: 'u002',
+        version: 4,
+      }),
+      expect.objectContaining({
+        id: 'tx-2',
+        state: 'SUBMITTED',
+        submittedBy: 'u002',
+        version: 4,
+      }),
+    ]);
+    expect(result.summary).toEqual({
+      submittedTransactionCount: 2,
+    });
+  });
+
+  it('builds an expense intake draft save command result for a visible PM project', () => {
+    const result = buildDevHarnessPortalExpenseIntakeDraftResult({
+      actorId: 'u002',
+      actorRole: 'pm',
+      command: {
+        projectId: 'p001',
+        intakeId: 'fp-1',
+        updates: {
+          manualFields: {
+            budgetSubCategory: '숙박',
+            evidenceCompletedDesc: '출장신청서',
+          },
+          reviewReasons: ['manual_review_required', 'evidence_missing'],
+        },
+      },
+    });
+
+    expect(result.expenseIntakeItem).toMatchObject({
+      id: 'fp-1',
+      projectId: 'p001',
+      sourceTxId: 'bank:fp-1',
+      manualFields: {
+        budgetSubCategory: '숙박',
+        evidenceCompletedDesc: '출장신청서',
+      },
+      reviewReasons: ['manual_review_required', 'evidence_missing'],
+      updatedBy: 'u002',
+      version: 3,
+    });
+    expect(result.summary).toEqual({
+      updatedManualFieldCount: 2,
+      version: 3,
+    });
+  });
+
+  it('builds an expense intake bulk upsert command result for a visible PM project', () => {
+    const result = buildDevHarnessPortalExpenseIntakeBulkUpsertResult({
+      actorId: 'u002',
+      actorRole: 'pm',
+      command: {
+        projectId: 'p001',
+        items: [
+          {
+            id: 'fp-1',
+            sourceTxId: 'bank:fp-1',
+            bankFingerprint: 'fp-1',
+            bankSnapshot: {
+              accountNumber: '111-222-333',
+              dateTime: '2026-04-17T08:00:00.000Z',
+              counterparty: '가맹점',
+              memo: '카드 결제',
+              signedAmount: -120000,
+              balanceAfter: 910000,
+            },
+            matchState: 'PENDING_INPUT',
+            manualFields: {},
+            lastUploadBatchId: 'batch-1',
+            createdAt: '2026-04-17T08:10:00.000Z',
+            updatedAt: '2026-04-17T08:15:00.000Z',
+            updatedBy: 'pm-old',
+          },
+        ],
+      },
+    });
+
+    expect(result.summary).toEqual({
+      projectId: 'p001',
+      upsertedCount: 1,
+    });
+  });
+
+  it('builds an expense intake project command result for a visible PM project', () => {
+    const result = buildDevHarnessPortalExpenseIntakeProjectResult({
+      actorId: 'u002',
+      actorRole: 'pm',
+      command: {
+        projectId: 'p001',
+        intakeId: 'fp-1',
+        updates: {
+          manualFields: {
+            budgetCategory: '여비',
+            budgetSubCategory: '숙박',
+            cashflowLineId: 'DIRECT_COST_OUT',
+            expenseAmount: 125000,
+            evidenceCompletedDesc: '출장신청서',
+          },
+          reviewReasons: ['manual_review_required'],
+        },
+      },
+    });
+
+    expect(result.expenseIntakeItem).toMatchObject({
+      id: 'fp-1',
+      projectId: 'p001',
+      matchState: 'AUTO_CONFIRMED',
+      evidenceStatus: 'PARTIAL',
+      existingExpenseSheetId: 'default',
+      existingExpenseRowTempId: 'bank-fp-1',
+      version: 4,
+    });
+    expect(result.expenseSheet).toMatchObject({
+      id: 'default',
+      projectId: 'p001',
+      rowCount: 1,
+      version: 2,
+    });
+    expect(result.summary).toEqual({
+      projectId: 'p001',
+      intakeId: 'fp-1',
+      targetSheetId: 'default',
+      projectedRowTempId: 'bank-fp-1',
+      version: 4,
+    });
+  });
+
+  it('builds a portal transaction finance-write result without taking lifecycle ownership', () => {
+    const result = buildDevHarnessPortalTransactionFinanceWriteResult({
+      actorId: 'u002',
+      actorRole: 'pm',
+      command: {
+        id: 'tx-portal-1',
+        projectId: 'p001',
+        ledgerId: 'ledger-1',
+        expectedVersion: 3,
+        patch: {
+          counterparty: '수정 거래처',
+          memo: '수정 메모',
+          attachmentsCount: 2,
+          evidenceStatus: 'PARTIAL',
+          evidenceMissing: ['세금계산서'],
+          supportPendingDocs: '세금계산서',
+        },
+      },
+    });
+
+    expect(result.transaction).toMatchObject({
+      id: 'tx-portal-1',
+      projectId: 'p001',
+      ledgerId: 'ledger-1',
+      state: 'DRAFT',
+      counterparty: '수정 거래처',
+      memo: '수정 메모',
+      attachmentsCount: 2,
+      evidenceStatus: 'PARTIAL',
+      supportPendingDocs: '세금계산서',
+      version: 4,
+      updatedBy: 'u002',
+    });
+    expect(result.transaction.submittedBy).toBeUndefined();
+    expect(result.transaction.approvedBy).toBeUndefined();
+    expect(result.summary).toMatchObject({
+      id: 'tx-portal-1',
+      created: false,
+      version: 4,
+    });
+  });
+
+  it('builds a cashflow week close command result for a visible admin project', () => {
+    const result = buildDevHarnessPortalCloseCashflowWeekResult({
+      actorId: 'admin-1',
+      actorRole: 'admin',
+      command: {
+        projectId: 'p001',
+        yearMonth: '2026-04',
+        weekNo: 3,
+      },
+    });
+
+    expect(result.cashflowWeek).toMatchObject({
+      id: 'p001-2026-04-w3',
+      projectId: 'p001',
+      yearMonth: '2026-04',
+      weekNo: 3,
+      adminClosed: true,
+    });
+    expect(result.summary).toEqual({
+      closedWeek: true,
+    });
+  });
+
+  it('builds a cashflow week upsert command result for a visible PM project', () => {
+    const result = buildDevHarnessPortalUpsertCashflowWeekResult({
+      actorId: 'u002',
+      actorRole: 'pm',
+      command: {
+        projectId: 'p001',
+        yearMonth: '2026-04',
+        weekNo: 3,
+        mode: 'projection',
+        amounts: {
+          SALES_IN: 250000,
+          DIRECT_COST_OUT: 80000,
+        },
+      },
+    });
+
+    expect(result.cashflowWeek).toMatchObject({
+      id: 'p001-2026-04-w3',
+      projectId: 'p001',
+      yearMonth: '2026-04',
+      weekNo: 3,
+      projection: {
+        SALES_IN: 250000,
+        DIRECT_COST_OUT: 80000,
+      },
+      actual: {},
+      pmSubmitted: false,
+      adminClosed: false,
+    });
+    expect(result.summary).toEqual({
+      mode: 'projection',
+      updatedLineCount: 2,
+    });
+  });
+
+  it('builds a cashflow week variance command result for a visible admin project', () => {
+    const result = buildDevHarnessPortalVarianceFlagResult({
+      actorId: 'admin-1',
+      actorRole: 'admin',
+      command: {
+        sheetId: 'p001-2026-04-w3',
+        varianceFlag: {
+          status: 'OPEN',
+          reason: '증빙 불일치',
+          flaggedBy: '관리자',
+          flaggedByUid: 'admin-1',
+          flaggedAt: '2026-04-16T18:59:00.000Z',
+        },
+        varianceHistory: [
+          {
+            id: 'vf-1',
+            action: 'FLAG',
+            actor: '관리자',
+            actorUid: 'admin-1',
+            content: '증빙 불일치',
+            timestamp: '2026-04-16T18:59:00.000Z',
+          },
+        ],
+      },
+    });
+
+    expect(result.cashflowWeek).toMatchObject({
+      id: 'p001-2026-04-w3',
+      varianceFlag: {
+        status: 'OPEN',
+        reason: '증빙 불일치',
+      },
+    });
+    expect(result.summary).toEqual({
+      hasVarianceFlag: true,
+      varianceHistoryCount: 1,
+    });
+  });
+
+  it('builds a bank handoff command result for a visible PM project', () => {
+    const result = buildDevHarnessPortalBankStatementHandoffResult({
+      actorId: 'u002',
+      actorRole: 'pm',
+      command: {
+        projectId: 'p001',
+        activeSheetId: 'default',
+        activeSheetName: '기본 탭',
+        order: 0,
+        columns: ['통장번호', '거래일시'],
+        rows: [{ tempId: 'bank-1', cells: ['111-222', '2026-04-16'] }],
+      },
+    });
+
+    expect(result.bankStatement).toMatchObject({
+      rowCount: 1,
+      columnCount: 2,
+    });
+    expect(result.sheet).toMatchObject({
+      id: 'default',
+      projectId: 'p001',
+    });
+    expect(result.expenseIntakeItems).toHaveLength(1);
+  });
+
+  it('handles bank handoff through the vite dev harness router', async () => {
+    const response = await resolveDevHarnessPortalApiResponse({
+      enabled: true,
+      method: 'POST',
+      url: '/api/v1/portal/bank-statements/handoff',
+      actorId: 'u002',
+      actorRole: 'pm',
+      readBody: async () => ({
+        projectId: 'p001',
+        activeSheetId: 'default',
+        activeSheetName: '기본 탭',
+        order: 0,
+        columns: ['통장번호', '거래일시'],
+        rows: [{ tempId: 'bank-1', cells: ['111-222', '2026-04-16'] }],
+      }),
+    });
+
+    expect(response).toMatchObject({
+      handled: true,
+      statusCode: 200,
+      payload: {
+        bankStatement: {
+          rowCount: 1,
+          columnCount: 2,
+        },
+        sheet: {
+          id: 'default',
+          projectId: 'p001',
+        },
+      },
+    });
+  });
+
   it('handles phase1 read-model summary routes through the vite dev harness router', async () => {
     const [payroll, weeklyExpenses, bankStatements] = await Promise.all([
       resolveDevHarnessPortalApiResponse({
@@ -153,6 +648,338 @@ describe('dev harness portal api helpers', () => {
       handled: true,
       statusCode: 200,
       payload: { handoffContext: { ready: true, nextPath: '/portal/weekly-expenses' } },
+    });
+  });
+
+  it('handles weekly expense save through the vite dev harness router', async () => {
+    const response = await resolveDevHarnessPortalApiResponse({
+      enabled: true,
+      method: 'POST',
+      url: '/api/v1/portal/weekly-expenses/save',
+      actorId: 'u002',
+      actorRole: 'pm',
+      readBody: async () => ({
+        projectId: 'p001',
+        activeSheetId: 'default',
+        activeSheetName: '기본 탭',
+        order: 0,
+        expectedVersion: 2,
+        rows: [
+          {
+            tempId: 'row-1',
+            cells: ['담당자', '1', '2026-04-14', '04-4-3'],
+          },
+        ],
+        syncPlan: [
+          {
+            yearMonth: '2026-04',
+            weekNo: 3,
+            amounts: { DIRECT_COST_OUT: 120000 },
+            reviewPendingCount: 0,
+          },
+        ],
+      }),
+    });
+
+    expect(response).toMatchObject({
+      handled: true,
+      statusCode: 200,
+      payload: {
+        sheet: {
+          id: 'default',
+          projectId: 'p001',
+        },
+        syncSummary: {
+          expenseSyncState: 'synced',
+          expenseReviewPendingCount: 0,
+          syncedWeekCount: 1,
+          reviewRequiredWeekCount: 0,
+        },
+      },
+    });
+  });
+
+  it('handles weekly submission submit through the vite dev harness router', async () => {
+    const response = await resolveDevHarnessPortalApiResponse({
+      enabled: true,
+      method: 'POST',
+      url: '/api/v1/portal/weekly-submissions/submit',
+      actorId: 'u002',
+      actorRole: 'pm',
+      readBody: async () => ({
+        projectId: 'p001',
+        yearMonth: '2026-04',
+        weekNo: 3,
+        transactionIds: ['tx-1'],
+      }),
+    });
+
+    expect(response).toMatchObject({
+      handled: true,
+      statusCode: 200,
+      payload: {
+        cashflowWeek: {
+          id: 'p001-2026-04-w3',
+          projectId: 'p001',
+          pmSubmitted: true,
+        },
+        transactions: [
+          expect.objectContaining({
+            id: 'tx-1',
+            state: 'SUBMITTED',
+          }),
+        ],
+        summary: {
+          submittedTransactionCount: 1,
+        },
+      },
+    });
+  });
+
+  it('handles expense intake draft saves through the vite dev harness router', async () => {
+    const response = await resolveDevHarnessPortalApiResponse({
+      enabled: true,
+      method: 'POST',
+      url: '/api/v1/portal/expense-intake/draft',
+      actorId: 'u002',
+      actorRole: 'pm',
+      readBody: async () => ({
+        projectId: 'p001',
+        intakeId: 'fp-1',
+        updates: {
+          manualFields: {
+            budgetSubCategory: '숙박',
+          },
+          reviewReasons: ['manual_review_required'],
+        },
+      }),
+    });
+
+    expect(response).toMatchObject({
+      handled: true,
+      statusCode: 200,
+      payload: {
+        expenseIntakeItem: {
+          id: 'fp-1',
+          projectId: 'p001',
+          manualFields: {
+            budgetSubCategory: '숙박',
+          },
+          reviewReasons: ['manual_review_required'],
+        },
+        summary: {
+          updatedManualFieldCount: 1,
+          version: 3,
+        },
+      },
+    });
+  });
+
+  it('handles expense intake bulk upsert through the vite dev harness router', async () => {
+    const response = await resolveDevHarnessPortalApiResponse({
+      enabled: true,
+      method: 'POST',
+      url: '/api/v1/portal/expense-intake/bulk-upsert',
+      actorId: 'u002',
+      actorRole: 'pm',
+      readBody: async () => ({
+        projectId: 'p001',
+        items: [
+          {
+            id: 'fp-1',
+            sourceTxId: 'bank:fp-1',
+            bankFingerprint: 'fp-1',
+            bankSnapshot: {
+              accountNumber: '111-222-333',
+              dateTime: '2026-04-17T08:00:00.000Z',
+              counterparty: '가맹점',
+              memo: '카드 결제',
+              signedAmount: -120000,
+              balanceAfter: 910000,
+            },
+            matchState: 'PENDING_INPUT',
+            manualFields: {},
+            lastUploadBatchId: 'batch-1',
+            createdAt: '2026-04-17T08:10:00.000Z',
+            updatedAt: '2026-04-17T08:15:00.000Z',
+            updatedBy: 'pm-old',
+          },
+        ],
+      }),
+    });
+
+    expect(response).toMatchObject({
+      handled: true,
+      statusCode: 200,
+      payload: {
+        summary: {
+          projectId: 'p001',
+          upsertedCount: 1,
+        },
+      },
+    });
+  });
+
+  it('handles expense intake project through the vite dev harness router', async () => {
+    const response = await resolveDevHarnessPortalApiResponse({
+      enabled: true,
+      method: 'POST',
+      url: '/api/v1/portal/expense-intake/project',
+      actorId: 'u002',
+      actorRole: 'pm',
+      readBody: async () => ({
+        projectId: 'p001',
+        intakeId: 'fp-1',
+        updates: {
+          manualFields: {
+            budgetCategory: '여비',
+            budgetSubCategory: '숙박',
+            cashflowLineId: 'DIRECT_COST_OUT',
+            expenseAmount: 125000,
+            evidenceCompletedDesc: '출장신청서',
+          },
+          reviewReasons: ['manual_review_required'],
+        },
+      }),
+    });
+
+    expect(response).toMatchObject({
+      handled: true,
+      statusCode: 200,
+      payload: {
+        expenseIntakeItem: {
+          id: 'fp-1',
+          projectId: 'p001',
+          existingExpenseSheetId: 'default',
+          existingExpenseRowTempId: 'bank-fp-1',
+        },
+        expenseSheet: {
+          id: 'default',
+          rowCount: 1,
+        },
+        summary: {
+          targetSheetId: 'default',
+          projectedRowTempId: 'bank-fp-1',
+          version: 4,
+        },
+      },
+    });
+  });
+
+  it('handles cashflow week close through the vite dev harness router', async () => {
+    const response = await resolveDevHarnessPortalApiResponse({
+      enabled: true,
+      method: 'POST',
+      url: '/api/v1/cashflow/weeks/close',
+      actorId: 'admin-1',
+      actorRole: 'admin',
+      readBody: async () => ({
+        projectId: 'p001',
+        yearMonth: '2026-04',
+        weekNo: 3,
+      }),
+    });
+
+    expect(response).toMatchObject({
+      handled: true,
+      statusCode: 200,
+      payload: {
+        cashflowWeek: {
+          id: 'p001-2026-04-w3',
+          projectId: 'p001',
+          adminClosed: true,
+        },
+        summary: {
+          closedWeek: true,
+        },
+      },
+    });
+  });
+
+  it('handles cashflow week upsert through the vite dev harness router', async () => {
+    const response = await resolveDevHarnessPortalApiResponse({
+      enabled: true,
+      method: 'POST',
+      url: '/api/v1/cashflow/weeks/upsert',
+      actorId: 'u002',
+      actorRole: 'pm',
+      readBody: async () => ({
+        projectId: 'p001',
+        yearMonth: '2026-04',
+        weekNo: 3,
+        mode: 'actual',
+        amounts: {
+          DIRECT_COST_OUT: 91000,
+        },
+      }),
+    });
+
+    expect(response).toMatchObject({
+      handled: true,
+      statusCode: 200,
+      payload: {
+        cashflowWeek: {
+          id: 'p001-2026-04-w3',
+          projectId: 'p001',
+          actual: {
+            DIRECT_COST_OUT: 91000,
+          },
+          pmSubmitted: false,
+          adminClosed: false,
+        },
+        summary: {
+          mode: 'actual',
+          updatedLineCount: 1,
+        },
+      },
+    });
+  });
+
+  it('handles cashflow week variance updates through the vite dev harness router', async () => {
+    const response = await resolveDevHarnessPortalApiResponse({
+      enabled: true,
+      method: 'POST',
+      url: '/api/v1/cashflow/weeks/variance-flag',
+      actorId: 'admin-1',
+      actorRole: 'admin',
+      readBody: async () => ({
+        sheetId: 'p001-2026-04-w3',
+        varianceFlag: {
+          status: 'OPEN',
+          reason: '증빙 불일치',
+          flaggedBy: '관리자',
+          flaggedByUid: 'admin-1',
+          flaggedAt: '2026-04-16T18:59:00.000Z',
+        },
+        varianceHistory: [
+          {
+            id: 'vf-1',
+            action: 'FLAG',
+            actor: '관리자',
+            actorUid: 'admin-1',
+            content: '증빙 불일치',
+            timestamp: '2026-04-16T18:59:00.000Z',
+          },
+        ],
+      }),
+    });
+
+    expect(response).toMatchObject({
+      handled: true,
+      statusCode: 200,
+      payload: {
+        cashflowWeek: {
+          id: 'p001-2026-04-w3',
+          varianceFlag: {
+            status: 'OPEN',
+            reason: '증빙 불일치',
+          },
+        },
+        summary: {
+          hasVarianceFlag: true,
+          varianceHistoryCount: 1,
+        },
+      },
     });
   });
 });

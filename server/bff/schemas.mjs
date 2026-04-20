@@ -94,6 +94,307 @@ const settlementKernelImportRowSchema = z.object({
   userEditedCells: z.array(z.number().int().nonnegative()).optional(),
 }).strict();
 
+const weeklyExpenseSaveSyncPlanSchema = z.object({
+  yearMonth: z.string().trim().regex(/^\d{4}-\d{2}$/),
+  weekNo: z.number().int().positive(),
+  amounts: z.record(z.string().trim().min(1), z.number()),
+  reviewPendingCount: z.number().int().nonnegative(),
+}).strict();
+
+export const portalWeeklyExpenseSaveSchema = z.object({
+  projectId: NON_EMPTY_STRING,
+  activeSheetId: NON_EMPTY_STRING,
+  activeSheetName: NON_EMPTY_STRING.max(200),
+  order: z.number().int().nonnegative(),
+  expectedVersion: z.number().int().nonnegative(),
+  rows: z.array(settlementKernelImportRowSchema),
+  syncPlan: z.array(weeklyExpenseSaveSyncPlanSchema),
+}).strict();
+
+export const portalWeeklySubmissionSubmitSchema = z.object({
+  projectId: NON_EMPTY_STRING,
+  yearMonth: z.string().trim().regex(/^\d{4}-\d{2}$/),
+  weekNo: z.number().int().positive(),
+  transactionIds: z.array(NON_EMPTY_STRING),
+}).strict();
+
+export const portalWeeklySubmissionStatusUpsertSchema = z.object({
+  projectId: NON_EMPTY_STRING,
+  yearMonth: z.string().trim().regex(/^\d{4}-\d{2}$/),
+  weekNo: z.number().int().positive(),
+  projectionEdited: z.boolean().optional(),
+  projectionUpdated: z.boolean().optional(),
+  expenseEdited: z.boolean().optional(),
+  expenseUpdated: z.boolean().optional(),
+  expenseSyncState: z.enum(['pending', 'review_required', 'synced', 'sync_failed']).optional(),
+  expenseReviewPendingCount: z.number().int().nonnegative().optional(),
+}).strict();
+
+const budgetCodeEntrySchema = z.object({
+  code: z.string(),
+  subCodes: z.array(z.string()),
+}).strict();
+
+const budgetCodeRenameSchema = z.object({
+  fromCode: z.string(),
+  fromSub: z.string(),
+  toCode: z.string(),
+  toSub: z.string(),
+}).strict();
+
+const budgetPlanRowSchema = z.object({
+  budgetCode: z.string(),
+  subCode: z.string(),
+  initialBudget: z.number().finite(),
+  revisedBudget: z.number().finite().optional(),
+  note: z.string().trim().optional(),
+}).strict();
+
+export const portalBudgetCodeBookSaveSchema = z.object({
+  projectId: NON_EMPTY_STRING,
+  activeSheetId: z.string().trim().optional(),
+  rows: z.array(budgetCodeEntrySchema),
+  renames: z.array(budgetCodeRenameSchema).optional(),
+}).strict();
+
+export const portalBudgetPlanSaveSchema = z.object({
+  projectId: NON_EMPTY_STRING,
+  rows: z.array(budgetPlanRowSchema),
+}).strict();
+
+export const portalEvidenceRequiredMapSaveSchema = z.object({
+  projectId: NON_EMPTY_STRING,
+  map: z.record(z.string().trim().min(1), z.string()),
+}).strict();
+
+export const cashflowWeekCloseSchema = z.object({
+  projectId: NON_EMPTY_STRING,
+  yearMonth: z.string().trim().regex(/^\d{4}-\d{2}$/),
+  weekNo: z.number().int().positive(),
+}).strict();
+
+export const cashflowWeekUpsertSchema = z.object({
+  projectId: NON_EMPTY_STRING,
+  yearMonth: z.string().trim().regex(/^\d{4}-\d{2}$/),
+  weekNo: z.number().int().positive(),
+  mode: z.enum(['projection', 'actual']),
+  amounts: z.record(z.string().trim().min(1), z.number()),
+}).strict();
+
+const varianceFlagSchema = z.object({
+  status: z.enum(['OPEN', 'REPLIED', 'RESOLVED']),
+  reason: NON_EMPTY_STRING,
+  flaggedBy: NON_EMPTY_STRING,
+  flaggedByUid: z.string().trim().max(200).optional(),
+  flaggedAt: NON_EMPTY_STRING,
+  pmReply: z.string().trim().optional(),
+  pmRepliedBy: z.string().trim().optional(),
+  pmRepliedByUid: z.string().trim().max(200).optional(),
+  pmRepliedAt: z.string().trim().optional(),
+  resolvedBy: z.string().trim().optional(),
+  resolvedByUid: z.string().trim().max(200).optional(),
+  resolvedAt: z.string().trim().optional(),
+}).strict();
+
+const varianceFlagEventSchema = z.object({
+  id: NON_EMPTY_STRING,
+  action: z.enum(['FLAG', 'REPLY', 'RESOLVE']),
+  actor: NON_EMPTY_STRING,
+  actorUid: z.string().trim().max(200).optional(),
+  content: NON_EMPTY_STRING,
+  timestamp: NON_EMPTY_STRING,
+}).strict();
+
+export const cashflowWeekVarianceFlagSchema = z.object({
+  sheetId: NON_EMPTY_STRING,
+  varianceFlag: varianceFlagSchema.nullish(),
+  varianceHistory: z.array(varianceFlagEventSchema),
+}).strict();
+
+export const portalBankStatementHandoffSchema = z.object({
+  projectId: NON_EMPTY_STRING,
+  activeSheetId: NON_EMPTY_STRING,
+  activeSheetName: NON_EMPTY_STRING.max(200),
+  order: z.number().int().nonnegative(),
+  columns: z.array(z.string()),
+  rows: z.array(settlementKernelImportRowSchema),
+}).strict();
+
+const bankImportManualFieldsSchema = z.object({
+  expenseAmount: z.number().finite().optional(),
+  budgetCategory: z.string().trim().optional(),
+  budgetSubCategory: z.string().trim().optional(),
+  cashflowLineId: z.enum([
+    'MYSC_PREPAY_IN',
+    'SALES_IN',
+    'SALES_VAT_IN',
+    'TEAM_SUPPORT_IN',
+    'BANK_INTEREST_IN',
+    'DIRECT_COST_OUT',
+    'INPUT_VAT_OUT',
+    'MYSC_LABOR_OUT',
+    'MYSC_PROFIT_OUT',
+    'SALES_VAT_OUT',
+    'TEAM_SUPPORT_OUT',
+    'BANK_INTEREST_OUT',
+  ]).optional(),
+  cashflowCategory: z.enum([
+    'CONTRACT_PAYMENT',
+    'INTERIM_PAYMENT',
+    'FINAL_PAYMENT',
+    'LABOR_COST',
+    'OUTSOURCING',
+    'EQUIPMENT',
+    'TRAVEL',
+    'SUPPLIES',
+    'COMMUNICATION',
+    'RENT',
+    'UTILITY',
+    'TAX_PAYMENT',
+    'VAT_REFUND',
+    'INSURANCE',
+    'MISC_INCOME',
+    'MISC_EXPENSE',
+  ]).optional(),
+  memo: z.string().trim().optional(),
+  evidenceCompletedDesc: z.string().optional(),
+}).strict();
+
+const bankImportSnapshotSchema = z.object({
+  accountNumber: NON_EMPTY_STRING,
+  dateTime: NON_EMPTY_STRING,
+  counterparty: NON_EMPTY_STRING,
+  memo: NON_EMPTY_STRING,
+  signedAmount: z.number(),
+  balanceAfter: z.number(),
+}).strict();
+
+export const portalExpenseIntakeBulkUpsertItemSchema = z.object({
+  id: NON_EMPTY_STRING,
+  sourceTxId: NON_EMPTY_STRING,
+  bankFingerprint: NON_EMPTY_STRING,
+  bankSnapshot: bankImportSnapshotSchema,
+  matchState: z.enum(['AUTO_CONFIRMED', 'PENDING_INPUT', 'REVIEW_REQUIRED', 'IGNORED']),
+  manualFields: bankImportManualFieldsSchema,
+  lastUploadBatchId: NON_EMPTY_STRING,
+  createdAt: NON_EMPTY_STRING,
+  updatedAt: NON_EMPTY_STRING,
+  updatedBy: NON_EMPTY_STRING,
+}).strict();
+
+export const portalExpenseIntakeBulkUpsertSchema = z.object({
+  projectId: NON_EMPTY_STRING,
+  items: z.array(portalExpenseIntakeBulkUpsertItemSchema),
+}).strict();
+
+const portalExpenseIntakeUpdatesSchema = z.object({
+  manualFields: bankImportManualFieldsSchema.optional(),
+  existingExpenseSheetId: NON_EMPTY_STRING.nullish(),
+  existingExpenseRowTempId: NON_EMPTY_STRING.nullish(),
+  matchState: z.enum(['AUTO_CONFIRMED', 'PENDING_INPUT', 'REVIEW_REQUIRED', 'IGNORED']).optional(),
+  projectionStatus: z.enum(['NOT_PROJECTED', 'PROJECTED', 'PROJECTED_WITH_PENDING_EVIDENCE']).optional(),
+  evidenceStatus: z.enum(['MISSING', 'PARTIAL', 'COMPLETE']).optional(),
+  reviewReasons: z.array(NON_EMPTY_STRING).optional(),
+  lastUploadBatchId: NON_EMPTY_STRING.optional(),
+}).strict();
+
+export const portalExpenseIntakeDraftSaveSchema = z.object({
+  projectId: NON_EMPTY_STRING,
+  intakeId: NON_EMPTY_STRING,
+  updates: portalExpenseIntakeUpdatesSchema,
+}).strict();
+
+export const portalExpenseIntakeProjectSchema = z.object({
+  projectId: NON_EMPTY_STRING,
+  intakeId: NON_EMPTY_STRING,
+  updates: portalExpenseIntakeUpdatesSchema.optional(),
+}).strict();
+
+const transactionAmountsWriteSchema = z.object({
+  bankAmount: z.number().finite(),
+  depositAmount: z.number().finite(),
+  expenseAmount: z.number().finite(),
+  vatIn: z.number().finite(),
+  vatOut: z.number().finite(),
+  vatRefund: z.number().finite(),
+  balanceAfter: z.number().finite(),
+}).strict();
+
+const portalTransactionFinancePatchSchema = z.object({
+  counterparty: z.string().trim().optional(),
+  dateTime: NON_EMPTY_STRING.optional(),
+  weekCode: NON_EMPTY_STRING.optional(),
+  direction: z.enum(['IN', 'OUT']).optional(),
+  entryKind: z.enum(['STANDARD', 'DEPOSIT', 'EXPENSE', 'ADJUSTMENT']).optional(),
+  method: z.enum(['TRANSFER', 'CORP_CARD_1', 'CORP_CARD_2', 'OTHER']).optional(),
+  cashflowCategory: z.enum([
+    'CONTRACT_PAYMENT',
+    'INTERIM_PAYMENT',
+    'FINAL_PAYMENT',
+    'LABOR_COST',
+    'OUTSOURCING',
+    'EQUIPMENT',
+    'TRAVEL',
+    'SUPPLIES',
+    'COMMUNICATION',
+    'RENT',
+    'UTILITY',
+    'TAX_PAYMENT',
+    'VAT_REFUND',
+    'INSURANCE',
+    'MISC_INCOME',
+    'MISC_EXPENSE',
+  ]).optional(),
+  cashflowLabel: z.string().trim().optional(),
+  budgetCategory: z.string().trim().optional(),
+  budgetSubCategory: z.string().trim().optional(),
+  budgetSubSubCategory: z.string().trim().optional(),
+  memo: z.string().optional(),
+  amounts: transactionAmountsWriteSchema.optional(),
+  evidenceRequired: z.array(z.string()).optional(),
+  evidenceStatus: z.enum(['MISSING', 'PARTIAL', 'COMPLETE']).optional(),
+  evidenceMissing: z.array(z.string()).optional(),
+  attachmentsCount: z.number().int().nonnegative().optional(),
+  evidenceRequiredDesc: z.string().optional(),
+  evidenceCompletedDesc: z.string().optional(),
+  evidenceCompletedManualDesc: z.string().optional(),
+  evidencePendingDesc: z.string().optional(),
+  evidenceDriveLink: z.string().trim().optional(),
+  evidenceDriveSharedDriveId: z.string().trim().optional(),
+  evidenceDriveFolderId: z.string().trim().optional(),
+  evidenceDriveFolderName: z.string().trim().optional(),
+  evidenceDriveSyncStatus: z.enum(['NOT_LINKED', 'LINKED', 'UPLOADED', 'SYNCING', 'SYNCED', 'ERROR']).optional(),
+  evidenceDriveLastSyncedAt: z.string().trim().optional(),
+  evidenceAutoListedDesc: z.string().optional(),
+  supportPendingDocs: z.string().optional(),
+  eNaraRegistered: z.string().optional(),
+  eNaraExecuted: z.string().optional(),
+  vatSettlementDone: z.boolean().optional(),
+  settlementComplete: z.boolean().optional(),
+  settlementNote: z.string().optional(),
+  author: z.string().optional(),
+}).strict();
+
+export const portalTransactionFinanceWriteSchema = z.object({
+  id: NON_EMPTY_STRING,
+  projectId: NON_EMPTY_STRING,
+  ledgerId: NON_EMPTY_STRING,
+  expectedVersion: z.number().int().nonnegative().optional(),
+  patch: portalTransactionFinancePatchSchema,
+}).strict();
+
+const portalExpenseIntakeEvidenceSyncUpdatesSchema = z.object({
+  manualFields: z.object({
+    evidenceCompletedDesc: z.string().optional(),
+  }).strict().optional(),
+}).strict().optional();
+
+export const portalExpenseIntakeEvidenceSyncSchema = z.object({
+  projectId: NON_EMPTY_STRING,
+  intakeId: NON_EMPTY_STRING,
+  updates: portalExpenseIntakeEvidenceSyncUpdatesSchema,
+}).strict();
+
 export const projectSheetSourceUploadSchema = z.object({
   sourceType: z.enum(['usage', 'budget', 'evidence_rules', 'cashflow', 'bank_statement']),
   sheetName: NON_EMPTY_STRING.max(200),
@@ -107,6 +408,12 @@ export const projectSheetSourceUploadSchema = z.object({
   unmatchedColumns: z.array(z.string().trim().max(300)).max(80).optional(),
   previewMatrix: z.array(z.array(z.string().max(1000)).max(24)).max(60).optional(),
   applyTarget: z.string().trim().max(120).optional(),
+}).strict();
+
+export const portalSheetSourceApplySchema = z.object({
+  projectId: NON_EMPTY_STRING,
+  sourceType: z.enum(['usage', 'budget', 'evidence_rules', 'cashflow', 'bank_statement']),
+  applyTarget: NON_EMPTY_STRING.max(120),
 }).strict();
 
 export const clientErrorIngestSchema = z.object({

@@ -5,6 +5,7 @@ import {
   analyzeGoogleSheetImportViaBff,
   analyzeProjectRequestContractViaBff,
   changeTransactionStateViaBff,
+  closeCashflowWeekViaBff,
   deepSyncAuthGovernanceUserViaBff,
   fetchPortalEntryContextViaBff,
   fetchPortalOnboardingContextViaBff,
@@ -19,9 +20,17 @@ import {
   previewGoogleSheetImportViaBff,
   processProjectRequestContractViaBff,
   provisionProjectEvidenceDriveRootViaBff,
+  savePortalExpenseIntakeDraftViaBff,
+  savePortalExpenseIntakeBulkUpsertViaBff,
+  savePortalExpenseIntakeEvidenceSyncViaBff,
+  savePortalTransactionFinanceWriteViaBff,
   provisionTransactionEvidenceDriveViaBff,
   readPlatformApiRuntimeConfig,
   restoreProjectViaBff,
+  savePortalWeeklyExpenseViaBff,
+  handoffPortalBankStatementViaBff,
+  submitPortalWeeklySubmissionViaBff,
+  updateCashflowWeekVarianceViaBff,
   syncTransactionEvidenceDriveViaBff,
   trashProjectViaBff,
   upsertPortalRegistrationViaBff,
@@ -30,6 +39,7 @@ import {
   toRequestActor,
   switchPortalSessionProjectViaBff,
   uploadTransactionEvidenceDriveViaBff,
+  upsertCashflowWeekViaBff,
   upsertLedgerViaBff,
   type PlatformApiClientLike,
   upsertProjectViaBff,
@@ -236,6 +246,614 @@ describe('platform-bff-client', () => {
     });
     expect(result.financeSummaryItems[0]).toEqual({ label: '총 입금', value: '300만' });
     expect(result.submissionRows[0]?.expenseTone).toBe('success');
+  });
+
+  it('calls the expense intake bulk upsert endpoint', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({
+        data: {
+          summary: {
+            projectId: 'p001',
+            upsertedCount: 1,
+          },
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    const result = await savePortalExpenseIntakeBulkUpsertViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm' },
+      command: {
+        projectId: 'p001',
+        items: [
+          {
+            id: 'abc',
+            sourceTxId: 'bank:abc',
+            bankFingerprint: 'fp-abc',
+            bankSnapshot: {
+              accountNumber: '111-222-333',
+              dateTime: '2026-04-17T08:00:00.000Z',
+              counterparty: '가맹점',
+              memo: '카드 결제',
+              signedAmount: -120000,
+              balanceAfter: 910000,
+            },
+            matchState: 'PENDING_INPUT',
+            manualFields: {
+              budgetCategory: '여비',
+              budgetSubCategory: '교통비',
+            },
+            lastUploadBatchId: 'batch-1',
+            createdAt: '2026-04-17T08:10:00.000Z',
+            updatedAt: '2026-04-17T08:15:00.000Z',
+            updatedBy: 'pm-old',
+          },
+        ],
+      },
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/portal/expense-intake/bulk-upsert', expect.objectContaining({
+      tenantId: 'mysc',
+      body: {
+        projectId: 'p001',
+        items: [
+          {
+            id: 'abc',
+            sourceTxId: 'bank:abc',
+            bankFingerprint: 'fp-abc',
+            bankSnapshot: {
+              accountNumber: '111-222-333',
+              dateTime: '2026-04-17T08:00:00.000Z',
+              counterparty: '가맹점',
+              memo: '카드 결제',
+              signedAmount: -120000,
+              balanceAfter: 910000,
+            },
+            matchState: 'PENDING_INPUT',
+            manualFields: {
+              budgetCategory: '여비',
+              budgetSubCategory: '교통비',
+            },
+            lastUploadBatchId: 'batch-1',
+            createdAt: '2026-04-17T08:10:00.000Z',
+            updatedAt: '2026-04-17T08:15:00.000Z',
+            updatedBy: 'pm-old',
+          },
+        ],
+      },
+    }));
+    const postMock = client.post as unknown as {
+      mock: {
+        calls: Array<[string, { body: { items: Array<Record<string, unknown>> } }]>;
+      };
+    };
+    const forwardedItem = postMock.mock.calls[0]?.[1]?.body?.items?.[0];
+    expect(forwardedItem).not.toHaveProperty('projectId');
+    expect(forwardedItem).not.toHaveProperty('projectionStatus');
+    expect(forwardedItem).not.toHaveProperty('evidenceStatus');
+    expect(forwardedItem).not.toHaveProperty('reviewReasons');
+    expect(result.summary).toEqual({
+      projectId: 'p001',
+      upsertedCount: 1,
+    });
+  });
+
+  it('calls portal weekly expense save command endpoint', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({
+        data: {
+          sheet: {
+            id: 'default',
+            projectId: 'p001',
+            version: 3,
+            rowCount: 2,
+            updatedAt: '2026-04-16T12:00:00.000Z',
+          },
+          weeklySubmissionStatuses: [],
+          cashflowWeeks: [],
+          syncSummary: {
+            expenseSyncState: 'review_required',
+            expenseReviewPendingCount: 1,
+            syncedWeekCount: 1,
+            reviewRequiredWeekCount: 1,
+          },
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    const result = await savePortalWeeklyExpenseViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm', idToken: 'token-abc' },
+      command: {
+        projectId: 'p001',
+        activeSheetId: 'default',
+        activeSheetName: '기본 탭',
+        order: 0,
+        expectedVersion: 2,
+        rows: [
+          {
+            tempId: 'row-1',
+            cells: ['담당자', '1', '2026-04-14', '04-4-3'],
+          },
+        ],
+        syncPlan: [
+          {
+            yearMonth: '2026-04',
+            weekNo: 3,
+            amounts: { DIRECT_COST_OUT: 120000 },
+            reviewPendingCount: 0,
+          },
+        ],
+      },
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/portal/weekly-expenses/save', expect.objectContaining({
+      tenantId: 'mysc',
+      body: expect.objectContaining({
+        projectId: 'p001',
+        activeSheetId: 'default',
+        expectedVersion: 2,
+      }),
+    }));
+    expect(result.sheet.version).toBe(3);
+    expect(result.syncSummary.expenseSyncState).toBe('review_required');
+  });
+
+  it('calls portal weekly submission submit command endpoint', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({
+        data: {
+          cashflowWeek: {
+            id: 'p001-2026-04-w3',
+            projectId: 'p001',
+            yearMonth: '2026-04',
+            weekNo: 3,
+            pmSubmitted: true,
+            pmSubmittedAt: '2026-04-16T13:00:00.000Z',
+          },
+          transactions: [
+            {
+              id: 'tx-1',
+              state: 'SUBMITTED',
+              submittedAt: '2026-04-16T13:00:00.000Z',
+              updatedAt: '2026-04-16T13:00:00.000Z',
+              version: 4,
+            },
+          ],
+          summary: {
+            submittedTransactionCount: 1,
+          },
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    const result = await submitPortalWeeklySubmissionViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm', idToken: 'token-abc' },
+      command: {
+        projectId: 'p001',
+        yearMonth: '2026-04',
+        weekNo: 3,
+        transactionIds: ['tx-1'],
+      },
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/portal/weekly-submissions/submit', expect.objectContaining({
+      tenantId: 'mysc',
+      body: expect.objectContaining({
+        projectId: 'p001',
+        yearMonth: '2026-04',
+        weekNo: 3,
+        transactionIds: ['tx-1'],
+      }),
+    }));
+    expect(result.cashflowWeek.pmSubmitted).toBe(true);
+    expect(result.summary.submittedTransactionCount).toBe(1);
+  });
+
+  it('calls portal expense intake draft save command endpoint', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({
+        data: {
+          expenseIntakeItem: {
+            id: 'fp-1',
+            projectId: 'p001',
+            sourceTxId: 'bank:fp-1',
+            bankFingerprint: 'fp-1',
+            bankSnapshot: {
+              accountNumber: '123-456',
+              dateTime: '2026-04-16 09:00',
+              counterparty: '테스트 상호',
+              memo: '기존 메모',
+              signedAmount: -125000,
+              balanceAfter: 900000,
+            },
+            matchState: 'PENDING_INPUT',
+            projectionStatus: 'NOT_PROJECTED',
+            evidenceStatus: 'MISSING',
+            manualFields: {
+              budgetCategory: '여비',
+              budgetSubCategory: '숙박',
+            },
+            reviewReasons: ['manual_review_required'],
+            lastUploadBatchId: 'batch-1',
+            createdAt: '2026-04-16T18:00:00.000Z',
+            updatedAt: '2026-04-16T19:00:00.000Z',
+            updatedBy: 'u001',
+            version: 3,
+          },
+          summary: {
+            updatedManualFieldCount: 1,
+            version: 3,
+          },
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    const result = await savePortalExpenseIntakeDraftViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm', idToken: 'token-abc' },
+      command: {
+        projectId: 'p001',
+        intakeId: 'fp-1',
+        updates: {
+          manualFields: {
+            budgetSubCategory: '숙박',
+          },
+          reviewReasons: ['manual_review_required'],
+        },
+      },
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/portal/expense-intake/draft', expect.objectContaining({
+      tenantId: 'mysc',
+      body: expect.objectContaining({
+        projectId: 'p001',
+        intakeId: 'fp-1',
+        updates: {
+          manualFields: {
+            budgetSubCategory: '숙박',
+          },
+          reviewReasons: ['manual_review_required'],
+        },
+      }),
+    }));
+    expect(result.expenseIntakeItem.manualFields.budgetSubCategory).toBe('숙박');
+    expect(result.summary.updatedManualFieldCount).toBe(1);
+  });
+
+  it('calls portal expense intake evidence sync command endpoint', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({
+        data: {
+          expenseIntakeItem: {
+            id: 'fp-1',
+            projectId: 'p001',
+            sourceTxId: 'bank:fp-1',
+            bankFingerprint: 'fp-1',
+            bankSnapshot: {
+              accountNumber: '123-456',
+              dateTime: '2026-04-16 09:00',
+              counterparty: '테스트 상호',
+              memo: '기존 메모',
+              signedAmount: -125000,
+              balanceAfter: 900000,
+            },
+            matchState: 'AUTO_CONFIRMED',
+            projectionStatus: 'PROJECTED_WITH_PENDING_EVIDENCE',
+            evidenceStatus: 'PARTIAL',
+            manualFields: {
+              expenseAmount: 125000,
+              budgetCategory: '여비',
+              budgetSubCategory: '숙박',
+              cashflowLineId: 'DIRECT_COST_OUT',
+              evidenceCompletedDesc: '출장신청서',
+            },
+            existingExpenseSheetId: 'default',
+            existingExpenseRowTempId: 'bank-fp-1',
+            reviewReasons: ['manual_review_required'],
+            lastUploadBatchId: 'batch-1',
+            createdAt: '2026-04-16T18:00:00.000Z',
+            updatedAt: '2026-04-16T19:10:00.000Z',
+            updatedBy: 'u001',
+            version: 4,
+          },
+          expenseSheet: {
+            id: 'default',
+            projectId: 'p001',
+            name: '기본 탭',
+            order: 0,
+            rowCount: 1,
+            rows: [{ tempId: 'bank-fp-1', sourceTxId: 'bank:fp-1', cells: ['담당자'] }],
+            updatedAt: '2026-04-16T19:10:00.000Z',
+            updatedBy: 'u001',
+            version: 2,
+          },
+          projectedRow: { tempId: 'bank-fp-1', sourceTxId: 'bank:fp-1', cells: ['담당자'] },
+          summary: {
+            projectId: 'p001',
+            intakeId: 'fp-1',
+            targetSheetId: 'default',
+            projectedRowTempId: 'bank-fp-1',
+            version: 4,
+          },
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    const result = await savePortalExpenseIntakeEvidenceSyncViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm', idToken: 'token-abc' },
+      command: {
+        projectId: 'p001',
+        intakeId: 'fp-1',
+        updates: {
+          manualFields: {
+            memo: '수정 메모',
+            evidenceCompletedDesc: '출장신청서',
+          },
+          reviewReasons: ['manual_review_required'],
+        },
+      },
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/portal/expense-intake/evidence-sync', expect.objectContaining({
+      tenantId: 'mysc',
+      body: expect.objectContaining({
+        projectId: 'p001',
+        intakeId: 'fp-1',
+      }),
+    }));
+    expect(result.expenseIntakeItem.existingExpenseRowTempId).toBe('bank-fp-1');
+    expect(result.expenseSheet.rows).toHaveLength(1);
+    expect(result.summary.targetSheetId).toBe('default');
+  });
+
+  it('calls cashflow week close command endpoint', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({
+        data: {
+          cashflowWeek: {
+            id: 'p001-2026-04-w3',
+            projectId: 'p001',
+            yearMonth: '2026-04',
+            weekNo: 3,
+            adminClosed: true,
+            adminClosedAt: '2026-04-16T14:00:00.000Z',
+          },
+          summary: {
+            closedWeek: true,
+          },
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    const result = await closeCashflowWeekViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'admin-1', role: 'admin', idToken: 'token-abc' },
+      command: {
+        projectId: 'p001',
+        yearMonth: '2026-04',
+        weekNo: 3,
+      },
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/cashflow/weeks/close', expect.objectContaining({
+      tenantId: 'mysc',
+      body: expect.objectContaining({
+        projectId: 'p001',
+        yearMonth: '2026-04',
+        weekNo: 3,
+      }),
+    }));
+    expect(result.cashflowWeek.adminClosed).toBe(true);
+    expect(result.summary.closedWeek).toBe(true);
+  });
+
+  it('calls cashflow week upsert command endpoint', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({
+        data: {
+          cashflowWeek: {
+            id: 'p001-2026-04-w3',
+            projectId: 'p001',
+            yearMonth: '2026-04',
+            weekNo: 3,
+            weekStart: '2026-04-15',
+            weekEnd: '2026-04-21',
+            projection: {
+              SALES_IN: 250000,
+            },
+            actual: {},
+            pmSubmitted: false,
+            adminClosed: false,
+            updatedAt: '2026-04-16T18:40:00.000Z',
+            version: 5,
+          },
+          summary: {
+            mode: 'projection',
+            updatedLineCount: 1,
+          },
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    const result = await upsertCashflowWeekViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'pm-1', role: 'pm', idToken: 'token-abc' },
+      command: {
+        projectId: 'p001',
+        yearMonth: '2026-04',
+        weekNo: 3,
+        mode: 'projection',
+        amounts: {
+          SALES_IN: 250000,
+        },
+      },
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/cashflow/weeks/upsert', expect.objectContaining({
+      tenantId: 'mysc',
+      body: expect.objectContaining({
+        projectId: 'p001',
+        yearMonth: '2026-04',
+        weekNo: 3,
+        mode: 'projection',
+        amounts: {
+          SALES_IN: 250000,
+        },
+      }),
+    }));
+    expect(result.cashflowWeek.projection).toEqual({
+      SALES_IN: 250000,
+    });
+    expect(result.summary).toEqual({
+      mode: 'projection',
+      updatedLineCount: 1,
+    });
+  });
+
+  it('calls cashflow week variance command endpoint', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({
+        data: {
+          cashflowWeek: {
+            id: 'p001-2026-04-w3',
+            projectId: 'p001',
+            yearMonth: '2026-04',
+            weekNo: 3,
+            varianceFlag: {
+              status: 'OPEN',
+              reason: '증빙 불일치',
+            },
+            varianceHistory: [
+              {
+                id: 'vf-1',
+                action: 'FLAG',
+                actor: '관리자',
+                content: '증빙 불일치',
+                timestamp: '2026-04-16T18:59:00.000Z',
+              },
+            ],
+          },
+          summary: {
+            hasVarianceFlag: true,
+            varianceHistoryCount: 1,
+          },
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    const result = await updateCashflowWeekVarianceViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'admin-1', role: 'admin' },
+      command: {
+        sheetId: 'p001-2026-04-w3',
+        varianceFlag: {
+          status: 'OPEN',
+          reason: '증빙 불일치',
+          flaggedBy: '관리자',
+          flaggedByUid: 'admin-1',
+          flaggedAt: '2026-04-16T18:59:00.000Z',
+        },
+        varianceHistory: [
+          {
+            id: 'vf-1',
+            action: 'FLAG',
+            actor: '관리자',
+            actorUid: 'admin-1',
+            content: '증빙 불일치',
+            timestamp: '2026-04-16T18:59:00.000Z',
+          },
+        ],
+      },
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/cashflow/weeks/variance-flag', expect.objectContaining({
+      tenantId: 'mysc',
+      body: expect.objectContaining({
+        sheetId: 'p001-2026-04-w3',
+      }),
+    }));
+    expect(result.summary).toEqual({
+      hasVarianceFlag: true,
+      varianceHistoryCount: 1,
+    });
+  });
+
+  it('calls portal bank statement handoff command endpoint', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({
+        data: {
+          bankStatement: {
+            rowCount: 1,
+            columnCount: 7,
+            updatedAt: '2026-04-16T15:00:00.000Z',
+          },
+          sheet: {
+            id: 'default',
+            projectId: 'p001',
+            name: '기본 탭',
+            rowCount: 1,
+            version: 3,
+            updatedAt: '2026-04-16T15:00:00.000Z',
+          },
+          rows: [{ tempId: 'row-1', sourceTxId: 'bank:abc', cells: ['담당자'] }],
+          expenseIntakeItems: [{ id: 'abc', projectId: 'p001', sourceTxId: 'bank:abc' }],
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    const result = await handoffPortalBankStatementViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm', idToken: 'token-abc' },
+      command: {
+        projectId: 'p001',
+        activeSheetId: 'default',
+        activeSheetName: '기본 탭',
+        order: 0,
+        columns: ['통장번호', '거래일시'],
+        rows: [{ tempId: 'bank-1', cells: ['111-222', '2026-04-16'] }],
+      },
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/portal/bank-statements/handoff', expect.objectContaining({
+      tenantId: 'mysc',
+      body: expect.objectContaining({
+        projectId: 'p001',
+        activeSheetId: 'default',
+      }),
+    }));
+    expect(result.bankStatement.rowCount).toBe(1);
+    expect(result.sheet.version).toBe(3);
+    expect(result.expenseIntakeItems).toHaveLength(1);
   });
 
   it('calls portal payroll summary endpoint', async () => {
@@ -543,6 +1161,68 @@ describe('platform-bff-client', () => {
       body: { newState: 'APPROVED', expectedVersion: 1, reason: undefined },
     }));
     expect(result.state).toBe('APPROVED');
+  });
+
+  it('calls portal transaction finance-write endpoint with a narrow finance patch', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({
+        data: {
+          transaction: {
+            id: 'tx001',
+            projectId: 'p001',
+            ledgerId: 'l001',
+            state: 'DRAFT',
+            counterparty: 'vendor',
+            memo: 'patched memo',
+            version: 2,
+            updatedAt: '2026-04-17T09:00:00.000Z',
+          },
+          summary: {
+            id: 'tx001',
+            projectId: 'p001',
+            ledgerId: 'l001',
+            created: false,
+            version: 2,
+          },
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    const result = await savePortalTransactionFinanceWriteViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm' },
+      command: {
+        id: 'tx001',
+        projectId: 'p001',
+        ledgerId: 'l001',
+        expectedVersion: 1,
+        patch: {
+          counterparty: 'vendor',
+          memo: 'patched memo',
+          attachmentsCount: 2,
+        },
+      },
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/portal/transactions/finance-write', expect.objectContaining({
+      tenantId: 'mysc',
+      body: {
+        id: 'tx001',
+        projectId: 'p001',
+        ledgerId: 'l001',
+        expectedVersion: 1,
+        patch: {
+          counterparty: 'vendor',
+          memo: 'patched memo',
+          attachmentsCount: 2,
+        },
+      },
+    }));
+    expect(result.transaction.version).toBe(2);
+    expect(result.summary.created).toBe(false);
   });
 
   it('calls comment/evidence endpoints', async () => {
