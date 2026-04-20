@@ -26,6 +26,7 @@
 - [x] App 루트 broad provider tree가 admin/portal route shell로 분리됨
 - [x] route shell이 explicit Firestore access mode를 주입하고 store는 pathname self-inference를 하지 않음
 - [x] `portal-store`가 `project catalog`, `current project scope`, `weekly submission scope`를 분리해 자기유발 bootstrap loop를 줄이도록 재구성됨
+- [x] 동일한 project snapshot은 state를 다시 쓰지 않도록 dedupe contract를 추가함
 - [ ] admin summary surface cutover까지 완료됨
 - [ ] 포털의 broad Firestore direct read가 완전히 제거됨
 
@@ -36,11 +37,29 @@
 - [2026-04-15] 포털 문제의 본질을 Firestore 자체가 아니라 클라이언트의 분산된 data access policy로 명시했다.
 - [2026-04-15] Phase 1 구현으로 App 루트 broad provider를 admin/portal route shell로 분리하고, `portal-safe`/`admin-live` access mode를 route provider에서 주입하도록 바꿨다.
 - [2026-04-15] `portal-store`의 단일 bootstrap effect를 `projects catalog`, `project-scoped fetch`, `weekly submission fetch`로 분리하고, 동일한 project snapshot은 state를 다시 밀지 않게 만들어 PM 포털의 반복 fetch loop 후보를 줄였다.
+- [2026-04-15] `portal-store` bootstrap loop를 project catalog / project scope / weekly submission effect로 분리해, project state write가 scoped fetch를 다시 깨우는 self-trigger 구조를 제거했다.
+- [2026-04-15] public `/portal` 기준 Firestore `Listen/channel` 요청이 0건인 상태까지 확인했다.
+
+## Postmortem
+
+- 내가 처음 몇 번의 핫픽스에서 `Firestore 400`과 `provider realtime drift`만 좁게 보고, `portal-store` 안의 bootstrap self-trigger를 늦게 봤다.
+- 그 결과 원인 분리가 끝나기 전에 `production이 고쳐졌다`는 뉘앙스로 커뮤니케이션한 구간이 있었다. 그건 잘못이었다.
+- 이번 장애의 직접 원인은 `projects`를 쓰는 bootstrap effect가 다시 `scopedProjectIds`와 주간 제출 fetch를 흔드는 구조였다. 즉 Firestore 자체보다 `클라이언트 상태 write와 fetch scope가 한 effect에 섞여 있던 설계`가 핵심이었다.
+- 구조 문제를 증상별 핫픽스로 먼저 눌러버린 것도 좋지 않았다. 이후에는 `루프 source -> state write boundary -> fetch boundary` 순서로만 본다.
+
+## Guardrails
+
+- route/provider 정책 문제와 data bootstrap 문제를 같은 버그로 뭉뚱그리지 않는다.
+- `production fixed`라는 표현은 `main CI green + Vercel alias 갱신 + 해당 route smoke` 이후에만 쓴다.
+- 포털 store는 `catalog`, `current scope`, `cross-project summary`를 한 effect에 섞지 않는다.
+- Firestore fetch 결과를 state에 쓸 때는 `same snapshot no-op` 비교 계약을 먼저 둔다.
+- public smoke와 authenticated smoke를 분리해서 본다. public에서 조용하다고 authenticated도 조용하다고 가정하지 않는다.
 
 ## Known Notes
 
 - 이 문서는 patch note라기보다 운영/아키텍처 판단 기록에 가깝다.
 - PostgreSQL/application server 전면 전환은 이번 RFC의 기본안이 아니라 후속 비교안이다.
+- 이번 장애는 `Firestore가 나빠서`가 아니라 `bootstrap read boundary가 엉켜서` 발생한 사례로 기록한다.
 
 ## Related Files
 
@@ -64,6 +83,7 @@
 - 운영 화면이 raw Firestore query를 직접 조합하는 구조를 줄이고, 읽기 계약을 BFF로 모으는 것이 장기 안정화의 핵심으로 정리됐다.
 - 이번 phase는 provider를 옮기는 수준이 아니라, route shell이 data access policy를 명시적으로 주입하게 만든 첫 구조 변경이다.
 - 포털 홈이 번쩍이거나 Firestore `Listen/channel` 요청이 계속 누적되면, 먼저 `portal-store`가 다시 `projects`와 `scopedProjectIds`를 한 effect에서 함께 다루고 있지 않은지 본다.
+- `portal-store` bootstrap loop가 실제 churn source였고, route-scoped provider split만으로는 이 문제가 닫히지 않는다는 점을 확인했다.
 
 ## Next Watch Points
 
@@ -71,3 +91,4 @@
 - `portal-store` bootstrap이 다시 단일 effect로 합쳐지지 않는지
 - read model endpoint가 raw model drift 없이 유지되는지
 - 새 포털 기능이 다시 Firestore direct path로 들어오지 않는지
+- authenticated PM 세션에서 여전히 남는 Firestore channel churn이 있는지

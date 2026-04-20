@@ -24,6 +24,7 @@
 | [admin-users-auth-governance](./pages/admin-users-auth-governance.md) | `/users` | 2026-04-14 | drift 확인, deep sync, auth/member 정렬 운영 |
 | [shared-label-policy](./pages/shared-label-policy.md) | `shared / policy` | 2026-04-15 | cashflow label↔enum↔line id↔export 기준 통합 |
 | [shared-portal-architecture](./pages/shared-portal-architecture.md) | `shared / architecture` | 2026-04-15 | Firestore 유지, BFF/API-first, route-scoped provider split과 portal bootstrap loop 분리 |
+| [shared-migration-retrospective](./pages/shared-migration-retrospective.md) | `shared / retrospective` | 2026-04-20 | 강제 spreadsheet migration 회고, translate-first/admin-first 판단 기록 |
 
 ## How To Use
 
@@ -45,6 +46,7 @@
 - [admin-users-auth-governance](./pages/admin-users-auth-governance.md)
 - [shared-label-policy](./pages/shared-label-policy.md)
 - [shared-portal-architecture](./pages/shared-portal-architecture.md)
+- [shared-migration-retrospective](./pages/shared-migration-retrospective.md)
 
 ## Related Repo Context
 
