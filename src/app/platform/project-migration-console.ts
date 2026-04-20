@@ -138,7 +138,7 @@ export function describeMigrationAuditActionState(
     return {
       tone: 'success',
       label: '승인 완료',
-      helper: '임원 검토가 끝났고 이 등록 제안은 우리 시스템 기준으로 확정되었습니다. 필요하면 다시 반려 또는 중복·폐기로 조정할 수 있습니다.',
+      helper: 'CIC 대표 리뷰가 끝났고 이 등록 제안은 우리 시스템 기준으로 확정되었습니다. 필요하면 다시 반려 또는 중복·폐기로 조정할 수 있습니다.',
     };
   }
   if (record.status === 'REVISION_REJECTED') {
@@ -158,6 +158,6 @@ export function describeMigrationAuditActionState(
   return {
     tone: 'warning',
     label: '검토 대기',
-    helper: 'PM이 입력한 원문과 예산·인력을 확인한 뒤 임원 결정이 필요합니다.',
+    helper: 'PM이 입력한 원문과 예산·인력을 확인한 뒤 CIC 대표 리뷰 결정이 필요합니다.',
   };
 }

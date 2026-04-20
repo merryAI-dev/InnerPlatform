@@ -272,7 +272,7 @@ export function ProjectMigrationAuditPage() {
       setActionMode(null);
       setReviewComment('');
     } catch (error) {
-      toast.error('임원 결정 저장 실패', {
+      toast.error('CIC 대표 리뷰 결정 저장 실패', {
         description: error instanceof Error ? error.message : '다시 시도해 주세요.',
       });
     } finally {
@@ -280,7 +280,7 @@ export function ProjectMigrationAuditPage() {
     }
   }
 
-  const pageDescription = 'PM이 포털에서 등록한 프로젝트를 CIC와 상태 기준으로 좁힌 뒤, 우측에서 원문·예산·등록 인력을 그대로 읽고 임원 승인만 내리는 콘솔입니다.';
+  const pageDescription = 'PM이 포털에서 등록한 프로젝트를 CIC와 상태 기준으로 좁힌 뒤, 우측에서 원문·예산·등록 인력을 그대로 읽고 CIC 대표 리뷰 결정을 내리는 콘솔입니다.';
 
   return (
     <div className="space-y-6">

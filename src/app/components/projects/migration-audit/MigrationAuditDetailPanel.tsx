@@ -55,7 +55,7 @@ export function MigrationAuditDetailPanel({
     return (
       <Card className="border-slate-200/80 bg-white shadow-sm" data-testid="migration-review-dossier">
         <CardContent className="py-24 text-center text-[12px] text-muted-foreground">
-          좌측 대기함에서 PM 등록 프로젝트 하나를 고르면, 여기서 포털 원문과 예산·인력을 바로 읽고 임원 결정을 끝낼 수 있습니다.
+          좌측 대기함에서 PM 등록 프로젝트 하나를 고르면, 여기서 포털 원문과 예산·인력을 바로 읽고 CIC 대표 리뷰 결정을 끝낼 수 있습니다.
         </CardContent>
       </Card>
     );
@@ -88,8 +88,8 @@ export function MigrationAuditDetailPanel({
               </CardTitle>
               <p className="mt-1 text-[12px] leading-6 text-slate-600">
                 {isPmPortalProject
-                  ? 'PM이 포털에서 입력한 내용을 그대로 펼쳐서 보여줍니다. 임원은 우측 원문을 읽고 승인, 수정 요청 후 반려, 중복·폐기만 결정하면 됩니다.'
-                  : '이미 등록된 기존 프로젝트입니다. 같은 화면에서 기존 프로젝트 정보와 예산·인력을 다시 읽을 수 있지만, 임원 승인 액션은 필요하지 않습니다.'}
+                  ? 'PM이 포털에서 입력한 내용을 그대로 펼쳐서 보여줍니다. CIC 대표는 우측 원문을 읽고 승인, 수정 요청 후 반려, 중복·폐기만 결정하면 됩니다.'
+                  : '이미 등록된 기존 프로젝트입니다. 같은 화면에서 기존 프로젝트 정보와 예산·인력을 다시 읽고, 필요하면 CIC 대표 리뷰 결정을 다시 조정할 수 있습니다.'}
               </p>
             </div>
 
@@ -180,7 +180,7 @@ export function MigrationAuditDetailPanel({
           <section className="space-y-3">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">목적 및 메모</p>
-              <p className="mt-1 text-[14px] font-semibold text-slate-950">임원이 판단할 때 필요한 원문 설명</p>
+              <p className="mt-1 text-[14px] font-semibold text-slate-950">CIC 대표가 판단할 때 필요한 원문 설명</p>
             </div>
             <div className="grid gap-3 xl:grid-cols-2">
               <DetailFact label="프로젝트 목적" value={dossier.notes.projectPurpose} />
@@ -271,7 +271,7 @@ export function MigrationAuditDetailPanel({
         >
           <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">임원 결정</p>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">CIC 대표 리뷰 결정</p>
               <p className="mt-1 text-[12px] text-slate-600">
                 상단이나 좌측이 아니라 여기서만 승인, 수정 요청 후 반려, 중복·폐기를 결정합니다.
               </p>

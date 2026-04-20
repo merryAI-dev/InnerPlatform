@@ -21,8 +21,10 @@ describe('ProjectMigrationAuditPage shell contract', () => {
     expect(compositeSource).toContain('승인');
     expect(compositeSource).toContain('수정 요청 후 반려');
     expect(compositeSource).toContain('중복·폐기');
-    expect(compositeSource).toContain('PM 등록 프로젝트 심사');
+    expect(compositeSource).toContain('PM 등록 프로젝트 리뷰');
     expect(compositeSource).toContain('PM이 포털에서 입력한 내용을 그대로');
+    expect(compositeSource).toContain('CIC 대표 리뷰 대기함');
+    expect(compositeSource).toContain('CIC 대표 리뷰 결정');
     expect(compositeSource).not.toContain('사업명으로 검색');
     expect(compositeSource).not.toContain('우리 사업으로 승인');
     expect(compositeSource).not.toContain('연결 필요');
