@@ -64,11 +64,6 @@ export function MigrationAuditDetailPanel({
   const dossier = buildMigrationReviewDossier(record.project, record.request);
   const actionState = describeMigrationAuditActionState(record);
   const isPmPortalProject = record.project.registrationSource === 'pm_portal';
-  const isReadOnlyExistingProject = !isPmPortalProject;
-  const showReviewSummary = !(isReadOnlyExistingProject && record.status === 'APPROVED');
-  const statusHelper = isReadOnlyExistingProject
-    ? '이미 등록된 기존 프로젝트입니다. 여기서는 PM이 등록할 때 남긴 원문과 계약서만 참고합니다.'
-    : actionState.helper;
 
   return (
     <Card
@@ -101,7 +96,7 @@ export function MigrationAuditDetailPanel({
             <div className={`rounded-2xl border px-4 py-3 ${statusStripClass(actionState.tone)}`}>
               <p className="text-[11px] uppercase tracking-[0.08em]">현재 판단</p>
               <p className="mt-1 text-[14px] font-semibold">{actionState.label}</p>
-              <p className="mt-1 text-[11px] leading-5">{statusHelper}</p>
+              <p className="mt-1 text-[11px] leading-5">{actionState.helper}</p>
             </div>
           </div>
         </div>
@@ -231,15 +226,6 @@ export function MigrationAuditDetailPanel({
             <div className="grid gap-3 xl:grid-cols-2">
               <DetailFact label="요청자" value={dossier.audit.requestedByName} />
               <DetailFact label="접수일" value={dossier.audit.requestedAt} />
-              {showReviewSummary ? (
-                <>
-                  <DetailFact label="검토자" value={dossier.audit.reviewedByName} />
-                  <DetailFact label="검토일" value={dossier.audit.reviewedAt} />
-                  <div className="xl:col-span-2">
-                    <DetailFact label="검토 메모" value={dossier.audit.reviewComment} />
-                  </div>
-                </>
-              ) : null}
             </div>
             {dossier.audit.history.length > 0 ? (
               <div className="rounded-3xl border border-slate-200 bg-white p-5">
@@ -287,37 +273,29 @@ export function MigrationAuditDetailPanel({
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">임원 결정</p>
               <p className="mt-1 text-[12px] text-slate-600">
-                {isPmPortalProject
-                  ? '상단이나 좌측이 아니라 여기서만 승인, 수정 요청 후 반려, 중복·폐기를 결정합니다.'
-                  : '기존 등록 프로젝트는 읽기 전용 참고 화면입니다. 별도 승인 액션은 보여주지 않습니다.'}
+                상단이나 좌측이 아니라 여기서만 승인, 수정 요청 후 반려, 중복·폐기를 결정합니다.
               </p>
             </div>
-            {isPmPortalProject ? (
-              <div className="flex flex-wrap gap-2">
-                <Button type="button" className="h-10 gap-1.5" onClick={onApprove} disabled={acting || record.status === 'APPROVED'}>
-                  {acting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-                  승인
-                </Button>
-                <Button type="button" variant="outline" className="h-10 gap-1.5" onClick={onReject} disabled={acting || record.status === 'REVISION_REJECTED'}>
-                  {acting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
-                  수정 요청 후 반려
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-10 gap-1.5 border-rose-200 text-rose-700 hover:bg-rose-50 hover:text-rose-800"
-                  onClick={onDiscard}
-                  disabled={acting || record.status === 'DUPLICATE_DISCARDED'}
-                >
-                  {acting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                  중복·폐기
-                </Button>
-              </div>
-            ) : (
-              <div className="rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-[12px] font-medium text-slate-600">
-                읽기 전용
-              </div>
-            )}
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" className="h-10 gap-1.5" onClick={onApprove} disabled={acting}>
+                {acting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                승인
+              </Button>
+              <Button type="button" variant="outline" className="h-10 gap-1.5" onClick={onReject} disabled={acting}>
+                {acting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
+                수정 요청 후 반려
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-10 gap-1.5 border-rose-200 text-rose-700 hover:bg-rose-50 hover:text-rose-800"
+                onClick={onDiscard}
+                disabled={acting}
+              >
+                {acting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                중복·폐기
+              </Button>
+            </div>
           </div>
         </div>
       </CardContent>
