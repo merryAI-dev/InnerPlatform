@@ -24,6 +24,8 @@ import {
   projectDriveRootLinkSchema,
   projectRestoreSchema,
   projectTrashSchema,
+  projectExecutiveReviewSchema,
+  projectExecutiveResubmitSchema,
 } from '../schemas.mjs';
 
 function trimSlackText(value, maxLength = 200) {
@@ -139,6 +141,156 @@ function buildProjectCreatedSlackPayload(project, context = {}) {
         },
       },
     ],
+  };
+}
+
+function formatExecutiveReviewSlackLabel(status) {
+  if (status === 'APPROVED') return '승인 완료';
+  if (status === 'REVISION_REJECTED') return '수정 요청 후 반려';
+  if (status === 'DUPLICATE_DISCARDED') return '중복·폐기';
+  return '검토 대기';
+}
+
+function buildProjectExecutiveReviewSlackPayload({ project, projectRequest, reviewStatus, reviewComment, reviewerName }) {
+  const payload = project && typeof project === 'object' ? project : {};
+  const requestPayload = projectRequest?.payload && typeof projectRequest.payload === 'object'
+    ? projectRequest.payload
+    : {};
+  const projectName = trimSlackText(payload.name || requestPayload.name, 120);
+  const officialContractName = trimSlackText(payload.officialContractName || requestPayload.officialContractName, 220);
+  const clientOrg = trimSlackText(payload.clientOrg || requestPayload.clientOrg, 160);
+  const department = trimSlackText(payload.department || requestPayload.department, 120);
+  const requester = trimSlackText(projectRequest?.requestedByName, 120);
+  const requestId = trimSlackText(projectRequest?.id, 120);
+  const projectId = trimSlackText(payload.id, 120);
+  const decisionLabel = formatExecutiveReviewSlackLabel(reviewStatus);
+  const reason = trimSlackText(reviewComment, 280);
+  const reviewer = trimSlackText(reviewerName, 120);
+  const lines = [
+    '*[InnerPlatform] 프로젝트 임원 심사 결과*',
+    `프로젝트명: \`${projectName}\``,
+    `계약명: ${officialContractName}`,
+    `발주기관: ${clientOrg}`,
+    `담당조직: ${department}`,
+    `결정: ${decisionLabel}`,
+    `사유: ${reason}`,
+    `검토자: ${reviewer}`,
+    `요청자: ${requester}`,
+    `requestId: \`${requestId}\``,
+    `projectId: \`${projectId}\``,
+  ];
+
+  return {
+    text: `[InnerPlatform] 프로젝트 임원 심사 결과: ${decisionLabel} · ${projectName}`,
+    blocks: [
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: lines.join('\n'),
+        },
+      },
+    ],
+  };
+}
+
+async function resolveProjectRequestDocuments({ db, tenantId, requestId, projectId }) {
+  const refs = [];
+  const addRef = (ref) => {
+    if (!refs.some((existing) => existing.path === ref.path)) refs.push(ref);
+  };
+
+  let request = null;
+  let resolvedRequestId = readOptionalText(requestId);
+
+  if (resolvedRequestId) {
+    for (const collectionName of ['project_requests', 'projectRequests']) {
+      const ref = db.doc(`orgs/${tenantId}/${collectionName}/${resolvedRequestId}`);
+      const snap = await ref.get();
+      if (snap.exists) {
+        addRef(ref);
+        request = request || { id: resolvedRequestId, ...(snap.data() || {}) };
+      }
+    }
+    if (refs.length === 0) {
+      addRef(db.doc(`orgs/${tenantId}/project_requests/${resolvedRequestId}`));
+    }
+    return { request, requestId: resolvedRequestId, refs };
+  }
+
+  for (const collectionName of ['project_requests', 'projectRequests']) {
+    const querySnap = await db.collection(`orgs/${tenantId}/${collectionName}`)
+      .where('approvedProjectId', '==', projectId)
+      .limit(1)
+      .get();
+    if (!querySnap.empty) {
+      const snap = querySnap.docs[0];
+      addRef(snap.ref);
+      resolvedRequestId = snap.id;
+      request = { id: snap.id, ...(snap.data() || {}) };
+      break;
+    }
+  }
+
+  if (resolvedRequestId) {
+    addRef(db.doc(`orgs/${tenantId}/project_requests/${resolvedRequestId}`));
+  }
+
+  return { request, requestId: resolvedRequestId || null, refs };
+}
+
+function formatProjectRequestTeamMember(member) {
+  const name = readOptionalText(member?.memberName);
+  const nickname = readOptionalText(member?.memberNickname);
+  const role = readOptionalText(member?.role);
+  const participationRate = Number.isFinite(Number(member?.participationRate))
+    ? Math.max(0, Math.round(Number(member.participationRate)))
+    : 0;
+  const identity = nickname || name || '-';
+  const rolePart = role ? ` · ${role}` : '';
+  const ratePart = participationRate > 0 ? ` · ${participationRate}%` : '';
+  return `${identity}${rolePart}${ratePart}`;
+}
+
+function buildProjectRequestPayloadFromProject(project, existingPayload = {}) {
+  const teamMembersDetailed = Array.isArray(project?.teamMembersDetailed) && project.teamMembersDetailed.length > 0
+    ? project.teamMembersDetailed
+    : (Array.isArray(existingPayload.teamMembersDetailed) ? existingPayload.teamMembersDetailed : []);
+  const teamMembers = teamMembersDetailed.length > 0
+    ? teamMembersDetailed.map(formatProjectRequestTeamMember).join(', ')
+    : readOptionalText(existingPayload.teamMembers);
+
+  return {
+    ...(existingPayload && typeof existingPayload === 'object' ? existingPayload : {}),
+    name: readOptionalText(project?.name) || readOptionalText(existingPayload.name),
+    officialContractName: readOptionalText(project?.officialContractName) || readOptionalText(existingPayload.officialContractName),
+    type: readOptionalText(project?.type) || readOptionalText(existingPayload.type),
+    description: readOptionalText(project?.description) || readOptionalText(existingPayload.description),
+    clientOrg: readOptionalText(project?.clientOrg) || readOptionalText(existingPayload.clientOrg),
+    department: readOptionalText(project?.department) || readOptionalText(existingPayload.department),
+    contractAmount: Number.isFinite(project?.contractAmount) ? project.contractAmount : existingPayload.contractAmount,
+    salesVatAmount: Number.isFinite(project?.salesVatAmount) ? project.salesVatAmount : existingPayload.salesVatAmount,
+    totalRevenueAmount: Number.isFinite(project?.totalRevenueAmount) ? project.totalRevenueAmount : existingPayload.totalRevenueAmount,
+    supportAmount: Number.isFinite(project?.supportAmount) ? project.supportAmount : existingPayload.supportAmount,
+    financialInputFlags: project?.financialInputFlags || existingPayload.financialInputFlags || undefined,
+    contractStart: readOptionalText(project?.contractStart) || readOptionalText(existingPayload.contractStart),
+    contractEnd: readOptionalText(project?.contractEnd) || readOptionalText(existingPayload.contractEnd),
+    settlementType: readOptionalText(project?.settlementType) || readOptionalText(existingPayload.settlementType),
+    basis: readOptionalText(project?.basis) || readOptionalText(existingPayload.basis),
+    accountType: readOptionalText(project?.accountType) || readOptionalText(existingPayload.accountType),
+    fundInputMode: readOptionalText(project?.fundInputMode) || readOptionalText(existingPayload.fundInputMode),
+    settlementSheetPolicy: project?.settlementSheetPolicy || existingPayload.settlementSheetPolicy || undefined,
+    paymentPlanDesc: readOptionalText(project?.paymentPlanDesc) || readOptionalText(existingPayload.paymentPlanDesc),
+    settlementGuide: readOptionalText(project?.settlementGuide) || readOptionalText(existingPayload.settlementGuide),
+    projectPurpose: readOptionalText(project?.projectPurpose) || readOptionalText(existingPayload.projectPurpose),
+    managerName: readOptionalText(project?.managerName) || readOptionalText(existingPayload.managerName),
+    teamName: readOptionalText(project?.teamName) || readOptionalText(existingPayload.teamName),
+    teamMembers,
+    teamMembersDetailed,
+    participantCondition: readOptionalText(project?.participantCondition) || readOptionalText(existingPayload.participantCondition),
+    note: readOptionalText(existingPayload.note),
+    contractDocument: project?.contractDocument ?? existingPayload.contractDocument ?? null,
+    contractAnalysis: project?.contractAnalysis ?? existingPayload.contractAnalysis ?? null,
   };
 }
 
@@ -830,6 +982,192 @@ export function mountProjectRoutes(app, {
         delivered: true,
         requestId,
         projectId: readOptionalText(projectRequest.approvedProjectId) || null,
+      },
+    };
+  }));
+
+  app.post('/api/v1/projects/:projectId/executive-review', createMutatingRoute(idempotencyService, async (req) => {
+    const { tenantId, actorId, actorEmail } = req.context;
+    assertActorRoleAllowed(req, ROUTE_ROLES.writeCore, 'review project executive status');
+    const projectId = readOptionalText(req.params.projectId);
+    if (!projectId) {
+      throw createHttpError(400, 'project id is required', 'missing_project_id');
+    }
+
+    const parsed = parseWithSchema(projectExecutiveReviewSchema, req.body, 'Invalid executive review payload');
+    const projectPath = `orgs/${tenantId}/projects/${projectId}`;
+    const reviewerName = readOptionalText(parsed.reviewerName) || readOptionalText(actorEmail) || actorId;
+    const now = new Date().toISOString();
+    const currentProject = await ensureDocumentExists(db, projectPath, `Project not found: ${projectId}`);
+    if (readOptionalText(currentProject.registrationSource) !== 'pm_portal') {
+      throw createHttpError(409, 'Only PM portal-created projects can receive executive review decisions', 'invalid_review_target');
+    }
+
+    const previousStatus = readOptionalText(currentProject.executiveReviewStatus) || 'PENDING';
+    const currentHistory = Array.isArray(currentProject.executiveReviewHistory) ? currentProject.executiveReviewHistory : [];
+    const projectResult = await mergeSystemManagedDoc({
+      db,
+      path: projectPath,
+      patch: {
+        executiveReviewStatus: parsed.reviewStatus,
+        executiveReviewedAt: now,
+        executiveReviewedById: actorId,
+        executiveReviewedByName: reviewerName,
+        executiveReviewComment: readOptionalText(parsed.reviewComment) || null,
+        executiveReviewHistory: [
+          ...currentHistory,
+          {
+            status: parsed.reviewStatus,
+            previousStatus,
+            reviewedAt: now,
+            reviewedById: actorId,
+            reviewedByName: reviewerName,
+            reviewComment: readOptionalText(parsed.reviewComment) || null,
+          },
+        ],
+      },
+      tenantId,
+      actorId,
+      now,
+      notFoundMessage: `Project not found: ${projectId}`,
+    });
+
+    const { request, requestId: resolvedRequestId, refs } = await resolveProjectRequestDocuments({
+      db,
+      tenantId,
+      requestId: parsed.requestId,
+      projectId,
+    });
+
+    if (resolvedRequestId) {
+      const requestPatch = {
+        status: parsed.reviewStatus === 'APPROVED' ? 'APPROVED' : 'REJECTED',
+        reviewOutcome: parsed.reviewStatus,
+        reviewedBy: actorId,
+        reviewedByName: reviewerName,
+        reviewedAt: now,
+        reviewComment: readOptionalText(parsed.reviewComment) || null,
+        rejectedReason: parsed.reviewStatus === 'APPROVED' ? null : (readOptionalText(parsed.reviewComment) || null),
+        approvedProjectId: projectId,
+        updatedAt: now,
+      };
+      await Promise.all(refs.map((ref) => ref.set(requestPatch, { merge: true })));
+    }
+
+    let slackDelivered = false;
+    let slackReason = null;
+    if (parsed.reviewStatus !== 'APPROVED') {
+      if (!projectRegistrationSlackService?.enabled || typeof projectRegistrationSlackService.notifyMessage !== 'function') {
+        slackReason = 'slack_not_configured';
+      } else {
+        try {
+          await projectRegistrationSlackService.notifyMessage(buildProjectExecutiveReviewSlackPayload({
+            project: projectResult.data,
+            projectRequest: request,
+            reviewStatus: parsed.reviewStatus,
+            reviewComment: parsed.reviewComment,
+            reviewerName,
+          }));
+          slackDelivered = true;
+        } catch (error) {
+          console.error('[BFF] executive review Slack notification failed:', error);
+          slackReason = error instanceof Error ? error.message : 'slack_delivery_failed';
+        }
+      }
+    }
+
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        projectId,
+        requestId: resolvedRequestId || null,
+        reviewStatus: parsed.reviewStatus,
+        reviewedAt: now,
+        slackDelivered,
+        slackReason,
+      },
+    };
+  }));
+
+  app.post('/api/v1/projects/:projectId/executive-review/resubmit', createMutatingRoute(idempotencyService, async (req) => {
+    const { tenantId, actorId, actorEmail } = req.context;
+    assertActorRoleAllowed(req, ROUTE_ROLES.writeCore, 'resubmit project for executive review');
+    const projectId = readOptionalText(req.params.projectId);
+    if (!projectId) {
+      throw createHttpError(400, 'project id is required', 'missing_project_id');
+    }
+
+    const parsed = parseWithSchema(projectExecutiveResubmitSchema, req.body, 'Invalid executive resubmit payload');
+    const projectPath = `orgs/${tenantId}/projects/${projectId}`;
+    const reviewerName = readOptionalText(parsed.reviewerName) || readOptionalText(actorEmail) || actorId;
+    const now = new Date().toISOString();
+    const currentProject = await ensureDocumentExists(db, projectPath, `Project not found: ${projectId}`);
+    if (readOptionalText(currentProject.registrationSource) !== 'pm_portal') {
+      throw createHttpError(409, 'Only PM portal-created projects can be resubmitted for executive review', 'invalid_review_target');
+    }
+
+    const previousStatus = readOptionalText(currentProject.executiveReviewStatus) || 'PENDING';
+    const currentHistory = Array.isArray(currentProject.executiveReviewHistory) ? currentProject.executiveReviewHistory : [];
+    await mergeSystemManagedDoc({
+      db,
+      path: projectPath,
+      patch: {
+        executiveReviewStatus: 'PENDING',
+        executiveReviewedAt: now,
+        executiveReviewedById: actorId,
+        executiveReviewedByName: reviewerName,
+        executiveReviewComment: readOptionalText(parsed.reviewComment) || null,
+        executiveReviewHistory: [
+          ...currentHistory,
+          {
+            status: 'PENDING',
+            previousStatus,
+            reviewedAt: now,
+            reviewedById: actorId,
+            reviewedByName: reviewerName,
+            reviewComment: readOptionalText(parsed.reviewComment) || null,
+          },
+        ],
+      },
+      tenantId,
+      actorId,
+      now,
+      notFoundMessage: `Project not found: ${projectId}`,
+    });
+
+    const { request, requestId: resolvedRequestId, refs } = await resolveProjectRequestDocuments({
+      db,
+      tenantId,
+      requestId: parsed.requestId,
+      projectId,
+    });
+
+    if (resolvedRequestId) {
+      const nextPayload = buildProjectRequestPayloadFromProject(currentProject, request?.payload || {});
+      const requestPatch = {
+        status: 'PENDING',
+        reviewOutcome: null,
+        reviewedBy: null,
+        reviewedByName: null,
+        reviewedAt: null,
+        reviewComment: null,
+        rejectedReason: null,
+        approvedProjectId: projectId,
+        payload: nextPayload,
+        updatedAt: now,
+      };
+      await Promise.all(refs.map((ref) => ref.set(requestPatch, { merge: true })));
+    }
+
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        projectId,
+        requestId: resolvedRequestId || null,
+        reviewStatus: 'PENDING',
+        reviewedAt: now,
       },
     };
   }));

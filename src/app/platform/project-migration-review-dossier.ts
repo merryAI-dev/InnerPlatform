@@ -3,6 +3,7 @@ import {
   BASIS_LABELS,
   PROJECT_FUND_INPUT_MODE_LABELS,
   PROJECT_TYPE_LABELS,
+  type ProjectExecutiveReviewHistoryEntry,
   SETTLEMENT_TYPE_LABELS,
   type Project,
   type ProjectRequest,
@@ -11,6 +12,7 @@ import {
   formatProjectTeamMemberLine,
   normalizeProjectTeamMembers,
 } from './project-team-members';
+import { getMigrationAuditStatusLabel } from './project-migration-console';
 
 export interface MigrationReviewDossier {
   headerTitle: string;
@@ -52,11 +54,22 @@ export interface MigrationReviewDossier {
     reviewedByName: string;
     reviewedAt: string;
     reviewComment: string;
+    history: Array<{
+      statusLabel: string;
+      reviewedByName: string;
+      reviewedAt: string;
+      reviewComment: string;
+    }>;
   };
   analysis: {
     summary: string;
     warnings: string[];
     nextActions: string[];
+  };
+  contractDocument: {
+    name: string;
+    downloadURL: string;
+    uploadedAt: string;
   };
 }
 
@@ -76,11 +89,42 @@ function formatDate(value: string | null | undefined): string {
   return normalized.slice(0, 10).replace(/-/g, '.');
 }
 
+function buildAuditHistory(project: Project, request: ProjectRequest | null) {
+  const history = Array.isArray(project.executiveReviewHistory) ? project.executiveReviewHistory : [];
+  if (history.length > 0) {
+    return [...history]
+      .sort((left, right) => String(right.reviewedAt || '').localeCompare(String(left.reviewedAt || '')))
+      .map((entry: ProjectExecutiveReviewHistoryEntry) => ({
+        statusLabel: getMigrationAuditStatusLabel(entry.status),
+        reviewedByName: readable(entry.reviewedByName),
+        reviewedAt: formatDate(entry.reviewedAt),
+        reviewComment: readable(entry.reviewComment),
+      }));
+  }
+
+  const fallbackStatus = project.executiveReviewStatus || request?.reviewOutcome;
+  const fallbackReviewedAt = project.executiveReviewedAt || request?.reviewedAt;
+  const fallbackReviewedByName = project.executiveReviewedByName || request?.reviewedByName;
+  const fallbackReviewComment = project.executiveReviewComment || request?.reviewComment || request?.rejectedReason;
+  if (!fallbackStatus && !fallbackReviewedAt && !fallbackReviewedByName && !fallbackReviewComment) {
+    return [];
+  }
+
+  return [{
+    statusLabel: getMigrationAuditStatusLabel((fallbackStatus || 'PENDING') as any),
+    reviewedByName: readable(fallbackReviewedByName),
+    reviewedAt: formatDate(fallbackReviewedAt),
+    reviewComment: readable(fallbackReviewComment),
+  }];
+}
+
 export function buildMigrationReviewDossier(
   project: Project,
   request: ProjectRequest | null,
 ): MigrationReviewDossier {
   const payload = request?.payload;
+  const contractDocument = project.contractDocument || payload?.contractDocument || null;
+  const contractAnalysis = project.contractAnalysis || payload?.contractAnalysis || null;
   const rawMembers = payload?.teamMembersDetailed || project.teamMembersDetailed;
   const members = rawMembers && rawMembers.length > 0
     ? normalizeProjectTeamMembers(rawMembers).map(formatProjectTeamMemberLine)
@@ -88,6 +132,7 @@ export function buildMigrationReviewDossier(
         .split(/[,\n]/)
         .map((member) => member.trim())
         .filter(Boolean);
+  const auditHistory = buildAuditHistory(project, request);
 
   return {
     headerTitle: readable(project.name),
@@ -129,11 +174,17 @@ export function buildMigrationReviewDossier(
       reviewedByName: readable(project.executiveReviewedByName || request?.reviewedByName),
       reviewedAt: formatDate(project.executiveReviewedAt || request?.reviewedAt),
       reviewComment: readable(project.executiveReviewComment || request?.reviewComment || request?.rejectedReason),
+      history: auditHistory,
     },
     analysis: {
-      summary: readable(payload?.contractAnalysis?.summary),
-      warnings: payload?.contractAnalysis?.warnings || [],
-      nextActions: payload?.contractAnalysis?.nextActions || [],
+      summary: readable(contractAnalysis?.summary),
+      warnings: contractAnalysis?.warnings || [],
+      nextActions: contractAnalysis?.nextActions || [],
+    },
+    contractDocument: {
+      name: readable(contractDocument?.name),
+      downloadURL: readable(contractDocument?.downloadURL),
+      uploadedAt: formatDate(contractDocument?.uploadedAt),
     },
   };
 }

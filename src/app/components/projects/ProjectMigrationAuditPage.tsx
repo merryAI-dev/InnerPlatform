@@ -9,13 +9,16 @@ import {
   setDoc,
 } from 'firebase/firestore';
 import { toast } from 'sonner';
+import { useAuth } from '../../data/auth-store';
 import { useAppStore } from '../../data/store';
 import type {
+  Project,
   ProjectExecutiveReviewStatus,
   ProjectRequest,
 } from '../../data/types';
 import { getOrgCollectionPath, getOrgDocumentPath } from '../../lib/firebase';
 import { useFirebase } from '../../lib/firebase-context';
+import { isPlatformApiEnabled, reviewProjectExecutiveStatusViaBff } from '../../lib/platform-bff-client';
 import {
   type MigrationAuditConsoleStatus,
   buildMigrationAuditConsoleRecords,
@@ -51,8 +54,8 @@ function getReviewDialogTitle(mode: ReviewActionMode): string {
 
 function getReviewDialogDescription(mode: ReviewActionMode): string {
   if (mode === 'approve') return 'PM이 올린 원문을 기준으로 이 프로젝트를 우리 시스템 등록 대상으로 확정합니다.';
-  if (mode === 'reject') return '수정이 필요한 이유를 남기고 PM이 다시 보완하도록 돌려보냅니다.';
-  return '중복 또는 폐기 대상으로 정리하고, 왜 그렇게 판단했는지 메모를 남깁니다.';
+  if (mode === 'reject') return '수정이 필요한 이유를 반드시 남기고 PM이 다시 보완하도록 돌려보냅니다.';
+  return '중복 또는 폐기 대상으로 정리하고, 왜 그렇게 판단했는지 사유를 반드시 남깁니다.';
 }
 
 function toExecutiveStatus(mode: ReviewActionMode): ProjectExecutiveReviewStatus {
@@ -61,7 +64,54 @@ function toExecutiveStatus(mode: ReviewActionMode): ProjectExecutiveReviewStatus
   return 'DUPLICATE_DISCARDED';
 }
 
+function appendExecutiveReviewHistory(
+  project: Project,
+  input: {
+    nextStatus: ProjectExecutiveReviewStatus;
+    reviewerId: string;
+    reviewerName: string;
+    reviewComment: string;
+    reviewedAt: string;
+    previousStatus: ProjectExecutiveReviewStatus;
+  },
+) {
+  const currentHistory = Array.isArray(project.executiveReviewHistory) ? project.executiveReviewHistory : [];
+  return [
+    ...currentHistory,
+    {
+      status: input.nextStatus,
+      previousStatus: input.previousStatus,
+      reviewedAt: input.reviewedAt,
+      reviewedById: input.reviewerId,
+      reviewedByName: input.reviewerName,
+      reviewComment: input.reviewComment || undefined,
+    },
+  ];
+}
+
+function buildProjectRequestReviewPatch(input: {
+  projectId: string;
+  reviewerId: string;
+  reviewerName: string;
+  nextStatus: ProjectExecutiveReviewStatus;
+  reviewComment: string;
+  reviewedAt: string;
+}) {
+  return {
+    status: input.nextStatus === 'APPROVED' ? 'APPROVED' : 'REJECTED',
+    reviewOutcome: input.nextStatus === 'APPROVED' ? 'APPROVED' : input.nextStatus,
+    reviewedBy: input.reviewerId,
+    reviewedByName: input.reviewerName,
+    reviewedAt: input.reviewedAt,
+    reviewComment: input.reviewComment || null,
+    rejectedReason: input.nextStatus === 'APPROVED' ? null : (input.reviewComment || null),
+    approvedProjectId: input.projectId,
+    updatedAt: input.reviewedAt,
+  };
+}
+
 export function ProjectMigrationAuditPage() {
+  const { user: authUser } = useAuth();
   const { projects, currentUser, updateProject } = useAppStore();
   const { db, isOnline, orgId } = useFirebase();
 
@@ -146,35 +196,67 @@ export function ProjectMigrationAuditPage() {
     const nextExecutiveStatus = toExecutiveStatus(actionMode);
     const now = new Date().toISOString();
     const trimmedComment = reviewComment.trim();
-    const reviewerName = currentUser?.name || currentUser?.email || '관리자';
-    const reviewerId = currentUser?.uid || '';
+    const reviewerName = currentUser?.name || authUser?.name || currentUser?.email || authUser?.email || '관리자';
+    const reviewerId = currentUser?.uid || authUser?.uid || '';
+    if (nextExecutiveStatus !== 'APPROVED' && !trimmedComment) {
+      toast.error(actionMode === 'reject' ? '반려 사유를 입력해 주세요.' : '폐기 사유를 입력해 주세요.');
+      return;
+    }
 
     setActing(true);
     try {
-      await updateProject(activeRecord.project.id, {
-        executiveReviewStatus: nextExecutiveStatus,
-        executiveReviewedAt: now,
-        executiveReviewedById: reviewerId,
-        executiveReviewedByName: reviewerName,
-        executiveReviewComment: trimmedComment,
-        updatedAt: now,
-      });
-
-      if (db && activeRecord.request) {
-        await setDoc(
-          doc(db, getOrgDocumentPath(orgId, 'projectRequests', activeRecord.request.id)),
-          {
-            status: actionMode === 'approve' ? 'APPROVED' : 'REJECTED',
-            reviewOutcome: nextExecutiveStatus === 'APPROVED' ? 'APPROVED' : nextExecutiveStatus,
-            reviewedBy: reviewerId,
-            reviewedByName: reviewerName,
-            reviewedAt: now,
-            reviewComment: trimmedComment || null,
-            rejectedReason: actionMode === 'approve' ? null : trimmedComment || null,
-            updatedAt: now,
+      if (isPlatformApiEnabled() && authUser?.uid) {
+        const response = await reviewProjectExecutiveStatusViaBff({
+          tenantId: orgId,
+          actor: {
+            uid: authUser.uid,
+            email: authUser.email,
+            role: authUser.role,
+            idToken: authUser.idToken,
           },
-          { merge: true },
-        );
+          projectId: activeRecord.project.id,
+          review: {
+            requestId: activeRecord.request?.id,
+            reviewStatus: nextExecutiveStatus,
+            reviewComment: trimmedComment || undefined,
+            reviewerName,
+          },
+        });
+        if (response.slackDelivered === false && response.slackReason) {
+          console.warn('[ProjectMigrationAuditPage] executive review slack not delivered:', response.slackReason);
+        }
+      } else {
+        await updateProject(activeRecord.project.id, {
+          executiveReviewStatus: nextExecutiveStatus,
+          executiveReviewedAt: now,
+          executiveReviewedById: reviewerId,
+          executiveReviewedByName: reviewerName,
+          executiveReviewComment: trimmedComment || undefined,
+          executiveReviewHistory: appendExecutiveReviewHistory(activeRecord.project, {
+            nextStatus: nextExecutiveStatus,
+            reviewerId,
+            reviewerName,
+            reviewComment: trimmedComment,
+            reviewedAt: now,
+            previousStatus: activeRecord.status,
+          }),
+          updatedAt: now,
+        });
+
+        if (db && activeRecord.request) {
+          await setDoc(
+            doc(db, getOrgDocumentPath(orgId, 'projectRequests', activeRecord.request.id)),
+            buildProjectRequestReviewPatch({
+              projectId: activeRecord.project.id,
+              reviewerId,
+              reviewerName,
+              nextStatus: nextExecutiveStatus,
+              reviewComment: trimmedComment,
+              reviewedAt: now,
+            }),
+            { merge: true },
+          );
+        }
       }
 
       toast.success(
@@ -278,11 +360,13 @@ export function ProjectMigrationAuditPage() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="space-y-2">
-            <p className="text-[12px] font-medium text-slate-700">검토 메모</p>
+            <p className="text-[12px] font-medium text-slate-700">
+              {actionMode === 'approve' ? '승인 메모' : actionMode === 'reject' ? '반려 사유' : '폐기 사유'}
+            </p>
             <Textarea
               value={reviewComment}
               onChange={(event) => setReviewComment(event.target.value)}
-              placeholder={actionMode === 'approve' ? '승인 판단 근거를 남길 수 있습니다.' : 'PM이 수정하거나 폐기 판단을 이해할 수 있도록 메모를 남겨 주세요.'}
+              placeholder={actionMode === 'approve' ? '승인 판단 근거를 남길 수 있습니다.' : 'PM이 수정하거나 폐기 판단을 이해할 수 있도록 사유를 남겨 주세요.'}
               className="min-h-[120px]"
             />
           </div>
@@ -291,7 +375,7 @@ export function ProjectMigrationAuditPage() {
             <AlertDialogAction onClick={(event) => {
               event.preventDefault();
               void handleConfirmAction();
-            }} disabled={acting}>
+            }} disabled={acting || (actionMode !== 'approve' && !reviewComment.trim())}>
               {acting ? '저장 중...' : actionMode === 'approve' ? '승인 저장' : actionMode === 'reject' ? '반려 저장' : '폐기 저장'}
             </AlertDialogAction>
           </AlertDialogFooter>

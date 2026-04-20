@@ -192,6 +192,34 @@ export function MigrationAuditDetailPanel({
 
           <section className="space-y-3">
             <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">첨부 계약서</p>
+              <p className="mt-1 text-[14px] font-semibold text-slate-950">PM이 붙인 계약서 파일과 업로드 시점을 그대로 보여줍니다</p>
+            </div>
+            <div className="rounded-3xl border border-slate-200 bg-white p-5">
+              <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_220px_auto] xl:items-center">
+                <div>
+                  <p className="text-[11px] text-slate-500">파일명</p>
+                  <p className="mt-1 text-[13px] font-semibold text-slate-950">{dossier.contractDocument.name}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] text-slate-500">업로드일</p>
+                  <p className="mt-1 text-[13px] font-medium text-slate-900">{dossier.contractDocument.uploadedAt}</p>
+                </div>
+                {dossier.contractDocument.downloadURL !== '-' ? (
+                  <div className="xl:justify-self-end">
+                    <Button asChild variant="outline" className="h-10 rounded-full px-4">
+                      <a href={dossier.contractDocument.downloadURL} target="_blank" rel="noreferrer">
+                        계약서 보기
+                      </a>
+                    </Button>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </section>
+
+          <section className="space-y-3">
+            <div>
               <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">접수 및 검토 이력</p>
               <p className="mt-1 text-[14px] font-semibold text-slate-950">누가 언제 올렸고, 누가 어떤 메모를 남겼는지 봅니다</p>
             </div>
@@ -204,6 +232,23 @@ export function MigrationAuditDetailPanel({
                 <DetailFact label="검토 메모" value={dossier.audit.reviewComment} />
               </div>
             </div>
+            {dossier.audit.history.length > 0 ? (
+              <div className="rounded-3xl border border-slate-200 bg-white p-5">
+                <p className="text-[11px] text-slate-500">검토 이력</p>
+                <div className="mt-3 space-y-3">
+                  {dossier.audit.history.map((entry, index) => (
+                    <div key={`${entry.statusLabel}-${entry.reviewedAt}-${index}`} className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="outline">{entry.statusLabel}</Badge>
+                        <span className="text-[12px] font-medium text-slate-900">{entry.reviewedByName}</span>
+                        <span className="text-[11px] text-slate-500">{entry.reviewedAt}</span>
+                      </div>
+                      <p className="mt-2 whitespace-pre-wrap text-[12px] leading-6 text-slate-700">{entry.reviewComment}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
           </section>
 
           {(dossier.analysis.summary !== '-' || dossier.analysis.warnings.length > 0 || dossier.analysis.nextActions.length > 0) && (

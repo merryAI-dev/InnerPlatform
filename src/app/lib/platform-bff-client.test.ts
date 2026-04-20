@@ -9,6 +9,7 @@ import {
   fetchAuthGovernanceUsersViaBff,
   linkProjectEvidenceDriveRootViaBff,
   notifyProjectRequestRegistrationViaBff,
+  reviewProjectExecutiveStatusViaBff,
   overrideTransactionEvidenceDriveCategoriesViaBff,
   previewGoogleSheetImportViaBff,
   processProjectRequestContractViaBff,
@@ -466,6 +467,85 @@ describe('platform-bff-client', () => {
     }));
     expect(result.delivered).toBe(true);
     expect(result.projectId).toBe('p-123');
+  });
+
+  it('calls project executive review endpoint with reason and reviewer metadata', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({
+        data: {
+          ok: true,
+          projectId: 'p-123',
+          requestId: 'pr-123',
+          reviewStatus: 'REVISION_REJECTED',
+          slackDelivered: true,
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    const result = await reviewProjectExecutiveStatusViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u-admin', role: 'admin', idToken: 'token-abc' },
+      projectId: 'p-123',
+      review: {
+        requestId: 'pr-123',
+        reviewStatus: 'REVISION_REJECTED',
+        reviewComment: '예산 다시 올려 주세요',
+        reviewerName: '임원A',
+      },
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/projects/p-123/executive-review', expect.objectContaining({
+      tenantId: 'mysc',
+      body: {
+        requestId: 'pr-123',
+        reviewStatus: 'REVISION_REJECTED',
+        reviewComment: '예산 다시 올려 주세요',
+        reviewerName: '임원A',
+      },
+    }));
+    expect(result.reviewStatus).toBe('REVISION_REJECTED');
+    expect(result.slackDelivered).toBe(true);
+  });
+
+  it('calls project executive review resubmission endpoint', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({
+        data: {
+          ok: true,
+          projectId: 'p-123',
+          requestId: 'pr-123',
+          reviewStatus: 'PENDING',
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    const { resubmitProjectExecutiveReviewViaBff } = await import('./platform-bff-client');
+    const result = await resubmitProjectExecutiveReviewViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u-admin', role: 'admin', idToken: 'token-abc' },
+      projectId: 'p-123',
+      payload: {
+        requestId: 'pr-123',
+        reviewComment: '계약서 보완 후 재제출',
+        reviewerName: '변민욱',
+      },
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/projects/p-123/executive-review/resubmit', expect.objectContaining({
+      tenantId: 'mysc',
+      body: {
+        requestId: 'pr-123',
+        reviewComment: '계약서 보완 후 재제출',
+        reviewerName: '변민욱',
+      },
+    }));
+    expect(result.reviewStatus).toBe('PENDING');
   });
 
   it('calls evidence drive provision/sync endpoints', async () => {

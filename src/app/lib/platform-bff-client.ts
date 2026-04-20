@@ -1,6 +1,7 @@
 import { featureFlags, parseFeatureFlag } from '../config/feature-flags';
 import type {
   AccountType,
+  ProjectExecutiveReviewStatus,
   ProjectSheetSourceSnapshot,
   ProjectSheetSourceType,
   ProjectRequestContractAnalysis,
@@ -145,6 +146,37 @@ export interface ProjectRequestRegistrationNotificationResult {
   requestId: string;
   projectId: string | null;
   reason?: string;
+}
+
+export interface ProjectExecutiveReviewPayload {
+  requestId?: string;
+  reviewStatus: ProjectExecutiveReviewStatus;
+  reviewComment?: string;
+  reviewerName?: string;
+}
+
+export interface ProjectExecutiveReviewResult {
+  ok: boolean;
+  projectId: string;
+  requestId: string | null;
+  reviewStatus: ProjectExecutiveReviewStatus;
+  reviewedAt?: string;
+  slackDelivered?: boolean;
+  slackReason?: string | null;
+}
+
+export interface ProjectExecutiveReviewResubmitPayload {
+  requestId?: string;
+  reviewComment?: string;
+  reviewerName?: string;
+}
+
+export interface ProjectExecutiveReviewResubmitResult {
+  ok: boolean;
+  projectId: string;
+  requestId: string | null;
+  reviewStatus: 'PENDING';
+  reviewedAt?: string;
 }
 
 export type AuthGovernanceDriftFlag =
@@ -846,6 +878,48 @@ export async function notifyProjectRequestRegistrationViaBff(params: {
       actor: toRequestActor(params.actor),
       body: {},
       idempotencyKey: `project-request-registration-notify:${params.projectRequestId}`,
+      timeoutMs: 10000,
+      retries: 0,
+    },
+  );
+  return response.data;
+}
+
+export async function reviewProjectExecutiveStatusViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  review: ProjectExecutiveReviewPayload;
+  client?: PlatformApiClientLike;
+}): Promise<ProjectExecutiveReviewResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<ProjectExecutiveReviewResult>(
+    `/api/v1/projects/${encodeURIComponent(params.projectId)}/executive-review`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.review,
+      timeoutMs: 10000,
+      retries: 0,
+    },
+  );
+  return response.data;
+}
+
+export async function resubmitProjectExecutiveReviewViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  payload: ProjectExecutiveReviewResubmitPayload;
+  client?: PlatformApiClientLike;
+}): Promise<ProjectExecutiveReviewResubmitResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<ProjectExecutiveReviewResubmitResult>(
+    `/api/v1/projects/${encodeURIComponent(params.projectId)}/executive-review/resubmit`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.payload,
       timeoutMs: 10000,
       retries: 0,
     },

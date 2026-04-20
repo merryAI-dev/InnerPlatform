@@ -69,6 +69,27 @@ export const projectRestoreSchema = z.object({
   expectedVersion: z.number().int().positive(),
 }).strict();
 
+export const projectExecutiveReviewSchema = z.object({
+  requestId: NON_EMPTY_STRING.optional(),
+  reviewStatus: z.enum(['APPROVED', 'REVISION_REJECTED', 'DUPLICATE_DISCARDED']),
+  reviewComment: z.string().trim().max(2000).optional(),
+  reviewerName: z.string().trim().max(200).optional(),
+}).strict().superRefine((value, ctx) => {
+  if (value.reviewStatus !== 'APPROVED' && !value.reviewComment) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['reviewComment'],
+      message: 'reviewComment is required when reviewStatus is a rejection or discard',
+    });
+  }
+});
+
+export const projectExecutiveResubmitSchema = z.object({
+  requestId: NON_EMPTY_STRING.optional(),
+  reviewComment: z.string().trim().max(2000).optional(),
+  reviewerName: z.string().trim().max(200).optional(),
+}).strict();
+
 export const googleSheetImportPreviewSchema = z.object({
   value: NON_EMPTY_STRING,
   sheetName: NON_EMPTY_STRING.optional(),

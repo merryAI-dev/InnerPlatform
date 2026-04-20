@@ -29,6 +29,33 @@ const project: Project = {
     { memberName: '김다은', memberNickname: '데이나', role: '운영', participationRate: 40 },
   ],
   contractType: '계약서(날인)',
+  contractDocument: {
+    path: 'orgs/mysc/project-request-contracts/u-1/contract.pdf',
+    name: '네팔_계약서.pdf',
+    downloadURL: 'https://example.com/contract.pdf',
+    size: 1234,
+    contentType: 'application/pdf',
+    uploadedAt: '2026-04-19T09:00:00Z',
+  },
+  contractAnalysis: {
+    provider: 'heuristic',
+    model: 'fallback',
+    summary: '계약서에서 사업 기간과 계약금액이 식별되었습니다.',
+    warnings: ['계약 대상 기관은 사람이 다시 확인해 주세요.'],
+    nextActions: ['최종 공식 계약명을 확인하세요.'],
+    extractedAt: '2026-04-19T09:01:00Z',
+    fields: {
+      officialContractName: { value: '2026 다자간협력 프로그램', confidence: 'medium', evidence: '계약서 제목' },
+      suggestedProjectName: { value: '2026 다자간협력', confidence: 'medium', evidence: '계약서 제목' },
+      clientOrg: { value: 'KOICA', confidence: 'low', evidence: '본문 추정' },
+      projectPurpose: { value: '다자간협력 사업 운영 및 성과 확산', confidence: 'low', evidence: '본문 추정' },
+      description: { value: '다자간협력 사업 설명', confidence: 'low', evidence: '본문 추정' },
+      contractStart: { value: '2026-01-01', confidence: 'medium', evidence: '계약 기간' },
+      contractEnd: { value: '2026-12-31', confidence: 'medium', evidence: '계약 기간' },
+      contractAmount: { value: 120000000, confidence: 'medium', evidence: '계약금액' },
+      salesVatAmount: { value: 10000000, confidence: 'low', evidence: '추정' },
+    },
+  },
   projectPurpose: '다자간협력 사업 운영 및 성과 확산',
   department: 'CIC1',
   teamName: '임팩트 CIC',
@@ -119,7 +146,9 @@ describe('buildMigrationReviewDossier', () => {
     expect(dossier.notes.participantCondition).toContain('공동참여');
     expect(dossier.audit.requestedByName).toBe('변민욱');
     expect(dossier.audit.reviewedByName).toBe('임원A');
-    expect(dossier.analysis.summary).toBe('-');
+    expect(dossier.analysis.summary).toContain('사업 기간과 계약금액');
+    expect(dossier.contractDocument.name).toBe('네팔_계약서.pdf');
+    expect(dossier.contractDocument.downloadURL).toContain('contract.pdf');
   });
 
   it('falls back to project fields even when no project request document is attached', () => {
@@ -133,5 +162,51 @@ describe('buildMigrationReviewDossier', () => {
     expect(dossier.people.members[0]).toContain('변민욱');
     expect(dossier.audit.requestedByName).toBe('-');
     expect(dossier.audit.reviewedByName).toBe('-');
+    expect(dossier.contractDocument.name).toBe('네팔_계약서.pdf');
+  });
+
+  it('includes executive review history entries with the latest reversal reason', () => {
+    const dossier = buildMigrationReviewDossier(
+      {
+        ...project,
+        executiveReviewStatus: 'REVISION_REJECTED',
+        executiveReviewedAt: '2026-04-21T10:00:00Z',
+        executiveReviewedByName: '임원B',
+        executiveReviewComment: '예산 근거 보완 필요',
+        executiveReviewHistory: [
+          {
+            status: 'APPROVED',
+            previousStatus: 'PENDING',
+            reviewedAt: '2026-04-20T10:00:00Z',
+            reviewedById: 'u-admin-1',
+            reviewedByName: '임원A',
+            reviewComment: '초안 승인',
+          },
+          {
+            status: 'REVISION_REJECTED',
+            previousStatus: 'APPROVED',
+            reviewedAt: '2026-04-21T10:00:00Z',
+            reviewedById: 'u-admin-2',
+            reviewedByName: '임원B',
+            reviewComment: '예산 근거 보완 필요',
+          },
+        ],
+      } as Project,
+      request,
+    );
+
+    expect(dossier.audit.reviewedByName).toBe('임원B');
+    expect(dossier.audit.reviewComment).toBe('예산 근거 보완 필요');
+    expect(dossier.audit.history).toHaveLength(2);
+    expect(dossier.audit.history[0]).toMatchObject({
+      statusLabel: '수정 요청 후 반려',
+      reviewedByName: '임원B',
+      reviewComment: '예산 근거 보완 필요',
+    });
+    expect(dossier.audit.history[1]).toMatchObject({
+      statusLabel: '승인 완료',
+      reviewedByName: '임원A',
+      reviewComment: '초안 승인',
+    });
   });
 });

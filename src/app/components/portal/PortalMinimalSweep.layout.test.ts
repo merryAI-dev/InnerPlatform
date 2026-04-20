@@ -83,4 +83,11 @@ describe('portal minimal sweep', () => {
     expect(projectRegisterSource).toContain('주간 사업비 시트 또는 엑셀 템플릿으로 직접 입력합니다.');
     expect(projectEditSource).toContain('주간 사업비 시트 또는 엑셀 템플릿으로 직접 입력합니다.');
   });
+
+  it('lets rejected pm projects recover from the edit screen with contract upload and resubmission', () => {
+    expect(projectEditSource).toContain('수정 후 다시 제출');
+    expect(projectEditSource).toContain('반려 사유');
+    expect(projectEditSource).toContain('계약서 PDF');
+    expect(projectEditSource).toContain('processProjectRequestContractViaBff');
+  });
 });

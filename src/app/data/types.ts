@@ -456,6 +456,7 @@ export interface Project {
   executiveReviewedById?: string;
   executiveReviewedByName?: string;
   executiveReviewComment?: string;
+  executiveReviewHistory?: ProjectExecutiveReviewHistoryEntry[];
   trashedAt?: string | null;
   trashedById?: string | null;
   trashedByEmail?: string | null;
@@ -494,6 +495,7 @@ export interface Project {
   financialInputFlags?: ProjectFinancialInputFlags;
   settlementGuide?: string;
   contractDocument?: FileAttachment | null;
+  contractAnalysis?: ProjectRequestContractAnalysis | null;
   // 팀/담당자
   department: string;            // 담당조직
   teamName: string;              // 사내기업팀 (팀장)
@@ -527,6 +529,15 @@ export interface Project {
 export type ProjectRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 export type ProjectExecutiveReviewStatus = 'PENDING' | 'APPROVED' | 'REVISION_REJECTED' | 'DUPLICATE_DISCARDED';
 export type ProjectRequestReviewOutcome = 'APPROVED' | 'REVISION_REJECTED' | 'DUPLICATE_DISCARDED';
+
+export interface ProjectExecutiveReviewHistoryEntry {
+  status: ProjectExecutiveReviewStatus;
+  previousStatus?: ProjectExecutiveReviewStatus | null;
+  reviewedAt: string;
+  reviewedById: string;
+  reviewedByName: string;
+  reviewComment?: string;
+}
 
 export interface FileAttachment {
   path: string;

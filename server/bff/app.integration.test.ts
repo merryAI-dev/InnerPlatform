@@ -202,6 +202,229 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     }));
   });
 
+  it('allows executive review reversal, appends history, and posts Slack on rejection', async () => {
+    const projectRegistrationSlackService = {
+      enabled: true,
+      notifyMessage: vi.fn(async () => {}),
+    };
+    const reviewApi = request(createBffApp({
+      projectId,
+      workerSecret,
+      db,
+      projectRegistrationSlackService,
+    }));
+
+    await db.doc(`orgs/${tenantId}/projects/p_exec_review_001`).set({
+      id: 'p_exec_review_001',
+      tenantId,
+      name: '네팔 귀환노동자 재정착 사업',
+      registrationSource: 'pm_portal',
+      executiveReviewStatus: 'APPROVED',
+      executiveReviewedAt: '2026-04-20T09:00:00.000Z',
+      executiveReviewedById: 'u-old',
+      executiveReviewedByName: '임원A',
+      executiveReviewComment: '초안 승인',
+      executiveReviewHistory: [
+        {
+          status: 'APPROVED',
+          previousStatus: 'PENDING',
+          reviewedAt: '2026-04-20T09:00:00.000Z',
+          reviewedById: 'u-old',
+          reviewedByName: '임원A',
+          reviewComment: '초안 승인',
+        },
+      ],
+      createdAt: '2026-04-20T08:00:00.000Z',
+      updatedAt: '2026-04-20T09:00:00.000Z',
+    }, { merge: true });
+
+    await db.doc(`orgs/${tenantId}/project_requests/pr_exec_review_001`).set({
+      id: 'pr_exec_review_001',
+      tenantId,
+      status: 'APPROVED',
+      approvedProjectId: 'p_exec_review_001',
+      requestedByName: '변민욱',
+      requestedByEmail: 'boram@example.com',
+      payload: {
+        name: '네팔 귀환노동자 재정착 사업',
+        officialContractName: '네팔 귀환노동자 재정착 사업',
+        clientOrg: 'KOICA',
+        department: 'CIC1',
+        managerName: '변민욱',
+        teamName: 'AXR팀',
+      },
+      createdAt: '2026-04-20T08:00:00.000Z',
+      updatedAt: '2026-04-20T09:00:00.000Z',
+    }, { merge: true });
+
+    const response = await reviewApi
+      .post('/api/v1/projects/p_exec_review_001/executive-review')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-executive-review-001' })
+      .send({
+        requestId: 'pr_exec_review_001',
+        reviewStatus: 'REVISION_REJECTED',
+        reviewComment: '예산 산출 근거 보완 필요',
+        reviewerName: '임원B',
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      ok: true,
+      projectId: 'p_exec_review_001',
+      requestId: 'pr_exec_review_001',
+      reviewStatus: 'REVISION_REJECTED',
+      slackDelivered: true,
+    });
+
+    const projectSnap = await db.doc(`orgs/${tenantId}/projects/p_exec_review_001`).get();
+    expect(projectSnap.exists).toBe(true);
+    expect(projectSnap.data()).toMatchObject({
+      executiveReviewStatus: 'REVISION_REJECTED',
+      executiveReviewedByName: '임원B',
+      executiveReviewComment: '예산 산출 근거 보완 필요',
+    });
+    expect(projectSnap.data()?.executiveReviewHistory).toHaveLength(2);
+    expect(projectSnap.data()?.executiveReviewHistory?.[1]).toMatchObject({
+      status: 'REVISION_REJECTED',
+      previousStatus: 'APPROVED',
+      reviewedByName: '임원B',
+      reviewComment: '예산 산출 근거 보완 필요',
+    });
+
+    const requestSnap = await db.doc(`orgs/${tenantId}/project_requests/pr_exec_review_001`).get();
+    expect(requestSnap.exists).toBe(true);
+    expect(requestSnap.data()).toMatchObject({
+      status: 'REJECTED',
+      reviewOutcome: 'REVISION_REJECTED',
+      reviewedByName: '임원B',
+      rejectedReason: '예산 산출 근거 보완 필요',
+    });
+    expect(projectRegistrationSlackService.notifyMessage).toHaveBeenCalledWith(expect.objectContaining({
+      text: expect.stringContaining('수정 요청 후 반려'),
+    }));
+  });
+
+  it('requires a rejection reason for executive rejection and discard', async () => {
+    const reviewApi = request(createBffApp({
+      projectId,
+      workerSecret,
+      db,
+    }));
+
+    await db.doc(`orgs/${tenantId}/projects/p_exec_review_002`).set({
+      id: 'p_exec_review_002',
+      tenantId,
+      name: '사유 필수 테스트',
+      registrationSource: 'pm_portal',
+      createdAt: '2026-04-20T08:00:00.000Z',
+      updatedAt: '2026-04-20T08:00:00.000Z',
+    }, { merge: true });
+
+    const response = await reviewApi
+      .post('/api/v1/projects/p_exec_review_002/executive-review')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-executive-review-002' })
+      .send({
+        reviewStatus: 'REVISION_REJECTED',
+        reviewerName: '임원B',
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body?.error || response.text).toMatch(/reviewComment/i);
+  });
+
+  it('resubmits an executive-rejected pm portal project back to pending', async () => {
+    const reviewApi = request(createBffApp({
+      projectId,
+      workerSecret,
+      db,
+    }));
+
+    await db.doc(`orgs/${tenantId}/projects/p_exec_review_003`).set({
+      id: 'p_exec_review_003',
+      tenantId,
+      name: '재제출 테스트 사업',
+      registrationSource: 'pm_portal',
+      executiveReviewStatus: 'REVISION_REJECTED',
+      executiveReviewedAt: '2026-04-20T09:00:00.000Z',
+      executiveReviewedById: 'u-old',
+      executiveReviewedByName: '임원A',
+      executiveReviewComment: '계약서 다시 올려 주세요',
+      executiveReviewHistory: [
+        {
+          status: 'REVISION_REJECTED',
+          previousStatus: 'APPROVED',
+          reviewedAt: '2026-04-20T09:00:00.000Z',
+          reviewedById: 'u-old',
+          reviewedByName: '임원A',
+          reviewComment: '계약서 다시 올려 주세요',
+        },
+      ],
+      contractDocument: {
+        path: 'orgs/mysc/project-request-contracts/u-old/contract.pdf',
+        name: '재제출_계약서.pdf',
+        downloadURL: 'https://example.com/recontract.pdf',
+        size: 2345,
+        contentType: 'application/pdf',
+        uploadedAt: '2026-04-20T08:00:00.000Z',
+      },
+      createdAt: '2026-04-20T08:00:00.000Z',
+      updatedAt: '2026-04-20T09:00:00.000Z',
+    }, { merge: true });
+
+    await db.doc(`orgs/${tenantId}/project_requests/pr_exec_review_003`).set({
+      id: 'pr_exec_review_003',
+      tenantId,
+      status: 'REJECTED',
+      reviewOutcome: 'REVISION_REJECTED',
+      approvedProjectId: 'p_exec_review_003',
+      rejectedReason: '계약서 다시 올려 주세요',
+      payload: {
+        name: '재제출 테스트 사업',
+        officialContractName: '재제출 테스트 사업',
+        clientOrg: 'KOICA',
+        department: 'CIC1',
+        managerName: '변민욱',
+        teamName: 'AXR팀',
+        contractDocument: {
+          path: 'orgs/mysc/project-request-contracts/u-old/contract.pdf',
+          name: '재제출_계약서.pdf',
+          downloadURL: 'https://example.com/recontract.pdf',
+          size: 2345,
+          contentType: 'application/pdf',
+          uploadedAt: '2026-04-20T08:00:00.000Z',
+        },
+        contractAnalysis: {
+          provider: 'heuristic',
+          model: 'fallback',
+          summary: '기존 분석',
+          warnings: [],
+          nextActions: [],
+          extractedAt: '2026-04-20T08:01:00.000Z',
+          fields: {},
+        },
+      },
+      createdAt: '2026-04-20T08:00:00.000Z',
+      updatedAt: '2026-04-20T09:00:00.000Z',
+    }, { merge: true });
+
+    const response = await reviewApi
+      .post('/api/v1/projects/p_exec_review_003/executive-review/resubmit')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-executive-review-003-resubmit' })
+      .send({
+        requestId: 'pr_exec_review_003',
+        reviewComment: '계약서 보완 후 다시 제출',
+        reviewerName: '변민욱',
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      ok: true,
+      projectId: 'p_exec_review_003',
+      requestId: 'pr_exec_review_003',
+      reviewStatus: 'PENDING',
+    });
+  });
+
   it('persists explicit zero contract amounts through project upsert', async () => {
     const response = await api
       .post('/api/v1/projects')
