@@ -209,4 +209,31 @@ describe('buildMigrationReviewDossier', () => {
       reviewComment: '초안 승인',
     });
   });
+
+  it('prefers current project settlement fields over stale request payload values', () => {
+    const dossier = buildMigrationReviewDossier(
+      {
+        ...project,
+        settlementType: 'TYPE1',
+        basis: '공급가액',
+        accountType: 'DEDICATED',
+        fundInputMode: 'DIRECT_ENTRY',
+      },
+      {
+        ...request,
+        payload: {
+          ...request.payload,
+          settlementType: 'NONE',
+          basis: 'NONE',
+          accountType: 'NONE',
+          fundInputMode: 'BANK_UPLOAD',
+        },
+      },
+    );
+
+    expect(dossier.contract.settlementTypeLabel).toBe('Type1. 세금계산서발행+공급가액');
+    expect(dossier.contract.basisLabel).toBe('공급가액 기준');
+    expect(dossier.contract.accountTypeLabel).toBe('전용계좌 사업(이나라도움)');
+    expect(dossier.contract.fundInputModeLabel).toBe('직접 입력');
+  });
 });
