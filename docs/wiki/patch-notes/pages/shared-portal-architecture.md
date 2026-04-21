@@ -3,7 +3,7 @@
 - route: `shared / architecture`
 - primary users: 운영자, 개발자, QA, 의사결정자
 - status: draft-active
-- last updated: 2026-04-15
+- last updated: 2026-04-21
 
 ## Purpose
 
@@ -26,11 +26,13 @@
 - [x] App 루트 broad provider tree가 admin/portal route shell로 분리됨
 - [x] route shell이 explicit Firestore access mode를 주입하고 store는 pathname self-inference를 하지 않음
 - [x] `portal-store`가 `project catalog`, `current project scope`, `weekly submission scope`를 분리해 자기유발 bootstrap loop를 줄이도록 재구성됨
+- [x] `v2` 예산 구조는 `budget_tree_v2`를 원본으로 두고, `budget_code_book`은 2단 파생본으로 동기화함
 - [ ] admin summary surface cutover까지 완료됨
 - [ ] 포털의 broad Firestore direct read가 완전히 제거됨
 
 ## Recent Changes
 
+- [2026-04-21] 세세목 도입 프로젝트는 `budget_tree_v2`를 원본으로 사용하고, 저장 시 `budget_code_book`을 2단 파생본으로 함께 동기화하도록 정리했다.
 - [2026-04-15] 포털 안정화 장기안으로 `Firestore 유지 + BFF/API-first hybrid`를 채택했다.
 - [2026-04-15] 6~8주 RFC에서 route-scoped provider split, read model API, critical write command, admin summary cutover 순서를 고정했다.
 - [2026-04-15] 포털 문제의 본질을 Firestore 자체가 아니라 클라이언트의 분산된 data access policy로 명시했다.

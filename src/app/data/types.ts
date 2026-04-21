@@ -751,6 +751,34 @@ export interface BudgetCodeEntry {
   subCodes: string[];
 }
 
+export interface BudgetTreeLeafItem {
+  subSubCode?: string;
+  initialBudget: number;
+  revisedBudget?: number;
+  note?: string;
+}
+
+export interface BudgetTreeSubItem {
+  subCode: string;
+  initialBudget?: number;
+  revisedBudget?: number;
+  note?: string;
+  leafItems: BudgetTreeLeafItem[];
+}
+
+export interface BudgetTreeCode {
+  code: string;
+  subItems: BudgetTreeSubItem[];
+}
+
+export interface BudgetTreeV2 {
+  version: 2;
+  projectId: string;
+  codes: BudgetTreeCode[];
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
 export interface BudgetCodeRename {
   fromCode: string;
   fromSub: string;

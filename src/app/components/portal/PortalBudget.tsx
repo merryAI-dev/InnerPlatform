@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect, type DragEvent } from 'react';
+import { Fragment, useState, useMemo, useCallback, useEffect, type DragEvent } from 'react';
 import {
   Lock, SlidersHorizontal, ChevronDown, ChevronRight,
   Calculator, Wallet, TrendingUp, Info,
@@ -21,9 +21,15 @@ import { usePortalStore } from '../../data/portal-store';
 import { toast } from 'sonner';
 import {
   fmtKRW, fmtPercent, fmtShort,
-  type BudgetRow,
 } from '../../data/budget-data';
-import type { BudgetPlanRow, BudgetCodeEntry, BudgetCodeRename } from '../../data/types';
+import type {
+  BudgetPlanRow,
+  BudgetCodeEntry,
+  BudgetCodeRename,
+  BudgetTreeCode,
+  BudgetTreeLeafItem,
+  BudgetTreeSubItem,
+} from '../../data/types';
 import { BASIS_LABELS } from '../../data/types';
 import { useFirebase } from '../../lib/firebase-context';
 import {
@@ -46,9 +52,14 @@ import { parseNumber } from '../../platform/csv-utils';
 import {
   aggregateBudgetActualsFromSettlementRowsLocally,
 } from '../../platform/settlement-calculation-kernel';
-import { moveBudgetSubCode, moveBudgetSubCodeToIndex } from '../../platform/budget-code-book-order';
-import { validateBudgetCodeBookDraft } from '../../platform/budget-code-book-validation';
 import { buildBudgetLabelKey, normalizeBudgetLabel } from '../../platform/budget-labels';
+import {
+  buildBudgetTreeFromLegacySnapshots,
+  buildLegacyBudgetSnapshotsFromTree,
+  budgetTreeHasSubSubCodes,
+  cloneBudgetTreeCodes,
+  normalizeBudgetTreeCodes,
+} from '../../platform/budget-tree-v2';
 import { parseBudgetPlanMatrix, planBudgetPlanMerge } from '../../platform/google-sheet-migration';
 import { parseLocalWorkbookFile, type LocalWorkbookSheet } from '../../platform/local-workbook';
 
@@ -58,16 +69,6 @@ import { parseLocalWorkbookFile, type LocalWorkbookSheet } from '../../platform/
 
 function groupIdForEntry(name: string): string {
   return normalizeBudgetLabel(name) || '기타';
-}
-
-function formatBudgetCodeLabel(_index: number, name: string): string {
-  const trimmed = String(name || '').trim();
-  return trimmed || '비목 미입력';
-}
-
-function formatSubCodeLabel(_codeIndex: number, _subIndex: number, name: string): string {
-  const trimmed = String(name || '').trim();
-  return trimmed || '세목 미입력';
 }
 
 // 소진율 색상
@@ -223,32 +224,351 @@ function formatConfidenceLabel(value?: 'high' | 'medium' | 'low'): string {
   }
 }
 
+interface BudgetDraftRow {
+  rowType: 'subItem' | 'leaf';
+  budgetCode: string;
+  subCode: string;
+  subSubCode: string;
+  initialBudget: string;
+  revisedBudget: string;
+  note: string;
+}
+
+interface BudgetLeafView {
+  key: string;
+  budgetCode: string;
+  subCode: string;
+  subSubCode: string;
+  initialBudget: number;
+  revisedBudget: number;
+  effectiveBudget: number;
+  spent: number;
+  balance: number;
+  burnRate: number;
+  note: string;
+}
+
+interface BudgetSubItemView {
+  key: string;
+  budgetCode: string;
+  subCode: string;
+  leafItems: BudgetLeafView[];
+  targetInitialBudget: number;
+  targetRevisedBudget: number;
+  leafInitialBudgetTotal: number;
+  leafRevisedBudgetTotal: number;
+  aggregateSpent: number;
+  initialBudget: number;
+  revisedBudget: number;
+  effectiveBudget: number;
+  spent: number;
+  balance: number;
+  burnRate: number;
+  isSplit: boolean;
+  note: string;
+  hasInitialBudgetMismatch: boolean;
+  hasRevisedBudgetMismatch: boolean;
+}
+
+interface BudgetCodeView {
+  key: string;
+  budgetCode: string;
+  subItems: BudgetSubItemView[];
+  initialBudget: number;
+  revisedBudget: number;
+  effectiveBudget: number;
+  spent: number;
+  balance: number;
+  burnRate: number;
+}
+
+interface BudgetTreeDraftValidationResult {
+  isValid: boolean;
+  errors: string[];
+}
+
+function cloneSubItem(subItem: BudgetTreeSubItem): BudgetTreeSubItem {
+  return {
+    subCode: subItem.subCode,
+    ...(typeof subItem.initialBudget === 'number' ? { initialBudget: subItem.initialBudget } : {}),
+    ...(typeof subItem.revisedBudget === 'number' ? { revisedBudget: subItem.revisedBudget } : {}),
+    ...(subItem.note ? { note: subItem.note } : {}),
+    leafItems: subItem.leafItems.map((leaf) => ({
+      ...(leaf.subSubCode ? { subSubCode: leaf.subSubCode } : {}),
+      initialBudget: leaf.initialBudget,
+      ...(typeof leaf.revisedBudget === 'number' ? { revisedBudget: leaf.revisedBudget } : {}),
+      ...(leaf.note ? { note: leaf.note } : {}),
+    })),
+  };
+}
+
+function createEmptyLeafItem(): BudgetTreeLeafItem {
+  return { initialBudget: 0, revisedBudget: 0, note: '' };
+}
+
+function createEmptySubItem(): BudgetTreeSubItem {
+  return {
+    subCode: '',
+    initialBudget: 0,
+    revisedBudget: 0,
+    leafItems: [createEmptyLeafItem()],
+  };
+}
+
+function validateBudgetTreeDraft(entries: BudgetTreeCode[]): BudgetTreeDraftValidationResult {
+  const errors: string[] = [];
+  if (!Array.isArray(entries) || entries.length === 0) {
+    return { isValid: false, errors: ['비목을 1개 이상 입력해 주세요.'] };
+  }
+
+  entries.forEach((codeEntry, codeIdx) => {
+    const codeLabel = normalizeBudgetLabel(codeEntry.code);
+    if (!codeLabel) {
+      errors.push(`${codeIdx + 1}번째 비목명을 입력해 주세요.`);
+      return;
+    }
+    if (!Array.isArray(codeEntry.subItems) || codeEntry.subItems.length === 0) {
+      errors.push(`${codeLabel}에 세목을 1개 이상 추가해 주세요.`);
+      return;
+    }
+    const subSeen = new Set<string>();
+    codeEntry.subItems.forEach((subItem, subIdx) => {
+      const subLabel = normalizeBudgetLabel(subItem.subCode);
+      if (!subLabel) {
+        errors.push(`${codeLabel}의 ${subIdx + 1}번째 세목명을 입력해 주세요.`);
+        return;
+      }
+      if (subSeen.has(subLabel)) {
+        errors.push(`${codeLabel} 안에 중복된 세목명 ${subLabel}이 있습니다.`);
+      }
+      subSeen.add(subLabel);
+
+      const normalizedLeafLabels = (subItem.leafItems || []).map((leaf) => normalizeBudgetLabel(leaf.subSubCode));
+      const splitMode = normalizedLeafLabels.some(Boolean) || normalizedLeafLabels.length > 1;
+      if (!splitMode) return;
+      const leafSeen = new Set<string>();
+      normalizedLeafLabels.forEach((leafLabel, leafIdx) => {
+        if (!leafLabel) {
+          errors.push(`${codeLabel} > ${subLabel}의 ${leafIdx + 1}번째 세세목명을 입력해 주세요.`);
+          return;
+        }
+        if (leafSeen.has(leafLabel)) {
+          errors.push(`${codeLabel} > ${subLabel} 안에 중복된 세세목명 ${leafLabel}이 있습니다.`);
+        }
+        leafSeen.add(leafLabel);
+      });
+    });
+  });
+
+  return {
+    isValid: errors.length === 0,
+    errors,
+  };
+}
+
+function getLeafRowKey(row: Pick<BudgetDraftRow, 'budgetCode' | 'subCode' | 'subSubCode'>): string {
+  return buildBudgetLabelKey(row.budgetCode, row.subCode, row.subSubCode);
+}
+
+function getSubItemRowKey(row: Pick<BudgetDraftRow, 'budgetCode' | 'subCode'>): string {
+  return buildBudgetLabelKey(row.budgetCode, row.subCode);
+}
+
+function buildDraftRowsFromTree(codes: BudgetTreeCode[]): BudgetDraftRow[] {
+  return codes.flatMap((codeEntry) => codeEntry.subItems.flatMap((subItem) => {
+    const hasSplitLeaves = subItem.leafItems.some((leaf) => normalizeBudgetLabel(leaf.subSubCode));
+    const rows: BudgetDraftRow[] = [];
+    if (hasSplitLeaves) {
+      rows.push({
+        rowType: 'subItem',
+        budgetCode: codeEntry.code,
+        subCode: subItem.subCode,
+        subSubCode: '',
+        initialBudget: subItem.initialBudget ? subItem.initialBudget.toLocaleString('ko-KR') : '',
+        revisedBudget: subItem.revisedBudget ? subItem.revisedBudget.toLocaleString('ko-KR') : '',
+        note: subItem.note || '',
+      });
+    }
+    return rows.concat(
+      subItem.leafItems.map((leaf) => ({
+        rowType: 'leaf',
+        budgetCode: codeEntry.code,
+        subCode: subItem.subCode,
+        subSubCode: leaf.subSubCode || '',
+        initialBudget: leaf.initialBudget ? leaf.initialBudget.toLocaleString('ko-KR') : '',
+        revisedBudget: leaf.revisedBudget ? leaf.revisedBudget.toLocaleString('ko-KR') : '',
+        note: leaf.note || '',
+      })),
+    );
+  }));
+}
+
+function mergeDraftRowsIntoTree(codes: BudgetTreeCode[], rows: BudgetDraftRow[]): BudgetTreeCode[] {
+  const subItemRowMap = new Map(
+    rows
+      .filter((row) => row.rowType === 'subItem')
+      .map((row) => [getSubItemRowKey(row), row]),
+  );
+  const leafRowMap = new Map(
+    rows
+      .filter((row) => row.rowType === 'leaf')
+      .map((row) => [getLeafRowKey(row), row]),
+  );
+  return normalizeBudgetTreeCodes(codes.map((codeEntry) => ({
+    code: codeEntry.code,
+    subItems: codeEntry.subItems.map((subItem) => ({
+      subCode: subItem.subCode,
+      ...(() => {
+        const subItemDraft = subItemRowMap.get(buildBudgetLabelKey(codeEntry.code, subItem.subCode));
+        if (!subItemDraft) {
+          return {
+            ...(typeof subItem.initialBudget === 'number' ? { initialBudget: subItem.initialBudget } : {}),
+            ...(typeof subItem.revisedBudget === 'number' ? { revisedBudget: subItem.revisedBudget } : {}),
+            ...(subItem.note ? { note: subItem.note } : {}),
+          };
+        }
+        const initialBudget = parseNumber(subItemDraft.initialBudget) ?? 0;
+        const revisedBudget = parseNumber(subItemDraft.revisedBudget) ?? 0;
+        return {
+          ...(initialBudget > 0 ? { initialBudget } : {}),
+          ...(revisedBudget > 0 ? { revisedBudget } : {}),
+          ...(subItemDraft.note.trim() ? { note: subItemDraft.note.trim() } : {}),
+        };
+      })(),
+      leafItems: subItem.leafItems.map((leaf) => {
+        const key = buildBudgetLabelKey(codeEntry.code, subItem.subCode, leaf.subSubCode || '');
+        const draft = leafRowMap.get(key);
+        if (!draft) return leaf;
+        const initialBudget = parseNumber(draft.initialBudget) ?? 0;
+        const revisedBudget = parseNumber(draft.revisedBudget) ?? 0;
+        return {
+          ...(leaf.subSubCode ? { subSubCode: leaf.subSubCode } : {}),
+          initialBudget,
+          ...(revisedBudget > 0 ? { revisedBudget } : {}),
+          ...(draft.note.trim() ? { note: draft.note.trim() } : {}),
+        };
+      }),
+    })),
+  })));
+}
+
+function buildBudgetCodeViews(
+  codes: BudgetTreeCode[],
+  spentMap: Map<string, number>,
+): BudgetCodeView[] {
+  const getSubItemSpentTotal = (budgetCode: string, subCode: string): number => {
+    const baseKey = buildBudgetLabelKey(budgetCode, subCode);
+    const splitPrefix = `${baseKey}|`;
+    let total = 0;
+    spentMap.forEach((amount, key) => {
+      if (key === baseKey || key.startsWith(splitPrefix)) total += amount;
+    });
+    return total;
+  };
+
+  return codes.map((codeEntry) => {
+    const subItems = codeEntry.subItems.map((subItem) => {
+      const isSplit = subItem.leafItems.some((leaf) => normalizeBudgetLabel(leaf.subSubCode));
+      const subItemSpentTotal = getSubItemSpentTotal(codeEntry.code, subItem.subCode);
+      const leafItems = subItem.leafItems.map((leaf) => {
+        const key = buildBudgetLabelKey(codeEntry.code, subItem.subCode, leaf.subSubCode || '');
+        const initialBudget = Number.isFinite(leaf.initialBudget) ? leaf.initialBudget : 0;
+        const revisedBudget = Number.isFinite(leaf.revisedBudget ?? NaN) ? (leaf.revisedBudget as number) : 0;
+        const effectiveBudget = revisedBudget > 0 ? revisedBudget : initialBudget;
+        const spent = leaf.subSubCode ? (spentMap.get(key) || 0) : subItemSpentTotal;
+        return {
+          key,
+          budgetCode: codeEntry.code,
+          subCode: subItem.subCode,
+          subSubCode: leaf.subSubCode || '',
+          initialBudget,
+          revisedBudget,
+          effectiveBudget,
+          spent,
+          balance: effectiveBudget - spent,
+          burnRate: effectiveBudget > 0 ? spent / effectiveBudget : 0,
+          note: leaf.note || '',
+        } satisfies BudgetLeafView;
+      });
+      const leafInitialBudgetTotal = leafItems.reduce((sum, leaf) => sum + leaf.initialBudget, 0);
+      const leafRevisedBudgetTotal = leafItems.reduce((sum, leaf) => sum + leaf.revisedBudget, 0);
+      const targetInitialBudget = Number.isFinite(subItem.initialBudget ?? NaN)
+        ? (subItem.initialBudget as number)
+        : leafInitialBudgetTotal;
+      const targetRevisedBudget = Number.isFinite(subItem.revisedBudget ?? NaN)
+        ? (subItem.revisedBudget as number)
+        : leafRevisedBudgetTotal;
+      const initialBudget = isSplit ? targetInitialBudget : leafInitialBudgetTotal;
+      const revisedBudget = isSplit ? targetRevisedBudget : leafRevisedBudgetTotal;
+      const effectiveBudget = revisedBudget > 0 ? revisedBudget : initialBudget;
+      const leafSpentTotal = leafItems.reduce((sum, leaf) => sum + leaf.spent, 0);
+      const spent = isSplit ? subItemSpentTotal : leafSpentTotal;
+      const aggregateSpent = spent;
+      return {
+        key: buildBudgetLabelKey(codeEntry.code, subItem.subCode),
+        budgetCode: codeEntry.code,
+        subCode: subItem.subCode,
+        leafItems,
+        targetInitialBudget,
+        targetRevisedBudget,
+        leafInitialBudgetTotal,
+        leafRevisedBudgetTotal,
+        aggregateSpent,
+        initialBudget,
+        revisedBudget,
+        effectiveBudget,
+        spent,
+        balance: effectiveBudget - spent,
+        burnRate: effectiveBudget > 0 ? spent / effectiveBudget : 0,
+        isSplit,
+        note: subItem.note || '',
+        hasInitialBudgetMismatch: isSplit && targetInitialBudget !== leafInitialBudgetTotal,
+        hasRevisedBudgetMismatch: isSplit && ((targetRevisedBudget > 0 || leafRevisedBudgetTotal > 0) && targetRevisedBudget !== leafRevisedBudgetTotal),
+      } satisfies BudgetSubItemView;
+    });
+    const initialBudget = subItems.reduce((sum, subItem) => sum + subItem.initialBudget, 0);
+    const revisedBudget = subItems.reduce((sum, subItem) => sum + subItem.revisedBudget, 0);
+    const effectiveBudget = subItems.reduce((sum, subItem) => sum + subItem.effectiveBudget, 0);
+    const spent = subItems.reduce((sum, subItem) => sum + subItem.aggregateSpent, 0);
+    return {
+      key: groupIdForEntry(codeEntry.code),
+      budgetCode: codeEntry.code,
+      subItems,
+      initialBudget,
+      revisedBudget,
+      effectiveBudget,
+      spent,
+      balance: effectiveBudget - spent,
+      burnRate: effectiveBudget > 0 ? spent / effectiveBudget : 0,
+    } satisfies BudgetCodeView;
+  });
+}
+
 export function PortalBudget() {
   const { user: authUser } = useAuth();
   const { orgId } = useFirebase();
   const {
     portalUser,
     myProject,
+    expenseSheets,
     expenseSheetRows,
     budgetPlanRows,
     budgetCodeBook,
+    budgetTreeV2,
     saveBudgetPlanRows,
     saveBudgetCodeBook,
+    saveBudgetTreeV2,
     sheetSources,
   } = usePortalStore();
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
-  const [selectedRow, setSelectedRow] = useState<BudgetRow | null>(null);
+  const [collapsedSubItems, setCollapsedSubItems] = useState<Set<string>>(new Set());
+  const [openedLeafEditors, setOpenedLeafEditors] = useState<Set<string>>(new Set());
+  const [selectedRow, setSelectedRow] = useState<BudgetLeafView | null>(null);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [codeBookMode, setCodeBookMode] = useState(false);
-  const [draftRows, setDraftRows] = useState<Array<{
-    budgetCode: string;
-    subCode: string;
-    initialBudget: string;
-    revisedBudget: string;
-    note: string;
-  }>>([]);
-  const [draftCodeBook, setDraftCodeBook] = useState<BudgetCodeEntry[]>([]);
+  const [draftRows, setDraftRows] = useState<BudgetDraftRow[]>([]);
+  const [draftTreeCodes, setDraftTreeCodes] = useState<BudgetTreeCode[]>([]);
   const [codeBookEditorTab, setCodeBookEditorTab] = useState<'manual' | 'paste' | 'csv'>('manual');
   const [codeBookImportText, setCodeBookImportText] = useState('');
   const [codeBookImportFileName, setCodeBookImportFileName] = useState('');
@@ -293,21 +613,37 @@ export function PortalBudget() {
     });
   };
 
-  const planMap = useMemo(() => {
-    const map = new Map<string, BudgetPlanRow>();
-    (budgetPlanRows || []).forEach((row) => {
-      map.set(buildBudgetLabelKey(row.budgetCode, row.subCode), row);
+  const toggleSubItem = useCallback((key: string) => {
+    setCollapsedSubItems((prev) => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
     });
-    return map;
-  }, [budgetPlanRows]);
+  }, []);
 
   const [spentMap, setSpentMap] = useState<Map<string, number>>(
-    () => aggregateBudgetActualsFromSettlementRowsLocally(expenseSheetRows),
+    () => aggregateBudgetActualsFromSettlementRowsLocally(
+      expenseSheets.flatMap((sheet) => sheet.rows || []).length > 0
+        ? expenseSheets.flatMap((sheet) => sheet.rows || [])
+        : expenseSheetRows,
+    ),
   );
 
-  const activeCodeBook = useMemo(
-    () => budgetCodeBook,
-    [budgetCodeBook],
+  const allExpenseSheetRows = useMemo(
+    () => {
+      const rows = expenseSheets.flatMap((sheet) => sheet.rows || []);
+      return rows.length > 0 ? rows : expenseSheetRows;
+    },
+    [expenseSheets, expenseSheetRows],
+  );
+
+  const activeTreeCodes = useMemo(
+    () => normalizeBudgetTreeCodes(
+      budgetTreeV2?.codes && budgetTreeV2.codes.length > 0
+        ? cloneBudgetTreeCodes(budgetTreeV2.codes)
+        : buildBudgetTreeFromLegacySnapshots(budgetCodeBook, budgetPlanRows || []),
+    ),
+    [budgetCodeBook, budgetPlanRows, budgetTreeV2?.codes],
   );
 
   const codeBookImportPreview = useMemo(
@@ -315,8 +651,8 @@ export function PortalBudget() {
     [codeBookImportText],
   );
   const codeBookValidation = useMemo(
-    () => validateBudgetCodeBookDraft(draftCodeBook),
-    [draftCodeBook],
+    () => validateBudgetTreeDraft(draftTreeCodes),
+    [draftTreeCodes],
   );
   const budgetImportSelectedSheet = useMemo(
     () => budgetImportSheets.find((sheet) => sheet.name === budgetImportSheetName) || budgetImportSheets[0] || null,
@@ -431,8 +767,8 @@ export function PortalBudget() {
   const budgetImportShowAiPanel = budgetImportAiShouldRun || budgetImportAiLoading || Boolean(budgetImportAiAnalysis) || Boolean(budgetImportAiError);
 
   useEffect(() => {
-    setSpentMap(aggregateBudgetActualsFromSettlementRowsLocally(expenseSheetRows));
-  }, [expenseSheetRows]);
+    setSpentMap(aggregateBudgetActualsFromSettlementRowsLocally(allExpenseSheetRows));
+  }, [allExpenseSheetRows]);
 
   const formatInput = useCallback((value: string) => {
     const num = parseNumber(value);
@@ -471,101 +807,163 @@ export function PortalBudget() {
     resetBudgetImport();
   }, [budgetImportApplying, resetBudgetImport]);
 
-  const syncDraftRowCode = useCallback((prevCode: string, nextCode: string) => {
-    if (!editMode) return;
-    setDraftRows((prev) => prev.map((r) => (
-      r.budgetCode === prevCode ? { ...r, budgetCode: nextCode } : r
+  const updateBudgetCode = useCallback((idx: number, nextCode: string) => {
+    setDraftTreeCodes((prev) => prev.map((entry, entryIdx) => (
+      entryIdx === idx ? { ...entry, code: nextCode } : entry
     )));
-  }, [editMode]);
-
-  const syncDraftRowSubCode = useCallback((budgetCode: string, prevSub: string, nextSub: string) => {
-    if (!editMode) return;
-    setDraftRows((prev) => prev.map((r) => (
-      r.budgetCode === budgetCode && r.subCode === prevSub ? { ...r, subCode: nextSub } : r
-    )));
-  }, [editMode]);
-
-  const addDraftRow = useCallback((budgetCode: string, subCode: string) => {
-    setDraftRows((prev) => ([
-      ...prev,
-      { budgetCode, subCode, initialBudget: '', revisedBudget: '', note: '' },
-    ]));
   }, []);
 
-  const removeDraftRows = useCallback((budgetCode: string, subCode?: string) => {
-    setDraftRows((prev) => prev.filter((r) => {
-      if (r.budgetCode !== budgetCode) return true;
-      if (subCode == null) return false;
-      return r.subCode !== subCode;
+  const updateSubCode = useCallback((idx: number, subIdx: number, nextSub: string) => {
+    setDraftTreeCodes((prev) => prev.map((entry, entryIdx) => {
+      if (entryIdx !== idx) return entry;
+      return {
+        ...entry,
+        subItems: entry.subItems.map((subItem, currentSubIdx) => (
+          currentSubIdx === subIdx ? { ...subItem, subCode: nextSub } : subItem
+        )),
+      };
     }));
   }, []);
 
-  const updateBudgetCode = useCallback((idx: number, nextCode: string) => {
-    setDraftCodeBook((prev) => {
-      const copy = prev.map((c) => ({ code: c.code, subCodes: [...c.subCodes] }));
-      const before = copy[idx];
-      if (!before) return prev;
-      copy[idx] = { ...before, code: nextCode };
-      if (before.code !== nextCode) syncDraftRowCode(before.code, nextCode);
-      return copy;
-    });
-  }, [syncDraftRowCode]);
-
-  const updateSubCode = useCallback((idx: number, subIdx: number, nextSub: string) => {
-    setDraftCodeBook((prev) => {
-      const copy = prev.map((c) => ({ code: c.code, subCodes: [...c.subCodes] }));
-      const entry = copy[idx];
-      if (!entry) return prev;
-      const before = entry.subCodes[subIdx] || '';
-      entry.subCodes[subIdx] = nextSub;
-      if (before !== nextSub) syncDraftRowSubCode(entry.code, before, nextSub);
-      return copy;
-    });
-  }, [syncDraftRowSubCode]);
+  const updateLeafSubSubCode = useCallback((idx: number, subIdx: number, leafIdx: number, nextValue: string) => {
+    setDraftTreeCodes((prev) => prev.map((entry, entryIdx) => {
+      if (entryIdx !== idx) return entry;
+      return {
+        ...entry,
+        subItems: entry.subItems.map((subItem, currentSubIdx) => {
+          if (currentSubIdx !== subIdx) return subItem;
+          return {
+            ...subItem,
+            leafItems: subItem.leafItems.map((leaf, currentLeafIdx) => (
+              currentLeafIdx === leafIdx
+                ? { ...leaf, subSubCode: nextValue }
+                : leaf
+            )),
+          };
+        }),
+      };
+    }));
+  }, []);
 
   const addBudgetCode = useCallback(() => {
-    setDraftCodeBook((prev) => ([...prev, { code: '', subCodes: [''] }]));
-    addDraftRow('', '');
-  }, [addDraftRow]);
+    setDraftTreeCodes((prev) => ([...prev, { code: '', subItems: [createEmptySubItem()] }]));
+  }, []);
 
   const removeBudgetCode = useCallback((idx: number) => {
-    setDraftCodeBook((prev) => {
-      const entry = prev[idx];
-      const next = prev.filter((_, i) => i !== idx);
-      if (entry?.code) removeDraftRows(entry.code);
-      return next;
-    });
-  }, [removeDraftRows]);
+    setDraftTreeCodes((prev) => prev.filter((_, entryIdx) => entryIdx !== idx));
+  }, []);
 
   const addSubCode = useCallback((idx: number) => {
-    setDraftCodeBook((prev) => {
-      const copy = prev.map((c) => ({ code: c.code, subCodes: [...c.subCodes] }));
-      const entry = copy[idx];
-      if (!entry) return prev;
-      entry.subCodes.push('');
-      addDraftRow(entry.code, '');
-      return copy;
-    });
-  }, [addDraftRow]);
+    setDraftTreeCodes((prev) => prev.map((entry, entryIdx) => (
+      entryIdx === idx
+        ? { ...entry, subItems: [...entry.subItems, createEmptySubItem()] }
+        : entry
+    )));
+  }, []);
 
   const removeSubCode = useCallback((idx: number, subIdx: number) => {
-    setDraftCodeBook((prev) => {
-      const copy = prev.map((c) => ({ code: c.code, subCodes: [...c.subCodes] }));
-      const entry = copy[idx];
-      if (!entry) return prev;
-      if (entry.subCodes.length <= 1) {
+    setDraftTreeCodes((prev) => prev.map((entry, entryIdx) => {
+      if (entryIdx !== idx) return entry;
+      if (entry.subItems.length <= 1) {
         toast.error('각 비목에는 세목이 최소 1개 필요합니다.');
-        return prev;
+        return entry;
       }
-      const removed = entry.subCodes[subIdx] || '';
-      entry.subCodes = entry.subCodes.filter((_, i) => i !== subIdx);
-      if (entry.code && removed) removeDraftRows(entry.code, removed);
-      return copy;
+      return {
+        ...entry,
+        subItems: entry.subItems.filter((_, currentSubIdx) => currentSubIdx !== subIdx),
+      };
+    }));
+  }, []);
+
+  const addLeafItem = useCallback((idx: number, subIdx: number) => {
+    const editorKey = `${idx}:${subIdx}`;
+    const wasOpened = openedLeafEditors.has(editorKey);
+    setOpenedLeafEditors((prev) => {
+      const next = new Set(prev);
+      next.add(editorKey);
+      return next;
     });
-  }, [removeDraftRows]);
+    setDraftTreeCodes((prev) => prev.map((entry, entryIdx) => {
+      if (entryIdx !== idx) return entry;
+      return {
+        ...entry,
+        subItems: entry.subItems.map((subItem, currentSubIdx) => (
+          currentSubIdx === subIdx
+            ? (() => {
+              const hasNamedLeaf = subItem.leafItems.some((leaf) => normalizeBudgetLabel(leaf.subSubCode));
+              if (!wasOpened && !hasNamedLeaf && subItem.leafItems.length <= 1) {
+                const baseLeaf = subItem.leafItems[0];
+                return {
+                  ...subItem,
+                  initialBudget: subItem.initialBudget ?? baseLeaf?.initialBudget ?? 0,
+                  revisedBudget: subItem.revisedBudget ?? baseLeaf?.revisedBudget ?? 0,
+                  note: subItem.note ?? baseLeaf?.note ?? '',
+                  leafItems: subItem.leafItems.length === 0
+                    ? [createEmptyLeafItem()]
+                    : subItem.leafItems.map((leaf, leafItemIdx) => (
+                      leafItemIdx === 0
+                        ? { ...leaf, initialBudget: 0, revisedBudget: 0, note: '' }
+                        : leaf
+                    )),
+                };
+              }
+              return { ...subItem, leafItems: [...subItem.leafItems, createEmptyLeafItem()] };
+            })()
+            : subItem
+        )),
+      };
+    }));
+  }, [openedLeafEditors]);
+
+  const removeLeafItem = useCallback((idx: number, subIdx: number, leafIdx: number) => {
+    setDraftTreeCodes((prev) => prev.map((entry, entryIdx) => {
+      if (entryIdx !== idx) return entry;
+      return {
+        ...entry,
+        subItems: entry.subItems.map((subItem, currentSubIdx) => {
+          if (currentSubIdx !== subIdx) return subItem;
+          if (subItem.leafItems.length <= 1) {
+            return {
+              ...subItem,
+              leafItems: [{
+                initialBudget: subItem.initialBudget ?? 0,
+                revisedBudget: subItem.revisedBudget ?? 0,
+                note: subItem.note ?? '',
+              }],
+            };
+          }
+          const nextLeafItems = subItem.leafItems.filter((_, currentLeafIdx) => currentLeafIdx !== leafIdx);
+          const hasNamedLeaf = nextLeafItems.some((leaf) => normalizeBudgetLabel(leaf.subSubCode));
+          if (!hasNamedLeaf) {
+            return {
+              ...subItem,
+              leafItems: [{
+                initialBudget: subItem.initialBudget ?? nextLeafItems[0]?.initialBudget ?? 0,
+                revisedBudget: subItem.revisedBudget ?? nextLeafItems[0]?.revisedBudget ?? 0,
+                note: subItem.note ?? nextLeafItems[0]?.note ?? '',
+              }],
+            };
+          }
+          return {
+            ...subItem,
+            leafItems: nextLeafItems,
+          };
+        }),
+      };
+    }));
+  }, []);
 
   const reorderSubCode = useCallback((idx: number, subIdx: number, direction: 'up' | 'down') => {
-    setDraftCodeBook((prev) => moveBudgetSubCode(prev, idx, subIdx, direction));
+    setDraftTreeCodes((prev) => {
+      const next = cloneBudgetTreeCodes(prev);
+      const entry = next[idx];
+      if (!entry) return prev;
+      const targetIdx = direction === 'up' ? subIdx - 1 : subIdx + 1;
+      if (targetIdx < 0 || targetIdx >= entry.subItems.length) return prev;
+      const [moved] = entry.subItems.splice(subIdx, 1);
+      entry.subItems.splice(targetIdx, 0, moved);
+      return next;
+    });
   }, []);
 
   const handleSubCodeDragStart = useCallback((codeIdx: number, subIdx: number) => {
@@ -592,19 +990,23 @@ export function PortalBudget() {
       return;
     }
 
-    setDraftCodeBook((prev) => {
+    setDraftTreeCodes((prev) => {
       const entry = prev[codeIdx];
       if (!entry) return prev;
 
+      const next = cloneBudgetTreeCodes(prev);
+      const nextEntry = next[codeIdx];
+      if (!nextEntry) return prev;
       const insertIndex = dropTarget?.codeIdx === codeIdx && dropTarget.subIdx === subIdx
         ? (dropTarget.position === 'after' ? subIdx + 1 : subIdx)
         : subIdx;
-      const boundedInsertIndex = Math.max(0, Math.min(insertIndex, entry.subCodes.length));
+      const boundedInsertIndex = Math.max(0, Math.min(insertIndex, nextEntry.subItems.length));
       const targetIndex = draggedSubCode.subIdx < boundedInsertIndex
         ? boundedInsertIndex - 1
         : boundedInsertIndex;
-
-      return moveBudgetSubCodeToIndex(prev, codeIdx, draggedSubCode.subIdx, targetIndex);
+      const [moved] = nextEntry.subItems.splice(draggedSubCode.subIdx, 1);
+      nextEntry.subItems.splice(targetIndex, 0, moved);
+      return next;
     });
     setDraggedSubCode(null);
     setDropTarget(null);
@@ -616,41 +1018,30 @@ export function PortalBudget() {
   }, []);
 
   const startEdit = useCallback(() => {
-    const next = budgetCodeBook.flatMap((entry) => (
-      entry.subCodes.map((subCode) => {
-        const key = buildBudgetLabelKey(entry.code, subCode);
-        const existing = planMap.get(key);
-        return {
-          budgetCode: entry.code,
-          subCode,
-          initialBudget: existing?.initialBudget ? existing.initialBudget.toLocaleString('ko-KR') : '',
-          revisedBudget: existing?.revisedBudget ? existing.revisedBudget.toLocaleString('ko-KR') : '',
-          note: existing?.note || '',
-        };
-      })
-    ));
-    setDraftRows(next);
+    setDraftRows(buildDraftRowsFromTree(activeTreeCodes));
     setEditMode(true);
-  }, [planMap, budgetCodeBook]);
+  }, [activeTreeCodes]);
 
   const startCodeBookEdit = useCallback(() => {
-    setDraftCodeBook(budgetCodeBook.map((c) => ({ code: c.code, subCodes: [...c.subCodes] })));
+    setDraftTreeCodes(cloneBudgetTreeCodes(activeTreeCodes));
+    setOpenedLeafEditors(new Set());
     setCodeBookEditorTab('manual');
     setCodeBookImportText('');
     setCodeBookImportFileName('');
     setCodeBookReplaceMode(false);
     setCodeBookMode(true);
-  }, [budgetCodeBook]);
+  }, [activeTreeCodes]);
 
   const cancelEdit = useCallback(() => {
     setEditMode(false);
     setCodeBookMode(false);
     setDraftRows([]);
-    setDraftCodeBook([]);
+    setDraftTreeCodes([]);
     setCodeBookEditorTab('manual');
     setCodeBookImportText('');
     setCodeBookImportFileName('');
     setCodeBookReplaceMode(false);
+    setOpenedLeafEditors(new Set());
     setDraggedSubCode(null);
     setDropTarget(null);
   }, []);
@@ -660,10 +1051,14 @@ export function PortalBudget() {
       toast.error('가져올 비목/세목 구조를 먼저 입력해 주세요.');
       return;
     }
-    setDraftCodeBook(codeBookImportPreview.rows.map((entry) => ({
+    setDraftTreeCodes(codeBookImportPreview.rows.map((entry) => ({
       code: entry.code,
-      subCodes: [...entry.subCodes],
+      subItems: entry.subCodes.map((subCode) => ({
+        subCode,
+        leafItems: [createEmptyLeafItem()],
+      })),
     })));
+    setOpenedLeafEditors(new Set());
     setCodeBookReplaceMode(true);
     setCodeBookEditorTab('manual');
     toast.success(`비목 ${codeBookImportPreview.rows.length}개, 세목 ${codeBookImportPreview.totalPairs}건을 구조 초안으로 불러왔습니다.`);
@@ -779,8 +1174,10 @@ export function PortalBudget() {
   const buildCodeBookRenames = useCallback((): BudgetCodeRename[] => {
     if (!codeBookMode) return [];
     const renames: BudgetCodeRename[] = [];
-    draftCodeBook.forEach((nextEntry, idx) => {
-      const prevEntry = budgetCodeBook[idx];
+    const previousLegacy = buildLegacyBudgetSnapshotsFromTree(activeTreeCodes).codeBook;
+    const nextLegacy = buildLegacyBudgetSnapshotsFromTree(draftTreeCodes).codeBook;
+    nextLegacy.forEach((nextEntry, idx) => {
+      const prevEntry = previousLegacy[idx];
       if (!prevEntry) return;
       const prevCode = normalizeBudgetLabel(prevEntry.code);
       const nextCode = normalizeBudgetLabel(nextEntry.code);
@@ -798,25 +1195,29 @@ export function PortalBudget() {
       }
     });
     return renames;
-  }, [budgetCodeBook, draftCodeBook, codeBookMode]);
+  }, [activeTreeCodes, codeBookMode, draftTreeCodes]);
 
   const saveSettings = useCallback(async () => {
-    if (!saveBudgetPlanRows && !saveBudgetCodeBook) return;
+    if (!saveBudgetPlanRows && !saveBudgetCodeBook && !saveBudgetTreeV2) return;
     if (codeBookMode) {
-      const validation = validateBudgetCodeBookDraft(draftCodeBook);
+      const validation = validateBudgetTreeDraft(draftTreeCodes);
       if (!validation.isValid) {
-        toast.error(validation.errors[0] || '비목/세목 구조를 확인해 주세요.');
+        toast.error(validation.errors[0] || '예산 구조를 확인해 주세요.');
         return;
       }
     }
-    const normalized: BudgetPlanRow[] = editMode ? draftRows.map((row) => {
+    const normalized: Array<BudgetPlanRow & { subSubCode?: string }> = editMode ? draftRows
+      .filter((row) => row.rowType === 'leaf')
+      .map((row) => {
       const budgetCode = normalizeBudgetLabel(String(row.budgetCode || '').trim());
       const subCode = normalizeBudgetLabel(String(row.subCode || '').trim());
+      const subSubCode = normalizeBudgetLabel(String(row.subSubCode || '').trim());
       const initial = parseNumber(row.initialBudget) ?? 0;
       const revised = parseNumber(row.revisedBudget) ?? 0;
       return {
         budgetCode,
         subCode,
+        ...(subSubCode ? { subSubCode } : {}),
         initialBudget: initial,
         revisedBudget: revised,
         ...(row.note ? { note: row.note } : {}),
@@ -827,17 +1228,28 @@ export function PortalBudget() {
 
     setSettingsSaving(true);
     try {
-      if (codeBookMode && saveBudgetCodeBook && draftCodeBook.length > 0) {
-        const renames = codeBookReplaceMode ? [] : buildCodeBookRenames();
-        await saveBudgetCodeBook(draftCodeBook, renames);
+      if (codeBookMode) {
+        const normalizedTree = normalizeBudgetTreeCodes(draftTreeCodes);
+        if (budgetTreeV2 || budgetTreeHasSubSubCodes(normalizedTree)) {
+          await saveBudgetTreeV2(normalizedTree);
+        } else if (saveBudgetCodeBook) {
+          const renames = codeBookReplaceMode ? [] : buildCodeBookRenames();
+          const legacy = buildLegacyBudgetSnapshotsFromTree(normalizedTree);
+          await saveBudgetCodeBook(legacy.codeBook, renames);
+        }
       }
       if (editMode) {
-        await saveBudgetPlanRows(normalized);
+        const shouldUseV2 = Boolean(budgetTreeV2);
+        if (shouldUseV2) {
+          await saveBudgetTreeV2(mergeDraftRowsIntoTree(activeTreeCodes, draftRows));
+        } else {
+          await saveBudgetPlanRows(normalized);
+        }
       }
       setEditMode(false);
       setCodeBookMode(false);
       setDraftRows([]);
-      setDraftCodeBook([]);
+      setDraftTreeCodes([]);
       setCodeBookEditorTab('manual');
       setCodeBookImportText('');
       setCodeBookImportFileName('');
@@ -849,7 +1261,19 @@ export function PortalBudget() {
     } finally {
       setSettingsSaving(false);
     }
-  }, [draftRows, draftCodeBook, saveBudgetPlanRows, saveBudgetCodeBook, editMode, codeBookMode, buildCodeBookRenames, codeBookReplaceMode]);
+  }, [
+    activeTreeCodes,
+    buildCodeBookRenames,
+    budgetTreeV2,
+    codeBookMode,
+    codeBookReplaceMode,
+    draftRows,
+    draftTreeCodes,
+    editMode,
+    saveBudgetCodeBook,
+    saveBudgetPlanRows,
+    saveBudgetTreeV2,
+  ]);
 
   const applyBudgetImport = useCallback(async () => {
     if (!saveBudgetPlanRows || !saveBudgetCodeBook) {
@@ -863,8 +1287,15 @@ export function PortalBudget() {
 
     setBudgetImportApplying(true);
     try {
-      await saveBudgetPlanRows(budgetImportMergePlan.mergedRows);
-      await saveBudgetCodeBook(budgetImportMergedCodeBook);
+      if (budgetTreeV2) {
+        await saveBudgetTreeV2(buildBudgetTreeFromLegacySnapshots(
+          budgetImportMergedCodeBook,
+          budgetImportMergePlan.mergedRows,
+        ));
+      } else {
+        await saveBudgetPlanRows(budgetImportMergePlan.mergedRows);
+        await saveBudgetCodeBook(budgetImportMergedCodeBook);
+      }
       toast.success(
         `예산 ${budgetImportMergePlan.summary.importedCount}건을 가져왔습니다. `
         + `${budgetImportMergePlan.summary.updateCount}건 갱신, `
@@ -882,140 +1313,63 @@ export function PortalBudget() {
   }, [
     budgetImportMergePlan,
     budgetImportMergedCodeBook,
+    budgetTreeV2,
     resetBudgetImport,
     saveBudgetCodeBook,
     saveBudgetPlanRows,
+    saveBudgetTreeV2,
   ]);
 
-  const budgetItems = useMemo(() => {
-    const items: BudgetRow[] = activeCodeBook.flatMap((entry, codeIdx) => (
-      entry.subCodes.map((subCode, subIdx) => {
-        const lookupKey = buildBudgetLabelKey(entry.code, subCode);
-        const plan = planMap.get(lookupKey);
-        const initial = plan?.initialBudget ?? 0;
-        const revised = plan?.revisedBudget ?? 0;
-        const effective = revised > 0 ? revised : initial;
-        const spent = spentMap.get(lookupKey) ?? 0;
-        const balance = effective - spent;
-        const burnRate = effective > 0 ? spent / effective : 0;
-        const codeLabel = formatBudgetCodeLabel(codeIdx, entry.code);
-        const subLabel = formatSubCodeLabel(codeIdx, subIdx, subCode);
-        const groupId = groupIdForEntry(entry.code);
-        return {
-          id: lookupKey,
-          projectId: myProject?.id || '',
-          category: groupId,
-          budgetCode: codeLabel,
-          subCode: subLabel,
-          calcDesc: '',
-          initialBudget: initial,
-          lastYearBudget: 0,
-          comparison: '',
-          revisedAug: revised,
-          revisedOct: 0,
-          planAmount: 0,
-          composition: 0,
-          spent,
-          vatPurchase: 0,
-          burnRate,
-          balance,
-          balanceOct: 0,
-          note: plan?.note || '',
-          rowType: 'ITEM',
-          fixType: 'NONE',
-          groupId,
-          order: 0,
-        } as BudgetRow;
-      })
-    ));
-
-    const totalEffective = items.reduce((sum, row) => {
-      const effective = row.revisedAug > 0 ? row.revisedAug : row.initialBudget;
-      return sum + effective;
-    }, 0);
-
-    return items.map((row) => {
-      const effective = row.revisedAug > 0 ? row.revisedAug : row.initialBudget;
-      return {
-        ...row,
-        composition: totalEffective > 0 ? effective / totalEffective : 0,
-      };
-    });
-  }, [planMap, spentMap, myProject?.id, activeCodeBook]);
-
-  const groups = useMemo(() => {
-    const groupMap: Record<string, { subtotal: BudgetRow; items: BudgetRow[] }> = {};
-    const ungrouped: BudgetRow[] = [];
-    budgetItems.forEach((row) => {
-      if (!row.groupId) { ungrouped.push(row); return; }
-      if (!groupMap[row.groupId]) {
-        groupMap[row.groupId] = {
-          subtotal: {
-            ...row,
-            id: `${row.groupId}-subtotal`,
-            budgetCode: '',
-            subCode: '',
-            rowType: 'SUBTOTAL',
-            fixType: 'NONE',
-            spent: 0,
-            burnRate: 0,
-            balance: 0,
-            initialBudget: 0,
-            revisedAug: 0,
-          } as BudgetRow,
-          items: [],
-        };
-      }
-      groupMap[row.groupId].items.push(row);
-    });
-
-    Object.values(groupMap).forEach((group) => {
-      const initialSum = group.items.reduce((s, r) => s + (r.initialBudget || 0), 0);
-      const revisedSum = group.items.reduce((s, r) => s + (r.revisedAug || 0), 0);
-      const effectiveSum = group.items.reduce((s, r) => s + ((r.revisedAug > 0 ? r.revisedAug : r.initialBudget) || 0), 0);
-      const spentSum = group.items.reduce((s, r) => s + (r.spent || 0), 0);
-      group.subtotal = {
-        ...group.subtotal,
-        initialBudget: initialSum,
-        revisedAug: revisedSum,
-        spent: spentSum,
-        balance: effectiveSum - spentSum,
-        burnRate: effectiveSum > 0 ? spentSum / effectiveSum : 0,
-      };
-    });
-
-    return { groupMap, ungrouped };
-  }, [budgetItems]);
+  const budgetCodeViews = useMemo(
+    () => buildBudgetCodeViews(activeTreeCodes, spentMap),
+    [activeTreeCodes, spentMap],
+  );
 
   const total = useMemo(() => {
-    const initialSum = budgetItems.reduce((s, r) => s + (r.initialBudget || 0), 0);
-    const revisedSum = budgetItems.reduce((s, r) => s + (r.revisedAug || 0), 0);
-    const effectiveSum = budgetItems.reduce((s, r) => s + ((r.revisedAug > 0 ? r.revisedAug : r.initialBudget) || 0), 0);
-    const spentSum = budgetItems.reduce((s, r) => s + (r.spent || 0), 0);
+    const initialSum = budgetCodeViews.reduce((sum, code) => sum + code.initialBudget, 0);
+    const revisedSum = budgetCodeViews.reduce((sum, code) => sum + code.revisedBudget, 0);
+    const effectiveSum = budgetCodeViews.reduce((sum, code) => sum + code.effectiveBudget, 0);
+    const spentSum = budgetCodeViews.reduce((sum, code) => sum + code.spent, 0);
     return {
       initialBudget: initialSum,
-      revisedAug: revisedSum,
+      revisedBudget: revisedSum,
       spent: spentSum,
       balance: effectiveSum - spentSum,
       burnRate: effectiveSum > 0 ? spentSum / effectiveSum : 0,
       effectiveBudget: effectiveSum,
     };
-  }, [budgetItems]);
+  }, [budgetCodeViews]);
 
   const auxRows = useMemo(() => {
     const effectiveTotal = total.effectiveBudget || 0;
-    return Object.entries(groups.groupMap).map(([gid, group]) => {
-      const effective = group.subtotal.revisedAug > 0 ? group.subtotal.revisedAug : group.subtotal.initialBudget;
+    return budgetCodeViews.map((group) => {
+      const effective = group.effectiveBudget;
       return {
-        label: gid || '기타',
+        label: group.budgetCode || '기타',
         amount: effective,
         ratio: effectiveTotal > 0 ? effective / effectiveTotal : 0,
       };
     });
-  }, [groups.groupMap, total.effectiveBudget]);
+  }, [budgetCodeViews, total.effectiveBudget]);
 
-  const getEffectiveBudget = useCallback((row: BudgetRow) => {
-    return row.revisedAug > 0 ? row.revisedAug : row.initialBudget;
+  const updateDraftLeafField = useCallback((
+    rowKey: string,
+    field: keyof Pick<BudgetDraftRow, 'initialBudget' | 'revisedBudget' | 'note'>,
+    value: string,
+  ) => {
+    setDraftRows((prev) => prev.map((row) => (
+      row.rowType === 'leaf' && getLeafRowKey(row) === rowKey ? { ...row, [field]: value } : row
+    )));
+  }, []);
+
+  const updateDraftSubItemField = useCallback((
+    rowKey: string,
+    field: keyof Pick<BudgetDraftRow, 'initialBudget' | 'revisedBudget' | 'note'>,
+    value: string,
+  ) => {
+    setDraftRows((prev) => prev.map((row) => (
+      row.rowType === 'subItem' && getSubItemRowKey(row) === rowKey ? { ...row, [field]: value } : row
+    )));
   }, []);
 
   if (!meta) {
@@ -1400,12 +1754,8 @@ export function PortalBudget() {
                 <TabsContent value="manual" className="mt-3 min-h-0 flex flex-1 flex-col space-y-3 overflow-hidden">
                   <div className="flex items-center justify-between">
                     <div className="space-y-1">
-                      <p className="text-[11px] text-muted-foreground">세목은 드래그해서 순서를 바꿀 수 있습니다.</p>
                       {codeBookReplaceMode ? (
-                        <p className="text-[10px] text-amber-600">가져온 구조 초안이 반영된 상태입니다. 저장하면 현재 비목/세목 구조가 교체됩니다.</p>
-                      ) : null}
-                      {!codeBookValidation.isValid ? (
-                        <p className="text-[10px] text-rose-600">{codeBookValidation.errors[0]}</p>
+                        <p className="text-[10px] text-amber-600">가져온 구조 초안이 반영된 상태입니다. 저장하면 현재 예산 구조가 교체됩니다.</p>
                       ) : null}
                     </div>
                     <Button variant="outline" size="sm" className="h-7 text-[11px] gap-1" onClick={addBudgetCode}>
@@ -1414,7 +1764,7 @@ export function PortalBudget() {
                     </Button>
                   </div>
                   <div className="min-h-0 flex-1 space-y-3 overflow-y-scroll pr-2">
-                    {draftCodeBook.map((entry, idx) => (
+                    {draftTreeCodes.map((entry, idx) => (
                       <div key={`code-${idx}`} className="rounded-md border border-border/60 p-3 space-y-2">
                         <div className="flex items-center gap-2">
                           <span className="text-[10px] text-muted-foreground min-w-[24px]">{idx + 1}</span>
@@ -1435,11 +1785,15 @@ export function PortalBudget() {
                           </Button>
                         </div>
                         <div className="space-y-1">
-                          {entry.subCodes.map((sub, sidx) => (
+                          {entry.subItems.map((subItem, sidx) => {
+                            const showLeafItems = openedLeafEditors.has(`${idx}:${sidx}`)
+                              || subItem.leafItems.some((leaf) => normalizeBudgetLabel(leaf.subSubCode))
+                              || subItem.leafItems.length > 1;
+                            return (
                             <div
                               key={`sub-${idx}-${sidx}`}
                               className={[
-                                'flex items-center gap-2 rounded-md border border-transparent px-1 py-1',
+                                'rounded-md border border-border/50 px-2 py-2',
                                 draggedSubCode?.codeIdx === idx && draggedSubCode.subIdx === sidx ? 'opacity-50' : '',
                                 dropTarget?.codeIdx === idx && dropTarget.subIdx === sidx && dropTarget.position === 'before'
                                   ? 'border-t-primary'
@@ -1454,53 +1808,86 @@ export function PortalBudget() {
                               onDrop={() => handleSubCodeDrop(idx, sidx)}
                               onDragEnd={handleSubCodeDragEnd}
                             >
-                              <button
-                                type="button"
-                                className="flex h-7 w-7 shrink-0 cursor-grab items-center justify-center rounded border border-dashed border-border/80 text-muted-foreground active:cursor-grabbing"
-                                aria-label="세목 순서 드래그"
-                              >
-                                <GripVertical className="h-3.5 w-3.5" />
-                              </button>
-                              <span className="text-[10px] text-muted-foreground min-w-[28px]">{idx + 1}-{sidx + 1}</span>
-                              <input
-                                type="text"
-                                value={sub}
-                                placeholder="세목명"
-                                className="flex-1 bg-transparent outline-none text-[11px] px-2 py-1 border rounded"
-                                onChange={(e) => updateSubCode(idx, sidx, e.target.value)}
-                              />
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-7 w-7 p-0"
-                                onClick={() => reorderSubCode(idx, sidx, 'up')}
-                                disabled={sidx === 0}
-                                aria-label="세목 위로 이동"
-                              >
-                                <ArrowUp className="w-3 h-3" />
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-7 w-7 p-0"
-                                onClick={() => reorderSubCode(idx, sidx, 'down')}
-                                disabled={sidx === entry.subCodes.length - 1}
-                                aria-label="세목 아래로 이동"
-                              >
-                                <ArrowDown className="w-3 h-3" />
-                              </Button>
-                              <Button variant="outline" size="sm" className="h-7 text-[10px]" onClick={() => removeSubCode(idx, sidx)}>
-                                <Trash2 className="w-3 h-3" />
-                              </Button>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  className="flex h-7 w-7 shrink-0 cursor-grab items-center justify-center rounded border border-dashed border-border/80 text-muted-foreground active:cursor-grabbing"
+                                  aria-label="세목 순서 드래그"
+                                >
+                                  <GripVertical className="h-3.5 w-3.5" />
+                                </button>
+                                <span className="text-[10px] text-muted-foreground min-w-[28px]">{idx + 1}-{sidx + 1}</span>
+                                <input
+                                  type="text"
+                                  value={subItem.subCode}
+                                  placeholder="세목명"
+                                  className="flex-1 bg-transparent outline-none text-[11px] px-2 py-1 border rounded"
+                                  onChange={(e) => updateSubCode(idx, sidx, e.target.value)}
+                                />
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-7 w-7 p-0"
+                                  onClick={() => reorderSubCode(idx, sidx, 'up')}
+                                  disabled={sidx === 0}
+                                  aria-label="세목 위로 이동"
+                                >
+                                  <ArrowUp className="w-3 h-3" />
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-7 w-7 p-0"
+                                  onClick={() => reorderSubCode(idx, sidx, 'down')}
+                                  disabled={sidx === entry.subItems.length - 1}
+                                  aria-label="세목 아래로 이동"
+                                >
+                                  <ArrowDown className="w-3 h-3" />
+                                </Button>
+                                <Button variant="outline" size="sm" className="h-7 text-[10px] gap-1" onClick={() => addLeafItem(idx, sidx)}>
+                                  <Plus className="w-3 h-3" />
+                                  세세목
+                                </Button>
+                                <Button variant="outline" size="sm" className="h-7 text-[10px]" onClick={() => removeSubCode(idx, sidx)}>
+                                  <Trash2 className="w-3 h-3" />
+                                </Button>
+                              </div>
+                              {showLeafItems ? (
+                              <div className="mt-2 space-y-1">
+                                {subItem.leafItems.map((leaf, leafIdx) => (
+                                  <div key={`leaf-${idx}-${sidx}-${leafIdx}`} className="flex items-center gap-2 pl-10">
+                                    <span className="min-w-[44px] text-[10px] text-muted-foreground">
+                                      {idx + 1}-{sidx + 1}-{leafIdx + 1}
+                                    </span>
+                                    <input
+                                      type="text"
+                                      value={leaf.subSubCode || ''}
+                                      placeholder="세세목명"
+                                      className="flex-1 bg-transparent outline-none text-[11px] px-2 py-1 border rounded"
+                                      onChange={(e) => updateLeafSubSubCode(idx, sidx, leafIdx, e.target.value)}
+                                    />
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-7 text-[10px]"
+                                      onClick={() => removeLeafItem(idx, sidx, leafIdx)}
+                                    >
+                                      <Trash2 className="w-3 h-3" />
+                                    </Button>
+                                  </div>
+                                ))}
+                              </div>
+                              ) : null}
                             </div>
-                          ))}
-                          {entry.subCodes.length === 0 && (
+                            );
+                          })}
+                          {entry.subItems.length === 0 && (
                             <p className="text-[10px] text-muted-foreground">세목이 없습니다.</p>
                           )}
                         </div>
                       </div>
                     ))}
-                    {draftCodeBook.length === 0 && (
+                    {draftTreeCodes.length === 0 && (
                       <p className="text-[11px] text-muted-foreground">비목을 추가해 주세요.</p>
                     )}
                   </div>
@@ -1726,10 +2113,9 @@ export function PortalBudget() {
 
         {/* ── 그룹별 카드 뷰 (테이블 대체) ── */}
         <div className="space-y-3">
-          {Object.entries(groups.groupMap).map(([gid, group]) => {
+          {budgetCodeViews.map((group) => {
+            const gid = group.key;
             const isCollapsed = collapsedGroups.has(gid);
-            const sub = group.subtotal;
-            const subEffective = getEffectiveBudget(sub);
             return (
               <Card key={gid} className="overflow-hidden">
                 {/* 그룹 헤더 */}
@@ -1739,12 +2125,12 @@ export function PortalBudget() {
                 >
                   {isCollapsed ? <ChevronRight className="w-3.5 h-3.5 text-muted-foreground shrink-0" /> : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground shrink-0" />}
                   <span className="text-[12px] flex-1" style={{ fontWeight: 600 }}>
-                    {gid || '기타'}
+                    {group.budgetCode || '기타'}
                   </span>
                   <div className="flex items-center gap-3 text-[10px]" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                    <span className="text-muted-foreground">예산 <strong className="text-foreground">{fmtShort(subEffective)}</strong></span>
-                    <span className="text-muted-foreground">집행 <strong style={{ color: sub.spent > 0 ? '#e11d48' : undefined }}>{fmtShort(sub.spent)}</strong></span>
-                    <span style={{ fontWeight: 600, color: burnColor(sub.burnRate) }}>{fmtPercent(sub.burnRate)}</span>
+                    <span className="text-muted-foreground">예산 <strong className="text-foreground">{fmtShort(group.effectiveBudget)}</strong></span>
+                    <span className="text-muted-foreground">집행 <strong style={{ color: group.spent > 0 ? '#e11d48' : undefined }}>{fmtShort(group.spent)}</strong></span>
+                    <span style={{ fontWeight: 600, color: burnColor(group.burnRate) }}>{fmtPercent(group.burnRate)}</span>
                   </div>
                 </button>
 
@@ -1752,19 +2138,19 @@ export function PortalBudget() {
                 <div className="px-4 pt-1.5 pb-0.5">
                   <div className="w-full h-1.5 rounded-full bg-muted overflow-hidden">
                     <div className="h-full rounded-full" style={{
-                      width: `${Math.min(sub.burnRate * 100, 100)}%`,
-                      background: burnColor(sub.burnRate),
+                      width: `${Math.min(group.burnRate * 100, 100)}%`,
+                      background: burnColor(group.burnRate),
                     }} />
                   </div>
                 </div>
 
                 {/* 항목 테이블 */}
-                {!isCollapsed && group.items.length > 0 && (
+                {!isCollapsed && group.subItems.length > 0 && (
                   <div className="overflow-x-auto">
                     <table className="w-full text-[11px]">
                       <thead>
                         <tr className="bg-muted/30">
-                          <th className="px-4 py-2 text-left" style={{ fontWeight: 600, minWidth: 100 }}>비목 / 세목</th>
+                          <th className="px-4 py-2 text-left" style={{ fontWeight: 600, minWidth: 140 }}>세목 / 세세목</th>
                           <th className="px-3 py-2 text-right" style={{ fontWeight: 600, minWidth: 90 }}>최초 예산</th>
                           <th className="px-3 py-2 text-right" style={{ fontWeight: 600, minWidth: 90 }}>수정 예산</th>
                           <th className="px-3 py-2 text-right" style={{ fontWeight: 600, minWidth: 90 }}>소진금액</th>
@@ -1774,143 +2160,289 @@ export function PortalBudget() {
                         </tr>
                       </thead>
                       <tbody>
-                        {group.items.map(row => {
-                          const effective = getEffectiveBudget(row);
-                          const hasRevised = row.revisedAug > 0;
-                          const delta = hasRevised ? row.revisedAug - row.initialBudget : 0;
-                          const deltaUp = delta > 0;
-                          const deltaDown = delta < 0;
-                          const rowKey = buildBudgetLabelKey(row.budgetCode, row.subCode);
+                        {group.subItems.map((subItem) => {
+                          const subCollapsed = collapsedSubItems.has(subItem.key);
+                          if (subItem.isSplit) {
+                            const rowKey = subItem.key;
+                            const draft = editMode
+                              ? draftRows.find((row) => row.rowType === 'subItem' && getSubItemRowKey(row) === rowKey)
+                              : null;
+                            const hasRevised = subItem.revisedBudget > 0;
+                            const delta = hasRevised ? subItem.revisedBudget - subItem.initialBudget : 0;
+                            const warningMessages = [
+                              subItem.hasInitialBudgetMismatch
+                                ? `세세목 최초예산 합계 ${fmtKRW(subItem.leafInitialBudgetTotal)}원이 세목 최초예산 ${fmtKRW(subItem.targetInitialBudget)}원과 다릅니다.`
+                                : '',
+                              subItem.hasRevisedBudgetMismatch
+                                ? `세세목 수정예산 합계 ${fmtKRW(subItem.leafRevisedBudgetTotal)}원이 세목 수정예산 ${fmtKRW(subItem.targetRevisedBudget)}원과 다릅니다.`
+                                : '',
+                            ].filter(Boolean);
+                            return (
+                              <Fragment key={subItem.key}>
+                                <tr className="border-t border-border/30 bg-background/70">
+                                    <td className="px-4 py-2.5">
+                                      <button
+                                        type="button"
+                                        className="flex w-full items-center gap-2 text-left"
+                                        onClick={() => toggleSubItem(subItem.key)}
+                                      >
+                                        {subCollapsed ? <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
+                                        <div className="min-w-0">
+                                          <p className="truncate text-[10px]" style={{ fontWeight: 600 }}>{subItem.subCode}</p>
+                                        </div>
+                                      </button>
+                                    </td>
+                                    <td className="px-3 py-2.5 text-right align-top" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                                      {editMode ? (
+                                        <input
+                                          type="text"
+                                          inputMode="numeric"
+                                          value={draft?.initialBudget || ''}
+                                          className="w-full bg-transparent outline-none text-[11px] text-right px-1 py-0.5 border rounded"
+                                          onChange={(e) => updateDraftSubItemField(rowKey, 'initialBudget', formatInputLive(e.target.value))}
+                                        />
+                                      ) : (
+                                        <div>{fmtKRW(subItem.initialBudget)}</div>
+                                      )}
+                                    </td>
+                                    <td className="px-3 py-2.5 text-right align-top" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                                      {editMode ? (
+                                        <input
+                                          type="text"
+                                          inputMode="numeric"
+                                          value={draft?.revisedBudget || ''}
+                                          className="w-full bg-transparent outline-none text-[11px] text-right px-1 py-0.5 border rounded"
+                                          onChange={(e) => updateDraftSubItemField(rowKey, 'revisedBudget', formatInputLive(e.target.value))}
+                                        />
+                                      ) : (
+                                        <div className="flex flex-col items-end leading-tight">
+                                          <div>{fmtKRW(subItem.effectiveBudget)}</div>
+                                          {hasRevised && delta !== 0 ? (
+                                            <div className={`text-[9px] mt-0.5 inline-flex items-center gap-1 ${delta > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                                              {delta > 0 ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
+                                              {delta > 0 ? '증액' : '감액'} {fmtKRW(Math.abs(delta))}
+                                            </div>
+                                          ) : null}
+                                        </div>
+                                      )}
+                                    </td>
+                                    <td className="px-3 py-2.5 text-right" style={{ fontVariantNumeric: 'tabular-nums', color: subItem.spent > 0 ? '#e11d48' : undefined }}>
+                                      {fmtKRW(subItem.spent)}
+                                    </td>
+                                    <td className="px-3 py-2.5 text-right">
+                                      <span className="inline-flex items-center justify-center min-w-[40px] px-1.5 py-0.5 rounded text-[9px]" style={{ fontWeight: 600, color: burnColor(subItem.burnRate), background: `${burnColor(subItem.burnRate)}10` }}>
+                                        {fmtPercent(subItem.burnRate)}
+                                      </span>
+                                    </td>
+                                    <td className="px-3 py-2.5 text-right" style={{ fontVariantNumeric: 'tabular-nums', color: '#059669' }}>
+                                      {fmtKRW(subItem.balance)}
+                                    </td>
+                                    <td className={`px-4 py-2.5 max-w-[180px] ${editMode ? '' : 'hidden lg:table-cell'}`}>
+                                      {editMode ? (
+                                        <input
+                                          type="text"
+                                          value={draft?.note || ''}
+                                          className="w-full bg-transparent outline-none text-[11px] px-2 py-1 border rounded"
+                                          placeholder="특이사항"
+                                          onChange={(e) => updateDraftSubItemField(rowKey, 'note', e.target.value)}
+                                        />
+                                      ) : subItem.note ? (
+                                        <Tooltip>
+                                          <TooltipTrigger>
+                                            <span className="text-muted-foreground truncate block text-[10px]">{subItem.note.slice(0, 40)}{subItem.note.length > 40 ? '...' : ''}</span>
+                                          </TooltipTrigger>
+                                          <TooltipContent className="text-[10px] max-w-[280px]">{subItem.note}</TooltipContent>
+                                        </Tooltip>
+                                      ) : (
+                                        <span className="text-muted-foreground/30">—</span>
+                                      )}
+                                    </td>
+                                  </tr>
+                                {!subCollapsed && warningMessages.length > 0 ? (
+                                  <tr className="border-t border-border/20 bg-rose-50/60">
+                                    <td colSpan={7} className="px-4 py-2 text-[10px] text-rose-600">
+                                      {warningMessages.join(' ')}
+                                    </td>
+                                  </tr>
+                                ) : null}
+                                {!subCollapsed && subItem.leafItems.map((leaf) => {
+                                  const hasRevised = leaf.revisedBudget > 0;
+                                  const delta = hasRevised ? leaf.revisedBudget - leaf.initialBudget : 0;
+                                  const rowKey = leaf.key;
+                                  const draft = editMode
+                                    ? draftRows.find((row) => getLeafRowKey(row) === rowKey)
+                                    : null;
+                                  return (
+                                    <tr
+                                      key={rowKey}
+                                      className={`border-t border-border/30 transition-colors ${editMode ? '' : 'hover:bg-muted/20 cursor-pointer'}`}
+                                      onClick={() => {
+                                        if (!editMode) setSelectedRow(leaf);
+                                      }}
+                                    >
+                                      <td className="px-4 py-2.5">
+                                        <div className="min-w-0 pl-5">
+                                          <p className="truncate" style={{ fontWeight: 500 }}>{leaf.subSubCode || '세세목 미입력'}</p>
+                                        </div>
+                                      </td>
+                                      <td className="px-3 py-2.5 text-right align-top" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                                        {editMode ? (
+                                          <input
+                                            type="text"
+                                            inputMode="numeric"
+                                            value={draft?.initialBudget || ''}
+                                            className="w-full bg-transparent outline-none text-[11px] text-right px-1 py-0.5 border rounded"
+                                            onChange={(e) => updateDraftLeafField(rowKey, 'initialBudget', formatInputLive(e.target.value))}
+                                          />
+                                        ) : (
+                                          <div>{fmtKRW(leaf.initialBudget)}</div>
+                                        )}
+                                      </td>
+                                      <td className="px-3 py-2.5 text-right align-top" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                                        {editMode ? (
+                                          <input
+                                            type="text"
+                                            inputMode="numeric"
+                                            value={draft?.revisedBudget || ''}
+                                            className="w-full bg-transparent outline-none text-[11px] text-right px-1 py-0.5 border rounded"
+                                            onChange={(e) => updateDraftLeafField(rowKey, 'revisedBudget', formatInputLive(e.target.value))}
+                                          />
+                                        ) : (
+                                          <div className="flex flex-col items-end leading-tight">
+                                            <div>{fmtKRW(leaf.effectiveBudget)}</div>
+                                            {hasRevised && delta !== 0 ? (
+                                              <div className={`text-[9px] mt-0.5 inline-flex items-center gap-1 ${delta > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                                                {delta > 0 ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
+                                                {delta > 0 ? '증액' : '감액'} {fmtKRW(Math.abs(delta))}
+                                              </div>
+                                            ) : null}
+                                          </div>
+                                        )}
+                                      </td>
+                                      <td className="px-3 py-2.5 text-right" style={{ fontVariantNumeric: 'tabular-nums', color: leaf.spent > 0 ? '#e11d48' : undefined }}>
+                                        {fmtKRW(leaf.spent)}
+                                      </td>
+                                      <td className="px-3 py-2.5 text-right">
+                                        <span className="inline-flex items-center justify-center min-w-[40px] px-1.5 py-0.5 rounded text-[9px]" style={{ fontWeight: 600, color: burnColor(leaf.burnRate), background: `${burnColor(leaf.burnRate)}10` }}>
+                                          {fmtPercent(leaf.burnRate)}
+                                        </span>
+                                      </td>
+                                      <td className="px-3 py-2.5 text-right" style={{ fontVariantNumeric: 'tabular-nums', color: '#059669' }}>
+                                        {fmtKRW(leaf.balance)}
+                                      </td>
+                                      <td className={`px-4 py-2.5 max-w-[180px] ${editMode ? '' : 'hidden lg:table-cell'}`}>
+                                        {editMode ? (
+                                          <input
+                                            type="text"
+                                            value={draft?.note || ''}
+                                            className="w-full bg-transparent outline-none text-[11px] px-2 py-1 border rounded"
+                                            placeholder="특이사항"
+                                            onChange={(e) => updateDraftLeafField(rowKey, 'note', e.target.value)}
+                                          />
+                                        ) : leaf.note ? (
+                                          <Tooltip>
+                                            <TooltipTrigger>
+                                              <span className="text-muted-foreground truncate block text-[10px]">{leaf.note.slice(0, 40)}{leaf.note.length > 40 ? '...' : ''}</span>
+                                            </TooltipTrigger>
+                                            <TooltipContent className="text-[10px] max-w-[280px]">{leaf.note}</TooltipContent>
+                                          </Tooltip>
+                                        ) : (
+                                          <span className="text-muted-foreground/30">—</span>
+                                        )}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </Fragment>
+                            );
+                          }
+
+                          const leaf = subItem.leafItems[0];
+                          const rowKey = leaf.key;
+                          const hasRevised = leaf.revisedBudget > 0;
+                          const delta = hasRevised ? leaf.revisedBudget - leaf.initialBudget : 0;
                           const draft = editMode
-                            ? draftRows.find((r) => buildBudgetLabelKey(r.budgetCode, r.subCode) === rowKey)
+                            ? draftRows.find((row) => getLeafRowKey(row) === rowKey)
                             : null;
                           return (
-                          <tr
-                            key={row.id}
-                            className={`border-t border-border/30 transition-colors ${editMode ? '' : 'hover:bg-muted/20 cursor-pointer'}`}
-                            onClick={() => {
-                              if (!editMode) setSelectedRow(row);
-                            }}
-                          >
-                            <td className="px-4 py-2.5">
-                              <div className="flex items-center gap-1.5">
+                            <tr
+                              key={rowKey}
+                              className={`border-t border-border/30 transition-colors ${editMode ? '' : 'hover:bg-muted/20 cursor-pointer'}`}
+                              onClick={() => {
+                                if (!editMode) setSelectedRow(leaf);
+                              }}
+                            >
+                              <td className="px-4 py-2.5">
                                 <div className="min-w-0">
-                                  {row.budgetCode && <p className="text-[10px] text-muted-foreground truncate">{row.budgetCode}</p>}
-                                  <p className="truncate" style={{ fontWeight: 500 }}>{row.subCode}</p>
+                                  <p className="truncate text-[10px]" style={{ fontWeight: 500 }}>{subItem.subCode}</p>
                                 </div>
-                                {row.fixType === 'FIXED' && (
+                              </td>
+                              <td className="px-3 py-2.5 text-right align-top" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                                {editMode ? (
+                                  <input
+                                    type="text"
+                                    inputMode="numeric"
+                                    value={draft?.initialBudget || ''}
+                                    className="w-full bg-transparent outline-none text-[11px] text-right px-1 py-0.5 border rounded"
+                                    onChange={(e) => updateDraftLeafField(rowKey, 'initialBudget', formatInputLive(e.target.value))}
+                                  />
+                                ) : (
+                                  <div>{fmtKRW(leaf.initialBudget)}</div>
+                                )}
+                              </td>
+                              <td className="px-3 py-2.5 text-right align-top" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                                {editMode ? (
+                                  <input
+                                    type="text"
+                                    inputMode="numeric"
+                                    value={draft?.revisedBudget || ''}
+                                    className="w-full bg-transparent outline-none text-[11px] text-right px-1 py-0.5 border rounded"
+                                    onChange={(e) => updateDraftLeafField(rowKey, 'revisedBudget', formatInputLive(e.target.value))}
+                                  />
+                                ) : (
+                                  <div className="flex flex-col items-end leading-tight">
+                                    <div>{fmtKRW(leaf.effectiveBudget)}</div>
+                                    {hasRevised && delta !== 0 ? (
+                                      <div className={`text-[9px] mt-0.5 inline-flex items-center gap-1 ${delta > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                                        {delta > 0 ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
+                                        {delta > 0 ? '증액' : '감액'} {fmtKRW(Math.abs(delta))}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                )}
+                              </td>
+                              <td className="px-3 py-2.5 text-right" style={{ fontVariantNumeric: 'tabular-nums', color: leaf.spent > 0 ? '#e11d48' : undefined }}>
+                                {fmtKRW(leaf.spent)}
+                              </td>
+                              <td className="px-3 py-2.5 text-right">
+                                <span className="inline-flex items-center justify-center min-w-[40px] px-1.5 py-0.5 rounded text-[9px]" style={{ fontWeight: 600, color: burnColor(leaf.burnRate), background: `${burnColor(leaf.burnRate)}10` }}>
+                                  {fmtPercent(leaf.burnRate)}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2.5 text-right" style={{ fontVariantNumeric: 'tabular-nums', color: '#059669' }}>
+                                {fmtKRW(leaf.balance)}
+                              </td>
+                              <td className={`px-4 py-2.5 max-w-[180px] ${editMode ? '' : 'hidden lg:table-cell'}`}>
+                                {editMode ? (
+                                  <input
+                                    type="text"
+                                    value={draft?.note || ''}
+                                    className="w-full bg-transparent outline-none text-[11px] px-2 py-1 border rounded"
+                                    placeholder="특이사항"
+                                    onChange={(e) => updateDraftLeafField(rowKey, 'note', e.target.value)}
+                                  />
+                                ) : leaf.note ? (
                                   <Tooltip>
                                     <TooltipTrigger>
-                                      <Lock className="w-2.5 h-2.5 text-blue-500 shrink-0" />
+                                      <span className="text-muted-foreground truncate block text-[10px]">{leaf.note.slice(0, 40)}{leaf.note.length > 40 ? '...' : ''}</span>
                                     </TooltipTrigger>
-                                    <TooltipContent className="text-[10px]">고정 항목</TooltipContent>
+                                    <TooltipContent className="text-[10px] max-w-[280px]">{leaf.note}</TooltipContent>
                                   </Tooltip>
+                                ) : (
+                                  <span className="text-muted-foreground/30">—</span>
                                 )}
-                                {row.fixType === 'ADJUSTABLE' && (
-                                  <Tooltip>
-                                    <TooltipTrigger>
-                                      <SlidersHorizontal className="w-2.5 h-2.5 text-rose-500 shrink-0" />
-                                    </TooltipTrigger>
-                                    <TooltipContent className="text-[10px]">조정 가능</TooltipContent>
-                                  </Tooltip>
-                                )}
-                              </div>
-                            </td>
-                            <td className="px-3 py-2.5 text-right align-top" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                              {editMode ? (
-                                <input
-                                  type="text"
-                                  inputMode="numeric"
-                                  value={draft?.initialBudget || ''}
-                                  className="w-full bg-transparent outline-none text-[11px] text-right px-1 py-0.5 border rounded"
-                                  onChange={(e) => {
-                                    const value = formatInputLive(e.target.value);
-                                    setDraftRows((prev) => prev.map((r) => (
-                                      buildBudgetLabelKey(r.budgetCode, r.subCode) === rowKey
-                                        ? { ...r, initialBudget: value }
-                                        : r
-                                    )));
-                                  }}
-                                />
-                              ) : (
-                                <div>{fmtKRW(row.initialBudget)}</div>
-                              )}
-                            </td>
-                            <td className="px-3 py-2.5 text-right align-top" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                              {editMode ? (
-                                <input
-                                  type="text"
-                                  inputMode="numeric"
-                                  value={draft?.revisedBudget || ''}
-                                  className="w-full bg-transparent outline-none text-[11px] text-right px-1 py-0.5 border rounded"
-                                  onChange={(e) => {
-                                    const value = formatInputLive(e.target.value);
-                                    setDraftRows((prev) => prev.map((r) => (
-                                      buildBudgetLabelKey(r.budgetCode, r.subCode) === rowKey
-                                        ? { ...r, revisedBudget: value }
-                                        : r
-                                    )));
-                                  }}
-                                />
-                              ) : (
-                                <div className="flex flex-col items-end leading-tight">
-                                  <div>{fmtKRW(effective)}</div>
-                                  {hasRevised && delta !== 0 && (
-                                    <div className={`text-[9px] mt-0.5 inline-flex items-center gap-1 ${deltaUp ? 'text-emerald-600' : 'text-rose-600'}`}>
-                                      {deltaUp ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
-                                      {deltaUp ? '증액' : '감액'} {fmtKRW(Math.abs(delta))}
-                                    </div>
-                                  )}
-                                  {hasRevised && delta === 0 && (
-                                    <div className="text-[9px] mt-0.5 text-muted-foreground">유지 0</div>
-                                  )}
-                                </div>
-                              )}
-                            </td>
-                            <td className="px-3 py-2.5 text-right" style={{ fontVariantNumeric: 'tabular-nums', color: row.spent > 0 ? '#e11d48' : undefined }}>
-                              {fmtKRW(row.spent)}
-                            </td>
-                            <td className="px-3 py-2.5 text-right">
-                              <span className="inline-flex items-center justify-center min-w-[40px] px-1.5 py-0.5 rounded text-[9px]"
-                                style={{
-                                  fontWeight: 600,
-                                  color: burnColor(row.burnRate),
-                                  background: `${burnColor(row.burnRate)}10`,
-                                }}>
-                                {fmtPercent(row.burnRate)}
-                              </span>
-                            </td>
-                            <td className="px-3 py-2.5 text-right" style={{ fontVariantNumeric: 'tabular-nums', color: '#059669' }}>
-                              {fmtKRW(row.balance)}
-                            </td>
-                            <td className={`px-4 py-2.5 max-w-[180px] ${editMode ? '' : 'hidden lg:table-cell'}`}>
-                              {editMode ? (
-                                <input
-                                  type="text"
-                                  value={draft?.note || ''}
-                                  className="w-full bg-transparent outline-none text-[11px] px-2 py-1 border rounded"
-                                  placeholder="특이사항"
-                                  onChange={(e) => {
-                                    const value = e.target.value;
-                                    setDraftRows((prev) => prev.map((r) => (
-                                      buildBudgetLabelKey(r.budgetCode, r.subCode) === rowKey
-                                        ? { ...r, note: value }
-                                        : r
-                                    )));
-                                  }}
-                                />
-                              ) : row.note ? (
-                                <Tooltip>
-                                  <TooltipTrigger>
-                                    <span className="text-muted-foreground truncate block text-[10px]">{row.note.slice(0, 40)}{row.note.length > 40 ? '...' : ''}</span>
-                                  </TooltipTrigger>
-                                  <TooltipContent className="text-[10px] max-w-[280px]">{row.note}</TooltipContent>
-                                </Tooltip>
-                              ) : (
-                                <span className="text-muted-foreground/30">—</span>
-                              )}
-                            </td>
-                          </tr>
+                              </td>
+                            </tr>
                           );
                         })}
                       </tbody>
@@ -1921,9 +2453,9 @@ export function PortalBudget() {
                 {/* 소계 풋터 */}
                 <div className="px-4 py-2.5 bg-muted/20 border-t border-border/50 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px]" style={{ fontVariantNumeric: 'tabular-nums' }}>
                   <span className="text-muted-foreground">소계</span>
-                  <span>예산 <strong>{fmtKRW(subEffective)}</strong></span>
-                  <span>집행 <strong style={{ color: sub.spent > 0 ? '#e11d48' : undefined }}>{fmtKRW(sub.spent)}</strong></span>
-                  <span className="ml-auto" style={{ fontWeight: 600, color: '#059669' }}>잔액 {fmtKRW(sub.balance)}</span>
+                  <span>예산 <strong>{fmtKRW(group.effectiveBudget)}</strong></span>
+                  <span>집행 <strong style={{ color: group.spent > 0 ? '#e11d48' : undefined }}>{fmtKRW(group.spent)}</strong></span>
+                  <span className="ml-auto" style={{ fontWeight: 600, color: '#059669' }}>잔액 {fmtKRW(group.balance)}</span>
                 </div>
               </Card>
             );
@@ -1938,19 +2470,19 @@ export function PortalBudget() {
             {selectedRow && (
               <div className="space-y-3">
                 <div className="flex items-center gap-2 mb-2">
-                  <Badge className={`text-[9px] h-4 px-1.5 ${selectedRow.fixType === 'FIXED' ? 'bg-blue-100 text-blue-700' : selectedRow.fixType === 'ADJUSTABLE' ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-600'}`}>
-                    {selectedRow.fixType === 'FIXED' ? '고정' : selectedRow.fixType === 'ADJUSTABLE' ? '조정가능' : '일반'}
+                  <Badge className="text-[9px] h-4 px-1.5 bg-slate-100 text-slate-600">
+                    {selectedRow.subSubCode ? '세세목' : '세목'}
                   </Badge>
-                  {selectedRow.category && <span className="text-[10px] text-muted-foreground">{selectedRow.category}</span>}
+                  <span className="text-[10px] text-muted-foreground">{selectedRow.budgetCode}</span>
                 </div>
 
                 <div className="grid grid-cols-2 gap-2 text-[11px]">
                   {[
                     ['비목', selectedRow.budgetCode || '—'],
                     ['세목', selectedRow.subCode || '—'],
+                    ['세세목', selectedRow.subSubCode || '—'],
                     ['최초 예산', fmtKRW(selectedRow.initialBudget) + '원'],
-                    ['수정 예산', selectedRow.revisedAug > 0 ? fmtKRW(selectedRow.revisedAug) + '원' : '—'],
-                    ['구성비', fmtPercent(selectedRow.composition)],
+                    ['수정 예산', selectedRow.revisedBudget > 0 ? fmtKRW(selectedRow.revisedBudget) + '원' : '—'],
                     ['소진금액', fmtKRW(selectedRow.spent) + '원'],
                     ['소진율', fmtPercent(selectedRow.burnRate)],
                     ['잔액', fmtKRW(selectedRow.balance) + '원'],

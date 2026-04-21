@@ -5,6 +5,7 @@ import { BUDGET_CODE_BOOK } from '../../data/budget-data';
 import type {
   Basis,
   BudgetCodeEntry,
+  BudgetTreeV2,
   Comment,
   ProjectFundInputMode,
   SettlementSheetPolicy,
@@ -34,6 +35,8 @@ import {
   type WeeklyAccountingSheetRowsHydrationReason,
 } from '../../platform/weekly-accounting-state';
 import { resolveWeeklyExpenseAutosavePlan } from '../../platform/weekly-expense-save-policy';
+import { normalizeBudgetLabel } from '../../platform/budget-labels';
+import { findBudgetTreeSubItem } from '../../platform/budget-tree-v2';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import {
@@ -86,6 +89,7 @@ export interface SettlementLedgerProps {
   showSaveStatusButton?: boolean;
   authorOptions?: string[];
   budgetCodeBook?: BudgetCodeEntry[];
+  budgetTreeV2?: BudgetTreeV2 | null;
   hideYearControls?: boolean;
   hideCountBadge?: boolean;
   onSubmitWeek?: (input: {
@@ -158,6 +162,7 @@ export function SettlementLedgerPage({
   showSaveStatusButton = true,
   authorOptions,
   budgetCodeBook,
+  budgetTreeV2,
   hideYearControls = false,
   hideCountBadge = false,
   onSubmitWeek,
@@ -233,6 +238,9 @@ export function SettlementLedgerPage({
   );
   const weekIdx = useMemo(() => SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '해당 주차'), []);
   const dateIdx = useMemo(() => SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '거래일시'), []);
+  const budgetCodeIdx = useMemo(() => SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '비목'), []);
+  const subCodeIdx = useMemo(() => SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '세목'), []);
+  const subSubCodeIdx = useMemo(() => SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '세세목'), []);
 
   // Filter transactions for this project + year
   const projectTxs = useMemo(() => {
@@ -241,6 +249,33 @@ export function SettlementLedgerPage({
       (tx) => tx.projectId === projectId && (!tx.dateTime || tx.dateTime.startsWith(yearStr)),
     );
   }, [allTransactions, projectId, year]);
+
+  const sanitizeBudgetSubSubRows = useCallback((input: ImportRow[]) => {
+    if (subSubCodeIdx < 0) return input;
+    return input.map((row) => {
+      const currentSubSub = normalizeBudgetLabel(row.cells[subSubCodeIdx] || '');
+      if (!currentSubSub) return row;
+      const budgetCode = budgetCodeIdx >= 0 ? normalizeBudgetLabel(row.cells[budgetCodeIdx] || '') : '';
+      const subCode = subCodeIdx >= 0 ? normalizeBudgetLabel(row.cells[subCodeIdx] || '') : '';
+      if (!budgetTreeV2?.codes || !budgetCode || !subCode) {
+        const cells = [...row.cells];
+        cells[subSubCodeIdx] = '';
+        return { ...row, cells };
+      }
+      const subItem = findBudgetTreeSubItem(budgetTreeV2.codes, budgetCode, subCode);
+      const validSubSubs = new Set(
+        (subItem?.leafItems || [])
+          .map((leaf) => normalizeBudgetLabel(leaf.subSubCode))
+          .filter(Boolean),
+      );
+      if (validSubSubs.size === 0 || !validSubSubs.has(currentSubSub)) {
+        const cells = [...row.cells];
+        cells[subSubCodeIdx] = '';
+        return { ...row, cells };
+      }
+      return row;
+    });
+  }, [budgetCodeIdx, budgetTreeV2?.codes, subCodeIdx, subSubCodeIdx]);
 
   useEffect(() => {
     if (importDirty) return;
@@ -609,8 +644,10 @@ export function SettlementLedgerPage({
     setSheetSaving(true);
     setSheetSaveState('saving');
     try {
-      const persistedRows = await onSaveSheetRows(rows);
-      const previewSourceRows = Array.isArray(persistedRows) ? persistedRows : rows;
+      const sanitizedRows = sanitizeBudgetSubSubRows(rows);
+      setImportRows(cloneImportRows(sanitizedRows));
+      const persistedRows = await onSaveSheetRows(sanitizedRows);
+      const previewSourceRows = Array.isArray(persistedRows) ? persistedRows : sanitizedRows;
       pendingSheetRowsEchoSignatureRef.current = serializeWeeklyAccountingImportRowsMaterially(previewSourceRows);
       const payload = onPreviewActualSyncPayload
         ? await onPreviewActualSyncPayload(previewSourceRows, yearWeeks, sheetRows || null)
@@ -634,7 +671,7 @@ export function SettlementLedgerPage({
     } finally {
       setSheetSaving(false);
     }
-  }, [draftCacheKey, onPreviewActualSyncPayload, onSaveSheetRows, sheetRows, updateWeeklyStatusesForPayload, yearWeeks]);
+  }, [cloneImportRows, draftCacheKey, onPreviewActualSyncPayload, onSaveSheetRows, sanitizeBudgetSubSubRows, sheetRows, updateWeeklyStatusesForPayload, yearWeeks]);
 
   const syncImportRowsToCashflow = useCallback(async (
     rows: ImportRow[],
@@ -1067,6 +1104,7 @@ export function SettlementLedgerPage({
             onSaveEvidenceRequiredMap={onSaveEvidenceRequiredMap}
             authorOptions={authorOptions}
             budgetCodeBook={resolvedBudgetBook}
+            budgetTreeV2={budgetTreeV2}
             weekOptions={weekOptions}
             inline
             fullscreen={editorFullscreen}
@@ -1267,6 +1305,7 @@ export function SettlementLedgerPage({
           onSaveEvidenceRequiredMap={onSaveEvidenceRequiredMap}
           authorOptions={authorOptions}
           budgetCodeBook={resolvedBudgetBook}
+          budgetTreeV2={budgetTreeV2}
           weekOptions={weekOptions}
           comments={comments}
           currentUserId={currentUserId}

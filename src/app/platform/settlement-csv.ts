@@ -10,7 +10,7 @@ import type {
 } from '../data/types';
 import type { MonthMondayWeek } from './cashflow-weeks';
 import { findWeekForDate, getYearMondayWeeks } from './cashflow-weeks';
-import { pickValue, parseNumber, parseDate, stableHash, normalizeSpace, normalizeKey } from './csv-utils';
+import { pickExactValue, pickValue, parseNumber, parseDate, stableHash, normalizeSpace, normalizeKey } from './csv-utils';
 import { getCashflowLineLabel, listCashflowLineOptions, parseCashflowLineLabelAlias } from './policies/cashflow-policy';
 
 // ── Cashflow line label ↔ id mapping ──
@@ -538,7 +538,7 @@ export function parseSettlementCsv(
 
     const budgetCategory = pickValue(kv, ['비목', 'budgetCategory']);
     const budgetSubCategory = pickValue(kv, ['세목', 'budgetSubCategory']);
-    const budgetSubSubCategory = pickValue(kv, ['세세목', 'budgetSubSubCategory']);
+    const budgetSubSubCategory = pickExactValue(kv, ['세세목', 'budgetSubSubCategory']);
 
     const cashflowLabelRaw = pickValue(kv, ['cashflow항목', 'cashflowLabel', 'cashflow']);
     const lineId = parseCashflowLineLabel(cashflowLabelRaw);
@@ -816,7 +816,7 @@ export function importRowToTransaction(
 
   const budgetCategory = pickValue(kv, ['비목', 'budgetCategory']);
   const budgetSubCategory = pickValue(kv, ['세목', 'budgetSubCategory']);
-  const budgetSubSubCategory = pickValue(kv, ['세세목', 'budgetSubSubCategory']);
+  const budgetSubSubCategory = pickExactValue(kv, ['세세목', 'budgetSubSubCategory']);
 
   const cashflowLabelRaw = pickValue(kv, ['cashflow항목', 'cashflowLabel', 'cashflow']);
   const lineId = parseCashflowLineLabel(cashflowLabelRaw);

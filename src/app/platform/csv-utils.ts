@@ -99,6 +99,22 @@ export function pickValue(row: Record<string, string>, aliases: string[]): strin
   return '';
 }
 
+/** Exact header match only — used when similar labels like 세목/세세목 must not cross-match. */
+export function pickExactValue(row: Record<string, string>, aliases: string[]): string {
+  const entries = Object.entries(row);
+  for (const alias of aliases) {
+    const key = normalizeKey(alias);
+    for (const [rawKey, rawVal] of entries) {
+      if (!rawVal) continue;
+      const k = normalizeKey(rawKey);
+      if (k === key) {
+        return normalizeSpace(rawVal);
+      }
+    }
+  }
+  return '';
+}
+
 export function parseNumber(raw: string): number | null {
   if (!raw) return null;
   const cleaned = raw.replace(/[,\s원₩]/g, '').replace(/[^0-9.+-]/g, '');

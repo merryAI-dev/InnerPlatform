@@ -19,6 +19,7 @@ export interface SettlementFlowAmountIndexes {
   refundIdx: number;
   budgetCodeIdx?: number;
   subCodeIdx?: number;
+  subSubCodeIdx?: number;
 }
 
 export interface SettlementRowFlowAmounts {
@@ -37,6 +38,7 @@ export interface SettlementFlowSnapshot extends SettlementRowFlowAmounts {
   budgetKey?: string;
   budgetCode?: string;
   subCode?: string;
+  subSubCode?: string;
   cashflowActualLineAmounts: Partial<Record<string, number>>;
   budgetActualAmount: number;
   manualOutflowPending: boolean;
@@ -60,6 +62,7 @@ export function getSettlementFlowAmountIndexes(): SettlementFlowAmountIndexes {
   return {
     budgetCodeIdx: getSettlementColumnIndex('비목'),
     subCodeIdx: getSettlementColumnIndex('세목'),
+    subSubCodeIdx: getSettlementColumnIndex('세세목'),
     cashflowIdx: getSettlementColumnIndex('cashflow항목'),
     bankAmountIdx: getSettlementColumnIndex('통장에 찍힌 입/출금액'),
     expenseAmountIdx: getSettlementColumnIndex('사업비 사용액'),
@@ -95,7 +98,10 @@ export function resolveSettlementFlowSnapshot(
   const subCode = typeof indexes.subCodeIdx === 'number' && indexes.subCodeIdx >= 0
     ? String(row.cells[indexes.subCodeIdx] || '').trim()
     : '';
-  const budgetKey = budgetCode || subCode ? buildBudgetLabelKey(budgetCode, subCode) : '';
+  const subSubCode = typeof indexes.subSubCodeIdx === 'number' && indexes.subSubCodeIdx >= 0
+    ? String(row.cells[indexes.subSubCodeIdx] || '').trim()
+    : '';
+  const budgetKey = budgetCode || subCode || subSubCode ? buildBudgetLabelKey(budgetCode, subCode, subSubCode) : '';
   const reviewRequired = row.reviewStatus === 'pending' || (row.reviewHints?.length || 0) > 0;
   const isInflowLine = Boolean(amounts.lineId && CASHFLOW_IN_LINE_IDS.has(amounts.lineId));
   const manualOutflowPending = isBankImportedExpenseRow(row) && (
@@ -115,6 +121,7 @@ export function resolveSettlementFlowSnapshot(
       ...(budgetKey ? { budgetKey } : {}),
       ...(budgetCode ? { budgetCode } : {}),
       ...(subCode ? { subCode } : {}),
+      ...(subSubCode ? { subSubCode } : {}),
       ...amounts,
       cashflowActualLineAmounts: {},
       budgetActualAmount: 0,
@@ -131,6 +138,7 @@ export function resolveSettlementFlowSnapshot(
       ...(budgetKey ? { budgetKey } : {}),
       ...(budgetCode ? { budgetCode } : {}),
       ...(subCode ? { subCode } : {}),
+      ...(subSubCode ? { subSubCode } : {}),
       ...amounts,
       cashflowActualLineAmounts: {},
       budgetActualAmount: 0,
@@ -183,6 +191,7 @@ export function resolveSettlementFlowSnapshot(
     ...(budgetKey ? { budgetKey } : {}),
     ...(budgetCode ? { budgetCode } : {}),
     ...(subCode ? { subCode } : {}),
+    ...(subSubCode ? { subSubCode } : {}),
     ...amounts,
     cashflowActualLineAmounts,
     budgetActualAmount,
