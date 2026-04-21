@@ -5,8 +5,9 @@ import type {
   MouseEvent as ReactMouseEvent,
 } from 'react';
 import { Check, ExternalLink, GripVertical, Plus, Upload, X } from 'lucide-react';
-import type { BudgetCodeEntry, Transaction, SettlementSheetPolicy } from '../../data/types';
+import type { BudgetCodeEntry, BudgetTreeV2, Transaction, SettlementSheetPolicy } from '../../data/types';
 import { parseNumber } from '../../platform/csv-utils';
+import { findBudgetTreeSubItem } from '../../platform/budget-tree-v2';
 import { isValidDriveUrl, resolveEvidenceChecklist } from '../../platform/evidence-helpers';
 import type { CounterpartySuggestion } from '../../platform/counterparty-normalizer';
 import {
@@ -189,8 +190,10 @@ function ImportEditorRow({
   authorListId,
   authorOptions,
   budgetCodeBook,
+  budgetTreeV2,
   budgetCodeIdx,
   subCodeIdx,
+  subSubCodeIdx,
   evidenceIdx,
   evidenceCompletedIdx,
   evidencePendingIdx,
@@ -232,8 +235,10 @@ function ImportEditorRow({
   authorListId: string;
   authorOptions?: string[];
   budgetCodeBook: BudgetCodeEntry[];
+  budgetTreeV2?: BudgetTreeV2 | null;
   budgetCodeIdx: number;
   subCodeIdx: number;
+  subSubCodeIdx: number;
   evidenceIdx: number;
   evidenceCompletedIdx: number;
   evidencePendingIdx: number;
@@ -277,11 +282,23 @@ function ImportEditorRow({
   );
   const budgetCodeRaw = budgetCodeIdx >= 0 ? row.cells[budgetCodeIdx] : '';
   const budgetCode = normalizeBudgetLabel(String(budgetCodeRaw || ''));
+  const subCodeRaw = subCodeIdx >= 0 ? row.cells[subCodeIdx] : '';
+  const subCode = normalizeBudgetLabel(String(subCodeRaw || ''));
   const isAdjustmentRow = row.entryKind === 'ADJUSTMENT';
   const subCodes = useMemo(() => {
     const entry = budgetCodeBook.find((c) => c.code === budgetCode);
     return entry ? entry.subCodes : [];
   }, [budgetCode, budgetCodeBook]);
+  const subItem = useMemo(
+    () => findBudgetTreeSubItem(budgetTreeV2?.codes, budgetCode, subCode),
+    [budgetTreeV2?.codes, budgetCode, subCode],
+  );
+  const subSubCodeOptions = useMemo(
+    () => (subItem?.leafItems || [])
+      .map((leaf) => normalizeBudgetLabel(leaf.subSubCode))
+      .filter((value): value is string => Boolean(value)),
+    [subItem],
+  );
   const rowLabel = `${rowIdx + 1}행`;
   const driveLinkIdx = useMemo(
     () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '증빙자료 드라이브'),
@@ -586,6 +603,7 @@ function ImportEditorRow({
         const isReadOnly = col.csvHeader === 'No.';
         const isBudgetCode = colIdx === budgetCodeIdx;
         const isSubCode = colIdx === subCodeIdx;
+        const isSubSubCode = colIdx === subSubCodeIdx;
         const isWeek = colIdx === weekIdx;
         const isCashflow = colIdx === cashflowIdx;
         const isAuthor = colIdx === authorIdx;
@@ -694,6 +712,9 @@ function ImportEditorRow({
                             cells[subCodeIdx] = currentSub;
                           }
                         }
+                        if (subSubCodeIdx >= 0) {
+                          cells[subSubCodeIdx] = '';
+                        }
                         if (evidenceIdx >= 0) {
                           const mapped = resolveEvidenceRequiredDesc(evidenceRequiredMap, nextCode, cells[subCodeIdx] || '');
                           if (mapped) cells[evidenceIdx] = mapped;
@@ -715,6 +736,9 @@ function ImportEditorRow({
                           cells[budgetCodeIdx] = budgetSuggestion.budgetCategory;
                           if (subCodeIdx >= 0 && budgetSuggestion.budgetSubCategory) {
                             cells[subCodeIdx] = budgetSuggestion.budgetSubCategory;
+                          }
+                          if (subSubCodeIdx >= 0) {
+                            cells[subSubCodeIdx] = '';
                           }
                           if (evidenceIdx >= 0) {
                             const mapped = resolveEvidenceRequiredDesc(evidenceRequiredMap, budgetSuggestion.budgetCategory, budgetSuggestion.budgetSubCategory);
@@ -751,6 +775,7 @@ function ImportEditorRow({
                           const cells = [...prev.cells];
                           if (budgetCodeIdx >= 0) cells[budgetCodeIdx] = parentCode;
                           if (subCodeIdx >= 0) cells[subCodeIdx] = nextSub;
+                          if (subSubCodeIdx >= 0) cells[subSubCodeIdx] = '';
                           if (evidenceIdx >= 0) {
                             const mapped = resolveEvidenceRequiredDesc(evidenceRequiredMap, parentCode, nextSub);
                             if (mapped) cells[evidenceIdx] = mapped;
@@ -777,6 +802,7 @@ function ImportEditorRow({
                           if (subCodeIdx < 0) return prev;
                           const cells = [...prev.cells];
                           cells[subCodeIdx] = nextSub;
+                          if (subSubCodeIdx >= 0) cells[subSubCodeIdx] = '';
                           if (evidenceIdx >= 0) {
                             const mapped = resolveEvidenceRequiredDesc(evidenceRequiredMap, budgetCode, nextSub);
                             if (mapped) cells[evidenceIdx] = mapped;
@@ -786,6 +812,24 @@ function ImportEditorRow({
                       }}
                     />
                   )}
+                </div>
+              ) : isSubSubCode ? (
+                <div className="pr-6">
+                  <SelectCell
+                    value={normalizeBudgetLabel(String(row.cells[colIdx] || ''))}
+                    options={subSubCodeOptions.map((value, idx) => ({
+                      value,
+                      label: `${idx + 1}. ${value}`,
+                    }))}
+                    onFocus={() => onCellFocus(rowIdx, colIdx)}
+                    rowIdx={rowIdx}
+                    cellColIdx={colIdx}
+                    disabled={!budgetCode || !subCode || subSubCodeOptions.length === 0}
+                    isOpen={openSelect?.rowIdx === rowIdx && openSelect?.colIdx === colIdx}
+                    onOpen={() => onOpenSelect(rowIdx, colIdx)}
+                    onClose={onCloseSelect}
+                    onChange={(nextSubSub) => onCellChange(colIdx, nextSubSub)}
+                  />
                 </div>
               ) : isAuthor && hasAuthorOptions ? (
                 <div className="pr-6">
@@ -1016,8 +1060,10 @@ export const MemoizedImportEditorRow = memo(ImportEditorRow, (prev, next) => {
     && prev.authorListId === next.authorListId
     && prev.authorOptions === next.authorOptions
     && prev.budgetCodeBook === next.budgetCodeBook
+    && prev.budgetTreeV2 === next.budgetTreeV2
     && prev.budgetCodeIdx === next.budgetCodeIdx
     && prev.subCodeIdx === next.subCodeIdx
+    && prev.subSubCodeIdx === next.subSubCodeIdx
     && prev.evidenceIdx === next.evidenceIdx
     && prev.evidenceCompletedIdx === next.evidenceCompletedIdx
     && prev.evidencePendingIdx === next.evidencePendingIdx

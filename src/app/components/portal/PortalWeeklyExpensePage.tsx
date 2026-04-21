@@ -105,6 +105,7 @@ export function PortalWeeklyExpensePage() {
     participationEntries,
     budgetPlanRows,
     budgetCodeBook,
+    budgetTreeV2,
     saveBankStatementRows,
     saveBudgetPlanRows,
     saveBudgetCodeBook,
@@ -206,22 +207,36 @@ export function PortalWeeklyExpensePage() {
       subCodesByCode.get(code)!.add(sub);
     };
 
-    budgetCodeBook.forEach((entry) => {
-      const code = normalizeBudgetLabel(entry.code);
+    const pushCode = (rawCode?: string | null) => {
+      const code = normalizeBudgetLabel(rawCode || '');
       if (!code) return;
       if (!subCodesByCode.has(code)) {
         subCodesByCode.set(code, new Set());
         orderedCodes.push(code);
       }
-      entry.subCodes.forEach((subCode) => pushEntry(code, subCode));
-    });
-    (budgetPlanRows || []).forEach((row) => pushEntry(row.budgetCode, row.subCode));
+      return code;
+    };
+
+    if (budgetTreeV2?.codes && budgetTreeV2.codes.length > 0) {
+      budgetTreeV2.codes.forEach((entry) => {
+        const code = pushCode(entry.code);
+        if (!code) return;
+        entry.subItems.forEach((subItem) => pushEntry(code, subItem.subCode));
+      });
+    } else {
+      budgetCodeBook.forEach((entry) => {
+        const code = pushCode(entry.code);
+        if (!code) return;
+        entry.subCodes.forEach((subCode) => pushEntry(code, subCode));
+      });
+      (budgetPlanRows || []).forEach((row) => pushEntry(row.budgetCode, row.subCode));
+    }
 
     return orderedCodes.map((code) => ({
       code,
       subCodes: Array.from(subCodesByCode.get(code) || []),
     })).filter((entry) => entry.subCodes.length > 0);
-  }, [budgetCodeBook, budgetPlanRows]);
+  }, [budgetCodeBook, budgetPlanRows, budgetTreeV2?.codes]);
 
   const authorOptions = useMemo(() => {
     const names = new Set<string>();
@@ -925,6 +940,7 @@ export function PortalWeeklyExpensePage() {
           onUpdateTransaction={handleUpdateTransaction}
           authorOptions={authorOptions}
           budgetCodeBook={effectiveBudgetCodeBook}
+          budgetTreeV2={budgetTreeV2}
           hideYearControls
           hideCountBadge
           saveMode={weeklyExpenseSavePolicy.mode}

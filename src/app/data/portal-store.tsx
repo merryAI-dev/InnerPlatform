@@ -20,6 +20,8 @@ import type {
   BudgetPlanRow,
   BudgetCodeEntry,
   BudgetCodeRename,
+  BudgetTreeCode,
+  BudgetTreeV2,
   Comment,
   Ledger,
   ProjectSheetSourceSnapshot,
@@ -93,6 +95,7 @@ import { readDevAuthHarnessConfig } from '../platform/dev-harness';
 import { reportError } from '../platform/observability';
 import { validateBudgetCodeBookDraft } from '../platform/budget-code-book-validation';
 import { buildBudgetLabelKey, normalizeBudgetLabel } from '../platform/budget-labels';
+import { buildLegacyBudgetSnapshotsFromTree, normalizeBudgetTreeCodes } from '../platform/budget-tree-v2';
 import { useFirestoreAccessPolicy } from './firestore-realtime-mode';
 import {
   resolveActivePortalProjectId,
@@ -422,6 +425,7 @@ interface PortalState {
   bankStatementRows: BankStatementSheet | null;
   budgetPlanRows: BudgetPlanRow[] | null;
   budgetCodeBook: BudgetCodeEntry[];
+  budgetTreeV2: BudgetTreeV2 | null;
   weeklySubmissionStatuses: WeeklySubmissionStatus[];
 }
 
@@ -462,6 +466,7 @@ interface PortalActions {
   saveBankStatementRows: (sheet: BankStatementSheet) => Promise<void>;
   saveBudgetPlanRows: (rows: BudgetPlanRow[]) => Promise<void>;
   saveBudgetCodeBook: (rows: BudgetCodeEntry[], renames?: BudgetCodeRename[]) => Promise<void>;
+  saveBudgetTreeV2: (codes: BudgetTreeCode[]) => Promise<void>;
   upsertWeeklySubmissionStatus: (input: {
     projectId: string;
     yearMonth: string;
@@ -631,6 +636,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   const [budgetCodeBook, setBudgetCodeBook] = useState<BudgetCodeEntry[]>(
     normalizeBudgetCodeBook(BUDGET_CODE_BOOK as unknown as BudgetCodeEntry[]),
   );
+  const [budgetTreeV2, setBudgetTreeV2] = useState<BudgetTreeV2 | null>(null);
   const [weeklySubmissionStatuses, setWeeklySubmissionStatuses] = useState<WeeklySubmissionStatus[]>([]);
   const [projectCatalogLoading, setProjectCatalogLoading] = useState(false);
   const [projectScopeLoading, setProjectScopeLoading] = useState(false);
@@ -1270,6 +1276,10 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       db,
       `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/budget_code_book/default`,
     );
+    const budgetTreeV2Ref = doc(
+      db,
+      `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/budget_tree_v2/default`,
+    );
     const handleTransactionResult = (docs: Array<{ data(): unknown }>) => {
       ifActive(() => {
         const list = docs
@@ -1542,6 +1552,26 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       console.error('[PortalStore] budget code book listen error:', err);
       ifActive(() => setBudgetCodeBook(normalizeBudgetCodeBook(BUDGET_CODE_BOOK as unknown as BudgetCodeEntry[])));
     };
+    const handleBudgetTreeV2Result = (snap: { exists(): boolean; data(): unknown }) => {
+      ifActive(() => {
+        if (!snap.exists()) {
+          setBudgetTreeV2(null);
+          return;
+        }
+        const data = snap.data() as Partial<BudgetTreeV2> & { codes?: BudgetTreeCode[] };
+        setBudgetTreeV2({
+          version: 2,
+          projectId: String(data.projectId || currentProjectId || ''),
+          codes: normalizeBudgetTreeCodes(data.codes),
+          ...(data.updatedAt ? { updatedAt: String(data.updatedAt) } : {}),
+          ...(data.updatedBy ? { updatedBy: String(data.updatedBy) } : {}),
+        });
+      });
+    };
+    const handleBudgetTreeV2Error = (err: unknown) => {
+      console.error('[PortalStore] budget tree v2 listen error:', err);
+      ifActive(() => setBudgetTreeV2(null));
+    };
 
     if (livePortalMode) {
       projectScopeUnsubsRef.current.push(onSnapshot(ledgerQuery, (snap) => handleLedgerResult(snap.docs), handleLedgerError));
@@ -1563,6 +1593,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       projectScopeUnsubsRef.current.push(onSnapshot(bankStatementRef, handleBankStatementResult, handleBankStatementError));
       projectScopeUnsubsRef.current.push(onSnapshot(budgetPlanRef, handleBudgetPlanResult, handleBudgetPlanError));
       projectScopeUnsubsRef.current.push(onSnapshot(budgetCodeBookRef, handleBudgetCodeBookResult, handleBudgetCodeBookError));
+      projectScopeUnsubsRef.current.push(onSnapshot(budgetTreeV2Ref, handleBudgetTreeV2Result, handleBudgetTreeV2Error));
     } else {
       getDocs(ledgerQuery).then((snap) => handleLedgerResult(snap.docs)).catch(handleLedgerError);
       getDocs(expenseQuery).then((snap) => handleExpenseResult(snap.docs)).catch(handleExpenseError);
@@ -1579,6 +1610,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       getDoc(bankStatementRef).then(handleBankStatementResult).catch(handleBankStatementError);
       getDoc(budgetPlanRef).then(handleBudgetPlanResult).catch(handleBudgetPlanError);
       getDoc(budgetCodeBookRef).then(handleBudgetCodeBookResult).catch(handleBudgetCodeBookError);
+      getDoc(budgetTreeV2Ref).then(handleBudgetTreeV2Result).catch(handleBudgetTreeV2Error);
     }
 
     return () => {
@@ -2165,6 +2197,42 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       }
     }
   }, [currentProjectId, db, orgId, portalUser?.name, authUser?.name, activeExpenseSheetId, isDevHarnessUser]);
+
+  const saveBudgetTreeV2 = useCallback(async (codes: BudgetTreeCode[]) => {
+    const now = new Date().toISOString();
+    const normalizedCodes = normalizeBudgetTreeCodes(codes);
+    const derivedLegacy = buildLegacyBudgetSnapshotsFromTree(normalizedCodes);
+    const nextTree: BudgetTreeV2 = {
+      version: 2,
+      projectId: currentProjectId || '',
+      codes: normalizedCodes,
+      updatedAt: now,
+      updatedBy: portalUser?.name || authUser?.name || '',
+    };
+    if (isDevHarnessUser || !db || !currentProjectId) {
+      setBudgetCodeBook(derivedLegacy.codeBook);
+      setBudgetTreeV2(nextTree);
+      return;
+    }
+    const projectBasePath = `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}`;
+    await setDoc(
+      doc(db, `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/budget_tree_v2/default`),
+      withTenantScope(orgId, nextTree),
+      { merge: true },
+    );
+    await setDoc(
+      doc(db, `${projectBasePath}/budget_code_book/default`),
+      withTenantScope(orgId, {
+        projectId: currentProjectId,
+        codes: derivedLegacy.codeBook,
+        updatedAt: now,
+        updatedBy: portalUser?.name || authUser?.name || '',
+      }),
+      { merge: true },
+    );
+    setBudgetCodeBook(derivedLegacy.codeBook);
+    setBudgetTreeV2(nextTree);
+  }, [authUser?.name, currentProjectId, db, isDevHarnessUser, orgId, portalUser?.name]);
 
   const upsertWeeklySubmissionStatus = useCallback(async (input: {
     projectId: string;
@@ -3115,6 +3183,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     bankStatementRows,
     budgetPlanRows,
     budgetCodeBook,
+    budgetTreeV2,
     weeklySubmissionStatuses,
     register,
     setSessionActiveProject,
@@ -3147,6 +3216,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     saveBankStatementRows,
     saveBudgetPlanRows,
     saveBudgetCodeBook,
+    saveBudgetTreeV2,
     upsertWeeklySubmissionStatus,
     createProjectRequest,
   };

@@ -8,6 +8,15 @@ export function normalizeBudgetLabel(value: unknown): string {
     .trim();
 }
 
-export function buildBudgetLabelKey(budgetCode: unknown, subCode: unknown): string {
-  return `${normalizeBudgetLabel(budgetCode)}|${normalizeBudgetLabel(subCode)}`;
+export function buildBudgetLabelKey(
+  budgetCode: unknown,
+  subCode: unknown,
+  subSubCode?: unknown,
+): string {
+  const normalizedBudgetCode = normalizeBudgetLabel(budgetCode);
+  const normalizedSubCode = normalizeBudgetLabel(subCode);
+  const normalizedSubSubCode = normalizeBudgetLabel(subSubCode);
+  return normalizedSubSubCode
+    ? `${normalizedBudgetCode}|${normalizedSubCode}|${normalizedSubSubCode}`
+    : `${normalizedBudgetCode}|${normalizedSubCode}`;
 }
