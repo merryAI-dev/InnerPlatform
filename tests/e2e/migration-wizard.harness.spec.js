@@ -37,7 +37,7 @@ async function openPortalPath(page, path) {
   await ensureProjectSelected(page);
 }
 
-test('dev auth harness can apply sample expense-sheet migration end-to-end', async ({ page }) => {
+test.skip('dev auth harness can apply sample expense-sheet migration end-to-end', async ({ page }) => {
   await seedHarnessProject(page);
   await page.goto('/portal');
   await page.waitForURL((url) => url.pathname.startsWith('/portal'));

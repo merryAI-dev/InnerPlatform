@@ -105,14 +105,14 @@ test('bank upload flows directly into weekly expenses and survives reupload with
   await expect(page.getByRole('button', { name: '증빙 이어서 하기' })).toHaveCount(0);
   await page.getByRole('button', { name: '사업비 입력(주간)으로 이어가기' }).click();
   await expect(page.getByRole('heading', { name: '사업비 입력(주간)' })).toBeVisible();
-  await expect(page.getByText('거래: 2건')).toBeVisible();
+  await expect(page.getByText(/거래[: ]+2건/)).toBeVisible();
   await expect(page.locator('input[value="코레일"]').first()).toBeVisible();
   await expect(page.locator('input[value="카카오T"]').first()).toBeVisible();
   await expect(page.getByText('신규 거래 처리 Queue')).toHaveCount(0);
 
   await uploadBankSheet(page, [...originalRows].reverse());
   await page.getByRole('button', { name: '사업비 입력(주간)으로 이어가기' }).click();
-  await expect(page.getByText('거래: 2건')).toBeVisible();
+  await expect(page.getByText(/거래[: ]+2건/)).toBeVisible();
   await expect(page.locator('input[value="코레일"]').first()).toBeVisible();
   await expect(page.locator('input[value="카카오T"]').first()).toBeVisible();
 });

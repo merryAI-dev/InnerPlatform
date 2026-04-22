@@ -11,6 +11,7 @@ import { BUDGET_CODE_BOOK } from '../../data/budget-data';
 import type {
   Basis,
   BudgetCodeEntry,
+  BudgetTreeV2,
   Comment,
   Transaction,
   ProjectFundInputMode,
@@ -144,6 +145,7 @@ export function ImportEditor({
   onSaveEvidenceRequiredMap,
   authorOptions,
   budgetCodeBook,
+  budgetTreeV2,
   weekOptions,
   inline = false,
   fullscreen = false,
@@ -176,6 +178,7 @@ export function ImportEditor({
   onSaveEvidenceRequiredMap?: (map: Record<string, string>) => void | Promise<void>;
   authorOptions?: string[];
   budgetCodeBook?: BudgetCodeEntry[];
+  budgetTreeV2?: BudgetTreeV2 | null;
   weekOptions: { value: string; label: string }[];
   inline?: boolean;
   fullscreen?: boolean;
@@ -273,6 +276,10 @@ export function ImportEditor({
   );
   const subCodeIdx = useMemo(
     () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '세목'),
+    [],
+  );
+  const subSubCodeIdx = useMemo(
+    () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '세세목'),
     [],
   );
   const weekIdx = useMemo(
@@ -1042,7 +1049,7 @@ export function ImportEditor({
         if (colIdx === budgetCodeIdx) {
           return normalizeBudgetLabel(trimmed);
         }
-        if (colIdx === subCodeIdx) {
+        if (colIdx === subCodeIdx || colIdx === subSubCodeIdx) {
           return normalizeBudgetLabel(trimmed);
         }
         return trimmed;
@@ -1061,7 +1068,7 @@ export function ImportEditor({
           if (!fillAll && (sr >= gridRows || sc >= gridCols)) continue;
           const raw = (fillAll ? (grid[0]?.[0] ?? '') : (grid[sr]?.[sc] ?? '')).trim();
           const colDef = SETTLEMENT_COLUMNS[colIdx];
-          if ([weekIdx, cashflowIdx, methodIdx, budgetCodeIdx, subCodeIdx].includes(colIdx)) {
+          if ([weekIdx, cashflowIdx, methodIdx, budgetCodeIdx, subCodeIdx, subSubCodeIdx].includes(colIdx)) {
             cells[colIdx] = normalizeSelectValue(colIdx, raw, cells);
           } else {
             cells[colIdx] = colDef?.format === 'number' ? formatNumberCell(raw) : raw;
@@ -1908,8 +1915,10 @@ export function ImportEditor({
                 authorListId={authorListId}
                 authorOptions={authorOptions}
                 budgetCodeBook={resolvedBudgetBook}
+                budgetTreeV2={budgetTreeV2}
                 budgetCodeIdx={budgetCodeIdx}
                 subCodeIdx={subCodeIdx}
+                subSubCodeIdx={subSubCodeIdx}
                 evidenceIdx={evidenceIdx}
                 evidenceCompletedIdx={evidenceCompletedIdx}
                 evidencePendingIdx={evidencePendingIdx}

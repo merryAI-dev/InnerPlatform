@@ -43,25 +43,57 @@ async function openPortalPath(page: import('@playwright/test').Page, path: strin
   await ensureProjectSelected(page);
 }
 
+function buildBankCsv(rows: Array<{
+  account: string;
+  dateTime: string;
+  memo: string;
+  counterparty: string;
+  withdrawal?: string;
+  deposit?: string;
+  balance: string;
+}>): Buffer {
+  const header = ['통장번호', '거래일시', '적요', '의뢰인/수취인', '출금금액', '입금금액', '잔액'];
+  const lines = rows.map((row) => [
+    row.account,
+    row.dateTime,
+    row.memo,
+    row.counterparty,
+    row.withdrawal || '',
+    row.deposit || '',
+    row.balance,
+  ]);
+  return Buffer.from([header, ...lines].map((line) => line.join(',')).join('\n'));
+}
+
 async function applySampleExpenseSheet(page: import('@playwright/test').Page) {
-  await openPortalPath(page, '/portal/weekly-expenses');
+  await openPortalPath(page, '/portal/bank-statements');
+  await expect(page.getByRole('heading', { name: '통장내역' })).toBeVisible();
+  await page.locator('input[type="file"]').setInputFiles({
+    name: 'bank-statement.csv',
+    mimeType: 'text/csv',
+    buffer: buildBankCsv([
+      {
+        account: '111-222-333',
+        dateTime: '2026-04-07 10:00',
+        memo: 'KTX 예매',
+        counterparty: 'KTX',
+        withdrawal: '15000',
+        balance: '500000',
+      },
+      {
+        account: '111-222-333',
+        dateTime: '2026-04-07 13:30',
+        memo: '회의비',
+        counterparty: '카페 메리',
+        withdrawal: '22000',
+        balance: '478000',
+      },
+    ]),
+  });
+  await page.getByRole('button', { name: '저장' }).click();
+  await expect(page.getByRole('button', { name: '사업비 입력(주간)으로 이어가기' })).toBeVisible();
+  await page.getByRole('button', { name: '사업비 입력(주간)으로 이어가기' }).click();
   await expect(page.getByRole('heading', { name: '사업비 입력(주간)' })).toBeVisible();
-
-  await page.getByRole('button', { name: 'Migration Wizard' }).click();
-  await expect(page.getByText('Google Sheets Migration Wizard')).toBeVisible();
-
-  await page.getByPlaceholder(/docs\.google\.com\/spreadsheets/).fill('sample://migration');
-  await page.getByRole('button', { name: '워크북 스캔 시작' }).click();
-  await expect(page.getByText('개발용 사업비 관리 시트 샘플').first()).toBeVisible();
-  await page.getByRole('button', { name: /사용내역\(통장내역기준취소내역,불인정포함\)/ }).click();
-
-  await expect(page.getByRole('cell', { name: 'KTX' }).first()).toBeVisible();
-  await expect(page.getByRole('cell', { name: '카페 메리' }).first()).toBeVisible();
-
-  await page.getByRole('button', { name: /^다음$/ }).click();
-  await page.getByRole('button', { name: /기본 탭에 안전 반영/ }).click();
-  await page.keyboard.press('Escape');
-  await expect(page.getByRole('dialog', { name: 'Google Sheets Migration Wizard' })).toBeHidden();
 }
 
 async function expectSampleRowsVisible(page: import('@playwright/test').Page) {
@@ -70,7 +102,7 @@ async function expectSampleRowsVisible(page: import('@playwright/test').Page) {
   await expect(page.getByText('예기치 못한 오류가 발생했습니다')).toHaveCount(0);
 }
 
-test('settlement product completeness: wizard apply survives reload and restores editable rows', async ({ page }) => {
+test('settlement product completeness: imported rows survive reload and restore editable cells', async ({ page }) => {
   await loginAsPm(page);
   await applySampleExpenseSheet(page);
 
@@ -81,7 +113,7 @@ test('settlement product completeness: wizard apply survives reload and restores
   await expectSampleRowsVisible(page);
 });
 
-test('settlement product completeness: PM can continue to weekly cashflow after wizard apply', async ({ page }) => {
+test('settlement product completeness: PM can continue to weekly cashflow after import apply', async ({ page }) => {
   await loginAsPm(page);
   await applySampleExpenseSheet(page);
 

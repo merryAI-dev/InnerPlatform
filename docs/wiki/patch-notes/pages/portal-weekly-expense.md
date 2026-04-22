@@ -3,7 +3,7 @@
 - route: `/portal/weekly-expenses`
 - primary users: PM, 실무 입력 담당자
 - status: active
-- last updated: 2026-04-15
+- last updated: 2026-04-21
 
 ## Purpose
 
@@ -27,10 +27,12 @@
 - [x] overwrite/backspace 입력 가능
 - [x] 통장내역 저장본에서 queue-first wizard 없이 바로 주간 입력으로 이어가기 가능
 - [x] PM 포털 safe fetch 모드에서도 주간 입력 화면 부팅 가능
+- [x] `v2` 프로젝트에서 세세목 dropdown과 tree 기반 2단 예산 목록 사용 가능
 - [ ] 입력 보조 드롭다운/팝오버 잘림 이슈 완전 해소 확인 필요
 
 ## Recent Changes
 
+- [2026-04-21] `v2` 프로젝트에서는 사업비 입력이 `budget_tree_v2` 기준 세세목 dropdown을 쓰고, 2단 목록도 tree 파생값을 우선 사용하도록 정리했다.
 - [2026-04-14] 포털 session active project 전환과 함께 현재 사업 기준 입력 상태 요약과 진행 step strip을 안정적으로 다시 연결했다.
 - [2026-04-15] 통장내역 저장 직후 신규 은행 행이 현재 주간 사업비 탭에 바로 나타나도록 연결했다. 별도 Queue나 triage wizard 없이 이 화면에서 바로 편집을 이어간다.
 - [2026-04-15] PM 역할에서는 portal store가 주요 운영 데이터를 realtime listen 대신 safe fetch로 초기 로딩해, 포털 부팅 중 반복 Listen 400이 사업비 입력 화면까지 흔드는 구조를 줄였다.

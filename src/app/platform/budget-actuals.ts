@@ -7,7 +7,10 @@ import {
   type SettlementFlowSnapshot,
 } from './settlement-flow-amounts';
 
-type SettlementBudgetActualSnapshot = Pick<SettlementFlowSnapshot, 'budgetKey' | 'budgetCode' | 'subCode' | 'budgetActualAmount'>;
+type SettlementBudgetActualSnapshot = Pick<
+  SettlementFlowSnapshot,
+  'budgetKey' | 'budgetCode' | 'subCode' | 'subSubCode' | 'budgetActualAmount'
+>;
 
 export function aggregateBudgetActualsFromSettlementFlowSnapshots(
   snapshots: Iterable<SettlementBudgetActualSnapshot> | null | undefined,
@@ -16,7 +19,11 @@ export function aggregateBudgetActualsFromSettlementFlowSnapshots(
   if (!snapshots) return result;
 
   for (const snapshot of snapshots) {
-    const key = snapshot.budgetKey || buildBudgetLabelKey(snapshot.budgetCode || '', snapshot.subCode || '');
+    const key = snapshot.budgetKey || buildBudgetLabelKey(
+      snapshot.budgetCode || '',
+      snapshot.subCode || '',
+      snapshot.subSubCode || '',
+    );
     if (key === '|') continue;
     if (snapshot.budgetActualAmount === 0) continue;
     result.set(key, (result.get(key) || 0) + snapshot.budgetActualAmount);

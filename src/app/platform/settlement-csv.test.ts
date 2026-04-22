@@ -423,9 +423,7 @@ describe('importRowToTransaction', () => {
     expect(tx.direction).toBe('OUT');
     expect(tx.budgetCategory).toBe('회의비');
     expect(tx.budgetSubCategory).toBe('다과비');
-    // Note: pickValue fuzzy-matches '세목' inside '세세목', so budgetSubSubCategory
-    // picks up the 세목 value when both are present. This is expected fuzzy behavior.
-    expect(tx.budgetSubSubCategory).toBe('다과비');
+    expect(tx.budgetSubSubCategory).toBeUndefined();
     expect(tx.counterparty).toBe('카페 메리');
     expect(tx.memo).toBe('간식 구매');
     expect(tx.amounts.bankAmount).toBe(33000);
