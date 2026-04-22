@@ -916,6 +916,9 @@ export function PortalBudget() {
   }, [openedLeafEditors]);
 
   const removeLeafItem = useCallback((idx: number, subIdx: number, leafIdx: number) => {
+    const editorKey = `${idx}:${subIdx}`;
+    let shouldCloseEditor = false;
+    let shouldKeepEditorOpen = false;
     setDraftTreeCodes((prev) => prev.map((entry, entryIdx) => {
       if (entryIdx !== idx) return entry;
       return {
@@ -923,6 +926,7 @@ export function PortalBudget() {
         subItems: entry.subItems.map((subItem, currentSubIdx) => {
           if (currentSubIdx !== subIdx) return subItem;
           if (subItem.leafItems.length <= 1) {
+            shouldCloseEditor = true;
             return {
               ...subItem,
               leafItems: [{
@@ -934,7 +938,8 @@ export function PortalBudget() {
           }
           const nextLeafItems = subItem.leafItems.filter((_, currentLeafIdx) => currentLeafIdx !== leafIdx);
           const hasNamedLeaf = nextLeafItems.some((leaf) => normalizeBudgetLabel(leaf.subSubCode));
-          if (!hasNamedLeaf) {
+          if (!hasNamedLeaf && nextLeafItems.length === 0) {
+            shouldCloseEditor = true;
             return {
               ...subItem,
               leafItems: [{
@@ -944,6 +949,7 @@ export function PortalBudget() {
               }],
             };
           }
+          shouldKeepEditorOpen = true;
           return {
             ...subItem,
             leafItems: nextLeafItems,
@@ -951,6 +957,21 @@ export function PortalBudget() {
         }),
       };
     }));
+    if (shouldCloseEditor) {
+      setOpenedLeafEditors((prev) => {
+        if (!prev.has(editorKey)) return prev;
+        const next = new Set(prev);
+        next.delete(editorKey);
+        return next;
+      });
+    } else if (shouldKeepEditorOpen) {
+      setOpenedLeafEditors((prev) => {
+        if (prev.has(editorKey)) return prev;
+        const next = new Set(prev);
+        next.add(editorKey);
+        return next;
+      });
+    }
   }, []);
 
   const reorderSubCode = useCallback((idx: number, subIdx: number, direction: 'up' | 'down') => {

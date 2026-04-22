@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-04-22] patch-note | portal-budget | sub-sub-item delete editor state fix
+- pages: [portal-budget](./pages/portal-budget.md)
+- summary: 구조 편집에서 세세목을 여러 개 추가한 뒤 하나를 삭제하면 편집 영역 전체가 예상보다 빨리 접히던 문제를 줄였고, 마지막 빈 세세목만 기본 상태로 돌아가도록 정리했다.
+
 ## [2026-04-21] patch-note | portal-budget, portal-weekly-expense, shared-portal-architecture | budget tree v2 sub-sub-category flow
 - pages: [portal-budget](./pages/portal-budget.md), [portal-weekly-expense](./pages/portal-weekly-expense.md), [shared-portal-architecture](./pages/shared-portal-architecture.md)
 - summary: 세세목이 필요한 프로젝트는 `budget_tree_v2`를 원본으로 사용하고, 예산 편집의 세목 부모 예산과 불일치 경고를 추가했으며, 주간 사업비 입력은 tree 기반 세세목 dropdown과 2단 파생 codebook 동기화로 연결했다.
