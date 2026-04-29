@@ -36,6 +36,7 @@ import {
   listenProjects,
   listenLedgers,
   listenTransactions,
+  listenBankStatementSheets,
   listenComments,
   listenEvidences,
   listenAuditLogs,
@@ -62,6 +63,7 @@ import {
   upsertTransactionViaBff,
 } from '../lib/platform-bff-client';
 import { reportError } from '../platform/observability';
+import type { CashflowAnalyticsBankStatementSheet } from '../platform/cashflow-analytics';
 import type { Unsubscribe } from 'firebase/firestore';
 
 interface EtlStagingUiPayload {
@@ -69,6 +71,7 @@ interface EtlStagingUiPayload {
   members?: OrgMember[];
   ledgers?: Ledger[];
   transactions?: Transaction[];
+  bankStatementSheets?: CashflowAnalyticsBankStatementSheet[];
   comments?: Comment[];
   evidences?: Evidence[];
   auditLogs?: AuditLog[];
@@ -84,6 +87,7 @@ interface AppState {
   allProjects: Project[];
   ledgers: Ledger[];
   transactions: Transaction[];
+  bankStatementSheets: CashflowAnalyticsBankStatementSheet[];
   comments: Comment[];
   evidences: Evidence[];
   auditLogs: AuditLog[];
@@ -135,6 +139,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [projects, setProjects] = useState<Project[]>(PROJECTS);
   const [ledgers, setLedgers] = useState<Ledger[]>(LEDGERS);
   const [transactions, setTransactions] = useState<Transaction[]>(TRANSACTIONS);
+  const [bankStatementSheets, setBankStatementSheets] = useState<CashflowAnalyticsBankStatementSheet[]>([]);
   const [comments, setComments] = useState<Comment[]>(COMMENTS);
   const [evidences, setEvidences] = useState<Evidence[]>(EVIDENCES);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(AUDIT_LOGS);
@@ -232,6 +237,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setProjects(PROJECTS);
       setLedgers(LEDGERS);
       setTransactions(TRANSACTIONS);
+      setBankStatementSheets([]);
       setComments(COMMENTS);
       setEvidences(EVIDENCES);
       setAuditLogs(AUDIT_LOGS);
@@ -242,6 +248,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     setDataSource('firestore');
     setLocalMembers([]);
+    setBankStatementSheets([]);
 
     unsubsRef.current.push(
       listenMembers(db, orgId, (items) => setLocalMembers(items as Array<OrgMember & Record<string, unknown>>)),
@@ -261,6 +268,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     unsubsRef.current.push(
       listenTransactions(db, orgId, (txs) => setTransactions(txs as Transaction[])),
+    );
+
+    unsubsRef.current.push(
+      listenBankStatementSheets(db, orgId, (sheets) => setBankStatementSheets(sheets)),
     );
 
     unsubsRef.current.push(
@@ -300,6 +311,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
         if (Array.isArray(payload.transactions) && payload.transactions.length > 0) {
           setTransactions(payload.transactions);
+        }
+        if (Array.isArray(payload.bankStatementSheets) && payload.bankStatementSheets.length > 0) {
+          setBankStatementSheets(payload.bankStatementSheets);
         }
         if (Array.isArray(payload.comments) && payload.comments.length > 0) {
           setComments(payload.comments);
@@ -755,6 +769,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     allProjects: projects,
     ledgers,
     transactions,
+    bankStatementSheets,
     comments,
     evidences,
     auditLogs,

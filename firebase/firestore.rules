@@ -105,6 +105,14 @@ service cloud.firestore {
         && getMemberRole(orgId) in ['admin', 'finance'];
     }
 
+    // ── 통장내역 원본: admin 현금흐름 분석 collection group 조회 지원 ──
+    match /{path=**}/bank_statements/{statementId} {
+      allow read: if resource.data.tenantId is string
+        && canRead(resource.data.tenantId);
+      allow write: if request.resource.data.tenantId is string
+        && canWrite(request.resource.data.tenantId);
+    }
+
     // ── 일반 규칙: 나머지 모든 컬렉션 ──
     // (projects, ledgers, transactions, evidences, comments, 등)
     match /orgs/{orgId}/{collection}/{document=**} {

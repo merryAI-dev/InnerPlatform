@@ -27,4 +27,8 @@ describe('CashflowAnalyticsPage copy', () => {
     expect(source).toContain('<LineChart data={analytics.monthlyRows}>');
     expect(source).not.toContain('<AreaChart data={analytics.monthlyRows}>');
   });
+
+  it('passes uploaded bank statement sheets into analytics', () => {
+    expect(source).toContain('bankStatementSheets');
+  });
 });

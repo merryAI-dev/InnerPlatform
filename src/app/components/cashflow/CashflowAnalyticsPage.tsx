@@ -43,7 +43,12 @@ import {
   type ProjectType,
   type TransactionState,
 } from '../../data/types';
-import { buildCashflowAnalytics } from '../../platform/cashflow-analytics';
+import {
+  buildCashflowAnalytics,
+  getProjectOrganizationLabels,
+  resolveCashflowAnalyticsDateRange,
+  resolveProjectOrganizationLabel,
+} from '../../platform/cashflow-analytics';
 
 const REPORT_TEAL = '#008c86';
 const REPORT_DARK_TEAL = '#00766f';
@@ -138,23 +143,25 @@ function FilterLabel({ label, disabled = false }: { label: string; disabled?: bo
 }
 
 export function CashflowAnalyticsPage() {
-  const { transactions, projects } = useAppStore();
+  const { transactions, projects, bankStatementSheets } = useAppStore();
+  const defaultDateRange = useMemo(() => resolveCashflowAnalyticsDateRange(), []);
   const [projectFilter, setProjectFilter] = useState('ALL');
   const [typeFilter, setTypeFilter] = useState('ALL');
   const [departmentFilter, setDepartmentFilter] = useState('ALL');
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
+  const [startDate, setStartDate] = useState(defaultDateRange.startDate);
+  const [endDate, setEndDate] = useState(defaultDateRange.endDate);
   const [directionFilter, setDirectionFilter] = useState('ALL');
   const [stateFilter, setStateFilter] = useState('ALL');
   const [categoryFilter, setCategoryFilter] = useState('ALL');
 
   const departments = useMemo(
-    () => [...new Set(projects.map((project) => project.department).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ko-KR')),
+    () => [...new Set(projects.flatMap((project) => getProjectOrganizationLabels(project)))]
+      .sort((a, b) => a.localeCompare(b, 'ko-KR')),
     [projects],
   );
 
   const projectsForTypeFilter = useMemo(
-    () => projects.filter((project) => departmentFilter === 'ALL' || project.department === departmentFilter),
+    () => projects.filter((project) => departmentFilter === 'ALL' || getProjectOrganizationLabels(project).includes(departmentFilter)),
     [departmentFilter, projects],
   );
 
@@ -173,6 +180,7 @@ export function CashflowAnalyticsPage() {
     () => buildCashflowAnalytics({
       transactions,
       projects,
+      bankStatementSheets,
       filters: {
         projectId: projectFilter === 'ALL' ? undefined : projectFilter,
         projectType: typeFilter === 'ALL' ? undefined : typeFilter as ProjectType,
@@ -184,7 +192,7 @@ export function CashflowAnalyticsPage() {
         cashflowCategory: categoryFilter === 'ALL' ? undefined : categoryFilter as CashflowCategory,
       },
     }),
-    [transactions, projects, projectFilter, typeFilter, departmentFilter, startDate, endDate, directionFilter, stateFilter, categoryFilter],
+    [transactions, projects, bankStatementSheets, projectFilter, typeFilter, departmentFilter, startDate, endDate, directionFilter, stateFilter, categoryFilter],
   );
 
   const categoryChartData = useMemo(
@@ -203,8 +211,8 @@ export function CashflowAnalyticsPage() {
     directionFilter,
     stateFilter,
     categoryFilter,
-    startDate,
-    endDate,
+    startDate !== defaultDateRange.startDate ? startDate : '',
+    endDate !== defaultDateRange.endDate ? endDate : '',
   ].filter((value) => value && value !== 'ALL').length;
 
   const selectedProject = useMemo(
@@ -220,17 +228,21 @@ export function CashflowAnalyticsPage() {
     if (directionFilter !== 'ALL') items.push({ label: '입출금', value: DIRECTION_LABELS[directionFilter as Direction] });
     if (stateFilter !== 'ALL') items.push({ label: '상태', value: STATE_LABELS[stateFilter as TransactionState] });
     if (categoryFilter !== 'ALL') items.push({ label: '항목', value: CASHFLOW_CATEGORY_LABELS[categoryFilter as CashflowCategory] });
-    if (startDate) items.push({ label: '시작일', value: startDate });
-    if (endDate) items.push({ label: '종료일', value: endDate });
+    if (startDate === defaultDateRange.startDate && endDate === defaultDateRange.endDate) {
+      items.push({ label: '기준연도', value: defaultDateRange.year });
+    } else {
+      if (startDate) items.push({ label: '시작일', value: startDate });
+      if (endDate) items.push({ label: '종료일', value: endDate });
+    }
     return items;
-  }, [categoryFilter, departmentFilter, directionFilter, endDate, projectFilter, selectedProject, startDate, stateFilter, typeFilter]);
+  }, [categoryFilter, defaultDateRange.endDate, defaultDateRange.startDate, defaultDateRange.year, departmentFilter, directionFilter, endDate, projectFilter, selectedProject, startDate, stateFilter, typeFilter]);
 
   const resetFilters = () => {
     setProjectFilter('ALL');
     setTypeFilter('ALL');
     setDepartmentFilter('ALL');
-    setStartDate('');
-    setEndDate('');
+    setStartDate(defaultDateRange.startDate);
+    setEndDate(defaultDateRange.endDate);
     setDirectionFilter('ALL');
     setStateFilter('ALL');
     setCategoryFilter('ALL');
@@ -242,7 +254,7 @@ export function CashflowAnalyticsPage() {
 
     if (typeFilter !== 'ALL') {
       const hasSelectedType = projects.some((project) => (
-        (value === 'ALL' || project.department === value) && project.type === typeFilter
+        (value === 'ALL' || getProjectOrganizationLabels(project).includes(value)) && project.type === typeFilter
       ));
       if (!hasSelectedType) setTypeFilter('ALL');
     }
@@ -260,7 +272,7 @@ export function CashflowAnalyticsPage() {
     const project = projects.find((item) => item.id === value);
     if (!project) return;
 
-    setDepartmentFilter(project.department || 'ALL');
+    setDepartmentFilter(resolveProjectOrganizationLabel(project));
     setTypeFilter(project.type || 'ALL');
   };
 
@@ -282,7 +294,7 @@ export function CashflowAnalyticsPage() {
             </p>
           </div>
           <div className="hidden text-right sm:block">
-            <p className="text-[34px] leading-none text-[#c9c9c9]" style={{ fontWeight: 900 }}>2026</p>
+            <p className="text-[34px] leading-none text-[#c9c9c9]" style={{ fontWeight: 900 }}>{defaultDateRange.year}</p>
           </div>
         </div>
       </section>

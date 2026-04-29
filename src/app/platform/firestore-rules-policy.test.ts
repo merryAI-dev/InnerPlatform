@@ -7,6 +7,7 @@
  * policy-as-code constraints that the rules depend on.
  */
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import rbacPolicy from '../../../policies/rbac-policy.json';
 import { hasPermission, canAccessProject, canAccessTenant } from './rbac';
 import type { PlatformPermission } from './rbac';
@@ -16,6 +17,7 @@ const policy = rbacPolicy as {
   rolePermissions: Record<string, string[]>;
   roles: string[];
 };
+const firestoreRules = readFileSync(new URL('../../../firebase/firestore.rules', import.meta.url), 'utf8');
 
 describe('firestore rules policy alignment', () => {
   // ── isSignedIn: company email domain ──
@@ -136,5 +138,11 @@ describe('firestore rules policy alignment', () => {
     for (const role of ['admin', 'finance'] as const) {
       expect(hasPermission(role, 'project:read')).toBe(true);
     }
+  });
+
+  it('allows tenant-scoped bank statement collection group reads', () => {
+    expect(firestoreRules).toContain('match /{path=**}/bank_statements/{statementId}');
+    expect(firestoreRules).toContain('canRead(resource.data.tenantId)');
+    expect(firestoreRules).toContain('canWrite(request.resource.data.tenantId)');
   });
 });

@@ -8,6 +8,8 @@ import {
   type Transaction,
   type TransactionState,
 } from '../data/types';
+import { mapBankStatementsToImportRows, type BankStatementSheet } from './bank-statement';
+import { importRowToTransaction } from './settlement-csv';
 
 export type CashflowAnalyticsFilters = {
   projectId?: string;
@@ -87,6 +89,17 @@ export type CashflowAnalyticsResult = {
   projectRows: CashflowAnalyticsProjectRow[];
 };
 
+export type CashflowAnalyticsBankStatementSheet = {
+  projectId: string;
+  sheet: BankStatementSheet;
+};
+
+export type CashflowAnalyticsDateRange = {
+  year: string;
+  startDate: string;
+  endDate: string;
+};
+
 const EMPTY_TOTALS: CashflowAnalyticsTotals = {
   totalIn: 0,
   totalOut: 0,
@@ -109,11 +122,47 @@ function dateOnly(value: string): string {
   return value.slice(0, 10);
 }
 
+function normalizeOrganizationLabel(value: unknown): string {
+  return String(value || '')
+    .normalize('NFKC')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^[CLIS]-/, '')
+    .replace(/\s*그룹$/, '그룹');
+}
+
+export function getProjectOrganizationLabels(project: Pick<Project, 'department' | 'teamName'> | undefined): string[] {
+  if (!project) return [];
+  const labels = [
+    project.department,
+    ...String(project.teamName || '').split(','),
+  ]
+    .map((value) => normalizeOrganizationLabel(value))
+    .filter((value) => value && value !== '-' && value !== '미지정');
+  return [...new Set(labels)];
+}
+
+export function resolveProjectOrganizationLabel(project: Pick<Project, 'department' | 'teamName'> | undefined): string {
+  return getProjectOrganizationLabels(project)[0] || '-';
+}
+
+export function resolveCashflowAnalyticsDateRange(now: Date = new Date()): CashflowAnalyticsDateRange {
+  const year = String(now.getFullYear());
+  return {
+    year,
+    startDate: `${year}-01-01`,
+    endDate: `${year}-12-31`,
+  };
+}
+
 function projectMatches(project: Project | undefined, filters: CashflowAnalyticsFilters): boolean {
   if (!isAll(filters.projectId)) return true;
   if (!project) return isAll(filters.projectType) && isAll(filters.department);
   if (!isAll(filters.projectType) && project.type !== filters.projectType) return false;
-  if (!isAll(filters.department) && project.department !== filters.department) return false;
+  if (!isAll(filters.department)) {
+    const target = normalizeOrganizationLabel(filters.department);
+    if (!getProjectOrganizationLabels(project).includes(target)) return false;
+  }
   return true;
 }
 
@@ -147,7 +196,7 @@ export function filterCashflowTransactions({
       return {
         ...transaction,
         projectName: project?.name || '미지정 사업',
-        projectDepartment: project?.department || '-',
+        projectDepartment: resolveProjectOrganizationLabel(project),
         projectTypeLabel: project ? PROJECT_TYPE_SHORT_LABELS[project.type] : '-',
       };
     })
@@ -180,16 +229,48 @@ export function summarizeCashflowTransactions(transactions: Transaction[]): Cash
   return transactions.reduce(addTransactionToTotals, EMPTY_TOTALS);
 }
 
+export function buildBankStatementAnalyticsTransactions(
+  bankStatementSheets: CashflowAnalyticsBankStatementSheet[] | undefined,
+  existingTransactions: Transaction[] = [],
+): Transaction[] {
+  const existingIds = new Set(existingTransactions.map((transaction) => transaction.id));
+  const bankTransactions: Transaction[] = [];
+
+  for (const source of bankStatementSheets || []) {
+    const projectId = String(source.projectId || '').trim();
+    if (!projectId) continue;
+    const mappedRows = mapBankStatementsToImportRows(source.sheet);
+    mappedRows.forEach((row, rowIndex) => {
+      const parsed = importRowToTransaction(row, projectId, `bank-statement:${projectId}`, rowIndex);
+      if (!parsed.transaction || existingIds.has(parsed.transaction.id)) return;
+      bankTransactions.push({
+        ...parsed.transaction,
+        state: 'DRAFT',
+        createdBy: 'bank-statement',
+        updatedBy: 'bank-statement',
+      });
+    });
+  }
+
+  return bankTransactions;
+}
+
 export function buildCashflowAnalytics({
   transactions,
   projects,
   filters,
+  bankStatementSheets,
 }: {
   transactions: Transaction[];
   projects: Project[];
   filters: CashflowAnalyticsFilters;
+  bankStatementSheets?: CashflowAnalyticsBankStatementSheet[];
 }): CashflowAnalyticsResult {
-  const filteredTransactions = filterCashflowTransactions({ transactions, projects, filters });
+  const analyticsTransactions = [
+    ...transactions,
+    ...buildBankStatementAnalyticsTransactions(bankStatementSheets, transactions),
+  ];
+  const filteredTransactions = filterCashflowTransactions({ transactions: analyticsTransactions, projects, filters });
   const projectMap = new Map(projects.map((project) => [project.id, project]));
   const totals = summarizeCashflowTransactions(filteredTransactions);
 
@@ -235,7 +316,7 @@ export function buildCashflowAnalytics({
       name: project?.name || '미지정 사업',
       type: project?.type || '',
       typeLabel: project ? PROJECT_TYPE_SHORT_LABELS[project.type] : '-',
-      department: project?.department || '-',
+      department: resolveProjectOrganizationLabel(project),
       totalIn: 0,
       totalOut: 0,
       net: 0,

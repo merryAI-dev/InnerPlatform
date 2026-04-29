@@ -1,5 +1,8 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { buildTransactionStatePatch, withTenantScope } from './firestore-service';
+
+const source = readFileSync(new URL('./firestore-service.ts', import.meta.url), 'utf8');
 
 describe('withTenantScope', () => {
   it('injects tenantId and removes undefined values', () => {
@@ -50,5 +53,12 @@ describe('buildTransactionStatePatch', () => {
       newState: 'INVALID',
       actorId: 'u001',
     })).toThrow(/Unsupported transaction state/);
+  });
+});
+
+describe('bank statement listeners', () => {
+  it('subscribes to project-scoped bank statement subcollections for admin analytics', () => {
+    expect(source).toContain("collectionGroup(db, 'bank_statements')");
+    expect(source).toContain("where('tenantId', '==', orgId)");
   });
 });

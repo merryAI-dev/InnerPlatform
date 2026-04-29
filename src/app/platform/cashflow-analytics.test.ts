@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildCashflowAnalytics,
+  resolveCashflowAnalyticsDateRange,
   type CashflowAnalyticsFilters,
 } from './cashflow-analytics';
 import type { Project, Transaction } from '../data/types';
@@ -199,5 +200,90 @@ describe('cashflow analytics', () => {
 
     expect(analytics.transactions.map((item) => item.id)).toEqual(['refund-1', 'out-1', 'in-1']);
     expect(analytics.totals.count).toBe(3);
+  });
+
+  it('defaults the admin report to the visible current year', () => {
+    expect(resolveCashflowAnalyticsDateRange(new Date('2026-04-29T00:00:00.000Z'))).toEqual({
+      year: '2026',
+      startDate: '2026-01-01',
+      endDate: '2026-12-31',
+    });
+  });
+
+  it('matches organization filters against center labels stored in teamName', () => {
+    const analytics = buildCashflowAnalytics({
+      transactions: [
+        tx({
+          id: 'dev-team-tx',
+          projectId: 'p-dev-team',
+          dateTime: '2026-04-01',
+          direction: 'IN',
+          cashflowCategory: 'CONTRACT_PAYMENT',
+          amounts: { bankAmount: 10_000, depositAmount: 10_000, expenseAmount: 0, vatIn: 0, vatOut: 0, vatRefund: 0, balanceAfter: 10_000 },
+        }),
+      ],
+      projects: [
+        project({
+          id: 'p-dev-team',
+          name: '개발협력 사업',
+          type: 'D1',
+          department: '',
+          teamName: 'L-개발협력센터',
+        }),
+      ],
+      filters: { department: '개발협력센터' },
+    });
+
+    expect(analytics.transactions.map((item) => item.id)).toEqual(['dev-team-tx']);
+    expect(analytics.projectRows[0]).toMatchObject({
+      projectId: 'p-dev-team',
+      department: '개발협력센터',
+      totalIn: 10_000,
+    });
+  });
+
+  it('includes uploaded bank statement rows that have not been projected into transactions yet', () => {
+    const analytics = buildCashflowAnalytics({
+      transactions: [],
+      projects: [
+        project({
+          id: 'p-dev-bank',
+          name: '개발협력 통장 업로드 사업',
+          type: 'D1',
+          department: '',
+          teamName: 'L-개발협력센터',
+        }),
+      ],
+      bankStatementSheets: [
+        {
+          projectId: 'p-dev-bank',
+          sheet: {
+            columns: ['거래일시', '적요', '의뢰인/수취인', '출금금액', '입금금액', '잔액'],
+            rows: [
+              {
+                tempId: 'bank-row-1',
+                cells: ['2026-04-10 09:00', '사업비 입금', 'KOICA', '', '1,000,000', '1,000,000'],
+              },
+              {
+                tempId: 'bank-row-2',
+                cells: ['2026-04-11 10:00', '현지 조사비', '파트너사', '250,000', '', '750,000'],
+              },
+            ],
+          },
+        },
+      ],
+      filters: {
+        department: '개발협력센터',
+        startDate: '2026-01-01',
+        endDate: '2026-12-31',
+      },
+    });
+
+    expect(analytics.totals).toMatchObject({
+      totalIn: 1_000_000,
+      totalOut: 250_000,
+      net: 750_000,
+      count: 2,
+    });
   });
 });

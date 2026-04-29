@@ -5,17 +5,21 @@
 
 import {
   collection,
+  collectionGroup,
   deleteDoc,
   doc,
   getDoc,
   onSnapshot,
+  query,
   setDoc,
   updateDoc,
+  where,
   type Firestore,
   type Unsubscribe,
 } from 'firebase/firestore';
 import { getOrgCollectionPath, getOrgDocumentPath } from './firebase';
 import type { OrgMember, ParticipationEntry, TransactionState } from '../data/types';
+import type { CashflowAnalyticsBankStatementSheet } from '../platform/cashflow-analytics';
 import type { MyscEmployee, ParticipationProject } from '../data/participation-data';
 import {
   createAuditLogEntry,
@@ -392,6 +396,41 @@ export function listenTransactions(
   return onSnapshot(colRef(db, orgId, 'transactions'), (snap) => {
     const list: any[] = [];
     snap.forEach((d) => list.push(d.data()));
+    callback(list);
+  });
+}
+
+export function listenBankStatementSheets(
+  db: Firestore,
+  orgId: string,
+  callback: (sheets: CashflowAnalyticsBankStatementSheet[]) => void,
+): Unsubscribe {
+  const bankStatementsQuery = query(
+    collectionGroup(db, 'bank_statements'),
+    where('tenantId', '==', orgId),
+  );
+  return onSnapshot(bankStatementsQuery, (snap) => {
+    const list: CashflowAnalyticsBankStatementSheet[] = [];
+    snap.forEach((d) => {
+      const data = d.data() as Record<string, unknown>;
+      const projectId = String(data.projectId || d.ref.parent.parent?.id || '').trim();
+      if (!projectId) return;
+      list.push({
+        projectId,
+        sheet: {
+          columns: Array.isArray(data.columns) ? data.columns.map((value) => String(value || '')) : [],
+          rows: Array.isArray(data.rows)
+            ? data.rows.map((row, index) => {
+              const record = (row && typeof row === 'object') ? row as Record<string, unknown> : {};
+              return {
+                tempId: String(record.tempId || `${projectId}-bank-row-${index + 1}`),
+                cells: Array.isArray(record.cells) ? record.cells.map((value) => String(value ?? '')) : [],
+              };
+            })
+            : [],
+        },
+      });
+    });
     callback(list);
   });
 }
