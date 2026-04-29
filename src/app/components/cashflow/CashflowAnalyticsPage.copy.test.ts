@@ -8,4 +8,14 @@ describe('CashflowAnalyticsPage copy', () => {
     expect(source).toContain('입출금 분석');
     expect(source).not.toContain('캐시플로 분석');
   });
+
+  it('orders filters from organization to project type to project name', () => {
+    const organizationIndex = source.indexOf('FilterLabel label="조직 구분"');
+    const typeIndex = source.indexOf('FilterLabel label="사업 유형"');
+    const projectIndex = source.indexOf('FilterLabel label="사업명"');
+
+    expect(organizationIndex).toBeGreaterThan(-1);
+    expect(typeIndex).toBeGreaterThan(organizationIndex);
+    expect(projectIndex).toBeGreaterThan(typeIndex);
+  });
 });

@@ -154,6 +154,22 @@ export function CashflowAnalyticsPage() {
     [projects],
   );
 
+  const projectsForTypeFilter = useMemo(
+    () => projects.filter((project) => departmentFilter === 'ALL' || project.department === departmentFilter),
+    [departmentFilter, projects],
+  );
+
+  const projectTypes = useMemo(
+    () => [...new Set(projectsForTypeFilter.map((project) => project.type))]
+      .sort((a, b) => (PROJECT_TYPE_SHORT_LABELS[a] || a).localeCompare(PROJECT_TYPE_SHORT_LABELS[b] || b, 'ko-KR')),
+    [projectsForTypeFilter],
+  );
+
+  const projectsForProjectFilter = useMemo(
+    () => projectsForTypeFilter.filter((project) => typeFilter === 'ALL' || project.type === typeFilter),
+    [projectsForTypeFilter, typeFilter],
+  );
+
   const analytics = useMemo(
     () => buildCashflowAnalytics({
       transactions,
@@ -199,9 +215,9 @@ export function CashflowAnalyticsPage() {
 
   const activeFilterItems = useMemo(() => {
     const items: Array<{ label: string; value: string }> = [];
-    if (selectedProject) items.push({ label: '사업', value: selectedProject.name });
-    if (projectFilter === 'ALL' && typeFilter !== 'ALL') items.push({ label: '유형', value: PROJECT_TYPE_SHORT_LABELS[typeFilter as ProjectType] || typeFilter });
-    if (projectFilter === 'ALL' && departmentFilter !== 'ALL') items.push({ label: '부서', value: departmentFilter });
+    if (departmentFilter !== 'ALL') items.push({ label: '조직', value: departmentFilter });
+    if (typeFilter !== 'ALL') items.push({ label: '유형', value: PROJECT_TYPE_SHORT_LABELS[typeFilter as ProjectType] || typeFilter });
+    if (selectedProject) items.push({ label: '사업명', value: selectedProject.name });
     if (directionFilter !== 'ALL') items.push({ label: '입출금', value: DIRECTION_LABELS[directionFilter as Direction] });
     if (stateFilter !== 'ALL') items.push({ label: '상태', value: STATE_LABELS[stateFilter as TransactionState] });
     if (categoryFilter !== 'ALL') items.push({ label: '항목', value: CASHFLOW_CATEGORY_LABELS[categoryFilter as CashflowCategory] });
@@ -221,12 +237,32 @@ export function CashflowAnalyticsPage() {
     setCategoryFilter('ALL');
   };
 
+  const handleDepartmentFilterChange = (value: string) => {
+    setDepartmentFilter(value);
+    setProjectFilter('ALL');
+
+    if (typeFilter !== 'ALL') {
+      const hasSelectedType = projects.some((project) => (
+        (value === 'ALL' || project.department === value) && project.type === typeFilter
+      ));
+      if (!hasSelectedType) setTypeFilter('ALL');
+    }
+  };
+
+  const handleTypeFilterChange = (value: string) => {
+    setTypeFilter(value);
+    setProjectFilter('ALL');
+  };
+
   const handleProjectFilterChange = (value: string) => {
     setProjectFilter(value);
-    if (value !== 'ALL') {
-      setTypeFilter('ALL');
-      setDepartmentFilter('ALL');
-    }
+    if (value === 'ALL') return;
+
+    const project = projects.find((item) => item.id === value);
+    if (!project) return;
+
+    setDepartmentFilter(project.department || 'ALL');
+    setTypeFilter(project.type || 'ALL');
   };
 
   const { totals } = analytics;
@@ -260,7 +296,7 @@ export function CashflowAnalyticsPage() {
             <div>
               <p className="text-[13px] text-zinc-950" style={{ fontWeight: 800 }}>조회 조건</p>
               <p className="text-[10px] text-[#7d8286]">
-                사업을 직접 선택하면 유형·부서 조건은 자동으로 전체 처리됩니다.
+                조직 구분에서 사업 유형, 사업명 순서로 후보가 좁혀집니다.
               </p>
             </div>
           </div>
@@ -276,37 +312,37 @@ export function CashflowAnalyticsPage() {
         </div>
         <div className="grid gap-3 md:grid-cols-4 xl:grid-cols-8">
           <div>
-            <FilterLabel label="사업" />
-            <Select value={projectFilter} onValueChange={handleProjectFilterChange}>
-              <SelectTrigger className="h-8 rounded-none border-[#bfc6c5] bg-white text-[11px]"><SelectValue placeholder="사업" /></SelectTrigger>
+            <FilterLabel label="조직 구분" />
+            <Select value={departmentFilter} onValueChange={handleDepartmentFilterChange}>
+              <SelectTrigger className="h-8 rounded-none border-[#bfc6c5] bg-white text-[11px]"><SelectValue placeholder="부서" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="ALL">전체 사업</SelectItem>
-                {projects.map((project) => (
-                  <SelectItem key={project.id} value={project.id} className="text-[11px]">{project.name}</SelectItem>
+                <SelectItem value="ALL">전체 조직</SelectItem>
+                {departments.map((department) => (
+                  <SelectItem key={department} value={department} className="text-[11px]">{department}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
           <div>
-            <FilterLabel label="사업유형" disabled={projectFilter !== 'ALL'} />
-            <Select value={typeFilter} onValueChange={setTypeFilter} disabled={projectFilter !== 'ALL'}>
+            <FilterLabel label="사업 유형" />
+            <Select value={typeFilter} onValueChange={handleTypeFilterChange}>
               <SelectTrigger className="h-8 rounded-none border-[#bfc6c5] bg-white text-[11px]"><SelectValue placeholder="유형" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="ALL">전체 유형</SelectItem>
-                {(Object.keys(PROJECT_TYPE_SHORT_LABELS) as ProjectType[]).map((key) => (
-                  <SelectItem key={key} value={key} className="text-[11px]">{PROJECT_TYPE_SHORT_LABELS[key]}</SelectItem>
+                {projectTypes.map((key) => (
+                  <SelectItem key={key} value={key} className="text-[11px]">{PROJECT_TYPE_SHORT_LABELS[key] || key}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
           <div>
-            <FilterLabel label="부서" disabled={projectFilter !== 'ALL'} />
-            <Select value={departmentFilter} onValueChange={setDepartmentFilter} disabled={projectFilter !== 'ALL'}>
-              <SelectTrigger className="h-8 rounded-none border-[#bfc6c5] bg-white text-[11px]"><SelectValue placeholder="부서" /></SelectTrigger>
+            <FilterLabel label="사업명" />
+            <Select value={projectFilter} onValueChange={handleProjectFilterChange}>
+              <SelectTrigger className="h-8 rounded-none border-[#bfc6c5] bg-white text-[11px]"><SelectValue placeholder="사업명" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="ALL">전체 부서</SelectItem>
-                {departments.map((department) => (
-                  <SelectItem key={department} value={department} className="text-[11px]">{department}</SelectItem>
+                <SelectItem value="ALL">전체 사업</SelectItem>
+                {projectsForProjectFilter.map((project) => (
+                  <SelectItem key={project.id} value={project.id} className="text-[11px]">{project.name}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
