@@ -1,303 +1,533 @@
-import React, { useState, useMemo } from 'react';
+import { useMemo, useState, type ComponentType } from 'react';
 import {
-  TrendingUp, TrendingDown, ArrowDownUp, Filter, BarChart3,
-  ArrowUpRight, ArrowDownRight, Hash, Layers,
+  ArrowDownRight,
+  ArrowDownUp,
+  ArrowUpRight,
+  BarChart3,
+  ClipboardList,
+  Hash,
+  Layers,
+  ReceiptText,
+  Search,
+  TrendingUp,
+  WalletCards,
 } from 'lucide-react';
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Legend,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip as RTooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
+import { Input } from '../ui/input';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '../ui/select';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '../ui/table';
-import {
-  BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid,
-  Tooltip as RTooltip, ResponsiveContainer, Legend, AreaChart, Area,
-} from 'recharts';
 import { useAppStore } from '../../data/store';
 import {
-  CASHFLOW_CATEGORY_LABELS, PROJECT_TYPE_SHORT_LABELS,
-  type CashflowCategory, type ProjectType,
+  CASHFLOW_CATEGORY_LABELS,
+  PROJECT_TYPE_SHORT_LABELS,
+  type CashflowCategory,
+  type Direction,
+  type ProjectType,
+  type TransactionState,
 } from '../../data/types';
-import { PageHeader } from '../layout/PageHeader';
+import { buildCashflowAnalytics } from '../../platform/cashflow-analytics';
+
+const REPORT_TEAL = '#008c86';
+const REPORT_DARK_TEAL = '#00766f';
+const REPORT_BORDER = '#c7c7c7';
+const REPORT_GRAY = '#8a8f94';
+
+const STATE_LABELS: Record<TransactionState, string> = {
+  DRAFT: '초안',
+  SUBMITTED: '제출',
+  APPROVED: '승인',
+  REJECTED: '반려',
+};
+
+const DIRECTION_LABELS: Record<Direction, string> = {
+  IN: '입금',
+  OUT: '출금',
+};
 
 function fmt(n: number) {
   return n.toLocaleString('ko-KR');
 }
 
 function fmtShort(n: number) {
-  if (Math.abs(n) >= 1e8) return (n / 1e8).toFixed(1) + '억';
-  if (Math.abs(n) >= 1e4) return (n / 1e4).toFixed(0) + '만';
-  return n.toLocaleString();
+  if (Math.abs(n) >= 1e8) return `${(n / 1e8).toFixed(1)}억`;
+  if (Math.abs(n) >= 1e4) return `${(n / 1e4).toFixed(0)}만`;
+  return n.toLocaleString('ko-KR');
 }
 
-// ── Cashflow Metric Card ──
-function CfMetric({ icon: Icon, label, value, sub, color, bgColor }: {
-  icon: any; label: string; value: string; sub?: string; color: string; bgColor: string;
+function CfMetric({
+  icon: Icon,
+  label,
+  value,
+  sub,
+  color,
+  bgColor,
+}: {
+  icon: ComponentType<{ className?: string; style?: React.CSSProperties }>;
+  label: string;
+  value: string;
+  sub?: string;
+  color: string;
+  bgColor: string;
 }) {
   return (
-    <Card className="shadow-sm border-border/40 overflow-hidden">
+    <Card className="min-h-[118px] overflow-hidden rounded-none border border-[#c7c7c7] bg-white shadow-none">
       <CardContent className="p-0">
-        <div className="p-4 relative">
-          <div className="absolute top-0 left-0 right-0 h-[3px]" style={{ background: color }} />
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="text-[11px] text-muted-foreground mb-1" style={{ fontWeight: 500 }}>{label}</p>
-              <p className="text-[22px]" style={{ fontWeight: 800, letterSpacing: '-0.03em', fontVariantNumeric: 'tabular-nums', lineHeight: 1.1, color }}>
-                {value}
-              </p>
-              {sub && <p className="text-[10px] text-muted-foreground mt-1">{sub}</p>}
-            </div>
-            <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0" style={{ background: bgColor }}>
-              <Icon className="w-4.5 h-4.5" style={{ color }} />
-            </div>
-          </div>
+        <div className="flex h-8 items-center justify-between border-b border-[#d7d7d7] bg-[#f1f2f2] px-3">
+          <p className="text-[11px] text-[#4f565a]" style={{ fontWeight: 800 }}>{label}</p>
+          <span className="flex h-5 w-5 items-center justify-center border border-[#d7d7d7] bg-white" style={{ borderBottomColor: color }}>
+            <Icon className="h-3.5 w-3.5" style={{ color }} />
+          </span>
+        </div>
+        <div className="px-4 py-3">
+          <p
+            className="text-[24px]"
+            style={{ fontWeight: 900, fontVariantNumeric: 'tabular-nums', lineHeight: 1.05, color }}
+          >
+            {value}
+          </p>
+          <div className="mt-2 h-px w-9" style={{ background: bgColor }} />
+          {sub && <p className="mt-2 truncate text-[10px] text-[#7d8286]">{sub}</p>}
         </div>
       </CardContent>
     </Card>
   );
 }
 
+function stateBadgeClass(state: TransactionState) {
+  if (state === 'APPROVED') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  if (state === 'SUBMITTED') return 'border-amber-200 bg-amber-50 text-amber-700';
+  if (state === 'REJECTED') return 'border-rose-200 bg-rose-50 text-rose-700';
+  return 'border-slate-200 bg-slate-50 text-slate-600';
+}
+
+function reportSectionTitle(title: string, Icon: ComponentType<{ className?: string }>) {
+  return (
+    <div className="flex items-center justify-between border-b pb-2" style={{ borderColor: REPORT_TEAL }}>
+      <div className="flex items-center gap-2">
+        <Icon className="h-4 w-4" style={{ color: REPORT_TEAL }} />
+        <span className="text-[15px] text-zinc-950" style={{ fontWeight: 800 }}>{title}</span>
+      </div>
+    </div>
+  );
+}
+
+function FilterLabel({ label, disabled = false }: { label: string; disabled?: boolean }) {
+  return (
+    <span className={`mb-1 block text-[10px] ${disabled ? 'text-slate-400' : 'text-[#6f7478]'}`} style={{ fontWeight: 700 }}>
+      {label}
+    </span>
+  );
+}
+
 export function CashflowAnalyticsPage() {
   const { transactions, projects } = useAppStore();
-  const [projectFilter, setProjectFilter] = useState<string>('ALL');
-  const [typeFilter, setTypeFilter] = useState<string>('ALL');
-  const [departmentFilter, setDepartmentFilter] = useState<string>('ALL');
+  const [projectFilter, setProjectFilter] = useState('ALL');
+  const [typeFilter, setTypeFilter] = useState('ALL');
+  const [departmentFilter, setDepartmentFilter] = useState('ALL');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [directionFilter, setDirectionFilter] = useState('ALL');
+  const [stateFilter, setStateFilter] = useState('ALL');
+  const [categoryFilter, setCategoryFilter] = useState('ALL');
 
-  const departments = useMemo(() => [...new Set(projects.map(p => p.department))], [projects]);
+  const departments = useMemo(
+    () => [...new Set(projects.map((project) => project.department).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ko-KR')),
+    [projects],
+  );
 
-  const filteredTx = useMemo(() => {
-    return transactions.filter(t => {
-      if (projectFilter !== 'ALL' && t.projectId !== projectFilter) return false;
-      if (typeFilter !== 'ALL') {
-        const proj = projects.find(p => p.id === t.projectId);
-        if (!proj || proj.type !== typeFilter) return false;
-      }
-      if (departmentFilter !== 'ALL') {
-        const proj = projects.find(p => p.id === t.projectId);
-        if (!proj || proj.department !== departmentFilter) return false;
-      }
-      return true;
-    });
-  }, [transactions, projectFilter, typeFilter, departmentFilter, projects]);
+  const projectsForTypeFilter = useMemo(
+    () => projects.filter((project) => departmentFilter === 'ALL' || project.department === departmentFilter),
+    [departmentFilter, projects],
+  );
 
-  const monthlyData = useMemo(() => {
-    const months: Record<string, { month: string; in: number; out: number; net: number }> = {};
-    filteredTx.forEach(t => {
-      const m = t.dateTime.substring(0, 7);
-      if (!months[m]) months[m] = { month: m, in: 0, out: 0, net: 0 };
-      if (t.direction === 'IN') months[m].in += t.amounts.bankAmount;
-      else months[m].out += t.amounts.bankAmount;
-    });
-    Object.values(months).forEach(m => { m.net = m.in - m.out; });
-    return Object.values(months).sort((a, b) => a.month.localeCompare(b.month));
-  }, [filteredTx]);
+  const projectTypes = useMemo(
+    () => [...new Set(projectsForTypeFilter.map((project) => project.type))]
+      .sort((a, b) => (PROJECT_TYPE_SHORT_LABELS[a] || a).localeCompare(PROJECT_TYPE_SHORT_LABELS[b] || b, 'ko-KR')),
+    [projectsForTypeFilter],
+  );
 
-  const categoryData = useMemo(() => {
-    const map: Record<string, { category: CashflowCategory; label: string; inAmt: number; outAmt: number; count: number }> = {};
-    filteredTx.forEach(t => {
-      const cat = t.cashflowCategory;
-      if (!map[cat]) map[cat] = { category: cat, label: CASHFLOW_CATEGORY_LABELS[cat], inAmt: 0, outAmt: 0, count: 0 };
-      map[cat].count++;
-      if (t.direction === 'IN') map[cat].inAmt += t.amounts.bankAmount;
-      else map[cat].outAmt += t.amounts.bankAmount;
-    });
-    return Object.values(map).sort((a, b) => (b.inAmt + b.outAmt) - (a.inAmt + a.outAmt));
-  }, [filteredTx]);
+  const projectsForProjectFilter = useMemo(
+    () => projectsForTypeFilter.filter((project) => typeFilter === 'ALL' || project.type === typeFilter),
+    [projectsForTypeFilter, typeFilter],
+  );
 
-  const projectData = useMemo(() => {
-    const map: Record<string, { projectId: string; name: string; type: string; inAmt: number; outAmt: number; count: number }> = {};
-    filteredTx.forEach(t => {
-      const proj = projects.find(p => p.id === t.projectId);
-      if (!map[t.projectId]) {
-        map[t.projectId] = {
-          projectId: t.projectId,
-          name: proj?.name || '',
-          type: proj?.type || '',
-          inAmt: 0, outAmt: 0, count: 0,
-        };
-      }
-      map[t.projectId].count++;
-      if (t.direction === 'IN') map[t.projectId].inAmt += t.amounts.bankAmount;
-      else map[t.projectId].outAmt += t.amounts.bankAmount;
-    });
-    return Object.values(map).sort((a, b) => (b.inAmt + b.outAmt) - (a.inAmt + a.outAmt));
-  }, [filteredTx, projects]);
+  const analytics = useMemo(
+    () => buildCashflowAnalytics({
+      transactions,
+      projects,
+      filters: {
+        projectId: projectFilter === 'ALL' ? undefined : projectFilter,
+        projectType: typeFilter === 'ALL' ? undefined : typeFilter as ProjectType,
+        department: departmentFilter === 'ALL' ? undefined : departmentFilter,
+        startDate: startDate || undefined,
+        endDate: endDate || undefined,
+        direction: directionFilter === 'ALL' ? undefined : directionFilter as Direction,
+        state: stateFilter === 'ALL' ? undefined : stateFilter as TransactionState,
+        cashflowCategory: categoryFilter === 'ALL' ? undefined : categoryFilter as CashflowCategory,
+      },
+    }),
+    [transactions, projects, projectFilter, typeFilter, departmentFilter, startDate, endDate, directionFilter, stateFilter, categoryFilter],
+  );
 
-  const categoryChartData = useMemo(() => {
-    return categoryData.map(c => ({
-      name: c.label,
-      입금: c.inAmt,
-      출금: c.outAmt,
-    }));
-  }, [categoryData]);
+  const categoryChartData = useMemo(
+    () => analytics.categoryRows.map((row) => ({
+      name: row.label,
+      입금: row.inAmt,
+      출금: row.outAmt,
+    })),
+    [analytics.categoryRows],
+  );
 
-  const totals = useMemo(() => {
-    const totalIn = filteredTx.filter(t => t.direction === 'IN').reduce((s, t) => s + t.amounts.bankAmount, 0);
-    const totalOut = filteredTx.filter(t => t.direction === 'OUT').reduce((s, t) => s + t.amounts.bankAmount, 0);
-    const approved = filteredTx.filter(t => t.state === 'APPROVED').length;
-    return { totalIn, totalOut, net: totalIn - totalOut, count: filteredTx.length, approved };
-  }, [filteredTx]);
+  const activeFilters = [
+    projectFilter,
+    typeFilter,
+    departmentFilter,
+    directionFilter,
+    stateFilter,
+    categoryFilter,
+    startDate,
+    endDate,
+  ].filter((value) => value && value !== 'ALL').length;
 
-  const activeFilters = [projectFilter, typeFilter, departmentFilter].filter(f => f !== 'ALL').length;
+  const selectedProject = useMemo(
+    () => projects.find((project) => project.id === projectFilter),
+    [projects, projectFilter],
+  );
+
+  const activeFilterItems = useMemo(() => {
+    const items: Array<{ label: string; value: string }> = [];
+    if (departmentFilter !== 'ALL') items.push({ label: '조직', value: departmentFilter });
+    if (typeFilter !== 'ALL') items.push({ label: '유형', value: PROJECT_TYPE_SHORT_LABELS[typeFilter as ProjectType] || typeFilter });
+    if (selectedProject) items.push({ label: '사업명', value: selectedProject.name });
+    if (directionFilter !== 'ALL') items.push({ label: '입출금', value: DIRECTION_LABELS[directionFilter as Direction] });
+    if (stateFilter !== 'ALL') items.push({ label: '상태', value: STATE_LABELS[stateFilter as TransactionState] });
+    if (categoryFilter !== 'ALL') items.push({ label: '항목', value: CASHFLOW_CATEGORY_LABELS[categoryFilter as CashflowCategory] });
+    if (startDate) items.push({ label: '시작일', value: startDate });
+    if (endDate) items.push({ label: '종료일', value: endDate });
+    return items;
+  }, [categoryFilter, departmentFilter, directionFilter, endDate, projectFilter, selectedProject, startDate, stateFilter, typeFilter]);
+
+  const resetFilters = () => {
+    setProjectFilter('ALL');
+    setTypeFilter('ALL');
+    setDepartmentFilter('ALL');
+    setStartDate('');
+    setEndDate('');
+    setDirectionFilter('ALL');
+    setStateFilter('ALL');
+    setCategoryFilter('ALL');
+  };
+
+  const handleDepartmentFilterChange = (value: string) => {
+    setDepartmentFilter(value);
+    setProjectFilter('ALL');
+
+    if (typeFilter !== 'ALL') {
+      const hasSelectedType = projects.some((project) => (
+        (value === 'ALL' || project.department === value) && project.type === typeFilter
+      ));
+      if (!hasSelectedType) setTypeFilter('ALL');
+    }
+  };
+
+  const handleTypeFilterChange = (value: string) => {
+    setTypeFilter(value);
+    setProjectFilter('ALL');
+  };
+
+  const handleProjectFilterChange = (value: string) => {
+    setProjectFilter(value);
+    if (value === 'ALL') return;
+
+    const project = projects.find((item) => item.id === value);
+    if (!project) return;
+
+    setDepartmentFilter(project.department || 'ALL');
+    setTypeFilter(project.type || 'ALL');
+  };
+
+  const { totals } = analytics;
 
   return (
-    <div className="space-y-5">
-      <PageHeader
-        icon={BarChart3}
-        iconGradient="linear-gradient(135deg, #0d9488, #14b8a6)"
-        title="캐시플로 분석"
-        description={`전사 프로젝트 입출금 통합 현황 · ${totals.count}건 거래`}
-        badge={activeFilters > 0 ? `필터 ${activeFilters}개 적용` : undefined}
-      />
-
-      {/* Filter bar */}
-      <div className="flex flex-wrap items-center gap-2 p-3 rounded-lg border border-border/40 bg-card shadow-sm">
-        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground mr-1">
-          <Filter className="w-3.5 h-3.5" />
-          <span style={{ fontWeight: 500 }}>필터</span>
+    <div className="space-y-5 bg-white px-1 pb-8 text-zinc-950">
+      <section className="relative border bg-white px-6 py-5" style={{ borderColor: REPORT_BORDER }}>
+        <div className="absolute left-0 top-0 h-12 w-2" style={{ background: REPORT_TEAL }} />
+        <div className="absolute left-0 top-12 h-12 w-2 bg-[#b8b8b8]" />
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0 pl-3">
+            <p className="text-[13px]" style={{ color: REPORT_TEAL, fontWeight: 800 }}>Bank Transaction Admin Report</p>
+            <h1 className="mt-2 text-[28px] leading-tight text-zinc-950" style={{ fontWeight: 900 }}>
+              입출금 분석
+            </h1>
+            <p className="mt-2 text-[12px] text-[#6f7478]">
+              사업·통장사용내역 기반 조회/필터/집계 · 현재 조건 {totals.count}건
+            </p>
+          </div>
+          <div className="hidden text-right sm:block">
+            <p className="text-[34px] leading-none text-[#c9c9c9]" style={{ fontWeight: 900 }}>2026</p>
+          </div>
         </div>
-        <Select value={projectFilter} onValueChange={setProjectFilter}>
-          <SelectTrigger className="h-8 w-[180px] text-[11px]"><SelectValue placeholder="프로젝트" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="ALL">전체 프로젝트</SelectItem>
-            {projects.map(p => (
-              <SelectItem key={p.id} value={p.id} className="text-[11px]">{p.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={typeFilter} onValueChange={setTypeFilter}>
-          <SelectTrigger className="h-8 w-[120px] text-[11px]"><SelectValue placeholder="유형" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="ALL">전체 유형</SelectItem>
-            {(Object.keys(PROJECT_TYPE_SHORT_LABELS) as ProjectType[]).map(k => (
-              <SelectItem key={k} value={k} className="text-[11px]">{PROJECT_TYPE_SHORT_LABELS[k]}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
-          <SelectTrigger className="h-8 w-[130px] text-[11px]"><SelectValue placeholder="부서" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="ALL">전체 부서</SelectItem>
-            {departments.map(d => (
-              <SelectItem key={d} value={d} className="text-[11px]">{d}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        {activeFilters > 0 && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 text-[10px] text-muted-foreground"
-            onClick={() => { setProjectFilter('ALL'); setTypeFilter('ALL'); setDepartmentFilter('ALL'); }}
-          >
-            초기화
-          </Button>
-        )}
-      </div>
+      </section>
 
-      {/* KPI Metrics */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <section className="border bg-white p-4" style={{ borderColor: REPORT_BORDER }}>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Search className="h-4 w-4" style={{ color: REPORT_TEAL }} />
+            <div>
+              <p className="text-[13px] text-zinc-950" style={{ fontWeight: 800 }}>조회 조건</p>
+              <p className="text-[10px] text-[#7d8286]">
+                조직 구분에서 사업 유형, 사업명 순서로 후보가 좁혀집니다.
+              </p>
+            </div>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 rounded-none border-[#c7c7c7] bg-white px-3 text-[10px] text-zinc-700 hover:bg-[#f5f7f7]"
+            onClick={resetFilters}
+            disabled={activeFilters === 0}
+          >
+            전체 초기화
+          </Button>
+        </div>
+        <div className="grid gap-3 md:grid-cols-4 xl:grid-cols-8">
+          <div>
+            <FilterLabel label="조직 구분" />
+            <Select value={departmentFilter} onValueChange={handleDepartmentFilterChange}>
+              <SelectTrigger className="h-8 rounded-none border-[#bfc6c5] bg-white text-[11px]"><SelectValue placeholder="부서" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">전체 조직</SelectItem>
+                {departments.map((department) => (
+                  <SelectItem key={department} value={department} className="text-[11px]">{department}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <FilterLabel label="사업 유형" />
+            <Select value={typeFilter} onValueChange={handleTypeFilterChange}>
+              <SelectTrigger className="h-8 rounded-none border-[#bfc6c5] bg-white text-[11px]"><SelectValue placeholder="유형" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">전체 유형</SelectItem>
+                {projectTypes.map((key) => (
+                  <SelectItem key={key} value={key} className="text-[11px]">{PROJECT_TYPE_SHORT_LABELS[key] || key}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <FilterLabel label="사업명" />
+            <Select value={projectFilter} onValueChange={handleProjectFilterChange}>
+              <SelectTrigger className="h-8 rounded-none border-[#bfc6c5] bg-white text-[11px]"><SelectValue placeholder="사업명" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">전체 사업</SelectItem>
+                {projectsForProjectFilter.map((project) => (
+                  <SelectItem key={project.id} value={project.id} className="text-[11px]">{project.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <FilterLabel label="입출금" />
+            <Select value={directionFilter} onValueChange={setDirectionFilter}>
+              <SelectTrigger className="h-8 rounded-none border-[#bfc6c5] bg-white text-[11px]"><SelectValue placeholder="입출금" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">입출금 전체</SelectItem>
+                <SelectItem value="IN">입금</SelectItem>
+                <SelectItem value="OUT">출금</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <FilterLabel label="상태" />
+            <Select value={stateFilter} onValueChange={setStateFilter}>
+              <SelectTrigger className="h-8 rounded-none border-[#bfc6c5] bg-white text-[11px]"><SelectValue placeholder="상태" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">상태 전체</SelectItem>
+                {(Object.keys(STATE_LABELS) as TransactionState[]).map((state) => (
+                  <SelectItem key={state} value={state} className="text-[11px]">{STATE_LABELS[state]}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <FilterLabel label="cashflow 항목" />
+            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+              <SelectTrigger className="h-8 rounded-none border-[#bfc6c5] bg-white text-[11px]"><SelectValue placeholder="cashflow 항목" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">전체 항목</SelectItem>
+                {(Object.keys(CASHFLOW_CATEGORY_LABELS) as CashflowCategory[]).map((category) => (
+                  <SelectItem key={category} value={category} className="text-[11px]">{CASHFLOW_CATEGORY_LABELS[category]}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <FilterLabel label="시작일" />
+            <Input
+              type="date"
+              value={startDate}
+              onChange={(event) => setStartDate(event.target.value)}
+              className="h-8 rounded-none border-[#bfc6c5] bg-white text-[11px]"
+              aria-label="시작일"
+            />
+          </div>
+          <div>
+            <FilterLabel label="종료일" />
+            <Input
+              type="date"
+              value={endDate}
+              onChange={(event) => setEndDate(event.target.value)}
+              className="h-8 rounded-none border-[#bfc6c5] bg-white text-[11px]"
+              aria-label="종료일"
+            />
+          </div>
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t pt-3" style={{ borderColor: '#e1e1e1' }}>
+          <span className="mr-1 text-[10px] text-[#7d8286]" style={{ fontWeight: 800 }}>적용 조건</span>
+          {activeFilterItems.length === 0 ? (
+            <span className="text-[10px] text-[#8a8f94]">전체 데이터 기준</span>
+          ) : activeFilterItems.map((item) => (
+            <span key={`${item.label}:${item.value}`} className="inline-flex h-5 items-center border border-[#bfc6c5] bg-[#f7fbfb] px-2 text-[10px] text-zinc-800">
+              <span className="mr-1" style={{ color: REPORT_TEAL, fontWeight: 800 }}>{item.label}</span>
+              {item.value}
+            </span>
+          ))}
+        </div>
+      </section>
+
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <CfMetric
           icon={ArrowUpRight}
           label="총 입금"
           value={fmtShort(totals.totalIn)}
-          sub={`${fmt(totals.totalIn)}원`}
-          color="#059669"
-          bgColor="#05966912"
+          sub={`${fmt(totals.depositAmount)}원 입금액`}
+          color={REPORT_TEAL}
+          bgColor="#008c8633"
         />
         <CfMetric
           icon={ArrowDownRight}
           label="총 출금"
           value={fmtShort(totals.totalOut)}
-          sub={`${fmt(totals.totalOut)}원`}
-          color="#e11d48"
-          bgColor="#e11d4812"
+          sub={`${fmt(totals.expenseAmount)}원 사업비`}
+          color="#b91c1c"
+          bgColor="#b91c1c33"
         />
         <CfMetric
           icon={ArrowDownUp}
           label="NET (순현금)"
           value={fmtShort(totals.net)}
           sub={totals.net >= 0 ? '입금 초과' : '출금 초과'}
-          color={totals.net >= 0 ? '#059669' : '#e11d48'}
-          bgColor={totals.net >= 0 ? '#05966912' : '#e11d4812'}
+          color={totals.net >= 0 ? REPORT_DARK_TEAL : '#b91c1c'}
+          bgColor={totals.net >= 0 ? '#00766f33' : '#b91c1c33'}
         />
         <CfMetric
           icon={Hash}
           label="거래 건수"
           value={`${totals.count}건`}
           sub={`승인 ${totals.approved}건`}
-          color="#4f46e5"
-          bgColor="#4f46e512"
+          color="#52525b"
+          bgColor="#71717a33"
         />
       </div>
 
-      {/* Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Card className="shadow-sm border-border/50">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <CfMetric
+          icon={ReceiptText}
+          label="매입부가세"
+          value={fmtShort(totals.inputVat)}
+          sub={`${fmt(totals.inputVat)}원`}
+          color="#8a5a22"
+          bgColor="#8a5a2233"
+        />
+        <CfMetric
+          icon={WalletCards}
+          label="매출부가세"
+          value={fmtShort(totals.outputVat)}
+          sub={`${fmt(totals.outputVat)}원`}
+          color={REPORT_DARK_TEAL}
+          bgColor="#00766f33"
+        />
+        <CfMetric
+          icon={TrendingUp}
+          label="부가세 환급"
+          value={fmtShort(totals.vatRefund)}
+          sub={`${fmt(totals.vatRefund)}원`}
+          color="#4f6f96"
+          bgColor="#4f6f9633"
+        />
+        <CfMetric
+          icon={ClipboardList}
+          label="예수금 잔액"
+          value={fmtShort(totals.withholdingBalance)}
+          sub="매출부가세 - 매입부가세 - 환급"
+          color={totals.withholdingBalance >= 0 ? '#52525b' : '#b91c1c'}
+          bgColor={totals.withholdingBalance >= 0 ? '#71717a33' : '#b91c1c33'}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Card className="rounded-none border border-[#d7d7d7] bg-white shadow-none">
           <CardHeader className="pb-2">
-            <CardTitle className="text-[13px] flex items-center gap-2">
-              <div className="w-6 h-6 rounded-md bg-teal-50 dark:bg-teal-950/40 flex items-center justify-center">
-                <TrendingUp className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-              </div>
-              월별 캐시플로 추이
-            </CardTitle>
+            <CardTitle>{reportSectionTitle('월별 통장사용내역 추이', TrendingUp)}</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="h-[280px]">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={monthlyData}>
-                  <defs>
-                    <linearGradient id="gIn" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.15} />
-                      <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="gOut" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.12} />
-                      <stop offset="95%" stopColor="#f43f5e" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                  <XAxis dataKey="month" tick={{ fontSize: 10, fill: '#94a3b8' }} tickFormatter={(v: string) => v.slice(5)} />
-                  <YAxis tickFormatter={(v: number) => fmtShort(v)} tick={{ fontSize: 10, fill: '#94a3b8' }} width={55} />
+                <LineChart data={analytics.monthlyRows}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e6e6e6" />
+                  <XAxis dataKey="month" tick={{ fontSize: 10, fill: REPORT_GRAY }} tickFormatter={(value: string) => value.slice(5)} />
+                  <YAxis tickFormatter={(value: number) => fmtShort(value)} tick={{ fontSize: 10, fill: REPORT_GRAY }} width={55} />
                   <RTooltip
-                    formatter={(v: number, name: string) => [fmt(v) + '원', name === 'in' ? '입금' : name === 'out' ? '출금' : 'NET']}
-                    contentStyle={{ borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 11, boxShadow: '0 4px 12px rgba(0,0,0,0.06)' }}
+                    formatter={(value: number, name: string) => [(`${fmt(value)}원`), name === 'in' ? '입금' : name === 'out' ? '출금' : 'NET']}
+                    contentStyle={{ borderRadius: 0, border: '1px solid #c7c7c7', fontSize: 11, boxShadow: 'none' }}
                   />
-                  <Area type="monotone" dataKey="in" name="in" stroke="#10b981" strokeWidth={2} fill="url(#gIn)" />
-                  <Area type="monotone" dataKey="out" name="out" stroke="#f43f5e" strokeWidth={2} fill="url(#gOut)" />
-                  <Line type="monotone" dataKey="net" name="net" stroke="#6366f1" strokeWidth={2} strokeDasharray="4 4" dot={{ r: 3, fill: '#6366f1' }} />
-                </AreaChart>
+                  <Legend wrapperStyle={{ fontSize: 10 }} />
+                  <Line type="monotone" dataKey="in" name="입금" stroke={REPORT_TEAL} strokeWidth={2.4} dot={{ r: 3, fill: REPORT_TEAL }} activeDot={{ r: 5 }} />
+                  <Line type="monotone" dataKey="out" name="출금" stroke="#b91c1c" strokeWidth={2.2} dot={{ r: 3, fill: '#b91c1c' }} />
+                  <Line type="monotone" dataKey="net" name="NET" stroke={REPORT_DARK_TEAL} strokeWidth={2} strokeDasharray="4 4" dot={{ r: 3, fill: REPORT_DARK_TEAL }} />
+                </LineChart>
               </ResponsiveContainer>
             </div>
           </CardContent>
         </Card>
 
-        <Card className="shadow-sm border-border/50">
+        <Card className="rounded-none border border-[#d7d7d7] bg-white shadow-none">
           <CardHeader className="pb-2">
-            <CardTitle className="text-[13px] flex items-center gap-2">
-              <div className="w-6 h-6 rounded-md bg-indigo-50 dark:bg-indigo-950/40 flex items-center justify-center">
-                <Layers className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-              </div>
-              항목별 입출금
-            </CardTitle>
+            <CardTitle>{reportSectionTitle('항목별 입출금', Layers)}</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="h-[280px]">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={categoryChartData} layout="vertical" barGap={2}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                  <XAxis type="number" tickFormatter={(v: number) => fmtShort(v)} tick={{ fontSize: 10, fill: '#94a3b8' }} />
-                  <YAxis type="category" dataKey="name" width={70} tick={{ fontSize: 10, fill: '#64748b' }} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e6e6e6" />
+                  <XAxis type="number" tickFormatter={(value: number) => fmtShort(value)} tick={{ fontSize: 10, fill: REPORT_GRAY }} />
+                  <YAxis type="category" dataKey="name" width={76} tick={{ fontSize: 10, fill: '#4f565a' }} />
                   <RTooltip
-                    formatter={(v: number) => fmt(v) + '원'}
-                    contentStyle={{ borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 11, boxShadow: '0 4px 12px rgba(0,0,0,0.06)' }}
+                    formatter={(value: number) => `${fmt(value)}원`}
+                    contentStyle={{ borderRadius: 0, border: '1px solid #c7c7c7', fontSize: 11, boxShadow: 'none' }}
                   />
                   <Legend wrapperStyle={{ fontSize: 10 }} />
-                  <Bar dataKey="입금" fill="#10b981" radius={[0, 3, 3, 0]} />
-                  <Bar dataKey="출금" fill="#f43f5e" radius={[0, 3, 3, 0]} />
+                  <Bar dataKey="입금" fill={REPORT_TEAL} radius={[0, 0, 0, 0]} />
+                  <Bar dataKey="출금" fill="#bdbdbd" radius={[0, 0, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -305,107 +535,158 @@ export function CashflowAnalyticsPage() {
         </Card>
       </div>
 
-      {/* Tables */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Card className="shadow-sm border-border/50">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+        <Card className="rounded-none border border-[#d7d7d7] bg-white shadow-none">
           <CardHeader className="pb-2">
-            <CardTitle className="text-[13px] flex items-center gap-2">
-              <div className="w-6 h-6 rounded-md bg-emerald-50 dark:bg-emerald-950/40 flex items-center justify-center">
-                <BarChart3 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-              </div>
-              항목별 상세
-            </CardTitle>
+            <CardTitle>{reportSectionTitle('사업별 집계', BarChart3)}</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="text-[10px]">항목</TableHead>
-                    <TableHead className="text-right text-[10px]">입금</TableHead>
-                    <TableHead className="text-right text-[10px]">출금</TableHead>
-                    <TableHead className="text-right text-[10px]">NET</TableHead>
-                    <TableHead className="text-center text-[10px]">건수</TableHead>
+                    <TableHead className="min-w-[170px] bg-[#e5e5e5] text-[10px] text-zinc-900">사업</TableHead>
+                    <TableHead className="bg-[#e5e5e5] text-[10px] text-zinc-900">부서</TableHead>
+                    <TableHead className="bg-[#e5e5e5] text-right text-[10px] text-zinc-900">입금</TableHead>
+                    <TableHead className="bg-[#e5e5e5] text-right text-[10px] text-zinc-900">사업비</TableHead>
+                    <TableHead className="bg-[#e5e5e5] text-right text-[10px] text-zinc-900">매입VAT</TableHead>
+                    <TableHead className="bg-[#e5e5e5] text-right text-[10px] text-zinc-900">매출VAT</TableHead>
+                    <TableHead className="bg-[#e5e5e5] text-right text-[10px] text-zinc-900">예수금</TableHead>
+                    <TableHead className="bg-[#e5e5e5] text-center text-[10px] text-zinc-900">건수</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {categoryData.map(c => (
-                    <TableRow key={c.category} className="hover:bg-muted/50 h-9">
-                      <TableCell className="text-[11px]" style={{ fontWeight: 500 }}>{c.label}</TableCell>
-                      <TableCell className="text-right text-[11px] text-emerald-600" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                        {c.inAmt > 0 ? fmtShort(c.inAmt) : '-'}
+                  {analytics.projectRows.map((row) => (
+                    <TableRow key={row.projectId} className="h-9 border-[#d6d6d6] hover:bg-[#f6fbfb]">
+                      <TableCell className="max-w-[220px] text-[11px]" style={{ fontWeight: 600 }}>
+                        <div className="truncate">{row.name}</div>
+                        <div className="text-[10px] text-muted-foreground">{row.typeLabel}</div>
                       </TableCell>
-                      <TableCell className="text-right text-[11px] text-rose-600" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                        {c.outAmt > 0 ? fmtShort(c.outAmt) : '-'}
-                      </TableCell>
-                      <TableCell className={`text-right text-[11px] ${(c.inAmt - c.outAmt) >= 0 ? 'text-emerald-600' : 'text-rose-600'}`} style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
-                        {fmtShort(c.inAmt - c.outAmt)}
+                      <TableCell className="whitespace-nowrap text-[10px] text-[#6f7478]">{row.department}</TableCell>
+                      <TableCell className="text-right text-[11px]" style={{ color: REPORT_TEAL, fontVariantNumeric: 'tabular-nums' }}>{fmtShort(row.totalIn)}</TableCell>
+                      <TableCell className="text-right text-[11px] text-rose-600" style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtShort(row.expenseAmount)}</TableCell>
+                      <TableCell className="text-right text-[11px]" style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtShort(row.inputVat)}</TableCell>
+                      <TableCell className="text-right text-[11px]" style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtShort(row.outputVat)}</TableCell>
+                      <TableCell className={`text-right text-[11px] ${row.withholdingBalance >= 0 ? 'text-zinc-900' : 'text-rose-700'}`} style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                        {fmtShort(row.withholdingBalance)}
                       </TableCell>
                       <TableCell className="text-center">
-                        <span className="text-[10px] bg-muted text-muted-foreground px-1.5 py-0.5 rounded-md" style={{ fontWeight: 600 }}>{c.count}</span>
+                        <span className="border border-[#c7c7c7] bg-white px-1.5 py-0.5 text-[10px] text-zinc-700" style={{ fontWeight: 700 }}>{row.count}</span>
                       </TableCell>
                     </TableRow>
                   ))}
-                  <TableRow className="border-t-2 border-border bg-muted/30">
-                    <TableCell className="text-[11px]" style={{ fontWeight: 700 }}>합계</TableCell>
-                    <TableCell className="text-right text-[11px] text-emerald-700" style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtShort(totals.totalIn)}</TableCell>
-                    <TableCell className="text-right text-[11px] text-rose-700" style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtShort(totals.totalOut)}</TableCell>
-                    <TableCell className={`text-right text-[11px] ${totals.net >= 0 ? 'text-emerald-700' : 'text-rose-700'}`} style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
-                      {fmtShort(totals.net)}
-                    </TableCell>
-                    <TableCell className="text-center text-[11px]" style={{ fontWeight: 700 }}>{totals.count}</TableCell>
-                  </TableRow>
+                  {analytics.projectRows.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={8} className="py-8 text-center text-[12px] text-muted-foreground">조회 조건에 맞는 사업 집계가 없습니다.</TableCell>
+                    </TableRow>
+                  )}
                 </TableBody>
               </Table>
             </div>
           </CardContent>
         </Card>
 
-        <Card className="shadow-sm border-border/50">
+        <Card className="rounded-none border border-[#d7d7d7] bg-white shadow-none">
           <CardHeader className="pb-2">
-            <CardTitle className="text-[13px] flex items-center gap-2">
-              <div className="w-6 h-6 rounded-md bg-violet-50 dark:bg-violet-950/40 flex items-center justify-center">
-                <Layers className="w-3.5 h-3.5 text-violet-600 dark:text-violet-400" />
-              </div>
-              프로젝트별 상세
-            </CardTitle>
+            <CardTitle>{reportSectionTitle('항목별 상세', ReceiptText)}</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="text-[10px] min-w-[120px]">프로젝트</TableHead>
-                    <TableHead className="text-[10px]">유형</TableHead>
-                    <TableHead className="text-right text-[10px]">입금</TableHead>
-                    <TableHead className="text-right text-[10px]">출금</TableHead>
-                    <TableHead className="text-right text-[10px]">NET</TableHead>
+                    <TableHead className="bg-[#e5e5e5] text-[10px] text-zinc-900">항목</TableHead>
+                    <TableHead className="bg-[#e5e5e5] text-right text-[10px] text-zinc-900">입금</TableHead>
+                    <TableHead className="bg-[#e5e5e5] text-right text-[10px] text-zinc-900">출금</TableHead>
+                    <TableHead className="bg-[#e5e5e5] text-right text-[10px] text-zinc-900">VAT</TableHead>
+                    <TableHead className="bg-[#e5e5e5] text-center text-[10px] text-zinc-900">건수</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {projectData.map(p => (
-                    <TableRow key={p.projectId} className="hover:bg-muted/50 h-9">
-                      <TableCell className="text-[11px] max-w-[140px] truncate" style={{ fontWeight: 500 }}>{p.name}</TableCell>
-                      <TableCell className="text-[10px] text-muted-foreground whitespace-nowrap">
-                        {PROJECT_TYPE_SHORT_LABELS[p.type as ProjectType] || p.type}
+                  {analytics.categoryRows.map((row) => (
+                    <TableRow key={row.category} className="h-9 border-[#d6d6d6] hover:bg-[#f6fbfb]">
+                      <TableCell className="text-[11px]" style={{ fontWeight: 600 }}>{row.label}</TableCell>
+                      <TableCell className="text-right text-[11px]" style={{ color: REPORT_TEAL, fontVariantNumeric: 'tabular-nums' }}>{row.inAmt > 0 ? fmtShort(row.inAmt) : '-'}</TableCell>
+                      <TableCell className="text-right text-[11px] text-rose-600" style={{ fontVariantNumeric: 'tabular-nums' }}>{row.outAmt > 0 ? fmtShort(row.outAmt) : '-'}</TableCell>
+                      <TableCell className="text-right text-[11px]" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                        {fmtShort(row.outputVat - row.inputVat - row.vatRefund)}
                       </TableCell>
-                      <TableCell className="text-right text-[11px] text-emerald-600" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                        {fmtShort(p.inAmt)}
-                      </TableCell>
-                      <TableCell className="text-right text-[11px] text-rose-600" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                        {fmtShort(p.outAmt)}
-                      </TableCell>
-                      <TableCell className={`text-right text-[11px] ${(p.inAmt - p.outAmt) >= 0 ? 'text-emerald-600' : 'text-rose-600'}`} style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
-                        {fmtShort(p.inAmt - p.outAmt)}
+                      <TableCell className="text-center">
+                        <span className="border border-[#c7c7c7] bg-white px-1.5 py-0.5 text-[10px] text-zinc-700" style={{ fontWeight: 700 }}>{row.count}</span>
                       </TableCell>
                     </TableRow>
                   ))}
+                  {analytics.categoryRows.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={5} className="py-8 text-center text-[12px] text-muted-foreground">조회 조건에 맞는 항목 집계가 없습니다.</TableCell>
+                    </TableRow>
+                  )}
                 </TableBody>
               </Table>
             </div>
           </CardContent>
         </Card>
       </div>
+
+      <Card className="rounded-none border border-[#d7d7d7] bg-white shadow-none">
+        <CardHeader className="pb-2">
+          <CardTitle>{reportSectionTitle('통장사용내역 상세', ClipboardList)}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="min-w-[92px] bg-[#e5e5e5] text-[10px] text-zinc-900">거래일</TableHead>
+                  <TableHead className="min-w-[180px] bg-[#e5e5e5] text-[10px] text-zinc-900">사업</TableHead>
+                  <TableHead className="bg-[#e5e5e5] text-[10px] text-zinc-900">상태</TableHead>
+                  <TableHead className="bg-[#e5e5e5] text-[10px] text-zinc-900">구분</TableHead>
+                  <TableHead className="min-w-[120px] bg-[#e5e5e5] text-[10px] text-zinc-900">거래처</TableHead>
+                  <TableHead className="min-w-[120px] bg-[#e5e5e5] text-[10px] text-zinc-900">cashflow 항목</TableHead>
+                  <TableHead className="bg-[#e5e5e5] text-right text-[10px] text-zinc-900">통장금액</TableHead>
+                  <TableHead className="bg-[#e5e5e5] text-right text-[10px] text-zinc-900">사업비</TableHead>
+                  <TableHead className="bg-[#e5e5e5] text-right text-[10px] text-zinc-900">매입VAT</TableHead>
+                  <TableHead className="bg-[#e5e5e5] text-right text-[10px] text-zinc-900">매출VAT</TableHead>
+                  <TableHead className="min-w-[180px] bg-[#e5e5e5] text-[10px] text-zinc-900">메모</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {analytics.transactions.map((transaction) => (
+                  <TableRow key={transaction.id} className="h-9 border-[#d6d6d6] hover:bg-[#f6fbfb]">
+                    <TableCell className="whitespace-nowrap text-[11px]">{transaction.dateTime.slice(0, 10)}</TableCell>
+                    <TableCell className="max-w-[240px] text-[11px]">
+                      <div className="truncate" style={{ fontWeight: 600 }}>{transaction.projectName}</div>
+                      <div className="text-[10px] text-[#6f7478]">{transaction.projectDepartment} · {transaction.projectTypeLabel}</div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge className={`h-5 border px-1.5 text-[10px] ${stateBadgeClass(transaction.state)}`}>
+                        {STATE_LABELS[transaction.state]}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className={transaction.direction === 'IN' ? 'text-[11px] text-emerald-700' : 'text-[11px] text-rose-700'} style={{ fontWeight: 700 }}>
+                      {DIRECTION_LABELS[transaction.direction]}
+                    </TableCell>
+                    <TableCell className="max-w-[160px] truncate text-[11px]">{transaction.counterparty || '-'}</TableCell>
+                    <TableCell className="whitespace-nowrap text-[11px]">{CASHFLOW_CATEGORY_LABELS[transaction.cashflowCategory]}</TableCell>
+                    <TableCell className={`text-right text-[11px] ${transaction.direction === 'IN' ? '' : 'text-rose-700'}`} style={{ color: transaction.direction === 'IN' ? REPORT_TEAL : undefined, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                      {transaction.direction === 'IN' ? '+' : '-'}{fmt(transaction.amounts.bankAmount)}
+                    </TableCell>
+                    <TableCell className="text-right text-[11px]" style={{ fontVariantNumeric: 'tabular-nums' }}>{transaction.amounts.expenseAmount > 0 ? fmt(transaction.amounts.expenseAmount) : '-'}</TableCell>
+                    <TableCell className="text-right text-[11px]" style={{ fontVariantNumeric: 'tabular-nums' }}>{transaction.amounts.vatIn > 0 ? fmt(transaction.amounts.vatIn) : '-'}</TableCell>
+                    <TableCell className="text-right text-[11px]" style={{ fontVariantNumeric: 'tabular-nums' }}>{transaction.amounts.vatOut > 0 ? fmt(transaction.amounts.vatOut) : '-'}</TableCell>
+                    <TableCell className="max-w-[260px] truncate text-[11px] text-[#6f7478]">{transaction.memo || '-'}</TableCell>
+                  </TableRow>
+                ))}
+                {analytics.transactions.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={11} className="py-8 text-center text-[12px] text-muted-foreground">조회 조건에 맞는 통장사용내역이 없습니다.</TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
