@@ -89,25 +89,23 @@ function CfMetric({
   bgColor: string;
 }) {
   return (
-    <Card className="overflow-hidden rounded-none border border-[#d7d7d7] bg-white shadow-none">
+    <Card className="min-h-[118px] overflow-hidden rounded-none border border-[#c7c7c7] bg-white shadow-none">
       <CardContent className="p-0">
-        <div className="relative p-4">
-          <div className="absolute left-0 right-0 top-0 h-[2px]" style={{ background: color }} />
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <p className="mb-1 text-[11px] text-[#6f7478]" style={{ fontWeight: 700 }}>{label}</p>
-              <p
-                className="text-[21px]"
-                style={{ fontWeight: 800, fontVariantNumeric: 'tabular-nums', lineHeight: 1.1, color }}
-              >
-                {value}
-              </p>
-              {sub && <p className="mt-1 truncate text-[10px] text-[#8a8f94]">{sub}</p>}
-            </div>
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-sm" style={{ background: bgColor }}>
-              <Icon className="h-4.5 w-4.5" style={{ color }} />
-            </div>
-          </div>
+        <div className="flex h-8 items-center justify-between border-b border-[#d7d7d7] bg-[#f1f2f2] px-3">
+          <p className="text-[11px] text-[#4f565a]" style={{ fontWeight: 800 }}>{label}</p>
+          <span className="flex h-5 w-5 items-center justify-center border border-[#d7d7d7] bg-white" style={{ borderBottomColor: color }}>
+            <Icon className="h-3.5 w-3.5" style={{ color }} />
+          </span>
+        </div>
+        <div className="px-4 py-3">
+          <p
+            className="text-[24px]"
+            style={{ fontWeight: 900, fontVariantNumeric: 'tabular-nums', lineHeight: 1.05, color }}
+          >
+            {value}
+          </p>
+          <div className="mt-2 h-px w-9" style={{ background: bgColor }} />
+          {sub && <p className="mt-2 truncate text-[10px] text-[#7d8286]">{sub}</p>}
         </div>
       </CardContent>
     </Card>
@@ -240,9 +238,9 @@ export function CashflowAnalyticsPage() {
         <div className="absolute left-0 top-12 h-12 w-2 bg-[#b8b8b8]" />
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0 pl-3">
-            <p className="text-[13px]" style={{ color: REPORT_TEAL, fontWeight: 800 }}>Cashflow Admin Report</p>
+            <p className="text-[13px]" style={{ color: REPORT_TEAL, fontWeight: 800 }}>Bank Transaction Admin Report</p>
             <h1 className="mt-2 text-[28px] leading-tight text-zinc-950" style={{ fontWeight: 900 }}>
-              캐시플로 분석
+              입출금 분석
             </h1>
             <p className="mt-2 text-[12px] text-[#6f7478]">
               사업·통장사용내역 기반 조회/필터/집계 · 현재 조건 {totals.count}건
@@ -250,7 +248,7 @@ export function CashflowAnalyticsPage() {
           </div>
           <div className="hidden text-right sm:block">
             <p className="text-[34px] leading-none text-[#c9c9c9]" style={{ fontWeight: 900 }}>2026</p>
-            <p className="text-[11px] text-[#7d8286]" style={{ fontWeight: 800 }}>MYSC Cashflow Guide</p>
+            <p className="text-[11px] text-[#7d8286]" style={{ fontWeight: 800 }}>MYSC Bank Use Guide</p>
           </div>
         </div>
       </section>
@@ -388,32 +386,32 @@ export function CashflowAnalyticsPage() {
           label="총 입금"
           value={fmtShort(totals.totalIn)}
           sub={`${fmt(totals.depositAmount)}원 입금액`}
-          color="#059669"
-          bgColor="#05966912"
+          color={REPORT_TEAL}
+          bgColor="#008c8633"
         />
         <CfMetric
           icon={ArrowDownRight}
           label="총 출금"
           value={fmtShort(totals.totalOut)}
           sub={`${fmt(totals.expenseAmount)}원 사업비`}
-          color="#e11d48"
-          bgColor="#e11d4812"
+          color="#b91c1c"
+          bgColor="#b91c1c33"
         />
         <CfMetric
           icon={ArrowDownUp}
           label="NET (순현금)"
           value={fmtShort(totals.net)}
           sub={totals.net >= 0 ? '입금 초과' : '출금 초과'}
-          color={totals.net >= 0 ? '#059669' : '#e11d48'}
-          bgColor={totals.net >= 0 ? '#05966912' : '#e11d4812'}
+          color={totals.net >= 0 ? REPORT_DARK_TEAL : '#b91c1c'}
+          bgColor={totals.net >= 0 ? '#00766f33' : '#b91c1c33'}
         />
         <CfMetric
           icon={Hash}
           label="거래 건수"
           value={`${totals.count}건`}
           sub={`승인 ${totals.approved}건`}
-          color="#4f46e5"
-          bgColor="#4f46e512"
+          color="#52525b"
+          bgColor="#71717a33"
         />
       </div>
 
@@ -423,32 +421,32 @@ export function CashflowAnalyticsPage() {
           label="매입부가세"
           value={fmtShort(totals.inputVat)}
           sub={`${fmt(totals.inputVat)}원`}
-          color="#b45309"
-          bgColor="#b4530912"
+          color="#8a5a22"
+          bgColor="#8a5a2233"
         />
         <CfMetric
           icon={WalletCards}
           label="매출부가세"
           value={fmtShort(totals.outputVat)}
           sub={`${fmt(totals.outputVat)}원`}
-          color="#0f766e"
-          bgColor="#0f766e12"
+          color={REPORT_DARK_TEAL}
+          bgColor="#00766f33"
         />
         <CfMetric
           icon={TrendingUp}
           label="부가세 환급"
           value={fmtShort(totals.vatRefund)}
           sub={`${fmt(totals.vatRefund)}원`}
-          color="#2563eb"
-          bgColor="#2563eb12"
+          color="#4f6f96"
+          bgColor="#4f6f9633"
         />
         <CfMetric
           icon={ClipboardList}
           label="예수금 잔액"
           value={fmtShort(totals.withholdingBalance)}
           sub="매출부가세 - 매입부가세 - 환급"
-          color={totals.withholdingBalance >= 0 ? '#7c3aed' : '#dc2626'}
-          bgColor={totals.withholdingBalance >= 0 ? '#7c3aed12' : '#dc262612'}
+          color={totals.withholdingBalance >= 0 ? '#52525b' : '#b91c1c'}
+          bgColor={totals.withholdingBalance >= 0 ? '#71717a33' : '#b91c1c33'}
         />
       </div>
 
