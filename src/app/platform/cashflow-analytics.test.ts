@@ -185,4 +185,19 @@ describe('cashflow analytics', () => {
       }),
     ]);
   });
+
+  it('does not over-constrain a selected project with stale type and department filters', () => {
+    const analytics = buildCashflowAnalytics({
+      transactions,
+      projects,
+      filters: {
+        projectId: 'p-consulting',
+        projectType: 'A2',
+        department: '글로벌팀',
+      },
+    });
+
+    expect(analytics.transactions.map((item) => item.id)).toEqual(['refund-1', 'out-1', 'in-1']);
+    expect(analytics.totals.count).toBe(3);
+  });
 });

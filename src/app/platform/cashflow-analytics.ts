@@ -110,6 +110,7 @@ function dateOnly(value: string): string {
 }
 
 function projectMatches(project: Project | undefined, filters: CashflowAnalyticsFilters): boolean {
+  if (!isAll(filters.projectId)) return true;
   if (!project) return isAll(filters.projectType) && isAll(filters.department);
   if (!isAll(filters.projectType) && project.type !== filters.projectType) return false;
   if (!isAll(filters.department) && project.department !== filters.department) return false;

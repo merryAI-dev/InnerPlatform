@@ -182,6 +182,14 @@ export function CashflowAnalyticsPage() {
     setCategoryFilter('ALL');
   };
 
+  const handleProjectFilterChange = (value: string) => {
+    setProjectFilter(value);
+    if (value !== 'ALL') {
+      setTypeFilter('ALL');
+      setDepartmentFilter('ALL');
+    }
+  };
+
   const { totals } = analytics;
 
   return (
@@ -212,7 +220,7 @@ export function CashflowAnalyticsPage() {
           )}
         </div>
         <div className="grid gap-2 md:grid-cols-4 xl:grid-cols-8">
-          <Select value={projectFilter} onValueChange={setProjectFilter}>
+          <Select value={projectFilter} onValueChange={handleProjectFilterChange}>
             <SelectTrigger className="h-8 text-[11px]"><SelectValue placeholder="사업" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="ALL">전체 사업</SelectItem>
@@ -221,7 +229,7 @@ export function CashflowAnalyticsPage() {
               ))}
             </SelectContent>
           </Select>
-          <Select value={typeFilter} onValueChange={setTypeFilter}>
+          <Select value={typeFilter} onValueChange={setTypeFilter} disabled={projectFilter !== 'ALL'}>
             <SelectTrigger className="h-8 text-[11px]"><SelectValue placeholder="유형" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="ALL">전체 유형</SelectItem>
@@ -230,7 +238,7 @@ export function CashflowAnalyticsPage() {
               ))}
             </SelectContent>
           </Select>
-          <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
+          <Select value={departmentFilter} onValueChange={setDepartmentFilter} disabled={projectFilter !== 'ALL'}>
             <SelectTrigger className="h-8 text-[11px]"><SelectValue placeholder="부서" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="ALL">전체 부서</SelectItem>
