@@ -13,13 +13,12 @@ import {
   WalletCards,
 } from 'lucide-react';
 import {
-  Area,
-  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
   Legend,
   Line,
+  LineChart,
   ResponsiveContainer,
   Tooltip as RTooltip,
   XAxis,
@@ -284,7 +283,6 @@ export function CashflowAnalyticsPage() {
           </div>
           <div className="hidden text-right sm:block">
             <p className="text-[34px] leading-none text-[#c9c9c9]" style={{ fontWeight: 900 }}>2026</p>
-            <p className="text-[11px] text-[#7d8286]" style={{ fontWeight: 800 }}>MYSC Bank Use Guide</p>
           </div>
         </div>
       </section>
@@ -494,17 +492,7 @@ export function CashflowAnalyticsPage() {
           <CardContent>
             <div className="h-[280px]">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={analytics.monthlyRows}>
-                  <defs>
-                    <linearGradient id="gIn" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.15} />
-                      <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="gOut" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.12} />
-                      <stop offset="95%" stopColor="#f43f5e" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
+                <LineChart data={analytics.monthlyRows}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e6e6e6" />
                   <XAxis dataKey="month" tick={{ fontSize: 10, fill: REPORT_GRAY }} tickFormatter={(value: string) => value.slice(5)} />
                   <YAxis tickFormatter={(value: number) => fmtShort(value)} tick={{ fontSize: 10, fill: REPORT_GRAY }} width={55} />
@@ -512,10 +500,11 @@ export function CashflowAnalyticsPage() {
                     formatter={(value: number, name: string) => [(`${fmt(value)}원`), name === 'in' ? '입금' : name === 'out' ? '출금' : 'NET']}
                     contentStyle={{ borderRadius: 0, border: '1px solid #c7c7c7', fontSize: 11, boxShadow: 'none' }}
                   />
-                  <Area type="monotone" dataKey="in" name="in" stroke={REPORT_TEAL} strokeWidth={2} fill="url(#gIn)" />
-                  <Area type="monotone" dataKey="out" name="out" stroke="#a7a7a7" strokeWidth={2} fill="url(#gOut)" />
-                  <Line type="monotone" dataKey="net" name="net" stroke={REPORT_DARK_TEAL} strokeWidth={2} strokeDasharray="4 4" dot={{ r: 3, fill: REPORT_DARK_TEAL }} />
-                </AreaChart>
+                  <Legend wrapperStyle={{ fontSize: 10 }} />
+                  <Line type="monotone" dataKey="in" name="입금" stroke={REPORT_TEAL} strokeWidth={2.4} dot={{ r: 3, fill: REPORT_TEAL }} activeDot={{ r: 5 }} />
+                  <Line type="monotone" dataKey="out" name="출금" stroke="#b91c1c" strokeWidth={2.2} dot={{ r: 3, fill: '#b91c1c' }} />
+                  <Line type="monotone" dataKey="net" name="NET" stroke={REPORT_DARK_TEAL} strokeWidth={2} strokeDasharray="4 4" dot={{ r: 3, fill: REPORT_DARK_TEAL }} />
+                </LineChart>
               </ResponsiveContainer>
             </div>
           </CardContent>

@@ -18,4 +18,13 @@ describe('CashflowAnalyticsPage copy', () => {
     expect(typeIndex).toBeGreaterThan(organizationIndex);
     expect(projectIndex).toBeGreaterThan(typeIndex);
   });
+
+  it('removes the bank guide label from the report header', () => {
+    expect(source).not.toContain('MYSC Bank Use Guide');
+  });
+
+  it('renders the monthly bank usage trend as a line chart', () => {
+    expect(source).toContain('<LineChart data={analytics.monthlyRows}>');
+    expect(source).not.toContain('<AreaChart data={analytics.monthlyRows}>');
+  });
 });
