@@ -136,6 +136,29 @@ describe('project-migration-console', () => {
     expect(filtered[0].project.id).toBe('p-2');
   });
 
+  it('uses the latest project request when multiple requests point to the same project', () => {
+    const records = buildMigrationAuditConsoleRecords(
+      [makeProject({ id: 'p-1' })],
+      [
+        makeRequest({
+          id: 'old-request',
+          approvedProjectId: 'p-1',
+          requestedAt: '2026-04-20T08:00:00.000Z',
+          payload: { ...makeRequest().payload, note: 'old' },
+        }),
+        makeRequest({
+          id: 'new-request',
+          approvedProjectId: 'p-1',
+          requestedAt: '2026-04-21T08:00:00.000Z',
+          payload: { ...makeRequest().payload, note: 'new' },
+        }),
+      ],
+    );
+
+    expect(records[0].request?.id).toBe('new-request');
+    expect(records[0].request?.payload.note).toBe('new');
+  });
+
   it('summarizes review queue counts by executive outcome across all projects', () => {
     const records = buildMigrationAuditConsoleRecords(
       [

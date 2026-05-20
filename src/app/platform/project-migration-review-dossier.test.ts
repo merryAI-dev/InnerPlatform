@@ -19,7 +19,7 @@ const project: Project = {
   basis: '공급가액',
   accountType: 'NONE',
   fundInputMode: 'DIRECT_ENTRY',
-  paymentPlan: { contract: 40, interim: 30, final: 30 },
+  paymentPlan: { contract: 48000000, interim: 36000000, final: 36000000 },
   paymentPlanDesc: '선금 40%, 중도금 30%, 잔금 30%',
   clientOrg: 'KOICA',
   groupwareName: '2026 다자간협력 운영',
@@ -40,7 +40,7 @@ const project: Project = {
   contractAnalysis: {
     provider: 'heuristic',
     model: 'fallback',
-    summary: '계약서에서 사업 기간과 계약금액이 식별되었습니다.',
+    summary: '계약서에서 계약 기간과 계약금액이 식별되었습니다.',
     warnings: ['계약 대상 기관은 사람이 다시 확인해 주세요.'],
     nextActions: ['최종 공식 계약명을 확인하세요.'],
     extractedAt: '2026-04-19T09:01:00Z',
@@ -66,7 +66,7 @@ const project: Project = {
   profitRate: 0.18,
   profitAmount: 21600000,
   isSettled: false,
-  finalPaymentNote: '',
+  finalPaymentNote: '잔금은 최종 검수 후 입금',
   confirmerName: '센터장A',
   lastCheckedAt: '2026-04-20T09:00:00Z',
   cashflowDiffNote: '',
@@ -127,10 +127,12 @@ describe('buildMigrationReviewDossier', () => {
 
     expect(dossier.headerTitle).toBe('2026 다자간협력');
     expect(dossier.identity.clientOrg).toBe('KOICA');
+    expect(dossier.identity.groupwareName).toBe('2026 다자간협력 운영');
     expect(dossier.identity.cic).toBe('CIC1');
     expect(dossier.identity.pmName).toBe('변민욱');
 
     expect(dossier.contract.projectTypeLabel).toBeTruthy();
+    expect(dossier.contract.contractType).toBe('계약서(날인)');
     expect(dossier.contract.periodLabel).toContain('2026-01-01');
     expect(dossier.contract.basisLabel).toBe('공급가액 기준');
     expect(dossier.contract.accountTypeLabel).toBe('일반 사업');
@@ -138,6 +140,8 @@ describe('buildMigrationReviewDossier', () => {
 
     expect(dossier.budget.contractAmountLabel).toContain('120,000,000');
     expect(dossier.budget.salesVatAmountLabel).toContain('10,000,000');
+    expect(dossier.budget.paymentPlanSplitLabel).toBe('선금/계약금 48,000,000원 (40%) · 중도금 36,000,000원 (30%) · 잔금 36,000,000원 (30%)');
+    expect(dossier.budget.finalPaymentNote).toBe('잔금은 최종 검수 후 입금');
     expect(dossier.people.teamName).toBe('임팩트 CIC');
     expect(dossier.people.members[0]).toContain('변민욱');
     expect(dossier.people.members[0]).toContain('PM');
@@ -146,23 +150,44 @@ describe('buildMigrationReviewDossier', () => {
     expect(dossier.notes.participantCondition).toContain('공동참여');
     expect(dossier.audit.requestedByName).toBe('변민욱');
     expect(dossier.audit.reviewedByName).toBe('임원A');
-    expect(dossier.analysis.summary).toContain('사업 기간과 계약금액');
+    expect(dossier.analysis.summary).toContain('계약 기간과 계약금액');
     expect(dossier.contractDocument.name).toBe('네팔_계약서.pdf');
     expect(dossier.contractDocument.downloadURL).toContain('contract.pdf');
   });
 
   it('falls back to project fields even when no project request document is attached', () => {
-    const dossier = buildMigrationReviewDossier(project, null);
+    const dossier = buildMigrationReviewDossier({
+      ...project,
+      contractType: '발주기관 전자시스템',
+    }, null);
 
     expect(dossier.headerTitle).toBe('2026 다자간협력');
     expect(dossier.identity.clientOrg).toBe('KOICA');
     expect(dossier.identity.cic).toBe('CIC1');
     expect(dossier.identity.pmName).toBe('변민욱');
+    expect(dossier.contract.contractType).toBe('전자계약 시스템');
     expect(dossier.contract.accountTypeLabel).toBe('일반 사업');
     expect(dossier.people.members[0]).toContain('변민욱');
     expect(dossier.audit.requestedByName).toBe('-');
     expect(dossier.audit.reviewedByName).toBe('-');
     expect(dossier.contractDocument.name).toBe('네팔_계약서.pdf');
+  });
+
+  it('normalizes legacy dropdown values before approval display formatting', () => {
+    const dossier = buildMigrationReviewDossier({
+      ...project,
+      type: 'UNKNOWN' as never,
+      settlementType: 'MONTHLY' as never,
+      basis: 'SUPPLY_AMOUNT' as never,
+      accountType: 'LEGACY_ACCOUNT' as never,
+      fundInputMode: 'MANUAL' as never,
+    }, null);
+
+    expect(dossier.contract.projectTypeLabel).toBe('D-1 개발협력사업 - AVPN 포함');
+    expect(dossier.contract.settlementTypeLabel).toBe('해당없음');
+    expect(dossier.contract.basisLabel).toBe('공급가액 기준');
+    expect(dossier.contract.accountTypeLabel).toBe('일반 사업');
+    expect(dossier.contract.fundInputModeLabel).toBe('통장내역 업로드');
   });
 
   it('includes executive review history entries with the latest reversal reason', () => {

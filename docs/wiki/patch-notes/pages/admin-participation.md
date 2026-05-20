@@ -3,11 +3,11 @@
 - route: `/participation`
 - primary users: 관리자, 인력 배정 운영자
 - status: active
-- last updated: 2026-04-14
+- last updated: 2026-05-20
 
 ## Purpose
 
-KOICA 및 교차검증 대상 사업의 참여율 합산과 위험 신호를 관리하는 관리자 화면이다.
+KOICA 및 교차검증 대상 프로젝트의 참여율 합산과 위험 신호를 관리하는 관리자 화면이다.
 
 ## Current UX Summary
 
@@ -24,6 +24,7 @@ KOICA 및 교차검증 대상 사업의 참여율 합산과 위험 신호를 관
 
 ## Recent Changes
 
+- [2026-05-20] 참여율 화면의 주요 표기와 fallback 문구를 `프로젝트명`, `계약 대상`, `프로젝트 수` 기준으로 맞춰 등록/수정/승인 화면의 프로젝트 용어와 충돌하지 않게 정리했다.
 - [2026-04-14] `4단계 프로토콜 가이드` 패널을 제거했다.
 
 ## Known Notes

@@ -17,6 +17,22 @@
       ]
     },
     {
+      "collectionGroup": "project_requests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "approvedProjectId", "order": "ASCENDING" },
+        { "fieldPath": "requestedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "projectRequests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "approvedProjectId", "order": "ASCENDING" },
+        { "fieldPath": "requestedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "ledgers",
       "queryScope": "COLLECTION",
       "fields": [

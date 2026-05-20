@@ -14,7 +14,7 @@ export interface PortalShellCommandItem {
   id: string;
   label: string;
   description: string;
-  category: '업무' | '사업' | '관리';
+  category: '업무' | '프로젝트' | '관리';
   kind: 'portal' | 'admin' | 'project';
   to: string;
   keywords: string[];
@@ -38,12 +38,12 @@ export function buildPortalShellCommandItems(input: {
   const projectItems = input.availableProjects.map((project) => ({
     id: `project:${project.id}`,
     label: project.name,
-    description: input.currentProject?.id === project.id ? '현재 작업 사업입니다.' : '현재 화면을 유지한 채 이 사업으로 전환',
-    category: '사업' as const,
+    description: input.currentProject?.id === project.id ? '현재 작업 프로젝트입니다.' : '현재 화면을 유지한 채 이 프로젝트로 전환',
+    category: '프로젝트' as const,
     kind: 'project' as const,
     to: switchPath,
     projectId: project.id,
-    keywords: [project.name, project.id, '담당 사업', '사업 전환', '현재 화면 유지'],
+    keywords: [project.name, project.id, '담당 프로젝트', '프로젝트 전환', '현재 화면 유지'],
   }));
 
   const adminItems = String(input.role || '').toLowerCase() === 'admin' || String(input.role || '').toLowerCase() === 'finance'

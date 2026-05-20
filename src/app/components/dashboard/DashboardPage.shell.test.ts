@@ -20,9 +20,11 @@ describe('DashboardPage shell contract', () => {
     expect(dashboardPageSource).toContain('payrollFinalUnconfirmedCount');
     expect(dashboardPageSource).toContain('resolvePayrollReviewQueue');
     expect(dashboardPageSource).toContain('증빙 큐');
-    expect(dashboardPageSource).toContain('승인 큐');
+    expect(dashboardPageSource).toContain('CIC 검토');
     expect(dashboardPageSource).not.toContain('캐시플로 추출');
     expect(dashboardPageSource).not.toContain('전체 사업');
+    expect(dashboardPageSource).not.toContain('사업 통합 대시보드');
+    expect(dashboardPageSource).not.toContain('전사 사업관리');
     expect(dashboardPageSource).not.toContain('최근 거래');
     expect(dashboardPageSource).not.toContain('캐시플로 이상치');
     expect(dashboardPageSource).not.toContain('인사 공지 (홈)');

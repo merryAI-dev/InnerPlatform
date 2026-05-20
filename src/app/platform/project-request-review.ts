@@ -9,6 +9,10 @@ import type {
 import {
   ACCOUNT_TYPE_LABELS,
   BASIS_LABELS,
+  normalizeAccountType,
+  normalizeBasis,
+  normalizeProjectFundInputMode,
+  normalizeSettlementType,
   PROJECT_FUND_INPUT_MODE_LABELS,
   SETTLEMENT_TYPE_LABELS,
 } from '../data/types';
@@ -77,10 +81,10 @@ export interface ProjectRequestReviewModel {
 }
 
 const ANALYSIS_FIELD_LABELS: Record<keyof ProjectRequestContractAnalysis['fields'], string> = {
-  officialContractName: '공식계약명',
-  suggestedProjectName: '등록명',
+  officialContractName: '공식 계약명',
+  suggestedProjectName: '프로젝트명',
   clientOrg: '계약 대상',
-  projectPurpose: '사업 목적',
+  projectPurpose: '프로젝트 목적',
   description: '주요 내용',
   contractStart: '계약 시작일',
   contractEnd: '계약 종료일',
@@ -177,7 +181,7 @@ function buildMoneyItem(
     label,
     value: formatShortAmount(value),
     status,
-    ...(flag === false && present ? { note: '수기/AI 입력값 재확인 필요' } : {}),
+    ...(flag === false && present ? { note: '입력값 재확인 필요' } : {}),
   };
 }
 
@@ -192,20 +196,20 @@ function buildSettlementPolicyItem(policy?: SettlementSheetPolicy | null): Proje
 }
 
 function formatSettlementType(value: ProjectRequestPayload['settlementType']): string {
-  return SETTLEMENT_TYPE_LABELS[value] || value;
+  return SETTLEMENT_TYPE_LABELS[normalizeSettlementType(value)] || value;
 }
 
 function formatBasis(value: ProjectRequestPayload['basis']): string {
-  return BASIS_LABELS[value] || value;
+  return BASIS_LABELS[normalizeBasis(value)] || value;
 }
 
 function formatAccountType(value: ProjectRequestPayload['accountType']): string {
-  return ACCOUNT_TYPE_LABELS[value] || value;
+  return ACCOUNT_TYPE_LABELS[normalizeAccountType(value)] || value;
 }
 
 function formatFundInputMode(value: ProjectRequestPayload['fundInputMode']): string {
   if (!value) return '-';
-  return PROJECT_FUND_INPUT_MODE_LABELS[value] || value;
+  return PROJECT_FUND_INPUT_MODE_LABELS[normalizeProjectFundInputMode(value)] || value;
 }
 
 function buildAnalysisHighlights(analysis?: ProjectRequestContractAnalysis | null): ProjectRequestReviewAnalysisHighlight[] {
@@ -233,27 +237,6 @@ function buildChecklistGroups(payload: ProjectRequestPayload, analysisHighlights
   );
 
   const contractAnalysis = payload.contractAnalysis;
-  const analysisItem: ProjectRequestReviewItem = contractAnalysis
-    ? {
-        key: 'contractAnalysis',
-        label: '계약 분석 초안',
-        value: contractAnalysis.summary || '요약 없음',
-        status: contractAnalysis.warnings.length > 0 || contractAnalysis.nextActions.length > 0
-          ? 'needs-check'
-          : 'ready',
-        ...(contractAnalysis.warnings.length > 0
-          ? { note: contractAnalysis.warnings[0] }
-          : contractAnalysis.nextActions[0]
-            ? { note: contractAnalysis.nextActions[0] }
-            : {}),
-      }
-    : {
-        key: 'contractAnalysis',
-        label: '계약 분석 초안',
-        value: '분석 없음',
-        status: 'missing',
-        note: '계약서 분석 초안을 업로드해 주세요.',
-    };
 
   const contractPeriodStatus = (() => {
     if (isBlank(payload.contractStart) || isBlank(payload.contractEnd)) return 'missing';
@@ -264,15 +247,15 @@ function buildChecklistGroups(payload: ProjectRequestPayload, analysisHighlights
   })();
 
   const identityItems: ProjectRequestReviewItem[] = [
-    buildTextItem('name', '등록명', payload.name),
-    buildTextItem('officialContractName', '공식계약명', payload.officialContractName, {
+    buildTextItem('name', '프로젝트명', payload.name),
+    buildTextItem('officialContractName', '공식 계약명', payload.officialContractName, {
       status: analysisStatusByKey.get('officialContractName') || undefined,
     }),
     buildTextItem('clientOrg', '계약 대상', payload.clientOrg, {
       status: analysisStatusByKey.get('clientOrg') || undefined,
     }),
-    buildTextItem('department', '담당조직', payload.department),
-    buildTextItem('managerName', '담당자', payload.managerName),
+    buildTextItem('department', '담당조직(CIC)', payload.department),
+    buildTextItem('managerName', 'PM', payload.managerName),
   ];
 
   const contractItems: ProjectRequestReviewItem[] = [
@@ -280,32 +263,46 @@ function buildChecklistGroups(payload: ProjectRequestPayload, analysisHighlights
       status: contractPeriodStatus,
     }),
     buildTextItem('contractDocument', '계약서 PDF', payload.contractDocument?.name || '', {
-      status: payload.contractDocument ? 'ready' : 'missing',
-      ...(payload.contractDocument ? {} : { note: '계약서 파일이 첨부되지 않았습니다.' }),
+      status: payload.contractDocument ? 'ready' : 'needs-check',
+      ...(payload.contractDocument ? {} : { note: '첨부 계약서가 없으면 5단계 입력값을 기준으로 검토합니다.' }),
     }),
-    analysisItem,
-    buildTextItem('projectPurpose', '사업 목적', payload.projectPurpose, {
+    buildTextItem('projectPurpose', '프로젝트 목적', payload.projectPurpose, {
       status: analysisStatusByKey.get('projectPurpose') || undefined,
     }),
     buildTextItem('description', '주요 내용', payload.description, {
       status: analysisStatusByKey.get('description') || undefined,
     }),
-    buildTextItem('participantCondition', '참여조건', payload.participantCondition),
+    buildTextItem('participantCondition', '참여 조건', payload.participantCondition),
   ];
+  if (contractAnalysis) {
+    contractItems.splice(2, 0, {
+      key: 'contractAnalysis',
+      label: '계약 검토 메모',
+      value: contractAnalysis.summary || '요약 없음',
+      status: contractAnalysis.warnings.length > 0 || contractAnalysis.nextActions.length > 0
+        ? 'needs-check'
+        : 'ready',
+      ...(contractAnalysis.warnings.length > 0
+        ? { note: contractAnalysis.warnings[0] }
+        : contractAnalysis.nextActions[0]
+          ? { note: contractAnalysis.nextActions[0] }
+          : {}),
+    });
+  }
 
   const financialItems: ProjectRequestReviewItem[] = [
     buildMoneyItem('contractAmount', '계약금액', payload.contractAmount, payload.financialInputFlags),
     buildMoneyItem('salesVatAmount', '매출 부가세', payload.salesVatAmount, payload.financialInputFlags),
     buildMoneyItem('totalRevenueAmount', '총수익', payload.totalRevenueAmount, payload.financialInputFlags),
     buildMoneyItem('supportAmount', '지원금', payload.supportAmount, payload.financialInputFlags),
-    buildTextItem('paymentPlanDesc', '입금계획', payload.paymentPlanDesc),
+    buildTextItem('paymentPlanDesc', '입금 계획', payload.paymentPlanDesc),
   ];
 
   const settlementItems: ProjectRequestReviewItem[] = [
     buildTextItem('settlementType', '정산 유형', formatSettlementType(payload.settlementType)),
     buildTextItem('basis', '정산 기준', formatBasis(payload.basis)),
-    buildTextItem('accountType', '계좌 유형', formatAccountType(payload.accountType)),
-    buildTextItem('fundInputMode', '입금 방식', formatFundInputMode(payload.fundInputMode)),
+    buildTextItem('accountType', '통장 유형', formatAccountType(payload.accountType)),
+    buildTextItem('fundInputMode', '자금 입력 방식', formatFundInputMode(payload.fundInputMode)),
     buildSettlementPolicyItem(payload.settlementSheetPolicy),
     buildTextItem('settlementGuide', '정산 가이드', payload.settlementGuide),
   ];
@@ -318,10 +315,10 @@ function buildChecklistGroups(payload: ProjectRequestPayload, analysisHighlights
 
   return [
     { key: 'identity', label: '기본 정보', items: identityItems },
-    { key: 'contract', label: '계약 및 증빙', items: contractItems },
-    { key: 'financial', label: '핵심 재무', items: financialItems },
+    { key: 'contract', label: '계약/운영', items: contractItems },
+    { key: 'financial', label: '계약/재무', items: financialItems },
     { key: 'settlement', label: '정산', items: settlementItems },
-    { key: 'team', label: '팀/비고', items: teamItems },
+    { key: 'team', label: '팀/인력', items: teamItems },
   ];
 }
 
@@ -340,12 +337,12 @@ function countNeedsCheck(groups: ProjectRequestReviewGroup[], analysis: ProjectR
   const checklistNeedsCheck = groups.flatMap((group) => group.items).filter((item) => item.status === 'needs-check').length;
   const analysisNeedsCheck = analysis.available
     ? analysis.warnings.length + analysis.highlights.filter((item) => item.status === 'needs-check').length
-    : 1;
+    : 0;
   return checklistNeedsCheck + analysisNeedsCheck;
 }
 
 export function buildProjectRequestReviewModel(request: ProjectRequest): ProjectRequestReviewModel {
-  const title = request.payload.name || request.payload.officialContractName || '사업 등록 요청';
+  const title = request.payload.name || request.payload.officialContractName || '프로젝트 등록 요청';
   const subtitle = `${request.requestedByName || request.requestedByEmail || '요청자'} · ${String(request.requestedAt || '').slice(0, 10) || '-'}`;
   const analysis = request.payload.contractAnalysis;
   const analysisHighlights = buildAnalysisHighlights(analysis);
@@ -355,9 +352,9 @@ export function buildProjectRequestReviewModel(request: ProjectRequest): Project
     available: !!analysis,
     providerLabel: analysis?.provider === 'anthropic' ? 'Anthropic' : analysis ? '휴리스틱' : '없음',
     model: analysis?.model || '-',
-    summary: analysis?.summary || '계약서 분석 초안이 없습니다.',
-    warnings: analysis?.warnings || ['계약서 분석이 없습니다.'],
-    nextActions: analysis?.nextActions || ['계약서 PDF와 핵심 정보를 먼저 보완하세요.'],
+    summary: analysis?.summary || '계약 검토 메모가 없습니다.',
+    warnings: analysis?.warnings || [],
+    nextActions: analysis?.nextActions || [],
     highlights: analysisHighlights,
   };
   const needsCheckCount = countNeedsCheck(checklistGroups, analysisModel);
@@ -378,7 +375,7 @@ export function buildProjectRequestReviewModel(request: ProjectRequest): Project
       { label: `${missingFields.length}건 누락`, tone: missingFields.length > 0 ? 'critical' : 'success' },
       { label: `${needsCheckCount}건 확인 필요`, tone: needsCheckCount > 0 ? 'warning' : 'neutral' },
       { label: request.payload.contractDocument ? '계약서 첨부' : '계약서 없음', tone: request.payload.contractDocument ? 'success' : 'critical' },
-      { label: analysis?.summary ? 'AI 분석 있음' : 'AI 분석 없음', tone: analysis?.summary ? 'neutral' : 'warning' },
+      { label: analysis?.summary ? '계약 검토 메모 있음' : '계약 검토 메모 없음', tone: analysis?.summary ? 'neutral' : 'warning' },
     ],
     missingFields,
     analysis: analysisModel,

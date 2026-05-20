@@ -292,7 +292,7 @@ export function DashboardPage() {
     },
     {
       key: 'approvals',
-      label: '승인 큐',
+      label: 'CIC 검토',
       detail: `대기 ${pendingApprovalCount}건 · 반려 ${rejectedTransactionCount}건`,
       count: pendingApprovalCount,
       countLabel: '건',
@@ -303,7 +303,7 @@ export function DashboardPage() {
     {
       key: 'projects',
       label: '프로젝트 정리',
-      detail: `갱신 지연 ${staleProjectCount}개 · 위험 사업은 상세 화면에서 추적`,
+      detail: `갱신 지연 ${staleProjectCount}개 · 위험 프로젝트는 상세 화면에서 추적`,
       count: staleProjectCount,
       countLabel: '개',
       to: '/projects',
@@ -317,8 +317,8 @@ export function DashboardPage() {
       <PageHeader
         icon={LayoutDashboard}
         iconGradient="linear-gradient(135deg, #4f46e5, #7c3aed)"
-        title="사업 통합 대시보드"
-        description={`전사 사업관리 현황 모니터링 · ${projects.length}개 사업 추적 중`}
+        title="프로젝트 통합 대시보드"
+        description={`전사 프로젝트 관리 현황 모니터링 · ${projects.length}개 프로젝트 추적 중`}
         actions={
           <div className="flex items-center gap-2">
             <Button

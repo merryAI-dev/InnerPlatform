@@ -34,12 +34,12 @@ export function MigrationAuditControlBar({
       <CardContent className="space-y-4 p-4">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Executive Review</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">대표 검토</p>
             <h2 className="mt-1 text-[22px] font-semibold tracking-[-0.03em] text-slate-950">
-              PM 등록 프로젝트 리뷰
+              PM 등록 프로젝트 검토
             </h2>
             <p className="mt-1 text-[12px] leading-6 text-slate-600">
-              CIC와 상태만 먼저 좁힌 뒤, 우측에서 PM이 포털에서 입력한 내용을 그대로 읽고 CIC 대표 리뷰 판단을 내립니다.
+              CIC와 상태만 먼저 좁힌 뒤, 우측에서 PM이 포털에서 입력한 내용을 그대로 읽고 CIC 대표 검토 판단을 내립니다.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">

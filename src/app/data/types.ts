@@ -63,16 +63,33 @@ export const CASHFLOW_CATEGORY_LABELS: Record<CashflowCategory, string> = Object
 ) as Record<CashflowCategory, string>;
 
 export const PROJECT_STATUS_LABELS: Record<ProjectStatus, string> = {
-  CONTRACT_PENDING: '계약전',
-  IN_PROGRESS: '사업진행중',
-  COMPLETED: '사업종료',
-  COMPLETED_PENDING_PAYMENT: '종료(잔금대기)',
+  CONTRACT_PENDING: '계약 전',
+  IN_PROGRESS: '진행 중',
+  COMPLETED: '종료',
+  COMPLETED_PENDING_PAYMENT: '종료(잔금 대기)',
 };
+
+export function normalizeProjectStatus(raw: unknown): ProjectStatus {
+  if (
+    raw === 'CONTRACT_PENDING'
+    || raw === 'IN_PROGRESS'
+    || raw === 'COMPLETED'
+    || raw === 'COMPLETED_PENDING_PAYMENT'
+  ) {
+    return raw;
+  }
+  return 'CONTRACT_PENDING';
+}
 
 export const PROJECT_PHASE_LABELS: Record<ProjectPhase, string> = {
   PROSPECT: '입찰/예정',
   CONFIRMED: '확정',
 };
+
+export function normalizeProjectPhase(raw: unknown): ProjectPhase {
+  if (raw === 'PROSPECT' || raw === 'CONFIRMED') return raw;
+  return 'CONFIRMED';
+}
 
 export const PROJECT_TYPE_LABELS: Record<ProjectType, string> = {
   C1: 'C-1 컨설팅',
@@ -88,6 +105,12 @@ export const PROJECT_TYPE_LABELS: Record<ProjectType, string> = {
   P1: 'P-1 출판사업',
   Z1: 'Z-1 기타사업',
 };
+
+export function normalizeProjectType(raw: unknown): ProjectType {
+  const value = String(raw || '').trim();
+  if (value in PROJECT_TYPE_LABELS) return value as ProjectType;
+  return 'D1';
+}
 
 export const PROJECT_TYPE_SHORT_LABELS: Record<ProjectType, string> = {
   C1: '컨설팅',
@@ -145,6 +168,11 @@ export const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
   OPERATING: '전용계좌(이나라도움x)',
   NONE: '일반 사업',
 };
+
+export function normalizeAccountType(raw: unknown): AccountType {
+  if (raw === 'DEDICATED' || raw === 'OPERATING') return raw;
+  return 'NONE';
+}
 
 export const PROJECT_FUND_INPUT_MODE_LABELS: Record<ProjectFundInputMode, string> = {
   BANK_UPLOAD: '통장내역 업로드',
@@ -281,6 +309,8 @@ export const PROJECT_TYPE_REGISTER_OPTIONS: ProjectType[] = [
   'A1',
   'A2',
   'I1',
+  'I2',
+  'I3',
   'D1',
   'S1',
   'S2',
@@ -299,6 +329,31 @@ export function getProjectTypeSelectableOptions(currentType?: ProjectType): Proj
     : next.length;
   next.splice(insertIndex, 0, currentType);
   return next;
+}
+
+export const PROJECT_CONTRACT_TYPE_OPTIONS = [
+  '계약서(날인)',
+  '협약서(날인)',
+  '전자계약 시스템',
+  '기타',
+] as const;
+
+export function normalizeProjectContractType(raw: unknown): string {
+  const value = String(raw || '').trim();
+  if (!value) return '계약서(날인)';
+  if (value === '계약서') return '계약서(날인)';
+  if (value === '협약서') return '협약서(날인)';
+  if (value === '발주기관 전자시스템') return '전자계약 시스템';
+  if (value === '일반') return '기타';
+  return value;
+}
+
+export function getProjectContractTypeSelectableOptions(currentType?: string): string[] {
+  const current = normalizeProjectContractType(currentType);
+  const options = [...PROJECT_CONTRACT_TYPE_OPTIONS];
+  return options.includes(current as (typeof PROJECT_CONTRACT_TYPE_OPTIONS)[number])
+    ? options
+    : [current, ...options];
 }
 
 export const DIRECTION_LABELS: Record<Direction, string> = {
@@ -455,7 +510,7 @@ export interface Project {
   executiveReviewedAt?: string;
   executiveReviewedById?: string;
   executiveReviewedByName?: string;
-  executiveReviewComment?: string;
+  executiveReviewComment?: string | null;
   executiveReviewHistory?: ProjectExecutiveReviewHistoryEntry[];
   trashedAt?: string | null;
   trashedById?: string | null;
@@ -620,9 +675,12 @@ export interface ProjectRequestPayload {
   name: string;
   officialContractName: string;
   type: ProjectType;
+  status?: ProjectStatus;
+  phase?: ProjectPhase;
   description: string;
   clientOrg: string;
   department: string;
+  groupwareName?: string;
   contractAmount: number;
   salesVatAmount: number;
   totalRevenueAmount: number;
@@ -630,14 +688,18 @@ export interface ProjectRequestPayload {
   financialInputFlags?: ProjectFinancialInputFlags;
   contractStart: string;
   contractEnd: string;
+  contractType?: string;
   settlementType: SettlementType;
   basis: Basis;
   accountType: AccountType;
   fundInputMode?: ProjectFundInputMode;
   settlementSheetPolicy?: SettlementSheetPolicy;
+  paymentPlan?: Project['paymentPlan'];
   paymentPlanDesc: string;
   settlementGuide: string;
+  finalPaymentNote?: string;
   projectPurpose: string;
+  managerId?: string;
   managerName: string;
   teamName: string;
   teamMembers: string;

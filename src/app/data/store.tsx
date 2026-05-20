@@ -60,8 +60,10 @@ import {
   upsertLedgerViaBff,
   upsertProjectViaBff,
   upsertTransactionViaBff,
+  type UpsertProjectPayload,
 } from '../lib/platform-bff-client';
 import { reportError } from '../platform/observability';
+import { normalizeProjectRevenueFields } from '../platform/project-financials';
 import type { Unsubscribe } from 'firebase/firestore';
 
 interface EtlStagingUiPayload {
@@ -325,25 +327,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const addProject = useCallback(async (p: Project) => {
     await runStoreMutation('addProject', async () => {
+      const normalizedProject = normalizeProjectRevenueFields(p, 'totalRevenueAmount');
       if (writeStrategy.target === 'bff') {
         const result = await upsertProjectViaBff({
           tenantId: orgId,
           actor: bffActor,
-          project: p,
+          project: normalizedProject as unknown as UpsertProjectPayload,
         });
 
         if (writeStrategy.mirrorRemoteWritesLocally) {
-          setProjects((prev) => [...prev, mergeProjectMutationResult(p, result)]);
+          setProjects((prev) => [...prev, mergeProjectMutationResult(normalizedProject, result)]);
         }
         return;
       }
 
       if (writeStrategy.target === 'firestore' && db) {
-        await upsertProject(db, orgId, p, auditActor);
+        await upsertProject(db, orgId, normalizedProject, auditActor);
         return;
       }
 
-      setProjects((prev) => [...prev, p]);
+      setProjects((prev) => [...prev, normalizedProject]);
     });
   }, [runStoreMutation, writeStrategy, orgId, bffActor, db, auditActor]);
 
@@ -374,7 +377,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (writeStrategy.target === 'bff') {
         const existing = projects.find((project) => project.id === id);
         if (existing) {
-          const merged = { ...existing, ...updates } as Project;
+          const merged = normalizeProjectRevenueFields({ ...existing, ...updates } as Project, 'totalRevenueAmount');
           const result = await upsertProjectViaBff({
             tenantId: orgId,
             actor: bffActor,
@@ -387,7 +390,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           if (writeStrategy.mirrorRemoteWritesLocally) {
             setProjects((prev) => prev.map((project) => (
               project.id === id
-                ? mergeProjectMutationResult(project, result, updates)
+                ? mergeProjectMutationResult(project, result, merged)
                 : project
             )));
           }
@@ -398,12 +401,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (writeStrategy.target === 'firestore' && db) {
         const existing = projects.find((project) => project.id === id);
         if (existing) {
-          await upsertProject(db, orgId, { ...existing, ...updates }, auditActor);
+          await upsertProject(db, orgId, normalizeProjectRevenueFields({ ...existing, ...updates } as Project, 'totalRevenueAmount'), auditActor);
         }
         return;
       }
 
-      setProjects((prev) => prev.map((p) => (p.id === id ? { ...p, ...updates } : p)));
+      setProjects((prev) => prev.map((p) => (p.id === id ? normalizeProjectRevenueFields({ ...p, ...updates } as Project, 'totalRevenueAmount') : p)));
     });
   }, [runStoreMutation, writeStrategy, projects, orgId, bffActor, db, auditActor]);
 

@@ -98,13 +98,13 @@ describe('createSlackAlertService', () => {
     });
 
     await service.notifyMessage({
-      text: '[InnerPlatform] 신규 프로젝트 등록 완료: 2026 CTS2',
+      text: '[InnerPlatform] 프로젝트 등록 요청 접수: 2026 CTS2',
       blocks: [
         {
           type: 'section',
           text: {
             type: 'mrkdwn',
-            text: '*[InnerPlatform] 신규 프로젝트 등록 완료*',
+            text: '*[InnerPlatform] 프로젝트 등록 요청 접수*',
           },
         },
       ],
@@ -116,6 +116,6 @@ describe('createSlackAlertService', () => {
     const body = JSON.parse(String(init.body));
     expect(body.channel).toBe('C09BJ767XCM');
     expect(body.text).toContain('2026 CTS2');
-    expect(body.blocks[0].text.text).toContain('신규 프로젝트 등록 완료');
+    expect(body.blocks[0].text.text).toContain('프로젝트 등록 요청 접수');
   });
 });

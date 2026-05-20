@@ -4,7 +4,7 @@ import {
   Users, AlertTriangle, ShieldAlert, Shield,
   Search,
   UserCheck, FolderKanban, Download,
-  AlertCircle, CheckCircle2, XCircle, Eye, Network,
+  AlertCircle, CheckCircle2, XCircle, Eye, Network, Info,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
@@ -120,7 +120,7 @@ function MemberDetailDialog({ member, open, onClose }: {
             — 참여율 상세
           </DialogTitle>
           <DialogDescription>
-            전체 {member.totalRate}% / {member.projectCount}개 사업 배정
+            전체 {member.totalRate}% / {member.projectCount}개 프로젝트 배정
           </DialogDescription>
         </DialogHeader>
 
@@ -167,9 +167,9 @@ function MemberDetailDialog({ member, open, onClose }: {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="min-w-[140px]">사업명</TableHead>
+                <TableHead className="min-w-[140px]">프로젝트명</TableHead>
                 <TableHead>정산유형</TableHead>
-                <TableHead>발주기관</TableHead>
+                <TableHead>계약 대상</TableHead>
                 <TableHead className="text-right">참여율</TableHead>
                 <TableHead>기간</TableHead>
               </TableRow>
@@ -214,7 +214,7 @@ function CrossVerificationInfo({ projects }: { projects: ProjectParticipationVie
         <CardHeader className="pb-2">
           <CardTitle className="text-base flex items-center gap-1.5">
             <Network className="w-4 h-4" />
-            MYSC 사업 정산유형 분류
+            MYSC 프로젝트 정산유형 분류
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -222,8 +222,8 @@ function CrossVerificationInfo({ projects }: { projects: ProjectParticipationVie
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="min-w-[180px]">사업명</TableHead>
-                  <TableHead>발주기관</TableHead>
+                  <TableHead className="min-w-[180px]">프로젝트명</TableHead>
+                  <TableHead>계약 대상</TableHead>
                   <TableHead>정산유형</TableHead>
                   <TableHead>진행단계</TableHead>
                   <TableHead>기간</TableHead>
@@ -320,10 +320,10 @@ function CrossVerificationInfo({ projects }: { projects: ProjectParticipationVie
             </div>
             <div>
               <p style={{ fontWeight: 600 }} className="mb-1">회계사정산</p>
-              <p className="text-muted-foreground">전문 회계법인이 정산. e나라도움 시스템과 직접 연동은 아니나, <span className="text-foreground" style={{ fontWeight: 500 }}>동일 발주기관(KOICA 등)</span>은 자체적으로 참여율을 확인할 수 있음.</p>
+              <p className="text-muted-foreground">전문 회계법인이 정산. e나라도움 시스템과 직접 연동은 아니나, <span className="text-foreground" style={{ fontWeight: 500 }}>동일 기관(KOICA 등)</span>은 자체적으로 참여율을 확인할 수 있음.</p>
             </div>
             <div>
-              <p style={{ fontWeight: 600 }} className="mb-1">민간사업</p>
+              <p style={{ fontWeight: 600 }} className="mb-1">민간형</p>
               <p className="text-muted-foreground">정부 교차검증 대상 아님. 단, 전체 실제 근무시간 초과 시 내부 관리 필요.</p>
             </div>
           </div>
@@ -432,7 +432,7 @@ export function ParticipationPage() {
           icon={Shield}
           iconGradient="linear-gradient(135deg, #6366f1, #8b5cf6)"
           title="참여율 관리 (100-1)"
-          description="2025-2026 KOICA 사업 통합관리 — 교차검증 가능 사업 참여율 합산 ≤ 100% 관리"
+          description="2025-2026 KOICA 프로젝트 통합관리 — 교차검증 가능 프로젝트 참여율 합산 ≤ 100% 관리"
         />
         <div className="flex items-center justify-between rounded-lg border border-indigo-200/60 bg-indigo-50/40 px-3 py-2">
           <div className="flex items-center gap-2 text-xs">
@@ -485,7 +485,7 @@ export function ParticipationPage() {
           <Card>
             <CardContent className="pt-3 pb-3">
               <div className="flex items-center gap-1.5 text-xs mb-0.5">
-                <Shield className="w-3.5 h-3.5 text-blue-600" /><span>e나라도움 사업</span>
+                <Shield className="w-3.5 h-3.5 text-blue-600" /><span>e나라도움 프로젝트</span>
               </div>
               <p className="text-xl" style={{ fontWeight: 600 }}>{kpis.eNaraProjects}건</p>
               <p className="text-[10px] text-muted-foreground">시스템 교차검증 대상</p>
@@ -494,7 +494,7 @@ export function ParticipationPage() {
           <Card>
             <CardContent className="pt-3 pb-3">
               <div className="flex items-center gap-1.5 text-xs mb-0.5">
-                <FolderKanban className="w-3.5 h-3.5" /><span>전체 사업</span>
+                <FolderKanban className="w-3.5 h-3.5" /><span>전체 프로젝트</span>
               </div>
               <p className="text-xl" style={{ fontWeight: 600 }}>{projectEntries.length}건</p>
               <p className="text-[10px] text-muted-foreground">확정+입찰 포함</p>
@@ -531,7 +531,7 @@ export function ParticipationPage() {
         <Tabs defaultValue="member">
           <TabsList>
             <TabsTrigger value="member" className="gap-1"><Users className="w-3.5 h-3.5" /> 인원별 현황 (100-1)</TabsTrigger>
-            <TabsTrigger value="project" className="gap-1"><FolderKanban className="w-3.5 h-3.5" /> 사업별 현황</TabsTrigger>
+            <TabsTrigger value="project" className="gap-1"><FolderKanban className="w-3.5 h-3.5" /> 프로젝트별 현황</TabsTrigger>
             <TabsTrigger value="matrix" className="gap-1"><Network className="w-3.5 h-3.5" /> 교차검증 매트릭스</TabsTrigger>
           </TabsList>
 
@@ -540,7 +540,7 @@ export function ParticipationPage() {
             <div className="flex items-center gap-3 flex-wrap">
               <div className="relative flex-1 max-w-sm">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <Input placeholder="이름 또는 사업명 검색…" value={searchText} onChange={e => setSearchText(e.target.value)} className="pl-9 h-8 text-sm" />
+                <Input placeholder="이름 또는 프로젝트명 검색…" value={searchText} onChange={e => setSearchText(e.target.value)} className="pl-9 h-8 text-sm" />
               </div>
               <div className="flex items-center gap-1">
                 {(['ALL', 'DANGER', 'WARNING', 'SAFE'] as const).map(f => (
@@ -563,7 +563,7 @@ export function ParticipationPage() {
                     <TableHead className="min-w-[80px]">e나라도움</TableHead>
                     <TableHead className="min-w-[80px]">회계사정산</TableHead>
                     <TableHead className="min-w-[60px]">민간</TableHead>
-                    <TableHead className="text-center">사업수</TableHead>
+                    <TableHead className="text-center">프로젝트 수</TableHead>
                     <TableHead className="min-w-[200px]">리스크</TableHead>
                     <TableHead className="w-8" />
                   </TableRow>
@@ -627,9 +627,9 @@ export function ParticipationPage() {
               <Table>
                 <TableHeader>
                   <TableRow className="bg-muted/30">
-                    <TableHead className="min-w-[160px]">사업명</TableHead>
+                    <TableHead className="min-w-[160px]">프로젝트명</TableHead>
                     <TableHead>정산유형</TableHead>
-                    <TableHead>발주기관</TableHead>
+                    <TableHead>계약 대상</TableHead>
                     <TableHead>단계</TableHead>
                     <TableHead className="text-center">인원</TableHead>
                     <TableHead className="min-w-[250px]">인원 배정 현황</TableHead>

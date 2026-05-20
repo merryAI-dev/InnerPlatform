@@ -64,10 +64,10 @@ function ProjectStartCard(props: {
             )}
           </div>
           <p className="text-[12px] text-slate-600">
-            {project.clientOrg || '클라이언트 미지정'}
+            {project.clientOrg || '계약 대상 미지정'}
           </p>
           <p className="text-[11px] text-muted-foreground">
-            담당 {project.managerName || '미지정'} · {project.department || '부서 미지정'}
+            PM {project.managerName || '미지정'} · {project.department || '담당조직 미지정'}
           </p>
         </div>
         <Button
@@ -78,7 +78,7 @@ function ProjectStartCard(props: {
           onClick={() => onStart(project.id)}
         >
           {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
-          이 사업으로 시작
+          이 프로젝트로 시작
         </Button>
       </CardContent>
     </Card>
@@ -167,12 +167,12 @@ export function PortalProjectSelectPage() {
             <FolderKanban className="h-7 w-7" />
           </div>
           <div className="space-y-1.5">
-            <h1 className="text-[28px] font-semibold tracking-[-0.04em] text-slate-950">오늘 작업할 사업 선택</h1>
+            <h1 className="text-[28px] font-semibold tracking-[-0.04em] text-slate-950">오늘 작업할 프로젝트 선택</h1>
             <p className="text-[13px] text-slate-600">
-              담당 사업이 먼저 보이며, 필요한 경우 검색해서 다른 사업으로 바로 들어갈 수 있습니다.
+              담당 프로젝트가 먼저 보이며, 필요한 경우 검색해서 다른 프로젝트로 바로 들어갈 수 있습니다.
             </p>
             <p className="text-[12px] text-muted-foreground">
-              여기서 고른 사업은 이번 세션의 작업 기준만 바뀌며 저장된 주사업은 그대로 유지됩니다.
+              여기서 고른 프로젝트는 이번 세션의 작업 기준만 바뀌며 저장된 주 프로젝트는 그대로 유지됩니다.
             </p>
           </div>
         </div>
@@ -184,7 +184,7 @@ export function PortalProjectSelectPage() {
               <Input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="사업명, 클라이언트, 유형, 담당자로 검색"
+                placeholder="프로젝트명, 계약 대상, 유형, PM으로 검색"
                 className="border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
               />
             </div>
@@ -193,10 +193,10 @@ export function PortalProjectSelectPage() {
               {activeProjectId ? (
                 <span className="inline-flex items-center gap-1 text-teal-700">
                   <CheckCircle2 className="h-3.5 w-3.5" />
-                  현재 세션 사업이 이미 선택되어 있습니다.
+                  현재 세션 프로젝트가 이미 선택되어 있습니다.
                 </span>
               ) : (
-                <span>사업을 하나 고르면 현재 보고 있던 화면으로 바로 이동합니다.</span>
+                <span>프로젝트를 하나 고르면 현재 보고 있던 화면으로 바로 이동합니다.</span>
               )}
             </div>
           </CardContent>
@@ -205,8 +205,8 @@ export function PortalProjectSelectPage() {
         {showPrioritySection && !normalizedQuery && (
           <section className="space-y-3">
             <div>
-              <p className="text-[12px] font-semibold uppercase tracking-[0.12em] text-slate-500">담당 사업</p>
-              <p className="mt-1 text-[12px] text-muted-foreground">지금 바로 시작할 수 있는 담당 사업입니다.</p>
+              <p className="text-[12px] font-semibold uppercase tracking-[0.12em] text-slate-500">담당 프로젝트</p>
+              <p className="mt-1 text-[12px] text-muted-foreground">지금 바로 시작할 수 있는 담당 프로젝트입니다.</p>
             </div>
             <div className="grid gap-4 md:grid-cols-2">
               {candidateProjects.priorityProjects.map((project) => (
@@ -225,14 +225,14 @@ export function PortalProjectSelectPage() {
         <section className="space-y-3">
           <div>
             <p className="text-[12px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-              {normalizedQuery ? '검색 결과' : showPrioritySection ? '전체 검색' : '선택 가능한 사업'}
+              {normalizedQuery ? '검색 결과' : showPrioritySection ? '전체 검색' : '선택 가능한 프로젝트'}
             </p>
             <p className="mt-1 text-[12px] text-muted-foreground">
               {normalizedQuery
-                ? `${filteredSearchProjects.length}개 사업이 검색되었습니다.`
+                ? `${filteredSearchProjects.length}개 프로젝트가 검색되었습니다.`
                 : showPrioritySection
-                  ? '다른 사업을 찾으려면 검색어를 입력하세요.'
-                  : '접근 가능한 사업을 바로 선택할 수 있습니다.'}
+                  ? '다른 프로젝트를 찾으려면 검색어를 입력하세요.'
+                  : '접근 가능한 프로젝트를 바로 선택할 수 있습니다.'}
             </p>
           </div>
 
@@ -252,10 +252,10 @@ export function PortalProjectSelectPage() {
             <Card className="border-dashed border-slate-300 bg-slate-50/60">
               <CardContent className="py-10 text-center">
                 <p className="text-[13px] font-medium text-slate-900">
-                  {normalizedQuery ? '일치하는 사업이 없습니다.' : '검색어를 입력하면 다른 사업을 바로 찾을 수 있습니다.'}
+                  {normalizedQuery ? '일치하는 프로젝트가 없습니다.' : '검색어를 입력하면 다른 프로젝트를 바로 찾을 수 있습니다.'}
                 </p>
                 <p className="mt-1 text-[12px] text-muted-foreground">
-                  {normalizedQuery ? '다른 사업명이나 담당자 이름으로 다시 검색해 보세요.' : '사업명, 클라이언트, 유형, 담당자 기준으로 검색할 수 있습니다.'}
+                  {normalizedQuery ? '다른 프로젝트명이나 PM 이름으로 다시 검색해 보세요.' : '프로젝트명, 계약 대상, 유형, PM 기준으로 검색할 수 있습니다.'}
                 </p>
               </CardContent>
             </Card>

@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-05-20] patch-note | admin-dashboard, admin-participation, portal-dashboard, shared-portal-architecture | project registration review flow alignment
+- pages: [admin-dashboard](./pages/admin-dashboard.md), [admin-participation](./pages/admin-participation.md), [portal-dashboard](./pages/portal-dashboard.md), [shared-portal-architecture](./pages/shared-portal-architecture.md)
+- summary: 프로젝트 등록, 포털 수정, Admin 승인 화면을 공통 5단계 프로젝트 에디터로 정렬하고, `프로젝트/계약 대상/PM/CIC 대표 검토` 용어와 dropdown 값을 통일했다. 승인/재제출의 project-request 상태 동기화는 같은 Firestore transaction으로 묶고, canonical `project_requests` index와 legacy fallback을 보강했다.
+
 ## [2026-04-22] patch-note | portal-budget | sub-sub-item delete editor state fix
 - pages: [portal-budget](./pages/portal-budget.md)
 - summary: 구조 편집에서 세세목을 여러 개 추가한 뒤 하나를 삭제하면 편집 영역 전체가 예상보다 빨리 접히던 문제를 줄였고, 마지막 빈 세세목만 기본 상태로 돌아가도록 정리했다.

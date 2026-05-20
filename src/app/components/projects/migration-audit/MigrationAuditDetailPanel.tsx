@@ -55,7 +55,7 @@ export function MigrationAuditDetailPanel({
     return (
       <Card className="border-slate-200/80 bg-white shadow-sm" data-testid="migration-review-dossier">
         <CardContent className="py-24 text-center text-[12px] text-muted-foreground">
-          좌측 대기함에서 PM 등록 프로젝트 하나를 고르면, 여기서 포털 원문과 예산·인력을 바로 읽고 CIC 대표 리뷰 결정을 끝낼 수 있습니다.
+          좌측 대기열에서 PM 등록 프로젝트 하나를 고르면, 여기서 포털 원문과 계약/재무·팀/인력을 바로 읽고 CIC 대표 검토 결정을 끝낼 수 있습니다.
         </CardContent>
       </Card>
     );
@@ -77,7 +77,7 @@ export function MigrationAuditDetailPanel({
               {getMigrationAuditStatusLabel(record.status)}
             </Badge>
             <Badge variant="outline">{record.cic}</Badge>
-            <Badge variant="outline">{record.clientOrg || '발주기관 미지정'}</Badge>
+            <Badge variant="outline">{record.clientOrg || '계약 대상 미지정'}</Badge>
             <Badge variant="outline">{isPmPortalProject ? 'PM 등록' : '기존 등록'}</Badge>
           </div>
 
@@ -89,7 +89,7 @@ export function MigrationAuditDetailPanel({
               <p className="mt-1 text-[12px] leading-6 text-slate-600">
                 {isPmPortalProject
                   ? 'PM이 포털에서 입력한 내용을 그대로 펼쳐서 보여줍니다. CIC 대표는 우측 원문을 읽고 승인, 수정 요청 후 반려, 중복·폐기만 결정하면 됩니다.'
-                  : '이미 등록된 기존 프로젝트입니다. 같은 화면에서 기존 프로젝트 정보와 예산·인력을 다시 읽고, 필요하면 CIC 대표 리뷰 결정을 다시 조정할 수 있습니다.'}
+                  : '이미 등록된 기존 프로젝트입니다. 같은 화면에서 기존 프로젝트 정보와 계약/재무·팀/인력을 다시 읽고, 필요하면 CIC 대표 검토 결정을 다시 조정할 수 있습니다.'}
               </p>
             </div>
 
@@ -107,26 +107,27 @@ export function MigrationAuditDetailPanel({
           <section className="space-y-4 rounded-3xl border border-slate-200 bg-slate-50/80 p-5">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">PM 등록 원문</p>
-              <p className="mt-1 text-[15px] font-semibold text-slate-950">PM 포털 프로젝트 수정 화면 내용</p>
+              <p className="mt-1 text-[15px] font-semibold text-slate-950">PM 포털 프로젝트 수정 화면 입력값</p>
             </div>
             <div className="grid gap-4 xl:grid-cols-2">
               <DetailFact label="프로젝트명" value={dossier.headerTitle} />
-              <DetailFact label="정식 계약명" value={dossier.identity.officialContractName} />
-              <DetailFact label="발주기관" value={dossier.identity.clientOrg} />
-              <DetailFact label="등록 조직(CIC)" value={dossier.identity.cic} />
-              <DetailFact label="담당 PM" value={dossier.identity.pmName} />
-              <DetailFact label="담당조직" value={dossier.identity.department} />
+              <DetailFact label="공식 계약명" value={dossier.identity.officialContractName} />
+              <DetailFact label="계약 대상" value={dossier.identity.clientOrg} />
+              <DetailFact label="그룹웨어 등록명" value={dossier.identity.groupwareName} />
+              <DetailFact label="담당조직(CIC)" value={dossier.identity.cic} />
+              <DetailFact label="PM" value={dossier.identity.pmName} />
             </div>
           </section>
 
           <section className="space-y-3">
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">계약 및 운영 정보</p>
-              <p className="mt-1 text-[14px] font-semibold text-slate-950">프로젝트 수정 화면 기준 핵심 항목</p>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">계약/재무</p>
+              <p className="mt-1 text-[14px] font-semibold text-slate-950">프로젝트 수정 화면 기준 핵심 입력값</p>
             </div>
             <div className="grid gap-3 xl:grid-cols-2">
-              <DetailFact label="사업 유형" value={dossier.contract.projectTypeLabel} />
-              <DetailFact label="사업 기간" value={dossier.contract.periodLabel} />
+              <DetailFact label="프로젝트 유형" value={dossier.contract.projectTypeLabel} />
+              <DetailFact label="계약 기간" value={dossier.contract.periodLabel} />
+              <DetailFact label="계약서 유형" value={dossier.contract.contractType} />
               <DetailFact label="정산 유형" value={dossier.contract.settlementTypeLabel} />
               <DetailFact label="정산 기준" value={dossier.contract.basisLabel} />
               <DetailFact label="통장 유형" value={dossier.contract.accountTypeLabel} />
@@ -136,21 +137,23 @@ export function MigrationAuditDetailPanel({
 
           <section className="space-y-3">
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">예산</p>
-              <p className="mt-1 text-[14px] font-semibold text-slate-950">PM이 입력한 예산과 재무 기준</p>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">계약/재무</p>
+              <p className="mt-1 text-[14px] font-semibold text-slate-950">PM이 입력한 계약/재무 기준</p>
             </div>
             <div className="grid gap-3 xl:grid-cols-2">
-              <DetailFact label="총사업비" value={dossier.budget.contractAmountLabel} />
-              <DetailFact label="매출부가세" value={dossier.budget.salesVatAmountLabel} />
+              <DetailFact label="계약금액" value={dossier.budget.contractAmountLabel} />
+              <DetailFact label="매출 부가세" value={dossier.budget.salesVatAmountLabel} />
               <DetailFact label="총수익" value={dossier.budget.totalRevenueAmountLabel} />
               <DetailFact label="지원금" value={dossier.budget.supportAmountLabel} />
               <DetailFact label="입금 계획" value={dossier.budget.paymentPlanDesc} />
+              <DetailFact label="입금 분할" value={dossier.budget.paymentPlanSplitLabel} />
+              <DetailFact label="최종 입금 메모" value={dossier.budget.finalPaymentNote} />
             </div>
           </section>
 
           <section className="space-y-3">
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">등록 인력</p>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">팀/인력</p>
               <p className="mt-1 text-[14px] font-semibold text-slate-950">PM이 등록한 팀과 참여 인력</p>
             </div>
             <div className="rounded-3xl border border-slate-200 bg-white p-5">
@@ -160,7 +163,7 @@ export function MigrationAuditDetailPanel({
                   <p className="mt-1 text-[13px] font-semibold text-slate-950">{dossier.people.teamName}</p>
                 </div>
                 <div>
-                  <p className="text-[11px] text-slate-500">등록 인력</p>
+                  <p className="text-[11px] text-slate-500">팀원</p>
                   {dossier.people.members.length > 0 ? (
                     <div className="mt-2 flex flex-wrap gap-2">
                       {dossier.people.members.map((member) => (
@@ -170,7 +173,7 @@ export function MigrationAuditDetailPanel({
                       ))}
                     </div>
                   ) : (
-                    <p className="mt-2 text-[12px] text-slate-500">등록 인력 정보 없음</p>
+                    <p className="mt-2 text-[12px] text-slate-500">팀원 정보 없음</p>
                   )}
                 </div>
               </div>
@@ -246,23 +249,6 @@ export function MigrationAuditDetailPanel({
             ) : null}
           </section>
 
-          {(dossier.analysis.summary !== '-' || dossier.analysis.warnings.length > 0 || dossier.analysis.nextActions.length > 0) && (
-            <section className="space-y-3">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">계약 분석 보조 정보</p>
-                <p className="mt-1 text-[14px] font-semibold text-slate-950">계약 원문 분석이 있으면 같이 봅니다</p>
-              </div>
-              <div className="grid gap-3">
-                <DetailFact label="AI/휴리스틱 요약" value={dossier.analysis.summary} />
-                {dossier.analysis.warnings.length > 0 && (
-                  <DetailFact label="주의 사항" value={dossier.analysis.warnings.map((warning) => `• ${warning}`).join('\n')} />
-                )}
-                {dossier.analysis.nextActions.length > 0 && (
-                  <DetailFact label="다음 행동" value={dossier.analysis.nextActions.map((action) => `• ${action}`).join('\n')} />
-                )}
-              </div>
-            </section>
-          )}
         </div>
 
         <div
@@ -271,7 +257,7 @@ export function MigrationAuditDetailPanel({
         >
           <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">CIC 대표 리뷰 결정</p>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">CIC 대표 검토 결정</p>
               <p className="mt-1 text-[12px] text-slate-600">
                 상단이나 좌측이 아니라 여기서만 승인, 수정 요청 후 반려, 중복·폐기를 결정합니다.
               </p>

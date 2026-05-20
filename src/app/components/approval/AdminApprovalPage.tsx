@@ -17,7 +17,7 @@ import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
 import { Textarea } from '../ui/textarea';
-import { ProjectRequestApprovalSection } from '../projects/ProjectRequestApprovalPage';
+import { ProjectMigrationAuditPage } from '../projects/ProjectMigrationAuditPage';
 import { useAppStore } from '../../data/store';
 import {
   EXPENSE_SETS,
@@ -106,7 +106,14 @@ export function AdminApprovalPage() {
     () => changeReqs.filter((item) => item.state === 'SUBMITTED'),
     [changeReqs],
   );
-  const totalPending = pendingExpenses.length + pendingChanges.length;
+  const pendingProjectReviews = useMemo(
+    () => projects.filter((project) => (
+      project.registrationSource === 'pm_portal'
+      && (project.executiveReviewStatus || 'PENDING') === 'PENDING'
+    )),
+    [projects],
+  );
+  const totalPending = pendingProjectReviews.length + pendingExpenses.length + pendingChanges.length;
 
   const handleAction = () => {
     if (!actionDialog) return;
@@ -164,7 +171,7 @@ export function AdminApprovalPage() {
         icon={CheckCircle2}
         iconGradient="linear-gradient(135deg, #0f766e, #14b8a6)"
         title="승인 대기열"
-        description="프로젝트 등록 승인부터 먼저 정리한 뒤 사업비 세트와 인력변경 요청을 처리합니다"
+        description="프로젝트 등록 요청부터 먼저 정리한 뒤 사업비 세트와 인력변경 요청을 처리합니다"
         badge={`대기 ${totalPending}건`}
       />
 
@@ -172,10 +179,10 @@ export function AdminApprovalPage() {
         <CardContent className="flex flex-col gap-3 p-5 lg:flex-row lg:items-center lg:justify-between">
           <div className="space-y-1">
             <p className="text-[11px] uppercase tracking-[0.08em] text-teal-700" style={{ fontWeight: 700 }}>대표 검토</p>
-            <h2 className="text-[22px] tracking-[-0.04em] text-slate-950" style={{ fontWeight: 800 }}>사업 등록 심사</h2>
-            <p className="text-[12px] leading-6 text-slate-600">프로젝트 등록 승인부터 먼저 정리합니다. 계약 근거, 재무/정산, 검토 메모를 한 화면에서 보고 결정합니다.</p>
+            <h2 className="text-[22px] tracking-[-0.04em] text-slate-950" style={{ fontWeight: 800 }}>프로젝트 등록 검토</h2>
+            <p className="text-[12px] leading-6 text-slate-600">프로젝트 등록 요청부터 먼저 정리합니다. 계약 근거, 재무/정산, 검토 메모를 한 화면에서 보고 결정합니다.</p>
           </div>
-          <Badge className="border-0 bg-teal-600 text-white">등록 승인 우선</Badge>
+          <Badge className="border-0 bg-teal-600 text-white">등록 요청 우선</Badge>
         </CardContent>
       </Card>
 
@@ -187,10 +194,14 @@ export function AdminApprovalPage() {
               처리 이력과 보조 KPI는 1차 surface에서 제외하고, 지금 승인해야 하는 항목만 먼저 노출합니다.
             </p>
           </div>
-          <div className="grid grid-cols-3 gap-2 text-center">
+          <div className="grid grid-cols-2 gap-2 text-center sm:grid-cols-4">
             <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
               <p className="text-[10px] text-slate-500">전체 대기</p>
               <p className="text-[18px] font-bold text-slate-900">{totalPending}</p>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+              <p className="text-[10px] text-slate-500">프로젝트 등록</p>
+              <p className="text-[18px] font-bold text-teal-700">{pendingProjectReviews.length}</p>
             </div>
             <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
               <p className="text-[10px] text-slate-500">사업비</p>
@@ -213,14 +224,14 @@ export function AdminApprovalPage() {
             <div className="space-y-1">
               <p className="text-[12px] font-semibold text-slate-900">이번에 처리할 승인 항목이 남아 있습니다</p>
               <p className="text-[11px] leading-6 text-slate-600">
-                사업비 세트 {pendingExpenses.length}건, 인력변경 요청 {pendingChanges.length}건을 같은 화면에서 바로 검토할 수 있습니다.
+              프로젝트 등록 요청 {pendingProjectReviews.length}건, 사업비 세트 {pendingExpenses.length}건, 인력변경 요청 {pendingChanges.length}건을 같은 화면에서 바로 검토할 수 있습니다.
               </p>
             </div>
           </CardContent>
         </Card>
       )}
 
-      <ProjectRequestApprovalSection compact />
+      <ProjectMigrationAuditPage embedded reviewScope="pending" />
 
       <section className="space-y-3">
         <div className="flex items-center gap-2">
@@ -250,7 +261,7 @@ export function AdminApprovalPage() {
                       <span className="text-[14px] font-semibold text-slate-900">{item.title}</span>
                     </div>
                     <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500">
-                      <span>사업: {projectMap.get(item.projectId) || item.projectId}</span>
+                      <span>프로젝트: {projectMap.get(item.projectId) || item.projectId}</span>
                       <span>작성자: {item.createdByName}</span>
                       <span>기간: {item.period}</span>
                       <span>합계: {fmtKRW(item.totalGross)}원</span>
@@ -340,7 +351,7 @@ export function AdminApprovalPage() {
                       <span className="text-[14px] font-semibold text-slate-900">{item.title}</span>
                     </div>
                     <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500">
-                      <span>사업: {item.projectName}</span>
+                      <span>프로젝트: {item.projectName}</span>
                       <span>요청자: {item.requestedBy}</span>
                       <span>요청일: {new Date(item.requestedAt).toLocaleDateString('ko-KR')}</span>
                       <span>변경: {item.changes.length}건</span>

@@ -24,6 +24,7 @@ import {
   type AuditAction,
   type AuditEntityType,
 } from '../platform/audit-log';
+import { normalizeProjectRevenueFields } from '../platform/project-financials';
 import { assertTenantId } from '../platform/tenant';
 
 const SYSTEM_ACTOR: AuditActorContext = {
@@ -352,8 +353,9 @@ export async function upsertProject(
   project: any,
   actor: AuditActorContext = SYSTEM_ACTOR,
 ): Promise<void> {
+  const normalizedProject = normalizeProjectRevenueFields(project, 'totalRevenueAmount');
   await setDoc(docRef(db, orgId, 'projects', project.id), withTenantScope(orgId, {
-    ...project,
+    ...normalizedProject,
     updatedAt: new Date().toISOString(),
   }));
   await writeAuditLog(db, orgId, 'project', project.id, 'UPSERT', `프로젝트 업데이트: ${project.name}`, actor);

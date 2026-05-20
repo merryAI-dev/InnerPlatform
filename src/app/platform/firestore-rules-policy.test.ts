@@ -7,6 +7,7 @@
  * policy-as-code constraints that the rules depend on.
  */
 import { describe, expect, it } from 'vitest';
+import firestoreIndexes from '../../../firebase/firestore.indexes.json';
 import rbacPolicy from '../../../policies/rbac-policy.json';
 import { hasPermission, canAccessProject, canAccessTenant } from './rbac';
 import type { PlatformPermission } from './rbac';
@@ -129,6 +130,25 @@ describe('firestore rules policy alignment', () => {
   it('pm is tenant-scoped', () => {
     expect(canAccessTenant({ actorRole: 'pm', actorTenantId: 't1', targetTenantId: 't1' })).toBe(true);
     expect(canAccessTenant({ actorRole: 'pm', actorTenantId: 't1', targetTenantId: 't2' })).toBe(false);
+  });
+
+  it('keeps the portal project request lookup index deployable', () => {
+    expect(firestoreIndexes.indexes).toContainEqual({
+      collectionGroup: 'project_requests',
+      queryScope: 'COLLECTION',
+      fields: [
+        { fieldPath: 'approvedProjectId', order: 'ASCENDING' },
+        { fieldPath: 'requestedAt', order: 'DESCENDING' },
+      ],
+    });
+    expect(firestoreIndexes.indexes).toContainEqual({
+      collectionGroup: 'projectRequests',
+      queryScope: 'COLLECTION',
+      fields: [
+        { fieldPath: 'approvedProjectId', order: 'ASCENDING' },
+        { fieldPath: 'requestedAt', order: 'DESCENDING' },
+      ],
+    });
   });
 
   // ── HR rules assumptions ──

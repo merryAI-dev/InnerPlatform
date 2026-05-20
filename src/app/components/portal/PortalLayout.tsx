@@ -77,14 +77,14 @@ import {
 
 // ═══════════════════════════════════════════════════════════════
 // PortalLayout — 사용자(PM) 전용 레이아웃
-// 하나의 사업만 볼 수 있는 간소화된 UI
+// 하나의 프로젝트만 볼 수 있는 간소화된 UI
 // ═══════════════════════════════════════════════════════════════
 
 const NAV_SECTIONS = [
   {
     title: '마이메뉴',
     items: [
-      { to: '/portal', icon: LayoutDashboard, label: '내 사업 현황', exact: true },
+      { to: '/portal', icon: LayoutDashboard, label: '내 프로젝트 현황', exact: true },
       { to: '/portal/payroll', icon: CircleDollarSign, label: '인건비/공지', accent: true },
     ],
   },
@@ -98,11 +98,11 @@ const NAV_SECTIONS = [
     ],
   },
   {
-    title: '사업 배정 및 등록',
+    title: '프로젝트 배정 및 등록',
     items: [
-      { to: '/portal/project-settings', icon: Settings2, label: '사업 배정 수정', exact: true },
-      { to: '/portal/edit-project', icon: Pencil, label: '프로젝트 정보 수정' },
-      { to: '/portal/register-project', icon: Plus, label: '사업 등록 제안', accent: true },
+      { to: '/portal/project-settings', icon: Settings2, label: '프로젝트 배정 수정', exact: true },
+      { to: '/portal/edit-project', icon: Pencil, label: '프로젝트 수정' },
+      { to: '/portal/register-project', icon: Plus, label: '프로젝트 등록 요청', accent: true },
     ],
   },
 ];
@@ -267,7 +267,7 @@ function PortalContent() {
   const topNavItems = useMemo(() => navSections.flatMap((section) => section.items), [navSections]);
   const currentSectionLabel = useMemo(() => {
     const current = topNavItems.find((item) => isActive(item.to, item.exact));
-    return current?.label || '내 사업 현황';
+    return current?.label || '내 프로젝트 현황';
   }, [topNavItems, location.pathname]);
   const shellCommandItems = useMemo(() => buildPortalShellCommandItems({
     role: authUser?.role,
@@ -316,7 +316,7 @@ function PortalContent() {
     void setWorkspacePreference('portal', { persistDefault: false });
   }, [authLoading, authUser?.lastWorkspace, authUser?.role, isAuthenticated, setWorkspacePreference]);
 
-  // 포털 미등록 시 온보딩으로 (인증은 되었지만 포털 사업 미선택)
+  // 포털 미등록 시 온보딩으로 (인증은 되었지만 포털 프로젝트 미선택)
   useEffect(() => {
     if (authLoading || portalLoading) return;
     if (shouldForcePortalOnboarding({
@@ -405,7 +405,7 @@ function PortalContent() {
               환영합니다!
             </h1>
             <p className="text-sm text-muted-foreground mt-1.5">
-              사업관리를 시작하려면 아래에서 선택해 주세요
+              프로젝트 관리를 시작하려면 아래에서 선택해 주세요
             </p>
           </div>
 
@@ -419,8 +419,8 @@ function PortalContent() {
                 <FolderKanban className="w-5 h-5" />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold">기존 사업 선택</p>
-                <p className="text-xs text-muted-foreground mt-0.5">이미 등록된 사업에서 선택하여 시작합니다</p>
+                <p className="text-sm font-semibold">기존 프로젝트 선택</p>
+                <p className="text-xs text-muted-foreground mt-0.5">이미 등록된 프로젝트에서 선택하여 시작합니다</p>
               </div>
               <ArrowRight className="w-4 h-4 text-muted-foreground/40 group-hover:text-teal-500 group-hover:translate-x-0.5 transition-all" />
             </button>
@@ -434,7 +434,7 @@ function PortalContent() {
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold">증빙 업로드만 할게요</p>
-                <p className="text-xs text-muted-foreground mt-0.5">사업 선택 없이 바로 PDF/영수증을 업로드합니다</p>
+                <p className="text-xs text-muted-foreground mt-0.5">프로젝트 선택 없이 바로 PDF/영수증을 업로드합니다</p>
               </div>
               <ArrowRight className="w-4 h-4 text-muted-foreground/40 group-hover:text-violet-500 group-hover:translate-x-0.5 transition-all" />
             </button>
@@ -447,8 +447,8 @@ function PortalContent() {
                 <Plus className="w-5 h-5" />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold">새 사업 등록</p>
-                <p className="text-xs text-muted-foreground mt-0.5">새로운 사업을 제안하고 등록을 시작합니다</p>
+                <p className="text-sm font-semibold">새 프로젝트 등록</p>
+                <p className="text-xs text-muted-foreground mt-0.5">새로운 프로젝트를 제안하고 등록을 시작합니다</p>
               </div>
               <ArrowRight className="w-4 h-4 text-muted-foreground/40 group-hover:text-emerald-500 group-hover:translate-x-0.5 transition-all" />
             </button>
@@ -547,10 +547,10 @@ function PortalContent() {
             )}
           </div>
 
-          {/* 사업 정보 카드 */}
+          {/* 프로젝트 정보 카드 */}
           {currentProject && !collapsed && (
             <div className="mx-2.5 mb-2 p-2.5 rounded-xl bg-white/8 border border-white/20">
-              <p className="text-[10px] text-slate-500 mb-0.5">내 사업</p>
+              <p className="text-[10px] text-slate-500 mb-0.5">내 프로젝트</p>
               {projectOptions.length > 0 ? (
                 <Select
                   value={selectedProjectOptionValue}
@@ -561,7 +561,7 @@ function PortalContent() {
                   }}
                 >
                   <SelectTrigger className="h-7 text-[10px] px-2 bg-white/8 border-white/20 text-slate-200">
-                    <SelectValue placeholder="사업 선택" />
+                    <SelectValue placeholder="프로젝트 선택" />
                   </SelectTrigger>
                   <SelectContent>
                     {projectOptions.map((project) => (
@@ -586,9 +586,9 @@ function PortalContent() {
                 size="sm"
                 variant="outline"
                 className="mt-2 h-6 text-[10px] w-full border-white/20 bg-white/8 text-slate-200 hover:bg-white/15"
-                onClick={() => requestPortalNavigation('/portal/project-settings', '사업 배정 수정')}
+                onClick={() => requestPortalNavigation('/portal/project-settings', '프로젝트 배정 수정')}
               >
-                사업 배정 수정
+                프로젝트 배정 수정
               </Button>
             </div>
           )}
@@ -601,15 +601,15 @@ function PortalContent() {
                     variant="outline"
                     size="icon"
                     className="h-9 w-9 border-white/20 bg-white/8 text-slate-200 hover:bg-white/15"
-                    onClick={() => requestPortalNavigation('/portal/project-settings', '사업 배정 수정')}
+                    onClick={() => requestPortalNavigation('/portal/project-settings', '프로젝트 배정 수정')}
                   >
                     <FolderKanban className="h-4 w-4" />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="right" className="text-[11px]">
                   <div className="space-y-1">
-                    <p className="font-medium text-slate-900">{currentProjectName || '사업 미선택'}</p>
-                    <p className="text-slate-500">사업 배정 수정</p>
+                    <p className="font-medium text-slate-900">{currentProjectName || '프로젝트 미선택'}</p>
+                    <p className="text-slate-500">프로젝트 배정 수정</p>
                   </div>
                 </TooltipContent>
               </Tooltip>
@@ -765,7 +765,7 @@ function PortalContent() {
                   className="flex h-10 w-full max-w-xl items-center gap-2 rounded-xl border border-white/15 bg-white/8 px-3 text-left text-slate-200 transition-colors hover:bg-white/12"
                 >
                   <Search className="h-4 w-4 text-slate-300" />
-                  <span className="truncate text-[12px] text-slate-300">담당 사업 검색 또는 전환</span>
+                  <span className="truncate text-[12px] text-slate-300">담당 프로젝트 검색 또는 전환</span>
                   <span className="ml-auto rounded-md border border-white/15 bg-white/8 px-2 py-1 text-[10px] font-semibold text-slate-300">
                     ⌘K
                   </span>
@@ -878,7 +878,7 @@ function PortalContent() {
                       }}
                     >
                       <SelectTrigger className="h-10 min-w-[220px] rounded-xl border-slate-300 bg-white text-[12px] font-medium text-slate-900 shadow-sm">
-                        <SelectValue placeholder="사업 선택" />
+                        <SelectValue placeholder="프로젝트 선택" />
                       </SelectTrigger>
                       <SelectContent>
                         {projectOptions.map((project) => (
@@ -890,7 +890,7 @@ function PortalContent() {
                     </Select>
                   ) : (
                     <div className="flex h-10 items-center rounded-xl border border-slate-300 bg-white px-3 text-[12px] font-medium text-slate-900 shadow-sm">
-                      {currentProjectName || '사업 미선택'}
+                      {currentProjectName || '프로젝트 미선택'}
                     </div>
                   )}
                 </div>
@@ -948,13 +948,13 @@ function PortalContent() {
         <CommandDialog
           open={commandOpen}
           onOpenChange={setCommandOpen}
-          title="사업 전환"
-          description="지금 보고 있는 화면을 유지한 채 다른 사업으로 전환합니다."
+          title="프로젝트 전환"
+          description="지금 보고 있는 화면을 유지한 채 다른 프로젝트로 전환합니다."
         >
-          <CommandInput placeholder="담당 사업 검색 또는 전환..." />
+          <CommandInput placeholder="담당 프로젝트 검색 또는 전환..." />
           <CommandList>
-            <CommandEmpty>일치하는 사업이 없습니다.</CommandEmpty>
-            <CommandGroup heading="사업 전환">
+            <CommandEmpty>일치하는 프로젝트가 없습니다.</CommandEmpty>
+            <CommandGroup heading="프로젝트 전환">
               {shellCommandItems.map((item) => (
                 <CommandItem
                   key={item.id}

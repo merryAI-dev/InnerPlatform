@@ -45,8 +45,8 @@ export function MigrationAuditQueueRail({
               <ClipboardCheck className="h-4 w-4" />
             </div>
             <div>
-              <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">PM Registration Queue</p>
-              <p className="text-[14px] font-semibold text-slate-950">CIC 대표 리뷰 대기함</p>
+              <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">PM 등록 대기열</p>
+              <p className="text-[14px] font-semibold text-slate-950">CIC 대표 검토 대기열</p>
             </div>
           </div>
         </div>
@@ -89,7 +89,7 @@ export function MigrationAuditQueueRail({
                         {item.title}
                       </p>
                       <p className={`truncate text-[11px] ${selected ? 'text-slate-200' : 'text-slate-500'}`}>
-                        {item.clientOrg || '발주기관 미지정'}
+                        {item.clientOrg || '계약 대상 미지정'}
                       </p>
                       <div className={`flex flex-wrap gap-x-3 gap-y-1 text-[11px] ${selected ? 'text-slate-200' : 'text-slate-500'}`}>
                         <span>PM {item.managerName || '미지정'}</span>

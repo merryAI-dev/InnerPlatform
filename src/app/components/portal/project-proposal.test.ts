@@ -5,6 +5,7 @@ const sampleDraft: ProjectProposalDraft = {
   name: 'KOICA 디지털 역량 강화',
   officialContractName: 'KOICA 디지털 역량 강화 사업 운영 계약',
   type: 'D1',
+  contractType: '계약서(날인)',
   description: '현지 파트너 역량 강화 사업',
   clientOrg: 'KOICA',
   department: '임팩트 그룹',
@@ -17,6 +18,7 @@ const sampleDraft: ProjectProposalDraft = {
   settlementType: 'TYPE1',
   basis: '공급가액',
   accountType: 'DEDICATED',
+  fundInputMode: 'BANK_UPLOAD',
   paymentPlanDesc: '선금 50%, 중도 30%, 잔금 20%',
   settlementGuide: '선지급 후 정산, 공급가액 기준',
   projectPurpose: '현지 디지털 전환 역량 강화',
@@ -35,7 +37,7 @@ const sampleDraft: ProjectProposalDraft = {
 describe('buildProjectProposalPost', () => {
   it('builds title with proposal prefix', () => {
     const result = buildProjectProposalPost(sampleDraft, '데이나', 'dana@mysc.co.kr');
-    expect(result.title).toBe('[사업등록제안] KOICA 디지털 역량 강화');
+    expect(result.title).toBe('[프로젝트등록요청] KOICA 디지털 역량 강화');
   });
 
   it('includes core sections and requester metadata', () => {
@@ -47,6 +49,7 @@ describe('buildProjectProposalPost', () => {
     expect(result.body).toContain('[팀 정보]');
     expect(result.body).toContain('[첨부]');
     expect(result.body).toContain('[추가 메모]');
+    expect(result.body).toContain('- 계약서 유형: 계약서(날인)');
     expect(result.body).toContain('120,000,000원');
     expect(result.body).toContain('김다은 (데이나) / PM / 60%');
   });

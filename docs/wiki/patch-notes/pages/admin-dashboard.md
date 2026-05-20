@@ -3,7 +3,7 @@
 - route: `/`
 - primary users: 관리자, 운영 PM
 - status: active
-- last updated: 2026-04-16
+- last updated: 2026-05-20
 
 ## Purpose
 
@@ -24,6 +24,7 @@
 
 ## Recent Changes
 
+- [2026-05-20] 대시보드와 승인 진입면의 `사업/승인 큐` 계열 문구를 `프로젝트/CIC 검토` 기준으로 정리하고, 등록·수정·승인 흐름에서 같은 project status와 dropdown 값을 보도록 맞췄다.
 - [2026-04-16] 인건비 관제 숫자에 `PM 입력 금액 없음`, `Projection 금액 없음`, `금액 불일치`, `Projection 기준 잔액 부족`, `PM 기준 잔액 부족`을 추가해 사업별 payroll anomaly를 더 직접적으로 모니터링할 수 있게 했다.
 - [2026-04-16] 인건비 모니터링 숫자를 `PM 검토 대기 / 후보 없음 / 최종 확정 가능`으로 나눠 보여주고, Admin 월간정산 화면에서 PM 판단 요약과 최종 확정 액션이 같은 언어 체계로 읽히도록 정리했다.
 - [2026-04-15] 웰컴 배너, validation summary, validation badge, update reminder를 제거해 첫 화면을 KPI와 관제 블록만 남는 운영판으로 더 압축했다.

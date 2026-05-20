@@ -13,6 +13,7 @@ const cashflowSource = readPortalSource('PortalCashflowPage.tsx');
 const projectSettingsSource = readPortalSource('PortalProjectSettings.tsx');
 const projectEditSource = readPortalSource('PortalProjectEdit.tsx');
 const projectRegisterSource = readPortalSource('PortalProjectRegister.tsx');
+const projectEditorWizardSource = readFileSync(resolve(import.meta.dirname, '../projects/ProjectEditorWizard.tsx'), 'utf8');
 
 describe('portal minimal sweep', () => {
   it('trims explanatory copy and empty-state coaching from submissions', () => {
@@ -80,18 +81,19 @@ describe('portal minimal sweep', () => {
   });
 
   it('explains direct-entry as weekly sheet or excel-template input in register and edit flows', () => {
-    expect(projectRegisterSource).toContain('주간 사업비 시트 또는 엑셀 템플릿으로 직접 입력합니다.');
-    expect(projectEditSource).toContain('주간 사업비 시트 또는 엑셀 템플릿으로 직접 입력합니다.');
+    expect(projectRegisterSource).toContain('ProjectEditorWizard');
+    expect(projectEditSource).toContain('ProjectEditorWizard');
+    expect(projectEditorWizardSource).toContain('정산 시트 또는 엑셀 템플릿으로 직접 입력합니다.');
   });
 
-  it('lets rejected pm projects recover from the edit screen with contract upload and resubmission', () => {
+  it('lets rejected pm projects recover from the shared edit screen without contract extraction', () => {
     expect(projectEditSource).toContain('수정 후 다시 제출');
     expect(projectEditSource).toContain('반려 사유');
-    expect(projectEditSource).toContain('리뷰 완료');
-    expect(projectEditSource).toContain('CIC 대표 리뷰 대기');
-    expect(projectEditSource).toContain('계약서 PDF');
-    expect(projectEditSource).toContain('processProjectRequestContractViaBff');
+    expect(projectEditSource).toContain('승인 완료');
+    expect(projectEditSource).toContain('검토 대기');
+    expect(projectEditSource).not.toContain('계약서 PDF');
+    expect(projectEditSource).not.toContain('processProjectRequestContractViaBff');
     expect(projectEditSource).not.toContain('임원 심사 큐');
-    expect(projectEditSource).not.toContain('임원 리뷰 큐');
+    expect(projectEditSource).not.toContain('임원 검토 큐');
   });
 });

@@ -160,7 +160,7 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       projectRegistrationSlackService,
     }));
 
-    await db.doc(`orgs/${tenantId}/projectRequests/pr_notify_001`).set({
+    await db.doc(`orgs/${tenantId}/project_requests/pr_notify_001`).set({
       id: 'pr_notify_001',
       tenantId,
       status: 'APPROVED',
@@ -511,6 +511,31 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       id: 'p-zero-contract-001',
       name: 'Zero Contract Project',
       contractAmount: 0,
+    });
+  });
+
+  it('normalizes project revenue fields through project upsert', async () => {
+    const response = await api
+      .post('/api/v1/projects')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-revenue-normalize-001' })
+      .send({
+        id: 'p-revenue-normalize-001',
+        name: 'Revenue Normalize Project',
+        contractAmount: 100000,
+        totalRevenueAmount: 91000,
+        profitAmount: 1,
+        profitRate: 0.01,
+      });
+
+    expect([200, 201]).toContain(response.status);
+
+    const stored = await db.doc(`orgs/${tenantId}/projects/p-revenue-normalize-001`).get();
+    expect(stored.exists).toBe(true);
+    expect(stored.data()).toMatchObject({
+      id: 'p-revenue-normalize-001',
+      totalRevenueAmount: 91000,
+      profitAmount: 91000,
+      profitRate: 0.91,
     });
   });
 

@@ -53,7 +53,7 @@ function getReviewDialogTitle(mode: ReviewActionMode): string {
 }
 
 function getReviewDialogDescription(mode: ReviewActionMode): string {
-  if (mode === 'approve') return 'PM이 올린 원문을 기준으로 이 프로젝트를 우리 시스템 등록 대상으로 확정합니다.';
+  if (mode === 'approve') return 'PM이 올린 원문을 기준으로 이 프로젝트를 등록 대상으로 확정합니다.';
   if (mode === 'reject') return '수정이 필요한 이유를 반드시 남기고 PM이 다시 보완하도록 돌려보냅니다.';
   return '중복 또는 폐기 대상으로 정리하고, 왜 그렇게 판단했는지 사유를 반드시 남깁니다.';
 }
@@ -110,7 +110,15 @@ function buildProjectRequestReviewPatch(input: {
   };
 }
 
-export function ProjectMigrationAuditPage() {
+type ProjectMigrationAuditPageProps = {
+  embedded?: boolean;
+  reviewScope?: 'all' | 'pending';
+};
+
+export function ProjectMigrationAuditPage({
+  embedded = false,
+  reviewScope = 'all',
+}: ProjectMigrationAuditPageProps = {}) {
   const { user: authUser } = useAuth();
   const { projects, currentUser, updateProject } = useAppStore();
   const { db, isOnline, orgId } = useFirebase();
@@ -159,12 +167,22 @@ export function ProjectMigrationAuditPage() {
     [projects, requests],
   );
 
+  const scopedRecords = useMemo(
+    () => reviewScope === 'pending'
+      ? records.filter((record) => (
+          record.project.registrationSource === 'pm_portal'
+          && record.status === 'PENDING'
+        ))
+      : records,
+    [records, reviewScope],
+  );
+
   const filteredRecords = useMemo(
-    () => filterMigrationAuditConsoleRecords(records, {
+    () => filterMigrationAuditConsoleRecords(scopedRecords, {
       cic: cicFilter,
       status: statusFilter,
     }),
-    [cicFilter, records, statusFilter],
+    [cicFilter, scopedRecords, statusFilter],
   );
 
   const summary = useMemo(
@@ -173,8 +191,8 @@ export function ProjectMigrationAuditPage() {
   );
 
   const cicOptions = useMemo(
-    () => collectMigrationAuditCicOptions(records),
-    [records],
+    () => collectMigrationAuditCicOptions(scopedRecords),
+    [scopedRecords],
   );
 
   const activeRecord = useMemo(
@@ -272,7 +290,7 @@ export function ProjectMigrationAuditPage() {
       setActionMode(null);
       setReviewComment('');
     } catch (error) {
-      toast.error('CIC 대표 리뷰 결정 저장 실패', {
+      toast.error('CIC 대표 검토 결정 저장 실패', {
         description: error instanceof Error ? error.message : '다시 시도해 주세요.',
       });
     } finally {
@@ -280,17 +298,19 @@ export function ProjectMigrationAuditPage() {
     }
   }
 
-  const pageDescription = 'PM이 포털에서 등록한 프로젝트를 CIC와 상태 기준으로 좁힌 뒤, 우측에서 원문·예산·등록 인력을 그대로 읽고 CIC 대표 리뷰 결정을 내리는 콘솔입니다.';
+  const pageDescription = 'PM이 포털에서 등록한 프로젝트를 CIC와 상태 기준으로 좁힌 뒤, 우측에서 원문·계약/재무·팀/인력을 그대로 읽고 CIC 대표 검토 결정을 내리는 콘솔입니다.';
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        icon={ClipboardCheck}
-        iconGradient="linear-gradient(135deg, #0f766e 0%, #0ea5e9 100%)"
-        title="PM 등록 프로젝트 심사"
-        description={pageDescription}
-        badge="Executive Review"
-      />
+      {!embedded ? (
+        <PageHeader
+          icon={ClipboardCheck}
+          iconGradient="linear-gradient(135deg, #0f766e 0%, #0ea5e9 100%)"
+          title="PM 등록 프로젝트 검토"
+          description={pageDescription}
+          badge="대표 검토"
+        />
+      ) : null}
 
       {!db || !isOnline ? (
         <Card>

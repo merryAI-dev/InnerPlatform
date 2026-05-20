@@ -8,14 +8,14 @@ type CompletenessField = {
 };
 
 const FIELDS: CompletenessField[] = [
-  { key: 'department', label: '담당조직', isFilled: (p) => !!String(p.department || '').trim() },
-  { key: 'clientOrg', label: '발주기관', isFilled: (p) => !!String(p.clientOrg || '').trim() },
-  { key: 'managerName', label: '메인 담당자', isFilled: (p) => !!String(p.managerName || '').trim() },
+  { key: 'department', label: '담당조직(CIC)', isFilled: (p) => !!String(p.department || '').trim() },
+  { key: 'clientOrg', label: '계약 대상', isFilled: (p) => !!String(p.clientOrg || '').trim() },
+  { key: 'managerName', label: 'PM', isFilled: (p) => !!String(p.managerName || '').trim() },
   { key: 'managerId', label: '담당자 계정', isFilled: (p) => !!String(p.managerId || '').trim() },
-  { key: 'accountType', label: '통장 구분', isFilled: (p) => String(p.accountType || '') !== 'NONE' && !!p.accountType },
+  { key: 'accountType', label: '통장 유형', isFilled: (p) => String(p.accountType || '') !== 'NONE' && !!p.accountType },
   { key: 'contractStart', label: '계약 시작일', isFilled: (p) => p.type === 'I1' || !!String(p.contractStart || '').trim() },
   { key: 'contractEnd', label: '계약 종료일', isFilled: (p) => p.type === 'I1' || !!String(p.contractEnd || '').trim() },
-  { key: 'contractAmount', label: '총 사업비', isFilled: (p) => p.type === 'I1' || hasStoredProjectContractAmount(p) },
+  { key: 'contractAmount', label: '계약금액', isFilled: (p) => p.type === 'I1' || hasStoredProjectContractAmount(p) },
   { key: 'paymentPlanDesc', label: '입금 계획', isFilled: (p) => !!String(p.paymentPlanDesc || '').trim() },
   { key: 'groupwareName', label: '그룹웨어 등록명', isFilled: (p) => !!String(p.groupwareName || '').trim() },
 ];

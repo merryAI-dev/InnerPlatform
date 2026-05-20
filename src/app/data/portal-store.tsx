@@ -34,7 +34,17 @@ import type {
   ProjectRequest,
   ProjectRequestPayload,
 } from './types';
-import { normalizeSettlementSheetPolicy } from './types';
+import {
+  normalizeAccountType,
+  normalizeBasis,
+  normalizeProjectContractType,
+  normalizeProjectFundInputMode,
+  normalizeProjectPhase,
+  normalizeProjectStatus,
+  normalizeProjectType,
+  normalizeSettlementSheetPolicy,
+  normalizeSettlementType,
+} from './types';
 import type { ExpenseSet, ExpenseItem, ExpenseSetStatus } from './budget-data';
 import { BUDGET_CODE_BOOK, EXPENSE_SETS } from './budget-data';
 import {
@@ -57,6 +67,8 @@ import {
 import { normalizeSpace } from '../platform/csv-utils';
 import { isBankImportManualFieldsComplete, resolveBankImportProjectionStatus } from '../platform/bank-import-triage';
 import { resolveProjectCic } from '../platform/project-cic';
+import { normalizeProjectFinancialInputFlagsForAmounts } from '../platform/project-contract-amount';
+import { resolveProjectRevenueFinancials } from '../platform/project-financials';
 import {
   resolveEvidenceRequiredDesc,
 } from '../platform/settlement-sheet-prepare';
@@ -2307,49 +2319,71 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       .replace(/[^a-z0-9가-힣\s-]/g, '')
       .replace(/\s+/g, '-')
       .slice(0, 50);
+    const revenueFinancials = resolveProjectRevenueFinancials({
+      contractAmount: payload.contractAmount,
+      totalRevenueAmount: payload.totalRevenueAmount,
+      preferredSource: 'totalRevenueAmount',
+    });
+    const financialInputFlags = normalizeProjectFinancialInputFlagsForAmounts(payload.financialInputFlags, {
+      contractAmount: payload.contractAmount,
+      salesVatAmount: payload.salesVatAmount,
+      totalRevenueAmount: revenueFinancials.totalRevenueAmount,
+      supportAmount: payload.supportAmount,
+    });
+    const paymentPlan = payload.paymentPlan || { contract: 0, interim: 0, final: 0 };
+    const requesterName = authUser.name || portalUser?.name || '사용자';
     const project: Project = {
       id: projectId,
       slug,
       orgId,
       registrationSource: 'pm_portal',
+      executiveReviewStatus: 'PENDING',
+      executiveReviewHistory: [{
+        status: 'PENDING',
+        previousStatus: null,
+        reviewedAt: now,
+        reviewedById: authUser.uid,
+        reviewedByName: requesterName,
+        reviewComment: 'PM 신규 등록',
+      }],
       name: payload.name,
       officialContractName: payload.officialContractName,
-      status: 'CONTRACT_PENDING',
-      type: payload.type,
-      phase: 'CONFIRMED',
+      status: normalizeProjectStatus(payload.status),
+      type: normalizeProjectType(payload.type),
+      phase: normalizeProjectPhase(payload.phase),
       contractAmount: payload.contractAmount,
       contractStart: payload.contractStart,
       contractEnd: payload.contractEnd,
-      settlementType: payload.settlementType,
-      basis: payload.basis,
-      accountType: payload.accountType,
-      fundInputMode: payload.fundInputMode,
-      settlementSheetPolicy: normalizeSettlementSheetPolicy(payload.settlementSheetPolicy, payload.fundInputMode),
-      paymentPlan: { contract: 0, interim: 0, final: 0 },
+      settlementType: normalizeSettlementType(payload.settlementType),
+      basis: normalizeBasis(payload.basis),
+      accountType: normalizeAccountType(payload.accountType),
+      fundInputMode: normalizeProjectFundInputMode(payload.fundInputMode),
+      settlementSheetPolicy: normalizeSettlementSheetPolicy(payload.settlementSheetPolicy, normalizeProjectFundInputMode(payload.fundInputMode)),
+      paymentPlan,
       paymentPlanDesc: payload.paymentPlanDesc,
       clientOrg: payload.clientOrg,
-      groupwareName: '',
+      groupwareName: payload.groupwareName || '',
       participantCondition: payload.participantCondition,
       teamMembersDetailed: payload.teamMembersDetailed || [],
-      contractType: '계약서(날인)',
+      contractType: normalizeProjectContractType(payload.contractType),
       projectPurpose: payload.projectPurpose,
-      totalRevenueAmount: payload.totalRevenueAmount,
+      totalRevenueAmount: revenueFinancials.totalRevenueAmount,
       supportAmount: payload.supportAmount,
       salesVatAmount: payload.salesVatAmount,
-      financialInputFlags: payload.financialInputFlags,
+      financialInputFlags,
       settlementGuide: payload.settlementGuide,
       contractDocument: payload.contractDocument,
       department: payload.department,
       cic: resolveProjectCic({ department: payload.department }),
       teamName: payload.teamName,
-      managerId: authUser.uid,
+      managerId: payload.managerId || authUser.uid,
       managerName: payload.managerName || authUser.name || portalUser?.name || '',
       budgetCurrentYear: payload.contractAmount || 0,
       taxInvoiceAmount: 0,
-      profitRate: 0,
-      profitAmount: 0,
+      profitRate: revenueFinancials.profitRate,
+      profitAmount: revenueFinancials.profitAmount,
       isSettled: false,
-      finalPaymentNote: '',
+      finalPaymentNote: payload.finalPaymentNote || '',
       confirmerName: '',
       lastCheckedAt: '',
       cashflowDiffNote: '',
@@ -2413,10 +2447,11 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     }));
     await setDoc(doc(db, getOrgDocumentPath(orgId, 'projectRequests', id)), {
       ...request,
-      status: 'APPROVED',
-      reviewedBy: authUser.uid,
-      reviewedByName: authUser.name || '',
-      reviewedAt: now,
+      status: 'PENDING',
+      reviewOutcome: null,
+      reviewedBy: null,
+      reviewedByName: null,
+      reviewedAt: null,
       approvedProjectId: projectId,
     }, { merge: true });
     return id;

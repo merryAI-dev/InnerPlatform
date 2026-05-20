@@ -9,13 +9,15 @@ const portalProjectSettingsSource = readFileSync(
 
 describe('PortalProjectSettings shell contract', () => {
   it('keeps only assignment and primary-project editing while preserving save navigation', () => {
-    expect(portalProjectSettingsSource).toContain('선택한 사업 중 주사업만 저장하세요.');
-    expect(portalProjectSettingsSource).toContain('주사업 저장');
+    expect(portalProjectSettingsSource).toContain('선택한 프로젝트와 주 프로젝트를 확인하세요.');
+    expect(portalProjectSettingsSource).toContain('주 프로젝트 저장');
     expect(portalProjectSettingsSource).toContain("navigate('/portal', { replace: true });");
-    expect(portalProjectSettingsSource).toContain('선택한 사업만 보기');
-    expect(portalProjectSettingsSource).toContain('주사업으로 지정');
-    expect(portalProjectSettingsSource).toContain('사업명, 클라이언트, 담당자로 검색');
+    expect(portalProjectSettingsSource).toContain('선택한 프로젝트만 보기');
+    expect(portalProjectSettingsSource).toContain('주 프로젝트로 지정');
+    expect(portalProjectSettingsSource).toContain('프로젝트명, 계약 대상, 담당자로 검색');
     expect(portalProjectSettingsSource).not.toContain('사업명, 클라이언트, 유형, 담당자로 검색');
+    expect(portalProjectSettingsSource).not.toContain('주사업');
+    expect(portalProjectSettingsSource).not.toContain('클라이언트 미지정');
     expect(portalProjectSettingsSource).not.toContain('최근 사용한 사업');
     expect(portalProjectSettingsSource).not.toContain('증빙 드라이브 연결');
     expect(portalProjectSettingsSource).not.toContain('기본 폴더 자동 생성');

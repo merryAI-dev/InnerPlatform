@@ -146,7 +146,7 @@ export function PortalProjectSettings() {
       <div className="min-h-screen bg-background flex items-center justify-center p-4">
         <div className="text-center">
           <Loader2 className="w-5 h-5 mx-auto animate-spin text-muted-foreground" />
-          <p className="mt-2 text-[12px] text-muted-foreground">사업 목록을 불러오는 중...</p>
+          <p className="mt-2 text-[12px] text-muted-foreground">프로젝트 목록을 불러오는 중...</p>
         </div>
       </div>
     );
@@ -154,7 +154,7 @@ export function PortalProjectSettings() {
 
   function getClientLabel(project: Project) {
     const maybeName = (project as unknown as { clientName?: string }).clientName;
-    return project.clientOrg || maybeName || '클라이언트 미지정';
+    return project.clientOrg || maybeName || '계약 대상 미지정';
   }
 
   function getStatusFilterLabel(filter: ProjectStatusFilter): string {
@@ -204,13 +204,13 @@ export function PortalProjectSettings() {
 
     const normalized = normalizeProjectIds(projectIds);
     if (normalized.length === 0) {
-      setError('최소 1개 이상의 사업을 선택해 주세요.');
+      setError('최소 1개 이상의 프로젝트를 선택해 주세요.');
       return;
     }
 
     const primary = resolvePrimaryProjectId(normalized, primaryProjectId || normalized[0]);
     if (!primary) {
-      setError('주사업을 선택해 주세요.');
+      setError('주 프로젝트를 선택해 주세요.');
       return;
     }
 
@@ -240,10 +240,10 @@ export function PortalProjectSettings() {
             <FolderKanban className="w-7 h-7 text-white" />
           </div>
           <h1 className="text-[22px]" style={{ fontWeight: 800, letterSpacing: '-0.02em' }}>
-            {isRegistered ? '사업 배정 수정' : '포털 시작하기'}
+            {isRegistered ? '프로젝트 배정 수정' : '포털 시작하기'}
           </h1>
           <p className="text-[12px] text-muted-foreground">
-            선택한 사업 중 주사업만 저장하세요.
+            선택한 프로젝트와 주 프로젝트를 확인하세요.
           </p>
         </div>
 
@@ -258,7 +258,7 @@ export function PortalProjectSettings() {
 
             {allProjects.length === 0 && (
               <div className="p-4 rounded-lg border border-dashed border-border text-center text-[12px] text-muted-foreground">
-                등록된 사업이 없습니다. 관리자에게 사업 등록을 요청해 주세요.
+                등록된 프로젝트가 없습니다. 관리자에게 프로젝트 등록을 요청해 주세요.
               </div>
             )}
 
@@ -267,15 +267,15 @@ export function PortalProjectSettings() {
                 <div>
                   <p className="text-[11px] text-teal-700" style={{ fontWeight: 700 }}>현재 선택 상태</p>
                   <p className="text-[13px] text-slate-900" style={{ fontWeight: 700 }}>
-                    {projectIds.length > 0 ? `${projectIds.length}개 사업 선택됨` : '아직 선택한 사업이 없습니다'}
+                    {projectIds.length > 0 ? `${projectIds.length}개 프로젝트 선택됨` : '아직 선택한 프로젝트가 없습니다'}
                   </p>
                 </div>
                 <Badge className="bg-white text-teal-700 border border-teal-200 text-[10px]">
-                  {primaryProject ? `주사업: ${primaryProject.name}` : '주사업 미선택'}
+                  {primaryProject ? `주 프로젝트: ${primaryProject.name}` : '주 프로젝트 미선택'}
                 </Badge>
               </div>
               <p className="mt-2 text-[11px] text-teal-800/80">
-                주사업을 저장하면 포털에 즉시 반영됩니다.
+                주 프로젝트를 저장하면 포털에 즉시 반영됩니다.
               </p>
             </div>
 
@@ -283,7 +283,7 @@ export function PortalProjectSettings() {
               <div className="space-y-2">
                 {primaryProject ? (
                   <div className="rounded-lg border border-amber-200/70 bg-amber-50/80 px-3 py-2 text-[11px] text-amber-900">
-                    현재 주사업은 <strong>{primaryProject.name}</strong>입니다. 다른 사업으로 바꾸려면 목록에서 주사업을 다시 지정하세요.
+                    현재 주 프로젝트는 <strong>{primaryProject.name}</strong>입니다. 다른 프로젝트로 바꾸려면 목록에서 주 프로젝트를 다시 지정하세요.
                   </div>
                 ) : null}
                 <div className="relative">
@@ -291,7 +291,7 @@ export function PortalProjectSettings() {
                   <Input
                     value={projectSearch}
                     onChange={(event) => setProjectSearch(event.target.value)}
-                    placeholder="사업명, 클라이언트, 담당자로 검색"
+                    placeholder="프로젝트명, 계약 대상, 담당자로 검색"
                     className="h-10 pl-9 text-[12px]"
                   />
                 </div>
@@ -299,7 +299,7 @@ export function PortalProjectSettings() {
                   <span>
                     {projectSearch.trim()
                       ? `${visibleProjects.length}개 검색 결과 · 선택 ${visibleSelectedProjects.length}개`
-                      : `${allProjects.length}개 전체 사업 · 선택 ${projectIds.length}개`}
+                      : `${allProjects.length}개 전체 프로젝트 · 선택 ${projectIds.length}개`}
                   </span>
                   {projectSearch.trim() ? (
                     <button
@@ -318,7 +318,7 @@ export function PortalProjectSettings() {
                     className={`h-8 text-[11px] ${showSelectedOnly ? 'bg-teal-600 hover:bg-teal-600/90' : ''}`}
                     onClick={() => setShowSelectedOnly((prev) => !prev)}
                   >
-                    선택한 사업만 보기
+                    선택한 프로젝트만 보기
                   </Button>
                   {PROJECT_STATUS_FILTERS.map((filter) => {
                     const active = statusFilter === filter;
@@ -341,12 +341,12 @@ export function PortalProjectSettings() {
             <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
               {visibleSelectedProjects.length > 0 && (
                 <div className="sticky top-0 z-10 rounded-lg border border-amber-200/70 bg-amber-50/95 px-3 py-2 text-[11px] text-amber-800 backdrop-blur-sm">
-                  선택한 사업과 주사업이 먼저 보입니다.
+                  선택한 프로젝트와 주 프로젝트가 먼저 보입니다.
                 </div>
               )}
               {visibleProjects.length > 0 && visibleSelectedProjects.length > 0 && (
                 <div className="px-1 pt-1 text-[11px] font-medium text-slate-700">
-                  선택한 사업
+                  선택한 프로젝트
                 </div>
               )}
               {visibleSelectedProjects.map((project) => {
@@ -368,17 +368,17 @@ export function PortalProjectSettings() {
                         <Badge className={`text-[10px] ${statusColors[project.status] || 'bg-slate-100 text-slate-700'}`}>{statusLabel}</Badge>
                         <Badge className="bg-teal-600 text-white text-[10px]">
                           <CheckCircle2 className="mr-1 h-3 w-3" />
-                          선택한 사업
+                          선택한 프로젝트
                         </Badge>
                         {isPrimary ? (
                           <Badge className="bg-amber-100 text-amber-800 text-[10px] border border-amber-200">
-                            주사업
+                            주 프로젝트
                           </Badge>
                         ) : null}
                       </div>
                       <p className="text-[11px] text-muted-foreground">{highlightKeyword(getClientLabel(project), projectSearch)}</p>
                       <p className="mt-1 text-[11px] text-teal-800">
-                        {isPrimary ? '이 사업이 현재 주사업으로 저장됩니다.' : '선택된 사업입니다. 필요하면 주사업으로 지정하세요.'}
+                        {isPrimary ? '이 프로젝트가 현재 주 프로젝트로 저장됩니다.' : '선택된 프로젝트입니다. 필요하면 주 프로젝트로 지정하세요.'}
                       </p>
                     </div>
 
@@ -389,9 +389,9 @@ export function PortalProjectSettings() {
                         onClick={() => selectPrimary(project.id)}
                       >
                         {isPrimary ? (
-                          <><CheckCircle2 className="w-3 h-3 mr-1" /> 주사업 선택 완료</>
+                          <><CheckCircle2 className="w-3 h-3 mr-1" /> 주 프로젝트 선택 완료</>
                         ) : (
-                          '주사업으로 지정'
+                          '주 프로젝트로 지정'
                         )}
                       </Button>
                       <Button
@@ -407,7 +407,7 @@ export function PortalProjectSettings() {
               })}
               {visibleUnselectedProjects.length > 0 && (
                 <div className="px-1 pt-2 text-[11px] font-medium text-slate-700">
-                  {visibleSelectedProjects.length > 0 ? '추가 가능한 사업' : '사업 목록'}
+                  {visibleSelectedProjects.length > 0 ? '추가 가능한 프로젝트' : '프로젝트 목록'}
                 </div>
               )}
               {visibleUnselectedProjects.map((project) => {
@@ -430,25 +430,25 @@ export function PortalProjectSettings() {
                         {selected ? (
                           <Badge className="bg-teal-600 text-white text-[10px]">
                             <CheckCircle2 className="mr-1 h-3 w-3" />
-                            선택한 사업
+                            선택한 프로젝트
                           </Badge>
                         ) : null}
                         {isPrimary ? (
                           <Badge className="bg-amber-100 text-amber-800 text-[10px] border border-amber-200">
-                            주사업
+                            주 프로젝트
                           </Badge>
                         ) : null}
                       </div>
                       <p className="text-[11px] text-muted-foreground">{highlightKeyword(getClientLabel(project), projectSearch)}</p>
                       {selected ? (
                         <p className="mt-1 text-[11px] text-teal-800">
-                          {isPrimary ? '이 사업이 현재 주사업으로 저장됩니다.' : '선택된 사업입니다. 필요하면 주사업으로 지정하세요.'}
+                          {isPrimary ? '이 프로젝트가 현재 주 프로젝트로 저장됩니다.' : '선택된 프로젝트입니다. 필요하면 주 프로젝트로 지정하세요.'}
                         </p>
                       ) : (
                         <p className="mt-1 text-[11px] text-muted-foreground">
                           {project.managerName
-                            ? <>담당 {highlightKeyword(project.managerName, projectSearch)} · 선택하면 내 사업 목록에 포함됩니다.</>
-                            : '선택하면 내 사업 목록에 포함됩니다.'}
+                            ? <>담당 {highlightKeyword(project.managerName, projectSearch)} · 선택하면 내 프로젝트 목록에 포함됩니다.</>
+                            : '선택하면 내 프로젝트 목록에 포함됩니다.'}
                         </p>
                       )}
                     </div>
@@ -461,9 +461,9 @@ export function PortalProjectSettings() {
                           onClick={() => selectPrimary(project.id)}
                         >
                           {isPrimary ? (
-                            <><CheckCircle2 className="w-3 h-3 mr-1" /> 주사업 선택 완료</>
+                            <><CheckCircle2 className="w-3 h-3 mr-1" /> 주 프로젝트 선택 완료</>
                           ) : (
-                            '주사업으로 지정'
+                            '주 프로젝트로 지정'
                           )}
                         </Button>
                       )}
@@ -472,7 +472,7 @@ export function PortalProjectSettings() {
                         className={`h-9 text-[11px] ${selected ? 'bg-teal-600 hover:bg-teal-600/90' : ''}`}
                         onClick={() => toggleProject(project.id)}
                       >
-                        {selected ? '선택 취소' : '내 사업으로 선택'}
+                        {selected ? '선택 취소' : '내 프로젝트로 선택'}
                       </Button>
                     </div>
                   </div>
@@ -487,14 +487,14 @@ export function PortalProjectSettings() {
 
             <div className="flex items-center justify-between pt-2">
               <p className="text-[11px] text-muted-foreground">
-                주사업을 저장하면 포털이 즉시 갱신됩니다. {primaryProject ? `현재 주사업은 ${primaryProject.name}입니다.` : '주사업을 먼저 선택해 주세요.'}
+                주 프로젝트를 저장하면 포털이 즉시 갱신됩니다. {primaryProject ? `현재 주 프로젝트는 ${primaryProject.name}입니다.` : '주 프로젝트를 먼저 선택해 주세요.'}
               </p>
               <Button
                 className="h-9 text-[12px]"
                 onClick={handleSave}
                 disabled={saving || allProjects.length === 0 || projectIds.length === 0}
               >
-                {saving ? '저장 중...' : '주사업 저장'}
+                {saving ? '저장 중...' : '주 프로젝트 저장'}
               </Button>
             </div>
           </CardContent>

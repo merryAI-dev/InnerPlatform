@@ -172,13 +172,13 @@ export function ProjectListPage() {
   const renderEmptyState = () => {
     const stateByTab = hasActiveFilters
       ? {
-        title: '검색 조건에 맞는 사업이 없습니다',
+        title: '검색 조건에 맞는 프로젝트가 없습니다',
         description: '필터를 초기화하고 전체 포트폴리오를 다시 확인해 주세요.',
       }
       : activeTab === 'prospect'
         ? {
-          title: '입찰/예정 사업이 없습니다',
-          description: '등록 제안은 포털에서 접수되고, 여기서는 예정 사업을 검토하고 확정으로 전환합니다.',
+          title: '입찰/예정 프로젝트가 없습니다',
+          description: '등록 요청은 포털에서 접수되고, 여기서는 예정 프로젝트를 검토하고 확정으로 전환합니다.',
         }
         : activeTab === 'trash'
           ? {
@@ -186,7 +186,7 @@ export function ProjectListPage() {
             description: '삭제된 프로젝트가 생기면 이 탭에서 복구할 수 있습니다.',
           }
           : {
-            title: '확정 사업이 없습니다',
+            title: '확정 프로젝트가 없습니다',
             description: '프로젝트가 생성되면 이 탭에서 운영 현황과 원장을 바로 확인할 수 있습니다.',
           };
 
@@ -214,23 +214,23 @@ export function ProjectListPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="min-w-[90px]">담당조직</TableHead>
+                <TableHead className="min-w-[90px]">담당조직(CIC)</TableHead>
                 <TableHead className="min-w-[200px] cursor-pointer" onClick={() => handleSort('name')}>
                   <span className="flex items-center gap-1">
-                    사업명 <ArrowUpDown className="w-3 h-3" />
+                    프로젝트명 <ArrowUpDown className="w-3 h-3" />
                   </span>
                 </TableHead>
-                <TableHead className="min-w-[120px]">발주기관</TableHead>
+                <TableHead className="min-w-[120px]">계약 대상</TableHead>
                 <TableHead className="cursor-pointer" onClick={() => handleSort('status')}>
                   <span className="flex items-center gap-1">
                     상태 <ArrowUpDown className="w-3 h-3" />
                   </span>
                 </TableHead>
-                <TableHead className="min-w-[90px]">계약기간</TableHead>
+                <TableHead className="min-w-[90px]">계약 기간</TableHead>
                 <TableHead className="min-w-[80px]">담당자</TableHead>
                 <TableHead className="text-right min-w-[100px] cursor-pointer" onClick={() => handleSort('contractAmount')}>
                   <span className="flex items-center justify-end gap-1">
-                    총 사업비 <ArrowUpDown className="w-3 h-3" />
+                    계약금액 <ArrowUpDown className="w-3 h-3" />
                   </span>
                 </TableHead>
                 <TableHead className="min-w-[35px] text-center">정산</TableHead>
@@ -318,12 +318,12 @@ export function ProjectListPage() {
                 <TableRow>
                   <TableCell colSpan={activeTab === 'trash' ? 10 : activeTab === 'prospect' ? 9 : 8} className="text-center py-12 text-muted-foreground">
                     {search || statusFilter !== 'ALL' || typeFilter !== 'ALL' || deptFilter !== 'ALL'
-                      ? '검색 조건에 맞는 사업이 없습니다'
+                      ? '검색 조건에 맞는 프로젝트가 없습니다'
                       : activeTab === 'trash'
                         ? '휴지통이 비어 있습니다.'
                         : activeTab === 'prospect'
-                          ? '예정 사업이 없습니다.'
-                          : '확정 사업이 없습니다.'}
+                          ? '예정 프로젝트가 없습니다.'
+                          : '확정 프로젝트가 없습니다.'}
                   </TableCell>
                 </TableRow>
               )}
@@ -340,8 +340,8 @@ export function ProjectListPage() {
       <PageHeader
         icon={FolderKanban}
         iconGradient="linear-gradient(135deg, #6366f1, #818cf8)"
-        title="사업 통합 관리"
-        description={`활성 ${activeProjects.length}개 사업 · 확정 ${confirmedProjects.length} / 예정 ${prospectProjects.length} / 휴지통 ${trashedProjects.length}`}
+        title="프로젝트 통합 관리"
+        description={`활성 ${activeProjects.length}개 프로젝트 · 확정 ${confirmedProjects.length} / 예정 ${prospectProjects.length} / 휴지통 ${trashedProjects.length}`}
       />
 
       <Card className="border-slate-200/80 bg-gradient-to-r from-slate-50 via-white to-teal-50/70">
@@ -413,7 +413,7 @@ export function ProjectListPage() {
         <TabsList>
           <TabsTrigger value="confirmed" className="gap-1.5" data-testid="projects-tab-confirmed">
             <CheckCircle2 className="w-3.5 h-3.5" />
-            확정 사업
+            확정 프로젝트
             <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 py-0">
               {confirmedProjects.length}
             </Badge>
@@ -441,7 +441,7 @@ export function ProjectListPage() {
               <div className="relative flex-1 min-w-[200px] max-w-sm">
                 <Search className="absolute left-2.5 top-2.5 w-4 h-4 text-muted-foreground" />
                 <Input
-                  placeholder="사업명, 발주기관, 담당자 검색..."
+                  placeholder="프로젝트명, 계약 대상, 담당자 검색..."
                   value={search}
                   onChange={e => setSearch(e.target.value)}
                   className="pl-8"
@@ -475,7 +475,7 @@ export function ProjectListPage() {
                 </SelectContent>
               </Select>
               <span className="text-sm text-muted-foreground">
-                {filtered.length}개 사업
+                {filtered.length}개 프로젝트
               </span>
             </div>
           </CardContent>

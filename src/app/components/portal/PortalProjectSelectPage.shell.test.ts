@@ -6,8 +6,8 @@ const source = readFileSync(resolve(import.meta.dirname, 'PortalProjectSelectPag
 
 describe('PortalProjectSelectPage shell', () => {
   it('keeps the page focused on current-session project choice only', () => {
-    expect(source).toContain('오늘 작업할 사업 선택');
-    expect(source).toContain('이 사업으로 시작');
+    expect(source).toContain('오늘 작업할 프로젝트 선택');
+    expect(source).toContain('이 프로젝트로 시작');
     expect(source).toContain('data-testid="portal-project-select-page"');
     expect(source).not.toContain('주사업으로 지정');
     expect(source).not.toContain('증빙 드라이브 연결');

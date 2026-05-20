@@ -98,13 +98,13 @@ export function PortalOnboarding() {
 
     const normalized = normalizeProjectIds(projectIds);
     if (normalized.length === 0) {
-      setError('최소 1개 이상의 사업을 선택해 주세요.');
+      setError('최소 1개 이상의 프로젝트를 선택해 주세요.');
       return;
     }
 
     const primary = resolvePrimaryProjectId(normalized, primaryProjectId || normalized[0]);
     if (!primary) {
-      setError('주사업을 선택해 주세요.');
+      setError('주 프로젝트를 선택해 주세요.');
       return;
     }
 
@@ -131,7 +131,7 @@ export function PortalOnboarding() {
       <div className="min-h-screen bg-background flex items-center justify-center p-4">
         <div className="text-center">
           <Loader2 className="w-5 h-5 mx-auto animate-spin text-muted-foreground" />
-          <p className="mt-2 text-[12px] text-muted-foreground">사업 목록을 불러오는 중...</p>
+          <p className="mt-2 text-[12px] text-muted-foreground">프로젝트 목록을 불러오는 중...</p>
         </div>
       </div>
     );
@@ -139,7 +139,7 @@ export function PortalOnboarding() {
 
   const getClientLabel = (project: Project) => {
     const maybeName = (project as unknown as { clientName?: string }).clientName;
-    return project.clientOrg || maybeName || '클라이언트 미지정';
+    return project.clientOrg || maybeName || '계약 대상 미지정';
   };
 
   return (
@@ -149,9 +149,9 @@ export function PortalOnboarding() {
           <div className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-lg shadow-teal-500/20 bg-teal-600">
             <FolderKanban className="w-7 h-7 text-white" />
           </div>
-          <h1 className="text-[22px]" style={{ fontWeight: 800, letterSpacing: '-0.02em' }}>내 사업 선택</h1>
+          <h1 className="text-[22px]" style={{ fontWeight: 800, letterSpacing: '-0.02em' }}>내 프로젝트 선택</h1>
           <p className="text-[12px] text-muted-foreground">
-            참여하는 사업을 선택해 주세요. 선택 후 바로 포털로 이동합니다.
+            참여하는 프로젝트를 선택해 주세요. 선택 후 바로 포털로 이동합니다.
           </p>
         </div>
 
@@ -166,14 +166,14 @@ export function PortalOnboarding() {
 
             {allProjects.length === 0 && (
               <div className="p-4 rounded-lg border border-dashed border-border text-center text-[12px] text-muted-foreground">
-                <div>등록된 사업이 없습니다. 관리자에게 사업 등록을 요청해 주세요.</div>
+                <div>등록된 프로젝트가 없습니다. 관리자에게 프로젝트 등록을 요청해 주세요.</div>
                 <Button
                   variant="outline"
                   size="sm"
                   className="mt-3 h-7 text-[11px]"
                   onClick={() => navigate('/portal/register-project')}
                 >
-                  사업 추가 요청
+                  프로젝트 추가 요청
                 </Button>
               </div>
             )}
@@ -183,15 +183,15 @@ export function PortalOnboarding() {
                 <div>
                   <p className="text-[11px] text-teal-700" style={{ fontWeight: 700 }}>현재 선택 상태</p>
                   <p className="text-[13px] text-slate-900" style={{ fontWeight: 700 }}>
-                    {projectIds.length > 0 ? `${projectIds.length}개 사업 선택됨` : '아직 선택한 사업이 없습니다'}
+                    {projectIds.length > 0 ? `${projectIds.length}개 프로젝트 선택됨` : '아직 선택한 프로젝트가 없습니다'}
                   </p>
                 </div>
                 <Badge className="bg-white text-teal-700 border border-teal-200 text-[10px]">
-                  {primaryProject ? `주사업: ${primaryProject.name}` : '주사업 미선택'}
+                  {primaryProject ? `주 프로젝트: ${primaryProject.name}` : '주 프로젝트 미선택'}
                 </Badge>
               </div>
               <p className="mt-2 text-[11px] text-teal-800/80">
-                카드를 선택하면 내 사업에 포함되고, 그중 하나를 주사업으로 지정할 수 있습니다.
+                카드를 선택하면 내 프로젝트에 포함되고, 그중 하나를 주 프로젝트로 지정할 수 있습니다.
               </p>
             </div>
 
@@ -216,22 +216,22 @@ export function PortalOnboarding() {
                         {selected ? (
                           <Badge className="bg-teal-600 text-white text-[10px]">
                             <CheckCircle2 className="mr-1 h-3 w-3" />
-                            선택한 사업
+                            선택한 프로젝트
                           </Badge>
                         ) : null}
                         {isPrimary ? (
                           <Badge className="bg-amber-100 text-amber-800 text-[10px] border border-amber-200">
-                            주사업
+                            주 프로젝트
                           </Badge>
                         ) : null}
                       </div>
                       <p className="text-[11px] text-muted-foreground">{getClientLabel(project)}</p>
                       {selected ? (
                         <p className="mt-1 text-[11px] text-teal-800">
-                          {isPrimary ? '이 사업이 현재 포털 기본 진입 사업입니다.' : '선택된 사업입니다. 필요하면 주사업으로 지정하세요.'}
+                          {isPrimary ? '이 프로젝트가 현재 포털 기본 진입 프로젝트입니다.' : '선택된 프로젝트입니다. 필요하면 주 프로젝트로 지정하세요.'}
                         </p>
                       ) : (
-                        <p className="mt-1 text-[11px] text-muted-foreground">선택하면 내 사업 목록에 포함됩니다.</p>
+                        <p className="mt-1 text-[11px] text-muted-foreground">선택하면 내 프로젝트 목록에 포함됩니다.</p>
                       )}
                     </div>
 
@@ -243,9 +243,9 @@ export function PortalOnboarding() {
                           onClick={() => selectPrimary(project.id)}
                         >
                           {isPrimary ? (
-                            <><CheckCircle2 className="w-3 h-3 mr-1" /> 주사업 선택 완료</>
+                            <><CheckCircle2 className="w-3 h-3 mr-1" /> 주 프로젝트 선택 완료</>
                           ) : (
-                            '주사업으로 지정'
+                            '주 프로젝트로 지정'
                           )}
                         </Button>
                       )}
@@ -254,7 +254,7 @@ export function PortalOnboarding() {
                         className={`h-9 text-[11px] ${selected ? 'bg-teal-600 hover:bg-teal-600/90' : ''}`}
                         onClick={() => toggleProject(project.id)}
                       >
-                        {selected ? '선택 취소' : '내 사업으로 선택'}
+                        {selected ? '선택 취소' : '내 프로젝트로 선택'}
                       </Button>
                     </div>
                   </div>
@@ -269,15 +269,15 @@ export function PortalOnboarding() {
                 className="h-9 text-[12px] w-full"
                 onClick={() => navigate('/portal/register-project')}
               >
-                사업 추가 요청
+                프로젝트 추가 요청
               </Button>
             </div>
 
             <div className="flex items-center justify-between pt-2">
               <p className="text-[11px] text-muted-foreground">
                 {isRegistered
-                  ? `선택 정보를 저장하면 ${primaryProject?.name || '주사업'} 기준으로 바로 반영됩니다.`
-                  : '사업을 선택하고 주사업을 확인한 뒤 포털로 이동하세요.'}
+                  ? `선택 정보를 저장하면 ${primaryProject?.name || '주 프로젝트'} 기준으로 바로 반영됩니다.`
+                  : '프로젝트를 선택하고 주 프로젝트를 확인한 뒤 포털로 이동하세요.'}
               </p>
               <Button
                 className="h-9 text-[12px]"

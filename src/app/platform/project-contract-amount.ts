@@ -24,6 +24,24 @@ export function normalizeProjectFinancialInputFlags(
   };
 }
 
+export function normalizeProjectFinancialInputFlagsForAmounts(
+  value: ProjectFinancialInputFlags | null | undefined,
+  amounts: {
+    contractAmount?: number | null;
+    salesVatAmount?: number | null;
+    totalRevenueAmount?: number | null;
+    supportAmount?: number | null;
+  },
+): Required<ProjectFinancialInputFlags> {
+  const normalized = normalizeProjectFinancialInputFlags(value);
+  return {
+    contractAmount: normalized.contractAmount || Number(amounts.contractAmount || 0) > 0,
+    salesVatAmount: normalized.salesVatAmount || Number(amounts.salesVatAmount || 0) > 0,
+    totalRevenueAmount: normalized.totalRevenueAmount || Number(amounts.totalRevenueAmount || 0) > 0,
+    supportAmount: normalized.supportAmount || Number(amounts.supportAmount || 0) > 0,
+  };
+}
+
 export function parseProjectAmountInput(value: string): number {
   const normalized = normalizeAmountInput(value);
   if (!normalized) return 0;

@@ -40,6 +40,7 @@ import { EmptyState } from '../ui/empty-state';
 import { Progress } from '../ui/progress';
 import { computeProjectCompleteness } from '../../data/project-completeness';
 import { resolveApiErrorMessage } from '../../platform/api-error-message';
+import { normalizeProjectRevenueFields } from '../../platform/project-financials';
 
 const statusColor: Record<string, string> = {
   CONTRACT_PENDING: 'bg-amber-100 text-amber-800',
@@ -85,10 +86,11 @@ export function ProjectDetailPage() {
   const project = getProjectById(projectId || '');
   const projectLedgers = getProjectLedgers(projectId || '');
 
+  const revenueFinancials = project ? normalizeProjectRevenueFields(project, 'totalRevenueAmount') : null;
   const contractAmount = toFiniteNumber(project?.contractAmount);
   const budgetCurrentYear = toFiniteNumber(project?.budgetCurrentYear);
-  const profitRate = toFiniteNumber(project?.profitRate);
-  const profitAmount = toFiniteNumber(project?.profitAmount);
+  const profitRate = toFiniteNumber(revenueFinancials?.profitRate);
+  const profitAmount = toFiniteNumber(revenueFinancials?.profitAmount);
   const taxInvoiceAmount = toFiniteNumber(project?.taxInvoiceAmount);
   const isTrashed = !!project?.trashedAt;
 
@@ -402,13 +404,13 @@ export function ProjectDetailPage() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Card>
           <CardContent className="pt-3 pb-3">
-            <p className="text-xs text-muted-foreground mb-1">발주기관</p>
+            <p className="text-xs text-muted-foreground mb-1">계약 대상</p>
             <p className="text-sm" style={{ fontWeight: 500 }}>{project.clientOrg || '-'}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-3 pb-3">
-            <p className="text-xs text-muted-foreground mb-1">사업유형</p>
+            <p className="text-xs text-muted-foreground mb-1">프로젝트 유형</p>
             <p className="text-sm" style={{ fontWeight: 500 }}>{PROJECT_TYPE_LABELS[project.type]}</p>
           </CardContent>
         </Card>
@@ -422,7 +424,7 @@ export function ProjectDetailPage() {
         </Card>
         <Card>
           <CardContent className="pt-3 pb-3">
-            <p className="text-xs text-muted-foreground mb-1">담당조직 / 팀</p>
+            <p className="text-xs text-muted-foreground mb-1">담당조직(CIC) / 팀</p>
             <p className="text-sm" style={{ fontWeight: 500 }}>{project.department}</p>
             <p className="text-xs text-muted-foreground">{project.teamName || '-'}</p>
           </CardContent>
@@ -442,7 +444,7 @@ export function ProjectDetailPage() {
         <Card>
           <CardContent className="pt-4 pb-4">
             <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
-              <Landmark className="w-3.5 h-3.5" /> 총 사업비
+              <Landmark className="w-3.5 h-3.5" /> 계약금액
             </div>
             <p className="text-xl" style={{ fontWeight: 600 }}>{fmtShort(contractAmount)}</p>
           </CardContent>
@@ -571,7 +573,7 @@ export function ProjectDetailPage() {
                       <span>{project.contractStart || '-'} ~ {project.contractEnd || '-'}</span>
                     </div>
                     <div className="flex justify-between gap-4">
-                      <span className="text-muted-foreground">입금계획</span>
+                      <span className="text-muted-foreground">입금 계획</span>
                       <span className="text-right">{project.paymentPlanDesc || '-'}</span>
                     </div>
                     <div className="flex justify-between gap-4">
@@ -592,7 +594,7 @@ export function ProjectDetailPage() {
 
                   <div className="space-y-2 text-sm">
                     <div className="flex justify-between gap-4">
-                      <span className="text-muted-foreground">담당조직</span>
+                      <span className="text-muted-foreground">담당조직(CIC)</span>
                       <span>{project.department}</span>
                     </div>
                     <div className="flex justify-between gap-4">
@@ -600,7 +602,7 @@ export function ProjectDetailPage() {
                       <span>{project.teamName || '-'} </span>
                     </div>
                     <div className="flex justify-between gap-4">
-                      <span className="text-muted-foreground">메인 담당자</span>
+                      <span className="text-muted-foreground">PM</span>
                       <span>{project.managerName || '-'}</span>
                     </div>
                     <div className="flex justify-between gap-4">

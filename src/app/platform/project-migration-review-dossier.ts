@@ -1,6 +1,12 @@
 import {
   ACCOUNT_TYPE_LABELS,
   BASIS_LABELS,
+  normalizeAccountType,
+  normalizeBasis,
+  normalizeProjectContractType,
+  normalizeProjectFundInputMode,
+  normalizeProjectType,
+  normalizeSettlementType,
   PROJECT_FUND_INPUT_MODE_LABELS,
   PROJECT_TYPE_LABELS,
   type ProjectExecutiveReviewHistoryEntry,
@@ -22,10 +28,12 @@ export interface MigrationReviewDossier {
     pmName: string;
     department: string;
     officialContractName: string;
+    groupwareName: string;
   };
   contract: {
     projectTypeLabel: string;
     periodLabel: string;
+    contractType: string;
     settlementTypeLabel: string;
     basisLabel: string;
     accountTypeLabel: string;
@@ -35,6 +43,8 @@ export interface MigrationReviewDossier {
     contractAmountLabel: string;
     salesVatAmountLabel: string;
     paymentPlanDesc: string;
+    paymentPlanSplitLabel: string;
+    finalPaymentNote: string;
     totalRevenueAmountLabel: string;
     supportAmountLabel: string;
   };
@@ -87,6 +97,30 @@ function formatDate(value: string | null | undefined): string {
   const normalized = readable(value, '');
   if (!normalized) return '-';
   return normalized.slice(0, 10).replace(/-/g, '.');
+}
+
+function formatPaymentPlanSplit(
+  plan: Project['paymentPlan'] | ProjectRequest['payload']['paymentPlan'] | null | undefined,
+  contractAmount: number | null | undefined,
+): string {
+  if (!plan) return '-';
+  const normalizedContractAmount = Number(contractAmount);
+  const entries = [
+    ['선금/계약금', plan.contract],
+    ['중도금', plan.interim],
+    ['잔금', plan.final],
+  ] as const;
+  const label = entries
+    .filter(([, value]) => Number.isFinite(value as number) && Number(value) > 0)
+    .map(([name, value]) => {
+      const amount = Number(value);
+      const percent = Number.isFinite(normalizedContractAmount) && normalizedContractAmount > 0
+        ? ` (${((amount / normalizedContractAmount) * 100).toFixed(0)}%)`
+        : '';
+      return `${name} ${amount.toLocaleString('ko-KR')}원${percent}`;
+    })
+    .join(' · ');
+  return label || '-';
 }
 
 function buildAuditHistory(project: Project, request: ProjectRequest | null) {
@@ -142,19 +176,26 @@ export function buildMigrationReviewDossier(
       pmName: readable(project.managerName || payload?.managerName),
       department: readable(project.department || payload?.department),
       officialContractName: readable(project.officialContractName || payload?.officialContractName || project.name),
+      groupwareName: readable(project.groupwareName || payload?.groupwareName),
     },
     contract: {
-      projectTypeLabel: PROJECT_TYPE_LABELS[project.type || payload?.type] || readable(project.type || payload?.type),
+      projectTypeLabel: PROJECT_TYPE_LABELS[normalizeProjectType(project.type || payload?.type)] || readable(project.type || payload?.type),
       periodLabel: `${readable(project.contractStart || payload?.contractStart)} ~ ${readable(project.contractEnd || payload?.contractEnd)}`,
-      settlementTypeLabel: SETTLEMENT_TYPE_LABELS[project.settlementType || payload?.settlementType] || '-',
-      basisLabel: BASIS_LABELS[project.basis || payload?.basis] || '-',
-      accountTypeLabel: ACCOUNT_TYPE_LABELS[project.accountType || payload?.accountType] || '-',
-      fundInputModeLabel: PROJECT_FUND_INPUT_MODE_LABELS[project.fundInputMode || payload?.fundInputMode || 'BANK_UPLOAD'] || '-',
+      contractType: readable(normalizeProjectContractType(project.contractType || payload?.contractType)),
+      settlementTypeLabel: SETTLEMENT_TYPE_LABELS[normalizeSettlementType(project.settlementType || payload?.settlementType)] || '-',
+      basisLabel: BASIS_LABELS[normalizeBasis(project.basis || payload?.basis)] || '-',
+      accountTypeLabel: ACCOUNT_TYPE_LABELS[normalizeAccountType(project.accountType || payload?.accountType)] || '-',
+      fundInputModeLabel: PROJECT_FUND_INPUT_MODE_LABELS[normalizeProjectFundInputMode(project.fundInputMode || payload?.fundInputMode)] || '-',
     },
     budget: {
       contractAmountLabel: formatStoredProjectAmount(project.contractAmount ?? payload?.contractAmount),
       salesVatAmountLabel: formatStoredProjectAmount(project.salesVatAmount ?? payload?.salesVatAmount),
       paymentPlanDesc: readable(project.paymentPlanDesc || payload?.paymentPlanDesc),
+      paymentPlanSplitLabel: formatPaymentPlanSplit(
+        project.paymentPlan || payload?.paymentPlan,
+        project.contractAmount ?? payload?.contractAmount,
+      ),
+      finalPaymentNote: readable(project.finalPaymentNote || payload?.finalPaymentNote),
       totalRevenueAmountLabel: formatStoredProjectAmount(project.totalRevenueAmount ?? payload?.totalRevenueAmount),
       supportAmountLabel: formatStoredProjectAmount(project.supportAmount ?? payload?.supportAmount),
     },

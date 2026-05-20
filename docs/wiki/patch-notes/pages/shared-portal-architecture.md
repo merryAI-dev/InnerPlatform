@@ -3,7 +3,7 @@
 - route: `shared / architecture`
 - primary users: 운영자, 개발자, QA, 의사결정자
 - status: draft-active
-- last updated: 2026-04-21
+- last updated: 2026-05-20
 
 ## Purpose
 
@@ -32,6 +32,7 @@
 
 ## Recent Changes
 
+- [2026-05-20] 프로젝트 등록, 포털 수정, Admin 승인 화면이 같은 5단계 editor contract를 쓰도록 공통 draft/payload/patch builder를 분리했다. 승인/재제출은 request 조회를 먼저 검증하고 project/request 상태 patch를 같은 Firestore transaction에서 쓰도록 보강했다.
 - [2026-04-21] 세세목 도입 프로젝트는 `budget_tree_v2`를 원본으로 사용하고, 저장 시 `budget_code_book`을 2단 파생본으로 함께 동기화하도록 정리했다.
 - [2026-04-15] 포털 안정화 장기안으로 `Firestore 유지 + BFF/API-first hybrid`를 채택했다.
 - [2026-04-15] 6~8주 RFC에서 route-scoped provider split, read model API, critical write command, admin summary cutover 순서를 고정했다.

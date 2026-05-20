@@ -484,7 +484,7 @@ export function PortalDashboard() {
                 <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">프로젝트 상세</div>
                 <div className="space-y-2">
                   <div className="rounded-xl border border-slate-300 bg-white px-4 py-3">
-                    <div className="text-[11px] font-medium text-slate-600">발주기관</div>
+                    <div className="text-[11px] font-medium text-slate-600">계약 대상</div>
                     <div className="mt-1 text-[14px] font-semibold text-slate-900">{myProject.clientOrg || '-'}</div>
                   </div>
                   <div className="rounded-xl border border-slate-300 bg-white px-4 py-3">
@@ -492,7 +492,7 @@ export function PortalDashboard() {
                     <div className="mt-1 text-[14px] font-semibold text-slate-900">{portalUser.name}</div>
                   </div>
                   <div className="rounded-xl border border-slate-300 bg-white px-4 py-3">
-                    <div className="text-[11px] font-medium text-slate-600">사업비 총액</div>
+                    <div className="text-[11px] font-medium text-slate-600">계약금액</div>
                     <div className="mt-1 text-[14px] font-semibold text-slate-900">
                       {myProject.contractAmount > 0 ? `${fmtShort(myProject.contractAmount)}원` : '-'}
                     </div>
