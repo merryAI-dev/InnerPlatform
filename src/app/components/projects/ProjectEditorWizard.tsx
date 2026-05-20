@@ -200,6 +200,7 @@ function TeamMemberSearchCombobox({
           type="button"
           variant="outline"
           role="combobox"
+          aria-label={selectedLabel ? `팀원 선택: ${selectedLabel}` : '팀원 검색'}
           aria-expanded={open}
           className="mt-1 h-9 w-full justify-between px-3 text-left text-sm font-normal"
         >
@@ -706,17 +707,6 @@ export function ProjectEditorWizard({
           </Select>
         </div>
       </div>
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div>
-          <Label className="text-xs">사내기업팀</Label>
-          <Input value={draft.teamName} onChange={(event) => update('teamName', event.target.value)} className="mt-1 h-9 text-sm" />
-        </div>
-        <div>
-          <Label className="text-xs">참여기업 조건</Label>
-          <Input value={draft.participantCondition} onChange={(event) => update('participantCondition', event.target.value)} className="mt-1 h-9 text-sm" />
-        </div>
-      </div>
-
       <div className="flex items-center justify-between gap-3">
         <div>
           <Label className="text-xs">팀원 구성</Label>
@@ -886,9 +876,7 @@ export function ProjectEditorWizard({
           <CardContent>
             <ReviewRow label="PM" value={draft.managerName} />
             <ReviewRow label="담당자 계정" value={draft.managerId || '-'} />
-            <ReviewRow label="사내기업팀" value={draft.teamName} />
             <ReviewRow label="팀원" value={teamMembersSummary} />
-            <ReviewRow label="참여 조건" value={draft.participantCondition} />
           </CardContent>
         </Card>
         <Card className="shadow-none">

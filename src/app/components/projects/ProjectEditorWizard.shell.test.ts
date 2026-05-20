@@ -33,9 +33,19 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('<CommandInput placeholder="이름/닉네임으로 검색" />');
     expect(source).toContain('PROJECT_TEAM_MEMBER_OPTIONS.length}명 중 검색');
     expect(source).toContain('<TeamMemberSearchCombobox');
+    expect(source).toContain("aria-label={selectedLabel ? `팀원 선택: ${selectedLabel}` : '팀원 검색'}");
     expect(source).toContain('selectedNames={selectedNames}');
     expect(source).toContain('이미 추가됨');
     expect(source).not.toContain("value={member.memberName || 'none'}");
+  });
+
+  it('keeps the team step focused on CIC and member assignments without duplicate organization fields', () => {
+    expect(source).not.toContain('<Label className="text-xs">사내기업팀</Label>');
+    expect(source).not.toContain("<Input value={draft.teamName}");
+    expect(source).not.toContain('<Label className="text-xs">참여기업 조건</Label>');
+    expect(source).not.toContain("<Input value={draft.participantCondition}");
+    expect(source).not.toContain('<ReviewRow label="사내기업팀"');
+    expect(source).not.toContain('<ReviewRow label="참여 조건"');
   });
 
   it('keeps team member add rows editable and aligns the add button with the primary next action', () => {

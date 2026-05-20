@@ -2,7 +2,7 @@
 
 ## [2026-05-20] patch-note | portal-register-project, portal-edit-project | searchable team member picker
 - pages: [portal-register-project](./pages/portal-register-project.md), [portal-edit-project](./pages/portal-edit-project.md)
-- summary: 공통 프로젝트 에디터의 팀원 선택을 긴 dropdown에서 이름/닉네임 검색형 picker로 교체해 신규 등록과 수정 루프에서 80명+ 팀원 목록을 같은 방식으로 빠르게 찾게 했다. 기존 저장값이 canonical 옵션 밖에 있어도 표시와 닉네임을 유지하고, 이미 추가된 팀원은 중복 선택하지 못하도록 표시한다.
+- summary: 공통 프로젝트 에디터의 팀원 선택을 긴 dropdown에서 이름/닉네임 검색형 picker로 교체해 신규 등록과 수정 루프에서 80명+ 팀원 목록을 같은 방식으로 빠르게 찾게 했다. 팀/인력 단계는 담당조직(CIC)과 중복되는 사내기업팀/참여기업 조건 입력을 제거하고, 기존 저장값이 canonical 옵션 밖에 있어도 표시와 닉네임을 유지하며, 이미 추가된 팀원은 중복 선택하지 못하도록 표시한다.
 
 ## [2026-05-20] patch-note | admin-participation | Salesforce-style participation source lanes
 - pages: [admin-participation](./pages/admin-participation.md)
