@@ -49,7 +49,10 @@ import {
 } from '../../platform/project-contract-amount';
 import { formatProfitRatePercentInput } from '../../platform/project-financials';
 import { createProjectEditorDraft, type ProjectEditorDraft, type ProjectEditorMode } from '../../platform/project-editor';
-import { formatProjectTeamMembersSummary } from '../../platform/project-team-members';
+import {
+  formatProjectTeamMembersSummary,
+  normalizeProjectTeamMemberDraftRows,
+} from '../../platform/project-team-members';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
@@ -134,6 +137,17 @@ function isAdminMode(mode: ProjectEditorMode) {
   return mode === 'admin';
 }
 
+function createProjectEditorWizardDraft(overrides: Partial<ProjectEditorDraft> = {}): ProjectEditorDraft {
+  const draft = createProjectEditorDraft(overrides);
+  if (!Array.isArray(overrides.teamMembersDetailed)) {
+    return draft;
+  }
+  return {
+    ...draft,
+    teamMembersDetailed: normalizeProjectTeamMemberDraftRows(overrides.teamMembersDetailed),
+  };
+}
+
 export function ProjectEditorWizard({
   mode,
   initialDraft,
@@ -148,10 +162,10 @@ export function ProjectEditorWizard({
   onSubmit,
 }: ProjectEditorWizardProps) {
   const [stepIndex, setStepIndex] = useState(0);
-  const [draft, setDraft] = useState<ProjectEditorDraft>(() => createProjectEditorDraft(initialDraft));
+  const [draft, setDraft] = useState<ProjectEditorDraft>(() => createProjectEditorWizardDraft(initialDraft));
 
   useEffect(() => {
-    setDraft(createProjectEditorDraft(initialDraft));
+    setDraft(createProjectEditorWizardDraft(initialDraft));
     setStepIndex(0);
   }, [draftKey]);
 
@@ -185,11 +199,11 @@ export function ProjectEditorWizard({
   }, [draft.managerId, draft.managerName, members]);
 
   const update = <K extends keyof ProjectEditorDraft>(key: K, value: ProjectEditorDraft[K]) => {
-    setDraft((prev) => createProjectEditorDraft({ ...prev, [key]: value }));
+    setDraft((prev) => createProjectEditorWizardDraft({ ...prev, [key]: value }));
   };
 
   const updateAmount = (key: 'contractAmount' | 'salesVatAmount' | 'totalRevenueAmount' | 'supportAmount', rawValue: string) => {
-    setDraft((prev) => createProjectEditorDraft({
+    setDraft((prev) => createProjectEditorWizardDraft({
       ...prev,
       [key]: parseProjectAmountInput(rawValue),
       financialInputFlags: updateFlag(prev.financialInputFlags, key, rawValue),
@@ -201,7 +215,7 @@ export function ProjectEditorWizard({
       const oldDefault = getDefaultSettlementSheetPolicyForFundInputMode(prev.fundInputMode);
       const currentPolicy = normalizeSettlementSheetPolicy(prev.settlementSheetPolicy, prev.fundInputMode);
       const shouldResetPolicy = currentPolicy.preset === oldDefault.preset;
-      return createProjectEditorDraft({
+      return createProjectEditorWizardDraft({
         ...prev,
         fundInputMode: modeValue,
         settlementSheetPolicy: shouldResetPolicy
@@ -222,12 +236,12 @@ export function ProjectEditorWizard({
     setDraft((prev) => {
       const next = [...prev.teamMembersDetailed];
       next[index] = { ...next[index], ...patch };
-      return createProjectEditorDraft({ ...prev, teamMembersDetailed: next });
+      return createProjectEditorWizardDraft({ ...prev, teamMembersDetailed: next });
     });
   };
 
   const removeTeamMember = (index: number) => {
-    setDraft((prev) => createProjectEditorDraft({
+    setDraft((prev) => createProjectEditorWizardDraft({
       ...prev,
       teamMembersDetailed: prev.teamMembersDetailed.filter((_, itemIndex) => itemIndex !== index),
     }));

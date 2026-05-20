@@ -6,22 +6,32 @@ function toRate(value: unknown) {
   return Math.max(0, Math.min(100, Math.round(parsed)));
 }
 
+function normalizeProjectTeamMemberRow(member: ProjectTeamMemberAssignment): ProjectTeamMemberAssignment {
+  return {
+    memberName: String(member?.memberName || '').trim(),
+    memberNickname: String(member?.memberNickname || '').trim(),
+    role: String(member?.role || '').trim(),
+    participationRate: toRate(member?.participationRate),
+  };
+}
+
 export function normalizeProjectTeamMembers(
   members: ProjectTeamMemberAssignment[] | null | undefined,
 ): ProjectTeamMemberAssignment[] {
   return (Array.isArray(members) ? members : [])
-    .map((member) => ({
-      memberName: String(member?.memberName || '').trim(),
-      memberNickname: String(member?.memberNickname || '').trim(),
-      role: String(member?.role || '').trim(),
-      participationRate: toRate(member?.participationRate),
-    }))
+    .map(normalizeProjectTeamMemberRow)
     .filter((member) => (
       member.memberName
       || member.memberNickname
       || member.role
       || member.participationRate > 0
     ));
+}
+
+export function normalizeProjectTeamMemberDraftRows(
+  members: ProjectTeamMemberAssignment[] | null | undefined,
+): ProjectTeamMemberAssignment[] {
+  return (Array.isArray(members) ? members : []).map(normalizeProjectTeamMemberRow);
 }
 
 export function isProjectTeamMemberComplete(member: ProjectTeamMemberAssignment) {
@@ -38,9 +48,11 @@ export function formatProjectTeamMemberLine(member: ProjectTeamMemberAssignment)
   const identity = member.memberNickname
     ? `${member.memberName} (${member.memberNickname})`
     : member.memberName;
-  return member.participationRate > 0
-    ? `${identity} / ${member.role} / ${member.participationRate}%`
-    : `${identity} / ${member.role}`;
+  return [
+    identity,
+    member.role,
+    member.participationRate > 0 ? `${member.participationRate}%` : '',
+  ].filter(Boolean).join(' / ');
 }
 
 export function formatProjectTeamMembersSummary(
@@ -48,9 +60,9 @@ export function formatProjectTeamMembersSummary(
   fallback = '',
   separator = ', ',
 ) {
-  const completed = normalizeProjectTeamMembers(members).filter(isProjectTeamMemberComplete);
-  if (completed.length === 0) {
+  const normalized = normalizeProjectTeamMembers(members);
+  if (normalized.length === 0) {
     return String(fallback || '').trim() || '-';
   }
-  return completed.map(formatProjectTeamMemberLine).join(separator);
+  return normalized.map(formatProjectTeamMemberLine).join(separator);
 }

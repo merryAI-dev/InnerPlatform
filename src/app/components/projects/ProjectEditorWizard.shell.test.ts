@@ -31,6 +31,8 @@ describe('ProjectEditorWizard dropdown contract', () => {
   it('keeps team member add rows editable and aligns the add button with the primary next action', () => {
     const addTeamMemberBlock = source.slice(source.indexOf('const addTeamMember'), source.indexOf('const updateTeamMember'));
 
+    expect(source).toContain('createProjectEditorWizardDraft');
+    expect(source).toContain('normalizeProjectTeamMemberDraftRows');
     expect(addTeamMemberBlock).toContain('teamMembersDetailed: [...prev.teamMembersDetailed, createEmptyTeamMember()]');
     expect(addTeamMemberBlock).not.toContain('createProjectEditorDraft');
     expect(source).toContain('<Plus className="h-4 w-4" />');

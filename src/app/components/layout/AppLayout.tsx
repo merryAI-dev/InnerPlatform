@@ -96,14 +96,16 @@ function AppLayoutContent() {
 
   const participationDangerCount = React.useMemo(() => {
     const memberMap = new Map<string, { eNara: number; orgs: Map<string, number> }>();
-    participationEntries.forEach(e => {
-      if (e.settlementSystem === 'NONE' || e.settlementSystem === 'PRIVATE') return;
-      let m = memberMap.get(e.memberId);
-      if (!m) { m = { eNara: 0, orgs: new Map() }; memberMap.set(e.memberId, m); }
-      if (e.settlementSystem === 'E_NARA_DOUM') m.eNara += e.rate;
-      const orgName = e.clientOrg.split('/')[0];
-      m.orgs.set(orgName, (m.orgs.get(orgName) || 0) + e.rate);
-    });
+    participationEntries
+      .filter((entry) => entry.source !== 'PROJECT_TEAM_SYNC')
+      .forEach(e => {
+        if (e.settlementSystem === 'NONE' || e.settlementSystem === 'PRIVATE') return;
+        let m = memberMap.get(e.memberId);
+        if (!m) { m = { eNara: 0, orgs: new Map() }; memberMap.set(e.memberId, m); }
+        if (e.settlementSystem === 'E_NARA_DOUM') m.eNara += e.rate;
+        const orgName = e.clientOrg.split('/')[0];
+        m.orgs.set(orgName, (m.orgs.get(orgName) || 0) + e.rate);
+      });
     let count = 0;
     memberMap.forEach(m => {
       if (m.eNara > 100) { count++; return; }

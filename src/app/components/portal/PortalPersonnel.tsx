@@ -12,6 +12,7 @@ import { usePortalStore } from '../../data/portal-store';
 import {
   SETTLEMENT_SYSTEM_SHORT,
 } from '../../data/types';
+import { buildProjectTeamParticipationEntries } from '../../platform/project-team-participation';
 
 // ═══════════════════════════════════════════════════════════════
 // PortalPersonnel — 내 사업 인력 현황
@@ -20,6 +21,31 @@ import {
 export function PortalPersonnel() {
   const navigate = useNavigate();
   const { isLoading, myProject, participationEntries } = usePortalStore();
+
+  // 내 사업에 배정된 인력
+  const myEntries = useMemo(() => {
+    return myProject ? buildProjectTeamParticipationEntries(myProject, participationEntries) : [];
+  }, [myProject, participationEntries]);
+
+  // 멤버별 그룹핑
+  const members = useMemo(() => {
+    const map = new Map<string, { name: string; entries: typeof myEntries }>();
+    myEntries.forEach(e => {
+      if (!map.has(e.memberId)) map.set(e.memberId, { name: e.memberName, entries: [] });
+      map.get(e.memberId)!.entries.push(e);
+    });
+    return Array.from(map.entries()).map(([id, v]) => ({
+      id,
+      name: v.name,
+      entries: v.entries,
+      totalRate: v.entries.reduce((s, e) => s + e.rate, 0),
+    }));
+  }, [myEntries]);
+
+  const totalHeadcount = members.length;
+  const avgRate = members.length > 0
+    ? members.reduce((s, m) => s + m.totalRate, 0) / members.length
+    : 0;
 
   if (isLoading) {
     return (
@@ -43,31 +69,6 @@ export function PortalPersonnel() {
       </div>
     );
   }
-
-  // 내 사업에 배정된 인력
-  const myEntries = useMemo(() => {
-    return participationEntries.filter(e => e.projectId === myProject.id);
-  }, [myProject.id, participationEntries]);
-
-  // 멤버별 그룹핑
-  const members = useMemo(() => {
-    const map = new Map<string, { name: string; entries: typeof myEntries }>();
-    myEntries.forEach(e => {
-      if (!map.has(e.memberId)) map.set(e.memberId, { name: e.memberName, entries: [] });
-      map.get(e.memberId)!.entries.push(e);
-    });
-    return Array.from(map.entries()).map(([id, v]) => ({
-      id,
-      name: v.name,
-      entries: v.entries,
-      totalRate: v.entries.reduce((s, e) => s + e.rate, 0),
-    }));
-  }, [myEntries]);
-
-  const totalHeadcount = members.length;
-  const avgRate = members.length > 0
-    ? members.reduce((s, m) => s + m.totalRate, 0) / members.length
-    : 0;
 
   return (
     <div className="space-y-5">
@@ -103,7 +104,7 @@ export function PortalPersonnel() {
               <Percent className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
             </div>
             <div>
-              <p className="text-[10px] text-muted-foreground">평균 투입율</p>
+              <p className="text-[10px] text-muted-foreground">평균 참여율</p>
               <p className="text-[16px]" style={{ fontWeight: 700 }}>{avgRate.toFixed(0)}%</p>
             </div>
           </CardContent>
@@ -153,7 +154,7 @@ export function PortalPersonnel() {
                       'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300'
                     }`}
                   >
-                    투입율 {m.totalRate}%
+                    참여율 {m.totalRate}%
                   </Badge>
                 </div>
 
@@ -165,6 +166,9 @@ export function PortalPersonnel() {
                           {SETTLEMENT_SYSTEM_SHORT[e.settlementSystem]}
                         </Badge>
                         <span className="truncate">{e.clientOrg}</span>
+                        {e.source === 'PROJECT_TEAM_SYNC' ? (
+                          <span className="text-muted-foreground">· {e.note || '팀원'}</span>
+                        ) : null}
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
                         <span style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{e.rate}%</span>

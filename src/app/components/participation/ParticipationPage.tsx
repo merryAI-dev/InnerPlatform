@@ -4,7 +4,7 @@ import {
   Users, AlertTriangle, ShieldAlert, Shield,
   Search,
   UserCheck, FolderKanban, Download,
-  AlertCircle, CheckCircle2, XCircle, Eye, Network, Info,
+  AlertCircle, CheckCircle2, XCircle, Eye, Network, Info, Building2,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
@@ -31,6 +31,7 @@ import {
   getCrossVerifyRisk,
 } from '../../data/participation-data';
 import type { MemberParticipationSummary } from '../../data/participation-data';
+import { buildAllProjectTeamParticipationEntries } from '../../platform/project-team-participation';
 
 // ── Helpers ──
 
@@ -101,13 +102,72 @@ interface ProjectParticipationView {
   memberCount: number;
 }
 
+interface ClassificationLane {
+  key: 'ENARA' | 'KOICA' | 'ACCOUNTANT' | 'PRIVATE';
+  label: string;
+  helper: string;
+  projects: ProjectParticipationView[];
+  projectCount: number;
+  memberCount: number;
+  totalRate: number;
+  riskCount: number;
+}
+
+const classificationLaneMeta: Record<ClassificationLane['key'], Pick<ClassificationLane, 'label' | 'helper'>> = {
+  ENARA: {
+    label: 'e나라도움',
+    helper: '전용계좌·Type5 기준',
+  },
+  KOICA: {
+    label: 'KOICA',
+    helper: '동일 기관 누적 확인',
+  },
+  ACCOUNTANT: {
+    label: '회계사정산',
+    helper: '전문 회계법인 정산',
+  },
+  PRIVATE: {
+    label: '민간/기타',
+    helper: '교차검증 참고',
+  },
+};
+
+function getClassificationLaneKey(project: ProjectParticipationView): ClassificationLane['key'] {
+  if (project.settlement === 'E_NARA_DOUM') return 'ENARA';
+  if (project.clientOrg.includes('KOICA')) return 'KOICA';
+  if (project.settlement === 'ACCOUNTANT') return 'ACCOUNTANT';
+  return 'PRIVATE';
+}
+
+function laneToneClass(key: ClassificationLane['key']) {
+  switch (key) {
+    case 'ENARA':
+      return 'border-sky-200 bg-sky-50/70 text-sky-800';
+    case 'KOICA':
+      return 'border-emerald-200 bg-emerald-50/70 text-emerald-800';
+    case 'ACCOUNTANT':
+      return 'border-amber-200 bg-amber-50/70 text-amber-800';
+    default:
+      return 'border-slate-200 bg-slate-50 text-slate-700';
+  }
+}
+
+function participationSourceLabel(entry: ParticipationEntry) {
+  return entry.source === 'PROJECT_TEAM_SYNC' ? '프로젝트 팀 연동' : '공식 참여율';
+}
+
 // ── Member Detail Dialog ──
 
-function MemberDetailDialog({ member, open, onClose }: {
-  member: MemberParticipationSummary | null; open: boolean; onClose: () => void;
+function MemberDetailDialog({ member, formalMember, open, onClose }: {
+  member: MemberParticipationSummary | null;
+  formalMember: MemberParticipationSummary | null;
+  open: boolean;
+  onClose: () => void;
 }) {
   if (!member) return null;
-  const rc = riskColors[member.riskLevel];
+  const formalRiskLevel = formalMember?.riskLevel || 'SAFE';
+  const formalRiskDetails = formalMember?.riskDetails || [];
+  const rc = riskColors[formalRiskLevel];
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -120,25 +180,28 @@ function MemberDetailDialog({ member, open, onClose }: {
             — 참여율 상세
           </DialogTitle>
           <DialogDescription>
-            전체 {member.totalRate}% / {member.projectCount}개 프로젝트 배정
+            표시 합계 {member.totalRate}% / {member.projectCount}개 프로젝트 배정
           </DialogDescription>
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto -mx-6 px-6">
           {/* Summary Bar */}
           <div className="flex flex-wrap items-center gap-2 mt-2">
-            <Badge className={`${rc.bg} ${rc.text} border ${rc.border}`}>{riskLabels[member.riskLevel]}</Badge>
+            <Badge className={`${rc.bg} ${rc.text} border ${rc.border}`}>{riskLabels[formalRiskLevel]}</Badge>
             <div className="flex items-center gap-3 text-xs">
-              <span>e나라도움 <span style={{ fontWeight: 700 }} className={member.eNaraRate > 100 ? 'text-red-700' : ''}>{member.eNaraRate}%</span></span>
-              <span>회계사정산 <span style={{ fontWeight: 700 }}>{member.accountantRate}%</span></span>
-              {member.privateRate > 0 && <span>민간 <span style={{ fontWeight: 700 }}>{member.privateRate}%</span></span>}
+              <span>공식 e나라도움 <span style={{ fontWeight: 700 }} className={(formalMember?.eNaraRate || 0) > 100 ? 'text-red-700' : ''}>{formalMember?.eNaraRate || 0}%</span></span>
+              <span>공식 회계사정산 <span style={{ fontWeight: 700 }}>{formalMember?.accountantRate || 0}%</span></span>
+              {(formalMember?.privateRate || 0) > 0 && <span>공식 민간 <span style={{ fontWeight: 700 }}>{formalMember?.privateRate || 0}%</span></span>}
+              {member.entries.some((entry) => entry.source === 'PROJECT_TEAM_SYNC') ? (
+                <span className="text-sky-700">프로젝트 팀 연동 포함</span>
+              ) : null}
             </div>
           </div>
 
           {/* Risk Alerts */}
-          {member.riskDetails.length > 0 && (
+          {formalRiskDetails.length > 0 && (
             <div className="mt-3 space-y-1">
-              {member.riskDetails.map((d, i) => (
+              {formalRiskDetails.map((d, i) => (
                 <div key={i} className="flex items-start gap-1.5 text-xs">
                   {d.includes('초과') || d.includes('환수') ? (
                     <XCircle className="w-3.5 h-3.5 text-red-600 shrink-0 mt-0.5" />
@@ -168,6 +231,7 @@ function MemberDetailDialog({ member, open, onClose }: {
             <TableHeader>
               <TableRow>
                 <TableHead className="min-w-[140px]">프로젝트명</TableHead>
+                <TableHead>출처</TableHead>
                 <TableHead>정산유형</TableHead>
                 <TableHead>계약 대상</TableHead>
                 <TableHead className="text-right">참여율</TableHead>
@@ -178,6 +242,11 @@ function MemberDetailDialog({ member, open, onClose }: {
               {member.entries.map(e => (
                 <TableRow key={e.id}>
                   <TableCell className="text-xs" style={{ fontWeight: 500 }}>{e.projectName}</TableCell>
+                  <TableCell>
+                    <Badge variant={e.source === 'PROJECT_TEAM_SYNC' ? 'secondary' : 'outline'} className="text-[10px]">
+                      {participationSourceLabel(e)}
+                    </Badge>
+                  </TableCell>
                   <TableCell><SettlementBadge system={e.settlementSystem} /></TableCell>
                   <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{e.clientOrg.split('/')[0]}</TableCell>
                   <TableCell className="text-right"><span className="text-xs" style={{ fontWeight: 600 }}>{e.rate}%</span></TableCell>
@@ -187,6 +256,7 @@ function MemberDetailDialog({ member, open, onClose }: {
               {/* Total row */}
               <TableRow className="bg-muted/30">
                 <TableCell className="text-xs" style={{ fontWeight: 700 }}>합계</TableCell>
+                <TableCell />
                 <TableCell />
                 <TableCell />
                 <TableCell className="text-right">
@@ -342,14 +412,35 @@ export function ParticipationPage() {
   const [detailOpen, setDetailOpen] = useState(false);
   const [riskFilter, setRiskFilter] = useState<'ALL' | 'DANGER' | 'WARNING' | 'SAFE'>('ALL');
 
-  const memberSummaries = useMemo(
-    () => computeMemberSummaries(participationEntries),
-    [participationEntries]
+  const displayParticipationEntries = useMemo(
+    () => buildAllProjectTeamParticipationEntries(projects, participationEntries),
+    [participationEntries, projects]
   );
+
+  const formalParticipationEntries = useMemo(
+    () => participationEntries.filter((entry) => entry.source !== 'PROJECT_TEAM_SYNC'),
+    [participationEntries],
+  );
+
+  const memberSummaries = useMemo(
+    () => computeMemberSummaries(displayParticipationEntries),
+    [displayParticipationEntries]
+  );
+
+  const formalMemberSummaries = useMemo(
+    () => computeMemberSummaries(formalParticipationEntries),
+    [formalParticipationEntries],
+  );
+
+  const formalSummaryMap = useMemo(() => {
+    return new Map(formalMemberSummaries.map((member) => [member.memberId, member]));
+  }, [formalMemberSummaries]);
 
   const filteredSummaries = useMemo(() => {
     let result = memberSummaries;
-    if (riskFilter !== 'ALL') result = result.filter(m => m.riskLevel === riskFilter);
+    if (riskFilter !== 'ALL') {
+      result = result.filter((member) => formalSummaryMap.get(member.memberId)?.riskLevel === riskFilter);
+    }
     if (searchText.trim()) {
       const q = searchText.toLowerCase();
       result = result.filter(m =>
@@ -359,12 +450,12 @@ export function ParticipationPage() {
       );
     }
     return result;
-  }, [memberSummaries, searchText, riskFilter]);
+  }, [formalSummaryMap, memberSummaries, searchText, riskFilter]);
 
   // Project-centric view
   const projectEntries = useMemo<ProjectParticipationView[]>(() => {
     const byProject = new Map<string, ParticipationEntry[]>();
-    participationEntries.forEach((entry) => {
+    displayParticipationEntries.forEach((entry) => {
       const list = byProject.get(entry.projectId) || [];
       list.push(entry);
       byProject.set(entry.projectId, list);
@@ -395,19 +486,44 @@ export function ParticipationPage() {
     });
 
     return rows.sort((a, b) => b.memberCount - a.memberCount);
-  }, [participationEntries, projects]);
+  }, [displayParticipationEntries, projects]);
+
+  const classificationLanes = useMemo<ClassificationLane[]>(() => {
+    const map = new Map<ClassificationLane['key'], ProjectParticipationView[]>();
+    projectEntries.forEach((project) => {
+      const key = getClassificationLaneKey(project);
+      const list = map.get(key) || [];
+      list.push(project);
+      map.set(key, list);
+    });
+
+    return (['ENARA', 'KOICA', 'ACCOUNTANT', 'PRIVATE'] as const).map((key) => {
+      const laneProjects = map.get(key) || [];
+      const entries = laneProjects.flatMap((project) => project.entries);
+      return {
+        key,
+        ...classificationLaneMeta[key],
+        projects: laneProjects,
+        projectCount: laneProjects.length,
+        memberCount: new Set(entries.map((entry) => entry.memberId)).size,
+        totalRate: entries.reduce((sum, entry) => sum + entry.rate, 0),
+        riskCount: laneProjects.filter((project) => project.totalRate > 100).length,
+      };
+    });
+  }, [projectEntries]);
 
   // KPIs
   const kpis = useMemo(() => {
     const total = memberSummaries.length;
-    const danger = memberSummaries.filter(m => m.riskLevel === 'DANGER').length;
-    const warning = memberSummaries.filter(m => m.riskLevel === 'WARNING').length;
-    const safe = memberSummaries.filter(m => m.riskLevel === 'SAFE').length;
+    const danger = formalMemberSummaries.filter(m => m.riskLevel === 'DANGER').length;
+    const warning = formalMemberSummaries.filter(m => m.riskLevel === 'WARNING').length;
+    const safe = formalMemberSummaries.filter(m => m.riskLevel === 'SAFE').length;
     const totalEmployees = Math.max(total, members.length);
     const avgRate = total > 0 ? Math.round(memberSummaries.reduce((s, m) => s + m.totalRate, 0) / total) : 0;
     const eNaraProjects = projectEntries.filter((p) => p.settlement === 'E_NARA_DOUM').length;
-    return { total, danger, warning, safe, totalEmployees, avgRate, eNaraProjects };
-  }, [memberSummaries, members.length, projectEntries]);
+    const koicaProjects = projectEntries.filter((p) => p.clientOrg.includes('KOICA')).length;
+    return { total, danger, warning, safe, totalEmployees, avgRate, eNaraProjects, koicaProjects };
+  }, [formalMemberSummaries, memberSummaries, members.length, projectEntries]);
 
   const handleOpenDetail = (s: MemberParticipationSummary) => {
     setSelectedMember(s);
@@ -415,7 +531,7 @@ export function ParticipationPage() {
   };
 
   const handleDownloadRiskJson = () => {
-    const report = buildParticipationRiskReport(participationEntries);
+    const report = buildParticipationRiskReport(formalParticipationEntries);
     const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
@@ -428,22 +544,76 @@ export function ParticipationPage() {
     <TooltipProvider>
       <div className="space-y-5">
         {/* Header */}
-        <PageHeader
-          icon={Shield}
-          iconGradient="linear-gradient(135deg, #6366f1, #8b5cf6)"
-          title="참여율 관리 (100-1)"
-          description="2025-2026 KOICA 프로젝트 통합관리 — 교차검증 가능 프로젝트 참여율 합산 ≤ 100% 관리"
-        />
-        <div className="flex items-center justify-between rounded-lg border border-indigo-200/60 bg-indigo-50/40 px-3 py-2">
-          <div className="flex items-center gap-2 text-xs">
-            <Badge className="bg-indigo-100 text-indigo-700 border border-indigo-200">규칙 검증 결과</Badge>
-            <span className="text-indigo-700">AI 추론 미사용 · ruleset {PARTICIPATION_RISK_RULESET.version}</span>
+        <div className="rounded-lg border bg-white shadow-sm">
+          <div className="flex flex-col gap-3 border-b bg-slate-50/80 px-4 py-3 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-md bg-[#0176d3] text-white">
+                <Shield className="h-5 w-5" />
+              </div>
+              <div>
+                <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-slate-500">Participation Object</p>
+                <h1 className="text-[18px] font-semibold text-slate-950">참여율 관리 (100-1)</h1>
+                <p className="text-[12px] text-slate-500">e나라도움·KOICA·회계사정산 기준으로 누적 참여율을 확인합니다</p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge className="border border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-50">규칙 검증</Badge>
+              <span className="text-[11px] text-slate-500">AI 추론 미사용 · ruleset {PARTICIPATION_RISK_RULESET.version}</span>
+              <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5" onClick={handleDownloadRiskJson}>
+                <Download className="w-3.5 h-3.5" />
+                공식 JSON
+              </Button>
+            </div>
           </div>
-          <Button variant="outline" size="sm" className="h-7 text-xs gap-1.5" onClick={handleDownloadRiskJson}>
-            <Download className="w-3.5 h-3.5" />
-            결과 JSON
-          </Button>
         </div>
+
+        <PageHeader
+          icon={Building2}
+          iconGradient="linear-gradient(135deg, #0176d3 0%, #2e844a 100%)"
+          title="원천 구분"
+          description="원래 프로젝트 분류를 먼저 보고, 인원별 상세로 내려갑니다"
+        />
+
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+          {classificationLanes.map((lane) => (
+            <div key={lane.key} className={`rounded-lg border px-3 py-3 ${laneToneClass(lane.key)}`}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[13px] font-semibold">{lane.label}</p>
+                  <p className="text-[10px] opacity-75">{lane.helper}</p>
+                </div>
+                <Badge variant="outline" className="h-5 bg-white/70 px-1.5 text-[10px]">
+                  {lane.projectCount}건
+                </Badge>
+              </div>
+              <div className="mt-3 grid grid-cols-3 gap-2 text-[11px]">
+                <div>
+                  <p className="text-[9px] opacity-70">인원</p>
+                  <p className="font-semibold tabular-nums">{lane.memberCount}명</p>
+                </div>
+                <div>
+                  <p className="text-[9px] opacity-70">누적</p>
+                  <p className="font-semibold tabular-nums">{lane.totalRate}%</p>
+                </div>
+                <div>
+                  <p className="text-[9px] opacity-70">검토</p>
+                  <p className={`font-semibold tabular-nums ${lane.riskCount > 0 ? 'text-rose-700' : ''}`}>{lane.riskCount}건</p>
+                </div>
+              </div>
+              <div className="mt-3 flex min-h-5 flex-wrap gap-1">
+                {lane.projects.slice(0, 3).map((project) => (
+                  <span key={project.id} className="rounded border border-white/70 bg-white/70 px-1.5 py-0.5 text-[9px] text-slate-700">
+                    {project.shortName}
+                  </span>
+                ))}
+                {lane.projects.length > 3 ? (
+                  <span className="px-1 py-0.5 text-[9px] opacity-70">+{lane.projects.length - 3}</span>
+                ) : null}
+              </div>
+            </div>
+          ))}
+        </div>
+
         {/* KPI Cards */}
         <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
           <Card>
@@ -461,7 +631,7 @@ export function ParticipationPage() {
                 <XCircle className="w-3.5 h-3.5 text-red-600" /><span className="text-red-700">위험</span>
               </div>
               <p className="text-xl text-red-700" style={{ fontWeight: 600 }}>{kpis.danger}명</p>
-              <p className="text-[10px] text-red-600">e나라도움 or 동일기관 초과</p>
+              <p className="text-[10px] text-red-600">공식 참여율 기준</p>
             </CardContent>
           </Card>
           <Card className={kpis.warning > 0 ? 'border-amber-200 bg-amber-50/40' : ''}>
@@ -470,7 +640,7 @@ export function ParticipationPage() {
                 <AlertCircle className="w-3.5 h-3.5 text-amber-600" /><span className="text-amber-700">경고</span>
               </div>
               <p className="text-xl text-amber-700" style={{ fontWeight: 600 }}>{kpis.warning}명</p>
-              <p className="text-[10px] text-amber-600">80~100% 구간</p>
+              <p className="text-[10px] text-amber-600">공식 참여율 기준</p>
             </CardContent>
           </Card>
           <Card>
@@ -494,10 +664,10 @@ export function ParticipationPage() {
           <Card>
             <CardContent className="pt-3 pb-3">
               <div className="flex items-center gap-1.5 text-xs mb-0.5">
-                <FolderKanban className="w-3.5 h-3.5" /><span>전체 프로젝트</span>
+                <Building2 className="w-3.5 h-3.5 text-emerald-600" /><span>KOICA 프로젝트</span>
               </div>
-              <p className="text-xl" style={{ fontWeight: 600 }}>{projectEntries.length}건</p>
-              <p className="text-[10px] text-muted-foreground">확정+입찰 포함</p>
+              <p className="text-xl" style={{ fontWeight: 600 }}>{kpis.koicaProjects}건</p>
+              <p className="text-[10px] text-muted-foreground">동일 기관 확인</p>
             </CardContent>
           </Card>
         </div>
@@ -513,7 +683,7 @@ export function ParticipationPage() {
                     환수 위험 인원 {kpis.danger}명 — 즉시 참여율 조정이 필요합니다
                   </p>
                   <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1">
-                    {memberSummaries.filter(m => m.riskLevel === 'DANGER').map(m => (
+                    {formalMemberSummaries.filter(m => m.riskLevel === 'DANGER').map(m => (
                       <div key={m.memberId} className="flex items-center gap-2 text-xs cursor-pointer hover:underline" onClick={() => handleOpenDetail(m)}>
                         <span className="text-red-700" style={{ fontWeight: 600 }}>{m.realName}({m.nickname})</span>
                         <span className="text-red-600">전체 {m.totalRate}%</span>
@@ -559,7 +729,7 @@ export function ParticipationPage() {
                   <TableRow className="bg-muted/30">
                     <TableHead className="w-8" />
                     <TableHead className="min-w-[100px]">이름</TableHead>
-                    <TableHead className="min-w-[120px]">전체 투입율</TableHead>
+                    <TableHead className="min-w-[120px]">전체 참여율</TableHead>
                     <TableHead className="min-w-[80px]">e나라도움</TableHead>
                     <TableHead className="min-w-[80px]">회계사정산</TableHead>
                     <TableHead className="min-w-[60px]">민간</TableHead>
@@ -570,7 +740,10 @@ export function ParticipationPage() {
                 </TableHeader>
                 <TableBody>
                   {filteredSummaries.map(m => {
-                    const rc = riskColors[m.riskLevel];
+                    const formalSummary = formalSummaryMap.get(m.memberId);
+                    const riskLevel = formalSummary?.riskLevel || 'SAFE';
+                    const riskDetails = formalSummary?.riskDetails || [];
+                    const rc = riskColors[riskLevel];
                     return (
                       <TableRow key={m.memberId} className="cursor-pointer hover:bg-accent/40" onClick={() => handleOpenDetail(m)}>
                         <TableCell><div className={`w-2 h-2 rounded-full ${rc.dot}`} /></TableCell>
@@ -604,8 +777,10 @@ export function ParticipationPage() {
                         </TableCell>
                         <TableCell className="text-center text-xs">{m.projectCount}</TableCell>
                         <TableCell>
-                          {m.riskDetails.length > 0 ? (
-                            <span className="text-[10px] text-red-600 line-clamp-1">{m.riskDetails[0]}</span>
+                          {riskDetails.length > 0 ? (
+                            <span className="text-[10px] text-red-600 line-clamp-1">{riskDetails[0]}</span>
+                          ) : m.entries.some((entry) => entry.source === 'PROJECT_TEAM_SYNC') ? (
+                            <span className="text-[10px] text-sky-700">팀 연동 포함</span>
                           ) : (
                             <span className="text-[10px] text-green-600">리스크 없음</span>
                           )}
@@ -628,6 +803,7 @@ export function ParticipationPage() {
                 <TableHeader>
                   <TableRow className="bg-muted/30">
                     <TableHead className="min-w-[160px]">프로젝트명</TableHead>
+                    <TableHead>원천 구분</TableHead>
                     <TableHead>정산유형</TableHead>
                     <TableHead>계약 대상</TableHead>
                     <TableHead>단계</TableHead>
@@ -644,6 +820,11 @@ export function ParticipationPage() {
                           <p className="text-[10px] text-muted-foreground">{p.periodDesc}</p>
                         </div>
                       </TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="text-[10px]">
+                          {classificationLaneMeta[getClassificationLaneKey(p)].label}
+                        </Badge>
+                      </TableCell>
                       <TableCell><SettlementBadge system={p.settlement} /></TableCell>
                       <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{p.clientOrg.split('/')[0]}</TableCell>
                       <TableCell><PhaseChip phase={p.phase} /></TableCell>
@@ -655,12 +836,16 @@ export function ParticipationPage() {
                             return (
                               <Tooltip key={e.id}>
                                 <TooltipTrigger>
-                                  <Badge variant="outline" className={`text-[10px] gap-0.5 ${e.isDocumentOnly ? 'border-dashed' : ''}`}>
+                                  <Badge
+                                    variant={e.source === 'PROJECT_TEAM_SYNC' ? 'secondary' : 'outline'}
+                                    className={`text-[10px] gap-0.5 ${e.isDocumentOnly ? 'border-dashed' : ''}`}
+                                  >
                                     {name} {e.rate}%
                                   </Badge>
                                 </TooltipTrigger>
                                 <TooltipContent className="text-xs">
                                   {e.memberName}: {e.rate}% / {e.periodStart}
+                                  {' / '}{participationSourceLabel(e)}
                                 </TooltipContent>
                               </Tooltip>
                             );
@@ -680,7 +865,12 @@ export function ParticipationPage() {
           </TabsContent>
         </Tabs>
 
-        <MemberDetailDialog member={selectedMember} open={detailOpen} onClose={() => setDetailOpen(false)} />
+        <MemberDetailDialog
+          member={selectedMember}
+          formalMember={selectedMember ? formalSummaryMap.get(selectedMember.memberId) || null : null}
+          open={detailOpen}
+          onClose={() => setDetailOpen(false)}
+        />
       </div>
     </TooltipProvider>
   );

@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-05-20] patch-note | admin-participation | Salesforce-style participation source lanes
+- pages: [admin-participation](./pages/admin-participation.md)
+- summary: 참여율 관리 화면을 e나라도움, KOICA, 회계사정산, 민간/기타 원천 구분 lane이 먼저 보이는 Salesforce형 운영 뷰로 정리했다. 프로젝트 팀 연동 행은 표시용으로 합산하되 공식 위험 카운트와 JSON 내보내기는 formal 참여율만 사용하도록 분리하고, stale `PROJECT_TEAM_SYNC` 행과 이름/닉네임 중복을 막는 회귀 테스트를 추가했다.
+
 ## [2026-05-20] patch-note | admin-dashboard, admin-participation, portal-dashboard, shared-portal-architecture | project registration review flow alignment
 - pages: [admin-dashboard](./pages/admin-dashboard.md), [admin-participation](./pages/admin-participation.md), [portal-dashboard](./pages/portal-dashboard.md), [shared-portal-architecture](./pages/shared-portal-architecture.md)
 - summary: 프로젝트 등록, 포털 수정, Admin 승인 화면을 공통 5단계 프로젝트 에디터로 정렬하고, `프로젝트/계약 대상/PM/CIC 대표 검토` 용어와 dropdown 값을 통일했다. 승인/재제출의 project-request 상태 동기화는 같은 Firestore transaction으로 묶고, canonical `project_requests` index와 legacy fallback을 보강했다.

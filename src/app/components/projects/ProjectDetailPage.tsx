@@ -32,6 +32,7 @@ import {
   PROJECT_STATUS_LABELS, PROJECT_TYPE_LABELS, SETTLEMENT_TYPE_LABELS,
   SETTLEMENT_TYPE_SHORT, BASIS_LABELS, ACCOUNT_TYPE_LABELS,
   PROJECT_PHASE_LABELS,
+  SETTLEMENT_SYSTEM_SHORT,
   type ProjectStatus, type Basis, type SettlementType, type Ledger,
   formatSettlementSheetPolicySummary,
   normalizeSettlementSheetPolicy,
@@ -41,6 +42,7 @@ import { Progress } from '../ui/progress';
 import { computeProjectCompleteness } from '../../data/project-completeness';
 import { resolveApiErrorMessage } from '../../platform/api-error-message';
 import { normalizeProjectRevenueFields } from '../../platform/project-financials';
+import { buildProjectTeamParticipationEntries } from '../../platform/project-team-participation';
 
 const statusColor: Record<string, string> = {
   CONTRACT_PENDING: 'bg-amber-100 text-amber-800',
@@ -130,9 +132,7 @@ export function ProjectDetailPage() {
   const completeness = useMemo(() => computeProjectCompleteness(project || {}), [project]);
   const projectParticipationEntries = useMemo(() => {
     if (!project) return [];
-    return participationEntries
-      .filter((entry) => entry.projectId === project.id)
-      .sort((a, b) => String(a.memberName || '').localeCompare(String(b.memberName || ''), 'ko'));
+    return buildProjectTeamParticipationEntries(project, participationEntries);
   }, [participationEntries, project]);
   const settlementSheetPolicy = useMemo(
     () => normalizeSettlementSheetPolicy(project?.settlementSheetPolicy, project?.fundInputMode),
@@ -642,11 +642,11 @@ export function ProjectDetailPage() {
                       {projectParticipationEntries.map((entry) => (
                         <TableRow key={entry.id}>
                           <TableCell>{entry.memberName || '-'}</TableCell>
-                          <TableCell>{entry.rate ? `${entry.rate}%` : '-'}</TableCell>
+                          <TableCell>{Number.isFinite(entry.rate) ? `${entry.rate}%` : '-'}</TableCell>
                           <TableCell>
                             {[entry.periodStart, entry.periodEnd].filter(Boolean).join(' ~ ') || '-'}
                           </TableCell>
-                          <TableCell>{entry.settlementSystem || '-'}</TableCell>
+                          <TableCell>{SETTLEMENT_SYSTEM_SHORT[entry.settlementSystem] || '-'}</TableCell>
                           <TableCell>
                             <Badge variant={entry.source === 'PROJECT_TEAM_SYNC' ? 'secondary' : 'outline'}>
                               {entry.source === 'PROJECT_TEAM_SYNC' ? '프로젝트 팀 연동' : '수동 입력'}

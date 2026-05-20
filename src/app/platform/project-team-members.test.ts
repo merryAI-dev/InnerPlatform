@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   formatProjectTeamMembersSummary,
   hasIncompleteProjectTeamMembers,
+  normalizeProjectTeamMemberDraftRows,
   normalizeProjectTeamMembers,
 } from './project-team-members';
 
@@ -22,6 +23,25 @@ describe('project-team-members', () => {
     ]);
 
     expect(result).toBe('김다은 (데이나) / PM');
+  });
+
+  it('formats saved partial team rows instead of hiding them from review surfaces', () => {
+    const result = formatProjectTeamMembersSummary([
+      { memberName: '김다은', memberNickname: '데이나', role: '', participationRate: 0 },
+    ]);
+
+    expect(result).toBe('김다은 (데이나)');
+  });
+
+  it('keeps empty draft rows while editing before save normalization', () => {
+    expect(normalizeProjectTeamMemberDraftRows([
+      { memberName: '', memberNickname: '', role: '', participationRate: 0 },
+    ])).toEqual([
+      { memberName: '', memberNickname: '', role: '', participationRate: 0 },
+    ]);
+    expect(normalizeProjectTeamMembers([
+      { memberName: '', memberNickname: '', role: '', participationRate: 0 },
+    ])).toEqual([]);
   });
 
   it('treats member with name and role but no rate as complete', () => {
