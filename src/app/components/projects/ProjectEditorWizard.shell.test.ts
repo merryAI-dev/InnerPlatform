@@ -14,6 +14,8 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('BASIS_LABELS');
     expect(source).toContain('ACCOUNT_TYPE_LABELS');
     expect(source).toContain('PROJECT_FUND_INPUT_MODE_LABELS');
+    expect(source).toContain('ContractDocumentPreview');
+    expect(source).toContain('draft.contractDocument');
     expect(source).not.toContain('<Input value={draft.contractType}');
   });
 

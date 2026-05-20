@@ -6,7 +6,8 @@ const pageSource = readFileSync(resolve(import.meta.dirname, 'ProjectMigrationAu
 const controlBarSource = readFileSync(resolve(import.meta.dirname, 'migration-audit/MigrationAuditControlBar.tsx'), 'utf8');
 const queueSource = readFileSync(resolve(import.meta.dirname, 'migration-audit/MigrationAuditQueueRail.tsx'), 'utf8');
 const detailSource = readFileSync(resolve(import.meta.dirname, 'migration-audit/MigrationAuditDetailPanel.tsx'), 'utf8');
-const compositeSource = [pageSource, controlBarSource, queueSource, detailSource].join('\n');
+const previewSource = readFileSync(resolve(import.meta.dirname, 'ContractDocumentPreview.tsx'), 'utf8');
+const compositeSource = [pageSource, controlBarSource, queueSource, detailSource, previewSource].join('\n');
 
 describe('ProjectMigrationAuditPage shell contract', () => {
   it('presents the page as a PM registration executive approval console', () => {
@@ -44,5 +45,14 @@ describe('ProjectMigrationAuditPage shell contract', () => {
     expect(detailSource).not.toContain('DetailFact label="검토자"');
     expect(detailSource).not.toContain('DetailFact label="검토일"');
     expect(detailSource).not.toContain('DetailFact label="검토 메모"');
+  });
+
+  it('shows the uploaded contract PDF next to analysis notes', () => {
+    expect(detailSource).toContain('계약 분석 보조 정보');
+    expect(detailSource).toContain('ContractDocumentPreview');
+    expect(detailSource).toContain('계약서 PDF 원문');
+    expect(previewSource).toContain('data-testid="contract-document-preview"');
+    expect(previewSource).toContain('<iframe');
+    expect(previewSource).toContain('PDF 미리보기');
   });
 });

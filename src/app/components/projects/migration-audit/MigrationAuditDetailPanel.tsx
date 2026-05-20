@@ -13,6 +13,7 @@ import { buildMigrationReviewDossier } from '../../../platform/project-migration
 import { Badge } from '../../ui/badge';
 import { Button } from '../../ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
+import { ContractDocumentPreview } from '../ContractDocumentPreview';
 
 interface MigrationAuditDetailPanelProps {
   record: MigrationAuditConsoleRecord | null;
@@ -44,6 +45,32 @@ function DetailFact({
   );
 }
 
+function AnalysisList({
+  title,
+  items,
+}: {
+  title: string;
+  items: string[];
+}) {
+  return (
+    <div>
+      <p className="text-[11px] font-semibold text-slate-500">{title}</p>
+      {items.length > 0 ? (
+        <ul className="mt-2 space-y-2 text-[12px] leading-5 text-slate-700">
+          {items.map((item) => (
+            <li key={item} className="flex gap-2">
+              <span className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-slate-400" />
+              <span>{item}</span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-2 text-[12px] text-slate-500">-</p>
+      )}
+    </div>
+  );
+}
+
 export function MigrationAuditDetailPanel({
   record,
   acting,
@@ -64,6 +91,7 @@ export function MigrationAuditDetailPanel({
   const dossier = buildMigrationReviewDossier(record.project, record.request);
   const actionState = describeMigrationAuditActionState(record);
   const isPmPortalProject = record.project.registrationSource === 'pm_portal';
+  const contractDocument = record.project.contractDocument || record.request?.payload.contractDocument || null;
 
   return (
     <Card
@@ -195,29 +223,33 @@ export function MigrationAuditDetailPanel({
 
           <section className="space-y-3">
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">첨부 계약서</p>
-              <p className="mt-1 text-[14px] font-semibold text-slate-950">PM이 붙인 계약서 파일과 업로드 시점을 그대로 보여줍니다</p>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">계약 분석 보조 정보</p>
+              <p className="mt-1 text-[14px] font-semibold text-slate-950">분석 메모와 업로드된 PDF 원문을 함께 봅니다</p>
             </div>
-            <div className="rounded-3xl border border-slate-200 bg-white p-5">
-              <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_220px_auto] xl:items-center">
+            <div className="grid gap-4 2xl:grid-cols-[minmax(300px,0.82fr)_minmax(0,1.18fr)]">
+              <div className="space-y-5 rounded-3xl border border-slate-200 bg-white p-5">
                 <div>
-                  <p className="text-[11px] text-slate-500">파일명</p>
-                  <p className="mt-1 text-[13px] font-semibold text-slate-950">{dossier.contractDocument.name}</p>
+                  <p className="text-[11px] font-semibold text-slate-500">AI/휴리스틱 요약</p>
+                  <p className="mt-2 whitespace-pre-wrap text-[13px] leading-6 font-medium text-slate-950">{dossier.analysis.summary}</p>
                 </div>
-                <div>
-                  <p className="text-[11px] text-slate-500">업로드일</p>
-                  <p className="mt-1 text-[13px] font-medium text-slate-900">{dossier.contractDocument.uploadedAt}</p>
-                </div>
-                {dossier.contractDocument.downloadURL !== '-' ? (
-                  <div className="xl:justify-self-end">
-                    <Button asChild variant="outline" className="h-10 rounded-full px-4">
-                      <a href={dossier.contractDocument.downloadURL} target="_blank" rel="noreferrer">
-                        계약서 보기
-                      </a>
-                    </Button>
+                <AnalysisList title="주의 사항" items={dossier.analysis.warnings} />
+                <AnalysisList title="다음 행동" items={dossier.analysis.nextActions} />
+                <div className="grid gap-3 border-t border-slate-200 pt-4 sm:grid-cols-2">
+                  <div>
+                    <p className="text-[11px] text-slate-500">파일명</p>
+                    <p className="mt-1 text-[13px] font-semibold text-slate-950">{dossier.contractDocument.name}</p>
                   </div>
-                ) : null}
+                  <div>
+                    <p className="text-[11px] text-slate-500">업로드일</p>
+                    <p className="mt-1 text-[13px] font-medium text-slate-900">{dossier.contractDocument.uploadedAt}</p>
+                  </div>
+                </div>
               </div>
+              <ContractDocumentPreview
+                document={contractDocument}
+                title="계약서 PDF 원문"
+                description="분석 결과가 부족하면 여기서 원문을 바로 대조합니다."
+              />
             </div>
           </section>
 

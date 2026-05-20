@@ -63,6 +63,7 @@ import {
   SelectValue,
 } from '../ui/select';
 import { Textarea } from '../ui/textarea';
+import { ContractDocumentPreview } from './ContractDocumentPreview';
 import { SettlementSheetPolicyFields } from './SettlementSheetPolicyFields';
 
 type ProjectEditorStep = 'basic' | 'financial' | 'team' | 'payment' | 'review';
@@ -782,6 +783,15 @@ export function ProjectEditorWizard({
             <ReviewRow label="최종 입금 메모" value={draft.finalPaymentNote} />
           </CardContent>
         </Card>
+        {draft.contractDocument ? (
+          <div className="lg:col-span-2">
+            <ContractDocumentPreview
+              document={draft.contractDocument}
+              title="계약서 원문"
+              description="업로드된 PDF를 마지막 확인 단계에서 바로 봅니다."
+            />
+          </div>
+        ) : null}
       </div>
     </div>
   );
