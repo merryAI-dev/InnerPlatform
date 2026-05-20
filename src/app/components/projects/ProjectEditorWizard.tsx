@@ -3,7 +3,9 @@ import {
   ArrowRight,
   Building2,
   CalendarRange,
+  Check,
   CheckCircle2,
+  ChevronsUpDown,
   ClipboardList,
   CreditCard,
   Plus,
@@ -69,6 +71,17 @@ import {
 import { Textarea } from '../ui/textarea';
 import { ContractDocumentPreview } from './ContractDocumentPreview';
 import { SettlementSheetPolicyFields } from './SettlementSheetPolicyFields';
+import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+} from '../ui/command';
+import { cn } from '../ui/utils';
 
 type ProjectEditorStep = 'basic' | 'financial' | 'team' | 'payment' | 'review';
 
@@ -146,6 +159,111 @@ function createProjectEditorWizardDraft(overrides: Partial<ProjectEditorDraft> =
     ...draft,
     teamMembersDetailed: normalizeProjectTeamMemberDraftRows(overrides.teamMembersDetailed),
   };
+}
+
+interface TeamMemberSearchComboboxProps {
+  member: ProjectTeamMemberAssignment;
+  selectedNames: Set<string>;
+  currentTeamMemberOptionExists: boolean;
+  onSelect: (patch: Partial<ProjectTeamMemberAssignment>) => void;
+}
+
+function TeamMemberSearchCombobox({
+  member,
+  selectedNames,
+  currentTeamMemberOptionExists,
+  onSelect,
+}: TeamMemberSearchComboboxProps) {
+  const [open, setOpen] = useState(false);
+  const selectedLabel = member.memberName
+    ? (member.memberNickname ? `${member.memberName} (${member.memberNickname})` : member.memberName)
+    : '';
+
+  const handleSelect = (value: string) => {
+    if (value === 'none') {
+      onSelect({ memberName: '', memberNickname: '' });
+      setOpen(false);
+      return;
+    }
+    const option = PROJECT_TEAM_MEMBER_OPTION_MAP[value];
+    onSelect({
+      memberName: option?.name || value,
+      memberNickname: option?.nickname || '',
+    });
+    setOpen(false);
+  };
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          role="combobox"
+          aria-label={selectedLabel ? `팀원 선택: ${selectedLabel}` : '팀원 검색'}
+          aria-expanded={open}
+          className="mt-1 h-9 w-full justify-between px-3 text-left text-sm font-normal"
+        >
+          <span className={cn('truncate', !selectedLabel && 'text-muted-foreground')}>
+            {selectedLabel || '팀원 검색'}
+          </span>
+          <ChevronsUpDown className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] p-0">
+        <Command>
+          <CommandInput placeholder="이름/닉네임으로 검색" />
+          <CommandList className="max-h-[260px]">
+            <CommandEmpty>검색 결과가 없습니다</CommandEmpty>
+            <CommandGroup heading="선택">
+              <CommandItem value="none 선택 안 함" onSelect={() => handleSelect('none')}>
+                <Check className={cn('h-4 w-4', !member.memberName ? 'opacity-100' : 'opacity-0')} />
+                선택 안 함
+              </CommandItem>
+            </CommandGroup>
+            <CommandSeparator />
+            <CommandGroup heading={`${PROJECT_TEAM_MEMBER_OPTIONS.length}명 중 검색`}>
+              {!currentTeamMemberOptionExists && member.memberName ? (
+                <CommandItem
+                  value={`${member.memberName} ${member.memberNickname}`}
+                  onSelect={() => {
+                    onSelect({
+                      memberName: member.memberName,
+                      memberNickname: member.memberNickname,
+                    });
+                    setOpen(false);
+                  }}
+                >
+                  <Check className="h-4 w-4 opacity-100" />
+                  <span className="truncate">
+                    {member.memberNickname ? `${member.memberName} (${member.memberNickname})` : member.memberName}
+                  </span>
+                </CommandItem>
+              ) : null}
+              {PROJECT_TEAM_MEMBER_OPTIONS.map((option) => {
+                const disabled = selectedNames.has(option.value);
+                const selected = option.value === member.memberName;
+                return (
+                  <CommandItem
+                    key={option.value}
+                    value={`${option.name} ${option.nickname} ${option.label}`}
+                    disabled={disabled}
+                    onSelect={() => handleSelect(option.value)}
+                  >
+                    <Check className={cn('h-4 w-4', selected ? 'opacity-100' : 'opacity-0')} />
+                    <span className="truncate">{option.label}</span>
+                    {disabled ? (
+                      <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">이미 추가됨</span>
+                    ) : null}
+                  </CommandItem>
+                );
+              })}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
 }
 
 export function ProjectEditorWizard({
@@ -589,17 +707,6 @@ export function ProjectEditorWizard({
           </Select>
         </div>
       </div>
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div>
-          <Label className="text-xs">사내기업팀</Label>
-          <Input value={draft.teamName} onChange={(event) => update('teamName', event.target.value)} className="mt-1 h-9 text-sm" />
-        </div>
-        <div>
-          <Label className="text-xs">참여기업 조건</Label>
-          <Input value={draft.participantCondition} onChange={(event) => update('participantCondition', event.target.value)} className="mt-1 h-9 text-sm" />
-        </div>
-      </div>
-
       <div className="flex items-center justify-between gap-3">
         <div>
           <Label className="text-xs">팀원 구성</Label>
@@ -636,35 +743,12 @@ export function ProjectEditorWizard({
                 <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_120px]">
                   <div>
                     <Label className="text-xs">팀원</Label>
-                    <Select
-                      value={member.memberName || 'none'}
-                      onValueChange={(value) => {
-                        if (value === 'none') {
-                          updateTeamMember(index, { memberName: '', memberNickname: '' });
-                          return;
-                        }
-                        const option = PROJECT_TEAM_MEMBER_OPTION_MAP[value];
-                        updateTeamMember(index, {
-                          memberName: option?.name || value,
-                          memberNickname: option?.nickname || '',
-                        });
-                      }}
-                    >
-                      <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue placeholder="팀원 선택" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">선택 안 함</SelectItem>
-                        {!currentTeamMemberOptionExists ? (
-                          <SelectItem value={member.memberName}>
-                            {member.memberNickname ? `${member.memberName} (${member.memberNickname})` : member.memberName}
-                          </SelectItem>
-                        ) : null}
-                        {PROJECT_TEAM_MEMBER_OPTIONS.map((option) => (
-                          <SelectItem key={option.value} value={option.value} disabled={selectedNames.has(option.value)}>
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <TeamMemberSearchCombobox
+                      member={member}
+                      selectedNames={selectedNames}
+                      currentTeamMemberOptionExists={currentTeamMemberOptionExists}
+                      onSelect={(patch) => updateTeamMember(index, patch)}
+                    />
                   </div>
                   <div>
                     <Label className="text-xs">역할</Label>
@@ -792,9 +876,7 @@ export function ProjectEditorWizard({
           <CardContent>
             <ReviewRow label="PM" value={draft.managerName} />
             <ReviewRow label="담당자 계정" value={draft.managerId || '-'} />
-            <ReviewRow label="사내기업팀" value={draft.teamName} />
             <ReviewRow label="팀원" value={teamMembersSummary} />
-            <ReviewRow label="참여 조건" value={draft.participantCondition} />
           </CardContent>
         </Card>
         <Card className="shadow-none">
