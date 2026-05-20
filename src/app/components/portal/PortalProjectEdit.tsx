@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { AlertTriangle, Loader2, Save, SendHorizontal } from 'lucide-react';
-import { collection, doc, limit, onSnapshot, orderBy, query, setDoc, where } from 'firebase/firestore';
+import { collection, doc, getDoc, limit, onSnapshot, orderBy, query, setDoc, where } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { useAuth } from '../../data/auth-store';
 import { usePortalStore } from '../../data/portal-store';
@@ -20,7 +20,10 @@ import {
   createProjectEditorDraft,
   type ProjectEditorDraft,
 } from '../../platform/project-editor';
-import { resolveProjectCic } from '../../platform/project-cic';
+import {
+  buildPortalProjectEditSavePayload,
+  isProjectVersionConflictError,
+} from '../../platform/project-edit-save';
 import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
 import { Label } from '../ui/label';
@@ -64,6 +67,16 @@ function bannerClassName(tone: string) {
   if (tone === 'danger') return 'border-rose-200 bg-rose-50 text-rose-900';
   if (tone === 'neutral') return 'border-slate-200 bg-slate-50 text-slate-900';
   return 'border-amber-200 bg-amber-50 text-amber-900';
+}
+
+async function loadLatestProjectSnapshot(
+  db: NonNullable<ReturnType<typeof useFirebase>['db']>,
+  orgId: string,
+  projectId: string,
+): Promise<Project | null> {
+  const snap = await getDoc(doc(db, getOrgDocumentPath(orgId, 'projects', projectId)));
+  if (!snap.exists()) return null;
+  return { ...(snap.data() as Project), id: projectId };
 }
 
 export function PortalProjectEdit() {
@@ -159,30 +172,42 @@ export function PortalProjectEdit() {
       forceExecutiveReviewPending: options.forcePendingReview,
       executiveReviewComment: options.reviewComment,
     });
-    const nextProject: Project = {
-      ...myProject,
-      ...patch,
-      id: myProject.id,
-      orgId: myProject.orgId || orgId,
-      cic: resolveProjectCic({ cic: myProject.cic, department: patch.department || draft.department }),
+    const buildSavePayload = async () => buildPortalProjectEditSavePayload({
+      baseProject: myProject,
+      latestProject: db ? await loadLatestProjectSnapshot(db, orgId, myProject.id) : null,
+      patch,
+      orgId,
       updatedAt: now,
-    };
+    });
+    let savedProject: Project | null = null;
 
     if (isPlatformApiEnabled()) {
       const idToken = authUser.idToken || await getAuthInstance()?.currentUser?.getIdToken() || undefined;
-      await upsertProjectViaBff({
+      const actor = {
+        uid: authUser.uid,
+        email: authUser.email,
+        role: authUser.role,
+        idToken,
+      };
+      const saveViaBff = (payload: Awaited<ReturnType<typeof buildSavePayload>>) => upsertProjectViaBff({
         tenantId: orgId,
-        actor: {
-          uid: authUser.uid,
-          email: authUser.email,
-          role: authUser.role,
-          idToken,
-        },
+        actor,
         project: {
-          ...nextProject,
-          expectedVersion: myProject.version ?? 1,
+          ...payload.project,
+          expectedVersion: payload.expectedVersion,
         } as UpsertProjectPayload,
       });
+
+      const savePayload = await buildSavePayload();
+      try {
+        await saveViaBff(savePayload);
+        savedProject = savePayload.project;
+      } catch (error) {
+        if (!db || !isProjectVersionConflictError(error)) throw error;
+        const retryPayload = await buildSavePayload();
+        await saveViaBff(retryPayload);
+        savedProject = retryPayload.project;
+      }
 
       if (requestPatch && requestDoc?.id) {
         if (!db) {
@@ -195,7 +220,9 @@ export function PortalProjectEdit() {
         );
       }
     } else if (db) {
-      await setDoc(doc(db, getOrgDocumentPath(orgId, 'projects', myProject.id)), nextProject, { merge: true });
+      const savePayload = await buildSavePayload();
+      await setDoc(doc(db, getOrgDocumentPath(orgId, 'projects', myProject.id)), savePayload.project, { merge: true });
+      savedProject = savePayload.project;
       if (requestPatch && requestDoc?.id) {
         await setDoc(
           doc(db, getOrgDocumentPath(orgId, 'projectRequests', requestDoc.id)),
@@ -205,7 +232,7 @@ export function PortalProjectEdit() {
       }
     }
 
-    return nextProject;
+    return savedProject;
   };
 
   const handleSubmit = async (draft: ProjectEditorDraft, actionId: string) => {

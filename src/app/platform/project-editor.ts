@@ -41,6 +41,7 @@ import {
   formatProjectTeamMembersSummary,
   normalizeProjectTeamMembers,
 } from './project-team-members';
+import { resolveProjectCic } from './project-cic';
 
 export type ProjectEditorMode = 'portal-register' | 'portal-edit' | 'admin';
 
@@ -444,6 +445,7 @@ export function buildProjectEditorProjectPatch(
     contractDocument: draft.contractDocument,
     contractAnalysis: draft.contractAnalysis,
     department: text(draft.department),
+    cic: resolveProjectCic({ department: draft.department }),
     teamName: text(draft.teamName),
     managerId: text(draft.managerId),
     managerName: text(draft.managerName),

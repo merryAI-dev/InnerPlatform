@@ -119,10 +119,7 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
       });
 
       if (editProject) {
-        await updateProject(editProject.id, {
-          ...patch,
-          cic: resolveProjectCic({ cic: editProject.cic, department: draft.department }),
-        });
+        await updateProject(editProject.id, patch);
         toast.success('프로젝트 수정 내용이 저장되었습니다.');
         navigate(`/projects/${editProject.id}`);
       } else {

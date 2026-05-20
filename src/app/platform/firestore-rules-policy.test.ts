@@ -139,6 +139,7 @@ describe('firestore rules policy alignment', () => {
       fields: [
         { fieldPath: 'approvedProjectId', order: 'ASCENDING' },
         { fieldPath: 'requestedAt', order: 'DESCENDING' },
+        { fieldPath: '__name__', order: 'DESCENDING' },
       ],
     });
     expect(firestoreIndexes.indexes).toContainEqual({
@@ -147,6 +148,7 @@ describe('firestore rules policy alignment', () => {
       fields: [
         { fieldPath: 'approvedProjectId', order: 'ASCENDING' },
         { fieldPath: 'requestedAt', order: 'DESCENDING' },
+        { fieldPath: '__name__', order: 'DESCENDING' },
       ],
     });
   });

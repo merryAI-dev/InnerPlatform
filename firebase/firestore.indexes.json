@@ -21,7 +21,8 @@
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "approvedProjectId", "order": "ASCENDING" },
-        { "fieldPath": "requestedAt", "order": "DESCENDING" }
+        { "fieldPath": "requestedAt", "order": "DESCENDING" },
+        { "fieldPath": "__name__", "order": "DESCENDING" }
       ]
     },
     {
@@ -29,7 +30,8 @@
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "approvedProjectId", "order": "ASCENDING" },
-        { "fieldPath": "requestedAt", "order": "DESCENDING" }
+        { "fieldPath": "requestedAt", "order": "DESCENDING" },
+        { "fieldPath": "__name__", "order": "DESCENDING" }
       ]
     },
     {
