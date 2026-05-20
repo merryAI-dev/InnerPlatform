@@ -1,9 +1,13 @@
 import {
   CheckCircle2,
+  FileText,
+  History,
   Loader2,
   RefreshCcw,
+  Tags,
   Trash2,
 } from 'lucide-react';
+import type { ReactNode } from 'react';
 import type { MigrationAuditConsoleRecord } from '../../../platform/project-migration-console';
 import {
   describeMigrationAuditActionState,
@@ -12,7 +16,7 @@ import {
 import { buildMigrationReviewDossier } from '../../../platform/project-migration-review-dossier';
 import { Badge } from '../../ui/badge';
 import { Button } from '../../ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
+import { Card, CardContent } from '../../ui/card';
 import { ContractDocumentPreview } from '../ContractDocumentPreview';
 
 interface MigrationAuditDetailPanelProps {
@@ -23,25 +27,74 @@ interface MigrationAuditDetailPanelProps {
   onDiscard: () => void;
 }
 
-function statusStripClass(tone: 'warning' | 'success' | 'danger' | 'neutral') {
+type ReviewTone = 'warning' | 'success' | 'danger' | 'neutral';
+
+interface ReviewFact {
+  label: string;
+  value: string;
+  wide?: boolean;
+}
+
+function statusStripClass(tone: ReviewTone) {
   if (tone === 'success') return 'border-emerald-200 bg-emerald-50/90 text-emerald-900';
   if (tone === 'danger') return 'border-rose-200 bg-rose-50/90 text-rose-900';
   if (tone === 'neutral') return 'border-slate-300 bg-slate-100 text-slate-900';
   return 'border-amber-200 bg-amber-50/90 text-amber-900';
 }
 
-function DetailFact({
-  label,
-  value,
+function valueClass(value: string) {
+  return value === '-' ? 'text-slate-400' : 'text-slate-950';
+}
+
+function ReviewSection({
+  eyebrow,
+  title,
+  description,
+  icon,
+  children,
 }: {
-  label: string;
-  value: string;
+  eyebrow: string;
+  title: string;
+  description?: string;
+  icon?: ReactNode;
+  children: ReactNode;
 }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4">
-      <p className="text-[11px] text-slate-500">{label}</p>
-      <p className="mt-1 whitespace-pre-wrap text-[13px] leading-6 font-medium text-slate-950">{value}</p>
-    </div>
+    <section className="space-y-3 border-t border-slate-200 pt-5 first:border-t-0 first:pt-0">
+      <div className="flex items-start gap-3">
+        {icon ? (
+          <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-slate-600">
+            {icon}
+          </div>
+        ) : null}
+        <div className="min-w-0">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">{eyebrow}</p>
+          <h3 className="mt-1 text-[15px] font-semibold text-slate-950">{title}</h3>
+          {description ? <p className="mt-1 text-[12px] leading-6 text-slate-600">{description}</p> : null}
+        </div>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function ReviewFactGrid({ items }: { items: ReviewFact[] }) {
+  return (
+    <dl className="grid overflow-hidden rounded-xl border border-slate-200 bg-white md:grid-cols-2">
+      {items.map((item) => (
+        <div
+          key={`${item.label}-${item.value}`}
+          className={`min-w-0 border-b border-slate-100 px-4 py-3 last:border-b-0 md:border-r md:last:border-r-0 ${
+            item.wide ? 'md:col-span-2' : ''
+          }`}
+        >
+          <dt className="text-[11px] font-medium text-slate-500">{item.label}</dt>
+          <dd className={`mt-1 whitespace-pre-wrap break-words text-[13px] leading-6 font-medium ${valueClass(item.value)}`}>
+            {item.value || '-'}
+          </dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 
@@ -81,7 +134,7 @@ function ChangeRow({
   after: string;
 }) {
   return (
-    <div className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 lg:grid-cols-[160px_minmax(0,1fr)_minmax(0,1fr)]">
+    <div className="grid gap-3 border-b border-slate-100 px-4 py-3 last:border-b-0 lg:grid-cols-[150px_minmax(0,1fr)_minmax(0,1fr)]">
       <p className="text-[12px] font-semibold text-slate-700">{label}</p>
       <div className="min-w-0">
         <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">이전</p>
@@ -119,65 +172,66 @@ export function MigrationAuditDetailPanel({
 
   return (
     <Card
-      className="border-slate-200/80 bg-white shadow-sm xl:h-[calc(100vh-8rem)]"
+      className="overflow-hidden border-slate-200/80 bg-white shadow-sm xl:h-[calc(100vh-8rem)]"
       data-testid="migration-review-dossier"
     >
-      <CardHeader className="border-b border-slate-200 pb-4">
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge className="border border-slate-200 bg-slate-50 text-slate-700">
-              {getMigrationAuditStatusLabel(record.status)}
-            </Badge>
-            <Badge variant="outline">{record.cic}</Badge>
-            <Badge variant="outline">{record.clientOrg || '계약 대상 미지정'}</Badge>
-            <Badge variant="outline">{isPmPortalProject ? 'PM 등록' : '기존 등록'}</Badge>
-          </div>
-
-          <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-            <div>
-              <CardTitle className="text-[24px] font-semibold tracking-[-0.03em] text-slate-950">
-                {record.title}
-              </CardTitle>
-              <p className="mt-1 text-[12px] leading-6 text-slate-600">
-                {isPmPortalProject
-                  ? 'PM이 포털에서 입력한 내용을 그대로 펼쳐서 보여줍니다. CIC 대표는 우측 원문을 읽고 승인, 수정 요청 후 반려, 중복·폐기만 결정하면 됩니다.'
-                  : '이미 등록된 기존 프로젝트입니다. 같은 화면에서 기존 프로젝트 정보와 계약/재무·팀/인력을 다시 읽고, 필요하면 CIC 대표 검토 결정을 다시 조정할 수 있습니다.'}
-              </p>
+      <CardContent className="flex h-full flex-col p-0">
+        <div className="border-b border-slate-200 bg-white px-6 py-5">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+            <div className="min-w-0 space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge className="border border-slate-200 bg-slate-50 text-slate-700">
+                  {getMigrationAuditStatusLabel(record.status)}
+                </Badge>
+                <Badge variant="outline">{record.cic}</Badge>
+                <Badge variant="outline">{record.clientOrg || '계약 대상 미지정'}</Badge>
+                <Badge variant="outline">{isPmPortalProject ? 'PM 등록' : '기존 등록'}</Badge>
+              </div>
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">PM 등록 원문</p>
+                <h2 className="mt-1 text-[24px] font-semibold tracking-[-0.02em] text-slate-950">
+                  {record.title}
+                </h2>
+                <p className="mt-2 max-w-3xl text-[12px] leading-6 text-slate-600">
+                  PM이 포털에서 입력한 내용을 그대로 보되, 항목을 등록/수정 흐름과 같은 묶음으로 정리해 빠르게 대조합니다.
+                </p>
+              </div>
             </div>
 
-            <div className={`rounded-2xl border px-4 py-3 ${statusStripClass(actionState.tone)}`}>
+            <div className={`shrink-0 rounded-xl border px-4 py-3 xl:w-[260px] ${statusStripClass(actionState.tone)}`}>
               <p className="text-[11px] uppercase tracking-[0.08em]">현재 판단</p>
               <p className="mt-1 text-[14px] font-semibold">{actionState.label}</p>
               <p className="mt-1 text-[11px] leading-5">{actionState.helper}</p>
             </div>
           </div>
         </div>
-      </CardHeader>
 
-      <CardContent className="flex h-[calc(100%-124px)] flex-col p-0">
         <div className="flex-1 space-y-6 overflow-y-auto px-6 py-6">
-          <section className="space-y-4 rounded-3xl border border-slate-200 bg-slate-50/80 p-5">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">PM 등록 원문</p>
-              <p className="mt-1 text-[15px] font-semibold text-slate-950">PM 포털 프로젝트 수정 화면 입력값</p>
-            </div>
-            <div className="grid gap-4 xl:grid-cols-2">
-              <DetailFact label="프로젝트명" value={dossier.headerTitle} />
-              <DetailFact label="공식 계약명" value={dossier.identity.officialContractName} />
-              <DetailFact label="계약 대상" value={dossier.identity.clientOrg} />
-              <DetailFact label="그룹웨어 등록명" value={dossier.identity.groupwareName} />
-              <DetailFact label="담당조직(CIC)" value={dossier.identity.cic} />
-              <DetailFact label="PM" value={dossier.identity.pmName} />
-            </div>
-          </section>
+          <ReviewSection
+            eyebrow="기본 정보"
+            title="프로젝트 식별 정보"
+            description="계약서, 포털 입력값, 담당조직이 같은 프로젝트를 가리키는지 먼저 확인합니다."
+            icon={<Tags className="h-4 w-4" />}
+          >
+            <ReviewFactGrid
+              items={[
+                { label: '프로젝트명', value: dossier.headerTitle },
+                { label: '공식 계약명', value: dossier.identity.officialContractName },
+                { label: '계약 대상', value: dossier.identity.clientOrg },
+                { label: '그룹웨어 등록명', value: dossier.identity.groupwareName },
+                { label: '담당조직(CIC)', value: dossier.identity.cic },
+                { label: 'PM', value: dossier.identity.pmName },
+              ]}
+            />
+          </ReviewSection>
 
           {dossier.changes.length > 0 ? (
-            <section className="space-y-3">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">이번 수정에서 바뀐 값</p>
-                <p className="mt-1 text-[14px] font-semibold text-slate-950">PM이 다시 제출하면서 바꾼 항목을 이전 값과 나란히 봅니다</p>
-              </div>
-              <div className="space-y-2">
+            <ReviewSection
+              eyebrow="이번 수정에서 바뀐 값"
+              title="PM 재제출 변경 diff"
+              description="PM이 다시 제출하면서 바꾼 항목을 이전 값과 나란히 봅니다."
+            >
+              <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
                 {dossier.changes.map((change) => (
                   <ChangeRow
                     key={`${change.key}-${change.before}-${change.after}`}
@@ -187,54 +241,58 @@ export function MigrationAuditDetailPanel({
                   />
                 ))}
               </div>
-            </section>
+            </ReviewSection>
           ) : null}
 
-          <section className="space-y-3">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">계약/재무</p>
-              <p className="mt-1 text-[14px] font-semibold text-slate-950">프로젝트 수정 화면 기준 핵심 입력값</p>
-            </div>
-            <div className="grid gap-3 xl:grid-cols-2">
-              <DetailFact label="프로젝트 유형" value={dossier.contract.projectTypeLabel} />
-              <DetailFact label="계약 기간" value={dossier.contract.periodLabel} />
-              <DetailFact label="계약서 유형" value={dossier.contract.contractType} />
-              <DetailFact label="정산 유형" value={dossier.contract.settlementTypeLabel} />
-              <DetailFact label="정산 기준" value={dossier.contract.basisLabel} />
-              <DetailFact label="통장 유형" value={dossier.contract.accountTypeLabel} />
-              <DetailFact label="자금 입력 방식" value={dossier.contract.fundInputModeLabel} />
-            </div>
-          </section>
+          <ReviewSection
+            eyebrow="계약/재무"
+            title="계약 구조와 정산 기준"
+            description="프로젝트 유형, 계약 기간, 정산/통장 기준을 한 묶음으로 확인합니다."
+          >
+            <ReviewFactGrid
+              items={[
+                { label: '프로젝트 유형', value: dossier.contract.projectTypeLabel },
+                { label: '계약 기간', value: dossier.contract.periodLabel },
+                { label: '계약서 유형', value: dossier.contract.contractType },
+                { label: '정산 유형', value: dossier.contract.settlementTypeLabel },
+                { label: '정산 기준', value: dossier.contract.basisLabel },
+                { label: '통장 유형', value: dossier.contract.accountTypeLabel },
+                { label: '자금 입력 방식', value: dossier.contract.fundInputModeLabel },
+              ]}
+            />
+          </ReviewSection>
 
-          <section className="space-y-3">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">계약/재무</p>
-              <p className="mt-1 text-[14px] font-semibold text-slate-950">PM이 입력한 계약/재무 기준</p>
-            </div>
-            <div className="grid gap-3 xl:grid-cols-2">
-              <DetailFact label="계약금액" value={dossier.budget.contractAmountLabel} />
-              <DetailFact label="매출 부가세" value={dossier.budget.salesVatAmountLabel} />
-              <DetailFact label="총수익" value={dossier.budget.totalRevenueAmountLabel} />
-              <DetailFact label="지원금" value={dossier.budget.supportAmountLabel} />
-              <DetailFact label="입금 계획" value={dossier.budget.paymentPlanDesc} />
-              <DetailFact label="입금 분할" value={dossier.budget.paymentPlanSplitLabel} />
-              <DetailFact label="최종 입금 메모" value={dossier.budget.finalPaymentNote} />
-            </div>
-          </section>
+          <ReviewSection
+            eyebrow="계약/재무"
+            title="금액과 입금 계획"
+            description="계약금, 수익, 지원금, 입금 분할이 서로 어긋나지 않는지 봅니다."
+          >
+            <ReviewFactGrid
+              items={[
+                { label: '계약금액', value: dossier.budget.contractAmountLabel },
+                { label: '매출 부가세', value: dossier.budget.salesVatAmountLabel },
+                { label: '총수익', value: dossier.budget.totalRevenueAmountLabel },
+                { label: '지원금', value: dossier.budget.supportAmountLabel },
+                { label: '입금 계획', value: dossier.budget.paymentPlanDesc, wide: true },
+                { label: '입금 분할', value: dossier.budget.paymentPlanSplitLabel, wide: true },
+                { label: '최종 입금 메모', value: dossier.budget.finalPaymentNote, wide: true },
+              ]}
+            />
+          </ReviewSection>
 
-          <section className="space-y-3">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">팀/인력</p>
-              <p className="mt-1 text-[14px] font-semibold text-slate-950">PM이 등록한 팀과 참여 인력</p>
-            </div>
-            <div className="rounded-3xl border border-slate-200 bg-white p-5">
-              <div className="grid gap-4 xl:grid-cols-[220px_minmax(0,1fr)]">
+          <ReviewSection
+            eyebrow="팀/인력"
+            title="PM이 등록한 팀과 참여 인력"
+            description="팀명과 참여 인력, 역할, 참여율을 함께 확인합니다."
+          >
+            <div className="rounded-xl border border-slate-200 bg-white">
+              <div className="grid gap-4 border-b border-slate-100 px-4 py-3 xl:grid-cols-[180px_minmax(0,1fr)]">
                 <div>
-                  <p className="text-[11px] text-slate-500">팀명</p>
-                  <p className="mt-1 text-[13px] font-semibold text-slate-950">{dossier.people.teamName}</p>
+                  <p className="text-[11px] font-medium text-slate-500">팀명</p>
+                  <p className={`mt-1 text-[13px] font-semibold ${valueClass(dossier.people.teamName)}`}>{dossier.people.teamName}</p>
                 </div>
                 <div>
-                  <p className="text-[11px] text-slate-500">팀원</p>
+                  <p className="text-[11px] font-medium text-slate-500">팀원</p>
                   {dossier.people.members.length > 0 ? (
                     <div className="mt-2 flex flex-wrap gap-2">
                       {dossier.people.members.map((member) => (
@@ -249,28 +307,31 @@ export function MigrationAuditDetailPanel({
                 </div>
               </div>
             </div>
-          </section>
+          </ReviewSection>
 
-          <section className="space-y-3">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">목적 및 메모</p>
-              <p className="mt-1 text-[14px] font-semibold text-slate-950">CIC 대표가 판단할 때 필요한 원문 설명</p>
-            </div>
-            <div className="grid gap-3 xl:grid-cols-2">
-              <DetailFact label="프로젝트 목적" value={dossier.notes.projectPurpose} />
-              <DetailFact label="참여 조건" value={dossier.notes.participantCondition} />
-              <DetailFact label="상세 설명" value={dossier.notes.description} />
-              <DetailFact label="비고" value={dossier.notes.note} />
-            </div>
-          </section>
+          <ReviewSection
+            eyebrow="목적 및 메모"
+            title="판단에 필요한 원문 설명"
+            description="프로젝트 목적, 상세 설명, 조건, 비고를 함께 읽습니다."
+          >
+            <ReviewFactGrid
+              items={[
+                { label: '프로젝트 목적', value: dossier.notes.projectPurpose, wide: true },
+                { label: '참여 조건', value: dossier.notes.participantCondition, wide: true },
+                { label: '상세 설명', value: dossier.notes.description, wide: true },
+                { label: '비고', value: dossier.notes.note, wide: true },
+              ]}
+            />
+          </ReviewSection>
 
-          <section className="space-y-3">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">계약 분석 보조 정보</p>
-              <p className="mt-1 text-[14px] font-semibold text-slate-950">분석 메모와 업로드된 PDF 원문을 함께 봅니다</p>
-            </div>
+          <ReviewSection
+            eyebrow="계약 분석 보조 정보"
+            title="계약서 요약과 PDF 원문"
+            description="분석 메모가 부족하면 PDF 원문을 바로 대조합니다."
+            icon={<FileText className="h-4 w-4" />}
+          >
             <div className="grid gap-4 2xl:grid-cols-[minmax(300px,0.82fr)_minmax(0,1.18fr)]">
-              <div className="space-y-5 rounded-3xl border border-slate-200 bg-white p-5">
+              <div className="space-y-5 rounded-xl border border-slate-200 bg-white p-5">
                 <div>
                   <p className="text-[11px] font-semibold text-slate-500">계약서 요약</p>
                   <p className="mt-2 whitespace-pre-wrap text-[13px] leading-6 font-medium text-slate-950">{dossier.analysis.summary}</p>
@@ -280,7 +341,7 @@ export function MigrationAuditDetailPanel({
                 <div className="grid gap-3 border-t border-slate-200 pt-4 sm:grid-cols-2">
                   <div>
                     <p className="text-[11px] text-slate-500">파일명</p>
-                    <p className="mt-1 text-[13px] font-semibold text-slate-950">{dossier.contractDocument.name}</p>
+                    <p className="mt-1 break-words text-[13px] font-semibold text-slate-950">{dossier.contractDocument.name}</p>
                   </div>
                   <div>
                     <p className="text-[11px] text-slate-500">업로드일</p>
@@ -294,40 +355,39 @@ export function MigrationAuditDetailPanel({
                 description="분석 결과가 부족하면 여기서 원문을 바로 대조합니다."
               />
             </div>
-          </section>
+          </ReviewSection>
 
-          <section className="space-y-3">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">접수 및 검토 이력</p>
-              <p className="mt-1 text-[14px] font-semibold text-slate-950">누가 언제 올렸고, 누가 어떤 메모를 남겼는지 봅니다</p>
-            </div>
-            <div className="grid gap-3 xl:grid-cols-2">
-              <DetailFact label="요청자" value={dossier.audit.requestedByName} />
-              <DetailFact label="접수일" value={dossier.audit.requestedAt} />
-            </div>
+          <ReviewSection
+            eyebrow="접수 및 검토 이력"
+            title="요청자와 이전 검토 메모"
+            description="누가 언제 올렸고, 누가 어떤 판단을 남겼는지 확인합니다."
+            icon={<History className="h-4 w-4" />}
+          >
+            <ReviewFactGrid
+              items={[
+                { label: '요청자', value: dossier.audit.requestedByName },
+                { label: '접수일', value: dossier.audit.requestedAt },
+              ]}
+            />
             {dossier.audit.history.length > 0 ? (
-              <div className="rounded-3xl border border-slate-200 bg-white p-5">
-                <p className="text-[11px] text-slate-500">검토 이력</p>
-                <div className="mt-3 space-y-3">
-                  {dossier.audit.history.map((entry, index) => (
-                    <div key={`${entry.statusLabel}-${entry.reviewedAt}-${index}`} className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant="outline">{entry.statusLabel}</Badge>
-                        <span className="text-[12px] font-medium text-slate-900">{entry.reviewedByName}</span>
-                        <span className="text-[11px] text-slate-500">{entry.reviewedAt}</span>
-                      </div>
-                      <p className="mt-2 whitespace-pre-wrap text-[12px] leading-6 text-slate-700">{entry.reviewComment}</p>
+              <div className="mt-3 space-y-2">
+                {dossier.audit.history.map((entry, index) => (
+                  <div key={`${entry.statusLabel}-${entry.reviewedAt}-${index}`} className="rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant="outline">{entry.statusLabel}</Badge>
+                      <span className="text-[12px] font-medium text-slate-900">{entry.reviewedByName}</span>
+                      <span className="text-[11px] text-slate-500">{entry.reviewedAt}</span>
                     </div>
-                  ))}
-                </div>
+                    <p className="mt-2 whitespace-pre-wrap text-[12px] leading-6 text-slate-700">{entry.reviewComment}</p>
+                  </div>
+                ))}
               </div>
             ) : null}
-          </section>
-
+          </ReviewSection>
         </div>
 
         <div
-          className="border-t border-slate-200 bg-white/95 px-6 py-4"
+          className="sticky bottom-0 border-t border-slate-200 bg-white/95 px-6 py-4 backdrop-blur"
           data-testid="migration-review-decision-footer"
         >
           <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
@@ -338,18 +398,18 @@ export function MigrationAuditDetailPanel({
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button type="button" className="h-10 gap-1.5" onClick={onApprove} disabled={acting}>
+              <Button type="button" className="h-11 gap-1.5" onClick={onApprove} disabled={acting}>
                 {acting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
                 승인
               </Button>
-              <Button type="button" variant="outline" className="h-10 gap-1.5" onClick={onReject} disabled={acting}>
+              <Button type="button" variant="outline" className="h-11 gap-1.5" onClick={onReject} disabled={acting}>
                 {acting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
                 수정 요청 후 반려
               </Button>
               <Button
                 type="button"
                 variant="outline"
-                className="h-10 gap-1.5 border-rose-200 text-rose-700 hover:bg-rose-50 hover:text-rose-800"
+                className="h-11 gap-1.5 border-rose-200 text-rose-700 hover:bg-rose-50 hover:text-rose-800"
                 onClick={onDiscard}
                 disabled={acting}
               >

@@ -58,4 +58,13 @@ describe('ProjectMigrationAuditPage shell contract', () => {
     expect(previewSource).toContain('<iframe');
     expect(previewSource).toContain('PDF 미리보기');
   });
+
+  it('keeps CIC registration review read-only while improving scan hierarchy', () => {
+    expect(detailSource).toContain('ReviewSection');
+    expect(detailSource).toContain('ReviewFactGrid');
+    expect(detailSource).toContain('sticky bottom-0');
+    expect(detailSource).toContain('PM이 포털에서 입력한 내용을 그대로');
+    expect(detailSource).not.toContain('ProjectEditorWizard');
+    expect(detailSource).not.toContain('수정 저장');
+  });
 });
