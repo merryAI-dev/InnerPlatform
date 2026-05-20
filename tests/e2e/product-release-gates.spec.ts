@@ -76,7 +76,7 @@ test('release gate: admin requested route survives login redirect', async ({ pag
   await completeWorkspaceSelectionIfNeeded(page);
 
   await expect(page).toHaveURL(/\/projects$/);
-  await expect(page.getByText('사업 통합 관리').first()).toBeVisible();
+  await expect(page.getByRole('heading', { name: '프로젝트 통합 관리' })).toBeVisible();
 });
 
 test('release gate: PM requested portal route survives login redirect', async ({ page }) => {
@@ -100,7 +100,7 @@ test('release gate: admin can switch from portal to admin home', async ({ page }
   await page.getByRole('button', { name: '관리자 공간' }).click();
 
   await expect(page).toHaveURL(/\/$/);
-  await expect(page.getByRole('heading', { name: '사업 통합 대시보드' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '프로젝트 통합 대시보드' })).toBeVisible();
 });
 
 test('release gate: PM dashboard shows unified project and submission surface', async ({ page }) => {
@@ -125,7 +125,7 @@ test('release gate: PM weekly expense keeps compact setup and status surfaces vi
 test('release gate: admin can move a project to trash and restore it', async ({ page }) => {
   await loginAsAdmin(page);
   await page.goto('/projects');
-  await expect(page.getByText('사업 통합 관리').first()).toBeVisible();
+  await expect(page.getByRole('heading', { name: '프로젝트 통합 관리' })).toBeVisible();
 
   const firstProjectRow = page.locator('[data-testid^="project-list-row-"]').first();
   await expect(firstProjectRow).toBeVisible();
