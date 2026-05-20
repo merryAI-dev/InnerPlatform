@@ -3,7 +3,7 @@
 - route: `/portal/edit-project`
 - primary users: PM, 프로젝트 정보 수정 담당자
 - status: active
-- last updated: 2026-04-14
+- last updated: 2026-05-20
 
 ## Purpose
 
@@ -13,15 +13,18 @@
 
 - 헤더는 화면 제목과 프로젝트명만 보여준다.
 - 현재 프로젝트를 설명문으로 반복하지 않고, 제목 아래 메타 한 줄만 유지한다.
+- 공통 프로젝트 에디터에서 팀원은 이름/닉네임 검색형 picker로 수정한다.
 
 ## Current Feature Checklist
 
 - [x] 현재 프로젝트 정보 수정 가능
 - [x] 화면 제목과 프로젝트명 확인 가능
+- [x] 기존 팀원 값을 유지하면서 검색형 팀원 선택 가능
 - [x] 중복 subtitle 없이 폼 중심으로 진입 가능
 
 ## Recent Changes
 
+- [2026-05-20] 팀원 선택을 긴 dropdown에서 검색형 picker로 바꿔 등록 화면과 수정 화면이 같은 팀원 선택 UX를 사용하게 했다.
 - [2026-04-14] `현재 프로젝트:` subtitle을 제거하고 프로젝트명만 남겨 헤더를 더 짧게 정리했다.
 
 ## Related Files

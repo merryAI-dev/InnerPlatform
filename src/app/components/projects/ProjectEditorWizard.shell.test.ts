@@ -23,9 +23,19 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('const managerOptions = useMemo');
     expect(source).toContain('uid: draft.managerId');
     expect(source).toContain("if (value === 'none')");
-    expect(source).toContain("updateTeamMember(index, { memberName: '', memberNickname: '' })");
+    expect(source).toContain("onSelect({ memberName: '', memberNickname: '' })");
     expect(source).toContain('currentTeamMemberOptionExists');
     expect(source).toContain('member.memberNickname ? `${member.memberName} (${member.memberNickname})` : member.memberName');
+  });
+
+  it('uses a searchable team member picker for registration and edit flows', () => {
+    expect(source).toContain('function TeamMemberSearchCombobox');
+    expect(source).toContain('<CommandInput placeholder="이름/닉네임으로 검색" />');
+    expect(source).toContain('PROJECT_TEAM_MEMBER_OPTIONS.length}명 중 검색');
+    expect(source).toContain('<TeamMemberSearchCombobox');
+    expect(source).toContain('selectedNames={selectedNames}');
+    expect(source).toContain('이미 추가됨');
+    expect(source).not.toContain("value={member.memberName || 'none'}");
   });
 
   it('keeps team member add rows editable and aligns the add button with the primary next action', () => {

@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-05-20] patch-note | portal-register-project, portal-edit-project | searchable team member picker
+- pages: [portal-register-project](./pages/portal-register-project.md), [portal-edit-project](./pages/portal-edit-project.md)
+- summary: 공통 프로젝트 에디터의 팀원 선택을 긴 dropdown에서 이름/닉네임 검색형 picker로 교체해 신규 등록과 수정 루프에서 80명+ 팀원 목록을 같은 방식으로 빠르게 찾게 했다. 기존 저장값이 canonical 옵션 밖에 있어도 표시와 닉네임을 유지하고, 이미 추가된 팀원은 중복 선택하지 못하도록 표시한다.
+
 ## [2026-05-20] patch-note | admin-participation | Salesforce-style participation source lanes
 - pages: [admin-participation](./pages/admin-participation.md)
 - summary: 참여율 관리 화면을 e나라도움, KOICA, 회계사정산, 민간/기타 원천 구분 lane이 먼저 보이는 Salesforce형 운영 뷰로 정리했다. 프로젝트 팀 연동 행은 표시용으로 합산하되 공식 위험 카운트와 JSON 내보내기는 formal 참여율만 사용하도록 분리하고, stale `PROJECT_TEAM_SYNC` 행과 이름/닉네임 중복을 막는 회귀 테스트를 추가했다.

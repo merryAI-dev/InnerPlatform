@@ -3,7 +3,7 @@
 - route: `/portal/register-project`
 - primary users: PM, 사업 등록 제안 담당자
 - status: active
-- last updated: 2026-04-14
+- last updated: 2026-05-20
 
 ## Purpose
 
@@ -13,6 +13,7 @@
 
 - 단계형 등록 플로우에서 초안 저장과 단계 게이팅을 함께 다룬다.
 - 계약서 PDF가 없는 예외 시나리오와 직접 입력형 자금 흐름 등록이 핵심 분기다.
+- 팀원 구성은 이름/닉네임 검색형 picker로 선택한다.
 - 등록 완료 이후 운영 알림과 후속 검토 흐름이 이어진다.
 
 ## Current Feature Checklist
@@ -23,11 +24,13 @@
 - [x] 계약서 PDF 예외 처리 가능
 - [x] 등록 완료 후 운영 알림 연계
 - [x] 팀 구성과 계약 금액 입력 가능
+- [x] 팀원 80명+ 목록을 이름/닉네임 검색으로 선택 가능
 - [x] review 단계에서 빈 값은 `-` placeholder 대신 숨김 처리
 - [x] AI 초안 카드와 최종 검토 영역은 값이 있는 필드만 노출
 
 ## Recent Changes
 
+- [2026-05-20] 공통 프로젝트 에디터의 팀원 선택을 긴 dropdown에서 이름/닉네임 검색형 picker로 바꿔 신규 등록과 수정 루프에서 같은 방식으로 팀원을 찾게 했다.
 - [2026-04-14] review 단계의 최종 확인 경고 박스를 제거하고 요약 카드만 남겼다.
 - [2026-04-14] review/AI 초안 summary에서 `-` placeholder를 제거하고 빈 row는 숨기도록 바꿨다.
 - [2026-04-03] 직접 입력형 자금 흐름(`DIRECT_ENTRY`) 등록 플로우를 추가했다.
