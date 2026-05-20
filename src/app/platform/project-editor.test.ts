@@ -9,6 +9,7 @@ import {
 import {
   buildProjectEditorDraftFromProject,
   buildProjectEditorProjectPatch,
+  buildProjectEditorReviewChanges,
   buildProjectRequestPayloadFromDraft,
   createProjectEditorDraft,
 } from './project-editor';
@@ -103,6 +104,22 @@ describe('project editor draft mapping', () => {
     ]);
   });
 
+  it('treats an explicit empty project team list as the current edit value', () => {
+    const draft = buildProjectEditorDraftFromProject(
+      {
+        ...baseProject,
+        teamMembersDetailed: [],
+      },
+      {
+        teamMembersDetailed: [
+          { memberName: '김다은', memberNickname: '데이나', role: 'PM', participationRate: 60 },
+        ],
+      },
+    );
+
+    expect(draft.teamMembersDetailed).toEqual([]);
+  });
+
   it('serializes the same detailed team, finance, and payment fields into request payload', () => {
     const draft = createProjectEditorDraft({
       ...buildProjectEditorDraftFromProject(baseProject),
@@ -155,6 +172,118 @@ describe('project editor draft mapping', () => {
       reviewedById: 'pm-1',
       reviewedByName: '김다은',
     });
+    expect(patch.executiveReviewHistory?.at(-1)?.changes).toEqual(
+      expect.arrayContaining([
+        {
+          key: 'name',
+          label: '프로젝트명',
+          before: '기후테크',
+          after: '기후테크수정',
+        },
+      ]),
+    );
+  });
+
+  it('logs deterministic changes when an already pending PM portal project is edited again', () => {
+    const pendingProject: Project = {
+      ...baseProject,
+      executiveReviewStatus: 'PENDING',
+      executiveReviewHistory: [
+        {
+          status: 'PENDING',
+          previousStatus: null,
+          reviewedAt: '2026-05-01T00:00:00.000Z',
+          reviewedById: 'pm-1',
+          reviewedByName: '김다은',
+        },
+      ],
+    };
+    const draft = createProjectEditorDraft({
+      ...buildProjectEditorDraftFromProject(pendingProject),
+      paymentPlanDesc: '선금 80%, 잔금 20%',
+    });
+
+    const patch = buildProjectEditorProjectPatch(draft, {
+      baseProject: pendingProject,
+      mode: 'portal-edit',
+      actorId: 'pm-1',
+      actorName: '김다은',
+      now: '2026-05-20T00:00:00.000Z',
+    });
+
+    expect(patch.executiveReviewStatus).toBe('PENDING');
+    expect(patch.executiveReviewHistory?.at(-1)).toMatchObject({
+      status: 'PENDING',
+      previousStatus: 'PENDING',
+      reviewedById: 'pm-1',
+      reviewedByName: '김다은',
+    });
+    expect(patch.executiveReviewHistory?.at(-1)?.changes).toEqual(
+      expect.arrayContaining([
+        {
+          key: 'paymentPlanDesc',
+          label: '입금 계획',
+          before: '선금 50%, 잔금 50%',
+          after: '선금 80%, 잔금 20%',
+        },
+      ]),
+    );
+  });
+
+  it('builds deterministic before-after review changes for CIC review', () => {
+    const draft = createProjectEditorDraft({
+      ...buildProjectEditorDraftFromProject(baseProject),
+      name: '기후테크수정',
+      totalRevenueAmount: 93_000,
+      managerName: '변민욱',
+    });
+
+    const changes = buildProjectEditorReviewChanges(baseProject, draft);
+
+    expect(changes).toEqual(expect.arrayContaining([
+      {
+        key: 'name',
+        label: '프로젝트명',
+        before: '기후테크',
+        after: '기후테크수정',
+      },
+      {
+        key: 'totalRevenueAmount',
+        label: '총수익',
+        before: '91,000원',
+        after: '93,000원',
+      },
+      {
+        key: 'managerName',
+        label: 'PM',
+        before: '김다은',
+        after: '변민욱',
+      },
+    ]));
+  });
+
+  it('keeps zero-won payment split values visible in deterministic review changes', () => {
+    const draft = createProjectEditorDraft({
+      ...buildProjectEditorDraftFromProject({
+        ...baseProject,
+        paymentPlan: { contract: 50_000, interim: 30_000, final: 20_000 },
+      }),
+      paymentPlan: { contract: 0, interim: 30_000, final: 0 },
+    });
+
+    const changes = buildProjectEditorReviewChanges({
+      ...baseProject,
+      paymentPlan: { contract: 50_000, interim: 30_000, final: 20_000 },
+    }, draft);
+
+    expect(changes).toEqual(expect.arrayContaining([
+      {
+        key: 'paymentPlan',
+        label: '입금 분할',
+        before: '선금/계약금 50,000원 · 중도금 30,000원 · 잔금 20,000원',
+        after: '선금/계약금 0원 · 중도금 30,000원 · 잔금 0원',
+      },
+    ]));
   });
 
   it('normalizes legacy contract type values before payload and project patch serialization', () => {

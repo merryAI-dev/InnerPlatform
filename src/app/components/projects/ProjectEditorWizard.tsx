@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   ClipboardList,
   CreditCard,
+  Plus,
   Save,
   Trash2,
   Users,
@@ -107,7 +108,7 @@ function fmtKRW(value: number) {
 }
 
 function formatPaymentPlanAmount(amount: number, contractAmount: number) {
-  if (!Number.isFinite(amount) || amount <= 0) return '-';
+  if (!Number.isFinite(amount)) return '-';
   const amountLabel = formatStoredProjectAmount(amount, true);
   if (!Number.isFinite(contractAmount) || contractAmount <= 0) return amountLabel;
   return `${amountLabel} (${((amount / contractAmount) * 100).toFixed(0)}%)`;
@@ -211,7 +212,7 @@ export function ProjectEditorWizard({
   };
 
   const addTeamMember = () => {
-    setDraft((prev) => createProjectEditorDraft({
+    setDraft((prev) => ({
       ...prev,
       teamMembersDetailed: [...prev.teamMembersDetailed, createEmptyTeamMember()],
     }));
@@ -590,7 +591,10 @@ export function ProjectEditorWizard({
           <Label className="text-xs">팀원 구성</Label>
           <p className="mt-1 text-[10px] text-muted-foreground">팀원, 역할, 참여율을 같은 구조로 저장합니다.</p>
         </div>
-        <Button type="button" variant="outline" size="sm" onClick={addTeamMember}>팀원 추가</Button>
+        <Button type="button" onClick={addTeamMember} className="gap-2">
+          <Plus className="h-4 w-4" />
+          팀원 추가
+        </Button>
       </div>
 
       {draft.teamMembersDetailed.length === 0 ? (
@@ -605,6 +609,8 @@ export function ProjectEditorWizard({
                 .map((item, itemIndex) => (itemIndex === index ? '' : item.memberName))
                 .filter(Boolean),
             );
+            const currentTeamMemberOptionExists = !member.memberName
+              || PROJECT_TEAM_MEMBER_OPTIONS.some((option) => option.value === member.memberName);
             return (
               <div key={`${member.memberName || 'member'}-${index}`} className="rounded-xl border border-border/60 bg-background/70 p-4">
                 <div className="flex items-center justify-between gap-3">
@@ -633,6 +639,11 @@ export function ProjectEditorWizard({
                       <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue placeholder="팀원 선택" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="none">선택 안 함</SelectItem>
+                        {!currentTeamMemberOptionExists ? (
+                          <SelectItem value={member.memberName}>
+                            {member.memberNickname ? `${member.memberName} (${member.memberNickname})` : member.memberName}
+                          </SelectItem>
+                        ) : null}
                         {PROJECT_TEAM_MEMBER_OPTIONS.map((option) => (
                           <SelectItem key={option.value} value={option.value} disabled={selectedNames.has(option.value)}>
                             {option.label}
@@ -676,15 +687,15 @@ export function ProjectEditorWizard({
       <div className="grid gap-4 lg:grid-cols-3">
         <div>
           <Label className="text-xs">선금/계약금 (원)</Label>
-          <Input value={formatProjectAmountInput(draft.paymentPlan.contract, draft.paymentPlan.contract > 0)} onChange={(event) => update('paymentPlan', { ...draft.paymentPlan, contract: parseProjectAmountInput(event.target.value) })} className="mt-1 h-9 text-sm" />
+          <Input value={formatProjectAmountInput(draft.paymentPlan.contract, true)} onChange={(event) => update('paymentPlan', { ...draft.paymentPlan, contract: parseProjectAmountInput(event.target.value) })} className="mt-1 h-9 text-sm" />
         </div>
         <div>
           <Label className="text-xs">중도금 (원)</Label>
-          <Input value={formatProjectAmountInput(draft.paymentPlan.interim, draft.paymentPlan.interim > 0)} onChange={(event) => update('paymentPlan', { ...draft.paymentPlan, interim: parseProjectAmountInput(event.target.value) })} className="mt-1 h-9 text-sm" />
+          <Input value={formatProjectAmountInput(draft.paymentPlan.interim, true)} onChange={(event) => update('paymentPlan', { ...draft.paymentPlan, interim: parseProjectAmountInput(event.target.value) })} className="mt-1 h-9 text-sm" />
         </div>
         <div>
           <Label className="text-xs">잔금 (원)</Label>
-          <Input value={formatProjectAmountInput(draft.paymentPlan.final, draft.paymentPlan.final > 0)} onChange={(event) => update('paymentPlan', { ...draft.paymentPlan, final: parseProjectAmountInput(event.target.value) })} className="mt-1 h-9 text-sm" />
+          <Input value={formatProjectAmountInput(draft.paymentPlan.final, true)} onChange={(event) => update('paymentPlan', { ...draft.paymentPlan, final: parseProjectAmountInput(event.target.value) })} className="mt-1 h-9 text-sm" />
         </div>
       </div>
       <div>
@@ -788,7 +799,8 @@ export function ProjectEditorWizard({
             <ContractDocumentPreview
               document={draft.contractDocument}
               title="계약서 원문"
-              description="업로드된 PDF를 마지막 확인 단계에서 바로 봅니다."
+              description="등록하려는 계약서가 맞는지 꼭 확인해주세요!"
+              descriptionClassName="text-rose-600"
             />
           </div>
         ) : null}

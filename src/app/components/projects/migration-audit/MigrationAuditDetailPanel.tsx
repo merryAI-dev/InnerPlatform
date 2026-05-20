@@ -71,6 +71,30 @@ function AnalysisList({
   );
 }
 
+function ChangeRow({
+  label,
+  before,
+  after,
+}: {
+  label: string;
+  before: string;
+  after: string;
+}) {
+  return (
+    <div className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 lg:grid-cols-[160px_minmax(0,1fr)_minmax(0,1fr)]">
+      <p className="text-[12px] font-semibold text-slate-700">{label}</p>
+      <div className="min-w-0">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">이전</p>
+        <p className="mt-1 whitespace-pre-wrap break-words text-[12px] leading-5 text-slate-600">{before}</p>
+      </div>
+      <div className="min-w-0">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-teal-600">현재</p>
+        <p className="mt-1 whitespace-pre-wrap break-words text-[12px] leading-5 font-semibold text-slate-950">{after}</p>
+      </div>
+    </div>
+  );
+}
+
 export function MigrationAuditDetailPanel({
   record,
   acting,
@@ -146,6 +170,25 @@ export function MigrationAuditDetailPanel({
               <DetailFact label="PM" value={dossier.identity.pmName} />
             </div>
           </section>
+
+          {dossier.changes.length > 0 ? (
+            <section className="space-y-3">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">이번 수정에서 바뀐 값</p>
+                <p className="mt-1 text-[14px] font-semibold text-slate-950">PM이 다시 제출하면서 바꾼 항목을 이전 값과 나란히 봅니다</p>
+              </div>
+              <div className="space-y-2">
+                {dossier.changes.map((change) => (
+                  <ChangeRow
+                    key={`${change.key}-${change.before}-${change.after}`}
+                    label={change.label}
+                    before={change.before}
+                    after={change.after}
+                  />
+                ))}
+              </div>
+            </section>
+          ) : null}
 
           <section className="space-y-3">
             <div>
@@ -229,7 +272,7 @@ export function MigrationAuditDetailPanel({
             <div className="grid gap-4 2xl:grid-cols-[minmax(300px,0.82fr)_minmax(0,1.18fr)]">
               <div className="space-y-5 rounded-3xl border border-slate-200 bg-white p-5">
                 <div>
-                  <p className="text-[11px] font-semibold text-slate-500">AI/휴리스틱 요약</p>
+                  <p className="text-[11px] font-semibold text-slate-500">계약서 요약</p>
                   <p className="mt-2 whitespace-pre-wrap text-[13px] leading-6 font-medium text-slate-950">{dossier.analysis.summary}</p>
                 </div>
                 <AnalysisList title="주의 사항" items={dossier.analysis.warnings} />

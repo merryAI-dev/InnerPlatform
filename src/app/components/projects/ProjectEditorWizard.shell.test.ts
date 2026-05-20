@@ -24,5 +24,29 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('uid: draft.managerId');
     expect(source).toContain("if (value === 'none')");
     expect(source).toContain("updateTeamMember(index, { memberName: '', memberNickname: '' })");
+    expect(source).toContain('currentTeamMemberOptionExists');
+    expect(source).toContain('member.memberNickname ? `${member.memberName} (${member.memberNickname})` : member.memberName');
+  });
+
+  it('keeps team member add rows editable and aligns the add button with the primary next action', () => {
+    const addTeamMemberBlock = source.slice(source.indexOf('const addTeamMember'), source.indexOf('const updateTeamMember'));
+
+    expect(addTeamMemberBlock).toContain('teamMembersDetailed: [...prev.teamMembersDetailed, createEmptyTeamMember()]');
+    expect(addTeamMemberBlock).not.toContain('createProjectEditorDraft');
+    expect(source).toContain('<Plus className="h-4 w-4" />');
+    expect(source).toContain('<Button type="button" onClick={addTeamMember} className="gap-2">');
+    expect(source).not.toContain('variant="outline" size="sm" onClick={addTeamMember}');
+  });
+
+  it('treats zero-won payment split values as explicit editable values', () => {
+    expect(source).toContain('formatProjectAmountInput(draft.paymentPlan.contract, true)');
+    expect(source).toContain('formatProjectAmountInput(draft.paymentPlan.interim, true)');
+    expect(source).toContain('formatProjectAmountInput(draft.paymentPlan.final, true)');
+  });
+
+  it('warns users to verify the uploaded contract before saving', () => {
+    expect(source).toContain('등록하려는 계약서가 맞는지 꼭 확인해주세요!');
+    expect(source).toContain('descriptionClassName="text-rose-600"');
+    expect(source).not.toContain('업로드된 PDF를 마지막 확인 단계에서 바로 봅니다.');
   });
 });

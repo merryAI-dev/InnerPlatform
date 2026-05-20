@@ -69,8 +69,20 @@ export interface MigrationReviewDossier {
       reviewedByName: string;
       reviewedAt: string;
       reviewComment: string;
+      changes: Array<{
+        key: string;
+        label: string;
+        before: string;
+        after: string;
+      }>;
     }>;
   };
+  changes: Array<{
+    key: string;
+    label: string;
+    before: string;
+    after: string;
+  }>;
   analysis: {
     summary: string;
     warnings: string[];
@@ -111,7 +123,7 @@ function formatPaymentPlanSplit(
     ['잔금', plan.final],
   ] as const;
   const label = entries
-    .filter(([, value]) => Number.isFinite(value as number) && Number(value) > 0)
+    .filter(([, value]) => Number.isFinite(Number(value)))
     .map(([name, value]) => {
       const amount = Number(value);
       const percent = Number.isFinite(normalizedContractAmount) && normalizedContractAmount > 0
@@ -133,6 +145,7 @@ function buildAuditHistory(project: Project, request: ProjectRequest | null) {
         reviewedByName: readable(entry.reviewedByName),
         reviewedAt: formatDate(entry.reviewedAt),
         reviewComment: readable(entry.reviewComment),
+        changes: normalizeReviewChanges(entry.changes),
       }));
   }
 
@@ -149,7 +162,23 @@ function buildAuditHistory(project: Project, request: ProjectRequest | null) {
     reviewedByName: readable(fallbackReviewedByName),
     reviewedAt: formatDate(fallbackReviewedAt),
     reviewComment: readable(fallbackReviewComment),
+    changes: [],
   }];
+}
+
+function normalizeReviewChanges(value: ProjectExecutiveReviewHistoryEntry['changes']) {
+  return (Array.isArray(value) ? value : [])
+    .map((change) => ({
+      key: readable(change?.key, 'change'),
+      label: readable(change?.label, '변경 항목'),
+      before: readable(change?.before),
+      after: readable(change?.after),
+    }))
+    .filter((change) => change.before !== change.after);
+}
+
+function findLatestReviewChanges(history: ReturnType<typeof buildAuditHistory>) {
+  return history.find((entry) => entry.changes.length > 0)?.changes || [];
 }
 
 export function buildMigrationReviewDossier(
@@ -159,14 +188,17 @@ export function buildMigrationReviewDossier(
   const payload = request?.payload;
   const contractDocument = project.contractDocument || payload?.contractDocument || null;
   const contractAnalysis = project.contractAnalysis || payload?.contractAnalysis || null;
-  const rawMembers = payload?.teamMembersDetailed || project.teamMembersDetailed;
-  const members = rawMembers && rawMembers.length > 0
+  const rawMembers = Array.isArray(project.teamMembersDetailed)
+    ? project.teamMembersDetailed
+    : payload?.teamMembersDetailed;
+  const members = Array.isArray(rawMembers)
     ? normalizeProjectTeamMembers(rawMembers).map(formatProjectTeamMemberLine)
     : readable(payload?.teamMembers, '')
         .split(/[,\n]/)
         .map((member) => member.trim())
         .filter(Boolean);
   const auditHistory = buildAuditHistory(project, request);
+  const changes = findLatestReviewChanges(auditHistory);
 
   return {
     headerTitle: readable(project.name),
@@ -217,6 +249,7 @@ export function buildMigrationReviewDossier(
       reviewComment: readable(project.executiveReviewComment || request?.reviewComment || request?.rejectedReason),
       history: auditHistory,
     },
+    changes,
     analysis: {
       summary: readable(contractAnalysis?.summary),
       warnings: contractAnalysis?.warnings || [],

@@ -585,6 +585,13 @@ export type ProjectRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 export type ProjectExecutiveReviewStatus = 'PENDING' | 'APPROVED' | 'REVISION_REJECTED' | 'DUPLICATE_DISCARDED';
 export type ProjectRequestReviewOutcome = 'APPROVED' | 'REVISION_REJECTED' | 'DUPLICATE_DISCARDED';
 
+export interface ProjectReviewFieldChange {
+  key: string;
+  label: string;
+  before: string;
+  after: string;
+}
+
 export interface ProjectExecutiveReviewHistoryEntry {
   status: ProjectExecutiveReviewStatus;
   previousStatus?: ProjectExecutiveReviewStatus | null;
@@ -592,6 +599,7 @@ export interface ProjectExecutiveReviewHistoryEntry {
   reviewedById: string;
   reviewedByName: string;
   reviewComment?: string;
+  changes?: ProjectReviewFieldChange[];
 }
 
 export interface FileAttachment {

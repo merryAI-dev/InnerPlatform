@@ -16,6 +16,8 @@ import type {
   SettlementType,
 } from '../data/types';
 import {
+  ACCOUNT_TYPE_LABELS,
+  BASIS_LABELS,
   createSettlementSheetPolicy,
   normalizeAccountType,
   normalizeBasis,
@@ -26,6 +28,9 @@ import {
   normalizeProjectType,
   normalizeSettlementSheetPolicy,
   normalizeSettlementType,
+  PROJECT_FUND_INPUT_MODE_LABELS,
+  PROJECT_TYPE_LABELS,
+  SETTLEMENT_TYPE_LABELS,
 } from '../data/types';
 import {
   createEmptyProjectFinancialInputFlags,
@@ -151,6 +156,69 @@ function normalizePaymentPlan(value: Project['paymentPlan'] | null | undefined):
   };
 }
 
+function formatAmountForChange(value: unknown) {
+  const amount = nonNegativeAmount(value);
+  return amount > 0 ? `${amount.toLocaleString('ko-KR')}원` : '-';
+}
+
+function formatDateRangeForChange(start: unknown, end: unknown) {
+  const startText = text(start);
+  const endText = text(end);
+  return startText || endText ? `${startText || '-'} ~ ${endText || '-'}` : '-';
+}
+
+function formatPaymentPlanForChange(value: Project['paymentPlan'] | null | undefined) {
+  const plan = normalizePaymentPlan(value);
+  const entries = [
+    ['선금/계약금', plan.contract],
+    ['중도금', plan.interim],
+    ['잔금', plan.final],
+  ] as const;
+  const label = entries
+    .map(([name, amount]) => `${name} ${amount.toLocaleString('ko-KR')}원`)
+    .join(' · ');
+  return label || '-';
+}
+
+function formatTeamMembersForChange(value: ProjectTeamMemberAssignment[] | null | undefined) {
+  return formatProjectTeamMembersSummary(normalizeProjectTeamMembers(value), '-', ', ');
+}
+
+function normalizeChangeValue(value: unknown) {
+  const normalized = text(value);
+  return normalized || '-';
+}
+
+const REVIEW_CHANGE_FIELDS: Array<{
+  key: string;
+  label: string;
+  before: (project: Project) => string;
+  after: (draft: ProjectEditorDraft) => string;
+}> = [
+  { key: 'name', label: '프로젝트명', before: (project) => normalizeChangeValue(project.name), after: (draft) => normalizeChangeValue(draft.name) },
+  { key: 'officialContractName', label: '공식 계약명', before: (project) => normalizeChangeValue(project.officialContractName), after: (draft) => normalizeChangeValue(draft.officialContractName) },
+  { key: 'clientOrg', label: '계약 대상', before: (project) => normalizeChangeValue(project.clientOrg), after: (draft) => normalizeChangeValue(draft.clientOrg) },
+  { key: 'department', label: '담당조직(CIC)', before: (project) => normalizeChangeValue(project.department), after: (draft) => normalizeChangeValue(draft.department) },
+  { key: 'type', label: '프로젝트 유형', before: (project) => PROJECT_TYPE_LABELS[normalizeProjectType(project.type)] || '-', after: (draft) => PROJECT_TYPE_LABELS[normalizeProjectType(draft.type)] || '-' },
+  { key: 'contractPeriod', label: '계약 기간', before: (project) => formatDateRangeForChange(project.contractStart, project.contractEnd), after: (draft) => formatDateRangeForChange(draft.contractStart, draft.contractEnd) },
+  { key: 'contractAmount', label: '계약금액', before: (project) => formatAmountForChange(project.contractAmount), after: (draft) => formatAmountForChange(draft.contractAmount) },
+  { key: 'totalRevenueAmount', label: '총수익', before: (project) => formatAmountForChange(project.totalRevenueAmount), after: (draft) => formatAmountForChange(draft.totalRevenueAmount) },
+  { key: 'supportAmount', label: '지원금', before: (project) => formatAmountForChange(project.supportAmount), after: (draft) => formatAmountForChange(draft.supportAmount) },
+  { key: 'settlementType', label: '정산 유형', before: (project) => SETTLEMENT_TYPE_LABELS[normalizeSettlementType(project.settlementType)] || '-', after: (draft) => SETTLEMENT_TYPE_LABELS[normalizeSettlementType(draft.settlementType)] || '-' },
+  { key: 'basis', label: '정산 기준', before: (project) => BASIS_LABELS[normalizeBasis(project.basis)] || '-', after: (draft) => BASIS_LABELS[normalizeBasis(draft.basis)] || '-' },
+  { key: 'accountType', label: '통장 유형', before: (project) => ACCOUNT_TYPE_LABELS[normalizeAccountType(project.accountType)] || '-', after: (draft) => ACCOUNT_TYPE_LABELS[normalizeAccountType(draft.accountType)] || '-' },
+  { key: 'fundInputMode', label: '자금 입력 방식', before: (project) => PROJECT_FUND_INPUT_MODE_LABELS[normalizeProjectFundInputMode(project.fundInputMode)] || '-', after: (draft) => PROJECT_FUND_INPUT_MODE_LABELS[normalizeProjectFundInputMode(draft.fundInputMode)] || '-' },
+  { key: 'managerName', label: 'PM', before: (project) => normalizeChangeValue(project.managerName), after: (draft) => normalizeChangeValue(draft.managerName) },
+  { key: 'teamName', label: '사내기업팀', before: (project) => normalizeChangeValue(project.teamName), after: (draft) => normalizeChangeValue(draft.teamName) },
+  { key: 'teamMembersDetailed', label: '팀원', before: (project) => formatTeamMembersForChange(project.teamMembersDetailed), after: (draft) => formatTeamMembersForChange(draft.teamMembersDetailed) },
+  { key: 'paymentPlan', label: '입금 분할', before: (project) => formatPaymentPlanForChange(project.paymentPlan), after: (draft) => formatPaymentPlanForChange(draft.paymentPlan) },
+  { key: 'paymentPlanDesc', label: '입금 계획', before: (project) => normalizeChangeValue(project.paymentPlanDesc), after: (draft) => normalizeChangeValue(draft.paymentPlanDesc) },
+  { key: 'finalPaymentNote', label: '최종 입금 메모', before: (project) => normalizeChangeValue(project.finalPaymentNote), after: (draft) => normalizeChangeValue(draft.finalPaymentNote) },
+  { key: 'projectPurpose', label: '프로젝트 목적', before: (project) => normalizeChangeValue(project.projectPurpose), after: (draft) => normalizeChangeValue(draft.projectPurpose) },
+  { key: 'description', label: '주요 내용', before: (project) => normalizeChangeValue(project.description), after: (draft) => normalizeChangeValue(draft.description) },
+  { key: 'contractDocument', label: '계약서 PDF', before: (project) => normalizeChangeValue(project.contractDocument?.name), after: (draft) => normalizeChangeValue(draft.contractDocument?.name) },
+];
+
 export function createProjectEditorDraft(overrides: Partial<ProjectEditorDraft> = {}): ProjectEditorDraft {
   const draft = {
     ...DEFAULT_DRAFT,
@@ -188,7 +256,7 @@ export function buildProjectEditorDraftFromProject(
 ): ProjectEditorDraft {
   const normalizedProject = normalizeProjectRevenueFields(project, 'totalRevenueAmount');
   const teamMembersDetailed = normalizeProjectTeamMembers(
-    normalizedProject.teamMembersDetailed?.length
+    Array.isArray(normalizedProject.teamMembersDetailed)
       ? normalizedProject.teamMembersDetailed
       : payload?.teamMembersDetailed,
   );
@@ -291,6 +359,21 @@ export function buildProjectRequestPayloadFromDraft(draftInput: ProjectEditorDra
   };
 }
 
+export function buildProjectEditorReviewChanges(
+  project: Project,
+  draftInput: ProjectEditorDraft,
+): ProjectExecutiveReviewHistoryEntry['changes'] {
+  const draft = createProjectEditorDraft(draftInput);
+  return REVIEW_CHANGE_FIELDS
+    .map((field) => ({
+      key: field.key,
+      label: field.label,
+      before: normalizeChangeValue(field.before(project)),
+      after: normalizeChangeValue(field.after(draft)),
+    }))
+    .filter((change) => change.before !== change.after);
+}
+
 function shouldResetApprovedPortalEdit(
   draft: ProjectEditorDraft,
   options: ProjectEditorPatchOptions,
@@ -303,7 +386,9 @@ function shouldResetApprovedPortalEdit(
 
 function appendPendingReviewHistory(
   project: Project,
+  draft: ProjectEditorDraft,
   options: ProjectEditorPatchOptions,
+  changes = buildProjectEditorReviewChanges(project, draft),
 ): ProjectExecutiveReviewHistoryEntry[] {
   const current = Array.isArray(project.executiveReviewHistory) ? project.executiveReviewHistory : [];
   const previousStatus = project.executiveReviewStatus || 'PENDING';
@@ -316,6 +401,7 @@ function appendPendingReviewHistory(
       reviewedById: options.actorId,
       reviewedByName: options.actorName,
       reviewComment: text(options.executiveReviewComment) || undefined,
+      ...(changes && changes.length > 0 ? { changes } : {}),
     },
   ];
 }
@@ -327,6 +413,9 @@ export function buildProjectEditorProjectPatch(
   const draft = createProjectEditorDraft(draftInput);
   const flags = normalizeProjectFinancialInputFlagsForAmounts(draft.financialInputFlags, draft);
   const teamMembersDetailed = normalizeProjectTeamMembers(draft.teamMembersDetailed);
+  const reviewChanges = options.baseProject
+    ? buildProjectEditorReviewChanges(options.baseProject, draft)
+    : [];
   const patch: Partial<Project> = {
     name: text(draft.name),
     officialContractName: text(draft.officialContractName),
@@ -372,14 +461,23 @@ export function buildProjectEditorProjectPatch(
     patch.phase = normalizeProjectPhase(draft.phase);
   }
 
-  if (options.forceExecutiveReviewPending || shouldResetApprovedPortalEdit(draft, options)) {
+  if (
+    options.forceExecutiveReviewPending
+    || shouldResetApprovedPortalEdit(draft, options)
+    || (
+      options.mode === 'portal-edit'
+      && options.baseProject?.registrationSource === 'pm_portal'
+      && options.baseProject?.executiveReviewStatus === 'PENDING'
+      && reviewChanges.length > 0
+    )
+  ) {
     patch.executiveReviewStatus = 'PENDING';
     patch.executiveReviewedAt = options.now;
     patch.executiveReviewedById = options.actorId;
     patch.executiveReviewedByName = options.actorName;
     patch.executiveReviewComment = text(options.executiveReviewComment) || null;
     if (options.baseProject) {
-      patch.executiveReviewHistory = appendPendingReviewHistory(options.baseProject, options);
+      patch.executiveReviewHistory = appendPendingReviewHistory(options.baseProject, draft, options, reviewChanges);
     }
   }
 

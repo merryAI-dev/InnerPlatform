@@ -26,6 +26,7 @@ describe('ProjectMigrationAuditPage shell contract', () => {
     expect(compositeSource).toContain('PM이 포털에서 입력한 내용을 그대로');
     expect(compositeSource).toContain('CIC 대표 검토 대기열');
     expect(compositeSource).toContain('CIC 대표 검토 결정');
+    expect(compositeSource).toContain('이번 수정에서 바뀐 값');
     expect(compositeSource).not.toContain('사업명으로 검색');
     expect(compositeSource).not.toContain('우리 사업으로 승인');
     expect(compositeSource).not.toContain('연결 필요');
@@ -51,6 +52,8 @@ describe('ProjectMigrationAuditPage shell contract', () => {
     expect(detailSource).toContain('계약 분석 보조 정보');
     expect(detailSource).toContain('ContractDocumentPreview');
     expect(detailSource).toContain('계약서 PDF 원문');
+    expect(detailSource).toContain('계약서 요약');
+    expect(detailSource).not.toContain('AI/휴리스틱 요약');
     expect(previewSource).toContain('data-testid="contract-document-preview"');
     expect(previewSource).toContain('<iframe');
     expect(previewSource).toContain('PDF 미리보기');

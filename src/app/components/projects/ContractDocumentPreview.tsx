@@ -8,6 +8,7 @@ interface ContractDocumentPreviewProps {
   document?: ContractDocumentPreviewAttachment | null;
   title?: string;
   description?: string;
+  descriptionClassName?: string;
   className?: string;
 }
 
@@ -21,6 +22,7 @@ export function ContractDocumentPreview({
   document,
   title = '계약서 원문',
   description = '업로드된 PDF를 화면 안에서 바로 확인합니다.',
+  descriptionClassName = 'text-slate-600',
   className = '',
 }: ContractDocumentPreviewProps) {
   const downloadURL = String(document?.downloadURL || '').trim();
@@ -35,7 +37,7 @@ export function ContractDocumentPreview({
           </div>
           <div className="min-w-0">
             <p className="text-[13px] font-semibold text-slate-950">{title}</p>
-            <p className="mt-1 text-[11px] leading-5 text-slate-600">{description}</p>
+            <p className={`mt-1 text-[11px] leading-5 ${descriptionClassName}`}>{description}</p>
             {document?.name ? (
               <p className="mt-2 truncate text-[12px] font-medium text-slate-800">{document.name}</p>
             ) : null}

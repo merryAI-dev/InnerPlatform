@@ -210,10 +210,6 @@ export function PortalProjectEdit() {
 
   const handleSubmit = async (draft: ProjectEditorDraft, actionId: string) => {
     if (!myProject || busyActionId) return;
-    if (actionId === 'resubmit' && !requestDoc) {
-      toast.error(loadingRequest ? '검토 요청 정보를 불러오는 중입니다.' : '다시 제출할 검토 요청 정보를 찾지 못했습니다.');
-      return;
-    }
 
     setBusyActionId(actionId);
     try {

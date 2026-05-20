@@ -235,6 +235,111 @@ describe('buildMigrationReviewDossier', () => {
     });
   });
 
+  it('surfaces the latest PM edit before-after changes for CIC review', () => {
+    const dossier = buildMigrationReviewDossier(
+      {
+        ...project,
+        executiveReviewStatus: 'PENDING',
+        executiveReviewHistory: [
+          {
+            status: 'APPROVED',
+            previousStatus: 'PENDING',
+            reviewedAt: '2026-04-20T10:00:00Z',
+            reviewedById: 'u-admin-1',
+            reviewedByName: '임원A',
+            reviewComment: '초안 승인',
+          },
+          {
+            status: 'PENDING',
+            previousStatus: 'APPROVED',
+            reviewedAt: '2026-04-22T10:00:00Z',
+            reviewedById: 'u-1',
+            reviewedByName: '변민욱',
+            reviewComment: 'PM 수정 저장',
+            changes: [
+              { key: 'contractAmount', label: '계약금액', before: '120,000,000원', after: '130,000,000원' },
+              { key: 'managerName', label: 'PM', before: '변민욱', after: '김다은' },
+            ],
+          },
+        ],
+      } as Project,
+      request,
+    );
+
+    expect(dossier.changes).toEqual([
+      { key: 'contractAmount', label: '계약금액', before: '120,000,000원', after: '130,000,000원' },
+      { key: 'managerName', label: 'PM', before: '변민욱', after: '김다은' },
+    ]);
+    expect(dossier.audit.history[0].changes).toHaveLength(2);
+  });
+
+  it('prefers current project team members over stale request payload values', () => {
+    const dossier = buildMigrationReviewDossier(
+      {
+        ...project,
+        teamMembersDetailed: [
+          { memberName: '변민욱', memberNickname: '보람', role: 'PM', participationRate: 80 },
+          { memberName: '이지영', memberNickname: '이지', role: '정산', participationRate: 20 },
+        ],
+      },
+      {
+        ...request,
+        payload: {
+          ...request.payload,
+          teamMembers: '김다은(데이나)',
+          teamMembersDetailed: [
+            { memberName: '김다은', memberNickname: '데이나', role: '운영', participationRate: 100 },
+          ],
+        },
+      },
+    );
+
+    expect(dossier.people.members).toEqual([
+      '변민욱 (보람) / PM / 80%',
+      '이지영 (이지) / 정산 / 20%',
+    ]);
+  });
+
+  it('treats an explicit empty project team list as current in CIC review', () => {
+    const dossier = buildMigrationReviewDossier(
+      {
+        ...project,
+        teamMembersDetailed: [],
+      },
+      {
+        ...request,
+        payload: {
+          ...request.payload,
+          teamMembers: '김다은(데이나)',
+          teamMembersDetailed: [
+            { memberName: '김다은', memberNickname: '데이나', role: '운영', participationRate: 100 },
+          ],
+        },
+      },
+    );
+
+    expect(dossier.people.members).toEqual([]);
+  });
+
+  it('keeps zero-won payment split entries visible for CIC review', () => {
+    const dossier = buildMigrationReviewDossier(
+      {
+        ...project,
+        contractAmount: 100_000,
+        paymentPlan: { contract: 0, interim: 20_000, final: 0 },
+      },
+      {
+        ...request,
+        payload: {
+          ...request.payload,
+          paymentPlan: { contract: 50_000, interim: 30_000, final: 20_000 },
+        },
+      },
+    );
+
+    expect(dossier.budget.paymentPlanSplitLabel).toBe('선금/계약금 0원 (0%) · 중도금 20,000원 (20%) · 잔금 0원 (0%)');
+  });
+
   it('prefers current project settlement fields over stale request payload values', () => {
     const dossier = buildMigrationReviewDossier(
       {
