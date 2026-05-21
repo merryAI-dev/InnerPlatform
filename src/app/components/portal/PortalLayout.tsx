@@ -548,9 +548,12 @@ function PortalContent() {
         `}>
           {/* Brand */}
           <div className={`flex items-center gap-2.5 h-[48px] px-3 ${collapsed ? 'justify-center' : ''}`}>
-            <div className="inline-flex items-center rounded-lg bg-white px-2 py-1 shadow-sm">
-              <MyscWordmark />
-            </div>
+            <MyscWordmark
+              tone="onDark"
+              size={collapsed ? 'sm' : 'md'}
+              className={collapsed ? 'max-w-8 overflow-hidden' : ''}
+              imageClassName={collapsed ? 'max-w-none' : ''}
+            />
             {!collapsed && (
               <div className="flex-1" />
             )}
@@ -780,9 +783,7 @@ function PortalContent() {
                 <Menu className="h-4 w-4" />
               </button>
               <div className="flex min-w-0 items-center gap-2">
-                <div className="inline-flex items-center rounded-lg bg-white px-2 py-1 shadow-sm">
-                  <MyscWordmark className="shrink-0" />
-                </div>
+                <MyscWordmark tone="onDark" size="md" className="shrink-0" />
               </div>
               <div className="hidden flex-1 items-center justify-center px-4 md:flex">
                 <button

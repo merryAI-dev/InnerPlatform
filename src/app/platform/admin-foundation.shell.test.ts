@@ -14,6 +14,8 @@ const routesSource = readFileSync(
 
 describe('admin monitoring foundation shell contract', () => {
   it('renames the cashflow nav entry to monitoring language and exposes users nav', () => {
+    expect(navConfigSource).toContain("label: '기능 검색'");
+    expect(navConfigSource).toContain("to: '/dashboard'");
     expect(navConfigSource).toContain("label: '캐시플로 모니터링'");
     expect(navConfigSource).toContain("label: '프로젝트 등록/승인'");
     expect(navConfigSource).toContain("to: '/users'");
@@ -23,6 +25,8 @@ describe('admin monitoring foundation shell contract', () => {
   });
 
   it('registers a dedicated cashflow export route under the admin shell', () => {
+    expect(routesSource).toContain("{ index: true, element: <S C={FeatureSearchPage} /> }");
+    expect(routesSource).toContain("{ path: 'dashboard', element: <S C={DashboardPage} /> }");
     expect(routesSource).toContain("{ path: 'cashflow/export', element: <S C={CashflowExportPage} /> }");
     expect(routesSource).toContain("{ path: 'cashflow/weekly', element: <S C={CashflowWeeklyPage} /> }");
     expect(routesSource).toContain("{ path: 'cashflow/analytics', element: <S C={CashflowAnalyticsPage} /> }");

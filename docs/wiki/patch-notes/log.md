@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-05-21] patch-note | admin-dashboard, portal-onboarding | MYSCube feature search entry
+- pages: [admin-dashboard](./pages/admin-dashboard.md), [portal-onboarding](./pages/portal-onboarding.md)
+- summary: Admin 첫 화면을 사이드바 없는 전체 기능 검색 화면으로 전환하고, 로그인 직후 workspace 선택 화면도 관리자/PM 색상 구분형 feature map으로 맞췄다. MYSCube 로고 자산을 공통 brand component에 연결하고, 기능 검색 headline은 사용자 이름 기반 인사로 바꾸며 검색창 hover/focus affordance를 강화했다.
+
 ## [2026-05-21] patch-note | admin-dashboard | LAB shell visibility and dashboard polish
 - pages: [admin-dashboard](./pages/admin-dashboard.md)
 - summary: Admin/Portal shell에 공통 LAB visibility policy를 추가하고, 대시보드 이상 징후, 시스템 상태, 최근 활동, 상태바, 알림 패널, 404 quick links, 캐시플로 허브 카드까지 같은 정책으로 필터링했다. 알림 패널 모바일 폭 잘림과 Sheet 접근성 경고도 함께 정리했다.

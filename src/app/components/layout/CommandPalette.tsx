@@ -1,9 +1,20 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import {
-  LayoutDashboard, FolderKanban, BarChart3, FileCheck, Shield,
-  ClipboardList, Settings, Search, ArrowRight, ListChecks, ArrowLeftRight,
-  Zap, Clock, AlertTriangle, Users, Hash,
+  ArrowRight,
+  Banknote,
+  BarChart3,
+  Calculator,
+  CircleDollarSign,
+  FolderKanban,
+  LayoutDashboard,
+  ListChecks,
+  Pencil,
+  Search,
+  SlidersHorizontal,
+  UserCog,
+  Zap,
+  type LucideIcon,
 } from 'lucide-react';
 import { Dialog, DialogContent } from '../ui/dialog';
 import { useAppStore } from '../../data/store';
@@ -12,23 +23,41 @@ import { canShowAdminNavItem } from '../../platform/admin-nav';
 import { shouldShowShellRoute, useShellLabEnabled } from '../../platform/shell-lab-visibility';
 import { toast } from 'sonner';
 import { resolveGoShortcutTarget } from '../../platform/go-shortcuts';
+import {
+  buildAdminCommandItems,
+  searchAdminCommandItems,
+  type AdminCommandIcon,
+} from '../../platform/admin-command-index';
 
 interface CommandItem {
   id: string;
-  icon: any;
+  icon: LucideIcon;
   label: string;
   sublabel?: string;
   category: string;
   action: () => void;
-  keywords?: string[];
 }
+
+const COMMAND_ICON_MAP: Record<AdminCommandIcon, LucideIcon> = {
+  approval: ListChecks,
+  bank: Banknote,
+  budget: Calculator,
+  cashflow: BarChart3,
+  dashboard: LayoutDashboard,
+  expense: Pencil,
+  payroll: CircleDollarSign,
+  project: FolderKanban,
+  search: Search,
+  settings: SlidersHorizontal,
+  users: UserCog,
+};
 
 export function CommandPalette() {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const navigate = useNavigate();
-  const { projects, transactions } = useAppStore();
+  const { projects } = useAppStore();
   const { user } = useAuth();
   const [labEnabled] = useShellLabEnabled();
   const goPrefixTimeoutRef = useRef<number | null>(null);
@@ -116,72 +145,24 @@ export function CommandPalette() {
     };
   }, [armGoPrefix, clearGoPrefix, go, labEnabled, user?.role]);
 
+  const indexedItems = useMemo(() => buildAdminCommandItems({
+    role: user?.role,
+    projects,
+  }), [projects, user?.role]);
+
   const items: CommandItem[] = useMemo(() => {
-    const nav: CommandItem[] = [
-      { id: 'nav-dash', icon: LayoutDashboard, label: '대시보드', path: '/', category: '탐색', action: () => go('/'), keywords: ['dashboard', '홈'] },
-      { id: 'nav-proj', icon: FolderKanban, label: '프로젝트 목록', path: '/projects', category: '탐색', action: () => go('/projects'), keywords: ['project', '사업'] },
-      { id: 'nav-migration', icon: ArrowLeftRight, label: '프로젝트 등록/승인', path: '/projects/migration-audit', category: '탐색', action: () => go('/projects/migration-audit'), keywords: ['migration', '이관', '등록', '승인', '점검', 'audit'] },
-      { id: 'nav-cash', icon: BarChart3, label: '캐시플로 모니터링', path: '/cashflow', category: '탐색', action: () => go('/cashflow'), keywords: ['cashflow', '현금흐름', '모니터링', '편차', '주간'] },
-      { id: 'tool-cash-export', icon: BarChart3, label: '캐시플로 추출', path: '/cashflow', category: '도구', action: () => go('/cashflow/export'), keywords: ['cashflow', '현금흐름', '엑셀', '다운로드', 'export'] },
-      { id: 'nav-evi', icon: FileCheck, label: '증빙/정산 관리', path: '/evidence', category: '탐색', action: () => go('/evidence'), keywords: ['evidence', '증빙'] },
-      { id: 'nav-approval', icon: ListChecks, label: '승인 대기열', path: '/approvals', category: '탐색', action: () => go('/approvals'), keywords: ['approval', '승인', '대기열'] },
-      { id: 'nav-part', icon: Shield, label: '참여율 관리 (100-1)', path: '/participation', category: '탐색', action: () => go('/participation'), keywords: ['participation', '참여율'] },
-      { id: 'nav-koica', icon: ClipboardList, label: 'KOICA 인력배치', path: '/koica-personnel', category: '탐색', action: () => go('/koica-personnel'), keywords: ['koica', '인력'] },
-      { id: 'nav-set', icon: Settings, label: '설정', path: '/settings', category: '탐색', action: () => go('/settings'), keywords: ['settings', '설정'] },
-    ]
-      .filter((item) => (
-        canShowAdminNavItem(user?.role, (item as any).path)
-        && shouldShowShellRoute((item as any).path, 'admin', 'command', { labEnabled })
-      ))
-      .map(({ path: _path, ...rest }) => rest);
+    return searchAdminCommandItems(indexedItems, query, query.trim() ? 12 : 18)
+      .map((item) => ({
+        id: item.id,
+        icon: COMMAND_ICON_MAP[item.icon],
+        label: item.label,
+        sublabel: item.description,
+        category: item.category,
+        action: () => go(item.to),
+      }));
+  }, [go, indexedItems, query]);
 
-    const projItems: CommandItem[] = projects.slice(0, 20).map(p => ({
-      id: `proj-${p.id}`,
-      icon: FolderKanban,
-      label: p.name,
-      sublabel: `${p.department} · ${p.clientOrg || ''}`,
-      category: '프로젝트',
-      action: () => go(`/projects/${p.id}`),
-      keywords: [p.name, p.department, p.clientOrg || '', p.id],
-    }));
-
-    const pendingTx = transactions.filter(t => t.state === 'SUBMITTED').slice(0, 5);
-    const txItems: CommandItem[] = pendingTx.map(t => ({
-      id: `tx-${t.id}`,
-      icon: Clock,
-      label: `승인 대기: ${t.counterparty}`,
-      sublabel: `${t.amounts.bankAmount.toLocaleString()}원`,
-      category: '승인 대기',
-      action: () => {
-        const proj = projects.find(p => p.id === t.projectId);
-        if (proj) {
-          go(`/projects/${proj.id}`);
-          return;
-        }
-        const canOpenApprovals =
-          canShowAdminNavItem(user?.role, '/approvals')
-          && shouldShowShellRoute('/approvals', 'admin', 'command', { labEnabled });
-        const fallback = canOpenApprovals ? '/approvals' : '/projects';
-        toast.warning(canOpenApprovals
-          ? '원본 프로젝트를 찾을 수 없어 승인 대기열로 이동합니다.'
-          : '원본 프로젝트를 찾을 수 없어 프로젝트 목록으로 이동합니다.');
-        go(fallback);
-      },
-      keywords: [t.counterparty, t.id],
-    }));
-
-    return [...nav, ...txItems, ...projItems];
-  }, [projects, transactions, go, labEnabled, user?.role]);
-
-  const filtered = useMemo(() => {
-    if (!query.trim()) return items;
-    const q = query.toLowerCase();
-    return items.filter(item =>
-      item.label.toLowerCase().includes(q) ||
-      item.sublabel?.toLowerCase().includes(q) ||
-      item.keywords?.some(k => k.toLowerCase().includes(q))
-    );
-  }, [items, query]);
+  const filtered = items;
 
   // Group by category
   const grouped = useMemo(() => {

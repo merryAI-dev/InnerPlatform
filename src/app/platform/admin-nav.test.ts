@@ -11,6 +11,10 @@ describe('admin nav access control', () => {
     expect(canShowAdminNavItem('finance', '/')).toBe(true);
     expect(canShowAdminNavItem('pm', '/')).toBe(true);
     expect(canShowAdminNavItem('viewer', '/')).toBe(true);
+    expect(canShowAdminNavItem('admin', '/dashboard')).toBe(true);
+    expect(canShowAdminNavItem('finance', '/dashboard')).toBe(true);
+    expect(canShowAdminNavItem('pm', '/dashboard')).toBe(true);
+    expect(canShowAdminNavItem('viewer', '/dashboard')).toBe(true);
 
     expect(canShowAdminNavItem('admin', '/cashflow')).toBe(true);
     expect(canShowAdminNavItem('finance', '/cashflow')).toBe(true);

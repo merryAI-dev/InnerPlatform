@@ -4,6 +4,7 @@
   "routePermissions": {
     "finance": [
       "/",
+      "/dashboard",
       "/projects",
       "/board",
       "/cashflow",
@@ -17,6 +18,7 @@
     ],
     "pm": [
       "/",
+      "/dashboard",
       "/projects",
       "/projects/new",
       "/board",
@@ -27,6 +29,7 @@
     ],
     "viewer": [
       "/",
+      "/dashboard",
       "/projects",
       "/board",
       "/claude-sdk-help",

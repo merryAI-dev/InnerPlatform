@@ -37,6 +37,7 @@ export function canShowAdminNavItem(role: unknown, to: string): boolean {
 
 function canonicalizeAdminPath(pathname: string): string | undefined {
   if (pathname === '/') return '/';
+  if (pathname === '/dashboard') return '/dashboard';
 
   if (pathname === '/projects/migration-audit' || pathname.startsWith('/projects/migration-audit/')) {
     return '/projects/migration-audit';

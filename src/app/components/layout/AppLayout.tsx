@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router';
 import {
   ChevronLeft, ChevronRight,
-  Search, Zap, HelpCircle,
+  Search, HelpCircle,
   Menu, LogOut,
 } from 'lucide-react';
 import { useAppStore, AppProvider } from '../../data/store';
@@ -28,9 +28,10 @@ import { canAccessAdminPath, canShowAdminNavItem } from '../../platform/admin-na
 import { NAV_GROUPS } from '../../platform/nav-config';
 import { readShellLabEnabled, shouldShowShellRoute, writeShellLabEnabled } from '../../platform/shell-lab-visibility';
 import { TenantSwitcher, TenantBadge } from '../settings/TenantSwitcher';
+import { MyscWordmark } from '../brand/MyscWordmark';
 
 function AppLayoutContent() {
-  const { org, currentUser, transactions, participationEntries, dataSource } = useAppStore();
+  const { currentUser, transactions, participationEntries, dataSource } = useAppStore();
   const { isAuthenticated, isLoading: authLoading, user: authUser, logout, setWorkspacePreference } = useAuth();
   const { getAllPendingCount: getHrPendingCount } = useHrAnnouncements();
   const [collapsed, setCollapsed] = useState(false);
@@ -131,6 +132,22 @@ function AppLayoutContent() {
 
   if (authLoading || !isAuthenticated) return null;
 
+  if (location.pathname === '/') {
+    return (
+      <TooltipProvider delayDuration={300}>
+        <CommandPalette />
+        <KeyboardShortcuts />
+        <main className="min-h-dvh">
+          <PageTransition>
+            <ErrorBoundary resetKey={location.pathname}>
+              <Outlet />
+            </ErrorBoundary>
+          </PageTransition>
+        </main>
+      </TooltipProvider>
+    );
+  }
+
   function getBadgeCount(to: string): number | null {
     if (to === '/evidence' && missingEvidenceCount > 0) return missingEvidenceCount;
     if (to === '/participation' && participationDangerCount > 0) return participationDangerCount;
@@ -171,23 +188,13 @@ function AppLayoutContent() {
           `}
         >
           {/* Brand */}
-          <div className={`flex items-center gap-2.5 h-[48px] px-3 ${collapsed ? 'justify-center' : ''}`}>
-            <div
-              className="flex items-center justify-center w-8 h-8 rounded-lg shrink-0"
-              style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)' }}
-            >
-              <Zap className="w-4 h-4 text-white" />
-            </div>
-            {!collapsed && (
-              <div className="overflow-hidden flex-1">
-                <p className="text-[13px] text-white truncate" style={{ fontWeight: 700, letterSpacing: '-0.01em' }}>
-                  {org.name}
-                </p>
-                <p className="text-[9px] text-slate-500 truncate tracking-wider" style={{ textTransform: 'uppercase' }}>
-                  Business Platform
-                </p>
-              </div>
-            )}
+          <div className={`flex h-[48px] items-center px-3 ${collapsed ? 'justify-center overflow-hidden' : ''}`}>
+            <MyscWordmark
+              tone="onDark"
+              size={collapsed ? 'sm' : 'md'}
+              className={collapsed ? 'max-w-8 overflow-hidden' : ''}
+              imageClassName={collapsed ? 'max-w-none' : ''}
+            />
           </div>
 
           {/* Quick search */}

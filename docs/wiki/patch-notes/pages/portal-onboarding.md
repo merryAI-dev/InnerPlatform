@@ -3,7 +3,7 @@
 - route: `/login`, `/workspace-select`
 - primary users: 전체 사용자
 - status: active
-- last updated: 2026-04-15
+- last updated: 2026-05-21
 
 ## Purpose
 
@@ -12,7 +12,7 @@
 ## Current UX Summary
 
 - 로그인 화면은 계정 인증과 예외 상태만 보여준다.
-- 공간 선택 화면은 관리자 공간과 PM 포털의 차이를 짧게 설명하고 바로 진입시킨다.
+- 공간 선택 화면은 로그인 직후 관리자와 PM 포털의 주요 진입점을 glassmorphism panel과 색상으로 구분해 보여주고 바로 진입시킨다.
 - 별도 Guided Start 카드 없이 핵심 선택만 남긴다.
 
 ## Current Feature Checklist
@@ -20,12 +20,15 @@
 - [x] 로그인 가능
 - [x] 역할별 기본 진입 경로 판단 가능
 - [x] workspace 선택 가능 계정은 공간 선택 후 진입 가능
+- [x] workspace 선택 화면에서 관리자/PM 주요 기능이 색상과 기능 chip으로 구분됨
 - [x] 포털 미등록 사용자는 온보딩 선택 카드에서 기존 사업 선택, 증빙 업로드, 새 사업 등록으로 실제 이동 가능
 - [x] Guided Start 카드 없이 핵심 인증/선택 UI만 유지
 - [ ] 공간 설명 카피는 더 압축할 여지 있음
 
 ## Recent Changes
 
+- [2026-05-21] workspace 선택 화면을 MYSCube 브랜드 slab와 관리자/PM 색상 구분형 feature map으로 재구성해, 로그인 직후 어떤 업무 공간으로 들어가는지 더 빨리 판단하게 했다.
+- [2026-05-21] workspace 선택 화면의 배경, 공간 카드, 기능 chip, CTA를 translucent surface와 blur 기반 glassmorphism 톤으로 조정했다.
 - [2026-04-15] 포털 시작 선택 카드는 standalone entry path 정책을 공통 helper로 보게 정리했고, deep route 진입 후에도 fallback 선택 화면이 다시 덮이지 않도록 복구했다.
 - [2026-04-15] `기존 사업 선택`은 `사업 배정 수정`이 아니라 실제 세션 사업 선택 단계인 `/portal/project-select`로 연결되게 바꿨다.
 - [2026-04-15] workspace 선택 화면에서 사용자가 `관리자 공간` 또는 `PM 포털 공간`을 명시적으로 고르면, 그 공간에 맞는 redirect만 유지하도록 정리했다.
@@ -43,6 +46,7 @@
 
 - `src/app/components/auth/LoginPage.tsx`
 - `src/app/components/auth/WorkspaceSelectPage.tsx`
+- `src/app/components/brand/MyscWordmark.tsx`
 - `src/app/platform/navigation.ts`
 
 ## Related Tests
@@ -50,6 +54,7 @@
 - `src/app/platform/navigation.test.ts`
 - `src/app/platform/preview-auth.test.ts`
 - `src/app/data/member-workspace.test.ts`
+- `src/app/components/auth/WorkspaceSelectPage.shell.test.ts`
 
 ## Related QA / Ops Context
 

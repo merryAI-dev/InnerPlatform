@@ -26,3 +26,11 @@ describe('AppLayout LAB shell contract', () => {
     expect(source).toContain("'admin', 'nav'");
   });
 });
+
+describe('AppLayout root entry contract', () => {
+  it('renders the root feature search without sidebar chrome', () => {
+    expect(source).toContain("if (location.pathname === '/')");
+    expect(source).toContain('<main className="min-h-dvh">');
+    expect(source).toContain('<Outlet />');
+  });
+});

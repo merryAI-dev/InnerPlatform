@@ -61,6 +61,7 @@ describe('shell LAB visibility', () => {
 
   it('keeps core admin routes visible with LAB disabled', () => {
     expect(shouldShowShellRoute('/', 'admin', 'nav', { labEnabled: false })).toBe(true);
+    expect(shouldShowShellRoute('/dashboard', 'admin', 'nav', { labEnabled: false })).toBe(true);
     expect(shouldShowShellRoute('/projects', 'admin', 'nav', { labEnabled: false })).toBe(true);
     expect(shouldShowShellRoute('/projects/migration-audit', 'admin', 'nav', { labEnabled: false })).toBe(true);
     expect(shouldShowShellRoute('/cashflow', 'admin', 'nav', { labEnabled: false })).toBe(true);

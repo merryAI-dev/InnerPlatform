@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import {
-  FolderKanban,
   ArrowRight,
   AlertCircle,
   Loader2,
@@ -23,6 +22,7 @@ import {
   shouldBlockFirebasePopupAuth,
 } from '../../platform/preview-auth';
 import { readDevAuthHarnessConfig } from '../../platform/dev-harness';
+import { MyscWordmark } from '../brand/MyscWordmark';
 
 // ═══════════════════════════════════════════════════════════════
 // LoginPage — 통합 로그인 페이지
@@ -106,14 +106,9 @@ export function LoginPage() {
       <div className="w-full max-w-[420px]">
         {/* ── Brand Header ── */}
         <div className="text-center mb-8">
-          <div
-            className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-indigo-500/20"
-            style={{ background: 'linear-gradient(135deg, #312e81 0%, #4f46e5 50%, #0d9488 100%)' }}
-          >
-            <FolderKanban className="w-8 h-8 text-white" />
-          </div>
-          <h1 className="text-[24px] text-foreground mb-1" style={{ fontWeight: 800, letterSpacing: '-0.03em' }}>
-            MYSC 사업관리
+          <MyscWordmark tone="light" size="lg" className="mb-4 justify-center" />
+          <h1 className="text-[22px] text-foreground mb-1" style={{ fontWeight: 800, letterSpacing: '-0.03em' }}>
+            프로젝트 운영 플랫폼
           </h1>
           <p className="text-[13px] text-muted-foreground">
             통합 플랫폼에 로그인하세요

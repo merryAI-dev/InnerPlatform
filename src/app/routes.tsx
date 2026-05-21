@@ -9,6 +9,7 @@ import { loadLazyRouteModule } from './platform/lazy-route';
 // Lazy-loaded pages — each becomes a separate chunk
 const LoginPage = lazy(() => import('./components/auth/LoginPage').then(m => ({ default: m.LoginPage })));
 const WorkspaceSelectPage = lazy(() => import('./components/auth/WorkspaceSelectPage').then(m => ({ default: m.WorkspaceSelectPage })));
+const FeatureSearchPage = lazy(() => import('./components/dashboard/FeatureSearchPage').then(m => ({ default: m.FeatureSearchPage })));
 const DashboardPage = lazy(() => import('./components/dashboard/DashboardPage').then(m => ({ default: m.DashboardPage })));
 const BoardFeedPage = lazy(() => import('./components/board/BoardFeedPage').then(m => ({ default: m.BoardFeedPage })));
 const BoardPostPage = lazy(() => import('./components/board/BoardPostPage').then(m => ({ default: m.BoardPostPage })));
@@ -96,7 +97,8 @@ export const router = createBrowserRouter([
     path: '/',
     element: <AdminRouteShell />,
     children: [
-      { index: true, element: <S C={DashboardPage} /> },
+      { index: true, element: <S C={FeatureSearchPage} /> },
+      { path: 'dashboard', element: <S C={DashboardPage} /> },
       // ── Company Board (전사 게시판) ──
       {
         path: 'board',

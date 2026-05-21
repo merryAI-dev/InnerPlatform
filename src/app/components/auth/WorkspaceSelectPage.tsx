@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
-import { ArrowRight, CheckCircle2, FolderKanban, Loader2, Shield, Sparkles } from 'lucide-react';
-import { Card, CardContent } from '../ui/card';
+import { ArrowRight, CheckCircle2, FolderKanban, Loader2, Search, Shield, Sparkles } from 'lucide-react';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { useAuth } from '../../data/auth-store';
@@ -15,6 +14,25 @@ import {
 } from '../../platform/navigation';
 import { canAccessAdminPath } from '../../platform/admin-nav';
 import type { WorkspaceId } from '../../data/member-workspace';
+import { MyscWordmark } from '../brand/MyscWordmark';
+
+const ADMIN_WORKSPACE_FEATURES = [
+  '기능 검색',
+  '대시보드',
+  '프로젝트',
+  '프로젝트 등록/승인',
+  '캐시플로 모니터링',
+  '권한/사용자',
+];
+
+const PM_WORKSPACE_FEATURES = [
+  '내 프로젝트 현황',
+  '예산 편집',
+  '사업비 입력',
+  '캐시플로',
+  '프로젝트 등록 요청',
+  '인건비/공지',
+];
 
 export function WorkspaceSelectPage() {
   const location = useLocation();
@@ -76,88 +94,152 @@ export function WorkspaceSelectPage() {
   const adminRequested = !!redirectFrom && !portalRequested;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-indigo-50/30 to-teal-50/20 dark:from-slate-950 dark:via-indigo-950/10 dark:to-teal-950/10 flex items-center justify-center p-4">
-      <div className="w-full max-w-4xl">
-        <div className="text-center mb-8">
-          <h1 className="text-[28px] text-foreground mb-2" style={{ fontWeight: 800, letterSpacing: '-0.03em' }}>
-            어떤 공간으로 들어갈까요?
-          </h1>
-          <p className="text-[13px] text-muted-foreground">
-            당분간 모든 계정은 관리자 화면과 PM 포털 화면 중 하나를 기본 진입점으로 저장할 수 있습니다.
-          </p>
-        </div>
-
-        {error && (
-          <div className="mb-4 rounded-xl border border-rose-200/70 bg-rose-50 px-4 py-3 text-[12px] text-rose-700">
-            {error}
+    <div className="flex min-h-dvh items-center justify-center bg-[linear-gradient(135deg,#eef6ff_0%,#f8fbff_46%,#ecfdf5_100%)] p-4 dark:bg-[linear-gradient(135deg,#061a2f_0%,#0f172a_52%,#052e2b_100%)]">
+      <div className="w-full max-w-5xl">
+        <section className="overflow-hidden rounded-lg border border-white/60 bg-white/50 shadow-[0_24px_80px_rgba(15,23,42,0.12)] backdrop-blur-2xl dark:border-white/10 dark:bg-slate-950/40">
+          <div className="border-b border-white/20 bg-[#0f2747]/90 px-5 py-5 text-white shadow-inner shadow-white/5 backdrop-blur-xl md:px-7">
+            <MyscWordmark tone="onDark" size="md" />
           </div>
-        )}
-
-        <div className="grid gap-4 md:grid-cols-2">
-          <Card className="border-border/60 shadow-lg shadow-black/5">
-            <CardContent className="p-6 space-y-4">
-              <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-950">
-                <Shield className="h-6 w-6" />
-              </div>
-              <div>
-                <h2 className="text-[18px]" style={{ fontWeight: 700 }}>관리자 공간</h2>
-                <p className="mt-1 text-[12px] text-muted-foreground">
-                  설정, 사용자 관리, 조직 단위 운영 화면으로 이동합니다.
+          <div className="space-y-6 px-5 py-6 md:px-7 md:py-8">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+              <div className="max-w-2xl">
+                <div className="inline-flex items-center gap-2 rounded-full border border-white/70 bg-white/50 px-3 py-1 text-[12px] font-semibold text-slate-700 shadow-sm backdrop-blur-md dark:border-white/10 dark:bg-slate-900/60 dark:text-slate-200">
+                  <Search className="h-3.5 w-3.5" />
+                  시작 공간 선택
+                </div>
+                <h1 className="mt-4 text-[30px] font-extrabold leading-tight text-slate-950 dark:text-slate-50 md:text-[38px]">
+                  어느 공간에서 시작할까요?
+                </h1>
+                <p className="mt-3 text-[14px] leading-6 text-slate-600 dark:text-slate-300">
+                  로그인 직후 자주 쓰는 업무 화면을 기준으로 관리자와 PM 포털을 구분해 보여줍니다.
                 </p>
               </div>
-              <div className="space-y-2 text-[11px] text-slate-600">
-                <div className="flex items-center gap-2"><CheckCircle2 className="h-3.5 w-3.5 text-slate-500" /> 프로젝트, 권한, 운영 설정 관리</div>
-                <div className="flex items-center gap-2"><CheckCircle2 className="h-3.5 w-3.5 text-slate-500" /> 조직 단위 대시보드와 감사 흐름 확인</div>
-                {adminRequested && <Badge variant="outline" className="w-fit">요청한 화면과 가장 가까운 공간</Badge>}
+              <div className="flex flex-wrap gap-2 text-[12px] font-semibold">
+                <span className="rounded-full border border-sky-200/80 bg-sky-50/75 px-3 py-1 text-sky-800 shadow-sm backdrop-blur-md dark:border-sky-400/20 dark:bg-sky-950/40 dark:text-sky-200">
+                  관리자
+                </span>
+                <span className="rounded-full border border-emerald-200/80 bg-emerald-50/75 px-3 py-1 text-emerald-800 shadow-sm backdrop-blur-md dark:border-emerald-400/20 dark:bg-emerald-950/40 dark:text-emerald-200">
+                  PM
+                </span>
               </div>
-              <Button
-                className="w-full h-11 gap-2"
-                variant={currentWorkspace === 'admin' ? 'default' : 'outline'}
-                disabled={pending !== null || !canAccessAdmin}
-                onClick={() => void handleSelect('admin')}
-              >
-                {pending === 'admin' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Shield className="h-4 w-4" />}
-                관리자 공간으로 계속
-              </Button>
-              {!canAccessAdmin && (
-                <p className="text-[11px] text-muted-foreground/60 text-center">현재 이 계정은 관리자 공간 접근이 제한되어 있습니다</p>
-              )}
-            </CardContent>
-          </Card>
+            </div>
 
-          <Card className="border-border/60 shadow-lg shadow-black/5">
-            <CardContent className="p-6 space-y-4">
-              <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-teal-600 text-white">
-                <FolderKanban className="h-6 w-6" />
+            {error && (
+              <div className="rounded-xl border border-rose-200/70 bg-rose-50 px-4 py-3 text-[12px] text-rose-700">
+                {error}
               </div>
-              <div>
-                <h2 className="text-[18px]" style={{ fontWeight: 700 }}>PM 포털 공간</h2>
-                <p className="mt-1 text-[12px] text-muted-foreground">
-                  예산 편집, 통장내역, 주간 사업비 같은 PM 실무 화면으로 이동합니다.
-                </p>
-              </div>
-              <div className="space-y-2 text-[11px] text-slate-600">
-                <div className="flex items-center gap-2"><CheckCircle2 className="h-3.5 w-3.5 text-teal-600" /> 주요 실무 화면으로 바로 이동</div>
-                <div className="flex items-center gap-2"><CheckCircle2 className="h-3.5 w-3.5 text-teal-600" /> 통장내역, 사업비 입력, 예산 반영을 한 흐름으로 진행</div>
-                {(portalRequested || !canAccessAdmin) && (
-                  <Badge variant="outline" className="w-fit border-teal-200 bg-teal-50 text-teal-700">
-                    <Sparkles className="mr-1 h-3 w-3" />
-                    추천
-                  </Badge>
-                )}
-              </div>
-              <Button
-                className="w-full h-11 gap-2"
-                style={{ background: 'linear-gradient(135deg, #0f766e, #0d9488)' }}
-                disabled={pending !== null}
-                onClick={() => void handleSelect('portal')}
-              >
-                {pending === 'portal' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
-                PM 포털로 계속
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
+            )}
+
+            <div className="grid gap-4 lg:grid-cols-2">
+              <section className="flex min-h-[360px] flex-col justify-between rounded-lg border border-white/60 bg-sky-50/50 p-5 shadow-lg shadow-slate-900/5 backdrop-blur-xl dark:border-sky-400/20 dark:bg-sky-950/25">
+                <div className="space-y-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="inline-flex h-12 w-12 items-center justify-center rounded-lg border border-white/40 bg-sky-800/90 text-white shadow-lg shadow-sky-900/20 backdrop-blur-md dark:bg-sky-300/90 dark:text-sky-950">
+                      <Shield className="h-6 w-6" />
+                    </div>
+                    {adminRequested && (
+                      <Badge variant="outline" className="border-white/70 bg-white/60 text-sky-800 shadow-sm backdrop-blur-md dark:border-sky-400/20 dark:bg-slate-950/50 dark:text-sky-200">
+                        요청 화면 기준
+                      </Badge>
+                    )}
+                  </div>
+                  <div>
+                    <h2 className="text-[20px] font-bold text-sky-950 dark:text-sky-100">관리자 공간</h2>
+                    <p className="mt-2 text-[13px] leading-6 text-sky-900/75 dark:text-sky-100/70">
+                      프로젝트 운영, 등록/승인, 캐시플로 관제, 권한 관리로 이동합니다.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {ADMIN_WORKSPACE_FEATURES.map((feature) => (
+                      <span
+                        key={feature}
+                        className="rounded-full border border-white/70 bg-white/60 px-3 py-1 text-[12px] font-semibold text-sky-900 shadow-sm backdrop-blur-md dark:border-sky-400/20 dark:bg-slate-950/50 dark:text-sky-200"
+                      >
+                        {feature}
+                      </span>
+                    ))}
+                  </div>
+                  <div className="space-y-2 text-[12px] text-sky-900/75 dark:text-sky-100/70">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="h-3.5 w-3.5 text-sky-700 dark:text-sky-300" />
+                      승인, 조직, 권한처럼 관리 기준으로 찾는 화면
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="h-3.5 w-3.5 text-sky-700 dark:text-sky-300" />
+                      운영 상태와 프로젝트 목록을 한 번에 확인
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-5 space-y-3">
+                  <Button
+                    className="h-11 w-full gap-2 border border-sky-700/40 bg-sky-800/90 text-white shadow-lg shadow-sky-900/20 backdrop-blur-md hover:bg-sky-900/95"
+                    variant={currentWorkspace === 'admin' ? 'default' : 'outline'}
+                    disabled={pending !== null || !canAccessAdmin}
+                    onClick={() => void handleSelect('admin')}
+                  >
+                    {pending === 'admin' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Shield className="h-4 w-4" />}
+                    관리자 공간으로 계속
+                  </Button>
+                  {!canAccessAdmin && (
+                    <p className="text-center text-[11px] text-sky-900/60 dark:text-sky-100/50">
+                      현재 이 계정은 관리자 공간 접근이 제한되어 있습니다
+                    </p>
+                  )}
+                </div>
+              </section>
+
+              <section className="flex min-h-[360px] flex-col justify-between rounded-lg border border-white/60 bg-emerald-50/50 p-5 shadow-lg shadow-slate-900/5 backdrop-blur-xl dark:border-emerald-400/20 dark:bg-emerald-950/25">
+                <div className="space-y-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="inline-flex h-12 w-12 items-center justify-center rounded-lg border border-white/40 bg-emerald-700/90 text-white shadow-lg shadow-emerald-900/20 backdrop-blur-md dark:bg-emerald-300/90 dark:text-emerald-950">
+                      <FolderKanban className="h-6 w-6" />
+                    </div>
+                    {(portalRequested || !canAccessAdmin) && (
+                      <Badge variant="outline" className="border-white/70 bg-white/60 text-emerald-800 shadow-sm backdrop-blur-md dark:border-emerald-400/20 dark:bg-slate-950/50 dark:text-emerald-200">
+                        <Sparkles className="mr-1 h-3 w-3" />
+                        추천
+                      </Badge>
+                    )}
+                  </div>
+                  <div>
+                    <h2 className="text-[20px] font-bold text-emerald-950 dark:text-emerald-100">PM 포털</h2>
+                    <p className="mt-2 text-[13px] leading-6 text-emerald-900/75 dark:text-emerald-100/70">
+                      담당 프로젝트 현황, 예산 편집, 사업비 입력, 프로젝트 등록 요청으로 이동합니다.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {PM_WORKSPACE_FEATURES.map((feature) => (
+                      <span
+                        key={feature}
+                        className="rounded-full border border-white/70 bg-white/60 px-3 py-1 text-[12px] font-semibold text-emerald-900 shadow-sm backdrop-blur-md dark:border-emerald-400/20 dark:bg-slate-950/50 dark:text-emerald-200"
+                      >
+                        {feature}
+                      </span>
+                    ))}
+                  </div>
+                  <div className="space-y-2 text-[12px] text-emerald-900/75 dark:text-emerald-100/70">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-700 dark:text-emerald-300" />
+                      내 프로젝트 기준으로 입력과 확인을 진행
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-700 dark:text-emerald-300" />
+                      사업비, 예산, 캐시플로 흐름을 같은 공간에서 처리
+                    </div>
+                  </div>
+                </div>
+                <Button
+                  className="mt-5 h-11 w-full gap-2 border border-emerald-700/40 bg-emerald-700/90 text-white shadow-lg shadow-emerald-900/20 backdrop-blur-md hover:bg-emerald-800/95"
+                  disabled={pending !== null}
+                  onClick={() => void handleSelect('portal')}
+                >
+                  {pending === 'portal' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
+                  PM 포털로 계속
+                </Button>
+              </section>
+            </div>
+          </div>
+        </section>
       </div>
     </div>
   );
