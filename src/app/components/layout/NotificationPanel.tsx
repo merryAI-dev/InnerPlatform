@@ -4,7 +4,7 @@ import {
   Bell, X, Clock, AlertTriangle, CheckCircle2, FileText,
   Shield, ChevronRight, Users, ExternalLink, Filter,
 } from 'lucide-react';
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '../ui/sheet';
+import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from '../ui/sheet';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Separator } from '../ui/separator';
@@ -14,6 +14,7 @@ import { computeMemberSummaries } from '../../data/participation-data';
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { getSeoulTodayIso } from '../../platform/business-days';
 import { findWeekForDate, getMonthMondayWeeks } from '../../platform/cashflow-weeks';
+import { shouldShowShellRoute, useShellLabEnabled } from '../../platform/shell-lab-visibility';
 
 interface NotifItem {
   id: string;
@@ -23,6 +24,7 @@ interface NotifItem {
   description: string;
   timestamp: string;
   link?: string;
+  policyRoute?: string;
   read: boolean;
 }
 
@@ -31,6 +33,7 @@ export function NotificationPanel() {
   const { transactions, projects, participationEntries } = useAppStore();
   const { weeks: cashflowWeeks } = useCashflowWeeks();
   const [open, setOpen] = useState(false);
+  const [labEnabled] = useShellLabEnabled();
   const fmtAmount = (value?: number | null) =>
     Number.isFinite(value) ? Number(value).toLocaleString('ko-KR') : '-';
 
@@ -52,6 +55,7 @@ export function NotificationPanel() {
         description: `${t.counterparty} — ${fmtAmount(t.amounts?.bankAmount)}원 (${proj?.name || ''})`,
         timestamp: t.submittedAt || t.dateTime,
         link: proj ? `/projects/${proj.id}` : undefined,
+        policyRoute: '/approvals',
         read: false,
       });
     });
@@ -68,6 +72,7 @@ export function NotificationPanel() {
         description: `${t.counterparty} — ${proj?.name || ''}`,
         timestamp: t.dateTime,
         link: '/evidence',
+        policyRoute: '/evidence',
         read: false,
       });
     });
@@ -84,6 +89,7 @@ export function NotificationPanel() {
         description: `${m.realName}(${m.nickname}) — 전체 ${m.totalRate}%`,
         timestamp: new Date().toISOString(),
         link: '/participation',
+        policyRoute: '/participation',
         read: false,
       });
     });
@@ -100,6 +106,7 @@ export function NotificationPanel() {
         description: `${t.counterparty} — ${t.rejectedReason || '사유 없음'} (${proj?.name || ''})`,
         timestamp: t.dateTime,
         link: proj ? `/projects/${proj.id}` : undefined,
+        policyRoute: '/audit',
         read: false,
       });
     });
@@ -134,6 +141,7 @@ export function NotificationPanel() {
             description: `미입력 사업 ${missingIds.length}건 — 금주 사업비 입력을 완료해주세요`,
             timestamp: today,
             link: '/cashflow',
+            policyRoute: '/cashflow',
             read: false,
           });
         }
@@ -152,6 +160,7 @@ export function NotificationPanel() {
         description: `${proj?.name || w.projectId} — ${w.yearMonth} ${w.weekNo}주: "${w.varianceFlag?.reason || ''}"`,
         timestamp: w.varianceFlag?.flaggedAt || today,
         link: '/cashflow',
+        policyRoute: '/cashflow',
         read: false,
       });
     });
@@ -168,6 +177,7 @@ export function NotificationPanel() {
         description: `${t.counterparty} — ${fmtAmount(t.amounts?.bankAmount)}원 (${proj?.name || ''})`,
         timestamp: t.approvedAt || t.dateTime,
         link: '/evidence',
+        policyRoute: '/approvals',
         read: false,
       });
     });
@@ -177,9 +187,6 @@ export function NotificationPanel() {
       return severityOrder[a.severity] - severityOrder[b.severity];
     });
   }, [transactions, projects, participationEntries, cashflowWeeks, today, dayOfWeek]);
-
-  const criticalCount = notifications.filter(n => n.severity === 'critical').length;
-  const totalCount = notifications.length;
 
   const typeIcons = {
     approval: Clock,
@@ -201,6 +208,17 @@ export function NotificationPanel() {
     system: '/approvals',
   };
 
+  const visibleNotifications = useMemo(() => (
+    notifications.filter((notif) => (
+      shouldShowShellRoute(notif.policyRoute || fallbackByType[notif.type], 'admin', 'command', { labEnabled })
+    ))
+  ), [fallbackByType, labEnabled, notifications]);
+
+  const criticalCount = visibleNotifications.filter(n => n.severity === 'critical').length;
+  const totalCount = visibleNotifications.length;
+  const approvalCount = visibleNotifications.filter(n => n.type === 'approval').length;
+  const showApprovalTab = shouldShowShellRoute('/approvals', 'admin', 'command', { labEnabled });
+
   const handleGo = (notif: NotifItem) => {
     const target = notif.link || fallbackByType[notif.type];
     navigate(target);
@@ -210,7 +228,12 @@ export function NotificationPanel() {
   return (
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger asChild>
-        <Button variant="ghost" size="sm" className="relative h-8 w-8 p-0">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="relative h-8 w-8 p-0"
+          aria-label={`알림 센터 열기${totalCount > 0 ? ` (${totalCount}건)` : ''}`}
+        >
           <Bell className="w-4 h-4 text-slate-500" />
           {totalCount > 0 && (
             <span
@@ -222,7 +245,7 @@ export function NotificationPanel() {
           )}
         </Button>
       </SheetTrigger>
-      <SheetContent className="glass-heavy w-[420px] p-0 flex flex-col">
+      <SheetContent className="glass-heavy w-[calc(100vw-1rem)] p-0 flex flex-col sm:w-[420px]">
         {/* Header */}
         <div className="px-5 py-4 border-b border-glass-border">
           <div className="flex items-center justify-between mb-1">
@@ -236,7 +259,9 @@ export function NotificationPanel() {
               <Badge variant="secondary" className="text-[10px]">{totalCount}건</Badge>
             </div>
           </div>
-          <p className="text-[12px] text-muted-foreground">승인 대기, 증빙 미제출, 위험 알림을 한곳에서 확인하세요.</p>
+          <SheetDescription className="text-[12px] text-muted-foreground">
+            현재 표시 가능한 업무 알림을 한곳에서 확인하세요.
+          </SheetDescription>
         </div>
 
         {/* Tabs */}
@@ -245,20 +270,22 @@ export function NotificationPanel() {
             <TabsList className="w-full h-8">
               <TabsTrigger value="all" className="text-[11px] flex-1">전체 ({totalCount})</TabsTrigger>
               <TabsTrigger value="critical" className="text-[11px] flex-1">긴급 ({criticalCount})</TabsTrigger>
-              <TabsTrigger value="approval" className="text-[11px] flex-1">
-                승인 ({notifications.filter(n => n.type === 'approval').length})
-              </TabsTrigger>
+              {showApprovalTab && (
+                <TabsTrigger value="approval" className="text-[11px] flex-1">
+                  승인 ({approvalCount})
+                </TabsTrigger>
+              )}
             </TabsList>
           </div>
 
           <TabsContent value="all" className="flex-1 overflow-y-auto mt-0 px-3 py-2 space-y-1.5">
-            {notifications.length === 0 && (
+            {visibleNotifications.length === 0 && (
               <div className="text-center py-12 text-[13px] text-muted-foreground">
                 <CheckCircle2 className="w-10 h-10 mx-auto mb-3 text-emerald-300" />
                 처리할 알림이 없습니다
               </div>
             )}
-            {notifications.map(n => {
+            {visibleNotifications.map(n => {
               const Icon = typeIcons[n.type];
               const sev = severityStyles[n.severity];
               return (
@@ -287,7 +314,7 @@ export function NotificationPanel() {
           </TabsContent>
 
           <TabsContent value="critical" className="flex-1 overflow-y-auto mt-0 px-3 py-2 space-y-1.5">
-            {notifications.filter(n => n.severity === 'critical').map(n => {
+            {visibleNotifications.filter(n => n.severity === 'critical').map(n => {
               const Icon = typeIcons[n.type];
               const sev = severityStyles[n.severity];
               return (
@@ -310,7 +337,7 @@ export function NotificationPanel() {
           </TabsContent>
 
           <TabsContent value="approval" className="flex-1 overflow-y-auto mt-0 px-3 py-2 space-y-1.5">
-            {notifications.filter(n => n.type === 'approval').map(n => {
+            {visibleNotifications.filter(n => n.type === 'approval').map(n => {
               const sev = severityStyles[n.severity];
               return (
                 <div

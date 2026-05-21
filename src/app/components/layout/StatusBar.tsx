@@ -6,6 +6,7 @@ import {
 import { useAppStore } from '../../data/store';
 import { computeMemberSummaries } from '../../data/participation-data';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
+import { shouldShowShellRoute, useShellLabEnabled } from '../../platform/shell-lab-visibility';
 
 function StatusItem({ icon: Icon, label, value, color, tooltip }: {
   icon: any; label: string; value: string | number; color?: string; tooltip?: string;
@@ -31,6 +32,7 @@ function StatusItem({ icon: Icon, label, value, color, tooltip }: {
 
 export function StatusBar() {
   const { projects, transactions, participationEntries, dataSource } = useAppStore();
+  const [labEnabled] = useShellLabEnabled();
 
   const stats = useMemo(() => {
     const activeProjects = projects.filter(p => p.phase === 'CONFIRMED' && p.status === 'IN_PROGRESS').length;
@@ -45,6 +47,10 @@ export function StatusBar() {
 
   const now = new Date();
   const timeStr = `${now.getFullYear()}.${String(now.getMonth() + 1).padStart(2, '0')}.${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  const showPendingApproval = shouldShowShellRoute('/approvals', 'admin', 'quick-action', { labEnabled });
+  const showMissingEvidence = shouldShowShellRoute('/evidence', 'admin', 'quick-action', { labEnabled });
+  const showParticipationRisk = shouldShowShellRoute('/participation', 'admin', 'quick-action', { labEnabled });
+  const showApprovalSummary = shouldShowShellRoute('/approvals', 'admin', 'quick-action', { labEnabled });
 
   return (
     <div
@@ -74,7 +80,7 @@ export function StatusBar() {
           tooltip={`진행중 ${stats.activeProjects} / 전체 ${stats.totalProjects}`}
         />
 
-        {stats.pendingApproval > 0 && (
+        {showPendingApproval && stats.pendingApproval > 0 && (
           <StatusItem
             icon={Clock}
             label="승인대기"
@@ -84,7 +90,7 @@ export function StatusBar() {
           />
         )}
 
-        {stats.missingEvidence > 0 && (
+        {showMissingEvidence && stats.missingEvidence > 0 && (
           <StatusItem
             icon={AlertTriangle}
             label="증빙누락"
@@ -94,7 +100,7 @@ export function StatusBar() {
           />
         )}
 
-        {stats.dangerCount > 0 && (
+        {showParticipationRisk && stats.dangerCount > 0 && (
           <StatusItem
             icon={Shield}
             label="참여율위험"
@@ -107,13 +113,15 @@ export function StatusBar() {
 
       {/* Right section */}
       <div className="flex items-center gap-0.5 divide-x divide-border/40">
-        <StatusItem
-          icon={CheckCircle2}
-          label="승인완료"
-          value={stats.approvedToday}
-          color="text-emerald-600"
-          tooltip={`${stats.approvedToday}건 승인됨`}
-        />
+        {showApprovalSummary && (
+          <StatusItem
+            icon={CheckCircle2}
+            label="승인완료"
+            value={stats.approvedToday}
+            color="text-emerald-600"
+            tooltip={`${stats.approvedToday}건 승인됨`}
+          />
+        )}
         <div className="flex items-center gap-1 px-2 text-[10px] text-slate-400">
           <Clock className="w-3 h-3" />
           <span style={{ fontVariantNumeric: 'tabular-nums' }}>{timeStr}</span>

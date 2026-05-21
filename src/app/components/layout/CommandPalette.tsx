@@ -9,6 +9,7 @@ import { Dialog, DialogContent } from '../ui/dialog';
 import { useAppStore } from '../../data/store';
 import { useAuth } from '../../data/auth-store';
 import { canShowAdminNavItem } from '../../platform/admin-nav';
+import { shouldShowShellRoute, useShellLabEnabled } from '../../platform/shell-lab-visibility';
 import { toast } from 'sonner';
 import { resolveGoShortcutTarget } from '../../platform/go-shortcuts';
 
@@ -29,6 +30,7 @@ export function CommandPalette() {
   const navigate = useNavigate();
   const { projects, transactions } = useAppStore();
   const { user } = useAuth();
+  const [labEnabled] = useShellLabEnabled();
   const goPrefixTimeoutRef = useRef<number | null>(null);
   const goPrefixArmedRef = useRef(false);
 
@@ -55,7 +57,7 @@ export function CommandPalette() {
     setQuery('');
   }, [navigate]);
 
-  // ⌘K / Ctrl+K + sequence shortcuts (G then D/P/C/E/A/S)
+  // ⌘K / Ctrl+K + sequence shortcuts (G then D/P/M/C/E/S)
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       const target = e.target as HTMLElement | null;
@@ -92,6 +94,10 @@ export function CommandPalette() {
           toast.warning('해당 메뉴에 접근 권한이 없습니다.');
           return;
         }
+        if (!shouldShowShellRoute(targetPath, 'admin', 'shortcut', { labEnabled })) {
+          toast.warning('LAB 메뉴는 LAB 토글을 켠 뒤 사용할 수 있습니다.');
+          return;
+        }
         e.preventDefault();
         go(targetPath);
         return;
@@ -108,13 +114,13 @@ export function CommandPalette() {
       document.removeEventListener('keydown', handleKeyDown);
       clearGoPrefix();
     };
-  }, [armGoPrefix, clearGoPrefix, go, user?.role]);
+  }, [armGoPrefix, clearGoPrefix, go, labEnabled, user?.role]);
 
   const items: CommandItem[] = useMemo(() => {
     const nav: CommandItem[] = [
       { id: 'nav-dash', icon: LayoutDashboard, label: '대시보드', path: '/', category: '탐색', action: () => go('/'), keywords: ['dashboard', '홈'] },
       { id: 'nav-proj', icon: FolderKanban, label: '프로젝트 목록', path: '/projects', category: '탐색', action: () => go('/projects'), keywords: ['project', '사업'] },
-      { id: 'nav-migration', icon: ArrowLeftRight, label: '사업이관', path: '/projects/migration-audit', category: '탐색', action: () => go('/projects/migration-audit'), keywords: ['migration', '이관', '점검', 'audit'] },
+      { id: 'nav-migration', icon: ArrowLeftRight, label: '프로젝트 등록/승인', path: '/projects/migration-audit', category: '탐색', action: () => go('/projects/migration-audit'), keywords: ['migration', '이관', '등록', '승인', '점검', 'audit'] },
       { id: 'nav-cash', icon: BarChart3, label: '캐시플로 모니터링', path: '/cashflow', category: '탐색', action: () => go('/cashflow'), keywords: ['cashflow', '현금흐름', '모니터링', '편차', '주간'] },
       { id: 'tool-cash-export', icon: BarChart3, label: '캐시플로 추출', path: '/cashflow', category: '도구', action: () => go('/cashflow/export'), keywords: ['cashflow', '현금흐름', '엑셀', '다운로드', 'export'] },
       { id: 'nav-evi', icon: FileCheck, label: '증빙/정산 관리', path: '/evidence', category: '탐색', action: () => go('/evidence'), keywords: ['evidence', '증빙'] },
@@ -123,7 +129,10 @@ export function CommandPalette() {
       { id: 'nav-koica', icon: ClipboardList, label: 'KOICA 인력배치', path: '/koica-personnel', category: '탐색', action: () => go('/koica-personnel'), keywords: ['koica', '인력'] },
       { id: 'nav-set', icon: Settings, label: '설정', path: '/settings', category: '탐색', action: () => go('/settings'), keywords: ['settings', '설정'] },
     ]
-      .filter((item) => canShowAdminNavItem(user?.role, (item as any).path))
+      .filter((item) => (
+        canShowAdminNavItem(user?.role, (item as any).path)
+        && shouldShowShellRoute((item as any).path, 'admin', 'command', { labEnabled })
+      ))
       .map(({ path: _path, ...rest }) => rest);
 
     const projItems: CommandItem[] = projects.slice(0, 20).map(p => ({
@@ -149,15 +158,20 @@ export function CommandPalette() {
           go(`/projects/${proj.id}`);
           return;
         }
-        const fallback = canShowAdminNavItem(user?.role, '/approvals') ? '/approvals' : '/projects';
-        toast.warning('원본 프로젝트를 찾을 수 없어 승인 대기열로 이동합니다.');
+        const canOpenApprovals =
+          canShowAdminNavItem(user?.role, '/approvals')
+          && shouldShowShellRoute('/approvals', 'admin', 'command', { labEnabled });
+        const fallback = canOpenApprovals ? '/approvals' : '/projects';
+        toast.warning(canOpenApprovals
+          ? '원본 프로젝트를 찾을 수 없어 승인 대기열로 이동합니다.'
+          : '원본 프로젝트를 찾을 수 없어 프로젝트 목록으로 이동합니다.');
         go(fallback);
       },
       keywords: [t.counterparty, t.id],
     }));
 
     return [...nav, ...txItems, ...projItems];
-  }, [projects, transactions, go, user?.role]);
+  }, [projects, transactions, go, labEnabled, user?.role]);
 
   const filtered = useMemo(() => {
     if (!query.trim()) return items;

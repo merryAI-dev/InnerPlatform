@@ -15,3 +15,14 @@ describe('AppLayout participation alert contract', () => {
     expect(alertBlock).not.toContain('buildAllProjectTeamParticipationEntries');
   });
 });
+
+describe('AppLayout LAB shell contract', () => {
+  it('filters admin navigation through LAB visibility and exposes a LAB toggle', () => {
+    expect(source).toContain('shouldShowShellRoute');
+    expect(source).toContain('readShellLabEnabled');
+    expect(source).toContain('writeShellLabEnabled');
+    expect(source).toContain('LAB');
+    expect(source).toContain('LAB 메뉴 보이기');
+    expect(source).toContain("'admin', 'nav'");
+  });
+});

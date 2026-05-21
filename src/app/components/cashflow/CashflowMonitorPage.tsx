@@ -16,6 +16,7 @@ import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { useAppStore } from '../../data/store';
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
+import { shouldShowShellRoute, useShellLabEnabled } from '../../platform/shell-lab-visibility';
 
 type MonitorLinkCardProps = {
   title: string;
@@ -91,6 +92,7 @@ export function CashflowMonitorPage() {
   const navigate = useNavigate();
   const { projects } = useAppStore();
   const { weeks, yearMonth, isLoading } = useCashflowWeeks();
+  const [labEnabled] = useShellLabEnabled();
 
   const currentMonthWeeks = useMemo(
     () => weeks.filter((week) => week.yearMonth === yearMonth),
@@ -111,6 +113,35 @@ export function CashflowMonitorPage() {
   const closedCount = useMemo(
     () => currentMonthWeeks.filter((week) => week.adminClosed).length,
     [currentMonthWeeks],
+  );
+  const monitoringLinks = useMemo<MonitorLinkCardProps[]>(
+    () => [
+      {
+        title: '주간 모니터링',
+        description: '프로젝트별 주차 상태, 편차, 결산 흐름을 확인합니다.',
+        href: '/cashflow/weekly',
+        badge: '운영',
+        icon: Activity,
+        toneClass: 'border-teal-200 bg-teal-50/80',
+      },
+      {
+        title: '분석 대시보드',
+        description: '입출금 추이와 항목별 분포를 빠르게 훑어봅니다.',
+        href: '/cashflow/analytics',
+        badge: '추세',
+        icon: BarChart3,
+        toneClass: 'border-indigo-200 bg-indigo-50/80',
+      },
+      {
+        title: '은행 대조',
+        description: '은행 CSV와 시스템 거래를 맞춰 미매칭을 찾아냅니다.',
+        href: '/bank-reconciliation',
+        badge: '대조',
+        icon: ArrowLeftRight,
+        toneClass: 'border-amber-200 bg-amber-50/80',
+      },
+    ].filter((card) => shouldShowShellRoute(card.href, 'admin', 'card', { labEnabled })),
+    [labEnabled],
   );
 
   return (
@@ -164,31 +195,10 @@ export function CashflowMonitorPage() {
             현재 {yearMonth}
           </Badge>
         </div>
-        <div className="grid gap-3 lg:grid-cols-3">
-          <MonitorLinkCard
-            title="주간 모니터링"
-            description="프로젝트별 주차 상태, 편차, 결산 흐름을 확인합니다."
-            href="/cashflow/weekly"
-            badge="운영"
-            icon={Activity}
-            toneClass="border-teal-200 bg-teal-50/80"
-          />
-          <MonitorLinkCard
-            title="분석 대시보드"
-            description="입출금 추이와 항목별 분포를 빠르게 훑어봅니다."
-            href="/cashflow/analytics"
-            badge="추세"
-            icon={BarChart3}
-            toneClass="border-indigo-200 bg-indigo-50/80"
-          />
-          <MonitorLinkCard
-            title="은행 대조"
-            description="은행 CSV와 시스템 거래를 맞춰 미매칭을 찾아냅니다."
-            href="/bank-reconciliation"
-            badge="대조"
-            icon={ArrowLeftRight}
-            toneClass="border-amber-200 bg-amber-50/80"
-          />
+        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+          {monitoringLinks.map((card) => (
+            <MonitorLinkCard key={card.href} {...card} />
+          ))}
         </div>
       </section>
 

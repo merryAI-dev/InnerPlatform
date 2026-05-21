@@ -441,16 +441,16 @@ export function DataMigrationTab() {
 
             <div className="flex items-center justify-between rounded-md border border-slate-200 bg-slate-50/70 p-3">
               <div className="space-y-1">
-                <p className="text-sm font-semibold text-slate-900">사업이관 바로가기</p>
+                <p className="text-sm font-semibold text-slate-900">프로젝트 등록/승인 바로가기</p>
                 <p className="text-xs text-slate-600">
-                  프로젝트 이관 콘솔은 사업이관 메뉴와 설정 탭 양쪽에서 바로 열 수 있습니다.
+                  프로젝트 등록/승인 콘솔은 메인 메뉴와 설정 탭 양쪽에서 바로 열 수 있습니다.
                 </p>
               </div>
               <Link
                 to="/projects/migration-audit"
                 className="inline-flex h-8 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-900 transition-colors hover:bg-slate-100"
               >
-                이관 점검 열기
+                등록/승인 열기
               </Link>
             </div>
 

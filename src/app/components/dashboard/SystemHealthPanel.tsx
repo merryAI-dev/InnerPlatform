@@ -9,6 +9,7 @@ import { Progress } from '../ui/progress';
 import { useAppStore } from '../../data/store';
 import { computeMemberSummaries } from '../../data/participation-data';
 import { compareSafeLocaleDesc, toSafeString } from './dashboard-rollups';
+import { shouldShowShellRoute, useShellLabEnabled } from '../../platform/shell-lab-visibility';
 
 interface HealthMetric {
   id: string;
@@ -24,6 +25,7 @@ interface HealthMetric {
 export function SystemHealthPanel() {
   const { projects, transactions, ledgers, participationEntries, dataSource } = useAppStore();
   const navigate = useNavigate();
+  const [labEnabled] = useShellLabEnabled();
 
   const metrics = useMemo<HealthMetric[]>(() => {
     const confirmed = projects.filter(p => p.phase === 'CONFIRMED');
@@ -101,13 +103,18 @@ export function SystemHealthPanel() {
     ];
   }, [projects, transactions, ledgers, participationEntries, dataSource]);
 
+  const visibleMetrics = useMemo(
+    () => metrics.filter((metric) => shouldShowShellRoute(metric.to, 'admin', 'welcome', { labEnabled })),
+    [labEnabled, metrics],
+  );
+
   const overallHealth = useMemo(() => {
-    const criticals = metrics.filter(m => m.status === 'critical').length;
-    const warnings = metrics.filter(m => m.status === 'warning').length;
+    const criticals = visibleMetrics.filter(m => m.status === 'critical').length;
+    const warnings = visibleMetrics.filter(m => m.status === 'warning').length;
     if (criticals > 0) return { label: '조치 필요', color: 'text-rose-600', bg: 'bg-rose-50', border: 'border-rose-200', icon: XCircle };
     if (warnings > 0) return { label: '주의 필요', color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-200', icon: AlertTriangle };
     return { label: '정상 운영', color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-200', icon: CheckCircle2 };
-  }, [metrics]);
+  }, [visibleMetrics]);
 
   const statusDot = {
     healthy: 'bg-emerald-500',
@@ -138,7 +145,7 @@ export function SystemHealthPanel() {
         </div>
       </CardHeader>
       <CardContent className="space-y-2">
-        {metrics.map(m => (
+        {visibleMetrics.map(m => (
           <button
             key={m.id}
             type="button"
@@ -180,8 +187,17 @@ interface ActivityItem {
   type: 'approval' | 'rejection' | 'creation' | 'evidence' | 'system';
 }
 
+const ACTIVITY_ROUTE_BY_TYPE: Record<ActivityItem['type'], string> = {
+  approval: '/approvals',
+  rejection: '/audit',
+  creation: '/approvals',
+  evidence: '/evidence',
+  system: '/settings',
+};
+
 export function ActivityFeed() {
   const { transactions, projects, auditLogs } = useAppStore();
+  const [labEnabled] = useShellLabEnabled();
   const fmtAmount = (value?: number | null) =>
     Number.isFinite(value) ? Number(value).toLocaleString('ko-KR') : '-';
 
@@ -231,6 +247,16 @@ export function ActivityFeed() {
     return items.sort((a, b) => compareSafeLocaleDesc(a.timestamp, b.timestamp)).slice(0, 12);
   }, [transactions, projects]);
 
+  const visibleActivities = useMemo(
+    () => activities.filter((activity) => shouldShowShellRoute(
+      ACTIVITY_ROUTE_BY_TYPE[activity.type],
+      'admin',
+      'welcome',
+      { labEnabled },
+    )),
+    [activities, labEnabled],
+  );
+
   return (
     <Card className="shadow-sm border-border/50">
       <CardHeader className="pb-3">
@@ -247,7 +273,12 @@ export function ActivityFeed() {
           <div className="absolute left-[11px] top-2 bottom-2 w-px bg-border/60" />
 
           <div className="space-y-3">
-            {activities.map((a, i) => (
+            {visibleActivities.length === 0 && (
+              <p className="py-2 text-[11px] text-muted-foreground">
+                최근 표시할 운영 활동이 없습니다.
+              </p>
+            )}
+            {visibleActivities.map((a) => (
               <div key={a.id} className="flex items-start gap-3 relative">
                 <div className="w-[23px] h-[23px] rounded-full bg-white border-2 border-border/60 flex items-center justify-center shrink-0 z-10">
                   <a.icon className={`w-3 h-3 ${a.iconColor}`} />

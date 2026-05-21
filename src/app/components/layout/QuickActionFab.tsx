@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../data/auth-store';
 import { canShowAdminNavItem } from '../../platform/admin-nav';
+import { shouldShowShellRoute, useShellLabEnabled } from '../../platform/shell-lab-visibility';
 
 const ACTIONS = [
   { icon: BarChart3, label: '캐시플로 모니터링', path: '/cashflow', color: '#0d9488' },
@@ -19,9 +20,12 @@ export function QuickActionFab() {
   const location = useLocation();
   const fabRef = useRef<HTMLDivElement>(null);
   const { user } = useAuth();
+  const [labEnabled] = useShellLabEnabled();
 
-  const visibleActions = ACTIONS.filter((action) => canShowAdminNavItem(user?.role, action.path));
-  if (visibleActions.length === 0) return null;
+  const visibleActions = ACTIONS.filter((action) => (
+    canShowAdminNavItem(user?.role, action.path)
+    && shouldShowShellRoute(action.path, 'admin', 'quick-action', { labEnabled })
+  ));
 
   // Close on route change
   useEffect(() => {
@@ -39,6 +43,8 @@ export function QuickActionFab() {
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
   }, [open]);
+
+  if (visibleActions.length === 0) return null;
 
   return (
     <div ref={fabRef} className="fixed bottom-14 right-5 z-50 lg:hidden">

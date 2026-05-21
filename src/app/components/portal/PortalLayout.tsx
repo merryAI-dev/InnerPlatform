@@ -70,6 +70,7 @@ import { addMonthsToYearMonth, getSeoulTodayIso } from '../../platform/business-
 import { normalizeProjectFundInputMode } from '../../data/types';
 import { rememberRecentPortalProject } from '../../platform/portal-recent-projects';
 import { buildPortalShellCommandItems, buildPortalShellNotificationItems } from '../../platform/portal-shell-actions';
+import { shouldShowShellRoute, useShellLabEnabled } from '../../platform/shell-lab-visibility';
 import {
   resolvePortalProjectCandidates,
   resolvePortalProjectSelectPath,
@@ -176,6 +177,7 @@ function PortalContent() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
+  const [labEnabled, setLabEnabled] = useShellLabEnabled();
   const navigationHandlerRef = useRef<((attempt: PortalNavigationAttempt) => boolean) | null>(null);
   const currentPath = `${location.pathname}${location.search}${location.hash}`;
   const registerNavigationHandler = useCallback((handler: ((attempt: PortalNavigationAttempt) => boolean) | null) => {
@@ -259,11 +261,13 @@ function PortalContent() {
       ...section,
       items: section.items.filter((item) => {
         if ('hidden' in item && item.hidden) return false;
-        if (item.to === '/portal/bank-statements' && currentFundInputMode === 'DIRECT_ENTRY') return false;
-        return true;
+        return shouldShowShellRoute(item.to, 'portal', 'nav', {
+          fundInputMode: currentFundInputMode,
+          labEnabled,
+        });
       }),
     }))
-  ), [currentFundInputMode]);
+  ), [currentFundInputMode, labEnabled]);
   const topNavItems = useMemo(() => navSections.flatMap((section) => section.items), [navSections]);
   const currentSectionLabel = useMemo(() => {
     const current = topNavItems.find((item) => isActive(item.to, item.exact));
@@ -274,7 +278,12 @@ function PortalContent() {
     currentPath,
     currentProject: currentProject ? { id: currentProject.id, name: currentProject.name } : null,
     availableProjects: projectOptions,
-  }), [authUser?.role, currentPath, currentProject, projectOptions]);
+    fundInputMode: currentFundInputMode,
+    labEnabled,
+  }), [authUser?.role, currentFundInputMode, currentPath, currentProject, labEnabled, projectOptions]);
+  const workCommandItems = useMemo(() => shellCommandItems.filter((item) => item.category === '업무'), [shellCommandItems]);
+  const projectCommandItems = useMemo(() => shellCommandItems.filter((item) => item.category === '프로젝트'), [shellCommandItems]);
+  const adminCommandItems = useMemo(() => shellCommandItems.filter((item) => item.category === '관리'), [shellCommandItems]);
   const switchProjectInPlace = useCallback((projectId: string, targetPath = currentPath) => {
     void setSessionActiveProject(projectId).then((ok: boolean) => {
       if (!ok) return;
@@ -694,6 +703,20 @@ function PortalContent() {
           {/* Footer */}
           <div className="border-t border-white/10 p-2 space-y-1.5">
             <DarkModeToggle collapsed={collapsed} />
+            <button
+              type="button"
+              onClick={() => setLabEnabled(!labEnabled)}
+              aria-label={labEnabled ? 'LAB 메뉴 숨기기' : 'LAB 메뉴 보이기'}
+              title={labEnabled ? 'LAB 메뉴 숨기기' : 'LAB 메뉴 보이기'}
+              className={`w-full flex items-center justify-center h-7 rounded-md text-[10px] transition-colors ${
+                labEnabled
+                  ? 'bg-teal-500/20 text-teal-200'
+                  : 'text-slate-500 hover:text-slate-300 hover:bg-white/10'
+              }`}
+              aria-pressed={labEnabled}
+            >
+              LAB
+            </button>
             {!collapsed ? (
               <div className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-white/8 border border-white/10">
                 <div
@@ -710,6 +733,7 @@ function PortalContent() {
                   <TooltipTrigger asChild>
                     <button
                       onClick={() => { portalLogout(); authLogout(); navigate('/login'); }}
+                      aria-label="로그아웃"
                       className="p-1 rounded hover:bg-white/15 text-slate-500 hover:text-slate-300 transition-colors"
                     >
                       <LogOut className="w-3.5 h-3.5" />
@@ -724,6 +748,7 @@ function PortalContent() {
                   <TooltipTrigger asChild>
                     <button
                       onClick={() => { portalLogout(); authLogout(); navigate('/login'); }}
+                      aria-label="로그아웃"
                       className="flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-white/8 text-slate-400 hover:bg-white/15 hover:text-slate-200 transition-colors"
                     >
                       <LogOut className="w-3.5 h-3.5" />
@@ -735,6 +760,7 @@ function PortalContent() {
             )}
             <button
               onClick={toggleSidebar}
+              aria-label={collapsed ? '사이드바 펼치기' : '사이드바 접기'}
               className="w-full flex items-center justify-center h-7 rounded-md text-slate-500 hover:text-slate-300 hover:bg-white/10 transition-colors"
             >
               {collapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronLeft className="w-3.5 h-3.5" />}
@@ -749,6 +775,7 @@ function PortalContent() {
               <button
                 className="rounded-md p-1.5 text-slate-200 transition-colors hover:bg-white/10 lg:hidden"
                 onClick={() => setMobileOpen(true)}
+                aria-label="포털 메뉴 열기"
               >
                 <Menu className="h-4 w-4" />
               </button>
@@ -762,10 +789,11 @@ function PortalContent() {
                   type="button"
                   data-testid="portal-project-switch-trigger"
                   onClick={() => setCommandOpen(true)}
+                  aria-label="검색 또는 열기"
                   className="flex h-10 w-full max-w-xl items-center gap-2 rounded-xl border border-white/15 bg-white/8 px-3 text-left text-slate-200 transition-colors hover:bg-white/12"
                 >
                   <Search className="h-4 w-4 text-slate-300" />
-                  <span className="truncate text-[12px] text-slate-300">담당 프로젝트 검색 또는 전환</span>
+                  <span className="truncate text-[12px] text-slate-300">검색 또는 열기</span>
                   <span className="ml-auto rounded-md border border-white/15 bg-white/8 px-2 py-1 text-[10px] font-semibold text-slate-300">
                     ⌘K
                   </span>
@@ -948,14 +976,39 @@ function PortalContent() {
         <CommandDialog
           open={commandOpen}
           onOpenChange={setCommandOpen}
-          title="프로젝트 전환"
-          description="지금 보고 있는 화면을 유지한 채 다른 프로젝트로 전환합니다."
+          title="열기"
+          description="업무 화면을 열거나 담당 프로젝트를 전환합니다."
         >
-          <CommandInput placeholder="담당 프로젝트 검색 또는 전환..." />
+          <CommandInput placeholder="업무, 프로젝트, 화면 검색..." />
           <CommandList>
             <CommandEmpty>일치하는 프로젝트가 없습니다.</CommandEmpty>
-            <CommandGroup heading="프로젝트 전환">
-              {shellCommandItems.map((item) => (
+            {workCommandItems.length > 0 && (
+              <CommandGroup heading="업무 바로가기">
+                {workCommandItems.map((item) => (
+                  <CommandItem
+                    key={item.id}
+                    value={`${item.label} ${item.description} ${item.keywords.join(' ')}`}
+                    onSelect={() => {
+                      setCommandOpen(false);
+                      if (item.kind === 'portal') {
+                        requestPortalNavigation(item.to, item.label);
+                      }
+                    }}
+                    className="flex items-center gap-3"
+                  >
+                    <div className="flex min-w-0 flex-1 flex-col">
+                      <span className="text-[12px] font-medium text-slate-900">{item.label}</span>
+                      <span className="text-[11px] text-slate-500">{item.description}</span>
+                    </div>
+                    <CommandShortcut>{item.category}</CommandShortcut>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            )}
+            {workCommandItems.length > 0 && projectCommandItems.length > 0 && <CommandSeparator />}
+            {projectCommandItems.length > 0 && (
+              <CommandGroup heading="프로젝트 전환">
+                {projectCommandItems.map((item) => (
                 <CommandItem
                   key={item.id}
                   value={`${item.label} ${item.description} ${item.keywords.join(' ')}`}
@@ -978,9 +1031,31 @@ function PortalContent() {
                   </div>
                   <CommandShortcut>{item.category}</CommandShortcut>
                 </CommandItem>
-              ))}
-            </CommandGroup>
-            <CommandSeparator />
+                ))}
+              </CommandGroup>
+            )}
+            {projectCommandItems.length > 0 && adminCommandItems.length > 0 && <CommandSeparator />}
+            {adminCommandItems.length > 0 && (
+              <CommandGroup heading="관리">
+                {adminCommandItems.map((item) => (
+                  <CommandItem
+                    key={item.id}
+                    value={`${item.label} ${item.description} ${item.keywords.join(' ')}`}
+                    onSelect={() => {
+                      setCommandOpen(false);
+                      if (item.kind === 'admin') requestAdminNavigation();
+                    }}
+                    className="flex items-center gap-3"
+                  >
+                    <div className="flex min-w-0 flex-1 flex-col">
+                      <span className="text-[12px] font-medium text-slate-900">{item.label}</span>
+                      <span className="text-[11px] text-slate-500">{item.description}</span>
+                    </div>
+                    <CommandShortcut>{item.category}</CommandShortcut>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            )}
           </CommandList>
         </CommandDialog>
       </div>

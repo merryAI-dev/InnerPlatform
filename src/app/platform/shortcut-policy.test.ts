@@ -8,9 +8,18 @@ function flattenDescriptions(groups: { shortcuts: { desc: string }[] }[]) {
 describe('shortcut policy', () => {
   it('shows admin-only shortcuts for admin roles', () => {
     const descs = flattenDescriptions(getShortcutGroupsForRole('admin'));
-    expect(descs).toContain('설정으로 이동');
-    expect(descs).toContain('사업이관으로 이동');
+    expect(descs).toContain('프로젝트 등록/승인으로 이동');
+    expect(descs).not.toContain('설정으로 이동');
+    expect(descs).not.toContain('증빙/정산으로 이동');
+    expect(descs).not.toContain('사업이관으로 이동');
     expect(descs).not.toContain('새 사업 등록');
+  });
+
+  it('reveals LAB shortcuts when LAB is enabled', () => {
+    const descs = flattenDescriptions(getShortcutGroupsForRole('admin', { labEnabled: true }));
+    expect(descs).toContain('프로젝트 등록/승인으로 이동');
+    expect(descs).toContain('증빙/정산으로 이동');
+    expect(descs).toContain('설정으로 이동');
   });
 
   it('filters out settings/new-project for finance', () => {

@@ -25,6 +25,7 @@ import { isPayrollLiquidityRiskStatus, resolvePayrollLiquidityQueue } from '../.
 import { resolveAdminMonitoringIssues } from '../../platform/admin-monitoring';
 import { resolvePayrollReviewQueue } from '../../platform/payroll-review';
 import { resolvePayrollCashflowAlignment } from '../../platform/payroll-cashflow-alignment';
+import { shouldShowShellRoute, useShellLabEnabled } from '../../platform/shell-lab-visibility';
 
 function MonitoringToolCard(props: {
   icon: typeof BarChart3;
@@ -75,6 +76,7 @@ export function DashboardPage() {
   const { runs } = usePayroll();
   const { weeks: cashflowWeeks } = useCashflowWeeks();
   const navigate = useNavigate();
+  const [labEnabled] = useShellLabEnabled();
 
   const today = getSeoulTodayIso();
   const yearMonth = today.slice(0, 7);
@@ -312,6 +314,14 @@ export function DashboardPage() {
     },
   ] as const;
 
+  const visibleMonitoringIssues = useMemo(() => (
+    monitoringIssues.filter((issue) => shouldShowShellRoute(issue.to, 'admin', 'welcome', { labEnabled }))
+  ), [labEnabled, monitoringIssues]);
+
+  const visibleToolCards = useMemo(() => (
+    toolCards.filter((card) => shouldShowShellRoute(card.to, 'admin', 'welcome', { labEnabled }))
+  ), [labEnabled, toolCards]);
+
   return (
     <div className="space-y-5">
       <PageHeader
@@ -343,10 +353,10 @@ export function DashboardPage() {
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
         <div className="lg:col-span-7">
-          <AdminMonitoringQueue issues={monitoringIssues} />
+          <AdminMonitoringQueue issues={visibleMonitoringIssues} />
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:col-span-5">
-          {toolCards.map((card) => (
+          {visibleToolCards.map((card) => (
             <MonitoringToolCard
               key={card.key}
               icon={card.icon}

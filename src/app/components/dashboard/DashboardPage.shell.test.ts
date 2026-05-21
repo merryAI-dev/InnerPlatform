@@ -10,6 +10,10 @@ const dashboardPageSource = readFileSync(
 describe('DashboardPage shell contract', () => {
   it('keeps the admin landing page anomaly-first with monitoring queue and tool CTAs', () => {
     expect(dashboardPageSource).toContain('AdminMonitoringQueue');
+    expect(dashboardPageSource).toContain('useShellLabEnabled');
+    expect(dashboardPageSource).toContain('shouldShowShellRoute');
+    expect(dashboardPageSource).toContain('visibleMonitoringIssues');
+    expect(dashboardPageSource).toContain('visibleToolCards');
     expect(dashboardPageSource).toContain('SystemHealthPanel');
     expect(dashboardPageSource).toContain('ActivityFeed');
     expect(dashboardPageSource).toContain('캐시플로 관제');

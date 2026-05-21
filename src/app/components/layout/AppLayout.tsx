@@ -26,6 +26,7 @@ import { ErrorBoundary } from './ErrorBoundary';
 import { canChooseWorkspace, isPortalRole, resolveActiveWorkspacePreference, resolveHomePath } from '../../platform/navigation';
 import { canAccessAdminPath, canShowAdminNavItem } from '../../platform/admin-nav';
 import { NAV_GROUPS } from '../../platform/nav-config';
+import { readShellLabEnabled, shouldShowShellRoute, writeShellLabEnabled } from '../../platform/shell-lab-visibility';
 import { TenantSwitcher, TenantBadge } from '../settings/TenantSwitcher';
 
 function AppLayoutContent() {
@@ -34,6 +35,7 @@ function AppLayoutContent() {
   const { getAllPendingCount: getHrPendingCount } = useHrAnnouncements();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [labEnabled, setLabEnabled] = useState(() => readShellLabEnabled());
   const location = useLocation();
   const navigate = useNavigate();
   const currentPath = `${location.pathname}${location.search}${location.hash}`;
@@ -86,10 +88,19 @@ function AppLayoutContent() {
     return NAV_GROUPS
       .map((group) => ({
         ...group,
-        items: group.items.filter((item) => canShowAdminNavItem(displayUser?.role, item.to)),
+        items: group.items.filter((item) => (
+          canShowAdminNavItem(displayUser?.role, item.to)
+          && shouldShowShellRoute(item.to, 'admin', 'nav', { labEnabled })
+        )),
       }))
       .filter((group) => group.items.length > 0);
-  }, [displayUser?.role]);
+  }, [displayUser?.role, labEnabled]);
+
+  function toggleLab() {
+    const next = !labEnabled;
+    writeShellLabEnabled(next);
+    setLabEnabled(next);
+  }
 
   const pendingCount = transactions.filter(t => t.state === 'SUBMITTED').length;
   const missingEvidenceCount = transactions.filter(t => t.evidenceStatus !== 'COMPLETE' && t.state !== 'REJECTED').length;
@@ -273,6 +284,20 @@ function AppLayoutContent() {
               </div>
             )}
             <DarkModeToggle collapsed={collapsed} />
+            <button
+              type="button"
+              onClick={toggleLab}
+              aria-pressed={labEnabled}
+              aria-label={labEnabled ? 'LAB 메뉴 숨기기' : 'LAB 메뉴 보이기'}
+              title={labEnabled ? 'LAB 메뉴 숨기기' : 'LAB 메뉴 보이기'}
+              className={`w-full flex items-center justify-center h-7 rounded-md text-[10px] transition-colors ${
+                labEnabled
+                  ? 'bg-indigo-500/20 text-indigo-200'
+                  : 'text-slate-500 hover:text-slate-300 hover:bg-white/10'
+              }`}
+            >
+              {collapsed ? 'LAB' : `LAB ${labEnabled ? 'ON' : 'OFF'}`}
+            </button>
             {!collapsed && (
               <div className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-white/8 border border-white/10">
                 <div
@@ -316,6 +341,7 @@ function AppLayoutContent() {
               <button
                 className="lg:hidden flex items-center justify-center w-7 h-7 rounded-md text-muted-foreground hover:bg-muted transition-colors"
                 onClick={() => setMobileOpen(!mobileOpen)}
+                aria-label={mobileOpen ? '메뉴 닫기' : '메뉴 열기'}
               >
                 <Menu className="w-4 h-4" />
               </button>
@@ -350,6 +376,7 @@ function AppLayoutContent() {
                     variant="ghost"
                     size="sm"
                     className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+                    aria-label="검색 열기"
                     onClick={() => {
                       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }));
                     }}
@@ -367,6 +394,7 @@ function AppLayoutContent() {
                     variant="ghost"
                     size="sm"
                     className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+                    aria-label="단축키 열기"
                     onClick={() => {
                       document.dispatchEvent(new KeyboardEvent('keydown', { key: '/', metaKey: true }));
                     }}

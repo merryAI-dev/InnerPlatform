@@ -6,6 +6,7 @@ describe('go shortcuts', () => {
     expect(resolveGoShortcutTarget('d')).toBe('/');
     expect(resolveGoShortcutTarget('p')).toBe('/projects');
     expect(resolveGoShortcutTarget('c')).toBe('/cashflow');
+    expect(resolveGoShortcutTarget('m')).toBe('/projects/migration-audit');
     expect(resolveGoShortcutTarget('e')).toBe('/evidence');
     expect(resolveGoShortcutTarget('s')).toBe('/settings');
   });

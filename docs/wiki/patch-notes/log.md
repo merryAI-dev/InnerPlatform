@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-05-21] patch-note | admin-dashboard | LAB shell visibility and dashboard polish
+- pages: [admin-dashboard](./pages/admin-dashboard.md)
+- summary: Admin/Portal shell에 공통 LAB visibility policy를 추가하고, 대시보드 이상 징후, 시스템 상태, 최근 활동, 상태바, 알림 패널, 404 quick links, 캐시플로 허브 카드까지 같은 정책으로 필터링했다. 알림 패널 모바일 폭 잘림과 Sheet 접근성 경고도 함께 정리했다.
+
 ## [2026-05-20] patch-note | portal-register-project, portal-edit-project | searchable team member picker
 - pages: [portal-register-project](./pages/portal-register-project.md), [portal-edit-project](./pages/portal-edit-project.md)
 - summary: 공통 프로젝트 에디터의 팀원 선택을 긴 dropdown에서 이름/닉네임 검색형 picker로 교체해 신규 등록과 수정 루프에서 80명+ 팀원 목록을 같은 방식으로 빠르게 찾게 했다. 팀/인력 단계는 담당조직(CIC)과 중복되는 사내기업팀/참여기업 조건 입력을 제거하고, 기존 저장값이 canonical 옵션 밖에 있어도 표시와 닉네임을 유지하며, 이미 추가된 팀원은 중복 선택하지 못하도록 표시한다.

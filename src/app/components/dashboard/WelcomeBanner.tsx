@@ -7,6 +7,7 @@ import {
 import { useAppStore } from '../../data/store';
 import { useAuth } from '../../data/auth-store';
 import { canShowAdminNavItem } from '../../platform/admin-nav';
+import { shouldShowShellRoute, useShellLabEnabled } from '../../platform/shell-lab-visibility';
 
 const QUICK_ACTIONS = [
   {
@@ -43,6 +44,7 @@ export function WelcomeBanner() {
   const navigate = useNavigate();
   const { currentUser } = useAppStore();
   const { user } = useAuth();
+  const [labEnabled] = useShellLabEnabled();
   const [dismissed, setDismissed] = useState(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('mysc-welcome-dismissed') === 'true';
@@ -55,9 +57,10 @@ export function WelcomeBanner() {
     return QUICK_ACTIONS.filter((action) => {
       if ('action' in action) return true;
       if (!('path' in action) || !action.path) return true;
-      return canShowAdminNavItem(user?.role, action.path);
+      return canShowAdminNavItem(user?.role, action.path)
+        && shouldShowShellRoute(action.path, 'admin', 'welcome', { labEnabled });
     });
-  }, [user?.role]);
+  }, [labEnabled, user?.role]);
 
   const handleDismiss = () => {
     setExiting(true);

@@ -1,9 +1,24 @@
+import { useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import { Home, ArrowLeft, Search, Zap } from 'lucide-react';
 import { Button } from '../ui/button';
+import { shouldShowShellRoute, useShellLabEnabled } from '../../platform/shell-lab-visibility';
+
+const QUICK_LINKS = [
+  { label: '프로젝트', path: '/projects' },
+  { label: '캐시플로', path: '/cashflow' },
+  { label: '증빙/정산', path: '/evidence' },
+  { label: '참여율', path: '/participation' },
+  { label: '설정', path: '/settings' },
+];
 
 export function NotFoundPage() {
   const navigate = useNavigate();
+  const [labEnabled] = useShellLabEnabled();
+  const visibleQuickLinks = useMemo(
+    () => QUICK_LINKS.filter((link) => shouldShowShellRoute(link.path, 'admin', 'quick-action', { labEnabled })),
+    [labEnabled],
+  );
 
   return (
     <div className="flex flex-col items-center justify-center min-h-[60vh] px-6 text-center">
@@ -77,13 +92,7 @@ export function NotFoundPage() {
 
       {/* Quick links */}
       <div className="mt-10 flex flex-wrap justify-center gap-2">
-        {[
-          { label: '프로젝트', path: '/projects' },
-          { label: '캐시플로', path: '/cashflow' },
-          { label: '증빙/정산', path: '/evidence' },
-          { label: '참여율', path: '/participation' },
-          { label: '설정', path: '/settings' },
-        ].map(link => (
+        {visibleQuickLinks.map(link => (
           <button
             key={link.path}
             onClick={() => navigate(link.path)}

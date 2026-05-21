@@ -1,4 +1,5 @@
 import { canShowAdminNavItem } from './admin-nav';
+import { shouldShowShellRoute } from './shell-lab-visibility';
 
 export interface Shortcut {
   keys: string[];
@@ -19,17 +20,16 @@ function normalizeRole(value: unknown): string {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
 }
 
-function canShowShortcutForRole(role: unknown, to: string): boolean {
+function canShowShortcutForRole(role: unknown, to: string, labEnabled: boolean): boolean {
   const normalizedRole = normalizeRole(role);
   if (!normalizedRole) return false;
 
   // Shortcut discoverability stays curated even while admin routes are
   // temporarily open to every signed-in role.
-  if (to === '/settings') {
-    return normalizedRole === 'admin';
-  }
+  if (to === '/settings' && normalizedRole !== 'admin') return false;
 
-  return canShowAdminNavItem(role, to);
+  return canShowAdminNavItem(role, to)
+    && shouldShowShellRoute(to, 'admin', 'shortcut', { labEnabled });
 }
 
 const BASE_GROUPS: ShortcutGroup[] = [
@@ -46,7 +46,7 @@ const BASE_GROUPS: ShortcutGroup[] = [
     shortcuts: [
       { keys: ['G', 'D'], desc: '대시보드로 이동', to: '/' },
       { keys: ['G', 'P'], desc: '프로젝트 목록으로 이동', to: '/projects' },
-      { keys: ['G', 'M'], desc: '사업이관으로 이동', to: '/projects/migration-audit' },
+      { keys: ['G', 'M'], desc: '프로젝트 등록/승인으로 이동', to: '/projects/migration-audit' },
       { keys: ['G', 'C'], desc: '캐시플로 모니터링으로 이동', to: '/cashflow' },
       { keys: ['G', 'E'], desc: '증빙/정산으로 이동', to: '/evidence' },
       { keys: ['G', 'S'], desc: '설정으로 이동', to: '/settings' },
@@ -60,11 +60,15 @@ const BASE_GROUPS: ShortcutGroup[] = [
   },
 ];
 
-export function getShortcutGroupsForRole(role: unknown): ShortcutGroup[] {
+export function getShortcutGroupsForRole(
+  role: unknown,
+  options: { labEnabled?: boolean } = {},
+): ShortcutGroup[] {
+  const labEnabled = options.labEnabled === true;
   return BASE_GROUPS
     .map((group) => ({
       ...group,
-      shortcuts: group.shortcuts.filter((s) => (s.to ? canShowShortcutForRole(role, s.to) : true)),
+      shortcuts: group.shortcuts.filter((s) => (s.to ? canShowShortcutForRole(role, s.to, labEnabled) : true)),
     }))
     .filter((group) => group.shortcuts.length > 0);
 }

@@ -4,11 +4,13 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '../ui/sheet';
 import { Separator } from '../ui/separator';
 import { useAuth } from '../../data/auth-store';
 import { getShortcutGroupsForRole } from '../../platform/shortcut-policy';
+import { useShellLabEnabled } from '../../platform/shell-lab-visibility';
 
 export function KeyboardShortcuts() {
   const [open, setOpen] = useState(false);
   const { user } = useAuth();
-  const shortcutGroups = useMemo(() => getShortcutGroupsForRole(user?.role), [user?.role]);
+  const [labEnabled] = useShellLabEnabled();
+  const shortcutGroups = useMemo(() => getShortcutGroupsForRole(user?.role, { labEnabled }), [labEnabled, user?.role]);
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {

@@ -1,4 +1,5 @@
 import { resolvePortalProjectSwitchPath } from './portal-project-selection';
+import { shouldShowShellRoute } from './shell-lab-visibility';
 
 export interface PortalShellNavItem {
   to: string;
@@ -28,13 +29,43 @@ export interface PortalShellNotificationItem {
   to: string;
 }
 
+const PORTAL_DIRECT_COMMANDS = [
+  {
+    id: 'portal:cashflow',
+    label: '캐시플로우',
+    description: '프로젝트 캐시플로우 보기',
+    to: '/portal/cashflow',
+    keywords: ['cashflow', '캐시플로우', '현금흐름'],
+  },
+  {
+    id: 'portal:weekly-expenses',
+    label: '사업비 입력',
+    description: '주간 사업비 입력 열기',
+    to: '/portal/weekly-expenses',
+    keywords: ['사업비', '입력', '주간', '정산'],
+  },
+] as const;
+
 export function buildPortalShellCommandItems(input: {
   role: string | null | undefined;
   currentPath: string;
   currentProject?: PortalShellProjectItem | null;
   availableProjects: PortalShellProjectItem[];
+  fundInputMode?: string | null;
+  labEnabled?: boolean;
 }): PortalShellCommandItem[] {
   const switchPath = resolvePortalProjectSwitchPath(input.currentPath);
+  const portalItems = PORTAL_DIRECT_COMMANDS
+    .filter((item) => shouldShowShellRoute(item.to, 'portal', 'command', {
+      fundInputMode: input.fundInputMode,
+      labEnabled: input.labEnabled,
+    }))
+    .map((item) => ({
+      ...item,
+      category: '업무' as const,
+      kind: 'portal' as const,
+      projectId: undefined,
+    }));
   const projectItems = input.availableProjects.map((project) => ({
     id: `project:${project.id}`,
     label: project.name,
@@ -58,7 +89,7 @@ export function buildPortalShellCommandItems(input: {
     }]
     : [];
 
-  return [...projectItems, ...adminItems];
+  return [...portalItems, ...projectItems, ...adminItems];
 }
 
 export function buildPortalShellNotificationItems(input: {
