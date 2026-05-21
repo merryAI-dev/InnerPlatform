@@ -44,7 +44,6 @@ const BASE_GROUPS: ShortcutGroup[] = [
   {
     label: '네비게이션',
     shortcuts: [
-      { keys: ['G', 'D'], desc: '기능 검색으로 이동', to: '/' },
       { keys: ['G', 'P'], desc: '프로젝트 목록으로 이동', to: '/projects' },
       { keys: ['G', 'M'], desc: '프로젝트 등록/승인으로 이동', to: '/projects/migration-audit' },
       { keys: ['G', 'C'], desc: '캐시플로 모니터링으로 이동', to: '/cashflow' },

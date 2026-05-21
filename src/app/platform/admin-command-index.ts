@@ -10,7 +10,6 @@ export type AdminCommandIcon =
   | 'expense'
   | 'payroll'
   | 'project'
-  | 'search'
   | 'settings'
   | 'users';
 
@@ -50,19 +49,6 @@ export interface BuildAdminCommandItemsInput {
 }
 
 const ADMIN_COMMAND_DEFINITIONS: AdminCommandItem[] = [
-  {
-    id: 'admin:feature-search',
-    label: '기능 검색',
-    description: '관리자와 PM 업무 화면을 키워드로 찾습니다.',
-    category: '관리자',
-    scope: 'admin',
-    to: '/',
-    icon: 'search',
-    kind: 'page',
-    priority: 124,
-    featured: true,
-    keywords: ['홈', '메인', '검색', '기능 검색', '메뉴 검색', '화면 검색', '바로가기', 'endpoint', '엔드포인트', '업무 찾기', '어디서', '어디로'],
-  },
   {
     id: 'admin:dashboard',
     label: '대시보드',
@@ -506,7 +492,6 @@ export function buildAdminCommandItems(input: BuildAdminCommandItemsInput): Admi
       '계약명',
       '공식명',
       '그룹웨어명',
-      '등록명',
       '클라이언트',
       '고객',
       '계약서',
@@ -519,6 +504,18 @@ export function buildAdminCommandItems(input: BuildAdminCommandItemsInput): Admi
   }));
 
   return [...staticItems, ...pmItems, ...projectItems];
+}
+
+function isProjectRegistrationIntent(normalizedQuery: string): boolean {
+  if (!normalizedQuery) return false;
+  if (!normalizedQuery.includes('등록')) return false;
+  return [
+    '프로젝트',
+    '사업',
+    '신규',
+    '요청',
+    '승인',
+  ].some((keyword) => normalizedQuery.includes(keyword));
 }
 
 function scoreCommandItem(item: AdminCommandItem, query: string): number {
@@ -563,7 +560,11 @@ export function searchAdminCommandItems(
       .slice(0, limit);
   }
 
-  return items
+  const candidates = isProjectRegistrationIntent(normalizedQuery)
+    ? items.filter((item) => item.kind !== 'project')
+    : items;
+
+  return candidates
     .map((item) => ({ item, score: scoreCommandItem(item, query) }))
     .filter((entry) => entry.score > 0)
     .sort((a, b) => b.score - a.score || b.item.priority - a.item.priority || a.item.label.localeCompare(b.item.label))

@@ -4,7 +4,7 @@ import {
   FileCheck, Settings, Shield, ClipboardList, ClipboardCheck,
   Calculator, Wallet, ExternalLink, UserCog,
   ListChecks, MessagesSquare,
-  CircleDollarSign, ArrowLeftRight, Search,
+  CircleDollarSign, ArrowLeftRight,
 } from 'lucide-react';
 
 export interface NavItem {
@@ -23,7 +23,6 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: '메인',
     items: [
-      { to: '/', icon: Search, label: '기능 검색' },
       { to: '/dashboard', icon: LayoutDashboard, label: '대시보드' },
       { to: '/projects', icon: FolderKanban, label: '프로젝트' },
       { to: '/projects/migration-audit', icon: ArrowLeftRight, label: '프로젝트 등록/승인' },

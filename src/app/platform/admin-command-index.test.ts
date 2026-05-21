@@ -53,6 +53,25 @@ describe('admin command index', () => {
     });
   });
 
+  it('keeps project-registration searches focused on feature endpoints, not project records', () => {
+    const items = buildAdminCommandItems({
+      role: 'admin',
+      projects: [{
+        ...project,
+        id: 'eco-cmk',
+        name: '에코스타트업 CMK',
+        shortName: '에코스타트업',
+      }],
+    });
+    const results = searchAdminCommandItems(items, '프로젝트 등록', 8);
+    const labels = results.map((item) => item.label);
+
+    expect(labels).toContain('프로젝트 등록/승인');
+    expect(labels).toContain('PM 프로젝트 등록 요청');
+    expect(labels).not.toContain('에코스타트업 CMK');
+    expect(results.every((item) => item.kind === 'page')).toBe(true);
+  });
+
   it('only indexes currently exposed admin surfaces', () => {
     const items = buildAdminCommandItems({
       role: 'admin',
@@ -60,14 +79,14 @@ describe('admin command index', () => {
     });
     const labels = items.map((item) => item.label);
 
-    expect(labels.slice(0, 6)).toEqual([
-      '기능 검색',
+    expect(labels.slice(0, 5)).toEqual([
       '대시보드',
       '프로젝트',
       '프로젝트 등록/승인',
       '캐시플로 모니터링',
       '권한/사용자',
     ]);
+    expect(labels).not.toContain('기능 검색');
     expect(items.filter((item) => item.category === '관리자').length).toBeGreaterThan(0);
     expect(items.filter((item) => item.category === 'PM').length).toBeGreaterThan(0);
     expect(searchAdminCommandItems(items, '예산 편집')[0]).toMatchObject({

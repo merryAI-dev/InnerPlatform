@@ -14,7 +14,7 @@ const routesSource = readFileSync(
 
 describe('admin monitoring foundation shell contract', () => {
   it('renames the cashflow nav entry to monitoring language and exposes users nav', () => {
-    expect(navConfigSource).toContain("label: '기능 검색'");
+    expect(navConfigSource).not.toContain("label: '기능 검색'");
     expect(navConfigSource).toContain("to: '/dashboard'");
     expect(navConfigSource).toContain("label: '캐시플로 모니터링'");
     expect(navConfigSource).toContain("label: '프로젝트 등록/승인'");

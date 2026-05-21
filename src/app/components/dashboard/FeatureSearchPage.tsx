@@ -6,10 +6,10 @@ import { AdminCommandSearch } from './AdminCommandSearch';
 import { MyscWordmark } from '../brand/MyscWordmark';
 
 const ADMIN_ENTRY_POINTS = [
-  { label: '프로젝트', to: '/projects' },
-  { label: '프로젝트 등록/승인', to: '/projects/migration-audit' },
-  { label: '캐시플로 모니터링', to: '/cashflow' },
-  { label: '권한/사용자', to: '/users' },
+  { label: '전체 프로젝트 보기', to: '/projects', description: '프로젝트 목록, 담당조직, PM, 발주기관을 확인합니다.' },
+  { label: '프로젝트 등록/승인', to: '/projects/migration-audit', description: '신규 등록 요청, 수정 제출, 계약서 PDF 검토를 처리합니다.' },
+  { label: '캐시플로 모니터링', to: '/cashflow', description: '입금, 지출, 계약금, 지원금, 수익 흐름을 확인합니다.' },
+  { label: '권한/사용자', to: '/users', description: '사용자 역할, 조직장, 접근 권한을 관리합니다.' },
 ];
 
 const PM_ENTRY_POINTS = [
@@ -57,15 +57,25 @@ export function FeatureSearchPage() {
             </div>
             <div className="mt-3 grid gap-2 sm:grid-cols-2">
               {ADMIN_ENTRY_POINTS.map((item) => (
-                <button
-                  key={item.to}
-                  type="button"
-                  onClick={() => navigate(item.to)}
-                  className="flex h-10 items-center justify-between rounded-lg border border-white/70 bg-white/60 px-3 text-left text-[12px] font-semibold text-sky-950 shadow-sm backdrop-blur-md transition-colors hover:border-sky-200 hover:bg-white/80 dark:border-sky-400/20 dark:bg-slate-950/50 dark:text-sky-200 dark:hover:bg-sky-950/30"
-                >
-                  {item.label}
-                  <ArrowRight className="h-3.5 w-3.5" />
-                </button>
+                <div key={item.to} className="group relative focus-within:z-30 hover:z-30">
+                  <button
+                    type="button"
+                    aria-describedby={`admin-entry-note-${item.to.replace(/[^a-z0-9]+/gi, '-')}`}
+                    onClick={() => navigate(item.to)}
+                    className="flex h-10 w-full items-center justify-between rounded-lg border border-white/70 bg-white/60 px-3 text-left text-[12px] font-semibold text-sky-950 shadow-sm backdrop-blur-md transition-colors hover:border-sky-200 hover:bg-white/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 dark:border-sky-400/20 dark:bg-slate-950/50 dark:text-sky-200 dark:hover:bg-sky-950/30"
+                  >
+                    {item.label}
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  </button>
+                  <div
+                    id={`admin-entry-note-${item.to.replace(/[^a-z0-9]+/gi, '-')}`}
+                    role="note"
+                    className="pointer-events-none absolute left-0 top-[calc(100%+0.5rem)] z-40 w-full translate-y-1 rounded-lg border border-sky-100/80 bg-white/85 px-3 py-2 text-[11px] font-medium leading-5 text-sky-950 opacity-0 shadow-xl shadow-slate-900/10 backdrop-blur-xl transition-all duration-150 group-hover:translate-y-0 group-hover:opacity-100 focus-within:translate-y-0 focus-within:opacity-100 dark:border-sky-400/20 dark:bg-slate-950/85 dark:text-sky-100 sm:left-[calc(100%+0.75rem)] sm:top-1/2 sm:w-64 sm:-translate-y-1/2 sm:group-hover:-translate-y-1/2 sm:focus-within:-translate-y-1/2"
+                  >
+                    <span className="absolute left-4 top-[-5px] h-2.5 w-2.5 rotate-45 border-l border-t border-sky-100/80 bg-white/85 dark:border-sky-400/20 dark:bg-slate-950/85 sm:left-[-5px] sm:top-1/2 sm:-translate-y-1/2" />
+                    <span className="relative">{item.description}</span>
+                  </div>
+                </div>
               ))}
             </div>
           </section>

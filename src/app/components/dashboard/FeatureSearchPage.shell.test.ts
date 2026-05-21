@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const source = readFileSync(resolve(import.meta.dirname, 'FeatureSearchPage.tsx'), 'utf8');
+const searchSource = readFileSync(resolve(import.meta.dirname, 'AdminCommandSearch.tsx'), 'utf8');
 const routesSource = readFileSync(resolve(import.meta.dirname, '../../routes.tsx'), 'utf8');
 
 describe('FeatureSearchPage shell contract', () => {
@@ -16,10 +17,20 @@ describe('FeatureSearchPage shell contract', () => {
     expect(source).toContain('아래 검색창에서 원하시는 기능을 바로 탐색하실 수 있습니다.');
     expect(source).toContain('관리자');
     expect(source).toContain('PM');
+    expect(source).toContain('전체 프로젝트 보기');
+    expect(source).toContain('description');
+    expect(source).toContain('프로젝트 목록, 담당조직, PM, 발주기관을 확인합니다.');
+    expect(source).toContain('group-hover:opacity-100');
+    expect(source).toContain('focus-within:opacity-100');
     expect(source).toContain('min-h-dvh');
     expect(source).toContain('border-sky-200');
     expect(source).toContain('border-emerald-200');
     expect(source).toContain('backdrop-blur-xl');
     expect(source).toContain('bg-white/50');
+  });
+
+  it('uses registration-focused quick suggestions without the ambiguous CIC chip', () => {
+    expect(searchSource).toContain("const SUGGESTIONS = ['프로젝트 등록', '계약서', '사업비 입력', '권한']");
+    expect(searchSource).not.toContain("'CIC'");
   });
 });

@@ -31,12 +31,11 @@ const ICONS: Record<AdminCommandIcon, LucideIcon> = {
   expense: Pencil,
   payroll: CircleDollarSign,
   project: FolderKanban,
-  search: Search,
   settings: SlidersHorizontal,
   users: UserCog,
 };
 
-const SUGGESTIONS = ['프로젝트 등록', 'CIC', '계약서', '사업비 입력', '권한'];
+const SUGGESTIONS = ['프로젝트 등록', '계약서', '사업비 입력', '권한'];
 
 const SCOPE_STYLE = {
   admin: {

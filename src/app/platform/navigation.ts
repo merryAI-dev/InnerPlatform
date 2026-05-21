@@ -110,6 +110,16 @@ export function resolvePortalEntryPath(
   return target;
 }
 
+export function resolveLoginSuccessPath(
+  role: unknown,
+  preferredWorkspace: WorkspaceId | unknown,
+  requestedPath?: unknown,
+): string {
+  const normalizedPath = normalizeRequestedPath(requestedPath);
+  if (!normalizedPath || normalizedPath === '/') return '/';
+  return resolvePortalEntryPath(role, preferredWorkspace, normalizedPath);
+}
+
 export function resolveWorkspaceSelectionPath(
   role: unknown,
   selectedWorkspace: WorkspaceId | unknown,

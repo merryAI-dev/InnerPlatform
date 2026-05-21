@@ -8,7 +8,7 @@ function flattenDescriptions(groups: { shortcuts: { desc: string }[] }[]) {
 describe('shortcut policy', () => {
   it('shows admin-only shortcuts for admin roles', () => {
     const descs = flattenDescriptions(getShortcutGroupsForRole('admin'));
-    expect(descs).toContain('기능 검색으로 이동');
+    expect(descs).not.toContain('기능 검색으로 이동');
     expect(descs).toContain('프로젝트 등록/승인으로 이동');
     expect(descs).not.toContain('설정으로 이동');
     expect(descs).not.toContain('증빙/정산으로 이동');
@@ -25,7 +25,7 @@ describe('shortcut policy', () => {
 
   it('filters out settings/new-project for finance', () => {
     const descs = flattenDescriptions(getShortcutGroupsForRole('finance'));
-    expect(descs).toContain('기능 검색으로 이동');
+    expect(descs).not.toContain('기능 검색으로 이동');
     expect(descs).toContain('프로젝트 목록으로 이동');
     expect(descs).not.toContain('설정으로 이동');
     expect(descs).not.toContain('사업이관으로 이동');
@@ -36,7 +36,7 @@ describe('shortcut policy', () => {
   it('viewer gets minimal shortcuts', () => {
     const descs = flattenDescriptions(getShortcutGroupsForRole('viewer'));
     expect(descs).toContain('커맨드 팔레트 열기');
-    expect(descs).toContain('기능 검색으로 이동');
+    expect(descs).not.toContain('기능 검색으로 이동');
     expect(descs).not.toContain('설정으로 이동');
     expect(descs).not.toContain('사업이관으로 이동');
     expect(descs).not.toContain('새 사업 등록');

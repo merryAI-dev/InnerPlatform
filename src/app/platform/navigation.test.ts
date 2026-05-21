@@ -9,6 +9,7 @@ import {
   resolveActiveWorkspacePreference,
   resolvePortalEntryPath,
   resolveHomePath,
+  resolveLoginSuccessPath,
   resolveRequestedRedirectPath,
   resolvePostLoginPath,
   resolveWorkspaceSelectionPath,
@@ -212,6 +213,21 @@ describe('resolvePortalEntryPath', () => {
     expect(resolvePortalEntryPath('admin', 'portal', '/portal/cashflow')).toBe('/portal/project-select?redirect=%2Fportal%2Fcashflow');
     expect(resolvePortalEntryPath('pm', undefined, '/portal/project-select?redirect=%2Fportal%2Fbudget')).toBe('/portal/project-select?redirect=%2Fportal%2Fbudget');
     expect(resolvePortalEntryPath('admin', 'admin', '/settings')).toBe('/settings');
+  });
+});
+
+describe('resolveLoginSuccessPath', () => {
+  it('uses the full-screen feature search as the default post-login entry for every role', () => {
+    expect(resolveLoginSuccessPath('admin', undefined)).toBe('/');
+    expect(resolveLoginSuccessPath('finance', 'portal')).toBe('/');
+    expect(resolveLoginSuccessPath('pm', undefined)).toBe('/');
+    expect(resolveLoginSuccessPath('viewer', undefined, '/')).toBe('/');
+  });
+
+  it('preserves explicit deep links after login when they are role-safe', () => {
+    expect(resolveLoginSuccessPath('admin', 'admin', '/users')).toBe('/users');
+    expect(resolveLoginSuccessPath('pm', undefined, '/portal/budget')).toBe('/portal/project-select?redirect=%2Fportal%2Fbudget');
+    expect(resolveLoginSuccessPath('pm', undefined, '/users')).toBe('/portal/project-select?redirect=%2Fportal');
   });
 });
 

@@ -218,3 +218,7 @@
 ## [2026-04-15] patch-note | portal-cashflow, portal-dashboard | PM cashflow listen hardening
 - pages: [portal-cashflow](./pages/portal-cashflow.md), [portal-dashboard](./pages/portal-dashboard.md)
 - summary: PM용 cashflow 주차 구독은 Firestore에서 project 기준으로만 listen하고, 연도 범위는 클라이언트에서 필터링하도록 바꿔 PM 포털 부팅이 cashflow composite index drift에 직접 막히지 않게 보강했다.
+
+## [2026-05-21] patch-note | portal-onboarding-feature-search | 로그인 후 검색 엔트리 정리
+- pages: [portal-onboarding](./pages/portal-onboarding.md)
+- summary: 로그인 성공 후 빈 화면 대신 짧은 전환 화면을 거쳐 기능 검색 엔트리로 이동하게 하고, 업무 화면 진입 후에는 `기능 검색` 자기 참조 메뉴를 제거했으며, 프로젝트 등록 검색은 기능 결과만 노출되도록 정리했다.

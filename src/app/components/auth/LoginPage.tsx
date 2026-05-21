@@ -10,9 +10,8 @@ import { Button } from '../ui/button';
 import { useAuth } from '../../data/auth-store';
 import {
   resolveActiveWorkspacePreference,
-  resolvePortalEntryPath,
+  resolveLoginSuccessPath,
   resolveRequestedRedirectPath,
-  shouldPromptWorkspaceSelection,
 } from '../../platform/navigation';
 import { readFirebaseEmulatorConfig } from '../../lib/firebase';
 import {
@@ -26,8 +25,44 @@ import { MyscWordmark } from '../brand/MyscWordmark';
 
 // ═══════════════════════════════════════════════════════════════
 // LoginPage — 통합 로그인 페이지
-// 역할에 따라 admin(/) 또는 portal(/portal) 로 라우팅
+// 로그인 후 전용 기능 검색 엔트리로 부드럽게 라우팅
 // ═══════════════════════════════════════════════════════════════
+
+const POST_LOGIN_TRANSITION_MS = 700;
+
+function PostLoginTransition({ displayName }: { displayName: string }) {
+  return (
+    <div className="relative flex min-h-dvh items-center justify-center overflow-hidden bg-[linear-gradient(135deg,#eaf4ff_0%,#f8fbff_45%,#eafaf4_100%)] px-4 py-6 dark:bg-[linear-gradient(135deg,#05182d_0%,#0f172a_52%,#062d2a_100%)]">
+      <div className="absolute inset-0 bg-white/20 backdrop-blur-3xl dark:bg-slate-950/10" />
+      <div className="relative w-full max-w-[520px] animate-in fade-in-0 zoom-in-95 duration-700">
+        <section className="overflow-hidden rounded-lg border border-white/65 bg-white/55 shadow-[0_30px_90px_rgba(15,23,42,0.14)] backdrop-blur-2xl dark:border-white/10 dark:bg-slate-950/45">
+          <div className="border-b border-white/20 bg-[#0f2747]/90 px-6 py-5 text-white shadow-inner shadow-white/5">
+            <MyscWordmark tone="onDark" size="md" />
+          </div>
+          <div className="space-y-6 px-6 py-8 text-center">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-lg border border-sky-200/80 bg-sky-50/80 text-sky-800 shadow-lg shadow-sky-900/10 backdrop-blur-md dark:border-sky-400/20 dark:bg-sky-950/40 dark:text-sky-200">
+              <Loader2 className="h-5 w-5 animate-spin" />
+            </div>
+            <div>
+              <p className="text-[12px] font-semibold uppercase tracking-[0.12em] text-sky-700 dark:text-sky-300">
+                Login Complete
+              </p>
+              <h1 className="mt-2 text-[24px] font-extrabold leading-tight text-slate-950 dark:text-slate-50 md:text-[30px]">
+                {displayName}님, 업무 검색 화면을 준비하고 있습니다
+              </h1>
+              <p className="mt-3 text-[13px] leading-6 text-slate-600 dark:text-slate-300">
+                필요한 기능을 바로 찾을 수 있도록 진입 화면을 여는 중입니다.
+              </p>
+            </div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-slate-200/80 dark:bg-slate-800/80">
+              <div className="h-full w-2/3 animate-pulse rounded-full bg-[linear-gradient(90deg,#0369a1,#059669)]" />
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -66,24 +101,25 @@ export function LoginPage() {
     window.location.replace(target);
   }, [emulatorConfig.authEnabled]);
 
-  // 이미 인증된 사용자는 역할에 맞는 페이지로 리다이렉트
+  // 이미 인증된 사용자는 전환 화면을 거쳐 기능 검색 엔트리로 이동
   useEffect(() => {
     if (isLoading) return;
     if (isAuthenticated && user) {
-      if (shouldPromptWorkspaceSelection(user.role, activeWorkspace)) {
-        navigate('/workspace-select', { replace: true, state: redirectFrom ? { from: redirectFrom } : undefined });
-        return;
-      }
-      const target = resolvePortalEntryPath(
+      const target = resolveLoginSuccessPath(
         user.role,
         activeWorkspace,
         redirectFrom,
       );
-      navigate(target, { replace: true });
+      const timer = window.setTimeout(() => {
+        navigate(target, { replace: true });
+      }, POST_LOGIN_TRANSITION_MS);
+      return () => window.clearTimeout(timer);
     }
   }, [activeWorkspace, isAuthenticated, isLoading, navigate, redirectFrom, user]);
 
-  if (isAuthenticated && user) return null;
+  if (isAuthenticated && user) {
+    return <PostLoginTransition displayName={user.name?.trim() || '구성원'} />;
+  }
 
   const handleLogin = async () => {
     setError('');
