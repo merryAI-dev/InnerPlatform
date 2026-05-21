@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { ArrowRight, Building2, UserRoundCheck } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { useAppStore } from '../../data/store';
@@ -24,6 +25,7 @@ export function FeatureSearchPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const displayName = user?.name?.trim() || '구성원';
+  const [activeAdminEntry, setActiveAdminEntry] = useState<(typeof ADMIN_ENTRY_POINTS)[number] | null>(null);
 
   return (
     <div className="min-h-dvh bg-[linear-gradient(135deg,#eef6ff_0%,#f8fbff_46%,#ecfdf5_100%)] px-4 py-5 dark:bg-[linear-gradient(135deg,#061a2f_0%,#0f172a_52%,#052e2b_100%)] md:px-6 md:py-8">
@@ -50,33 +52,49 @@ export function FeatureSearchPage() {
         </section>
 
         <div className="grid gap-4 lg:grid-cols-2">
-          <section className="rounded-lg border border-white/60 bg-sky-50/50 p-4 shadow-lg shadow-slate-900/5 backdrop-blur-xl dark:border-sky-400/20 dark:bg-sky-950/25">
+          <section
+            className="rounded-lg border border-white/60 bg-sky-50/50 p-4 shadow-lg shadow-slate-900/5 backdrop-blur-xl dark:border-sky-400/20 dark:bg-sky-950/25"
+            onMouseLeave={() => setActiveAdminEntry(null)}
+          >
             <div className="flex items-center gap-2 text-sky-900 dark:text-sky-200">
               <Building2 className="h-4 w-4" />
               <h2 className="text-[13px] font-bold">관리자</h2>
             </div>
-            <div className="mt-3 grid gap-2 sm:grid-cols-2">
-              {ADMIN_ENTRY_POINTS.map((item) => (
-                <div key={item.to} className="group relative focus-within:z-30 hover:z-30">
+            <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_230px]">
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+                {ADMIN_ENTRY_POINTS.map((item) => (
                   <button
+                    key={item.to}
                     type="button"
-                    aria-describedby={`admin-entry-note-${item.to.replace(/[^a-z0-9]+/gi, '-')}`}
+                    aria-describedby="admin-entry-memo"
+                    onMouseEnter={() => setActiveAdminEntry(item)}
+                    onFocus={() => setActiveAdminEntry(item)}
                     onClick={() => navigate(item.to)}
                     className="flex h-10 w-full items-center justify-between rounded-lg border border-white/70 bg-white/60 px-3 text-left text-[12px] font-semibold text-sky-950 shadow-sm backdrop-blur-md transition-colors hover:border-sky-200 hover:bg-white/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 dark:border-sky-400/20 dark:bg-slate-950/50 dark:text-sky-200 dark:hover:bg-sky-950/30"
                   >
                     {item.label}
                     <ArrowRight className="h-3.5 w-3.5" />
                   </button>
-                  <div
-                    id={`admin-entry-note-${item.to.replace(/[^a-z0-9]+/gi, '-')}`}
-                    role="note"
-                    className="pointer-events-none absolute left-0 top-[calc(100%+0.5rem)] z-40 w-full translate-y-1 rounded-lg border border-sky-100/80 bg-white/85 px-3 py-2 text-[11px] font-medium leading-5 text-sky-950 opacity-0 shadow-xl shadow-slate-900/10 backdrop-blur-xl transition-all duration-150 group-hover:translate-y-0 group-hover:opacity-100 focus-within:translate-y-0 focus-within:opacity-100 dark:border-sky-400/20 dark:bg-slate-950/85 dark:text-sky-100 sm:left-[calc(100%+0.75rem)] sm:top-1/2 sm:w-64 sm:-translate-y-1/2 sm:group-hover:-translate-y-1/2 sm:focus-within:-translate-y-1/2"
-                  >
-                    <span className="absolute left-4 top-[-5px] h-2.5 w-2.5 rotate-45 border-l border-t border-sky-100/80 bg-white/85 dark:border-sky-400/20 dark:bg-slate-950/85 sm:left-[-5px] sm:top-1/2 sm:-translate-y-1/2" />
-                    <span className="relative">{item.description}</span>
-                  </div>
-                </div>
-              ))}
+                ))}
+              </div>
+              <div
+                id="admin-entry-memo"
+                role="note"
+                aria-live="polite"
+                className={`relative min-h-[88px] rounded-lg border border-sky-100/80 bg-white/75 px-3 py-2.5 text-[11px] font-medium leading-5 text-sky-950 shadow-lg shadow-slate-900/5 backdrop-blur-xl transition-all duration-150 dark:border-sky-400/20 dark:bg-slate-950/55 dark:text-sky-100 ${
+                  activeAdminEntry
+                    ? 'translate-x-0 opacity-100'
+                    : 'translate-x-1 opacity-45'
+                }`}
+              >
+                <span className="absolute right-0 top-0 h-0 w-0 border-b-[12px] border-l-[12px] border-b-sky-100/90 border-l-transparent dark:border-b-sky-400/25" />
+                <span className="mb-1 block text-[10px] font-bold uppercase tracking-[0.12em] text-sky-600 dark:text-sky-300">
+                  Memo
+                </span>
+                <span className="block">
+                  {activeAdminEntry?.description || ADMIN_ENTRY_POINTS[0].description}
+                </span>
+              </div>
             </div>
           </section>
 

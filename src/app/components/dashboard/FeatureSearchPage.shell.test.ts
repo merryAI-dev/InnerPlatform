@@ -20,8 +20,9 @@ describe('FeatureSearchPage shell contract', () => {
     expect(source).toContain('전체 프로젝트 보기');
     expect(source).toContain('description');
     expect(source).toContain('프로젝트 목록, 담당조직, PM, 발주기관을 확인합니다.');
-    expect(source).toContain('group-hover:opacity-100');
-    expect(source).toContain('focus-within:opacity-100');
+    expect(source).toContain('activeAdminEntry');
+    expect(source).toContain('id="admin-entry-memo"');
+    expect(source).toContain('aria-live="polite"');
     expect(source).toContain('min-h-dvh');
     expect(source).toContain('border-sky-200');
     expect(source).toContain('border-emerald-200');
