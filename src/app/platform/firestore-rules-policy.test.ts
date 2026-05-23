@@ -169,31 +169,52 @@ describe('firestore rules policy alignment', () => {
     expect(storageRulesText).toContain("collection != 'business-cards' && isMyscSignedIn()");
   });
 
-  it('keeps business-card search indexes and large-field exemptions deployable', () => {
-    expect(firestoreIndexes.indexes).toContainEqual({
-      collectionGroup: 'business_card_imports',
-      queryScope: 'COLLECTION',
-      fields: [
-        { fieldPath: 'status', order: 'ASCENDING' },
-        { fieldPath: '__name__', order: 'ASCENDING' },
-      ],
-    });
-    expect(firestoreIndexes.indexes).toContainEqual({
-      collectionGroup: 'contacts',
-      queryScope: 'COLLECTION',
-      fields: [
-        { fieldPath: 'searchTokens', arrayConfig: 'CONTAINS' },
-        { fieldPath: '__name__', order: 'ASCENDING' },
-      ],
-    });
+  it('keeps business-card indexes deployable and large fields exempted', () => {
+    const rejectedSingleFieldComposites = [
+      {
+        collectionGroup: 'business_card_imports',
+        queryScope: 'COLLECTION',
+        fields: [
+          { fieldPath: 'status', order: 'ASCENDING' },
+          { fieldPath: '__name__', order: 'ASCENDING' },
+        ],
+      },
+      {
+        collectionGroup: 'contacts',
+        queryScope: 'COLLECTION',
+        fields: [
+          { fieldPath: 'searchTokens', arrayConfig: 'CONTAINS' },
+          { fieldPath: '__name__', order: 'ASCENDING' },
+        ],
+      },
+    ];
+
+    for (const index of rejectedSingleFieldComposites) {
+      expect(firestoreIndexes.indexes).not.toContainEqual(index);
+    }
     expect(firestoreIndexes.fieldOverrides).toContainEqual({
       collectionGroup: 'business_card_imports',
       fieldPath: 'rawText',
       indexes: [],
     });
     expect(firestoreIndexes.fieldOverrides).toContainEqual({
+      collectionGroup: 'business_card_imports',
+      fieldPath: 'extracted',
+      indexes: [],
+    });
+    expect(firestoreIndexes.fieldOverrides).toContainEqual({
+      collectionGroup: 'business_card_imports',
+      fieldPath: 'error',
+      indexes: [],
+    });
+    expect(firestoreIndexes.fieldOverrides).toContainEqual({
       collectionGroup: 'contacts',
       fieldPath: 'memo',
+      indexes: [],
+    });
+    expect(firestoreIndexes.fieldOverrides).toContainEqual({
+      collectionGroup: 'contacts',
+      fieldPath: 'address',
       indexes: [],
     });
   });
