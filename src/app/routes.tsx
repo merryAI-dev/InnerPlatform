@@ -9,6 +9,7 @@ import { loadLazyRouteModule } from './platform/lazy-route';
 // Lazy-loaded pages — each becomes a separate chunk
 const LoginPage = lazy(() => import('./components/auth/LoginPage').then(m => ({ default: m.LoginPage })));
 const WorkspaceSelectPage = lazy(() => import('./components/auth/WorkspaceSelectPage').then(m => ({ default: m.WorkspaceSelectPage })));
+const PwaInstallPage = lazy(() => import('./components/pwa/PwaInstallPage').then(m => ({ default: m.PwaInstallPage })));
 const FeatureSearchPage = lazy(() => import('./components/dashboard/FeatureSearchPage').then(m => ({ default: m.FeatureSearchPage })));
 const DashboardPage = lazy(() => import('./components/dashboard/DashboardPage').then(m => ({ default: m.DashboardPage })));
 const BoardFeedPage = lazy(() => import('./components/board/BoardFeedPage').then(m => ({ default: m.BoardFeedPage })));
@@ -70,6 +71,7 @@ const PortalWeeklyExpensePage = lazy(() => loadLazyRouteModule(
 ));
 const PortalBankStatementPage = lazy(() => import('./components/portal/PortalBankStatementPage').then(m => ({ default: m.PortalBankStatementPage })));
 const GuideChatPage = lazy(() => import('./components/guide-chat/GuideChatPage').then(m => ({ default: m.GuideChatPage })));
+const BusinessCardLabPage = lazy(() => import('./components/business-cards/BusinessCardLabPage').then(m => ({ default: m.BusinessCardLabPage })));
 
 // Suspense wrapper — layouts already provide visual chrome, so a minimal fallback suffices
 function S({ C }: { C: ComponentType }) {
@@ -92,6 +94,9 @@ export const router = createBrowserRouter([
   // ── Login ──
   { path: '/login', element: <S C={LoginPage} /> },
   { path: '/workspace-select', element: <S C={WorkspaceSelectPage} /> },
+  { path: '/install', element: <S C={PwaInstallPage} /> },
+  { path: '/install/ios', element: <S C={PwaInstallPage} /> },
+  { path: '/install/android', element: <S C={PwaInstallPage} /> },
   // ── Admin (관리자) ──
   {
     path: '/',
@@ -99,6 +104,7 @@ export const router = createBrowserRouter([
     children: [
       { index: true, element: <S C={FeatureSearchPage} /> },
       { path: 'dashboard', element: <S C={DashboardPage} /> },
+      { path: 'business-cards', element: <S C={BusinessCardLabPage} /> },
       // ── Company Board (전사 게시판) ──
       {
         path: 'board',
@@ -166,6 +172,7 @@ export const router = createBrowserRouter([
       { path: 'training', element: <S C={PortalTrainingPage} /> },
       { path: 'career-profile', element: <S C={CareerProfilePage} /> },
       { path: 'guide-chat', element: <S C={GuideChatPage} /> },
+      { path: 'business-cards', element: <S C={BusinessCardLabPage} /> },
     ],
   },
 ]);

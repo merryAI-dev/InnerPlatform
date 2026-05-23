@@ -7,6 +7,7 @@ const CANONICAL_PRODUCTION_HOST =
 const CANONICAL_PRODUCTION_URL = `https://${CANONICAL_PRODUCTION_HOST}`;
 const MAX_ALIAS_CHECK_ATTEMPTS = Number.parseInt(process.env.VERCEL_CANONICAL_CHECK_ATTEMPTS ?? '10', 10);
 const ALIAS_CHECK_DELAY_MS = Number.parseInt(process.env.VERCEL_CANONICAL_CHECK_DELAY_MS ?? '2000', 10);
+const SKIP_PWA_LIVE_VERIFY = process.env.VERCEL_SKIP_PWA_LIVE_VERIFY === 'true';
 
 function fail(message, details) {
   console.error(`[deploy-align] ${message}`);
@@ -118,6 +119,16 @@ async function verifyCanonicalAlias(deploymentHost) {
   fail(`timed out waiting for ${CANONICAL_PRODUCTION_URL} to point at ${deploymentHost}`);
 }
 
+function verifyLivePwaPackage() {
+  if (SKIP_PWA_LIVE_VERIFY) {
+    console.log('[deploy-align] skipping live PWA verification because VERCEL_SKIP_PWA_LIVE_VERIFY=true');
+    return;
+  }
+
+  console.log(`[deploy-align] verifying live PWA package: ${CANONICAL_PRODUCTION_URL}`);
+  run('npm', ['run', 'pwa:verify:live', '--', CANONICAL_PRODUCTION_URL], { stdio: 'inherit' });
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
 
@@ -149,6 +160,7 @@ async function main() {
 
   console.log(`[deploy-align] target deployment: https://${deploymentHost}`);
   await verifyCanonicalAlias(deploymentHost);
+  verifyLivePwaPackage();
   console.log(`[deploy-align] official production URL: ${CANONICAL_PRODUCTION_URL}`);
 }
 

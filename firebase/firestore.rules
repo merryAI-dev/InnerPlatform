@@ -55,6 +55,12 @@ service cloud.firestore {
         && getMemberRole(orgId) in ['admin', 'finance'];
     }
 
+    // BFF 전용 PII 컬렉션: 클라이언트 SDK 직접 접근 금지.
+    // BFF(Admin SDK)는 rules를 우회하므로 검증, 감사, idempotency를 서버에서 강제한다.
+    function isBffOnlyCollection(collection) {
+      return collection in ['contacts', 'business_card_imports', 'contact_events'];
+    }
+
     // ══════════════════════════════════════════════════════════════
     // orgs/{orgId}/** 규칙
     // 특정 컬렉션 override → 일반 규칙 순서로 적용
@@ -98,6 +104,19 @@ service cloud.firestore {
       allow create, delete: if false;
     }
 
+    // ── 명함 DB/연락처: BFF API로만 접근 ──
+    match /orgs/{orgId}/contacts/{contactId} {
+      allow read, write: if false;
+    }
+
+    match /orgs/{orgId}/business_card_imports/{importId} {
+      allow read, write: if false;
+    }
+
+    match /orgs/{orgId}/contact_events/{eventId} {
+      allow read, write: if false;
+    }
+
     // ── 프로젝트 변경 알림: admin/finance만 쓰기 ──
     match /orgs/{orgId}/project_change_alerts/{alertId} {
       allow read: if canRead(orgId);
@@ -108,8 +127,8 @@ service cloud.firestore {
     // ── 일반 규칙: 나머지 모든 컬렉션 ──
     // (projects, ledgers, transactions, evidences, comments, 등)
     match /orgs/{orgId}/{collection}/{document=**} {
-      allow read: if canRead(orgId);
-      allow write: if canWrite(orgId);
+      allow read: if !isBffOnlyCollection(collection) && canRead(orgId);
+      allow write: if !isBffOnlyCollection(collection) && canWrite(orgId);
     }
   }
 }

@@ -34,4 +34,11 @@ scripts/etl/output/
 .claude/worktrees/
 .claude/memory/
 .pm-status/
-docs/superpowers/
+docs/superpowers/*
+!docs/superpowers/
+!docs/superpowers/specs/
+!docs/superpowers/plans/
+docs/superpowers/specs/*
+docs/superpowers/plans/*
+!docs/superpowers/specs/2026-05-23-business-card-db-pwa-vertex-gemini-design.md
+!docs/superpowers/plans/2026-05-23-business-card-db-*.md

@@ -6,6 +6,7 @@
  * They do NOT run the rules emulator — instead they validate the
  * policy-as-code constraints that the rules depend on.
  */
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import firestoreIndexes from '../../../firebase/firestore.indexes.json';
 import rbacPolicy from '../../../policies/rbac-policy.json';
@@ -17,6 +18,8 @@ const policy = rbacPolicy as {
   rolePermissions: Record<string, string[]>;
   roles: string[];
 };
+const firestoreRulesText = readFileSync(new URL('../../../firebase/firestore.rules', import.meta.url), 'utf8');
+const storageRulesText = readFileSync(new URL('../../../firebase/storage.rules', import.meta.url), 'utf8');
 
 describe('firestore rules policy alignment', () => {
   // ── isSignedIn: company email domain ──
@@ -150,6 +153,48 @@ describe('firestore rules policy alignment', () => {
         { fieldPath: 'requestedAt', order: 'DESCENDING' },
         { fieldPath: '__name__', order: 'DESCENDING' },
       ],
+    });
+  });
+
+  it('keeps business-card PII collections behind BFF-only Firestore rules', () => {
+    expect(firestoreRulesText).toContain('function isBffOnlyCollection(collection)');
+    expect(firestoreRulesText).toContain("['contacts', 'business_card_imports', 'contact_events']");
+    expect(firestoreRulesText).toContain('allow read: if !isBffOnlyCollection(collection) && canRead(orgId);');
+    expect(firestoreRulesText).toContain('allow write: if !isBffOnlyCollection(collection) && canWrite(orgId);');
+  });
+
+  it('keeps business-card source images behind BFF-only Storage rules', () => {
+    expect(storageRulesText).toContain('match /orgs/{orgId}/business-cards/{allPaths=**}');
+    expect(storageRulesText).toContain('allow read, write: if false;');
+    expect(storageRulesText).toContain("collection != 'business-cards' && isMyscSignedIn()");
+  });
+
+  it('keeps business-card search indexes and large-field exemptions deployable', () => {
+    expect(firestoreIndexes.indexes).toContainEqual({
+      collectionGroup: 'business_card_imports',
+      queryScope: 'COLLECTION',
+      fields: [
+        { fieldPath: 'status', order: 'ASCENDING' },
+        { fieldPath: '__name__', order: 'ASCENDING' },
+      ],
+    });
+    expect(firestoreIndexes.indexes).toContainEqual({
+      collectionGroup: 'contacts',
+      queryScope: 'COLLECTION',
+      fields: [
+        { fieldPath: 'searchTokens', arrayConfig: 'CONTAINS' },
+        { fieldPath: '__name__', order: 'ASCENDING' },
+      ],
+    });
+    expect(firestoreIndexes.fieldOverrides).toContainEqual({
+      collectionGroup: 'business_card_imports',
+      fieldPath: 'rawText',
+      indexes: [],
+    });
+    expect(firestoreIndexes.fieldOverrides).toContainEqual({
+      collectionGroup: 'contacts',
+      fieldPath: 'memo',
+      indexes: [],
     });
   });
 

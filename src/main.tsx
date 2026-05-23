@@ -18,5 +18,13 @@ installVitePreloadRecovery();
 initObservability(import.meta.env);
 installGlobalObservabilityHandlers();
 
+if (typeof window !== 'undefined' && 'serviceWorker' in navigator && import.meta.env.PROD) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch((error) => {
+      console.warn('[MYSC] service worker registration failed:', error);
+    });
+  });
+}
+
 createRoot(document.getElementById('root')!).render(<App />);
   

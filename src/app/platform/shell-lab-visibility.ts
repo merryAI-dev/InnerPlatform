@@ -14,6 +14,7 @@ export const SHELL_LAB_STORAGE_KEY = 'mysc-shell-lab-enabled';
 const SHELL_LAB_CHANGE_EVENT = 'mysc-shell-lab-enabled-change';
 
 export const ADMIN_LAB_ROUTES = [
+  '/business-cards',
   '/board',
   '/evidence',
   '/bank-reconciliation',
@@ -32,6 +33,7 @@ export const ADMIN_LAB_ROUTES = [
 ] as const;
 
 export const PORTAL_LAB_ROUTES = [
+  '/portal/business-cards',
   '/portal/board',
 ] as const;
 

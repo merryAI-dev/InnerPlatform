@@ -76,6 +76,94 @@ export interface ProjectRequestContractUploadPayload {
   contentBase64: string;
 }
 
+export type BusinessCardConfidence = 'high' | 'medium' | 'low';
+
+export interface BusinessCardExtractedField {
+  value: string;
+  confidence: BusinessCardConfidence;
+  evidence: string;
+}
+
+export interface BusinessCardExtractedListField extends BusinessCardExtractedField {}
+
+export interface BusinessCardExtraction {
+  name: BusinessCardExtractedField;
+  organization: BusinessCardExtractedField;
+  department: BusinessCardExtractedField;
+  title: BusinessCardExtractedField;
+  role: BusinessCardExtractedField;
+  emails: BusinessCardExtractedListField[];
+  phones: BusinessCardExtractedListField[];
+  website: BusinessCardExtractedField;
+  address: BusinessCardExtractedField;
+  memo: BusinessCardExtractedField;
+  rawText: string;
+  warnings: string[];
+}
+
+export interface BusinessCardProcessPayload {
+  fileName: string;
+  mimeType: string;
+  fileSize: number;
+  contentBase64: string;
+}
+
+export interface BusinessCardImportResult {
+  importId: string;
+  status: 'needs_review' | 'saved' | 'failed';
+  extracted: BusinessCardExtraction;
+  error?: { code?: string; message?: string } | null;
+}
+
+export interface BusinessCardImportListItem {
+  id: string;
+  status: 'needs_review' | 'saved' | 'failed';
+  fileName: string;
+  mimeType: string;
+  fileSize: number;
+  uploadedBy?: string;
+  uploadedByEmail?: string;
+  createdAt: string;
+  updatedAt: string;
+  extracted: BusinessCardExtraction | null;
+  contactId?: string | null;
+  error?: { code?: string; message?: string } | null;
+}
+
+export interface BusinessCardConfirmPayload {
+  name: string;
+  organization: string;
+  department: string;
+  title: string;
+  role: string;
+  emails: string[];
+  phones: string[];
+  website: string;
+  address: string;
+  memo: string;
+}
+
+export interface BusinessCardConfirmResult {
+  ok: boolean;
+  importId: string;
+  contactId: string;
+  status: 'saved';
+}
+
+export interface ContactSearchResult {
+  id: string;
+  name: string;
+  organization: string;
+  department?: string;
+  title?: string;
+  role?: string;
+  emails: string[];
+  phones: string[];
+  website?: string;
+  score: number;
+  updatedAt?: string;
+}
+
 export interface ProvisionProjectEvidenceDriveRootResult {
   projectId: string;
   folderId: string;
@@ -338,6 +426,45 @@ export function normalizeProjectRequestContractAnalysisResult(
       contractAmount: normalizeProjectRequestNumberSuggestion(fields.contractAmount),
       salesVatAmount: normalizeProjectRequestNumberSuggestion(fields.salesVatAmount),
     },
+  };
+}
+
+function normalizeBusinessCardConfidence(value: unknown): BusinessCardConfidence {
+  return value === 'high' || value === 'medium' || value === 'low' ? value : 'low';
+}
+
+function normalizeBusinessCardField(value: unknown): BusinessCardExtractedField {
+  const raw = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  return {
+    value: typeof raw.value === 'string' ? raw.value.trim() : '',
+    confidence: normalizeBusinessCardConfidence(raw.confidence),
+    evidence: typeof raw.evidence === 'string' ? raw.evidence.trim() : '',
+  };
+}
+
+function normalizeBusinessCardListField(value: unknown): BusinessCardExtractedListField[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => normalizeBusinessCardField(item))
+    .filter((item) => item.value)
+    .slice(0, 8);
+}
+
+export function normalizeBusinessCardExtraction(value: unknown): BusinessCardExtraction {
+  const raw = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  return {
+    name: normalizeBusinessCardField(raw.name),
+    organization: normalizeBusinessCardField(raw.organization),
+    department: normalizeBusinessCardField(raw.department),
+    title: normalizeBusinessCardField(raw.title),
+    role: normalizeBusinessCardField(raw.role),
+    emails: normalizeBusinessCardListField(raw.emails),
+    phones: normalizeBusinessCardListField(raw.phones),
+    website: normalizeBusinessCardField(raw.website),
+    address: normalizeBusinessCardField(raw.address),
+    memo: normalizeBusinessCardField(raw.memo),
+    rawText: typeof raw.rawText === 'string' ? raw.rawText.trim() : '',
+    warnings: normalizeStringArray(raw.warnings),
   };
 }
 
@@ -1003,6 +1130,96 @@ export async function uploadTransactionEvidenceDriveViaBff(params: {
       body: params.upload,
       retries: 0,
       timeoutMs: 30000,
+    },
+  );
+  return response.data;
+}
+
+export async function processBusinessCardViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  upload: BusinessCardProcessPayload;
+  client?: PlatformApiClientLike;
+}): Promise<BusinessCardImportResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<BusinessCardImportResult>(
+    '/api/v1/business-card-imports/process',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.upload,
+      retries: 0,
+      timeoutMs: 60000,
+    },
+  );
+  return {
+    ...response.data,
+    extracted: normalizeBusinessCardExtraction(response.data.extracted),
+  };
+}
+
+export async function listBusinessCardImportsViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  status?: 'needs_review' | 'saved' | 'failed';
+  client?: PlatformApiClientLike;
+}): Promise<{ items: BusinessCardImportListItem[]; count: number; nextCursor: string | null }> {
+  const apiClient = resolveClient(params.client);
+  const searchParams = new URLSearchParams();
+  if (params.status) searchParams.set('status', params.status);
+  const response = await apiClient.get<{ items: BusinessCardImportListItem[]; count: number; nextCursor: string | null }>(
+    `/api/v1/business-card-imports${searchParams.size ? `?${searchParams.toString()}` : ''}`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      timeoutMs: 10000,
+    },
+  );
+  return {
+    ...response.data,
+    items: (response.data.items || []).map((item) => ({
+      ...item,
+      extracted: item.extracted ? normalizeBusinessCardExtraction(item.extracted) : null,
+    })),
+  };
+}
+
+export async function confirmBusinessCardImportViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  importId: string;
+  contact: BusinessCardConfirmPayload;
+  client?: PlatformApiClientLike;
+}): Promise<BusinessCardConfirmResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<BusinessCardConfirmResult>(
+    `/api/v1/business-card-imports/${encodeURIComponent(params.importId)}/confirm`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.contact,
+      retries: 0,
+      timeoutMs: 20000,
+    },
+  );
+  return response.data;
+}
+
+export async function searchContactsViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  query: string;
+  client?: PlatformApiClientLike;
+}): Promise<{ items: ContactSearchResult[]; count: number; nextCursor: string | null }> {
+  const apiClient = resolveClient(params.client);
+  const searchParams = new URLSearchParams();
+  searchParams.set('query', params.query);
+  const response = await apiClient.get<{ items: ContactSearchResult[]; count: number; nextCursor: string | null }>(
+    `/api/v1/contacts?${searchParams.toString()}`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      timeoutMs: 10000,
     },
   );
   return response.data;

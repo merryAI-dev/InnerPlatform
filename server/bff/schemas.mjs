@@ -158,6 +158,64 @@ export const projectRequestContractUploadSchema = z.object({
   contentBase64: NON_EMPTY_STRING,
 }).strict();
 
+const BUSINESS_CARD_MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+const BUSINESS_CARD_CONTENT_BASE64_MAX_LENGTH = 12 * 1024 * 1024;
+
+export const businessCardProcessSchema = z.object({
+  fileName: NON_EMPTY_STRING.max(300),
+  mimeType: z.enum(['image/jpeg', 'image/png', 'image/webp']),
+  fileSize: z.number().int().positive().max(BUSINESS_CARD_MAX_IMAGE_BYTES),
+  contentBase64: NON_EMPTY_STRING.max(BUSINESS_CARD_CONTENT_BASE64_MAX_LENGTH),
+}).strict();
+
+export const businessCardExtractedFieldSchema = z.object({
+  value: z.string().trim().max(2000).default(''),
+  confidence: z.enum(['high', 'medium', 'low']).default('low'),
+  evidence: z.string().trim().max(2000).default(''),
+}).strict();
+
+export const businessCardExtractedListFieldSchema = z.object({
+  value: z.string().trim().max(500),
+  confidence: z.enum(['high', 'medium', 'low']).default('low'),
+  evidence: z.string().trim().max(2000).default(''),
+}).strict();
+
+export const businessCardConfirmSchema = z.object({
+  name: z.string().trim().max(300).default(''),
+  organization: z.string().trim().max(500).default(''),
+  department: z.string().trim().max(300).default(''),
+  title: z.string().trim().max(300).default(''),
+  role: z.string().trim().max(300).default(''),
+  emails: z.array(z.string().trim().max(320)).max(8).default([]),
+  phones: z.array(z.string().trim().max(80)).max(8).default([]),
+  website: z.string().trim().max(500).default(''),
+  address: z.string().trim().max(1000).default(''),
+  memo: z.string().trim().max(2000).default(''),
+}).strict().superRefine((value, ctx) => {
+  const hasIdentity = Boolean(value.name || value.organization);
+  const hasContact = value.emails.length > 0 || value.phones.length > 0;
+  if (!hasIdentity) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['name'],
+      message: 'name or organization is required',
+    });
+  }
+  if (!hasContact) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['emails'],
+      message: 'email or phone is required',
+    });
+  }
+});
+
+export const businessCardSearchSchema = z.object({
+  query: NON_EMPTY_STRING.max(200),
+  limit: z.number().int().positive().max(100).optional(),
+  cursor: z.string().trim().max(300).optional(),
+}).strict();
+
 export const claudeSdkHelpAskSchema = z.object({
   question: NON_EMPTY_STRING.max(2000),
   history: z.array(

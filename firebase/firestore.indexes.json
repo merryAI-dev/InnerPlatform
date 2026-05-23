@@ -165,5 +165,31 @@
       ]
     }
   ],
-  "fieldOverrides": []
+  "fieldOverrides": [
+    {
+      "collectionGroup": "business_card_imports",
+      "fieldPath": "rawText",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "business_card_imports",
+      "fieldPath": "extracted",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "business_card_imports",
+      "fieldPath": "error",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "contacts",
+      "fieldPath": "memo",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "contacts",
+      "fieldPath": "address",
+      "indexes": []
+    }
+  ]
 }

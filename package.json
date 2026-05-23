@@ -5,6 +5,9 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
+    "pwa:verify": "node scripts/validate_pwa_package.mjs",
+    "pwa:verify:live": "node scripts/validate_pwa_live_package.mjs",
+    "pwa:qa": "npm run build && npm run pwa:verify",
     "deploy:prod:safe": "node ./deploy-prod-align.mjs",
     "dev": "vite",
     "dev:local": "VITE_DEV_AUTH_HARNESS_ENABLED=true VITE_DEMO_LOGIN_ENABLED=true VITE_FIREBASE_AUTH_ENABLED=false VITE_FIRESTORE_CORE_ENABLED=false vite",
@@ -57,6 +60,7 @@
     "@emotion/react": "11.14.0",
     "@emotion/styled": "11.14.1",
     "@google-cloud/kms": "^5.2.0",
+    "@google/genai": "^2.6.0",
     "@mui/icons-material": "7.3.5",
     "@mui/material": "7.3.5",
     "@popperjs/core": "2.11.8",

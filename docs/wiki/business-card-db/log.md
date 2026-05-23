@@ -1,0 +1,69 @@
+# Business Card DB Wiki Log
+
+## 2026-05-23
+
+- Created the initial wiki/spec/plan structure for the InnerPlatform LAB business card DB.
+- Locked product decisions:
+  - PWA first, no native app store submission for v1.
+  - Vertex AI Gemini instead of Google Vision OCR.
+  - Org-wide contact search.
+  - Original business card images retained indefinitely.
+  - No Hermes agent in v1.
+- Added formulas for field confidence, duplicate candidate scoring, search ranking, and contact quality.
+- Added security rule that original images must be private Storage objects served only through BFF auth/audit.
+- Implemented A. PWA shell:
+  - Added LAB-gated admin and portal routes for `/business-cards` and `/portal/business-cards`.
+  - Added a mobile-first `BusinessCardLabPage` scaffold with capture/upload preview.
+  - Added image preparation helper with MIME validation, client compression target, and server hard limit constants.
+  - Added PWA manifest and service worker that avoids caching API and business-card image traffic.
+  - Verification: `npx vitest run src/app/platform/shell-lab-visibility.test.ts` passed 7/7; `npm run build` completed.
+  - gstack QA note: route discoverability is LAB-gated; service worker cache scope is limited to shell/brand assets.
+- Implemented B. BFF/Storage/Gemini foundation:
+  - Added `@google/genai` dependency and Vertex AI Gemini service wrapper.
+  - Added private business-card Storage helper that does not create Firebase download tokens.
+  - Added business-card schemas, domain normalization/scoring helpers, BFF routes, and app mounting.
+  - Added contact RBAC permissions and Vertex AI env examples.
+  - Verification: `npx vitest run server/bff/business-card-domain.test.mjs server/bff/business-card-storage.test.mjs server/bff/business-card-gemini-ai.test.mjs` passed 8/8; `npx vitest run server/bff/app.test.ts` passed 2/2; `npm run build` completed.
+  - gstack QA note: Gemini output is normalized before UI/API use, and missing Vertex config returns a manual-review draft instead of requiring API credentials during development.
+- Implemented C. Review/save/search workflow:
+  - Wired `BusinessCardLabPage` to BFF process, review, confirm, import queue, and contact search APIs.
+  - Added client-side review form helpers and tests for save-ready conditions.
+  - Removed private `storagePath` from process API responses while keeping it server-side for image streaming.
+  - Added PostgreSQL-inspired write-time derived fields: `normalizedName`, `normalizedOrganization`, `emailKeys`, `phoneKeys`, `phoneDigits`, `searchTokens`, `nameTrigrams`, `organizationTrigrams`, `quality`, `normalizationVersion`, and `extractionSchemaVersion`.
+  - Verification: targeted Vitest suite passed 37/37; `npm run build` completed.
+  - gstack QA note: Firestore remains a candidate lookup store, while BFF owns ranking and derived field generation.
+- Implemented D. Privacy/RBAC/release safeguards:
+  - Blocked client SDK direct access to `contacts`, `business_card_imports`, and `contact_events` in Firestore rules.
+  - Blocked direct Storage reads/writes for `orgs/{tenantId}/business-cards/**`; original images must go through BFF image endpoint.
+  - Added server-side decoded-byte upload limit enforcement.
+  - Changed malformed Gemini JSON responses into manual-review drafts instead of treating them as successful extraction.
+  - Added Firestore composite indexes for business-card review queue and contact token search.
+  - Added field index exemptions for large/free-text business-card fields.
+  - Verification: `npm run policy:verify` passed; `npx firebase-tools deploy --only firestore:rules,firestore:indexes,storage --project inner-platform-live-20260316 --dry-run` compiled rules successfully without deploying.
+  - gstack QA note: the two high-risk bypasses from QA were addressed by changing broad allow conditions, not only by adding specific deny blocks.
+- Follow-up gstack/superpowers verification pass:
+  - Found and fixed failed imports being confirmable as contacts.
+  - Found and fixed unsafe Storage path segment handling for actor/tenant/import IDs.
+  - Tightened Gemini malformed JSON detection so partial JSON cannot be treated as a successful extraction.
+  - Improved multi-token search scoring for queries such as `MYSC 홍길동`.
+  - Browser QA found a React warning from passing refs to the shared `Input`; converted `Input` to `forwardRef` and re-ran the browser check with no console warnings.
+  - Fresh verification after fixes: targeted business-card suite passed 41/41; `npm test` passed 1290/1290 with 52 skipped; `npm run build` completed; `git diff --check` passed.
+- Strengthened the Gemini extraction prompt after source review:
+  - Playwright-based Google Images sampling was attempted for Korean business-card examples, but Google returned an automated-traffic block page, so no Google image samples were used as prompt evidence.
+  - Used public business-card OCR and GitHub references to reinforce the prompt around JSON-only output, raw OCR review, mixed Korean/English cards, title vs role, organization vs department, fax exclusion, visible-only website extraction, evidence snippets, and multi-card warnings.
+  - Updated `server/bff/business-card-gemini-ai.mjs` and its tests so prompt regressions are covered directly.
+- Implemented PWA commercial packaging foundation:
+  - Generated square PWA icons from the existing MYSCube logo for 192px, 512px, and maskable 512px use.
+  - Added public install endpoints for `/install`, `/install/ios`, and `/install/android`.
+  - Added a business-card page install prompt that links users to the correct device-specific install endpoint.
+  - Added `npm run pwa:verify` and `npm run pwa:qa` to validate manifest fields, icon dimensions, iOS metadata, service worker cache boundaries, and install route registration.
+  - Added Android TWA handoff docs and a non-public `assetlinks` template; public Digital Asset Links stay blocked until the Play signing SHA-256 fingerprint exists.
+- Added live PWA release gate:
+  - Clarified that InnerPlatform stays desktop-first, while the business-card DB capture/review surface is the mobile-first PWA scope.
+  - Changed the live Vercel `Permissions-Policy` from camera-blocked to same-origin camera allowed so mobile capture can work after user permission.
+  - Added `npm run pwa:verify:live -- https://inner-platform.vercel.app` for post-deploy HTTPS endpoint, manifest, icon, service worker, and camera-policy checks.
+  - Wired `deploy:prod:safe` to run the live PWA check after canonical Vercel alias confirmation.
+- Prepared production Firebase release:
+  - Confirmed `inner-platform.vercel.app` is present in Firebase Auth authorized domains.
+  - Deployed Firestore rules, Firestore indexes, and Storage rules to `inner-platform-live-20260316`.
+  - Removed unnecessary composite indexes for business-card import review queue and contact token search because Firestore handles those queries through single-field index controls.

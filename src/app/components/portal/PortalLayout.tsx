@@ -20,6 +20,7 @@ import {
   Bell,
   UserCircle2,
   User,
+  UserRoundCheck,
 } from 'lucide-react';
 import { PortalProvider, usePortalStore } from '../../data/portal-store';
 import { useAuth } from '../../data/auth-store';
@@ -86,6 +87,7 @@ const NAV_SECTIONS = [
     title: '마이메뉴',
     items: [
       { to: '/portal', icon: LayoutDashboard, label: '내 프로젝트 현황', exact: true },
+      { to: '/portal/business-cards', icon: UserRoundCheck, label: '명함 DB' },
       { to: '/portal/payroll', icon: CircleDollarSign, label: '인건비/공지', accent: true },
     ],
   },

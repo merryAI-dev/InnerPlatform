@@ -22,6 +22,10 @@ export type PlatformPermission =
   | 'evidence:write'
   | 'evidence:drive:write'
   | 'audit:read'
+  | 'contact:read'
+  | 'contact:write'
+  | 'contact:image:read'
+  | 'contact:delete'
   | 'user:manage'
   | 'tenant:manage';
 
@@ -48,6 +52,10 @@ const KNOWN_PERMISSIONS = new Set<PlatformPermission>([
   'evidence:write',
   'evidence:drive:write',
   'audit:read',
+  'contact:read',
+  'contact:write',
+  'contact:image:read',
+  'contact:delete',
   'user:manage',
   'tenant:manage',
 ]);

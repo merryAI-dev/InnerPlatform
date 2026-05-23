@@ -78,6 +78,8 @@ import { createGoogleSheetMigrationAiService } from './google-sheet-migration-ai
 import { createProjectRequestContractAiService } from './project-request-contract-ai.mjs';
 import { createProjectRequestContractStorageService } from './project-request-contract-storage.mjs';
 import { createProjectSheetSourceStorageService } from './project-sheet-source-storage.mjs';
+import { createBusinessCardGeminiAiService } from './business-card-gemini-ai.mjs';
+import { createBusinessCardStorageService } from './business-card-storage.mjs';
 import { extractTextFromPdfBuffer } from './pdf-text.mjs';
 import { createSlackAlertService } from './slack-alerts.mjs';
 import { updateCounterpartyHistory, lookupCounterpartyHistory } from './counterparty-budget-history.mjs';
@@ -88,6 +90,7 @@ import { mountTransactionRoutes } from './routes/transactions.mjs';
 import { mountAuditRoutes } from './routes/audit.mjs';
 import { mountMemberRoutes } from './routes/members.mjs';
 import { mountCashflowExportRoutes } from './routes/cashflow-exports.mjs';
+import { mountBusinessCardRoutes } from './routes/business-cards.mjs';
 
 function createHttpError(statusCode, message, code = 'request_error') {
   const error = new Error(message);
@@ -641,6 +644,8 @@ export function createBffApp(options = {}) {
   const projectRequestContractAiService = options.projectRequestContractAiService || createProjectRequestContractAiService();
   const projectRequestContractStorageService = options.projectRequestContractStorageService || createProjectRequestContractStorageService({ projectId });
   const projectSheetSourceStorageService = options.projectSheetSourceStorageService || createProjectSheetSourceStorageService({ projectId });
+  const businessCardStorageService = options.businessCardStorageService || createBusinessCardStorageService({ projectId });
+  const businessCardGeminiAiService = options.businessCardGeminiAiService || createBusinessCardGeminiAiService();
   const allowedOrigins = parseAllowedOrigins(options.allowedOrigins || process.env.BFF_ALLOWED_ORIGINS);
   const relationRulesPolicyPath = options.relationRulesPolicyPath || resolveRelationRulesPolicyPath();
   const workQueueBatchSizeRaw = Number.parseInt(process.env.BFF_WORK_QUEUE_BATCH || '100', 10);
@@ -1353,6 +1358,16 @@ export function createBffApp(options = {}) {
   mountLedgerRoutes(app, { db, now, idempotencyService, auditChainService, piiProtector });
   mountTransactionRoutes(app, { db, now, idempotencyService, auditChainService, piiProtector, rbacPolicy, driveService });
   mountAuditRoutes(app, { db, auditChainService });
+  mountBusinessCardRoutes(app, {
+    db,
+    now,
+    idempotencyService,
+    auditChainService,
+    piiProtector,
+    rbacPolicy,
+    businessCardStorageService,
+    businessCardGeminiAiService,
+  });
   mountMemberRoutes(app, {
     db,
     now,

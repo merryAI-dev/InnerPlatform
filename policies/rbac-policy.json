@@ -23,6 +23,10 @@
     "evidence:write",
     "evidence:drive:write",
     "audit:read",
+    "contact:read",
+    "contact:write",
+    "contact:image:read",
+    "contact:delete",
     "user:manage",
     "tenant:manage"
   ],
@@ -43,6 +47,10 @@
       "evidence:write",
       "evidence:drive:write",
       "audit:read",
+      "contact:read",
+      "contact:write",
+      "contact:image:read",
+      "contact:delete",
       "user:manage",
       "tenant:manage"
     ],
@@ -61,7 +69,10 @@
       "evidence:read",
       "evidence:write",
       "evidence:drive:write",
-      "audit:read"
+      "audit:read",
+      "contact:read",
+      "contact:write",
+      "contact:image:read"
     ],
     "pm": [
       "project:read",
@@ -74,7 +85,10 @@
       "comment:write",
       "evidence:read",
       "evidence:write",
-      "evidence:drive:write"
+      "evidence:drive:write",
+      "contact:read",
+      "contact:write",
+      "contact:image:read"
     ],
     "viewer": [
       "project:read",
@@ -84,7 +98,10 @@
       "comment:read",
       "comment:write",
       "evidence:read",
-      "evidence:drive:write"
+      "evidence:drive:write",
+      "contact:read",
+      "contact:write",
+      "contact:image:read"
     ]
   },
   "roleChangeRules": {
