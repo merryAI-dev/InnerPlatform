@@ -5,6 +5,8 @@ coverage/
 test-results/
 .playwright-cli/
 tmp/
+.playwright-cli/
+output/
 rust/**/target/
 *.log
 
