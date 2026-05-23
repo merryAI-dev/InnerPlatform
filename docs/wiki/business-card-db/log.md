@@ -67,3 +67,10 @@
   - Confirmed `inner-platform.vercel.app` is present in Firebase Auth authorized domains.
   - Deployed Firestore rules, Firestore indexes, and Storage rules to `inner-platform-live-20260316`.
   - Removed unnecessary composite indexes for business-card import review queue and contact token search because Firestore handles those queries through single-field index controls.
+- Released business-card DB PWA package to production:
+  - Git commit `46a021a` deployed through Vercel production.
+  - Canonical alias `https://inner-platform.vercel.app` verified against `https://inner-platform-izmq2tzsp-merryai-devs-projects.vercel.app`.
+  - Live PWA verifier passed for install routes, manifest, icons, service worker private-cache bypasses, `/business-cards`, and camera permissions policy.
+  - Browser canary passed on desktop and iPhone viewport for `/install`, `/install/ios`, `/install/android`, and `/business-cards`.
+  - Physical iPhone/Android install and camera QA remains pending because it requires real devices.
+  - Android TWA remains deferred; no placeholder `assetlinks.json` was published.

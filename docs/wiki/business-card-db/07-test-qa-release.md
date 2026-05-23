@@ -81,6 +81,35 @@ Before reporting the release as complete, capture:
 - Firebase production rules/index deploy: `npx firebase-tools deploy --only firestore:rules,firestore:indexes,storage --project inner-platform-live-20260316` completed at 2026-05-23 13:31 KST.
 - Firestore index note: removed unnecessary composite indexes for `business_card_imports(status, __name__)` and `contacts(searchTokens, __name__)`; Firestore rejected them as single-field-index cases.
 
+### Production Deploy Evidence - 2026-05-23 13:38 KST
+
+- Git commit deployed: `46a021a`.
+- Vercel production deployment URL: `https://inner-platform-izmq2tzsp-merryai-devs-projects.vercel.app`.
+- Vercel deployment id: `dpl_2mDNZS44RGaFbrzBwVAh95h2oaJL`.
+- Canonical alias verified: `https://inner-platform.vercel.app`.
+- Additional aliases verified: `https://submit-mysc.com`, `https://inner-platform-merryai-devs-projects.vercel.app`.
+- Live PWA verifier: `npm run pwa:verify:live -- https://inner-platform.vercel.app` passed.
+- Live camera header: `Permissions-Policy: camera=(self), microphone=(), geolocation=()`.
+- Browser canary: desktop and iPhone viewport checks passed for `/install`, `/install/ios`, `/install/android`, and `/business-cards`; status 200, app root visible, no console errors.
+- Android TWA gate: `public/.well-known/assetlinks.json` is not published; placeholder Digital Asset Links remain blocked.
+
+### Device QA Evidence - 2026-05-23
+
+- iPhone:
+  - model: pending physical device QA
+  - iOS: pending physical device QA
+  - Safari: pending physical device QA
+  - Add to Home Screen: pending physical device QA
+  - camera/gallery: pending physical device QA
+  - upload/review/save/search: pending physical device QA
+- Android:
+  - model: pending physical device QA
+  - Android: pending physical device QA
+  - Chrome: pending physical device QA
+  - Install: pending physical device QA
+  - camera/gallery: pending physical device QA
+  - upload/review/save/search: pending physical device QA
+
 Manual smoke:
 
 - LAB on/off behavior
