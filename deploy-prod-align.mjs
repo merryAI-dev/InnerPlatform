@@ -147,7 +147,7 @@ async function main() {
   if (!deploymentHost) {
     run('node', ['scripts/assert-safe-local-deploy.mjs'], { stdio: 'inherit' });
 
-    const deployment = run('vercel', ['deploy', '--prod', '--yes']);
+    const deployment = run('vercel', ['deploy', '--prod', '--yes', '--archive=tgz']);
     process.stdout.write(deployment.stdout);
     process.stderr.write(deployment.stderr);
 
