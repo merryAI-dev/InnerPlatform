@@ -114,6 +114,7 @@ interface ProjectEditorWizardProps {
     contractDocument: ProjectEditorDraft['contractDocument'];
     contractAnalysis: ProjectRequestContractAnalysis | null;
   }>;
+  canRemoveContractDocument?: boolean;
   onCancel?: () => void;
   onSubmit: (draft: ProjectEditorDraft, actionId: string) => void | Promise<void>;
 }
@@ -209,6 +210,16 @@ function formatTeamMemberIdentityInput(member: ProjectTeamMemberAssignment): str
 
 function isAdminMode(mode: ProjectEditorMode) {
   return mode === 'admin';
+}
+
+function isSameContractDocument(
+  current: ProjectEditorDraft['contractDocument'],
+  initial: ProjectEditorDraft['contractDocument'],
+) {
+  if (!current || !initial) return current === initial;
+  return current.path === initial.path
+    && current.downloadURL === initial.downloadURL
+    && current.uploadedAt === initial.uploadedAt;
 }
 
 function createProjectEditorWizardDraft(overrides: Partial<ProjectEditorDraft> = {}): ProjectEditorDraft {
@@ -340,6 +351,7 @@ export function ProjectEditorWizard({
   actions,
   busyActionId,
   onContractFileUpload,
+  canRemoveContractDocument,
   onCancel,
   onSubmit,
 }: ProjectEditorWizardProps) {
@@ -348,6 +360,16 @@ export function ProjectEditorWizard({
   const [contractUploadState, setContractUploadState] = useState<ContractUploadState>('idle');
   const [contractUploadError, setContractUploadError] = useState('');
   const contractUploadInputRef = useRef<HTMLInputElement | null>(null);
+  const initialContractDocument = initialDraft.contractDocument ?? null;
+  const initialContractAnalysis = initialDraft.contractAnalysis ?? null;
+  const canRemoveExistingContractDocument = canRemoveContractDocument ?? isAdminMode(mode);
+  const isCurrentContractDocumentInitial = isSameContractDocument(draft.contractDocument, initialContractDocument);
+  const canRemoveCurrentContractDocument = Boolean(
+    draft.contractDocument && (canRemoveExistingContractDocument || !isCurrentContractDocumentInitial),
+  );
+  const isExistingContractDocumentLocked = Boolean(
+    draft.contractDocument && initialContractDocument && isCurrentContractDocumentInitial && !canRemoveExistingContractDocument,
+  );
 
   useEffect(() => {
     setDraft(createProjectEditorWizardDraft(initialDraft));
@@ -482,8 +504,12 @@ export function ProjectEditorWizard({
   const removeContractDocument = () => {
     setDraft((prev) => createProjectEditorWizardDraft({
       ...prev,
-      contractDocument: null,
-      contractAnalysis: null,
+      contractDocument: initialContractDocument && !canRemoveExistingContractDocument
+        ? initialContractDocument
+        : null,
+      contractAnalysis: initialContractDocument && !canRemoveExistingContractDocument
+        ? initialContractAnalysis
+        : null,
     }));
     setContractUploadState('idle');
     setContractUploadError('');
@@ -635,11 +661,18 @@ export function ProjectEditorWizard({
                   <Button asChild type="button" variant="outline" size="sm" className="h-7 px-2 text-[11px]">
                     <a href={draft.contractDocument.downloadURL} target="_blank" rel="noreferrer">원문 보기</a>
                   </Button>
-                  <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[11px] text-rose-600" onClick={removeContractDocument}>
-                    <X className="mr-1 h-3.5 w-3.5" />
-                    첨부 제거
-                  </Button>
+                  {canRemoveCurrentContractDocument ? (
+                    <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[11px] text-rose-600" onClick={removeContractDocument}>
+                      <X className="mr-1 h-3.5 w-3.5" />
+                      {initialContractDocument && !canRemoveExistingContractDocument ? '교체 취소' : '첨부 제거'}
+                    </Button>
+                  ) : null}
                 </div>
+              ) : null}
+              {isExistingContractDocumentLocked ? (
+                <p className="mt-2 text-[11px] text-muted-foreground">
+                  기존 계약서는 관리자 화면에서만 제거할 수 있습니다.
+                </p>
               ) : null}
               {draft.contractAnalysis ? (
                 <div className="mt-3 rounded-lg border border-emerald-200 bg-white px-3 py-2 text-[12px] leading-5 text-slate-700">
