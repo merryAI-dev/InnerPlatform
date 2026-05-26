@@ -83,6 +83,12 @@ import { createBusinessCardStorageService } from './business-card-storage.mjs';
 import { extractTextFromPdfBuffer } from './pdf-text.mjs';
 import { createSlackAlertService } from './slack-alerts.mjs';
 import { updateCounterpartyHistory, lookupCounterpartyHistory } from './counterparty-budget-history.mjs';
+import {
+  assertBffRuntimeSafety,
+  evaluateWorkerAuthorization,
+  resolveBffRuntimeSafetyConfig,
+  resolveBffWorkerAuthPolicy,
+} from './runtime-safety.mjs';
 
 import { mountProjectRoutes } from './routes/projects.mjs';
 import { mountLedgerRoutes } from './routes/ledgers.mjs';
@@ -168,11 +174,16 @@ function parseAllowedOrigins(value) {
   return ['http://127.0.0.1:5173', 'http://localhost:5173'];
 }
 
-function isKnownMyscVercelOrigin(origin) {
+function isKnownMyscPreviewOrigin(origin) {
+  return /^https:\/\/inner-platform(?:-[a-z0-9-]+)?-merryai-devs-projects\.vercel\.app$/i.test(origin);
+}
+
+function isKnownMyscVercelOrigin(origin, deployEnv = 'local') {
   const normalized = readOptionalText(origin);
   if (!normalized) return false;
   if (normalized === 'https://inner-platform.vercel.app') return true;
-  return /^https:\/\/inner-platform(?:-[a-z0-9-]+)?-merryai-devs-projects\.vercel\.app$/i.test(normalized);
+  if (deployEnv === 'live') return false;
+  return isKnownMyscPreviewOrigin(normalized);
 }
 
 function buildListResponse(items, limit) {
@@ -628,9 +639,25 @@ function createMutatingRoute(idempotencyService, routeHandler) {
 
 export function createBffApp(options = {}) {
   const app = express();
+  const env = options.env || process.env;
   const now = options.now || (() => new Date().toISOString());
-  const projectId = options.projectId || resolveProjectId();
-  const db = options.db || createFirestoreDb({ projectId });
+  const projectId = options.projectId || resolveProjectId(env);
+  const allowedOrigins = parseAllowedOrigins(options.allowedOrigins || env.BFF_ALLOWED_ORIGINS);
+  const workerAuthPolicy = options.workerAuthPolicy || resolveBffWorkerAuthPolicy({
+    workerSecret: options.workerSecret,
+  }, env);
+  const runtimeSafetyConfig = resolveBffRuntimeSafetyConfig({
+    projectId,
+    allowedOrigins,
+    workerSecret: options.workerSecret,
+    workerSecrets: options.workerSecrets,
+    firestoreEmulator: options.firestoreEmulator,
+  }, env);
+
+  assertBffRuntimeSafety(runtimeSafetyConfig);
+
+  const createDb = options.createDb || createFirestoreDb;
+  const db = options.db || createDb({ projectId });
   const authMode = options.authMode || resolveAuthMode();
   const verifyToken = options.tokenVerifier || createFirebaseTokenVerifier({ projectId });
   const authAdminService = options.authAdminService || createFirebaseAuthAdminService({ projectId });
@@ -646,7 +673,6 @@ export function createBffApp(options = {}) {
   const projectSheetSourceStorageService = options.projectSheetSourceStorageService || createProjectSheetSourceStorageService({ projectId });
   const businessCardStorageService = options.businessCardStorageService || createBusinessCardStorageService({ projectId });
   const businessCardGeminiAiService = options.businessCardGeminiAiService || createBusinessCardGeminiAiService();
-  const allowedOrigins = parseAllowedOrigins(options.allowedOrigins || process.env.BFF_ALLOWED_ORIGINS);
   const relationRulesPolicyPath = options.relationRulesPolicyPath || resolveRelationRulesPolicyPath();
   const workQueueBatchSizeRaw = Number.parseInt(process.env.BFF_WORK_QUEUE_BATCH || '100', 10);
   const workQueueMaxAttemptsRaw = Number.parseInt(process.env.BFF_WORK_QUEUE_MAX_ATTEMPTS || '6', 10);
@@ -660,7 +686,6 @@ export function createBffApp(options = {}) {
   const outboxMaxAttempts = Number.isFinite(outboxMaxAttemptsRaw) && outboxMaxAttemptsRaw > 0 ? outboxMaxAttemptsRaw : 8;
   const clientErrorBatchSize = Number.isFinite(clientErrorBatchSizeRaw) && clientErrorBatchSizeRaw > 0 ? clientErrorBatchSizeRaw : 20;
   const clientErrorMaxAttempts = Number.isFinite(clientErrorMaxAttemptsRaw) && clientErrorMaxAttemptsRaw > 0 ? clientErrorMaxAttemptsRaw : 5;
-  const workerSecret = readOptionalText(options.workerSecret || process.env.BFF_WORKER_SECRET || process.env.CRON_SECRET);
   const slackAlertService = options.slackAlertService || createSlackAlertService();
   const projectRegistrationSlackService = options.projectRegistrationSlackService
     || createSlackAlertService(resolveProjectRegistrationSlackConfig(options));
@@ -689,7 +714,7 @@ export function createBffApp(options = {}) {
     const isAllowedOrigin = allowAnyOrigin
       || !requestOrigin
       || allowedOrigins.includes(requestOrigin)
-      || isKnownMyscVercelOrigin(requestOrigin);
+      || isKnownMyscVercelOrigin(requestOrigin, runtimeSafetyConfig.deployEnv);
 
     if (!isAllowedOrigin) {
       res.status(403).json({
@@ -766,15 +791,11 @@ export function createBffApp(options = {}) {
   }
 
   function assertInternalWorkerAuthorized(req) {
-    if (!workerSecret) {
-      throw createHttpError(503, 'Worker secret is not configured', 'worker_secret_missing');
-    }
     const headerSecret = readOptionalText(req.header('x-worker-secret'));
     const bearerSecret = parseBearerToken(req.header('authorization'));
-    const matched = (headerSecret && headerSecret === workerSecret)
-      || (bearerSecret && bearerSecret === workerSecret);
-    if (!matched) {
-      throw createHttpError(401, 'Worker authorization failed', 'unauthorized_worker');
+    const result = evaluateWorkerAuthorization({ headerSecret, bearerSecret }, workerAuthPolicy);
+    if (!result.ok) {
+      throw createHttpError(result.statusCode, result.message, result.code);
     }
   }
 
