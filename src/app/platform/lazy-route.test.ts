@@ -38,4 +38,14 @@ describe('loadLazyRouteModule', () => {
     expect(spy).toHaveBeenCalledWith('[routes] failed to load PortalSubmissionsPage:', error);
     spy.mockRestore();
   });
+
+  it('falls back cleanly when a route module resolves to undefined', async () => {
+    const result = await loadLazyRouteModule(
+      async () => undefined as never,
+      'PortalProjectSettings',
+      Fallback,
+    );
+
+    expect(result.default).toBe(Fallback as ComponentType);
+  });
 });
