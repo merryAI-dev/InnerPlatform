@@ -133,6 +133,9 @@ export const EMPLOYEES: MyscEmployee[] = [
   { id: 'e82', realName: '이지영', nickname: '' },
   { id: 'e83', realName: '노성진', nickname: '' },
   { id: 'e84', realName: '김민주', nickname: '' },  // 벤처리움 김민주(별도)
+  { id: 'e85', realName: '박지연', nickname: '느티' },
+  { id: 'e86', realName: '김소영', nickname: '소이' },
+  { id: 'e87', realName: '최새롬', nickname: '노리' },
 ];
 
 const empMap = new Map(EMPLOYEES.map(e => [e.realName, e]));

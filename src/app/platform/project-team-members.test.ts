@@ -4,6 +4,7 @@ import {
   hasIncompleteProjectTeamMembers,
   normalizeProjectTeamMemberDraftRows,
   normalizeProjectTeamMembers,
+  parseProjectTeamMemberIdentityInput,
 } from './project-team-members';
 
 describe('project-team-members', () => {
@@ -60,5 +61,20 @@ describe('project-team-members', () => {
       { memberName: '김다은', memberNickname: '데이나', role: '', participationRate: 50 },
     ]);
     expect(hasIncompleteProjectTeamMembers(members)).toBe(true);
+  });
+
+  it('parses manual identity input in 이름(별명) format', () => {
+    expect(parseProjectTeamMemberIdentityInput('박지연(느티)')).toEqual({
+      memberName: '박지연',
+      memberNickname: '느티',
+    });
+    expect(parseProjectTeamMemberIdentityInput(' 박지연 ( 느티 ) ')).toEqual({
+      memberName: '박지연',
+      memberNickname: '느티',
+    });
+    expect(parseProjectTeamMemberIdentityInput('느티')).toEqual({
+      memberName: '느티',
+      memberNickname: '',
+    });
   });
 });

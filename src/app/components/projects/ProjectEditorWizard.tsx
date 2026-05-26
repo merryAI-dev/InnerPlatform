@@ -54,6 +54,7 @@ import { createProjectEditorDraft, type ProjectEditorDraft, type ProjectEditorMo
 import {
   formatProjectTeamMembersSummary,
   normalizeProjectTeamMemberDraftRows,
+  parseProjectTeamMemberIdentityInput,
 } from '../../platform/project-team-members';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -139,11 +140,19 @@ function updateFlag(flags: ProjectFinancialInputFlags, key: keyof ProjectFinanci
 
 function createEmptyTeamMember(): ProjectTeamMemberAssignment {
   return {
+    inputMode: 'search',
     memberName: '',
     memberNickname: '',
     role: '',
     participationRate: 0,
   };
+}
+
+function formatTeamMemberIdentityInput(member: ProjectTeamMemberAssignment): string {
+  const name = String(member.memberName || '').trim();
+  const nickname = String(member.memberNickname || '').trim();
+  if (!nickname) return name;
+  return `${name}(${nickname})`;
 }
 
 function isAdminMode(mode: ProjectEditorMode) {
@@ -187,6 +196,7 @@ function TeamMemberSearchCombobox({
     }
     const option = PROJECT_TEAM_MEMBER_OPTION_MAP[value];
     onSelect({
+      inputMode: 'search',
       memberName: option?.name || value,
       memberNickname: option?.nickname || '',
     });
@@ -725,6 +735,7 @@ export function ProjectEditorWizard({
       ) : (
         <div className="space-y-3">
           {draft.teamMembersDetailed.map((member, index) => {
+            const teamMemberInputMode = member.inputMode === 'manual' ? 'manual' : 'search';
             const selectedNames = new Set(
               draft.teamMembersDetailed
                 .map((item, itemIndex) => (itemIndex === index ? '' : item.memberName))
@@ -740,15 +751,46 @@ export function ProjectEditorWizard({
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
                 </div>
-                <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_120px]">
+                <div className="mt-3 grid gap-3 lg:grid-cols-[132px_minmax(0,1.4fr)_minmax(0,1fr)_120px]">
+                  <div>
+                    <Label className="text-xs">입력 방식</Label>
+                    <Select
+                      value={teamMemberInputMode}
+                      onValueChange={(value) => updateTeamMember(index, {
+                        inputMode: value === 'manual' ? 'manual' : 'search',
+                        memberName: '',
+                        memberNickname: '',
+                      })}
+                    >
+                      <SelectTrigger className="mt-1 h-9 text-sm">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="search">팀원 검색</SelectItem>
+                        <SelectItem value="manual">직접 입력</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                   <div>
                     <Label className="text-xs">팀원</Label>
-                    <TeamMemberSearchCombobox
-                      member={member}
-                      selectedNames={selectedNames}
-                      currentTeamMemberOptionExists={currentTeamMemberOptionExists}
-                      onSelect={(patch) => updateTeamMember(index, patch)}
-                    />
+                    {teamMemberInputMode === 'search' ? (
+                      <TeamMemberSearchCombobox
+                        member={member}
+                        selectedNames={selectedNames}
+                        currentTeamMemberOptionExists={currentTeamMemberOptionExists}
+                        onSelect={(patch) => updateTeamMember(index, patch)}
+                      />
+                    ) : (
+                      <Input
+                        value={formatTeamMemberIdentityInput(member)}
+                        onChange={(event) => updateTeamMember(index, {
+                          inputMode: 'manual',
+                          ...parseProjectTeamMemberIdentityInput(event.target.value),
+                        })}
+                        placeholder="이름(별명)"
+                        className="mt-1 h-9 text-sm"
+                      />
+                    )}
                   </div>
                   <div>
                     <Label className="text-xs">역할</Label>
