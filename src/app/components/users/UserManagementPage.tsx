@@ -39,6 +39,8 @@ import { Separator } from '../ui/separator';
 import {
   emptyGovernanceSummary,
   filterGovernanceRows,
+  getFriendlyGovernanceIssueLabels,
+  getGovernanceOperatorStatus,
   getRecommendedGovernanceRole,
   type AuthGovernanceFilters,
 } from './auth-governance-view-model';
@@ -49,21 +51,17 @@ const ROLE_OPTIONS: Array<{ value: UserRole; label: string }> = [
   { value: 'pm', label: 'PM' },
 ];
 
-const DRIFT_LABELS: Record<string, string> = {
-  missing_auth: 'Auth 없음',
-  missing_canonical_member: 'Canonical 멤버 없음',
-  legacy_only: 'Legacy만 존재',
-  duplicate_member_docs: '중복 멤버 문서',
-  legacy_role_mismatch: 'Legacy role 불일치',
-  claim_mismatch: 'Claim 불일치',
-  bootstrap_admin_not_adopted: 'Bootstrap admin 미반영',
-};
-
 const ROLE_BADGE_CLASS: Record<string, string> = {
   admin: 'bg-stone-900 text-white',
   finance: 'bg-stone-700 text-white',
   pm: 'bg-stone-200 text-stone-900',
 };
+
+const OPERATOR_STATUS_CLASS = {
+  success: 'bg-emerald-100 text-emerald-800 border border-emerald-200',
+  warning: 'bg-amber-100 text-amber-900 border border-amber-200',
+  danger: 'bg-rose-100 text-rose-800 border border-rose-200',
+} as const;
 
 function roleLabel(role: string | null | undefined): string {
   const normalized = (role || '').trim().toLowerCase();
@@ -115,7 +113,7 @@ function KpiCard({
 
 function SourceBadge({ ok, label }: { ok: boolean; label: string }) {
   return (
-    <Badge className={ok ? 'bg-stone-900 text-white' : 'bg-amber-100 text-amber-800'}>
+    <Badge className={ok ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}>
       {label}
     </Badge>
   );
@@ -251,12 +249,12 @@ export function UserManagementPage() {
         <PageHeader
           icon={UserCog}
           iconGradient="linear-gradient(135deg, #44403c 0%, #0c0a09 100%)"
-          title="Auth/RBAC 정렬 대시보드"
-          description="Firebase Auth와 member 문서를 함께 관리하는 운영 화면"
+          title="권한 관리"
+          description="관리자, 재무팀, PM 권한을 한 화면에서 확인하고 반영합니다."
         />
         <Card className="border-stone-200">
           <CardContent className="p-6 text-sm text-stone-600">
-            이 화면은 BFF와 Firebase ID 토큰이 활성화된 admin 환경에서만 동작합니다.
+            이 화면은 관리자 로그인 환경에서만 사용할 수 있습니다.
           </CardContent>
         </Card>
       </div>
@@ -268,8 +266,8 @@ export function UserManagementPage() {
       <PageHeader
         icon={UserCog}
         iconGradient="linear-gradient(135deg, #44403c 0%, #0c0a09 100%)"
-        title="Auth/RBAC 정렬 대시보드"
-        description="Firebase Auth, canonical member, legacy member, custom claim drift를 한 화면에서 정렬합니다."
+        title="권한 관리"
+        description="사용자가 어떤 권한으로 로그인되는지 확인하고, 필요한 권한을 즉시 반영합니다."
         badge={`${summary.total}건`}
         actions={(
           <div className="flex items-center gap-2">
@@ -280,7 +278,7 @@ export function UserManagementPage() {
               disabled={loading || bulkSyncing}
             >
               <GitMerge className={`h-4 w-4 ${bulkSyncing ? 'animate-pulse' : ''}`} />
-              정렬 필요 전체 적용
+              필요한 권한 모두 반영
             </Button>
             <Button
               variant="outline"
@@ -290,19 +288,31 @@ export function UserManagementPage() {
               disabled={loading || bulkSyncing}
             >
               <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-              새로고침
+              목록 다시 불러오기
             </Button>
           </div>
         )}
       />
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
-        <KpiCard icon={Users} label="전체 정렬 대상" value={summary.total} />
-        <KpiCard icon={GitMerge} label="정렬 필요" value={summary.needsDeepSync} tone={summary.needsDeepSync > 0 ? 'danger' : 'default'} />
-        <KpiCard icon={KeyRound} label="Auth 없음" value={summary.missingAuth} tone={summary.missingAuth > 0 ? 'danger' : 'default'} />
-        <KpiCard icon={Database} label="Canonical 없음" value={summary.missingCanonicalMember} tone={summary.missingCanonicalMember > 0 ? 'danger' : 'default'} />
-        <KpiCard icon={AlertTriangle} label="중복 member" value={summary.duplicateMemberDocs} tone={summary.duplicateMemberDocs > 0 ? 'danger' : 'default'} />
-        <KpiCard icon={Shield} label="Bootstrap 후보" value={summary.bootstrapCandidates} />
+        <KpiCard icon={Users} label="전체 사용자" value={summary.total} />
+        <KpiCard icon={GitMerge} label="권한 반영 필요" value={summary.needsDeepSync} tone={summary.needsDeepSync > 0 ? 'danger' : 'default'} />
+        <KpiCard icon={KeyRound} label="로그인 계정 없음" value={summary.missingAuth} tone={summary.missingAuth > 0 ? 'danger' : 'default'} />
+        <KpiCard icon={Database} label="직원 권한 기록 없음" value={summary.missingCanonicalMember} tone={summary.missingCanonicalMember > 0 ? 'danger' : 'default'} />
+        <KpiCard icon={AlertTriangle} label="중복 기록" value={summary.duplicateMemberDocs} tone={summary.duplicateMemberDocs > 0 ? 'danger' : 'default'} />
+        <KpiCard icon={Shield} label="기본 관리자 후보" value={summary.bootstrapCandidates} />
+      </div>
+
+      <div className="rounded-xl border border-stone-200 bg-stone-950 px-5 py-4 text-white shadow-sm">
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div>
+            <div className="text-sm font-semibold">운영 기준</div>
+            <div className="mt-1 text-sm text-stone-300">
+              권한 반영은 로그인 권한과 직원 권한 기록을 같은 값으로 맞춥니다. 반영 후 사용자는 다시 로그인하면 새 권한으로 들어옵니다.
+            </div>
+          </div>
+          <Badge className="w-fit bg-white text-stone-950">관리자 전용</Badge>
+        </div>
       </div>
 
       <Card className="border-stone-200">
@@ -312,16 +322,16 @@ export function UserManagementPage() {
             <Input
               value={filters.searchText}
               onChange={(event) => setFilters((prev) => ({ ...prev, searchText: event.target.value }))}
-              placeholder="이메일, 이름, docId, drift 검색"
+              placeholder="이메일이나 이름으로 검색"
               className="h-9 border-stone-300 pl-9"
             />
           </div>
           <Select value={filters.role} onValueChange={(value) => setFilters((prev) => ({ ...prev, role: value as AuthGovernanceFilters['role'] }))}>
             <SelectTrigger className="h-9 w-[150px] border-stone-300 bg-white">
-              <SelectValue placeholder="권한 추천값" />
+              <SelectValue placeholder="권한" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="ALL">전체 권한</SelectItem>
+              <SelectItem value="ALL">권한 전체</SelectItem>
               {ROLE_OPTIONS.map((item) => (
                 <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
               ))}
@@ -329,23 +339,23 @@ export function UserManagementPage() {
           </Select>
           <Select value={filters.drift} onValueChange={(value) => setFilters((prev) => ({ ...prev, drift: value as AuthGovernanceFilters['drift'] }))}>
             <SelectTrigger className="h-9 w-[150px] border-stone-300 bg-white">
-              <SelectValue placeholder="정렬 상태" />
+              <SelectValue placeholder="상태" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="ALL">전체 상태</SelectItem>
-              <SelectItem value="DRIFT_ONLY">정렬 필요만</SelectItem>
-              <SelectItem value="CLEAN_ONLY">정렬 완료만</SelectItem>
+              <SelectItem value="ALL">상태 전체</SelectItem>
+              <SelectItem value="DRIFT_ONLY">확인 필요만</SelectItem>
+              <SelectItem value="CLEAN_ONLY">정상만</SelectItem>
             </SelectContent>
           </Select>
           <Select value={filters.source} onValueChange={(value) => setFilters((prev) => ({ ...prev, source: value as AuthGovernanceFilters['source'] }))}>
             <SelectTrigger className="h-9 w-[170px] border-stone-300 bg-white">
-              <SelectValue placeholder="소스 상태" />
+              <SelectValue placeholder="계정 상태" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="ALL">전체 소스</SelectItem>
-              <SelectItem value="AUTH_MISSING">Auth 없음</SelectItem>
-              <SelectItem value="MEMBER_MISSING">Canonical 없음</SelectItem>
-              <SelectItem value="BOOTSTRAP">Bootstrap 후보</SelectItem>
+              <SelectItem value="ALL">계정 전체</SelectItem>
+              <SelectItem value="AUTH_MISSING">로그인 계정 없음</SelectItem>
+              <SelectItem value="MEMBER_MISSING">직원 권한 기록 없음</SelectItem>
+              <SelectItem value="BOOTSTRAP">기본 관리자 후보</SelectItem>
             </SelectContent>
           </Select>
         </CardContent>
@@ -363,13 +373,15 @@ export function UserManagementPage() {
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(360px,0.9fr)]">
         <Card className="border-stone-200">
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-semibold text-stone-900">정렬 대상 목록</CardTitle>
+            <CardTitle className="text-sm font-semibold text-stone-900">사용자 권한 목록</CardTitle>
           </CardHeader>
           <CardContent className="p-0">
             <ScrollArea className="h-[720px]">
               <div className="divide-y divide-stone-200">
                 {filteredRows.map((row) => {
                   const role = draftRoles[row.identityKey] || getRecommendedGovernanceRole(row);
+                  const status = getGovernanceOperatorStatus(row);
+                  const issueLabels = getFriendlyGovernanceIssueLabels(row);
                   const selected = selectedRow?.identityKey === row.identityKey;
                   return (
                     <div
@@ -381,30 +393,31 @@ export function UserManagementPage() {
                         <div className="min-w-0 space-y-2">
                           <div className="flex flex-wrap items-center gap-2">
                             <div className="text-sm font-semibold text-stone-950">{row.displayName}</div>
-                            <Badge className={row.needsDeepSync ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}>
-                              {row.needsDeepSync ? '정렬 필요' : '정렬 완료'}
+                            <Badge className={OPERATOR_STATUS_CLASS[status.tone]}>
+                              {status.label}
                             </Badge>
                             {row.bootstrapAdmin && (
-                              <Badge className="bg-stone-900 text-white">Bootstrap admin 후보</Badge>
+                              <Badge className="bg-stone-900 text-white">기본 관리자 후보</Badge>
                             )}
                           </div>
                           <div className="text-sm text-stone-600">{row.email}</div>
+                          <div className="text-xs text-stone-500">{status.description}</div>
                           <div className="flex flex-wrap items-center gap-2 text-xs">
-                            <SourceBadge ok={Boolean(row.authUid)} label={row.authUid ? 'Auth 연결' : 'Auth 없음'} />
-                            <SourceBadge ok={Boolean(row.canonicalMember)} label={row.canonicalMember ? 'Canonical 있음' : 'Canonical 없음'} />
-                            <Badge className="bg-stone-100 text-stone-700">Legacy {row.legacyMembers.length}건</Badge>
+                            <SourceBadge ok={Boolean(row.authUid)} label={row.authUid ? '로그인 계정 연결됨' : '로그인 계정 없음'} />
+                            <SourceBadge ok={Boolean(row.canonicalMember)} label={row.canonicalMember ? '직원 권한 기록 있음' : '직원 권한 기록 없음'} />
+                            <Badge className="bg-stone-100 text-stone-700">예전 기록 {row.legacyMembers.length}건</Badge>
                             <Badge className={ROLE_BADGE_CLASS[row.effectiveRole] || 'bg-stone-200 text-stone-900'}>
-                              현재 판단 {roleLabel(row.effectiveRole)}
+                              현재 권한 {roleLabel(row.effectiveRole)}
                             </Badge>
                             {row.claimRole && (
-                              <Badge className="bg-stone-100 text-stone-700">Claim {roleLabel(row.claimRole)}</Badge>
+                              <Badge className="bg-stone-100 text-stone-700">로그인 권한 {roleLabel(row.claimRole)}</Badge>
                             )}
                           </div>
-                          {row.driftFlags.length > 0 && (
+                          {issueLabels.length > 0 && (
                             <div className="flex flex-wrap gap-1.5">
-                              {row.driftFlags.map((flag) => (
-                                <Badge key={flag} className="bg-amber-100 text-amber-800">
-                                  {DRIFT_LABELS[flag] || flag}
+                              {issueLabels.map((label) => (
+                                <Badge key={label} className="bg-amber-100 text-amber-800">
+                                  {label}
                                 </Badge>
                               ))}
                             </div>
@@ -444,7 +457,7 @@ export function UserManagementPage() {
                             ) : (
                               <>
                                 <GitMerge className="mr-2 h-3.5 w-3.5" />
-                                Deep Sync
+                                권한 반영
                               </>
                             )}
                           </Button>
@@ -465,13 +478,23 @@ export function UserManagementPage() {
 
         <Card className="border-stone-200">
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-semibold text-stone-900">선택 사용자 정렬 상태</CardTitle>
+            <CardTitle className="text-sm font-semibold text-stone-900">선택한 사용자</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             {!selectedRow ? (
-              <div className="text-sm text-stone-500">대상을 선택하면 auth/member 정합성을 비교해서 보여줍니다.</div>
+              <div className="text-sm text-stone-500">사용자를 선택하면 권한 상태를 보여줍니다.</div>
             ) : (
               <>
+                {(() => {
+                  const status = getGovernanceOperatorStatus(selectedRow);
+                  return (
+                    <div className={`rounded-xl px-4 py-3 text-sm ${OPERATOR_STATUS_CLASS[status.tone]}`}>
+                      <div className="font-semibold">{status.label}</div>
+                      <div className="mt-1">{status.description}</div>
+                    </div>
+                  );
+                })()}
+
                 <div className="space-y-1">
                   <div className="text-base font-semibold text-stone-950">{selectedRow.displayName}</div>
                   <div className="text-sm text-stone-600">{selectedRow.email}</div>
@@ -479,10 +502,10 @@ export function UserManagementPage() {
 
                 <div className="flex flex-wrap gap-2">
                   <Badge className={ROLE_BADGE_CLASS[selectedRow.effectiveRole] || 'bg-stone-200 text-stone-900'}>
-                    현재 판단 {roleLabel(selectedRow.effectiveRole)}
+                    현재 권한 {roleLabel(selectedRow.effectiveRole)}
                   </Badge>
                   <Badge className="bg-stone-100 text-stone-700">
-                    추천 반영 {roleLabel(draftRoles[selectedRow.identityKey] || getRecommendedGovernanceRole(selectedRow))}
+                    반영할 권한 {roleLabel(draftRoles[selectedRow.identityKey] || getRecommendedGovernanceRole(selectedRow))}
                   </Badge>
                 </div>
 
@@ -492,31 +515,31 @@ export function UserManagementPage() {
                   <div>
                     <div className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-stone-500">
                       <KeyRound className="h-3.5 w-3.5" />
-                      Firebase Auth
+                      로그인 계정
                     </div>
                     <div className="rounded-xl border border-stone-200 bg-stone-50 p-3 text-sm text-stone-700">
                       <div>UID: {selectedRow.authUid || '-'}</div>
-                      <div>Claim role: {roleLabel(selectedRow.claimRole)}</div>
-                      <div>Claim tenant: {selectedRow.claimTenantId || '-'}</div>
-                      <div>계정 상태: {selectedRow.authUid ? (selectedRow.authDisabled ? '비활성' : '활성') : '없음'}</div>
+                      <div>로그인 권한: {roleLabel(selectedRow.claimRole)}</div>
+                      <div>조직: {selectedRow.claimTenantId || '-'}</div>
+                      <div>로그인 상태: {selectedRow.authUid ? (selectedRow.authDisabled ? '비활성' : '활성') : '계정 없음'}</div>
                     </div>
                   </div>
 
                   <div>
                     <div className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-stone-500">
                       <Database className="h-3.5 w-3.5" />
-                      Canonical Member
+                      직원 권한 기록
                     </div>
                     <div className="rounded-xl border border-stone-200 bg-stone-50 p-3 text-sm text-stone-700">
                       {selectedRow.canonicalMember ? (
                         <>
                           <div>docId: {selectedRow.canonicalMember.docId}</div>
-                          <div>role: {roleLabel(selectedRow.canonicalMember.role)}</div>
-                          <div>status: {statusLabel(selectedRow.canonicalMember.status)}</div>
-                          <div>name: {selectedRow.canonicalMember.name || '-'}</div>
+                          <div>권한: {roleLabel(selectedRow.canonicalMember.role)}</div>
+                          <div>상태: {statusLabel(selectedRow.canonicalMember.status)}</div>
+                          <div>이름: {selectedRow.canonicalMember.name || '-'}</div>
                         </>
                       ) : (
-                        <div>canonical member 문서가 없습니다.</div>
+                        <div>직원 권한 기록이 없습니다.</div>
                       )}
                     </div>
                   </div>
@@ -524,19 +547,19 @@ export function UserManagementPage() {
                   <div>
                     <div className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-stone-500">
                       <GitMerge className="h-3.5 w-3.5" />
-                      Legacy Members
+                      예전 권한 기록
                     </div>
                     <div className="space-y-2">
                       {selectedRow.legacyMembers.length > 0 ? selectedRow.legacyMembers.map((member) => (
                         <div key={member.docId} className="rounded-xl border border-stone-200 bg-stone-50 p-3 text-sm text-stone-700">
                           <div>docId: {member.docId}</div>
-                          <div>role: {roleLabel(member.role)}</div>
-                          <div>status: {statusLabel(member.status)}</div>
-                          <div>name: {member.name || '-'}</div>
+                          <div>권한: {roleLabel(member.role)}</div>
+                          <div>상태: {statusLabel(member.status)}</div>
+                          <div>이름: {member.name || '-'}</div>
                         </div>
                       )) : (
                         <div className="rounded-xl border border-dashed border-stone-200 bg-white p-3 text-sm text-stone-500">
-                          legacy 문서는 없습니다.
+                          예전 권한 기록은 없습니다.
                         </div>
                       )}
                     </div>
@@ -545,12 +568,12 @@ export function UserManagementPage() {
                   <div>
                     <div className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-stone-500">
                       <AlertTriangle className="h-3.5 w-3.5" />
-                      Drift Flags
+                      조치가 필요한 이유
                     </div>
                     <div className="flex flex-wrap gap-1.5">
-                      {selectedRow.driftFlags.length > 0 ? selectedRow.driftFlags.map((flag) => (
-                        <Badge key={flag} className="bg-amber-100 text-amber-800">
-                          {DRIFT_LABELS[flag] || flag}
+                      {getFriendlyGovernanceIssueLabels(selectedRow).length > 0 ? getFriendlyGovernanceIssueLabels(selectedRow).map((label) => (
+                        <Badge key={label} className="bg-amber-100 text-amber-800">
+                          {label}
                         </Badge>
                       )) : (
                         <Badge className="bg-emerald-100 text-emerald-800">
@@ -565,24 +588,24 @@ export function UserManagementPage() {
                 <Separator />
 
                 <div className="rounded-xl border border-stone-200 bg-stone-50 p-3 text-sm text-stone-700">
-                  <div className="font-medium text-stone-900">이 액션이 하는 일</div>
+                  <div className="font-medium text-stone-900">권한 반영을 누르면</div>
                   <div className="mt-2 space-y-1">
-                    <div>1. Auth 계정 기준으로 canonical member 문서를 맞춥니다.</div>
-                    <div>2. legacy member 문서가 있으면 role과 canonical UID를 함께 미러링합니다.</div>
-                    <div>3. Firebase custom claim role/tenantId까지 같이 정렬합니다.</div>
+                    <div>1. 로그인 권한을 선택한 권한으로 저장합니다.</div>
+                    <div>2. 직원 권한 기록과 예전 기록을 같은 값으로 맞춥니다.</div>
+                    <div>3. 다음 로그인부터 같은 권한으로 들어오게 합니다.</div>
                   </div>
                 </div>
 
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-xs text-stone-500">
-                    마지막 추천 role은 {roleLabel(draftRoles[selectedRow.identityKey] || getRecommendedGovernanceRole(selectedRow))} 입니다.
+                    반영할 권한은 {roleLabel(draftRoles[selectedRow.identityKey] || getRecommendedGovernanceRole(selectedRow))} 입니다.
                   </div>
                   <Button
                     className="bg-stone-900 text-white hover:bg-stone-800"
                     onClick={() => void handleDeepSync(selectedRow)}
                     disabled={syncingIdentityKey === selectedRow.identityKey}
                   >
-                    {syncingIdentityKey === selectedRow.identityKey ? '반영 중…' : '선택 사용자 Deep Sync'}
+                    {syncingIdentityKey === selectedRow.identityKey ? '반영 중...' : '선택 사용자 권한 반영'}
                   </Button>
                 </div>
               </>

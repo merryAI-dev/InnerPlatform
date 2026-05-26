@@ -1,5 +1,5 @@
 const CACHE_NAME = 'myscube-shell-v2';
-const CACHEABLE_PREFIXES = ['/assets/', '/brand/'];
+const CACHEABLE_PREFIXES = ['/brand/'];
 const NEVER_CACHE_PREFIXES = ['/api/', '/api/v1/', '/business-card-imports/'];
 
 self.addEventListener('install', (event) => {

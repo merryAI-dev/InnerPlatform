@@ -2,19 +2,10 @@
 import { createRoot } from 'react-dom/client';
 import App from './app/App';
 import { initObservability, installGlobalObservabilityHandlers } from './app/platform/observability';
+import { installVitePreloadRecovery } from './app/platform/preload-recovery';
 import './styles/index.css';
 
-function installVitePreloadRecovery(): void {
-  if (typeof window === 'undefined') return;
-
-  window.addEventListener('vite:preloadError', (event) => {
-    const customEvent = event as unknown as CustomEvent<{ message?: string } | undefined>;
-    customEvent.preventDefault();
-    console.warn('[MYSC] Vite preload error suppressed (no auto-reload):', customEvent.detail);
-  });
-}
-
-installVitePreloadRecovery();
+if (typeof window !== 'undefined') installVitePreloadRecovery();
 initObservability(import.meta.env);
 installGlobalObservabilityHandlers();
 
