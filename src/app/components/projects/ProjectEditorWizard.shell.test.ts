@@ -99,5 +99,8 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('계약서 업로드');
     expect(source).toContain('계약서 교체');
     expect(source).toContain('첨부 제거');
+    expect(source).toContain('canRemoveContractDocument');
+    expect(source).toContain('기존 계약서는 관리자 화면에서만 제거할 수 있습니다.');
+    expect(source).toContain('교체 취소');
   });
 });
