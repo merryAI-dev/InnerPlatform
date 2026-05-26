@@ -53,6 +53,11 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('value={member.identityInput ?? formatTeamMemberIdentityInput(member)}');
   });
 
+  it('does not key editable team member rows by typed member name', () => {
+    expect(source).toContain("key={`team-member-${index}`}");
+    expect(source).not.toContain("key={`${member.memberName || 'member'}-${index}`}");
+  });
+
   it('keeps the team step focused on CIC and member assignments without duplicate organization fields', () => {
     expect(source).not.toContain('<Label className="text-xs">사내기업팀</Label>');
     expect(source).not.toContain("<Input value={draft.teamName}");

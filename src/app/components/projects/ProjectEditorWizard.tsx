@@ -745,7 +745,7 @@ export function ProjectEditorWizard({
             const currentTeamMemberOptionExists = !member.memberName
               || PROJECT_TEAM_MEMBER_OPTIONS.some((option) => option.value === member.memberName);
             return (
-              <div key={`${member.memberName || 'member'}-${index}`} className="rounded-xl border border-border/60 bg-background/70 p-4">
+              <div key={`team-member-${index}`} className="rounded-xl border border-border/60 bg-background/70 p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-xs font-semibold">팀원 {index + 1}</div>
                   <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-rose-600" onClick={() => removeTeamMember(index)}>
