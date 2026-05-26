@@ -86,15 +86,15 @@ describe('portal minimal sweep', () => {
     expect(projectEditorWizardSource).toContain('정산 시트 또는 엑셀 템플릿으로 직접 입력합니다.');
   });
 
-  it('lets rejected pm projects recover from the shared edit screen without contract extraction', () => {
+  it('lets rejected pm projects recover from the shared edit screen with contract upload available', () => {
     expect(projectEditSource).toContain('수정 후 다시 제출');
     expect(projectEditSource).toContain('반려 사유');
     expect(projectEditSource).toContain('승인 완료');
     expect(projectEditSource).toContain('검토 대기');
     expect(projectEditSource).not.toContain('다시 제출할 검토 요청 정보를 찾지 못했습니다.');
     expect(projectEditSource).not.toContain("actionId === 'resubmit' && !requestDoc");
-    expect(projectEditSource).not.toContain('계약서 PDF');
-    expect(projectEditSource).not.toContain('processProjectRequestContractViaBff');
+    expect(projectEditSource).toContain('processProjectRequestContractViaBff');
+    expect(projectEditSource).toContain('onContractFileUpload={handleContractFileUpload}');
     expect(projectEditSource).not.toContain('임원 심사 큐');
     expect(projectEditSource).not.toContain('임원 검토 큐');
   });

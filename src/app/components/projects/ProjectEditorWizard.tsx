@@ -8,13 +8,18 @@ import {
   ChevronsUpDown,
   ClipboardList,
   CreditCard,
+  FileText,
+  Loader2,
   Plus,
   Save,
   Trash2,
+  Upload,
+  X,
   Users,
   Wallet,
 } from 'lucide-react';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
+import { toast } from 'sonner';
 import {
   ACCOUNT_TYPE_LABELS,
   BASIS_LABELS,
@@ -35,6 +40,7 @@ import {
   type ProjectFinancialInputFlags,
   type ProjectFundInputMode,
   type ProjectPhase,
+  type ProjectRequestContractAnalysis,
   type ProjectStatus,
   type ProjectTeamMemberAssignment,
   type ProjectType,
@@ -104,9 +110,18 @@ interface ProjectEditorWizardProps {
   topSlot?: ReactNode;
   actions: ProjectEditorAction[];
   busyActionId?: string | null;
+  onContractFileUpload?: (file: File) => Promise<{
+    contractDocument: ProjectEditorDraft['contractDocument'];
+    contractAnalysis: ProjectRequestContractAnalysis | null;
+  }>;
   onCancel?: () => void;
   onSubmit: (draft: ProjectEditorDraft, actionId: string) => void | Promise<void>;
 }
+
+const MAX_CONTRACT_UPLOAD_SIZE_BYTES = 4 * 1024 * 1024;
+const MAX_CONTRACT_UPLOAD_SIZE_LABEL = '4MB';
+
+type ContractUploadState = 'idle' | 'extracting' | 'ready' | 'error';
 
 const STEPS: Array<{
   id: ProjectEditorStep;
@@ -122,6 +137,43 @@ const STEPS: Array<{
 
 function fmtKRW(value: number) {
   return value ? value.toLocaleString('ko-KR') : '0';
+}
+
+function readText(value: unknown) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function readNumberSuggestion(value: ProjectRequestContractAnalysis['fields']['contractAmount'] | undefined) {
+  return typeof value?.value === 'number' && Number.isFinite(value.value) ? value.value : null;
+}
+
+function mergeContractAnalysisIntoDraft(
+  prev: ProjectEditorDraft,
+  analysis: ProjectRequestContractAnalysis | null,
+): ProjectEditorDraft {
+  if (!analysis) return prev;
+  const currentFlags = normalizeProjectFinancialInputFlags(prev.financialInputFlags);
+  const suggestedContractAmount = readNumberSuggestion(analysis.fields.contractAmount);
+  const suggestedSalesVatAmount = readNumberSuggestion(analysis.fields.salesVatAmount);
+  const shouldApplyContractAmount = !currentFlags.contractAmount && suggestedContractAmount != null;
+  const shouldApplySalesVatAmount = !currentFlags.salesVatAmount && suggestedSalesVatAmount != null;
+
+  return createProjectEditorDraft({
+    ...prev,
+    officialContractName: prev.officialContractName || readText(analysis.fields.officialContractName?.value),
+    clientOrg: prev.clientOrg || readText(analysis.fields.clientOrg?.value),
+    contractStart: prev.contractStart || readText(analysis.fields.contractStart?.value),
+    contractEnd: prev.contractEnd || readText(analysis.fields.contractEnd?.value),
+    projectPurpose: prev.projectPurpose || readText(analysis.fields.projectPurpose?.value),
+    description: prev.description || readText(analysis.fields.description?.value),
+    contractAmount: shouldApplyContractAmount ? suggestedContractAmount : prev.contractAmount,
+    salesVatAmount: shouldApplySalesVatAmount ? suggestedSalesVatAmount : prev.salesVatAmount,
+    financialInputFlags: {
+      ...currentFlags,
+      contractAmount: currentFlags.contractAmount || suggestedContractAmount != null,
+      salesVatAmount: currentFlags.salesVatAmount || suggestedSalesVatAmount != null,
+    },
+  });
 }
 
 function formatPaymentPlanAmount(amount: number, contractAmount: number) {
@@ -287,15 +339,21 @@ export function ProjectEditorWizard({
   topSlot,
   actions,
   busyActionId,
+  onContractFileUpload,
   onCancel,
   onSubmit,
 }: ProjectEditorWizardProps) {
   const [stepIndex, setStepIndex] = useState(0);
   const [draft, setDraft] = useState<ProjectEditorDraft>(() => createProjectEditorWizardDraft(initialDraft));
+  const [contractUploadState, setContractUploadState] = useState<ContractUploadState>('idle');
+  const [contractUploadError, setContractUploadError] = useState('');
+  const contractUploadInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     setDraft(createProjectEditorWizardDraft(initialDraft));
     setStepIndex(0);
+    setContractUploadState('idle');
+    setContractUploadError('');
   }, [draftKey]);
 
   const step = STEPS[stepIndex];
@@ -374,6 +432,61 @@ export function ProjectEditorWizard({
       ...prev,
       teamMembersDetailed: prev.teamMembersDetailed.filter((_, itemIndex) => itemIndex !== index),
     }));
+  };
+
+  const handleContractDocumentSelect = async (event: ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    if (!file) return;
+    if (!onContractFileUpload) {
+      toast.error('계약서 업로드를 사용할 수 없는 화면입니다.');
+      input.value = '';
+      return;
+    }
+    if (!/pdf$/i.test(file.name) && file.type !== 'application/pdf') {
+      toast.error('계약서 파일은 PDF로 업로드해 주세요.');
+      input.value = '';
+      return;
+    }
+    if (file.size > MAX_CONTRACT_UPLOAD_SIZE_BYTES) {
+      const message = `계약서 PDF는 ${MAX_CONTRACT_UPLOAD_SIZE_LABEL} 이하만 업로드할 수 있습니다. 파일을 압축하거나 필요한 페이지만 추려 다시 시도해 주세요.`;
+      setContractUploadState('error');
+      setContractUploadError(message);
+      toast.error(message);
+      input.value = '';
+      return;
+    }
+
+    setContractUploadState('extracting');
+    setContractUploadError('');
+    try {
+      const processed = await onContractFileUpload(file);
+      setDraft((prev) => mergeContractAnalysisIntoDraft(createProjectEditorWizardDraft({
+        ...prev,
+        contractDocument: processed.contractDocument,
+        contractAnalysis: processed.contractAnalysis,
+      }), processed.contractAnalysis));
+      setContractUploadState('ready');
+      toast.success(`계약서 PDF 업로드 및 분석 완료: ${file.name}`);
+    } catch (error) {
+      console.error('[ProjectEditorWizard] contract upload failed:', error);
+      const message = error instanceof Error ? error.message : '계약서 업로드에 실패했습니다.';
+      setContractUploadState('error');
+      setContractUploadError(message);
+      toast.error(message);
+    } finally {
+      input.value = '';
+    }
+  };
+
+  const removeContractDocument = () => {
+    setDraft((prev) => createProjectEditorWizardDraft({
+      ...prev,
+      contractDocument: null,
+      contractAnalysis: null,
+    }));
+    setContractUploadState('idle');
+    setContractUploadError('');
   };
 
   const submitIssues = useMemo(() => {
@@ -502,6 +615,65 @@ export function ProjectEditorWizard({
 
   const renderFinancialStep = () => (
     <div className="space-y-4">
+      {onContractFileUpload ? (
+        <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <FileText className="h-4 w-4 text-slate-600" />
+                <Label className="text-xs font-semibold">계약서 PDF</Label>
+              </div>
+              <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+                PDF를 올리면 계약명, 계약기간, 계약금액, 계약 대상 후보를 읽어와 빈 항목만 채웁니다.
+              </p>
+              {draft.contractDocument ? (
+                <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px]">
+                  <span className="max-w-full truncate font-medium text-slate-900">{draft.contractDocument.name}</span>
+                  <span className="text-muted-foreground">
+                    {(draft.contractDocument.size / 1024 / 1024).toFixed(2)} MB
+                  </span>
+                  <Button asChild type="button" variant="outline" size="sm" className="h-7 px-2 text-[11px]">
+                    <a href={draft.contractDocument.downloadURL} target="_blank" rel="noreferrer">원문 보기</a>
+                  </Button>
+                  <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[11px] text-rose-600" onClick={removeContractDocument}>
+                    <X className="mr-1 h-3.5 w-3.5" />
+                    첨부 제거
+                  </Button>
+                </div>
+              ) : null}
+              {draft.contractAnalysis ? (
+                <div className="mt-3 rounded-lg border border-emerald-200 bg-white px-3 py-2 text-[12px] leading-5 text-slate-700">
+                  <span className="font-semibold text-emerald-700">분석 요약</span>
+                  <span className="ml-2">{draft.contractAnalysis.summary}</span>
+                </div>
+              ) : null}
+              {contractUploadError ? (
+                <p className="mt-2 text-[11px] text-rose-600">{contractUploadError}</p>
+              ) : null}
+            </div>
+            <div className="shrink-0">
+              <input
+                ref={contractUploadInputRef}
+                type="file"
+                accept="application/pdf,.pdf"
+                className="hidden"
+                onChange={handleContractDocumentSelect}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full gap-2 lg:w-auto"
+                disabled={contractUploadState === 'extracting'}
+                onClick={() => contractUploadInputRef.current?.click()}
+              >
+                {contractUploadState === 'extracting' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                {draft.contractDocument ? '계약서 교체' : '계약서 업로드'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <div className="grid gap-4 lg:grid-cols-2">
         <div>
           <Label className="text-xs">계약 시작일 *</Label>
