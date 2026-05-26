@@ -9,6 +9,7 @@ import { useFirebase } from '../../lib/firebase-context';
 import {
   isPlatformApiEnabled,
   notifyProjectRequestRegistrationViaBff,
+  processProjectRequestContractViaBff,
 } from '../../lib/platform-bff-client';
 import {
   buildProjectRequestPayloadFromDraft,
@@ -78,6 +79,30 @@ export function PortalProjectRegister() {
     }
   };
 
+  const handleContractFileUpload = async (file: File) => {
+    if (!authUser?.uid) {
+      throw new Error('로그인 정보를 확인할 수 없습니다.');
+    }
+    if (!isPlatformApiEnabled()) {
+      throw new Error('계약서 업로드는 플랫폼 API가 켜진 환경에서만 사용할 수 있습니다.');
+    }
+    const idToken = authUser.idToken || await getAuthInstance()?.currentUser?.getIdToken() || undefined;
+    const processed = await processProjectRequestContractViaBff({
+      tenantId: orgId,
+      actor: {
+        uid: authUser.uid,
+        email: authUser.email,
+        role: authUser.role,
+        idToken,
+      },
+      file,
+    });
+    return {
+      contractDocument: processed.contractDocument,
+      contractAnalysis: processed.analysis,
+    };
+  };
+
   if (submitted) {
     return (
       <div className="mx-auto max-w-3xl py-10">
@@ -110,6 +135,7 @@ export function PortalProjectRegister() {
       draftKey={`portal-register-${authUser?.uid || 'anonymous'}`}
       actions={[{ id: 'submit', label: '등록 요청 저장', icon: Send }]}
       busyActionId={busyActionId}
+      onContractFileUpload={handleContractFileUpload}
       onCancel={() => navigate('/portal')}
       onSubmit={(draft) => void handleSubmit(draft)}
     />

@@ -90,4 +90,14 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('descriptionClassName="text-rose-600"');
     expect(source).not.toContain('업로드된 PDF를 마지막 확인 단계에서 바로 봅니다.');
   });
+
+  it('supports contract PDF upload before saving registration or edit drafts', () => {
+    expect(source).toContain('onContractFileUpload');
+    expect(source).toContain('handleContractDocumentSelect');
+    expect(source).toContain('MAX_CONTRACT_UPLOAD_SIZE_BYTES');
+    expect(source).toContain('mergeContractAnalysisIntoDraft');
+    expect(source).toContain('계약서 업로드');
+    expect(source).toContain('계약서 교체');
+    expect(source).toContain('첨부 제거');
+  });
 });
