@@ -197,6 +197,7 @@ function TeamMemberSearchCombobox({
     const option = PROJECT_TEAM_MEMBER_OPTION_MAP[value];
     onSelect({
       inputMode: 'search',
+      identityInput: undefined,
       memberName: option?.name || value,
       memberNickname: option?.nickname || '',
     });
@@ -758,6 +759,7 @@ export function ProjectEditorWizard({
                       value={teamMemberInputMode}
                       onValueChange={(value) => updateTeamMember(index, {
                         inputMode: value === 'manual' ? 'manual' : 'search',
+                        identityInput: value === 'manual' ? '' : undefined,
                         memberName: '',
                         memberNickname: '',
                       })}
@@ -782,9 +784,10 @@ export function ProjectEditorWizard({
                       />
                     ) : (
                       <Input
-                        value={formatTeamMemberIdentityInput(member)}
+                        value={member.identityInput ?? formatTeamMemberIdentityInput(member)}
                         onChange={(event) => updateTeamMember(index, {
                           inputMode: 'manual',
+                          identityInput: event.target.value,
                           ...parseProjectTeamMemberIdentityInput(event.target.value),
                         })}
                         placeholder="이름(별명)"
