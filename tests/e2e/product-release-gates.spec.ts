@@ -100,7 +100,7 @@ test('release gate: admin can switch from portal to admin home', async ({ page }
   await page.getByRole('button', { name: '관리자 공간' }).click();
 
   await expect(page).toHaveURL(/\/$/);
-  await expect(page.getByRole('heading', { name: '프로젝트 통합 대시보드' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '전체 프로젝트 보기' })).toBeVisible();
 });
 
 test('release gate: PM dashboard shows unified project and submission surface', async ({ page }) => {

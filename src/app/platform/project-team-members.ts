@@ -6,13 +6,35 @@ function toRate(value: unknown) {
   return Math.max(0, Math.min(100, Math.round(parsed)));
 }
 
-function normalizeProjectTeamMemberRow(member: ProjectTeamMemberAssignment): ProjectTeamMemberAssignment {
+export function parseProjectTeamMemberIdentityInput(value: string) {
+  const normalized = String(value || '').trim().replace(/\s+/g, ' ');
+  const match = normalized.match(/^(.+?)\s*\(\s*([^)]+?)\s*\)\s*$/);
+  if (!match) {
+    return {
+      memberName: normalized,
+      memberNickname: '',
+    };
+  }
   return {
+    memberName: match[1].trim(),
+    memberNickname: match[2].trim(),
+  };
+}
+
+function normalizeProjectTeamMemberRow(
+  member: ProjectTeamMemberAssignment,
+  options: { preserveInputMode?: boolean } = {},
+): ProjectTeamMemberAssignment {
+  const normalized: ProjectTeamMemberAssignment = {
     memberName: String(member?.memberName || '').trim(),
     memberNickname: String(member?.memberNickname || '').trim(),
     role: String(member?.role || '').trim(),
     participationRate: toRate(member?.participationRate),
   };
+  if (options.preserveInputMode && member?.inputMode === 'manual') {
+    normalized.inputMode = 'manual';
+  }
+  return normalized;
 }
 
 export function normalizeProjectTeamMembers(
@@ -31,7 +53,8 @@ export function normalizeProjectTeamMembers(
 export function normalizeProjectTeamMemberDraftRows(
   members: ProjectTeamMemberAssignment[] | null | undefined,
 ): ProjectTeamMemberAssignment[] {
-  return (Array.isArray(members) ? members : []).map(normalizeProjectTeamMemberRow);
+  return (Array.isArray(members) ? members : [])
+    .map((member) => normalizeProjectTeamMemberRow(member, { preserveInputMode: true }));
 }
 
 export function isProjectTeamMemberComplete(member: ProjectTeamMemberAssignment) {

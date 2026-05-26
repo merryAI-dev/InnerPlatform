@@ -39,6 +39,14 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).not.toContain("value={member.memberName || 'none'}");
   });
 
+  it('allows manual team member identity entry when the picker is missing a member', () => {
+    expect(source).toContain('팀원 검색');
+    expect(source).toContain('직접 입력');
+    expect(source).toContain('placeholder="이름(별명)"');
+    expect(source).toContain('parseProjectTeamMemberIdentityInput');
+    expect(source).toContain("inputMode: 'manual'");
+  });
+
   it('keeps the team step focused on CIC and member assignments without duplicate organization fields', () => {
     expect(source).not.toContain('<Label className="text-xs">사내기업팀</Label>');
     expect(source).not.toContain("<Input value={draft.teamName}");
