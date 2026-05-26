@@ -1,0 +1,57 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { describe, expect, it } from 'vitest';
+
+const repoRoot = resolve(__dirname, '..');
+const workflowText = readFileSync(resolve(repoRoot, '.github/workflows/production-deploy.yml'), 'utf8');
+
+function extractRunBlocks(text: string) {
+  const lines = text.split('\n');
+  const blocks: string[] = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = lines[index].match(/^(\s*)run:\s*\|/);
+    if (!match) continue;
+
+    const runIndent = match[1].length;
+    const body: string[] = [];
+    for (let bodyIndex = index + 1; bodyIndex < lines.length; bodyIndex += 1) {
+      const line = lines[bodyIndex];
+      if (line.trim() && line.search(/\S/) <= runIndent) break;
+      body.push(line);
+    }
+    blocks.push(body.join('\n'));
+  }
+
+  return blocks;
+}
+
+describe('production deployment workflow safety', () => {
+  it('deploys only through the Production environment from the full main ref', () => {
+    expect(workflowText).toMatch(/environment:\n\s+name: Production/);
+    expect(workflowText).toContain('if [ "${GITHUB_REF}" != "refs/heads/main" ]; then');
+    expect(workflowText).toContain('ref: main');
+  });
+
+  it('does not interpolate manual workflow inputs directly inside shell run blocks', () => {
+    const runBlocks = extractRunBlocks(workflowText);
+
+    expect(runBlocks.some((block) => block.includes('${{ inputs.'))).toBe(false);
+    expect(workflowText).toContain('DEPLOY_NOTE: ${{ inputs.note }}');
+    expect(workflowText).toContain('printf \'%s\\n\' "- Note: ${DEPLOY_NOTE}"');
+  });
+
+  it('does not interpolate deployment outputs directly inside shell run blocks', () => {
+    const runBlocks = extractRunBlocks(workflowText);
+
+    expect(runBlocks.some((block) => block.includes('${{ steps.'))).toBe(false);
+    expect(workflowText).toContain('DEPLOYMENT_URL: ${{ steps.vercel_deploy.outputs.deployment_url }}');
+    expect(workflowText).toContain('node deploy-prod-align.mjs --verify-only "${DEPLOYMENT_URL}"');
+  });
+
+  it('keeps the Vercel deployment URL parse failure path reachable under pipefail', () => {
+    expect(workflowText).toContain('deployment_url="$(grep -Eo');
+    expect(workflowText).toContain('| tail -n 1 || true)"');
+    expect(workflowText).toContain('Could not parse Vercel deployment URL');
+  });
+});

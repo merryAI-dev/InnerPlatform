@@ -41,9 +41,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
    where(documentId(), 'in', [''])
    ```
 
-4. **`vercel --prod` 후 반드시 alias 확인**
+4. **로컬 `vercel --prod` 금지**
    ```bash
-   vercel alias <deployment-url> inner-platform.vercel.app
+   # Production 배포는 GitHub Actions production environment에서만 진행
+   # 로컬 CLI에서 production deploy를 직접 실행하지 않는다
+   ```
+   필요한 GitHub production environment secrets:
+   - `VERCEL_TOKEN`
+   - `VERCEL_ORG_ID`
+   - `VERCEL_PROJECT_ID`
+
+   로컬에서는 기존 deployment 검증만 허용합니다:
+   ```bash
+   node deploy-prod-align.mjs --verify-only <deployment-url-or-host>
    ```
 
 5. **새 Firebase 프로젝트 세팅 체크리스트**
