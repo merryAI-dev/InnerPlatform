@@ -33,6 +33,9 @@ function normalizeProjectTeamMemberRow(
   };
   if (options.preserveInputMode && member?.inputMode === 'manual') {
     normalized.inputMode = 'manual';
+    if (typeof member?.identityInput === 'string') {
+      normalized.identityInput = member.identityInput;
+    }
   }
   return normalized;
 }

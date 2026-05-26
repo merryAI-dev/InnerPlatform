@@ -47,6 +47,12 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain("inputMode: 'manual'");
   });
 
+  it('keeps manual team member input bound to the raw typed value instead of reparsing formatted text', () => {
+    expect(source).toContain('formatTeamMemberIdentityInput(member)');
+    expect(source).toContain('identityInput: event.target.value');
+    expect(source).toContain('value={member.identityInput ?? formatTeamMemberIdentityInput(member)}');
+  });
+
   it('keeps the team step focused on CIC and member assignments without duplicate organization fields', () => {
     expect(source).not.toContain('<Label className="text-xs">사내기업팀</Label>');
     expect(source).not.toContain("<Input value={draft.teamName}");

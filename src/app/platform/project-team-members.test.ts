@@ -45,6 +45,28 @@ describe('project-team-members', () => {
     ])).toEqual([]);
   });
 
+  it('preserves raw manual identity input while editing so Korean IME composition is not reformatted', () => {
+    expect(normalizeProjectTeamMemberDraftRows([
+      {
+        inputMode: 'manual',
+        identityInput: ' 박지연 ( 느티',
+        memberName: '박지연 ( 느티',
+        memberNickname: '',
+        role: '',
+        participationRate: 0,
+      },
+    ])).toEqual([
+      {
+        inputMode: 'manual',
+        identityInput: ' 박지연 ( 느티',
+        memberName: '박지연 ( 느티',
+        memberNickname: '',
+        role: '',
+        participationRate: 0,
+      },
+    ]);
+  });
+
   it('treats member with name and role but no rate as complete', () => {
     expect(hasIncompleteProjectTeamMembers([
       { memberName: '김다은', memberNickname: '', role: 'PM', participationRate: 0 },

@@ -674,6 +674,7 @@ export interface ProjectRequestContractAnalysis {
 
 export interface ProjectTeamMemberAssignment {
   inputMode?: 'search' | 'manual';
+  identityInput?: string;
   memberName: string;
   memberNickname: string;
   role: string;
