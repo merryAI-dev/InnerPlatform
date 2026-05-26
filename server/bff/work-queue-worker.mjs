@@ -1,7 +1,16 @@
 import { createFirestoreDb, resolveProjectId } from './firestore.mjs';
 import { processWorkQueueBatch } from './work-queue.mjs';
+import {
+  assertBffStandaloneWorkerExecutionAllowed,
+  parseBffAllowedOrigins,
+  resolveBffRuntimeSafetyConfig,
+} from './runtime-safety.mjs';
 
 const projectId = resolveProjectId();
+assertBffStandaloneWorkerExecutionAllowed(resolveBffRuntimeSafetyConfig({
+  projectId,
+  allowedOrigins: parseBffAllowedOrigins(process.env.BFF_ALLOWED_ORIGINS),
+}), 'work queue worker');
 const db = createFirestoreDb({ projectId });
 
 const batchSize = Number.parseInt(process.env.BFF_WORK_QUEUE_BATCH || '100', 10);

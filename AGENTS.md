@@ -41,7 +41,10 @@ npm run build
 ## Firebase/Vercel Ops (Common)
 - Deploy Firestore rules/indexes: `npm run firebase:deploy:firestore`.
 - One-shot Firebase setup (writes `.env`, `.firebaserc`, deploys): `npm run firebase:autosetup`.
-- Vercel deploy: `vercel deploy` (preview) or `vercel --prod` (production).
+- Vercel preview deploy: `vercel deploy`.
+- Production deploy: use the GitHub Actions `Production Deploy` workflow on `main` only.
+- Local production deploy is forbidden. `vercel --prod` and `node deploy-prod-align.mjs` must not be used from a local worktree.
+- Local production verification only: `npm run deploy:prod:verify -- <deployment-url-or-host>`.
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence

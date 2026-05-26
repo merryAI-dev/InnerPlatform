@@ -8,11 +8,22 @@ const CANONICAL_PRODUCTION_URL = `https://${CANONICAL_PRODUCTION_HOST}`;
 const MAX_ALIAS_CHECK_ATTEMPTS = Number.parseInt(process.env.VERCEL_CANONICAL_CHECK_ATTEMPTS ?? '10', 10);
 const ALIAS_CHECK_DELAY_MS = Number.parseInt(process.env.VERCEL_CANONICAL_CHECK_DELAY_MS ?? '2000', 10);
 const SKIP_PWA_LIVE_VERIFY = process.env.VERCEL_SKIP_PWA_LIVE_VERIFY === 'true';
+const VERCEL_CLI_PACKAGE = process.env.VERCEL_CLI_PACKAGE?.trim() || null;
+const VERCEL_TOKEN = process.env.VERCEL_TOKEN?.trim() || null;
+
+function redactSecrets(text) {
+  if (!VERCEL_TOKEN) return text;
+  return text.split(VERCEL_TOKEN).join('[redacted]');
+}
+
+function formatCommand(command, args) {
+  return redactSecrets(`${command} ${args.join(' ')}`);
+}
 
 function fail(message, details) {
   console.error(`[deploy-align] ${message}`);
   if (details) {
-    console.error(details);
+    console.error(redactSecrets(details));
   }
   process.exit(1);
 }
@@ -29,7 +40,7 @@ function run(command, args, options = {}) {
   const combined = [stdout, stderr].filter(Boolean).join('\n');
 
   if (result.status !== 0) {
-    fail(`command failed: ${command} ${args.join(' ')}`, combined);
+    fail(`command failed: ${formatCommand(command, args)}`, combined);
   }
 
   return { stdout, stderr, combined };
@@ -39,9 +50,14 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function parseDeploymentUrl(text) {
-  const matches = text.match(/https:\/\/[a-z0-9.-]+\.vercel\.app/gi) ?? [];
-  return matches.at(-1) ?? null;
+function runVercel(args) {
+  const authArgs = VERCEL_TOKEN ? [...args, '--token', VERCEL_TOKEN] : args;
+
+  if (VERCEL_CLI_PACKAGE) {
+    return run('npx', ['--yes', VERCEL_CLI_PACKAGE, ...authArgs]);
+  }
+
+  return run('vercel', authArgs);
 }
 
 function parseFetchedDeploymentHost(text) {
@@ -81,7 +97,7 @@ function parseArgs(argv) {
       continue;
     }
 
-    fail(`unknown argument: ${value}`, 'Usage: node deploy-prod-align.mjs [--verify-only <deployment-url-or-host>]');
+    fail(`unknown argument: ${value}`, 'Usage: node deploy-prod-align.mjs --verify-only <deployment-url-or-host>');
   }
 
   return args;
@@ -89,11 +105,11 @@ function parseArgs(argv) {
 
 async function verifyCanonicalAlias(deploymentHost) {
   for (let attempt = 1; attempt <= MAX_ALIAS_CHECK_ATTEMPTS; attempt += 1) {
-    const aliasInspect = run('vercel', ['inspect', CANONICAL_PRODUCTION_HOST]);
+    const aliasInspect = runVercel(['inspect', CANONICAL_PRODUCTION_HOST]);
     const aliasTargetHost = parseFetchedDeploymentHost(aliasInspect.combined);
 
     if (aliasTargetHost === deploymentHost) {
-      const deploymentInspect = run('vercel', ['inspect', deploymentHost]);
+      const deploymentInspect = runVercel(['inspect', deploymentHost]);
 
       if (!deploymentInspect.combined.includes(CANONICAL_PRODUCTION_URL)) {
         fail(
@@ -133,8 +149,9 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
 
   if (args.help) {
-    console.log('Usage: node deploy-prod-align.mjs [--verify-only <deployment-url-or-host>]');
+    console.log('Usage: node deploy-prod-align.mjs --verify-only <deployment-url-or-host>');
     console.log(`Canonical production URL: ${CANONICAL_PRODUCTION_URL}`);
+    console.log('Production deploys are intentionally not available from this local CLI.');
     return;
   }
 
@@ -145,17 +162,10 @@ async function main() {
   }
 
   if (!deploymentHost) {
-    run('node', ['scripts/assert-safe-local-deploy.mjs'], { stdio: 'inherit' });
-
-    const deployment = run('vercel', ['deploy', '--prod', '--yes', '--archive=tgz']);
-    process.stdout.write(deployment.stdout);
-    process.stderr.write(deployment.stderr);
-
-    deploymentHost = normalizeDeploymentHost(parseDeploymentUrl(deployment.stdout) ?? parseDeploymentUrl(deployment.combined));
-
-    if (!deploymentHost) {
-      fail('could not parse the production deployment URL from `vercel deploy --prod --yes` output.', deployment.combined);
-    }
+    fail(
+      'Production deploys are disabled from local CLI.',
+      'Use `node deploy-prod-align.mjs --verify-only <deployment-url-or-host>` to verify an existing deployment. Production deploy authority must move through GitHub Actions.',
+    );
   }
 
   console.log(`[deploy-align] target deployment: https://${deploymentHost}`);

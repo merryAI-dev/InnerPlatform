@@ -2,7 +2,18 @@ import { describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { createBffApp } from './app.mjs';
 
-function createTestApp() {
+const LIVE_PROJECT_ID = 'inner-platform-live-20260316';
+const LONG_CRON_SECRET = 'vercel-cron-secret-32-characters-ok';
+const LONG_K8S_SECRET = 'k8s-worker-secret-32-characters-ok';
+const INTERNAL_WORKER_PATHS = [
+  '/api/internal/workers/outbox/run',
+  '/api/internal/workers/work-queue/run',
+  '/api/internal/workers/payroll/run',
+  '/api/internal/workers/monthly-close/run',
+  '/api/internal/workers/client-errors/run',
+];
+
+function createTestApp(options: Parameters<typeof createBffApp>[0] = {}) {
   // These tests assert routing + auth gates only (no Firestore calls should happen).
   const stubDb = {
     doc: () => { throw new Error('db not expected'); },
@@ -16,35 +27,124 @@ function createTestApp() {
     authMode: 'headers',
     tokenVerifier: async () => ({}),
     workerSecret: 'test-secret',
+    ...options,
   });
 }
 
 describe('internal worker endpoints (cron)', () => {
-  it('supports GET for outbox worker route', async () => {
+  it.each(INTERNAL_WORKER_PATHS)('supports GET auth gate for %s', async (workerPath) => {
     const app = createTestApp();
-    const res = await request(app).get('/api/internal/workers/outbox/run');
+    const res = await request(app).get(workerPath);
     expect(res.status).toBe(401);
     expect(res.body?.error).toBe('unauthorized_worker');
   });
 
-  it('supports GET for work queue worker route', async () => {
-    const app = createTestApp();
-    const res = await request(app).get('/api/internal/workers/work-queue/run');
+  it.each(INTERNAL_WORKER_PATHS)('fails closed before DB access when live workers are disabled for %s', async (workerPath) => {
+    const app = createTestApp({
+      projectId: LIVE_PROJECT_ID,
+      allowedOrigins: ['https://inner-platform.vercel.app'],
+      env: {
+        BFF_DEPLOY_ENV: 'live',
+        BFF_WORKERS_ENABLED: 'false',
+      },
+    });
+
+    const res = await request(app)
+      .get(workerPath)
+      .set('Authorization', `Bearer ${LONG_CRON_SECRET}`);
+
+    expect(res.status).toBe(503);
+    expect(res.body?.error).toBe('worker_scheduler_disabled');
+  });
+
+  it('rejects Vercel-owned worker calls that do not use the Vercel cron bearer token', async () => {
+    const app = createTestApp({
+      projectId: LIVE_PROJECT_ID,
+      allowedOrigins: ['https://inner-platform.vercel.app'],
+      env: {
+        BFF_DEPLOY_ENV: 'live',
+        BFF_SCHEDULER_OWNER: 'vercel',
+        CRON_SECRET: LONG_CRON_SECRET,
+        BFF_WORKER_SECRET: LONG_K8S_SECRET,
+      },
+    });
+
+    const res = await request(app)
+      .get('/api/internal/workers/work-queue/run')
+      .set('x-worker-secret', LONG_CRON_SECRET);
+
     expect(res.status).toBe(401);
     expect(res.body?.error).toBe('unauthorized_worker');
   });
 
-  it('supports GET for payroll worker route', async () => {
-    const app = createTestApp();
-    const res = await request(app).get('/api/internal/workers/payroll/run');
+  it('rejects Kubernetes-owned worker calls that use the Vercel cron token', async () => {
+    const app = createTestApp({
+      projectId: 'local-bff',
+      allowedOrigins: ['http://127.0.0.1:5173'],
+      env: {
+        BFF_DEPLOY_ENV: 'local',
+        BFF_SCHEDULER_OWNER: 'k8s',
+        CRON_SECRET: LONG_CRON_SECRET,
+        K8S_WORKER_SECRET: LONG_K8S_SECRET,
+      },
+    });
+
+    const res = await request(app)
+      .get('/api/internal/workers/payroll/run')
+      .set('Authorization', `Bearer ${LONG_CRON_SECRET}`);
+
     expect(res.status).toBe(401);
     expect(res.body?.error).toBe('unauthorized_worker');
   });
 
-  it('supports GET for monthly close worker route', async () => {
-    const app = createTestApp();
-    const res = await request(app).get('/api/internal/workers/monthly-close/run');
-    expect(res.status).toBe(401);
-    expect(res.body?.error).toBe('unauthorized_worker');
+  it('rejects unsafe runtime configuration before creating the Firestore client', () => {
+    let createDbCalled = false;
+
+    expect(() => createBffApp({
+      projectId: LIVE_PROJECT_ID,
+      allowedOrigins: ['*'],
+      env: {
+        BFF_DEPLOY_ENV: 'live',
+        BFF_SCHEDULER_OWNER: 'vercel',
+        CRON_SECRET: LONG_CRON_SECRET,
+      },
+      createDb: () => {
+        createDbCalled = true;
+        throw new Error('createDb should not be called');
+      },
+    })).toThrow(/BFF_ALLOWED_ORIGINS cannot include \*/);
+    expect(createDbCalled).toBe(false);
+  });
+
+  it('rejects unsafe live runtime configuration before worker routes are available', () => {
+    expect(() => createTestApp({
+      projectId: LIVE_PROJECT_ID,
+      allowedOrigins: ['*'],
+      env: {
+        BFF_DEPLOY_ENV: 'live',
+        BFF_SCHEDULER_OWNER: 'vercel',
+        CRON_SECRET: LONG_CRON_SECRET,
+      },
+    })).toThrow(/BFF_ALLOWED_ORIGINS cannot include \*/);
+  });
+
+  it('does not auto-allow Vercel preview origins in live mode', async () => {
+    const app = createTestApp({
+      projectId: LIVE_PROJECT_ID,
+      allowedOrigins: ['https://inner-platform.vercel.app'],
+      env: {
+        BFF_DEPLOY_ENV: 'live',
+        BFF_SCHEDULER_OWNER: 'vercel',
+        CRON_SECRET: LONG_CRON_SECRET,
+      },
+    });
+
+    const res = await request(app)
+      .get('/api/internal/workers/monthly-close/run')
+      .set('Origin', 'https://inner-platform-git-feature-merryai-devs-projects.vercel.app')
+      .set('Authorization', `Bearer ${LONG_CRON_SECRET}`);
+
+    expect(res.status).toBe(403);
+    expect(res.body?.error).toBe('origin_not_allowed');
   });
 });

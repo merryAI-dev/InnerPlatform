@@ -1,7 +1,16 @@
 import { createFirestoreDb, resolveProjectId } from './firestore.mjs';
 import { processOutboxBatch } from './outbox.mjs';
+import {
+  assertBffStandaloneWorkerExecutionAllowed,
+  parseBffAllowedOrigins,
+  resolveBffRuntimeSafetyConfig,
+} from './runtime-safety.mjs';
 
 const projectId = resolveProjectId();
+assertBffStandaloneWorkerExecutionAllowed(resolveBffRuntimeSafetyConfig({
+  projectId,
+  allowedOrigins: parseBffAllowedOrigins(process.env.BFF_ALLOWED_ORIGINS),
+}), 'outbox worker');
 const db = createFirestoreDb({ projectId });
 
 const batchSize = Number.parseInt(process.env.BFF_OUTBOX_BATCH || '50', 10);
