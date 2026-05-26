@@ -8,6 +8,22 @@ export interface AuthGovernanceFilters {
   source: 'ALL' | 'AUTH_MISSING' | 'MEMBER_MISSING' | 'BOOTSTRAP';
 }
 
+export interface GovernanceOperatorStatus {
+  tone: 'success' | 'warning' | 'danger';
+  label: string;
+  description: string;
+}
+
+const FRIENDLY_ISSUE_LABELS: Record<string, string> = {
+  missing_auth: '로그인 계정 없음',
+  missing_canonical_member: '직원 권한 기록 없음',
+  legacy_only: '예전 권한 기록만 있음',
+  duplicate_member_docs: '권한 기록이 중복됨',
+  legacy_role_mismatch: '예전 기록의 권한이 다름',
+  claim_mismatch: '로그인 권한과 화면 권한이 다름',
+  bootstrap_admin_not_adopted: '기본 관리자 권한 미반영',
+};
+
 function normalizeText(value: string | undefined): string {
   return (value || '').trim().toLowerCase();
 }
@@ -46,6 +62,34 @@ export function filterGovernanceRows(
     ].join(' ').toLowerCase();
     return haystack.includes(q);
   });
+}
+
+export function getFriendlyGovernanceIssueLabels(row: AuthGovernanceUserRow): string[] {
+  return row.driftFlags.map((flag) => FRIENDLY_ISSUE_LABELS[flag] || flag);
+}
+
+export function getGovernanceOperatorStatus(row: AuthGovernanceUserRow): GovernanceOperatorStatus {
+  if (row.driftFlags.includes('missing_auth')) {
+    return {
+      tone: 'danger',
+      label: '로그인 계정 없음',
+      description: '먼저 Google 로그인 계정이 만들어져야 권한을 반영할 수 있습니다.',
+    };
+  }
+
+  if (row.needsDeepSync) {
+    return {
+      tone: 'warning',
+      label: '확인 필요',
+      description: '권한 반영 버튼을 눌러 로그인 권한과 직원 권한을 맞춰야 합니다.',
+    };
+  }
+
+  return {
+    tone: 'success',
+    label: '정상',
+    description: '로그인 권한과 직원 권한이 맞춰져 있습니다.',
+  };
 }
 
 export function emptyGovernanceSummary(): AuthGovernanceSummary {

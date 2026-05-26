@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { emptyGovernanceSummary, filterGovernanceRows, getRecommendedGovernanceRole } from './auth-governance-view-model';
+import {
+  emptyGovernanceSummary,
+  filterGovernanceRows,
+  getFriendlyGovernanceIssueLabels,
+  getGovernanceOperatorStatus,
+  getRecommendedGovernanceRole,
+} from './auth-governance-view-model';
 import type { AuthGovernanceUserRow } from '../../lib/platform-bff-client';
 
 const baseRow: AuthGovernanceUserRow = {
@@ -63,6 +69,31 @@ describe('auth governance view model helpers', () => {
       missingCanonicalMember: 0,
       duplicateMemberDocs: 0,
       bootstrapCandidates: 0,
+    });
+  });
+
+  it('describes sync issues in non-developer language', () => {
+    expect(getFriendlyGovernanceIssueLabels({
+      ...baseRow,
+      driftFlags: ['claim_mismatch', 'duplicate_member_docs', 'missing_canonical_member'],
+    })).toEqual([
+      '로그인 권한과 화면 권한이 다름',
+      '권한 기록이 중복됨',
+      '직원 권한 기록 없음',
+    ]);
+  });
+
+  it('summarizes whether an operator needs to take action', () => {
+    expect(getGovernanceOperatorStatus(baseRow)).toEqual({
+      tone: 'warning',
+      label: '확인 필요',
+      description: '권한 반영 버튼을 눌러 로그인 권한과 직원 권한을 맞춰야 합니다.',
+    });
+
+    expect(getGovernanceOperatorStatus({ ...baseRow, needsDeepSync: false, driftFlags: [] })).toEqual({
+      tone: 'success',
+      label: '정상',
+      description: '로그인 권한과 직원 권한이 맞춰져 있습니다.',
     });
   });
 });
