@@ -44,7 +44,6 @@ const NotFoundPage = lazy(() => import('./components/layout/NotFoundPage').then(
 // Portal pages
 const PortalOnboarding = lazy(() => import('./components/portal/PortalOnboarding').then(m => ({ default: m.PortalOnboarding })));
 const PortalProjectSelectPage = lazy(() => import('./components/portal/PortalProjectSelectPage').then(m => ({ default: m.PortalProjectSelectPage })));
-const PortalProjectSettings = lazy(() => import('./components/portal/PortalProjectSettings').then(m => ({ default: m.PortalProjectSettings })));
 const PortalDashboard = lazy(() => import('./components/portal/PortalDashboard').then(m => ({ default: m.PortalDashboard })));
 const PortalBudget = lazy(() => import('./components/portal/PortalBudget').then(m => ({ default: m.PortalBudget })));
 const PortalPersonnel = lazy(() => import('./components/portal/PortalPersonnel').then(m => ({ default: m.PortalPersonnel })));
@@ -68,6 +67,12 @@ const PortalWeeklyExpensePage = lazy(() => loadLazyRouteModule(
   'PortalWeeklyExpensePage',
   RouteChunkFallback,
   '[routes] failed to load PortalWeeklyExpensePage:',
+));
+const PortalProjectSettings = lazy(() => loadLazyRouteModule(
+  () => import('./components/portal/PortalProjectSettings'),
+  'PortalProjectSettings',
+  RouteChunkFallback,
+  '[routes] failed to load PortalProjectSettings:',
 ));
 const PortalBankStatementPage = lazy(() => import('./components/portal/PortalBankStatementPage').then(m => ({ default: m.PortalBankStatementPage })));
 const GuideChatPage = lazy(() => import('./components/guide-chat/GuideChatPage').then(m => ({ default: m.GuideChatPage })));
