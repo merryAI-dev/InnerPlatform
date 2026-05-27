@@ -26,10 +26,12 @@ describe('FeatureSearchPage shell contract', () => {
     expect(source).toContain('group-focus-within:opacity-100');
     expect(source).toContain('absolute left-0 top-[-8px]');
     expect(source).toContain('min-h-dvh');
-    expect(source).toContain('border-sky-200');
-    expect(source).toContain('border-emerald-200');
-    expect(source).toContain('backdrop-blur-xl');
-    expect(source).toContain('bg-white/50');
+    expect(source).toContain('bg-[#001e46]');
+    expect(source).toContain('mx-auto flex');
+    expect(source).toContain('max-w-6xl');
+    expect(source).toContain('border border-slate-200 bg-white');
+    expect(source).not.toContain('border-emerald-200');
+    expect(source).not.toContain('backdrop-blur-xl');
   });
 
   it('uses registration-focused quick suggestions without the ambiguous CIC chip', () => {

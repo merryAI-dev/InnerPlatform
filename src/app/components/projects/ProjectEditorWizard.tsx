@@ -29,6 +29,7 @@ import {
   getProjectTypeSelectableOptions,
   normalizeProjectContractType,
   normalizeSettlementSheetPolicy,
+  PROJECT_CURRENCY_LABELS,
   PROJECT_FUND_INPUT_MODE_LABELS,
   PROJECT_PHASE_LABELS,
   PROJECT_STATUS_LABELS,
@@ -37,6 +38,7 @@ import {
   type AccountType,
   type Basis,
   type OrgMember,
+  type ProjectCurrency,
   type ProjectFinancialInputFlags,
   type ProjectFundInputMode,
   type ProjectPhase,
@@ -55,6 +57,7 @@ import {
   normalizeProjectFinancialInputFlags,
   parseProjectAmountInput,
 } from '../../platform/project-contract-amount';
+import { buildContractDocumentEditPolicy } from '../../platform/project-contract-document-policy';
 import { formatProfitRatePercentInput } from '../../platform/project-financials';
 import { createProjectEditorDraft, type ProjectEditorDraft, type ProjectEditorMode } from '../../platform/project-editor';
 import {
@@ -114,6 +117,7 @@ interface ProjectEditorWizardProps {
     contractDocument: ProjectEditorDraft['contractDocument'];
     contractAnalysis: ProjectRequestContractAnalysis | null;
   }>;
+  contractAnalysisMergeMode?: 'fill-empty' | 'none';
   canRemoveContractDocument?: boolean;
   onCancel?: () => void;
   onSubmit: (draft: ProjectEditorDraft, actionId: string) => void | Promise<void>;
@@ -135,6 +139,28 @@ const STEPS: Array<{
   { id: 'payment', label: '입금/정산', icon: CreditCard },
   { id: 'review', label: '검토 및 저장', icon: ClipboardList },
 ];
+
+const PROJECT_EDITOR_FORM_SURFACE_CLASS = [
+  '[&_[data-slot=input]]:border-slate-300',
+  '[&_[data-slot=input]]:bg-white',
+  '[&_[data-slot=input]]:shadow-[inset_0_1px_0_rgba(15,23,42,0.03)]',
+  '[&_[data-slot=input]]:focus-visible:border-slate-400',
+  '[&_[data-slot=input]]:focus-visible:ring-slate-200',
+  '[&_[data-slot=select-trigger]]:border',
+  '[&_[data-slot=select-trigger]]:border-slate-300',
+  '[&_[data-slot=select-trigger]]:bg-white',
+  '[&_[data-slot=select-trigger]]:shadow-[inset_0_1px_0_rgba(15,23,42,0.03)]',
+  '[&_[data-slot=select-trigger]]:focus-visible:border-slate-400',
+  '[&_[data-slot=select-trigger]]:focus-visible:ring-slate-200',
+  '[&_[data-slot=textarea]]:border-slate-300',
+  '[&_[data-slot=textarea]]:bg-white',
+  '[&_[data-slot=textarea]]:shadow-[inset_0_1px_0_rgba(15,23,42,0.03)]',
+  '[&_[data-slot=textarea]]:focus-visible:border-slate-400',
+  '[&_[data-slot=textarea]]:focus-visible:ring-slate-200',
+  '[&_[role=combobox]]:border-slate-300',
+  '[&_[role=combobox]]:bg-white',
+  '[&_[role=combobox]]:shadow-[inset_0_1px_0_rgba(15,23,42,0.03)]',
+].join(' ');
 
 function fmtKRW(value: number) {
   return value ? value.toLocaleString('ko-KR') : '0';
@@ -198,6 +224,8 @@ function createEmptyTeamMember(): ProjectTeamMemberAssignment {
     memberNickname: '',
     role: '',
     participationRate: 0,
+    laborAllocationStartMonth: '',
+    laborAllocationEndMonth: '',
   };
 }
 
@@ -210,16 +238,6 @@ function formatTeamMemberIdentityInput(member: ProjectTeamMemberAssignment): str
 
 function isAdminMode(mode: ProjectEditorMode) {
   return mode === 'admin';
-}
-
-function isSameContractDocument(
-  current: ProjectEditorDraft['contractDocument'],
-  initial: ProjectEditorDraft['contractDocument'],
-) {
-  if (!current || !initial) return current === initial;
-  return current.path === initial.path
-    && current.downloadURL === initial.downloadURL
-    && current.uploadedAt === initial.uploadedAt;
 }
 
 function createProjectEditorWizardDraft(overrides: Partial<ProjectEditorDraft> = {}): ProjectEditorDraft {
@@ -351,6 +369,7 @@ export function ProjectEditorWizard({
   actions,
   busyActionId,
   onContractFileUpload,
+  contractAnalysisMergeMode = 'fill-empty',
   canRemoveContractDocument,
   onCancel,
   onSubmit,
@@ -363,13 +382,11 @@ export function ProjectEditorWizard({
   const initialContractDocument = initialDraft.contractDocument ?? null;
   const initialContractAnalysis = initialDraft.contractAnalysis ?? null;
   const canRemoveExistingContractDocument = canRemoveContractDocument ?? isAdminMode(mode);
-  const isCurrentContractDocumentInitial = isSameContractDocument(draft.contractDocument, initialContractDocument);
-  const canRemoveCurrentContractDocument = Boolean(
-    draft.contractDocument && (canRemoveExistingContractDocument || !isCurrentContractDocumentInitial),
-  );
-  const isExistingContractDocumentLocked = Boolean(
-    draft.contractDocument && initialContractDocument && isCurrentContractDocumentInitial && !canRemoveExistingContractDocument,
-  );
+  const contractDocumentEditPolicy = buildContractDocumentEditPolicy({
+    current: draft.contractDocument,
+    initial: initialContractDocument,
+    canRemoveExistingContractDocument,
+  });
 
   useEffect(() => {
     setDraft(createProjectEditorWizardDraft(initialDraft));
@@ -483,11 +500,16 @@ export function ProjectEditorWizard({
     setContractUploadError('');
     try {
       const processed = await onContractFileUpload(file);
-      setDraft((prev) => mergeContractAnalysisIntoDraft(createProjectEditorWizardDraft({
-        ...prev,
-        contractDocument: processed.contractDocument,
-        contractAnalysis: processed.contractAnalysis,
-      }), processed.contractAnalysis));
+      setDraft((prev) => {
+        const nextDraft = createProjectEditorWizardDraft({
+          ...prev,
+          contractDocument: processed.contractDocument,
+          contractAnalysis: processed.contractAnalysis,
+        });
+        return contractAnalysisMergeMode === 'none'
+          ? nextDraft
+          : mergeContractAnalysisIntoDraft(nextDraft, processed.contractAnalysis);
+      });
       setContractUploadState('ready');
       toast.success(`계약서 PDF 업로드 및 분석 완료: ${file.name}`);
     } catch (error) {
@@ -504,10 +526,10 @@ export function ProjectEditorWizard({
   const removeContractDocument = () => {
     setDraft((prev) => createProjectEditorWizardDraft({
       ...prev,
-      contractDocument: initialContractDocument && !canRemoveExistingContractDocument
+      contractDocument: initialContractDocument && !contractDocumentEditPolicy.canRemoveExistingContractDocument
         ? initialContractDocument
         : null,
-      contractAnalysis: initialContractDocument && !canRemoveExistingContractDocument
+      contractAnalysis: initialContractDocument && !contractDocumentEditPolicy.canRemoveExistingContractDocument
         ? initialContractAnalysis
         : null,
     }));
@@ -650,7 +672,9 @@ export function ProjectEditorWizard({
                 <Label className="text-xs font-semibold">계약서 PDF</Label>
               </div>
               <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
-                PDF를 올리면 계약명, 계약기간, 계약금액, 계약 대상 후보를 읽어와 빈 항목만 채웁니다.
+                {contractAnalysisMergeMode === 'none'
+                  ? 'PDF를 올리면 계약서 원문과 검토용 첨부를 저장합니다. 입력값은 자동으로 바꾸지 않습니다.'
+                  : 'PDF를 올리면 계약명, 계약기간, 계약금액, 계약 대상 후보를 읽어와 빈 항목만 채웁니다.'}
               </p>
               {draft.contractDocument ? (
                 <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px]">
@@ -661,22 +685,22 @@ export function ProjectEditorWizard({
                   <Button asChild type="button" variant="outline" size="sm" className="h-7 px-2 text-[11px]">
                     <a href={draft.contractDocument.downloadURL} target="_blank" rel="noreferrer">원문 보기</a>
                   </Button>
-                  {canRemoveCurrentContractDocument ? (
+                  {contractDocumentEditPolicy.canRemoveCurrentContractDocument ? (
                     <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[11px] text-rose-600" onClick={removeContractDocument}>
                       <X className="mr-1 h-3.5 w-3.5" />
-                      {initialContractDocument && !canRemoveExistingContractDocument ? '교체 취소' : '첨부 제거'}
+                      {contractDocumentEditPolicy.removeButtonLabel}
                     </Button>
                   ) : null}
                 </div>
               ) : null}
-              {isExistingContractDocumentLocked ? (
+              {contractDocumentEditPolicy.isExistingContractDocumentLocked ? (
                 <p className="mt-2 text-[11px] text-muted-foreground">
                   기존 계약서는 관리자 화면에서만 제거할 수 있습니다.
                 </p>
               ) : null}
               {draft.contractAnalysis ? (
-                <div className="mt-3 rounded-lg border border-emerald-200 bg-white px-3 py-2 text-[12px] leading-5 text-slate-700">
-                  <span className="font-semibold text-emerald-700">분석 요약</span>
+                <div className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-[12px] leading-5 text-slate-700">
+                  <span className="font-semibold text-[#001e46]">분석 요약</span>
                   <span className="ml-2">{draft.contractAnalysis.summary}</span>
                 </div>
               ) : null}
@@ -750,18 +774,31 @@ export function ProjectEditorWizard({
         </div>
       )}
 
-      <div>
-        <Label className="text-xs">계약금액 (원) *</Label>
-        <Input
-          inputMode="numeric"
-          value={hasContractAmountInput ? String(draft.contractAmount) : ''}
-          onChange={(event) => updateAmount('contractAmount', event.target.value)}
-          placeholder="0"
-          className="mt-1 h-9 text-sm"
-        />
-        <p className="mt-1 text-[10px] text-muted-foreground">
-          {hasContractAmountInput ? `${fmtKRW(draft.contractAmount)}원` : '미입력'}
-        </p>
+      <div className="grid gap-4 lg:grid-cols-[160px_minmax(0,1fr)]">
+        <div>
+          <Label className="text-xs">통화</Label>
+          <Select value={draft.currency} onValueChange={(value) => update('currency', (value === 'USD' ? 'USD' : 'KRW') as ProjectCurrency)}>
+            <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {(Object.keys(PROJECT_CURRENCY_LABELS) as ProjectCurrency[]).map((currency) => (
+                <SelectItem key={currency} value={currency}>{PROJECT_CURRENCY_LABELS[currency]}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <Label className="text-xs">계약금액 *</Label>
+          <Input
+            inputMode="numeric"
+            value={hasContractAmountInput ? String(draft.contractAmount) : ''}
+            onChange={(event) => updateAmount('contractAmount', event.target.value)}
+            placeholder="0"
+            className="mt-1 h-9 text-sm"
+          />
+          <p className="mt-1 text-[10px] text-muted-foreground">
+            {hasContractAmountInput ? `${PROJECT_CURRENCY_LABELS[draft.currency]} ${fmtKRW(draft.contractAmount)}` : '미입력'}
+          </p>
+        </div>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-4">
@@ -925,8 +962,8 @@ export function ProjectEditorWizard({
       </div>
       <div className="flex items-center justify-between gap-3">
         <div>
-          <Label className="text-xs">팀원 구성</Label>
-          <p className="mt-1 text-[10px] text-muted-foreground">팀원, 역할, 참여율을 같은 구조로 저장합니다.</p>
+          <Label className="text-xs">서류상 참여인력</Label>
+          <p className="mt-1 text-[10px] text-muted-foreground">계약·협약서에 남길 참여인력, 역할, 참여율을 같은 구조로 저장합니다.</p>
         </div>
         <Button type="button" onClick={addTeamMember} className="gap-2">
           <Plus className="h-4 w-4" />
@@ -957,7 +994,7 @@ export function ProjectEditorWizard({
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
                 </div>
-                <div className="mt-3 grid gap-3 lg:grid-cols-[132px_minmax(0,1.4fr)_minmax(0,1fr)_120px]">
+                <div className="mt-3 grid gap-3 lg:grid-cols-[132px_minmax(0,1.4fr)_minmax(0,1fr)_120px_140px_140px]">
                   <div>
                     <Label className="text-xs">입력 방식</Label>
                     <Select
@@ -1013,6 +1050,24 @@ export function ProjectEditorWizard({
                       step={1}
                       value={member.participationRate || ''}
                       onChange={(event) => updateTeamMember(index, { participationRate: Number(event.target.value) || 0 })}
+                      className="mt-1 h-9 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">인건비 시작월</Label>
+                    <Input
+                      type="month"
+                      value={member.laborAllocationStartMonth || ''}
+                      onChange={(event) => updateTeamMember(index, { laborAllocationStartMonth: event.target.value })}
+                      className="mt-1 h-9 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">인건비 종료월</Label>
+                    <Input
+                      type="month"
+                      value={member.laborAllocationEndMonth || ''}
+                      onChange={(event) => updateTeamMember(index, { laborAllocationEndMonth: event.target.value })}
                       className="mt-1 h-9 text-sm"
                     />
                   </div>
@@ -1081,7 +1136,7 @@ export function ProjectEditorWizard({
   const renderReviewStep = () => (
     <div className="space-y-4">
       {submitIssues.length > 0 ? (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[12px] text-amber-800">
+        <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-[12px] text-red-700">
           제출 전 {submitIssues.map((issue) => issue.label).join(', ')} 입력이 필요합니다.
         </div>
       ) : null}
@@ -1109,6 +1164,7 @@ export function ProjectEditorWizard({
           <CardHeader className="pb-2"><CardTitle className="text-sm">계약/재무</CardTitle></CardHeader>
           <CardContent>
             <ReviewRow label="기간" value={`${draft.contractStart || '-'} ~ ${draft.contractEnd || '-'}`} />
+            <ReviewRow label="통화" value={PROJECT_CURRENCY_LABELS[draft.currency]} />
             <ReviewRow label="계약금액" value={formatStoredProjectAmount(draft.contractAmount, financialInputFlags.contractAmount)} />
             <ReviewRow label="매출 부가세" value={formatStoredProjectAmount(draft.salesVatAmount, financialInputFlags.salesVatAmount)} />
             <ReviewRow label="총수익" value={formatStoredProjectAmount(draft.totalRevenueAmount, financialInputFlags.totalRevenueAmount)} />
@@ -1126,7 +1182,7 @@ export function ProjectEditorWizard({
           <CardContent>
             <ReviewRow label="PM" value={draft.managerName} />
             <ReviewRow label="담당자 계정" value={draft.managerId || '-'} />
-            <ReviewRow label="팀원" value={teamMembersSummary} />
+            <ReviewRow label="서류상 참여인력" value={teamMembersSummary} />
           </CardContent>
         </Card>
         <Card className="shadow-none">
@@ -1163,7 +1219,7 @@ export function ProjectEditorWizard({
   };
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5">
+    <div className="mx-auto w-full max-w-6xl space-y-5">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <div className="flex items-center gap-2">
@@ -1200,7 +1256,7 @@ export function ProjectEditorWizard({
                   type="button"
                   onClick={() => setStepIndex(index)}
                   className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-left text-xs transition-colors ${
-                    active ? 'border-teal-300 bg-teal-50 text-teal-800' : 'border-border bg-white text-muted-foreground hover:bg-muted/40'
+                    active ? 'border-[#001e46] bg-slate-50 text-[#001e46]' : 'border-border bg-white text-muted-foreground hover:bg-muted/40'
                   }`}
                 >
                   <Icon className="h-4 w-4 shrink-0" />
@@ -1219,7 +1275,7 @@ export function ProjectEditorWizard({
             {step.label}
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-5">
+        <CardContent className={cn('space-y-5', PROJECT_EDITOR_FORM_SURFACE_CLASS)}>
           {renderStep()}
         </CardContent>
       </Card>

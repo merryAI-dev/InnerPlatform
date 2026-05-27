@@ -130,7 +130,7 @@ export function CashflowMonitorPage() {
         href: '/cashflow/analytics',
         badge: '추세',
         icon: BarChart3,
-        toneClass: 'border-indigo-200 bg-indigo-50/80',
+        toneClass: 'border-cyan-200 bg-cyan-50/80',
       },
       {
         title: '은행 대조',
@@ -180,7 +180,7 @@ export function CashflowMonitorPage() {
           label="결산 완료"
           value={`${closedCount}개`}
           hint={`결산 대기 ${pendingCloseCount}개`}
-          toneClass="border-indigo-200 bg-indigo-50/70"
+          toneClass="border-cyan-200 bg-cyan-50/70"
           icon={TrendingUp}
         />
       </div>

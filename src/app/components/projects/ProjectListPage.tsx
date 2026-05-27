@@ -339,7 +339,7 @@ export function ProjectListPage() {
       {/* Header */}
       <PageHeader
         icon={FolderKanban}
-        iconGradient="linear-gradient(135deg, #6366f1, #818cf8)"
+        iconGradient="linear-gradient(135deg, #0891b2, #22d3ee)"
         title="프로젝트 통합 관리"
         description={`활성 ${activeProjects.length}개 프로젝트 · 확정 ${confirmedProjects.length} / 예정 ${prospectProjects.length} / 휴지통 ${trashedProjects.length}`}
       />

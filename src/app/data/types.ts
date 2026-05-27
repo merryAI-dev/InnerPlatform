@@ -27,6 +27,7 @@ export type ProjectPhase = 'PROSPECT' | 'CONFIRMED';  // 입찰예정 / 확정
 
 export type SettlementType = 'TYPE1' | 'TYPE2' | 'TYPE3' | 'TYPE4' | 'TYPE5' | 'NONE';
 export type Basis = '공급가액' | '공급대가' | 'NONE';
+export type ProjectCurrency = 'KRW' | 'USD';
 
 export type AccountType = 'DEDICATED' | 'OPERATING' | 'NONE'; // 전용계좌 사업(이나라도움) / 전용계좌(이나라도움x) / 일반 사업
 export type ProjectFundInputMode = 'BANK_UPLOAD' | 'DIRECT_ENTRY';
@@ -39,6 +40,15 @@ export type PaymentMethod = 'TRANSFER' | 'CORP_CARD_1' | 'CORP_CARD_2' | 'OTHER'
 export type SettlementEntryKind = 'STANDARD' | 'DEPOSIT' | 'EXPENSE' | 'ADJUSTMENT';
 
 export type EvidenceStatus = 'MISSING' | 'PARTIAL' | 'COMPLETE';
+
+export const PROJECT_CURRENCY_LABELS: Record<ProjectCurrency, string> = {
+  KRW: 'KRW',
+  USD: 'USD',
+};
+
+export function normalizeProjectCurrency(raw: unknown): ProjectCurrency {
+  return raw === 'USD' ? 'USD' : 'KRW';
+}
 
 export type CashflowCategory =
   | 'CONTRACT_PAYMENT'    // 계약금
@@ -133,7 +143,7 @@ export const SETTLEMENT_TYPE_LABELS: Record<SettlementType, string> = {
   TYPE3: 'Type3. 공급가액+세금계산서 미발행',
   TYPE4: 'Type4. 세금계산서미발행+공급대가',
   TYPE5: 'Type5. 이나라도움+공급가액',
-  NONE: '해당없음',
+  NONE: '해당없음(정산대상 아님)',
 };
 
 export const SETTLEMENT_TYPE_SHORT: Record<SettlementType, string> = {
@@ -142,13 +152,13 @@ export const SETTLEMENT_TYPE_SHORT: Record<SettlementType, string> = {
   TYPE3: 'Type3',
   TYPE4: 'Type4',
   TYPE5: 'Type5',
-  NONE: '해당없음',
+  NONE: '해당없음(정산대상 아님)',
 };
 
 export const BASIS_LABELS: Record<Basis, string> = {
   '공급가액': '공급가액 기준',
   '공급대가': '공급대가 기준',
-  NONE: '해당없음',
+  NONE: '해당없음(정산대상 아님)',
 };
 
 export function normalizeSettlementType(raw: unknown): SettlementType {
@@ -522,6 +532,7 @@ export interface Project {
   status: ProjectStatus;
   type: ProjectType;
   phase: ProjectPhase;
+  currency?: ProjectCurrency;
   contractAmount: number;        // 총 사업비 금액(매출부가세 포함)
   contractStart: string;
   contractEnd: string;
@@ -679,6 +690,8 @@ export interface ProjectTeamMemberAssignment {
   memberNickname: string;
   role: string;
   participationRate: number;
+  laborAllocationStartMonth?: string;
+  laborAllocationEndMonth?: string;
 }
 
 export interface ProjectRequestPayload {
@@ -691,6 +704,7 @@ export interface ProjectRequestPayload {
   clientOrg: string;
   department: string;
   groupwareName?: string;
+  currency?: ProjectCurrency;
   contractAmount: number;
   salesVatAmount: number;
   totalRevenueAmount: number;

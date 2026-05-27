@@ -405,11 +405,11 @@ function PortalContent() {
 
   if (!portalUser && !isAdminSpaceRole(authUser?.role)) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-teal-50/30 dark:from-slate-950 dark:via-slate-900 dark:to-teal-950/20 flex items-center justify-center px-6">
-        <div className="max-w-lg w-full">
+      <div className="min-h-screen bg-slate-50 px-6 py-8 dark:bg-slate-950">
+        <div className="mx-auto w-full max-w-6xl">
           {/* 환영 헤더 */}
           <div className="text-center mb-8">
-            <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-teal-500 to-emerald-600 shadow-lg shadow-teal-500/20 mb-4">
+            <div className="inline-flex items-center justify-center w-14 h-14 rounded-lg bg-[#001e46] shadow-sm mb-4">
               <Sparkles className="w-7 h-7 text-white" />
             </div>
             <h1 className="text-xl font-bold tracking-tight">
@@ -424,44 +424,44 @@ function PortalContent() {
           <div className="grid gap-3">
             <button
               onClick={() => navigate('/portal/project-select')}
-              className="group relative flex items-center gap-4 p-5 rounded-2xl border border-border/60 bg-white/80 dark:bg-slate-800/60 backdrop-blur-sm hover:border-teal-300 hover:shadow-md hover:shadow-teal-500/5 transition-all duration-200 text-left"
+              className="group relative flex items-center gap-4 rounded-lg border border-border bg-white p-5 text-left shadow-sm transition-all duration-200 hover:border-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800"
             >
-              <div className="shrink-0 flex items-center justify-center w-11 h-11 rounded-xl bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 group-hover:scale-105 transition-transform">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-sky-50 text-sky-700 transition-transform group-hover:scale-105 dark:bg-sky-950 dark:text-sky-300">
                 <FolderKanban className="w-5 h-5" />
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold">기존 프로젝트 선택</p>
                 <p className="text-xs text-muted-foreground mt-0.5">이미 등록된 프로젝트에서 선택하여 시작합니다</p>
               </div>
-              <ArrowRight className="w-4 h-4 text-muted-foreground/40 group-hover:text-teal-500 group-hover:translate-x-0.5 transition-all" />
+              <ArrowRight className="w-4 h-4 text-muted-foreground/40 group-hover:text-[#001e46] group-hover:translate-x-0.5 transition-all" />
             </button>
 
             <button
               onClick={() => navigate('/portal/weekly-expenses')}
-              className="group relative flex items-center gap-4 p-5 rounded-2xl border border-border/60 bg-white/80 dark:bg-slate-800/60 backdrop-blur-sm hover:border-violet-300 hover:shadow-md hover:shadow-violet-500/5 transition-all duration-200 text-left"
+              className="group relative flex items-center gap-4 p-5 rounded-lg border border-border/80 bg-white text-left shadow-sm transition-all duration-200 hover:border-cyan-300 hover:bg-cyan-50/60 dark:bg-slate-900 dark:hover:bg-cyan-950/20"
             >
-              <div className="shrink-0 flex items-center justify-center w-11 h-11 rounded-xl bg-violet-50 dark:bg-violet-950 text-violet-600 dark:text-violet-400 group-hover:scale-105 transition-transform">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-cyan-50 text-cyan-700 transition-transform group-hover:scale-105 dark:bg-cyan-950 dark:text-cyan-300">
                 <Upload className="w-5 h-5" />
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold">증빙 업로드만 할게요</p>
                 <p className="text-xs text-muted-foreground mt-0.5">프로젝트 선택 없이 바로 PDF/영수증을 업로드합니다</p>
               </div>
-              <ArrowRight className="w-4 h-4 text-muted-foreground/40 group-hover:text-violet-500 group-hover:translate-x-0.5 transition-all" />
+              <ArrowRight className="w-4 h-4 text-muted-foreground/40 transition-all group-hover:translate-x-0.5 group-hover:text-cyan-600" />
             </button>
 
             <button
               onClick={() => navigate('/portal/register-project')}
-              className="group relative flex items-center gap-4 p-5 rounded-2xl border border-border/60 bg-white/80 dark:bg-slate-800/60 backdrop-blur-sm hover:border-emerald-300 hover:shadow-md hover:shadow-emerald-500/5 transition-all duration-200 text-left"
+              className="group relative flex items-center gap-4 rounded-lg border border-border bg-white p-5 text-left shadow-sm transition-all duration-200 hover:border-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800"
             >
-              <div className="shrink-0 flex items-center justify-center w-11 h-11 rounded-xl bg-emerald-50 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400 group-hover:scale-105 transition-transform">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-slate-100 text-[#001e46] transition-transform group-hover:scale-105 dark:bg-slate-800 dark:text-slate-200">
                 <Plus className="w-5 h-5" />
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold">새 프로젝트 등록</p>
                 <p className="text-xs text-muted-foreground mt-0.5">새로운 프로젝트를 제안하고 등록을 시작합니다</p>
               </div>
-              <ArrowRight className="w-4 h-4 text-muted-foreground/40 group-hover:text-emerald-500 group-hover:translate-x-0.5 transition-all" />
+              <ArrowRight className="w-4 h-4 text-muted-foreground/40 group-hover:text-[#001e46] group-hover:translate-x-0.5 transition-all" />
             </button>
 
             {isAdminSpaceRole(authUser?.role) && (
@@ -591,7 +591,7 @@ function PortalContent() {
                 </p>
               )}
               <div className="flex items-center gap-1.5 mt-1">
-                <Badge className="text-[8px] h-3.5 px-1 bg-teal-500/20 text-teal-300 border-0">
+                <Badge className="text-[8px] h-3.5 px-1 border-white/20 bg-white/10 text-slate-200">
                   {currentProject?.clientOrg || ''}
                 </Badge>
                 <span className="text-[9px] text-slate-600">{currentProject?.department || ''}</span>
@@ -661,20 +661,20 @@ function PortalContent() {
                               group relative flex items-center gap-2 rounded-md text-[12px] transition-all duration-100
                               ${collapsed ? 'justify-center h-9 w-full px-0' : 'px-2.5 py-[7px]'}
                               ${active
-                                ? 'bg-teal-500/18 text-white backdrop-blur-sm'
+                                ? 'bg-white/12 text-white'
                                 : 'text-slate-400 hover:text-slate-200 hover:bg-white/8'
                               }
                             `}
                           >
                             {active && !collapsed && (
-                              <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-3.5 rounded-r bg-teal-400" />
+                              <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-3.5 rounded-r bg-[#5bbfdf]" />
                             )}
-                            <item.icon className={`w-[15px] h-[15px] shrink-0 ${active ? 'text-teal-400' : 'text-slate-600 group-hover:text-slate-400'}`} />
+                            <item.icon className={`w-[15px] h-[15px] shrink-0 ${active ? 'text-[#5bbfdf]' : 'text-slate-600 group-hover:text-slate-400'}`} />
                             {!collapsed && (
                               <>
                                 <span style={{ fontWeight: active ? 500 : 400 }}>{item.label}</span>
                                 {badge !== null && (
-                                  <span className="ml-auto flex items-center justify-center min-w-[16px] h-[16px] rounded-full bg-teal-500/90 text-[9px] text-white px-1" style={{ fontWeight: 700 }}>
+                                  <span className="ml-auto flex items-center justify-center min-w-[16px] h-[16px] rounded-full bg-[#5bbfdf] text-[9px] text-[#001e46] px-1" style={{ fontWeight: 700 }}>
                                     {badge}
                                   </span>
                                 )}
@@ -689,7 +689,7 @@ function PortalContent() {
                               <TooltipContent side="right" className="text-[11px]">
                                 <div className="flex items-center gap-2">
                                   <span>{item.label}</span>
-                                  {badge !== null && <span className="text-teal-500">{badge}</span>}
+                                  {badge !== null && <span className="text-[#001e46]">{badge}</span>}
                                 </div>
                               </TooltipContent>
                             </Tooltip>
@@ -715,7 +715,7 @@ function PortalContent() {
               title={labEnabled ? 'LAB 메뉴 숨기기' : 'LAB 메뉴 보이기'}
               className={`w-full flex items-center justify-center h-7 rounded-md text-[10px] transition-colors ${
                 labEnabled
-                  ? 'bg-teal-500/20 text-teal-200'
+                  ? 'bg-white/12 text-slate-100'
                   : 'text-slate-500 hover:text-slate-300 hover:bg-white/10'
               }`}
               aria-pressed={labEnabled}
@@ -726,7 +726,7 @@ function PortalContent() {
               <div className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-white/8 border border-white/10">
                 <div
                   className="w-6 h-6 rounded-md flex items-center justify-center shrink-0 text-[10px] text-white"
-                  style={{ fontWeight: 700, background: 'linear-gradient(135deg, #0d9488, #059669)' }}
+                  style={{ fontWeight: 700, background: '#001e46' }}
                 >
                   {portalDisplayName.charAt(0)}
                 </div>
@@ -793,7 +793,7 @@ function PortalContent() {
                   data-testid="portal-project-switch-trigger"
                   onClick={() => setCommandOpen(true)}
                   aria-label="검색 또는 열기"
-                  className="flex h-10 w-full max-w-xl items-center gap-2 rounded-xl border border-white/15 bg-white/8 px-3 text-left text-slate-200 transition-colors hover:bg-white/12"
+                  className="flex h-10 w-full max-w-none items-center gap-2 rounded-lg border border-white/15 bg-white/8 px-3 text-left text-slate-200 transition-colors hover:bg-white/12"
                 >
                   <Search className="h-4 w-4 text-slate-300" />
                   <span className="truncate text-[12px] text-slate-300">검색 또는 열기</span>
@@ -823,7 +823,7 @@ function PortalContent() {
                     >
                       <Bell className="h-4 w-4" />
                       {notificationItems.length > 0 && (
-                        <span className="absolute right-1 top-1 inline-flex h-2 w-2 rounded-full bg-amber-400" />
+                        <span className="absolute right-1 top-1 inline-flex h-2 w-2 rounded-full bg-[#5bbfdf]" />
                       )}
                     </button>
                   </DropdownMenuTrigger>
@@ -967,7 +967,7 @@ function PortalContent() {
 
           {/* Content */}
           <main className="flex-1 overflow-y-auto">
-            <div className={useWidePortalCanvas ? 'mx-auto w-full max-w-none px-3 py-4 md:px-5 md:py-6 xl:px-8' : 'mx-auto max-w-[1480px] p-4 md:p-6'}>
+            <div className={useWidePortalCanvas ? 'w-full max-w-none px-3 py-4 md:px-5 md:py-6 xl:px-8' : 'mx-auto w-full max-w-[1480px] p-4 md:p-6'}>
               <PageTransition>
                 <ErrorBoundary homePath="/portal" resetKey={location.pathname}>
                   <Outlet />

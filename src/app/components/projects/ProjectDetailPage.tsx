@@ -212,7 +212,7 @@ export function ProjectDetailPage() {
           </Button>
           <div
             className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 mt-0.5"
-            style={{ background: 'linear-gradient(135deg, #4f46e5, #6366f1)' }}
+            style={{ background: 'linear-gradient(135deg, #0891b2, #0891b2)' }}
           >
             <FolderKanban className="w-4.5 h-4.5 text-white" />
           </div>
@@ -302,7 +302,7 @@ export function ProjectDetailPage() {
           {!isTrashed && project.status === 'CONTRACT_PENDING' && (
             <AlertDialog>
               <AlertDialogTrigger asChild>
-                <Button size="sm" className="gap-1.5" style={{ background: 'linear-gradient(135deg, #4f46e5, #6366f1)' }}>
+                <Button size="sm" className="gap-1.5" style={{ background: 'linear-gradient(135deg, #0891b2, #0891b2)' }}>
                   <Play className="w-3.5 h-3.5" />
                   사업 시작
                 </Button>

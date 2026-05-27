@@ -143,9 +143,40 @@ describe('project-request-review', () => {
     }));
 
     const items = model.checklistGroups.flatMap((group) => group.items);
-    expect(items.find((item) => item.key === 'settlementType')?.value).toBe('해당없음');
+    expect(items.find((item) => item.key === 'settlementType')?.value).toBe('해당없음(정산대상 아님)');
     expect(items.find((item) => item.key === 'basis')?.value).toBe('공급가액 기준');
     expect(items.find((item) => item.key === 'accountType')?.value).toBe('일반 사업');
     expect(items.find((item) => item.key === 'fundInputMode')?.value).toBe('통장내역 업로드');
+  });
+
+  it('shows currency as a financial review item', () => {
+    const model = buildProjectRequestReviewModel(createRequest({
+      payload: {
+        currency: 'USD',
+      },
+    }));
+
+    const items = model.checklistGroups.flatMap((group) => group.items);
+    expect(items.find((item) => item.key === 'currency')?.value).toBe('USD');
+  });
+
+  it('shows labor allocation period for document team members', () => {
+    const model = buildProjectRequestReviewModel(createRequest({
+      payload: {
+        teamMembersDetailed: [
+          {
+            memberName: '김다은',
+            memberNickname: '데이나',
+            role: 'PM',
+            participationRate: 60,
+            laborAllocationStartMonth: '2026-04',
+            laborAllocationEndMonth: '2026-09',
+          },
+        ],
+      },
+    }));
+
+    const items = model.checklistGroups.flatMap((group) => group.items);
+    expect(items.find((item) => item.key === 'teamMembers')?.value).toBe('김다은 (데이나) / PM / 60% / 인건비 2026-04~2026-09');
   });
 });

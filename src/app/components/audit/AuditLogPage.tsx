@@ -174,7 +174,7 @@ export function AuditLogPage() {
     <div className="space-y-5">
       <PageHeader
         icon={BookOpen}
-        iconGradient="linear-gradient(135deg, #7c3aed, #a78bfa)"
+        iconGradient="linear-gradient(135deg, #0f766e, #2dd4bf)"
         title="감사 로그"
         description="모든 데이터 변경 이력 추적 · 읽기 전용"
         badge={`${allLogs.length}건`}
@@ -248,8 +248,8 @@ export function AuditLogPage() {
           <div key={date}>
             {/* Date header */}
             <div className="flex items-center gap-2 mb-2 sticky top-0 z-10 bg-background py-1">
-              <div className="w-2 h-2 rounded-full bg-indigo-400" />
-              <span className="text-[11px] text-indigo-600" style={{ fontWeight: 700 }}>
+              <div className="w-2 h-2 rounded-full bg-cyan-400" />
+              <span className="text-[11px] text-cyan-600" style={{ fontWeight: 700 }}>
                 {date.replace(/-/g, '.')}
               </span>
               <div className="flex-1 h-px bg-border/40" />
@@ -266,7 +266,7 @@ export function AuditLogPage() {
                     className="flex items-start gap-3 p-2.5 rounded-lg hover:bg-muted/30 transition-colors group relative"
                   >
                     {/* Timeline dot */}
-                    <div className="absolute -left-[17px] top-3.5 w-2 h-2 rounded-full bg-card border-2 border-border/60 group-hover:border-indigo-400 transition-colors" />
+                    <div className="absolute -left-[17px] top-3.5 w-2 h-2 rounded-full bg-card border-2 border-border/60 group-hover:border-cyan-400 transition-colors" />
 
                     {/* Entity icon */}
                     <div className={`w-7 h-7 rounded-md flex items-center justify-center shrink-0 ${as.bg}`}>

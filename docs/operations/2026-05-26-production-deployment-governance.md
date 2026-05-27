@@ -15,10 +15,11 @@ Production deployment authority belongs to GitHub Actions running from `main` th
 | --- | --- | --- |
 | Live canonical | `https://inner-platform.vercel.app` | Product status, meeting demos, smoke tests |
 | Vercel deployment URL | `*.vercel.app` deployment host | Debugging a specific artifact only |
-| Preview URL | Vercel preview URL | PR review only |
-| Stage URL | TBD | Live rehearsal, never live evidence |
+| Preview URL | Vercel random deployment URL | Artifact debugging only, not QA login |
+| Stage URL | `https://inner-platform-git-ft-izzie-merryai-devs-projects.vercel.app` | Live rehearsal, Firebase Auth QA, never live evidence |
 
 Do not treat a preview URL or a one-off deployment URL as the product status URL.
+Because Firebase Auth only allows registered domains, do not share random Vercel preview URLs as Stage QA links. After each preview deployment, move the fixed Stage alias to the new deployment and share only the fixed Stage URL.
 
 ## Allowed Commands
 

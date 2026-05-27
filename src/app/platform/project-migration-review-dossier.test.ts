@@ -25,7 +25,7 @@ const project: Project = {
   groupwareName: '2026 다자간협력 운영',
   participantCondition: '현지 파트너 공동참여',
   teamMembersDetailed: [
-    { memberName: '변민욱', memberNickname: '보람', role: 'PM', participationRate: 60 },
+    { memberName: '변민욱', memberNickname: '보람', role: 'PM', participationRate: 60, laborAllocationStartMonth: '2026-03', laborAllocationEndMonth: '2026-08' },
     { memberName: '김다은', memberNickname: '데이나', role: '운영', participationRate: 40 },
   ],
   contractType: '계약서(날인)',
@@ -184,7 +184,7 @@ describe('buildMigrationReviewDossier', () => {
     }, null);
 
     expect(dossier.contract.projectTypeLabel).toBe('D-1 개발협력사업 - AVPN 포함');
-    expect(dossier.contract.settlementTypeLabel).toBe('해당없음');
+    expect(dossier.contract.settlementTypeLabel).toBe('해당없음(정산대상 아님)');
     expect(dossier.contract.basisLabel).toBe('공급가액 기준');
     expect(dossier.contract.accountTypeLabel).toBe('일반 사업');
     expect(dossier.contract.fundInputModeLabel).toBe('통장내역 업로드');

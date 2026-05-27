@@ -38,7 +38,7 @@ export const ORG_MEMBERS: OrgMember[] = [
   { uid: 'u016', name: '허브', email: 'hub@mysc.co.kr', role: 'pm' },
   { uid: 'u017', name: '다온', email: 'daon@mysc.co.kr', role: 'pm' },
   { uid: 'u018', name: '그린', email: 'green@mysc.co.kr', role: 'pm' },
-  { uid: 'u019', name: '재무팀', email: 'finance@mysc.co.kr', role: 'finance' },
+  { uid: 'u019', name: '경영기획실', email: 'finance@mysc.co.kr', role: 'finance' },
   { uid: 'u020', name: '감사팀', email: 'audit@mysc.co.kr', role: 'auditor' },
   { uid: 'u021', name: '수', email: 'su@mysc.co.kr', role: 'pm' },
   { uid: 'u022', name: '호두', email: 'hodu@mysc.co.kr', role: 'pm' },

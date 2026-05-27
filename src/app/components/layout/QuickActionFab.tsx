@@ -11,7 +11,7 @@ import { shouldShowShellRoute, useShellLabEnabled } from '../../platform/shell-l
 const ACTIONS = [
   { icon: BarChart3, label: '캐시플로 모니터링', path: '/cashflow', color: '#0d9488' },
   { icon: FileCheck, label: '증빙/정산', path: '/evidence', color: '#f59e0b' },
-  { icon: Shield, label: '승인 대기열', path: '/approvals', color: '#7c3aed' },
+  { icon: Shield, label: '승인 대기열', path: '/approvals', color: '#0891b2' },
 ];
 
 export function QuickActionFab() {
@@ -70,7 +70,7 @@ export function QuickActionFab() {
               navigate(action.path);
               setOpen(false);
             }}
-            className="flex items-center gap-2.5 pl-3 pr-4 py-2 rounded-xl bg-card border border-border/60 shadow-lg shadow-black/8 whitespace-nowrap hover:shadow-xl active:scale-[0.98] transition-all duration-150"
+            className="flex min-h-11 items-center gap-2.5 whitespace-nowrap rounded-lg border border-border bg-card py-2 pl-3 pr-4 shadow-sm transition-all duration-150 hover:bg-accent active:scale-[0.98]"
             style={{
               transitionDelay: open ? `${i * 30}ms` : '0ms',
               opacity: open ? 1 : 0,
@@ -78,7 +78,7 @@ export function QuickActionFab() {
             }}
           >
             <div
-              className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md"
               style={{ background: action.color + '14' }}
             >
               <action.icon className="w-3.5 h-3.5" style={{ color: action.color }} />
@@ -93,12 +93,12 @@ export function QuickActionFab() {
       {/* Main FAB button */}
       <button
         onClick={() => setOpen(!open)}
-        className="w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg transition-all duration-200 active:scale-95"
+        className="flex h-12 w-12 items-center justify-center rounded-lg shadow-lg transition-all duration-200 active:scale-95"
         style={{
-          background: open ? 'var(--muted)' : 'linear-gradient(135deg, #4f46e5, #7c3aed)',
+          background: open ? 'var(--muted)' : 'linear-gradient(135deg, #0891b2, #0f766e)',
           boxShadow: open
             ? '0 4px 12px rgba(0,0,0,0.1)'
-            : '0 8px 24px rgba(79,70,229,0.35)',
+            : '0 8px 24px rgba(8,145,178,0.28)',
         }}
       >
         <div

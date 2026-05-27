@@ -93,7 +93,7 @@ describe('portal minimal sweep', () => {
     expect(projectEditSource).toContain('검토 대기');
     expect(projectEditSource).not.toContain('다시 제출할 검토 요청 정보를 찾지 못했습니다.');
     expect(projectEditSource).not.toContain("actionId === 'resubmit' && !requestDoc");
-    expect(projectEditSource).toContain('processProjectRequestContractViaBff');
+    expect(projectEditSource).toContain('uploadProjectRequestContractFile');
     expect(projectEditSource).toContain('onContractFileUpload={handleContractFileUpload}');
     expect(projectEditSource).not.toContain('임원 심사 큐');
     expect(projectEditSource).not.toContain('임원 검토 큐');

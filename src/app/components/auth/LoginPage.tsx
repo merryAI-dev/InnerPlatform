@@ -138,7 +138,7 @@ export function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-indigo-50/30 to-teal-50/20 dark:from-slate-950 dark:via-indigo-950/10 dark:to-teal-950/5 flex items-center justify-center p-4">
+    <div className="flex min-h-screen items-center justify-center bg-[linear-gradient(180deg,#f8fafc_0%,#f3f7fb_58%,#eef6f9_100%)] p-4 dark:bg-[linear-gradient(180deg,#07111f_0%,#0b1727_58%,#0b2530_100%)]">
       <div className="w-full max-w-[420px]">
         {/* ── Brand Header ── */}
         <div className="text-center mb-8">
@@ -152,7 +152,7 @@ export function LoginPage() {
         </div>
 
         {/* ── Login Form ── */}
-        <Card className="shadow-xl shadow-black/5 dark:shadow-black/20 border-border/50">
+        <Card className="border-border/80 shadow-lg shadow-slate-900/6 dark:shadow-black/20">
           <CardContent className="p-6">
             <div className="space-y-4">
               {!isFirebaseAuthEnabled && (
@@ -204,7 +204,7 @@ export function LoginPage() {
                 className="w-full h-11 text-[13px] gap-2"
                 disabled={isLoading || !isFirebaseAuthEnabled || loginBlockedOnPreview}
                 onClick={() => handleLogin()}
-                style={{ background: 'linear-gradient(135deg, #312e81, #4f46e5)' }}
+                style={{ background: 'linear-gradient(135deg, #0891b2, #0f766e)' }}
               >
                 {isLoading ? (
                   <><Loader2 className="w-4 h-4 animate-spin" /> Google 인증 중...</>

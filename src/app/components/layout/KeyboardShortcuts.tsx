@@ -31,7 +31,7 @@ export function KeyboardShortcuts() {
           <SheetTitle className="flex items-center gap-2 text-[14px]">
             <div
               className="w-7 h-7 rounded-lg flex items-center justify-center"
-              style={{ background: 'linear-gradient(135deg, #4f46e5, #7c3aed)' }}
+              style={{ background: 'linear-gradient(135deg, #0891b2, #0f766e)' }}
             >
               <Keyboard className="w-3.5 h-3.5 text-white" />
             </div>

@@ -184,7 +184,7 @@ function AppLayoutContent() {
             ${collapsed ? 'w-[60px]' : 'w-[240px]'}
             fixed lg:relative inset-y-0 left-0 z-50
             ${mobileOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0
-            bg-sidebar/90 backdrop-blur-xl border-r border-white/10
+            bg-sidebar border-r border-sidebar-border
           `}
         >
           {/* Brand */}
@@ -201,14 +201,14 @@ function AppLayoutContent() {
           {!collapsed && (
             <div className="px-2.5 mb-1">
               <button
-                className="w-full flex items-center gap-2 h-[30px] px-2.5 rounded-md text-[11px] text-slate-400 bg-white/10 hover:bg-white/15 border border-white/20 backdrop-blur-sm transition-colors"
+                className="flex h-9 w-full items-center gap-2 rounded-md border border-sidebar-border bg-white/6 px-2.5 text-[11px] text-slate-300 transition-colors hover:bg-white/10"
                 onClick={() => {
                   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }));
                 }}
               >
                 <Search className="w-3 h-3" />
                 <span className="flex-1 text-left">빠른 검색...</span>
-                <kbd className="text-[9px] text-slate-600 bg-slate-800 px-1 py-0.5 rounded">⌘K</kbd>
+                <kbd className="rounded bg-slate-950/50 px-1 py-0.5 text-[9px] text-slate-400">⌘K</kbd>
               </button>
             </div>
           )}
@@ -216,7 +216,7 @@ function AppLayoutContent() {
           {/* Navigation */}
           <nav className="flex-1 py-1.5 overflow-y-auto">
             {navGroups.map((group, gi) => (
-              <div key={group.label} className={gi > 0 ? 'mt-2.5' : ''}>
+              <div key={group.label} className={gi > 0 ? 'mt-3' : ''}>
                 {!collapsed && (
                   <p className="px-4 pb-1 text-[9px] tracking-[0.08em] text-slate-600" style={{ fontWeight: 600, textTransform: 'uppercase' }}>
                     {group.label}
@@ -235,18 +235,18 @@ function AppLayoutContent() {
                         to={item.to}
                         className={`
                           group relative flex items-center gap-2 rounded-md text-[12px] transition-all duration-100
-                          ${collapsed ? 'justify-center h-9 w-full' : 'px-2.5 py-[6px]'}
+                          ${collapsed ? 'justify-center h-10 w-full' : 'min-h-9 px-2.5 py-2'}
                           ${active
-                            ? 'bg-indigo-500/18 text-white backdrop-blur-sm'
-                            : 'text-slate-400 hover:text-slate-200 hover:bg-white/8'
+                            ? 'bg-cyan-400/12 text-white'
+                            : 'text-slate-400 hover:text-slate-100 hover:bg-white/7'
                           }
                         `}
                       >
                         {active && !collapsed && (
-                          <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-3.5 rounded-r bg-indigo-400" />
+                          <div className="absolute left-0 top-1/2 h-4 w-[2px] -translate-y-1/2 rounded-r bg-cyan-300" />
                         )}
                         <item.icon className={`w-[15px] h-[15px] shrink-0 ${
-                          active ? 'text-indigo-400' : accent ? 'text-indigo-500/50' : 'text-slate-600 group-hover:text-slate-400'
+                          active ? 'text-cyan-300' : accent ? 'text-cyan-500/65' : 'text-slate-500 group-hover:text-slate-300'
                         }`} />
                         {!collapsed && (
                           <>
@@ -299,17 +299,17 @@ function AppLayoutContent() {
               title={labEnabled ? 'LAB 메뉴 숨기기' : 'LAB 메뉴 보이기'}
               className={`w-full flex items-center justify-center h-7 rounded-md text-[10px] transition-colors ${
                 labEnabled
-                  ? 'bg-indigo-500/20 text-indigo-200'
+                  ? 'bg-cyan-400/14 text-cyan-100'
                   : 'text-slate-500 hover:text-slate-300 hover:bg-white/10'
               }`}
             >
               {collapsed ? 'LAB' : `LAB ${labEnabled ? 'ON' : 'OFF'}`}
             </button>
             {!collapsed && (
-              <div className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-white/8 border border-white/10">
+              <div className="flex items-center gap-2 rounded-md border border-sidebar-border bg-white/6 px-2 py-2">
                 <div
                   className="w-6 h-6 rounded-md flex items-center justify-center shrink-0 text-[10px] text-white"
-                  style={{ fontWeight: 700, background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' }}
+                  style={{ fontWeight: 700, background: 'linear-gradient(135deg, #0891b2, #0f766e)' }}
                 >
                   {displayUser.name.charAt(0)}
                 </div>
@@ -321,7 +321,7 @@ function AppLayoutContent() {
                   <TooltipTrigger asChild>
                     <button
                       onClick={() => { logout(); navigate('/login'); }}
-                      className="p-1 rounded hover:bg-white/15 text-slate-500 hover:text-slate-300 transition-colors"
+                      className="rounded p-1 text-slate-500 transition-colors hover:bg-white/10 hover:text-slate-300"
                     >
                       <LogOut className="w-3.5 h-3.5" />
                     </button>
@@ -332,7 +332,7 @@ function AppLayoutContent() {
             )}
             <button
               onClick={() => setCollapsed(!collapsed)}
-              className="w-full flex items-center justify-center h-7 rounded-md text-slate-500 hover:text-slate-300 hover:bg-white/10 transition-colors"
+              className="flex h-8 w-full items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-white/10 hover:text-slate-300"
             >
               {collapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronLeft className="w-3.5 h-3.5" />}
             </button>
@@ -342,7 +342,7 @@ function AppLayoutContent() {
         {/* ━━━ Main ━━━ */}
         <div className="flex-1 flex flex-col min-w-0 bg-background">
           {/* Top Header */}
-          <header className="glass sticky top-0 z-30 flex items-center justify-between h-[48px] border-b border-glass-border px-5 shrink-0">
+          <header className="sticky top-0 z-30 flex h-[48px] shrink-0 items-center justify-between border-b border-border bg-card/95 px-5 shadow-sm">
             <div className="flex items-center gap-3">
               {/* Mobile hamburger */}
               <button
@@ -422,7 +422,7 @@ function AppLayoutContent() {
                 <TooltipTrigger asChild>
                   <div
                     className="w-7 h-7 rounded-md flex items-center justify-center text-white text-[10px] cursor-pointer ring-1 ring-white/20"
-                    style={{ fontWeight: 700, background: 'linear-gradient(135deg, #4f46e5, #7c3aed)' }}
+                    style={{ fontWeight: 700, background: 'linear-gradient(135deg, #0891b2, #0f766e)' }}
                   >
                     {displayUser.name.charAt(0)}
                   </div>

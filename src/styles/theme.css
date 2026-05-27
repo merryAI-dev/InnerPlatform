@@ -2,135 +2,135 @@
 
 :root {
   --font-size: 15px;
-  /* ── MYSC Brand Color System ── */
-  --background: #f8fafc;
+  /* ── MYSCube Professional Operations System ── */
+  --background: #f6f8fb;
   --foreground: #0f172a;
-  --card: rgba(255, 255, 255, 0.65);
+  --card: #ffffff;
   --card-foreground: #0f172a;
-  --popover: rgba(255, 255, 255, 0.8);
+  --popover: #ffffff;
   --popover-foreground: #0f172a;
-  /* Primary — Deep Indigo */
-  --primary: #4f46e5;
+  /* Primary — MYSCube navy, extracted from the logo */
+  --primary: #001e46;
   --primary-foreground: #ffffff;
-  /* Secondary — Slate Blue */
-  --secondary: rgba(241, 245, 249, 0.6);
-  --secondary-foreground: #334155;
+  /* Secondary — operational slate */
+  --secondary: #eef3f8;
+  --secondary-foreground: #243447;
   /* Muted */
   --muted: #f1f5f9;
   --muted-foreground: #64748b;
   /* Accent */
-  --accent: rgba(238, 242, 255, 0.5);
-  --accent-foreground: #3730a3;
+  --accent: #eef6fb;
+  --accent-foreground: #001e46;
   /* Destructive */
   --destructive: #e11d48;
   --destructive-foreground: #ffffff;
   /* Border & Input */
   --border: #e2e8f0;
-  --input: transparent;
-  --input-background: #f8fafc;
+  --input: #cbd5e1;
+  --input-background: #ffffff;
   --switch-background: #cbd5e1;
   /* Font Weight */
   --font-weight-medium: 500;
   --font-weight-normal: 400;
-  --ring: #818cf8;
+  --ring: #5bbfdf;
   /* Charts — MYSC palette */
-  --chart-1: #4f46e5;
-  --chart-2: #0d9488;
+  --chart-1: #001e46;
+  --chart-2: #5bbfdf;
   --chart-3: #f59e0b;
-  --chart-4: #8b5cf6;
-  --chart-5: #ec4899;
-  --radius: 0.75rem;
+  --chart-4: #334155;
+  --chart-5: #e11d48;
+  --radius: 0.5rem;
   /* Sidebar — Dark Navy */
-  --sidebar: #0f172a;
-  --sidebar-foreground: #cbd5e1;
-  --sidebar-primary: #818cf8;
+  --sidebar: #172033;
+  --sidebar-foreground: #c7d2e0;
+  --sidebar-primary: #5bbfdf;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #1e293b;
-  --sidebar-accent-foreground: #e2e8f0;
-  --sidebar-border: #1e293b;
-  --sidebar-ring: #4f46e5;
+  --sidebar-accent: #243047;
+  --sidebar-accent-foreground: #f8fafc;
+  --sidebar-border: #2b3a52;
+  --sidebar-ring: #5bbfdf;
   /* ── MYSC Extended Tokens ── */
-  --mysc-gradient-start: #4f46e5;
-  --mysc-gradient-end: #7c3aed;
-  --mysc-teal: #0d9488;
-  --mysc-emerald: #059669;
-  --mysc-surface-elevated: rgba(255, 255, 255, 0.7);
-  --mysc-surface-sunken: rgba(241, 245, 249, 0.5);
+  --mysc-navy: #001e46;
+  --mysc-cyan: #5bbfdf;
+  --mysc-gradient-start: #001e46;
+  --mysc-gradient-end: #0b2f63;
+  --mysc-teal: #5bbfdf;
+  --mysc-emerald: #001e46;
+  --mysc-surface-elevated: #ffffff;
+  --mysc-surface-sunken: #eef3f8;
   /* ── Glass Tokens ── */
-  --glass-bg: rgba(255, 255, 255, 0.65);
-  --glass-bg-heavy: rgba(255, 255, 255, 0.8);
-  --glass-bg-light: rgba(255, 255, 255, 0.4);
-  --glass-border: rgba(255, 255, 255, 0.3);
-  --glass-shadow: 0 8px 32px rgba(31, 38, 135, 0.12);
-  --glass-shadow-sm: 0 4px 16px rgba(31, 38, 135, 0.08);
-  --glass-blur: 16px;
-  --glass-blur-heavy: 24px;
+  --glass-bg: rgba(255, 255, 255, 0.92);
+  --glass-bg-heavy: #ffffff;
+  --glass-bg-light: rgba(255, 255, 255, 0.78);
+  --glass-border: #dbe3ec;
+  --glass-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+  --glass-shadow-sm: 0 4px 12px rgba(15, 23, 42, 0.06);
+  --glass-blur: 10px;
+  --glass-blur-heavy: 14px;
   --mesh-gradient: linear-gradient(
     135deg,
-    #667eea 0%,
-    #764ba2 25%,
-    #f093fb 50%,
-    #4facfe 75%,
-    #00f2fe 100%
+    #f6f8fb 0%,
+    #eef3f8 48%,
+    #f8fafc 100%
   );
 }
 
 .dark {
-  --background: #0c0a1d;
+  --background: #07111f;
   --foreground: #e2e8f0;
-  --card: rgba(21, 18, 40, 0.6);
+  --card: #0f1b2d;
   --card-foreground: #e2e8f0;
-  --popover: rgba(21, 18, 40, 0.75);
+  --popover: #101d30;
   --popover-foreground: #e2e8f0;
-  --primary: #818cf8;
-  --primary-foreground: #0f172a;
-  --secondary: rgba(30, 27, 58, 0.5);
+  --primary: #5bbfdf;
+  --primary-foreground: #001e46;
+  --secondary: #17283e;
   --secondary-foreground: #e2e8f0;
-  --muted: #1e1b3a;
+  --muted: #17283e;
   --muted-foreground: #94a3b8;
-  --accent: rgba(30, 27, 58, 0.4);
-  --accent-foreground: #a5b4fc;
+  --accent: #10243f;
+  --accent-foreground: #c7edf8;
   --destructive: #be123c;
   --destructive-foreground: #fecdd3;
-  --border: #2d2a4a;
-  --input: #1e1b3a;
-  --input-background: #1e1b3a;
-  --switch-background: #3d3a5c;
-  --ring: #6366f1;
+  --border: #243447;
+  --input: #334155;
+  --input-background: #111d2f;
+  --switch-background: #475569;
+  --ring: #5bbfdf;
   --font-weight-medium: 500;
   --font-weight-normal: 400;
-  --chart-1: #818cf8;
-  --chart-2: #2dd4bf;
+  --chart-1: #5bbfdf;
+  --chart-2: #8ed4ea;
   --chart-3: #fbbf24;
-  --chart-4: #a78bfa;
-  --chart-5: #f472b6;
-  --sidebar: #0c0a1d;
+  --chart-4: #94a3b8;
+  --chart-5: #fb7185;
+  --sidebar: #0a1220;
   --sidebar-foreground: #94a3b8;
-  --sidebar-primary: #818cf8;
+  --sidebar-primary: #5bbfdf;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #1e1b3a;
+  --sidebar-accent: #17283e;
   --sidebar-accent-foreground: #e2e8f0;
-  --sidebar-border: #2d2a4a;
-  --sidebar-ring: #6366f1;
-  --mysc-gradient-start: #818cf8;
-  --mysc-gradient-end: #a78bfa;
-  --mysc-teal: #2dd4bf;
-  --mysc-emerald: #34d399;
-  --mysc-surface-elevated: rgba(30, 27, 58, 0.6);
-  --mysc-surface-sunken: rgba(12, 10, 29, 0.5);
-  --glass-bg: rgba(15, 12, 40, 0.6);
-  --glass-bg-heavy: rgba(15, 12, 40, 0.75);
-  --glass-bg-light: rgba(15, 12, 40, 0.35);
-  --glass-border: rgba(255, 255, 255, 0.08);
+  --sidebar-border: #243447;
+  --sidebar-ring: #5bbfdf;
+  --mysc-navy: #001e46;
+  --mysc-cyan: #5bbfdf;
+  --mysc-gradient-start: #5bbfdf;
+  --mysc-gradient-end: #0b2f63;
+  --mysc-teal: #5bbfdf;
+  --mysc-emerald: #5bbfdf;
+  --mysc-surface-elevated: #0f1b2d;
+  --mysc-surface-sunken: #07111f;
+  --glass-bg: rgba(15, 27, 45, 0.9);
+  --glass-bg-heavy: #0f1b2d;
+  --glass-bg-light: rgba(15, 27, 45, 0.76);
+  --glass-border: #243447;
   --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
   --glass-shadow-sm: 0 4px 16px rgba(0, 0, 0, 0.2);
   --mesh-gradient: linear-gradient(
     135deg,
-    #1a1145 0%,
-    #2d1b69 25%,
-    #0c0a1d 50%,
-    #1e1b3a 75%,
-    #151228 100%
+    #07111f 0%,
+    #0f1b2d 52%,
+    #0b1727 100%
   );
 }
 
@@ -195,18 +195,12 @@
     position: fixed;
     inset: 0;
     z-index: -1;
-    background:
-      radial-gradient(circle at 20% 20%, rgba(79, 70, 229, 0.15) 0%, transparent 50%),
-      radial-gradient(circle at 80% 80%, rgba(124, 58, 237, 0.1) 0%, transparent 50%),
-      radial-gradient(circle at 50% 50%, rgba(99, 102, 241, 0.08) 0%, transparent 60%);
+    background: linear-gradient(180deg, #f8fafc 0%, #f3f7fb 54%, #eef3f8 100%);
     background-color: var(--background);
   }
 
   .dark body::before {
-    background:
-      radial-gradient(circle at 20% 20%, rgba(129, 140, 248, 0.08) 0%, transparent 50%),
-      radial-gradient(circle at 80% 80%, rgba(167, 139, 250, 0.06) 0%, transparent 50%),
-      radial-gradient(circle at 50% 50%, rgba(99, 102, 241, 0.04) 0%, transparent 60%);
+    background: linear-gradient(180deg, #07111f 0%, #0b1727 58%, #091426 100%);
     background-color: var(--background);
   }
 
@@ -235,12 +229,12 @@
 
   /* Selection */
   ::selection {
-    background: #c7d2fe;
-    color: #312e81;
+    background: #bae6fd;
+    color: #082f49;
   }
   .dark ::selection {
-    background: #3730a3;
-    color: #e0e7ff;
+    background: #155e75;
+    color: #ecfeff;
   }
 
   /**

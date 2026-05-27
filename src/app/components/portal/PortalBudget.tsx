@@ -2043,7 +2043,7 @@ export function PortalBudget() {
         {/* KPI Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           {[
-            { label: '총 예산', value: fmtShort(total.effectiveBudget || 0), sub: fmtKRW(total.effectiveBudget || 0) + '원', gradient: 'linear-gradient(135deg, #4f46e5, #7c3aed)', icon: Calculator },
+            { label: '총 예산', value: fmtShort(total.effectiveBudget || 0), sub: fmtKRW(total.effectiveBudget || 0) + '원', gradient: 'linear-gradient(135deg, #0891b2, #0f766e)', icon: Calculator },
             { label: '집행액', value: fmtShort(total.spent || 0), sub: fmtKRW(total.spent || 0) + '원', gradient: 'linear-gradient(135deg, #e11d48, #f43f5e)', icon: Wallet },
             { label: '잔액', value: fmtShort(total.balance || 0), sub: fmtKRW(total.balance || 0) + '원', gradient: 'linear-gradient(135deg, #0d9488, #059669)', icon: TrendingUp },
             { label: '소진율', value: fmtPercent(total.burnRate || 0), sub: `${fmtKRW(total.spent || 0)} / ${fmtKRW(total.effectiveBudget || 0)}`, gradient: `linear-gradient(135deg, ${burnColor(total.burnRate || 0)}, ${burnColor(total.burnRate || 0)}88)`, icon: TrendingUp },

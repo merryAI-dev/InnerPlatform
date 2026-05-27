@@ -326,7 +326,7 @@ export function DashboardPage() {
     <div className="space-y-5">
       <PageHeader
         icon={LayoutDashboard}
-        iconGradient="linear-gradient(135deg, #4f46e5, #7c3aed)"
+        iconGradient="linear-gradient(135deg, #0891b2, #0f766e)"
         title="프로젝트 통합 대시보드"
         description={`전사 프로젝트 관리 현황 모니터링 · ${projects.length}개 프로젝트 추적 중`}
         actions={
@@ -343,7 +343,7 @@ export function DashboardPage() {
               onClick={() => navigate('/projects')}
               size="sm"
               className="h-8 gap-1.5 rounded-lg text-[11px]"
-              style={{ background: 'linear-gradient(135deg, #4f46e5, #6366f1)' }}
+              style={{ background: 'linear-gradient(135deg, #0891b2, #0891b2)' }}
             >
               전체 프로젝트 <ArrowRight className="h-3 w-3" />
             </Button>

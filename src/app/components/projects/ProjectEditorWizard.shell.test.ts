@@ -3,6 +3,8 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const source = readFileSync(resolve(import.meta.dirname, 'ProjectEditorWizard.tsx'), 'utf8');
+const adminWizardSource = readFileSync(resolve(import.meta.dirname, 'ProjectWizard.tsx'), 'utf8');
+const contractDocumentPolicySource = readFileSync(resolve(import.meta.dirname, '../../platform/project-contract-document-policy.ts'), 'utf8');
 
 describe('ProjectEditorWizard dropdown contract', () => {
   it('renders editor dropdowns from canonical option maps instead of surface-local labels', () => {
@@ -14,6 +16,7 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('BASIS_LABELS');
     expect(source).toContain('ACCOUNT_TYPE_LABELS');
     expect(source).toContain('PROJECT_FUND_INPUT_MODE_LABELS');
+    expect(source).toContain('PROJECT_CURRENCY_LABELS');
     expect(source).toContain('ContractDocumentPreview');
     expect(source).toContain('draft.contractDocument');
     expect(source).not.toContain('<Input value={draft.contractType}');
@@ -47,6 +50,13 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain("inputMode: 'manual'");
   });
 
+  it('uses project operations terminology and exposes currency selection', () => {
+    expect(source).toContain('서류상 참여인력');
+    expect(source).not.toContain('<Label className="text-xs">팀원 구성</Label>');
+    expect(source).toContain('<Label className="text-xs">통화</Label>');
+    expect(source).toContain('PROJECT_CURRENCY_LABELS[draft.currency]');
+  });
+
   it('keeps manual team member input bound to the raw typed value instead of reparsing formatted text', () => {
     expect(source).toContain('formatTeamMemberIdentityInput(member)');
     expect(source).toContain('identityInput: event.target.value');
@@ -74,6 +84,10 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('normalizeProjectTeamMemberDraftRows');
     expect(addTeamMemberBlock).toContain('teamMembersDetailed: [...prev.teamMembersDetailed, createEmptyTeamMember()]');
     expect(addTeamMemberBlock).not.toContain('createProjectEditorDraft');
+    expect(source).toContain('인건비 시작월');
+    expect(source).toContain('인건비 종료월');
+    expect(source).toContain('laborAllocationStartMonth');
+    expect(source).toContain('laborAllocationEndMonth');
     expect(source).toContain('<Plus className="h-4 w-4" />');
     expect(source).toContain('<Button type="button" onClick={addTeamMember} className="gap-2">');
     expect(source).not.toContain('variant="outline" size="sm" onClick={addTeamMember}');
@@ -96,11 +110,23 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('handleContractDocumentSelect');
     expect(source).toContain('MAX_CONTRACT_UPLOAD_SIZE_BYTES');
     expect(source).toContain('mergeContractAnalysisIntoDraft');
+    expect(source).toContain('contractAnalysisMergeMode');
+    expect(source).toContain("contractAnalysisMergeMode === 'none'");
+    expect(source).toContain('입력값은 자동으로 바꾸지 않습니다.');
     expect(source).toContain('계약서 업로드');
     expect(source).toContain('계약서 교체');
-    expect(source).toContain('첨부 제거');
+    expect(source).toContain('buildContractDocumentEditPolicy');
+    expect(contractDocumentPolicySource).toContain('첨부 제거');
     expect(source).toContain('canRemoveContractDocument');
     expect(source).toContain('기존 계약서는 관리자 화면에서만 제거할 수 있습니다.');
-    expect(source).toContain('교체 취소');
+    expect(contractDocumentPolicySource).toContain('교체 취소');
+  });
+
+  it('wires admin project editor to contract upload without automatic analysis merge', () => {
+    expect(adminWizardSource).toContain('uploadProjectRequestContractFile');
+    expect(adminWizardSource).toContain('handleContractFileUpload');
+    expect(adminWizardSource).toContain('onContractFileUpload={handleContractFileUpload}');
+    expect(adminWizardSource).toContain('contractAnalysisMergeMode="none"');
+    expect(adminWizardSource).toContain('canRemoveContractDocument');
   });
 });

@@ -29,7 +29,7 @@ interface FeatureFlags {
 
 const DEFAULT_BRANDING: BrandingConfig = {
   orgName: '',
-  primaryColor: '#6366f1',
+  primaryColor: '#0891b2',
   logoUrl: '',
 };
 
@@ -195,7 +195,7 @@ export function TenantBrandingTab() {
                     <Input
                       value={branding.primaryColor}
                       onChange={(e) => setBranding((b) => ({ ...b, primaryColor: e.target.value }))}
-                      placeholder="#6366f1"
+                      placeholder="#0891b2"
                       className="h-8 text-[13px] font-mono flex-1"
                     />
                   </div>
@@ -230,7 +230,7 @@ export function TenantBrandingTab() {
                     ) : (
                       <div
                         className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-[13px]"
-                        style={{ background: `linear-gradient(135deg, ${/^#[0-9a-fA-F]{6}$/.test(branding.primaryColor) ? branding.primaryColor : '#6366f1'}, ${/^#[0-9a-fA-F]{6}$/.test(branding.primaryColor) ? branding.primaryColor : '#6366f1'}99)` }}
+                        style={{ background: `linear-gradient(135deg, ${/^#[0-9a-fA-F]{6}$/.test(branding.primaryColor) ? branding.primaryColor : '#0891b2'}, ${/^#[0-9a-fA-F]{6}$/.test(branding.primaryColor) ? branding.primaryColor : '#0891b2'}99)` }}
                       >
                         {(branding.orgName || orgId).charAt(0).toUpperCase()}
                       </div>

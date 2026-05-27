@@ -71,9 +71,9 @@ const changeTypeColors: Record<string, string> = {
   ADD: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-400',
   REMOVE: 'bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-400',
   RATE_CHANGE: 'bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-400',
-  GRADE_CHANGE: 'bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-400',
+  GRADE_CHANGE: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/50 dark:text-cyan-400',
   MONTHS_CHANGE: 'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-400',
-  REPLACEMENT: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-400',
+  REPLACEMENT: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/50 dark:text-cyan-400',
 };
 
 const DISMISSED_ALERT_STORAGE_PREFIX = 'mysc-dismissed-hr-alerts';
@@ -302,7 +302,7 @@ export function PortalChangeRequests() {
     <div className="space-y-5">
       <PageHeader
         icon={ArrowRightLeft}
-        iconGradient="linear-gradient(135deg, #7c3aed 0%, #6366f1 100%)"
+        iconGradient="linear-gradient(135deg, #0f766e 0%, #0891b2 100%)"
         title="인력변경 신청"
         description="인력 투입/해제/변경을 신청하고 관리자 승인을 받습니다"
         badge={`${kpi.total}건`}
@@ -454,7 +454,7 @@ export function PortalChangeRequests() {
                 return (
                   <Card
                     key={req.id}
-                    className={`cursor-pointer transition-all hover:shadow-sm ${req.id === selectedReq?.id ? 'ring-2 ring-violet-500/40' : ''}`}
+                    className={`cursor-pointer transition-all hover:shadow-sm ${req.id === selectedReq?.id ? 'ring-2 ring-cyan-500/40' : ''}`}
                     onClick={() => setSelectedReq(req)}
                   >
                     <CardContent className="p-3">

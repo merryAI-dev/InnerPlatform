@@ -4,6 +4,8 @@ import { Save } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAppStore } from '../../data/store';
 import type { Project, ProjectPhase } from '../../data/types';
+import { useFirebase } from '../../lib/firebase-context';
+import { uploadProjectRequestContractFile } from '../../platform/project-contract-upload';
 import {
   buildProjectEditorDraftFromProject,
   buildProjectEditorProjectPatch,
@@ -42,6 +44,7 @@ function createProjectFromDraft(
     status: draft.status,
     type: draft.type,
     phase: draft.phase,
+    currency: draft.currency,
     contractAmount: draft.contractAmount,
     contractStart: draft.contractStart,
     contractEnd: draft.contractEnd,
@@ -89,6 +92,7 @@ function createProjectFromDraft(
 export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: ProjectWizardProps) {
   const navigate = useNavigate();
   const { addProject, updateProject, members, currentUser } = useAppStore();
+  const { orgId } = useFirebase();
   const [busyActionId, setBusyActionId] = useState<string | null>(null);
 
   const initialDraft = useMemo(
@@ -136,6 +140,14 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
     }
   };
 
+  const handleContractFileUpload = async (file: File) => {
+    return uploadProjectRequestContractFile({
+      tenantId: orgId,
+      actor: currentUser,
+      file,
+    });
+  };
+
   return (
     <ProjectEditorWizard
       mode="admin"
@@ -150,6 +162,9 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
         { id: 'save', label: '프로젝트 저장', icon: Save },
       ]}
       busyActionId={busyActionId}
+      onContractFileUpload={handleContractFileUpload}
+      contractAnalysisMergeMode="none"
+      canRemoveContractDocument
       onCancel={() => navigate(editProject ? `/projects/${editProject.id}` : '/projects')}
       onSubmit={(draft, actionId) => void handleSubmit(draft, actionId)}
     />

@@ -264,7 +264,7 @@ export function ExpenseManagementPage() {
         {/* Header */}
         <PageHeader
           icon={Wallet}
-          iconGradient="linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)"
+          iconGradient="linear-gradient(135deg, #0891b2 0%, #0f766e 100%)"
           title="사업비 관리"
           description="사업비 지출 세트를 생성하고 항목별 증빙·승인을 관리합니다"
           badge={`${kpi.total}건`}
@@ -287,7 +287,7 @@ export function ExpenseManagementPage() {
             { label: '제출완료', count: kpi.submitted, color: '#3b82f6', icon: Send },
             { label: '승인', count: kpi.approved, color: '#059669', icon: CheckCircle2 },
             { label: '반려', count: kpi.rejected, color: '#e11d48', icon: XCircle },
-            { label: '총 금액', count: null, amount: fmtShort(kpi.totalAmount), color: '#4f46e5', icon: CircleDollarSign },
+            { label: '총 금액', count: null, amount: fmtShort(kpi.totalAmount), color: '#0891b2', icon: CircleDollarSign },
           ].map(k => (
             <Card key={k.label}>
               <CardContent className="p-3 flex items-center gap-2.5">
@@ -689,7 +689,7 @@ function SetListView({
                     <span>{s.createdByName}</span>
                     <span>{s.period}</span>
                     <span>{s.items.length}건</span>
-                    <span className="ml-auto" style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: '#4f46e5' }}>
+                    <span className="ml-auto" style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: '#0891b2' }}>
                       {fmtKRW(s.totalGross)}원
                     </span>
                   </div>
@@ -781,7 +781,7 @@ function SetGridView({
             <p className="text-[10px] text-muted-foreground truncate mb-3">{projectMap.get(s.projectId)}</p>
             <div className="flex items-center justify-between text-[11px]">
               <span className="text-muted-foreground">{s.items.length}건 · {s.createdByName}</span>
-              <span style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: '#4f46e5' }}>{fmtKRW(s.totalGross)}원</span>
+              <span style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: '#0891b2' }}>{fmtKRW(s.totalGross)}원</span>
             </div>
           </CardContent>
         </Card>
@@ -875,7 +875,7 @@ function SetDetail({
         </div>
         <div className="ml-auto">
           <span className="text-muted-foreground">합계: </span>
-          <span style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: '#4f46e5' }}>{fmtKRW(set.totalGross)}원</span>
+          <span style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: '#0891b2' }}>{fmtKRW(set.totalGross)}원</span>
         </div>
       </div>
 

@@ -17,6 +17,7 @@ import {
 } from '../../platform/bank-statement';
 import { normalizeKey, parseCsv, parseNumber } from '../../platform/csv-utils';
 import { loadXlsx, warmXlsx } from '../../platform/lazy-heavy-modules';
+import { readTextFile } from '../../platform/text-file-decoder';
 
 function getAmountColumnIndexes(columns: string[]): Set<number> {
   return new Set(
@@ -134,7 +135,7 @@ export function PortalBankStatementPage() {
       if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
         matrix = await parseExcelToMatrix(file);
       } else if (name.endsWith('.csv')) {
-        const text = await file.text();
+        const text = await readTextFile(file);
         matrix = parseCsv(text);
       } else {
         toast.error('CSV, XLSX 또는 XLS 파일만 업로드할 수 있습니다.');
@@ -238,13 +239,13 @@ export function PortalBankStatementPage() {
     ? {
       label: '저장 중',
       description: '현재 수정한 통장내역을 주간 사업비 기준본으로 저장하고 있습니다.',
-      toneClass: 'border-indigo-200/70 bg-indigo-50/60',
+      toneClass: 'border-cyan-200/70 bg-cyan-50/60',
     }
     : dirty
       ? {
         label: '저장 전 초안',
         description: '수정한 통장내역이 아직 주간 사업비 기준본으로 저장되지 않았습니다. 저장 후 바로 사업비 입력으로 이어갈 수 있습니다.',
-        toneClass: 'border-amber-200/70 bg-amber-50/60',
+        toneClass: 'border-slate-200 bg-white',
       }
       : hasUploadedSheet
         ? {
@@ -265,7 +266,7 @@ export function PortalBankStatementPage() {
 
   if (!ready) {
     return (
-      <Card className="border-amber-200/70 bg-gradient-to-br from-amber-50 via-white to-orange-50/70">
+      <Card className="border-slate-200 bg-white">
         <CardContent className="p-6">
           <div className="max-w-2xl space-y-3">
             <h1 className="text-[20px] font-extrabold tracking-[-0.03em] text-slate-900">통장내역을 시작하려면 먼저 사업 연결이 필요합니다</h1>
@@ -335,11 +336,11 @@ export function PortalBankStatementPage() {
       </div>
 
       {!hasUploadedSheet && (
-        <Card data-testid="bank-statement-empty-state" className="border-teal-200/80 bg-gradient-to-br from-teal-50/90 via-white to-emerald-50/60">
+        <Card data-testid="bank-statement-empty-state" className="border-slate-200 bg-white">
           <CardContent className="p-5">
             <div
               className={`rounded-2xl border-2 border-dashed p-6 transition-colors ${
-                dragActive ? 'border-teal-500 bg-teal-50' : 'border-teal-200/80 bg-white/80'
+                dragActive ? 'border-[#001e46] bg-slate-50' : 'border-slate-300 bg-white'
               }`}
               onDragEnter={(event) => {
                 event.preventDefault();
@@ -357,7 +358,7 @@ export function PortalBankStatementPage() {
             >
               <div className="flex h-full flex-col justify-between gap-5">
                 <div className="space-y-3">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-teal-600 text-white shadow-sm">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-[#001e46] text-white shadow-sm">
                     <FileSpreadsheet className="h-5 w-5" />
                   </div>
                   <div className="space-y-2">
@@ -384,15 +385,15 @@ export function PortalBankStatementPage() {
       <Card data-testid="bank-statement-trust-surface" className={trustSurface.toneClass}>
         <CardContent className="px-4 py-3">
           <div className="flex items-start gap-2">
-            <ShieldAlert className="mt-0.5 h-4 w-4 text-amber-700" />
-            <div className="space-y-1 text-[12px] text-amber-900">
+            <ShieldAlert className="mt-0.5 h-4 w-4 text-red-700" />
+            <div className="space-y-1 text-[12px] text-slate-700">
               <p className="font-semibold">반영 상태 · {trustSurface.label}</p>
               <p>{trustSurface.description}</p>
               <p>
                 현재 프로필: {getBankStatementProfileLabel(bankProfile)}
                 {lastUploadedName ? ` · 최근 파일: ${lastUploadedName}` : ''}
               </p>
-              {lastSavedAt && <p className="text-[11px] text-amber-800/80">마지막 자동저장: {lastSavedAt.slice(0, 16).replace('T', ' ')}</p>}
+              {lastSavedAt && <p className="text-[11px] text-slate-500">마지막 자동저장: {lastSavedAt.slice(0, 16).replace('T', ' ')}</p>}
             </div>
           </div>
         </CardContent>
@@ -434,7 +435,7 @@ export function PortalBankStatementPage() {
                       {columns.map((_, colIdx) => (
                         <td
                           key={colIdx}
-                          className="px-1.5 py-1 border-r border-border/30 focus-within:bg-teal-50/20 focus-within:shadow-[inset_0_0_0_2px_rgba(20,184,166,0.8)]"
+                          className="px-1.5 py-1 border-r border-border/30 focus-within:bg-slate-50 focus-within:shadow-[inset_0_0_0_2px_rgba(0,30,70,0.28)]"
                         >
                           <input
                             type="text"

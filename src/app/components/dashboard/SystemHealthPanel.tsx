@@ -261,8 +261,8 @@ export function ActivityFeed() {
     <Card className="shadow-sm border-border/50">
       <CardHeader className="pb-3">
         <CardTitle className="text-[13px] flex items-center gap-2">
-          <div className="w-6 h-6 rounded-md bg-indigo-50 flex items-center justify-center">
-            <Zap className="w-3.5 h-3.5 text-indigo-600" />
+          <div className="w-6 h-6 rounded-md bg-cyan-50 flex items-center justify-center">
+            <Zap className="w-3.5 h-3.5 text-cyan-600" />
           </div>
           최근 활동
         </CardTitle>

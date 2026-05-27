@@ -100,8 +100,8 @@ export function PortalPersonnel() {
         </Card>
         <Card>
           <CardContent className="p-3 flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-indigo-100 dark:bg-indigo-900/50">
-              <Percent className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-cyan-100 dark:bg-cyan-900/50">
+              <Percent className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
             </div>
             <div>
               <p className="text-[10px] text-muted-foreground">평균 참여율</p>

@@ -13,6 +13,7 @@ import {
 } from '../ui/table';
 import { useAppStore } from '../../data/store';
 import { parseCsv } from '../../platform/csv-utils';
+import { readTextFile } from '../../platform/text-file-decoder';
 import {
   autoMatchBankTransactions,
   parseBankCsv,
@@ -77,14 +78,14 @@ export function BankReconciliationPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     setFileName(file.name);
-    const reader = new FileReader();
-    reader.onload = () => {
-      const text = reader.result as string;
+    void readTextFile(file).then((text) => {
       const matrix = parseCsv(text);
       const parsed = parseBankCsv(matrix);
       setBankTxs(parsed);
-    };
-    reader.readAsText(file, 'UTF-8');
+    }).catch((error) => {
+      console.error('[BankReconciliation] CSV parse failed:', error);
+      setBankTxs([]);
+    });
     // Reset input so same file can be re-uploaded
     e.target.value = '';
   }, []);

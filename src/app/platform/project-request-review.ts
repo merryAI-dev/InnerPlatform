@@ -13,9 +13,12 @@ import {
   normalizeBasis,
   normalizeProjectFundInputMode,
   normalizeSettlementType,
+  normalizeProjectCurrency,
+  PROJECT_CURRENCY_LABELS,
   PROJECT_FUND_INPUT_MODE_LABELS,
   SETTLEMENT_TYPE_LABELS,
 } from '../data/types';
+import { formatProjectTeamMemberLine } from './project-team-members';
 
 export type ProjectRequestReviewStatus = 'ready' | 'needs-check' | 'missing';
 export type ProjectRequestReviewBadgeTone = 'neutral' | 'warning' | 'critical' | 'success';
@@ -133,10 +136,7 @@ function formatSettlementSheetPolicy(policy?: SettlementSheetPolicy | null): str
 function formatTeamMembers(payload: ProjectRequestPayload): string {
   if (payload.teamMembersDetailed && payload.teamMembersDetailed.length > 0) {
     return payload.teamMembersDetailed
-      .map((member) => {
-        const name = `${member.memberName}${member.memberNickname ? `(${member.memberNickname})` : ''}`;
-        return member.role ? `${name} · ${member.role}` : name;
-      })
+      .map(formatProjectTeamMemberLine)
       .join('\n');
   }
   return payload.teamMembers || '-';
@@ -291,6 +291,7 @@ function buildChecklistGroups(payload: ProjectRequestPayload, analysisHighlights
   }
 
   const financialItems: ProjectRequestReviewItem[] = [
+    buildTextItem('currency', '통화', PROJECT_CURRENCY_LABELS[normalizeProjectCurrency(payload.currency)]),
     buildMoneyItem('contractAmount', '계약금액', payload.contractAmount, payload.financialInputFlags),
     buildMoneyItem('salesVatAmount', '매출 부가세', payload.salesVatAmount, payload.financialInputFlags),
     buildMoneyItem('totalRevenueAmount', '총수익', payload.totalRevenueAmount, payload.financialInputFlags),

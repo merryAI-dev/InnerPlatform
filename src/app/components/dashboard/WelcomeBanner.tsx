@@ -15,7 +15,7 @@ const QUICK_ACTIONS = [
     label: '프로젝트 확인',
     desc: '운영 중인 사업과 원장을 바로 확인',
     path: '/projects',
-    color: '#4f46e5',
+    color: '#0891b2',
   },
   {
     icon: BarChart3,
@@ -29,7 +29,7 @@ const QUICK_ACTIONS = [
     label: '참여율 점검',
     desc: '100-1 참여율 위험 확인',
     path: '/participation',
-    color: '#7c3aed',
+    color: '#0f766e',
   },
   {
     icon: Keyboard,

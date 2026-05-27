@@ -41,7 +41,7 @@ function CalcTypeBadge({ type }: { type: string }) {
   const styles: Record<string, string> = {
     FIXED_RATE: 'bg-blue-100 text-blue-800 border-blue-200',
     ACTUAL_SALARY: 'bg-orange-100 text-orange-800 border-orange-200',
-    DAY_RATE: 'bg-purple-100 text-purple-800 border-purple-200',
+    DAY_RATE: 'bg-cyan-100 text-cyan-800 border-cyan-200',
     NO_COST: 'bg-gray-100 text-gray-500 border-gray-200',
   };
   const labels: Record<string, string> = {
@@ -288,7 +288,7 @@ function GradeSummaryCard({ summaries, title }: { summaries: GradeSummary[]; tit
     <Card>
       <CardHeader className="pb-2 pt-3">
         <CardTitle className="text-xs flex items-center gap-1.5">
-          <Layers className="w-3.5 h-3.5 text-indigo-600" />
+          <Layers className="w-3.5 h-3.5 text-cyan-600" />
           {title}
         </CardTitle>
       </CardHeader>
@@ -309,7 +309,7 @@ function GradeSummaryCard({ summaries, title }: { summaries: GradeSummary[]; tit
               {summaries.map(g => (
                 <TableRow key={g.grade}>
                   <TableCell>
-                    <span className="px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800 text-[10px]" style={{ fontWeight: 600 }}>
+                    <span className="px-1.5 py-0.5 rounded bg-cyan-100 text-cyan-800 text-[10px]" style={{ fontWeight: 600 }}>
                       {g.label}
                     </span>
                   </TableCell>
@@ -650,7 +650,7 @@ function ProjectDetailView({ project }: { project: KoicaProject }) {
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
           <h3 className="flex items-center gap-2">
-            <Building2 className="w-5 h-5 text-indigo-600" />
+            <Building2 className="w-5 h-5 text-cyan-600" />
             {project.shortName}
           </h3>
           <p className="text-xs text-muted-foreground mt-0.5">{project.name}</p>
@@ -659,7 +659,7 @@ function ProjectDetailView({ project }: { project: KoicaProject }) {
             <Badge variant="outline" className="text-[10px]">종료: {project.endDate}</Badge>
             <CalcTypeBadge type={project.calcType} />
             {project.projectTotal && (
-              <Badge className="bg-indigo-100 text-indigo-800 border-indigo-200 text-[10px]">
+              <Badge className="bg-cyan-100 text-cyan-800 border-cyan-200 text-[10px]">
                 인건비 총액: {formatKRW(project.projectTotal)}원
               </Badge>
             )}
@@ -887,7 +887,7 @@ function OverviewSummary() {
       <Card>
         <CardContent className="pt-3 pb-3">
           <div className="flex items-center gap-1.5 text-muted-foreground text-[10px] mb-0.5">
-            <Building2 className="w-3 h-3 text-indigo-600" />KOICA 사업
+            <Building2 className="w-3 h-3 text-cyan-600" />KOICA 사업
           </div>
           <p className="text-xl" style={{ fontWeight: 600 }}>{kpis.projectCount}<span className="text-sm text-muted-foreground">건</span></p>
         </CardContent>
@@ -946,7 +946,7 @@ function OverviewSummary() {
           <p className="text-[10px]">
             <span className="text-blue-700" style={{ fontWeight: 600 }}>정액정산</span> (CTS) +{' '}
             <span className="text-orange-700" style={{ fontWeight: 600 }}>실급여</span> (IBS) +{' '}
-            <span className="text-purple-700" style={{ fontWeight: 600 }}>일당</span> (네팔)
+            <span className="text-cyan-700" style={{ fontWeight: 600 }}>일당</span> (네팔)
           </p>
         </CardContent>
       </Card>
@@ -972,7 +972,7 @@ export function KoicaPersonnelPage() {
         {/* Header */}
         <PageHeader
           icon={ClipboardList}
-          iconGradient="linear-gradient(135deg, #4338ca, #6366f1)"
+          iconGradient="linear-gradient(135deg, #0e7490, #0891b2)"
           title="KOICA 사업 인력 배치"
           description="전문가 등급별 단가 자동 계산 | 현행 vs 변경 비교 | 정액정산·실급여·일당 구분"
           badge="2026년"
@@ -1023,8 +1023,8 @@ export function KoicaPersonnelPage() {
                     className={`
                       px-3 py-1.5 rounded-lg text-xs border transition-all
                       ${isActive
-                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
-                        : 'bg-white border-gray-200 hover:border-indigo-400 hover:bg-indigo-50'
+                        ? 'bg-cyan-600 text-white border-cyan-600 shadow-sm'
+                        : 'bg-white border-gray-200 hover:border-cyan-400 hover:bg-cyan-50'
                       }
                     `}
                     style={{ fontWeight: isActive ? 600 : 400 }}

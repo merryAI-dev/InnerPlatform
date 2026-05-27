@@ -10,10 +10,10 @@ import { getAuthInstance, getOrgCollectionPath, getOrgDocumentPath } from '../..
 import { useFirebase } from '../../lib/firebase-context';
 import {
   isPlatformApiEnabled,
-  processProjectRequestContractViaBff,
   upsertProjectViaBff,
   type UpsertProjectPayload,
 } from '../../lib/platform-bff-client';
+import { uploadProjectRequestContractFile } from '../../platform/project-contract-upload';
 import { buildProjectRequestPayloadFromDraft } from '../../platform/project-editor';
 import {
   buildProjectEditorDraftFromProject,
@@ -64,10 +64,10 @@ function resolveExecutiveBanner(project: Project) {
 }
 
 function bannerClassName(tone: string) {
-  if (tone === 'success') return 'border-emerald-200 bg-emerald-50 text-emerald-900';
-  if (tone === 'danger') return 'border-rose-200 bg-rose-50 text-rose-900';
+  if (tone === 'success') return 'border-slate-200 bg-white text-slate-900';
+  if (tone === 'danger') return 'border-slate-200 bg-white text-red-700';
   if (tone === 'neutral') return 'border-slate-200 bg-slate-50 text-slate-900';
-  return 'border-amber-200 bg-amber-50 text-amber-900';
+  return 'border-slate-200 bg-white text-red-700';
 }
 
 async function loadLatestProjectSnapshot(
@@ -263,27 +263,11 @@ export function PortalProjectEdit() {
   };
 
   const handleContractFileUpload = async (file: File) => {
-    if (!authUser?.uid) {
-      throw new Error('로그인 정보를 확인할 수 없습니다.');
-    }
-    if (!isPlatformApiEnabled()) {
-      throw new Error('계약서 업로드는 플랫폼 API가 켜진 환경에서만 사용할 수 있습니다.');
-    }
-    const idToken = authUser.idToken || await getAuthInstance()?.currentUser?.getIdToken() || undefined;
-    const processed = await processProjectRequestContractViaBff({
+    return uploadProjectRequestContractFile({
       tenantId: orgId,
-      actor: {
-        uid: authUser.uid,
-        email: authUser.email,
-        role: authUser.role,
-        idToken,
-      },
+      actor: authUser,
       file,
     });
-    return {
-      contractDocument: processed.contractDocument,
-      contractAnalysis: processed.analysis,
-    };
   };
 
   if (!myProject) {
