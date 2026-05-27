@@ -859,15 +859,6 @@ export function CashflowProjectSheet({
               variant="outline"
               size="sm"
               className="h-8 text-[12px] gap-1.5"
-              onClick={() => copyMonthValues('projection', 'actual')}
-              disabled={!canEdit}
-            >
-              <ArrowLeftRight className="w-3.5 h-3.5" /> Projection → Actual
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8 text-[12px] gap-1.5"
               onClick={() => copyMonthValues('actual', 'projection')}
             >
               <ArrowLeftRight className="w-3.5 h-3.5" /> Actual → Projection
