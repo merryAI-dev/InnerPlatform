@@ -126,7 +126,7 @@ describe('project editor draft mapping', () => {
     const draft = createProjectEditorDraft({
       ...buildProjectEditorDraftFromProject(baseProject),
       teamMembersDetailed: [
-        { memberName: '김다은', memberNickname: '데이나', role: 'PM', participationRate: 60 },
+        { memberName: '김다은', memberNickname: '데이나', role: 'PM', participationRate: 60, laborAllocationStartMonth: '2026-04', laborAllocationEndMonth: '2026-09' },
         { memberName: '변민욱', memberNickname: '보람', role: '운영', participationRate: 40 },
       ],
       groupwareName: '기후테크GW',
@@ -141,10 +141,10 @@ describe('project editor draft mapping', () => {
     expect(payload.totalRevenueAmount).toBe(91_000);
     expect(payload.currency).toBe('USD');
     expect(payload.teamMembersDetailed).toEqual([
-      { memberName: '김다은', memberNickname: '데이나', role: 'PM', participationRate: 60 },
+      { memberName: '김다은', memberNickname: '데이나', role: 'PM', participationRate: 60, laborAllocationStartMonth: '2026-04', laborAllocationEndMonth: '2026-09' },
       { memberName: '변민욱', memberNickname: '보람', role: '운영', participationRate: 40 },
     ]);
-    expect(payload.teamMembers).toBe('김다은 (데이나) / PM / 60%, 변민욱 (보람) / 운영 / 40%');
+    expect(payload.teamMembers).toBe('김다은 (데이나) / PM / 60% / 인건비 2026-04~2026-09, 변민욱 (보람) / 운영 / 40%');
     expect(payload.groupwareName).toBe('기후테크GW');
     expect(payload.paymentPlan).toEqual({ contract: 50_000, interim: 30_000, final: 20_000 });
     expect(payload.finalPaymentNote).toBe('잔금은 검수 후 2주 이내');

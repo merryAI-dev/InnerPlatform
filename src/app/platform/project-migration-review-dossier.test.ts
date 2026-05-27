@@ -25,7 +25,7 @@ const project: Project = {
   groupwareName: '2026 다자간협력 운영',
   participantCondition: '현지 파트너 공동참여',
   teamMembersDetailed: [
-    { memberName: '변민욱', memberNickname: '보람', role: 'PM', participationRate: 60 },
+    { memberName: '변민욱', memberNickname: '보람', role: 'PM', participationRate: 60, laborAllocationStartMonth: '2026-03', laborAllocationEndMonth: '2026-08' },
     { memberName: '김다은', memberNickname: '데이나', role: '운영', participationRate: 40 },
   ],
   contractType: '계약서(날인)',

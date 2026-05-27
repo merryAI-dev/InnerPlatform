@@ -18,6 +18,7 @@ import {
   PROJECT_FUND_INPUT_MODE_LABELS,
   SETTLEMENT_TYPE_LABELS,
 } from '../data/types';
+import { formatProjectTeamMemberLine } from './project-team-members';
 
 export type ProjectRequestReviewStatus = 'ready' | 'needs-check' | 'missing';
 export type ProjectRequestReviewBadgeTone = 'neutral' | 'warning' | 'critical' | 'success';
@@ -135,10 +136,7 @@ function formatSettlementSheetPolicy(policy?: SettlementSheetPolicy | null): str
 function formatTeamMembers(payload: ProjectRequestPayload): string {
   if (payload.teamMembersDetailed && payload.teamMembersDetailed.length > 0) {
     return payload.teamMembersDetailed
-      .map((member) => {
-        const name = `${member.memberName}${member.memberNickname ? `(${member.memberNickname})` : ''}`;
-        return member.role ? `${name} · ${member.role}` : name;
-      })
+      .map(formatProjectTeamMemberLine)
       .join('\n');
   }
   return payload.teamMembers || '-';

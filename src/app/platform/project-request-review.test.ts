@@ -159,4 +159,24 @@ describe('project-request-review', () => {
     const items = model.checklistGroups.flatMap((group) => group.items);
     expect(items.find((item) => item.key === 'currency')?.value).toBe('USD');
   });
+
+  it('shows labor allocation period for document team members', () => {
+    const model = buildProjectRequestReviewModel(createRequest({
+      payload: {
+        teamMembersDetailed: [
+          {
+            memberName: '김다은',
+            memberNickname: '데이나',
+            role: 'PM',
+            participationRate: 60,
+            laborAllocationStartMonth: '2026-04',
+            laborAllocationEndMonth: '2026-09',
+          },
+        ],
+      },
+    }));
+
+    const items = model.checklistGroups.flatMap((group) => group.items);
+    expect(items.find((item) => item.key === 'teamMembers')?.value).toBe('김다은 (데이나) / PM / 60% / 인건비 2026-04~2026-09');
+  });
 });

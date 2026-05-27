@@ -201,6 +201,8 @@ function createEmptyTeamMember(): ProjectTeamMemberAssignment {
     memberNickname: '',
     role: '',
     participationRate: 0,
+    laborAllocationStartMonth: '',
+    laborAllocationEndMonth: '',
   };
 }
 
@@ -981,7 +983,7 @@ export function ProjectEditorWizard({
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
                 </div>
-                <div className="mt-3 grid gap-3 lg:grid-cols-[132px_minmax(0,1.4fr)_minmax(0,1fr)_120px]">
+                <div className="mt-3 grid gap-3 lg:grid-cols-[132px_minmax(0,1.4fr)_minmax(0,1fr)_120px_140px_140px]">
                   <div>
                     <Label className="text-xs">입력 방식</Label>
                     <Select
@@ -1037,6 +1039,24 @@ export function ProjectEditorWizard({
                       step={1}
                       value={member.participationRate || ''}
                       onChange={(event) => updateTeamMember(index, { participationRate: Number(event.target.value) || 0 })}
+                      className="mt-1 h-9 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">인건비 시작월</Label>
+                    <Input
+                      type="month"
+                      value={member.laborAllocationStartMonth || ''}
+                      onChange={(event) => updateTeamMember(index, { laborAllocationStartMonth: event.target.value })}
+                      className="mt-1 h-9 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">인건비 종료월</Label>
+                    <Input
+                      type="month"
+                      value={member.laborAllocationEndMonth || ''}
+                      onChange={(event) => updateTeamMember(index, { laborAllocationEndMonth: event.target.value })}
                       className="mt-1 h-9 text-sm"
                     />
                   </div>
@@ -1151,7 +1171,7 @@ export function ProjectEditorWizard({
           <CardContent>
             <ReviewRow label="PM" value={draft.managerName} />
             <ReviewRow label="담당자 계정" value={draft.managerId || '-'} />
-            <ReviewRow label="팀원" value={teamMembersSummary} />
+            <ReviewRow label="서류상 참여인력" value={teamMembersSummary} />
           </CardContent>
         </Card>
         <Card className="shadow-none">

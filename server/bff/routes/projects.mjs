@@ -335,10 +335,15 @@ function formatProjectRequestTeamMember(member) {
   const participationRate = Number.isFinite(Number(member?.participationRate))
     ? Math.max(0, Math.round(Number(member.participationRate)))
     : 0;
+  const laborAllocationStartMonth = normalizeMonth(member?.laborAllocationStartMonth);
+  const laborAllocationEndMonth = normalizeMonth(member?.laborAllocationEndMonth);
   const identity = nickname || name || '-';
   const rolePart = role ? ` · ${role}` : '';
   const ratePart = participationRate > 0 ? ` · ${participationRate}%` : '';
-  return `${identity}${rolePart}${ratePart}`;
+  const periodPart = laborAllocationStartMonth || laborAllocationEndMonth
+    ? ` · 인건비 ${laborAllocationStartMonth || '-'}~${laborAllocationEndMonth || '-'}`
+    : '';
+  return `${identity}${rolePart}${ratePart}${periodPart}`;
 }
 
 function normalizeProjectContractType(value) {
@@ -451,15 +456,34 @@ function normalizeParticipationRate(value) {
   return Math.max(0, Math.min(100, Math.round(parsed)));
 }
 
+function normalizeMonth(value) {
+  const text = readOptionalText(value);
+  return /^\d{4}-\d{2}$/.test(text) ? text : '';
+}
+
 function normalizeProjectTeamMembersDetailed(value) {
   return (Array.isArray(value) ? value : [])
-    .map((member) => ({
-      memberName: readOptionalText(member?.memberName),
-      memberNickname: readOptionalText(member?.memberNickname),
-      role: readOptionalText(member?.role),
-      participationRate: normalizeParticipationRate(member?.participationRate),
-    }))
-    .filter((member) => member.memberName || member.memberNickname || member.role || member.participationRate > 0);
+    .map((member) => {
+      const normalized = {
+        memberName: readOptionalText(member?.memberName),
+        memberNickname: readOptionalText(member?.memberNickname),
+        role: readOptionalText(member?.role),
+        participationRate: normalizeParticipationRate(member?.participationRate),
+      };
+      const laborAllocationStartMonth = normalizeMonth(member?.laborAllocationStartMonth);
+      const laborAllocationEndMonth = normalizeMonth(member?.laborAllocationEndMonth);
+      if (laborAllocationStartMonth) normalized.laborAllocationStartMonth = laborAllocationStartMonth;
+      if (laborAllocationEndMonth) normalized.laborAllocationEndMonth = laborAllocationEndMonth;
+      return normalized;
+    })
+    .filter((member) => (
+      member.memberName
+      || member.memberNickname
+      || member.role
+      || member.participationRate > 0
+      || member.laborAllocationStartMonth
+      || member.laborAllocationEndMonth
+    ));
 }
 
 function normalizeSyncKeySegment(value, fallback = 'na') {
@@ -598,8 +622,8 @@ async function syncProjectParticipationEntries({
       rate: member.participationRate,
       settlementSystem: resolveParticipationSettlementSystem(project),
       clientOrg: readOptionalText(project.clientOrg),
-      periodStart: readOptionalText(project.contractStart).slice(0, 7),
-      periodEnd: readOptionalText(project.contractEnd).slice(0, 7),
+      periodStart: member.laborAllocationStartMonth || readOptionalText(project.contractStart).slice(0, 7),
+      periodEnd: member.laborAllocationEndMonth || readOptionalText(project.contractEnd).slice(0, 7),
       isDocumentOnly: false,
       note: member.role,
       source: 'PROJECT_TEAM_SYNC',

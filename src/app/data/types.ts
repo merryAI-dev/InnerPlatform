@@ -690,6 +690,8 @@ export interface ProjectTeamMemberAssignment {
   memberNickname: string;
   role: string;
   participationRate: number;
+  laborAllocationStartMonth?: string;
+  laborAllocationEndMonth?: string;
 }
 
 export interface ProjectRequestPayload {

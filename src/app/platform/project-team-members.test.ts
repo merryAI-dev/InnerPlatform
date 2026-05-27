@@ -10,11 +10,11 @@ import {
 describe('project-team-members', () => {
   it('formats completed team members into a readable summary', () => {
     const result = formatProjectTeamMembersSummary([
-      { memberName: '김다은', memberNickname: '데이나', role: 'PM', participationRate: 60 },
+      { memberName: '김다은', memberNickname: '데이나', role: 'PM', participationRate: 60, laborAllocationStartMonth: '2026-03', laborAllocationEndMonth: '2026-08' },
       { memberName: '변민욱', memberNickname: '보람', role: '운영', participationRate: 40 },
     ]);
 
-    expect(result).toContain('김다은 (데이나) / PM / 60%');
+    expect(result).toContain('김다은 (데이나) / PM / 60% / 인건비 2026-03~2026-08');
     expect(result).toContain('변민욱 (보람) / 운영 / 40%');
   });
 
@@ -41,7 +41,12 @@ describe('project-team-members', () => {
       { memberName: '', memberNickname: '', role: '', participationRate: 0 },
     ]);
     expect(normalizeProjectTeamMembers([
-      { memberName: '', memberNickname: '', role: '', participationRate: 0 },
+      { memberName: '', memberNickname: '', role: '', participationRate: 0, laborAllocationStartMonth: '2026-04' },
+    ])).toEqual([
+      { memberName: '', memberNickname: '', role: '', participationRate: 0, laborAllocationStartMonth: '2026-04' },
+    ]);
+    expect(normalizeProjectTeamMembers([
+      { memberName: '', memberNickname: '', role: '', participationRate: 0, laborAllocationStartMonth: '2026-4' },
     ])).toEqual([]);
   });
 

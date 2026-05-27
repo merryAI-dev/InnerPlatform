@@ -6,6 +6,11 @@ function toRate(value: unknown) {
   return Math.max(0, Math.min(100, Math.round(parsed)));
 }
 
+function toMonth(value: unknown) {
+  const normalized = String(value || '').trim();
+  return /^\d{4}-\d{2}$/.test(normalized) ? normalized : '';
+}
+
 export function parseProjectTeamMemberIdentityInput(value: string) {
   const normalized = String(value || '').trim().replace(/\s+/g, ' ');
   const match = normalized.match(/^(.+?)\s*\(\s*([^)]+?)\s*\)\s*$/);
@@ -31,6 +36,10 @@ function normalizeProjectTeamMemberRow(
     role: String(member?.role || '').trim(),
     participationRate: toRate(member?.participationRate),
   };
+  const laborAllocationStartMonth = toMonth(member?.laborAllocationStartMonth);
+  const laborAllocationEndMonth = toMonth(member?.laborAllocationEndMonth);
+  if (laborAllocationStartMonth) normalized.laborAllocationStartMonth = laborAllocationStartMonth;
+  if (laborAllocationEndMonth) normalized.laborAllocationEndMonth = laborAllocationEndMonth;
   if (options.preserveInputMode && member?.inputMode === 'manual') {
     normalized.inputMode = 'manual';
     if (typeof member?.identityInput === 'string') {
@@ -50,6 +59,8 @@ export function normalizeProjectTeamMembers(
       || member.memberNickname
       || member.role
       || member.participationRate > 0
+      || member.laborAllocationStartMonth
+      || member.laborAllocationEndMonth
     ));
 }
 
@@ -74,10 +85,14 @@ export function formatProjectTeamMemberLine(member: ProjectTeamMemberAssignment)
   const identity = member.memberNickname
     ? `${member.memberName} (${member.memberNickname})`
     : member.memberName;
+  const period = member.laborAllocationStartMonth || member.laborAllocationEndMonth
+    ? `${member.laborAllocationStartMonth || '-'}~${member.laborAllocationEndMonth || '-'}`
+    : '';
   return [
     identity,
     member.role,
     member.participationRate > 0 ? `${member.participationRate}%` : '',
+    period ? `인건비 ${period}` : '',
   ].filter(Boolean).join(' / ');
 }
 

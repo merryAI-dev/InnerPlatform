@@ -26,7 +26,7 @@ const project: Project = {
   groupwareName: '',
   participantCondition: '',
   teamMembersDetailed: [
-    { memberName: '변민욱', memberNickname: '보람', role: 'PM', participationRate: 80 },
+    { memberName: '변민욱', memberNickname: '보람', role: 'PM', participationRate: 80, laborAllocationStartMonth: '2026-03', laborAllocationEndMonth: '2026-08' },
     { memberName: '이지영', memberNickname: '이지', role: '정산', participationRate: 20 },
   ],
   contractType: '계약서(날인)',
@@ -77,8 +77,8 @@ describe('project-team-participation', () => {
       rate: 80,
       source: 'PROJECT_TEAM_SYNC',
       note: 'PM',
-      periodStart: '2026-01',
-      periodEnd: '2026-12',
+      periodStart: '2026-03',
+      periodEnd: '2026-08',
     });
   });
 

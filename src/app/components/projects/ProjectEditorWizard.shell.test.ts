@@ -83,6 +83,10 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('normalizeProjectTeamMemberDraftRows');
     expect(addTeamMemberBlock).toContain('teamMembersDetailed: [...prev.teamMembersDetailed, createEmptyTeamMember()]');
     expect(addTeamMemberBlock).not.toContain('createProjectEditorDraft');
+    expect(source).toContain('인건비 시작월');
+    expect(source).toContain('인건비 종료월');
+    expect(source).toContain('laborAllocationStartMonth');
+    expect(source).toContain('laborAllocationEndMonth');
     expect(source).toContain('<Plus className="h-4 w-4" />');
     expect(source).toContain('<Button type="button" onClick={addTeamMember} className="gap-2">');
     expect(source).not.toContain('variant="outline" size="sm" onClick={addTeamMember}');
