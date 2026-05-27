@@ -4,6 +4,8 @@ import {
   getOrgCollectionPath,
   getOrgDocumentPath,
   readFirebaseEmulatorConfig,
+  readFirebaseConfigFromEnv,
+  resolveFirebaseAuthDomain,
   selectFirebaseConfig,
   shouldEnableFirebaseEmulatorsForLocation,
   type FirebaseConfig,
@@ -57,6 +59,53 @@ describe('selectFirebaseConfig', () => {
   it('falls back to saved config when env config is disabled', () => {
     const selected = selectFirebaseConfig(savedConfig, {}, false);
     expect(selected?.projectId).toBe('saved-project');
+  });
+});
+
+describe('Firebase auth domain proxy', () => {
+  it('keeps the configured Firebase auth domain on local development hosts', () => {
+    expect(resolveFirebaseAuthDomain(
+      'mysc-bmp-14173451.firebaseapp.com',
+      {
+        VITE_FIREBASE_AUTH_ALLOWED_HOSTS: 'inner-platform-git-dev-merryai-devs-projects.vercel.app',
+      },
+      { hostname: 'localhost' },
+    )).toBe('mysc-bmp-14173451.firebaseapp.com');
+  });
+
+  it('uses the current app host as authDomain only for configured fixed auth hosts', () => {
+    const env = {
+      VITE_FIREBASE_AUTH_ALLOWED_HOSTS: 'inner-platform-git-dev-merryai-devs-projects.vercel.app',
+      VITE_FIREBASE_AUTH_PROXY_HELPER_ON_ALLOWED_HOSTS: 'true',
+    };
+
+    expect(resolveFirebaseAuthDomain(
+      'mysc-bmp-14173451.firebaseapp.com',
+      env,
+      { hostname: 'inner-platform-git-dev-merryai-devs-projects.vercel.app' },
+    )).toBe('inner-platform-git-dev-merryai-devs-projects.vercel.app');
+
+    expect(resolveFirebaseAuthDomain(
+      'mysc-bmp-14173451.firebaseapp.com',
+      env,
+      { hostname: 'inner-platform-random123-merryai-devs-projects.vercel.app' },
+    )).toBe('mysc-bmp-14173451.firebaseapp.com');
+  });
+
+  it('applies authDomain proxy selection when reading env config', () => {
+    const selected = readFirebaseConfigFromEnv({
+      VITE_FIREBASE_API_KEY: 'env-api-key',
+      VITE_FIREBASE_AUTH_DOMAIN: 'mysc-bmp-14173451.firebaseapp.com',
+      VITE_FIREBASE_PROJECT_ID: 'env-project',
+      VITE_FIREBASE_STORAGE_BUCKET: 'env-bucket',
+      VITE_FIREBASE_MESSAGING_SENDER_ID: 'env-msg',
+      VITE_FIREBASE_APP_ID: 'env-app',
+      VITE_FIREBASE_AUTH_ALLOWED_HOSTS: 'inner-platform-git-dev-merryai-devs-projects.vercel.app',
+    }, {
+      hostname: 'inner-platform-git-dev-merryai-devs-projects.vercel.app',
+    });
+
+    expect(selected?.authDomain).toBe('inner-platform-git-dev-merryai-devs-projects.vercel.app');
   });
 });
 

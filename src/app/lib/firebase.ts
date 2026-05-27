@@ -35,6 +35,7 @@ export interface FirebaseEmulatorConfig {
 
 interface LocationLike {
   hostname?: string;
+  host?: string;
 }
 
 function normalizeString(value: unknown): string {
@@ -51,6 +52,20 @@ function getRuntimeLocation(): LocationLike | undefined {
   return window.location;
 }
 
+function normalizeHost(value: unknown): string {
+  const raw = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  if (!raw) return '';
+  const withoutProtocol = raw.replace(/^https?:\/\//, '');
+  return withoutProtocol.replace(/[/?#].*$/, '').replace(/:\d+$/, '');
+}
+
+function parseHostList(value: unknown): string[] {
+  return String(value || '')
+    .split(',')
+    .map((entry) => normalizeHost(entry))
+    .filter(Boolean);
+}
+
 function isLoopbackDevHostname(hostname: string): boolean {
   const normalized = hostname.trim().toLowerCase();
   return normalized === 'localhost'
@@ -60,17 +75,46 @@ function isLoopbackDevHostname(hostname: string): boolean {
     || normalized.endsWith('.localhost');
 }
 
+function getLocationHostname(locationLike?: LocationLike): string {
+  return normalizeHost(locationLike?.hostname || locationLike?.host);
+}
+
 export function shouldEnableFirebaseEmulatorsForLocation(locationLike?: LocationLike): boolean {
-  if (!locationLike?.hostname) return true;
-  return isLoopbackDevHostname(locationLike.hostname);
+  const hostname = getLocationHostname(locationLike);
+  if (!hostname) return true;
+  return isLoopbackDevHostname(hostname);
+}
+
+function getFirebaseAuthProxyHosts(env: Record<string, unknown>): string[] {
+  const hosts = new Set([
+    ...parseHostList(env.VITE_FIREBASE_AUTH_ALLOWED_HOSTS),
+    ...parseHostList(env.VITE_FIREBASE_AUTH_PROXY_HOSTS),
+  ]);
+  const fallbackUrl = normalizeString(env.VITE_FIREBASE_AUTH_FALLBACK_URL);
+  if (fallbackUrl) hosts.add(normalizeHost(fallbackUrl));
+  return Array.from(hosts);
+}
+
+export function resolveFirebaseAuthDomain(
+  configuredAuthDomain: unknown,
+  env: Record<string, unknown> = import.meta.env,
+  locationLike: LocationLike | undefined = getRuntimeLocation(),
+): string {
+  const configured = normalizeString(configuredAuthDomain);
+  const currentHost = getLocationHostname(locationLike);
+  const proxyEnabled = parseFeatureFlag(env.VITE_FIREBASE_AUTH_PROXY_HELPER_ON_ALLOWED_HOSTS, true);
+  if (!proxyEnabled || !currentHost || isLoopbackDevHostname(currentHost)) return configured;
+  if (!getFirebaseAuthProxyHosts(env).includes(currentHost)) return configured;
+  return currentHost;
 }
 
 export function readFirebaseConfigFromEnv(
   env: Record<string, unknown> = import.meta.env,
+  locationLike: LocationLike | undefined = getRuntimeLocation(),
 ): FirebaseConfig | null {
   const cfg: FirebaseConfig = {
     apiKey: normalizeString(env.VITE_FIREBASE_API_KEY),
-    authDomain: normalizeString(env.VITE_FIREBASE_AUTH_DOMAIN),
+    authDomain: resolveFirebaseAuthDomain(env.VITE_FIREBASE_AUTH_DOMAIN, env, locationLike),
     projectId: normalizeString(env.VITE_FIREBASE_PROJECT_ID),
     storageBucket: normalizeString(env.VITE_FIREBASE_STORAGE_BUCKET),
     messagingSenderId: normalizeString(env.VITE_FIREBASE_MESSAGING_SENDER_ID),
