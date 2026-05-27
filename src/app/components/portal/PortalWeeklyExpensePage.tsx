@@ -56,6 +56,7 @@ import { buildOptimisticUploadedEvidencePatch } from '../../platform/evidence-up
 import { readDevAuthHarnessConfig } from '../../platform/dev-harness';
 import { detectParticipationRisk } from '../../platform/participation-risk-rules';
 import { normalizeBudgetLabel } from '../../platform/budget-labels';
+import { buildProjectExpenseRowsForActualSync } from '../../platform/expense-sheet-actual-sync';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -69,6 +70,7 @@ import {
 import { resolvePortalHappyPath } from '../../platform/portal-happy-path';
 import { resolveWeeklyExpenseSavePolicy } from '../../platform/weekly-expense-save-policy';
 import { usePortalNavigationGuard } from './PortalLayout';
+import { getYearMondayWeeks } from '../../platform/cashflow-weeks';
 const GoogleSheetMigrationWizard = lazy(
   () => import('./GoogleSheetMigrationWizard').then((module) => ({ default: module.GoogleSheetMigrationWizard })),
 );
@@ -121,6 +123,7 @@ export function PortalWeeklyExpensePage() {
   const [hasUnsavedSettlementChanges, setHasUnsavedSettlementChanges] = useState(false);
   const [isSettlementSaving, setIsSettlementSaving] = useState(false);
   const [pendingNavigationAttempt, setPendingNavigationAttempt] = useState<{ path: string; label: string } | null>(null);
+  const actualSyncSignatureRef = useRef('');
   const [participationRiskWarning, setParticipationRiskWarning] = useState<{
     yearMonth: string;
     weekNo: number;
@@ -280,7 +283,76 @@ export function PortalWeeklyExpensePage() {
     rows: ImportRow[],
     yearWeeks: Parameters<typeof buildSettlementActualSyncPayloadLocally>[1],
     persistedRows?: ImportRow[] | null,
-  ) => buildSettlementActualSyncPayloadLocally(rows, yearWeeks, persistedRows), []);
+  ) => {
+    const currentProjectRows = buildProjectExpenseRowsForActualSync({
+      sheets: visibleExpenseSheets,
+      activeSheetId: activeExpenseSheetId,
+      activeRows: rows,
+    });
+    const persistedProjectRows = buildProjectExpenseRowsForActualSync({
+      sheets: visibleExpenseSheets,
+      activeSheetId: activeExpenseSheetId,
+      activeRows: persistedRows ?? expenseSheetRows ?? [],
+    });
+    return buildSettlementActualSyncPayloadLocally(currentProjectRows, yearWeeks, persistedProjectRows);
+  }, [activeExpenseSheetId, expenseSheetRows, visibleExpenseSheets]);
+
+  const projectActualSyncPayload = useMemo(() => {
+    const rows = buildProjectExpenseRowsForActualSync({
+      sheets: visibleExpenseSheets,
+      activeSheetId: activeExpenseSheetId,
+      activeRows: expenseSheetRows ?? [],
+    });
+    if (rows.length === 0) return [];
+    const currentYear = new Date().getFullYear();
+    return buildSettlementActualSyncPayloadLocally(rows, getYearMondayWeeks(currentYear), rows);
+  }, [activeExpenseSheetId, expenseSheetRows, visibleExpenseSheets]);
+
+  useEffect(() => {
+    if (!projectId || projectActualSyncPayload.length === 0) return;
+    const signature = JSON.stringify(projectActualSyncPayload);
+    if (actualSyncSignatureRef.current === signature) return;
+    actualSyncSignatureRef.current = signature;
+    let cancelled = false;
+    void (async () => {
+      try {
+        await Promise.all(projectActualSyncPayload.map((week) => upsertWeekAmounts({
+          projectId,
+          yearMonth: week.yearMonth,
+          weekNo: week.weekNo,
+          mode: 'actual',
+          amounts: week.amounts as any,
+        })));
+        if (cancelled) return;
+        await Promise.all(projectActualSyncPayload.map((week) => upsertWeeklySubmissionStatus({
+          projectId,
+          yearMonth: week.yearMonth,
+          weekNo: week.weekNo,
+          expenseUpdated: true,
+          expenseSyncState: 'synced',
+          expenseReviewPendingCount: 0,
+        })));
+      } catch (error) {
+        actualSyncSignatureRef.current = '';
+        reportError(error, {
+          message: '[PortalWeeklyExpensePage] actual realtime sync failed:',
+          options: {
+            level: 'error',
+            tags: {
+              surface: 'portal_weekly_expense',
+              action: 'actual_realtime_sync',
+            },
+            extra: {
+              projectId,
+            },
+          },
+        });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectActualSyncPayload, projectId, upsertWeekAmounts, upsertWeeklySubmissionStatus]);
 
   const handleEvidenceDriveError = useCallback((error: unknown, actionLabel: string) => {
     reportError(error, {

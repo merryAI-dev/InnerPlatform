@@ -53,4 +53,10 @@ describe('PortalWeeklyExpensePage flow layout', () => {
   it('guards the setup panel so the page can render when no setup action is needed', () => {
     expect(weeklyExpenseSource).toMatch(/\{weeklySetupPanel \? \(\s*<Card data-testid="weekly-expense-setup-panel" className=\{weeklySetupPanel\.toneClass\}>/);
   });
+
+  it('keeps cashflow actual sync tied to the full project expense-sheet source, not only the active tab save button', () => {
+    expect(weeklyExpenseSource).toContain('buildProjectExpenseRowsForActualSync');
+    expect(weeklyExpenseSource).toContain('projectActualSyncPayload');
+    expect(weeklyExpenseSource).toContain('actual_realtime_sync');
+  });
 });

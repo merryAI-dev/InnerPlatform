@@ -12,7 +12,6 @@ import {
   collection,
   doc,
   getDoc,
-  getDocs,
   limit,
   onSnapshot,
   query,
@@ -162,28 +161,8 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
           limit(2500),
         ));
 
-    if (readAll) {
-      unsubsRef.current.push(
-        onSnapshot(q, (snap) => {
-          const docs = filterCashflowWeeksThroughSelectedYear(
-            snap.docs.map((d) => d.data() as CashflowWeekSheet),
-            yearMonth,
-          );
-          docs.sort((a, b) => {
-            if (a.projectId !== b.projectId) return String(a.projectId).localeCompare(String(b.projectId));
-            if (a.yearMonth !== b.yearMonth) return String(a.yearMonth).localeCompare(String(b.yearMonth));
-            return (a.weekNo || 0) - (b.weekNo || 0);
-          });
-          setWeeks(docs);
-          setIsLoading(false);
-        }, (err) => {
-          console.error('[CashflowWeeks] listen error:', err);
-          setWeeks([]);
-          setIsLoading(false);
-        }),
-      );
-    } else {
-      void getDocs(q).then((snap) => {
+    unsubsRef.current.push(
+      onSnapshot(q, (snap) => {
         const docs = filterCashflowWeeksThroughSelectedYear(
           snap.docs.map((d) => d.data() as CashflowWeekSheet),
           yearMonth,
@@ -195,12 +174,12 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
         });
         setWeeks(docs);
         setIsLoading(false);
-      }).catch((err) => {
-        console.error('[CashflowWeeks] fetch error:', err);
+      }, (err) => {
+        console.error('[CashflowWeeks] listen error:', err);
         setWeeks([]);
         setIsLoading(false);
-      });
-    }
+      }),
+    );
 
     return () => {
       unsubsRef.current.forEach((u) => u());
