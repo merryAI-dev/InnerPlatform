@@ -4,6 +4,12 @@ import { Save } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAppStore } from '../../data/store';
 import type { Project, ProjectPhase } from '../../data/types';
+import { getAuthInstance } from '../../lib/firebase';
+import { useFirebase } from '../../lib/firebase-context';
+import {
+  isPlatformApiEnabled,
+  processProjectRequestContractViaBff,
+} from '../../lib/platform-bff-client';
 import {
   buildProjectEditorDraftFromProject,
   buildProjectEditorProjectPatch,
@@ -42,6 +48,7 @@ function createProjectFromDraft(
     status: draft.status,
     type: draft.type,
     phase: draft.phase,
+    currency: draft.currency,
     contractAmount: draft.contractAmount,
     contractStart: draft.contractStart,
     contractEnd: draft.contractEnd,
@@ -89,6 +96,7 @@ function createProjectFromDraft(
 export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: ProjectWizardProps) {
   const navigate = useNavigate();
   const { addProject, updateProject, members, currentUser } = useAppStore();
+  const { orgId } = useFirebase();
   const [busyActionId, setBusyActionId] = useState<string | null>(null);
 
   const initialDraft = useMemo(
@@ -136,6 +144,30 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
     }
   };
 
+  const handleContractFileUpload = async (file: File) => {
+    if (!currentUser?.uid) {
+      throw new Error('로그인 정보를 확인할 수 없습니다.');
+    }
+    if (!isPlatformApiEnabled()) {
+      throw new Error('계약서 업로드는 플랫폼 API가 켜진 환경에서만 사용할 수 있습니다.');
+    }
+    const idToken = await getAuthInstance()?.currentUser?.getIdToken() || undefined;
+    const processed = await processProjectRequestContractViaBff({
+      tenantId: orgId,
+      actor: {
+        uid: currentUser.uid,
+        email: currentUser.email,
+        role: currentUser.role,
+        idToken,
+      },
+      file,
+    });
+    return {
+      contractDocument: processed.contractDocument,
+      contractAnalysis: processed.analysis,
+    };
+  };
+
   return (
     <ProjectEditorWizard
       mode="admin"
@@ -150,6 +182,9 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
         { id: 'save', label: '프로젝트 저장', icon: Save },
       ]}
       busyActionId={busyActionId}
+      onContractFileUpload={handleContractFileUpload}
+      contractAnalysisMergeMode="none"
+      canRemoveContractDocument
       onCancel={() => navigate(editProject ? `/projects/${editProject.id}` : '/projects')}
       onSubmit={(draft, actionId) => void handleSubmit(draft, actionId)}
     />

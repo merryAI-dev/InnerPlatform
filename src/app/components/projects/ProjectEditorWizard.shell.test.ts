@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const source = readFileSync(resolve(import.meta.dirname, 'ProjectEditorWizard.tsx'), 'utf8');
+const adminWizardSource = readFileSync(resolve(import.meta.dirname, 'ProjectWizard.tsx'), 'utf8');
 
 describe('ProjectEditorWizard dropdown contract', () => {
   it('renders editor dropdowns from canonical option maps instead of surface-local labels', () => {
@@ -104,11 +105,22 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('handleContractDocumentSelect');
     expect(source).toContain('MAX_CONTRACT_UPLOAD_SIZE_BYTES');
     expect(source).toContain('mergeContractAnalysisIntoDraft');
+    expect(source).toContain('contractAnalysisMergeMode');
+    expect(source).toContain("contractAnalysisMergeMode === 'none'");
+    expect(source).toContain('입력값은 자동으로 바꾸지 않습니다.');
     expect(source).toContain('계약서 업로드');
     expect(source).toContain('계약서 교체');
     expect(source).toContain('첨부 제거');
     expect(source).toContain('canRemoveContractDocument');
     expect(source).toContain('기존 계약서는 관리자 화면에서만 제거할 수 있습니다.');
     expect(source).toContain('교체 취소');
+  });
+
+  it('wires admin project editor to contract upload without automatic analysis merge', () => {
+    expect(adminWizardSource).toContain('processProjectRequestContractViaBff');
+    expect(adminWizardSource).toContain('handleContractFileUpload');
+    expect(adminWizardSource).toContain('onContractFileUpload={handleContractFileUpload}');
+    expect(adminWizardSource).toContain('contractAnalysisMergeMode="none"');
+    expect(adminWizardSource).toContain('canRemoveContractDocument');
   });
 });

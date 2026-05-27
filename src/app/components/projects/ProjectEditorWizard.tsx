@@ -116,6 +116,7 @@ interface ProjectEditorWizardProps {
     contractDocument: ProjectEditorDraft['contractDocument'];
     contractAnalysis: ProjectRequestContractAnalysis | null;
   }>;
+  contractAnalysisMergeMode?: 'fill-empty' | 'none';
   canRemoveContractDocument?: boolean;
   onCancel?: () => void;
   onSubmit: (draft: ProjectEditorDraft, actionId: string) => void | Promise<void>;
@@ -353,6 +354,7 @@ export function ProjectEditorWizard({
   actions,
   busyActionId,
   onContractFileUpload,
+  contractAnalysisMergeMode = 'fill-empty',
   canRemoveContractDocument,
   onCancel,
   onSubmit,
@@ -485,11 +487,16 @@ export function ProjectEditorWizard({
     setContractUploadError('');
     try {
       const processed = await onContractFileUpload(file);
-      setDraft((prev) => mergeContractAnalysisIntoDraft(createProjectEditorWizardDraft({
-        ...prev,
-        contractDocument: processed.contractDocument,
-        contractAnalysis: processed.contractAnalysis,
-      }), processed.contractAnalysis));
+      setDraft((prev) => {
+        const nextDraft = createProjectEditorWizardDraft({
+          ...prev,
+          contractDocument: processed.contractDocument,
+          contractAnalysis: processed.contractAnalysis,
+        });
+        return contractAnalysisMergeMode === 'none'
+          ? nextDraft
+          : mergeContractAnalysisIntoDraft(nextDraft, processed.contractAnalysis);
+      });
       setContractUploadState('ready');
       toast.success(`계약서 PDF 업로드 및 분석 완료: ${file.name}`);
     } catch (error) {
@@ -652,7 +659,9 @@ export function ProjectEditorWizard({
                 <Label className="text-xs font-semibold">계약서 PDF</Label>
               </div>
               <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
-                PDF를 올리면 계약명, 계약기간, 계약금액, 계약 대상 후보를 읽어와 빈 항목만 채웁니다.
+                {contractAnalysisMergeMode === 'none'
+                  ? 'PDF를 올리면 계약서 원문과 검토용 첨부를 저장합니다. 입력값은 자동으로 바꾸지 않습니다.'
+                  : 'PDF를 올리면 계약명, 계약기간, 계약금액, 계약 대상 후보를 읽어와 빈 항목만 채웁니다.'}
               </p>
               {draft.contractDocument ? (
                 <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px]">
