@@ -281,10 +281,6 @@ function normalizeAmounts(amounts) {
   return normalized;
 }
 
-function clearedAmounts() {
-  return Object.fromEntries(CASHFLOW_ALL_LINES.map((lineId) => [lineId, 0]));
-}
-
 function weekKey(week) {
   return `${week.yearMonth}:w${week.weekNo}`;
 }
@@ -318,21 +314,14 @@ export function buildCashflowActualSyncPlan({ rows, previousWeekKeys = [], ancho
   const payload = Array.from(weekLabels)
     .map((key) => {
       const week = parseWeekKey(key);
-      return week ? { ...week, key, amounts: { ...clearedAmounts(), ...(byWeek.get(key) || {}) } } : null;
+      return week ? { ...week, key, amounts: { ...(byWeek.get(key) || {}) } } : null;
     })
     .filter(Boolean)
     .sort((a, b) => a.yearMonth.localeCompare(b.yearMonth) || a.weekNo - b.weekNo);
 
-  const currentKeys = new Set(payload.map((week) => week.key));
-  const clearedWeeks = Array.from(new Set(previousWeekKeys || []))
-    .filter((key) => !currentKeys.has(key))
-    .map((key) => parseWeekKey(key))
-    .filter(Boolean)
-    .map((week) => ({ ...week, key: weekKey(week), amounts: clearedAmounts() }));
-
   return {
     weeks: payload,
-    clearedWeeks,
+    clearedWeeks: [],
     weekKeys: payload.map((week) => week.key),
   };
 }

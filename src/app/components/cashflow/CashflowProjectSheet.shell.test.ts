@@ -22,7 +22,8 @@ describe('CashflowProjectSheet actual sync flow', () => {
 
   it('saves visible month values instead of draft-only input changes', () => {
     expect(cashflowProjectSheetSource).toContain('persistWeekValues');
-    expect(cashflowProjectSheetSource).toContain('getEffectiveAmount({ yearMonth, mode: input.mode');
+    expect(cashflowProjectSheetSource).toContain('persisted.hasValue');
+    expect(cashflowProjectSheetSource).toContain('parseAmount(drafts[cellKey])');
     expect(cashflowProjectSheetSource).toContain('await persistWeekValues({ weekNo, mode: targetMode })');
     expect(cashflowProjectSheetSource).not.toContain('저장할 변경사항이 없습니다.');
   });

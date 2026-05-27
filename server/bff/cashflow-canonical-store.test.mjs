@@ -39,7 +39,7 @@ describe('cashflow canonical BFF helpers', () => {
     expect(parseCashflowLineLabel('MYSC인건비')).toBe('MYSC_LABOR_OUT');
   });
 
-  it('aggregates actuals from persisted expense rows and clears stale managed weeks', () => {
+  it('aggregates actuals from persisted expense rows without injecting zero lines', () => {
     const plan = buildCashflowActualSyncPlan({
       anchorYear: 2026,
       previousWeekKeys: ['2026-05:w1', '2026-05:w2'],
@@ -65,9 +65,8 @@ describe('cashflow canonical BFF helpers', () => {
     expect(plan.weeks[0].amounts.MYSC_LABOR_OUT).toBe(48064130);
     expect(plan.weeks[0].amounts.DIRECT_COST_OUT).toBe(3620183);
     expect(plan.weeks[0].amounts.INPUT_VAT_OUT).toBe(17239);
-    expect(plan.clearedWeeks).toHaveLength(1);
-    expect(plan.clearedWeeks[0]).toMatchObject({ yearMonth: '2026-05', weekNo: 2 });
-    expect(plan.clearedWeeks[0].amounts.MYSC_LABOR_OUT).toBe(0);
+    expect(plan.weeks[0].amounts).not.toHaveProperty('SALES_IN');
+    expect(plan.clearedWeeks).toHaveLength(0);
   });
 
   it('treats bank-imported expense rows on inflow lines as negative adjustments', () => {

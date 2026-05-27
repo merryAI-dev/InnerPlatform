@@ -448,10 +448,29 @@ export function CashflowProjectSheet({
     if (!canEdit && input.mode === 'actual') return;
 
     const wkKey = resolveWeekKey({ yearMonth, mode: input.mode, weekNo: input.weekNo });
-    const amounts = Object.fromEntries(CASHFLOW_ALL_LINES.map((lineId) => [
-      lineId,
-      getEffectiveAmount({ yearMonth, mode: input.mode, weekNo: input.weekNo, lineId }),
-    ])) as Partial<Record<CashflowSheetLineId, number>>;
+    const doc = byWeekNo.get(input.weekNo);
+    const amounts: Partial<Record<CashflowSheetLineId, number>> = {};
+    for (const lineId of CASHFLOW_ALL_LINES) {
+      const cellKey = resolveCellKey({ yearMonth, mode: input.mode, weekNo: input.weekNo, lineId });
+      if (Object.prototype.hasOwnProperty.call(drafts, cellKey)) {
+        amounts[lineId] = parseAmount(drafts[cellKey]);
+        continue;
+      }
+
+      const persisted = getPersistedCell({ doc, mode: input.mode, lineId });
+      if (persisted.hasValue) {
+        amounts[lineId] = persisted.amount;
+      }
+    }
+
+    if (Object.keys(amounts).length === 0) {
+      setWeekSaveState((prev) => {
+        const next = { ...prev };
+        delete next[wkKey];
+        return next;
+      });
+      return;
+    }
 
     setWeekSaveState((prev) => ({ ...prev, [wkKey]: 'saving' }));
     try {
@@ -485,8 +504,9 @@ export function CashflowProjectSheet({
       throw error;
     }
   }, [
+    byWeekNo,
     canEdit,
-    getEffectiveAmount,
+    drafts,
     onUpdateWeeklySubmissionStatus,
     projectId,
     resolveCellKey,
