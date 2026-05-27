@@ -67,15 +67,26 @@ describe('Firebase auth domain proxy', () => {
     expect(resolveFirebaseAuthDomain(
       'mysc-bmp-14173451.firebaseapp.com',
       {
-        VITE_FIREBASE_AUTH_ALLOWED_HOSTS: 'inner-platform-git-dev-merryai-devs-projects.vercel.app',
+        VITE_FIREBASE_AUTH_PROXY_HOSTS: 'inner-platform-git-dev-merryai-devs-projects.vercel.app',
       },
       { hostname: 'localhost' },
     )).toBe('mysc-bmp-14173451.firebaseapp.com');
   });
 
-  it('uses the current app host as authDomain only for configured fixed auth hosts', () => {
+  it('keeps the configured Firebase auth domain on fixed auth hosts unless proxy is explicitly configured', () => {
+    expect(resolveFirebaseAuthDomain(
+      'mysc-bmp-14173451.firebaseapp.com',
+      {
+        VITE_FIREBASE_AUTH_ALLOWED_HOSTS: 'inner-platform-git-dev-merryai-devs-projects.vercel.app',
+      },
+      { hostname: 'inner-platform-git-dev-merryai-devs-projects.vercel.app' },
+    )).toBe('mysc-bmp-14173451.firebaseapp.com');
+  });
+
+  it('uses the current app host as authDomain only for explicit proxy hosts', () => {
     const env = {
       VITE_FIREBASE_AUTH_ALLOWED_HOSTS: 'inner-platform-git-dev-merryai-devs-projects.vercel.app',
+      VITE_FIREBASE_AUTH_PROXY_HOSTS: 'inner-platform-git-dev-merryai-devs-projects.vercel.app',
       VITE_FIREBASE_AUTH_PROXY_HELPER_ON_ALLOWED_HOSTS: 'true',
     };
 
@@ -101,6 +112,8 @@ describe('Firebase auth domain proxy', () => {
       VITE_FIREBASE_MESSAGING_SENDER_ID: 'env-msg',
       VITE_FIREBASE_APP_ID: 'env-app',
       VITE_FIREBASE_AUTH_ALLOWED_HOSTS: 'inner-platform-git-dev-merryai-devs-projects.vercel.app',
+      VITE_FIREBASE_AUTH_PROXY_HOSTS: 'inner-platform-git-dev-merryai-devs-projects.vercel.app',
+      VITE_FIREBASE_AUTH_PROXY_HELPER_ON_ALLOWED_HOSTS: 'true',
     }, {
       hostname: 'inner-platform-git-dev-merryai-devs-projects.vercel.app',
     });

@@ -86,13 +86,7 @@ export function shouldEnableFirebaseEmulatorsForLocation(locationLike?: Location
 }
 
 function getFirebaseAuthProxyHosts(env: Record<string, unknown>): string[] {
-  const hosts = new Set([
-    ...parseHostList(env.VITE_FIREBASE_AUTH_ALLOWED_HOSTS),
-    ...parseHostList(env.VITE_FIREBASE_AUTH_PROXY_HOSTS),
-  ]);
-  const fallbackUrl = normalizeString(env.VITE_FIREBASE_AUTH_FALLBACK_URL);
-  if (fallbackUrl) hosts.add(normalizeHost(fallbackUrl));
-  return Array.from(hosts);
+  return parseHostList(env.VITE_FIREBASE_AUTH_PROXY_HOSTS);
 }
 
 export function resolveFirebaseAuthDomain(
@@ -102,7 +96,7 @@ export function resolveFirebaseAuthDomain(
 ): string {
   const configured = normalizeString(configuredAuthDomain);
   const currentHost = getLocationHostname(locationLike);
-  const proxyEnabled = parseFeatureFlag(env.VITE_FIREBASE_AUTH_PROXY_HELPER_ON_ALLOWED_HOSTS, true);
+  const proxyEnabled = parseFeatureFlag(env.VITE_FIREBASE_AUTH_PROXY_HELPER_ON_ALLOWED_HOSTS, false);
   if (!proxyEnabled || !currentHost || isLoopbackDevHostname(currentHost)) return configured;
   if (!getFirebaseAuthProxyHosts(env).includes(currentHost)) return configured;
   return currentHost;
