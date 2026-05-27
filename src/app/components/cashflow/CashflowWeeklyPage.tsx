@@ -53,7 +53,7 @@ export function CashflowWeeklyPage() {
   }, [weeks, yearMonth]);
 
   function openProject(projectId: string) {
-    navigate(`/cashflow/projects/${projectId}?ym=${encodeURIComponent(yearMonth)}`);
+    navigate(`/cashflow/projects/${projectId}?ym=${encodeURIComponent(yearMonth)}&view=projection`);
   }
 
   return (
@@ -89,7 +89,7 @@ export function CashflowWeeklyPage() {
                       <div className="text-[9px] text-muted-foreground mt-0.5">{w.weekStart}~{w.weekEnd}</div>
                     </th>
                   ))}
-                  <th className="px-4 py-2 text-right" style={{ fontWeight: 700, minWidth: 120 }}>바로가기</th>
+                  <th className="px-4 py-2 text-right" style={{ fontWeight: 700, minWidth: 120 }}>프로젝션 바로가기</th>
                 </tr>
               </thead>
               <tbody>
@@ -158,7 +158,7 @@ export function CashflowWeeklyPage() {
                         onClick={() => openProject(p.id)}
                       >
                         <ExternalLink className="w-3.5 h-3.5" />
-                        열기
+                        프로젝션 열기
                       </Button>
                     </td>
                   </tr>

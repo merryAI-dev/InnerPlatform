@@ -66,12 +66,14 @@ export function CashflowProjectSheet({
   projectName,
   transactions,
   roleOverride,
+  initialViewMode = 'compare',
   onUpdateWeeklySubmissionStatus,
 }: {
   projectId: string;
   projectName: string;
   transactions: Transaction[];
   roleOverride?: UserRole | string;
+  initialViewMode?: 'projection' | 'actual' | 'compare';
   onUpdateWeeklySubmissionStatus?: (input: {
     projectId: string;
     yearMonth: string;
@@ -137,7 +139,7 @@ export function CashflowProjectSheet({
 
   // ── Actual: Firestore cashflow_weeks actual 값 사용 ──
 
-  const [viewMode, setViewMode] = useState<'projection' | 'actual' | 'compare'>('compare');
+  const [viewMode, setViewMode] = useState<'projection' | 'actual' | 'compare'>(initialViewMode);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
 
   type WeekSaveState = 'dirty' | 'saving' | 'error' | 'saved';

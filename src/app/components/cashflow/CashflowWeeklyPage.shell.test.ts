@@ -30,4 +30,10 @@ describe('CashflowWeeklyPage status semantics', () => {
     expect(cashflowWeeklyPageSource).toContain('빨간색</span>=미작성');
     expect(cashflowWeeklyPageSource).toContain('bg-red-50 dark:bg-red-950/30');
   });
+
+  it('opens project cashflow directly on the projection tab', () => {
+    expect(cashflowWeeklyPageSource).toContain('&view=projection');
+    expect(cashflowWeeklyPageSource).toContain('프로젝션 바로가기');
+    expect(cashflowWeeklyPageSource).toContain('프로젝션 열기');
+  });
 });

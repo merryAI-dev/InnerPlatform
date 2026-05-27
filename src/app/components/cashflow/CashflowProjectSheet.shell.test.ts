@@ -51,6 +51,11 @@ describe('CashflowProjectSheet actual sync flow', () => {
     expect(cashflowProjectSheetSource).not.toContain('Projection 저장');
   });
 
+  it('can initialize directly on the projection tab from routing', () => {
+    expect(cashflowProjectSheetSource).toContain("initialViewMode = 'compare'");
+    expect(cashflowProjectSheetSource).toContain("useState<'projection' | 'actual' | 'compare'>(initialViewMode)");
+  });
+
   it('loads cashflow weeks directly from Firestore year range without project assignment gating', () => {
     expect(cashflowWeeksStoreSource).toContain("where('yearMonth', '>=', carryForwardYearStart)");
     expect(cashflowWeeksStoreSource).toContain("where('yearMonth', '<=', selectedYearEnd)");

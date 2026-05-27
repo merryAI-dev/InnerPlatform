@@ -11,6 +11,10 @@ export function ProjectCashflowSheetPage() {
   const { setYearMonth } = useCashflowWeeks();
 
   const ym = searchParams.get('ym') || '';
+  const viewParam = searchParams.get('view');
+  const initialViewMode = viewParam === 'projection' || viewParam === 'actual' || viewParam === 'compare'
+    ? viewParam
+    : 'compare';
 
   useEffect(() => {
     if (/^\d{4}-\d{2}$/.test(ym)) {
@@ -28,5 +32,12 @@ export function ProjectCashflowSheetPage() {
     );
   }
 
-  return <CashflowProjectSheet projectId={projectId} projectName={project.name} transactions={transactions} />;
+  return (
+    <CashflowProjectSheet
+      projectId={projectId}
+      projectName={project.name}
+      transactions={transactions}
+      initialViewMode={initialViewMode}
+    />
+  );
 }
