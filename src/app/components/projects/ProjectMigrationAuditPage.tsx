@@ -120,7 +120,7 @@ export function ProjectMigrationAuditPage({
   reviewScope = 'all',
 }: ProjectMigrationAuditPageProps = {}) {
   const { user: authUser } = useAuth();
-  const { projects, currentUser, updateProject } = useAppStore();
+  const { projects, currentUser, updateProject, trashProject } = useAppStore();
   const { db, isOnline, orgId } = useFirebase();
 
   const [requests, setRequests] = useState<ProjectRequest[]>([]);
@@ -216,6 +216,8 @@ export function ProjectMigrationAuditPage({
     const trimmedComment = reviewComment.trim();
     const reviewerName = currentUser?.name || authUser?.name || currentUser?.email || authUser?.email || '관리자';
     const reviewerId = currentUser?.uid || authUser?.uid || '';
+    const shouldTrashProject = actionMode === 'discard';
+    const trashReason = trimmedComment || 'CIC 대표 검토 중복·폐기';
     if (nextExecutiveStatus !== 'APPROVED' && !trimmedComment) {
       toast.error(actionMode === 'reject' ? '반려 사유를 입력해 주세요.' : '폐기 사유를 입력해 주세요.');
       return;
@@ -223,6 +225,10 @@ export function ProjectMigrationAuditPage({
 
     setActing(true);
     try {
+      if (shouldTrashProject && isPlatformApiEnabled() && authUser?.uid) {
+        await trashProject(activeRecord.project.id, trashReason);
+      }
+
       if (isPlatformApiEnabled() && authUser?.uid) {
         const response = await reviewProjectExecutiveStatusViaBff({
           tenantId: orgId,
@@ -258,6 +264,14 @@ export function ProjectMigrationAuditPage({
             reviewedAt: now,
             previousStatus: activeRecord.status,
           }),
+          ...(shouldTrashProject
+            ? {
+              trashedAt: now,
+              trashedById: reviewerId,
+              trashedByEmail: currentUser?.email || authUser?.email || null,
+              trashedReason: trashReason,
+            }
+            : {}),
           updatedAt: now,
         });
 

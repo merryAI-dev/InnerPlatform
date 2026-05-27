@@ -48,6 +48,14 @@ describe('ProjectMigrationAuditPage shell contract', () => {
     expect(detailSource).not.toContain('DetailFact label="검토 메모"');
   });
 
+  it('routes duplicate-discard decisions through the project trash flow', () => {
+    expect(pageSource).toContain('trashProject');
+    expect(pageSource).toContain("const shouldTrashProject = actionMode === 'discard'");
+    expect(pageSource).toContain('await trashProject(activeRecord.project.id, trashReason)');
+    expect(pageSource).toContain('trashedAt: now');
+    expect(pageSource).toContain('trashedReason: trashReason');
+  });
+
   it('shows the uploaded contract PDF next to analysis notes', () => {
     expect(detailSource).toContain('계약 분석 보조 정보');
     expect(detailSource).toContain('ContractDocumentPreview');

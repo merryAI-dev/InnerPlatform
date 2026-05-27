@@ -11,6 +11,12 @@ function extractFunction(name: string): string {
 }
 
 describe('project trash local state contract', () => {
+  it('does not seed live Firestore sessions with mock projects before remote data arrives', () => {
+    expect(source).toContain('const usesLocalSeedData = !featureFlags.firestoreCoreEnabled');
+    expect(source).toContain('useState<Project[]>(() => (usesLocalSeedData ? PROJECTS : []))');
+    expect(source).toContain('setProjects(usesLocalSeedData ? PROJECTS : [])');
+  });
+
   it('mirrors trash and restore success into local state even when Firestore is online', () => {
     const trashProject = extractFunction('trashProject');
     const restoreProject = extractFunction('restoreProject');

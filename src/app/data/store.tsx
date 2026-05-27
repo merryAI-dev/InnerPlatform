@@ -134,13 +134,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [platformApiEnabled, firestoreEnabled],
   );
 
-  const [projects, setProjects] = useState<Project[]>(PROJECTS);
-  const [ledgers, setLedgers] = useState<Ledger[]>(LEDGERS);
-  const [transactions, setTransactions] = useState<Transaction[]>(TRANSACTIONS);
-  const [comments, setComments] = useState<Comment[]>(COMMENTS);
-  const [evidences, setEvidences] = useState<Evidence[]>(EVIDENCES);
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>(AUDIT_LOGS);
-  const [participationEntries, setParticipationEntries] = useState<ParticipationEntry[]>(PARTICIPATION_ENTRIES);
+  const usesLocalSeedData = !featureFlags.firestoreCoreEnabled;
+  const [projects, setProjects] = useState<Project[]>(() => (usesLocalSeedData ? PROJECTS : []));
+  const [ledgers, setLedgers] = useState<Ledger[]>(() => (usesLocalSeedData ? LEDGERS : []));
+  const [transactions, setTransactions] = useState<Transaction[]>(() => (usesLocalSeedData ? TRANSACTIONS : []));
+  const [comments, setComments] = useState<Comment[]>(() => (usesLocalSeedData ? COMMENTS : []));
+  const [evidences, setEvidences] = useState<Evidence[]>(() => (usesLocalSeedData ? EVIDENCES : []));
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => (usesLocalSeedData ? AUDIT_LOGS : []));
+  const [participationEntries, setParticipationEntries] = useState<ParticipationEntry[]>(() => (usesLocalSeedData ? PARTICIPATION_ENTRIES : []));
   const [localMembers, setLocalMembers] = useState<Array<OrgMember & Record<string, unknown>>>(
     ORG_MEMBERS as Array<OrgMember & Record<string, unknown>>,
   );
@@ -231,14 +232,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     if (!firestoreEnabled || !db) {
       setDataSource('local');
-      setProjects(PROJECTS);
-      setLedgers(LEDGERS);
-      setTransactions(TRANSACTIONS);
-      setComments(COMMENTS);
-      setEvidences(EVIDENCES);
-      setAuditLogs(AUDIT_LOGS);
-      setParticipationEntries(PARTICIPATION_ENTRIES);
-      setLocalMembers(ORG_MEMBERS as Array<OrgMember & Record<string, unknown>>);
+      setProjects(usesLocalSeedData ? PROJECTS : []);
+      setLedgers(usesLocalSeedData ? LEDGERS : []);
+      setTransactions(usesLocalSeedData ? TRANSACTIONS : []);
+      setComments(usesLocalSeedData ? COMMENTS : []);
+      setEvidences(usesLocalSeedData ? EVIDENCES : []);
+      setAuditLogs(usesLocalSeedData ? AUDIT_LOGS : []);
+      setParticipationEntries(usesLocalSeedData ? PARTICIPATION_ENTRIES : []);
+      setLocalMembers(usesLocalSeedData ? ORG_MEMBERS as Array<OrgMember & Record<string, unknown>> : []);
       return;
     }
 
@@ -281,7 +282,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       unsubsRef.current.forEach((unsub) => unsub());
       unsubsRef.current = [];
     };
-  }, [firestoreEnabled, db, orgId]);
+  }, [firestoreEnabled, db, orgId, usesLocalSeedData]);
 
   useEffect(() => {
     if (firestoreEnabled || !featureFlags.etlStagingLocalEnabled) return;
