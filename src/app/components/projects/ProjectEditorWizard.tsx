@@ -140,6 +140,28 @@ const STEPS: Array<{
   { id: 'review', label: '검토 및 저장', icon: ClipboardList },
 ];
 
+const PROJECT_EDITOR_FORM_SURFACE_CLASS = [
+  '[&_[data-slot=input]]:border-slate-300',
+  '[&_[data-slot=input]]:bg-white',
+  '[&_[data-slot=input]]:shadow-[inset_0_1px_0_rgba(15,23,42,0.03)]',
+  '[&_[data-slot=input]]:focus-visible:border-slate-400',
+  '[&_[data-slot=input]]:focus-visible:ring-slate-200',
+  '[&_[data-slot=select-trigger]]:border',
+  '[&_[data-slot=select-trigger]]:border-slate-300',
+  '[&_[data-slot=select-trigger]]:bg-white',
+  '[&_[data-slot=select-trigger]]:shadow-[inset_0_1px_0_rgba(15,23,42,0.03)]',
+  '[&_[data-slot=select-trigger]]:focus-visible:border-slate-400',
+  '[&_[data-slot=select-trigger]]:focus-visible:ring-slate-200',
+  '[&_[data-slot=textarea]]:border-slate-300',
+  '[&_[data-slot=textarea]]:bg-white',
+  '[&_[data-slot=textarea]]:shadow-[inset_0_1px_0_rgba(15,23,42,0.03)]',
+  '[&_[data-slot=textarea]]:focus-visible:border-slate-400',
+  '[&_[data-slot=textarea]]:focus-visible:ring-slate-200',
+  '[&_[role=combobox]]:border-slate-300',
+  '[&_[role=combobox]]:bg-white',
+  '[&_[role=combobox]]:shadow-[inset_0_1px_0_rgba(15,23,42,0.03)]',
+].join(' ');
+
 function fmtKRW(value: number) {
   return value ? value.toLocaleString('ko-KR') : '0';
 }
@@ -1253,7 +1275,7 @@ export function ProjectEditorWizard({
             {step.label}
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-5">
+        <CardContent className={cn('space-y-5', PROJECT_EDITOR_FORM_SURFACE_CLASS)}>
           {renderStep()}
         </CardContent>
       </Card>
