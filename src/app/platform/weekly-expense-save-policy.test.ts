@@ -6,10 +6,10 @@ import {
 } from './weekly-expense-save-policy';
 
 describe('resolveWeeklyExpenseSavePolicy', () => {
-  it('enables idle autosave with cashflow sync after 120 seconds', () => {
+  it('enables near-realtime autosave with cashflow sync', () => {
     expect(resolveWeeklyExpenseSavePolicy()).toEqual({
       mode: 'auto',
-      idleMs: 120_000,
+      idleMs: 1_500,
       syncCashflowOnAutoSave: true,
       showStatusButton: true,
       showInlineStatus: false,

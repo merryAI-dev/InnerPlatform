@@ -21,4 +21,11 @@ describe('route-aware firestore realtime providers', () => {
       expect(source).not.toContain('canUseRealtimeListeners(');
     });
   }
+
+  it('keeps cashflow weeks realtime for project-scoped users so actual values do not go stale', () => {
+    const source = readFileSync(resolve(import.meta.dirname, 'cashflow-weeks-store.tsx'), 'utf8');
+
+    expect(source).toContain('onSnapshot(q,');
+    expect(source).not.toContain('getDocs(q)');
+  });
 });
