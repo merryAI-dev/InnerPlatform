@@ -110,6 +110,7 @@ export function PortalWeeklyExpensePage() {
     saveBudgetPlanRows,
     saveBudgetCodeBook,
     markSheetSourceApplied,
+    weeklySubmissionStatuses,
     upsertWeeklySubmissionStatus,
   } = usePortalStore();
   const { submitWeekAsPm, upsertWeekAmounts } = useCashflowWeeks();
@@ -974,6 +975,7 @@ export function PortalWeeklyExpensePage() {
           onPreviewActualSyncPayload={previewActualSyncWithLocalKernel}
           onDirtyStateChange={setHasUnsavedSettlementChanges}
           onSavingStateChange={setIsSettlementSaving}
+          weeklySubmissionStatuses={weeklySubmissionStatuses}
           discardChangesRequestToken={0}
         />
       </Suspense>

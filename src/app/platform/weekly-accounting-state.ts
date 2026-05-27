@@ -1,6 +1,5 @@
 import type { CashflowWeekSheet, WeeklySubmissionStatus } from '../data/types';
 import type { ImportRow } from './settlement-csv';
-import { countPendingImportRowReviews } from './settlement-review';
 
 export type WeeklyExpenseSyncState = 'idle' | 'pending' | 'review_required' | 'synced' | 'sync_failed';
 export type WeeklyAccountingSheetRowsHydrationReason =
@@ -142,7 +141,7 @@ function deriveHydratedSheetRowsState(
   }
   return {
     saveState: 'saved',
-    syncState: countPendingImportRowReviews(rows) > 0 ? 'review_required' : 'synced',
+    syncState: 'synced',
   };
 }
 
