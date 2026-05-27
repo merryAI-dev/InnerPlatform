@@ -1601,7 +1601,7 @@ export function ImportEditor({
           </div>
           <div className="shrink-0 text-right text-[11px] text-muted-foreground">
             <div>행 왼쪽 배지에서 출처를 확인할 수 있습니다.</div>
-            <div>사람 확인이 필요한 후보값은 확인 완료 전까지 캐시플로 반영이 보류됩니다.</div>
+            <div>입력한 값은 저장 시 캐시플로 actual에 바로 반영됩니다.</div>
             {onToggleFullscreen && (
               <Button
                 variant="outline"

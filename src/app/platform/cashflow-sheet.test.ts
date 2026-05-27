@@ -3,6 +3,8 @@ import type { Transaction } from '../data/types';
 import type { MonthMondayWeek } from './cashflow-weeks';
 import {
   aggregateTransactionsToActual,
+  computeCashflowDerivedTotals,
+  computeOpeningCashflowTotals,
   computeCashflowTotals,
   hasAnyCashflowKeys,
   mapCategoryToSheetLine,
@@ -125,6 +127,95 @@ describe('computeCashflowTotals', () => {
   it('treats NaN-coercible values as 0', () => {
     const sheet = { SALES_IN: undefined } as unknown as Record<string, number>;
     expect(computeCashflowTotals(sheet)).toEqual({ totalIn: 0, totalOut: 0, net: 0 });
+  });
+});
+
+describe('computeCashflowDerivedTotals', () => {
+  it('keeps weekly in/out totals scoped to each week while balance carries opening totals', () => {
+    const result = computeCashflowDerivedTotals({
+      openingIn: 565_442_002,
+      openingOut: 7_639_093,
+      weeks: [
+        {
+          weekNo: 1,
+          amounts: {
+            MYSC_PREPAY_IN: -8_615_904,
+            DIRECT_COST_OUT: 3_620_183,
+            INPUT_VAT_OUT: 17_239,
+            MYSC_LABOR_OUT: 48_064_130,
+          },
+        },
+        { weekNo: 2, amounts: {} },
+      ],
+    });
+
+    expect(result.weekTotals[0]).toMatchObject({
+      totalIn: -8_615_904,
+      totalOut: 51_701_552,
+      net: 497_485_453,
+    });
+    expect(result.weekTotals[1]).toMatchObject({
+      totalIn: 0,
+      totalOut: 0,
+      net: 497_485_453,
+    });
+    expect(result.monthTotals).toEqual({
+      totalIn: -8_615_904,
+      totalOut: 51_701_552,
+      net: 497_485_453,
+    });
+  });
+});
+
+describe('computeOpeningCashflowTotals', () => {
+  it('carries previous-year balances into January', () => {
+    const weeks = [
+      {
+        id: 'p1-2026-12-w5',
+        tenantId: 'mysc',
+        projectId: 'p1',
+        yearMonth: '2026-12',
+        weekNo: 5,
+        weekStart: '2026-12-23',
+        weekEnd: '2026-12-29',
+        projection: { SALES_IN: 50_000_000, DIRECT_COST_OUT: 10_000_000 },
+        actual: { SALES_IN: 40_000_000, DIRECT_COST_OUT: 8_000_000 },
+        pmSubmitted: false,
+        adminClosed: false,
+        createdAt: '',
+        updatedAt: '',
+        updatedByUid: '',
+        updatedByName: '',
+      },
+      {
+        id: 'p1-2027-01-w1',
+        tenantId: 'mysc',
+        projectId: 'p1',
+        yearMonth: '2027-01',
+        weekNo: 1,
+        weekStart: '2026-12-30',
+        weekEnd: '2027-01-05',
+        projection: { DIRECT_COST_OUT: 5_000_000 },
+        actual: { DIRECT_COST_OUT: 3_000_000 },
+        pmSubmitted: false,
+        adminClosed: false,
+        createdAt: '',
+        updatedAt: '',
+        updatedByUid: '',
+        updatedByName: '',
+      },
+    ] as any[];
+
+    expect(computeOpeningCashflowTotals({
+      weeks,
+      projectId: 'p1',
+      yearMonth: '2027-01',
+    })).toEqual({
+      projectionIn: 50_000_000,
+      projectionOut: 10_000_000,
+      actualIn: 40_000_000,
+      actualOut: 8_000_000,
+    });
   });
 });
 

@@ -149,12 +149,19 @@ export function resolveSettlementFlowSnapshot(
 
   let cashflowActualLineAmounts: Partial<Record<string, number>> = {};
   if (isInflowLine) {
+    const outflowAdjustmentAmount = amounts.expenseAmount < 0
+      ? amounts.expenseAmount
+      : row.entryKind === 'EXPENSE' && amounts.depositAmount <= 0 && amounts.refundAmount <= 0 && amounts.bankAmount > 0
+        ? -amounts.bankAmount
+        : 0;
     const inflowAmount = amounts.depositAmount > 0
       ? amounts.depositAmount
       : amounts.refundAmount > 0
         ? amounts.refundAmount
         : amounts.bankAmount;
-    cashflowActualLineAmounts = inflowAmount > 0 ? { [amounts.lineId]: inflowAmount } : {};
+    cashflowActualLineAmounts = outflowAdjustmentAmount < 0
+      ? { [amounts.lineId]: outflowAdjustmentAmount }
+      : inflowAmount > 0 ? { [amounts.lineId]: inflowAmount } : {};
   } else if (amounts.lineId === 'INPUT_VAT_OUT') {
     cashflowActualLineAmounts = amounts.vatIn > 0 ? { INPUT_VAT_OUT: amounts.vatIn } : {};
   } else {

@@ -26,6 +26,20 @@ describe('SettlementLedgerPage direct-entry workbook flow', () => {
   });
 
   it('emits a separate saving-state signal while the sheet save request is in flight', () => {
-    expect(settlementLedgerSource).toContain("onSavingStateChange?.(sheetSaveState === 'saving')");
+    expect(settlementLedgerSource).toContain("onSavingStateChange?.(sheetSaveState === 'saving' || cashflowSyncing)");
+  });
+
+  it('does not keep a human-review queue between expense saves and cashflow actual sync', () => {
+    expect(settlementLedgerSource).toContain('const syncableWeeks = payload;');
+    expect(settlementLedgerSource).not.toContain('const syncableWeeks = payload.filter((week) => !blockedWeeks.includes(week));');
+    expect(settlementLedgerSource).not.toContain("expenseSyncState: 'review_required'");
+    expect(settlementLedgerSource).toContain("expenseSyncState: 'synced'");
+  });
+
+  it('uses persisted weekly sync status to resume pending cashflow updates after returning to the page', () => {
+    expect(settlementLedgerSource).toContain('weeklySubmissionStatuses?: WeeklySubmissionStatus[]');
+    expect(settlementLedgerSource).toContain('resolveCashflowSyncStateFromStatuses');
+    expect(settlementLedgerSource).toContain("cashflowSyncState !== 'pending' && cashflowSyncState !== 'sync_failed'");
+    expect(settlementLedgerSource).toContain("void syncImportRowsToCashflow(importRows, { silent: true });");
   });
 });

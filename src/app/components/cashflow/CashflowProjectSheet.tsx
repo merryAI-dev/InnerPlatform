@@ -29,7 +29,7 @@ import {
   type WeeklySubmissionStatus,
 } from '../../data/types';
 import { getSeoulTodayIso } from '../../platform/business-days';
-import { CASHFLOW_ALL_LINES, CASHFLOW_IN_LINES, CASHFLOW_OUT_LINES, computeCashflowTotals } from '../../platform/cashflow-sheet';
+import { CASHFLOW_ALL_LINES, CASHFLOW_IN_LINES, CASHFLOW_OUT_LINES, computeCashflowDerivedTotals, computeOpeningCashflowTotals } from '../../platform/cashflow-sheet';
 import { getMonthMondayWeeks } from '../../platform/cashflow-weeks';
 import { resolveWeeklyAccountingState } from '../../platform/weekly-accounting-state';
 import { useAuth } from '../../data/auth-store';
@@ -126,37 +126,11 @@ export function CashflowProjectSheet({
   }, [projectWeeks]);
 
   const openingTotalsByMode = useMemo(() => {
-    function ymToNumber(value: string): number | null {
-      const [y, m] = value.split('-');
-      const yy = Number.parseInt(y, 10);
-      const mm = Number.parseInt(m, 10);
-      if (!Number.isFinite(yy) || !Number.isFinite(mm)) return null;
-      return yy * 100 + mm;
-    }
-
-    const currentYmNum = ymToNumber(normalizedYearMonth);
-    const currentYear = currentYmNum ? Math.trunc(currentYmNum / 100) : null;
-    let projectionIn = 0;
-    let projectionOut = 0;
-    let actualIn = 0;
-    let actualOut = 0;
-
-    for (const w of weeks) {
-      if (w.projectId !== projectId) continue;
-      const ymRaw = typeof w.yearMonth === 'string' ? w.yearMonth : '';
-      const ymNum = ymToNumber(ymRaw);
-      if (!ymNum || !currentYear || !currentYmNum) continue;
-      if (Math.trunc(ymNum / 100) !== currentYear) continue;
-      if (ymNum >= currentYmNum) continue;
-      const p = computeCashflowTotals(w.projection);
-      const a = computeCashflowTotals(w.actual);
-      projectionIn += p.totalIn;
-      projectionOut += p.totalOut;
-      actualIn += a.totalIn;
-      actualOut += a.totalOut;
-    }
-
-    return { projectionIn, projectionOut, actualIn, actualOut };
+    return computeOpeningCashflowTotals({
+      weeks,
+      projectId,
+      yearMonth: normalizedYearMonth,
+    });
   }, [normalizedYearMonth, projectId, weeks]);
 
 
@@ -276,32 +250,19 @@ export function CashflowProjectSheet({
 
   const derivedByMode = useMemo(() => {
     function compute(mode: 'projection' | 'actual') {
-      const rowTotals: Record<CashflowSheetLineId, number> = Object.fromEntries(CASHFLOW_ALL_LINES.map((id) => [id, 0])) as any;
       const openingIn = mode === 'projection' ? openingTotalsByMode.projectionIn : openingTotalsByMode.actualIn;
       const openingOut = mode === 'projection' ? openingTotalsByMode.projectionOut : openingTotalsByMode.actualOut;
-      let runningIn = openingIn;
-      let runningOut = openingOut;
-      const weekTotals = monthWeeks.map((def) => {
-        const weekIn = CASHFLOW_IN_LINES.reduce((acc, id) => acc + getEffectiveAmount({ yearMonth, mode, weekNo: def.weekNo, lineId: id }), 0);
-        const weekOut = CASHFLOW_OUT_LINES.reduce((acc, id) => acc + getEffectiveAmount({ yearMonth, mode, weekNo: def.weekNo, lineId: id }), 0);
-        runningIn += weekIn;
-        runningOut += weekOut;
-        return { weekNo: def.weekNo, totalIn: runningIn, totalOut: runningOut, net: runningIn - runningOut, weekIn, weekOut };
+      return computeCashflowDerivedTotals({
+        openingIn,
+        openingOut,
+        weeks: monthWeeks.map((def) => ({
+          weekNo: def.weekNo,
+          amounts: Object.fromEntries(CASHFLOW_ALL_LINES.map((lineId) => [
+            lineId,
+            getEffectiveAmount({ yearMonth, mode, weekNo: def.weekNo, lineId }),
+          ])) as Partial<Record<CashflowSheetLineId, number>>,
+        })),
       });
-
-      for (const lineId of CASHFLOW_ALL_LINES) {
-        for (const def of monthWeeks) {
-          rowTotals[lineId] += getEffectiveAmount({ yearMonth, mode, weekNo: def.weekNo, lineId });
-        }
-      }
-
-      const totalIn = weekTotals.length ? weekTotals[weekTotals.length - 1].totalIn : openingIn;
-      const totalOut = weekTotals.length ? weekTotals[weekTotals.length - 1].totalOut : openingOut;
-      return {
-        rowTotals,
-        weekTotals,
-        monthTotals: { totalIn, totalOut, net: totalIn - totalOut },
-      };
     }
 
     return {

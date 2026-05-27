@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ImportRow } from './settlement-csv';
+import { getYearMondayWeeks } from './cashflow-weeks';
 import { buildSettlementActualSyncPayload } from './settlement-sheet-sync';
 
 function createRow(cells: string[]): ImportRow {
@@ -199,6 +200,27 @@ describe('buildSettlementActualSyncPayload', () => {
 
     const currentWeek = payload.find((item) => item.yearMonth === '2026-03' && item.weekNo === 1);
     const clearedWeek = payload.find((item) => item.yearMonth === '2026-03' && item.weekNo === 2);
+    expect(currentWeek?.amounts.DIRECT_COST_OUT).toBe(10000);
+    expect(clearedWeek?.amounts.DIRECT_COST_OUT).toBe(0);
+  });
+
+  it('clears stale actuals when a saved row moves across a year boundary', () => {
+    const base = createEmptyCells();
+    const currentRows = [
+      createRow(withCell(withCell(withCell(base, 2, '2027-01-07'), 3, '27-1-2'), 8, '직접사업비').map((cell, index) => (
+        index === 10 ? '10,000' : cell
+      ))),
+    ];
+    const persistedRows = [
+      createRow(withCell(withCell(withCell(base, 2, '2026-12-23'), 3, '26-12-4'), 8, '직접사업비').map((cell, index) => (
+        index === 10 ? '20,000' : cell
+      ))),
+    ];
+
+    const payload = buildSettlementActualSyncPayload(currentRows, getYearMondayWeeks(2027), persistedRows);
+
+    const currentWeek = payload.find((item) => item.yearMonth === '2027-01' && item.weekNo === 2);
+    const clearedWeek = payload.find((item) => item.yearMonth === '2026-12' && item.weekNo === 4);
     expect(currentWeek?.amounts.DIRECT_COST_OUT).toBe(10000);
     expect(clearedWeek?.amounts.DIRECT_COST_OUT).toBe(0);
   });

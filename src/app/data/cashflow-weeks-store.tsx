@@ -23,7 +23,7 @@ import {
 } from 'firebase/firestore';
 import { useAuth } from './auth-store';
 import type { CashflowSheetLineId, CashflowWeekSheet, VarianceFlag, VarianceFlagEvent } from './types';
-import { filterCashflowWeeksForYear, shouldCreateDocOnUpdateError } from './cashflow-weeks.helpers';
+import { filterCashflowWeeksThroughSelectedYear, shouldCreateDocOnUpdateError } from './cashflow-weeks.helpers';
 import {
   buildCashflowWeekUpdatePatch,
   buildInitialCashflowWeekDoc,
@@ -135,12 +135,15 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     setIsLoading(true);
 
     const base = collection(db, getOrgCollectionPath(orgId, 'cashflowWeeks'));
+    const selectedYear = Number.parseInt(yearMonth.slice(0, 4), 10);
+    const carryForwardYearStart = `${Number.isFinite(selectedYear) ? selectedYear - 1 : yearMonth.slice(0, 4)}-01`;
+    const selectedYearEnd = `${yearMonth.slice(0, 4)}-12`;
     const q = readAll
       ? query(
         base,
-        where('yearMonth', '>=', `${yearMonth.slice(0, 4)}-01`),
-        where('yearMonth', '<=', `${yearMonth.slice(0, 4)}-12`),
-        limit(2500),
+        where('yearMonth', '>=', carryForwardYearStart),
+        where('yearMonth', '<=', selectedYearEnd),
+        limit(5000),
       )
       : (projectIds.length > 0
         ? (projectIds.length === 1
@@ -162,9 +165,13 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     if (readAll) {
       unsubsRef.current.push(
         onSnapshot(q, (snap) => {
-          const docs = snap.docs.map((d) => d.data() as CashflowWeekSheet);
+          const docs = filterCashflowWeeksThroughSelectedYear(
+            snap.docs.map((d) => d.data() as CashflowWeekSheet),
+            yearMonth,
+          );
           docs.sort((a, b) => {
             if (a.projectId !== b.projectId) return String(a.projectId).localeCompare(String(b.projectId));
+            if (a.yearMonth !== b.yearMonth) return String(a.yearMonth).localeCompare(String(b.yearMonth));
             return (a.weekNo || 0) - (b.weekNo || 0);
           });
           setWeeks(docs);
@@ -177,12 +184,13 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
       );
     } else {
       void getDocs(q).then((snap) => {
-        const docs = filterCashflowWeeksForYear(
+        const docs = filterCashflowWeeksThroughSelectedYear(
           snap.docs.map((d) => d.data() as CashflowWeekSheet),
           yearMonth,
         );
         docs.sort((a, b) => {
           if (a.projectId !== b.projectId) return String(a.projectId).localeCompare(String(b.projectId));
+          if (a.yearMonth !== b.yearMonth) return String(a.yearMonth).localeCompare(String(b.yearMonth));
           return (a.weekNo || 0) - (b.weekNo || 0);
         });
         setWeeks(docs);

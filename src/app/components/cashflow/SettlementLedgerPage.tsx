@@ -11,6 +11,7 @@ import type {
   SettlementSheetPolicy,
   Transaction,
   TransactionState,
+  WeeklySubmissionStatus,
 } from '../../data/types';
 import { resolveApiErrorMessage } from '../../platform/api-error-message';
 import { findWeekForDate, getYearMondayWeeks, type MonthMondayWeek } from '../../platform/cashflow-weeks';
@@ -62,7 +63,6 @@ import {
   writeImportDraftCache,
   clearImportDraftCache,
 } from '../../platform/settlement-draft-cache';
-import { countPendingImportRowReviews } from '../../platform/settlement-review';
 import { loadExcelJs, warmExcelJs } from '../../platform/lazy-heavy-modules';
 
 // ── Types ──
@@ -71,6 +71,24 @@ interface WeekBucket {
   week: MonthMondayWeek;
   transactions: Transaction[];
   collapsed: boolean;
+}
+
+type CashflowExpenseSyncState = 'idle' | 'pending' | 'syncing' | 'synced' | 'sync_failed';
+
+function resolveCashflowSyncStateFromStatuses(
+  payload: Array<{ yearMonth: string; weekNo: number }>,
+  statusMap: Map<string, WeeklySubmissionStatus>,
+): Exclude<CashflowExpenseSyncState, 'syncing'> | null {
+  if (payload.length === 0) return null;
+  let hasSynced = false;
+  for (const week of payload) {
+    const status = statusMap.get(`${week.yearMonth}:${week.weekNo}`);
+    const state = status?.expenseSyncState;
+    if (state === 'sync_failed') return 'sync_failed';
+    if (state === 'pending' || state === 'review_required' || !state) return 'pending';
+    if (state === 'synced') hasSynced = true;
+  }
+  return hasSynced ? 'synced' : null;
 }
 
 export interface SettlementLedgerProps {
@@ -140,6 +158,7 @@ export interface SettlementLedgerProps {
   ) => Promise<SettlementActualSyncWeekPayload[]>;
   onDirtyStateChange?: (dirty: boolean) => void;
   onSavingStateChange?: (saving: boolean) => void;
+  weeklySubmissionStatuses?: WeeklySubmissionStatus[];
   discardChangesRequestToken?: number;
   autoSaveIdleMs?: number;
   autoSaveSyncCashflow?: boolean;
@@ -188,6 +207,7 @@ export function SettlementLedgerPage({
   onPreviewActualSyncPayload,
   onDirtyStateChange,
   onSavingStateChange,
+  weeklySubmissionStatuses = [],
   discardChangesRequestToken = 0,
   autoSaveIdleMs = 60_000,
   autoSaveSyncCashflow = true,
@@ -204,7 +224,7 @@ export function SettlementLedgerPage({
   const [lastCashflowSyncedAt, setLastCashflowSyncedAt] = useState('');
   const [editorFullscreen, setEditorFullscreen] = useState(false);
   const [sheetSaveState, setSheetSaveState] = useState<'idle' | 'dirty' | 'saving' | 'saved' | 'save_failed'>('idle');
-  const [cashflowSyncState, setCashflowSyncState] = useState<'idle' | 'pending' | 'syncing' | 'synced' | 'sync_failed' | 'review_required'>('idle');
+  const [cashflowSyncState, setCashflowSyncState] = useState<CashflowExpenseSyncState>('idle');
   const [downloadFrom, setDownloadFrom] = useState('');
   const [downloadTo, setDownloadTo] = useState('');
   const [downloadPreparing, setDownloadPreparing] = useState(false);
@@ -214,6 +234,7 @@ export function SettlementLedgerPage({
   const restoredDraftCacheKeyRef = useRef('');
   const hasAppliedSheetRowsRef = useRef(false);
   const lastDiscardChangesRequestTokenRef = useRef(0);
+  const pendingCashflowSyncRetryKeyRef = useRef('');
   const pendingSheetRowsEchoSignatureRef = useRef<string | null>(null);
   const pendingSheetRowsSyncRef = useRef<{ rows: ImportRow[] | null; reason: WeeklyAccountingSheetRowsHydrationReason } | null>(null);
   const cloneImportRows = useCallback((input: ImportRow[]) => (
@@ -236,8 +257,14 @@ export function SettlementLedgerPage({
     () => `settlement-import-draft:${projectId}:${defaultLedgerId}:${year}`,
     [projectId, defaultLedgerId, year],
   );
-  const weekIdx = useMemo(() => SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '해당 주차'), []);
-  const dateIdx = useMemo(() => SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '거래일시'), []);
+  const weeklySubmissionStatusMap = useMemo(() => {
+    const map = new Map<string, WeeklySubmissionStatus>();
+    for (const status of weeklySubmissionStatuses) {
+      if (status.projectId !== projectId) continue;
+      map.set(`${status.yearMonth}:${status.weekNo}`, status);
+    }
+    return map;
+  }, [projectId, weeklySubmissionStatuses]);
   const budgetCodeIdx = useMemo(() => SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '비목'), []);
   const subCodeIdx = useMemo(() => SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '세목'), []);
   const subSubCodeIdx = useMemo(() => SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '세세목'), []);
@@ -320,16 +347,22 @@ export function SettlementLedgerPage({
     if (hydration.shouldReplaceRows) {
       setImportRows(cloneImportRows(incomingRows || []));
     }
+    const persistedSyncState = incomingRowsOrigin === 'persisted'
+      ? resolveCashflowSyncStateFromStatuses(
+        buildSettlementActualSyncPayloadLocally(incomingRows || [], yearWeeks, null),
+        weeklySubmissionStatusMap,
+      )
+      : null;
     setImportDirty(false);
     setSheetSaveState(hydration.nextSaveState);
-    setCashflowSyncState(hydration.nextSyncState);
+    setCashflowSyncState(persistedSyncState || hydration.nextSyncState);
     if (reason !== 'persistence_echo') {
       clearImportDraftCache(draftCacheKey);
     } else {
       pendingSheetRowsEchoSignatureRef.current = null;
     }
     hasAppliedSheetRowsRef.current = true;
-  }, [cashflowSyncState, cloneImportRows, draftCacheKey, importRows, projectTxs, sheetSaveState, yearWeeks]);
+  }, [cashflowSyncState, cloneImportRows, draftCacheKey, importRows, projectTxs, sheetSaveState, weeklySubmissionStatusMap, yearWeeks]);
 
   useEffect(() => {
     const nextSignature = serializeWeeklyAccountingImportRowsMaterially(sheetRows);
@@ -573,35 +606,6 @@ export function SettlementLedgerPage({
     }
   }, [buildExportMatrix, projectName, year]);
 
-  const resolveWeekLabelForImportRow = useCallback((row: ImportRow): string => {
-    const explicitLabel = weekIdx >= 0 ? String(row.cells[weekIdx] || '').trim() : '';
-    if (explicitLabel) return explicitLabel;
-    if (dateIdx < 0) return '';
-    const parsedDate = parseDate(String(row.cells[dateIdx] || '').trim());
-    if (!parsedDate) return '';
-    const dateOnly = parsedDate.slice(0, 10);
-    const dateYear = Number.parseInt(dateOnly.slice(0, 4), 10);
-    if (!Number.isFinite(dateYear)) return '';
-    const anchorYear = Number.parseInt(yearWeeks[0]?.yearMonth.slice(0, 4) || '', 10);
-    const matchedWeek = findWeekForDate(
-      dateOnly,
-      dateYear === anchorYear ? yearWeeks : getYearMondayWeeks(dateYear),
-    );
-    return matchedWeek?.label || '';
-  }, [dateIdx, weekIdx, yearWeeks]);
-
-  const buildPendingReviewCountsByWeek = useCallback((rows: ImportRow[]) => {
-    const counts = new Map<string, number>();
-    for (const row of rows) {
-      const isPending = (row.reviewHints?.length || 0) > 0 && row.reviewStatus !== 'confirmed';
-      if (!isPending) continue;
-      const weekLabel = resolveWeekLabelForImportRow(row);
-      if (!weekLabel) continue;
-      counts.set(weekLabel, (counts.get(weekLabel) || 0) + 1);
-    }
-    return counts;
-  }, [resolveWeekLabelForImportRow]);
-
   const buildPayloadWeekLabelMap = useCallback(() => {
     const labelMap = new Map<string, string>();
     for (const week of yearWeeks) {
@@ -678,18 +682,12 @@ export function SettlementLedgerPage({
     options?: { silent?: boolean },
   ) => {
     const silent = options?.silent ?? false;
-    const pendingReviewCount = countPendingImportRowReviews(rows);
-    const reviewCountsByWeekLabel = buildPendingReviewCountsByWeek(rows);
     const payload = onPreviewActualSyncPayload
       ? await onPreviewActualSyncPayload(rows, yearWeeks, sheetRows || null)
       : buildSettlementActualSyncPayloadLocally(rows, yearWeeks, sheetRows || null);
-    const weekLabelMap = buildPayloadWeekLabelMap();
-    const blockedWeeks = payload.filter((week) => (
-      reviewCountsByWeekLabel.get(weekLabelMap.get(`${week.yearMonth}:${week.weekNo}`) || '') || 0
-    ) > 0);
-    const syncableWeeks = payload.filter((week) => !blockedWeeks.includes(week));
+    const syncableWeeks = payload;
     setCashflowSyncing(true);
-    setCashflowSyncState(blockedWeeks.length > 0 ? 'review_required' : 'syncing');
+    setCashflowSyncState('syncing');
     try {
       let syncFailed = false;
       await Promise.all(
@@ -708,18 +706,10 @@ export function SettlementLedgerPage({
           }
         }),
       );
-      if (blockedWeeks.length > 0) {
-        await updateWeeklyStatusesForPayload(blockedWeeks, {
-          expenseUpdated: true,
-          expenseSyncState: 'review_required',
-          reviewCountsByWeekLabel,
-        });
-      }
       if (syncFailed) {
         await updateWeeklyStatusesForPayload(syncableWeeks, {
           expenseUpdated: true,
           expenseSyncState: 'sync_failed',
-          reviewCountsByWeekLabel,
         });
         setCashflowSyncState('sync_failed');
         if (!silent) toast.message('정산대장은 저장되었지만 캐시플로 업데이트에 실패했습니다.');
@@ -729,25 +719,18 @@ export function SettlementLedgerPage({
         await updateWeeklyStatusesForPayload(syncableWeeks, {
           expenseUpdated: true,
           expenseSyncState: 'synced',
-          reviewCountsByWeekLabel,
         });
       }
-      setCashflowSyncState(blockedWeeks.length > 0 ? 'review_required' : 'synced');
+      setCashflowSyncState('synced');
       setLastCashflowSyncedAt(new Date().toISOString());
       if (!silent) {
-        if (blockedWeeks.length > 0 && syncableWeeks.length > 0) {
-          toast.success(`검토가 끝난 ${syncableWeeks.length}개 주차는 캐시플로에 반영했고, ${blockedWeeks.length}개 주차는 사람 확인 상태로 남겼습니다.`);
-        } else if (blockedWeeks.length > 0) {
-          toast.message(`정산대장은 저장했고, 사람 확인 ${pendingReviewCount}건이 있는 주차는 검토 후 캐시플로에 반영됩니다.`);
-        } else {
-          toast.success('캐시플로 실제값까지 동기화했습니다.');
-        }
+        toast.success('캐시플로 실제값까지 동기화했습니다.');
       }
-      return blockedWeeks.length > 0 ? ('review_required' as const) : ('synced' as const);
+      return 'synced' as const;
     } finally {
       setCashflowSyncing(false);
     }
-  }, [buildPayloadWeekLabelMap, buildPendingReviewCountsByWeek, onPreviewActualSyncPayload, projectId, sheetRows, updateWeeklyStatusesForPayload, upsertWeekAmounts, yearWeeks]);
+  }, [onPreviewActualSyncPayload, projectId, sheetRows, updateWeeklyStatusesForPayload, upsertWeekAmounts, yearWeeks]);
 
   const handleImportSave = useCallback(async (options?: { silent?: boolean; syncCashflow?: boolean }) => {
     if (!importRows) return;
@@ -775,12 +758,19 @@ export function SettlementLedgerPage({
       toast.success(`작성본 ${persistedRows.length}건을 저장하고 캐시플로 actual까지 반영했습니다.`);
       return;
     }
-    if (syncOutcome === 'review_required') {
-      toast.message(`작성본 ${persistedRows.length}건을 저장했고, 사람 확인이 필요한 주차는 검토 후 actual에 반영됩니다.`);
-      return;
-    }
     toast.error(`작성본 ${persistedRows.length}건은 저장했지만 캐시플로 actual 반영은 다시 확인이 필요합니다.`);
   }, [cloneImportRows, persistImportRowsSnapshot, syncImportRowsToCashflow]);
+
+  useEffect(() => {
+    if (sheetSaveState !== 'saved') return;
+    if (importDirty || !importRows || importRows.length === 0) return;
+    if (cashflowSyncState !== 'pending' && cashflowSyncState !== 'sync_failed') return;
+    const signature = serializeWeeklyAccountingImportRowsMaterially(importRows);
+    const retryKey = `${draftCacheKey}:${cashflowSyncState}:${signature}`;
+    if (pendingCashflowSyncRetryKeyRef.current === retryKey) return;
+    pendingCashflowSyncRetryKeyRef.current = retryKey;
+    void syncImportRowsToCashflow(importRows, { silent: true });
+  }, [cashflowSyncState, draftCacheKey, importDirty, importRows, sheetSaveState, syncImportRowsToCashflow]);
 
   const handleDirectEntryWorkbookFile = useCallback(async (file: File) => {
     setDirectEntryUploading(true);
@@ -826,22 +816,22 @@ export function SettlementLedgerPage({
   }, [autosavePlan, handleImportSave]);
 
   useEffect(() => {
-    if (!importDirty) return;
+    if (!importDirty && !cashflowSyncing) return;
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = '';
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [importDirty]);
+  }, [cashflowSyncing, importDirty]);
 
   useEffect(() => {
     onDirtyStateChange?.(importDirty || sheetSaveState === 'dirty');
   }, [importDirty, onDirtyStateChange, sheetSaveState]);
 
   useEffect(() => {
-    onSavingStateChange?.(sheetSaveState === 'saving');
-  }, [onSavingStateChange, sheetSaveState]);
+    onSavingStateChange?.(sheetSaveState === 'saving' || cashflowSyncing);
+  }, [cashflowSyncing, onSavingStateChange, sheetSaveState]);
 
   useEffect(() => () => {
     onDirtyStateChange?.(false);
@@ -855,7 +845,6 @@ export function SettlementLedgerPage({
     if (sheetSaveState === 'saving') return '시트 저장 중...';
     if (sheetSaveState === 'save_failed') return '시트 저장 실패';
     if (importDirty || sheetSaveState === 'dirty') return '저장 전 초안';
-    if (cashflowSyncState === 'review_required') return '저장 완료 · 사람 확인 필요';
     if (cashflowSyncState === 'syncing') return '저장 완료 · actual 반영 중';
     if (cashflowSyncState === 'sync_failed') return '저장 완료 · actual 반영 실패';
     if (cashflowSyncState === 'pending') {
@@ -872,25 +861,23 @@ export function SettlementLedgerPage({
     return saveMode === 'manual' ? '수동 저장만 사용' : '자동 저장 대기';
   }, [cashflowSyncState, importDirty, lastAutoSavedAt, lastCashflowSyncedAt, saveMode, sheetSaveState]);
 
-  const pendingReviewCount = useMemo(() => countPendingImportRowReviews(importRows || []), [importRows]);
-
   const weeklyAccountingStatus = useMemo(() => resolveWeeklyAccountingProductStatus({
     snapshot: {
       projectionEdited: importDirty,
       projectionDone: true,
       expenseEdited: importDirty,
-      expenseDone: sheetSaveState === 'saved' || cashflowSyncState === 'pending' || cashflowSyncState === 'syncing' || cashflowSyncState === 'synced' || cashflowSyncState === 'review_required' || cashflowSyncState === 'sync_failed',
-      expenseSyncState: cashflowSyncState === 'review_required' || cashflowSyncState === 'sync_failed' || cashflowSyncState === 'synced'
+      expenseDone: sheetSaveState === 'saved' || cashflowSyncState === 'pending' || cashflowSyncState === 'syncing' || cashflowSyncState === 'synced' || cashflowSyncState === 'sync_failed',
+      expenseSyncState: cashflowSyncState === 'sync_failed' || cashflowSyncState === 'synced'
         ? cashflowSyncState
         : 'pending',
-      expenseReviewPendingCount: pendingReviewCount,
+      expenseReviewPendingCount: 0,
       pmSubmitted: false,
       adminClosed: false,
     },
     saveState: sheetSaveState,
     syncState: cashflowSyncState,
-    reviewCount: pendingReviewCount,
-  }), [cashflowSyncState, importDirty, pendingReviewCount, sheetSaveState]);
+    reviewCount: 0,
+  }), [cashflowSyncState, importDirty, sheetSaveState]);
   const weeklyAccountingStatusHooks = useMemo(
     () => resolveWeeklyAccountingProductStatusDomHooks(weeklyAccountingStatus),
     [weeklyAccountingStatus],

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  filterCashflowWeeksThroughSelectedYear,
   filterCashflowWeeksForYear,
   resolveFirestoreErrorCode,
   shouldCreateDocOnUpdateError,
@@ -29,6 +30,21 @@ describe('cashflow weeks helpers', () => {
     expect(filterCashflowWeeksForYear(rows, '2026-04')).toEqual([
       { id: 'b', projectId: 'p1', yearMonth: '2026-01', weekNo: 1 },
       { id: 'c', projectId: 'p1', yearMonth: '2026-08', weekNo: 2 },
+    ]);
+  });
+
+  it('keeps prior-year weeks for opening balance carry-forward', () => {
+    const rows = [
+      { id: 'a', projectId: 'p1', yearMonth: '2025-12', weekNo: 5 },
+      { id: 'b', projectId: 'p1', yearMonth: '2026-12', weekNo: 5 },
+      { id: 'c', projectId: 'p1', yearMonth: '2027-01', weekNo: 1 },
+      { id: 'd', projectId: 'p1', yearMonth: '2028-01', weekNo: 1 },
+    ] as any[];
+
+    expect(filterCashflowWeeksThroughSelectedYear(rows, '2027-01')).toEqual([
+      { id: 'a', projectId: 'p1', yearMonth: '2025-12', weekNo: 5 },
+      { id: 'b', projectId: 'p1', yearMonth: '2026-12', weekNo: 5 },
+      { id: 'c', projectId: 'p1', yearMonth: '2027-01', weekNo: 1 },
     ]);
   });
 });

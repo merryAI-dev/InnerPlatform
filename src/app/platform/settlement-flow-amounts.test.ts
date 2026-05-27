@@ -81,4 +81,19 @@ describe('resolveSettlementFlowSnapshot', () => {
     expect(snapshot.cashflowActualLineAmounts).toEqual({ SALES_VAT_IN: 20000 });
     expect(snapshot.budgetActualAmount).toBe(0);
   });
+
+  it('keeps bank outflows on inflow-labeled lines as negative actual adjustments', () => {
+    const cells = createEmptyCells();
+    cells[8] = 'MYSC 선입금(잔금 등 입금 필요 시)';
+    cells[10] = '8,615,904';
+    cells[13] = '-8,615,904';
+    const snapshot = resolveSettlementFlowSnapshot(createRow(cells, {
+      sourceTxId: 'bank:prepay-out',
+      entryKind: 'EXPENSE',
+    }), indexes);
+
+    expect(snapshot.manualOutflowPending).toBe(false);
+    expect(snapshot.cashflowActualLineAmounts).toEqual({ MYSC_PREPAY_IN: -8615904 });
+    expect(snapshot.budgetActualAmount).toBe(0);
+  });
 });

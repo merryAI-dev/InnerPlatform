@@ -27,6 +27,17 @@ function resolveWeekFromLabel(label: string, yearWeeks: MonthMondayWeek[]): Mont
   return getMonthMondayWeeks(yearMonth).find((week) => week.weekNo === weekNo);
 }
 
+function resolveWeekFromAnyYearLabel(label: string, yearWeeks: MonthMondayWeek[]): MonthMondayWeek | undefined {
+  const fromActiveYear = resolveWeekFromLabel(label, yearWeeks);
+  if (fromActiveYear) return fromActiveYear;
+
+  const match = label.trim().match(/^(\d{2})-(\d{1,2})-(\d{1,2})$/);
+  if (!match) return undefined;
+  const year = 2000 + Number.parseInt(match[1], 10);
+  if (!Number.isFinite(year)) return undefined;
+  return getYearMondayWeeks(year).find((week) => week.label === label);
+}
+
 function resolveWeekLabelFromRow(
   row: ImportRow,
   yearWeeks: MonthMondayWeek[],
@@ -106,7 +117,7 @@ export function buildSettlementActualSyncPayload(
   }
 
   const targetWeeks = Array.from(weekLabels)
-    .map((label) => resolveWeekFromLabel(label, yearWeeks))
+    .map((label) => resolveWeekFromAnyYearLabel(label, yearWeeks))
     .filter((week): week is MonthMondayWeek => Boolean(week?.yearMonth));
 
   return targetWeeks.map((week) => ({
