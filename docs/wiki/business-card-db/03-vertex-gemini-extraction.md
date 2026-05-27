@@ -7,13 +7,20 @@ unblocks:
   - business-card-db-review-save-search
 ---
 
-# 03 Vertex Gemini Extraction
+# 03 Gemini Extraction
 
 ## Runtime
 
-Use Vertex AI through the Google Gen AI SDK on the BFF server.
+Use the Google Gen AI SDK on the BFF server. The fast setup path uses a Google AI Studio API key. The enterprise setup path uses Vertex AI.
 
 Environment:
+
+```text
+GEMINI_API_KEY=<Google AI Studio API key>
+BUSINESS_CARD_GEMINI_MODEL=gemini-2.5-flash
+```
+
+Vertex AI environment:
 
 ```text
 GOOGLE_GENAI_USE_VERTEXAI=true
@@ -21,6 +28,8 @@ GOOGLE_CLOUD_PROJECT=inner-platform-live-20260316
 GOOGLE_CLOUD_LOCATION=global
 BUSINESS_CARD_GEMINI_MODEL=gemini-2.5-flash
 ```
+
+If `GEMINI_API_KEY` is present, the BFF uses the API key path first. If it is absent, the BFF falls back to Vertex AI when `GOOGLE_GENAI_USE_VERTEXAI=true`.
 
 ## Input
 

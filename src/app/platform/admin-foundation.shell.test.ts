@@ -25,7 +25,10 @@ describe('admin monitoring foundation shell contract', () => {
   });
 
   it('registers a dedicated cashflow export route under the admin shell', () => {
-    expect(routesSource).toContain("{ index: true, element: <S C={FeatureSearchPage} /> }");
+    expect(routesSource).toContain("const FeatureSearchPage");
+    expect(routesSource).toContain("function MobileAwareAdminHome()");
+    expect(routesSource).toContain(": <S C={FeatureSearchPage} />;");
+    expect(routesSource).toContain("{ index: true, element: <MobileAwareAdminHome /> }");
     expect(routesSource).toContain("{ path: 'dashboard', element: <S C={DashboardPage} /> }");
     expect(routesSource).toContain("{ path: 'cashflow/export', element: <S C={CashflowExportPage} /> }");
     expect(routesSource).toContain("{ path: 'cashflow/weekly', element: <S C={CashflowWeeklyPage} /> }");

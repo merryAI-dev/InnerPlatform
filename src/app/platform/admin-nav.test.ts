@@ -39,6 +39,13 @@ describe('admin nav access control', () => {
     expect(canAccessAdminPath('viewer', '/approvals')).toBe(false);
   });
 
+  it('allows every signed-in role into the business card capture route', () => {
+    expect(canAccessAdminPath('admin', '/business-cards')).toBe(true);
+    expect(canAccessAdminPath('finance', '/business-cards')).toBe(true);
+    expect(canAccessAdminPath('pm', '/business-cards')).toBe(true);
+    expect(canAccessAdminPath('viewer', '/business-cards')).toBe(true);
+  });
+
   it('restores migration audit as an admin-only menu route', () => {
     expect(canShowAdminNavItem('admin', '/projects/migration-audit')).toBe(true);
     expect(canShowAdminNavItem('finance', '/projects/migration-audit')).toBe(false);

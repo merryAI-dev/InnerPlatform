@@ -1,5 +1,10 @@
 import { normalizeWorkspaceId, type WorkspaceId } from '../data/member-workspace';
 import { canAccessAdminPath } from './admin-nav';
+import {
+  BUSINESS_CARD_MOBILE_ENTRY_PATH,
+  shouldUseBusinessCardMobileEntry,
+  type MobileEntryContext,
+} from './mobile-entry';
 import { resolvePortalProjectSelectPath } from './portal-project-selection';
 
 export type HomePath = '/' | '/portal';
@@ -114,8 +119,15 @@ export function resolveLoginSuccessPath(
   role: unknown,
   preferredWorkspace: WorkspaceId | unknown,
   requestedPath?: unknown,
+  mobileEntryContext?: MobileEntryContext,
 ): string {
   const normalizedPath = normalizeRequestedPath(requestedPath);
+  if (shouldUseBusinessCardMobileEntry({
+    ...mobileEntryContext,
+    requestedPath: normalizedPath || '/',
+  })) {
+    return BUSINESS_CARD_MOBILE_ENTRY_PATH;
+  }
   if (!normalizedPath || normalizedPath === '/') return '/';
   return resolvePortalEntryPath(role, preferredWorkspace, normalizedPath);
 }

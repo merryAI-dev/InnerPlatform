@@ -10,6 +10,10 @@ function resolveModel(env = process.env) {
   return readOptionalText(env.BUSINESS_CARD_GEMINI_MODEL) || DEFAULT_MODEL;
 }
 
+function resolveApiKey(env = process.env) {
+  return readOptionalText(env.GEMINI_API_KEY || env.GOOGLE_API_KEY);
+}
+
 function buildPrompt(fileName) {
   return [
     'You extract contact details from a Korean or bilingual business card image.',
@@ -123,9 +127,15 @@ export function createBusinessCardGeminiAiService(options = {}) {
   const model = options.model || resolveModel(env);
   const client = options.client || null;
   const importSdk = options.importSdk || (() => import('@google/genai'));
+  const configuredProvider = resolveApiKey(env) ? 'gemini-api' : 'vertex-ai';
 
   async function getClient() {
     if (client) return client;
+    const apiKey = resolveApiKey(env);
+    if (apiKey) {
+      const { GoogleGenAI } = await importSdk();
+      return new GoogleGenAI({ apiKey });
+    }
     if (String(env.GOOGLE_GENAI_USE_VERTEXAI || '').toLowerCase() !== 'true') return null;
     const { GoogleGenAI } = await importSdk();
     return new GoogleGenAI({
@@ -145,7 +155,7 @@ export function createBusinessCardGeminiAiService(options = {}) {
         ai = await getClient();
       } catch (error) {
         return {
-          provider: 'vertex-ai',
+          provider: configuredProvider,
           model,
           status: 'manual_review',
           extracted: fallback,
@@ -158,7 +168,7 @@ export function createBusinessCardGeminiAiService(options = {}) {
 
       if (!ai?.models?.generateContent) {
         return {
-          provider: 'vertex-ai',
+          provider: configuredProvider,
           model,
           status: 'manual_review',
           extracted: fallback,
@@ -195,7 +205,7 @@ export function createBusinessCardGeminiAiService(options = {}) {
         const parsed = extractJson(rawText);
         if (!isStructuredExtractionCandidate(parsed)) {
           return {
-            provider: 'vertex-ai',
+            provider: configuredProvider,
             model,
             status: 'manual_review',
             extracted: buildEmptyBusinessCardExtraction([
@@ -210,7 +220,7 @@ export function createBusinessCardGeminiAiService(options = {}) {
         }
         const extracted = normalizeBusinessCardExtraction(parsed);
         return {
-          provider: 'vertex-ai',
+          provider: configuredProvider,
           model,
           status: 'ok',
           extracted,
@@ -218,7 +228,7 @@ export function createBusinessCardGeminiAiService(options = {}) {
         };
       } catch (error) {
         return {
-          provider: 'vertex-ai',
+          provider: configuredProvider,
           model,
           status: 'failed',
           extracted: fallback,
@@ -235,5 +245,6 @@ export function createBusinessCardGeminiAiService(options = {}) {
 export {
   buildPrompt,
   responseSchema as businessCardGeminiResponseSchema,
+  resolveApiKey,
   resolveModel,
 };

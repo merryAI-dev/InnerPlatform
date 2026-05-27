@@ -12,4 +12,12 @@ describe('route lazy loading safety', () => {
       "const PortalProjectSettings = lazy(() => import('./components/portal/PortalProjectSettings').then(m => ({ default: m.PortalProjectSettings })));",
     );
   });
+
+  it('registers the mobile PWA entry route separately from the desktop root', () => {
+    expect(routesSource).toContain("const MobileEntryPage = lazy(() => import('./components/pwa/MobileEntryPage')");
+    expect(routesSource).toContain("{ path: '/mobile-entry', element: <S C={MobileEntryPage} /> }");
+    expect(routesSource).toContain('function MobileAwareAdminHome()');
+    expect(routesSource).toContain('shouldUseBusinessCardMobileEntry');
+    expect(routesSource).toContain('{ index: true, element: <MobileAwareAdminHome /> }');
+  });
 });

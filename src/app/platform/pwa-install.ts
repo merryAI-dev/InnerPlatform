@@ -25,7 +25,7 @@ const TARGETS: Record<PwaInstallPlatform, PwaInstallTarget> = {
       'Safari에서 MYSCube 라이브 링크를 엽니다.',
       '공유 버튼을 누르고 홈 화면에 추가를 선택합니다.',
       'Open as Web App이 보이면 켠 상태로 추가합니다.',
-      '홈 화면의 MYSCube 아이콘으로 다시 실행합니다.',
+      '홈 화면의 MYSCube 아이콘으로 다시 실행하면 명함 DB가 먼저 열립니다.',
     ],
     checks: [
       '주소창 없이 standalone 화면으로 열리는지 확인',
@@ -44,7 +44,7 @@ const TARGETS: Record<PwaInstallPlatform, PwaInstallTarget> = {
     steps: [
       'Chrome에서 MYSCube 라이브 링크를 엽니다.',
       '주소창 또는 브라우저 메뉴의 앱 설치를 선택합니다.',
-      '설치된 MYSCube 아이콘으로 다시 실행합니다.',
+      '설치된 MYSCube 아이콘으로 다시 실행하면 명함 DB가 먼저 열립니다.',
       '명함 DB에서 촬영, 추출, 검토 저장 흐름을 확인합니다.',
     ],
     checks: [
@@ -64,7 +64,7 @@ const TARGETS: Record<PwaInstallPlatform, PwaInstallTarget> = {
     steps: [
       '현재 기기에 맞는 설치 안내를 선택합니다.',
       '설치 후 MYSCube 아이콘으로 앱을 실행합니다.',
-      '로그인 후 명함 DB 또는 필요한 업무 화면으로 이동합니다.',
+      '모바일에서는 명함 DB가 먼저 열리고, 데스크톱에서는 기존 업무 화면으로 이동합니다.',
     ],
     checks: [
       'manifest 아이콘이 192px, 512px, maskable 512px로 제공되는지 확인',
