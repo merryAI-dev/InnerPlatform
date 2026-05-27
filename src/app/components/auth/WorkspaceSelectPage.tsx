@@ -95,7 +95,7 @@ export function WorkspaceSelectPage() {
 
   return (
     <div className="flex min-h-dvh bg-slate-50 p-4 dark:bg-slate-950">
-      <div className="w-full max-w-none">
+      <div className="mx-auto w-full max-w-6xl">
         <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
           <div className="border-b border-slate-800 bg-[#001e46] px-5 py-5 text-white md:px-7">
             <MyscWordmark tone="onDark" size="md" />

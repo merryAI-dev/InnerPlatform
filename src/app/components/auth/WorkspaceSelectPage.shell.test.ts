@@ -12,7 +12,7 @@ describe('WorkspaceSelectPage shell contract', () => {
     expect(source).toContain('어느 공간에서 시작할까요?');
     expect(source).toContain('bg-[#001e46]');
     expect(source).toContain('border-slate-200 bg-white');
-    expect(source).toContain('w-full max-w-none');
+    expect(source).toContain('mx-auto w-full max-w-6xl');
     expect(source).not.toContain('border-emerald-200');
     expect(source).not.toContain('backdrop-blur-2xl');
     expect(source).toContain('관리자 공간으로 계속');

@@ -406,7 +406,7 @@ function PortalContent() {
   if (!portalUser && !isAdminSpaceRole(authUser?.role)) {
     return (
       <div className="min-h-screen bg-slate-50 px-6 py-8 dark:bg-slate-950">
-        <div className="w-full max-w-none">
+        <div className="mx-auto w-full max-w-6xl">
           {/* 환영 헤더 */}
           <div className="text-center mb-8">
             <div className="inline-flex items-center justify-center w-14 h-14 rounded-lg bg-[#001e46] shadow-sm mb-4">
@@ -967,7 +967,7 @@ function PortalContent() {
 
           {/* Content */}
           <main className="flex-1 overflow-y-auto">
-            <div className={useWidePortalCanvas ? 'w-full max-w-none px-3 py-4 md:px-5 md:py-6 xl:px-8' : 'w-full max-w-none p-4 md:p-6'}>
+            <div className={useWidePortalCanvas ? 'w-full max-w-none px-3 py-4 md:px-5 md:py-6 xl:px-8' : 'mx-auto w-full max-w-[1480px] p-4 md:p-6'}>
               <PageTransition>
                 <ErrorBoundary homePath="/portal" resetKey={location.pathname}>
                   <Outlet />

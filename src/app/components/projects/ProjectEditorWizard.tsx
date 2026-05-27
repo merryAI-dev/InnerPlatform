@@ -1219,7 +1219,7 @@ export function ProjectEditorWizard({
   };
 
   return (
-    <div className="w-full max-w-none space-y-5">
+    <div className="mx-auto w-full max-w-6xl space-y-5">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <div className="flex items-center gap-2">

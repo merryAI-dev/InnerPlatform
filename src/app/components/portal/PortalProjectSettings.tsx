@@ -234,7 +234,7 @@ export function PortalProjectSettings() {
 
   return (
     <div className="min-h-screen bg-slate-50 p-4 dark:bg-slate-950">
-      <div className="w-full max-w-none">
+      <div className="mx-auto w-full max-w-6xl">
         <div className="text-center mb-6">
           <div className="w-14 h-14 rounded-lg flex items-center justify-center mx-auto mb-3 shadow-sm bg-[#001e46]">
             <FolderKanban className="w-7 h-7 text-white" />

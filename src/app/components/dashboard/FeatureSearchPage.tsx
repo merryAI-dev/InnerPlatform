@@ -27,7 +27,7 @@ export function FeatureSearchPage() {
 
   return (
     <div className="min-h-dvh bg-slate-50 px-4 py-5 dark:bg-slate-950 md:px-6 md:py-8">
-      <div className="flex min-h-[calc(100dvh-2.5rem)] w-full max-w-none flex-col space-y-5 md:min-h-[calc(100dvh-4rem)]">
+      <div className="mx-auto flex min-h-[calc(100dvh-2.5rem)] w-full max-w-6xl flex-col space-y-5 md:min-h-[calc(100dvh-4rem)]">
         <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
           <div className="border-b border-slate-800 bg-[#001e46] px-5 py-5 text-white md:px-7">
             <MyscWordmark tone="onDark" size="md" />

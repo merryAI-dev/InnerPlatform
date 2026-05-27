@@ -27,7 +27,8 @@ describe('FeatureSearchPage shell contract', () => {
     expect(source).toContain('absolute left-0 top-[-8px]');
     expect(source).toContain('min-h-dvh');
     expect(source).toContain('bg-[#001e46]');
-    expect(source).toContain('w-full max-w-none');
+    expect(source).toContain('mx-auto flex');
+    expect(source).toContain('max-w-6xl');
     expect(source).toContain('border border-slate-200 bg-white');
     expect(source).not.toContain('border-emerald-200');
     expect(source).not.toContain('backdrop-blur-xl');
