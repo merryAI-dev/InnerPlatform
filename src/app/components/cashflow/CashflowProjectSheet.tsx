@@ -39,7 +39,7 @@ import { useFirebase } from '../../lib/firebase-context';
 import { getOrgDocumentPath } from '../../lib/firebase';
 import { loadExcelJs, warmExcelJs } from '../../platform/lazy-heavy-modules';
 import { buildCashflowExportWorkbookSpec } from '../../platform/cashflow-export';
-import { exportCashflowWorkbookViaBff, isPlatformApiEnabled } from '../../lib/platform-bff-client';
+import { exportCashflowWorkbookViaBff, isPlatformApiEnabled, syncProjectCashflowActualsViaBff } from '../../lib/platform-bff-client';
 
 function fmt(n: number): string {
   return n.toLocaleString('ko-KR');
@@ -155,6 +155,8 @@ export function CashflowProjectSheet({
   } | null>(null);
   const [monthSavingMode, setMonthSavingMode] = useState<null | 'projection' | 'actual'>(null);
   const [downloadPreparing, setDownloadPreparing] = useState(false);
+  const [actualSyncing, setActualSyncing] = useState(false);
+  const [copyingMode, setCopyingMode] = useState<null | 'projection_to_actual' | 'actual_to_projection'>(null);
 
   const hasDirty = useMemo(
     () => hasUnsavedChanges(weekSaveState) || Object.keys(drafts).length > 0,
@@ -486,32 +488,107 @@ export function CashflowProjectSheet({
     });
   }, [drafts, flushWeek, monthWeeks, yearMonth]);
 
+  const syncActualsFromExpenseSheet = useCallback(() => {
+    if (!isPlatformApiEnabled() || !user) {
+      toast.error('Actual 동기화 API가 연결되어 있지 않습니다.');
+      return;
+    }
+    void (async () => {
+      setActualSyncing(true);
+      const result = await syncProjectCashflowActualsViaBff({
+        tenantId: orgId,
+        actor: {
+          uid: user.uid,
+          email: user.email,
+          role: user.role,
+          idToken: user.idToken,
+          googleAccessToken: user.googleAccessToken,
+        },
+        projectId,
+      });
+      if (result.skipped) {
+        toast.message('동기화할 정산대장 행이 없습니다.');
+        return;
+      }
+      toast.success(`Actual ${result.upsertedWeeks}개 주차를 동기화했습니다.`);
+    })().catch((error) => {
+      console.error('[Cashflow] actual sync failed:', error);
+      toast.error('Actual 동기화에 실패했습니다. 정산대장 저장 상태를 확인해 주세요.');
+    }).finally(() => {
+      setActualSyncing(false);
+    });
+  }, [orgId, projectId, user]);
+
   const copyMonthValues = useCallback((sourceMode: 'projection' | 'actual', targetMode: 'projection' | 'actual') => {
     if (sourceMode === targetMode) return;
     if (targetMode === 'actual' && !canEdit) {
       toast.error('Actual 복사는 편집 권한이 있을 때만 가능합니다.');
       return;
     }
-    setDrafts((prev) => {
-      const next = { ...prev };
+
+    const direction = sourceMode === 'projection' ? 'projection_to_actual' : 'actual_to_projection';
+    void (async () => {
+      setCopyingMode(direction);
       for (const week of monthWeeks) {
-        for (const lineId of CASHFLOW_ALL_LINES) {
-          const sourceValue = getEffectiveAmount({ yearMonth, mode: sourceMode, weekNo: week.weekNo, lineId });
-          const targetKey = resolveCellKey({ yearMonth, mode: targetMode, weekNo: week.weekNo, lineId });
-          next[targetKey] = formatAmountInput(String(sourceValue));
+        const amounts = Object.fromEntries(CASHFLOW_ALL_LINES.map((lineId) => [
+          lineId,
+          getEffectiveAmount({ yearMonth, mode: sourceMode, weekNo: week.weekNo, lineId }),
+        ])) as Partial<Record<CashflowSheetLineId, number>>;
+
+        await upsertWeekAmounts({
+          projectId,
+          yearMonth,
+          weekNo: week.weekNo,
+          mode: targetMode,
+          amounts,
+        });
+
+        if (onUpdateWeeklySubmissionStatus) {
+          await onUpdateWeeklySubmissionStatus({
+            projectId,
+            yearMonth,
+            weekNo: week.weekNo,
+            ...(targetMode === 'projection'
+              ? { projectionEdited: true, projectionUpdated: true }
+              : { expenseEdited: true, expenseUpdated: true }),
+          });
         }
       }
-      return next;
+
+      setDrafts((prev) => {
+        const next = { ...prev };
+        for (const week of monthWeeks) {
+          for (const lineId of CASHFLOW_ALL_LINES) {
+            delete next[resolveCellKey({ yearMonth, mode: targetMode, weekNo: week.weekNo, lineId })];
+          }
+        }
+        return next;
+      });
+      setWeekSaveState((prev) => {
+        const next = { ...prev };
+        for (const week of monthWeeks) {
+          delete next[resolveWeekKey({ yearMonth, mode: targetMode, weekNo: week.weekNo })];
+        }
+        return next;
+      });
+      toast.success(`${sourceMode === 'projection' ? 'Projection' : 'Actual'} 값을 ${targetMode === 'projection' ? 'Projection' : 'Actual'} 서버에 복사했습니다.`);
+    })().catch((error) => {
+      console.error('[Cashflow] month value copy failed:', error);
+      toast.error('월 복사에 실패했습니다. 네트워크/권한을 확인해 주세요.');
+    }).finally(() => {
+      setCopyingMode((prev) => (prev === direction ? null : prev));
     });
-    setWeekSaveState((prev) => {
-      const next = { ...prev };
-      for (const week of monthWeeks) {
-        next[resolveWeekKey({ yearMonth, mode: targetMode, weekNo: week.weekNo })] = 'dirty';
-      }
-      return next;
-    });
-    toast.success(`${sourceMode === 'projection' ? 'Projection' : 'Actual'} 값을 ${targetMode === 'projection' ? 'Projection' : 'Actual'} 초안으로 복사했습니다.`);
-  }, [canEdit, formatAmountInput, getEffectiveAmount, monthWeeks, resolveCellKey, resolveWeekKey, yearMonth]);
+  }, [
+    canEdit,
+    getEffectiveAmount,
+    monthWeeks,
+    onUpdateWeeklySubmissionStatus,
+    projectId,
+    resolveCellKey,
+    resolveWeekKey,
+    upsertWeekAmounts,
+    yearMonth,
+  ]);
 
   const handleSubmitWeek = useCallback(async (input: { weekNo: number; yearMonth: string }) => {
     setSubmitBusy(true);
@@ -821,17 +898,18 @@ export function CashflowProjectSheet({
               size="sm"
               className="h-8 text-[12px] gap-1.5"
               onClick={() => copyMonthValues('projection', 'actual')}
-              disabled={!canEdit}
+              disabled={!canEdit || copyingMode !== null || actualSyncing || monthSavingMode !== null}
             >
-              <ArrowLeftRight className="w-3.5 h-3.5" /> Projection → Actual
+              {copyingMode === 'projection_to_actual' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ArrowLeftRight className="w-3.5 h-3.5" />} Projection → Actual
             </Button>
             <Button
               variant="outline"
               size="sm"
               className="h-8 text-[12px] gap-1.5"
               onClick={() => copyMonthValues('actual', 'projection')}
+              disabled={copyingMode !== null || actualSyncing || monthSavingMode !== null}
             >
-              <ArrowLeftRight className="w-3.5 h-3.5" /> Actual → Projection
+              {copyingMode === 'actual_to_projection' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ArrowLeftRight className="w-3.5 h-3.5" />} Actual → Projection
             </Button>
             <Button
               variant="outline"
@@ -858,8 +936,18 @@ export function CashflowProjectSheet({
               variant="outline"
               size="sm"
               className="h-8 text-[12px] gap-1.5"
+              onClick={syncActualsFromExpenseSheet}
+              disabled={!canEdit || actualSyncing || monthSavingMode !== null}
+            >
+              {actualSyncing && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              Actual 동기화
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-[12px] gap-1.5"
               onClick={() => saveMonth('actual')}
-              disabled={!canEdit || monthSavingMode !== null}
+              disabled={!canEdit || actualSyncing || monthSavingMode !== null}
             >
               {monthSavingMode === 'actual' && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
               Actual 저장
@@ -875,7 +963,7 @@ export function CashflowProjectSheet({
       />
 
       <div className="rounded-2xl border border-slate-200/80 bg-slate-50/70 px-4 py-3 text-[11px] text-slate-600">
-        비교 모드에서는 Projection과 Actual을 동시에 보면서 바로 복사할 수 있습니다. 입력 필드는 그대로 복붙되고, 월 저장은 각 영역별로 따로 반영됩니다.
+        비교 모드에서는 Projection과 Actual을 동시에 보면서 바로 복사할 수 있습니다. 복사는 초안이 아니라 서버에 즉시 반영되고, 직접 수정한 입력값만 각 영역별 저장 버튼으로 반영됩니다.
       </div>
 
       <Tabs value={viewMode} onValueChange={(v) => (v === 'projection' || v === 'actual' || v === 'compare') && setViewMode(v)}>
