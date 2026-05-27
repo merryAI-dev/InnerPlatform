@@ -42,6 +42,13 @@ describe('CashflowProjectSheet actual sync flow', () => {
     expect(cashflowProjectSheetSource).toContain('weekMeta[w.weekNo]?.projectionUpdated');
   });
 
+  it('uses per-week projection completion instead of the retired month projection save button', () => {
+    expect(cashflowProjectSheetSource).toContain('handleCompleteProjectionWeek');
+    expect(cashflowProjectSheetSource).toContain('projectionUpdated: true');
+    expect(cashflowProjectSheetSource).toContain('주차 Projection을 작성완료 처리했습니다.');
+    expect(cashflowProjectSheetSource).not.toContain('Projection 저장');
+  });
+
   it('loads cashflow weeks directly from Firestore year range without project assignment gating', () => {
     expect(cashflowWeeksStoreSource).toContain("where('yearMonth', '>=', carryForwardYearStart)");
     expect(cashflowWeeksStoreSource).toContain("where('yearMonth', '<=', selectedYearEnd)");

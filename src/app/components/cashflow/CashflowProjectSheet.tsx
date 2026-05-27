@@ -145,6 +145,7 @@ export function CashflowProjectSheet({
 
   const [submitConfirm, setSubmitConfirm] = useState<{ weekNo: number; yearMonth: string } | null>(null);
   const [submitBusy, setSubmitBusy] = useState(false);
+  const [projectionCompleteWeek, setProjectionCompleteWeek] = useState<number | null>(null);
   const [closeBusy, setCloseBusy] = useState(false);
   const [closeDialog, setCloseDialog] = useState<{
     kind: 'prerequisite' | 'warning' | 'confirm';
@@ -154,7 +155,7 @@ export function CashflowProjectSheet({
     expenseStatusLabel?: string;
     expenseStatusDescription?: string;
   } | null>(null);
-  const [monthSavingMode, setMonthSavingMode] = useState<null | 'projection' | 'actual'>(null);
+  const [monthSavingMode, setMonthSavingMode] = useState<null | 'actual'>(null);
   const [downloadPreparing, setDownloadPreparing] = useState(false);
   const [actualSyncing, setActualSyncing] = useState(false);
   const [copyingMode, setCopyingMode] = useState<null | 'projection_to_actual' | 'actual_to_projection'>(null);
@@ -543,16 +544,16 @@ export function CashflowProjectSheet({
       .catch(() => {});
   }, [flushAllDirtyBeforeMonthChange, goNextMonth]);
 
-  const saveMonth = useCallback((targetMode: 'projection' | 'actual') => {
+  const saveMonth = useCallback((targetMode: 'actual') => {
     const targets = monthWeeks.map((w) => w.weekNo);
     void (async () => {
       setMonthSavingMode(targetMode);
       for (const weekNo of targets) {
         await persistWeekValues({ weekNo, mode: targetMode });
       }
-      toast.success(`이번 달 ${targetMode === 'projection' ? 'Projection' : 'Actual'}을 저장했습니다.`);
+      toast.success('이번 달 Actual을 저장했습니다.');
     })().catch((err) => {
-      console.error('[Cashflow] month projection save failed:', err);
+      console.error('[Cashflow] month actual save failed:', err);
       toast.error('월 저장에 실패했습니다. 네트워크/권한을 확인해 주세요.');
     }).finally(() => {
       setMonthSavingMode((prev) => (prev === targetMode ? null : prev));
@@ -675,6 +676,64 @@ export function CashflowProjectSheet({
     }
   }, [persistWeekValues, projectId, submitWeekAsPm]);
 
+  const handleCompleteProjectionWeek = useCallback((weekNo: number) => {
+    if (!canEdit) return;
+
+    void (async () => {
+      setProjectionCompleteWeek(weekNo);
+      const amounts = Object.fromEntries(CASHFLOW_ALL_LINES.map((lineId) => [
+        lineId,
+        getEffectiveAmount({ yearMonth, mode: 'projection', weekNo, lineId }),
+      ])) as Partial<Record<CashflowSheetLineId, number>>;
+
+      await upsertWeekAmounts({
+        projectId,
+        yearMonth,
+        weekNo,
+        mode: 'projection',
+        amounts,
+      });
+
+      if (onUpdateWeeklySubmissionStatus) {
+        await onUpdateWeeklySubmissionStatus({
+          projectId,
+          yearMonth,
+          weekNo,
+          projectionEdited: true,
+          projectionUpdated: true,
+        });
+      }
+
+      setDrafts((prev) => {
+        const next = { ...prev };
+        for (const lineId of CASHFLOW_ALL_LINES) {
+          delete next[resolveCellKey({ yearMonth, mode: 'projection', weekNo, lineId })];
+        }
+        return next;
+      });
+      setWeekSaveState((prev) => {
+        const next = { ...prev };
+        delete next[resolveWeekKey({ yearMonth, mode: 'projection', weekNo })];
+        return next;
+      });
+      toast.success('주차 Projection을 작성완료 처리했습니다.');
+    })().catch((error) => {
+      console.error('[Cashflow] projection complete failed:', error);
+      toast.error('작성완료 처리에 실패했습니다. 네트워크/권한을 확인해 주세요.');
+    }).finally(() => {
+      setProjectionCompleteWeek((prev) => (prev === weekNo ? null : prev));
+    });
+  }, [
+    canEdit,
+    getEffectiveAmount,
+    onUpdateWeeklySubmissionStatus,
+    projectId,
+    resolveCellKey,
+    resolveWeekKey,
+    upsertWeekAmounts,
+    yearMonth,
+  ]);
+
   const handleCloseWeek = useCallback(async (weekNo: number) => {
     setCloseBusy(true);
     try {
@@ -780,6 +839,18 @@ export function CashflowProjectSheet({
                         </div>
                         <div className="text-[9px] text-muted-foreground mt-0.5">{w.weekStart} ~ {w.weekEnd}</div>
                         <div className="mt-2 flex items-center justify-end gap-1.5">
+                          {tableMode === 'projection' && !weekMeta[w.weekNo]?.projectionUpdated && canEdit && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 text-[10px] gap-1"
+                              onClick={() => handleCompleteProjectionWeek(w.weekNo)}
+                              disabled={projectionCompleteWeek === w.weekNo}
+                            >
+                              {projectionCompleteWeek === w.weekNo ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
+                              작성완료
+                            </Button>
+                          )}
                           {tableMode === 'actual' && !weekMeta[w.weekNo]?.pmSubmitted && isPm && (
                             <Button
                               size="sm"
@@ -998,16 +1069,6 @@ export function CashflowProjectSheet({
               disabled={downloadPreparing}
             >
               {downloadPreparing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />} {downloadPreparing ? '엑셀 준비 중' : '엑셀 다운로드'}
-            </Button>
-            <Button
-              variant="default"
-              size="sm"
-              className="h-8 text-[12px] gap-1.5"
-              onClick={() => saveMonth('projection')}
-              disabled={monthSavingMode !== null}
-            >
-              {monthSavingMode === 'projection' && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-              Projection 저장
             </Button>
             <Button
               variant="outline"
