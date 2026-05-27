@@ -341,7 +341,9 @@ async function commitInChunks(db, mutations) {
   }
 }
 
-function buildWeekPatch({ tenantId, actorId, actorName, projectId, mode, week, amounts, now }) {
+function buildWeekPatch({ tenantId, actorId, actorName, projectId, mode, week, amounts, now, existingData }) {
+  const normalizedAmounts = normalizeAmounts(amounts);
+  const existingModeAmounts = normalizeAmounts(existingData?.[mode] || {});
   const patch = {
     id: resolveWeekDocId(projectId, week.yearMonth, week.weekNo),
     tenantId,
@@ -356,8 +358,11 @@ function buildWeekPatch({ tenantId, actorId, actorName, projectId, mode, week, a
     updatedByUid: actorId,
     updatedByName: actorName,
   };
-  for (const [lineId, amount] of Object.entries(normalizeAmounts(amounts))) {
-    patch[`${mode}.${lineId}`] = amount;
+  if (Object.keys(normalizedAmounts).length > 0) {
+    patch[mode] = {
+      ...existingModeAmounts,
+      ...normalizedAmounts,
+    };
   }
   return patch;
 }
@@ -406,11 +411,21 @@ export async function upsertCashflowWeekAmounts({ db, tenantId, actorId, actorNa
 
   const weekRef = db.doc(`orgs/${tenantId}/cashflow_weeks/${resolveWeekDocId(projectId, targetWeek.yearMonth, targetWeek.weekNo)}`);
   const statusRef = db.doc(`orgs/${tenantId}/weekly_submission_status/${resolveWeekDocId(projectId, targetWeek.yearMonth, targetWeek.weekNo)}`);
-  const patch = buildWeekPatch({ tenantId, actorId, actorName, projectId, mode, week: targetWeek, amounts, now });
   const statusPatch = buildStatusPatch({ tenantId, actorId, actorName, projectId, week: targetWeek, mode, now });
 
   await db.runTransaction(async (tx) => {
     const snap = await tx.get(weekRef);
+    const patch = buildWeekPatch({
+      tenantId,
+      actorId,
+      actorName,
+      projectId,
+      mode,
+      week: targetWeek,
+      amounts,
+      now,
+      existingData: snap.exists ? snap.data() : undefined,
+    });
     tx.set(weekRef, {
       ...(snap.exists ? {} : { createdAt: now, pmSubmitted: false, adminClosed: false }),
       ...patch,
@@ -464,6 +479,7 @@ export async function syncProjectCashflowActualsFromExpenseSheets({ db, tenantId
   for (const week of writeWeeks) {
     const weekRef = db.doc(`orgs/${tenantId}/cashflow_weeks/${resolveWeekDocId(projectId, week.yearMonth, week.weekNo)}`);
     const statusRef = db.doc(`orgs/${tenantId}/weekly_submission_status/${resolveWeekDocId(projectId, week.yearMonth, week.weekNo)}`);
+    const existingSnap = await weekRef.get().catch(() => null);
     const patch = buildWeekPatch({
       tenantId,
       actorId,
@@ -473,6 +489,7 @@ export async function syncProjectCashflowActualsFromExpenseSheets({ db, tenantId
       week,
       amounts: week.amounts,
       now,
+      existingData: existingSnap?.exists ? existingSnap.data() : undefined,
     });
     const statusPatch = buildStatusPatch({
       tenantId,

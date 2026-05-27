@@ -88,7 +88,7 @@ describe('cashflow canonical BFF helpers', () => {
     expect(plan.clearedWeeks).toHaveLength(0);
   });
 
-  it('patches amount fields by dot path so partial saves cannot replace the saved map', async () => {
+  it('merges partial saves into the existing map so saved values stay visible to Firestore readers', async () => {
     const writes = [];
     const db = {
       doc(path) {
@@ -97,7 +97,15 @@ describe('cashflow canonical BFF helpers', () => {
       async runTransaction(callback) {
         await callback({
           async get() {
-            return { exists: true };
+            return {
+              exists: true,
+              data: () => ({
+                actual: {
+                  SALES_IN: 7900000,
+                  MYSC_PREPAY_IN: -1000,
+                },
+              }),
+            };
           },
           set(ref, data, options) {
             writes.push({ ref, data, options });
@@ -120,8 +128,12 @@ describe('cashflow canonical BFF helpers', () => {
     });
 
     const weekWrite = writes.find((write) => write.ref.path.includes('/cashflow_weeks/'));
-    expect(weekWrite.data['actual.DIRECT_COST_OUT']).toBe(3620183);
-    expect(weekWrite.data).not.toHaveProperty('actual');
+    expect(weekWrite.data.actual).toEqual({
+      SALES_IN: 7900000,
+      MYSC_PREPAY_IN: -1000,
+      DIRECT_COST_OUT: 3620183,
+    });
+    expect(Object.prototype.hasOwnProperty.call(weekWrite.data, 'actual.DIRECT_COST_OUT')).toBe(false);
     expect(weekWrite.options).toEqual({ merge: true });
   });
 
