@@ -123,7 +123,7 @@ describe('ProjectEditorWizard dropdown contract', () => {
   });
 
   it('wires admin project editor to contract upload without automatic analysis merge', () => {
-    expect(adminWizardSource).toContain('processProjectRequestContractViaBff');
+    expect(adminWizardSource).toContain('uploadProjectRequestContractFile');
     expect(adminWizardSource).toContain('handleContractFileUpload');
     expect(adminWizardSource).toContain('onContractFileUpload={handleContractFileUpload}');
     expect(adminWizardSource).toContain('contractAnalysisMergeMode="none"');

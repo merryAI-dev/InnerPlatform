@@ -9,8 +9,8 @@ import { useFirebase } from '../../lib/firebase-context';
 import {
   isPlatformApiEnabled,
   notifyProjectRequestRegistrationViaBff,
-  processProjectRequestContractViaBff,
 } from '../../lib/platform-bff-client';
+import { uploadProjectRequestContractFile } from '../../platform/project-contract-upload';
 import {
   buildProjectRequestPayloadFromDraft,
   createProjectEditorDraft,
@@ -80,27 +80,11 @@ export function PortalProjectRegister() {
   };
 
   const handleContractFileUpload = async (file: File) => {
-    if (!authUser?.uid) {
-      throw new Error('로그인 정보를 확인할 수 없습니다.');
-    }
-    if (!isPlatformApiEnabled()) {
-      throw new Error('계약서 업로드는 플랫폼 API가 켜진 환경에서만 사용할 수 있습니다.');
-    }
-    const idToken = authUser.idToken || await getAuthInstance()?.currentUser?.getIdToken() || undefined;
-    const processed = await processProjectRequestContractViaBff({
+    return uploadProjectRequestContractFile({
       tenantId: orgId,
-      actor: {
-        uid: authUser.uid,
-        email: authUser.email,
-        role: authUser.role,
-        idToken,
-      },
+      actor: authUser,
       file,
     });
-    return {
-      contractDocument: processed.contractDocument,
-      contractAnalysis: processed.analysis,
-    };
   };
 
   if (submitted) {
