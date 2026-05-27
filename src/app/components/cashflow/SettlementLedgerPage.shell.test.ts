@@ -28,4 +28,11 @@ describe('SettlementLedgerPage direct-entry workbook flow', () => {
   it('emits a separate saving-state signal while the sheet save request is in flight', () => {
     expect(settlementLedgerSource).toContain("onSavingStateChange?.(sheetSaveState === 'saving')");
   });
+
+  it('does not keep a human-review queue between expense saves and cashflow actual sync', () => {
+    expect(settlementLedgerSource).toContain('const syncableWeeks = payload;');
+    expect(settlementLedgerSource).not.toContain('const syncableWeeks = payload.filter((week) => !blockedWeeks.includes(week));');
+    expect(settlementLedgerSource).not.toContain("expenseSyncState: 'review_required'");
+    expect(settlementLedgerSource).toContain("expenseSyncState: 'synced'");
+  });
 });
