@@ -95,6 +95,7 @@ async function verifyManifest(baseUrl) {
 
   if (manifest.display !== 'standalone') fail('manifest display must be standalone');
   if (manifest.lang !== 'ko-KR') fail('manifest lang must be ko-KR');
+  if (manifest.start_url !== '/mobile-entry') fail('manifest start_url must be /mobile-entry');
 
   const icons = Array.isArray(manifest.icons) ? manifest.icons : [];
   const requiredIcons = new Map([
@@ -162,6 +163,7 @@ async function main() {
     verifyHtmlEndpoint(baseUrl, '/install'),
     verifyHtmlEndpoint(baseUrl, '/install/ios'),
     verifyHtmlEndpoint(baseUrl, '/install/android'),
+    verifyHtmlEndpoint(baseUrl, '/mobile-entry'),
     verifyManifest(baseUrl),
     verifyIcon(baseUrl, '/pwa/myscube-icon-192.png', 192),
     verifyIcon(baseUrl, '/pwa/myscube-icon-512.png', 512),

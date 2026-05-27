@@ -5,7 +5,7 @@
   "description": "MYSC 사내 프로젝트, 재무, 연락처 운영 플랫폼",
   "lang": "ko-KR",
   "dir": "ltr",
-  "start_url": "/",
+  "start_url": "/mobile-entry",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait-primary",

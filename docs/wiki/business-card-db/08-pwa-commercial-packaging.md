@@ -37,6 +37,7 @@ Commercial order:
 
 | Endpoint | Purpose |
 | --- | --- |
+| `/mobile-entry` | PWA start URL. Mobile opens business-card DB first; desktop falls back to the existing workspace entry. |
 | `/install` | Device-aware PWA install landing page |
 | `/install/ios` | iPhone Safari Add to Home Screen instructions |
 | `/install/android` | Android Chrome install instructions and TWA readiness notes |
@@ -46,7 +47,7 @@ Commercial order:
 
 ## PWA Package Contract
 
-- `public/manifest.webmanifest` provides app identity, start URL, scope, standalone display, Korean language metadata, square icons, maskable icon, and shortcuts.
+- `public/manifest.webmanifest` provides app identity, `/mobile-entry` start URL, scope, standalone display, Korean language metadata, square icons, maskable icon, and shortcuts.
 - `public/pwa/myscube-icon-192.png` and `public/pwa/myscube-icon-512.png` are generated from the approved MYSCube logo.
 - `public/pwa/myscube-icon-maskable-512.png` keeps safe-zone padding for Android launcher masks.
 - `public/sw.js` caches only shell assets and brand assets.
@@ -90,7 +91,7 @@ npm run pwa:verify
 - Korean HTML metadata
 - Apple touch icon
 - service worker private cache bypasses
-- `/install`, `/install/ios`, `/install/android`, and `/business-cards` route registration
+- `/install`, `/install/ios`, `/install/android`, `/mobile-entry`, and `/business-cards` route registration
 - same-origin camera permissions policy in `vercel.json`
 
 Live package check after deployment/alias:
@@ -103,7 +104,7 @@ npm run pwa:verify:live -- https://inner-platform.vercel.app
 
 `pwa:verify:live` checks:
 
-- `/install`, `/install/ios`, `/install/android`, and `/business-cards` return the app shell over HTTPS
+- `/install`, `/install/ios`, `/install/android`, `/mobile-entry`, and `/business-cards` return the app shell over HTTPS
 - live manifest fields and icon references
 - live PNG icon dimensions
 - service worker private cache bypasses

@@ -5,9 +5,34 @@ import {
 } from './business-card-domain.mjs';
 
 const DEFAULT_MODEL = 'gemini-2.5-flash';
+const DEFAULT_FALLBACK_MODELS = ['gemini-2.5-flash-lite'];
 
 function resolveModel(env = process.env) {
   return readOptionalText(env.BUSINESS_CARD_GEMINI_MODEL) || DEFAULT_MODEL;
+}
+
+function parseModelList(value) {
+  return String(value || '')
+    .split(',')
+    .map((entry) => readOptionalText(entry))
+    .filter(Boolean);
+}
+
+function resolveModelCandidates(env = process.env, primaryModel = resolveModel(env)) {
+  const seen = new Set();
+  return [
+    primaryModel,
+    ...parseModelList(env.BUSINESS_CARD_GEMINI_FALLBACK_MODELS),
+    ...DEFAULT_FALLBACK_MODELS,
+  ].filter((candidate) => {
+    if (!candidate || seen.has(candidate)) return false;
+    seen.add(candidate);
+    return true;
+  });
+}
+
+function resolveApiKey(env = process.env) {
+  return readOptionalText(env.GEMINI_API_KEY || env.GOOGLE_API_KEY);
 }
 
 function buildPrompt(fileName) {
@@ -118,14 +143,26 @@ function readResponseText(response) {
   return readOptionalText(response?.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('\n'));
 }
 
+function isRetryableGeminiError(error) {
+  const text = error instanceof Error ? error.message : String(error || '');
+  return /(?:503|UNAVAILABLE|RESOURCE_EXHAUSTED|high demand|try again later|temporarily unavailable)/i.test(text);
+}
+
 export function createBusinessCardGeminiAiService(options = {}) {
   const env = options.env || process.env;
   const model = options.model || resolveModel(env);
+  const modelCandidates = options.modelCandidates || resolveModelCandidates(env, model);
   const client = options.client || null;
   const importSdk = options.importSdk || (() => import('@google/genai'));
+  const configuredProvider = resolveApiKey(env) ? 'gemini-api' : 'vertex-ai';
 
   async function getClient() {
     if (client) return client;
+    const apiKey = resolveApiKey(env);
+    if (apiKey) {
+      const { GoogleGenAI } = await importSdk();
+      return new GoogleGenAI({ apiKey });
+    }
     if (String(env.GOOGLE_GENAI_USE_VERTEXAI || '').toLowerCase() !== 'true') return null;
     const { GoogleGenAI } = await importSdk();
     return new GoogleGenAI({
@@ -145,7 +182,7 @@ export function createBusinessCardGeminiAiService(options = {}) {
         ai = await getClient();
       } catch (error) {
         return {
-          provider: 'vertex-ai',
+          provider: configuredProvider,
           model,
           status: 'manual_review',
           extracted: fallback,
@@ -158,7 +195,7 @@ export function createBusinessCardGeminiAiService(options = {}) {
 
       if (!ai?.models?.generateContent) {
         return {
-          provider: 'vertex-ai',
+          provider: configuredProvider,
           model,
           status: 'manual_review',
           extracted: fallback,
@@ -169,65 +206,71 @@ export function createBusinessCardGeminiAiService(options = {}) {
         };
       }
 
-      try {
-        const response = await ai.models.generateContent({
-          model,
-          contents: [
-            {
-              role: 'user',
-              parts: [
-                { text: buildPrompt(input?.fileName) },
-                {
-                  inlineData: {
-                    mimeType: input?.mimeType || 'image/jpeg',
-                    data: input?.contentBase64,
+      let lastError = null;
+      for (const candidateModel of modelCandidates) {
+        try {
+          const response = await ai.models.generateContent({
+            model: candidateModel,
+            contents: [
+              {
+                role: 'user',
+                parts: [
+                  { text: buildPrompt(input?.fileName) },
+                  {
+                    inlineData: {
+                      mimeType: input?.mimeType || 'image/jpeg',
+                      data: input?.contentBase64,
+                    },
                   },
-                },
-              ],
+                ],
+              },
+            ],
+            config: {
+              responseMimeType: 'application/json',
+              responseSchema,
             },
-          ],
-          config: {
-            responseMimeType: 'application/json',
-            responseSchema,
-          },
-        });
-        const rawText = await readResponseText(response);
-        const parsed = extractJson(rawText);
-        if (!isStructuredExtractionCandidate(parsed)) {
+          });
+          const rawText = await readResponseText(response);
+          const parsed = extractJson(rawText);
+          if (!isStructuredExtractionCandidate(parsed)) {
+            return {
+              provider: configuredProvider,
+              model: candidateModel,
+              status: 'manual_review',
+              extracted: buildEmptyBusinessCardExtraction([
+                'Gemini 응답 형식이 맞지 않아 수동 검토가 필요합니다.',
+              ]),
+              rawResponseText: rawText,
+              error: {
+                code: 'gemini_malformed_response',
+                message: 'Gemini did not return the expected business-card JSON shape.',
+              },
+            };
+          }
+          const extracted = normalizeBusinessCardExtraction(parsed);
           return {
-            provider: 'vertex-ai',
-            model,
-            status: 'manual_review',
-            extracted: buildEmptyBusinessCardExtraction([
-              'Gemini 응답 형식이 맞지 않아 수동 검토가 필요합니다.',
-            ]),
+            provider: configuredProvider,
+            model: candidateModel,
+            status: 'ok',
+            extracted,
             rawResponseText: rawText,
-            error: {
-              code: 'gemini_malformed_response',
-              message: 'Gemini did not return the expected business-card JSON shape.',
-            },
           };
+        } catch (error) {
+          lastError = error;
+          if (!isRetryableGeminiError(error)) break;
         }
-        const extracted = normalizeBusinessCardExtraction(parsed);
-        return {
-          provider: 'vertex-ai',
-          model,
-          status: 'ok',
-          extracted,
-          rawResponseText: rawText,
-        };
-      } catch (error) {
-        return {
-          provider: 'vertex-ai',
-          model,
-          status: 'failed',
-          extracted: fallback,
-          error: {
-            code: 'gemini_extract_failed',
-            message: error instanceof Error ? error.message : String(error),
-          },
-        };
       }
+
+      return {
+        provider: configuredProvider,
+        model: modelCandidates.join(','),
+        status: 'failed',
+        extracted: fallback,
+        error: {
+          code: 'gemini_extract_failed',
+          message: lastError instanceof Error ? lastError.message : String(lastError),
+        },
+      };
     },
   };
 }
@@ -235,5 +278,7 @@ export function createBusinessCardGeminiAiService(options = {}) {
 export {
   buildPrompt,
   responseSchema as businessCardGeminiResponseSchema,
+  resolveApiKey,
   resolveModel,
+  resolveModelCandidates,
 };

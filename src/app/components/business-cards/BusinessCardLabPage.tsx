@@ -38,8 +38,8 @@ import {
 type BusinessCardTab = 'search' | 'capture' | 'review';
 
 const TABS: Array<{ id: BusinessCardTab; label: string; description: string }> = [
-  { id: 'search', label: '검색', description: '전사 연락처를 이름, 회사, 이메일, 전화번호로 찾습니다.' },
   { id: 'capture', label: '명함 등록', description: '모바일 카메라나 이미지 파일로 새 명함을 등록합니다.' },
+  { id: 'search', label: '검색', description: '전사 연락처를 이름, 회사, 이메일, 전화번호로 찾습니다.' },
   { id: 'review', label: '검토 대기', description: 'Gemini 추출 후 저장 전 상태의 명함을 확인합니다.' },
 ];
 

@@ -5,11 +5,13 @@ import { PortalLayout } from './components/portal/PortalLayout';
 import { AdminRouteProviders } from './data/admin-route-providers';
 import { PortalRouteProviders } from './data/portal-route-providers';
 import { loadLazyRouteModule } from './platform/lazy-route';
+import { BUSINESS_CARD_MOBILE_ENTRY_PATH, shouldUseBusinessCardMobileEntry } from './platform/mobile-entry';
 
 // Lazy-loaded pages — each becomes a separate chunk
 const LoginPage = lazy(() => import('./components/auth/LoginPage').then(m => ({ default: m.LoginPage })));
 const WorkspaceSelectPage = lazy(() => import('./components/auth/WorkspaceSelectPage').then(m => ({ default: m.WorkspaceSelectPage })));
 const PwaInstallPage = lazy(() => import('./components/pwa/PwaInstallPage').then(m => ({ default: m.PwaInstallPage })));
+const MobileEntryPage = lazy(() => import('./components/pwa/MobileEntryPage').then(m => ({ default: m.MobileEntryPage })));
 const FeatureSearchPage = lazy(() => import('./components/dashboard/FeatureSearchPage').then(m => ({ default: m.FeatureSearchPage })));
 const DashboardPage = lazy(() => import('./components/dashboard/DashboardPage').then(m => ({ default: m.DashboardPage })));
 const BoardFeedPage = lazy(() => import('./components/board/BoardFeedPage').then(m => ({ default: m.BoardFeedPage })));
@@ -95,6 +97,18 @@ function PortalRouteShell() {
   return <PortalRouteProviders><PortalLayout /></PortalRouteProviders>;
 }
 
+function MobileAwareAdminHome() {
+  const useBusinessCardEntry = shouldUseBusinessCardMobileEntry({
+    userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
+    viewportWidth: typeof window !== 'undefined' ? window.innerWidth : undefined,
+    requestedPath: typeof window !== 'undefined' ? window.location.pathname : '/',
+  });
+
+  return useBusinessCardEntry
+    ? <Navigate to={BUSINESS_CARD_MOBILE_ENTRY_PATH} replace />
+    : <S C={FeatureSearchPage} />;
+}
+
 export const router = createBrowserRouter([
   // ── Login ──
   { path: '/login', element: <S C={LoginPage} /> },
@@ -102,12 +116,13 @@ export const router = createBrowserRouter([
   { path: '/install', element: <S C={PwaInstallPage} /> },
   { path: '/install/ios', element: <S C={PwaInstallPage} /> },
   { path: '/install/android', element: <S C={PwaInstallPage} /> },
+  { path: '/mobile-entry', element: <S C={MobileEntryPage} /> },
   // ── Admin (관리자) ──
   {
     path: '/',
     element: <AdminRouteShell />,
     children: [
-      { index: true, element: <S C={FeatureSearchPage} /> },
+      { index: true, element: <MobileAwareAdminHome /> },
       { path: 'dashboard', element: <S C={DashboardPage} /> },
       { path: 'business-cards', element: <S C={BusinessCardLabPage} /> },
       // ── Company Board (전사 게시판) ──

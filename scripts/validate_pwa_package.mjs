@@ -43,6 +43,7 @@ for (const field of ['id', 'name', 'short_name', 'start_url', 'scope', 'display'
 
 if (manifest.display !== 'standalone') fail('manifest display must be standalone');
 if (manifest.lang !== 'ko-KR') fail('manifest lang must be ko-KR');
+if (manifest.start_url !== '/mobile-entry') fail('manifest start_url must be /mobile-entry');
 if (!Array.isArray(manifest.icons) || manifest.icons.length < 3) fail('manifest must include any and maskable icons');
 
 const requiredIcons = new Map([
@@ -72,7 +73,7 @@ for (const privatePrefix of ['/api/', '/api/v1/', '/business-card-imports/']) {
   requireText('public/sw.js', privatePrefix, `service worker private cache bypass ${privatePrefix}`);
 }
 
-for (const route of ["'/install'", "'/install/ios'", "'/install/android'", "'business-cards'"]) {
+for (const route of ["'/install'", "'/install/ios'", "'/install/android'", "'/mobile-entry'", "'business-cards'"]) {
   requireText('src/app/routes.tsx', route, `PWA install route ${route}`);
 }
 

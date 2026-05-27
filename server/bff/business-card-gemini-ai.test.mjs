@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { buildPrompt, createBusinessCardGeminiAiService } from './business-card-gemini-ai.mjs';
+import {
+  buildPrompt,
+  createBusinessCardGeminiAiService,
+  resolveApiKey,
+  resolveModelCandidates,
+} from './business-card-gemini-ai.mjs';
 
 describe('business-card-gemini-ai', () => {
   it('normalizes structured Gemini JSON responses', async () => {
@@ -74,6 +79,103 @@ describe('business-card-gemini-ai', () => {
     expect(result.status).toBe('manual_review');
     expect(result.error.code).toBe('gemini_not_configured');
     expect(result.extracted.warnings[0]).toContain('수동 검토');
+  });
+
+  it('uses Gemini API key configuration before Vertex AI', async () => {
+    const constructed = [];
+    const generateContent = vi.fn(async () => ({
+      text: JSON.stringify({
+        name: { value: '김명함', confidence: 'high', evidence: '김명함' },
+        organization: { value: 'MYSC', confidence: 'high', evidence: 'MYSC' },
+        department: { value: '', confidence: 'low', evidence: '' },
+        title: { value: '', confidence: 'low', evidence: '' },
+        role: { value: '', confidence: 'low', evidence: '' },
+        emails: [{ value: 'card@example.com', confidence: 'high', evidence: 'card@example.com' }],
+        phones: [],
+        website: { value: '', confidence: 'low', evidence: '' },
+        address: { value: '', confidence: 'low', evidence: '' },
+        memo: { value: '', confidence: 'low', evidence: '' },
+        rawText: '김명함 MYSC card@example.com',
+        warnings: [],
+      }),
+    }));
+    const service = createBusinessCardGeminiAiService({
+      env: {
+        GEMINI_API_KEY: '  ai-studio-key-with-newline\n',
+        GOOGLE_GENAI_USE_VERTEXAI: 'true',
+        GOOGLE_CLOUD_PROJECT: 'should-not-be-used',
+      },
+      importSdk: async () => ({
+        GoogleGenAI: class {
+          constructor(options) {
+            constructed.push(options);
+            this.models = { generateContent };
+          }
+        },
+      }),
+    });
+
+    const result = await service.analyzeBusinessCard({
+      fileName: 'card.jpg',
+      mimeType: 'image/jpeg',
+      contentBase64: 'abc',
+    });
+
+    expect(constructed).toEqual([{ apiKey: 'ai-studio-key-with-newline' }]);
+    expect(result.provider).toBe('gemini-api');
+    expect(result.status).toBe('ok');
+  });
+
+  it('trims Gemini API keys from environment variables', () => {
+    expect(resolveApiKey({ GEMINI_API_KEY: '  key\n' })).toBe('key');
+    expect(resolveApiKey({ GOOGLE_API_KEY: '  fallback-key\n' })).toBe('fallback-key');
+  });
+
+  it('builds a deduped Gemini model fallback list', () => {
+    expect(resolveModelCandidates({
+      BUSINESS_CARD_GEMINI_MODEL: 'gemini-primary',
+      BUSINESS_CARD_GEMINI_FALLBACK_MODELS: ' gemini-lite, gemini-primary, gemini-extra ',
+    })).toEqual(['gemini-primary', 'gemini-lite', 'gemini-extra', 'gemini-2.5-flash-lite']);
+  });
+
+  it('retries transient Gemini capacity failures with a fallback model', async () => {
+    const generateContent = vi.fn(async ({ model }) => {
+      if (model === 'gemini-primary') {
+        throw new Error('503 UNAVAILABLE: model is currently experiencing high demand');
+      }
+      return {
+        text: JSON.stringify({
+          name: { value: '박명함', confidence: 'high', evidence: '박명함' },
+          organization: { value: 'MYSC', confidence: 'high', evidence: 'MYSC' },
+          department: { value: '', confidence: 'low', evidence: '' },
+          title: { value: '', confidence: 'low', evidence: '' },
+          role: { value: '', confidence: 'low', evidence: '' },
+          emails: [{ value: 'card@example.com', confidence: 'high', evidence: 'card@example.com' }],
+          phones: [],
+          website: { value: '', confidence: 'low', evidence: '' },
+          address: { value: '', confidence: 'low', evidence: '' },
+          memo: { value: '', confidence: 'low', evidence: '' },
+          rawText: '박명함 MYSC card@example.com',
+          warnings: [],
+        }),
+      };
+    });
+    const service = createBusinessCardGeminiAiService({
+      client: { models: { generateContent } },
+      modelCandidates: ['gemini-primary', 'gemini-lite'],
+    });
+
+    const result = await service.analyzeBusinessCard({
+      fileName: 'card.jpg',
+      mimeType: 'image/jpeg',
+      contentBase64: Buffer.from('fake-image', 'utf8').toString('base64'),
+    });
+
+    expect(generateContent).toHaveBeenCalledTimes(2);
+    expect(generateContent.mock.calls.map(([input]) => input.model)).toEqual(['gemini-primary', 'gemini-lite']);
+    expect(result.status).toBe('ok');
+    expect(result.model).toBe('gemini-lite');
+    expect(result.extracted.name.value).toBe('박명함');
   });
 
   it('marks malformed Gemini responses for manual review', async () => {

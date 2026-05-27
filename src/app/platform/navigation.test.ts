@@ -224,10 +224,23 @@ describe('resolveLoginSuccessPath', () => {
     expect(resolveLoginSuccessPath('viewer', undefined, '/')).toBe('/');
   });
 
+  it('uses business cards as the mobile default post-login entry', () => {
+    const mobileContext = {
+      userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) Mobile/15E148 Safari/604.1',
+    };
+
+    expect(resolveLoginSuccessPath('admin', undefined, undefined, mobileContext)).toBe('/business-cards');
+    expect(resolveLoginSuccessPath('pm', undefined, '/', mobileContext)).toBe('/business-cards');
+    expect(resolveLoginSuccessPath('viewer', undefined, '/mobile-entry', mobileContext)).toBe('/business-cards');
+  });
+
   it('preserves explicit deep links after login when they are role-safe', () => {
     expect(resolveLoginSuccessPath('admin', 'admin', '/users')).toBe('/users');
     expect(resolveLoginSuccessPath('pm', undefined, '/portal/budget')).toBe('/portal/project-select?redirect=%2Fportal%2Fbudget');
     expect(resolveLoginSuccessPath('pm', undefined, '/users')).toBe('/portal/project-select?redirect=%2Fportal');
+    expect(resolveLoginSuccessPath('pm', undefined, '/portal/cashflow', {
+      viewportWidth: 390,
+    })).toBe('/portal/project-select?redirect=%2Fportal%2Fcashflow');
   });
 });
 

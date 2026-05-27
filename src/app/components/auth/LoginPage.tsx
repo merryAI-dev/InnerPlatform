@@ -48,10 +48,10 @@ function PostLoginTransition({ displayName }: { displayName: string }) {
                 Login Complete
               </p>
               <h1 className="mt-2 text-[24px] font-extrabold leading-tight text-slate-950 dark:text-slate-50 md:text-[30px]">
-                {displayName}님, 업무 검색 화면을 준비하고 있습니다
+                {displayName}님, 시작 화면을 준비하고 있습니다
               </h1>
               <p className="mt-3 text-[13px] leading-6 text-slate-600 dark:text-slate-300">
-                필요한 기능을 바로 찾을 수 있도록 진입 화면을 여는 중입니다.
+                현재 기기와 요청한 링크에 맞는 진입 화면을 여는 중입니다.
               </p>
             </div>
             <div className="h-1.5 overflow-hidden rounded-full bg-slate-200/80 dark:bg-slate-800/80">
@@ -109,6 +109,10 @@ export function LoginPage() {
         user.role,
         activeWorkspace,
         redirectFrom,
+        {
+          userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
+          viewportWidth: typeof window !== 'undefined' ? window.innerWidth : undefined,
+        },
       );
       const timer = window.setTimeout(() => {
         navigate(target, { replace: true });

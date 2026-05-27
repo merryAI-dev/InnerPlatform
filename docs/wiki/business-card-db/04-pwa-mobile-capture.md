@@ -12,11 +12,12 @@ unblocks:
 ## Routes
 
 ```text
+/mobile-entry
 /business-cards
 /portal/business-cards
 ```
 
-Both routes point to the same LAB business card workspace with role-aware shell wrapping.
+`/mobile-entry` is the PWA start URL: mobile users land on the business-card DB first, while desktop users keep the existing workspace entry. The business-card routes point to the same LAB business card workspace with role-aware shell wrapping.
 
 ## Capture UI
 
