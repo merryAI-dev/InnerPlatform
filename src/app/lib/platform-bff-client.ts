@@ -562,8 +562,20 @@ export interface ProjectCashflowActualSyncResult {
   sheetCount: number;
   upsertedWeeks: number;
   clearedWeeks: number;
-  weeks: Array<{ yearMonth: string; weekNo: number }>;
-  cleared: Array<{ yearMonth: string; weekNo: number }>;
+  weeks: Array<{
+    yearMonth: string;
+    weekNo: number;
+    weekStart?: string;
+    weekEnd?: string;
+    amounts?: Record<string, number>;
+  }>;
+  cleared: Array<{
+    yearMonth: string;
+    weekNo: number;
+    weekStart?: string;
+    weekEnd?: string;
+    amounts?: Record<string, number>;
+  }>;
   updatedAt: string;
 }
 

@@ -31,7 +31,12 @@ import {
 import { applyWeekAmountsToLocalWeeks } from './cashflow-weeks.local-state';
 import { useFirebase } from '../lib/firebase-context';
 import { getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
-import { isPlatformApiEnabled, upsertCashflowWeekAmountsViaBff } from '../lib/platform-bff-client';
+import {
+  isPlatformApiEnabled,
+  syncProjectCashflowActualsViaBff,
+  upsertCashflowWeekAmountsViaBff,
+  type ProjectCashflowActualSyncResult,
+} from '../lib/platform-bff-client';
 import { addMonthsToYearMonth, getSeoulTodayIso } from '../platform/business-days';
 import { getMonthMondayWeeks } from '../platform/cashflow-weeks';
 import { normalizeProjectIds } from './project-assignment';
@@ -64,6 +69,7 @@ interface CashflowWeekActions {
   }) => Promise<void>;
   submitWeekAsPm: (input: { projectId: string; yearMonth: string; weekNo: number }) => Promise<void>;
   closeWeekAsAdmin: (input: { projectId: string; yearMonth: string; weekNo: number }) => Promise<void>;
+  syncProjectActualsFromExpenseSheets: (input: { projectId: string }) => Promise<ProjectCashflowActualSyncResult>;
   updateVarianceFlag: (input: {
     sheetId: string;
     varianceFlag: VarianceFlag | undefined;
@@ -347,6 +353,59 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     });
   }, [upsertWeekAmounts]);
 
+  const syncProjectActualsFromExpenseSheets = useCallback(async (input: {
+    projectId: string;
+  }): Promise<ProjectCashflowActualSyncResult> => {
+    const actor = user;
+    const projectId = input.projectId.trim();
+    if (!actor || !projectId) throw new Error('Actual 동기화 권한 정보가 없습니다.');
+    if (!isPlatformApiEnabled() || actor.source === 'dev_harness') {
+      throw new Error('Actual 동기화 API가 연결되어 있지 않습니다.');
+    }
+
+    const result = await syncProjectCashflowActualsViaBff({
+      tenantId: orgId,
+      actor: {
+        uid: actor.uid,
+        email: actor.email,
+        role: actor.role,
+        idToken: (actor as any).idToken,
+        googleAccessToken: (actor as any).googleAccessToken,
+      },
+      projectId,
+    });
+
+    if (!result.skipped) {
+      setWeeks((prev) => [...result.weeks, ...result.cleared].reduce((nextWeeks, week) => {
+        const fallback = getMonthMondayWeeks(week.yearMonth).find((candidate) => candidate.weekNo === week.weekNo);
+        return applyWeekAmountsToLocalWeeks({
+          weeks: nextWeeks,
+          orgId,
+          actorUid: actor.uid,
+          actorName: actor.name,
+          projectId,
+          yearMonth: week.yearMonth,
+          weekNo: week.weekNo,
+          weekStart: week.weekStart || fallback?.weekStart || '',
+          weekEnd: week.weekEnd || fallback?.weekEnd || '',
+          mode: 'actual',
+          amounts: (week.amounts || {}) as Partial<Record<CashflowSheetLineId, number>>,
+          now: result.updatedAt,
+        });
+      }, prev));
+    }
+
+    console.groupCollapsed(`[CashflowActualSync] project=${projectId}`);
+    console.log('response', result);
+    console.table(result.weeks.map((week) => ({
+      week: `${week.yearMonth}:w${week.weekNo}`,
+      nonZero: Object.fromEntries(Object.entries(week.amounts || {}).filter(([, amount]) => Number(amount) !== 0)),
+    })));
+    console.groupEnd();
+
+    return result;
+  }, [orgId, user]);
+
   const submitWeekAsPm = useCallback(async (input: {
     projectId: string;
     yearMonth: string;
@@ -502,6 +561,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     upsertLineAmount,
     submitWeekAsPm,
     closeWeekAsAdmin,
+    syncProjectActualsFromExpenseSheets,
     updateVarianceFlag,
     getWeeksForProject,
   }), [
@@ -515,6 +575,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     upsertLineAmount,
     submitWeekAsPm,
     closeWeekAsAdmin,
+    syncProjectActualsFromExpenseSheets,
     updateVarianceFlag,
     getWeeksForProject,
   ]);

@@ -6,11 +6,17 @@ const cashflowProjectSheetSource = readFileSync(
   resolve(import.meta.dirname, 'CashflowProjectSheet.tsx'),
   'utf8',
 );
+const cashflowWeeksStoreSource = readFileSync(
+  resolve(import.meta.dirname, '../../data/cashflow-weeks-store.tsx'),
+  'utf8',
+);
 
 describe('CashflowProjectSheet actual sync flow', () => {
   it('keeps actual sync separate from manual actual save', () => {
     expect(cashflowProjectSheetSource).toContain('Actual 동기화');
-    expect(cashflowProjectSheetSource).toContain('syncProjectCashflowActualsViaBff');
+    expect(cashflowProjectSheetSource).toContain('syncProjectActualsFromExpenseSheets');
+    expect(cashflowWeeksStoreSource).toContain('syncProjectCashflowActualsViaBff');
+    expect(cashflowWeeksStoreSource).toContain('applyWeekAmountsToLocalWeeks');
     expect(cashflowProjectSheetSource).toContain('Actual 저장');
     expect(cashflowProjectSheetSource).toContain("toast.message('저장할 변경사항이 없습니다.')");
   });
