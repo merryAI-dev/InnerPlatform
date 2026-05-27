@@ -43,6 +43,9 @@ Preview 환경변수:
 
 - 랜덤 URL 예: `inner-platform-xxxxxxxxx-merryai-devs-projects.vercel.app`
 - 이런 주소는 매번 바뀌므로 Authorized domains 운영 대상으로 삼지 않는다.
+- Stage/QA 확인 링크로도 랜덤 preview URL을 전달하지 않는다.
+- Preview 배포가 랜덤 URL로 생성되면 반드시 고정 preview alias에 연결한 뒤 그 alias만 공유한다.
+- Firebase Auth가 켜진 환경에서 임시 URL을 공유하면 Google 로그인 단계에서 `auth/unauthorized-domain`이 발생할 수 있으므로, 임시 URL은 artifact 디버깅 용도로만 내부 확인한다.
 
 ## 기대 동작
 
@@ -100,11 +103,12 @@ Preview 환경변수:
 ## 배포 후 확인 순서
 
 1. `vercel env ls` 에서 Preview env 두 개가 보이는지 확인
-2. `vercel inspect <latest deployment>` 로 alias가 `inner-platform-git-ft-izzie-merryai-devs-projects.vercel.app` 인지 확인
-3. 랜덤 preview URL 접속
-4. 안내 배너, 버튼 비활성화, 고정 preview 이동 버튼 확인
-5. 고정 preview alias 접속
-6. Google 로그인 정상 여부 확인
+2. Preview 배포 URL이 랜덤 URL이면 `vercel alias set <deployment-host> inner-platform-git-ft-izzie-merryai-devs-projects.vercel.app` 로 고정 alias를 갱신
+3. `vercel inspect inner-platform-git-ft-izzie-merryai-devs-projects.vercel.app` 로 alias가 최신 deployment를 바라보는지 확인
+4. 랜덤 preview URL 접속
+5. 안내 배너, 버튼 비활성화, 고정 preview 이동 버튼 확인
+6. 고정 preview alias 접속
+7. Google 로그인 정상 여부 확인
 
 ## 관련 코드
 
