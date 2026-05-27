@@ -27,6 +27,18 @@ export interface CashflowTotals {
   net: number;
 }
 
+export interface CashflowDerivedWeekTotals extends CashflowTotals {
+  weekNo: number;
+  weekIn: number;
+  weekOut: number;
+}
+
+export interface CashflowDerivedTotals {
+  rowTotals: Record<CashflowSheetLineId, number>;
+  weekTotals: CashflowDerivedWeekTotals[];
+  monthTotals: CashflowTotals;
+}
+
 export function computeCashflowTotals(
   sheet: Partial<Record<CashflowSheetLineId, number>> | undefined,
 ): CashflowTotals {
@@ -35,6 +47,48 @@ export function computeCashflowTotals(
   const totalIn = CASHFLOW_IN_LINES.reduce((acc, id) => acc + (Number(src[id]) || 0), 0);
   const totalOut = CASHFLOW_OUT_LINES.reduce((acc, id) => acc + (Number(src[id]) || 0), 0);
   return { totalIn, totalOut, net: totalIn - totalOut };
+}
+
+export function computeCashflowDerivedTotals(input: {
+  weeks: Array<{
+    weekNo: number;
+    amounts: Partial<Record<CashflowSheetLineId, number>>;
+  }>;
+  openingIn?: number;
+  openingOut?: number;
+}): CashflowDerivedTotals {
+  const rowTotals = Object.fromEntries(CASHFLOW_ALL_LINES.map((id) => [id, 0])) as Record<CashflowSheetLineId, number>;
+  let runningIn = Number(input.openingIn || 0);
+  let runningOut = Number(input.openingOut || 0);
+  const weekTotals = input.weeks.map((week) => {
+    const totals = computeCashflowTotals(week.amounts);
+    for (const lineId of CASHFLOW_ALL_LINES) {
+      rowTotals[lineId] += Number(week.amounts[lineId] || 0);
+    }
+    runningIn += totals.totalIn;
+    runningOut += totals.totalOut;
+    return {
+      weekNo: week.weekNo,
+      totalIn: totals.totalIn,
+      totalOut: totals.totalOut,
+      net: runningIn - runningOut,
+      weekIn: totals.totalIn,
+      weekOut: totals.totalOut,
+    };
+  });
+  const monthTotals = weekTotals.reduce<CashflowTotals>(
+    (acc, week) => ({
+      totalIn: acc.totalIn + week.totalIn,
+      totalOut: acc.totalOut + week.totalOut,
+      net: week.net,
+    }),
+    {
+      totalIn: 0,
+      totalOut: 0,
+      net: Number(input.openingIn || 0) - Number(input.openingOut || 0),
+    },
+  );
+  return { rowTotals, weekTotals, monthTotals };
 }
 
 function yearMonthToNumber(value: string): number | null {

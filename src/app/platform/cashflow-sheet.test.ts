@@ -3,6 +3,7 @@ import type { Transaction } from '../data/types';
 import type { MonthMondayWeek } from './cashflow-weeks';
 import {
   aggregateTransactionsToActual,
+  computeCashflowDerivedTotals,
   computeOpeningCashflowTotals,
   computeCashflowTotals,
   hasAnyCashflowKeys,
@@ -126,6 +127,43 @@ describe('computeCashflowTotals', () => {
   it('treats NaN-coercible values as 0', () => {
     const sheet = { SALES_IN: undefined } as unknown as Record<string, number>;
     expect(computeCashflowTotals(sheet)).toEqual({ totalIn: 0, totalOut: 0, net: 0 });
+  });
+});
+
+describe('computeCashflowDerivedTotals', () => {
+  it('keeps weekly in/out totals scoped to each week while balance carries opening totals', () => {
+    const result = computeCashflowDerivedTotals({
+      openingIn: 565_442_002,
+      openingOut: 7_639_093,
+      weeks: [
+        {
+          weekNo: 1,
+          amounts: {
+            MYSC_PREPAY_IN: -8_615_904,
+            DIRECT_COST_OUT: 3_620_183,
+            INPUT_VAT_OUT: 17_239,
+            MYSC_LABOR_OUT: 48_064_130,
+          },
+        },
+        { weekNo: 2, amounts: {} },
+      ],
+    });
+
+    expect(result.weekTotals[0]).toMatchObject({
+      totalIn: -8_615_904,
+      totalOut: 51_701_552,
+      net: 497_485_453,
+    });
+    expect(result.weekTotals[1]).toMatchObject({
+      totalIn: 0,
+      totalOut: 0,
+      net: 497_485_453,
+    });
+    expect(result.monthTotals).toEqual({
+      totalIn: -8_615_904,
+      totalOut: 51_701_552,
+      net: 497_485_453,
+    });
   });
 });
 
