@@ -28,6 +28,14 @@ export function applyWeekAmountsToLocalWeeks(input: {
         ...current[input.mode],
         ...normalizedAmounts,
       },
+      ...(input.mode === 'actual'
+        ? {
+          pmSubmitted: true,
+          pmSubmittedAt: input.now,
+          pmSubmittedByUid: input.actorUid,
+          pmSubmittedByName: input.actorName,
+        }
+        : {}),
       updatedAt: input.now,
       updatedByUid: input.actorUid,
       updatedByName: input.actorName,
@@ -47,7 +55,14 @@ export function applyWeekAmountsToLocalWeeks(input: {
       weekEnd: input.weekEnd,
       projection: input.mode === 'projection' ? normalizedAmounts : {},
       actual: input.mode === 'actual' ? normalizedAmounts : {},
-      pmSubmitted: false,
+      pmSubmitted: input.mode === 'actual',
+      ...(input.mode === 'actual'
+        ? {
+          pmSubmittedAt: input.now,
+          pmSubmittedByUid: input.actorUid,
+          pmSubmittedByName: input.actorName,
+        }
+        : {}),
       adminClosed: false,
       createdAt: input.now,
       updatedAt: input.now,
