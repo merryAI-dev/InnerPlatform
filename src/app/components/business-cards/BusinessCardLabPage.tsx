@@ -1,13 +1,15 @@
-import { useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import {
   AlertTriangle,
   Camera,
   CheckCircle2,
+  Download,
+  Image as ImageIcon,
   Loader2,
   Search,
   Sparkles,
-  Upload,
   UserRoundCheck,
+  X,
 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -16,11 +18,9 @@ import { useAuth } from '../../data/auth-store';
 import {
   confirmBusinessCardImportViaBff,
   isPlatformApiEnabled,
-  listBusinessCardImportsViaBff,
   processBusinessCardViaBff,
   searchContactsViaBff,
   type ActorLike,
-  type BusinessCardImportListItem,
   type BusinessCardImportResult,
   type ContactSearchResult,
 } from '../../lib/platform-bff-client';
@@ -35,18 +35,45 @@ import {
   isLowConfidenceField,
 } from './business-card-quality';
 
-type BusinessCardTab = 'search' | 'capture' | 'review';
+type BusinessCardTab = 'search' | 'capture';
 
 const TABS: Array<{ id: BusinessCardTab; label: string; description: string }> = [
-  { id: 'capture', label: '명함 등록', description: '모바일 카메라나 이미지 파일로 새 명함을 등록합니다.' },
+  { id: 'capture', label: '명함 등록', description: '카메라 가이드에 맞춰 촬영하거나 이미지 파일로 새 명함을 등록합니다.' },
   { id: 'search', label: '검색', description: '전사 연락처를 이름, 회사, 이메일, 전화번호로 찾습니다.' },
-  { id: 'review', label: '검토 대기', description: 'Gemini 추출 후 저장 전 상태의 명함을 확인합니다.' },
 ];
+
+const CAMERA_GUIDE = {
+  left: 0.11,
+  top: 0.28,
+  width: 0.78,
+  aspectRatio: 1.58,
+};
 
 function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 KB';
   if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
   return `${Math.ceil(bytes / 1024)} KB`;
+}
+
+function escapeCsvCell(value: unknown): string {
+  const text = String(value ?? '').replace(/\r?\n/g, ' ').trim();
+  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function buildContactsCsv(items: ContactSearchResult[]): string {
+  const header = ['이름', '회사/소속', '부서', '직함', '역할', '이메일', '전화번호', '웹사이트', '수정일'];
+  const rows = items.map((item) => [
+    item.name,
+    item.organization,
+    item.department || '',
+    item.title || '',
+    item.role || '',
+    item.emails?.join('; ') || '',
+    item.phones?.join('; ') || '',
+    item.website || '',
+    item.updatedAt || '',
+  ]);
+  return [header, ...rows].map((row) => row.map(escapeCsvCell).join(',')).join('\n');
 }
 
 export function BusinessCardLabPage() {
@@ -57,11 +84,13 @@ export function BusinessCardLabPage() {
   const [preparing, setPreparing] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [loadingImports, setLoadingImports] = useState(false);
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const [cameraStarting, setCameraStarting] = useState(false);
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const [cameraError, setCameraError] = useState('');
   const [searching, setSearching] = useState(false);
   const [workflowMessage, setWorkflowMessage] = useState('');
   const [currentImport, setCurrentImport] = useState<BusinessCardImportResult | null>(null);
-  const [reviewImports, setReviewImports] = useState<BusinessCardImportListItem[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<ContactSearchResult[]>([]);
   const [formState, setFormState] = useState({
@@ -77,6 +106,7 @@ export function BusinessCardLabPage() {
     memo: '',
   });
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
 
   const activeTabMeta = useMemo(
     () => TABS.find((tab) => tab.id === activeTab) || TABS[0],
@@ -93,8 +123,16 @@ export function BusinessCardLabPage() {
   const canSave = canConfirmBusinessCardContact(confirmPayload) && Boolean(currentImport?.importId);
   const bffEnabled = isPlatformApiEnabled();
 
-  async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
+  useEffect(() => {
+    if (!scannerOpen || !cameraStream || !videoRef.current) return;
+    videoRef.current.srcObject = cameraStream;
+  }, [cameraStream, scannerOpen]);
+
+  useEffect(() => () => {
+    cameraStream?.getTracks().forEach((track) => track.stop());
+  }, [cameraStream]);
+
+  async function prepareSelectedFile(file: File) {
     setImageError('');
     if (!file) return;
     setPreparing(true);
@@ -107,19 +145,116 @@ export function BusinessCardLabPage() {
       setImageError(error instanceof Error ? error.message : '이미지를 준비하지 못했습니다.');
     } finally {
       setPreparing(false);
-      event.target.value = '';
     }
+  }
+
+  async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (file) {
+      if (scannerOpen) closeScanner();
+      await prepareSelectedFile(file);
+    }
+    event.target.value = '';
+  }
+
+  function stopCamera() {
+    cameraStream?.getTracks().forEach((track) => track.stop());
+    setCameraStream(null);
+  }
+
+  async function openScanner() {
+    setImageError('');
+    setCameraError('');
+    setScannerOpen(true);
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCameraError('이 브라우저에서는 앱 내 카메라를 사용할 수 없습니다. 이미지 업로드를 이용해 주세요.');
+      return;
+    }
+    setCameraStarting(true);
+    try {
+      stopCamera();
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+        },
+      });
+      setCameraStream(stream);
+    } catch (error) {
+      setCameraError(error instanceof Error ? error.message : '카메라 권한을 열지 못했습니다.');
+    } finally {
+      setCameraStarting(false);
+    }
+  }
+
+  function closeScanner() {
+    stopCamera();
+    setScannerOpen(false);
+    setCameraError('');
+  }
+
+  async function handleCaptureFromScanner() {
+    const video = videoRef.current;
+    if (!video || video.videoWidth <= 0 || video.videoHeight <= 0) {
+      setCameraError('카메라 화면을 아직 읽지 못했습니다. 잠시 후 다시 촬영해 주세요.');
+      return;
+    }
+
+    const displayWidth = video.clientWidth || video.videoWidth;
+    const displayHeight = video.clientHeight || video.videoHeight;
+    const guideHeight = (displayWidth * CAMERA_GUIDE.width) / CAMERA_GUIDE.aspectRatio;
+    const guideTop = displayHeight * CAMERA_GUIDE.top;
+    const guide = {
+      x: displayWidth * CAMERA_GUIDE.left,
+      y: guideTop,
+      width: displayWidth * CAMERA_GUIDE.width,
+      height: guideHeight,
+    };
+    const scale = Math.max(displayWidth / video.videoWidth, displayHeight / video.videoHeight);
+    const renderedWidth = video.videoWidth * scale;
+    const renderedHeight = video.videoHeight * scale;
+    const offsetX = (displayWidth - renderedWidth) / 2;
+    const offsetY = (displayHeight - renderedHeight) / 2;
+    const source = {
+      x: Math.max(0, Math.round((guide.x - offsetX) / scale)),
+      y: Math.max(0, Math.round((guide.y - offsetY) / scale)),
+      width: Math.min(video.videoWidth, Math.round(guide.width / scale)),
+      height: Math.min(video.videoHeight, Math.round(guide.height / scale)),
+    };
+    source.width = Math.max(1, Math.min(source.width, video.videoWidth - source.x));
+    source.height = Math.max(1, Math.min(source.height, video.videoHeight - source.y));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = source.width;
+    canvas.height = source.height;
+    const context = canvas.getContext('2d');
+    if (!context) {
+      setCameraError('촬영 이미지를 만들지 못했습니다.');
+      return;
+    }
+    context.drawImage(video, source.x, source.y, source.width, source.height, 0, 0, source.width, source.height);
+    const blob = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob((nextBlob) => resolve(nextBlob), 'image/jpeg', 0.92);
+    });
+    if (!blob) {
+      setCameraError('촬영 이미지를 저장하지 못했습니다.');
+      return;
+    }
+    const file = new File([blob], `business-card-scan-${Date.now()}.jpg`, { type: 'image/jpeg' });
+    closeScanner();
+    await prepareSelectedFile(file);
   }
 
   function updateFormField(key: keyof typeof formState, value: string) {
     setFormState((current) => ({ ...current, [key]: value }));
   }
 
-  function applyImportForReview(item: BusinessCardImportListItem | BusinessCardImportResult) {
+  function applyImportForEdit(item: BusinessCardImportResult) {
     if (!item.extracted) return;
-    const importId = 'importId' in item ? item.importId : item.id;
     setCurrentImport({
-      importId,
+      importId: item.importId,
       status: item.status,
       extracted: item.extracted,
       error: item.error || null,
@@ -148,8 +283,8 @@ export function BusinessCardLabPage() {
           contentBase64: preparedImage.contentBase64,
         },
       });
-      applyImportForReview(result);
-      setWorkflowMessage('추출 draft를 만들었습니다. 필드를 확인한 뒤 저장해 주세요.');
+      applyImportForEdit(result);
+      setWorkflowMessage('Gemini가 읽은 값을 아래에 채웠습니다. 필요한 부분만 수정한 뒤 DB에 저장해 주세요.');
     } catch (error) {
       setWorkflowMessage(error instanceof Error ? error.message : '명함 추출 요청에 실패했습니다.');
     } finally {
@@ -179,28 +314,6 @@ export function BusinessCardLabPage() {
     }
   }
 
-  async function handleLoadReviewImports() {
-    if (!actor || !bffEnabled) {
-      setWorkflowMessage('BFF API가 꺼져 있어 검토 대기열을 불러올 수 없습니다.');
-      return;
-    }
-    setLoadingImports(true);
-    setWorkflowMessage('');
-    try {
-      const result = await listBusinessCardImportsViaBff({
-        tenantId,
-        actor,
-        status: 'needs_review',
-      });
-      setReviewImports(result.items);
-      setWorkflowMessage(`검토 대기 ${result.items.length}건을 불러왔습니다.`);
-    } catch (error) {
-      setWorkflowMessage(error instanceof Error ? error.message : '검토 대기열을 불러오지 못했습니다.');
-    } finally {
-      setLoadingImports(false);
-    }
-  }
-
   async function handleSearchContacts() {
     if (!actor || !bffEnabled || !searchQuery.trim()) return;
     setSearching(true);
@@ -217,6 +330,21 @@ export function BusinessCardLabPage() {
     } finally {
       setSearching(false);
     }
+  }
+
+  function handleDownloadSearchResultsCsv() {
+    if (searchResults.length === 0) return;
+    const csv = `\uFEFF${buildContactsCsv(searchResults)}`;
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const date = new Date().toISOString().slice(0, 10);
+    link.href = url;
+    link.download = `business-card-contacts-${date}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
   }
 
   return (
@@ -285,9 +413,9 @@ export function BusinessCardLabPage() {
                         {preparing ? <Loader2 className="h-6 w-6 animate-spin" /> : <Camera className="h-6 w-6" />}
                       </div>
                       <div>
-                        <h3 className="text-[16px] font-bold text-slate-950 dark:text-slate-50">명함 이미지 선택</h3>
+                        <h3 className="text-[16px] font-bold text-slate-950 dark:text-slate-50">명함 스캔</h3>
                         <p className="mt-2 max-w-md text-[13px] leading-6 text-muted-foreground">
-                          모바일에서는 카메라가 열리고, 데스크톱에서는 파일 선택으로 이어집니다. 이미지는 업로드 전에 브라우저에서 한 번 압축합니다.
+                          앱 안의 카메라 가이드에 명함을 맞춰 촬영하거나, 저장된 이미지를 선택합니다. 추출 후 같은 화면에서 바로 수정하고 DB에 저장합니다.
                         </p>
                       </div>
                       <Input
@@ -299,9 +427,13 @@ export function BusinessCardLabPage() {
                         onChange={handleFileChange}
                       />
                       <div className="flex flex-wrap justify-center gap-2">
-                        <Button type="button" onClick={() => fileInputRef.current?.click()} disabled={preparing}>
-                          <Upload className="h-4 w-4" />
-                          촬영/업로드
+                        <Button type="button" onClick={openScanner} disabled={preparing}>
+                          <Camera className="h-4 w-4" />
+                          카메라 스캔
+                        </Button>
+                        <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()} disabled={preparing}>
+                          <ImageIcon className="h-4 w-4" />
+                          이미지 선택
                         </Button>
                         <Button
                           type="button"
@@ -310,7 +442,7 @@ export function BusinessCardLabPage() {
                           onClick={handleProcessImage}
                         >
                           {processing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                          추출 실행
+                          Gemini 추출
                         </Button>
                       </div>
                       {imageError && (
@@ -349,7 +481,7 @@ export function BusinessCardLabPage() {
                           </div>
                         </dl>
                         <div className="rounded-lg border border-amber-200/70 bg-amber-50/70 px-3 py-2 text-[11px] leading-5 text-amber-800 dark:border-amber-400/20 dark:bg-amber-950/25 dark:text-amber-200">
-                          추출 실행 시 이 이미지는 private Storage에 저장되고 Gemini 검토 draft로 이어집니다.
+                          Gemini 추출 후 아래 입력칸에서 수정한 뒤 DB에 저장합니다.
                         </div>
                       </div>
                     ) : (
@@ -369,9 +501,9 @@ export function BusinessCardLabPage() {
                       <section className="rounded-lg border border-white/70 bg-white/70 p-4 shadow-sm backdrop-blur-md dark:border-white/10 dark:bg-slate-950/45">
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div>
-                            <h3 className="text-[15px] font-extrabold text-slate-950 dark:text-slate-50">추출 결과 검토</h3>
+                            <h3 className="text-[15px] font-extrabold text-slate-950 dark:text-slate-50">추출값 수정 및 DB 저장</h3>
                             <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
-                              낮은 신뢰도의 값은 표시해 두었습니다. 확인 후 저장해야 전사 검색에 반영됩니다.
+                              Gemini가 읽은 값을 필요하면 수정하세요. 저장하면 전사 연락처 검색 DB에 반영됩니다.
                             </p>
                           </div>
                           <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-800 dark:border-amber-400/20 dark:bg-amber-950/25 dark:text-amber-200">
@@ -431,7 +563,7 @@ export function BusinessCardLabPage() {
                           </p>
                           <Button type="button" onClick={handleSaveContact} disabled={!canSave || saving || currentImport.status === 'saved'}>
                             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-                            연락처 저장
+                            DB 저장
                           </Button>
                         </div>
                       </section>
@@ -442,7 +574,7 @@ export function BusinessCardLabPage() {
 
               {activeTab === 'search' && (
                 <div className="space-y-4">
-                  <div className="flex gap-2">
+                  <div className="flex flex-col gap-2 md:flex-row">
                     <Input
                       value={searchQuery}
                       onChange={(event) => setSearchQuery(event.target.value)}
@@ -454,6 +586,10 @@ export function BusinessCardLabPage() {
                     <Button type="button" onClick={handleSearchContacts} disabled={!searchQuery.trim() || searching || !bffEnabled}>
                       {searching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
                       검색
+                    </Button>
+                    <Button type="button" variant="outline" onClick={handleDownloadSearchResultsCsv} disabled={searchResults.length === 0}>
+                      <Download className="h-4 w-4" />
+                      Excel CSV
                     </Button>
                   </div>
                   <div className="overflow-hidden rounded-lg border border-white/70 bg-white/65 shadow-sm backdrop-blur-md dark:border-white/10 dark:bg-slate-950/35">
@@ -491,43 +627,70 @@ export function BusinessCardLabPage() {
                 </div>
               )}
 
-              {activeTab === 'review' && (
-                <div className="space-y-3">
-                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-white/70 bg-white/55 px-4 py-3 backdrop-blur-md dark:border-white/10 dark:bg-slate-950/35">
-                    <div>
-                      <h3 className="text-[14px] font-bold text-slate-950 dark:text-slate-50">검토 대기 명함</h3>
-                      <p className="mt-1 text-[12px] text-muted-foreground">저장 전 확인이 필요한 추출 draft입니다.</p>
-                    </div>
-                    <Button type="button" variant="outline" onClick={handleLoadReviewImports} disabled={loadingImports || !bffEnabled}>
-                      {loadingImports ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-                      불러오기
-                    </Button>
-                  </div>
-                  {reviewImports.length === 0 ? (
-                    <div className="flex min-h-[180px] items-center justify-center rounded-lg border border-dashed border-slate-200 bg-white/40 px-4 text-center text-[12px] text-muted-foreground dark:border-white/10 dark:bg-slate-950/25">
-                      검토 대기 명함이 없습니다.
-                    </div>
-                  ) : (
-                    <div className="grid gap-3 md:grid-cols-2">
-                      {reviewImports.map((item) => (
-                        <button
-                          key={item.id}
-                          type="button"
-                          onClick={() => applyImportForReview(item)}
-                          className="rounded-lg border border-white/70 bg-white/65 p-4 text-left shadow-sm backdrop-blur-md transition-colors hover:border-sky-200 hover:bg-sky-50/70 dark:border-white/10 dark:bg-slate-950/35 dark:hover:border-sky-400/20"
-                        >
-                          <span className="block text-[13px] font-bold text-slate-950 dark:text-slate-50">{item.extracted?.name.value || item.extracted?.organization.value || item.fileName}</span>
-                          <span className="mt-1 block text-[11px] text-muted-foreground">{item.fileName} · {formatBytes(item.fileSize)}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
             </main>
           </div>
         </section>
       </div>
+      {scannerOpen && (
+        <div className="fixed inset-0 z-50 flex items-stretch justify-center bg-slate-950 md:items-center md:bg-slate-950/80 md:p-6">
+          <div className="relative flex h-dvh w-full max-w-md flex-col overflow-hidden bg-slate-950 text-white md:h-[760px] md:rounded-lg md:border md:border-white/10">
+            <div className="absolute left-0 right-0 top-0 z-20 flex items-center justify-between px-4 py-3">
+              <Button type="button" size="icon" variant="ghost" className="text-white hover:bg-white/10 hover:text-white" onClick={closeScanner} aria-label="스캐너 닫기">
+                <X className="h-5 w-5" />
+              </Button>
+              <span className="rounded-full bg-black/35 px-3 py-1 text-[12px] font-semibold backdrop-blur-md">명함을 가이드 안에 맞춰주세요</span>
+              <span className="h-10 w-10" aria-hidden="true" />
+            </div>
+            <div className="relative flex-1 overflow-hidden">
+              {cameraStream ? (
+                <video ref={videoRef} autoPlay playsInline muted className="h-full w-full object-cover" />
+              ) : (
+                <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+                  {cameraStarting ? <Loader2 className="h-8 w-8 animate-spin" /> : <Camera className="h-8 w-8" />}
+                  <p className="text-[13px] text-white/80">{cameraError || '카메라를 여는 중입니다.'}</p>
+                </div>
+              )}
+              <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_0%,transparent_42%,rgba(2,6,23,0.52)_74%)]" />
+              <div
+                className="pointer-events-none absolute rounded-[6px] border-2 border-emerald-400 bg-emerald-300/10 shadow-[0_0_0_999px_rgba(2,6,23,0.42)]"
+                style={{
+                  left: `${CAMERA_GUIDE.left * 100}%`,
+                  top: `${CAMERA_GUIDE.top * 100}%`,
+                  width: `${CAMERA_GUIDE.width * 100}%`,
+                  aspectRatio: String(CAMERA_GUIDE.aspectRatio),
+                }}
+              >
+                <span className="absolute -left-0.5 -top-0.5 h-5 w-5 border-l-4 border-t-4 border-emerald-300" />
+                <span className="absolute -right-0.5 -top-0.5 h-5 w-5 border-r-4 border-t-4 border-emerald-300" />
+                <span className="absolute -bottom-0.5 -left-0.5 h-5 w-5 border-b-4 border-l-4 border-emerald-300" />
+                <span className="absolute -bottom-0.5 -right-0.5 h-5 w-5 border-b-4 border-r-4 border-emerald-300" />
+              </div>
+            </div>
+            <div className="z-20 border-t border-white/10 bg-white px-4 pb-[calc(env(safe-area-inset-bottom)+18px)] pt-4 text-slate-950">
+              {cameraError && (
+                <p className="mb-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-center text-[12px] font-semibold text-rose-700">
+                  {cameraError}
+                </p>
+              )}
+              <div className="flex items-center justify-center gap-6">
+                <Button type="button" variant="ghost" className="h-12 w-12 rounded-full" onClick={() => fileInputRef.current?.click()} aria-label="이미지 선택">
+                  <ImageIcon className="h-5 w-5" />
+                </Button>
+                <button
+                  type="button"
+                  onClick={handleCaptureFromScanner}
+                  disabled={!cameraStream || cameraStarting}
+                  className="flex h-16 w-16 items-center justify-center rounded-full border-4 border-slate-950 bg-white disabled:opacity-50"
+                  aria-label="명함 촬영"
+                >
+                  <span className="h-10 w-10 rounded-full bg-emerald-500 shadow-inner" />
+                </button>
+                <span className="h-12 w-12" aria-hidden="true" />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
