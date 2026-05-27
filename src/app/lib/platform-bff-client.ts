@@ -535,6 +535,36 @@ export interface OverrideTransactionEvidenceDriveCategoriesPayload {
   }>;
 }
 
+export interface CashflowWeekAmountsPayload {
+  yearMonth: string;
+  weekNo: number;
+  mode: 'projection' | 'actual';
+  amounts: Record<string, number>;
+}
+
+export interface CashflowWeekAmountsResult {
+  ok: boolean;
+  projectId: string;
+  yearMonth: string;
+  weekNo: number;
+  weekStart: string;
+  weekEnd: string;
+  mode: 'projection' | 'actual';
+  updatedAt: string;
+}
+
+export interface ProjectCashflowActualSyncResult {
+  ok: boolean;
+  projectId: string;
+  sourceRows: number;
+  sheetCount: number;
+  upsertedWeeks: number;
+  clearedWeeks: number;
+  weeks: Array<{ yearMonth: string; weekNo: number }>;
+  cleared: Array<{ yearMonth: string; weekNo: number }>;
+  updatedAt: string;
+}
+
 export interface PlatformApiClientLike {
   get<T>(path: string, options: {
     tenantId: string;
@@ -1280,6 +1310,47 @@ export async function overrideTransactionEvidenceDriveCategoriesViaBff(params: {
       body: params.overrides,
       retries: 0,
       timeoutMs: 15000,
+    },
+  );
+  return response.data;
+}
+
+export async function upsertCashflowWeekAmountsViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  payload: CashflowWeekAmountsPayload;
+  client?: PlatformApiClientLike;
+}): Promise<CashflowWeekAmountsResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<CashflowWeekAmountsResult>(
+    `/api/v1/projects/${encodeURIComponent(params.projectId)}/cashflow-weeks/upsert`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.payload,
+      retries: 0,
+      timeoutMs: 12000,
+    },
+  );
+  return response.data;
+}
+
+export async function syncProjectCashflowActualsViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  client?: PlatformApiClientLike;
+}): Promise<ProjectCashflowActualSyncResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<ProjectCashflowActualSyncResult>(
+    `/api/v1/projects/${encodeURIComponent(params.projectId)}/cashflow-actuals/sync`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: {},
+      retries: 0,
+      timeoutMs: 20000,
     },
   );
   return response.data;

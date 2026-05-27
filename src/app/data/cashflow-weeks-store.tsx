@@ -31,6 +31,7 @@ import {
 import { applyWeekAmountsToLocalWeeks } from './cashflow-weeks.local-state';
 import { useFirebase } from '../lib/firebase-context';
 import { getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
+import { isPlatformApiEnabled, upsertCashflowWeekAmountsViaBff } from '../lib/platform-bff-client';
 import { addMonthsToYearMonth, getSeoulTodayIso } from '../platform/business-days';
 import { getMonthMondayWeeks } from '../platform/cashflow-weeks';
 import { normalizeProjectIds } from './project-assignment';
@@ -205,6 +206,45 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     const monthWeeks = getMonthMondayWeeks(ym);
     const def = monthWeeks.find((w) => w.weekNo === weekNo);
     if (!def) return;
+
+    if (isPlatformApiEnabled() && actor.source !== 'dev_harness') {
+      const normalizedAmounts = input.amounts || {};
+      await upsertCashflowWeekAmountsViaBff({
+        tenantId: orgId,
+        actor: {
+          uid: actor.uid,
+          email: actor.email,
+          role: actor.role,
+          idToken: (actor as any).idToken,
+          googleAccessToken: (actor as any).googleAccessToken,
+        },
+        projectId,
+        payload: {
+          yearMonth: ym,
+          weekNo,
+          mode: input.mode,
+          amounts: Object.fromEntries(
+            Object.entries(normalizedAmounts).map(([lineId, amount]) => [lineId, Number(amount) || 0]),
+          ),
+        },
+      });
+      const now = new Date().toISOString();
+      setWeeks((prev) => applyWeekAmountsToLocalWeeks({
+        weeks: prev,
+        orgId,
+        actorUid: actor.uid,
+        actorName: actor.name,
+        projectId,
+        yearMonth: ym,
+        weekNo,
+        weekStart: def.weekStart,
+        weekEnd: def.weekEnd,
+        mode: input.mode,
+        amounts: normalizedAmounts,
+        now,
+      }));
+      return;
+    }
 
     if (!db && actor.source === 'dev_harness') {
       const now = new Date().toISOString();

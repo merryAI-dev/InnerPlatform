@@ -1375,7 +1375,7 @@ export function createBffApp(options = {}) {
     projectRequestContractAiService, projectRequestContractStorageService,
     projectSheetSourceStorageService, projectRegistrationSlackService,
   });
-  mountCashflowExportRoutes(app, { db, rbacPolicy });
+  mountCashflowExportRoutes(app, { db, rbacPolicy, idempotencyService, now });
   mountLedgerRoutes(app, { db, now, idempotencyService, auditChainService, piiProtector });
   mountTransactionRoutes(app, { db, now, idempotencyService, auditChainService, piiProtector, rbacPolicy, driveService });
   mountAuditRoutes(app, { db, auditChainService });
