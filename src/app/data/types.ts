@@ -1181,6 +1181,10 @@ export interface CashflowWeekSheet {
   weekEnd: string; // "YYYY-MM-DD" (Sunday)
   projection: Partial<Record<CashflowSheetLineId, number>>;
   actual: Partial<Record<CashflowSheetLineId, number>>;
+  projectionUpdated?: boolean;
+  projectionUpdatedAt?: string;
+  projectionUpdatedByUid?: string;
+  projectionUpdatedByName?: string;
   pmSubmitted: boolean;
   pmSubmittedAt?: string;
   pmSubmittedByUid?: string;

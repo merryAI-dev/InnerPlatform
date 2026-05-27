@@ -36,11 +36,11 @@ export function buildCashflowWeekUpdatePatch(params: {
     updatedByUid: params.actorUid,
     updatedByName: params.actorName,
   };
-  if (params.mode === 'actual') {
-    patch.pmSubmitted = true;
-    patch.pmSubmittedAt = params.now;
-    patch.pmSubmittedByUid = params.actorUid;
-    patch.pmSubmittedByName = params.actorName;
+  if (params.mode === 'projection') {
+    patch.projectionUpdated = true;
+    patch.projectionUpdatedAt = params.now;
+    patch.projectionUpdatedByUid = params.actorUid;
+    patch.projectionUpdatedByName = params.actorName;
   }
   for (const [lineId, amount] of Object.entries(normalizeWeekAmounts(params.amounts))) {
     patch[`${params.mode}.${lineId}`] = amount;
@@ -72,14 +72,15 @@ export function buildInitialCashflowWeekDoc(params: {
     weekEnd: params.weekEnd,
     projection: params.mode === 'projection' ? normalizedAmounts : {},
     actual: params.mode === 'actual' ? normalizedAmounts : {},
-    pmSubmitted: params.mode === 'actual',
-    ...(params.mode === 'actual'
+    ...(params.mode === 'projection'
       ? {
-        pmSubmittedAt: params.now,
-        pmSubmittedByUid: params.actorUid,
-        pmSubmittedByName: params.actorName,
+        projectionUpdated: true,
+        projectionUpdatedAt: params.now,
+        projectionUpdatedByUid: params.actorUid,
+        projectionUpdatedByName: params.actorName,
       }
       : {}),
+    pmSubmitted: false,
     adminClosed: false,
     createdAt: params.now,
     updatedAt: params.now,

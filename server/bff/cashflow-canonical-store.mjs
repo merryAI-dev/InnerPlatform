@@ -363,11 +363,11 @@ function buildWeekPatch({ tenantId, actorId, actorName, projectId, mode, week, a
       ...existingModeAmounts,
       ...normalizedAmounts,
     };
-    if (mode === 'actual') {
-      patch.pmSubmitted = true;
-      patch.pmSubmittedAt = now;
-      patch.pmSubmittedByUid = actorId;
-      patch.pmSubmittedByName = actorName;
+    if (mode === 'projection') {
+      patch.projectionUpdated = true;
+      patch.projectionUpdatedAt = now;
+      patch.projectionUpdatedByUid = actorId;
+      patch.projectionUpdatedByName = actorName;
     }
   }
   return patch;

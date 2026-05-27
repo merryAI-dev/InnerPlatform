@@ -133,12 +133,7 @@ describe('cashflow canonical BFF helpers', () => {
       MYSC_PREPAY_IN: -1000,
       DIRECT_COST_OUT: 3620183,
     });
-    expect(weekWrite.data).toMatchObject({
-      pmSubmitted: true,
-      pmSubmittedAt: '2026-05-27T09:40:00.000Z',
-      pmSubmittedByUid: 'u1',
-      pmSubmittedByName: 'PM',
-    });
+    expect(weekWrite.data.pmSubmitted).toBeUndefined();
     expect(Object.prototype.hasOwnProperty.call(weekWrite.data, 'actual.DIRECT_COST_OUT')).toBe(false);
     expect(weekWrite.options).toEqual({ merge: true });
   });

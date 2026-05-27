@@ -30,6 +30,12 @@ function computeVariance(sheet: CashflowWeekSheet | undefined): { ratio: number;
   return { ratio, projNet: proj.net, actualNet: actual.net };
 }
 
+function hasProjectionInput(sheet: CashflowWeekSheet | undefined): boolean {
+  if (!sheet) return false;
+  if (sheet.projectionUpdated) return true;
+  return Object.values(sheet.projection || {}).some((value) => Number.isFinite(Number(value)) && Number(value) !== 0);
+}
+
 export function CashflowWeeklyPage() {
   const navigate = useNavigate();
   const { projects } = useAppStore();
@@ -47,13 +53,13 @@ export function CashflowWeeklyPage() {
   }, [weeks, yearMonth]);
 
   const byProjectWeek = useMemo(() => {
-    const map = new Map<string, { pmSubmitted: boolean; adminClosed: boolean; net: number; netSource: 'actual' | 'projection' }>();
+    const map = new Map<string, { projectionUpdated: boolean; adminClosed: boolean; net: number; netSource: 'actual' | 'projection' }>();
     for (const w of weeks.filter((x) => x.yearMonth === yearMonth)) {
       const key = `${w.projectId}:${w.weekNo}`;
       const { source, sheet } = chooseCashflowSheetForNet({ actual: w.actual, projection: w.projection });
       const { net } = computeCashflowTotals(sheet);
       map.set(key, {
-        pmSubmitted: Boolean(w.pmSubmitted),
+        projectionUpdated: hasProjectionInput(w),
         adminClosed: Boolean(w.adminClosed),
         net,
         netSource: source,
@@ -118,7 +124,7 @@ export function CashflowWeeklyPage() {
                       const cellKey = `${p.id}:${w.weekNo}`;
                       const status = byProjectWeek.get(cellKey);
                       const sheet = weekSheetMap.get(cellKey);
-                      const pmSubmitted = Boolean(status?.pmSubmitted);
+                      const projectionUpdated = Boolean(status?.projectionUpdated);
                       const adminClosed = Boolean(status?.adminClosed);
                       const net = status?.net ?? 0;
                       const netSource = status?.netSource ?? 'actual';
@@ -128,7 +134,7 @@ export function CashflowWeeklyPage() {
 
                       const chip = adminClosed
                         ? { bg: 'bg-emerald-500/15', text: 'text-emerald-700 dark:text-emerald-300', label: '결산완료' }
-                        : pmSubmitted
+                        : projectionUpdated
                           ? { bg: 'bg-amber-500/15', text: 'text-amber-700 dark:text-amber-300', label: '작성완료' }
                           : { bg: 'bg-slate-500/10', text: 'text-slate-600 dark:text-slate-300', label: '미작성' };
 
@@ -187,7 +193,7 @@ export function CashflowWeeklyPage() {
           {!isLoading && (
             <div className="px-4 py-3 text-[10px] text-muted-foreground border-t border-border/40 flex items-center gap-3 flex-wrap">
               <Badge variant="outline" className="text-[9px] h-4 px-1.5">정의</Badge>
-              작성완료=PM 작성완료 · 결산완료=관리자 결산확정 ·{' '}
+              작성완료=Projection 저장 · 결산완료=관리자 결산확정 ·{' '}
               <span className="text-red-600">편차 20%↑</span>=예상 대비 실적 차이 경고 ·{' '}
               <Flag className="inline w-2.5 h-2.5 text-red-500" /> 확인요청{' '}
               <MessageSquareText className="inline w-2.5 h-2.5 text-blue-500" /> 답변완료{' '}
