@@ -39,8 +39,6 @@ import {
 } from '../lib/platform-bff-client';
 import { addMonthsToYearMonth, getSeoulTodayIso } from '../platform/business-days';
 import { getMonthMondayWeeks } from '../platform/cashflow-weeks';
-import { normalizeProjectIds } from './project-assignment';
-import { useFirestoreAccessPolicy } from './firestore-realtime-mode';
 
 interface CashflowWeekState {
   yearMonth: string; // selected month ("YYYY-MM")
@@ -89,14 +87,6 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
   const { db, isOnline, orgId } = useFirebase();
   const firestoreEnabled = isOnline && !!db;
 
-  const role = user?.role;
-  const myProjectId = user?.projectId || '';
-  const projectIds = useMemo(
-    () => normalizeProjectIds([...(Array.isArray(user?.projectIds) ? user?.projectIds : []), myProjectId]),
-    [user?.projectIds, myProjectId],
-  );
-  const { allowPrivilegedReadAll: readAll } = useFirestoreAccessPolicy(role);
-
   const [yearMonth, setYearMonthState] = useState(() => getSeoulTodayIso().slice(0, 7));
   const [weeks, setWeeks] = useState<CashflowWeekSheet[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -132,41 +122,18 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    if (!readAll && projectIds.length === 0) {
-      setWeeks([]);
-      setIsLoading(false);
-      return;
-    }
-
     setIsLoading(true);
 
     const base = collection(db, getOrgCollectionPath(orgId, 'cashflowWeeks'));
     const selectedYear = Number.parseInt(yearMonth.slice(0, 4), 10);
     const carryForwardYearStart = `${Number.isFinite(selectedYear) ? selectedYear - 1 : yearMonth.slice(0, 4)}-01`;
     const selectedYearEnd = `${yearMonth.slice(0, 4)}-12`;
-    const q = readAll
-      ? query(
-        base,
-        where('yearMonth', '>=', carryForwardYearStart),
-        where('yearMonth', '<=', selectedYearEnd),
-        limit(5000),
-      )
-      : (projectIds.length > 0
-        ? (projectIds.length === 1
-          ? query(
-            base,
-            where('projectId', '==', projectIds[0]),
-            limit(2500),
-          )
-          : query(
-            base,
-            where('projectId', 'in', projectIds.slice(0, 10)),
-            limit(2500),
-          ))
-        : query(
-          base,
-          limit(2500),
-        ));
+    const q = query(
+      base,
+      where('yearMonth', '>=', carryForwardYearStart),
+      where('yearMonth', '<=', selectedYearEnd),
+      limit(5000),
+    );
 
     unsubsRef.current.push(
       onSnapshot(q, (snap) => {
@@ -192,7 +159,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
       unsubsRef.current.forEach((u) => u());
       unsubsRef.current = [];
     };
-  }, [authLoading, isAuthenticated, user, db, firestoreEnabled, orgId, projectIds, readAll, yearMonth]);
+  }, [authLoading, isAuthenticated, user, db, firestoreEnabled, orgId, yearMonth]);
 
   const upsertWeekAmounts = useCallback(async (input: {
     projectId: string;

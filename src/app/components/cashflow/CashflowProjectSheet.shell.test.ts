@@ -35,4 +35,12 @@ describe('CashflowProjectSheet actual sync flow', () => {
     expect(cashflowProjectSheetSource).toContain('서버에 복사했습니다');
     expect(cashflowProjectSheetSource).not.toContain('초안으로 복사했습니다');
   });
+
+  it('loads cashflow weeks directly from Firestore year range without project assignment gating', () => {
+    expect(cashflowWeeksStoreSource).toContain("where('yearMonth', '>=', carryForwardYearStart)");
+    expect(cashflowWeeksStoreSource).toContain("where('yearMonth', '<=', selectedYearEnd)");
+    expect(cashflowWeeksStoreSource).not.toContain("where('projectId'");
+    expect(cashflowWeeksStoreSource).not.toContain('allowPrivilegedReadAll');
+    expect(cashflowWeeksStoreSource).not.toContain('projectIds.length === 0');
+  });
 });
