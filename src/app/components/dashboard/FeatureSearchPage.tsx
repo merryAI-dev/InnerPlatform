@@ -26,10 +26,10 @@ export function FeatureSearchPage() {
   const displayName = user?.name?.trim() || '구성원';
 
   return (
-    <div className="min-h-dvh bg-[linear-gradient(135deg,#eef6ff_0%,#f8fbff_46%,#ecfdf5_100%)] px-4 py-5 dark:bg-[linear-gradient(135deg,#061a2f_0%,#0f172a_52%,#052e2b_100%)] md:px-6 md:py-8">
+    <div className="min-h-dvh bg-[linear-gradient(180deg,#f8fafc_0%,#f3f7fb_58%,#eef6f9_100%)] px-4 py-5 dark:bg-[linear-gradient(180deg,#07111f_0%,#0b1727_58%,#0b2530_100%)] md:px-6 md:py-8">
       <div className="mx-auto flex min-h-[calc(100dvh-2.5rem)] w-full max-w-6xl flex-col justify-center space-y-5 md:min-h-[calc(100dvh-4rem)]">
-        <section className="overflow-hidden rounded-lg border border-white/60 bg-white/50 shadow-xl shadow-slate-900/5 backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/40">
-          <div className="border-b border-white/20 bg-[#0f2747]/90 px-5 py-5 text-white shadow-inner shadow-white/5 backdrop-blur-xl md:px-7">
+        <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg shadow-slate-900/6 dark:border-slate-800 dark:bg-slate-950/70">
+          <div className="border-b border-slate-800 bg-[#172033] px-5 py-5 text-white md:px-7">
             <MyscWordmark tone="onDark" size="md" />
           </div>
           <div className="space-y-5 px-5 py-6 md:px-7 md:py-8">
@@ -50,7 +50,7 @@ export function FeatureSearchPage() {
         </section>
 
         <div className="grid gap-4 lg:grid-cols-2">
-          <section className="rounded-lg border border-white/60 bg-sky-50/50 p-4 shadow-lg shadow-slate-900/5 backdrop-blur-xl dark:border-sky-400/20 dark:bg-sky-950/25">
+          <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/70">
             <div className="flex items-center gap-2 text-sky-900 dark:text-sky-200">
               <Building2 className="h-4 w-4" />
               <h2 className="text-[13px] font-bold">관리자</h2>
@@ -62,7 +62,7 @@ export function FeatureSearchPage() {
                     type="button"
                     aria-describedby={`admin-entry-note-${item.to.replace(/[^a-z0-9]+/gi, '-')}`}
                     onClick={() => navigate(item.to)}
-                    className="flex h-10 w-full items-center justify-between rounded-lg border border-white/70 bg-white/60 px-3 text-left text-[12px] font-semibold text-sky-950 shadow-sm backdrop-blur-md transition-colors hover:border-sky-200 hover:bg-white/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 dark:border-sky-400/20 dark:bg-slate-950/50 dark:text-sky-200 dark:hover:bg-sky-950/30"
+                    className="flex h-10 w-full items-center justify-between rounded-md border border-slate-200 bg-white px-3 text-left text-[12px] font-semibold text-slate-950 shadow-sm transition-colors hover:border-cyan-300 hover:bg-cyan-50/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200 dark:border-slate-700 dark:bg-slate-900 dark:text-sky-100 dark:hover:bg-cyan-950/20"
                   >
                     {item.label}
                     <ArrowRight className="h-3.5 w-3.5" />
@@ -83,7 +83,7 @@ export function FeatureSearchPage() {
             </div>
           </section>
 
-          <section className="rounded-lg border border-white/60 bg-emerald-50/50 p-4 shadow-lg shadow-slate-900/5 backdrop-blur-xl dark:border-emerald-400/20 dark:bg-emerald-950/25">
+          <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/70">
             <div className="flex items-center gap-2 text-emerald-900 dark:text-emerald-200">
               <UserRoundCheck className="h-4 w-4" />
               <h2 className="text-[13px] font-bold">PM</h2>
@@ -94,7 +94,7 @@ export function FeatureSearchPage() {
                   key={item.to}
                   type="button"
                   onClick={() => navigate(item.to)}
-                  className="flex h-10 items-center justify-between rounded-lg border border-white/70 bg-white/60 px-3 text-left text-[12px] font-semibold text-emerald-950 shadow-sm backdrop-blur-md transition-colors hover:border-emerald-200 hover:bg-white/80 dark:border-emerald-400/20 dark:bg-slate-950/50 dark:text-emerald-200 dark:hover:bg-emerald-950/30"
+                  className="flex h-10 items-center justify-between rounded-md border border-slate-200 bg-white px-3 text-left text-[12px] font-semibold text-slate-950 shadow-sm transition-colors hover:border-teal-300 hover:bg-teal-50/70 dark:border-slate-700 dark:bg-slate-900 dark:text-emerald-100 dark:hover:bg-emerald-950/20"
                 >
                   {item.label}
                   <ArrowRight className="h-3.5 w-3.5" />

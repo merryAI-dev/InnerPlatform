@@ -39,7 +39,7 @@ const CATEGORY_FILTERS: { value: 'all' | TrainingCategory; label: string }[] = [
 const categoryColors: Record<TrainingCategory, string> = {
   technical: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
   compliance: 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300',
-  'soft-skills': 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300',
+  'soft-skills': 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/40 dark:text-cyan-300',
   management: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
   language: 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300',
   other: 'bg-muted text-muted-foreground',
@@ -200,7 +200,7 @@ export function PortalTrainingPage() {
         <Card className="hidden sm:block">
           <CardContent className="p-3">
             <p className="text-[11px] text-muted-foreground">개설 강의</p>
-            <p className="text-[24px] text-indigo-600 mt-0.5" style={{ fontWeight: 700 }}>
+            <p className="text-[24px] text-cyan-600 mt-0.5" style={{ fontWeight: 700 }}>
               {courses.filter((c) => c.status === 'OPEN').length}
             </p>
             <p className="text-[10px] text-muted-foreground">모집 중</p>

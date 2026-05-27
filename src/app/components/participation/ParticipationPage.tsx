@@ -62,12 +62,12 @@ function RateBar({ rate, showLabel = true }: { rate: number; showLabel?: boolean
 }
 
 const settlementColors: Record<string, string> = {
-  E_NARA_DOUM: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+  E_NARA_DOUM: 'bg-cyan-50 text-cyan-700 border-cyan-200',
   ACCOUNTANT: 'bg-amber-50 text-amber-700 border-amber-200',
   PRIVATE: 'bg-slate-100 text-slate-500 border-slate-200',
-  IRIS: 'bg-purple-50 text-purple-700 border-purple-200',
-  RCMS: 'bg-violet-50 text-violet-700 border-violet-200',
-  EZBARO: 'bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200',
+  IRIS: 'bg-cyan-50 text-cyan-700 border-cyan-200',
+  RCMS: 'bg-cyan-50 text-cyan-700 border-cyan-200',
+  EZBARO: 'bg-rose-50 text-rose-700 border-rose-200',
   E_HIJO: 'bg-teal-50 text-teal-700 border-teal-200',
   EDUFINE: 'bg-cyan-50 text-cyan-700 border-cyan-200',
   HAPPYEUM: 'bg-pink-50 text-pink-700 border-pink-200',
@@ -85,7 +85,7 @@ function SettlementBadge({ system }: { system: SettlementSystemCode }) {
 
 function PhaseChip({ phase }: { phase: string }) {
   const c = phase === '계약전' ? 'bg-amber-100 text-amber-800 border-amber-200'
-    : phase.includes('변경') ? 'bg-purple-100 text-purple-700 border-purple-200'
+    : phase.includes('변경') ? 'bg-cyan-100 text-cyan-700 border-cyan-200'
     : 'bg-green-100 text-green-800 border-green-200';
   return <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] border ${c}`}>{phase}</span>;
 }

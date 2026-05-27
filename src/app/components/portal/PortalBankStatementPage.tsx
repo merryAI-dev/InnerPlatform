@@ -239,7 +239,7 @@ export function PortalBankStatementPage() {
     ? {
       label: '저장 중',
       description: '현재 수정한 통장내역을 주간 사업비 기준본으로 저장하고 있습니다.',
-      toneClass: 'border-indigo-200/70 bg-indigo-50/60',
+      toneClass: 'border-cyan-200/70 bg-cyan-50/60',
     }
     : dirty
       ? {

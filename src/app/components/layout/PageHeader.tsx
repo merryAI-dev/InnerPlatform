@@ -24,7 +24,7 @@ export function PageHeader({
     <div className="flex items-start justify-between gap-4">
       <div className="flex items-start gap-3">
         <div
-          className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 mt-0.5"
+          className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg shadow-sm"
           style={{ background: iconGradient }}
         >
           <Icon className="w-4.5 h-4.5 text-white" />

@@ -52,9 +52,9 @@ const changeTypeStyles: Record<string, { color: string; bg: string; icon: typeof
   ADD: { color: 'text-emerald-700 dark:text-emerald-400', bg: 'bg-emerald-50 dark:bg-emerald-950/30', icon: UserPlus },
   REMOVE: { color: 'text-rose-700 dark:text-rose-400', bg: 'bg-rose-50 dark:bg-rose-950/30', icon: UserMinus },
   RATE_CHANGE: { color: 'text-amber-700 dark:text-amber-400', bg: 'bg-amber-50 dark:bg-amber-950/30', icon: Percent },
-  GRADE_CHANGE: { color: 'text-violet-700 dark:text-violet-400', bg: 'bg-violet-50 dark:bg-violet-950/30', icon: ArrowUpDown },
+  GRADE_CHANGE: { color: 'text-cyan-700 dark:text-cyan-400', bg: 'bg-cyan-50 dark:bg-cyan-950/30', icon: ArrowUpDown },
   MONTHS_CHANGE: { color: 'text-blue-700 dark:text-blue-400', bg: 'bg-blue-50 dark:bg-blue-950/30', icon: Calendar },
-  REPLACEMENT: { color: 'text-indigo-700 dark:text-indigo-400', bg: 'bg-indigo-50 dark:bg-indigo-950/30', icon: ArrowRightLeft },
+  REPLACEMENT: { color: 'text-cyan-700 dark:text-cyan-400', bg: 'bg-cyan-50 dark:bg-cyan-950/30', icon: ArrowRightLeft },
 };
 
 const changeTypeLabels: Record<string, string> = {
@@ -69,8 +69,8 @@ const timelineTypeStyles: Record<string, { color: string; bg: string }> = {
   APPROVE: { color: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-100 dark:bg-emerald-900/40' },
   REJECT: { color: 'text-rose-600 dark:text-rose-400', bg: 'bg-rose-100 dark:bg-rose-900/40' },
   REVISION: { color: 'text-orange-600 dark:text-orange-400', bg: 'bg-orange-100 dark:bg-orange-900/40' },
-  UPLOAD: { color: 'text-violet-600 dark:text-violet-400', bg: 'bg-violet-100 dark:bg-violet-900/40' },
-  COMMENT: { color: 'text-indigo-600 dark:text-indigo-400', bg: 'bg-indigo-100 dark:bg-indigo-900/40' },
+  UPLOAD: { color: 'text-cyan-600 dark:text-cyan-400', bg: 'bg-cyan-100 dark:bg-cyan-900/40' },
+  COMMENT: { color: 'text-cyan-600 dark:text-cyan-400', bg: 'bg-cyan-100 dark:bg-cyan-900/40' },
 };
 
 function docStatusBadge(status: string) {
@@ -165,8 +165,8 @@ function PdfPreviewModal({ doc, open, onClose }: { doc: EvidenceDocument | null;
               {/* Document Header */}
               <div className="text-center space-y-2 pb-4 border-b border-border/30">
                 <div className="flex justify-center mb-3">
-                  <div className="w-12 h-12 rounded-lg bg-indigo-100 dark:bg-indigo-950/40 flex items-center justify-center">
-                    <Shield className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
+                  <div className="w-12 h-12 rounded-lg bg-cyan-100 dark:bg-cyan-950/40 flex items-center justify-center">
+                    <Shield className="w-6 h-6 text-cyan-600 dark:text-cyan-400" />
                   </div>
                 </div>
                 <p className="text-muted-foreground" style={{ fontSize: '0.75em' }}>MYSC 사업관리 통합 플랫폼</p>
@@ -183,7 +183,7 @@ function PdfPreviewModal({ doc, open, onClose }: { doc: EvidenceDocument | null;
                 <div className="space-y-3">
                   {page.sections.map((section, i) => (
                     <div key={i} className="flex items-start gap-2">
-                      <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 mt-1.5 shrink-0" />
+                      <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-1.5 shrink-0" />
                       <p className="text-foreground" style={{ fontSize: '0.95em', lineHeight: 1.6 }}>{section}</p>
                     </div>
                   ))}
@@ -633,8 +633,8 @@ function ChangeRequestDetail({ request, onPreviewDoc, onApprove, onReject, onReq
           <Card className="shadow-sm border-border/50">
             <CardHeader className="pb-2">
               <CardTitle className="text-[12px] flex items-center gap-1.5">
-                <div className="w-5 h-5 rounded-md bg-violet-50 dark:bg-violet-950/40 flex items-center justify-center">
-                  <Paperclip className="w-3 h-3 text-violet-600 dark:text-violet-400" />
+                <div className="w-5 h-5 rounded-md bg-cyan-50 dark:bg-cyan-950/40 flex items-center justify-center">
+                  <Paperclip className="w-3 h-3 text-cyan-600 dark:text-cyan-400" />
                 </div>
                 증빙서류 ({request.documents.length}건)
               </CardTitle>
@@ -816,7 +816,7 @@ export function PersonnelChangePage() {
         {/* Header */}
         <PageHeader
           icon={ClipboardCheck}
-          iconGradient="linear-gradient(135deg, #7c3aed, #a78bfa)"
+          iconGradient="linear-gradient(135deg, #0f766e, #2dd4bf)"
           title="인력변경 관리"
           description="이전/이후 비교 · 증빙서류 관리 · 변경 승인 워크플로"
           badge={`${kpis.total}건`}
@@ -828,7 +828,7 @@ export function PersonnelChangePage() {
               <Button
                 size="sm"
                 className="h-8 text-[11px] gap-1.5 rounded-lg"
-                style={{ background: 'linear-gradient(135deg, #7c3aed, #a78bfa)' }}
+                style={{ background: 'linear-gradient(135deg, #0f766e, #2dd4bf)' }}
               >
                 <FileText className="w-3 h-3" /> 새 변경 요청
               </Button>
@@ -839,11 +839,11 @@ export function PersonnelChangePage() {
         {/* KPI Row */}
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2.5">
           {[
-            { label: '전체 요청', value: kpis.total, icon: FileText, color: '#6366f1' },
+            { label: '전체 요청', value: kpis.total, icon: FileText, color: '#0891b2' },
             { label: '초안', value: kpis.draft, icon: FileText, color: '#94a3b8' },
             { label: '검토 대기', value: kpis.submitted, icon: Clock, color: '#d97706' },
             { label: '승인완료', value: kpis.approved, icon: CheckCircle2, color: '#059669' },
-            { label: '총 변경건', value: kpis.totalChanges, icon: ArrowRightLeft, color: '#7c3aed' },
+            { label: '총 변경건', value: kpis.totalChanges, icon: ArrowRightLeft, color: '#0f766e' },
             { label: '증빙서류', value: kpis.totalDocs, icon: Paperclip, color: '#0891b2' },
             { label: '미제출 서류', value: kpis.missingDocs, icon: AlertTriangle, color: kpis.missingDocs > 0 ? '#ea580c' : '#94a3b8' },
           ].map((k, i) => (

@@ -125,7 +125,7 @@ export function BudgetSummaryPage() {
         {/* ── KPI Cards ── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           {[
-            { label: '총 예산', value: fmtShort(kpi.budget), icon: Wallet, gradient: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)' },
+            { label: '총 예산', value: fmtShort(kpi.budget), icon: Wallet, gradient: 'linear-gradient(135deg, #0891b2 0%, #0f766e 100%)' },
             { label: '집행액', value: fmtShort(kpi.spent), icon: ArrowDownRight, gradient: 'linear-gradient(135deg, #e11d48 0%, #f43f5e 100%)' },
             { label: '잔액', value: fmtShort(kpi.balance), icon: TrendingUp, gradient: 'linear-gradient(135deg, #0d9488 0%, #059669 100%)' },
             { label: '소진율', value: fmtPercent(kpi.burnRate), icon: SlidersHorizontal, gradient: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)' },
@@ -273,7 +273,7 @@ export function BudgetSummaryPage() {
                         key={row.id}
                         className={`
                           border-b border-border/50 transition-colors
-                          ${isTotal ? 'bg-indigo-50/60 dark:bg-indigo-950/30' : ''}
+                          ${isTotal ? 'bg-cyan-50/60 dark:bg-cyan-950/30' : ''}
                           ${isSubtotal ? 'bg-slate-50/80 dark:bg-slate-800/30' : ''}
                           ${!isSummary ? 'hover:bg-muted/30 cursor-pointer' : ''}
                         `}

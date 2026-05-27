@@ -205,7 +205,7 @@ export function AdminApprovalPage() {
             </div>
             <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
               <p className="text-[10px] text-slate-500">사업비</p>
-              <p className="text-[18px] font-bold text-indigo-700">{pendingExpenses.length}</p>
+              <p className="text-[18px] font-bold text-cyan-700">{pendingExpenses.length}</p>
             </div>
             <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
               <p className="text-[10px] text-slate-500">인력변경</p>
@@ -235,7 +235,7 @@ export function AdminApprovalPage() {
 
       <section className="space-y-3">
         <div className="flex items-center gap-2">
-          <Wallet className="h-4 w-4 text-indigo-600" />
+          <Wallet className="h-4 w-4 text-cyan-600" />
           <div>
             <h2 className="text-[15px] font-semibold text-slate-900">사업비 승인 대기</h2>
             <p className="text-[11px] text-slate-500">제출된 사업비 세트만 노출합니다</p>

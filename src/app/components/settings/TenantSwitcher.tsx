@@ -184,7 +184,7 @@ export function TenantSwitcher({ collapsed = false, userRole, userTenantId }: Te
         {/* Register new tenant */}
         <button
           type="button"
-          className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-[12px] hover:bg-muted transition-colors text-indigo-400"
+          className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-[12px] hover:bg-muted transition-colors text-cyan-400"
           onClick={() => {
             setOpen(false);
             navigate('/settings?tab=tenants');

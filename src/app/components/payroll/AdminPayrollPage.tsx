@@ -331,7 +331,7 @@ export function AdminPayrollPage() {
       {/* KPI */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[
-          { label: '공지 대상(이번달)', value: payrollKpis.due, icon: Clock, gradient: 'linear-gradient(135deg, #4f46e5, #7c3aed)', color: '#4f46e5' },
+          { label: '공지 대상(이번달)', value: payrollKpis.due, icon: Clock, gradient: 'linear-gradient(135deg, #0891b2, #0f766e)', color: '#0891b2' },
           { label: '미인지(이번달)', value: payrollKpis.unacked, icon: AlertTriangle, gradient: 'linear-gradient(135deg, #e11d48, #f43f5e)', color: '#e11d48' },
           { label: '미확정 지급', value: payrollKpis.unconfirmed, icon: FileText, gradient: 'linear-gradient(135deg, #f59e0b, #d97706)', color: '#d97706' },
           { label: `${prevYearMonth} 정산 완료`, value: monthlyKpis.done, icon: CalendarCheck2, gradient: 'linear-gradient(135deg, #059669, #0d9488)', color: '#059669' },

@@ -1126,19 +1126,19 @@ function GoogleSheetImportDialog({
                       </div>
                     </div>
                     {isENaraProject && (
-                      <div className="rounded-2xl border border-violet-200 bg-violet-50 p-5 text-[12px] text-violet-950">
+                      <div className="rounded-2xl border border-cyan-200 bg-cyan-50 p-5 text-[12px] text-cyan-950">
                         <div className="flex items-center justify-between gap-3">
                           <div>
                             <p className="font-semibold">{projectName} · 이나라도움 흐름</p>
-                            <p className="mt-1 text-violet-900/85">
+                            <p className="mt-1 text-cyan-900/85">
                               예전 e나라도움 import 흐름을 현재 wizard에 다시 연결했습니다. 권장 순서는 통장내역 → cashflow(사용내역 연동) → 사용내역 → 예산총괄시트 → 증빙서류입니다. `cashflow(e나라도움 시 가이드)`는 참고용 preview로만 봅니다.
                             </p>
                           </div>
-                          <Badge className="bg-violet-600 text-white hover:bg-violet-600">TYPE5 / 전용계좌</Badge>
+                          <Badge className="bg-cyan-600 text-white hover:bg-cyan-600">TYPE5 / 전용계좌</Badge>
                         </div>
                         <div className="mt-3 flex flex-wrap gap-2">
                           {['통장내역', 'cashflow', '사용내역', '예산총괄시트', '증빙서류'].map((label) => (
-                            <Badge key={label} variant="outline" className="border-violet-300 bg-white text-violet-900">
+                            <Badge key={label} variant="outline" className="border-cyan-300 bg-white text-cyan-900">
                               {label}
                             </Badge>
                           ))}
@@ -1327,7 +1327,7 @@ function GoogleSheetImportDialog({
                             </div>
                             <div className="flex items-center gap-1">
                               {isENaraRecommended && (
-                                <Badge variant="outline" className="text-[10px] border-violet-300 bg-violet-50 text-violet-900">
+                                <Badge variant="outline" className="text-[10px] border-cyan-300 bg-cyan-50 text-cyan-900">
                                   이나라도움 추천
                                 </Badge>
                               )}

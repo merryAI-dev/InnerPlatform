@@ -47,7 +47,7 @@ import {
 
 const ROLE_OPTIONS: Array<{ value: UserRole; label: string }> = [
   { value: 'admin', label: '관리자' },
-  { value: 'finance', label: '재무팀' },
+  { value: 'finance', label: '경영기획실' },
   { value: 'pm', label: 'PM' },
 ];
 
@@ -250,7 +250,7 @@ export function UserManagementPage() {
           icon={UserCog}
           iconGradient="linear-gradient(135deg, #44403c 0%, #0c0a09 100%)"
           title="권한 관리"
-          description="관리자, 재무팀, PM 권한을 한 화면에서 확인하고 반영합니다."
+          description="관리자, 경영기획실, PM 권한을 한 화면에서 확인하고 반영합니다."
         />
         <Card className="border-stone-200">
           <CardContent className="p-6 text-sm text-stone-600">

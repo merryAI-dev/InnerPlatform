@@ -105,8 +105,8 @@ export function PortalSubmissions() {
       onClick={() => navigate(`/portal/expenses?set=${encodeURIComponent(item.id)}`)}
       className="w-full text-left flex items-center gap-3 p-3 rounded-lg border border-border/50 hover:bg-muted/30 transition-colors"
     >
-      <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-indigo-500/10 shrink-0">
-        <FileText className="w-4 h-4 text-indigo-600" />
+      <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-cyan-500/10 shrink-0">
+        <FileText className="w-4 h-4 text-cyan-600" />
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
@@ -133,8 +133,8 @@ export function PortalSubmissions() {
       onClick={() => navigate(`/portal/change-requests?req=${encodeURIComponent(item.id)}`)}
       className="w-full text-left flex items-center gap-3 p-3 rounded-lg border border-border/50 hover:bg-muted/30 transition-colors"
     >
-      <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-violet-500/10 shrink-0">
-        <ArrowRightLeft className="w-4 h-4 text-violet-600" />
+      <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-cyan-500/10 shrink-0">
+        <ArrowRightLeft className="w-4 h-4 text-cyan-600" />
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">

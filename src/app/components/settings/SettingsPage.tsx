@@ -78,7 +78,7 @@ export function SettingsPage() {
     <div className="space-y-5">
       <PageHeader
         icon={Settings}
-        iconGradient="linear-gradient(135deg, #4f46e5, #6366f1)"
+        iconGradient="linear-gradient(135deg, #0891b2, #0891b2)"
         title="설정"
         description="운영에 필요한 조직, 구성원, 템플릿, 권한 설정만 관리합니다"
       />

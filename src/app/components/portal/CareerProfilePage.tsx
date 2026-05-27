@@ -409,7 +409,7 @@ function ParticipationTab() {
                   <Badge variant="outline" className="text-[10px] h-5">
                     {entry.periodStart} ~ {entry.periodEnd}
                   </Badge>
-                  <Badge className="text-[10px] h-5 bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300 border-0">
+                  <Badge className="text-[10px] h-5 bg-cyan-100 text-cyan-700 dark:bg-cyan-900/40 dark:text-cyan-300 border-0">
                     {SETTLEMENT_SYSTEM_SHORT[entry.settlementSystem]}
                   </Badge>
                   {entry.isDocumentOnly && (

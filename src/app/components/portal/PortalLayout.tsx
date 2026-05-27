@@ -424,9 +424,9 @@ function PortalContent() {
           <div className="grid gap-3">
             <button
               onClick={() => navigate('/portal/project-select')}
-              className="group relative flex items-center gap-4 p-5 rounded-2xl border border-border/60 bg-white/80 dark:bg-slate-800/60 backdrop-blur-sm hover:border-teal-300 hover:shadow-md hover:shadow-teal-500/5 transition-all duration-200 text-left"
+              className="group relative flex items-center gap-4 rounded-lg border border-border/80 bg-white p-5 text-left shadow-sm transition-all duration-200 hover:border-teal-300 hover:bg-teal-50/60 dark:bg-slate-900 dark:hover:bg-teal-950/20"
             >
-              <div className="shrink-0 flex items-center justify-center w-11 h-11 rounded-xl bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 group-hover:scale-105 transition-transform">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-sky-50 text-sky-700 transition-transform group-hover:scale-105 dark:bg-sky-950 dark:text-sky-300">
                 <FolderKanban className="w-5 h-5" />
               </div>
               <div className="flex-1 min-w-0">
@@ -438,23 +438,23 @@ function PortalContent() {
 
             <button
               onClick={() => navigate('/portal/weekly-expenses')}
-              className="group relative flex items-center gap-4 p-5 rounded-2xl border border-border/60 bg-white/80 dark:bg-slate-800/60 backdrop-blur-sm hover:border-violet-300 hover:shadow-md hover:shadow-violet-500/5 transition-all duration-200 text-left"
+              className="group relative flex items-center gap-4 p-5 rounded-lg border border-border/80 bg-white text-left shadow-sm transition-all duration-200 hover:border-cyan-300 hover:bg-cyan-50/60 dark:bg-slate-900 dark:hover:bg-cyan-950/20"
             >
-              <div className="shrink-0 flex items-center justify-center w-11 h-11 rounded-xl bg-violet-50 dark:bg-violet-950 text-violet-600 dark:text-violet-400 group-hover:scale-105 transition-transform">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-cyan-50 text-cyan-700 transition-transform group-hover:scale-105 dark:bg-cyan-950 dark:text-cyan-300">
                 <Upload className="w-5 h-5" />
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold">증빙 업로드만 할게요</p>
                 <p className="text-xs text-muted-foreground mt-0.5">프로젝트 선택 없이 바로 PDF/영수증을 업로드합니다</p>
               </div>
-              <ArrowRight className="w-4 h-4 text-muted-foreground/40 group-hover:text-violet-500 group-hover:translate-x-0.5 transition-all" />
+              <ArrowRight className="w-4 h-4 text-muted-foreground/40 transition-all group-hover:translate-x-0.5 group-hover:text-cyan-600" />
             </button>
 
             <button
               onClick={() => navigate('/portal/register-project')}
-              className="group relative flex items-center gap-4 p-5 rounded-2xl border border-border/60 bg-white/80 dark:bg-slate-800/60 backdrop-blur-sm hover:border-emerald-300 hover:shadow-md hover:shadow-emerald-500/5 transition-all duration-200 text-left"
+              className="group relative flex items-center gap-4 rounded-lg border border-border/80 bg-white p-5 text-left shadow-sm transition-all duration-200 hover:border-emerald-300 hover:bg-emerald-50/60 dark:bg-slate-900 dark:hover:bg-emerald-950/20"
             >
-              <div className="shrink-0 flex items-center justify-center w-11 h-11 rounded-xl bg-emerald-50 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400 group-hover:scale-105 transition-transform">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-emerald-50 text-emerald-700 transition-transform group-hover:scale-105 dark:bg-emerald-950 dark:text-emerald-300">
                 <Plus className="w-5 h-5" />
               </div>
               <div className="flex-1 min-w-0">

@@ -168,7 +168,7 @@ export function PortalWeeklyExpensePage() {
       return {
         title: '이번 주 원본이 아직 없습니다',
         description: '통장내역을 먼저 올리면 이 탭이 자동 분류와 사람 확인 기준으로 바로 이어집니다.',
-        toneClass: 'border-indigo-200/70 bg-indigo-50/70',
+        toneClass: 'border-cyan-200/70 bg-cyan-50/70',
         actionLabel: '통장내역 열기',
         actionKind: 'bank' as const,
       };

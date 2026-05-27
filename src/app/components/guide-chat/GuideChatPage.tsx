@@ -101,7 +101,7 @@ export function GuideChatPage() {
       <div className="space-y-5">
         <PageHeader
           icon={MessageCircle}
-          iconGradient="linear-gradient(135deg, #8b5cf6, #a78bfa)"
+          iconGradient="linear-gradient(135deg, #0f766e, #2dd4bf)"
           title="사업비 가이드 Q&A"
           description="사업비 가이드에 대해 질문하세요"
         />
@@ -125,7 +125,7 @@ export function GuideChatPage() {
     <div className="space-y-5">
       <PageHeader
         icon={MessageCircle}
-        iconGradient="linear-gradient(135deg, #8b5cf6, #a78bfa)"
+        iconGradient="linear-gradient(135deg, #0f766e, #2dd4bf)"
         title="사업비 가이드 Q&A"
         description={guideInfo ? `가이드: ${guideInfo.title}` : '사업비 가이드에 대해 질문하세요'}
       />

@@ -226,13 +226,13 @@ export function DashboardGuidePanel() {
   const schedule = useMemo(() => getNextUpdateFridays(), []);
 
   return (
-    <div className="rounded-xl border border-indigo-200/60 bg-gradient-to-r from-indigo-50/50 to-blue-50/30 overflow-hidden">
+    <div className="rounded-xl border border-cyan-200/60 bg-gradient-to-r from-cyan-50/50 to-blue-50/30 overflow-hidden">
       <div className="flex items-center justify-between px-4 py-3">
         <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-lg bg-indigo-100 flex items-center justify-center">
-            <BookOpen className="w-3.5 h-3.5 text-indigo-600" />
+          <div className="w-7 h-7 rounded-lg bg-cyan-100 flex items-center justify-center">
+            <BookOpen className="w-3.5 h-3.5 text-cyan-600" />
           </div>
-          <span className="text-[13px] text-indigo-900" style={{ fontWeight: 600 }}>대시보드 작성 가이드</span>
+          <span className="text-[13px] text-cyan-900" style={{ fontWeight: 600 }}>대시보드 작성 가이드</span>
         </div>
         <div className="flex items-center gap-2">
           <span
@@ -241,7 +241,7 @@ export function DashboardGuidePanel() {
                 ? 'bg-rose-100 text-rose-700 border border-rose-200'
                 : schedule.daysLeft <= 3
                 ? 'bg-amber-100 text-amber-700 border border-amber-200'
-                : 'bg-indigo-100 text-indigo-700 border border-indigo-200'
+                : 'bg-cyan-100 text-cyan-700 border border-cyan-200'
             }`}
             style={{ fontWeight: 500 }}
           >
@@ -254,7 +254,7 @@ export function DashboardGuidePanel() {
             variant="ghost"
             size="sm"
             onClick={() => setExpanded(!expanded)}
-            className="h-7 w-7 p-0 text-indigo-500 hover:text-indigo-700 hover:bg-indigo-100"
+            className="h-7 w-7 p-0 text-cyan-500 hover:text-cyan-700 hover:bg-cyan-100"
           >
             {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
           </Button>
@@ -262,7 +262,7 @@ export function DashboardGuidePanel() {
       </div>
 
       {expanded && (
-        <div className="px-4 pb-4 border-t border-indigo-100">
+        <div className="px-4 pb-4 border-t border-cyan-100">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs pt-3">
             {/* 입력 시기 */}
             <div className="space-y-2">
@@ -390,10 +390,10 @@ export function ValidationSummaryCard({ validations }: ValidationSummaryProps) {
             <p className="text-[20px] text-rose-600" style={{ fontWeight: 700 }}>{summary.hasErrors}</p>
             <p className="text-[10px] text-slate-500">필수 누락</p>
           </div>
-          <div className="text-center p-2 rounded-lg bg-indigo-50">
+          <div className="text-center p-2 rounded-lg bg-cyan-50">
             <div className="flex items-center justify-center gap-0.5">
-              <p className="text-[20px] text-indigo-600" style={{ fontWeight: 700 }}>{summary.avgScore}</p>
-              <span className="text-[12px] text-indigo-400">%</span>
+              <p className="text-[20px] text-cyan-600" style={{ fontWeight: 700 }}>{summary.avgScore}</p>
+              <span className="text-[12px] text-cyan-400">%</span>
             </div>
             <p className="text-[10px] text-slate-500">평균 점수</p>
           </div>

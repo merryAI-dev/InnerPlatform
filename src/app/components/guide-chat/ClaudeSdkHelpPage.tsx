@@ -110,7 +110,7 @@ export function ClaudeSdkHelpPage() {
       <div className="space-y-5">
         <PageHeader
           icon={Bot}
-          iconGradient="linear-gradient(135deg, #2563eb, #8b5cf6)"
+          iconGradient="linear-gradient(135deg, #2563eb, #0f766e)"
           title="사업관리 메리"
           description="실제 홈페이지 흐름 기준으로 사업 설정, Drive 연결, Migration, 증빙 업로드 사용법을 안내합니다"
         />
@@ -131,7 +131,7 @@ export function ClaudeSdkHelpPage() {
     <div className="space-y-5">
       <PageHeader
         icon={Bot}
-        iconGradient="linear-gradient(135deg, #2563eb, #8b5cf6)"
+        iconGradient="linear-gradient(135deg, #2563eb, #0f766e)"
         title="사업관리 메리"
         description="실제 홈페이지 흐름 기준으로 사업 설정, Drive 연결, Migration, 증빙 업로드 사용법을 안내합니다"
       />

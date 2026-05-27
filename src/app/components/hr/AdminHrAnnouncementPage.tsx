@@ -107,7 +107,7 @@ export function AdminHrAnnouncementPage() {
       {/* KPI */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[
-          { label: '전체 공지', count: announcements.length, color: '#6366f1', icon: Megaphone },
+          { label: '전체 공지', count: announcements.length, color: '#0891b2', icon: Megaphone },
           { label: '미해결', count: announcements.filter(a => !a.resolved).length, color: '#f59e0b', icon: AlertTriangle },
           { label: '미확인 알림', count: unackCount, color: '#e11d48', icon: Clock },
           { label: '인력변경 필요', count: pendingCount, color: '#0d9488', icon: ArrowRightLeft },
