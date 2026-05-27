@@ -3,6 +3,7 @@ import {
   buildCashflowActualSyncPlan,
   getMonthCashflowWeeks,
   parseCashflowLineLabel,
+  syncProjectCashflowActualsFromExpenseSheets,
 } from './cashflow-canonical-store.mjs';
 
 function row(cells, extra = {}) {
@@ -82,5 +83,48 @@ describe('cashflow canonical BFF helpers', () => {
     });
 
     expect(plan.weeks[0].amounts.MYSC_PREPAY_IN).toBe(-8615904);
+  });
+
+  it('does not clear existing actuals when a project has no persisted expense rows', async () => {
+    const writes = [];
+    const db = {
+      collection(path) {
+        if (path.endsWith('/expense_sheets')) {
+          return { async get() { return { docs: [{ id: 'default', data: () => ({ rows: [] }) }] }; } };
+        }
+        throw new Error(`unexpected collection path ${path}`);
+      },
+      doc(path) {
+        return {
+          path,
+          async get() {
+            return { exists: true, data: () => ({ weekKeys: ['2026-05:w1'] }) };
+          },
+        };
+      },
+      batch() {
+        return {
+          set(...args) { writes.push(args); },
+          async commit() {},
+        };
+      },
+    };
+
+    const result = await syncProjectCashflowActualsFromExpenseSheets({
+      db,
+      tenantId: 'mysc',
+      actorId: 'u1',
+      actorName: 'PM',
+      projectId: 'p1',
+      now: '2026-05-27T09:40:00.000Z',
+    });
+
+    expect(result).toMatchObject({
+      skipped: true,
+      reason: 'no_expense_sheet_rows',
+      upsertedWeeks: 0,
+      clearedWeeks: 0,
+    });
+    expect(writes).toHaveLength(0);
   });
 });
