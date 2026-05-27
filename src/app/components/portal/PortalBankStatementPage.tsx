@@ -17,6 +17,7 @@ import {
 } from '../../platform/bank-statement';
 import { normalizeKey, parseCsv, parseNumber } from '../../platform/csv-utils';
 import { loadXlsx, warmXlsx } from '../../platform/lazy-heavy-modules';
+import { readTextFile } from '../../platform/text-file-decoder';
 
 function getAmountColumnIndexes(columns: string[]): Set<number> {
   return new Set(
@@ -134,7 +135,7 @@ export function PortalBankStatementPage() {
       if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
         matrix = await parseExcelToMatrix(file);
       } else if (name.endsWith('.csv')) {
-        const text = await file.text();
+        const text = await readTextFile(file);
         matrix = parseCsv(text);
       } else {
         toast.error('CSV, XLSX 또는 XLS 파일만 업로드할 수 있습니다.');

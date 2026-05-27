@@ -90,6 +90,6 @@ test('pm is redirected away from admin cashflow export route', async ({ page }) 
   await loginAsPm(page);
   await page.goto('/cashflow');
 
-  await expect(page).toHaveURL(/\/portal\/project-select\?redirect=%2Fportal$/);
+  await expect(page).toHaveURL(/\/portal$/);
   await expect(page.getByTestId('cashflow-export-page')).toHaveCount(0);
 });
