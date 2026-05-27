@@ -89,10 +89,10 @@ export function PortalProjectRegister() {
 
   if (submitted) {
     return (
-      <div className="mx-auto max-w-3xl py-10">
-        <Card className="border-teal-200 bg-teal-50/70">
+      <div className="w-full max-w-none py-10">
+        <Card className="border-slate-200 bg-white">
           <CardContent className="flex flex-col items-center gap-4 p-8 text-center">
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white text-teal-700 shadow-sm">
+            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-[#001e46] text-white shadow-sm">
               <CheckCircle2 className="h-6 w-6" />
             </div>
             <div>

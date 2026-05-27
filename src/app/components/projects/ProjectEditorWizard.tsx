@@ -699,8 +699,8 @@ export function ProjectEditorWizard({
                 </p>
               ) : null}
               {draft.contractAnalysis ? (
-                <div className="mt-3 rounded-lg border border-emerald-200 bg-white px-3 py-2 text-[12px] leading-5 text-slate-700">
-                  <span className="font-semibold text-emerald-700">분석 요약</span>
+                <div className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-[12px] leading-5 text-slate-700">
+                  <span className="font-semibold text-[#001e46]">분석 요약</span>
                   <span className="ml-2">{draft.contractAnalysis.summary}</span>
                 </div>
               ) : null}
@@ -1136,7 +1136,7 @@ export function ProjectEditorWizard({
   const renderReviewStep = () => (
     <div className="space-y-4">
       {submitIssues.length > 0 ? (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[12px] text-amber-800">
+        <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-[12px] text-red-700">
           제출 전 {submitIssues.map((issue) => issue.label).join(', ')} 입력이 필요합니다.
         </div>
       ) : null}
@@ -1219,7 +1219,7 @@ export function ProjectEditorWizard({
   };
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5">
+    <div className="w-full max-w-none space-y-5">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <div className="flex items-center gap-2">
@@ -1256,7 +1256,7 @@ export function ProjectEditorWizard({
                   type="button"
                   onClick={() => setStepIndex(index)}
                   className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-left text-xs transition-colors ${
-                    active ? 'border-teal-300 bg-teal-50 text-teal-800' : 'border-border bg-white text-muted-foreground hover:bg-muted/40'
+                    active ? 'border-[#001e46] bg-slate-50 text-[#001e46]' : 'border-border bg-white text-muted-foreground hover:bg-muted/40'
                   }`}
                 >
                   <Icon className="h-4 w-4 shrink-0" />

@@ -58,9 +58,9 @@ const ROLE_BADGE_CLASS: Record<string, string> = {
 };
 
 const OPERATOR_STATUS_CLASS = {
-  success: 'bg-emerald-100 text-emerald-800 border border-emerald-200',
-  warning: 'bg-amber-100 text-amber-900 border border-amber-200',
-  danger: 'bg-rose-100 text-rose-800 border border-rose-200',
+  success: 'bg-white text-stone-700 border border-stone-300',
+  warning: 'bg-white text-red-700 border border-stone-300',
+  danger: 'bg-white text-red-700 border border-stone-300',
 } as const;
 
 function roleLabel(role: string | null | undefined): string {
@@ -94,11 +94,11 @@ function KpiCard({
   tone?: 'default' | 'danger';
 }) {
   return (
-    <Card className={tone === 'danger' ? 'border-rose-200 bg-rose-50/60' : 'border-stone-200 bg-white'}>
+    <Card className="border-stone-200 bg-white">
       <CardContent className="flex items-center gap-3 p-4">
         <div className={tone === 'danger'
-          ? 'flex h-10 w-10 items-center justify-center rounded-xl bg-rose-100 text-rose-700'
-          : 'flex h-10 w-10 items-center justify-center rounded-xl bg-stone-100 text-stone-700'}
+          ? 'flex h-10 w-10 items-center justify-center rounded-lg bg-stone-100 text-red-700'
+          : 'flex h-10 w-10 items-center justify-center rounded-lg bg-stone-100 text-stone-700'}
         >
           <Icon className="h-4 w-4" />
         </div>
@@ -113,7 +113,7 @@ function KpiCard({
 
 function SourceBadge({ ok, label }: { ok: boolean; label: string }) {
   return (
-    <Badge className={ok ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}>
+    <Badge className={ok ? 'bg-white text-stone-700 border border-stone-300' : 'bg-white text-red-700 border border-stone-300'}>
       {label}
     </Badge>
   );
@@ -362,8 +362,8 @@ export function UserManagementPage() {
       </Card>
 
       {error && (
-        <Card className="border-rose-200 bg-rose-50/70">
-          <CardContent className="flex items-center gap-2 p-4 text-sm text-rose-700">
+        <Card className="border-stone-200 bg-white">
+          <CardContent className="flex items-center gap-2 p-4 text-sm text-red-700">
             <AlertTriangle className="h-4 w-4" />
             {error}
           </CardContent>
@@ -416,7 +416,7 @@ export function UserManagementPage() {
                           {issueLabels.length > 0 && (
                             <div className="flex flex-wrap gap-1.5">
                               {issueLabels.map((label) => (
-                                <Badge key={label} className="bg-amber-100 text-amber-800">
+                                <Badge key={label} className="bg-white text-red-700 border border-stone-300">
                                   {label}
                                 </Badge>
                               ))}
@@ -572,11 +572,11 @@ export function UserManagementPage() {
                     </div>
                     <div className="flex flex-wrap gap-1.5">
                       {getFriendlyGovernanceIssueLabels(selectedRow).length > 0 ? getFriendlyGovernanceIssueLabels(selectedRow).map((label) => (
-                        <Badge key={label} className="bg-amber-100 text-amber-800">
+                        <Badge key={label} className="bg-white text-red-700 border border-stone-300">
                           {label}
                         </Badge>
                       )) : (
-                        <Badge className="bg-emerald-100 text-emerald-800">
+                        <Badge className="bg-white text-stone-700 border border-stone-300">
                           <CheckCircle2 className="mr-1 h-3 w-3" />
                           drift 없음
                         </Badge>

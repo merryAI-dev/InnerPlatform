@@ -13,7 +13,6 @@ interface PageHeaderProps {
 
 export function PageHeader({
   icon: Icon,
-  iconGradient,
   title,
   description,
   badge,
@@ -24,8 +23,7 @@ export function PageHeader({
     <div className="flex items-start justify-between gap-4">
       <div className="flex items-start gap-3">
         <div
-          className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg shadow-sm"
-          style={{ background: iconGradient }}
+          className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#001e46] shadow-sm"
         >
           <Icon className="w-4.5 h-4.5 text-white" />
         </div>

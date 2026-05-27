@@ -11,10 +11,10 @@ import { useAuth } from '../../data/auth-store';
 import { canEnterPortalWorkspace } from '../../platform/navigation';
 
 const statusColors: Record<string, string> = {
-  CONTRACT_PENDING: 'bg-amber-100 text-amber-700',
+  CONTRACT_PENDING: 'border border-slate-300 bg-white text-slate-700',
   IN_PROGRESS: 'bg-blue-100 text-blue-700',
-  COMPLETED: 'bg-green-100 text-green-700',
-  COMPLETED_PENDING_PAYMENT: 'bg-teal-100 text-teal-700',
+  COMPLETED: 'border border-slate-300 bg-white text-slate-700',
+  COMPLETED_PENDING_PAYMENT: 'border border-slate-300 bg-white text-slate-700',
 };
 
 export function PortalOnboarding() {
@@ -143,10 +143,10 @@ export function PortalOnboarding() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-teal-50/30 dark:from-slate-950 dark:to-teal-950/10 flex items-center justify-center p-4">
-      <div className="w-full max-w-3xl">
+    <div className="min-h-screen bg-slate-50 p-4 dark:bg-slate-950">
+      <div className="w-full max-w-none">
         <div className="text-center mb-6">
-          <div className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-lg shadow-teal-500/20 bg-teal-600">
+          <div className="w-14 h-14 rounded-lg flex items-center justify-center mx-auto mb-3 shadow-sm bg-[#001e46]">
             <FolderKanban className="w-7 h-7 text-white" />
           </div>
           <h1 className="text-[22px]" style={{ fontWeight: 800, letterSpacing: '-0.02em' }}>내 프로젝트 선택</h1>
@@ -155,10 +155,10 @@ export function PortalOnboarding() {
           </p>
         </div>
 
-        <Card className="shadow-xl shadow-black/5 border-border/50">
+        <Card className="border-border">
           <CardContent className="p-6 space-y-4">
             {error && (
-              <div className="flex items-center gap-2 p-3 rounded-lg bg-rose-50 border border-rose-200/60 text-rose-700 text-[12px]">
+              <div className="flex items-center gap-2 p-3 rounded-lg border border-slate-200 bg-white text-red-700 text-[12px]">
                 <AlertCircle className="w-4 h-4 shrink-0" />
                 <span>{error}</span>
               </div>
@@ -178,19 +178,19 @@ export function PortalOnboarding() {
               </div>
             )}
 
-            <div className="rounded-xl border border-teal-200/70 bg-teal-50/80 px-4 py-3">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-[11px] text-teal-700" style={{ fontWeight: 700 }}>현재 선택 상태</p>
+                  <p className="text-[11px] text-slate-600" style={{ fontWeight: 700 }}>현재 선택 상태</p>
                   <p className="text-[13px] text-slate-900" style={{ fontWeight: 700 }}>
                     {projectIds.length > 0 ? `${projectIds.length}개 프로젝트 선택됨` : '아직 선택한 프로젝트가 없습니다'}
                   </p>
                 </div>
-                <Badge className="bg-white text-teal-700 border border-teal-200 text-[10px]">
+                <Badge className="bg-white text-slate-800 border border-slate-300 text-[10px]">
                   {primaryProject ? `주 프로젝트: ${primaryProject.name}` : '주 프로젝트 미선택'}
                 </Badge>
               </div>
-              <p className="mt-2 text-[11px] text-teal-800/80">
+              <p className="mt-2 text-[11px] text-slate-600">
                 카드를 선택하면 내 프로젝트에 포함되고, 그중 하나를 주 프로젝트로 지정할 수 있습니다.
               </p>
             </div>
@@ -205,8 +205,8 @@ export function PortalOnboarding() {
                     key={project.id}
                     className={`flex items-center justify-between gap-3 rounded-xl border p-4 transition-all ${
                       selected
-                        ? 'border-teal-400 bg-teal-50 shadow-sm shadow-teal-200/40 ring-1 ring-teal-200'
-                        : 'border-border/60 bg-white/80 hover:border-teal-200 hover:bg-teal-50/30'
+                        ? 'border-[#001e46] bg-slate-50 shadow-sm ring-1 ring-[#001e46]/15'
+                        : 'border-border bg-white hover:border-slate-300 hover:bg-slate-50'
                     }`}
                   >
                     <div className="min-w-0">
@@ -214,20 +214,20 @@ export function PortalOnboarding() {
                         <span className="text-[13px]" style={{ fontWeight: 600 }}>{project.name}</span>
                         <Badge className={`text-[10px] ${statusColors[project.status] || 'bg-slate-100 text-slate-700'}`}>{statusLabel}</Badge>
                         {selected ? (
-                          <Badge className="bg-teal-600 text-white text-[10px]">
+                          <Badge className="bg-[#001e46] text-white text-[10px]">
                             <CheckCircle2 className="mr-1 h-3 w-3" />
                             선택한 프로젝트
                           </Badge>
                         ) : null}
                         {isPrimary ? (
-                          <Badge className="bg-amber-100 text-amber-800 text-[10px] border border-amber-200">
+                          <Badge className="bg-white text-slate-800 text-[10px] border border-slate-300">
                             주 프로젝트
                           </Badge>
                         ) : null}
                       </div>
                       <p className="text-[11px] text-muted-foreground">{getClientLabel(project)}</p>
                       {selected ? (
-                        <p className="mt-1 text-[11px] text-teal-800">
+                        <p className="mt-1 text-[11px] text-slate-600">
                           {isPrimary ? '이 프로젝트가 현재 포털 기본 진입 프로젝트입니다.' : '선택된 프로젝트입니다. 필요하면 주 프로젝트로 지정하세요.'}
                         </p>
                       ) : (
@@ -239,7 +239,7 @@ export function PortalOnboarding() {
                       {selected && (
                         <Button
                           variant={isPrimary ? 'default' : 'outline'}
-                          className={`h-9 text-[11px] ${isPrimary ? 'bg-amber-500 hover:bg-amber-500/90 text-white border-amber-500' : ''}`}
+                          className={`h-9 text-[11px] ${isPrimary ? 'bg-[#001e46] hover:bg-[#001735] text-white border-[#001e46]' : ''}`}
                           onClick={() => selectPrimary(project.id)}
                         >
                           {isPrimary ? (
@@ -251,7 +251,7 @@ export function PortalOnboarding() {
                       )}
                       <Button
                         variant={selected ? 'default' : 'outline'}
-                        className={`h-9 text-[11px] ${selected ? 'bg-teal-600 hover:bg-teal-600/90' : ''}`}
+                        className={`h-9 text-[11px] ${selected ? 'bg-[#001e46] hover:bg-[#001735]' : ''}`}
                         onClick={() => toggleProject(project.id)}
                       >
                         {selected ? '선택 취소' : '내 프로젝트로 선택'}

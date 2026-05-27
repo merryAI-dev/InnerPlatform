@@ -9,8 +9,8 @@
   --card-foreground: #0f172a;
   --popover: #ffffff;
   --popover-foreground: #0f172a;
-  /* Primary — MYSCube cyan */
-  --primary: #0891b2;
+  /* Primary — MYSCube navy, extracted from the logo */
+  --primary: #001e46;
   --primary-foreground: #ffffff;
   /* Secondary — operational slate */
   --secondary: #eef3f8;
@@ -19,8 +19,8 @@
   --muted: #f1f5f9;
   --muted-foreground: #64748b;
   /* Accent */
-  --accent: #e8f6fa;
-  --accent-foreground: #0e7490;
+  --accent: #eef6fb;
+  --accent-foreground: #001e46;
   /* Destructive */
   --destructive: #e11d48;
   --destructive-foreground: #ffffff;
@@ -32,10 +32,10 @@
   /* Font Weight */
   --font-weight-medium: 500;
   --font-weight-normal: 400;
-  --ring: #06b6d4;
+  --ring: #5bbfdf;
   /* Charts — MYSC palette */
-  --chart-1: #0891b2;
-  --chart-2: #0d9488;
+  --chart-1: #001e46;
+  --chart-2: #5bbfdf;
   --chart-3: #f59e0b;
   --chart-4: #334155;
   --chart-5: #e11d48;
@@ -43,17 +43,19 @@
   /* Sidebar — Dark Navy */
   --sidebar: #172033;
   --sidebar-foreground: #c7d2e0;
-  --sidebar-primary: #22d3ee;
+  --sidebar-primary: #5bbfdf;
   --sidebar-primary-foreground: #ffffff;
   --sidebar-accent: #243047;
   --sidebar-accent-foreground: #f8fafc;
   --sidebar-border: #2b3a52;
-  --sidebar-ring: #06b6d4;
+  --sidebar-ring: #5bbfdf;
   /* ── MYSC Extended Tokens ── */
-  --mysc-gradient-start: #0891b2;
-  --mysc-gradient-end: #0f766e;
-  --mysc-teal: #0d9488;
-  --mysc-emerald: #059669;
+  --mysc-navy: #001e46;
+  --mysc-cyan: #5bbfdf;
+  --mysc-gradient-start: #001e46;
+  --mysc-gradient-end: #0b2f63;
+  --mysc-teal: #5bbfdf;
+  --mysc-emerald: #001e46;
   --mysc-surface-elevated: #ffffff;
   --mysc-surface-sunken: #eef3f8;
   /* ── Glass Tokens ── */
@@ -68,7 +70,7 @@
   --mesh-gradient: linear-gradient(
     135deg,
     #f6f8fb 0%,
-    #eef6f9 48%,
+    #eef3f8 48%,
     #f8fafc 100%
   );
 }
@@ -80,40 +82,42 @@
   --card-foreground: #e2e8f0;
   --popover: #101d30;
   --popover-foreground: #e2e8f0;
-  --primary: #22d3ee;
-  --primary-foreground: #082f49;
+  --primary: #5bbfdf;
+  --primary-foreground: #001e46;
   --secondary: #17283e;
   --secondary-foreground: #e2e8f0;
   --muted: #17283e;
   --muted-foreground: #94a3b8;
-  --accent: #123240;
-  --accent-foreground: #67e8f9;
+  --accent: #10243f;
+  --accent-foreground: #c7edf8;
   --destructive: #be123c;
   --destructive-foreground: #fecdd3;
   --border: #243447;
   --input: #334155;
   --input-background: #111d2f;
   --switch-background: #475569;
-  --ring: #06b6d4;
+  --ring: #5bbfdf;
   --font-weight-medium: 500;
   --font-weight-normal: 400;
-  --chart-1: #22d3ee;
-  --chart-2: #2dd4bf;
+  --chart-1: #5bbfdf;
+  --chart-2: #8ed4ea;
   --chart-3: #fbbf24;
   --chart-4: #94a3b8;
   --chart-5: #fb7185;
   --sidebar: #0a1220;
   --sidebar-foreground: #94a3b8;
-  --sidebar-primary: #22d3ee;
+  --sidebar-primary: #5bbfdf;
   --sidebar-primary-foreground: #ffffff;
   --sidebar-accent: #17283e;
   --sidebar-accent-foreground: #e2e8f0;
   --sidebar-border: #243447;
-  --sidebar-ring: #06b6d4;
-  --mysc-gradient-start: #22d3ee;
-  --mysc-gradient-end: #2dd4bf;
-  --mysc-teal: #2dd4bf;
-  --mysc-emerald: #34d399;
+  --sidebar-ring: #5bbfdf;
+  --mysc-navy: #001e46;
+  --mysc-cyan: #5bbfdf;
+  --mysc-gradient-start: #5bbfdf;
+  --mysc-gradient-end: #0b2f63;
+  --mysc-teal: #5bbfdf;
+  --mysc-emerald: #5bbfdf;
   --mysc-surface-elevated: #0f1b2d;
   --mysc-surface-sunken: #07111f;
   --glass-bg: rgba(15, 27, 45, 0.9);
@@ -126,7 +130,7 @@
     135deg,
     #07111f 0%,
     #0f1b2d 52%,
-    #0b2530 100%
+    #0b1727 100%
   );
 }
 
@@ -191,12 +195,12 @@
     position: fixed;
     inset: 0;
     z-index: -1;
-    background: linear-gradient(180deg, #f8fafc 0%, #f3f7fb 54%, #eef6f9 100%);
+    background: linear-gradient(180deg, #f8fafc 0%, #f3f7fb 54%, #eef3f8 100%);
     background-color: var(--background);
   }
 
   .dark body::before {
-    background: linear-gradient(180deg, #07111f 0%, #0b1727 58%, #0b2530 100%);
+    background: linear-gradient(180deg, #07111f 0%, #0b1727 58%, #091426 100%);
     background-color: var(--background);
   }
 

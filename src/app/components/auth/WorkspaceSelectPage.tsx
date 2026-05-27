@@ -94,16 +94,16 @@ export function WorkspaceSelectPage() {
   const adminRequested = !!redirectFrom && !portalRequested;
 
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-[linear-gradient(135deg,#eef6ff_0%,#f8fbff_46%,#ecfdf5_100%)] p-4 dark:bg-[linear-gradient(135deg,#061a2f_0%,#0f172a_52%,#052e2b_100%)]">
-      <div className="w-full max-w-5xl">
-        <section className="overflow-hidden rounded-lg border border-white/60 bg-white/50 shadow-[0_24px_80px_rgba(15,23,42,0.12)] backdrop-blur-2xl dark:border-white/10 dark:bg-slate-950/40">
-          <div className="border-b border-white/20 bg-[#0f2747]/90 px-5 py-5 text-white shadow-inner shadow-white/5 backdrop-blur-xl md:px-7">
+    <div className="flex min-h-dvh bg-slate-50 p-4 dark:bg-slate-950">
+      <div className="w-full max-w-none">
+        <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
+          <div className="border-b border-slate-800 bg-[#001e46] px-5 py-5 text-white md:px-7">
             <MyscWordmark tone="onDark" size="md" />
           </div>
           <div className="space-y-6 px-5 py-6 md:px-7 md:py-8">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-              <div className="max-w-2xl">
-                <div className="inline-flex items-center gap-2 rounded-full border border-white/70 bg-white/50 px-3 py-1 text-[12px] font-semibold text-slate-700 shadow-sm backdrop-blur-md dark:border-white/10 dark:bg-slate-900/60 dark:text-slate-200">
+              <div className="w-full">
+                <div className="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-1 text-[12px] font-semibold text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
                   <Search className="h-3.5 w-3.5" />
                   시작 공간 선택
                 </div>
@@ -118,14 +118,14 @@ export function WorkspaceSelectPage() {
                 <span className="rounded-full border border-sky-200/80 bg-sky-50/75 px-3 py-1 text-sky-800 shadow-sm backdrop-blur-md dark:border-sky-400/20 dark:bg-sky-950/40 dark:text-sky-200">
                   관리자
                 </span>
-                <span className="rounded-full border border-emerald-200/80 bg-emerald-50/75 px-3 py-1 text-emerald-800 shadow-sm backdrop-blur-md dark:border-emerald-400/20 dark:bg-emerald-950/40 dark:text-emerald-200">
+                <span className="rounded-full border border-slate-300 bg-white px-3 py-1 text-slate-800 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
                   PM
                 </span>
               </div>
             </div>
 
             {error && (
-              <div className="rounded-xl border border-rose-200/70 bg-rose-50 px-4 py-3 text-[12px] text-rose-700">
+              <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-[12px] text-red-700">
                 {error}
               </div>
             )}
@@ -188,22 +188,22 @@ export function WorkspaceSelectPage() {
                 </div>
               </section>
 
-              <section className="flex min-h-[360px] flex-col justify-between rounded-lg border border-white/60 bg-emerald-50/50 p-5 shadow-lg shadow-slate-900/5 backdrop-blur-xl dark:border-emerald-400/20 dark:bg-emerald-950/25">
+              <section className="flex min-h-[360px] flex-col justify-between rounded-lg border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
                 <div className="space-y-4">
                   <div className="flex items-start justify-between gap-3">
-                    <div className="inline-flex h-12 w-12 items-center justify-center rounded-lg border border-white/40 bg-emerald-700/90 text-white shadow-lg shadow-emerald-900/20 backdrop-blur-md dark:bg-emerald-300/90 dark:text-emerald-950">
+                    <div className="inline-flex h-12 w-12 items-center justify-center rounded-lg border border-slate-200 bg-[#001e46] text-white shadow-sm dark:border-slate-700">
                       <FolderKanban className="h-6 w-6" />
                     </div>
                     {(portalRequested || !canAccessAdmin) && (
-                      <Badge variant="outline" className="border-white/70 bg-white/60 text-emerald-800 shadow-sm backdrop-blur-md dark:border-emerald-400/20 dark:bg-slate-950/50 dark:text-emerald-200">
+                      <Badge variant="outline" className="border-slate-300 bg-white text-slate-800 shadow-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200">
                         <Sparkles className="mr-1 h-3 w-3" />
                         추천
                       </Badge>
                     )}
                   </div>
                   <div>
-                    <h2 className="text-[20px] font-bold text-emerald-950 dark:text-emerald-100">PM 포털</h2>
-                    <p className="mt-2 text-[13px] leading-6 text-emerald-900/75 dark:text-emerald-100/70">
+                    <h2 className="text-[20px] font-bold text-slate-950 dark:text-slate-100">PM 포털</h2>
+                    <p className="mt-2 text-[13px] leading-6 text-slate-600 dark:text-slate-300">
                       담당 프로젝트 현황, 예산 편집, 사업비 입력, 프로젝트 등록 요청으로 이동합니다.
                     </p>
                   </div>
@@ -211,25 +211,25 @@ export function WorkspaceSelectPage() {
                     {PM_WORKSPACE_FEATURES.map((feature) => (
                       <span
                         key={feature}
-                        className="rounded-full border border-white/70 bg-white/60 px-3 py-1 text-[12px] font-semibold text-emerald-900 shadow-sm backdrop-blur-md dark:border-emerald-400/20 dark:bg-slate-950/50 dark:text-emerald-200"
+                        className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[12px] font-semibold text-slate-800 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
                       >
                         {feature}
                       </span>
                     ))}
                   </div>
-                  <div className="space-y-2 text-[12px] text-emerald-900/75 dark:text-emerald-100/70">
+                  <div className="space-y-2 text-[12px] text-slate-600 dark:text-slate-300">
                     <div className="flex items-center gap-2">
-                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-700 dark:text-emerald-300" />
+                      <CheckCircle2 className="h-3.5 w-3.5 text-slate-500 dark:text-slate-400" />
                       내 프로젝트 기준으로 입력과 확인을 진행
                     </div>
                     <div className="flex items-center gap-2">
-                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-700 dark:text-emerald-300" />
+                      <CheckCircle2 className="h-3.5 w-3.5 text-slate-500 dark:text-slate-400" />
                       사업비, 예산, 캐시플로 흐름을 같은 공간에서 처리
                     </div>
                   </div>
                 </div>
                 <Button
-                  className="mt-5 h-11 w-full gap-2 border border-emerald-700/40 bg-emerald-700/90 text-white shadow-lg shadow-emerald-900/20 backdrop-blur-md hover:bg-emerald-800/95"
+                  className="mt-5 h-11 w-full gap-2 border border-[#001e46] bg-[#001e46] text-white shadow-sm hover:bg-[#001735]"
                   disabled={pending !== null}
                   onClick={() => void handleSelect('portal')}
                 >

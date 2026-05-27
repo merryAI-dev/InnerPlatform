@@ -23,14 +23,14 @@
 
 ## Color
 - **Approach:** Restrained. One brand accent, cool neutrals, clear semantic states.
-- **Primary:** `#0891b2` MYSCube cyan. Use for primary actions, active focus, links, and selected navigation.
-- **Primary dark:** `#0e7490`. Use for hover/pressed states.
-- **Secondary:** `#0f766e` operational teal. Use for success-adjacent finance and workflow progress.
+- **Primary:** `#001e46` MYSCube navy, extracted from the logo. Use for primary actions, selected navigation, key headers, and durable emphasis.
+- **Primary dark:** `#001735`. Use for hover/pressed states.
+- **Secondary:** `#5bbfdf` MYSCube cyan, extracted from the logo. Use for links, focus rings, and lightweight information emphasis.
 - **Ink:** `#0f172a`. Use for sidebar, page headers, and high-emphasis text.
 - **Neutrals:** `#f8fafc`, `#f1f5f9`, `#e2e8f0`, `#94a3b8`, `#475569`, `#0f172a`.
-- **Semantic:** success `#059669`, warning `#d97706`, error `#e11d48`, info `#0891b2`.
-- **Dark mode:** Deep navy surfaces with cyan/teal accents. Avoid violet, purple, and blue-purple gradients.
-- **Do not use:** purple/violet/indigo as the default accent, decorative blue-purple gradients, gradient primary buttons, or purple FABs.
+- **Semantic:** success `#047857`, warning `#d97706`, error `#e11d48`, info `#0e7490`.
+- **Dark mode:** Deep navy surfaces with cyan accents. Avoid violet, purple, blue-purple gradients, and transparent green surfaces.
+- **Do not use:** purple/violet/indigo as the default accent, decorative blue-purple gradients, gradient primary buttons, transparent green/emerald/teal surfaces as decoration, or purple FABs.
 
 ## Spacing
 - **Base unit:** 4px.
@@ -45,6 +45,17 @@
 - **Border radius:** sm 4px, md 6px, lg 8px, full 9999px. Avoid bubbly 12-20px radii except for contained empty states.
 - **Cards:** Use cards for repeated records, modals, and framed tools. Do not make every section a floating card if a table or full-width band would scan better.
 
+## Surface and Emphasis Rules
+- **Default surface:** Prefer flat workspace surfaces with clear borders, row rhythm, section headers, and tables. A page should not read as a stack of unrelated marketing cards.
+- **Use a card when:** The content is a repeated record, a modal-like decision block, a contained upload/drop zone, or a tool that benefits from a visible boundary.
+- **Avoid a card when:** The content is the primary work area, a form section that should scan like editable cells, a filter bar, a KPI strip, or a ledger/table. Use a flat band, divider, table, or bordered field group instead.
+- **Emphasis order:** Primary task first, pending/risk state second, supporting KPI third. Do not let decorative gradients, icon tiles, or empty-state illustrations become the strongest visual signal.
+- **Warning/error treatment:** Do not use yellow, orange, or red tinted panels as decoration. Put warning/error copy in red text on a neutral surface; reserve red fills only for destructive confirmation buttons.
+- **Admin emphasis:** In approval and permission screens, the strongest visual target should be the decision or permission meaning, not the container chrome.
+- **PM portal emphasis:** In project, cashflow, and bank-statement screens, the strongest visual target should be the next operational action and save/sync state.
+- **Density rule:** Compact is acceptable, cramped is not. Buttons and editable controls can be dense on desktop, but mobile touch targets and destructive/approval actions must remain comfortably clickable.
+- **Icon rule:** Icons explain actions, status, or navigation. Avoid decorative raw SVGs and gradient icon tiles unless they anchor a clearly important workflow state.
+
 ## Motion
 - **Approach:** Minimal-functional.
 - **Easing:** enter ease-out, exit ease-in, move ease-in-out.
@@ -52,7 +63,7 @@
 - **Rule:** Motion should explain state changes. Avoid decorative animation.
 
 ## Components
-- **Buttons:** Solid primary is cyan/teal, no gradient. Secondary is neutral outline. Destructive is red with confirmation.
+- **Buttons:** Solid primary is navy, no gradient. Secondary is neutral outline. Destructive is red only for confirmation/destructive actions.
 - **Navigation:** Active state uses a cyan rail and subtle navy/cyan fill, not purple glow.
 - **Forms:** Inputs need visible light-gray borders and white surface. Form fields should look like editable cells, not floating glass.
 - **Tables and ledgers:** Prioritize row rhythm, sticky headers, tabular numbers, and quiet status badges.

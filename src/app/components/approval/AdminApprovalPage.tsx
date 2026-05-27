@@ -41,17 +41,17 @@ const priorityLabels: Record<string, string> = {
 };
 
 const priorityColors: Record<string, string> = {
-  HIGH: 'bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-300',
-  MEDIUM: 'bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300',
-  LOW: 'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300',
+  HIGH: 'border border-slate-300 bg-white text-red-700',
+  MEDIUM: 'border border-slate-300 bg-white text-red-700',
+  LOW: 'border border-slate-300 bg-white text-slate-700',
 };
 
 const stateColors: Record<ChangeRequestState, string> = {
-  DRAFT: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400',
-  SUBMITTED: 'bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-400',
-  APPROVED: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-400',
-  REJECTED: 'bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-400',
-  REVISION_REQUESTED: 'bg-orange-100 text-orange-700 dark:bg-orange-900/50 dark:text-orange-400',
+  DRAFT: 'border border-slate-300 bg-white text-slate-600',
+  SUBMITTED: 'border border-slate-300 bg-white text-red-700',
+  APPROVED: 'border border-slate-300 bg-white text-slate-700',
+  REJECTED: 'border border-slate-300 bg-white text-red-700',
+  REVISION_REQUESTED: 'border border-slate-300 bg-white text-red-700',
 };
 
 type ApprovalActionDialog =
@@ -175,18 +175,18 @@ export function AdminApprovalPage() {
         badge={`대기 ${totalPending}건`}
       />
 
-      <Card className="border-teal-200/80 bg-gradient-to-r from-teal-50 via-white to-slate-50">
+      <Card className="border-slate-200 bg-white">
         <CardContent className="flex flex-col gap-3 p-5 lg:flex-row lg:items-center lg:justify-between">
           <div className="space-y-1">
-            <p className="text-[11px] uppercase tracking-[0.08em] text-teal-700" style={{ fontWeight: 700 }}>대표 검토</p>
+            <p className="text-[11px] uppercase tracking-[0.08em] text-slate-600" style={{ fontWeight: 700 }}>대표 검토</p>
             <h2 className="text-[22px] tracking-[-0.04em] text-slate-950" style={{ fontWeight: 800 }}>프로젝트 등록 검토</h2>
             <p className="text-[12px] leading-6 text-slate-600">프로젝트 등록 요청부터 먼저 정리합니다. 계약 근거, 재무/정산, 검토 메모를 한 화면에서 보고 결정합니다.</p>
           </div>
-          <Badge className="border-0 bg-teal-600 text-white">등록 요청 우선</Badge>
+          <Badge className="border-0 bg-[#001e46] text-white">등록 요청 우선</Badge>
         </CardContent>
       </Card>
 
-      <Card className="border-slate-200/80 bg-gradient-to-r from-slate-50 via-white to-teal-50/70">
+      <Card className="border-slate-200 bg-slate-50">
         <CardContent className="flex flex-col gap-4 p-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="space-y-2">
             <p className="text-[12px] font-semibold text-slate-900">승인 대기 항목</p>
@@ -201,7 +201,7 @@ export function AdminApprovalPage() {
             </div>
             <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
               <p className="text-[10px] text-slate-500">프로젝트 등록</p>
-              <p className="text-[18px] font-bold text-teal-700">{pendingProjectReviews.length}</p>
+              <p className="text-[18px] font-bold text-slate-600">{pendingProjectReviews.length}</p>
             </div>
             <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
               <p className="text-[10px] text-slate-500">사업비</p>
@@ -209,17 +209,17 @@ export function AdminApprovalPage() {
             </div>
             <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
               <p className="text-[10px] text-slate-500">인력변경</p>
-              <p className="text-[18px] font-bold text-teal-700">{pendingChanges.length}</p>
+              <p className="text-[18px] font-bold text-slate-600">{pendingChanges.length}</p>
             </div>
           </div>
         </CardContent>
       </Card>
 
       {totalPending > 0 && (
-        <Card className="border-amber-200/80 bg-amber-50/70">
+        <Card className="border-slate-200 bg-white">
           <CardContent className="flex items-start gap-3 p-4">
             <div className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-full bg-white">
-              <AlertTriangle className="h-4 w-4 text-amber-600" />
+              <AlertTriangle className="h-4 w-4 text-red-700" />
             </div>
             <div className="space-y-1">
               <p className="text-[12px] font-semibold text-slate-900">이번에 처리할 승인 항목이 남아 있습니다</p>
@@ -284,7 +284,7 @@ export function AdminApprovalPage() {
                   <div className="flex shrink-0 flex-col gap-2 lg:w-[132px]">
                     <Button
                       size="sm"
-                      className="gap-1 bg-emerald-600 hover:bg-emerald-700"
+                      className="gap-1 bg-[#001e46] hover:bg-[#001735]"
                       onClick={() => {
                         setActionDialog({ type: 'expense', id: item.id, action: 'APPROVED' });
                         setActionComment('');
@@ -296,7 +296,7 @@ export function AdminApprovalPage() {
                     <Button
                       size="sm"
                       variant="outline"
-                      className="gap-1 border-rose-200 text-rose-600 hover:bg-rose-50"
+                      className="gap-1 border-slate-300 text-red-700 hover:bg-slate-50"
                       onClick={() => {
                         setActionDialog({ type: 'expense', id: item.id, action: 'REJECTED' });
                         setActionComment('');
@@ -324,7 +324,7 @@ export function AdminApprovalPage() {
 
       <section className="space-y-3">
         <div className="flex items-center gap-2">
-          <ArrowRightLeft className="h-4 w-4 text-teal-600" />
+          <ArrowRightLeft className="h-4 w-4 text-[#001e46]" />
           <div>
             <h2 className="text-[15px] font-semibold text-slate-900">인력변경 승인 대기</h2>
             <p className="text-[11px] text-slate-500">제출 상태의 요청만 빠르게 검토합니다</p>
@@ -383,7 +383,7 @@ export function AdminApprovalPage() {
                   <div className="flex shrink-0 flex-col gap-2 lg:w-[132px]">
                     <Button
                       size="sm"
-                      className="gap-1 bg-emerald-600 hover:bg-emerald-700"
+                      className="gap-1 bg-[#001e46] hover:bg-[#001735]"
                       onClick={() => {
                         setActionDialog({ type: 'change', id: item.id, action: 'APPROVED' });
                         setActionComment('');
@@ -395,7 +395,7 @@ export function AdminApprovalPage() {
                     <Button
                       size="sm"
                       variant="outline"
-                      className="gap-1 border-rose-200 text-rose-600 hover:bg-rose-50"
+                      className="gap-1 border-slate-300 text-red-700 hover:bg-slate-50"
                       onClick={() => {
                         setActionDialog({ type: 'change', id: item.id, action: 'REJECTED' });
                         setActionComment('');
@@ -433,8 +433,8 @@ export function AdminApprovalPage() {
             <div
               className={`rounded-lg border px-3 py-3 text-[11px] ${
                 actionDialog?.action === 'APPROVED'
-                  ? 'border-emerald-200/60 bg-emerald-50 text-emerald-700'
-                  : 'border-rose-200/60 bg-rose-50 text-rose-700'
+                  ? 'border-slate-200 bg-white text-slate-700'
+                  : 'border-slate-200 bg-white text-red-700'
               }`}
             >
               <div className="flex items-center gap-1.5">
@@ -468,7 +468,7 @@ export function AdminApprovalPage() {
               size="sm"
               onClick={handleAction}
               disabled={actionDialog?.action === 'REJECTED' && !actionComment.trim()}
-              className={actionDialog?.action === 'APPROVED' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-rose-600 hover:bg-rose-700'}
+              className={actionDialog?.action === 'APPROVED' ? 'bg-[#001e46] hover:bg-[#001735]' : 'bg-red-700 hover:bg-red-800'}
             >
               {actionDialog?.action === 'APPROVED' ? '승인' : '반려'}
             </Button>
