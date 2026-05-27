@@ -39,7 +39,7 @@ import { useFirebase } from '../../lib/firebase-context';
 import { getOrgDocumentPath } from '../../lib/firebase';
 import { loadExcelJs, warmExcelJs } from '../../platform/lazy-heavy-modules';
 import { buildCashflowExportWorkbookSpec } from '../../platform/cashflow-export';
-import { exportCashflowWorkbookViaBff, isPlatformApiEnabled, syncProjectCashflowActualsViaBff } from '../../lib/platform-bff-client';
+import { exportCashflowWorkbookViaBff, isPlatformApiEnabled } from '../../lib/platform-bff-client';
 
 function fmt(n: number): string {
   return n.toLocaleString('ko-KR');
@@ -101,6 +101,7 @@ export function CashflowProjectSheet({
     upsertWeekAmounts,
     submitWeekAsPm,
     closeWeekAsAdmin,
+    syncProjectActualsFromExpenseSheets,
   } = useCashflowWeeks();
 
   const monthWeeks = useMemo(() => getMonthMondayWeeks(yearMonth), [yearMonth]);
@@ -489,27 +490,27 @@ export function CashflowProjectSheet({
   }, [drafts, flushWeek, monthWeeks, yearMonth]);
 
   const syncActualsFromExpenseSheet = useCallback(() => {
-    if (!isPlatformApiEnabled() || !user) {
-      toast.error('Actual 동기화 API가 연결되어 있지 않습니다.');
-      return;
-    }
     void (async () => {
       setActualSyncing(true);
-      const result = await syncProjectCashflowActualsViaBff({
-        tenantId: orgId,
-        actor: {
-          uid: user.uid,
-          email: user.email,
-          role: user.role,
-          idToken: user.idToken,
-          googleAccessToken: user.googleAccessToken,
-        },
-        projectId,
-      });
+      const result = await syncProjectActualsFromExpenseSheets({ projectId });
       if (result.skipped) {
         toast.message('동기화할 정산대장 행이 없습니다.');
         return;
       }
+      setDrafts((prev) => {
+        const next = { ...prev };
+        for (const key of Object.keys(next)) {
+          if (key.startsWith(`${yearMonth}:actual:`)) delete next[key];
+        }
+        return next;
+      });
+      setWeekSaveState((prev) => {
+        const next = { ...prev };
+        for (const week of monthWeeks) {
+          delete next[resolveWeekKey({ yearMonth, mode: 'actual', weekNo: week.weekNo })];
+        }
+        return next;
+      });
       toast.success(`Actual ${result.upsertedWeeks}개 주차를 동기화했습니다.`);
     })().catch((error) => {
       console.error('[Cashflow] actual sync failed:', error);
@@ -517,7 +518,7 @@ export function CashflowProjectSheet({
     }).finally(() => {
       setActualSyncing(false);
     });
-  }, [orgId, projectId, user]);
+  }, [monthWeeks, projectId, resolveWeekKey, syncProjectActualsFromExpenseSheets, yearMonth]);
 
   const copyMonthValues = useCallback((sourceMode: 'projection' | 'actual', targetMode: 'projection' | 'actual') => {
     if (sourceMode === targetMode) return;

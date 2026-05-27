@@ -523,8 +523,20 @@ export async function syncProjectCashflowActualsFromExpenseSheets({ db, tenantId
     sheetCount: sheets.length,
     upsertedWeeks: plan.weeks.length,
     clearedWeeks: plan.clearedWeeks.length,
-    weeks: plan.weeks.map((week) => ({ yearMonth: week.yearMonth, weekNo: week.weekNo })),
-    cleared: plan.clearedWeeks.map((week) => ({ yearMonth: week.yearMonth, weekNo: week.weekNo })),
+    weeks: plan.weeks.map((week) => ({
+      yearMonth: week.yearMonth,
+      weekNo: week.weekNo,
+      weekStart: week.weekStart,
+      weekEnd: week.weekEnd,
+      amounts: week.amounts,
+    })),
+    cleared: plan.clearedWeeks.map((week) => ({
+      yearMonth: week.yearMonth,
+      weekNo: week.weekNo,
+      weekStart: week.weekStart,
+      weekEnd: week.weekEnd,
+      amounts: week.amounts,
+    })),
     updatedAt: now,
   };
 }
