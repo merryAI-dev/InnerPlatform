@@ -434,18 +434,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
           },
         });
 
-        if (writeStrategy.mirrorRemoteWritesLocally) {
-          setProjects((prev) => prev.map((project) => (
-            project.id === id
-              ? mergeProjectMutationResult(project, result, patch)
-              : project
-          )));
-        }
+        setProjects((prev) => prev.map((project) => (
+          project.id === id
+            ? mergeProjectMutationResult(project, result, patch)
+            : project
+        )));
         return;
       }
 
       if (writeStrategy.target === 'firestore' && db) {
         await upsertProject(db, orgId, { ...existing, ...patch }, auditActor);
+        setProjects((prev) => prev.map((project) => (project.id === id ? { ...project, ...patch } : project)));
         return;
       }
 
@@ -474,18 +473,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
           },
         });
 
-        if (writeStrategy.mirrorRemoteWritesLocally) {
-          setProjects((prev) => prev.map((project) => (
-            project.id === id
-              ? mergeProjectMutationResult(project, result, patch)
-              : project
-          )));
-        }
+        setProjects((prev) => prev.map((project) => (
+          project.id === id
+            ? mergeProjectMutationResult(project, result, patch)
+            : project
+        )));
         return;
       }
 
       if (writeStrategy.target === 'firestore' && db) {
         await upsertProject(db, orgId, { ...existing, ...patch }, auditActor);
+        setProjects((prev) => prev.map((project) => (project.id === id ? { ...project, ...patch } : project)));
         return;
       }
 
