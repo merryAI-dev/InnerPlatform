@@ -839,7 +839,7 @@ export function CashflowProjectSheet({
                         </div>
                         <div className="text-[9px] text-muted-foreground mt-0.5">{w.weekStart} ~ {w.weekEnd}</div>
                         <div className="mt-2 flex items-center justify-end gap-1.5">
-                          {tableMode === 'projection' && !weekMeta[w.weekNo]?.projectionUpdated && canEdit && (
+                          {tableMode === 'projection' && canEdit && (
                             <Button
                               size="sm"
                               variant="outline"

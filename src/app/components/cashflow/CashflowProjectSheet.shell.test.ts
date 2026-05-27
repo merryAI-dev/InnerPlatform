@@ -44,6 +44,8 @@ describe('CashflowProjectSheet actual sync flow', () => {
 
   it('uses per-week projection completion instead of the retired month projection save button', () => {
     expect(cashflowProjectSheetSource).toContain('handleCompleteProjectionWeek');
+    expect(cashflowProjectSheetSource).toContain("tableMode === 'projection' && canEdit");
+    expect(cashflowProjectSheetSource).not.toContain("tableMode === 'projection' && !weekMeta[w.weekNo]?.projectionUpdated");
     expect(cashflowProjectSheetSource).toContain('projectionUpdated: true');
     expect(cashflowProjectSheetSource).toContain('주차 Projection을 작성완료 처리했습니다.');
     expect(cashflowProjectSheetSource).not.toContain('Projection 저장');
