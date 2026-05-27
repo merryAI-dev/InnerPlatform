@@ -74,6 +74,7 @@ describe('PortalLayout shell actions', () => {
 
   it('uses a wider content canvas for the weekly expense work surface', () => {
     expect(portalLayoutSource).toContain("const useWidePortalCanvas = location.pathname === '/portal/weekly-expenses';");
-    expect(portalLayoutSource).toContain("mx-auto w-full max-w-none px-3 py-4 md:px-5 md:py-6 xl:px-8");
+    expect(portalLayoutSource).toContain("w-full max-w-none px-3 py-4 md:px-5 md:py-6 xl:px-8");
+    expect(portalLayoutSource).not.toContain("mx-auto max-w-[1480px]");
   });
 });
