@@ -36,6 +36,12 @@ describe('CashflowProjectSheet actual sync flow', () => {
     expect(cashflowProjectSheetSource).not.toContain('초안으로 복사했습니다');
   });
 
+  it('shows projection 작성 from projectionUpdated on the project sheet header', () => {
+    expect(cashflowProjectSheetSource).toContain('projectionUpdated: Boolean(doc?.projectionUpdated)');
+    expect(cashflowProjectSheetSource).toContain("tableMode === 'projection'");
+    expect(cashflowProjectSheetSource).toContain('weekMeta[w.weekNo]?.projectionUpdated');
+  });
+
   it('loads cashflow weeks directly from Firestore year range without project assignment gating', () => {
     expect(cashflowWeeksStoreSource).toContain("where('yearMonth', '>=', carryForwardYearStart)");
     expect(cashflowWeeksStoreSource).toContain("where('yearMonth', '<=', selectedYearEnd)");

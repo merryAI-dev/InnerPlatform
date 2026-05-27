@@ -192,10 +192,11 @@ export function CashflowProjectSheet({
   }, [yearMonth, projectId]);
 
   const weekMeta = useMemo(() => {
-    const map: Record<number, { pmSubmitted: boolean; adminClosed: boolean }> = {};
+    const map: Record<number, { projectionUpdated: boolean; pmSubmitted: boolean; adminClosed: boolean }> = {};
     for (const def of monthWeeks) {
       const doc = byWeekNo.get(def.weekNo);
       map[def.weekNo] = {
+        projectionUpdated: Boolean(doc?.projectionUpdated),
         pmSubmitted: Boolean(doc?.pmSubmitted),
         adminClosed: Boolean(doc?.adminClosed),
       };
@@ -756,6 +757,12 @@ export function CashflowProjectSheet({
                           <span>{w.label}</span>
                           {weekMeta[w.weekNo]?.adminClosed ? (
                             <Badge className="h-4 px-1 text-[9px] bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-0">결산</Badge>
+                          ) : tableMode === 'projection' ? (
+                            weekMeta[w.weekNo]?.projectionUpdated ? (
+                              <Badge className="h-4 px-1 text-[9px] bg-amber-500/15 text-amber-700 dark:text-amber-300 border-0">작성</Badge>
+                            ) : (
+                              <Badge className="h-4 px-1 text-[9px] bg-slate-500/10 text-slate-600 dark:text-slate-300 border-0">미작성</Badge>
+                            )
                           ) : weekMeta[w.weekNo]?.pmSubmitted || weekHasActual[w.weekNo] ? (
                             <Badge className="h-4 px-1 text-[9px] bg-amber-500/15 text-amber-700 dark:text-amber-300 border-0">작성</Badge>
                           ) : (
