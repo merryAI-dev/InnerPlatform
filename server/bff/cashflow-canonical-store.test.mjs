@@ -138,6 +138,55 @@ describe('cashflow canonical BFF helpers', () => {
     expect(weekWrite.options).toEqual({ merge: true });
   });
 
+  it('flags large projection changes made within a week of the target week', async () => {
+    const writes = [];
+    const db = {
+      doc(path) {
+        return { path };
+      },
+      async runTransaction(callback) {
+        await callback({
+          async get() {
+            return {
+              exists: true,
+              data: () => ({
+                projection: {
+                  DIRECT_COST_OUT: 1000000,
+                },
+              }),
+            };
+          },
+          set(ref, data, options) {
+            writes.push({ ref, data, options });
+          },
+        });
+      },
+    };
+
+    await upsertCashflowWeekAmounts({
+      db,
+      tenantId: 'mysc',
+      actorId: 'u1',
+      actorName: 'PM',
+      projectId: 'p1',
+      mode: 'projection',
+      yearMonth: '2026-06',
+      weekNo: 1,
+      amounts: { DIRECT_COST_OUT: 101000000 },
+      now: '2026-06-01T09:40:00.000Z',
+    });
+
+    const weekWrite = writes.find((write) => write.ref.path.includes('/cashflow_weeks/'));
+    expect(weekWrite.data.projectionChangeAlert).toMatchObject({
+      triggered: true,
+      reason: 'near_week_large_projection_change',
+      totalAbsDelta: 100000000,
+      largestLineId: 'DIRECT_COST_OUT',
+      largestLineDelta: 100000000,
+      daysBeforeWeekStart: 2,
+    });
+  });
+
   it('treats bank-imported expense rows on inflow lines as negative adjustments', () => {
     const plan = buildCashflowActualSyncPlan({
       anchorYear: 2026,

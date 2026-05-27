@@ -1185,6 +1185,7 @@ export interface CashflowWeekSheet {
   projectionUpdatedAt?: string;
   projectionUpdatedByUid?: string;
   projectionUpdatedByName?: string;
+  projectionChangeAlert?: ProjectionChangeAlert | null;
   pmSubmitted: boolean;
   pmSubmittedAt?: string;
   pmSubmittedByUid?: string;
@@ -1201,6 +1202,22 @@ export interface CashflowWeekSheet {
   varianceFlag?: VarianceFlag;
   // 편차 확인 영구 이력 — 모든 플래그/답변/해결 기록 (삭제 불가)
   varianceHistory?: VarianceFlagEvent[];
+}
+
+export interface ProjectionChangeAlert {
+  triggered: true;
+  reason: 'near_week_large_projection_change';
+  changedAt: string;
+  changedByUid?: string;
+  changedByName?: string;
+  daysBeforeWeekStart: number;
+  thresholdAmount: number;
+  totalAbsDelta: number;
+  netDelta: number;
+  largestLineId?: CashflowSheetLineId;
+  largestLineDelta: number;
+  previousAmount?: number;
+  nextAmount?: number;
 }
 
 // 편차 확인 티켓 — 현재 상태

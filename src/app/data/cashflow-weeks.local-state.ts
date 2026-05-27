@@ -1,5 +1,5 @@
 import type { CashflowSheetLineId, CashflowWeekSheet } from './types';
-import { normalizeWeekAmounts, resolveWeekDocId } from './cashflow-weeks.persistence';
+import { buildProjectionChangeAlert, normalizeWeekAmounts, resolveWeekDocId } from './cashflow-weeks.persistence';
 
 export function applyWeekAmountsToLocalWeeks(input: {
   weeks: CashflowWeekSheet[];
@@ -22,6 +22,12 @@ export function applyWeekAmountsToLocalWeeks(input: {
   if (existingIndex >= 0) {
     const next = [...input.weeks];
     const current = next[existingIndex];
+    const nextProjection = input.mode === 'projection'
+      ? {
+        ...current.projection,
+        ...normalizedAmounts,
+      }
+      : current.projection;
     next[existingIndex] = {
       ...current,
       [input.mode]: {
@@ -34,6 +40,14 @@ export function applyWeekAmountsToLocalWeeks(input: {
           projectionUpdatedAt: input.now,
           projectionUpdatedByUid: input.actorUid,
           projectionUpdatedByName: input.actorName,
+          projectionChangeAlert: buildProjectionChangeAlert({
+            previousProjection: current.projection,
+            nextProjection,
+            weekStart: input.weekStart,
+            now: input.now,
+            actorUid: input.actorUid,
+            actorName: input.actorName,
+          }),
         }
         : {}),
       updatedAt: input.now,

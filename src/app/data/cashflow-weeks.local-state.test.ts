@@ -52,6 +52,46 @@ describe('applyWeekAmountsToLocalWeeks', () => {
     });
   });
 
+  it('marks near-week large projection edits for admin attention', () => {
+    const existing: CashflowWeekSheet = {
+      id: resolveWeekDocId('p002', '2026-06', 1),
+      tenantId: 'mysc',
+      projectId: 'p002',
+      yearMonth: '2026-06',
+      weekNo: 1,
+      weekStart: '2026-06-03',
+      weekEnd: '2026-06-09',
+      projection: { DIRECT_COST_OUT: 1000000 },
+      actual: {},
+      pmSubmitted: false,
+      adminClosed: false,
+      createdAt: '2026-05-01T00:00:00.000Z',
+      updatedAt: '2026-05-01T00:00:00.000Z',
+    };
+
+    const result = applyWeekAmountsToLocalWeeks({
+      weeks: [existing],
+      orgId: 'mysc',
+      actorUid: 'u-pm',
+      actorName: 'PM 보람',
+      projectId: 'p002',
+      yearMonth: '2026-06',
+      weekNo: 1,
+      weekStart: '2026-06-03',
+      weekEnd: '2026-06-09',
+      mode: 'projection',
+      amounts: { DIRECT_COST_OUT: 101000000 },
+      now: '2026-06-01T10:00:00.000Z',
+    });
+
+    expect(result[0].projectionChangeAlert).toMatchObject({
+      triggered: true,
+      totalAbsDelta: 100000000,
+      largestLineId: 'DIRECT_COST_OUT',
+      daysBeforeWeekStart: 2,
+    });
+  });
+
   it('creates a missing actual week immediately after save', () => {
     const [, , week] = getMonthMondayWeeks('2026-04');
 

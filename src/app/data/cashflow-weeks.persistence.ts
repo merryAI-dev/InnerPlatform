@@ -1,4 +1,6 @@
-import type { CashflowSheetLineId, CashflowWeekSheet } from './types';
+import type { CashflowSheetLineId, CashflowWeekSheet, ProjectionChangeAlert } from './types';
+
+export const PROJECTION_CHANGE_ALERT_THRESHOLD_AMOUNT = 10_000_000;
 
 export function resolveWeekDocId(projectId: string, yearMonth: string, weekNo: number): string {
   const safeProjectId = projectId.trim();
@@ -22,6 +24,77 @@ export function normalizeWeekAmounts(input: Partial<Record<CashflowSheetLineId, 
   return normalized;
 }
 
+function parseDateOnlyUtc(isoDate: string): number | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(isoDate || '').trim());
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
+  return Date.UTC(year, month - 1, day);
+}
+
+export function buildProjectionChangeAlert(params: {
+  previousProjection?: Partial<Record<CashflowSheetLineId, number>>;
+  nextProjection: Partial<Record<CashflowSheetLineId, number>>;
+  weekStart: string;
+  now: string;
+  actorUid?: string;
+  actorName?: string;
+  thresholdAmount?: number;
+}): ProjectionChangeAlert | null {
+  const thresholdAmount = params.thresholdAmount ?? PROJECTION_CHANGE_ALERT_THRESHOLD_AMOUNT;
+  const previous = normalizeWeekAmounts(params.previousProjection || {});
+  const next = normalizeWeekAmounts(params.nextProjection || {});
+  if (Object.keys(previous).length === 0) return null;
+
+  const nowDate = parseDateOnlyUtc(params.now);
+  const weekStartDate = parseDateOnlyUtc(params.weekStart);
+  if (nowDate === null || weekStartDate === null) return null;
+  const daysBeforeWeekStart = Math.floor((weekStartDate - nowDate) / (24 * 60 * 60 * 1000));
+  if (daysBeforeWeekStart < 0 || daysBeforeWeekStart > 7) return null;
+
+  const lineIds = new Set([...Object.keys(previous), ...Object.keys(next)] as CashflowSheetLineId[]);
+  let totalAbsDelta = 0;
+  let netDelta = 0;
+  let largestLineId: CashflowSheetLineId | undefined;
+  let largestLineDelta = 0;
+  let previousAmount: number | undefined;
+  let nextAmount: number | undefined;
+  for (const lineId of lineIds) {
+    const before = Number(previous[lineId] || 0);
+    const after = Number(next[lineId] || 0);
+    const delta = after - before;
+    const absDelta = Math.abs(delta);
+    totalAbsDelta += absDelta;
+    netDelta += delta;
+    if (absDelta > largestLineDelta) {
+      largestLineDelta = absDelta;
+      largestLineId = lineId;
+      previousAmount = before;
+      nextAmount = after;
+    }
+  }
+
+  if (totalAbsDelta < thresholdAmount && largestLineDelta < thresholdAmount) return null;
+
+  return {
+    triggered: true,
+    reason: 'near_week_large_projection_change',
+    changedAt: params.now,
+    changedByUid: params.actorUid,
+    changedByName: params.actorName,
+    daysBeforeWeekStart,
+    thresholdAmount,
+    totalAbsDelta,
+    netDelta,
+    largestLineId,
+    largestLineDelta,
+    previousAmount,
+    nextAmount,
+  };
+}
+
 export function buildCashflowWeekUpdatePatch(params: {
   orgId: string;
   actorUid: string;
@@ -29,6 +102,8 @@ export function buildCashflowWeekUpdatePatch(params: {
   mode: 'projection' | 'actual';
   amounts: Partial<Record<CashflowSheetLineId, number>>;
   now: string;
+  weekStart?: string;
+  existingProjection?: Partial<Record<CashflowSheetLineId, number>>;
 }) {
   const patch: Record<string, unknown> = {
     tenantId: params.orgId,
@@ -37,10 +112,26 @@ export function buildCashflowWeekUpdatePatch(params: {
     updatedByName: params.actorName,
   };
   if (params.mode === 'projection') {
+    const normalizedAmounts = normalizeWeekAmounts(params.amounts);
+    const nextProjection = {
+      ...(params.existingProjection || {}),
+      ...normalizedAmounts,
+    };
+    const alert = params.weekStart
+      ? buildProjectionChangeAlert({
+        previousProjection: params.existingProjection,
+        nextProjection,
+        weekStart: params.weekStart,
+        now: params.now,
+        actorUid: params.actorUid,
+        actorName: params.actorName,
+      })
+      : null;
     patch.projectionUpdated = true;
     patch.projectionUpdatedAt = params.now;
     patch.projectionUpdatedByUid = params.actorUid;
     patch.projectionUpdatedByName = params.actorName;
+    patch.projectionChangeAlert = alert;
   }
   for (const [lineId, amount] of Object.entries(normalizeWeekAmounts(params.amounts))) {
     patch[`${params.mode}.${lineId}`] = amount;

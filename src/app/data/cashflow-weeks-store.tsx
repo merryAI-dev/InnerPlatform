@@ -244,6 +244,8 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     const now = new Date().toISOString();
     const ref = doc(db, getOrgDocumentPath(orgId, 'cashflowWeeks', id));
 
+    const existingSnap = await getDoc(ref).catch(() => null);
+    const existingData = existingSnap?.exists() ? (existingSnap.data() as CashflowWeekSheet) : undefined;
     const patch = buildCashflowWeekUpdatePatch({
       orgId,
       actorUid: actor.uid,
@@ -251,9 +253,10 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
       mode: input.mode,
       amounts: input.amounts || {},
       now,
+      weekStart: def.weekStart,
+      existingProjection: existingData?.projection,
     });
 
-    const existingSnap = await getDoc(ref).catch(() => null);
     if (existingSnap?.exists()) {
       await updateDoc(ref, patch as any);
       setWeeks((prev) => applyWeekAmountsToLocalWeeks({

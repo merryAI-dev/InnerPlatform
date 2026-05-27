@@ -20,16 +20,6 @@ function fmtShort(n: number): string {
   return n.toLocaleString('ko-KR');
 }
 
-function computeVariance(sheet: CashflowWeekSheet | undefined): { ratio: number; projNet: number; actualNet: number } | null {
-  if (!sheet) return null;
-  const proj = computeCashflowTotals(sheet.projection || {});
-  const actual = computeCashflowTotals(sheet.actual || {});
-  if (proj.net === 0 && actual.net === 0) return null;
-  const denominator = Math.abs(proj.net) || 1;
-  const ratio = Math.abs(proj.net - actual.net) / denominator;
-  return { ratio, projNet: proj.net, actualNet: actual.net };
-}
-
 export function CashflowWeeklyPage() {
   const navigate = useNavigate();
   const { projects } = useAppStore();
@@ -123,8 +113,8 @@ export function CashflowWeeklyPage() {
                       const net = status?.net ?? 0;
                       const netSource = status?.netSource ?? 'actual';
 
-                      const variance = computeVariance(sheet);
-                      const hasHighVariance = variance !== null && variance.ratio > 0.2;
+                      const projectionChangeAlert = sheet?.projectionChangeAlert;
+                      const hasProjectionChangeAlert = Boolean(projectionChangeAlert?.triggered);
 
                       const chip = adminClosed
                         ? { bg: 'bg-emerald-500/15', text: 'text-emerald-700 dark:text-emerald-300', label: '결산완료' }
@@ -135,7 +125,7 @@ export function CashflowWeeklyPage() {
                       return (
                         <td
                           key={w.weekNo}
-                          className={`px-3 py-2 text-center ${hasHighVariance ? 'bg-red-50 dark:bg-red-950/30' : ''}`}
+                          className={`px-3 py-2 text-center ${hasProjectionChangeAlert ? 'bg-red-50 dark:bg-red-950/30' : ''}`}
                         >
                           <div className="flex flex-col items-center gap-1">
                             <span className={`inline-flex items-center h-5 px-2 rounded-full text-[10px] ${chip.bg} ${chip.text}`} style={{ fontWeight: 700 }}>
@@ -144,9 +134,10 @@ export function CashflowWeeklyPage() {
                             <span className="text-[10px] text-muted-foreground" style={{ fontVariantNumeric: 'tabular-nums' }}>
                               NET {fmtShort(net)}{netSource === 'projection' ? ' (예상)' : ''}
                             </span>
-                            {hasHighVariance && variance && (
+                            {hasProjectionChangeAlert && projectionChangeAlert && (
                               <span className="text-[9px] text-red-600 dark:text-red-400" style={{ fontWeight: 600 }}>
-                                편차 {(variance.ratio * 100).toFixed(0)}%
+                                급변 {fmtShort(projectionChangeAlert.totalAbsDelta)}
+                                {Number.isFinite(projectionChangeAlert.daysBeforeWeekStart) ? ` · D-${projectionChangeAlert.daysBeforeWeekStart}` : ''}
                               </span>
                             )}
                             <VarianceFlagButton
@@ -188,7 +179,7 @@ export function CashflowWeeklyPage() {
             <div className="px-4 py-3 text-[10px] text-muted-foreground border-t border-border/40 flex items-center gap-3 flex-wrap">
               <Badge variant="outline" className="text-[9px] h-4 px-1.5">정의</Badge>
               작성완료=Projection 저장 · 결산완료=관리자 결산확정 ·{' '}
-              <span className="text-red-600">편차 20%↑</span>=예상 대비 실적 차이 경고 ·{' '}
+              <span className="text-red-600">급변</span>=주차 시작 7일 이내 Projection 큰 변경 ·{' '}
               <Flag className="inline w-2.5 h-2.5 text-red-500" /> 확인요청{' '}
               <MessageSquareText className="inline w-2.5 h-2.5 text-blue-500" /> 답변완료{' '}
               <Check className="inline w-2.5 h-2.5 text-slate-400" /> 해결

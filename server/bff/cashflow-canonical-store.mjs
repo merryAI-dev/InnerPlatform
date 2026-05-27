@@ -22,6 +22,7 @@ const SETTLEMENT_COLUMN_HEADERS = [
 const COLUMN_INDEX = Object.fromEntries(SETTLEMENT_COLUMN_HEADERS.map((header, index) => [header, index]));
 const CASHFLOW_IN_LINE_IDS = new Set(CASHFLOW_IN_LINES);
 const LINE_BY_LABEL = new Map();
+const PROJECTION_CHANGE_ALERT_THRESHOLD_AMOUNT = 10_000_000;
 
 function normalizePolicyLabel(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
@@ -281,6 +282,70 @@ function normalizeAmounts(amounts) {
   return normalized;
 }
 
+function parseDateOnlyUtc(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value || '').trim());
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
+  return Date.UTC(year, month - 1, day);
+}
+
+function buildProjectionChangeAlert({ previousProjection, nextProjection, weekStart, now, actorId, actorName }) {
+  const previous = normalizeAmounts(previousProjection || {});
+  const next = normalizeAmounts(nextProjection || {});
+  if (Object.keys(previous).length === 0) return null;
+
+  const nowDate = parseDateOnlyUtc(now);
+  const weekStartDate = parseDateOnlyUtc(weekStart);
+  if (nowDate === null || weekStartDate === null) return null;
+  const daysBeforeWeekStart = Math.floor((weekStartDate - nowDate) / (24 * 60 * 60 * 1000));
+  if (daysBeforeWeekStart < 0 || daysBeforeWeekStart > 7) return null;
+
+  const lineIds = new Set([...Object.keys(previous), ...Object.keys(next)]);
+  let totalAbsDelta = 0;
+  let netDelta = 0;
+  let largestLineId;
+  let largestLineDelta = 0;
+  let previousAmount;
+  let nextAmount;
+  for (const lineId of lineIds) {
+    const before = Number(previous[lineId] || 0);
+    const after = Number(next[lineId] || 0);
+    const delta = after - before;
+    const absDelta = Math.abs(delta);
+    totalAbsDelta += absDelta;
+    netDelta += delta;
+    if (absDelta > largestLineDelta) {
+      largestLineDelta = absDelta;
+      largestLineId = lineId;
+      previousAmount = before;
+      nextAmount = after;
+    }
+  }
+
+  if (totalAbsDelta < PROJECTION_CHANGE_ALERT_THRESHOLD_AMOUNT && largestLineDelta < PROJECTION_CHANGE_ALERT_THRESHOLD_AMOUNT) {
+    return null;
+  }
+
+  return {
+    triggered: true,
+    reason: 'near_week_large_projection_change',
+    changedAt: now,
+    changedByUid: actorId,
+    changedByName: actorName,
+    daysBeforeWeekStart,
+    thresholdAmount: PROJECTION_CHANGE_ALERT_THRESHOLD_AMOUNT,
+    totalAbsDelta,
+    netDelta,
+    largestLineId,
+    largestLineDelta,
+    previousAmount,
+    nextAmount,
+  };
+}
+
 function weekKey(week) {
   return `${week.yearMonth}:w${week.weekNo}`;
 }
@@ -364,10 +429,22 @@ function buildWeekPatch({ tenantId, actorId, actorName, projectId, mode, week, a
       ...normalizedAmounts,
     };
     if (mode === 'projection') {
+      const nextProjection = {
+        ...existingModeAmounts,
+        ...normalizedAmounts,
+      };
       patch.projectionUpdated = true;
       patch.projectionUpdatedAt = now;
       patch.projectionUpdatedByUid = actorId;
       patch.projectionUpdatedByName = actorName;
+      patch.projectionChangeAlert = buildProjectionChangeAlert({
+        previousProjection: existingModeAmounts,
+        nextProjection,
+        weekStart: week.weekStart,
+        now,
+        actorId,
+        actorName,
+      });
     }
   }
   return patch;
