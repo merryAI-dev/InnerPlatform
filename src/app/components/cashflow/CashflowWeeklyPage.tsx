@@ -115,17 +115,18 @@ export function CashflowWeeklyPage() {
 
                       const projectionChangeAlert = sheet?.projectionChangeAlert;
                       const hasProjectionChangeAlert = Boolean(projectionChangeAlert?.triggered);
+                      const isMissingProjection = !adminClosed && !projectionUpdated;
 
                       const chip = adminClosed
                         ? { bg: 'bg-emerald-500/15', text: 'text-emerald-700 dark:text-emerald-300', label: '결산완료' }
                         : projectionUpdated
                           ? { bg: 'bg-amber-500/15', text: 'text-amber-700 dark:text-amber-300', label: '작성완료' }
-                          : { bg: 'bg-slate-500/10', text: 'text-slate-600 dark:text-slate-300', label: '미작성' };
+                          : { bg: 'bg-red-500/15', text: 'text-red-700 dark:text-red-300', label: '미작성' };
 
                       return (
                         <td
                           key={w.weekNo}
-                          className={`px-3 py-2 text-center ${hasProjectionChangeAlert ? 'bg-red-50 dark:bg-red-950/30' : ''}`}
+                          className={`px-3 py-2 text-center ${isMissingProjection ? 'bg-red-50 dark:bg-red-950/30' : ''}`}
                         >
                           <div className="flex flex-col items-center gap-1">
                             <span className={`inline-flex items-center h-5 px-2 rounded-full text-[10px] ${chip.bg} ${chip.text}`} style={{ fontWeight: 700 }}>
@@ -135,8 +136,8 @@ export function CashflowWeeklyPage() {
                               NET {fmtShort(net)}{netSource === 'projection' ? ' (예상)' : ''}
                             </span>
                             {hasProjectionChangeAlert && projectionChangeAlert && (
-                              <span className="text-[9px] text-red-600 dark:text-red-400" style={{ fontWeight: 600 }}>
-                                급변 {fmtShort(projectionChangeAlert.totalAbsDelta)}
+                              <span className="text-[9px] text-amber-700 dark:text-amber-300" style={{ fontWeight: 600 }}>
+                                D-7 1천만↑ {fmtShort(projectionChangeAlert.totalAbsDelta)}
                                 {Number.isFinite(projectionChangeAlert.daysBeforeWeekStart) ? ` · D-${projectionChangeAlert.daysBeforeWeekStart}` : ''}
                               </span>
                             )}
@@ -179,7 +180,8 @@ export function CashflowWeeklyPage() {
             <div className="px-4 py-3 text-[10px] text-muted-foreground border-t border-border/40 flex items-center gap-3 flex-wrap">
               <Badge variant="outline" className="text-[9px] h-4 px-1.5">정의</Badge>
               작성완료=Projection 저장 · 결산완료=관리자 결산확정 ·{' '}
-              <span className="text-red-600">급변</span>=주차 시작 7일 이내 Projection 큰 변경 ·{' '}
+              <span className="text-red-600">빨간색</span>=미작성 ·{' '}
+              <span className="text-amber-700">D-7 1천만↑</span>=주차 시작 7일 이내 Projection 1천만원 이상 변경 ·{' '}
               <Flag className="inline w-2.5 h-2.5 text-red-500" /> 확인요청{' '}
               <MessageSquareText className="inline w-2.5 h-2.5 text-blue-500" /> 답변완료{' '}
               <Check className="inline w-2.5 h-2.5 text-slate-400" /> 해결

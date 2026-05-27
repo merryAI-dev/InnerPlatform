@@ -19,9 +19,15 @@ describe('CashflowWeeklyPage status semantics', () => {
 
   it('uses projection change alerts for 급변 warnings instead of projection-vs-actual variance', () => {
     expect(cashflowWeeklyPageSource).toContain('sheet?.projectionChangeAlert');
-    expect(cashflowWeeklyPageSource).toContain('급변');
-    expect(cashflowWeeklyPageSource).toContain('주차 시작 7일 이내 Projection 큰 변경');
+    expect(cashflowWeeklyPageSource).toContain('D-7 1천만↑');
+    expect(cashflowWeeklyPageSource).toContain('주차 시작 7일 이내 Projection 1천만원 이상 변경');
     expect(cashflowWeeklyPageSource).not.toContain('computeVariance');
     expect(cashflowWeeklyPageSource).not.toContain('편차 20%');
+  });
+
+  it('uses red as the missing projection signal', () => {
+    expect(cashflowWeeklyPageSource).toContain('const isMissingProjection = !adminClosed && !projectionUpdated');
+    expect(cashflowWeeklyPageSource).toContain('빨간색</span>=미작성');
+    expect(cashflowWeeklyPageSource).toContain('bg-red-50 dark:bg-red-950/30');
   });
 });
