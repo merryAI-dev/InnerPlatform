@@ -441,6 +441,60 @@ export function CashflowProjectSheet({
     setWeekSaveState((prev) => ({ ...prev, [wkKey]: 'dirty' }));
   }, [resolveWeekKey, yearMonth]);
 
+  const persistWeekValues = useCallback(async (input: {
+    weekNo: number;
+    mode: 'projection' | 'actual';
+  }): Promise<void> => {
+    if (!canEdit && input.mode === 'actual') return;
+
+    const wkKey = resolveWeekKey({ yearMonth, mode: input.mode, weekNo: input.weekNo });
+    const amounts = Object.fromEntries(CASHFLOW_ALL_LINES.map((lineId) => [
+      lineId,
+      getEffectiveAmount({ yearMonth, mode: input.mode, weekNo: input.weekNo, lineId }),
+    ])) as Partial<Record<CashflowSheetLineId, number>>;
+
+    setWeekSaveState((prev) => ({ ...prev, [wkKey]: 'saving' }));
+    try {
+      await upsertWeekAmounts({
+        projectId,
+        yearMonth,
+        weekNo: input.weekNo,
+        mode: input.mode,
+        amounts,
+      });
+      if (onUpdateWeeklySubmissionStatus) {
+        await onUpdateWeeklySubmissionStatus({
+          projectId,
+          yearMonth,
+          weekNo: input.weekNo,
+          ...(input.mode === 'projection'
+            ? { projectionEdited: true, projectionUpdated: true }
+            : { expenseEdited: true, expenseUpdated: true }),
+        });
+      }
+      setDrafts((prev) => {
+        const next = { ...prev };
+        for (const lineId of CASHFLOW_ALL_LINES) {
+          delete next[resolveCellKey({ yearMonth, mode: input.mode, weekNo: input.weekNo, lineId })];
+        }
+        return next;
+      });
+      setWeekSaveState((prev) => ({ ...prev, [wkKey]: 'saved' }));
+    } catch (error) {
+      setWeekSaveState((prev) => ({ ...prev, [wkKey]: 'error' }));
+      throw error;
+    }
+  }, [
+    canEdit,
+    getEffectiveAmount,
+    onUpdateWeeklySubmissionStatus,
+    projectId,
+    resolveCellKey,
+    resolveWeekKey,
+    upsertWeekAmounts,
+    yearMonth,
+  ]);
+
   const flushAllDirtyBeforeMonthChange = useCallback(async () => {
     const entries = Object.entries(weekSaveState).filter(([, state]) => state === 'dirty' || state === 'error');
     for (const [key] of entries) {
@@ -470,15 +524,10 @@ export function CashflowProjectSheet({
 
   const saveMonth = useCallback((targetMode: 'projection' | 'actual') => {
     const targets = monthWeeks.map((w) => w.weekNo);
-    const hasPendingDrafts = Object.keys(drafts).some((k) => k.startsWith(`${yearMonth}:${targetMode}:`));
-    if (!hasPendingDrafts) {
-      toast.message('저장할 변경사항이 없습니다.');
-      return;
-    }
     void (async () => {
       setMonthSavingMode(targetMode);
       for (const weekNo of targets) {
-        await flushWeek({ weekNo, mode: targetMode, silent: false });
+        await persistWeekValues({ weekNo, mode: targetMode });
       }
       toast.success(`이번 달 ${targetMode === 'projection' ? 'Projection' : 'Actual'}을 저장했습니다.`);
     })().catch((err) => {
@@ -487,7 +536,7 @@ export function CashflowProjectSheet({
     }).finally(() => {
       setMonthSavingMode((prev) => (prev === targetMode ? null : prev));
     });
-  }, [drafts, flushWeek, monthWeeks, yearMonth]);
+  }, [monthWeeks, persistWeekValues]);
 
   const syncActualsFromExpenseSheet = useCallback(() => {
     void (async () => {
@@ -594,7 +643,7 @@ export function CashflowProjectSheet({
   const handleSubmitWeek = useCallback(async (input: { weekNo: number; yearMonth: string }) => {
     setSubmitBusy(true);
     try {
-      await flushWeek({ weekNo: input.weekNo, mode: 'actual', silent: false });
+      await persistWeekValues({ weekNo: input.weekNo, mode: 'actual' });
       await submitWeekAsPm({ projectId, yearMonth: input.yearMonth, weekNo: input.weekNo });
       toast.success('작성완료 처리했습니다.');
     } catch (e) {
@@ -603,12 +652,12 @@ export function CashflowProjectSheet({
       setSubmitBusy(false);
       setSubmitConfirm(null);
     }
-  }, [flushWeek, projectId, submitWeekAsPm]);
+  }, [persistWeekValues, projectId, submitWeekAsPm]);
 
   const handleCloseWeek = useCallback(async (weekNo: number) => {
     setCloseBusy(true);
     try {
-      await flushWeek({ weekNo, mode: 'projection', silent: false });
+      await persistWeekValues({ weekNo, mode: 'projection' });
       await closeWeekAsAdmin({ projectId, yearMonth, weekNo });
       toast.success('결산완료 처리했습니다.');
     } catch (e) {
@@ -617,7 +666,7 @@ export function CashflowProjectSheet({
       setCloseBusy(false);
       setCloseDialog(null);
     }
-  }, [closeWeekAsAdmin, flushWeek, projectId, yearMonth]);
+  }, [closeWeekAsAdmin, persistWeekValues, projectId, yearMonth]);
 
   const handleStartCloseWeek = useCallback(async (weekNo: number) => {
     if (!db) {
