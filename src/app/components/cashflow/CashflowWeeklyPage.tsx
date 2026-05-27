@@ -30,12 +30,6 @@ function computeVariance(sheet: CashflowWeekSheet | undefined): { ratio: number;
   return { ratio, projNet: proj.net, actualNet: actual.net };
 }
 
-function hasProjectionInput(sheet: CashflowWeekSheet | undefined): boolean {
-  if (!sheet) return false;
-  if (sheet.projectionUpdated) return true;
-  return Object.values(sheet.projection || {}).some((value) => Number.isFinite(Number(value)) && Number(value) !== 0);
-}
-
 export function CashflowWeeklyPage() {
   const navigate = useNavigate();
   const { projects } = useAppStore();
@@ -59,7 +53,7 @@ export function CashflowWeeklyPage() {
       const { source, sheet } = chooseCashflowSheetForNet({ actual: w.actual, projection: w.projection });
       const { net } = computeCashflowTotals(sheet);
       map.set(key, {
-        projectionUpdated: hasProjectionInput(w),
+        projectionUpdated: Boolean(w.projectionUpdated),
         adminClosed: Boolean(w.adminClosed),
         net,
         netSource: source,
@@ -77,7 +71,7 @@ export function CashflowWeeklyPage() {
       <PageHeader
         icon={BarChart3}
         iconGradient="linear-gradient(135deg, #0d9488 0%, #14b8a6 100%)"
-        title="주간 캐시플로(전사)"
+        title="주간 프로젝션 작성 현황(전사)"
         description={`프로젝트별 주간 작성/결산 현황 · ${yearMonth}`}
         actions={(
           <div className="flex items-center gap-2">
