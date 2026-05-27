@@ -18,7 +18,13 @@ describe('CashflowProjectSheet actual sync flow', () => {
     expect(cashflowWeeksStoreSource).toContain('syncProjectCashflowActualsViaBff');
     expect(cashflowWeeksStoreSource).toContain('applyWeekAmountsToLocalWeeks');
     expect(cashflowProjectSheetSource).toContain('Actual 저장');
-    expect(cashflowProjectSheetSource).toContain("toast.message('저장할 변경사항이 없습니다.')");
+  });
+
+  it('saves visible month values instead of draft-only input changes', () => {
+    expect(cashflowProjectSheetSource).toContain('persistWeekValues');
+    expect(cashflowProjectSheetSource).toContain('getEffectiveAmount({ yearMonth, mode: input.mode');
+    expect(cashflowProjectSheetSource).toContain('await persistWeekValues({ weekNo, mode: targetMode })');
+    expect(cashflowProjectSheetSource).not.toContain('저장할 변경사항이 없습니다.');
   });
 
   it('persists projection/actual copy through the canonical week upsert path', () => {
