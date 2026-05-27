@@ -184,7 +184,7 @@ describe('buildMigrationReviewDossier', () => {
     }, null);
 
     expect(dossier.contract.projectTypeLabel).toBe('D-1 개발협력사업 - AVPN 포함');
-    expect(dossier.contract.settlementTypeLabel).toBe('해당없음');
+    expect(dossier.contract.settlementTypeLabel).toBe('해당없음(정산대상 아님)');
     expect(dossier.contract.basisLabel).toBe('공급가액 기준');
     expect(dossier.contract.accountTypeLabel).toBe('일반 사업');
     expect(dossier.contract.fundInputModeLabel).toBe('통장내역 업로드');

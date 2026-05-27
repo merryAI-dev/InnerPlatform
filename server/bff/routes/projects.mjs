@@ -385,6 +385,10 @@ function normalizeProjectFundInputMode(value) {
   return value === 'DIRECT_ENTRY' ? 'DIRECT_ENTRY' : 'BANK_UPLOAD';
 }
 
+function normalizeProjectCurrency(value) {
+  return value === 'USD' ? 'USD' : 'KRW';
+}
+
 function buildProjectRequestPayloadFromProject(project, existingPayload = {}) {
   const teamMembersDetailed = Array.isArray(project?.teamMembersDetailed) && project.teamMembersDetailed.length > 0
     ? project.teamMembersDetailed
@@ -410,6 +414,7 @@ function buildProjectRequestPayloadFromProject(project, existingPayload = {}) {
     clientOrg: pickText('clientOrg'),
     department: pickText('department'),
     groupwareName: pickText('groupwareName'),
+    currency: normalizeProjectCurrency(pickText('currency')),
     contractAmount: pickNumber('contractAmount'),
     salesVatAmount: pickNumber('salesVatAmount'),
     totalRevenueAmount: pickNumber('totalRevenueAmount'),
@@ -700,6 +705,7 @@ export function mountProjectRoutes(app, {
       id: parsed.id.trim(),
       name: parsed.name.trim(),
       orgId: tenantId,
+      currency: normalizeProjectCurrency(parsed.currency),
       teamMembersDetailed: normalizeProjectTeamMembersDetailed(parsed.teamMembersDetailed),
     }, 'totalRevenueAmount');
 

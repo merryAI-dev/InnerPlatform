@@ -4,6 +4,7 @@ import type {
   FileAttachment,
   Project,
   ProjectExecutiveReviewHistoryEntry,
+  ProjectCurrency,
   ProjectFinancialInputFlags,
   ProjectFundInputMode,
   ProjectPhase,
@@ -21,6 +22,7 @@ import {
   createSettlementSheetPolicy,
   normalizeAccountType,
   normalizeBasis,
+  normalizeProjectCurrency,
   normalizeProjectContractType,
   normalizeProjectFundInputMode,
   normalizeProjectPhase,
@@ -29,6 +31,7 @@ import {
   normalizeSettlementSheetPolicy,
   normalizeSettlementType,
   PROJECT_FUND_INPUT_MODE_LABELS,
+  PROJECT_CURRENCY_LABELS,
   PROJECT_TYPE_LABELS,
   SETTLEMENT_TYPE_LABELS,
 } from '../data/types';
@@ -58,6 +61,7 @@ export interface ProjectEditorDraft {
   contractType: string;
   contractStart: string;
   contractEnd: string;
+  currency: ProjectCurrency;
   contractAmount: number;
   salesVatAmount: number;
   totalRevenueAmount: number;
@@ -110,6 +114,7 @@ const DEFAULT_DRAFT: ProjectEditorDraft = {
   contractType: '계약서(날인)',
   contractStart: '',
   contractEnd: '',
+  currency: 'KRW',
   contractAmount: 0,
   salesVatAmount: 0,
   totalRevenueAmount: 0,
@@ -202,6 +207,7 @@ const REVIEW_CHANGE_FIELDS: Array<{
   { key: 'department', label: '담당조직(CIC)', before: (project) => normalizeChangeValue(project.department), after: (draft) => normalizeChangeValue(draft.department) },
   { key: 'type', label: '프로젝트 유형', before: (project) => PROJECT_TYPE_LABELS[normalizeProjectType(project.type)] || '-', after: (draft) => PROJECT_TYPE_LABELS[normalizeProjectType(draft.type)] || '-' },
   { key: 'contractPeriod', label: '계약 기간', before: (project) => formatDateRangeForChange(project.contractStart, project.contractEnd), after: (draft) => formatDateRangeForChange(draft.contractStart, draft.contractEnd) },
+  { key: 'currency', label: '통화', before: (project) => PROJECT_CURRENCY_LABELS[normalizeProjectCurrency(project.currency)] || '-', after: (draft) => PROJECT_CURRENCY_LABELS[normalizeProjectCurrency(draft.currency)] || '-' },
   { key: 'contractAmount', label: '계약금액', before: (project) => formatAmountForChange(project.contractAmount), after: (draft) => formatAmountForChange(draft.contractAmount) },
   { key: 'totalRevenueAmount', label: '총수익', before: (project) => formatAmountForChange(project.totalRevenueAmount), after: (draft) => formatAmountForChange(draft.totalRevenueAmount) },
   { key: 'supportAmount', label: '지원금', before: (project) => formatAmountForChange(project.supportAmount), after: (draft) => formatAmountForChange(draft.supportAmount) },
@@ -245,6 +251,7 @@ export function createProjectEditorDraft(overrides: Partial<ProjectEditorDraft> 
       normalizeProjectFundInputMode(overrides.fundInputMode ?? DEFAULT_DRAFT.fundInputMode),
     ),
     contractType: normalizeProjectContractType(overrides.contractType ?? DEFAULT_DRAFT.contractType),
+    currency: normalizeProjectCurrency(overrides.currency ?? DEFAULT_DRAFT.currency),
     paymentPlan: normalizePaymentPlan(overrides.paymentPlan ?? DEFAULT_DRAFT.paymentPlan),
     teamMembersDetailed: normalizeProjectTeamMembers(overrides.teamMembersDetailed),
   };
@@ -276,6 +283,7 @@ export function buildProjectEditorDraftFromProject(
     contractType: normalizeProjectContractType(normalizedProject.contractType || payload?.contractType),
     contractStart: text(normalizedProject.contractStart || payload?.contractStart),
     contractEnd: text(normalizedProject.contractEnd || payload?.contractEnd),
+    currency: normalizeProjectCurrency(normalizedProject.currency || payload?.currency),
     contractAmount: nonNegativeAmount(normalizedProject.contractAmount ?? payload?.contractAmount),
     salesVatAmount: nonNegativeAmount(normalizedProject.salesVatAmount ?? payload?.salesVatAmount),
     totalRevenueAmount: nonNegativeAmount(normalizedProject.totalRevenueAmount ?? payload?.totalRevenueAmount),
@@ -330,6 +338,7 @@ export function buildProjectRequestPayloadFromDraft(draftInput: ProjectEditorDra
     clientOrg: text(draft.clientOrg),
     department: text(draft.department),
     groupwareName: text(draft.groupwareName),
+    currency: normalizeProjectCurrency(draft.currency),
     contractAmount: nonNegativeAmount(draft.contractAmount),
     salesVatAmount: nonNegativeAmount(draft.salesVatAmount),
     totalRevenueAmount: nonNegativeAmount(draft.totalRevenueAmount),
@@ -421,6 +430,7 @@ export function buildProjectEditorProjectPatch(
     name: text(draft.name),
     officialContractName: text(draft.officialContractName),
     type: normalizeProjectType(draft.type),
+    currency: normalizeProjectCurrency(draft.currency),
     contractAmount: nonNegativeAmount(draft.contractAmount),
     contractStart: text(draft.contractStart),
     contractEnd: text(draft.contractEnd),

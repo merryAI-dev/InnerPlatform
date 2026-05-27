@@ -13,6 +13,8 @@ import {
   normalizeBasis,
   normalizeProjectFundInputMode,
   normalizeSettlementType,
+  normalizeProjectCurrency,
+  PROJECT_CURRENCY_LABELS,
   PROJECT_FUND_INPUT_MODE_LABELS,
   SETTLEMENT_TYPE_LABELS,
 } from '../data/types';
@@ -291,6 +293,7 @@ function buildChecklistGroups(payload: ProjectRequestPayload, analysisHighlights
   }
 
   const financialItems: ProjectRequestReviewItem[] = [
+    buildTextItem('currency', '통화', PROJECT_CURRENCY_LABELS[normalizeProjectCurrency(payload.currency)]),
     buildMoneyItem('contractAmount', '계약금액', payload.contractAmount, payload.financialInputFlags),
     buildMoneyItem('salesVatAmount', '매출 부가세', payload.salesVatAmount, payload.financialInputFlags),
     buildMoneyItem('totalRevenueAmount', '총수익', payload.totalRevenueAmount, payload.financialInputFlags),

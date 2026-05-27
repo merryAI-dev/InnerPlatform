@@ -32,6 +32,7 @@ const baseProject: Project = {
   status: 'CONTRACT_PENDING',
   type: 'D1',
   phase: 'CONFIRMED',
+  currency: 'KRW',
   contractAmount: 100_000,
   contractStart: '2026-01-01',
   contractEnd: '2026-12-31',
@@ -97,6 +98,7 @@ describe('project editor draft mapping', () => {
     const draft = buildProjectEditorDraftFromProject(baseProject);
 
     expect(draft.totalRevenueAmount).toBe(91_000);
+    expect(draft.currency).toBe('KRW');
     expect(draft.profitAmount).toBe(91_000);
     expect(draft.profitRate).toBe(0.91);
     expect(draft.teamMembersDetailed).toEqual([
@@ -128,6 +130,7 @@ describe('project editor draft mapping', () => {
         { memberName: '변민욱', memberNickname: '보람', role: '운영', participationRate: 40 },
       ],
       groupwareName: '기후테크GW',
+      currency: 'USD',
       paymentPlan: { contract: 50_000, interim: 30_000, final: 20_000 },
       finalPaymentNote: '잔금은 검수 후 2주 이내',
       contractAnalysis: { provider: 'heuristic', summary: '기존 분석값' } as never,
@@ -136,6 +139,7 @@ describe('project editor draft mapping', () => {
     const payload = buildProjectRequestPayloadFromDraft(draft);
 
     expect(payload.totalRevenueAmount).toBe(91_000);
+    expect(payload.currency).toBe('USD');
     expect(payload.teamMembersDetailed).toEqual([
       { memberName: '김다은', memberNickname: '데이나', role: 'PM', participationRate: 60 },
       { memberName: '변민욱', memberNickname: '보람', role: '운영', participationRate: 40 },
@@ -348,5 +352,31 @@ describe('project editor draft mapping', () => {
     expect(draft.basis).toBe('공급가액');
     expect(draft.accountType).toBe('NONE');
     expect(draft.fundInputMode).toBe('BANK_UPLOAD');
+  });
+
+  it('persists currency into project patches and review changes', () => {
+    const draft = createProjectEditorDraft({
+      ...buildProjectEditorDraftFromProject(baseProject),
+      currency: 'USD',
+    });
+
+    const patch = buildProjectEditorProjectPatch(draft, {
+      baseProject,
+      mode: 'portal-edit',
+      actorId: 'pm-1',
+      actorName: '김다은',
+      now: '2026-05-27T00:00:00.000Z',
+    });
+    const changes = buildProjectEditorReviewChanges(baseProject, draft);
+
+    expect(patch.currency).toBe('USD');
+    expect(changes).toEqual(expect.arrayContaining([
+      {
+        key: 'currency',
+        label: '통화',
+        before: 'KRW',
+        after: 'USD',
+      },
+    ]));
   });
 });

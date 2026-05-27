@@ -14,6 +14,7 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('BASIS_LABELS');
     expect(source).toContain('ACCOUNT_TYPE_LABELS');
     expect(source).toContain('PROJECT_FUND_INPUT_MODE_LABELS');
+    expect(source).toContain('PROJECT_CURRENCY_LABELS');
     expect(source).toContain('ContractDocumentPreview');
     expect(source).toContain('draft.contractDocument');
     expect(source).not.toContain('<Input value={draft.contractType}');
@@ -45,6 +46,13 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('placeholder="이름(별명)"');
     expect(source).toContain('parseProjectTeamMemberIdentityInput');
     expect(source).toContain("inputMode: 'manual'");
+  });
+
+  it('uses project operations terminology and exposes currency selection', () => {
+    expect(source).toContain('서류상 참여인력');
+    expect(source).not.toContain('<Label className="text-xs">팀원 구성</Label>');
+    expect(source).toContain('<Label className="text-xs">통화</Label>');
+    expect(source).toContain('PROJECT_CURRENCY_LABELS[draft.currency]');
   });
 
   it('keeps manual team member input bound to the raw typed value instead of reparsing formatted text', () => {

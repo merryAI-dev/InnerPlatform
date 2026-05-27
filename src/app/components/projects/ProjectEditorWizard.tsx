@@ -29,6 +29,7 @@ import {
   getProjectTypeSelectableOptions,
   normalizeProjectContractType,
   normalizeSettlementSheetPolicy,
+  PROJECT_CURRENCY_LABELS,
   PROJECT_FUND_INPUT_MODE_LABELS,
   PROJECT_PHASE_LABELS,
   PROJECT_STATUS_LABELS,
@@ -37,6 +38,7 @@ import {
   type AccountType,
   type Basis,
   type OrgMember,
+  type ProjectCurrency,
   type ProjectFinancialInputFlags,
   type ProjectFundInputMode,
   type ProjectPhase,
@@ -750,18 +752,31 @@ export function ProjectEditorWizard({
         </div>
       )}
 
-      <div>
-        <Label className="text-xs">계약금액 (원) *</Label>
-        <Input
-          inputMode="numeric"
-          value={hasContractAmountInput ? String(draft.contractAmount) : ''}
-          onChange={(event) => updateAmount('contractAmount', event.target.value)}
-          placeholder="0"
-          className="mt-1 h-9 text-sm"
-        />
-        <p className="mt-1 text-[10px] text-muted-foreground">
-          {hasContractAmountInput ? `${fmtKRW(draft.contractAmount)}원` : '미입력'}
-        </p>
+      <div className="grid gap-4 lg:grid-cols-[160px_minmax(0,1fr)]">
+        <div>
+          <Label className="text-xs">통화</Label>
+          <Select value={draft.currency} onValueChange={(value) => update('currency', (value === 'USD' ? 'USD' : 'KRW') as ProjectCurrency)}>
+            <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {(Object.keys(PROJECT_CURRENCY_LABELS) as ProjectCurrency[]).map((currency) => (
+                <SelectItem key={currency} value={currency}>{PROJECT_CURRENCY_LABELS[currency]}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <Label className="text-xs">계약금액 *</Label>
+          <Input
+            inputMode="numeric"
+            value={hasContractAmountInput ? String(draft.contractAmount) : ''}
+            onChange={(event) => updateAmount('contractAmount', event.target.value)}
+            placeholder="0"
+            className="mt-1 h-9 text-sm"
+          />
+          <p className="mt-1 text-[10px] text-muted-foreground">
+            {hasContractAmountInput ? `${PROJECT_CURRENCY_LABELS[draft.currency]} ${fmtKRW(draft.contractAmount)}` : '미입력'}
+          </p>
+        </div>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-4">
@@ -925,8 +940,8 @@ export function ProjectEditorWizard({
       </div>
       <div className="flex items-center justify-between gap-3">
         <div>
-          <Label className="text-xs">팀원 구성</Label>
-          <p className="mt-1 text-[10px] text-muted-foreground">팀원, 역할, 참여율을 같은 구조로 저장합니다.</p>
+          <Label className="text-xs">서류상 참여인력</Label>
+          <p className="mt-1 text-[10px] text-muted-foreground">계약·협약서에 남길 참여인력, 역할, 참여율을 같은 구조로 저장합니다.</p>
         </div>
         <Button type="button" onClick={addTeamMember} className="gap-2">
           <Plus className="h-4 w-4" />
@@ -1109,6 +1124,7 @@ export function ProjectEditorWizard({
           <CardHeader className="pb-2"><CardTitle className="text-sm">계약/재무</CardTitle></CardHeader>
           <CardContent>
             <ReviewRow label="기간" value={`${draft.contractStart || '-'} ~ ${draft.contractEnd || '-'}`} />
+            <ReviewRow label="통화" value={PROJECT_CURRENCY_LABELS[draft.currency]} />
             <ReviewRow label="계약금액" value={formatStoredProjectAmount(draft.contractAmount, financialInputFlags.contractAmount)} />
             <ReviewRow label="매출 부가세" value={formatStoredProjectAmount(draft.salesVatAmount, financialInputFlags.salesVatAmount)} />
             <ReviewRow label="총수익" value={formatStoredProjectAmount(draft.totalRevenueAmount, financialInputFlags.totalRevenueAmount)} />

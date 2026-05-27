@@ -4,10 +4,12 @@ import {
   normalizeAccountType,
   normalizeBasis,
   normalizeProjectContractType,
+  normalizeProjectCurrency,
   normalizeProjectFundInputMode,
   normalizeProjectType,
   normalizeSettlementType,
   PROJECT_FUND_INPUT_MODE_LABELS,
+  PROJECT_CURRENCY_LABELS,
   PROJECT_TYPE_LABELS,
   type ProjectExecutiveReviewHistoryEntry,
   SETTLEMENT_TYPE_LABELS,
@@ -40,6 +42,7 @@ export interface MigrationReviewDossier {
     fundInputModeLabel: string;
   };
   budget: {
+    currencyLabel: string;
     contractAmountLabel: string;
     salesVatAmountLabel: string;
     paymentPlanDesc: string;
@@ -220,6 +223,7 @@ export function buildMigrationReviewDossier(
       fundInputModeLabel: PROJECT_FUND_INPUT_MODE_LABELS[normalizeProjectFundInputMode(project.fundInputMode || payload?.fundInputMode)] || '-',
     },
     budget: {
+      currencyLabel: PROJECT_CURRENCY_LABELS[normalizeProjectCurrency(project.currency || payload?.currency)] || 'KRW',
       contractAmountLabel: formatStoredProjectAmount(project.contractAmount ?? payload?.contractAmount),
       salesVatAmountLabel: formatStoredProjectAmount(project.salesVatAmount ?? payload?.salesVatAmount),
       paymentPlanDesc: readable(project.paymentPlanDesc || payload?.paymentPlanDesc),
