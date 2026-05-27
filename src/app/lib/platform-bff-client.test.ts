@@ -22,6 +22,7 @@ import {
   uploadProjectSheetSourceViaBff,
   uploadProjectRequestContractViaBff,
   toRequestActor,
+  updateContactViaBff,
   uploadTransactionEvidenceDriveViaBff,
   upsertLedgerViaBff,
   type PlatformApiClientLike,
@@ -59,6 +60,40 @@ describe('platform-bff-client', () => {
       role: 'admin',
       idToken: 'token-abc',
     });
+  });
+
+  it('calls contact update endpoint', async () => {
+    const client = asMockClient({
+      post: vi.fn(),
+      get: vi.fn(),
+      patch: vi.fn(async () => ({ data: { ok: true, contact: { id: 'ct_001', name: '홍길동', organization: 'MYSC', emails: ['person@example.com'], phones: [], score: 1 } } })),
+      request: vi.fn(),
+    });
+
+    const result = await updateContactViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'admin' },
+      contactId: 'ct_001',
+      contact: {
+        name: '홍길동',
+        organization: 'MYSC',
+        department: '',
+        title: '',
+        role: '',
+        emails: ['person@example.com'],
+        phones: [],
+        website: '',
+        address: '',
+        memo: '수정',
+      },
+      client,
+    });
+
+    expect(client.patch).toHaveBeenCalledWith('/api/v1/contacts/ct_001', expect.objectContaining({
+      tenantId: 'mysc',
+      body: expect.objectContaining({ memo: '수정' }),
+    }));
+    expect(result.contact.id).toBe('ct_001');
   });
 
   it('calls project upsert endpoint', async () => {

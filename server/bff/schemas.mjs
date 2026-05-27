@@ -210,8 +210,10 @@ export const businessCardConfirmSchema = z.object({
   }
 });
 
+export const businessCardContactUpdateSchema = businessCardConfirmSchema;
+
 export const businessCardSearchSchema = z.object({
-  query: NON_EMPTY_STRING.max(200),
+  query: z.string().trim().max(200).default(''),
   limit: z.number().int().positive().max(100).optional(),
   cursor: z.string().trim().max(300).optional(),
 }).strict();

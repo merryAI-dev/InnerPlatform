@@ -335,4 +335,8 @@ export class PlatformApiClient {
   post<T>(path: string, options: Omit<PlatformRequestOptions, 'method'>): Promise<ApiResponse<T>> {
     return this.request<T>(path, { ...options, method: 'POST' });
   }
+
+  patch<T>(path: string, options: Omit<PlatformRequestOptions, 'method'>): Promise<ApiResponse<T>> {
+    return this.request<T>(path, { ...options, method: 'PATCH' });
+  }
 }

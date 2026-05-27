@@ -160,8 +160,15 @@ export interface ContactSearchResult {
   emails: string[];
   phones: string[];
   website?: string;
+  address?: string;
+  memo?: string;
   score: number;
   updatedAt?: string;
+}
+
+export interface ContactUpdateResult {
+  ok: boolean;
+  contact: ContactSearchResult;
 }
 
 export interface ProvisionProjectEvidenceDriveRootResult {
@@ -540,6 +547,16 @@ export interface PlatformApiClientLike {
     timeoutMs?: number;
   }): Promise<{ data: T }>;
   post<T>(path: string, options: {
+    tenantId: string;
+    actor: RequestActor;
+    body?: unknown;
+    headers?: HeadersInit;
+    idempotencyKey?: string;
+    requestId?: string;
+    retries?: number;
+    timeoutMs?: number;
+  }): Promise<{ data: T }>;
+  patch<T>(path: string, options: {
     tenantId: string;
     actor: RequestActor;
     body?: unknown;
@@ -1220,6 +1237,27 @@ export async function searchContactsViaBff(params: {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
       timeoutMs: 10000,
+    },
+  );
+  return response.data;
+}
+
+export async function updateContactViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  contactId: string;
+  contact: BusinessCardConfirmPayload;
+  client?: PlatformApiClientLike;
+}): Promise<ContactUpdateResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.patch<ContactUpdateResult>(
+    `/api/v1/contacts/${encodeURIComponent(params.contactId)}`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.contact,
+      retries: 0,
+      timeoutMs: 20000,
     },
   );
   return response.data;
