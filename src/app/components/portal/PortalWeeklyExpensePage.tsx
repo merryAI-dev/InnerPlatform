@@ -37,6 +37,7 @@ import {
   uploadTransactionEvidenceDriveViaBff,
   fetchBudgetSuggestionViaBff,
   isPlatformApiEnabled,
+  syncProjectCashflowActualsViaBff,
 } from '../../lib/platform-bff-client';
 import { PlatformApiError } from '../../platform/api-client';
 import {
@@ -85,6 +86,7 @@ export function PortalWeeklyExpensePage() {
   const { user: authUser, ensureGoogleWorkspaceAccess } = useAuth();
   const { orgId } = useFirebase();
   const {
+    isLoading: portalStoreLoading,
     activeProjectId,
     portalUser,
     myProject,
@@ -308,30 +310,69 @@ export function PortalWeeklyExpensePage() {
     return buildSettlementActualSyncPayloadLocally(rows, getYearMondayWeeks(currentYear), rows);
   }, [activeExpenseSheetId, expenseSheetRows, visibleExpenseSheets]);
 
+  const projectExpenseSourceSignature = useMemo(() => {
+    const rows = buildProjectExpenseRowsForActualSync({
+      sheets: visibleExpenseSheets,
+      activeSheetId: activeExpenseSheetId,
+      activeRows: expenseSheetRows ?? [],
+    });
+    return JSON.stringify({
+      projectId,
+      sheets: visibleExpenseSheets.map((sheet) => ({
+        id: sheet.id,
+        name: sheet.name,
+        rowCount: Array.isArray(sheet.rows) ? sheet.rows.length : 0,
+      })),
+      rows: rows.map((row) => ({
+        tempId: row.tempId,
+        sourceTxId: row.sourceTxId,
+        entryKind: row.entryKind,
+        cells: row.cells,
+      })),
+    });
+  }, [activeExpenseSheetId, expenseSheetRows, projectId, visibleExpenseSheets]);
+
+  const syncCashflowActualsFromCanonicalSource = useCallback(async () => {
+    if (!projectId) return [];
+    if (isPlatformApiEnabled()) {
+      const result = await syncProjectCashflowActualsViaBff({
+        tenantId: orgId,
+        actor: bffActor,
+        projectId,
+      });
+      return [...result.weeks, ...result.cleared];
+    }
+
+    await Promise.all(projectActualSyncPayload.map((week) => upsertWeekAmounts({
+      projectId,
+      yearMonth: week.yearMonth,
+      weekNo: week.weekNo,
+      mode: 'actual',
+      amounts: week.amounts as any,
+    })));
+    if (projectActualSyncPayload.length > 0) {
+      await Promise.all(projectActualSyncPayload.map((week) => upsertWeeklySubmissionStatus({
+        projectId,
+        yearMonth: week.yearMonth,
+        weekNo: week.weekNo,
+        expenseUpdated: true,
+        expenseSyncState: 'synced',
+        expenseReviewPendingCount: 0,
+      })));
+    }
+    return projectActualSyncPayload.map((week) => ({ yearMonth: week.yearMonth, weekNo: week.weekNo }));
+  }, [bffActor, orgId, projectActualSyncPayload, projectId, upsertWeekAmounts, upsertWeeklySubmissionStatus]);
+
   useEffect(() => {
-    if (!projectId || projectActualSyncPayload.length === 0) return;
-    const signature = JSON.stringify(projectActualSyncPayload);
+    if (!projectId || portalStoreLoading || hasUnsavedSettlementChanges || isSettlementSaving) return;
+    const signature = projectExpenseSourceSignature;
     if (actualSyncSignatureRef.current === signature) return;
     actualSyncSignatureRef.current = signature;
     let cancelled = false;
     void (async () => {
       try {
-        await Promise.all(projectActualSyncPayload.map((week) => upsertWeekAmounts({
-          projectId,
-          yearMonth: week.yearMonth,
-          weekNo: week.weekNo,
-          mode: 'actual',
-          amounts: week.amounts as any,
-        })));
+        await syncCashflowActualsFromCanonicalSource();
         if (cancelled) return;
-        await Promise.all(projectActualSyncPayload.map((week) => upsertWeeklySubmissionStatus({
-          projectId,
-          yearMonth: week.yearMonth,
-          weekNo: week.weekNo,
-          expenseUpdated: true,
-          expenseSyncState: 'synced',
-          expenseReviewPendingCount: 0,
-        })));
       } catch (error) {
         actualSyncSignatureRef.current = '';
         reportError(error, {
@@ -352,7 +393,14 @@ export function PortalWeeklyExpensePage() {
     return () => {
       cancelled = true;
     };
-  }, [projectActualSyncPayload, projectId, upsertWeekAmounts, upsertWeeklySubmissionStatus]);
+  }, [
+    hasUnsavedSettlementChanges,
+    isSettlementSaving,
+    portalStoreLoading,
+    projectExpenseSourceSignature,
+    projectId,
+    syncCashflowActualsFromCanonicalSource,
+  ]);
 
   const handleEvidenceDriveError = useCallback((error: unknown, actionLabel: string) => {
     reportError(error, {
@@ -1045,6 +1093,7 @@ export function PortalWeeklyExpensePage() {
           onPendingQuickInsertHandled={handlePendingQuickInsertHandled}
           onDeriveRows={deriveRowsWithLocalKernel}
           onPreviewActualSyncPayload={previewActualSyncWithLocalKernel}
+          onSyncCashflowActuals={syncCashflowActualsFromCanonicalSource}
           onDirtyStateChange={setHasUnsavedSettlementChanges}
           onSavingStateChange={setIsSettlementSaving}
           weeklySubmissionStatuses={weeklySubmissionStatuses}

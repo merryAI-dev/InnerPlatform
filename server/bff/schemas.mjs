@@ -278,6 +278,17 @@ export const cashflowExportSchema = z.object({
   }
 });
 
+export const cashflowWeekAmountsSchema = z.object({
+  yearMonth: z.string().trim().regex(/^\d{4}-\d{2}$/),
+  weekNo: z.number().int().min(1).max(6),
+  mode: z.enum(['projection', 'actual']),
+  amounts: z.record(z.string().trim().min(1), z.number().finite()),
+}).strict();
+
+export const cashflowActualSyncSchema = z.object({
+  reason: z.string().trim().max(300).optional(),
+}).strict();
+
 export const genericWriteSchema = z.object({
   entityType: NON_EMPTY_STRING,
   entityId: NON_EMPTY_STRING.optional(),

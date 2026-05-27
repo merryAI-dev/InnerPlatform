@@ -156,6 +156,7 @@ export interface SettlementLedgerProps {
     yearWeeks: MonthMondayWeek[],
     persistedRows?: ImportRow[] | null,
   ) => Promise<SettlementActualSyncWeekPayload[]>;
+  onSyncCashflowActuals?: () => Promise<Array<{ yearMonth: string; weekNo: number }>>;
   onDirtyStateChange?: (dirty: boolean) => void;
   onSavingStateChange?: (saving: boolean) => void;
   weeklySubmissionStatuses?: WeeklySubmissionStatus[];
@@ -205,6 +206,7 @@ export function SettlementLedgerPage({
   onPendingQuickInsertHandled,
   onDeriveRows,
   onPreviewActualSyncPayload,
+  onSyncCashflowActuals,
   onDirtyStateChange,
   onSavingStateChange,
   weeklySubmissionStatuses = [],
@@ -689,6 +691,35 @@ export function SettlementLedgerPage({
     setCashflowSyncing(true);
     setCashflowSyncState('syncing');
     try {
+      if (onSyncCashflowActuals) {
+        try {
+          const syncedWeeks = await onSyncCashflowActuals();
+          if (syncedWeeks.length > 0) {
+            await updateWeeklyStatusesForPayload(syncedWeeks, {
+              expenseUpdated: true,
+              expenseSyncState: 'synced',
+            });
+          }
+          setCashflowSyncState('synced');
+          setLastCashflowSyncedAt(new Date().toISOString());
+          if (!silent) {
+            toast.success('캐시플로 실제값까지 동기화했습니다.');
+          }
+          return 'synced' as const;
+        } catch (err) {
+          console.error('[SettlementLedger] BFF cashflow actual sync failed:', err);
+          if (syncableWeeks.length > 0) {
+            await updateWeeklyStatusesForPayload(syncableWeeks, {
+              expenseUpdated: true,
+              expenseSyncState: 'sync_failed',
+            });
+          }
+          setCashflowSyncState('sync_failed');
+          if (!silent) toast.message('정산대장은 저장되었지만 캐시플로 업데이트에 실패했습니다.');
+          return 'sync_failed' as const;
+        }
+      }
+
       let syncFailed = false;
       await Promise.all(
         syncableWeeks.map(async (week) => {
@@ -717,8 +748,8 @@ export function SettlementLedgerPage({
       }
       if (syncableWeeks.length > 0) {
         await updateWeeklyStatusesForPayload(syncableWeeks, {
-          expenseUpdated: true,
-          expenseSyncState: 'synced',
+            expenseUpdated: true,
+            expenseSyncState: 'synced',
         });
       }
       setCashflowSyncState('synced');
@@ -730,7 +761,15 @@ export function SettlementLedgerPage({
     } finally {
       setCashflowSyncing(false);
     }
-  }, [onPreviewActualSyncPayload, projectId, sheetRows, updateWeeklyStatusesForPayload, upsertWeekAmounts, yearWeeks]);
+  }, [
+    onPreviewActualSyncPayload,
+    onSyncCashflowActuals,
+    projectId,
+    sheetRows,
+    updateWeeklyStatusesForPayload,
+    upsertWeekAmounts,
+    yearWeeks,
+  ]);
 
   const handleImportSave = useCallback(async (options?: { silent?: boolean; syncCashflow?: boolean }) => {
     if (!importRows) return;
