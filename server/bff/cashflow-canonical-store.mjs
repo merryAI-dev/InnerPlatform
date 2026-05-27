@@ -316,6 +316,7 @@ export function buildCashflowActualSyncPlan({ rows, previousWeekKeys = [], ancho
       const week = parseWeekKey(key);
       return week ? { ...week, key, amounts: { ...(byWeek.get(key) || {}) } } : null;
     })
+    .filter((week) => week && Object.keys(week.amounts || {}).length > 0)
     .filter(Boolean)
     .sort((a, b) => a.yearMonth.localeCompare(b.yearMonth) || a.weekNo - b.weekNo);
 
@@ -355,7 +356,9 @@ function buildWeekPatch({ tenantId, actorId, actorName, projectId, mode, week, a
     updatedByUid: actorId,
     updatedByName: actorName,
   };
-  patch[mode] = normalizeAmounts(amounts);
+  for (const [lineId, amount] of Object.entries(normalizeAmounts(amounts))) {
+    patch[`${mode}.${lineId}`] = amount;
+  }
   return patch;
 }
 

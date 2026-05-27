@@ -962,7 +962,7 @@ export function CashflowProjectSheet({
         title="프로젝트 캐시플로(주간)"
         description={`${projectName} · ${yearMonth}`}
         actions={(
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 xl:justify-end">
             <Button
               variant="outline"
               size="sm"

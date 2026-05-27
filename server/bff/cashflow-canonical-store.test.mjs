@@ -4,6 +4,7 @@ import {
   getMonthCashflowWeeks,
   parseCashflowLineLabel,
   syncProjectCashflowActualsFromExpenseSheets,
+  upsertCashflowWeekAmounts,
 } from './cashflow-canonical-store.mjs';
 
 function row(cells, extra = {}) {
@@ -67,6 +68,61 @@ describe('cashflow canonical BFF helpers', () => {
     expect(plan.weeks[0].amounts.INPUT_VAT_OUT).toBe(17239);
     expect(plan.weeks[0].amounts).not.toHaveProperty('SALES_IN');
     expect(plan.clearedWeeks).toHaveLength(0);
+  });
+
+  it('does not write empty actual weeks from rows that have no resolved amount', () => {
+    const plan = buildCashflowActualSyncPlan({
+      anchorYear: 2026,
+      rows: [
+        row({
+          3: '26-2-4',
+          8: '직접사업비',
+          10: '0',
+          13: '0',
+        }, { tempId: 'empty-bank-row', sourceTxId: 'bank:empty', entryKind: 'EXPENSE' }),
+      ],
+    });
+
+    expect(plan.weeks).toHaveLength(0);
+    expect(plan.weekKeys).toHaveLength(0);
+    expect(plan.clearedWeeks).toHaveLength(0);
+  });
+
+  it('patches amount fields by dot path so partial saves cannot replace the saved map', async () => {
+    const writes = [];
+    const db = {
+      doc(path) {
+        return { path };
+      },
+      async runTransaction(callback) {
+        await callback({
+          async get() {
+            return { exists: true };
+          },
+          set(ref, data, options) {
+            writes.push({ ref, data, options });
+          },
+        });
+      },
+    };
+
+    await upsertCashflowWeekAmounts({
+      db,
+      tenantId: 'mysc',
+      actorId: 'u1',
+      actorName: 'PM',
+      projectId: 'p1',
+      mode: 'actual',
+      yearMonth: '2026-05',
+      weekNo: 1,
+      amounts: { DIRECT_COST_OUT: 3620183 },
+      now: '2026-05-27T09:40:00.000Z',
+    });
+
+    const weekWrite = writes.find((write) => write.ref.path.includes('/cashflow_weeks/'));
+    expect(weekWrite.data['actual.DIRECT_COST_OUT']).toBe(3620183);
+    expect(weekWrite.data).not.toHaveProperty('actual');
+    expect(weekWrite.options).toEqual({ merge: true });
   });
 
   it('treats bank-imported expense rows on inflow lines as negative adjustments', () => {

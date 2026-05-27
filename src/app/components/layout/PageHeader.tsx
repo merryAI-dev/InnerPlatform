@@ -20,15 +20,15 @@ export function PageHeader({
   actions,
 }: PageHeaderProps) {
   return (
-    <div className="flex items-start justify-between gap-4">
-      <div className="flex items-start gap-3">
+    <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+      <div className="flex min-w-0 items-start gap-3">
         <div
           className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#001e46] shadow-sm"
         >
           <Icon className="w-4.5 h-4.5 text-white" />
         </div>
-        <div>
-          <div className="flex items-center gap-2">
+        <div className="min-w-0">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
             <h1 className="text-[20px]" style={{ fontWeight: 800, letterSpacing: '-0.03em' }}>
               {title}
             </h1>
@@ -41,7 +41,7 @@ export function PageHeader({
           <p className="text-[12px] text-muted-foreground mt-0.5">{description}</p>
         </div>
       </div>
-      {actions && <div className="flex items-center gap-2 shrink-0">{actions}</div>}
+      {actions && <div className="flex w-full flex-wrap items-center gap-2 xl:w-auto xl:justify-end">{actions}</div>}
     </div>
   );
 }
