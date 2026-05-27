@@ -555,6 +555,8 @@ export interface CashflowWeekAmountsResult {
 
 export interface ProjectCashflowActualSyncResult {
   ok: boolean;
+  skipped?: boolean;
+  reason?: string;
   projectId: string;
   sourceRows: number;
   sheetCount: number;
