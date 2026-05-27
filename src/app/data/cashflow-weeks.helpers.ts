@@ -20,3 +20,15 @@ export function filterCashflowWeeksForYear<
     return value >= yearStart && value <= yearEnd;
   });
 }
+
+export function filterCashflowWeeksThroughSelectedYear<
+  T extends { yearMonth?: string | null },
+>(rows: T[], selectedYearMonth: string): T[] {
+  const year = typeof selectedYearMonth === 'string' ? selectedYearMonth.slice(0, 4) : '';
+  if (!/^\d{4}$/.test(year)) return [];
+  const yearEnd = `${year}-12`;
+  return rows.filter((row) => {
+    const value = typeof row?.yearMonth === 'string' ? row.yearMonth : '';
+    return /^\d{4}-\d{2}$/.test(value) && value <= yearEnd;
+  });
+}

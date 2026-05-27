@@ -1,4 +1,4 @@
-import type { CashflowCategory, CashflowSheetLineId, Direction, Transaction } from '../data/types';
+import type { CashflowCategory, CashflowSheetLineId, CashflowWeekSheet, Direction, Transaction } from '../data/types';
 import type { MonthMondayWeek } from './cashflow-weeks';
 
 export const CASHFLOW_IN_LINES: CashflowSheetLineId[] = [
@@ -35,6 +35,50 @@ export function computeCashflowTotals(
   const totalIn = CASHFLOW_IN_LINES.reduce((acc, id) => acc + (Number(src[id]) || 0), 0);
   const totalOut = CASHFLOW_OUT_LINES.reduce((acc, id) => acc + (Number(src[id]) || 0), 0);
   return { totalIn, totalOut, net: totalIn - totalOut };
+}
+
+function yearMonthToNumber(value: string): number | null {
+  const [y, m] = String(value || '').split('-');
+  const yy = Number.parseInt(y, 10);
+  const mm = Number.parseInt(m, 10);
+  if (!Number.isFinite(yy) || !Number.isFinite(mm) || mm < 1 || mm > 12) return null;
+  return yy * 100 + mm;
+}
+
+export function computeOpeningCashflowTotals(input: {
+  weeks: CashflowWeekSheet[];
+  projectId: string;
+  yearMonth: string;
+}): {
+  projectionIn: number;
+  projectionOut: number;
+  actualIn: number;
+  actualOut: number;
+} {
+  const currentYmNum = yearMonthToNumber(input.yearMonth);
+  let projectionIn = 0;
+  let projectionOut = 0;
+  let actualIn = 0;
+  let actualOut = 0;
+
+  if (!currentYmNum) {
+    return { projectionIn, projectionOut, actualIn, actualOut };
+  }
+
+  for (const week of input.weeks || []) {
+    if (week.projectId !== input.projectId) continue;
+    const ymNum = yearMonthToNumber(week.yearMonth);
+    if (!ymNum || ymNum >= currentYmNum) continue;
+
+    const projection = computeCashflowTotals(week.projection);
+    const actual = computeCashflowTotals(week.actual);
+    projectionIn += projection.totalIn;
+    projectionOut += projection.totalOut;
+    actualIn += actual.totalIn;
+    actualOut += actual.totalOut;
+  }
+
+  return { projectionIn, projectionOut, actualIn, actualOut };
 }
 
 export function hasAnyCashflowKeys(sheet: Partial<Record<CashflowSheetLineId, number>> | undefined): boolean {
@@ -140,4 +184,3 @@ export function aggregateTransactionsToActual(
 
   return result;
 }
-

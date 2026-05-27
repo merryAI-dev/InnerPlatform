@@ -3,6 +3,7 @@ import type { Transaction } from '../data/types';
 import type { MonthMondayWeek } from './cashflow-weeks';
 import {
   aggregateTransactionsToActual,
+  computeOpeningCashflowTotals,
   computeCashflowTotals,
   hasAnyCashflowKeys,
   mapCategoryToSheetLine,
@@ -125,6 +126,58 @@ describe('computeCashflowTotals', () => {
   it('treats NaN-coercible values as 0', () => {
     const sheet = { SALES_IN: undefined } as unknown as Record<string, number>;
     expect(computeCashflowTotals(sheet)).toEqual({ totalIn: 0, totalOut: 0, net: 0 });
+  });
+});
+
+describe('computeOpeningCashflowTotals', () => {
+  it('carries previous-year balances into January', () => {
+    const weeks = [
+      {
+        id: 'p1-2026-12-w5',
+        tenantId: 'mysc',
+        projectId: 'p1',
+        yearMonth: '2026-12',
+        weekNo: 5,
+        weekStart: '2026-12-23',
+        weekEnd: '2026-12-29',
+        projection: { SALES_IN: 50_000_000, DIRECT_COST_OUT: 10_000_000 },
+        actual: { SALES_IN: 40_000_000, DIRECT_COST_OUT: 8_000_000 },
+        pmSubmitted: false,
+        adminClosed: false,
+        createdAt: '',
+        updatedAt: '',
+        updatedByUid: '',
+        updatedByName: '',
+      },
+      {
+        id: 'p1-2027-01-w1',
+        tenantId: 'mysc',
+        projectId: 'p1',
+        yearMonth: '2027-01',
+        weekNo: 1,
+        weekStart: '2026-12-30',
+        weekEnd: '2027-01-05',
+        projection: { DIRECT_COST_OUT: 5_000_000 },
+        actual: { DIRECT_COST_OUT: 3_000_000 },
+        pmSubmitted: false,
+        adminClosed: false,
+        createdAt: '',
+        updatedAt: '',
+        updatedByUid: '',
+        updatedByName: '',
+      },
+    ] as any[];
+
+    expect(computeOpeningCashflowTotals({
+      weeks,
+      projectId: 'p1',
+      yearMonth: '2027-01',
+    })).toEqual({
+      projectionIn: 50_000_000,
+      projectionOut: 10_000_000,
+      actualIn: 40_000_000,
+      actualOut: 8_000_000,
+    });
   });
 });
 
