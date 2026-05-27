@@ -445,19 +445,22 @@ export async function syncProjectCashflowActualsFromExpenseSheets({ db, tenantId
   const rows = sheets.flatMap((sheet) => Array.isArray(sheet.rows) ? sheet.rows : []);
   const stateRef = db.doc(`orgs/${tenantId}/cashflow_actual_sync_state/${projectId}`);
   const stateSnap = await stateRef.get().catch(() => null);
-  const stateWeekKeys = Array.isArray(stateSnap?.data()?.weekKeys) ? stateSnap.data().weekKeys : [];
-  const existingWeeksSnap = await db.collection(`orgs/${tenantId}/cashflow_weeks`)
-    .where('projectId', '==', projectId)
-    .get();
-  const existingActualWeekKeys = existingWeeksSnap.docs
-    .map((doc) => doc.data() || {})
-    .filter((week) => {
-      const actual = week.actual && typeof week.actual === 'object' ? week.actual : {};
-      return Object.values(actual).some((amount) => Number(amount) !== 0);
-    })
-    .map((week) => `${week.yearMonth}:w${week.weekNo}`)
-    .filter((key) => /^\d{4}-\d{2}:w\d+$/.test(key));
-  const previousWeekKeys = Array.from(new Set([...stateWeekKeys, ...existingActualWeekKeys]));
+  const previousWeekKeys = Array.isArray(stateSnap?.data()?.weekKeys) ? stateSnap.data().weekKeys : [];
+  if (rows.length === 0) {
+    return {
+      ok: true,
+      skipped: true,
+      reason: 'no_expense_sheet_rows',
+      projectId,
+      sourceRows: 0,
+      sheetCount: sheets.length,
+      upsertedWeeks: 0,
+      clearedWeeks: 0,
+      weeks: [],
+      cleared: [],
+      updatedAt: now,
+    };
+  }
   const plan = buildCashflowActualSyncPlan({
     rows,
     previousWeekKeys,
