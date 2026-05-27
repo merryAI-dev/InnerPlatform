@@ -12,6 +12,7 @@ import {
 } from '../bff-utils.mjs';
 import {
   parseWithSchema,
+  businessCardContactUpdateSchema,
   businessCardConfirmSchema,
   businessCardProcessSchema,
   businessCardSearchSchema,
@@ -90,6 +91,8 @@ function contactDocToSearchResult(doc, score = 0) {
     emails: Array.isArray(doc.emails) ? doc.emails : [],
     phones: Array.isArray(doc.phones) ? doc.phones : [],
     website: doc.website || '',
+    address: doc.address || '',
+    memo: doc.memo || '',
     score,
     updatedAt: doc.updatedAt || '',
   };
@@ -340,6 +343,59 @@ export function mountBusinessCardRoutes(app, {
     });
 
     res.status(200).json(buildListResponse(items, limit));
+  }));
+
+  app.patch('/api/v1/contacts/:contactId', createMutatingRoute(idempotencyService, async (req) => {
+    assertActorPermissionAllowed(rbacPolicy, req, 'contact:write', 'update contacts');
+    const { tenantId, actorId } = req.context;
+    const contactId = readOptionalText(req.params.contactId);
+    const timestamp = now();
+    if (!contactId) throw createHttpError(400, 'contactId is required', 'missing_contact_id');
+
+    const parsed = parseWithSchema(businessCardContactUpdateSchema, req.body, 'Invalid contact payload');
+    const contactPayload = normalizeBusinessCardContactPayload(parsed);
+    assertConfirmableContact(contactPayload);
+
+    const contactRef = db.doc(`orgs/${tenantId}/contacts/${contactId}`);
+    const updatedDoc = await db.runTransaction(async (tx) => {
+      const contactSnap = await tx.get(contactRef);
+      if (!contactSnap.exists) throw createHttpError(404, `Contact not found: ${contactId}`, 'not_found');
+      const existing = contactSnap.data() || {};
+      const nextContact = stripUndefinedDeep({
+        ...existing,
+        ...contactPayload,
+        ...buildContactDerivedFields(contactPayload),
+        id: contactId,
+        tenantId,
+        updatedBy: actorId,
+        updatedAt: timestamp,
+      });
+      tx.set(contactRef, nextContact, { merge: true });
+      return nextContact;
+    });
+
+    await appendAudit({
+      auditChainService,
+      piiProtector,
+      context: req.context,
+      entityType: 'contact',
+      entityId: contactId,
+      action: 'UPDATE',
+      details: `연락처 수정: ${contactPayload.name || contactPayload.organization}`,
+      metadata: {
+        source: 'business_card_db',
+        visibility: updatedDoc.visibility || 'org',
+      },
+      timestamp,
+    });
+
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        contact: contactDocToSearchResult(updatedDoc, 1),
+      },
+    };
   }));
 
   app.get('/api/v1/business-card-imports/:importId/image', asyncHandler(async (req, res) => {

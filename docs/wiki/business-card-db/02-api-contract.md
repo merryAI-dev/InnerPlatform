@@ -113,7 +113,7 @@ Response:
 
 ## GET `/api/v1/contacts?query=...`
 
-Org-wide contact search.
+Org-wide contact search. An empty `query` returns the first page of org-visible contacts for DB-style browsing.
 
 Response:
 
@@ -132,6 +132,26 @@ Response:
   ],
   "count": 1,
   "nextCursor": null
+}
+```
+
+## PATCH `/api/v1/contacts/:contactId`
+
+Updates an existing org-visible contact from the business-card DB editor. The payload shape is the same as the confirm endpoint, and the BFF rebuilds normalized search keys before writing.
+
+Response:
+
+```json
+{
+  "ok": true,
+  "contact": {
+    "id": "ct_abc123",
+    "name": "홍길동",
+    "organization": "MYSC",
+    "emails": ["hello@example.com"],
+    "phones": ["01012345678"],
+    "memo": "PC에서 수정"
+  }
 }
 ```
 

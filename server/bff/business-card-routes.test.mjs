@@ -189,4 +189,106 @@ describe('business-card routes', () => {
     expect(response.body.error).toBe('import_not_confirmable');
     expect(txSet).not.toHaveBeenCalled();
   });
+
+  it('lists contacts when the search query is blank', async () => {
+    const get = vi.fn(async () => ({
+      docs: [
+        {
+          id: 'ct_001',
+          data: () => ({
+            name: '홍길동',
+            organization: 'MYSC',
+            emails: ['person@example.com'],
+            phones: ['01012345678'],
+            memo: '첫 미팅',
+            updatedAt: '2026-05-23T00:00:00.000Z',
+          }),
+        },
+      ],
+    }));
+    const limit = vi.fn(() => ({ get }));
+    const orderBy = vi.fn(() => ({ limit }));
+    const collection = vi.fn(() => ({ orderBy }));
+    const { app } = createRouteHarness({
+      db: { collection },
+      storage: { uploadBusinessCard: vi.fn() },
+      gemini: { analyzeBusinessCard: vi.fn() },
+    });
+
+    const response = await request(app).get('/api/v1/contacts?query=');
+
+    expect(response.status).toBe(200);
+    expect(response.body.items).toHaveLength(1);
+    expect(response.body.items[0]).toMatchObject({
+      id: 'ct_001',
+      name: '홍길동',
+      memo: '첫 미팅',
+    });
+    expect(collection).toHaveBeenCalledWith('orgs/mysc/contacts');
+  });
+
+  it('updates contacts through the BFF and rebuilds search fields', async () => {
+    const txSet = vi.fn();
+    const db = {
+      doc: vi.fn((path) => ({ path })),
+      runTransaction: vi.fn(async (callback) => callback({
+        get: vi.fn(async () => ({
+          exists: true,
+          data: () => ({
+            id: 'ct_001',
+            tenantId: 'mysc',
+            visibility: 'org',
+            name: '기존 이름',
+            organization: 'MYSC',
+            emails: ['old@example.com'],
+            phones: [],
+            createdAt: '2026-05-22T00:00:00.000Z',
+          }),
+        })),
+        set: txSet,
+      })),
+    };
+    const { app, auditChainService } = createRouteHarness({
+      db,
+      storage: { uploadBusinessCard: vi.fn() },
+      gemini: { analyzeBusinessCard: vi.fn() },
+    });
+
+    const response = await request(app)
+      .patch('/api/v1/contacts/ct_001')
+      .set({ 'idempotency-key': 'idem_contact_update_001' })
+      .send({
+        name: '새 이름',
+        organization: 'MYSC',
+        department: 'AX',
+        title: '리드',
+        role: '',
+        emails: ['new@example.com'],
+        phones: [],
+        website: '',
+        address: '',
+        memo: 'PC에서 수정',
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body.contact).toMatchObject({
+      id: 'ct_001',
+      name: '새 이름',
+      memo: 'PC에서 수정',
+    });
+    expect(txSet).toHaveBeenCalledWith(
+      { path: 'orgs/mysc/contacts/ct_001' },
+      expect.objectContaining({
+        name: '새 이름',
+        memo: 'PC에서 수정',
+        primaryEmail: 'new@example.com',
+        updatedBy: 'u001',
+      }),
+      { merge: true },
+    );
+    expect(auditChainService.append).toHaveBeenCalledWith(expect.objectContaining({
+      entityType: 'contact',
+      action: 'UPDATE',
+    }));
+  });
 });

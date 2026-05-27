@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
+import { Textarea } from '../ui/textarea';
 import { PwaInstallPrompt } from '../pwa/PwaInstallPrompt';
 import { useAuth } from '../../data/auth-store';
 import {
@@ -20,7 +21,9 @@ import {
   isPlatformApiEnabled,
   processBusinessCardViaBff,
   searchContactsViaBff,
+  updateContactViaBff,
   type ActorLike,
+  type BusinessCardConfirmPayload,
   type BusinessCardImportResult,
   type ContactSearchResult,
 } from '../../lib/platform-bff-client';
@@ -36,6 +39,19 @@ import {
 } from './business-card-quality';
 
 type BusinessCardTab = 'search' | 'capture';
+
+interface BusinessCardContactFormState {
+  name: string;
+  organization: string;
+  department: string;
+  title: string;
+  role: string;
+  emailsText: string;
+  phonesText: string;
+  website: string;
+  address: string;
+  memo: string;
+}
 
 const TABS: Array<{ id: BusinessCardTab; label: string; description: string }> = [
   { id: 'capture', label: '명함 등록', description: '카메라 가이드에 맞춰 촬영하거나 이미지 파일로 새 명함을 등록합니다.' },
@@ -61,7 +77,7 @@ function escapeCsvCell(value: unknown): string {
 }
 
 function buildContactsCsv(items: ContactSearchResult[]): string {
-  const header = ['이름', '회사/소속', '부서', '직함', '역할', '이메일', '전화번호', '웹사이트', '수정일'];
+  const header = ['이름', '회사/소속', '부서', '직함', '역할', '이메일', '전화번호', '웹사이트', '주소', '메모', '수정일'];
   const rows = items.map((item) => [
     item.name,
     item.organization,
@@ -71,9 +87,41 @@ function buildContactsCsv(items: ContactSearchResult[]): string {
     item.emails?.join('; ') || '',
     item.phones?.join('; ') || '',
     item.website || '',
+    item.address || '',
+    item.memo || '',
     item.updatedAt || '',
   ]);
   return [header, ...rows].map((row) => row.map(escapeCsvCell).join(',')).join('\n');
+}
+
+function createEmptyContactFormState(): BusinessCardContactFormState {
+  return {
+    name: '',
+    organization: '',
+    department: '',
+    title: '',
+    role: '',
+    emailsText: '',
+    phonesText: '',
+    website: '',
+    address: '',
+    memo: '',
+  };
+}
+
+function contactToFormState(contact: ContactSearchResult): BusinessCardContactFormState {
+  return {
+    name: contact.name || '',
+    organization: contact.organization || '',
+    department: contact.department || '',
+    title: contact.title || '',
+    role: contact.role || '',
+    emailsText: contact.emails?.join(', ') || '',
+    phonesText: contact.phones?.join(', ') || '',
+    website: contact.website || '',
+    address: contact.address || '',
+    memo: contact.memo || '',
+  };
 }
 
 export function BusinessCardLabPage() {
@@ -89,22 +137,14 @@ export function BusinessCardLabPage() {
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [cameraError, setCameraError] = useState('');
   const [searching, setSearching] = useState(false);
+  const [savingContactId, setSavingContactId] = useState('');
   const [workflowMessage, setWorkflowMessage] = useState('');
   const [currentImport, setCurrentImport] = useState<BusinessCardImportResult | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<ContactSearchResult[]>([]);
-  const [formState, setFormState] = useState({
-    name: '',
-    organization: '',
-    department: '',
-    title: '',
-    role: '',
-    emailsText: '',
-    phonesText: '',
-    website: '',
-    address: '',
-    memo: '',
-  });
+  const [contactDrafts, setContactDrafts] = useState<Record<string, BusinessCardContactFormState>>({});
+  const [hasLoadedInitialContacts, setHasLoadedInitialContacts] = useState(false);
+  const [formState, setFormState] = useState<BusinessCardContactFormState>(() => createEmptyContactFormState());
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -122,6 +162,14 @@ export function BusinessCardLabPage() {
   const confirmPayload = useMemo(() => buildBusinessCardConfirmPayload(formState), [formState]);
   const canSave = canConfirmBusinessCardContact(confirmPayload) && Boolean(currentImport?.importId);
   const bffEnabled = isPlatformApiEnabled();
+  const busyLabel = preparing
+    ? '이미지 준비 중'
+    : processing
+      ? 'Gemini가 명함을 읽는 중'
+      : saving
+        ? 'DB에 저장 중'
+        : '';
+  const captureBusy = Boolean(busyLabel);
 
   useEffect(() => {
     if (!scannerOpen || !cameraStream || !videoRef.current) return;
@@ -132,6 +180,12 @@ export function BusinessCardLabPage() {
     cameraStream?.getTracks().forEach((track) => track.stop());
   }, [cameraStream]);
 
+  useEffect(() => {
+    if (activeTab !== 'search' || hasLoadedInitialContacts || !actor || !bffEnabled) return;
+    setHasLoadedInitialContacts(true);
+    void handleSearchContacts('');
+  }, [activeTab, actor, bffEnabled, hasLoadedInitialContacts]);
+
   async function prepareSelectedFile(file: File) {
     setImageError('');
     if (!file) return;
@@ -139,7 +193,10 @@ export function BusinessCardLabPage() {
     try {
       const nextImage = await prepareBusinessCardImage(file);
       setPreparedImage(nextImage);
-      setWorkflowMessage('');
+      setCurrentImport(null);
+      setFormState(createEmptyContactFormState());
+      setPreparing(false);
+      await processPreparedImage(nextImage);
     } catch (error) {
       setPreparedImage(null);
       setImageError(error instanceof Error ? error.message : '이미지를 준비하지 못했습니다.');
@@ -264,8 +321,11 @@ export function BusinessCardLabPage() {
     setActiveTab('capture');
   }
 
-  async function handleProcessImage() {
-    if (!preparedImage || !actor) return;
+  async function processPreparedImage(image: BusinessCardPreparedImage) {
+    if (!actor) {
+      setWorkflowMessage('로그인 정보를 확인하지 못해 자동 추출을 시작하지 못했습니다.');
+      return;
+    }
     if (!bffEnabled) {
       setWorkflowMessage('BFF API가 꺼져 있어 명함 추출을 실행할 수 없습니다.');
       return;
@@ -277,14 +337,14 @@ export function BusinessCardLabPage() {
         tenantId,
         actor,
         upload: {
-          fileName: preparedImage.fileName,
-          mimeType: preparedImage.mimeType,
-          fileSize: preparedImage.fileSize,
-          contentBase64: preparedImage.contentBase64,
+          fileName: image.fileName,
+          mimeType: image.mimeType,
+          fileSize: image.fileSize,
+          contentBase64: image.contentBase64,
         },
       });
       applyImportForEdit(result);
-      setWorkflowMessage('Gemini가 읽은 값을 아래에 채웠습니다. 필요한 부분만 수정한 뒤 DB에 저장해 주세요.');
+      setWorkflowMessage('Gemini가 읽은 값을 아래에 채웠습니다. 필요한 부분만 수정한 뒤 DB에 저장하세요.');
     } catch (error) {
       setWorkflowMessage(error instanceof Error ? error.message : '명함 추출 요청에 실패했습니다.');
     } finally {
@@ -314,21 +374,59 @@ export function BusinessCardLabPage() {
     }
   }
 
-  async function handleSearchContacts() {
-    if (!actor || !bffEnabled || !searchQuery.trim()) return;
+  async function handleSearchContacts(nextQuery = searchQuery) {
+    if (!actor || !bffEnabled) return;
     setSearching(true);
     setWorkflowMessage('');
     try {
       const result = await searchContactsViaBff({
         tenantId,
         actor,
-        query: searchQuery,
+        query: nextQuery.trim(),
       });
       setSearchResults(result.items);
+      setContactDrafts(Object.fromEntries(result.items.map((item) => [item.id, contactToFormState(item)])));
     } catch (error) {
       setWorkflowMessage(error instanceof Error ? error.message : '연락처 검색에 실패했습니다.');
     } finally {
       setSearching(false);
+    }
+  }
+
+  function updateContactDraft(contactId: string, key: keyof BusinessCardContactFormState, value: string) {
+    setContactDrafts((current) => ({
+      ...current,
+      [contactId]: {
+        ...(current[contactId] || createEmptyContactFormState()),
+        [key]: value,
+      },
+    }));
+  }
+
+  async function handleSaveSearchContact(contact: ContactSearchResult) {
+    if (!actor || !bffEnabled) return;
+    const draft = contactDrafts[contact.id] || contactToFormState(contact);
+    const payload: BusinessCardConfirmPayload = buildBusinessCardConfirmPayload(draft);
+    if (!canConfirmBusinessCardContact(payload)) {
+      setWorkflowMessage('저장하려면 이름 또는 회사/소속 1개 이상, 이메일 또는 전화번호 1개 이상이 필요합니다.');
+      return;
+    }
+    setSavingContactId(contact.id);
+    setWorkflowMessage('');
+    try {
+      const result = await updateContactViaBff({
+        tenantId,
+        actor,
+        contactId: contact.id,
+        contact: payload,
+      });
+      setSearchResults((current) => current.map((item) => (item.id === contact.id ? result.contact : item)));
+      setContactDrafts((current) => ({ ...current, [contact.id]: contactToFormState(result.contact) }));
+      setWorkflowMessage('연락처를 DB에 저장했습니다.');
+    } catch (error) {
+      setWorkflowMessage(error instanceof Error ? error.message : '연락처 저장에 실패했습니다.');
+    } finally {
+      setSavingContactId('');
     }
   }
 
@@ -348,7 +446,7 @@ export function BusinessCardLabPage() {
   }
 
   return (
-    <div className="min-h-dvh bg-[linear-gradient(135deg,#eef6ff_0%,#f8fbff_46%,#ecfdf5_100%)] px-4 py-6 dark:bg-[linear-gradient(135deg,#061a2f_0%,#0f172a_52%,#052e2b_100%)] md:px-6 md:py-8">
+    <div className="min-h-dvh bg-[linear-gradient(135deg,#eef6ff_0%,#f8fbff_48%,#f3f7fb_100%)] px-4 py-6 dark:bg-[linear-gradient(135deg,#061a2f_0%,#0f172a_52%,#111827_100%)] md:px-6 md:py-8">
       <div className="mx-auto w-full max-w-6xl space-y-5">
         <section className="overflow-hidden rounded-lg border border-white/70 bg-white/55 shadow-xl shadow-slate-900/5 backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/45">
           <div className="border-b border-white/40 bg-[#0f2747]/95 px-5 py-5 text-white md:px-7">
@@ -361,12 +459,12 @@ export function BusinessCardLabPage() {
                   명함 DB
                 </h1>
                 <p className="mt-2 max-w-2xl text-[13px] leading-6 text-sky-50/85">
-                  명함 이미지를 업로드하고, 추출 결과를 검토한 뒤 전사에서 다시 검색할 수 있는 연락처로 저장합니다.
+                  명함을 촬영하거나 업로드하면 Gemini가 자동으로 읽고, 바로 수정한 뒤 전사 연락처 DB에 저장합니다.
                 </p>
               </div>
               <span className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-[12px] font-semibold text-sky-50 backdrop-blur-md">
                 <Sparkles className="h-3.5 w-3.5" />
-                Gemini 검토형 추출
+                Gemini 자동 추출
               </span>
             </div>
           </div>
@@ -409,13 +507,19 @@ export function BusinessCardLabPage() {
                 <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
                   <div className="rounded-lg border border-dashed border-sky-200 bg-sky-50/55 p-4 dark:border-sky-400/25 dark:bg-sky-950/20">
                     <div className="flex min-h-[260px] flex-col items-center justify-center gap-4 text-center">
-                      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-white/80 text-sky-700 shadow-sm backdrop-blur-md dark:bg-slate-950/60 dark:text-sky-200">
-                        {preparing ? <Loader2 className="h-6 w-6 animate-spin" /> : <Camera className="h-6 w-6" />}
-                      </div>
+                      <button
+                        type="button"
+                        onClick={openScanner}
+                        disabled={captureBusy}
+                        className="flex h-20 w-20 touch-manipulation items-center justify-center rounded-full border border-sky-200 bg-white text-[#0f2747] shadow-sm transition hover:bg-sky-50 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60 dark:border-sky-400/25 dark:bg-slate-950/70 dark:text-sky-100"
+                        aria-label="명함 촬영 시작"
+                      >
+                        {captureBusy ? <Loader2 className="h-8 w-8 animate-spin" /> : <Camera className="h-8 w-8" />}
+                      </button>
                       <div>
                         <h3 className="text-[16px] font-bold text-slate-950 dark:text-slate-50">명함 스캔</h3>
                         <p className="mt-2 max-w-md text-[13px] leading-6 text-muted-foreground">
-                          앱 안의 카메라 가이드에 명함을 맞춰 촬영하거나, 저장된 이미지를 선택합니다. 추출 후 같은 화면에서 바로 수정하고 DB에 저장합니다.
+                          카메라 버튼을 누르면 촬영 화면이 열립니다. 이미지가 준비되면 Gemini 분석이 자동으로 시작되고, 같은 화면에서 바로 수정해 저장합니다.
                         </p>
                       </div>
                       <Input
@@ -427,24 +531,22 @@ export function BusinessCardLabPage() {
                         onChange={handleFileChange}
                       />
                       <div className="flex flex-wrap justify-center gap-2">
-                        <Button type="button" onClick={openScanner} disabled={preparing}>
-                          <Camera className="h-4 w-4" />
-                          카메라 스캔
-                        </Button>
-                        <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()} disabled={preparing}>
+                        <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()} disabled={captureBusy}>
                           <ImageIcon className="h-4 w-4" />
                           이미지 선택
                         </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          disabled={!preparedImage || processing || !bffEnabled}
-                          onClick={handleProcessImage}
-                        >
-                          {processing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                          Gemini 추출
-                        </Button>
                       </div>
+                      {busyLabel && (
+                        <div className="w-full max-w-sm rounded-lg border border-sky-200 bg-white/80 px-3 py-3 text-left shadow-sm dark:border-sky-400/20 dark:bg-slate-950/45">
+                          <div className="flex items-center gap-2 text-[12px] font-semibold text-[#0f2747] dark:text-sky-100">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            {busyLabel}
+                          </div>
+                          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
+                            <div className="h-full w-2/3 animate-pulse rounded-full bg-[#0f2747] dark:bg-sky-300" />
+                          </div>
+                        </div>
+                      )}
                       {imageError && (
                         <p className="inline-flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] font-semibold text-rose-700 dark:border-rose-400/20 dark:bg-rose-950/25 dark:text-rose-200">
                           <AlertTriangle className="h-4 w-4" />
@@ -480,8 +582,8 @@ export function BusinessCardLabPage() {
                             <dd className="font-semibold text-slate-900 dark:text-slate-100">{formatBytes(preparedImage.fileSize)}</dd>
                           </div>
                         </dl>
-                        <div className="rounded-lg border border-amber-200/70 bg-amber-50/70 px-3 py-2 text-[11px] leading-5 text-amber-800 dark:border-amber-400/20 dark:bg-amber-950/25 dark:text-amber-200">
-                          Gemini 추출 후 아래 입력칸에서 수정한 뒤 DB에 저장합니다.
+                        <div className="rounded-lg border border-sky-200/70 bg-sky-50/70 px-3 py-2 text-[11px] leading-5 text-[#0f2747] dark:border-sky-400/20 dark:bg-sky-950/25 dark:text-sky-100">
+                          업로드되면 Gemini가 자동으로 추출합니다. 결과는 아래 입력칸에서 수정할 수 있습니다.
                         </div>
                       </div>
                     ) : (
@@ -506,8 +608,8 @@ export function BusinessCardLabPage() {
                               Gemini가 읽은 값을 필요하면 수정하세요. 저장하면 전사 연락처 검색 DB에 반영됩니다.
                             </p>
                           </div>
-                          <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-800 dark:border-amber-400/20 dark:bg-amber-950/25 dark:text-amber-200">
-                            {currentImport.status}
+                          <span className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-[#0f2747] dark:border-sky-400/20 dark:bg-sky-950/25 dark:text-sky-100">
+                            {currentImport.status === 'saved' ? '저장됨' : currentImport.status === 'failed' ? '실패' : '수정 가능'}
                           </span>
                         </div>
 
@@ -530,7 +632,7 @@ export function BusinessCardLabPage() {
                               <span className="flex items-center gap-2">
                                 {label as string}
                                 {isLowConfidenceField(field as typeof currentImport.extracted.name) && (
-                                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">확인 필요</span>
+                                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-700 dark:bg-slate-800 dark:text-slate-200">확인 필요</span>
                                 )}
                               </span>
                               <Input
@@ -581,9 +683,9 @@ export function BusinessCardLabPage() {
                       onKeyDown={(event) => {
                         if (event.key === 'Enter') void handleSearchContacts();
                       }}
-                      placeholder="이름, 회사, 이메일, 전화번호 검색"
+                      placeholder="이름, 회사, 이메일, 전화번호 검색. 비워두면 전체 목록"
                     />
-                    <Button type="button" onClick={handleSearchContacts} disabled={!searchQuery.trim() || searching || !bffEnabled}>
+                    <Button type="button" onClick={() => void handleSearchContacts()} disabled={searching || !bffEnabled}>
                       {searching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
                       검색
                     </Button>
@@ -596,31 +698,82 @@ export function BusinessCardLabPage() {
                     {searchResults.length === 0 ? (
                       <div className="flex min-h-[180px] flex-col items-center justify-center px-4 text-center">
                         <Search className="h-8 w-8 text-sky-600 dark:text-sky-300" />
-                        <h3 className="mt-3 text-[15px] font-bold text-slate-950 dark:text-slate-50">전사 연락처 검색</h3>
+                        <h3 className="mt-3 text-[15px] font-bold text-slate-950 dark:text-slate-50">
+                          {searching ? '연락처를 불러오는 중' : '전사 연락처 DB'}
+                        </h3>
                         <p className="mt-2 max-w-md text-[12px] leading-5 text-muted-foreground">
-                          저장된 연락처를 이름, 회사, 이메일, 전화번호 일부로 찾습니다.
+                          검색어 없이 조회하면 연락처 목록이 먼저 표시됩니다.
                         </p>
                       </div>
                     ) : (
                       <div className="divide-y divide-white/70 dark:divide-white/10">
-                        {searchResults.map((contact) => (
-                          <div key={contact.id} className="px-4 py-3">
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <div>
-                                <p className="text-[14px] font-bold text-slate-950 dark:text-slate-50">{contact.name || contact.organization}</p>
-                                <p className="mt-1 text-[12px] text-muted-foreground">
-                                  {[contact.organization, contact.department, contact.title || contact.role].filter(Boolean).join(' · ')}
-                                </p>
+                        {searchResults.map((contact) => {
+                          const draft = contactDrafts[contact.id] || contactToFormState(contact);
+                          const draftPayload = buildBusinessCardConfirmPayload(draft);
+                          const canSaveContact = canConfirmBusinessCardContact(draftPayload);
+                          const isSavingContact = savingContactId === contact.id;
+                          return (
+                            <section key={contact.id} className="px-3 py-3 md:px-4">
+                              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                                <div>
+                                  <p className="text-[13px] font-bold text-slate-950 dark:text-slate-50">{draft.name || draft.organization || '이름 없음'}</p>
+                                  <p className="mt-1 text-[11px] text-muted-foreground">
+                                    {[draft.organization, draft.department, draft.title || draft.role].filter(Boolean).join(' · ') || contact.id}
+                                  </p>
+                                </div>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  onClick={() => void handleSaveSearchContact(contact)}
+                                  disabled={!canSaveContact || isSavingContact}
+                                >
+                                  {isSavingContact ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+                                  저장
+                                </Button>
                               </div>
-                              <span className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[10px] font-semibold text-sky-800 dark:border-sky-400/20 dark:bg-sky-950/25 dark:text-sky-200">
-                                score {contact.score.toFixed(2)}
-                              </span>
-                            </div>
-                            <p className="mt-2 text-[12px] text-slate-700 dark:text-slate-200">
-                              {[contact.emails?.[0], contact.phones?.[0]].filter(Boolean).join(' · ')}
-                            </p>
-                          </div>
-                        ))}
+                              <div className="grid gap-2 md:grid-cols-4">
+                                {[
+                                  ['name', '이름'],
+                                  ['organization', '회사/소속'],
+                                  ['department', '부서'],
+                                  ['title', '직함'],
+                                  ['role', '역할'],
+                                  ['emailsText', '이메일'],
+                                  ['phonesText', '전화번호'],
+                                  ['website', '웹사이트'],
+                                ].map(([key, label]) => (
+                                  <label key={`${contact.id}-${key}`} className="space-y-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                                    {label}
+                                    <Input
+                                      value={draft[key as keyof BusinessCardContactFormState]}
+                                      onChange={(event) => updateContactDraft(contact.id, key as keyof BusinessCardContactFormState, event.target.value)}
+                                      className="h-9 bg-white text-[12px] dark:bg-slate-950/60"
+                                    />
+                                  </label>
+                                ))}
+                                <label className="space-y-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300 md:col-span-2">
+                                  주소
+                                  <Input
+                                    value={draft.address}
+                                    onChange={(event) => updateContactDraft(contact.id, 'address', event.target.value)}
+                                    className="h-9 bg-white text-[12px] dark:bg-slate-950/60"
+                                  />
+                                </label>
+                                <label className="space-y-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300 md:col-span-2">
+                                  메모
+                                  <Textarea
+                                    value={draft.memo}
+                                    onChange={(event) => updateContactDraft(contact.id, 'memo', event.target.value)}
+                                    className="min-h-9 bg-white text-[12px] dark:bg-slate-950/60"
+                                  />
+                                </label>
+                              </div>
+                              <p className="mt-2 text-[10px] text-muted-foreground">
+                                저장 조건: 이름 또는 회사/소속 1개 이상, 이메일 또는 전화번호 1개 이상 · score {contact.score.toFixed(2)}
+                              </p>
+                            </section>
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -652,7 +805,7 @@ export function BusinessCardLabPage() {
               )}
               <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_0%,transparent_42%,rgba(2,6,23,0.52)_74%)]" />
               <div
-                className="pointer-events-none absolute rounded-[6px] border-2 border-emerald-400 bg-emerald-300/10 shadow-[0_0_0_999px_rgba(2,6,23,0.42)]"
+                className="pointer-events-none absolute rounded-[6px] border-2 border-sky-300 bg-sky-300/10 shadow-[0_0_0_999px_rgba(2,6,23,0.42)]"
                 style={{
                   left: `${CAMERA_GUIDE.left * 100}%`,
                   top: `${CAMERA_GUIDE.top * 100}%`,
@@ -660,10 +813,10 @@ export function BusinessCardLabPage() {
                   aspectRatio: String(CAMERA_GUIDE.aspectRatio),
                 }}
               >
-                <span className="absolute -left-0.5 -top-0.5 h-5 w-5 border-l-4 border-t-4 border-emerald-300" />
-                <span className="absolute -right-0.5 -top-0.5 h-5 w-5 border-r-4 border-t-4 border-emerald-300" />
-                <span className="absolute -bottom-0.5 -left-0.5 h-5 w-5 border-b-4 border-l-4 border-emerald-300" />
-                <span className="absolute -bottom-0.5 -right-0.5 h-5 w-5 border-b-4 border-r-4 border-emerald-300" />
+                <span className="absolute -left-0.5 -top-0.5 h-5 w-5 border-l-4 border-t-4 border-sky-100" />
+                <span className="absolute -right-0.5 -top-0.5 h-5 w-5 border-r-4 border-t-4 border-sky-100" />
+                <span className="absolute -bottom-0.5 -left-0.5 h-5 w-5 border-b-4 border-l-4 border-sky-100" />
+                <span className="absolute -bottom-0.5 -right-0.5 h-5 w-5 border-b-4 border-r-4 border-sky-100" />
               </div>
             </div>
             <div className="z-20 border-t border-white/10 bg-white px-4 pb-[calc(env(safe-area-inset-bottom)+18px)] pt-4 text-slate-950">
@@ -683,7 +836,7 @@ export function BusinessCardLabPage() {
                   className="flex h-16 w-16 items-center justify-center rounded-full border-4 border-slate-950 bg-white disabled:opacity-50"
                   aria-label="명함 촬영"
                 >
-                  <span className="h-10 w-10 rounded-full bg-emerald-500 shadow-inner" />
+                  <span className="h-10 w-10 rounded-full bg-[#0f2747] shadow-inner" />
                 </button>
                 <span className="h-12 w-12" aria-hidden="true" />
               </div>
