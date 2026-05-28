@@ -24,8 +24,11 @@ describe('ProjectEditorWizard dropdown contract', () => {
 
   it('keeps select values representable in their option lists', () => {
     expect(source).toContain('const ownerOptions = useMemo');
-    expect(source).toContain('uid: draft.registeredById');
-    expect(source).toContain("if (value === 'none')");
+    expect(source).toContain('const selectedOwner = useMemo');
+    expect(source).toContain('const hasUnlinkedStoredOwner');
+    expect(source).toContain('구성원 원장에서 선택');
+    expect(source).not.toContain('<SelectItem value="none">선택 안 함</SelectItem>');
+    expect(source).not.toContain('uid: draft.registeredById');
     expect(source).toContain("onSelect({ memberName: '', memberNickname: '' })");
     expect(source).toContain('currentTeamMemberOptionExists');
     expect(source).toContain('member.memberNickname ? `${member.memberName} (${member.memberNickname})` : member.memberName');
@@ -34,7 +37,7 @@ describe('ProjectEditorWizard dropdown contract', () => {
   it('uses a member select for project owner instead of free text manager input', () => {
     expect(source).toContain('사업 담당자');
     expect(source).toContain('registeredById');
-    expect(source).toContain('registeredByName: member?.name ||');
+    expect(source).toContain('registeredByName: member.name || member.email || member.uid');
     expect(source).not.toContain('<Input value={draft.managerName}');
   });
 

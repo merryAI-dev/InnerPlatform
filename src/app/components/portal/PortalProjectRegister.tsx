@@ -24,7 +24,7 @@ export function PortalProjectRegister() {
   const navigate = useNavigate();
   const { orgId } = useFirebase();
   const { user: authUser } = useAuth();
-  const { createProjectRequest, portalUser } = usePortalStore();
+  const { createProjectRequest, members, portalUser } = usePortalStore();
   const [busyActionId, setBusyActionId] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
 
@@ -120,6 +120,7 @@ export function PortalProjectRegister() {
       description="기본 정보, 계약/재무, 팀/인력, 입금/정산 정보를 같은 기준으로 입력합니다."
       initialDraft={initialDraft}
       draftKey={`portal-register-${authUser?.uid || 'anonymous'}`}
+      members={members}
       actions={[{ id: 'submit', label: '등록 요청 저장', icon: Send }]}
       busyActionId={busyActionId}
       onContractFileUpload={handleContractFileUpload}

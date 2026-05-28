@@ -129,13 +129,13 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
 
       if (editProject) {
         await updateProject(editProject.id, patch);
-        syncProjectOwnerAssignment(editProject.id, draft.name || editProject.name, editProject.registeredById || editProject.managerId || '', draft);
+        await syncProjectOwnerAssignment(editProject.id, draft.name || editProject.name, editProject.registeredById || editProject.managerId || '', draft);
         toast.success('프로젝트 수정 내용이 저장되었습니다.');
         navigate(`/projects/${editProject.id}`);
       } else {
         const project = createProjectFromDraft(draft, patch, now);
         await addProject(project);
-        syncProjectOwnerAssignment(project.id, project.name, '', draft);
+        await syncProjectOwnerAssignment(project.id, project.name, '', draft);
         toast.success(draft.phase === 'PROSPECT' ? '예정 프로젝트로 저장했습니다.' : '프로젝트를 등록했습니다.');
         navigate(`/projects/${project.id}`);
       }
@@ -147,7 +147,7 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
     }
   };
 
-  const syncProjectOwnerAssignment = (
+  const syncProjectOwnerAssignment = async (
     projectId: string,
     projectName: string,
     previousOwnerId: string,
@@ -170,7 +170,7 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
       nextMember,
     });
     if (previousMember && patches.previous) {
-      upsertMember({
+      await upsertMember({
         ...previousMember,
         projectIds: patches.previous.projectIds,
         projectNames: patches.previous.projectNames,
@@ -182,7 +182,7 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
       });
     }
     if (patches.next) {
-      upsertMember({
+      await upsertMember({
         ...nextMember,
         projectId: patches.next.projectId,
         projectIds: patches.next.projectIds,

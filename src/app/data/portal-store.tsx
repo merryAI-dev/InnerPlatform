@@ -28,6 +28,7 @@ import type {
   ProjectSheetSourceType,
   Project,
   ProjectStatus,
+  OrgMember,
   ParticipationEntry,
   Transaction,
   TransactionState,
@@ -114,6 +115,7 @@ import {
   resolveActivePortalProjectId,
   resolvePortalProjectCandidates,
 } from '../platform/portal-project-selection';
+import { listenMembers } from '../lib/firestore-service';
 
 export interface PortalUser {
   id: string;
@@ -421,6 +423,7 @@ interface PortalState {
   isLoading: boolean;
   portalUser: PortalUser | null;
   activeProjectId: string;
+  members: OrgMember[];
   projects: Project[];
   ledgers: Ledger[];
   myProject: Project | null;
@@ -635,6 +638,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   const [expenseSets, setExpenseSets] = useState<ExpenseSet[]>(EXPENSE_SETS);
   const [changeRequests, setChangeRequests] = useState<ChangeRequest[]>(CHANGE_REQUESTS);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [members, setMembers] = useState<OrgMember[]>([]);
   const [ledgers, setLedgers] = useState<Ledger[]>([]);
   const [participationEntries, setParticipationEntries] = useState<ParticipationEntry[]>(PARTICIPATION_ENTRIES);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -729,6 +733,14 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   }, [activeProjectId, projects]);
   const currentProjectId = activeProjectId;
   const { allowRealtimeListeners: livePortalMode } = useFirestoreAccessPolicy(portalUser?.role || authUser?.role);
+
+  useEffect(() => {
+    if (!firestoreEnabled || !db || !isAuthenticated || !authUser) {
+      setMembers([]);
+      return;
+    }
+    return listenMembers(db, orgId, setMembers);
+  }, [authUser?.uid, db, firestoreEnabled, isAuthenticated, orgId]);
 
   useEffect(() => {
     const uid = authUser?.uid;
@@ -3291,6 +3303,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     isLoading: projectCatalogLoading || projectScopeLoading || isMemberLoading,
     portalUser,
     activeProjectId,
+    members,
     projects,
     ledgers,
     myProject,
