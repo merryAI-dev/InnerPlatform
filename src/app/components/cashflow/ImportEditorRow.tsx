@@ -380,13 +380,13 @@ function ImportEditorRow({
       return { label: '검토 필요', className: 'border-rose-200 bg-rose-50 text-rose-700' };
     }
     if (isReviewPending) {
-      return { label: '사람 확인', className: 'border-amber-200 bg-amber-50 text-amber-700' };
+      return { label: '검토 루프', className: 'border-[#26415f]/25 bg-[#26415f]/5 text-[#26415f]' };
     }
     if (isReviewConfirmed) {
-      return { label: '확인 완료', className: 'border-emerald-200 bg-emerald-50 text-emerald-700' };
+      return { label: '확인 완료', className: 'border-slate-200 bg-slate-50 text-slate-700' };
     }
     if ((row.userEditedCells?.size || 0) > 0) {
-      return { label: '수정됨', className: 'border-teal-200 bg-teal-50 text-teal-700' };
+      return { label: '수정됨', className: 'border-slate-200 bg-white text-slate-700' };
     }
     if (hasMissingCell) {
       return { label: '미입력', className: 'border-orange-200 bg-orange-50 text-orange-700' };
@@ -429,8 +429,8 @@ function ImportEditorRow({
     }
     if (row.reviewRequiredCellIndexes?.includes(colIdx)) {
       return isReviewConfirmed
-        ? { label: '확인', className: 'bg-emerald-100 text-emerald-700' }
-        : { label: '검토', className: 'bg-amber-100 text-amber-700' };
+        ? { label: '확인', className: 'bg-slate-100 text-slate-700' }
+        : { label: '검토', className: 'bg-[#26415f]/10 text-[#26415f]' };
     }
     const cellValue = String(row.cells[colIdx] || '').trim();
     if (
@@ -582,7 +582,7 @@ function ImportEditorRow({
                     }}
                   >
                     <Check className="h-3.5 w-3.5" />
-                    {isReviewConfirmed ? '사람 확인 해제' : '사람 확인 완료'}
+                    {isReviewConfirmed ? '검토 완료 해제' : '검토 완료'}
                   </DropdownMenuItem>
                 </>
               )}
@@ -592,7 +592,7 @@ function ImportEditorRow({
         {(hasError || hasMissingCell || isReviewPending) && (
           <span
             className={`absolute right-1 top-1 h-1 w-1 rounded-full ${
-              hasError || hasMissingCell ? 'bg-rose-500' : 'bg-amber-500'
+              hasError || hasMissingCell ? 'bg-rose-500' : 'bg-[#26415f]'
             }`}
             title={hasError ? (row.error || '행 오류') : hasMissingCell ? '미입력 셀 있음' : reviewHintLabel}
           />

@@ -1255,7 +1255,7 @@ export function CashflowProjectSheet({
               {closeDialog?.kind === 'prerequisite'
                 ? '내 제출현황에서 Projection 업데이트와 사업비 입력을 체크해주세요.'
                 : closeDialog?.kind === 'warning'
-                  ? '사업비 입력은 저장되었지만 일부 주차는 사람 확인 또는 동기화 확인이 더 필요합니다. 그래도 결산은 진행할 수 있습니다.'
+                  ? '사업비 입력은 저장되었지만 일부 주차는 검토 루프 또는 동기화 확인이 더 필요합니다. 그래도 결산은 진행할 수 있습니다.'
                 : 'Projection 업데이트와 사업비 입력 체크가 완료된 주차입니다. 결산완료 후에도 Projection은 계속 수정할 수 있습니다.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
