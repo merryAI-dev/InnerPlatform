@@ -161,7 +161,6 @@ function matchesPathPrefix(pathname: string, prefix: string): boolean {
 
 const PORTAL_STANDALONE_ENTRY_PATHS = [
   '/portal/onboarding',
-  '/portal/project-settings',
   '/portal/project-select',
   '/portal/register-project',
   '/portal/weekly-expenses',

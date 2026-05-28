@@ -701,12 +701,8 @@ export function PortalProvider({ children }: { children: ReactNode }) {
 
   const candidateProjectsSource = useMemo(() => {
     if (!isDevHarnessUser || projects.length > 0) return projects;
-    if (authUser?.role === 'admin' || authUser?.role === 'finance') {
-      return PROJECTS;
-    }
-    const assignedIds = new Set(assignedProjectIds);
-    return PROJECTS.filter((project) => assignedIds.has(project.id));
-  }, [assignedProjectIdsKey, authUser?.role, isDevHarnessUser, projects]);
+    return PROJECTS;
+  }, [isDevHarnessUser, projects]);
 
   const portalProjectCandidates = useMemo(() => resolvePortalProjectCandidates({
     role: authUser?.role || portalUser?.role,

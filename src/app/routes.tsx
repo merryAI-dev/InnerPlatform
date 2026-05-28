@@ -69,12 +69,6 @@ const PortalWeeklyExpensePage = lazy(() => loadLazyRouteModule(
   RouteChunkFallback,
   '[routes] failed to load PortalWeeklyExpensePage:',
 ));
-const PortalProjectSettings = lazy(() => loadLazyRouteModule(
-  () => import('./components/portal/PortalProjectSettings'),
-  'PortalProjectSettings',
-  RouteChunkFallback,
-  '[routes] failed to load PortalProjectSettings:',
-));
 const PortalBankStatementPage = lazy(() => import('./components/portal/PortalBankStatementPage').then(m => ({ default: m.PortalBankStatementPage })));
 const GuideChatPage = lazy(() => import('./components/guide-chat/GuideChatPage').then(m => ({ default: m.GuideChatPage })));
 const BusinessCardLabPage = lazy(() => import('./components/business-cards/BusinessCardLabPage').then(m => ({ default: m.BusinessCardLabPage })));
@@ -177,7 +171,7 @@ export const router = createBrowserRouter([
       },
       { path: 'onboarding', element: <S C={PortalOnboarding} /> },
       { path: 'project-select', element: <S C={PortalProjectSelectPage} /> },
-      { path: 'project-settings', element: <S C={PortalProjectSettings} /> },
+      { path: 'project-settings', element: <S C={PortalProjectSelectPage} /> },
       { path: 'submissions', element: <S C={PortalProjectSelectPage} /> },
       { path: 'payroll', element: <S C={PortalPayrollPage} /> },
       { path: 'cashflow', element: <S C={PortalCashflowPage} /> },

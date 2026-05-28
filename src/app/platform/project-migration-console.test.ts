@@ -156,6 +156,45 @@ describe('project-migration-console', () => {
     expect(filtered[0].project.id).toBe('p-2');
   });
 
+  it('searches project title, requester fields, and raw request payload values', () => {
+    const records = buildMigrationAuditConsoleRecords(
+      [
+        makeProject({ id: 'p-cts', name: '일반 프로젝트', cic: 'CIC-A' }),
+        makeProject({ id: 'p-other', name: '에코스타트업', cic: 'CIC-A' }),
+      ],
+      [
+        makeRequest({
+          id: 'pr-cts',
+          approvedProjectId: 'p-cts',
+          requestedByName: '김현지(데이지)',
+          payload: {
+            ...makeRequest().payload,
+            name: '2026 CTS2',
+            officialContractName: '2023-2026 창업투자 전문기관 CTS 참여기업 역량 강화 용역',
+            clientOrg: 'KOICA',
+            note: '등록 원문에만 남은 검색 단서',
+          },
+        }),
+      ],
+    );
+
+    expect(filterMigrationAuditConsoleRecords(records, {
+      cic: 'ALL',
+      status: 'ALL',
+      searchQuery: 'cts',
+    }).map((record) => record.id)).toEqual(['p-cts']);
+    expect(filterMigrationAuditConsoleRecords(records, {
+      cic: 'CIC-A',
+      status: 'APPROVED',
+      searchQuery: '검색 단서',
+    }).map((record) => record.id)).toEqual(['p-cts']);
+    expect(filterMigrationAuditConsoleRecords(records, {
+      cic: 'ALL',
+      status: 'ALL',
+      searchQuery: '데이지',
+    }).map((record) => record.id)).toEqual(['p-cts']);
+  });
+
   it('uses the latest project request when multiple requests point to the same project', () => {
     const records = buildMigrationAuditConsoleRecords(
       [makeProject({ id: 'p-1' })],

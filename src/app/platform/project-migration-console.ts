@@ -76,6 +76,46 @@ export function isMigrationAuditPmRegistration(record: MigrationAuditConsoleReco
   return !!record.request || record.project.registrationSource === 'pm_portal';
 }
 
+function collectSearchValues(value: unknown, output: string[]) {
+  if (value == null) return;
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    const text = String(value).trim();
+    if (text) output.push(text);
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectSearchValues(item, output));
+    return;
+  }
+  if (typeof value === 'object') {
+    Object.values(value as Record<string, unknown>).forEach((item) => collectSearchValues(item, output));
+  }
+}
+
+function buildMigrationAuditSearchText(record: MigrationAuditConsoleRecord): string {
+  const values: string[] = [
+    record.title,
+    record.clientOrg,
+    record.managerName,
+    record.cic,
+    record.project.name,
+    record.project.officialContractName,
+    record.project.clientOrg,
+    record.project.managerName,
+    record.project.registeredByName,
+    record.request?.requestedByName,
+    record.request?.requestedByEmail,
+    record.request?.payload?.name,
+    record.request?.payload?.officialContractName,
+    record.request?.payload?.clientOrg,
+    record.request?.payload?.managerName,
+    record.request?.payload?.teamName,
+  ].map((value) => normalizeText(value)).filter(Boolean);
+
+  collectSearchValues(record.request?.payload, values);
+  return values.join(' ').toLowerCase();
+}
+
 export function buildMigrationAuditConsoleRecords(
   projects: Project[],
   requests: ProjectRequest[],
@@ -110,11 +150,14 @@ export function filterMigrationAuditConsoleRecords(
   options: {
     cic: string;
     status: 'ALL' | MigrationAuditConsoleStatus;
+    searchQuery?: string;
   },
 ): MigrationAuditConsoleRecord[] {
+  const normalizedQuery = normalizeText(options.searchQuery).toLowerCase();
   return records.filter((record) => {
     if (options.cic !== 'ALL' && record.cic !== options.cic) return false;
     if (options.status !== 'ALL' && record.status !== options.status) return false;
+    if (normalizedQuery && !buildMigrationAuditSearchText(record).includes(normalizedQuery)) return false;
     return true;
   });
 }

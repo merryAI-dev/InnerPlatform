@@ -377,18 +377,6 @@ const PM_COMMAND_DEFINITIONS: AdminCommandItem[] = [
     keywords: ['통장', '통장내역', '은행', '엑셀', '업로드', '입출금', '거래내역', 'bank', 'statement', '계좌'],
   },
   {
-    id: 'pm:project-settings',
-    label: 'PM 프로젝트 배정 수정',
-    description: '담당 프로젝트 선택과 배정 상태를 조정합니다.',
-    category: 'PM',
-    scope: 'pm',
-    to: '/portal/project-settings',
-    icon: 'settings',
-    kind: 'page',
-    priority: 98,
-    keywords: ['프로젝트 배정', '사업 배정', '담당 프로젝트', '담당 사업', '프로젝트 선택', '사업 선택', '배정 수정', '내 프로젝트'],
-  },
-  {
     id: 'pm:project-edit',
     label: 'PM 프로젝트 수정',
     description: '등록된 프로젝트 정보를 수정 제출합니다.',

@@ -1,5 +1,6 @@
 import { Badge } from '../../ui/badge';
 import { Card, CardContent } from '../../ui/card';
+import { Input } from '../../ui/input';
 import {
   Select,
   SelectContent,
@@ -18,6 +19,8 @@ interface MigrationAuditControlBarProps {
   onCicFilterChange: (value: string) => void;
   statusFilter: 'ALL' | MigrationAuditConsoleStatus;
   onStatusFilterChange: (value: 'ALL' | MigrationAuditConsoleStatus) => void;
+  searchQuery: string;
+  onSearchQueryChange: (value: string) => void;
   summary: MigrationAuditConsoleSummary;
 }
 
@@ -27,6 +30,8 @@ export function MigrationAuditControlBar({
   onCicFilterChange,
   statusFilter,
   onStatusFilterChange,
+  searchQuery,
+  onSearchQueryChange,
   summary,
 }: MigrationAuditControlBarProps) {
   return (
@@ -61,7 +66,7 @@ export function MigrationAuditControlBar({
           </div>
         </div>
 
-        <div className="grid gap-4 xl:grid-cols-[minmax(280px,360px)_minmax(280px,360px)]">
+        <div className="grid gap-4 xl:grid-cols-[minmax(220px,300px)_minmax(220px,300px)_minmax(320px,1fr)]">
           <div className="space-y-1.5">
             <p className="text-[12px] font-semibold text-slate-600">CIC 필터</p>
             <Select value={cicFilter} onValueChange={onCicFilterChange}>
@@ -91,6 +96,18 @@ export function MigrationAuditControlBar({
                 <SelectItem value="DUPLICATE_DISCARDED">중복·폐기</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+
+          <div className="space-y-1.5">
+            <p className="text-[12px] font-semibold text-slate-600">프로젝트 검색</p>
+            <Input
+              id="migration-review-project-search"
+              name="migrationReviewProjectSearch"
+              value={searchQuery}
+              onChange={(event) => onSearchQueryChange(event.target.value)}
+              placeholder="프로젝트명, 등록 원문, 계약 대상, PM 검색"
+              className="h-14 rounded-2xl border-2 border-slate-300 bg-white px-4 text-[15px] font-medium shadow-sm"
+            />
           </div>
         </div>
       </CardContent>
