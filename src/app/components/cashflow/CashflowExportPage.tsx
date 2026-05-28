@@ -217,7 +217,7 @@ export function CashflowExportPage() {
 
   async function handleDownload() {
     if (!canExport) {
-      toast.error('캐시플로 추출 권한이 없습니다.');
+      toast.error('경영기획실 페이지 접근 권한이 없습니다.');
       return;
     }
     if (projectInputs.length === 0 || yearMonths.length === 0) {
@@ -286,8 +286,8 @@ export function CashflowExportPage() {
         <Card>
         <CardContent className="p-8 text-center space-y-2">
           <FileSpreadsheet className="w-8 h-8 mx-auto text-muted-foreground/40" />
-          <p className="text-[13px] font-semibold text-zinc-950">캐시플로 내보내기 권한이 없습니다.</p>
-          <p className="text-[12px] text-stone-600">이 보조 도구는 관리자와 경영기획실 담당자만 사용할 수 있습니다.</p>
+          <p className="text-[13px] font-semibold text-zinc-950">경영기획실 페이지 접근 권한이 없습니다.</p>
+          <p className="text-[12px] text-stone-600">관리자와 경영기획실 담당자만 주간 상태 정리와 엑셀 다운로드를 사용할 수 있습니다.</p>
         </CardContent>
       </Card>
     );
@@ -298,8 +298,8 @@ export function CashflowExportPage() {
       <PageHeader
         icon={BarChart3}
         iconGradient="linear-gradient(135deg, #fafaf9 0%, #f5f5f4 100%)"
-        title="캐시플로 내보내기"
-        description="모니터링 허브에서 상태를 확인한 뒤 필요한 범위를 엑셀로 추출합니다."
+        title="경영기획실 페이지"
+        description="주간 캐시플로 상태를 정리하고 필요한 범위만 엑셀로 다운로드합니다."
         badge={scope === 'single' ? '사업별 추출' : '전체 추출'}
         badgeVariant="outline"
         actions={(
