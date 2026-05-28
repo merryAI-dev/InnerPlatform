@@ -250,6 +250,10 @@ export function ImportEditor({
     () => countConfirmedImportRowReviews(meaningfulRows),
     [meaningfulRows],
   );
+  const cellCommentCount = useMemo(
+    () => comments.filter((comment) => comment.transactionId && comment.fieldKey).length,
+    [comments],
+  );
   const noIdx = useMemo(
     () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === 'No.'),
     [],
@@ -1578,13 +1582,18 @@ export function ImportEditor({
                 <Badge variant="secondary" className="text-[10px] text-red-600">{missingCount}건 미입력</Badge>
               )}
               {reviewRequiredRowCount > 0 && (
-                <Badge variant="outline" className="text-[10px] border-amber-200 bg-amber-50 text-amber-700">
-                  사람 확인 {reviewRequiredRowCount}건
+                <Badge variant="outline" className="border-[#26415f]/25 bg-[#26415f]/5 text-[10px] text-[#26415f]">
+                  검토 루프 {reviewRequiredRowCount}건
                 </Badge>
               )}
               {reviewConfirmedRowCount > 0 && (
-                <Badge variant="outline" className="text-[10px] border-emerald-200 bg-emerald-50 text-emerald-700">
+                <Badge variant="outline" className="border-slate-200 bg-slate-50 text-[10px] text-slate-700">
                   확인 완료 {reviewConfirmedRowCount}건
+                </Badge>
+              )}
+              {cellCommentCount > 0 && (
+                <Badge variant="outline" className="border-slate-200 bg-slate-50 text-[10px] text-slate-700">
+                  셀 주석 {cellCommentCount}건
                 </Badge>
               )}
             </div>
@@ -1789,9 +1798,9 @@ export function ImportEditor({
         <div className="rounded-lg border bg-slate-50/70 px-3 py-2 text-[10px] text-muted-foreground">
           <div className="flex flex-wrap items-center gap-2">
             <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-slate-700">원본: 통장내역 또는 기존 저장값</span>
-            <span className="inline-flex rounded-full bg-teal-100 px-2 py-0.5 text-teal-700">수정: 사용자가 직접 덮어쓴 값</span>
+            <span className="inline-flex rounded-full bg-white px-2 py-0.5 text-slate-700 ring-1 ring-inset ring-slate-200">수정: 사용자가 직접 덮어쓴 값</span>
             <span className="inline-flex rounded-full bg-slate-200 px-2 py-0.5 text-slate-700">계산: 정책에 따라 자동 계산되고 잠긴 값</span>
-            <span className="inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-amber-700">검토/확인: 수식 후보값 확인 필요</span>
+            <span className="inline-flex rounded-full bg-[#26415f]/10 px-2 py-0.5 text-[#26415f]">검토 루프: 후보값 또는 주석 확인 필요</span>
           </div>
         </div>
         {/* Scrollable table */}
