@@ -3,8 +3,6 @@ import { useNavigate } from 'react-router';
 import {
   Activity,
   ArrowRight,
-  ArrowLeftRight,
-  BarChart3,
   CalendarRange,
   FileSpreadsheet,
   ShieldAlert,
@@ -16,7 +14,6 @@ import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { useAppStore } from '../../data/store';
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
-import { shouldShowShellRoute, useShellLabEnabled } from '../../platform/shell-lab-visibility';
 
 type MonitorLinkCardProps = {
   title: string;
@@ -25,6 +22,7 @@ type MonitorLinkCardProps = {
   badge: string;
   icon: ComponentType<{ className?: string }>;
   toneClass: string;
+  isPrimary?: boolean;
 };
 
 type MonitorStatCardProps = {
@@ -37,7 +35,7 @@ type MonitorStatCardProps = {
 
 function MonitorStatCard({ label, value, hint, toneClass, icon: Icon }: MonitorStatCardProps) {
   return (
-    <Card className={`shadow-sm ${toneClass}`}>
+    <Card className={`border shadow-sm ${toneClass}`}>
       <CardContent className="p-4">
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -54,7 +52,7 @@ function MonitorStatCard({ label, value, hint, toneClass, icon: Icon }: MonitorS
   );
 }
 
-function MonitorLinkCard({ title, description, href, badge, icon: Icon, toneClass }: MonitorLinkCardProps) {
+function MonitorLinkCard({ title, description, href, badge, icon: Icon, toneClass, isPrimary = false }: MonitorLinkCardProps) {
   const navigate = useNavigate();
 
   return (
@@ -67,8 +65,8 @@ function MonitorLinkCard({ title, description, href, badge, icon: Icon, toneClas
                 <Icon className="h-4 w-4 text-slate-700" />
               </div>
               <div>
-                <p className="text-[13px]" style={{ fontWeight: 800, letterSpacing: '-0.01em' }}>{title}</p>
-                <Badge className="mt-1 border border-white/70 bg-white/80 text-[10px] text-slate-700">{badge}</Badge>
+                <p className={isPrimary ? 'text-[15px]' : 'text-[13px]'} style={{ fontWeight: 800 }}>{title}</p>
+                <Badge className="mt-1 border border-slate-200 bg-white text-[10px] text-slate-700">{badge}</Badge>
               </div>
             </div>
             <p className="max-w-[32rem] text-[12px] text-slate-700">{description}</p>
@@ -89,10 +87,8 @@ function MonitorLinkCard({ title, description, href, badge, icon: Icon, toneClas
 }
 
 export function CashflowMonitorPage() {
-  const navigate = useNavigate();
   const { projects } = useAppStore();
   const { weeks, yearMonth, isLoading } = useCashflowWeeks();
-  const [labEnabled] = useShellLabEnabled();
 
   const currentMonthWeeks = useMemo(
     () => weeks.filter((week) => week.yearMonth === yearMonth),
@@ -114,45 +110,55 @@ export function CashflowMonitorPage() {
     () => currentMonthWeeks.filter((week) => week.adminClosed).length,
     [currentMonthWeeks],
   );
-  const monitoringLinks = useMemo<MonitorLinkCardProps[]>(
+  const primaryLinks = useMemo<MonitorLinkCardProps[]>(
     () => [
       {
         title: '주간 모니터링',
-        description: '프로젝트별 주차 상태, 편차, 결산 흐름을 확인합니다.',
+        description: '프로젝트별 주차 상태, PM 작성 여부, 결산 흐름을 먼저 확인합니다.',
         href: '/cashflow/weekly',
-        badge: '운영',
+        badge: '우선 확인',
         icon: Activity,
-        toneClass: 'border-teal-200 bg-teal-50/80',
+        toneClass: 'border-slate-300 bg-white',
+        isPrimary: true,
       },
       {
-        title: '분석 대시보드',
-        description: '입출금 추이와 항목별 분포를 빠르게 훑어봅니다.',
-        href: '/cashflow/analytics',
-        badge: '추세',
-        icon: BarChart3,
-        toneClass: 'border-cyan-200 bg-cyan-50/80',
+        title: '경영기획실 페이지',
+        description: `현재 ${yearMonth} 기준 주간 상태를 워크북으로 확인하고 필요한 범위만 내보냅니다.`,
+        href: '/cashflow/export',
+        badge: '정리/내보내기',
+        icon: FileSpreadsheet,
+        toneClass: 'border-slate-200 bg-slate-50',
       },
-      {
-        title: '은행 대조',
-        description: '은행 CSV와 시스템 거래를 맞춰 미매칭을 찾아냅니다.',
-        href: '/bank-reconciliation',
-        badge: '대조',
-        icon: ArrowLeftRight,
-        toneClass: 'border-amber-200 bg-amber-50/80',
-      },
-    ].filter((card) => shouldShowShellRoute(card.href, 'admin', 'card', { labEnabled })),
-    [labEnabled],
+    ],
+    [yearMonth],
   );
 
   return (
     <div className="space-y-5">
       <PageHeader
         icon={ShieldAlert}
-        iconGradient="linear-gradient(135deg, #0f766e 0%, #14b8a6 100%)"
+        iconGradient="linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)"
         title="캐시플로 모니터링 허브"
-        description="먼저 상태를 보고, 필요할 때만 내보내기 도구로 이동합니다."
+        description="주간 작성 상태를 먼저 확인하고, 경영기획실 정리 화면으로 필요한 내보내기만 진행합니다."
         badge="관리자 모니터링"
       />
+
+      <section className="space-y-3">
+        <div className="flex items-end justify-between gap-3">
+          <div>
+            <p className="text-[12px] font-semibold text-zinc-950">현재 {yearMonth}</p>
+            <p className="text-[11px] text-muted-foreground">상태 확인과 경영기획실 정리 화면만 상단에 둡니다.</p>
+          </div>
+          <Badge className="border border-slate-200 bg-white text-[10px] text-slate-700">
+            주간 기준
+          </Badge>
+        </div>
+        <div className="grid gap-3 lg:grid-cols-[1.4fr_1fr]">
+          {primaryLinks.map((card) => (
+            <MonitorLinkCard key={card.href} {...card} />
+          ))}
+        </div>
+      </section>
 
       <div className="grid gap-3 md:grid-cols-4">
         <MonitorStatCard
@@ -166,74 +172,24 @@ export function CashflowMonitorPage() {
           label="이번 달 주차"
           value={`${currentMonthWeeks.length}개`}
           hint={`${yearMonth} 기준`}
-          toneClass="border-teal-200 bg-teal-50/70"
+          toneClass="border-slate-200 bg-white"
           icon={CalendarRange}
         />
         <MonitorStatCard
           label="작성 대기"
           value={`${unsubmittedCount}개`}
           hint="PM 미작성 주차"
-          toneClass="border-amber-200 bg-amber-50/70"
+          toneClass="border-slate-200 bg-white"
           icon={FileSpreadsheet}
         />
         <MonitorStatCard
           label="결산 완료"
           value={`${closedCount}개`}
           hint={`결산 대기 ${pendingCloseCount}개`}
-          toneClass="border-cyan-200 bg-cyan-50/70"
+          toneClass="border-slate-200 bg-white"
           icon={TrendingUp}
         />
       </div>
-
-      <section className="space-y-3">
-        <div className="flex items-end justify-between gap-3">
-          <div>
-            <p className="text-[12px] font-semibold text-zinc-950">실시간 모니터링</p>
-            <p className="text-[11px] text-muted-foreground">주간 상태와 대조를 먼저 확인합니다.</p>
-          </div>
-          <Badge className="border border-teal-200 bg-teal-50 text-[10px] text-teal-700">
-            현재 {yearMonth}
-          </Badge>
-        </div>
-        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-          {monitoringLinks.map((card) => (
-            <MonitorLinkCard key={card.href} {...card} />
-          ))}
-        </div>
-      </section>
-
-      <section className="space-y-3">
-        <div>
-          <p className="text-[12px] font-semibold text-zinc-950">보조 도구</p>
-          <p className="text-[11px] text-muted-foreground">모니터링 뒤 필요한 범위만 내보냅니다.</p>
-        </div>
-        <MonitorLinkCard
-          title="엑셀 내보내기"
-          description={`현재 ${yearMonth} 기준 상태를 워크북으로 추출합니다. 모니터링 허브에서 분리된 보조 도구입니다.`}
-          href="/cashflow/export"
-          badge="내보내기"
-          icon={FileSpreadsheet}
-          toneClass="border-stone-200 bg-stone-50/90"
-        />
-      </section>
-
-      <Card className="border-slate-200 bg-white shadow-sm">
-        <CardContent className="flex flex-col gap-3 px-5 py-4 text-[12px] text-slate-700 sm:flex-row sm:items-center sm:justify-between">
-          <div className="space-y-1">
-            <p className="font-semibold text-slate-950">상태 우선, 추출은 다음 단계</p>
-            <p>먼저 주간 상태와 대조 결과를 확인하고, 그 뒤에만 내보내기 화면으로 이동하세요.</p>
-          </div>
-          <Button
-            type="button"
-            variant="outline"
-            className="h-9 gap-1.5 text-[12px]"
-            onClick={() => navigate('/cashflow/export')}
-          >
-            엑셀 내보내기 열기
-            <ArrowRight className="h-4 w-4" />
-          </Button>
-        </CardContent>
-      </Card>
 
       {isLoading && (
         <p className="text-[11px] text-muted-foreground">모니터링 상태를 불러오는 중...</p>

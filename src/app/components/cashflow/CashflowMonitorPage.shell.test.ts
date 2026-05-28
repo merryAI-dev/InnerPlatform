@@ -8,21 +8,21 @@ const cashflowMonitorSource = readFileSync(
 );
 
 describe('CashflowMonitorPage shell contract', () => {
-  it('frames cashflow as a monitoring hub with export as a subtool', () => {
+  it('prioritizes weekly monitoring and the planning office page', () => {
     expect(cashflowMonitorSource).toContain('캐시플로 모니터링 허브');
     expect(cashflowMonitorSource).toContain('/cashflow/weekly');
-    expect(cashflowMonitorSource).toContain('/cashflow/analytics');
     expect(cashflowMonitorSource).toContain('/cashflow/export');
     expect(cashflowMonitorSource).toContain('주간 모니터링');
-    expect(cashflowMonitorSource).toContain('분석 대시보드');
-    expect(cashflowMonitorSource).toContain('엑셀 내보내기');
+    expect(cashflowMonitorSource).toContain('경영기획실 페이지');
     expect(cashflowMonitorSource).not.toContain('CashflowExportPage');
   });
 
-  it('keeps LAB-only bank reconciliation out of the cashflow hub by default', () => {
-    expect(cashflowMonitorSource).toContain('useShellLabEnabled');
-    expect(cashflowMonitorSource).toContain('shouldShowShellRoute');
-    expect(cashflowMonitorSource).toContain('/bank-reconciliation');
-    expect(cashflowMonitorSource).toContain("'admin', 'card'");
+  it('hides unfinished analysis and reconciliation entry points', () => {
+    expect(cashflowMonitorSource).not.toContain('/cashflow/analytics');
+    expect(cashflowMonitorSource).not.toContain('분석 대시보드');
+    expect(cashflowMonitorSource).not.toContain('/bank-reconciliation');
+    expect(cashflowMonitorSource).not.toContain('은행 대조');
+    expect(cashflowMonitorSource).not.toContain('상태 우선, 추출은 다음 단계');
+    expect(cashflowMonitorSource).not.toContain('엑셀 내보내기 열기');
   });
 });
