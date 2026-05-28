@@ -9,7 +9,6 @@ export interface PortalProjectCandidateSet {
 const PORTAL_PATH_PREFIX = '/portal';
 const PORTAL_PROJECT_SELECT_PATH = '/portal/project-select';
 const PORTAL_PROJECT_SWITCH_FALLBACK_PATH = '/portal/budget';
-const ADMIN_PROJECT_ROLES = new Set<UserRole>(['admin', 'finance']);
 
 function normalizeRole(role: unknown): UserRole | null {
   const normalized = typeof role === 'string' ? role.trim().toLowerCase() : '';
@@ -56,24 +55,24 @@ export function resolvePortalProjectCandidates(input: {
   const role = normalizeRole(input.role);
   const projects = dedupeProjects(sortProjects(input.projects || []));
 
-  if (role && ADMIN_PROJECT_ROLES.has(role)) {
+  if (!role) {
     return {
-      priorityProjects: projects,
-      searchProjects: projects,
+      priorityProjects: [],
+      searchProjects: [],
     };
   }
 
   const assignedProjectIds = new Set(normalizeProjectIds(input.assignedProjectIds || []));
   const authUid = typeof input.authUid === 'string' ? input.authUid.trim() : '';
-  const allowedProjects = projects.filter((project) => (
+  const priorityProjects = projects.filter((project) => (
     assignedProjectIds.has(project.id)
     || (authUid && project.registeredById === authUid)
     || (authUid && !project.registeredById && project.managerId === authUid)
   ));
 
   return {
-    priorityProjects: allowedProjects,
-    searchProjects: allowedProjects,
+    priorityProjects,
+    searchProjects: projects,
   };
 }
 

@@ -8,7 +8,6 @@ import {
   CircleDollarSign,
   BarChart3,
   Loader2,
-  Settings2,
   FileSpreadsheet,
   Sparkles,
   ArrowRight,
@@ -97,7 +96,6 @@ const NAV_SECTIONS = [
   {
     title: '프로젝트 배정 및 등록',
     items: [
-      { to: '/portal/project-settings', icon: Settings2, label: '프로젝트 배정 수정', exact: true },
       { to: '/portal/edit-project', icon: Pencil, label: '프로젝트 수정' },
       { to: '/portal/register-project', icon: Plus, label: '프로젝트 등록 요청', accent: true },
       { to: '/portal/business-cards', icon: UserRoundCheck, label: '명함 DB' },
@@ -568,9 +566,9 @@ function PortalContent() {
                 size="sm"
                 variant="outline"
                 className="mt-2 h-6 text-[10px] w-full border-white/20 bg-white/8 text-slate-200 hover:bg-white/15"
-                onClick={() => requestPortalNavigation('/portal/project-settings', '프로젝트 배정 수정')}
+                onClick={() => requestPortalNavigation('/portal/project-select', '프로젝트 선택')}
               >
-                프로젝트 배정 수정
+                프로젝트 선택
               </Button>
             </div>
           )}
@@ -583,7 +581,7 @@ function PortalContent() {
                     variant="outline"
                     size="icon"
                     className="h-9 w-9 border-white/20 bg-white/8 text-slate-200 hover:bg-white/15"
-                    onClick={() => requestPortalNavigation('/portal/project-settings', '프로젝트 배정 수정')}
+                    onClick={() => requestPortalNavigation('/portal/project-select', '프로젝트 선택')}
                   >
                     <FolderKanban className="h-4 w-4" />
                   </Button>
@@ -591,7 +589,7 @@ function PortalContent() {
                 <TooltipContent side="right" className="text-[11px]">
                   <div className="space-y-1">
                     <p className="font-medium text-slate-900">{currentProjectName || '프로젝트 미선택'}</p>
-                    <p className="text-slate-500">프로젝트 배정 수정</p>
+                    <p className="text-slate-500">프로젝트 선택</p>
                   </div>
                 </TooltipContent>
               </Tooltip>

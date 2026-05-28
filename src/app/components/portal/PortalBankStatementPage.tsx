@@ -274,7 +274,7 @@ export function PortalBankStatementPage() {
               배정된 사업이 있어야 이번 주 원본 파일을 올리고, 주간 사업비 기준본으로 이어갈 수 있습니다.
             </p>
             <div className="flex flex-wrap gap-2">
-              <Button size="sm" onClick={() => navigate('/portal/project-settings')}>사업 연결 확인하기</Button>
+              <Button size="sm" onClick={() => navigate('/portal/project-select')}>사업 선택하기</Button>
               <Button variant="outline" size="sm" onClick={() => navigate('/portal/weekly-expenses')}>
                 주간 사업비 화면 보기
               </Button>

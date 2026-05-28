@@ -18,7 +18,6 @@ const TERMINOLOGY_SURFACES = [
   'components/portal/PortalProjectEdit.tsx',
   'components/portal/PortalProjectSelectPage.tsx',
   'components/portal/PortalOnboarding.tsx',
-  'components/portal/PortalProjectSettings.tsx',
   'components/portal/project-proposal.ts',
   'components/approval/AdminApprovalPage.tsx',
   'platform/project-request-review.ts',

@@ -17,6 +17,9 @@ describe('ProjectMigrationAuditPage shell contract', () => {
     expect(compositeSource).toContain('data-testid="migration-review-decision-footer"');
     expect(compositeSource).toContain('CIC 필터');
     expect(compositeSource).toContain('상태 필터');
+    expect(compositeSource).toContain('프로젝트 검색');
+    expect(compositeSource).toContain('프로젝트명, 등록 원문, 계약 대상, PM 검색');
+    expect(compositeSource).toContain('migration-review-project-search');
     expect(compositeSource).toContain('h-14');
     expect(compositeSource).toContain('border-2 border-slate-300');
     expect(compositeSource).toContain('승인');

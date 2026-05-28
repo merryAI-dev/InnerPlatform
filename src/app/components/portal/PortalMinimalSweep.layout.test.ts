@@ -10,7 +10,6 @@ const submissionsSource = readPortalSource('PortalSubmissionsPage.tsx');
 const bankStatementSource = readPortalSource('PortalBankStatementPage.tsx');
 const weeklyExpenseSource = readPortalSource('PortalWeeklyExpensePage.tsx');
 const cashflowSource = readPortalSource('PortalCashflowPage.tsx');
-const projectSettingsSource = readPortalSource('PortalProjectSettings.tsx');
 const projectEditSource = readPortalSource('PortalProjectEdit.tsx');
 const projectRegisterSource = readPortalSource('PortalProjectRegister.tsx');
 const projectEditorWizardSource = readFileSync(resolve(import.meta.dirname, '../projects/ProjectEditorWizard.tsx'), 'utf8');
@@ -63,11 +62,6 @@ describe('portal minimal sweep', () => {
   it('turns cashflow migration guidance into a compact action instead of a top explainer card', () => {
     expect(cashflowSource).not.toContain('기존 캐시플로 형식 그대로 migration 할 수 있습니다.');
     expect(cashflowSource).not.toContain('권장 형식: 첫 1~2열에 항목명');
-  });
-
-  it('reduces duplicate state banners from project settings', () => {
-    expect(projectSettingsSource).not.toContain('최근 사용한 사업');
-    expect(projectSettingsSource).not.toContain('최근 사용한 사업과 현재 주사업');
   });
 
   it('drops the redundant current-project subtitle from project edit', () => {

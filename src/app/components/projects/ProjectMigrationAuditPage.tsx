@@ -133,6 +133,7 @@ export function ProjectMigrationAuditPage({
   const [loadingRequests, setLoadingRequests] = useState(true);
   const [cicFilter, setCicFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState<'ALL' | MigrationAuditConsoleStatus>('ALL');
+  const [searchQuery, setSearchQuery] = useState('');
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
   const [actionMode, setActionMode] = useState<ReviewActionMode | null>(null);
   const [reviewComment, setReviewComment] = useState('');
@@ -211,8 +212,9 @@ export function ProjectMigrationAuditPage({
     () => filterMigrationAuditConsoleRecords(scopedRecords, {
       cic: cicFilter,
       status: statusFilter,
+      searchQuery,
     }),
-    [cicFilter, scopedRecords, statusFilter],
+    [cicFilter, scopedRecords, searchQuery, statusFilter],
   );
 
   const summary = useMemo(
@@ -373,6 +375,8 @@ export function ProjectMigrationAuditPage({
         onCicFilterChange={setCicFilter}
         statusFilter={statusFilter}
         onStatusFilterChange={setStatusFilter}
+        searchQuery={searchQuery}
+        onSearchQueryChange={setSearchQuery}
         summary={summary}
       />
 

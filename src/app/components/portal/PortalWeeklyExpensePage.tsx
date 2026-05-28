@@ -854,7 +854,7 @@ export function PortalWeeklyExpensePage() {
             사업 배정이 끝나면 이번 주 입력 탭, 통장내역, 증빙 흐름을 같은 기준으로 이어서 사용할 수 있습니다.
           </p>
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" onClick={() => navigate('/portal/project-settings')}>사업 연결 확인하기</Button>
+            <Button size="sm" onClick={() => navigate('/portal/project-select')}>사업 선택하기</Button>
             <Button variant="outline" size="sm" onClick={() => navigate('/portal/project-select')}>프로젝트 선택으로 이동</Button>
           </div>
         </div>
@@ -966,9 +966,9 @@ export function PortalWeeklyExpensePage() {
             <Button
               variant="outline"
               size="sm"
-            onClick={() => requestRouteNavigation('/portal/project-settings', '사업 배정 수정')}
+            onClick={() => requestRouteNavigation('/portal/project-select', '사업 선택')}
           >
-            설정 열기
+            사업 선택
           </Button>
           </div>
         </div>
@@ -994,7 +994,7 @@ export function PortalWeeklyExpensePage() {
                           {weeklySetupPanel.actionLabel}
                         </Button>
                       ) : weeklySetupPanel.actionKind === 'settings' ? (
-                        <Button size="sm" onClick={() => requestRouteNavigation('/portal/project-settings', '사업 배정 수정')}>
+                        <Button size="sm" onClick={() => requestRouteNavigation('/portal/project-select', '사업 선택')}>
                           {weeklySetupPanel.actionLabel}
                         </Button>
                       ) : (

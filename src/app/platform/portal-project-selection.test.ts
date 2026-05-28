@@ -26,7 +26,7 @@ const projects = [
 ] as unknown as Project[];
 
 describe('portal project selection helpers', () => {
-  it('resolves PM candidates from assigned and manager-owned projects and normalizes viewer to PM', () => {
+  it('lets PM portal users search the full project pool while keeping assigned projects prioritized', () => {
     const result = resolvePortalProjectCandidates({
       role: 'viewer',
       authUid: 'uid-pm',
@@ -35,10 +35,10 @@ describe('portal project selection helpers', () => {
     });
 
     expect(result.priorityProjects.map((project) => project.id)).toEqual(['p-assigned', 'p-managed']);
-    expect(result.searchProjects.map((project) => project.id)).toEqual(['p-assigned', 'p-managed']);
+    expect(result.searchProjects.map((project) => project.id)).toEqual(['p-assigned', 'p-managed', 'p-other']);
   });
 
-  it('prioritizes registeredById as PM portal owner over legacy managerId', () => {
+  it('does not hide projects with inconsistent owner metadata from PM search', () => {
     const result = resolvePortalProjectCandidates({
       role: 'pm',
       authUid: 'owner-1',
@@ -49,7 +49,8 @@ describe('portal project selection helpers', () => {
       ] as unknown as Project[],
     });
 
-    expect(result.searchProjects.map((project) => project.id)).toEqual(['p-owner']);
+    expect(result.priorityProjects.map((project) => project.id)).toEqual(['p-owner']);
+    expect(result.searchProjects.map((project) => project.id)).toEqual(['p-legacy', 'p-owner']);
   });
 
   it('lets admin and finance search the full project pool', () => {

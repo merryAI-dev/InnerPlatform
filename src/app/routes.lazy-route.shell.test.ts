@@ -5,12 +5,9 @@ import { describe, expect, it } from 'vitest';
 const routesSource = readFileSync(resolve(import.meta.dirname, 'routes.tsx'), 'utf8');
 
 describe('route lazy loading safety', () => {
-  it('loads PortalProjectSettings through the guarded lazy route helper', () => {
-    expect(routesSource).toContain('const PortalProjectSettings = lazy(() => loadLazyRouteModule(');
-    expect(routesSource).toContain("'[routes] failed to load PortalProjectSettings:'");
-    expect(routesSource).not.toContain(
-      "const PortalProjectSettings = lazy(() => import('./components/portal/PortalProjectSettings').then(m => ({ default: m.PortalProjectSettings })));",
-    );
+  it('keeps the retired portal project settings screen off the route table', () => {
+    expect(routesSource).not.toContain('const PortalProjectSettings = lazy(');
+    expect(routesSource).toContain("{ path: 'project-settings', element: <S C={PortalProjectSelectPage} /> }");
   });
 
   it('registers the mobile PWA entry route separately from the desktop root', () => {
