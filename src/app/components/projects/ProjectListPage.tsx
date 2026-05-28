@@ -19,7 +19,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { useAppStore } from '../../data/store';
 import {
   PROJECT_STATUS_LABELS, PROJECT_TYPE_LABELS, PROJECT_TYPE_SHORT_LABELS,
-  SETTLEMENT_TYPE_SHORT,
+  SETTLEMENT_TYPE_LABELS, SETTLEMENT_TYPE_SHORT, normalizeSettlementType,
   type ProjectStatus, type ProjectType, type Project,
 } from '../../data/types';
 import { PageHeader } from '../layout/PageHeader';
@@ -233,7 +233,7 @@ export function ProjectListPage() {
                     계약금액 <ArrowUpDown className="w-3 h-3" />
                   </span>
                 </TableHead>
-                <TableHead className="min-w-[35px] text-center">정산</TableHead>
+                <TableHead className="min-w-[80px] text-center">정산 유형</TableHead>
                 {activeTab === 'trash' && (
                   <>
                     <TableHead className="min-w-[90px]">삭제일</TableHead>
@@ -276,11 +276,12 @@ export function ProjectListPage() {
                     {p.contractAmount > 0 ? fmtFull(p.contractAmount) : '-'}
                   </TableCell>
                   <TableCell className="text-center text-sm">
-                    {p.isSettled ? (
-                      <span className="text-green-600">O</span>
-                    ) : (
-                      <span className="text-muted-foreground">X</span>
-                    )}
+                    <span
+                      className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-700"
+                      title={SETTLEMENT_TYPE_LABELS[normalizeSettlementType(p.settlementType)]}
+                    >
+                      {SETTLEMENT_TYPE_SHORT[normalizeSettlementType(p.settlementType)]}
+                    </span>
                   </TableCell>
                   {activeTab === 'trash' && (
                     <>

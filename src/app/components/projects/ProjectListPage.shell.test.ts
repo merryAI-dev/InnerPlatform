@@ -14,4 +14,11 @@ describe('ProjectListPage shell contract', () => {
     expect(source).toContain('승인 대기');
     expect(source).toContain('증빙 미제출');
   });
+
+  it('shows settlement type labels instead of O/X settlement flags', () => {
+    expect(source).toContain('정산 유형');
+    expect(source).toContain('normalizeSettlementType(p.settlementType)');
+    expect(source).toContain('SETTLEMENT_TYPE_SHORT[normalizeSettlementType(p.settlementType)]');
+    expect(source).not.toContain('p.isSettled ?');
+  });
 });

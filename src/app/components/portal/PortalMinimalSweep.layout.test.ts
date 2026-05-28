@@ -74,6 +74,12 @@ describe('portal minimal sweep', () => {
     expect(projectEditSource).not.toContain('현재 프로젝트:');
   });
 
+  it('allows PM project edit to change the project status through the shared editor', () => {
+    expect(projectEditorWizardSource).toContain("mode === 'admin' || mode === 'portal-edit'");
+    expect(projectEditorWizardSource).toContain('프로젝트 진행 상태');
+    expect(projectEditorWizardSource).toContain("update('status', value as ProjectStatus)");
+  });
+
   it('removes dash placeholders and review coaching from project register summaries', () => {
     expect(projectRegisterSource).not.toContain('제출 전 최종 확인');
     expect(projectRegisterSource).not.toContain("|| '-'");
