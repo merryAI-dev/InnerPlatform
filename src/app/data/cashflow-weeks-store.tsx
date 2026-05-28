@@ -257,6 +257,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
       now,
       weekStart: def.weekStart,
       existingProjection: existingData?.projection,
+      existingActual: existingData?.actual,
     });
 
     if (existingSnap?.exists()) {

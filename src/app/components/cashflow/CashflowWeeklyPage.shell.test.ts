@@ -17,6 +17,17 @@ describe('CashflowWeeklyPage status semantics', () => {
     expect(cashflowWeeklyPageSource).not.toContain('작성완료=PM 작성완료');
   });
 
+  it('reads stored in/out totals from cashflow week docs instead of recomputing NET in the monitor', () => {
+    expect(cashflowWeeklyPageSource).toContain('projectionTotals');
+    expect(cashflowWeeklyPageSource).toContain('totals: w.projectionTotals || emptyTotals()');
+    expect(cashflowWeeklyPageSource).toContain('입금 {fmtShort(totals.totalIn)}');
+    expect(cashflowWeeklyPageSource).toContain('출금 {fmtShort(totals.totalOut)}');
+    expect(cashflowWeeklyPageSource).not.toContain('chooseCashflowSheetForNet');
+    expect(cashflowWeeklyPageSource).not.toContain('computeCashflowTotals');
+    expect(cashflowWeeklyPageSource).not.toContain('NET {fmtShort');
+    expect(cashflowWeeklyPageSource).not.toContain('actualTotals');
+  });
+
   it('uses projection change alerts for 급변 warnings instead of projection-vs-actual variance', () => {
     expect(cashflowWeeklyPageSource).toContain('sheet?.projectionChangeAlert');
     expect(cashflowWeeklyPageSource).toContain('D-7 1천만↑');

@@ -1,5 +1,5 @@
 import cashflowPolicyData from '../../src/app/policies/cashflow-policy.json' with { type: 'json' };
-import { CASHFLOW_ALL_LINES, CASHFLOW_IN_LINES } from './cashflow-policy.mjs';
+import { CASHFLOW_ALL_LINES, CASHFLOW_IN_LINES, CASHFLOW_OUT_LINES } from './cashflow-policy.mjs';
 
 const SETTLEMENT_COLUMN_HEADERS = [
   '작성자',
@@ -282,6 +282,13 @@ function normalizeAmounts(amounts) {
   return normalized;
 }
 
+function computeCashflowTotals(amounts) {
+  const normalized = normalizeAmounts(amounts);
+  const totalIn = CASHFLOW_IN_LINES.reduce((sum, lineId) => sum + (Number(normalized[lineId]) || 0), 0);
+  const totalOut = CASHFLOW_OUT_LINES.reduce((sum, lineId) => sum + (Number(normalized[lineId]) || 0), 0);
+  return { totalIn, totalOut, net: totalIn - totalOut };
+}
+
 function parseDateOnlyUtc(value) {
   const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value || '').trim());
   if (!match) return null;
@@ -409,6 +416,10 @@ async function commitInChunks(db, mutations) {
 function buildWeekPatch({ tenantId, actorId, actorName, projectId, mode, week, amounts, now, existingData }) {
   const normalizedAmounts = normalizeAmounts(amounts);
   const existingModeAmounts = normalizeAmounts(existingData?.[mode] || {});
+  const nextModeAmounts = {
+    ...existingModeAmounts,
+    ...normalizedAmounts,
+  };
   const patch = {
     id: resolveWeekDocId(projectId, week.yearMonth, week.weekNo),
     tenantId,
@@ -422,24 +433,18 @@ function buildWeekPatch({ tenantId, actorId, actorName, projectId, mode, week, a
     updatedAt: now,
     updatedByUid: actorId,
     updatedByName: actorName,
+    [`${mode}Totals`]: computeCashflowTotals(nextModeAmounts),
   };
   if (Object.keys(normalizedAmounts).length > 0) {
-    patch[mode] = {
-      ...existingModeAmounts,
-      ...normalizedAmounts,
-    };
+    patch[mode] = nextModeAmounts;
     if (mode === 'projection') {
-      const nextProjection = {
-        ...existingModeAmounts,
-        ...normalizedAmounts,
-      };
       patch.projectionUpdated = true;
       patch.projectionUpdatedAt = now;
       patch.projectionUpdatedByUid = actorId;
       patch.projectionUpdatedByName = actorName;
       patch.projectionChangeAlert = buildProjectionChangeAlert({
         previousProjection: existingModeAmounts,
-        nextProjection,
+        nextProjection: nextModeAmounts,
         weekStart: week.weekStart,
         now,
         actorId,

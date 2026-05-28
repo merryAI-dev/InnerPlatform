@@ -1,5 +1,6 @@
 import type { CashflowSheetLineId, CashflowWeekSheet } from './types';
 import { buildProjectionChangeAlert, normalizeWeekAmounts, resolveWeekDocId } from './cashflow-weeks.persistence';
+import { computeCashflowTotals } from '../platform/cashflow-sheet';
 
 export function applyWeekAmountsToLocalWeeks(input: {
   weeks: CashflowWeekSheet[];
@@ -28,12 +29,17 @@ export function applyWeekAmountsToLocalWeeks(input: {
         ...normalizedAmounts,
       }
       : current.projection;
+    const nextModeAmounts = {
+      ...current[input.mode],
+      ...normalizedAmounts,
+    };
     next[existingIndex] = {
       ...current,
       [input.mode]: {
         ...current[input.mode],
         ...normalizedAmounts,
       },
+      [`${input.mode}Totals`]: computeCashflowTotals(nextModeAmounts),
       ...(input.mode === 'projection'
         ? {
           projectionUpdated: true,
@@ -69,6 +75,8 @@ export function applyWeekAmountsToLocalWeeks(input: {
       weekEnd: input.weekEnd,
       projection: input.mode === 'projection' ? normalizedAmounts : {},
       actual: input.mode === 'actual' ? normalizedAmounts : {},
+      projectionTotals: computeCashflowTotals(input.mode === 'projection' ? normalizedAmounts : {}),
+      actualTotals: computeCashflowTotals(input.mode === 'actual' ? normalizedAmounts : {}),
       ...(input.mode === 'projection'
         ? {
           projectionUpdated: true,
