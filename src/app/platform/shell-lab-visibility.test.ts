@@ -51,7 +51,6 @@ describe('shell LAB visibility', () => {
       '/hr-announcements',
       '/training',
       '/settings',
-      '/portal',
     ]);
 
     for (const route of ADMIN_LAB_ROUTES) {
