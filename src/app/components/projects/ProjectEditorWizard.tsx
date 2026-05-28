@@ -240,6 +240,10 @@ function isAdminMode(mode: ProjectEditorMode) {
   return mode === 'admin';
 }
 
+function canEditProjectStatus(mode: ProjectEditorMode) {
+  return mode === 'admin' || mode === 'portal-edit';
+}
+
 function createProjectEditorWizardDraft(overrides: Partial<ProjectEditorDraft> = {}): ProjectEditorDraft {
   const draft = createProjectEditorDraft(overrides);
   if (!Array.isArray(overrides.teamMembersDetailed)) {
@@ -742,8 +746,8 @@ export function ProjectEditorWizard({
         </div>
       </div>
 
-      {isAdminMode(mode) ? (
-        <div className="grid gap-4 lg:grid-cols-3">
+      {canEditProjectStatus(mode) ? (
+        <div className={`grid gap-4 ${isAdminMode(mode) ? 'lg:grid-cols-3' : 'lg:grid-cols-2'}`}>
           <div>
             <Label className="text-xs">프로젝트 진행 상태</Label>
             <Select value={draft.status} onValueChange={(value) => update('status', value as ProjectStatus)}>
@@ -755,18 +759,20 @@ export function ProjectEditorWizard({
               </SelectContent>
             </Select>
           </div>
-          <div>
-            <Label className="text-xs">프로젝트 구분</Label>
-            <Select value={draft.phase} onValueChange={(value) => update('phase', value as ProjectPhase)}>
-              <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {(Object.keys(PROJECT_PHASE_LABELS) as ProjectPhase[]).map((phase) => (
-                  <SelectItem key={phase} value={phase}>{PROJECT_PHASE_LABELS[phase]}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          {renderContractTypeSelect()}
+          {isAdminMode(mode) ? (
+            <div>
+              <Label className="text-xs">프로젝트 구분</Label>
+              <Select value={draft.phase} onValueChange={(value) => update('phase', value as ProjectPhase)}>
+                <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {(Object.keys(PROJECT_PHASE_LABELS) as ProjectPhase[]).map((phase) => (
+                    <SelectItem key={phase} value={phase}>{PROJECT_PHASE_LABELS[phase]}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : null}
+          {isAdminMode(mode) ? renderContractTypeSelect() : null}
         </div>
       ) : (
         <div className="grid gap-4 lg:grid-cols-3">
@@ -1152,10 +1158,10 @@ export function ProjectEditorWizard({
             <ReviewRow label="계약 대상" value={draft.clientOrg} />
             <ReviewRow label="그룹웨어 등록명" value={draft.groupwareName} />
             <ReviewRow label="프로젝트 목적" value={draft.projectPurpose} />
-            {isAdminMode(mode) ? (
+            {canEditProjectStatus(mode) ? (
               <>
                 <ReviewRow label="프로젝트 진행 상태" value={PROJECT_STATUS_LABELS[draft.status]} />
-                <ReviewRow label="프로젝트 구분" value={PROJECT_PHASE_LABELS[draft.phase]} />
+                {isAdminMode(mode) ? <ReviewRow label="프로젝트 구분" value={PROJECT_PHASE_LABELS[draft.phase]} /> : null}
               </>
             ) : null}
           </CardContent>
