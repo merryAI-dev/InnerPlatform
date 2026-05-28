@@ -16,6 +16,8 @@ describe('route lazy loading safety', () => {
     expect(routesSource).toContain('function MobileAwareAdminHome()');
     expect(routesSource).toContain('shouldUseBusinessCardMobileEntry');
     expect(routesSource).toContain('{ index: true, element: <MobileAwareAdminHome /> }');
+    expect(routesSource).toContain('? <S C={BusinessCardLabPage} />');
+    expect(routesSource).not.toContain('<Navigate to={BUSINESS_CARD_MOBILE_ENTRY_PATH} replace />');
   });
 
   it('keeps /portal on the project selection surface without a route-level redirect', () => {

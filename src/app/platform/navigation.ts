@@ -56,7 +56,7 @@ export function resolveHomePath(role: unknown, preferredWorkspace?: WorkspaceId 
   const normalized = normalizeRole(role);
   if (!normalized) return '/portal/project-select';
   if (isPortalRole(normalized)) return '/portal/project-select';
-  if (normalized === 'admin' && normalizeWorkspaceId(preferredWorkspace) === 'portal') {
+  if (isAdminSpaceRole(normalized) && normalizeWorkspaceId(preferredWorkspace) === 'portal') {
     return '/portal/project-select';
   }
   if (isAdminSpaceRole(normalized)) return '/';
@@ -124,7 +124,7 @@ export function resolveLoginSuccessPath(
   })) {
     return BUSINESS_CARD_MOBILE_ENTRY_PATH;
   }
-  if (!normalizedPath || normalizedPath === '/') return '/';
+  if (!normalizedPath || normalizedPath === '/') return resolveHomePath(role, preferredWorkspace);
   return resolvePortalEntryPath(role, preferredWorkspace, normalizedPath);
 }
 

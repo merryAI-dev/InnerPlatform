@@ -13,4 +13,10 @@ describe('SettingsPage member directory contract', () => {
     expect(source).toContain('Firebase UID');
     expect(source).toContain('이름, 이메일, UID 검색');
   });
+
+  it('keeps unauthorized settings access in place instead of redirecting home', () => {
+    expect(source).toContain('settingsAccessBlocked');
+    expect(source).toContain('설정 접근 권한이 없습니다');
+    expect(source).not.toContain('navigate(resolveHomePath(role, activeWorkspace), { replace: true })');
+  });
 });

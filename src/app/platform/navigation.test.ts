@@ -110,8 +110,9 @@ describe('resolveHomePath', () => {
     expect(resolveHomePath('admin', 'admin')).toBe('/');
   });
 
-  it('admin with portal preference goes to the explicit portal home', () => {
+  it('dual-space roles with portal preference go to the explicit portal home', () => {
     expect(resolveHomePath('admin', 'portal')).toBe('/portal/project-select');
+    expect(resolveHomePath('finance', 'portal')).toBe('/portal/project-select');
   });
 
   it('finance defaults to /', () => {
@@ -216,11 +217,17 @@ describe('resolvePortalEntryPath', () => {
 });
 
 describe('resolveLoginSuccessPath', () => {
-  it('uses the full-screen feature search as the default post-login entry for every role', () => {
+  it('uses the full-screen feature search as the default post-login entry for admin-space users', () => {
     expect(resolveLoginSuccessPath('admin', undefined)).toBe('/');
-    expect(resolveLoginSuccessPath('finance', 'portal')).toBe('/');
-    expect(resolveLoginSuccessPath('pm', undefined)).toBe('/');
-    expect(resolveLoginSuccessPath('viewer', undefined, '/')).toBe('/');
+    expect(resolveLoginSuccessPath('admin', 'admin')).toBe('/');
+    expect(resolveLoginSuccessPath('finance', undefined)).toBe('/');
+  });
+
+  it('does not force portal-context users back to the admin homepage after login or auth refresh', () => {
+    expect(resolveLoginSuccessPath('pm', undefined)).toBe('/portal/project-select');
+    expect(resolveLoginSuccessPath('viewer', undefined, '/')).toBe('/portal/project-select');
+    expect(resolveLoginSuccessPath('admin', 'portal')).toBe('/portal/project-select');
+    expect(resolveLoginSuccessPath('finance', 'portal')).toBe('/portal/project-select');
   });
 
   it('uses business cards as the mobile default post-login entry', () => {

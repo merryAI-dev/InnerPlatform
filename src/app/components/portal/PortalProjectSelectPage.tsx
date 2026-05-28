@@ -100,6 +100,13 @@ export function PortalProjectSelectPage() {
 
   const currentPath = `${location.pathname}${location.search}${location.hash}`;
   const redirectTarget = resolvePortalProjectSwitchPath('/portal/budget');
+  const blockedPortalAccess = Boolean(
+    !authLoading
+    && !portalLoading
+    && isAuthenticated
+    && authUser?.role
+    && !canEnterPortalWorkspace(authUser.role)
+  );
   const assignedProjectIds = useMemo(() => normalizeProjectIds([
     ...(Array.isArray(portalUser?.projectIds) ? portalUser.projectIds : []),
     portalUser?.projectId,
@@ -125,13 +132,8 @@ export function PortalProjectSelectPage() {
     if (authLoading || portalLoading) return;
     if (!isAuthenticated) {
       navigate('/login', { replace: true, state: { from: currentPath } });
-      return;
     }
-    if (!canEnterPortalWorkspace(authUser?.role)) {
-      navigate('/', { replace: true });
-      return;
-    }
-  }, [authLoading, authUser?.role, currentPath, isAuthenticated, navigate, portalLoading]);
+  }, [authLoading, currentPath, isAuthenticated, navigate, portalLoading]);
 
   const handleStart = async (projectId: string) => {
     setPendingProjectId(projectId);
@@ -145,6 +147,29 @@ export function PortalProjectSelectPage() {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50">
         <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) return null;
+
+  if (blockedPortalAccess) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
+        <Card className="w-full max-w-xl border-slate-200 bg-white shadow-sm">
+          <CardContent className="p-6">
+            <Badge variant="outline">접근 제한</Badge>
+            <h1 className="mt-4 text-lg font-semibold text-slate-950">프로젝트 선택 권한을 확인해 주세요</h1>
+            <p className="mt-2 text-sm text-slate-600">
+              권한 또는 작업 공간 상태를 확인해 주세요. 현재 URL은 유지했습니다.
+            </p>
+            {isAdminSpaceRole(authUser?.role) && (
+              <Button type="button" className="mt-5" onClick={() => navigate('/')}>
+                관리자 공간 열기
+              </Button>
+            )}
+          </CardContent>
+        </Card>
       </div>
     );
   }

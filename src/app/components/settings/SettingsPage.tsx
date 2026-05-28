@@ -24,7 +24,6 @@ import {
 import { DataMigrationTab } from './DataMigrationTab';
 import { PageHeader } from '../layout/PageHeader';
 import { useAuth } from '../../data/auth-store';
-import { resolveActiveWorkspacePreference, resolveHomePath } from '../../platform/navigation';
 
 const DISPLAY_ROLES = ['admin', 'finance', 'pm'] as const;
 type DisplayRole = typeof DISPLAY_ROLES[number];
@@ -45,7 +44,7 @@ const PERMISSION_LABELS: Partial<Record<PlatformPermission, string>> = {
 
 export function SettingsPage() {
   const { org, members, templates, upsertMember, removeMember } = useAppStore();
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, isLoading: authLoading, user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const searchParams = new URLSearchParams(location.search);
@@ -61,7 +60,7 @@ export function SettingsPage() {
     role: 'pm' as DisplayRole,
   });
   const currentPath = `${location.pathname}${location.search}${location.hash}`;
-  const activeWorkspace = resolveActiveWorkspacePreference(user?.lastWorkspace, user?.defaultWorkspace);
+  const settingsAccessBlocked = Boolean(isAuthenticated && user && user.role !== 'admin');
   const filteredMembers = useMemo(() => {
     const query = memberSearch.trim().toLowerCase();
     if (!query) return members;
@@ -117,24 +116,32 @@ export function SettingsPage() {
   };
 
   useEffect(() => {
+    if (authLoading) return;
     if (!isAuthenticated) {
       navigate('/login', { replace: true, state: { from: currentPath } });
-      return;
     }
+  }, [authLoading, currentPath, isAuthenticated, navigate]);
 
-    const role = user?.role;
-    if (!role) return;
-
-    // Keep operational settings (Firebase/feature toggles, member management) admin-scoped.
-    const allowed = role === 'admin';
-    if (!allowed) {
-      navigate(resolveHomePath(role, activeWorkspace), { replace: true });
-    }
-  }, [activeWorkspace, currentPath, isAuthenticated, navigate, user?.role]);
-
-  if (!isAuthenticated) return null;
+  if (authLoading || !isAuthenticated) return null;
   if (!user) return null;
-  if (user.role !== 'admin') return null;
+
+  if (settingsAccessBlocked) {
+    return (
+      <div className="space-y-5">
+        <PageHeader
+          icon={Shield}
+          iconGradient="linear-gradient(135deg, #001e46, #001e46)"
+          title="설정 접근 권한이 없습니다"
+          description="운영 설정은 관리자만 변경할 수 있습니다. 현재 URL은 유지했습니다."
+        />
+        <Card className="border-slate-200 bg-white">
+          <CardContent className="p-5 text-sm text-slate-600">
+            필요한 경우 관리자에게 권한 확인을 요청해 주세요.
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5">

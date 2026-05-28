@@ -41,4 +41,10 @@ describe('AppLayout root entry contract', () => {
     expect(source).toContain('<main className="min-h-dvh">');
     expect(source).toContain('<Outlet />');
   });
+
+  it('keeps permission or workspace loss in-place instead of redirecting home', () => {
+    expect(source).toContain('blockedAdminPath');
+    expect(source).not.toContain("navigate('/portal/project-select', { replace: true })");
+    expect(source).not.toContain('navigate(resolveHomePath(role, activeWorkspace), { replace: true })');
+  });
 });
