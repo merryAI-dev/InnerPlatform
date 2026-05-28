@@ -1,11 +1,11 @@
 import { lazy, Suspense, type ComponentType } from 'react';
-import { createBrowserRouter, Navigate } from 'react-router';
+import { createBrowserRouter } from 'react-router';
 import { AppLayout } from './components/layout/AppLayout';
 import { PortalLayout } from './components/portal/PortalLayout';
 import { AdminRouteProviders } from './data/admin-route-providers';
 import { PortalRouteProviders } from './data/portal-route-providers';
 import { loadLazyRouteModule } from './platform/lazy-route';
-import { BUSINESS_CARD_MOBILE_ENTRY_PATH, shouldUseBusinessCardMobileEntry } from './platform/mobile-entry';
+import { shouldUseBusinessCardMobileEntry } from './platform/mobile-entry';
 
 // Lazy-loaded pages — each becomes a separate chunk
 const LoginPage = lazy(() => import('./components/auth/LoginPage').then(m => ({ default: m.LoginPage })));
@@ -98,7 +98,7 @@ function MobileAwareAdminHome() {
   });
 
   return useBusinessCardEntry
-    ? <Navigate to={BUSINESS_CARD_MOBILE_ENTRY_PATH} replace />
+    ? <S C={BusinessCardLabPage} />
     : <S C={FeatureSearchPage} />;
 }
 

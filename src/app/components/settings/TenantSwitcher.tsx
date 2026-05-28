@@ -70,9 +70,8 @@ export function TenantSwitcher({ collapsed = false, userRole, userTenantId }: Te
     if (ok) {
       setOpen(false);
       setCustomInput('');
-      navigate('/', { replace: true });
     }
-  }, [orgId, setOrgId, navigate, isTenantAdmin, userTenantId]);
+  }, [orgId, setOrgId, isTenantAdmin, userTenantId]);
 
   const handleCustomSwitch = useCallback(() => {
     const value = customInput.trim().toLowerCase();

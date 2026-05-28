@@ -12,8 +12,10 @@ describe('PortalProjectSelectPage shell', () => {
     expect(source).toContain('id="portal-project-search"');
     expect(source).toContain('name="portalProjectSearch"');
     expect(source).toContain("resolvePortalProjectSwitchPath('/portal/budget')");
+    expect(source).toContain('blockedPortalAccess');
     expect(source).not.toContain('resolveRequestedRedirectPath');
     expect(source).not.toContain("navigate('/portal/onboarding'");
+    expect(source).not.toContain("navigate('/', { replace: true })");
     expect(source).not.toContain('주사업으로 지정');
     expect(source).not.toContain('증빙 드라이브 연결');
   });

@@ -174,6 +174,13 @@ function PortalContent() {
   const [labEnabled, setLabEnabled] = useShellLabEnabled();
   const navigationHandlerRef = useRef<((attempt: PortalNavigationAttempt) => boolean) | null>(null);
   const currentPath = `${location.pathname}${location.search}${location.hash}`;
+  const blockedPortalAccess = Boolean(
+    !authLoading
+    && !portalLoading
+    && isAuthenticated
+    && authUser?.role
+    && !canEnterPortalWorkspace(authUser.role)
+  );
   const registerNavigationHandler = useCallback((handler: ((attempt: PortalNavigationAttempt) => boolean) | null) => {
     navigationHandlerRef.current = handler;
   }, []);
@@ -297,21 +304,6 @@ function PortalContent() {
   useEffect(() => {
     if (authLoading) return;
     const role = authUser?.role;
-    if (!isAuthenticated || !role) return;
-    if (!canEnterPortalWorkspace(role)) {
-      if (location.pathname.startsWith('/portal/board')) {
-        const suffix = location.pathname.slice('/portal'.length);
-        navigate(suffix, { replace: true });
-        return;
-      }
-
-      navigate('/', { replace: true });
-    }
-  }, [authLoading, isAuthenticated, authUser, location.pathname, navigate]);
-
-  useEffect(() => {
-    if (authLoading) return;
-    const role = authUser?.role;
     if (!isAuthenticated || !role || !canChooseWorkspace(role)) return;
     // admin/finance가 portal을 잠깐 방문할 때 workspace를 덮어쓰지 않음
     if (isAdminSpaceRole(role)) return;
@@ -349,6 +341,25 @@ function PortalContent() {
         <div className="text-center">
           <Loader2 className="w-5 h-5 mx-auto animate-spin text-muted-foreground" />
           <p className="mt-2 text-[12px] text-muted-foreground">포털 데이터를 불러오는 중...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (blockedPortalAccess) {
+    return (
+      <div className="min-h-screen bg-slate-50 px-6 py-8 dark:bg-slate-950">
+        <div className="mx-auto max-w-xl rounded-lg border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <Badge variant="outline">접근 제한</Badge>
+          <h1 className="mt-4 text-lg font-semibold text-slate-950 dark:text-slate-50">이 포털 화면을 열 수 없습니다</h1>
+          <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+            권한 또는 작업 공간 상태를 확인해 주세요. 현재 URL은 유지했습니다.
+          </p>
+          {isAdminSpaceRole(authUser?.role) && (
+            <Button type="button" className="mt-5" onClick={requestAdminNavigation}>
+              관리자 공간 열기
+            </Button>
+          )}
         </div>
       </div>
     );

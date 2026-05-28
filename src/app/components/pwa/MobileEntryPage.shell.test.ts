@@ -5,10 +5,12 @@ import { describe, expect, it } from 'vitest';
 const source = readFileSync(resolve(import.meta.dirname, 'MobileEntryPage.tsx'), 'utf8');
 
 describe('MobileEntryPage route contract', () => {
-  it('sends mobile PWA launches to business cards and desktop launches to the existing root', () => {
+  it('renders mobile business cards in place without route-level redirects', () => {
     expect(source).toContain('shouldUseBusinessCardMobileEntry');
-    expect(source).toContain('BUSINESS_CARD_MOBILE_ENTRY_PATH');
+    expect(source).toContain('BusinessCardLabPage');
     expect(source).toContain("'/mobile-entry'");
-    expect(source).toContain("to={useBusinessCardEntry ? BUSINESS_CARD_MOBILE_ENTRY_PATH : '/'}");
+    expect(source).toContain('return <BusinessCardLabPage />');
+    expect(source).not.toContain('Navigate');
+    expect(source).not.toContain('replace');
   });
 });

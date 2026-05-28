@@ -70,9 +70,11 @@ describe('PortalLayout shell actions', () => {
 
   it('keeps portal navigation explicit without onboarding or project-select redirect effects', () => {
     expect(portalLayoutSource).toContain('isPortalStandaloneEntryPath');
+    expect(portalLayoutSource).toContain('blockedPortalAccess');
     expect(portalLayoutSource).toContain("navigate('/portal/project-select')");
     expect(portalLayoutSource).toContain("navigate('/portal/weekly-expenses')");
     expect(portalLayoutSource).toContain("navigate('/portal/register-project')");
+    expect(portalLayoutSource).not.toContain("navigate('/', { replace: true })");
     expect(portalLayoutSource).not.toContain('shouldForcePortalOnboarding');
     expect(portalLayoutSource).not.toContain('resolvePortalProjectSelectPath(currentPath)');
   });

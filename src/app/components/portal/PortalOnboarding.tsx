@@ -33,7 +33,7 @@ export function PortalOnboarding() {
     resolvePrimaryProjectId(projectIds, portalUser?.projectId || authUser?.projectId) || ''
   ));
 
-  const isAdminSpaceUser = !canEnterPortalWorkspace(authUser?.role);
+  const isAdminSpaceUser = Boolean(authUser?.role && !canEnterPortalWorkspace(authUser.role));
 
   useEffect(() => {
     if (authLoading) return;
@@ -41,11 +41,7 @@ export function PortalOnboarding() {
       navigate('/login', { replace: true, state: { from: '/portal/onboarding' } });
       return;
     }
-
-    if (isAdminSpaceUser) {
-      navigate('/', { replace: true });
-    }
-  }, [authLoading, isAuthenticated, isAdminSpaceUser, navigate]);
+  }, [authLoading, isAuthenticated, navigate]);
 
   useEffect(() => {
     const merged = normalizeProjectIds([
@@ -126,6 +122,24 @@ export function PortalOnboarding() {
           <Loader2 className="w-5 h-5 mx-auto animate-spin text-muted-foreground" />
           <p className="mt-2 text-[12px] text-muted-foreground">프로젝트 목록을 불러오는 중...</p>
         </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) return null;
+
+  if (isAdminSpaceUser) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4 dark:bg-slate-950">
+        <Card className="w-full max-w-xl border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <CardContent className="p-6">
+            <Badge variant="outline">접근 제한</Badge>
+            <h1 className="mt-4 text-lg font-semibold text-slate-950 dark:text-slate-50">포털 접근 권한을 확인해 주세요</h1>
+            <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+              권한 또는 작업 공간 상태를 확인해 주세요. 현재 URL은 유지했습니다.
+            </p>
+          </CardContent>
+        </Card>
       </div>
     );
   }

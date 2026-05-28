@@ -23,7 +23,7 @@ import { ScrollToTop } from './ScrollToTop';
 import { QuickActionFab } from './QuickActionFab';
 import { PageTransition } from './PageTransition';
 import { ErrorBoundary } from './ErrorBoundary';
-import { canChooseWorkspace, isPortalRole, resolveActiveWorkspacePreference, resolveHomePath } from '../../platform/navigation';
+import { canChooseWorkspace, isPortalRole } from '../../platform/navigation';
 import { canAccessAdminPath, canShowAdminNavItem } from '../../platform/admin-nav';
 import { NAV_GROUPS } from '../../platform/nav-config';
 import { readShellLabEnabled, shouldShowShellRoute, writeShellLabEnabled } from '../../platform/shell-lab-visibility';
@@ -40,7 +40,13 @@ function AppLayoutContent() {
   const location = useLocation();
   const navigate = useNavigate();
   const currentPath = `${location.pathname}${location.search}${location.hash}`;
-  const activeWorkspace = resolveActiveWorkspacePreference(authUser?.lastWorkspace, authUser?.defaultWorkspace);
+  const displayUser = authUser || currentUser;
+  const blockedAdminPath = Boolean(
+    !authLoading
+    && isAuthenticated
+    && displayUser?.role
+    && !canAccessAdminPath(displayUser.role, location.pathname)
+  );
 
   // Auth guard — 미인증 시 로그인 페이지로
   useEffect(() => {
@@ -49,25 +55,6 @@ function AppLayoutContent() {
       navigate('/login', { replace: true, state: { from: currentPath } });
     }
   }, [authLoading, currentPath, isAuthenticated, navigate]);
-
-  useEffect(() => {
-    if (authLoading) return;
-    const role = (authUser || currentUser)?.role;
-    if (!isAuthenticated || !role) return;
-    if (isPortalRole(role) && !canAccessAdminPath(role, location.pathname)) {
-      if (location.pathname.startsWith('/board')) {
-        navigate(`/portal${location.pathname}`, { replace: true });
-        return;
-      }
-
-      navigate('/portal/project-select', { replace: true });
-      return;
-    }
-
-    if (!canAccessAdminPath(role, location.pathname)) {
-      navigate(resolveHomePath(role, activeWorkspace), { replace: true });
-    }
-  }, [activeWorkspace, authLoading, authUser, currentUser, isAuthenticated, location.pathname, navigate]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -84,7 +71,6 @@ function AppLayoutContent() {
     setMobileOpen(false);
   }, [location.pathname]);
 
-  const displayUser = authUser || currentUser;
   const navGroups = React.useMemo(() => {
     return NAV_GROUPS
       .map((group) => ({
@@ -136,6 +122,29 @@ function AppLayoutContent() {
   const totalAlerts = pendingCount + (participationDangerCount > 0 ? participationDangerCount : 0);
 
   if (authLoading || !isAuthenticated) return null;
+
+  if (blockedAdminPath) {
+    return (
+      <TooltipProvider delayDuration={300}>
+        <CommandPalette />
+        <KeyboardShortcuts />
+        <main className="min-h-dvh bg-background p-6">
+          <div className="mx-auto max-w-xl rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+            <Badge variant="outline">접근 제한</Badge>
+            <h1 className="mt-4 text-lg font-semibold text-slate-950">이 화면을 열 수 없습니다</h1>
+            <p className="mt-2 text-sm text-slate-600">
+              권한 또는 작업 공간 상태를 확인해 주세요. 현재 URL은 유지했습니다.
+            </p>
+            {isPortalRole(displayUser?.role) && (
+              <Button type="button" className="mt-5" onClick={openPortalWorkspace}>
+                사용자 포털 열기
+              </Button>
+            )}
+          </div>
+        </main>
+      </TooltipProvider>
+    );
+  }
 
   if (location.pathname === '/') {
     return (
