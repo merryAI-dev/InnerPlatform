@@ -7,47 +7,12 @@ const portalDashboardSource = readFileSync(
   'utf8',
 );
 
-describe('PortalDashboard layout compaction', () => {
-  it('keeps project detail and weekly status inside one unified slab', () => {
-    expect(portalDashboardSource).toContain('프로젝트 상세');
-    expect(portalDashboardSource).toContain('이번 주 작업 상태');
-    expect(portalDashboardSource).toContain('최근 Projection 수정');
-    expect(portalDashboardSource).toContain('items-stretch gap-4 xl:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)]');
-  });
-
-  it('drops the separate operating shortcuts card to keep the page compact', () => {
-    expect(portalDashboardSource).not.toContain('운영 바로가기');
-    expect(portalDashboardSource).not.toContain('이번 주 바로 작업');
-    expect(portalDashboardSource).not.toContain('프로젝트 설정');
-    expect(portalDashboardSource).not.toContain('사업비 입력 열기');
-  });
-
-  it('drops explanatory paragraph copy from the hero slab', () => {
-    expect(portalDashboardSource).not.toContain('발주기관, 정산 기준, 예산 흐름과 현재 작업 상태를 한 화면에서 확인합니다.');
-  });
-
-  it('moves the finance summary into the hero slab under the project title', () => {
-    expect(portalDashboardSource).toContain('md:grid-cols-2 xl:grid-cols-4');
-    expect(portalDashboardSource).not.toContain('CardTitle className="text-[13px] text-slate-900">자금 요약');
-  });
-
-  it('lets PMs update the current project status from the dashboard hero', () => {
-    expect(portalDashboardSource).toContain('updateProjectStatus');
-    expect(portalDashboardSource).toContain('PROJECT_STATUS_OPTIONS');
-    expect(portalDashboardSource).toContain('aria-label="사업 상태 변경"');
-    expect(portalDashboardSource).toContain('사업 상태를');
-  });
-
-  it('absorbs submissions into the dashboard and drops duplicate submission blocks', () => {
-    expect(portalDashboardSource).toContain('내 제출 현황');
-    expect(portalDashboardSource).toContain('제출 상태를 한 번에 확인합니다.');
-    expect(portalDashboardSource).not.toContain('인력변경 신청');
-    expect(portalDashboardSource).not.toContain('사업비 입력(주간) 작성/제출');
-  });
-
-  it('keeps an always-visible payroll CTA on the dashboard', () => {
-    expect(portalDashboardSource).toContain('이번 달 인건비 확인');
-    expect(portalDashboardSource).toContain('인건비/공지 열기');
-    expect(portalDashboardSource).toContain('지급일이 아직 없으면 여기서 먼저 등록하세요.');
+describe('PortalDashboard closure', () => {
+  it('redirects the closed PM project status dashboard to project selection', () => {
+    expect(portalDashboardSource).toContain('Navigate');
+    expect(portalDashboardSource).toContain('to="/portal/project-select"');
+    expect(portalDashboardSource).not.toContain('프로젝트 상세');
+    expect(portalDashboardSource).not.toContain('내 제출 현황');
+    expect(portalDashboardSource).not.toContain('사업 상태');
   });
 });

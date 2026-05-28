@@ -86,14 +86,13 @@ const NAV_SECTIONS = [
   {
     title: '마이메뉴',
     items: [
-      { to: '/portal/business-cards', icon: UserRoundCheck, label: '명함 DB' },
+      { to: '/portal/budget', icon: Calculator, label: '예산 편집' },
       { to: '/portal/payroll', icon: CircleDollarSign, label: '인건비/공지', accent: true },
     ],
   },
   {
     title: '사업비관리',
     items: [
-      { to: '/portal/budget', icon: Calculator, label: '예산 편집' },
       { to: '/portal/bank-statements', icon: FileSpreadsheet, label: '통장내역' },
       { to: '/portal/weekly-expenses', icon: FileSpreadsheet, label: '사업비 입력(주간)' },
       { to: '/portal/cashflow', icon: BarChart3, label: '캐시플로(주간)' },
@@ -105,6 +104,7 @@ const NAV_SECTIONS = [
       { to: '/portal/project-settings', icon: Settings2, label: '프로젝트 배정 수정', exact: true },
       { to: '/portal/edit-project', icon: Pencil, label: '프로젝트 수정' },
       { to: '/portal/register-project', icon: Plus, label: '프로젝트 등록 요청', accent: true },
+      { to: '/portal/business-cards', icon: UserRoundCheck, label: '명함 DB' },
     ],
   },
 ];
