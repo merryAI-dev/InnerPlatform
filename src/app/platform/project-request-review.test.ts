@@ -143,7 +143,7 @@ describe('project-request-review', () => {
     }));
 
     const items = model.checklistGroups.flatMap((group) => group.items);
-    expect(items.find((item) => item.key === 'settlementType')?.value).toBe('해당없음(정산대상 아님)');
+    expect(items.find((item) => item.key === 'settlementType')?.value).toBe('정산 없음');
     expect(items.find((item) => item.key === 'basis')?.value).toBe('공급가액 기준');
     expect(items.find((item) => item.key === 'accountType')?.value).toBe('일반 사업');
     expect(items.find((item) => item.key === 'fundInputMode')?.value).toBe('통장내역 업로드');
