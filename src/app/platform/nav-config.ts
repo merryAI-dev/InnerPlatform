@@ -2,7 +2,7 @@ import type { LucideIcon } from 'lucide-react';
 import {
   LayoutDashboard, FolderKanban, BarChart3,
   FileCheck, Settings, Shield, ClipboardList, ClipboardCheck,
-  Calculator, Wallet, ExternalLink, UserCog,
+  Calculator, Wallet, UserCog,
   ListChecks, MessagesSquare, UserRoundCheck,
   CircleDollarSign, ArrowLeftRight,
 } from 'lucide-react';
@@ -55,7 +55,6 @@ export const NAV_GROUPS: NavGroup[] = [
       { to: '/approvals', icon: ListChecks, label: '승인 대기열', accent: true },
       { to: '/users', icon: UserCog, label: '권한/사용자' },
       { to: '/settings', icon: Settings, label: '설정' },
-      { to: '/portal', icon: ExternalLink, label: '사용자 포털' },
     ],
   },
 ];

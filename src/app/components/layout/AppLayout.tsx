@@ -3,7 +3,7 @@ import { Outlet, NavLink, useLocation, useNavigate } from 'react-router';
 import {
   ChevronLeft, ChevronRight,
   Search, HelpCircle,
-  Menu, LogOut,
+  Menu, LogOut, ExternalLink,
 } from 'lucide-react';
 import { useAppStore, AppProvider } from '../../data/store';
 import { useAuth } from '../../data/auth-store';
@@ -101,6 +101,11 @@ function AppLayoutContent() {
     const next = !labEnabled;
     writeShellLabEnabled(next);
     setLabEnabled(next);
+  }
+
+  function openPortalWorkspace() {
+    void setWorkspacePreference('portal', { persistDefault: false })
+      .finally(() => navigate('/portal'));
   }
 
   const pendingCount = transactions.filter(t => t.state === 'SUBMITTED').length;
@@ -368,6 +373,23 @@ function AppLayoutContent() {
                   로컬
                 </div>
               )}
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={openPortalWorkspace}
+                    className="h-8 gap-1.5 rounded-md border border-slate-950 bg-slate-950 px-3 text-[12px] font-semibold text-white shadow-sm transition-colors hover:bg-slate-800 hover:text-white focus-visible:ring-2 focus-visible:ring-slate-400 dark:border-slate-200 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white"
+                    aria-label="로그아웃 없이 사용자 포털로 이동"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                    <span className="hidden sm:inline">사용자 포털</span>
+                    <span className="sm:hidden">포털</span>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent className="text-[11px]">로그아웃 없이 사용자 포털로 이동</TooltipContent>
+              </Tooltip>
 
               <div className="w-px h-4 bg-border/50 mx-0.5" />
 

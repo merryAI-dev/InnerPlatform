@@ -29,7 +29,6 @@ export const ADMIN_LAB_ROUTES = [
   '/hr-announcements',
   '/training',
   '/settings',
-  '/portal',
 ] as const;
 
 export const PORTAL_LAB_ROUTES = [

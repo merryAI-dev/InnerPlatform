@@ -21,6 +21,7 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore';
 import { useAuth } from './auth-store';
+import { useFirestoreAccessPolicy } from './firestore-realtime-mode';
 import type { CashflowSheetLineId, CashflowWeekSheet, VarianceFlag, VarianceFlagEvent } from './types';
 import { filterCashflowWeeksThroughSelectedYear, shouldCreateDocOnUpdateError } from './cashflow-weeks.helpers';
 import {
@@ -84,6 +85,7 @@ const CashflowWeekContext: React.Context<(CashflowWeekState & CashflowWeekAction
 
 export function CashflowWeekProvider({ children }: { children: ReactNode }) {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
+  const { routeMode } = useFirestoreAccessPolicy(user?.role);
   const { db, isOnline, orgId } = useFirebase();
   const firestoreEnabled = isOnline && !!db;
 
@@ -159,7 +161,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
       unsubsRef.current.forEach((u) => u());
       unsubsRef.current = [];
     };
-  }, [authLoading, isAuthenticated, user, db, firestoreEnabled, orgId, yearMonth]);
+  }, [authLoading, isAuthenticated, user, db, firestoreEnabled, orgId, routeMode, yearMonth]);
 
   const upsertWeekAmounts = useCallback(async (input: {
     projectId: string;
