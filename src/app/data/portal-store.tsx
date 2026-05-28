@@ -27,6 +27,7 @@ import type {
   ProjectSheetSourceSnapshot,
   ProjectSheetSourceType,
   Project,
+  ProjectStatus,
   ParticipationEntry,
   Transaction,
   TransactionState,
@@ -449,6 +450,7 @@ interface PortalActions {
     },
   ) => Promise<boolean>;
   setSessionActiveProject: (projectId: string) => Promise<boolean>;
+  updateProjectStatus: (projectId: string, status: ProjectStatus) => Promise<boolean>;
   logout: () => void;
   addExpenseSet: (set: ExpenseSet) => void;
   updateExpenseSet: (id: string, updates: Partial<ExpenseSet>) => void;
@@ -2903,6 +2905,82 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     return true;
   }, [scopedProjectIds]);
 
+  const updateProjectStatus = useCallback(async (projectId: string, status: ProjectStatus): Promise<boolean> => {
+    const targetProjectId = projectId.trim();
+    if (!targetProjectId || !includesProject(scopedProjectIds, targetProjectId)) {
+      toast.error('선택 가능한 사업이 아닙니다.');
+      return false;
+    }
+
+    const normalizedStatus = normalizeProjectStatus(status);
+    const existingProject = projectsRef.current.find((project) => project.id === targetProjectId);
+    if (!existingProject) {
+      toast.error('사업 정보를 찾지 못했습니다.');
+      return false;
+    }
+    if (existingProject.status === normalizedStatus) return true;
+
+    const now = new Date().toISOString();
+    const patch: Partial<Project> = {
+      status: normalizedStatus,
+      updatedAt: now,
+    };
+    const previousProjects = projectsRef.current;
+    const nextProjects = previousProjects.map((project) => (
+      project.id === targetProjectId ? { ...project, ...patch } : project
+    ));
+    projectsRef.current = nextProjects;
+    setProjects(nextProjects);
+
+    if (isDevHarnessUser || !firestoreEnabled || !db) return true;
+
+    try {
+      if (isPlatformApiEnabled()) {
+        const idToken = authUser?.idToken || await getAuthInstance()?.currentUser?.getIdToken() || undefined;
+        await upsertProjectViaBff({
+          tenantId: orgId,
+          actor: {
+            uid: authUser?.uid || portalUser?.id || 'portal-user',
+            email: authUser?.email || portalUser?.email || '',
+            role: authUser?.role || portalUser?.role || 'pm',
+            idToken,
+          },
+          project: {
+            ...existingProject,
+            ...patch,
+            expectedVersion: existingProject.version ?? 1,
+          } as UpsertProjectPayload,
+        });
+      } else {
+        await setDoc(
+          doc(db, getOrgDocumentPath(orgId, 'projects', targetProjectId)),
+          withTenantScope(orgId, patch),
+          { merge: true },
+        );
+      }
+      return true;
+    } catch (err) {
+      console.error('[PortalStore] updateProjectStatus error:', err);
+      projectsRef.current = previousProjects;
+      setProjects(previousProjects);
+      toast.error('사업 상태 저장에 실패했습니다.');
+      return false;
+    }
+  }, [
+    authUser?.email,
+    authUser?.idToken,
+    authUser?.role,
+    authUser?.uid,
+    db,
+    firestoreEnabled,
+    isDevHarnessUser,
+    orgId,
+    portalUser?.email,
+    portalUser?.id,
+    portalUser?.role,
+    scopedProjectIds,
+  ]);
+
   const logout = useCallback(() => {
     setActiveProjectIdState('');
     setPortalUser(null);
@@ -3222,6 +3300,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     weeklySubmissionStatuses,
     register,
     setSessionActiveProject,
+    updateProjectStatus,
     logout,
     addExpenseSet,
     updateExpenseSet,

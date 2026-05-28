@@ -17,6 +17,7 @@ import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { usePortalStore } from '../../data/portal-store';
 import { useHrAnnouncements, HR_EVENT_LABELS, HR_EVENT_COLORS } from '../../data/hr-announcements-store';
 import { usePayroll } from '../../data/payroll-store';
@@ -25,6 +26,7 @@ import { TRANSACTIONS } from '../../data/mock-data';
 import { fmtShort } from '../../data/budget-data';
 import {
   PROJECT_STATUS_LABELS, SETTLEMENT_TYPE_SHORT, BASIS_LABELS,
+  type ProjectStatus,
   type Transaction,
 } from '../../data/types';
 import { addMonthsToYearMonth, getSeoulTodayIso } from '../../platform/business-days';
@@ -54,6 +56,13 @@ import { resolvePayrollCashflowAlignment } from '../../platform/payroll-cashflow
 // ═══════════════════════════════════════════════════════════════
 // PortalDashboard — 내 사업 현황
 // ═══════════════════════════════════════════════════════════════
+
+const PROJECT_STATUS_OPTIONS: ProjectStatus[] = [
+  'CONTRACT_PENDING',
+  'IN_PROGRESS',
+  'COMPLETED',
+  'COMPLETED_PENDING_PAYMENT',
+];
 
 function formatKstDateTime(value: string | undefined): string {
   if (!value) return '아직 수정 없음';
@@ -94,7 +103,7 @@ function submissionBadgeClassName(tone: 'neutral' | 'warning' | 'danger' | 'succ
 
 export function PortalDashboard() {
   const navigate = useNavigate();
-  const { isLoading, portalUser, myProject, weeklySubmissionStatuses, projects } = usePortalStore();
+  const { isLoading, portalUser, myProject, weeklySubmissionStatuses, projects, updateProjectStatus } = usePortalStore();
   const { getProjectAlerts } = useHrAnnouncements();
   const { schedules, runs, monthlyCloses, acknowledgePayrollRun, acknowledgeMonthlyClose } = usePayroll();
   const { weeks: cashflowWeeks } = useCashflowWeeks();
@@ -103,6 +112,7 @@ export function PortalDashboard() {
 
   const [liveTransactions, setLiveTransactions] = useState<Transaction[] | null>(null);
   const [transactionsFetchState, setTransactionsFetchState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [statusSaving, setStatusSaving] = useState(false);
   const projectId = myProject?.id || '';
 
   useEffect(() => {
@@ -170,6 +180,22 @@ export function PortalDashboard() {
     } catch (err: any) {
       console.error(err);
       toast.error(err?.message || '확인 처리에 실패했습니다');
+    }
+  }
+
+  async function handleProjectStatusChange(nextStatus: string) {
+    if (!myProject || statusSaving) return;
+    const typedStatus = nextStatus as ProjectStatus;
+    if (typedStatus === myProject.status) return;
+
+    setStatusSaving(true);
+    try {
+      const ok = await updateProjectStatus(myProject.id, typedStatus);
+      if (ok) {
+        toast.success(`사업 상태를 '${PROJECT_STATUS_LABELS[typedStatus]}'로 변경했습니다.`);
+      }
+    } finally {
+      setStatusSaving(false);
     }
   }
 
@@ -445,9 +471,30 @@ export function PortalDashboard() {
           <div className="space-y-5">
             <div className="space-y-3">
               <div className="flex flex-wrap items-center gap-2">
-                <Badge className="h-5 rounded-full bg-[#e8f0fb] px-2 text-[10px] font-semibold text-[#1b4f8f]">
-                  {PROJECT_STATUS_LABELS[myProject.status]}
-                </Badge>
+                <div className="flex items-center gap-2 rounded-full border border-[#1b4f8f]/20 bg-[#e8f0fb] px-2 py-1 text-[#1b4f8f]">
+                  <span className="text-[10px] font-semibold">사업 상태</span>
+                  <Select
+                    value={myProject.status}
+                    disabled={statusSaving}
+                    onValueChange={(value) => void handleProjectStatusChange(value)}
+                  >
+                    <SelectTrigger
+                      aria-label="사업 상태 변경"
+                      size="sm"
+                      className="h-6 w-[132px] rounded-full border-[#1b4f8f]/20 bg-white px-2 text-[11px] font-semibold text-[#1b4f8f] shadow-none"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PROJECT_STATUS_OPTIONS.map((status) => (
+                        <SelectItem key={status} value={status}>
+                          {PROJECT_STATUS_LABELS[status]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {statusSaving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                </div>
                 <Badge variant="outline" className="h-5 rounded-full border-slate-300 px-2 text-[10px] font-semibold text-slate-600">
                   {SETTLEMENT_TYPE_SHORT[myProject.settlementType]}
                 </Badge>

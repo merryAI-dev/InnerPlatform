@@ -31,6 +31,13 @@ describe('PortalDashboard layout compaction', () => {
     expect(portalDashboardSource).not.toContain('CardTitle className="text-[13px] text-slate-900">자금 요약');
   });
 
+  it('lets PMs update the current project status from the dashboard hero', () => {
+    expect(portalDashboardSource).toContain('updateProjectStatus');
+    expect(portalDashboardSource).toContain('PROJECT_STATUS_OPTIONS');
+    expect(portalDashboardSource).toContain('aria-label="사업 상태 변경"');
+    expect(portalDashboardSource).toContain('사업 상태를');
+  });
+
   it('absorbs submissions into the dashboard and drops duplicate submission blocks', () => {
     expect(portalDashboardSource).toContain('내 제출 현황');
     expect(portalDashboardSource).toContain('제출 상태를 한 번에 확인합니다.');

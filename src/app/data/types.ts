@@ -75,8 +75,8 @@ export const CASHFLOW_CATEGORY_LABELS: Record<CashflowCategory, string> = Object
 export const PROJECT_STATUS_LABELS: Record<ProjectStatus, string> = {
   CONTRACT_PENDING: '계약 전',
   IN_PROGRESS: '진행 중',
-  COMPLETED: '종료',
-  COMPLETED_PENDING_PAYMENT: '종료(잔금 대기)',
+  COMPLETED: '완료',
+  COMPLETED_PENDING_PAYMENT: '완료(잔금 대기)',
 };
 
 export function normalizeProjectStatus(raw: unknown): ProjectStatus {
@@ -143,7 +143,7 @@ export const SETTLEMENT_TYPE_LABELS: Record<SettlementType, string> = {
   TYPE3: 'Type3. 공급가액+세금계산서 미발행',
   TYPE4: 'Type4. 세금계산서미발행+공급대가',
   TYPE5: 'Type5. 이나라도움+공급가액',
-  NONE: '해당없음(정산대상 아님)',
+  NONE: '정산 없음',
 };
 
 export const SETTLEMENT_TYPE_SHORT: Record<SettlementType, string> = {
@@ -152,13 +152,13 @@ export const SETTLEMENT_TYPE_SHORT: Record<SettlementType, string> = {
   TYPE3: 'Type3',
   TYPE4: 'Type4',
   TYPE5: 'Type5',
-  NONE: '해당없음(정산대상 아님)',
+  NONE: '정산 없음',
 };
 
 export const BASIS_LABELS: Record<Basis, string> = {
   '공급가액': '공급가액 기준',
   '공급대가': '공급대가 기준',
-  NONE: '해당없음(정산대상 아님)',
+  NONE: '정산 기준 없음',
 };
 
 export function normalizeSettlementType(raw: unknown): SettlementType {
