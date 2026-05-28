@@ -23,12 +23,19 @@ describe('ProjectEditorWizard dropdown contract', () => {
   });
 
   it('keeps select values representable in their option lists', () => {
-    expect(source).toContain('const managerOptions = useMemo');
-    expect(source).toContain('uid: draft.managerId');
+    expect(source).toContain('const ownerOptions = useMemo');
+    expect(source).toContain('uid: draft.registeredById');
     expect(source).toContain("if (value === 'none')");
     expect(source).toContain("onSelect({ memberName: '', memberNickname: '' })");
     expect(source).toContain('currentTeamMemberOptionExists');
     expect(source).toContain('member.memberNickname ? `${member.memberName} (${member.memberNickname})` : member.memberName');
+  });
+
+  it('uses a member select for project owner instead of free text manager input', () => {
+    expect(source).toContain('사업 담당자');
+    expect(source).toContain('registeredById');
+    expect(source).toContain('registeredByName: member?.name ||');
+    expect(source).not.toContain('<Input value={draft.managerName}');
   });
 
   it('uses a searchable team member picker for registration and edit flows', () => {

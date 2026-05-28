@@ -38,6 +38,20 @@ describe('portal project selection helpers', () => {
     expect(result.searchProjects.map((project) => project.id)).toEqual(['p-assigned', 'p-managed']);
   });
 
+  it('prioritizes registeredById as PM portal owner over legacy managerId', () => {
+    const result = resolvePortalProjectCandidates({
+      role: 'pm',
+      authUid: 'owner-1',
+      assignedProjectIds: [],
+      projects: [
+        { id: 'p-owner', name: 'Owner Project', registeredById: 'owner-1', managerId: 'legacy-other' },
+        { id: 'p-legacy', name: 'Legacy Project', registeredById: 'other', managerId: 'owner-1' },
+      ] as unknown as Project[],
+    });
+
+    expect(result.searchProjects.map((project) => project.id)).toEqual(['p-owner']);
+  });
+
   it('lets admin and finance search the full project pool', () => {
     const adminResult = resolvePortalProjectCandidates({
       role: 'admin',

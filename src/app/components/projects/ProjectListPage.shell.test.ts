@@ -21,4 +21,9 @@ describe('ProjectListPage shell contract', () => {
     expect(source).toContain('SETTLEMENT_TYPE_SHORT[normalizeSettlementType(p.settlementType)]');
     expect(source).not.toContain('p.isSettled ?');
   });
+
+  it('shows the business owner from registeredBy fields', () => {
+    expect(source).toContain('사업 담당자');
+    expect(source).toContain('p.registeredByName || p.managerName');
+  });
 });

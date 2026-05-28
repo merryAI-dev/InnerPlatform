@@ -25,6 +25,7 @@ import {
   buildPortalProjectEditSavePayload,
   isProjectVersionConflictError,
 } from '../../platform/project-edit-save';
+import { buildProjectOwnerAssignmentPatches } from '../../platform/project-owner-assignment';
 import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
 import { Label } from '../ui/label';
@@ -134,6 +135,62 @@ export function PortalProjectEdit() {
     && project.executiveReviewStatus === 'APPROVED'
   );
 
+  const syncProjectOwnerAssignment = async (draft: ProjectEditorDraft) => {
+    if (!db || !myProject?.id || !draft.registeredById) return;
+    const previousOwnerId = myProject.registeredById || myProject.managerId || '';
+    const nextOwnerId = draft.registeredById;
+    const previousRef = previousOwnerId && previousOwnerId !== nextOwnerId
+      ? doc(db, getOrgDocumentPath(orgId, 'members', previousOwnerId))
+      : null;
+    const nextRef = doc(db, getOrgDocumentPath(orgId, 'members', nextOwnerId));
+    const [previousSnap, nextSnap] = await Promise.all([
+      previousRef ? getDoc(previousRef) : Promise.resolve(null),
+      getDoc(nextRef),
+    ]);
+    if (!nextSnap.exists()) {
+      throw new Error('선택한 사업 담당자 계정을 찾을 수 없습니다.');
+    }
+    const previousMember = previousSnap?.exists() ? previousSnap.data() : undefined;
+    const nextMember = nextSnap.data();
+    const patches = buildProjectOwnerAssignmentPatches({
+      projectId: myProject.id,
+      projectName: draft.name || myProject.name,
+      previousOwnerId,
+      nextOwner: {
+        uid: nextOwnerId,
+        name: draft.registeredByName,
+        email: draft.registeredByEmail,
+      },
+      previousMember,
+      nextMember,
+    });
+    const now = new Date().toISOString();
+    if (previousRef && patches.previous) {
+      await setDoc(previousRef, {
+        projectIds: patches.previous.projectIds,
+        projectNames: patches.previous.projectNames,
+        portalProfile: {
+          projectIds: patches.previous.projectIds,
+          projectNames: patches.previous.projectNames,
+        },
+        updatedAt: now,
+      }, { merge: true });
+    }
+    if (patches.next) {
+      await setDoc(nextRef, {
+        projectId: patches.next.projectId,
+        projectIds: patches.next.projectIds,
+        projectNames: patches.next.projectNames,
+        portalProfile: {
+          projectId: patches.next.projectId,
+          projectIds: patches.next.projectIds,
+          projectNames: patches.next.projectNames,
+        },
+        updatedAt: now,
+      }, { merge: true });
+    }
+  };
+
   const persistProject = async (
     draft: ProjectEditorDraft,
     options: { forcePendingReview?: boolean; reviewComment?: string | null } = {},
@@ -232,6 +289,8 @@ export function PortalProjectEdit() {
         );
       }
     }
+
+    await syncProjectOwnerAssignment(draft);
 
     return savedProject;
   };

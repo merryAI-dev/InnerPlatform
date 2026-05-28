@@ -30,10 +30,13 @@ export function PortalProjectRegister() {
 
   const initialDraft = useMemo(
     () => createProjectEditorDraft({
+      registeredById: authUser?.uid || '',
+      registeredByName: authUser?.name || portalUser?.name || '',
+      registeredByEmail: authUser?.email || portalUser?.email || '',
       managerId: authUser?.uid || '',
       managerName: authUser?.name || portalUser?.name || '',
     }),
-    [authUser?.name, authUser?.uid, portalUser?.name],
+    [authUser?.email, authUser?.name, authUser?.uid, portalUser?.email, portalUser?.name],
   );
 
   const handleSubmit = async (draft: ProjectEditorDraft) => {

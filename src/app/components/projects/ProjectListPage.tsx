@@ -227,7 +227,7 @@ export function ProjectListPage() {
                   </span>
                 </TableHead>
                 <TableHead className="min-w-[90px]">계약 기간</TableHead>
-                <TableHead className="min-w-[80px]">담당자</TableHead>
+                <TableHead className="min-w-[80px]">사업 담당자</TableHead>
                 <TableHead className="text-right min-w-[100px] cursor-pointer" onClick={() => handleSort('contractAmount')}>
                   <span className="flex items-center justify-end gap-1">
                     계약금액 <ArrowUpDown className="w-3 h-3" />
@@ -270,7 +270,7 @@ export function ProjectListPage() {
                     {p.contractEnd ? ` ~ ${p.contractEnd.replace(/-/g, '.')}` : ''}
                   </TableCell>
                   <TableCell className="text-[11px] whitespace-nowrap">
-                    {p.managerName || '-'}
+                    {p.registeredByName || p.managerName || '-'}
                   </TableCell>
                   <TableCell className="text-right text-sm whitespace-nowrap">
                     {p.contractAmount > 0 ? fmtFull(p.contractAmount) : '-'}
