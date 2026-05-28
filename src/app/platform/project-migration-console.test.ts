@@ -6,6 +6,7 @@ import {
   describeMigrationAuditActionState,
   filterMigrationAuditConsoleRecords,
   findMigrationAuditRecord,
+  isMigrationAuditPmRegistration,
   normalizeCicLabel,
   summarizeMigrationAuditConsole,
 } from './project-migration-console';
@@ -135,6 +136,7 @@ describe('project-migration-console', () => {
     );
 
     expect(records[0]?.status).toBe('PENDING');
+    expect(isMigrationAuditPmRegistration(records[0])).toBe(true);
   });
 
   it('filters by cic and review status', () => {

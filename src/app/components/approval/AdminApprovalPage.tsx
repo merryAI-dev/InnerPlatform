@@ -108,8 +108,7 @@ export function AdminApprovalPage() {
   );
   const pendingProjectReviews = useMemo(
     () => projects.filter((project) => (
-      project.registrationSource === 'pm_portal'
-      && (project.executiveReviewStatus || 'PENDING') === 'PENDING'
+      (project.executiveReviewStatus || (project.registrationSource === 'pm_portal' ? 'PENDING' : 'APPROVED')) === 'PENDING'
     )),
     [projects],
   );

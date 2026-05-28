@@ -20,4 +20,9 @@ describe('route lazy loading safety', () => {
     expect(routesSource).toContain('shouldUseBusinessCardMobileEntry');
     expect(routesSource).toContain('{ index: true, element: <MobileAwareAdminHome /> }');
   });
+
+  it('closes the PM portal project dashboard route by sending /portal to project selection', () => {
+    expect(routesSource).toContain('{ index: true, element: <Navigate to="/portal/project-select" replace /> }');
+    expect(routesSource).not.toContain('{ index: true, element: <S C={PortalDashboard} /> }');
+  });
 });

@@ -16,7 +16,7 @@ import type {
   ProjectExecutiveReviewStatus,
   ProjectRequest,
 } from '../../data/types';
-import { getOrgCollectionPath, getOrgDocumentPath } from '../../lib/firebase';
+import { getOrgDocumentPath, getOrgRootPath } from '../../lib/firebase';
 import { useFirebase } from '../../lib/firebase-context';
 import { isPlatformApiEnabled, reviewProjectExecutiveStatusViaBff } from '../../lib/platform-bff-client';
 import {
@@ -45,6 +45,12 @@ import {
 import { Textarea } from '../ui/textarea';
 
 type ReviewActionMode = 'approve' | 'reject' | 'discard';
+type ProjectRequestCollectionName = 'project_requests' | 'projectRequests';
+type ProjectRequestWithSource = ProjectRequest & {
+  __collectionName?: ProjectRequestCollectionName;
+};
+
+const PROJECT_REQUEST_COLLECTIONS: ProjectRequestCollectionName[] = ['project_requests', 'projectRequests'];
 
 function getReviewDialogTitle(mode: ReviewActionMode): string {
   if (mode === 'approve') return '이 프로젝트를 승인할까요?';
@@ -140,26 +146,51 @@ export function ProjectMigrationAuditPage({
     }
 
     setLoadingRequests(true);
-    const requestQuery = query(
-      collection(db, getOrgCollectionPath(orgId, 'projectRequests')),
-      orderBy('requestedAt', 'desc'),
-    );
+    const sourceRows = new Map<ProjectRequestCollectionName, ProjectRequestWithSource[]>();
+    const initializedSources = new Set<ProjectRequestCollectionName>();
+    let disposed = false;
 
-    const unsubscribe = onSnapshot(
-      requestQuery,
-      (snapshot) => {
-        const next = snapshot.docs.map((docSnap) => docSnap.data() as ProjectRequest);
-        setRequests(next);
+    const publish = () => {
+      if (disposed) return;
+      setRequests(Array.from(sourceRows.values()).flat());
+      if (initializedSources.size === PROJECT_REQUEST_COLLECTIONS.length) {
         setLoadingRequests(false);
-      },
-      (error) => {
-        console.error('[ProjectMigrationAuditPage] project request listen error:', error);
-        setRequests([]);
-        setLoadingRequests(false);
-      },
-    );
+      }
+    };
 
-    return () => unsubscribe();
+    const unsubscribers = PROJECT_REQUEST_COLLECTIONS.map((collectionName) => {
+      const requestQuery = query(
+        collection(db, `${getOrgRootPath(orgId)}/${collectionName}`),
+        orderBy('requestedAt', 'desc'),
+      );
+
+      return onSnapshot(
+        requestQuery,
+        (snapshot) => {
+          sourceRows.set(
+            collectionName,
+            snapshot.docs.map((docSnap) => ({
+              ...(docSnap.data() as ProjectRequest),
+              id: String((docSnap.data() as ProjectRequest).id || docSnap.id),
+              __collectionName: collectionName,
+            })),
+          );
+          initializedSources.add(collectionName);
+          publish();
+        },
+        (error) => {
+          console.error(`[ProjectMigrationAuditPage] ${collectionName} listen error:`, error);
+          sourceRows.set(collectionName, []);
+          initializedSources.add(collectionName);
+          publish();
+        },
+      );
+    });
+
+    return () => {
+      disposed = true;
+      unsubscribers.forEach((unsubscribe) => unsubscribe());
+    };
   }, [db, isOnline, orgId]);
 
   const records = useMemo(
@@ -249,6 +280,7 @@ export function ProjectMigrationAuditPage({
           console.warn('[ProjectMigrationAuditPage] executive review slack not delivered:', response.slackReason);
         }
       } else {
+        const requestCollectionName = (activeRecord.request as ProjectRequestWithSource | null)?.__collectionName || 'project_requests';
         await updateProject(activeRecord.project.id, {
           executiveReviewStatus: nextExecutiveStatus,
           executiveReviewedAt: now,
@@ -276,7 +308,9 @@ export function ProjectMigrationAuditPage({
 
         if (db && activeRecord.request) {
           await setDoc(
-            doc(db, getOrgDocumentPath(orgId, 'projectRequests', activeRecord.request.id)),
+            requestCollectionName === 'project_requests'
+              ? doc(db, getOrgDocumentPath(orgId, 'projectRequests', activeRecord.request.id))
+              : doc(db, `${getOrgRootPath(orgId)}/${requestCollectionName}/${activeRecord.request.id}`),
             buildProjectRequestReviewPatch({
               projectId: activeRecord.project.id,
               reviewerId,

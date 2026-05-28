@@ -327,19 +327,6 @@ const ADMIN_COMMAND_DEFINITIONS: AdminCommandItem[] = [
 
 const PM_COMMAND_DEFINITIONS: AdminCommandItem[] = [
   {
-    id: 'pm:dashboard',
-    label: 'PM 내 프로젝트 현황',
-    description: '담당 프로젝트의 예산, 사업비, 캐시플로 상태를 봅니다.',
-    category: 'PM',
-    scope: 'pm',
-    to: '/portal',
-    icon: 'dashboard',
-    kind: 'page',
-    priority: 110,
-    featured: true,
-    keywords: ['PM', '포털', '내 프로젝트', '내 사업', '사업 현황', '프로젝트 현황', '담당 프로젝트', '담당 사업', '홈', '대시보드', '상태'],
-  },
-  {
     id: 'pm:budget',
     label: 'PM 예산 편집',
     description: '예산 구조, 비목, 세목, 사업비 계획을 편집합니다.',
