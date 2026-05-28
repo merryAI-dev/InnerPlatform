@@ -56,6 +56,12 @@ describe('ProjectMigrationAuditPage shell contract', () => {
     expect(pageSource).toContain('trashedReason: trashReason');
   });
 
+  it('listens to both canonical and legacy project request collections', () => {
+    expect(pageSource).toContain("const PROJECT_REQUEST_COLLECTIONS: ProjectRequestCollectionName[] = ['project_requests', 'projectRequests']");
+    expect(pageSource).toContain('__collectionName: collectionName');
+    expect(compositeSource).toContain('isMigrationAuditPmRegistration');
+  });
+
   it('shows the uploaded contract PDF next to analysis notes', () => {
     expect(detailSource).toContain('계약 분석 보조 정보');
     expect(detailSource).toContain('ContractDocumentPreview');

@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router';
 import {
-  LayoutDashboard, Calculator,
+  Calculator,
   LogOut,
   FolderKanban, Menu,
   Plus, Pencil,
@@ -86,7 +86,6 @@ const NAV_SECTIONS = [
   {
     title: '마이메뉴',
     items: [
-      { to: '/portal', icon: LayoutDashboard, label: '내 프로젝트 현황', exact: true },
       { to: '/portal/business-cards', icon: UserRoundCheck, label: '명함 DB' },
       { to: '/portal/payroll', icon: CircleDollarSign, label: '인건비/공지', accent: true },
     ],
@@ -273,7 +272,7 @@ function PortalContent() {
   const topNavItems = useMemo(() => navSections.flatMap((section) => section.items), [navSections]);
   const currentSectionLabel = useMemo(() => {
     const current = topNavItems.find((item) => isActive(item.to, item.exact));
-    return current?.label || '내 프로젝트 현황';
+    return current?.label || '프로젝트 선택';
   }, [topNavItems, location.pathname]);
   const shellCommandItems = useMemo(() => buildPortalShellCommandItems({
     role: authUser?.role,

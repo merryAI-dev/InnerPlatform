@@ -11,7 +11,7 @@ describe('PortalProjectSettings shell contract', () => {
   it('keeps only assignment and primary-project editing while preserving save navigation', () => {
     expect(portalProjectSettingsSource).toContain('선택한 프로젝트와 주 프로젝트를 확인하세요.');
     expect(portalProjectSettingsSource).toContain('주 프로젝트 저장');
-    expect(portalProjectSettingsSource).toContain("navigate('/portal', { replace: true });");
+    expect(portalProjectSettingsSource).toContain("navigate('/portal/project-select', { replace: true });");
     expect(portalProjectSettingsSource).toContain('선택한 프로젝트만 보기');
     expect(portalProjectSettingsSource).toContain('주 프로젝트로 지정');
     expect(portalProjectSettingsSource).toContain('프로젝트명, 계약 대상, 담당자로 검색');

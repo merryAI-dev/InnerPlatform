@@ -72,6 +72,10 @@ export function getMigrationAuditStatusLabel(status: MigrationAuditConsoleStatus
   return '검토 대기';
 }
 
+export function isMigrationAuditPmRegistration(record: MigrationAuditConsoleRecord): boolean {
+  return !!record.request || record.project.registrationSource === 'pm_portal';
+}
+
 export function buildMigrationAuditConsoleRecords(
   projects: Project[],
   requests: ProjectRequest[],

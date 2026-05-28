@@ -229,7 +229,7 @@ export function PortalProjectSettings() {
       return;
     }
 
-    navigate('/portal', { replace: true });
+    navigate('/portal/project-select', { replace: true });
   };
 
   return (

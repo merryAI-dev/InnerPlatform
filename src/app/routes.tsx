@@ -46,7 +46,6 @@ const NotFoundPage = lazy(() => import('./components/layout/NotFoundPage').then(
 // Portal pages
 const PortalOnboarding = lazy(() => import('./components/portal/PortalOnboarding').then(m => ({ default: m.PortalOnboarding })));
 const PortalProjectSelectPage = lazy(() => import('./components/portal/PortalProjectSelectPage').then(m => ({ default: m.PortalProjectSelectPage })));
-const PortalDashboard = lazy(() => import('./components/portal/PortalDashboard').then(m => ({ default: m.PortalDashboard })));
 const PortalBudget = lazy(() => import('./components/portal/PortalBudget').then(m => ({ default: m.PortalBudget })));
 const PortalPersonnel = lazy(() => import('./components/portal/PortalPersonnel').then(m => ({ default: m.PortalPersonnel })));
 const PortalChangeRequests = lazy(() => import('./components/portal/PortalChangeRequests').then(m => ({ default: m.PortalChangeRequests })));
@@ -167,7 +166,7 @@ export const router = createBrowserRouter([
     path: '/portal',
     element: <PortalRouteShell />,
     children: [
-      { index: true, element: <S C={PortalDashboard} /> },
+      { index: true, element: <Navigate to="/portal/project-select" replace /> },
       // ── Company Board (전사 게시판) ──
       {
         path: 'board',
@@ -179,7 +178,7 @@ export const router = createBrowserRouter([
       { path: 'onboarding', element: <S C={PortalOnboarding} /> },
       { path: 'project-select', element: <S C={PortalProjectSelectPage} /> },
       { path: 'project-settings', element: <S C={PortalProjectSettings} /> },
-      { path: 'submissions', element: <Navigate to="/portal" replace /> },
+      { path: 'submissions', element: <Navigate to="/portal/project-select" replace /> },
       { path: 'payroll', element: <S C={PortalPayrollPage} /> },
       { path: 'cashflow', element: <S C={PortalCashflowPage} /> },
       { path: 'budget', element: <S C={PortalBudget} /> },

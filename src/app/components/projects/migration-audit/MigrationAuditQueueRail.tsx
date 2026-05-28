@@ -5,7 +5,10 @@ import type {
   MigrationAuditConsoleRecord,
   MigrationAuditConsoleStatus,
 } from '../../../platform/project-migration-console';
-import { getMigrationAuditStatusLabel } from '../../../platform/project-migration-console';
+import {
+  getMigrationAuditStatusLabel,
+  isMigrationAuditPmRegistration,
+} from '../../../platform/project-migration-console';
 
 interface MigrationAuditQueueRailProps {
   records: MigrationAuditConsoleRecord[];
@@ -25,7 +28,7 @@ function formatRequestedAt(value: string) {
 }
 
 function getSourceLabel(record: MigrationAuditConsoleRecord) {
-  return record.project.registrationSource === 'pm_portal' ? 'PM 등록' : '기존 등록';
+  return isMigrationAuditPmRegistration(record) ? 'PM 등록' : '기존 등록';
 }
 
 export function MigrationAuditQueueRail({

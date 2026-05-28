@@ -12,6 +12,7 @@ import type { MigrationAuditConsoleRecord } from '../../../platform/project-migr
 import {
   describeMigrationAuditActionState,
   getMigrationAuditStatusLabel,
+  isMigrationAuditPmRegistration,
 } from '../../../platform/project-migration-console';
 import { buildMigrationReviewDossier } from '../../../platform/project-migration-review-dossier';
 import { Badge } from '../../ui/badge';
@@ -167,7 +168,7 @@ export function MigrationAuditDetailPanel({
 
   const dossier = buildMigrationReviewDossier(record.project, record.request);
   const actionState = describeMigrationAuditActionState(record);
-  const isPmPortalProject = record.project.registrationSource === 'pm_portal';
+  const isPmPortalProject = isMigrationAuditPmRegistration(record);
   const contractDocument = record.project.contractDocument || record.request?.payload.contractDocument || null;
 
   return (
