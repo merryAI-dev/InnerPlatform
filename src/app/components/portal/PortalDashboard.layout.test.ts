@@ -8,9 +8,9 @@ const portalDashboardSource = readFileSync(
 );
 
 describe('PortalDashboard closure', () => {
-  it('redirects the closed PM project status dashboard to project selection', () => {
-    expect(portalDashboardSource).toContain('Navigate');
-    expect(portalDashboardSource).toContain('to="/portal/project-select"');
+  it('keeps the closed PM project status dashboard off the route without redirecting', () => {
+    expect(portalDashboardSource).toContain('PortalProjectSelectPage');
+    expect(portalDashboardSource).not.toContain('Navigate');
     expect(portalDashboardSource).not.toContain('프로젝트 상세');
     expect(portalDashboardSource).not.toContain('내 제출 현황');
     expect(portalDashboardSource).not.toContain('사업 상태');

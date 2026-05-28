@@ -68,11 +68,13 @@ describe('PortalLayout shell actions', () => {
     expect(portalLayoutSource).not.toContain("/portal/submissions");
   });
 
-  it('keeps onboarding bypass routes aligned with navigation policy', () => {
+  it('keeps portal navigation explicit without onboarding or project-select redirect effects', () => {
     expect(portalLayoutSource).toContain('isPortalStandaloneEntryPath');
     expect(portalLayoutSource).toContain("navigate('/portal/project-select')");
     expect(portalLayoutSource).toContain("navigate('/portal/weekly-expenses')");
     expect(portalLayoutSource).toContain("navigate('/portal/register-project')");
+    expect(portalLayoutSource).not.toContain('shouldForcePortalOnboarding');
+    expect(portalLayoutSource).not.toContain('resolvePortalProjectSelectPath(currentPath)');
   });
 
   it('exposes stable portal navigation test ids for release-gate flows', () => {

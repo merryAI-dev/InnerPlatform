@@ -84,12 +84,14 @@ describe('portal project selection helpers', () => {
     })).toBe('p-managed');
   });
 
-  it('wraps portal routes for project selection and preserves current work routes on switch', () => {
-    expect(resolvePortalProjectSelectPath('/portal/budget')).toBe('/portal/project-select?redirect=%2Fportal%2Fbudget');
+  it('keeps project selection and switch targets explicit without falling back to /portal', () => {
+    expect(resolvePortalProjectSelectPath('/portal')).toBe('/portal/project-select');
+    expect(resolvePortalProjectSelectPath('/portal/budget')).toBe('/portal/project-select');
     expect(resolvePortalProjectSelectPath('/portal/project-select')).toBe('/portal/project-select');
-    expect(resolvePortalProjectSelectPath('/portal/project-select?redirect=%2Fportal%2Fbudget')).toBe('/portal/project-select?redirect=%2Fportal%2Fbudget');
+    expect(resolvePortalProjectSelectPath('/portal/project-select?redirect=%2Fportal%2Fbudget')).toBe('/portal/project-select');
     expect(resolvePortalProjectSwitchPath('/portal/cashflow')).toBe('/portal/cashflow');
-    expect(resolvePortalProjectSwitchPath('/portal/project-select')).toBe('/portal');
-    expect(resolvePortalProjectSwitchPath('/portal/project-select?redirect=%2Fportal%2Fbudget')).toBe('/portal');
+    expect(resolvePortalProjectSwitchPath('/portal')).toBe('/portal/budget');
+    expect(resolvePortalProjectSwitchPath('/portal/project-select')).toBe('/portal/budget');
+    expect(resolvePortalProjectSwitchPath('/portal/project-select?redirect=%2Fportal%2Fbudget')).toBe('/portal/budget');
   });
 });

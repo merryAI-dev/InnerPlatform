@@ -14,7 +14,6 @@ import {
   resolvePostLoginPath,
   resolveWorkspaceSelectionPath,
   shouldPromptWorkspaceSelection,
-  shouldForcePortalOnboarding,
 } from './navigation';
 
 const ALL_ROLES = ['admin', 'finance', 'pm', 'viewer'] as const;
@@ -111,27 +110,27 @@ describe('resolveHomePath', () => {
     expect(resolveHomePath('admin', 'admin')).toBe('/');
   });
 
-  it('admin with portal preference goes to /portal', () => {
-    expect(resolveHomePath('admin', 'portal')).toBe('/portal');
+  it('admin with portal preference goes to the explicit portal home', () => {
+    expect(resolveHomePath('admin', 'portal')).toBe('/portal/project-select');
   });
 
   it('finance defaults to /', () => {
     expect(resolveHomePath('finance')).toBe('/');
   });
 
-  it('pm and viewer default to /portal', () => {
-    expect(resolveHomePath('pm')).toBe('/portal');
-    expect(resolveHomePath('viewer')).toBe('/portal');
+  it('pm and viewer default to the explicit portal home', () => {
+    expect(resolveHomePath('pm')).toBe('/portal/project-select');
+    expect(resolveHomePath('viewer')).toBe('/portal/project-select');
   });
 
-  it('unknown roles default to /portal', () => {
-    expect(resolveHomePath('unknown_role')).toBe('/portal');
-    expect(resolveHomePath('')).toBe('/portal');
-    expect(resolveHomePath(null)).toBe('/portal');
+  it('unknown roles default to the explicit portal home', () => {
+    expect(resolveHomePath('unknown_role')).toBe('/portal/project-select');
+    expect(resolveHomePath('')).toBe('/portal/project-select');
+    expect(resolveHomePath(null)).toBe('/portal/project-select');
   });
 
   it('normalizes role casing', () => {
-    expect(resolveHomePath(' PM ')).toBe('/portal');
+    expect(resolveHomePath(' PM ')).toBe('/portal/project-select');
     expect(resolveHomePath('ADMIN')).toBe('/');
     expect(resolveHomePath('FINANCE')).toBe('/');
   });
@@ -171,14 +170,14 @@ describe('resolvePostLoginPath', () => {
   });
 
   it('pm falls back to portal for admin-only paths', () => {
-    expect(resolvePostLoginPath('pm', undefined, '/approvals')).toBe('/portal');
-    expect(resolvePostLoginPath('pm', undefined, '/settings')).toBe('/portal');
-    expect(resolvePostLoginPath('pm', undefined, '/users')).toBe('/portal');
+    expect(resolvePostLoginPath('pm', undefined, '/approvals')).toBe('/portal/project-select');
+    expect(resolvePostLoginPath('pm', undefined, '/settings')).toBe('/portal/project-select');
+    expect(resolvePostLoginPath('pm', undefined, '/users')).toBe('/portal/project-select');
   });
 
   it('viewer falls back to portal for admin-only paths', () => {
-    expect(resolvePostLoginPath('viewer', undefined, '/settings')).toBe('/portal');
-    expect(resolvePostLoginPath('viewer', undefined, '/users')).toBe('/portal');
+    expect(resolvePostLoginPath('viewer', undefined, '/settings')).toBe('/portal/project-select');
+    expect(resolvePostLoginPath('viewer', undefined, '/users')).toBe('/portal/project-select');
   });
 
   // ── special paths ──
@@ -189,8 +188,8 @@ describe('resolvePostLoginPath', () => {
 
   it('no requestedPath → fallback home', () => {
     expect(resolvePostLoginPath('admin', 'admin')).toBe('/');
-    expect(resolvePostLoginPath('pm', undefined)).toBe('/portal');
-    expect(resolvePostLoginPath('admin', 'portal')).toBe('/portal');
+    expect(resolvePostLoginPath('pm', undefined)).toBe('/portal/project-select');
+    expect(resolvePostLoginPath('admin', 'portal')).toBe('/portal/project-select');
   });
 
   it('non-string requestedPath → fallback', () => {
@@ -203,15 +202,15 @@ describe('resolvePostLoginPath', () => {
   });
 
   it('empty role requesting portal path → fallback (canEnterPortalWorkspace false)', () => {
-    expect(resolvePostLoginPath('', undefined, '/portal/budget')).toBe('/portal');
+    expect(resolvePostLoginPath('', undefined, '/portal/budget')).toBe('/portal/project-select');
   });
 });
 
 describe('resolvePortalEntryPath', () => {
-  it('routes portal logins through project-select while preserving the requested portal path', () => {
-    expect(resolvePortalEntryPath('pm', undefined, '/portal/budget')).toBe('/portal/project-select?redirect=%2Fportal%2Fbudget');
-    expect(resolvePortalEntryPath('admin', 'portal', '/portal/cashflow')).toBe('/portal/project-select?redirect=%2Fportal%2Fcashflow');
-    expect(resolvePortalEntryPath('pm', undefined, '/portal/project-select?redirect=%2Fportal%2Fbudget')).toBe('/portal/project-select?redirect=%2Fportal%2Fbudget');
+  it('preserves explicit portal paths without adding project-select redirects', () => {
+    expect(resolvePortalEntryPath('pm', undefined, '/portal/budget')).toBe('/portal/budget');
+    expect(resolvePortalEntryPath('admin', 'portal', '/portal/cashflow')).toBe('/portal/cashflow');
+    expect(resolvePortalEntryPath('pm', undefined, '/portal/project-select?redirect=%2Fportal%2Fbudget')).toBe('/portal/project-select');
     expect(resolvePortalEntryPath('admin', 'admin', '/settings')).toBe('/settings');
   });
 });
@@ -236,18 +235,18 @@ describe('resolveLoginSuccessPath', () => {
 
   it('preserves explicit deep links after login when they are role-safe', () => {
     expect(resolveLoginSuccessPath('admin', 'admin', '/users')).toBe('/users');
-    expect(resolveLoginSuccessPath('pm', undefined, '/portal/budget')).toBe('/portal/project-select?redirect=%2Fportal%2Fbudget');
-    expect(resolveLoginSuccessPath('pm', undefined, '/users')).toBe('/portal/project-select?redirect=%2Fportal');
+    expect(resolveLoginSuccessPath('pm', undefined, '/portal/budget')).toBe('/portal/budget');
+    expect(resolveLoginSuccessPath('pm', undefined, '/users')).toBe('/portal/project-select');
     expect(resolveLoginSuccessPath('pm', undefined, '/portal/cashflow', {
       viewportWidth: 390,
-    })).toBe('/portal/project-select?redirect=%2Fportal%2Fcashflow');
+    })).toBe('/portal/cashflow');
   });
 });
 
 describe('resolveWorkspaceSelectionPath', () => {
-  it('keeps only portal redirects when the user explicitly selects portal space', () => {
+  it('keeps explicit portal paths when the user explicitly selects portal space', () => {
     expect(resolveWorkspaceSelectionPath('admin', 'portal', '/settings')).toBe('/portal/project-select');
-    expect(resolveWorkspaceSelectionPath('admin', 'portal', '/portal/budget')).toBe('/portal/project-select?redirect=%2Fportal%2Fbudget');
+    expect(resolveWorkspaceSelectionPath('admin', 'portal', '/portal/budget')).toBe('/portal/budget');
   });
 
   it('keeps only admin redirects when the user explicitly selects admin space', () => {
@@ -261,6 +260,7 @@ describe('requested redirect restoration', () => {
     expect(normalizeRequestedPath('/users')).toBe('/users');
     expect(normalizeRequestedPath('/login')).toBe('');
     expect(normalizeRequestedPath('/workspace-select')).toBe('');
+    expect(normalizeRequestedPath('/portal/project-select?redirect=%2Fportal%2Fbudget')).toBe('/portal/project-select');
     expect(normalizeRequestedPath('https://example.com/users')).toBe('');
   });
 
@@ -286,61 +286,5 @@ describe('portal standalone entry paths', () => {
     expect(isPortalStandaloneEntryPath('/portal/register-project')).toBe(true);
     expect(isPortalStandaloneEntryPath('/portal')).toBe(false);
     expect(isPortalStandaloneEntryPath('/portal/budget')).toBe(false);
-  });
-});
-
-describe('shouldForcePortalOnboarding', () => {
-  it('forces unregistered pm into onboarding', () => {
-    expect(shouldForcePortalOnboarding({
-      isAuthenticated: true, role: 'pm', isRegistered: false, pathname: '/portal',
-    })).toBe(true);
-  });
-
-  it('forces unregistered viewer into onboarding', () => {
-    expect(shouldForcePortalOnboarding({
-      isAuthenticated: true, role: 'viewer', isRegistered: false, pathname: '/portal/budget',
-    })).toBe(true);
-  });
-
-  it('does NOT force on bypass paths (onboarding, project-settings, project-select, weekly-expenses)', () => {
-    const bypassPaths = ['/portal/onboarding', '/portal/project-settings', '/portal/project-select', '/portal/register-project', '/portal/weekly-expenses'];
-    for (const pathname of bypassPaths) {
-      expect(shouldForcePortalOnboarding({
-        isAuthenticated: true, role: 'pm', isRegistered: false, pathname,
-      }), `pm on ${pathname}`).toBe(false);
-      expect(shouldForcePortalOnboarding({
-        isAuthenticated: true, role: 'viewer', isRegistered: false, pathname,
-      }), `viewer on ${pathname}`).toBe(false);
-    }
-  });
-
-  it('does NOT force if registered', () => {
-    expect(shouldForcePortalOnboarding({
-      isAuthenticated: true, role: 'pm', isRegistered: true, pathname: '/portal',
-    })).toBe(false);
-  });
-
-  it('does NOT force for admin-space roles (admin, finance)', () => {
-    expect(shouldForcePortalOnboarding({
-      isAuthenticated: true, role: 'admin', isRegistered: false, pathname: '/portal',
-    })).toBe(false);
-    expect(shouldForcePortalOnboarding({
-      isAuthenticated: true, role: 'finance', isRegistered: false, pathname: '/portal',
-    })).toBe(false);
-  });
-
-  it('does NOT force if not authenticated', () => {
-    expect(shouldForcePortalOnboarding({
-      isAuthenticated: false, role: 'pm', isRegistered: false, pathname: '/portal',
-    })).toBe(false);
-  });
-
-  it('does NOT force for empty/null role', () => {
-    expect(shouldForcePortalOnboarding({
-      isAuthenticated: true, role: '', isRegistered: false, pathname: '/portal',
-    })).toBe(false);
-    expect(shouldForcePortalOnboarding({
-      isAuthenticated: true, role: null, isRegistered: false, pathname: '/portal',
-    })).toBe(false);
   });
 });

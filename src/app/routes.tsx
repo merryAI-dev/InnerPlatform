@@ -166,7 +166,7 @@ export const router = createBrowserRouter([
     path: '/portal',
     element: <PortalRouteShell />,
     children: [
-      { index: true, element: <Navigate to="/portal/project-select" replace /> },
+      { index: true, element: <S C={PortalProjectSelectPage} /> },
       // ── Company Board (전사 게시판) ──
       {
         path: 'board',
@@ -178,7 +178,7 @@ export const router = createBrowserRouter([
       { path: 'onboarding', element: <S C={PortalOnboarding} /> },
       { path: 'project-select', element: <S C={PortalProjectSelectPage} /> },
       { path: 'project-settings', element: <S C={PortalProjectSettings} /> },
-      { path: 'submissions', element: <Navigate to="/portal/project-select" replace /> },
+      { path: 'submissions', element: <S C={PortalProjectSelectPage} /> },
       { path: 'payroll', element: <S C={PortalPayrollPage} /> },
       { path: 'cashflow', element: <S C={PortalCashflowPage} /> },
       { path: 'budget', element: <S C={PortalBudget} /> },

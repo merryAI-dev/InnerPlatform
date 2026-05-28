@@ -8,7 +8,6 @@ import { PROJECT_STATUS_LABELS, type Project } from '../../data/types';
 import {
   canEnterPortalWorkspace,
   isAdminSpaceRole,
-  resolveRequestedRedirectPath,
 } from '../../platform/navigation';
 import {
   resolvePortalProjectCandidates,
@@ -90,7 +89,6 @@ export function PortalProjectSelectPage() {
   const navigate = useNavigate();
   const { isAuthenticated, isLoading: authLoading, user: authUser } = useAuth();
   const {
-    isRegistered,
     isLoading: portalLoading,
     portalUser,
     activeProjectId,
@@ -101,9 +99,7 @@ export function PortalProjectSelectPage() {
   const [pendingProjectId, setPendingProjectId] = useState('');
 
   const currentPath = `${location.pathname}${location.search}${location.hash}`;
-  const redirectTarget = resolvePortalProjectSwitchPath(
-    resolveRequestedRedirectPath(undefined, location.search) || '/portal',
-  );
+  const redirectTarget = resolvePortalProjectSwitchPath('/portal/budget');
   const assignedProjectIds = useMemo(() => normalizeProjectIds([
     ...(Array.isArray(portalUser?.projectIds) ? portalUser.projectIds : []),
     portalUser?.projectId,
@@ -135,10 +131,7 @@ export function PortalProjectSelectPage() {
       navigate('/', { replace: true });
       return;
     }
-    if (!isRegistered && !isAdminSpaceRole(authUser?.role)) {
-      navigate('/portal/onboarding', { replace: true });
-    }
-  }, [authLoading, authUser?.role, currentPath, isAuthenticated, isRegistered, navigate, portalLoading]);
+  }, [authLoading, authUser?.role, currentPath, isAuthenticated, navigate, portalLoading]);
 
   const handleStart = async (projectId: string) => {
     setPendingProjectId(projectId);
@@ -182,6 +175,8 @@ export function PortalProjectSelectPage() {
             <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5">
               <Search className="h-4 w-4 text-slate-400" />
               <Input
+                id="portal-project-search"
+                name="portalProjectSearch"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="프로젝트명, 계약 대상, 유형, PM으로 검색"

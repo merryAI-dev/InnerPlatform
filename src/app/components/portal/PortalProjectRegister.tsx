@@ -104,8 +104,8 @@ export function PortalProjectRegister() {
                 수정 화면과 승인 화면에서 같은 입력값을 기준으로 검토됩니다.
               </p>
             </div>
-            <Button onClick={() => navigate('/portal')} className="gap-2">
-              포털로 돌아가기
+            <Button onClick={() => navigate('/portal/project-select')} className="gap-2">
+              프로젝트 선택으로 돌아가기
             </Button>
           </CardContent>
         </Card>
@@ -123,7 +123,7 @@ export function PortalProjectRegister() {
       actions={[{ id: 'submit', label: '등록 요청 저장', icon: Send }]}
       busyActionId={busyActionId}
       onContractFileUpload={handleContractFileUpload}
-      onCancel={() => navigate('/portal')}
+      onCancel={() => navigate('/portal/project-select')}
       onSubmit={(draft) => void handleSubmit(draft)}
     />
   );

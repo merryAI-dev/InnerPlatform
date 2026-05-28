@@ -29,7 +29,7 @@ describe('AppLayout LAB shell contract', () => {
   it('keeps the user portal switch next to the realtime status instead of inside LAB navigation', () => {
     expect(source).toContain('function openPortalWorkspace()');
     expect(source).toContain("setWorkspacePreference('portal'");
-    expect(source).toContain("navigate('/portal')");
+    expect(source).toContain("navigate('/portal/project-select')");
     expect(source).toContain('로그아웃 없이 사용자 포털로 이동');
     expect(source).toContain('사용자 포털');
   });

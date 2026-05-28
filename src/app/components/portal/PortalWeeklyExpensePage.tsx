@@ -855,7 +855,7 @@ export function PortalWeeklyExpensePage() {
           </p>
           <div className="flex flex-wrap gap-2">
             <Button size="sm" onClick={() => navigate('/portal/project-settings')}>사업 연결 확인하기</Button>
-            <Button variant="outline" size="sm" onClick={() => navigate('/portal')}>포털 홈으로 이동</Button>
+            <Button variant="outline" size="sm" onClick={() => navigate('/portal/project-select')}>프로젝트 선택으로 이동</Button>
           </div>
         </div>
       </div>
