@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Settings, Users, BookOpen, Building2, Plus, Upload, Shield,
+  Settings, Users, BookOpen, Building2, Plus, Upload, Shield, Search, Save, Trash2,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { ROLE_META } from '../../platform/role-meta';
 import { hasPermission, type PlatformPermission } from '../../platform/rbac';
 import { useLocation, useNavigate } from 'react-router';
@@ -43,7 +44,7 @@ const PERMISSION_LABELS: Partial<Record<PlatformPermission, string>> = {
 };
 
 export function SettingsPage() {
-  const { org, members, templates } = useAppStore();
+  const { org, members, templates, upsertMember, removeMember } = useAppStore();
   const { isAuthenticated, user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -51,8 +52,69 @@ export function SettingsPage() {
   const requestedTab = searchParams.get('tab') || 'org';
   const initialTab = PRIMARY_SETTINGS_TAB_SET.has(requestedTab) ? requestedTab : 'org';
   const [tab, setTab] = useState(initialTab);
+  const [memberSearch, setMemberSearch] = useState('');
+  const [savingMember, setSavingMember] = useState(false);
+  const [memberDraft, setMemberDraft] = useState({
+    uid: '',
+    name: '',
+    email: '',
+    role: 'pm' as DisplayRole,
+  });
   const currentPath = `${location.pathname}${location.search}${location.hash}`;
   const activeWorkspace = resolveActiveWorkspacePreference(user?.lastWorkspace, user?.defaultWorkspace);
+  const filteredMembers = useMemo(() => {
+    const query = memberSearch.trim().toLowerCase();
+    if (!query) return members;
+    return members.filter((member) => [
+      member.name,
+      member.email,
+      member.uid,
+      ROLE_META[member.role]?.label,
+      member.role,
+    ].some((value) => String(value || '').toLowerCase().includes(query)));
+  }, [memberSearch, members]);
+
+  const resetMemberDraft = () => {
+    setMemberDraft({ uid: '', name: '', email: '', role: 'pm' });
+  };
+
+  const handleSaveMember = async () => {
+    const uid = memberDraft.uid.trim();
+    const name = memberDraft.name.trim();
+    const email = memberDraft.email.trim().toLowerCase();
+    if (!uid || !name || !email) {
+      toast.error('UID, 이름, 이메일을 모두 입력해 주세요.');
+      return;
+    }
+
+    setSavingMember(true);
+    try {
+      await upsertMember({
+        uid,
+        name,
+        email,
+        role: memberDraft.role,
+        status: 'ACTIVE',
+      });
+      toast.success('구성원 원장을 저장했습니다.');
+      resetMemberDraft();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '구성원 원장 저장에 실패했습니다.');
+    } finally {
+      setSavingMember(false);
+    }
+  };
+
+  const handleRemoveMember = async (uid: string, name: string) => {
+    if (!window.confirm(`${name || uid} 구성원을 원장에서 제거할까요?`)) return;
+    try {
+      await removeMember(uid);
+      toast.success('구성원 원장에서 제거했습니다.');
+      if (memberDraft.uid === uid) resetMemberDraft();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '구성원 제거에 실패했습니다.');
+    }
+  };
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -152,20 +214,85 @@ export function SettingsPage() {
 
         {/* Members */}
         <TabsContent value="members">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-base">구성원 ({members.length}명)</CardTitle>
-                <Button variant="outline" size="sm" className="gap-1.5" onClick={() => navigate('/users')}>
-                  <Plus className="w-3.5 h-3.5" /> 구성원·역할 관리
+          <div className="space-y-4">
+            <Card className="border-slate-200">
+              <CardHeader>
+                <CardTitle className="text-base">구성원 원장 추가/수정</CardTitle>
+                <p className="text-[12px] text-muted-foreground">
+                  사업 담당자 선택값은 이 원장의 UID를 저장합니다. 이미 로그인한 구성원은 Firebase UID를 사용하세요.
+                </p>
+              </CardHeader>
+              <CardContent className="grid gap-3 lg:grid-cols-[1fr_1fr_1fr_180px_auto_auto] lg:items-end">
+                <div>
+                  <Label className="text-xs">UID *</Label>
+                  <Input
+                    value={memberDraft.uid}
+                    onChange={(event) => setMemberDraft((prev) => ({ ...prev, uid: event.target.value }))}
+                    placeholder="Firebase UID"
+                    className="mt-1 border-slate-300"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">이름 *</Label>
+                  <Input
+                    value={memberDraft.name}
+                    onChange={(event) => setMemberDraft((prev) => ({ ...prev, name: event.target.value }))}
+                    placeholder="홍길동(닉네임)"
+                    className="mt-1 border-slate-300"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">이메일 *</Label>
+                  <Input
+                    value={memberDraft.email}
+                    onChange={(event) => setMemberDraft((prev) => ({ ...prev, email: event.target.value }))}
+                    placeholder="name@mysc.co.kr"
+                    className="mt-1 border-slate-300"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">역할</Label>
+                  <Select value={memberDraft.role} onValueChange={(value) => setMemberDraft((prev) => ({ ...prev, role: value as DisplayRole }))}>
+                    <SelectTrigger className="mt-1 h-9 border-slate-300 bg-white">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {DISPLAY_ROLES.map((role) => (
+                        <SelectItem key={role} value={role}>{ROLE_META[role]?.label ?? role}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Button type="button" onClick={() => void handleSaveMember()} disabled={savingMember} className="gap-2">
+                  <Save className="h-4 w-4" /> 저장
                 </Button>
-              </div>
-              <p className="text-[12px] text-muted-foreground">
-                신규 구성원은 첫 로그인 시 자동 등록됩니다 (기본 역할: PM).
-                역할 변경·추가·삭제는 <button type="button" className="underline underline-offset-2" onClick={() => navigate('/users')}>구성원 관리 페이지</button>에서 할 수 있어요.
-              </p>
-            </CardHeader>
-            <CardContent>
+                <Button type="button" variant="outline" onClick={resetMemberDraft}>
+                  초기화
+                </Button>
+              </CardContent>
+            </Card>
+
+            <Card className="border-slate-200">
+              <CardHeader>
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <CardTitle className="text-base">구성원 원장 ({members.length}명)</CardTitle>
+                    <p className="mt-1 text-[12px] text-muted-foreground">
+                      실제 데이터는 Firestore orgs/{org.id}/members에 저장됩니다.
+                    </p>
+                  </div>
+                  <div className="relative w-full lg:w-[320px]">
+                    <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+                    <Input
+                      value={memberSearch}
+                      onChange={(event) => setMemberSearch(event.target.value)}
+                      placeholder="이름, 이메일, UID 검색"
+                      className="h-9 border-slate-300 pl-9"
+                    />
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -173,10 +300,11 @@ export function SettingsPage() {
                     <TableHead>이메일</TableHead>
                     <TableHead>역할</TableHead>
                     <TableHead>UID</TableHead>
+                    <TableHead className="w-[160px] text-right">관리</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {members.map(m => (
+                  {filteredMembers.map(m => (
                     <TableRow key={m.uid}>
                       <TableCell style={{ fontWeight: 500 }}>{m.name}</TableCell>
                       <TableCell className="text-sm text-muted-foreground">{m.email}</TableCell>
@@ -186,12 +314,39 @@ export function SettingsPage() {
                         </span>
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground font-mono">{m.uid}</TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setMemberDraft({
+                              uid: m.uid,
+                              name: m.name,
+                              email: m.email || '',
+                              role: DISPLAY_ROLES.includes(m.role as DisplayRole) ? m.role as DisplayRole : 'pm',
+                            })}
+                          >
+                            수정
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="border-slate-300 text-red-700 hover:text-red-700"
+                            onClick={() => void handleRemoveMember(m.uid, m.name)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
 
         {/* Templates */}

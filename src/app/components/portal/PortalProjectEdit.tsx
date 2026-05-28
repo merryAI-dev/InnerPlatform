@@ -85,7 +85,7 @@ export function PortalProjectEdit() {
   const navigate = useNavigate();
   const { user: authUser } = useAuth();
   const { db, isOnline, orgId } = useFirebase();
-  const { myProject } = usePortalStore();
+  const { members, myProject } = usePortalStore();
   const [requestDoc, setRequestDoc] = useState<ProjectRequest | null>(null);
   const [loadingRequest, setLoadingRequest] = useState(true);
   const [busyActionId, setBusyActionId] = useState<string | null>(null);
@@ -347,6 +347,7 @@ export function PortalProjectEdit() {
       description="등록 화면과 같은 5단계 구조로 수정하고, 승인 상태는 변경 이력과 함께 관리됩니다."
       initialDraft={initialDraft}
       draftKey={`portal-edit-${myProject.id}-${requestDoc?.updatedAt || myProject.updatedAt}`}
+      members={members}
       actions={[
         { id: 'save', label: '저장', icon: Save },
         ...(canResubmit ? [{ id: 'resubmit', label: '수정 후 다시 제출', icon: SendHorizontal, variant: 'secondary' as const }] : []),

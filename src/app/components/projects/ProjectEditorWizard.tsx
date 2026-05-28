@@ -412,20 +412,17 @@ export function ProjectEditorWizard({
   const teamMembersSummary = formatProjectTeamMembersSummary(draft.teamMembersDetailed, '', '\n');
   const projectTypeOptions = getProjectTypeSelectableOptions(draft.type);
   const contractTypeOptions = getProjectContractTypeSelectableOptions(draft.contractType);
-  const ownerOptions = useMemo(() => {
-    if (!draft.registeredById || members.some((member) => member.uid === draft.registeredById)) {
-      return members;
-    }
-    return [
-      ...members,
-      {
-        uid: draft.registeredById,
-        name: draft.registeredByName || draft.registeredById,
-        email: draft.registeredByEmail || '',
-        role: 'pm' as const,
-      },
-    ];
-  }, [draft.registeredByEmail, draft.registeredById, draft.registeredByName, members]);
+  const ownerOptions = useMemo(
+    () => [...members]
+      .filter((member) => String(member.uid || '').trim())
+      .sort((left, right) => String(left.name || left.email || left.uid).localeCompare(String(right.name || right.email || right.uid), 'ko')),
+    [members],
+  );
+  const selectedOwner = useMemo(
+    () => ownerOptions.find((member) => member.uid === draft.registeredById) || null,
+    [draft.registeredById, ownerOptions],
+  );
+  const hasUnlinkedStoredOwner = Boolean(draft.registeredById && !selectedOwner);
 
   useEffect(() => {
     if (!draft.registeredById) return;
@@ -961,30 +958,38 @@ export function ProjectEditorWizard({
       <div className="grid gap-4 lg:grid-cols-2">
         <div>
           <Label className="text-xs">사업 담당자 *</Label>
-          <Select value={draft.registeredById || 'none'} onValueChange={(value) => {
-            const member = members.find((item) => item.uid === value);
+          <Select value={selectedOwner?.uid} onValueChange={(value) => {
+            const member = ownerOptions.find((item) => item.uid === value);
+            if (!member) return;
             setDraft((prev) => createProjectEditorDraft({
               ...prev,
-              registeredById: value === 'none' ? '' : value,
-              registeredByName: member?.name || '',
-              registeredByEmail: member?.email || '',
-              managerId: value === 'none' ? '' : value,
-              managerName: member?.name || '',
+              registeredById: member.uid,
+              registeredByName: member.name || member.email || member.uid,
+              registeredByEmail: member.email || '',
+              managerId: member.uid,
+              managerName: member.name || member.email || member.uid,
             }));
-          }}>
-            <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue placeholder="조직원 선택" /></SelectTrigger>
+          }} disabled={ownerOptions.length === 0}>
+            <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue placeholder="구성원 원장에서 선택" /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="none">선택 안 함</SelectItem>
               {ownerOptions.map((member) => (
                 <SelectItem key={member.uid} value={member.uid}>
-                  {member.email ? `${member.name} (${member.email})` : member.name}
+                  {member.email ? `${member.name || member.uid} (${member.email})` : (member.name || member.uid)}
                 </SelectItem>
               ))}
+              {ownerOptions.length === 0 ? (
+                <SelectItem value="__no_org_members__" disabled>구성원 원장을 불러오는 중입니다</SelectItem>
+              ) : null}
             </SelectContent>
           </Select>
           <p className="mt-1 text-[11px] text-muted-foreground">
-            프로젝트 현황과 PM 포털 노출은 이 조직원 계정 기준으로 연결됩니다.
+            구성원 원장(orgs/{'{'}orgId{'}'}/members)의 UID를 저장합니다. 프로젝트 현황과 PM 포털 노출은 이 UID 기준으로 연결됩니다.
           </p>
+          {hasUnlinkedStoredOwner ? (
+            <p className="mt-1 text-[11px] text-red-700">
+              현재 저장된 담당자 값이 구성원 원장에 없습니다. 원장에서 다시 선택해야 저장 후 연결됩니다.
+            </p>
+          ) : null}
         </div>
       </div>
       <div className="flex items-center justify-between gap-3">

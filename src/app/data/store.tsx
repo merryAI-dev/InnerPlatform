@@ -94,8 +94,8 @@ interface AppState {
 }
 
 interface AppActions {
-  upsertMember: (member: OrgMember & Record<string, unknown>) => void;
-  removeMember: (uid: string) => void;
+  upsertMember: (member: OrgMember & Record<string, unknown>) => Promise<void>;
+  removeMember: (uid: string) => Promise<void>;
   addProject: (p: Project) => Promise<void>;
   updateProject: (id: string, updates: Partial<Project>) => Promise<void>;
   trashProject: (id: string, reason?: string) => Promise<void>;
@@ -351,27 +351,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
   }, [runStoreMutation, writeStrategy, orgId, bffActor, db, auditActor]);
 
-  const upsertMember = useCallback((member: OrgMember & Record<string, unknown>) => {
-    if (firestoreEnabled && db) {
-      upsertMemberFS(db, orgId, member, auditActor).catch(console.error);
-      return;
-    }
-    setLocalMembers((prev) => {
-      const idx = prev.findIndex((m) => m.uid === member.uid);
-      if (idx === -1) return [member, ...prev];
-      const next = [...prev];
-      next[idx] = { ...next[idx], ...member };
-      return next;
+  const upsertMember = useCallback(async (member: OrgMember & Record<string, unknown>) => {
+    await runStoreMutation('upsertMember', async () => {
+      if (firestoreEnabled && db) {
+        await upsertMemberFS(db, orgId, member, auditActor);
+        return;
+      }
+      setLocalMembers((prev) => {
+        const idx = prev.findIndex((m) => m.uid === member.uid);
+        if (idx === -1) return [member, ...prev];
+        const next = [...prev];
+        next[idx] = { ...next[idx], ...member };
+        return next;
+      });
     });
-  }, [firestoreEnabled, db, orgId, auditActor]);
+  }, [runStoreMutation, firestoreEnabled, db, orgId, auditActor]);
 
-  const removeMember = useCallback((uid: string) => {
-    if (firestoreEnabled && db) {
-      deleteMemberFS(db, orgId, uid, auditActor).catch(console.error);
-      return;
-    }
-    setLocalMembers((prev) => prev.filter((m) => m.uid !== uid));
-  }, [firestoreEnabled, db, orgId, auditActor]);
+  const removeMember = useCallback(async (uid: string) => {
+    await runStoreMutation('removeMember', async () => {
+      if (firestoreEnabled && db) {
+        await deleteMemberFS(db, orgId, uid, auditActor);
+        return;
+      }
+      setLocalMembers((prev) => prev.filter((m) => m.uid !== uid));
+    });
+  }, [runStoreMutation, firestoreEnabled, db, orgId, auditActor]);
 
   const updateProject = useCallback(async (id: string, updates: Partial<Project>) => {
     await runStoreMutation('updateProject', async () => {

@@ -67,6 +67,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 MYSC 사업관리 통합 플랫폼 — an enterprise business management platform for a Korean social enterprise (MYSC). Manages projects, ledgers, transactions, payroll, cashflow, personnel, budgets, training, and career profiles. **All user-facing UI text is in Korean (한국어).**
 
+### UI Wording & Comments Policy
+- Admin and portal screens must use the same Korean business terms for the same concept. Reuse shared label maps and domain types where possible.
+- User-facing copy should explain the operational meaning in non-developer language. Avoid internal field names, unexplained acronyms, `X`, `N/A`, or temporary labels.
+- Code comments should be short and reserved for intent, policy, or non-obvious dependencies. Do not add comments that simply restate the code.
+
 ## Commands
 
 ```bash

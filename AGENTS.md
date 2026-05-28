@@ -31,6 +31,9 @@ npm run build
 - Components/pages: `PascalCase.tsx` (example: `AdminPayrollPage.tsx`).
 - Route segments/folders: lowercase/kebab (example: `expense-management`).
 - Keep cross-cutting rules in `src/app/platform/`; keep feature UI in `src/app/components/<feature>/`.
+- UI wording must use the same Korean business terms across admin and portal. Prefer domain labels already used in `src/app/data/types.ts` or shared label maps; avoid one-off labels like `X`, `N/A`, or developer-only shorthand in user-facing screens.
+- User-facing helper text should explain the operational meaning, not the implementation. Example: say "구성원 원장에서 사업 담당자를 선택합니다" instead of "registeredById 값을 설정합니다".
+- Code comments should be rare and explain why a rule exists or why a non-obvious dependency is necessary. Do not comment what the next line mechanically does.
 
 ## Commit & PR Guidelines
 - Prefer Conventional Commits: `feat(cashflow): ...`, `fix(rbac): ...`, `docs: ...`.
