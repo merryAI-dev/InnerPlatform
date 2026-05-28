@@ -60,7 +60,7 @@ function AppLayoutContent() {
         return;
       }
 
-      navigate('/portal', { replace: true });
+      navigate('/portal/project-select', { replace: true });
       return;
     }
 
@@ -105,7 +105,7 @@ function AppLayoutContent() {
 
   function openPortalWorkspace() {
     void setWorkspacePreference('portal', { persistDefault: false })
-      .finally(() => navigate('/portal'));
+      .finally(() => navigate('/portal/project-select'));
   }
 
   const pendingCount = transactions.filter(t => t.state === 'SUBMITTED').length;
@@ -194,12 +194,19 @@ function AppLayoutContent() {
         >
           {/* Brand */}
           <div className={`flex h-[48px] items-center px-3 ${collapsed ? 'justify-center overflow-hidden' : ''}`}>
-            <MyscWordmark
-              tone="onDark"
-              size={collapsed ? 'sm' : 'md'}
-              className={collapsed ? 'max-w-8 overflow-hidden' : ''}
-              imageClassName={collapsed ? 'max-w-none' : ''}
-            />
+            <button
+              type="button"
+              aria-label="홈으로 이동"
+              onClick={() => navigate('/')}
+              className="rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
+            >
+              <MyscWordmark
+                tone="onDark"
+                size={collapsed ? 'sm' : 'md'}
+                className={collapsed ? 'max-w-8 overflow-hidden' : ''}
+                imageClassName={collapsed ? 'max-w-none' : ''}
+              />
+            </button>
           </div>
 
           {/* Quick search */}

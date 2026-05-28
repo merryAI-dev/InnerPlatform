@@ -334,7 +334,7 @@ export function PortalProjectEdit() {
       <Card className="border-dashed border-slate-200 bg-slate-50">
         <CardContent className="p-8 text-center">
           <p className="text-sm text-slate-600">수정할 프로젝트를 찾지 못했습니다.</p>
-          <Button className="mt-4" onClick={() => navigate('/portal')}>포털로 돌아가기</Button>
+          <Button className="mt-4" onClick={() => navigate('/portal/project-select')}>프로젝트 선택으로 돌아가기</Button>
         </CardContent>
       </Card>
     );
@@ -353,7 +353,7 @@ export function PortalProjectEdit() {
       ]}
       busyActionId={busyActionId}
       onContractFileUpload={handleContractFileUpload}
-      onCancel={() => navigate('/portal')}
+      onCancel={() => navigate('/portal/project-select')}
       onSubmit={(draft, actionId) => void handleSubmit(draft, actionId)}
       topSlot={executiveBanner ? (
         <div className={`rounded-2xl border px-4 py-4 ${bannerClassName(executiveBanner.tone)}`}>

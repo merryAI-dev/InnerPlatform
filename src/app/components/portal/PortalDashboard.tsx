@@ -1,5 +1,5 @@
-import { Navigate } from 'react-router';
+import { PortalProjectSelectPage } from './PortalProjectSelectPage';
 
 export function PortalDashboard() {
-  return <Navigate to="/portal/project-select" replace />;
+  return <PortalProjectSelectPage />;
 }

@@ -48,13 +48,6 @@ export function PortalOnboarding() {
   }, [authLoading, isAuthenticated, isAdminSpaceUser, navigate]);
 
   useEffect(() => {
-    if (authLoading || isLoading) return;
-    if (isRegistered) {
-      navigate('/portal', { replace: true });
-    }
-  }, [authLoading, isLoading, isRegistered, navigate]);
-
-  useEffect(() => {
     const merged = normalizeProjectIds([
       ...(Array.isArray(portalUser?.projectIds) ? portalUser.projectIds : []),
       portalUser?.projectId,
@@ -123,7 +116,7 @@ export function PortalOnboarding() {
       return;
     }
 
-    navigate('/portal', { replace: true });
+    navigate('/portal/project-select', { replace: true });
   };
 
   if (isLoading || authLoading) {

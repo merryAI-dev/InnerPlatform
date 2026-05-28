@@ -26,7 +26,7 @@ const ADMIN_WORKSPACE_FEATURES = [
 ];
 
 const PM_WORKSPACE_FEATURES = [
-  '내 프로젝트 현황',
+  '프로젝트 선택',
   '예산 편집',
   '사업비 입력',
   '캐시플로',

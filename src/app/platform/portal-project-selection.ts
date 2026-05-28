@@ -8,7 +8,7 @@ export interface PortalProjectCandidateSet {
 
 const PORTAL_PATH_PREFIX = '/portal';
 const PORTAL_PROJECT_SELECT_PATH = '/portal/project-select';
-const PORTAL_PROJECT_SWITCH_FALLBACK_PATH = '/portal';
+const PORTAL_PROJECT_SWITCH_FALLBACK_PATH = '/portal/budget';
 const ADMIN_PROJECT_ROLES = new Set<UserRole>(['admin', 'finance']);
 
 function normalizeRole(role: unknown): UserRole | null {
@@ -95,18 +95,17 @@ export function resolveActivePortalProjectId(input: {
 export function resolvePortalProjectSelectPath(requestedPath?: string): string {
   const pathname = typeof requestedPath === 'string' ? requestedPath.trim() : '';
   if (!isPortalPath(pathname)) return PORTAL_PROJECT_SELECT_PATH;
-  if (pathname === PORTAL_PROJECT_SELECT_PATH) {
-    return PORTAL_PROJECT_SELECT_PATH;
-  }
-  if (pathname.startsWith(`${PORTAL_PROJECT_SELECT_PATH}?`)) return pathname;
-  return `${PORTAL_PROJECT_SELECT_PATH}?redirect=${encodeURIComponent(pathname)}`;
+  return PORTAL_PROJECT_SELECT_PATH;
 }
 
 export function resolvePortalProjectSwitchPath(pathname?: string): string {
   const normalizedPath = typeof pathname === 'string' ? pathname.trim() : '';
   if (!isPortalPath(normalizedPath)) return PORTAL_PROJECT_SWITCH_FALLBACK_PATH;
   if (
-    normalizedPath === PORTAL_PROJECT_SELECT_PATH
+    normalizedPath === PORTAL_PATH_PREFIX
+    || normalizedPath.startsWith(`${PORTAL_PATH_PREFIX}?`)
+    || normalizedPath.startsWith(`${PORTAL_PATH_PREFIX}#`)
+    || normalizedPath === PORTAL_PROJECT_SELECT_PATH
     || normalizedPath.startsWith(`${PORTAL_PROJECT_SELECT_PATH}/`)
     || normalizedPath.startsWith(`${PORTAL_PROJECT_SELECT_PATH}?`)
   ) {

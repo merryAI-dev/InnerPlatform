@@ -65,17 +65,13 @@ import {
   canEnterPortalWorkspace,
   isPortalStandaloneEntryPath,
   isAdminSpaceRole,
-  shouldForcePortalOnboarding,
 } from '../../platform/navigation';
 import { addMonthsToYearMonth, getSeoulTodayIso } from '../../platform/business-days';
 import { normalizeProjectFundInputMode } from '../../data/types';
 import { rememberRecentPortalProject } from '../../platform/portal-recent-projects';
 import { buildPortalShellCommandItems, buildPortalShellNotificationItems } from '../../platform/portal-shell-actions';
 import { shouldShowShellRoute, useShellLabEnabled } from '../../platform/shell-lab-visibility';
-import {
-  resolvePortalProjectCandidates,
-  resolvePortalProjectSelectPath,
-} from '../../platform/portal-project-selection';
+import { resolvePortalProjectCandidates } from '../../platform/portal-project-selection';
 
 // ═══════════════════════════════════════════════════════════════
 // PortalLayout — 사용자(PM) 전용 레이아웃
@@ -155,7 +151,6 @@ export function usePortalNavigationGuard() {
 function PortalContent() {
   const {
     activeProjectId,
-    isRegistered,
     isLoading: portalLoading,
     portalUser,
     myProject,
@@ -325,39 +320,6 @@ function PortalContent() {
     if (authUser?.lastWorkspace === 'portal') return;
     void setWorkspacePreference('portal', { persistDefault: false });
   }, [authLoading, authUser?.lastWorkspace, authUser?.role, isAuthenticated, setWorkspacePreference]);
-
-  // 포털 미등록 시 온보딩으로 (인증은 되었지만 포털 프로젝트 미선택)
-  useEffect(() => {
-    if (authLoading || portalLoading) return;
-    if (shouldForcePortalOnboarding({
-      isAuthenticated,
-      role: authUser?.role,
-      isRegistered,
-      pathname: location.pathname,
-    })) {
-      navigate('/portal/onboarding', { replace: true });
-    }
-  }, [authLoading, portalLoading, isAuthenticated, authUser?.role, isRegistered, location.pathname, navigate]);
-
-  useEffect(() => {
-    if (authLoading || portalLoading) return;
-    if (!isAuthenticated || !canEnterPortalWorkspace(authUser?.role)) return;
-    if (location.pathname === '/portal/project-select') return;
-    if (location.pathname === '/portal/project-settings' || location.pathname === '/portal/register-project') return;
-    if (!isRegistered && (location.pathname === '/portal/onboarding' || location.pathname === '/portal/weekly-expenses')) return;
-    if (activeProjectId) return;
-    navigate(resolvePortalProjectSelectPath(currentPath), { replace: true });
-  }, [
-    activeProjectId,
-    authLoading,
-    authUser?.role,
-    currentPath,
-    isAuthenticated,
-    isRegistered,
-    location.pathname,
-    navigate,
-    portalLoading,
-  ]);
 
   // Close mobile sidebar on navigation
   useEffect(() => {
@@ -549,12 +511,19 @@ function PortalContent() {
         `}>
           {/* Brand */}
           <div className={`flex items-center gap-2.5 h-[48px] px-3 ${collapsed ? 'justify-center' : ''}`}>
-            <MyscWordmark
-              tone="onDark"
-              size={collapsed ? 'sm' : 'md'}
-              className={collapsed ? 'max-w-8 overflow-hidden' : ''}
-              imageClassName={collapsed ? 'max-w-none' : ''}
-            />
+            <button
+              type="button"
+              aria-label="포털 홈으로 이동"
+              onClick={() => navigate('/portal/project-select')}
+              className="rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
+            >
+              <MyscWordmark
+                tone="onDark"
+                size={collapsed ? 'sm' : 'md'}
+                className={collapsed ? 'max-w-8 overflow-hidden' : ''}
+                imageClassName={collapsed ? 'max-w-none' : ''}
+              />
+            </button>
             {!collapsed && (
               <div className="flex-1" />
             )}
@@ -784,7 +753,14 @@ function PortalContent() {
                 <Menu className="h-4 w-4" />
               </button>
               <div className="flex min-w-0 items-center gap-2">
-                <MyscWordmark tone="onDark" size="md" className="shrink-0" />
+                <button
+                  type="button"
+                  aria-label="포털 홈으로 이동"
+                  onClick={() => navigate('/portal/project-select')}
+                  className="shrink-0 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
+                >
+                  <MyscWordmark tone="onDark" size="md" />
+                </button>
               </div>
               <div className="hidden flex-1 items-center justify-center px-4 md:flex">
                 <button
@@ -968,7 +944,7 @@ function PortalContent() {
           <main className="flex-1 overflow-y-auto">
             <div className={useWidePortalCanvas ? 'w-full max-w-none px-3 py-4 md:px-5 md:py-6 xl:px-8' : 'mx-auto w-full max-w-[1480px] p-4 md:p-6'}>
               <PageTransition>
-                <ErrorBoundary homePath="/portal" resetKey={location.pathname}>
+                <ErrorBoundary homePath="/portal/project-select" resetKey={location.pathname}>
                   <Outlet />
                 </ErrorBoundary>
               </PageTransition>
