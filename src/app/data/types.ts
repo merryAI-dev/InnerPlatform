@@ -1188,6 +1188,8 @@ export interface CashflowWeekSheet {
   weekEnd: string; // "YYYY-MM-DD" (Sunday)
   projection: Partial<Record<CashflowSheetLineId, number>>;
   actual: Partial<Record<CashflowSheetLineId, number>>;
+  projectionTotals?: CashflowWeekTotals;
+  actualTotals?: CashflowWeekTotals;
   projectionUpdated?: boolean;
   projectionUpdatedAt?: string;
   projectionUpdatedByUid?: string;
@@ -1209,6 +1211,12 @@ export interface CashflowWeekSheet {
   varianceFlag?: VarianceFlag;
   // 편차 확인 영구 이력 — 모든 플래그/답변/해결 기록 (삭제 불가)
   varianceHistory?: VarianceFlagEvent[];
+}
+
+export interface CashflowWeekTotals {
+  totalIn: number;
+  totalOut: number;
+  net: number;
 }
 
 export interface ProjectionChangeAlert {

@@ -1,4 +1,5 @@
 import type { CashflowSheetLineId, CashflowWeekSheet, ProjectionChangeAlert } from './types';
+import { computeCashflowTotals } from '../platform/cashflow-sheet';
 
 export const PROJECTION_CHANGE_ALERT_THRESHOLD_AMOUNT = 10_000_000;
 
@@ -104,23 +105,28 @@ export function buildCashflowWeekUpdatePatch(params: {
   now: string;
   weekStart?: string;
   existingProjection?: Partial<Record<CashflowSheetLineId, number>>;
+  existingActual?: Partial<Record<CashflowSheetLineId, number>>;
 }) {
+  const normalizedAmounts = normalizeWeekAmounts(params.amounts);
+  const existingModeAmounts = params.mode === 'projection'
+    ? normalizeWeekAmounts(params.existingProjection || {})
+    : normalizeWeekAmounts(params.existingActual || {});
+  const nextModeAmounts = {
+    ...existingModeAmounts,
+    ...normalizedAmounts,
+  };
   const patch: Record<string, unknown> = {
     tenantId: params.orgId,
     updatedAt: params.now,
     updatedByUid: params.actorUid,
     updatedByName: params.actorName,
+    [`${params.mode}Totals`]: computeCashflowTotals(nextModeAmounts),
   };
   if (params.mode === 'projection') {
-    const normalizedAmounts = normalizeWeekAmounts(params.amounts);
-    const nextProjection = {
-      ...(params.existingProjection || {}),
-      ...normalizedAmounts,
-    };
     const alert = params.weekStart
       ? buildProjectionChangeAlert({
         previousProjection: params.existingProjection,
-        nextProjection,
+        nextProjection: nextModeAmounts,
         weekStart: params.weekStart,
         now: params.now,
         actorUid: params.actorUid,
@@ -133,7 +139,7 @@ export function buildCashflowWeekUpdatePatch(params: {
     patch.projectionUpdatedByName = params.actorName;
     patch.projectionChangeAlert = alert;
   }
-  for (const [lineId, amount] of Object.entries(normalizeWeekAmounts(params.amounts))) {
+  for (const [lineId, amount] of Object.entries(normalizedAmounts)) {
     patch[`${params.mode}.${lineId}`] = amount;
   }
   return patch;
@@ -153,6 +159,8 @@ export function buildInitialCashflowWeekDoc(params: {
   now: string;
 }): CashflowWeekSheet {
   const normalizedAmounts = normalizeWeekAmounts(params.amounts);
+  const projection = params.mode === 'projection' ? normalizedAmounts : {};
+  const actual = params.mode === 'actual' ? normalizedAmounts : {};
   return {
     id: resolveWeekDocId(params.projectId, params.yearMonth, params.weekNo),
     tenantId: params.orgId,
@@ -161,8 +169,10 @@ export function buildInitialCashflowWeekDoc(params: {
     weekNo: params.weekNo,
     weekStart: params.weekStart,
     weekEnd: params.weekEnd,
-    projection: params.mode === 'projection' ? normalizedAmounts : {},
-    actual: params.mode === 'actual' ? normalizedAmounts : {},
+    projection,
+    actual,
+    projectionTotals: computeCashflowTotals(projection),
+    actualTotals: computeCashflowTotals(actual),
     ...(params.mode === 'projection'
       ? {
         projectionUpdated: true,

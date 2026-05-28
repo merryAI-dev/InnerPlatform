@@ -9,15 +9,18 @@ import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { useAppStore } from '../../data/store';
 import { useAuth } from '../../data/auth-store';
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
-import { chooseCashflowSheetForNet, computeCashflowTotals } from '../../platform/cashflow-sheet';
 import { getMonthMondayWeeks } from '../../platform/cashflow-weeks';
-import type { CashflowWeekSheet, VarianceFlag, VarianceFlagEvent } from '../../data/types';
+import type { CashflowWeekSheet, CashflowWeekTotals, VarianceFlag, VarianceFlagEvent } from '../../data/types';
 
 function fmtShort(n: number): string {
   const abs = Math.abs(n);
   if (abs >= 1e8) return (n / 1e8).toFixed(1) + '억';
   if (abs >= 1e4) return (n / 1e4).toFixed(0) + '만';
   return n.toLocaleString('ko-KR');
+}
+
+function emptyTotals(): CashflowWeekTotals {
+  return { totalIn: 0, totalOut: 0, net: 0 };
 }
 
 export function CashflowWeeklyPage() {
@@ -37,16 +40,13 @@ export function CashflowWeeklyPage() {
   }, [weeks, yearMonth]);
 
   const byProjectWeek = useMemo(() => {
-    const map = new Map<string, { projectionUpdated: boolean; adminClosed: boolean; net: number; netSource: 'actual' | 'projection' }>();
+    const map = new Map<string, { projectionUpdated: boolean; adminClosed: boolean; totals: CashflowWeekTotals }>();
     for (const w of weeks.filter((x) => x.yearMonth === yearMonth)) {
       const key = `${w.projectId}:${w.weekNo}`;
-      const { source, sheet } = chooseCashflowSheetForNet({ actual: w.actual, projection: w.projection });
-      const { net } = computeCashflowTotals(sheet);
       map.set(key, {
         projectionUpdated: Boolean(w.projectionUpdated),
         adminClosed: Boolean(w.adminClosed),
-        net,
-        netSource: source,
+        totals: w.projectionTotals || emptyTotals(),
       });
     }
     return map;
@@ -110,8 +110,7 @@ export function CashflowWeeklyPage() {
                       const sheet = weekSheetMap.get(cellKey);
                       const projectionUpdated = Boolean(status?.projectionUpdated);
                       const adminClosed = Boolean(status?.adminClosed);
-                      const net = status?.net ?? 0;
-                      const netSource = status?.netSource ?? 'actual';
+                      const totals = status?.totals || emptyTotals();
 
                       const projectionChangeAlert = sheet?.projectionChangeAlert;
                       const hasProjectionChangeAlert = Boolean(projectionChangeAlert?.triggered);
@@ -133,7 +132,10 @@ export function CashflowWeeklyPage() {
                               {chip.label}
                             </span>
                             <span className="text-[10px] text-muted-foreground" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                              NET {fmtShort(net)}{netSource === 'projection' ? ' (예상)' : ''}
+                              입금 {fmtShort(totals.totalIn)}
+                            </span>
+                            <span className="text-[10px] text-muted-foreground" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                              출금 {fmtShort(totals.totalOut)}
                             </span>
                             {hasProjectionChangeAlert && projectionChangeAlert && (
                               <span className="text-[9px] text-amber-700 dark:text-amber-300" style={{ fontWeight: 600 }}>
