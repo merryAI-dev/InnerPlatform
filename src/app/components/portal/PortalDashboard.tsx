@@ -246,7 +246,11 @@ export function PortalDashboard() {
     const ordered = projectIds
       .map((projectId) => projectMap.get(projectId))
       .filter((project): project is NonNullable<typeof project> => Boolean(project));
-    if (ordered.length > 0) return ordered;
+    const seen = new Set(ordered.map((project) => project.id));
+    const owned = projects.filter((project) => (
+      project.registeredById === portalUser.id && !seen.has(project.id)
+    ));
+    if (ordered.length > 0 || owned.length > 0) return [...ordered, ...owned];
     return myProject ? [myProject] : [];
   }, [myProject, portalUser, projects]);
   const currentWeek = useMemo(() => resolveCurrentCashflowWeek(today), [today]);

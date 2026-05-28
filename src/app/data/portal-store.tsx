@@ -2302,38 +2302,50 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     }
     const now = new Date().toISOString();
     const id = `pr-${Date.now()}`;
+    const requesterName = authUser.name || portalUser?.name || '사용자';
+    const requesterEmail = authUser.email || portalUser?.email || '';
+    const ownerId = payload.registeredById || payload.managerId || authUser.uid;
+    const ownerName = payload.registeredByName || payload.managerName || requesterName;
+    const ownerEmail = payload.registeredByEmail || (ownerId === authUser.uid ? requesterEmail : '');
+    const requestPayload: ProjectRequestPayload = {
+      ...payload,
+      registeredById: ownerId,
+      registeredByName: ownerName,
+      registeredByEmail: ownerEmail,
+      managerId: ownerId,
+      managerName: ownerName,
+    };
     const request: ProjectRequest = {
       id,
       tenantId: orgId,
       status: 'PENDING',
-      payload,
+      payload: requestPayload,
       requestedBy: authUser.uid,
-      requestedByName: authUser.name || portalUser?.name || '사용자',
-      requestedByEmail: authUser.email || portalUser?.email || '',
+      requestedByName: requesterName,
+      requestedByEmail: requesterEmail,
       requestedAt: now,
       createdAt: now,
       updatedAt: now,
     };
     // Immediately create project (no admin approval flow)
     const projectId = `p${Date.now()}`;
-    const slug = String(payload.name || '')
+    const slug = String(requestPayload.name || '')
       .toLowerCase()
       .replace(/[^a-z0-9가-힣\s-]/g, '')
       .replace(/\s+/g, '-')
       .slice(0, 50);
     const revenueFinancials = resolveProjectRevenueFinancials({
-      contractAmount: payload.contractAmount,
-      totalRevenueAmount: payload.totalRevenueAmount,
+      contractAmount: requestPayload.contractAmount,
+      totalRevenueAmount: requestPayload.totalRevenueAmount,
       preferredSource: 'totalRevenueAmount',
     });
-    const financialInputFlags = normalizeProjectFinancialInputFlagsForAmounts(payload.financialInputFlags, {
-      contractAmount: payload.contractAmount,
-      salesVatAmount: payload.salesVatAmount,
+    const financialInputFlags = normalizeProjectFinancialInputFlagsForAmounts(requestPayload.financialInputFlags, {
+      contractAmount: requestPayload.contractAmount,
+      salesVatAmount: requestPayload.salesVatAmount,
       totalRevenueAmount: revenueFinancials.totalRevenueAmount,
-      supportAmount: payload.supportAmount,
+      supportAmount: requestPayload.supportAmount,
     });
-    const paymentPlan = payload.paymentPlan || { contract: 0, interim: 0, final: 0 };
-    const requesterName = authUser.name || portalUser?.name || '사용자';
+    const paymentPlan = requestPayload.paymentPlan || { contract: 0, interim: 0, final: 0 };
     const project: Project = {
       id: projectId,
       slug,
@@ -2348,48 +2360,52 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         reviewedByName: requesterName,
         reviewComment: 'PM 신규 등록',
       }],
-      name: payload.name,
-      officialContractName: payload.officialContractName,
-      status: normalizeProjectStatus(payload.status),
-      type: normalizeProjectType(payload.type),
-      phase: normalizeProjectPhase(payload.phase),
-      contractAmount: payload.contractAmount,
-      contractStart: payload.contractStart,
-      contractEnd: payload.contractEnd,
-      settlementType: normalizeSettlementType(payload.settlementType),
-      basis: normalizeBasis(payload.basis),
-      accountType: normalizeAccountType(payload.accountType),
-      fundInputMode: normalizeProjectFundInputMode(payload.fundInputMode),
-      settlementSheetPolicy: normalizeSettlementSheetPolicy(payload.settlementSheetPolicy, normalizeProjectFundInputMode(payload.fundInputMode)),
+      registeredById: ownerId,
+      registeredByName: ownerName,
+      registeredByEmail: ownerEmail,
+      registeredAt: now,
+      name: requestPayload.name,
+      officialContractName: requestPayload.officialContractName,
+      status: normalizeProjectStatus(requestPayload.status),
+      type: normalizeProjectType(requestPayload.type),
+      phase: normalizeProjectPhase(requestPayload.phase),
+      contractAmount: requestPayload.contractAmount,
+      contractStart: requestPayload.contractStart,
+      contractEnd: requestPayload.contractEnd,
+      settlementType: normalizeSettlementType(requestPayload.settlementType),
+      basis: normalizeBasis(requestPayload.basis),
+      accountType: normalizeAccountType(requestPayload.accountType),
+      fundInputMode: normalizeProjectFundInputMode(requestPayload.fundInputMode),
+      settlementSheetPolicy: normalizeSettlementSheetPolicy(requestPayload.settlementSheetPolicy, normalizeProjectFundInputMode(requestPayload.fundInputMode)),
       paymentPlan,
-      paymentPlanDesc: payload.paymentPlanDesc,
-      clientOrg: payload.clientOrg,
-      groupwareName: payload.groupwareName || '',
-      participantCondition: payload.participantCondition,
-      teamMembersDetailed: payload.teamMembersDetailed || [],
-      contractType: normalizeProjectContractType(payload.contractType),
-      projectPurpose: payload.projectPurpose,
+      paymentPlanDesc: requestPayload.paymentPlanDesc,
+      clientOrg: requestPayload.clientOrg,
+      groupwareName: requestPayload.groupwareName || '',
+      participantCondition: requestPayload.participantCondition,
+      teamMembersDetailed: requestPayload.teamMembersDetailed || [],
+      contractType: normalizeProjectContractType(requestPayload.contractType),
+      projectPurpose: requestPayload.projectPurpose,
       totalRevenueAmount: revenueFinancials.totalRevenueAmount,
-      supportAmount: payload.supportAmount,
-      salesVatAmount: payload.salesVatAmount,
+      supportAmount: requestPayload.supportAmount,
+      salesVatAmount: requestPayload.salesVatAmount,
       financialInputFlags,
-      settlementGuide: payload.settlementGuide,
-      contractDocument: payload.contractDocument,
-      department: payload.department,
-      cic: resolveProjectCic({ department: payload.department }),
-      teamName: payload.teamName,
-      managerId: payload.managerId || authUser.uid,
-      managerName: payload.managerName || authUser.name || portalUser?.name || '',
-      budgetCurrentYear: payload.contractAmount || 0,
+      settlementGuide: requestPayload.settlementGuide,
+      contractDocument: requestPayload.contractDocument,
+      department: requestPayload.department,
+      cic: resolveProjectCic({ department: requestPayload.department }),
+      teamName: requestPayload.teamName,
+      managerId: ownerId,
+      managerName: ownerName,
+      budgetCurrentYear: requestPayload.contractAmount || 0,
       taxInvoiceAmount: 0,
       profitRate: revenueFinancials.profitRate,
       profitAmount: revenueFinancials.profitAmount,
       isSettled: false,
-      finalPaymentNote: payload.finalPaymentNote || '',
+      finalPaymentNote: requestPayload.finalPaymentNote || '',
       confirmerName: '',
       lastCheckedAt: '',
       cashflowDiffNote: '',
-      description: payload.description,
+      description: requestPayload.description,
       createdAt: now,
       updatedAt: now,
     };
@@ -2416,7 +2432,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     const nextPortalProjectId = resolvePrimaryProjectId(nextPortalProjectIds, projectId) || projectId;
     const nextPortalProjectNames = {
       ...(portalUser?.projectNames || {}),
-      [projectId]: payload.name,
+      [projectId]: requestPayload.name,
     };
     await setDoc(doc(db, getOrgDocumentPath(orgId, 'members', authUser.uid)), {
       uid: authUser.uid,

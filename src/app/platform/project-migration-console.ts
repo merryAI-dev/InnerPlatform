@@ -54,9 +54,15 @@ function deriveProjectRequestMap(requests: ProjectRequest[]): Map<string, Projec
   return map;
 }
 
-export function deriveMigrationAuditStatus(project: Project): MigrationAuditConsoleStatus {
-  if (project.registrationSource !== 'pm_portal') return 'APPROVED';
-  return project.executiveReviewStatus || 'PENDING';
+export function deriveMigrationAuditStatus(
+  project: Project,
+  request?: ProjectRequest | null,
+): MigrationAuditConsoleStatus {
+  if (request?.status === 'PENDING') return 'PENDING';
+  if (project.executiveReviewStatus) return project.executiveReviewStatus;
+  if (request?.status === 'REJECTED') return 'REVISION_REJECTED';
+  if (request?.status === 'APPROVED') return 'APPROVED';
+  return project.registrationSource === 'pm_portal' ? 'PENDING' : 'APPROVED';
 }
 
 export function getMigrationAuditStatusLabel(status: MigrationAuditConsoleStatus): string {
@@ -84,11 +90,11 @@ export function buildMigrationAuditConsoleRecords(
         id: project.id,
         project,
         request,
-        status: deriveMigrationAuditStatus(project),
+        status: deriveMigrationAuditStatus(project, request),
         cic: normalizeCicLabel(project.cic || project.department),
         title: normalizeText(project.officialContractName || project.name) || '이름 없음',
         clientOrg: normalizeText(project.clientOrg),
-        managerName: normalizeText(project.managerName),
+        managerName: normalizeText(project.registeredByName || project.managerName),
         requestedAt: normalizeText(request?.requestedAt || project.createdAt),
       };
     })

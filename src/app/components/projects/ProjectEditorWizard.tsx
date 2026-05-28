@@ -412,21 +412,40 @@ export function ProjectEditorWizard({
   const teamMembersSummary = formatProjectTeamMembersSummary(draft.teamMembersDetailed, '', '\n');
   const projectTypeOptions = getProjectTypeSelectableOptions(draft.type);
   const contractTypeOptions = getProjectContractTypeSelectableOptions(draft.contractType);
-  const managerOptions = useMemo(() => {
-    const pmMembers = members.filter((member) => member.role === 'pm');
-    if (!draft.managerId || pmMembers.some((member) => member.uid === draft.managerId)) {
-      return pmMembers;
+  const ownerOptions = useMemo(() => {
+    if (!draft.registeredById || members.some((member) => member.uid === draft.registeredById)) {
+      return members;
     }
     return [
-      ...pmMembers,
+      ...members,
       {
-        uid: draft.managerId,
-        name: draft.managerName || draft.managerId,
-        email: '',
+        uid: draft.registeredById,
+        name: draft.registeredByName || draft.registeredById,
+        email: draft.registeredByEmail || '',
         role: 'pm' as const,
       },
     ];
-  }, [draft.managerId, draft.managerName, members]);
+  }, [draft.registeredByEmail, draft.registeredById, draft.registeredByName, members]);
+
+  useEffect(() => {
+    if (!draft.registeredById) return;
+    const member = members.find((item) => item.uid === draft.registeredById);
+    if (!member) return;
+    if (
+      draft.registeredByName === member.name
+      && draft.registeredByEmail === (member.email || '')
+      && draft.managerId === member.uid
+      && draft.managerName === member.name
+    ) return;
+    setDraft((prev) => createProjectEditorDraft({
+      ...prev,
+      registeredById: member.uid,
+      registeredByName: member.name,
+      registeredByEmail: member.email || '',
+      managerId: member.uid,
+      managerName: member.name,
+    }));
+  }, [draft.managerId, draft.managerName, draft.registeredByEmail, draft.registeredById, draft.registeredByName, members]);
 
   const update = <K extends keyof ProjectEditorDraft>(key: K, value: ProjectEditorDraft[K]) => {
     setDraft((prev) => createProjectEditorWizardDraft({ ...prev, [key]: value }));
@@ -941,29 +960,31 @@ export function ProjectEditorWizard({
     <div className="space-y-4">
       <div className="grid gap-4 lg:grid-cols-2">
         <div>
-          <Label className="text-xs">PM *</Label>
-          <Input value={draft.managerName} onChange={(event) => update('managerName', event.target.value)} className="mt-1 h-9 text-sm" />
-        </div>
-        <div>
-          <Label className="text-xs">담당자 계정</Label>
-          <Select value={draft.managerId || 'none'} onValueChange={(value) => {
+          <Label className="text-xs">사업 담당자 *</Label>
+          <Select value={draft.registeredById || 'none'} onValueChange={(value) => {
             const member = members.find((item) => item.uid === value);
             setDraft((prev) => createProjectEditorDraft({
               ...prev,
+              registeredById: value === 'none' ? '' : value,
+              registeredByName: member?.name || '',
+              registeredByEmail: member?.email || '',
               managerId: value === 'none' ? '' : value,
-              managerName: member?.name || prev.managerName,
+              managerName: member?.name || '',
             }));
           }}>
-            <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue placeholder="선택" /></SelectTrigger>
+            <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue placeholder="조직원 선택" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="none">선택 안 함</SelectItem>
-              {managerOptions.map((member) => (
+              {ownerOptions.map((member) => (
                 <SelectItem key={member.uid} value={member.uid}>
                   {member.email ? `${member.name} (${member.email})` : member.name}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            프로젝트 현황과 PM 포털 노출은 이 조직원 계정 기준으로 연결됩니다.
+          </p>
         </div>
       </div>
       <div className="flex items-center justify-between gap-3">

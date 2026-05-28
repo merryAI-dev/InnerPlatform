@@ -170,8 +170,7 @@ export function ProjectMigrationAuditPage({
   const scopedRecords = useMemo(
     () => reviewScope === 'pending'
       ? records.filter((record) => (
-          record.project.registrationSource === 'pm_portal'
-          && record.status === 'PENDING'
+          record.status === 'PENDING'
         ))
       : records,
     [records, reviewScope],

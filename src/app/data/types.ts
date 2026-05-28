@@ -516,6 +516,10 @@ export interface Project {
   orgId: string;
   cic?: string;
   registrationSource?: string;
+  registeredById?: string;
+  registeredByName?: string;
+  registeredByEmail?: string;
+  registeredAt?: string;
   executiveReviewStatus?: ProjectExecutiveReviewStatus;
   executiveReviewedAt?: string;
   executiveReviewedById?: string;
@@ -723,6 +727,9 @@ export interface ProjectRequestPayload {
   settlementGuide: string;
   finalPaymentNote?: string;
   projectPurpose: string;
+  registeredById?: string;
+  registeredByName?: string;
+  registeredByEmail?: string;
   managerId?: string;
   managerName: string;
   teamName: string;

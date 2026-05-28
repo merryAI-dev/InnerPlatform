@@ -74,6 +74,9 @@ export interface ProjectEditorDraft {
   settlementSheetPolicy: SettlementSheetPolicy;
   profitRate: number;
   profitAmount: number;
+  registeredById: string;
+  registeredByName: string;
+  registeredByEmail: string;
   managerId: string;
   managerName: string;
   teamName: string;
@@ -127,6 +130,9 @@ const DEFAULT_DRAFT: ProjectEditorDraft = {
   settlementSheetPolicy: createSettlementSheetPolicy('STANDARD'),
   profitRate: 0,
   profitAmount: 0,
+  registeredById: '',
+  registeredByName: '',
+  registeredByEmail: '',
   managerId: '',
   managerName: '',
   teamName: '',
@@ -215,7 +221,7 @@ const REVIEW_CHANGE_FIELDS: Array<{
   { key: 'basis', label: '정산 기준', before: (project) => BASIS_LABELS[normalizeBasis(project.basis)] || '-', after: (draft) => BASIS_LABELS[normalizeBasis(draft.basis)] || '-' },
   { key: 'accountType', label: '통장 유형', before: (project) => ACCOUNT_TYPE_LABELS[normalizeAccountType(project.accountType)] || '-', after: (draft) => ACCOUNT_TYPE_LABELS[normalizeAccountType(draft.accountType)] || '-' },
   { key: 'fundInputMode', label: '자금 입력 방식', before: (project) => PROJECT_FUND_INPUT_MODE_LABELS[normalizeProjectFundInputMode(project.fundInputMode)] || '-', after: (draft) => PROJECT_FUND_INPUT_MODE_LABELS[normalizeProjectFundInputMode(draft.fundInputMode)] || '-' },
-  { key: 'managerName', label: 'PM', before: (project) => normalizeChangeValue(project.managerName), after: (draft) => normalizeChangeValue(draft.managerName) },
+  { key: 'registeredByName', label: '사업 담당자', before: (project) => normalizeChangeValue(project.registeredByName || project.managerName), after: (draft) => normalizeChangeValue(draft.registeredByName || draft.managerName) },
   { key: 'teamName', label: '사내기업팀', before: (project) => normalizeChangeValue(project.teamName), after: (draft) => normalizeChangeValue(draft.teamName) },
   { key: 'teamMembersDetailed', label: '서류상 참여인력', before: (project) => formatTeamMembersForChange(project.teamMembersDetailed), after: (draft) => formatTeamMembersForChange(draft.teamMembersDetailed) },
   { key: 'paymentPlan', label: '입금 분할', before: (project) => formatPaymentPlanForChange(project.paymentPlan), after: (draft) => formatPaymentPlanForChange(draft.paymentPlan) },
@@ -252,6 +258,11 @@ export function createProjectEditorDraft(overrides: Partial<ProjectEditorDraft> 
     ),
     contractType: normalizeProjectContractType(overrides.contractType ?? DEFAULT_DRAFT.contractType),
     currency: normalizeProjectCurrency(overrides.currency ?? DEFAULT_DRAFT.currency),
+    registeredById: text(overrides.registeredById ?? overrides.managerId ?? DEFAULT_DRAFT.registeredById),
+    registeredByName: text(overrides.registeredByName ?? overrides.managerName ?? DEFAULT_DRAFT.registeredByName),
+    registeredByEmail: text(overrides.registeredByEmail ?? DEFAULT_DRAFT.registeredByEmail),
+    managerId: text(overrides.registeredById ?? overrides.managerId ?? DEFAULT_DRAFT.managerId),
+    managerName: text(overrides.registeredByName ?? overrides.managerName ?? DEFAULT_DRAFT.managerName),
     paymentPlan: normalizePaymentPlan(overrides.paymentPlan ?? DEFAULT_DRAFT.paymentPlan),
     teamMembersDetailed: normalizeProjectTeamMembers(overrides.teamMembersDetailed),
   };
@@ -307,8 +318,11 @@ export function buildProjectEditorDraftFromProject(
     ),
     profitRate: normalizedProject.profitRate,
     profitAmount: normalizedProject.profitAmount,
-    managerId: text(normalizedProject.managerId),
-    managerName: text(normalizedProject.managerName || payload?.managerName),
+    registeredById: text(normalizedProject.registeredById || payload?.registeredById || normalizedProject.managerId || payload?.managerId),
+    registeredByName: text(normalizedProject.registeredByName || payload?.registeredByName || normalizedProject.managerName || payload?.managerName),
+    registeredByEmail: text(normalizedProject.registeredByEmail || payload?.registeredByEmail),
+    managerId: text(normalizedProject.registeredById || payload?.registeredById || normalizedProject.managerId || payload?.managerId),
+    managerName: text(normalizedProject.registeredByName || payload?.registeredByName || normalizedProject.managerName || payload?.managerName),
     teamName: text(normalizedProject.teamName || payload?.teamName),
     teamMembersDetailed,
     participantCondition: text(normalizedProject.participantCondition || payload?.participantCondition),
@@ -357,8 +371,11 @@ export function buildProjectRequestPayloadFromDraft(draftInput: ProjectEditorDra
     settlementGuide: text(draft.settlementGuide),
     finalPaymentNote: text(draft.finalPaymentNote),
     projectPurpose: text(draft.projectPurpose),
-    managerId: text(draft.managerId),
-    managerName: text(draft.managerName),
+    registeredById: text(draft.registeredById),
+    registeredByName: text(draft.registeredByName),
+    registeredByEmail: text(draft.registeredByEmail),
+    managerId: text(draft.registeredById),
+    managerName: text(draft.registeredByName),
     teamName: text(draft.teamName),
     teamMembers: formatProjectTeamMembersSummary(teamMembersDetailed, '', ', '),
     teamMembersDetailed,
@@ -457,8 +474,11 @@ export function buildProjectEditorProjectPatch(
     department: text(draft.department),
     cic: resolveProjectCic({ department: draft.department }),
     teamName: text(draft.teamName),
-    managerId: text(draft.managerId),
-    managerName: text(draft.managerName),
+    registeredById: text(draft.registeredById),
+    registeredByName: text(draft.registeredByName),
+    registeredByEmail: text(draft.registeredByEmail),
+    managerId: text(draft.registeredById),
+    managerName: text(draft.registeredByName),
     budgetCurrentYear: nonNegativeAmount(draft.budgetCurrentYear || draft.contractAmount),
     taxInvoiceAmount: nonNegativeAmount(draft.taxInvoiceAmount),
     profitRate: draft.profitRate,

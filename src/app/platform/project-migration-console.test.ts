@@ -114,9 +114,27 @@ describe('project-migration-console', () => {
 
     expect(records).toHaveLength(3);
     expect(records.map((record) => record.id)).toEqual(['p-1', 'p-2', 'p-3']);
-    expect(records[0].status).toBe('PENDING');
+    expect(records[0].status).toBe('APPROVED');
     expect(records[1].status).toBe('REVISION_REJECTED');
     expect(records[2].status).toBe('APPROVED');
+  });
+
+  it('treats linked pending project request as pending even when registrationSource is missing', () => {
+    const records = buildMigrationAuditConsoleRecords(
+      [makeProject({
+        id: 'p-cts2',
+        name: '2026 CTS2',
+        registrationSource: undefined,
+        executiveReviewStatus: 'PENDING',
+      })],
+      [makeRequest({
+        id: 'pr-cts2',
+        status: 'PENDING',
+        approvedProjectId: 'p-cts2',
+      })],
+    );
+
+    expect(records[0]?.status).toBe('PENDING');
   });
 
   it('filters by cic and review status', () => {

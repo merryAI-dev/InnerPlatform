@@ -208,7 +208,7 @@ export function buildMigrationReviewDossier(
     identity: {
       clientOrg: readable(project.clientOrg || payload?.clientOrg),
       cic: readable(project.cic || project.department || payload?.department),
-      pmName: readable(project.managerName || payload?.managerName),
+      pmName: readable(project.registeredByName || payload?.registeredByName || project.managerName || payload?.managerName),
       department: readable(project.department || payload?.department),
       officialContractName: readable(project.officialContractName || payload?.officialContractName || project.name),
       groupwareName: readable(project.groupwareName || payload?.groupwareName),

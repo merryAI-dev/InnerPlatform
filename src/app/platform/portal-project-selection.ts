@@ -66,7 +66,9 @@ export function resolvePortalProjectCandidates(input: {
   const assignedProjectIds = new Set(normalizeProjectIds(input.assignedProjectIds || []));
   const authUid = typeof input.authUid === 'string' ? input.authUid.trim() : '';
   const allowedProjects = projects.filter((project) => (
-    assignedProjectIds.has(project.id) || (authUid && project.managerId === authUid)
+    assignedProjectIds.has(project.id)
+    || (authUid && project.registeredById === authUid)
+    || (authUid && !project.registeredById && project.managerId === authUid)
   ));
 
   return {

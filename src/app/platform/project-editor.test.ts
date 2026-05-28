@@ -99,11 +99,47 @@ describe('project editor draft mapping', () => {
 
     expect(draft.totalRevenueAmount).toBe(91_000);
     expect(draft.currency).toBe('KRW');
+    expect(draft.registeredById).toBe('pm-1');
+    expect(draft.registeredByName).toBe('김다은');
     expect(draft.profitAmount).toBe(91_000);
     expect(draft.profitRate).toBe(0.91);
     expect(draft.teamMembersDetailed).toEqual([
       { memberName: '김다은', memberNickname: '데이나', role: 'PM', participationRate: 60 },
     ]);
+  });
+
+  it('uses selected registeredBy member as the project owner source of truth', () => {
+    const base = {
+      ...baseProject,
+      registeredById: 'writer-1',
+      registeredByName: '기존 작성자',
+      registeredByEmail: 'writer@mysc.co.kr',
+      managerId: 'writer-1',
+      managerName: '기존 작성자',
+    };
+    const draft = createProjectEditorDraft({
+      ...buildProjectEditorDraftFromProject(base),
+      registeredById: 'member-2',
+      registeredByName: '새 담당자',
+      registeredByEmail: 'member2@mysc.co.kr',
+    });
+
+    const patch = buildProjectEditorProjectPatch(draft, {
+      baseProject: base,
+      mode: 'admin',
+      actorId: 'admin-1',
+      actorName: '관리자',
+      now: '2026-05-28T00:00:00.000Z',
+    });
+    const payload = buildProjectRequestPayloadFromDraft(draft);
+
+    expect(patch.registeredById).toBe('member-2');
+    expect(patch.registeredByName).toBe('새 담당자');
+    expect(patch.registeredByEmail).toBe('member2@mysc.co.kr');
+    expect(patch.managerId).toBe('member-2');
+    expect(patch.managerName).toBe('새 담당자');
+    expect(payload.registeredById).toBe('member-2');
+    expect(payload.managerName).toBe('새 담당자');
   });
 
   it('treats an explicit empty project team list as the current edit value', () => {
@@ -239,7 +275,9 @@ describe('project editor draft mapping', () => {
       ...buildProjectEditorDraftFromProject(baseProject),
       name: '기후테크수정',
       totalRevenueAmount: 93_000,
-      managerName: '변민욱',
+      registeredById: 'pm-2',
+      registeredByName: '변민욱',
+      registeredByEmail: 'boram@mysc.co.kr',
     });
 
     const changes = buildProjectEditorReviewChanges(baseProject, draft);
@@ -258,8 +296,8 @@ describe('project editor draft mapping', () => {
         after: '93,000원',
       },
       {
-        key: 'managerName',
-        label: 'PM',
+        key: 'registeredByName',
+        label: '사업 담당자',
         before: '김다은',
         after: '변민욱',
       },
