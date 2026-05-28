@@ -14,6 +14,15 @@ describe('PortalLayout shell actions', () => {
     expect(portalLayoutSource).not.toContain("label: '인건비/공지', accent: true, hidden: true");
   });
 
+  it('puts budget first and pushes business cards behind operating work', () => {
+    expect(portalLayoutSource.indexOf("label: '예산 편집'")).toBeLessThan(
+      portalLayoutSource.indexOf("label: '인건비/공지'"),
+    );
+    expect(portalLayoutSource.indexOf("label: '명함 DB'")).toBeGreaterThan(
+      portalLayoutSource.indexOf("label: '프로젝트 등록 요청'"),
+    );
+  });
+
   it('turns the top search into a project switcher', () => {
     expect(portalLayoutSource).toContain('CommandDialog');
     expect(portalLayoutSource).toContain('setCommandOpen(true)');
