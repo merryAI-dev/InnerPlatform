@@ -222,6 +222,14 @@ export function areProjectsEqual(left: Project[], right: Project[]): boolean {
   return true;
 }
 
+export function mergeProjectSnapshot(projects: Project[], project: Project): Project[] {
+  const map = new Map(projects.map((item) => [item.id, item]));
+  map.set(project.id, project);
+  return Array.from(map.values()).sort((a, b) =>
+    String(a.name || '').localeCompare(String(b.name || ''), 'ko'),
+  );
+}
+
 export function areExpenseSheetRowsEqual(
   left: ImportRow[] | null | undefined,
   right: ImportRow[] | null | undefined,
@@ -453,6 +461,7 @@ interface PortalActions {
     },
   ) => Promise<boolean>;
   setSessionActiveProject: (projectId: string) => Promise<boolean>;
+  patchProjectSnapshot: (project: Project) => void;
   updateProjectStatus: (projectId: string, status: ProjectStatus) => Promise<boolean>;
   logout: () => void;
   addExpenseSet: (set: ExpenseSet) => void;
@@ -2929,6 +2938,15 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     return true;
   }, [scopedProjectIds]);
 
+  const patchProjectSnapshot = useCallback((project: Project) => {
+    if (!project.id) return;
+    setProjects((prev) => {
+      const next = mergeProjectSnapshot(prev, project);
+      projectsRef.current = next;
+      return next;
+    });
+  }, []);
+
   const updateProjectStatus = useCallback(async (projectId: string, status: ProjectStatus): Promise<boolean> => {
     const targetProjectId = projectId.trim();
     if (!targetProjectId || !includesProject(scopedProjectIds, targetProjectId)) {
@@ -3325,6 +3343,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     weeklySubmissionStatuses,
     register,
     setSessionActiveProject,
+    patchProjectSnapshot,
     updateProjectStatus,
     logout,
     addExpenseSet,

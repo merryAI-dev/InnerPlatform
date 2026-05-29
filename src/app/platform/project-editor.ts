@@ -229,6 +229,7 @@ const REVIEW_CHANGE_FIELDS: Array<{
   { key: 'finalPaymentNote', label: '최종 입금 메모', before: (project) => normalizeChangeValue(project.finalPaymentNote), after: (draft) => normalizeChangeValue(draft.finalPaymentNote) },
   { key: 'projectPurpose', label: '프로젝트 목적', before: (project) => normalizeChangeValue(project.projectPurpose), after: (draft) => normalizeChangeValue(draft.projectPurpose) },
   { key: 'description', label: '주요 내용', before: (project) => normalizeChangeValue(project.description), after: (draft) => normalizeChangeValue(draft.description) },
+  { key: 'note', label: '비고', before: (project) => normalizeChangeValue(project.note), after: (draft) => normalizeChangeValue(draft.note) },
   { key: 'contractDocument', label: '계약서 PDF', before: (project) => normalizeChangeValue(project.contractDocument?.name), after: (draft) => normalizeChangeValue(draft.contractDocument?.name) },
 ];
 
@@ -326,7 +327,7 @@ export function buildProjectEditorDraftFromProject(
     teamName: text(normalizedProject.teamName || payload?.teamName),
     teamMembersDetailed,
     participantCondition: text(normalizedProject.participantCondition || payload?.participantCondition),
-    note: text(payload?.note),
+    note: text(normalizedProject.note || payload?.note),
     paymentPlanDesc: text(normalizedProject.paymentPlanDesc || payload?.paymentPlanDesc),
     settlementGuide: text(normalizedProject.settlementGuide || payload?.settlementGuide),
     groupwareName: text(normalizedProject.groupwareName),
@@ -461,6 +462,7 @@ export function buildProjectEditorProjectPatch(
     clientOrg: text(draft.clientOrg),
     groupwareName: text(draft.groupwareName),
     participantCondition: text(draft.participantCondition),
+    note: text(draft.note),
     teamMembersDetailed,
     contractType: normalizeProjectContractType(draft.contractType),
     projectPurpose: text(draft.projectPurpose),

@@ -444,7 +444,7 @@ function buildProjectRequestPayloadFromProject(project, existingPayload = {}) {
     teamMembers,
     teamMembersDetailed,
     participantCondition: pickText('participantCondition'),
-    note: readOptionalText(existingPayload.note),
+    note: pickText('note'),
     contractDocument: project?.contractDocument ?? existingPayload.contractDocument ?? null,
     contractAnalysis: project?.contractAnalysis ?? existingPayload.contractAnalysis ?? null,
   };

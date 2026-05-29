@@ -85,7 +85,7 @@ export function PortalProjectEdit() {
   const navigate = useNavigate();
   const { user: authUser } = useAuth();
   const { db, isOnline, orgId } = useFirebase();
-  const { members, myProject } = usePortalStore();
+  const { members, myProject, patchProjectSnapshot } = usePortalStore();
   const [requestDoc, setRequestDoc] = useState<ProjectRequest | null>(null);
   const [loadingRequest, setLoadingRequest] = useState(true);
   const [busyActionId, setBusyActionId] = useState<string | null>(null);
@@ -301,10 +301,11 @@ export function PortalProjectEdit() {
     setBusyActionId(actionId);
     try {
       const forcePendingReview = actionId === 'resubmit';
-      await persistProject(draft, {
+      const savedProject = await persistProject(draft, {
         forcePendingReview,
         reviewComment: forcePendingReview ? resubmitComment.trim() || null : null,
       });
+      if (savedProject) patchProjectSnapshot(savedProject);
       if (forcePendingReview) {
         setResubmitComment('');
         toast.success('수정 후 다시 제출했습니다.');

@@ -556,6 +556,7 @@ export interface Project {
   clientOrg: string;             // 발주기관(계약기관)
   groupwareName: string;         // 그룹웨어 프로젝트등록명
   participantCondition: string;  // 참여기업 조건
+  note?: string;                  // PM/관리자 참고 메모
   teamMembersDetailed?: ProjectTeamMemberAssignment[];
   contractType: string;          // 계약서 유형 (계약서(날인), 기타 등)
   projectPurpose?: string;

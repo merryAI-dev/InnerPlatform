@@ -417,4 +417,25 @@ describe('project editor draft mapping', () => {
       },
     ]));
   });
+
+  it('persists PM edit notes into the project source of truth as well as request payload', () => {
+    const draft = createProjectEditorDraft({
+      ...buildProjectEditorDraftFromProject(baseProject, {
+        note: '기존 등록 원문 비고',
+      } as never),
+      note: '마고와 써니 참여율 보정 메모',
+    });
+
+    const patch = buildProjectEditorProjectPatch(draft, {
+      baseProject,
+      mode: 'portal-edit',
+      actorId: 'pm-1',
+      actorName: '김다은',
+      now: '2026-05-29T00:00:00.000Z',
+    });
+    const payload = buildProjectRequestPayloadFromDraft(draft);
+
+    expect(patch.note).toBe('마고와 써니 참여율 보정 메모');
+    expect(payload.note).toBe('마고와 써니 참여율 보정 메모');
+  });
 });
