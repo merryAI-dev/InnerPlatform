@@ -15,6 +15,7 @@ describe('installVitePreloadRecovery', () => {
       addEventListener: vi.fn((type: string, callback: EventListener) => {
         if (type === 'vite:preloadError') listener = callback;
       }),
+      dispatchEvent: vi.fn(),
       location: { pathname: '/portal/cashflow' },
       sessionStorage: {
         getItem: vi.fn((key: string) => storage.get(key) || null),
@@ -30,6 +31,9 @@ describe('installVitePreloadRecovery', () => {
     listener?.(event);
 
     expect(event.preventDefault).toHaveBeenCalledTimes(1);
+    expect(target.dispatchEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'mysc:preloadError',
+    }));
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Keeping current URL. User must choose when to refresh after saving current work.'));
     listener?.(event);
     expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('already reported recently'));
@@ -46,6 +50,7 @@ describe('installVitePreloadRecovery', () => {
       addEventListener: vi.fn((type: string, callback: EventListener) => {
         if (type === 'vite:preloadError') listener = callback;
       }),
+      dispatchEvent: vi.fn(),
       location: { pathname: '/portal/cashflow' },
       sessionStorage: {
         getItem: vi.fn(() => JSON.stringify({

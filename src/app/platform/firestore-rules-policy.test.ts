@@ -159,8 +159,19 @@ describe('firestore rules policy alignment', () => {
   it('keeps business-card PII collections behind BFF-only Firestore rules', () => {
     expect(firestoreRulesText).toContain('function isBffOnlyCollection(collection)');
     expect(firestoreRulesText).toContain("['contacts', 'business_card_imports', 'contact_events']");
-    expect(firestoreRulesText).toContain('allow read: if !isBffOnlyCollection(collection) && canRead(orgId);');
-    expect(firestoreRulesText).toContain('allow write: if !isBffOnlyCollection(collection) && canWrite(orgId);');
+    expect(firestoreRulesText).toContain('allow read: if !isCatchallExcludedCollection(collection) && canRead(orgId);');
+    expect(firestoreRulesText).toContain('allow write: if !isCatchallExcludedCollection(collection) && canWrite(orgId);');
+  });
+
+  it('keeps project request drafts hidden from admin review surfaces until submission', () => {
+    expect(firestoreRulesText).toContain('match /orgs/{orgId}/projectRequestDrafts/{draftId}');
+    expect(firestoreRulesText).toContain('resource.data.ownerId == request.auth.uid');
+    expect(firestoreRulesText).toContain('request.resource.data.ownerId == request.auth.uid');
+    expect(firestoreRulesText).toContain("request.resource.data.status in ['DRAFT', 'SUBMITTED', 'DISCARDED']");
+    expect(firestoreRulesText).toContain('function isCatchallExcludedCollection(collection)');
+    expect(firestoreRulesText).toContain("collection in ['projectRequestDrafts']");
+    expect(firestoreRulesText).toContain('allow read: if !isCatchallExcludedCollection(collection) && canRead(orgId);');
+    expect(firestoreRulesText).toContain('allow write: if !isCatchallExcludedCollection(collection) && canWrite(orgId);');
   });
 
   it('keeps business-card source images behind BFF-only Storage rules', () => {

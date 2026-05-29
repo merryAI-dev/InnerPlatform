@@ -1,4 +1,4 @@
-type PreloadRecoveryTarget = Pick<Window, 'addEventListener'> & {
+type PreloadRecoveryTarget = Pick<Window, 'addEventListener' | 'dispatchEvent'> & {
   location: Pick<Location, 'pathname'>;
   sessionStorage?: Pick<Storage, 'getItem' | 'setItem'>;
 };
@@ -45,6 +45,13 @@ export function installVitePreloadRecovery(target: PreloadRecoveryTarget = windo
     const customEvent = event as unknown as CustomEvent<{ message?: string } | undefined>;
     customEvent.preventDefault();
     console.warn('[MYSC] Vite preload error detected:', customEvent.detail);
+    target.dispatchEvent(new CustomEvent('mysc:preloadError', {
+      detail: {
+        route: target.location.pathname || '/',
+        source: 'vite:preloadError',
+        originalDetail: customEvent.detail,
+      },
+    }));
 
     if (!shouldReportPreloadError(target)) {
       console.error('[MYSC] Vite preload error already reported recently; keeping current URL without auto reload.');

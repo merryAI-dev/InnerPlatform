@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { AlertTriangle, Loader2, Save, SendHorizontal } from 'lucide-react';
 import { collection, doc, limit, onSnapshot, orderBy, query, setDoc, where } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { useAuth } from '../../data/auth-store';
 import { usePortalStore } from '../../data/portal-store';
-import type { Project, ProjectRequest } from '../../data/types';
+import type { Project, ProjectRequest, ProjectRequestDraft, ProjectRequestDraftStatus } from '../../data/types';
 import { getOrgCollectionPath, getOrgDocumentPath } from '../../lib/firebase';
 import { useFirebase } from '../../lib/firebase-context';
 import { uploadProjectRequestContractFile } from '../../platform/project-contract-upload';
@@ -18,6 +18,7 @@ import {
   buildProjectChangeRequest,
   resolveProjectRequestKind,
 } from '../../platform/project-change-request';
+import { buildProjectRequestDraft } from '../../platform/project-request-draft';
 import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
 import { Label } from '../ui/label';
@@ -71,6 +72,8 @@ export function PortalProjectEdit() {
   const [requestDoc, setRequestDoc] = useState<ProjectRequest | null>(null);
   const [busyActionId, setBusyActionId] = useState<string | null>(null);
   const [resubmitComment, setResubmitComment] = useState('');
+  const serverDraftRef = useRef<ProjectRequestDraft | null>(null);
+  const autosaveKey = `portal-edit-${orgId}-${myProject?.id || 'no-project'}-${authUser?.uid || 'anonymous'}`;
 
   useEffect(() => {
     if (!db || !isOnline || !myProject?.id) {
@@ -125,6 +128,43 @@ export function PortalProjectEdit() {
   const canResubmit = myProject?.executiveReviewStatus === 'REVISION_REJECTED'
     || myProject?.executiveReviewStatus === 'DUPLICATE_DISCARDED';
 
+  const persistDraft = useCallback(async (
+    draft: ProjectEditorDraft,
+    stepIndex: number,
+    status: ProjectRequestDraftStatus = 'DRAFT',
+  ) => {
+    if (!db || !orgId || !myProject?.id || !authUser?.uid) return;
+    const now = new Date().toISOString();
+    const nextDraft = buildProjectRequestDraft({
+      tenantId: orgId,
+      kind: 'CHANGE',
+      ownerId: authUser.uid,
+      ownerName: authUser.name || authUser.email || 'PM',
+      ownerEmail: authUser.email || '',
+      targetProjectId: myProject.id,
+      draftKey: autosaveKey,
+      draft,
+      stepIndex,
+      previousDraft: serverDraftRef.current,
+      status,
+      now,
+    });
+    await setDoc(
+      doc(db, getOrgDocumentPath(orgId, 'projectRequestDrafts', nextDraft.id)),
+      nextDraft,
+      { merge: true },
+    );
+    serverDraftRef.current = nextDraft;
+  }, [authUser?.email, authUser?.name, authUser?.uid, autosaveKey, db, myProject?.id, orgId]);
+
+  const autosaveConfig = useMemo(
+    () => (authUser?.uid ? {
+      key: autosaveKey,
+      onSave: persistDraft,
+    } : undefined),
+    [authUser?.uid, autosaveKey, persistDraft],
+  );
+
   const persistProject = async (
     draft: ProjectEditorDraft,
     options: { forcePendingReview?: boolean; reviewComment?: string | null } = {},
@@ -172,6 +212,11 @@ export function PortalProjectEdit() {
         forcePendingReview,
         reviewComment: forcePendingReview ? resubmitComment.trim() || null : null,
       });
+      try {
+        await persistDraft(draft, 4, 'SUBMITTED');
+      } catch (draftError) {
+        console.warn('[PortalProjectEdit] submitted draft marker failed:', draftError);
+      }
       if (forcePendingReview) {
         setResubmitComment('');
         toast.success('프로젝트 변경 요청을 다시 제출했습니다.');
@@ -183,6 +228,7 @@ export function PortalProjectEdit() {
     } catch (error) {
       console.error('[PortalProjectEdit] save failed:', error);
       toast.error(error instanceof Error ? error.message : '저장에 실패했습니다. 다시 시도해주세요.');
+      throw error;
     } finally {
       setBusyActionId(null);
     }
@@ -215,6 +261,7 @@ export function PortalProjectEdit() {
       initialDraft={initialDraft}
       draftKey={`portal-edit-${myProject.id}-${requestDoc?.updatedAt || myProject.updatedAt}`}
       members={members}
+      autosave={autosaveConfig}
       actions={[
         { id: 'save', label: '저장', icon: Save },
         ...(canResubmit ? [{ id: 'resubmit', label: '수정 후 다시 제출', icon: SendHorizontal, variant: 'secondary' as const }] : []),
@@ -222,7 +269,7 @@ export function PortalProjectEdit() {
       busyActionId={busyActionId}
       onContractFileUpload={handleContractFileUpload}
       onCancel={() => navigate('/portal/project-select')}
-      onSubmit={(draft, actionId) => void handleSubmit(draft, actionId)}
+      onSubmit={(draft, actionId) => handleSubmit(draft, actionId)}
       topSlot={executiveBanner ? (
         <div className={`rounded-2xl border px-4 py-4 ${bannerClassName(executiveBanner.tone)}`}>
           <div className="flex items-start gap-3">

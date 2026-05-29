@@ -1,10 +1,12 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { CheckCircle2, Send } from 'lucide-react';
+import { doc, setDoc } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { useAuth } from '../../data/auth-store';
 import { usePortalStore } from '../../data/portal-store';
-import { getAuthInstance } from '../../lib/firebase';
+import type { ProjectRequestDraft, ProjectRequestDraftStatus } from '../../data/types';
+import { getAuthInstance, getOrgDocumentPath } from '../../lib/firebase';
 import { useFirebase } from '../../lib/firebase-context';
 import {
   isPlatformApiEnabled,
@@ -16,17 +18,20 @@ import {
   createProjectEditorDraft,
   type ProjectEditorDraft,
 } from '../../platform/project-editor';
+import { buildProjectRequestDraft } from '../../platform/project-request-draft';
 import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
 import { ProjectEditorWizard } from '../projects/ProjectEditorWizard';
 
 export function PortalProjectRegister() {
   const navigate = useNavigate();
-  const { orgId } = useFirebase();
+  const { db, orgId } = useFirebase();
   const { user: authUser } = useAuth();
   const { createProjectRequest, members, portalUser } = usePortalStore();
   const [busyActionId, setBusyActionId] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
+  const serverDraftRef = useRef<ProjectRequestDraft | null>(null);
+  const autosaveKey = `portal-register-${orgId}-${authUser?.uid || 'anonymous'}`;
 
   const initialDraft = useMemo(
     () => createProjectEditorDraft({
@@ -39,6 +44,42 @@ export function PortalProjectRegister() {
     [authUser?.email, authUser?.name, authUser?.uid, portalUser?.email, portalUser?.name],
   );
 
+  const persistDraft = useCallback(async (
+    draft: ProjectEditorDraft,
+    stepIndex: number,
+    status: ProjectRequestDraftStatus = 'DRAFT',
+  ) => {
+    if (!db || !authUser?.uid) return;
+    const now = new Date().toISOString();
+    const nextDraft = buildProjectRequestDraft({
+      tenantId: orgId,
+      kind: 'REGISTRATION',
+      ownerId: authUser.uid,
+      ownerName: authUser.name || portalUser?.name || authUser.email || 'PM',
+      ownerEmail: authUser.email || portalUser?.email || '',
+      draftKey: autosaveKey,
+      draft,
+      stepIndex,
+      previousDraft: serverDraftRef.current,
+      status,
+      now,
+    });
+    await setDoc(
+      doc(db, getOrgDocumentPath(orgId, 'projectRequestDrafts', nextDraft.id)),
+      nextDraft,
+      { merge: true },
+    );
+    serverDraftRef.current = nextDraft;
+  }, [authUser?.email, authUser?.name, authUser?.uid, autosaveKey, db, orgId, portalUser?.email, portalUser?.name]);
+
+  const autosaveConfig = useMemo(
+    () => (authUser?.uid ? {
+      key: autosaveKey,
+      onSave: persistDraft,
+    } : undefined),
+    [authUser?.uid, autosaveKey, persistDraft],
+  );
+
   const handleSubmit = async (draft: ProjectEditorDraft) => {
     if (busyActionId) return;
     setBusyActionId('submit');
@@ -46,8 +87,12 @@ export function PortalProjectRegister() {
       const payload = buildProjectRequestPayloadFromDraft(draft);
       const createdId = await createProjectRequest(payload);
       if (!createdId) {
-        toast.error('프로젝트 등록 요청 저장에 실패했습니다. 다시 시도해 주세요.');
-        return;
+        throw new Error('프로젝트 등록 요청 저장에 실패했습니다. 다시 시도해 주세요.');
+      }
+      try {
+        await persistDraft(draft, 4, 'SUBMITTED');
+      } catch (draftError) {
+        console.warn('[PortalProjectRegister] submitted draft marker failed:', draftError);
       }
 
       if (authUser && isPlatformApiEnabled()) {
@@ -77,6 +122,7 @@ export function PortalProjectRegister() {
     } catch (error) {
       console.error('[PortalProjectRegister] create project request failed:', error);
       toast.error(error instanceof Error ? error.message : '프로젝트 등록 요청 저장에 실패했습니다.');
+      throw error;
     } finally {
       setBusyActionId(null);
     }
@@ -121,11 +167,12 @@ export function PortalProjectRegister() {
       initialDraft={initialDraft}
       draftKey={`portal-register-${authUser?.uid || 'anonymous'}`}
       members={members}
+      autosave={autosaveConfig}
       actions={[{ id: 'submit', label: '등록 요청 저장', icon: Send }]}
       busyActionId={busyActionId}
       onContractFileUpload={handleContractFileUpload}
       onCancel={() => navigate('/portal/project-select')}
-      onSubmit={(draft) => void handleSubmit(draft)}
+      onSubmit={(draft) => handleSubmit(draft)}
     />
   );
 }
