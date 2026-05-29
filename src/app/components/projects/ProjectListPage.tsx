@@ -1,10 +1,9 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import {
   Search, ArrowUpDown, Sparkles, CheckCircle2, ArrowRight,
   FolderKanban, RotateCcw, Trash2, FileText, Clock, AlertTriangle,
 } from 'lucide-react';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { Card, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
@@ -21,12 +20,11 @@ import { useAppStore } from '../../data/store';
 import {
   PROJECT_STATUS_LABELS, PROJECT_TYPE_LABELS, PROJECT_TYPE_SHORT_LABELS,
   SETTLEMENT_TYPE_LABELS, SETTLEMENT_TYPE_SHORT, normalizeSettlementType,
-  type ProjectStatus, type ProjectType, type Project, type ProjectRequest,
+  type ProjectStatus, type ProjectType, type Project,
 } from '../../data/types';
 import { PageHeader } from '../layout/PageHeader';
 import { resolveApiErrorMessage } from '../../platform/api-error-message';
-import { getOrgCollectionPath } from '../../lib/firebase';
-import { useFirebase } from '../../lib/firebase-context';
+import { usePendingProjectChangeRequests } from './usePendingProjectChangeRequests';
 
 const statusColor: Record<string, string> = {
   CONTRACT_PENDING: 'bg-amber-100 text-amber-800',
@@ -44,7 +42,6 @@ type SortDir = 'asc' | 'desc';
 
 export function ProjectListPage() {
   const { allProjects, restoreProject, ledgers, transactions } = useAppStore();
-  const { db, isOnline, orgId } = useFirebase();
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
@@ -54,36 +51,7 @@ export function ProjectListPage() {
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [activeTab, setActiveTab] = useState<string>('confirmed');
   const [monitoringPreset, setMonitoringPreset] = useState<'all' | 'no-ledger' | 'pending-approval' | 'missing-evidence'>('all');
-  const [pendingProjectChangeMap, setPendingProjectChangeMap] = useState<Map<string, ProjectRequest>>(new Map());
-
-  useEffect(() => {
-    if (!db || !isOnline) {
-      setPendingProjectChangeMap(new Map());
-      return undefined;
-    }
-
-    const q = query(
-      collection(db, getOrgCollectionPath(orgId, 'projectRequests')),
-      where('status', '==', 'PENDING'),
-    );
-    return onSnapshot(q, (snapshot) => {
-      const next = new Map<string, ProjectRequest>();
-      snapshot.docs.forEach((docSnap) => {
-        const request = { ...(docSnap.data() as ProjectRequest), id: docSnap.id };
-        if (request.requestKind !== 'CHANGE') return;
-        const projectId = request.targetProjectId || request.approvedProjectId;
-        if (!projectId) return;
-        const previous = next.get(projectId);
-        if (!previous || String(request.requestedAt || '').localeCompare(String(previous.requestedAt || '')) > 0) {
-          next.set(projectId, request);
-        }
-      });
-      setPendingProjectChangeMap(next);
-    }, (error) => {
-      console.error('[ProjectListPage] pending change request listen failed:', error);
-      setPendingProjectChangeMap(new Map());
-    });
-  }, [db, isOnline, orgId]);
+  const pendingProjectChangeMap = usePendingProjectChangeRequests();
 
   const activeProjects = useMemo(
     () => allProjects.filter((project) => !project.trashedAt),

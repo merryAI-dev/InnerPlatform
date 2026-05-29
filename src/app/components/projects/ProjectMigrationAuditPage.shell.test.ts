@@ -30,6 +30,9 @@ describe('ProjectMigrationAuditPage shell contract', () => {
     expect(compositeSource).toContain('CIC 대표 검토 대기열');
     expect(compositeSource).toContain('CIC 대표 검토 결정');
     expect(compositeSource).toContain('이번 수정에서 바뀐 값');
+    expect(compositeSource).toContain('describeProjectRequestVersion');
+    expect(compositeSource).toContain('수정 중');
+    expect(compositeSource).toContain('PM 수정 요청');
     expect(compositeSource).not.toContain('사업명으로 검색');
     expect(compositeSource).not.toContain('우리 사업으로 승인');
     expect(compositeSource).not.toContain('연결 필요');
@@ -49,6 +52,7 @@ describe('ProjectMigrationAuditPage shell contract', () => {
     expect(detailSource).not.toContain('DetailFact label="검토자"');
     expect(detailSource).not.toContain('DetailFact label="검토일"');
     expect(detailSource).not.toContain('DetailFact label="검토 메모"');
+    expect(detailSource).not.toContain("{isPmPortalProject ? 'PM 등록' : '기존 등록'}");
   });
 
   it('routes duplicate-discard decisions through the project trash flow', () => {
@@ -80,7 +84,7 @@ describe('ProjectMigrationAuditPage shell contract', () => {
     expect(detailSource).toContain('ReviewSection');
     expect(detailSource).toContain('ReviewFactGrid');
     expect(detailSource).toContain('sticky bottom-0');
-    expect(detailSource).toContain('PM이 포털에서 입력한 내용을 그대로');
+    expect(detailSource).toContain('requestVersionDescription');
     expect(detailSource).not.toContain('ProjectEditorWizard');
     expect(detailSource).not.toContain('수정 저장');
   });

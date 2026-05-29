@@ -41,8 +41,56 @@ function formatKst(iso: string): string {
   }
 }
 
+function formatKstSentence(iso: string): string {
+  const value = text(iso);
+  if (!value) return '시간 미상';
+
+  try {
+    const parts = new Intl.DateTimeFormat('ko-KR', {
+      timeZone: 'Asia/Seoul',
+      month: 'numeric',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).formatToParts(new Date(value));
+    const part = (type: string) => parts.find((item) => item.type === type)?.value || '';
+    const month = part('month');
+    const day = part('day');
+    const hour = part('hour');
+    const minute = part('minute');
+    if (month && day && hour && minute) return `${month}월 ${day}일 ${hour}시 ${minute}분`;
+  } catch {
+    // fall through to raw value
+  }
+
+  return value;
+}
+
 export function resolveProjectRequestKind(request: ProjectRequest | null | undefined): ProjectRequestKind {
   return request?.requestKind === 'CHANGE' ? 'CHANGE' : 'REGISTRATION';
+}
+
+export function describeProjectRequestVersion(input: {
+  request?: ProjectRequest | null;
+  project?: Project | null;
+  fallbackActorName?: string;
+  fallbackRequestedAt?: string;
+}): string {
+  const request = input.request || null;
+  const project = input.project || null;
+  const actorName = text(
+    request?.requestedByName
+    || input.fallbackActorName
+    || project?.registeredByName
+    || project?.managerName,
+  ) || '요청자';
+  const requestedAt = text(request?.requestedAt || input.fallbackRequestedAt || project?.createdAt);
+  const action = request
+    ? resolveProjectRequestKind(request) === 'CHANGE' ? '수정 요청' : '등록 요청'
+    : '등록';
+  const version = request?.requestVersion || request?.targetProjectVersion || request?.baseProjectVersion;
+  return `${actorName} 님이 ${formatKstSentence(requestedAt)}에 ${action}한 버전입니다${version ? ` · v${version}` : ''}`;
 }
 
 export function buildProjectPayloadFromProject(project: Project): ProjectRequestPayload {

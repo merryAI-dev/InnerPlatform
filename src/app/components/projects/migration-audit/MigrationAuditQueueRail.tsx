@@ -7,8 +7,11 @@ import type {
 } from '../../../platform/project-migration-console';
 import {
   getMigrationAuditStatusLabel,
-  isMigrationAuditPmRegistration,
 } from '../../../platform/project-migration-console';
+import {
+  describeProjectRequestVersion,
+  resolveProjectRequestKind,
+} from '../../../platform/project-change-request';
 
 interface MigrationAuditQueueRailProps {
   records: MigrationAuditConsoleRecord[];
@@ -21,14 +24,6 @@ function statusClass(status: MigrationAuditConsoleStatus) {
   if (status === 'REVISION_REJECTED') return 'border-rose-200 bg-rose-50 text-rose-700';
   if (status === 'DUPLICATE_DISCARDED') return 'border-slate-300 bg-slate-100 text-slate-700';
   return 'border-amber-200 bg-amber-50 text-amber-700';
-}
-
-function formatRequestedAt(value: string) {
-  return String(value || '').slice(0, 10).replace(/-/g, '.');
-}
-
-function getSourceLabel(record: MigrationAuditConsoleRecord) {
-  return isMigrationAuditPmRegistration(record) ? 'PM 등록' : '기존 등록';
 }
 
 export function MigrationAuditQueueRail({
@@ -63,6 +58,13 @@ export function MigrationAuditQueueRail({
 
           {records.map((item) => {
             const selected = item.id === selectedId;
+            const isChangeRequest = resolveProjectRequestKind(item.request) === 'CHANGE';
+            const requestVersionDescription = describeProjectRequestVersion({
+              request: item.request,
+              project: item.project,
+              fallbackActorName: item.managerName,
+              fallbackRequestedAt: item.requestedAt,
+            });
             return (
               <button
                 key={item.id}
@@ -83,9 +85,11 @@ export function MigrationAuditQueueRail({
                       <Badge variant="outline" className={`text-[10px] ${selected ? 'border-white/20 text-white' : 'border-slate-200 text-slate-600'}`}>
                         {item.cic}
                       </Badge>
-                      <Badge variant="outline" className={`text-[10px] ${selected ? 'border-white/20 text-white' : 'border-slate-200 text-slate-600'}`}>
-                        {getSourceLabel(item)}
-                      </Badge>
+                      {isChangeRequest && item.status === 'PENDING' ? (
+                        <Badge variant="outline" className={`text-[10px] ${selected ? 'border-white/20 text-white' : 'border-amber-300 bg-amber-50 text-amber-800'}`}>
+                          수정 중
+                        </Badge>
+                      ) : null}
                     </div>
                     <div className="space-y-1">
                       <p className={`truncate text-[13px] font-semibold ${selected ? 'text-white' : 'text-slate-950'}`}>
@@ -94,10 +98,9 @@ export function MigrationAuditQueueRail({
                       <p className={`truncate text-[11px] ${selected ? 'text-slate-200' : 'text-slate-500'}`}>
                         {item.clientOrg || '계약 대상 미지정'}
                       </p>
-                      <div className={`flex flex-wrap gap-x-3 gap-y-1 text-[11px] ${selected ? 'text-slate-200' : 'text-slate-500'}`}>
-                        <span>PM {item.managerName || '미지정'}</span>
-                        <span>접수 {formatRequestedAt(item.requestedAt)}</span>
-                      </div>
+                      <p className={`text-[11px] leading-5 ${selected ? 'text-slate-200' : 'text-slate-500'}`}>
+                        {requestVersionDescription}
+                      </p>
                     </div>
                   </div>
                   <ArrowRight className={`mt-1 h-4 w-4 shrink-0 ${selected ? 'text-slate-200' : 'text-slate-400'}`} />
