@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ExpenseSet } from './budget-data';
 import type { Project } from './types';
-import { areProjectsEqual } from './portal-store';
+import { areProjectsEqual, mergeProjectSnapshot } from './portal-store';
 import {
   computeExpenseTotals,
   duplicateExpenseSetAsDraft,
@@ -135,5 +135,27 @@ describe('portal-store helpers', () => {
     const right = [{ ...baseProject, updatedAt: '2026-01-02T00:00:00Z' }];
 
     expect(areProjectsEqual(left, right)).toBe(false);
+  });
+
+  it('replaces a saved project snapshot without dropping unrelated projects', () => {
+    const next = mergeProjectSnapshot([
+      { ...baseProject, id: 'p001', name: '기존 사업', version: 1 },
+      { ...baseProject, id: 'p002', name: '다른 사업', version: 1 },
+    ], {
+      ...baseProject,
+      id: 'p001',
+      name: '수정된 사업',
+      note: '저장된 비고',
+      version: 3,
+      updatedAt: '2026-05-29T00:00:00.000Z',
+    });
+
+    expect(next).toHaveLength(2);
+    expect(next.find((project) => project.id === 'p001')).toMatchObject({
+      name: '수정된 사업',
+      note: '저장된 비고',
+      version: 3,
+    });
+    expect(next.find((project) => project.id === 'p002')).toMatchObject({ name: '다른 사업' });
   });
 });
