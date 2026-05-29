@@ -5,10 +5,9 @@ describe('installVitePreloadRecovery', () => {
     vi.resetModules();
   });
 
-  it('reloads the app shell once when Vite reports a stale preload chunk', async () => {
+  it('does not auto reload when Vite reports a stale preload chunk', async () => {
     const { installVitePreloadRecovery } = await import('./preload-recovery');
     let listener: ((event: Event) => void) | undefined;
-    const reload = vi.fn();
     const storage = new Map<string, string>();
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -16,7 +15,7 @@ describe('installVitePreloadRecovery', () => {
       addEventListener: vi.fn((type: string, callback: EventListener) => {
         if (type === 'vite:preloadError') listener = callback;
       }),
-      location: { pathname: '/portal/cashflow', reload },
+      location: { pathname: '/portal/cashflow' },
       sessionStorage: {
         getItem: vi.fn((key: string) => storage.get(key) || null),
         setItem: vi.fn((key: string, value: string) => storage.set(key, value)),
@@ -31,24 +30,23 @@ describe('installVitePreloadRecovery', () => {
     listener?.(event);
 
     expect(event.preventDefault).toHaveBeenCalledTimes(1);
-    expect(reload).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Keeping current URL. User must choose when to refresh after saving current work.'));
     listener?.(event);
-    expect(reload).toHaveBeenCalledTimes(1);
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('already reported recently'));
     errorSpy.mockRestore();
     warnSpy.mockRestore();
   });
 
-  it('does not reload again after a same-path recovery marker survives reload', async () => {
+  it('does not auto reload after a same-path recovery marker survives reload', async () => {
     const { installVitePreloadRecovery } = await import('./preload-recovery');
     let listener: ((event: Event) => void) | undefined;
-    const reload = vi.fn();
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const target = {
       addEventListener: vi.fn((type: string, callback: EventListener) => {
         if (type === 'vite:preloadError') listener = callback;
       }),
-      location: { pathname: '/portal/cashflow', reload },
+      location: { pathname: '/portal/cashflow' },
       sessionStorage: {
         getItem: vi.fn(() => JSON.stringify({
           path: '/portal/cashflow',
@@ -66,8 +64,7 @@ describe('installVitePreloadRecovery', () => {
     listener?.(event);
 
     expect(event.preventDefault).toHaveBeenCalledTimes(1);
-    expect(reload).not.toHaveBeenCalled();
-    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('already attempted recently'));
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('already reported recently'));
     warnSpy.mockRestore();
     errorSpy.mockRestore();
   });
