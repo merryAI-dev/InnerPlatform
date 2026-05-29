@@ -48,6 +48,17 @@ const baseProject = {
   updatedAt: '2026-01-01T00:00:00.000Z',
 } satisfies Project;
 
+function collectUndefinedPaths(value: unknown, prefix = ''): string[] {
+  if (value === undefined) return [prefix || '<root>'];
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) => collectUndefinedPaths(item, `${prefix}[${index}]`));
+  }
+  if (!value || typeof value !== 'object') return [];
+  return Object.entries(value as Record<string, unknown>).flatMap(([key, item]) => (
+    collectUndefinedPaths(item, prefix ? `${prefix}.${key}` : key)
+  ));
+}
+
 describe('project change request helpers', () => {
   it('keeps legacy requests as registration requests', () => {
     expect(resolveProjectRequestKind(null)).toBe('REGISTRATION');
@@ -94,6 +105,8 @@ describe('project change request helpers', () => {
     expect(describeProjectRequestVersion({ request, project: baseProject })).toBe(
       '김인효(베리) 님이 5월 29일 10시 29분에 수정 요청한 버전입니다 · v1',
     );
+    expect(Object.prototype.hasOwnProperty.call(request, 'reviewOutcome')).toBe(false);
+    expect(collectUndefinedPaths(request)).toEqual([]);
   });
 
   it('applies an approved request payload as a project patch', () => {
