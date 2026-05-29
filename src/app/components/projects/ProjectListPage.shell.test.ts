@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const source = readFileSync(resolve(import.meta.dirname, 'ProjectListPage.tsx'), 'utf8');
+const pendingHookSource = readFileSync(resolve(import.meta.dirname, 'usePendingProjectChangeRequests.ts'), 'utf8');
 
 describe('ProjectListPage shell contract', () => {
   it('keeps the monitoring presets visible for admin exception detection', () => {
@@ -25,5 +26,13 @@ describe('ProjectListPage shell contract', () => {
   it('shows the business owner from registeredBy fields', () => {
     expect(source).toContain('사업 담당자');
     expect(source).toContain('p.registeredByName || p.managerName');
+  });
+
+  it('surfaces pending PM change requests from both request collections', () => {
+    expect(source).toContain('usePendingProjectChangeRequests');
+    expect(source).toContain('수정 검토 중');
+    expect(pendingHookSource).toContain("const PROJECT_REQUEST_COLLECTIONS: ProjectRequestCollectionName[] = ['project_requests', 'projectRequests']");
+    expect(pendingHookSource).toContain("request.requestKind !== 'CHANGE'");
+    expect(pendingHookSource).toContain("request.targetProjectId || request.approvedProjectId");
   });
 });

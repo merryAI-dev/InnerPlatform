@@ -14,6 +14,10 @@ import {
   getMigrationAuditStatusLabel,
   isMigrationAuditPmRegistration,
 } from '../../../platform/project-migration-console';
+import {
+  describeProjectRequestVersion,
+  resolveProjectRequestKind,
+} from '../../../platform/project-change-request';
 import { buildMigrationReviewDossier } from '../../../platform/project-migration-review-dossier';
 import { Badge } from '../../ui/badge';
 import { Button } from '../../ui/button';
@@ -169,6 +173,13 @@ export function MigrationAuditDetailPanel({
   const dossier = buildMigrationReviewDossier(record.project, record.request);
   const actionState = describeMigrationAuditActionState(record);
   const isPmPortalProject = isMigrationAuditPmRegistration(record);
+  const isChangeRequest = resolveProjectRequestKind(record.request) === 'CHANGE';
+  const requestVersionDescription = describeProjectRequestVersion({
+    request: record.request,
+    project: record.project,
+    fallbackActorName: record.managerName,
+    fallbackRequestedAt: record.requestedAt,
+  });
   const contractDocument = record.project.contractDocument || record.request?.payload.contractDocument || null;
 
   return (
@@ -186,15 +197,19 @@ export function MigrationAuditDetailPanel({
                 </Badge>
                 <Badge variant="outline">{record.cic}</Badge>
                 <Badge variant="outline">{record.clientOrg || '계약 대상 미지정'}</Badge>
-                <Badge variant="outline">{isPmPortalProject ? 'PM 등록' : '기존 등록'}</Badge>
+                {isChangeRequest && record.status === 'PENDING' ? (
+                  <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800">수정 중</Badge>
+                ) : null}
               </div>
               <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">PM 등록 원문</p>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                  {isChangeRequest ? 'PM 수정 요청' : isPmPortalProject ? 'PM 등록 요청' : '프로젝트 원장'}
+                </p>
                 <h2 className="mt-1 text-[24px] font-semibold tracking-[-0.02em] text-slate-950">
                   {record.title}
                 </h2>
                 <p className="mt-2 max-w-3xl text-[12px] leading-6 text-slate-600">
-                  PM이 포털에서 입력한 내용을 그대로 보되, 항목을 등록/수정 흐름과 같은 묶음으로 정리해 빠르게 대조합니다.
+                  {requestVersionDescription}
                 </p>
               </div>
             </div>

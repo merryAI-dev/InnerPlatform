@@ -43,6 +43,8 @@ import { computeProjectCompleteness } from '../../data/project-completeness';
 import { resolveApiErrorMessage } from '../../platform/api-error-message';
 import { normalizeProjectRevenueFields } from '../../platform/project-financials';
 import { buildProjectTeamParticipationEntries } from '../../platform/project-team-participation';
+import { describeProjectRequestVersion } from '../../platform/project-change-request';
+import { usePendingProjectChangeRequests } from './usePendingProjectChangeRequests';
 
 const statusColor: Record<string, string> = {
   CONTRACT_PENDING: 'bg-amber-100 text-amber-800',
@@ -87,6 +89,8 @@ export function ProjectDetailPage() {
 
   const project = getProjectById(projectId || '');
   const projectLedgers = getProjectLedgers(projectId || '');
+  const pendingProjectChangeMap = usePendingProjectChangeRequests();
+  const pendingProjectChangeRequest = project ? pendingProjectChangeMap.get(project.id) || null : null;
 
   const revenueFinancials = project ? normalizeProjectRevenueFields(project, 'totalRevenueAmount') : null;
   const contractAmount = toFiniteNumber(project?.contractAmount);
@@ -232,6 +236,11 @@ export function ProjectDetailPage() {
                   입찰/예정
                 </span>
               )}
+              {pendingProjectChangeRequest && (
+                <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800">
+                  수정 중
+                </Badge>
+              )}
               <span className={`inline-flex rounded px-1.5 py-0.5 text-[10px] ${
                 project.accountType === 'DEDICATED'
                   ? 'bg-blue-50 text-blue-700'
@@ -243,6 +252,16 @@ export function ProjectDetailPage() {
               </span>
             </div>
             <p className="text-[12px] text-muted-foreground mt-0.5">{project.description}</p>
+            {pendingProjectChangeRequest && (
+              <p className="mt-1 text-[12px] font-medium text-amber-700">
+                {describeProjectRequestVersion({
+                  request: pendingProjectChangeRequest,
+                  project,
+                  fallbackActorName: project.registeredByName || project.managerName,
+                  fallbackRequestedAt: pendingProjectChangeRequest.requestedAt,
+                })} 승인 전까지 이 화면은 현재 확정된 원장 값을 보여줍니다.
+              </p>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">

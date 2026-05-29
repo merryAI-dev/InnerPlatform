@@ -4,6 +4,7 @@ import { createProjectEditorDraft } from './project-editor';
 import {
   buildProjectChangeRequest,
   buildProjectPatchFromRequestPayload,
+  describeProjectRequestVersion,
   resolveProjectRequestKind,
 } from './project-change-request';
 
@@ -90,6 +91,9 @@ describe('project change request helpers', () => {
     expect(request.proposedSnapshot?.name).toBe('2026 CTS2 수정');
     expect(request.changedFields?.some((change) => change.key === 'name')).toBe(true);
     expect(request.humanSummary).toContain('기준 프로젝트 v7');
+    expect(describeProjectRequestVersion({ request, project: baseProject })).toBe(
+      '김인효(베리) 님이 5월 29일 10시 29분에 수정 요청한 버전입니다 · v1',
+    );
   });
 
   it('applies an approved request payload as a project patch', () => {
