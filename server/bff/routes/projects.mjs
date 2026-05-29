@@ -450,6 +450,74 @@ function buildProjectRequestPayloadFromProject(project, existingPayload = {}) {
   };
 }
 
+function resolveProjectCicFromPayload(payload, currentProject = {}) {
+  return readOptionalText(payload?.cic)
+    || readOptionalText(payload?.department)
+    || readOptionalText(currentProject?.cic)
+    || readOptionalText(currentProject?.department);
+}
+
+export function buildProjectPatchFromChangeRequestPayload(payload = {}, currentProject = {}) {
+  const managerId = readOptionalText(payload.registeredById)
+    || readOptionalText(payload.managerId)
+    || readOptionalText(currentProject.registeredById)
+    || readOptionalText(currentProject.managerId);
+  const managerName = readOptionalText(payload.registeredByName)
+    || readOptionalText(payload.managerName)
+    || readOptionalText(currentProject.registeredByName)
+    || readOptionalText(currentProject.managerName);
+  const teamMembersDetailed = normalizeProjectTeamMembersDetailed(payload.teamMembersDetailed);
+  return normalizeProjectRevenueFields(stripUndefinedDeep({
+    name: readOptionalText(payload.name) || readOptionalText(currentProject.name),
+    officialContractName: readOptionalText(payload.officialContractName),
+    type: normalizeProjectType(readOptionalText(payload.type)),
+    status: normalizeProjectStatus(readOptionalText(payload.status) || currentProject.status),
+    phase: normalizeProjectPhase(readOptionalText(payload.phase) || currentProject.phase),
+    description: readOptionalText(payload.description),
+    clientOrg: readOptionalText(payload.clientOrg),
+    department: readOptionalText(payload.department),
+    cic: resolveProjectCicFromPayload(payload, currentProject),
+    groupwareName: readOptionalText(payload.groupwareName),
+    currency: normalizeProjectCurrency(readOptionalText(payload.currency)),
+    contractAmount: Number.isFinite(Number(payload.contractAmount)) ? Math.max(0, Math.round(Number(payload.contractAmount))) : 0,
+    salesVatAmount: Number.isFinite(Number(payload.salesVatAmount)) ? Math.max(0, Math.round(Number(payload.salesVatAmount))) : 0,
+    totalRevenueAmount: Number.isFinite(Number(payload.totalRevenueAmount)) ? Math.max(0, Math.round(Number(payload.totalRevenueAmount))) : 0,
+    supportAmount: Number.isFinite(Number(payload.supportAmount)) ? Math.max(0, Math.round(Number(payload.supportAmount))) : 0,
+    financialInputFlags: payload.financialInputFlags,
+    contractStart: readOptionalText(payload.contractStart),
+    contractEnd: readOptionalText(payload.contractEnd),
+    contractType: normalizeProjectContractType(payload.contractType),
+    settlementType: normalizeSettlementType(readOptionalText(payload.settlementType)),
+    basis: normalizeBasis(readOptionalText(payload.basis)),
+    accountType: normalizeAccountType(readOptionalText(payload.accountType)),
+    fundInputMode: normalizeProjectFundInputMode(readOptionalText(payload.fundInputMode)),
+    settlementSheetPolicy: payload.settlementSheetPolicy,
+    paymentPlan: payload.paymentPlan || currentProject.paymentPlan || { contract: 0, interim: 0, final: 0 },
+    paymentPlanDesc: readOptionalText(payload.paymentPlanDesc),
+    settlementGuide: readOptionalText(payload.settlementGuide),
+    finalPaymentNote: readOptionalText(payload.finalPaymentNote),
+    projectPurpose: readOptionalText(payload.projectPurpose),
+    registeredById: managerId,
+    registeredByName: managerName,
+    registeredByEmail: readOptionalText(payload.registeredByEmail) || readOptionalText(currentProject.registeredByEmail),
+    managerId,
+    managerName,
+    teamName: readOptionalText(payload.teamName),
+    teamMembersDetailed,
+    participantCondition: readOptionalText(payload.participantCondition),
+    note: readOptionalText(payload.note),
+    contractDocument: payload.contractDocument || null,
+    contractAnalysis: payload.contractAnalysis || null,
+    budgetCurrentYear: Number.isFinite(Number(payload.contractAmount))
+      ? Math.max(0, Math.round(Number(payload.contractAmount)))
+      : currentProject.budgetCurrentYear,
+  }), 'totalRevenueAmount');
+}
+
+function isProjectChangeRequest(request) {
+  return readOptionalText(request?.requestKind) === 'CHANGE';
+}
+
 function normalizeParticipationRate(value) {
   const parsed = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(parsed)) return 0;
@@ -1187,7 +1255,13 @@ export function mountProjectRoutes(app, {
       buildProjectPatch: (currentProject) => {
         const previousStatus = readOptionalText(currentProject.executiveReviewStatus) || 'PENDING';
         const currentHistory = Array.isArray(currentProject.executiveReviewHistory) ? currentProject.executiveReviewHistory : [];
+        const isApprovedChangeRequest = parsed.reviewStatus === 'APPROVED' && isProjectChangeRequest(request);
+        const requestChanges = Array.isArray(request?.changedFields) ? request.changedFields : [];
+        const payloadPatch = isApprovedChangeRequest
+          ? buildProjectPatchFromChangeRequestPayload(request?.payload, currentProject)
+          : {};
         return {
+          ...payloadPatch,
           executiveReviewStatus: parsed.reviewStatus,
           executiveReviewedAt: now,
           executiveReviewedById: actorId,
@@ -1202,6 +1276,7 @@ export function mountProjectRoutes(app, {
               reviewedById: actorId,
               reviewedByName: reviewerName,
               reviewComment: readOptionalText(parsed.reviewComment) || null,
+              ...(requestChanges.length > 0 ? { changes: requestChanges } : {}),
             },
           ],
         };
@@ -1215,6 +1290,10 @@ export function mountProjectRoutes(app, {
         reviewComment: readOptionalText(parsed.reviewComment) || null,
         rejectedReason: parsed.reviewStatus === 'APPROVED' ? null : (readOptionalText(parsed.reviewComment) || null),
         approvedProjectId: projectId,
+        targetProjectId: projectId,
+        ...(parsed.reviewStatus === 'APPROVED' && isProjectChangeRequest(request) ? {
+          approvedSnapshot: request?.payload || null,
+        } : {}),
         updatedAt: now,
       }) : null,
       requestRefs: resolvedRequestId ? refs : [],

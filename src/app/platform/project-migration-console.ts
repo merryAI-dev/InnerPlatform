@@ -44,10 +44,11 @@ export function normalizeCicLabel(value: unknown): string {
 function deriveProjectRequestMap(requests: ProjectRequest[]): Map<string, ProjectRequest> {
   const map = new Map<string, ProjectRequest>();
   requests.forEach((request) => {
-    if (request.approvedProjectId) {
-      const previous = map.get(request.approvedProjectId);
+    const projectId = request.targetProjectId || request.approvedProjectId;
+    if (projectId) {
+      const previous = map.get(projectId);
       if (!previous || String(request.requestedAt || '').localeCompare(String(previous.requestedAt || '')) > 0) {
-        map.set(request.approvedProjectId, request);
+        map.set(projectId, request);
       }
     }
   });

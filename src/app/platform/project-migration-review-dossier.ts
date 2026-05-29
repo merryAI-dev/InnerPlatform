@@ -21,6 +21,7 @@ import {
   normalizeProjectTeamMembers,
 } from './project-team-members';
 import { getMigrationAuditStatusLabel } from './project-migration-console';
+import { resolveProjectRequestKind } from './project-change-request';
 
 export interface MigrationReviewDossier {
   headerTitle: string;
@@ -62,6 +63,8 @@ export interface MigrationReviewDossier {
     note: string;
   };
   audit: {
+    requestSummary: string;
+    requestVersion: string;
     requestedByName: string;
     requestedAt: string;
     reviewedByName: string;
@@ -184,16 +187,39 @@ function findLatestReviewChanges(history: ReturnType<typeof buildAuditHistory>) 
   return history.find((entry) => entry.changes.length > 0)?.changes || [];
 }
 
+function readReviewChangesFromRequest(request: ProjectRequest | null) {
+  return normalizeReviewChanges(request?.changedFields);
+}
+
+function preferRequestPayloadForChange<T>(
+  request: ProjectRequest | null,
+  projectValue: T,
+  payloadValue: T | undefined,
+): T | undefined {
+  return resolveProjectRequestKind(request) === 'CHANGE'
+    ? (payloadValue ?? projectValue)
+    : (projectValue ?? payloadValue);
+}
+
 export function buildMigrationReviewDossier(
   project: Project,
   request: ProjectRequest | null,
 ): MigrationReviewDossier {
   const payload = request?.payload;
+  const usePayloadAsCurrent = resolveProjectRequestKind(request) === 'CHANGE' && request?.status === 'PENDING';
   const contractDocument = project.contractDocument || payload?.contractDocument || null;
   const contractAnalysis = project.contractAnalysis || payload?.contractAnalysis || null;
-  const rawMembers = Array.isArray(project.teamMembersDetailed)
-    ? project.teamMembersDetailed
-    : payload?.teamMembersDetailed;
+  const currentName = preferRequestPayloadForChange(request, project.name, payload?.name);
+  const currentOfficialContractName = preferRequestPayloadForChange(request, project.officialContractName, payload?.officialContractName);
+  const currentClientOrg = preferRequestPayloadForChange(request, project.clientOrg, payload?.clientOrg);
+  const currentDepartment = preferRequestPayloadForChange(request, project.department, payload?.department);
+  const currentManagerName = preferRequestPayloadForChange(request, project.registeredByName || project.managerName, payload?.registeredByName || payload?.managerName);
+  const currentTeamName = preferRequestPayloadForChange(request, project.teamName, payload?.teamName);
+  const rawMembers = usePayloadAsCurrent && Array.isArray(payload?.teamMembersDetailed)
+    ? payload?.teamMembersDetailed
+    : Array.isArray(project.teamMembersDetailed)
+      ? project.teamMembersDetailed
+      : payload?.teamMembersDetailed;
   const members = Array.isArray(rawMembers)
     ? normalizeProjectTeamMembers(rawMembers).map(formatProjectTeamMemberLine)
     : readable(payload?.teamMembers, '')
@@ -201,51 +227,55 @@ export function buildMigrationReviewDossier(
         .map((member) => member.trim())
         .filter(Boolean);
   const auditHistory = buildAuditHistory(project, request);
-  const changes = findLatestReviewChanges(auditHistory);
+  const changes = readReviewChangesFromRequest(request).length > 0
+    ? readReviewChangesFromRequest(request)
+    : findLatestReviewChanges(auditHistory);
 
   return {
-    headerTitle: readable(project.name),
+    headerTitle: readable(currentName),
     identity: {
-      clientOrg: readable(project.clientOrg || payload?.clientOrg),
-      cic: readable(project.cic || project.department || payload?.department),
-      pmName: readable(project.registeredByName || payload?.registeredByName || project.managerName || payload?.managerName),
-      department: readable(project.department || payload?.department),
-      officialContractName: readable(project.officialContractName || payload?.officialContractName || project.name),
-      groupwareName: readable(project.groupwareName || payload?.groupwareName),
+      clientOrg: readable(currentClientOrg),
+      cic: readable(project.cic || currentDepartment),
+      pmName: readable(currentManagerName),
+      department: readable(currentDepartment),
+      officialContractName: readable(currentOfficialContractName || currentName),
+      groupwareName: readable(preferRequestPayloadForChange(request, project.groupwareName, payload?.groupwareName)),
     },
     contract: {
-      projectTypeLabel: PROJECT_TYPE_LABELS[normalizeProjectType(project.type || payload?.type)] || readable(project.type || payload?.type),
-      periodLabel: `${readable(project.contractStart || payload?.contractStart)} ~ ${readable(project.contractEnd || payload?.contractEnd)}`,
-      contractType: readable(normalizeProjectContractType(project.contractType || payload?.contractType)),
-      settlementTypeLabel: SETTLEMENT_TYPE_LABELS[normalizeSettlementType(project.settlementType || payload?.settlementType)] || '-',
-      basisLabel: BASIS_LABELS[normalizeBasis(project.basis || payload?.basis)] || '-',
-      accountTypeLabel: ACCOUNT_TYPE_LABELS[normalizeAccountType(project.accountType || payload?.accountType)] || '-',
-      fundInputModeLabel: PROJECT_FUND_INPUT_MODE_LABELS[normalizeProjectFundInputMode(project.fundInputMode || payload?.fundInputMode)] || '-',
+      projectTypeLabel: PROJECT_TYPE_LABELS[normalizeProjectType(preferRequestPayloadForChange(request, project.type, payload?.type))] || readable(project.type || payload?.type),
+      periodLabel: `${readable(preferRequestPayloadForChange(request, project.contractStart, payload?.contractStart))} ~ ${readable(preferRequestPayloadForChange(request, project.contractEnd, payload?.contractEnd))}`,
+      contractType: readable(normalizeProjectContractType(preferRequestPayloadForChange(request, project.contractType, payload?.contractType))),
+      settlementTypeLabel: SETTLEMENT_TYPE_LABELS[normalizeSettlementType(preferRequestPayloadForChange(request, project.settlementType, payload?.settlementType))] || '-',
+      basisLabel: BASIS_LABELS[normalizeBasis(preferRequestPayloadForChange(request, project.basis, payload?.basis))] || '-',
+      accountTypeLabel: ACCOUNT_TYPE_LABELS[normalizeAccountType(preferRequestPayloadForChange(request, project.accountType, payload?.accountType))] || '-',
+      fundInputModeLabel: PROJECT_FUND_INPUT_MODE_LABELS[normalizeProjectFundInputMode(preferRequestPayloadForChange(request, project.fundInputMode, payload?.fundInputMode))] || '-',
     },
     budget: {
-      currencyLabel: PROJECT_CURRENCY_LABELS[normalizeProjectCurrency(project.currency || payload?.currency)] || 'KRW',
-      contractAmountLabel: formatStoredProjectAmount(project.contractAmount ?? payload?.contractAmount),
-      salesVatAmountLabel: formatStoredProjectAmount(project.salesVatAmount ?? payload?.salesVatAmount),
-      paymentPlanDesc: readable(project.paymentPlanDesc || payload?.paymentPlanDesc),
+      currencyLabel: PROJECT_CURRENCY_LABELS[normalizeProjectCurrency(preferRequestPayloadForChange(request, project.currency, payload?.currency))] || 'KRW',
+      contractAmountLabel: formatStoredProjectAmount(preferRequestPayloadForChange(request, project.contractAmount, payload?.contractAmount)),
+      salesVatAmountLabel: formatStoredProjectAmount(preferRequestPayloadForChange(request, project.salesVatAmount, payload?.salesVatAmount)),
+      paymentPlanDesc: readable(preferRequestPayloadForChange(request, project.paymentPlanDesc, payload?.paymentPlanDesc)),
       paymentPlanSplitLabel: formatPaymentPlanSplit(
-        project.paymentPlan || payload?.paymentPlan,
-        project.contractAmount ?? payload?.contractAmount,
+        preferRequestPayloadForChange(request, project.paymentPlan, payload?.paymentPlan),
+        preferRequestPayloadForChange(request, project.contractAmount, payload?.contractAmount),
       ),
-      finalPaymentNote: readable(project.finalPaymentNote || payload?.finalPaymentNote),
-      totalRevenueAmountLabel: formatStoredProjectAmount(project.totalRevenueAmount ?? payload?.totalRevenueAmount),
-      supportAmountLabel: formatStoredProjectAmount(project.supportAmount ?? payload?.supportAmount),
+      finalPaymentNote: readable(preferRequestPayloadForChange(request, project.finalPaymentNote, payload?.finalPaymentNote)),
+      totalRevenueAmountLabel: formatStoredProjectAmount(preferRequestPayloadForChange(request, project.totalRevenueAmount, payload?.totalRevenueAmount)),
+      supportAmountLabel: formatStoredProjectAmount(preferRequestPayloadForChange(request, project.supportAmount, payload?.supportAmount)),
     },
     people: {
-      teamName: readable(project.teamName || payload?.teamName),
+      teamName: readable(currentTeamName),
       members,
     },
     notes: {
-      description: readable(project.description || payload?.description),
-      projectPurpose: readable(project.projectPurpose || payload?.projectPurpose),
-      participantCondition: readable(project.participantCondition || payload?.participantCondition),
+      description: readable(preferRequestPayloadForChange(request, project.description, payload?.description)),
+      projectPurpose: readable(preferRequestPayloadForChange(request, project.projectPurpose, payload?.projectPurpose)),
+      participantCondition: readable(preferRequestPayloadForChange(request, project.participantCondition, payload?.participantCondition)),
       note: readable(payload?.note),
     },
     audit: {
+      requestSummary: readable(request?.humanSummary),
+      requestVersion: request?.requestVersion ? `v${request.requestVersion}` : '-',
       requestedByName: readable(request?.requestedByName),
       requestedAt: formatDate(request?.requestedAt),
       reviewedByName: readable(project.executiveReviewedByName || request?.reviewedByName),

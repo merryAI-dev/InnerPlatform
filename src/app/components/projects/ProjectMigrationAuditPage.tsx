@@ -27,6 +27,10 @@ import {
   findMigrationAuditRecord,
   summarizeMigrationAuditConsole,
 } from '../../platform/project-migration-console';
+import {
+  buildProjectPatchFromRequestPayload,
+  resolveProjectRequestKind,
+} from '../../platform/project-change-request';
 import { PageHeader } from '../layout/PageHeader';
 import { Card, CardContent } from '../ui/card';
 import { MigrationAuditControlBar } from './migration-audit/MigrationAuditControlBar';
@@ -62,6 +66,14 @@ function getReviewDialogDescription(mode: ReviewActionMode): string {
   if (mode === 'approve') return 'PM이 올린 원문을 기준으로 이 프로젝트를 등록 대상으로 확정합니다.';
   if (mode === 'reject') return '수정이 필요한 이유를 반드시 남기고 PM이 다시 보완하도록 돌려보냅니다.';
   return '중복 또는 폐기 대상으로 정리하고, 왜 그렇게 판단했는지 사유를 반드시 남깁니다.';
+}
+
+function getProjectRequestReviewDescription(mode: ReviewActionMode, request: ProjectRequest | null | undefined): string {
+  const isChangeRequest = resolveProjectRequestKind(request) === 'CHANGE';
+  if (!isChangeRequest) return getReviewDialogDescription(mode);
+  if (mode === 'approve') return 'PM이 제출한 수정 중 값을 프로젝트 원장에 반영하고 변경 요청을 승인 완료로 닫습니다.';
+  if (mode === 'reject') return '프로젝트 원장은 유지하고, 수정이 필요한 이유를 남겨 PM에게 돌려보냅니다.';
+  return '프로젝트 원장은 유지하고, 중복 또는 폐기된 수정 요청으로 정리합니다.';
 }
 
 function toExecutiveStatus(mode: ReviewActionMode): ProjectExecutiveReviewStatus {
@@ -102,6 +114,8 @@ function buildProjectRequestReviewPatch(input: {
   nextStatus: ProjectExecutiveReviewStatus;
   reviewComment: string;
   reviewedAt: string;
+  request?: ProjectRequest | null;
+  targetProjectVersion?: number;
 }) {
   return {
     status: input.nextStatus === 'APPROVED' ? 'APPROVED' : 'REJECTED',
@@ -112,6 +126,9 @@ function buildProjectRequestReviewPatch(input: {
     reviewComment: input.reviewComment || null,
     rejectedReason: input.nextStatus === 'APPROVED' ? null : (input.reviewComment || null),
     approvedProjectId: input.projectId,
+    targetProjectId: input.projectId,
+    ...(input.nextStatus === 'APPROVED' && input.request?.payload ? { approvedSnapshot: input.request.payload } : {}),
+    ...(input.targetProjectVersion ? { targetProjectVersion: input.targetProjectVersion } : {}),
     updatedAt: input.reviewedAt,
   };
 }
@@ -284,19 +301,32 @@ export function ProjectMigrationAuditPage({
       } else {
         const requestCollectionName = (activeRecord.request as ProjectRequestWithSource | null)?.__collectionName || 'project_requests';
         await updateProject(activeRecord.project.id, {
-          executiveReviewStatus: nextExecutiveStatus,
-          executiveReviewedAt: now,
-          executiveReviewedById: reviewerId,
-          executiveReviewedByName: reviewerName,
-          executiveReviewComment: trimmedComment || undefined,
-          executiveReviewHistory: appendExecutiveReviewHistory(activeRecord.project, {
-            nextStatus: nextExecutiveStatus,
-            reviewerId,
-            reviewerName,
-            reviewComment: trimmedComment,
-            reviewedAt: now,
-            previousStatus: activeRecord.status,
-          }),
+          ...(nextExecutiveStatus === 'APPROVED'
+            && activeRecord.request
+            && resolveProjectRequestKind(activeRecord.request) === 'CHANGE'
+            ? buildProjectPatchFromRequestPayload(activeRecord.request.payload, {
+                baseProject: activeRecord.project,
+                approvedAt: now,
+                reviewerId,
+                reviewerName,
+                reviewComment: trimmedComment,
+                changedFields: activeRecord.request.changedFields,
+              })
+            : {
+                executiveReviewStatus: nextExecutiveStatus,
+                executiveReviewedAt: now,
+                executiveReviewedById: reviewerId,
+                executiveReviewedByName: reviewerName,
+                executiveReviewComment: trimmedComment || undefined,
+                executiveReviewHistory: appendExecutiveReviewHistory(activeRecord.project, {
+                  nextStatus: nextExecutiveStatus,
+                  reviewerId,
+                  reviewerName,
+                  reviewComment: trimmedComment,
+                  reviewedAt: now,
+                  previousStatus: activeRecord.status,
+                }),
+              }),
           ...(shouldTrashProject
             ? {
               trashedAt: now,
@@ -320,6 +350,10 @@ export function ProjectMigrationAuditPage({
               nextStatus: nextExecutiveStatus,
               reviewComment: trimmedComment,
               reviewedAt: now,
+              request: activeRecord.request,
+              targetProjectVersion: nextExecutiveStatus === 'APPROVED'
+                ? Number(activeRecord.project.version || 1) + 1
+                : undefined,
             }),
             { merge: true },
           );
@@ -427,7 +461,7 @@ export function ProjectMigrationAuditPage({
           <AlertDialogHeader>
             <AlertDialogTitle>{getReviewDialogTitle(actionMode || 'approve')}</AlertDialogTitle>
             <AlertDialogDescription>
-              {getReviewDialogDescription(actionMode || 'approve')}
+              {getProjectRequestReviewDescription(actionMode || 'approve', activeRecord?.request)}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="space-y-2">

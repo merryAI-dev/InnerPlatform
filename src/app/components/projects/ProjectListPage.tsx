@@ -1,9 +1,10 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import {
   Search, ArrowUpDown, Sparkles, CheckCircle2, ArrowRight,
   FolderKanban, RotateCcw, Trash2, FileText, Clock, AlertTriangle,
 } from 'lucide-react';
+import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { Card, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
@@ -20,10 +21,12 @@ import { useAppStore } from '../../data/store';
 import {
   PROJECT_STATUS_LABELS, PROJECT_TYPE_LABELS, PROJECT_TYPE_SHORT_LABELS,
   SETTLEMENT_TYPE_LABELS, SETTLEMENT_TYPE_SHORT, normalizeSettlementType,
-  type ProjectStatus, type ProjectType, type Project,
+  type ProjectStatus, type ProjectType, type Project, type ProjectRequest,
 } from '../../data/types';
 import { PageHeader } from '../layout/PageHeader';
 import { resolveApiErrorMessage } from '../../platform/api-error-message';
+import { getOrgCollectionPath } from '../../lib/firebase';
+import { useFirebase } from '../../lib/firebase-context';
 
 const statusColor: Record<string, string> = {
   CONTRACT_PENDING: 'bg-amber-100 text-amber-800',
@@ -41,6 +44,7 @@ type SortDir = 'asc' | 'desc';
 
 export function ProjectListPage() {
   const { allProjects, restoreProject, ledgers, transactions } = useAppStore();
+  const { db, isOnline, orgId } = useFirebase();
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
@@ -50,6 +54,36 @@ export function ProjectListPage() {
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [activeTab, setActiveTab] = useState<string>('confirmed');
   const [monitoringPreset, setMonitoringPreset] = useState<'all' | 'no-ledger' | 'pending-approval' | 'missing-evidence'>('all');
+  const [pendingProjectChangeMap, setPendingProjectChangeMap] = useState<Map<string, ProjectRequest>>(new Map());
+
+  useEffect(() => {
+    if (!db || !isOnline) {
+      setPendingProjectChangeMap(new Map());
+      return undefined;
+    }
+
+    const q = query(
+      collection(db, getOrgCollectionPath(orgId, 'projectRequests')),
+      where('status', '==', 'PENDING'),
+    );
+    return onSnapshot(q, (snapshot) => {
+      const next = new Map<string, ProjectRequest>();
+      snapshot.docs.forEach((docSnap) => {
+        const request = { ...(docSnap.data() as ProjectRequest), id: docSnap.id };
+        if (request.requestKind !== 'CHANGE') return;
+        const projectId = request.targetProjectId || request.approvedProjectId;
+        if (!projectId) return;
+        const previous = next.get(projectId);
+        if (!previous || String(request.requestedAt || '').localeCompare(String(previous.requestedAt || '')) > 0) {
+          next.set(projectId, request);
+        }
+      });
+      setPendingProjectChangeMap(next);
+    }, (error) => {
+      console.error('[ProjectListPage] pending change request listen failed:', error);
+      setPendingProjectChangeMap(new Map());
+    });
+  }, [db, isOnline, orgId]);
 
   const activeProjects = useMemo(
     () => allProjects.filter((project) => !project.trashedAt),
@@ -257,7 +291,14 @@ export function ProjectListPage() {
                     {p.department || '-'}
                   </TableCell>
                   <TableCell style={{ fontWeight: 500 }} className="max-w-[220px] truncate text-sm">
-                    {p.name}
+                    <span className="inline-flex max-w-full items-center gap-1.5">
+                      <span className="truncate">{p.name}</span>
+                      {pendingProjectChangeMap.has(p.id) ? (
+                        <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+                          수정 검토 중
+                        </span>
+                      ) : null}
+                    </span>
                   </TableCell>
                   <TableCell className="text-[11px] whitespace-nowrap">{p.clientOrg || '-'}</TableCell>
                   <TableCell className="text-[11px] whitespace-nowrap">

@@ -600,6 +600,7 @@ export interface Project {
 export type ProjectRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 export type ProjectExecutiveReviewStatus = 'PENDING' | 'APPROVED' | 'REVISION_REJECTED' | 'DUPLICATE_DISCARDED';
 export type ProjectRequestReviewOutcome = 'APPROVED' | 'REVISION_REJECTED' | 'DUPLICATE_DISCARDED';
+export type ProjectRequestKind = 'REGISTRATION' | 'CHANGE';
 
 export interface ProjectReviewFieldChange {
   key: string;
@@ -745,6 +746,16 @@ export interface ProjectRequestPayload {
 export interface ProjectRequest {
   id: string;
   tenantId?: string;
+  requestKind?: ProjectRequestKind;
+  targetProjectId?: string;
+  baseProjectVersion?: number;
+  requestVersion?: number;
+  targetProjectVersion?: number;
+  beforeSnapshot?: ProjectRequestPayload | null;
+  proposedSnapshot?: ProjectRequestPayload | null;
+  approvedSnapshot?: ProjectRequestPayload | null;
+  changedFields?: ProjectReviewFieldChange[];
+  humanSummary?: string;
   status: ProjectRequestStatus;
   reviewOutcome?: ProjectRequestReviewOutcome;
   payload: ProjectRequestPayload;

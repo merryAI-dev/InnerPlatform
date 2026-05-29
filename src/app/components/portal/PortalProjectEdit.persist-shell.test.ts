@@ -5,9 +5,10 @@ import { describe, expect, it } from 'vitest';
 const source = readFileSync(resolve(import.meta.dirname, 'PortalProjectEdit.tsx'), 'utf8');
 
 describe('PortalProjectEdit persistence shell', () => {
-  it('patches the portal project snapshot after a successful save', () => {
-    expect(source).toContain('patchProjectSnapshot');
-    expect(source).toContain('const savedProject = await persistProject');
-    expect(source).toContain('if (savedProject) patchProjectSnapshot(savedProject)');
+  it('stores portal edits as approval-gated change requests instead of mutating the project snapshot', () => {
+    expect(source).toContain('buildProjectChangeRequest');
+    expect(source).toContain("doc(db, getOrgDocumentPath(orgId, 'projectRequests', changeRequest.id))");
+    expect(source).not.toContain('patchProjectSnapshot');
+    expect(source).not.toContain('upsertProjectViaBff');
   });
 });
