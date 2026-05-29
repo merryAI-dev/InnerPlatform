@@ -25,6 +25,19 @@ function nextPositiveInt(value: unknown): number {
   return Number.isInteger(parsed) && parsed > 0 ? parsed + 1 : 1;
 }
 
+function omitUndefinedFields<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((item) => omitUndefinedFields(item)) as T;
+  }
+  if (!value || typeof value !== 'object') return value;
+
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([, item]) => item !== undefined)
+      .map(([key, item]) => [key, omitUndefinedFields(item)]),
+  ) as T;
+}
+
 function formatKst(iso: string): string {
   try {
     return new Intl.DateTimeFormat('ko-KR', {
@@ -165,7 +178,7 @@ export function buildProjectChangeRequest(input: {
     ? Number(input.baseProject.version)
     : 1;
   const id = text(input.previousRequest?.id) || `change-${input.baseProject.id}`;
-  return {
+  return omitUndefinedFields({
     id,
     tenantId: input.tenantId,
     requestKind: 'CHANGE',
@@ -182,21 +195,17 @@ export function buildProjectChangeRequest(input: {
       requestVersion,
     }),
     status: 'PENDING',
-    reviewOutcome: undefined,
     payload: proposedSnapshot,
     requestedBy: input.actorId,
     requestedByName: input.actorName,
     requestedByEmail: input.actorEmail,
     requestedAt: input.requestedAt,
-    reviewedBy: undefined,
-    reviewedByName: undefined,
-    reviewedAt: undefined,
     reviewComment: null,
     rejectedReason: null,
     approvedProjectId: input.baseProject.id,
     createdAt: input.previousRequest?.createdAt || input.requestedAt,
     updatedAt: input.requestedAt,
-  };
+  });
 }
 
 export function buildProjectPatchFromRequestPayload(

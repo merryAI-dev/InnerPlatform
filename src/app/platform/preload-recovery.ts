@@ -1,20 +1,20 @@
 type PreloadRecoveryTarget = Pick<Window, 'addEventListener'> & {
-  location: Pick<Location, 'pathname' | 'reload'>;
+  location: Pick<Location, 'pathname'>;
   sessionStorage?: Pick<Storage, 'getItem' | 'setItem'>;
 };
 
-let reloadRequested = false;
+let reportRequested = false;
 const PRELOAD_RECOVERY_SESSION_KEY = 'mysc:vite-preload-recovery';
 const PRELOAD_RECOVERY_THROTTLE_MS = 30_000;
 
-function shouldReloadForPreloadError(target: PreloadRecoveryTarget): boolean {
-  if (reloadRequested) return false;
+function shouldReportPreloadError(target: PreloadRecoveryTarget): boolean {
+  if (reportRequested) return false;
 
   const path = target.location.pathname || '/';
   const now = Date.now();
   const sessionStorage = target.sessionStorage;
   if (!sessionStorage) {
-    reloadRequested = true;
+    reportRequested = true;
     return true;
   }
 
@@ -36,7 +36,7 @@ function shouldReloadForPreloadError(target: PreloadRecoveryTarget): boolean {
     // Storage can be blocked in some auth/browser modes. Fall back to in-memory protection.
   }
 
-  reloadRequested = true;
+  reportRequested = true;
   return true;
 }
 
@@ -46,12 +46,11 @@ export function installVitePreloadRecovery(target: PreloadRecoveryTarget = windo
     customEvent.preventDefault();
     console.warn('[MYSC] Vite preload error detected:', customEvent.detail);
 
-    if (!shouldReloadForPreloadError(target)) {
-      console.error('[MYSC] Vite preload recovery already attempted recently; keeping current URL without another reload.');
+    if (!shouldReportPreloadError(target)) {
+      console.error('[MYSC] Vite preload error already reported recently; keeping current URL without auto reload.');
       return;
     }
 
-    console.warn('[MYSC] Reloading app shell once to recover stale chunks.');
-    target.location.reload();
+    console.warn('[MYSC] Keeping current URL. User must choose when to refresh after saving current work.');
   });
 }
