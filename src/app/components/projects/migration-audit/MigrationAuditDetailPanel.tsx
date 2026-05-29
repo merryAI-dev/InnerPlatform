@@ -366,6 +366,8 @@ export function MigrationAuditDetailPanel({
           >
             <ReviewFactGrid
               items={[
+                { label: '요청 요약', value: dossier.audit.requestSummary, wide: true },
+                { label: '요청 버전', value: dossier.audit.requestVersion },
                 { label: '요청자', value: dossier.audit.requestedByName },
                 { label: '접수일', value: dossier.audit.requestedAt },
               ]}

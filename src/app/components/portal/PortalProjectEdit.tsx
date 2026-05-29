@@ -1,31 +1,23 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { AlertTriangle, Loader2, Save, SendHorizontal } from 'lucide-react';
-import { collection, doc, getDoc, limit, onSnapshot, orderBy, query, setDoc, where } from 'firebase/firestore';
+import { collection, doc, limit, onSnapshot, orderBy, query, setDoc, where } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { useAuth } from '../../data/auth-store';
 import { usePortalStore } from '../../data/portal-store';
 import type { Project, ProjectRequest } from '../../data/types';
-import { getAuthInstance, getOrgCollectionPath, getOrgDocumentPath } from '../../lib/firebase';
+import { getOrgCollectionPath, getOrgDocumentPath } from '../../lib/firebase';
 import { useFirebase } from '../../lib/firebase-context';
-import {
-  isPlatformApiEnabled,
-  upsertProjectViaBff,
-  type UpsertProjectPayload,
-} from '../../lib/platform-bff-client';
 import { uploadProjectRequestContractFile } from '../../platform/project-contract-upload';
-import { buildProjectRequestPayloadFromDraft } from '../../platform/project-editor';
 import {
   buildProjectEditorDraftFromProject,
-  buildProjectEditorProjectPatch,
   createProjectEditorDraft,
   type ProjectEditorDraft,
 } from '../../platform/project-editor';
 import {
-  buildPortalProjectEditSavePayload,
-  isProjectVersionConflictError,
-} from '../../platform/project-edit-save';
-import { buildProjectOwnerAssignmentPatches } from '../../platform/project-owner-assignment';
+  buildProjectChangeRequest,
+  resolveProjectRequestKind,
+} from '../../platform/project-change-request';
 import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
 import { Label } from '../ui/label';
@@ -71,34 +63,21 @@ function bannerClassName(tone: string) {
   return 'border-slate-200 bg-white text-red-700';
 }
 
-async function loadLatestProjectSnapshot(
-  db: NonNullable<ReturnType<typeof useFirebase>['db']>,
-  orgId: string,
-  projectId: string,
-): Promise<Project | null> {
-  const snap = await getDoc(doc(db, getOrgDocumentPath(orgId, 'projects', projectId)));
-  if (!snap.exists()) return null;
-  return { ...(snap.data() as Project), id: projectId };
-}
-
 export function PortalProjectEdit() {
   const navigate = useNavigate();
   const { user: authUser } = useAuth();
   const { db, isOnline, orgId } = useFirebase();
-  const { members, myProject, patchProjectSnapshot } = usePortalStore();
+  const { members, myProject } = usePortalStore();
   const [requestDoc, setRequestDoc] = useState<ProjectRequest | null>(null);
-  const [loadingRequest, setLoadingRequest] = useState(true);
   const [busyActionId, setBusyActionId] = useState<string | null>(null);
   const [resubmitComment, setResubmitComment] = useState('');
 
   useEffect(() => {
     if (!db || !isOnline || !myProject?.id) {
       setRequestDoc(null);
-      setLoadingRequest(false);
       return;
     }
 
-    setLoadingRequest(true);
     const q = query(
       collection(db, getOrgCollectionPath(orgId, 'projectRequests')),
       where('approvedProjectId', '==', myProject.id),
@@ -107,18 +86,34 @@ export function PortalProjectEdit() {
     );
     return onSnapshot(q, (snapshot) => {
       setRequestDoc(snapshot.docs[0]?.data() as ProjectRequest || null);
-      setLoadingRequest(false);
     }, (error) => {
       console.error('[PortalProjectEdit] request listen failed:', error);
       setRequestDoc(null);
-      setLoadingRequest(false);
     });
   }, [db, isOnline, myProject?.id, orgId]);
 
   const initialDraft = useMemo(
-    () => (myProject
-      ? buildProjectEditorDraftFromProject(myProject, requestDoc?.payload)
-      : createProjectEditorDraft()),
+    () => {
+      if (!myProject) return createProjectEditorDraft();
+      const shouldReadPendingChange = requestDoc?.status === 'PENDING'
+        && resolveProjectRequestKind(requestDoc) === 'CHANGE';
+      if (!shouldReadPendingChange) {
+        return buildProjectEditorDraftFromProject(myProject, requestDoc?.payload);
+      }
+      return buildProjectEditorDraftFromProject({
+        ...myProject,
+        ...requestDoc.payload,
+        id: myProject.id,
+        slug: myProject.slug,
+        orgId: myProject.orgId,
+        createdAt: myProject.createdAt,
+        updatedAt: myProject.updatedAt,
+        isSettled: myProject.isSettled,
+        confirmerName: myProject.confirmerName,
+        lastCheckedAt: myProject.lastCheckedAt,
+        cashflowDiffNote: myProject.cashflowDiffNote,
+      } as Project);
+    },
     [myProject, requestDoc?.payload],
   );
 
@@ -130,169 +125,41 @@ export function PortalProjectEdit() {
   const canResubmit = myProject?.executiveReviewStatus === 'REVISION_REJECTED'
     || myProject?.executiveReviewStatus === 'DUPLICATE_DISCARDED';
 
-  const shouldAutoResetApprovedReview = (project: Project) => (
-    project.registrationSource === 'pm_portal'
-    && project.executiveReviewStatus === 'APPROVED'
-  );
-
-  const syncProjectOwnerAssignment = async (draft: ProjectEditorDraft) => {
-    if (!db || !myProject?.id || !draft.registeredById) return;
-    const previousOwnerId = myProject.registeredById || myProject.managerId || '';
-    const nextOwnerId = draft.registeredById;
-    const previousRef = previousOwnerId && previousOwnerId !== nextOwnerId
-      ? doc(db, getOrgDocumentPath(orgId, 'members', previousOwnerId))
-      : null;
-    const nextRef = doc(db, getOrgDocumentPath(orgId, 'members', nextOwnerId));
-    const [previousSnap, nextSnap] = await Promise.all([
-      previousRef ? getDoc(previousRef) : Promise.resolve(null),
-      getDoc(nextRef),
-    ]);
-    if (!nextSnap.exists()) {
-      throw new Error('선택한 사업 담당자 계정을 찾을 수 없습니다.');
-    }
-    const previousMember = previousSnap?.exists() ? previousSnap.data() : undefined;
-    const nextMember = nextSnap.data();
-    const patches = buildProjectOwnerAssignmentPatches({
-      projectId: myProject.id,
-      projectName: draft.name || myProject.name,
-      previousOwnerId,
-      nextOwner: {
-        uid: nextOwnerId,
-        name: draft.registeredByName,
-        email: draft.registeredByEmail,
-      },
-      previousMember,
-      nextMember,
-    });
-    const now = new Date().toISOString();
-    if (previousRef && patches.previous) {
-      await setDoc(previousRef, {
-        projectIds: patches.previous.projectIds,
-        projectNames: patches.previous.projectNames,
-        portalProfile: {
-          projectIds: patches.previous.projectIds,
-          projectNames: patches.previous.projectNames,
-        },
-        updatedAt: now,
-      }, { merge: true });
-    }
-    if (patches.next) {
-      await setDoc(nextRef, {
-        projectId: patches.next.projectId,
-        projectIds: patches.next.projectIds,
-        projectNames: patches.next.projectNames,
-        portalProfile: {
-          projectId: patches.next.projectId,
-          projectIds: patches.next.projectIds,
-          projectNames: patches.next.projectNames,
-        },
-        updatedAt: now,
-      }, { merge: true });
-    }
-  };
-
   const persistProject = async (
     draft: ProjectEditorDraft,
     options: { forcePendingReview?: boolean; reviewComment?: string | null } = {},
   ) => {
     if (!orgId || !myProject || !authUser?.uid) return null;
+    if (!db) {
+      throw new Error('프로젝트 변경 요청을 저장하려면 Firestore 연결이 필요합니다.');
+    }
     const now = new Date().toISOString();
     const actorName = authUser.name || authUser.email || 'PM';
-    const autoReset = shouldAutoResetApprovedReview(myProject);
-    const shouldSyncRequestPayload = !!requestDoc?.id && (
-      requestDoc.status === 'PENDING' || options.forcePendingReview || autoReset
-    );
-    const requestPatch = shouldSyncRequestPayload
-      ? ((options.forcePendingReview || autoReset)
-          ? {
-              status: 'PENDING',
-              reviewOutcome: null,
-              reviewedBy: null,
-              reviewedByName: null,
-              reviewedAt: null,
-              reviewComment: null,
-              rejectedReason: null,
-              approvedProjectId: myProject.id,
-              payload: buildProjectRequestPayloadFromDraft(draft),
-              updatedAt: now,
-            }
-          : {
-              payload: buildProjectRequestPayloadFromDraft(draft),
-              updatedAt: now,
-            })
+    const previousChangeRequest = requestDoc?.status === 'PENDING'
+      && resolveProjectRequestKind(requestDoc) === 'CHANGE'
+      ? requestDoc
       : null;
-    const patch = buildProjectEditorProjectPatch(draft, {
+    const changeRequest = buildProjectChangeRequest({
       baseProject: myProject,
-      mode: 'portal-edit',
+      draft,
+      previousRequest: previousChangeRequest,
       actorId: authUser.uid,
       actorName,
-      now,
-      forceExecutiveReviewPending: options.forcePendingReview,
-      executiveReviewComment: options.reviewComment,
+      actorEmail: authUser.email || '',
+      tenantId: orgId,
+      requestedAt: now,
     });
-    const buildSavePayload = async () => buildPortalProjectEditSavePayload({
-      baseProject: myProject,
-      latestProject: db ? await loadLatestProjectSnapshot(db, orgId, myProject.id) : null,
-      patch,
-      orgId,
-      updatedAt: now,
-    });
-    let savedProject: Project | null = null;
 
-    if (isPlatformApiEnabled()) {
-      const idToken = authUser.idToken || await getAuthInstance()?.currentUser?.getIdToken() || undefined;
-      const actor = {
-        uid: authUser.uid,
-        email: authUser.email,
-        role: authUser.role,
-        idToken,
-      };
-      const saveViaBff = (payload: Awaited<ReturnType<typeof buildSavePayload>>) => upsertProjectViaBff({
-        tenantId: orgId,
-        actor,
-        project: {
-          ...payload.project,
-          expectedVersion: payload.expectedVersion,
-        } as UpsertProjectPayload,
-      });
+    await setDoc(
+      doc(db, getOrgDocumentPath(orgId, 'projectRequests', changeRequest.id)),
+      {
+        ...changeRequest,
+        ...(options.reviewComment ? { reviewComment: options.reviewComment } : {}),
+      },
+      { merge: true },
+    );
 
-      const savePayload = await buildSavePayload();
-      try {
-        await saveViaBff(savePayload);
-        savedProject = savePayload.project;
-      } catch (error) {
-        if (!db || !isProjectVersionConflictError(error)) throw error;
-        const retryPayload = await buildSavePayload();
-        await saveViaBff(retryPayload);
-        savedProject = retryPayload.project;
-      }
-
-      if (requestPatch && requestDoc?.id) {
-        if (!db) {
-          throw new Error('검토 요청 동기화에 필요한 Firestore 연결이 없습니다.');
-        }
-        await setDoc(
-          doc(db, getOrgDocumentPath(orgId, 'projectRequests', requestDoc.id)),
-          requestPatch,
-          { merge: true },
-        );
-      }
-    } else if (db) {
-      const savePayload = await buildSavePayload();
-      await setDoc(doc(db, getOrgDocumentPath(orgId, 'projects', myProject.id)), savePayload.project, { merge: true });
-      savedProject = savePayload.project;
-      if (requestPatch && requestDoc?.id) {
-        await setDoc(
-          doc(db, getOrgDocumentPath(orgId, 'projectRequests', requestDoc.id)),
-          requestPatch,
-          { merge: true },
-        );
-      }
-    }
-
-    await syncProjectOwnerAssignment(draft);
-
-    return savedProject;
+    return changeRequest;
   };
 
   const handleSubmit = async (draft: ProjectEditorDraft, actionId: string) => {
@@ -301,18 +168,17 @@ export function PortalProjectEdit() {
     setBusyActionId(actionId);
     try {
       const forcePendingReview = actionId === 'resubmit';
-      const savedProject = await persistProject(draft, {
+      await persistProject(draft, {
         forcePendingReview,
         reviewComment: forcePendingReview ? resubmitComment.trim() || null : null,
       });
-      if (savedProject) patchProjectSnapshot(savedProject);
       if (forcePendingReview) {
         setResubmitComment('');
-        toast.success('수정 후 다시 제출했습니다.');
-      } else if (shouldAutoResetApprovedReview(myProject)) {
-        toast.success('수정 내용을 저장하고 재검토 대기로 전환했습니다.');
+        toast.success('프로젝트 변경 요청을 다시 제출했습니다.');
       } else {
-        toast.success('프로젝트 수정 내용이 저장되었습니다.');
+        toast.success('프로젝트 변경 요청을 저장했습니다.', {
+          description: '관리자 승인 전까지 프로젝트 원장은 바뀌지 않습니다.',
+        });
       }
     } catch (error) {
       console.error('[PortalProjectEdit] save failed:', error);
