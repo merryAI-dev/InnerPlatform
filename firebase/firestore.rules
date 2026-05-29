@@ -61,6 +61,13 @@ service cloud.firestore {
       return collection in ['contacts', 'business_card_imports', 'contact_events'];
     }
 
+    // 일반 org 멤버 catchall에서 제외할 컬렉션.
+    // 각 컬렉션의 상단 override 규칙만 적용되도록 막는다.
+    function isCatchallExcludedCollection(collection) {
+      return isBffOnlyCollection(collection)
+        || collection in ['projectRequestDrafts'];
+    }
+
     // ══════════════════════════════════════════════════════════════
     // orgs/{orgId}/** 규칙
     // 특정 컬렉션 override → 일반 규칙 순서로 적용
@@ -124,11 +131,32 @@ service cloud.firestore {
         && getMemberRole(orgId) in ['admin', 'finance'];
     }
 
+    // ── 프로젝트 등록/수정 임시저장: 제출 전 개인 작업공간 ──
+    // 관리자 승인 콘솔은 project_requests만 읽고, draft는 작성자 본인만 접근한다.
+    match /orgs/{orgId}/projectRequestDrafts/{draftId} {
+      allow read: if isMember(orgId)
+        && resource.data.ownerId == request.auth.uid;
+
+      allow create: if isMember(orgId)
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.tenantId == orgId
+        && request.resource.data.status in ['DRAFT', 'SUBMITTED'];
+
+      allow update: if isMember(orgId)
+        && resource.data.ownerId == request.auth.uid
+        && request.resource.data.ownerId == resource.data.ownerId
+        && request.resource.data.tenantId == orgId
+        && request.resource.data.status in ['DRAFT', 'SUBMITTED', 'DISCARDED'];
+
+      allow delete: if isMember(orgId)
+        && resource.data.ownerId == request.auth.uid;
+    }
+
     // ── 일반 규칙: 나머지 모든 컬렉션 ──
     // (projects, ledgers, transactions, evidences, comments, 등)
     match /orgs/{orgId}/{collection}/{document=**} {
-      allow read: if !isBffOnlyCollection(collection) && canRead(orgId);
-      allow write: if !isBffOnlyCollection(collection) && canWrite(orgId);
+      allow read: if !isCatchallExcludedCollection(collection) && canRead(orgId);
+      allow write: if !isCatchallExcludedCollection(collection) && canWrite(orgId);
     }
   }
 }

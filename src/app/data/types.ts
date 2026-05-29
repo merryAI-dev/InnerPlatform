@@ -773,6 +773,27 @@ export interface ProjectRequest {
   updatedAt?: string;
 }
 
+export type ProjectRequestDraftKind = 'REGISTRATION' | 'CHANGE';
+export type ProjectRequestDraftStatus = 'DRAFT' | 'SUBMITTED' | 'DISCARDED';
+
+export interface ProjectRequestDraft {
+  id: string;
+  tenantId: string;
+  kind: ProjectRequestDraftKind;
+  ownerId: string;
+  ownerName: string;
+  ownerEmail: string;
+  targetProjectId?: string;
+  draftKey: string;
+  payloadSnapshot: ProjectRequestPayload;
+  stepIndex: number;
+  status: ProjectRequestDraftStatus;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  submittedAt?: string;
+}
+
 export interface Ledger {
   id: string;
   version?: number;

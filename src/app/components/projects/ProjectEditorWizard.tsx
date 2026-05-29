@@ -18,7 +18,7 @@ import {
   Users,
   Wallet,
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import {
   ACCOUNT_TYPE_LABELS,
@@ -119,14 +119,29 @@ interface ProjectEditorWizardProps {
   }>;
   contractAnalysisMergeMode?: 'fill-empty' | 'none';
   canRemoveContractDocument?: boolean;
+  autosave?: {
+    key: string;
+    disabled?: boolean;
+    onSave?: (draft: ProjectEditorDraft, stepIndex: number) => void | Promise<void>;
+    onDiscard?: () => void | Promise<void>;
+  };
   onCancel?: () => void;
   onSubmit: (draft: ProjectEditorDraft, actionId: string) => void | Promise<void>;
 }
 
 const MAX_CONTRACT_UPLOAD_SIZE_BYTES = 4 * 1024 * 1024;
 const MAX_CONTRACT_UPLOAD_SIZE_LABEL = '4MB';
+const PROJECT_EDITOR_AUTOSAVE_SCHEMA_VERSION = 1;
 
 type ContractUploadState = 'idle' | 'extracting' | 'ready' | 'error';
+type AutosaveState = 'idle' | 'saving' | 'saved' | 'error';
+type StoredProjectEditorDraft = {
+  schemaVersion: number;
+  draftKey: string;
+  draft: ProjectEditorDraft;
+  stepIndex: number;
+  updatedAt: string;
+};
 
 const STEPS: Array<{
   id: ProjectEditorStep;
@@ -161,6 +176,43 @@ const PROJECT_EDITOR_FORM_SURFACE_CLASS = [
   '[&_[role=combobox]]:bg-white',
   '[&_[role=combobox]]:shadow-[inset_0_1px_0_rgba(15,23,42,0.03)]',
 ].join(' ');
+
+function getProjectEditorAutosaveStorageKey(key: string) {
+  return `mysc:project-editor-autosave:${key}`;
+}
+
+function readStoredProjectEditorDraft(key: string): StoredProjectEditorDraft | null {
+  if (typeof localStorage === 'undefined') return null;
+  try {
+    const parsed = JSON.parse(localStorage.getItem(getProjectEditorAutosaveStorageKey(key)) || 'null') as StoredProjectEditorDraft | null;
+    if (!parsed || parsed.schemaVersion !== PROJECT_EDITOR_AUTOSAVE_SCHEMA_VERSION || !parsed.draft) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredProjectEditorDraft(key: string, value: StoredProjectEditorDraft) {
+  if (typeof localStorage === 'undefined') return;
+  localStorage.setItem(getProjectEditorAutosaveStorageKey(key), JSON.stringify(value));
+}
+
+function removeStoredProjectEditorDraft(key: string) {
+  if (typeof localStorage === 'undefined') return;
+  localStorage.removeItem(getProjectEditorAutosaveStorageKey(key));
+}
+
+function formatAutosaveTime(value: string) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString('ko-KR', {
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
 
 function fmtKRW(value: number) {
   return value ? value.toLocaleString('ko-KR') : '0';
@@ -375,6 +427,7 @@ export function ProjectEditorWizard({
   onContractFileUpload,
   contractAnalysisMergeMode = 'fill-empty',
   canRemoveContractDocument,
+  autosave,
   onCancel,
   onSubmit,
 }: ProjectEditorWizardProps) {
@@ -382,7 +435,12 @@ export function ProjectEditorWizard({
   const [draft, setDraft] = useState<ProjectEditorDraft>(() => createProjectEditorWizardDraft(initialDraft));
   const [contractUploadState, setContractUploadState] = useState<ContractUploadState>('idle');
   const [contractUploadError, setContractUploadError] = useState('');
+  const [restoreCandidate, setRestoreCandidate] = useState<StoredProjectEditorDraft | null>(null);
+  const [autosaveState, setAutosaveState] = useState<AutosaveState>('idle');
+  const [lastAutosavedAt, setLastAutosavedAt] = useState('');
+  const [preloadWarningVisible, setPreloadWarningVisible] = useState(false);
   const contractUploadInputRef = useRef<HTMLInputElement | null>(null);
+  const initialDraftFingerprint = useMemo(() => JSON.stringify(createProjectEditorDraft(initialDraft)), [initialDraft]);
   const initialContractDocument = initialDraft.contractDocument ?? null;
   const initialContractAnalysis = initialDraft.contractAnalysis ?? null;
   const canRemoveExistingContractDocument = canRemoveContractDocument ?? isAdminMode(mode);
@@ -397,7 +455,90 @@ export function ProjectEditorWizard({
     setStepIndex(0);
     setContractUploadState('idle');
     setContractUploadError('');
-  }, [draftKey]);
+    setAutosaveState('idle');
+    setLastAutosavedAt('');
+    setPreloadWarningVisible(false);
+    setRestoreCandidate(autosave?.key ? readStoredProjectEditorDraft(autosave.key) : null);
+  }, [autosave?.key, draftKey, initialDraft]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const handlePreloadError = () => setPreloadWarningVisible(true);
+    window.addEventListener('mysc:preloadError', handlePreloadError);
+    return () => window.removeEventListener('mysc:preloadError', handlePreloadError);
+  }, []);
+
+  const persistAutosaveSnapshot = useCallback(async (
+    nextDraft: ProjectEditorDraft,
+    nextStepIndex: number,
+  ) => {
+    if (!autosave?.key || autosave.disabled) return false;
+    const now = new Date().toISOString();
+    const storedDraft: StoredProjectEditorDraft = {
+      schemaVersion: PROJECT_EDITOR_AUTOSAVE_SCHEMA_VERSION,
+      draftKey,
+      draft: createProjectEditorDraft(nextDraft),
+      stepIndex: nextStepIndex,
+      updatedAt: now,
+    };
+    setAutosaveState('saving');
+    try {
+      writeStoredProjectEditorDraft(autosave.key, storedDraft);
+      await autosave.onSave?.(storedDraft.draft, nextStepIndex);
+      setLastAutosavedAt(now);
+      setAutosaveState('saved');
+      return true;
+    } catch (error) {
+      console.error('[ProjectEditorWizard] autosave failed:', error);
+      setLastAutosavedAt(now);
+      setAutosaveState('error');
+      return false;
+    }
+  }, [autosave, draftKey]);
+
+  useEffect(() => {
+    if (!autosave?.key || autosave.disabled || restoreCandidate) return undefined;
+    const isInitialDraft = stepIndex === 0 && JSON.stringify(createProjectEditorDraft(draft)) === initialDraftFingerprint;
+    if (isInitialDraft) return undefined;
+
+    const timer = window.setTimeout(() => {
+      void persistAutosaveSnapshot(draft, stepIndex);
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [autosave?.disabled, autosave?.key, draft, initialDraftFingerprint, persistAutosaveSnapshot, restoreCandidate, stepIndex]);
+
+  const restoreLocalDraft = () => {
+    if (!restoreCandidate) return;
+    setDraft(createProjectEditorWizardDraft(restoreCandidate.draft));
+    setStepIndex(Math.max(0, Math.min(STEPS.length - 1, restoreCandidate.stepIndex || 0)));
+    setLastAutosavedAt(restoreCandidate.updatedAt);
+    setAutosaveState('saved');
+    setRestoreCandidate(null);
+  };
+
+  const discardLocalDraft = () => {
+    if (autosave?.key) removeStoredProjectEditorDraft(autosave.key);
+    setRestoreCandidate(null);
+    void autosave?.onDiscard?.();
+  };
+
+  const handleManualAutosave = async () => {
+    const saved = await persistAutosaveSnapshot(draft, stepIndex);
+    if (saved) toast.success('임시저장되었습니다.');
+    else toast.error('임시저장에 실패했습니다. 잠시 후 다시 시도해 주세요.');
+  };
+
+  const handleActionSubmit = async (actionId: string) => {
+    try {
+      await persistAutosaveSnapshot(draft, stepIndex);
+      await onSubmit(createProjectEditorDraft(draft), actionId);
+      if (autosave?.key) removeStoredProjectEditorDraft(autosave.key);
+      setAutosaveState('idle');
+      setLastAutosavedAt('');
+    } catch (error) {
+      console.error('[ProjectEditorWizard] submit failed:', error);
+    }
+  };
 
   const step = STEPS[stepIndex];
   const financialInputFlags = useMemo(
@@ -1271,6 +1412,50 @@ export function ProjectEditorWizard({
 
       {topSlot}
 
+      {preloadWarningVisible ? (
+        <div className="rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-800 shadow-sm">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="font-semibold text-slate-950">새 버전이 배포되었습니다</p>
+              <p className="mt-1 text-[12px] leading-5 text-slate-600">
+                작성 중인 내용 보호를 위해 자동 새로고침은 막았습니다. 임시저장 후 새로고침하면 됩니다.
+              </p>
+            </div>
+            {autosave?.key ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => void handleManualAutosave()}
+              >
+                지금 임시저장
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {restoreCandidate ? (
+        <div className="rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-800">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="font-semibold text-slate-950">이전에 작성 중이던 임시저장이 있습니다</p>
+              <p className="mt-1 text-[12px] leading-5 text-slate-600">
+                {formatAutosaveTime(restoreCandidate.updatedAt) || '최근'}에 저장된 작성 내용을 불러올 수 있습니다.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={discardLocalDraft}>
+                버리기
+              </Button>
+              <Button type="button" size="sm" onClick={restoreLocalDraft}>
+                임시저장 불러오기
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <Card className="border-slate-200/80 shadow-sm">
         <CardContent className="p-4">
           <div className="mb-4 flex items-center justify-between text-xs text-muted-foreground">
@@ -1319,9 +1504,36 @@ export function ProjectEditorWizard({
             <span>{draft.contractStart || '-'} ~ {draft.contractEnd || '-'}</span>
             <span className="hidden lg:inline">·</span>
             <span className="hidden lg:inline">{draft.name || '프로젝트명 미입력'}</span>
+            {autosave?.key ? (
+              <>
+                <span className="hidden lg:inline">·</span>
+                <span className={autosaveState === 'error' ? 'text-red-600' : 'text-muted-foreground'}>
+                  {autosaveState === 'saving'
+                    ? '임시저장 중'
+                    : autosaveState === 'saved'
+                      ? `임시저장됨${lastAutosavedAt ? ` ${formatAutosaveTime(lastAutosavedAt)}` : ''}`
+                      : autosaveState === 'error'
+                        ? '임시저장 실패'
+                        : '임시저장 대기'}
+                </span>
+              </>
+            ) : null}
           </div>
           <div className="flex flex-wrap gap-2">
+            {autosave?.key ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void handleManualAutosave()}
+                disabled={autosaveState === 'saving'}
+                className="gap-2"
+              >
+                {autosaveState === 'saving' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                임시저장
+              </Button>
+            ) : null}
             <Button
+              type="button"
               variant="outline"
               onClick={() => setStepIndex((value) => Math.max(0, value - 1))}
               disabled={stepIndex === 0}
@@ -1331,7 +1543,7 @@ export function ProjectEditorWizard({
               이전
             </Button>
             {stepIndex < STEPS.length - 1 ? (
-              <Button onClick={() => setStepIndex((value) => Math.min(STEPS.length - 1, value + 1))} className="gap-2">
+              <Button type="button" onClick={() => setStepIndex((value) => Math.min(STEPS.length - 1, value + 1))} className="gap-2">
                 다음
                 <ArrowRight className="h-4 w-4" />
               </Button>
@@ -1341,9 +1553,10 @@ export function ProjectEditorWizard({
                 return (
                   <Button
                     key={action.id}
+                    type="button"
                     variant={action.variant || 'default'}
                     disabled={!!busyActionId || action.disabled || !canSubmit}
-                    onClick={() => void onSubmit(createProjectEditorDraft(draft), action.id)}
+                    onClick={() => void handleActionSubmit(action.id)}
                     className="gap-2"
                   >
                     <Icon className={`h-4 w-4 ${busyActionId === action.id ? 'animate-spin' : ''}`} />
