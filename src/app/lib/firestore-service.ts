@@ -17,6 +17,8 @@ import {
 import { getOrgCollectionPath, getOrgDocumentPath } from './firebase';
 import type { OrgMember, ParticipationEntry, TransactionState } from '../data/types';
 import type { MyscEmployee, ParticipationProject } from '../data/participation-data';
+import { buildLegacyMemberDocId, mergeMemberRecordSources } from '../data/member-documents';
+import { normalizeEmail } from '../data/auth-helpers';
 import {
   createAuditLogEntry,
   writeAuditLogDoc,
@@ -32,6 +34,11 @@ const SYSTEM_ACTOR: AuditActorContext = {
   name: 'System',
 };
 const TRANSACTION_STATES: TransactionState[] = ['DRAFT', 'SUBMITTED', 'APPROVED', 'REJECTED'];
+
+export interface MemberDirectoryDocInput {
+  id: string;
+  data: Record<string, unknown>;
+}
 
 function assertActorId(actorId: string | undefined): string {
   const normalized = (actorId || '').trim();
@@ -165,22 +172,53 @@ export function listenMembers(
   callback: (members: OrgMember[]) => void,
 ): Unsubscribe {
   return onSnapshot(colRef(db, orgId, 'members'), (snap) => {
-    const list: OrgMember[] = [];
+    const docs: MemberDirectoryDocInput[] = [];
+
     snap.forEach((d) => {
-      const raw = d.data() as Partial<OrgMember>;
-      list.push({
-        uid: (raw.uid || d.id).trim(),
-        name: raw.name || '',
-        email: raw.email || '',
-        role: raw.role || 'pm',
-        avatarUrl: raw.avatarUrl,
-      });
+      docs.push({ id: d.id, data: d.data() as Record<string, unknown> });
     });
-    list.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'ko'));
-    callback(list);
+
+    callback(buildMemberDirectoryList(docs));
   }, (err) => {
     console.error('[Firestore] members listen error:', err);
   });
+}
+
+export function buildMemberDirectoryList(docs: MemberDirectoryDocInput[]): OrgMember[] {
+  const byIdentity = new Map<string, {
+    canonical?: Record<string, unknown>;
+    legacy?: Record<string, unknown>;
+  }>();
+
+  docs.forEach((docInput) => {
+    const raw = docInput.data;
+    const uid = typeof raw.uid === 'string' && raw.uid.trim() ? raw.uid.trim() : docInput.id;
+    const email = normalizeEmail(typeof raw.email === 'string' ? raw.email : '');
+    const legacyId = buildLegacyMemberDocId(email);
+    const key = email ? `email:${email}` : `uid:${uid}`;
+    const bucket = byIdentity.get(key) || {};
+    const record = { ...raw, uid };
+    if (legacyId && docInput.id === legacyId && legacyId !== uid) {
+      bucket.legacy = record;
+    } else {
+      bucket.canonical = record;
+    }
+    byIdentity.set(key, bucket);
+  });
+
+  const list: OrgMember[] = Array.from(byIdentity.values()).map(({ canonical, legacy }) => {
+    const merged = mergeMemberRecordSources(canonical, legacy) || {};
+    return {
+      uid: String(merged.uid || '').trim(),
+      name: String(merged.name || ''),
+      email: String(merged.email || ''),
+      role: (merged.role || 'pm') as OrgMember['role'],
+      avatarUrl: typeof merged.avatarUrl === 'string' ? merged.avatarUrl : undefined,
+    };
+  }).filter((member) => member.uid);
+
+  list.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'ko'));
+  return list;
 }
 
 export async function upsertMember(
