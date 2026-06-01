@@ -17,18 +17,15 @@ import {
 import { Separator } from '../ui/separator';
 import { toast } from 'sonner';
 import { isValidTenantId } from '../../platform/tenant';
+import {
+  mergeTenantRegistryEntries,
+  type TenantRegistryEntry,
+} from '../../platform/tenant-registry';
 import { useFirebase } from '../../lib/firebase-context';
 
 // ── Types ──
 
-interface TenantDoc {
-  id: string;
-  name: string;
-  adminOrgId?: string;
-  createdAt?: string;
-  protected?: boolean;
-  branding?: { primaryColor?: string; logoUrl?: string };
-}
+type TenantDoc = TenantRegistryEntry;
 
 // ── Firestore helpers ──
 
@@ -38,14 +35,14 @@ function tenantRegistryCollection(db: Firestore, orgId: string) {
 
 async function fetchTenants(db: Firestore, adminOrgId: string): Promise<TenantDoc[]> {
   const snap = await getDocs(query(tenantRegistryCollection(db, adminOrgId), where('adminOrgId', '==', adminOrgId), limit(100)));
-  return snap.docs.map((d) => ({
+  return mergeTenantRegistryEntries(adminOrgId, snap.docs.map((d) => ({
     id: d.id,
     name: (d.data().name as string | undefined) || d.id,
     adminOrgId: d.data().adminOrgId as string | undefined,
     createdAt: (d.data().createdAt as any)?.toDate?.()?.toISOString?.() || '',
     protected: d.data().protected === true,
     branding: d.data().branding as TenantDoc['branding'],
-  }));
+  })));
 }
 
 async function createTenant(db: Firestore, adminOrgId: string, id: string, name: string): Promise<void> {

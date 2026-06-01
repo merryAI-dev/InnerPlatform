@@ -10,6 +10,7 @@ import { Input } from '../ui/input';
 import { Separator } from '../ui/separator';
 import { useFirebase } from '../../lib/firebase-context';
 import { isValidTenantId } from '../../platform/tenant';
+import { mergeTenantRegistryEntries } from '../../platform/tenant-registry';
 
 // ── Types ──
 
@@ -23,12 +24,12 @@ interface TenantEntry {
 async function loadKnownTenants(db: Firestore, orgId: string): Promise<TenantEntry[]> {
   try {
     const snap = await getDocs(query(collection(db, 'orgs', orgId, 'tenant_registry'), limit(50)));
-    return snap.docs.map((doc) => ({
+    return mergeTenantRegistryEntries(orgId, snap.docs.map((doc) => ({
       id: doc.id,
       name: (doc.data().name as string | undefined) || doc.id,
-    }));
+    }))).map(({ id, name }) => ({ id, name }));
   } catch {
-    return [];
+    return mergeTenantRegistryEntries(orgId, []).map(({ id, name }) => ({ id, name }));
   }
 }
 
@@ -58,7 +59,7 @@ export function TenantSwitcher({ collapsed = false, userRole, userTenantId }: Te
     if (!open || !db || loadedRef.current) return;
     loadedRef.current = true;
     void loadKnownTenants(db, orgId).then((list) => {
-      if (list.length > 0) setTenants(list);
+      setTenants(list);
     });
   }, [open, db, orgId]);
 

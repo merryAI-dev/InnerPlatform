@@ -17,6 +17,7 @@ describe('TenantSwitcher redirect contract', () => {
 
   it('loads known organizations from the org-scoped registry', () => {
     expect(source).toContain("collection(db, 'orgs', orgId, 'tenant_registry')");
+    expect(source).toContain('mergeTenantRegistryEntries(orgId');
     expect(source).not.toContain("collection(db, 'tenants')");
   });
 });
