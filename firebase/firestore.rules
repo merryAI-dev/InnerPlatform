@@ -49,22 +49,6 @@ service cloud.firestore {
         && getMemberRole(orgId) in ['admin'];
     }
 
-    function canReadTenant() {
-      return resource.data.adminOrgId is string
-        && isAdmin(resource.data.adminOrgId);
-    }
-
-    function canCreateTenant(tenantId) {
-      return request.resource.data.id == tenantId
-        && request.resource.data.adminOrgId is string
-        && isAdmin(request.resource.data.adminOrgId);
-    }
-
-    function canUpdateTenant() {
-      return canReadTenant()
-        && request.resource.data.adminOrgId == resource.data.adminOrgId;
-    }
-
     // 감사/재무 접근 (audit_logs 읽기용)
     function canReadAuditLogs(orgId) {
       return isMember(orgId)
@@ -90,13 +74,12 @@ service cloud.firestore {
     }
 
     // ══════════════════════════════════════════════════════════════
-    // 최상위 조직 DB 규칙
+    // 최상위 tenants는 클라이언트 목록 쿼리 권한을 안정적으로 검증할 수 없으므로 사용하지 않는다.
+    // 조직DB는 orgs/{orgId}/tenant_registry에서 조직 admin 권한으로 관리한다.
     // ══════════════════════════════════════════════════════════════
 
     match /tenants/{tenantId} {
-      allow read, delete: if canReadTenant();
-      allow create: if canCreateTenant(tenantId);
-      allow update: if canUpdateTenant();
+      allow read, write: if false;
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -124,6 +107,21 @@ service cloud.firestore {
 
       // Admin: 역할 변경·삭제·타인 문서 수정 포함 모든 쓰기
       allow write: if isAdmin(orgId);
+    }
+
+    // ── 조직DB: 현재 조직 admin만 조직 registry를 관리 ──
+    match /orgs/{orgId}/tenant_registry/{tenantId} {
+      allow read: if isAdmin(orgId);
+
+      allow create: if isAdmin(orgId)
+        && request.resource.data.id == tenantId
+        && request.resource.data.adminOrgId == orgId;
+
+      allow update: if isAdmin(orgId)
+        && request.resource.data.adminOrgId == resource.data.adminOrgId;
+
+      allow delete: if isAdmin(orgId)
+        && resource.data.protected != true;
     }
 
     // ── 감사 로그: 클라이언트 쓰기 금지, 특정 역할만 읽기 ──

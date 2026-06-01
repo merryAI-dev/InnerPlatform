@@ -96,7 +96,9 @@ describe('firestore rules policy alignment', () => {
     expect(hasPermission('admin', 'user:manage')).toBe(true);
     expect(hasPermission('admin', 'tenant:manage')).toBe(true);
     expect(firestoreRulesText).toContain('match /tenants/{tenantId}');
-    expect(firestoreRulesText).toContain('resource.data.adminOrgId');
+    expect(firestoreRulesText).toContain('allow read, write: if false;');
+    expect(firestoreRulesText).toContain('match /orgs/{orgId}/tenant_registry/{tenantId}');
+    expect(firestoreRulesText).toContain('allow read: if isAdmin(orgId);');
     expect(firestoreRulesText).toContain('request.resource.data.adminOrgId');
     expect(firestoreRulesText).not.toContain('isPlatformAdmin');
     expect(firestoreRulesText).not.toContain("isAdmin('mysc')");

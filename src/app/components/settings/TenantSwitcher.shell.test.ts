@@ -14,4 +14,9 @@ describe('TenantSwitcher redirect contract', () => {
     expect(source).toContain("navigate('/settings?tab=tenants')");
     expect(source).toContain('신규 조직 등록');
   });
+
+  it('loads known organizations from the org-scoped registry', () => {
+    expect(source).toContain("collection(db, 'orgs', orgId, 'tenant_registry')");
+    expect(source).not.toContain("collection(db, 'tenants')");
+  });
 });

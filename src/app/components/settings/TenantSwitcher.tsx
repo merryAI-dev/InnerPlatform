@@ -20,9 +20,9 @@ interface TenantEntry {
 
 // ── Firestore tenant list loader ──
 
-async function loadKnownTenants(db: Firestore): Promise<TenantEntry[]> {
+async function loadKnownTenants(db: Firestore, orgId: string): Promise<TenantEntry[]> {
   try {
-    const snap = await getDocs(query(collection(db, 'tenants'), limit(50)));
+    const snap = await getDocs(query(collection(db, 'orgs', orgId, 'tenant_registry'), limit(50)));
     return snap.docs.map((doc) => ({
       id: doc.id,
       name: (doc.data().name as string | undefined) || doc.id,
@@ -57,10 +57,10 @@ export function TenantSwitcher({ collapsed = false, userRole, userTenantId }: Te
   useEffect(() => {
     if (!open || !db || loadedRef.current) return;
     loadedRef.current = true;
-    void loadKnownTenants(db).then((list) => {
+    void loadKnownTenants(db, orgId).then((list) => {
       if (list.length > 0) setTenants(list);
     });
-  }, [open, db]);
+  }, [open, db, orgId]);
 
   const handleSelect = useCallback((nextId: string) => {
     if (nextId === orgId) { setOpen(false); return; }
