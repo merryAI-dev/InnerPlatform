@@ -32,8 +32,12 @@ interface TenantDoc {
 
 // ── Firestore helpers ──
 
+function tenantRegistryCollection(db: Firestore, orgId: string) {
+  return collection(db, 'orgs', orgId, 'tenant_registry');
+}
+
 async function fetchTenants(db: Firestore, adminOrgId: string): Promise<TenantDoc[]> {
-  const snap = await getDocs(query(collection(db, 'tenants'), where('adminOrgId', '==', adminOrgId), limit(100)));
+  const snap = await getDocs(query(tenantRegistryCollection(db, adminOrgId), where('adminOrgId', '==', adminOrgId), limit(100)));
   return snap.docs.map((d) => ({
     id: d.id,
     name: (d.data().name as string | undefined) || d.id,
@@ -45,7 +49,7 @@ async function fetchTenants(db: Firestore, adminOrgId: string): Promise<TenantDo
 }
 
 async function createTenant(db: Firestore, adminOrgId: string, id: string, name: string): Promise<void> {
-  await setDoc(doc(db, 'tenants', id), {
+  await setDoc(doc(tenantRegistryCollection(db, adminOrgId), id), {
     id,
     name: name || id,
     adminOrgId,
@@ -55,8 +59,8 @@ async function createTenant(db: Firestore, adminOrgId: string, id: string, name:
   });
 }
 
-async function removeTenant(db: Firestore, id: string): Promise<void> {
-  await deleteDoc(doc(db, 'tenants', id));
+async function removeTenant(db: Firestore, adminOrgId: string, id: string): Promise<void> {
+  await deleteDoc(doc(tenantRegistryCollection(db, adminOrgId), id));
 }
 
 // ── Component ──
@@ -113,7 +117,7 @@ export function TenantManagementTab() {
     if (id === orgId) { toast.error('현재 활성 조직은 삭제할 수 없습니다'); return; }
     if (!db) return;
     try {
-      await removeTenant(db, id);
+      await removeTenant(db, orgId, id);
       toast.success(`조직 "${id}" 삭제됨`);
       setTenants((prev) => prev.filter((t) => t.id !== id));
     } catch (err: any) {
