@@ -8,7 +8,7 @@ import { Check, ExternalLink, GripVertical, Plus, Upload, X } from 'lucide-react
 import type { BudgetCodeEntry, BudgetTreeV2, Transaction, SettlementSheetPolicy } from '../../data/types';
 import { parseNumber } from '../../platform/csv-utils';
 import { findBudgetTreeSubItem } from '../../platform/budget-tree-v2';
-import { isValidDriveUrl, resolveEvidenceChecklist } from '../../platform/evidence-helpers';
+import { isValidDriveUrl } from '../../platform/evidence-helpers';
 import type { CounterpartySuggestion } from '../../platform/counterparty-normalizer';
 import {
   SETTLEMENT_COLUMNS,
@@ -195,8 +195,6 @@ function ImportEditorRow({
   subCodeIdx,
   subSubCodeIdx,
   evidenceIdx,
-  evidenceCompletedIdx,
-  evidencePendingIdx,
   weekIdx,
   cashflowIdx,
   weekOptions,
@@ -240,8 +238,6 @@ function ImportEditorRow({
   subCodeIdx: number;
   subSubCodeIdx: number;
   evidenceIdx: number;
-  evidenceCompletedIdx: number;
-  evidencePendingIdx: number;
   weekIdx: number;
   cashflowIdx: number;
   weekOptions: { value: string; label: string }[];
@@ -300,10 +296,6 @@ function ImportEditorRow({
     [subItem],
   );
   const rowLabel = `${rowIdx + 1}행`;
-  const driveLinkIdx = useMemo(
-    () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '증빙자료 드라이브'),
-    [],
-  );
   const commentTransactionId = row.sourceTxId || buildSheetRowCommentId(row.tempId);
   const [driveAction, setDriveAction] = useState<'' | 'provision' | 'sync'>('');
   const hasSourceTransaction = Boolean(persistedTransactionId);
@@ -317,82 +309,6 @@ function ImportEditorRow({
     : persistedTransaction?.evidenceDriveSyncStatus === 'SYNCED'
       ? '동기화됨'
       : '';
-  const evidenceChecklist = useMemo(() => resolveEvidenceChecklist({
-    evidenceRequired: persistedTransaction?.evidenceRequired || [],
-    evidenceRequiredDesc: persistedTransaction?.evidenceRequiredDesc || String(evidenceIdx >= 0 ? row.cells[evidenceIdx] || '' : ''),
-    evidenceCompletedDesc: persistedTransaction?.evidenceCompletedDesc || String(evidenceCompletedIdx >= 0 ? row.cells[evidenceCompletedIdx] || '' : ''),
-    evidenceCompletedManualDesc: persistedTransaction?.evidenceCompletedManualDesc,
-    evidenceAutoListedDesc: persistedTransaction?.evidenceAutoListedDesc,
-    evidenceDriveLink: persistedTransaction?.evidenceDriveLink || String(driveLinkIdx >= 0 ? row.cells[driveLinkIdx] || '' : ''),
-    evidenceDriveFolderId: persistedTransaction?.evidenceDriveFolderId,
-  }), [
-    driveLinkIdx,
-    evidenceCompletedIdx,
-    evidenceIdx,
-    persistedTransaction?.evidenceAutoListedDesc,
-    persistedTransaction?.evidenceCompletedDesc,
-    persistedTransaction?.evidenceCompletedManualDesc,
-    persistedTransaction?.evidenceDriveFolderId,
-    persistedTransaction?.evidenceDriveLink,
-    persistedTransaction?.evidenceRequired,
-    persistedTransaction?.evidenceRequiredDesc,
-    row.cells,
-  ]);
-  const evidenceStatusBadge = useMemo(() => {
-    if (evidenceChecklist.required.length === 0 && evidenceChecklist.completed.length === 0 && !evidenceChecklist.hasLink) return null;
-    if (evidenceChecklist.status === 'COMPLETE') {
-      return {
-        label: '증빙완료',
-        className: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-      };
-    }
-    if (evidenceChecklist.status === 'PARTIAL') {
-      return {
-        label: evidenceChecklist.missing.length > 0 ? `증빙 ${evidenceChecklist.missing.length}건 남음` : '증빙 일부완료',
-        className: 'border-amber-200 bg-amber-50 text-amber-700',
-      };
-    }
-    return {
-      label: '증빙미완료',
-      className: 'border-rose-200 bg-rose-50 text-rose-700',
-    };
-  }, [evidenceChecklist]);
-  const evidenceStatusTitle = useMemo(() => {
-    if (!evidenceStatusBadge) return '';
-    const pendingDesc = String(evidencePendingIdx >= 0 ? row.cells[evidencePendingIdx] || '' : '').trim();
-    const lines = [
-      evidenceChecklist.required.length > 0 ? `필수: ${evidenceChecklist.required.join(', ')}` : '',
-      evidenceChecklist.completed.length > 0 ? `완료: ${evidenceChecklist.completed.join(', ')}` : '완료: 없음',
-      evidenceChecklist.missing.length > 0 ? `미완료: ${evidenceChecklist.missing.join(', ')}` : '미완료: 없음',
-      pendingDesc ? `준비필요: ${pendingDesc}` : '',
-    ].filter(Boolean);
-    return lines.join('\n');
-  }, [evidenceChecklist, evidencePendingIdx, evidenceStatusBadge, row.cells]);
-  const rowSourceBadge = useMemo(() => {
-    if (isAdjustmentRow) return { label: '잔액 조정', className: 'border-amber-200 bg-amber-50 text-amber-700' };
-    if (row.entryKind === 'DEPOSIT') return { label: '직접 입금', className: 'border-sky-200 bg-sky-50 text-sky-700' };
-    if (row.entryKind === 'EXPENSE') return { label: '직접 지출', className: 'border-cyan-200 bg-cyan-50 text-cyan-700' };
-    if (row.sourceTxId) return { label: '업로드 반영', className: 'border-slate-200 bg-slate-50 text-slate-700' };
-    return { label: '수동 입력', className: 'border-emerald-200 bg-emerald-50 text-emerald-700' };
-  }, [isAdjustmentRow, row.entryKind, row.sourceTxId]);
-  const rowEditStateBadge = useMemo(() => {
-    if (hasError) {
-      return { label: '검토 필요', className: 'border-rose-200 bg-rose-50 text-rose-700' };
-    }
-    if (isReviewPending) {
-      return { label: '검토 루프', className: 'border-[#26415f]/25 bg-[#26415f]/5 text-[#26415f]' };
-    }
-    if (isReviewConfirmed) {
-      return { label: '확인 완료', className: 'border-slate-200 bg-slate-50 text-slate-700' };
-    }
-    if ((row.userEditedCells?.size || 0) > 0) {
-      return { label: '수정됨', className: 'border-slate-200 bg-white text-slate-700' };
-    }
-    if (hasMissingCell) {
-      return { label: '미입력', className: 'border-orange-200 bg-orange-50 text-orange-700' };
-    }
-    return null;
-  }, [hasError, hasMissingCell, isReviewConfirmed, isReviewPending, row.userEditedCells]);
   const isCellSelected = useCallback((colIdx: number) => {
     if (!selectionBounds || colIdx === noIdx) return false;
     return rowIdx >= selectionBounds.r1
@@ -502,102 +418,6 @@ function ImportEditorRow({
         ? 'bg-red-50/40 dark:bg-red-950/10'
         : 'hover:bg-muted/30'
     } transition-colors`}>
-      {/* Row controls */}
-      <td className="relative px-1 py-1 border-b border-r align-middle w-24">
-        <div className="flex items-start justify-between gap-1">
-          <div className="min-w-0 space-y-1">
-            <span className={`inline-flex rounded-full border px-1.5 py-0.5 text-[9px] leading-none ${rowSourceBadge.className}`}>
-              {rowSourceBadge.label}
-            </span>
-            {rowEditStateBadge && (
-              <span
-                title={hasReviewHint ? reviewHintLabel : undefined}
-                className={`inline-flex rounded-full border px-1.5 py-0.5 text-[9px] leading-none ${rowEditStateBadge.className}`}
-              >
-                {rowEditStateBadge.label}
-              </span>
-            )}
-            {evidenceStatusBadge && (
-              <span
-                title={evidenceStatusTitle}
-                className={`inline-flex rounded-full border px-1.5 py-0.5 text-[9px] leading-none ${evidenceStatusBadge.className}`}
-              >
-                {evidenceStatusBadge.label}
-              </span>
-            )}
-            <span className="block text-[9px] text-muted-foreground">#{rowIdx + 1}</span>
-          </div>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                className="inline-flex h-4 w-4 items-center justify-center rounded-sm text-muted-foreground/70 hover:bg-muted hover:text-foreground transition-colors"
-                title="행 작업"
-              >
-                <GripVertical className="h-2.5 w-2.5" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="text-[11px]">
-              <DropdownMenuItem
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onInsertBelow();
-                }}
-              >
-                <Plus className="h-3.5 w-3.5" />
-                아래에 행 추가
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                variant="destructive"
-                disabled={!settlementSheetPolicy.allowRowDelete}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (!settlementSheetPolicy.allowRowDelete) return;
-                  onRemove();
-                }}
-              >
-                <X className="h-3.5 w-3.5" />
-                {settlementSheetPolicy.allowRowDelete ? '행 삭제' : '행 삭제 잠금'}
-              </DropdownMenuItem>
-              {hasReviewHint && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onRowChange((prev) => {
-                        if (!hasImportRowReviewRequirement(prev)) return prev;
-                        if (isImportRowReviewConfirmed(prev)) {
-                          const next: ImportRow = { ...prev, reviewStatus: 'pending' };
-                          delete next.reviewConfirmedAt;
-                          return next;
-                        }
-                        return {
-                          ...prev,
-                          reviewStatus: 'confirmed',
-                          reviewConfirmedAt: new Date().toISOString(),
-                        };
-                      });
-                    }}
-                  >
-                    <Check className="h-3.5 w-3.5" />
-                    {isReviewConfirmed ? '검토 완료 해제' : '검토 완료'}
-                  </DropdownMenuItem>
-                </>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-        {(hasError || hasMissingCell || isReviewPending) && (
-          <span
-            className={`absolute right-1 top-1 h-1 w-1 rounded-full ${
-              hasError || hasMissingCell ? 'bg-rose-500' : 'bg-[#26415f]'
-            }`}
-            title={hasError ? (row.error || '행 오류') : hasMissingCell ? '미입력 셀 있음' : reviewHintLabel}
-          />
-        )}
-      </td>
       {/* Data cells */}
       {SETTLEMENT_COLUMNS.map((col, colIdx) => {
         const isReadOnly = col.csvHeader === 'No.';
@@ -616,6 +436,7 @@ function ImportEditorRow({
         const isManualPriorityField = isManualPriorityOutflowField(col.csvHeader);
         const cellSource = resolveCellSource(colIdx, col.csvHeader);
         const showCellBadge = Boolean(isDerivedLocked || cellSource);
+        const isFirstColumn = colIdx === 0;
         const cellToneClass = isExpenseAmount || isVatIn
           ? 'bg-yellow-50/80 dark:bg-yellow-950/15'
           : '';
@@ -639,6 +460,77 @@ function ImportEditorRow({
             onMouseEnter={() => onCellMouseEnter(rowIdx, colIdx)}
           >
             <div className={`group relative ${showCellBadge ? 'pt-4' : ''}`}>
+              {isFirstColumn && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      className="absolute right-1 top-1 z-10 inline-flex h-4 w-4 items-center justify-center rounded-sm text-muted-foreground/70 hover:bg-muted hover:text-foreground transition-colors"
+                      title="행 작업"
+                    >
+                      <GripVertical className="h-2.5 w-2.5" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="text-[11px]">
+                    <DropdownMenuItem
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onInsertBelow();
+                      }}
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      아래에 행 추가
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      variant="destructive"
+                      disabled={!settlementSheetPolicy.allowRowDelete}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (!settlementSheetPolicy.allowRowDelete) return;
+                        onRemove();
+                      }}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                      {settlementSheetPolicy.allowRowDelete ? '행 삭제' : '행 삭제 잠금'}
+                    </DropdownMenuItem>
+                    {hasReviewHint && (
+                      <>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onRowChange((prev) => {
+                              if (!hasImportRowReviewRequirement(prev)) return prev;
+                              if (isImportRowReviewConfirmed(prev)) {
+                                const next: ImportRow = { ...prev, reviewStatus: 'pending' };
+                                delete next.reviewConfirmedAt;
+                                return next;
+                              }
+                              return {
+                                ...prev,
+                                reviewStatus: 'confirmed',
+                                reviewConfirmedAt: new Date().toISOString(),
+                              };
+                            });
+                          }}
+                        >
+                          <Check className="h-3.5 w-3.5" />
+                          {isReviewConfirmed ? '검토 완료 해제' : '검토 완료'}
+                        </DropdownMenuItem>
+                      </>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+              {isFirstColumn && (hasError || hasMissingCell || isReviewPending) && (
+                <span
+                  className={`absolute left-1 top-1 h-1 w-1 rounded-full ${
+                    hasError || hasMissingCell ? 'bg-rose-500' : 'bg-[#26415f]'
+                  }`}
+                  title={hasError ? (row.error || '행 오류') : hasMissingCell ? '미입력 셀 있음' : reviewHintLabel}
+                />
+              )}
               {isReadOnly ? (
                 <span className="block pr-6 text-[10px] text-muted-foreground px-1">
                   {row.cells[colIdx]}
@@ -1065,8 +957,6 @@ export const MemoizedImportEditorRow = memo(ImportEditorRow, (prev, next) => {
     && prev.subCodeIdx === next.subCodeIdx
     && prev.subSubCodeIdx === next.subSubCodeIdx
     && prev.evidenceIdx === next.evidenceIdx
-    && prev.evidenceCompletedIdx === next.evidenceCompletedIdx
-    && prev.evidencePendingIdx === next.evidencePendingIdx
     && prev.weekIdx === next.weekIdx
     && prev.cashflowIdx === next.cashflowIdx
     && prev.weekOptions === next.weekOptions

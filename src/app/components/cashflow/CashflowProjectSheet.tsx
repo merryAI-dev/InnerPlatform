@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { doc, getDoc } from 'firebase/firestore';
-import { ArrowLeftRight, CheckCircle2, ClipboardCheck, ClipboardList, Columns2, CircleDollarSign, ChevronLeft, ChevronRight, Download, Loader2 } from 'lucide-react';
+import { CheckCircle2, ClipboardCheck, ClipboardList, Columns2, CircleDollarSign, ChevronLeft, ChevronRight, Download, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useBlocker, useNavigate } from 'react-router';
 import { Button } from '../ui/button';
@@ -160,7 +160,6 @@ export function CashflowProjectSheet({
   const [monthSavingMode, setMonthSavingMode] = useState<null | 'actual'>(null);
   const [downloadPreparing, setDownloadPreparing] = useState(false);
   const [actualSyncing, setActualSyncing] = useState(false);
-  const [copyingMode, setCopyingMode] = useState<null | 'projection_to_actual' | 'actual_to_projection'>(null);
 
   const hasDirty = useMemo(
     () => hasUnsavedChanges(weekSaveState) || Object.keys(drafts).length > 0,
@@ -593,77 +592,6 @@ export function CashflowProjectSheet({
     });
   }, [monthWeeks, projectId, resolveWeekKey, syncProjectActualsFromExpenseSheets, yearMonth]);
 
-  const copyMonthValues = useCallback((sourceMode: 'projection' | 'actual', targetMode: 'projection' | 'actual') => {
-    if (sourceMode === targetMode) return;
-    if (targetMode === 'actual' && !canEdit) {
-      toast.error('Actual 복사는 편집 권한이 있을 때만 가능합니다.');
-      return;
-    }
-
-    const direction = sourceMode === 'projection' ? 'projection_to_actual' : 'actual_to_projection';
-    void (async () => {
-      setCopyingMode(direction);
-      for (const week of monthWeeks) {
-        const amounts = Object.fromEntries(CASHFLOW_ALL_LINES.map((lineId) => [
-          lineId,
-          getEffectiveAmount({ yearMonth, mode: sourceMode, weekNo: week.weekNo, lineId }),
-        ])) as Partial<Record<CashflowSheetLineId, number>>;
-
-        await upsertWeekAmounts({
-          projectId,
-          yearMonth,
-          weekNo: week.weekNo,
-          mode: targetMode,
-          amounts,
-        });
-
-        if (onUpdateWeeklySubmissionStatus) {
-          await onUpdateWeeklySubmissionStatus({
-            projectId,
-            yearMonth,
-            weekNo: week.weekNo,
-            ...(targetMode === 'projection'
-              ? { projectionEdited: true, projectionUpdated: true }
-              : { expenseEdited: true, expenseUpdated: true }),
-          });
-        }
-      }
-
-      setDrafts((prev) => {
-        const next = { ...prev };
-        for (const week of monthWeeks) {
-          for (const lineId of CASHFLOW_ALL_LINES) {
-            delete next[resolveCellKey({ yearMonth, mode: targetMode, weekNo: week.weekNo, lineId })];
-          }
-        }
-        return next;
-      });
-      setWeekSaveState((prev) => {
-        const next = { ...prev };
-        for (const week of monthWeeks) {
-          delete next[resolveWeekKey({ yearMonth, mode: targetMode, weekNo: week.weekNo })];
-        }
-        return next;
-      });
-      toast.success(`${sourceMode === 'projection' ? 'Projection' : 'Actual'} 값을 ${targetMode === 'projection' ? 'Projection' : 'Actual'} 서버에 복사했습니다.`);
-    })().catch((error) => {
-      console.error('[Cashflow] month value copy failed:', error);
-      toast.error('월 복사에 실패했습니다. 네트워크/권한을 확인해 주세요.');
-    }).finally(() => {
-      setCopyingMode((prev) => (prev === direction ? null : prev));
-    });
-  }, [
-    canEdit,
-    getEffectiveAmount,
-    monthWeeks,
-    onUpdateWeeklySubmissionStatus,
-    projectId,
-    resolveCellKey,
-    resolveWeekKey,
-    upsertWeekAmounts,
-    yearMonth,
-  ]);
-
   const handleSubmitWeek = useCallback(async (input: { weekNo: number; yearMonth: string }) => {
     setSubmitBusy(true);
     try {
@@ -909,7 +837,7 @@ export function CashflowProjectSheet({
                       const persisted = getPersistedCell({ doc, mode: tableMode, lineId });
                       const key = resolveCellKey({ yearMonth, mode: tableMode, weekNo: w.weekNo, lineId });
                       const raw = Object.prototype.hasOwnProperty.call(drafts, key) ? drafts[key] : undefined;
-                      const value = raw !== undefined ? raw : (persisted.hasValue ? String(persisted.amount) : '');
+                      const value = raw !== undefined ? raw : (persisted.hasValue ? formatAmountInput(String(persisted.amount)) : '');
 
                       return (
                         <td key={w.weekNo} className={`px-3 h-9 align-middle text-right ${colClass}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
@@ -970,7 +898,7 @@ export function CashflowProjectSheet({
                       const persisted = getPersistedCell({ doc, mode: tableMode, lineId });
                       const key = resolveCellKey({ yearMonth, mode: tableMode, weekNo: w.weekNo, lineId });
                       const raw = Object.prototype.hasOwnProperty.call(drafts, key) ? drafts[key] : undefined;
-                      const value = raw !== undefined ? raw : (persisted.hasValue ? String(persisted.amount) : '');
+                      const value = raw !== undefined ? raw : (persisted.hasValue ? formatAmountInput(String(persisted.amount)) : '');
 
                       return (
                         <td key={w.weekNo} className={`px-3 h-9 align-middle text-right ${colClass}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
@@ -1047,24 +975,6 @@ export function CashflowProjectSheet({
               variant="outline"
               size="sm"
               className="h-8 text-[12px] gap-1.5"
-              onClick={() => copyMonthValues('projection', 'actual')}
-              disabled={!canEdit || copyingMode !== null || actualSyncing || monthSavingMode !== null}
-            >
-              {copyingMode === 'projection_to_actual' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ArrowLeftRight className="w-3.5 h-3.5" />} Projection → Actual
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8 text-[12px] gap-1.5"
-              onClick={() => copyMonthValues('actual', 'projection')}
-              disabled={copyingMode !== null || actualSyncing || monthSavingMode !== null}
-            >
-              {copyingMode === 'actual_to_projection' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ArrowLeftRight className="w-3.5 h-3.5" />} Actual → Projection
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8 text-[12px] gap-1.5"
               onClick={handleDownload}
               onMouseEnter={() => warmExcelJs()}
               onFocus={() => warmExcelJs()}
@@ -1103,7 +1013,7 @@ export function CashflowProjectSheet({
       />
 
       <div className="rounded-2xl border border-slate-200/80 bg-slate-50/70 px-4 py-3 text-[11px] text-slate-600">
-        비교 모드에서는 Projection과 Actual을 동시에 보면서 바로 복사할 수 있습니다. 복사는 초안이 아니라 서버에 즉시 반영되고, 직접 수정한 입력값만 각 영역별 저장 버튼으로 반영됩니다.
+        비교 모드에서는 Firestore에 저장된 Projection과 Actual을 동시에 대조합니다. 직접 입력한 값은 각 영역의 저장/작성완료 버튼을 눌렀을 때 서버 기준값으로 반영됩니다.
       </div>
 
       <Tabs value={viewMode} onValueChange={(v) => (v === 'projection' || v === 'actual' || v === 'compare') && setViewMode(v)}>

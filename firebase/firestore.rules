@@ -68,6 +68,11 @@ service cloud.firestore {
         || collection in ['projectRequestDrafts'];
     }
 
+    function isCatchallExcludedPath(collection, document) {
+      return isCatchallExcludedCollection(collection)
+        || (collection == 'settings' && document == 'project-departments');
+    }
+
     // ══════════════════════════════════════════════════════════════
     // orgs/{orgId}/** 규칙
     // 특정 컬렉션 override → 일반 규칙 순서로 적용
@@ -131,6 +136,12 @@ service cloud.firestore {
         && getMemberRole(orgId) in ['admin', 'finance'];
     }
 
+    // ── 관리자 설정: 프로젝트 선택값 ──
+    match /orgs/{orgId}/settings/project-departments {
+      allow read: if canRead(orgId);
+      allow write: if isAdmin(orgId);
+    }
+
     // ── 프로젝트 등록/수정 임시저장: 제출 전 개인 작업공간 ──
     // 관리자 승인 콘솔은 project_requests만 읽고, draft는 작성자 본인만 접근한다.
     match /orgs/{orgId}/projectRequestDrafts/{draftId} {
@@ -155,8 +166,8 @@ service cloud.firestore {
     // ── 일반 규칙: 나머지 모든 컬렉션 ──
     // (projects, ledgers, transactions, evidences, comments, 등)
     match /orgs/{orgId}/{collection}/{document=**} {
-      allow read: if !isCatchallExcludedCollection(collection) && canRead(orgId);
-      allow write: if !isCatchallExcludedCollection(collection) && canWrite(orgId);
+      allow read: if !isCatchallExcludedPath(collection, document) && canRead(orgId);
+      allow write: if !isCatchallExcludedPath(collection, document) && canWrite(orgId);
     }
   }
 }

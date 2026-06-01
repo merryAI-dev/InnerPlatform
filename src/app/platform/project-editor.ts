@@ -44,7 +44,7 @@ import {
   formatProjectTeamMembersSummary,
   normalizeProjectTeamMembers,
 } from './project-team-members';
-import { resolveProjectCic } from './project-cic';
+import { normalizeProjectDepartment, resolveProjectCic } from './project-cic';
 
 export type ProjectEditorMode = 'portal-register' | 'portal-edit' | 'admin';
 
@@ -288,7 +288,7 @@ export function buildProjectEditorDraftFromProject(
     type: normalizeProjectType(normalizedProject.type || payload?.type),
     description: text(normalizedProject.description || payload?.description),
     clientOrg: text(normalizedProject.clientOrg || payload?.clientOrg),
-    department: text(normalizedProject.department || payload?.department),
+    department: normalizeProjectDepartment(normalizedProject.department || payload?.department),
     projectPurpose: text(normalizedProject.projectPurpose || payload?.projectPurpose),
     status: normalizeProjectStatus(normalizedProject.status),
     phase: normalizeProjectPhase(normalizedProject.phase),
@@ -351,7 +351,7 @@ export function buildProjectRequestPayloadFromDraft(draftInput: ProjectEditorDra
     phase: normalizeProjectPhase(draft.phase),
     description: text(draft.description),
     clientOrg: text(draft.clientOrg),
-    department: text(draft.department),
+    department: normalizeProjectDepartment(draft.department),
     groupwareName: text(draft.groupwareName),
     currency: normalizeProjectCurrency(draft.currency),
     contractAmount: nonNegativeAmount(draft.contractAmount),
@@ -473,7 +473,7 @@ export function buildProjectEditorProjectPatch(
     settlementGuide: text(draft.settlementGuide),
     contractDocument: draft.contractDocument,
     contractAnalysis: draft.contractAnalysis,
-    department: text(draft.department),
+    department: normalizeProjectDepartment(draft.department),
     cic: resolveProjectCic({ department: draft.department }),
     teamName: text(draft.teamName),
     registeredById: text(draft.registeredById),

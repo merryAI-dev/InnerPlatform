@@ -1813,7 +1813,6 @@ export function ImportEditor({
         >
           <table className="w-full text-[11px] border-collapse table-fixed">
           <colgroup>
-            <col style={{ width: 96 }} />
             {SETTLEMENT_COLUMNS.map((_, i) => (
               <col key={i} style={{ width: colWidths[i] }} />
             ))}
@@ -1821,7 +1820,6 @@ export function ImportEditor({
           <thead className="sticky top-0 z-10">
             {/* Group header */}
             <tr className="bg-slate-100 dark:bg-slate-800">
-              <th className="px-1 py-1 border-b border-r text-center text-[9px] w-24">상태</th>
               {SETTLEMENT_COLUMN_GROUPS.map((g) => (
                 <th
                   key={g.name}
@@ -1834,7 +1832,6 @@ export function ImportEditor({
             </tr>
             {/* Column header */}
             <tr className="bg-slate-50 dark:bg-slate-900">
-              <th className="px-1 py-1 border-b border-r text-[9px] w-24">행 정보</th>
               {SETTLEMENT_COLUMNS.map((col, i) => (
                 <th
                   key={i}
@@ -1885,7 +1882,7 @@ export function ImportEditor({
             {shouldVirtualizeRows && visibleRowWindow.paddingTop > 0 && (
               <tr aria-hidden="true">
                 <td
-                  colSpan={SETTLEMENT_COLUMNS.length + 1}
+                  colSpan={SETTLEMENT_COLUMNS.length}
                   style={{ height: visibleRowWindow.paddingTop }}
                   className="border-b-0 p-0"
                 />
@@ -1929,8 +1926,6 @@ export function ImportEditor({
                 subCodeIdx={subCodeIdx}
                 subSubCodeIdx={subSubCodeIdx}
                 evidenceIdx={evidenceIdx}
-                evidenceCompletedIdx={evidenceCompletedIdx}
-                evidencePendingIdx={evidencePendingIdx}
                 weekIdx={weekIdx}
                 cashflowIdx={cashflowIdx}
                 weekOptions={weekOptions}
@@ -1955,7 +1950,7 @@ export function ImportEditor({
             {shouldVirtualizeRows && visibleRowWindow.paddingBottom > 0 && (
               <tr aria-hidden="true">
                 <td
-                  colSpan={SETTLEMENT_COLUMNS.length + 1}
+                  colSpan={SETTLEMENT_COLUMNS.length}
                   style={{ height: visibleRowWindow.paddingBottom }}
                   className="border-b-0 p-0"
                 />
@@ -1964,7 +1959,7 @@ export function ImportEditor({
             {rows.length === 0 && (
               <tr>
                 <td
-                  colSpan={SETTLEMENT_COLUMNS.length + 1}
+                  colSpan={SETTLEMENT_COLUMNS.length}
                   className="px-4 py-8 text-center text-[12px] text-muted-foreground"
                 >
                   데이터가 없습니다. 행을 추가하세요.

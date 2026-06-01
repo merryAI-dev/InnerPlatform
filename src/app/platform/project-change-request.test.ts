@@ -109,6 +109,29 @@ describe('project change request helpers', () => {
     expect(collectUndefinedPaths(request)).toEqual([]);
   });
 
+  it('normalizes department labels in change request snapshots and payload', () => {
+    const draft = createProjectEditorDraft({
+      ...baseProject,
+      department: 'CIC 2',
+    });
+    const request = buildProjectChangeRequest({
+      baseProject: {
+        ...baseProject,
+        department: 'CIC 2',
+      },
+      draft,
+      actorId: 'u-berry',
+      actorName: '김인효(베리)',
+      actorEmail: 'berry@example.com',
+      tenantId: 'mysc',
+      requestedAt: '2026-05-29T01:29:00.000Z',
+    });
+
+    expect(request.beforeSnapshot?.department).toBe('CIC2');
+    expect(request.proposedSnapshot?.department).toBe('CIC2');
+    expect(request.payload.department).toBe('CIC2');
+  });
+
   it('applies an approved request payload as a project patch', () => {
     const draft = createProjectEditorDraft({
       ...baseProject,

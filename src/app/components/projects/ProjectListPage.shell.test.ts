@@ -6,14 +6,12 @@ const source = readFileSync(resolve(import.meta.dirname, 'ProjectListPage.tsx'),
 const pendingHookSource = readFileSync(resolve(import.meta.dirname, 'usePendingProjectChangeRequests.ts'), 'utf8');
 
 describe('ProjectListPage shell contract', () => {
-  it('keeps the monitoring presets visible for admin exception detection', () => {
-    expect(source).toContain('data-testid="project-monitoring-presets"');
-    expect(source).toContain('data-testid="project-monitoring-preset-no-ledger"');
-    expect(source).toContain('data-testid="project-monitoring-preset-pending-approval"');
-    expect(source).toContain('data-testid="project-monitoring-preset-missing-evidence"');
-    expect(source).toContain('원장 없음');
-    expect(source).toContain('승인 대기');
-    expect(source).toContain('증빙 미제출');
+  it('does not show the retired monitoring preset filter bar', () => {
+    expect(source).not.toContain('data-testid="project-monitoring-presets"');
+    expect(source).not.toContain('data-testid="project-monitoring-preset-no-ledger"');
+    expect(source).not.toContain('data-testid="project-monitoring-preset-pending-approval"');
+    expect(source).not.toContain('data-testid="project-monitoring-preset-missing-evidence"');
+    expect(source).not.toContain('모니터링 프리셋');
   });
 
   it('shows settlement type labels instead of O/X settlement flags', () => {

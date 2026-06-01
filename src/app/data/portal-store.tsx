@@ -68,7 +68,7 @@ import {
 } from '../platform/bank-statement';
 import { normalizeSpace } from '../platform/csv-utils';
 import { isBankImportManualFieldsComplete, resolveBankImportProjectionStatus } from '../platform/bank-import-triage';
-import { resolveProjectCic } from '../platform/project-cic';
+import { normalizeProjectDepartment, resolveProjectCic } from '../platform/project-cic';
 import { normalizeProjectFinancialInputFlagsForAmounts } from '../platform/project-contract-amount';
 import { resolveProjectRevenueFinancials } from '../platform/project-financials';
 import {
@@ -2408,7 +2408,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       financialInputFlags,
       settlementGuide: requestPayload.settlementGuide,
       contractDocument: requestPayload.contractDocument,
-      department: requestPayload.department,
+      department: normalizeProjectDepartment(requestPayload.department),
       cic: resolveProjectCic({ department: requestPayload.department }),
       teamName: requestPayload.teamName,
       managerId: ownerId,

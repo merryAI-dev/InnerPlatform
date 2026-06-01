@@ -48,7 +48,7 @@ import {
   type ProjectType,
   type SettlementType,
 } from '../../data/types';
-import { PROJECT_DEPARTMENT_OPTIONS } from '../../data/project-department-options';
+import { PROJECT_DEPARTMENT_OPTIONS, dedupeProjectDepartmentLabels } from '../../data/project-department-options';
 import { PROJECT_TEAM_MEMBER_OPTION_MAP, PROJECT_TEAM_MEMBER_OPTIONS } from '../../data/project-team-member-options';
 import {
   formatProjectAmountInput,
@@ -60,6 +60,7 @@ import {
 import { buildContractDocumentEditPolicy } from '../../platform/project-contract-document-policy';
 import { formatProfitRatePercentInput } from '../../platform/project-financials';
 import { createProjectEditorDraft, type ProjectEditorDraft, type ProjectEditorMode } from '../../platform/project-editor';
+import { normalizeProjectDepartment } from '../../platform/project-cic';
 import {
   formatProjectTeamMembersSummary,
   normalizeProjectTeamMemberDraftRows,
@@ -110,6 +111,7 @@ interface ProjectEditorWizardProps {
   title: string;
   description?: string;
   members?: OrgMember[];
+  departmentOptions?: string[];
   topSlot?: ReactNode;
   actions: ProjectEditorAction[];
   busyActionId?: string | null;
@@ -421,6 +423,7 @@ export function ProjectEditorWizard({
   title,
   description,
   members = [],
+  departmentOptions,
   topSlot,
   actions,
   busyActionId,
@@ -443,6 +446,13 @@ export function ProjectEditorWizard({
   const initialDraftFingerprint = useMemo(() => JSON.stringify(createProjectEditorDraft(initialDraft)), [initialDraft]);
   const initialContractDocument = initialDraft.contractDocument ?? null;
   const initialContractAnalysis = initialDraft.contractAnalysis ?? null;
+  const normalizedDepartmentOptions = useMemo(
+    () => dedupeProjectDepartmentLabels(departmentOptions ? departmentOptions : [...PROJECT_DEPARTMENT_OPTIONS]),
+    [departmentOptions],
+  );
+  const departmentOptionSet = useMemo(() => new Set(normalizedDepartmentOptions), [normalizedDepartmentOptions]);
+  const selectedDepartment = normalizeProjectDepartment(draft.department);
+  const canUseSelectedDepartment = selectedDepartment && departmentOptionSet.has(selectedDepartment);
   const canRemoveExistingContractDocument = canRemoveContractDocument ?? isAdminMode(mode);
   const contractDocumentEditPolicy = buildContractDocumentEditPolicy({
     current: draft.contractDocument,
@@ -700,14 +710,15 @@ export function ProjectEditorWizard({
 
   const submitIssues = useMemo(() => {
     const issues: Array<{ step: ProjectEditorStep; label: string }> = [];
-    if (!draft.department.trim()) issues.push({ step: 'basic', label: '담당조직(CIC)' });
+    const normalizedDepartment = normalizeProjectDepartment(draft.department);
+    if (!normalizedDepartment || !departmentOptionSet.has(normalizedDepartment)) issues.push({ step: 'basic', label: '담당조직(CIC)' });
     if (!draft.name.trim()) issues.push({ step: 'basic', label: '프로젝트명' });
     if (draft.type !== 'I1' && !draft.contractStart.trim()) issues.push({ step: 'financial', label: '계약 시작일' });
     if (draft.type !== 'I1' && !draft.contractEnd.trim()) issues.push({ step: 'financial', label: '계약 종료일' });
     if (draft.type !== 'I1' && !hasContractAmountInput) issues.push({ step: 'financial', label: '계약금액' });
     if (!draft.managerName.trim()) issues.push({ step: 'team', label: 'PM' });
     return issues;
-  }, [draft, hasContractAmountInput]);
+  }, [departmentOptionSet, draft, hasContractAmountInput]);
 
   const canSubmit = submitIssues.length === 0;
 
@@ -716,16 +727,16 @@ export function ProjectEditorWizard({
       <div className="grid gap-4 lg:grid-cols-2">
         <div>
           <Label className="text-xs">담당조직(CIC) *</Label>
-          <datalist id={`project-editor-department-options-${mode}`}>
-            {PROJECT_DEPARTMENT_OPTIONS.map((department) => <option key={department} value={department} />)}
-          </datalist>
-          <Input
-            value={draft.department}
-            onChange={(event) => update('department', event.target.value)}
-            list={`project-editor-department-options-${mode}`}
-            placeholder="예: 투자센터"
-            className="mt-1 h-9 text-sm"
-          />
+          <Select value={canUseSelectedDepartment ? selectedDepartment : undefined} onValueChange={(value) => update('department', value)}>
+            <SelectTrigger className="mt-1 h-9 text-sm">
+              <SelectValue placeholder="담당조직 선택" />
+            </SelectTrigger>
+            <SelectContent>
+              {normalizedDepartmentOptions.map((department) => (
+                <SelectItem key={department} value={department}>{department}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
         <div>
           <Label className="text-xs">프로젝트 유형 *</Label>

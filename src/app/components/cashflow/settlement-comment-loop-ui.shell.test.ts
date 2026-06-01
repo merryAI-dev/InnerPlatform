@@ -44,7 +44,7 @@ describe('settlement comment and review loop UI copy', () => {
     expect(importEditorSource).toContain('검토 루프');
     expect(importEditorSource).toContain('셀 주석');
     expect(importEditorSource).toContain('후보값 또는 주석 확인 필요');
-    expect(importEditorRowSource).toContain('검토 루프');
+    expect(importEditorRowSource).toContain('행 작업');
     expect(importEditorRowSource).toContain('검토 완료');
     expect(cashflowProjectSheetSource).toContain('검토 루프 또는 동기화 확인');
     expect(importEditorSource).not.toContain('사람 확인');

@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { deriveProjectCicFromDepartment, getProjectRegistrationCicOptions, normalizeStoredCic, resolveProjectCic } from './project-cic';
+import { deriveProjectCicFromDepartment, getProjectRegistrationCicOptions, normalizeProjectDepartment, normalizeStoredCic, resolveProjectCic } from './project-cic';
 
 describe('project-cic', () => {
   it('normalizes stored cic values', () => {
     expect(normalizeStoredCic('CIC1')).toBe('CIC1');
+    expect(normalizeStoredCic('CIC 2')).toBe('CIC2');
     expect(normalizeStoredCic('미지정')).toBeUndefined();
     expect(normalizeStoredCic('')).toBeUndefined();
   });
@@ -13,7 +14,14 @@ describe('project-cic', () => {
     expect(deriveProjectCicFromDepartment('cic 3')).toBe('CIC3');
     expect(deriveProjectCicFromDepartment('C-스템CIC')).toBe('C-스템CIC');
     expect(deriveProjectCicFromDepartment('개발협력센터')).toBe('개발협력센터');
+    expect(deriveProjectCicFromDepartment('공간플랫폼센터')).toBe('공간플랫폼센터');
     expect(deriveProjectCicFromDepartment('투자센터')).toBe('투자센터');
+  });
+
+  it('normalizes stored department labels before project writes', () => {
+    expect(normalizeProjectDepartment('CIC 2')).toBe('CIC2');
+    expect(normalizeProjectDepartment(' 투자센터 ')).toBe('투자센터');
+    expect(normalizeProjectDepartment('미지정')).toBe('');
   });
 
   it('prefers explicit cic and falls back to department-derived cic', () => {
@@ -25,6 +33,7 @@ describe('project-cic', () => {
   it('exposes registration organization options from the project registration source list', () => {
     expect(getProjectRegistrationCicOptions()).toEqual([
       '개발협력센터',
+      '공간플랫폼센터',
       '글로벌센터',
       '조인트액션',
       '투자센터',

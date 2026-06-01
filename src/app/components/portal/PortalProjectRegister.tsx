@@ -4,6 +4,7 @@ import { CheckCircle2, Send } from 'lucide-react';
 import { doc, setDoc } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { useAuth } from '../../data/auth-store';
+import { useProjectDepartmentSettings } from '../../data/project-department-settings';
 import { usePortalStore } from '../../data/portal-store';
 import type { ProjectRequestDraft, ProjectRequestDraftStatus } from '../../data/types';
 import { getAuthInstance, getOrgDocumentPath } from '../../lib/firebase';
@@ -28,6 +29,7 @@ export function PortalProjectRegister() {
   const { db, orgId } = useFirebase();
   const { user: authUser } = useAuth();
   const { createProjectRequest, members, portalUser } = usePortalStore();
+  const { options: departmentOptions } = useProjectDepartmentSettings();
   const [busyActionId, setBusyActionId] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const serverDraftRef = useRef<ProjectRequestDraft | null>(null);
@@ -167,6 +169,7 @@ export function PortalProjectRegister() {
       initialDraft={initialDraft}
       draftKey={`portal-register-${authUser?.uid || 'anonymous'}`}
       members={members}
+      departmentOptions={departmentOptions}
       autosave={autosaveConfig}
       actions={[{ id: 'submit', label: '등록 요청 저장', icon: Send }]}
       busyActionId={busyActionId}
