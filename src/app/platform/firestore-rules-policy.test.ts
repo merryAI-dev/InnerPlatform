@@ -95,6 +95,8 @@ describe('firestore rules policy alignment', () => {
   it('admin can manage users and tenants', () => {
     expect(hasPermission('admin', 'user:manage')).toBe(true);
     expect(hasPermission('admin', 'tenant:manage')).toBe(true);
+    expect(firestoreRulesText).toContain('match /tenants/{tenantId}');
+    expect(firestoreRulesText).toContain('allow read, write: if isPlatformAdmin();');
   });
 
   // ── canAccessProject: project-scoped ──

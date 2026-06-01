@@ -49,6 +49,11 @@ service cloud.firestore {
         && getMemberRole(orgId) in ['admin'];
     }
 
+    // 최상위 조직 DB(tenants)는 전역 운영 조직(mysc)의 admin만 관리한다.
+    function isPlatformAdmin() {
+      return isAdmin('mysc');
+    }
+
     // 감사/재무 접근 (audit_logs 읽기용)
     function canReadAuditLogs(orgId) {
       return isMember(orgId)
@@ -71,6 +76,14 @@ service cloud.firestore {
     function isCatchallExcludedPath(collection, document) {
       return isCatchallExcludedCollection(collection)
         || (collection == 'settings' && document == 'project-departments');
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // 최상위 조직 DB 규칙
+    // ══════════════════════════════════════════════════════════════
+
+    match /tenants/{tenantId} {
+      allow read, write: if isPlatformAdmin();
     }
 
     // ══════════════════════════════════════════════════════════════

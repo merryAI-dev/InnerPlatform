@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { resolveMemberProjectAccessState } from './member-workspace';
 import { buildLegacyMemberDocId, mergeMemberRecordSources } from './member-documents';
+import { buildMemberDirectoryList } from '../lib/firestore-service';
 
 describe('member document helpers', () => {
   it('builds the legacy email-key member id from normalized email', () => {
@@ -68,5 +69,37 @@ describe('member document helpers', () => {
       email: 'hong@mysc.co.kr',
       role: 'viewer',
     });
+  });
+
+  it('lets the member listener collapse canonical and legacy email documents', () => {
+    const members = buildMemberDirectoryList([
+      {
+        id: 'uid-1',
+        data: {
+          uid: 'uid-1',
+          name: '홍길동',
+          email: 'hong@mysc.co.kr',
+          role: 'pm',
+        },
+      },
+      {
+        id: 'hong_mysc_co_kr',
+        data: {
+          uid: 'uid-1',
+          name: '홍길동 legacy',
+          email: 'hong@mysc.co.kr',
+          role: 'admin',
+          projectIds: ['p1'],
+        },
+      },
+    ]);
+
+    expect(members).toEqual([{
+      uid: 'uid-1',
+      name: '홍길동',
+      email: 'hong@mysc.co.kr',
+      role: 'pm',
+      avatarUrl: undefined,
+    }]);
   });
 });
