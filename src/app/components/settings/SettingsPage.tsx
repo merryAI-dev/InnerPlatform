@@ -1,10 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Settings, Users, BookOpen, Building2, Upload, Shield, Search, Save, Trash2, ArrowUp, ArrowDown,
+  Settings, Users, Building2, Shield, Search, Save, Trash2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ROLE_META } from '../../platform/role-meta';
-import { hasPermission, type PlatformPermission } from '../../platform/rbac';
 import { useLocation, useNavigate } from 'react-router';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
@@ -18,15 +17,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '../ui/select';
-import { Separator } from '../ui/separator';
 import { useAppStore } from '../../data/store';
-import { useProjectDepartmentSettings } from '../../data/project-department-settings';
-import { normalizeProjectDepartmentOptionLabel } from '../../data/project-department-options';
-import {
-  CASHFLOW_CATEGORY_LABELS, SETTLEMENT_TYPE_LABELS, BASIS_LABELS,
-  type CashflowCategory,
-} from '../../data/types';
-import { DataMigrationTab } from './DataMigrationTab';
 import { TenantManagementTab } from './TenantManagementTab';
 import { PageHeader } from '../layout/PageHeader';
 import { useAuth } from '../../data/auth-store';
@@ -34,39 +25,20 @@ import { MyscWordmark } from '../brand/MyscWordmark';
 
 const DISPLAY_ROLES = ['admin', 'finance', 'pm'] as const;
 type DisplayRole = typeof DISPLAY_ROLES[number];
-const PRIMARY_SETTINGS_TABS = ['org', 'members', 'tenants', 'templates', 'migration', 'permissions'] as const;
+const PRIMARY_SETTINGS_TABS = ['members', 'tenants'] as const;
 const PRIMARY_SETTINGS_TAB_SET = new Set<string>(PRIMARY_SETTINGS_TABS);
 
-const PERMISSION_LABELS: Partial<Record<PlatformPermission, string>> = {
-  'project:write':       '프로젝트 생성/수정',
-  'ledger:write':        '원장 생성',
-  'transaction:submit':  '거래 입력/수정',
-  'transaction:approve': '거래 승인/반려',
-  'evidence:write':      '증빙 첨부',
-  'comment:write':       '댓글/제출',
-  'audit:read':          '감사 로그 조회',
-  'user:manage':         '구성원 관리',
-  'tenant:manage':       '설정 변경',
-};
-
 export function SettingsPage() {
-  const { org, members, templates, upsertMember, removeMember } = useAppStore();
-  const {
-    options: departmentOptions,
-    saveOptions: saveDepartmentOptions,
-  } = useProjectDepartmentSettings();
+  const { org, members, upsertMember, removeMember } = useAppStore();
   const { isAuthenticated, isLoading: authLoading, user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const searchParams = new URLSearchParams(location.search);
-  const requestedTab = searchParams.get('tab') || 'org';
-  const initialTab = PRIMARY_SETTINGS_TAB_SET.has(requestedTab) ? requestedTab : 'org';
+  const requestedTab = searchParams.get('tab') || 'members';
+  const initialTab = PRIMARY_SETTINGS_TAB_SET.has(requestedTab) ? requestedTab : 'members';
   const [tab, setTab] = useState(initialTab);
   const [memberSearch, setMemberSearch] = useState('');
   const [savingMember, setSavingMember] = useState(false);
-  const [savingDepartment, setSavingDepartment] = useState(false);
-  const [departmentDraft, setDepartmentDraft] = useState('');
-  const [editingDepartment, setEditingDepartment] = useState('');
   const [memberDraft, setMemberDraft] = useState({
     uid: '',
     name: '',
@@ -90,171 +62,6 @@ export function SettingsPage() {
   const resetMemberDraft = () => {
     setMemberDraft({ uid: '', name: '', email: '', role: 'pm' });
   };
-
-  const resetDepartmentDraft = () => {
-    setDepartmentDraft('');
-    setEditingDepartment('');
-  };
-
-  const handleSaveDepartment = async () => {
-    const label = normalizeProjectDepartmentOptionLabel(departmentDraft);
-    if (!label) {
-      toast.error('담당조직(CIC)을 입력해 주세요.');
-      return;
-    }
-    if (departmentOptions.includes(label) && label !== editingDepartment) {
-      toast.error('이미 등록된 담당조직(CIC)입니다.');
-      return;
-    }
-
-    const withoutEditing = departmentOptions.filter((option) => option !== editingDepartment && option !== label);
-    const nextOptions = editingDepartment
-      ? departmentOptions.map((option) => (option === editingDepartment ? label : option)).filter((option, index, list) => list.indexOf(option) === index)
-      : [...withoutEditing, label];
-
-    setSavingDepartment(true);
-    try {
-      await saveDepartmentOptions(nextOptions, user?.uid);
-      toast.success('프로젝트 선택값을 저장했습니다.');
-      resetDepartmentDraft();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : '프로젝트 선택값 저장에 실패했습니다.');
-    } finally {
-      setSavingDepartment(false);
-    }
-  };
-
-  const handleRemoveDepartment = async (label: string) => {
-    if (!window.confirm(`${label} 옵션을 삭제할까요?`)) return;
-    setSavingDepartment(true);
-    try {
-      await saveDepartmentOptions(departmentOptions.filter((option) => option !== label), user?.uid);
-      toast.success('프로젝트 선택값을 삭제했습니다.');
-      if (editingDepartment === label) resetDepartmentDraft();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : '프로젝트 선택값 삭제에 실패했습니다.');
-    } finally {
-      setSavingDepartment(false);
-    }
-  };
-
-  const handleMoveDepartment = async (label: string, direction: -1 | 1) => {
-    const index = departmentOptions.indexOf(label);
-    const nextIndex = index + direction;
-    if (index < 0 || nextIndex < 0 || nextIndex >= departmentOptions.length) return;
-    const nextOptions = [...departmentOptions];
-    [nextOptions[index], nextOptions[nextIndex]] = [nextOptions[nextIndex], nextOptions[index]];
-    setSavingDepartment(true);
-    try {
-      await saveDepartmentOptions(nextOptions, user?.uid);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : '프로젝트 선택값 순서 저장에 실패했습니다.');
-    } finally {
-      setSavingDepartment(false);
-    }
-  };
-
-  const renderProjectSelectionValuesCard = () => (
-    <Card className="overflow-hidden border-slate-200 bg-white shadow-sm">
-      <CardHeader className="border-b border-slate-100 pb-4">
-        <div className="flex items-center justify-between gap-3">
-          <CardTitle className="text-base">프로젝트 선택값</CardTitle>
-          <Badge variant="outline" className="border-cyan-200 bg-accent text-[11px] text-accent-foreground">
-            {departmentOptions.length}개
-          </Badge>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4 pt-5">
-        <div className="grid gap-3 lg:grid-cols-[1fr_auto_auto] lg:items-end">
-          <div>
-            <Label className="text-xs">새 담당조직(CIC)</Label>
-            <Input
-              value={departmentDraft}
-              onChange={(event) => setDepartmentDraft(event.target.value)}
-              placeholder="담당조직(CIC)"
-              className="mt-1 border-slate-300"
-            />
-          </div>
-          <Button type="button" onClick={() => void handleSaveDepartment()} disabled={savingDepartment} className="gap-2">
-            <Save className="h-4 w-4" /> {editingDepartment ? '수정 저장' : '추가'}
-          </Button>
-          <Button type="button" variant="outline" onClick={resetDepartmentDraft}>
-            초기화
-          </Button>
-        </div>
-        <div className="overflow-hidden rounded-lg border border-slate-200">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-[72px]">순서</TableHead>
-                <TableHead>담당조직(CIC)</TableHead>
-                <TableHead className="w-[180px] text-right">관리</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {departmentOptions.length ? departmentOptions.map((label, index) => (
-                <TableRow key={label}>
-                  <TableCell className="text-xs tabular-nums text-slate-500">{index + 1}</TableCell>
-                  <TableCell className="font-medium">{label}</TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex justify-end gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        aria-label={`${label} 위로 이동`}
-                        disabled={index === 0 || savingDepartment}
-                        onClick={() => void handleMoveDepartment(label, -1)}
-                      >
-                        <ArrowUp className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        aria-label={`${label} 아래로 이동`}
-                        disabled={index === departmentOptions.length - 1 || savingDepartment}
-                        onClick={() => void handleMoveDepartment(label, 1)}
-                      >
-                        <ArrowDown className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setDepartmentDraft(label);
-                          setEditingDepartment(label);
-                        }}
-                      >
-                        수정
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="border-slate-300 text-red-700 hover:text-red-700"
-                        aria-label={`${label} 삭제`}
-                        onClick={() => void handleRemoveDepartment(label)}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              )) : (
-                <TableRow>
-                  <TableCell colSpan={3} className="py-6 text-center text-sm text-slate-500">
-                    등록된 담당조직이 없습니다
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </div>
-      </CardContent>
-    </Card>
-  );
 
   const handleSaveMember = async () => {
     const uid = memberDraft.uid.trim();
@@ -331,8 +138,8 @@ export function SettingsPage() {
       <PageHeader
         icon={Settings}
         iconGradient="linear-gradient(135deg, #001e46, #001e46)"
-        title="설정"
-        description="운영에 필요한 조직, 멤버DB, 조직DB, 템플릿, 권한 설정만 관리합니다"
+        title="관리자 DB"
+        description="관리자에게 필요한 멤버DB와 조직DB만 관리합니다"
       />
 
       <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
@@ -351,8 +158,8 @@ export function SettingsPage() {
               <p className="text-sm font-semibold tabular-nums text-primary">{members.length}명</p>
             </div>
             <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
-              <p className="text-[10px] font-medium text-slate-500">담당조직</p>
-              <p className="text-sm font-semibold tabular-nums text-primary">{departmentOptions.length}개</p>
+              <p className="text-[10px] font-medium text-slate-500">현재 조직</p>
+              <p className="text-sm font-semibold tabular-nums text-primary">{org.id}</p>
             </div>
           </div>
         </div>
@@ -360,66 +167,17 @@ export function SettingsPage() {
 
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="w-full justify-start overflow-x-auto rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
-          <TabsTrigger value="org" className="flex-none rounded-md px-3 text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
-            <Building2 className="w-3.5 h-3.5" /> 조직 정보
-          </TabsTrigger>
           <TabsTrigger value="members" className="flex-none rounded-md px-3 text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
             <Users className="w-3.5 h-3.5" /> 멤버DB
           </TabsTrigger>
           <TabsTrigger value="tenants" className="flex-none rounded-md px-3 text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
             <Building2 className="w-3.5 h-3.5" /> 조직DB
           </TabsTrigger>
-          <TabsTrigger value="templates" className="flex-none rounded-md px-3 text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
-            <BookOpen className="w-3.5 h-3.5" /> 원장 템플릿
-          </TabsTrigger>
-          <TabsTrigger value="migration" className="flex-none rounded-md px-3 text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
-            <Upload className="w-3.5 h-3.5" /> 데이터 마이그레이션
-          </TabsTrigger>
-          <TabsTrigger value="permissions" className="flex-none rounded-md px-3 text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
-            <Shield className="w-3.5 h-3.5" /> 권한 설정
-          </TabsTrigger>
         </TabsList>
-
-        {/* Organization */}
-        <TabsContent value="org">
-          <Card className="border-slate-200 bg-white shadow-sm">
-            <CardHeader className="border-b border-slate-100 pb-4">
-              <CardTitle className="text-base">조직 정보</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4 pt-5">
-              <div>
-                <Label>조직명</Label>
-                <Input value={org.name} readOnly className="max-w-sm" />
-              </div>
-              <div>
-                <Label>조직 ID</Label>
-                <Input value={org.id} readOnly className="max-w-sm" />
-              </div>
-              <div>
-                <Label>생성일</Label>
-                <Input value={new Date(org.createdAt).toLocaleDateString('ko-KR')} readOnly className="max-w-sm" />
-              </div>
-              <Separator />
-              <div>
-                <h4 className="mb-2">캐시플로 표준 항목 (Enum)</h4>
-                <div className="flex flex-wrap gap-1.5">
-                  {(Object.entries(CASHFLOW_CATEGORY_LABELS) as [CashflowCategory, string][]).map(([key, label]) => (
-                    <Badge key={key} variant="outline" className="text-xs">
-                      {label} ({key})
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
 
         {/* Members */}
         <TabsContent value="members">
           <div className="space-y-4">
-            <div className="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
-              {renderProjectSelectionValuesCard()}
-
               <Card className="overflow-hidden border-slate-200 bg-white shadow-sm">
                 <CardHeader className="border-b border-slate-100 pb-4">
                   <div className="flex items-center justify-between gap-3">
@@ -480,7 +238,6 @@ export function SettingsPage() {
                   </div>
                 </CardContent>
               </Card>
-            </div>
 
             <Card className="overflow-hidden border-slate-200 bg-white shadow-sm">
               <CardHeader className="border-b border-slate-100 pb-4">
@@ -559,108 +316,6 @@ export function SettingsPage() {
         {/* Tenants */}
         <TabsContent value="tenants">
           <TenantManagementTab />
-        </TabsContent>
-
-        {/* Templates */}
-        <TabsContent value="templates">
-          <div className="space-y-4">
-            {templates.map(tpl => (
-              <Card key={tpl.id}>
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-base">{tpl.name}</CardTitle>
-                    <div className="flex items-center gap-2">
-                      <Badge variant="outline">v{tpl.version}</Badge>
-                      <Badge variant="secondary">{tpl.id}</Badge>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="grid grid-cols-2 gap-4 text-sm">
-                    <div>
-                      <p className="text-xs text-muted-foreground mb-1">기본 기준 (Basis)</p>
-                      <p>{BASIS_LABELS[tpl.defaultBasis]}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground mb-1">승인 기준 금액</p>
-                      <p>{tpl.approvalThreshold.toLocaleString()}원 이상</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground mb-1">허용 정산유형</p>
-                      <div className="flex gap-1">
-                        {tpl.allowedSettlementTypes.map(s => (
-                          <Badge key={s} variant="outline" className="text-xs">{SETTLEMENT_TYPE_LABELS[s]}</Badge>
-                        ))}
-                      </div>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground mb-1">필수 증빙</p>
-                      <div className="flex gap-1">
-                        {tpl.evidenceRules.map(r => (
-                          <Badge key={r} variant="secondary" className="text-xs">{r}</Badge>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                  <Separator />
-                  <div>
-                    <p className="text-xs text-muted-foreground mb-1">캐시플로 항목</p>
-                    <div className="flex flex-wrap gap-1">
-                      {tpl.cashflowEnums.map(c => (
-                        <Badge key={c} variant="outline" className="text-[10px]">
-                          {CASHFLOW_CATEGORY_LABELS[c]}
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </TabsContent>
-
-        {/* Data migration */}
-        <TabsContent value="migration">
-          <DataMigrationTab />
-        </TabsContent>
-
-        {/* Permissions */}
-        <TabsContent value="permissions">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">역할별 권한 매트릭스</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>권한</TableHead>
-                    {DISPLAY_ROLES.map(role => (
-                      <TableHead key={role} className="text-center">
-                        {ROLE_META[role].label}
-                      </TableHead>
-                    ))}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {(Object.entries(PERMISSION_LABELS) as [PlatformPermission, string][]).map(([perm, label]) => (
-                    <TableRow key={perm}>
-                      <TableCell className="text-sm">{label}</TableCell>
-                      {DISPLAY_ROLES.map((role: DisplayRole) => (
-                        <TableCell key={role} className="text-center">
-                          {hasPermission(role, perm) ? (
-                            <span className="text-green-600">&#10003;</span>
-                          ) : (
-                            <span className="text-gray-300">&#10005;</span>
-                          )}
-                        </TableCell>
-                      ))}
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
         </TabsContent>
       </Tabs>
     </div>

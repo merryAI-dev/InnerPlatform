@@ -5,20 +5,23 @@ import { describe, expect, it } from 'vitest';
 const source = readFileSync(resolve(import.meta.dirname, 'SettingsPage.tsx'), 'utf8');
 
 describe('SettingsPage member directory contract', () => {
-  it('keeps project selection values admin-managed in the member tab', () => {
-    expect(source).toContain('프로젝트 선택값');
-    expect(source).toContain('새 담당조직(CIC)');
-    expect(source).toContain('useProjectDepartmentSettings');
-    expect(source).toContain('saveDepartmentOptions');
-    expect(source).toContain('handleRemoveDepartment');
-    expect(source).toContain('handleMoveDepartment');
-    expect(source).toContain('이미 등록된 담당조직(CIC)입니다.');
-    expect(source).toContain('<ArrowUp className="h-3.5 w-3.5" />');
-    expect(source).toContain('<ArrowDown className="h-3.5 w-3.5" />');
-    expect(source.indexOf('{renderProjectSelectionValuesCard()}')).toBeLessThan(source.indexOf('구성원 원장 추가/수정'));
-    expect(source).toContain('xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]');
+  it('keeps the admin DB surface limited to member and org databases', () => {
+    expect(source).toContain("const PRIMARY_SETTINGS_TABS = ['members', 'tenants'] as const;");
+    expect(source).toContain('관리자에게 필요한 멤버DB와 조직DB만 관리합니다');
     expect(source).toContain('구성원 원장 추가/수정');
-    expect(source).toContain("const PRIMARY_SETTINGS_TABS = ['org', 'members', 'tenants', 'templates', 'migration', 'permissions'] as const;");
+    expect(source).toContain('조직DB');
+    expect(source).not.toContain('프로젝트 선택값');
+    expect(source).not.toContain('새 담당조직(CIC)');
+    expect(source).not.toContain('useProjectDepartmentSettings');
+    expect(source).not.toContain('saveDepartmentOptions');
+    expect(source).not.toContain('handleMoveDepartment');
+    expect(source).not.toContain('원장 템플릿');
+    expect(source).not.toContain('데이터 마이그레이션');
+    expect(source).not.toContain('조직 정보</CardTitle>');
+    expect(source).not.toContain("value=\"templates\"");
+    expect(source).not.toContain("value=\"migration\"");
+    expect(source).not.toContain("value=\"org\"");
+    expect(source).toContain('구성원 원장 추가/수정');
     expect(source).not.toContain("'project-options'");
   });
 
@@ -46,7 +49,7 @@ describe('SettingsPage member directory contract', () => {
 
   it('restores the tenant ledger tab instead of falling back to org settings', () => {
     expect(source).toContain("import { TenantManagementTab } from './TenantManagementTab';");
-    expect(source).toContain("PRIMARY_SETTINGS_TAB_SET.has(requestedTab) ? requestedTab : 'org'");
+    expect(source).toContain("PRIMARY_SETTINGS_TAB_SET.has(requestedTab) ? requestedTab : 'members'");
     expect(source).toContain('setTab(initialTab)');
     expect(source).toContain('<TabsTrigger value="tenants"');
     expect(source).toContain('조직DB');

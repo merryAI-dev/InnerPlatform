@@ -79,9 +79,14 @@ expectContains('firebase/firestore.rules', 'isCatchallExcludedPath(collection, d
 expectContains('src/app/data/project-department-options.ts', 'sortOrder: number');
 expectContains('src/app/data/project-department-options.ts', '.sort((a, b) => {');
 expectContains('src/app/data/project-department-options.ts', '`${baseId}-${nextCount}`');
-expectContains('src/app/components/settings/SettingsPage.tsx', 'renderProjectSelectionValuesCard');
-expectContains('src/app/components/settings/SettingsPage.tsx', 'handleMoveDepartment');
-expectContains('src/app/components/settings/SettingsPage.tsx', '이미 등록된 담당조직(CIC)입니다.');
+expectContains('src/app/components/settings/SettingsPage.tsx', "const PRIMARY_SETTINGS_TABS = ['members', 'tenants'] as const;");
+expectContains('src/app/components/settings/SettingsPage.tsx', '관리자에게 필요한 멤버DB와 조직DB만 관리합니다');
+expectNotContains('src/app/components/settings/SettingsPage.tsx', 'renderProjectSelectionValuesCard');
+expectNotContains('src/app/components/settings/SettingsPage.tsx', 'handleMoveDepartment');
+expectNotContains('src/app/components/settings/SettingsPage.tsx', '이미 등록된 담당조직(CIC)입니다.');
+expectNotContains('src/app/components/settings/SettingsPage.tsx', '원장 템플릿');
+expectNotContains('src/app/components/settings/SettingsPage.tsx', '데이터 마이그레이션');
+expectNotContains('src/app/components/settings/SettingsPage.tsx', '조직 정보</CardTitle>');
 
 expectNotContains('src/app/components/projects/ProjectListPage.tsx', '모니터링 프리셋');
 expectNotContains('src/app/components/cashflow/CashflowProjectSheet.tsx', 'copyMonthValues');

@@ -54,7 +54,6 @@ export const NAV_GROUPS: NavGroup[] = [
       { to: '/business-cards', icon: UserRoundCheck, label: '명함 DB' },
       { to: '/approvals', icon: ListChecks, label: '승인 대기열', accent: true },
       { to: '/users', icon: UserCog, label: '사용자 관리' },
-      { to: '/settings?tab=org', icon: Building2, label: '조직 정보' },
       { to: '/settings?tab=members', icon: UserCog, label: '멤버DB' },
       { to: '/settings?tab=tenants', icon: Building2, label: '조직DB' },
     ],

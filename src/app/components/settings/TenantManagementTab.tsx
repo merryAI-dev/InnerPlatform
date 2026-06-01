@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Building2, Check, Loader2, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import type { Firestore } from 'firebase/firestore';
 import {
-  collection, deleteDoc, doc, getDocs, limit, query, serverTimestamp, setDoc,
+  collection, deleteDoc, doc, getDocs, limit, query, serverTimestamp, setDoc, where,
 } from 'firebase/firestore';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -24,27 +24,33 @@ import { useFirebase } from '../../lib/firebase-context';
 interface TenantDoc {
   id: string;
   name: string;
+  adminOrgId?: string;
   createdAt?: string;
+  protected?: boolean;
   branding?: { primaryColor?: string; logoUrl?: string };
 }
 
 // ── Firestore helpers ──
 
-async function fetchTenants(db: Firestore): Promise<TenantDoc[]> {
-  const snap = await getDocs(query(collection(db, 'tenants'), limit(100)));
+async function fetchTenants(db: Firestore, adminOrgId: string): Promise<TenantDoc[]> {
+  const snap = await getDocs(query(collection(db, 'tenants'), where('adminOrgId', '==', adminOrgId), limit(100)));
   return snap.docs.map((d) => ({
     id: d.id,
     name: (d.data().name as string | undefined) || d.id,
+    adminOrgId: d.data().adminOrgId as string | undefined,
     createdAt: (d.data().createdAt as any)?.toDate?.()?.toISOString?.() || '',
+    protected: d.data().protected === true,
     branding: d.data().branding as TenantDoc['branding'],
   }));
 }
 
-async function createTenant(db: Firestore, id: string, name: string): Promise<void> {
+async function createTenant(db: Firestore, adminOrgId: string, id: string, name: string): Promise<void> {
   await setDoc(doc(db, 'tenants', id), {
     id,
     name: name || id,
+    adminOrgId,
     createdAt: serverTimestamp(),
+    protected: false,
     branding: {},
   });
 }
@@ -68,14 +74,14 @@ export function TenantManagementTab() {
     if (!db) return;
     setLoading(true);
     try {
-      const list = await fetchTenants(db);
+      const list = await fetchTenants(db, orgId);
       setTenants(list);
     } catch (err: any) {
       toast.error('조직 목록 로드 실패: ' + (err.message || ''));
     } finally {
       setLoading(false);
     }
-  }, [db]);
+  }, [db, orgId]);
 
   useEffect(() => { void loadTenants(); }, [loadTenants]);
 
@@ -89,7 +95,7 @@ export function TenantManagementTab() {
     if (!db) return;
     setCreating(true);
     try {
-      await createTenant(db, id, newName.trim() || id);
+      await createTenant(db, orgId, id, newName.trim() || id);
       toast.success(`조직 "${id}" 등록 완료`);
       setNewId('');
       setNewName('');
@@ -102,7 +108,8 @@ export function TenantManagementTab() {
   }, [db, newId, newName, loadTenants]);
 
   const handleDelete = useCallback(async (id: string) => {
-    if (id === 'mysc') { toast.error('mysc 기본 조직은 삭제할 수 없습니다'); return; }
+    const target = tenants.find((tenant) => tenant.id === id);
+    if (target?.protected) { toast.error('보호된 조직은 삭제할 수 없습니다'); return; }
     if (id === orgId) { toast.error('현재 활성 조직은 삭제할 수 없습니다'); return; }
     if (!db) return;
     try {
@@ -112,7 +119,7 @@ export function TenantManagementTab() {
     } catch (err: any) {
       toast.error('삭제 실패: ' + (err.message || ''));
     }
-  }, [db, orgId]);
+  }, [db, orgId, tenants]);
 
   return (
     <div className="space-y-6">
@@ -222,8 +229,8 @@ export function TenantManagementTab() {
                         variant="ghost"
                         size="sm"
                         className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
-                        disabled={t.id === 'mysc' || t.id === orgId}
-                        title={t.id === 'mysc' ? '기본 조직은 삭제 불가' : t.id === orgId ? '활성 조직은 삭제 불가' : '삭제'}
+                        disabled={t.protected || t.id === orgId}
+                        title={t.protected ? '보호된 조직은 삭제 불가' : t.id === orgId ? '활성 조직은 삭제 불가' : '삭제'}
                         onClick={() => void handleDelete(t.id)}
                       >
                         <Trash2 className="w-3.5 h-3.5" />

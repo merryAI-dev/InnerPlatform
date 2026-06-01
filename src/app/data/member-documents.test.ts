@@ -102,4 +102,39 @@ describe('member document helpers', () => {
       avatarUrl: undefined,
     }]);
   });
+
+  it('deduplicates multiple uid-keyed documents for the same email without relying on legacy ids', () => {
+    const members = buildMemberDirectoryList([
+      {
+        id: 'uid-old',
+        data: {
+          uid: 'uid-old',
+          name: '홍길동 이전',
+          email: 'hong@mysc.co.kr',
+          role: 'viewer',
+          status: 'INACTIVE',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+      },
+      {
+        id: 'uid-current',
+        data: {
+          uid: 'uid-current',
+          name: '홍길동',
+          email: 'hong@mysc.co.kr',
+          role: 'pm',
+          status: 'ACTIVE',
+          updatedAt: '2026-02-01T00:00:00.000Z',
+        },
+      },
+    ]);
+
+    expect(members).toEqual([{
+      uid: 'uid-current',
+      name: '홍길동',
+      email: 'hong@mysc.co.kr',
+      role: 'pm',
+      avatarUrl: undefined,
+    }]);
+  });
 });
