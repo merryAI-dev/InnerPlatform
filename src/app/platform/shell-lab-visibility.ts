@@ -31,6 +31,11 @@ export const ADMIN_LAB_ROUTES = [
   '/settings',
 ] as const;
 
+export const ADMIN_ALWAYS_VISIBLE_SETTINGS_ROUTES = [
+  '/settings?tab=members',
+  '/settings?tab=tenants',
+] as const;
+
 export const PORTAL_LAB_ROUTES = [
   '/portal/business-cards',
   '/portal/board',
@@ -53,6 +58,12 @@ function isLabRoute(route: string, routes: readonly string[]): boolean {
   return routes.some((candidate) => routeMatches(route, candidate));
 }
 
+function isAlwaysVisibleAdminSettingsRoute(route: string): boolean {
+  const withoutHash = String(route || '').split('#')[0] || '/';
+  const normalized = withoutHash.replace(/\/+(?=[?#]|$)/, '');
+  return ADMIN_ALWAYS_VISIBLE_SETTINGS_ROUTES.includes(normalized as typeof ADMIN_ALWAYS_VISIBLE_SETTINGS_ROUTES[number]);
+}
+
 export function shouldShowShellRoute(
   route: string,
   space: ShellSpace,
@@ -68,6 +79,10 @@ export function shouldShowShellRoute(
     && normalizeProjectFundInputMode(context.fundInputMode) === 'DIRECT_ENTRY'
   ) {
     return false;
+  }
+
+  if (space === 'admin' && isAlwaysVisibleAdminSettingsRoute(route)) {
+    return true;
   }
 
   if (space === 'admin' && !labEnabled && isLabRoute(normalizedRoute, ADMIN_LAB_ROUTES)) {

@@ -18,7 +18,7 @@ describe('SettingsPage member directory contract', () => {
     expect(source.indexOf('{renderProjectSelectionValuesCard()}')).toBeLessThan(source.indexOf('구성원 원장 추가/수정'));
     expect(source).toContain('xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]');
     expect(source).toContain('구성원 원장 추가/수정');
-    expect(source).toContain("const PRIMARY_SETTINGS_TABS = ['org', 'members', 'templates', 'migration', 'permissions'] as const;");
+    expect(source).toContain("const PRIMARY_SETTINGS_TABS = ['org', 'members', 'tenants', 'templates', 'migration', 'permissions'] as const;");
     expect(source).not.toContain("'project-options'");
   });
 
@@ -42,5 +42,15 @@ describe('SettingsPage member directory contract', () => {
     expect(source).toContain('settingsAccessBlocked');
     expect(source).toContain('설정 접근 권한이 없습니다');
     expect(source).not.toContain('navigate(resolveHomePath(role, activeWorkspace), { replace: true })');
+  });
+
+  it('restores the tenant ledger tab instead of falling back to org settings', () => {
+    expect(source).toContain("import { TenantManagementTab } from './TenantManagementTab';");
+    expect(source).toContain("PRIMARY_SETTINGS_TAB_SET.has(requestedTab) ? requestedTab : 'org'");
+    expect(source).toContain('setTab(initialTab)');
+    expect(source).toContain('<TabsTrigger value="tenants"');
+    expect(source).toContain('조직DB');
+    expect(source).toContain('<TabsContent value="tenants">');
+    expect(source).toContain('<TenantManagementTab />');
   });
 });

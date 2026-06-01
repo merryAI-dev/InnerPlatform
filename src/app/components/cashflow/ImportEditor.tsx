@@ -82,6 +82,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu';
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import type { ActiveCommentAnchor } from './SettlementCommentThreadSheet';
 import type { EvidenceUploadDraft } from './SettlementEvidenceUploadDialog';
 import { MemoizedImportEditorRow } from './ImportEditorRow';
@@ -1760,15 +1761,25 @@ export function ImportEditor({
             <RotateCcw className="h-3.5 w-3.5 mr-1" />
             되돌리기
           </Button>
-          <Button
-            size="sm"
-            className="h-7 text-[11px] gap-1 cursor-pointer shadow-sm"
-            onClick={onSave}
-            disabled={validCount === 0 || saving || derivingRows}
-          >
-            {saving || derivingRows ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-            {saving ? '저장 중...' : derivingRows ? 'Rust 계산 중...' : `${validCount}건 저장`}
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex">
+                <Button
+                  size="sm"
+                  className="h-7 text-[11px] gap-1 cursor-pointer shadow-sm"
+                  onClick={onSave}
+                  disabled={validCount === 0 || saving || derivingRows}
+                >
+                  {saving || derivingRows ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                  {saving ? '저장 중...' : derivingRows ? 'Rust 계산 중...' : `${validCount}건 저장`}
+                </Button>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-[320px] text-[11px] leading-5">
+              <p className="font-semibold">저장</p>
+              <p>지금 보이는 주간 사업비 입력표를 서버 기준본으로 보관합니다. 저장 후에는 캐시플로 Actual 불러오기가 이어져 실제 입금/지출 값으로 캐시플로 화면에 반영됩니다.</p>
+            </TooltipContent>
+          </Tooltip>
         </div>
         </div>
       </div>

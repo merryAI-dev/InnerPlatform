@@ -13,7 +13,7 @@ const cashflowWeeksStoreSource = readFileSync(
 
 describe('CashflowProjectSheet actual sync flow', () => {
   it('keeps actual sync separate from manual actual save', () => {
-    expect(cashflowProjectSheetSource).toContain('Actual 동기화');
+    expect(cashflowProjectSheetSource).toContain('Actual 불러오기');
     expect(cashflowProjectSheetSource).toContain('syncProjectActualsFromExpenseSheets');
     expect(cashflowWeeksStoreSource).toContain('syncProjectCashflowActualsViaBff');
     expect(cashflowWeeksStoreSource).toContain('applyWeekAmountsToLocalWeeks');

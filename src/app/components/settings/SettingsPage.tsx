@@ -27,13 +27,14 @@ import {
   type CashflowCategory,
 } from '../../data/types';
 import { DataMigrationTab } from './DataMigrationTab';
+import { TenantManagementTab } from './TenantManagementTab';
 import { PageHeader } from '../layout/PageHeader';
 import { useAuth } from '../../data/auth-store';
 import { MyscWordmark } from '../brand/MyscWordmark';
 
 const DISPLAY_ROLES = ['admin', 'finance', 'pm'] as const;
 type DisplayRole = typeof DISPLAY_ROLES[number];
-const PRIMARY_SETTINGS_TABS = ['org', 'members', 'templates', 'migration', 'permissions'] as const;
+const PRIMARY_SETTINGS_TABS = ['org', 'members', 'tenants', 'templates', 'migration', 'permissions'] as const;
 const PRIMARY_SETTINGS_TAB_SET = new Set<string>(PRIMARY_SETTINGS_TABS);
 
 const PERMISSION_LABELS: Partial<Record<PlatformPermission, string>> = {
@@ -300,6 +301,10 @@ export function SettingsPage() {
     }
   }, [authLoading, currentPath, isAuthenticated, navigate]);
 
+  useEffect(() => {
+    setTab(initialTab);
+  }, [initialTab]);
+
   if (authLoading || !isAuthenticated) return null;
   if (!user) return null;
 
@@ -327,7 +332,7 @@ export function SettingsPage() {
         icon={Settings}
         iconGradient="linear-gradient(135deg, #001e46, #001e46)"
         title="설정"
-        description="운영에 필요한 조직, 구성원, 템플릿, 권한 설정만 관리합니다"
+        description="운영에 필요한 조직, 멤버DB, 조직DB, 템플릿, 권한 설정만 관리합니다"
       />
 
       <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
@@ -359,7 +364,10 @@ export function SettingsPage() {
             <Building2 className="w-3.5 h-3.5" /> 조직 정보
           </TabsTrigger>
           <TabsTrigger value="members" className="flex-none rounded-md px-3 text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
-            <Users className="w-3.5 h-3.5" /> 구성원
+            <Users className="w-3.5 h-3.5" /> 멤버DB
+          </TabsTrigger>
+          <TabsTrigger value="tenants" className="flex-none rounded-md px-3 text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+            <Building2 className="w-3.5 h-3.5" /> 조직DB
           </TabsTrigger>
           <TabsTrigger value="templates" className="flex-none rounded-md px-3 text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
             <BookOpen className="w-3.5 h-3.5" /> 원장 템플릿
@@ -546,6 +554,11 @@ export function SettingsPage() {
               </CardContent>
             </Card>
           </div>
+        </TabsContent>
+
+        {/* Tenants */}
+        <TabsContent value="tenants">
+          <TenantManagementTab />
         </TabsContent>
 
         {/* Templates */}

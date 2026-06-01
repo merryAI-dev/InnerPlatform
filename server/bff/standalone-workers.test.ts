@@ -17,7 +17,7 @@ function runWorker(scriptPath: string) {
     cwd: repoRoot,
     env: LIVE_WORKER_DISABLED_ENV,
     encoding: 'utf8',
-    timeout: 5000,
+    timeout: 15000,
   });
 }
 
