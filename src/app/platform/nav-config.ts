@@ -1,7 +1,7 @@
 import type { LucideIcon } from 'lucide-react';
 import {
   LayoutDashboard, FolderKanban, BarChart3,
-  FileCheck, Settings, Shield, ClipboardList, ClipboardCheck,
+  FileCheck, Building2, Shield, ClipboardList, ClipboardCheck,
   Calculator, Wallet, UserCog,
   ListChecks, MessagesSquare, UserRoundCheck,
   CircleDollarSign, ArrowLeftRight,
@@ -53,8 +53,8 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/business-cards', icon: UserRoundCheck, label: '명함 DB' },
       { to: '/approvals', icon: ListChecks, label: '승인 대기열', accent: true },
-      { to: '/users', icon: UserCog, label: '권한/사용자' },
-      { to: '/settings', icon: Settings, label: '설정' },
+      { to: '/users', icon: UserCog, label: '사용자 관리' },
+      { to: '/settings?tab=org', icon: Building2, label: '조직 관리' },
     ],
   },
 ];

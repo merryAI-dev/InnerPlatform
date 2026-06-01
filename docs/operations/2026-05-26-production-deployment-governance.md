@@ -80,7 +80,8 @@ Applied on 2026-05-26 in this branch:
 
 Still required before using the workflow:
 
-- Create a dedicated Vercel deploy token and set it as `VERCEL_TOKEN` in the GitHub `Production` environment.
+- Create a dedicated Vercel deploy token and set it as `VERCEL_DEPLOY_TOKEN_PRODUCTION` in the GitHub `Production` environment.
+  Do not use a generic `VERCEL_TOKEN` secret for this workflow: GitHub Actions resolves environment secrets ahead of repository secrets when a job declares `environment: Production`, so changing only the repository secret can leave production deploys using a stale environment-scoped token.
 - Keep `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` set in the GitHub `Production` environment.
 - Keep production BFF environment variables in Vercel:
   - `BFF_DEPLOY_ENV=live`
@@ -92,7 +93,7 @@ Still required before using the workflow:
 Operational check on 2026-05-26:
 
 - GitHub `Production` environment has `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID`.
-- GitHub `Production` environment is missing `VERCEL_TOKEN`.
+- GitHub `Production` environment is missing `VERCEL_DEPLOY_TOKEN_PRODUCTION`.
 - Vercel production environment contains `BFF_DEPLOY_ENV`, `FIREBASE_PROJECT_ID`, `BFF_ALLOWED_ORIGINS`, `BFF_SCHEDULER_OWNER`, and `CRON_SECRET`.
 
 ## Stage And Live Separation

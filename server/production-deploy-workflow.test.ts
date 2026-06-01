@@ -54,4 +54,10 @@ describe('production deployment workflow safety', () => {
     expect(workflowText).toContain('| tail -n 1 || true)"');
     expect(workflowText).toContain('Could not parse Vercel deployment URL');
   });
+
+  it('uses a production-scoped Vercel token secret to avoid repo/environment name shadowing', () => {
+    expect(workflowText).toContain('VERCEL_DEPLOY_TOKEN_PRODUCTION');
+    expect(workflowText).not.toContain('VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}');
+    expect(workflowText).toContain('Missing secret: VERCEL_DEPLOY_TOKEN_PRODUCTION');
+  });
 });
