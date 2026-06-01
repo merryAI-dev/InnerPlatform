@@ -29,6 +29,8 @@ describe('admin nav access control', () => {
     expect(canAccessAdminPath('finance', '/approvals')).toBe(true);
     expect(canAccessAdminPath('finance', '/audit')).toBe(false);
     expect(canAccessAdminPath('finance', '/settings')).toBe(false);
+    expect(canShowAdminNavItem('finance', '/settings?tab=members')).toBe(false);
+    expect(canShowAdminNavItem('finance', '/settings?tab=tenants')).toBe(false);
     expect(canAccessAdminPath('finance', '/users')).toBe(false);
   });
 

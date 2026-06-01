@@ -173,6 +173,10 @@ function AppLayoutContent() {
   }
 
   function isActive(to: string): boolean {
+    const [targetPath, targetQuery] = to.split('?');
+    if (targetQuery) {
+      return location.pathname === targetPath && location.search === `?${targetQuery}`;
+    }
     if (to === '/') return location.pathname === '/';
     if (to === '/projects/new') return location.pathname.startsWith('/projects/new');
     if (to === '/projects') return location.pathname.startsWith('/projects') && !location.pathname.startsWith('/projects/new');

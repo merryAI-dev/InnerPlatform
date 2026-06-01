@@ -71,7 +71,7 @@ export function TenantManagementTab() {
       const list = await fetchTenants(db);
       setTenants(list);
     } catch (err: any) {
-      toast.error('테넌트 목록 로드 실패: ' + (err.message || ''));
+      toast.error('조직 목록 로드 실패: ' + (err.message || ''));
     } finally {
       setLoading(false);
     }
@@ -90,7 +90,7 @@ export function TenantManagementTab() {
     setCreating(true);
     try {
       await createTenant(db, id, newName.trim() || id);
-      toast.success(`테넌트 "${id}" 등록 완료`);
+      toast.success(`조직 "${id}" 등록 완료`);
       setNewId('');
       setNewName('');
       await loadTenants();
@@ -102,12 +102,12 @@ export function TenantManagementTab() {
   }, [db, newId, newName, loadTenants]);
 
   const handleDelete = useCallback(async (id: string) => {
-    if (id === 'mysc') { toast.error('mysc 기본 테넌트는 삭제할 수 없습니다'); return; }
-    if (id === orgId) { toast.error('현재 활성 테넌트는 삭제할 수 없습니다'); return; }
+    if (id === 'mysc') { toast.error('mysc 기본 조직은 삭제할 수 없습니다'); return; }
+    if (id === orgId) { toast.error('현재 활성 조직은 삭제할 수 없습니다'); return; }
     if (!db) return;
     try {
       await removeTenant(db, id);
-      toast.success(`테넌트 "${id}" 삭제됨`);
+      toast.success(`조직 "${id}" 삭제됨`);
       setTenants((prev) => prev.filter((t) => t.id !== id));
     } catch (err: any) {
       toast.error('삭제 실패: ' + (err.message || ''));
@@ -119,16 +119,16 @@ export function TenantManagementTab() {
       {/* Register new tenant */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-[15px]">신규 테넌트 등록</CardTitle>
+          <CardTitle className="text-[15px]">신규 조직 등록</CardTitle>
           <CardDescription className="text-[12px]">
-            새 조직을 플랫폼에 온보딩합니다. 테넌트 ID는 변경 불가하므로 신중히 입력하세요.
+            새 조직을 플랫폼에 온보딩합니다. 조직 ID는 변경 불가하므로 신중히 입력하세요.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <Label htmlFor="tenant-id" className="text-[12px]">
-                테넌트 ID <span className="text-destructive">*</span>
+                조직 ID <span className="text-destructive">*</span>
               </Label>
               <Input
                 id="tenant-id"
@@ -159,7 +159,7 @@ export function TenantManagementTab() {
             className="gap-1.5"
           >
             {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
-            테넌트 등록
+            조직 등록
           </Button>
         </CardContent>
       </Card>
@@ -168,7 +168,7 @@ export function TenantManagementTab() {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between py-3">
           <div>
-            <CardTitle className="text-[15px]">등록된 테넌트</CardTitle>
+            <CardTitle className="text-[15px]">등록된 조직</CardTitle>
             <CardDescription className="text-[12px]">플랫폼에 등록된 조직 목록</CardDescription>
           </div>
           <Button
@@ -190,13 +190,13 @@ export function TenantManagementTab() {
           ) : tenants.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-8 text-[12px] text-muted-foreground gap-2">
               <Building2 className="w-8 h-8 opacity-20" />
-              <p>등록된 테넌트가 없습니다.</p>
+              <p>등록된 조직이 없습니다.</p>
             </div>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="text-[11px] w-40">테넌트 ID</TableHead>
+                  <TableHead className="text-[11px] w-40">조직 ID</TableHead>
                   <TableHead className="text-[11px]">조직 이름</TableHead>
                   <TableHead className="text-[11px]">등록일</TableHead>
                   <TableHead className="text-[11px] w-20">상태</TableHead>
@@ -223,7 +223,7 @@ export function TenantManagementTab() {
                         size="sm"
                         className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
                         disabled={t.id === 'mysc' || t.id === orgId}
-                        title={t.id === 'mysc' ? '기본 테넌트는 삭제 불가' : t.id === orgId ? '활성 테넌트는 삭제 불가' : '삭제'}
+                        title={t.id === 'mysc' ? '기본 조직은 삭제 불가' : t.id === orgId ? '활성 조직은 삭제 불가' : '삭제'}
                         onClick={() => void handleDelete(t.id)}
                       >
                         <Trash2 className="w-3.5 h-3.5" />

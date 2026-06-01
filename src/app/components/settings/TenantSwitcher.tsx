@@ -81,7 +81,7 @@ export function TenantSwitcher({ collapsed = false, userRole, userTenantId }: Te
     }
     // tenant_admin은 임의 테넌트 전환 차단
     if (isTenantAdmin && userTenantId && value !== userTenantId) {
-      setInputError('자신의 테넌트만 전환할 수 있습니다');
+      setInputError('자신의 조직만 전환할 수 있습니다');
       return;
     }
     setInputError('');
@@ -94,7 +94,7 @@ export function TenantSwitcher({ collapsed = false, userRole, userTenantId }: Te
         <button
           type="button"
           className="w-7 h-7 rounded-md flex items-center justify-center text-slate-500 hover:text-slate-300 hover:bg-white/10 transition-colors"
-          title={isUsingEnvConfig ? `테넌트: ${orgId} (잠금)` : `테넌트: ${orgId}`}
+          title={isUsingEnvConfig ? `조직: ${orgId} (잠금)` : `조직: ${orgId}`}
           onClick={() => canSwitch && setOpen(!open)}
           disabled={!canSwitch}
         >
@@ -115,7 +115,7 @@ export function TenantSwitcher({ collapsed = false, userRole, userTenantId }: Te
               ? 'hover:bg-white/10 text-slate-400 hover:text-slate-200 cursor-pointer'
               : 'text-slate-600 cursor-default'
             }`}
-          title={isUsingEnvConfig ? '환경변수로 테넌트가 고정되어 있습니다' : '테넌트 전환'}
+          title={isUsingEnvConfig ? '환경변수로 조직이 고정되어 있습니다' : '조직 전환'}
         >
           {isUsingEnvConfig
             ? <Lock className="w-3 h-3 shrink-0 text-slate-600" />
@@ -128,7 +128,7 @@ export function TenantSwitcher({ collapsed = false, userRole, userTenantId }: Te
 
       <PopoverContent className="w-64 p-2" align="start" side="right">
         <p className="text-[10px] font-medium text-muted-foreground px-1 pb-1.5 tracking-wider uppercase">
-          테넌트 전환
+          조직 전환
         </p>
 
         {/* Known tenant list */}
@@ -190,7 +190,7 @@ export function TenantSwitcher({ collapsed = false, userRole, userTenantId }: Te
           }}
         >
           <Plus className="w-3.5 h-3.5" />
-          신규 테넌트 등록
+          신규 조직 등록
         </button>
       </PopoverContent>
     </Popover>
@@ -205,7 +205,7 @@ export function TenantBadge() {
     <Badge
       variant="outline"
       className="text-[10px] font-mono gap-1 px-1.5 py-0.5 h-5"
-      title={isUsingEnvConfig ? '환경변수로 고정된 테넌트' : `현재 테넌트: ${orgId}`}
+      title={isUsingEnvConfig ? '환경변수로 고정된 조직' : `현재 조직: ${orgId}`}
     >
       {isUsingEnvConfig && <Lock className="w-2.5 h-2.5" />}
       {orgId}

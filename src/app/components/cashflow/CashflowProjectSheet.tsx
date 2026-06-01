@@ -8,6 +8,7 @@ import { Card, CardContent } from '../ui/card';
 import { Input } from '../ui/input';
 import { Badge } from '../ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -566,7 +567,7 @@ export function CashflowProjectSheet({
       setActualSyncing(true);
       const result = await syncProjectActualsFromExpenseSheets({ projectId });
       if (result.skipped) {
-        toast.message('동기화할 정산대장 행이 없습니다.');
+        toast.message('불러올 정산대장 행이 없습니다.');
         return;
       }
       setDrafts((prev) => {
@@ -583,10 +584,10 @@ export function CashflowProjectSheet({
         }
         return next;
       });
-      toast.success(`Actual ${result.upsertedWeeks}개 주차를 동기화했습니다.`);
+      toast.success(`Actual ${result.upsertedWeeks}개 주차를 불러왔습니다.`);
     })().catch((error) => {
       console.error('[Cashflow] actual sync failed:', error);
-      toast.error('Actual 동기화에 실패했습니다. 정산대장 저장 상태를 확인해 주세요.');
+      toast.error('Actual 불러오기에 실패했습니다. 정산대장 저장 상태를 확인해 주세요.');
     }).finally(() => {
       setActualSyncing(false);
     });
@@ -982,26 +983,46 @@ export function CashflowProjectSheet({
             >
               {downloadPreparing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />} {downloadPreparing ? '엑셀 준비 중' : '엑셀 다운로드'}
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8 text-[12px] gap-1.5"
-              onClick={syncActualsFromExpenseSheet}
-              disabled={!canEdit || actualSyncing || monthSavingMode !== null}
-            >
-              {actualSyncing && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-              Actual 동기화
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8 text-[12px] gap-1.5"
-              onClick={() => saveMonth('actual')}
-              disabled={!canEdit || actualSyncing || monthSavingMode !== null}
-            >
-              {monthSavingMode === 'actual' && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-              Actual 저장
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-[12px] gap-1.5"
+                    onClick={syncActualsFromExpenseSheet}
+                    disabled={!canEdit || actualSyncing || monthSavingMode !== null}
+                  >
+                    {actualSyncing && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                    Actual 불러오기
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="max-w-[320px] text-[11px] leading-5">
+                <p className="font-semibold">Actual 불러오기</p>
+                <p>주간 사업비 입력표에 저장된 실제 입금/지출을 읽어와 이 캐시플로 Actual 칸에 채웁니다. 새로 계산해 보여주는 단계이며, 최종 반영은 Actual 저장까지 눌러야 끝납니다.</p>
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-[12px] gap-1.5"
+                    onClick={() => saveMonth('actual')}
+                    disabled={!canEdit || actualSyncing || monthSavingMode !== null}
+                  >
+                    {monthSavingMode === 'actual' && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                    Actual 저장
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="max-w-[320px] text-[11px] leading-5">
+                <p className="font-semibold">Actual 저장</p>
+                <p>화면에 보이는 Actual 값을 서버 기준값으로 저장합니다. 저장해야 다른 화면과 다음 접속에서도 같은 실제값을 볼 수 있습니다.</p>
+              </TooltipContent>
+            </Tooltip>
             <Button variant="outline" size="sm" className="h-8 text-[12px] gap-1.5" onClick={goPrevMonthSafe}>
               <ChevronLeft className="w-3.5 h-3.5" /> 이전 달
             </Button>

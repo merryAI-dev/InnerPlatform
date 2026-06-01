@@ -81,7 +81,7 @@ export function TenantBrandingTab() {
             브랜딩 설정
           </CardTitle>
           <CardDescription className="text-[12px]">
-            테넌트 <span className="font-mono">{orgId}</span>의 외관을 커스터마이징합니다
+            조직 <span className="font-mono">{orgId}</span>의 외관을 커스터마이징합니다
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">

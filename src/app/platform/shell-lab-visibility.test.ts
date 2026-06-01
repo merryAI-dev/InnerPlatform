@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  ADMIN_ALWAYS_VISIBLE_SETTINGS_ROUTES,
   ADMIN_LAB_ROUTES,
   PORTAL_LAB_ROUTES,
   readShellLabEnabled,
@@ -57,6 +58,17 @@ describe('shell LAB visibility', () => {
       expect(shouldShowShellRoute(route, 'admin', 'nav', { labEnabled: false })).toBe(false);
       expect(shouldShowShellRoute(route, 'admin', 'command', { labEnabled: true })).toBe(true);
     }
+  });
+
+  it('keeps required settings ledger links visible without reopening the whole settings surface', () => {
+    expect(ADMIN_ALWAYS_VISIBLE_SETTINGS_ROUTES).toEqual([
+      '/settings?tab=members',
+      '/settings?tab=tenants',
+    ]);
+    expect(shouldShowShellRoute('/settings', 'admin', 'nav', { labEnabled: false })).toBe(false);
+    expect(shouldShowShellRoute('/settings?tab=org', 'admin', 'nav', { labEnabled: false })).toBe(false);
+    expect(shouldShowShellRoute('/settings?tab=members', 'admin', 'nav', { labEnabled: false })).toBe(true);
+    expect(shouldShowShellRoute('/settings?tab=tenants', 'admin', 'nav', { labEnabled: false })).toBe(true);
   });
 
   it('keeps core admin routes visible with LAB disabled', () => {
