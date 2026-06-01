@@ -6,8 +6,6 @@ import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
-import { Separator } from '../ui/separator';
-import { Switch } from '../ui/switch';
 import { toast } from 'sonner';
 import { useFirebase } from '../../lib/firebase-context';
 
@@ -19,26 +17,10 @@ interface BrandingConfig {
   logoUrl: string;
 }
 
-interface FeatureFlags {
-  tenantIsolationStrict: boolean;
-  enableBudgetSuggestions: boolean;
-  enableVlmPilot: boolean;
-  enableParticipationRiskAlerts: boolean;
-  enableMultiTenantUi: boolean;
-}
-
 const DEFAULT_BRANDING: BrandingConfig = {
   orgName: '',
   primaryColor: '#0891b2',
   logoUrl: '',
-};
-
-const DEFAULT_FLAGS: FeatureFlags = {
-  tenantIsolationStrict: true,
-  enableBudgetSuggestions: true,
-  enableVlmPilot: false,
-  enableParticipationRiskAlerts: true,
-  enableMultiTenantUi: false,
 };
 
 // ── Firestore helpers ──
@@ -62,67 +44,18 @@ async function saveBranding(db: Firestore, orgId: string, branding: BrandingConf
   await setDoc(doc(db, `orgs/${orgId}/settings/branding`), branding, { merge: true });
 }
 
-async function loadFeatureFlags(db: Firestore, orgId: string): Promise<FeatureFlags> {
-  try {
-    const snap = await getDoc(doc(db, `orgs/${orgId}/settings/feature-flags`));
-    if (!snap.exists()) return { ...DEFAULT_FLAGS };
-    return { ...DEFAULT_FLAGS, ...snap.data() } as FeatureFlags;
-  } catch {
-    return { ...DEFAULT_FLAGS };
-  }
-}
-
-async function saveFeatureFlags(db: Firestore, orgId: string, flags: FeatureFlags): Promise<void> {
-  await setDoc(doc(db, `orgs/${orgId}/settings/feature-flags`), flags, { merge: true });
-}
-
-// ── Flag metadata ──
-
-const FLAG_META: { key: keyof FeatureFlags; label: string; description: string }[] = [
-  {
-    key: 'tenantIsolationStrict',
-    label: '테넌트 엄격 격리',
-    description: '다른 org의 데이터 접근을 완전히 차단합니다',
-  },
-  {
-    key: 'enableBudgetSuggestions',
-    label: '비목 자동 제안',
-    description: '거래처 히스토리 및 코드북 기반 비목/세목 제안 칩 표시',
-  },
-  {
-    key: 'enableParticipationRiskAlerts',
-    label: '참여율 위험 알림',
-    description: '100% 초과 참여율 경고 및 대시보드 드릴다운',
-  },
-  {
-    key: 'enableMultiTenantUi',
-    label: '멀티테넌트 UI',
-    description: '테넌트 선택 드롭다운 및 온보딩 플로우 활성화',
-  },
-  {
-    key: 'enableVlmPilot',
-    label: 'VLM 파일럿 (실험적)',
-    description: '영수증/계약서 이미지에서 거래처·금액 자동 추출 (Claude Vision)',
-  },
-];
-
 // ── Component ──
 
 export function TenantBrandingTab() {
   const { db, orgId } = useFirebase();
   const [branding, setBranding] = useState<BrandingConfig>(DEFAULT_BRANDING);
-  const [flags, setFlags] = useState<FeatureFlags>(DEFAULT_FLAGS);
   const [loadingBranding, setLoadingBranding] = useState(false);
-  const [loadingFlags, setLoadingFlags] = useState(false);
   const [savingBranding, setSavingBranding] = useState(false);
-  const [savingFlags, setSavingFlags] = useState(false);
 
   useEffect(() => {
     if (!db) return;
     setLoadingBranding(true);
     void loadBranding(db, orgId).then((b) => { setBranding(b); setLoadingBranding(false); });
-    setLoadingFlags(true);
-    void loadFeatureFlags(db, orgId).then((f) => { setFlags(f); setLoadingFlags(false); });
   }, [db, orgId]);
 
   const handleSaveBranding = useCallback(async () => {
@@ -137,19 +70,6 @@ export function TenantBrandingTab() {
       setSavingBranding(false);
     }
   }, [db, orgId, branding]);
-
-  const handleSaveFlags = useCallback(async () => {
-    if (!db) return;
-    setSavingFlags(true);
-    try {
-      await saveFeatureFlags(db, orgId, flags);
-      toast.success('기능 플래그 저장 완료');
-    } catch (err: unknown) {
-      toast.error('저장 실패: ' + (err instanceof Error ? err.message : ''));
-    } finally {
-      setSavingFlags(false);
-    }
-  }, [db, orgId, flags]);
 
   return (
     <div className="space-y-6">
@@ -251,52 +171,6 @@ export function TenantBrandingTab() {
               >
                 {savingBranding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
                 브랜딩 저장
-              </Button>
-            </>
-          )}
-        </CardContent>
-      </Card>
-
-      <Separator />
-
-      {/* Feature Flags */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-[15px]">기능 플래그</CardTitle>
-          <CardDescription className="text-[12px]">
-            테넌트 <span className="font-mono">{orgId}</span>에서 활성화할 기능을 선택합니다.
-            변경 사항은 저장 후 즉시 적용됩니다.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {loadingFlags ? (
-            <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
-              <Loader2 className="w-3.5 h-3.5 animate-spin" /> 로딩 중...
-            </div>
-          ) : (
-            <>
-              <div className="space-y-3">
-                {FLAG_META.map(({ key, label, description }) => (
-                  <div key={key} className="flex items-center justify-between gap-4 py-1">
-                    <div>
-                      <p className="text-[13px] font-medium">{label}</p>
-                      <p className="text-[11px] text-muted-foreground">{description}</p>
-                    </div>
-                    <Switch
-                      checked={flags[key] as boolean}
-                      onCheckedChange={(v) => setFlags((f) => ({ ...f, [key]: v }))}
-                    />
-                  </div>
-                ))}
-              </div>
-              <Button
-                size="sm"
-                className="gap-1.5"
-                onClick={handleSaveFlags}
-                disabled={savingFlags}
-              >
-                {savingFlags ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                플래그 저장
               </Button>
             </>
           )}
