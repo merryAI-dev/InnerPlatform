@@ -74,3 +74,4 @@
 | Date | Decision | Rationale |
 |------|----------|-----------|
 | 2026-05-27 | Initial MYSCube design system created | Remove AI SaaS/purple styling and align the platform with a Jira-like professional operations workspace. |
+| 2026-06-01 | Admin settings uses the MYSCube wordmark, navy active states, and compact operational metrics | Keep configuration screens branded without adding explanatory UI copy or decorative gradients. |

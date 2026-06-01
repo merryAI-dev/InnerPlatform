@@ -9,7 +9,7 @@ import { normalizeProjectStatus } from '../data/types';
 import { buildProjectRequestPayloadFromDraft, type ProjectEditorDraft } from './project-editor';
 import { buildProjectEditorReviewChanges } from './project-editor';
 import { normalizeProjectRevenueFields } from './project-financials';
-import { resolveProjectCic } from './project-cic';
+import { normalizeProjectDepartment, resolveProjectCic } from './project-cic';
 
 function text(value: unknown): string {
   return String(value || '').trim();
@@ -115,7 +115,7 @@ export function buildProjectPayloadFromProject(project: Project): ProjectRequest
     phase: project.phase,
     description: text(project.description),
     clientOrg: text(project.clientOrg),
-    department: text(project.department),
+    department: normalizeProjectDepartment(project.department),
     groupwareName: text(project.groupwareName),
     currency: project.currency || 'KRW',
     contractAmount: numeric(project.contractAmount),
@@ -227,7 +227,7 @@ export function buildProjectPatchFromRequestPayload(
     phase: payload.phase || input.baseProject.phase,
     description: text(payload.description),
     clientOrg: text(payload.clientOrg),
-    department: text(payload.department),
+    department: normalizeProjectDepartment(payload.department),
     cic: resolveProjectCic({ department: payload.department }),
     groupwareName: text(payload.groupwareName),
     currency: payload.currency || 'KRW',

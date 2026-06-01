@@ -24,19 +24,19 @@ describe('PortalWeeklyExpensePage flow layout', () => {
     expect(weeklyExpenseSource).not.toContain('탭 삭제');
   });
 
-  it('shows a blocking full-screen saving overlay instead of the unsaved-changes dialog while save is in flight', () => {
-    expect(weeklyExpenseSource).toContain('if (isSettlementSaving) return;');
+  it('shows a blocking full-screen saving overlay while save is in flight', () => {
+    expect(weeklyExpenseSource).toContain('if (isSettlementSaving) {');
+    expect(weeklyExpenseSource).toContain('이동은 저장이 끝난 뒤 가능합니다.');
     expect(weeklyExpenseSource).toContain('사업비 입력을 저장하고 있습니다');
     expect(weeklyExpenseSource).toContain('저장이 끝날 때까지 잠시 기다려 주세요.');
     expect(weeklyExpenseSource).toContain('w-[min(92vw,56rem)] max-w-none');
     expect(weeklyExpenseSource).toContain('min-h-[22rem]');
   });
 
-  it('renders the unsaved-changes dialog as a large centered modal surface', () => {
-    expect(weeklyExpenseSource).toContain('data-testid="weekly-expense-unsaved-dialog"');
-    expect(weeklyExpenseSource).toContain('w-[min(92vw,56rem)] max-w-none');
-    expect(weeklyExpenseSource).toContain('min-h-[22rem]');
-    expect(weeklyExpenseSource).toContain('items-center gap-4 text-center');
+  it('does not block route changes with the retired unsaved weekly expense dialog', () => {
+    expect(weeklyExpenseSource).not.toContain('data-testid="weekly-expense-unsaved-dialog"');
+    expect(weeklyExpenseSource).not.toContain('저장되지 않은 사업비 입력이 있습니다');
+    expect(weeklyExpenseSource).not.toContain('지금 이동하면 저장되지 않은 사업비 입력(주간) 편집 내용이 유실될 수 있습니다.');
   });
 
   it('uses a Korean first-action heading instead of the previous English label', () => {

@@ -67,6 +67,16 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('PROJECT_CURRENCY_LABELS[draft.currency]');
   });
 
+  it('receives department options instead of mapping hardcoded options directly in the wizard UI', () => {
+    expect(source).toContain('departmentOptions?: string[]');
+    expect(source).toContain('dedupeProjectDepartmentLabels(departmentOptions ? departmentOptions');
+    expect(source).toContain('<Label className="text-xs">담당조직(CIC) *</Label>');
+    expect(source).toContain('<SelectValue placeholder="담당조직 선택" />');
+    expect(source).not.toContain('PROJECT_DEPARTMENT_OPTIONS.map((department)');
+    expect(adminWizardSource).toContain('useProjectDepartmentSettings');
+    expect(adminWizardSource).toContain('departmentOptions={departmentOptions}');
+  });
+
   it('keeps manual team member input bound to the raw typed value instead of reparsing formatted text', () => {
     expect(source).toContain('formatTeamMemberIdentityInput(member)');
     expect(source).toContain('identityInput: event.target.value');

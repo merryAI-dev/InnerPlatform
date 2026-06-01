@@ -159,8 +159,8 @@ describe('firestore rules policy alignment', () => {
   it('keeps business-card PII collections behind BFF-only Firestore rules', () => {
     expect(firestoreRulesText).toContain('function isBffOnlyCollection(collection)');
     expect(firestoreRulesText).toContain("['contacts', 'business_card_imports', 'contact_events']");
-    expect(firestoreRulesText).toContain('allow read: if !isCatchallExcludedCollection(collection) && canRead(orgId);');
-    expect(firestoreRulesText).toContain('allow write: if !isCatchallExcludedCollection(collection) && canWrite(orgId);');
+    expect(firestoreRulesText).toContain('allow read: if !isCatchallExcludedPath(collection, document) && canRead(orgId);');
+    expect(firestoreRulesText).toContain('allow write: if !isCatchallExcludedPath(collection, document) && canWrite(orgId);');
   });
 
   it('keeps project request drafts hidden from admin review surfaces until submission', () => {
@@ -170,8 +170,15 @@ describe('firestore rules policy alignment', () => {
     expect(firestoreRulesText).toContain("request.resource.data.status in ['DRAFT', 'SUBMITTED', 'DISCARDED']");
     expect(firestoreRulesText).toContain('function isCatchallExcludedCollection(collection)');
     expect(firestoreRulesText).toContain("collection in ['projectRequestDrafts']");
-    expect(firestoreRulesText).toContain('allow read: if !isCatchallExcludedCollection(collection) && canRead(orgId);');
-    expect(firestoreRulesText).toContain('allow write: if !isCatchallExcludedCollection(collection) && canWrite(orgId);');
+    expect(firestoreRulesText).toContain('allow read: if !isCatchallExcludedPath(collection, document) && canRead(orgId);');
+    expect(firestoreRulesText).toContain('allow write: if !isCatchallExcludedPath(collection, document) && canWrite(orgId);');
+  });
+
+  it('keeps project option settings admin-managed', () => {
+    expect(firestoreRulesText).toContain('match /orgs/{orgId}/settings/project-departments');
+    expect(firestoreRulesText).toContain('allow read: if canRead(orgId);');
+    expect(firestoreRulesText).toContain('allow write: if isAdmin(orgId);');
+    expect(firestoreRulesText).toContain("(collection == 'settings' && document == 'project-departments')");
   });
 
   it('keeps business-card source images behind BFF-only Storage rules', () => {

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Settings, Users, BookOpen, Building2, Plus, Upload, Shield, Search, Save, Trash2,
+  Settings, Users, BookOpen, Building2, Upload, Shield, Search, Save, Trash2, ArrowUp, ArrowDown,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ROLE_META } from '../../platform/role-meta';
@@ -15,8 +15,13 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '../ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '../ui/select';
 import { Separator } from '../ui/separator';
 import { useAppStore } from '../../data/store';
+import { useProjectDepartmentSettings } from '../../data/project-department-settings';
+import { normalizeProjectDepartmentOptionLabel } from '../../data/project-department-options';
 import {
   CASHFLOW_CATEGORY_LABELS, SETTLEMENT_TYPE_LABELS, BASIS_LABELS,
   type CashflowCategory,
@@ -24,6 +29,7 @@ import {
 import { DataMigrationTab } from './DataMigrationTab';
 import { PageHeader } from '../layout/PageHeader';
 import { useAuth } from '../../data/auth-store';
+import { MyscWordmark } from '../brand/MyscWordmark';
 
 const DISPLAY_ROLES = ['admin', 'finance', 'pm'] as const;
 type DisplayRole = typeof DISPLAY_ROLES[number];
@@ -44,6 +50,10 @@ const PERMISSION_LABELS: Partial<Record<PlatformPermission, string>> = {
 
 export function SettingsPage() {
   const { org, members, templates, upsertMember, removeMember } = useAppStore();
+  const {
+    options: departmentOptions,
+    saveOptions: saveDepartmentOptions,
+  } = useProjectDepartmentSettings();
   const { isAuthenticated, isLoading: authLoading, user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -53,6 +63,9 @@ export function SettingsPage() {
   const [tab, setTab] = useState(initialTab);
   const [memberSearch, setMemberSearch] = useState('');
   const [savingMember, setSavingMember] = useState(false);
+  const [savingDepartment, setSavingDepartment] = useState(false);
+  const [departmentDraft, setDepartmentDraft] = useState('');
+  const [editingDepartment, setEditingDepartment] = useState('');
   const [memberDraft, setMemberDraft] = useState({
     uid: '',
     name: '',
@@ -76,6 +89,171 @@ export function SettingsPage() {
   const resetMemberDraft = () => {
     setMemberDraft({ uid: '', name: '', email: '', role: 'pm' });
   };
+
+  const resetDepartmentDraft = () => {
+    setDepartmentDraft('');
+    setEditingDepartment('');
+  };
+
+  const handleSaveDepartment = async () => {
+    const label = normalizeProjectDepartmentOptionLabel(departmentDraft);
+    if (!label) {
+      toast.error('담당조직(CIC)을 입력해 주세요.');
+      return;
+    }
+    if (departmentOptions.includes(label) && label !== editingDepartment) {
+      toast.error('이미 등록된 담당조직(CIC)입니다.');
+      return;
+    }
+
+    const withoutEditing = departmentOptions.filter((option) => option !== editingDepartment && option !== label);
+    const nextOptions = editingDepartment
+      ? departmentOptions.map((option) => (option === editingDepartment ? label : option)).filter((option, index, list) => list.indexOf(option) === index)
+      : [...withoutEditing, label];
+
+    setSavingDepartment(true);
+    try {
+      await saveDepartmentOptions(nextOptions, user?.uid);
+      toast.success('프로젝트 선택값을 저장했습니다.');
+      resetDepartmentDraft();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '프로젝트 선택값 저장에 실패했습니다.');
+    } finally {
+      setSavingDepartment(false);
+    }
+  };
+
+  const handleRemoveDepartment = async (label: string) => {
+    if (!window.confirm(`${label} 옵션을 삭제할까요?`)) return;
+    setSavingDepartment(true);
+    try {
+      await saveDepartmentOptions(departmentOptions.filter((option) => option !== label), user?.uid);
+      toast.success('프로젝트 선택값을 삭제했습니다.');
+      if (editingDepartment === label) resetDepartmentDraft();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '프로젝트 선택값 삭제에 실패했습니다.');
+    } finally {
+      setSavingDepartment(false);
+    }
+  };
+
+  const handleMoveDepartment = async (label: string, direction: -1 | 1) => {
+    const index = departmentOptions.indexOf(label);
+    const nextIndex = index + direction;
+    if (index < 0 || nextIndex < 0 || nextIndex >= departmentOptions.length) return;
+    const nextOptions = [...departmentOptions];
+    [nextOptions[index], nextOptions[nextIndex]] = [nextOptions[nextIndex], nextOptions[index]];
+    setSavingDepartment(true);
+    try {
+      await saveDepartmentOptions(nextOptions, user?.uid);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '프로젝트 선택값 순서 저장에 실패했습니다.');
+    } finally {
+      setSavingDepartment(false);
+    }
+  };
+
+  const renderProjectSelectionValuesCard = () => (
+    <Card className="overflow-hidden border-slate-200 bg-white shadow-sm">
+      <CardHeader className="border-b border-slate-100 pb-4">
+        <div className="flex items-center justify-between gap-3">
+          <CardTitle className="text-base">프로젝트 선택값</CardTitle>
+          <Badge variant="outline" className="border-cyan-200 bg-accent text-[11px] text-accent-foreground">
+            {departmentOptions.length}개
+          </Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4 pt-5">
+        <div className="grid gap-3 lg:grid-cols-[1fr_auto_auto] lg:items-end">
+          <div>
+            <Label className="text-xs">새 담당조직(CIC)</Label>
+            <Input
+              value={departmentDraft}
+              onChange={(event) => setDepartmentDraft(event.target.value)}
+              placeholder="담당조직(CIC)"
+              className="mt-1 border-slate-300"
+            />
+          </div>
+          <Button type="button" onClick={() => void handleSaveDepartment()} disabled={savingDepartment} className="gap-2">
+            <Save className="h-4 w-4" /> {editingDepartment ? '수정 저장' : '추가'}
+          </Button>
+          <Button type="button" variant="outline" onClick={resetDepartmentDraft}>
+            초기화
+          </Button>
+        </div>
+        <div className="overflow-hidden rounded-lg border border-slate-200">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-[72px]">순서</TableHead>
+                <TableHead>담당조직(CIC)</TableHead>
+                <TableHead className="w-[180px] text-right">관리</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {departmentOptions.length ? departmentOptions.map((label, index) => (
+                <TableRow key={label}>
+                  <TableCell className="text-xs tabular-nums text-slate-500">{index + 1}</TableCell>
+                  <TableCell className="font-medium">{label}</TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        aria-label={`${label} 위로 이동`}
+                        disabled={index === 0 || savingDepartment}
+                        onClick={() => void handleMoveDepartment(label, -1)}
+                      >
+                        <ArrowUp className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        aria-label={`${label} 아래로 이동`}
+                        disabled={index === departmentOptions.length - 1 || savingDepartment}
+                        onClick={() => void handleMoveDepartment(label, 1)}
+                      >
+                        <ArrowDown className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setDepartmentDraft(label);
+                          setEditingDepartment(label);
+                        }}
+                      >
+                        수정
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="border-slate-300 text-red-700 hover:text-red-700"
+                        aria-label={`${label} 삭제`}
+                        onClick={() => void handleRemoveDepartment(label)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              )) : (
+                <TableRow>
+                  <TableCell colSpan={3} className="py-6 text-center text-sm text-slate-500">
+                    등록된 담당조직이 없습니다
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      </CardContent>
+    </Card>
+  );
 
   const handleSaveMember = async () => {
     const uid = memberDraft.uid.trim();
@@ -147,51 +325,60 @@ export function SettingsPage() {
     <div className="space-y-5">
       <PageHeader
         icon={Settings}
-        iconGradient="linear-gradient(135deg, #0891b2, #0891b2)"
+        iconGradient="linear-gradient(135deg, #001e46, #001e46)"
         title="설정"
         description="운영에 필요한 조직, 구성원, 템플릿, 권한 설정만 관리합니다"
       />
 
-      <Card className="border-slate-200/80 bg-slate-50/70">
-        <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
-          <div className="space-y-1">
-            <p className="text-[12px] font-semibold text-slate-900">운영 설정 범위</p>
-            <p className="text-[12px] leading-6 text-slate-600">
-              1차 운영 surface에서는 조직 정보, 구성원, 원장 템플릿, 데이터 마이그레이션, 권한 매트릭스만 노출합니다.
-            </p>
+      <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex min-w-0 items-center gap-3">
+            <MyscWordmark size="sm" />
+            <div className="hidden h-7 w-px bg-slate-200 sm:block" />
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-slate-900">{org.name}</p>
+              <p className="truncate text-[11px] text-slate-500">{org.id}</p>
+            </div>
           </div>
-          <Badge variant="outline" className="h-7 self-start border-slate-300 bg-white px-3 text-[11px] text-slate-700">
-            Primary Admin Settings
-          </Badge>
-        </CardContent>
-      </Card>
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+              <p className="text-[10px] font-medium text-slate-500">구성원</p>
+              <p className="text-sm font-semibold tabular-nums text-primary">{members.length}명</p>
+            </div>
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+              <p className="text-[10px] font-medium text-slate-500">담당조직</p>
+              <p className="text-sm font-semibold tabular-nums text-primary">{departmentOptions.length}개</p>
+            </div>
+          </div>
+        </div>
+      </div>
 
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList>
-          <TabsTrigger value="org" className="gap-1.5">
+        <TabsList className="w-full justify-start overflow-x-auto rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+          <TabsTrigger value="org" className="flex-none rounded-md px-3 text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
             <Building2 className="w-3.5 h-3.5" /> 조직 정보
           </TabsTrigger>
-          <TabsTrigger value="members" className="gap-1.5">
+          <TabsTrigger value="members" className="flex-none rounded-md px-3 text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
             <Users className="w-3.5 h-3.5" /> 구성원
           </TabsTrigger>
-          <TabsTrigger value="templates" className="gap-1.5">
+          <TabsTrigger value="templates" className="flex-none rounded-md px-3 text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
             <BookOpen className="w-3.5 h-3.5" /> 원장 템플릿
           </TabsTrigger>
-          <TabsTrigger value="migration" className="gap-1.5">
+          <TabsTrigger value="migration" className="flex-none rounded-md px-3 text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
             <Upload className="w-3.5 h-3.5" /> 데이터 마이그레이션
           </TabsTrigger>
-          <TabsTrigger value="permissions" className="gap-1.5">
+          <TabsTrigger value="permissions" className="flex-none rounded-md px-3 text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
             <Shield className="w-3.5 h-3.5" /> 권한 설정
           </TabsTrigger>
         </TabsList>
 
         {/* Organization */}
         <TabsContent value="org">
-          <Card>
-            <CardHeader>
+          <Card className="border-slate-200 bg-white shadow-sm">
+            <CardHeader className="border-b border-slate-100 pb-4">
               <CardTitle className="text-base">조직 정보</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-4 pt-5">
               <div>
                 <Label>조직명</Label>
                 <Input value={org.name} readOnly className="max-w-sm" />
@@ -222,71 +409,76 @@ export function SettingsPage() {
         {/* Members */}
         <TabsContent value="members">
           <div className="space-y-4">
-            <Card className="border-slate-200">
-              <CardHeader>
-                <CardTitle className="text-base">구성원 원장 추가/수정</CardTitle>
-                <p className="text-[12px] text-muted-foreground">
-                  사업 담당자 선택값은 이 원장의 UID를 저장합니다. 이미 로그인한 구성원은 Firebase UID를 사용하세요.
-                </p>
-              </CardHeader>
-              <CardContent className="grid gap-3 lg:grid-cols-[1fr_1fr_1fr_180px_auto_auto] lg:items-end">
-                <div>
-                  <Label className="text-xs">UID *</Label>
-                  <Input
-                    value={memberDraft.uid}
-                    onChange={(event) => setMemberDraft((prev) => ({ ...prev, uid: event.target.value }))}
-                    placeholder="Firebase UID"
-                    className="mt-1 border-slate-300"
-                  />
-                </div>
-                <div>
-                  <Label className="text-xs">이름 *</Label>
-                  <Input
-                    value={memberDraft.name}
-                    onChange={(event) => setMemberDraft((prev) => ({ ...prev, name: event.target.value }))}
-                    placeholder="홍길동(닉네임)"
-                    className="mt-1 border-slate-300"
-                  />
-                </div>
-                <div>
-                  <Label className="text-xs">이메일 *</Label>
-                  <Input
-                    value={memberDraft.email}
-                    onChange={(event) => setMemberDraft((prev) => ({ ...prev, email: event.target.value }))}
-                    placeholder="name@mysc.co.kr"
-                    className="mt-1 border-slate-300"
-                  />
-                </div>
-                <div>
-                  <Label className="text-xs">역할</Label>
-                  <Select value={memberDraft.role} onValueChange={(value) => setMemberDraft((prev) => ({ ...prev, role: value as DisplayRole }))}>
-                    <SelectTrigger className="mt-1 h-9 border-slate-300 bg-white">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {DISPLAY_ROLES.map((role) => (
-                        <SelectItem key={role} value={role}>{ROLE_META[role]?.label ?? role}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <Button type="button" onClick={() => void handleSaveMember()} disabled={savingMember} className="gap-2">
-                  <Save className="h-4 w-4" /> 저장
-                </Button>
-                <Button type="button" variant="outline" onClick={resetMemberDraft}>
-                  초기화
-                </Button>
-              </CardContent>
-            </Card>
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
+              {renderProjectSelectionValuesCard()}
 
-            <Card className="border-slate-200">
-              <CardHeader>
+              <Card className="overflow-hidden border-slate-200 bg-white shadow-sm">
+                <CardHeader className="border-b border-slate-100 pb-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <CardTitle className="text-base">구성원 원장 추가/수정</CardTitle>
+                    <Badge variant="outline" className="border-slate-300 text-[11px] text-slate-700">
+                      {memberDraft.uid ? '수정' : '신규'}
+                    </Badge>
+                  </div>
+                </CardHeader>
+                <CardContent className="grid gap-3 pt-5 md:grid-cols-2 xl:grid-cols-1">
+                  <div>
+                    <Label className="text-xs">UID *</Label>
+                    <Input
+                      value={memberDraft.uid}
+                      onChange={(event) => setMemberDraft((prev) => ({ ...prev, uid: event.target.value }))}
+                      placeholder="Firebase UID"
+                      className="mt-1 border-slate-300"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">이름 *</Label>
+                    <Input
+                      value={memberDraft.name}
+                      onChange={(event) => setMemberDraft((prev) => ({ ...prev, name: event.target.value }))}
+                      placeholder="홍길동(닉네임)"
+                      className="mt-1 border-slate-300"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">이메일 *</Label>
+                    <Input
+                      value={memberDraft.email}
+                      onChange={(event) => setMemberDraft((prev) => ({ ...prev, email: event.target.value }))}
+                      placeholder="name@mysc.co.kr"
+                      className="mt-1 border-slate-300"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">역할</Label>
+                    <Select value={memberDraft.role} onValueChange={(value) => setMemberDraft((prev) => ({ ...prev, role: value as DisplayRole }))}>
+                      <SelectTrigger className="mt-1 h-9 border-slate-300 bg-white">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {DISPLAY_ROLES.map((role) => (
+                          <SelectItem key={role} value={role}>{ROLE_META[role]?.label ?? role}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex gap-2 md:col-span-2 xl:col-span-1">
+                    <Button type="button" onClick={() => void handleSaveMember()} disabled={savingMember} className="flex-1 gap-2">
+                      <Save className="h-4 w-4" /> 저장
+                    </Button>
+                    <Button type="button" variant="outline" onClick={resetMemberDraft}>
+                      초기화
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            <Card className="overflow-hidden border-slate-200 bg-white shadow-sm">
+              <CardHeader className="border-b border-slate-100 pb-4">
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                   <div>
                     <CardTitle className="text-base">구성원 원장 ({members.length}명)</CardTitle>
-                    <p className="mt-1 text-[12px] text-muted-foreground">
-                      실제 데이터는 Firestore orgs/{org.id}/members에 저장됩니다.
-                    </p>
                   </div>
                   <div className="relative w-full lg:w-[320px]">
                     <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
@@ -299,7 +491,7 @@ export function SettingsPage() {
                   </div>
                 </div>
               </CardHeader>
-              <CardContent>
+              <CardContent className="pt-5">
               <Table>
                 <TableHeader>
                   <TableRow>

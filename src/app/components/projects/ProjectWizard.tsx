@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router';
 import { Save } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAppStore } from '../../data/store';
+import { useProjectDepartmentSettings } from '../../data/project-department-settings';
 import type { Project, ProjectPhase } from '../../data/types';
 import { useFirebase } from '../../lib/firebase-context';
 import { uploadProjectRequestContractFile } from '../../platform/project-contract-upload';
@@ -13,7 +14,7 @@ import {
   type ProjectEditorDraft,
 } from '../../platform/project-editor';
 import { buildProjectOwnerAssignmentPatches } from '../../platform/project-owner-assignment';
-import { resolveProjectCic } from '../../platform/project-cic';
+import { normalizeProjectDepartment, resolveProjectCic } from '../../platform/project-cic';
 import { ProjectEditorWizard } from './ProjectEditorWizard';
 
 interface ProjectWizardProps {
@@ -73,7 +74,7 @@ function createProjectFromDraft(
     settlementGuide: draft.settlementGuide,
     contractDocument: draft.contractDocument,
     contractAnalysis: null,
-    department: draft.department,
+    department: normalizeProjectDepartment(draft.department),
     cic: resolveProjectCic({ department: draft.department }),
     teamName: draft.teamName,
     managerId: draft.registeredById,
@@ -98,6 +99,7 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
   const navigate = useNavigate();
   const { addProject, updateProject, upsertMember, members, currentUser } = useAppStore();
   const { orgId } = useFirebase();
+  const { options: departmentOptions } = useProjectDepartmentSettings();
   const [busyActionId, setBusyActionId] = useState<string | null>(null);
 
   const initialDraft = useMemo(
@@ -213,6 +215,7 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
       initialDraft={initialDraft}
       draftKey={`admin-${editProject?.id || 'new'}-${editProject?.updatedAt || initialPhase}`}
       members={members}
+      departmentOptions={departmentOptions}
       actions={editProject ? [
         { id: 'save', label: '수정 저장', icon: Save },
       ] : [

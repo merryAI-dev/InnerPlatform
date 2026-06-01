@@ -4,6 +4,7 @@ import { AlertTriangle, Loader2, Save, SendHorizontal } from 'lucide-react';
 import { collection, doc, limit, onSnapshot, orderBy, query, setDoc, where } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { useAuth } from '../../data/auth-store';
+import { useProjectDepartmentSettings } from '../../data/project-department-settings';
 import { usePortalStore } from '../../data/portal-store';
 import type { Project, ProjectRequest, ProjectRequestDraft, ProjectRequestDraftStatus } from '../../data/types';
 import { getOrgCollectionPath, getOrgDocumentPath } from '../../lib/firebase';
@@ -69,6 +70,7 @@ export function PortalProjectEdit() {
   const { user: authUser } = useAuth();
   const { db, isOnline, orgId } = useFirebase();
   const { members, myProject } = usePortalStore();
+  const { options: departmentOptions } = useProjectDepartmentSettings();
   const [requestDoc, setRequestDoc] = useState<ProjectRequest | null>(null);
   const [busyActionId, setBusyActionId] = useState<string | null>(null);
   const [resubmitComment, setResubmitComment] = useState('');
@@ -261,6 +263,7 @@ export function PortalProjectEdit() {
       initialDraft={initialDraft}
       draftKey={`portal-edit-${myProject.id}-${requestDoc?.updatedAt || myProject.updatedAt}`}
       members={members}
+      departmentOptions={departmentOptions}
       autosave={autosaveConfig}
       actions={[
         { id: 'save', label: '저장', icon: Save },

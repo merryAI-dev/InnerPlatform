@@ -28,12 +28,17 @@ describe('CashflowProjectSheet actual sync flow', () => {
     expect(cashflowProjectSheetSource).not.toContain('저장할 변경사항이 없습니다.');
   });
 
-  it('persists projection/actual copy through the canonical week upsert path', () => {
-    expect(cashflowProjectSheetSource).toContain('copyMonthValues');
-    expect(cashflowProjectSheetSource).toContain('setCopyingMode(direction)');
+  it('removes projection/actual copy buttons while keeping canonical week saves', () => {
+    expect(cashflowProjectSheetSource).not.toContain('copyMonthValues');
+    expect(cashflowProjectSheetSource).not.toContain('setCopyingMode(direction)');
+    expect(cashflowProjectSheetSource).not.toContain('Projection → Actual');
+    expect(cashflowProjectSheetSource).not.toContain('Actual → Projection');
     expect(cashflowProjectSheetSource).toContain('await upsertWeekAmounts({');
-    expect(cashflowProjectSheetSource).toContain('서버에 복사했습니다');
-    expect(cashflowProjectSheetSource).not.toContain('초안으로 복사했습니다');
+  });
+
+  it('formats persisted input values for display without changing numeric save parsing', () => {
+    expect(cashflowProjectSheetSource).toContain('formatAmountInput(String(persisted.amount))');
+    expect(cashflowProjectSheetSource).toContain('parseAmount(drafts[cellKey])');
   });
 
   it('shows projection 작성 from projectionUpdated on the project sheet header', () => {

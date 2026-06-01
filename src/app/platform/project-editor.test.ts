@@ -327,6 +327,29 @@ describe('project editor draft mapping', () => {
     expect(patch.cic).toBe('CIC2');
   });
 
+  it('normalizes legacy spaced CIC labels before saving 담당조직', () => {
+    const existingProject = {
+      ...baseProject,
+      cic: 'CIC1',
+      department: 'CIC1',
+    };
+    const draft = createProjectEditorDraft({
+      ...buildProjectEditorDraftFromProject(existingProject),
+      department: 'CIC 2',
+    });
+
+    const patch = buildProjectEditorProjectPatch(draft, {
+      baseProject: existingProject,
+      mode: 'admin',
+      actorId: 'admin-1',
+      actorName: '관리자',
+      now: '2026-05-20T00:00:00.000Z',
+    });
+
+    expect(patch.department).toBe('CIC2');
+    expect(patch.cic).toBe('CIC2');
+  });
+
   it('keeps zero-won payment split values visible in deterministic review changes', () => {
     const draft = createProjectEditorDraft({
       ...buildProjectEditorDraftFromProject({
