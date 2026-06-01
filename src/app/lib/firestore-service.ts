@@ -186,8 +186,8 @@ export function listenMembers(
 
 export function buildMemberDirectoryList(docs: MemberDirectoryDocInput[]): OrgMember[] {
   const byIdentity = new Map<string, {
-    canonical?: Record<string, unknown>;
-    legacy?: Record<string, unknown>;
+    canonical: Record<string, unknown>[];
+    legacy: Record<string, unknown>[];
   }>();
 
   docs.forEach((docInput) => {
@@ -196,18 +196,20 @@ export function buildMemberDirectoryList(docs: MemberDirectoryDocInput[]): OrgMe
     const email = normalizeEmail(typeof raw.email === 'string' ? raw.email : '');
     const legacyId = buildLegacyMemberDocId(email);
     const key = email ? `email:${email}` : `uid:${uid}`;
-    const bucket = byIdentity.get(key) || {};
+    const bucket = byIdentity.get(key) || { canonical: [], legacy: [] };
     const record = { ...raw, uid };
     if (legacyId && docInput.id === legacyId && legacyId !== uid) {
-      bucket.legacy = record;
+      bucket.legacy.push(record);
     } else {
-      bucket.canonical = record;
+      bucket.canonical.push(record);
     }
     byIdentity.set(key, bucket);
   });
 
   const list: OrgMember[] = Array.from(byIdentity.values()).map(({ canonical, legacy }) => {
-    const merged = mergeMemberRecordSources(canonical, legacy) || {};
+    const canonicalRecord = mergeMemberRecordsByPreference(canonical);
+    const legacyRecord = mergeMemberRecordsByPreference(legacy);
+    const merged = mergeMemberRecordSources(canonicalRecord, legacyRecord) || {};
     return {
       uid: String(merged.uid || '').trim(),
       name: String(merged.name || ''),
@@ -219,6 +221,47 @@ export function buildMemberDirectoryList(docs: MemberDirectoryDocInput[]): OrgMe
 
   list.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'ko'));
   return list;
+}
+
+function mergeMemberRecordsByPreference(records: Record<string, unknown>[]): Record<string, unknown> | undefined {
+  const ranked = [...records].sort(compareMemberRecordPreference);
+  if (!ranked.length) return undefined;
+
+  return ranked.slice(1).reduce<Record<string, unknown>>((merged, record) => (
+    mergeMemberRecordSources(merged, record) || merged
+  ), ranked[0]);
+}
+
+function compareMemberRecordPreference(a: Record<string, unknown>, b: Record<string, unknown>): number {
+  return memberRecordScore(b) - memberRecordScore(a);
+}
+
+function memberRecordScore(record: Record<string, unknown>): number {
+  const status = String(record.status || '').trim().toUpperCase();
+  const activeScore = status === 'ACTIVE' ? 1000 : status === 'INACTIVE' || status === 'DELETED' ? -1000 : 0;
+  const completenessScore = ['uid', 'name', 'email', 'role'].reduce((score, field) => (
+    typeof record[field] === 'string' && String(record[field]).trim() ? score + 10 : score
+  ), 0);
+  const recencyScore = Math.max(
+    getTimestampScore(record.updatedAt),
+    getTimestampScore(record.lastLoginAt),
+    getTimestampScore(record.createdAt),
+  );
+
+  return activeScore + completenessScore + recencyScore;
+}
+
+function getTimestampScore(value: unknown): number {
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed / 1_000_000_000 : 0;
+  }
+  if (typeof value === 'object' && value !== null) {
+    const maybeDate = (value as { toDate?: () => Date }).toDate?.();
+    const millis = maybeDate?.getTime?.();
+    return typeof millis === 'number' && Number.isFinite(millis) ? millis / 1_000_000_000 : 0;
+  }
+  return 0;
 }
 
 export async function upsertMember(

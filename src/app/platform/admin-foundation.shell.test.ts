@@ -20,8 +20,8 @@ describe('admin monitoring foundation shell contract', () => {
     expect(navConfigSource).toContain("label: '프로젝트 등록/승인'");
     expect(navConfigSource).toContain("to: '/users'");
     expect(navConfigSource).toContain("label: '사용자 관리'");
-    expect(navConfigSource).toContain("to: '/settings?tab=org'");
-    expect(navConfigSource).toContain("label: '조직 정보'");
+    expect(navConfigSource).not.toContain("to: '/settings?tab=org'");
+    expect(navConfigSource).not.toContain("label: '조직 정보'");
     expect(navConfigSource).toContain("to: '/settings?tab=members'");
     expect(navConfigSource).toContain("label: '멤버DB'");
     expect(navConfigSource).toContain("to: '/settings?tab=tenants'");
