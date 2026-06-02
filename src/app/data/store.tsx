@@ -32,13 +32,8 @@ import { featureFlags } from '../config/feature-flags';
 import { useAuth } from './auth-store';
 import {
   listenMembers,
-  listenPartEntries,
   listenProjects,
-  listenLedgers,
-  listenTransactions,
-  listenComments,
-  listenEvidences,
-  listenAuditLogs,
+  readOrgCollection,
   addPartEntry,
   updatePartEntry,
   deletePartEntry,
@@ -122,6 +117,36 @@ if (!_g.__MYSC_APP_CTX__) {
   _g.__MYSC_APP_CTX__ = createContext<(AppState & AppActions) | null>(null);
 }
 const AppContext: React.Context<(AppState & AppActions) | null> = _g.__MYSC_APP_CTX__;
+
+function upsertLocalItem<T extends { id: string }>(items: T[], item: T): T[] {
+  const existingIndex = items.findIndex((existing) => existing.id === item.id);
+  if (existingIndex === -1) return [...items, item];
+  const next = [...items];
+  next[existingIndex] = { ...next[existingIndex], ...item };
+  return next;
+}
+
+function updateLocalItem<T extends { id: string }>(items: T[], id: string, updates: Partial<T>): T[] {
+  return items.map((item) => (item.id === id ? { ...item, ...updates } : item));
+}
+
+function buildTransactionStateLocalPatch(
+  newState: TransactionState,
+  actorId: string,
+  reason?: string,
+): Partial<Transaction> {
+  const updates: Partial<Transaction> = { state: newState };
+  if (newState === 'SUBMITTED') {
+    updates.submittedBy = actorId;
+    updates.submittedAt = new Date().toISOString();
+  } else if (newState === 'APPROVED') {
+    updates.approvedBy = actorId;
+    updates.approvedAt = new Date().toISOString();
+  } else if (newState === 'REJECTED') {
+    updates.rejectedReason = reason || '';
+  }
+  return updates;
+}
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const { db, isOnline, orgId } = useFirebase();
@@ -229,6 +254,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     unsubsRef.current.forEach((unsub) => unsub());
     unsubsRef.current = [];
+    let cancelled = false;
 
     if (!firestoreEnabled || !db) {
       setDataSource('local');
@@ -240,7 +266,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setAuditLogs(usesLocalSeedData ? AUDIT_LOGS : []);
       setParticipationEntries(usesLocalSeedData ? PARTICIPATION_ENTRIES : []);
       setLocalMembers(usesLocalSeedData ? ORG_MEMBERS as Array<OrgMember & Record<string, unknown>> : []);
-      return;
+      return () => {
+        cancelled = true;
+      };
     }
 
     setDataSource('firestore');
@@ -251,34 +279,49 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
 
     unsubsRef.current.push(
-      listenPartEntries(db, orgId, (entries) => setParticipationEntries(entries)),
-    );
-
-    unsubsRef.current.push(
       listenProjects(db, orgId, (projs) => setProjects(projs as Project[])),
     );
 
-    unsubsRef.current.push(
-      listenLedgers(db, orgId, (ldgs) => setLedgers(ldgs as Ledger[])),
-    );
-
-    unsubsRef.current.push(
-      listenTransactions(db, orgId, (txs) => setTransactions(txs as Transaction[])),
-    );
-
-    unsubsRef.current.push(
-      listenComments(db, orgId, (cmts) => setComments(cmts as Comment[])),
-    );
-
-    unsubsRef.current.push(
-      listenEvidences(db, orgId, (evs) => setEvidences(evs as Evidence[])),
-    );
-
-    unsubsRef.current.push(
-      listenAuditLogs(db, orgId, (logs) => setAuditLogs(logs as AuditLog[])),
-    );
+    Promise.all([
+      readOrgCollection(db, orgId, 'ledgers'),
+      readOrgCollection(db, orgId, 'transactions'),
+      readOrgCollection(db, orgId, 'comments'),
+      readOrgCollection(db, orgId, 'evidences'),
+      readOrgCollection(db, orgId, 'auditLogs'),
+      readOrgCollection(db, orgId, 'partEntries'),
+    ]).then(([
+      nextLedgers,
+      nextTransactions,
+      nextComments,
+      nextEvidences,
+      nextAuditLogs,
+      nextParticipationEntries,
+    ]) => {
+      if (cancelled) return;
+      setLedgers(nextLedgers as Ledger[]);
+      setTransactions(nextTransactions as Transaction[]);
+      setComments(nextComments as Comment[]);
+      setEvidences(nextEvidences as Evidence[]);
+      setAuditLogs((nextAuditLogs as AuditLog[]).sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || '')));
+      setParticipationEntries((nextParticipationEntries as ParticipationEntry[]).sort((a, b) => a.id.localeCompare(b.id)));
+    }).catch((error) => {
+      reportError(error, {
+        message: '[AppStore] Firestore bulk fetch failed:',
+        options: {
+          level: 'error',
+          tags: {
+            surface: 'app_store',
+            action: 'bulk_fetch',
+          },
+          extra: {
+            orgId,
+          },
+        },
+      });
+    });
 
     return () => {
+      cancelled = true;
       unsubsRef.current.forEach((unsub) => unsub());
       unsubsRef.current = [];
     };
@@ -505,18 +548,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
           ledger: l as any,
         });
 
-        if (writeStrategy.mirrorRemoteWritesLocally) {
-          setLedgers((prev) => [...prev, l]);
-        }
+        setLedgers((prev) => upsertLocalItem(prev, l));
         return;
       }
 
       if (writeStrategy.target === 'firestore' && db) {
         await upsertLedger(db, orgId, l, auditActor);
+        setLedgers((prev) => upsertLocalItem(prev, l));
         return;
       }
 
-      setLedgers((prev) => [...prev, l]);
+      setLedgers((prev) => upsertLocalItem(prev, l));
     });
   }, [runStoreMutation, writeStrategy, orgId, bffActor, db, auditActor]);
 
@@ -529,18 +571,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
           transaction: t as any,
         });
 
-        if (writeStrategy.mirrorRemoteWritesLocally) {
-          setTransactions((prev) => [...prev, t]);
-        }
+        setTransactions((prev) => upsertLocalItem(prev, t));
         return;
       }
 
       if (writeStrategy.target === 'firestore' && db) {
         await upsertTransaction(db, orgId, t, auditActor);
+        setTransactions((prev) => upsertLocalItem(prev, t));
         return;
       }
 
-      setTransactions((prev) => [...prev, t]);
+      setTransactions((prev) => upsertLocalItem(prev, t));
     });
   }, [runStoreMutation, writeStrategy, orgId, bffActor, db, auditActor]);
 
@@ -560,9 +601,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           });
         }
 
-        if (writeStrategy.mirrorRemoteWritesLocally) {
-          setTransactions((prev) => prev.map((t) => (t.id === id ? { ...t, ...updates } : t)));
-        }
+        setTransactions((prev) => updateLocalItem(prev, id, updates));
         return;
       }
 
@@ -571,10 +610,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (existing) {
           await upsertTransaction(db, orgId, { ...existing, ...updates }, auditActor);
         }
+        setTransactions((prev) => updateLocalItem(prev, id, updates));
         return;
       }
 
-      setTransactions((prev) => prev.map((t) => (t.id === id ? { ...t, ...updates } : t)));
+      setTransactions((prev) => updateLocalItem(prev, id, updates));
     });
   }, [runStoreMutation, writeStrategy, transactions, orgId, bffActor, db, auditActor]);
 
@@ -591,44 +631,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
           reason,
         });
 
-        if (writeStrategy.mirrorRemoteWritesLocally) {
-          setTransactions((prev) => prev.map((t) => {
-            if (t.id !== id) return t;
-            const updates: Partial<Transaction> = { state: newState };
-            if (newState === 'SUBMITTED') {
-              updates.submittedBy = currentUser.uid;
-              updates.submittedAt = new Date().toISOString();
-            } else if (newState === 'APPROVED') {
-              updates.approvedBy = currentUser.uid;
-              updates.approvedAt = new Date().toISOString();
-            } else if (newState === 'REJECTED') {
-              updates.rejectedReason = reason || '';
-            }
-            return { ...t, ...updates };
-          }));
-        }
+        setTransactions((prev) => updateLocalItem(prev, id, buildTransactionStateLocalPatch(newState, currentUser.uid, reason)));
         return;
       }
 
       if (writeStrategy.target === 'firestore' && db) {
         await changeTransactionStateFS(db, orgId, id, newState, auditActor, reason);
+        setTransactions((prev) => updateLocalItem(prev, id, buildTransactionStateLocalPatch(newState, currentUser.uid, reason)));
         return;
       }
 
-      setTransactions((prev) => prev.map((t) => {
-        if (t.id !== id) return t;
-        const updates: Partial<Transaction> = { state: newState };
-        if (newState === 'SUBMITTED') {
-          updates.submittedBy = currentUser.uid;
-          updates.submittedAt = new Date().toISOString();
-        } else if (newState === 'APPROVED') {
-          updates.approvedBy = currentUser.uid;
-          updates.approvedAt = new Date().toISOString();
-        } else if (newState === 'REJECTED') {
-          updates.rejectedReason = reason || '';
-        }
-        return { ...t, ...updates };
-      }));
+      setTransactions((prev) => updateLocalItem(prev, id, buildTransactionStateLocalPatch(newState, currentUser.uid, reason)));
     });
   }, [runStoreMutation, writeStrategy, transactions, orgId, bffActor, db, currentUser.uid, auditActor]);
 
@@ -646,18 +659,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
           },
         });
 
-        if (writeStrategy.mirrorRemoteWritesLocally) {
-          setComments((prev) => [...prev, c]);
-        }
+        setComments((prev) => upsertLocalItem(prev, c));
         return;
       }
 
       if (writeStrategy.target === 'firestore' && db) {
         await addCommentFS(db, orgId, c, auditActor);
+        setComments((prev) => upsertLocalItem(prev, c));
         return;
       }
 
-      setComments((prev) => [...prev, c]);
+      setComments((prev) => upsertLocalItem(prev, c));
     });
   }, [runStoreMutation, writeStrategy, orgId, bffActor, db, auditActor]);
 
@@ -678,18 +690,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
           },
         });
 
-        if (writeStrategy.mirrorRemoteWritesLocally) {
-          setEvidences((prev) => [...prev, e]);
-        }
+        setEvidences((prev) => upsertLocalItem(prev, e));
         return;
       }
 
       if (writeStrategy.target === 'firestore' && db) {
         await addEvidenceFS(db, orgId, e, auditActor);
+        setEvidences((prev) => upsertLocalItem(prev, e));
         return;
       }
 
-      setEvidences((prev) => [...prev, e]);
+      setEvidences((prev) => upsertLocalItem(prev, e));
     });
   }, [runStoreMutation, writeStrategy, orgId, bffActor, db, auditActor]);
 
@@ -697,9 +708,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await runStoreMutation('addParticipation', async () => {
       if (firestoreEnabled && db) {
         await addPartEntry(db, orgId, pe, auditActor);
+        setParticipationEntries((prev) => upsertLocalItem(prev, pe));
         return;
       }
-      setParticipationEntries((prev) => [...prev, pe]);
+      setParticipationEntries((prev) => upsertLocalItem(prev, pe));
     });
   }, [runStoreMutation, firestoreEnabled, db, orgId, auditActor]);
 
@@ -707,9 +719,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await runStoreMutation('updateParticipation', async () => {
       if (firestoreEnabled && db) {
         await updatePartEntry(db, orgId, id, updates, auditActor);
+        setParticipationEntries((prev) => updateLocalItem(prev, id, updates));
         return;
       }
-      setParticipationEntries((prev) => prev.map((p) => (p.id === id ? { ...p, ...updates } : p)));
+      setParticipationEntries((prev) => updateLocalItem(prev, id, updates));
     });
   }, [runStoreMutation, firestoreEnabled, db, orgId, auditActor]);
 
@@ -717,6 +730,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await runStoreMutation('removeParticipation', async () => {
       if (firestoreEnabled && db) {
         await deletePartEntry(db, orgId, id, auditActor);
+        setParticipationEntries((prev) => prev.filter((p) => p.id !== id));
         return;
       }
       setParticipationEntries((prev) => prev.filter((p) => p.id !== id));

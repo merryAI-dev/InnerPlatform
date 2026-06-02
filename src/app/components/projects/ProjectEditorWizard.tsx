@@ -38,6 +38,7 @@ import {
   type AccountType,
   type Basis,
   type OrgMember,
+  type FileAttachment,
   type ProjectCurrency,
   type ProjectFinancialInputFlags,
   type ProjectFundInputMode,
@@ -58,6 +59,11 @@ import {
   parseProjectAmountInput,
 } from '../../platform/project-contract-amount';
 import { buildContractDocumentEditPolicy } from '../../platform/project-contract-document-policy';
+import {
+  PROJECT_REQUEST_DOCUMENT_UPLOAD_MAX_SIZE_BYTES,
+  PROJECT_REQUEST_DOCUMENT_UPLOAD_MAX_SIZE_LABEL,
+  type ProjectRequestDocumentKind,
+} from '../../platform/project-contract-upload';
 import { formatProfitRatePercentInput } from '../../platform/project-financials';
 import { createProjectEditorDraft, type ProjectEditorDraft, type ProjectEditorMode } from '../../platform/project-editor';
 import { normalizeProjectDepartment } from '../../platform/project-cic';
@@ -119,6 +125,10 @@ interface ProjectEditorWizardProps {
     contractDocument: ProjectEditorDraft['contractDocument'];
     contractAnalysis: ProjectRequestContractAnalysis | null;
   }>;
+  onProjectDocumentFileUpload?: (input: { kind: ProjectRequestDocumentKind; file: File }) => Promise<{
+    document: FileAttachment;
+    contractAnalysis: ProjectRequestContractAnalysis | null;
+  }>;
   contractAnalysisMergeMode?: 'fill-empty' | 'none';
   canRemoveContractDocument?: boolean;
   autosave?: {
@@ -131,11 +141,20 @@ interface ProjectEditorWizardProps {
   onSubmit: (draft: ProjectEditorDraft, actionId: string) => void | Promise<void>;
 }
 
-const MAX_CONTRACT_UPLOAD_SIZE_BYTES = 4 * 1024 * 1024;
-const MAX_CONTRACT_UPLOAD_SIZE_LABEL = '4MB';
 const PROJECT_EDITOR_AUTOSAVE_SCHEMA_VERSION = 1;
 
 type ContractUploadState = 'idle' | 'extracting' | 'ready' | 'error';
+const PROJECT_DOCUMENT_KINDS: ProjectRequestDocumentKind[] = ['contract', 'quote', 'proposal'];
+const PROJECT_DOCUMENT_LABELS: Record<ProjectRequestDocumentKind, string> = {
+  contract: '계약서 PDF',
+  quote: '견적서 PDF',
+  proposal: '제안서 PDF',
+};
+const PROJECT_DOCUMENT_BUTTON_LABELS: Record<ProjectRequestDocumentKind, string> = {
+  contract: '계약서',
+  quote: '견적서',
+  proposal: '제안서',
+};
 type AutosaveState = 'idle' | 'saving' | 'saved' | 'error';
 type StoredProjectEditorDraft = {
   schemaVersion: number;
@@ -428,6 +447,7 @@ export function ProjectEditorWizard({
   actions,
   busyActionId,
   onContractFileUpload,
+  onProjectDocumentFileUpload,
   contractAnalysisMergeMode = 'fill-empty',
   canRemoveContractDocument,
   autosave,
@@ -436,13 +456,24 @@ export function ProjectEditorWizard({
 }: ProjectEditorWizardProps) {
   const [stepIndex, setStepIndex] = useState(0);
   const [draft, setDraft] = useState<ProjectEditorDraft>(() => createProjectEditorWizardDraft(initialDraft));
-  const [contractUploadState, setContractUploadState] = useState<ContractUploadState>('idle');
-  const [contractUploadError, setContractUploadError] = useState('');
+  const [documentUploadState, setDocumentUploadState] = useState<Record<ProjectRequestDocumentKind, ContractUploadState>>({
+    contract: 'idle',
+    quote: 'idle',
+    proposal: 'idle',
+  });
+  const [documentUploadError, setDocumentUploadError] = useState<Record<ProjectRequestDocumentKind, string>>({
+    contract: '',
+    quote: '',
+    proposal: '',
+  });
   const [restoreCandidate, setRestoreCandidate] = useState<StoredProjectEditorDraft | null>(null);
   const [autosaveState, setAutosaveState] = useState<AutosaveState>('idle');
   const [lastAutosavedAt, setLastAutosavedAt] = useState('');
   const [preloadWarningVisible, setPreloadWarningVisible] = useState(false);
   const contractUploadInputRef = useRef<HTMLInputElement | null>(null);
+  const quoteUploadInputRef = useRef<HTMLInputElement | null>(null);
+  const proposalUploadInputRef = useRef<HTMLInputElement | null>(null);
+  const lastResetKeyRef = useRef<string | null>(null);
   const initialDraftFingerprint = useMemo(() => JSON.stringify(createProjectEditorDraft(initialDraft)), [initialDraft]);
   const initialContractDocument = initialDraft.contractDocument ?? null;
   const initialContractAnalysis = initialDraft.contractAnalysis ?? null;
@@ -461,10 +492,13 @@ export function ProjectEditorWizard({
   });
 
   useEffect(() => {
+    const resetKey = `${draftKey}::${autosave?.key || ''}`;
+    if (lastResetKeyRef.current === resetKey) return;
+    lastResetKeyRef.current = resetKey;
     setDraft(createProjectEditorWizardDraft(initialDraft));
     setStepIndex(0);
-    setContractUploadState('idle');
-    setContractUploadError('');
+    setDocumentUploadState({ contract: 'idle', quote: 'idle', proposal: 'idle' });
+    setDocumentUploadError({ contract: '', quote: '', proposal: '' });
     setAutosaveState('idle');
     setLastAutosavedAt('');
     setPreloadWarningVisible(false);
@@ -644,50 +678,69 @@ export function ProjectEditorWizard({
     }));
   };
 
-  const handleContractDocumentSelect = async (event: ChangeEvent<HTMLInputElement>) => {
+  const getDocumentInputRef = (kind: ProjectRequestDocumentKind) => (
+    kind === 'contract' ? contractUploadInputRef : kind === 'quote' ? quoteUploadInputRef : proposalUploadInputRef
+  );
+
+  const uploadProjectDocument = async (kind: ProjectRequestDocumentKind, file: File) => {
+    if (onProjectDocumentFileUpload) {
+      return onProjectDocumentFileUpload({ kind, file });
+    }
+    if (kind === 'contract' && onContractFileUpload) {
+      const processed = await onContractFileUpload(file);
+      return {
+        document: processed.contractDocument as FileAttachment,
+        contractAnalysis: processed.contractAnalysis,
+      };
+    }
+    throw new Error(`${PROJECT_DOCUMENT_BUTTON_LABELS[kind]} 업로드를 사용할 수 없는 화면입니다.`);
+  };
+
+  const handleProjectDocumentSelect = async (kind: ProjectRequestDocumentKind, event: ChangeEvent<HTMLInputElement>) => {
     const input = event.currentTarget;
     const file = input.files?.[0];
     if (!file) return;
-    if (!onContractFileUpload) {
-      toast.error('계약서 업로드를 사용할 수 없는 화면입니다.');
-      input.value = '';
-      return;
-    }
     if (!/pdf$/i.test(file.name) && file.type !== 'application/pdf') {
-      toast.error('계약서 파일은 PDF로 업로드해 주세요.');
+      toast.error(`${PROJECT_DOCUMENT_BUTTON_LABELS[kind]} 파일은 PDF로 업로드해 주세요.`);
       input.value = '';
       return;
     }
-    if (file.size > MAX_CONTRACT_UPLOAD_SIZE_BYTES) {
-      const message = `계약서 PDF는 ${MAX_CONTRACT_UPLOAD_SIZE_LABEL} 이하만 업로드할 수 있습니다. 파일을 압축하거나 필요한 페이지만 추려 다시 시도해 주세요.`;
-      setContractUploadState('error');
-      setContractUploadError(message);
+    if (file.size > PROJECT_REQUEST_DOCUMENT_UPLOAD_MAX_SIZE_BYTES) {
+      const message = `${PROJECT_DOCUMENT_BUTTON_LABELS[kind]} PDF는 ${PROJECT_REQUEST_DOCUMENT_UPLOAD_MAX_SIZE_LABEL} 이하만 업로드할 수 있습니다.`;
+      setDocumentUploadState((prev) => ({ ...prev, [kind]: 'error' }));
+      setDocumentUploadError((prev) => ({ ...prev, [kind]: message }));
       toast.error(message);
       input.value = '';
       return;
     }
 
-    setContractUploadState('extracting');
-    setContractUploadError('');
+    setDocumentUploadState((prev) => ({ ...prev, [kind]: 'extracting' }));
+    setDocumentUploadError((prev) => ({ ...prev, [kind]: '' }));
     try {
-      const processed = await onContractFileUpload(file);
+      const processed = await uploadProjectDocument(kind, file);
       setDraft((prev) => {
-        const nextDraft = createProjectEditorWizardDraft({
+        if (kind === 'contract') {
+          const nextDraft = createProjectEditorWizardDraft({
+            ...prev,
+            contractDocument: processed.document,
+            contractAnalysis: processed.contractAnalysis,
+          });
+          return contractAnalysisMergeMode === 'none'
+            ? nextDraft
+            : mergeContractAnalysisIntoDraft(nextDraft, processed.contractAnalysis);
+        }
+        return createProjectEditorWizardDraft({
           ...prev,
-          contractDocument: processed.contractDocument,
-          contractAnalysis: processed.contractAnalysis,
+          [kind === 'quote' ? 'quoteDocument' : 'proposalDocument']: processed.document,
         });
-        return contractAnalysisMergeMode === 'none'
-          ? nextDraft
-          : mergeContractAnalysisIntoDraft(nextDraft, processed.contractAnalysis);
       });
-      setContractUploadState('ready');
-      toast.success(`계약서 PDF 업로드 및 분석 완료: ${file.name}`);
+      setDocumentUploadState((prev) => ({ ...prev, [kind]: 'ready' }));
+      toast.success(`${PROJECT_DOCUMENT_BUTTON_LABELS[kind]} PDF 업로드 완료: ${file.name}`);
     } catch (error) {
-      console.error('[ProjectEditorWizard] contract upload failed:', error);
-      const message = error instanceof Error ? error.message : '계약서 업로드에 실패했습니다.';
-      setContractUploadState('error');
-      setContractUploadError(message);
+      console.error(`[ProjectEditorWizard] ${kind} upload failed:`, error);
+      const message = error instanceof Error ? error.message : `${PROJECT_DOCUMENT_BUTTON_LABELS[kind]} 업로드에 실패했습니다.`;
+      setDocumentUploadState((prev) => ({ ...prev, [kind]: 'error' }));
+      setDocumentUploadError((prev) => ({ ...prev, [kind]: message }));
       toast.error(message);
     } finally {
       input.value = '';
@@ -704,8 +757,17 @@ export function ProjectEditorWizard({
         ? initialContractAnalysis
         : null,
     }));
-    setContractUploadState('idle');
-    setContractUploadError('');
+    setDocumentUploadState((prev) => ({ ...prev, contract: 'idle' }));
+    setDocumentUploadError((prev) => ({ ...prev, contract: '' }));
+  };
+
+  const removeSupplementalDocument = (kind: 'quote' | 'proposal') => {
+    setDraft((prev) => createProjectEditorWizardDraft({
+      ...prev,
+      [kind === 'quote' ? 'quoteDocument' : 'proposalDocument']: null,
+    }));
+    setDocumentUploadState((prev) => ({ ...prev, [kind]: 'idle' }));
+    setDocumentUploadError((prev) => ({ ...prev, [kind]: '' }));
   };
 
   const submitIssues = useMemo(() => {
@@ -762,7 +824,7 @@ export function ProjectEditorWizard({
       </div>
 
       <div>
-        <Label className="text-xs">프로젝트명 *</Label>
+        <Label className="text-xs">프로젝트명(그룹웨어 등록명) *</Label>
         <Input
           value={draft.name}
           onChange={(event) => update('name', event.target.value.slice(0, mode === 'portal-register' ? 10 : 80))}
@@ -833,73 +895,97 @@ export function ProjectEditorWizard({
     </div>
   );
 
+  const renderProjectDocumentUpload = (kind: ProjectRequestDocumentKind) => {
+    const document = kind === 'contract'
+      ? draft.contractDocument
+      : kind === 'quote'
+        ? draft.quoteDocument
+        : draft.proposalDocument;
+    const uploadState = documentUploadState[kind];
+    const uploadError = documentUploadError[kind];
+    const inputRef = getDocumentInputRef(kind);
+    const canRemove = kind === 'contract'
+      ? contractDocumentEditPolicy.canRemoveCurrentContractDocument
+      : Boolean(document);
+    const removeLabel = kind === 'contract' ? contractDocumentEditPolicy.removeButtonLabel : '첨부 제거';
+    const remove = kind === 'contract' ? removeContractDocument : () => removeSupplementalDocument(kind);
+
+    return (
+      <div key={kind} className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <FileText className="h-4 w-4 text-slate-600" />
+              <Label className="text-xs font-semibold">{PROJECT_DOCUMENT_LABELS[kind]}</Label>
+            </div>
+            <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+              {kind === 'contract'
+                ? (contractAnalysisMergeMode === 'none'
+                    ? 'PDF를 올리면 계약서 원문과 검토용 첨부를 저장합니다. 입력값은 자동으로 바꾸지 않습니다.'
+                    : 'PDF를 올리면 계약명, 계약기간, 계약금액, 계약 대상 후보를 읽어와 빈 항목만 채웁니다.')
+                : 'PDF를 올리면 검토용 첨부로 저장합니다.'}
+            </p>
+            {document ? (
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px]">
+                <span className="max-w-full truncate font-medium text-slate-900">{document.name}</span>
+                <span className="text-muted-foreground">
+                  {(document.size / 1024 / 1024).toFixed(2)} MB
+                </span>
+                <Button asChild type="button" variant="outline" size="sm" className="h-7 px-2 text-[11px]">
+                  <a href={document.downloadURL} target="_blank" rel="noreferrer">원문 보기</a>
+                </Button>
+                {canRemove ? (
+                  <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[11px] text-rose-600" onClick={remove}>
+                    <X className="mr-1 h-3.5 w-3.5" />
+                    {removeLabel}
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
+            {kind === 'contract' && contractDocumentEditPolicy.isExistingContractDocumentLocked ? (
+              <p className="mt-2 text-[11px] text-muted-foreground">
+                기존 계약서는 관리자 화면에서만 제거할 수 있습니다.
+              </p>
+            ) : null}
+            {kind === 'contract' && draft.contractAnalysis ? (
+              <div className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-[12px] leading-5 text-slate-700">
+                <span className="font-semibold text-[#001e46]">분석 요약</span>
+                <span className="ml-2">{draft.contractAnalysis.summary}</span>
+              </div>
+            ) : null}
+            {uploadError ? (
+              <p className="mt-2 text-[11px] text-rose-600">{uploadError}</p>
+            ) : null}
+          </div>
+          <div className="shrink-0">
+            <input
+              ref={inputRef}
+              type="file"
+              accept="application/pdf,.pdf"
+              className="hidden"
+              onChange={(event) => handleProjectDocumentSelect(kind, event)}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full gap-2 lg:w-auto"
+              disabled={uploadState === 'extracting'}
+              onClick={() => inputRef.current?.click()}
+            >
+              {uploadState === 'extracting' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+              {document ? `${PROJECT_DOCUMENT_BUTTON_LABELS[kind]} 교체` : `${PROJECT_DOCUMENT_BUTTON_LABELS[kind]} 업로드`}
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const renderFinancialStep = () => (
     <div className="space-y-4">
-      {onContractFileUpload ? (
-        <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <FileText className="h-4 w-4 text-slate-600" />
-                <Label className="text-xs font-semibold">계약서 PDF</Label>
-              </div>
-              <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
-                {contractAnalysisMergeMode === 'none'
-                  ? 'PDF를 올리면 계약서 원문과 검토용 첨부를 저장합니다. 입력값은 자동으로 바꾸지 않습니다.'
-                  : 'PDF를 올리면 계약명, 계약기간, 계약금액, 계약 대상 후보를 읽어와 빈 항목만 채웁니다.'}
-              </p>
-              {draft.contractDocument ? (
-                <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px]">
-                  <span className="max-w-full truncate font-medium text-slate-900">{draft.contractDocument.name}</span>
-                  <span className="text-muted-foreground">
-                    {(draft.contractDocument.size / 1024 / 1024).toFixed(2)} MB
-                  </span>
-                  <Button asChild type="button" variant="outline" size="sm" className="h-7 px-2 text-[11px]">
-                    <a href={draft.contractDocument.downloadURL} target="_blank" rel="noreferrer">원문 보기</a>
-                  </Button>
-                  {contractDocumentEditPolicy.canRemoveCurrentContractDocument ? (
-                    <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[11px] text-rose-600" onClick={removeContractDocument}>
-                      <X className="mr-1 h-3.5 w-3.5" />
-                      {contractDocumentEditPolicy.removeButtonLabel}
-                    </Button>
-                  ) : null}
-                </div>
-              ) : null}
-              {contractDocumentEditPolicy.isExistingContractDocumentLocked ? (
-                <p className="mt-2 text-[11px] text-muted-foreground">
-                  기존 계약서는 관리자 화면에서만 제거할 수 있습니다.
-                </p>
-              ) : null}
-              {draft.contractAnalysis ? (
-                <div className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-[12px] leading-5 text-slate-700">
-                  <span className="font-semibold text-[#001e46]">분석 요약</span>
-                  <span className="ml-2">{draft.contractAnalysis.summary}</span>
-                </div>
-              ) : null}
-              {contractUploadError ? (
-                <p className="mt-2 text-[11px] text-rose-600">{contractUploadError}</p>
-              ) : null}
-            </div>
-            <div className="shrink-0">
-              <input
-                ref={contractUploadInputRef}
-                type="file"
-                accept="application/pdf,.pdf"
-                className="hidden"
-                onChange={handleContractDocumentSelect}
-              />
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full gap-2 lg:w-auto"
-                disabled={contractUploadState === 'extracting'}
-                onClick={() => contractUploadInputRef.current?.click()}
-              >
-                {contractUploadState === 'extracting' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                {draft.contractDocument ? '계약서 교체' : '계약서 업로드'}
-              </Button>
-            </div>
-          </div>
+      {onContractFileUpload || onProjectDocumentFileUpload ? (
+        <div className="space-y-3">
+          {PROJECT_DOCUMENT_KINDS.map((kind) => renderProjectDocumentUpload(kind))}
         </div>
       ) : null}
 
@@ -964,7 +1050,7 @@ export function ProjectEditorWizard({
           <Label className="text-xs">계약금액 *</Label>
           <Input
             inputMode="numeric"
-            value={hasContractAmountInput ? String(draft.contractAmount) : ''}
+            value={formatProjectAmountInput(draft.contractAmount, hasContractAmountInput)}
             onChange={(event) => updateAmount('contractAmount', event.target.value)}
             placeholder="0"
             className="mt-1 h-9 text-sm"
@@ -980,7 +1066,7 @@ export function ProjectEditorWizard({
           <Label className="text-xs">매출 부가세</Label>
           <Input
             inputMode="numeric"
-            value={hasSalesVatAmountInput ? String(draft.salesVatAmount) : ''}
+            value={formatProjectAmountInput(draft.salesVatAmount, hasSalesVatAmountInput)}
             onChange={(event) => updateAmount('salesVatAmount', event.target.value)}
             placeholder="0"
             className="mt-1 h-9 text-sm"
@@ -990,7 +1076,7 @@ export function ProjectEditorWizard({
           <Label className="text-xs">총수익</Label>
           <Input
             inputMode="numeric"
-            value={hasTotalRevenueAmountInput ? String(draft.totalRevenueAmount) : ''}
+            value={formatProjectAmountInput(draft.totalRevenueAmount, hasTotalRevenueAmountInput)}
             onChange={(event) => updateAmount('totalRevenueAmount', event.target.value)}
             placeholder="0"
             className="mt-1 h-9 text-sm"
@@ -1000,7 +1086,7 @@ export function ProjectEditorWizard({
           <Label className="text-xs">지원금</Label>
           <Input
             inputMode="numeric"
-            value={hasSupportAmountInput ? String(draft.supportAmount) : ''}
+            value={formatProjectAmountInput(draft.supportAmount, hasSupportAmountInput)}
             onChange={(event) => updateAmount('supportAmount', event.target.value)}
             placeholder="0"
             className="mt-1 h-9 text-sm"
@@ -1021,7 +1107,7 @@ export function ProjectEditorWizard({
           <Label className="text-xs">당해연도 예산</Label>
             <Input
               inputMode="numeric"
-              value={draft.budgetCurrentYear > 0 ? String(draft.budgetCurrentYear) : ''}
+              value={formatProjectAmountInput(draft.budgetCurrentYear, draft.budgetCurrentYear > 0)}
               onChange={(event) => update('budgetCurrentYear', parseProjectAmountInput(event.target.value))}
               placeholder="0"
               className="mt-1 h-9 bg-white text-sm"
@@ -1034,7 +1120,7 @@ export function ProjectEditorWizard({
             <Label className="text-xs">세금계산서 발행액</Label>
             <Input
               inputMode="numeric"
-              value={draft.taxInvoiceAmount > 0 ? String(draft.taxInvoiceAmount) : ''}
+              value={formatProjectAmountInput(draft.taxInvoiceAmount, draft.taxInvoiceAmount > 0)}
               onChange={(event) => update('taxInvoiceAmount', parseProjectAmountInput(event.target.value))}
               placeholder="0"
               className="mt-1 h-9 bg-white text-sm"
@@ -1387,6 +1473,24 @@ export function ProjectEditorWizard({
               title="계약서 원문"
               description="등록하려는 계약서가 맞는지 꼭 확인해주세요!"
               descriptionClassName="text-rose-600"
+            />
+          </div>
+        ) : null}
+        {draft.quoteDocument ? (
+          <div className="lg:col-span-2">
+            <ContractDocumentPreview
+              document={draft.quoteDocument}
+              title="견적서 원문"
+              description="첨부한 견적서가 맞는지 확인해주세요."
+            />
+          </div>
+        ) : null}
+        {draft.proposalDocument ? (
+          <div className="lg:col-span-2">
+            <ContractDocumentPreview
+              document={draft.proposalDocument}
+              title="제안서 원문"
+              description="첨부한 제안서가 맞는지 확인해주세요."
             />
           </div>
         ) : null}

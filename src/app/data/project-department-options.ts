@@ -87,8 +87,7 @@ export function resolveProjectDepartmentSettingsOptions(
     ? (settingsData as { options: unknown[] }).options
     : [];
 
-  return dedupeProjectDepartmentLabels(
-    [...rawOptions]
+  const configuredLabels = [...rawOptions]
       .filter((option) => !option || typeof option !== 'object' || (option as { active?: unknown }).active !== false)
       .sort((a, b) => {
         const aOrder = a && typeof a === 'object' ? Number((a as { sortOrder?: unknown }).sortOrder) : Number.NaN;
@@ -100,6 +99,10 @@ export function resolveProjectDepartmentSettingsOptions(
         const bLabel = b && typeof b === 'object' ? String((b as { label?: unknown }).label || '') : String(b || '');
         return aLabel.localeCompare(bLabel, 'ko');
       })
-      .map((option) => (option && typeof option === 'object' ? (option as { label?: unknown }).label : option)),
-  );
+      .map((option) => (option && typeof option === 'object' ? (option as { label?: unknown }).label : option));
+
+  return dedupeProjectDepartmentLabels([
+    ...configuredLabels,
+    ...fallbackLabels,
+  ]);
 }

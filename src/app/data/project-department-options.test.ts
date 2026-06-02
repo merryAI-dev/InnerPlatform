@@ -10,17 +10,17 @@ describe('project department settings options', () => {
     expect(resolveProjectDepartmentSettingsOptions(null)).toEqual([...PROJECT_DEPARTMENT_OPTIONS]);
   });
 
-  it('uses exactly configured options when the settings document exists', () => {
+  it('keeps configured options first while preserving canonical defaults', () => {
     expect(resolveProjectDepartmentSettingsOptions({
       options: [
         { id: 'space', label: '공간플랫폼센터', sortOrder: 1, active: true },
         { id: 'investment', label: '투자센터', sortOrder: 0, active: true },
       ],
-    })).toEqual(['투자센터', '공간플랫폼센터']);
+    }).slice(0, 2)).toEqual(['투자센터', '공간플랫폼센터']);
   });
 
-  it('does not resurrect defaults when an existing settings document is empty', () => {
-    expect(resolveProjectDepartmentSettingsOptions({ options: [] })).toEqual([]);
+  it('falls back to canonical defaults when an existing settings document is empty', () => {
+    expect(resolveProjectDepartmentSettingsOptions({ options: [] })).toEqual([...PROJECT_DEPARTMENT_OPTIONS]);
   });
 
   it('normalizes spaced CIC labels before saving settings options', () => {

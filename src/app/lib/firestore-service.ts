@@ -8,6 +8,7 @@ import {
   deleteDoc,
   doc,
   getDoc,
+  getDocs,
   onSnapshot,
   setDoc,
   updateDoc,
@@ -117,6 +118,17 @@ export function withTenantScope<T extends object>(
 
 function colRef(db: Firestore, orgId: string, key: Parameters<typeof getOrgCollectionPath>[1]) {
   return collection(db, getOrgCollectionPath(orgId, key));
+}
+
+export async function readOrgCollection(
+  db: Firestore,
+  orgId: string,
+  key: Parameters<typeof getOrgCollectionPath>[1],
+): Promise<any[]> {
+  const snap = await getDocs(colRef(db, orgId, key));
+  const list: any[] = [];
+  snap.forEach((d) => list.push(d.data()));
+  return list;
 }
 
 function docRef(

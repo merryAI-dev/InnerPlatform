@@ -169,6 +169,22 @@ describe('project editor draft mapping', () => {
       currency: 'USD',
       paymentPlan: { contract: 50_000, interim: 30_000, final: 20_000 },
       finalPaymentNote: '잔금은 검수 후 2주 이내',
+      quoteDocument: {
+        path: 'orgs/mysc/project-request-documents/u001/quote.pdf',
+        name: 'quote.pdf',
+        downloadURL: 'https://example.com/quote.pdf',
+        size: 100,
+        contentType: 'application/pdf',
+        uploadedAt: '2026-06-02T00:00:00.000Z',
+      },
+      proposalDocument: {
+        path: 'orgs/mysc/project-request-documents/u001/proposal.pdf',
+        name: 'proposal.pdf',
+        downloadURL: 'https://example.com/proposal.pdf',
+        size: 200,
+        contentType: 'application/pdf',
+        uploadedAt: '2026-06-02T00:00:00.000Z',
+      },
       contractAnalysis: { provider: 'heuristic', summary: '기존 분석값' } as never,
     });
 
@@ -181,9 +197,11 @@ describe('project editor draft mapping', () => {
       { memberName: '변민욱', memberNickname: '보람', role: '운영', participationRate: 40 },
     ]);
     expect(payload.teamMembers).toBe('김다은 (데이나) / PM / 60% / 인건비 2026-04~2026-09, 변민욱 (보람) / 운영 / 40%');
-    expect(payload.groupwareName).toBe('기후테크GW');
+    expect(payload.groupwareName).toBe(payload.name);
     expect(payload.paymentPlan).toEqual({ contract: 50_000, interim: 30_000, final: 20_000 });
     expect(payload.finalPaymentNote).toBe('잔금은 검수 후 2주 이내');
+    expect(payload.quoteDocument?.name).toBe('quote.pdf');
+    expect(payload.proposalDocument?.name).toBe('proposal.pdf');
     expect(payload.contractAnalysis).toEqual({ provider: 'heuristic', summary: '기존 분석값' });
   });
 

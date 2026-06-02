@@ -51,7 +51,7 @@ import {
   AlertDialogTitle,
 } from '../ui/alert-dialog';
 import { ImportEditor, type EvidenceUploadSelection } from './ImportEditor';
-export type { EvidenceUploadSelection, PendingQuickInsert } from './ImportEditor';
+export type { EvidenceUploadSelection } from './ImportEditor';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { SettlementWeekSection } from './SettlementWeekSection';
 import {
@@ -144,8 +144,6 @@ export interface SettlementLedgerProps {
     expenseSyncState?: 'pending' | 'review_required' | 'synced' | 'sync_failed';
     expenseReviewPendingCount?: number;
   }) => void | Promise<void>;
-  pendingQuickInsert?: import('./ImportEditor').PendingQuickInsert | null;
-  onPendingQuickInsertHandled?: () => void;
   onDeriveRows?: (
     rows: ImportRow[],
     context: SettlementDerivationContext,
@@ -202,8 +200,6 @@ export function SettlementLedgerPage({
   settlementSheetPolicy,
   basis,
   onUpdateWeeklySubmissionStatus,
-  pendingQuickInsert,
-  onPendingQuickInsertHandled,
   onDeriveRows,
   onPreviewActualSyncPayload,
   onSyncCashflowActuals,
@@ -1146,8 +1142,6 @@ export function SettlementLedgerPage({
             workflowMode={workflowMode}
             settlementSheetPolicy={settlementSheetPolicy}
             basis={basis}
-            pendingQuickInsert={pendingQuickInsert}
-            onPendingQuickInsertHandled={onPendingQuickInsertHandled}
             onToggleFullscreen={() => setEditorFullscreen((prev) => !prev)}
             onDeriveRows={onDeriveRows}
           />
@@ -1346,8 +1340,6 @@ export function SettlementLedgerPage({
           workflowMode={workflowMode}
           settlementSheetPolicy={settlementSheetPolicy}
           basis={basis}
-          pendingQuickInsert={pendingQuickInsert}
-          onPendingQuickInsertHandled={onPendingQuickInsertHandled}
           onDeriveRows={onDeriveRows}
         />
       )}

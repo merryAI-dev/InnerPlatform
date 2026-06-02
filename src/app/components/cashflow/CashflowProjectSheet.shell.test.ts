@@ -17,6 +17,7 @@ describe('CashflowProjectSheet actual sync flow', () => {
     expect(cashflowProjectSheetSource).toContain('syncProjectActualsFromExpenseSheets');
     expect(cashflowWeeksStoreSource).toContain('syncProjectCashflowActualsViaBff');
     expect(cashflowWeeksStoreSource).toContain('applyWeekAmountsToLocalWeeks');
+    expect(cashflowWeeksStoreSource).toContain('applyProjectActualSyncResultLocally');
     expect(cashflowProjectSheetSource).toContain('Actual 저장');
   });
 

@@ -228,7 +228,7 @@ const SETTLEMENT_SHEET_POLICY_PRESETS: Record<SettlementSheetPolicyPreset, Settl
     autoComputeBalance: true,
     autoComputeExpenseFromBank: true,
     autoComputeBankFromExpense: true,
-    requireCounterparty: false,
+    requireCounterparty: true,
     requireNoteForAdjustment: true,
     requireEvidenceBeforeSubmit: false,
     preserveExplicitZero: true,
@@ -241,7 +241,7 @@ const SETTLEMENT_SHEET_POLICY_PRESETS: Record<SettlementSheetPolicyPreset, Settl
     autoComputeBalance: true,
     autoComputeExpenseFromBank: false,
     autoComputeBankFromExpense: true,
-    requireCounterparty: false,
+    requireCounterparty: true,
     requireNoteForAdjustment: true,
     requireEvidenceBeforeSubmit: false,
     preserveExplicitZero: true,
@@ -254,7 +254,7 @@ const SETTLEMENT_SHEET_POLICY_PRESETS: Record<SettlementSheetPolicyPreset, Settl
     autoComputeBalance: true,
     autoComputeExpenseFromBank: false,
     autoComputeBankFromExpense: true,
-    requireCounterparty: false,
+    requireCounterparty: true,
     requireNoteForAdjustment: true,
     requireEvidenceBeforeSubmit: false,
     preserveExplicitZero: true,
@@ -566,6 +566,8 @@ export interface Project {
   financialInputFlags?: ProjectFinancialInputFlags;
   settlementGuide?: string;
   contractDocument?: FileAttachment | null;
+  quoteDocument?: FileAttachment | null;
+  proposalDocument?: FileAttachment | null;
   contractAnalysis?: ProjectRequestContractAnalysis | null;
   // 팀/담당자
   department: string;            // 담당조직
@@ -740,6 +742,8 @@ export interface ProjectRequestPayload {
   participantCondition: string;
   note: string;
   contractDocument: FileAttachment | null;
+  quoteDocument?: FileAttachment | null;
+  proposalDocument?: FileAttachment | null;
   contractAnalysis?: ProjectRequestContractAnalysis | null;
 }
 

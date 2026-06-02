@@ -69,6 +69,10 @@ interface CashflowWeekActions {
   submitWeekAsPm: (input: { projectId: string; yearMonth: string; weekNo: number }) => Promise<void>;
   closeWeekAsAdmin: (input: { projectId: string; yearMonth: string; weekNo: number }) => Promise<void>;
   syncProjectActualsFromExpenseSheets: (input: { projectId: string }) => Promise<ProjectCashflowActualSyncResult>;
+  applyProjectActualSyncResultLocally: (input: {
+    projectId: string;
+    result: Pick<ProjectCashflowActualSyncResult, 'weeks' | 'cleared' | 'updatedAt' | 'skipped'>;
+  }) => void;
   updateVarianceFlag: (input: {
     sheetId: string;
     varianceFlag: VarianceFlag | undefined;
@@ -107,6 +111,36 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
   const goNextMonth = useCallback(() => {
     setYearMonthState((prev) => addMonthsToYearMonth(prev, 1));
   }, []);
+
+  const applyProjectActualSyncResultLocally = useCallback((input: {
+    projectId: string;
+    result: Pick<ProjectCashflowActualSyncResult, 'weeks' | 'cleared' | 'updatedAt' | 'skipped'>;
+  }) => {
+    const actor = user;
+    const projectId = input.projectId.trim();
+    if (!actor || !projectId || input.result.skipped) return;
+
+    const weeksToApply = [...input.result.weeks, ...input.result.cleared];
+    if (weeksToApply.length === 0) return;
+
+    setWeeks((prev) => weeksToApply.reduce((nextWeeks, week) => {
+      const fallback = getMonthMondayWeeks(week.yearMonth).find((candidate) => candidate.weekNo === week.weekNo);
+      return applyWeekAmountsToLocalWeeks({
+        weeks: nextWeeks,
+        orgId,
+        actorUid: actor.uid,
+        actorName: actor.name,
+        projectId,
+        yearMonth: week.yearMonth,
+        weekNo: week.weekNo,
+        weekStart: week.weekStart || fallback?.weekStart || '',
+        weekEnd: week.weekEnd || fallback?.weekEnd || '',
+        mode: 'actual',
+        amounts: (week.amounts || {}) as Partial<Record<CashflowSheetLineId, number>>,
+        now: input.result.updatedAt || new Date().toISOString(),
+      });
+    }, prev));
+  }, [orgId, user]);
 
   useEffect(() => {
     unsubsRef.current.forEach((u) => u());
@@ -348,25 +382,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
       projectId,
     });
 
-    if (!result.skipped) {
-      setWeeks((prev) => [...result.weeks, ...result.cleared].reduce((nextWeeks, week) => {
-        const fallback = getMonthMondayWeeks(week.yearMonth).find((candidate) => candidate.weekNo === week.weekNo);
-        return applyWeekAmountsToLocalWeeks({
-          weeks: nextWeeks,
-          orgId,
-          actorUid: actor.uid,
-          actorName: actor.name,
-          projectId,
-          yearMonth: week.yearMonth,
-          weekNo: week.weekNo,
-          weekStart: week.weekStart || fallback?.weekStart || '',
-          weekEnd: week.weekEnd || fallback?.weekEnd || '',
-          mode: 'actual',
-          amounts: (week.amounts || {}) as Partial<Record<CashflowSheetLineId, number>>,
-          now: result.updatedAt,
-        });
-      }, prev));
-    }
+    applyProjectActualSyncResultLocally({ projectId, result });
 
     console.groupCollapsed(`[CashflowActualSync] project=${projectId}`);
     console.log('response', result);
@@ -377,7 +393,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     console.groupEnd();
 
     return result;
-  }, [orgId, user]);
+  }, [applyProjectActualSyncResultLocally, orgId, user]);
 
   const submitWeekAsPm = useCallback(async (input: {
     projectId: string;
@@ -535,6 +551,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     submitWeekAsPm,
     closeWeekAsAdmin,
     syncProjectActualsFromExpenseSheets,
+    applyProjectActualSyncResultLocally,
     updateVarianceFlag,
     getWeeksForProject,
   }), [
@@ -549,6 +566,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     submitWeekAsPm,
     closeWeekAsAdmin,
     syncProjectActualsFromExpenseSheets,
+    applyProjectActualSyncResultLocally,
     updateVarianceFlag,
     getWeeksForProject,
   ]);
