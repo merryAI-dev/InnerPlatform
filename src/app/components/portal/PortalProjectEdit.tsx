@@ -9,7 +9,11 @@ import { usePortalStore } from '../../data/portal-store';
 import type { Project, ProjectRequest, ProjectRequestDraft, ProjectRequestDraftStatus } from '../../data/types';
 import { getOrgCollectionPath, getOrgDocumentPath } from '../../lib/firebase';
 import { useFirebase } from '../../lib/firebase-context';
-import { uploadProjectRequestContractFile } from '../../platform/project-contract-upload';
+import {
+  uploadProjectRequestContractFile,
+  uploadProjectRequestSupplementalDocumentFile,
+  type ProjectRequestDocumentKind,
+} from '../../platform/project-contract-upload';
 import {
   buildProjectEditorDraftFromProject,
   createProjectEditorDraft,
@@ -244,6 +248,20 @@ export function PortalProjectEdit() {
     });
   };
 
+  const handleProjectDocumentFileUpload = async (input: { kind: ProjectRequestDocumentKind; file: File }) => {
+    if (input.kind === 'contract') {
+      const processed = await handleContractFileUpload(input.file);
+      return { document: processed.contractDocument!, contractAnalysis: processed.contractAnalysis };
+    }
+    const document = await uploadProjectRequestSupplementalDocumentFile({
+      tenantId: orgId,
+      actor: authUser,
+      file: input.file,
+      kind: input.kind,
+    });
+    return { document, contractAnalysis: null };
+  };
+
   if (!myProject) {
     return (
       <Card className="border-dashed border-slate-200 bg-slate-50">
@@ -261,7 +279,7 @@ export function PortalProjectEdit() {
       title="프로젝트 수정"
       description="등록 화면과 같은 5단계 구조로 수정하고, 승인 상태는 변경 이력과 함께 관리됩니다."
       initialDraft={initialDraft}
-      draftKey={`portal-edit-${myProject.id}-${requestDoc?.updatedAt || myProject.updatedAt}`}
+      draftKey={autosaveKey}
       members={members}
       departmentOptions={departmentOptions}
       autosave={autosaveConfig}
@@ -271,6 +289,7 @@ export function PortalProjectEdit() {
       ]}
       busyActionId={busyActionId}
       onContractFileUpload={handleContractFileUpload}
+      onProjectDocumentFileUpload={handleProjectDocumentFileUpload}
       onCancel={() => navigate('/portal/project-select')}
       onSubmit={(draft, actionId) => handleSubmit(draft, actionId)}
       topSlot={executiveBanner ? (

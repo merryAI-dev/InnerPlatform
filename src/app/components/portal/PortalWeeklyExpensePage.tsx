@@ -11,7 +11,7 @@ import {
 import { usePortalStore } from '../../data/portal-store';
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { useAuth } from '../../data/auth-store';
-import type { EvidenceUploadSelection, PendingQuickInsert } from '../cashflow/SettlementLedgerPage';
+import type { EvidenceUploadSelection } from '../cashflow/SettlementLedgerPage';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Card, CardContent } from '../ui/card';
@@ -117,11 +117,10 @@ export function PortalWeeklyExpensePage() {
     weeklySubmissionStatuses,
     upsertWeeklySubmissionStatus,
   } = usePortalStore();
-  const { submitWeekAsPm, upsertWeekAmounts } = useCashflowWeeks();
+  const { submitWeekAsPm, upsertWeekAmounts, applyProjectActualSyncResultLocally } = useCashflowWeeks();
   const devHarnessConfig = readDevAuthHarnessConfig(import.meta.env, typeof window !== 'undefined' ? window.location : undefined);
   const [projectDriveProvisioning, setProjectDriveProvisioning] = useState(false);
   const [googleSheetImportOpen, setGoogleSheetImportOpen] = useState(false);
-  const [pendingQuickInsert, setPendingQuickInsert] = useState<PendingQuickInsert | null>(null);
   const [hasUnsavedSettlementChanges, setHasUnsavedSettlementChanges] = useState(false);
   const [isSettlementSaving, setIsSettlementSaving] = useState(false);
   const actualSyncSignatureRef = useRef('');
@@ -339,6 +338,7 @@ export function PortalWeeklyExpensePage() {
         actor: bffActor,
         projectId,
       });
+      applyProjectActualSyncResultLocally({ projectId, result });
       return [...result.weeks, ...result.cleared];
     }
 
@@ -360,7 +360,7 @@ export function PortalWeeklyExpensePage() {
       })));
     }
     return projectActualSyncPayload.map((week) => ({ yearMonth: week.yearMonth, weekNo: week.weekNo }));
-  }, [bffActor, orgId, projectActualSyncPayload, projectId, upsertWeekAmounts, upsertWeeklySubmissionStatus]);
+  }, [applyProjectActualSyncResultLocally, bffActor, orgId, projectActualSyncPayload, projectId, upsertWeekAmounts, upsertWeeklySubmissionStatus]);
 
   useEffect(() => {
     if (!projectId || portalStoreLoading || hasUnsavedSettlementChanges || isSettlementSaving) return;
@@ -421,13 +421,6 @@ export function PortalWeeklyExpensePage() {
       : `${actionLabel}에 실패했습니다.`;
     toast.error(resolveApiErrorMessage(error, fallback));
   }, [bffActor.uid, projectId]);
-
-  const queueQuickInsert = (kind: PendingQuickInsert['kind']) => {
-    setPendingQuickInsert({
-      kind,
-      token: Date.now(),
-    });
-  };
 
   const resolveVersionFromApiError = useCallback((error: unknown): number | null => {
     if (!(error instanceof PlatformApiError)) return null;
@@ -806,10 +799,6 @@ export function PortalWeeklyExpensePage() {
     return fetchBudgetSuggestionViaBff({ tenantId: orgId, actor: bffActor, projectId, counterparty });
   }, [bffActor, orgId, projectId]);
 
-  const handlePendingQuickInsertHandled = useCallback(() => {
-    setPendingQuickInsert(null);
-  }, []);
-
   const requestRouteNavigation = useCallback((path: string, label: string) => {
     if (isSettlementSaving) {
       toast.message(`${label} 이동은 저장이 끝난 뒤 가능합니다.`);
@@ -905,17 +894,6 @@ export function PortalWeeklyExpensePage() {
           <div className="flex items-center gap-2 flex-wrap xl:justify-end">
           {isDirectEntryMode ? (
             <>
-              <Button size="sm" onClick={() => queueQuickInsert('DEPOSIT')}>
-                입금 추가
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => queueQuickInsert('EXPENSE')}>
-                지출 추가
-              </Button>
-              {settlementSheetPolicy.allowAdjustmentRows && (
-                <Button variant="outline" size="sm" onClick={() => queueQuickInsert('ADJUSTMENT')}>
-                  잔액 조정
-                </Button>
-              )}
               <Button
                 variant="outline"
                 size="sm"
@@ -1085,8 +1063,6 @@ export function PortalWeeklyExpensePage() {
           settlementSheetPolicy={settlementSheetPolicy}
           basis={myProject?.basis}
           onUpdateWeeklySubmissionStatus={upsertWeeklySubmissionStatus}
-          pendingQuickInsert={pendingQuickInsert}
-          onPendingQuickInsertHandled={handlePendingQuickInsertHandled}
           onDeriveRows={deriveRowsWithLocalKernel}
           onPreviewActualSyncPayload={previewActualSyncWithLocalKernel}
           onSyncCashflowActuals={syncCashflowActualsFromCanonicalSource}

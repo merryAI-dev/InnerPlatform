@@ -13,7 +13,11 @@ import {
   isPlatformApiEnabled,
   notifyProjectRequestRegistrationViaBff,
 } from '../../lib/platform-bff-client';
-import { uploadProjectRequestContractFile } from '../../platform/project-contract-upload';
+import {
+  uploadProjectRequestContractFile,
+  uploadProjectRequestSupplementalDocumentFile,
+  type ProjectRequestDocumentKind,
+} from '../../platform/project-contract-upload';
 import {
   buildProjectRequestPayloadFromDraft,
   createProjectEditorDraft,
@@ -138,6 +142,20 @@ export function PortalProjectRegister() {
     });
   };
 
+  const handleProjectDocumentFileUpload = async (input: { kind: ProjectRequestDocumentKind; file: File }) => {
+    if (input.kind === 'contract') {
+      const processed = await handleContractFileUpload(input.file);
+      return { document: processed.contractDocument!, contractAnalysis: processed.contractAnalysis };
+    }
+    const document = await uploadProjectRequestSupplementalDocumentFile({
+      tenantId: orgId,
+      actor: authUser,
+      file: input.file,
+      kind: input.kind,
+    });
+    return { document, contractAnalysis: null };
+  };
+
   if (submitted) {
     return (
       <div className="mx-auto w-full max-w-5xl py-10">
@@ -174,6 +192,7 @@ export function PortalProjectRegister() {
       actions={[{ id: 'submit', label: '등록 요청 저장', icon: Send }]}
       busyActionId={busyActionId}
       onContractFileUpload={handleContractFileUpload}
+      onProjectDocumentFileUpload={handleProjectDocumentFileUpload}
       onCancel={() => navigate('/portal/project-select')}
       onSubmit={(draft) => handleSubmit(draft)}
     />

@@ -2408,6 +2408,8 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       financialInputFlags,
       settlementGuide: requestPayload.settlementGuide,
       contractDocument: requestPayload.contractDocument,
+      quoteDocument: requestPayload.quoteDocument || null,
+      proposalDocument: requestPayload.proposalDocument || null,
       department: normalizeProjectDepartment(requestPayload.department),
       cic: resolveProjectCic({ department: requestPayload.department }),
       teamName: requestPayload.teamName,

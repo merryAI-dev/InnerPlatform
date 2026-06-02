@@ -57,6 +57,7 @@ describe('PortalWeeklyExpensePage flow layout', () => {
   it('keeps cashflow actual sync tied to the full project expense-sheet source, not only the active tab save button', () => {
     expect(weeklyExpenseSource).toContain('buildProjectExpenseRowsForActualSync');
     expect(weeklyExpenseSource).toContain('projectActualSyncPayload');
+    expect(weeklyExpenseSource).toContain('applyProjectActualSyncResultLocally({ projectId, result })');
     expect(weeklyExpenseSource).toContain('actual_realtime_sync');
   });
 });

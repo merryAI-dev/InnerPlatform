@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Basis, SettlementSheetPolicy } from './types';
+import { createSettlementSheetPolicy, type Basis, type SettlementSheetPolicy } from './types';
 import { SETTLEMENT_COLUMNS, type ImportRow } from '../platform/settlement-csv';
 import { prepareSettlementImportRows } from '../platform/settlement-sheet-prepare';
 import { prepareExpenseSheetRowsForSave } from './portal-store.settlement';
@@ -34,6 +34,12 @@ function buildParams(partial?: {
 }
 
 describe('prepareExpenseSheetRowsForSave', () => {
+  it('requires counterparty by default for every settlement sheet preset', () => {
+    expect(createSettlementSheetPolicy('STANDARD').requireCounterparty).toBe(true);
+    expect(createSettlementSheetPolicy('DIRECT_ENTRY').requireCounterparty).toBe(true);
+    expect(createSettlementSheetPolicy('BALANCE_TRACKING').requireCounterparty).toBe(true);
+  });
+
   it('drops empty rows and returns the same derived rows as settlement sheet prepare', () => {
     const rows = [
       makeRow({

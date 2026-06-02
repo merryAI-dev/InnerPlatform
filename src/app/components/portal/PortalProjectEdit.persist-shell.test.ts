@@ -11,4 +11,10 @@ describe('PortalProjectEdit persistence shell', () => {
     expect(source).not.toContain('patchProjectSnapshot');
     expect(source).not.toContain('upsertProjectViaBff');
   });
+
+  it('keeps the project edit draft key stable across request listener updates', () => {
+    expect(source).toContain("const autosaveKey = `portal-edit-${orgId}-${myProject?.id || 'no-project'}-${authUser?.uid || 'anonymous'}`");
+    expect(source).toContain('draftKey={autosaveKey}');
+    expect(source).not.toContain("draftKey={`portal-edit-${myProject.id}-${requestDoc?.updatedAt || myProject.updatedAt}`}");
+  });
 });

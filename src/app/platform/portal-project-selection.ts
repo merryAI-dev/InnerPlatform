@@ -67,7 +67,7 @@ export function resolvePortalProjectCandidates(input: {
   const priorityProjects = projects.filter((project) => (
     assignedProjectIds.has(project.id)
     || (authUid && project.registeredById === authUid)
-    || (authUid && !project.registeredById && project.managerId === authUid)
+    || (authUid && project.managerId === authUid)
   ));
 
   return {

@@ -147,6 +147,8 @@ export function buildProjectPayloadFromProject(project: Project): ProjectRequest
     participantCondition: text(project.participantCondition),
     note: text(project.note),
     contractDocument: project.contractDocument || null,
+    quoteDocument: project.quoteDocument || null,
+    proposalDocument: project.proposalDocument || null,
     contractAnalysis: project.contractAnalysis || null,
   };
 }
@@ -259,6 +261,8 @@ export function buildProjectPatchFromRequestPayload(
     participantCondition: text(payload.participantCondition),
     note: text(payload.note),
     contractDocument: payload.contractDocument || null,
+    quoteDocument: payload.quoteDocument || null,
+    proposalDocument: payload.proposalDocument || null,
     contractAnalysis: payload.contractAnalysis || null,
     budgetCurrentYear: numeric(payload.contractAmount || input.baseProject.budgetCurrentYear),
     taxInvoiceAmount: input.baseProject.taxInvoiceAmount,

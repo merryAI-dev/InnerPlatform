@@ -49,7 +49,7 @@ describe('portal project selection helpers', () => {
       ] as unknown as Project[],
     });
 
-    expect(result.priorityProjects.map((project) => project.id)).toEqual(['p-owner']);
+    expect(result.priorityProjects.map((project) => project.id)).toEqual(['p-legacy', 'p-owner']);
     expect(result.searchProjects.map((project) => project.id)).toEqual(['p-legacy', 'p-owner']);
   });
 

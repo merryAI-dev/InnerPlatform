@@ -62,6 +62,7 @@ describe('ProjectEditorWizard dropdown contract', () => {
 
   it('uses project operations terminology and exposes currency selection', () => {
     expect(source).toContain('서류상 참여인력');
+    expect(source).toContain("{ id: 'team', label: '팀/인력', icon: Users }");
     expect(source).not.toContain('<Label className="text-xs">팀원 구성</Label>');
     expect(source).toContain('<Label className="text-xs">통화</Label>');
     expect(source).toContain('PROJECT_CURRENCY_LABELS[draft.currency]');
@@ -114,9 +115,28 @@ describe('ProjectEditorWizard dropdown contract', () => {
   });
 
   it('treats zero-won payment split values as explicit editable values', () => {
+    expect(source).toContain('formatProjectAmountInput(draft.contractAmount, hasContractAmountInput)');
+    expect(source).toContain('formatProjectAmountInput(draft.salesVatAmount, hasSalesVatAmountInput)');
+    expect(source).toContain('formatProjectAmountInput(draft.totalRevenueAmount, hasTotalRevenueAmountInput)');
+    expect(source).toContain('formatProjectAmountInput(draft.supportAmount, hasSupportAmountInput)');
+    expect(source).toContain('formatProjectAmountInput(draft.budgetCurrentYear, draft.budgetCurrentYear > 0)');
+    expect(source).toContain('formatProjectAmountInput(draft.taxInvoiceAmount, draft.taxInvoiceAmount > 0)');
     expect(source).toContain('formatProjectAmountInput(draft.paymentPlan.contract, true)');
     expect(source).toContain('formatProjectAmountInput(draft.paymentPlan.interim, true)');
     expect(source).toContain('formatProjectAmountInput(draft.paymentPlan.final, true)');
+  });
+
+  it('keeps portal edit drafts stable when async listener data refreshes', () => {
+    expect(source).toContain('const lastResetKeyRef = useRef<string | null>(null)');
+    expect(source).toContain("const resetKey = `${draftKey}::${autosave?.key || ''}`");
+    expect(source).toContain('if (lastResetKeyRef.current === resetKey) return;');
+  });
+
+  it('labels project name as the groupware registration name without touching the team step', () => {
+    expect(source).toContain('프로젝트명(그룹웨어 등록명) *');
+    expect(source).toContain("{ id: 'team', label: '팀/인력', icon: Users }");
+    expect(source).toContain("onChange={(event) => update('groupwareName', event.target.value)}");
+    expect(source).not.toContain('const updateProjectName = (value: string)');
   });
 
   it('warns users to verify the uploaded contract before saving', () => {
@@ -127,14 +147,20 @@ describe('ProjectEditorWizard dropdown contract', () => {
 
   it('supports contract PDF upload before saving registration or edit drafts', () => {
     expect(source).toContain('onContractFileUpload');
-    expect(source).toContain('handleContractDocumentSelect');
-    expect(source).toContain('MAX_CONTRACT_UPLOAD_SIZE_BYTES');
+    expect(source).toContain('onProjectDocumentFileUpload');
+    expect(source).toContain('handleProjectDocumentSelect');
+    expect(source).toContain('PROJECT_REQUEST_DOCUMENT_UPLOAD_MAX_SIZE_BYTES');
+    expect(source).toContain('PROJECT_REQUEST_DOCUMENT_UPLOAD_MAX_SIZE_LABEL');
     expect(source).toContain('mergeContractAnalysisIntoDraft');
     expect(source).toContain('contractAnalysisMergeMode');
     expect(source).toContain("contractAnalysisMergeMode === 'none'");
     expect(source).toContain('입력값은 자동으로 바꾸지 않습니다.');
-    expect(source).toContain('계약서 업로드');
-    expect(source).toContain('계약서 교체');
+    expect(source).toContain('`${PROJECT_DOCUMENT_BUTTON_LABELS[kind]} 업로드`');
+    expect(source).toContain('`${PROJECT_DOCUMENT_BUTTON_LABELS[kind]} 교체`');
+    expect(source).toContain('견적서 PDF');
+    expect(source).toContain('제안서 PDF');
+    expect(source).toContain('quoteDocument');
+    expect(source).toContain('proposalDocument');
     expect(source).toContain('buildContractDocumentEditPolicy');
     expect(contractDocumentPolicySource).toContain('첨부 제거');
     expect(source).toContain('canRemoveContractDocument');
@@ -144,8 +170,11 @@ describe('ProjectEditorWizard dropdown contract', () => {
 
   it('wires admin project editor to contract upload without automatic analysis merge', () => {
     expect(adminWizardSource).toContain('uploadProjectRequestContractFile');
+    expect(adminWizardSource).toContain('uploadProjectRequestSupplementalDocumentFile');
     expect(adminWizardSource).toContain('handleContractFileUpload');
+    expect(adminWizardSource).toContain('handleProjectDocumentFileUpload');
     expect(adminWizardSource).toContain('onContractFileUpload={handleContractFileUpload}');
+    expect(adminWizardSource).toContain('onProjectDocumentFileUpload={handleProjectDocumentFileUpload}');
     expect(adminWizardSource).toContain('contractAnalysisMergeMode="none"');
     expect(adminWizardSource).toContain('canRemoveContractDocument');
   });

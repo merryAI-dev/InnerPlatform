@@ -6,7 +6,11 @@ import { useAppStore } from '../../data/store';
 import { useProjectDepartmentSettings } from '../../data/project-department-settings';
 import type { Project, ProjectPhase } from '../../data/types';
 import { useFirebase } from '../../lib/firebase-context';
-import { uploadProjectRequestContractFile } from '../../platform/project-contract-upload';
+import {
+  uploadProjectRequestContractFile,
+  uploadProjectRequestSupplementalDocumentFile,
+  type ProjectRequestDocumentKind,
+} from '../../platform/project-contract-upload';
 import {
   buildProjectEditorDraftFromProject,
   buildProjectEditorProjectPatch,
@@ -207,6 +211,20 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
     });
   };
 
+  const handleProjectDocumentFileUpload = async (input: { kind: ProjectRequestDocumentKind; file: File }) => {
+    if (input.kind === 'contract') {
+      const processed = await handleContractFileUpload(input.file);
+      return { document: processed.contractDocument!, contractAnalysis: processed.contractAnalysis };
+    }
+    const document = await uploadProjectRequestSupplementalDocumentFile({
+      tenantId: orgId,
+      actor: currentUser,
+      file: input.file,
+      kind: input.kind,
+    });
+    return { document, contractAnalysis: null };
+  };
+
   return (
     <ProjectEditorWizard
       mode="admin"
@@ -223,6 +241,7 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
       ]}
       busyActionId={busyActionId}
       onContractFileUpload={handleContractFileUpload}
+      onProjectDocumentFileUpload={handleProjectDocumentFileUpload}
       contractAnalysisMergeMode="none"
       canRemoveContractDocument
       onCancel={() => navigate(editProject ? `/projects/${editProject.id}` : '/projects')}

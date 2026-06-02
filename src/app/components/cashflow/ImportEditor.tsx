@@ -30,10 +30,8 @@ import {
   SETTLEMENT_COLUMNS,
   SETTLEMENT_COLUMN_GROUPS,
   createEmptyImportRow,
-  createQuickEntryImportRow,
   importRowToTransaction,
   type ImportRow,
-  type SettlementQuickInsertKind,
 } from '../../platform/settlement-csv';
 import { computeSettlementGridWindowRange } from '../../platform/settlement-grid-windowing';
 import { updateImportRowAt } from '../../platform/settlement-grid-state';
@@ -75,13 +73,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '../ui/alert-dialog';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '../ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import type { ActiveCommentAnchor } from './SettlementCommentThreadSheet';
 import type { EvidenceUploadDraft } from './SettlementEvidenceUploadDialog';
@@ -103,8 +94,6 @@ import {
   normalizeMethodValue,
   parseContentStatusNote,
   composeContentStatusNote,
-  type QuickExpenseTemplate,
-  QUICK_EXPENSE_TEMPLATES,
   derivePendingEvidence,
   TX_STATE_BADGE,
   isEditable,
@@ -118,11 +107,6 @@ export interface EvidenceUploadSelection {
   category: string;
   parserCategory: string;
   reviewedFileName: string;
-}
-
-export interface PendingQuickInsert {
-  kind: SettlementQuickInsertKind;
-  token: number;
 }
 
 const SettlementCommentThreadSheet = lazy(
@@ -162,8 +146,6 @@ export function ImportEditor({
   onFetchBudgetSuggestion,
   workflowMode = 'BANK_UPLOAD',
   settlementSheetPolicy,
-  pendingQuickInsert,
-  onPendingQuickInsertHandled,
   basis,
   onToggleFullscreen,
   onDeriveRows,
@@ -198,8 +180,6 @@ export function ImportEditor({
   onFetchBudgetSuggestion?: (counterparty: string) => Promise<{ budgetCategory: string; budgetSubCategory: string } | null>;
   workflowMode?: ProjectFundInputMode;
   settlementSheetPolicy?: SettlementSheetPolicy;
-  pendingQuickInsert?: PendingQuickInsert | null;
-  onPendingQuickInsertHandled?: () => void;
   basis?: Basis;
   onToggleFullscreen?: () => void;
   onDeriveRows?: (
@@ -859,31 +839,6 @@ export function ImportEditor({
     commitRows(nextRows, { rowIdx: insertIndex, colIdx: getPreferredEditableCol() });
   }, [rows, getSelectionAnchor, commitRows, getPreferredEditableCol]);
 
-  const insertPreparedRow = useCallback((preparedRow: ImportRow, focusColIdx?: number) => {
-    const anchor = getSelectionAnchor();
-    const insertIndex = anchor ? Math.min(rows.length, anchor.rowIdx + 1) : rows.length;
-    const nextRows = [
-      ...rows.slice(0, insertIndex),
-      preparedRow,
-      ...rows.slice(insertIndex),
-    ];
-    commitRows(nextRows, { rowIdx: insertIndex, colIdx: focusColIdx ?? getPreferredEditableCol() });
-  }, [rows, getSelectionAnchor, commitRows, getPreferredEditableCol]);
-
-  const addQuickInsertRow = useCallback((kind: SettlementQuickInsertKind) => {
-    if (kind === 'ADJUSTMENT' && !resolvedPolicy.allowAdjustmentRows) {
-      toast.message('현재 사업 정책에서는 잔액 조정 행을 사용할 수 없습니다.');
-      return;
-    }
-    const preparedRow = createQuickEntryImportRow(kind);
-    const focusColIdx = kind === 'DEPOSIT'
-      ? (depositIdx >= 0 ? depositIdx : bankAmountIdx)
-      : kind === 'EXPENSE'
-        ? (expenseIdx >= 0 ? expenseIdx : bankAmountIdx)
-        : (balanceIdx >= 0 ? balanceIdx : bankAmountIdx);
-    insertPreparedRow(preparedRow, focusColIdx >= 0 ? focusColIdx : undefined);
-  }, [insertPreparedRow, depositIdx, expenseIdx, balanceIdx, bankAmountIdx, resolvedPolicy.allowAdjustmentRows]);
-
   const addRows = useCallback((count: number) => {
     if (count <= 0) return;
     const nextRows = [...rows];
@@ -893,28 +848,6 @@ export function ImportEditor({
     }
     commitRows(nextRows);
   }, [rows, commitRows]);
-
-  useEffect(() => {
-    if (!pendingQuickInsert) return;
-    addQuickInsertRow(pendingQuickInsert.kind);
-    onPendingQuickInsertHandled?.();
-  }, [pendingQuickInsert, addQuickInsertRow, onPendingQuickInsertHandled]);
-
-  const addTemplateRow = useCallback((template: QuickExpenseTemplate) => {
-    const anchor = getSelectionAnchor();
-    const insertIndex = anchor ? Math.min(rows.length, anchor.rowIdx + 1) : rows.length;
-    const newRow = createEmptyImportRow();
-    if (methodIdx >= 0) newRow.cells[methodIdx] = template.methodLabel;
-    if (cashflowIdx >= 0) newRow.cells[cashflowIdx] = template.cashflowLabel;
-    if (counterpartyIdx >= 0) newRow.cells[counterpartyIdx] = template.counterparty;
-    if (memoIdx >= 0) newRow.cells[memoIdx] = template.memo;
-    const nextRows = [
-      ...rows.slice(0, insertIndex),
-      newRow,
-      ...rows.slice(insertIndex),
-    ];
-    commitRows(nextRows, { rowIdx: insertIndex, colIdx: getPreferredEditableCol() });
-  }, [rows, methodIdx, cashflowIdx, counterpartyIdx, memoIdx, getSelectionAnchor, commitRows, getPreferredEditableCol]);
 
   const insertRowAt = useCallback((index: number) => {
     const boundedIndex = Math.max(0, Math.min(rows.length, index));
@@ -1679,61 +1612,6 @@ export function ImportEditor({
           >
             증빙 매핑 설정
           </Button>
-          {workflowMode === 'DIRECT_ENTRY' && (
-            <>
-              <Button
-                variant="default"
-                size="sm"
-                className="h-7 text-[11px] gap-1 cursor-pointer shadow-sm"
-                onClick={() => addQuickInsertRow('DEPOSIT')}
-              >
-                <Plus className="h-3.5 w-3.5" />
-                입금 추가
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 text-[11px] gap-1 cursor-pointer shadow-sm hover:bg-muted/40"
-                onClick={() => addQuickInsertRow('EXPENSE')}
-              >
-                <Plus className="h-3.5 w-3.5" />
-                지출 추가
-              </Button>
-              {resolvedPolicy.allowAdjustmentRows && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-7 text-[11px] gap-1 cursor-pointer shadow-sm hover:bg-muted/40"
-                  onClick={() => addQuickInsertRow('ADJUSTMENT')}
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  잔액 조정
-                </Button>
-              )}
-            </>
-          )}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 text-[11px] gap-1 cursor-pointer shadow-sm hover:bg-muted/40"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                정기지출 템플릿
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="text-[11px]">
-              {QUICK_EXPENSE_TEMPLATES.map((template) => (
-                <DropdownMenuItem
-                  key={template.id}
-                  onClick={() => addTemplateRow(template)}
-                >
-                  {template.label}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
           <Button
             variant="outline"
             size="sm"

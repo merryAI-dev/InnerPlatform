@@ -91,6 +91,8 @@ export interface ProjectEditorDraft {
   budgetCurrentYear: number;
   taxInvoiceAmount: number;
   contractDocument: FileAttachment | null;
+  quoteDocument: FileAttachment | null;
+  proposalDocument: FileAttachment | null;
   contractAnalysis: ProjectRequestContractAnalysis | null;
 }
 
@@ -147,6 +149,8 @@ const DEFAULT_DRAFT: ProjectEditorDraft = {
   budgetCurrentYear: 0,
   taxInvoiceAmount: 0,
   contractDocument: null,
+  quoteDocument: null,
+  proposalDocument: null,
   contractAnalysis: null,
 };
 
@@ -231,6 +235,8 @@ const REVIEW_CHANGE_FIELDS: Array<{
   { key: 'description', label: '주요 내용', before: (project) => normalizeChangeValue(project.description), after: (draft) => normalizeChangeValue(draft.description) },
   { key: 'note', label: '비고', before: (project) => normalizeChangeValue(project.note), after: (draft) => normalizeChangeValue(draft.note) },
   { key: 'contractDocument', label: '계약서 PDF', before: (project) => normalizeChangeValue(project.contractDocument?.name), after: (draft) => normalizeChangeValue(draft.contractDocument?.name) },
+  { key: 'quoteDocument', label: '견적서 PDF', before: (project) => normalizeChangeValue(project.quoteDocument?.name), after: (draft) => normalizeChangeValue(draft.quoteDocument?.name) },
+  { key: 'proposalDocument', label: '제안서 PDF', before: (project) => normalizeChangeValue(project.proposalDocument?.name), after: (draft) => normalizeChangeValue(draft.proposalDocument?.name) },
 ];
 
 export function createProjectEditorDraft(overrides: Partial<ProjectEditorDraft> = {}): ProjectEditorDraft {
@@ -281,6 +287,8 @@ export function buildProjectEditorDraftFromProject(
       : payload?.teamMembersDetailed,
   );
   const contractDocument = normalizedProject.contractDocument ?? payload?.contractDocument ?? null;
+  const quoteDocument = normalizedProject.quoteDocument ?? payload?.quoteDocument ?? null;
+  const proposalDocument = normalizedProject.proposalDocument ?? payload?.proposalDocument ?? null;
 
   return createProjectEditorDraft({
     name: text(normalizedProject.name || payload?.name),
@@ -288,7 +296,9 @@ export function buildProjectEditorDraftFromProject(
     type: normalizeProjectType(normalizedProject.type || payload?.type),
     description: text(normalizedProject.description || payload?.description),
     clientOrg: text(normalizedProject.clientOrg || payload?.clientOrg),
-    department: normalizeProjectDepartment(normalizedProject.department || payload?.department),
+    department: normalizeProjectDepartment(
+      normalizedProject.department || normalizedProject.cic || payload?.department,
+    ),
     projectPurpose: text(normalizedProject.projectPurpose || payload?.projectPurpose),
     status: normalizeProjectStatus(normalizedProject.status),
     phase: normalizeProjectPhase(normalizedProject.phase),
@@ -336,6 +346,8 @@ export function buildProjectEditorDraftFromProject(
     budgetCurrentYear: nonNegativeAmount(normalizedProject.budgetCurrentYear),
     taxInvoiceAmount: nonNegativeAmount(normalizedProject.taxInvoiceAmount),
     contractDocument,
+    quoteDocument,
+    proposalDocument,
     contractAnalysis: normalizedProject.contractAnalysis ?? payload?.contractAnalysis ?? null,
   });
 }
@@ -352,7 +364,7 @@ export function buildProjectRequestPayloadFromDraft(draftInput: ProjectEditorDra
     description: text(draft.description),
     clientOrg: text(draft.clientOrg),
     department: normalizeProjectDepartment(draft.department),
-    groupwareName: text(draft.groupwareName),
+    groupwareName: text(draft.name),
     currency: normalizeProjectCurrency(draft.currency),
     contractAmount: nonNegativeAmount(draft.contractAmount),
     salesVatAmount: nonNegativeAmount(draft.salesVatAmount),
@@ -383,6 +395,8 @@ export function buildProjectRequestPayloadFromDraft(draftInput: ProjectEditorDra
     participantCondition: text(draft.participantCondition),
     note: text(draft.note),
     contractDocument: draft.contractDocument,
+    quoteDocument: draft.quoteDocument,
+    proposalDocument: draft.proposalDocument,
     contractAnalysis: draft.contractAnalysis,
   };
 }
@@ -460,7 +474,7 @@ export function buildProjectEditorProjectPatch(
     paymentPlan: normalizePaymentPlan(draft.paymentPlan),
     paymentPlanDesc: text(draft.paymentPlanDesc),
     clientOrg: text(draft.clientOrg),
-    groupwareName: text(draft.groupwareName),
+    groupwareName: text(draft.name),
     participantCondition: text(draft.participantCondition),
     note: text(draft.note),
     teamMembersDetailed,
@@ -472,6 +486,8 @@ export function buildProjectEditorProjectPatch(
     financialInputFlags: flags,
     settlementGuide: text(draft.settlementGuide),
     contractDocument: draft.contractDocument,
+    quoteDocument: draft.quoteDocument,
+    proposalDocument: draft.proposalDocument,
     contractAnalysis: draft.contractAnalysis,
     department: normalizeProjectDepartment(draft.department),
     cic: resolveProjectCic({ department: draft.department }),

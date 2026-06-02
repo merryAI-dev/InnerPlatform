@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-06-02] patch-note | portal-weekly-expense, shared-portal-architecture | portal edit stability and document uploads
+- pages: [portal-weekly-expense](./pages/portal-weekly-expense.md), [shared-portal-architecture](./pages/shared-portal-architecture.md)
+- summary: 주간 사업비 입력의 빠른 추가 액션을 단일 `행 추가`로 통합하고 Actual 동기화 결과가 현재 화면에 즉시 반영되도록 보강했다. 프로젝트 등록/수정은 프로젝트명과 그룹웨어 등록명을 같은 값으로 저장하며, 계약서 외 견적서/제안서 첨부와 1GB Firebase Storage direct upload 경로를 추가했다.
+
 ## [2026-05-21] patch-note | admin-dashboard, portal-onboarding | MYSCube feature search entry
 - pages: [admin-dashboard](./pages/admin-dashboard.md), [portal-onboarding](./pages/portal-onboarding.md)
 - summary: Admin 첫 화면을 사이드바 없는 전체 기능 검색 화면으로 전환하고, 로그인 직후 workspace 선택 화면도 관리자/PM 색상 구분형 feature map으로 맞췄다. MYSCube 로고 자산을 공통 brand component에 연결하고, 기능 검색 headline은 사용자 이름 기반 인사로 바꾸며 검색창 hover/focus affordance를 강화했다.
