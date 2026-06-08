@@ -83,9 +83,14 @@ function readSetCookie(response) {
 }
 
 async function requestJson(method, path, body) {
+  const requestId = `smoke-${method.toLowerCase()}-${runId}-${randomUUID().slice(0, 8)}`;
+  const requestHeaders = headers({
+    'x-request-id': requestId,
+    ...(method !== 'GET' && body?.idempotencyKey ? { 'idempotency-key': body.idempotencyKey } : {}),
+  });
   const response = await fetch(`${baseUrl}${path}`, {
     method,
-    headers: headers(),
+    headers: requestHeaders,
     body: method === 'GET' ? undefined : JSON.stringify(body || {}),
   });
   const text = await response.text();
