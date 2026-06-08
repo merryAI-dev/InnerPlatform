@@ -17,6 +17,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+import jakarta.servlet.http.Cookie;
 
 import java.util.ArrayList;
 import java.nio.charset.StandardCharsets;
@@ -92,6 +93,10 @@ class WeeklyExpenseControllerTest {
         return "test-firebase:" + Base64.getUrlEncoder().encodeToString(claims.getBytes(StandardCharsets.UTF_8));
     }
 
+    private static String firebaseTestSessionCookie(String tenantId, String actorId, String role, String email) {
+        return firebaseTestToken(tenantId, actorId, role, email).replace("test-firebase:", "test-firebase-session:");
+    }
+
     @Test
     void javaApiRejectsTrustedActorHeadersWithoutAnyRuntimeAuth() throws Exception {
         String body = """
@@ -150,6 +155,82 @@ class WeeklyExpenseControllerTest {
             .singleElement()
             .extracting("actorRole")
             .isEqualTo("pm");
+    }
+
+    @Test
+    void firebaseIdTokenCreatesHttpOnlySessionCookie() throws Exception {
+        String idToken = firebaseTestToken("tenant-session", "firebase-pm-session", "pm", "pm-session@mysc.co.kr");
+        String setCookie = mockMvc.perform(post("/api/v1/auth/session")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"idToken\":\"" + idToken + "\"}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.ok").value(true))
+            .andExpect(jsonPath("$.actorId").value("firebase-pm-session"))
+            .andExpect(jsonPath("$.tenantId").value("tenant-session"))
+            .andReturn()
+            .getResponse()
+            .getHeader("Set-Cookie");
+
+        assertThat(setCookie).contains(WeeklyAuthSessionController.SESSION_COOKIE_NAME + "=");
+        assertThat(setCookie).contains("HttpOnly");
+        assertThat(setCookie).contains("Secure");
+        assertThat(setCookie).contains("SameSite=None");
+        assertThat(setCookie).contains("Path=/");
+    }
+
+    @Test
+    void firebaseSessionCookieCanRunJavaCommandWithoutPerRequestBearerToken() throws Exception {
+        String body = """
+            {
+              "idempotencyKey": "session-cookie-save-001",
+              "sheetName": "session",
+              "rows": [
+                {
+                  "rowIndex": 0,
+                  "entryKind": "manual",
+                  "cells": [
+                    {"columnIndex": 3, "rawValue": "2026-06-W1", "userEdited": true},
+                    {"columnIndex": 8, "rawValue": "사업비", "userEdited": true},
+                    {"columnIndex": 13, "rawValue": "8100", "userEdited": true}
+                  ]
+                }
+              ]
+            }
+            """;
+
+        mockMvc.perform(post("/api/v1/weekly-expenses/project-session/sheets/default/save-draft")
+                .cookie(new Cookie(
+                    WeeklyAuthSessionController.SESSION_COOKIE_NAME,
+                    firebaseTestSessionCookie("tenant-session", "firebase-pm-session", "pm", "pm-session@mysc.co.kr")
+                ))
+                .header("x-request-id", "req-session-cookie-save")
+                .header("x-tenant-id", "tenant-session")
+                .header("x-actor-id", "firebase-pm-session")
+                .header("x-actor-role", "admin")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.commandName").value("weeklyExpense.saveDraft"))
+            .andExpect(jsonPath("$.actualDelta[0].amount").value(8100));
+
+        assertThat(auditEventRepository.findByTenantIdAndProjectIdOrderByCreatedAtAsc("tenant-session", "project-session"))
+            .singleElement()
+            .extracting("actorRole")
+            .isEqualTo("pm");
+    }
+
+    @Test
+    void firebaseSessionCookieMutationsRequireRequestIdHeader() throws Exception {
+        mockMvc.perform(post("/api/v1/weekly-expenses/project-session/sheets/default/save-draft")
+                .cookie(new Cookie(
+                    WeeklyAuthSessionController.SESSION_COOKIE_NAME,
+                    firebaseTestSessionCookie("tenant-session", "firebase-pm-session", "pm", "pm-session@mysc.co.kr")
+                ))
+                .header("x-tenant-id", "tenant-session")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"idempotencyKey\":\"missing-request-id\",\"rows\":[]}"))
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.code").value("weekly_expense_csrf_header_required"));
     }
 
     @Test

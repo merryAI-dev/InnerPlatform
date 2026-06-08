@@ -50,6 +50,7 @@ import {
   type DevHarnessPreset,
 } from '../platform/dev-harness';
 import { setObservabilityUserContext } from '../platform/observability';
+import { clearPlatformApiSession, createPlatformApiSession } from '../platform/api-session';
 
 export interface AuthUser {
   uid: string;
@@ -428,6 +429,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       try {
         const token = await firebaseUser.getIdTokenResult().catch(() => null);
+        await createPlatformApiSession(token?.token).catch((sessionError) => {
+          console.error('[Auth] Failed to establish platform API session:', sessionError);
+        });
         const claimsContext = extractAuthContextFromClaims(token?.claims as FirebaseAuthClaims | undefined);
         const tenantId = resolveTenantId({
           claimTenantId: claimsContext.tenantId,
@@ -452,6 +456,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           strict: false,
         });
         const token = await firebaseUser.getIdTokenResult().catch(() => null);
+        await createPlatformApiSession(token?.token).catch((sessionError) => {
+          console.error('[Auth] Failed to establish fallback platform API session:', sessionError);
+        });
         const fallback = mapFirebaseUserToAuthUser(firebaseUser, cachedMember, fallbackTenantId, token?.token);
         fallback.source = 'firebase';
         setUser(fallback);
@@ -657,6 +664,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(() => {
     if (featureFlags.firebaseAuthEnabled) {
+      void clearPlatformApiSession().catch((err) => {
+        console.error('[Auth] platform API session logout failed:', err);
+      });
       const auth = getAuthInstance();
       if (auth) {
         signOut(auth).catch((err) => {

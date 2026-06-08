@@ -55,7 +55,6 @@ export function buildStandardHeaders(input: BuildStandardHeadersInput): Headers 
   const method = (input.method || 'GET').toUpperCase();
   const actorId = normalizeActorId(input.actor.id);
   const headers = new Headers(input.headers || {});
-  const hasIdToken = Boolean(input.actor.idToken && input.actor.idToken.trim());
 
   if (!headers.get('x-request-id')) {
     headers.set('x-request-id', input.requestId || createRequestId());
@@ -73,10 +72,6 @@ export function buildStandardHeaders(input: BuildStandardHeadersInput): Headers 
   const actorRole = normalizeActorRole(input.actor.role);
   if (actorRole && !headers.get('x-actor-role')) {
     headers.set('x-actor-role', actorRole);
-  }
-
-  if (hasIdToken && !headers.get('authorization')) {
-    headers.set('authorization', `Bearer ${input.actor.idToken}`);
   }
 
   if (isMutationMethod(method) && !headers.get('idempotency-key')) {

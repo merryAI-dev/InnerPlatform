@@ -931,15 +931,11 @@ export function readPlatformApiRuntimeConfig(
 }
 
 export function toRequestActor(actor: ActorLike): RequestActor {
-  const mapped: RequestActor = {
+  return {
     id: actor.uid,
     email: actor.email,
     role: actor.role,
   };
-  if (actor.idToken) {
-    mapped.idToken = actor.idToken;
-  }
-  return mapped;
 }
 
 export function createPlatformApiClient(

@@ -20,3 +20,4 @@ weekly:
   internal-api-token: ${JVM_WEEKLY_INTERNAL_API_TOKEN:}
   firebase-project-id: ${JVM_WEEKLY_FIREBASE_PROJECT_ID:${FIREBASE_PROJECT_ID:${GOOGLE_CLOUD_PROJECT:}}}
   allowed-origins: ${JVM_WEEKLY_ALLOWED_ORIGINS:https://inner-platform.vercel.app}
+  session-cookie-ttl-seconds: ${JVM_WEEKLY_SESSION_COOKIE_TTL_SECONDS:432000}

@@ -43,7 +43,7 @@ Optional environment:
 - `JVM_WEEKLY_DATABASE_USER`: defaults to `innerplatform`
 - `JVM_WEEKLY_DATABASE_PASSWORD`: defaults to `innerplatform`
 - `JVM_WEEKLY_INTERNAL_API_TOKEN`: shared secret accepted for deployment smoke and internal jobs
-- `JVM_WEEKLY_FIREBASE_PROJECT_ID`: Firebase project whose ID tokens are accepted for browser-direct calls
+- `JVM_WEEKLY_FIREBASE_PROJECT_ID`: Firebase project whose ID tokens/session cookies are accepted for browser-direct calls
 - `JVM_WEEKLY_ALLOWED_ORIGINS`: comma-separated browser origins allowed by CORS; defaults to `https://inner-platform.vercel.app`
 
 ## First Endpoints
@@ -69,13 +69,18 @@ audit metadata.
 
 Runtime auth:
 
-- Browser/direct path: `Authorization: Bearer <Firebase ID token>`.
+- Browser/direct path: `POST /api/v1/auth/session` exchanges a Firebase ID token for a
+  `HttpOnly; Secure; SameSite=None` session cookie. Normal Java API calls use that
+  cookie with `credentials: include`.
+- Smoke/internal verification may still send `Authorization: Bearer <Firebase ID token>`
+  directly to prove Firebase identity without using the service token fallback.
 - Internal path: `x-inner-platform-service-token`.
 
-For browser-direct calls the Java API verifies the Firebase token with revocation
-checks, reads `{ role, tenantId }` custom claims, rejects spoofed tenant/actor
-headers, and injects trusted actor context before controller logic runs. The
-command body does not define actor or tenant authority.
+For browser-direct calls the Java API verifies the Firebase session with
+revocation checks, reads `{ role, tenantId }` custom claims when present, falls
+back to request tenant/role context for low-friction ERP use, rejects spoofed
+actor headers, and injects trusted actor context before controller logic runs.
+The command body does not define actor or tenant authority.
 
 The Java API should be deployable without the BFF. Stage/live Cloud Run uses
 public ingress and `--allow-unauthenticated`; Firebase token verification, CORS,

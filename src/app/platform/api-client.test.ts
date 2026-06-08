@@ -8,9 +8,10 @@ describe('PlatformApiClient', () => {
       expect(headers.get('x-tenant-id')).toBe('mysc');
       expect(headers.get('x-actor-id')).toBe('u001');
       expect(headers.get('x-actor-role')).toBe('admin');
-      expect(headers.get('authorization')).toBe('Bearer id-token-1');
+      expect(headers.get('authorization')).toBeNull();
       expect(headers.get('idempotency-key')).toMatch(/^idem_POST_u001_/);
       expect(headers.get('content-type')).toBe('application/json');
+      expect(init?.credentials).toBe('include');
 
       return new Response(JSON.stringify({ ok: true }), {
         status: 200,
@@ -39,6 +40,7 @@ describe('PlatformApiClient', () => {
     const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       const headers = new Headers(init?.headers);
       expect(headers.get('idempotency-key')).toBeNull();
+      expect(init?.credentials).toBe('include');
 
       return new Response('ok', {
         status: 200,

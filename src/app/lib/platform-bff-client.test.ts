@@ -82,11 +82,10 @@ describe('platform-bff-client', () => {
     });
   });
 
-  it('passes id token when provided', () => {
+  it('does not pass id token through ordinary API actors', () => {
     expect(toRequestActor({ uid: 'u001', role: 'admin', idToken: 'token-abc' })).toEqual({
       id: 'u001',
       role: 'admin',
-      idToken: 'token-abc',
     });
   });
 
@@ -314,7 +313,7 @@ describe('platform-bff-client', () => {
 
     expect(client.get).toHaveBeenCalledWith('/api/v1/admin/auth-governance/users', expect.objectContaining({
       tenantId: 'mysc',
-      actor: expect.objectContaining({ id: 'u-admin', role: 'admin', idToken: 'token-1' }),
+      actor: expect.objectContaining({ id: 'u-admin', role: 'admin' }),
     }));
     expect(response.summary.total).toBe(1);
   });
@@ -406,7 +405,7 @@ describe('platform-bff-client', () => {
 
     expect(client.get).toHaveBeenCalledWith('/api/v1/cashflow/p-cashflow', expect.objectContaining({
       tenantId: 'mysc',
-      actor: expect.objectContaining({ id: 'u-finance', role: 'finance', idToken: 'token-1' }),
+      actor: expect.objectContaining({ id: 'u-finance', role: 'finance' }),
       timeoutMs: 12000,
     }));
     const cashflowGetOptions = (client.get.mock.calls as unknown as Array<[string, Record<string, unknown>]>)[0][1];
@@ -418,7 +417,8 @@ describe('platform-bff-client', () => {
     const fetchImpl = vi.fn(async (url, init) => {
       expect(url).toBe('http://127.0.0.1:8787/api/v1/weekly-expenses/p-cashflow/audit-export');
       const headers = init?.headers as Headers;
-      expect(headers.get('authorization')).toBe('Bearer token-export');
+      expect(headers.get('authorization')).toBeNull();
+      expect(init?.credentials).toBe('include');
       expect(headers.get('x-tenant-id')).toBe('mysc');
       expect(headers.get('x-actor-id')).toBe('u-finance');
       expect(JSON.parse(String(init?.body))).toEqual({
@@ -510,7 +510,7 @@ describe('platform-bff-client', () => {
 
     expect(client.post).toHaveBeenNthCalledWith(1, '/api/v1/weekly-expenses/p-cashflow/submit', expect.objectContaining({
       tenantId: 'mysc',
-      actor: expect.objectContaining({ id: 'u-pm', role: 'pm', idToken: 'token-submit' }),
+      actor: expect.objectContaining({ id: 'u-pm', role: 'pm' }),
       body: { yearMonth: '2026-06', weekNo: 1 },
       idempotencyKey: 'submit-key-1',
       retries: 0,
@@ -518,7 +518,7 @@ describe('platform-bff-client', () => {
     }));
     expect(client.post).toHaveBeenNthCalledWith(2, '/api/v1/weekly-expenses/p-cashflow/close', expect.objectContaining({
       tenantId: 'mysc',
-      actor: expect.objectContaining({ id: 'u-finance', role: 'finance', idToken: 'token-close' }),
+      actor: expect.objectContaining({ id: 'u-finance', role: 'finance' }),
       body: { yearMonth: '2026-06', weekNo: 1 },
       idempotencyKey: 'close-key-1',
       retries: 0,
@@ -564,7 +564,7 @@ describe('platform-bff-client', () => {
     expect(result.statuses[0]?.state).toBe('closed');
     expect(client.get).toHaveBeenCalledWith('/api/v1/weekly-expenses/p-cashflow/statuses', expect.objectContaining({
       tenantId: 'mysc',
-      actor: expect.objectContaining({ id: 'u-viewer', role: 'viewer', idToken: 'token-status' }),
+      actor: expect.objectContaining({ id: 'u-viewer', role: 'viewer' }),
       timeoutMs: 12000,
     }));
   });
@@ -617,7 +617,7 @@ describe('platform-bff-client', () => {
 
     expect(client.post).toHaveBeenCalledWith('/api/v1/weekly-expenses/p-cells/sheets/default/commands/copy', expect.objectContaining({
       tenantId: 'mysc',
-      actor: expect.objectContaining({ id: 'u-pm', role: 'pm', idToken: 'token-copy' }),
+      actor: expect.objectContaining({ id: 'u-pm', role: 'pm' }),
       body: {
         expectedSheetVersion: 4,
         startRow: 0,

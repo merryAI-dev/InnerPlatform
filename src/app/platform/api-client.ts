@@ -265,6 +265,7 @@ export class PlatformApiClient {
             method,
             headers,
             body,
+            credentials: 'include',
           },
           options.signal,
           timeoutMs,

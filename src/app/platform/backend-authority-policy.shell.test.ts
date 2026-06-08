@@ -41,16 +41,22 @@ describe('backend authority policy', () => {
     expect(source).toContain('weeklyExpense.cells.copy');
   });
 
-  it('requires browser-direct Java auth for BFF-free weekly expense operation', () => {
+  it('requires Java session auth for BFF-free weekly expense operation', () => {
     const filterSource = readText('server/jvm-weekly-api/src/main/java/dev/merryai/innerplatform/weekly/api/InternalServiceTokenFilter.java');
     const verifierSource = readText('server/jvm-weekly-api/src/main/java/dev/merryai/innerplatform/weekly/api/FirebaseBearerTokenVerifier.java');
     const cloudBuild = readText('cloudbuild.jvm-weekly-api.yaml');
+    const apiClient = readText('src/app/platform/api-client.ts');
+    const apiSession = readText('src/app/platform/api-session.ts');
 
-    expect(filterSource).toContain('firebaseBearerTokenVerifier.verify');
+    expect(filterSource).toContain('verifyFirebaseActor');
+    expect(filterSource).toContain('verifySessionCookie');
     expect(filterSource).toContain('withTrustedActorHeaders');
     expect(filterSource).toContain('tenant_mismatch');
     expect(filterSource).toContain('actor_mismatch');
     expect(verifierSource).toContain('verifyIdToken(token, true)');
+    expect(verifierSource).toContain('verifySessionCookie(cookie, true)');
+    expect(apiClient).toContain("credentials: 'include'");
+    expect(apiSession).toContain('/api/v1/auth/session');
     expect(verifierSource).toContain('tenantId');
     expect(verifierSource).toContain('role');
     expect(cloudBuild).toContain('--ingress all');
@@ -108,6 +114,8 @@ describe('backend authority policy', () => {
     expect(deployScript).toContain('eval "$SMOKE_AUTH_ENV"');
     expect(deployScript).toContain('--require-identity-token');
     expect(smokeScript).toContain('--require-identity-token forbids service token fallback');
+    expect(smokeScript).toContain('/api/v1/auth/session');
+    expect(smokeScript).toContain('cookie: sessionCookie');
     expect(tokenScript).toContain('accounts:signInWithPassword');
     expect(tokenScript).toContain('export JVM_WEEKLY_SMOKE_ACTOR_ID');
   });

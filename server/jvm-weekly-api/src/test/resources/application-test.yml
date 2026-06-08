@@ -11,3 +11,4 @@ spring:
 weekly:
   internal-api-token: test-weekly-api-token
   firebase-test-tokens-enabled: true
+  session-cookie-ttl-seconds: 3600

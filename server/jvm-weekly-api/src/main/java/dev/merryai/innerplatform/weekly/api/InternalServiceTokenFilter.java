@@ -58,9 +58,10 @@ public class InternalServiceTokenFilter extends OncePerRequestFilter {
 
         VerifiedFirebaseActor actor;
         try {
-            actor = firebaseBearerTokenVerifier.verify(parseBearer(request.getHeader("authorization")));
+            actor = completeActorFromRequest(verifyFirebaseActor(request), request);
             requireHeaderMatch(request, "x-tenant-id", actor.tenantId(), "tenant_mismatch", "Header tenant does not match token tenant.");
             requireHeaderMatch(request, "x-actor-id", actor.actorId(), "actor_mismatch", "Header actor does not match token subject.");
+            requireCookieMutationHeader(request);
         } catch (WeeklyApiAuthException error) {
             writeAuthError(response, error.statusCode, error.code, error.getMessage());
             return;
@@ -76,7 +77,12 @@ public class InternalServiceTokenFilter extends OncePerRequestFilter {
         if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
             return true;
         }
-        return "GET".equalsIgnoreCase(request.getMethod()) && "/api/v1/health".equals(request.getRequestURI());
+        String path = request.getRequestURI();
+        if ("GET".equalsIgnoreCase(request.getMethod()) && "/api/v1/health".equals(path)) {
+            return true;
+        }
+        return "POST".equalsIgnoreCase(request.getMethod())
+            && ("/api/v1/auth/session".equals(path) || "/api/v1/auth/logout".equals(path));
     }
 
     private boolean tokensMatch(String expected, String supplied) {
@@ -94,6 +100,59 @@ public class InternalServiceTokenFilter extends OncePerRequestFilter {
         if (value.isEmpty()) return "";
         if (!value.toLowerCase(Locale.ROOT).startsWith("bearer ")) return "";
         return value.substring("bearer ".length()).trim();
+    }
+
+    private VerifiedFirebaseActor verifyFirebaseActor(HttpServletRequest request) {
+        String sessionCookie = readCookie(request, WeeklyAuthSessionController.SESSION_COOKIE_NAME);
+        if (!sessionCookie.isBlank()) {
+            return firebaseBearerTokenVerifier.verifySessionCookie(sessionCookie);
+        }
+        return firebaseBearerTokenVerifier.verify(parseBearer(request.getHeader("authorization")));
+    }
+
+    private VerifiedFirebaseActor completeActorFromRequest(VerifiedFirebaseActor actor, HttpServletRequest request) {
+        String tenantId = actor.tenantId();
+        if (tenantId == null || tenantId.isBlank()) {
+            tenantId = readTrustedContextHeader(request, "x-tenant-id", "default");
+        }
+        String role = actor.actorRole();
+        if (role == null || role.isBlank()) {
+            role = readTrustedContextHeader(request, "x-actor-role", "pm").toLowerCase(Locale.ROOT);
+        }
+        return new VerifiedFirebaseActor(tenantId, actor.actorId(), actor.actorEmail(), role);
+    }
+
+    private String readTrustedContextHeader(HttpServletRequest request, String headerName, String fallback) {
+        String value = request.getHeader(headerName);
+        if (value == null || value.isBlank()) return fallback;
+        return value.trim();
+    }
+
+    private String readCookie(HttpServletRequest request, String cookieName) {
+        if (request.getCookies() == null) return "";
+        for (jakarta.servlet.http.Cookie cookie : request.getCookies()) {
+            if (cookieName.equals(cookie.getName())) {
+                return cookie.getValue() == null ? "" : cookie.getValue().trim();
+            }
+        }
+        return "";
+    }
+
+    private void requireCookieMutationHeader(HttpServletRequest request) {
+        if (!isMutationMethod(request.getMethod())) return;
+        if (readCookie(request, WeeklyAuthSessionController.SESSION_COOKIE_NAME).isBlank()) return;
+        String requestId = request.getHeader("x-request-id");
+        if (requestId != null && !requestId.isBlank()) return;
+        throw new WeeklyApiAuthException(
+            HttpServletResponse.SC_FORBIDDEN,
+            "weekly_expense_csrf_header_required",
+            "Session-cookie mutations require x-request-id."
+        );
+    }
+
+    private boolean isMutationMethod(String method) {
+        String normalized = method == null ? "GET" : method.trim().toUpperCase(Locale.ROOT);
+        return "POST".equals(normalized) || "PUT".equals(normalized) || "PATCH".equals(normalized) || "DELETE".equals(normalized);
     }
 
     private void requireHeaderMatch(

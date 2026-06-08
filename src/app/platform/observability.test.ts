@@ -126,7 +126,7 @@ describe('observability', () => {
     expect(init.method).toBe('POST');
 
     const headers = new Headers(init.headers);
-    expect(headers.get('authorization')).toBe('Bearer firebase-id-token');
+    expect(headers.get('authorization')).toBeNull();
     expect(headers.get('x-tenant-id')).toBe('mysc');
     expect(headers.get('x-actor-id')).toBe('u-1');
     expect(headers.get('idempotency-key')).toMatch(/^idem_POST_u-1_/);

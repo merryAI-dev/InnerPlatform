@@ -29,6 +29,7 @@ public class WeeklyApiCorsConfiguration implements WebMvcConfigurer {
                 "x-actor-email"
             )
             .exposedHeaders("x-request-id")
+            .allowCredentials(true)
             .maxAge(600);
     }
 
