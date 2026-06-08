@@ -6,6 +6,13 @@ Date: 2026-06-08
 
 The weekly expense refactor must make the frontend thin.
 
+Storage migration sequencing is tracked in
+[`weekly-expense-firestore-inheritance-postgres-roadmap-2026-06-08.md`](./weekly-expense-firestore-inheritance-postgres-roadmap-2026-06-08.md).
+The current storage decision is to inherit the existing Firestore-shaped weekly
+expense and cashflow data first, move command/calculation/audit authority to the
+server, and treat PostgreSQL as a staged long-term canonical-store candidate
+after migration comparison gates pass.
+
 Frontend code may:
 
 - render sheet state
