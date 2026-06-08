@@ -221,6 +221,8 @@ const rowInsert = await requestJson('POST', `${pathPrefix}/commands/row-insert`,
 });
 assert(rowInsert.commandName === 'weeklyExpense.row.insert', 'row insert command name mismatch', { commandName: rowInsert.commandName });
 assert(Number(rowInsert.affectedRowCount) === 1, 'row insert affected row count mismatch', rowInsert);
+const insertedRowVersion = rowInsert.rowVersions?.find((row) => Number(row.rowIndex) === 2)?.rowVersion;
+assert(Number.isInteger(Number(insertedRowVersion)), 'row insert did not return inserted row version', { rowVersions: rowInsert.rowVersions });
 
 const rowDelete = await requestJson('POST', `${pathPrefix}/commands/row-delete`, {
   idempotencyKey: `smoke-row-delete-${runId}`,
@@ -228,7 +230,7 @@ const rowDelete = await requestJson('POST', `${pathPrefix}/commands/row-delete`,
   startRow: 2,
   rowCount: 1,
   expectedRowVersions: [
-    { rowIndex: 2, rowVersion: 0 },
+    { rowIndex: 2, rowVersion: Number(insertedRowVersion) },
   ],
 });
 assert(rowDelete.commandName === 'weeklyExpense.row.delete', 'row delete command name mismatch', { commandName: rowDelete.commandName });

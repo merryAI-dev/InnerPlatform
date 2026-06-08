@@ -13,9 +13,15 @@ public record RowCommandResponse(
     String sheetKey,
     long sheetVersion,
     Set<Integer> touchedRows,
+    List<RowVersion> rowVersions,
     int affectedRowCount,
     List<CellValidationIssue> cellIssues,
     List<SaveDraftResponse.ActualDelta> actualDelta,
     String auditId
 ) {
+    public record RowVersion(
+        int rowIndex,
+        long rowVersion
+    ) {
+    }
 }

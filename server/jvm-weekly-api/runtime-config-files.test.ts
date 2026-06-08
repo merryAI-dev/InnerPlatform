@@ -22,9 +22,10 @@ describe('JVM weekly API runtime config files', () => {
     const dockerfile = readRepoFile('server/jvm-weekly-api/Dockerfile');
 
     expect(dockerfile).toContain('maven:3.9-eclipse-temurin-21');
-    expect(dockerfile).toContain('eclipse-temurin:21-jre-alpine');
+    expect(dockerfile).toContain('eclipse-temurin:21-jre');
+    expect(dockerfile).not.toContain('eclipse-temurin:21-jre-alpine');
     expect(dockerfile).toContain('ENV WEEKLY_API_PORT=8080');
-    expect(dockerfile).toContain('adduser -S app');
+    expect(dockerfile).toContain('useradd --system');
     expect(dockerfile).toContain('USER app');
     expect(dockerfile).toContain('ENTRYPOINT ["java", "-jar", "/app/jvm-weekly-api.jar"]');
   });

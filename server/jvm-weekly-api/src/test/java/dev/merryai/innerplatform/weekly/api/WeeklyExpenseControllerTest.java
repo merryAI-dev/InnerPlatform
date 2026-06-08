@@ -1447,6 +1447,8 @@ class WeeklyExpenseControllerTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.commandName").value("weeklyExpense.row.insert"))
             .andExpect(jsonPath("$.affectedRowCount").value(1))
+            .andExpect(jsonPath("$.rowVersions[0].rowIndex").value(0))
+            .andExpect(jsonPath("$.rowVersions[0].rowVersion").isNumber())
             .andExpect(jsonPath("$.actualDelta[0].amount").value(1000));
 
         var sheet = sheetRepository.findWithRowsByTenantIdAndProjectIdAndSheetKey("tenant-rows", "project-rows", "default")

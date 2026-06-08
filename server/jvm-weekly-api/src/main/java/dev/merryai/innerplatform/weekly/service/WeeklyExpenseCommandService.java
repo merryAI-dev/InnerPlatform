@@ -61,6 +61,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -1199,6 +1200,7 @@ public class WeeklyExpenseCommandService {
             savedSheet.getSheetKey(),
             savedSheet.getSheetVersion(),
             touchedRows,
+            rowVersionsFor(savedSheet, touchedRows),
             affectedRowCount,
             issues,
             actualDelta,
@@ -1213,6 +1215,21 @@ public class WeeklyExpenseCommandService {
             writeJson(response)
         ));
         return response;
+    }
+
+    private List<RowCommandResponse.RowVersion> rowVersionsFor(
+        WeeklyExpenseSheetEntity sheet,
+        Set<Integer> rowIndexes
+    ) {
+        List<RowCommandResponse.RowVersion> rowVersions = new ArrayList<>();
+        for (Integer rowIndex : rowIndexes) {
+            if (rowIndex == null) continue;
+            sheet.findRow(rowIndex)
+                .map(row -> new RowCommandResponse.RowVersion(row.getRowIndex(), row.getRowVersion()))
+                .ifPresent(rowVersions::add);
+        }
+        rowVersions.sort(Comparator.comparingInt(RowCommandResponse.RowVersion::rowIndex));
+        return rowVersions;
     }
 
     private void requirePasteRectangle(PasteCellsRequest request) {

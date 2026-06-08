@@ -682,6 +682,10 @@ export interface WeeklyExpenseRowCommandResult {
   sheetKey: string;
   sheetVersion: number;
   touchedRows: number[];
+  rowVersions: Array<{
+    rowIndex: number;
+    rowVersion: number;
+  }>;
   affectedRowCount: number;
   cellIssues: WeeklyExpenseSaveDraftResult['cellIssues'];
   actualDelta: WeeklyExpenseSaveDraftResult['actualDelta'];
