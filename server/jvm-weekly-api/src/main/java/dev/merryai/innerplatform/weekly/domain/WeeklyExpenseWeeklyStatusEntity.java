@@ -89,6 +89,10 @@ public class WeeklyExpenseWeeklyStatusEntity {
         return yearMonth;
     }
 
+    public String getTenantId() {
+        return tenantId;
+    }
+
     public String getProjectId() {
         return projectId;
     }
@@ -119,5 +123,23 @@ public class WeeklyExpenseWeeklyStatusEntity {
 
     public Instant getUpdatedAt() {
         return updatedAt;
+    }
+
+    public void restorePersistenceState(
+        String id,
+        String state,
+        String submittedBy,
+        Instant submittedAt,
+        String closedBy,
+        Instant closedAt,
+        Instant updatedAt
+    ) {
+        this.id = id == null || id.isBlank() ? this.id : id.trim();
+        this.state = state == null || state.isBlank() ? this.state : state.trim();
+        this.submittedBy = submittedBy == null || submittedBy.isBlank() ? null : submittedBy.trim();
+        this.submittedAt = submittedAt;
+        this.closedBy = closedBy == null || closedBy.isBlank() ? null : closedBy.trim();
+        this.closedAt = closedAt;
+        if (updatedAt != null) this.updatedAt = updatedAt;
     }
 }

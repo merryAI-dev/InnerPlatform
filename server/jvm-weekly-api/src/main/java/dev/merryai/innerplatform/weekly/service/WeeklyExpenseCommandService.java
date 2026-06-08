@@ -52,15 +52,7 @@ import dev.merryai.innerplatform.weekly.domain.PasteResult;
 import dev.merryai.innerplatform.weekly.domain.SpreadsheetOperationType;
 import dev.merryai.innerplatform.weekly.domain.SpreadsheetSelection;
 import dev.merryai.innerplatform.weekly.domain.SpreadsheetValueType;
-import dev.merryai.innerplatform.weekly.repository.WeeklyExpenseActualRepository;
-import dev.merryai.innerplatform.weekly.repository.WeeklyExpenseAuditEventRepository;
-import dev.merryai.innerplatform.weekly.repository.WeeklyExpenseAuditExportRepository;
-import dev.merryai.innerplatform.weekly.repository.WeeklyExpenseBankImportBatchRepository;
-import dev.merryai.innerplatform.weekly.repository.WeeklyExpenseBankImportLineRepository;
-import dev.merryai.innerplatform.weekly.repository.WeeklyExpenseIdempotencyRepository;
-import dev.merryai.innerplatform.weekly.repository.WeeklyExpenseProjectionRepository;
-import dev.merryai.innerplatform.weekly.repository.WeeklyExpenseSheetRepository;
-import dev.merryai.innerplatform.weekly.repository.WeeklyExpenseWeeklyStatusRepository;
+import dev.merryai.innerplatform.weekly.storage.WeeklyExpensePersistence;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -101,41 +93,17 @@ public class WeeklyExpenseCommandService {
     private static final Pattern WEEK_LABEL_PATTERN = Pattern.compile("(20\\d{2}-\\d{2}).*?([1-6])");
     private static final int ROW_REINDEX_TEMPORARY_OFFSET = 1_000_000;
 
-    private final WeeklyExpenseSheetRepository sheetRepository;
-    private final WeeklyExpenseIdempotencyRepository idempotencyRepository;
-    private final WeeklyExpenseAuditEventRepository auditEventRepository;
-    private final WeeklyExpenseActualRepository actualRepository;
-    private final WeeklyExpenseProjectionRepository projectionRepository;
-    private final WeeklyExpenseWeeklyStatusRepository weeklyStatusRepository;
-    private final WeeklyExpenseAuditExportRepository auditExportRepository;
-    private final WeeklyExpenseBankImportBatchRepository bankImportBatchRepository;
-    private final WeeklyExpenseBankImportLineRepository bankImportLineRepository;
+    private final WeeklyExpensePersistence persistence;
     private final WeeklyExpenseAuthorizationService authorizationService;
     private final WeeklyExpenseSpreadsheetService spreadsheetService;
     private final ObjectMapper objectMapper;
 
     public WeeklyExpenseCommandService(
-        WeeklyExpenseSheetRepository sheetRepository,
-        WeeklyExpenseIdempotencyRepository idempotencyRepository,
-        WeeklyExpenseAuditEventRepository auditEventRepository,
-        WeeklyExpenseActualRepository actualRepository,
-        WeeklyExpenseProjectionRepository projectionRepository,
-        WeeklyExpenseWeeklyStatusRepository weeklyStatusRepository,
-        WeeklyExpenseAuditExportRepository auditExportRepository,
-        WeeklyExpenseBankImportBatchRepository bankImportBatchRepository,
-        WeeklyExpenseBankImportLineRepository bankImportLineRepository,
+        WeeklyExpensePersistence persistence,
         WeeklyExpenseAuthorizationService authorizationService,
         ObjectMapper objectMapper
     ) {
-        this.sheetRepository = sheetRepository;
-        this.idempotencyRepository = idempotencyRepository;
-        this.auditEventRepository = auditEventRepository;
-        this.actualRepository = actualRepository;
-        this.projectionRepository = projectionRepository;
-        this.weeklyStatusRepository = weeklyStatusRepository;
-        this.auditExportRepository = auditExportRepository;
-        this.bankImportBatchRepository = bankImportBatchRepository;
-        this.bankImportLineRepository = bankImportLineRepository;
+        this.persistence = persistence;
         this.authorizationService = authorizationService;
         this.objectMapper = objectMapper;
         this.spreadsheetService = new WeeklyExpenseSpreadsheetService(new dev.merryai.innerplatform.weekly.domain.WeeklyExpenseCellValidator());
@@ -149,7 +117,7 @@ public class WeeklyExpenseCommandService {
     public SaveDraftResponse saveDraft(TrustedActorContext actor, String projectId, String sheetKey, SaveDraftRequest request) {
         authorizationService.requireAllowed(SAVE_DRAFT_COMMAND, actor);
         String requestHash = hashJson(request);
-        var existing = idempotencyRepository.findByTenantIdAndIdempotencyKey(actor.tenantId(), request.idempotencyKey());
+        var existing = persistence.findIdempotency(actor.tenantId(), request.idempotencyKey());
         if (existing.isPresent()) {
             WeeklyExpenseIdempotencyEntity idempotency = existing.get();
             if (!idempotency.getRequestHash().equals(requestHash)) {
@@ -163,9 +131,9 @@ public class WeeklyExpenseCommandService {
         replaceRows(sheet, request.rows());
         List<CellValidationIssue> issues = spreadsheetService.validateAndRecalculateRows(sheet);
         List<SaveDraftResponse.ActualDelta> actualDelta = persistActuals(sheet);
-        WeeklyExpenseSheetEntity savedSheet = sheetRepository.saveAndFlush(sheet);
+        WeeklyExpenseSheetEntity savedSheet = persistence.saveSheet(sheet);
 
-        WeeklyExpenseAuditEventEntity auditEvent = auditEventRepository.save(new WeeklyExpenseAuditEventEntity(
+        WeeklyExpenseAuditEventEntity auditEvent = persistence.saveAuditEvent(new WeeklyExpenseAuditEventEntity(
             actor.tenantId(),
             projectId,
             sheetKey,
@@ -190,7 +158,7 @@ public class WeeklyExpenseCommandService {
             actualDelta,
             auditEvent.getId()
         );
-        idempotencyRepository.save(new WeeklyExpenseIdempotencyEntity(
+        persistence.saveIdempotency(new WeeklyExpenseIdempotencyEntity(
             actor.tenantId(),
             projectId,
             request.idempotencyKey(),
@@ -209,8 +177,7 @@ public class WeeklyExpenseCommandService {
     ) {
         authorizationService.requireAllowed(BANK_IMPORT_LIST_LINES_COMMAND, actor);
         String normalizedStatus = normalizeImportLineStatus(status);
-        List<WeeklyExpenseBankImportLineEntity> lines = bankImportLineRepository
-            .findByTenantIdAndProjectIdAndOptionalStatus(actor.tenantId(), projectId, normalizedStatus);
+        List<WeeklyExpenseBankImportLineEntity> lines = persistence.findBankImportLines(actor.tenantId(), projectId, normalizedStatus);
         List<BankStatementImportLinesResponse.Line> responseLines = lines.stream()
             .map(line -> new BankStatementImportLinesResponse.Line(
                 line.getId(),
@@ -250,7 +217,7 @@ public class WeeklyExpenseCommandService {
     ) {
         authorizationService.requireAllowed(BANK_IMPORT_BATCH_COMMAND, actor);
         String requestHash = hashJson(request);
-        var existing = idempotencyRepository.findByTenantIdAndIdempotencyKey(actor.tenantId(), request.idempotencyKey());
+        var existing = persistence.findIdempotency(actor.tenantId(), request.idempotencyKey());
         if (existing.isPresent()) {
             WeeklyExpenseIdempotencyEntity idempotency = existing.get();
             if (!idempotency.getRequestHash().equals(requestHash)) {
@@ -280,7 +247,7 @@ public class WeeklyExpenseCommandService {
                 ));
                 continue;
             }
-            var duplicate = bankImportLineRepository.findByTenantIdAndProjectIdAndSourceLineKey(
+            var duplicate = persistence.findBankImportLineBySourceKey(
                 actor.tenantId(),
                 projectId,
                 line.sourceLineKey()
@@ -309,7 +276,7 @@ public class WeeklyExpenseCommandService {
             ));
         }
 
-        WeeklyExpenseBankImportBatchEntity savedBatch = bankImportBatchRepository.saveAndFlush(batch);
+        WeeklyExpenseBankImportBatchEntity savedBatch = persistence.saveBankImportBatch(batch);
         List<ImportBankStatementBatchResponse.LineResult> lineResults = new ArrayList<>();
         for (WeeklyExpenseBankImportLineEntity line : savedBatch.getLines()) {
             lineResults.add(new ImportBankStatementBatchResponse.LineResult(
@@ -327,7 +294,7 @@ public class WeeklyExpenseCommandService {
         metadata.put("stagedLineCount", savedBatch.getLines().size());
         metadata.put("duplicateLineCount", duplicateLines.size());
 
-        WeeklyExpenseAuditEventEntity auditEvent = auditEventRepository.save(new WeeklyExpenseAuditEventEntity(
+        WeeklyExpenseAuditEventEntity auditEvent = persistence.saveAuditEvent(new WeeklyExpenseAuditEventEntity(
             actor.tenantId(),
             projectId,
             "bank-import",
@@ -348,7 +315,7 @@ public class WeeklyExpenseCommandService {
             lineResults,
             auditEvent.getId()
         );
-        idempotencyRepository.save(new WeeklyExpenseIdempotencyEntity(
+        persistence.saveIdempotency(new WeeklyExpenseIdempotencyEntity(
             actor.tenantId(),
             projectId,
             request.idempotencyKey(),
@@ -367,7 +334,7 @@ public class WeeklyExpenseCommandService {
     ) {
         authorizationService.requireAllowed(BANK_IMPORT_APPLY_ITEMS_COMMAND, actor);
         String requestHash = hashJson(request);
-        var existing = idempotencyRepository.findByTenantIdAndIdempotencyKey(actor.tenantId(), request.idempotencyKey());
+        var existing = persistence.findIdempotency(actor.tenantId(), request.idempotencyKey());
         if (existing.isPresent()) {
             WeeklyExpenseIdempotencyEntity idempotency = existing.get();
             if (!idempotency.getRequestHash().equals(requestHash)) {
@@ -386,8 +353,8 @@ public class WeeklyExpenseCommandService {
         if (requestedLineIds.isEmpty()) {
             throw new IllegalArgumentException("At least one bank import line must be selected.");
         }
-        List<WeeklyExpenseBankImportLineEntity> lockedLines = bankImportLineRepository
-            .findLockedByTenantIdAndProjectIdAndIdIn(actor.tenantId(), projectId, requestedLineIds);
+        List<WeeklyExpenseBankImportLineEntity> lockedLines = persistence
+            .findBankImportLinesForUpdate(actor.tenantId(), projectId, requestedLineIds);
         if (lockedLines.size() != requestedLineIds.size()) {
             throw new WeeklyExpenseConflictException("Selected bank import lines changed. Reload and retry.");
         }
@@ -445,12 +412,12 @@ public class WeeklyExpenseCommandService {
 
         List<CellValidationIssue> issues = spreadsheetService.validateAndRecalculateRows(sheet);
         List<SaveDraftResponse.ActualDelta> actualDelta = persistActuals(sheet);
-        WeeklyExpenseSheetEntity savedSheet = sheetRepository.saveAndFlush(sheet);
+        WeeklyExpenseSheetEntity savedSheet = persistence.saveSheet(sheet);
         for (WeeklyExpenseBankImportLineEntity line : lockedLines) {
             WeeklyExpenseRowEntity row = rowsByLineId.get(line.getId());
             line.markApplied(savedSheet.getSheetKey(), row == null ? null : row.getId(), actor.id());
         }
-        bankImportLineRepository.saveAll(lockedLines);
+        persistence.saveBankImportLines(lockedLines);
 
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("sheetId", savedSheet.getId());
@@ -461,7 +428,7 @@ public class WeeklyExpenseCommandService {
         metadata.put("validationIssueCount", issues.size());
         metadata.put("actualDeltaCount", actualDelta.size());
 
-        WeeklyExpenseAuditEventEntity auditEvent = auditEventRepository.save(new WeeklyExpenseAuditEventEntity(
+        WeeklyExpenseAuditEventEntity auditEvent = persistence.saveAuditEvent(new WeeklyExpenseAuditEventEntity(
             actor.tenantId(),
             projectId,
             savedSheet.getSheetKey(),
@@ -485,7 +452,7 @@ public class WeeklyExpenseCommandService {
             actualDelta,
             auditEvent.getId()
         );
-        idempotencyRepository.save(new WeeklyExpenseIdempotencyEntity(
+        persistence.saveIdempotency(new WeeklyExpenseIdempotencyEntity(
             actor.tenantId(),
             projectId,
             request.idempotencyKey(),
@@ -500,7 +467,7 @@ public class WeeklyExpenseCommandService {
     public UpsertProjectionResponse upsertProjection(TrustedActorContext actor, String projectId, UpsertProjectionRequest request) {
         authorizationService.requireAllowed(UPSERT_PROJECTION_COMMAND, actor);
         String requestHash = hashJson(request);
-        var existing = idempotencyRepository.findByTenantIdAndIdempotencyKey(actor.tenantId(), request.idempotencyKey());
+        var existing = persistence.findIdempotency(actor.tenantId(), request.idempotencyKey());
         if (existing.isPresent()) {
             WeeklyExpenseIdempotencyEntity idempotency = existing.get();
             if (!idempotency.getRequestHash().equals(requestHash)) {
@@ -511,8 +478,8 @@ public class WeeklyExpenseCommandService {
 
         List<CashflowSnapshotResponse.ProjectionLine> projection = new ArrayList<>();
         for (UpsertProjectionRequest.ProjectionLinePatch line : request.lines()) {
-            WeeklyExpenseProjectionEntity projectionEntity = projectionRepository
-                .findByTenantIdAndProjectIdAndYearMonthAndWeekNoAndCashflowLine(
+            WeeklyExpenseProjectionEntity projectionEntity = persistence
+                .findProjectionLine(
                     actor.tenantId(),
                     projectId,
                     line.yearMonth(),
@@ -527,7 +494,7 @@ public class WeeklyExpenseCommandService {
                     line.cashflowLine()
                 ));
             projectionEntity.setAmount(line.amount());
-            WeeklyExpenseProjectionEntity saved = projectionRepository.save(projectionEntity);
+            WeeklyExpenseProjectionEntity saved = persistence.saveProjection(projectionEntity);
             projection.add(new CashflowSnapshotResponse.ProjectionLine(
                 saved.getYearMonth(),
                 saved.getWeekNo(),
@@ -536,7 +503,7 @@ public class WeeklyExpenseCommandService {
             ));
         }
 
-        WeeklyExpenseAuditEventEntity auditEvent = auditEventRepository.save(new WeeklyExpenseAuditEventEntity(
+        WeeklyExpenseAuditEventEntity auditEvent = persistence.saveAuditEvent(new WeeklyExpenseAuditEventEntity(
             actor.tenantId(),
             projectId,
             "projection",
@@ -555,7 +522,7 @@ public class WeeklyExpenseCommandService {
             projection,
             auditEvent.getId()
         );
-        idempotencyRepository.save(new WeeklyExpenseIdempotencyEntity(
+        persistence.saveIdempotency(new WeeklyExpenseIdempotencyEntity(
             actor.tenantId(),
             projectId,
             request.idempotencyKey(),
@@ -570,7 +537,7 @@ public class WeeklyExpenseCommandService {
     public SubmitWeekResponse submitWeek(TrustedActorContext actor, String projectId, SubmitWeekRequest request) {
         authorizationService.requireAllowed(SUBMIT_WEEK_COMMAND, actor);
         String requestHash = hashJson(request);
-        var existing = idempotencyRepository.findByTenantIdAndIdempotencyKey(actor.tenantId(), request.idempotencyKey());
+        var existing = persistence.findIdempotency(actor.tenantId(), request.idempotencyKey());
         if (existing.isPresent()) {
             WeeklyExpenseIdempotencyEntity idempotency = existing.get();
             if (!idempotency.getRequestHash().equals(requestHash)) {
@@ -579,8 +546,8 @@ public class WeeklyExpenseCommandService {
             return readJson(idempotency.getResponseJson(), SubmitWeekResponse.class);
         }
 
-        WeeklyExpenseWeeklyStatusEntity status = weeklyStatusRepository
-            .findByTenantIdAndProjectIdAndYearMonthAndWeekNo(
+        WeeklyExpenseWeeklyStatusEntity status = persistence
+            .findWeeklyStatus(
                 actor.tenantId(),
                 projectId,
                 request.yearMonth(),
@@ -597,14 +564,14 @@ public class WeeklyExpenseCommandService {
         } catch (IllegalStateException error) {
             throw new WeeklyExpenseConflictException(error.getMessage());
         }
-        WeeklyExpenseWeeklyStatusEntity saved = weeklyStatusRepository.save(status);
+        WeeklyExpenseWeeklyStatusEntity saved = persistence.saveWeeklyStatus(status);
 
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("yearMonth", request.yearMonth());
         metadata.put("weekNo", request.weekNo());
         metadata.put("state", saved.getState());
 
-        WeeklyExpenseAuditEventEntity auditEvent = auditEventRepository.save(new WeeklyExpenseAuditEventEntity(
+        WeeklyExpenseAuditEventEntity auditEvent = persistence.saveAuditEvent(new WeeklyExpenseAuditEventEntity(
             actor.tenantId(),
             projectId,
             "weekly-status",
@@ -624,7 +591,7 @@ public class WeeklyExpenseCommandService {
             saved.getState(),
             auditEvent.getId()
         );
-        idempotencyRepository.save(new WeeklyExpenseIdempotencyEntity(
+        persistence.saveIdempotency(new WeeklyExpenseIdempotencyEntity(
             actor.tenantId(),
             projectId,
             request.idempotencyKey(),
@@ -639,7 +606,7 @@ public class WeeklyExpenseCommandService {
     public CloseWeekResponse closeWeek(TrustedActorContext actor, String projectId, CloseWeekRequest request) {
         authorizationService.requireAllowed(CLOSE_WEEK_COMMAND, actor);
         String requestHash = hashJson(request);
-        var existing = idempotencyRepository.findByTenantIdAndIdempotencyKey(actor.tenantId(), request.idempotencyKey());
+        var existing = persistence.findIdempotency(actor.tenantId(), request.idempotencyKey());
         if (existing.isPresent()) {
             WeeklyExpenseIdempotencyEntity idempotency = existing.get();
             if (!idempotency.getRequestHash().equals(requestHash)) {
@@ -648,8 +615,8 @@ public class WeeklyExpenseCommandService {
             return readJson(idempotency.getResponseJson(), CloseWeekResponse.class);
         }
 
-        WeeklyExpenseWeeklyStatusEntity status = weeklyStatusRepository
-            .findByTenantIdAndProjectIdAndYearMonthAndWeekNo(
+        WeeklyExpenseWeeklyStatusEntity status = persistence
+            .findWeeklyStatus(
                 actor.tenantId(),
                 projectId,
                 request.yearMonth(),
@@ -661,14 +628,14 @@ public class WeeklyExpenseCommandService {
         } catch (IllegalStateException error) {
             throw new WeeklyExpenseConflictException(error.getMessage());
         }
-        WeeklyExpenseWeeklyStatusEntity saved = weeklyStatusRepository.save(status);
+        WeeklyExpenseWeeklyStatusEntity saved = persistence.saveWeeklyStatus(status);
 
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("yearMonth", request.yearMonth());
         metadata.put("weekNo", request.weekNo());
         metadata.put("state", saved.getState());
 
-        WeeklyExpenseAuditEventEntity auditEvent = auditEventRepository.save(new WeeklyExpenseAuditEventEntity(
+        WeeklyExpenseAuditEventEntity auditEvent = persistence.saveAuditEvent(new WeeklyExpenseAuditEventEntity(
             actor.tenantId(),
             projectId,
             "weekly-status",
@@ -688,7 +655,7 @@ public class WeeklyExpenseCommandService {
             saved.getState(),
             auditEvent.getId()
         );
-        idempotencyRepository.save(new WeeklyExpenseIdempotencyEntity(
+        persistence.saveIdempotency(new WeeklyExpenseIdempotencyEntity(
             actor.tenantId(),
             projectId,
             request.idempotencyKey(),
@@ -707,7 +674,7 @@ public class WeeklyExpenseCommandService {
     ) {
         authorizationService.requireAllowed(AUDIT_EXPORT_CREATE_COMMAND, actor);
         String requestHash = hashJson(request);
-        var existing = idempotencyRepository.findByTenantIdAndIdempotencyKey(actor.tenantId(), request.idempotencyKey());
+        var existing = persistence.findIdempotency(actor.tenantId(), request.idempotencyKey());
         if (existing.isPresent()) {
             WeeklyExpenseIdempotencyEntity idempotency = existing.get();
             if (!idempotency.getRequestHash().equals(requestHash)) {
@@ -717,18 +684,16 @@ public class WeeklyExpenseCommandService {
         }
 
         String artifactType = normalizeExportFormat(request.format());
-        List<WeeklyExpenseProjectionEntity> projection = projectionRepository
-            .findByTenantIdAndProjectIdOrderByYearMonthAscWeekNoAscCashflowLineAsc(actor.tenantId(), projectId);
-        List<WeeklyExpenseActualEntity> actual = actualRepository
-            .findByTenantIdAndProjectIdOrderByYearMonthAscWeekNoAscSheetKeyAscCashflowLineAsc(actor.tenantId(), projectId);
+        List<WeeklyExpenseProjectionEntity> projection = persistence.findProjectionLinesForAudit(actor.tenantId(), projectId);
+        List<WeeklyExpenseActualEntity> actual = persistence.findActualLinesForAudit(actor.tenantId(), projectId);
         List<WeeklyExpenseAuditEventEntity> auditEvents = Boolean.FALSE.equals(request.includeAuditSummary())
             ? List.of()
-            : auditEventRepository.findByTenantIdAndProjectIdOrderByCreatedAtAsc(actor.tenantId(), projectId);
+            : persistence.findAuditEventsForAudit(actor.tenantId(), projectId);
 
         String content = buildAuditExportCsv(projectId, projection, actual, auditEvents);
         String digest = sha256(content);
         String fileName = sanitizeFileName(projectId) + "-weekly-expense-audit.csv";
-        WeeklyExpenseAuditExportEntity artifact = auditExportRepository.save(new WeeklyExpenseAuditExportEntity(
+        WeeklyExpenseAuditExportEntity artifact = persistence.saveAuditExport(new WeeklyExpenseAuditExportEntity(
             actor.tenantId(),
             projectId,
             artifactType,
@@ -750,7 +715,7 @@ public class WeeklyExpenseCommandService {
         metadata.put("actualLineCount", artifact.getActualLineCount());
         metadata.put("auditEventCount", artifact.getAuditEventCount());
 
-        WeeklyExpenseAuditEventEntity auditEvent = auditEventRepository.save(new WeeklyExpenseAuditEventEntity(
+        WeeklyExpenseAuditEventEntity auditEvent = persistence.saveAuditEvent(new WeeklyExpenseAuditEventEntity(
             actor.tenantId(),
             projectId,
             "audit-export",
@@ -775,7 +740,7 @@ public class WeeklyExpenseCommandService {
             artifact.getArtifactContent(),
             auditEvent.getId()
         );
-        idempotencyRepository.save(new WeeklyExpenseIdempotencyEntity(
+        persistence.saveIdempotency(new WeeklyExpenseIdempotencyEntity(
             actor.tenantId(),
             projectId,
             request.idempotencyKey(),
@@ -790,7 +755,7 @@ public class WeeklyExpenseCommandService {
     public CellCommandResponse patchCells(TrustedActorContext actor, String projectId, String sheetKey, CellPatchCommandRequest request) {
         authorizationService.requireAllowed(CELL_PATCH_COMMAND, actor);
         String requestHash = hashJson(request);
-        var existing = idempotencyRepository.findByTenantIdAndIdempotencyKey(actor.tenantId(), request.idempotencyKey());
+        var existing = persistence.findIdempotency(actor.tenantId(), request.idempotencyKey());
         if (existing.isPresent()) {
             WeeklyExpenseIdempotencyEntity idempotency = existing.get();
             if (!idempotency.getRequestHash().equals(requestHash)) {
@@ -828,7 +793,7 @@ public class WeeklyExpenseCommandService {
     public CellCommandResponse copyCells(TrustedActorContext actor, String projectId, String sheetKey, CopyCellsRequest request) {
         authorizationService.requireAllowed(CELLS_COPY_COMMAND, actor);
         String requestHash = hashJson(request);
-        var existing = idempotencyRepository.findByTenantIdAndIdempotencyKey(actor.tenantId(), request.idempotencyKey());
+        var existing = persistence.findIdempotency(actor.tenantId(), request.idempotencyKey());
         if (existing.isPresent()) {
             WeeklyExpenseIdempotencyEntity idempotency = existing.get();
             if (!idempotency.getRequestHash().equals(requestHash)) {
@@ -867,7 +832,7 @@ public class WeeklyExpenseCommandService {
     public CellCommandResponse pasteCells(TrustedActorContext actor, String projectId, String sheetKey, PasteCellsRequest request) {
         authorizationService.requireAllowed(CELLS_PASTE_COMMAND, actor);
         String requestHash = hashJson(request);
-        var existing = idempotencyRepository.findByTenantIdAndIdempotencyKey(actor.tenantId(), request.idempotencyKey());
+        var existing = persistence.findIdempotency(actor.tenantId(), request.idempotencyKey());
         if (existing.isPresent()) {
             WeeklyExpenseIdempotencyEntity idempotency = existing.get();
             if (!idempotency.getRequestHash().equals(requestHash)) {
@@ -916,7 +881,7 @@ public class WeeklyExpenseCommandService {
     public CellCommandResponse cutCells(TrustedActorContext actor, String projectId, String sheetKey, CutCellsRequest request) {
         authorizationService.requireAllowed(CELLS_CUT_COMMAND, actor);
         String requestHash = hashJson(request);
-        var existing = idempotencyRepository.findByTenantIdAndIdempotencyKey(actor.tenantId(), request.idempotencyKey());
+        var existing = persistence.findIdempotency(actor.tenantId(), request.idempotencyKey());
         if (existing.isPresent()) {
             WeeklyExpenseIdempotencyEntity idempotency = existing.get();
             if (!idempotency.getRequestHash().equals(requestHash)) {
@@ -957,7 +922,7 @@ public class WeeklyExpenseCommandService {
     public RowCommandResponse insertRows(TrustedActorContext actor, String projectId, String sheetKey, RowInsertRequest request) {
         authorizationService.requireAllowed(ROW_INSERT_COMMAND, actor);
         String requestHash = hashJson(request);
-        var existing = idempotencyRepository.findByTenantIdAndIdempotencyKey(actor.tenantId(), request.idempotencyKey());
+        var existing = persistence.findIdempotency(actor.tenantId(), request.idempotencyKey());
         if (existing.isPresent()) {
             WeeklyExpenseIdempotencyEntity idempotency = existing.get();
             if (!idempotency.getRequestHash().equals(requestHash)) {
@@ -973,7 +938,7 @@ public class WeeklyExpenseCommandService {
             throw new IllegalArgumentException("Row insert would exceed weekly expense sheet row limit.");
         }
         sheet.moveRowsToTemporaryIndexesFrom(request.startRow(), ROW_REINDEX_TEMPORARY_OFFSET);
-        sheetRepository.saveAndFlush(sheet);
+        persistence.flushSheet(sheet);
         Set<Integer> touchedRows = new LinkedHashSet<>(sheet.finishInsertRowsFromTemporaryIndexes(
             request.startRow(),
             request.rowCount(),
@@ -997,7 +962,7 @@ public class WeeklyExpenseCommandService {
     public RowCommandResponse deleteRows(TrustedActorContext actor, String projectId, String sheetKey, RowDeleteRequest request) {
         authorizationService.requireAllowed(ROW_DELETE_COMMAND, actor);
         String requestHash = hashJson(request);
-        var existing = idempotencyRepository.findByTenantIdAndIdempotencyKey(actor.tenantId(), request.idempotencyKey());
+        var existing = persistence.findIdempotency(actor.tenantId(), request.idempotencyKey());
         if (existing.isPresent()) {
             WeeklyExpenseIdempotencyEntity idempotency = existing.get();
             if (!idempotency.getRequestHash().equals(requestHash)) {
@@ -1010,7 +975,7 @@ public class WeeklyExpenseCommandService {
         requireRowSpan(request.startRow(), request.rowCount());
         requireExpectedRowVersions(sheet, request.expectedRowVersions());
         sheet.moveRowsToTemporaryIndexesFrom(request.startRow(), ROW_REINDEX_TEMPORARY_OFFSET);
-        sheetRepository.saveAndFlush(sheet);
+        persistence.flushSheet(sheet);
         Set<Integer> touchedRows = new LinkedHashSet<>(sheet.finishDeleteRowsFromTemporaryIndexes(
             request.startRow(),
             request.rowCount(),
@@ -1037,8 +1002,7 @@ public class WeeklyExpenseCommandService {
         String sheetName,
         Long expectedSheetVersion
     ) {
-        Optional<WeeklyExpenseSheetEntity> existing = sheetRepository
-            .findLockedByTenantIdAndProjectIdAndSheetKey(tenantId, projectId, sheetKey);
+        Optional<WeeklyExpenseSheetEntity> existing = persistence.findSheetForUpdate(tenantId, projectId, sheetKey);
         if (existing.isEmpty()) {
             return new WeeklyExpenseSheetEntity(tenantId, projectId, sheetKey, sheetName);
         }
@@ -1061,8 +1025,8 @@ public class WeeklyExpenseCommandService {
         String sheetKey,
         Long expectedSheetVersion
     ) {
-        WeeklyExpenseSheetEntity sheet = sheetRepository
-            .findLockedByTenantIdAndProjectIdAndSheetKey(tenantId, projectId, sheetKey)
+        WeeklyExpenseSheetEntity sheet = persistence
+            .findSheetForUpdate(tenantId, projectId, sheetKey)
             .orElseThrow(() -> new WeeklyExpenseConflictException("Cannot copy from a sheet that does not exist."));
         if (expectedSheetVersion == null) {
             throw new WeeklyExpenseConflictException("Existing sheet copy requires expectedSheetVersion.");
@@ -1093,7 +1057,7 @@ public class WeeklyExpenseCommandService {
         metadata.put("touchedCellCount", clipboard.cells().size());
         metadata.put("depth", clipboard.depth());
 
-        WeeklyExpenseAuditEventEntity auditEvent = auditEventRepository.save(new WeeklyExpenseAuditEventEntity(
+        WeeklyExpenseAuditEventEntity auditEvent = persistence.saveAuditEvent(new WeeklyExpenseAuditEventEntity(
             tenantId,
             projectId,
             sheetKey,
@@ -1118,7 +1082,7 @@ public class WeeklyExpenseCommandService {
             clipboard,
             auditEvent.getId()
         );
-        idempotencyRepository.save(new WeeklyExpenseIdempotencyEntity(
+        persistence.saveIdempotency(new WeeklyExpenseIdempotencyEntity(
             tenantId,
             projectId,
             idempotencyKey,
@@ -1144,7 +1108,7 @@ public class WeeklyExpenseCommandService {
     ) {
         List<CellValidationIssue> issues = spreadsheetService.validateAndRecalculateRows(sheet);
         List<SaveDraftResponse.ActualDelta> actualDelta = persistActuals(sheet);
-        WeeklyExpenseSheetEntity savedSheet = sheetRepository.saveAndFlush(sheet);
+        WeeklyExpenseSheetEntity savedSheet = persistence.saveSheet(sheet);
 
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("sheetId", savedSheet.getId());
@@ -1155,7 +1119,7 @@ public class WeeklyExpenseCommandService {
         metadata.put("validationIssueCount", issues.size());
         metadata.put("actualDeltaCount", actualDelta.size());
 
-        WeeklyExpenseAuditEventEntity auditEvent = auditEventRepository.save(new WeeklyExpenseAuditEventEntity(
+        WeeklyExpenseAuditEventEntity auditEvent = persistence.saveAuditEvent(new WeeklyExpenseAuditEventEntity(
             tenantId,
             projectId,
             sheetKey,
@@ -1180,7 +1144,7 @@ public class WeeklyExpenseCommandService {
             clipboard,
             auditEvent.getId()
         );
-        idempotencyRepository.save(new WeeklyExpenseIdempotencyEntity(
+        persistence.saveIdempotency(new WeeklyExpenseIdempotencyEntity(
             tenantId,
             projectId,
             idempotencyKey,
@@ -1205,7 +1169,7 @@ public class WeeklyExpenseCommandService {
     ) {
         List<CellValidationIssue> issues = spreadsheetService.validateAndRecalculateRows(sheet);
         List<SaveDraftResponse.ActualDelta> actualDelta = persistActuals(sheet);
-        WeeklyExpenseSheetEntity savedSheet = sheetRepository.saveAndFlush(sheet);
+        WeeklyExpenseSheetEntity savedSheet = persistence.saveSheet(sheet);
 
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("sheetId", savedSheet.getId());
@@ -1216,7 +1180,7 @@ public class WeeklyExpenseCommandService {
         metadata.put("validationIssueCount", issues.size());
         metadata.put("actualDeltaCount", actualDelta.size());
 
-        WeeklyExpenseAuditEventEntity auditEvent = auditEventRepository.save(new WeeklyExpenseAuditEventEntity(
+        WeeklyExpenseAuditEventEntity auditEvent = persistence.saveAuditEvent(new WeeklyExpenseAuditEventEntity(
             tenantId,
             projectId,
             sheetKey,
@@ -1240,7 +1204,7 @@ public class WeeklyExpenseCommandService {
             actualDelta,
             auditEvent.getId()
         );
-        idempotencyRepository.save(new WeeklyExpenseIdempotencyEntity(
+        persistence.saveIdempotency(new WeeklyExpenseIdempotencyEntity(
             tenantId,
             projectId,
             idempotencyKey,
@@ -1335,9 +1299,27 @@ public class WeeklyExpenseCommandService {
     }
 
     private void replaceRows(WeeklyExpenseSheetEntity sheet, List<SaveDraftRequest.RowPatch> rows) {
+        requireUniqueRowPatchIdentities(rows);
+        Map<Integer, ExistingRowIdentity> existingByIndex = new LinkedHashMap<>();
+        Map<String, ExistingRowIdentity> existingById = new LinkedHashMap<>();
+        Map<String, ExistingRowIdentity> existingBySourceTx = new LinkedHashMap<>();
+        for (WeeklyExpenseRowEntity existing : sheet.getRows()) {
+            ExistingRowIdentity identity = new ExistingRowIdentity(existing.getId(), existing.getRowVersion(), existing.getSourceTxId());
+            existingByIndex.put(existing.getRowIndex(), identity);
+            if (existing.getId() != null && !existing.getId().isBlank()) {
+                existingById.put(existing.getId(), identity);
+            }
+            if (existing.getSourceTxId() != null && !existing.getSourceTxId().isBlank()) {
+                existingBySourceTx.put(existing.getSourceTxId(), identity);
+            }
+        }
         sheet.getRows().clear();
         for (SaveDraftRequest.RowPatch rowPatch : rows) {
             WeeklyExpenseRowEntity row = sheet.rowAt(rowPatch.rowIndex());
+            ExistingRowIdentity identity = resolveExistingRowIdentity(rowPatch, existingById, existingBySourceTx, existingByIndex);
+            if (identity != null) {
+                row.restorePersistenceState(identity.id(), identity.rowVersion());
+            }
             row.setSourceTxId(rowPatch.sourceTxId());
             row.setEntryKind(rowPatch.entryKind());
             for (SaveDraftRequest.CellPatch cellPatch : rowPatch.cells()) {
@@ -1347,6 +1329,48 @@ public class WeeklyExpenseCommandService {
                 cell.setUserEdited(Boolean.TRUE.equals(cellPatch.userEdited()));
             }
         }
+    }
+
+    private void requireUniqueRowPatchIdentities(List<SaveDraftRequest.RowPatch> rows) {
+        Set<Integer> rowIndexes = new LinkedHashSet<>();
+        Set<String> tempIds = new LinkedHashSet<>();
+        Set<String> sourceTxIds = new LinkedHashSet<>();
+        for (SaveDraftRequest.RowPatch row : rows) {
+            if (!rowIndexes.add(row.rowIndex())) {
+                throw new WeeklyExpenseConflictException("Duplicate row index in save draft request: " + row.rowIndex());
+            }
+            String tempId = normalizeOptionalIdentity(row.tempId());
+            if (tempId != null && !tempIds.add(tempId)) {
+                throw new WeeklyExpenseConflictException("Duplicate row tempId in save draft request.");
+            }
+            String sourceTxId = normalizeOptionalIdentity(row.sourceTxId());
+            if (sourceTxId != null && !sourceTxIds.add(sourceTxId)) {
+                throw new WeeklyExpenseConflictException("Duplicate source transaction in save draft request.");
+            }
+        }
+    }
+
+    private String normalizeOptionalIdentity(String value) {
+        if (value == null) return null;
+        String normalized = value.trim();
+        return normalized.isBlank() ? null : normalized;
+    }
+
+    private ExistingRowIdentity resolveExistingRowIdentity(
+        SaveDraftRequest.RowPatch rowPatch,
+        Map<String, ExistingRowIdentity> existingById,
+        Map<String, ExistingRowIdentity> existingBySourceTx,
+        Map<Integer, ExistingRowIdentity> existingByIndex
+    ) {
+        if (rowPatch.tempId() != null && !rowPatch.tempId().isBlank()) {
+            ExistingRowIdentity byId = existingById.get(rowPatch.tempId());
+            if (byId != null) return byId;
+        }
+        if (rowPatch.sourceTxId() != null && !rowPatch.sourceTxId().isBlank()) {
+            ExistingRowIdentity bySourceTx = existingBySourceTx.get(rowPatch.sourceTxId());
+            if (bySourceTx != null) return bySourceTx;
+        }
+        return existingByIndex.get(rowPatch.rowIndex());
     }
 
     private List<SaveDraftResponse.ActualDelta> persistActuals(WeeklyExpenseSheetEntity sheet) {
@@ -1366,30 +1390,7 @@ public class WeeklyExpenseCommandService {
             deltas.put(key, new SaveDraftResponse.ActualDelta(week.yearMonth, week.weekNo, cashflowLine, nextAmount));
         }
 
-        List<SaveDraftResponse.ActualDelta> result = new ArrayList<>(deltas.values());
-        actualRepository.deleteByTenantIdAndProjectIdAndSheetKey(sheet.getTenantId(), sheet.getProjectId(), sheet.getSheetKey());
-        for (SaveDraftResponse.ActualDelta delta : result) {
-            WeeklyExpenseActualEntity actual = actualRepository
-                .findByTenantIdAndProjectIdAndSheetKeyAndYearMonthAndWeekNoAndCashflowLine(
-                    sheet.getTenantId(),
-                    sheet.getProjectId(),
-                    sheet.getSheetKey(),
-                    delta.yearMonth(),
-                    delta.weekNo(),
-                    delta.cashflowLine()
-                )
-                .orElseGet(() -> new WeeklyExpenseActualEntity(
-                    sheet.getTenantId(),
-                    sheet.getProjectId(),
-                    sheet.getSheetKey(),
-                    delta.yearMonth(),
-                    delta.weekNo(),
-                    delta.cashflowLine()
-                ));
-            actual.setAmount(delta.amount());
-            actualRepository.save(actual);
-        }
-        return result;
+        return persistence.replaceActuals(sheet, new ArrayList<>(deltas.values()));
     }
 
     private WeekKey parseWeek(WeeklyExpenseRowEntity row) {
@@ -1608,5 +1609,8 @@ public class WeeklyExpenseCommandService {
     }
 
     private record WeekKey(String yearMonth, int weekNo) {
+    }
+
+    private record ExistingRowIdentity(String id, long rowVersion, String sourceTxId) {
     }
 }

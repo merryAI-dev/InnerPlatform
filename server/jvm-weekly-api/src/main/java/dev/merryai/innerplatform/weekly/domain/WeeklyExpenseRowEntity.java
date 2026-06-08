@@ -103,6 +103,11 @@ public class WeeklyExpenseRowEntity {
         return rowVersion;
     }
 
+    public void restorePersistenceState(String id, long rowVersion) {
+        this.id = id == null || id.isBlank() ? this.id : id.trim();
+        this.rowVersion = Math.max(0, rowVersion);
+    }
+
     public String getSourceTxId() {
         return sourceTxId;
     }

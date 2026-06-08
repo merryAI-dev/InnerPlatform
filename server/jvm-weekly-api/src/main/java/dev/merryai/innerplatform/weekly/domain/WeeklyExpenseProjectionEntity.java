@@ -67,6 +67,14 @@ public class WeeklyExpenseProjectionEntity {
         return yearMonth;
     }
 
+    public String getTenantId() {
+        return tenantId;
+    }
+
+    public String getProjectId() {
+        return projectId;
+    }
+
     public int getWeekNo() {
         return weekNo;
     }

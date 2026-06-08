@@ -100,4 +100,21 @@ public class WeeklyExpenseAuditEventEntity {
     public Instant getCreatedAt() {
         return createdAt;
     }
+
+    public String getTenantId() {
+        return tenantId;
+    }
+
+    public String getProjectId() {
+        return projectId;
+    }
+
+    public String getMetadataJson() {
+        return metadataJson;
+    }
+
+    public void restorePersistenceState(String id, Instant createdAt) {
+        this.id = id == null || id.isBlank() ? this.id : id.trim();
+        if (createdAt != null) this.createdAt = createdAt;
+    }
 }

@@ -91,6 +91,11 @@ public class WeeklyExpenseSheetEntity {
         return sheetVersion;
     }
 
+    public void restorePersistenceState(String id, long sheetVersion) {
+        this.id = id == null || id.isBlank() ? this.sheetKey : id.trim();
+        this.sheetVersion = Math.max(0, sheetVersion);
+    }
+
     public List<WeeklyExpenseRowEntity> getRows() {
         rows.sort(Comparator.comparingInt(WeeklyExpenseRowEntity::getRowIndex));
         return rows;

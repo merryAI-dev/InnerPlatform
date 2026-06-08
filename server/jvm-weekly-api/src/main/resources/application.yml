@@ -17,6 +17,7 @@ spring:
 server:
   port: ${WEEKLY_API_PORT:8088}
 weekly:
+  storage-backend: ${JVM_WEEKLY_STORAGE_BACKEND:jpa}
   internal-api-token: ${JVM_WEEKLY_INTERNAL_API_TOKEN:}
   firebase-project-id: ${JVM_WEEKLY_FIREBASE_PROJECT_ID:${FIREBASE_PROJECT_ID:${GOOGLE_CLOUD_PROJECT:}}}
   allowed-origins: ${JVM_WEEKLY_ALLOWED_ORIGINS:https://inner-platform.vercel.app}

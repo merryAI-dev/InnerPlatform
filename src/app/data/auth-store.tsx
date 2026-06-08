@@ -286,6 +286,19 @@ function mapFirebaseUserToAuthUser(
   };
 }
 
+async function establishPlatformApiSession(firebaseUser: FirebaseUser): Promise<{
+  tokenResult: Awaited<ReturnType<FirebaseUser['getIdTokenResult']>>;
+  idToken: string;
+}> {
+  const tokenResult = await firebaseUser.getIdTokenResult();
+  const idToken = String(tokenResult.token || '').trim();
+  if (featureFlags.platformApiEnabled && !idToken) {
+    throw new Error('Platform API session requires a Firebase ID token.');
+  }
+  await createPlatformApiSession(idToken);
+  return { tokenResult, idToken };
+}
+
 async function upsertMemberFromFirebase(
   firebaseUser: FirebaseUser,
   tenantId: string,
@@ -415,24 +428,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
+      setIsLoading(true);
       const cachedMember = getCachedMemberFallback(firebaseUser);
-      const cachedTenantId = resolveTenantId({
-        savedTenantId: cachedMember?.tenantId,
-        envTenantId: DEFAULT_ORG_ID,
-        strict: false,
-      });
-      const optimisticUser = mapFirebaseUserToAuthUser(firebaseUser, cachedMember, cachedTenantId);
-      optimisticUser.source = 'firebase';
-      setUser(optimisticUser);
-      saveUser(optimisticUser);
-      setIsLoading(false);
 
       try {
-        const token = await firebaseUser.getIdTokenResult().catch(() => null);
-        await createPlatformApiSession(token?.token).catch((sessionError) => {
-          console.error('[Auth] Failed to establish platform API session:', sessionError);
-        });
-        const claimsContext = extractAuthContextFromClaims(token?.claims as FirebaseAuthClaims | undefined);
+        const { tokenResult, idToken } = await establishPlatformApiSession(firebaseUser);
+        const claimsContext = extractAuthContextFromClaims(tokenResult.claims as FirebaseAuthClaims | undefined);
         const tenantId = resolveTenantId({
           claimTenantId: claimsContext.tenantId,
           envTenantId: DEFAULT_ORG_ID,
@@ -444,25 +445,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           claimsContext.role,
           claimsContext.department,
         );
-        const mapped = mapFirebaseUserToAuthUser(firebaseUser, member, tenantId, token?.token);
+        const mapped = mapFirebaseUserToAuthUser(firebaseUser, member, tenantId, idToken);
         mapped.source = 'firebase';
         setUser(mapped);
         saveUser(mapped);
+        setIsLoading(false);
       } catch (err) {
         console.error('[Auth] Failed to sync member profile:', err);
+        if (featureFlags.platformApiEnabled) {
+          setUser(null);
+          saveUser(null);
+          setIsLoading(false);
+          return;
+        }
         const fallbackTenantId = resolveTenantId({
           savedTenantId: cachedMember?.tenantId,
           envTenantId: DEFAULT_ORG_ID,
           strict: false,
         });
         const token = await firebaseUser.getIdTokenResult().catch(() => null);
-        await createPlatformApiSession(token?.token).catch((sessionError) => {
-          console.error('[Auth] Failed to establish fallback platform API session:', sessionError);
-        });
         const fallback = mapFirebaseUserToAuthUser(firebaseUser, cachedMember, fallbackTenantId, token?.token);
         fallback.source = 'firebase';
         setUser(fallback);
         saveUser(fallback);
+        setIsLoading(false);
       }
     });
 

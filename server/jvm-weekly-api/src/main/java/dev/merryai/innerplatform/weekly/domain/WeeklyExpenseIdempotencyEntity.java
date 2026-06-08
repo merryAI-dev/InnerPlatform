@@ -69,4 +69,29 @@ public class WeeklyExpenseIdempotencyEntity {
     public String getResponseJson() {
         return responseJson;
     }
+
+    public String getProjectId() {
+        return projectId;
+    }
+
+    public String getTenantId() {
+        return tenantId;
+    }
+
+    public String getIdempotencyKey() {
+        return idempotencyKey;
+    }
+
+    public String getCommandName() {
+        return commandName;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
+    }
+
+    public void restorePersistenceState(String id, Instant createdAt) {
+        this.id = id == null || id.isBlank() ? this.id : id.trim();
+        if (createdAt != null) this.createdAt = createdAt;
+    }
 }

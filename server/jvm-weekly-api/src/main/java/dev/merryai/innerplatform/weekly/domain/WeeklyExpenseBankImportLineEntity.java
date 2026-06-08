@@ -183,6 +183,22 @@ public class WeeklyExpenseBankImportLineEntity {
         this.appliedAt = Instant.now();
     }
 
+    public void restorePersistenceState(
+        String id,
+        String status,
+        String appliedSheetKey,
+        String appliedRowId,
+        Instant appliedAt,
+        String appliedBy
+    ) {
+        this.id = id == null || id.isBlank() ? this.id : id.trim();
+        this.status = status == null || status.isBlank() ? this.status : status.trim();
+        this.appliedSheetKey = appliedSheetKey == null || appliedSheetKey.isBlank() ? null : appliedSheetKey.trim();
+        this.appliedRowId = appliedRowId == null || appliedRowId.isBlank() ? null : appliedRowId.trim();
+        this.appliedAt = appliedAt;
+        this.appliedBy = appliedBy == null || appliedBy.isBlank() ? null : appliedBy.trim();
+    }
+
     private static String safeText(String value) {
         return value == null ? "" : value.trim();
     }

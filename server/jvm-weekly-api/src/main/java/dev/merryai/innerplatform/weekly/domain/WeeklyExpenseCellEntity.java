@@ -63,6 +63,10 @@ public class WeeklyExpenseCellEntity {
         this.columnIndex = columnIndex;
     }
 
+    public void restorePersistenceState(String id) {
+        this.id = id == null || id.isBlank() ? this.id : id.trim();
+    }
+
     public String getId() {
         return id;
     }
@@ -134,4 +138,3 @@ public class WeeklyExpenseCellEntity {
         return copy;
     }
 }
-

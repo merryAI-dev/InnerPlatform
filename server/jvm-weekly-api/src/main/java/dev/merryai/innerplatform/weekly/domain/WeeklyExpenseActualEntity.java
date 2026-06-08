@@ -71,6 +71,14 @@ public class WeeklyExpenseActualEntity {
         return sheetKey;
     }
 
+    public String getTenantId() {
+        return tenantId;
+    }
+
+    public String getProjectId() {
+        return projectId;
+    }
+
     public String getYearMonth() {
         return yearMonth;
     }

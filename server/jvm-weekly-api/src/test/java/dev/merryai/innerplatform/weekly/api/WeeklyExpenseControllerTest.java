@@ -327,6 +327,71 @@ class WeeklyExpenseControllerTest {
     }
 
     @Test
+    void saveDraftDoesNotUseNewClientTempIdAsJpaRowPrimaryKey() throws Exception {
+        String body = """
+            {
+              "idempotencyKey": "save-temp-id-001",
+              "sheetName": "default",
+              "rows": [
+                {
+                  "rowIndex": 0,
+                  "tempId": "client-temp-row-001",
+                  "entryKind": "manual",
+                  "cells": [
+                    {"columnIndex": 3, "rawValue": "2026-06-W1", "userEdited": true},
+                    {"columnIndex": 8, "rawValue": "사업비", "userEdited": true},
+                    {"columnIndex": 13, "rawValue": "1000", "userEdited": true}
+                  ]
+                }
+              ]
+            }
+            """;
+
+        mockMvc.perform(asActor(post("/api/v1/weekly-expenses/project-temp-id/sheets/default/save-draft"), "tenant-temp-id", "pm-temp", "pm")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+            .andExpect(status().isOk());
+
+        var sheet = sheetRepository.findWithRowsByTenantIdAndProjectIdAndSheetKey("tenant-temp-id", "project-temp-id", "default")
+            .orElseThrow();
+        assertThat(sheet.getRows()).singleElement()
+            .extracting("id")
+            .isNotEqualTo("client-temp-row-001");
+    }
+
+    @Test
+    void saveDraftRejectsDuplicateRowIdentities() throws Exception {
+        String body = """
+            {
+              "idempotencyKey": "save-duplicate-source-001",
+              "sheetName": "default",
+              "rows": [
+                {
+                  "rowIndex": 0,
+                  "sourceTxId": "bank:dup-001",
+                  "cells": [
+                    {"columnIndex": 3, "rawValue": "2026-06-W1", "userEdited": true}
+                  ]
+                },
+                {
+                  "rowIndex": 1,
+                  "sourceTxId": "bank:dup-001",
+                  "cells": [
+                    {"columnIndex": 3, "rawValue": "2026-06-W2", "userEdited": true}
+                  ]
+                }
+              ]
+            }
+            """;
+
+        mockMvc.perform(asActor(post("/api/v1/weekly-expenses/project-dup/sheets/default/save-draft"), "tenant-dup", "pm-dup", "pm")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.message").value("Duplicate source transaction in save draft request."));
+    }
+
+    @Test
     void sameIdempotencyKeyWithDifferentBodyReturnsConflict() throws Exception {
         String first = """
             {

@@ -543,6 +543,7 @@ export interface WeeklyExpenseDraftCellPatch {
 
 export interface WeeklyExpenseDraftRowPatch {
   rowIndex: number;
+  tempId?: string;
   sourceTxId?: string;
   entryKind?: string;
   cells: WeeklyExpenseDraftCellPatch[];

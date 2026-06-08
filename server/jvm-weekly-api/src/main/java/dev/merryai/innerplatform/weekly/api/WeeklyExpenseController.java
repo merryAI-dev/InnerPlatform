@@ -15,9 +15,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-import dev.merryai.innerplatform.weekly.repository.WeeklyExpenseActualRepository;
-import dev.merryai.innerplatform.weekly.repository.WeeklyExpenseProjectionRepository;
-import dev.merryai.innerplatform.weekly.repository.WeeklyExpenseWeeklyStatusRepository;
+import dev.merryai.innerplatform.weekly.storage.WeeklyExpensePersistence;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -84,20 +82,14 @@ public class WeeklyExpenseController {
     );
 
     private final WeeklyExpenseCommandService commandService;
-    private final WeeklyExpenseActualRepository actualRepository;
-    private final WeeklyExpenseProjectionRepository projectionRepository;
-    private final WeeklyExpenseWeeklyStatusRepository weeklyStatusRepository;
+    private final WeeklyExpensePersistence persistence;
 
     public WeeklyExpenseController(
         WeeklyExpenseCommandService commandService,
-        WeeklyExpenseActualRepository actualRepository,
-        WeeklyExpenseProjectionRepository projectionRepository,
-        WeeklyExpenseWeeklyStatusRepository weeklyStatusRepository
+        WeeklyExpensePersistence persistence
     ) {
         this.commandService = commandService;
-        this.actualRepository = actualRepository;
-        this.projectionRepository = projectionRepository;
-        this.weeklyStatusRepository = weeklyStatusRepository;
+        this.persistence = persistence;
     }
 
     @GetMapping("/health")
@@ -245,7 +237,7 @@ public class WeeklyExpenseController {
         @RequestHeader(value = "x-actor-email", required = false) String actorEmail
     ) {
         commandService.requireAllowed(WeeklyExpenseCommandService.CASHFLOW_READ_COMMAND, actorContext(tenantId, actorId, actorRole, actorEmail));
-        List<CashflowSnapshotResponse.ProjectionLine> projection = projectionRepository.findByTenantIdAndProjectId(tenantId, projectId).stream()
+        List<CashflowSnapshotResponse.ProjectionLine> projection = persistence.findProjectionLines(tenantId, projectId).stream()
             .map(line -> new CashflowSnapshotResponse.ProjectionLine(
                 line.getYearMonth(),
                 line.getWeekNo(),
@@ -253,7 +245,7 @@ public class WeeklyExpenseController {
                 line.getAmount()
             ))
             .toList();
-        List<CashflowSnapshotResponse.ActualLine> actual = actualRepository.findByTenantIdAndProjectId(tenantId, projectId).stream()
+        List<CashflowSnapshotResponse.ActualLine> actual = persistence.findActualLines(tenantId, projectId).stream()
             .map(line -> new CashflowSnapshotResponse.ActualLine(
                 line.getSheetKey(),
                 line.getYearMonth(),
@@ -317,7 +309,7 @@ public class WeeklyExpenseController {
         commandService.requireAllowed(WeeklyExpenseCommandService.WEEKLY_STATUS_READ_COMMAND, actorContext(tenantId, actorId, actorRole, actorEmail));
         return new WeeklyExpenseStatusesResponse(
             projectId,
-            weeklyStatusRepository.findByTenantIdAndProjectIdOrderByYearMonthDescWeekNoAsc(tenantId, projectId).stream()
+            persistence.findWeeklyStatuses(tenantId, projectId).stream()
                 .map(status -> new WeeklyExpenseStatusesResponse.WeeklyStatusLine(
                     status.getProjectId() + "-" + status.getYearMonth() + "-w" + status.getWeekNo(),
                     status.getProjectId(),

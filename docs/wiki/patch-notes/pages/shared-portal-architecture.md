@@ -31,11 +31,13 @@
 - [x] 포털 safe fetch 경로에서 주요 운영 컬렉션은 초기 fetch와 로컬 write mirror로 화면 흔들림을 줄임
 - [x] 주간 사업비/캐시플로 Projection/Actual 경로는 Java Spring/JPA API를 canonical write/read 권위로 사용
 - [x] stage/live 주간 사업비 경로에서 Vercel/BFF rewrite가 아닌 직접 Java API base URL을 요구
+- [x] Java weekly API가 JPA와 현재 Firestore 문서 구조를 같은 persistence port 뒤에서 선택할 수 있음
 - [ ] admin summary surface cutover까지 완료됨
 - [ ] 포털의 broad Firestore direct read가 완전히 제거됨
 
 ## Recent Changes
 
+- [2026-06-08] Java weekly API에 persistence port와 Firestore-inherited adapter를 추가해 현재 `expense_sheets`, `cashflow_weeks`, `expense_intake` 문서를 삭제 없이 상속하도록 했다. Frontend는 stage/live에서 세션 쿠키가 준비된 뒤 Java API로만 주간 사업비/캐시플로 명령을 보내며, Firestore adapter는 row/cell 검증, actual merge, projection/status/audit를 서버 transaction 경계 안에서 처리한다.
 - [2026-06-08] 주간 사업비와 캐시플로 Projection/Actual 경로를 Java Spring/JPA API 기준으로 재설계했다. Firestore direct write와 BFF-only mutation은 stage/live 정책에서 반려되며, 프론트는 표시와 명령 전달만 맡도록 노출 정책과 검증 스크립트를 추가했다.
 - [2026-06-02] 프로젝트 등록/수정 editor contract에 견적서와 제안서 첨부를 추가하고, 25MB를 넘는 문서는 BFF raw upload 대신 Firebase Storage direct upload로 처리하도록 분리했다. 포털 safe fetch 경로는 ledgers/transactions/comments/evidences/auditLogs/partEntries를 초기 fetch하고 write 후 로컬 상태도 갱신해 화면 데이터 공백을 줄였다.
 - [2026-05-20] 프로젝트 등록, 포털 수정, Admin 승인 화면이 같은 5단계 editor contract를 쓰도록 공통 draft/payload/patch builder를 분리했다. 승인/재제출은 request 조회를 먼저 검증하고 project/request 상태 patch를 같은 Firestore transaction에서 쓰도록 보강했다.

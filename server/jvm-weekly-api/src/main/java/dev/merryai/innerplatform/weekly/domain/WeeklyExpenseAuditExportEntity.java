@@ -114,4 +114,25 @@ public class WeeklyExpenseAuditExportEntity {
     public int getAuditEventCount() {
         return auditEventCount;
     }
+
+    public String getTenantId() {
+        return tenantId;
+    }
+
+    public String getProjectId() {
+        return projectId;
+    }
+
+    public String getCreatedBy() {
+        return createdBy;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
+    }
+
+    public void restorePersistenceState(String id, Instant createdAt) {
+        this.id = id == null || id.isBlank() ? this.id : id.trim();
+        if (createdAt != null) this.createdAt = createdAt;
+    }
 }

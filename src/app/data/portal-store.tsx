@@ -359,6 +359,7 @@ function buildWeeklyExpenseDraftRows(rows: ImportRow[]): WeeklyExpenseDraftRowPa
     const userEditedCells = row.userEditedCells instanceof Set ? row.userEditedCells : new Set<number>();
     return {
       rowIndex,
+      ...(row.tempId ? { tempId: row.tempId } : {}),
       ...(row.sourceTxId ? { sourceTxId: row.sourceTxId } : {}),
       ...(row.entryKind ? { entryKind: row.entryKind } : {}),
       cells: SETTLEMENT_COLUMNS

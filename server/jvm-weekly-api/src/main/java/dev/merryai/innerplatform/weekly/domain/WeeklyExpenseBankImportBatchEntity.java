@@ -108,6 +108,12 @@ public class WeeklyExpenseBankImportBatchEntity {
         lines.add(line);
     }
 
+    public void restorePersistenceState(String id, String status, Instant createdAt) {
+        this.id = id == null || id.isBlank() ? this.id : id.trim();
+        this.status = status == null || status.isBlank() ? this.status : status.trim();
+        if (createdAt != null) this.createdAt = createdAt;
+    }
+
     private static String requireText(String value, String field) {
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException(field + " is required");

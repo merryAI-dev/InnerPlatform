@@ -17,6 +17,7 @@ public record SaveDraftRequest(
 ) {
     public record RowPatch(
         @PositiveOrZero @Max(WeeklyExpenseRequestLimits.MAX_ROW_INDEX) int rowIndex,
+        @Size(max = WeeklyExpenseRequestLimits.MAX_SOURCE_ID_LENGTH) String tempId,
         @Size(max = WeeklyExpenseRequestLimits.MAX_SOURCE_ID_LENGTH) String sourceTxId,
         @Size(max = WeeklyExpenseRequestLimits.MAX_ENTRY_KIND_LENGTH) String entryKind,
         @Valid @NotNull @Size(max = WeeklyExpenseRequestLimits.COLUMN_COUNT) List<CellPatch> cells
