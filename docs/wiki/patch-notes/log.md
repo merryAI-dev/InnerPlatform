@@ -234,3 +234,7 @@
 ## [2026-06-08] patch-note | shared-portal-architecture | 주간 사업비 Firestore 구조 상속
 - pages: [shared-portal-architecture](./pages/shared-portal-architecture.md)
 - summary: 주간 사업비와 캐시플로 Projection/Actual 권위를 Java persistence port로 모으고, 현재 Firestore `expense_sheets`, `cashflow_weeks`, `expense_intake` 구조를 삭제 없이 상속하는 adapter와 stage/live 직접 Java API gate를 보강했다.
+
+## [2026-06-08] patch-note | shared-portal-architecture | stage Firestore adapter 배포 env
+- pages: [shared-portal-architecture](./pages/shared-portal-architecture.md)
+- summary: JVM weekly API stage 배포 스크립트와 Cloud Build가 `JVM_WEEKLY_STORAGE_BACKEND=firestore`를 명시하도록 보강해, QA/stage가 JPA 기본값이 아니라 Firestore-inherited adapter로 뜨도록 했다.

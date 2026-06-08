@@ -57,10 +57,13 @@ describe('JVM weekly API runtime config files', () => {
     expect(cloudBuild).toContain('availableSecrets');
     expect(cloudBuild).toContain('JVM_WEEKLY_INTERNAL_API_TOKEN');
     expect(cloudBuild).toContain('JVM_WEEKLY_DATABASE_URL=${_JVM_WEEKLY_DATABASE_URL}');
+    expect(cloudBuild).toContain('JVM_WEEKLY_STORAGE_BACKEND=${_JVM_WEEKLY_STORAGE_BACKEND}');
+    expect(cloudBuild).toContain("_JVM_WEEKLY_STORAGE_BACKEND: firestore");
     expect(cloudBuild).toContain('JVM_WEEKLY_FIREBASE_PROJECT_ID=$${FIREBASE_PROJECT_ID}');
     expect(cloudBuild).toContain('JVM_WEEKLY_ALLOWED_ORIGINS=${_JVM_WEEKLY_ALLOWED_ORIGINS}');
     expect(cloudBuild).toContain('JVM_WEEKLY_INTERNAL_API_TOKEN=${_JVM_WEEKLY_INTERNAL_API_TOKEN_SECRET}:latest');
     expect(deployScript).toContain('JVM_WEEKLY_DATABASE_URL is required for stage deploy');
+    expect(deployScript).toContain('JVM_WEEKLY_STORAGE_BACKEND="${JVM_WEEKLY_STORAGE_BACKEND:-firestore}"');
     expect(deployScript).toContain('must not point at localhost for Cloud Run');
     expect(deployScript).toContain('--ingress all');
     expect(deployScript).toContain('--allow-unauthenticated');
