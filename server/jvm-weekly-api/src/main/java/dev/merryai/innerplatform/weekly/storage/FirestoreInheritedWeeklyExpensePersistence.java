@@ -251,7 +251,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
 
     @Override
     public List<WeeklyExpenseAuditEventEntity> findAuditEventsForAudit(String tenantId, String projectId) {
-        QuerySnapshot snap = query(auditEvents(tenantId).whereEqualTo("projectId", projectId).orderBy("createdAt"));
+        QuerySnapshot snap = query(auditEvents(tenantId).whereEqualTo("projectId", projectId));
         List<WeeklyExpenseAuditEventEntity> events = new ArrayList<>();
         for (DocumentSnapshot doc : snap.getDocuments()) {
             Map<String, Object> data = data(doc);
@@ -268,6 +268,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             event.restorePersistenceState(doc.getId(), instant(data.get("createdAt")));
             events.add(event);
         }
+        events.sort(Comparator.comparing(WeeklyExpenseAuditEventEntity::getCreatedAt));
         return events;
     }
 
