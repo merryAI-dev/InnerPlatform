@@ -11,12 +11,13 @@ RUN for attempt in 1 2 3; do \
     done; \
     exit 1
 
-FROM eclipse-temurin:21-jre-alpine
+FROM eclipse-temurin:21-jre
 
 WORKDIR /app
 ENV WEEKLY_API_PORT=8080
 
-RUN addgroup -S app && adduser -S app -G app
+RUN groupadd --system app \
+    && useradd --system --gid app --home-dir /app --shell /usr/sbin/nologin app
 
 COPY --from=build /workspace/target/jvm-weekly-api-0.1.0-SNAPSHOT.jar /app/jvm-weekly-api.jar
 
