@@ -4,7 +4,12 @@ WORKDIR /workspace
 COPY server/jvm-weekly-api/pom.xml ./pom.xml
 
 COPY server/jvm-weekly-api/src ./src
-RUN mvn -q -DskipTests package
+RUN for attempt in 1 2 3; do \
+      mvn -q -DskipTests package && exit 0; \
+      echo "maven package failed on attempt ${attempt}; retrying"; \
+      sleep $((attempt * 5)); \
+    done; \
+    exit 1
 
 FROM eclipse-temurin:21-jre-alpine
 
