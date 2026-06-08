@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
-import { collection, limit, onSnapshot, query, where } from 'firebase/firestore';
 import {
   BarChart3,
   CalendarRange,
@@ -25,13 +24,10 @@ import { useAppStore } from '../../data/store';
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { useAuth } from '../../data/auth-store';
 import { useFirebase } from '../../lib/firebase-context';
-import { getOrgCollectionPath } from '../../lib/firebase';
 import { triggerDownload } from '../../platform/csv-utils';
 import { filterCashflowExportTargetProjects } from '../../platform/cashflow-export-filters';
-import { loadExcelJs } from '../../platform/lazy-heavy-modules';
 import { exportCashflowWorkbookViaBff, isPlatformApiEnabled } from '../../lib/platform-bff-client';
 import {
-  buildCashflowExportWorkbookSpec,
   expandCashflowYearMonthRange,
   summarizeCashflowYearMonths,
   type CashflowExportProjectInput,
@@ -53,10 +49,6 @@ function formatDateTime(value?: string): string {
     hour: '2-digit',
     minute: '2-digit',
   });
-}
-
-function sanitizeFilePart(value: string): string {
-  return value.replace(/[\\/:*?"<>|]/g, '-').trim();
 }
 
 const strongFieldBaseClass = 'h-10 rounded-lg border-2 bg-white text-[12px] font-medium text-zinc-950 shadow-none transition-colors focus-visible:ring-2 [&_svg]:size-4 [&_svg]:!opacity-100 [&_svg]:text-stone-500';
@@ -92,8 +84,8 @@ export function CashflowExportPage() {
   const { projects, transactions } = useAppStore();
   const { weeks, yearMonth } = useCashflowWeeks();
   const { user } = useAuth();
-  const { db, orgId } = useFirebase();
-  const [scope, setScope] = useState<'all' | 'single'>('all');
+  const { orgId } = useFirebase();
+  const [scope, setScope] = useState<'all' | 'single'>('single');
   const [selectedProjectId, setSelectedProjectId] = useState<string>('ALL');
   const [accountTypeFilter, setAccountTypeFilter] = useState<'ALL' | AccountType>('ALL');
   const [rangeMode, setRangeMode] = useState<'year' | 'custom'>('year');
@@ -102,7 +94,6 @@ export function CashflowExportPage() {
   const [endYearMonth, setEndYearMonth] = useState<string>(`${yearMonth.slice(0, 4)}-12`);
   const [multiProjectVariant, setMultiProjectVariant] = useState<'combined' | 'multi-sheet'>('multi-sheet');
   const [downloadPreparing, setDownloadPreparing] = useState(false);
-  const [weeklySubmissionStatuses, setWeeklySubmissionStatuses] = useState<WeeklySubmissionStatus[]>([]);
 
   const canExport = hasPermission((user?.role || 'viewer') as any, 'cashflow:export');
   const bffEnabled = isPlatformApiEnabled();
@@ -153,10 +144,10 @@ export function CashflowExportPage() {
   const projectRows = useMemo(() => buildCashflowExportProjectRows({
     projects: targetProjects,
     weeks,
-    weeklySubmissionStatuses,
+    weeklySubmissionStatuses: [] as WeeklySubmissionStatus[],
     targetYearMonths: yearMonths,
     todayIso,
-  }), [targetProjects, todayIso, weeklySubmissionStatuses, weeks, yearMonths]);
+  }), [targetProjects, todayIso, weeks, yearMonths]);
 
   const updatedCount = projectRows.filter((row) => row.updated).length;
   const missingCount = projectRows.length - updatedCount;
@@ -179,42 +170,6 @@ export function CashflowExportPage() {
     }
   }, [scope, selectedProjectId, sortedProjects]);
 
-  useEffect(() => {
-    if (!db) {
-      setWeeklySubmissionStatuses([]);
-      return;
-    }
-
-    const currentYearMonth = todayIso.slice(0, 7);
-    const rangedYearMonths = [...yearMonths, currentYearMonth].filter((value) => /^\d{4}-\d{2}$/.test(value)).sort();
-    const startYearMonth = rangedYearMonths[0];
-    const endYearMonth = rangedYearMonths[rangedYearMonths.length - 1];
-    if (!startYearMonth || !endYearMonth) {
-      setWeeklySubmissionStatuses([]);
-      return;
-    }
-
-    const base = collection(db, getOrgCollectionPath(orgId, 'weeklySubmissionStatus'));
-    const q = query(
-      base,
-      where('yearMonth', '>=', startYearMonth),
-      where('yearMonth', '<=', endYearMonth),
-      limit(2500),
-    );
-
-    const unsubscribe = onSnapshot(q, (snap) => {
-      const list = snap.docs.map((docItem) => {
-        const data = docItem.data() as WeeklySubmissionStatus;
-        return { ...data, id: data.id || docItem.id };
-      });
-      setWeeklySubmissionStatuses(list);
-    }, () => {
-      setWeeklySubmissionStatuses([]);
-    });
-
-    return () => unsubscribe();
-  }, [db, orgId, todayIso, yearMonths]);
-
   async function handleDownload() {
     if (!canExport) {
       toast.error('경영기획실 페이지 접근 권한이 없습니다.');
@@ -227,51 +182,31 @@ export function CashflowExportPage() {
 
     setDownloadPreparing(true);
     try {
-      if (bffEnabled && user) {
-        const response = await exportCashflowWorkbookViaBff({
-          tenantId: orgId,
-          actor: {
-            uid: user.uid,
-            email: user.email,
-            role: user.role,
-            idToken: user.idToken,
-            googleAccessToken: user.googleAccessToken,
-          },
-          body: {
-            scope,
-            projectId: scope === 'single' ? projectInputs[0]?.projectId : undefined,
-            accountType: accountTypeFilter === 'ALL' ? undefined : accountTypeFilter,
-            startYearMonth: yearMonths[0],
-            endYearMonth: yearMonths[yearMonths.length - 1],
-            variant: workbookVariant,
-          },
-        });
-        triggerDownload(response.blob, response.fileName);
-      } else {
-        const workbookSpec = buildCashflowExportWorkbookSpec({
-          variant: workbookVariant,
-          projects: projectInputs,
-          yearMonths,
-        });
-        const ExcelJS = await loadExcelJs();
-        const workbook = new ExcelJS.Workbook();
-
-        for (const sheet of workbookSpec.sheets) {
-          const worksheet = workbook.addWorksheet(sheet.name);
-          sheet.rows.forEach((row) => worksheet.addRow(row));
-          worksheet.views = [{ state: 'frozen', ySplit: 2 }];
-        }
-
-        const buffer = await workbook.xlsx.writeBuffer();
-        const blob = new Blob(
-          [buffer],
-          { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
-        );
-        const fileScope = scope === 'single'
-          ? sanitizeFilePart(projectInputs[0]?.projectName || '단일사업')
-          : (workbookVariant === 'combined' ? '전체사업_통합시트' : '전체사업_개별시트');
-        triggerDownload(blob, `캐시플로_추출_${fileScope}_${sanitizeFilePart(periodSummary || selectedYear)}.xlsx`);
+      if (!bffEnabled || !user) {
+        throw new Error('감사용 다운로드 경로를 확인할 수 없습니다. 관리자에게 문의해 주세요.');
       }
+      if (scope !== 'single') {
+        throw new Error('사업별 추출을 선택해 주세요.');
+      }
+      const response = await exportCashflowWorkbookViaBff({
+        tenantId: orgId,
+        actor: {
+          uid: user.uid,
+          email: user.email,
+          role: user.role,
+          idToken: user.idToken,
+          googleAccessToken: user.googleAccessToken,
+        },
+        body: {
+          scope,
+          projectId: projectInputs[0]?.projectId,
+          accountType: accountTypeFilter === 'ALL' ? undefined : accountTypeFilter,
+          startYearMonth: yearMonths[0],
+          endYearMonth: yearMonths[yearMonths.length - 1],
+          variant: workbookVariant,
+        },
+      });
+      triggerDownload(response.blob, response.fileName);
       toast.success('캐시플로 엑셀을 준비했습니다.');
     } catch (error) {
       const message = error instanceof Error ? error.message : '캐시플로 다운로드에 실패했습니다.';

@@ -1,0 +1,553 @@
+{
+  "generatedAt": "2026-06-08T07:12:00.000Z",
+  "tool": "understand-anything scoped connectivity validation",
+  "sourceArtifacts": {
+    "scan": ".understand-anything/tmp/current-scan.json",
+    "importMap": ".understand-anything/tmp/focus-import-map.json"
+  },
+  "importMapStats": {
+    "projectFilesScanned": 971,
+    "focusFilesScanned": 33,
+    "filesWithImports": 15,
+    "totalEdges": 36
+  },
+  "decision": "PASS_WITH_BFF_REMOVABLE_JAVA_STATUS_READ_AND_CLAIMS_OPS",
+  "nodes": [
+    {
+      "id": "ui.cashflow.projectSheet",
+      "file": "src/app/components/cashflow/CashflowProjectSheet.tsx",
+      "role": "cashflow read-model UI"
+    },
+    {
+      "id": "store.cashflowWeeks",
+      "file": "src/app/data/cashflow-weeks-store.tsx",
+      "role": "cashflow Java snapshot channel"
+    },
+    {
+      "id": "store.portal",
+      "file": "src/app/data/portal-store.tsx",
+      "role": "portal weekly expense/bank statement channel"
+    },
+    {
+      "id": "parser.bankStatement",
+      "file": "src/app/platform/bank-statement.ts",
+      "role": "bank upload header/date/amount/counterparty normalization"
+    },
+    {
+      "id": "client.platformBff",
+      "file": "src/app/lib/platform-bff-client.ts",
+      "role": "typed platform API client; can point directly at Java API"
+    },
+    {
+      "id": "bff.jvmWeekly.route",
+      "file": "server/bff/routes/jvm-weekly-api.mjs",
+      "role": "optional legacy Java weekly API proxy; not required for weekly operation"
+    },
+    {
+      "id": "bff.jvmWeekly.noFirestoreIdempotency",
+      "file": "server/bff/routes/jvm-weekly-api.mjs",
+      "role": "Java-owned command idempotency; BFF does not write Firestore before proxying"
+    },
+    {
+      "id": "bff.thinAdapterPolicy",
+      "file": "docs/architecture/weekly-expense-backend-authority-gate-2026-06-08.md",
+      "role": "BFF must be removable; Java direct auth is the weekly operation boundary"
+    },
+    {
+      "id": "db.sqlConnectReadChannelPolicy",
+      "file": "docs/architecture/weekly-expense-backend-authority-gate-2026-06-08.md",
+      "role": "Firebase SQL Connect/Data Connect may expose PostgreSQL reads/realtime updates but cannot write canonical weekly expense, projection, actual, bank apply, audit, or export state"
+    },
+    {
+      "id": "runtime.jvmWeekly.localAndStage",
+      "file": "cloudbuild.jvm-weekly-api.yaml",
+      "role": "local smoke profile and stage deploy path for Java API"
+    },
+    {
+      "id": "runtime.jvmWeekly.commandSmoke",
+      "file": "scripts/smoke_jvm_weekly_api.mjs",
+      "role": "stage/live Firebase identity-token command smoke for cell patch, rectangular copy/paste/cut, row insert/delete, bank import/apply, projection, status read, cashflow read, submit/close, and audit export"
+    },
+    {
+      "id": "runtime.firebaseSmokeToken",
+      "file": "scripts/create_firebase_smoke_id_token.mjs",
+      "role": "Firebase Auth REST sign-in for dedicated stage/live smoke user"
+    },
+    {
+      "id": "runtime.vercelDirectEnvGate",
+      "file": "scripts/verify_weekly_direct_vercel_env.mjs",
+      "role": "production deploy gate that rejects same-origin Vercel/BFF API base URLs"
+    },
+    {
+      "id": "ops.firebaseClaims",
+      "file": "scripts/sync_firebase_member_claims.mjs",
+      "role": "BFF-free Firebase custom claims repair/update path for Java browser-direct auth"
+    },
+    {
+      "id": "java.weekly.firebaseAuth",
+      "file": "server/jvm-weekly-api/src/main/java/dev/merryai/innerplatform/weekly/api/InternalServiceTokenFilter.java",
+      "role": "browser-direct Firebase token verification and trusted actor header injection"
+    },
+    {
+      "id": "java.weekly.controller",
+      "file": "server/jvm-weekly-api/src/main/java/dev/merryai/innerplatform/weekly/api/WeeklyExpenseController.java",
+      "role": "Spring REST API"
+    },
+    {
+      "id": "java.weekly.commandService",
+      "file": "server/jvm-weekly-api/src/main/java/dev/merryai/innerplatform/weekly/service/WeeklyExpenseCommandService.java",
+      "role": "ORM command/read service"
+    },
+    {
+      "id": "repo.bankLine",
+      "file": "server/jvm-weekly-api/src/main/java/dev/merryai/innerplatform/weekly/repository/WeeklyExpenseBankImportLineRepository.java",
+      "role": "bank import line staged/apply persistence"
+    },
+    {
+      "id": "repo.bankBatch",
+      "file": "server/jvm-weekly-api/src/main/java/dev/merryai/innerplatform/weekly/repository/WeeklyExpenseBankImportBatchRepository.java",
+      "role": "bank import batch persistence"
+    },
+    {
+      "id": "repo.projection",
+      "file": "server/jvm-weekly-api/src/main/java/dev/merryai/innerplatform/weekly/repository/WeeklyExpenseProjectionRepository.java",
+      "role": "projection persistence"
+    },
+    {
+      "id": "repo.actual",
+      "file": "server/jvm-weekly-api/src/main/java/dev/merryai/innerplatform/weekly/repository/WeeklyExpenseActualRepository.java",
+      "role": "actual persistence"
+    },
+    {
+      "id": "repo.weeklyStatus",
+      "file": "server/jvm-weekly-api/src/main/java/dev/merryai/innerplatform/weekly/repository/WeeklyExpenseWeeklyStatusRepository.java",
+      "role": "weekly submit/close status persistence"
+    },
+    {
+      "id": "repo.auditExport",
+      "file": "server/jvm-weekly-api/src/main/java/dev/merryai/innerplatform/weekly/repository/WeeklyExpenseAuditExportRepository.java",
+      "role": "audit export artifact persistence"
+    }
+  ],
+  "edges": [
+    {
+      "id": "portal.bankParse",
+      "from": "store.portal",
+      "to": "parser.bankStatement",
+      "evidence": "saveBankStatementRows builds normalized intake items from uploaded bank sheet",
+      "status": "ok"
+    },
+    {
+      "id": "portal.bankImport",
+      "from": "store.portal",
+      "to": "client.platformBff",
+      "evidence": "portal-store imports importWeeklyExpenseBankStatementBatchViaBff",
+      "status": "manual-ok"
+    },
+    {
+      "id": "portal.bankListStaged",
+      "from": "store.portal",
+      "to": "client.platformBff",
+      "evidence": "portal-store imports fetchWeeklyExpenseBankStatementImportLinesViaBff and hydrates status=staged candidates",
+      "status": "manual-ok"
+    },
+    {
+      "id": "portal.bankApply",
+      "from": "store.portal",
+      "to": "client.platformBff",
+      "evidence": "portal-store applies selected importLineId through the typed platform API client",
+      "status": "manual-ok"
+    },
+    {
+      "id": "client.bankImportPost",
+      "from": "client.platformBff",
+      "to": "java.weekly.controller",
+      "evidence": "POST /api/v1/weekly-expenses/{projectId}/bank-statements/import-batch",
+      "status": "ok"
+    },
+    {
+      "id": "client.bankListGet",
+      "from": "client.platformBff",
+      "to": "java.weekly.controller",
+      "evidence": "GET /api/v1/weekly-expenses/{projectId}/bank-statements/import-lines?status=staged",
+      "status": "ok"
+    },
+    {
+      "id": "client.bankApplyPost",
+      "from": "client.platformBff",
+      "to": "java.weekly.controller",
+      "evidence": "POST /api/v1/weekly-expenses/{projectId}/bank-statements/apply-items",
+      "status": "ok"
+    },
+    {
+      "id": "java.browserDirectAuth",
+      "from": "client.platformBff",
+      "to": "java.weekly.firebaseAuth",
+      "evidence": "Frontend PlatformApiClient attaches Authorization: Bearer Firebase ID token; Java verifies token claims and rejects spoofed tenant/actor headers",
+      "status": "ok"
+    },
+    {
+      "id": "ops.claimsForJavaAuth",
+      "from": "ops.firebaseClaims",
+      "to": "java.weekly.firebaseAuth",
+      "evidence": "scripts/sync_firebase_member_claims.mjs updates tenantId and role custom claims without importing server/bff",
+      "status": "ok"
+    },
+    {
+      "id": "bff.bankImportProxy",
+      "from": "bff.jvmWeekly.route",
+      "to": "java.weekly.controller",
+      "evidence": "BFF strips spoofed body actor/tenant and forwards trusted headers",
+      "status": "ok"
+    },
+    {
+      "id": "bff.bankListProxy",
+      "from": "bff.jvmWeekly.route",
+      "to": "java.weekly.controller",
+      "evidence": "BFF proxies import-lines GET without request body",
+      "status": "ok"
+    },
+    {
+      "id": "bff.bankApplyProxy",
+      "from": "bff.jvmWeekly.route",
+      "to": "java.weekly.controller",
+      "evidence": "BFF proxies selected apply command with idempotency key",
+      "status": "ok"
+    },
+    {
+      "id": "bff.javaCommandNoFirestoreIdempotency",
+      "from": "bff.jvmWeekly.noFirestoreIdempotency",
+      "to": "java.weekly.controller",
+      "evidence": "BFF mutating Java weekly routes use createJavaMutatingProxyRoute; tests and local smoke prove save-draft reaches Java without BFF Firestore idempotency",
+      "status": "ok"
+    },
+    {
+      "id": "bff.thinAdapterOnly",
+      "from": "bff.thinAdapterPolicy",
+      "to": "java.weekly.controller",
+      "evidence": "Policy rejects BFF-only authentication or private-network dependency; weekly operation must keep working when BFF route is removed",
+      "status": "ok"
+    },
+    {
+      "id": "runtime.stageCommandSmoke",
+      "from": "runtime.jvmWeekly.commandSmoke",
+      "to": "java.weekly.controller",
+      "evidence": "Cloud Build and deploy script run scripts/smoke_jvm_weekly_api.mjs --require-identity-token after deploy; smoke exercises cell-patch, copy, paste, cut, row insert/delete, bank import/apply, projection upsert, submit/close, weekly status read, cashflow read, and audit export",
+      "status": "ok"
+    },
+    {
+      "id": "runtime.firebaseSmokeTokenToAuth",
+      "from": "runtime.firebaseSmokeToken",
+      "to": "java.weekly.firebaseAuth",
+      "evidence": "Smoke token script signs in a Firebase user and exports the returned localId as JVM_WEEKLY_SMOKE_ACTOR_ID; Java verifies the resulting ID token and spoof guard",
+      "status": "ok"
+    },
+    {
+      "id": "runtime.vercelDirectJavaOnly",
+      "from": "runtime.vercelDirectEnvGate",
+      "to": "client.platformBff",
+      "evidence": "production-deploy pulls .env.production.local and rejects disabled platform API or *.vercel.app API bases before npm run build",
+      "status": "ok"
+    },
+    {
+      "id": "java.controller.bankImport",
+      "from": "java.weekly.controller",
+      "to": "java.weekly.commandService",
+      "evidence": "Controller maps import-batch to commandService.importBankStatementBatch",
+      "status": "ok"
+    },
+    {
+      "id": "java.controller.bankList",
+      "from": "java.weekly.controller",
+      "to": "java.weekly.commandService",
+      "evidence": "Controller maps import-lines GET to commandService.listBankStatementImportLines",
+      "status": "ok"
+    },
+    {
+      "id": "java.controller.bankApply",
+      "from": "java.weekly.controller",
+      "to": "java.weekly.commandService",
+      "evidence": "Controller maps apply-items to commandService.applyBankStatementItems",
+      "status": "ok"
+    },
+    {
+      "id": "java.service.bankRepos",
+      "from": "java.weekly.commandService",
+      "to": "repo.bankLine",
+      "evidence": "Service stores, deduplicates, lists, locks, and marks bank import lines",
+      "status": "ok"
+    },
+    {
+      "id": "java.service.bankBatchRepo",
+      "from": "java.weekly.commandService",
+      "to": "repo.bankBatch",
+      "evidence": "Service creates bank import batches and returns batch metadata",
+      "status": "ok"
+    },
+    {
+      "id": "cashflow.snapshotReadModel",
+      "from": "store.cashflowWeeks",
+      "to": "client.platformBff",
+      "evidence": "cashflow store reads Java snapshot/readModel through the typed platform API client",
+      "status": "ok"
+    },
+    {
+      "id": "portal.weeklyStatusReadModel",
+      "from": "store.portal",
+      "to": "client.platformBff",
+      "evidence": "portal-store reads weekly submit/close state from fetchWeeklyExpenseStatusesViaBff when platform API is enabled",
+      "status": "ok"
+    },
+    {
+      "id": "client.weeklyStatusRead",
+      "from": "client.platformBff",
+      "to": "java.weekly.controller",
+      "evidence": "GET /api/v1/weekly-expenses/{projectId}/statuses",
+      "status": "ok"
+    },
+    {
+      "id": "java.weeklyStatusRepo",
+      "from": "java.weekly.controller",
+      "to": "repo.weeklyStatus",
+      "evidence": "Controller requires weeklyExpense.status.read and returns status lines from WeeklyExpenseWeeklyStatusRepository",
+      "status": "ok"
+    },
+    {
+      "id": "java.submitCloseStatusRepo",
+      "from": "java.weekly.commandService",
+      "to": "repo.weeklyStatus",
+      "evidence": "submitWeek and closeWeek persist state transitions through WeeklyExpenseWeeklyStatusRepository",
+      "status": "ok"
+    },
+    {
+      "id": "client.cashflowRead",
+      "from": "client.platformBff",
+      "to": "java.weekly.controller",
+      "evidence": "GET /api/v1/cashflow/{projectId}",
+      "status": "ok"
+    },
+    {
+      "id": "java.cashflowProjectionRepo",
+      "from": "java.weekly.commandService",
+      "to": "repo.projection",
+      "evidence": "Cashflow read model projection side is derived from projection repository in Java controller/service path",
+      "status": "ok"
+    },
+    {
+      "id": "java.cashflowActualRepo",
+      "from": "java.weekly.commandService",
+      "to": "repo.actual",
+      "evidence": "Cashflow read model actual side is derived from actual repository in Java controller/service path",
+      "status": "ok"
+    },
+    {
+      "id": "bff.auditExportNoFirestoreFallback",
+      "from": "client.platformBff",
+      "to": "java.weekly.controller",
+      "evidence": "cashflow export uses the Java weekly audit-export route; legacy /api/v1/cashflow-exports wrapper was removed so Firestore workbook fallback cannot run in stage/live",
+      "status": "ok"
+    },
+    {
+      "id": "java.auditExportRepos",
+      "from": "java.weekly.commandService",
+      "to": "repo.auditExport",
+      "evidence": "Java audit export persists hash-addressed artifact",
+      "status": "ok"
+    },
+    {
+      "id": "sqlConnect.projectionReadAfterJavaCommitOnly",
+      "from": "db.sqlConnectReadChannelPolicy",
+      "to": "repo.projection",
+      "evidence": "Policy allows SQL Connect/Data Connect projection reads only after Java ORM commands commit, and rejects direct canonical mutations",
+      "status": "ok"
+    },
+    {
+      "id": "sqlConnect.actualReadAfterJavaCommitOnly",
+      "from": "db.sqlConnectReadChannelPolicy",
+      "to": "repo.actual",
+      "evidence": "Policy allows SQL Connect/Data Connect actual reads only after Java ORM commands commit, and rejects direct canonical mutations",
+      "status": "ok"
+    }
+  ],
+  "hardCaseCoverage": [
+    {
+      "id": "bank.column.ragged.frontend",
+      "file": "src/app/platform/bank-statement.test.ts",
+      "coverage": "duplicate/blank headers, short rows, long rows, shuffled aliases, text columns containing amount keywords",
+      "status": "ok"
+    },
+    {
+      "id": "bank.amount.singleDirectionColumn",
+      "file": "src/app/platform/bank-statement.test.ts",
+      "coverage": "single 거래금액/amount column derives EXPENSE/DEPOSIT from a separate 입출금구분/direction column",
+      "status": "ok"
+    },
+    {
+      "id": "bank.amount.englishDebitCredit",
+      "file": "src/app/platform/bank-statement.test.ts",
+      "coverage": "English Date/Description/Debit/Credit/Balance uploads map amount, entry kind, and counterparty without Korean headers",
+      "status": "ok"
+    },
+    {
+      "id": "bank.column.ragged.java",
+      "file": "server/jvm-weekly-api/src/test/java/dev/merryai/innerplatform/weekly/api/WeeklyExpenseControllerTest.java",
+      "coverage": "columns/rawCells length mismatch stored and listed through ORM API",
+      "status": "ok"
+    },
+    {
+      "id": "bank.import.validationBounds.java",
+      "file": "server/jvm-weekly-api/src/test/java/dev/merryai/innerplatform/weekly/api/WeeklyExpenseControllerTest.java",
+      "coverage": "oversized bank import columns, rawCells, and lines are rejected with validation failure before ORM persistence",
+      "status": "ok"
+    },
+    {
+      "id": "actual.formula.manualDeposit.java",
+      "file": "server/jvm-weekly-api/src/test/java/dev/merryai/innerplatform/weekly/api/WeeklyExpenseControllerTest.java",
+      "coverage": "manual rows with 입금액 but blank 통장 입/출금액 still persist actual and cashflow read-model totalIn through Java formula evaluation",
+      "status": "ok"
+    },
+    {
+      "id": "row.formula.engine.java",
+      "file": "server/jvm-weekly-api/src/test/java/dev/merryai/innerplatform/weekly/domain/WeeklyExpenseSpreadsheetServiceTest.java",
+      "coverage": "row formula evaluates explicit deposit amount, bank magnitude for actual, and signed bank movement independently of frontend calculations",
+      "status": "ok"
+    },
+    {
+      "id": "write.dto.schemaBounds.java",
+      "file": "server/jvm-weekly-api/src/test/java/dev/merryai/innerplatform/weekly/api/WeeklyExpenseControllerTest.java",
+      "coverage": "save-draft off-schema cells, non-rectangular paste payloads, dense/sparse row insert overflow, malformed projection lines including 2026-0X, and duplicate bank apply items are rejected before ORM persistence",
+      "status": "ok"
+    },
+    {
+      "id": "write.domain.cellSchema.java",
+      "file": "server/jvm-weekly-api/src/test/java/dev/merryai/innerplatform/weekly/domain/WeeklyExpenseSpreadsheetServiceTest.java",
+      "coverage": "WeeklyExpenseRowEntity rejects cellAt calls outside the 20-column weekly expense schema",
+      "status": "ok"
+    },
+    {
+      "id": "bank.reapply.conflict",
+      "file": "server/jvm-weekly-api/src/test/java/dev/merryai/innerplatform/weekly/api/WeeklyExpenseControllerTest.java",
+      "coverage": "new idempotency key cannot reapply an already applied import line",
+      "status": "ok"
+    },
+    {
+      "id": "audit.noFallback",
+      "file": "server/bff/routes/jvm-weekly-api.test.mjs",
+      "coverage": "Java audit export is reached through the weekly JVM proxy route; deleted cashflow-exports wrapper cannot fall back to Firestore workbook",
+      "status": "ok"
+    },
+    {
+      "id": "cashflow.close.clientShape",
+      "file": "src/app/lib/platform-bff-client.test.ts",
+      "coverage": "submit and close weekly expense commands use typed BFF options object with tenant, actor, body, idempotencyKey, retries, and timeout",
+      "status": "ok"
+    },
+    {
+      "id": "bff.javaProxy.noFirestoreIdempotency",
+      "file": "server/bff/routes/jvm-weekly-api.test.mjs",
+      "coverage": "Java weekly mutating commands bypass BFF Firestore idempotency and rely on Java ORM idempotency ledger",
+      "status": "ok"
+    },
+    {
+      "id": "runtime.localSmokeAndStageDeploy",
+      "file": "server/jvm-weekly-api/runtime-config-files.test.ts",
+      "coverage": "local H2 smoke profile, root npm scripts, Java Dockerfile, Cloud Build, and Cloud Run deploy script are present and stage-scoped",
+      "status": "ok"
+    },
+    {
+      "id": "audit.csvFormulaInjection.java",
+      "file": "server/jvm-weekly-api/src/test/java/dev/merryai/innerplatform/weekly/api/WeeklyExpenseControllerTest.java",
+      "coverage": "audit CSV output prefixes formula-like cells before Google Sheet/Excel external output",
+      "status": "ok"
+    },
+    {
+      "id": "statusAndExport.dtoBounds.java",
+      "file": "server/jvm-weekly-api/src/test/java/dev/merryai/innerplatform/weekly/api/WeeklyExpenseControllerTest.java",
+      "coverage": "submit/close reject malformed yearMonth and audit export rejects oversized idempotency keys before persistence",
+      "status": "ok"
+    },
+    {
+      "id": "runtime.stageNoLocalhostDb.java",
+      "file": "server/jvm-weekly-api/runtime-config-files.test.ts",
+      "coverage": "stage deploy requires explicit non-localhost PostgreSQL URL, supports VPC connector/Cloud SQL instance flags, Java image runs as non-root app user, and post-deploy command smoke runs through the Java ORM API",
+      "status": "ok"
+    },
+    {
+      "id": "runtime.browserDirectAuth.java",
+      "file": "server/jvm-weekly-api/src/test/java/dev/merryai/innerplatform/weekly/api/WeeklyExpenseControllerTest.java",
+      "coverage": "Java Cloud Run can deploy with --allow-unauthenticated and --ingress all because Java verifies Firebase ID tokens, derives tenant/actor/role from claims, rejects spoofed headers, keeps internal service token only for smoke/internal jobs, and no longer needs BFF roles/run.invoker",
+      "status": "ok"
+    },
+    {
+      "id": "status.readModel.bffFree",
+      "file": "server/jvm-weekly-api/src/test/java/dev/merryai/innerplatform/weekly/api/WeeklyExpenseControllerTest.java",
+      "coverage": "submit/close status is readable from Java with viewer role and rejects unknown roles, so portal weekly status does not require Firestore or BFF",
+      "status": "ok"
+    },
+    {
+      "id": "frontend.weeklyPage.noBffOnlyActions",
+      "file": "src/app/platform/backend-authority-policy.shell.test.ts",
+      "coverage": "PortalWeeklyExpensePage does not wire BFF-only transaction upsert, evidence Drive, server upload fallback, or budget suggestion callbacks in the weekly expense operation path",
+      "status": "ok"
+    },
+    {
+      "id": "claims.ops.bffFree",
+      "file": "scripts/verify_weekly_bff_free_policy.mjs",
+      "coverage": "Firebase custom claims repair/update path uses scripts/sync_firebase_member_claims.mjs and does not import server/bff",
+      "status": "ok"
+    },
+    {
+      "id": "runtime.vercelSameOriginFallbackBlocked",
+      "file": "scripts/verify_weekly_direct_vercel_env.mjs",
+      "coverage": "production deploy pulls Vercel env and rejects disabled platform API or same-origin Vercel API base URLs before build",
+      "status": "ok"
+    },
+    {
+      "id": "runtime.stageSmoke.firebaseIdentityOnly",
+      "file": "scripts/smoke_jvm_weekly_api.mjs",
+      "coverage": "stage/live command smoke requires Firebase ID token, binds actor id to Firebase localId, and fails if service token fallback is present",
+      "status": "ok"
+    },
+    {
+      "id": "frontend.implementationTermExposure.policy",
+      "file": "src/app/platform/backend-authority-policy.shell.test.ts",
+      "coverage": "frontend exposure policy bans BFF, Java ORM, SQL Connect/Data Connect, Cloud SQL, PostgreSQL/Postgres, and Firestore direct implementation terms from checked ERP frontend paths",
+      "status": "ok"
+    },
+    {
+      "id": "frontend.localDerivationHooksRemoved.policy",
+      "file": "src/app/platform/backend-authority-policy.shell.test.ts",
+      "coverage": "weekly expense save/edit frontend paths do not import deriveSettlementRowsLocally and do not expose onDeriveRows/buildSettlementDerivationContext hooks",
+      "status": "ok"
+    },
+    {
+      "id": "clipboard.copyCommand.java",
+      "file": "server/jvm-weekly-api/src/test/java/dev/merryai/innerplatform/weekly/api/WeeklyExpenseControllerTest.java",
+      "coverage": "server copy command returns a rectangular backend clipboard payload for shallow/deep copy without mutating sheet version or recalculating actuals",
+      "status": "ok"
+    },
+    {
+      "id": "clipboard.metadataAdvisory.java",
+      "file": "server/jvm-weekly-api/src/test/java/dev/merryai/innerplatform/weekly/domain/WeeklyExpenseSpreadsheetServiceTest.java",
+      "coverage": "deep paste ignores client-provided normalizedValue/valueType/validationStatus as authority and revalidates target cells from rawValue before row actual calculation",
+      "status": "ok"
+    },
+    {
+      "id": "frontend.typedSheetCommandChannels.policy",
+      "file": "src/app/platform/backend-authority-policy.shell.test.ts",
+      "coverage": "typed BFF client exposes patch/copy/paste/cut/row-insert/row-delete Java ORM sheet command channels without moving validation or calculation into the frontend",
+      "status": "ok"
+    },
+    {
+      "id": "sqlConnect.readOnlyPolicy",
+      "file": "src/app/platform/backend-authority-policy.shell.test.ts",
+      "coverage": "SQL Connect/Data Connect is documented and tested as a read/realtime channel only, with canonical mutations reserved for Java ORM commands",
+      "status": "ok"
+    }
+  ],
+  "remainingNextStack": [
+    "Add fixture-driven tests with real anonymized Hana/KB/Shinhan/NH/Woori uploads so profile detection and fingerprint stability are locked against production bank files.",
+    "Review bank-specific matching precedence when two amount-like numeric columns both pass the 60% numeric threshold."
+  ],
+  "findings": []
+}

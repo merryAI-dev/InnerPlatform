@@ -988,6 +988,7 @@ export interface BankImportIntakeItem {
   projectId: string;
   sourceTxId: string;
   bankFingerprint: string;
+  serverImportLineId?: string;
   bankSnapshot: BankImportSnapshot;
   matchState: BankImportMatchState;
   projectionStatus: BankImportProjectionStatus;

@@ -273,6 +273,20 @@ function findHeaderIndicesByAliases(columns: string[], aliases: string[]): numbe
   return matched;
 }
 
+function findHeaderIndicesByAliasPriority(columns: string[], aliasGroups: string[][]): number[] {
+  const seen = new Set<number>();
+  const ordered: number[] = [];
+  aliasGroups.forEach((aliases) => {
+    findHeaderIndicesByAliases(columns, aliases).forEach((idx) => {
+      if (!seen.has(idx)) {
+        seen.add(idx);
+        ordered.push(idx);
+      }
+    });
+  });
+  return ordered;
+}
+
 function findHeaderIndicesByKeyword(columns: string[], keyword: string): number[] {
   const target = cleanHeader(keyword);
   if (!target) return [];
@@ -342,6 +356,10 @@ function resolveAmountColumnIndices(columns: string[], rows: BankStatementRow[])
     ...findHeaderIndicesByKeyword(columns, '입금'),
     ...findHeaderIndicesByKeyword(columns, '출금'),
     ...findHeaderIndicesByKeyword(columns, '입출금'),
+    ...findHeaderIndicesByKeyword(columns, '금액'),
+    ...findHeaderIndicesByKeyword(columns, 'amount'),
+    ...findHeaderIndicesByKeyword(columns, 'debit'),
+    ...findHeaderIndicesByKeyword(columns, 'credit'),
   ])).filter((idx) => {
     const key = cleanHeader(columns[idx] || '');
     if (!key) return false;
@@ -362,12 +380,59 @@ function resolveAmountColumnIndices(columns: string[], rows: BankStatementRow[])
   });
 }
 
+function resolveDirectionColumnIndices(columns: string[]): number[] {
+  return findHeaderIndicesByAliasPriority(columns, [
+    ['입출금구분', '입출구분'],
+    ['거래구분', '거래유형'],
+    ['구분'],
+    ['direction'],
+    ['type'],
+    ['drcr', 'debitcredit'],
+  ]);
+}
+
+function inferEntryKindFromDirectionValue(raw: string): SettlementEntryKind | undefined {
+  const key = cleanHeader(raw);
+  if (!key) return undefined;
+  if (
+    key.includes(cleanHeader('입금'))
+    || key.includes('deposit')
+    || key.includes('credit')
+    || key === 'cr'
+    || key === 'in'
+  ) {
+    return 'DEPOSIT';
+  }
+  if (
+    key.includes(cleanHeader('출금'))
+    || key.includes(cleanHeader('지급'))
+    || key.includes(cleanHeader('인출'))
+    || key.includes('withdrawal')
+    || key.includes('debit')
+    || key === 'dr'
+    || key === 'out'
+  ) {
+    return 'EXPENSE';
+  }
+  return undefined;
+}
+
+function inferEntryKindFromDirectionCells(cells: string[], directionIdxs: number[]): SettlementEntryKind | undefined {
+  for (const idx of directionIdxs) {
+    const entryKind = inferEntryKindFromDirectionValue(String(cells[idx] || ''));
+    if (entryKind) return entryKind;
+  }
+  return undefined;
+}
+
 function inferEntryKindFromAmountCell(header: string, raw: string, parsed: number): SettlementEntryKind | undefined {
   const key = cleanHeader(header);
   const value = normalizeSpace(raw);
   const hasParens = /^\(.*\)$/.test(value);
   const isNegativeLiteral = /^-/.test(value) || hasParens || parsed < 0;
 
+  if (key.includes('debit')) return 'EXPENSE';
+  if (key.includes('credit')) return 'DEPOSIT';
   if (key.includes(cleanHeader('출금'))) return 'EXPENSE';
   if (key.includes(cleanHeader('입금'))) return 'DEPOSIT';
   if (key.includes(cleanHeader('입출금'))) {
@@ -382,6 +447,7 @@ function pickAmount(
   cells: string[],
   amountIdxs: number[],
   columns: string[],
+  directionIdxs: number[] = [],
 ): { amount: number | null; entryKind?: SettlementEntryKind } {
   let fallback: { amount: number; entryKind?: SettlementEntryKind } | null = null;
   for (const idx of amountIdxs) {
@@ -389,7 +455,8 @@ function pickAmount(
     if (!isAmountLiteral(raw)) continue;
     const n = parseNumber(raw);
     if (n == null) continue;
-    const entryKind = inferEntryKindFromAmountCell(columns[idx] || '', raw, n);
+    const entryKind = inferEntryKindFromAmountCell(columns[idx] || '', raw, n)
+      || inferEntryKindFromDirectionCells(cells, directionIdxs);
     const amount = Math.abs(n);
     if (fallback == null) fallback = { amount, entryKind };
     if (n !== 0) return { amount, entryKind };
@@ -462,10 +529,10 @@ function resolveBankSnapshotFromStatementRow(
   const dateIdx = findFirstHeaderIndex(columns, ['거래일자', '거래일시', '거래일', '일자', '날짜', 'date']);
   const counterpartyIdxCandidates = (() => {
     const groups = [
-      ['사용처', '가맹점', '상호', '거래처'],
-      ['의뢰인/수취인', '의뢰인수취인', '수취인', '의뢰인', '상대계좌명'],
-      ['내용', '거래내용'],
-      ['적요', '메모'],
+      ['사용처', '가맹점', '상호', '거래처', 'merchant', 'vendor', 'counterparty'],
+      ['의뢰인/수취인', '의뢰인수취인', '수취인', '의뢰인', '상대계좌명', 'payee', 'payer'],
+      ['내용', '거래내용', 'description', 'details'],
+      ['적요', '메모', 'memo'],
     ];
     const seen = new Set<number>();
     const ordered: number[] = [];
@@ -479,9 +546,16 @@ function resolveBankSnapshotFromStatementRow(
     });
     return ordered;
   })();
-  const memoIdxCandidates = findHeaderIndicesByAliases(columns, ['적요', '메모', '내용', '거래내용', '상세적요']);
+  const memoIdxCandidates = findHeaderIndicesByAliasPriority(columns, [
+    ['적요'],
+    ['메모', 'memo'],
+    ['상세적요', 'details'],
+    ['거래내용'],
+    ['내용', 'description'],
+  ]);
   const balanceIdx = findFirstHeaderIndex(columns, ['잔액']);
   const amountIdxs = resolveAmountColumnIndices(columns, allRows);
+  const directionIdxs = resolveDirectionColumnIndices(columns);
 
   const rawDate = dateIdx >= 0
     ? String(rowCells[dateIdx] || '')
@@ -505,7 +579,7 @@ function resolveBankSnapshotFromStatementRow(
     break;
   }
 
-  const resolvedAmount = pickAmount(rowCells, amountIdxs, columns);
+  const resolvedAmount = pickAmount(rowCells, amountIdxs, columns, directionIdxs);
   const signedAmount = resolvedAmount.amount == null
     ? 0
     : resolvedAmount.entryKind === 'DEPOSIT'
@@ -574,10 +648,10 @@ export function mapBankStatementsToImportRows(sheet: BankStatementSheet): Import
   const dateIdx = findFirstHeaderIndex(columns, ['거래일자', '거래일시', '거래일', '일자', '날짜', 'date']);
   const counterpartyIdxCandidates = (() => {
     const groups = [
-      ['사용처', '가맹점', '상호', '거래처'],
-      ['의뢰인/수취인', '의뢰인수취인', '수취인', '의뢰인', '상대계좌명'],
-      ['내용', '거래내용'],
-      ['적요', '메모'],
+      ['사용처', '가맹점', '상호', '거래처', 'merchant', 'vendor', 'counterparty'],
+      ['의뢰인/수취인', '의뢰인수취인', '수취인', '의뢰인', '상대계좌명', 'payee', 'payer'],
+      ['내용', '거래내용', 'description', 'details'],
+      ['적요', '메모', 'memo'],
     ];
     const seen = new Set<number>();
     const ordered: number[] = [];
@@ -593,8 +667,15 @@ export function mapBankStatementsToImportRows(sheet: BankStatementSheet): Import
   })();
 
   const balanceIdx = findFirstHeaderIndex(columns, ['잔액']);
-  const memoIdxCandidates = findHeaderIndicesByAliases(columns, ['적요', '메모', '내용', '거래내용', '상세적요']);
+  const memoIdxCandidates = findHeaderIndicesByAliasPriority(columns, [
+    ['적요'],
+    ['메모', 'memo'],
+    ['상세적요', 'details'],
+    ['거래내용'],
+    ['내용', 'description'],
+  ]);
   const amountIdxs = resolveAmountColumnIndices(columns, bankRows);
+  const directionIdxs = resolveDirectionColumnIndices(columns);
 
   const nextRows: ImportRow[] = [];
   for (const bankRow of bankRows) {
@@ -643,7 +724,7 @@ export function mapBankStatementsToImportRows(sheet: BankStatementSheet): Import
 
     let inferredEntryKind: SettlementEntryKind | undefined;
     if (idxBankAmount >= 0 && amountIdxs.length > 0) {
-      const resolvedAmount = pickAmount(rowCells, amountIdxs, columns);
+      const resolvedAmount = pickAmount(rowCells, amountIdxs, columns, directionIdxs);
       inferredEntryKind = resolvedAmount.entryKind;
       cells[idxBankAmount] = resolvedAmount.amount != null ? resolvedAmount.amount.toLocaleString('ko-KR') : '';
       if (idxDeposit >= 0 && inferredEntryKind === 'DEPOSIT') {

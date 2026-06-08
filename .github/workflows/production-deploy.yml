@@ -84,6 +84,12 @@ jobs:
       - name: RBAC policy verify
         run: npm run policy:verify
 
+      - name: Pull and verify Vercel production env
+        run: |
+          set -euo pipefail
+          npx --yes "${VERCEL_CLI_PACKAGE}" env pull .env.production.local --environment=production --token "${VERCEL_TOKEN}"
+          node scripts/verify_weekly_direct_vercel_env.mjs .env.production.local
+
       - name: Production build
         run: npm run build
 

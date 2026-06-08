@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "scope": "enterprise-erp-frontend",
+  "principles": [
+    "Frontend surfaces must expose only agreed business actions and business status text.",
+    "Implementation details, storage names, framework names, migration internals, and engineering comments must not be shown to ERP users.",
+    "New buttons on weekly expense, cashflow, and audit surfaces require product agreement and a named backend command or read-model contract."
+  ],
+  "checkedPaths": [
+    "src/app/components",
+    "src/app/data"
+  ],
+  "excludedGlobs": [
+    ".test.",
+    ".shell.test.",
+    ".spec."
+  ],
+  "bannedFrontendTerms": [
+    "BFF",
+    "Java ORM",
+    "SQL Connect",
+    "Data Connect",
+    "Firebase SQL",
+    "Cloud SQL",
+    "PostgreSQL",
+    "Postgres",
+    "Firestore direct",
+    "Firestore 직접",
+    "backend command",
+    "Backend",
+    "backend",
+    "Firestore</span>",
+    "Firebase / Firestore 연결",
+    "BFF 활성화 필요",
+    "VITE_PLATFORM_API_ENABLED=true",
+    "Rust 계산",
+    "read model"
+  ],
+  "allowedLanguage": [
+    "저장 기준본",
+    "Actual 반영",
+    "저장 경로",
+    "검토 항목",
+    "권한을 확인할 수 없습니다"
+  ]
+}

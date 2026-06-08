@@ -1,5 +1,5 @@
 import cashflowPolicyData from '../../src/app/policies/cashflow-policy.json' with { type: 'json' };
-import { CASHFLOW_ALL_LINES, CASHFLOW_IN_LINES, CASHFLOW_OUT_LINES } from './cashflow-policy.mjs';
+import { CASHFLOW_IN_LINES } from './cashflow-policy.mjs';
 
 const SETTLEMENT_COLUMN_HEADERS = [
   '작성자',
@@ -22,7 +22,12 @@ const SETTLEMENT_COLUMN_HEADERS = [
 const COLUMN_INDEX = Object.fromEntries(SETTLEMENT_COLUMN_HEADERS.map((header, index) => [header, index]));
 const CASHFLOW_IN_LINE_IDS = new Set(CASHFLOW_IN_LINES);
 const LINE_BY_LABEL = new Map();
-const PROJECTION_CHANGE_ALERT_THRESHOLD_AMOUNT = 10_000_000;
+function legacyCashflowWriterDisabled() {
+  const error = new Error('Legacy cashflow Firestore writer is disabled. Use Java weekly expense ORM commands.');
+  error.code = 'legacy_cashflow_writer_disabled';
+  error.statusCode = 410;
+  return error;
+}
 
 function normalizePolicyLabel(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
@@ -272,87 +277,6 @@ function resolveActualLineAmounts(row) {
   return amounts;
 }
 
-function normalizeAmounts(amounts) {
-  const normalized = {};
-  for (const lineId of CASHFLOW_ALL_LINES) {
-    if (Object.prototype.hasOwnProperty.call(amounts || {}, lineId)) {
-      normalized[lineId] = parseAmount(amounts[lineId]);
-    }
-  }
-  return normalized;
-}
-
-function computeCashflowTotals(amounts) {
-  const normalized = normalizeAmounts(amounts);
-  const totalIn = CASHFLOW_IN_LINES.reduce((sum, lineId) => sum + (Number(normalized[lineId]) || 0), 0);
-  const totalOut = CASHFLOW_OUT_LINES.reduce((sum, lineId) => sum + (Number(normalized[lineId]) || 0), 0);
-  return { totalIn, totalOut, net: totalIn - totalOut };
-}
-
-function parseDateOnlyUtc(value) {
-  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value || '').trim());
-  if (!match) return null;
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
-  return Date.UTC(year, month - 1, day);
-}
-
-function buildProjectionChangeAlert({ previousProjection, nextProjection, weekStart, now, actorId, actorName }) {
-  const previous = normalizeAmounts(previousProjection || {});
-  const next = normalizeAmounts(nextProjection || {});
-  if (Object.keys(previous).length === 0) return null;
-
-  const nowDate = parseDateOnlyUtc(now);
-  const weekStartDate = parseDateOnlyUtc(weekStart);
-  if (nowDate === null || weekStartDate === null) return null;
-  const daysBeforeWeekStart = Math.floor((weekStartDate - nowDate) / (24 * 60 * 60 * 1000));
-  if (daysBeforeWeekStart < 0 || daysBeforeWeekStart > 7) return null;
-
-  const lineIds = new Set([...Object.keys(previous), ...Object.keys(next)]);
-  let totalAbsDelta = 0;
-  let netDelta = 0;
-  let largestLineId;
-  let largestLineDelta = 0;
-  let previousAmount;
-  let nextAmount;
-  for (const lineId of lineIds) {
-    const before = Number(previous[lineId] || 0);
-    const after = Number(next[lineId] || 0);
-    const delta = after - before;
-    const absDelta = Math.abs(delta);
-    totalAbsDelta += absDelta;
-    netDelta += delta;
-    if (absDelta > largestLineDelta) {
-      largestLineDelta = absDelta;
-      largestLineId = lineId;
-      previousAmount = before;
-      nextAmount = after;
-    }
-  }
-
-  if (totalAbsDelta < PROJECTION_CHANGE_ALERT_THRESHOLD_AMOUNT && largestLineDelta < PROJECTION_CHANGE_ALERT_THRESHOLD_AMOUNT) {
-    return null;
-  }
-
-  return {
-    triggered: true,
-    reason: 'near_week_large_projection_change',
-    changedAt: now,
-    changedByUid: actorId,
-    changedByName: actorName,
-    daysBeforeWeekStart,
-    thresholdAmount: PROJECTION_CHANGE_ALERT_THRESHOLD_AMOUNT,
-    totalAbsDelta,
-    netDelta,
-    largestLineId,
-    largestLineDelta,
-    previousAmount,
-    nextAmount,
-  };
-}
-
 function weekKey(week) {
   return `${week.yearMonth}:w${week.weekNo}`;
 }
@@ -399,241 +323,10 @@ export function buildCashflowActualSyncPlan({ rows, previousWeekKeys = [], ancho
   };
 }
 
-function resolveWeekDocId(projectId, yearMonth, weekNo) {
-  return `${projectId}-${yearMonth}-w${weekNo}`;
-}
-
-async function commitInChunks(db, mutations) {
-  for (let offset = 0; offset < mutations.length; offset += 450) {
-    const batch = db.batch();
-    for (const mutation of mutations.slice(offset, offset + 450)) {
-      mutation(batch);
-    }
-    await batch.commit();
-  }
-}
-
-function buildWeekPatch({ tenantId, actorId, actorName, projectId, mode, week, amounts, now, existingData }) {
-  const normalizedAmounts = normalizeAmounts(amounts);
-  const existingModeAmounts = normalizeAmounts(existingData?.[mode] || {});
-  const nextModeAmounts = {
-    ...existingModeAmounts,
-    ...normalizedAmounts,
-  };
-  const patch = {
-    id: resolveWeekDocId(projectId, week.yearMonth, week.weekNo),
-    tenantId,
-    projectId,
-    yearMonth: week.yearMonth,
-    weekNo: week.weekNo,
-    weekStart: week.weekStart,
-    weekEnd: week.weekEnd,
-    [`${mode}Source`]: mode === 'actual' ? 'expense_sheets_bff' : 'cashflow_input_bff',
-    [`${mode}SyncedAt`]: now,
-    updatedAt: now,
-    updatedByUid: actorId,
-    updatedByName: actorName,
-    [`${mode}Totals`]: computeCashflowTotals(nextModeAmounts),
-  };
-  if (Object.keys(normalizedAmounts).length > 0) {
-    patch[mode] = nextModeAmounts;
-    if (mode === 'projection') {
-      patch.projectionUpdated = true;
-      patch.projectionUpdatedAt = now;
-      patch.projectionUpdatedByUid = actorId;
-      patch.projectionUpdatedByName = actorName;
-      patch.projectionChangeAlert = buildProjectionChangeAlert({
-        previousProjection: existingModeAmounts,
-        nextProjection: nextModeAmounts,
-        weekStart: week.weekStart,
-        now,
-        actorId,
-        actorName,
-      });
-    }
-  }
-  return patch;
-}
-
-function buildStatusPatch({ tenantId, actorId, actorName, projectId, week, mode, now, syncState }) {
-  const id = resolveWeekDocId(projectId, week.yearMonth, week.weekNo);
-  return {
-    id,
-    tenantId,
-    projectId,
-    yearMonth: week.yearMonth,
-    weekNo: week.weekNo,
-    ...(mode === 'projection'
-      ? {
-        projectionEdited: true,
-        projectionUpdated: true,
-        projectionUpdatedAt: now,
-        projectionUpdatedByName: actorName,
-      }
-      : {
-        expenseUpdated: true,
-        expenseSyncState: syncState || 'synced',
-        expenseReviewPendingCount: 0,
-        expenseUpdatedAt: now,
-        expenseUpdatedByName: actorName,
-      }),
-    updatedAt: now,
-    updatedByUid: actorId,
-    updatedByName: actorName,
-  };
-}
-
 export async function upsertCashflowWeekAmounts({ db, tenantId, actorId, actorName, projectId, mode, yearMonth, weekNo, amounts, now }) {
-  const parsed = parseYearMonth(yearMonth);
-  if (!parsed) {
-    const error = new Error('Invalid yearMonth');
-    error.statusCode = 400;
-    throw error;
-  }
-  const targetWeek = getMonthCashflowWeeks(parsed.yearMonth).find((week) => week.weekNo === weekNo);
-  if (!targetWeek) {
-    const error = new Error('Invalid cashflow week');
-    error.statusCode = 400;
-    throw error;
-  }
-
-  const weekRef = db.doc(`orgs/${tenantId}/cashflow_weeks/${resolveWeekDocId(projectId, targetWeek.yearMonth, targetWeek.weekNo)}`);
-  const statusRef = db.doc(`orgs/${tenantId}/weekly_submission_status/${resolveWeekDocId(projectId, targetWeek.yearMonth, targetWeek.weekNo)}`);
-  const statusPatch = buildStatusPatch({ tenantId, actorId, actorName, projectId, week: targetWeek, mode, now });
-
-  await db.runTransaction(async (tx) => {
-    const snap = await tx.get(weekRef);
-    const patch = buildWeekPatch({
-      tenantId,
-      actorId,
-      actorName,
-      projectId,
-      mode,
-      week: targetWeek,
-      amounts,
-      now,
-      existingData: snap.exists ? snap.data() : undefined,
-    });
-    tx.set(weekRef, {
-      ...(snap.exists ? {} : { createdAt: now, pmSubmitted: false, adminClosed: false }),
-      ...patch,
-    }, { merge: true });
-    tx.set(statusRef, statusPatch, { merge: true });
-  });
-
-  return {
-    projectId,
-    yearMonth: targetWeek.yearMonth,
-    weekNo: targetWeek.weekNo,
-    weekStart: targetWeek.weekStart,
-    weekEnd: targetWeek.weekEnd,
-    mode,
-    updatedAt: now,
-  };
+  throw legacyCashflowWriterDisabled();
 }
 
 export async function syncProjectCashflowActualsFromExpenseSheets({ db, tenantId, actorId, actorName, projectId, now }) {
-  const sheetsSnap = await db.collection(`orgs/${tenantId}/projects/${projectId}/expense_sheets`).get();
-  const sheets = sheetsSnap.docs
-    .map((doc) => ({ id: doc.id, ...doc.data() }))
-    .filter((sheet) => !sheet.deletedAt && !sheet.trashedAt);
-  const rows = sheets.flatMap((sheet) => Array.isArray(sheet.rows) ? sheet.rows : []);
-  const stateRef = db.doc(`orgs/${tenantId}/cashflow_actual_sync_state/${projectId}`);
-  const stateSnap = await stateRef.get().catch(() => null);
-  const previousWeekKeys = Array.isArray(stateSnap?.data()?.weekKeys) ? stateSnap.data().weekKeys : [];
-  if (rows.length === 0) {
-    return {
-      ok: true,
-      skipped: true,
-      reason: 'no_expense_sheet_rows',
-      projectId,
-      sourceRows: 0,
-      sheetCount: sheets.length,
-      upsertedWeeks: 0,
-      clearedWeeks: 0,
-      weeks: [],
-      cleared: [],
-      updatedAt: now,
-    };
-  }
-  const plan = buildCashflowActualSyncPlan({
-    rows,
-    previousWeekKeys,
-    anchorYear: new Date(now).getUTCFullYear(),
-  });
-  const writeWeeks = [...plan.weeks, ...plan.clearedWeeks];
-
-  const mutations = [];
-  for (const week of writeWeeks) {
-    const weekRef = db.doc(`orgs/${tenantId}/cashflow_weeks/${resolveWeekDocId(projectId, week.yearMonth, week.weekNo)}`);
-    const statusRef = db.doc(`orgs/${tenantId}/weekly_submission_status/${resolveWeekDocId(projectId, week.yearMonth, week.weekNo)}`);
-    const existingSnap = await weekRef.get().catch(() => null);
-    const patch = buildWeekPatch({
-      tenantId,
-      actorId,
-      actorName,
-      projectId,
-      mode: 'actual',
-      week,
-      amounts: week.amounts,
-      now,
-      existingData: existingSnap?.exists ? existingSnap.data() : undefined,
-    });
-    const statusPatch = buildStatusPatch({
-      tenantId,
-      actorId,
-      actorName,
-      projectId,
-      week,
-      mode: 'actual',
-      now,
-      syncState: plan.clearedWeeks.some((cleared) => cleared.key === week.key) ? 'synced' : 'synced',
-    });
-    mutations.push((batch) => {
-      batch.set(weekRef, {
-        ...patch,
-      }, { merge: true });
-      batch.set(statusRef, statusPatch, { merge: true });
-    });
-  }
-  mutations.push((batch) => {
-    batch.set(stateRef, {
-      id: projectId,
-      tenantId,
-      projectId,
-      source: 'expense_sheets_bff',
-      weekKeys: plan.weekKeys,
-      rowCount: rows.length,
-      sheetCount: sheets.length,
-      updatedAt: now,
-      updatedByUid: actorId,
-      updatedByName: actorName,
-    }, { merge: true });
-  });
-
-  await commitInChunks(db, mutations);
-
-  return {
-    ok: true,
-    projectId,
-    sourceRows: rows.length,
-    sheetCount: sheets.length,
-    upsertedWeeks: plan.weeks.length,
-    clearedWeeks: plan.clearedWeeks.length,
-    weeks: plan.weeks.map((week) => ({
-      yearMonth: week.yearMonth,
-      weekNo: week.weekNo,
-      weekStart: week.weekStart,
-      weekEnd: week.weekEnd,
-      amounts: week.amounts,
-    })),
-    cleared: plan.clearedWeeks.map((week) => ({
-      yearMonth: week.yearMonth,
-      weekNo: week.weekNo,
-      weekStart: week.weekStart,
-      weekEnd: week.weekEnd,
-      amounts: week.amounts,
-    })),
-    updatedAt: now,
-  };
+  throw legacyCashflowWriterDisabled();
 }

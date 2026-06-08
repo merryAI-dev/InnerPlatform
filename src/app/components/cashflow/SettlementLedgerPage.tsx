@@ -23,10 +23,6 @@ import {
   type ImportRow,
 } from '../../platform/settlement-csv';
 import { parseLocalWorkbookFile } from '../../platform/local-workbook';
-import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
-import { buildSettlementActualSyncPayloadLocally } from '../../platform/settlement-calculation-kernel';
-import type { SettlementDerivationContext, SettlementDerivationOptions } from '../../platform/settlement-row-derivation';
-import type { SettlementActualSyncWeekPayload } from '../../platform/settlement-sheet-sync';
 import { normalizeSettlementWorkbookToImportRows } from '../../platform/settlement-workbook-import';
 import {
   resolveWeeklyAccountingSheetRowsHydration,
@@ -36,8 +32,6 @@ import {
   type WeeklyAccountingSheetRowsHydrationReason,
 } from '../../platform/weekly-accounting-state';
 import { resolveWeeklyExpenseAutosavePlan } from '../../platform/weekly-expense-save-policy';
-import { normalizeBudgetLabel } from '../../platform/budget-labels';
-import { findBudgetTreeSubItem } from '../../platform/budget-tree-v2';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import {
@@ -74,22 +68,6 @@ interface WeekBucket {
 }
 
 type CashflowExpenseSyncState = 'idle' | 'pending' | 'syncing' | 'synced' | 'sync_failed';
-
-function resolveCashflowSyncStateFromStatuses(
-  payload: Array<{ yearMonth: string; weekNo: number }>,
-  statusMap: Map<string, WeeklySubmissionStatus>,
-): Exclude<CashflowExpenseSyncState, 'syncing'> | null {
-  if (payload.length === 0) return null;
-  let hasSynced = false;
-  for (const week of payload) {
-    const status = statusMap.get(`${week.yearMonth}:${week.weekNo}`);
-    const state = status?.expenseSyncState;
-    if (state === 'sync_failed') return 'sync_failed';
-    if (state === 'pending' || state === 'review_required' || !state) return 'pending';
-    if (state === 'synced') hasSynced = true;
-  }
-  return hasSynced ? 'synced' : null;
-}
 
 export interface SettlementLedgerProps {
   projectId: string;
@@ -136,31 +114,11 @@ export interface SettlementLedgerProps {
   workflowMode?: ProjectFundInputMode;
   settlementSheetPolicy?: SettlementSheetPolicy;
   basis?: Basis;
-  onUpdateWeeklySubmissionStatus?: (input: {
-    projectId: string;
-    yearMonth: string;
-    weekNo: number;
-    expenseUpdated?: boolean;
-    expenseSyncState?: 'pending' | 'review_required' | 'synced' | 'sync_failed';
-    expenseReviewPendingCount?: number;
-  }) => void | Promise<void>;
-  onDeriveRows?: (
-    rows: ImportRow[],
-    context: SettlementDerivationContext,
-    options: SettlementDerivationOptions,
-  ) => Promise<ImportRow[]>;
-  onPreviewActualSyncPayload?: (
-    rows: ImportRow[],
-    yearWeeks: MonthMondayWeek[],
-    persistedRows?: ImportRow[] | null,
-  ) => Promise<SettlementActualSyncWeekPayload[]>;
-  onSyncCashflowActuals?: () => Promise<Array<{ yearMonth: string; weekNo: number }>>;
   onDirtyStateChange?: (dirty: boolean) => void;
   onSavingStateChange?: (saving: boolean) => void;
   weeklySubmissionStatuses?: WeeklySubmissionStatus[];
   discardChangesRequestToken?: number;
   autoSaveIdleMs?: number;
-  autoSaveSyncCashflow?: boolean;
 }
 
 // ── Main Component ──
@@ -199,27 +157,19 @@ export function SettlementLedgerPage({
   workflowMode = 'BANK_UPLOAD',
   settlementSheetPolicy,
   basis,
-  onUpdateWeeklySubmissionStatus,
-  onDeriveRows,
-  onPreviewActualSyncPayload,
-  onSyncCashflowActuals,
   onDirtyStateChange,
   onSavingStateChange,
   weeklySubmissionStatuses = [],
   discardChangesRequestToken = 0,
   autoSaveIdleMs = 60_000,
-  autoSaveSyncCashflow = true,
 }: SettlementLedgerProps) {
-  const { upsertWeekAmounts } = useCashflowWeeks();
   const isDirectEntryMode = workflowMode === 'DIRECT_ENTRY';
   const [year, setYear] = useState(() => new Date().getFullYear());
   const [collapsedWeeks, setCollapsedWeeks] = useState<Set<string>>(new Set());
   const [importRows, setImportRows] = useState<ImportRow[] | null>(null);
   const [importDirty, setImportDirty] = useState(false);
   const [sheetSaving, setSheetSaving] = useState(false);
-  const [cashflowSyncing, setCashflowSyncing] = useState(false);
   const [lastAutoSavedAt, setLastAutoSavedAt] = useState('');
-  const [lastCashflowSyncedAt, setLastCashflowSyncedAt] = useState('');
   const [editorFullscreen, setEditorFullscreen] = useState(false);
   const [sheetSaveState, setSheetSaveState] = useState<'idle' | 'dirty' | 'saving' | 'saved' | 'save_failed'>('idle');
   const [cashflowSyncState, setCashflowSyncState] = useState<CashflowExpenseSyncState>('idle');
@@ -232,7 +182,6 @@ export function SettlementLedgerPage({
   const restoredDraftCacheKeyRef = useRef('');
   const hasAppliedSheetRowsRef = useRef(false);
   const lastDiscardChangesRequestTokenRef = useRef(0);
-  const pendingCashflowSyncRetryKeyRef = useRef('');
   const pendingSheetRowsEchoSignatureRef = useRef<string | null>(null);
   const pendingSheetRowsSyncRef = useRef<{ rows: ImportRow[] | null; reason: WeeklyAccountingSheetRowsHydrationReason } | null>(null);
   const cloneImportRows = useCallback((input: ImportRow[]) => (
@@ -255,18 +204,6 @@ export function SettlementLedgerPage({
     () => `settlement-import-draft:${projectId}:${defaultLedgerId}:${year}`,
     [projectId, defaultLedgerId, year],
   );
-  const weeklySubmissionStatusMap = useMemo(() => {
-    const map = new Map<string, WeeklySubmissionStatus>();
-    for (const status of weeklySubmissionStatuses) {
-      if (status.projectId !== projectId) continue;
-      map.set(`${status.yearMonth}:${status.weekNo}`, status);
-    }
-    return map;
-  }, [projectId, weeklySubmissionStatuses]);
-  const budgetCodeIdx = useMemo(() => SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '비목'), []);
-  const subCodeIdx = useMemo(() => SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '세목'), []);
-  const subSubCodeIdx = useMemo(() => SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '세세목'), []);
-
   // Filter transactions for this project + year
   const projectTxs = useMemo(() => {
     const yearStr = String(year);
@@ -274,33 +211,6 @@ export function SettlementLedgerPage({
       (tx) => tx.projectId === projectId && (!tx.dateTime || tx.dateTime.startsWith(yearStr)),
     );
   }, [allTransactions, projectId, year]);
-
-  const sanitizeBudgetSubSubRows = useCallback((input: ImportRow[]) => {
-    if (subSubCodeIdx < 0) return input;
-    return input.map((row) => {
-      const currentSubSub = normalizeBudgetLabel(row.cells[subSubCodeIdx] || '');
-      if (!currentSubSub) return row;
-      const budgetCode = budgetCodeIdx >= 0 ? normalizeBudgetLabel(row.cells[budgetCodeIdx] || '') : '';
-      const subCode = subCodeIdx >= 0 ? normalizeBudgetLabel(row.cells[subCodeIdx] || '') : '';
-      if (!budgetTreeV2?.codes || !budgetCode || !subCode) {
-        const cells = [...row.cells];
-        cells[subSubCodeIdx] = '';
-        return { ...row, cells };
-      }
-      const subItem = findBudgetTreeSubItem(budgetTreeV2.codes, budgetCode, subCode);
-      const validSubSubs = new Set(
-        (subItem?.leafItems || [])
-          .map((leaf) => normalizeBudgetLabel(leaf.subSubCode))
-          .filter(Boolean),
-      );
-      if (validSubSubs.size === 0 || !validSubSubs.has(currentSubSub)) {
-        const cells = [...row.cells];
-        cells[subSubCodeIdx] = '';
-        return { ...row, cells };
-      }
-      return row;
-    });
-  }, [budgetCodeIdx, budgetTreeV2?.codes, subCodeIdx, subSubCodeIdx]);
 
   useEffect(() => {
     if (importDirty) return;
@@ -345,22 +255,16 @@ export function SettlementLedgerPage({
     if (hydration.shouldReplaceRows) {
       setImportRows(cloneImportRows(incomingRows || []));
     }
-    const persistedSyncState = incomingRowsOrigin === 'persisted'
-      ? resolveCashflowSyncStateFromStatuses(
-        buildSettlementActualSyncPayloadLocally(incomingRows || [], yearWeeks, null),
-        weeklySubmissionStatusMap,
-      )
-      : null;
     setImportDirty(false);
     setSheetSaveState(hydration.nextSaveState);
-    setCashflowSyncState(persistedSyncState || hydration.nextSyncState);
+    setCashflowSyncState(hydration.nextSyncState);
     if (reason !== 'persistence_echo') {
       clearImportDraftCache(draftCacheKey);
     } else {
       pendingSheetRowsEchoSignatureRef.current = null;
     }
     hasAppliedSheetRowsRef.current = true;
-  }, [cashflowSyncState, cloneImportRows, draftCacheKey, importRows, projectTxs, sheetSaveState, weeklySubmissionStatusMap, yearWeeks]);
+  }, [cashflowSyncState, cloneImportRows, draftCacheKey, importRows, projectTxs, sheetSaveState, yearWeeks]);
 
   useEffect(() => {
     const nextSignature = serializeWeeklyAccountingImportRowsMaterially(sheetRows);
@@ -604,36 +508,6 @@ export function SettlementLedgerPage({
     }
   }, [buildExportMatrix, projectName, year]);
 
-  const buildPayloadWeekLabelMap = useCallback(() => {
-    const labelMap = new Map<string, string>();
-    for (const week of yearWeeks) {
-      labelMap.set(`${week.yearMonth}:${week.weekNo}`, week.label);
-    }
-    return labelMap;
-  }, [yearWeeks]);
-
-  const updateWeeklyStatusesForPayload = useCallback(async (
-    payload: Array<{ yearMonth: string; weekNo: number }>,
-    input: {
-      expenseUpdated?: boolean;
-      expenseSyncState: 'pending' | 'review_required' | 'synced' | 'sync_failed';
-      reviewCountsByWeekLabel?: Map<string, number>;
-    },
-  ) => {
-    if (!onUpdateWeeklySubmissionStatus || payload.length === 0) return;
-    const weekLabelMap = buildPayloadWeekLabelMap();
-    await Promise.all(payload.map((week) => onUpdateWeeklySubmissionStatus({
-      projectId,
-      yearMonth: week.yearMonth,
-      weekNo: week.weekNo,
-      ...(typeof input.expenseUpdated === 'boolean' ? { expenseUpdated: input.expenseUpdated } : {}),
-      expenseSyncState: input.expenseSyncState,
-      expenseReviewPendingCount: input.reviewCountsByWeekLabel?.get(
-        weekLabelMap.get(`${week.yearMonth}:${week.weekNo}`) || '',
-      ) || 0,
-    })));
-  }, [buildPayloadWeekLabelMap, onUpdateWeeklySubmissionStatus, projectId]);
-
   const persistImportRowsSnapshot = useCallback(async (
     rows: ImportRow[],
     options?: { silent?: boolean },
@@ -646,18 +520,10 @@ export function SettlementLedgerPage({
     setSheetSaving(true);
     setSheetSaveState('saving');
     try {
-      const sanitizedRows = sanitizeBudgetSubSubRows(rows);
-      setImportRows(cloneImportRows(sanitizedRows));
-      const persistedRows = await onSaveSheetRows(sanitizedRows);
-      const previewSourceRows = Array.isArray(persistedRows) ? persistedRows : sanitizedRows;
+      setImportRows(cloneImportRows(rows));
+      const persistedRows = await onSaveSheetRows(rows);
+      const previewSourceRows = Array.isArray(persistedRows) ? persistedRows : rows;
       pendingSheetRowsEchoSignatureRef.current = serializeWeeklyAccountingImportRowsMaterially(previewSourceRows);
-      const payload = onPreviewActualSyncPayload
-        ? await onPreviewActualSyncPayload(previewSourceRows, yearWeeks, sheetRows || null)
-        : buildSettlementActualSyncPayloadLocally(previewSourceRows, yearWeeks, sheetRows || null);
-      await updateWeeklyStatusesForPayload(payload, {
-        expenseUpdated: true,
-        expenseSyncState: 'pending',
-      });
       setImportDirty(false);
       setSheetSaveState('saved');
       setCashflowSyncState('pending');
@@ -673,110 +539,13 @@ export function SettlementLedgerPage({
     } finally {
       setSheetSaving(false);
     }
-  }, [cloneImportRows, draftCacheKey, onPreviewActualSyncPayload, onSaveSheetRows, sanitizeBudgetSubSubRows, sheetRows, updateWeeklyStatusesForPayload, yearWeeks]);
+  }, [cloneImportRows, draftCacheKey, onSaveSheetRows]);
 
-  const syncImportRowsToCashflow = useCallback(async (
-    rows: ImportRow[],
-    options?: { silent?: boolean },
-  ) => {
-    const silent = options?.silent ?? false;
-    const payload = onPreviewActualSyncPayload
-      ? await onPreviewActualSyncPayload(rows, yearWeeks, sheetRows || null)
-      : buildSettlementActualSyncPayloadLocally(rows, yearWeeks, sheetRows || null);
-    const syncableWeeks = payload;
-    setCashflowSyncing(true);
-    setCashflowSyncState('syncing');
-    try {
-      if (onSyncCashflowActuals) {
-        try {
-          const syncedWeeks = await onSyncCashflowActuals();
-          if (syncedWeeks.length > 0) {
-            await updateWeeklyStatusesForPayload(syncedWeeks, {
-              expenseUpdated: true,
-              expenseSyncState: 'synced',
-            });
-          }
-          setCashflowSyncState('synced');
-          setLastCashflowSyncedAt(new Date().toISOString());
-          if (!silent) {
-            toast.success('캐시플로 실제값까지 동기화했습니다.');
-          }
-          return 'synced' as const;
-        } catch (err) {
-          console.error('[SettlementLedger] BFF cashflow actual sync failed:', err);
-          if (syncableWeeks.length > 0) {
-            await updateWeeklyStatusesForPayload(syncableWeeks, {
-              expenseUpdated: true,
-              expenseSyncState: 'sync_failed',
-            });
-          }
-          setCashflowSyncState('sync_failed');
-          if (!silent) toast.message('정산대장은 저장되었지만 캐시플로 업데이트에 실패했습니다.');
-          return 'sync_failed' as const;
-        }
-      }
-
-      let syncFailed = false;
-      await Promise.all(
-        syncableWeeks.map(async (week) => {
-          try {
-            await upsertWeekAmounts({
-              projectId,
-              yearMonth: week.yearMonth,
-              weekNo: week.weekNo,
-              mode: 'actual',
-              amounts: week.amounts as any,
-            });
-          } catch (err) {
-            syncFailed = true;
-            console.error('[SettlementLedger] cashflow actual update failed:', err);
-          }
-        }),
-      );
-      if (syncFailed) {
-        await updateWeeklyStatusesForPayload(syncableWeeks, {
-          expenseUpdated: true,
-          expenseSyncState: 'sync_failed',
-        });
-        setCashflowSyncState('sync_failed');
-        if (!silent) toast.message('정산대장은 저장되었지만 캐시플로 업데이트에 실패했습니다.');
-        return 'sync_failed' as const;
-      }
-      if (syncableWeeks.length > 0) {
-        await updateWeeklyStatusesForPayload(syncableWeeks, {
-            expenseUpdated: true,
-            expenseSyncState: 'synced',
-        });
-      }
-      setCashflowSyncState('synced');
-      setLastCashflowSyncedAt(new Date().toISOString());
-      if (!silent) {
-        toast.success('캐시플로 실제값까지 동기화했습니다.');
-      }
-      return 'synced' as const;
-    } finally {
-      setCashflowSyncing(false);
-    }
-  }, [
-    onPreviewActualSyncPayload,
-    onSyncCashflowActuals,
-    projectId,
-    sheetRows,
-    updateWeeklyStatusesForPayload,
-    upsertWeekAmounts,
-    yearWeeks,
-  ]);
-
-  const handleImportSave = useCallback(async (options?: { silent?: boolean; syncCashflow?: boolean }) => {
+  const handleImportSave = useCallback(async (options?: { silent?: boolean }) => {
     if (!importRows) return;
     const silent = options?.silent ?? false;
-    const syncCashflow = options?.syncCashflow ?? true;
-    const persistedRows = await persistImportRowsSnapshot(importRows, { silent });
-    if (!persistedRows) return;
-    if (syncCashflow) {
-      await syncImportRowsToCashflow(persistedRows, { silent });
-    }
-  }, [importRows, persistImportRowsSnapshot, syncImportRowsToCashflow]);
+    await persistImportRowsSnapshot(importRows, { silent });
+  }, [importRows, persistImportRowsSnapshot]);
 
   const applyDirectEntryWorkbookRows = useCallback(async (rows: ImportRow[], sheetName: string) => {
     const nextRows = cloneImportRows(rows);
@@ -788,24 +557,8 @@ export function SettlementLedgerPage({
       toast.error(`작성본 업로드는 완료됐지만 저장에 실패했습니다: ${sheetName}`);
       return;
     }
-    const syncOutcome = await syncImportRowsToCashflow(persistedRows, { silent: true });
-    if (syncOutcome === 'synced') {
-      toast.success(`작성본 ${persistedRows.length}건을 저장하고 캐시플로 actual까지 반영했습니다.`);
-      return;
-    }
-    toast.error(`작성본 ${persistedRows.length}건은 저장했지만 캐시플로 actual 반영은 다시 확인이 필요합니다.`);
-  }, [cloneImportRows, persistImportRowsSnapshot, syncImportRowsToCashflow]);
-
-  useEffect(() => {
-    if (sheetSaveState !== 'saved') return;
-    if (importDirty || !importRows || importRows.length === 0) return;
-    if (cashflowSyncState !== 'pending' && cashflowSyncState !== 'sync_failed') return;
-    const signature = serializeWeeklyAccountingImportRowsMaterially(importRows);
-    const retryKey = `${draftCacheKey}:${cashflowSyncState}:${signature}`;
-    if (pendingCashflowSyncRetryKeyRef.current === retryKey) return;
-    pendingCashflowSyncRetryKeyRef.current = retryKey;
-    void syncImportRowsToCashflow(importRows, { silent: true });
-  }, [cashflowSyncState, draftCacheKey, importDirty, importRows, sheetSaveState, syncImportRowsToCashflow]);
+    toast.success(`작성본 ${persistedRows.length}건을 저장했습니다. Actual 반영 결과는 캐시플로에서 확인할 수 있습니다.`);
+  }, [cloneImportRows, persistImportRowsSnapshot]);
 
   const handleDirectEntryWorkbookFile = useCallback(async (file: File) => {
     setDirectEntryUploading(true);
@@ -835,38 +588,38 @@ export function SettlementLedgerPage({
   const autosavePlan = useMemo(() => resolveWeeklyExpenseAutosavePlan({
     saveMode,
     idleMs: autoSaveIdleMs,
-    syncCashflowOnAutoSave: autoSaveSyncCashflow,
+    syncCashflowOnAutoSave: false,
     importDirty,
     hasImportRows: Boolean(importRows && importRows.length > 0),
     hasSaveHandler: Boolean(onSaveSheetRows),
     sheetSaving,
-  }), [autoSaveIdleMs, autoSaveSyncCashflow, importDirty, importRows, onSaveSheetRows, saveMode, sheetSaving]);
+  }), [autoSaveIdleMs, importDirty, importRows, onSaveSheetRows, saveMode, sheetSaving]);
 
   useEffect(() => {
     if (!autosavePlan.shouldSchedule) return;
     const timer = window.setTimeout(() => {
-      void handleImportSave({ silent: true, syncCashflow: autosavePlan.syncCashflow });
+      void handleImportSave({ silent: true });
     }, autosavePlan.idleMs);
     return () => window.clearTimeout(timer);
   }, [autosavePlan, handleImportSave]);
 
   useEffect(() => {
-    if (!importDirty && !cashflowSyncing) return;
+    if (!importDirty) return;
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = '';
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [cashflowSyncing, importDirty]);
+  }, [importDirty]);
 
   useEffect(() => {
     onDirtyStateChange?.(importDirty || sheetSaveState === 'dirty');
   }, [importDirty, onDirtyStateChange, sheetSaveState]);
 
   useEffect(() => {
-    onSavingStateChange?.(sheetSaveState === 'saving' || cashflowSyncing);
-  }, [cashflowSyncing, onSavingStateChange, sheetSaveState]);
+    onSavingStateChange?.(sheetSaveState === 'saving');
+  }, [onSavingStateChange, sheetSaveState]);
 
   useEffect(() => () => {
     onDirtyStateChange?.(false);
@@ -880,21 +633,16 @@ export function SettlementLedgerPage({
     if (sheetSaveState === 'saving') return '시트 저장 중...';
     if (sheetSaveState === 'save_failed') return '시트 저장 실패';
     if (importDirty || sheetSaveState === 'dirty') return '저장 전 초안';
-    if (cashflowSyncState === 'syncing') return '저장 완료 · actual 반영 중';
-    if (cashflowSyncState === 'sync_failed') return '저장 완료 · actual 반영 실패';
     if (cashflowSyncState === 'pending') {
       return lastAutoSavedAt
-        ? `저장 완료 ${formatCommentTime(lastAutoSavedAt)} · actual 반영 대기`
-        : '저장 완료 · actual 반영 대기';
-    }
-    if (cashflowSyncState === 'synced' && lastCashflowSyncedAt) {
-      return `동기화 완료 ${formatCommentTime(lastCashflowSyncedAt)}`;
+        ? `저장 완료 ${formatCommentTime(lastAutoSavedAt)} · Actual 반영 대기`
+        : '저장 완료 · Actual 반영 대기';
     }
     if (lastAutoSavedAt) {
       return `${saveMode === 'manual' ? '수동 저장' : '자동 저장'} ${formatCommentTime(lastAutoSavedAt)}`;
     }
     return saveMode === 'manual' ? '수동 저장만 사용' : '자동 저장 대기';
-  }, [cashflowSyncState, importDirty, lastAutoSavedAt, lastCashflowSyncedAt, saveMode, sheetSaveState]);
+  }, [cashflowSyncState, importDirty, lastAutoSavedAt, saveMode, sheetSaveState]);
 
   const weeklyAccountingStatus = useMemo(() => resolveWeeklyAccountingProductStatus({
     snapshot: {
@@ -1143,7 +891,6 @@ export function SettlementLedgerPage({
             settlementSheetPolicy={settlementSheetPolicy}
             basis={basis}
             onToggleFullscreen={() => setEditorFullscreen((prev) => !prev)}
-            onDeriveRows={onDeriveRows}
           />
         )}
         {revertConfirmDialog}
@@ -1340,7 +1087,6 @@ export function SettlementLedgerPage({
           workflowMode={workflowMode}
           settlementSheetPolicy={settlementSheetPolicy}
           basis={basis}
-          onDeriveRows={onDeriveRows}
         />
       )}
       {revertConfirmDialog}

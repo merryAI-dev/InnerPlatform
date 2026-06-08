@@ -327,7 +327,7 @@ export function BusinessCardLabPage() {
       return;
     }
     if (!bffEnabled) {
-      setWorkflowMessage('BFF API가 꺼져 있어 명함 추출을 실행할 수 없습니다.');
+      setWorkflowMessage('서버 처리 경로를 확인할 수 없어 명함 추출을 실행할 수 없습니다.');
       return;
     }
     setProcessing(true);

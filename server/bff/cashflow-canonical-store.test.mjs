@@ -88,7 +88,7 @@ describe('cashflow canonical BFF helpers', () => {
     expect(plan.clearedWeeks).toHaveLength(0);
   });
 
-  it('merges partial saves into the existing map so saved values stay visible to Firestore readers', async () => {
+  it('hard-disables legacy cashflow week Firestore writes', async () => {
     const writes = [];
     const db = {
       doc(path) {
@@ -114,7 +114,7 @@ describe('cashflow canonical BFF helpers', () => {
       },
     };
 
-    await upsertCashflowWeekAmounts({
+    await expect(upsertCashflowWeekAmounts({
       db,
       tenantId: 'mysc',
       actorId: 'u1',
@@ -125,20 +125,14 @@ describe('cashflow canonical BFF helpers', () => {
       weekNo: 1,
       amounts: { DIRECT_COST_OUT: 3620183 },
       now: '2026-05-27T09:40:00.000Z',
+    })).rejects.toMatchObject({
+      code: 'legacy_cashflow_writer_disabled',
+      statusCode: 410,
     });
-
-    const weekWrite = writes.find((write) => write.ref.path.includes('/cashflow_weeks/'));
-    expect(weekWrite.data.actual).toEqual({
-      SALES_IN: 7900000,
-      MYSC_PREPAY_IN: -1000,
-      DIRECT_COST_OUT: 3620183,
-    });
-    expect(weekWrite.data.pmSubmitted).toBeUndefined();
-    expect(Object.prototype.hasOwnProperty.call(weekWrite.data, 'actual.DIRECT_COST_OUT')).toBe(false);
-    expect(weekWrite.options).toEqual({ merge: true });
+    expect(writes).toHaveLength(0);
   });
 
-  it('flags large projection changes made within a week of the target week', async () => {
+  it('does not allow legacy projection writes to bypass Java ORM projection commands', async () => {
     const writes = [];
     const db = {
       doc(path) {
@@ -163,7 +157,7 @@ describe('cashflow canonical BFF helpers', () => {
       },
     };
 
-    await upsertCashflowWeekAmounts({
+    await expect(upsertCashflowWeekAmounts({
       db,
       tenantId: 'mysc',
       actorId: 'u1',
@@ -174,17 +168,11 @@ describe('cashflow canonical BFF helpers', () => {
       weekNo: 1,
       amounts: { DIRECT_COST_OUT: 101000000 },
       now: '2026-06-01T09:40:00.000Z',
+    })).rejects.toMatchObject({
+      code: 'legacy_cashflow_writer_disabled',
+      statusCode: 410,
     });
-
-    const weekWrite = writes.find((write) => write.ref.path.includes('/cashflow_weeks/'));
-    expect(weekWrite.data.projectionChangeAlert).toMatchObject({
-      triggered: true,
-      reason: 'near_week_large_projection_change',
-      totalAbsDelta: 100000000,
-      largestLineId: 'DIRECT_COST_OUT',
-      largestLineDelta: 100000000,
-      daysBeforeWeekStart: 2,
-    });
+    expect(writes).toHaveLength(0);
   });
 
   it('treats bank-imported expense rows on inflow lines as negative adjustments', () => {
@@ -202,7 +190,7 @@ describe('cashflow canonical BFF helpers', () => {
     expect(plan.weeks[0].amounts.MYSC_PREPAY_IN).toBe(-8615904);
   });
 
-  it('does not clear existing actuals when a project has no persisted expense rows', async () => {
+  it('hard-disables legacy expense sheet actual sync writes', async () => {
     const writes = [];
     const db = {
       collection(path) {
@@ -227,20 +215,16 @@ describe('cashflow canonical BFF helpers', () => {
       },
     };
 
-    const result = await syncProjectCashflowActualsFromExpenseSheets({
+    await expect(syncProjectCashflowActualsFromExpenseSheets({
       db,
       tenantId: 'mysc',
       actorId: 'u1',
       actorName: 'PM',
       projectId: 'p1',
       now: '2026-05-27T09:40:00.000Z',
-    });
-
-    expect(result).toMatchObject({
-      skipped: true,
-      reason: 'no_expense_sheet_rows',
-      upsertedWeeks: 0,
-      clearedWeeks: 0,
+    })).rejects.toMatchObject({
+      code: 'legacy_cashflow_writer_disabled',
+      statusCode: 410,
     });
     expect(writes).toHaveLength(0);
   });

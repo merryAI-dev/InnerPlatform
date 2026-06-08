@@ -51,6 +51,12 @@ describe('readFeatureFlags', () => {
     expect(flags.etlStagingLocalEnabled).toBe(false);
   });
 
+  it('defaults platform API on in production builds so stage/live cannot silently fall back', () => {
+    const flags = readFeatureFlags({ PROD: 'true' });
+
+    expect(flags.platformApiEnabled).toBe(true);
+  });
+
   it('BFF cutover config: all production flags enabled', () => {
     const flags = readFeatureFlags({
       VITE_FIREBASE_AUTH_ENABLED: 'true',

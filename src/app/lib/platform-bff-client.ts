@@ -8,7 +8,7 @@ import type {
   TransactionState,
 } from '../data/types';
 import { PlatformApiClient } from '../platform/api-client';
-import { buildStandardHeaders, type RequestActor } from '../platform/request-context';
+import type { RequestActor } from '../platform/request-context';
 
 export interface PlatformApiRuntimeConfig {
   enabled: boolean;
@@ -535,48 +535,331 @@ export interface OverrideTransactionEvidenceDriveCategoriesPayload {
   }>;
 }
 
-export interface CashflowWeekAmountsPayload {
-  yearMonth: string;
-  weekNo: number;
-  mode: 'projection' | 'actual';
-  amounts: Record<string, number>;
+export interface WeeklyExpenseDraftCellPatch {
+  columnIndex: number;
+  rawValue: string;
+  userEdited?: boolean;
 }
 
-export interface CashflowWeekAmountsResult {
+export interface WeeklyExpenseDraftRowPatch {
+  rowIndex: number;
+  sourceTxId?: string;
+  entryKind?: string;
+  cells: WeeklyExpenseDraftCellPatch[];
+}
+
+export interface WeeklyExpenseSaveDraftPayload {
+  expectedSheetVersion?: number;
+  sheetName?: string;
+  rows: WeeklyExpenseDraftRowPatch[];
+}
+
+export interface WeeklyExpenseSaveDraftResult {
   ok: boolean;
+  commandName: string;
+  projectId: string;
+  sheetId: string;
+  sheetKey: string;
+  sheetVersion: number;
+  savedRowCount: number;
+  savedCellCount: number;
+  touchedRows: number[];
+  cellIssues: Array<{
+    rowIndex: number;
+    columnIndex: number;
+    code: string;
+    severity: string;
+    message: string;
+  }>;
+  actualDelta: Array<{
+    yearMonth: string;
+    weekNo: number;
+    cashflowLine: string;
+    amount: number | string;
+  }>;
+  auditId: string;
+}
+
+export type WeeklyExpenseClipboardDepth = 'SHALLOW' | 'DEEP';
+export type WeeklyExpenseClipboardOperationType = 'COPY' | 'CUT';
+export type WeeklyExpenseClipboardValueType = 'TEXT' | 'NUMBER' | 'DATE' | 'BOOLEAN';
+export type WeeklyExpenseClipboardValidationStatus = 'UNKNOWN' | 'VALID' | 'INVALID' | 'REVIEW_REQUIRED';
+
+export interface WeeklyExpenseClipboardPayload {
+  operationType: WeeklyExpenseClipboardOperationType;
+  depth: WeeklyExpenseClipboardDepth;
+  sourceSelection: {
+    startRow: number;
+    startColumn: number;
+    endRow: number;
+    endColumn: number;
+  };
+  rowCount: number;
+  columnCount: number;
+  cells: Array<{
+    relativeRow: number;
+    relativeColumn: number;
+    rawValue: string;
+    normalizedValue: string;
+    valueType: WeeklyExpenseClipboardValueType;
+    validationStatus: WeeklyExpenseClipboardValidationStatus;
+    validationMessage: string;
+  }>;
+}
+
+export interface WeeklyExpenseCellCommandResult {
+  ok: boolean;
+  commandName: string;
+  projectId: string;
+  sheetId: string;
+  sheetKey: string;
+  sheetVersion: number;
+  touchedRows: number[];
+  touchedCellCount: number;
+  cellIssues: WeeklyExpenseSaveDraftResult['cellIssues'];
+  actualDelta: WeeklyExpenseSaveDraftResult['actualDelta'];
+  clipboard: WeeklyExpenseClipboardPayload | null;
+  auditId: string;
+}
+
+export interface WeeklyExpenseCopyCellsPayload {
+  expectedSheetVersion: number;
+  startRow: number;
+  startColumn: number;
+  endRow: number;
+  endColumn: number;
+  depth: WeeklyExpenseClipboardDepth;
+}
+
+export interface WeeklyExpenseCellPatchCommandPayload {
+  expectedSheetVersion?: number;
+  sheetName?: string;
+  cells: Array<{
+    rowIndex: number;
+    columnIndex: number;
+    rawValue: string;
+    userEdited?: boolean;
+  }>;
+}
+
+export interface WeeklyExpensePasteCell {
+  relativeRow: number;
+  relativeColumn: number;
+  rawValue: string;
+  /** Advisory clipboard metadata only. Java ORM revalidates from rawValue. */
+  normalizedValue?: string;
+  valueType?: WeeklyExpenseClipboardValueType;
+  validationStatus?: WeeklyExpenseClipboardValidationStatus;
+  validationMessage?: string;
+}
+
+export interface WeeklyExpensePasteCellsPayload {
+  expectedSheetVersion: number;
+  sheetName?: string;
+  anchorRow: number;
+  anchorColumn: number;
+  rowCount: number;
+  columnCount: number;
+  depth: WeeklyExpenseClipboardDepth;
+  cells: WeeklyExpensePasteCell[];
+}
+
+export interface WeeklyExpenseCutCellsPayload {
+  expectedSheetVersion: number;
+  startRow: number;
+  startColumn: number;
+  endRow: number;
+  endColumn: number;
+  depth: WeeklyExpenseClipboardDepth;
+}
+
+export interface WeeklyExpenseRowCommandResult {
+  ok: boolean;
+  commandName: string;
+  projectId: string;
+  sheetId: string;
+  sheetKey: string;
+  sheetVersion: number;
+  touchedRows: number[];
+  affectedRowCount: number;
+  cellIssues: WeeklyExpenseSaveDraftResult['cellIssues'];
+  actualDelta: WeeklyExpenseSaveDraftResult['actualDelta'];
+  auditId: string;
+}
+
+export interface WeeklyExpenseRowInsertPayload {
+  expectedSheetVersion?: number;
+  sheetName?: string;
+  startRow: number;
+  rowCount: number;
+}
+
+export interface WeeklyExpenseRowDeletePayload {
+  expectedSheetVersion: number;
+  startRow: number;
+  rowCount: number;
+  expectedRowVersions?: Array<{
+    rowIndex: number;
+    rowVersion: number;
+  }>;
+}
+
+export interface WeeklyExpenseBankStatementImportBatchPayload {
+  uploadName?: string;
+  columns: string[];
+  lines: Array<{
+    lineIndex: number;
+    sourceLineKey: string;
+    transactionDate?: string;
+    counterparty?: string;
+    memo?: string;
+    signedAmount?: number;
+    balanceAfter?: number;
+    rawCells: string[];
+  }>;
+}
+
+export interface WeeklyExpenseBankStatementImportBatchResult {
+  ok: boolean;
+  commandName: string;
+  projectId: string;
+  batchId: string;
+  stagedLineCount: number;
+  duplicateLineCount: number;
+  lines: Array<{
+    id: string | null;
+    lineIndex: number;
+    sourceLineKey: string;
+    status: string;
+    signedAmount: number | string;
+  }>;
+  auditId: string;
+}
+
+export interface WeeklyExpenseBankStatementImportLinesResult {
+  ok: boolean;
+  projectId: string;
+  status: string;
+  lines: Array<{
+    id: string;
+    batchId: string;
+    uploadName: string;
+    batchStatus: string;
+    batchCreatedBy: string;
+    batchCreatedAt: string;
+    lineIndex: number;
+    sourceLineKey: string;
+    transactionDate: string;
+    counterparty: string;
+    memo: string;
+    signedAmount: number | string;
+    balanceAfter: number | string;
+    rawCells: string[];
+    status: string;
+    appliedSheetKey?: string | null;
+    appliedRowId?: string | null;
+    appliedAt?: string | null;
+    appliedBy?: string | null;
+  }>;
+}
+
+export interface WeeklyExpenseBankStatementApplyItemsPayload {
+  sheetKey: string;
+  expectedSheetVersion?: number;
+  sheetName?: string;
+  items: Array<{
+    importLineId: string;
+    cells: WeeklyExpenseDraftCellPatch[];
+  }>;
+}
+
+export interface WeeklyExpenseBankStatementApplyItemsResult {
+  ok: boolean;
+  commandName: string;
+  projectId: string;
+  sheetId: string;
+  sheetKey: string;
+  sheetVersion: number;
+  appliedLineCount: number;
+  touchedRows: number[];
+  cellIssues: WeeklyExpenseSaveDraftResult['cellIssues'];
+  actualDelta: WeeklyExpenseSaveDraftResult['actualDelta'];
+  auditId: string;
+}
+
+export interface WeeklyExpenseCashflowSnapshot {
+  projectId: string;
+  projection: Array<{
+    yearMonth: string;
+    weekNo: number;
+    cashflowLine: string;
+    amount: number | string;
+  }>;
+  actual: Array<{
+    sheetKey?: string;
+    yearMonth: string;
+    weekNo: number;
+    cashflowLine: string;
+    amount: number | string;
+  }>;
+  readModel?: {
+    months: Array<{
+      yearMonth: string;
+      projection: WeeklyExpenseCashflowModeReadModel;
+      actual: WeeklyExpenseCashflowModeReadModel;
+    }>;
+  };
+}
+
+export interface WeeklyExpenseCashflowTotals {
+  totalIn: number | string;
+  totalOut: number | string;
+  net: number | string;
+}
+
+export interface WeeklyExpenseCashflowWeekReadModel extends WeeklyExpenseCashflowTotals {
+  weekNo: number;
+  amounts: Record<string, number | string>;
+  weekIn: number | string;
+  weekOut: number | string;
+}
+
+export interface WeeklyExpenseCashflowModeReadModel {
+  rowTotals: Record<string, number | string>;
+  weeks: WeeklyExpenseCashflowWeekReadModel[];
+  monthTotals: WeeklyExpenseCashflowTotals;
+}
+
+export interface WeeklyExpenseSubmitWeekResult {
+  ok: boolean;
+  commandName: string;
   projectId: string;
   yearMonth: string;
   weekNo: number;
-  weekStart: string;
-  weekEnd: string;
-  mode: 'projection' | 'actual';
-  updatedAt: string;
+  state: string;
+  auditId: string;
 }
 
-export interface ProjectCashflowActualSyncResult {
-  ok: boolean;
-  skipped?: boolean;
-  reason?: string;
+export interface WeeklyExpenseCloseWeekResult extends WeeklyExpenseSubmitWeekResult {}
+
+export interface WeeklyExpenseStatusLine {
+  id: string;
   projectId: string;
-  sourceRows: number;
-  sheetCount: number;
-  upsertedWeeks: number;
-  clearedWeeks: number;
-  weeks: Array<{
-    yearMonth: string;
-    weekNo: number;
-    weekStart?: string;
-    weekEnd?: string;
-    amounts?: Record<string, number>;
-  }>;
-  cleared: Array<{
-    yearMonth: string;
-    weekNo: number;
-    weekStart?: string;
-    weekEnd?: string;
-    amounts?: Record<string, number>;
-  }>;
-  updatedAt: string;
+  yearMonth: string;
+  weekNo: number;
+  state: string;
+  pmSubmitted: boolean;
+  submittedBy?: string | null;
+  submittedAt?: string | null;
+  adminClosed: boolean;
+  closedBy?: string | null;
+  closedAt?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface WeeklyExpenseStatusesResult {
+  projectId: string;
+  statuses: WeeklyExpenseStatusLine[];
 }
 
 export interface PlatformApiClientLike {
@@ -625,17 +908,25 @@ export interface PlatformApiClientLike {
 
 const DEFAULT_BFF_BASE_URL = 'http://127.0.0.1:8787';
 
-function normalizeBaseUrl(value: unknown): string {
-  if (typeof value !== 'string' || !value.trim()) return DEFAULT_BFF_BASE_URL;
+function normalizeBaseUrl(value: unknown, options: { requireConfigured?: boolean } = {}): string {
+  if (typeof value !== 'string' || !value.trim()) {
+    if (options.requireConfigured) {
+      throw new Error('VITE_PLATFORM_API_BASE_URL is required for stage/live platform API operation.');
+    }
+    return DEFAULT_BFF_BASE_URL;
+  }
   return value.trim().replace(/\/$/, '');
 }
 
 export function readPlatformApiRuntimeConfig(
   env: Record<string, unknown> = import.meta.env,
 ): PlatformApiRuntimeConfig {
+  const enabled = parseFeatureFlag(env.VITE_PLATFORM_API_ENABLED, parseFeatureFlag(env.PROD, false));
   return {
-    enabled: parseFeatureFlag(env.VITE_PLATFORM_API_ENABLED, false),
-    baseUrl: normalizeBaseUrl(env.VITE_PLATFORM_API_BASE_URL),
+    enabled,
+    baseUrl: normalizeBaseUrl(env.VITE_PLATFORM_API_BASE_URL, {
+      requireConfigured: enabled && parseFeatureFlag(env.PROD, false),
+    }),
   };
 }
 
@@ -1329,20 +1620,25 @@ export async function overrideTransactionEvidenceDriveCategoriesViaBff(params: {
   return response.data;
 }
 
-export async function upsertCashflowWeekAmountsViaBff(params: {
+export async function upsertWeeklyExpenseProjectionViaBff(params: {
   tenantId: string;
   actor: ActorLike;
   projectId: string;
-  payload: CashflowWeekAmountsPayload;
+  lines: Array<{
+    yearMonth: string;
+    weekNo: number;
+    cashflowLine: string;
+    amount: number;
+  }>;
   client?: PlatformApiClientLike;
-}): Promise<CashflowWeekAmountsResult> {
+}): Promise<{ ok: boolean; commandName: string; savedLineCount: number }> {
   const apiClient = resolveClient(params.client);
-  const response = await apiClient.post<CashflowWeekAmountsResult>(
-    `/api/v1/projects/${encodeURIComponent(params.projectId)}/cashflow-weeks/upsert`,
+  const response = await apiClient.post<{ ok: boolean; commandName: string; savedLineCount: number }>(
+    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/projection`,
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
-      body: params.payload,
+      body: { lines: params.lines },
       retries: 0,
       timeoutMs: 12000,
     },
@@ -1350,19 +1646,23 @@ export async function upsertCashflowWeekAmountsViaBff(params: {
   return response.data;
 }
 
-export async function syncProjectCashflowActualsViaBff(params: {
+export async function saveWeeklyExpenseDraftViaBff(params: {
   tenantId: string;
   actor: ActorLike;
   projectId: string;
+  sheetKey: string;
+  payload: WeeklyExpenseSaveDraftPayload;
+  idempotencyKey: string;
   client?: PlatformApiClientLike;
-}): Promise<ProjectCashflowActualSyncResult> {
+}): Promise<WeeklyExpenseSaveDraftResult> {
   const apiClient = resolveClient(params.client);
-  const response = await apiClient.post<ProjectCashflowActualSyncResult>(
-    `/api/v1/projects/${encodeURIComponent(params.projectId)}/cashflow-actuals/sync`,
+  const response = await apiClient.post<WeeklyExpenseSaveDraftResult>(
+    `/api/v1/weekly-expenses/${encodeURIComponent(params.projectId)}/sheets/${encodeURIComponent(params.sheetKey)}/save-draft`,
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
-      body: {},
+      body: params.payload,
+      idempotencyKey: params.idempotencyKey,
       retries: 0,
       timeoutMs: 20000,
     },
@@ -1370,34 +1670,308 @@ export async function syncProjectCashflowActualsViaBff(params: {
   return response.data;
 }
 
+export async function copyWeeklyExpenseCellsViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  sheetKey: string;
+  payload: WeeklyExpenseCopyCellsPayload;
+  idempotencyKey: string;
+  client?: PlatformApiClientLike;
+}): Promise<WeeklyExpenseCellCommandResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<WeeklyExpenseCellCommandResult>(
+    `/api/v1/weekly-expenses/${encodeURIComponent(params.projectId)}/sheets/${encodeURIComponent(params.sheetKey)}/commands/copy`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.payload,
+      idempotencyKey: params.idempotencyKey,
+      retries: 0,
+      timeoutMs: 12000,
+    },
+  );
+  return response.data;
+}
+
+export async function patchWeeklyExpenseCellsViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  sheetKey: string;
+  payload: WeeklyExpenseCellPatchCommandPayload;
+  idempotencyKey: string;
+  client?: PlatformApiClientLike;
+}): Promise<WeeklyExpenseCellCommandResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<WeeklyExpenseCellCommandResult>(
+    `/api/v1/weekly-expenses/${encodeURIComponent(params.projectId)}/sheets/${encodeURIComponent(params.sheetKey)}/commands/cell-patch`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.payload,
+      idempotencyKey: params.idempotencyKey,
+      retries: 0,
+      timeoutMs: 12000,
+    },
+  );
+  return response.data;
+}
+
+export async function pasteWeeklyExpenseCellsViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  sheetKey: string;
+  payload: WeeklyExpensePasteCellsPayload;
+  idempotencyKey: string;
+  client?: PlatformApiClientLike;
+}): Promise<WeeklyExpenseCellCommandResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<WeeklyExpenseCellCommandResult>(
+    `/api/v1/weekly-expenses/${encodeURIComponent(params.projectId)}/sheets/${encodeURIComponent(params.sheetKey)}/commands/paste`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.payload,
+      idempotencyKey: params.idempotencyKey,
+      retries: 0,
+      timeoutMs: 20000,
+    },
+  );
+  return response.data;
+}
+
+export async function cutWeeklyExpenseCellsViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  sheetKey: string;
+  payload: WeeklyExpenseCutCellsPayload;
+  idempotencyKey: string;
+  client?: PlatformApiClientLike;
+}): Promise<WeeklyExpenseCellCommandResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<WeeklyExpenseCellCommandResult>(
+    `/api/v1/weekly-expenses/${encodeURIComponent(params.projectId)}/sheets/${encodeURIComponent(params.sheetKey)}/commands/cut`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.payload,
+      idempotencyKey: params.idempotencyKey,
+      retries: 0,
+      timeoutMs: 12000,
+    },
+  );
+  return response.data;
+}
+
+export async function insertWeeklyExpenseRowsViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  sheetKey: string;
+  payload: WeeklyExpenseRowInsertPayload;
+  idempotencyKey: string;
+  client?: PlatformApiClientLike;
+}): Promise<WeeklyExpenseRowCommandResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<WeeklyExpenseRowCommandResult>(
+    `/api/v1/weekly-expenses/${encodeURIComponent(params.projectId)}/sheets/${encodeURIComponent(params.sheetKey)}/commands/row-insert`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.payload,
+      idempotencyKey: params.idempotencyKey,
+      retries: 0,
+      timeoutMs: 12000,
+    },
+  );
+  return response.data;
+}
+
+export async function deleteWeeklyExpenseRowsViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  sheetKey: string;
+  payload: WeeklyExpenseRowDeletePayload;
+  idempotencyKey: string;
+  client?: PlatformApiClientLike;
+}): Promise<WeeklyExpenseRowCommandResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<WeeklyExpenseRowCommandResult>(
+    `/api/v1/weekly-expenses/${encodeURIComponent(params.projectId)}/sheets/${encodeURIComponent(params.sheetKey)}/commands/row-delete`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.payload,
+      idempotencyKey: params.idempotencyKey,
+      retries: 0,
+      timeoutMs: 12000,
+    },
+  );
+  return response.data;
+}
+
+export async function importWeeklyExpenseBankStatementBatchViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  payload: WeeklyExpenseBankStatementImportBatchPayload;
+  idempotencyKey: string;
+  client?: PlatformApiClientLike;
+}): Promise<WeeklyExpenseBankStatementImportBatchResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<WeeklyExpenseBankStatementImportBatchResult>(
+    `/api/v1/weekly-expenses/${encodeURIComponent(params.projectId)}/bank-statements/import-batch`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.payload,
+      idempotencyKey: params.idempotencyKey,
+      retries: 0,
+      timeoutMs: 20000,
+    },
+  );
+  return response.data;
+}
+
+export async function fetchWeeklyExpenseBankStatementImportLinesViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  status?: 'staged' | 'applied' | 'duplicate' | 'all';
+  client?: PlatformApiClientLike;
+}): Promise<WeeklyExpenseBankStatementImportLinesResult> {
+  const apiClient = resolveClient(params.client);
+  const status = params.status ? `?status=${encodeURIComponent(params.status)}` : '';
+  const response = await apiClient.get<WeeklyExpenseBankStatementImportLinesResult>(
+    `/api/v1/weekly-expenses/${encodeURIComponent(params.projectId)}/bank-statements/import-lines${status}`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      timeoutMs: 12000,
+    },
+  );
+  return response.data;
+}
+
+export async function applyWeeklyExpenseBankStatementItemsViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  payload: WeeklyExpenseBankStatementApplyItemsPayload;
+  idempotencyKey: string;
+  client?: PlatformApiClientLike;
+}): Promise<WeeklyExpenseBankStatementApplyItemsResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<WeeklyExpenseBankStatementApplyItemsResult>(
+    `/api/v1/weekly-expenses/${encodeURIComponent(params.projectId)}/bank-statements/apply-items`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.payload,
+      idempotencyKey: params.idempotencyKey,
+      retries: 0,
+      timeoutMs: 20000,
+    },
+  );
+  return response.data;
+}
+
+export async function fetchWeeklyExpenseCashflowViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  client?: PlatformApiClientLike;
+}): Promise<WeeklyExpenseCashflowSnapshot> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.get<WeeklyExpenseCashflowSnapshot>(
+    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      timeoutMs: 12000,
+    },
+  );
+  return response.data;
+}
+
+export async function submitWeeklyExpenseWeekViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  yearMonth: string;
+  weekNo: number;
+  idempotencyKey: string;
+  client?: PlatformApiClientLike;
+}): Promise<WeeklyExpenseSubmitWeekResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<WeeklyExpenseSubmitWeekResult>(
+    `/api/v1/weekly-expenses/${encodeURIComponent(params.projectId)}/submit`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: {
+        yearMonth: params.yearMonth,
+        weekNo: params.weekNo,
+      },
+      idempotencyKey: params.idempotencyKey,
+      retries: 0,
+      timeoutMs: 12000,
+    },
+  );
+  return response.data;
+}
+
+export async function closeWeeklyExpenseWeekViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  yearMonth: string;
+  weekNo: number;
+  idempotencyKey: string;
+  client?: PlatformApiClientLike;
+}): Promise<WeeklyExpenseCloseWeekResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<WeeklyExpenseCloseWeekResult>(
+    `/api/v1/weekly-expenses/${encodeURIComponent(params.projectId)}/close`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: {
+        yearMonth: params.yearMonth,
+        weekNo: params.weekNo,
+      },
+      idempotencyKey: params.idempotencyKey,
+      retries: 0,
+      timeoutMs: 12000,
+    },
+  );
+  return response.data;
+}
+
+export async function fetchWeeklyExpenseStatusesViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  client?: PlatformApiClientLike;
+}): Promise<WeeklyExpenseStatusesResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.get<WeeklyExpenseStatusesResult>(
+    `/api/v1/weekly-expenses/${encodeURIComponent(params.projectId)}/statuses`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      timeoutMs: 12000,
+    },
+  );
+  return response.data;
+}
+
 export function isPlatformApiEnabled(): boolean {
   return featureFlags.platformApiEnabled;
-}
-
-function resolveBinaryErrorMessage(text: string): string {
-  const trimmed = text.trim();
-  if (!trimmed) return '파일 다운로드 요청에 실패했습니다.';
-  try {
-    const parsed = JSON.parse(trimmed) as { message?: string; error?: string };
-    return parsed.message || parsed.error || trimmed;
-  } catch {
-    return trimmed;
-  }
-}
-
-function parseContentDispositionFileName(headerValue: string | null): string {
-  const value = String(headerValue || '').trim();
-  if (!value) return '';
-  const utf8Match = value.match(/filename\*=UTF-8''([^;]+)/i);
-  if (utf8Match?.[1]) {
-    try {
-      return decodeURIComponent(utf8Match[1]);
-    } catch {
-      return utf8Match[1];
-    }
-  }
-  const basicMatch = value.match(/filename="([^"]+)"/i) || value.match(/filename=([^;]+)/i);
-  return basicMatch?.[1]?.trim() || '';
 }
 
 export async function exportCashflowWorkbookViaBff(params: {
@@ -1412,28 +1986,33 @@ export async function exportCashflowWorkbookViaBff(params: {
     variant: 'single-project' | 'combined' | 'multi-sheet';
   };
 }): Promise<{ blob: Blob; fileName: string }> {
-  const config = readPlatformApiRuntimeConfig();
-  const headers = buildStandardHeaders({
-    tenantId: params.tenantId,
-    actor: toRequestActor(params.actor),
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-    },
-  });
-  const response = await fetch(`${config.baseUrl}/api/v1/cashflow-exports`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(params.body),
-  });
-
-  if (!response.ok) {
-    throw new Error(resolveBinaryErrorMessage(await response.text()));
+  if (params.body.scope !== 'single' || !params.body.projectId) {
+    throw new Error('단일 사업 기준으로 다시 다운로드해 주세요.');
   }
 
+  const apiClient = resolveClient();
+  const response = await apiClient.post<{
+    artifactType?: string;
+    fileName?: string;
+    content?: string;
+  }>(
+    `/api/v1/weekly-expenses/${encodeURIComponent(params.body.projectId)}/audit-export`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: {
+        format: 'CSV',
+        includeAuditSummary: true,
+      },
+      retries: 0,
+      timeoutMs: 20000,
+    },
+  );
+  const content = String(response.data.content || '');
+  const fileName = response.data.fileName || `${params.body.projectId}-weekly-expense-audit.csv`;
   return {
-    blob: await response.blob(),
-    fileName: parseContentDispositionFileName(response.headers.get('content-disposition')) || 'cashflow-export.xlsx',
+    blob: new Blob([content], { type: 'text/csv;charset=utf-8' }),
+    fileName,
   };
 }
 

@@ -63,7 +63,7 @@ export function StatusBar() {
           {dataSource === 'firestore' ? (
             <>
               <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              <span style={{ fontWeight: 500 }}>Firestore</span>
+              <span style={{ fontWeight: 500 }}>연결됨</span>
             </>
           ) : (
             <>

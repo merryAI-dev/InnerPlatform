@@ -1,0 +1,113 @@
+steps:
+  - name: maven:3.9-eclipse-temurin-21
+    entrypoint: bash
+    args:
+      - -lc
+      - |
+        mvn -f server/jvm-weekly-api/pom.xml test
+
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - server/jvm-weekly-api/Dockerfile
+      - -t
+      - gcr.io/$PROJECT_ID/innerplatform-jvm-weekly-api:$COMMIT_SHA
+      - .
+
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - gcr.io/$PROJECT_ID/innerplatform-jvm-weekly-api:$COMMIT_SHA
+
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -lc
+      - |
+        if [[ -z "${_JVM_WEEKLY_DATABASE_URL}" ]]; then
+          echo "[cloudbuild-jvm-weekly-api] _JVM_WEEKLY_DATABASE_URL is required"
+          exit 1
+        fi
+        if [[ "${_JVM_WEEKLY_DATABASE_URL}" == *"127.0.0.1"* || "${_JVM_WEEKLY_DATABASE_URL}" == *"localhost"* ]]; then
+          echo "[cloudbuild-jvm-weekly-api] _JVM_WEEKLY_DATABASE_URL must not point at localhost"
+          exit 1
+        fi
+        FIREBASE_PROJECT_ID="${_JVM_WEEKLY_FIREBASE_PROJECT_ID}"
+        if [[ -z "$${FIREBASE_PROJECT_ID}" ]]; then
+          FIREBASE_PROJECT_ID="$PROJECT_ID"
+        fi
+        if [[ -z "$${FIREBASE_PROJECT_ID}" ]]; then
+          echo "[cloudbuild-jvm-weekly-api] _JVM_WEEKLY_FIREBASE_PROJECT_ID or PROJECT_ID is required for browser-direct auth"
+          exit 1
+        fi
+        if [[ -z "${_JVM_WEEKLY_ALLOWED_ORIGINS}" ]]; then
+          echo "[cloudbuild-jvm-weekly-api] _JVM_WEEKLY_ALLOWED_ORIGINS is required for browser-direct CORS"
+          exit 1
+        fi
+        NETWORK_ARGS=()
+        if [[ -n "${_SERVERLESS_VPC_CONNECTOR}" ]]; then
+          NETWORK_ARGS+=(--vpc-connector "${_SERVERLESS_VPC_CONNECTOR}")
+        fi
+        if [[ -n "${_CLOUD_SQL_INSTANCE}" ]]; then
+          NETWORK_ARGS+=(--add-cloudsql-instances "${_CLOUD_SQL_INSTANCE}")
+        fi
+        gcloud run deploy innerplatform-jvm-weekly-api \
+          --image "gcr.io/$PROJECT_ID/innerplatform-jvm-weekly-api:$COMMIT_SHA" \
+          --region "${_REGION}" \
+          --platform managed \
+          --ingress all \
+          --allow-unauthenticated \
+          "$${NETWORK_ARGS[@]}" \
+          --set-env-vars "WEEKLY_API_PORT=8080,JVM_WEEKLY_DATABASE_URL=${_JVM_WEEKLY_DATABASE_URL},JVM_WEEKLY_DATABASE_USER=${_JVM_WEEKLY_DATABASE_USER},JVM_WEEKLY_FIREBASE_PROJECT_ID=$${FIREBASE_PROJECT_ID},JVM_WEEKLY_ALLOWED_ORIGINS=${_JVM_WEEKLY_ALLOWED_ORIGINS}" \
+          --set-secrets "JVM_WEEKLY_DATABASE_PASSWORD=${_JVM_WEEKLY_DATABASE_PASSWORD_SECRET}:latest,JVM_WEEKLY_INTERNAL_API_TOKEN=${_JVM_WEEKLY_INTERNAL_API_TOKEN_SECRET}:latest"
+        SERVICE_URL="$(gcloud run services describe innerplatform-jvm-weekly-api --region "${_REGION}" --format='value(status.url)')"
+        if [[ -n "${_JVM_WEEKLY_SMOKE_URL}" ]]; then
+          SMOKE_URL="${_JVM_WEEKLY_SMOKE_URL}"
+        else
+          SMOKE_URL="$${SERVICE_URL}"
+        fi
+        if [[ -z "$${SMOKE_URL}" ]]; then
+          echo "[cloudbuild-jvm-weekly-api] deployed service URL is required for smoke"
+          exit 1
+        fi
+        printf '%s' "$${SMOKE_URL}" > /workspace/.jvm-weekly-smoke-url
+
+  - name: node:24-slim
+    entrypoint: bash
+    secretEnv:
+      - FIREBASE_WEB_API_KEY
+      - JVM_WEEKLY_SMOKE_EMAIL
+      - JVM_WEEKLY_SMOKE_PASSWORD
+    args:
+      - -lc
+      - |
+        eval "$(node scripts/create_firebase_smoke_id_token.mjs --env)"
+        node scripts/smoke_jvm_weekly_api.mjs --require-identity-token --base-url="$(cat /workspace/.jvm-weekly-smoke-url)"
+
+substitutions:
+  _REGION: asia-northeast3
+  _JVM_WEEKLY_DATABASE_URL: ''
+  _JVM_WEEKLY_DATABASE_USER: innerplatform
+  _JVM_WEEKLY_FIREBASE_PROJECT_ID: ''
+  _JVM_WEEKLY_ALLOWED_ORIGINS: 'https://inner-platform.vercel.app'
+  _JVM_WEEKLY_DATABASE_PASSWORD_SECRET: innerplatform-weekly-db-password
+  _JVM_WEEKLY_INTERNAL_API_TOKEN_SECRET: innerplatform-weekly-api-token
+  _FIREBASE_WEB_API_KEY_SECRET: innerplatform-firebase-web-api-key
+  _JVM_WEEKLY_SMOKE_EMAIL_SECRET: innerplatform-weekly-smoke-email
+  _JVM_WEEKLY_SMOKE_PASSWORD_SECRET: innerplatform-weekly-smoke-password
+  _SERVERLESS_VPC_CONNECTOR: ''
+  _CLOUD_SQL_INSTANCE: ''
+  _JVM_WEEKLY_SMOKE_URL: ''
+
+images:
+  - gcr.io/$PROJECT_ID/innerplatform-jvm-weekly-api:$COMMIT_SHA
+
+availableSecrets:
+  secretManager:
+    - versionName: projects/$PROJECT_ID/secrets/${_FIREBASE_WEB_API_KEY_SECRET}/versions/latest
+      env: FIREBASE_WEB_API_KEY
+    - versionName: projects/$PROJECT_ID/secrets/${_JVM_WEEKLY_SMOKE_EMAIL_SECRET}/versions/latest
+      env: JVM_WEEKLY_SMOKE_EMAIL
+    - versionName: projects/$PROJECT_ID/secrets/${_JVM_WEEKLY_SMOKE_PASSWORD_SECRET}/versions/latest
+      env: JVM_WEEKLY_SMOKE_PASSWORD

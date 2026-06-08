@@ -24,6 +24,10 @@ describe('BFF runtime config files', () => {
     expect(script).toContain('BFF_DEPLOY_ENV="${BFF_DEPLOY_ENV:-stage}"');
     expect(script).toContain('BFF_WORKERS_ENABLED="${BFF_WORKERS_ENABLED:-false}"');
     expect(script).toContain('BFF_SCHEDULER_OWNER="${BFF_SCHEDULER_OWNER:-disabled}"');
+    expect(script).toContain('BFF_SERVERLESS_VPC_CONNECTOR');
+    expect(script).toContain('--vpc-egress all-traffic');
+    expect(script).toContain('JVM_WEEKLY_API_ID_TOKEN_AUDIENCE');
+    expect(script).toContain('JVM_WEEKLY_INTERNAL_API_TOKEN_SECRET');
     expect(script).not.toContain('BFF_ALLOWED_ORIGINS="${BFF_ALLOWED_ORIGINS:-*}"');
   });
 
@@ -33,6 +37,10 @@ describe('BFF runtime config files', () => {
     expect(cloudBuild).toContain('_DEPLOY_ENV: stage');
     expect(cloudBuild).toContain("_WORKERS_ENABLED: 'false'");
     expect(cloudBuild).toContain('_SCHEDULER_OWNER: disabled');
+    expect(cloudBuild).toContain('_BFF_SERVERLESS_VPC_CONNECTOR');
+    expect(cloudBuild).toContain('--vpc-egress all-traffic');
+    expect(cloudBuild).toContain('_JVM_WEEKLY_API_ID_TOKEN_AUDIENCE');
+    expect(cloudBuild).toContain('_JVM_WEEKLY_INTERNAL_API_TOKEN_SECRET');
     expect(cloudBuild).not.toContain("_ALLOWED_ORIGINS: '*'");
   });
 });

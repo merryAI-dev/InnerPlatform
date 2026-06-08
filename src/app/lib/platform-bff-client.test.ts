@@ -4,11 +4,23 @@ import {
   addEvidenceViaBff,
   analyzeGoogleSheetImportViaBff,
   analyzeProjectRequestContractViaBff,
+  applyWeeklyExpenseBankStatementItemsViaBff,
   changeTransactionStateViaBff,
+  copyWeeklyExpenseCellsViaBff,
+  cutWeeklyExpenseCellsViaBff,
   deepSyncAuthGovernanceUserViaBff,
+  deleteWeeklyExpenseRowsViaBff,
+  exportCashflowWorkbookViaBff,
   fetchAuthGovernanceUsersViaBff,
+  fetchWeeklyExpenseBankStatementImportLinesViaBff,
+  fetchWeeklyExpenseCashflowViaBff,
+  fetchWeeklyExpenseStatusesViaBff,
+  importWeeklyExpenseBankStatementBatchViaBff,
+  insertWeeklyExpenseRowsViaBff,
   linkProjectEvidenceDriveRootViaBff,
   notifyProjectRequestRegistrationViaBff,
+  pasteWeeklyExpenseCellsViaBff,
+  patchWeeklyExpenseCellsViaBff,
   reviewProjectExecutiveStatusViaBff,
   overrideTransactionEvidenceDriveCategoriesViaBff,
   previewGoogleSheetImportViaBff,
@@ -17,10 +29,12 @@ import {
   provisionTransactionEvidenceDriveViaBff,
   readPlatformApiRuntimeConfig,
   restoreProjectViaBff,
+  closeWeeklyExpenseWeekViaBff,
   syncTransactionEvidenceDriveViaBff,
   trashProjectViaBff,
   uploadProjectSheetSourceViaBff,
   uploadProjectRequestContractViaBff,
+  submitWeeklyExpenseWeekViaBff,
   toRequestActor,
   updateContactViaBff,
   uploadTransactionEvidenceDriveViaBff,
@@ -33,6 +47,7 @@ import {
 function asMockClient<T extends {
   post: ReturnType<typeof vi.fn>;
   get: ReturnType<typeof vi.fn>;
+  patch?: ReturnType<typeof vi.fn>;
   request: ReturnType<typeof vi.fn>;
 }>(client: T): T & PlatformApiClientLike {
   return client as T & PlatformApiClientLike;
@@ -43,6 +58,19 @@ describe('platform-bff-client', () => {
     expect(readPlatformApiRuntimeConfig({})).toEqual({
       enabled: false,
       baseUrl: 'http://127.0.0.1:8787',
+    });
+  });
+
+  it('requires explicit Java API base URL when production platform API is enabled', () => {
+    expect(() => readPlatformApiRuntimeConfig({ PROD: 'true' })).toThrow(
+      'VITE_PLATFORM_API_BASE_URL is required for stage/live platform API operation.',
+    );
+    expect(readPlatformApiRuntimeConfig({
+      PROD: 'true',
+      VITE_PLATFORM_API_BASE_URL: 'https://java-api.example.run.app/',
+    })).toEqual({
+      enabled: true,
+      baseUrl: 'https://java-api.example.run.app',
     });
   });
 
@@ -327,6 +355,653 @@ describe('platform-bff-client', () => {
       }),
     );
     expect(response.claimsUpdated).toBe(true);
+  });
+
+  it('reads weekly cashflow through the BFF snapshot endpoint without client-side totals in the request', async () => {
+    const client = asMockClient({
+      post: vi.fn(),
+      get: vi.fn(async () => ({
+        data: {
+          projectId: 'p-cashflow',
+          projection: [],
+          actual: [],
+          readModel: {
+            months: [
+              {
+                yearMonth: '2026-06',
+                projection: {
+                  rowTotals: { DIRECT_COST_OUT: 3000000 },
+                  weeks: [
+                    {
+                      weekNo: 1,
+                      amounts: { DIRECT_COST_OUT: 3000000 },
+                      totalIn: 0,
+                      totalOut: 3000000,
+                      net: -3000000,
+                      weekIn: 0,
+                      weekOut: 3000000,
+                    },
+                  ],
+                  monthTotals: { totalIn: 0, totalOut: 3000000, net: -3000000 },
+                },
+                actual: {
+                  rowTotals: {},
+                  weeks: [],
+                  monthTotals: { totalIn: 0, totalOut: 0, net: 0 },
+                },
+              },
+            ],
+          },
+        },
+      })),
+      request: vi.fn(),
+    });
+
+    const snapshot = await fetchWeeklyExpenseCashflowViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u-finance', role: 'finance', idToken: 'token-1' },
+      projectId: 'p-cashflow',
+      client,
+    });
+
+    expect(client.get).toHaveBeenCalledWith('/api/v1/cashflow/p-cashflow', expect.objectContaining({
+      tenantId: 'mysc',
+      actor: expect.objectContaining({ id: 'u-finance', role: 'finance', idToken: 'token-1' }),
+      timeoutMs: 12000,
+    }));
+    const cashflowGetOptions = (client.get.mock.calls as unknown as Array<[string, Record<string, unknown>]>)[0][1];
+    expect(cashflowGetOptions).not.toHaveProperty('body');
+    expect(snapshot.readModel?.months[0].projection.monthTotals.net).toBe(-3000000);
+  });
+
+  it('exports cashflow audit output through the Java weekly audit-export route', async () => {
+    const fetchImpl = vi.fn(async (url, init) => {
+      expect(url).toBe('http://127.0.0.1:8787/api/v1/weekly-expenses/p-cashflow/audit-export');
+      const headers = init?.headers as Headers;
+      expect(headers.get('authorization')).toBe('Bearer token-export');
+      expect(headers.get('x-tenant-id')).toBe('mysc');
+      expect(headers.get('x-actor-id')).toBe('u-finance');
+      expect(JSON.parse(String(init?.body))).toEqual({
+        format: 'CSV',
+        includeAuditSummary: true,
+      });
+      return new Response(JSON.stringify({
+        ok: true,
+        artifactType: 'CSV',
+        fileName: 'p-cashflow-weekly-expense-audit.csv',
+        content: 'section,projectId\nprojection,p-cashflow\n',
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    const originalFetch = globalThis.fetch;
+    vi.stubGlobal('fetch', fetchImpl);
+    try {
+      const result = await exportCashflowWorkbookViaBff({
+        tenantId: 'mysc',
+        actor: { uid: 'u-finance', role: 'finance', idToken: 'token-export' },
+        body: {
+          scope: 'single',
+          projectId: 'p-cashflow',
+          startYearMonth: '2026-06',
+          endYearMonth: '2026-06',
+          variant: 'single-project',
+        },
+      });
+
+      expect(result.fileName).toBe('p-cashflow-weekly-expense-audit.csv');
+      expect(await result.blob.text()).toContain('projection,p-cashflow');
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.stubGlobal('fetch', originalFetch);
+    }
+  });
+
+  it('sends weekly submit and close commands through the same typed BFF options shape', async () => {
+    const client = asMockClient({
+      post: vi
+        .fn()
+        .mockResolvedValueOnce({
+          data: {
+            ok: true,
+            commandName: 'weeklyExpense.submitWeek',
+            projectId: 'p-cashflow',
+            yearMonth: '2026-06',
+            weekNo: 1,
+            state: 'submitted',
+            auditId: 'audit-submit-1',
+          },
+        })
+        .mockResolvedValueOnce({
+          data: {
+            ok: true,
+            commandName: 'weeklyExpense.closeWeek',
+            projectId: 'p-cashflow',
+            yearMonth: '2026-06',
+            weekNo: 1,
+            state: 'closed',
+            auditId: 'audit-close-1',
+          },
+        }),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    await submitWeeklyExpenseWeekViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u-pm', role: 'pm', idToken: 'token-submit' },
+      projectId: 'p-cashflow',
+      yearMonth: '2026-06',
+      weekNo: 1,
+      idempotencyKey: 'submit-key-1',
+      client,
+    });
+
+    await closeWeeklyExpenseWeekViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u-finance', role: 'finance', idToken: 'token-close' },
+      projectId: 'p-cashflow',
+      yearMonth: '2026-06',
+      weekNo: 1,
+      idempotencyKey: 'close-key-1',
+      client,
+    });
+
+    expect(client.post).toHaveBeenNthCalledWith(1, '/api/v1/weekly-expenses/p-cashflow/submit', expect.objectContaining({
+      tenantId: 'mysc',
+      actor: expect.objectContaining({ id: 'u-pm', role: 'pm', idToken: 'token-submit' }),
+      body: { yearMonth: '2026-06', weekNo: 1 },
+      idempotencyKey: 'submit-key-1',
+      retries: 0,
+      timeoutMs: 12000,
+    }));
+    expect(client.post).toHaveBeenNthCalledWith(2, '/api/v1/weekly-expenses/p-cashflow/close', expect.objectContaining({
+      tenantId: 'mysc',
+      actor: expect.objectContaining({ id: 'u-finance', role: 'finance', idToken: 'token-close' }),
+      body: { yearMonth: '2026-06', weekNo: 1 },
+      idempotencyKey: 'close-key-1',
+      retries: 0,
+      timeoutMs: 12000,
+    }));
+    expect(client.post.mock.calls[1]).toHaveLength(2);
+  });
+
+  it('fetches weekly status read model from the Java weekly API channel', async () => {
+    const client = asMockClient({
+      post: vi.fn(),
+      get: vi.fn(async () => ({
+        data: {
+          projectId: 'p-cashflow',
+          statuses: [
+            {
+              id: 'p-cashflow-2026-06-w1',
+              projectId: 'p-cashflow',
+              yearMonth: '2026-06',
+              weekNo: 1,
+              state: 'closed',
+              pmSubmitted: true,
+              submittedBy: 'u-pm',
+              submittedAt: '2026-06-08T01:00:00Z',
+              adminClosed: true,
+              closedBy: 'u-finance',
+              closedAt: '2026-06-08T02:00:00Z',
+              updatedAt: '2026-06-08T02:00:00Z',
+            },
+          ],
+        },
+      })),
+      request: vi.fn(),
+    });
+
+    const result = await fetchWeeklyExpenseStatusesViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u-viewer', role: 'viewer', idToken: 'token-status' },
+      projectId: 'p-cashflow',
+      client,
+    });
+
+    expect(result.statuses[0]?.state).toBe('closed');
+    expect(client.get).toHaveBeenCalledWith('/api/v1/weekly-expenses/p-cashflow/statuses', expect.objectContaining({
+      tenantId: 'mysc',
+      actor: expect.objectContaining({ id: 'u-viewer', role: 'viewer', idToken: 'token-status' }),
+      timeoutMs: 12000,
+    }));
+  });
+
+  it('sends weekly expense copy as a server clipboard command', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({
+        data: {
+          ok: true,
+          commandName: 'weeklyExpense.cells.copy',
+          projectId: 'p-cells',
+          sheetId: 'sheet-1',
+          sheetKey: 'default',
+          sheetVersion: 4,
+          touchedRows: [0],
+          touchedCellCount: 2,
+          cellIssues: [],
+          actualDelta: [],
+          clipboard: {
+            operationType: 'COPY',
+            depth: 'DEEP',
+            sourceSelection: { startRow: 0, startColumn: 3, endRow: 0, endColumn: 4 },
+            rowCount: 1,
+            columnCount: 2,
+            cells: [],
+          },
+          auditId: 'audit-copy-1',
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    const result = await copyWeeklyExpenseCellsViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u-pm', role: 'pm', idToken: 'token-copy' },
+      projectId: 'p-cells',
+      sheetKey: 'default',
+      idempotencyKey: 'copy-key-1',
+      payload: {
+        expectedSheetVersion: 4,
+        startRow: 0,
+        startColumn: 3,
+        endRow: 0,
+        endColumn: 4,
+        depth: 'DEEP',
+      },
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/weekly-expenses/p-cells/sheets/default/commands/copy', expect.objectContaining({
+      tenantId: 'mysc',
+      actor: expect.objectContaining({ id: 'u-pm', role: 'pm', idToken: 'token-copy' }),
+      body: {
+        expectedSheetVersion: 4,
+        startRow: 0,
+        startColumn: 3,
+        endRow: 0,
+        endColumn: 4,
+        depth: 'DEEP',
+      },
+      idempotencyKey: 'copy-key-1',
+      retries: 0,
+      timeoutMs: 12000,
+    }));
+    expect(result.clipboard?.operationType).toBe('COPY');
+    expect(result.actualDelta).toEqual([]);
+  });
+
+  it('sends weekly expense cell and row commands through named Java ORM endpoints', async () => {
+    const client = asMockClient({
+      post: vi
+        .fn()
+        .mockResolvedValueOnce({
+          data: {
+            ok: true,
+            commandName: 'weeklyExpense.cell.patch',
+            projectId: 'p-cells',
+            sheetId: 'sheet-1',
+            sheetKey: 'default',
+            sheetVersion: 5,
+            touchedRows: [0],
+            touchedCellCount: 1,
+            cellIssues: [],
+            actualDelta: [],
+            clipboard: null,
+            auditId: 'audit-patch-1',
+          },
+        })
+        .mockResolvedValueOnce({
+          data: {
+            ok: true,
+            commandName: 'weeklyExpense.cells.paste',
+            projectId: 'p-cells',
+            sheetId: 'sheet-1',
+            sheetKey: 'default',
+            sheetVersion: 6,
+            touchedRows: [1],
+            touchedCellCount: 2,
+            cellIssues: [],
+            actualDelta: [{ yearMonth: '2026-06', weekNo: 1, cashflowLine: '사업비', amount: 3000 }],
+            clipboard: null,
+            auditId: 'audit-paste-1',
+          },
+        })
+        .mockResolvedValueOnce({
+          data: {
+            ok: true,
+            commandName: 'weeklyExpense.cells.cut',
+            projectId: 'p-cells',
+            sheetId: 'sheet-1',
+            sheetKey: 'default',
+            sheetVersion: 7,
+            touchedRows: [1],
+            touchedCellCount: 1,
+            cellIssues: [],
+            actualDelta: [],
+            clipboard: { operationType: 'CUT', depth: 'SHALLOW', sourceSelection: { startRow: 1, startColumn: 13, endRow: 1, endColumn: 13 }, rowCount: 1, columnCount: 1, cells: [] },
+            auditId: 'audit-cut-1',
+          },
+        })
+        .mockResolvedValueOnce({
+          data: {
+            ok: true,
+            commandName: 'weeklyExpense.row.insert',
+            projectId: 'p-cells',
+            sheetId: 'sheet-1',
+            sheetKey: 'default',
+            sheetVersion: 8,
+            touchedRows: [2],
+            affectedRowCount: 1,
+            cellIssues: [],
+            actualDelta: [],
+            auditId: 'audit-insert-1',
+          },
+        })
+        .mockResolvedValueOnce({
+          data: {
+            ok: true,
+            commandName: 'weeklyExpense.row.delete',
+            projectId: 'p-cells',
+            sheetId: 'sheet-1',
+            sheetKey: 'default',
+            sheetVersion: 9,
+            touchedRows: [2],
+            affectedRowCount: 1,
+            cellIssues: [],
+            actualDelta: [],
+            auditId: 'audit-delete-1',
+          },
+        }),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    await patchWeeklyExpenseCellsViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u-pm', role: 'pm' },
+      projectId: 'p-cells',
+      sheetKey: 'default',
+      idempotencyKey: 'patch-key-1',
+      payload: {
+        expectedSheetVersion: 4,
+        cells: [{ rowIndex: 0, columnIndex: 13, rawValue: '3000', userEdited: true }],
+      },
+      client,
+    });
+    await pasteWeeklyExpenseCellsViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u-pm', role: 'pm' },
+      projectId: 'p-cells',
+      sheetKey: 'default',
+      idempotencyKey: 'paste-key-1',
+      payload: {
+        expectedSheetVersion: 5,
+        anchorRow: 1,
+        anchorColumn: 13,
+        rowCount: 1,
+        columnCount: 2,
+        depth: 'SHALLOW',
+        cells: [
+          { relativeRow: 0, relativeColumn: 0, rawValue: '1000' },
+          { relativeRow: 0, relativeColumn: 1, rawValue: '2000' },
+        ],
+      },
+      client,
+    });
+    await cutWeeklyExpenseCellsViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u-pm', role: 'pm' },
+      projectId: 'p-cells',
+      sheetKey: 'default',
+      idempotencyKey: 'cut-key-1',
+      payload: {
+        expectedSheetVersion: 6,
+        startRow: 1,
+        startColumn: 13,
+        endRow: 1,
+        endColumn: 13,
+        depth: 'SHALLOW',
+      },
+      client,
+    });
+    await insertWeeklyExpenseRowsViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u-pm', role: 'pm' },
+      projectId: 'p-cells',
+      sheetKey: 'default',
+      idempotencyKey: 'insert-key-1',
+      payload: { expectedSheetVersion: 7, startRow: 2, rowCount: 1 },
+      client,
+    });
+    await deleteWeeklyExpenseRowsViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u-pm', role: 'pm' },
+      projectId: 'p-cells',
+      sheetKey: 'default',
+      idempotencyKey: 'delete-key-1',
+      payload: {
+        expectedSheetVersion: 8,
+        startRow: 2,
+        rowCount: 1,
+        expectedRowVersions: [{ rowIndex: 2, rowVersion: 1 }],
+      },
+      client,
+    });
+
+    expect(client.post).toHaveBeenNthCalledWith(1, '/api/v1/weekly-expenses/p-cells/sheets/default/commands/cell-patch', expect.objectContaining({
+      idempotencyKey: 'patch-key-1',
+      body: {
+        expectedSheetVersion: 4,
+        cells: [{ rowIndex: 0, columnIndex: 13, rawValue: '3000', userEdited: true }],
+      },
+    }));
+    expect(client.post).toHaveBeenNthCalledWith(2, '/api/v1/weekly-expenses/p-cells/sheets/default/commands/paste', expect.objectContaining({
+      idempotencyKey: 'paste-key-1',
+      body: expect.objectContaining({ rowCount: 1, columnCount: 2, depth: 'SHALLOW' }),
+    }));
+    expect(client.post).toHaveBeenNthCalledWith(3, '/api/v1/weekly-expenses/p-cells/sheets/default/commands/cut', expect.objectContaining({
+      idempotencyKey: 'cut-key-1',
+      body: expect.objectContaining({ startRow: 1, endColumn: 13, depth: 'SHALLOW' }),
+    }));
+    expect(client.post).toHaveBeenNthCalledWith(4, '/api/v1/weekly-expenses/p-cells/sheets/default/commands/row-insert', expect.objectContaining({
+      idempotencyKey: 'insert-key-1',
+      body: { expectedSheetVersion: 7, startRow: 2, rowCount: 1 },
+    }));
+    expect(client.post).toHaveBeenNthCalledWith(5, '/api/v1/weekly-expenses/p-cells/sheets/default/commands/row-delete', expect.objectContaining({
+      idempotencyKey: 'delete-key-1',
+      body: {
+        expectedSheetVersion: 8,
+        startRow: 2,
+        rowCount: 1,
+        expectedRowVersions: [{ rowIndex: 2, rowVersion: 1 }],
+      },
+    }));
+    for (const [, options] of client.post.mock.calls) {
+      expect(options.body).not.toHaveProperty('idempotencyKey');
+      expect(options).toMatchObject({
+        tenantId: 'mysc',
+        actor: expect.objectContaining({ id: 'u-pm', role: 'pm' }),
+        retries: 0,
+      });
+    }
+  });
+
+  it('sends bank statement import as staging only and applies only selected import line ids', async () => {
+    const client = asMockClient({
+      post: vi
+        .fn()
+        .mockResolvedValueOnce({
+          data: {
+            ok: true,
+            commandName: 'weeklyExpense.bankStatement.importBatch',
+            projectId: 'p-bank',
+            batchId: 'batch-1',
+            stagedLineCount: 2,
+            duplicateLineCount: 0,
+            lines: [
+              { id: 'line-1', lineIndex: 0, sourceLineKey: 'src-1', status: 'staged', signedAmount: -1000 },
+              { id: 'line-2', lineIndex: 1, sourceLineKey: 'src-2', status: 'staged', signedAmount: -2000 },
+            ],
+            auditId: 'audit-import-1',
+          },
+        })
+        .mockResolvedValueOnce({
+          data: {
+            ok: true,
+            commandName: 'weeklyExpense.bankStatement.applyItems',
+            projectId: 'p-bank',
+            sheetId: 'sheet-1',
+            sheetKey: 'default',
+            sheetVersion: 1,
+            appliedLineCount: 1,
+            touchedRows: [0],
+            cellIssues: [],
+            actualDelta: [{ yearMonth: '2026-06', weekNo: 1, cashflowLine: '사업비', amount: 1000 }],
+            auditId: 'audit-apply-1',
+          },
+        }),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    await importWeeklyExpenseBankStatementBatchViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u-pm', role: 'pm' },
+      projectId: 'p-bank',
+      idempotencyKey: 'import-key-1',
+      payload: {
+        uploadName: 'bank.xlsx',
+        columns: ['거래일시', '금액'],
+        lines: [
+          {
+            lineIndex: 0,
+            sourceLineKey: 'src-1',
+            transactionDate: '2026-06-01',
+            counterparty: '거래처1',
+            memo: '선택',
+            signedAmount: -1000,
+            balanceAfter: 9000,
+            rawCells: ['2026-06-01', '-1000'],
+          },
+          {
+            lineIndex: 1,
+            sourceLineKey: 'src-2',
+            transactionDate: '2026-06-02',
+            counterparty: '거래처2',
+            memo: '미선택',
+            signedAmount: -2000,
+            balanceAfter: 7000,
+            rawCells: ['2026-06-02', '-2000'],
+          },
+        ],
+      },
+      client,
+    });
+
+    await applyWeeklyExpenseBankStatementItemsViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u-pm', role: 'pm' },
+      projectId: 'p-bank',
+      idempotencyKey: 'apply-key-1',
+      payload: {
+        sheetKey: 'default',
+        items: [
+          {
+            importLineId: 'line-1',
+            cells: [
+              { columnIndex: 3, rawValue: '2026-06-W1', userEdited: true },
+              { columnIndex: 8, rawValue: '사업비', userEdited: true },
+            ],
+          },
+        ],
+      },
+      client,
+    });
+
+    expect(client.post).toHaveBeenNthCalledWith(1, '/api/v1/weekly-expenses/p-bank/bank-statements/import-batch', expect.objectContaining({
+      tenantId: 'mysc',
+      idempotencyKey: 'import-key-1',
+      body: expect.objectContaining({
+        lines: expect.arrayContaining([
+          expect.objectContaining({ sourceLineKey: 'src-1' }),
+          expect.objectContaining({ sourceLineKey: 'src-2' }),
+        ]),
+      }),
+    }));
+    expect(client.post.mock.calls[0][1].body).not.toHaveProperty('idempotencyKey');
+    expect(client.post).toHaveBeenNthCalledWith(2, '/api/v1/weekly-expenses/p-bank/bank-statements/apply-items', expect.objectContaining({
+      tenantId: 'mysc',
+      idempotencyKey: 'apply-key-1',
+      body: {
+        sheetKey: 'default',
+        items: [
+          {
+            importLineId: 'line-1',
+            cells: [
+              { columnIndex: 3, rawValue: '2026-06-W1', userEdited: true },
+              { columnIndex: 8, rawValue: '사업비', userEdited: true },
+            ],
+          },
+        ],
+      },
+    }));
+    expect(client.post.mock.calls[1][1].body).not.toHaveProperty('idempotencyKey');
+    expect(client.post.mock.calls[1][1].body.items).toHaveLength(1);
+    expect(client.post.mock.calls[1][1].body.items[0].importLineId).toBe('line-1');
+  });
+
+  it('reads bank statement staged candidates through the BFF without a request body', async () => {
+    const client = asMockClient({
+      post: vi.fn(),
+      get: vi.fn(async () => ({
+        data: {
+          ok: true,
+          projectId: 'p-bank',
+          status: 'staged',
+          lines: [
+            {
+              id: 'line-1',
+              batchId: 'batch-1',
+              uploadName: 'bank.xlsx',
+              batchStatus: 'staged',
+              batchCreatedBy: 'u-pm',
+              batchCreatedAt: '2026-06-08T00:00:00Z',
+              lineIndex: 0,
+              sourceLineKey: 'src-1',
+              transactionDate: '2026-06-01',
+              counterparty: '거래처1',
+              memo: '선택 후보',
+              signedAmount: -1000,
+              balanceAfter: 9000,
+              rawCells: ['2026-06-01', '-1000'],
+              status: 'staged',
+            },
+          ],
+        },
+      })),
+      request: vi.fn(),
+    });
+
+    const result = await fetchWeeklyExpenseBankStatementImportLinesViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u-pm', role: 'pm' },
+      projectId: 'p-bank',
+      status: 'staged',
+      client,
+    });
+
+    expect(client.get).toHaveBeenCalledWith('/api/v1/weekly-expenses/p-bank/bank-statements/import-lines?status=staged', expect.objectContaining({
+      tenantId: 'mysc',
+      actor: expect.objectContaining({ id: 'u-pm', role: 'pm' }),
+      timeoutMs: 12000,
+    }));
+    const importLinesGetOptions = (client.get.mock.calls as unknown as Array<[string, Record<string, unknown>]>)[0][1];
+    expect(importLinesGetOptions).not.toHaveProperty('body');
+    expect(result.lines[0].rawCells).toEqual(['2026-06-01', '-1000']);
   });
 
   it('calls project request contract analysis endpoint', async () => {

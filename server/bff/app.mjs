@@ -95,7 +95,7 @@ import { mountLedgerRoutes } from './routes/ledgers.mjs';
 import { mountTransactionRoutes } from './routes/transactions.mjs';
 import { mountAuditRoutes } from './routes/audit.mjs';
 import { mountMemberRoutes } from './routes/members.mjs';
-import { mountCashflowExportRoutes } from './routes/cashflow-exports.mjs';
+import { mountJvmWeeklyApiRoutes } from './routes/jvm-weekly-api.mjs';
 import { mountBusinessCardRoutes } from './routes/business-cards.mjs';
 
 function createHttpError(statusCode, message, code = 'request_error') {
@@ -1375,7 +1375,14 @@ export function createBffApp(options = {}) {
     projectRequestContractAiService, projectRequestContractStorageService,
     projectSheetSourceStorageService, projectRegistrationSlackService,
   });
-  mountCashflowExportRoutes(app, { db, rbacPolicy, idempotencyService, now });
+  mountJvmWeeklyApiRoutes(app, {
+    idempotencyService,
+    env,
+    fetchImpl: options.fetchImpl || globalThis.fetch,
+    jvmWeeklyApiBaseUrl: options.jvmWeeklyApiBaseUrl,
+    jvmWeeklyApiServiceToken: options.jvmWeeklyApiServiceToken,
+    jvmWeeklyApiIdTokenAudience: options.jvmWeeklyApiIdTokenAudience,
+  });
   mountLedgerRoutes(app, { db, now, idempotencyService, auditChainService, piiProtector });
   mountTransactionRoutes(app, { db, now, idempotencyService, auditChainService, piiProtector, rbacPolicy, driveService });
   mountAuditRoutes(app, { db, auditChainService });

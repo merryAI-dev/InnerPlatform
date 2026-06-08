@@ -21,13 +21,14 @@ export function parseFeatureFlag(value: unknown, defaultValue: boolean): boolean
 }
 
 export function readFeatureFlags(env: Record<string, unknown> = import.meta.env): FeatureFlags {
+  const isProductionBuild = parseFeatureFlag(env.PROD, false);
   return {
     firebaseAuthEnabled: parseFeatureFlag(env.VITE_FIREBASE_AUTH_ENABLED, false),
     firestoreCoreEnabled: parseFeatureFlag(env.VITE_FIRESTORE_CORE_ENABLED, false),
     firebaseUseEnvConfig: parseFeatureFlag(env.VITE_FIREBASE_USE_ENV_CONFIG, true),
     firebaseUseEmulators: parseFeatureFlag(env.VITE_FIREBASE_USE_EMULATORS, false),
     tenantIsolationStrict: parseFeatureFlag(env.VITE_TENANT_ISOLATION_STRICT, true),
-    platformApiEnabled: parseFeatureFlag(env.VITE_PLATFORM_API_ENABLED, false),
+    platformApiEnabled: parseFeatureFlag(env.VITE_PLATFORM_API_ENABLED, isProductionBuild),
     demoLoginEnabled: parseFeatureFlag(env.VITE_DEMO_LOGIN_ENABLED, false),
     etlStagingLocalEnabled: parseFeatureFlag(env.VITE_ETL_STAGING_LOCAL_ENABLED, false),
   };

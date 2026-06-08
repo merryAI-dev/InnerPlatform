@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { doc, getDoc } from 'firebase/firestore';
 import { CheckCircle2, ClipboardCheck, ClipboardList, Columns2, CircleDollarSign, ChevronLeft, ChevronRight, Download, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useBlocker, useNavigate } from 'react-router';
@@ -8,7 +7,6 @@ import { Card, CardContent } from '../ui/card';
 import { Input } from '../ui/input';
 import { Badge } from '../ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
-import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -20,24 +18,22 @@ import {
   AlertDialogTitle,
 } from '../ui/alert-dialog';
 import { PageHeader } from '../layout/PageHeader';
-import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
+import { useCashflowWeeks, type CashflowModeReadModel } from '../../data/cashflow-weeks-store';
 import {
   CASHFLOW_SHEET_LINE_LABELS,
   type CashflowSheetLineId,
   type CashflowWeekSheet,
   type Transaction,
   type UserRole,
-  type WeeklySubmissionStatus,
 } from '../../data/types';
 import { getSeoulTodayIso } from '../../platform/business-days';
-import { CASHFLOW_ALL_LINES, CASHFLOW_IN_LINES, CASHFLOW_OUT_LINES, computeCashflowDerivedTotals, computeOpeningCashflowTotals } from '../../platform/cashflow-sheet';
+import { CASHFLOW_ALL_LINES, CASHFLOW_IN_LINES, CASHFLOW_OUT_LINES } from '../../platform/cashflow-sheet';
 import { getMonthMondayWeeks } from '../../platform/cashflow-weeks';
 import { resolveWeeklyAccountingState } from '../../platform/weekly-accounting-state';
 import { useAuth } from '../../data/auth-store';
 import { hasUnsavedChanges } from './cashflow-unsaved';
 import { triggerDownload } from '../../platform/csv-utils';
 import { useFirebase } from '../../lib/firebase-context';
-import { getOrgDocumentPath } from '../../lib/firebase';
 import { loadExcelJs, warmExcelJs } from '../../platform/lazy-heavy-modules';
 import { buildCashflowExportWorkbookSpec } from '../../platform/cashflow-export';
 import { exportCashflowWorkbookViaBff, isPlatformApiEnabled } from '../../lib/platform-bff-client';
@@ -68,25 +64,15 @@ export function CashflowProjectSheet({
   transactions,
   roleOverride,
   initialViewMode = 'compare',
-  onUpdateWeeklySubmissionStatus,
 }: {
   projectId: string;
   projectName: string;
   transactions: Transaction[];
   roleOverride?: UserRole | string;
   initialViewMode?: 'projection' | 'actual' | 'compare';
-  onUpdateWeeklySubmissionStatus?: (input: {
-    projectId: string;
-    yearMonth: string;
-    weekNo: number;
-    projectionEdited?: boolean;
-    projectionUpdated?: boolean;
-    expenseEdited?: boolean;
-    expenseUpdated?: boolean;
-  }) => Promise<void>;
 }) {
   const { user } = useAuth();
-  const { db, orgId } = useFirebase();
+  const { orgId } = useFirebase();
   const navigate = useNavigate();
   const role = (roleOverride || user?.role || '').toString().toLowerCase() as UserRole | '';
   const isPm = role === 'pm';
@@ -101,10 +87,11 @@ export function CashflowProjectSheet({
     isLoading,
     goPrevMonth,
     goNextMonth,
-    upsertWeekAmounts,
+    upsertProjectionAmounts,
     submitWeekAsPm,
     closeWeekAsAdmin,
-    syncProjectActualsFromExpenseSheets,
+    ensureProjectCashflowSnapshot,
+    getReadModelForProjectMonth,
   } = useCashflowWeeks();
 
   const monthWeeks = useMemo(() => getMonthMondayWeeks(yearMonth), [yearMonth]);
@@ -129,16 +116,10 @@ export function CashflowProjectSheet({
     return map;
   }, [projectWeeks]);
 
-  const openingTotalsByMode = useMemo(() => {
-    return computeOpeningCashflowTotals({
-      weeks,
-      projectId,
-      yearMonth: normalizedYearMonth,
-    });
-  }, [normalizedYearMonth, projectId, weeks]);
-
-
-  // ── Actual: Firestore cashflow_weeks actual 값 사용 ──
+  const monthReadModel = useMemo(
+    () => getReadModelForProjectMonth(projectId, normalizedYearMonth),
+    [getReadModelForProjectMonth, normalizedYearMonth, projectId],
+  );
 
   const [viewMode, setViewMode] = useState<'projection' | 'actual' | 'compare'>(initialViewMode);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -158,9 +139,7 @@ export function CashflowProjectSheet({
     expenseStatusLabel?: string;
     expenseStatusDescription?: string;
   } | null>(null);
-  const [monthSavingMode, setMonthSavingMode] = useState<null | 'actual'>(null);
   const [downloadPreparing, setDownloadPreparing] = useState(false);
-  const [actualSyncing, setActualSyncing] = useState(false);
 
   const hasDirty = useMemo(
     () => hasUnsavedChanges(weekSaveState) || Object.keys(drafts).length > 0,
@@ -193,6 +172,10 @@ export function CashflowProjectSheet({
     setWeekSaveState({});
     setSubmitConfirm(null);
   }, [yearMonth, projectId]);
+
+  useEffect(() => {
+    void ensureProjectCashflowSnapshot(projectId);
+  }, [ensureProjectCashflowSnapshot, projectId]);
 
   const weekMeta = useMemo(() => {
     const map: Record<number, { projectionUpdated: boolean; pmSubmitted: boolean; adminClosed: boolean }> = {};
@@ -247,7 +230,6 @@ export function CashflowProjectSheet({
     weekNo: number;
     lineId: CashflowSheetLineId;
   }): number {
-    // Actual/Projection → Firestore 캐시플로 시트 값 사용
     const doc = byWeekNo.get(params.weekNo);
     const persisted = getPersistedCell({ doc, mode: params.mode, lineId: params.lineId });
     const key = resolveCellKey(params);
@@ -255,31 +237,54 @@ export function CashflowProjectSheet({
     return raw !== undefined ? parseAmount(raw) : persisted.amount;
   }
 
-  const derivedByMode = useMemo(() => {
-    function compute(mode: 'projection' | 'actual') {
-      const openingIn = mode === 'projection' ? openingTotalsByMode.projectionIn : openingTotalsByMode.actualIn;
-      const openingOut = mode === 'projection' ? openingTotalsByMode.projectionOut : openingTotalsByMode.actualOut;
-      return computeCashflowDerivedTotals({
-        openingIn,
-        openingOut,
-        weeks: monthWeeks.map((def) => ({
-          weekNo: def.weekNo,
-          amounts: Object.fromEntries(CASHFLOW_ALL_LINES.map((lineId) => [
-            lineId,
-            getEffectiveAmount({ yearMonth, mode, weekNo: def.weekNo, lineId }),
-          ])) as Partial<Record<CashflowSheetLineId, number>>,
-        })),
-      });
+  const readModelByMode = useMemo(() => {
+    function fromReadModel(source: CashflowModeReadModel | undefined): CashflowModeReadModel {
+      const sourceWeeks = new Map((source?.weeks || []).map((week) => [week.weekNo, week]));
+      return {
+        rowTotals: Object.fromEntries(CASHFLOW_ALL_LINES.map((lineId) => [
+          lineId,
+          Number(source?.rowTotals?.[lineId] || 0),
+        ])) as Partial<Record<CashflowSheetLineId, number>>,
+        weeks: monthWeeks.map((def) => {
+          const week = sourceWeeks.get(def.weekNo);
+          return {
+            weekNo: def.weekNo,
+            amounts: week?.amounts || {},
+            totalIn: Number(week?.totalIn || 0),
+            totalOut: Number(week?.totalOut || 0),
+            net: Number(week?.net || 0),
+            weekIn: Number(week?.weekIn || 0),
+            weekOut: Number(week?.weekOut || 0),
+          };
+        }),
+        weekTotals: monthWeeks.map((def) => {
+          const week = sourceWeeks.get(def.weekNo);
+          return {
+            weekNo: def.weekNo,
+            amounts: week?.amounts || {},
+            totalIn: Number(week?.totalIn || 0),
+            totalOut: Number(week?.totalOut || 0),
+            net: Number(week?.net || 0),
+            weekIn: Number(week?.weekIn || 0),
+            weekOut: Number(week?.weekOut || 0),
+          };
+        }),
+        monthTotals: {
+          totalIn: Number(source?.monthTotals?.totalIn || 0),
+          totalOut: Number(source?.monthTotals?.totalOut || 0),
+          net: Number(source?.monthTotals?.net || 0),
+        },
+      };
     }
 
     return {
-      projection: compute('projection'),
-      actual: compute('actual'),
+      projection: fromReadModel(monthReadModel?.projection),
+      actual: fromReadModel(monthReadModel?.actual),
     };
-  }, [drafts, getEffectiveAmount, monthWeeks, openingTotalsByMode, yearMonth]);
+  }, [monthReadModel, monthWeeks]);
 
   const buildExportMatrix = useCallback((tableMode: 'projection' | 'actual') => {
-    const derived = tableMode === 'projection' ? derivedByMode.projection : derivedByMode.actual;
+    const displayModel = tableMode === 'projection' ? readModelByMode.projection : readModelByMode.actual;
     const headerRow = ['항목', ...monthWeeks.map((w) => w.label), '월 합계'];
     const dateRow = ['기간', ...monthWeeks.map((w) => `${w.weekStart} ~ ${w.weekEnd}`), ''];
 
@@ -288,19 +293,19 @@ export function CashflowProjectSheet({
     rows.push([`입금 (${tableMode === 'projection' ? 'Projection' : 'Actual'})`, ...Array(monthWeeks.length + 1).fill('')]);
     for (const lineId of CASHFLOW_IN_LINES) {
       const weekValues = monthWeeks.map((w) => getEffectiveAmount({ yearMonth, mode: tableMode, weekNo: w.weekNo, lineId }));
-      rows.push([CASHFLOW_SHEET_LINE_LABELS[lineId], ...weekValues, derived.rowTotals[lineId] || 0]);
+      rows.push([CASHFLOW_SHEET_LINE_LABELS[lineId], ...weekValues, displayModel.rowTotals[lineId] || 0]);
     }
-    rows.push(['입금 합계', ...derived.weekTotals.map((w) => w.totalIn), derived.monthTotals.totalIn]);
+    rows.push(['입금 합계', ...displayModel.weekTotals.map((w) => w.totalIn), displayModel.monthTotals.totalIn]);
     rows.push([]);
     rows.push([`출금 (${tableMode === 'projection' ? 'Projection' : 'Actual'})`, ...Array(monthWeeks.length + 1).fill('')]);
     for (const lineId of CASHFLOW_OUT_LINES) {
       const weekValues = monthWeeks.map((w) => getEffectiveAmount({ yearMonth, mode: tableMode, weekNo: w.weekNo, lineId }));
-      rows.push([CASHFLOW_SHEET_LINE_LABELS[lineId], ...weekValues, derived.rowTotals[lineId] || 0]);
+      rows.push([CASHFLOW_SHEET_LINE_LABELS[lineId], ...weekValues, displayModel.rowTotals[lineId] || 0]);
     }
-    rows.push(['출금 합계', ...derived.weekTotals.map((w) => w.totalOut), derived.monthTotals.totalOut]);
-    rows.push(['잔액', ...derived.weekTotals.map((w) => w.net), derived.monthTotals.net]);
+    rows.push(['출금 합계', ...displayModel.weekTotals.map((w) => w.totalOut), displayModel.monthTotals.totalOut]);
+    rows.push(['잔액', ...displayModel.weekTotals.map((w) => w.net), displayModel.monthTotals.net]);
     return rows;
-  }, [derivedByMode, getEffectiveAmount, monthWeeks, yearMonth]);
+  }, [getEffectiveAmount, monthWeeks, readModelByMode, yearMonth]);
 
   const handleDownload = useCallback(async () => {
     setDownloadPreparing(true);
@@ -325,6 +330,9 @@ export function CashflowProjectSheet({
         });
         triggerDownload(response.blob, response.fileName);
       } else {
+        if (import.meta.env.PROD) {
+          throw new Error('감사용 다운로드 경로를 확인할 수 없습니다. 관리자에게 문의해 주세요.');
+        }
         const ExcelJS = await loadExcelJs();
         const workbookSpec = buildCashflowExportWorkbookSpec({
           variant: 'single-project',
@@ -359,19 +367,17 @@ export function CashflowProjectSheet({
     }
   }, [orgId, projectId, projectName, projectWeeks, transactions, user, yearMonth]);
 
-  const flushWeek = useCallback(async (input: {
+  const flushProjectionWeek = useCallback(async (input: {
     weekNo: number;
-    mode: 'projection' | 'actual';
     silent?: boolean;
   }): Promise<void> => {
-    if (!canEdit && input.mode === 'actual') return;
-    const wkKey = resolveWeekKey({ yearMonth, mode: input.mode, weekNo: input.weekNo });
+    const wkKey = resolveWeekKey({ yearMonth, mode: 'projection', weekNo: input.weekNo });
     const doc = byWeekNo.get(input.weekNo);
 
     const rawByLine: Partial<Record<CashflowSheetLineId, string>> = {};
     const amounts: Partial<Record<CashflowSheetLineId, number>> = {};
     for (const lineId of CASHFLOW_ALL_LINES) {
-      const cellKey = resolveCellKey({ yearMonth, mode: input.mode, weekNo: input.weekNo, lineId });
+      const cellKey = resolveCellKey({ yearMonth, mode: 'projection', weekNo: input.weekNo, lineId });
       const hasDraft = Object.prototype.hasOwnProperty.call(drafts, cellKey);
       if (!hasDraft) continue;
 
@@ -379,7 +385,7 @@ export function CashflowProjectSheet({
       rawByLine[lineId] = raw;
 
       const nextAmount = parseAmount(raw);
-      const persisted = getPersistedCell({ doc, mode: input.mode, lineId });
+      const persisted = getPersistedCell({ doc, mode: 'projection', lineId });
       if (nextAmount !== persisted.amount || !persisted.hasValue) {
         amounts[lineId] = nextAmount;
       }
@@ -394,7 +400,7 @@ export function CashflowProjectSheet({
       setDrafts((prev) => {
         const next = { ...prev };
         for (const lineId of Object.keys(rawByLine) as CashflowSheetLineId[]) {
-          const key = resolveCellKey({ yearMonth, mode: input.mode, weekNo: input.weekNo, lineId });
+          const key = resolveCellKey({ yearMonth, mode: 'projection', weekNo: input.weekNo, lineId });
           if (next[key] === rawByLine[lineId]) delete next[key];
         }
         return next;
@@ -404,29 +410,18 @@ export function CashflowProjectSheet({
 
     setWeekSaveState((prev) => ({ ...prev, [wkKey]: 'saving' }));
     try {
-      await upsertWeekAmounts({
+      await upsertProjectionAmounts({
         projectId,
         yearMonth,
         weekNo: input.weekNo,
-        mode: input.mode,
         amounts,
       });
-      if (onUpdateWeeklySubmissionStatus) {
-        await onUpdateWeeklySubmissionStatus({
-          projectId,
-          yearMonth,
-          weekNo: input.weekNo,
-          ...(input.mode === 'projection'
-            ? { projectionEdited: true, projectionUpdated: true }
-            : { expenseEdited: true, expenseUpdated: true }),
-        });
-      }
 
       setWeekSaveState((prev) => ({ ...prev, [wkKey]: 'saved' }));
       setDrafts((prev) => {
         const next = { ...prev };
         for (const lineId of Object.keys(rawByLine) as CashflowSheetLineId[]) {
-          const key = resolveCellKey({ yearMonth, mode: input.mode, weekNo: input.weekNo, lineId });
+          const key = resolveCellKey({ yearMonth, mode: 'projection', weekNo: input.weekNo, lineId });
           if (next[key] === rawByLine[lineId]) delete next[key];
         }
         return next;
@@ -438,30 +433,25 @@ export function CashflowProjectSheet({
       }
       throw error;
     }
-  }, [byWeekNo, canEdit, drafts, onUpdateWeeklySubmissionStatus, projectId, resolveCellKey, resolveWeekKey, upsertWeekAmounts, yearMonth]);
+  }, [byWeekNo, drafts, projectId, resolveCellKey, resolveWeekKey, upsertProjectionAmounts, yearMonth]);
 
   const markDirty = useCallback((input: { weekNo: number; mode: 'projection' | 'actual' }) => {
     const wkKey = resolveWeekKey({ yearMonth, mode: input.mode, weekNo: input.weekNo });
     setWeekSaveState((prev) => ({ ...prev, [wkKey]: 'dirty' }));
   }, [resolveWeekKey, yearMonth]);
 
-  const persistWeekValues = useCallback(async (input: {
-    weekNo: number;
-    mode: 'projection' | 'actual';
-  }): Promise<void> => {
-    if (!canEdit && input.mode === 'actual') return;
-
-    const wkKey = resolveWeekKey({ yearMonth, mode: input.mode, weekNo: input.weekNo });
-    const doc = byWeekNo.get(input.weekNo);
+  const persistProjectionWeekValues = useCallback(async (weekNo: number): Promise<void> => {
+    const wkKey = resolveWeekKey({ yearMonth, mode: 'projection', weekNo });
+    const doc = byWeekNo.get(weekNo);
     const amounts: Partial<Record<CashflowSheetLineId, number>> = {};
     for (const lineId of CASHFLOW_ALL_LINES) {
-      const cellKey = resolveCellKey({ yearMonth, mode: input.mode, weekNo: input.weekNo, lineId });
+      const cellKey = resolveCellKey({ yearMonth, mode: 'projection', weekNo, lineId });
       if (Object.prototype.hasOwnProperty.call(drafts, cellKey)) {
         amounts[lineId] = parseAmount(drafts[cellKey]);
         continue;
       }
 
-      const persisted = getPersistedCell({ doc, mode: input.mode, lineId });
+      const persisted = getPersistedCell({ doc, mode: 'projection', lineId });
       if (persisted.hasValue) {
         amounts[lineId] = persisted.amount;
       }
@@ -478,27 +468,16 @@ export function CashflowProjectSheet({
 
     setWeekSaveState((prev) => ({ ...prev, [wkKey]: 'saving' }));
     try {
-      await upsertWeekAmounts({
+      await upsertProjectionAmounts({
         projectId,
         yearMonth,
-        weekNo: input.weekNo,
-        mode: input.mode,
+        weekNo,
         amounts,
       });
-      if (onUpdateWeeklySubmissionStatus) {
-        await onUpdateWeeklySubmissionStatus({
-          projectId,
-          yearMonth,
-          weekNo: input.weekNo,
-          ...(input.mode === 'projection'
-            ? { projectionEdited: true, projectionUpdated: true }
-            : { expenseEdited: true, expenseUpdated: true }),
-        });
-      }
       setDrafts((prev) => {
         const next = { ...prev };
         for (const lineId of CASHFLOW_ALL_LINES) {
-          delete next[resolveCellKey({ yearMonth, mode: input.mode, weekNo: input.weekNo, lineId })];
+          delete next[resolveCellKey({ yearMonth, mode: 'projection', weekNo, lineId })];
         }
         return next;
       });
@@ -509,13 +488,11 @@ export function CashflowProjectSheet({
     }
   }, [
     byWeekNo,
-    canEdit,
     drafts,
-    onUpdateWeeklySubmissionStatus,
     projectId,
     resolveCellKey,
     resolveWeekKey,
-    upsertWeekAmounts,
+    upsertProjectionAmounts,
     yearMonth,
   ]);
 
@@ -529,10 +506,11 @@ export function CashflowProjectSheet({
       const keyMode = parts[1] as 'projection' | 'actual';
       const keyWeekNo = Number(parts[2]);
       if (keyYearMonth !== yearMonth) continue;
+      if (keyMode !== 'projection') continue;
       if (!Number.isFinite(keyWeekNo)) continue;
-      await flushWeek({ weekNo: keyWeekNo, mode: keyMode, silent: false });
+      await flushProjectionWeek({ weekNo: keyWeekNo, silent: false });
     }
-  }, [flushWeek, weekSaveState, yearMonth]);
+  }, [flushProjectionWeek, weekSaveState, yearMonth]);
 
   const goPrevMonthSafe = useCallback(() => {
     void flushAllDirtyBeforeMonthChange()
@@ -546,57 +524,9 @@ export function CashflowProjectSheet({
       .catch(() => {});
   }, [flushAllDirtyBeforeMonthChange, goNextMonth]);
 
-  const saveMonth = useCallback((targetMode: 'actual') => {
-    const targets = monthWeeks.map((w) => w.weekNo);
-    void (async () => {
-      setMonthSavingMode(targetMode);
-      for (const weekNo of targets) {
-        await persistWeekValues({ weekNo, mode: targetMode });
-      }
-      toast.success('이번 달 Actual을 저장했습니다.');
-    })().catch((err) => {
-      console.error('[Cashflow] month actual save failed:', err);
-      toast.error('월 저장에 실패했습니다. 네트워크/권한을 확인해 주세요.');
-    }).finally(() => {
-      setMonthSavingMode((prev) => (prev === targetMode ? null : prev));
-    });
-  }, [monthWeeks, persistWeekValues]);
-
-  const syncActualsFromExpenseSheet = useCallback(() => {
-    void (async () => {
-      setActualSyncing(true);
-      const result = await syncProjectActualsFromExpenseSheets({ projectId });
-      if (result.skipped) {
-        toast.message('불러올 정산대장 행이 없습니다.');
-        return;
-      }
-      setDrafts((prev) => {
-        const next = { ...prev };
-        for (const key of Object.keys(next)) {
-          if (key.startsWith(`${yearMonth}:actual:`)) delete next[key];
-        }
-        return next;
-      });
-      setWeekSaveState((prev) => {
-        const next = { ...prev };
-        for (const week of monthWeeks) {
-          delete next[resolveWeekKey({ yearMonth, mode: 'actual', weekNo: week.weekNo })];
-        }
-        return next;
-      });
-      toast.success(`Actual ${result.upsertedWeeks}개 주차를 불러왔습니다.`);
-    })().catch((error) => {
-      console.error('[Cashflow] actual sync failed:', error);
-      toast.error('Actual 불러오기에 실패했습니다. 정산대장 저장 상태를 확인해 주세요.');
-    }).finally(() => {
-      setActualSyncing(false);
-    });
-  }, [monthWeeks, projectId, resolveWeekKey, syncProjectActualsFromExpenseSheets, yearMonth]);
-
   const handleSubmitWeek = useCallback(async (input: { weekNo: number; yearMonth: string }) => {
     setSubmitBusy(true);
     try {
-      await persistWeekValues({ weekNo: input.weekNo, mode: 'actual' });
       await submitWeekAsPm({ projectId, yearMonth: input.yearMonth, weekNo: input.weekNo });
       toast.success('작성완료 처리했습니다.');
     } catch (e) {
@@ -605,7 +535,7 @@ export function CashflowProjectSheet({
       setSubmitBusy(false);
       setSubmitConfirm(null);
     }
-  }, [persistWeekValues, projectId, submitWeekAsPm]);
+  }, [projectId, submitWeekAsPm]);
 
   const handleCompleteProjectionWeek = useCallback((weekNo: number) => {
     if (!canEdit) return;
@@ -617,23 +547,12 @@ export function CashflowProjectSheet({
         getEffectiveAmount({ yearMonth, mode: 'projection', weekNo, lineId }),
       ])) as Partial<Record<CashflowSheetLineId, number>>;
 
-      await upsertWeekAmounts({
+      await upsertProjectionAmounts({
         projectId,
         yearMonth,
         weekNo,
-        mode: 'projection',
         amounts,
       });
-
-      if (onUpdateWeeklySubmissionStatus) {
-        await onUpdateWeeklySubmissionStatus({
-          projectId,
-          yearMonth,
-          weekNo,
-          projectionEdited: true,
-          projectionUpdated: true,
-        });
-      }
 
       setDrafts((prev) => {
         const next = { ...prev };
@@ -657,18 +576,17 @@ export function CashflowProjectSheet({
   }, [
     canEdit,
     getEffectiveAmount,
-    onUpdateWeeklySubmissionStatus,
     projectId,
     resolveCellKey,
     resolveWeekKey,
-    upsertWeekAmounts,
+    upsertProjectionAmounts,
     yearMonth,
   ]);
 
   const handleCloseWeek = useCallback(async (weekNo: number) => {
     setCloseBusy(true);
     try {
-      await persistWeekValues({ weekNo, mode: 'projection' });
+      await persistProjectionWeekValues(weekNo);
       await closeWeekAsAdmin({ projectId, yearMonth, weekNo });
       toast.success('결산완료 처리했습니다.');
     } catch (e) {
@@ -677,39 +595,19 @@ export function CashflowProjectSheet({
       setCloseBusy(false);
       setCloseDialog(null);
     }
-  }, [closeWeekAsAdmin, persistWeekValues, projectId, yearMonth]);
+  }, [closeWeekAsAdmin, persistProjectionWeekValues, projectId, yearMonth]);
 
   const handleStartCloseWeek = useCallback(async (weekNo: number) => {
-    if (!db) {
-      setCloseDialog({
-        kind: 'confirm',
-        weekNo,
-        projectionDone: true,
-        expenseDone: true,
-      });
-      return;
-    }
-
-    try {
-      const statusId = `${projectId}-${yearMonth}-w${weekNo}`;
-      const statusRef = doc(db, getOrgDocumentPath(orgId, 'weeklySubmissionStatus', statusId));
-      const snap = await getDoc(statusRef);
-      const status = snap.exists() ? (snap.data() as WeeklySubmissionStatus) : undefined;
-      const accountingState = resolveWeeklyAccountingState(status, byWeekNo.get(weekNo));
-
-      setCloseDialog({
-        kind: accountingState.closeDialogKind,
-        weekNo,
-        projectionDone: accountingState.projectionDone,
-        expenseDone: accountingState.expenseDone,
-        expenseStatusLabel: accountingState.expenseStatusLabel,
-        expenseStatusDescription: accountingState.expenseStatusDescription,
-      });
-    } catch (error) {
-      console.error('[Cashflow] weekly submission status read failed:', error);
-      toast.error('결산 전 제출현황을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.');
-    }
-  }, [db, orgId, projectId, yearMonth]);
+    const accountingState = resolveWeeklyAccountingState(undefined, byWeekNo.get(weekNo));
+    setCloseDialog({
+      kind: accountingState.closeDialogKind,
+      weekNo,
+      projectionDone: accountingState.projectionDone,
+      expenseDone: accountingState.expenseDone,
+      expenseStatusLabel: accountingState.expenseStatusLabel,
+      expenseStatusDescription: accountingState.expenseStatusDescription,
+    });
+  }, [byWeekNo]);
 
   function countEmptyCellsForWeek(input: { weekNo: number; mode: 'projection' | 'actual' }): number {
     const doc = byWeekNo.get(input.weekNo);
@@ -725,7 +623,7 @@ export function CashflowProjectSheet({
   }
 
   function renderSheetTable(tableMode: 'projection' | 'actual') {
-    const derived = tableMode === 'projection' ? derivedByMode.projection : derivedByMode.actual;
+    const displayModel = tableMode === 'projection' ? readModelByMode.projection : readModelByMode.actual;
     return (
       <Card className="overflow-hidden">
         <CardContent className="p-0">
@@ -825,7 +723,7 @@ export function CashflowProjectSheet({
                       const isThisWeek = todayYearMonth === yearMonth && todayIso >= w.weekStart && todayIso <= w.weekEnd;
                       const colClass = isThisWeek ? 'bg-teal-50/30 dark:bg-teal-950/10' : '';
 
-                      if (tableMode === 'actual' && !canEdit) {
+                      if (tableMode === 'actual') {
                         const amount = getEffectiveAmount({ yearMonth, mode: 'actual', weekNo: w.weekNo, lineId });
                         return (
                         <td key={w.weekNo} className={`px-3 py-2 h-9 align-middle text-right ${colClass}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
@@ -858,19 +756,19 @@ export function CashflowProjectSheet({
                       );
                     })}
                     <td className="px-3 py-1.5 pr-2 h-9 align-middle text-right text-[10px]" style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
-                      {fmt(derived.rowTotals[lineId] || 0)}
+                      {fmt(displayModel.rowTotals[lineId] || 0)}
                     </td>
                   </tr>
                 ))}
                 <tr className="border-t border-border/50 bg-muted/40">
                   <td className="px-4 py-1.5 text-[10px]" style={{ fontWeight: 800 }}>입금 합계</td>
-                  {derived.weekTotals.map((w) => (
+                  {displayModel.weekTotals.map((w) => (
                     <td key={w.weekNo} className="px-3 py-1.5 pr-2 h-9 align-middle text-right text-[10px]" style={{ fontWeight: 800, color: '#059669', fontVariantNumeric: 'tabular-nums' }}>
                       {fmt(w.totalIn)}
                     </td>
                   ))}
                   <td className="px-3 py-1.5 pr-2 h-9 align-middle text-right text-[10px]" style={{ fontWeight: 900, color: '#059669', fontVariantNumeric: 'tabular-nums' }}>
-                    {fmt(derived.monthTotals.totalIn)}
+                    {fmt(displayModel.monthTotals.totalIn)}
                   </td>
                 </tr>
 
@@ -886,7 +784,7 @@ export function CashflowProjectSheet({
                       const isThisWeek = todayYearMonth === yearMonth && todayIso >= w.weekStart && todayIso <= w.weekEnd;
                       const colClass = isThisWeek ? 'bg-teal-50/30 dark:bg-teal-950/10' : '';
 
-                      if (tableMode === 'actual' && !canEdit) {
+                      if (tableMode === 'actual') {
                         const amount = getEffectiveAmount({ yearMonth, mode: 'actual', weekNo: w.weekNo, lineId });
                         return (
                         <td key={w.weekNo} className={`px-3 py-2 h-9 align-middle text-right ${colClass}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
@@ -919,27 +817,27 @@ export function CashflowProjectSheet({
                       );
                     })}
                     <td className="px-3 py-1.5 pr-2 h-9 align-middle text-right text-[10px]" style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
-                      {fmt(derived.rowTotals[lineId] || 0)}
+                      {fmt(displayModel.rowTotals[lineId] || 0)}
                     </td>
                   </tr>
                 ))}
 
                 <tr className="border-t border-border/30 bg-muted/40">
                   <td className="px-4 py-1.5 text-[10px]" style={{ fontWeight: 800 }}>출금 합계</td>
-                  {derived.weekTotals.map((w) => (
+                  {displayModel.weekTotals.map((w) => (
                     <td key={w.weekNo} className="px-3 py-1.5 pr-2 h-9 align-middle text-right text-[10px]" style={{ fontWeight: 800, color: '#e11d48', fontVariantNumeric: 'tabular-nums' }}>
                       {fmt(w.totalOut)}
                     </td>
                   ))}
                   <td className="px-3 py-1.5 pr-2 h-9 align-middle text-right text-[10px]" style={{ fontWeight: 900, color: '#e11d48', fontVariantNumeric: 'tabular-nums' }}>
-                    {fmt(derived.monthTotals.totalOut)}
+                    {fmt(displayModel.monthTotals.totalOut)}
                   </td>
                 </tr>
                 <tr className="border-t border-border/30 bg-muted/50">
                   <td className="px-4 py-2" style={{ fontWeight: 900 }}>잔액</td>
                   {(() => {
                     let running = 0;
-                    return derived.weekTotals.map((w) => {
+                    return displayModel.weekTotals.map((w) => {
                       running = w.net;
                       return (
                         <td key={w.weekNo} className="px-3 py-2 text-right" style={{ fontWeight: 900, color: running >= 0 ? '#059669' : '#e11d48' }}>
@@ -948,8 +846,8 @@ export function CashflowProjectSheet({
                       );
                     });
                   })()}
-                  <td className="px-3 py-2 text-right" style={{ fontWeight: 900, color: derived.monthTotals.net >= 0 ? '#059669' : '#e11d48' }}>
-                    {fmt(derived.monthTotals.net)}
+                  <td className="px-3 py-2 text-right" style={{ fontWeight: 900, color: displayModel.monthTotals.net >= 0 ? '#059669' : '#e11d48' }}>
+                    {fmt(displayModel.monthTotals.net)}
                   </td>
                 </tr>
               </tbody>
@@ -983,46 +881,6 @@ export function CashflowProjectSheet({
             >
               {downloadPreparing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />} {downloadPreparing ? '엑셀 준비 중' : '엑셀 다운로드'}
             </Button>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="inline-flex">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8 text-[12px] gap-1.5"
-                    onClick={syncActualsFromExpenseSheet}
-                    disabled={!canEdit || actualSyncing || monthSavingMode !== null}
-                  >
-                    {actualSyncing && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                    Actual 불러오기
-                  </Button>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" className="max-w-[320px] text-[11px] leading-5">
-                <p className="font-semibold">Actual 불러오기</p>
-                <p>주간 사업비 입력표에 저장된 실제 입금/지출을 읽어와 이 캐시플로 Actual 칸에 채웁니다. 새로 계산해 보여주는 단계이며, 최종 반영은 Actual 저장까지 눌러야 끝납니다.</p>
-              </TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="inline-flex">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8 text-[12px] gap-1.5"
-                    onClick={() => saveMonth('actual')}
-                    disabled={!canEdit || actualSyncing || monthSavingMode !== null}
-                  >
-                    {monthSavingMode === 'actual' && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                    Actual 저장
-                  </Button>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" className="max-w-[320px] text-[11px] leading-5">
-                <p className="font-semibold">Actual 저장</p>
-                <p>화면에 보이는 Actual 값을 서버 기준값으로 저장합니다. 저장해야 다른 화면과 다음 접속에서도 같은 실제값을 볼 수 있습니다.</p>
-              </TooltipContent>
-            </Tooltip>
             <Button variant="outline" size="sm" className="h-8 text-[12px] gap-1.5" onClick={goPrevMonthSafe}>
               <ChevronLeft className="w-3.5 h-3.5" /> 이전 달
             </Button>
@@ -1034,7 +892,7 @@ export function CashflowProjectSheet({
       />
 
       <div className="rounded-2xl border border-slate-200/80 bg-slate-50/70 px-4 py-3 text-[11px] text-slate-600">
-        비교 모드에서는 Firestore에 저장된 Projection과 Actual을 동시에 대조합니다. 직접 입력한 값은 각 영역의 저장/작성완료 버튼을 눌렀을 때 서버 기준값으로 반영됩니다.
+        비교 모드에서는 Projection과 Actual을 동시에 대조합니다. Projection만 편집할 수 있고 Actual은 저장된 기준값으로 표시합니다.
       </div>
 
       <Tabs value={viewMode} onValueChange={(v) => (v === 'projection' || v === 'actual' || v === 'compare') && setViewMode(v)}>
@@ -1085,7 +943,7 @@ export function CashflowProjectSheet({
               <div className="flex items-center justify-between">
                 <div>
                   <div className="text-[12px] font-semibold">Actual</div>
-                  <div className="text-[10px] text-muted-foreground">실적값을 확인하고 필요 시 보정합니다.</div>
+                  <div className="text-[10px] text-muted-foreground">Actual은 저장된 기준값만 표시합니다.</div>
                 </div>
               </div>
               {renderSheetTable('actual')}

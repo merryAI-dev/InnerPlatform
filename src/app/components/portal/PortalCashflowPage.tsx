@@ -2,7 +2,6 @@ import { lazy, Suspense, useMemo, useState } from 'react';
 import { FileSpreadsheet } from 'lucide-react';
 import { CashflowProjectSheet } from '../cashflow/CashflowProjectSheet';
 import { usePortalStore } from '../../data/portal-store';
-import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { useAuth } from '../../data/auth-store';
 import { useFirebase } from '../../lib/firebase-context';
 import { readDevAuthHarnessConfig } from '../../platform/dev-harness';
@@ -25,15 +24,12 @@ export function PortalCashflowPage() {
     budgetPlanRows,
     evidenceRequiredMap,
     sheetSources,
-    saveExpenseSheetRows,
     saveBudgetPlanRows,
     saveBudgetCodeBook,
     saveBankStatementRows,
     saveEvidenceRequiredMap,
     markSheetSourceApplied,
-    upsertWeeklySubmissionStatus,
   } = usePortalStore();
-  const { upsertWeekAmounts } = useCashflowWeeks();
   const devHarnessConfig = readDevAuthHarnessConfig(import.meta.env, typeof window !== 'undefined' ? window.location : undefined);
   const [googleSheetImportOpen, setGoogleSheetImportOpen] = useState(false);
 
@@ -87,7 +83,6 @@ export function PortalCashflowPage() {
         projectName={projectName}
         transactions={transactions}
         roleOverride={portalUser?.role}
-        onUpdateWeeklySubmissionStatus={upsertWeeklySubmissionStatus}
       />
 
       {googleSheetImportOpen && (
@@ -108,23 +103,11 @@ export function PortalCashflowPage() {
             sheetSources={sheetSources}
             devHarnessEnabled={devHarnessConfig.enabled}
             ensureGoogleWorkspaceAccess={ensureGoogleWorkspaceAccess}
-            saveExpenseSheetRows={saveExpenseSheetRows}
             saveBudgetPlanRows={saveBudgetPlanRows}
             saveBudgetCodeBook={saveBudgetCodeBook}
             saveBankStatementRows={saveBankStatementRows}
             saveEvidenceRequiredMap={saveEvidenceRequiredMap}
             markSheetSourceApplied={markSheetSourceApplied}
-            upsertWeekAmounts={async (input) => {
-              await upsertWeekAmounts(input);
-              await upsertWeeklySubmissionStatus({
-                projectId: input.projectId,
-                yearMonth: input.yearMonth,
-                weekNo: input.weekNo,
-                ...(input.mode === 'projection'
-                  ? { projectionEdited: true, projectionUpdated: true }
-                  : { expenseEdited: true, expenseUpdated: true }),
-              });
-            }}
           />
         </Suspense>
       )}

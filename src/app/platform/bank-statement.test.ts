@@ -81,6 +81,118 @@ describe('bank statement helpers', () => {
     expect(rows[1]?.cells[depositIdx]).toBe('');
   });
 
+  it('normalizes duplicate, blank, short, and long bank columns without shifting row values', () => {
+    const normalized = normalizeBankStatementMatrix([
+      ['거래일시', '적요', '출금금액', '출금금액', '', '잔액'],
+      ['2026-06-01', '짧은 행', '12,000'],
+      ['2026-06-02', '긴 행', '', '15,000', '추가 메모', '900,000', '무시될 값'],
+    ]);
+
+    expect(normalized.columns).toEqual(['거래일시', '적요', '출금금액', '출금금액_2', '컬럼5', '잔액']);
+    expect(normalized.rows).toHaveLength(2);
+    expect(normalized.rows[0].cells).toEqual(['2026-06-01', '짧은 행', '12,000', '', '', '']);
+    expect(normalized.rows[1].cells).toEqual(['2026-06-02', '긴 행', '', '15,000', '추가 메모', '900,000']);
+  });
+
+  it('maps shuffled and renamed bank columns while ignoring text columns that contain amount keywords', () => {
+    const dateIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '거래일시');
+    const counterpartyIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '지급처');
+    const memoIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '상세 적요');
+    const bankAmountIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '통장에 찍힌 입/출금액');
+    const depositIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '입금액(사업비,공급가액,은행이자)');
+
+    const rows = mapBankStatementsToImportRows({
+      columns: ['잔액', '출금내용', '메모', '입금금액', '거래일자', '상대계좌명', '출금액'],
+      rows: [
+        {
+          tempId: 'bank-in',
+          cells: ['1,000,000', '입금 이체 텍스트', '선입금', '300,000', '2026.06.01', '거래처 A', ''],
+        },
+        {
+          tempId: 'bank-out',
+          cells: ['700,000', '출금 이체 텍스트', '용역비', '', '2026.06.02', '거래처 B', '120,000'],
+        },
+      ],
+    });
+
+    expect(rows).toHaveLength(2);
+    expect(rows[0].entryKind).toBe('DEPOSIT');
+    expect(rows[0].cells[dateIdx]).toBe('2026-06-01');
+    expect(rows[0].cells[counterpartyIdx]).toBe('거래처 A');
+    expect(rows[0].cells[memoIdx]).toBe('선입금');
+    expect(rows[0].cells[bankAmountIdx]).toBe('300,000');
+    expect(rows[0].cells[depositIdx]).toBe('300,000');
+    expect(rows[1].entryKind).toBe('EXPENSE');
+    expect(rows[1].cells[dateIdx]).toBe('2026-06-02');
+    expect(rows[1].cells[counterpartyIdx]).toBe('거래처 B');
+    expect(rows[1].cells[memoIdx]).toBe('용역비');
+    expect(rows[1].cells[bankAmountIdx]).toBe('120,000');
+    expect(rows[1].cells[depositIdx]).toBe('');
+  });
+
+  it('maps single amount columns when direction is carried by a separate in-out type column', () => {
+    const dateIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '거래일시');
+    const memoIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '상세 적요');
+    const bankAmountIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '통장에 찍힌 입/출금액');
+    const depositIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '입금액(사업비,공급가액,은행이자)');
+
+    const rows = mapBankStatementsToImportRows({
+      columns: ['거래일자', '거래금액', '입출금구분', '내용', '잔액'],
+      rows: [
+        {
+          tempId: 'single-out',
+          cells: ['2026-06-03', '45,000', '출금', '계좌이체 수수료', '955,000'],
+        },
+        {
+          tempId: 'single-in',
+          cells: ['2026-06-04', '120,000', '입금', '지원금 입금', '1,075,000'],
+        },
+      ],
+    });
+
+    expect(rows).toHaveLength(2);
+    expect(rows[0].entryKind).toBe('EXPENSE');
+    expect(rows[0].cells[dateIdx]).toBe('2026-06-03');
+    expect(rows[0].cells[memoIdx]).toBe('계좌이체 수수료');
+    expect(rows[0].cells[bankAmountIdx]).toBe('45,000');
+    expect(rows[0].cells[depositIdx]).toBe('');
+    expect(rows[1].entryKind).toBe('DEPOSIT');
+    expect(rows[1].cells[dateIdx]).toBe('2026-06-04');
+    expect(rows[1].cells[memoIdx]).toBe('지원금 입금');
+    expect(rows[1].cells[bankAmountIdx]).toBe('120,000');
+    expect(rows[1].cells[depositIdx]).toBe('120,000');
+  });
+
+  it('maps English debit and credit columns without Korean amount headers', () => {
+    const bankAmountIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '통장에 찍힌 입/출금액');
+    const depositIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '입금액(사업비,공급가액,은행이자)');
+    const counterpartyIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '지급처');
+
+    const rows = mapBankStatementsToImportRows({
+      columns: ['Date', 'Description', 'Debit', 'Credit', 'Balance'],
+      rows: [
+        {
+          tempId: 'debit-row',
+          cells: ['2026-06-05', 'Vendor A', '80,000', '', '920,000'],
+        },
+        {
+          tempId: 'credit-row',
+          cells: ['2026-06-06', 'Client B', '', '300,000', '1,220,000'],
+        },
+      ],
+    });
+
+    expect(rows).toHaveLength(2);
+    expect(rows[0].entryKind).toBe('EXPENSE');
+    expect(rows[0].cells[counterpartyIdx]).toBe('Vendor A');
+    expect(rows[0].cells[bankAmountIdx]).toBe('80,000');
+    expect(rows[0].cells[depositIdx]).toBe('');
+    expect(rows[1].entryKind).toBe('DEPOSIT');
+    expect(rows[1].cells[counterpartyIdx]).toBe('Client B');
+    expect(rows[1].cells[bankAmountIdx]).toBe('300,000');
+    expect(rows[1].cells[depositIdx]).toBe('300,000');
+  });
+
   it('derives intake items that preserve existing manual weekly classification', () => {
     const sheet = {
       columns: ['통장번호', '거래일시', '적요', '의뢰인/수취인', '출금금액', '잔액'],

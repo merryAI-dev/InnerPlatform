@@ -1,0 +1,22 @@
+spring:
+  application:
+    name: jvm-weekly-api
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: true
+  datasource:
+    url: ${JVM_WEEKLY_DATABASE_URL:jdbc:postgresql://localhost:5432/innerplatform_weekly}
+    username: ${JVM_WEEKLY_DATABASE_USER:innerplatform}
+    password: ${JVM_WEEKLY_DATABASE_PASSWORD:innerplatform}
+  flyway:
+    enabled: true
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+server:
+  port: ${WEEKLY_API_PORT:8088}
+weekly:
+  internal-api-token: ${JVM_WEEKLY_INTERNAL_API_TOKEN:}
+  firebase-project-id: ${JVM_WEEKLY_FIREBASE_PROJECT_ID:${FIREBASE_PROJECT_ID:${GOOGLE_CLOUD_PROJECT:}}}
+  allowed-origins: ${JVM_WEEKLY_ALLOWED_ORIGINS:https://inner-platform.vercel.app}

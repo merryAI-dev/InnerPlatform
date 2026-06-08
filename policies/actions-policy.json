@@ -1,0 +1,224 @@
+{
+  "version": 1,
+  "description": "Action-level policy for keeping authoritative writes and irreversible operations behind named server command owners. BFF routes may adapt auth and proxy, but domain authority stays with the owning backend service.",
+  "roles": ["admin", "finance", "pm", "viewer"],
+  "scopes": ["global", "tenant", "project"],
+  "actions": {
+    "tenant.create": {
+      "roles": ["admin"],
+      "scope": "global",
+      "permission": "tenant:manage",
+      "audit": true,
+      "irreversible": true,
+      "owner": "bff",
+      "status": "implemented"
+    },
+    "tenant.delete": {
+      "roles": ["admin"],
+      "scope": "global",
+      "permission": "tenant:manage",
+      "audit": true,
+      "irreversible": true,
+      "owner": "bff",
+      "status": "implemented"
+    },
+    "member.upsert": {
+      "roles": ["admin"],
+      "scope": "tenant",
+      "permission": "user:manage",
+      "audit": true,
+      "irreversible": false,
+      "owner": "bff",
+      "status": "implemented"
+    },
+    "member.delete": {
+      "roles": ["admin"],
+      "scope": "tenant",
+      "permission": "user:manage",
+      "audit": true,
+      "irreversible": true,
+      "owner": "bff",
+      "status": "implemented"
+    },
+    "project.approve": {
+      "roles": ["admin"],
+      "scope": "tenant",
+      "permission": "project:write",
+      "audit": true,
+      "irreversible": true,
+      "owner": "bff",
+      "status": "implemented"
+    },
+    "project.reject": {
+      "roles": ["admin"],
+      "scope": "tenant",
+      "permission": "project:write",
+      "audit": true,
+      "irreversible": true,
+      "owner": "bff",
+      "status": "implemented"
+    },
+    "migration.commit": {
+      "roles": ["admin"],
+      "scope": "tenant",
+      "permission": "project:write",
+      "audit": true,
+      "irreversible": true,
+      "owner": "bff",
+      "status": "planned"
+    },
+    "bankReconciliation.confirm": {
+      "roles": ["admin", "finance"],
+      "scope": "tenant",
+      "permission": "transaction:approve",
+      "audit": true,
+      "irreversible": true,
+      "owner": "bff",
+      "status": "planned"
+    },
+    "payroll.confirm": {
+      "roles": ["admin", "finance"],
+      "scope": "tenant",
+      "permission": "transaction:approve",
+      "audit": true,
+      "irreversible": true,
+      "owner": "bff",
+      "status": "planned"
+    },
+    "monthlyClose.confirm": {
+      "roles": ["admin", "finance"],
+      "scope": "tenant",
+      "permission": "transaction:approve",
+      "audit": true,
+      "irreversible": true,
+      "owner": "bff",
+      "status": "planned"
+    },
+    "weeklyExpense.cell.patch": {
+      "roles": ["admin", "finance", "pm"],
+      "scope": "project",
+      "permission": "weekly_expense:write",
+      "audit": true,
+      "irreversible": false,
+      "owner": "java-orm-api",
+      "status": "implemented"
+    },
+    "weeklyExpense.cells.copy": {
+      "roles": ["admin", "finance", "pm"],
+      "scope": "project",
+      "permission": "weekly_expense:write",
+      "audit": true,
+      "irreversible": false,
+      "owner": "java-orm-api",
+      "status": "implemented"
+    },
+    "weeklyExpense.cells.paste": {
+      "roles": ["admin", "finance", "pm"],
+      "scope": "project",
+      "permission": "weekly_expense:write",
+      "audit": true,
+      "irreversible": false,
+      "owner": "java-orm-api",
+      "status": "implemented"
+    },
+    "weeklyExpense.cells.cut": {
+      "roles": ["admin", "finance", "pm"],
+      "scope": "project",
+      "permission": "weekly_expense:write",
+      "audit": true,
+      "irreversible": false,
+      "owner": "java-orm-api",
+      "status": "implemented"
+    },
+    "weeklyExpense.row.insert": {
+      "roles": ["admin", "finance", "pm"],
+      "scope": "project",
+      "permission": "weekly_expense:write",
+      "audit": true,
+      "irreversible": false,
+      "owner": "java-orm-api",
+      "status": "implemented"
+    },
+    "weeklyExpense.row.delete": {
+      "roles": ["admin", "finance", "pm"],
+      "scope": "project",
+      "permission": "weekly_expense:write",
+      "audit": true,
+      "irreversible": true,
+      "owner": "java-orm-api",
+      "status": "implemented"
+    },
+    "weeklyExpense.saveDraft": {
+      "roles": ["admin", "finance", "pm"],
+      "scope": "project",
+      "permission": "weekly_expense:write",
+      "audit": true,
+      "irreversible": false,
+      "owner": "java-orm-api",
+      "status": "implemented"
+    },
+    "weeklyExpense.bankStatement.importBatch": {
+      "roles": ["admin", "finance", "pm"],
+      "scope": "project",
+      "permission": "weekly_expense:write",
+      "audit": true,
+      "irreversible": false,
+      "owner": "java-orm-api",
+      "status": "implemented"
+    },
+    "weeklyExpense.bankStatement.listLines": {
+      "roles": ["admin", "finance", "pm", "auditor", "viewer", "tenant_admin", "support", "security"],
+      "scope": "project",
+      "permission": "weekly_expense:read",
+      "audit": false,
+      "irreversible": false,
+      "owner": "java-orm-api",
+      "status": "implemented"
+    },
+    "weeklyExpense.bankStatement.applyItems": {
+      "roles": ["admin", "finance", "pm"],
+      "scope": "project",
+      "permission": "weekly_expense:write",
+      "audit": true,
+      "irreversible": false,
+      "owner": "java-orm-api",
+      "status": "implemented"
+    },
+    "weeklyExpense.submitWeek": {
+      "roles": ["admin", "finance", "pm"],
+      "scope": "project",
+      "permission": "weekly_expense:submit",
+      "audit": true,
+      "irreversible": true,
+      "owner": "java-orm-api",
+      "status": "implemented"
+    },
+    "weeklyExpense.actual.recalculate": {
+      "roles": ["admin", "finance"],
+      "scope": "project",
+      "permission": "weekly_expense:actual:write",
+      "audit": true,
+      "irreversible": false,
+      "owner": "java-orm-api",
+      "status": "planned"
+    },
+    "weeklyExpense.projection.upsert": {
+      "roles": ["admin", "finance"],
+      "scope": "project",
+      "permission": "weekly_expense:projection:write",
+      "audit": true,
+      "irreversible": false,
+      "owner": "java-orm-api",
+      "status": "implemented"
+    },
+    "weeklyExpense.auditExport.create": {
+      "roles": ["admin", "finance"],
+      "scope": "project",
+      "permission": "weekly_expense:export",
+      "audit": true,
+      "irreversible": false,
+      "owner": "java-orm-api",
+      "status": "implemented"
+    }
+  }
+}

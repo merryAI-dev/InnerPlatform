@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-06-08] patch-note | portal-weekly-expense, shared-portal-architecture | Java weekly expense authority
+- pages: [portal-weekly-expense](./pages/portal-weekly-expense.md), [shared-portal-architecture](./pages/shared-portal-architecture.md)
+- summary: 사업비 입력(주간)의 셀/행 편집, 통장내역 반영, Actual 계산, Projection/Cashflow 읽기 경로를 Java Spring/JPA 권위 API로 옮겼다. 프론트는 화면 표시와 명령 전달만 맡도록 줄이고, Firestore direct write와 BFF-only 주간 작업 경로를 stage/live 정책 검증에서 반려하도록 추가했다.
+
 ## [2026-06-02] patch-note | portal-weekly-expense, shared-portal-architecture | portal edit stability and document uploads
 - pages: [portal-weekly-expense](./pages/portal-weekly-expense.md), [shared-portal-architecture](./pages/shared-portal-architecture.md)
 - summary: 주간 사업비 입력의 빠른 추가 액션을 단일 `행 추가`로 통합하고 Actual 동기화 결과가 현재 화면에 즉시 반영되도록 보강했다. 프로젝트 등록/수정은 프로젝트명과 그룹웨어 등록명을 같은 값으로 저장하며, 계약서 외 견적서/제안서 첨부와 1GB Firebase Storage direct upload 경로를 추가했다.

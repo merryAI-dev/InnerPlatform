@@ -23,20 +23,33 @@ steps:
       - gcr.io/$PROJECT_ID/mysc-bff:$COMMIT_SHA
 
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
-    entrypoint: gcloud
+    entrypoint: bash
     args:
-      - run
-      - deploy
-      - mysc-bff
-      - --image
-      - gcr.io/$PROJECT_ID/mysc-bff:$COMMIT_SHA
-      - --region
-      - ${_REGION}
-      - --platform
-      - managed
-      - --allow-unauthenticated
-      - --set-env-vars
-      - BFF_DEPLOY_ENV=${_DEPLOY_ENV},FIREBASE_PROJECT_ID=$PROJECT_ID,BFF_ALLOWED_ORIGINS=${_ALLOWED_ORIGINS},BFF_WORKERS_ENABLED=${_WORKERS_ENABLED},BFF_SCHEDULER_OWNER=${_SCHEDULER_OWNER},BFF_OUTBOX_BATCH=${_OUTBOX_BATCH},BFF_OUTBOX_MAX_ATTEMPTS=${_OUTBOX_MAX_ATTEMPTS},PII_MODE=${_PII_MODE},PII_KMS_KEYS=${_PII_KMS_KEYS},PII_KMS_CURRENT_KEY=${_PII_KMS_CURRENT_KEY}
+      - -lc
+      - |
+        NETWORK_ARGS=()
+        if [[ -n "${_BFF_SERVERLESS_VPC_CONNECTOR}" ]]; then
+          NETWORK_ARGS+=(--vpc-connector "${_BFF_SERVERLESS_VPC_CONNECTOR}" --vpc-egress all-traffic)
+        fi
+        ENV_VARS="BFF_DEPLOY_ENV=${_DEPLOY_ENV},FIREBASE_PROJECT_ID=$PROJECT_ID,BFF_ALLOWED_ORIGINS=${_ALLOWED_ORIGINS},BFF_WORKERS_ENABLED=${_WORKERS_ENABLED},BFF_SCHEDULER_OWNER=${_SCHEDULER_OWNER},BFF_OUTBOX_BATCH=${_OUTBOX_BATCH},BFF_OUTBOX_MAX_ATTEMPTS=${_OUTBOX_MAX_ATTEMPTS},PII_MODE=${_PII_MODE},PII_KMS_KEYS=${_PII_KMS_KEYS},PII_KMS_CURRENT_KEY=${_PII_KMS_CURRENT_KEY}"
+        if [[ -n "${_JVM_WEEKLY_API_BASE_URL}" ]]; then
+          ENV_VARS="${ENV_VARS},JVM_WEEKLY_API_BASE_URL=${_JVM_WEEKLY_API_BASE_URL}"
+        fi
+        if [[ -n "${_JVM_WEEKLY_API_ID_TOKEN_AUDIENCE}" ]]; then
+          ENV_VARS="${ENV_VARS},JVM_WEEKLY_API_ID_TOKEN_AUDIENCE=${_JVM_WEEKLY_API_ID_TOKEN_AUDIENCE}"
+        fi
+        SECRET_ARGS=()
+        if [[ -n "${_JVM_WEEKLY_INTERNAL_API_TOKEN_SECRET}" ]]; then
+          SECRET_ARGS=(--set-secrets "JVM_WEEKLY_INTERNAL_API_TOKEN=${_JVM_WEEKLY_INTERNAL_API_TOKEN_SECRET}:latest")
+        fi
+        gcloud run deploy mysc-bff \
+          --image "gcr.io/$PROJECT_ID/mysc-bff:$COMMIT_SHA" \
+          --region "${_REGION}" \
+          --platform managed \
+          --allow-unauthenticated \
+          "${NETWORK_ARGS[@]}" \
+          --set-env-vars "${ENV_VARS}" \
+          "${SECRET_ARGS[@]}"
 
 substitutions:
   _REGION: asia-northeast3
@@ -49,6 +62,10 @@ substitutions:
   _PII_MODE: 'off'
   _PII_KMS_KEYS: ''
   _PII_KMS_CURRENT_KEY: ''
+  _BFF_SERVERLESS_VPC_CONNECTOR: ''
+  _JVM_WEEKLY_API_BASE_URL: ''
+  _JVM_WEEKLY_API_ID_TOKEN_AUDIENCE: ''
+  _JVM_WEEKLY_INTERNAL_API_TOKEN_SECRET: ''
 
 images:
   - gcr.io/$PROJECT_ID/mysc-bff:$COMMIT_SHA

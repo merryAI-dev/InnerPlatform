@@ -101,6 +101,8 @@ Firestore direct와 Spring을 오래 공존시킨다.
 
 Google Sheet, Drive, Firebase snapshot은 시스템 기록이 아니라 입출력 채널이다. source of truth는 PostgreSQL이다.
 
+Firebase SQL Connect/Data Connect를 쓰더라도 이 원칙은 바뀌지 않는다. Cloud SQL for PostgreSQL은 원장이고, Spring ORM command API는 검증/계산/저장/audit 권위다. SQL Connect/Data Connect는 승인된 읽기/동기화/query 채널로만 사용하며, weekly expense row/cell, projection, actual, status, bank apply, audit artifact를 직접 쓰는 경로로 쓰지 않는다.
+
 ### 원칙 3. 동기/비동기 분리
 
 - 동기: validation, command accept/reject, persisted version 반환
@@ -116,6 +118,8 @@ Write model과 read model을 구분한다.
 
 - write model: commands, versions, workflow transitions
 - read model: dashboard, queues, record summaries, audit timelines
+
+BFF는 장기 application layer가 아니다. 전환 기간에는 인증 컨텍스트 정규화, 내부 서비스 identity 부착, 레거시 `/api` 라우팅 호환, CORS 같은 edge adapter 역할만 맡는다. validation, calculation, idempotency, projection/actual 생성, audit decision, canonical persistence는 Spring ORM 계층으로만 둔다.
 
 ## 7. 목표 기술 스택
 

@@ -18,7 +18,6 @@ import type {
   SettlementSheetPolicy,
 } from '../../data/types';
 import { normalizeSettlementSheetPolicy } from '../../data/types';
-import { parseNumber } from '../../platform/csv-utils';
 import {
   computeEvidenceStatus,
   computeEvidenceSummary,
@@ -41,12 +40,6 @@ import {
   deleteSelectedRows,
 } from '../../platform/settlement-grid-actions';
 import {
-  type SettlementDerivationContext,
-  type SettlementDerivationOptions,
-  isSettlementCascadeColumn,
-} from '../../platform/settlement-row-derivation';
-import { deriveSettlementRowsLocally } from '../../platform/settlement-calculation-kernel';
-import {
   countConfirmedImportRowReviews,
   countPendingImportRowReviews,
 } from '../../platform/settlement-review';
@@ -54,13 +47,7 @@ import {
   findSimilarCounterparty,
   type CounterpartySuggestion,
 } from '../../platform/counterparty-normalizer';
-import { resolveEvidenceRequiredByRules } from '../../platform/evidence-rules';
-import { matchBudgetCode } from '../../platform/budget-auto-match';
-import {
-  buildSettlementDerivationContext,
-  resolveEvidenceRequiredDesc,
-  isSettlementRowMeaningful,
-} from '../../platform/settlement-sheet-prepare';
+import { isSettlementRowMeaningful } from '../../platform/settlement-sheet-prepare';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import {
@@ -81,9 +68,7 @@ import {
   buildCommentThreadKey,
   fmt,
   METHOD_LABELS,
-  METHOD_OPTIONS,
   CASHFLOW_IN_LINE_IDS,
-  normalizeBudgetLabel,
   formatBudgetCodeLabel,
   formatSubCodeLabel,
   toFieldSlug,
@@ -148,7 +133,6 @@ export function ImportEditor({
   settlementSheetPolicy,
   basis,
   onToggleFullscreen,
-  onDeriveRows,
 }: {
   rows: ImportRow[];
   onChange: (rows: ImportRow[]) => void;
@@ -182,15 +166,8 @@ export function ImportEditor({
   settlementSheetPolicy?: SettlementSheetPolicy;
   basis?: Basis;
   onToggleFullscreen?: () => void;
-  onDeriveRows?: (
-    rows: ImportRow[],
-    context: SettlementDerivationContext,
-    options: SettlementDerivationOptions,
-  ) => Promise<ImportRow[]>;
 }) {
   const isInlineLayout = inline && !fullscreen;
-  const deriveRequestSeq = useRef(0);
-  const [derivingRows, setDerivingRows] = useState(false);
 
   useEffect(() => {
     if (!fullscreen) return undefined;
@@ -283,10 +260,6 @@ export function ImportEditor({
     () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === 'cashflow항목'),
     [],
   );
-  const methodIdx = useMemo(
-    () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '지출구분'),
-    [],
-  );
   const evidenceIdx = useMemo(
     () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '필수증빙자료 리스트'),
     [],
@@ -303,18 +276,9 @@ export function ImportEditor({
     () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '지급처'),
     [],
   );
-  const memoIdx = useMemo(
-    () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '상세 적요'),
-    [],
-  );
-
-  // 거래처 입력 후 비목이 비어있는 행에 대해 히스토리 → 코드북 cascade 제안
-  // 1. BFF 히스토리 hit → 즉시 사용
-  // 2. BFF miss + 코드북 있음 → 코드북 fuzzy match (confidence: 'codebook')
-  // 3. 둘 다 miss → null (칩 미표시)
+  // 거래처 입력 후 비목이 비어있는 행에 대해 서버 제안만 표시한다.
   useEffect(() => {
     if (!onFetchBudgetSuggestion || counterpartyIdx < 0 || budgetCodeIdx < 0) return;
-    const codebook = budgetCodeBook ?? [];
     for (const row of rows) {
       const counterparty = String(row.cells[counterpartyIdx] || '').trim();
       const budgetCode = String(row.cells[budgetCodeIdx] || '').trim();
@@ -322,31 +286,18 @@ export function ImportEditor({
       const key = `${row.tempId}::${counterparty}`;
       if (pendingBudgetFetches.current.has(key) || key in budgetSuggestionsMap) continue;
       pendingBudgetFetches.current.add(key);
-      const memo = memoIdx >= 0 ? String(row.cells[memoIdx] || '').trim() : '';
-      const cashflowLabel = cashflowIdx >= 0 ? String(row.cells[cashflowIdx] || '').trim() : '';
       onFetchBudgetSuggestion(counterparty).then((suggestion) => {
         pendingBudgetFetches.current.delete(key);
         if (suggestion) {
           setBudgetSuggestionsMap((prev) => ({ ...prev, [key]: suggestion }));
           return;
         }
-        // BFF miss → 코드북 fuzzy fallback
-        if (codebook.length > 0) {
-          const local = matchBudgetCode(counterparty, memo, cashflowLabel, codebook);
-          if (local.confidence !== 'none') {
-            setBudgetSuggestionsMap((prev) => ({
-              ...prev,
-              [key]: { budgetCategory: local.budgetCategory, budgetSubCategory: local.budgetSubCategory, confidence: 'codebook' as const },
-            }));
-            return;
-          }
-        }
         setBudgetSuggestionsMap((prev) => ({ ...prev, [key]: null }));
       }).catch(() => {
         pendingBudgetFetches.current.delete(key);
       });
     }
-  }, [rows, onFetchBudgetSuggestion, counterpartyIdx, budgetCodeIdx, budgetSuggestionsMap, budgetCodeBook, memoIdx, cashflowIdx]);
+  }, [rows, onFetchBudgetSuggestion, counterpartyIdx, budgetCodeIdx, budgetSuggestionsMap]);
 
   const cashflowOptions = useMemo(
     () => CASHFLOW_LINE_OPTIONS.filter((o) => o.value !== 'INPUT_VAT_OUT'),
@@ -360,16 +311,8 @@ export function ImportEditor({
     () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '매입부가세 반환'),
     [],
   );
-  const expenseIdx = useMemo(
-    () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '사업비 사용액'),
-    [],
-  );
   const vatInIdx = useMemo(
     () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '매입부가세'),
-    [],
-  );
-  const bankAmountIdx = useMemo(
-    () => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '통장에 찍힌 입/출금액'),
     [],
   );
   const balanceIdx = useMemo(
@@ -681,38 +624,9 @@ export function ImportEditor({
     uploadTargetTxId,
   ]);
 
-  const settlementDerivationContext = useMemo(
-    () => buildSettlementDerivationContext(projectId, defaultLedgerId, resolvedPolicy, basis),
-    [projectId, defaultLedgerId, resolvedPolicy, basis],
-  );
-
-  const applyDerivedRows = useCallback((
-    nextRows: ImportRow[],
-    options: SettlementDerivationOptions,
-  ) => {
-    if (!onDeriveRows) {
-      onChange(deriveSettlementRowsLocally(nextRows, settlementDerivationContext, options));
-      return;
-    }
-
+  const applyEditedRows = useCallback((nextRows: ImportRow[]) => {
     onChange(nextRows);
-    const requestSeq = ++deriveRequestSeq.current;
-    setDerivingRows(true);
-    void onDeriveRows(nextRows, settlementDerivationContext, options)
-      .then((derivedRows) => {
-        if (requestSeq !== deriveRequestSeq.current) return;
-        onChange(derivedRows);
-      })
-      .catch((error) => {
-        if (requestSeq !== deriveRequestSeq.current) return;
-        console.error('[ImportEditor] Rust settlement derive failed:', error);
-        toast.error('정산 계산 엔진 호출에 실패했습니다. 입력값은 유지합니다.');
-      })
-      .finally(() => {
-        if (requestSeq !== deriveRequestSeq.current) return;
-        setDerivingRows(false);
-      });
-  }, [onChange, onDeriveRows, settlementDerivationContext]);
+  }, [onChange]);
 
   const updateCell = useCallback(
     (rowIdx: number, colIdx: number, value: string) => {
@@ -724,12 +638,7 @@ export function ImportEditor({
         return { ...r, cells, userEditedCells };
       });
 
-      const mode = colIdx === cashflowIdx
-        ? 'row'
-        : isSettlementCascadeColumn(colIdx, settlementDerivationContext)
-          ? 'cascade'
-          : 'row';
-      applyDerivedRows(next, { mode, rowIdx });
+      applyEditedRows(next);
 
       // 거래처 셀 변경 시 오타 탐지
       if (colIdx === counterpartyIdx && value.trim()) {
@@ -744,40 +653,17 @@ export function ImportEditor({
         }
       }
     },
-    [rows, cashflowIdx, settlementDerivationContext, counterpartyIdx, applyDerivedRows],
+    [rows, counterpartyIdx, applyEditedRows],
   );
 
   const updateRow = useCallback(
     (rowIdx: number, updater: (row: ImportRow) => ImportRow) => {
       const next = updateImportRowAt(rows, rowIdx, (r) => {
-        let updated = updater(r);
-        if (budgetCodeIdx >= 0 && subCodeIdx >= 0 && evidenceIdx >= 0) {
-          const budgetCode = updated.cells[budgetCodeIdx] || '';
-          const subCode = updated.cells[subCodeIdx] || '';
-          // 1순위: 프로젝트별 evidenceRequiredMap
-          const mapped = resolveEvidenceRequiredDesc(evidenceRequiredMap, budgetCode, subCode);
-          if (mapped) {
-            const cells = [...updated.cells];
-            cells[evidenceIdx] = mapped;
-            updated = { ...updated, cells };
-          } else {
-            // 2순위: 기본 규칙표 fallback
-            const amountStr = (expenseIdx >= 0 ? updated.cells[expenseIdx] : '')
-              || (bankAmountIdx >= 0 ? updated.cells[bankAmountIdx] : '')
-              || '';
-            const ruleResult = resolveEvidenceRequiredByRules(budgetCode, subCode, amountStr);
-            if (ruleResult) {
-              const cells = [...updated.cells];
-              cells[evidenceIdx] = ruleResult;
-              updated = { ...updated, cells };
-            }
-          }
-        }
-        return updated;
+        return updater(r);
       });
-      applyDerivedRows(next, { mode: 'row', rowIdx });
+      applyEditedRows(next);
     },
-    [rows, budgetCodeIdx, subCodeIdx, evidenceIdx, evidenceRequiredMap, settlementDerivationContext, expenseIdx, bankAmountIdx, applyDerivedRows],
+    [rows, applyEditedRows],
   );
 
   const normalizeRowNumbers = useCallback((input: ImportRow[]) => {
@@ -823,8 +709,8 @@ export function ImportEditor({
 
   const commitRows = useCallback((nextRows: ImportRow[], focusTarget?: { rowIdx: number; colIdx: number } | null) => {
     if (focusTarget) pendingFocusCell.current = focusTarget;
-    applyDerivedRows(normalizeRowNumbers(nextRows), { mode: 'full' });
-  }, [normalizeRowNumbers, applyDerivedRows]);
+    applyEditedRows(normalizeRowNumbers(nextRows));
+  }, [normalizeRowNumbers, applyEditedRows]);
 
   const addRow = useCallback(() => {
     const anchor = getSelectionAnchor();
@@ -859,13 +745,6 @@ export function ImportEditor({
     ];
     commitRows(nextRows, { rowIdx: boundedIndex, colIdx: getPreferredEditableCol() });
   }, [rows, commitRows, getPreferredEditableCol]);
-
-  const formatNumberCell = useCallback((value: string) => {
-    if (!value) return '';
-    const num = parseNumber(value);
-    if (num == null) return value;
-    return Number.isFinite(num) ? num.toLocaleString('ko-KR') : value;
-  }, []);
 
   const cloneRows = useCallback((input: ImportRow[]) => {
     return input.map((row) => ({ ...row, cells: [...row.cells] }));
@@ -969,30 +848,6 @@ export function ImportEditor({
 
       const fillAll = gridRows === 1 && gridCols === 1;
 
-      const normalizeSelectValue = (colIdx: number, raw: string, currentCells: string[]) => {
-        const trimmed = raw.trim();
-        if (!trimmed) return '';
-        if (colIdx === weekIdx) {
-          const match = weekOptions.find((o) => o.value === trimmed || o.label === trimmed);
-          return match ? match.value : trimmed;
-        }
-        if (colIdx === cashflowIdx) {
-          const match = cashflowOptions.find((o) => o.label === trimmed || o.value === trimmed);
-          return match ? match.label : trimmed;
-        }
-        if (colIdx === methodIdx) {
-          const match = METHOD_OPTIONS.find((o) => o.label === trimmed || o.value === trimmed);
-          return match ? match.label : trimmed;
-        }
-        if (colIdx === budgetCodeIdx) {
-          return normalizeBudgetLabel(trimmed);
-        }
-        if (colIdx === subCodeIdx || colIdx === subSubCodeIdx) {
-          return normalizeBudgetLabel(trimmed);
-        }
-        return trimmed;
-      };
-
       for (let r = bounds.r1; r <= bounds.r2; r++) {
         const rowIdx = r;
         const row = nextRows[rowIdx];
@@ -1005,25 +860,9 @@ export function ImportEditor({
           const sc = c - bounds.c1;
           if (!fillAll && (sr >= gridRows || sc >= gridCols)) continue;
           const raw = (fillAll ? (grid[0]?.[0] ?? '') : (grid[sr]?.[sc] ?? '')).trim();
-          const colDef = SETTLEMENT_COLUMNS[colIdx];
-          if ([weekIdx, cashflowIdx, methodIdx, budgetCodeIdx, subCodeIdx, subSubCodeIdx].includes(colIdx)) {
-            cells[colIdx] = normalizeSelectValue(colIdx, raw, cells);
-          } else {
-            cells[colIdx] = colDef?.format === 'number' ? formatNumberCell(raw) : raw;
-          }
+          cells[colIdx] = raw;
         }
-        let updated = { ...row, cells };
-        if (budgetCodeIdx >= 0 && subCodeIdx >= 0 && evidenceIdx >= 0 && evidenceRequiredMap) {
-          const budgetCode = updated.cells[budgetCodeIdx] || '';
-          const subCode = updated.cells[subCodeIdx] || '';
-          const mapped = resolveEvidenceRequiredDesc(evidenceRequiredMap, budgetCode, subCode);
-          if (mapped) {
-            const mappedCells = [...updated.cells];
-            mappedCells[evidenceIdx] = mapped;
-            updated = { ...updated, cells: mappedCells };
-          }
-        }
-        nextRows[rowIdx] = updated;
+        nextRows[rowIdx] = { ...row, cells };
       }
 
       commitRows(nextRows);
@@ -1035,10 +874,6 @@ export function ImportEditor({
       noIdx,
       selection,
       cloneRows,
-      budgetCodeIdx,
-      subCodeIdx,
-      evidenceIdx,
-      evidenceRequiredMap,
     ],
   );
 
@@ -1427,37 +1262,6 @@ export function ImportEditor({
     [rows, pushUndoSnapshot, commitRows, getPreferredEditableCol, resolvedPolicy.allowRowDelete],
   );
 
-  const applyEvidenceMapping = useCallback((rowIdx?: number) => {
-    if (budgetCodeIdx < 0 || subCodeIdx < 0 || evidenceIdx < 0) return;
-    if (!evidenceRequiredMap || Object.keys(evidenceRequiredMap).length === 0) return;
-    const next = rowIdx == null
-      ? rows.map((r, i) => {
-        const budgetCode = r.cells[budgetCodeIdx] || '';
-        const subCode = r.cells[subCodeIdx] || '';
-        const mapped = resolveEvidenceRequiredDesc(evidenceRequiredMap, budgetCode, subCode);
-        if (!mapped) return r;
-        const cells = [...r.cells];
-        cells[evidenceIdx] = mapped;
-        const updated: ImportRow = { ...r, cells };
-        const result = importRowToTransaction(updated, projectId, defaultLedgerId, i, { policy: resolvedPolicy });
-        updated.error = result.error;
-        return updated;
-      })
-      : updateImportRowAt(rows, rowIdx, (r) => {
-        const budgetCode = r.cells[budgetCodeIdx] || '';
-        const subCode = r.cells[subCodeIdx] || '';
-        const mapped = resolveEvidenceRequiredDesc(evidenceRequiredMap, budgetCode, subCode);
-        if (!mapped) return r;
-        const cells = [...r.cells];
-        cells[evidenceIdx] = mapped;
-        const updated: ImportRow = { ...r, cells };
-        const result = importRowToTransaction(updated, projectId, defaultLedgerId, rowIdx, { policy: resolvedPolicy });
-        updated.error = result.error;
-        return updated;
-      });
-    onChange(next);
-  }, [rows, onChange, projectId, defaultLedgerId, budgetCodeIdx, subCodeIdx, evidenceIdx, evidenceRequiredMap]);
-
   const openMappingEditor = useCallback(() => {
     setMappingDraft({ ...(evidenceRequiredMap || {}) });
     setMappingOpen(true);
@@ -1477,7 +1281,6 @@ export function ImportEditor({
     try {
       await onSaveEvidenceRequiredMap(nextMap);
       setMappingOpen(false);
-      applyEvidenceMapping();
       toast.success('증빙 매핑이 저장되었습니다');
     } catch (err) {
       console.error('[SettlementLedger] save evidence map failed:', err);
@@ -1544,7 +1347,7 @@ export function ImportEditor({
           </div>
           <div className="shrink-0 text-right text-[11px] text-muted-foreground">
             <div>행 왼쪽 배지에서 출처를 확인할 수 있습니다.</div>
-            <div>입력한 값은 저장 시 캐시플로 actual에 바로 반영됩니다.</div>
+            <div>입력한 값은 저장 후 Actual 반영 기준으로 사용됩니다.</div>
             {onToggleFullscreen && (
               <Button
                 variant="outline"
@@ -1646,16 +1449,16 @@ export function ImportEditor({
                   size="sm"
                   className="h-7 text-[11px] gap-1 cursor-pointer shadow-sm"
                   onClick={onSave}
-                  disabled={validCount === 0 || saving || derivingRows}
+                  disabled={validCount === 0 || saving}
                 >
-                  {saving || derivingRows ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-                  {saving ? '저장 중...' : derivingRows ? 'Rust 계산 중...' : `${validCount}건 저장`}
+                  {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                  {saving ? '저장 중...' : `${validCount}건 저장`}
                 </Button>
               </span>
             </TooltipTrigger>
             <TooltipContent side="top" className="max-w-[320px] text-[11px] leading-5">
               <p className="font-semibold">저장</p>
-              <p>지금 보이는 주간 사업비 입력표를 서버 기준본으로 보관합니다. 저장 후에는 캐시플로 Actual 불러오기가 이어져 실제 입금/지출 값으로 캐시플로 화면에 반영됩니다.</p>
+              <p>지금 보이는 주간 사업비 입력표를 저장 기준본으로 보관합니다. Actual은 저장된 행을 기준으로 캐시플로 화면에 반영됩니다.</p>
             </TooltipContent>
           </Tooltip>
         </div>

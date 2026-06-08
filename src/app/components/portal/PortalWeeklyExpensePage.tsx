@@ -1,17 +1,15 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import {
   AlertTriangle,
   ArrowRight,
   ExternalLink,
-  FolderPlus,
   Loader2,
   Send,
 } from 'lucide-react';
 import { usePortalStore } from '../../data/portal-store';
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { useAuth } from '../../data/auth-store';
-import type { EvidenceUploadSelection } from '../cashflow/SettlementLedgerPage';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Card, CardContent } from '../ui/card';
@@ -27,37 +25,13 @@ import {
 import { toast } from 'sonner';
 import { useFirebase } from '../../lib/firebase-context';
 import {
-  type ProvisionTransactionEvidenceDriveResult,
-  type SyncTransactionEvidenceDriveResult,
-  type UploadTransactionEvidenceDriveResult,
-  provisionProjectEvidenceDriveRootViaBff,
-  provisionTransactionEvidenceDriveViaBff,
-  syncTransactionEvidenceDriveViaBff,
-  upsertTransactionViaBff,
-  uploadTransactionEvidenceDriveViaBff,
-  fetchBudgetSuggestionViaBff,
   isPlatformApiEnabled,
-  syncProjectCashflowActualsViaBff,
 } from '../../lib/platform-bff-client';
-import { PlatformApiError } from '../../platform/api-client';
-import {
-  deriveSettlementRowsLocally,
-  buildSettlementActualSyncPayloadLocally,
-} from '../../platform/settlement-calculation-kernel';
-import {
-  GoogleDriveBrowserUploadError,
-  uploadFileToGoogleDriveFolder,
-} from '../../platform/google-drive-browser-upload';
-import { shouldFallbackToBffOnBrowserUploadError } from '../../platform/evidence-drive-upload';
 import { splitLooseNameList } from '../../platform/name-list';
 import { resolveApiErrorMessage } from '../../platform/api-error-message';
-import { reportError } from '../../platform/observability';
-import { type ImportRow } from '../../platform/settlement-csv';
-import { buildOptimisticUploadedEvidencePatch } from '../../platform/evidence-upload-flow';
 import { readDevAuthHarnessConfig } from '../../platform/dev-harness';
 import { detectParticipationRisk } from '../../platform/participation-risk-rules';
 import { normalizeBudgetLabel } from '../../platform/budget-labels';
-import { buildProjectExpenseRowsForActualSync } from '../../platform/expense-sheet-actual-sync';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -71,7 +45,6 @@ import {
 import { resolvePortalHappyPath } from '../../platform/portal-happy-path';
 import { resolveWeeklyExpenseSavePolicy } from '../../platform/weekly-expense-save-policy';
 import { usePortalNavigationGuard } from './PortalLayout';
-import { getYearMondayWeeks } from '../../platform/cashflow-weeks';
 const GoogleSheetMigrationWizard = lazy(
   () => import('./GoogleSheetMigrationWizard').then((module) => ({ default: module.GoogleSheetMigrationWizard })),
 );
@@ -115,15 +88,13 @@ export function PortalWeeklyExpensePage() {
     saveBudgetCodeBook,
     markSheetSourceApplied,
     weeklySubmissionStatuses,
-    upsertWeeklySubmissionStatus,
   } = usePortalStore();
-  const { submitWeekAsPm, upsertWeekAmounts, applyProjectActualSyncResultLocally } = useCashflowWeeks();
+  const { submitWeekAsPm } = useCashflowWeeks();
   const devHarnessConfig = readDevAuthHarnessConfig(import.meta.env, typeof window !== 'undefined' ? window.location : undefined);
-  const [projectDriveProvisioning, setProjectDriveProvisioning] = useState(false);
+  const weeklyDirectApiMode = isPlatformApiEnabled();
   const [googleSheetImportOpen, setGoogleSheetImportOpen] = useState(false);
   const [hasUnsavedSettlementChanges, setHasUnsavedSettlementChanges] = useState(false);
   const [isSettlementSaving, setIsSettlementSaving] = useState(false);
-  const actualSyncSignatureRef = useRef('');
   const [participationRiskWarning, setParticipationRiskWarning] = useState<{
     yearMonth: string;
     weekNo: number;
@@ -177,7 +148,7 @@ export function PortalWeeklyExpensePage() {
         actionKind: 'bank' as const,
       };
     }
-    if (!happyPath.canUseEvidenceWorkflow) {
+    if (!weeklyDirectApiMode && !happyPath.canUseEvidenceWorkflow) {
       return {
         title: '증빙 폴더 연결을 마치면 제출 흐름이 더 빨라집니다',
         description: '기본 폴더를 준비하면 행 저장 후 바로 증빙 폴더 생성, 업로드, 동기화를 이어갈 수 있습니다.',
@@ -192,6 +163,7 @@ export function PortalWeeklyExpensePage() {
     happyPath.canOpenWeeklyExpenses,
     happyPath.canUseEvidenceWorkflow,
     isDirectEntryMode,
+    weeklyDirectApiMode,
   ]);
   const settlementSheetPolicy = useMemo(
     () => normalizeSettlementSheetPolicy(myProject?.settlementSheetPolicy, myProject?.fundInputMode),
@@ -274,473 +246,6 @@ export function PortalWeeklyExpensePage() {
     portalUser?.email,
     portalUser?.role,
   ]);
-  const deriveRowsWithLocalKernel = useCallback(async (
-    rows: ImportRow[],
-    context: Parameters<typeof deriveSettlementRowsLocally>[1],
-    options: Parameters<typeof deriveSettlementRowsLocally>[2],
-  ) => deriveSettlementRowsLocally(rows, context, options), []);
-  const previewActualSyncWithLocalKernel = useCallback(async (
-    rows: ImportRow[],
-    yearWeeks: Parameters<typeof buildSettlementActualSyncPayloadLocally>[1],
-    persistedRows?: ImportRow[] | null,
-  ) => {
-    const currentProjectRows = buildProjectExpenseRowsForActualSync({
-      sheets: visibleExpenseSheets,
-      activeSheetId: activeExpenseSheetId,
-      activeRows: rows,
-    });
-    const persistedProjectRows = buildProjectExpenseRowsForActualSync({
-      sheets: visibleExpenseSheets,
-      activeSheetId: activeExpenseSheetId,
-      activeRows: persistedRows ?? expenseSheetRows ?? [],
-    });
-    return buildSettlementActualSyncPayloadLocally(currentProjectRows, yearWeeks, persistedProjectRows);
-  }, [activeExpenseSheetId, expenseSheetRows, visibleExpenseSheets]);
-
-  const projectActualSyncPayload = useMemo(() => {
-    const rows = buildProjectExpenseRowsForActualSync({
-      sheets: visibleExpenseSheets,
-      activeSheetId: activeExpenseSheetId,
-      activeRows: expenseSheetRows ?? [],
-    });
-    if (rows.length === 0) return [];
-    const currentYear = new Date().getFullYear();
-    return buildSettlementActualSyncPayloadLocally(rows, getYearMondayWeeks(currentYear), rows);
-  }, [activeExpenseSheetId, expenseSheetRows, visibleExpenseSheets]);
-
-  const projectExpenseSourceSignature = useMemo(() => {
-    const rows = buildProjectExpenseRowsForActualSync({
-      sheets: visibleExpenseSheets,
-      activeSheetId: activeExpenseSheetId,
-      activeRows: expenseSheetRows ?? [],
-    });
-    return JSON.stringify({
-      projectId,
-      sheets: visibleExpenseSheets.map((sheet) => ({
-        id: sheet.id,
-        name: sheet.name,
-        rowCount: Array.isArray(sheet.rows) ? sheet.rows.length : 0,
-      })),
-      rows: rows.map((row) => ({
-        tempId: row.tempId,
-        sourceTxId: row.sourceTxId,
-        entryKind: row.entryKind,
-        cells: row.cells,
-      })),
-    });
-  }, [activeExpenseSheetId, expenseSheetRows, projectId, visibleExpenseSheets]);
-
-  const syncCashflowActualsFromCanonicalSource = useCallback(async () => {
-    if (!projectId) return [];
-    if (isPlatformApiEnabled()) {
-      const result = await syncProjectCashflowActualsViaBff({
-        tenantId: orgId,
-        actor: bffActor,
-        projectId,
-      });
-      applyProjectActualSyncResultLocally({ projectId, result });
-      return [...result.weeks, ...result.cleared];
-    }
-
-    await Promise.all(projectActualSyncPayload.map((week) => upsertWeekAmounts({
-      projectId,
-      yearMonth: week.yearMonth,
-      weekNo: week.weekNo,
-      mode: 'actual',
-      amounts: week.amounts as any,
-    })));
-    if (projectActualSyncPayload.length > 0) {
-      await Promise.all(projectActualSyncPayload.map((week) => upsertWeeklySubmissionStatus({
-        projectId,
-        yearMonth: week.yearMonth,
-        weekNo: week.weekNo,
-        expenseUpdated: true,
-        expenseSyncState: 'synced',
-        expenseReviewPendingCount: 0,
-      })));
-    }
-    return projectActualSyncPayload.map((week) => ({ yearMonth: week.yearMonth, weekNo: week.weekNo }));
-  }, [applyProjectActualSyncResultLocally, bffActor, orgId, projectActualSyncPayload, projectId, upsertWeekAmounts, upsertWeeklySubmissionStatus]);
-
-  useEffect(() => {
-    if (!projectId || portalStoreLoading || hasUnsavedSettlementChanges || isSettlementSaving) return;
-    const signature = projectExpenseSourceSignature;
-    if (actualSyncSignatureRef.current === signature) return;
-    actualSyncSignatureRef.current = signature;
-    let cancelled = false;
-    void (async () => {
-      try {
-        await syncCashflowActualsFromCanonicalSource();
-        if (cancelled) return;
-      } catch (error) {
-        actualSyncSignatureRef.current = '';
-        reportError(error, {
-          message: '[PortalWeeklyExpensePage] actual realtime sync failed:',
-          options: {
-            level: 'error',
-            tags: {
-              surface: 'portal_weekly_expense',
-              action: 'actual_realtime_sync',
-            },
-            extra: {
-              projectId,
-            },
-          },
-        });
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    hasUnsavedSettlementChanges,
-    isSettlementSaving,
-    portalStoreLoading,
-    projectExpenseSourceSignature,
-    projectId,
-    syncCashflowActualsFromCanonicalSource,
-  ]);
-
-  const handleEvidenceDriveError = useCallback((error: unknown, actionLabel: string) => {
-    reportError(error, {
-      message: `[PortalWeeklyExpensePage] ${actionLabel} failed:`,
-      options: {
-        level: 'error',
-        tags: {
-          surface: 'portal_weekly_expense',
-          action: actionLabel,
-        },
-        extra: {
-          projectId,
-          actorId: bffActor.uid,
-        },
-      },
-    });
-    const fallback = error instanceof GoogleDriveBrowserUploadError
-      ? (error.message || `${actionLabel}에 실패했습니다.`)
-      : `${actionLabel}에 실패했습니다.`;
-    toast.error(resolveApiErrorMessage(error, fallback));
-  }, [bffActor.uid, projectId]);
-
-  const resolveVersionFromApiError = useCallback((error: unknown): number | null => {
-    if (!(error instanceof PlatformApiError)) return null;
-    const bodyMessage = typeof error.body === 'object' && error.body && 'message' in (error.body as Record<string, unknown>)
-      ? String((error.body as Record<string, unknown>).message || '')
-      : '';
-    const source = `${error.message} ${bodyMessage}`;
-    const currentMatch = source.match(/current=(\d+)/i);
-    if (currentMatch) return Number.parseInt(currentMatch[1], 10);
-    const actualMatch = source.match(/actual\s+(\d+)/i);
-    if (actualMatch) return Number.parseInt(actualMatch[1], 10);
-    return null;
-  }, []);
-
-  const applyProvisionedDriveState = useCallback(async (
-    txId: string,
-    result: ProvisionTransactionEvidenceDriveResult,
-  ) => {
-    await updateTransaction(txId, {
-      version: result.version,
-      evidenceDriveFolderId: result.folderId,
-      evidenceDriveFolderName: result.folderName,
-      evidenceDriveLink: result.webViewLink || undefined,
-      evidenceDriveSharedDriveId: result.sharedDriveId || undefined,
-      evidenceDriveSyncStatus: result.syncStatus,
-      updatedAt: result.updatedAt,
-    });
-  }, [updateTransaction]);
-
-  const applySyncedEvidenceState = useCallback(async (
-    txId: string,
-    result: SyncTransactionEvidenceDriveResult | UploadTransactionEvidenceDriveResult,
-  ) => {
-    await updateTransaction(txId, {
-      version: result.version,
-      attachmentsCount: result.evidenceCount,
-      evidenceDriveFolderId: result.folderId,
-      evidenceDriveFolderName: result.folderName,
-      evidenceDriveLink: result.webViewLink || undefined,
-      evidenceDriveSharedDriveId: result.sharedDriveId || undefined,
-      evidenceDriveSyncStatus: 'SYNCED',
-      evidenceDriveLastSyncedAt: result.lastSyncedAt,
-      evidenceCompletedDesc: result.evidenceCompletedDesc || '',
-      evidenceCompletedManualDesc: result.evidenceCompletedManualDesc || '',
-      evidenceAutoListedDesc: result.evidenceAutoListedDesc || '',
-      evidencePendingDesc: result.evidencePendingDesc || '',
-      supportPendingDocs: result.supportPendingDocs || '',
-      evidenceMissing: result.evidenceMissing,
-      evidenceStatus: result.evidenceStatus,
-      updatedAt: result.updatedAt,
-    });
-  }, [updateTransaction]);
-
-  const ensureTransactionPersisted = useCallback(async ({
-    transaction,
-    sourceTxId,
-  }: {
-    transaction: Transaction;
-    sourceTxId?: string;
-  }): Promise<string | null> => {
-    const existingTx = sourceTxId ? transactions.find((candidate) => candidate.id === sourceTxId) : undefined;
-    const now = new Date().toISOString();
-    const txId = existingTx?.id || transaction.id;
-    const nextTx: Transaction = {
-      ...(existingTx || {}),
-      ...transaction,
-      id: txId,
-      projectId,
-      ledgerId: defaultLedgerId,
-      counterparty: transaction.counterparty.trim(),
-      state: existingTx?.state || transaction.state || 'DRAFT',
-      createdAt: existingTx?.createdAt || transaction.createdAt || now,
-      createdBy: existingTx?.createdBy || transaction.createdBy || portalUser?.name || authUser?.name || 'pm',
-      updatedAt: now,
-      updatedBy: portalUser?.name || authUser?.name || transaction.updatedBy || 'pm',
-      weekCode: transaction.weekCode || existingTx?.weekCode || '',
-    };
-
-    try {
-      const requestPayload = {
-        ...nextTx,
-        ...(Number.isFinite(existingTx?.version)
-          ? { expectedVersion: existingTx?.version }
-          : {}),
-      };
-      let result;
-      try {
-        result = await upsertTransactionViaBff({
-          tenantId: orgId,
-          actor: bffActor,
-          transaction: requestPayload,
-        });
-      } catch (error) {
-        const retryVersion = resolveVersionFromApiError(error);
-        if (retryVersion == null) throw error;
-        result = await upsertTransactionViaBff({
-          tenantId: orgId,
-          actor: bffActor,
-          transaction: {
-            ...nextTx,
-            expectedVersion: retryVersion,
-          },
-        });
-      }
-      const syncedTx = {
-        ...nextTx,
-        version: result.version,
-        updatedAt: result.updatedAt,
-        state: result.state as TransactionState,
-      };
-      if (existingTx) {
-        await updateTransaction(txId, syncedTx);
-      } else {
-        await addTransaction(syncedTx);
-      }
-      return txId;
-    } catch (error) {
-      handleEvidenceDriveError(error, '거래 저장');
-      return null;
-    }
-  }, [
-    addTransaction,
-    authUser?.name,
-    bffActor,
-    defaultLedgerId,
-    handleEvidenceDriveError,
-    orgId,
-    portalUser?.name,
-    projectId,
-    resolveVersionFromApiError,
-    transactions,
-    updateTransaction,
-  ]);
-
-  const provisionEvidenceDrive = useCallback(async (tx: Transaction) => {
-    if (tx.evidenceDriveFolderId) {
-      const folderName = tx.evidenceDriveFolderName || '기존 증빙 폴더';
-      toast.success(`이미 연결된 증빙 폴더를 사용합니다: ${folderName}`);
-      return {
-        transactionId: tx.id,
-        projectId: tx.projectId,
-        projectFolderId: myProject?.evidenceDriveRootFolderId || '',
-        projectFolderName: myProject?.evidenceDriveRootFolderName || '',
-        folderId: tx.evidenceDriveFolderId,
-        folderName,
-        webViewLink: tx.evidenceDriveLink || null,
-        sharedDriveId: tx.evidenceDriveSharedDriveId || myProject?.evidenceDriveSharedDriveId || null,
-        syncStatus: 'LINKED' as const,
-        version: tx.version || 1,
-        updatedAt: tx.updatedAt || new Date().toISOString(),
-      };
-    }
-
-    try {
-      const result = await provisionTransactionEvidenceDriveViaBff({
-        tenantId: orgId,
-        actor: bffActor,
-        transactionId: tx.id,
-      });
-      await applyProvisionedDriveState(tx.id, result);
-      toast.success(`증빙 폴더 연결 완료: ${result.folderName}`);
-      return result;
-    } catch (error) {
-      handleEvidenceDriveError(error, '증빙 폴더 생성');
-      throw error;
-    }
-  }, [applyProvisionedDriveState, bffActor, handleEvidenceDriveError, myProject?.evidenceDriveRootFolderId, myProject?.evidenceDriveRootFolderName, myProject?.evidenceDriveSharedDriveId, orgId]);
-
-  const syncEvidenceDrive = useCallback(async (tx: Transaction) => {
-    try {
-      const result = await syncTransactionEvidenceDriveViaBff({
-        tenantId: orgId,
-        actor: bffActor,
-        transactionId: tx.id,
-      });
-      await applySyncedEvidenceState(tx.id, result);
-      toast.success(`증빙 동기화 완료: Drive 폴더 파일 ${result.evidenceCount}건 반영`);
-    } catch (error) {
-      handleEvidenceDriveError(error, '증빙 동기화');
-      throw error;
-    }
-  }, [applySyncedEvidenceState, bffActor, handleEvidenceDriveError, orgId]);
-
-  const provisionProjectDriveRoot = useCallback(async () => {
-    setProjectDriveProvisioning(true);
-    try {
-      const result = await provisionProjectEvidenceDriveRootViaBff({
-        tenantId: orgId,
-        actor: bffActor,
-        projectId,
-      });
-      toast.success(`기본 폴더 연결 완료: ${result.folderName}`);
-    } catch (error) {
-      handleEvidenceDriveError(error, '기본 폴더 생성');
-      throw error;
-    } finally {
-      setProjectDriveProvisioning(false);
-    }
-  }, [bffActor, handleEvidenceDriveError, orgId, projectId]);
-
-  const uploadEvidenceDrive = useCallback(async (tx: Transaction, uploads: EvidenceUploadSelection[]) => {
-    try {
-      const googleAccessToken = bffActor.googleAccessToken || await ensureGoogleWorkspaceAccess() || undefined;
-      let workingTx = transactions.find((candidate) => candidate.id === tx.id) || tx;
-      let folderId = workingTx.evidenceDriveFolderId || '';
-      let sharedDriveId = workingTx.evidenceDriveSharedDriveId || '';
-
-      if (!folderId) {
-        const provisioned = await provisionEvidenceDrive(workingTx);
-        folderId = provisioned.folderId;
-        sharedDriveId = provisioned.sharedDriveId || sharedDriveId;
-        workingTx = {
-          ...workingTx,
-          version: provisioned.version,
-          evidenceDriveFolderId: provisioned.folderId,
-          evidenceDriveFolderName: provisioned.folderName,
-          evidenceDriveLink: provisioned.webViewLink || workingTx.evidenceDriveLink,
-          evidenceDriveSharedDriveId: provisioned.sharedDriveId || workingTx.evidenceDriveSharedDriveId,
-        };
-      }
-
-      if (!folderId) {
-        throw new Error('증빙 Drive 폴더를 찾지 못했습니다.');
-      }
-
-      let usedBrowserUpload = false;
-      let lastResult: UploadTransactionEvidenceDriveResult | null = null;
-      for (const upload of uploads) {
-        if (googleAccessToken) {
-          try {
-            await uploadFileToGoogleDriveFolder({
-              accessToken: googleAccessToken,
-              folderId,
-              file: upload.file,
-              fileName: upload.reviewedFileName,
-              mimeType: upload.file.type || 'application/octet-stream',
-              appProperties: {
-                managedBy: 'mysc-platform',
-                tenantId: orgId,
-                projectId,
-                transactionId: tx.id,
-                evidenceSource: 'platform-upload',
-                originalFileName: upload.file.name,
-                category: upload.category,
-                sharedDriveId,
-              },
-            });
-            usedBrowserUpload = true;
-            continue;
-          } catch (error) {
-            if (!shouldFallbackToBffOnBrowserUploadError(error)) {
-              throw error;
-            }
-            reportError(error, {
-              message: '[PortalWeeklyExpensePage] Browser Drive upload failed; falling back to BFF upload:',
-              options: {
-                level: 'warning',
-                tags: {
-                  surface: 'portal_weekly_expense',
-                  action: 'browser_drive_upload_fallback',
-                },
-                extra: {
-                  projectId,
-                  transactionId: tx.id,
-                  actorId: bffActor.uid,
-                },
-              },
-            });
-          }
-        }
-
-        const contentBase64 = await readFileAsBase64(upload.file);
-        lastResult = await uploadTransactionEvidenceDriveViaBff({
-          tenantId: orgId,
-          actor: bffActor,
-          transactionId: tx.id,
-          upload: {
-            fileName: upload.reviewedFileName,
-            originalFileName: upload.file.name,
-            mimeType: upload.file.type || 'application/octet-stream',
-            fileSize: upload.file.size,
-            contentBase64,
-            category: upload.category,
-          },
-        });
-      }
-
-      if (usedBrowserUpload) {
-        await updateTransaction(tx.id, buildOptimisticUploadedEvidencePatch({
-          transaction: workingTx,
-          folderId,
-          folderName: workingTx.evidenceDriveFolderName,
-          webViewLink: workingTx.evidenceDriveLink,
-          sharedDriveId: sharedDriveId || workingTx.evidenceDriveSharedDriveId,
-          uploadedCategories: uploads.map((upload) => String(upload.category || upload.parserCategory).trim()).filter(Boolean),
-          updatedAt: new Date().toISOString(),
-        }));
-        const uploadLabel = uploads.length === 1
-          ? uploads[0]?.reviewedFileName || uploads[0]?.file.name || '파일 1건'
-          : `${uploads[0]?.reviewedFileName || uploads[0]?.file.name || '파일'} 외 ${uploads.length - 1}건`;
-        toast.success(`업로드 완료: ${uploadLabel}`);
-      } else if (lastResult) {
-        await applySyncedEvidenceState(tx.id, lastResult);
-      }
-    } catch (error) {
-      handleEvidenceDriveError(error, '증빙 업로드');
-      throw error;
-    }
-  }, [
-    applySyncedEvidenceState,
-    bffActor,
-    ensureGoogleWorkspaceAccess,
-    handleEvidenceDriveError,
-    orgId,
-    projectId,
-    provisionEvidenceDrive,
-    transactions,
-    updateTransaction,
-  ]);
-
   const handleAddTransaction = useCallback((tx: Transaction) => {
     void addTransaction(tx).catch((error) => {
       toast.error(resolveApiErrorMessage(error, '거래 저장에 실패했습니다.'));
@@ -794,10 +299,6 @@ export function PortalWeeklyExpensePage() {
       toast.error(resolveApiErrorMessage(error, '거래 상태 변경에 실패했습니다.'));
     });
   }, [changeTransactionState]);
-
-  const handleFetchBudgetSuggestion = useCallback(async (counterparty: string) => {
-    return fetchBudgetSuggestionViaBff({ tenantId: orgId, actor: bffActor, projectId, counterparty });
-  }, [bffActor, orgId, projectId]);
 
   const requestRouteNavigation = useCallback((path: string, label: string) => {
     if (isSettlementSaving) {
@@ -865,7 +366,7 @@ export function PortalWeeklyExpensePage() {
             </div>
             <p className="max-w-4xl text-[12px] text-muted-foreground">
               {isDirectEntryMode
-                ? '주간 사업비 시트 또는 엑셀 템플릿으로 직접 입력하고, 저장 후 actual 반영 상태까지 같은 작업면에서 확인합니다.'
+                ? '주간 사업비 시트 또는 엑셀 템플릿으로 직접 입력합니다. Actual은 저장 후 캐시플로에서 확인합니다.'
                 : bankStatementCount > 0
                   ? '통장내역 기준본에서 이어서 작업합니다. 이 화면에서 분류 확인, 행 입력, 저장까지 바로 마무리하세요.'
                   : '통장내역 기준본을 먼저 만들면 이 화면에서 바로 입력과 저장을 이어갈 수 있습니다.'}
@@ -886,7 +387,7 @@ export function PortalWeeklyExpensePage() {
                 {isDirectEntryMode
                   ? '원본 입력은 이 화면입니다.'
                   : bankStatementCount > 0
-                    ? '원본 기준과 같은 흐름으로 저장과 actual 반영을 이어갑니다.'
+                    ? '원본 기준과 같은 흐름으로 저장하고 Actual 반영 결과를 확인합니다.'
                     : '원본 기준본을 준비하면 이 화면에서 바로 이어서 저장할 수 있습니다.'}
               </span>
             </div>
@@ -922,21 +423,6 @@ export function PortalWeeklyExpensePage() {
               </a>
             </Button>
           )}
-          {!happyPath.canUseEvidenceWorkflow && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void provisionProjectDriveRoot()}
-              disabled={projectDriveProvisioning || !happyPath.canOpenWeeklyExpenses}
-            >
-              {projectDriveProvisioning ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <FolderPlus className="h-4 w-4" />
-              )}
-              기본 폴더 준비
-            </Button>
-          )}
             <Button
               variant="outline"
               size="sm"
@@ -958,16 +444,7 @@ export function PortalWeeklyExpensePage() {
                   </div>
                   {weeklySetupPanel.actionLabel && (
                     <div className="shrink-0">
-                      {weeklySetupPanel.actionKind === 'drive' ? (
-                        <Button
-                          size="sm"
-                          onClick={() => void provisionProjectDriveRoot()}
-                          disabled={projectDriveProvisioning || !happyPath.canOpenWeeklyExpenses}
-                        >
-                          {projectDriveProvisioning ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderPlus className="h-4 w-4" />}
-                          {weeklySetupPanel.actionLabel}
-                        </Button>
-                      ) : weeklySetupPanel.actionKind === 'settings' ? (
+                      {weeklySetupPanel.actionKind === 'drive' ? null : weeklySetupPanel.actionKind === 'settings' ? (
                         <Button size="sm" onClick={() => requestRouteNavigation('/portal/project-select', '사업 선택')}>
                           {weeklySetupPanel.actionLabel}
                         </Button>
@@ -988,7 +465,7 @@ export function PortalWeeklyExpensePage() {
             <div className="text-[10px] uppercase tracking-wide text-muted-foreground">입력 정책</div>
             <div className="mt-1 text-sm font-semibold text-slate-900">{formatSettlementSheetPolicySummary(settlementSheetPolicy)}</div>
             <div className="mt-1 text-[11px] leading-5 text-muted-foreground">
-              {expenseRowCount}건의 거래를 현재 탭에서 관리하고 있고, 저장 후 actual 반영 상태를 같은 화면에서 확인합니다.
+              {expenseRowCount}건의 거래를 현재 탭에서 관리합니다. 저장된 행은 Actual 반영 기준으로 사용됩니다.
             </div>
           </div>
         </div>
@@ -1040,7 +517,6 @@ export function PortalWeeklyExpensePage() {
           hideCountBadge
           saveMode={weeklyExpenseSavePolicy.mode}
           autoSaveIdleMs={weeklyExpenseSavePolicy.idleMs}
-          autoSaveSyncCashflow={weeklyExpenseSavePolicy.syncCashflowOnAutoSave}
           showSaveStatusButton={weeklyExpenseSavePolicy.showStatusButton}
           evidenceRequiredMap={evidenceRequiredMap}
           onSaveEvidenceRequiredMap={saveEvidenceRequiredMap}
@@ -1054,18 +530,9 @@ export function PortalWeeklyExpensePage() {
           allowEditSubmitted
           comments={comments}
           onAddComment={addComment}
-          onProvisionEvidenceDrive={provisionEvidenceDrive}
-          onSyncEvidenceDrive={syncEvidenceDrive}
-          onUploadEvidenceDrive={uploadEvidenceDrive}
-          onEnsureTransactionPersisted={ensureTransactionPersisted}
-          onFetchBudgetSuggestion={isPlatformApiEnabled() ? handleFetchBudgetSuggestion : undefined}
           workflowMode={fundInputMode}
           settlementSheetPolicy={settlementSheetPolicy}
           basis={myProject?.basis}
-          onUpdateWeeklySubmissionStatus={upsertWeeklySubmissionStatus}
-          onDeriveRows={deriveRowsWithLocalKernel}
-          onPreviewActualSyncPayload={previewActualSyncWithLocalKernel}
-          onSyncCashflowActuals={syncCashflowActualsFromCanonicalSource}
           onDirtyStateChange={setHasUnsavedSettlementChanges}
           onSavingStateChange={setIsSettlementSaving}
           weeklySubmissionStatuses={weeklySubmissionStatuses}
@@ -1101,14 +568,11 @@ export function PortalWeeklyExpensePage() {
               sheetSources={sheetSources}
               devHarnessEnabled={devHarnessConfig.enabled}
               ensureGoogleWorkspaceAccess={ensureGoogleWorkspaceAccess}
-              saveExpenseSheetRows={saveExpenseSheetRows}
               saveBudgetPlanRows={saveBudgetPlanRows}
               saveBudgetCodeBook={saveBudgetCodeBook}
               saveBankStatementRows={saveBankStatementRows}
               saveEvidenceRequiredMap={saveEvidenceRequiredMap}
               markSheetSourceApplied={markSheetSourceApplied}
-              upsertWeekAmounts={upsertWeekAmounts}
-              previewActualSyncPayload={previewActualSyncWithLocalKernel}
             />
         </Suspense>
       )}
@@ -1168,21 +632,6 @@ export function PortalWeeklyExpensePage() {
 
     </div>
   );
-}
-
-async function readFileAsBase64(file: File): Promise<string> {
-  const dataUrl = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(reader.error || new Error('파일 읽기에 실패했습니다.'));
-    reader.onload = () => resolve(String(reader.result || ''));
-    reader.readAsDataURL(file);
-  });
-
-  const [, base64 = ''] = dataUrl.split(',', 2);
-  if (!base64) {
-    throw new Error(`파일 인코딩에 실패했습니다: ${file.name}`);
-  }
-  return base64;
 }
 
 // ── PM 편차 확인 배너 ──

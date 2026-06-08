@@ -75,6 +75,7 @@ export function serializeBankImportIntakeItemForPersistence(item: BankImportInta
     projectId: item.projectId,
     sourceTxId: item.sourceTxId,
     bankFingerprint: item.bankFingerprint,
+    ...(item.serverImportLineId ? { serverImportLineId: item.serverImportLineId } : {}),
     bankSnapshot: {
       accountNumber: item.bankSnapshot.accountNumber,
       dateTime: item.bankSnapshot.dateTime,
@@ -126,6 +127,7 @@ export function normalizeBankImportIntakeItem(value: unknown): BankImportIntakeI
     projectId: normalizeString(candidate.projectId),
     sourceTxId: normalizeString(candidate.sourceTxId),
     bankFingerprint: normalizeString(candidate.bankFingerprint),
+    ...(normalizeString(candidate.serverImportLineId) ? { serverImportLineId: normalizeString(candidate.serverImportLineId) } : {}),
     bankSnapshot,
     matchState,
     projectionStatus,
@@ -189,6 +191,7 @@ export function reconcileBankImportUploadItems(
       }),
       existingExpenseSheetId: currentItem.existingExpenseSheetId || rebuiltItem.existingExpenseSheetId,
       existingExpenseRowTempId: currentItem.existingExpenseRowTempId || rebuiltItem.existingExpenseRowTempId,
+      serverImportLineId: currentItem.serverImportLineId || rebuiltItem.serverImportLineId,
       createdAt: currentItem.createdAt || rebuiltItem.createdAt,
     }) || rebuiltItem;
 

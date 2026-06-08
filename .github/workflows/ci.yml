@@ -28,6 +28,9 @@ jobs:
         run: npm run policy:verify
 
       - name: Production build
+        env:
+          VITE_PLATFORM_API_ENABLED: "true"
+          VITE_PLATFORM_API_BASE_URL: https://ci-innerplatform-jvm-weekly-api.example.run.app
         run: npm run build
 
   product-release-gates:

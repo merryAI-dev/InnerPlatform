@@ -3,7 +3,7 @@
 - route: `/portal/weekly-expenses`
 - primary users: PM, 실무 입력 담당자
 - status: active
-- last updated: 2026-06-02
+- last updated: 2026-06-08
 
 ## Purpose
 
@@ -30,10 +30,13 @@
 - [x] `v2` 프로젝트에서 세세목 dropdown과 tree 기반 2단 예산 목록 사용 가능
 - [x] 주간 입력 행 추가는 단일 `행 추가` 액션으로 제공
 - [x] Actual 동기화 이후 현재 화면의 캐시플로 행도 즉시 갱신
+- [x] 사업비 입력/셀 편집/행 조작/Actual 계산 권위를 Java ORM API로 이동
+- [x] 프론트의 Firestore 직접 write와 BFF-only 주간 작업 버튼을 제거
 - [ ] 입력 보조 드롭다운/팝오버 잘림 이슈 완전 해소 확인 필요
 
 ## Recent Changes
 
+- [2026-06-08] 사업비 입력(주간)의 셀 편집, 복사/붙여넣기/오려두기, 행 추가/삭제, 통장내역 반영, Actual 계산을 Java Spring/JPA 권위 API로 옮겼다. 프론트는 화면 표시와 명령 전달만 맡고, Firestore/BFF-only write 경로와 합의되지 않은 보조 버튼 노출을 제거했다.
 - [2026-06-02] 사용 빈도가 낮고 의미가 겹치던 입금/지출/잔액조정/정기지출 템플릿 빠른 추가 액션을 제거하고, 주간 입력은 단일 `행 추가` 버튼으로 모았다. Actual 동기화 결과도 저장 후 현재 캐시플로 화면에 바로 반영되도록 로컬 상태 갱신을 연결했다.
 - [2026-04-21] `v2` 프로젝트에서는 사업비 입력이 `budget_tree_v2` 기준 세세목 dropdown을 쓰고, 2단 목록도 tree 파생값을 우선 사용하도록 정리했다.
 - [2026-04-14] 포털 session active project 전환과 함께 현재 사업 기준 입력 상태 요약과 진행 step strip을 안정적으로 다시 연결했다.
@@ -67,6 +70,8 @@
 - `src/app/platform/weekly-expense-save-policy.test.ts`
 - `src/app/platform/bank-import-triage.test.ts`
 - `src/app/data/portal-store.integration.test.ts`
+- `server/jvm-weekly-api/src/test/java/dev/merryai/innerplatform/weekly/api/WeeklyExpenseControllerTest.java`
+- `server/jvm-weekly-api/src/test/java/dev/merryai/innerplatform/weekly/domain/WeeklyExpenseSpreadsheetServiceTest.java`
 
 ## Related QA / Ops Context
 

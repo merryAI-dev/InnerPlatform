@@ -69,7 +69,7 @@ interface ProjectionGateProps {
 }
 
 export function ProjectionGate({ projectId, children }: ProjectionGateProps) {
-  const { weeks, upsertWeekAmounts } = useCashflowWeeks();
+  const { weeks, upsertProjectionAmounts } = useCashflowWeeks();
   const [confirmed, setConfirmed] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -143,11 +143,10 @@ export function ProjectionGate({ projectId, children }: ProjectionGateProps) {
   const handleConfirm = async () => {
     setSaving(true);
     try {
-      await upsertWeekAmounts({
+      await upsertProjectionAmounts({
         projectId,
         yearMonth: currentWeekInfo.yearMonth,
         weekNo: currentWeekInfo.weekNo,
-        mode: 'projection',
         amounts,
       });
       setConfirmed(true);

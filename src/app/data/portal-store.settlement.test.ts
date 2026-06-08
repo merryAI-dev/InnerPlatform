@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createSettlementSheetPolicy, type Basis, type SettlementSheetPolicy } from './types';
 import { SETTLEMENT_COLUMNS, type ImportRow } from '../platform/settlement-csv';
-import { prepareSettlementImportRows } from '../platform/settlement-sheet-prepare';
+import { prepareSettlementImportRowsBase } from '../platform/settlement-sheet-prepare';
 import { prepareExpenseSheetRowsForSave } from './portal-store.settlement';
 
 function makeRow(values: Record<string, string>, partial?: Partial<ImportRow>): ImportRow {
@@ -40,7 +40,7 @@ describe('prepareExpenseSheetRowsForSave', () => {
     expect(createSettlementSheetPolicy('BALANCE_TRACKING').requireCounterparty).toBe(true);
   });
 
-  it('drops empty rows and returns the same derived rows as settlement sheet prepare', () => {
+  it('drops empty rows and returns normalized base rows without frontend derivation', () => {
     const rows = [
       makeRow({
         '작성자': '메리',
@@ -62,7 +62,7 @@ describe('prepareExpenseSheetRowsForSave', () => {
       }),
     ];
 
-    const expected = prepareSettlementImportRows(rows, buildParams());
+    const expected = prepareSettlementImportRowsBase(rows, buildParams());
     const prepared = prepareExpenseSheetRowsForSave({
       rows,
       ...buildParams(),
@@ -71,6 +71,7 @@ describe('prepareExpenseSheetRowsForSave', () => {
     expect(prepared).toEqual(expected);
     expect(prepared).toHaveLength(1);
     expect(readCell(prepared[0], '필수증빙자료 리스트')).toBe('영수증, 결과보고서');
+    expect(readCell(prepared[0], '해당 주차')).toBe('');
   });
 
   it('works without tenant or actor runtime inputs', () => {

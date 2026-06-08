@@ -95,7 +95,7 @@ export function GuideChatPage() {
     }
   }, [question, asking, guideInfo, user, actorParams]);
 
-  // ── Gate: BFF disabled ──
+  // Gate unavailable server processing.
   if (!bffEnabled) {
     return (
       <div className="space-y-5">
@@ -108,9 +108,9 @@ export function GuideChatPage() {
         <Card>
           <CardContent className="py-12 text-center">
             <Lock className="w-8 h-8 mx-auto text-muted-foreground/40 mb-3" />
-            <p className="text-sm font-semibold">BFF 활성화 필요</p>
+            <p className="text-sm font-semibold">연결 설정 필요</p>
             <p className="text-xs text-muted-foreground mt-1">
-              VITE_PLATFORM_API_ENABLED=true 설정 후 BFF 서버를 실행해 주세요.
+              관리자 설정을 확인해 주세요.
             </p>
           </CardContent>
         </Card>
