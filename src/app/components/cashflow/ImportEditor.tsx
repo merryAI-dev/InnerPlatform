@@ -870,7 +870,6 @@ export function ImportEditor({
     [
       rows,
       commitRows,
-      formatNumberCell,
       noIdx,
       selection,
       cloneRows,

@@ -6,6 +6,10 @@ const settlementLedgerSource = readFileSync(
   resolve(import.meta.dirname, 'SettlementLedgerPage.tsx'),
   'utf8',
 );
+const importEditorSource = readFileSync(
+  resolve(import.meta.dirname, 'ImportEditor.tsx'),
+  'utf8',
+);
 
 describe('SettlementLedgerPage direct-entry workbook flow', () => {
   it('adds explicit template download and workbook upload actions for direct-entry mode', () => {
@@ -42,5 +46,9 @@ describe('SettlementLedgerPage direct-entry workbook flow', () => {
   it('does not resume cashflow updates from frontend weekly sync status', () => {
     expect(settlementLedgerSource).toContain('weeklySubmissionStatuses?: WeeklySubmissionStatus[]');
     expect(settlementLedgerSource).not.toContain('resolveCashflowSyncStateFromStatuses');
+  });
+
+  it('does not reference removed number formatter dependencies at runtime', () => {
+    expect(importEditorSource).not.toContain('formatNumberCell');
   });
 });
