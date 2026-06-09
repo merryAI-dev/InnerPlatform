@@ -6,11 +6,11 @@ import {
 } from './weekly-expense-save-policy';
 
 describe('resolveWeeklyExpenseSavePolicy', () => {
-  it('enables near-realtime autosave with cashflow sync', () => {
+  it('keeps weekly expense input on explicit manual save', () => {
     expect(resolveWeeklyExpenseSavePolicy()).toEqual({
-      mode: 'auto',
-      idleMs: 1_500,
-      syncCashflowOnAutoSave: true,
+      mode: 'manual',
+      idleMs: 60_000,
+      syncCashflowOnAutoSave: false,
       showStatusButton: true,
       showInlineStatus: false,
       guideMinimizable: true,

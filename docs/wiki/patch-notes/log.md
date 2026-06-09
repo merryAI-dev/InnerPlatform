@@ -250,3 +250,7 @@
 ## [2026-06-09] patch-note | shared-portal-architecture | 로그인 member sync Java Admin 경로
 - pages: [shared-portal-architecture](./pages/shared-portal-architecture.md)
 - summary: 로그인 직후 member profile sync를 Java API/Admin SDK 경로로 옮기고, stage/live 포털 흐름의 `members/{uid}` 직접 write와 role claim 없는 privileged role fallback을 차단했다.
+
+## [2026-06-09] patch-note | portal-weekly-expense | 수동 저장과 Cashflow 요약
+- pages: [portal-weekly-expense](./pages/portal-weekly-expense.md)
+- summary: 사업비 입력(주간)의 자동 저장 루프를 끄고 명시 저장 후 Java cashflow read model을 강제 갱신해 Projection, Actual, 차이 요약을 같은 화면에서 확인하도록 했다.

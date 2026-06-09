@@ -60,4 +60,12 @@ describe('PortalWeeklyExpensePage flow layout', () => {
     expect(weeklyExpenseSource).not.toContain('applyProjectActualSyncResultLocally');
     expect(weeklyExpenseSource).not.toContain('actual_realtime_sync');
   });
+
+  it('shows Java cashflow read-model totals after weekly expense saves', () => {
+    expect(weeklyExpenseSource).toContain('data-testid="weekly-expense-cashflow-summary"');
+    expect(weeklyExpenseSource).toContain('getReadModelForProjectMonth(projectId, cashflowYearMonth)');
+    expect(weeklyExpenseSource).toContain("ensureProjectCashflowSnapshot(projectId, { force: true })");
+    expect(weeklyExpenseSource).toContain('Projection');
+    expect(weeklyExpenseSource).toContain('Actual');
+  });
 });
