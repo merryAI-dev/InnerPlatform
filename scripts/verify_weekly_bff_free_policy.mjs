@@ -49,6 +49,8 @@ for (const source of [cloudBuild, deployScript]) {
 
 requireIncludes(cloudBuild, 'JVM_WEEKLY_FIREBASE_PROJECT_ID', 'Java Firebase project env');
 requireIncludes(cloudBuild, 'JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID', 'Java Firebase auth project env');
+requireIncludes(cloudBuild, '_JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID: mysc-bmp-14173451', 'stage Firebase Auth project pin');
+requireIncludes(cloudBuild, 'stage must verify Firebase Auth tokens from mysc-bmp-14173451', 'stage Firebase Auth project mismatch guard');
 requireIncludes(cloudBuild, 'JVM_WEEKLY_FIRESTORE_PROJECT_ID', 'Java Firestore storage project env');
 requireIncludes(cloudBuild, 'JVM_WEEKLY_ALLOWED_ORIGINS', 'Java CORS env');
 requireIncludes(cloudBuild, 'JVM_WEEKLY_INTERNAL_API_TOKEN_ENABLED=false', 'stage Java service-token disabled by default');
@@ -56,6 +58,8 @@ requireIncludes(cloudBuild, 'eval "$(node scripts/create_firebase_smoke_id_token
 requireIncludes(cloudBuild, '--require-identity-token', 'stage smoke browser-direct auth requirement');
 requireNotIncludes(cloudBuild, 'secretEnv:\n      - JVM_WEEKLY_INTERNAL_API_TOKEN', 'stage smoke service token secret env');
 requireIncludes(deployScript, 'SMOKE_AUTH_ENV="$(', 'manual deploy Firebase ID token and UID minting');
+requireIncludes(deployScript, 'STAGE_FIREBASE_AUTH_PROJECT_ID="mysc-bmp-14173451"', 'manual deploy stage Firebase Auth project pin');
+requireIncludes(deployScript, 'stage must verify Firebase Auth tokens from $STAGE_FIREBASE_AUTH_PROJECT_ID', 'manual deploy stage Firebase Auth project mismatch guard');
 requireIncludes(deployScript, 'eval "$SMOKE_AUTH_ENV"', 'manual deploy smoke auth env export');
 requireIncludes(deployScript, '--require-identity-token', 'manual deploy browser-direct auth requirement');
 requireIncludes(smokeScript, 'requireIdentityToken', 'smoke identity-token-only mode');

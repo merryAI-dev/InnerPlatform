@@ -54,7 +54,10 @@ npm run build
   - `VITE_PLATFORM_API_BASE_URL` must be an absolute `https://` Cloud Run Java API URL.
   - Never set `VITE_PLATFORM_API_BASE_URL=/`, localhost, or a Vercel URL for stage/live; that routes `/api/v1/auth/session` through Vercel/BFF and causes login/session failures.
   - Set `JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID` for token/session verification and `JVM_WEEKLY_FIRESTORE_PROJECT_ID` for Firestore storage. Do not repair login by moving storage implicitly.
+  - Stage Auth/storage split is intentional: `JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID=mysc-bmp-14173451`, while `JVM_WEEKLY_FIRESTORE_PROJECT_ID=inner-platform-qa-20260310`.
+  - The stage Cloud Run runtime service account `1084486080400-compute@developer.gserviceaccount.com` needs `roles/firebaseauth.admin` on `mysc-bmp-14173451`; otherwise `/api/v1/auth/session` returns 401 even with a valid browser ID token.
   - Verify pulled env files with `node scripts/verify_weekly_direct_vercel_env.mjs <env-file>` before stage/live rollout.
+  - Run `node scripts/smoke_jvm_weekly_api.mjs --require-identity-token --base-url=<cloud-run-url>` before stage alias handoff.
 - Production deploy: use the GitHub Actions `Production Deploy` workflow on `main` only.
 - Local production deploy is forbidden. `vercel --prod` and `node deploy-prod-align.mjs` must not be used from a local worktree.
 - Local production verification only: `npm run deploy:prod:verify -- <deployment-url-or-host>`.

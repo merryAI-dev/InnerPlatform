@@ -37,6 +37,18 @@ Java API Firebase project env는 분리한다.
 - `JVM_WEEKLY_FIRESTORE_PROJECT_ID`: Firestore 저장소 project를 명시한다.
 - `JVM_WEEKLY_FIREBASE_PROJECT_ID` 하나만 바꾸는 방식은 로그인 수정 과정에서 저장소 project까지 이동시킬 수 있으므로 stage/live QA에서 반려한다.
 
+현재 stage 기준:
+
+- 브라우저 Firebase Auth project: `mysc-bmp-14173451`
+- Java API/Firestore storage GCP project: `inner-platform-qa-20260310`
+- 고정 stage URL host: `inner-platform-stage-merryai-devs-projects.vercel.app`
+
+주의:
+
+- 고정 stage URL host는 Firebase Auth project ID가 아니다.
+- Cloud Run 실행 서비스 계정 `1084486080400-compute@developer.gserviceaccount.com`은 `mysc-bmp-14173451`에서 `roles/firebaseauth.admin` 권한을 가져야 한다.
+- 이 권한이 없으면 ID token의 `aud/iss`가 맞아도 revocation-aware verification/session cookie 생성이 실패해 `/api/v1/auth/session`이 401을 반환한다.
+
 ## Firebase Console 점검 기준
 
 위치:
@@ -128,13 +140,16 @@ Java API Firebase project env는 분리한다.
 
 1. `vercel env pull <env-file> --environment=preview --scope merryai-devs-projects --yes`
 2. `node scripts/verify_weekly_direct_vercel_env.mjs <env-file>` 로 `VITE_PLATFORM_API_BASE_URL`이 Java API Cloud Run URL인지 확인
-3. `vercel deploy --archive=tgz --scope merryai-devs-projects --yes`
-4. Preview 배포 URL이 생성되면 `npx vercel alias set <deployment-host> inner-platform-stage-merryai-devs-projects.vercel.app --scope merryai-devs-projects` 로 고정 alias를 갱신
-5. `vercel inspect inner-platform-stage-merryai-devs-projects.vercel.app --scope merryai-devs-projects` 로 alias가 최신 deployment를 바라보는지 확인
-6. Firebase Auth Authorized Domains에 `inner-platform-stage-merryai-devs-projects.vercel.app`이 있는지 확인
-7. Cloud Run Java API CORS allowlist에 `https://inner-platform-stage-merryai-devs-projects.vercel.app`이 있는지 확인
-8. 고정 stage alias 접속
-9. Google 로그인 후 `/api/v1/auth/session` 2xx, CORS preflight 2xx, member profile sync 정상 여부 확인
+3. Preview env의 `VITE_FIREBASE_PROJECT_ID`가 Cloud Run `JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID`와 일치하는지 확인
+4. Cloud Run `JVM_WEEKLY_FIRESTORE_PROJECT_ID`가 저장소 project인 `inner-platform-qa-20260310`을 유지하는지 확인
+5. `node scripts/smoke_jvm_weekly_api.mjs --require-identity-token --base-url=<cloud-run-url>` 로 `/api/v1/auth/session`과 weekly command smoke를 확인
+6. `vercel deploy --archive=tgz --scope merryai-devs-projects --yes`
+7. Preview 배포 URL이 생성되면 `npx vercel alias set <deployment-host> inner-platform-stage-merryai-devs-projects.vercel.app --scope merryai-devs-projects` 로 고정 alias를 갱신
+8. `vercel inspect inner-platform-stage-merryai-devs-projects.vercel.app --scope merryai-devs-projects` 로 alias가 최신 deployment를 바라보는지 확인
+9. Firebase Auth Authorized Domains에 `inner-platform-stage-merryai-devs-projects.vercel.app`이 있는지 확인
+10. Cloud Run Java API CORS allowlist에 `https://inner-platform-stage-merryai-devs-projects.vercel.app`이 있는지 확인
+11. 고정 stage alias 접속
+12. Google 로그인 후 `/api/v1/auth/session` 2xx, CORS preflight 2xx, member profile sync 정상 여부 확인
 
 ## Live 배포 전 추가 확인
 

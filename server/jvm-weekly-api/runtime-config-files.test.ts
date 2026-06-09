@@ -43,7 +43,9 @@ describe('JVM weekly API runtime config files', () => {
     expect(cloudBuild).toContain('--ingress all');
     expect(cloudBuild).toContain('_JVM_WEEKLY_DATABASE_URL is required');
     expect(cloudBuild).toContain('must not point at localhost');
-    expect(cloudBuild).toContain('_JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID, _JVM_WEEKLY_FIREBASE_PROJECT_ID, or PROJECT_ID is required for browser-direct auth');
+    expect(cloudBuild).toContain('_JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID is required for browser-direct auth');
+    expect(cloudBuild).toContain('_JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID: mysc-bmp-14173451');
+    expect(cloudBuild).toContain('stage must verify Firebase Auth tokens from mysc-bmp-14173451');
     expect(cloudBuild).toContain('_JVM_WEEKLY_FIRESTORE_PROJECT_ID, _JVM_WEEKLY_FIREBASE_PROJECT_ID, or PROJECT_ID is required for Firestore storage');
     expect(cloudBuild).toContain('_JVM_WEEKLY_ALLOWED_ORIGINS is required for browser-direct CORS');
     expect(cloudBuild).toContain("_JVM_WEEKLY_DATABASE_URL: ''");
@@ -73,7 +75,9 @@ describe('JVM weekly API runtime config files', () => {
     expect(deployScript).toContain('JVM_WEEKLY_DATABASE_URL is required for stage deploy');
     expect(deployScript).toContain('JVM_WEEKLY_STORAGE_BACKEND="${JVM_WEEKLY_STORAGE_BACKEND:-firestore}"');
     expect(deployScript).toContain('JVM_WEEKLY_PROJECT_ACCESS_BACKEND="${JVM_WEEKLY_PROJECT_ACCESS_BACKEND:-firestore}"');
-    expect(deployScript).toContain('JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID="${JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID:-$JVM_WEEKLY_FIREBASE_PROJECT_ID}"');
+    expect(deployScript).toContain('STAGE_GCP_PROJECT_ID="inner-platform-qa-20260310"');
+    expect(deployScript).toContain('STAGE_FIREBASE_AUTH_PROJECT_ID="mysc-bmp-14173451"');
+    expect(deployScript).toContain('JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID="$STAGE_FIREBASE_AUTH_PROJECT_ID"');
     expect(deployScript).toContain('JVM_WEEKLY_FIRESTORE_PROJECT_ID="${JVM_WEEKLY_FIRESTORE_PROJECT_ID:-$JVM_WEEKLY_FIREBASE_PROJECT_ID}"');
     expect(deployScript).toContain('must not point at localhost for Cloud Run');
     expect(deployScript).toContain('--ingress all');
@@ -82,6 +86,7 @@ describe('JVM weekly API runtime config files', () => {
     expect(deployScript).not.toContain('roles/run.invoker');
     expect(deployScript).toContain('JVM_WEEKLY_FIREBASE_PROJECT_ID="${JVM_WEEKLY_FIREBASE_PROJECT_ID:-$PROJECT_ID}"');
     expect(deployScript).toContain('JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID is required for browser-direct auth');
+    expect(deployScript).toContain('stage must verify Firebase Auth tokens from $STAGE_FIREBASE_AUTH_PROJECT_ID');
     expect(deployScript).toContain('JVM_WEEKLY_FIRESTORE_PROJECT_ID is required for Firestore storage');
     expect(deployScript).toContain('JVM_WEEKLY_ALLOWED_ORIGINS="${JVM_WEEKLY_ALLOWED_ORIGINS:-https://inner-platform-stage-merryai-devs-projects.vercel.app,https://inner-platform.vercel.app}"');
     expect(deployScript).toContain('--set-env-vars "^|^WEEKLY_API_PORT=8080');

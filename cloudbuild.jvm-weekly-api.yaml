@@ -43,13 +43,11 @@ steps:
         fi
         AUTH_PROJECT_ID="${_JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID}"
         if [[ -z "$${AUTH_PROJECT_ID}" ]]; then
-          AUTH_PROJECT_ID="${_JVM_WEEKLY_FIREBASE_PROJECT_ID}"
+          echo "[cloudbuild-jvm-weekly-api] _JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID is required for browser-direct auth"
+          exit 1
         fi
-        if [[ -z "$${AUTH_PROJECT_ID}" ]]; then
-          AUTH_PROJECT_ID="$PROJECT_ID"
-        fi
-        if [[ -z "$${AUTH_PROJECT_ID}" ]]; then
-          echo "[cloudbuild-jvm-weekly-api] _JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID, _JVM_WEEKLY_FIREBASE_PROJECT_ID, or PROJECT_ID is required for browser-direct auth"
+        if [[ "$PROJECT_ID" == "inner-platform-qa-20260310" && "$${AUTH_PROJECT_ID}" != "mysc-bmp-14173451" ]]; then
+          echo "[cloudbuild-jvm-weekly-api] stage must verify Firebase Auth tokens from mysc-bmp-14173451"
           exit 1
         fi
         if [[ -z "$${FIRESTORE_PROJECT_ID}" ]]; then
@@ -108,7 +106,7 @@ substitutions:
   _JVM_WEEKLY_STORAGE_BACKEND: firestore
   _JVM_WEEKLY_PROJECT_ACCESS_BACKEND: firestore
   _JVM_WEEKLY_FIREBASE_PROJECT_ID: ''
-  _JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID: ''
+  _JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID: mysc-bmp-14173451
   _JVM_WEEKLY_FIRESTORE_PROJECT_ID: ''
   _JVM_WEEKLY_ALLOWED_ORIGINS: 'https://inner-platform-stage-merryai-devs-projects.vercel.app,https://inner-platform.vercel.app'
   _JVM_WEEKLY_DATABASE_PASSWORD_SECRET: innerplatform-weekly-db-password
