@@ -17,7 +17,6 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
-import jakarta.servlet.http.Cookie;
 
 import java.util.ArrayList;
 import java.nio.charset.StandardCharsets;
@@ -86,10 +85,6 @@ class WeeklyExpenseControllerTest {
     private static String firebaseTestToken(String tenantId, String actorId, String role, String email) {
         String claims = "uid=%s;tenantId=%s;role=%s;email=%s".formatted(actorId, tenantId, role, email);
         return "test-firebase:" + Base64.getUrlEncoder().encodeToString(claims.getBytes(StandardCharsets.UTF_8));
-    }
-
-    private static String firebaseTestSessionCookie(String tenantId, String actorId, String role, String email) {
-        return firebaseTestToken(tenantId, actorId, role, email).replace("test-firebase:", "test-firebase-session:");
     }
 
     @Test
@@ -173,106 +168,33 @@ class WeeklyExpenseControllerTest {
     }
 
     @Test
-    void firebaseIdTokenCreatesHttpOnlySessionCookie() throws Exception {
+    void authSessionEndpointIsNotPartOfBrowserDirectBearerFlow() throws Exception {
         String idToken = firebaseTestToken("tenant-session", "firebase-pm-session", "pm", "pm-session@mysc.co.kr");
-        String setCookie = mockMvc.perform(post("/api/v1/auth/session")
+        mockMvc.perform(post("/api/v1/auth/session")
+                .header("authorization", "Bearer " + idToken)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"idToken\":\"" + idToken + "\"}"))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.ok").value(true))
-            .andExpect(jsonPath("$.actorId").value("firebase-pm-session"))
-            .andExpect(jsonPath("$.tenantId").value("tenant-session"))
-            .andReturn()
-            .getResponse()
-            .getHeader("Set-Cookie");
-
-        assertThat(setCookie).contains(WeeklyAuthSessionController.SESSION_COOKIE_NAME + "=");
-        assertThat(setCookie).contains("HttpOnly");
-        assertThat(setCookie).contains("Secure");
-        assertThat(setCookie).contains("SameSite=None");
-        assertThat(setCookie).contains("Path=/");
+            .andExpect(status().isNotFound());
     }
 
     @Test
-    void malformedFirebaseSessionTokenReturnsJsonUnauthorizedInsteadOfServerError() throws Exception {
+    void malformedAuthSessionRequestUsesBearerAuthGate() throws Exception {
         mockMvc.perform(post("/api/v1/auth/session")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"idToken\":\"test-firebase:not-base64\"}"))
             .andExpect(status().isUnauthorized())
-            .andExpect(jsonPath("$.ok").value("false"))
-            .andExpect(jsonPath("$.code").value("weekly_expense_firebase_auth_invalid"));
+            .andExpect(jsonPath("$.code").value("weekly_expense_firebase_auth_required"));
     }
 
     @Test
-    void firebaseSessionCookieCanRunJavaCommandWithoutPerRequestBearerToken() throws Exception {
-        String body = """
-            {
-              "idempotencyKey": "session-cookie-save-001",
-              "sheetName": "session",
-              "rows": [
-                {
-                  "rowIndex": 0,
-                  "entryKind": "manual",
-                  "cells": [
-                    {"columnIndex": 3, "rawValue": "2026-06-W1", "userEdited": true},
-                    {"columnIndex": 8, "rawValue": "사업비", "userEdited": true},
-                    {"columnIndex": 13, "rawValue": "8100", "userEdited": true}
-                  ]
-                }
-              ]
-            }
-            """;
-
+    void firebaseSessionCookieDoesNotAuthorizeJavaCommand() throws Exception {
         mockMvc.perform(post("/api/v1/weekly-expenses/project-session/sheets/default/save-draft")
-                .cookie(new Cookie(
-                    WeeklyAuthSessionController.SESSION_COOKIE_NAME,
-                    firebaseTestSessionCookie("tenant-session", "firebase-pm-session", "pm", "pm-session@mysc.co.kr")
-                ))
-                .header("x-request-id", "req-session-cookie-save")
-                .header("origin", "https://inner-platform.vercel.app")
-                .header("x-tenant-id", "tenant-session")
-                .header("x-actor-id", "firebase-pm-session")
-                .header("x-actor-role", "admin")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(body))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.commandName").value("weeklyExpense.saveDraft"))
-            .andExpect(jsonPath("$.actualDelta[0].amount").value(8100));
-
-        assertThat(auditEventRepository.findByTenantIdAndProjectIdOrderByCreatedAtAsc("tenant-session", "project-session"))
-            .singleElement()
-            .extracting("actorRole")
-            .isEqualTo("pm");
-    }
-
-    @Test
-    void firebaseSessionCookieMutationsRequireRequestIdHeader() throws Exception {
-        mockMvc.perform(post("/api/v1/weekly-expenses/project-session/sheets/default/save-draft")
-                .cookie(new Cookie(
-                    WeeklyAuthSessionController.SESSION_COOKIE_NAME,
-                    firebaseTestSessionCookie("tenant-session", "firebase-pm-session", "pm", "pm-session@mysc.co.kr")
-                ))
+                .header("cookie", "__Host-innerplatform_weekly_session=legacy-session")
                 .header("x-tenant-id", "tenant-session")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"idempotencyKey\":\"missing-request-id\",\"rows\":[]}"))
-            .andExpect(status().isForbidden())
-            .andExpect(jsonPath("$.code").value("weekly_expense_csrf_header_required"));
-    }
-
-    @Test
-    void firebaseSessionCookieMutationsRequireAllowedOrigin() throws Exception {
-        mockMvc.perform(post("/api/v1/weekly-expenses/project-session/sheets/default/save-draft")
-                .cookie(new Cookie(
-                    WeeklyAuthSessionController.SESSION_COOKIE_NAME,
-                    firebaseTestSessionCookie("tenant-session", "firebase-pm-session", "pm", "pm-session@mysc.co.kr")
-                ))
-                .header("x-request-id", "req-bad-origin")
-                .header("origin", "https://attacker.example")
-                .header("x-tenant-id", "tenant-session")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"idempotencyKey\":\"bad-origin\",\"rows\":[]}"))
-            .andExpect(status().isForbidden())
-            .andExpect(jsonPath("$.code").value("weekly_expense_csrf_origin_required"));
+                .content("{\"idempotencyKey\":\"legacy-cookie-denied\",\"rows\":[]}"))
+            .andExpect(status().isUnauthorized())
+            .andExpect(jsonPath("$.code").value("weekly_expense_firebase_auth_required"));
     }
 
     @Test
@@ -284,7 +206,7 @@ class WeeklyExpenseControllerTest {
             }
             """;
 
-        mockMvc.perform(post("/api/v1/weekly-expenses/project-direct/sheets/default/save-draft")
+        mockMvc.perform(post("/api/v1/weekly-expenses/project-missing-claims/sheets/default/save-draft")
                 .header("authorization", "Bearer " + firebaseTestToken("tenant-direct", "firebase-pm-1", "pm", "pm@mysc.co.kr"))
                 .header("x-tenant-id", "tenant-other")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -292,7 +214,7 @@ class WeeklyExpenseControllerTest {
             .andExpect(status().isForbidden())
             .andExpect(jsonPath("$.code").value("tenant_mismatch"));
 
-        mockMvc.perform(post("/api/v1/weekly-expenses/project-direct/sheets/default/save-draft")
+        mockMvc.perform(post("/api/v1/weekly-expenses/project-missing-claims/sheets/default/save-draft")
                 .header("authorization", "Bearer " + firebaseTestToken("tenant-direct", "firebase-pm-1", "pm", "pm@mysc.co.kr"))
                 .header("x-tenant-id", "tenant-direct")
                 .header("x-actor-id", "spoofed-admin")
@@ -303,25 +225,63 @@ class WeeklyExpenseControllerTest {
     }
 
     @Test
-    void browserDirectFirebaseTokenCannotUseHeadersToFillMissingTenantOrRoleClaims() throws Exception {
+    void browserDirectFirebaseTokenCanUseRequestContextWhenClaimsAreMissing() throws Exception {
         String body = """
             {
               "idempotencyKey": "direct-firebase-missing-claims-001",
-              "rows": []
+              "rows": [
+                {
+                  "rowIndex": 0,
+                  "entryKind": "manual",
+                  "cells": [
+                    {"columnIndex": 3, "rawValue": "2026-06-W1", "userEdited": true},
+                    {"columnIndex": 8, "rawValue": "사업비", "userEdited": true},
+                    {"columnIndex": 13, "rawValue": "9000", "userEdited": true}
+                  ]
+                }
+              ]
             }
             """;
         String missingClaimsToken = "test-firebase:" + Base64.getUrlEncoder()
             .encodeToString("uid=firebase-pm-claims;email=pm-claims@mysc.co.kr".getBytes(StandardCharsets.UTF_8));
 
-        mockMvc.perform(post("/api/v1/weekly-expenses/project-direct/sheets/default/save-draft")
+        mockMvc.perform(post("/api/v1/weekly-expenses/project-missing-claims/sheets/default/save-draft")
                 .header("authorization", "Bearer " + missingClaimsToken)
                 .header("x-tenant-id", "tenant-direct")
                 .header("x-actor-id", "firebase-pm-claims")
-                .header("x-actor-role", "admin")
+                .header("x-actor-role", "pm")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.actualDelta[0].amount").value(9000));
+
+        assertThat(auditEventRepository.findByTenantIdAndProjectIdOrderByCreatedAtAsc("tenant-direct", "project-missing-claims"))
+            .extracting("actorId")
+            .contains("firebase-pm-claims");
+    }
+
+    @Test
+    void browserDirectFirebaseTokenRequiresRequestContextWhenClaimsAreMissing() throws Exception {
+        String missingClaimsToken = "test-firebase:" + Base64.getUrlEncoder()
+            .encodeToString("uid=firebase-pm-missing-context;email=pm-missing@mysc.co.kr".getBytes(StandardCharsets.UTF_8));
+
+        mockMvc.perform(post("/api/v1/weekly-expenses/project-direct/sheets/default/save-draft")
+                .header("authorization", "Bearer " + missingClaimsToken)
+                .header("x-actor-id", "firebase-pm-missing-context")
+                .header("x-actor-role", "pm")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"idempotencyKey\":\"missing-context-denied\",\"rows\":[]}"))
             .andExpect(status().isUnauthorized())
-            .andExpect(jsonPath("$.code").value("weekly_expense_firebase_auth_required"));
+            .andExpect(jsonPath("$.code").value("tenant_required"));
+
+        mockMvc.perform(post("/api/v1/weekly-expenses/project-direct/sheets/default/save-draft")
+                .header("authorization", "Bearer " + missingClaimsToken)
+                .header("x-tenant-id", "tenant-direct")
+                .header("x-actor-id", "firebase-pm-missing-context")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"idempotencyKey\":\"missing-role-denied\",\"rows\":[]}"))
+            .andExpect(status().isUnauthorized())
+            .andExpect(jsonPath("$.code").value("actor_role_required"));
     }
 
     @Test

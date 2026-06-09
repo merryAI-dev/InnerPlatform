@@ -172,7 +172,7 @@ POST /api/v1/weekly-expenses/{projectId}/audit-export
 
 Every mutating command requires:
 
-- Firebase ID token is exchanged for a Java API `HttpOnly` session cookie for browser operation; deployment smoke may use the Firebase ID token to create that session; internal service token is limited to internal jobs
+- Firebase ID token is sent as a scoped Java API Bearer credential for browser operation; deployment smoke must use the same Firebase ID token path; internal service token is limited to internal jobs
 - trusted actor identity derived by Java from Firebase `{ role, tenantId }` custom claims, not request body
 - trusted tenant scope derived by Java from Firebase claims, not request body
 - idempotency key
@@ -258,7 +258,7 @@ Current gate status on 2026-06-08:
 | Stage | Score | Status | Feedback |
 | --- | ---: | --- | --- |
 | Shadow JVM/Rust compute | 82/100 | PASS WITH LIMITS | Domain tests pass and frontend hard-fail imports were removed from weekly expense paths, but Rust parity still needs backend-only orchestration. |
-| Stage authoritative API | 98/100 | PASS WITH LIMITS | Spring Boot JPA commands reject client actor/tenant body fields, exchange browser Firebase ID tokens for Java session cookies, derive trusted actor headers inside Java, expose public Cloud Run behind app-level auth/CORS, and run command smoke across spreadsheet, bank apply, projection, cashflow, submit/close, and audit export. Remaining limit is stage/live session-cookie smoke automation. |
+| Stage authoritative API | 98/100 | PASS WITH LIMITS | Spring Boot JPA commands reject client actor/tenant body fields, verify browser Firebase ID tokens as scoped Java Bearer credentials, derive trusted actor headers inside Java, expose public Cloud Run behind app-level auth/CORS, and run command smoke across spreadsheet, bank apply, projection, cashflow, submit/close, and audit export. Remaining limit is authenticated stage/live browser smoke after deploy. |
 | Frontend thinness | 96/100 | PASS WITH LIMITS | Weekly expense direct actual sync is removed, `/portal/cashflow` Actual is read-only, Projection writes use the Java projection command, and legacy BFF cashflow write endpoints permanently reject requests; remaining risk is Firestore read-model cutover to Java cashflow reads. |
 | External audit export | 90/100 | PASS WITH LIMITS | `weeklyExpense.auditExport.create` now generates a CSV artifact from backend projection + actual + audit summary with artifact id and SHA-256 hash; Excel/Google Sheet import formatting and private Java exposure are still deployment concerns. |
 
@@ -286,7 +286,7 @@ Stage deploy is allowed only when:
 - [ ] Rust kernel is called from the backend, not from the frontend, for parity-sensitive calculation.
 - [x] Frontend stops importing calculation modules and legacy sync APIs for weekly expense authoritative save/sync paths.
 - [ ] Parity tests prove Java/Rust backend output matches current accepted behavior.
-- [ ] Stage/live Firebase-user smoke proves browser-direct Java calls with session cookies after deploy.
+- [ ] Stage/live Firebase-user smoke proves browser-direct Java calls with scoped Firebase Bearer tokens after deploy.
 
 Until then, JVM/Rust may run only as shadow compute.
 

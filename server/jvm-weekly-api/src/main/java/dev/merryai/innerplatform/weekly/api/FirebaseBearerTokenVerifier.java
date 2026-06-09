@@ -4,14 +4,12 @@ import com.google.auth.oauth2.GoogleCredentials;
 import com.google.firebase.FirebaseApp;
 import com.google.firebase.FirebaseOptions;
 import com.google.firebase.auth.FirebaseAuth;
-import com.google.firebase.auth.SessionCookieOptions;
 import com.google.firebase.auth.FirebaseToken;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.Locale;
@@ -20,7 +18,6 @@ import java.util.Map;
 @Component
 public class FirebaseBearerTokenVerifier {
     private static final String TEST_TOKEN_PREFIX = "test-firebase:";
-    private static final String TEST_SESSION_PREFIX = "test-firebase-session:";
 
     private final String firebaseAuthProjectId;
     private final boolean testTokensEnabled;
@@ -48,47 +45,6 @@ public class FirebaseBearerTokenVerifier {
             firebaseToken = auth().verifyIdToken(token, true);
         } catch (Exception error) {
             throw new IllegalArgumentException("Invalid Firebase ID token.");
-        }
-
-        Map<String, Object> claims = firebaseToken.getClaims();
-        String tenantId = readTextClaim(claims, "tenantId", "tenant_id", "orgId", "org_id");
-        String actorRole = readRoleClaim(claims);
-        String actorEmail = normalizeEmail(firebaseToken.getEmail());
-        return new VerifiedFirebaseActor(tenantId, firebaseToken.getUid(), actorEmail, actorRole);
-    }
-
-    public String createSessionCookie(String idToken, Duration expiresIn) {
-        String token = idToken == null ? "" : idToken.trim();
-        if (token.isEmpty()) {
-            throw new IllegalArgumentException("Firebase ID token is required.");
-        }
-        if (testTokensEnabled && token.startsWith(TEST_TOKEN_PREFIX)) {
-            return TEST_SESSION_PREFIX + token.substring(TEST_TOKEN_PREFIX.length());
-        }
-        try {
-            SessionCookieOptions options = SessionCookieOptions.builder()
-                .setExpiresIn(expiresIn.toMillis())
-                .build();
-            return auth().createSessionCookie(token, options);
-        } catch (Exception error) {
-            throw new IllegalArgumentException("Invalid Firebase ID token.");
-        }
-    }
-
-    public VerifiedFirebaseActor verifySessionCookie(String sessionCookie) {
-        String cookie = sessionCookie == null ? "" : sessionCookie.trim();
-        if (cookie.isEmpty()) {
-            throw new IllegalArgumentException("Firebase session cookie is required.");
-        }
-        if (testTokensEnabled && cookie.startsWith(TEST_SESSION_PREFIX)) {
-            return verifyTestToken(cookie.substring(TEST_SESSION_PREFIX.length()));
-        }
-
-        FirebaseToken firebaseToken;
-        try {
-            firebaseToken = auth().verifySessionCookie(cookie, true);
-        } catch (Exception error) {
-            throw new IllegalArgumentException("Invalid Firebase session cookie.");
         }
 
         Map<String, Object> claims = firebaseToken.getClaims();

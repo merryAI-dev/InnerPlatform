@@ -1,4 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('./firebase', () => ({
+  getAuthInstance: vi.fn(() => null),
+}));
+
 import {
   addCommentViaBff,
   addEvidenceViaBff,
@@ -94,10 +99,13 @@ describe('platform-bff-client', () => {
   });
 
   it('routes only weekly and cashflow paths to Java API while preserving legacy BFF routes', async () => {
-    const calls: string[] = [];
-    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const calls: Array<{ url: string; authorization: string | null }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      calls.push(url);
+      calls.push({
+        url,
+        authorization: new Headers(init?.headers).get('authorization'),
+      });
       if (url.includes('/api/v1/weekly-expenses/p-cashflow/statuses')) {
         return new Response(JSON.stringify({ projectId: 'p-cashflow', statuses: [] }), {
           status: 200,
@@ -130,19 +138,25 @@ describe('platform-bff-client', () => {
 
     await fetchWeeklyExpenseStatusesViaBff({
       tenantId: 'mysc',
-      actor: { uid: 'viewer-1', role: 'viewer' },
+      actor: { uid: 'viewer-1', role: 'viewer', idToken: 'token-weekly' },
       projectId: 'p-cashflow',
       client,
     });
     await upsertProjectViaBff({
       tenantId: 'mysc',
-      actor: { uid: 'admin-1', role: 'admin' },
+      actor: { uid: 'admin-1', role: 'admin', idToken: 'token-legacy' },
       project: { id: 'p001', name: 'Project 1' },
       client,
     });
 
-    expect(calls[0]).toBe('https://java-api.example.run.app/api/v1/weekly-expenses/p-cashflow/statuses');
-    expect(calls[1]).toBe('https://legacy-bff.example.app/api/v1/projects');
+    expect(calls[0]).toEqual({
+      url: 'https://java-api.example.run.app/api/v1/weekly-expenses/p-cashflow/statuses',
+      authorization: 'Bearer token-weekly',
+    });
+    expect(calls[1]).toEqual({
+      url: 'https://legacy-bff.example.app/api/v1/projects',
+      authorization: null,
+    });
     vi.unstubAllGlobals();
   });
 
@@ -154,10 +168,11 @@ describe('platform-bff-client', () => {
     });
   });
 
-  it('does not pass id token through ordinary API actors', () => {
+  it('passes Firebase ID token through request actors for Java Bearer auth', () => {
     expect(toRequestActor({ uid: 'u001', role: 'admin', idToken: 'token-abc' })).toEqual({
       id: 'u001',
       role: 'admin',
+      idToken: 'token-abc',
     });
   });
 
@@ -489,8 +504,8 @@ describe('platform-bff-client', () => {
     const fetchImpl = vi.fn(async (url, init) => {
       expect(url).toBe('http://127.0.0.1:8787/api/v1/weekly-expenses/p-cashflow/audit-export');
       const headers = init?.headers as Headers;
-      expect(headers.get('authorization')).toBeNull();
-      expect(init?.credentials).toBe('include');
+      expect(headers.get('authorization')).toBe('Bearer token-export');
+      expect(init?.credentials).toBe('omit');
       expect(headers.get('x-tenant-id')).toBe('mysc');
       expect(headers.get('x-actor-id')).toBe('u-finance');
       expect(JSON.parse(String(init?.body))).toEqual({

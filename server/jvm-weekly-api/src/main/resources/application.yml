@@ -25,4 +25,3 @@ weekly:
   firestore-project-id: ${JVM_WEEKLY_FIRESTORE_PROJECT_ID:${weekly.firebase-project-id}}
   project-access-backend: ${JVM_WEEKLY_PROJECT_ACCESS_BACKEND:firestore}
   allowed-origins: ${JVM_WEEKLY_ALLOWED_ORIGINS:https://inner-platform.vercel.app}
-  session-cookie-ttl-seconds: ${JVM_WEEKLY_SESSION_COOKIE_TTL_SECONDS:432000}

@@ -1,5 +1,6 @@
 import { featureFlags, parseFeatureFlag } from '../config/feature-flags';
 import { normalizePlatformApiBaseUrl } from '../platform/platform-api-base-url';
+import { getAuthInstance } from './firebase';
 import type {
   AccountType,
   ProjectExecutiveReviewStatus,
@@ -972,11 +973,13 @@ export function readPlatformApiRuntimeConfig(
 }
 
 export function toRequestActor(actor: ActorLike): RequestActor {
-  return {
+  const requestActor: RequestActor = {
     id: actor.uid,
-    email: actor.email,
-    role: actor.role,
+    ...(actor.email ? { email: actor.email } : {}),
+    ...(actor.role ? { role: actor.role } : {}),
+    ...(actor.idToken ? { idToken: actor.idToken } : {}),
   };
+  return requestActor;
 }
 
 export function createPlatformApiClient(
@@ -985,6 +988,8 @@ export function createPlatformApiClient(
   const config = readPlatformApiRuntimeConfig(env);
   const weeklyClient = new PlatformApiClient({
     baseUrl: config.baseUrl,
+    includeFirebaseBearer: true,
+    firebaseIdTokenProvider: async () => getAuthInstance()?.currentUser?.getIdToken(),
     maxRetries: 2,
     retryDelayMs: 200,
     timeoutMs: 4000,
@@ -1003,7 +1008,7 @@ function resolveClient(client?: PlatformApiClientLike): PlatformApiClientLike {
 }
 
 function isWeeklyJavaApiPath(path: string): boolean {
-  return /^\/api\/v1\/(?:auth(?:\/|$)|weekly-expenses(?:\/|$)|cashflow(?:\/|$))/.test(path);
+  return /^\/api\/v1\/(?:weekly-expenses(?:\/|$)|cashflow(?:\/|$))/.test(path);
 }
 
 class RoutingPlatformApiClient implements PlatformApiClientLike {

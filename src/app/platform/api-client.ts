@@ -22,6 +22,7 @@ export interface PlatformRequestOptions {
   body?: unknown;
   idempotencyKey?: string;
   requestId?: string;
+  includeFirebaseBearer?: boolean;
   signal?: AbortSignal;
   retries?: number;
   timeoutMs?: number;
@@ -49,6 +50,8 @@ function toBinaryBody(value: Blob | ArrayBuffer | Uint8Array): BodyInit {
 export interface PlatformApiClientOptions {
   baseUrl?: string;
   fetchImpl?: typeof fetch;
+  includeFirebaseBearer?: boolean;
+  firebaseIdTokenProvider?: () => Promise<string | undefined> | string | undefined;
   maxRetries?: number;
   retryDelayMs?: number;
   retryOnStatuses?: number[];
@@ -128,10 +131,14 @@ export class PlatformApiClient {
   private readonly retryDelayMs: number;
   private readonly retryOnStatuses: Set<number>;
   private readonly timeoutMs: number;
+  private readonly includeFirebaseBearer: boolean;
+  private readonly firebaseIdTokenProvider?: () => Promise<string | undefined> | string | undefined;
 
   constructor(options: PlatformApiClientOptions = {}) {
     this.baseUrl = (options.baseUrl || '').replace(/\/$/, '');
     this.fetchImpl = options.fetchImpl || globalThis.fetch.bind(globalThis);
+    this.includeFirebaseBearer = Boolean(options.includeFirebaseBearer);
+    this.firebaseIdTokenProvider = options.firebaseIdTokenProvider;
     this.maxRetries = normalizeRetryCount(options.maxRetries);
     this.retryDelayMs = normalizeDelay(options.retryDelayMs, 150);
     this.retryOnStatuses = new Set(options.retryOnStatuses || Array.from(DEFAULT_RETRY_STATUSES));
@@ -229,14 +236,27 @@ export class PlatformApiClient {
   async request<T>(path: string, options: PlatformRequestOptions): Promise<ApiResponse<T>> {
     const method = (options.method || 'GET').toUpperCase();
     const requestUrl = buildRequestUrl(this.baseUrl, path);
+    const includeFirebaseBearer = options.includeFirebaseBearer ?? this.includeFirebaseBearer;
+    let actor = options.actor;
+    if (includeFirebaseBearer && this.firebaseIdTokenProvider) {
+      try {
+        const freshIdToken = String(await this.firebaseIdTokenProvider() || '').trim();
+        if (freshIdToken) {
+          actor = { ...actor, idToken: freshIdToken };
+        }
+      } catch {
+        // Keep the request on the existing actor token; the Java API remains the auth authority.
+      }
+    }
 
     const headerInput: BuildStandardHeadersInput = {
       tenantId: options.tenantId,
-      actor: options.actor,
+      actor,
       method,
       requestId: options.requestId,
       idempotencyKey: options.idempotencyKey,
       headers: options.headers,
+      includeFirebaseBearer,
     };
 
     const headers = buildStandardHeaders(headerInput);
@@ -265,7 +285,7 @@ export class PlatformApiClient {
             method,
             headers,
             body,
-            credentials: 'include',
+            credentials: 'omit',
           },
           options.signal,
           timeoutMs,
@@ -313,7 +333,7 @@ export class PlatformApiClient {
               maxRetries,
               requestId: headers.get('x-request-id') || '',
               tenantId: options.tenantId,
-              actorId: options.actor.id,
+              actorId: actor.id,
               status: error instanceof PlatformApiError ? error.status : undefined,
               responseRequestId: error instanceof PlatformApiError ? error.requestId : undefined,
             },

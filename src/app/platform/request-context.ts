@@ -14,6 +14,7 @@ export interface BuildStandardHeadersInput {
   requestId?: string;
   idempotencyKey?: string;
   headers?: HeadersInit;
+  includeFirebaseBearer?: boolean;
 }
 
 function normalizeActorId(value: string | undefined): string {
@@ -72,6 +73,11 @@ export function buildStandardHeaders(input: BuildStandardHeadersInput): Headers 
   const actorRole = normalizeActorRole(input.actor.role);
   if (actorRole && !headers.get('x-actor-role')) {
     headers.set('x-actor-role', actorRole);
+  }
+
+  const idToken = input.includeFirebaseBearer ? input.actor.idToken?.trim() : '';
+  if (idToken && !headers.get('authorization')) {
+    headers.set('authorization', `Bearer ${idToken}`);
   }
 
   if (isMutationMethod(method) && !headers.get('idempotency-key')) {

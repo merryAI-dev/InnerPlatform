@@ -7,10 +7,10 @@ public record VerifiedFirebaseActor(
     String actorRole
 ) {
     public VerifiedFirebaseActor {
-        tenantId = requireText(tenantId, "tenantId");
+        tenantId = tenantId == null ? "" : tenantId.trim();
         actorId = requireText(actorId, "actorId");
         actorEmail = actorEmail == null ? "" : actorEmail.trim().toLowerCase();
-        actorRole = requireText(actorRole, "actorRole").toLowerCase();
+        actorRole = actorRole == null ? "" : actorRole.trim().toLowerCase();
     }
 
     private static String requireText(String value, String name) {

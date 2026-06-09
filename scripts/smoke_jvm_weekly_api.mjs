@@ -62,30 +62,18 @@ if (requireIdentityToken && serviceToken) {
   process.exit(1);
 }
 
-let sessionCookie = '';
-
 function headers(extra = {}) {
   return {
     'content-type': 'application/json',
     ...(serviceToken ? { 'x-inner-platform-service-token': serviceToken } : {}),
-    ...(!serviceToken && sessionCookie ? { cookie: sessionCookie } : {}),
     'x-tenant-id': tenantId,
     'x-actor-id': actorId,
     'x-actor-role': actorRole,
     'x-actor-email': actorEmail,
-    ...(identityToken && !sessionCookie ? { authorization: `Bearer ${identityToken}` } : {}),
+    ...(identityToken ? { authorization: `Bearer ${identityToken}` } : {}),
     ...(smokeOrigin ? { origin: smokeOrigin } : {}),
     ...extra,
   };
-}
-
-function readSetCookie(response) {
-  const getSetCookie = response.headers.getSetCookie?.();
-  if (Array.isArray(getSetCookie) && getSetCookie.length > 0) {
-    return getSetCookie[0].split(';')[0];
-  }
-  const header = response.headers.get('set-cookie') || '';
-  return header.split(';')[0].trim();
 }
 
 async function requestJson(method, path, body) {
@@ -120,32 +108,6 @@ async function requestJson(method, path, body) {
   return payload;
 }
 
-async function createSessionCookie() {
-  if (!identityToken || serviceToken) return;
-  const response = await fetch(`${baseUrl}/api/v1/auth/session`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-request-id': `session-${runId}`,
-      ...(smokeOrigin ? { origin: smokeOrigin } : {}),
-    },
-    body: JSON.stringify({ idToken: identityToken }),
-  });
-  const text = await response.text();
-  if (!response.ok) {
-    console.error('[smoke-jvm-weekly-api] session creation failed', JSON.stringify({
-      status: response.status,
-      payload: text,
-    }, null, 2));
-    process.exit(1);
-  }
-  sessionCookie = readSetCookie(response);
-  if (!sessionCookie) {
-    console.error('[smoke-jvm-weekly-api] session creation did not return a Set-Cookie header');
-    process.exit(1);
-  }
-}
-
 function assert(condition, message, details = {}) {
   if (condition) return;
   console.error('[smoke-jvm-weekly-api] assertion failed', JSON.stringify({ message, ...details }, null, 2));
@@ -155,7 +117,6 @@ function assert(condition, message, details = {}) {
 const pathPrefix = `/api/v1/weekly-expenses/${encodeURIComponent(projectId)}/sheets/${encodeURIComponent(sheetKey)}`;
 
 await requestJson('GET', '/api/v1/health');
-await createSessionCookie();
 
 const patch = await requestJson('POST', `${pathPrefix}/commands/cell-patch`, {
   idempotencyKey: `smoke-cell-patch-${runId}`,

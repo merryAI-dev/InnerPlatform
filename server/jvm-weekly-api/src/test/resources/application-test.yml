@@ -13,4 +13,3 @@ weekly:
   internal-api-token: test-weekly-api-token
   firebase-test-tokens-enabled: true
   project-access-backend: disabled
-  session-cookie-ttl-seconds: 3600

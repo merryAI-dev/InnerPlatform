@@ -50,7 +50,6 @@ import {
   type DevHarnessPreset,
 } from '../platform/dev-harness';
 import { setObservabilityUserContext } from '../platform/observability';
-import { clearPlatformApiSession, createPlatformApiSession } from '../platform/api-session';
 
 export interface AuthUser {
   uid: string;
@@ -293,9 +292,8 @@ async function establishPlatformApiSession(firebaseUser: FirebaseUser): Promise<
   const tokenResult = await firebaseUser.getIdTokenResult();
   const idToken = String(tokenResult.token || '').trim();
   if (featureFlags.platformApiEnabled && !idToken) {
-    throw new Error('Platform API session requires a Firebase ID token.');
+    throw new Error('Platform API requests require a Firebase ID token.');
   }
-  await createPlatformApiSession(idToken);
   return { tokenResult, idToken };
 }
 
@@ -677,9 +675,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(() => {
     if (featureFlags.firebaseAuthEnabled) {
-      void clearPlatformApiSession().catch((err) => {
-        console.error('[Auth] platform API session logout failed:', err);
-      });
       const auth = getAuthInstance();
       if (auth) {
         signOut(auth).catch((err) => {

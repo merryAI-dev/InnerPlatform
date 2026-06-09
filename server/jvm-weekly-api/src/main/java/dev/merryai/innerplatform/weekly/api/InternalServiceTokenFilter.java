@@ -27,13 +27,11 @@ public class InternalServiceTokenFilter extends OncePerRequestFilter {
 
     private final boolean internalApiTokenEnabled;
     private final String internalApiToken;
-    private final Set<String> allowedOrigins;
     private final FirebaseBearerTokenVerifier firebaseBearerTokenVerifier;
 
     public InternalServiceTokenFilter(
         @Value("${weekly.internal-api-token-enabled:false}") boolean internalApiTokenEnabled,
         @Value("${weekly.internal-api-token}") String internalApiToken,
-        @Value("${weekly.allowed-origins:}") String allowedOrigins,
         FirebaseBearerTokenVerifier firebaseBearerTokenVerifier
     ) {
         if (internalApiTokenEnabled && (internalApiToken == null || internalApiToken.isBlank())) {
@@ -41,7 +39,6 @@ public class InternalServiceTokenFilter extends OncePerRequestFilter {
         }
         this.internalApiTokenEnabled = internalApiTokenEnabled;
         this.internalApiToken = internalApiToken;
-        this.allowedOrigins = parseAllowedOrigins(allowedOrigins);
         this.firebaseBearerTokenVerifier = firebaseBearerTokenVerifier;
     }
 
@@ -73,10 +70,9 @@ public class InternalServiceTokenFilter extends OncePerRequestFilter {
 
         VerifiedFirebaseActor actor;
         try {
-            actor = verifyFirebaseActor(request);
-            requireHeaderMatch(request, "x-tenant-id", actor.tenantId(), "tenant_mismatch", "Header tenant does not match token tenant.");
+            actor = firebaseBearerTokenVerifier.verify(parseBearer(request.getHeader("authorization")));
             requireHeaderMatch(request, "x-actor-id", actor.actorId(), "actor_mismatch", "Header actor does not match token subject.");
-            requireCookieMutationHeader(request);
+            actor = resolveTrustedActor(request, actor);
         } catch (WeeklyApiAuthException error) {
             writeAuthError(response, error.statusCode, error.code, error.getMessage());
             return;
@@ -96,8 +92,7 @@ public class InternalServiceTokenFilter extends OncePerRequestFilter {
         if ("GET".equalsIgnoreCase(request.getMethod()) && "/api/v1/health".equals(path)) {
             return true;
         }
-        return "POST".equalsIgnoreCase(request.getMethod())
-            && ("/api/v1/auth/session".equals(path) || "/api/v1/auth/logout".equals(path));
+        return false;
     }
 
     private boolean isInternalServiceEndpoint(HttpServletRequest request) {
@@ -122,64 +117,6 @@ public class InternalServiceTokenFilter extends OncePerRequestFilter {
         return value.substring("bearer ".length()).trim();
     }
 
-    private VerifiedFirebaseActor verifyFirebaseActor(HttpServletRequest request) {
-        String sessionCookie = readCookie(request, WeeklyAuthSessionController.SESSION_COOKIE_NAME);
-        if (!sessionCookie.isBlank()) {
-            return firebaseBearerTokenVerifier.verifySessionCookie(sessionCookie);
-        }
-        return firebaseBearerTokenVerifier.verify(parseBearer(request.getHeader("authorization")));
-    }
-
-    private String readCookie(HttpServletRequest request, String cookieName) {
-        if (request.getCookies() == null) return "";
-        for (jakarta.servlet.http.Cookie cookie : request.getCookies()) {
-            if (cookieName.equals(cookie.getName())) {
-                return cookie.getValue() == null ? "" : cookie.getValue().trim();
-            }
-        }
-        return "";
-    }
-
-    private void requireCookieMutationHeader(HttpServletRequest request) {
-        if (!isMutationMethod(request.getMethod())) return;
-        if (readCookie(request, WeeklyAuthSessionController.SESSION_COOKIE_NAME).isBlank()) return;
-        String requestId = request.getHeader("x-request-id");
-        if (requestId == null || requestId.isBlank()) {
-            throw new WeeklyApiAuthException(
-                HttpServletResponse.SC_FORBIDDEN,
-                "weekly_expense_csrf_header_required",
-                "Session-cookie mutations require x-request-id."
-            );
-        }
-        String origin = request.getHeader("origin");
-        if (origin != null && allowedOrigins.contains(origin.trim())) return;
-        throw new WeeklyApiAuthException(
-            HttpServletResponse.SC_FORBIDDEN,
-            "weekly_expense_csrf_origin_required",
-            "Session-cookie mutations require an allowed Origin."
-        );
-    }
-
-    private boolean isMutationMethod(String method) {
-        String normalized = method == null ? "GET" : method.trim().toUpperCase(Locale.ROOT);
-        return "POST".equals(normalized) || "PUT".equals(normalized) || "PATCH".equals(normalized) || "DELETE".equals(normalized);
-    }
-
-    private Set<String> parseAllowedOrigins(String raw) {
-        String text = raw == null ? "" : raw.trim();
-        if (text.isEmpty()) {
-            return Set.of("https://inner-platform.vercel.app");
-        }
-        Set<String> origins = new LinkedHashSet<>();
-        for (String origin : text.split(",")) {
-            String value = origin.trim();
-            if (!value.isBlank()) {
-                origins.add(value);
-            }
-        }
-        return origins.isEmpty() ? Set.of("https://inner-platform.vercel.app") : origins;
-    }
-
     private void requireHeaderMatch(
         HttpServletRequest request,
         String headerName,
@@ -192,6 +129,47 @@ public class InternalServiceTokenFilter extends OncePerRequestFilter {
         if (!supplied.trim().equals(trustedValue)) {
             throw new WeeklyApiAuthException(HttpServletResponse.SC_FORBIDDEN, errorCode, message);
         }
+    }
+
+    private VerifiedFirebaseActor resolveTrustedActor(HttpServletRequest request, VerifiedFirebaseActor tokenActor) {
+        String tenantId = tokenActor.tenantId();
+        if (tenantId.isBlank()) {
+            tenantId = requireRequestHeader(request, "x-tenant-id", "tenant_required", "Request tenant context is required.");
+        } else {
+            requireHeaderMatch(request, "x-tenant-id", tenantId, "tenant_mismatch", "Header tenant does not match token tenant.");
+        }
+
+        String actorRole = tokenActor.actorRole();
+        if (actorRole.isBlank()) {
+            actorRole = normalizeRole(requireRequestHeader(request, "x-actor-role", "actor_role_required", "Request actor role context is required."));
+        }
+
+        String actorEmail = tokenActor.actorEmail();
+        if (actorEmail.isBlank()) {
+            actorEmail = normalizeEmail(request.getHeader("x-actor-email"));
+        }
+
+        return new VerifiedFirebaseActor(tenantId, tokenActor.actorId(), actorEmail, actorRole);
+    }
+
+    private String requireRequestHeader(HttpServletRequest request, String headerName, String code, String message) {
+        String supplied = request.getHeader(headerName);
+        if (supplied == null || supplied.isBlank()) {
+            throw new WeeklyApiAuthException(HttpServletResponse.SC_UNAUTHORIZED, code, message);
+        }
+        return supplied.trim();
+    }
+
+    private String normalizeRole(String value) {
+        String normalized = value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+        if ("viewer".equals(normalized)) {
+            return "pm";
+        }
+        return normalized;
+    }
+
+    private String normalizeEmail(String value) {
+        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
     }
 
     private HttpServletRequest withTrustedActorHeaders(HttpServletRequest request, VerifiedFirebaseActor actor) {

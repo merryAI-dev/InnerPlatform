@@ -68,4 +68,15 @@ describe('request-context helpers', () => {
     expect(headers.get('x-actor-email')).toBe('viewer@mysc.co.kr');
     expect(headers.get('x-actor-role')).toBe('pm');
   });
+
+  it('attaches Firebase Bearer only when explicitly requested by the Java API client', () => {
+    const headers = buildStandardHeaders({
+      tenantId: 'mysc',
+      actor: { id: 'u001', idToken: 'token-123' },
+      method: 'GET',
+      includeFirebaseBearer: true,
+    });
+
+    expect(headers.get('authorization')).toBe('Bearer token-123');
+  });
 });

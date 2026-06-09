@@ -25,8 +25,7 @@ The near-term architecture is:
 
 ```text
 Browser Firebase Auth
-  -> Java API /api/v1/auth/session
-  -> HttpOnly Firebase session cookie
+  -> scoped Firebase ID token Bearer header
   -> Java weekly command/read contracts
   -> inherited Firestore-shaped documents
 ```
@@ -35,7 +34,7 @@ The longer-term architecture is:
 
 ```text
 Browser Firebase Auth
-  -> Java API session
+  -> scoped Firebase ID token Bearer header
   -> Java ORM command/read contracts
   -> PostgreSQL canonical row/cell/projection/actual/audit tables
 ```
@@ -58,7 +57,7 @@ preserving the existing Firestore data shape.
 Resolved or materially improved:
 
 - Stage authentication authority was fixed by pinning the Java API Firebase Auth project to `mysc-bmp-14173451` while keeping stage Firestore writes in `inner-platform-qa-20260310`.
-- Stage Java API smoke passed with Firebase identity-token/session-cookie flow.
+- Stage Java API smoke passed with Firebase identity-token Bearer flow.
 - Browser API base URL logic rejects same-origin Vercel preview rewrites in stage/live mode.
 - `FirestoreInheritedWeeklyExpensePersistence` exists and can inherit the current Firestore-shaped weekly data.
 - Bank import batch IDs no longer depend on predictable input IDs.
@@ -94,28 +93,28 @@ Pass condition:
 - The plan is committed.
 - Stage URL, Java API base URL, Firebase Auth project, Firestore project, and Cloud Run service account are written in the deploy runbook.
 
-### Stage 1: Auth And Session Authority Hardening
+### Stage 1: Auth Authority Hardening
 
-Keep Firebase Auth as the identity provider and Java session cookie as the browser API credential.
+Keep Firebase Auth as the identity provider and use Firebase ID tokens as the browser-direct Java API credential.
 
 Required changes:
 
-- Keep `/api/v1/auth/session` as the only browser session establishment path.
-- Require `credentials: include` from the frontend.
-- Keep mutating requests protected by trusted Origin validation.
+- Do not expose `/api/v1/auth/session` as a required browser session establishment path.
+- Require Java weekly/cashflow calls to send `Authorization: Bearer <Firebase ID token>` with `credentials: omit`.
+- Scope Bearer injection to the Java weekly/cashflow routing client so legacy BFF routes do not receive Firebase ID tokens.
 - Add a stage/live environment assertion for:
   - `JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID=mysc-bmp-14173451`
   - `JVM_WEEKLY_FIRESTORE_PROJECT_ID=inner-platform-qa-20260310` for stage
   - `JVM_WEEKLY_INTERNAL_API_TOKEN_ENABLED=false` unless a named internal job requires it
 - Remove or hard-restrict the internal service-token path for weekly/cashflow user actions.
-- Add a smoke that fails if session creation returns 400, 401, or 500.
+- Add a smoke that fails if Firebase Bearer Java calls return 400, 401, or 500.
 
 Pass condition:
 
-- Browser Google login creates a session cookie.
-- A weekly/cashflow Java API request succeeds without manually attaching a bearer token.
+- Browser Google login provides a Firebase ID token to the Java routing client.
+- A weekly/cashflow Java API request succeeds with automatically scoped Bearer auth.
 - A spoofed actor header is rejected.
-- A missing or wrong Origin on a mutating request is rejected.
+- A missing, expired, or wrong-project Firebase token is rejected.
 
 ### Stage 2: Persistence Authority Hardening
 
@@ -222,7 +221,8 @@ Required manual/browser checks:
 - Open `https://inner-platform-stage-merryai-devs-projects.vercel.app`.
 - Login with Google.
 - Confirm no Firebase unauthorized-domain error.
-- Confirm no `/api/v1/auth/session` 400/401/500.
+- Confirm the frontend bundle does not call `/api/v1/auth/session`.
+- Confirm Java weekly/cashflow calls carry a Firebase Bearer token and do not use cookies.
 - Confirm weekly expense can read, save, apply bank items, and export audit summary through Java.
 - Confirm cashflow projection and actual read from Java.
 
@@ -300,4 +300,3 @@ Migration rules:
 6. Add audit export manifest.
 7. Refresh Understand graph and compare node connectivity before stage deploy.
 8. Run full stage gate and browser smoke.
-

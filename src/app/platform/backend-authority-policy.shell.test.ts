@@ -41,26 +41,32 @@ describe('backend authority policy', () => {
     expect(source).toContain('weeklyExpense.cells.copy');
   });
 
-  it('requires Java session auth for BFF-free weekly expense operation', () => {
+  it('requires Java Firebase Bearer auth for BFF-free weekly expense operation', () => {
     const filterSource = readText('server/jvm-weekly-api/src/main/java/dev/merryai/innerplatform/weekly/api/InternalServiceTokenFilter.java');
     const verifierSource = readText('server/jvm-weekly-api/src/main/java/dev/merryai/innerplatform/weekly/api/FirebaseBearerTokenVerifier.java');
     const cloudBuild = readText('cloudbuild.jvm-weekly-api.yaml');
     const apiClient = readText('src/app/platform/api-client.ts');
-    const apiSession = readText('src/app/platform/api-session.ts');
+    const requestContext = readText('src/app/platform/request-context.ts');
+    const platformBffClient = readText('src/app/lib/platform-bff-client.ts');
 
-    expect(filterSource).toContain('verifyFirebaseActor');
-    expect(filterSource).toContain('verifySessionCookie');
+    expect(filterSource).toContain('firebaseBearerTokenVerifier.verify(parseBearer');
     expect(filterSource).toContain('withTrustedActorHeaders');
     expect(filterSource).toContain('tenant_mismatch');
     expect(filterSource).toContain('actor_mismatch');
     expect(verifierSource).toContain('verifyIdToken(token, true)');
-    expect(verifierSource).toContain('verifySessionCookie(cookie, true)');
-    expect(apiClient).toContain("credentials: 'include'");
-    expect(apiSession).toContain('/api/v1/auth/session');
+    expect(verifierSource).not.toContain('verifySessionCookie(cookie, true)');
+    expect(apiClient).toContain("credentials: 'omit'");
+    expect(apiClient).toContain('includeFirebaseBearer');
+    expect(apiClient).toContain('firebaseIdTokenProvider');
+    expect(requestContext).toContain('input.includeFirebaseBearer');
+    expect(platformBffClient).toContain('includeFirebaseBearer: true');
+    expect(platformBffClient).toContain('firebaseIdTokenProvider');
+    expect(platformBffClient).not.toContain('auth(?:');
+    expect(requestContext).toContain("headers.set('authorization', `Bearer ${idToken}`)");
     expect(verifierSource).toContain('tenantId');
     expect(verifierSource).toContain('role');
     expect(filterSource).toContain('internalApiTokenEnabled && tokensMatch');
-    expect(filterSource).toContain('weekly_expense_csrf_origin_required');
+    expect(filterSource).not.toContain('weekly_expense_csrf_origin_required');
     expect(cloudBuild).toContain('JVM_WEEKLY_INTERNAL_API_TOKEN_ENABLED=false');
     expect(cloudBuild).toContain('--ingress all');
     expect(cloudBuild).toContain('--allow-unauthenticated');
@@ -117,8 +123,9 @@ describe('backend authority policy', () => {
     expect(deployScript).toContain('eval "$SMOKE_AUTH_ENV"');
     expect(deployScript).toContain('--require-identity-token');
     expect(smokeScript).toContain('--require-identity-token forbids service token fallback');
-    expect(smokeScript).toContain('/api/v1/auth/session');
-    expect(smokeScript).toContain('cookie: sessionCookie');
+    expect(smokeScript).not.toContain('/api/v1/auth/session');
+    expect(smokeScript).not.toContain('cookie: sessionCookie');
+    expect(smokeScript).toContain('authorization: `Bearer ${identityToken}`');
     expect(tokenScript).toContain('accounts:signInWithPassword');
     expect(tokenScript).toContain('export JVM_WEEKLY_SMOKE_ACTOR_ID');
   });

@@ -2,7 +2,7 @@
 
 ## [2026-06-09] patch-note | shared-portal-architecture | weekly Java authority hardening
 - pages: [shared-portal-architecture](./pages/shared-portal-architecture.md)
-- summary: 주간 사업비 Java API stage/live 경로에서 Vercel/BFF rewrite fallback을 런타임에서 차단하고, Firestore rules catchall이 서버 전용 컬렉션 쓰기 차단을 우회하지 못하도록 보강했다. 세션 쿠키 mutation은 허용 Origin을 요구하고, idempotency replay는 project/command 단위로 제한하며, projection/actual cashflow line은 백엔드 canonical ID로 저장되도록 정리했다.
+- summary: 주간 사업비 Java API stage/live 경로에서 Vercel/BFF rewrite fallback을 런타임에서 차단하고, Firestore rules catchall이 서버 전용 컬렉션 쓰기 차단을 우회하지 못하도록 보강했다. Java weekly/cashflow 호출은 scoped Firebase Bearer 인증을 사용하고, idempotency replay는 project/command 단위로 제한하며, projection/actual cashflow line은 백엔드 canonical ID로 저장되도록 정리했다.
 
 ## [2026-06-08] patch-note | portal-weekly-expense, shared-portal-architecture | Java weekly expense authority
 - pages: [portal-weekly-expense](./pages/portal-weekly-expense.md), [shared-portal-architecture](./pages/shared-portal-architecture.md)

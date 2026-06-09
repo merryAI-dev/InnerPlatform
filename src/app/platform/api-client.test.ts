@@ -8,10 +8,10 @@ describe('PlatformApiClient', () => {
       expect(headers.get('x-tenant-id')).toBe('mysc');
       expect(headers.get('x-actor-id')).toBe('u001');
       expect(headers.get('x-actor-role')).toBe('admin');
-      expect(headers.get('authorization')).toBeNull();
+      expect(headers.get('authorization')).toBe('Bearer id-token-1');
       expect(headers.get('idempotency-key')).toMatch(/^idem_POST_u001_/);
       expect(headers.get('content-type')).toBe('application/json');
-      expect(init?.credentials).toBe('include');
+      expect(init?.credentials).toBe('omit');
 
       return new Response(JSON.stringify({ ok: true }), {
         status: 200,
@@ -22,7 +22,11 @@ describe('PlatformApiClient', () => {
       });
     });
 
-    const client = new PlatformApiClient({ baseUrl: 'https://api.example.com', fetchImpl });
+    const client = new PlatformApiClient({
+      baseUrl: 'https://api.example.com',
+      fetchImpl,
+      includeFirebaseBearer: true,
+    });
     const response = await client.post<{ ok: boolean }>('/api/v1/projects', {
       tenantId: 'mysc',
       actor: { id: 'u001', role: 'admin', idToken: 'id-token-1' },
@@ -36,11 +40,59 @@ describe('PlatformApiClient', () => {
     expect(response.data.ok).toBe(true);
   });
 
+  it('does not send Firebase Bearer tokens unless the client opts in', async () => {
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      expect(headers.get('authorization')).toBeNull();
+
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+
+    const client = new PlatformApiClient({ baseUrl: 'https://legacy.example.com', fetchImpl });
+    await client.post<{ ok: boolean }>('/api/v1/projects', {
+      tenantId: 'mysc',
+      actor: { id: 'u001', role: 'admin', idToken: 'id-token-legacy' },
+      body: { name: 'legacy' },
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('refreshes Firebase Bearer tokens through the configured provider', async () => {
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      expect(headers.get('authorization')).toBe('Bearer fresh-token');
+
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    const firebaseIdTokenProvider = vi.fn(async () => 'fresh-token');
+
+    const client = new PlatformApiClient({
+      baseUrl: 'https://java.example.com',
+      fetchImpl,
+      includeFirebaseBearer: true,
+      firebaseIdTokenProvider,
+    });
+    await client.get<{ ok: boolean }>('/api/v1/weekly-expenses/project-1/statuses', {
+      tenantId: 'mysc',
+      actor: { id: 'u001', role: 'pm', idToken: 'stale-token' },
+    });
+
+    expect(firebaseIdTokenProvider).toHaveBeenCalledTimes(1);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it('does not add idempotency for GET', async () => {
     const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       const headers = new Headers(init?.headers);
       expect(headers.get('idempotency-key')).toBeNull();
-      expect(init?.credentials).toBe('include');
+      expect(init?.credentials).toBe('omit');
 
       return new Response('ok', {
         status: 200,
