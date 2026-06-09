@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router';
 import {
   AlertTriangle,
   ArrowRight,
+  BarChart3,
   ExternalLink,
   Loader2,
   Send,
@@ -457,6 +458,15 @@ export function PortalWeeklyExpensePage() {
               <ArrowRight className="h-4 w-4" />
             </Button>
           )}
+          <Button
+            variant="outline"
+            size="sm"
+            data-testid="weekly-expense-cashflow-action"
+            onClick={() => requestRouteNavigation('/portal/cashflow', '캐시플로')}
+          >
+            <BarChart3 className="h-4 w-4" />
+            캐시플로 보기
+          </Button>
           {myProject?.evidenceDriveRootFolderLink && (
             <Button asChild variant="outline" size="sm">
               <a href={myProject.evidenceDriveRootFolderLink} target="_blank" rel="noreferrer">

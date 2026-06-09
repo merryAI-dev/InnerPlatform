@@ -68,4 +68,10 @@ describe('PortalWeeklyExpensePage flow layout', () => {
     expect(weeklyExpenseSource).toContain('Projection');
     expect(weeklyExpenseSource).toContain('Actual');
   });
+
+  it('keeps a direct route from weekly expense input to the portal cashflow screen', () => {
+    expect(weeklyExpenseSource).toContain('data-testid="weekly-expense-cashflow-action"');
+    expect(weeklyExpenseSource).toContain("requestRouteNavigation('/portal/cashflow', '캐시플로')");
+    expect(weeklyExpenseSource).toContain('캐시플로 보기');
+  });
 });
