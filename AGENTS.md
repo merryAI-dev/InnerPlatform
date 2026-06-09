@@ -44,7 +44,15 @@ npm run build
 ## Firebase/Vercel Ops (Common)
 - Deploy Firestore rules/indexes: `npm run firebase:deploy:firestore`.
 - One-shot Firebase setup (writes `.env`, `.firebaserc`, deploys): `npm run firebase:autosetup`.
-- Vercel preview deploy: `vercel deploy`.
+- Vercel stage deploy: deploy preview, then always move the fixed stage alias to that deployment.
+  - Fixed stage URL: `https://inner-platform-stage-merryai-devs-projects.vercel.app`.
+  - Do not share random Vercel preview URLs for stage QA.
+  - Alias command: `npx vercel alias set <deployment-host> inner-platform-stage-merryai-devs-projects.vercel.app --scope merryai-devs-projects`.
+- Stage and production must call the Java API directly for platform API/session flows.
+  - `VITE_PLATFORM_API_ENABLED=true`.
+  - `VITE_PLATFORM_API_BASE_URL` must be an absolute `https://` Cloud Run Java API URL.
+  - Never set `VITE_PLATFORM_API_BASE_URL=/`, localhost, or a Vercel URL for stage/live; that routes `/api/v1/auth/session` through Vercel/BFF and causes login/session failures.
+  - Verify pulled env files with `node scripts/verify_weekly_direct_vercel_env.mjs <env-file>` before stage/live rollout.
 - Production deploy: use the GitHub Actions `Production Deploy` workflow on `main` only.
 - Local production deploy is forbidden. `vercel --prod` and `node deploy-prod-align.mjs` must not be used from a local worktree.
 - Local production verification only: `npm run deploy:prod:verify -- <deployment-url-or-host>`.
