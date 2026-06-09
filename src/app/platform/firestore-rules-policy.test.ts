@@ -175,8 +175,7 @@ describe('firestore rules policy alignment', () => {
   it('keeps business-card PII collections behind BFF-only Firestore rules', () => {
     expect(firestoreRulesText).toContain('function isBffOnlyCollection(collection)');
     expect(firestoreRulesText).toContain("['contacts', 'business_card_imports', 'contact_events']");
-    expect(firestoreRulesText).toContain('allow read: if !isCatchallExcludedPath(collection, document) && canRead(orgId);');
-    expect(firestoreRulesText).toContain('allow write: if !isCatchallExcludedPath(collection, document) && canWrite(orgId);');
+    expect(firestoreRulesText).toContain('return isBffOnlyCollection(collection)');
   });
 
   it('keeps project request drafts hidden from admin review surfaces until submission', () => {
@@ -185,9 +184,49 @@ describe('firestore rules policy alignment', () => {
     expect(firestoreRulesText).toContain('request.resource.data.ownerId == request.auth.uid');
     expect(firestoreRulesText).toContain("request.resource.data.status in ['DRAFT', 'SUBMITTED', 'DISCARDED']");
     expect(firestoreRulesText).toContain('function isCatchallExcludedCollection(collection)');
-    expect(firestoreRulesText).toContain("collection in ['projectRequestDrafts']");
-    expect(firestoreRulesText).toContain('allow read: if !isCatchallExcludedPath(collection, document) && canRead(orgId);');
-    expect(firestoreRulesText).toContain('allow write: if !isCatchallExcludedPath(collection, document) && canWrite(orgId);');
+    expect(firestoreRulesText).toContain('function isExplicitPolicyCollection(collection)');
+    expect(firestoreRulesText).toContain("'projectRequestDrafts'");
+    expect(firestoreRulesText).toContain('|| isExplicitPolicyCollection(collection)');
+  });
+
+  it('does not let the generic org catchall reopen explicit policy collections', () => {
+    expect(firestoreRulesText).toContain('function isExplicitPolicyCollection(collection)');
+    for (const collection of [
+      'members',
+      'tenant_registry',
+      'audit_logs',
+      'notifications',
+      'project_change_alerts',
+      'projectRequestDrafts',
+    ]) {
+      expect(firestoreRulesText).toContain(`'${collection}'`);
+    }
+    expect(firestoreRulesText).not.toContain('match /orgs/{orgId}/{collection}/{document=**}');
+    expect(firestoreRulesText).toContain('match /orgs/{orgId}/{collection}/{document}');
+    expect(firestoreRulesText).toContain('match /orgs/{orgId}/{collection}/{document}/{subcollection}/{subdocument=**}');
+    expect(firestoreRulesText).toContain('&& !isCatchallExcludedCollection(subcollection)');
+  });
+
+  it('keeps Java weekly authority collections client read-only or fully hidden', () => {
+    expect(firestoreRulesText).toContain('function isJavaWeeklyServerCollection(collection)');
+    for (const collection of [
+      'cashflow_weeks',
+      'cashflowWeeks',
+      'weekly_api_idempotency',
+      'weekly_api_audit_events',
+      'weekly_api_audit_exports',
+      'weekly_bank_import_batches',
+      'expense_sheets',
+      'expense_intake',
+    ]) {
+      expect(firestoreRulesText).toContain(`'${collection}'`);
+    }
+    expect(firestoreRulesText).toContain('match /orgs/{orgId}/cashflow_weeks/{weekId}');
+    expect(firestoreRulesText).toContain('match /orgs/{orgId}/projects/{projectId}/expense_sheets/{sheetId}');
+    expect(firestoreRulesText).toContain('match /orgs/{orgId}/projects/{projectId}/expense_intake/{lineId}');
+    expect(firestoreRulesText).toContain('match /orgs/{orgId}/weekly_api_idempotency/{keyId}');
+    expect(firestoreRulesText).toContain('allow read, write: if false;');
+    expect(firestoreRulesText).toContain('|| isJavaWeeklyServerCollection(collection)');
   });
 
   it('keeps project option settings admin-managed', () => {

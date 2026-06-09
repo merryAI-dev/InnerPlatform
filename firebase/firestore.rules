@@ -77,11 +77,36 @@ service cloud.firestore {
       return collection in ['contacts', 'business_card_imports', 'contact_events'];
     }
 
+    function isExplicitPolicyCollection(collection) {
+      return collection in [
+        'members',
+        'tenant_registry',
+        'audit_logs',
+        'notifications',
+        'project_change_alerts',
+        'projectRequestDrafts'
+      ];
+    }
+
+    function isJavaWeeklyServerCollection(collection) {
+      return collection in [
+        'cashflow_weeks',
+        'cashflowWeeks',
+        'weekly_api_idempotency',
+        'weekly_api_audit_events',
+        'weekly_api_audit_exports',
+        'weekly_bank_import_batches',
+        'expense_sheets',
+        'expense_intake'
+      ];
+    }
+
     // 일반 org 멤버 catchall에서 제외할 컬렉션.
     // 각 컬렉션의 상단 override 규칙만 적용되도록 막는다.
     function isCatchallExcludedCollection(collection) {
       return isBffOnlyCollection(collection)
-        || collection in ['projectRequestDrafts'];
+        || isExplicitPolicyCollection(collection)
+        || isJavaWeeklyServerCollection(collection);
     }
 
     function isCatchallExcludedPath(collection, document) {
@@ -205,11 +230,61 @@ service cloud.firestore {
         && resource.data.ownerId == request.auth.uid;
     }
 
+    // ── Java weekly API 권위 컬렉션 ──
+    // Admin SDK(Java API)만 쓴다. 클라이언트 SDK는 읽기만 허용해도 쓰기는 절대 열지 않는다.
+    match /orgs/{orgId}/cashflow_weeks/{weekId} {
+      allow read: if canRead(orgId);
+      allow write: if false;
+    }
+
+    match /orgs/{orgId}/cashflowWeeks/{weekId} {
+      allow read: if canRead(orgId);
+      allow write: if false;
+    }
+
+    match /orgs/{orgId}/projects/{projectId}/expense_sheets/{sheetId} {
+      allow read: if canRead(orgId);
+      allow write: if false;
+    }
+
+    match /orgs/{orgId}/projects/{projectId}/expense_intake/{lineId} {
+      allow read: if canRead(orgId);
+      allow write: if false;
+    }
+
+    match /orgs/{orgId}/weekly_bank_import_batches/{batchId} {
+      allow read: if canRead(orgId);
+      allow write: if false;
+    }
+
+    match /orgs/{orgId}/weekly_api_idempotency/{keyId} {
+      allow read, write: if false;
+    }
+
+    match /orgs/{orgId}/weekly_api_audit_events/{eventId} {
+      allow read: if canReadAuditLogs(orgId);
+      allow write: if false;
+    }
+
+    match /orgs/{orgId}/weekly_api_audit_exports/{exportId} {
+      allow read: if canReadAuditLogs(orgId);
+      allow write: if false;
+    }
+
     // ── 일반 규칙: 나머지 모든 컬렉션 ──
     // (projects, ledgers, transactions, evidences, comments, 등)
-    match /orgs/{orgId}/{collection}/{document=**} {
+    match /orgs/{orgId}/{collection}/{document} {
       allow read: if !isCatchallExcludedPath(collection, document) && canRead(orgId);
       allow write: if !isCatchallExcludedPath(collection, document) && canWrite(orgId);
+    }
+
+    match /orgs/{orgId}/{collection}/{document}/{subcollection}/{subdocument=**} {
+      allow read: if !isCatchallExcludedPath(collection, document)
+        && !isCatchallExcludedCollection(subcollection)
+        && canRead(orgId);
+      allow write: if !isCatchallExcludedPath(collection, document)
+        && !isCatchallExcludedCollection(subcollection)
+        && canWrite(orgId);
     }
   }
 }

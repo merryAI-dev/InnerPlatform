@@ -43,6 +43,7 @@ public class FirestoreWeeklyProjectAccessRepository implements WeeklyProjectAcce
         String targetProjectId = text(projectId);
         if (targetProjectId.isBlank()) return false;
         for (Map<String, Object> member : memberDocuments(actor)) {
+            if (!isActiveActorMember(member, actor)) continue;
             if (projectIds(member).contains(targetProjectId)) {
                 return true;
             }
@@ -91,6 +92,13 @@ public class FirestoreWeeklyProjectAccessRepository implements WeeklyProjectAcce
             addTextList(ids, profile.get("projectIds"));
         }
         return ids;
+    }
+
+    private boolean isActiveActorMember(Map<String, Object> member, TrustedActorContext actor) {
+        if (member == null) return false;
+        if (!"ACTIVE".equals(text(member.get("status")).toUpperCase())) return false;
+        String memberUid = text(member.get("uid"));
+        return memberUid.isBlank() || memberUid.equals(text(actor.id()));
     }
 
     private void addText(Set<String> ids, Object value) {

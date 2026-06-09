@@ -28,6 +28,8 @@ const verifier = read('server/jvm-weekly-api/src/main/java/dev/merryai/innerplat
 const cors = read('server/jvm-weekly-api/src/main/java/dev/merryai/innerplatform/weekly/api/WeeklyApiCorsConfiguration.java');
 const client = read('src/app/platform/request-context.ts');
 const platformClient = read('src/app/lib/platform-bff-client.ts');
+const platformApiBaseUrl = read('src/app/platform/platform-api-base-url.ts');
+const apiSession = read('src/app/platform/api-session.ts');
 const featureFlags = read('src/app/config/feature-flags.ts');
 const envExample = read('.env.example');
 const claimsScript = read('scripts/sync_firebase_member_claims.mjs');
@@ -49,6 +51,7 @@ requireIncludes(cloudBuild, 'JVM_WEEKLY_FIREBASE_PROJECT_ID', 'Java Firebase pro
 requireIncludes(cloudBuild, 'JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID', 'Java Firebase auth project env');
 requireIncludes(cloudBuild, 'JVM_WEEKLY_FIRESTORE_PROJECT_ID', 'Java Firestore storage project env');
 requireIncludes(cloudBuild, 'JVM_WEEKLY_ALLOWED_ORIGINS', 'Java CORS env');
+requireIncludes(cloudBuild, 'JVM_WEEKLY_INTERNAL_API_TOKEN_ENABLED=false', 'stage Java service-token disabled by default');
 requireIncludes(cloudBuild, 'eval "$(node scripts/create_firebase_smoke_id_token.mjs --env)"', 'stage smoke Firebase ID token and UID minting');
 requireIncludes(cloudBuild, '--require-identity-token', 'stage smoke browser-direct auth requirement');
 requireNotIncludes(cloudBuild, 'secretEnv:\n      - JVM_WEEKLY_INTERNAL_API_TOKEN', 'stage smoke service token secret env');
@@ -70,11 +73,17 @@ requireIncludes(verifier, 'verifyIdToken(token, true)', 'revocation-aware Fireba
 requireIncludes(verifier, 'verifySessionCookie(cookie, true)', 'revocation-aware Firebase session verification');
 requireIncludes(verifier, 'tenantId', 'Firebase tenant claim contract');
 requireIncludes(verifier, 'role', 'Firebase role claim contract');
+requireIncludes(filter, 'internalApiTokenEnabled && tokensMatch', 'Java shared service-token path disabled unless explicitly enabled');
+requireIncludes(filter, 'weekly_expense_csrf_origin_required', 'session-cookie mutation Origin allowlist');
 requireIncludes(cors, 'https://inner-platform.vercel.app', 'live frontend CORS origin');
 requireNotIncludes(client, "headers.set('authorization', `Bearer ${input.actor.idToken}`)", 'frontend per-request bearer token channel');
 requireIncludes(read('src/app/platform/api-client.ts'), "credentials: 'include'", 'frontend session-cookie channel');
-requireIncludes(read('src/app/platform/api-session.ts'), '/api/v1/auth/session', 'frontend login-time Java session creation');
-requireIncludes(platformClient, 'VITE_PLATFORM_API_BASE_URL is required for stage/live platform API operation.', 'production API base URL fail-fast');
+requireIncludes(apiSession, '/api/v1/auth/session', 'frontend login-time Java session creation');
+requireIncludes(apiSession, 'rejectBrowserRewriteHosts: enabled && isProductionBuild', 'frontend session runtime same-origin rejection');
+requireIncludes(platformApiBaseUrl, 'is required for stage/live platform API operation.', 'production API base URL fail-fast');
+requireIncludes(platformClient, 'rejectBrowserRewriteHosts: enabled && isProductionBuild', 'frontend Java API runtime same-origin rejection');
+requireIncludes(platformApiBaseUrl, "host.endsWith('.vercel.app')", 'Vercel Java API base URL rejection');
+requireIncludes(platformApiBaseUrl, 'must bypass Vercel/BFF rewrites', 'same-origin Java API base URL rejection error');
 requireIncludes(platformClient, 'fetchWeeklyExpenseStatusesViaBff', 'Java weekly status read channel');
 requireIncludes(featureFlags, 'parseFeatureFlag(env.VITE_PLATFORM_API_ENABLED, isProductionBuild)', 'production platform API default');
 requireIncludes(envExample, 'VITE_PLATFORM_API_ENABLED=true', 'stage/live platform API enabled default');

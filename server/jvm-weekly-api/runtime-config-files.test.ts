@@ -59,6 +59,7 @@ describe('JVM weekly API runtime config files', () => {
     expect(cloudBuild).toContain('availableSecrets');
     expect(cloudBuild).toContain('JVM_WEEKLY_INTERNAL_API_TOKEN');
     expect(cloudBuild).toContain('JVM_WEEKLY_DATABASE_URL=${_JVM_WEEKLY_DATABASE_URL}');
+    expect(cloudBuild).toContain('JVM_WEEKLY_INTERNAL_API_TOKEN_ENABLED=false');
     expect(cloudBuild).toContain('JVM_WEEKLY_STORAGE_BACKEND=${_JVM_WEEKLY_STORAGE_BACKEND}');
     expect(cloudBuild).toContain('JVM_WEEKLY_PROJECT_ACCESS_BACKEND=${_JVM_WEEKLY_PROJECT_ACCESS_BACKEND}');
     expect(cloudBuild).toContain("_JVM_WEEKLY_STORAGE_BACKEND: firestore");
@@ -84,6 +85,7 @@ describe('JVM weekly API runtime config files', () => {
     expect(deployScript).toContain('JVM_WEEKLY_FIRESTORE_PROJECT_ID is required for Firestore storage');
     expect(deployScript).toContain('JVM_WEEKLY_ALLOWED_ORIGINS="${JVM_WEEKLY_ALLOWED_ORIGINS:-https://inner-platform-stage-merryai-devs-projects.vercel.app,https://inner-platform.vercel.app}"');
     expect(deployScript).toContain('--set-env-vars "^|^WEEKLY_API_PORT=8080');
+    expect(deployScript).toContain('JVM_WEEKLY_INTERNAL_API_TOKEN_ENABLED=false');
     expect(deployScript).toContain('node scripts/smoke_jvm_weekly_api.mjs');
     expect(deployScript).toContain('gcloud secrets versions access latest');
     expect(deployScript).not.toContain('gcloud auth print-identity-token');

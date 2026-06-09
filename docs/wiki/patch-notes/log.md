@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-06-09] patch-note | shared-portal-architecture | weekly Java authority hardening
+- pages: [shared-portal-architecture](./pages/shared-portal-architecture.md)
+- summary: 주간 사업비 Java API stage/live 경로에서 Vercel/BFF rewrite fallback을 런타임에서 차단하고, Firestore rules catchall이 서버 전용 컬렉션 쓰기 차단을 우회하지 못하도록 보강했다. 세션 쿠키 mutation은 허용 Origin을 요구하고, idempotency replay는 project/command 단위로 제한하며, projection/actual cashflow line은 백엔드 canonical ID로 저장되도록 정리했다.
+
 ## [2026-06-08] patch-note | portal-weekly-expense, shared-portal-architecture | Java weekly expense authority
 - pages: [portal-weekly-expense](./pages/portal-weekly-expense.md), [shared-portal-architecture](./pages/shared-portal-architecture.md)
 - summary: 사업비 입력(주간)의 셀/행 편집, 통장내역 반영, Actual 계산, Projection/Cashflow 읽기 경로를 Java Spring/JPA 권위 API로 옮겼다. 프론트는 화면 표시와 명령 전달만 맡도록 줄이고, Firestore direct write와 BFF-only 주간 작업 경로를 stage/live 정책 검증에서 반려하도록 추가했다.

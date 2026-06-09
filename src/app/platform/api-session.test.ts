@@ -34,4 +34,12 @@ describe('api-session', () => {
     expect(url).toBe('http://127.0.0.1:8787/api/v1/auth/logout');
     expect(init?.credentials).toBe('include');
   });
+
+  it('rejects stage session sync through Vercel rewrite hosts', async () => {
+    await expect(createPlatformApiSession('firebase-id-token', {
+      PROD: 'true',
+      VITE_PLATFORM_API_ENABLED: 'true',
+      VITE_PLATFORM_API_BASE_URL: 'https://inner-platform-stage-merryai-devs-projects.vercel.app',
+    })).rejects.toThrow('VITE_PLATFORM_API_BASE_URL must bypass Vercel/BFF rewrites');
+  });
 });

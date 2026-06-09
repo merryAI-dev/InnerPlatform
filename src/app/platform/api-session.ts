@@ -1,24 +1,16 @@
 import { parseFeatureFlag } from '../config/feature-flags';
+import { normalizePlatformApiBaseUrl } from './platform-api-base-url';
 import { createRequestId } from './request-context';
-
-const DEFAULT_PLATFORM_API_BASE_URL = 'http://127.0.0.1:8787';
-
-function normalizeBaseUrl(value: unknown, options: { requireConfigured?: boolean } = {}): string {
-  if (typeof value !== 'string' || !value.trim()) {
-    if (options.requireConfigured) {
-      throw new Error('VITE_PLATFORM_API_BASE_URL is required for stage/live platform API session operation.');
-    }
-    return DEFAULT_PLATFORM_API_BASE_URL;
-  }
-  return value.trim().replace(/\/$/, '');
-}
 
 function readSessionRuntimeConfig(env: Record<string, unknown> = import.meta.env) {
   const enabled = parseFeatureFlag(env.VITE_PLATFORM_API_ENABLED, parseFeatureFlag(env.PROD, false));
+  const isProductionBuild = parseFeatureFlag(env.PROD, false);
   return {
     enabled,
-    baseUrl: normalizeBaseUrl(env.VITE_PLATFORM_API_BASE_URL, {
-      requireConfigured: enabled && parseFeatureFlag(env.PROD, false),
+    baseUrl: normalizePlatformApiBaseUrl(env.VITE_PLATFORM_API_BASE_URL, {
+      requireConfigured: enabled && isProductionBuild,
+      rejectBrowserRewriteHosts: enabled && isProductionBuild,
+      errorPrefix: 'VITE_PLATFORM_API_BASE_URL',
     }),
   };
 }

@@ -828,6 +828,13 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   const activeExpenseSheetIdRef = useRef(activeExpenseSheetId);
   const expenseSheetRowsRef = useRef<ImportRow[] | null>(expenseSheetRows);
   const weeklyExpenseSheetVersionRef = useRef<Record<string, number>>({});
+  const persistExpenseSheetRowsRef = useRef<((input: {
+    sheetKey: string;
+    sheetName: string;
+    order: number;
+    rows: ImportRow[];
+    createdAt?: string;
+  }) => Promise<ImportRow[]>) | null>(null);
   const devHarnessHydratedProjectIdRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -2061,22 +2068,43 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const createExpenseSheet = useCallback(async (name?: string): Promise<string | null> => {
-    if (isDevHarnessUser || isPlatformApiEnabled()) {
-      const now = new Date().toISOString();
-      const id = createExpenseSheetId();
-      const nextOrder = expenseSheets.length > 0
-        ? Math.max(...expenseSheets.map((sheet) => (Number.isFinite(sheet.order) ? sheet.order : 0))) + 1
-        : 1;
-      const nextSheet = {
-        id,
-        name: sanitizeExpenseSheetName(name, `탭 ${expenseSheets.length + 1}`),
-        order: nextOrder,
-        rows: [] as ImportRow[],
-        createdAt: now,
-        updatedAt: now,
-      };
+    const now = new Date().toISOString();
+    const id = createExpenseSheetId();
+    const nextOrder = expenseSheets.length > 0
+      ? Math.max(...expenseSheets.map((sheet) => (Number.isFinite(sheet.order) ? sheet.order : 0))) + 1
+      : 1;
+    const sheetName = sanitizeExpenseSheetName(name, `탭 ${expenseSheets.length + 1}`);
+    const nextSheet = {
+      id,
+      name: sheetName,
+      order: nextOrder,
+      rows: [] as ImportRow[],
+      createdAt: now,
+      updatedAt: now,
+    };
+    if (isDevHarnessUser) {
       setExpenseSheets((prev) => [...prev, nextSheet]);
+      activeExpenseSheetIdRef.current = id;
       setActiveExpenseSheetIdState(id);
+      expenseSheetRowsRef.current = [];
+      setExpenseSheetRows([]);
+      return id;
+    }
+    if (isPlatformApiEnabled()) {
+      const persistRows = persistExpenseSheetRowsRef.current;
+      if (!persistRows) {
+        throw new Error('Weekly expense save path is not ready.');
+      }
+      await persistRows({
+        sheetKey: id,
+        sheetName,
+        order: nextOrder,
+        rows: [],
+        createdAt: now,
+      });
+      activeExpenseSheetIdRef.current = id;
+      setActiveExpenseSheetIdState(id);
+      expenseSheetRowsRef.current = [];
       setExpenseSheetRows([]);
       return id;
     }
@@ -2085,15 +2113,30 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   }, [expenseSheets, isDevHarnessUser]);
 
   const renameExpenseSheet = useCallback(async (sheetId: string, name: string): Promise<boolean> => {
-    if (isDevHarnessUser || isPlatformApiEnabled()) {
-      const id = String(sheetId || '').trim();
-      const nextName = sanitizeExpenseSheetName(name, '');
-      if (!id || !nextName) return false;
+    const id = String(sheetId || '').trim();
+    const nextName = sanitizeExpenseSheetName(name, '');
+    if (!id || !nextName) return false;
+    if (isDevHarnessUser) {
       setExpenseSheets((prev) => prev.map((sheet) => (
         sheet.id === id
           ? { ...sheet, name: nextName, updatedAt: new Date().toISOString() }
           : sheet
       )));
+      return true;
+    }
+    if (isPlatformApiEnabled()) {
+      const targetSheet = expenseSheetsRef.current.find((sheet) => sheet.id === id) || null;
+      const persistRows = persistExpenseSheetRowsRef.current;
+      if (!persistRows) {
+        throw new Error('Weekly expense save path is not ready.');
+      }
+      await persistRows({
+        sheetKey: id,
+        sheetName: nextName,
+        order: Number.isFinite(targetSheet?.order) ? targetSheet!.order : 0,
+        rows: targetSheet?.rows || (id === activeExpenseSheetIdRef.current ? expenseSheetRowsRef.current || [] : []),
+        createdAt: targetSheet?.createdAt,
+      });
       return true;
     }
     toast.error('사업비 탭 이름 변경은 현재 저장 정책상 제한되어 있습니다.');
@@ -2267,6 +2310,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     }
     return nextRows;
   }, [authUser, currentProjectId, isDevHarnessUser, orgId]);
+  persistExpenseSheetRowsRef.current = persistExpenseSheetRows;
 
   const saveExpenseSheetRows = useCallback(async (rows: ImportRow[]) => {
     const sheetKey = activeExpenseSheetIdRef.current || 'default';

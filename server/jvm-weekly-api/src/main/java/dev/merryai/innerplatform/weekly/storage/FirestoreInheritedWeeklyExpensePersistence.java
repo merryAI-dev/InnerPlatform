@@ -37,6 +37,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.Callable;
 
 @Repository
@@ -305,7 +306,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
 
     @Override
     public WeeklyExpenseBankImportBatchEntity saveBankImportBatch(WeeklyExpenseBankImportBatchEntity batch) {
-        String batchId = batch.getId() == null || batch.getId().isBlank() ? "bank-import-" + Instant.now().toEpochMilli() : batch.getId();
+        String batchId = batch.getId() == null || batch.getId().isBlank() ? "bank-import-" + UUID.randomUUID() : batch.getId();
         batch.restorePersistenceState(batchId, batch.getStatus(), batch.getCreatedAt());
         set(bankImportBatchRef(batch.getTenantId(), batchId), Map.of(
             "tenantId", batch.getTenantId(),

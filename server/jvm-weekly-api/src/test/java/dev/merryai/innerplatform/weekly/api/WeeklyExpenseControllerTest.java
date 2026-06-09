@@ -214,6 +214,7 @@ class WeeklyExpenseControllerTest {
                     firebaseTestSessionCookie("tenant-session", "firebase-pm-session", "pm", "pm-session@mysc.co.kr")
                 ))
                 .header("x-request-id", "req-session-cookie-save")
+                .header("origin", "https://inner-platform.vercel.app")
                 .header("x-tenant-id", "tenant-session")
                 .header("x-actor-id", "firebase-pm-session")
                 .header("x-actor-role", "admin")
@@ -241,6 +242,22 @@ class WeeklyExpenseControllerTest {
                 .content("{\"idempotencyKey\":\"missing-request-id\",\"rows\":[]}"))
             .andExpect(status().isForbidden())
             .andExpect(jsonPath("$.code").value("weekly_expense_csrf_header_required"));
+    }
+
+    @Test
+    void firebaseSessionCookieMutationsRequireAllowedOrigin() throws Exception {
+        mockMvc.perform(post("/api/v1/weekly-expenses/project-session/sheets/default/save-draft")
+                .cookie(new Cookie(
+                    WeeklyAuthSessionController.SESSION_COOKIE_NAME,
+                    firebaseTestSessionCookie("tenant-session", "firebase-pm-session", "pm", "pm-session@mysc.co.kr")
+                ))
+                .header("x-request-id", "req-bad-origin")
+                .header("origin", "https://attacker.example")
+                .header("x-tenant-id", "tenant-session")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"idempotencyKey\":\"bad-origin\",\"rows\":[]}"))
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.code").value("weekly_expense_csrf_origin_required"));
     }
 
     @Test
@@ -497,6 +514,81 @@ class WeeklyExpenseControllerTest {
     }
 
     @Test
+    void sameIdempotencyKeyAcrossProjectsReturnsConflictInsteadOfReplayingOtherProject() throws Exception {
+        String body = """
+            {
+              "idempotencyKey": "idem-cross-project",
+              "rows": []
+            }
+            """;
+
+        mockMvc.perform(asActor(post("/api/v1/weekly-expenses/project-idem-a/sheets/default/save-draft"), "tenant-idem", "pm-idem", "pm")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.projectId").value("project-idem-a"));
+
+        mockMvc.perform(asActor(post("/api/v1/weekly-expenses/project-idem-b/sheets/default/save-draft"), "tenant-idem", "pm-idem", "pm")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.code").value("weekly_expense_conflict"))
+            .andExpect(jsonPath("$.message").value("Idempotency key already exists for a different project or command."));
+    }
+
+    @Test
+    void sameIdempotencyKeyAcrossCommandsReturnsConflict() throws Exception {
+        String saveBody = """
+            {
+              "idempotencyKey": "idem-cross-command",
+              "rows": []
+            }
+            """;
+        String submitBody = """
+            {
+              "idempotencyKey": "idem-cross-command",
+              "yearMonth": "2026-06",
+              "weekNo": 1
+            }
+            """;
+
+        mockMvc.perform(asActor(post("/api/v1/weekly-expenses/project-idem-command/sheets/default/save-draft"), "tenant-idem-command", "pm-idem", "pm")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(saveBody))
+            .andExpect(status().isOk());
+
+        mockMvc.perform(asActor(post("/api/v1/weekly-expenses/project-idem-command/submit"), "tenant-idem-command", "pm-idem", "pm")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(submitBody))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.code").value("weekly_expense_conflict"))
+            .andExpect(jsonPath("$.message").value("Idempotency key already exists for a different project or command."));
+    }
+
+    @Test
+    void auditExportIdempotencyDoesNotReplayAnotherProjectContent() throws Exception {
+        String exportBody = """
+            {
+              "idempotencyKey": "audit-export-cross-project",
+              "format": "CSV",
+              "includeAuditSummary": true
+            }
+            """;
+
+        mockMvc.perform(asActor(post("/api/v1/weekly-expenses/project-export-a/audit-export"), "tenant-export-replay", "finance-export", "finance")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(exportBody))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.projectId").value("project-export-a"));
+
+        mockMvc.perform(asActor(post("/api/v1/weekly-expenses/project-export-b/audit-export"), "tenant-export-replay", "finance-export", "finance")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(exportBody))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.code").value("weekly_expense_conflict"));
+    }
+
+    @Test
     void saveDraftDoesNotPersistActualsForRowsRequiringReview() throws Exception {
         String body = """
             {
@@ -552,7 +644,7 @@ class WeeklyExpenseControllerTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.actualDelta[0].yearMonth").value("2026-06"))
             .andExpect(jsonPath("$.actualDelta[0].weekNo").value(2))
-            .andExpect(jsonPath("$.actualDelta[0].cashflowLine").value("매출액"))
+            .andExpect(jsonPath("$.actualDelta[0].cashflowLine").value("SALES_IN"))
             .andExpect(jsonPath("$.actualDelta[0].amount").value(500000));
 
         mockMvc.perform(asActor(get("/api/v1/cashflow/project-manual-deposit"), "tenant-manual-deposit", "viewer-manual-deposit", "viewer"))
@@ -583,7 +675,7 @@ class WeeklyExpenseControllerTest {
 
         mockMvc.perform(asActor(get("/api/v1/cashflow/project-projection"), "tenant-projection", "viewer-projection", "viewer"))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.projection[0].cashflowLine").value("사업비"))
+            .andExpect(jsonPath("$.projection[0].cashflowLine").value("DIRECT_COST_OUT"))
             .andExpect(jsonPath("$.projection[0].amount").value(3000000))
             .andExpect(jsonPath("$.readModel.months[0].projection.rowTotals.DIRECT_COST_OUT").value(3000000))
             .andExpect(jsonPath("$.readModel.months[0].projection.weeks[0].weekOut").value(3000000))
@@ -607,7 +699,7 @@ class WeeklyExpenseControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(projection))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.savedLineCount").value(4));
+            .andExpect(jsonPath("$.savedLineCount").value(3));
 
         String actual = """
             {
@@ -651,13 +743,13 @@ class WeeklyExpenseControllerTest {
             .andExpect(jsonPath("$.actualDelta.length()").value(3));
 
         assertThat(projectionRepository.findByTenantIdAndProjectId("tenant-read-model", "project-read-model"))
-            .hasSize(4);
+            .hasSize(3);
         assertThat(actualRepository.findByTenantIdAndProjectId("tenant-read-model", "project-read-model"))
             .hasSize(3);
 
         mockMvc.perform(asActor(get("/api/v1/cashflow/project-read-model"), "tenant-read-model", "viewer-read", "viewer"))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.projection.length()").value(4))
+            .andExpect(jsonPath("$.projection.length()").value(3))
             .andExpect(jsonPath("$.actual.length()").value(3))
             .andExpect(jsonPath("$.readModel.months[0].yearMonth").value("2026-06"))
             .andExpect(jsonPath("$.readModel.months[0].projection.rowTotals.DIRECT_COST_OUT").value(3700000))
@@ -1634,9 +1726,11 @@ class WeeklyExpenseControllerTest {
         JsonNode json = objectMapper.readTree(response);
         assertThat(json.get("sha256").asText()).hasSize(64);
         assertThat(json.get("content").asText())
-            .contains("PROJECTION,project-export,2026-06,1,,")
-            .contains("ACTUAL,project-export,2026-06,1,default,")
-            .contains("AUDIT_SUMMARY,project-export");
+            .contains("PROJECTION,project-export,2026-06,1,,DIRECT_COST_OUT,3000000")
+            .contains("ACTUAL,project-export,2026-06,1,default,DIRECT_COST_OUT,1200000")
+            .contains("AUDIT_SUMMARY,project-export")
+            .doesNotContain("사업비,3000000")
+            .doesNotContain("사업비,1200000");
         assertThat(auditExportRepository.findById(json.get("artifactId").asText())).isPresent();
         assertThat(auditEventRepository.findAll().stream()
             .anyMatch(event -> "weeklyExpense.auditExport.create".equals(event.getCommandName()))).isTrue();

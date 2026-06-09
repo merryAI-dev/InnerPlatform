@@ -34,6 +34,7 @@ import dev.merryai.innerplatform.weekly.api.WeeklyExpenseSheetsResponse;
 import dev.merryai.innerplatform.weekly.domain.CellValidationIssue;
 import dev.merryai.innerplatform.weekly.domain.CellAddress;
 import dev.merryai.innerplatform.weekly.domain.CellValidationStatus;
+import dev.merryai.innerplatform.weekly.domain.CashflowLineCatalog;
 import dev.merryai.innerplatform.weekly.domain.ClipboardCell;
 import dev.merryai.innerplatform.weekly.domain.ClipboardPayload;
 import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseActualEntity;
@@ -177,14 +178,15 @@ public class WeeklyExpenseCommandService {
     public SaveDraftResponse saveDraft(TrustedActorContext actor, String projectId, String sheetKey, SaveDraftRequest request) {
         authorizationService.requireProjectAllowed(SAVE_DRAFT_COMMAND, actor, projectId);
         String requestHash = hashJson(request);
-        var existing = persistence.findIdempotency(actor.tenantId(), request.idempotencyKey());
-        if (existing.isPresent()) {
-            WeeklyExpenseIdempotencyEntity idempotency = existing.get();
-            if (!idempotency.getRequestHash().equals(requestHash)) {
-                throw new WeeklyExpenseConflictException("Idempotency key already exists with a different request body.");
-            }
-            return readJson(idempotency.getResponseJson(), SaveDraftResponse.class);
-        }
+        Optional<SaveDraftResponse> replay = readIdempotentResponse(
+            actor.tenantId(),
+            projectId,
+            SAVE_DRAFT_COMMAND,
+            request.idempotencyKey(),
+            requestHash,
+            SaveDraftResponse.class
+        );
+        if (replay.isPresent()) return replay.get();
 
         WeeklyExpenseSheetEntity sheet = loadSheet(actor.tenantId(), projectId, sheetKey, request.sheetName(), request.expectedSheetVersion());
         sheet.setName(request.sheetName());
@@ -277,14 +279,15 @@ public class WeeklyExpenseCommandService {
     ) {
         authorizationService.requireProjectAllowed(BANK_IMPORT_BATCH_COMMAND, actor, projectId);
         String requestHash = hashJson(request);
-        var existing = persistence.findIdempotency(actor.tenantId(), request.idempotencyKey());
-        if (existing.isPresent()) {
-            WeeklyExpenseIdempotencyEntity idempotency = existing.get();
-            if (!idempotency.getRequestHash().equals(requestHash)) {
-                throw new WeeklyExpenseConflictException("Idempotency key already exists with a different request body.");
-            }
-            return readJson(idempotency.getResponseJson(), ImportBankStatementBatchResponse.class);
-        }
+        Optional<ImportBankStatementBatchResponse> replay = readIdempotentResponse(
+            actor.tenantId(),
+            projectId,
+            BANK_IMPORT_BATCH_COMMAND,
+            request.idempotencyKey(),
+            requestHash,
+            ImportBankStatementBatchResponse.class
+        );
+        if (replay.isPresent()) return replay.get();
 
         WeeklyExpenseBankImportBatchEntity batch = new WeeklyExpenseBankImportBatchEntity(
             actor.tenantId(),
@@ -394,14 +397,15 @@ public class WeeklyExpenseCommandService {
     ) {
         authorizationService.requireProjectAllowed(BANK_IMPORT_APPLY_ITEMS_COMMAND, actor, projectId);
         String requestHash = hashJson(request);
-        var existing = persistence.findIdempotency(actor.tenantId(), request.idempotencyKey());
-        if (existing.isPresent()) {
-            WeeklyExpenseIdempotencyEntity idempotency = existing.get();
-            if (!idempotency.getRequestHash().equals(requestHash)) {
-                throw new WeeklyExpenseConflictException("Idempotency key already exists with a different request body.");
-            }
-            return readJson(idempotency.getResponseJson(), ApplyBankStatementItemsResponse.class);
-        }
+        Optional<ApplyBankStatementItemsResponse> replay = readIdempotentResponse(
+            actor.tenantId(),
+            projectId,
+            BANK_IMPORT_APPLY_ITEMS_COMMAND,
+            request.idempotencyKey(),
+            requestHash,
+            ApplyBankStatementItemsResponse.class
+        );
+        if (replay.isPresent()) return replay.get();
 
         List<String> requestedLineIds = request.items().stream()
             .map(ApplyBankStatementItemsRequest.ItemPatch::importLineId)
@@ -527,33 +531,47 @@ public class WeeklyExpenseCommandService {
     public UpsertProjectionResponse upsertProjection(TrustedActorContext actor, String projectId, UpsertProjectionRequest request) {
         authorizationService.requireProjectAllowed(UPSERT_PROJECTION_COMMAND, actor, projectId);
         String requestHash = hashJson(request);
-        var existing = persistence.findIdempotency(actor.tenantId(), request.idempotencyKey());
-        if (existing.isPresent()) {
-            WeeklyExpenseIdempotencyEntity idempotency = existing.get();
-            if (!idempotency.getRequestHash().equals(requestHash)) {
-                throw new WeeklyExpenseConflictException("Idempotency key already exists with a different request body.");
+        Optional<UpsertProjectionResponse> replay = readIdempotentResponse(
+            actor.tenantId(),
+            projectId,
+            UPSERT_PROJECTION_COMMAND,
+            request.idempotencyKey(),
+            requestHash,
+            UpsertProjectionResponse.class
+        );
+        if (replay.isPresent()) return replay.get();
+
+        Map<String, ProjectionLineAccumulator> projectionPatches = new LinkedHashMap<>();
+        for (UpsertProjectionRequest.ProjectionLinePatch line : request.lines()) {
+            String cashflowLine = CashflowLineCatalog.canonicalize(line.cashflowLine());
+            String key = line.yearMonth() + ":" + line.weekNo() + ":" + cashflowLine;
+            ProjectionLineAccumulator accumulator = projectionPatches.get(key);
+            BigDecimal amount = line.amount() == null ? BigDecimal.ZERO : line.amount();
+            if (accumulator == null) {
+                projectionPatches.put(key, new ProjectionLineAccumulator(line.yearMonth(), line.weekNo(), cashflowLine, amount));
+            } else {
+                accumulator.add(amount);
             }
-            return readJson(idempotency.getResponseJson(), UpsertProjectionResponse.class);
         }
 
         List<CashflowSnapshotResponse.ProjectionLine> projection = new ArrayList<>();
-        for (UpsertProjectionRequest.ProjectionLinePatch line : request.lines()) {
+        for (ProjectionLineAccumulator line : projectionPatches.values()) {
             WeeklyExpenseProjectionEntity projectionEntity = persistence
                 .findProjectionLine(
                     actor.tenantId(),
                     projectId,
-                    line.yearMonth(),
-                    line.weekNo(),
-                    line.cashflowLine()
+                    line.yearMonth,
+                    line.weekNo,
+                    line.cashflowLine
                 )
                 .orElseGet(() -> new WeeklyExpenseProjectionEntity(
                     actor.tenantId(),
                     projectId,
-                    line.yearMonth(),
-                    line.weekNo(),
-                    line.cashflowLine()
+                    line.yearMonth,
+                    line.weekNo,
+                    line.cashflowLine
                 ));
-            projectionEntity.setAmount(line.amount());
+            projectionEntity.setAmount(line.amount);
             WeeklyExpenseProjectionEntity saved = persistence.saveProjection(projectionEntity);
             projection.add(new CashflowSnapshotResponse.ProjectionLine(
                 saved.getYearMonth(),
@@ -597,14 +615,15 @@ public class WeeklyExpenseCommandService {
     public SubmitWeekResponse submitWeek(TrustedActorContext actor, String projectId, SubmitWeekRequest request) {
         authorizationService.requireProjectAllowed(SUBMIT_WEEK_COMMAND, actor, projectId);
         String requestHash = hashJson(request);
-        var existing = persistence.findIdempotency(actor.tenantId(), request.idempotencyKey());
-        if (existing.isPresent()) {
-            WeeklyExpenseIdempotencyEntity idempotency = existing.get();
-            if (!idempotency.getRequestHash().equals(requestHash)) {
-                throw new WeeklyExpenseConflictException("Idempotency key already exists with a different request body.");
-            }
-            return readJson(idempotency.getResponseJson(), SubmitWeekResponse.class);
-        }
+        Optional<SubmitWeekResponse> replay = readIdempotentResponse(
+            actor.tenantId(),
+            projectId,
+            SUBMIT_WEEK_COMMAND,
+            request.idempotencyKey(),
+            requestHash,
+            SubmitWeekResponse.class
+        );
+        if (replay.isPresent()) return replay.get();
 
         WeeklyExpenseWeeklyStatusEntity status = persistence
             .findWeeklyStatus(
@@ -666,14 +685,15 @@ public class WeeklyExpenseCommandService {
     public CloseWeekResponse closeWeek(TrustedActorContext actor, String projectId, CloseWeekRequest request) {
         authorizationService.requireProjectAllowed(CLOSE_WEEK_COMMAND, actor, projectId);
         String requestHash = hashJson(request);
-        var existing = persistence.findIdempotency(actor.tenantId(), request.idempotencyKey());
-        if (existing.isPresent()) {
-            WeeklyExpenseIdempotencyEntity idempotency = existing.get();
-            if (!idempotency.getRequestHash().equals(requestHash)) {
-                throw new WeeklyExpenseConflictException("Idempotency key already exists with a different request body.");
-            }
-            return readJson(idempotency.getResponseJson(), CloseWeekResponse.class);
-        }
+        Optional<CloseWeekResponse> replay = readIdempotentResponse(
+            actor.tenantId(),
+            projectId,
+            CLOSE_WEEK_COMMAND,
+            request.idempotencyKey(),
+            requestHash,
+            CloseWeekResponse.class
+        );
+        if (replay.isPresent()) return replay.get();
 
         WeeklyExpenseWeeklyStatusEntity status = persistence
             .findWeeklyStatus(
@@ -734,14 +754,15 @@ public class WeeklyExpenseCommandService {
     ) {
         authorizationService.requireProjectAllowed(AUDIT_EXPORT_CREATE_COMMAND, actor, projectId);
         String requestHash = hashJson(request);
-        var existing = persistence.findIdempotency(actor.tenantId(), request.idempotencyKey());
-        if (existing.isPresent()) {
-            WeeklyExpenseIdempotencyEntity idempotency = existing.get();
-            if (!idempotency.getRequestHash().equals(requestHash)) {
-                throw new WeeklyExpenseConflictException("Idempotency key already exists with a different request body.");
-            }
-            return readJson(idempotency.getResponseJson(), CreateAuditExportResponse.class);
-        }
+        Optional<CreateAuditExportResponse> replay = readIdempotentResponse(
+            actor.tenantId(),
+            projectId,
+            AUDIT_EXPORT_CREATE_COMMAND,
+            request.idempotencyKey(),
+            requestHash,
+            CreateAuditExportResponse.class
+        );
+        if (replay.isPresent()) return replay.get();
 
         String artifactType = normalizeExportFormat(request.format());
         List<WeeklyExpenseProjectionEntity> projection = persistence.findProjectionLinesForAudit(actor.tenantId(), projectId);
@@ -815,14 +836,15 @@ public class WeeklyExpenseCommandService {
     public CellCommandResponse patchCells(TrustedActorContext actor, String projectId, String sheetKey, CellPatchCommandRequest request) {
         authorizationService.requireProjectAllowed(CELL_PATCH_COMMAND, actor, projectId);
         String requestHash = hashJson(request);
-        var existing = persistence.findIdempotency(actor.tenantId(), request.idempotencyKey());
-        if (existing.isPresent()) {
-            WeeklyExpenseIdempotencyEntity idempotency = existing.get();
-            if (!idempotency.getRequestHash().equals(requestHash)) {
-                throw new WeeklyExpenseConflictException("Idempotency key already exists with a different request body.");
-            }
-            return readJson(idempotency.getResponseJson(), CellCommandResponse.class);
-        }
+        Optional<CellCommandResponse> replay = readIdempotentResponse(
+            actor.tenantId(),
+            projectId,
+            CELL_PATCH_COMMAND,
+            request.idempotencyKey(),
+            requestHash,
+            CellCommandResponse.class
+        );
+        if (replay.isPresent()) return replay.get();
 
         WeeklyExpenseSheetEntity sheet = loadSheet(actor.tenantId(), projectId, sheetKey, request.sheetName(), request.expectedSheetVersion());
         Set<Integer> touchedRows = new LinkedHashSet<>();
@@ -853,14 +875,15 @@ public class WeeklyExpenseCommandService {
     public CellCommandResponse copyCells(TrustedActorContext actor, String projectId, String sheetKey, CopyCellsRequest request) {
         authorizationService.requireProjectAllowed(CELLS_COPY_COMMAND, actor, projectId);
         String requestHash = hashJson(request);
-        var existing = persistence.findIdempotency(actor.tenantId(), request.idempotencyKey());
-        if (existing.isPresent()) {
-            WeeklyExpenseIdempotencyEntity idempotency = existing.get();
-            if (!idempotency.getRequestHash().equals(requestHash)) {
-                throw new WeeklyExpenseConflictException("Idempotency key already exists with a different request body.");
-            }
-            return readJson(idempotency.getResponseJson(), CellCommandResponse.class);
-        }
+        Optional<CellCommandResponse> replay = readIdempotentResponse(
+            actor.tenantId(),
+            projectId,
+            CELLS_COPY_COMMAND,
+            request.idempotencyKey(),
+            requestHash,
+            CellCommandResponse.class
+        );
+        if (replay.isPresent()) return replay.get();
 
         WeeklyExpenseSheetEntity sheet = loadExistingSheet(actor.tenantId(), projectId, sheetKey, request.expectedSheetVersion());
         requireSelectionBounds(request.startRow(), request.startColumn(), request.endRow(), request.endColumn());
@@ -892,14 +915,15 @@ public class WeeklyExpenseCommandService {
     public CellCommandResponse pasteCells(TrustedActorContext actor, String projectId, String sheetKey, PasteCellsRequest request) {
         authorizationService.requireProjectAllowed(CELLS_PASTE_COMMAND, actor, projectId);
         String requestHash = hashJson(request);
-        var existing = persistence.findIdempotency(actor.tenantId(), request.idempotencyKey());
-        if (existing.isPresent()) {
-            WeeklyExpenseIdempotencyEntity idempotency = existing.get();
-            if (!idempotency.getRequestHash().equals(requestHash)) {
-                throw new WeeklyExpenseConflictException("Idempotency key already exists with a different request body.");
-            }
-            return readJson(idempotency.getResponseJson(), CellCommandResponse.class);
-        }
+        Optional<CellCommandResponse> replay = readIdempotentResponse(
+            actor.tenantId(),
+            projectId,
+            CELLS_PASTE_COMMAND,
+            request.idempotencyKey(),
+            requestHash,
+            CellCommandResponse.class
+        );
+        if (replay.isPresent()) return replay.get();
 
         WeeklyExpenseSheetEntity sheet = loadSheet(actor.tenantId(), projectId, sheetKey, request.sheetName(), request.expectedSheetVersion());
         requirePasteRectangle(request);
@@ -941,14 +965,15 @@ public class WeeklyExpenseCommandService {
     public CellCommandResponse cutCells(TrustedActorContext actor, String projectId, String sheetKey, CutCellsRequest request) {
         authorizationService.requireProjectAllowed(CELLS_CUT_COMMAND, actor, projectId);
         String requestHash = hashJson(request);
-        var existing = persistence.findIdempotency(actor.tenantId(), request.idempotencyKey());
-        if (existing.isPresent()) {
-            WeeklyExpenseIdempotencyEntity idempotency = existing.get();
-            if (!idempotency.getRequestHash().equals(requestHash)) {
-                throw new WeeklyExpenseConflictException("Idempotency key already exists with a different request body.");
-            }
-            return readJson(idempotency.getResponseJson(), CellCommandResponse.class);
-        }
+        Optional<CellCommandResponse> replay = readIdempotentResponse(
+            actor.tenantId(),
+            projectId,
+            CELLS_CUT_COMMAND,
+            request.idempotencyKey(),
+            requestHash,
+            CellCommandResponse.class
+        );
+        if (replay.isPresent()) return replay.get();
 
         WeeklyExpenseSheetEntity sheet = loadSheet(actor.tenantId(), projectId, sheetKey, null, request.expectedSheetVersion());
         requireSelectionBounds(request.startRow(), request.startColumn(), request.endRow(), request.endColumn());
@@ -982,14 +1007,15 @@ public class WeeklyExpenseCommandService {
     public RowCommandResponse insertRows(TrustedActorContext actor, String projectId, String sheetKey, RowInsertRequest request) {
         authorizationService.requireProjectAllowed(ROW_INSERT_COMMAND, actor, projectId);
         String requestHash = hashJson(request);
-        var existing = persistence.findIdempotency(actor.tenantId(), request.idempotencyKey());
-        if (existing.isPresent()) {
-            WeeklyExpenseIdempotencyEntity idempotency = existing.get();
-            if (!idempotency.getRequestHash().equals(requestHash)) {
-                throw new WeeklyExpenseConflictException("Idempotency key already exists with a different request body.");
-            }
-            return readJson(idempotency.getResponseJson(), RowCommandResponse.class);
-        }
+        Optional<RowCommandResponse> replay = readIdempotentResponse(
+            actor.tenantId(),
+            projectId,
+            ROW_INSERT_COMMAND,
+            request.idempotencyKey(),
+            requestHash,
+            RowCommandResponse.class
+        );
+        if (replay.isPresent()) return replay.get();
 
         WeeklyExpenseSheetEntity sheet = loadSheet(actor.tenantId(), projectId, sheetKey, request.sheetName(), request.expectedSheetVersion());
         requireRowSpan(request.startRow(), request.rowCount());
@@ -1022,14 +1048,15 @@ public class WeeklyExpenseCommandService {
     public RowCommandResponse deleteRows(TrustedActorContext actor, String projectId, String sheetKey, RowDeleteRequest request) {
         authorizationService.requireProjectAllowed(ROW_DELETE_COMMAND, actor, projectId);
         String requestHash = hashJson(request);
-        var existing = persistence.findIdempotency(actor.tenantId(), request.idempotencyKey());
-        if (existing.isPresent()) {
-            WeeklyExpenseIdempotencyEntity idempotency = existing.get();
-            if (!idempotency.getRequestHash().equals(requestHash)) {
-                throw new WeeklyExpenseConflictException("Idempotency key already exists with a different request body.");
-            }
-            return readJson(idempotency.getResponseJson(), RowCommandResponse.class);
-        }
+        Optional<RowCommandResponse> replay = readIdempotentResponse(
+            actor.tenantId(),
+            projectId,
+            ROW_DELETE_COMMAND,
+            request.idempotencyKey(),
+            requestHash,
+            RowCommandResponse.class
+        );
+        if (replay.isPresent()) return replay.get();
 
         WeeklyExpenseSheetEntity sheet = loadSheet(actor.tenantId(), projectId, sheetKey, null, request.expectedSheetVersion());
         requireRowSpan(request.startRow(), request.rowCount());
@@ -1456,7 +1483,7 @@ public class WeeklyExpenseCommandService {
                 continue;
             }
             WeekKey week = parseWeek(row);
-            String cashflowLine = textAt(row, WeeklyExpenseColumn.CASHFLOW_LINE);
+            String cashflowLine = CashflowLineCatalog.canonicalize(textAt(row, WeeklyExpenseColumn.CASHFLOW_LINE));
             if (week == null || cashflowLine.isBlank()) continue;
             BigDecimal amount = WeeklyExpenseFormulaEngine.evaluateRow(row).actualAmount();
             if (amount.signum() == 0) continue;
@@ -1644,6 +1671,28 @@ public class WeeklyExpenseCommandService {
         return sha256(writeJson(request));
     }
 
+    private <T> Optional<T> readIdempotentResponse(
+        String tenantId,
+        String projectId,
+        String commandName,
+        String idempotencyKey,
+        String requestHash,
+        Class<T> responseType
+    ) {
+        Optional<WeeklyExpenseIdempotencyEntity> existing = persistence.findIdempotency(tenantId, idempotencyKey);
+        if (existing.isEmpty()) return Optional.empty();
+
+        WeeklyExpenseIdempotencyEntity idempotency = existing.get();
+        if (!text(idempotency.getProjectId()).equals(text(projectId))
+            || !text(idempotency.getCommandName()).equals(text(commandName))) {
+            throw new WeeklyExpenseConflictException("Idempotency key already exists for a different project or command.");
+        }
+        if (!idempotency.getRequestHash().equals(requestHash)) {
+            throw new WeeklyExpenseConflictException("Idempotency key already exists with a different request body.");
+        }
+        return Optional.of(readJson(idempotency.getResponseJson(), responseType));
+    }
+
     private String sha256(String value) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
@@ -1689,6 +1738,24 @@ public class WeeklyExpenseCommandService {
     }
 
     private record WeekKey(String yearMonth, int weekNo) {
+    }
+
+    private static final class ProjectionLineAccumulator {
+        private final String yearMonth;
+        private final int weekNo;
+        private final String cashflowLine;
+        private BigDecimal amount;
+
+        private ProjectionLineAccumulator(String yearMonth, int weekNo, String cashflowLine, BigDecimal amount) {
+            this.yearMonth = yearMonth;
+            this.weekNo = weekNo;
+            this.cashflowLine = cashflowLine;
+            this.amount = amount;
+        }
+
+        private void add(BigDecimal nextAmount) {
+            this.amount = this.amount.add(nextAmount);
+        }
     }
 
     private record ExistingRowIdentity(String id, long rowVersion, String sourceTxId) {

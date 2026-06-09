@@ -78,6 +78,21 @@ describe('platform-bff-client', () => {
     });
   });
 
+  it('rejects Vercel and same-origin Java API base URLs in production platform mode', () => {
+    for (const baseUrl of [
+      '/',
+      'http://127.0.0.1:8787',
+      'https://inner-platform.vercel.app',
+      'https://inner-platform-stage-merryai-devs-projects.vercel.app',
+    ]) {
+      expect(() => readPlatformApiRuntimeConfig({
+        PROD: 'true',
+        VITE_PLATFORM_API_ENABLED: 'true',
+        VITE_PLATFORM_API_BASE_URL: baseUrl,
+      })).toThrow(/VITE_PLATFORM_API_BASE_URL must/);
+    }
+  });
+
   it('routes only weekly and cashflow paths to Java API while preserving legacy BFF routes', async () => {
     const calls: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {

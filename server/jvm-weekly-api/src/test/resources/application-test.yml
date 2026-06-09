@@ -9,6 +9,7 @@ spring:
   flyway:
     enabled: true
 weekly:
+  internal-api-token-enabled: true
   internal-api-token: test-weekly-api-token
   firebase-test-tokens-enabled: true
   project-access-backend: disabled

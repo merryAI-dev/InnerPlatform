@@ -1,4 +1,5 @@
 import { featureFlags, parseFeatureFlag } from '../config/feature-flags';
+import { normalizePlatformApiBaseUrl } from '../platform/platform-api-base-url';
 import type {
   AccountType,
   ProjectExecutiveReviewStatus,
@@ -952,16 +953,6 @@ export interface PlatformApiClientLike {
 
 const DEFAULT_BFF_BASE_URL = 'http://127.0.0.1:8787';
 
-function normalizeBaseUrl(value: unknown, options: { requireConfigured?: boolean; fallback?: string } = {}): string {
-  if (typeof value !== 'string' || !value.trim()) {
-    if (options.requireConfigured) {
-      throw new Error('VITE_PLATFORM_API_BASE_URL is required for stage/live platform API operation.');
-    }
-    return options.fallback ?? DEFAULT_BFF_BASE_URL;
-  }
-  return value.trim().replace(/\/$/, '');
-}
-
 export function readPlatformApiRuntimeConfig(
   env: Record<string, unknown> = import.meta.env,
 ): PlatformApiRuntimeConfig {
@@ -969,10 +960,12 @@ export function readPlatformApiRuntimeConfig(
   const isProductionBuild = parseFeatureFlag(env.PROD, false);
   return {
     enabled,
-    baseUrl: normalizeBaseUrl(env.VITE_PLATFORM_API_BASE_URL, {
+    baseUrl: normalizePlatformApiBaseUrl(env.VITE_PLATFORM_API_BASE_URL, {
       requireConfigured: enabled && isProductionBuild,
+      rejectBrowserRewriteHosts: enabled && isProductionBuild,
+      errorPrefix: 'VITE_PLATFORM_API_BASE_URL',
     }),
-    legacyBaseUrl: normalizeBaseUrl(env.VITE_PLATFORM_LEGACY_BFF_BASE_URL, {
+    legacyBaseUrl: normalizePlatformApiBaseUrl(env.VITE_PLATFORM_LEGACY_BFF_BASE_URL, {
       fallback: isProductionBuild ? '' : DEFAULT_BFF_BASE_URL,
     }),
   };

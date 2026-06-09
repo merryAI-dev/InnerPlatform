@@ -59,6 +59,9 @@ describe('backend authority policy', () => {
     expect(apiSession).toContain('/api/v1/auth/session');
     expect(verifierSource).toContain('tenantId');
     expect(verifierSource).toContain('role');
+    expect(filterSource).toContain('internalApiTokenEnabled && tokensMatch');
+    expect(filterSource).toContain('weekly_expense_csrf_origin_required');
+    expect(cloudBuild).toContain('JVM_WEEKLY_INTERNAL_API_TOKEN_ENABLED=false');
     expect(cloudBuild).toContain('--ingress all');
     expect(cloudBuild).toContain('--allow-unauthenticated');
     expect(cloudBuild).not.toContain('--no-allow-unauthenticated');
@@ -183,5 +186,12 @@ describe('backend authority policy', () => {
     expect(clientSource).toContain('/api/v1/weekly-expenses/${encodeURIComponent(params.body.projectId)}/audit-export');
     expect(projectSheetSource).toContain('import.meta.env.PROD');
     expect(projectSheetSource).toContain('감사용 다운로드 경로를 확인할 수 없습니다.');
+  });
+
+  it('keeps inherited Firestore weekly storage collision-safe for bank import batches', () => {
+    const persistence = readText('server/jvm-weekly-api/src/main/java/dev/merryai/innerplatform/weekly/storage/FirestoreInheritedWeeklyExpensePersistence.java');
+
+    expect(persistence).toContain('UUID.randomUUID()');
+    expect(persistence).not.toContain('"bank-import-" + Instant.now().toEpochMilli()');
   });
 });

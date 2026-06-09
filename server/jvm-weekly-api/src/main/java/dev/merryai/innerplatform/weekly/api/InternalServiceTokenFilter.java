@@ -25,17 +25,23 @@ import java.util.Vector;
 public class InternalServiceTokenFilter extends OncePerRequestFilter {
     public static final String HEADER_NAME = "x-inner-platform-service-token";
 
+    private final boolean internalApiTokenEnabled;
     private final String internalApiToken;
+    private final Set<String> allowedOrigins;
     private final FirebaseBearerTokenVerifier firebaseBearerTokenVerifier;
 
     public InternalServiceTokenFilter(
+        @Value("${weekly.internal-api-token-enabled:false}") boolean internalApiTokenEnabled,
         @Value("${weekly.internal-api-token}") String internalApiToken,
+        @Value("${weekly.allowed-origins:}") String allowedOrigins,
         FirebaseBearerTokenVerifier firebaseBearerTokenVerifier
     ) {
-        if (internalApiToken == null || internalApiToken.isBlank()) {
+        if (internalApiTokenEnabled && (internalApiToken == null || internalApiToken.isBlank())) {
             throw new IllegalStateException("weekly.internal-api-token must be configured.");
         }
+        this.internalApiTokenEnabled = internalApiTokenEnabled;
         this.internalApiToken = internalApiToken;
+        this.allowedOrigins = parseAllowedOrigins(allowedOrigins);
         this.firebaseBearerTokenVerifier = firebaseBearerTokenVerifier;
     }
 
@@ -51,7 +57,7 @@ public class InternalServiceTokenFilter extends OncePerRequestFilter {
         }
 
         String suppliedToken = request.getHeader(HEADER_NAME);
-        if (tokensMatch(internalApiToken, suppliedToken)) {
+        if (internalApiTokenEnabled && tokensMatch(internalApiToken, suppliedToken)) {
             filterChain.doFilter(request, response);
             return;
         }
@@ -124,17 +130,40 @@ public class InternalServiceTokenFilter extends OncePerRequestFilter {
         if (!isMutationMethod(request.getMethod())) return;
         if (readCookie(request, WeeklyAuthSessionController.SESSION_COOKIE_NAME).isBlank()) return;
         String requestId = request.getHeader("x-request-id");
-        if (requestId != null && !requestId.isBlank()) return;
+        if (requestId == null || requestId.isBlank()) {
+            throw new WeeklyApiAuthException(
+                HttpServletResponse.SC_FORBIDDEN,
+                "weekly_expense_csrf_header_required",
+                "Session-cookie mutations require x-request-id."
+            );
+        }
+        String origin = request.getHeader("origin");
+        if (origin != null && allowedOrigins.contains(origin.trim())) return;
         throw new WeeklyApiAuthException(
             HttpServletResponse.SC_FORBIDDEN,
-            "weekly_expense_csrf_header_required",
-            "Session-cookie mutations require x-request-id."
+            "weekly_expense_csrf_origin_required",
+            "Session-cookie mutations require an allowed Origin."
         );
     }
 
     private boolean isMutationMethod(String method) {
         String normalized = method == null ? "GET" : method.trim().toUpperCase(Locale.ROOT);
         return "POST".equals(normalized) || "PUT".equals(normalized) || "PATCH".equals(normalized) || "DELETE".equals(normalized);
+    }
+
+    private Set<String> parseAllowedOrigins(String raw) {
+        String text = raw == null ? "" : raw.trim();
+        if (text.isEmpty()) {
+            return Set.of("https://inner-platform.vercel.app");
+        }
+        Set<String> origins = new LinkedHashSet<>();
+        for (String origin : text.split(",")) {
+            String value = origin.trim();
+            if (!value.isBlank()) {
+                origins.add(value);
+            }
+        }
+        return origins.isEmpty() ? Set.of("https://inner-platform.vercel.app") : origins;
     }
 
     private void requireHeaderMatch(
