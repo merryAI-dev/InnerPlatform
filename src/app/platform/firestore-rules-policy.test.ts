@@ -49,6 +49,15 @@ describe('firestore rules policy alignment', () => {
     }
   });
 
+  it('prevents users from self-assigning project access in member documents', () => {
+    expect(firestoreRulesText).toContain('function hasNoSelfAssignedMemberProjects()');
+    expect(firestoreRulesText).toContain('function keepsMemberProjectAssignmentUnchanged()');
+    expect(firestoreRulesText).toContain("'projectIds'");
+    expect(firestoreRulesText).toContain("'portalProfile'");
+    expect(firestoreRulesText).toContain('&& hasNoSelfAssignedMemberProjects();');
+    expect(firestoreRulesText).toContain('&& keepsMemberProjectAssignmentUnchanged();');
+  });
+
   // ── viewer permissions (project:write granted for project registration) ──
   it('viewer can write projects but not evidence/ledger/transactions', () => {
     expect(hasPermission('viewer', 'project:write')).toBe(true);

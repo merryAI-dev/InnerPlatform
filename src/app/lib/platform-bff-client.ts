@@ -13,6 +13,7 @@ import type { RequestActor } from '../platform/request-context';
 export interface PlatformApiRuntimeConfig {
   enabled: boolean;
   baseUrl: string;
+  legacyBaseUrl: string;
 }
 
 export interface ActorLike {
@@ -581,6 +582,44 @@ export interface WeeklyExpenseSaveDraftResult {
   auditId: string;
 }
 
+export interface WeeklyExpenseSheetReadModel {
+  ok: boolean;
+  projectId: string;
+  sheetId: string;
+  sheetKey: string;
+  sheetName: string;
+  sheetVersion: number;
+  rows: Array<{
+    id: string;
+    rowIndex: number;
+    rowVersion: number;
+    sourceTxId?: string | null;
+    entryKind?: string | null;
+    cells: Array<{
+      columnIndex: number;
+      rawValue: string;
+      normalizedValue?: string;
+      valueType?: string;
+      validationStatus?: string;
+      validationMessage?: string;
+      userEdited: boolean;
+    }>;
+  }>;
+}
+
+export interface WeeklyExpenseSheetsResult {
+  ok: boolean;
+  projectId: string;
+  sheets: WeeklyExpenseSheetReadModel[];
+}
+
+function withCommandIdempotencyKey<T extends object>(payload: T, idempotencyKey: string): T & { idempotencyKey: string } {
+  return {
+    ...payload,
+    idempotencyKey,
+  };
+}
+
 export type WeeklyExpenseClipboardDepth = 'SHALLOW' | 'DEEP';
 export type WeeklyExpenseClipboardOperationType = 'COPY' | 'CUT';
 export type WeeklyExpenseClipboardValueType = 'TEXT' | 'NUMBER' | 'DATE' | 'BOOLEAN';
@@ -913,12 +952,12 @@ export interface PlatformApiClientLike {
 
 const DEFAULT_BFF_BASE_URL = 'http://127.0.0.1:8787';
 
-function normalizeBaseUrl(value: unknown, options: { requireConfigured?: boolean } = {}): string {
+function normalizeBaseUrl(value: unknown, options: { requireConfigured?: boolean; fallback?: string } = {}): string {
   if (typeof value !== 'string' || !value.trim()) {
     if (options.requireConfigured) {
       throw new Error('VITE_PLATFORM_API_BASE_URL is required for stage/live platform API operation.');
     }
-    return DEFAULT_BFF_BASE_URL;
+    return options.fallback ?? DEFAULT_BFF_BASE_URL;
   }
   return value.trim().replace(/\/$/, '');
 }
@@ -927,10 +966,14 @@ export function readPlatformApiRuntimeConfig(
   env: Record<string, unknown> = import.meta.env,
 ): PlatformApiRuntimeConfig {
   const enabled = parseFeatureFlag(env.VITE_PLATFORM_API_ENABLED, parseFeatureFlag(env.PROD, false));
+  const isProductionBuild = parseFeatureFlag(env.PROD, false);
   return {
     enabled,
     baseUrl: normalizeBaseUrl(env.VITE_PLATFORM_API_BASE_URL, {
-      requireConfigured: enabled && parseFeatureFlag(env.PROD, false),
+      requireConfigured: enabled && isProductionBuild,
+    }),
+    legacyBaseUrl: normalizeBaseUrl(env.VITE_PLATFORM_LEGACY_BFF_BASE_URL, {
+      fallback: isProductionBuild ? '' : DEFAULT_BFF_BASE_URL,
     }),
   };
 }
@@ -945,18 +988,56 @@ export function toRequestActor(actor: ActorLike): RequestActor {
 
 export function createPlatformApiClient(
   env: Record<string, unknown> = import.meta.env,
-): PlatformApiClient {
+): PlatformApiClientLike {
   const config = readPlatformApiRuntimeConfig(env);
-  return new PlatformApiClient({
+  const weeklyClient = new PlatformApiClient({
     baseUrl: config.baseUrl,
     maxRetries: 2,
     retryDelayMs: 200,
     timeoutMs: 4000,
   });
+  const legacyClient = new PlatformApiClient({
+    baseUrl: config.legacyBaseUrl,
+    maxRetries: 2,
+    retryDelayMs: 200,
+    timeoutMs: 4000,
+  });
+  return new RoutingPlatformApiClient(weeklyClient, legacyClient);
 }
 
 function resolveClient(client?: PlatformApiClientLike): PlatformApiClientLike {
   return client || createPlatformApiClient();
+}
+
+function isWeeklyJavaApiPath(path: string): boolean {
+  return /^\/api\/v1\/(?:auth(?:\/|$)|weekly-expenses(?:\/|$)|cashflow(?:\/|$))/.test(path);
+}
+
+class RoutingPlatformApiClient implements PlatformApiClientLike {
+  constructor(
+    private readonly weeklyClient: PlatformApiClient,
+    private readonly legacyClient: PlatformApiClient,
+  ) {}
+
+  get<T>(path: string, options: Parameters<PlatformApiClientLike['get']>[1]): Promise<{ data: T }> {
+    return this.clientFor(path).get<T>(path, options);
+  }
+
+  post<T>(path: string, options: Parameters<PlatformApiClientLike['post']>[1]): Promise<{ data: T }> {
+    return this.clientFor(path).post<T>(path, options);
+  }
+
+  patch<T>(path: string, options: Parameters<PlatformApiClientLike['patch']>[1]): Promise<{ data: T }> {
+    return this.clientFor(path).patch<T>(path, options);
+  }
+
+  request<T>(path: string, options: Parameters<PlatformApiClientLike['request']>[1]): Promise<{ data: T }> {
+    return this.clientFor(path).request<T>(path, options);
+  }
+
+  private clientFor(path: string): PlatformApiClient {
+    return isWeeklyJavaApiPath(path) ? this.weeklyClient : this.legacyClient;
+  }
 }
 
 function encodeHeaderValue(value: string): string {
@@ -1631,6 +1712,7 @@ export async function upsertWeeklyExpenseProjectionViaBff(params: {
     cashflowLine: string;
     amount: number;
   }>;
+  idempotencyKey: string;
   client?: PlatformApiClientLike;
 }): Promise<{ ok: boolean; commandName: string; savedLineCount: number }> {
   const apiClient = resolveClient(params.client);
@@ -1639,7 +1721,7 @@ export async function upsertWeeklyExpenseProjectionViaBff(params: {
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
-      body: { lines: params.lines },
+      body: withCommandIdempotencyKey({ lines: params.lines }, params.idempotencyKey),
       retries: 0,
       timeoutMs: 12000,
     },
@@ -1662,10 +1744,47 @@ export async function saveWeeklyExpenseDraftViaBff(params: {
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
-      body: params.payload,
+      body: withCommandIdempotencyKey(params.payload, params.idempotencyKey),
       idempotencyKey: params.idempotencyKey,
       retries: 0,
       timeoutMs: 20000,
+    },
+  );
+  return response.data;
+}
+
+export async function fetchWeeklyExpenseSheetsViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  client?: PlatformApiClientLike;
+}): Promise<WeeklyExpenseSheetsResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.get<WeeklyExpenseSheetsResult>(
+    `/api/v1/weekly-expenses/${encodeURIComponent(params.projectId)}/sheets`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      timeoutMs: 12000,
+    },
+  );
+  return response.data;
+}
+
+export async function fetchWeeklyExpenseSheetViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  sheetKey: string;
+  client?: PlatformApiClientLike;
+}): Promise<WeeklyExpenseSheetReadModel> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.get<WeeklyExpenseSheetReadModel>(
+    `/api/v1/weekly-expenses/${encodeURIComponent(params.projectId)}/sheets/${encodeURIComponent(params.sheetKey)}`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      timeoutMs: 12000,
     },
   );
   return response.data;
@@ -1686,7 +1805,7 @@ export async function copyWeeklyExpenseCellsViaBff(params: {
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
-      body: params.payload,
+      body: withCommandIdempotencyKey(params.payload, params.idempotencyKey),
       idempotencyKey: params.idempotencyKey,
       retries: 0,
       timeoutMs: 12000,
@@ -1710,7 +1829,7 @@ export async function patchWeeklyExpenseCellsViaBff(params: {
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
-      body: params.payload,
+      body: withCommandIdempotencyKey(params.payload, params.idempotencyKey),
       idempotencyKey: params.idempotencyKey,
       retries: 0,
       timeoutMs: 12000,
@@ -1734,7 +1853,7 @@ export async function pasteWeeklyExpenseCellsViaBff(params: {
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
-      body: params.payload,
+      body: withCommandIdempotencyKey(params.payload, params.idempotencyKey),
       idempotencyKey: params.idempotencyKey,
       retries: 0,
       timeoutMs: 20000,
@@ -1758,7 +1877,7 @@ export async function cutWeeklyExpenseCellsViaBff(params: {
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
-      body: params.payload,
+      body: withCommandIdempotencyKey(params.payload, params.idempotencyKey),
       idempotencyKey: params.idempotencyKey,
       retries: 0,
       timeoutMs: 12000,
@@ -1782,7 +1901,7 @@ export async function insertWeeklyExpenseRowsViaBff(params: {
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
-      body: params.payload,
+      body: withCommandIdempotencyKey(params.payload, params.idempotencyKey),
       idempotencyKey: params.idempotencyKey,
       retries: 0,
       timeoutMs: 12000,
@@ -1806,7 +1925,7 @@ export async function deleteWeeklyExpenseRowsViaBff(params: {
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
-      body: params.payload,
+      body: withCommandIdempotencyKey(params.payload, params.idempotencyKey),
       idempotencyKey: params.idempotencyKey,
       retries: 0,
       timeoutMs: 12000,
@@ -1829,7 +1948,7 @@ export async function importWeeklyExpenseBankStatementBatchViaBff(params: {
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
-      body: params.payload,
+      body: withCommandIdempotencyKey(params.payload, params.idempotencyKey),
       idempotencyKey: params.idempotencyKey,
       retries: 0,
       timeoutMs: 20000,
@@ -1872,7 +1991,7 @@ export async function applyWeeklyExpenseBankStatementItemsViaBff(params: {
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
-      body: params.payload,
+      body: withCommandIdempotencyKey(params.payload, params.idempotencyKey),
       idempotencyKey: params.idempotencyKey,
       retries: 0,
       timeoutMs: 20000,
@@ -1915,6 +2034,7 @@ export async function submitWeeklyExpenseWeekViaBff(params: {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
       body: {
+        idempotencyKey: params.idempotencyKey,
         yearMonth: params.yearMonth,
         weekNo: params.weekNo,
       },
@@ -1942,6 +2062,7 @@ export async function closeWeeklyExpenseWeekViaBff(params: {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
       body: {
+        idempotencyKey: params.idempotencyKey,
         yearMonth: params.yearMonth,
         weekNo: params.weekNo,
       },
@@ -1978,6 +2099,7 @@ export function isPlatformApiEnabled(): boolean {
 export async function exportCashflowWorkbookViaBff(params: {
   tenantId: string;
   actor: ActorLike;
+  idempotencyKey?: string;
   body: {
     scope: 'all' | 'single';
     projectId?: string;
@@ -2002,6 +2124,7 @@ export async function exportCashflowWorkbookViaBff(params: {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
       body: {
+        idempotencyKey: params.idempotencyKey || `audit-export-${params.body.projectId}-${Date.now()}`,
         format: 'CSV',
         includeAuditSummary: true,
       },

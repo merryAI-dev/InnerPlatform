@@ -5,12 +5,16 @@ import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Duration;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/v1/auth")
@@ -59,5 +63,23 @@ public class WeeklyAuthSessionController {
             .path("/")
             .maxAge(maxAge)
             .build();
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<Map<String, String>> invalidFirebaseToken(IllegalArgumentException error) {
+        return ResponseEntity.status(401).body(Map.of(
+            "ok", "false",
+            "code", "weekly_expense_firebase_auth_invalid",
+            "message", error.getMessage()
+        ));
+    }
+
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<Map<String, String>> invalidSessionRequest(MethodArgumentNotValidException error) {
+        return ResponseEntity.status(400).body(Map.of(
+            "ok", "false",
+            "code", "weekly_expense_firebase_auth_request_invalid",
+            "message", "Firebase ID token is required."
+        ));
     }
 }

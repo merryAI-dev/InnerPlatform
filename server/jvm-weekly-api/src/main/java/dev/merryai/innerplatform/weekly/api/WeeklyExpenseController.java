@@ -110,6 +110,29 @@ public class WeeklyExpenseController {
         return commandService.saveDraft(actorContext(tenantId, actorId, actorRole, actorEmail), projectId, sheetKey, request);
     }
 
+    @GetMapping("/weekly-expenses/{projectId}/sheets/{sheetKey}")
+    public WeeklyExpenseSheetResponse readSheet(
+        @PathVariable String projectId,
+        @PathVariable String sheetKey,
+        @RequestHeader("x-tenant-id") String tenantId,
+        @RequestHeader("x-actor-id") String actorId,
+        @RequestHeader("x-actor-role") String actorRole,
+        @RequestHeader(value = "x-actor-email", required = false) String actorEmail
+    ) {
+        return commandService.readSheet(actorContext(tenantId, actorId, actorRole, actorEmail), projectId, sheetKey);
+    }
+
+    @GetMapping("/weekly-expenses/{projectId}/sheets")
+    public WeeklyExpenseSheetsResponse listSheets(
+        @PathVariable String projectId,
+        @RequestHeader("x-tenant-id") String tenantId,
+        @RequestHeader("x-actor-id") String actorId,
+        @RequestHeader("x-actor-role") String actorRole,
+        @RequestHeader(value = "x-actor-email", required = false) String actorEmail
+    ) {
+        return commandService.listSheets(actorContext(tenantId, actorId, actorRole, actorEmail), projectId);
+    }
+
     @PostMapping("/weekly-expenses/{projectId}/bank-statements/import-batch")
     public ImportBankStatementBatchResponse importBankStatementBatch(
         @PathVariable String projectId,
@@ -236,7 +259,7 @@ public class WeeklyExpenseController {
         @RequestHeader("x-actor-role") String actorRole,
         @RequestHeader(value = "x-actor-email", required = false) String actorEmail
     ) {
-        commandService.requireAllowed(WeeklyExpenseCommandService.CASHFLOW_READ_COMMAND, actorContext(tenantId, actorId, actorRole, actorEmail));
+        commandService.requireProjectAllowed(WeeklyExpenseCommandService.CASHFLOW_READ_COMMAND, actorContext(tenantId, actorId, actorRole, actorEmail), projectId);
         List<CashflowSnapshotResponse.ProjectionLine> projection = persistence.findProjectionLines(tenantId, projectId).stream()
             .map(line -> new CashflowSnapshotResponse.ProjectionLine(
                 line.getYearMonth(),
@@ -306,7 +329,7 @@ public class WeeklyExpenseController {
         @RequestHeader("x-actor-role") String actorRole,
         @RequestHeader(value = "x-actor-email", required = false) String actorEmail
     ) {
-        commandService.requireAllowed(WeeklyExpenseCommandService.WEEKLY_STATUS_READ_COMMAND, actorContext(tenantId, actorId, actorRole, actorEmail));
+        commandService.requireProjectAllowed(WeeklyExpenseCommandService.WEEKLY_STATUS_READ_COMMAND, actorContext(tenantId, actorId, actorRole, actorEmail), projectId);
         return new WeeklyExpenseStatusesResponse(
             projectId,
             persistence.findWeeklyStatuses(tenantId, projectId).stream()

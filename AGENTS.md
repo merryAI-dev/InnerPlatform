@@ -49,9 +49,11 @@ npm run build
   - Do not share random Vercel preview URLs for stage QA.
   - Alias command: `npx vercel alias set <deployment-host> inner-platform-stage-merryai-devs-projects.vercel.app --scope merryai-devs-projects`.
 - Stage and production must call the Java API directly for platform API/session flows.
+  - Treat this as a 1,000+ user ERP operating system, not a prototype. Reviewers must block changes that can break login, project operations, weekly expense entry, cashflow, audit export, or stage/live deploy.
   - `VITE_PLATFORM_API_ENABLED=true`.
   - `VITE_PLATFORM_API_BASE_URL` must be an absolute `https://` Cloud Run Java API URL.
   - Never set `VITE_PLATFORM_API_BASE_URL=/`, localhost, or a Vercel URL for stage/live; that routes `/api/v1/auth/session` through Vercel/BFF and causes login/session failures.
+  - Set `JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID` for token/session verification and `JVM_WEEKLY_FIRESTORE_PROJECT_ID` for Firestore storage. Do not repair login by moving storage implicitly.
   - Verify pulled env files with `node scripts/verify_weekly_direct_vercel_env.mjs <env-file>` before stage/live rollout.
 - Production deploy: use the GitHub Actions `Production Deploy` workflow on `main` only.
 - Local production deploy is forbidden. `vercel --prod` and `node deploy-prod-align.mjs` must not be used from a local worktree.

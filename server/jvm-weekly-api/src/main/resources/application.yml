@@ -20,5 +20,8 @@ weekly:
   storage-backend: ${JVM_WEEKLY_STORAGE_BACKEND:jpa}
   internal-api-token: ${JVM_WEEKLY_INTERNAL_API_TOKEN:}
   firebase-project-id: ${JVM_WEEKLY_FIREBASE_PROJECT_ID:${FIREBASE_PROJECT_ID:${GOOGLE_CLOUD_PROJECT:}}}
+  firebase-auth-project-id: ${JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID:${weekly.firebase-project-id}}
+  firestore-project-id: ${JVM_WEEKLY_FIRESTORE_PROJECT_ID:${weekly.firebase-project-id}}
+  project-access-backend: ${JVM_WEEKLY_PROJECT_ACCESS_BACKEND:firestore}
   allowed-origins: ${JVM_WEEKLY_ALLOWED_ORIGINS:https://inner-platform.vercel.app}
   session-cookie-ttl-seconds: ${JVM_WEEKLY_SESSION_COOKIE_TTL_SECONDS:432000}

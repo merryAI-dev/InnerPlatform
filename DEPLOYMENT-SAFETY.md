@@ -21,6 +21,8 @@ Stage/live Java API policy:
 - `VITE_PLATFORM_API_ENABLED` must be exactly `true`.
 - `VITE_PLATFORM_API_BASE_URL` must be an absolute `https://` Java API Cloud Run URL.
 - `VITE_PLATFORM_API_BASE_URL` must not be `/`, localhost, `inner-platform.vercel.app`, or any `*.vercel.app` URL; those route through Vercel/BFF rewrites and break `/api/v1/auth/session`.
+- `JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID` must match the frontend Firebase project that issues browser ID tokens.
+- `JVM_WEEKLY_FIRESTORE_PROJECT_ID` must name the Firestore storage project explicitly; do not let auth fixes silently move storage.
 - Before stage/live rollout, pull the target Vercel env and run:
   `node scripts/verify_weekly_direct_vercel_env.mjs <env-file>`
 - For live, also set `WEEKLY_DIRECT_API_HOST_ALLOWLIST` to the approved Java API host before running the env verification.

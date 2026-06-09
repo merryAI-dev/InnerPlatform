@@ -31,6 +31,12 @@ Preview 환경변수:
 
 이 값이 `/` 또는 Vercel 도메인이면 `/api/v1/auth/session`이 Java API가 아니라 Vercel BFF rewrite로 들어가서 로그인 후 session sync가 400으로 실패한다.
 
+Java API Firebase project env는 분리한다.
+
+- `JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID`: 브라우저 Firebase ID token을 발급한 Auth project와 일치해야 한다.
+- `JVM_WEEKLY_FIRESTORE_PROJECT_ID`: Firestore 저장소 project를 명시한다.
+- `JVM_WEEKLY_FIREBASE_PROJECT_ID` 하나만 바꾸는 방식은 로그인 수정 과정에서 저장소 project까지 이동시킬 수 있으므로 stage/live QA에서 반려한다.
+
 ## Firebase Console 점검 기준
 
 위치:
@@ -95,6 +101,8 @@ Preview 환경변수:
 - Google popup이 열린다.
 - Firebase `unauthorized-domain` 에러가 나지 않는다.
 - `/api/v1/auth/session`이 Cloud Run Java API로 요청되고 2xx를 반환한다.
+- Cloud Run Java API의 `JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID`가 frontend `VITE_FIREBASE_PROJECT_ID`와 일치한다.
+- Cloud Run Java API의 `JVM_WEEKLY_FIRESTORE_PROJECT_ID`가 의도한 Firestore storage project와 일치한다.
 - `@mysc.co.kr`가 아닌 계정으로 로그인하면 회사 계정 제한 안내가 나온다.
 
 비정상:

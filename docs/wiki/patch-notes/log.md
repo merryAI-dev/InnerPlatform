@@ -238,3 +238,7 @@
 ## [2026-06-08] patch-note | shared-portal-architecture | stage Firestore adapter 배포 env
 - pages: [shared-portal-architecture](./pages/shared-portal-architecture.md)
 - summary: JVM weekly API stage 배포 스크립트와 Cloud Build가 `JVM_WEEKLY_STORAGE_BACKEND=firestore`를 명시하도록 보강해, QA/stage가 JPA 기본값이 아니라 Firestore-inherited adapter로 뜨도록 했다.
+
+## [2026-06-09] patch-note | shared-portal-architecture | Java weekly 권위와 self-assignment 차단
+- pages: [shared-portal-architecture](./pages/shared-portal-architecture.md)
+- summary: weekly/cashflow/auth만 Java API로 직접 라우팅하고, Java project access가 참조하는 Firestore member project assignment는 클라이언트 self-write로 변경되지 않도록 rules와 프론트 동기화 경로를 함께 닫았다.

@@ -319,6 +319,7 @@ async function upsertMemberFromFirebase(
     getDoc(memberRef),
     legacyMemberRef ? getDoc(legacyMemberRef) : Promise.resolve(null),
   ]);
+  const hasCanonicalMember = memberSnap.exists();
   const existing = mergeMemberRecordSources(
     memberSnap.exists() ? (memberSnap.data() as Record<string, unknown>) : undefined,
     legacySnap?.exists() ? (legacySnap.data() as Record<string, unknown>) : undefined,
@@ -337,6 +338,15 @@ async function upsertMemberFromFirebase(
     access.normalizedProjectId || existing?.projectId,
   ) || '';
 
+  const projectAssignmentPatch = hasCanonicalMember
+    ? {
+        projectId: primaryProjectId,
+        projectIds: mergedProjectIds,
+        projectNames: access.projectNames || existing?.projectNames,
+        portalProfile: existing?.portalProfile,
+      }
+    : {};
+
   const merged = omitUndefinedFields<MemberDoc>({
     uid: firebaseUser.uid,
     name: firebaseUser.displayName || existing?.name || '사용자',
@@ -349,14 +359,11 @@ async function upsertMemberFromFirebase(
     }),
     tenantId,
     status: existing?.status || 'ACTIVE',
-    projectId: primaryProjectId,
-    projectIds: mergedProjectIds,
+    ...projectAssignmentPatch,
     avatarUrl: firebaseUser.photoURL || existing?.avatarUrl,
     createdAt: existing?.createdAt || now,
     updatedAt: now,
     lastLoginAt: now,
-    projectNames: access.projectNames || existing?.projectNames,
-    portalProfile: existing?.portalProfile,
     defaultWorkspace: existing?.defaultWorkspace,
     lastWorkspace: existing?.lastWorkspace,
   });

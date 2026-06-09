@@ -3,7 +3,7 @@
 - route: `shared / architecture`
 - primary users: 운영자, 개발자, QA, 의사결정자
 - status: draft-active
-- last updated: 2026-06-08
+- last updated: 2026-06-09
 
 ## Purpose
 
@@ -33,11 +33,14 @@
 - [x] stage/live 주간 사업비 경로에서 Vercel/BFF rewrite가 아닌 직접 Java API base URL을 요구
 - [x] Java weekly API가 JPA와 현재 Firestore 문서 구조를 같은 persistence port 뒤에서 선택할 수 있음
 - [x] JVM weekly API stage deploy는 `JVM_WEEKLY_STORAGE_BACKEND=firestore`를 명시해 Firestore 상속 adapter로 기동함
+- [x] 주간 사업비/캐시플로 Java API는 Firestore member 문서의 project assignment를 읽되, 클라이언트 self-assignment는 Firestore rules에서 차단함
+- [x] stage/live Java API routing은 weekly/cashflow/auth만 직접 Java로 보내고, 나머지 legacy API는 별도 legacy BFF 채널로 유지함
 - [ ] admin summary surface cutover까지 완료됨
 - [ ] 포털의 broad Firestore direct read가 완전히 제거됨
 
 ## Recent Changes
 
+- [2026-06-09] Java weekly API에 server-readable sheet hydrate endpoint와 project-scoped authorization gate를 추가하고, `members/{uid}`의 `projectId/projectIds/portalProfile` self-write를 Firestore rules에서 차단했다. Frontend는 stage/live에서 주간 사업비 sheet hydrate, projection/actual, audit export를 Java API로만 요청하며, legacy BFF route와 weekly Java route를 명시적으로 분리한다.
 - [2026-06-08] Java weekly API에 persistence port와 Firestore-inherited adapter를 추가해 현재 `expense_sheets`, `cashflow_weeks`, `expense_intake` 문서를 삭제 없이 상속하도록 했다. Frontend는 stage/live에서 세션 쿠키가 준비된 뒤 Java API로만 주간 사업비/캐시플로 명령을 보내며, Firestore adapter는 row/cell 검증, actual merge, projection/status/audit를 서버 transaction 경계 안에서 처리한다.
 - [2026-06-08] JVM weekly API stage deploy env에 `JVM_WEEKLY_STORAGE_BACKEND=firestore`를 추가해 Cloud Build와 수동 Cloud Run deploy 모두 Firestore-inherited adapter로 기동하도록 고정했다.
 - [2026-06-08] 주간 사업비와 캐시플로 Projection/Actual 경로를 Java Spring/JPA API 기준으로 재설계했다. Firestore direct write와 BFF-only mutation은 stage/live 정책에서 반려되며, 프론트는 표시와 명령 전달만 맡도록 노출 정책과 검증 스크립트를 추가했다.

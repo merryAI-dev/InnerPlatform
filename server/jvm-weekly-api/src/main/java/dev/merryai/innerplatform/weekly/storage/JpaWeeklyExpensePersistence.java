@@ -78,6 +78,11 @@ public class JpaWeeklyExpensePersistence implements WeeklyExpensePersistence {
     }
 
     @Override
+    public List<WeeklyExpenseSheetEntity> findSheets(String tenantId, String projectId) {
+        return sheetRepository.findByTenantIdAndProjectIdOrderBySheetKeyAsc(tenantId, projectId);
+    }
+
+    @Override
     public WeeklyExpenseSheetEntity saveSheet(WeeklyExpenseSheetEntity sheet) {
         return sheetRepository.saveAndFlush(sheet);
     }

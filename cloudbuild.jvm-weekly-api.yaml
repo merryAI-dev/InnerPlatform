@@ -34,12 +34,26 @@ steps:
           echo "[cloudbuild-jvm-weekly-api] _JVM_WEEKLY_DATABASE_URL must not point at localhost"
           exit 1
         fi
-        FIREBASE_PROJECT_ID="${_JVM_WEEKLY_FIREBASE_PROJECT_ID}"
-        if [[ -z "$${FIREBASE_PROJECT_ID}" ]]; then
-          FIREBASE_PROJECT_ID="$PROJECT_ID"
+        FIRESTORE_PROJECT_ID="${_JVM_WEEKLY_FIRESTORE_PROJECT_ID}"
+        if [[ -z "$${FIRESTORE_PROJECT_ID}" ]]; then
+          FIRESTORE_PROJECT_ID="${_JVM_WEEKLY_FIREBASE_PROJECT_ID}"
         fi
-        if [[ -z "$${FIREBASE_PROJECT_ID}" ]]; then
-          echo "[cloudbuild-jvm-weekly-api] _JVM_WEEKLY_FIREBASE_PROJECT_ID or PROJECT_ID is required for browser-direct auth"
+        if [[ -z "$${FIRESTORE_PROJECT_ID}" ]]; then
+          FIRESTORE_PROJECT_ID="$PROJECT_ID"
+        fi
+        AUTH_PROJECT_ID="${_JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID}"
+        if [[ -z "$${AUTH_PROJECT_ID}" ]]; then
+          AUTH_PROJECT_ID="${_JVM_WEEKLY_FIREBASE_PROJECT_ID}"
+        fi
+        if [[ -z "$${AUTH_PROJECT_ID}" ]]; then
+          AUTH_PROJECT_ID="$PROJECT_ID"
+        fi
+        if [[ -z "$${AUTH_PROJECT_ID}" ]]; then
+          echo "[cloudbuild-jvm-weekly-api] _JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID, _JVM_WEEKLY_FIREBASE_PROJECT_ID, or PROJECT_ID is required for browser-direct auth"
+          exit 1
+        fi
+        if [[ -z "$${FIRESTORE_PROJECT_ID}" ]]; then
+          echo "[cloudbuild-jvm-weekly-api] _JVM_WEEKLY_FIRESTORE_PROJECT_ID, _JVM_WEEKLY_FIREBASE_PROJECT_ID, or PROJECT_ID is required for Firestore storage"
           exit 1
         fi
         if [[ -z "${_JVM_WEEKLY_ALLOWED_ORIGINS}" ]]; then
@@ -60,7 +74,7 @@ steps:
           --ingress all \
           --allow-unauthenticated \
           "$${NETWORK_ARGS[@]}" \
-          --set-env-vars "^|^WEEKLY_API_PORT=8080|JVM_WEEKLY_STORAGE_BACKEND=${_JVM_WEEKLY_STORAGE_BACKEND}|JVM_WEEKLY_DATABASE_URL=${_JVM_WEEKLY_DATABASE_URL}|JVM_WEEKLY_DATABASE_USER=${_JVM_WEEKLY_DATABASE_USER}|JVM_WEEKLY_FIREBASE_PROJECT_ID=$${FIREBASE_PROJECT_ID}|JVM_WEEKLY_ALLOWED_ORIGINS=${_JVM_WEEKLY_ALLOWED_ORIGINS}" \
+          --set-env-vars "^|^WEEKLY_API_PORT=8080|JVM_WEEKLY_STORAGE_BACKEND=${_JVM_WEEKLY_STORAGE_BACKEND}|JVM_WEEKLY_PROJECT_ACCESS_BACKEND=${_JVM_WEEKLY_PROJECT_ACCESS_BACKEND}|JVM_WEEKLY_DATABASE_URL=${_JVM_WEEKLY_DATABASE_URL}|JVM_WEEKLY_DATABASE_USER=${_JVM_WEEKLY_DATABASE_USER}|JVM_WEEKLY_FIREBASE_PROJECT_ID=$${FIRESTORE_PROJECT_ID}|JVM_WEEKLY_FIRESTORE_PROJECT_ID=$${FIRESTORE_PROJECT_ID}|JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID=$${AUTH_PROJECT_ID}|JVM_WEEKLY_ALLOWED_ORIGINS=${_JVM_WEEKLY_ALLOWED_ORIGINS}" \
           --set-secrets "JVM_WEEKLY_DATABASE_PASSWORD=${_JVM_WEEKLY_DATABASE_PASSWORD_SECRET}:latest,JVM_WEEKLY_INTERNAL_API_TOKEN=${_JVM_WEEKLY_INTERNAL_API_TOKEN_SECRET}:latest"
         SERVICE_URL="$(gcloud run services describe innerplatform-jvm-weekly-api --region "${_REGION}" --format='value(status.url)')"
         if [[ -n "${_JVM_WEEKLY_SMOKE_URL}" ]]; then
@@ -92,8 +106,11 @@ substitutions:
   _JVM_WEEKLY_DATABASE_URL: ''
   _JVM_WEEKLY_DATABASE_USER: innerplatform
   _JVM_WEEKLY_STORAGE_BACKEND: firestore
+  _JVM_WEEKLY_PROJECT_ACCESS_BACKEND: firestore
   _JVM_WEEKLY_FIREBASE_PROJECT_ID: ''
-  _JVM_WEEKLY_ALLOWED_ORIGINS: 'https://inner-platform.vercel.app'
+  _JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID: ''
+  _JVM_WEEKLY_FIRESTORE_PROJECT_ID: ''
+  _JVM_WEEKLY_ALLOWED_ORIGINS: 'https://inner-platform-stage-merryai-devs-projects.vercel.app,https://inner-platform.vercel.app'
   _JVM_WEEKLY_DATABASE_PASSWORD_SECRET: innerplatform-weekly-db-password
   _JVM_WEEKLY_INTERNAL_API_TOKEN_SECRET: innerplatform-weekly-api-token
   _FIREBASE_WEB_API_KEY_SECRET: innerplatform-firebase-web-api-key

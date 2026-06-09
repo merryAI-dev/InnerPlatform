@@ -55,6 +55,22 @@ service cloud.firestore {
         && getMemberRole(orgId) in ['admin', 'finance'];
     }
 
+    function hasNoSelfAssignedMemberProjects() {
+      return !request.resource.data.keys().hasAny([
+        'projectId',
+        'projectIds',
+        'projectNames',
+        'portalProfile'
+      ]);
+    }
+
+    function keepsMemberProjectAssignmentUnchanged() {
+      return request.resource.data.get('projectId', '') == resource.data.get('projectId', '')
+        && request.resource.data.get('projectIds', []) == resource.data.get('projectIds', [])
+        && request.resource.data.get('projectNames', {}) == resource.data.get('projectNames', {})
+        && request.resource.data.get('portalProfile', null) == resource.data.get('portalProfile', null);
+    }
+
     // BFF 전용 PII 컬렉션: 클라이언트 SDK 직접 접근 금지.
     // BFF(Admin SDK)는 rules를 우회하므로 검증, 감사, idempotency를 서버에서 강제한다.
     function isBffOnlyCollection(collection) {
@@ -98,12 +114,14 @@ service cloud.firestore {
       allow create: if isSignedIn()
         && memberId == request.auth.uid
         && request.resource.data.uid == request.auth.uid
-        && request.resource.data.role == 'pm';
+        && request.resource.data.role == 'pm'
+        && hasNoSelfAssignedMemberProjects();
 
       // 자기 문서 업데이트: lastLoginAt/avatarUrl 등 갱신 허용, role 변경 불가
       allow update: if isSignedIn()
         && memberId == request.auth.uid
-        && request.resource.data.role == resource.data.role;
+        && request.resource.data.role == resource.data.role
+        && keepsMemberProjectAssignmentUnchanged();
 
       // Admin: 역할 변경·삭제·타인 문서 수정 포함 모든 쓰기
       allow write: if isAdmin(orgId);

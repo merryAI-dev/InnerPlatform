@@ -22,15 +22,15 @@ public class FirebaseBearerTokenVerifier {
     private static final String TEST_TOKEN_PREFIX = "test-firebase:";
     private static final String TEST_SESSION_PREFIX = "test-firebase-session:";
 
-    private final String firebaseProjectId;
+    private final String firebaseAuthProjectId;
     private final boolean testTokensEnabled;
     private volatile FirebaseAuth firebaseAuth;
 
     public FirebaseBearerTokenVerifier(
-        @Value("${weekly.firebase-project-id:}") String firebaseProjectId,
+        @Value("${weekly.firebase-auth-project-id:}") String firebaseAuthProjectId,
         @Value("${weekly.firebase-test-tokens-enabled:false}") boolean testTokensEnabled
     ) {
-        this.firebaseProjectId = firebaseProjectId == null ? "" : firebaseProjectId.trim();
+        this.firebaseAuthProjectId = firebaseAuthProjectId == null ? "" : firebaseAuthProjectId.trim();
         this.testTokensEnabled = testTokensEnabled;
     }
 
@@ -101,8 +101,8 @@ public class FirebaseBearerTokenVerifier {
     private FirebaseAuth auth() {
         FirebaseAuth existing = firebaseAuth;
         if (existing != null) return existing;
-        if (firebaseProjectId.isBlank()) {
-            throw new IllegalStateException("weekly.firebase-project-id must be configured for browser-direct Java API auth.");
+        if (firebaseAuthProjectId.isBlank()) {
+            throw new IllegalStateException("weekly.firebase-auth-project-id must be configured for browser-direct Java API auth.");
         }
         synchronized (this) {
             if (firebaseAuth == null) {
@@ -120,7 +120,7 @@ public class FirebaseBearerTokenVerifier {
         }
         try {
             FirebaseOptions options = FirebaseOptions.builder()
-                .setProjectId(firebaseProjectId)
+                .setProjectId(firebaseAuthProjectId)
                 .setCredentials(GoogleCredentials.getApplicationDefault())
                 .build();
             return FirebaseApp.initializeApp(options, "innerplatform-weekly-api");

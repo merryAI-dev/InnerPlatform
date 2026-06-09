@@ -313,6 +313,7 @@ export function CashflowProjectSheet({
       if (isPlatformApiEnabled() && user) {
         const response = await exportCashflowWorkbookViaBff({
           tenantId: orgId,
+          idempotencyKey: `audit-export-${projectId}-${yearMonth}-${Date.now()}`,
           actor: {
             uid: user.uid,
             email: user.email,

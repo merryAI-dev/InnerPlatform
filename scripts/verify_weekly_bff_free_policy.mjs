@@ -46,6 +46,8 @@ for (const source of [cloudBuild, deployScript]) {
 }
 
 requireIncludes(cloudBuild, 'JVM_WEEKLY_FIREBASE_PROJECT_ID', 'Java Firebase project env');
+requireIncludes(cloudBuild, 'JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID', 'Java Firebase auth project env');
+requireIncludes(cloudBuild, 'JVM_WEEKLY_FIRESTORE_PROJECT_ID', 'Java Firestore storage project env');
 requireIncludes(cloudBuild, 'JVM_WEEKLY_ALLOWED_ORIGINS', 'Java CORS env');
 requireIncludes(cloudBuild, 'eval "$(node scripts/create_firebase_smoke_id_token.mjs --env)"', 'stage smoke Firebase ID token and UID minting');
 requireIncludes(cloudBuild, '--require-identity-token', 'stage smoke browser-direct auth requirement');

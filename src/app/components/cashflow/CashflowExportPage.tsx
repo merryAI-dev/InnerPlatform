@@ -190,6 +190,7 @@ export function CashflowExportPage() {
       }
       const response = await exportCashflowWorkbookViaBff({
         tenantId: orgId,
+        idempotencyKey: `audit-export-${projectInputs[0]?.projectId || 'unknown'}-${yearMonths[0]}-${yearMonths[yearMonths.length - 1]}-${Date.now()}`,
         actor: {
           uid: user.uid,
           email: user.email,

@@ -65,11 +65,11 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     private final ThreadLocal<Map<String, Map<String, Object>>> transactionDocumentCache = new ThreadLocal<>();
 
     public FirestoreInheritedWeeklyExpensePersistence(
-        @Value("${weekly.firebase-project-id:}") String firebaseProjectId
+        @Value("${weekly.firestore-project-id:}") String firestoreProjectId
     ) {
-        String projectId = firebaseProjectId == null ? "" : firebaseProjectId.trim();
+        String projectId = firestoreProjectId == null ? "" : firestoreProjectId.trim();
         if (projectId.isBlank()) {
-            throw new IllegalStateException("weekly.firebase-project-id is required when weekly.storage-backend=firestore.");
+            throw new IllegalStateException("weekly.firestore-project-id is required when weekly.storage-backend=firestore.");
         }
         try {
             this.db = FirestoreOptions.newBuilder()
@@ -148,6 +148,17 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         DocumentSnapshot snap = get(expenseSheetRef(tenantId, projectId, sheetKey));
         if (!snap.exists()) return Optional.empty();
         return Optional.of(sheetMapper.toSheet(tenantId, projectId, sheetKey, data(snap)));
+    }
+
+    @Override
+    public List<WeeklyExpenseSheetEntity> findSheets(String tenantId, String projectId) {
+        QuerySnapshot snap = query(db.collection("orgs/" + tenantId + "/projects/" + projectId + "/expense_sheets"));
+        List<WeeklyExpenseSheetEntity> sheets = new ArrayList<>();
+        for (DocumentSnapshot doc : snap.getDocuments()) {
+            sheets.add(sheetMapper.toSheet(tenantId, projectId, doc.getId(), data(doc)));
+        }
+        sheets.sort(Comparator.comparing(WeeklyExpenseSheetEntity::getSheetKey));
+        return sheets;
     }
 
     @Override

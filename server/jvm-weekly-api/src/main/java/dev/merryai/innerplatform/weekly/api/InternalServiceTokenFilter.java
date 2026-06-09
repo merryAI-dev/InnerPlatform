@@ -58,7 +58,7 @@ public class InternalServiceTokenFilter extends OncePerRequestFilter {
 
         VerifiedFirebaseActor actor;
         try {
-            actor = completeActorFromRequest(verifyFirebaseActor(request), request);
+            actor = verifyFirebaseActor(request);
             requireHeaderMatch(request, "x-tenant-id", actor.tenantId(), "tenant_mismatch", "Header tenant does not match token tenant.");
             requireHeaderMatch(request, "x-actor-id", actor.actorId(), "actor_mismatch", "Header actor does not match token subject.");
             requireCookieMutationHeader(request);
@@ -108,24 +108,6 @@ public class InternalServiceTokenFilter extends OncePerRequestFilter {
             return firebaseBearerTokenVerifier.verifySessionCookie(sessionCookie);
         }
         return firebaseBearerTokenVerifier.verify(parseBearer(request.getHeader("authorization")));
-    }
-
-    private VerifiedFirebaseActor completeActorFromRequest(VerifiedFirebaseActor actor, HttpServletRequest request) {
-        String tenantId = actor.tenantId();
-        if (tenantId == null || tenantId.isBlank()) {
-            tenantId = readTrustedContextHeader(request, "x-tenant-id", "default");
-        }
-        String role = actor.actorRole();
-        if (role == null || role.isBlank()) {
-            role = readTrustedContextHeader(request, "x-actor-role", "pm").toLowerCase(Locale.ROOT);
-        }
-        return new VerifiedFirebaseActor(tenantId, actor.actorId(), actor.actorEmail(), role);
-    }
-
-    private String readTrustedContextHeader(HttpServletRequest request, String headerName, String fallback) {
-        String value = request.getHeader(headerName);
-        if (value == null || value.isBlank()) return fallback;
-        return value.trim();
     }
 
     private String readCookie(HttpServletRequest request, String cookieName) {

@@ -92,6 +92,7 @@ import { getAuthInstance, getOrgCollectionPath, getOrgDocumentPath } from '../li
 import {
   applyWeeklyExpenseBankStatementItemsViaBff,
   fetchWeeklyExpenseBankStatementImportLinesViaBff,
+  fetchWeeklyExpenseSheetsViaBff,
   fetchWeeklyExpenseStatusesViaBff,
   importWeeklyExpenseBankStatementBatchViaBff,
   isPlatformApiEnabled,
@@ -100,10 +101,11 @@ import {
   type WeeklyExpenseBankStatementImportLinesResult,
   type WeeklyExpenseDraftCellPatch,
   type WeeklyExpenseDraftRowPatch,
+  type WeeklyExpenseSheetReadModel,
   upsertProjectViaBff,
 } from '../lib/platform-bff-client';
 import { duplicateExpenseSetAsDraft, withExpenseItems } from './portal-store.helpers';
-import { buildPortalProfilePatch, readMemberWorkspace, resolveMemberProjectAccessState } from './member-workspace';
+import { buildPortalProfilePatch, buildWorkspacePreferencePatch, readMemberWorkspace, resolveMemberProjectAccessState } from './member-workspace';
 import { buildLegacyMemberDocId, mergeMemberRecordSources } from './member-documents';
 import { toast } from 'sonner';
 import { includesProject, normalizeProjectIds, resolvePrimaryProjectId } from './project-assignment';
@@ -451,6 +453,51 @@ export function buildBankImportIntakeItemsFromServerLines(params: {
       updatedBy: line.batchCreatedBy || '',
     }))
     .filter((item): item is BankImportIntakeItem => item !== null);
+}
+
+function buildExpenseSheetsFromServerSheets(params: {
+  sheets: WeeklyExpenseSheetReadModel[];
+  now: string;
+}): {
+  sheets: ExpenseSheetTab[];
+  versionBySheetKey: Record<string, number>;
+} {
+  const versionBySheetKey: Record<string, number> = {};
+  const sheets = params.sheets.map((sheet, index) => {
+    const sheetKey = String(sheet.sheetKey || 'default').trim() || 'default';
+    versionBySheetKey[sheetKey] = Number(sheet.sheetVersion) || 0;
+    const rows = (Array.isArray(sheet.rows) ? sheet.rows : [])
+      .slice()
+      .sort((left, right) => Number(left.rowIndex) - Number(right.rowIndex))
+      .map((row) => {
+        const cells = Array.from({ length: SETTLEMENT_COLUMNS.length }, () => '');
+        const userEditedCells = new Set<number>();
+        for (const cell of row.cells || []) {
+          const columnIndex = Number(cell.columnIndex);
+          if (!Number.isInteger(columnIndex) || columnIndex < 0 || columnIndex >= cells.length) continue;
+          cells[columnIndex] = String(cell.rawValue ?? '');
+          if (cell.userEdited) userEditedCells.add(columnIndex);
+        }
+        return {
+          tempId: row.id || `server-row-${sheetKey}-${row.rowIndex}`,
+          ...(row.sourceTxId ? { sourceTxId: row.sourceTxId } : {}),
+          ...(row.entryKind ? { entryKind: row.entryKind } : {}),
+          cells,
+          ...(userEditedCells.size > 0 ? { userEditedCells } : {}),
+        } satisfies ImportRow;
+      });
+    return {
+      id: sheetKey,
+      name: sanitizeExpenseSheetName(sheet.sheetName, sheetKey === 'default' ? '기본 탭' : sheetKey),
+      rows,
+      order: sheetKey === 'default' ? 0 : index + 1,
+      updatedAt: params.now,
+    } satisfies ExpenseSheetTab;
+  });
+  return {
+    sheets,
+    versionBySheetKey,
+  };
 }
 
 export function syncExpenseIntakeEvidenceState(params: {
@@ -997,7 +1044,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           return;
         }
         try {
-          if (access.needsRootSync || usedLegacyFallback) {
+          if ((access.needsRootSync || usedLegacyFallback) && !isPlatformApiEnabled()) {
             const now = new Date().toISOString();
             await setDoc(canonicalRef, {
               uid: authUser.uid,
@@ -1548,42 +1595,88 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       });
       ifActive(() => setExpenseIntakeItems([]));
     };
-    const hydrateWeeklyExpenseServerIntake = async () => {
+    const hydrateWeeklyExpenseServerState = async () => {
       if (!authUser || !currentProjectId) {
-        ifActive(() => setExpenseIntakeItems([]));
+        ifActive(() => {
+          setExpenseIntakeItems([]);
+          setBankStatementRows(null);
+        });
         return;
       }
       try {
         const idToken = authUser.idToken || await getAuthInstance()?.currentUser?.getIdToken() || undefined;
-        const result = await fetchWeeklyExpenseBankStatementImportLinesViaBff({
-          tenantId: orgId,
-          actor: {
-            uid: authUser.uid,
-            email: authUser.email,
-            role: authUser.role,
-            idToken,
-            googleAccessToken: (authUser as any).googleAccessToken,
-          },
-          projectId: currentProjectId,
-          status: 'staged',
+        const actor = {
+          uid: authUser.uid,
+          email: authUser.email,
+          role: authUser.role,
+          idToken,
+          googleAccessToken: (authUser as any).googleAccessToken,
+        };
+        const [sheetsResult, importLinesResult] = await Promise.all([
+          fetchWeeklyExpenseSheetsViaBff({
+            tenantId: orgId,
+            actor,
+            projectId: currentProjectId,
+          }),
+          fetchWeeklyExpenseBankStatementImportLinesViaBff({
+            tenantId: orgId,
+            actor,
+            projectId: currentProjectId,
+            status: 'staged',
+          }),
+        ]);
+        const now = new Date().toISOString();
+        const serverSheets = buildExpenseSheetsFromServerSheets({
+          sheets: Array.isArray(sheetsResult.sheets) ? sheetsResult.sheets : [],
+          now,
         });
+        const nextSheets = serverSheets.sheets.length > 0
+          ? serverSheets.sheets
+          : [{
+              id: 'default',
+              name: '기본 탭',
+              rows: [],
+              order: 0,
+              updatedAt: now,
+            } satisfies ExpenseSheetTab];
+        const currentActiveId = activeExpenseSheetIdRef.current || 'default';
+        const nextActiveId = nextSheets.some((sheet) => sheet.id === currentActiveId)
+          ? currentActiveId
+          : (nextSheets.find((sheet) => sheet.id === 'default')?.id || nextSheets[0]?.id || 'default');
+        const nextRows = nextSheets.find((sheet) => sheet.id === nextActiveId)?.rows || [];
         const nextItems = buildBankImportIntakeItemsFromServerLines({
           projectId: currentProjectId,
-          lines: result.lines,
-          now: new Date().toISOString(),
+          lines: importLinesResult.lines,
+          now,
         }).sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')));
         ifActive(() => {
+          weeklyExpenseSheetVersionRef.current = {
+            ...weeklyExpenseSheetVersionRef.current,
+            ...Object.fromEntries(
+              Object.entries(serverSheets.versionBySheetKey).map(([sheetKey, version]) => [
+                `${currentProjectId}:${sheetKey}`,
+                version,
+              ]),
+            ),
+          };
+          expenseSheetsRef.current = nextSheets;
+          setExpenseSheets(nextSheets);
+          activeExpenseSheetIdRef.current = nextActiveId;
+          setActiveExpenseSheetIdState(nextActiveId);
+          expenseSheetRowsRef.current = nextRows;
+          setExpenseSheetRows(nextRows);
+          setBankStatementRows(null);
           expenseIntakeItemsRef.current = nextItems;
           setExpenseIntakeItems(nextItems);
         });
       } catch (err) {
         reportError(err, {
-          message: '[PortalStore] weekly expense staged intake load error:',
+          message: '[PortalStore] weekly expense server state load error:',
           options: {
             level: 'error',
             tags: {
               surface: 'portal_store',
-              action: 'weekly_expense_staged_intake_load',
+              action: 'weekly_expense_server_state_load',
             },
             extra: {
               orgId,
@@ -1770,9 +1863,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       projectScopeUnsubsRef.current.push(onSnapshot(evidenceMapRef, handleEvidenceMapResult, handleEvidenceMapError));
       projectScopeUnsubsRef.current.push(onSnapshot(sheetSourceCollection, (snap) => handleSheetSourceResult(snap.docs), handleSheetSourceError));
       if (weeklyExpenseServerAuthority) {
-        void hydrateWeeklyExpenseServerIntake();
-        setExpenseSheets([]);
-        setExpenseSheetRows(null);
+        void hydrateWeeklyExpenseServerState();
         setBankStatementRows(null);
       } else {
         projectScopeUnsubsRef.current.push(
@@ -1798,9 +1889,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       getDoc(evidenceMapRef).then(handleEvidenceMapResult).catch(handleEvidenceMapError);
       getDocs(sheetSourceCollection).then((snap) => handleSheetSourceResult(snap.docs)).catch(handleSheetSourceError);
       if (weeklyExpenseServerAuthority) {
-        void hydrateWeeklyExpenseServerIntake();
-        setExpenseSheets([]);
-        setExpenseSheetRows(null);
+        void hydrateWeeklyExpenseServerState();
         setBankStatementRows(null);
       } else {
         getDocs(collection(db, `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/expense_intake`))
@@ -2564,16 +2653,21 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     } else {
       await setDoc(doc(db, getOrgDocumentPath(orgId, 'projects', projectId)), withTenantScope(orgId, project), { merge: true });
     }
-    const nextPortalProjectIds = normalizeProjectIds([
+    const allowFrontendProjectAssignment = !isPlatformApiEnabled();
+    const currentPortalProjectIds = normalizeProjectIds([
       ...(Array.isArray(portalUser?.projectIds) ? portalUser.projectIds : []),
       portalUser?.projectId,
-      projectId,
     ]);
-    const nextPortalProjectId = resolvePrimaryProjectId(nextPortalProjectIds, projectId) || projectId;
-    const nextPortalProjectNames = {
+    const nextPortalProjectIds = allowFrontendProjectAssignment
+      ? normalizeProjectIds([...currentPortalProjectIds, projectId])
+      : currentPortalProjectIds;
+    const nextPortalProjectId = allowFrontendProjectAssignment
+      ? (resolvePrimaryProjectId(nextPortalProjectIds, projectId) || projectId)
+      : (resolvePrimaryProjectId(nextPortalProjectIds, portalUser?.projectId) || portalUser?.projectId || '');
+    const nextPortalProjectNames = allowFrontendProjectAssignment ? {
       ...(portalUser?.projectNames || {}),
       [projectId]: requestPayload.name,
-    };
+    } : (portalUser?.projectNames || {});
     await setDoc(doc(db, getOrgDocumentPath(orgId, 'members', authUser.uid)), {
       uid: authUser.uid,
       name: authUser.name || portalUser?.name || '사용자',
@@ -2581,28 +2675,32 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       role: normalizePortalRole(authUser.role || portalUser?.role || 'pm'),
       tenantId: orgId,
       status: 'ACTIVE',
-      ...buildPortalProfilePatch({
-        projectId: nextPortalProjectId,
-        projectIds: nextPortalProjectIds,
-        projectNames: nextPortalProjectNames,
-        updatedAt: now,
-        updatedByUid: authUser.uid,
-        updatedByName: authUser.name || portalUser?.name || '사용자',
-      }),
+      ...(allowFrontendProjectAssignment
+        ? buildPortalProfilePatch({
+            projectId: nextPortalProjectId,
+            projectIds: nextPortalProjectIds,
+            projectNames: nextPortalProjectNames,
+            updatedAt: now,
+            updatedByUid: authUser.uid,
+            updatedByName: authUser.name || portalUser?.name || '사용자',
+          })
+        : buildWorkspacePreferencePatch('portal', now, true)),
       updatedAt: now,
       createdAt: authUser.registeredAt || now,
       lastLoginAt: now,
     }, { merge: true });
-    setPortalUser((previous) => normalizePortalUser({
-      id: authUser.uid,
-      name: authUser.name || previous?.name || portalUser?.name || '사용자',
-      email: authUser.email || previous?.email || portalUser?.email || '',
-      role: normalizePortalRole(authUser.role || previous?.role || portalUser?.role || 'pm'),
-      projectId: nextPortalProjectId,
-      projectIds: nextPortalProjectIds,
-      projectNames: nextPortalProjectNames,
-      registeredAt: previous?.registeredAt || authUser.registeredAt || now,
-    }));
+    if (allowFrontendProjectAssignment) {
+      setPortalUser((previous) => normalizePortalUser({
+        id: authUser.uid,
+        name: authUser.name || previous?.name || portalUser?.name || '사용자',
+        email: authUser.email || previous?.email || portalUser?.email || '',
+        role: normalizePortalRole(authUser.role || previous?.role || portalUser?.role || 'pm'),
+        projectId: nextPortalProjectId,
+        projectIds: nextPortalProjectIds,
+        projectNames: nextPortalProjectNames,
+        registeredAt: previous?.registeredAt || authUser.registeredAt || now,
+      }));
+    }
     await setDoc(doc(db, getOrgDocumentPath(orgId, 'projectRequests', id)), {
       ...request,
       status: 'PENDING',
@@ -2965,6 +3063,19 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       toast.error('최소 1개 이상의 사업을 선택해 주세요.');
       return false;
     }
+    if (isPlatformApiEnabled()) {
+      const assignedProjectIds = normalizeProjectIds([
+        ...(Array.isArray(portalUser?.projectIds) ? portalUser.projectIds : []),
+        portalUser?.projectId,
+        ...(Array.isArray(authUser?.projectIds) ? authUser.projectIds : []),
+        authUser?.projectId,
+      ]);
+      const hasOnlyAssignedProjects = normalizedProjectIds.every((projectId) => assignedProjectIds.includes(projectId));
+      if (!hasOnlyAssignedProjects) {
+        toast.error('사업 권한 배정은 관리자 또는 서버 승인 경로에서 처리해야 합니다.');
+        return false;
+      }
+    }
 
     const candidate = normalizePortalUser({
       ...user,
@@ -2995,14 +3106,16 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           role: memberRole,
           tenantId: orgId,
           status: typeof member?.status === 'string' && member.status.trim() ? member.status : 'ACTIVE',
-          ...buildPortalProfilePatch({
-            projectId: candidate.projectId,
-            projectIds: candidate.projectIds,
-            projectNames: candidate.projectNames,
-            updatedAt: now,
-            updatedByUid: authUser.uid,
-            updatedByName: authUser.name || candidate.name,
-          }),
+          ...(isPlatformApiEnabled()
+            ? buildWorkspacePreferencePatch('portal', now, true)
+            : buildPortalProfilePatch({
+                projectId: candidate.projectId,
+                projectIds: candidate.projectIds,
+                projectNames: candidate.projectNames,
+                updatedAt: now,
+                updatedByUid: authUser.uid,
+                updatedByName: authUser.name || candidate.name,
+              })),
           updatedAt: now,
           createdAt: member?.createdAt || authUser.registeredAt || now,
           lastLoginAt: now,

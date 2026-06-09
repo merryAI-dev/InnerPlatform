@@ -12,6 +12,12 @@ export type PlatformPermission =
   | 'project:evidence_drive:write'
   | 'ledger:read'
   | 'ledger:write'
+  | 'weekly_expense:read'
+  | 'weekly_expense:write'
+  | 'weekly_expense:submit'
+  | 'weekly_expense:projection:write'
+  | 'weekly_expense:actual:write'
+  | 'weekly_expense:export'
   | 'transaction:submit'
   | 'transaction:approve'
   | 'transaction:reject'
@@ -42,6 +48,12 @@ const KNOWN_PERMISSIONS = new Set<PlatformPermission>([
   'project:evidence_drive:write',
   'ledger:read',
   'ledger:write',
+  'weekly_expense:read',
+  'weekly_expense:write',
+  'weekly_expense:submit',
+  'weekly_expense:projection:write',
+  'weekly_expense:actual:write',
+  'weekly_expense:export',
   'transaction:submit',
   'transaction:approve',
   'transaction:reject',

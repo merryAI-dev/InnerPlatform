@@ -33,6 +33,8 @@ public interface WeeklyExpensePersistence {
 
     Optional<WeeklyExpenseSheetEntity> findSheetForUpdate(String tenantId, String projectId, String sheetKey);
 
+    List<WeeklyExpenseSheetEntity> findSheets(String tenantId, String projectId);
+
     WeeklyExpenseSheetEntity saveSheet(WeeklyExpenseSheetEntity sheet);
 
     void flushSheet(WeeklyExpenseSheetEntity sheet);

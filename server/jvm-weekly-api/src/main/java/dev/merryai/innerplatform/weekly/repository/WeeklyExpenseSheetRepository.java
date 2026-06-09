@@ -7,12 +7,16 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 
 import java.util.Optional;
+import java.util.List;
 
 public interface WeeklyExpenseSheetRepository extends JpaRepository<WeeklyExpenseSheetEntity, String> {
     Optional<WeeklyExpenseSheetEntity> findByTenantIdAndProjectIdAndSheetKey(String tenantId, String projectId, String sheetKey);
 
     @EntityGraph(attributePaths = "rows")
     Optional<WeeklyExpenseSheetEntity> findWithRowsByTenantIdAndProjectIdAndSheetKey(String tenantId, String projectId, String sheetKey);
+
+    @EntityGraph(attributePaths = "rows")
+    List<WeeklyExpenseSheetEntity> findByTenantIdAndProjectIdOrderBySheetKeyAsc(String tenantId, String projectId);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @EntityGraph(attributePaths = "rows")

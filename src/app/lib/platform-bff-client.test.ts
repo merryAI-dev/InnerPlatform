@@ -28,6 +28,7 @@ import {
   provisionProjectEvidenceDriveRootViaBff,
   provisionTransactionEvidenceDriveViaBff,
   readPlatformApiRuntimeConfig,
+  createPlatformApiClient,
   restoreProjectViaBff,
   closeWeeklyExpenseWeekViaBff,
   syncTransactionEvidenceDriveViaBff,
@@ -39,6 +40,7 @@ import {
   updateContactViaBff,
   uploadTransactionEvidenceDriveViaBff,
   upsertLedgerViaBff,
+  upsertWeeklyExpenseProjectionViaBff,
   type PlatformApiClientLike,
   upsertProjectViaBff,
   upsertTransactionViaBff,
@@ -58,6 +60,7 @@ describe('platform-bff-client', () => {
     expect(readPlatformApiRuntimeConfig({})).toEqual({
       enabled: false,
       baseUrl: 'http://127.0.0.1:8787',
+      legacyBaseUrl: 'http://127.0.0.1:8787',
     });
   });
 
@@ -71,7 +74,61 @@ describe('platform-bff-client', () => {
     })).toEqual({
       enabled: true,
       baseUrl: 'https://java-api.example.run.app',
+      legacyBaseUrl: '',
     });
+  });
+
+  it('routes only weekly and cashflow paths to Java API while preserving legacy BFF routes', async () => {
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.includes('/api/v1/weekly-expenses/p-cashflow/statuses')) {
+        return new Response(JSON.stringify({ projectId: 'p-cashflow', statuses: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json', 'x-request-id': 'req-weekly' },
+        });
+      }
+      if (url.includes('/api/v1/projects')) {
+        return new Response(JSON.stringify({
+          id: 'p001',
+          tenantId: 'mysc',
+          version: 1,
+          updatedAt: '2026-06-09T00:00:00Z',
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json', 'x-request-id': 'req-legacy' },
+        });
+      }
+      return new Response(JSON.stringify({ ok: false }), {
+        status: 404,
+        headers: { 'content-type': 'application/json', 'x-request-id': 'req-miss' },
+      });
+    }));
+
+    const client = createPlatformApiClient({
+      PROD: 'true',
+      VITE_PLATFORM_API_ENABLED: 'true',
+      VITE_PLATFORM_API_BASE_URL: 'https://java-api.example.run.app',
+      VITE_PLATFORM_LEGACY_BFF_BASE_URL: 'https://legacy-bff.example.app',
+    });
+
+    await fetchWeeklyExpenseStatusesViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'viewer-1', role: 'viewer' },
+      projectId: 'p-cashflow',
+      client,
+    });
+    await upsertProjectViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'admin-1', role: 'admin' },
+      project: { id: 'p001', name: 'Project 1' },
+      client,
+    });
+
+    expect(calls[0]).toBe('https://java-api.example.run.app/api/v1/weekly-expenses/p-cashflow/statuses');
+    expect(calls[1]).toBe('https://legacy-bff.example.app/api/v1/projects');
+    vi.unstubAllGlobals();
   });
 
   it('normalizes actor shape', () => {
@@ -422,6 +479,7 @@ describe('platform-bff-client', () => {
       expect(headers.get('x-tenant-id')).toBe('mysc');
       expect(headers.get('x-actor-id')).toBe('u-finance');
       expect(JSON.parse(String(init?.body))).toEqual({
+        idempotencyKey: 'audit-export-key-1',
         format: 'CSV',
         includeAuditSummary: true,
       });
@@ -440,6 +498,7 @@ describe('platform-bff-client', () => {
     try {
       const result = await exportCashflowWorkbookViaBff({
         tenantId: 'mysc',
+        idempotencyKey: 'audit-export-key-1',
         actor: { uid: 'u-finance', role: 'finance', idToken: 'token-export' },
         body: {
           scope: 'single',
@@ -456,6 +515,44 @@ describe('platform-bff-client', () => {
     } finally {
       vi.stubGlobal('fetch', originalFetch);
     }
+  });
+
+  it('sends weekly projection idempotency in the Java request body', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({
+        data: {
+          ok: true,
+          commandName: 'weeklyExpense.projection.upsert',
+          savedLineCount: 1,
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    await upsertWeeklyExpenseProjectionViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u-finance', role: 'finance' },
+      projectId: 'p-cashflow',
+      idempotencyKey: 'projection-key-1',
+      lines: [
+        { yearMonth: '2026-06', weekNo: 1, cashflowLine: '사업비', amount: 3000000 },
+      ],
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/cashflow/p-cashflow/projection', expect.objectContaining({
+      tenantId: 'mysc',
+      actor: expect.objectContaining({ id: 'u-finance', role: 'finance' }),
+      body: {
+        idempotencyKey: 'projection-key-1',
+        lines: [
+          { yearMonth: '2026-06', weekNo: 1, cashflowLine: '사업비', amount: 3000000 },
+        ],
+      },
+      retries: 0,
+      timeoutMs: 12000,
+    }));
   });
 
   it('sends weekly submit and close commands through the same typed BFF options shape', async () => {
@@ -511,7 +608,7 @@ describe('platform-bff-client', () => {
     expect(client.post).toHaveBeenNthCalledWith(1, '/api/v1/weekly-expenses/p-cashflow/submit', expect.objectContaining({
       tenantId: 'mysc',
       actor: expect.objectContaining({ id: 'u-pm', role: 'pm' }),
-      body: { yearMonth: '2026-06', weekNo: 1 },
+      body: { idempotencyKey: 'submit-key-1', yearMonth: '2026-06', weekNo: 1 },
       idempotencyKey: 'submit-key-1',
       retries: 0,
       timeoutMs: 12000,
@@ -519,7 +616,7 @@ describe('platform-bff-client', () => {
     expect(client.post).toHaveBeenNthCalledWith(2, '/api/v1/weekly-expenses/p-cashflow/close', expect.objectContaining({
       tenantId: 'mysc',
       actor: expect.objectContaining({ id: 'u-finance', role: 'finance' }),
-      body: { yearMonth: '2026-06', weekNo: 1 },
+      body: { idempotencyKey: 'close-key-1', yearMonth: '2026-06', weekNo: 1 },
       idempotencyKey: 'close-key-1',
       retries: 0,
       timeoutMs: 12000,
@@ -619,6 +716,7 @@ describe('platform-bff-client', () => {
       tenantId: 'mysc',
       actor: expect.objectContaining({ id: 'u-pm', role: 'pm' }),
       body: {
+        idempotencyKey: 'copy-key-1',
         expectedSheetVersion: 4,
         startRow: 0,
         startColumn: 3,
@@ -797,25 +895,27 @@ describe('platform-bff-client', () => {
     expect(client.post).toHaveBeenNthCalledWith(1, '/api/v1/weekly-expenses/p-cells/sheets/default/commands/cell-patch', expect.objectContaining({
       idempotencyKey: 'patch-key-1',
       body: {
+        idempotencyKey: 'patch-key-1',
         expectedSheetVersion: 4,
         cells: [{ rowIndex: 0, columnIndex: 13, rawValue: '3000', userEdited: true }],
       },
     }));
     expect(client.post).toHaveBeenNthCalledWith(2, '/api/v1/weekly-expenses/p-cells/sheets/default/commands/paste', expect.objectContaining({
       idempotencyKey: 'paste-key-1',
-      body: expect.objectContaining({ rowCount: 1, columnCount: 2, depth: 'SHALLOW' }),
+      body: expect.objectContaining({ idempotencyKey: 'paste-key-1', rowCount: 1, columnCount: 2, depth: 'SHALLOW' }),
     }));
     expect(client.post).toHaveBeenNthCalledWith(3, '/api/v1/weekly-expenses/p-cells/sheets/default/commands/cut', expect.objectContaining({
       idempotencyKey: 'cut-key-1',
-      body: expect.objectContaining({ startRow: 1, endColumn: 13, depth: 'SHALLOW' }),
+      body: expect.objectContaining({ idempotencyKey: 'cut-key-1', startRow: 1, endColumn: 13, depth: 'SHALLOW' }),
     }));
     expect(client.post).toHaveBeenNthCalledWith(4, '/api/v1/weekly-expenses/p-cells/sheets/default/commands/row-insert', expect.objectContaining({
       idempotencyKey: 'insert-key-1',
-      body: { expectedSheetVersion: 7, startRow: 2, rowCount: 1 },
+      body: { idempotencyKey: 'insert-key-1', expectedSheetVersion: 7, startRow: 2, rowCount: 1 },
     }));
     expect(client.post).toHaveBeenNthCalledWith(5, '/api/v1/weekly-expenses/p-cells/sheets/default/commands/row-delete', expect.objectContaining({
       idempotencyKey: 'delete-key-1',
       body: {
+        idempotencyKey: 'delete-key-1',
         expectedSheetVersion: 8,
         startRow: 2,
         rowCount: 1,
@@ -823,7 +923,7 @@ describe('platform-bff-client', () => {
       },
     }));
     for (const [, options] of client.post.mock.calls) {
-      expect(options.body).not.toHaveProperty('idempotencyKey');
+      expect(options.body).toHaveProperty('idempotencyKey');
       expect(options).toMatchObject({
         tenantId: 'mysc',
         actor: expect.objectContaining({ id: 'u-pm', role: 'pm' }),
@@ -928,17 +1028,18 @@ describe('platform-bff-client', () => {
       tenantId: 'mysc',
       idempotencyKey: 'import-key-1',
       body: expect.objectContaining({
+        idempotencyKey: 'import-key-1',
         lines: expect.arrayContaining([
           expect.objectContaining({ sourceLineKey: 'src-1' }),
           expect.objectContaining({ sourceLineKey: 'src-2' }),
         ]),
       }),
     }));
-    expect(client.post.mock.calls[0][1].body).not.toHaveProperty('idempotencyKey');
     expect(client.post).toHaveBeenNthCalledWith(2, '/api/v1/weekly-expenses/p-bank/bank-statements/apply-items', expect.objectContaining({
       tenantId: 'mysc',
       idempotencyKey: 'apply-key-1',
       body: {
+        idempotencyKey: 'apply-key-1',
         sheetKey: 'default',
         items: [
           {
@@ -951,7 +1052,6 @@ describe('platform-bff-client', () => {
         ],
       },
     }));
-    expect(client.post.mock.calls[1][1].body).not.toHaveProperty('idempotencyKey');
     expect(client.post.mock.calls[1][1].body.items).toHaveLength(1);
     expect(client.post.mock.calls[1][1].body.items[0].importLineId).toBe('line-1');
   });

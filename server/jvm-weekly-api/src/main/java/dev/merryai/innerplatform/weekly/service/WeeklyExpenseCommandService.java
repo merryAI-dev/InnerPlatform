@@ -29,6 +29,8 @@ import dev.merryai.innerplatform.weekly.api.UpsertProjectionRequest;
 import dev.merryai.innerplatform.weekly.api.UpsertProjectionResponse;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseConflictException;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseRequestLimits;
+import dev.merryai.innerplatform.weekly.api.WeeklyExpenseSheetResponse;
+import dev.merryai.innerplatform.weekly.api.WeeklyExpenseSheetsResponse;
 import dev.merryai.innerplatform.weekly.domain.CellValidationIssue;
 import dev.merryai.innerplatform.weekly.domain.CellAddress;
 import dev.merryai.innerplatform.weekly.domain.CellValidationStatus;
@@ -75,6 +77,7 @@ import java.util.regex.Pattern;
 @Service
 public class WeeklyExpenseCommandService {
     public static final String SAVE_DRAFT_COMMAND = "weeklyExpense.saveDraft";
+    public static final String SHEET_READ_COMMAND = "weeklyExpense.sheet.read";
     public static final String BANK_IMPORT_BATCH_COMMAND = "weeklyExpense.bankStatement.importBatch";
     public static final String BANK_IMPORT_LIST_LINES_COMMAND = "weeklyExpense.bankStatement.listLines";
     public static final String BANK_IMPORT_APPLY_ITEMS_COMMAND = "weeklyExpense.bankStatement.applyItems";
@@ -114,9 +117,65 @@ public class WeeklyExpenseCommandService {
         authorizationService.requireAllowed(commandName, actor);
     }
 
+    public void requireProjectAllowed(String commandName, TrustedActorContext actor, String projectId) {
+        authorizationService.requireProjectAllowed(commandName, actor, projectId);
+    }
+
+    @Transactional(readOnly = true)
+    public WeeklyExpenseSheetResponse readSheet(TrustedActorContext actor, String projectId, String sheetKey) {
+        authorizationService.requireProjectAllowed(SHEET_READ_COMMAND, actor, projectId);
+        Optional<WeeklyExpenseSheetEntity> found = persistence.findSheetForUpdate(actor.tenantId(), projectId, sheetKey);
+        if (found.isEmpty()) {
+            return new WeeklyExpenseSheetResponse(true, projectId, "", sheetKey, sheetKey, 0, List.of());
+        }
+        return toSheetResponse(projectId, found.get());
+    }
+
+    @Transactional(readOnly = true)
+    public WeeklyExpenseSheetsResponse listSheets(TrustedActorContext actor, String projectId) {
+        authorizationService.requireProjectAllowed(SHEET_READ_COMMAND, actor, projectId);
+        List<WeeklyExpenseSheetResponse> sheets = persistence.findSheets(actor.tenantId(), projectId).stream()
+            .map(sheet -> toSheetResponse(projectId, sheet))
+            .toList();
+        return new WeeklyExpenseSheetsResponse(true, projectId, sheets);
+    }
+
+    private WeeklyExpenseSheetResponse toSheetResponse(String projectId, WeeklyExpenseSheetEntity sheet) {
+        return new WeeklyExpenseSheetResponse(
+            true,
+            projectId,
+            text(sheet.getId()),
+            sheet.getSheetKey(),
+            sheet.getName(),
+            sheet.getSheetVersion(),
+            sheet.getRows().stream()
+                .sorted((left, right) -> Integer.compare(left.getRowIndex(), right.getRowIndex()))
+                .map(row -> new WeeklyExpenseSheetResponse.Row(
+                    text(row.getId()),
+                    row.getRowIndex(),
+                    row.getRowVersion(),
+                    text(row.getSourceTxId()),
+                    text(row.getEntryKind()),
+                    row.getCells().stream()
+                        .sorted((left, right) -> Integer.compare(left.getColumnIndex(), right.getColumnIndex()))
+                        .map(cell -> new WeeklyExpenseSheetResponse.Cell(
+                            cell.getColumnIndex(),
+                            text(cell.getRawValue()),
+                            text(cell.getNormalizedValue()),
+                            cell.getValueType().name(),
+                            cell.getValidationStatus().name(),
+                            text(cell.getValidationMessage()),
+                            cell.isUserEdited()
+                        ))
+                        .toList()
+                ))
+                .toList()
+        );
+    }
+
     @Transactional
     public SaveDraftResponse saveDraft(TrustedActorContext actor, String projectId, String sheetKey, SaveDraftRequest request) {
-        authorizationService.requireAllowed(SAVE_DRAFT_COMMAND, actor);
+        authorizationService.requireProjectAllowed(SAVE_DRAFT_COMMAND, actor, projectId);
         String requestHash = hashJson(request);
         var existing = persistence.findIdempotency(actor.tenantId(), request.idempotencyKey());
         if (existing.isPresent()) {
@@ -176,7 +235,7 @@ public class WeeklyExpenseCommandService {
         String projectId,
         String status
     ) {
-        authorizationService.requireAllowed(BANK_IMPORT_LIST_LINES_COMMAND, actor);
+        authorizationService.requireProjectAllowed(BANK_IMPORT_LIST_LINES_COMMAND, actor, projectId);
         String normalizedStatus = normalizeImportLineStatus(status);
         List<WeeklyExpenseBankImportLineEntity> lines = persistence.findBankImportLines(actor.tenantId(), projectId, normalizedStatus);
         List<BankStatementImportLinesResponse.Line> responseLines = lines.stream()
@@ -216,7 +275,7 @@ public class WeeklyExpenseCommandService {
         String projectId,
         ImportBankStatementBatchRequest request
     ) {
-        authorizationService.requireAllowed(BANK_IMPORT_BATCH_COMMAND, actor);
+        authorizationService.requireProjectAllowed(BANK_IMPORT_BATCH_COMMAND, actor, projectId);
         String requestHash = hashJson(request);
         var existing = persistence.findIdempotency(actor.tenantId(), request.idempotencyKey());
         if (existing.isPresent()) {
@@ -333,7 +392,7 @@ public class WeeklyExpenseCommandService {
         String projectId,
         ApplyBankStatementItemsRequest request
     ) {
-        authorizationService.requireAllowed(BANK_IMPORT_APPLY_ITEMS_COMMAND, actor);
+        authorizationService.requireProjectAllowed(BANK_IMPORT_APPLY_ITEMS_COMMAND, actor, projectId);
         String requestHash = hashJson(request);
         var existing = persistence.findIdempotency(actor.tenantId(), request.idempotencyKey());
         if (existing.isPresent()) {
@@ -466,7 +525,7 @@ public class WeeklyExpenseCommandService {
 
     @Transactional
     public UpsertProjectionResponse upsertProjection(TrustedActorContext actor, String projectId, UpsertProjectionRequest request) {
-        authorizationService.requireAllowed(UPSERT_PROJECTION_COMMAND, actor);
+        authorizationService.requireProjectAllowed(UPSERT_PROJECTION_COMMAND, actor, projectId);
         String requestHash = hashJson(request);
         var existing = persistence.findIdempotency(actor.tenantId(), request.idempotencyKey());
         if (existing.isPresent()) {
@@ -536,7 +595,7 @@ public class WeeklyExpenseCommandService {
 
     @Transactional
     public SubmitWeekResponse submitWeek(TrustedActorContext actor, String projectId, SubmitWeekRequest request) {
-        authorizationService.requireAllowed(SUBMIT_WEEK_COMMAND, actor);
+        authorizationService.requireProjectAllowed(SUBMIT_WEEK_COMMAND, actor, projectId);
         String requestHash = hashJson(request);
         var existing = persistence.findIdempotency(actor.tenantId(), request.idempotencyKey());
         if (existing.isPresent()) {
@@ -605,7 +664,7 @@ public class WeeklyExpenseCommandService {
 
     @Transactional
     public CloseWeekResponse closeWeek(TrustedActorContext actor, String projectId, CloseWeekRequest request) {
-        authorizationService.requireAllowed(CLOSE_WEEK_COMMAND, actor);
+        authorizationService.requireProjectAllowed(CLOSE_WEEK_COMMAND, actor, projectId);
         String requestHash = hashJson(request);
         var existing = persistence.findIdempotency(actor.tenantId(), request.idempotencyKey());
         if (existing.isPresent()) {
@@ -673,7 +732,7 @@ public class WeeklyExpenseCommandService {
         String projectId,
         CreateAuditExportRequest request
     ) {
-        authorizationService.requireAllowed(AUDIT_EXPORT_CREATE_COMMAND, actor);
+        authorizationService.requireProjectAllowed(AUDIT_EXPORT_CREATE_COMMAND, actor, projectId);
         String requestHash = hashJson(request);
         var existing = persistence.findIdempotency(actor.tenantId(), request.idempotencyKey());
         if (existing.isPresent()) {
@@ -754,7 +813,7 @@ public class WeeklyExpenseCommandService {
 
     @Transactional
     public CellCommandResponse patchCells(TrustedActorContext actor, String projectId, String sheetKey, CellPatchCommandRequest request) {
-        authorizationService.requireAllowed(CELL_PATCH_COMMAND, actor);
+        authorizationService.requireProjectAllowed(CELL_PATCH_COMMAND, actor, projectId);
         String requestHash = hashJson(request);
         var existing = persistence.findIdempotency(actor.tenantId(), request.idempotencyKey());
         if (existing.isPresent()) {
@@ -792,7 +851,7 @@ public class WeeklyExpenseCommandService {
 
     @Transactional
     public CellCommandResponse copyCells(TrustedActorContext actor, String projectId, String sheetKey, CopyCellsRequest request) {
-        authorizationService.requireAllowed(CELLS_COPY_COMMAND, actor);
+        authorizationService.requireProjectAllowed(CELLS_COPY_COMMAND, actor, projectId);
         String requestHash = hashJson(request);
         var existing = persistence.findIdempotency(actor.tenantId(), request.idempotencyKey());
         if (existing.isPresent()) {
@@ -831,7 +890,7 @@ public class WeeklyExpenseCommandService {
 
     @Transactional
     public CellCommandResponse pasteCells(TrustedActorContext actor, String projectId, String sheetKey, PasteCellsRequest request) {
-        authorizationService.requireAllowed(CELLS_PASTE_COMMAND, actor);
+        authorizationService.requireProjectAllowed(CELLS_PASTE_COMMAND, actor, projectId);
         String requestHash = hashJson(request);
         var existing = persistence.findIdempotency(actor.tenantId(), request.idempotencyKey());
         if (existing.isPresent()) {
@@ -880,7 +939,7 @@ public class WeeklyExpenseCommandService {
 
     @Transactional
     public CellCommandResponse cutCells(TrustedActorContext actor, String projectId, String sheetKey, CutCellsRequest request) {
-        authorizationService.requireAllowed(CELLS_CUT_COMMAND, actor);
+        authorizationService.requireProjectAllowed(CELLS_CUT_COMMAND, actor, projectId);
         String requestHash = hashJson(request);
         var existing = persistence.findIdempotency(actor.tenantId(), request.idempotencyKey());
         if (existing.isPresent()) {
@@ -921,7 +980,7 @@ public class WeeklyExpenseCommandService {
 
     @Transactional
     public RowCommandResponse insertRows(TrustedActorContext actor, String projectId, String sheetKey, RowInsertRequest request) {
-        authorizationService.requireAllowed(ROW_INSERT_COMMAND, actor);
+        authorizationService.requireProjectAllowed(ROW_INSERT_COMMAND, actor, projectId);
         String requestHash = hashJson(request);
         var existing = persistence.findIdempotency(actor.tenantId(), request.idempotencyKey());
         if (existing.isPresent()) {
@@ -961,7 +1020,7 @@ public class WeeklyExpenseCommandService {
 
     @Transactional
     public RowCommandResponse deleteRows(TrustedActorContext actor, String projectId, String sheetKey, RowDeleteRequest request) {
-        authorizationService.requireAllowed(ROW_DELETE_COMMAND, actor);
+        authorizationService.requireProjectAllowed(ROW_DELETE_COMMAND, actor, projectId);
         String requestHash = hashJson(request);
         var existing = persistence.findIdempotency(actor.tenantId(), request.idempotencyKey());
         if (existing.isPresent()) {
@@ -1575,6 +1634,10 @@ public class WeeklyExpenseCommandService {
     private String sanitizeFileName(String value) {
         String text = value == null || value.isBlank() ? "project" : value.trim();
         return text.replaceAll("[^A-Za-z0-9._-]", "_");
+    }
+
+    private String text(String value) {
+        return value == null ? "" : value;
     }
 
     private String hashJson(Object request) {

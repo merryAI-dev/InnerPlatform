@@ -10,8 +10,17 @@ import java.util.Set;
 
 @Service
 public class WeeklyExpenseAuthorizationService {
+    private static final Set<String> TENANT_WIDE_PROJECT_ROLES = Set.of(
+        "admin",
+        "finance",
+        "auditor",
+        "tenant_admin",
+        "support",
+        "security"
+    );
     private static final Map<String, Set<String>> COMMAND_ROLES = Map.ofEntries(
         Map.entry(WeeklyExpenseCommandService.SAVE_DRAFT_COMMAND, Set.of("admin", "finance", "pm")),
+        Map.entry(WeeklyExpenseCommandService.SHEET_READ_COMMAND, Set.of("admin", "finance", "pm", "auditor", "viewer", "tenant_admin", "support", "security")),
         Map.entry(WeeklyExpenseCommandService.BANK_IMPORT_BATCH_COMMAND, Set.of("admin", "finance", "pm")),
         Map.entry(WeeklyExpenseCommandService.BANK_IMPORT_LIST_LINES_COMMAND, Set.of("admin", "finance", "pm", "auditor", "viewer", "tenant_admin", "support", "security")),
         Map.entry(WeeklyExpenseCommandService.BANK_IMPORT_APPLY_ITEMS_COMMAND, Set.of("admin", "finance", "pm")),
@@ -29,6 +38,12 @@ public class WeeklyExpenseAuthorizationService {
         Map.entry(WeeklyExpenseCommandService.AUDIT_EXPORT_CREATE_COMMAND, Set.of("admin", "finance"))
     );
 
+    private final WeeklyProjectAccessRepository projectAccessRepository;
+
+    public WeeklyExpenseAuthorizationService(WeeklyProjectAccessRepository projectAccessRepository) {
+        this.projectAccessRepository = projectAccessRepository;
+    }
+
     public void requireAllowed(String commandName, TrustedActorContext actor) {
         String role = actor == null || actor.role() == null
             ? ""
@@ -37,5 +52,19 @@ public class WeeklyExpenseAuthorizationService {
         if (!allowed.contains(role)) {
             throw new WeeklyExpenseForbiddenException("Actor role is not allowed to run " + commandName + ".");
         }
+    }
+
+    public void requireProjectAllowed(String commandName, TrustedActorContext actor, String projectId) {
+        requireAllowed(commandName, actor);
+        String role = actor == null || actor.role() == null
+            ? ""
+            : actor.role().trim().toLowerCase(Locale.ROOT);
+        if (TENANT_WIDE_PROJECT_ROLES.contains(role)) {
+            return;
+        }
+        if (projectAccessRepository.hasProjectAccess(actor, projectId)) {
+            return;
+        }
+        throw new WeeklyExpenseForbiddenException("Actor is not assigned to this project.");
     }
 }

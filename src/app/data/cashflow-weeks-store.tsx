@@ -434,6 +434,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
           googleAccessToken: (actor as any).googleAccessToken,
         },
         projectId,
+        idempotencyKey: `projection-${projectId}-${ym}-w${weekNo}-${Date.now()}`,
         lines: Object.entries(normalizedAmounts).map(([lineId, amount]) => ({
           yearMonth: ym,
           weekNo,
