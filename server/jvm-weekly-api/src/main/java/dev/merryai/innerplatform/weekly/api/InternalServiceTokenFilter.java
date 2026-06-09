@@ -58,6 +58,15 @@ public class InternalServiceTokenFilter extends OncePerRequestFilter {
 
         String suppliedToken = request.getHeader(HEADER_NAME);
         if (internalApiTokenEnabled && tokensMatch(internalApiToken, suppliedToken)) {
+            if (!isInternalServiceEndpoint(request)) {
+                writeAuthError(
+                    response,
+                    HttpServletResponse.SC_UNAUTHORIZED,
+                    "weekly_expense_service_token_not_allowed",
+                    "Internal service token is not accepted for weekly user routes."
+                );
+                return;
+            }
             filterChain.doFilter(request, response);
             return;
         }
@@ -89,6 +98,11 @@ public class InternalServiceTokenFilter extends OncePerRequestFilter {
         }
         return "POST".equalsIgnoreCase(request.getMethod())
             && ("/api/v1/auth/session".equals(path) || "/api/v1/auth/logout".equals(path));
+    }
+
+    private boolean isInternalServiceEndpoint(HttpServletRequest request) {
+        String path = request.getRequestURI();
+        return path != null && path.startsWith("/api/v1/internal/");
     }
 
     private boolean tokensMatch(String expected, String supplied) {

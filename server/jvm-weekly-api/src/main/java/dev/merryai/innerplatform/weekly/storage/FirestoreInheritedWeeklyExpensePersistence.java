@@ -114,15 +114,48 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     }
 
     @Override
-    public Optional<WeeklyExpenseIdempotencyEntity> findIdempotency(String tenantId, String idempotencyKey) {
-        DocumentSnapshot snap = get(idempotencyRef(tenantId, idempotencyKey));
-        if (!snap.exists()) return Optional.empty();
+    public Optional<WeeklyExpenseIdempotencyEntity> findIdempotency(
+        String tenantId,
+        String projectId,
+        String commandName,
+        String idempotencyKey
+    ) {
+        DocumentSnapshot snap = get(idempotencyRef(tenantId, projectId, commandName, idempotencyKey));
+        if (!snap.exists()) {
+            return findLegacyIdempotency(tenantId, projectId, commandName, idempotencyKey);
+        }
         Map<String, Object> data = data(snap);
         WeeklyExpenseIdempotencyEntity entity = new WeeklyExpenseIdempotencyEntity(
             tenantId,
-            text(data.get("projectId"), ""),
+            text(data.get("projectId"), projectId),
             text(data.get("idempotencyKey"), idempotencyKey),
-            text(data.get("commandName"), ""),
+            text(data.get("commandName"), commandName),
+            text(data.get("requestHash"), ""),
+            text(data.get("responseJson"), "")
+        );
+        entity.restorePersistenceState(snap.getId(), instant(data.get("createdAt")));
+        return Optional.of(entity);
+    }
+
+    private Optional<WeeklyExpenseIdempotencyEntity> findLegacyIdempotency(
+        String tenantId,
+        String projectId,
+        String commandName,
+        String idempotencyKey
+    ) {
+        DocumentSnapshot snap = get(legacyIdempotencyRef(tenantId, idempotencyKey));
+        if (!snap.exists()) return Optional.empty();
+        Map<String, Object> data = data(snap);
+        String storedProjectId = text(data.get("projectId"), "");
+        String storedCommandName = text(data.get("commandName"), "");
+        if (!storedProjectId.equals(projectId) || !storedCommandName.equals(commandName)) {
+            return Optional.empty();
+        }
+        WeeklyExpenseIdempotencyEntity entity = new WeeklyExpenseIdempotencyEntity(
+            tenantId,
+            storedProjectId,
+            text(data.get("idempotencyKey"), idempotencyKey),
+            storedCommandName,
             text(data.get("requestHash"), ""),
             text(data.get("responseJson"), "")
         );
@@ -140,7 +173,12 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         data.put("requestHash", idempotency.getRequestHash());
         data.put("responseJson", idempotency.getResponseJson());
         data.put("createdAt", idempotency.getCreatedAt().toString());
-        set(idempotencyRef(idempotency.getTenantId(), idempotency.getIdempotencyKey()), data);
+        set(idempotencyRef(
+            idempotency.getTenantId(),
+            idempotency.getProjectId(),
+            idempotency.getCommandName(),
+            idempotency.getIdempotencyKey()
+        ), data);
         return idempotency;
     }
 
@@ -656,7 +694,13 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         return expenseIntake(tenantId, projectId).document(lineKey);
     }
 
-    private DocumentReference idempotencyRef(String tenantId, String idempotencyKey) {
+    private DocumentReference idempotencyRef(String tenantId, String projectId, String commandName, String idempotencyKey) {
+        return db.document("orgs/" + tenantId + "/weekly_api_idempotency/" + safeDocId(
+            projectId + "\n" + commandName + "\n" + idempotencyKey
+        ));
+    }
+
+    private DocumentReference legacyIdempotencyRef(String tenantId, String idempotencyKey) {
         return db.document("orgs/" + tenantId + "/weekly_api_idempotency/" + safeDocId(idempotencyKey));
     }
 

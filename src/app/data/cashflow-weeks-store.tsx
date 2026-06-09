@@ -28,11 +28,13 @@ import { useFirebase } from '../lib/firebase-context';
 import { getOrgCollectionPath } from '../lib/firebase';
 import {
   fetchWeeklyExpenseCashflowViaBff,
+  fetchWeeklyExpenseStatusesViaBff,
   isPlatformApiEnabled,
   closeWeeklyExpenseWeekViaBff,
   submitWeeklyExpenseWeekViaBff,
   type WeeklyExpenseCashflowSnapshot,
   type WeeklyExpenseCashflowModeReadModel,
+  type WeeklyExpenseStatusLine,
   upsertWeeklyExpenseProjectionViaBff,
 } from '../lib/platform-bff-client';
 import { addMonthsToYearMonth, getSeoulTodayIso } from '../platform/business-days';
@@ -71,6 +73,7 @@ interface CashflowWeekActions {
     varianceHistory: VarianceFlagEvent[];
   }) => Promise<void>;
   ensureProjectCashflowSnapshot: (projectId: string) => Promise<void>;
+  ensureProjectCashflowSnapshots: (projectIds: string[]) => Promise<void>;
   getWeeksForProject: (projectId: string) => CashflowWeekSheet[];
   getReadModelForProjectMonth: (projectId: string, yearMonth: string) => CashflowMonthReadModel | undefined;
 }
@@ -250,6 +253,62 @@ function buildCashflowWeeksFromSnapshot(params: {
   });
 }
 
+function mergeWeeklyStatusesIntoCashflowWeeks(
+  weeks: CashflowWeekSheet[],
+  statuses: WeeklyExpenseStatusLine[] | undefined,
+  params: { orgId: string; now: string },
+): CashflowWeekSheet[] {
+  if (!Array.isArray(statuses) || statuses.length === 0) return weeks;
+  const byWeekId = new Map<string, CashflowWeekSheet>();
+  for (const week of weeks) {
+    byWeekId.set(resolveWeekDocId(week.projectId, week.yearMonth, Number(week.weekNo)), week);
+  }
+  const byKey = new Map<string, WeeklyExpenseStatusLine>();
+  for (const status of statuses) {
+    if (!status?.projectId || !/^\d{4}-\d{2}$/.test(status.yearMonth || '')) continue;
+    const weekNo = Number(status.weekNo);
+    const key = `${status.projectId}:${status.yearMonth}:${weekNo}`;
+    byKey.set(key, status);
+    const weekId = resolveWeekDocId(status.projectId, status.yearMonth, weekNo);
+    if (byWeekId.has(weekId)) continue;
+    const def = getMonthMondayWeeks(status.yearMonth).find((week) => week.weekNo === weekNo);
+    if (!def) continue;
+    byWeekId.set(weekId, {
+      id: weekId,
+      tenantId: params.orgId,
+      projectId: status.projectId,
+      yearMonth: status.yearMonth,
+      weekNo,
+      weekStart: def.weekStart,
+      weekEnd: def.weekEnd,
+      projection: {},
+      actual: {},
+      pmSubmitted: false,
+      adminClosed: false,
+      createdAt: params.now,
+      updatedAt: params.now,
+    });
+  }
+  return Array.from(byWeekId.values()).map((week) => {
+    const status = byKey.get(`${week.projectId}:${week.yearMonth}:${Number(week.weekNo)}`);
+    if (!status) return week;
+    return {
+      ...week,
+      pmSubmitted: Boolean(status.pmSubmitted),
+      pmSubmittedAt: status.submittedAt || undefined,
+      pmSubmittedByUid: status.submittedBy || undefined,
+      adminClosed: Boolean(status.adminClosed),
+      adminClosedAt: status.closedAt || undefined,
+      adminClosedByUid: status.closedBy || undefined,
+      updatedAt: status.updatedAt || week.updatedAt,
+    };
+  }).sort((a, b) => {
+    if (a.projectId !== b.projectId) return a.projectId.localeCompare(b.projectId);
+    if (a.yearMonth !== b.yearMonth) return a.yearMonth.localeCompare(b.yearMonth);
+    return a.weekNo - b.weekNo;
+  });
+}
+
 const _g = globalThis as any;
 if (!_g.__MYSC_CASHFLOW_WEEKS_CTX__) {
   _g.__MYSC_CASHFLOW_WEEKS_CTX__ = createContext<(CashflowWeekState & CashflowWeekActions) | null>(null);
@@ -295,8 +354,6 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     }
 
     if (isPlatformApiEnabled() && user.source !== 'dev_harness') {
-      setWeeks([]);
-      setReadModels({});
       setIsLoading(false);
       return;
     }
@@ -367,11 +424,23 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
         },
         projectId,
       });
-      const snapshotWeeks = buildCashflowWeeksFromSnapshot({
+      const statuses = await fetchWeeklyExpenseStatusesViaBff({
+        tenantId: orgId,
+        actor: {
+          uid: actor.uid,
+          email: actor.email,
+          role: actor.role,
+          idToken: (actor as any).idToken,
+          googleAccessToken: (actor as any).googleAccessToken,
+        },
+        projectId,
+      });
+      const now = new Date().toISOString();
+      const snapshotWeeks = mergeWeeklyStatusesIntoCashflowWeeks(buildCashflowWeeksFromSnapshot({
         orgId,
         snapshot,
-        now: new Date().toISOString(),
-      });
+        now,
+      }), statuses.statuses, { orgId, now });
       const snapshotReadModels = buildCashflowReadModelsFromSnapshot(snapshot);
       setWeeks((prev) => [
         ...prev.filter((week) => week.projectId !== projectId),
@@ -403,6 +472,15 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
       setIsLoading(false);
     }
   }, [orgId, user]);
+
+  const ensureProjectCashflowSnapshots = useCallback(async (projectIds: string[]): Promise<void> => {
+    const normalizedProjectIds = Array.from(new Set(
+      (projectIds || []).map((projectId) => String(projectId || '').trim()).filter(Boolean),
+    ));
+    for (const projectId of normalizedProjectIds) {
+      await ensureProjectCashflowSnapshot(projectId);
+    }
+  }, [ensureProjectCashflowSnapshot]);
 
   const upsertProjectionAmounts = useCallback(async (input: {
     projectId: string;
@@ -684,6 +762,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     closeWeekAsAdmin,
     updateVarianceFlag,
     ensureProjectCashflowSnapshot,
+    ensureProjectCashflowSnapshots,
     getWeeksForProject,
     getReadModelForProjectMonth,
   }), [
@@ -699,6 +778,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     closeWeekAsAdmin,
     updateVarianceFlag,
     ensureProjectCashflowSnapshot,
+    ensureProjectCashflowSnapshots,
     getWeeksForProject,
     getReadModelForProjectMonth,
   ]);

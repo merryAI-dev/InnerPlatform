@@ -1,4 +1,4 @@
-import { useMemo, type ComponentType } from 'react';
+import { useEffect, useMemo, type ComponentType } from 'react';
 import { useNavigate } from 'react-router';
 import {
   Activity,
@@ -88,7 +88,13 @@ function MonitorLinkCard({ title, description, href, badge, icon: Icon, toneClas
 
 export function CashflowMonitorPage() {
   const { projects } = useAppStore();
-  const { weeks, yearMonth, isLoading } = useCashflowWeeks();
+  const { weeks, yearMonth, isLoading, ensureProjectCashflowSnapshots } = useCashflowWeeks();
+
+  const projectIds = useMemo(() => projects.map((project) => project.id), [projects]);
+
+  useEffect(() => {
+    void ensureProjectCashflowSnapshots(projectIds);
+  }, [ensureProjectCashflowSnapshots, projectIds]);
 
   const currentMonthWeeks = useMemo(
     () => weeks.filter((week) => week.yearMonth === yearMonth),

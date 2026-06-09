@@ -82,7 +82,7 @@ function SelectionField(props: {
 export function CashflowExportPage() {
   const navigate = useNavigate();
   const { projects, transactions } = useAppStore();
-  const { weeks, yearMonth } = useCashflowWeeks();
+  const { weeks, yearMonth, ensureProjectCashflowSnapshots } = useCashflowWeeks();
   const { user } = useAuth();
   const { orgId } = useFirebase();
   const [scope, setScope] = useState<'all' | 'single'>('single');
@@ -127,6 +127,12 @@ export function CashflowExportPage() {
       accountTypeFilter,
     });
   }, [accountTypeFilter, scope, selectedProjectId, sortedProjects]);
+
+  const targetProjectIds = useMemo(() => targetProjects.map((project) => project.id), [targetProjects]);
+
+  useEffect(() => {
+    void ensureProjectCashflowSnapshots(targetProjectIds);
+  }, [ensureProjectCashflowSnapshots, targetProjectIds]);
 
   const targetYearMonths = useMemo(() => new Set(yearMonths), [yearMonths]);
   const todayIso = getSeoulTodayIso();

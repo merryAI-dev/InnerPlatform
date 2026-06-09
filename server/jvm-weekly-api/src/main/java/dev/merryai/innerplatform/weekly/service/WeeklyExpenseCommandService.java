@@ -1679,14 +1679,15 @@ public class WeeklyExpenseCommandService {
         String requestHash,
         Class<T> responseType
     ) {
-        Optional<WeeklyExpenseIdempotencyEntity> existing = persistence.findIdempotency(tenantId, idempotencyKey);
+        Optional<WeeklyExpenseIdempotencyEntity> existing = persistence.findIdempotency(
+            tenantId,
+            projectId,
+            commandName,
+            idempotencyKey
+        );
         if (existing.isEmpty()) return Optional.empty();
 
         WeeklyExpenseIdempotencyEntity idempotency = existing.get();
-        if (!text(idempotency.getProjectId()).equals(text(projectId))
-            || !text(idempotency.getCommandName()).equals(text(commandName))) {
-            throw new WeeklyExpenseConflictException("Idempotency key already exists for a different project or command.");
-        }
         if (!idempotency.getRequestHash().equals(requestHash)) {
             throw new WeeklyExpenseConflictException("Idempotency key already exists with a different request body.");
         }

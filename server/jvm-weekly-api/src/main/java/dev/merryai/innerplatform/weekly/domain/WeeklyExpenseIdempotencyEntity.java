@@ -14,8 +14,11 @@ import java.time.Instant;
 @Entity
 @Table(
     name = "weekly_expense_idempotency_keys",
-    uniqueConstraints = @UniqueConstraint(name = "uk_weekly_expense_idempotency", columnNames = {"tenant_id", "idempotency_key"}),
-    indexes = @Index(name = "idx_weekly_expense_idempotency_project", columnList = "tenant_id,project_id")
+    uniqueConstraints = @UniqueConstraint(
+        name = "uk_weekly_expense_idempotency",
+        columnNames = {"tenant_id", "project_id", "command_name", "idempotency_key"}
+    ),
+    indexes = @Index(name = "idx_weekly_expense_idempotency_project", columnList = "tenant_id,project_id,command_name")
 )
 public class WeeklyExpenseIdempotencyEntity {
     @Id

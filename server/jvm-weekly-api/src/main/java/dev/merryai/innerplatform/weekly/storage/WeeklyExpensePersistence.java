@@ -27,7 +27,12 @@ public interface WeeklyExpensePersistence {
         }
     }
 
-    Optional<WeeklyExpenseIdempotencyEntity> findIdempotency(String tenantId, String idempotencyKey);
+    Optional<WeeklyExpenseIdempotencyEntity> findIdempotency(
+        String tenantId,
+        String projectId,
+        String commandName,
+        String idempotencyKey
+    );
 
     WeeklyExpenseIdempotencyEntity saveIdempotency(WeeklyExpenseIdempotencyEntity idempotency);
 

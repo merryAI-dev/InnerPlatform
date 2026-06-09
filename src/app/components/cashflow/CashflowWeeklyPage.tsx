@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { BarChart3, ChevronLeft, ChevronRight, ExternalLink, Flag, Check, MessageSquareText } from 'lucide-react';
 import { PageHeader } from '../layout/PageHeader';
@@ -27,7 +27,13 @@ export function CashflowWeeklyPage() {
   const navigate = useNavigate();
   const { projects } = useAppStore();
   const { user } = useAuth();
-  const { yearMonth, weeks, isLoading, goPrevMonth, goNextMonth } = useCashflowWeeks();
+  const { yearMonth, weeks, isLoading, goPrevMonth, goNextMonth, ensureProjectCashflowSnapshots } = useCashflowWeeks();
+
+  const projectIds = useMemo(() => projects.map((project) => project.id), [projects]);
+
+  useEffect(() => {
+    void ensureProjectCashflowSnapshots(projectIds);
+  }, [ensureProjectCashflowSnapshots, projectIds]);
 
   const monthWeeks = useMemo(() => getMonthMondayWeeks(yearMonth), [yearMonth]);
 

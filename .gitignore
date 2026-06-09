@@ -5,6 +5,7 @@ coverage/
 test-results/
 .playwright-cli/
 tmp/
+output/
 rust/**/target/
 server/jvm-weekly-api/target/
 *.log

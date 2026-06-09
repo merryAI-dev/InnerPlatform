@@ -47,4 +47,10 @@ describe('CashflowWeeklyPage status semantics', () => {
     expect(cashflowWeeklyPageSource).toContain('프로젝션 바로가기');
     expect(cashflowWeeklyPageSource).toContain('프로젝션 열기');
   });
+
+  it('hydrates every project from the Java cashflow read model before aggregate rendering', () => {
+    expect(cashflowWeeklyPageSource).toContain('ensureProjectCashflowSnapshots');
+    expect(cashflowWeeklyPageSource).toContain('projects.map((project) => project.id)');
+    expect(cashflowWeeklyPageSource).toContain('void ensureProjectCashflowSnapshots(projectIds)');
+  });
 });

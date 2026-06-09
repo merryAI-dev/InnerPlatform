@@ -63,8 +63,18 @@ public class JpaWeeklyExpensePersistence implements WeeklyExpensePersistence {
     }
 
     @Override
-    public Optional<WeeklyExpenseIdempotencyEntity> findIdempotency(String tenantId, String idempotencyKey) {
-        return idempotencyRepository.findByTenantIdAndIdempotencyKey(tenantId, idempotencyKey);
+    public Optional<WeeklyExpenseIdempotencyEntity> findIdempotency(
+        String tenantId,
+        String projectId,
+        String commandName,
+        String idempotencyKey
+    ) {
+        return idempotencyRepository.findByTenantIdAndProjectIdAndCommandNameAndIdempotencyKey(
+            tenantId,
+            projectId,
+            commandName,
+            idempotencyKey
+        );
     }
 
     @Override

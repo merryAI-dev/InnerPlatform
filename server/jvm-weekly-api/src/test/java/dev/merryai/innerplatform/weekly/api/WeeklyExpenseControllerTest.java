@@ -68,12 +68,7 @@ class WeeklyExpenseControllerTest {
         String actorId,
         String role
     ) {
-        return request
-            .header(InternalServiceTokenFilter.HEADER_NAME, "test-weekly-api-token")
-            .header("x-tenant-id", tenantId)
-            .header("x-actor-id", actorId)
-            .header("x-actor-role", role)
-            .header("x-actor-email", actorId + "@example.com");
+        return asFirebaseActor(request, tenantId, actorId, role, actorId + "@example.com");
     }
 
     private static MockHttpServletRequestBuilder asFirebaseActor(
@@ -114,6 +109,26 @@ class WeeklyExpenseControllerTest {
                 .content(body))
             .andExpect(status().isUnauthorized())
             .andExpect(jsonPath("$.code").value("weekly_expense_firebase_auth_required"));
+    }
+
+    @Test
+    void internalServiceTokenDoesNotAuthorizeWeeklyUserRoutes() throws Exception {
+        String body = """
+            {
+              "idempotencyKey": "service-token-user-route",
+              "rows": []
+            }
+            """;
+
+        mockMvc.perform(post("/api/v1/weekly-expenses/project-auth/sheets/default/save-draft")
+                .header(InternalServiceTokenFilter.HEADER_NAME, "test-weekly-api-token")
+                .header("x-tenant-id", "tenant-auth")
+                .header("x-actor-id", "spoofed-admin")
+                .header("x-actor-role", "admin")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+            .andExpect(status().isUnauthorized())
+            .andExpect(jsonPath("$.code").value("weekly_expense_service_token_not_allowed"));
     }
 
     @Test
@@ -362,7 +377,12 @@ class WeeklyExpenseControllerTest {
         assertThat(sheetRepository.findByTenantIdAndProjectIdAndSheetKey("tenant-a", "project-a", "default")).isPresent();
         assertThat(actualRepository.findByTenantIdAndProjectId("tenant-a", "project-a")).hasSize(1);
         assertThat(auditEventRepository.findAll()).hasSize(1);
-        assertThat(idempotencyRepository.findByTenantIdAndIdempotencyKey("tenant-a", "idem-001")).isPresent();
+        assertThat(idempotencyRepository.findByTenantIdAndProjectIdAndCommandNameAndIdempotencyKey(
+            "tenant-a",
+            "project-a",
+            "weeklyExpense.saveDraft",
+            "idem-001"
+        )).isPresent();
 
         mockMvc.perform(asActor(get("/api/v1/cashflow/project-a"), "tenant-a", "viewer-a", "viewer"))
             .andExpect(status().isOk())
@@ -514,7 +534,7 @@ class WeeklyExpenseControllerTest {
     }
 
     @Test
-    void sameIdempotencyKeyAcrossProjectsReturnsConflictInsteadOfReplayingOtherProject() throws Exception {
+    void sameIdempotencyKeyAcrossProjectsUsesSeparateIdempotencyScope() throws Exception {
         String body = """
             {
               "idempotencyKey": "idem-cross-project",
@@ -531,13 +551,12 @@ class WeeklyExpenseControllerTest {
         mockMvc.perform(asActor(post("/api/v1/weekly-expenses/project-idem-b/sheets/default/save-draft"), "tenant-idem", "pm-idem", "pm")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body))
-            .andExpect(status().isConflict())
-            .andExpect(jsonPath("$.code").value("weekly_expense_conflict"))
-            .andExpect(jsonPath("$.message").value("Idempotency key already exists for a different project or command."));
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.projectId").value("project-idem-b"));
     }
 
     @Test
-    void sameIdempotencyKeyAcrossCommandsReturnsConflict() throws Exception {
+    void sameIdempotencyKeyAcrossCommandsUsesSeparateIdempotencyScope() throws Exception {
         String saveBody = """
             {
               "idempotencyKey": "idem-cross-command",
@@ -560,13 +579,12 @@ class WeeklyExpenseControllerTest {
         mockMvc.perform(asActor(post("/api/v1/weekly-expenses/project-idem-command/submit"), "tenant-idem-command", "pm-idem", "pm")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(submitBody))
-            .andExpect(status().isConflict())
-            .andExpect(jsonPath("$.code").value("weekly_expense_conflict"))
-            .andExpect(jsonPath("$.message").value("Idempotency key already exists for a different project or command."));
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.commandName").value("weeklyExpense.submitWeek"));
     }
 
     @Test
-    void auditExportIdempotencyDoesNotReplayAnotherProjectContent() throws Exception {
+    void auditExportIdempotencyUsesSeparateProjectScope() throws Exception {
         String exportBody = """
             {
               "idempotencyKey": "audit-export-cross-project",
@@ -584,8 +602,8 @@ class WeeklyExpenseControllerTest {
         mockMvc.perform(asActor(post("/api/v1/weekly-expenses/project-export-b/audit-export"), "tenant-export-replay", "finance-export", "finance")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(exportBody))
-            .andExpect(status().isConflict())
-            .andExpect(jsonPath("$.code").value("weekly_expense_conflict"));
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.projectId").value("project-export-b"));
     }
 
     @Test

@@ -37,8 +37,13 @@ const vercelEnvScript = read('scripts/verify_weekly_direct_vercel_env.mjs');
 const productionDeployWorkflow = read('.github/workflows/production-deploy.yml');
 const ciWorkflow = read('.github/workflows/ci.yml');
 const controller = read('server/jvm-weekly-api/src/main/java/dev/merryai/innerplatform/weekly/api/WeeklyExpenseController.java');
+const controllerTest = read('server/jvm-weekly-api/src/test/java/dev/merryai/innerplatform/weekly/api/WeeklyExpenseControllerTest.java');
 const portalStore = read('src/app/data/portal-store.tsx');
 const portalWeeklyPage = read('src/app/components/portal/PortalWeeklyExpensePage.tsx');
+const cashflowWeeksStore = read('src/app/data/cashflow-weeks-store.tsx');
+const cashflowWeeklyPage = read('src/app/components/cashflow/CashflowWeeklyPage.tsx');
+const cashflowMonitorPage = read('src/app/components/cashflow/CashflowMonitorPage.tsx');
+const cashflowExportPage = read('src/app/components/cashflow/CashflowExportPage.tsx');
 
 for (const source of [cloudBuild, deployScript]) {
   requireIncludes(source, '--ingress all', 'public Java Cloud Run ingress');
@@ -79,6 +84,10 @@ requireIncludes(verifier, 'tenantId', 'Firebase tenant claim contract');
 requireIncludes(verifier, 'role', 'Firebase role claim contract');
 requireIncludes(filter, 'internalApiTokenEnabled && tokensMatch', 'Java shared service-token path disabled unless explicitly enabled');
 requireIncludes(filter, 'weekly_expense_csrf_origin_required', 'session-cookie mutation Origin allowlist');
+requireIncludes(filter, 'weekly_expense_service_token_not_allowed', 'service token rejected on weekly user routes');
+requireIncludes(filter, 'isInternalServiceEndpoint', 'service token scoped to internal endpoints');
+requireIncludes(filter, 'path.startsWith("/api/v1/internal/")', 'service token internal endpoint namespace');
+requireIncludes(controllerTest, 'internalServiceTokenDoesNotAuthorizeWeeklyUserRoutes', 'service token user-route rejection regression');
 requireIncludes(cors, 'https://inner-platform.vercel.app', 'live frontend CORS origin');
 requireNotIncludes(client, "headers.set('authorization', `Bearer ${input.actor.idToken}`)", 'frontend per-request bearer token channel');
 requireIncludes(read('src/app/platform/api-client.ts'), "credentials: 'include'", 'frontend session-cookie channel');
@@ -89,6 +98,25 @@ requireIncludes(platformClient, 'rejectBrowserRewriteHosts: enabled && isProduct
 requireIncludes(platformApiBaseUrl, "host.endsWith('.vercel.app')", 'Vercel Java API base URL rejection');
 requireIncludes(platformApiBaseUrl, 'must bypass Vercel/BFF rewrites', 'same-origin Java API base URL rejection error');
 requireIncludes(platformClient, 'fetchWeeklyExpenseStatusesViaBff', 'Java weekly status read channel');
+requireIncludes(cashflowWeeksStore, 'ensureProjectCashflowSnapshots', 'cashflow aggregate Java snapshot hydration action');
+requireIncludes(cashflowWeeksStore, 'fetchWeeklyExpenseCashflowViaBff', 'cashflow Java read snapshot channel');
+requireIncludes(cashflowWeeksStore, 'fetchWeeklyExpenseStatusesViaBff', 'cashflow Java weekly status read channel');
+requireIncludes(cashflowWeeksStore, 'mergeWeeklyStatusesIntoCashflowWeeks', 'cashflow weekly status merge');
+requireIncludes(cashflowWeeksStore, 'byWeekId.set(weekId, {', 'cashflow status-only week creation');
+requireIncludes(cashflowWeeksStore, 'pmSubmitted: Boolean(status.pmSubmitted)', 'cashflow PM submission status merge');
+requireIncludes(cashflowWeeksStore, 'adminClosed: Boolean(status.adminClosed)', 'cashflow admin close status merge');
+requireNotIncludes(cashflowWeeksStore, "if (isPlatformApiEnabled() && user.source !== 'dev_harness') {\n      setWeeks([]);", 'platform cashflow month navigation empty fallback');
+requireNotIncludes(cashflowWeeksStore, "if (isPlatformApiEnabled() && user.source !== 'dev_harness') {\n      setReadModels({});", 'platform cashflow month navigation read model clear');
+requireIncludes(cashflowWeeklyPage, 'void ensureProjectCashflowSnapshots(projectIds)', 'weekly aggregate Java hydration call');
+requireIncludes(cashflowWeeklyPage, 'projects.map((project) => project.id)', 'weekly aggregate project hydration scope');
+requireIncludes(cashflowMonitorPage, 'void ensureProjectCashflowSnapshots(projectIds)', 'cashflow monitor Java hydration call');
+requireIncludes(cashflowMonitorPage, 'projects.map((project) => project.id)', 'cashflow monitor project hydration scope');
+requireIncludes(cashflowExportPage, 'void ensureProjectCashflowSnapshots(targetProjectIds)', 'cashflow export Java hydration call');
+requireIncludes(cashflowExportPage, 'targetProjects.map((project) => project.id)', 'cashflow export target hydration scope');
+for (const source of [cashflowWeeklyPage, cashflowMonitorPage, cashflowExportPage]) {
+  requireNotIncludes(source, 'computeCashflowTotals', 'cashflow aggregate/export local totals calculation');
+  requireNotIncludes(source, 'chooseCashflowSheetForNet', 'cashflow aggregate/export local net calculation');
+}
 requireIncludes(featureFlags, 'parseFeatureFlag(env.VITE_PLATFORM_API_ENABLED, isProductionBuild)', 'production platform API default');
 requireIncludes(envExample, 'VITE_PLATFORM_API_ENABLED=true', 'stage/live platform API enabled default');
 requireNotIncludes(envExample, 'VITE_PLATFORM_API_ENABLED=false', 'stage/live platform API disabled default');
