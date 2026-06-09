@@ -39,6 +39,11 @@ const actorEmail = readText(readArg('actor-email'), process.env.JVM_WEEKLY_SMOKE
 const runId = readText(readArg('run-id'), process.env.JVM_WEEKLY_SMOKE_RUN_ID, randomUUID().slice(0, 12));
 const projectId = readText(readArg('project-id'), process.env.JVM_WEEKLY_SMOKE_PROJECT_ID, `stage-smoke-${runId}`);
 const sheetKey = readText(readArg('sheet-key'), process.env.JVM_WEEKLY_SMOKE_SHEET_KEY, 'default');
+const smokeOrigin = readText(
+  readArg('origin'),
+  process.env.JVM_WEEKLY_SMOKE_ORIGIN,
+  'https://inner-platform-stage-merryai-devs-projects.vercel.app',
+);
 
 if (!baseUrl) {
   console.error('[smoke-jvm-weekly-api] --base-url or JVM_WEEKLY_SMOKE_URL is required');
@@ -69,6 +74,7 @@ function headers(extra = {}) {
     'x-actor-role': actorRole,
     'x-actor-email': actorEmail,
     ...(identityToken && !sessionCookie ? { authorization: `Bearer ${identityToken}` } : {}),
+    ...(smokeOrigin ? { origin: smokeOrigin } : {}),
     ...extra,
   };
 }
@@ -121,6 +127,7 @@ async function createSessionCookie() {
     headers: {
       'content-type': 'application/json',
       'x-request-id': `session-${runId}`,
+      ...(smokeOrigin ? { origin: smokeOrigin } : {}),
     },
     body: JSON.stringify({ idToken: identityToken }),
   });
