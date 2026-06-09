@@ -74,6 +74,37 @@ describe('backend authority policy', () => {
     expect(cloudBuild).not.toContain('roles/run.invoker');
   });
 
+  it('syncs login member profiles through Java Admin SDK instead of frontend Firestore member writes', () => {
+    const authStore = readText('src/app/data/auth-store.tsx');
+    const portalStore = readText('src/app/data/portal-store.tsx');
+    const clientSource = readText('src/app/lib/platform-bff-client.ts');
+    const controller = readText('server/jvm-weekly-api/src/main/java/dev/merryai/innerplatform/weekly/api/WeeklyExpenseController.java');
+    const firestoreMemberService = readText('server/jvm-weekly-api/src/main/java/dev/merryai/innerplatform/weekly/service/FirestoreMemberProfileService.java');
+
+    expect(authStore).toContain('syncMemberProfileViaBff');
+    expect(authStore).not.toContain("getOrgDocumentPath(currentUser.tenantId || DEFAULT_ORG_ID, 'members'");
+    expect(authStore).not.toContain('getDoc(memberRef)');
+    expect(authStore).not.toContain('setDoc(');
+    expect(portalStore).not.toContain('buildWorkspacePreferencePatch');
+    expect(portalStore).toContain("if (allowFrontendProjectAssignment) {\n      await setDoc(doc(db, getOrgDocumentPath(orgId, 'members', authUser.uid))");
+    expect(portalStore).toContain("if (isPlatformApiEnabled()) {\n          const nextPortalUser");
+    expect(portalStore).not.toContain("...(isPlatformApiEnabled()\n            ? buildWorkspacePreferencePatch");
+    expect(clientSource).toContain('/api/v1/identity/member-profile');
+    expect(clientSource).toContain('identity\\/member-profile');
+    expect(controller).toContain('/identity/member-profile');
+    expect(firestoreMemberService).toContain('SetOptions.merge()');
+    expect(firestoreMemberService).toContain('orgs/" + tenantId + "/members/" + uid');
+  });
+
+  it('requires trusted Firebase role claims for privileged Java API roles', () => {
+    const filterSource = readText('server/jvm-weekly-api/src/main/java/dev/merryai/innerplatform/weekly/api/InternalServiceTokenFilter.java');
+    const controllerTest = readText('server/jvm-weekly-api/src/test/java/dev/merryai/innerplatform/weekly/api/WeeklyExpenseControllerTest.java');
+
+    expect(filterSource).toContain('actor_role_claim_required');
+    expect(filterSource).toContain('isPrivilegedRole(actorRole)');
+    expect(controllerTest).toContain('browserDirectFirebaseTokenRejectsPrivilegedRequestRoleWhenRoleClaimIsMissing');
+  });
+
   it('keeps weekly status and Firebase claims operation BFF-free', () => {
     const controller = readText('server/jvm-weekly-api/src/main/java/dev/merryai/innerplatform/weekly/api/WeeklyExpenseController.java');
     const clientSource = readText('src/app/lib/platform-bff-client.ts');

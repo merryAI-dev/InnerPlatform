@@ -142,6 +142,13 @@ public class InternalServiceTokenFilter extends OncePerRequestFilter {
         String actorRole = tokenActor.actorRole();
         if (actorRole.isBlank()) {
             actorRole = normalizeRole(requireRequestHeader(request, "x-actor-role", "actor_role_required", "Request actor role context is required."));
+            if (isPrivilegedRole(actorRole)) {
+                throw new WeeklyApiAuthException(
+                    HttpServletResponse.SC_FORBIDDEN,
+                    "actor_role_claim_required",
+                    "Privileged actor roles require trusted Firebase role claims."
+                );
+            }
         }
 
         String actorEmail = tokenActor.actorEmail();
@@ -166,6 +173,16 @@ public class InternalServiceTokenFilter extends OncePerRequestFilter {
             return "pm";
         }
         return normalized;
+    }
+
+    private boolean isPrivilegedRole(String value) {
+        String normalized = normalizeRole(value);
+        return "admin".equals(normalized)
+            || "tenant_admin".equals(normalized)
+            || "finance".equals(normalized)
+            || "auditor".equals(normalized)
+            || "support".equals(normalized)
+            || "security".equals(normalized);
     }
 
     private String normalizeEmail(String value) {

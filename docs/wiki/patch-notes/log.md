@@ -246,3 +246,7 @@
 ## [2026-06-09] patch-note | shared-portal-architecture | Java weekly 권위와 self-assignment 차단
 - pages: [shared-portal-architecture](./pages/shared-portal-architecture.md)
 - summary: weekly/cashflow/auth만 Java API로 직접 라우팅하고, Java project access가 참조하는 Firestore member project assignment는 클라이언트 self-write로 변경되지 않도록 rules와 프론트 동기화 경로를 함께 닫았다.
+
+## [2026-06-09] patch-note | shared-portal-architecture | 로그인 member sync Java Admin 경로
+- pages: [shared-portal-architecture](./pages/shared-portal-architecture.md)
+- summary: 로그인 직후 member profile sync를 Java API/Admin SDK 경로로 옮기고, stage/live 포털 흐름의 `members/{uid}` 직접 write와 role claim 없는 privileged role fallback을 차단했다.

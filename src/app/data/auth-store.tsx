@@ -1,5 +1,4 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
 import {
   GoogleAuthProvider,
   onIdTokenChanged,
@@ -13,10 +12,8 @@ import { ORG_MEMBERS, PROJECTS } from './mock-data';
 import { featureFlags } from '../config/feature-flags';
 import {
   getAuthInstance,
-  getDb,
   getDefaultOrgId,
   getGoogleAuthProvider,
-  getOrgDocumentPath,
   initFirebase,
 } from '../lib/firebase';
 import {
@@ -28,10 +25,8 @@ import {
 } from './auth-helpers';
 import { isBootstrapAdminEmail } from './auth-bootstrap';
 import { resolveEffectiveAuthRole } from './auth-role-resolution';
-import { buildLegacyMemberDocId, mergeMemberRecordSources } from './member-documents';
 import { normalizeProjectIds, resolvePrimaryProjectId } from './project-assignment';
 import {
-  buildWorkspacePreferencePatch,
   readMemberWorkspace,
   resolveMemberProjectAccessState,
   type WorkspaceId,
@@ -50,6 +45,7 @@ import {
   type DevHarnessPreset,
 } from '../platform/dev-harness';
 import { setObservabilityUserContext } from '../platform/observability';
+import { syncMemberProfileViaBff } from '../lib/platform-bff-client';
 
 export interface AuthUser {
   uid: string;
@@ -300,75 +296,45 @@ async function establishPlatformApiSession(firebaseUser: FirebaseUser): Promise<
 async function upsertMemberFromFirebase(
   firebaseUser: FirebaseUser,
   tenantId: string,
+  idToken: string,
+  resolvedRole: UserRole,
   roleFromClaims?: string,
   department?: string,
 ): Promise<MemberDoc | undefined> {
-  const db = getDb();
-  if (!db) return undefined;
-
   const normalizedEmail = normalizeEmail(firebaseUser.email || '');
-  const memberPath = getOrgDocumentPath(tenantId, 'members', firebaseUser.uid);
-  const memberRef = doc(db, memberPath);
-  const legacyMemberId = buildLegacyMemberDocId(normalizedEmail);
-  const legacyMemberRef = legacyMemberId && legacyMemberId !== firebaseUser.uid
-    ? doc(db, getOrgDocumentPath(tenantId, 'members', legacyMemberId))
-    : null;
-  const [memberSnap, legacySnap] = await Promise.all([
-    getDoc(memberRef),
-    legacyMemberRef ? getDoc(legacyMemberRef) : Promise.resolve(null),
-  ]);
-  const hasCanonicalMember = memberSnap.exists();
-  const existing = mergeMemberRecordSources(
-    memberSnap.exists() ? (memberSnap.data() as Record<string, unknown>) : undefined,
-    legacySnap?.exists() ? (legacySnap.data() as Record<string, unknown>) : undefined,
-  ) as Partial<MemberDoc> | undefined;
-  const now = new Date().toISOString();
-  const bootstrapAdmin = isBootstrapAdminEmail(normalizedEmail);
-  const access = resolveMemberProjectAccessState(existing);
-  const mergedProjectIds = normalizeProjectIds([
-    ...access.normalizedProjectIds,
-    ...(Array.isArray(existing?.projectIds) ? existing?.projectIds : []),
-    existing?.projectId,
-    resolveProjectIdForManager(firebaseUser.uid, PROJECT_OWNERS),
-  ]);
-  const primaryProjectId = resolvePrimaryProjectId(
-    mergedProjectIds,
-    access.normalizedProjectId || existing?.projectId,
-  ) || '';
-
-  const projectAssignmentPatch = hasCanonicalMember
-    ? {
-        projectId: primaryProjectId,
-        projectIds: mergedProjectIds,
-        projectNames: access.projectNames || existing?.projectNames,
-        portalProfile: existing?.portalProfile,
-      }
-    : {};
-
-  const merged = omitUndefinedFields<MemberDoc>({
-    uid: firebaseUser.uid,
-    name: firebaseUser.displayName || existing?.name || '사용자',
-    email: normalizedEmail,
-    role: resolveEffectiveAuthRole({
-      memberRole: existing?.role,
-      claimRole: roleFromClaims,
-      directoryRole: resolveRoleFromDirectory(firebaseUser.email || '', ROLE_DIRECTORY),
-      bootstrapAdmin,
-    }),
+  const member = await syncMemberProfileViaBff({
     tenantId,
-    status: existing?.status || 'ACTIVE',
-    ...projectAssignmentPatch,
-    avatarUrl: firebaseUser.photoURL || existing?.avatarUrl,
-    createdAt: existing?.createdAt || now,
-    updatedAt: now,
-    lastLoginAt: now,
-    defaultWorkspace: existing?.defaultWorkspace,
-    lastWorkspace: existing?.lastWorkspace,
+    actor: {
+      uid: firebaseUser.uid,
+      email: normalizedEmail,
+      role: roleFromClaims || 'pm',
+      idToken,
+    },
+    profile: {
+      name: firebaseUser.displayName || '사용자',
+      avatarUrl: firebaseUser.photoURL || undefined,
+      department,
+    },
   });
-  if (department) merged.department = department;
-
-  await setDoc(memberRef, merged, { merge: true });
-  return merged;
+  return omitUndefinedFields<MemberDoc>({
+    uid: member.uid || firebaseUser.uid,
+    name: member.name || firebaseUser.displayName || '사용자',
+    email: normalizeEmail(member.email || normalizedEmail),
+    role: toUserRole(member.role) || resolvedRole,
+    tenantId: member.tenantId || tenantId,
+    department: member.department,
+    status: member.status === 'INACTIVE' || member.status === 'PENDING' ? member.status : 'ACTIVE',
+    projectId: member.projectId,
+    projectIds: member.projectIds,
+    projectNames: member.projectNames,
+    portalProfile: member.portalProfile,
+    avatarUrl: member.avatarUrl || firebaseUser.photoURL || undefined,
+    createdAt: member.createdAt,
+    updatedAt: member.updatedAt,
+    lastLoginAt: member.lastLoginAt,
+    defaultWorkspace: member.defaultWorkspace as WorkspaceId | undefined,
+    lastWorkspace: member.lastWorkspace as WorkspaceId | undefined,
+  });
 }
 
 const _g = globalThis as any;
@@ -444,9 +410,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           envTenantId: DEFAULT_ORG_ID,
           strict: featureFlags.tenantIsolationStrict,
         });
+        const normalizedEmail = normalizeEmail(firebaseUser.email || '');
+        const resolvedRole = resolveEffectiveAuthRole({
+          claimRole: claimsContext.role,
+          directoryRole: resolveRoleFromDirectory(firebaseUser.email || '', ROLE_DIRECTORY),
+          bootstrapAdmin: isBootstrapAdminEmail(normalizedEmail),
+        });
         const member = await upsertMemberFromFirebase(
           firebaseUser,
           tenantId,
+          idToken,
+          resolvedRole,
           claimsContext.role,
           claimsContext.department,
         );
@@ -502,7 +476,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const currentUser = user;
     if (!currentUser) return false;
 
-    const updatedAt = new Date().toISOString();
     const nextUser: AuthUser = {
       ...currentUser,
       ...(persistDefault ? { defaultWorkspace: workspace } : {}),
@@ -527,23 +500,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return true;
     }
 
-    const db = getDb();
-    if (!db) return true;
-
     try {
-      await setDoc(
-        doc(db, getOrgDocumentPath(currentUser.tenantId || DEFAULT_ORG_ID, 'members', currentUser.uid)),
-        {
+      const synced = await syncMemberProfileViaBff({
+        tenantId: currentUser.tenantId || DEFAULT_ORG_ID,
+        actor: {
           uid: currentUser.uid,
           email: currentUser.email,
-          name: currentUser.name,
           role: currentUser.role,
-          tenantId: currentUser.tenantId || DEFAULT_ORG_ID,
-          ...buildWorkspacePreferencePatch(workspace, updatedAt, persistDefault),
-          lastLoginAt: updatedAt,
+          idToken: currentUser.idToken,
         },
-        { merge: true },
-      );
+        profile: {
+          name: currentUser.name,
+          avatarUrl: currentUser.avatarUrl,
+          defaultWorkspace: persistDefault ? workspace : currentUser.defaultWorkspace,
+          lastWorkspace: workspace,
+        },
+      });
+      const confirmedUser: AuthUser = {
+        ...nextUser,
+        role: toUserRole(synced.role) || nextUser.role,
+        projectId: synced.projectId || nextUser.projectId,
+        projectIds: normalizeProjectIds([
+          ...(synced.projectIds || []),
+          synced.projectId || nextUser.projectId,
+        ]),
+        defaultWorkspace: (synced.defaultWorkspace as WorkspaceId | undefined) || nextUser.defaultWorkspace,
+        lastWorkspace: (synced.lastWorkspace as WorkspaceId | undefined) || nextUser.lastWorkspace,
+      };
+      setUser(confirmedUser);
+      saveUser(confirmedUser);
       return true;
     } catch (err) {
       console.error('[Auth] setWorkspacePreference failed:', err);

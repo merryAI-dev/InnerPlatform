@@ -36,6 +36,7 @@ import {
   createPlatformApiClient,
   restoreProjectViaBff,
   closeWeeklyExpenseWeekViaBff,
+  syncMemberProfileViaBff,
   syncTransactionEvidenceDriveViaBff,
   trashProjectViaBff,
   uploadProjectSheetSourceViaBff,
@@ -98,7 +99,7 @@ describe('platform-bff-client', () => {
     }
   });
 
-  it('routes only weekly and cashflow paths to Java API while preserving legacy BFF routes', async () => {
+  it('routes weekly, cashflow, and identity member sync paths to Java API while preserving legacy BFF routes', async () => {
     const calls: Array<{ url: string; authorization: string | null }> = [];
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -110,6 +111,18 @@ describe('platform-bff-client', () => {
         return new Response(JSON.stringify({ projectId: 'p-cashflow', statuses: [] }), {
           status: 200,
           headers: { 'content-type': 'application/json', 'x-request-id': 'req-weekly' },
+        });
+      }
+      if (url.includes('/api/v1/identity/member-profile')) {
+        return new Response(JSON.stringify({
+          uid: 'admin-1',
+          email: 'admin@mysc.co.kr',
+          name: 'Admin',
+          role: 'admin',
+          tenantId: 'mysc',
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json', 'x-request-id': 'req-identity' },
         });
       }
       if (url.includes('/api/v1/projects')) {
@@ -148,6 +161,12 @@ describe('platform-bff-client', () => {
       project: { id: 'p001', name: 'Project 1' },
       client,
     });
+    await syncMemberProfileViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'admin-1', email: 'admin@mysc.co.kr', role: 'admin', idToken: 'token-identity' },
+      profile: { name: 'Admin' },
+      client,
+    });
 
     expect(calls[0]).toEqual({
       url: 'https://java-api.example.run.app/api/v1/weekly-expenses/p-cashflow/statuses',
@@ -156,6 +175,10 @@ describe('platform-bff-client', () => {
     expect(calls[1]).toEqual({
       url: 'https://legacy-bff.example.app/api/v1/projects',
       authorization: null,
+    });
+    expect(calls[2]).toEqual({
+      url: 'https://java-api.example.run.app/api/v1/identity/member-profile',
+      authorization: 'Bearer token-identity',
     });
     vi.unstubAllGlobals();
   });

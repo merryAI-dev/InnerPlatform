@@ -105,7 +105,7 @@ import {
   upsertProjectViaBff,
 } from '../lib/platform-bff-client';
 import { duplicateExpenseSetAsDraft, withExpenseItems } from './portal-store.helpers';
-import { buildPortalProfilePatch, buildWorkspacePreferencePatch, readMemberWorkspace, resolveMemberProjectAccessState } from './member-workspace';
+import { buildPortalProfilePatch, readMemberWorkspace, resolveMemberProjectAccessState } from './member-workspace';
 import { buildLegacyMemberDocId, mergeMemberRecordSources } from './member-documents';
 import { toast } from 'sonner';
 import { includesProject, normalizeProjectIds, resolvePrimaryProjectId } from './project-assignment';
@@ -2712,27 +2712,27 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       ...(portalUser?.projectNames || {}),
       [projectId]: requestPayload.name,
     } : (portalUser?.projectNames || {});
-    await setDoc(doc(db, getOrgDocumentPath(orgId, 'members', authUser.uid)), {
-      uid: authUser.uid,
-      name: authUser.name || portalUser?.name || '사용자',
-      email: authUser.email || portalUser?.email || '',
-      role: normalizePortalRole(authUser.role || portalUser?.role || 'pm'),
-      tenantId: orgId,
-      status: 'ACTIVE',
-      ...(allowFrontendProjectAssignment
-        ? buildPortalProfilePatch({
-            projectId: nextPortalProjectId,
-            projectIds: nextPortalProjectIds,
-            projectNames: nextPortalProjectNames,
-            updatedAt: now,
-            updatedByUid: authUser.uid,
-            updatedByName: authUser.name || portalUser?.name || '사용자',
-          })
-        : buildWorkspacePreferencePatch('portal', now, true)),
-      updatedAt: now,
-      createdAt: authUser.registeredAt || now,
-      lastLoginAt: now,
-    }, { merge: true });
+    if (allowFrontendProjectAssignment) {
+      await setDoc(doc(db, getOrgDocumentPath(orgId, 'members', authUser.uid)), {
+        uid: authUser.uid,
+        name: authUser.name || portalUser?.name || '사용자',
+        email: authUser.email || portalUser?.email || '',
+        role: normalizePortalRole(authUser.role || portalUser?.role || 'pm'),
+        tenantId: orgId,
+        status: 'ACTIVE',
+        ...buildPortalProfilePatch({
+          projectId: nextPortalProjectId,
+          projectIds: nextPortalProjectIds,
+          projectNames: nextPortalProjectNames,
+          updatedAt: now,
+          updatedByUid: authUser.uid,
+          updatedByName: authUser.name || portalUser?.name || '사용자',
+        }),
+        updatedAt: now,
+        createdAt: authUser.registeredAt || now,
+        lastLoginAt: now,
+      }, { merge: true });
+    }
     if (allowFrontendProjectAssignment) {
       setPortalUser((previous) => normalizePortalUser({
         id: authUser.uid,
@@ -3139,6 +3139,12 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       setIsMemberLoading(true);
       let memberRole = normalizePortalRole(authUser.role || user.role || 'pm');
       try {
+        if (isPlatformApiEnabled()) {
+          const nextPortalUser = candidate.role !== memberRole ? { ...candidate, role: memberRole } : candidate;
+          setPortalUser(nextPortalUser);
+          setActiveProjectIdState(nextPortalUser.projectId);
+          return true;
+        }
         const { canonicalRef, member } = await loadPortalMemberRecord(db, orgId, authUser);
         if (typeof member?.role === 'string' && member.role.trim()) {
           memberRole = normalizePortalRole(member.role);
@@ -3150,16 +3156,14 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           role: memberRole,
           tenantId: orgId,
           status: typeof member?.status === 'string' && member.status.trim() ? member.status : 'ACTIVE',
-          ...(isPlatformApiEnabled()
-            ? buildWorkspacePreferencePatch('portal', now, true)
-            : buildPortalProfilePatch({
-                projectId: candidate.projectId,
-                projectIds: candidate.projectIds,
-                projectNames: candidate.projectNames,
-                updatedAt: now,
-                updatedByUid: authUser.uid,
-                updatedByName: authUser.name || candidate.name,
-              })),
+          ...buildPortalProfilePatch({
+            projectId: candidate.projectId,
+            projectIds: candidate.projectIds,
+            projectNames: candidate.projectNames,
+            updatedAt: now,
+            updatedByUid: authUser.uid,
+            updatedByName: authUser.name || candidate.name,
+          }),
           updatedAt: now,
           createdAt: member?.createdAt || authUser.registeredAt || now,
           lastLoginAt: now,

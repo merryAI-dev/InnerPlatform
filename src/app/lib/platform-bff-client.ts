@@ -908,6 +908,26 @@ export interface WeeklyExpenseStatusesResult {
   statuses: WeeklyExpenseStatusLine[];
 }
 
+export interface MemberProfileSyncResult {
+  uid: string;
+  name: string;
+  email: string;
+  role: string;
+  tenantId?: string;
+  department?: string;
+  status?: string;
+  projectId?: string;
+  projectIds?: string[];
+  projectNames?: Record<string, string>;
+  portalProfile?: Record<string, unknown>;
+  avatarUrl?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  lastLoginAt?: string;
+  defaultWorkspace?: string;
+  lastWorkspace?: string;
+}
+
 export interface PlatformApiClientLike {
   get<T>(path: string, options: {
     tenantId: string;
@@ -1008,7 +1028,7 @@ function resolveClient(client?: PlatformApiClientLike): PlatformApiClientLike {
 }
 
 function isWeeklyJavaApiPath(path: string): boolean {
-  return /^\/api\/v1\/(?:weekly-expenses(?:\/|$)|cashflow(?:\/|$))/.test(path);
+  return /^\/api\/v1\/(?:identity\/member-profile(?:\/|$)|weekly-expenses(?:\/|$)|cashflow(?:\/|$))/.test(path);
 }
 
 class RoutingPlatformApiClient implements PlatformApiClientLike {
@@ -1040,6 +1060,27 @@ class RoutingPlatformApiClient implements PlatformApiClientLike {
 
 function encodeHeaderValue(value: string): string {
   return encodeURIComponent(value);
+}
+
+export async function syncMemberProfileViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  profile?: {
+    name?: string;
+    avatarUrl?: string;
+    department?: string;
+    defaultWorkspace?: string;
+    lastWorkspace?: string;
+  };
+  client?: PlatformApiClientLike;
+}): Promise<MemberProfileSyncResult> {
+  const resolvedClient = resolveClient(params.client);
+  const { data } = await resolvedClient.post<MemberProfileSyncResult>('/api/v1/identity/member-profile', {
+    tenantId: params.tenantId,
+    actor: toRequestActor(params.actor),
+    body: params.profile || {},
+  });
+  return data;
 }
 
 export async function upsertProjectViaBff(params: {

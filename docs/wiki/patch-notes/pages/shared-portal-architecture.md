@@ -43,6 +43,7 @@
 
 ## Recent Changes
 
+- [2026-06-09] 로그인 직후 member profile sync를 프론트 Firestore write에서 Java API/Admin SDK 경로로 옮겼다. stage/live 플랫폼 모드에서 `auth-store`와 포털 등록 흐름은 `members/{uid}`를 직접 쓰지 않으며, Java API는 Firebase role claim이 없는 브라우저 요청의 privileged role fallback을 거부한다.
 - [2026-06-09] 주간 사업비 Java API의 stage/live 안정성 guard를 보강했다. 프론트 runtime은 Vercel/BFF rewrite host를 Java API base URL로 받으면 즉시 실패하고, Firestore rules는 weekly server-owned 컬렉션을 catchall write에서 제외한다. Java backend는 scoped Firebase Bearer 인증, project/command scoped idempotency replay, UUID bank import batch ID, canonical cashflow line 저장을 강제한다.
 - [2026-06-09] Java weekly API에 server-readable sheet hydrate endpoint와 project-scoped authorization gate를 추가하고, `members/{uid}`의 `projectId/projectIds/portalProfile` self-write를 Firestore rules에서 차단했다. Frontend는 stage/live에서 주간 사업비 sheet hydrate, projection/actual, audit export를 Java API로만 요청하며, legacy BFF route와 weekly Java route를 명시적으로 분리한다.
 - [2026-06-08] Java weekly API에 persistence port와 Firestore-inherited adapter를 추가해 현재 `expense_sheets`, `cashflow_weeks`, `expense_intake` 문서를 삭제 없이 상속하도록 했다. Frontend는 stage/live에서 Java API로만 주간 사업비/캐시플로 명령을 보내며, Firestore adapter는 row/cell 검증, actual merge, projection/status/audit를 서버 transaction 경계 안에서 처리한다.
