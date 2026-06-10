@@ -67,7 +67,7 @@ const SettlementLedgerPage = lazy(
 export function PortalWeeklyExpensePage() {
   const navigate = useNavigate();
   const weeklyExpenseSavePolicy = resolveWeeklyExpenseSavePolicy();
-  const { user: authUser } = useAuth();
+  const { user: authUser, ensureGoogleWorkspaceAccess } = useAuth();
   const { orgId } = useFirebase();
   const {
     isLoading: portalStoreLoading,

@@ -86,4 +86,9 @@ describe('PortalWeeklyExpensePage flow layout', () => {
     expect(weeklyExpenseSource).not.toContain('GoogleSheetMigrationWizard');
     expect(weeklyExpenseSource).not.toContain('googleSheetImportOpen');
   });
+
+  it('wires Google Workspace access through the auth store instead of an undefined global', () => {
+    expect(weeklyExpenseSource).toContain('const { user: authUser, ensureGoogleWorkspaceAccess } = useAuth();');
+    expect(weeklyExpenseSource).toContain('await ensureGoogleWorkspaceAccess()');
+  });
 });
