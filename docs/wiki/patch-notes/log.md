@@ -2,7 +2,7 @@
 
 ## [2026-06-10] patch-note | portal-bank-statement | cumulative upload surface
 - pages: [portal-bank-statement](./pages/portal-bank-statement.md)
-- summary: 통장내역 화면에 `전체/미반영/반영완료` 탭과 누적 거래 요약을 추가했다. 업로드된 상태에서도 `추가 업로드` 버튼을 노출하고, 새 파일은 기존 append/dedupe 기준으로 즉시 누적 저장해 프로젝트별 다회 업로드 흐름을 지원한다.
+- summary: 통장내역 화면에 `전체/미반영/반영완료` 탭과 누적 거래 요약을 추가했다. 업로드된 상태에서도 `추가 업로드` 버튼을 노출하고, 새 파일은 현재 탭이 아니라 저장된 전체 기준본 기준 append/dedupe로 즉시 누적 저장해 프로젝트별 다회 업로드 흐름을 지원한다.
 
 ## [2026-06-10] patch-note | portal-weekly-expense | workspace access hook restore
 - pages: [portal-weekly-expense](./pages/portal-weekly-expense.md)

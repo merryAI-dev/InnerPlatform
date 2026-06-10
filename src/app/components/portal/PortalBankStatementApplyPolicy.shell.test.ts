@@ -277,6 +277,8 @@ describe('portal bank statement apply policy', () => {
 
   it('keeps cumulative bank statement uploads visible with a repeat upload entry', () => {
     expect(bankStatementPageSource).toContain('appendBankStatementRows');
+    expect(bankStatementPageSource).toContain('const fullBaselineSheet = bankStatementRows || { columns, rows };');
+    expect(bankStatementPageSource).toContain('appendBankStatementRows(fullBaselineSheet, result)');
     expect(bankStatementPageSource).toContain('누적 통장내역');
     expect(bankStatementPageSource).toContain('추가 업로드');
     expect(bankStatementPageSource).toContain("switchStatusTab('all')");

@@ -484,7 +484,8 @@ export function PortalBankStatementPage() {
         toast.error('업로드 데이터에서 컬럼/행을 찾지 못했습니다. 파일 형식을 확인해 주세요.');
         return;
       }
-      const mergedPreview = appendBankStatementRows({ columns, rows }, result);
+      const fullBaselineSheet = bankStatementRows || { columns, rows };
+      const mergedPreview = appendBankStatementRows(fullBaselineSheet, result);
       setColumns(mergedPreview.sheet.columns);
       setRows(mergedPreview.sheet.rows);
       setSelectedRowIds(new Set(mergedPreview.appendedRows.map((row, index) => row.tempId || `uploaded-${index}`)));
@@ -509,7 +510,7 @@ export function PortalBankStatementPage() {
     } finally {
       setUploadPreparing(false);
     }
-  }, [columns, parseExcelToMatrix, rows, saveBankStatementRows]);
+  }, [bankStatementRows, columns, parseExcelToMatrix, rows, saveBankStatementRows]);
 
   const openFilePicker = useCallback(() => {
     warmXlsx();
