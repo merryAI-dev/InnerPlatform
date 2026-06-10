@@ -1289,15 +1289,28 @@ export function PortalBankStatementPage() {
                   </div>
                 </div>
 
-                <div className="mt-3 rounded border bg-white">
-                  <div className="border-b bg-slate-100 px-3 py-2 text-[12px] font-bold text-slate-900">
-                    작성 정책
-                  </div>
-                  <div className="space-y-2 px-3 py-3 text-[11px] leading-5 text-slate-600">
-                    <p>cashflow항목은 회사 기준 Actual PK입니다. 목록에 없는 값은 직접 입력하지 않습니다.</p>
-                    <p>거래처 제안은 자동완성일 뿐 자동확정하지 않습니다.</p>
-                    <p>선택 행 일괄적용은 위자드 임시 입력값에만 적용합니다.</p>
-                    <p>확정 시 Java API가 행/셀 검증 후 사업비 입력에 반영합니다.</p>
+                <div className="mt-3 flex justify-end">
+                  <div
+                    data-testid="bank-statement-wizard-policy-help"
+                    className="group relative inline-flex"
+                  >
+                    <button
+                      type="button"
+                      className="inline-flex h-7 items-center gap-1 border border-slate-300 bg-white px-2 text-[11px] font-semibold text-slate-600 hover:border-blue-300 hover:text-blue-700"
+                      aria-label="작성 기준 보기"
+                    >
+                      <ShieldAlert className="h-3.5 w-3.5" />
+                      작성 기준
+                    </button>
+                    <div className="pointer-events-none absolute bottom-full right-0 z-20 mb-2 w-[260px] translate-y-1 border border-slate-300 bg-white p-3 text-[11px] leading-5 text-slate-700 opacity-0 shadow-xl transition duration-150 ease-out group-hover:translate-y-0 group-hover:opacity-100">
+                      <div className="font-bold text-slate-900">검증 기준</div>
+                      <div className="mt-2 space-y-1">
+                        <div>cashflow항목은 회사 기준 Actual PK입니다. 목록에 없는 값은 직접 입력하지 않습니다.</div>
+                        <div>거래처 제안은 자동완성일 뿐 자동확정하지 않습니다.</div>
+                        <div>선택 행 일괄적용은 위자드 임시 입력값에만 적용합니다.</div>
+                        <div>확정 시 Java API가 행/셀 검증 후 사업비 입력에 반영합니다.</div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </aside>

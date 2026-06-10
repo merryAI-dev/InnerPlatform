@@ -8,6 +8,10 @@
 - pages: [portal-bank-statement](./pages/portal-bank-statement.md)
 - summary: 통장내역 선택 행 반영 위자드에 `해당 주차`를 수정불가 계산값으로 표시한다. 값은 거래일 기준 수요일~화요일 주차 정책으로 계산하며, 저장 patch 대상에는 포함하지 않는다.
 
+## [2026-06-10] patch-note | portal-bank-statement | hover-only wizard policy help
+- pages: [portal-bank-statement](./pages/portal-bank-statement.md)
+- summary: 통장내역 선택 행 반영 위자드의 상시 노출 정책 문구를 `작성 기준` hover 도움말로 접어, 입력 화면에서 불필요한 설명 문구가 계속 보이지 않게 했다.
+
 ## [2026-06-10] patch-note | portal-bank-statement | production temp wizard hardening
 - pages: [portal-bank-statement](./pages/portal-bank-statement.md)
 - summary: 통장내역 선택 행 반영 위자드를 상용 입력 버퍼로 보강했다. dirty 통장 원본은 위자드 진입 전 기준본으로 자동 저장하고, 30일 임시저장/작성본 불러오기/거래처 이전 조합 제안/선택 행 일괄적용/되돌리기/오류 요약을 추가했으며, 필수증빙자료는 예산 편집의 `비목 > 세목 > 세세목` 계층을 우선 상속한다.

@@ -135,6 +135,17 @@ describe('portal bank statement apply policy', () => {
     expect(cashflowFieldBlock).not.toContain('<input');
   });
 
+  it('keeps wizard policy copy behind hover help instead of always-visible sidebar comments', () => {
+    expect(bankStatementPageSource).toContain('data-testid="bank-statement-wizard-policy-help"');
+    expect(bankStatementPageSource).toContain('group-hover:translate-y-0');
+    expect(bankStatementPageSource).toContain('group-hover:opacity-100');
+    expect(bankStatementPageSource).not.toContain('<div className="border-b bg-slate-100 px-3 py-2 text-[12px] font-bold text-slate-900">\n                    작성 정책');
+    expect(bankStatementPageSource).not.toContain('<p>cashflow항목은 회사 기준 Actual PK입니다. 목록에 없는 값은 직접 입력하지 않습니다.</p>');
+    expect(bankStatementPageSource).not.toContain('<p>거래처 제안은 자동완성일 뿐 자동확정하지 않습니다.</p>');
+    expect(bankStatementPageSource).not.toContain('<p>선택 행 일괄적용은 위자드 임시 입력값에만 적용합니다.</p>');
+    expect(bankStatementPageSource).not.toContain('<p>확정 시 Java API가 행/셀 검증 후 사업비 입력에 반영합니다.</p>');
+  });
+
   it('does not expose weekly week labels as manual wizard input', () => {
     const wizardFieldBlock = sourceBetween(
       bankStatementPageSource,
