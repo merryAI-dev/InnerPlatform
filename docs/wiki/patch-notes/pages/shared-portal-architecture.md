@@ -28,11 +28,13 @@
 - [x] `portal-store`가 `project catalog`, `current project scope`, `weekly submission scope`를 분리해 자기유발 bootstrap loop를 줄이도록 재구성됨
 - [x] `v2` 예산 구조는 `budget_tree_v2`를 원본으로 두고, `budget_code_book`은 2단 파생본으로 동기화함
 - [x] 통장내역 선택 반영은 Temp 위자드를 거쳐 기존 Firestore 원장 구조에 merge되며, 프론트는 계산 권위가 아니라 작성 채널만 담당함
+- [x] 주간 사업비 원장은 확정 행 직접 mutate 대신 append-only 정정 행으로 보존하고, actual read model은 원장 저장 시 주차 단위로 sync함
 - [ ] admin summary surface cutover까지 완료됨
 - [ ] 포털의 broad Firestore direct read가 완전히 제거됨
 
 ## Recent Changes
 
+- [2026-06-10] 주간 사업비 원장은 기존 확정 행을 직접 수정하지 않고 선택 행 정정 위자드가 새 row를 append하는 방식으로 고정했다. 통장내역 선택 반영과 정정 저장은 같은 Firestore transaction/save 흐름에서 cashflow actual read model을 주차 단위로 갱신한다.
 - [2026-06-10] 내부 SaaS 편의성을 위해 통장내역 기준본 저장/선택 행 반영 경로에서 Java 권한 게이트를 제거하고 Firestore 기존 구조를 상속하도록 조정했다. Java는 주간 사업비 저장/계산/검증 영역에 남기되, 통장내역 위자드 진입과 확정이 `403`에 막히지 않도록 분리했다.
 - [2026-06-10] Firestore 기존 구조를 상속하더라도 rows 전체 배열 overwrite 위험을 줄이기 위해 통장내역 기준본과 선택 행 원장 반영 write는 transaction으로 최신 문서를 읽고 merge한 뒤 저장하도록 보강했다.
 - [2026-06-10] 통장내역 선택 반영을 `Temp 위자드 -> 셀 패치 -> 기존 원장 구조 merge` 구조로 조정했다. 위자드는 원본/원장을 확정 전 mutate하지 않고, 이미 반영된 거래는 전체 expense sheet tab 기준으로 제외한다.

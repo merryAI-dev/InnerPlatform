@@ -4,7 +4,7 @@ import type {
   ClipboardEvent as ReactClipboardEvent,
   MouseEvent as ReactMouseEvent,
 } from 'react';
-import { Check, ExternalLink, GripVertical, Plus, Upload, X } from 'lucide-react';
+import { ExternalLink, GripVertical, Plus, Upload, X } from 'lucide-react';
 import type { BudgetCodeEntry, BudgetTreeV2, Transaction, SettlementSheetPolicy } from '../../data/types';
 import { parseNumber } from '../../platform/csv-utils';
 import { findBudgetTreeSubItem } from '../../platform/budget-tree-v2';
@@ -14,11 +14,6 @@ import {
   SETTLEMENT_COLUMNS,
   type ImportRow,
 } from '../../platform/settlement-csv';
-import {
-  hasImportRowReviewRequirement,
-  isImportRowReviewConfirmed,
-  isImportRowReviewPending,
-} from '../../platform/settlement-review';
 import {
   buildCommentThreadKey,
   buildSheetRowCommentId,
@@ -215,6 +210,11 @@ function ImportEditorRow({
   onBudgetSuggestionAccepted,
   readOnly = false,
   editableReadOnlyHeaders = [],
+  rowSelectionEnabled = false,
+  rowSelected = false,
+  onRowSelectedChange,
+  unlockDerivedFields = false,
+  structureActionsEnabled = true,
 }: {
   row: ImportRow;
   rowIdx: number;
@@ -260,12 +260,13 @@ function ImportEditorRow({
   onBudgetSuggestionAccepted?: (confidence: 'history' | 'codebook') => void;
   readOnly?: boolean;
   editableReadOnlyHeaders?: string[];
+  rowSelectionEnabled?: boolean;
+  rowSelected?: boolean;
+  onRowSelectedChange?: (checked: boolean) => void;
+  unlockDerivedFields?: boolean;
+  structureActionsEnabled?: boolean;
 }) {
   const hasError = Boolean(row.error);
-  const hasReviewHint = hasImportRowReviewRequirement(row);
-  const isReviewConfirmed = isImportRowReviewConfirmed(row);
-  const isReviewPending = isImportRowReviewPending(row);
-  const reviewHintLabel = row.reviewHints?.[0] || '';
   const hasMissingCell = useMemo(() => {
     const cells = row.cells || [];
     const hasAnyValue = cells.some((cell, idx) => idx !== noIdx && String(cell || '').trim() !== '');
@@ -330,6 +331,7 @@ function ImportEditorRow({
     header === '사업비 사용액' || header === '매입부가세'
   ), []);
   const isDerivedFieldLocked = useCallback((header: string) => {
+    if (unlockDerivedFields) return false;
     if (isManualPriorityOutflowField(header)) return false;
     if (header === '통장잔액') {
       return settlementSheetPolicy.readOnlyDerivedFields.includes('balance') && !isAdjustmentRow;
@@ -339,39 +341,7 @@ function ImportEditorRow({
     if (header === '통장에 찍힌 입/출금액') return settlementSheetPolicy.readOnlyDerivedFields.includes('bankAmount');
     if (header === '매입부가세') return settlementSheetPolicy.readOnlyDerivedFields.includes('vatIn');
     return false;
-  }, [isAdjustmentRow, isManualPriorityOutflowField, settlementSheetPolicy.readOnlyDerivedFields]);
-  const resolveCellSource = useCallback((colIdx: number, header: string) => {
-    if (isDerivedFieldLocked(header)) {
-      return { label: '계산', className: 'bg-slate-100 text-slate-600' };
-    }
-    if (row.userEditedCells?.has(colIdx)) {
-      return { label: '수정', className: 'bg-teal-100 text-teal-700' };
-    }
-    if (row.reviewRequiredCellIndexes?.includes(colIdx)) {
-      return isReviewConfirmed
-        ? { label: '확인', className: 'bg-slate-100 text-slate-700' }
-        : { label: '검토', className: 'bg-[#26415f]/10 text-[#26415f]' };
-    }
-    const cellValue = String(row.cells[colIdx] || '').trim();
-    if (
-      row.sourceTxId
-      && cellValue
-      && (
-        colIdx === budgetCodeIdx
-        || colIdx === subCodeIdx
-        || colIdx === cashflowIdx
-        || colIdx === weekIdx
-        || header === '통장잔액'
-        || header === '통장에 찍힌 입/출금액'
-        || header === '사업비 사용액'
-        || header === '매입부가세'
-        || header === '지급처'
-      )
-    ) {
-      return { label: '원본', className: 'bg-slate-100 text-slate-600' };
-    }
-    return null;
-  }, [budgetCodeIdx, cashflowIdx, isReviewConfirmed, row.cells, row.reviewRequiredCellIndexes, row.sourceTxId, row.userEditedCells, subCodeIdx, weekIdx, isDerivedFieldLocked]);
+  }, [isAdjustmentRow, isManualPriorityOutflowField, settlementSheetPolicy.readOnlyDerivedFields, unlockDerivedFields]);
   const renderCommentButton = useCallback((fieldLabel: string) => {
     const fieldKey = toFieldSlug(fieldLabel);
     const count = commentCountByCell.get(buildCommentThreadKey(commentTransactionId, fieldKey)) || 0;
@@ -439,8 +409,7 @@ function ImportEditorRow({
         const isSettlementNote = col.csvHeader === '비고';
         const isDerivedLocked = isDerivedFieldLocked(col.csvHeader);
         const isManualPriorityField = isManualPriorityOutflowField(col.csvHeader);
-        const cellSource = resolveCellSource(colIdx, col.csvHeader);
-        const showCellBadge = Boolean(isDerivedLocked || cellSource);
+        const cellSource = null;
         const isFirstColumn = colIdx === 0;
         const cellToneClass = isExpenseAmount || isVatIn
           ? 'bg-yellow-50/80 dark:bg-yellow-950/15'
@@ -465,8 +434,20 @@ function ImportEditorRow({
             onMouseDown={() => onCellMouseDown(rowIdx, colIdx)}
             onMouseEnter={() => onCellMouseEnter(rowIdx, colIdx)}
           >
-            <div className={`group relative ${showCellBadge ? 'pt-4' : ''}`}>
-              {isFirstColumn && !readOnly && (
+            <div className="group relative">
+              {rowSelectionEnabled && isAuthor ? (
+                <div className="flex h-7 items-center justify-center">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 accent-[#001e46]"
+                    checked={rowSelected}
+                    aria-label={`${rowIdx + 1}행 선택`}
+                    onChange={(event) => onRowSelectedChange?.(event.target.checked)}
+                  />
+                </div>
+              ) : (
+              <>
+              {isFirstColumn && !readOnly && structureActionsEnabled && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <button
@@ -500,41 +481,13 @@ function ImportEditorRow({
                       <X className="h-3.5 w-3.5" />
                       {settlementSheetPolicy.allowRowDelete ? '행 삭제' : '행 삭제 잠금'}
                     </DropdownMenuItem>
-                    {hasReviewHint && (
-                      <>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onRowChange((prev) => {
-                              if (!hasImportRowReviewRequirement(prev)) return prev;
-                              if (isImportRowReviewConfirmed(prev)) {
-                                const next: ImportRow = { ...prev, reviewStatus: 'pending' };
-                                delete next.reviewConfirmedAt;
-                                return next;
-                              }
-                              return {
-                                ...prev,
-                                reviewStatus: 'confirmed',
-                                reviewConfirmedAt: new Date().toISOString(),
-                              };
-                            });
-                          }}
-                        >
-                          <Check className="h-3.5 w-3.5" />
-                          {isReviewConfirmed ? '검토 완료 해제' : '검토 완료'}
-                        </DropdownMenuItem>
-                      </>
-                    )}
                   </DropdownMenuContent>
                 </DropdownMenu>
               )}
-              {isFirstColumn && (hasError || hasMissingCell || isReviewPending) && (
+              {isFirstColumn && (hasError || hasMissingCell) && (
                 <span
-                  className={`absolute left-1 top-1 h-1 w-1 rounded-full ${
-                    hasError || hasMissingCell ? 'bg-rose-500' : 'bg-[#26415f]'
-                  }`}
-                  title={hasError ? (row.error || '행 오류') : hasMissingCell ? '미입력 셀 있음' : reviewHintLabel}
+                  className="absolute left-1 top-1 h-1 w-1 rounded-full bg-rose-500"
+                  title={hasError ? (row.error || '행 오류') : '미입력 셀 있음'}
                 />
               )}
               {isReadOnly ? (
@@ -799,7 +752,7 @@ function ImportEditorRow({
                       size="sm"
                       className="h-5 px-1.5 text-[9px]"
                       disabled={!canUseDrive || !onOpenEvidenceUpload}
-                      title={hasSourceTransaction ? '파일 업로드 및 분류 검토' : '필요한 값을 확인한 뒤 실제 거래로 저장하고 계속합니다'}
+                      title={hasSourceTransaction ? '거래별 증빙 파일 업로드' : '필요한 값을 확인한 뒤 실제 거래로 저장하고 계속합니다'}
                       onClick={() => {
                         if (!onOpenEvidenceUpload) return;
                         void (async () => {
@@ -897,16 +850,6 @@ function ImportEditorRow({
                   }}
                 />
               )}
-              {isDerivedLocked && (
-                <span className="absolute left-1 top-0.5 rounded bg-muted px-1 text-[9px] text-muted-foreground">
-                  계산값
-                </span>
-              )}
-              {cellSource && !isDerivedLocked && (
-                <span className={`absolute left-1 top-0.5 rounded px-1 text-[9px] ${cellSource.className}`}>
-                  {cellSource.label}
-                </span>
-              )}
               {isCounterparty && counterpartyHint && (
                 <button
                   type="button"
@@ -930,6 +873,8 @@ function ImportEditorRow({
                 </a>
               )}
               {renderCommentButton(col.csvHeader)}
+              </>
+              )}
             </div>
           </td>
         );

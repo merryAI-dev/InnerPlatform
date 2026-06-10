@@ -40,13 +40,19 @@ describe('settlement comment and review loop UI copy', () => {
     expect(commentButtonSource).not.toContain('셀 메모');
   });
 
-  it('labels pending review work as a review loop, not a person check', () => {
-    expect(importEditorSource).toContain('검토 루프');
+  it('keeps review-loop UI out of the ledger editor while preserving cell comments', () => {
+    expect(importEditorSource).not.toContain('검토 루프');
     expect(importEditorSource).toContain('셀 주석');
-    expect(importEditorSource).toContain('후보값 또는 주석 확인 필요');
+    expect(importEditorSource).not.toContain('후보값 또는 주석 확인 필요');
+    expect(importEditorSource).not.toContain('행 왼쪽 배지에서 출처를 확인할 수 있습니다.');
+    expect(importEditorSource).toContain('unlockDerivedFields');
+    expect(importEditorSource).toContain('structureActionsEnabled={false}');
     expect(importEditorRowSource).toContain('행 작업');
-    expect(importEditorRowSource).toContain('검토 완료');
-    expect(cashflowProjectSheetSource).toContain('검토 루프 또는 동기화 확인');
+    expect(importEditorRowSource).not.toContain('검토 완료');
+    expect(importEditorRowSource).not.toContain('resolveCellSource');
+    expect(importEditorRowSource).not.toContain('계산값');
+    expect(importEditorRowSource).toContain('if (unlockDerivedFields) return false;');
+    expect(cashflowProjectSheetSource).not.toContain('검토 루프 또는 동기화 확인');
     expect(importEditorSource).not.toContain('사람 확인');
     expect(importEditorRowSource).not.toContain('사람 확인');
     expect(cashflowProjectSheetSource).not.toContain('사람 확인');

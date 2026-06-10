@@ -23,6 +23,7 @@ import type {
   BudgetCodeRename,
   BudgetTreeCode,
   BudgetTreeV2,
+  CashflowWeekSheet,
   Comment,
   Ledger,
   ProjectSheetSourceSnapshot,
@@ -59,6 +60,13 @@ import { PARTICIPATION_ENTRIES } from './participation-data';
 import { LEDGERS, PROJECTS, TRANSACTIONS } from './mock-data';
 import { SETTLEMENT_COLUMNS, createEmptyImportRow } from '../platform/settlement-csv';
 import type { ImportRow } from '../platform/settlement-csv';
+import { getMonthMondayWeeks, getYearMondayWeeks } from '../platform/cashflow-weeks';
+import { buildSettlementActualSyncPayload } from '../platform/settlement-sheet-sync';
+import {
+  buildCashflowWeekUpdatePatch,
+  buildInitialCashflowWeekDoc,
+  resolveWeekDocId,
+} from './cashflow-weeks.persistence';
 import {
   BANK_STATEMENT_COLUMNS,
   appendBankStatementRows,
@@ -287,6 +295,29 @@ function sanitizeBankStatementSheet(sheet: BankStatementSheet): BankStatementShe
     cells: columns.map((_, colIdx) => normalizeSpace(String(Array.isArray(row?.cells) ? (row.cells[colIdx] ?? '') : ''))),
   }));
   return { columns, rows: rows as BankStatementRow[] };
+}
+
+function collectSettlementRowYears(rows: ImportRow[]): number[] {
+  const dateIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '거래일시');
+  const years = new Set<number>();
+  rows.forEach((row) => {
+    const raw = dateIdx >= 0 ? String(row.cells?.[dateIdx] || '').trim() : '';
+    const match = raw.match(/^(\d{4})/);
+    const year = match ? Number.parseInt(match[1], 10) : NaN;
+    if (Number.isFinite(year)) years.add(year);
+  });
+  if (years.size === 0) years.add(new Date().getFullYear());
+  return Array.from(years).sort((left, right) => left - right);
+}
+
+function buildLedgerActualSyncPayload(rows: ImportRow[]) {
+  const byWeek = new Map<string, ReturnType<typeof buildSettlementActualSyncPayload>[number]>();
+  collectSettlementRowYears(rows).forEach((year) => {
+    buildSettlementActualSyncPayload(rows, getYearMondayWeeks(year), null).forEach((week) => {
+      byWeek.set(`${week.yearMonth}:w${week.weekNo}`, week);
+    });
+  });
+  return Array.from(byWeek.values());
 }
 
 function serializeExpenseSheetTabForComparison(tab: ExpenseSheetTab): string {
@@ -2763,6 +2794,11 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         ? data.order
         : targetSheet?.order || (targetSheetId === 'default' ? 0 : expenseSheetsRef.current.length + 1);
       const preparedRows = prepareMergedRows(latestRows);
+      const actualPayload = buildLedgerActualSyncPayload(preparedRows);
+      const cashflowWeekRefs = actualPayload.map((week) => (
+        doc(db, getOrgDocumentPath(orgId, 'cashflowWeeks', resolveWeekDocId(currentProjectId, week.yearMonth, week.weekNo)))
+      ));
+      const cashflowWeekSnapshots = await Promise.all(cashflowWeekRefs.map((ref) => transaction.get(ref)));
       transaction.set(expenseSheetRef, buildExpenseSheetPersistenceDoc({
         orgId,
         projectId: currentProjectId,
@@ -2774,6 +2810,41 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         now,
         updatedBy: portalUser?.name || authUser?.name || '',
       }), { merge: true });
+      actualPayload.forEach((week, index) => {
+        const ref = cashflowWeekRefs[index];
+        const weekSnapshot = cashflowWeekSnapshots[index];
+        const fallbackWeek = getMonthMondayWeeks(week.yearMonth).find((candidate) => candidate.weekNo === week.weekNo);
+        const existingWeek = weekSnapshot.exists() ? weekSnapshot.data() as Partial<CashflowWeekSheet> : null;
+        const actorUid = authUser?.uid || portalUser?.id || 'portal-user';
+        const actorName = portalUser?.name || authUser?.name || '';
+        if (weekSnapshot.exists()) {
+          transaction.set(ref, buildCashflowWeekUpdatePatch({
+            orgId,
+            actorUid,
+            actorName,
+            mode: 'actual',
+            amounts: week.amounts as any,
+            now,
+            weekStart: existingWeek?.weekStart || fallbackWeek?.weekStart || '',
+            existingProjection: existingWeek?.projection,
+            existingActual: existingWeek?.actual,
+          }) as any, { merge: true });
+          return;
+        }
+        transaction.set(ref, buildInitialCashflowWeekDoc({
+          orgId,
+          actorUid,
+          actorName,
+          projectId: currentProjectId,
+          yearMonth: week.yearMonth,
+          weekNo: week.weekNo,
+          weekStart: fallbackWeek?.weekStart || '',
+          weekEnd: fallbackWeek?.weekEnd || '',
+          mode: 'actual',
+          amounts: week.amounts as any,
+          now,
+        }));
+      });
       return {
         rows: preparedRows,
         sheetName: latestName,
@@ -2799,6 +2870,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     }
     return { appliedCount: mappedRows.length };
   }, [
+    authUser?.uid,
     authUser?.name,
     currentProjectId,
     db,
@@ -2809,6 +2881,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     myProject?.fundInputMode,
     myProject?.settlementSheetPolicy,
     orgId,
+    portalUser?.id,
     portalUser?.name,
   ]);
 

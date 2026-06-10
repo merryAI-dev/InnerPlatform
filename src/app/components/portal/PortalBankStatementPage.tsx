@@ -21,6 +21,7 @@ import { readTextFile } from '../../platform/text-file-decoder';
 import { CASHFLOW_LINE_OPTIONS, SETTLEMENT_COLUMNS, type ImportRow } from '../../platform/settlement-csv';
 import { findWeekForDate, getYearMondayWeeks } from '../../platform/cashflow-weeks';
 import { normalizeBudgetLabel, buildBudgetLabelKey } from '../../platform/budget-labels';
+import { METHOD_LABELS, METHOD_OPTIONS } from '../../platform/settlement-grid-helpers';
 
 function getTransactionAmountColumnIndexes(columns: string[]): Set<number> {
   return new Set(
@@ -37,6 +38,7 @@ type WizardDraft = Record<string, string>;
 type BankStatementStatusTab = 'all' | 'staged' | 'applied';
 
 const WIZARD_FIELDS = [
+  { key: 'paymentMethod', label: '지출구분', column: '지출구분' },
   { key: 'budgetCategory', label: '비목', column: '비목' },
   { key: 'budgetSubCategory', label: '세목', column: '세목' },
   { key: 'budgetSubSubCategory', label: '세세목', column: '세세목' },
@@ -51,6 +53,7 @@ const WIZARD_PRIMARY_FIELDS = WIZARD_FIELDS.filter((field) => (
   field.key === 'budgetCategory'
   || field.key === 'budgetSubCategory'
   || field.key === 'budgetSubSubCategory'
+  || field.key === 'paymentMethod'
   || field.key === 'cashflowLine'
 ));
 const WIZARD_DEPOSIT_FIELDS = WIZARD_FIELDS.filter((field) => (
@@ -64,6 +67,7 @@ const WIZARD_BULK_CLASSIFICATION_FIELD_KEYS = [
   'budgetCategory',
   'budgetSubCategory',
   'budgetSubSubCategory',
+  'paymentMethod',
   'cashflowLine',
 ] as const;
 const WIZARD_GRID_FIELD_KEYS = WIZARD_BULK_CLASSIFICATION_FIELD_KEYS;
@@ -199,7 +203,7 @@ function getBankRowCounterparty(columns: string[], row: BankStatementRow): strin
 function buildInitialWizardDraft(signedAmount: number | null | undefined): WizardDraft {
   if (typeof signedAmount !== 'number' || !Number.isFinite(signedAmount)) return {};
   return signedAmount < 0
-    ? { expenseAmount: formatNumberDraft(signedAmount), vatIn: '' }
+    ? { paymentMethod: METHOD_LABELS.TRANSFER, expenseAmount: formatNumberDraft(signedAmount), vatIn: '' }
     : { depositAmount: formatNumberDraft(signedAmount), vatRefund: '' };
 }
 
@@ -218,6 +222,7 @@ function buildSameCounterpartySuggestions(expenseSheets: { rows?: ImportRow[] }[
       const key = normalizeKey(counterparty);
       if (!key) return;
       const draft: WizardDraft = {
+        paymentMethod: settlementCell(row, '지출구분'),
         budgetCategory: settlementCell(row, '비목'),
         budgetSubCategory: settlementCell(row, '세목'),
         budgetSubSubCategory: settlementCell(row, '세세목'),
@@ -950,6 +955,20 @@ export function PortalBankStatementPage() {
         >
           <option value="">선택</option>
           {WIZARD_CASHFLOW_OPTIONS.map((option) => (
+            <option key={option.value} value={option.label}>{option.label}</option>
+          ))}
+        </select>
+      );
+    }
+    if (field.key === 'paymentMethod') {
+      return (
+        <select
+          className={baseClass}
+          value={draft.paymentMethod || ''}
+          onChange={(event) => updateWizardDraft(rowKey, field.key, event.target.value)}
+        >
+          <option value="">선택</option>
+          {METHOD_OPTIONS.map((option) => (
             <option key={option.value} value={option.label}>{option.label}</option>
           ))}
         </select>

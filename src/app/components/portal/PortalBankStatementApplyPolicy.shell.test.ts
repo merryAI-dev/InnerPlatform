@@ -53,6 +53,11 @@ describe('portal bank statement apply policy', () => {
     expect(applyBlock).toContain('mapBankStatementsToImportRows');
     expect(applyBlock).toContain('mergeBankRowsIntoExpenseSheet');
     expect(applyBlock).toContain('buildExpenseSheetPersistenceDoc');
+    expect(applyBlock).toContain('buildLedgerActualSyncPayload(preparedRows)');
+    expect(applyBlock).toContain('buildCashflowWeekUpdatePatch');
+    expect(applyBlock).toContain('buildInitialCashflowWeekDoc');
+    expect(applyBlock).toContain("mode: 'actual'");
+    expect(applyBlock).toContain('cashflowWeeks');
     expect(applyBlock).toContain('expense_sheets/${targetSheetId}');
     expect(applyBlock).toContain('runTransaction');
     expect(applyBlock).toContain('transaction.get(expenseSheetRef)');
@@ -116,6 +121,10 @@ describe('portal bank statement apply policy', () => {
   });
 
   it('inherits weekly expense category, subcategory, sub-subcategory, and cashflow fields only', () => {
+    expect(bankStatementPageSource).toContain("label: '지출구분'");
+    expect(bankStatementPageSource).toContain("column: '지출구분'");
+    expect(bankStatementPageSource).toContain('METHOD_OPTIONS');
+    expect(bankStatementPageSource).toContain('METHOD_LABELS.TRANSFER');
     expect(bankStatementPageSource).toContain("label: '세세목'");
     expect(bankStatementPageSource).toContain("column: '세세목'");
     expect(bankStatementPageSource).toContain("label: '매입부가세'");

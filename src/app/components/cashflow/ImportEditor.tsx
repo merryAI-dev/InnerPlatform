@@ -49,10 +49,6 @@ import {
 } from '../../platform/settlement-row-derivation';
 import { deriveSettlementRowsLocally } from '../../platform/settlement-calculation-kernel';
 import {
-  countConfirmedImportRowReviews,
-  countPendingImportRowReviews,
-} from '../../platform/settlement-review';
-import {
   findSimilarCounterparty,
   type CounterpartySuggestion,
 } from '../../platform/counterparty-normalizer';
@@ -169,6 +165,10 @@ export function ImportEditor({
   onDeriveRows,
   readOnly = false,
   editableReadOnlyHeaders = [],
+  showRowSelection = false,
+  onRequestAppendRows,
+  unlockDerivedFields = false,
+  structureActionsEnabled = true,
 }: {
   rows: ImportRow[];
   onChange: (rows: ImportRow[]) => void;
@@ -211,6 +211,10 @@ export function ImportEditor({
   ) => Promise<ImportRow[]>;
   readOnly?: boolean;
   editableReadOnlyHeaders?: string[];
+  showRowSelection?: boolean;
+  onRequestAppendRows?: (rows: ImportRow[]) => Promise<void> | void;
+  unlockDerivedFields?: boolean;
+  structureActionsEnabled?: boolean;
 }) {
   const isInlineLayout = inline && !fullscreen;
   const deriveRequestSeq = useRef(0);
@@ -246,14 +250,6 @@ export function ImportEditor({
   );
   const quickEntryRowCount = useMemo(
     () => meaningfulRows.filter((row) => row.entryKind && row.entryKind !== 'STANDARD').length,
-    [meaningfulRows],
-  );
-  const reviewRequiredRowCount = useMemo(
-    () => countPendingImportRowReviews(meaningfulRows),
-    [meaningfulRows],
-  );
-  const reviewConfirmedRowCount = useMemo(
-    () => countConfirmedImportRowReviews(meaningfulRows),
     [meaningfulRows],
   );
   const cellCommentCount = useMemo(
@@ -454,6 +450,9 @@ export function ImportEditor({
   const [uploadDrafts, setUploadDrafts] = useState<EvidenceUploadDraft[]>([]);
   const [activeUploadDraftId, setActiveUploadDraftId] = useState('');
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
+  const [selectedLedgerRowIds, setSelectedLedgerRowIds] = useState<Set<string>>(() => new Set());
+  const [correctionRows, setCorrectionRows] = useState<ImportRow[] | null>(null);
+  const [correctionSaving, setCorrectionSaving] = useState(false);
   const [uploadingEvidence, setUploadingEvidence] = useState(false);
   const [clearAllConfirmOpen, setClearAllConfirmOpen] = useState(false);
   const selectionBounds = useMemo(() => {
@@ -854,6 +853,7 @@ export function ImportEditor({
 
   const addRow = useCallback(() => {
     if (readOnly) return;
+    if (!structureActionsEnabled) return;
     const anchor = getSelectionAnchor();
     const insertIndex = anchor ? Math.min(rows.length, anchor.rowIdx + 1) : rows.length;
     const newRow = createEmptyImportRow();
@@ -864,10 +864,11 @@ export function ImportEditor({
       ...rows.slice(insertIndex),
     ];
     commitRows(nextRows, { rowIdx: insertIndex, colIdx: getPreferredEditableCol() });
-  }, [rows, getSelectionAnchor, commitRows, getPreferredEditableCol, readOnly]);
+  }, [rows, getSelectionAnchor, commitRows, getPreferredEditableCol, readOnly, structureActionsEnabled]);
 
   const insertPreparedRow = useCallback((preparedRow: ImportRow, focusColIdx?: number) => {
     if (readOnly) return;
+    if (!structureActionsEnabled) return;
     const anchor = getSelectionAnchor();
     const insertIndex = anchor ? Math.min(rows.length, anchor.rowIdx + 1) : rows.length;
     const nextRows = [
@@ -876,10 +877,11 @@ export function ImportEditor({
       ...rows.slice(insertIndex),
     ];
     commitRows(nextRows, { rowIdx: insertIndex, colIdx: focusColIdx ?? getPreferredEditableCol() });
-  }, [rows, getSelectionAnchor, commitRows, getPreferredEditableCol, readOnly]);
+  }, [rows, getSelectionAnchor, commitRows, getPreferredEditableCol, readOnly, structureActionsEnabled]);
 
   const addQuickInsertRow = useCallback((kind: SettlementQuickInsertKind) => {
     if (readOnly) return;
+    if (!structureActionsEnabled) return;
     if (kind === 'ADJUSTMENT' && !resolvedPolicy.allowAdjustmentRows) {
       toast.message('현재 사업 정책에서는 잔액 조정 행을 사용할 수 없습니다.');
       return;
@@ -891,10 +893,11 @@ export function ImportEditor({
         ? (expenseIdx >= 0 ? expenseIdx : bankAmountIdx)
         : (balanceIdx >= 0 ? balanceIdx : bankAmountIdx);
     insertPreparedRow(preparedRow, focusColIdx >= 0 ? focusColIdx : undefined);
-  }, [insertPreparedRow, depositIdx, expenseIdx, balanceIdx, bankAmountIdx, resolvedPolicy.allowAdjustmentRows, readOnly]);
+  }, [insertPreparedRow, depositIdx, expenseIdx, balanceIdx, bankAmountIdx, resolvedPolicy.allowAdjustmentRows, readOnly, structureActionsEnabled]);
 
   const addRows = useCallback((count: number) => {
     if (readOnly) return;
+    if (!structureActionsEnabled) return;
     if (count <= 0) return;
     const nextRows = [...rows];
     for (let i = 0; i < count; i++) {
@@ -902,7 +905,7 @@ export function ImportEditor({
       nextRows.push(newRow);
     }
     commitRows(nextRows);
-  }, [rows, commitRows, readOnly]);
+  }, [rows, commitRows, readOnly, structureActionsEnabled]);
 
   useEffect(() => {
     if (!pendingQuickInsert) return;
@@ -912,6 +915,7 @@ export function ImportEditor({
 
   const addTemplateRow = useCallback((template: QuickExpenseTemplate) => {
     if (readOnly) return;
+    if (!structureActionsEnabled) return;
     const anchor = getSelectionAnchor();
     const insertIndex = anchor ? Math.min(rows.length, anchor.rowIdx + 1) : rows.length;
     const newRow = createEmptyImportRow();
@@ -925,10 +929,11 @@ export function ImportEditor({
       ...rows.slice(insertIndex),
     ];
     commitRows(nextRows, { rowIdx: insertIndex, colIdx: getPreferredEditableCol() });
-  }, [rows, methodIdx, cashflowIdx, counterpartyIdx, memoIdx, getSelectionAnchor, commitRows, getPreferredEditableCol, readOnly]);
+  }, [rows, methodIdx, cashflowIdx, counterpartyIdx, memoIdx, getSelectionAnchor, commitRows, getPreferredEditableCol, readOnly, structureActionsEnabled]);
 
   const insertRowAt = useCallback((index: number) => {
     if (readOnly) return;
+    if (!structureActionsEnabled) return;
     const boundedIndex = Math.max(0, Math.min(rows.length, index));
     const newRow = createEmptyImportRow();
     const nextRows = [
@@ -937,7 +942,7 @@ export function ImportEditor({
       ...rows.slice(boundedIndex),
     ];
     commitRows(nextRows, { rowIdx: boundedIndex, colIdx: getPreferredEditableCol() });
-  }, [rows, commitRows, getPreferredEditableCol, readOnly]);
+  }, [rows, commitRows, getPreferredEditableCol, readOnly, structureActionsEnabled]);
 
   const formatNumberCell = useCallback((value: string) => {
     if (!value) return '';
@@ -986,6 +991,7 @@ export function ImportEditor({
 
   const removeSelectedRows = useCallback(() => {
     if (readOnly) return false;
+    if (!structureActionsEnabled) return false;
     if (!resolvedPolicy.allowRowDelete) {
       toast.message('현재 사업 정책에서는 행 삭제가 잠겨 있습니다.');
       return false;
@@ -1004,10 +1010,11 @@ export function ImportEditor({
         : null,
     );
     return true;
-  }, [commitRows, getActiveSelectionBounds, getPreferredEditableCol, pushUndoSnapshot, resolvedPolicy.allowRowDelete, rows, readOnly]);
+  }, [commitRows, getActiveSelectionBounds, getPreferredEditableCol, pushUndoSnapshot, resolvedPolicy.allowRowDelete, rows, readOnly, structureActionsEnabled]);
 
   const clearAllRows = useCallback(() => {
     if (readOnly) return false;
+    if (!structureActionsEnabled) return false;
     if (rows.length === 0) {
       toast.message('초기화할 행이 없습니다.');
       return false;
@@ -1017,7 +1024,7 @@ export function ImportEditor({
     commitRows([], null);
     toast.success('현재 탭을 초기화했습니다.');
     return true;
-  }, [commitRows, pushUndoSnapshot, rows, readOnly]);
+  }, [commitRows, pushUndoSnapshot, rows, readOnly, structureActionsEnabled]);
 
   const applyPaste = useCallback(
     (startRow: number, startCol: number, text: string, html?: string) => {
@@ -1493,9 +1500,51 @@ export function ImportEditor({
   useEffect(() => {
     if (!inline) return;
     if (readOnly) return;
+    if (!structureActionsEnabled) return;
     if (rows.length >= 20) return;
     addRows(20 - rows.length);
-  }, [rows.length, inline, addRows, readOnly]);
+  }, [rows.length, inline, addRows, readOnly, structureActionsEnabled]);
+
+  const toggleLedgerRowSelection = useCallback((rowId: string, checked: boolean) => {
+    setSelectedLedgerRowIds((current) => {
+      const next = new Set(current);
+      if (checked) next.add(rowId);
+      else next.delete(rowId);
+      return next;
+    });
+  }, []);
+
+  const openCorrectionWizard = useCallback(() => {
+    const selectedRows = rows.filter((row) => selectedLedgerRowIds.has(row.tempId));
+    if (selectedRows.length === 0) {
+      toast.message('정정할 행을 선택해 주세요.');
+      return;
+    }
+    const now = Date.now();
+    setCorrectionRows(selectedRows.map((row, index) => ({
+      ...row,
+      tempId: `correction-draft-${now}-${index}`,
+      sourceTxId: `correction:${row.sourceTxId || row.tempId}:${now}-${index}`,
+      cells: [...row.cells],
+      userEditedCells: new Set(Array.from({ length: SETTLEMENT_COLUMNS.length }, (_, colIdx) => colIdx)),
+    })));
+  }, [rows, selectedLedgerRowIds]);
+
+  const saveCorrectionRows = useCallback(async () => {
+    if (!correctionRows || correctionRows.length === 0 || !onRequestAppendRows) return;
+    setCorrectionSaving(true);
+    try {
+      await onRequestAppendRows(correctionRows);
+      setCorrectionRows(null);
+      setSelectedLedgerRowIds(new Set());
+      toast.success(`정정 행 ${correctionRows.length}건을 원장에 추가했습니다.`);
+    } catch (error) {
+      console.error('[ImportEditor] correction save failed:', error);
+      toast.error('정정 행 저장에 실패했습니다.');
+    } finally {
+      setCorrectionSaving(false);
+    }
+  }, [correctionRows, onRequestAppendRows]);
 
   const removeRow = useCallback(
     (rowIdx: number) => {
@@ -1603,20 +1652,21 @@ export function ImportEditor({
               {missingCount > 0 && (
                 <Badge variant="secondary" className="text-[10px] text-red-600">{missingCount}건 미입력</Badge>
               )}
-              {reviewRequiredRowCount > 0 && (
-                <Badge variant="outline" className="border-[#26415f]/25 bg-[#26415f]/5 text-[10px] text-[#26415f]">
-                  검토 루프 {reviewRequiredRowCount}건
-                </Badge>
-              )}
-              {reviewConfirmedRowCount > 0 && (
-                <Badge variant="outline" className="border-slate-200 bg-slate-50 text-[10px] text-slate-700">
-                  확인 완료 {reviewConfirmedRowCount}건
-                </Badge>
-              )}
               {cellCommentCount > 0 && (
                 <Badge variant="outline" className="border-slate-200 bg-slate-50 text-[10px] text-slate-700">
                   셀 주석 {cellCommentCount}건
                 </Badge>
+              )}
+              {showRowSelection && selectedLedgerRowIds.size > 0 && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 border-rose-300 text-[11px] text-rose-700 hover:bg-rose-50"
+                  onClick={openCorrectionWizard}
+                >
+                  선택 행 정정
+                </Button>
               )}
             </div>
             <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
@@ -1631,7 +1681,6 @@ export function ImportEditor({
             </div>
           </div>
           <div className="shrink-0 text-right text-[11px] text-muted-foreground">
-            <div>행 왼쪽 배지에서 출처를 확인할 수 있습니다.</div>
             <div>{readOnly ? '이 화면은 원장 조회 전용입니다. 생성과 수정은 위자드에서만 처리합니다.' : '입력한 값은 저장 시 캐시플로 actual에 바로 반영됩니다.'}</div>
             {onToggleFullscreen && (
               <Button
@@ -1666,6 +1715,7 @@ export function ImportEditor({
                       <X className="h-3.5 w-3.5" />
                       선택 셀 비우기
                     </Button>
+                    {structureActionsEnabled && (
                     <Button
                       variant="outline"
                       size="sm"
@@ -1678,6 +1728,7 @@ export function ImportEditor({
                       <X className="h-3.5 w-3.5" />
                       선택 행 삭제
                     </Button>
+                    )}
                   </>
                 )}
                 <Button
@@ -1698,6 +1749,7 @@ export function ImportEditor({
           <div className="flex items-center gap-2">
           {!readOnly && (
             <>
+              {structureActionsEnabled && (
               <Button
                 variant="outline"
                 size="sm"
@@ -1706,7 +1758,8 @@ export function ImportEditor({
               >
                 증빙 매핑 설정
               </Button>
-              {workflowMode === 'DIRECT_ENTRY' && (
+              )}
+              {structureActionsEnabled && workflowMode === 'DIRECT_ENTRY' && (
                 <>
                   <Button
                     variant="default"
@@ -1739,6 +1792,7 @@ export function ImportEditor({
                   )}
                 </>
               )}
+              {structureActionsEnabled && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
@@ -1761,6 +1815,8 @@ export function ImportEditor({
                   ))}
                 </DropdownMenuContent>
               </DropdownMenu>
+              )}
+              {structureActionsEnabled && (
               <Button
                 variant="outline"
                 size="sm"
@@ -1770,6 +1826,8 @@ export function ImportEditor({
                 <Plus className="h-3.5 w-3.5" />
                 행 추가
               </Button>
+              )}
+              {structureActionsEnabled && (
               <Button
                 variant="outline"
                 size="sm"
@@ -1779,6 +1837,7 @@ export function ImportEditor({
               >
                 현재 탭 전체 비우기
               </Button>
+              )}
               <Button
                 variant="outline"
                 size="sm"
@@ -1840,14 +1899,6 @@ export function ImportEditor({
       </AlertDialog>
 
       <div className="space-y-3">
-        <div className="rounded-lg border bg-slate-50/70 px-3 py-2 text-[10px] text-muted-foreground">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-slate-700">원본: 통장내역 또는 기존 저장값</span>
-            <span className="inline-flex rounded-full bg-white px-2 py-0.5 text-slate-700 ring-1 ring-inset ring-slate-200">수정: 사용자가 직접 덮어쓴 값</span>
-            <span className="inline-flex rounded-full bg-slate-200 px-2 py-0.5 text-slate-700">계산: 정책에 따라 자동 계산되고 잠긴 값</span>
-            <span className="inline-flex rounded-full bg-[#26415f]/10 px-2 py-0.5 text-[#26415f]">검토 루프: 후보값 또는 주석 확인 필요</span>
-          </div>
-        </div>
         {/* Scrollable table */}
         <div
           className={`min-w-0 flex-1 ${isInlineLayout ? 'overflow-auto max-h-[calc(100vh-260px)]' : 'flex-1 overflow-auto'}`}
@@ -1883,7 +1934,7 @@ export function ImportEditor({
                   className="px-1.5 py-1 font-medium border-b border-r whitespace-nowrap text-[10px] text-left relative select-none pr-3"
                   style={{ width: colWidths[i], minWidth: 80 }}
                 >
-                  {col.csvHeader}
+                  {showRowSelection && i === authorIdx ? '선택' : col.csvHeader}
                   <div
                     role="separator"
                     className="absolute -right-1 top-0 h-full w-3 cursor-col-resize z-20 hover:bg-teal-500/10"
@@ -1951,6 +2002,11 @@ export function ImportEditor({
                 counterpartyHint={counterpartyHint}
                 readOnly={readOnly}
                 editableReadOnlyHeaders={editableReadOnlyHeaders}
+                rowSelectionEnabled={showRowSelection}
+                rowSelected={selectedLedgerRowIds.has(row.tempId)}
+                onRowSelectedChange={(checked) => toggleLedgerRowSelection(row.tempId, checked)}
+                unlockDerivedFields={unlockDerivedFields}
+                structureActionsEnabled={structureActionsEnabled}
                 onCellChange={(colIdx, value) => updateCell(rowIdx, colIdx, value)}
                 onRowChange={(updater) => updateRow(rowIdx, updater)}
                 onRemove={() => removeRow(rowIdx)}
@@ -2017,6 +2073,57 @@ export function ImportEditor({
           </table>
         </div>
       </div>
+      {correctionRows ? (
+        <div className="fixed inset-0 z-[170] flex items-center justify-center bg-slate-950/45 p-3">
+          <div className="flex max-h-[94vh] w-[min(1500px,96vw)] flex-col overflow-hidden border border-rose-300 bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-rose-200 bg-rose-50 px-4 py-3">
+              <h3 className="text-sm font-bold text-rose-800">선택 행 정정</h3>
+              <Button type="button" variant="outline" size="sm" onClick={() => setCorrectionRows(null)} disabled={correctionSaving}>
+                닫기
+              </Button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-auto border-y border-rose-200 bg-rose-50/30 p-2">
+              <ImportEditor
+                rows={correctionRows}
+                onChange={setCorrectionRows}
+                onSave={() => void saveCorrectionRows()}
+                saving={correctionSaving}
+                onCancel={() => setCorrectionRows(null)}
+                projectId={projectId}
+                defaultLedgerId={defaultLedgerId}
+                evidenceRequiredMap={evidenceRequiredMap}
+                onSaveEvidenceRequiredMap={onSaveEvidenceRequiredMap}
+                authorOptions={authorOptions}
+                budgetCodeBook={budgetCodeBook}
+                budgetTreeV2={budgetTreeV2}
+                weekOptions={weekOptions}
+                inline
+                comments={comments}
+                currentUserId={currentUserId}
+                currentUserName={currentUserName}
+                onAddComment={onAddComment}
+                sourceTransactions={sourceTransactions}
+                onFetchBudgetSuggestion={onFetchBudgetSuggestion}
+                workflowMode={workflowMode}
+                settlementSheetPolicy={settlementSheetPolicy}
+                basis={basis}
+                onDeriveRows={onDeriveRows}
+                unlockDerivedFields
+                structureActionsEnabled={false}
+              />
+            </div>
+            <div className="flex justify-end gap-2 bg-white px-4 py-3">
+              <Button type="button" variant="outline" onClick={() => setCorrectionRows(null)} disabled={correctionSaving}>
+                취소
+              </Button>
+              <Button type="button" onClick={() => void saveCorrectionRows()} disabled={correctionSaving}>
+                {correctionSaving ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}
+                정정 저장
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <input
         ref={evidenceFileInputRef}
         type="file"

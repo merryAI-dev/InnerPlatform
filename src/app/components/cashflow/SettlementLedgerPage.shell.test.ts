@@ -42,4 +42,14 @@ describe('SettlementLedgerPage direct-entry workbook flow', () => {
     expect(settlementLedgerSource).toContain("cashflowSyncState !== 'pending' && cashflowSyncState !== 'sync_failed'");
     expect(settlementLedgerSource).toContain("void syncImportRowsToCashflow(importRows, { silent: true });");
   });
+
+  it('appends selected ledger corrections instead of mutating confirmed rows in place', () => {
+    expect(settlementLedgerSource).toContain('const appendCorrectionRows = useCallback');
+    expect(settlementLedgerSource).toContain('...cloneImportRows(baseRows)');
+    expect(settlementLedgerSource).toContain('...rowsToAppend.map');
+    expect(settlementLedgerSource).toContain('persistImportRowsSnapshot(nextRows');
+    expect(settlementLedgerSource).toContain('syncImportRowsToCashflow(persistedRows');
+    expect(settlementLedgerSource).toContain('showRowSelection={ledgerViewOnly}');
+    expect(settlementLedgerSource).toContain('onRequestAppendRows={appendCorrectionRows}');
+  });
 });

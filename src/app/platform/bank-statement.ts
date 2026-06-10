@@ -15,6 +15,7 @@ import {
   resolveBankImportProjectionStatus,
 } from './bank-import-triage';
 import { mapCashflowLineToCategory } from './bank-import-cashflow';
+import { METHOD_LABELS } from './settlement-grid-helpers';
 
 // ── HTML-as-XLS parsing (KB, 신한 등 HTML 형식 은행 엑셀) ──
 
@@ -743,6 +744,7 @@ export function mapBankStatementsToImportRows(sheet: BankStatementSheet): Import
 
   const idxDate = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '거래일시');
   const idxWeek = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '해당 주차');
+  const idxMethod = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '지출구분');
   const idxCounterparty = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '지급처');
   const idxMemo = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '상세 적요');
   const idxBankAmount = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '통장에 찍힌 입/출금액');
@@ -826,6 +828,9 @@ export function mapBankStatementsToImportRows(sheet: BankStatementSheet): Import
       cells[idxBankAmount] = resolvedAmount.amount != null ? resolvedAmount.amount.toLocaleString('ko-KR') : '';
       if (idxDeposit >= 0 && inferredEntryKind === 'DEPOSIT') {
         cells[idxDeposit] = resolvedAmount.amount != null ? resolvedAmount.amount.toLocaleString('ko-KR') : '';
+      }
+      if (idxMethod >= 0 && inferredEntryKind === 'EXPENSE') {
+        cells[idxMethod] = METHOD_LABELS.TRANSFER;
       }
     }
 
@@ -951,10 +956,8 @@ function normalizeImportRow(row: ImportRow): ImportRow {
 }
 
 /**
- * Merge new bank-mapped rows into existing expense sheet rows.
- * - Rebuild rows from latest mapped bank rows (snapshot-style).
- * - Keep manual fields from matched existing rows by identity only.
- * - Never rely on row order/index as a fallback matcher.
+ * Append new bank-mapped rows into existing expense sheet rows.
+ * The weekly expense sheet is a ledger: confirmed rows are added, not rebuilt.
  */
 export function mergeBankRowsIntoExpenseSheet(
   existingRows: ImportRow[] | null | undefined,
@@ -962,76 +965,7 @@ export function mergeBankRowsIntoExpenseSheet(
 ): ImportRow[] {
   const existing = Array.isArray(existingRows) ? existingRows.map(normalizeImportRow) : [];
   const mapped = (Array.isArray(mappedRows) ? mappedRows : []).map(normalizeImportRow);
-
-  const autoHeaders = [
-    '거래일시',
-    '해당 주차',
-    '지급처',
-    '통장에 찍힌 입/출금액',
-    '통장잔액',
-    '입금액(사업비,공급가액,은행이자)',
-  ];
-  const autoIdxs = autoHeaders
-    .map((h) => SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === h))
-    .filter((idx) => idx >= 0);
-  const dateIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '거래일시');
-  const counterpartyIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === '지급처');
-
-  const rowKey = (row: ImportRow): string => {
-    const d = dateIdx >= 0 ? normalizeSpace(String(row.cells[dateIdx] || '')) : '';
-    const c = counterpartyIdx >= 0 ? normalizeSpace(String(row.cells[counterpartyIdx] || '')) : '';
-    if (!d || !c) return '';
-    return `${d}|${c}`;
-  };
-
-  const existingBySourceBuckets = new Map<string, ImportRow[]>();
-  const existingByKeyBuckets = new Map<string, ImportRow[]>();
-  const usedExisting = new Set<ImportRow>();
-  for (const row of existing) {
-    const source = String(row.sourceTxId || '').trim();
-    const key = rowKey(row);
-    if (source) {
-      const bucket = existingBySourceBuckets.get(source) || [];
-      bucket.push(row);
-      existingBySourceBuckets.set(source, bucket);
-    }
-    if (key) {
-      const bucket = existingByKeyBuckets.get(key) || [];
-      bucket.push(row);
-      existingByKeyBuckets.set(key, bucket);
-    }
-  }
-
-  const takeFromBucket = (bucket: ImportRow[] | undefined): ImportRow | undefined => {
-    if (!bucket || bucket.length === 0) return undefined;
-    return bucket.find((row) => !usedExisting.has(row));
-  };
-
-  const merged: ImportRow[] = [];
-  for (const mappedRow of mapped) {
-    const source = String(mappedRow.sourceTxId || '').trim();
-    const key = rowKey(mappedRow);
-    const matchedExisting = (
-      (source ? takeFromBucket(existingBySourceBuckets.get(source)) : undefined)
-      || (key ? takeFromBucket(existingByKeyBuckets.get(key)) : undefined)
-    );
-
-    if (!matchedExisting) {
-      merged.push(mappedRow);
-      continue;
-    }
-    usedExisting.add(matchedExisting);
-    const cells = [...matchedExisting.cells];
-    for (const idx of autoIdxs) {
-      cells[idx] = mappedRow.cells[idx] ?? '';
-    }
-    merged.push({
-      ...matchedExisting,
-      ...(mappedRow.sourceTxId ? { sourceTxId: mappedRow.sourceTxId } : {}),
-      ...(mappedRow.entryKind ? { entryKind: mappedRow.entryKind } : {}),
-      cells,
-    });
-  }
+  const merged: ImportRow[] = [...existing, ...mapped];
 
   const noIdx = SETTLEMENT_COLUMNS.findIndex((c) => c.csvHeader === 'No.');
   if (noIdx >= 0) {

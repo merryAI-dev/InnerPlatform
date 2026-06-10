@@ -266,10 +266,15 @@ describe('bank statement helpers', () => {
 
     const merged = mergeBankRowsIntoExpenseSheet([legacyManualRow, knownMappedRow], reorderedUploadRows);
 
-    expect(merged[0].sourceTxId).toBe('bank:known');
-    expect(merged[0].cells[budgetIdx]).toBe('교통비');
-    expect(merged[1].sourceTxId).toBe('bank:new');
-    expect(merged[1].cells[budgetIdx]).toBe('');
+    expect(merged).toHaveLength(4);
+    expect(merged[0].tempId).toBe('manual-1');
+    expect(merged[0].cells[budgetIdx]).toBe('여비');
+    expect(merged[1].sourceTxId).toBe('bank:known');
+    expect(merged[1].cells[budgetIdx]).toBe('교통비');
+    expect(merged[2].sourceTxId).toBe('bank:known');
+    expect(merged[2].cells[budgetIdx]).toBe('');
+    expect(merged[3].sourceTxId).toBe('bank:new');
+    expect(merged[3].cells[budgetIdx]).toBe('');
   });
 
   it('projects uploaded bank rows straight into weekly expense rows for direct handoff', () => {
@@ -277,6 +282,7 @@ describe('bank statement helpers', () => {
     const counterpartyIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '지급처');
     const bankAmountIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '통장에 찍힌 입/출금액');
     const budgetIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '비목');
+    const methodIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '지출구분');
 
     const legacyManualRow = createEmptyImportRow();
     legacyManualRow.tempId = 'manual-1';
@@ -298,10 +304,13 @@ describe('bank statement helpers', () => {
       }),
     );
 
-    expect(merged).toHaveLength(1);
-    expect(merged[0].sourceTxId).toMatch(/^bank:/);
-    expect(merged[0].cells[dateIdx]).toBe('2026-04-08');
-    expect(merged[0].cells[counterpartyIdx]).toBe('코레일');
-    expect(merged[0].cells[bankAmountIdx]).toBe('15,000');
+    expect(merged).toHaveLength(2);
+    expect(merged[0].tempId).toBe('manual-1');
+    expect(merged[0].cells[budgetIdx]).toBe('출장비');
+    expect(merged[1].sourceTxId).toMatch(/^bank:/);
+    expect(merged[1].cells[dateIdx]).toBe('2026-04-08');
+    expect(merged[1].cells[counterpartyIdx]).toBe('코레일');
+    expect(merged[1].cells[bankAmountIdx]).toBe('15,000');
+    expect(merged[1].cells[methodIdx]).toBe('계좌이체');
   });
 });

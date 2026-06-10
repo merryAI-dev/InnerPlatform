@@ -788,6 +788,25 @@ export function SettlementLedgerPage({
     }
   }, [importRows, persistImportRowsSnapshot, syncImportRowsToCashflow]);
 
+  const appendCorrectionRows = useCallback(async (rowsToAppend: ImportRow[]) => {
+    if (!rowsToAppend.length) return;
+    const baseRows = importRows || sheetRows || transactionsToImportRows(projectTxs, yearWeeks);
+    const nextRows = [
+      ...cloneImportRows(baseRows),
+      ...rowsToAppend.map((row) => ({
+        ...row,
+        cells: [...row.cells],
+        ...(row.userEditedCells ? { userEditedCells: new Set(row.userEditedCells) } : {}),
+      })),
+    ];
+    setImportRows(nextRows);
+    setImportDirty(true);
+    setSheetSaveState('dirty');
+    const persistedRows = await persistImportRowsSnapshot(nextRows, { silent: true });
+    if (!persistedRows) throw new Error('정정 행 저장 실패');
+    await syncImportRowsToCashflow(persistedRows, { silent: true });
+  }, [cloneImportRows, importRows, persistImportRowsSnapshot, projectTxs, sheetRows, syncImportRowsToCashflow, yearWeeks]);
+
   const applyDirectEntryWorkbookRows = useCallback(async (rows: ImportRow[], sheetName: string) => {
     const nextRows = cloneImportRows(rows);
     setImportRows(nextRows);
@@ -1159,6 +1178,8 @@ export function SettlementLedgerPage({
             onDeriveRows={onDeriveRows}
             readOnly={ledgerViewOnly}
             editableReadOnlyHeaders={ledgerViewOnlyEditableHeaders}
+            showRowSelection={ledgerViewOnly}
+            onRequestAppendRows={appendCorrectionRows}
           />
         )}
         {revertConfirmDialog}
@@ -1361,6 +1382,8 @@ export function SettlementLedgerPage({
           onDeriveRows={onDeriveRows}
           readOnly={ledgerViewOnly}
           editableReadOnlyHeaders={ledgerViewOnlyEditableHeaders}
+          showRowSelection={ledgerViewOnly}
+          onRequestAppendRows={appendCorrectionRows}
         />
       )}
       {revertConfirmDialog}
