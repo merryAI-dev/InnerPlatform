@@ -63,9 +63,12 @@ describe('JVM weekly API runtime config files', () => {
     expect(cloudBuild).toContain('JVM_WEEKLY_DATABASE_URL=${_JVM_WEEKLY_DATABASE_URL}');
     expect(cloudBuild).toContain('JVM_WEEKLY_INTERNAL_API_TOKEN_ENABLED=false');
     expect(cloudBuild).toContain('JVM_WEEKLY_STORAGE_BACKEND=${_JVM_WEEKLY_STORAGE_BACKEND}');
-    expect(cloudBuild).toContain('JVM_WEEKLY_PROJECT_ACCESS_BACKEND=${_JVM_WEEKLY_PROJECT_ACCESS_BACKEND}');
+    expect(cloudBuild).toContain('PROJECT_ACCESS_BACKEND="${_JVM_WEEKLY_PROJECT_ACCESS_BACKEND}"');
+    expect(cloudBuild).toContain('PROJECT_ACCESS_BACKEND="firestore"');
+    expect(cloudBuild).toContain('PROJECT_ACCESS_BACKEND="disabled"');
+    expect(cloudBuild).toContain('JVM_WEEKLY_PROJECT_ACCESS_BACKEND=$${PROJECT_ACCESS_BACKEND}');
     expect(cloudBuild).toContain("_JVM_WEEKLY_STORAGE_BACKEND: firestore");
-    expect(cloudBuild).toContain("_JVM_WEEKLY_PROJECT_ACCESS_BACKEND: firestore");
+    expect(cloudBuild).toContain("_JVM_WEEKLY_PROJECT_ACCESS_BACKEND: ''");
     expect(cloudBuild).toContain('JVM_WEEKLY_FIREBASE_PROJECT_ID=$${FIRESTORE_PROJECT_ID}');
     expect(cloudBuild).toContain('JVM_WEEKLY_FIRESTORE_PROJECT_ID=$${FIRESTORE_PROJECT_ID}');
     expect(cloudBuild).toContain('JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID=$${AUTH_PROJECT_ID}');
@@ -74,7 +77,9 @@ describe('JVM weekly API runtime config files', () => {
     expect(cloudBuild).toContain('JVM_WEEKLY_INTERNAL_API_TOKEN=${_JVM_WEEKLY_INTERNAL_API_TOKEN_SECRET}:latest');
     expect(deployScript).toContain('JVM_WEEKLY_DATABASE_URL is required for stage deploy');
     expect(deployScript).toContain('JVM_WEEKLY_STORAGE_BACKEND="${JVM_WEEKLY_STORAGE_BACKEND:-firestore}"');
-    expect(deployScript).toContain('JVM_WEEKLY_PROJECT_ACCESS_BACKEND="${JVM_WEEKLY_PROJECT_ACCESS_BACKEND:-firestore}"');
+    expect(deployScript).toContain('DEFAULT_PROJECT_ACCESS_BACKEND="firestore"');
+    expect(deployScript).toContain('DEFAULT_PROJECT_ACCESS_BACKEND="disabled"');
+    expect(deployScript).toContain('JVM_WEEKLY_PROJECT_ACCESS_BACKEND="${JVM_WEEKLY_PROJECT_ACCESS_BACKEND:-$DEFAULT_PROJECT_ACCESS_BACKEND}"');
     expect(deployScript).toContain('STAGE_GCP_PROJECT_ID="inner-platform-qa-20260310"');
     expect(deployScript).toContain('STAGE_FIREBASE_AUTH_PROJECT_ID="mysc-bmp-14173451"');
     expect(deployScript).toContain('JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID="$STAGE_FIREBASE_AUTH_PROJECT_ID"');

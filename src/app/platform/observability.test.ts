@@ -51,6 +51,7 @@ describe('observability', () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     delete (globalThis as any).fetch;
     delete (globalThis as any).localStorage;
     delete (globalThis as any).window;
@@ -136,5 +137,35 @@ describe('observability', () => {
     expect(body.message).toBe('internal boom');
     expect(body.source).toBe('portal_store');
     expect(body.clientRequestId).toBe('req_123');
+  });
+
+  it('keeps client-error telemetry off the Java platform API base URL', async () => {
+    vi.stubEnv('VITE_PLATFORM_API_BASE_URL', 'https://innerplatform-jvm-weekly-api.example.run.app');
+    const mod = await import('./observability');
+    mod.setObservabilityUserContext({
+      id: 'u-1',
+      tenantId: 'mysc',
+    });
+
+    mod.captureException(new Error('java telemetry leak guard'));
+    await Promise.resolve();
+
+    const [url] = (globalThis.fetch as any).mock.calls[0];
+    expect(url).toBe('https://inner-platform.vercel.app/api/v1/client-errors');
+  });
+
+  it('allows a dedicated client-error API base URL when explicitly configured', async () => {
+    vi.stubEnv('VITE_CLIENT_ERROR_API_BASE_URL', 'https://errors.example.com/');
+    const mod = await import('./observability');
+    mod.setObservabilityUserContext({
+      id: 'u-1',
+      tenantId: 'mysc',
+    });
+
+    mod.captureException(new Error('dedicated telemetry'));
+    await Promise.resolve();
+
+    const [url] = (globalThis.fetch as any).mock.calls[0];
+    expect(url).toBe('https://errors.example.com/api/v1/client-errors');
   });
 });

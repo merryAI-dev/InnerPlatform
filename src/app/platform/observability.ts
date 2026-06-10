@@ -149,7 +149,10 @@ function resolveObservabilityTenantId(): string {
 }
 
 function resolveInternalApiBaseUrl(env: Record<string, unknown> = import.meta.env): string {
-  const configured = readEnvString(env.VITE_PLATFORM_API_BASE_URL).replace(/\/$/, '');
+  const configured = (
+    readEnvString(env.VITE_CLIENT_ERROR_API_BASE_URL)
+    || readEnvString(env.VITE_INTERNAL_API_BASE_URL)
+  ).replace(/\/$/, '');
   const runtimeOrigin = getRuntimeOrigin().replace(/\/$/, '');
   const runtimeHostname = getRuntimeHostname();
   const hostedOrigin = runtimeOrigin && runtimeHostname && !isLoopbackHostname(runtimeHostname);
