@@ -234,6 +234,10 @@ export function SettlementLedgerPage({
   const [downloadPreparing, setDownloadPreparing] = useState(false);
   const [directEntryUploading, setDirectEntryUploading] = useState(false);
   const [revertConfirmOpen, setRevertConfirmOpen] = useState(false);
+  const ledgerViewOnlyEditableHeaders = useMemo(
+    () => (ledgerViewOnly ? ['상세 적요'] : []),
+    [ledgerViewOnly],
+  );
   const directEntryUploadInputRef = useRef<HTMLInputElement | null>(null);
   const restoredDraftCacheKeyRef = useRef('');
   const hasAppliedSheetRowsRef = useRef(false);
@@ -923,7 +927,7 @@ export function SettlementLedgerPage({
     () => resolveWeeklyAccountingProductStatusDomHooks(weeklyAccountingStatus),
     [weeklyAccountingStatus],
   );
-  const saveStatusButton = showSaveStatusButton && onSaveSheetRows && !ledgerViewOnly ? (
+  const saveStatusButton = showSaveStatusButton && onSaveSheetRows && (!ledgerViewOnly || ledgerViewOnlyEditableHeaders.length > 0) ? (
     <Popover>
       <PopoverTrigger asChild>
         <Button
@@ -1119,7 +1123,7 @@ export function SettlementLedgerPage({
           <ImportEditor
             rows={importRows}
             onChange={(rows) => {
-              if (ledgerViewOnly) return;
+              if (ledgerViewOnly && ledgerViewOnlyEditableHeaders.length === 0) return;
               setImportRows(rows);
               setImportDirty(true);
               setSheetSaveState('dirty');
@@ -1154,6 +1158,7 @@ export function SettlementLedgerPage({
             onToggleFullscreen={() => setEditorFullscreen((prev) => !prev)}
             onDeriveRows={onDeriveRows}
             readOnly={ledgerViewOnly}
+            editableReadOnlyHeaders={ledgerViewOnlyEditableHeaders}
           />
         )}
         {revertConfirmDialog}
@@ -1322,7 +1327,7 @@ export function SettlementLedgerPage({
         <ImportEditor
           rows={importRows}
           onChange={(rows) => {
-            if (ledgerViewOnly) return;
+            if (ledgerViewOnly && ledgerViewOnlyEditableHeaders.length === 0) return;
             setImportRows(rows);
             setImportDirty(true);
             setSheetSaveState('dirty');
@@ -1355,6 +1360,7 @@ export function SettlementLedgerPage({
           onPendingQuickInsertHandled={onPendingQuickInsertHandled}
           onDeriveRows={onDeriveRows}
           readOnly={ledgerViewOnly}
+          editableReadOnlyHeaders={ledgerViewOnlyEditableHeaders}
         />
       )}
       {revertConfirmDialog}

@@ -95,15 +95,18 @@ describe('portal bank statement apply policy', () => {
     expect(bankStatementPageSource).not.toContain('작성중초안있음');
   });
 
-  it('inherits weekly expense category, subcategory, sub-subcategory, cashflow, and evidence fields', () => {
+  it('inherits weekly expense category, subcategory, sub-subcategory, and cashflow fields only', () => {
     expect(bankStatementPageSource).toContain("label: '세세목'");
     expect(bankStatementPageSource).toContain("column: '세세목'");
     expect(bankStatementPageSource).toContain("label: '매입부가세'");
     expect(bankStatementPageSource).toContain("column: '매입부가세'");
     expect(bankStatementPageSource).toContain('budgetTreeV2');
     expect(bankStatementPageSource).toContain('budgetCodeBook');
-    expect(bankStatementPageSource).toContain('evidenceRequiredMap');
-    expect(bankStatementPageSource).toContain('resolveEvidenceSuggestion');
+    expect(bankStatementPageSource).not.toContain("key: 'evidenceRequired'");
+    expect(bankStatementPageSource).not.toContain("label: '필수증빙자료 리스트'");
+    expect(bankStatementPageSource).not.toContain("key: 'memo'");
+    expect(bankStatementPageSource).not.toContain("label: '상세 적요'");
+    expect(bankStatementPageSource).not.toContain('resolveEvidenceSuggestion');
   });
 
   it('keeps full bank amount by default without rendering VAT suggestion actions', () => {
@@ -152,7 +155,7 @@ describe('portal bank statement apply policy', () => {
     );
     expect(wizardFieldBlock).not.toContain('해당 주차');
     expect(wizardFieldBlock).not.toContain('week');
-    expect(bankStatementPageSource).toContain('해당 주차는 거래일 기준으로 자동 계산됩니다');
+    expect(bankStatementPageSource).toContain('aria-label="해당 주차 수정불가 계산값"');
   });
 
   it('shows weekly week labels as read-only calculated wizard context', () => {
@@ -199,8 +202,19 @@ describe('portal bank statement apply policy', () => {
     expect(bulkApplyBlock).not.toContain('vatRefund');
     expect(bulkApplyBlock).not.toContain('expenseAmount');
     expect(bulkApplyBlock).not.toContain('vatIn');
+    expect(bulkApplyBlock).not.toContain('evidenceRequired');
     expect(bulkApplyBlock).not.toContain('memo');
     expect(bulkApplyBlock).not.toContain('settlementNote');
+  });
+
+  it('keeps bank statement page chrome minimal around the source table', () => {
+    expect(bankStatementPageSource).not.toContain('사업비 입력(주간)으로 이어가기');
+    expect(bankStatementPageSource).not.toContain('파일 다시 업로드');
+    expect(bankStatementPageSource).not.toContain('기준본 저장');
+    expect(bankStatementPageSource).not.toContain('업로드 원본 전체');
+    expect(bankStatementPageSource).not.toContain('반영할 거래를 선택합니다');
+    expect(bankStatementPageSource).not.toContain('getBankStatementProfileLabel');
+    expect(bankStatementPageSource).not.toContain('lastSavedAt');
   });
 
   it('computes already applied bank lines across every expense sheet tab', () => {
@@ -212,7 +226,7 @@ describe('portal bank statement apply policy', () => {
     const submitBlock = sourceBetween(
       bankStatementPageSource,
       'const handleSubmitWizard = useCallback',
-      'const trustSurface = saving',
+      'const getSubCategoryOptions = useCallback',
     );
 
     expect(submitBlock).toContain('buildWizardCellPatchesByRowKey');

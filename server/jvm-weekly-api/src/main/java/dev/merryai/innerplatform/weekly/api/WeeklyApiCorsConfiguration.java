@@ -7,6 +7,11 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 @Configuration
 public class WeeklyApiCorsConfiguration implements WebMvcConfigurer {
+    private static final String[] DEFAULT_ALLOWED_ORIGINS = new String[]{
+        "https://inner-platform-stage-merryai-devs-projects.vercel.app",
+        "https://inner-platform.vercel.app"
+    };
+
     private final String[] allowedOrigins;
 
     public WeeklyApiCorsConfiguration(@Value("${weekly.allowed-origins:}") String allowedOrigins) {
@@ -33,10 +38,10 @@ public class WeeklyApiCorsConfiguration implements WebMvcConfigurer {
             .maxAge(600);
     }
 
-    private static String[] parseOrigins(String raw) {
+    static String[] parseOrigins(String raw) {
         String text = raw == null ? "" : raw.trim();
         if (text.isEmpty()) {
-            return new String[]{"https://inner-platform.vercel.app"};
+            return DEFAULT_ALLOWED_ORIGINS;
         }
         return java.util.Arrays.stream(text.split(","))
             .map(String::trim)

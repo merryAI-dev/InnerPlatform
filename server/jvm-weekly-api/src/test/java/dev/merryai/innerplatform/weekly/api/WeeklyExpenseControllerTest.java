@@ -27,6 +27,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -97,12 +98,15 @@ class WeeklyExpenseControllerTest {
             """;
 
         mockMvc.perform(post("/api/v1/weekly-expenses/project-auth/sheets/default/save-draft")
+                .header("origin", "https://inner-platform-stage-merryai-devs-projects.vercel.app")
                 .header("x-tenant-id", "tenant-auth")
                 .header("x-actor-id", "spoofed-admin")
                 .header("x-actor-role", "admin")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body))
             .andExpect(status().isUnauthorized())
+            .andExpect(header().string("Access-Control-Allow-Origin", "https://inner-platform-stage-merryai-devs-projects.vercel.app"))
+            .andExpect(header().string("Access-Control-Allow-Credentials", "true"))
             .andExpect(jsonPath("$.code").value("weekly_expense_firebase_auth_required"));
     }
 

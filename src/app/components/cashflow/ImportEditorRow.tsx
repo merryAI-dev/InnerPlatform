@@ -214,6 +214,7 @@ function ImportEditorRow({
   counterpartyHint,
   onBudgetSuggestionAccepted,
   readOnly = false,
+  editableReadOnlyHeaders = [],
 }: {
   row: ImportRow;
   rowIdx: number;
@@ -258,6 +259,7 @@ function ImportEditorRow({
   counterpartyHint?: CounterpartySuggestion | null;
   onBudgetSuggestionAccepted?: (confidence: 'history' | 'codebook') => void;
   readOnly?: boolean;
+  editableReadOnlyHeaders?: string[];
 }) {
   const hasError = Boolean(row.error);
   const hasReviewHint = hasImportRowReviewRequirement(row);
@@ -422,7 +424,8 @@ function ImportEditorRow({
     } transition-colors`}>
       {/* Data cells */}
       {SETTLEMENT_COLUMNS.map((col, colIdx) => {
-        const isReadOnly = readOnly || col.csvHeader === 'No.';
+        const canEditReadOnlyCell = readOnly && editableReadOnlyHeaders.includes(col.csvHeader);
+        const isReadOnly = (readOnly && !canEditReadOnlyCell) || col.csvHeader === 'No.';
         const isBudgetCode = colIdx === budgetCodeIdx;
         const isSubCode = colIdx === subCodeIdx;
         const isSubSubCode = colIdx === subSubCodeIdx;
@@ -456,6 +459,7 @@ function ImportEditorRow({
             style={{ width: colWidths[colIdx], minWidth: 60 }}
             onPaste={(e) => {
               if (isReadOnly) return;
+              if (readOnly && canEditReadOnlyCell) return;
               handlePaste(colIdx, e);
             }}
             onMouseDown={() => onCellMouseDown(rowIdx, colIdx)}
@@ -880,7 +884,10 @@ function ImportEditorRow({
                   list={isAuthor && authorListId ? authorListId : undefined}
                   readOnly={isDerivedLocked}
                   onFocus={() => onCellFocus(rowIdx, colIdx)}
-                  onPaste={(e) => handlePaste(colIdx, e)}
+                  onPaste={(e) => {
+                    if (readOnly && canEditReadOnlyCell) return;
+                    handlePaste(colIdx, e);
+                  }}
                   onChange={(e) => {
                     if (isDerivedLocked) return;
                     const next = col.format === 'number'
@@ -965,6 +972,8 @@ export const MemoizedImportEditorRow = memo(ImportEditorRow, (prev, next) => {
     && prev.cashflowOptions === next.cashflowOptions
     && prev.settlementSheetPolicy === next.settlementSheetPolicy
     && prev.evidenceRequiredMap === next.evidenceRequiredMap
+    && prev.readOnly === next.readOnly
+    && prev.editableReadOnlyHeaders === next.editableReadOnlyHeaders
     && prev.commentCountByCell === next.commentCountByCell
     && prev.persistedTransactionId === next.persistedTransactionId
     && prev.noIdx === next.noIdx

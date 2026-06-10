@@ -179,6 +179,10 @@
 - pages: [portal-dashboard](./pages/portal-dashboard.md)
 - summary: 상단 shell에서 정보량이 없는 `My Work` 보조 라벨을 제거하고 현재 화면명만 남겨 더 미니멀한 heading 구조로 정리했다.
 
+## [2026-06-10] patch-note | portal-bank-wizard-minimal-cors | 위자드 입력 축소와 stage CORS 보강
+- pages: [portal-bank-statement](./pages/portal-bank-statement.md)
+- summary: 통장내역 선택 행 반영 Temp 위자드에서 필수증빙자료/상세 적요 입력을 제외하고, 통장내역 화면의 중복 상단 액션과 상태 배지를 제거했으며 Java API 인증 실패 응답에도 stage CORS 헤더가 붙도록 보강했다.
+
 ## [2026-04-14] patch-note | portal-dashboard-shell | 현재 사업 검색 이동 보정
 - pages: [portal-dashboard](./pages/portal-dashboard.md)
 - summary: command search에서 현재 담당 사업을 선택했을 때 `setActiveProject` no-op 때문에 이동이 막히던 문제를 제거했다.

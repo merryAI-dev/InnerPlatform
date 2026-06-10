@@ -28,10 +28,12 @@ public class InternalServiceTokenFilter extends OncePerRequestFilter {
     private final boolean internalApiTokenEnabled;
     private final String internalApiToken;
     private final FirebaseBearerTokenVerifier firebaseBearerTokenVerifier;
+    private final Set<String> allowedOrigins;
 
     public InternalServiceTokenFilter(
         @Value("${weekly.internal-api-token-enabled:false}") boolean internalApiTokenEnabled,
         @Value("${weekly.internal-api-token}") String internalApiToken,
+        @Value("${weekly.allowed-origins:}") String allowedOrigins,
         FirebaseBearerTokenVerifier firebaseBearerTokenVerifier
     ) {
         if (internalApiTokenEnabled && (internalApiToken == null || internalApiToken.isBlank())) {
@@ -39,6 +41,7 @@ public class InternalServiceTokenFilter extends OncePerRequestFilter {
         }
         this.internalApiTokenEnabled = internalApiTokenEnabled;
         this.internalApiToken = internalApiToken;
+        this.allowedOrigins = Set.of(WeeklyApiCorsConfiguration.parseOrigins(allowedOrigins));
         this.firebaseBearerTokenVerifier = firebaseBearerTokenVerifier;
     }
 
@@ -65,9 +68,11 @@ public class InternalServiceTokenFilter extends OncePerRequestFilter {
             requireHeaderMatch(request, "x-actor-id", actor.actorId(), "actor_mismatch", "Header actor does not match token subject.");
             actor = resolveTrustedActor(request, actor);
         } catch (WeeklyApiAuthException error) {
+            applyCorsHeaders(request, response);
             writeAuthError(response, error.statusCode, error.code, error.getMessage());
             return;
         } catch (RuntimeException error) {
+            applyCorsHeaders(request, response);
             writeAuthError(response, HttpServletResponse.SC_UNAUTHORIZED, "weekly_expense_firebase_auth_required", error.getMessage());
             return;
         }
@@ -190,6 +195,17 @@ public class InternalServiceTokenFilter extends OncePerRequestFilter {
         response.setStatus(status);
         response.setContentType("application/json");
         response.getWriter().write("{\"ok\":false,\"code\":\"" + escapeJson(code) + "\",\"message\":\"" + escapeJson(message) + "\"}");
+    }
+
+    private void applyCorsHeaders(HttpServletRequest request, HttpServletResponse response) {
+        String origin = request.getHeader("origin");
+        if (origin == null || !allowedOrigins.contains(origin.trim())) {
+            return;
+        }
+        response.setHeader("Vary", "Origin");
+        response.setHeader("Access-Control-Allow-Origin", origin.trim());
+        response.setHeader("Access-Control-Allow-Credentials", "true");
+        response.setHeader("Access-Control-Expose-Headers", "x-request-id");
     }
 
     private String escapeJson(String value) {

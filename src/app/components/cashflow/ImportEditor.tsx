@@ -168,6 +168,7 @@ export function ImportEditor({
   onToggleFullscreen,
   onDeriveRows,
   readOnly = false,
+  editableReadOnlyHeaders = [],
 }: {
   rows: ImportRow[];
   onChange: (rows: ImportRow[]) => void;
@@ -209,6 +210,7 @@ export function ImportEditor({
     options: SettlementDerivationOptions,
   ) => Promise<ImportRow[]>;
   readOnly?: boolean;
+  editableReadOnlyHeaders?: string[];
 }) {
   const isInlineLayout = inline && !fullscreen;
   const deriveRequestSeq = useRef(0);
@@ -227,6 +229,7 @@ export function ImportEditor({
     () => normalizeSettlementSheetPolicy(settlementSheetPolicy, workflowMode),
     [settlementSheetPolicy, workflowMode],
   );
+  const readOnlyHasEditableCells = readOnly && editableReadOnlyHeaders.length > 0;
   const meaningfulRows = useMemo(
     () => rows.filter((row) => isSettlementRowMeaningful(row)),
     [rows],
@@ -844,10 +847,10 @@ export function ImportEditor({
   }, [getSelectionAnchor, selectionBounds]);
 
   const commitRows = useCallback((nextRows: ImportRow[], focusTarget?: { rowIdx: number; colIdx: number } | null) => {
-    if (readOnly) return;
+    if (readOnly && !readOnlyHasEditableCells) return;
     if (focusTarget) pendingFocusCell.current = focusTarget;
     applyDerivedRows(normalizeRowNumbers(nextRows), { mode: 'full' });
-  }, [normalizeRowNumbers, applyDerivedRows, readOnly]);
+  }, [normalizeRowNumbers, applyDerivedRows, readOnly, readOnlyHasEditableCells]);
 
   const addRow = useCallback(() => {
     if (readOnly) return;
@@ -1947,6 +1950,7 @@ export function ImportEditor({
                 budgetSuggestion={budgetSuggestion}
                 counterpartyHint={counterpartyHint}
                 readOnly={readOnly}
+                editableReadOnlyHeaders={editableReadOnlyHeaders}
                 onCellChange={(colIdx, value) => updateCell(rowIdx, colIdx, value)}
                 onRowChange={(updater) => updateRow(rowIdx, updater)}
                 onRemove={() => removeRow(rowIdx)}

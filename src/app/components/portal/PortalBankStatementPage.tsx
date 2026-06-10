@@ -1,17 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { Upload, Save, Loader2, ArrowRight, ShieldAlert, FileSpreadsheet } from 'lucide-react';
+import { Upload, Loader2, ShieldAlert, FileSpreadsheet } from 'lucide-react';
 import { toast } from 'sonner';
 import { collection, doc, getDocs, setDoc } from 'firebase/firestore';
 import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
-import { Badge } from '../ui/badge';
 import { Checkbox } from '../ui/checkbox';
 import { usePortalStore, type BankStatementApplyCellPatch } from '../../data/portal-store';
 import {
-  detectBankStatementProfile,
   buildBankStatementServerImportLines,
-  getBankStatementProfileLabel,
   isHtmlMaskedAsXls,
   normalizeBankStatementMatrix,
   parseHtmlBankExport,
@@ -49,8 +46,6 @@ const WIZARD_FIELDS = [
   { key: 'vatRefund', label: '매입부가세 반환', column: '매입부가세 반환' },
   { key: 'expenseAmount', label: '사업비 사용액', column: '사업비 사용액' },
   { key: 'vatIn', label: '매입부가세', column: '매입부가세' },
-  { key: 'evidenceRequired', label: '필수증빙자료 리스트', column: '필수증빙자료 리스트' },
-  { key: 'memo', label: '상세 적요', column: '상세 적요' },
   { key: 'settlementNote', label: '비고', column: '비고' },
 ] as const;
 
@@ -59,8 +54,6 @@ const WIZARD_PRIMARY_FIELDS = WIZARD_FIELDS.filter((field) => (
   || field.key === 'budgetSubCategory'
   || field.key === 'budgetSubSubCategory'
   || field.key === 'cashflowLine'
-  || field.key === 'evidenceRequired'
-  || field.key === 'memo'
   || field.key === 'settlementNote'
 ));
 const WIZARD_DEPOSIT_FIELDS = WIZARD_FIELDS.filter((field) => (
@@ -75,7 +68,6 @@ const WIZARD_BULK_CLASSIFICATION_FIELD_KEYS = [
   'budgetSubCategory',
   'budgetSubSubCategory',
   'cashflowLine',
-  'evidenceRequired',
 ] as const;
 const WIZARD_CASHFLOW_OPTIONS = CASHFLOW_LINE_OPTIONS.filter((option) => option.value !== 'INPUT_VAT_OUT');
 const WIZARD_DRAFT_RETENTION_DAYS = 30;
@@ -153,31 +145,6 @@ function wizardDraftCollectionPath(orgId: string, projectId: string): string {
   return `${getOrgDocumentPath(orgId, 'projects', projectId)}/weekly_expense_apply_drafts`;
 }
 
-function resolveEvidenceSuggestion(
-  evidenceRequiredMap: Record<string, string>,
-  budgetCategory: string,
-  budgetSubCategory: string,
-  budgetSubSubCategory?: string,
-): string {
-  const normalizedBudget = normalizeBudgetLabel(budgetCategory);
-  const normalizedSub = normalizeBudgetLabel(budgetSubCategory);
-  const normalizedSubSub = normalizeBudgetLabel(budgetSubSubCategory);
-  const candidates = [
-    normalizedSubSub ? buildBudgetLabelKey(normalizedBudget, normalizedSub, normalizedSubSub) : '',
-    normalizedSubSub ? `${normalizedBudget}|${normalizedSub}|${normalizedSubSub}` : '',
-    normalizedSubSub,
-    buildBudgetLabelKey(normalizedBudget, normalizedSub),
-    `${normalizedBudget}|${normalizedSub}`,
-    normalizedSub,
-    normalizedBudget,
-  ].filter(Boolean);
-  for (const key of candidates) {
-    const mapped = evidenceRequiredMap[key];
-    if (mapped) return mapped;
-  }
-  return '';
-}
-
 function getBankRowCounterparty(columns: string[], row: BankStatementRow): string {
   const aliases = ['거래처', '의뢰인/수취인', '수취인', '지급처', '적요', '내용'];
   for (const alias of aliases) {
@@ -215,7 +182,6 @@ function buildSameCounterpartySuggestions(expenseSheets: { rows?: ImportRow[] }[
         budgetSubCategory: settlementCell(row, '세목'),
         budgetSubSubCategory: settlementCell(row, '세세목'),
         cashflowLine: settlementCell(row, 'cashflow항목'),
-        evidenceRequired: settlementCell(row, '필수증빙자료 리스트'),
       };
       if (Object.values(draft).some(Boolean)) {
         suggestions.set(key, { counterparty, draft });
@@ -262,7 +228,6 @@ export function PortalBankStatementPage() {
     bankStatementRows,
     expenseSheets,
     expenseSheetRows,
-    evidenceRequiredMap,
     budgetCodeBook,
     budgetTreeV2,
     saveBankStatementRows,
@@ -274,8 +239,6 @@ export function PortalBankStatementPage() {
   const [rows, setRows] = useState<BankStatementRow[]>(bankStatementRows?.rows || []);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [lastUploadedName, setLastUploadedName] = useState('');
-  const [lastSavedAt, setLastSavedAt] = useState('');
   const [dragActive, setDragActive] = useState(false);
   const [uploadPreparing, setUploadPreparing] = useState(false);
   const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(() => new Set());
@@ -293,7 +256,6 @@ export function PortalBankStatementPage() {
   const projectName = myProject?.name || '내 사업';
   const projectId = activeProjectId || myProject?.id || '';
   const ready = useMemo(() => Boolean(activeProjectId || myProject?.id), [activeProjectId, myProject?.id]);
-  const bankProfile = useMemo(() => detectBankStatementProfile(columns, lastUploadedName), [columns, lastUploadedName]);
   const transactionAmountColIdxs = useMemo(() => getTransactionAmountColumnIndexes(columns), [columns]);
   const hasTransactionAmountColumns = transactionAmountColIdxs.size > 0;
   const hasUploadedSheet = rows.length > 0 && columns.length > 0;
@@ -351,12 +313,11 @@ export function PortalBankStatementPage() {
         .some((fieldKey) => {
           const value = draft[fieldKey] || '';
           return Boolean(value.trim()) && parseDraftAmount(value) === null;
-        });
+      });
       if ((!hasDeposit && !hasExpense) || invalidAmount) summary.amount += 1;
       if (!draft.budgetCategory || !draft.budgetSubCategory) summary.budget += 1;
-      if (!draft.evidenceRequired) summary.evidence += 1;
       return summary;
-    }, { amount: 0, budget: 0, evidence: 0 });
+    }, { amount: 0, budget: 0 });
   }, [wizardDrafts, wizardRows]);
   const wizardImportMetaByRowKey = useMemo(() => {
     const importLines = buildBankStatementServerImportLines({ columns, rows: wizardRows });
@@ -454,7 +415,6 @@ export function PortalBankStatementPage() {
         toast.error('업로드 데이터에서 컬럼/행을 찾지 못했습니다. 파일 형식을 확인해 주세요.');
         return;
       }
-      setLastUploadedName(file.name);
       setColumns(result.columns);
       setRows(result.rows);
       setSelectedRowIds(new Set(result.rows.map((row, index) => row.tempId || `row-${index}`)));
@@ -488,8 +448,6 @@ export function PortalBankStatementPage() {
     try {
       await saveBankStatementRows({ columns, rows });
       setDirty(false);
-      const now = new Date().toISOString();
-      setLastSavedAt(now);
       if (!options?.silent) toast.success('통장내역을 저장했습니다.');
     } catch (err) {
       console.error('[BankStatement] save failed:', err);
@@ -498,10 +456,6 @@ export function PortalBankStatementPage() {
       setSaving(false);
     }
   }, [columns, rows, saveBankStatementRows]);
-
-  const handleSave = useCallback(async () => {
-    await persistSheet();
-  }, [persistSheet]);
 
   const toggleRowSelection = useCallback((rowIdx: number, checked: boolean) => {
     const row = rows[rowIdx];
@@ -646,24 +600,12 @@ export function PortalBankStatementPage() {
         ...(current[rowKey] || {}),
         [fieldKey]: value,
       };
-      if (
-        ['budgetCategory', 'budgetSubCategory', 'budgetSubSubCategory'].includes(fieldKey)
-        && !String(nextRowDraft.evidenceRequired || '').trim()
-      ) {
-        const evidenceSuggestion = resolveEvidenceSuggestion(
-          evidenceRequiredMap,
-          nextRowDraft.budgetCategory || '',
-          nextRowDraft.budgetSubCategory || '',
-          nextRowDraft.budgetSubSubCategory || '',
-        );
-        if (evidenceSuggestion) nextRowDraft.evidenceRequired = evidenceSuggestion;
-      }
       return {
         ...current,
         [rowKey]: nextRowDraft,
       };
     });
-  }, [evidenceRequiredMap, pushWizardHistorySnapshot]);
+  }, [pushWizardHistorySnapshot]);
 
   const handleWizardUndo = useCallback(() => {
     setWizardHistory((history) => {
@@ -715,7 +657,7 @@ export function PortalBankStatementPage() {
     }
     const sourceKey = selectedKeys.find((key) => WIZARD_BULK_CLASSIFICATION_FIELD_KEYS.some((fieldKey) => String(wizardDrafts[key]?.[fieldKey] || '').trim()));
     if (!sourceKey) {
-      toast.message('먼저 기준 행에 비목/세목/cashflow/증빙 값을 입력해 주세요.');
+      toast.message('먼저 기준 행에 비목/세목/cashflow 값을 입력해 주세요.');
       return;
     }
     const sourceDraft = wizardDrafts[sourceKey] || {};
@@ -848,31 +790,6 @@ export function PortalBankStatementPage() {
     );
   }, [budgetCategoryOptions, getSubCategoryOptions, getSubSubCategoryOptions, updateWizardDraft]);
 
-  const trustSurface = saving
-    ? {
-      label: '저장 중',
-      description: '현재 업로드한 통장내역을 Java API 경로로 저장하고 있습니다.',
-      toneClass: 'border-cyan-200/70 bg-cyan-50/60',
-    }
-    : dirty
-      ? {
-        label: '저장 전 초안',
-        description: '업로드한 통장내역이 아직 주간 사업비 기준본으로 저장되지 않았습니다. 저장 후 선택 반영할 수 있습니다.',
-        toneClass: 'border-slate-200 bg-white',
-      }
-      : hasUploadedSheet
-        ? {
-          label: lastSavedAt ? '업로드 기준본 저장 완료' : '현재 저장본 사용 중',
-          description: lastSavedAt
-            ? '최근 저장본을 기준으로 사업비 입력 화면에서 바로 이어서 작업할 수 있습니다.'
-            : '이미 저장된 통장내역 기준본을 열어 검토하고 있습니다.',
-          toneClass: 'border-slate-300/80 bg-slate-100',
-        }
-        : {
-          label: '원본 업로드 대기',
-          description: '이번 주 원본 파일을 먼저 올리면 주간 사업비 입력의 시작점이 준비됩니다.',
-          toneClass: 'border-slate-200/80 bg-slate-50/80',
-        };
   const uploadExperienceHint = uploadPreparing
     ? '엑셀 엔진을 준비하고 있습니다. 첫 업로드는 잠시 더 걸릴 수 있습니다.'
     : '엑셀 파일은 첫 업로드 때 엔진을 먼저 준비한 뒤 읽습니다.';
@@ -904,50 +821,23 @@ export function PortalBankStatementPage() {
         <div className="space-y-1">
           <div className="flex items-center gap-2 flex-wrap">
             <h1 className="text-[18px]" style={{ fontWeight: 700 }}>통장내역</h1>
-            <Badge variant={hasUploadedSheet ? 'secondary' : 'outline'} className="text-[10px]">
-              {hasUploadedSheet ? `${rows.length}건 불러옴` : '업로드 전'}
-            </Badge>
-            <Badge variant={dirty ? 'destructive' : 'secondary'} className="text-[10px]">
-              {dirty ? '변경됨' : '저장됨'}
-            </Badge>
-            <Badge variant="outline" className="text-[10px]">
-              {getBankStatementProfileLabel(bankProfile)}
-            </Badge>
           </div>
           <p className="text-[12px] text-muted-foreground">{projectName} · 카드/통장 내역 업로드</p>
         </div>
-        <div className="flex items-center justify-end gap-2 flex-wrap">
-          <Button variant="outline" size="sm" onClick={() => navigate('/portal/weekly-expenses')}>
-            사업비 입력(주간)으로 이어가기
-            <ArrowRight className="h-4 w-4 ml-1" />
-          </Button>
-          <Button size="sm" onClick={openFilePicker} disabled={uploadPreparing}>
-            {uploadPreparing ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Upload className="h-4 w-4 mr-1" />}
-            {uploadPreparing ? '엑셀 준비 중' : hasUploadedSheet ? '파일 다시 업로드' : '엑셀 업로드'}
-          </Button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".csv,.xlsx,.xls"
-            className="hidden"
-            onClick={() => warmXlsx()}
-            onFocus={() => warmXlsx()}
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) void handleFileUpload(file);
-              e.currentTarget.value = '';
-            }}
-          />
-          <Button variant="outline" size="sm" onClick={handleApplySelected} disabled={saving || activeStatusTab !== 'staged' || selectedRows.length === 0}>
-            선택 행 반영
-            <ArrowRight className="h-4 w-4 ml-1" />
-          </Button>
-          <Button variant="outline" size="sm" onClick={handleSave} disabled={saving || !hasUploadedSheet}>
-            {saving ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Save className="h-4 w-4 mr-1" />}
-            기준본 저장
-          </Button>
-        </div>
       </div>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".csv,.xlsx,.xls"
+        className="hidden"
+        onClick={() => warmXlsx()}
+        onFocus={() => warmXlsx()}
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) void handleFileUpload(file);
+          e.currentTarget.value = '';
+        }}
+      />
 
       {!hasUploadedSheet && (
         <Card data-testid="bank-statement-empty-state" className="border-slate-200 bg-white">
@@ -1002,22 +892,7 @@ export function PortalBankStatementPage() {
             <div className="flex items-center justify-between gap-3">
               <div>
                 <h2 className="text-[18px] font-bold text-slate-950">통장내역 선택</h2>
-                <p className="mt-1 text-[12px] text-slate-500">{projectName} · 반영할 거래를 선택합니다</p>
               </div>
-              <Button variant="ghost" size="sm" onClick={() => navigate('/portal/weekly-expenses')}>
-                닫기
-              </Button>
-            </div>
-            <div className="mt-4 flex flex-wrap items-center gap-3 rounded border bg-slate-50 px-4 py-2.5">
-              <span className="text-[12px] font-semibold text-slate-700">거래일자</span>
-              <span className="rounded border bg-white px-3 py-1.5 text-[12px] text-slate-700">업로드 원본 전체</span>
-              <span className="text-[12px] font-semibold text-slate-700">파일</span>
-              <span className="min-w-[220px] rounded border bg-white px-3 py-1.5 text-[12px] text-slate-500">
-                {lastUploadedName || '저장된 기준본'}
-              </span>
-              <Button variant="outline" size="sm" onClick={openFilePicker} disabled={uploadPreparing}>
-                {uploadPreparing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-              </Button>
             </div>
           </div>
 
@@ -1052,42 +927,6 @@ export function PortalBankStatementPage() {
                   <div className="flex items-center justify-between border-t pt-3">
                     <span className="text-slate-600">금액 컬럼</span>
                     <span className="font-bold">{hasTransactionAmountColumns ? '감지됨' : '확인 필요'}</span>
-                  </div>
-                </div>
-              </div>
-              <div className="mt-4 rounded border bg-white">
-                <div className="border-b bg-slate-100 px-4 py-3 text-[13px] font-bold text-slate-900">
-                  {lastUploadedName || `${getBankStatementProfileLabel(bankProfile)} 기준본`}
-                </div>
-                <div className="space-y-3 px-4 py-4 text-[12px] text-slate-600">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100">
-                      <FileSpreadsheet className="h-4 w-4 text-slate-600" />
-                    </div>
-                    <div>
-                      <div className="font-semibold text-slate-800">{getBankStatementProfileLabel(bankProfile)}</div>
-                      <div className="text-slate-500">카드/계좌 원본</div>
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-between border-t pt-3">
-                    <span>선택</span>
-                    <span className="font-bold text-slate-900">{selectedRows.length.toLocaleString('ko-KR')}건</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span>상태</span>
-                    <span className="font-bold text-slate-900">{activeStatusTab === 'staged' ? '미반영' : '반영완료'}</span>
-                  </div>
-                </div>
-              </div>
-              <div className={`mt-4 rounded border px-4 py-3 text-[12px] ${trustSurface.toneClass}`}>
-                <div className="flex items-start gap-2">
-                  <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-red-700" />
-                  <div>
-                    <p className="font-semibold text-slate-800">{trustSurface.label}</p>
-                    <p className="mt-1 leading-5 text-slate-600">{trustSurface.description}</p>
-                    {lastSavedAt ? (
-                      <p className="mt-1 text-[11px] text-slate-500">마지막 저장 {lastSavedAt.slice(0, 16).replace('T', ' ')}</p>
-                    ) : null}
                   </div>
                 </div>
               </div>
@@ -1142,15 +981,6 @@ export function PortalBankStatementPage() {
                       </tr>
                     ))}
                   </tbody>
-                  <tfoot className="sticky bottom-0 bg-amber-50">
-                    <tr>
-                      <td className="border-t border-r px-2 py-2" />
-                      <td className="border-t border-r px-2 py-2 font-bold">처리</td>
-                      <td className="border-t px-3 py-2 font-bold" colSpan={Math.max(columns.length, 1)}>
-                        선택한 행만 Java API 검증 후 반영합니다
-                      </td>
-                    </tr>
-                  </tfoot>
                 </table>
               </div>
             </section>
@@ -1188,13 +1018,7 @@ export function PortalBankStatementPage() {
             <div className="flex items-center justify-between gap-4 border-b px-3 py-2">
               <div>
                 <h2 className="text-[15px] font-extrabold text-slate-950">비어있는 사업비 항목 작성</h2>
-                <p className="mt-0.5 text-[11px] leading-4 text-slate-500">
-                  통장내역에서 선택한 거래를 원장에 쓰기 전, 비목/세목/세세목, cashflow항목, 금액, 증빙을 임시 작성합니다. 해당 주차는 거래일 기준으로 자동 계산됩니다.
-                </p>
               </div>
-              <Button variant="ghost" size="sm" onClick={closeWizard} disabled={saving}>
-                닫기
-              </Button>
             </div>
 
             <div className={`grid min-h-0 flex-1 grid-cols-1 overflow-hidden ${wizardSidebarCollapsed ? 'lg:grid-cols-[44px_minmax(0,1fr)]' : 'lg:grid-cols-[220px_minmax(0,1fr)]'}`}>
@@ -1213,7 +1037,7 @@ export function PortalBankStatementPage() {
                 {wizardSidebarCollapsed ? (
                   <div className="flex flex-col items-center gap-2 pt-1 text-[10px] font-bold text-slate-500">
                     <span className="writing-mode-vertical">요약</span>
-                    <span>{wizardIssueSummary.amount + wizardIssueSummary.budget + wizardIssueSummary.evidence}</span>
+                    <span>{wizardIssueSummary.amount + wizardIssueSummary.budget}</span>
                   </div>
                 ) : (
                   <>
@@ -1247,10 +1071,6 @@ export function PortalBankStatementPage() {
                     <div className="flex items-center justify-between">
                       <span>비목 누락</span>
                       <span className="font-bold">{wizardIssueSummary.budget.toLocaleString('ko-KR')}건</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span>증빙 누락</span>
-                      <span className="font-bold">{wizardIssueSummary.evidence.toLocaleString('ko-KR')}건</span>
                     </div>
                   </div>
                 </div>
@@ -1302,7 +1122,7 @@ export function PortalBankStatementPage() {
                       <div className="mt-2 space-y-1">
                         <div>cashflow항목은 회사 기준 Actual PK입니다. 목록에 없는 값은 직접 입력하지 않습니다.</div>
                         <div>거래처 제안은 자동완성일 뿐 자동확정하지 않습니다.</div>
-                        <div>선택 행 일괄적용은 위자드 임시 입력값에만 적용합니다.</div>
+                        <div>선택 행 분류 복사는 위자드 임시 입력값에만 적용합니다.</div>
                         <div>확정 시 Java API가 행/셀 검증 후 사업비 입력에 반영합니다.</div>
                       </div>
                     </div>

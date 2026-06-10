@@ -6,6 +6,18 @@ const weeklyExpenseSource = readFileSync(
   resolve(import.meta.dirname, 'PortalWeeklyExpensePage.tsx'),
   'utf8',
 );
+const settlementLedgerSource = readFileSync(
+  resolve(import.meta.dirname, '../cashflow/SettlementLedgerPage.tsx'),
+  'utf8',
+);
+const importEditorSource = readFileSync(
+  resolve(import.meta.dirname, '../cashflow/ImportEditor.tsx'),
+  'utf8',
+);
+const importEditorRowSource = readFileSync(
+  resolve(import.meta.dirname, '../cashflow/ImportEditorRow.tsx'),
+  'utf8',
+);
 
 describe('PortalWeeklyExpensePage flow layout', () => {
   it('keeps the original weekly expense input columns available through the settlement ledger', () => {
@@ -18,6 +30,14 @@ describe('PortalWeeklyExpensePage flow layout', () => {
     expect(weeklyExpenseSource).toContain('ledgerViewOnly');
     expect(weeklyExpenseSource).toContain('사업비 입력은 원장 조회 화면입니다');
     expect(weeklyExpenseSource).toContain('금액/분류/지급정보 생성과 수정은 위자드에서만 처리합니다');
+  });
+
+  it('allows only detail memo edits inside the weekly view-only ledger', () => {
+    expect(settlementLedgerSource).toContain("ledgerViewOnly ? ['상세 적요'] : []");
+    expect(settlementLedgerSource).toContain('editableReadOnlyHeaders={ledgerViewOnlyEditableHeaders}');
+    expect(importEditorSource).toContain('readOnly && !readOnlyHasEditableCells');
+    expect(importEditorRowSource).toContain('editableReadOnlyHeaders.includes(col.csvHeader)');
+    expect(importEditorRowSource).toContain("col.csvHeader === 'No.'");
   });
 
   it('does not wire weekly expense to cashflow actual sync from the frontend', () => {
