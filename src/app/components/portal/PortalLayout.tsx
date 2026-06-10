@@ -332,12 +332,12 @@ function PortalContent() {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  if (authLoading || portalLoading) {
+  if (authLoading) {
     return (
       <div className="min-h-[60vh] flex items-center justify-center">
         <div className="text-center">
           <Loader2 className="w-5 h-5 mx-auto animate-spin text-muted-foreground" />
-          <p className="mt-2 text-[12px] text-muted-foreground">포털 데이터를 불러오는 중...</p>
+          <p className="mt-2 text-[12px] text-muted-foreground">로그인 상태를 확인하는 중...</p>
         </div>
       </div>
     );

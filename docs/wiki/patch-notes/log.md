@@ -223,6 +223,10 @@
 - pages: [portal-dashboard](./pages/portal-dashboard.md)
 - summary: 정보 박스는 다시 흰색으로 통일하고, hero 바탕 회색만 더 진하게 조정해 박스 대비와 가독성을 높였다.
 
+## [2026-06-10] patch-note | portal-bank-statement | Temp wizard grid stabilization
+- pages: [portal-bank-statement](./pages/portal-bank-statement.md)
+- summary: 선택 행 반영 Temp 위자드의 접힌 요약 문구/숫자와 `비고`를 제거하고, 원본 열/헤더 sticky, 분류 셀 범위 복사/붙여넣기, 명시적 부가세 계산, 포털 데이터 refresh 중 route unmount 방지를 추가했다.
+
 ## [2026-04-14] patch-note | portal-shell-project-search | 담당 사업 검색 전환 지원
 - pages: [portal-dashboard](./pages/portal-dashboard.md)
 - summary: 헤더의 중복 `사업비 입력` 버튼을 제거하고, 상단 command search가 담당 사업 전체를 검색해 선택 시 해당 사업으로 전환 후 이동하도록 확장했다.

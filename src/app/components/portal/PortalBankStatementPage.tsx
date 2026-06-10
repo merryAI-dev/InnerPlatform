@@ -46,7 +46,6 @@ const WIZARD_FIELDS = [
   { key: 'vatRefund', label: '매입부가세 반환', column: '매입부가세 반환' },
   { key: 'expenseAmount', label: '사업비 사용액', column: '사업비 사용액' },
   { key: 'vatIn', label: '매입부가세', column: '매입부가세' },
-  { key: 'settlementNote', label: '비고', column: '비고' },
 ] as const;
 
 const WIZARD_PRIMARY_FIELDS = WIZARD_FIELDS.filter((field) => (
@@ -54,7 +53,6 @@ const WIZARD_PRIMARY_FIELDS = WIZARD_FIELDS.filter((field) => (
   || field.key === 'budgetSubCategory'
   || field.key === 'budgetSubSubCategory'
   || field.key === 'cashflowLine'
-  || field.key === 'settlementNote'
 ));
 const WIZARD_DEPOSIT_FIELDS = WIZARD_FIELDS.filter((field) => (
   field.key === 'depositAmount' || field.key === 'vatRefund'
@@ -69,6 +67,7 @@ const WIZARD_BULK_CLASSIFICATION_FIELD_KEYS = [
   'budgetSubSubCategory',
   'cashflowLine',
 ] as const;
+const WIZARD_GRID_FIELD_KEYS = WIZARD_BULK_CLASSIFICATION_FIELD_KEYS;
 const WIZARD_CASHFLOW_OPTIONS = CASHFLOW_LINE_OPTIONS.filter((option) => option.value !== 'INPUT_VAT_OUT');
 const WIZARD_DRAFT_RETENTION_DAYS = 30;
 
@@ -90,6 +89,11 @@ interface WizardImportMeta {
   signedAmount?: number;
   transactionDate: string;
   weekLabel: string;
+}
+
+interface WizardGridCell {
+  rowKey: string;
+  fieldKey: typeof WIZARD_GRID_FIELD_KEYS[number];
 }
 
 function bankRowKey(row: BankStatementRow, index: number): string {
@@ -116,6 +120,26 @@ function parseDraftAmount(value: string): number | null {
   if (!cleaned) return null;
   const numeric = Number(cleaned);
   return Number.isFinite(numeric) ? numeric : null;
+}
+
+function splitVatIncludedAmount(value: string): { supply: string; vat: string } | null {
+  const amount = parseDraftAmount(value);
+  if (amount == null) return null;
+  const sign = amount < 0 ? -1 : 1;
+  const vat = Math.round(Math.abs(amount) / 11);
+  const supply = Math.max(Math.abs(amount) - vat, 0);
+  return {
+    supply: (supply * sign).toLocaleString('ko-KR'),
+    vat: (vat * sign).toLocaleString('ko-KR'),
+  };
+}
+
+function parseClipboardGrid(text: string): string[][] {
+  return String(text || '')
+    .replace(/\r/g, '')
+    .split('\n')
+    .filter((line, index, lines) => !(index === lines.length - 1 && line === ''))
+    .map((line) => line.split('\t'));
 }
 
 function buildWizardBatchKey(projectId: string, rows: BankStatementRow[]): string {
@@ -248,10 +272,13 @@ export function PortalBankStatementPage() {
   const [wizardDraftVersions, setWizardDraftVersions] = useState<WizardDraftVersion[]>([]);
   const [wizardHistory, setWizardHistory] = useState<Record<string, WizardDraft>[]>([]);
   const [wizardSelectedRowKeys, setWizardSelectedRowKeys] = useState<Set<string>>(() => new Set());
+  const [wizardGridSelection, setWizardGridSelection] = useState<{ start: WizardGridCell; end: WizardGridCell } | null>(null);
   const [wizardSavingDraft, setWizardSavingDraft] = useState(false);
   const [wizardSidebarCollapsed, setWizardSidebarCollapsed] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const wizardDraftsRef = useRef<Record<string, WizardDraft>>({});
+  const wizardGridDraggingRef = useRef(false);
+  const loadedProjectIdRef = useRef('');
 
   const projectName = myProject?.name || '내 사업';
   const projectId = activeProjectId || myProject?.id || '';
@@ -313,8 +340,10 @@ export function PortalBankStatementPage() {
         .some((fieldKey) => {
           const value = draft[fieldKey] || '';
           return Boolean(value.trim()) && parseDraftAmount(value) === null;
-      });
-      if ((!hasDeposit && !hasExpense) || invalidAmount) summary.amount += 1;
+        });
+      const missingVat = (hasDeposit && String(draft.vatRefund || '').trim() === '')
+        || (hasExpense && String(draft.vatIn || '').trim() === '');
+      if ((!hasDeposit && !hasExpense) || invalidAmount || missingVat) summary.amount += 1;
       if (!draft.budgetCategory || !draft.budgetSubCategory) summary.budget += 1;
       return summary;
     }, { amount: 0, budget: 0 });
@@ -339,16 +368,20 @@ export function PortalBankStatementPage() {
   }, [columns, wizardRows]);
 
   useEffect(() => {
-    if (dirty) return;
-    if (bankStatementRows?.rows && bankStatementRows.rows.length > 0) {
-      const nextColumns = bankStatementRows.columns || [];
-      setColumns(nextColumns);
-      setRows(bankStatementRows.rows);
-      setSelectedRowIds(new Set());
-      return;
-    }
+    if (loadedProjectIdRef.current === projectId) return;
+    loadedProjectIdRef.current = projectId;
     setColumns([]);
     setRows([]);
+    setSelectedRowIds(new Set());
+    setDirty(false);
+  }, [projectId]);
+
+  useEffect(() => {
+    if (dirty || !bankStatementRows) return;
+    const nextColumns = bankStatementRows.columns || [];
+    const nextRows = bankStatementRows.rows || [];
+    setColumns(nextColumns);
+    setRows(nextRows);
     setSelectedRowIds(new Set());
   }, [bankStatementRows, dirty]);
 
@@ -679,12 +712,144 @@ export function PortalBankStatementPage() {
     });
   }, [pushWizardHistorySnapshot, wizardDrafts, wizardSelectedRowKeys]);
 
+  const handleApplyVatSplit = useCallback(() => {
+    const targetKeys = wizardSelectedRowKeys.size > 0
+      ? Array.from(wizardSelectedRowKeys)
+      : wizardRows.map((row, index) => bankRowKey(row, index));
+    if (targetKeys.length === 0) return;
+    pushWizardHistorySnapshot();
+    setWizardDrafts((current) => {
+      const next = { ...current };
+      targetKeys.forEach((rowKey) => {
+        const draft = { ...(next[rowKey] || {}) };
+        const expenseSplit = String(draft.vatIn || '').trim() === ''
+          ? splitVatIncludedAmount(draft.expenseAmount || '')
+          : null;
+        if (expenseSplit) {
+          draft.expenseAmount = expenseSplit.supply;
+          draft.vatIn = expenseSplit.vat;
+        }
+        const depositSplit = String(draft.vatRefund || '').trim() === ''
+          ? splitVatIncludedAmount(draft.depositAmount || '')
+          : null;
+        if (depositSplit) {
+          draft.depositAmount = depositSplit.supply;
+          draft.vatRefund = depositSplit.vat;
+        }
+        next[rowKey] = draft;
+      });
+      return next;
+    });
+  }, [pushWizardHistorySnapshot, wizardRows, wizardSelectedRowKeys]);
+
+  const wizardGridSelectionBounds = useMemo(() => {
+    if (!wizardGridSelection) return null;
+    const rowKeys = wizardRows.map((row, index) => bankRowKey(row, index));
+    const startRow = rowKeys.indexOf(wizardGridSelection.start.rowKey);
+    const endRow = rowKeys.indexOf(wizardGridSelection.end.rowKey);
+    const startCol = WIZARD_GRID_FIELD_KEYS.indexOf(wizardGridSelection.start.fieldKey);
+    const endCol = WIZARD_GRID_FIELD_KEYS.indexOf(wizardGridSelection.end.fieldKey);
+    if (startRow < 0 || endRow < 0 || startCol < 0 || endCol < 0) return null;
+    return {
+      rowMin: Math.min(startRow, endRow),
+      rowMax: Math.max(startRow, endRow),
+      colMin: Math.min(startCol, endCol),
+      colMax: Math.max(startCol, endCol),
+      rowKeys,
+    };
+  }, [wizardGridSelection, wizardRows]);
+
+  const isWizardGridCellSelected = useCallback((rowKey: string, fieldKey: WizardGridCell['fieldKey']) => {
+    if (!wizardGridSelectionBounds) return false;
+    const rowIdx = wizardGridSelectionBounds.rowKeys.indexOf(rowKey);
+    const colIdx = WIZARD_GRID_FIELD_KEYS.indexOf(fieldKey);
+    return rowIdx >= wizardGridSelectionBounds.rowMin
+      && rowIdx <= wizardGridSelectionBounds.rowMax
+      && colIdx >= wizardGridSelectionBounds.colMin
+      && colIdx <= wizardGridSelectionBounds.colMax;
+  }, [wizardGridSelectionBounds]);
+
+  const beginWizardGridSelection = useCallback((rowKey: string, fieldKey: WizardGridCell['fieldKey']) => {
+    wizardGridDraggingRef.current = true;
+    setWizardGridSelection({ start: { rowKey, fieldKey }, end: { rowKey, fieldKey } });
+  }, []);
+
+  const extendWizardGridSelection = useCallback((rowKey: string, fieldKey: WizardGridCell['fieldKey']) => {
+    if (!wizardGridDraggingRef.current) return;
+    setWizardGridSelection((current) => (
+      current ? { ...current, end: { rowKey, fieldKey } } : current
+    ));
+  }, []);
+
+  useEffect(() => {
+    if (wizardRows.length === 0) return undefined;
+    const stopDragging = () => {
+      wizardGridDraggingRef.current = false;
+    };
+    window.addEventListener('mouseup', stopDragging);
+    return () => window.removeEventListener('mouseup', stopDragging);
+  }, [wizardRows.length]);
+
+  useEffect(() => {
+    if (wizardRows.length === 0) return undefined;
+    const readSelectedGrid = () => {
+      if (!wizardGridSelectionBounds) return null;
+      const lines: string[] = [];
+      for (let rowIdx = wizardGridSelectionBounds.rowMin; rowIdx <= wizardGridSelectionBounds.rowMax; rowIdx += 1) {
+        const rowKey = wizardGridSelectionBounds.rowKeys[rowIdx];
+        const draft = wizardDraftsRef.current[rowKey] || {};
+        const values: string[] = [];
+        for (let colIdx = wizardGridSelectionBounds.colMin; colIdx <= wizardGridSelectionBounds.colMax; colIdx += 1) {
+          values.push(String(draft[WIZARD_GRID_FIELD_KEYS[colIdx]] || ''));
+        }
+        lines.push(values.join('\t'));
+      }
+      return lines.join('\n');
+    };
+    const onCopy = (event: ClipboardEvent) => {
+      const text = readSelectedGrid();
+      if (text == null) return;
+      event.preventDefault();
+      event.clipboardData?.setData('text/plain', text);
+    };
+    const onPaste = (event: ClipboardEvent) => {
+      if (!wizardGridSelectionBounds) return;
+      const text = event.clipboardData?.getData('text/plain') || '';
+      if (!text) return;
+      const matrix = parseClipboardGrid(text);
+      if (matrix.length === 0) return;
+      event.preventDefault();
+      pushWizardHistorySnapshot();
+      setWizardDrafts((current) => {
+        const next = { ...current };
+        for (let rowIdx = wizardGridSelectionBounds.rowMin; rowIdx <= wizardGridSelectionBounds.rowMax; rowIdx += 1) {
+          const rowKey = wizardGridSelectionBounds.rowKeys[rowIdx];
+          const draft = { ...(next[rowKey] || {}) };
+          for (let colIdx = wizardGridSelectionBounds.colMin; colIdx <= wizardGridSelectionBounds.colMax; colIdx += 1) {
+            const matrixRow = matrix[(rowIdx - wizardGridSelectionBounds.rowMin) % matrix.length] || [];
+            const rawValue = matrixRow[(colIdx - wizardGridSelectionBounds.colMin) % Math.max(matrixRow.length, 1)] ?? matrixRow[0] ?? '';
+            draft[WIZARD_GRID_FIELD_KEYS[colIdx]] = rawValue;
+          }
+          next[rowKey] = draft;
+        }
+        return next;
+      });
+    };
+    window.addEventListener('copy', onCopy);
+    window.addEventListener('paste', onPaste);
+    return () => {
+      window.removeEventListener('copy', onCopy);
+      window.removeEventListener('paste', onPaste);
+    };
+  }, [pushWizardHistorySnapshot, wizardGridSelectionBounds, wizardRows.length]);
+
   const closeWizard = useCallback(() => {
     setWizardRows([]);
     setWizardDrafts({});
     setWizardDraftVersions([]);
     setWizardHistory([]);
     setWizardSelectedRowKeys(new Set());
+    setWizardGridSelection(null);
     setWizardSidebarCollapsed(false);
   }, []);
 
@@ -715,9 +880,17 @@ export function PortalBankStatementPage() {
 
   const renderWizardField = useCallback((rowKey: string, field: typeof WIZARD_FIELDS[number], draft: WizardDraft) => {
     const amountField = (WIZARD_AMOUNT_FIELD_KEYS as readonly string[]).includes(field.key);
+    const vatRefundMissing = field.key === 'vatRefund'
+      && String(draft.depositAmount || '').trim() !== ''
+      && String(draft.vatRefund || '').trim() === '';
+    const vatInMissing = field.key === 'vatIn'
+      && String(draft.expenseAmount || '').trim() !== ''
+      && String(draft.vatIn || '').trim() === '';
+    const vatField = field.key === 'vatRefund' || field.key === 'vatIn';
     const baseClass = [
       'h-7 w-full border border-slate-300 bg-white px-1.5 text-[11px] outline-none focus:border-blue-500',
       amountField ? 'min-w-[84px] text-right tabular-nums' : 'min-w-[104px]',
+      vatRefundMissing || vatInMissing ? 'border-red-400 bg-red-50 focus:border-red-500' : '',
     ].join(' ');
     if (field.key === 'cashflowLine') {
       return (
@@ -785,7 +958,7 @@ export function PortalBankStatementPage() {
         className={baseClass}
         value={draft[field.key] || ''}
         onChange={(event) => updateWizardDraft(rowKey, field.key, event.target.value)}
-        placeholder={field.label}
+        placeholder={vatField ? '(공급가액 정산만)' : field.label}
       />
     );
   }, [budgetCategoryOptions, getSubCategoryOptions, getSubSubCategoryOptions, updateWizardDraft]);
@@ -1035,10 +1208,7 @@ export function PortalBankStatementPage() {
                 </div>
 
                 {wizardSidebarCollapsed ? (
-                  <div className="flex flex-col items-center gap-2 pt-1 text-[10px] font-bold text-slate-500">
-                    <span className="writing-mode-vertical">요약</span>
-                    <span>{wizardIssueSummary.amount + wizardIssueSummary.budget}</span>
-                  </div>
+                  null
                 ) : (
                   <>
                 <div className="rounded border border-blue-200 bg-white p-2 shadow-sm">
@@ -1132,23 +1302,26 @@ export function PortalBankStatementPage() {
                 )}
               </aside>
 
-              <section className="min-w-0 overflow-auto p-2">
-                <div className="min-w-[1120px]">
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <div className="text-[12px] text-slate-500">Ctrl+Z / Command+Z는 이 위자드 입력만 되돌립니다.</div>
+              <section className="flex min-h-0 min-w-0 flex-col overflow-hidden p-2">
+                <div className="mb-2 flex shrink-0 items-center justify-between gap-2">
+                    <div />
                     <div className="flex items-center gap-2">
                       <Button variant="outline" size="sm" onClick={handleWizardUndo} disabled={wizardHistory.length === 0}>
                         되돌리기
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={handleApplyVatSplit} disabled={wizardRows.length === 0}>
+                        부가세 계산
                       </Button>
                       <Button variant="outline" size="sm" onClick={handleBulkApplyWizardDraft} disabled={wizardSelectedRowKeys.size < 2}>
                         선택 행 분류만 복사
                       </Button>
                     </div>
                   </div>
-                  <table className="w-full border-collapse text-[11px]">
-                    <thead className="sticky top-0 z-10">
+                <div className="min-h-0 flex-1 overflow-auto">
+                  <table className="w-full min-w-[1040px] border-collapse text-[11px]">
+                    <thead className="sticky top-0 z-30">
                       <tr className="bg-slate-100 text-left">
-                        <th rowSpan={2} className="w-8 border px-1.5 py-1">
+                        <th rowSpan={2} className="sticky left-0 z-40 w-8 border bg-slate-100 px-1.5 py-1">
                           <Checkbox
                             checked={wizardRows.length > 0 && wizardSelectedRowKeys.size === wizardRows.length}
                             onCheckedChange={(checked) => {
@@ -1159,8 +1332,8 @@ export function PortalBankStatementPage() {
                             aria-label="위자드 전체 행 선택"
                           />
                         </th>
-                        <th rowSpan={2} className="w-9 border px-1.5 py-1">행</th>
-                        <th rowSpan={2} className="w-[150px] border px-1.5 py-1">통장내역 원본</th>
+                        <th rowSpan={2} className="sticky left-8 z-40 w-9 border bg-slate-100 px-1.5 py-1">행</th>
+                        <th rowSpan={2} className="sticky left-[68px] z-40 w-[150px] border bg-slate-100 px-1.5 py-1">통장내역 원본</th>
                         <th rowSpan={2} className="w-[68px] border px-1.5 py-1">해당 주차</th>
                         {WIZARD_PRIMARY_FIELDS.map((field) => (
                           <th key={field.key} rowSpan={2} className="border px-1.5 py-1">
@@ -1200,17 +1373,17 @@ export function PortalBankStatementPage() {
                         const importMeta = wizardImportMetaByRowKey.get(rowKey);
                         return (
                           <tr key={rowKey} className="align-top">
-                            <td className="border bg-slate-50 px-1.5 py-1 text-center">
+                            <td className="sticky left-0 z-20 border bg-slate-50 px-1.5 py-1 text-center">
                               <Checkbox
                                 checked={wizardSelectedRowKeys.has(rowKey)}
                                 onCheckedChange={(checked) => toggleWizardRowSelection(rowKey, Boolean(checked))}
                                 aria-label={`${rowIdx + 1}행 위자드 선택`}
                               />
                             </td>
-                            <td className="border bg-slate-50 px-1.5 py-1 text-center text-[11px] text-slate-500">
+                            <td className="sticky left-8 z-20 border bg-slate-50 px-1.5 py-1 text-center text-[11px] text-slate-500">
                               {rowIdx + 1}
                             </td>
-                            <td className="border px-1.5 py-1">
+                            <td className="sticky left-[68px] z-20 border bg-white px-1.5 py-1">
                               <div className="max-w-[145px] space-y-0.5 text-[10px] text-slate-700">
                                 {(previewCells.length > 0 ? previewCells : ['원본 셀 없음']).map((cell, idx) => (
                                   <div key={`${rowKey}-raw-${idx}`} className="truncate">
@@ -1237,11 +1410,23 @@ export function PortalBankStatementPage() {
                                 {importMeta?.weekLabel || '-'}
                               </span>
                             </td>
-                            {WIZARD_PRIMARY_FIELDS.map((field) => (
-                              <td key={field.key} className="border px-1.5 py-1.5">
+                            {WIZARD_PRIMARY_FIELDS.map((field) => {
+                              const fieldKey = field.key as WizardGridCell['fieldKey'];
+                              const selected = isWizardGridCellSelected(rowKey, fieldKey);
+                              return (
+                              <td
+                                key={field.key}
+                                className={`border px-1.5 py-1.5 ${selected ? 'relative animate-pulse bg-blue-50 ring-2 ring-inset ring-blue-500 transition-shadow' : ''}`}
+                                onMouseDown={(event) => {
+                                  if (event.button !== 0) return;
+                                  beginWizardGridSelection(rowKey, fieldKey);
+                                }}
+                                onMouseEnter={() => extendWizardGridSelection(rowKey, fieldKey)}
+                              >
                                 {renderWizardField(rowKey, field, draft)}
                               </td>
-                            ))}
+                              );
+                            })}
                             {WIZARD_DEPOSIT_FIELDS.map((field) => (
                               <td key={field.key} className="border bg-emerald-50/20 px-1.5 py-1.5">
                                 {renderWizardField(rowKey, field, draft)}

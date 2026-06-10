@@ -106,14 +106,20 @@ describe('portal bank statement apply policy', () => {
     expect(bankStatementPageSource).not.toContain("label: '필수증빙자료 리스트'");
     expect(bankStatementPageSource).not.toContain("key: 'memo'");
     expect(bankStatementPageSource).not.toContain("label: '상세 적요'");
+    expect(bankStatementPageSource).not.toContain("key: 'settlementNote'");
+    expect(bankStatementPageSource).not.toContain("label: '비고'");
     expect(bankStatementPageSource).not.toContain('resolveEvidenceSuggestion');
   });
 
-  it('keeps full bank amount by default without rendering VAT suggestion actions', () => {
+  it('keeps full bank amount by default and only applies VAT split through an explicit temp action', () => {
     expect(bankStatementPageSource).toContain('expenseAmount: formatNumberDraft(signedAmount)');
     expect(bankStatementPageSource).toContain("vatIn: ''");
     expect(bankStatementPageSource).toContain('depositAmount: formatNumberDraft(signedAmount)');
     expect(bankStatementPageSource).toContain("vatRefund: ''");
+    expect(bankStatementPageSource).toContain('handleApplyVatSplit');
+    expect(bankStatementPageSource).toContain('부가세 계산');
+    expect(bankStatementPageSource).toContain("placeholder={vatField ? '(공급가액 정산만)' : field.label}");
+    expect(bankStatementPageSource).toContain('border-red-400 bg-red-50');
     expect(bankStatementPageSource).not.toContain('부가세 추정 적용');
     expect(bankStatementPageSource).not.toContain('handleApplyVatSuggestion');
     expect(bankStatementPageSource).not.toContain('buildVatIncludedDraftSuggestion');
@@ -180,6 +186,8 @@ describe('portal bank statement apply policy', () => {
     expect(bankStatementPageSource).toContain('colSpan={WIZARD_WITHDRAWAL_FIELDS.length}');
     expect(bankStatementPageSource).toContain('입금');
     expect(bankStatementPageSource).toContain('출금');
+    expect(bankStatementPageSource).not.toContain('writing-mode-vertical');
+    expect(bankStatementPageSource).not.toContain('wizardIssueSummary.amount + wizardIssueSummary.budget');
   });
 
   it('keeps user assistance inside temp state with classification-only bulk copy and undo controls', () => {
@@ -195,7 +203,7 @@ describe('portal bank statement apply policy', () => {
     const bulkApplyBlock = sourceBetween(
       bankStatementPageSource,
       'const handleBulkApplyWizardDraft = useCallback',
-      'const closeWizard = useCallback',
+      'const handleApplyVatSplit = useCallback',
     );
     expect(bulkApplyBlock).toContain('WIZARD_BULK_CLASSIFICATION_FIELD_KEYS');
     expect(bulkApplyBlock).not.toContain('depositAmount');
@@ -205,6 +213,36 @@ describe('portal bank statement apply policy', () => {
     expect(bulkApplyBlock).not.toContain('evidenceRequired');
     expect(bulkApplyBlock).not.toContain('memo');
     expect(bulkApplyBlock).not.toContain('settlementNote');
+  });
+
+  it('supports spreadsheet-style copy/paste only for classification cells', () => {
+    expect(bankStatementPageSource).toContain('WIZARD_GRID_FIELD_KEYS');
+    expect(bankStatementPageSource).toContain('wizardGridSelection');
+    expect(bankStatementPageSource).toContain('parseClipboardGrid');
+    expect(bankStatementPageSource).toContain("window.addEventListener('copy', onCopy)");
+    expect(bankStatementPageSource).toContain("window.addEventListener('paste', onPaste)");
+    expect(bankStatementPageSource).toContain('beginWizardGridSelection(rowKey, fieldKey)');
+    expect(bankStatementPageSource).toContain('extendWizardGridSelection(rowKey, fieldKey)');
+    expect(bankStatementPageSource).toContain('animate-pulse bg-blue-50 ring-2 ring-inset ring-blue-500');
+
+    const gridKeyBlock = sourceBetween(
+      bankStatementPageSource,
+      'const WIZARD_GRID_FIELD_KEYS =',
+      'const WIZARD_CASHFLOW_OPTIONS',
+    );
+    expect(gridKeyBlock).toContain('WIZARD_BULK_CLASSIFICATION_FIELD_KEYS');
+    expect(gridKeyBlock).not.toContain('depositAmount');
+    expect(gridKeyBlock).not.toContain('vatRefund');
+    expect(gridKeyBlock).not.toContain('expenseAmount');
+    expect(gridKeyBlock).not.toContain('vatIn');
+  });
+
+  it('keeps the wizard header and source bank columns fixed while the grid scrolls', () => {
+    expect(bankStatementPageSource).toContain('flex min-h-0 min-w-0 flex-col overflow-hidden p-2');
+    expect(bankStatementPageSource).toContain('min-h-0 flex-1 overflow-auto');
+    expect(bankStatementPageSource).toContain('sticky top-0 z-30');
+    expect(bankStatementPageSource).toContain('sticky left-[68px]');
+    expect(bankStatementPageSource).toContain('통장내역 원본');
   });
 
   it('keeps bank statement page chrome minimal around the source table', () => {

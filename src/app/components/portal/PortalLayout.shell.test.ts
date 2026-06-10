@@ -92,4 +92,10 @@ describe('PortalLayout shell actions', () => {
     expect(portalLayoutSource).toContain("w-full max-w-none px-3 py-4 md:px-5 md:py-6 xl:px-8");
     expect(portalLayoutSource).toContain("mx-auto w-full max-w-[1480px] p-4 md:p-6");
   });
+
+  it('does not unmount portal pages during portal data refreshes', () => {
+    expect(portalLayoutSource).toContain('if (authLoading) {');
+    expect(portalLayoutSource).not.toContain('if (authLoading || portalLoading) {');
+    expect(portalLayoutSource).not.toContain('포털 데이터를 불러오는 중...');
+  });
 });
