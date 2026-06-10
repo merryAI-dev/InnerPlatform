@@ -30,6 +30,7 @@
 
 ## Recent Changes
 
+- [2026-06-10] QA 중 업로드/셀 수정 검증을 방해하던 통장내역 자동 저장 timer를 제거했다. 통장내역은 사용자가 저장 버튼을 누를 때만 기준본으로 저장된다.
 - [2026-04-15] `cashflow항목` line label/alias/category 해석이 공용 policy 레이어를 통하도록 정리했다.
 - [2026-04-15] 통장내역 저장 시 업로드한 은행 행을 현재 주간 사업비 탭 행으로 바로 merge하도록 바꿨다. Queue 없이 `통장내역 -> 사업비 입력(주간)` direct handoff가 이어진다.
 - [2026-04-15] PM 역할에서는 portal store가 realtime listen 대신 safe fetch로 초기 데이터를 불러오도록 바꿔, 포털 부팅 시 반복 Listen 400이 통장내역 화면까지 전파되는 위험을 줄였다.

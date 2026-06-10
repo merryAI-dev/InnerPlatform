@@ -32,6 +32,7 @@
 
 ## Recent Changes
 
+- [2026-06-10] QA 중 반복 write를 줄이기 위해 포털 프로젝트 등록/수정 wizard의 작성 중 자동 임시저장을 끄고, 등록/수정 제출 시점의 명시적 저장 경로만 유지했다.
 - [2026-06-10] 신규 프로젝트 생성 시 `통장내역 기준본` 문서가 항상 `bank_statements/default`에 표준 컬럼과 빈 행 목록으로 생성되도록 정책을 고정했다. 기존 프로젝트에서 해당 문서가 없을 때도 화면은 `null`이 아니라 빈 기준본 상태를 사용한다.
 - [2026-05-20] 프로젝트 등록, 포털 수정, Admin 승인 화면이 같은 5단계 editor contract를 쓰도록 공통 draft/payload/patch builder를 분리했다. 승인/재제출은 request 조회를 먼저 검증하고 project/request 상태 patch를 같은 Firestore transaction에서 쓰도록 보강했다.
 - [2026-04-21] 세세목 도입 프로젝트는 `budget_tree_v2`를 원본으로 사용하고, 저장 시 `budget_code_book`을 2단 파생본으로 함께 동기화하도록 정리했다.

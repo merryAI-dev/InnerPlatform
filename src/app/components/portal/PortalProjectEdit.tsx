@@ -159,14 +159,6 @@ export function PortalProjectEdit() {
     serverDraftRef.current = nextDraft;
   }, [authUser?.email, authUser?.name, authUser?.uid, autosaveKey, db, myProject?.id, orgId]);
 
-  const autosaveConfig = useMemo(
-    () => (authUser?.uid ? {
-      key: autosaveKey,
-      onSave: persistDraft,
-    } : undefined),
-    [authUser?.uid, autosaveKey, persistDraft],
-  );
-
   const persistProject = async (
     draft: ProjectEditorDraft,
     options: { forcePendingReview?: boolean; reviewComment?: string | null } = {},
@@ -264,7 +256,6 @@ export function PortalProjectEdit() {
       draftKey={`portal-edit-${myProject.id}-${requestDoc?.updatedAt || myProject.updatedAt}`}
       members={members}
       departmentOptions={departmentOptions}
-      autosave={autosaveConfig}
       actions={[
         { id: 'save', label: '저장', icon: Save },
         ...(canResubmit ? [{ id: 'resubmit', label: '수정 후 다시 제출', icon: SendHorizontal, variant: 'secondary' as const }] : []),

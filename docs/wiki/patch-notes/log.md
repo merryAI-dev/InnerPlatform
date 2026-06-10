@@ -163,6 +163,10 @@
 - pages: [portal-dashboard](./pages/portal-dashboard.md)
 - summary: 상단 폴더 아이콘을 MYSC 로고로 교체하고 workspace 문구를 제거했으며, 첫 화면의 사업 정보와 주간 상태를 한 장의 세로형 헤더 슬랩으로 다시 묶었다.
 
+## [2026-06-10] patch-note | portal-autosave-qa-off | QA 중 자동 임시저장 비활성
+- pages: [portal-weekly-expense](./pages/portal-weekly-expense.md), [portal-bank-statement](./pages/portal-bank-statement.md), [shared-portal-architecture](./pages/shared-portal-architecture.md)
+- summary: 주간 사업비, 통장내역, 프로젝트 등록/수정 화면의 작성 중 자동 저장을 끄고, 사용자가 저장/등록/수정 버튼을 누르는 명시적 write 경로만 유지했다.
+
 ## [2026-06-10] patch-note | shared-portal-architecture | default bank statement seed
 - pages: [shared-portal-architecture](./pages/shared-portal-architecture.md)
 - summary: 신규 프로젝트 생성 시 `통장내역 기준본`을 `bank_statements/default`에 표준 컬럼과 빈 행 목록으로 항상 생성하고, 기존 프로젝트에서 문서가 없을 때도 화면은 `null` 대신 빈 기준본을 사용하도록 정책을 고정했다.

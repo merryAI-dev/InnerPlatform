@@ -227,14 +227,6 @@ export function PortalBankStatementPage() {
     await persistSheet();
   }, [persistSheet]);
 
-  useEffect(() => {
-    if (!dirty || saving || !saveBankStatementRows || columns.length === 0) return;
-    const timer = window.setTimeout(() => {
-      void persistSheet({ silent: true });
-    }, 900);
-    return () => window.clearTimeout(timer);
-  }, [dirty, saving, saveBankStatementRows, columns.length, persistSheet]);
-
   const trustSurface = saving
     ? {
       label: '저장 중',

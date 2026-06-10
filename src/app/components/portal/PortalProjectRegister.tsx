@@ -74,14 +74,6 @@ export function PortalProjectRegister() {
     serverDraftRef.current = nextDraft;
   }, [authUser?.email, authUser?.name, authUser?.uid, autosaveKey, db, orgId, portalUser?.email, portalUser?.name]);
 
-  const autosaveConfig = useMemo(
-    () => (authUser?.uid ? {
-      key: autosaveKey,
-      onSave: persistDraft,
-    } : undefined),
-    [authUser?.uid, autosaveKey, persistDraft],
-  );
-
   const handleSubmit = async (draft: ProjectEditorDraft) => {
     if (busyActionId) return;
     setBusyActionId('submit');
@@ -170,7 +162,6 @@ export function PortalProjectRegister() {
       draftKey={`portal-register-${authUser?.uid || 'anonymous'}`}
       members={members}
       departmentOptions={departmentOptions}
-      autosave={autosaveConfig}
       actions={[{ id: 'submit', label: '등록 요청 저장', icon: Send }]}
       busyActionId={busyActionId}
       onContractFileUpload={handleContractFileUpload}

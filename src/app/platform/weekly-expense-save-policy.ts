@@ -27,9 +27,9 @@ export interface WeeklyExpenseAutosavePlan {
 
 export function resolveWeeklyExpenseSavePolicy(): WeeklyExpenseSavePolicy {
   return {
-    mode: 'auto',
-    idleMs: 1_500,
-    syncCashflowOnAutoSave: true,
+    mode: 'manual',
+    idleMs: 0,
+    syncCashflowOnAutoSave: false,
     showStatusButton: true,
     showInlineStatus: false,
     guideMinimizable: true,
