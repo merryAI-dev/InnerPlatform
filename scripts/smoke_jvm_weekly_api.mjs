@@ -122,7 +122,7 @@ const patch = await requestJson('POST', `${pathPrefix}/commands/cell-patch`, {
   idempotencyKey: `smoke-cell-patch-${runId}`,
   sheetName: 'Stage Smoke',
   cells: [
-    { rowIndex: 0, columnIndex: 2, rawValue: '2026-06-01', userEdited: true },
+    { rowIndex: 0, columnIndex: 2, rawValue: '2026-06-03', userEdited: true },
     { rowIndex: 0, columnIndex: 3, rawValue: '2026-06-W1', userEdited: true },
     { rowIndex: 0, columnIndex: 8, rawValue: '사업비', userEdited: true },
     { rowIndex: 0, columnIndex: 13, rawValue: '1000', userEdited: true },
@@ -212,12 +212,12 @@ const bankImport = await requestJson('POST', `/api/v1/weekly-expenses/${encodeUR
     {
       lineIndex: 0,
       sourceLineKey: `smoke-bank-line-${runId}`,
-      transactionDate: '2026-06-02',
+      transactionDate: '2026-06-03',
       counterparty: 'Stage Smoke Vendor',
       memo: 'stage smoke selected apply',
       signedAmount: -500,
       balanceAfter: 9500,
-      rawCells: ['2026-06-02', 'Stage Smoke Vendor', 'stage smoke selected apply', '-500', '9500'],
+      rawCells: ['2026-06-03', 'Stage Smoke Vendor', 'stage smoke selected apply', '-500', '9500'],
     },
   ],
 });
@@ -229,7 +229,7 @@ const smokeUploadName = `stage-smoke-bank-${runId}.xlsx`;
 const importLineId = importLines.lines?.find((line) => (
   line.sourceLineKey === `smoke-bank-line-${runId}`
   || line.uploadName === smokeUploadName
-  || line.rawCells?.join('\t') === ['2026-06-02', 'Stage Smoke Vendor', 'stage smoke selected apply', '-500', '9500'].join('\t')
+  || line.rawCells?.join('\t') === ['2026-06-03', 'Stage Smoke Vendor', 'stage smoke selected apply', '-500', '9500'].join('\t')
 ))?.id || '';
 assert(importLineId, 'staged bank import line not listed', importLines);
 
