@@ -579,6 +579,36 @@ export interface ProjectCashflowActualSyncResult {
   updatedAt: string;
 }
 
+export interface WeeklyExpenseDraftCellPatch {
+  columnIndex: number;
+  rawValue: string;
+  userEdited?: boolean;
+}
+
+export interface WeeklyExpenseDraftRowPatch {
+  rowIndex: number;
+  tempId?: string;
+  sourceTxId?: string;
+  entryKind?: string;
+  cells: WeeklyExpenseDraftCellPatch[];
+}
+
+export interface WeeklyExpenseSaveDraftPayload {
+  expectedSheetVersion?: number | null;
+  sheetName: string;
+  rows: WeeklyExpenseDraftRowPatch[];
+}
+
+export interface WeeklyExpenseSaveDraftResult {
+  ok: boolean;
+  commandName: string;
+  projectId: string;
+  sheetKey: string;
+  sheetVersion: number;
+  savedRowCount: number;
+  actualDelta?: unknown[];
+}
+
 export interface PlatformApiClientLike {
   get<T>(path: string, options: {
     tenantId: string;
@@ -1363,6 +1393,30 @@ export async function syncProjectCashflowActualsViaBff(params: {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
       body: {},
+      retries: 0,
+      timeoutMs: 20000,
+    },
+  );
+  return response.data;
+}
+
+export async function saveWeeklyExpenseDraftViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  sheetKey: string;
+  payload: WeeklyExpenseSaveDraftPayload;
+  idempotencyKey: string;
+  client?: PlatformApiClientLike;
+}): Promise<WeeklyExpenseSaveDraftResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<WeeklyExpenseSaveDraftResult>(
+    `/api/v1/weekly-expenses/${encodeURIComponent(params.projectId)}/sheets/${encodeURIComponent(params.sheetKey)}/save-draft`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.payload,
+      idempotencyKey: params.idempotencyKey,
       retries: 0,
       timeoutMs: 20000,
     },
