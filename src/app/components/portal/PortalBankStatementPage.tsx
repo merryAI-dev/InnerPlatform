@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Upload, Save, Loader2, ArrowRight, ShieldAlert, FileSpreadsheet } from 'lucide-react';
 import { toast } from 'sonner';
+import { collection, doc, getDocs, setDoc } from 'firebase/firestore';
 import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
 import { Badge } from '../ui/badge';
@@ -9,6 +10,7 @@ import { Checkbox } from '../ui/checkbox';
 import { usePortalStore, type BankStatementApplyCellPatch } from '../../data/portal-store';
 import {
   detectBankStatementProfile,
+  buildBankStatementServerImportLines,
   getBankStatementProfileLabel,
   isHtmlMaskedAsXls,
   normalizeBankStatementMatrix,
@@ -20,6 +22,9 @@ import { normalizeKey, parseCsv } from '../../platform/csv-utils';
 import { loadXlsx, warmXlsx } from '../../platform/lazy-heavy-modules';
 import { readTextFile } from '../../platform/text-file-decoder';
 import { SETTLEMENT_COLUMNS, type ImportRow } from '../../platform/settlement-csv';
+import { useFirebase } from '../../lib/firebase-context';
+import { getOrgDocumentPath } from '../../lib/firebase';
+import { normalizeBudgetLabel, buildBudgetLabelKey } from '../../platform/budget-labels';
 
 function getTransactionAmountColumnIndexes(columns: string[]): Set<number> {
   return new Set(
@@ -37,12 +42,33 @@ type WizardDraft = Record<string, string>;
 const WIZARD_FIELDS = [
   { key: 'budgetCategory', label: '비목', column: '비목' },
   { key: 'budgetSubCategory', label: '세목', column: '세목' },
+  { key: 'budgetSubSubCategory', label: '세세목', column: '세세목' },
   { key: 'cashflowLine', label: 'cashflow항목', column: 'cashflow항목' },
+  { key: 'depositAmount', label: '입금액(사업비,공급가액,은행이자)', column: '입금액(사업비,공급가액,은행이자)' },
+  { key: 'vatRefund', label: '매입부가세 반환', column: '매입부가세 반환' },
   { key: 'expenseAmount', label: '사업비 사용액', column: '사업비 사용액' },
+  { key: 'vatIn', label: '매입부가세', column: '매입부가세' },
   { key: 'evidenceRequired', label: '필수증빙자료 리스트', column: '필수증빙자료 리스트' },
   { key: 'memo', label: '상세 적요', column: '상세 적요' },
   { key: 'settlementNote', label: '비고', column: '비고' },
 ] as const;
+
+const WIZARD_FIELD_KEYS = WIZARD_FIELDS.map((field) => field.key);
+const WIZARD_DRAFT_RETENTION_DAYS = 30;
+
+interface WizardDraftVersion {
+  id: string;
+  createdAtIso: string;
+  draftName: string;
+  rows: BankStatementRow[];
+  drafts: Record<string, WizardDraft>;
+  batchKey: string;
+}
+
+interface WizardSuggestion {
+  counterparty: string;
+  draft: WizardDraft;
+}
 
 function bankRowKey(row: BankStatementRow, index: number): string {
   return row.tempId || `row-${index}`;
@@ -50,6 +76,116 @@ function bankRowKey(row: BankStatementRow, index: number): string {
 
 function settlementColumnIndex(header: string): number {
   return SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === header);
+}
+
+function settlementCell(row: ImportRow, header: string): string {
+  const idx = settlementColumnIndex(header);
+  return idx >= 0 ? String(row.cells?.[idx] || '').trim() : '';
+}
+
+function formatNumberDraft(value: number | null | undefined): string {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.abs(value).toLocaleString('ko-KR')
+    : '';
+}
+
+function parseDraftAmount(value: string): number | null {
+  const cleaned = String(value || '').replace(/,/g, '').trim();
+  if (!cleaned) return null;
+  const numeric = Number(cleaned);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function buildWizardBatchKey(projectId: string, rows: BankStatementRow[]): string {
+  return [
+    projectId || 'no-project',
+    ...rows.map((row, index) => bankRowKey(row, index)),
+  ].join('|');
+}
+
+function formatWizardDraftVersionLabel(createdAtIso: string): string {
+  const date = new Date(createdAtIso);
+  if (!Number.isFinite(date.getTime())) return '작성본 불러오기';
+  const parts = new Intl.DateTimeFormat('ko-KR', {
+    timeZone: 'Asia/Seoul',
+    year: '2-digit',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(date);
+  const pick = (type: string) => parts.find((part) => part.type === type)?.value || '00';
+  return `${pick('year')}년${pick('month')}월${pick('day')}일${pick('hour')}시${pick('minute')}분 작성본 불러오기`;
+}
+
+function wizardDraftCollectionPath(orgId: string, projectId: string): string {
+  return `${getOrgDocumentPath(orgId, 'projects', projectId)}/weekly_expense_apply_drafts`;
+}
+
+function resolveEvidenceSuggestion(
+  evidenceRequiredMap: Record<string, string>,
+  budgetCategory: string,
+  budgetSubCategory: string,
+  budgetSubSubCategory?: string,
+): string {
+  const normalizedBudget = normalizeBudgetLabel(budgetCategory);
+  const normalizedSub = normalizeBudgetLabel(budgetSubCategory);
+  const normalizedSubSub = normalizeBudgetLabel(budgetSubSubCategory);
+  const candidates = [
+    normalizedSubSub ? buildBudgetLabelKey(normalizedBudget, normalizedSub, normalizedSubSub) : '',
+    normalizedSubSub ? `${normalizedBudget}|${normalizedSub}|${normalizedSubSub}` : '',
+    normalizedSubSub,
+    buildBudgetLabelKey(normalizedBudget, normalizedSub),
+    `${normalizedBudget}|${normalizedSub}`,
+    normalizedSub,
+    normalizedBudget,
+  ].filter(Boolean);
+  for (const key of candidates) {
+    const mapped = evidenceRequiredMap[key];
+    if (mapped) return mapped;
+  }
+  return '';
+}
+
+function getBankRowCounterparty(columns: string[], row: BankStatementRow): string {
+  const aliases = ['거래처', '의뢰인/수취인', '수취인', '지급처', '적요', '내용'];
+  for (const alias of aliases) {
+    const aliasKey = normalizeKey(alias);
+    const idx = columns.findIndex((column) => normalizeKey(column).includes(aliasKey));
+    const value = idx >= 0 ? String(row.cells?.[idx] || '').trim() : '';
+    if (value) return value;
+  }
+  return '';
+}
+
+function buildInitialWizardDraft(signedAmount: number | null | undefined): WizardDraft {
+  if (typeof signedAmount !== 'number' || !Number.isFinite(signedAmount)) return {};
+  return signedAmount < 0
+    ? { expenseAmount: formatNumberDraft(signedAmount), vatIn: '' }
+    : { depositAmount: formatNumberDraft(signedAmount), vatRefund: '' };
+}
+
+function buildSameCounterpartySuggestions(expenseSheets: { rows?: ImportRow[] }[]): Map<string, WizardSuggestion> {
+  const suggestions = new Map<string, WizardSuggestion>();
+  expenseSheets.forEach((sheet) => {
+    (sheet.rows || []).forEach((row) => {
+      const counterparty = settlementCell(row, '지급처');
+      const key = normalizeKey(counterparty);
+      if (!key) return;
+      const draft: WizardDraft = {
+        budgetCategory: settlementCell(row, '비목'),
+        budgetSubCategory: settlementCell(row, '세목'),
+        budgetSubSubCategory: settlementCell(row, '세세목'),
+        cashflowLine: settlementCell(row, 'cashflow항목'),
+        evidenceRequired: settlementCell(row, '필수증빙자료 리스트'),
+      };
+      if (Object.values(draft).some(Boolean)) {
+        suggestions.set(key, { counterparty, draft });
+      }
+    });
+  });
+  return suggestions;
 }
 
 function collectAppliedBankLineIds(rows: ImportRow[] | null | undefined): Set<string> {
@@ -89,10 +225,14 @@ export function PortalBankStatementPage() {
     bankStatementRows,
     expenseSheets,
     expenseSheetRows,
+    evidenceRequiredMap,
+    budgetCodeBook,
+    budgetTreeV2,
     saveBankStatementRows,
     applyBankStatementRowsToExpenseSheet,
     refreshBankStatementRows,
   } = usePortalStore();
+  const { db, orgId } = useFirebase();
   const [columns, setColumns] = useState<string[]>(bankStatementRows?.columns || []);
   const [rows, setRows] = useState<BankStatementRow[]>(bankStatementRows?.rows || []);
   const [dirty, setDirty] = useState(false);
@@ -105,9 +245,15 @@ export function PortalBankStatementPage() {
   const [activeStatusTab, setActiveStatusTab] = useState<'staged' | 'applied'>('staged');
   const [wizardRows, setWizardRows] = useState<BankStatementRow[]>([]);
   const [wizardDrafts, setWizardDrafts] = useState<Record<string, WizardDraft>>({});
+  const [wizardDraftVersions, setWizardDraftVersions] = useState<WizardDraftVersion[]>([]);
+  const [wizardHistory, setWizardHistory] = useState<Record<string, WizardDraft>[]>([]);
+  const [wizardSelectedRowKeys, setWizardSelectedRowKeys] = useState<Set<string>>(() => new Set());
+  const [wizardSavingDraft, setWizardSavingDraft] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const wizardDraftsRef = useRef<Record<string, WizardDraft>>({});
 
   const projectName = myProject?.name || '내 사업';
+  const projectId = activeProjectId || myProject?.id || '';
   const ready = useMemo(() => Boolean(activeProjectId || myProject?.id), [activeProjectId, myProject?.id]);
   const bankProfile = useMemo(() => detectBankStatementProfile(columns, lastUploadedName), [columns, lastUploadedName]);
   const transactionAmountColIdxs = useMemo(() => getTransactionAmountColumnIndexes(columns), [columns]);
@@ -129,6 +275,51 @@ export function PortalBankStatementPage() {
     [appliedBankLineIds, selectedRows],
   );
   const skippedAppliedCount = selectedRows.length - unappliedSelectedRows.length;
+  const budgetCategoryOptions = useMemo(() => {
+    if (budgetTreeV2?.codes?.length) return budgetTreeV2.codes.map((entry) => entry.code).filter(Boolean);
+    return budgetCodeBook.map((entry) => entry.code).filter(Boolean);
+  }, [budgetCodeBook, budgetTreeV2?.codes]);
+  const budgetHierarchyIndex = useMemo(() => {
+    const subCategoriesByBudget = new Map<string, string[]>();
+    const subSubCategoriesByPair = new Map<string, string[]>();
+    if (budgetTreeV2?.codes?.length) {
+      budgetTreeV2.codes.forEach((entry) => {
+        const budgetKey = normalizeBudgetLabel(entry.code);
+        subCategoriesByBudget.set(budgetKey, (entry.subItems || []).map((subItem) => subItem.subCode).filter(Boolean));
+        (entry.subItems || []).forEach((subItem) => {
+          subSubCategoriesByPair.set(
+            buildBudgetLabelKey(entry.code, subItem.subCode),
+            (subItem.leafItems || []).map((leaf) => normalizeBudgetLabel(leaf.subSubCode)).filter(Boolean),
+          );
+        });
+      });
+    } else {
+      budgetCodeBook.forEach((entry) => {
+        subCategoriesByBudget.set(normalizeBudgetLabel(entry.code), entry.subCodes || []);
+      });
+    }
+    return { subCategoriesByBudget, subSubCategoriesByPair };
+  }, [budgetCodeBook, budgetTreeV2?.codes]);
+  const sameCounterpartySuggestions = useMemo(
+    () => buildSameCounterpartySuggestions(expenseSheets),
+    [expenseSheets],
+  );
+  const wizardIssueSummary = useMemo(() => {
+    return wizardRows.reduce((summary, row, index) => {
+      const draft = wizardDrafts[bankRowKey(row, index)] || {};
+      const hasDeposit = parseDraftAmount(draft.depositAmount || '') !== null;
+      const hasExpense = parseDraftAmount(draft.expenseAmount || '') !== null;
+      const invalidAmount = ['depositAmount', 'vatRefund', 'expenseAmount', 'vatIn']
+        .some((fieldKey) => {
+          const value = draft[fieldKey] || '';
+          return Boolean(value.trim()) && parseDraftAmount(value) === null;
+        });
+      if ((!hasDeposit && !hasExpense) || invalidAmount) summary.amount += 1;
+      if (!draft.budgetCategory || !draft.budgetSubCategory) summary.budget += 1;
+      if (!draft.evidenceRequired) summary.evidence += 1;
+      return summary;
+    }, { amount: 0, budget: 0, evidence: 0 });
+  }, [wizardDrafts, wizardRows]);
 
   useEffect(() => {
     if (dirty) return;
@@ -143,6 +334,10 @@ export function PortalBankStatementPage() {
     setRows([]);
     setSelectedRowIds(new Set());
   }, [bankStatementRows, dirty]);
+
+  useEffect(() => {
+    wizardDraftsRef.current = wizardDrafts;
+  }, [wizardDrafts]);
 
   const parseExcelToMatrix = useCallback(async (file: File): Promise<string[][]> => {
     // KB 등 HTML-as-XLS 감지: 파일 앞부분이 HTML 태그로 시작하면 HTML 파서 사용
@@ -284,6 +479,82 @@ export function PortalBankStatementPage() {
     }
   }, [activeStatusTab, dirty, refreshBankStatementRows]);
 
+  const loadWizardDraftVersions = useCallback(async (targetRows: BankStatementRow[] = wizardRows) => {
+    if (!db || !orgId || !projectId || targetRows.length === 0) {
+      setWizardDraftVersions([]);
+      return;
+    }
+    const batchKey = buildWizardBatchKey(projectId, targetRows);
+    const minCreatedAt = Date.now() - WIZARD_DRAFT_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+    try {
+      const snapshot = await getDocs(collection(db, wizardDraftCollectionPath(orgId, projectId)));
+      const versions = snapshot.docs
+        .map((draftDoc) => {
+          const data = draftDoc.data() as Partial<WizardDraftVersion>;
+          return {
+            id: draftDoc.id,
+            createdAtIso: String(data.createdAtIso || ''),
+            draftName: String(data.draftName || ''),
+            rows: Array.isArray(data.rows) ? data.rows : [],
+            drafts: data.drafts && typeof data.drafts === 'object' ? data.drafts : {},
+            batchKey: String(data.batchKey || ''),
+          } satisfies WizardDraftVersion;
+        })
+        .filter((version) => {
+          const createdAt = new Date(version.createdAtIso).getTime();
+          return version.batchKey === batchKey && Number.isFinite(createdAt) && createdAt >= minCreatedAt;
+        })
+        .sort((left, right) => new Date(right.createdAtIso).getTime() - new Date(left.createdAtIso).getTime());
+      setWizardDraftVersions(versions);
+    } catch (err) {
+      console.error('[BankStatement] wizard draft load failed:', err);
+      toast.error('임시 작성본을 불러오지 못했습니다.');
+    }
+  }, [db, orgId, projectId, wizardRows]);
+
+  const handleSaveWizardDraft = useCallback(async () => {
+    if (!db || !orgId || !projectId || wizardRows.length === 0) {
+      toast.error('임시저장을 사용할 수 없습니다.');
+      return;
+    }
+    setWizardSavingDraft(true);
+    try {
+      const createdAtIso = new Date().toISOString();
+      const batchKey = buildWizardBatchKey(projectId, wizardRows);
+      const draftRef = doc(collection(db, wizardDraftCollectionPath(orgId, projectId)));
+      await setDoc(draftRef, {
+        createdAtIso,
+        draftName: formatWizardDraftVersionLabel(createdAtIso),
+        batchKey,
+        projectId,
+        rows: wizardRows,
+        drafts: wizardDrafts,
+        createdBy: portalUser?.name || portalUser?.email || 'unknown',
+        expiresAtIso: new Date(Date.now() + WIZARD_DRAFT_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString(),
+      });
+      toast.success('임시 작성본을 저장했습니다.');
+      await loadWizardDraftVersions(wizardRows);
+    } catch (err) {
+      console.error('[BankStatement] wizard draft save failed:', err);
+      toast.error('임시 작성본 저장에 실패했습니다.');
+    } finally {
+      setWizardSavingDraft(false);
+    }
+  }, [db, loadWizardDraftVersions, orgId, portalUser?.email, portalUser?.name, projectId, wizardDrafts, wizardRows]);
+
+  const handleLoadWizardDraft = useCallback((version: WizardDraftVersion) => {
+    setWizardRows(version.rows);
+    setWizardDrafts(version.drafts);
+    setWizardSelectedRowKeys(new Set(version.rows.map((row, index) => bankRowKey(row, index))));
+    setWizardHistory([]);
+    toast.success(formatWizardDraftVersionLabel(version.createdAtIso));
+  }, []);
+
+  const pushWizardHistorySnapshot = useCallback(() => {
+    const snapshot = wizardDraftsRef.current;
+    setWizardHistory((history) => [...history.slice(-19), snapshot]);
+  }, []);
+
   const handleApplySelected = useCallback(async () => {
     if (activeStatusTab !== 'staged') {
       toast.message('이미 반영된 통장내역은 다시 반영할 수 없습니다.');
@@ -297,27 +568,125 @@ export function PortalBankStatementPage() {
       toast.message('선택한 통장내역은 이미 사업비 입력에 반영되었습니다.');
       return;
     }
+    if (dirty) {
+      await persistSheet({ silent: true });
+    }
+    const serverImportLines = buildBankStatementServerImportLines({ columns, rows: unappliedSelectedRows });
     const nextDrafts: Record<string, WizardDraft> = {};
     unappliedSelectedRows.forEach((row, index) => {
-      nextDrafts[bankRowKey(row, index)] = {};
+      nextDrafts[bankRowKey(row, index)] = buildInitialWizardDraft(serverImportLines[index]?.signedAmount);
     });
     setWizardRows(unappliedSelectedRows);
     setWizardDrafts(nextDrafts);
-  }, [activeStatusTab, selectedRows, unappliedSelectedRows]);
+    setWizardSelectedRowKeys(new Set(unappliedSelectedRows.map((row, index) => bankRowKey(row, index))));
+    setWizardHistory([]);
+    void loadWizardDraftVersions(unappliedSelectedRows);
+  }, [activeStatusTab, columns, dirty, loadWizardDraftVersions, persistSheet, selectedRows, unappliedSelectedRows]);
 
   const updateWizardDraft = useCallback((rowKey: string, fieldKey: string, value: string) => {
-    setWizardDrafts((current) => ({
-      ...current,
-      [rowKey]: {
+    pushWizardHistorySnapshot();
+    setWizardDrafts((current) => {
+      const nextRowDraft = {
         ...(current[rowKey] || {}),
         [fieldKey]: value,
-      },
-    }));
+      };
+      if (
+        ['budgetCategory', 'budgetSubCategory', 'budgetSubSubCategory'].includes(fieldKey)
+        && !String(nextRowDraft.evidenceRequired || '').trim()
+      ) {
+        const evidenceSuggestion = resolveEvidenceSuggestion(
+          evidenceRequiredMap,
+          nextRowDraft.budgetCategory || '',
+          nextRowDraft.budgetSubCategory || '',
+          nextRowDraft.budgetSubSubCategory || '',
+        );
+        if (evidenceSuggestion) nextRowDraft.evidenceRequired = evidenceSuggestion;
+      }
+      return {
+        ...current,
+        [rowKey]: nextRowDraft,
+      };
+    });
+  }, [evidenceRequiredMap, pushWizardHistorySnapshot]);
+
+  const handleWizardUndo = useCallback(() => {
+    setWizardHistory((history) => {
+      const previous = history[history.length - 1];
+      if (!previous) return history;
+      setWizardDrafts(previous);
+      return history.slice(0, -1);
+    });
   }, []);
+
+  useEffect(() => {
+    if (wizardRows.length === 0) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'z') return;
+      event.preventDefault();
+      handleWizardUndo();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [handleWizardUndo, wizardRows.length]);
+
+  const toggleWizardRowSelection = useCallback((rowKey: string, checked: boolean) => {
+    setWizardSelectedRowKeys((current) => {
+      const next = new Set(current);
+      if (checked) next.add(rowKey);
+      else next.delete(rowKey);
+      return next;
+    });
+  }, []);
+
+  const handleApplySuggestion = useCallback((rowKey: string, suggestion: WizardSuggestion) => {
+    pushWizardHistorySnapshot();
+    setWizardDrafts((current) => {
+      return {
+        ...current,
+        [rowKey]: {
+          ...(current[rowKey] || {}),
+          ...suggestion.draft,
+        },
+      };
+    });
+  }, [pushWizardHistorySnapshot]);
+
+  const handleBulkApplyWizardDraft = useCallback(() => {
+    const selectedKeys = Array.from(wizardSelectedRowKeys);
+    if (selectedKeys.length < 2) {
+      toast.message('같은 값을 적용할 행을 2개 이상 선택해 주세요.');
+      return;
+    }
+    const sourceKey = selectedKeys.find((key) => WIZARD_FIELD_KEYS.some((fieldKey) => String(wizardDrafts[key]?.[fieldKey] || '').trim()));
+    if (!sourceKey) {
+      toast.message('먼저 기준이 될 행에 값을 입력해 주세요.');
+      return;
+    }
+    const sourceDraft = wizardDrafts[sourceKey] || {};
+    const patchDraft = WIZARD_FIELD_KEYS.reduce<WizardDraft>((acc, fieldKey) => {
+      const value = String(sourceDraft[fieldKey] || '').trim();
+      if (value) acc[fieldKey] = value;
+      return acc;
+    }, {});
+    pushWizardHistorySnapshot();
+    setWizardDrafts((current) => {
+      const next = { ...current };
+      selectedKeys.forEach((rowKey) => {
+        next[rowKey] = {
+          ...(next[rowKey] || {}),
+          ...patchDraft,
+        };
+      });
+      return next;
+    });
+  }, [pushWizardHistorySnapshot, wizardDrafts, wizardSelectedRowKeys]);
 
   const closeWizard = useCallback(() => {
     setWizardRows([]);
     setWizardDrafts({});
+    setWizardDraftVersions([]);
+    setWizardHistory([]);
+    setWizardSelectedRowKeys(new Set());
   }, []);
 
   const handleSubmitWizard = useCallback(async () => {
@@ -336,6 +705,71 @@ export function PortalBankStatementPage() {
       setSaving(false);
     }
   }, [applyBankStatementRowsToExpenseSheet, closeWizard, columns, wizardDrafts, wizardRows]);
+
+  const getSubCategoryOptions = useCallback((budgetCategory: string): string[] => {
+    return budgetHierarchyIndex.subCategoriesByBudget.get(normalizeBudgetLabel(budgetCategory)) || [];
+  }, [budgetHierarchyIndex.subCategoriesByBudget]);
+
+  const getSubSubCategoryOptions = useCallback((budgetCategory: string, budgetSubCategory: string): string[] => {
+    return budgetHierarchyIndex.subSubCategoriesByPair.get(buildBudgetLabelKey(budgetCategory, budgetSubCategory)) || [];
+  }, [budgetHierarchyIndex.subSubCategoriesByPair]);
+
+  const renderWizardField = useCallback((rowKey: string, field: typeof WIZARD_FIELDS[number], draft: WizardDraft) => {
+    const baseClass = 'h-9 w-full min-w-[132px] border border-slate-300 bg-white px-2 text-[12px] outline-none focus:border-blue-500';
+    if (field.key === 'budgetCategory') {
+      return (
+        <select
+          className={baseClass}
+          value={draft.budgetCategory || ''}
+          onChange={(event) => updateWizardDraft(rowKey, field.key, event.target.value)}
+        >
+          <option value="">선택</option>
+          {budgetCategoryOptions.map((option) => (
+            <option key={option} value={option}>{option}</option>
+          ))}
+        </select>
+      );
+    }
+    if (field.key === 'budgetSubCategory') {
+      const options = getSubCategoryOptions(draft.budgetCategory || '');
+      return (
+        <select
+          className={baseClass}
+          value={draft.budgetSubCategory || ''}
+          onChange={(event) => updateWizardDraft(rowKey, field.key, event.target.value)}
+        >
+          <option value="">선택</option>
+          {options.map((option) => (
+            <option key={option} value={option}>{option}</option>
+          ))}
+        </select>
+      );
+    }
+    if (field.key === 'budgetSubSubCategory') {
+      const options = getSubSubCategoryOptions(draft.budgetCategory || '', draft.budgetSubCategory || '');
+      return (
+        <select
+          className={baseClass}
+          value={draft.budgetSubSubCategory || ''}
+          onChange={(event) => updateWizardDraft(rowKey, field.key, event.target.value)}
+          disabled={options.length === 0}
+        >
+          <option value="">{options.length > 0 ? '선택' : '없음'}</option>
+          {options.map((option) => (
+            <option key={option} value={option}>{option}</option>
+          ))}
+        </select>
+      );
+    }
+    return (
+      <input
+        className={baseClass}
+        value={draft[field.key] || ''}
+        onChange={(event) => updateWizardDraft(rowKey, field.key, event.target.value)}
+        placeholder={field.label}
+      />
+    );
+  }, [budgetCategoryOptions, getSubCategoryOptions, getSubSubCategoryOptions, updateWizardDraft]);
 
   const trustSurface = saving
     ? {
@@ -678,7 +1112,7 @@ export function PortalBankStatementPage() {
               <div>
                 <h2 className="text-[20px] font-extrabold text-slate-950">비어있는 사업비 항목 작성</h2>
                 <p className="mt-1 text-[12px] leading-5 text-slate-500">
-                  통장내역과 기존 사업비 입력을 대조해 아직 반영되지 않은 행만 보완합니다.
+                  통장내역에서 선택한 거래를 원장에 쓰기 전, 비목/세목/세세목, 금액, 증빙을 임시 작성합니다.
                 </p>
               </div>
               <Button variant="ghost" size="sm" onClick={closeWizard} disabled={saving}>
@@ -708,11 +1142,61 @@ export function PortalBankStatementPage() {
 
                 <div className="mt-4 rounded border bg-white">
                   <div className="border-b bg-slate-100 px-4 py-3 text-[13px] font-bold text-slate-900">
-                    Temp 작성본
+                    오류 요약
+                  </div>
+                  <div className="space-y-2 px-4 py-4 text-[12px] leading-5 text-slate-700">
+                    <div className="flex items-center justify-between">
+                      <span>금액 오류</span>
+                      <span className="font-bold">{wizardIssueSummary.amount.toLocaleString('ko-KR')}건</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>비목 누락</span>
+                      <span className="font-bold">{wizardIssueSummary.budget.toLocaleString('ko-KR')}건</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>증빙 누락</span>
+                      <span className="font-bold">{wizardIssueSummary.evidence.toLocaleString('ko-KR')}건</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-4 rounded border bg-white">
+                  <div className="flex items-center justify-between gap-2 border-b bg-slate-100 px-4 py-3">
+                    <div className="text-[13px] font-bold text-slate-900">임시 작성본</div>
+                    <Button variant="outline" size="sm" onClick={() => void handleSaveWizardDraft()} disabled={wizardSavingDraft}>
+                      {wizardSavingDraft ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                      임시저장
+                    </Button>
                   </div>
                   <div className="space-y-2 px-4 py-4 text-[12px] leading-5 text-slate-600">
                     <p>원본 통장내역은 수정하지 않습니다.</p>
-                    <p>이 위자드의 입력값은 확정 전까지 임시 상태이며, 원장에는 바로 쓰지 않습니다.</p>
+                    <p>임시저장은 30일 동안 보관됩니다. 30일 이후에는 새 작성본으로 다시 저장해 주세요.</p>
+                    {wizardDraftVersions.length > 0 ? (
+                      <div className="space-y-1 border-t pt-3">
+                        {wizardDraftVersions.map((version) => (
+                          <button
+                            key={version.id}
+                            type="button"
+                            className="block w-full border bg-white px-2 py-1.5 text-left text-[11px] text-slate-700 hover:border-blue-300 hover:text-blue-700"
+                            onClick={() => handleLoadWizardDraft(version)}
+                          >
+                            {formatWizardDraftVersionLabel(version.createdAtIso)}
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="border-t pt-3 text-[11px] text-slate-500">저장된 작성본이 없습니다.</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="mt-4 rounded border bg-white">
+                  <div className="border-b bg-slate-100 px-4 py-3 text-[13px] font-bold text-slate-900">
+                    작성 정책
+                  </div>
+                  <div className="space-y-2 px-4 py-4 text-[12px] leading-5 text-slate-600">
+                    <p>거래처 제안은 자동완성일 뿐 자동확정하지 않습니다.</p>
+                    <p>선택 행 일괄적용은 위자드 임시 입력값에만 적용합니다.</p>
                     <p>확정 시 Java API가 행/셀 검증 후 사업비 입력에 반영합니다.</p>
                   </div>
                 </div>
@@ -720,9 +1204,31 @@ export function PortalBankStatementPage() {
 
               <section className="min-w-0 overflow-auto p-5">
                 <div className="min-w-[980px]">
+                  <div className="mb-3 flex items-center justify-between gap-2">
+                    <div className="text-[12px] text-slate-500">Ctrl+Z / Command+Z는 이 위자드 입력만 되돌립니다.</div>
+                    <div className="flex items-center gap-2">
+                      <Button variant="outline" size="sm" onClick={handleWizardUndo} disabled={wizardHistory.length === 0}>
+                        되돌리기
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={handleBulkApplyWizardDraft} disabled={wizardSelectedRowKeys.size < 2}>
+                        선택 행 일괄적용
+                      </Button>
+                    </div>
+                  </div>
                   <table className="w-full border-collapse text-[12px]">
                     <thead>
                       <tr className="bg-slate-100 text-left">
+                        <th className="w-10 border px-2 py-2">
+                          <Checkbox
+                            checked={wizardRows.length > 0 && wizardSelectedRowKeys.size === wizardRows.length}
+                            onCheckedChange={(checked) => {
+                              setWizardSelectedRowKeys(Boolean(checked)
+                                ? new Set(wizardRows.map((row, index) => bankRowKey(row, index)))
+                                : new Set());
+                            }}
+                            aria-label="위자드 전체 행 선택"
+                          />
+                        </th>
                         <th className="w-12 border px-2 py-2">행</th>
                         <th className="w-[280px] border px-3 py-2">통장내역 원본</th>
                         {WIZARD_FIELDS.map((field) => (
@@ -739,8 +1245,18 @@ export function PortalBankStatementPage() {
                           .map((cell) => String(cell || '').trim())
                           .filter(Boolean)
                           .slice(0, 5);
+                        const draft = wizardDrafts[rowKey] || {};
+                        const counterparty = getBankRowCounterparty(columns, row);
+                        const suggestion = sameCounterpartySuggestions.get(normalizeKey(counterparty));
                         return (
                           <tr key={rowKey} className="align-top">
+                            <td className="border bg-slate-50 px-2 py-2 text-center">
+                              <Checkbox
+                                checked={wizardSelectedRowKeys.has(rowKey)}
+                                onCheckedChange={(checked) => toggleWizardRowSelection(rowKey, Boolean(checked))}
+                                aria-label={`${rowIdx + 1}행 위자드 선택`}
+                              />
+                            </td>
                             <td className="border bg-slate-50 px-2 py-2 text-center text-[11px] text-slate-500">
                               {rowIdx + 1}
                             </td>
@@ -751,16 +1267,20 @@ export function PortalBankStatementPage() {
                                     {cell}
                                   </div>
                                 ))}
+                                {suggestion ? (
+                                  <button
+                                    type="button"
+                                    className="mt-2 border border-blue-200 bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700 hover:bg-blue-100"
+                                    onClick={() => handleApplySuggestion(rowKey, suggestion)}
+                                  >
+                                    이전 거래처 조합 적용
+                                  </button>
+                                ) : null}
                               </div>
                             </td>
                             {WIZARD_FIELDS.map((field) => (
                               <td key={field.key} className="border px-2 py-2">
-                                <input
-                                  className="h-9 w-full min-w-[120px] border border-slate-300 bg-white px-2 text-[12px] outline-none focus:border-blue-500"
-                                  value={wizardDrafts[rowKey]?.[field.key] || ''}
-                                  onChange={(event) => updateWizardDraft(rowKey, field.key, event.target.value)}
-                                  placeholder={field.label}
-                                />
+                                {renderWizardField(rowKey, field, draft)}
                               </td>
                             ))}
                           </tr>

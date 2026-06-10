@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-06-10] patch-note | portal-bank-statement | production temp wizard hardening
+- pages: [portal-bank-statement](./pages/portal-bank-statement.md)
+- summary: 통장내역 선택 행 반영 위자드를 상용 입력 버퍼로 보강했다. dirty 통장 원본은 위자드 진입 전 기준본으로 자동 저장하고, 30일 임시저장/작성본 불러오기/거래처 이전 조합 제안/선택 행 일괄적용/되돌리기/오류 요약을 추가했으며, 필수증빙자료는 예산 편집의 `비목 > 세목 > 세세목` 계층을 우선 상속한다.
+
 ## [2026-06-10] patch-note | portal-bank-statement | append-only bank stack and selected apply
 - pages: [portal-bank-statement](./pages/portal-bank-statement.md), [portal-weekly-expense](./pages/portal-weekly-expense.md), [shared-portal-architecture](./pages/shared-portal-architecture.md)
 - summary: 통장내역 저장을 프로젝트별 append-only 기준본으로 바꾸고, `거래일시(초 단위) + 거래처 + 금액`이 같은 행은 중복으로 제외한다. 기준본 저장은 주간 사업비 행을 자동 생성하지 않으며, 사용자가 선택한 행만 명시적으로 `사업비 입력(주간)`에 반영한다.

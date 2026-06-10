@@ -73,6 +73,48 @@ describe('portal bank statement apply policy', () => {
     expect(bankStatementPageSource).toContain('applyBankStatementRowsToExpenseSheet({ columns, rows: wizardRows }');
   });
 
+  it('auto-saves the bank statement baseline before the completion wizard opens', () => {
+    const applySelectedBlock = sourceBetween(
+      bankStatementPageSource,
+      'const handleApplySelected = useCallback',
+      'const updateWizardDraft = useCallback',
+    );
+
+    expect(applySelectedBlock).toContain('if (dirty)');
+    expect(applySelectedBlock).toContain('await persistSheet({ silent: true })');
+    expect(applySelectedBlock).toContain('setWizardRows(unappliedSelectedRows)');
+    expect(applySelectedBlock).not.toContain('applyBankStatementRowsToExpenseSheet({ columns, rows: selectedRows })');
+  });
+
+  it('supports versioned temp drafts instead of ambiguous draft banners', () => {
+    expect(bankStatementPageSource).toContain('wizardDraftVersions');
+    expect(bankStatementPageSource).toContain('loadWizardDraftVersions');
+    expect(bankStatementPageSource).toContain('handleSaveWizardDraft');
+    expect(bankStatementPageSource).toContain('작성본 불러오기');
+    expect(bankStatementPageSource).toContain('임시저장은 30일 동안 보관됩니다');
+    expect(bankStatementPageSource).not.toContain('작성중초안있음');
+  });
+
+  it('inherits weekly expense category, subcategory, sub-subcategory, cashflow, and evidence fields', () => {
+    expect(bankStatementPageSource).toContain("label: '세세목'");
+    expect(bankStatementPageSource).toContain("column: '세세목'");
+    expect(bankStatementPageSource).toContain("label: '매입부가세'");
+    expect(bankStatementPageSource).toContain("column: '매입부가세'");
+    expect(bankStatementPageSource).toContain('budgetTreeV2');
+    expect(bankStatementPageSource).toContain('budgetCodeBook');
+    expect(bankStatementPageSource).toContain('evidenceRequiredMap');
+    expect(bankStatementPageSource).toContain('resolveEvidenceSuggestion');
+  });
+
+  it('keeps user assistance inside temp state with explicit apply and undo controls', () => {
+    expect(bankStatementPageSource).toContain('sameCounterpartySuggestions');
+    expect(bankStatementPageSource).toContain('handleApplySuggestion');
+    expect(bankStatementPageSource).toContain('handleBulkApplyWizardDraft');
+    expect(bankStatementPageSource).toContain('handleWizardUndo');
+    expect(bankStatementPageSource).toContain('wizardHistory');
+    expect(bankStatementPageSource).toContain('오류 요약');
+  });
+
   it('computes already applied bank lines across every expense sheet tab', () => {
     expect(bankStatementPageSource).toContain('expenseSheets.flatMap');
     expect(bankStatementPageSource).toContain('collectAppliedBankLineIds(rowsAcrossSheets.length > 0 ? rowsAcrossSheets : expenseSheetRows)');
