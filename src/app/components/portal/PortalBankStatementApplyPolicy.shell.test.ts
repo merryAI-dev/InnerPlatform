@@ -146,6 +146,15 @@ describe('portal bank statement apply policy', () => {
     expect(bankStatementPageSource).toContain('해당 주차는 거래일 기준으로 자동 계산됩니다');
   });
 
+  it('shows weekly week labels as read-only calculated wizard context', () => {
+    expect(bankStatementPageSource).toContain('buildWizardWeekLabel');
+    expect(bankStatementPageSource).toContain('getYearMondayWeeks');
+    expect(bankStatementPageSource).toContain('findWeekForDate');
+    expect(bankStatementPageSource).toContain('wizardImportMetaByRowKey');
+    expect(bankStatementPageSource).toContain('수정불가 계산값');
+    expect(bankStatementPageSource).toContain('aria-label="해당 주차 수정불가 계산값"');
+  });
+
   it('uses a dense full-screen wizard layout with grouped deposit and withdrawal amount fields', () => {
     expect(bankStatementPageSource).toContain('w-[min(1680px,98vw)]');
     expect(bankStatementPageSource).toContain('max-h-[94vh]');

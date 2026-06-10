@@ -22,6 +22,7 @@ import { normalizeKey, parseCsv } from '../../platform/csv-utils';
 import { loadXlsx, warmXlsx } from '../../platform/lazy-heavy-modules';
 import { readTextFile } from '../../platform/text-file-decoder';
 import { CASHFLOW_LINE_OPTIONS, SETTLEMENT_COLUMNS, type ImportRow } from '../../platform/settlement-csv';
+import { findWeekForDate, getYearMondayWeeks } from '../../platform/cashflow-weeks';
 import { useFirebase } from '../../lib/firebase-context';
 import { getOrgDocumentPath } from '../../lib/firebase';
 import { normalizeBudgetLabel, buildBudgetLabelKey } from '../../platform/budget-labels';
@@ -85,6 +86,12 @@ interface WizardDraftVersion {
 interface WizardSuggestion {
   counterparty: string;
   draft: WizardDraft;
+}
+
+interface WizardImportMeta {
+  signedAmount?: number;
+  transactionDate: string;
+  weekLabel: string;
 }
 
 function bankRowKey(row: BankStatementRow, index: number): string {
@@ -198,6 +205,13 @@ function buildVatIncludedDraftSuggestion(signedAmount: number | null | undefined
   return signedAmount < 0
     ? { expenseAmount: formatNumberDraft(split.supplyAmount), vatIn: formatNumberDraft(split.vatAmount) }
     : { depositAmount: formatNumberDraft(split.supplyAmount), vatRefund: formatNumberDraft(split.vatAmount) };
+}
+
+function buildWizardWeekLabel(transactionDate: string | null | undefined): string {
+  const dateOnly = String(transactionDate || '').slice(0, 10);
+  const year = Number.parseInt(dateOnly.slice(0, 4), 10);
+  if (!dateOnly || !Number.isFinite(year)) return '';
+  return findWeekForDate(dateOnly, getYearMondayWeeks(year))?.label || '';
 }
 
 function buildSameCounterpartySuggestions(expenseSheets: { rows?: ImportRow[] }[]): Map<string, WizardSuggestion> {
@@ -354,14 +368,21 @@ export function PortalBankStatementPage() {
       return summary;
     }, { amount: 0, budget: 0, evidence: 0 });
   }, [wizardDrafts, wizardRows]);
-  const wizardSignedAmountByRowKey = useMemo(() => {
+  const wizardImportMetaByRowKey = useMemo(() => {
     const importLines = buildBankStatementServerImportLines({ columns, rows: wizardRows });
-    const result = new Map<string, number>();
+    const result = new Map<string, WizardImportMeta>();
     wizardRows.forEach((row, index) => {
-      const signedAmount = importLines[index]?.signedAmount;
+      const importLine = importLines[index];
+      const signedAmount = importLine?.signedAmount;
+      const transactionDate = importLine?.transactionDate || '';
+      const meta: WizardImportMeta = {
+        transactionDate,
+        weekLabel: buildWizardWeekLabel(transactionDate),
+      };
       if (typeof signedAmount === 'number' && Number.isFinite(signedAmount)) {
-        result.set(bankRowKey(row, index), signedAmount);
+        meta.signedAmount = signedAmount;
       }
+      result.set(bankRowKey(row, index), meta);
     });
     return result;
   }, [columns, wizardRows]);
@@ -1310,6 +1331,7 @@ export function PortalBankStatementPage() {
                         </th>
                         <th rowSpan={2} className="w-10 border px-2 py-1.5">행</th>
                         <th rowSpan={2} className="w-[210px] border px-2 py-1.5">통장내역 원본</th>
+                        <th rowSpan={2} className="w-[86px] border px-2 py-1.5">해당 주차</th>
                         {WIZARD_PRIMARY_FIELDS.map((field) => (
                           <th key={field.key} rowSpan={2} className="border px-2 py-1.5">
                             {field.label}
@@ -1345,7 +1367,8 @@ export function PortalBankStatementPage() {
                         const draft = wizardDrafts[rowKey] || {};
                         const counterparty = getBankRowCounterparty(columns, row);
                         const suggestion = sameCounterpartySuggestions.get(normalizeKey(counterparty));
-                        const signedAmount = wizardSignedAmountByRowKey.get(rowKey);
+                        const importMeta = wizardImportMetaByRowKey.get(rowKey);
+                        const signedAmount = importMeta?.signedAmount;
                         const vatSuggestion = typeof signedAmount === 'number'
                           ? splitVatIncludedDraftAmount(signedAmount)
                           : null;
@@ -1388,6 +1411,15 @@ export function PortalBankStatementPage() {
                                   </button>
                                 ) : null}
                               </div>
+                            </td>
+                            <td className="border bg-slate-100 px-2 py-1.5 text-center">
+                              <span
+                                className="inline-flex h-8 w-full min-w-[72px] items-center justify-center border border-slate-300 bg-slate-50 px-2 text-[11px] font-semibold text-slate-600"
+                                aria-label="해당 주차 수정불가 계산값"
+                                title={importMeta?.transactionDate ? `${importMeta.transactionDate} 기준 수정불가 계산값` : '거래일 기준 수정불가 계산값'}
+                              >
+                                {importMeta?.weekLabel || '-'}
+                              </span>
                             </td>
                             {WIZARD_PRIMARY_FIELDS.map((field) => (
                               <td key={field.key} className="border px-1.5 py-1.5">
