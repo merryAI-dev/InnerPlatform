@@ -82,6 +82,14 @@ describe('portal bank statement apply policy', () => {
     expect(bankStatementPageSource).not.toContain('applyBankStatementRowsToExpenseSheet({ columns, rows: selectedRows })');
   });
 
+  it('auto-hydrates cashflow actual read model from fixed weekly ledger rows', () => {
+    expect(portalStoreSource).toContain('upsertLedgerActualReadModel');
+    expect(portalStoreSource).toContain('ledgerActualReadModelHydrationKeyRef');
+    expect(portalStoreSource).toContain('buildLedgerActualSyncPayload(ledgerRows)');
+    expect(portalStoreSource).toContain('serializeLedgerActualSyncPayload(payload)');
+    expect(portalStoreSource).toContain('areCashflowActualAmountsEqual');
+  });
+
   it('opens a completion wizard before applying selected bank rows to weekly expense', () => {
     expect(bankStatementPageSource).toContain('data-testid="bank-statement-completion-wizard"');
     expect(bankStatementPageSource).toContain('비어있는 사업비 항목 작성');

@@ -235,8 +235,8 @@ export function SettlementLedgerPage({
   const [directEntryUploading, setDirectEntryUploading] = useState(false);
   const [revertConfirmOpen, setRevertConfirmOpen] = useState(false);
   const ledgerViewOnlyEditableHeaders = useMemo(
-    () => (ledgerViewOnly ? ['상세 적요'] : []),
-    [ledgerViewOnly],
+    () => [],
+    [],
   );
   const directEntryUploadInputRef = useRef<HTMLInputElement | null>(null);
   const restoredDraftCacheKeyRef = useRef('');

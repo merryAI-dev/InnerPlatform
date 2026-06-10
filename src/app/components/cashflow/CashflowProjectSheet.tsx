@@ -8,7 +8,6 @@ import { Card, CardContent } from '../ui/card';
 import { Input } from '../ui/input';
 import { Badge } from '../ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
-import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -104,7 +103,6 @@ export function CashflowProjectSheet({
     upsertWeekAmounts,
     submitWeekAsPm,
     closeWeekAsAdmin,
-    syncProjectActualsFromExpenseSheets,
   } = useCashflowWeeks();
 
   const monthWeeks = useMemo(() => getMonthMondayWeeks(yearMonth), [yearMonth]);
@@ -158,9 +156,7 @@ export function CashflowProjectSheet({
     expenseStatusLabel?: string;
     expenseStatusDescription?: string;
   } | null>(null);
-  const [monthSavingMode, setMonthSavingMode] = useState<null | 'actual'>(null);
   const [downloadPreparing, setDownloadPreparing] = useState(false);
-  const [actualSyncing, setActualSyncing] = useState(false);
 
   const hasDirty = useMemo(
     () => hasUnsavedChanges(weekSaveState) || Object.keys(drafts).length > 0,
@@ -545,53 +541,6 @@ export function CashflowProjectSheet({
       .then(() => goNextMonth())
       .catch(() => {});
   }, [flushAllDirtyBeforeMonthChange, goNextMonth]);
-
-  const saveMonth = useCallback((targetMode: 'actual') => {
-    const targets = monthWeeks.map((w) => w.weekNo);
-    void (async () => {
-      setMonthSavingMode(targetMode);
-      for (const weekNo of targets) {
-        await persistWeekValues({ weekNo, mode: targetMode });
-      }
-      toast.success('이번 달 Actual을 저장했습니다.');
-    })().catch((err) => {
-      console.error('[Cashflow] month actual save failed:', err);
-      toast.error('월 저장에 실패했습니다. 네트워크/권한을 확인해 주세요.');
-    }).finally(() => {
-      setMonthSavingMode((prev) => (prev === targetMode ? null : prev));
-    });
-  }, [monthWeeks, persistWeekValues]);
-
-  const syncActualsFromExpenseSheet = useCallback(() => {
-    void (async () => {
-      setActualSyncing(true);
-      const result = await syncProjectActualsFromExpenseSheets({ projectId });
-      if (result.skipped) {
-        toast.message('불러올 정산대장 행이 없습니다.');
-        return;
-      }
-      setDrafts((prev) => {
-        const next = { ...prev };
-        for (const key of Object.keys(next)) {
-          if (key.startsWith(`${yearMonth}:actual:`)) delete next[key];
-        }
-        return next;
-      });
-      setWeekSaveState((prev) => {
-        const next = { ...prev };
-        for (const week of monthWeeks) {
-          delete next[resolveWeekKey({ yearMonth, mode: 'actual', weekNo: week.weekNo })];
-        }
-        return next;
-      });
-      toast.success(`Actual ${result.upsertedWeeks}개 주차를 불러왔습니다.`);
-    })().catch((error) => {
-      console.error('[Cashflow] actual sync failed:', error);
-      toast.error('Actual 불러오기에 실패했습니다. 정산대장 저장 상태를 확인해 주세요.');
-    }).finally(() => {
-      setActualSyncing(false);
-    });
-  }, [monthWeeks, projectId, resolveWeekKey, syncProjectActualsFromExpenseSheets, yearMonth]);
 
   const handleSubmitWeek = useCallback(async (input: { weekNo: number; yearMonth: string }) => {
     setSubmitBusy(true);
@@ -983,46 +932,6 @@ export function CashflowProjectSheet({
             >
               {downloadPreparing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />} {downloadPreparing ? '엑셀 준비 중' : '엑셀 다운로드'}
             </Button>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="inline-flex">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8 text-[12px] gap-1.5"
-                    onClick={syncActualsFromExpenseSheet}
-                    disabled={!canEdit || actualSyncing || monthSavingMode !== null}
-                  >
-                    {actualSyncing && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                    Actual 불러오기
-                  </Button>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" className="max-w-[320px] text-[11px] leading-5">
-                <p className="font-semibold">Actual 불러오기</p>
-                <p>주간 사업비 입력표에 저장된 실제 입금/지출을 읽어와 이 캐시플로 Actual 칸에 채웁니다. 새로 계산해 보여주는 단계이며, 최종 반영은 Actual 저장까지 눌러야 끝납니다.</p>
-              </TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="inline-flex">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8 text-[12px] gap-1.5"
-                    onClick={() => saveMonth('actual')}
-                    disabled={!canEdit || actualSyncing || monthSavingMode !== null}
-                  >
-                    {monthSavingMode === 'actual' && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                    Actual 저장
-                  </Button>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" className="max-w-[320px] text-[11px] leading-5">
-                <p className="font-semibold">Actual 저장</p>
-                <p>화면에 보이는 Actual 값을 서버 기준값으로 저장합니다. 저장해야 다른 화면과 다음 접속에서도 같은 실제값을 볼 수 있습니다.</p>
-              </TooltipContent>
-            </Tooltip>
             <Button variant="outline" size="sm" className="h-8 text-[12px] gap-1.5" onClick={goPrevMonthSafe}>
               <ChevronLeft className="w-3.5 h-3.5" /> 이전 달
             </Button>
@@ -1179,14 +1088,14 @@ export function CashflowProjectSheet({
               {closeDialog?.kind === 'prerequisite'
                 ? '결산 전에 제출현황을 확인해 주세요'
                 : closeDialog?.kind === 'warning'
-                  ? '검토/동기화 상태를 확인한 뒤 결산할까요?'
+                  ? '제출 상태를 확인한 뒤 결산할까요?'
                 : '이번 주차를 결산완료 처리할까요?'}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {closeDialog?.kind === 'prerequisite'
                 ? '내 제출현황에서 Projection 업데이트와 사업비 입력을 체크해주세요.'
                 : closeDialog?.kind === 'warning'
-                  ? '사업비 입력은 저장되었지만 일부 주차는 동기화 확인이 더 필요합니다. 그래도 결산은 진행할 수 있습니다.'
+                  ? '일부 주차의 제출 상태가 완전히 닫히지 않았습니다. 그래도 결산은 진행할 수 있습니다.'
                 : 'Projection 업데이트와 사업비 입력 체크가 완료된 주차입니다. 결산완료 후에도 Projection은 계속 수정할 수 있습니다.'}
             </AlertDialogDescription>
           </AlertDialogHeader>

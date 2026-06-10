@@ -320,6 +320,79 @@ function buildLedgerActualSyncPayload(rows: ImportRow[]) {
   return Array.from(byWeek.values());
 }
 
+function serializeLedgerActualSyncPayload(payload: ReturnType<typeof buildLedgerActualSyncPayload>): string {
+  return JSON.stringify(payload
+    .map((week) => ({
+      yearMonth: week.yearMonth,
+      weekNo: week.weekNo,
+      amounts: Object.fromEntries(
+        Object.entries(week.amounts || {})
+          .map(([key, value]) => [key, Number(value) || 0])
+          .sort(([left], [right]) => left.localeCompare(right)),
+      ),
+    }))
+    .sort((left, right) => `${left.yearMonth}:${left.weekNo}`.localeCompare(`${right.yearMonth}:${right.weekNo}`)));
+}
+
+function areCashflowActualAmountsEqual(
+  current: Partial<Record<string, number>> | undefined,
+  next: Partial<Record<string, number>>,
+): boolean {
+  const keys = new Set([...Object.keys(current || {}), ...Object.keys(next || {})]);
+  for (const key of keys) {
+    if ((Number(current?.[key]) || 0) !== (Number(next[key]) || 0)) return false;
+  }
+  return true;
+}
+
+async function upsertLedgerActualReadModel(input: {
+  db: Firestore;
+  orgId: string;
+  projectId: string;
+  payload: ReturnType<typeof buildLedgerActualSyncPayload>;
+  actorUid: string;
+  actorName: string;
+}) {
+  const now = new Date().toISOString();
+  await Promise.all(input.payload.map(async (week) => {
+    const ref = doc(
+      input.db,
+      getOrgDocumentPath(input.orgId, 'cashflowWeeks', resolveWeekDocId(input.projectId, week.yearMonth, week.weekNo)),
+    );
+    const snapshot = await getDoc(ref);
+    const fallbackWeek = getMonthMondayWeeks(week.yearMonth).find((candidate) => candidate.weekNo === week.weekNo);
+    const existingWeek = snapshot.exists() ? snapshot.data() as Partial<CashflowWeekSheet> : null;
+    if (existingWeek && areCashflowActualAmountsEqual(existingWeek.actual as any, week.amounts as any)) return;
+    if (snapshot.exists()) {
+      await setDoc(ref, buildCashflowWeekUpdatePatch({
+        orgId: input.orgId,
+        actorUid: input.actorUid,
+        actorName: input.actorName,
+        mode: 'actual',
+        amounts: week.amounts as any,
+        now,
+        weekStart: existingWeek?.weekStart || fallbackWeek?.weekStart || '',
+        existingProjection: existingWeek?.projection,
+        existingActual: existingWeek?.actual,
+      }) as any, { merge: true });
+      return;
+    }
+    await setDoc(ref, buildInitialCashflowWeekDoc({
+      orgId: input.orgId,
+      actorUid: input.actorUid,
+      actorName: input.actorName,
+      projectId: input.projectId,
+      yearMonth: week.yearMonth,
+      weekNo: week.weekNo,
+      weekStart: fallbackWeek?.weekStart || '',
+      weekEnd: fallbackWeek?.weekEnd || '',
+      mode: 'actual',
+      amounts: week.amounts as any,
+      now,
+    }));
+  }));
+}
+
 function serializeExpenseSheetTabForComparison(tab: ExpenseSheetTab): string {
   return JSON.stringify({
     id: tab.id,
@@ -795,6 +868,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   const activeExpenseSheetIdRef = useRef(activeExpenseSheetId);
   const expenseSheetRowsRef = useRef<ImportRow[] | null>(expenseSheetRows);
   const devHarnessHydratedProjectIdRef = useRef<string | null>(null);
+  const ledgerActualReadModelHydrationKeyRef = useRef('');
 
   useEffect(() => {
     projectsRef.current = projects;
@@ -815,6 +889,39 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     expenseSheetRowsRef.current = expenseSheetRows;
   }, [expenseSheetRows]);
+
+  useEffect(() => {
+    if (!firestoreEnabled || !db || !currentProjectId || expenseSheets.length === 0) return;
+    const ledgerRows = expenseSheets.flatMap((sheet) => sheet.rows || []);
+    if (ledgerRows.length === 0) return;
+    const payload = buildLedgerActualSyncPayload(ledgerRows);
+    if (payload.length === 0) return;
+    const signature = serializeLedgerActualSyncPayload(payload);
+    const hydrationKey = `${orgId}:${currentProjectId}:${signature}`;
+    if (ledgerActualReadModelHydrationKeyRef.current === hydrationKey) return;
+    ledgerActualReadModelHydrationKeyRef.current = hydrationKey;
+    void upsertLedgerActualReadModel({
+      db,
+      orgId,
+      projectId: currentProjectId,
+      payload,
+      actorUid: authUser?.uid || portalUser?.id || 'portal-user',
+      actorName: portalUser?.name || authUser?.name || '',
+    }).catch((error) => {
+      console.error('[PortalStore] ledger actual read model hydration failed:', error);
+      ledgerActualReadModelHydrationKeyRef.current = '';
+    });
+  }, [
+    authUser?.name,
+    authUser?.uid,
+    currentProjectId,
+    db,
+    expenseSheets,
+    firestoreEnabled,
+    orgId,
+    portalUser?.id,
+    portalUser?.name,
+  ]);
 
   const authUserProjectIdsKey = (authUser?.projectIds || []).join('|');
   const portalUserProjectIdsKey = (portalUser?.projectIds || []).join('|');

@@ -12,19 +12,20 @@ const cashflowWeeksStoreSource = readFileSync(
 );
 
 describe('CashflowProjectSheet actual sync flow', () => {
-  it('keeps actual sync separate from manual actual save', () => {
-    expect(cashflowProjectSheetSource).toContain('Actual 불러오기');
-    expect(cashflowProjectSheetSource).toContain('syncProjectActualsFromExpenseSheets');
+  it('does not expose manual actual sync/save actions on the cashflow screen', () => {
+    expect(cashflowProjectSheetSource).not.toContain('Actual 불러오기');
+    expect(cashflowProjectSheetSource).not.toContain('Actual 저장');
+    expect(cashflowProjectSheetSource).not.toContain('syncProjectActualsFromExpenseSheets');
+    expect(cashflowProjectSheetSource).not.toContain('actualSyncing');
+    expect(cashflowProjectSheetSource).not.toContain('monthSavingMode');
     expect(cashflowWeeksStoreSource).toContain('syncProjectCashflowActualsViaBff');
     expect(cashflowWeeksStoreSource).toContain('applyWeekAmountsToLocalWeeks');
-    expect(cashflowProjectSheetSource).toContain('Actual 저장');
   });
 
-  it('saves visible month values instead of draft-only input changes', () => {
+  it('saves visible weekly values instead of draft-only input changes', () => {
     expect(cashflowProjectSheetSource).toContain('persistWeekValues');
     expect(cashflowProjectSheetSource).toContain('persisted.hasValue');
     expect(cashflowProjectSheetSource).toContain('parseAmount(drafts[cellKey])');
-    expect(cashflowProjectSheetSource).toContain('await persistWeekValues({ weekNo, mode: targetMode })');
     expect(cashflowProjectSheetSource).not.toContain('저장할 변경사항이 없습니다.');
   });
 

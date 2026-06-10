@@ -32,8 +32,8 @@ describe('PortalWeeklyExpensePage flow layout', () => {
     expect(weeklyExpenseSource).toContain('금액/분류/지급정보 생성과 수정은 위자드에서만 처리합니다');
   });
 
-  it('allows only detail memo edits inside the weekly view-only ledger', () => {
-    expect(settlementLedgerSource).toContain("ledgerViewOnly ? ['상세 적요'] : []");
+  it('keeps the weekly view-only ledger fully fixed', () => {
+    expect(settlementLedgerSource).toContain('() => []');
     expect(settlementLedgerSource).toContain('editableReadOnlyHeaders={ledgerViewOnlyEditableHeaders}');
     expect(importEditorSource).toContain('readOnly && !readOnlyHasEditableCells');
     expect(importEditorRowSource).toContain('editableReadOnlyHeaders.includes(col.csvHeader)');

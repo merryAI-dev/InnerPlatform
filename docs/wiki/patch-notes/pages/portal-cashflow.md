@@ -23,10 +23,12 @@
 - [x] 가져오기 이후 주간 제출 상태와 연결 가능
 - [x] PM 포털 부팅 시 cashflow 실시간 구독이 연도 범위 composite index에 직접 의존하지 않음
 - [x] 통장내역 반영/주간 원장 정정 저장 직후 actual read model이 같은 주차 단위로 갱신됨
+- [x] Cashflow 화면에서 수동 `Actual 불러오기`/`Actual 저장` 없이 저장된 read model만 조회
 - [ ] import wizard 내부 안내 문구 추가 감산 여지 있음
 
 ## Recent Changes
 
+- [2026-06-10] Cashflow 화면의 수동 `Actual 불러오기`와 `Actual 저장` 액션을 제거했다. Actual은 사업비 입력 원장 fixed 값으로 생성된 read model을 읽는 영역이며, 사용자가 Cashflow에서 별도 동기화/저장을 누르지 않는다.
 - [2026-06-10] 통장내역 선택 반영과 주간 사업비 정정 저장이 완료되면 저장된 전체 원장 기준으로 affected week의 actual read model을 즉시 sync한다. Projection/Actual 비교 UI는 계속 `/portal/cashflow`에서만 담당한다.
 - [2026-04-14] migration 설명 카드와 긴 형식 안내를 제거하고 compact import action만 남겼다.
 - [2026-04-15] PM용 cashflow 주차 구독은 Firestore에서 project 기준으로만 listen하고, 연도 범위는 클라이언트에서 필터링하도록 바꿔 PM 포털 전체가 cashflow index drift에 덜 민감하게 만들었다.
@@ -35,6 +37,7 @@
 
 - 이 화면은 actual 분석면이 아니라 projection 운영 입력면이다.
 - Actual은 사업비 입력(주간) 원장 append 결과를 읽는 read model이며, 주간 화면이 비교 UI를 갖지 않는다.
+- 기존 원장 rows를 불러왔을 때도 `해당 주차`와 `cashflow항목` fixed 값이 있으면 actual read model이 자동 보정된다.
 - 가져오기 이후 제출 상태와 admin 캐시플로 추출 화면까지 간접적으로 연결된다.
 
 ## Related Files

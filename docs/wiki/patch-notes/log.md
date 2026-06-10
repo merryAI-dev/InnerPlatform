@@ -247,6 +247,10 @@
 - pages: [portal-weekly-expense](./pages/portal-weekly-expense.md)
 - summary: 사업비 입력 원장에서 `통장잔액` 또는 `통장에 찍힌 입/출금액` 셀을 드래그 선택하면 좌측 하단에 스프레드시트처럼 `금액 합계`를 표시한다.
 
+## [2026-06-10] patch-note | portal-weekly-readonly-actual-readmodel | 원장 조회 전용과 Actual 자동 보정
+- pages: [portal-weekly-expense](./pages/portal-weekly-expense.md), [portal-cashflow](./pages/portal-cashflow.md), [shared-portal-architecture](./pages/shared-portal-architecture.md)
+- summary: 사업비 입력(주간)을 완전 조회 전용으로 고정해 저장 가능/미입력/수정 필요 배지를 숨기고, Cashflow의 수동 `Actual 불러오기`/`Actual 저장` 버튼을 제거했다. 기존 원장 rows를 불러올 때도 `해당 주차`와 `cashflow항목` fixed 값으로 actual read model을 자동 보정한다.
+
 ## [2026-04-14] patch-note | portal-shell-project-search | 담당 사업 검색 전환 지원
 - pages: [portal-dashboard](./pages/portal-dashboard.md)
 - summary: 헤더의 중복 `사업비 입력` 버튼을 제거하고, 상단 command search가 담당 사업 전체를 검색해 선택 시 해당 사업으로 전환 후 이동하도록 확장했다.

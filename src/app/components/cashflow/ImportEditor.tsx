@@ -1667,12 +1667,14 @@ export function ImportEditor({
         <div className="flex items-start justify-between gap-4 px-4 py-3">
           <div className="min-w-0 space-y-2">
             <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="text-sm font-bold">정산대장 편집</h3>
-              <Badge variant="default" className="text-[10px]">{validCount}건 저장 가능</Badge>
-              {errorCount > 0 && (
+              <h3 className="text-sm font-bold">{readOnly ? '정산대장 조회' : '정산대장 편집'}</h3>
+              {!readOnly && (
+                <Badge variant="default" className="text-[10px]">{validCount}건 저장 가능</Badge>
+              )}
+              {!readOnly && errorCount > 0 && (
                 <Badge variant="destructive" className="text-[10px]">{errorCount}건 수정 필요</Badge>
               )}
-              {missingCount > 0 && (
+              {!readOnly && missingCount > 0 && (
                 <Badge variant="secondary" className="text-[10px] text-red-600">{missingCount}건 미입력</Badge>
               )}
               {cellCommentCount > 0 && (
@@ -1692,6 +1694,7 @@ export function ImportEditor({
                 </Button>
               )}
             </div>
+            {!readOnly && (
             <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
               <span className="rounded-full border bg-background px-2 py-1">업로드 반영 {importedRowCount}건</span>
               <span className="rounded-full border bg-background px-2 py-1">수동 수정 {manuallyEditedRowCount}건</span>
@@ -1702,9 +1705,10 @@ export function ImportEditor({
                 </span>
               )}
             </div>
+            )}
           </div>
           <div className="shrink-0 text-right text-[11px] text-muted-foreground">
-            <div>{readOnly ? '이 화면은 원장 조회 전용입니다. 생성과 수정은 위자드에서만 처리합니다.' : '입력한 값은 저장 시 캐시플로 actual에 바로 반영됩니다.'}</div>
+            <div>{readOnly ? '확정 원장 조회 전용입니다.' : '입력한 값은 저장 시 캐시플로 actual에 바로 반영됩니다.'}</div>
             {onToggleFullscreen && (
               <Button
                 variant="outline"
@@ -1886,7 +1890,7 @@ export function ImportEditor({
                 </TooltipTrigger>
                 <TooltipContent side="top" className="max-w-[320px] text-[11px] leading-5">
                   <p className="font-semibold">저장</p>
-                  <p>지금 보이는 주간 사업비 입력표를 서버 기준본으로 보관합니다. 저장 후에는 캐시플로 Actual 불러오기가 이어져 실제 입금/지출 값으로 캐시플로 화면에 반영됩니다.</p>
+                  <p>지금 보이는 정산대장을 서버 기준본으로 보관합니다. 저장 후에는 실제 입금/지출 값이 캐시플로 Actual read model에 반영됩니다.</p>
                 </TooltipContent>
               </Tooltip>
             </>

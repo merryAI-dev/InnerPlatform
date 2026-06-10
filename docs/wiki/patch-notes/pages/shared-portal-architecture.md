@@ -29,11 +29,13 @@
 - [x] `v2` 예산 구조는 `budget_tree_v2`를 원본으로 두고, `budget_code_book`은 2단 파생본으로 동기화함
 - [x] 통장내역 선택 반영은 Temp 위자드를 거쳐 기존 Firestore 원장 구조에 merge되며, 프론트는 계산 권위가 아니라 작성 채널만 담당함
 - [x] 주간 사업비 원장은 확정 행 직접 mutate 대신 append-only 정정 행으로 보존하고, actual read model은 원장 저장 시 주차 단위로 sync함
+- [x] 기존 원장 hydrate 시에도 `해당 주차`/`cashflow항목` fixed 값으로 actual read model을 자동 보정함
 - [ ] admin summary surface cutover까지 완료됨
 - [ ] 포털의 broad Firestore direct read가 완전히 제거됨
 
 ## Recent Changes
 
+- [2026-06-10] 사업비 입력(주간)은 저장/검증 UI가 없는 완전 read-only 원장으로 고정하고, Cashflow의 수동 Actual 동기화/저장 버튼을 제거했다. 기존 원장 rows를 hydrate할 때도 actual read model을 비교 후 자동 보정한다.
 - [2026-06-10] 주간 사업비 원장은 기존 확정 행을 직접 수정하지 않고 선택 행 정정 위자드가 새 row를 append하는 방식으로 고정했다. 통장내역 선택 반영과 정정 저장은 같은 Firestore transaction/save 흐름에서 cashflow actual read model을 주차 단위로 갱신한다.
 - [2026-06-10] 내부 SaaS 편의성을 위해 통장내역 기준본 저장/선택 행 반영 경로에서 Java 권한 게이트를 제거하고 Firestore 기존 구조를 상속하도록 조정했다. Java는 주간 사업비 저장/계산/검증 영역에 남기되, 통장내역 위자드 진입과 확정이 `403`에 막히지 않도록 분리했다.
 - [2026-06-10] Firestore 기존 구조를 상속하더라도 rows 전체 배열 overwrite 위험을 줄이기 위해 통장내역 기준본과 선택 행 원장 반영 write는 transaction으로 최신 문서를 읽고 merge한 뒤 저장하도록 보강했다.
