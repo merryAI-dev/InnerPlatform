@@ -83,6 +83,7 @@ describe('bank statement helpers', () => {
     expect(Array.isArray(lines[0])).toBe(false);
     expect(lines[0]).toMatchObject({
       lineIndex: 0,
+      sourceLineKey: 'bank-2fd243f8b7b351d2edc4ea0acbc255f486ba602f0bceef51a310663eb30525da',
       transactionDate: '2026-06-02',
       counterparty: 'Amazon_AWS',
       signedAmount: -344796,

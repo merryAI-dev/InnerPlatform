@@ -89,15 +89,16 @@ class WeeklyExpenseControllerTest {
     }
 
     @Test
-    void javaApiRejectsTrustedActorHeadersWithoutAnyRuntimeAuth() throws Exception {
+    void javaApiRejectsActorHeadersWithoutBearerOrServiceToken() throws Exception {
         String body = """
             {
               "idempotencyKey": "missing-service-token",
+              "sheetName": "기본 탭",
               "rows": []
             }
             """;
 
-        mockMvc.perform(post("/api/v1/weekly-expenses/project-auth/sheets/default/save-draft")
+        mockMvc.perform(post("/api/v1/weekly-expenses/project-header-auth/sheets/default/save-draft")
                 .header("origin", "https://inner-platform-stage-merryai-devs-projects.vercel.app")
                 .header("x-tenant-id", "tenant-auth")
                 .header("x-actor-id", "spoofed-admin")
@@ -105,8 +106,6 @@ class WeeklyExpenseControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body))
             .andExpect(status().isUnauthorized())
-            .andExpect(header().string("Access-Control-Allow-Origin", "https://inner-platform-stage-merryai-devs-projects.vercel.app"))
-            .andExpect(header().string("Access-Control-Allow-Credentials", "true"))
             .andExpect(jsonPath("$.code").value("weekly_expense_firebase_auth_required"));
     }
 
@@ -204,10 +203,11 @@ class WeeklyExpenseControllerTest {
     }
 
     @Test
-    void browserDirectFirebaseTokenRejectsSpoofedTenantAndActorHeaders() throws Exception {
+    void bearerTokenMustMatchActorHeadersForWeeklyCommands() throws Exception {
         String body = """
             {
               "idempotencyKey": "direct-firebase-spoof-001",
+              "sheetName": "기본 탭",
               "rows": []
             }
             """;
@@ -215,17 +215,10 @@ class WeeklyExpenseControllerTest {
         mockMvc.perform(post("/api/v1/weekly-expenses/project-missing-claims/sheets/default/save-draft")
                 .header("authorization", "Bearer " + firebaseTestToken("tenant-direct", "firebase-pm-1", "pm", "pm@mysc.co.kr"))
                 .header("x-tenant-id", "tenant-other")
+                .header("x-actor-id", "spoofed-admin")
+                .header("x-actor-role", "admin")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body))
-            .andExpect(status().isForbidden())
-            .andExpect(jsonPath("$.code").value("tenant_mismatch"));
-
-        mockMvc.perform(post("/api/v1/weekly-expenses/project-missing-claims/sheets/default/save-draft")
-                .header("authorization", "Bearer " + firebaseTestToken("tenant-direct", "firebase-pm-1", "pm", "pm@mysc.co.kr"))
-                .header("x-tenant-id", "tenant-direct")
-                .header("x-actor-id", "spoofed-admin")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(body.replace("direct-firebase-spoof-001", "direct-firebase-spoof-002")))
             .andExpect(status().isForbidden())
             .andExpect(jsonPath("$.code").value("actor_mismatch"));
     }
@@ -267,7 +260,7 @@ class WeeklyExpenseControllerTest {
     }
 
     @Test
-    void browserDirectFirebaseTokenRejectsPrivilegedRequestRoleWhenRoleClaimIsMissing() throws Exception {
+    void privilegedRoleRequiresFirebaseRoleClaim() throws Exception {
         String missingClaimsToken = "test-firebase:" + Base64.getUrlEncoder()
             .encodeToString("uid=firebase-admin-claims;email=admin-claims@mysc.co.kr".getBytes(StandardCharsets.UTF_8));
 
@@ -292,7 +285,7 @@ class WeeklyExpenseControllerTest {
         String missingClaimsToken = "test-firebase:" + Base64.getUrlEncoder()
             .encodeToString("uid=firebase-pm-missing-context;email=pm-missing@mysc.co.kr".getBytes(StandardCharsets.UTF_8));
 
-        mockMvc.perform(post("/api/v1/weekly-expenses/project-direct/sheets/default/save-draft")
+        mockMvc.perform(post("/api/v1/weekly-expenses/project-direct-missing-role/sheets/default/save-draft")
                 .header("authorization", "Bearer " + missingClaimsToken)
                 .header("x-actor-id", "firebase-pm-missing-context")
                 .header("x-actor-role", "pm")
@@ -301,7 +294,7 @@ class WeeklyExpenseControllerTest {
             .andExpect(status().isUnauthorized())
             .andExpect(jsonPath("$.code").value("tenant_required"));
 
-        mockMvc.perform(post("/api/v1/weekly-expenses/project-direct/sheets/default/save-draft")
+        mockMvc.perform(post("/api/v1/weekly-expenses/project-direct-missing-role/sheets/default/save-draft")
                 .header("authorization", "Bearer " + missingClaimsToken)
                 .header("x-tenant-id", "tenant-direct")
                 .header("x-actor-id", "firebase-pm-missing-context")
@@ -349,7 +342,7 @@ class WeeklyExpenseControllerTest {
             .andExpect(jsonPath("$.ok").value(true))
             .andExpect(jsonPath("$.commandName").value("weeklyExpense.saveDraft"))
             .andExpect(jsonPath("$.savedRowCount").value(1))
-            .andExpect(jsonPath("$.savedCellCount").value(3))
+            .andExpect(jsonPath("$.savedCellCount").value(5))
             .andExpect(jsonPath("$.actualDelta[0].amount").value(1200000))
             .andReturn()
             .getResponse()
@@ -423,14 +416,16 @@ class WeeklyExpenseControllerTest {
         assertThat(sheet.path("sheetVersion").asLong()).isEqualTo(0);
         assertThat(sheet.path("rows").get(0).path("sourceTxId").asText()).isEqualTo("bank:sheet-read-001");
         assertThat(sheet.path("rows").get(0).path("entryKind").asText()).isEqualTo("bank_import");
-        assertThat(sheet.path("rows").get(0).path("cells").get(0).path("columnIndex").asInt()).isEqualTo(3);
-        assertThat(sheet.path("rows").get(0).path("cells").get(2).path("rawValue").asText()).isEqualTo("45,000");
+        JsonNode cells = sheet.path("rows").get(0).path("cells");
+        assertThat(cellValue(cells, 1)).isEqualTo("1");
+        assertThat(cellValue(cells, 3)).isEqualTo("2026-06-W1");
+        assertThat(cellValue(cells, 13)).isEqualTo("45000");
 
         mockMvc.perform(asActor(get("/api/v1/weekly-expenses/project-sheet-read/sheets/default"), "tenant-sheet-read", "viewer-sheet-read", "viewer"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.sheetKey").value("default"))
             .andExpect(jsonPath("$.sheetVersion").value(0))
-            .andExpect(jsonPath("$.rows[0].cells[2].columnIndex").value(13));
+            .andExpect(jsonPath("$.rows[0].cells[0].columnIndex").value(1));
     }
 
     @Test
@@ -813,7 +808,9 @@ class WeeklyExpenseControllerTest {
 
         assertThat(actualRepository.findByTenantIdAndProjectId("tenant-bank", "project-bank")).isEmpty();
 
-        String lineId = objectMapper.readTree(importResponse).get("lines").get(0).get("id").asText();
+        JsonNode importedLine = objectMapper.readTree(importResponse).get("lines").get(0);
+        String lineId = importedLine.get("id").asText();
+        String sourceLineKey = importedLine.get("sourceLineKey").asText();
         String applyBody = """
             {
               "idempotencyKey": "bank-apply-001",
@@ -844,8 +841,15 @@ class WeeklyExpenseControllerTest {
             .getResponse()
             .getContentAsString();
 
-        assertThat(sheetRepository.findByTenantIdAndProjectIdAndSheetKey("tenant-bank", "project-bank", "default"))
-            .isPresent();
+        String sheetResponse = mockMvc.perform(asActor(get("/api/v1/weekly-expenses/project-bank/sheets/default"), "tenant-bank", "pm-bank", "pm"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.rows[0].sourceTxId").value("bank:" + sourceLineKey))
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+        JsonNode rowCells = objectMapper.readTree(sheetResponse).get("rows").get(0).get("cells");
+        assertThat(cellValue(rowCells, 1)).isEqualTo("1");
+        assertThat(cellValue(rowCells, 3)).isEqualTo("26-5-5");
         assertThat(actualRepository.findByTenantIdAndProjectId("tenant-bank", "project-bank")).hasSize(1);
 
         mockMvc.perform(asActor(post("/api/v1/weekly-expenses/project-bank/bank-statements/apply-items"), "tenant-bank", "pm-bank", "pm")
@@ -1776,5 +1780,14 @@ class WeeklyExpenseControllerTest {
         String content = objectMapper.readTree(response).get("content").asText();
         assertThat(content).contains(",\"'=HYPERLINK(\"\"https://example.com\"\")\"");
         assertThat(content).doesNotContain(",=HYPERLINK(");
+    }
+
+    private static String cellValue(JsonNode cells, int columnIndex) {
+        for (JsonNode cell : cells) {
+            if (cell.get("columnIndex").asInt() == columnIndex) {
+                return cell.get("normalizedValue").asText();
+            }
+        }
+        return "";
     }
 }

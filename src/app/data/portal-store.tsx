@@ -13,7 +13,6 @@ import {
   setDoc,
   updateDoc,
   where,
-  type Firestore,
   type Unsubscribe,
 } from 'firebase/firestore';
 import type {
@@ -23,7 +22,6 @@ import type {
   BudgetCodeRename,
   BudgetTreeCode,
   BudgetTreeV2,
-  CashflowWeekSheet,
   Comment,
   Ledger,
   ProjectSheetSourceSnapshot,
@@ -60,13 +58,6 @@ import { PARTICIPATION_ENTRIES } from './participation-data';
 import { LEDGERS, PROJECTS, TRANSACTIONS } from './mock-data';
 import { SETTLEMENT_COLUMNS, createEmptyImportRow } from '../platform/settlement-csv';
 import type { ImportRow } from '../platform/settlement-csv';
-import { getMonthMondayWeeks, getYearMondayWeeks } from '../platform/cashflow-weeks';
-import { buildSettlementActualSyncPayload } from '../platform/settlement-sheet-sync';
-import {
-  buildCashflowWeekUpdatePatch,
-  buildInitialCashflowWeekDoc,
-  resolveWeekDocId,
-} from './cashflow-weeks.persistence';
 import {
   BANK_STATEMENT_COLUMNS,
   appendBankStatementRows,
@@ -106,6 +97,10 @@ import { useFirebase } from '../lib/firebase-context';
 import { getAuthInstance, getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
 import {
   isPlatformApiEnabled,
+  applyBankStatementItemsViaBff,
+  importBankStatementBatchViaBff,
+  listWeeklyExpenseSheetsViaBff,
+  readWeeklyExpenseSheetViaBff,
   saveWeeklyExpenseDraftViaBff,
   type UpsertProjectPayload,
   type WeeklyExpenseDraftRowPatch,
@@ -263,6 +258,28 @@ function buildWeeklyExpenseDraftRows(rows: ImportRow[]): WeeklyExpenseDraftRowPa
   }));
 }
 
+function weeklyExpenseServerRowsToImportRows(
+  rows: Awaited<ReturnType<typeof readWeeklyExpenseSheetViaBff>>['rows'],
+): ImportRow[] {
+  return [...rows]
+    .sort((left, right) => Number(left.rowIndex) - Number(right.rowIndex))
+    .map((row) => {
+      const userEditedCells = new Set<number>();
+      const cells = SETTLEMENT_COLUMNS.map((_, columnIndex) => {
+        const serverCell = row.cells.find((cell) => cell.columnIndex === columnIndex);
+        if (serverCell?.userEdited) userEditedCells.add(columnIndex);
+        return String(serverCell?.rawValue ?? '');
+      });
+      return {
+        tempId: row.sourceTxId || row.id || `server-row-${row.rowIndex}`,
+        sourceTxId: row.sourceTxId || undefined,
+        entryKind: row.entryKind || undefined,
+        cells,
+        ...(userEditedCells.size > 0 ? { userEditedCells } : {}),
+      } as ImportRow;
+    });
+}
+
 function buildWeeklyExpenseIdempotencyKey(projectId: string, sheetId: string): string {
   const suffix = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID()
@@ -295,102 +312,6 @@ function sanitizeBankStatementSheet(sheet: BankStatementSheet): BankStatementShe
     cells: columns.map((_, colIdx) => normalizeSpace(String(Array.isArray(row?.cells) ? (row.cells[colIdx] ?? '') : ''))),
   }));
   return { columns, rows: rows as BankStatementRow[] };
-}
-
-function collectSettlementRowYears(rows: ImportRow[]): number[] {
-  const dateIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '거래일시');
-  const years = new Set<number>();
-  rows.forEach((row) => {
-    const raw = dateIdx >= 0 ? String(row.cells?.[dateIdx] || '').trim() : '';
-    const match = raw.match(/^(\d{4})/);
-    const year = match ? Number.parseInt(match[1], 10) : NaN;
-    if (Number.isFinite(year)) years.add(year);
-  });
-  if (years.size === 0) years.add(new Date().getFullYear());
-  return Array.from(years).sort((left, right) => left - right);
-}
-
-function buildLedgerActualSyncPayload(rows: ImportRow[]) {
-  const byWeek = new Map<string, ReturnType<typeof buildSettlementActualSyncPayload>[number]>();
-  collectSettlementRowYears(rows).forEach((year) => {
-    buildSettlementActualSyncPayload(rows, getYearMondayWeeks(year), null).forEach((week) => {
-      byWeek.set(`${week.yearMonth}:w${week.weekNo}`, week);
-    });
-  });
-  return Array.from(byWeek.values());
-}
-
-function serializeLedgerActualSyncPayload(payload: ReturnType<typeof buildLedgerActualSyncPayload>): string {
-  return JSON.stringify(payload
-    .map((week) => ({
-      yearMonth: week.yearMonth,
-      weekNo: week.weekNo,
-      amounts: Object.fromEntries(
-        Object.entries(week.amounts || {})
-          .map(([key, value]) => [key, Number(value) || 0])
-          .sort(([left], [right]) => left.localeCompare(right)),
-      ),
-    }))
-    .sort((left, right) => `${left.yearMonth}:${left.weekNo}`.localeCompare(`${right.yearMonth}:${right.weekNo}`)));
-}
-
-function areCashflowActualAmountsEqual(
-  current: Partial<Record<string, number>> | undefined,
-  next: Partial<Record<string, number>>,
-): boolean {
-  const keys = new Set([...Object.keys(current || {}), ...Object.keys(next || {})]);
-  for (const key of keys) {
-    if ((Number(current?.[key]) || 0) !== (Number(next[key]) || 0)) return false;
-  }
-  return true;
-}
-
-async function upsertLedgerActualReadModel(input: {
-  db: Firestore;
-  orgId: string;
-  projectId: string;
-  payload: ReturnType<typeof buildLedgerActualSyncPayload>;
-  actorUid: string;
-  actorName: string;
-}) {
-  const now = new Date().toISOString();
-  await Promise.all(input.payload.map(async (week) => {
-    const ref = doc(
-      input.db,
-      getOrgDocumentPath(input.orgId, 'cashflowWeeks', resolveWeekDocId(input.projectId, week.yearMonth, week.weekNo)),
-    );
-    const snapshot = await getDoc(ref);
-    const fallbackWeek = getMonthMondayWeeks(week.yearMonth).find((candidate) => candidate.weekNo === week.weekNo);
-    const existingWeek = snapshot.exists() ? snapshot.data() as Partial<CashflowWeekSheet> : null;
-    if (existingWeek && areCashflowActualAmountsEqual(existingWeek.actual as any, week.amounts as any)) return;
-    if (snapshot.exists()) {
-      await setDoc(ref, buildCashflowWeekUpdatePatch({
-        orgId: input.orgId,
-        actorUid: input.actorUid,
-        actorName: input.actorName,
-        mode: 'actual',
-        amounts: week.amounts as any,
-        now,
-        weekStart: existingWeek?.weekStart || fallbackWeek?.weekStart || '',
-        existingProjection: existingWeek?.projection,
-        existingActual: existingWeek?.actual,
-      }) as any, { merge: true });
-      return;
-    }
-    await setDoc(ref, buildInitialCashflowWeekDoc({
-      orgId: input.orgId,
-      actorUid: input.actorUid,
-      actorName: input.actorName,
-      projectId: input.projectId,
-      yearMonth: week.yearMonth,
-      weekNo: week.weekNo,
-      weekStart: fallbackWeek?.weekStart || '',
-      weekEnd: fallbackWeek?.weekEnd || '',
-      mode: 'actual',
-      amounts: week.amounts as any,
-      now,
-    }));
-  }));
 }
 
 function serializeExpenseSheetTabForComparison(tab: ExpenseSheetTab): string {
@@ -868,7 +789,6 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   const activeExpenseSheetIdRef = useRef(activeExpenseSheetId);
   const expenseSheetRowsRef = useRef<ImportRow[] | null>(expenseSheetRows);
   const devHarnessHydratedProjectIdRef = useRef<string | null>(null);
-  const ledgerActualReadModelHydrationKeyRef = useRef('');
 
   useEffect(() => {
     projectsRef.current = projects;
@@ -889,39 +809,6 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     expenseSheetRowsRef.current = expenseSheetRows;
   }, [expenseSheetRows]);
-
-  useEffect(() => {
-    if (!firestoreEnabled || !db || !currentProjectId || expenseSheets.length === 0) return;
-    const ledgerRows = expenseSheets.flatMap((sheet) => sheet.rows || []);
-    if (ledgerRows.length === 0) return;
-    const payload = buildLedgerActualSyncPayload(ledgerRows);
-    if (payload.length === 0) return;
-    const signature = serializeLedgerActualSyncPayload(payload);
-    const hydrationKey = `${orgId}:${currentProjectId}:${signature}`;
-    if (ledgerActualReadModelHydrationKeyRef.current === hydrationKey) return;
-    ledgerActualReadModelHydrationKeyRef.current = hydrationKey;
-    void upsertLedgerActualReadModel({
-      db,
-      orgId,
-      projectId: currentProjectId,
-      payload,
-      actorUid: authUser?.uid || portalUser?.id || 'portal-user',
-      actorName: portalUser?.name || authUser?.name || '',
-    }).catch((error) => {
-      console.error('[PortalStore] ledger actual read model hydration failed:', error);
-      ledgerActualReadModelHydrationKeyRef.current = '';
-    });
-  }, [
-    authUser?.name,
-    authUser?.uid,
-    currentProjectId,
-    db,
-    expenseSheets,
-    firestoreEnabled,
-    orgId,
-    portalUser?.id,
-    portalUser?.name,
-  ]);
 
   const authUserProjectIdsKey = (authUser?.projectIds || []).join('|');
   const portalUserProjectIdsKey = (portalUser?.projectIds || []).join('|');
@@ -1758,6 +1645,29 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         setExpenseSheetRows(null);
       });
     };
+    const loadExpenseSheetsFromJava = () => {
+      if (!weeklyPlatformActor) {
+        handleExpenseSheetError(new Error('weekly platform actor is not available'));
+        return;
+      }
+      listWeeklyExpenseSheetsViaBff({
+        tenantId: orgId,
+        actor: weeklyPlatformActor,
+        projectId: currentProjectId,
+      })
+        .then((result) => {
+          handleExpenseSheetResult((result.sheets || []).map((sheet, index) => ({
+            id: sheet.sheetKey || sheet.sheetId || `sheet-${index}`,
+            data: () => ({
+              name: sheet.sheetName,
+              rows: weeklyExpenseServerRowsToImportRows(sheet.rows || []),
+              order: sheet.sheetKey === 'default' ? 0 : index + 1,
+              sheetVersion: sheet.sheetVersion,
+            }),
+          })));
+        })
+        .catch(handleExpenseSheetError);
+    };
     const handleBankStatementResult = (snap: { exists(): boolean; data(): unknown }) => {
       ifActive(() => {
         if (!snap.exists()) {
@@ -1870,7 +1780,11 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           handleExpenseIntakeError,
         ),
       );
-      projectScopeUnsubsRef.current.push(onSnapshot(expenseSheetCollection, (snap) => handleExpenseSheetResult(snap.docs), handleExpenseSheetError));
+      if (isPlatformApiEnabled()) {
+        loadExpenseSheetsFromJava();
+      } else {
+        projectScopeUnsubsRef.current.push(onSnapshot(expenseSheetCollection, (snap) => handleExpenseSheetResult(snap.docs), handleExpenseSheetError));
+      }
       projectScopeUnsubsRef.current.push(onSnapshot(bankStatementRef, handleBankStatementResult, handleBankStatementError));
       projectScopeUnsubsRef.current.push(onSnapshot(budgetPlanRef, handleBudgetPlanResult, handleBudgetPlanError));
       projectScopeUnsubsRef.current.push(onSnapshot(budgetCodeBookRef, handleBudgetCodeBookResult, handleBudgetCodeBookError));
@@ -1887,7 +1801,11 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       getDocs(collection(db, `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/expense_intake`))
         .then((snap) => handleExpenseIntakeResult(snap.docs))
         .catch(handleExpenseIntakeError);
-      getDocs(expenseSheetCollection).then((snap) => handleExpenseSheetResult(snap.docs)).catch(handleExpenseSheetError);
+      if (isPlatformApiEnabled()) {
+        loadExpenseSheetsFromJava();
+      } else {
+        getDocs(expenseSheetCollection).then((snap) => handleExpenseSheetResult(snap.docs)).catch(handleExpenseSheetError);
+      }
       getDoc(bankStatementRef).then(handleBankStatementResult).catch(handleBankStatementError);
       getDoc(budgetPlanRef).then(handleBudgetPlanResult).catch(handleBudgetPlanError);
       getDoc(budgetCodeBookRef).then(handleBudgetCodeBookResult).catch(handleBudgetCodeBookError);
@@ -1899,7 +1817,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       projectScopeUnsubsRef.current.forEach((unsub) => unsub());
       projectScopeUnsubsRef.current = [];
     };
-  }, [authLoading, isMemberLoading, isAuthenticated, authUser, currentProjectId, firestoreEnabled, db, orgId, scopedProjectIdsKey, isDevHarnessUser, portalUserProjectIdsKey, portalUser?.name, livePortalMode, refreshBankStatementRowsFromServer]);
+  }, [authLoading, isMemberLoading, isAuthenticated, authUser, currentProjectId, firestoreEnabled, db, orgId, scopedProjectIdsKey, isDevHarnessUser, portalUserProjectIdsKey, portalUser?.name, livePortalMode, refreshBankStatementRowsFromServer, weeklyPlatformActor]);
 
   useEffect(() => {
     weeklySubmissionUnsubsRef.current.forEach((unsub) => unsub());
@@ -2880,107 +2798,84 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       }
       return { appliedCount: mappedRows.length };
     }
-    if (!currentProjectId || !db) {
+    if (!isPlatformApiEnabled()) {
+      const message = '통장내역 반영은 Java API가 활성화된 환경에서만 가능합니다.';
+      toast.error(message);
+      throw new Error(message);
+    }
+    if (!currentProjectId || !weeklyPlatformActor) {
       const message = '통장내역 반영 권한 확인이 필요합니다. 다시 로그인한 뒤 반영해 주세요.';
       toast.error(message);
       throw new Error(message);
     }
-    const expenseSheetRef = doc(db, `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/expense_sheets/${targetSheetId}`);
-    const transactionResult = await runTransaction(db, async (transaction) => {
-      const snapshot = await transaction.get(expenseSheetRef);
-      const data = snapshot.exists() ? snapshot.data() as {
-        name?: string;
-        order?: number;
-        rows?: unknown;
-        createdAt?: string;
-        sheetVersion?: number;
-      } : {};
-      const latestRows = normalizeExpenseSheetRows(data.rows) || [];
-      const latestName = sanitizeExpenseSheetName(data.name, targetSheetName);
-      const latestOrder = typeof data.order === 'number'
-        ? data.order
-        : targetSheet?.order || (targetSheetId === 'default' ? 0 : expenseSheetsRef.current.length + 1);
-      const preparedRows = prepareMergedRows(latestRows);
-      const actualPayload = buildLedgerActualSyncPayload(preparedRows);
-      const cashflowWeekRefs = actualPayload.map((week) => (
-        doc(db, getOrgDocumentPath(orgId, 'cashflowWeeks', resolveWeekDocId(currentProjectId, week.yearMonth, week.weekNo)))
-      ));
-      const cashflowWeekSnapshots = await Promise.all(cashflowWeekRefs.map((ref) => transaction.get(ref)));
-      transaction.set(expenseSheetRef, buildExpenseSheetPersistenceDoc({
-        orgId,
-        projectId: currentProjectId,
-        activeSheetId: targetSheetId,
-        activeSheetName: latestName,
-        order: latestOrder,
-        rows: preparedRows,
-        createdAt: data.createdAt || targetSheet?.createdAt,
-        now,
-        updatedBy: portalUser?.name || authUser?.name || '',
-      }), { merge: true });
-      actualPayload.forEach((week, index) => {
-        const ref = cashflowWeekRefs[index];
-        const weekSnapshot = cashflowWeekSnapshots[index];
-        const fallbackWeek = getMonthMondayWeeks(week.yearMonth).find((candidate) => candidate.weekNo === week.weekNo);
-        const existingWeek = weekSnapshot.exists() ? weekSnapshot.data() as Partial<CashflowWeekSheet> : null;
-        const actorUid = authUser?.uid || portalUser?.id || 'portal-user';
-        const actorName = portalUser?.name || authUser?.name || '';
-        if (weekSnapshot.exists()) {
-          transaction.set(ref, buildCashflowWeekUpdatePatch({
-            orgId,
-            actorUid,
-            actorName,
-            mode: 'actual',
-            amounts: week.amounts as any,
-            now,
-            weekStart: existingWeek?.weekStart || fallbackWeek?.weekStart || '',
-            existingProjection: existingWeek?.projection,
-            existingActual: existingWeek?.actual,
-          }) as any, { merge: true });
-          return;
-        }
-        transaction.set(ref, buildInitialCashflowWeekDoc({
-          orgId,
-          actorUid,
-          actorName,
-          projectId: currentProjectId,
-          yearMonth: week.yearMonth,
-          weekNo: week.weekNo,
-          weekStart: fallbackWeek?.weekStart || '',
-          weekEnd: fallbackWeek?.weekEnd || '',
-          mode: 'actual',
-          amounts: week.amounts as any,
-          now,
-        }));
-      });
-      return {
-        rows: preparedRows,
-        sheetName: latestName,
-        order: latestOrder,
-        createdAt: data.createdAt || targetSheet?.createdAt,
-        sheetVersion: data.sheetVersion,
-      };
+
+    const importIdempotencyKey = `bank-import:${currentProjectId}:${targetSheetId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+    const importResult = await importBankStatementBatchViaBff({
+      tenantId: orgId,
+      actor: weeklyPlatformActor,
+      projectId: currentProjectId,
+      idempotencyKey: importIdempotencyKey,
+      payload: {
+        idempotencyKey: importIdempotencyKey,
+        uploadName: targetSheetName,
+        columns: sanitizedSheet.columns,
+        lines: importLines,
+      },
     });
+    const importedLinesByIndex = new Map(importResult.lines.map((line) => [line.lineIndex, line] as const));
+    const items = importLines.flatMap((line) => {
+      const importedLine = importedLinesByIndex.get(line.lineIndex);
+      if (!importedLine?.id) return [];
+      if (importedLine.duplicate && importedLine.status !== 'staged') return [];
+      const sourceRow = sanitizedSheet.rows[line.lineIndex];
+      const rowKey = sourceRow?.tempId || `row-${line.lineIndex}`;
+      const cells = cellPatchesByRowKey[rowKey] || cellPatchesByRowKey[line.sourceLineKey] || [];
+      return [{
+        importLineId: importedLine.id,
+        cells,
+      }];
+    });
+    if (items.length === 0) return { appliedCount: 0 };
+
+    const applyIdempotencyKey = `bank-apply:${currentProjectId}:${targetSheetId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+    const applyResult = await applyBankStatementItemsViaBff({
+      tenantId: orgId,
+      actor: weeklyPlatformActor,
+      projectId: currentProjectId,
+      idempotencyKey: applyIdempotencyKey,
+      payload: {
+        idempotencyKey: applyIdempotencyKey,
+        sheetKey: targetSheetId,
+        sheetName: targetSheetName,
+        expectedSheetVersion: targetSheet?.sheetVersion,
+        items,
+      },
+    });
+    const latestSheet = await readWeeklyExpenseSheetViaBff({
+      tenantId: orgId,
+      actor: weeklyPlatformActor,
+      projectId: currentProjectId,
+      sheetKey: targetSheetId,
+    });
+    const latestRows = weeklyExpenseServerRowsToImportRows(latestSheet.rows);
     const nextSheets = upsertExpenseSheetTabRows({
       sheets: expenseSheetsRef.current,
       sheetId: targetSheetId,
-      sheetName: transactionResult.sheetName,
-      order: transactionResult.order,
-      rows: transactionResult.rows,
-      sheetVersion: transactionResult.sheetVersion,
+      sheetName: latestSheet.sheetName || targetSheetName,
+      order: targetSheet?.order || (targetSheetId === 'default' ? 0 : expenseSheetsRef.current.length + 1),
+      rows: latestRows,
+      sheetVersion: latestSheet.sheetVersion,
       now,
-      createdAt: transactionResult.createdAt,
+      createdAt: targetSheet?.createdAt,
     });
     expenseSheetsRef.current = nextSheets;
     setExpenseSheets(nextSheets);
     if (targetSheetId === activeExpenseSheetIdRef.current) {
-      setExpenseSheetRows(transactionResult.rows);
+      setExpenseSheetRows(latestRows);
     }
-    return { appliedCount: mappedRows.length };
+    return { appliedCount: applyResult.appliedLineCount };
   }, [
-    authUser?.uid,
-    authUser?.name,
     currentProjectId,
-    db,
     evidenceRequiredMap,
     isDevHarnessUser,
     ledgers,
@@ -2988,8 +2883,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     myProject?.fundInputMode,
     myProject?.settlementSheetPolicy,
     orgId,
-    portalUser?.id,
-    portalUser?.name,
+    weeklyPlatformActor,
   ]);
 
   const upsertExpenseIntakeItems = useCallback(async (items: BankImportIntakeItem[]) => {

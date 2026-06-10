@@ -51,22 +51,18 @@ describe('portal bank statement apply policy', () => {
 
     expect(portalStoreSource).toContain('applyBankStatementRowsToExpenseSheet');
     expect(applyBlock).toContain('mapBankStatementsToImportRows');
-    expect(applyBlock).toContain('mergeBankRowsIntoExpenseSheet');
-    expect(applyBlock).toContain('buildExpenseSheetPersistenceDoc');
-    expect(applyBlock).toContain('buildLedgerActualSyncPayload(preparedRows)');
-    expect(applyBlock).toContain('buildCashflowWeekUpdatePatch');
-    expect(applyBlock).toContain('buildInitialCashflowWeekDoc');
-    expect(applyBlock).toContain("mode: 'actual'");
-    expect(applyBlock).toContain('cashflowWeeks');
-    expect(applyBlock).toContain('expense_sheets/${targetSheetId}');
-    expect(applyBlock).toContain('runTransaction');
-    expect(applyBlock).toContain('transaction.get(expenseSheetRef)');
-    expect(applyBlock).toContain('normalizeExpenseSheetRows(data.rows)');
+    expect(applyBlock).toContain('importBankStatementBatchViaBff');
+    expect(applyBlock).toContain('applyBankStatementItemsViaBff');
+    expect(applyBlock).toContain('readWeeklyExpenseSheetViaBff');
+    expect(applyBlock).toContain('weeklyExpenseServerRowsToImportRows(latestSheet.rows)');
+    expect(applyBlock).toContain('if (!isPlatformApiEnabled())');
     expect(applyBlock).toContain('cellPatchesByRowKey');
-    expect(applyBlock).toContain('bank-import-line:${rowKey}');
-    expect(applyBlock).not.toContain('importBankStatementBatchViaBff');
-    expect(applyBlock).not.toContain('applyBankStatementItemsViaBff');
-    expect(applyBlock).not.toContain('readWeeklyExpenseSheetViaBff');
+    expect(applyBlock).toContain('importLineId: importedLine.id');
+    expect(applyBlock).toContain("importedLine.duplicate && importedLine.status !== 'staged'");
+    expect(applyBlock).not.toContain('cashflowWeeks');
+    expect(applyBlock).not.toContain('buildCashflowWeekUpdatePatch');
+    expect(applyBlock).not.toContain('buildInitialCashflowWeekDoc');
+    expect(applyBlock).not.toContain('buildLedgerActualSyncPayload');
     expect(applyBlock).not.toContain('!line.duplicate');
     expect(applyBlock).not.toContain('saveExpenseSheetRows(');
     expect(applyBlock).not.toContain('buildBankImportIntakeDoc(');
@@ -77,17 +73,25 @@ describe('portal bank statement apply policy', () => {
     expect(bankStatementPageSource).toContain('visibleBankRows');
     expect(bankStatementPageSource).toContain("activeStatusTab === 'all'");
     expect(bankStatementPageSource).toContain("activeStatusTab === 'applied'");
-    expect(bankStatementPageSource).toContain('appliedBankLineIds.has(rowKey)');
+    expect(bankStatementPageSource).toContain('isAppliedBankRow(appliedBankLineIds, bankImportLineByRowKey, rowKey)');
+    expect(bankStatementPageSource).toContain("source.startsWith('bank:')");
     expect(bankStatementPageSource).toContain("activeStatusTab !== 'staged'");
     expect(bankStatementPageSource).not.toContain('applyBankStatementRowsToExpenseSheet({ columns, rows: selectedRows })');
   });
 
-  it('auto-hydrates cashflow actual read model from fixed weekly ledger rows', () => {
-    expect(portalStoreSource).toContain('upsertLedgerActualReadModel');
-    expect(portalStoreSource).toContain('ledgerActualReadModelHydrationKeyRef');
-    expect(portalStoreSource).toContain('buildLedgerActualSyncPayload(ledgerRows)');
-    expect(portalStoreSource).toContain('serializeLedgerActualSyncPayload(payload)');
-    expect(portalStoreSource).toContain('areCashflowActualAmountsEqual');
+  it('does not hydrate cashflow actual read model from the frontend ledger', () => {
+    expect(portalStoreSource).not.toContain('upsertLedgerActualReadModel');
+    expect(portalStoreSource).not.toContain('ledgerActualReadModelHydrationKeyRef');
+    expect(portalStoreSource).not.toContain('buildLedgerActualSyncPayload(ledgerRows)');
+    expect(portalStoreSource).not.toContain('serializeLedgerActualSyncPayload(payload)');
+    expect(portalStoreSource).not.toContain('areCashflowActualAmountsEqual');
+  });
+
+  it('hydrates weekly expense sheets from the Java read model when the platform API is enabled', () => {
+    expect(portalStoreSource).toContain('listWeeklyExpenseSheetsViaBff');
+    expect(portalStoreSource).toContain('if (isPlatformApiEnabled())');
+    expect(portalStoreSource).toContain('loadExpenseSheetsFromJava()');
+    expect(portalStoreSource).toContain('weeklyExpenseServerRowsToImportRows(sheet.rows || [])');
   });
 
   it('opens a completion wizard before applying selected bank rows to weekly expense', () => {
@@ -308,6 +312,7 @@ describe('portal bank statement apply policy', () => {
   it('computes already applied bank lines across every expense sheet tab', () => {
     expect(bankStatementPageSource).toContain('expenseSheets.flatMap');
     expect(bankStatementPageSource).toContain('collectAppliedBankLineIds(rowsAcrossSheets.length > 0 ? rowsAcrossSheets : expenseSheetRows)');
+    expect(bankStatementPageSource).toContain('const bankImportLineByRowKey = useMemo');
   });
 
   it('does not save the whole dirty bank baseline before confirming wizard patches', () => {

@@ -242,8 +242,22 @@ function collectAppliedBankLineIds(rows: ImportRow[] | null | undefined): Set<st
     const source = String(row.sourceTxId || '').trim();
     const match = source.match(/^bank-import-line:(.+)$/);
     if (match?.[1]) ids.add(match[1]);
+    if (source.startsWith('bank:')) {
+      ids.add(source);
+      ids.add(source.slice('bank:'.length));
+    }
   });
   return ids;
+}
+
+function isAppliedBankRow(
+  appliedIds: Set<string>,
+  importLineByRowKey: Map<string, { sourceLineKey?: string }>,
+  rowKey: string,
+): boolean {
+  if (appliedIds.has(rowKey)) return true;
+  const sourceLineKey = importLineByRowKey.get(rowKey)?.sourceLineKey || '';
+  return Boolean(sourceLineKey && (appliedIds.has(sourceLineKey) || appliedIds.has(`bank:${sourceLineKey}`)));
 }
 
 function buildWizardCellPatchesByRowKey(rows: BankStatementRow[], drafts: Record<string, WizardDraft>): Record<string, BankStatementApplyCellPatch[]> {
@@ -314,6 +328,14 @@ export function PortalBankStatementPage() {
     const rowsAcrossSheets = expenseSheets.flatMap((sheet) => sheet.rows || []);
     return collectAppliedBankLineIds(rowsAcrossSheets.length > 0 ? rowsAcrossSheets : expenseSheetRows);
   }, [expenseSheetRows, expenseSheets]);
+  const bankImportLineByRowKey = useMemo(() => {
+    const importLines = buildBankStatementServerImportLines({ columns, rows });
+    const result = new Map<string, { sourceLineKey?: string }>();
+    rows.forEach((row, index) => {
+      result.set(bankRowKey(row, index), { sourceLineKey: importLines[index]?.sourceLineKey });
+    });
+    return result;
+  }, [columns, rows]);
   const visibleBankRows = useMemo(
     () => rows
       .map((row, index) => ({ row, index, rowKey: row.tempId || `row-${index}` }))
@@ -321,14 +343,16 @@ export function PortalBankStatementPage() {
         activeStatusTab === 'all'
           ? true
           : activeStatusTab === 'applied'
-          ? appliedBankLineIds.has(rowKey)
-          : !appliedBankLineIds.has(rowKey)
+          ? isAppliedBankRow(appliedBankLineIds, bankImportLineByRowKey, rowKey)
+          : !isAppliedBankRow(appliedBankLineIds, bankImportLineByRowKey, rowKey)
       )),
-    [activeStatusTab, appliedBankLineIds, rows],
+    [activeStatusTab, appliedBankLineIds, bankImportLineByRowKey, rows],
   );
   const appliedBankRowCount = useMemo(
-    () => rows.reduce((count, row, index) => count + (appliedBankLineIds.has(bankRowKey(row, index)) ? 1 : 0), 0),
-    [appliedBankLineIds, rows],
+    () => rows.reduce((count, row, index) => (
+      count + (isAppliedBankRow(appliedBankLineIds, bankImportLineByRowKey, bankRowKey(row, index)) ? 1 : 0)
+    ), 0),
+    [appliedBankLineIds, bankImportLineByRowKey, rows],
   );
   const stagedBankRowCount = Math.max(rows.length - appliedBankRowCount, 0);
   const selectedVisibleCount = useMemo(
@@ -338,9 +362,9 @@ export function PortalBankStatementPage() {
   const unappliedSelectedRows = useMemo(
     () => selectedRows.filter((row, index) => {
       const id = bankRowKey(row, index);
-      return !appliedBankLineIds.has(id);
+      return !isAppliedBankRow(appliedBankLineIds, bankImportLineByRowKey, id);
     }),
-    [appliedBankLineIds, selectedRows],
+    [appliedBankLineIds, bankImportLineByRowKey, selectedRows],
   );
   const skippedAppliedCount = selectedRows.length - unappliedSelectedRows.length;
   const budgetCategoryOptions = useMemo(() => {

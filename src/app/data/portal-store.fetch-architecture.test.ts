@@ -17,7 +17,7 @@ describe('portal-store fetch architecture', () => {
       '}, [authLoading, isMemberLoading, isAuthenticated, authUser, firestoreEnabled, db, orgId, isDevHarnessUser, assignedProjectIds, livePortalMode]);',
     );
     expect(portalStoreSource).toContain(
-      '}, [authLoading, isMemberLoading, isAuthenticated, authUser, currentProjectId, firestoreEnabled, db, orgId, scopedProjectIdsKey, isDevHarnessUser, portalUserProjectIdsKey, portalUser?.name, livePortalMode]);',
+      '}, [authLoading, isMemberLoading, isAuthenticated, authUser, currentProjectId, firestoreEnabled, db, orgId, scopedProjectIdsKey, isDevHarnessUser, portalUserProjectIdsKey, portalUser?.name, livePortalMode, refreshBankStatementRowsFromServer, weeklyPlatformActor]);',
     );
     expect(portalStoreSource).toContain(
       '}, [authLoading, isMemberLoading, isAuthenticated, authUser, firestoreEnabled, db, orgId, isDevHarnessUser, scopedProjectIdsKey, livePortalMode]);',

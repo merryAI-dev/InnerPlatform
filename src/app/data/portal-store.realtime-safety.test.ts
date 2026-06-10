@@ -11,7 +11,7 @@ describe('portal-store realtime safety', () => {
   it('uses stable dependency keys for portal hydration listeners', () => {
     expect(portalStoreSource).toContain("const scopedProjectIdsKey = scopedProjectIds.join('|');");
     expect(portalStoreSource).toContain("const portalUserProjectIdsKey = (portalUser?.projectIds || []).join('|');");
-    expect(portalStoreSource).toContain('scopedProjectIdsKey, isDevHarnessUser, portalUserProjectIdsKey, livePortalMode');
+    expect(portalStoreSource).toContain('scopedProjectIdsKey, isDevHarnessUser, portalUserProjectIdsKey, portalUser?.name, livePortalMode, refreshBankStatementRowsFromServer, weeklyPlatformActor');
     expect(portalStoreSource).not.toContain('scopedProjectIds, isDevHarnessUser, portalUser?.projectIds, livePortalMode');
   });
 

@@ -96,6 +96,7 @@ public class WeeklyExpenseCommandService {
     public static final String AUDIT_EXPORT_CREATE_COMMAND = "weeklyExpense.auditExport.create";
 
     private static final Pattern WEEK_LABEL_PATTERN = Pattern.compile("(20\\d{2}-\\d{2}).*?([1-6])");
+    private static final Pattern SHORT_WEEK_LABEL_PATTERN = Pattern.compile("^(\\d{2})-(\\d{1,2})-([1-6])$");
     private static final int ROW_REINDEX_TEMPORARY_OFFSET = 1_000_000;
 
     private final WeeklyExpensePersistence persistence;
@@ -456,7 +457,7 @@ public class WeeklyExpenseCommandService {
             }
             WeeklyExpenseRowEntity row = sheet.rowAt(nextRowIndex);
             nextRowIndex += 1;
-            row.setSourceTxId("bank-import-line:" + line.getId());
+            row.setSourceTxId("bank:" + line.getSourceLineKey());
             row.setEntryKind("bank_import");
             setRawCell(row, WeeklyExpenseColumn.DATE, line.getTransactionDate(), false);
             setRawCell(row, WeeklyExpenseColumn.BALANCE_AFTER, moneyText(line.getBalanceAfter()), false);
@@ -1504,8 +1505,15 @@ public class WeeklyExpenseCommandService {
     private WeekKey parseWeek(WeeklyExpenseRowEntity row) {
         String label = textAt(row, WeeklyExpenseColumn.WEEK);
         Matcher matcher = WEEK_LABEL_PATTERN.matcher(label);
-        if (!matcher.find()) return null;
-        return new WeekKey(matcher.group(1), Integer.parseInt(matcher.group(2)));
+        if (matcher.find()) {
+            return new WeekKey(matcher.group(1), Integer.parseInt(matcher.group(2)));
+        }
+        Matcher shortMatcher = SHORT_WEEK_LABEL_PATTERN.matcher(label);
+        if (!shortMatcher.find()) return null;
+        int year = 2000 + Integer.parseInt(shortMatcher.group(1));
+        int month = Integer.parseInt(shortMatcher.group(2));
+        int weekNo = Integer.parseInt(shortMatcher.group(3));
+        return new WeekKey(String.format("%04d-%02d", year, month), weekNo);
     }
 
     private String textAt(WeeklyExpenseRowEntity row, WeeklyExpenseColumn column) {

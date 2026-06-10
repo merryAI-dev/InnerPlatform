@@ -211,6 +211,34 @@ describe('JVM weekly API BFF proxy', () => {
     });
   });
 
+  it('proxies weekly expense sheet list reads for Java-backed portal hydration', async () => {
+    const calls = [];
+    const fetchImpl = vi.fn(async (url, init) => {
+      calls.push({ url, init });
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({
+          projectId: 'project-a',
+          sheets: [{ sheetKey: 'default', rows: [], sheetVersion: 1 }],
+        }),
+      };
+    });
+    const { app } = createApp(fetchImpl);
+
+    await request(app)
+      .get('/api/v1/weekly-expenses/project-a/sheets')
+      .expect(200)
+      .expect((response) => {
+        expect(response.body).toMatchObject({ projectId: 'project-a', sheets: [{ sheetKey: 'default', sheetVersion: 1 }] });
+      });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe('http://jvm-weekly.local/api/v1/weekly-expenses/project-a/sheets');
+    expect(calls[0].init.method).toBe('GET');
+    expect(calls[0].init.body).toBeUndefined();
+  });
+
   it('adds a Google identity token when the Java Cloud Run audience is configured', async () => {
     const calls = [];
     const fetchImpl = vi.fn(async (url, init) => {

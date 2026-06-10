@@ -161,6 +161,26 @@ class WeeklyExpenseSpreadsheetServiceTest {
     }
 
     @Test
+    void serverDerivesRowNumberAndWednesdayBasedWeekLabel() {
+        WeeklyExpenseSheetEntity sheet = new WeeklyExpenseSheetEntity("tenant-a", "project-a", "default", "기본 탭");
+        WeeklyExpenseRowEntity row = sheet.rowAt(1);
+        row.cellAt(WeeklyExpenseColumn.NO.index()).setRawValue("999");
+        row.cellAt(WeeklyExpenseColumn.NO.index()).setUserEdited(true);
+        row.cellAt(WeeklyExpenseColumn.WEEK.index()).setRawValue("client-week");
+        row.cellAt(WeeklyExpenseColumn.WEEK.index()).setUserEdited(true);
+        row.cellAt(WeeklyExpenseColumn.DATE.index()).setRawValue("2026-06-10");
+
+        service.validateAndRecalculateRows(sheet);
+
+        WeeklyExpenseCellEntity noCell = row.cellAt(WeeklyExpenseColumn.NO.index());
+        WeeklyExpenseCellEntity weekCell = row.cellAt(WeeklyExpenseColumn.WEEK.index());
+        assertEquals("2", noCell.getNormalizedValue());
+        assertFalse(noCell.isUserEdited());
+        assertEquals("26-6-2", weekCell.getNormalizedValue());
+        assertFalse(weekCell.isUserEdited());
+    }
+
+    @Test
     void rowEntityRejectsCellsOutsideTheTwentyColumnSchema() {
         WeeklyExpenseSheetEntity sheet = new WeeklyExpenseSheetEntity("tenant-a", "project-a", "default", "기본 탭");
         WeeklyExpenseRowEntity row = sheet.rowAt(0);

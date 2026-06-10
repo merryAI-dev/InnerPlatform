@@ -727,6 +727,12 @@ export interface WeeklyExpenseSheetResult {
   }>;
 }
 
+export interface WeeklyExpenseSheetsResult {
+  ok: boolean;
+  projectId: string;
+  sheets: WeeklyExpenseSheetResult[];
+}
+
 export interface PlatformApiClientLike {
   get<T>(path: string, options: {
     tenantId: string;
@@ -1624,6 +1630,25 @@ export async function readWeeklyExpenseSheetViaBff(params: {
   const apiClient = resolveClient(params.client);
   const response = await apiClient.get<WeeklyExpenseSheetResult>(
     `/api/v1/weekly-expenses/${encodeURIComponent(params.projectId)}/sheets/${encodeURIComponent(params.sheetKey)}`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      retries: 0,
+      timeoutMs: 12000,
+    },
+  );
+  return response.data;
+}
+
+export async function listWeeklyExpenseSheetsViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  client?: PlatformApiClientLike;
+}): Promise<WeeklyExpenseSheetsResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.get<WeeklyExpenseSheetsResult>(
+    `/api/v1/weekly-expenses/${encodeURIComponent(params.projectId)}/sheets`,
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),

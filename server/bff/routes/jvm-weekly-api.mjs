@@ -135,6 +135,21 @@ export function mountJvmWeeklyApiRoutes(app, {
     });
   }
 
+  app.get('/api/v1/weekly-expenses/:projectId/sheets', asyncHandler(async (req, res) => {
+    assertActorRoleAllowed(req, ROUTE_ROLES.readCore, 'read weekly expense sheets');
+    const projectId = encodeURIComponent(readOptionalText(req.params.projectId));
+    const result = await proxyJavaWeeklyJson({
+      fetchImpl,
+      baseUrl,
+      serviceToken,
+      idTokenAudience,
+      context: req.context,
+      method: 'GET',
+      path: `/api/v1/weekly-expenses/${projectId}/sheets`,
+    });
+    res.status(200).json(result);
+  }));
+
   app.get('/api/v1/weekly-expenses/:projectId/sheets/:sheetKey', asyncHandler(async (req, res) => {
     assertActorRoleAllowed(req, ROUTE_ROLES.readCore, 'read weekly expense sheet');
     const projectId = encodeURIComponent(readOptionalText(req.params.projectId));

@@ -30,8 +30,9 @@ describe('portal minimal sweep', () => {
     expect(bankStatementSource).not.toContain('사업비 입력(주간) 먼저 보기');
   });
 
-  it('restores direct bank-to-weekly-expense continuation and removes queue-first controls', () => {
-    expect(bankStatementSource).toContain('사업비 입력(주간)으로 이어가기');
+  it('keeps bank-to-weekly-expense continuation inside the wizard and removes queue-first controls', () => {
+    expect(bankStatementSource).toContain('비어있는 사업비 항목 작성');
+    expect(bankStatementSource).not.toContain('사업비 입력(주간)으로 이어가기');
     expect(bankStatementSource).not.toContain('신규 거래 처리 Queue');
     expect(bankStatementSource).not.toContain('분류/검토 열기');
     expect(bankStatementSource).not.toContain('증빙 이어서 하기');

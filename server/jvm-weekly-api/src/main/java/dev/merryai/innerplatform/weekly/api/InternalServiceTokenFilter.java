@@ -64,9 +64,14 @@ public class InternalServiceTokenFilter extends OncePerRequestFilter {
 
         VerifiedFirebaseActor actor;
         try {
-            actor = firebaseBearerTokenVerifier.verify(parseBearer(request.getHeader("authorization")));
-            requireHeaderMatch(request, "x-actor-id", actor.actorId(), "actor_mismatch", "Header actor does not match token subject.");
-            actor = resolveTrustedActor(request, actor);
+            String bearerToken = parseBearer(request.getHeader("authorization"));
+            if (!bearerToken.isBlank()) {
+                actor = firebaseBearerTokenVerifier.verify(bearerToken);
+                requireHeaderMatch(request, "x-actor-id", actor.actorId(), "actor_mismatch", "Header actor does not match token subject.");
+                actor = resolveTrustedActor(request, actor);
+            } else {
+                actor = firebaseBearerTokenVerifier.verify("");
+            }
         } catch (WeeklyApiAuthException error) {
             applyCorsHeaders(request, response);
             writeAuthError(response, error.statusCode, error.code, error.getMessage());
