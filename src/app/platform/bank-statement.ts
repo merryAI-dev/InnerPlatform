@@ -1,4 +1,4 @@
-import { normalizeKey, normalizeSpace, parseDate, parseNumber } from './csv-utils';
+import { normalizeKey, normalizeSpace, parseDate, parseNumber, stableHash } from './csv-utils';
 import { findWeekForDate, getYearMondayWeeks } from './cashflow-weeks';
 import { SETTLEMENT_COLUMNS, createEmptyImportRow, parseCashflowLineLabel, type ImportRow } from './settlement-csv';
 import type {
@@ -185,10 +185,181 @@ export interface BankStatementSheet {
   rows: BankStatementRow[];
 }
 
+export interface BankStatementServerImportLine {
+  lineIndex: number;
+  sourceLineKey: string;
+  transactionDate: string;
+  counterparty: string;
+  memo: string;
+  signedAmount: number | null;
+  balanceAfter: number;
+  rawCells: string[];
+}
+
 export function createDefaultBankStatementSheet(): BankStatementSheet {
   return {
     columns: [...BANK_STATEMENT_COLUMNS],
     rows: [],
+  };
+}
+
+function normalizeDateTimeToSecond(raw: string): string {
+  const value = normalizeSpace(raw).replace(/\./g, '-').replace('T', ' ');
+  if (!value) return '';
+  const match = value.match(/(\d{4})\D(\d{1,2})\D(\d{1,2})(?:\s+(\d{1,2})(?::(\d{1,2}))?(?::(\d{1,2}))?)?/);
+  if (!match) return parseDateOnly(value);
+  const date = `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`;
+  if (!match[4]) return date;
+  const hour = match[4].padStart(2, '0');
+  const minute = (match[5] || '0').padStart(2, '0');
+  const second = (match[6] || '0').padStart(2, '0');
+  return `${date} ${hour}:${minute}:${second}`;
+}
+
+function pickCounterpartyFromStatementRow(columns: string[], rowCells: string[]): string {
+  const groups = [
+    ['사용처', '가맹점', '상호', '거래처'],
+    ['의뢰인/수취인', '의뢰인수취인', '수취인', '의뢰인', '상대계좌명'],
+    ['내용', '거래내용'],
+    ['적요', '메모'],
+  ];
+  const seen = new Set<number>();
+  for (const aliases of groups) {
+    for (const idx of findHeaderIndicesByAliases(columns, aliases)) {
+      if (seen.has(idx)) continue;
+      seen.add(idx);
+      const value = normalizeSpace(String(rowCells[idx] || ''));
+      if (value) return value;
+    }
+  }
+  return '';
+}
+
+export function buildBankStatementDedupeKey(sheet: BankStatementSheet, row: BankStatementRow): string {
+  const columns = Array.isArray(sheet.columns) ? sheet.columns : [];
+  const rows = Array.isArray(sheet.rows) ? sheet.rows : [];
+  const rowCells = Array.isArray(row.cells) ? row.cells : [];
+  const dateIdx = findFirstHeaderIndex(columns, ['거래일자', '거래일시', '거래일', '일자', '날짜', 'date']);
+  const rawDate = dateIdx >= 0
+    ? String(rowCells[dateIdx] || '')
+    : String(rowCells.find((value) => parseDateOnly(String(value || ''))) || '');
+  const dateTime = normalizeDateTimeToSecond(rawDate);
+  const counterparty = pickCounterpartyFromStatementRow(columns, rowCells);
+  const amount = pickAmount(rowCells, resolveAmountColumnIndices(columns, rows), columns);
+  if (!dateTime || !counterparty || amount.amount == null) return '';
+  const signedAmount = amount.entryKind === 'DEPOSIT' ? amount.amount : -Math.abs(amount.amount);
+  return `${dateTime}|${normalizeKey(counterparty)}|${signedAmount}`;
+}
+
+export function buildBankStatementServerImportLines(sheet: BankStatementSheet): BankStatementServerImportLine[] {
+  const columns = Array.isArray(sheet.columns) ? sheet.columns : [];
+  const rows = Array.isArray(sheet.rows) ? sheet.rows : [];
+  const dateIdx = findFirstHeaderIndex(columns, ['거래일자', '거래일시', '거래일', '일자', '날짜', 'date']);
+  const memoIdxCandidates = findHeaderIndicesByAliases(columns, ['적요', '메모', '내용', '거래내용', '상세적요']);
+  const balanceIdx = findFirstHeaderIndex(columns, ['잔액']);
+  const amountIdxs = resolveAmountColumnIndices(columns, rows);
+
+  return rows.map((row, index) => {
+    const rawCells = columns.map((_, colIdx) => normalizeSpace(String(row.cells?.[colIdx] ?? '')));
+    const rawDate = dateIdx >= 0
+      ? String(rawCells[dateIdx] || '')
+      : String(rawCells.find((value) => parseDateOnly(String(value || ''))) || '');
+    const normalizedDateTime = normalizeDateTimeToSecond(rawDate);
+    const counterparty = pickCounterpartyFromStatementRow(columns, rawCells);
+    const amount = pickAmount(rawCells, amountIdxs, columns);
+    const signedAmount = amount.amount == null
+      ? null
+      : amount.entryKind === 'DEPOSIT' ? amount.amount : -Math.abs(amount.amount);
+    const keyBase = normalizedDateTime && counterparty && amount.amount != null
+      ? `${normalizedDateTime}|${normalizeKey(counterparty)}|${signedAmount}`
+      : `client-unvalidated-row-${index}`;
+    let memo = '';
+    for (const idx of memoIdxCandidates) {
+      const value = normalizeSpace(String(rawCells[idx] || ''));
+      if (!value) continue;
+      memo = value;
+      break;
+    }
+    const balanceAfter = balanceIdx >= 0 ? (parseNumber(String(rawCells[balanceIdx] || '')) || 0) : 0;
+    return {
+      lineIndex: index,
+      sourceLineKey: `bank-${stableHash(keyBase)}`,
+      transactionDate: normalizedDateTime.slice(0, 10),
+      counterparty,
+      memo,
+      signedAmount,
+      balanceAfter,
+      rawCells,
+    };
+  });
+}
+
+function mergeBankStatementColumns(left: string[], right: string[]): string[] {
+  const merged: string[] = [];
+  const seen = new Set<string>();
+  [...left, ...right].forEach((column, index) => {
+    const label = normalizeSpace(String(column || `컬럼${index + 1}`)) || `컬럼${index + 1}`;
+    const key = cleanHeader(label) || `col_${index}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    merged.push(label);
+  });
+  return merged.length > 0 ? merged : [...BANK_STATEMENT_COLUMNS];
+}
+
+function alignBankStatementRow(row: BankStatementRow, fromColumns: string[], toColumns: string[]): BankStatementRow {
+  const fromKeyToIndex = new Map<string, number>();
+  fromColumns.forEach((column, index) => {
+    const key = cleanHeader(column);
+    if (key && !fromKeyToIndex.has(key)) fromKeyToIndex.set(key, index);
+  });
+  return {
+    tempId: row.tempId,
+    cells: toColumns.map((column) => {
+      const sourceIndex = fromKeyToIndex.get(cleanHeader(column));
+      return sourceIndex == null ? '' : normalizeSpace(String(row.cells?.[sourceIndex] ?? ''));
+    }),
+  };
+}
+
+export function appendBankStatementRows(
+  existingSheet: BankStatementSheet | null | undefined,
+  incomingSheet: BankStatementSheet,
+): { sheet: BankStatementSheet; appendedRows: BankStatementRow[]; duplicateRows: BankStatementRow[] } {
+  const existingColumns = Array.isArray(existingSheet?.columns) ? existingSheet.columns : [];
+  const incomingColumns = Array.isArray(incomingSheet?.columns) ? incomingSheet.columns : [];
+  const columns = mergeBankStatementColumns(existingColumns, incomingColumns);
+  const existingRows = (Array.isArray(existingSheet?.rows) ? existingSheet.rows : [])
+    .map((row) => alignBankStatementRow(row, existingColumns, columns));
+  const incomingRows = (Array.isArray(incomingSheet?.rows) ? incomingSheet.rows : [])
+    .map((row, index) => alignBankStatementRow({
+      tempId: row.tempId || `bank-${Date.now()}-${index}`,
+      cells: Array.isArray(row.cells) ? row.cells : [],
+    }, incomingColumns, columns));
+
+  const sheetForKey: BankStatementSheet = { columns, rows: existingRows };
+  const existingKeys = new Set(
+    existingRows
+      .map((row) => buildBankStatementDedupeKey(sheetForKey, row))
+      .filter(Boolean),
+  );
+  const appendedRows: BankStatementRow[] = [];
+  const duplicateRows: BankStatementRow[] = [];
+
+  incomingRows.forEach((row) => {
+    const key = buildBankStatementDedupeKey({ columns, rows: [...existingRows, ...appendedRows, row] }, row);
+    if (key && existingKeys.has(key)) {
+      duplicateRows.push(row);
+      return;
+    }
+    if (key) existingKeys.add(key);
+    appendedRows.push(row);
+  });
+
+  return {
+    sheet: { columns, rows: [...existingRows, ...appendedRows] },
+    appendedRows,
+    duplicateRows,
   };
 }
 
@@ -493,7 +664,7 @@ function resolveBankSnapshotFromStatementRow(
   const rawDate = dateIdx >= 0
     ? String(rowCells[dateIdx] || '')
     : String(rowCells.find((value) => parseDateOnly(String(value || ''))) || '');
-  const normalizedDateTime = parseDateOnly(rawDate) || normalizeSpace(rawDate);
+  const normalizedDateTime = normalizeDateTimeToSecond(rawDate) || normalizeSpace(rawDate);
   if (!normalizedDateTime) return null;
 
   let counterparty = '';

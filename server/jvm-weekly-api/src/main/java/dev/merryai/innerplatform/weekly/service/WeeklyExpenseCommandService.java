@@ -248,6 +248,7 @@ public class WeeklyExpenseCommandService {
                 line.getBatch().getStatus(),
                 line.getBatch().getCreatedBy(),
                 line.getBatch().getCreatedAt(),
+                readStringList(line.getBatch().getColumnJson()),
                 line.getLineIndex(),
                 line.getSourceLineKey(),
                 line.getTransactionDate(),
@@ -300,20 +301,22 @@ public class WeeklyExpenseCommandService {
         Set<String> seenSourceLineKeys = new LinkedHashSet<>();
         List<ImportBankStatementBatchResponse.LineResult> duplicateLines = new ArrayList<>();
         for (ImportBankStatementBatchRequest.LinePatch line : request.lines()) {
-            if (!seenSourceLineKeys.add(line.sourceLineKey())) {
+            CanonicalBankImportLine canonicalLine = canonicalizeBankImportLine(request.columns(), line);
+            if (!seenSourceLineKeys.add(canonicalLine.sourceLineKey())) {
                 duplicateLines.add(new ImportBankStatementBatchResponse.LineResult(
                     null,
-                    line.lineIndex(),
-                    line.sourceLineKey(),
+                    canonicalLine.lineIndex(),
+                    canonicalLine.sourceLineKey(),
                     "duplicate",
-                    line.signedAmount()
+                    canonicalLine.signedAmount(),
+                    true
                 ));
                 continue;
             }
             var duplicate = persistence.findBankImportLineBySourceKey(
                 actor.tenantId(),
                 projectId,
-                line.sourceLineKey()
+                canonicalLine.sourceLineKey()
             );
             if (duplicate.isPresent()) {
                 WeeklyExpenseBankImportLineEntity existingLine = duplicate.get();
@@ -322,20 +325,21 @@ public class WeeklyExpenseCommandService {
                     existingLine.getLineIndex(),
                     existingLine.getSourceLineKey(),
                     existingLine.getStatus(),
-                    existingLine.getSignedAmount()
+                    existingLine.getSignedAmount(),
+                    true
                 ));
                 continue;
             }
             batch.addLine(new WeeklyExpenseBankImportLineEntity(
                 batch,
-                line.lineIndex(),
-                line.sourceLineKey(),
-                line.transactionDate(),
-                line.counterparty(),
-                line.memo(),
-                line.signedAmount(),
-                line.balanceAfter(),
-                writeJson(line.rawCells())
+                canonicalLine.lineIndex(),
+                canonicalLine.sourceLineKey(),
+                canonicalLine.transactionDate(),
+                canonicalLine.counterparty(),
+                canonicalLine.memo(),
+                canonicalLine.signedAmount(),
+                canonicalLine.balanceAfter(),
+                writeJson(canonicalLine.rawCells())
             ));
         }
 
@@ -347,7 +351,8 @@ public class WeeklyExpenseCommandService {
                 line.getLineIndex(),
                 line.getSourceLineKey(),
                 line.getStatus(),
-                line.getSignedAmount()
+                line.getSignedAmount(),
+                false
             ));
         }
         lineResults.addAll(duplicateLines);
@@ -1523,6 +1528,186 @@ public class WeeklyExpenseCommandService {
         return value.stripTrailingZeros().toPlainString();
     }
 
+    private CanonicalBankImportLine canonicalizeBankImportLine(
+        List<String> columns,
+        ImportBankStatementBatchRequest.LinePatch line
+    ) {
+        List<String> safeColumns = columns == null ? List.of() : columns.stream().map(this::normalizeText).toList();
+        List<String> sourceCells = line.rawCells() == null ? List.of() : line.rawCells();
+        List<String> rawCells = new ArrayList<>();
+        for (int i = 0; i < safeColumns.size(); i++) {
+            rawCells.add(i < sourceCells.size() ? normalizeText(sourceCells.get(i)) : "");
+        }
+        int dateIndex = firstHeaderIndex(safeColumns, List.of("거래일자", "거래일시", "거래일", "일자", "날짜", "date"));
+        String rawDate = dateIndex >= 0 ? rawCells.get(dateIndex) : rawCells.stream()
+            .map(this::normalizeDateTimeToSecond)
+            .filter(value -> !value.isBlank())
+            .findFirst()
+            .orElse("");
+        String dateTime = normalizeDateTimeToSecond(rawDate);
+        String counterparty = pickBankCounterparty(safeColumns, rawCells);
+        BankImportAmount amount = pickBankAmount(safeColumns, rawCells);
+        if (dateTime.isBlank() || counterparty.isBlank() || amount.signedAmount() == null) {
+            throw new IllegalArgumentException("Bank import row requires transaction date, counterparty, and amount.");
+        }
+        BigDecimal signedAmount = amount.signedAmount();
+        String sourceLineKey = "bank-" + sha256(dateTime + "|" + normalizeKey(counterparty) + "|" + moneyText(signedAmount));
+        return new CanonicalBankImportLine(
+            line.lineIndex(),
+            sourceLineKey,
+            dateTime.substring(0, Math.min(10, dateTime.length())),
+            counterparty,
+            pickBankMemo(safeColumns, rawCells),
+            signedAmount,
+            pickBankBalanceAfter(safeColumns, rawCells),
+            rawCells
+        );
+    }
+
+    private String normalizeDateTimeToSecond(String raw) {
+        String value = normalizeText(raw).replace('.', '-').replace('T', ' ');
+        if (value.isBlank()) return "";
+        Matcher ymd = Pattern
+            .compile("(\\d{4})\\D(\\d{1,2})\\D(\\d{1,2})(?:\\s+(\\d{1,2})(?::(\\d{1,2}))?(?::(\\d{1,2}))?)?")
+            .matcher(value);
+        if (ymd.find()) {
+            String date = ymd.group(1) + "-" + twoDigits(ymd.group(2)) + "-" + twoDigits(ymd.group(3));
+            if (ymd.group(4) == null) return date;
+            return date + " " + twoDigits(ymd.group(4)) + ":" + twoDigits(defaultText(ymd.group(5), "0")) + ":" + twoDigits(defaultText(ymd.group(6), "0"));
+        }
+        Matcher mdy = Pattern
+            .compile("(\\d{1,2})/(\\d{1,2})/(\\d{2}|\\d{4})(?:\\s+(\\d{1,2})(?::(\\d{1,2}))?(?::(\\d{1,2}))?)?")
+            .matcher(value);
+        if (mdy.find()) {
+            int year = Integer.parseInt(mdy.group(3));
+            if (year < 100) year += 2000;
+            String date = year + "-" + twoDigits(mdy.group(1)) + "-" + twoDigits(mdy.group(2));
+            if (mdy.group(4) == null) return date;
+            return date + " " + twoDigits(mdy.group(4)) + ":" + twoDigits(defaultText(mdy.group(5), "0")) + ":" + twoDigits(defaultText(mdy.group(6), "0"));
+        }
+        return "";
+    }
+
+    private String pickBankCounterparty(List<String> columns, List<String> rawCells) {
+        List<List<String>> groups = List.of(
+            List.of("사용처", "가맹점", "상호", "거래처", "지급처"),
+            List.of("의뢰인/수취인", "의뢰인수취인", "수취인", "의뢰인", "상대계좌명"),
+            List.of("내용", "거래내용"),
+            List.of("적요", "메모")
+        );
+        for (List<String> aliases : groups) {
+            for (int idx : headerIndices(columns, aliases)) {
+                String value = cell(rawCells, idx);
+                if (!value.isBlank()) return value;
+            }
+        }
+        return "";
+    }
+
+    private String pickBankMemo(List<String> columns, List<String> rawCells) {
+        for (int idx : headerIndices(columns, List.of("적요", "메모", "내용", "거래내용", "상세적요"))) {
+            String value = cell(rawCells, idx);
+            if (!value.isBlank()) return value;
+        }
+        return "";
+    }
+
+    private BigDecimal pickBankBalanceAfter(List<String> columns, List<String> rawCells) {
+        int idx = firstHeaderIndex(columns, List.of("잔액"));
+        if (idx < 0) return BigDecimal.ZERO;
+        BigDecimal parsed = parseBankMoney(cell(rawCells, idx));
+        return parsed == null ? BigDecimal.ZERO : parsed;
+    }
+
+    private BankImportAmount pickBankAmount(List<String> columns, List<String> rawCells) {
+        BigDecimal deposit = null;
+        BigDecimal withdrawal = null;
+        BigDecimal generic = null;
+        for (int i = 0; i < columns.size(); i++) {
+            String header = normalizeKey(columns.get(i));
+            if (header.contains(normalizeKey("잔액"))) continue;
+            BigDecimal parsed = parseBankMoney(cell(rawCells, i));
+            if (parsed == null || parsed.compareTo(BigDecimal.ZERO) == 0) continue;
+            if (header.contains(normalizeKey("입금"))) {
+                deposit = parsed.abs();
+            } else if (header.contains(normalizeKey("출금")) || header.contains(normalizeKey("공급가액"))) {
+                withdrawal = parsed.abs();
+            } else if (header.contains(normalizeKey("금액")) || header.contains("amount")) {
+                generic = parsed;
+            }
+        }
+        if (deposit != null) return new BankImportAmount(deposit);
+        if (withdrawal != null) return new BankImportAmount(withdrawal.negate());
+        if (generic != null) return new BankImportAmount(generic);
+        return new BankImportAmount(null);
+    }
+
+    private BigDecimal parseBankMoney(String raw) {
+        String value = normalizeText(raw);
+        if (value.isBlank()) return null;
+        boolean wrappedNegative = value.startsWith("(") && value.endsWith(")");
+        String cleaned = value.replace(",", "").replace("원", "").replace("+", "").replace("(", "").replace(")", "").trim();
+        if (cleaned.isBlank() || "-".equals(cleaned)) return null;
+        try {
+            BigDecimal parsed = new BigDecimal(cleaned);
+            return wrappedNegative ? parsed.abs().negate() : parsed;
+        } catch (NumberFormatException error) {
+            return null;
+        }
+    }
+
+    private int firstHeaderIndex(List<String> columns, List<String> aliases) {
+        for (String alias : aliases) {
+            String key = normalizeKey(alias);
+            for (int i = 0; i < columns.size(); i++) {
+                if (normalizeKey(columns.get(i)).equals(key)) return i;
+            }
+        }
+        for (String alias : aliases) {
+            String key = normalizeKey(alias);
+            for (int i = 0; i < columns.size(); i++) {
+                String header = normalizeKey(columns.get(i));
+                if (!header.isBlank() && header.contains(key)) return i;
+            }
+        }
+        return -1;
+    }
+
+    private List<Integer> headerIndices(List<String> columns, List<String> aliases) {
+        List<Integer> indices = new ArrayList<>();
+        Set<Integer> seen = new LinkedHashSet<>();
+        for (String alias : aliases) {
+            String key = normalizeKey(alias);
+            for (int i = 0; i < columns.size(); i++) {
+                String header = normalizeKey(columns.get(i));
+                if (!header.isBlank() && (header.equals(key) || header.contains(key)) && seen.add(i)) {
+                    indices.add(i);
+                }
+            }
+        }
+        return indices;
+    }
+
+    private String normalizeText(String value) {
+        return value == null ? "" : value.replace('\u00a0', ' ').trim().replaceAll("\\s+", " ");
+    }
+
+    private String normalizeKey(String value) {
+        return normalizeText(value).toLowerCase(Locale.ROOT).replaceAll("[\\s_\\-./()\\[\\]]+", "");
+    }
+
+    private String cell(List<String> cells, int index) {
+        return index >= 0 && index < cells.size() ? normalizeText(cells.get(index)) : "";
+    }
+
+    private String defaultText(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value;
+    }
+
+    private String twoDigits(String value) {
+        return String.format("%02d", Integer.parseInt(value));
+    }
+
     private Set<Integer> touchedRows(List<SaveDraftRequest.RowPatch> rows) {
         Set<Integer> touched = new LinkedHashSet<>();
         for (SaveDraftRequest.RowPatch row : rows) touched.add(row.rowIndex());
@@ -1739,6 +1924,21 @@ public class WeeklyExpenseCommandService {
     }
 
     private record WeekKey(String yearMonth, int weekNo) {
+    }
+
+    private record BankImportAmount(BigDecimal signedAmount) {
+    }
+
+    private record CanonicalBankImportLine(
+        int lineIndex,
+        String sourceLineKey,
+        String transactionDate,
+        String counterparty,
+        String memo,
+        BigDecimal signedAmount,
+        BigDecimal balanceAfter,
+        List<String> rawCells
+    ) {
     }
 
     private static final class ProjectionLineAccumulator {

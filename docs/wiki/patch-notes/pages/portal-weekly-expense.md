@@ -3,7 +3,7 @@
 - route: `/portal/weekly-expenses`
 - primary users: PM, 실무 입력 담당자
 - status: active
-- last updated: 2026-04-21
+- last updated: 2026-06-10
 
 ## Purpose
 
@@ -32,6 +32,7 @@
 
 ## Recent Changes
 
+- [2026-06-10] 통장내역 기준본 저장만으로 주간 사업비 행이 자동 생성되지 않도록 handoff 정책을 분리했다. 주간 사업비에는 통장내역 화면에서 사용자가 선택해 반영한 거래만 들어온다.
 - [2026-06-10] QA 중 셀 편집을 방해하던 주간 사업비 자동 저장을 끄고 수동 저장만 사용하도록 바꿨다. 저장 버튼 경로는 유지하되 idle autosave와 자동 cashflow sync는 실행하지 않는다.
 - [2026-04-21] `v2` 프로젝트에서는 사업비 입력이 `budget_tree_v2` 기준 세세목 dropdown을 쓰고, 2단 목록도 tree 파생값을 우선 사용하도록 정리했다.
 - [2026-04-14] 포털 session active project 전환과 함께 현재 사업 기준 입력 상태 요약과 진행 step strip을 안정적으로 다시 연결했다.

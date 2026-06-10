@@ -24,8 +24,10 @@ describe('bank-import-triage', () => {
   it('builds the same fingerprint for the same bank transaction regardless of row order context', () => {
     const first = buildBankFingerprint(makeSnapshot());
     const second = buildBankFingerprint(makeSnapshot({
+      accountNumber: '999-888-777',
       counterparty: '  메리   사업팀 ',
-      memo: '법인카드   결제',
+      memo: '다른 카드 메모',
+      balanceAfter: 123456,
     }));
 
     expect(first).toBe(second);
@@ -110,6 +112,42 @@ describe('bank-import-triage', () => {
     });
 
     expect(matchState).toBe('REVIEW_REQUIRED');
+  });
+
+  it('keeps an existing match when only account, memo, or balance fields drift', () => {
+    const fingerprint = buildBankFingerprint(makeSnapshot());
+    const matchState = resolveBankImportMatchState({
+      fingerprint,
+      incomingSourceTxId: `bank:${fingerprint}`,
+      bankSnapshot: makeSnapshot({
+        accountNumber: '999-888-777',
+        memo: '다른 카드 메모',
+        balanceAfter: 123456,
+      }),
+      existingItem: {
+        id: fingerprint,
+        projectId: 'p-1',
+        sourceTxId: `bank:${fingerprint}`,
+        bankFingerprint: fingerprint,
+        bankSnapshot: makeSnapshot(),
+        matchState: 'AUTO_CONFIRMED',
+        projectionStatus: 'PROJECTED',
+        evidenceStatus: 'COMPLETE',
+        manualFields: {
+          expenseAmount: 120000,
+          budgetCategory: '여비',
+          budgetSubCategory: '교통비',
+          cashflowCategory: 'TRAVEL',
+        },
+        reviewReasons: [],
+        lastUploadBatchId: 'batch-1',
+        createdAt: '2026-04-06T00:00:00.000Z',
+        updatedAt: '2026-04-06T00:00:00.000Z',
+        updatedBy: 'pm',
+      },
+    });
+
+    expect(matchState).toBe('AUTO_CONFIRMED');
   });
 
   it('allows projection with pending evidence once manual fields are complete', () => {

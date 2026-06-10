@@ -171,6 +171,46 @@ describe('JVM weekly API BFF proxy', () => {
     expect(calls[0].init.body).toBeUndefined();
   });
 
+  it('proxies weekly expense sheet read-back through trusted Java context', async () => {
+    const calls = [];
+    const fetchImpl = vi.fn(async (url, init) => {
+      calls.push({ url, init });
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({
+          projectId: 'project-a',
+          sheetKey: 'default',
+          rows: [{ id: 'row-1', cells: [] }],
+          sheetVersion: 7,
+        }),
+      };
+    });
+    const { app } = createApp(fetchImpl);
+
+    await request(app)
+      .get('/api/v1/weekly-expenses/project-a/sheets/default')
+      .send({
+        tenantId: 'spoofed-tenant',
+        actor: { id: 'spoofed-admin', role: 'admin' },
+      })
+      .expect(200)
+      .expect((response) => {
+        expect(response.body).toMatchObject({ projectId: 'project-a', sheetKey: 'default', sheetVersion: 7 });
+      });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe('http://jvm-weekly.local/api/v1/weekly-expenses/project-a/sheets/default');
+    expect(calls[0].init.method).toBe('GET');
+    expect(calls[0].init.body).toBeUndefined();
+    expect(calls[0].init.headers).toMatchObject({
+      'x-tenant-id': 'tenant-a',
+      'x-inner-platform-service-token': 'test-service-token',
+      'x-actor-id': 'pm-1',
+      'x-actor-role': 'pm',
+    });
+  });
+
   it('adds a Google identity token when the Java Cloud Run audience is configured', async () => {
     const calls = [];
     const fetchImpl = vi.fn(async (url, init) => {

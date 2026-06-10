@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-06-10] patch-note | portal-bank-statement | append-only bank stack and selected apply
+- pages: [portal-bank-statement](./pages/portal-bank-statement.md), [portal-weekly-expense](./pages/portal-weekly-expense.md), [shared-portal-architecture](./pages/shared-portal-architecture.md)
+- summary: 통장내역 저장을 프로젝트별 append-only 기준본으로 바꾸고, `거래일시(초 단위) + 거래처 + 금액`이 같은 행은 중복으로 제외한다. 기준본 저장은 주간 사업비 행을 자동 생성하지 않으며, 사용자가 선택한 행만 명시적으로 `사업비 입력(주간)`에 반영한다.
+
 ## [2026-05-21] patch-note | admin-dashboard, portal-onboarding | MYSCube feature search entry
 - pages: [admin-dashboard](./pages/admin-dashboard.md), [portal-onboarding](./pages/portal-onboarding.md)
 - summary: Admin 첫 화면을 사이드바 없는 전체 기능 검색 화면으로 전환하고, 로그인 직후 workspace 선택 화면도 관리자/PM 색상 구분형 feature map으로 맞췄다. MYSCube 로고 자산을 공통 brand component에 연결하고, 기능 검색 headline은 사용자 이름 기반 인사로 바꾸며 검색창 hover/focus affordance를 강화했다.

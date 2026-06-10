@@ -8,13 +8,17 @@ const weeklyExpenseSource = readFileSync(
 );
 
 describe('PortalWeeklyExpensePage flow layout', () => {
-  it('surfaces bank-statement-to-weekly alignment with a direct source message', () => {
+  it('surfaces bank-statement-to-weekly alignment with a saved-row message', () => {
     expect(weeklyExpenseSource).toContain('통장내역 기준본에서 이어서 작업');
+    expect(weeklyExpenseSource).toContain('선택 반영된 지출정보와 저장 상태를 확인');
   });
 
-  it('makes direct-entry projects explicitly use the weekly sheet or excel template instead of bank upload wording', () => {
-    expect(weeklyExpenseSource).toContain('주간 사업비 시트 또는 엑셀 템플릿으로 직접 입력');
+  it('keeps direct-entry projects on saved rows instead of reopening a frontend editor', () => {
+    expect(weeklyExpenseSource).toContain('직접 입력형 지출정보도 저장된 행 기준으로 확인합니다.');
     expect(weeklyExpenseSource).not.toContain('기존 시트 가져오기');
+    expect(weeklyExpenseSource).not.toContain('입금 추가');
+    expect(weeklyExpenseSource).not.toContain('지출 추가');
+    expect(weeklyExpenseSource).not.toContain('잔액 조정');
   });
 
   it('removes top-level import and sheet-management actions from the weekly expense header', () => {
@@ -24,13 +28,12 @@ describe('PortalWeeklyExpensePage flow layout', () => {
     expect(weeklyExpenseSource).not.toContain('탭 삭제');
   });
 
-  it('shows a blocking full-screen saving overlay while save is in flight', () => {
-    expect(weeklyExpenseSource).toContain('if (isSettlementSaving) {');
-    expect(weeklyExpenseSource).toContain('이동은 저장이 끝난 뒤 가능합니다.');
-    expect(weeklyExpenseSource).toContain('사업비 입력을 저장하고 있습니다');
-    expect(weeklyExpenseSource).toContain('저장이 끝날 때까지 잠시 기다려 주세요.');
-    expect(weeklyExpenseSource).toContain('w-[min(92vw,56rem)] max-w-none');
-    expect(weeklyExpenseSource).toContain('min-h-[22rem]');
+  it('does not keep the retired saving loop or route-blocking overlay on the weekly dashboard', () => {
+    expect(weeklyExpenseSource).not.toContain('isSettlementSaving');
+    expect(weeklyExpenseSource).not.toContain('registerNavigationHandler');
+    expect(weeklyExpenseSource).not.toContain('beforeunload');
+    expect(weeklyExpenseSource).not.toContain('이동은 저장이 끝난 뒤 가능합니다.');
+    expect(weeklyExpenseSource).not.toContain('사업비 입력을 저장하고 있습니다');
   });
 
   it('does not block route changes with the retired unsaved weekly expense dialog', () => {
@@ -45,7 +48,7 @@ describe('PortalWeeklyExpensePage flow layout', () => {
   });
 
   it('compresses status chrome into a single operator bar and keeps the work surface wide', () => {
-    expect(weeklyExpenseSource).toContain('원본 입력은 이 화면입니다.');
+    expect(weeklyExpenseSource).toContain('주간 화면은 저장된 행을 보여주고 이동만 담당합니다.');
     expect(weeklyExpenseSource).toContain('max-w-4xl text-[12px] text-muted-foreground');
     expect(weeklyExpenseSource).not.toContain('현재 입력 탭');
   });
@@ -54,9 +57,22 @@ describe('PortalWeeklyExpensePage flow layout', () => {
     expect(weeklyExpenseSource).toMatch(/\{weeklySetupPanel \? \(\s*<Card data-testid="weekly-expense-setup-panel" className=\{weeklySetupPanel\.toneClass\}>/);
   });
 
-  it('keeps cashflow actual sync tied to the full project expense-sheet source, not only the active tab save button', () => {
-    expect(weeklyExpenseSource).toContain('buildProjectExpenseRowsForActualSync');
-    expect(weeklyExpenseSource).toContain('projectActualSyncPayload');
-    expect(weeklyExpenseSource).toContain('actual_realtime_sync');
+  it('keeps cashflow projection and actual work out of the weekly expense screen', () => {
+    expect(weeklyExpenseSource).not.toContain('buildProjectExpenseRowsForActualSync');
+    expect(weeklyExpenseSource).not.toContain('projectActualSyncPayload');
+    expect(weeklyExpenseSource).not.toContain('actual_realtime_sync');
+    expect(weeklyExpenseSource).not.toContain('syncProjectCashflowActualsViaBff');
+    expect(weeklyExpenseSource).not.toContain('onSyncCashflowActuals');
+    expect(weeklyExpenseSource).not.toContain('expenseDashboardTotal');
+    expect(weeklyExpenseSource).not.toContain('readSettlementAmount');
+    expect(weeklyExpenseSource).not.toContain('Number(String(raw)');
+    expect(weeklyExpenseSource).not.toContain('합계 {');
+  });
+
+  it('does not mount the cashflow ledger editor inside weekly expense', () => {
+    expect(weeklyExpenseSource).toContain('data-testid="weekly-expense-dashboard-surface"');
+    expect(weeklyExpenseSource).not.toContain('SettlementLedgerPage');
+    expect(weeklyExpenseSource).not.toContain('onSaveSheetRows');
+    expect(weeklyExpenseSource).not.toContain('pendingQuickInsert');
   });
 });

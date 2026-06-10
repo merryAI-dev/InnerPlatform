@@ -135,6 +135,22 @@ export function mountJvmWeeklyApiRoutes(app, {
     });
   }
 
+  app.get('/api/v1/weekly-expenses/:projectId/sheets/:sheetKey', asyncHandler(async (req, res) => {
+    assertActorRoleAllowed(req, ROUTE_ROLES.readCore, 'read weekly expense sheet');
+    const projectId = encodeURIComponent(readOptionalText(req.params.projectId));
+    const sheetKey = encodeURIComponent(readOptionalText(req.params.sheetKey));
+    const result = await proxyJavaWeeklyJson({
+      fetchImpl,
+      baseUrl,
+      serviceToken,
+      idTokenAudience,
+      context: req.context,
+      method: 'GET',
+      path: `/api/v1/weekly-expenses/${projectId}/sheets/${sheetKey}`,
+    });
+    res.status(200).json(result);
+  }));
+
   app.post('/api/v1/weekly-expenses/:projectId/sheets/:sheetKey/save-draft', createJavaMutatingProxyRoute(async (req) => {
     assertActorRoleAllowed(req, ROUTE_ROLES.writeCore, 'save weekly expense draft');
     const projectId = encodeURIComponent(readOptionalText(req.params.projectId));

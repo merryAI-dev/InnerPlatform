@@ -31,9 +31,12 @@ scripts/etl/output/
 .worktrees/
 .env*.local
 .gstack/
+.understand-anything/
 .claude/worktrees/
 .claude/memory/
 .pm-status/
+output/
+server/jvm-weekly-api/target/
 docs/superpowers/*
 !docs/superpowers/
 !docs/superpowers/specs/
@@ -42,3 +45,4 @@ docs/superpowers/specs/*
 docs/superpowers/plans/*
 !docs/superpowers/specs/2026-05-23-business-card-db-pwa-vertex-gemini-design.md
 !docs/superpowers/plans/2026-05-23-business-card-db-*.md
+.codex-stack/

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { Upload, Save, Plus, Loader2, ArrowRight, ShieldAlert, Trash2, FileSpreadsheet } from 'lucide-react';
+import { Upload, Save, Loader2, ArrowRight, ShieldAlert, FileSpreadsheet } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
 import { Badge } from '../ui/badge';
+import { Checkbox } from '../ui/checkbox';
 import { usePortalStore } from '../../data/portal-store';
 import {
   detectBankStatementProfile,
@@ -15,31 +16,19 @@ import {
   sanitizeHtmlMatrix,
   type BankStatementRow,
 } from '../../platform/bank-statement';
-import { normalizeKey, parseCsv, parseNumber } from '../../platform/csv-utils';
+import { normalizeKey, parseCsv } from '../../platform/csv-utils';
 import { loadXlsx, warmXlsx } from '../../platform/lazy-heavy-modules';
 import { readTextFile } from '../../platform/text-file-decoder';
 
-function getAmountColumnIndexes(columns: string[]): Set<number> {
+function getTransactionAmountColumnIndexes(columns: string[]): Set<number> {
   return new Set(
     columns.map((col, idx) => ({ col, idx }))
       .filter(({ col }) => {
         const key = normalizeKey(col);
-        return key.includes(normalizeKey('입금')) || key.includes(normalizeKey('출금')) || key.includes(normalizeKey('잔액'));
+        return key.includes(normalizeKey('입금')) || key.includes(normalizeKey('출금'));
       })
       .map(({ idx }) => idx),
   );
-}
-
-function formatBankStatementRows(
-  rows: BankStatementRow[],
-  columns: string[],
-  formatAmount: (value: string) => string,
-): BankStatementRow[] {
-  const amountColIdxs = getAmountColumnIndexes(columns);
-  return rows.map((row) => ({
-    ...row,
-    cells: row.cells.map((cell, idx) => (amountColIdxs.has(idx) ? formatAmount(cell) : cell)),
-  }));
 }
 
 export function PortalBankStatementPage() {
@@ -50,6 +39,8 @@ export function PortalBankStatementPage() {
     myProject,
     bankStatementRows,
     saveBankStatementRows,
+    applyBankStatementRowsToExpenseSheet,
+    refreshBankStatementRows,
   } = usePortalStore();
   const [columns, setColumns] = useState<string[]>(bankStatementRows?.columns || []);
   const [rows, setRows] = useState<BankStatementRow[]>(bankStatementRows?.rows || []);
@@ -59,33 +50,34 @@ export function PortalBankStatementPage() {
   const [lastSavedAt, setLastSavedAt] = useState('');
   const [dragActive, setDragActive] = useState(false);
   const [uploadPreparing, setUploadPreparing] = useState(false);
+  const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(() => new Set());
+  const [activeStatusTab, setActiveStatusTab] = useState<'staged' | 'applied'>('staged');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const projectName = myProject?.name || '내 사업';
   const ready = useMemo(() => Boolean(activeProjectId || myProject?.id), [activeProjectId, myProject?.id]);
   const bankProfile = useMemo(() => detectBankStatementProfile(columns, lastUploadedName), [columns, lastUploadedName]);
-  const amountColIdxs = useMemo(() => getAmountColumnIndexes(columns), [columns]);
+  const transactionAmountColIdxs = useMemo(() => getTransactionAmountColumnIndexes(columns), [columns]);
+  const hasTransactionAmountColumns = transactionAmountColIdxs.size > 0;
   const hasUploadedSheet = rows.length > 0 && columns.length > 0;
-
-  const formatAmount = useCallback((value: string) => {
-    const trimmed = value.trim();
-    if (!trimmed) return '';
-    const num = parseNumber(trimmed);
-    if (num == null) return trimmed;
-    return num.toLocaleString('ko-KR');
-  }, []);
+  const selectedRows = useMemo(
+    () => rows.filter((row, rowIdx) => selectedRowIds.has(row.tempId || `row-${rowIdx}`)),
+    [rows, selectedRowIds],
+  );
 
   useEffect(() => {
     if (dirty) return;
     if (bankStatementRows?.rows && bankStatementRows.rows.length > 0) {
       const nextColumns = bankStatementRows.columns || [];
       setColumns(nextColumns);
-      setRows(formatBankStatementRows(bankStatementRows.rows, nextColumns, formatAmount));
+      setRows(bankStatementRows.rows);
+      setSelectedRowIds(new Set());
       return;
     }
     setColumns([]);
     setRows([]);
-  }, [bankStatementRows, dirty, formatAmount]);
+    setSelectedRowIds(new Set());
+  }, [bankStatementRows, dirty]);
 
   const parseExcelToMatrix = useCallback(async (file: File): Promise<string[][]> => {
     // KB 등 HTML-as-XLS 감지: 파일 앞부분이 HTML 태그로 시작하면 HTML 파서 사용
@@ -148,7 +140,8 @@ export function PortalBankStatementPage() {
       }
       setLastUploadedName(file.name);
       setColumns(result.columns);
-      setRows(formatBankStatementRows(result.rows, result.columns, formatAmount));
+      setRows(result.rows);
+      setSelectedRowIds(new Set(result.rows.map((row, index) => row.tempId || `row-${index}`)));
       setDirty(true);
     } catch (err) {
       console.error('[BankStatement] upload parse failed:', err);
@@ -156,7 +149,7 @@ export function PortalBankStatementPage() {
     } finally {
       setUploadPreparing(false);
     }
-  }, [parseExcelToMatrix, formatAmount]);
+  }, [parseExcelToMatrix]);
 
   const openFilePicker = useCallback(() => {
     warmXlsx();
@@ -169,39 +162,6 @@ export function PortalBankStatementPage() {
     const file = event.dataTransfer.files?.[0];
     if (file) void handleFileUpload(file);
   }, [handleFileUpload]);
-
-  const addRow = useCallback(() => {
-    if (columns.length === 0) {
-      toast.message('먼저 통장내역 파일을 업로드해 주세요.');
-      return;
-    }
-    const next = [...rows, { tempId: `bank-${Date.now()}`, cells: columns.map(() => '') }];
-    setRows(next);
-    setDirty(true);
-  }, [rows, columns]);
-
-  const removeRow = useCallback((rowIdx: number) => {
-    setRows((prev) => prev.filter((_, idx) => idx !== rowIdx));
-    setDirty(true);
-  }, []);
-
-  const updateCell = useCallback((rowIdx: number, colIdx: number, value: string) => {
-    const nextValue = amountColIdxs.has(colIdx) ? formatAmount(value) : value;
-    setRows((prev) => prev.map((row, i) => {
-      if (i !== rowIdx) return row;
-      const cells = [...row.cells];
-      cells[colIdx] = nextValue;
-      return { ...row, cells };
-    }));
-    setDirty(true);
-  }, [amountColIdxs, formatAmount]);
-
-  const handleCellBlur = useCallback((rowIdx: number, colIdx: number, value: string) => {
-    if (!amountColIdxs.has(colIdx)) return;
-    const formatted = formatAmount(value);
-    if (formatted === value) return;
-    updateCell(rowIdx, colIdx, formatted);
-  }, [amountColIdxs, formatAmount, updateCell]);
 
   const persistSheet = useCallback(async (options?: { silent?: boolean }) => {
     if (!saveBankStatementRows) {
@@ -227,16 +187,74 @@ export function PortalBankStatementPage() {
     await persistSheet();
   }, [persistSheet]);
 
+  const toggleRowSelection = useCallback((rowIdx: number, checked: boolean) => {
+    const row = rows[rowIdx];
+    if (!row) return;
+    const id = row.tempId || `row-${rowIdx}`;
+    setSelectedRowIds((current) => {
+      const next = new Set(current);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, [rows]);
+
+  const toggleAllRows = useCallback((checked: boolean) => {
+    setSelectedRowIds(checked ? new Set(rows.map((row, index) => row.tempId || `row-${index}`)) : new Set());
+  }, [rows]);
+
+  const switchStatusTab = useCallback(async (status: 'staged' | 'applied') => {
+    if (status === activeStatusTab) return;
+    if (dirty) {
+      toast.message('저장 전 초안을 먼저 기준본으로 저장한 뒤 탭을 전환해 주세요.');
+      return;
+    }
+    setActiveStatusTab(status);
+    setSelectedRowIds(new Set());
+    try {
+      await refreshBankStatementRows(status);
+    } catch (err) {
+      console.error('[BankStatement] status tab load failed:', err);
+      toast.error('통장내역 상태를 불러오지 못했습니다.');
+    }
+  }, [activeStatusTab, dirty, refreshBankStatementRows]);
+
+  const handleApplySelected = useCallback(async () => {
+    if (activeStatusTab !== 'staged') {
+      toast.message('이미 반영된 통장내역은 다시 반영할 수 없습니다.');
+      return;
+    }
+    if (selectedRows.length === 0) {
+      toast.message('사업비 입력에 반영할 통장내역 행을 선택해 주세요.');
+      return;
+    }
+    setSaving(true);
+    try {
+      if (dirty) {
+        await saveBankStatementRows({ columns, rows });
+        setDirty(false);
+      }
+      const result = await applyBankStatementRowsToExpenseSheet({ columns, rows: selectedRows });
+      toast.success(`선택한 통장내역 ${result.appliedCount}건을 사업비 입력에 반영했습니다.`);
+      setSelectedRowIds(new Set());
+    } catch (err) {
+      console.error('[BankStatement] selected apply failed:', err);
+      toast.error('선택한 통장내역 반영에 실패했습니다.');
+    } finally {
+      setSaving(false);
+    }
+  }, [activeStatusTab, applyBankStatementRowsToExpenseSheet, columns, dirty, rows, saveBankStatementRows, selectedRows]);
+
   const trustSurface = saving
     ? {
       label: '저장 중',
-      description: '현재 수정한 통장내역을 주간 사업비 기준본으로 저장하고 있습니다.',
+      description: '현재 업로드한 통장내역을 Java API 경로로 저장하고 있습니다.',
       toneClass: 'border-cyan-200/70 bg-cyan-50/60',
     }
     : dirty
       ? {
         label: '저장 전 초안',
-        description: '수정한 통장내역이 아직 주간 사업비 기준본으로 저장되지 않았습니다. 저장 후 바로 사업비 입력으로 이어갈 수 있습니다.',
+        description: '업로드한 통장내역이 아직 주간 사업비 기준본으로 저장되지 않았습니다. 저장 후 선택 반영할 수 있습니다.',
         toneClass: 'border-slate-200 bg-white',
       }
       : hasUploadedSheet
@@ -317,12 +335,13 @@ export function PortalBankStatementPage() {
               e.currentTarget.value = '';
             }}
           />
-          <Button variant="outline" size="sm" onClick={addRow} disabled={!hasUploadedSheet}>
-            <Plus className="h-4 w-4 mr-1" /> 행 추가
+          <Button variant="outline" size="sm" onClick={handleApplySelected} disabled={saving || activeStatusTab !== 'staged' || selectedRows.length === 0}>
+            선택 행 반영
+            <ArrowRight className="h-4 w-4 ml-1" />
           </Button>
           <Button variant="outline" size="sm" onClick={handleSave} disabled={saving || !hasUploadedSheet}>
             {saving ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Save className="h-4 w-4 mr-1" />}
-            저장
+            기준본 저장
           </Button>
         </div>
       </div>
@@ -374,84 +393,183 @@ export function PortalBankStatementPage() {
         </Card>
       )}
 
-      <Card data-testid="bank-statement-trust-surface" className={trustSurface.toneClass}>
-        <CardContent className="px-4 py-3">
-          <div className="flex items-start gap-2">
-            <ShieldAlert className="mt-0.5 h-4 w-4 text-red-700" />
-            <div className="space-y-1 text-[12px] text-slate-700">
-              <p className="font-semibold">반영 상태 · {trustSurface.label}</p>
-              <p>{trustSurface.description}</p>
-              <p>
-                현재 프로필: {getBankStatementProfileLabel(bankProfile)}
-                {lastUploadedName ? ` · 최근 파일: ${lastUploadedName}` : ''}
-              </p>
-              {lastSavedAt && <p className="text-[11px] text-slate-500">마지막 자동저장: {lastSavedAt.slice(0, 16).replace('T', ' ')}</p>}
+      {hasUploadedSheet ? (
+        <div className="overflow-hidden rounded border border-slate-200 bg-white shadow-sm" data-testid="bank-statement-apply-wizard">
+          <div className="border-b px-5 py-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-[18px] font-bold text-slate-950">통장내역 선택</h2>
+                <p className="mt-1 text-[12px] text-slate-500">{projectName} · 반영할 거래를 선택합니다</p>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => navigate('/portal/weekly-expenses')}>
+                닫기
+              </Button>
+            </div>
+            <div className="mt-4 flex flex-wrap items-center gap-3 rounded border bg-slate-50 px-4 py-2.5">
+              <span className="text-[12px] font-semibold text-slate-700">거래일자</span>
+              <span className="rounded border bg-white px-3 py-1.5 text-[12px] text-slate-700">업로드 원본 전체</span>
+              <span className="text-[12px] font-semibold text-slate-700">파일</span>
+              <span className="min-w-[220px] rounded border bg-white px-3 py-1.5 text-[12px] text-slate-500">
+                {lastUploadedName || '저장된 기준본'}
+              </span>
+              <Button variant="outline" size="sm" onClick={openFilePicker} disabled={uploadPreparing}>
+                {uploadPreparing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+              </Button>
             </div>
           </div>
-        </CardContent>
-      </Card>
 
-      {hasUploadedSheet ? (
-        <Card>
-          <CardContent className="p-0">
-            <div className="overflow-auto max-h-[70vh]">
-              <table className="w-full text-[11px] border-collapse">
-                <thead className="sticky top-0 z-10 bg-muted/60">
-                  <tr>
-                    <th className="px-2 py-1 text-left border-b border-r font-medium whitespace-nowrap w-12">
-                      행
-                    </th>
-                    {columns.map((col, idx) => (
-                      <th key={idx} className="px-2 py-1 text-left border-b border-r font-medium whitespace-nowrap">
-                        {col}
+          <div className="border-b px-5 pt-3">
+            <div className="flex items-center gap-6 text-[13px] font-semibold">
+              <button
+                type="button"
+                className={`px-1 pb-2 ${activeStatusTab === 'staged' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-slate-500'}`}
+                onClick={() => void switchStatusTab('staged')}
+              >
+                미반영
+              </button>
+              <button
+                type="button"
+                className={`px-1 pb-2 ${activeStatusTab === 'applied' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-slate-500'}`}
+                onClick={() => void switchStatusTab('applied')}
+              >
+                반영완료
+              </button>
+            </div>
+          </div>
+
+          <div className="grid min-h-[520px] grid-cols-1 lg:grid-cols-[360px_minmax(0,1fr)]">
+            <aside className="border-r bg-slate-50/70 p-5">
+              <div className="rounded border border-blue-200 bg-white p-4 shadow-sm">
+                <div className="text-[14px] font-bold text-slate-900">전체</div>
+                <div className="mt-7 space-y-3 text-[13px]">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-600">{activeStatusTab === 'staged' ? '미반영 거래' : '반영완료 거래'}</span>
+                    <span className="font-bold">{rows.length.toLocaleString('ko-KR')}건</span>
+                  </div>
+                  <div className="flex items-center justify-between border-t pt-3">
+                    <span className="text-slate-600">금액 컬럼</span>
+                    <span className="font-bold">{hasTransactionAmountColumns ? '감지됨' : '확인 필요'}</span>
+                  </div>
+                </div>
+              </div>
+              <div className="mt-4 rounded border bg-white">
+                <div className="border-b bg-slate-100 px-4 py-3 text-[13px] font-bold text-slate-900">
+                  {lastUploadedName || `${getBankStatementProfileLabel(bankProfile)} 기준본`}
+                </div>
+                <div className="space-y-3 px-4 py-4 text-[12px] text-slate-600">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100">
+                      <FileSpreadsheet className="h-4 w-4 text-slate-600" />
+                    </div>
+                    <div>
+                      <div className="font-semibold text-slate-800">{getBankStatementProfileLabel(bankProfile)}</div>
+                      <div className="text-slate-500">카드/계좌 원본</div>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between border-t pt-3">
+                    <span>선택</span>
+                    <span className="font-bold text-slate-900">{selectedRows.length.toLocaleString('ko-KR')}건</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>상태</span>
+                    <span className="font-bold text-slate-900">{activeStatusTab === 'staged' ? '미반영' : '반영완료'}</span>
+                  </div>
+                </div>
+              </div>
+              <div className={`mt-4 rounded border px-4 py-3 text-[12px] ${trustSurface.toneClass}`}>
+                <div className="flex items-start gap-2">
+                  <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-red-700" />
+                  <div>
+                    <p className="font-semibold text-slate-800">{trustSurface.label}</p>
+                    <p className="mt-1 leading-5 text-slate-600">{trustSurface.description}</p>
+                    {lastSavedAt ? (
+                      <p className="mt-1 text-[11px] text-slate-500">마지막 저장 {lastSavedAt.slice(0, 16).replace('T', ' ')}</p>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            </aside>
+
+            <section className="min-w-0">
+              <div className="overflow-auto max-h-[520px]">
+                <table className="w-full min-w-[920px] text-[12px] border-collapse">
+                  <thead className="sticky top-0 z-10 bg-slate-100">
+                    <tr>
+                      <th className="w-10 border-b border-r px-2 py-2 text-left">
+                        <Checkbox
+                          checked={hasUploadedSheet && selectedRows.length === rows.length}
+                          onCheckedChange={(checked) => toggleAllRows(Boolean(checked))}
+                          aria-label="전체 행 선택"
+                          disabled={activeStatusTab !== 'staged'}
+                        />
                       </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((row, rowIdx) => (
-                    <tr key={row.tempId || rowIdx} className="border-t border-border/30">
-                      <td className="px-1.5 py-1 border-r border-border/30">
-                        <div className="flex items-center justify-between gap-1">
-                          <span className="text-[10px] text-muted-foreground">{rowIdx + 1}</span>
-                          <button
-                            type="button"
-                            className="inline-flex h-6 w-6 items-center justify-center rounded border text-muted-foreground hover:bg-muted"
-                            onClick={() => removeRow(rowIdx)}
-                            title="행 삭제"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                      </td>
-                      {columns.map((_, colIdx) => (
-                        <td
-                          key={colIdx}
-                          className="px-1.5 py-1 border-r border-border/30 focus-within:bg-slate-50 focus-within:shadow-[inset_0_0_0_2px_rgba(0,30,70,0.28)]"
-                        >
-                          <input
-                            type="text"
-                            value={row.cells[colIdx] || ''}
-                            className="w-full bg-transparent outline-none text-[11px]"
-                            onChange={(e) => updateCell(rowIdx, colIdx, e.target.value)}
-                            onBlur={(e) => handleCellBlur(rowIdx, colIdx, e.target.value)}
-                          />
-                        </td>
+                      <th className="w-14 border-b border-r px-2 py-2 text-left font-semibold">행</th>
+                      {columns.map((col, idx) => (
+                        <th key={idx} className="border-b border-r px-3 py-2 text-left font-semibold whitespace-nowrap">
+                          {col}
+                        </th>
                       ))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
+                  </thead>
+                  <tbody>
+                    {rows.map((row, rowIdx) => (
+                      <tr
+                        key={row.tempId || rowIdx}
+                        className={`border-t ${selectedRowIds.has(row.tempId || `row-${rowIdx}`) ? 'bg-blue-50/70' : 'bg-white'}`}
+                      >
+                        <td className="border-r px-2 py-1.5">
+                          <Checkbox
+                            checked={selectedRowIds.has(row.tempId || `row-${rowIdx}`)}
+                            onCheckedChange={(checked) => toggleRowSelection(rowIdx, Boolean(checked))}
+                            aria-label={`${rowIdx + 1}행 선택`}
+                            disabled={activeStatusTab !== 'staged'}
+                          />
+                        </td>
+                        <td className="border-r px-2 py-1.5">
+                          <span className="text-[11px] text-slate-500">{rowIdx + 1}</span>
+                        </td>
+                        {columns.map((_, colIdx) => (
+                          <td
+                            key={colIdx}
+                            className="border-r px-3 py-2 text-slate-700"
+                          >
+                            <span className="block min-w-[110px] whitespace-nowrap">{row.cells[colIdx] || ''}</span>
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="sticky bottom-0 bg-amber-50">
+                    <tr>
+                      <td className="border-t border-r px-2 py-2" />
+                      <td className="border-t border-r px-2 py-2 font-bold">처리</td>
+                      <td className="border-t px-3 py-2 font-bold" colSpan={Math.max(columns.length, 1)}>
+                        선택한 행만 Java API 검증 후 반영합니다
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </section>
+          </div>
+
+          <div className="flex items-center justify-end gap-2 border-t bg-slate-50 px-5 py-4">
+            <Button variant="outline" size="sm" onClick={() => navigate('/portal/weekly-expenses')}>
+              취소
+            </Button>
+            <Button size="sm" onClick={handleApplySelected} disabled={saving || activeStatusTab !== 'staged' || selectedRows.length === 0}>
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              선택 행 반영
+            </Button>
+          </div>
+        </div>
       ) : (
         <Card className="border-dashed">
           <CardContent className="flex min-h-[240px] items-center justify-center p-6">
             <div className="max-w-md text-center">
               <p className="text-[13px] font-medium text-slate-800">업로드 후 표가 여기에 그대로 표시됩니다.</p>
               <p className="mt-2 text-[12px] leading-6 text-muted-foreground">
-                헤더와 값은 원본 구조를 유지하고, 이 화면에서는 검토와 보조 입력만 이어서 진행합니다.
+                헤더와 값은 원본 구조를 유지하고, 이 화면에서는 검토와 선택만 진행합니다.
               </p>
             </div>
           </CardContent>

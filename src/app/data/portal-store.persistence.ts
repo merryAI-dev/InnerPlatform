@@ -14,6 +14,7 @@ interface ExpenseSheetTabSnapshot {
   name: string;
   order: number;
   rows: ImportRow[] | null;
+  sheetVersion?: number;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -178,6 +179,7 @@ export function upsertExpenseSheetTabRows(params: {
   order: number;
   rows: ImportRow[] | null;
   now: string;
+  sheetVersion?: number;
   createdAt?: string;
 }): ExpenseSheetTabSnapshot[] {
   const nextSheet: ExpenseSheetTabSnapshot = {
@@ -185,6 +187,7 @@ export function upsertExpenseSheetTabRows(params: {
     name: sanitizeExpenseSheetName(params.sheetName, params.sheetId === 'default' ? '기본 탭' : '새 탭'),
     order: params.order,
     rows: params.rows,
+    sheetVersion: Number.isFinite(params.sheetVersion) ? params.sheetVersion : params.sheets.find((sheet) => sheet.id === params.sheetId)?.sheetVersion,
     createdAt: params.createdAt || params.now,
     updatedAt: params.now,
   };

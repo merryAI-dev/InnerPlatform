@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  appendBankStatementRows,
+  buildBankStatementServerImportLines,
+  buildBankStatementDedupeKey,
   buildBankImportIntakeItemsFromBankSheet,
   createDefaultBankStatementSheet,
   detectBankStatementProfile,
@@ -24,6 +27,73 @@ describe('bank statement helpers', () => {
     expect(detectBankStatementProfile(['거래일자', '국민 계좌', '출금금액'], 'bank.csv')).toBe('kb');
     expect(detectBankStatementProfile(['거래일시', '적요', '입금금액'], '하나은행 거래내역.xlsx')).toBe('hana');
     expect(getBankStatementProfileLabel('generic')).toBe('일반 형식');
+  });
+
+  it('deduplicates bank statement rows by transaction second, counterparty, and signed amount only', () => {
+    const sheet = {
+      columns: ['통장번호', '거래일시', '거래처', '출금금액', '잔액'],
+      rows: [
+        {
+          tempId: 'old-1',
+          cells: ['111-222', '2026-06-02 10:30:12', 'Amazon_AWS', '344,796', '1,000,000'],
+        },
+      ],
+    };
+    const duplicateDifferentAccount = {
+      tempId: 'new-dup',
+      cells: ['999-888', '2026.06.02 10:30:12', 'Amazon_AWS', '344,796', '600,000'],
+    };
+
+    expect(buildBankStatementDedupeKey(sheet, sheet.rows[0])).toBe(
+      buildBankStatementDedupeKey({ ...sheet, rows: [duplicateDifferentAccount] }, duplicateDifferentAccount),
+    );
+
+    const result = appendBankStatementRows(sheet, {
+      columns: ['통장번호', '거래일시', '거래처', '출금금액', '잔액'],
+      rows: [
+        duplicateDifferentAccount,
+        {
+          tempId: 'new-unique',
+          cells: ['999-888', '2026-06-02 10:30:13', 'Amazon_AWS', '344,796', '255,204'],
+        },
+      ],
+    });
+
+    expect(result.duplicateRows.map((row) => row.tempId)).toEqual(['new-dup']);
+    expect(result.appendedRows.map((row) => row.tempId)).toEqual(['new-unique']);
+    expect(result.sheet.rows).toHaveLength(2);
+  });
+
+  it('builds one server import line per uploaded row and leaves critical validation to the backend', () => {
+    const lines = buildBankStatementServerImportLines({
+      columns: ['거래일시', '거래처', '출금금액', '잔액'],
+      rows: [
+        {
+          tempId: 'valid',
+          cells: ['2026-06-02 10:30:12', 'Amazon_AWS', '344,796', '1,000,000'],
+        },
+        {
+          tempId: 'invalid',
+          cells: ['', '', '', '900,000'],
+        },
+      ],
+    });
+
+    expect(lines).toHaveLength(2);
+    expect(Array.isArray(lines[0])).toBe(false);
+    expect(lines[0]).toMatchObject({
+      lineIndex: 0,
+      transactionDate: '2026-06-02',
+      counterparty: 'Amazon_AWS',
+      signedAmount: -344796,
+    });
+    expect(lines[1]).toMatchObject({
+      lineIndex: 1,
+      transactionDate: '',
+      counterparty: '',
+      signedAmount: null,
+    });
+    expect(lines[1].sourceLineKey).toMatch(/^bank-/);
   });
 
   it('finds the real header row even when the first line is blank', () => {

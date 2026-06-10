@@ -18,7 +18,8 @@ public record ImportBankStatementBatchResponse(
         int lineIndex,
         String sourceLineKey,
         String status,
-        BigDecimal signedAmount
+        BigDecimal signedAmount,
+        boolean duplicate
     ) {
     }
 }

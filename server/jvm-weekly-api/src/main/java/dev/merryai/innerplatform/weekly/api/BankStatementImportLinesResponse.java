@@ -17,6 +17,7 @@ public record BankStatementImportLinesResponse(
         String batchStatus,
         String batchCreatedBy,
         Instant batchCreatedAt,
+        List<String> columns,
         int lineIndex,
         String sourceLineKey,
         String transactionDate,

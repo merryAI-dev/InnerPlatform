@@ -867,7 +867,7 @@ class WeeklyExpenseControllerTest {
                   "memo": "rawCells가 columns보다 짧음",
                   "signedAmount": -10000,
                   "balanceAfter": 90000,
-                  "rawCells": ["2026-06-05", "짧은 행"]
+                  "rawCells": ["2026-06-05", "짧은 행 지급처", "10000"]
                 },
                 {
                   "lineIndex": 1,
@@ -894,11 +894,12 @@ class WeeklyExpenseControllerTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.status").value("staged"))
             .andExpect(jsonPath("$.lines.length()").value(2))
-            .andExpect(jsonPath("$.lines[0].sourceLineKey").value("ragged-bank-line-short"))
-            .andExpect(jsonPath("$.lines[0].rawCells.length()").value(2))
-            .andExpect(jsonPath("$.lines[1].sourceLineKey").value("ragged-bank-line-long"))
-            .andExpect(jsonPath("$.lines[1].rawCells.length()").value(5))
-            .andExpect(jsonPath("$.lines[1].rawCells[4]").value("추가 은행 컬럼"));
+            .andExpect(jsonPath("$.lines[0].columns[0]").value("거래일자"))
+            .andExpect(jsonPath("$.lines[0].rawCells.length()").value(4))
+            .andExpect(jsonPath("$.lines[0].rawCells[3]").value(""))
+            .andExpect(jsonPath("$.lines[1].columns[2]").value("출금금액"))
+            .andExpect(jsonPath("$.lines[1].rawCells.length()").value(4))
+            .andExpect(jsonPath("$.lines[1].rawCells[3]").value("70,000"));
     }
 
     @Test
@@ -979,13 +980,13 @@ class WeeklyExpenseControllerTest {
                 },
                 {
                   "lineIndex": 1,
-                  "sourceLineKey": "dup-bank-line-001",
+                  "sourceLineKey": "client-sent-key-must-be-ignored",
                   "transactionDate": "2026-06-03",
-                  "counterparty": "중복 지급처",
+                  "counterparty": "클라이언트 조작 지급처",
                   "memo": "같은 업로드 내 중복",
-                  "signedAmount": -200000,
+                  "signedAmount": -100000,
                   "balanceAfter": 700000,
-                  "rawCells": ["2026-06-03", "중복 지급처", "같은 업로드 내 중복", "-200000", "700000"]
+                  "rawCells": ["2026-06-03", "선택 지급처", "같은 업로드 내 중복", "-100000", "700000"]
                 },
                 {
                   "lineIndex": 2,
@@ -1023,7 +1024,7 @@ class WeeklyExpenseControllerTest {
               "lines": [
                 {
                   "lineIndex": 0,
-                  "sourceLineKey": "dup-bank-line-001",
+                  "sourceLineKey": "client-duplicate-key-is-ignored",
                   "transactionDate": "2026-06-03",
                   "counterparty": "선택 지급처",
                   "memo": "이미 staged",
@@ -1045,10 +1046,10 @@ class WeeklyExpenseControllerTest {
         String selectedLineId = null;
         String unselectedLineId = null;
         for (JsonNode line : lines) {
-            if ("dup-bank-line-001".equals(line.get("sourceLineKey").asText()) && !line.get("id").isNull()) {
+            if (line.get("lineIndex").asInt() == 0 && !line.get("id").isNull()) {
                 selectedLineId = line.get("id").asText();
             }
-            if ("dup-bank-line-002".equals(line.get("sourceLineKey").asText()) && !line.get("id").isNull()) {
+            if (line.get("lineIndex").asInt() == 2 && !line.get("id").isNull()) {
                 unselectedLineId = line.get("id").asText();
             }
         }
