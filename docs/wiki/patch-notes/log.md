@@ -229,7 +229,7 @@
 
 ## [2026-06-10] patch-note | portal-bank-statement-handoff | 내부 SaaS 통장내역 handoff 단순화
 - pages: [portal-bank-statement](./pages/portal-bank-statement.md), [shared-portal-architecture](./pages/shared-portal-architecture.md)
-- summary: 통장내역 기준본 저장과 선택 행 반영에서 Java `import-batch`/`apply-items` 권한 게이트를 제거하고, 기존 Firestore `bank_statements/default` 및 `expense_sheets/{tab}` 구조를 상속하도록 정리했다. Temp 작성본은 Firestore draft 대신 브라우저 로컬 버전으로 보관해 stage QA가 권한 오류에 막히지 않게 했다.
+- summary: 통장내역 기준본 저장과 선택 행 반영에서 Java `import-batch`/`apply-items` 권한 게이트를 제거하고, 기존 Firestore `bank_statements/default` 및 `expense_sheets/{tab}` 구조를 상속하도록 정리했다. 해당 write는 transaction으로 최신 문서를 다시 읽어 merge하며, Temp 작성본은 Firestore draft 대신 브라우저 로컬 버전으로 보관한다.
 
 ## [2026-04-14] patch-note | portal-shell-project-search | 담당 사업 검색 전환 지원
 - pages: [portal-dashboard](./pages/portal-dashboard.md)

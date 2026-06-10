@@ -9,6 +9,7 @@ import {
   limit,
   onSnapshot,
   query,
+  runTransaction,
   setDoc,
   updateDoc,
   where,
@@ -2621,11 +2622,11 @@ export function PortalProvider({ children }: { children: ReactNode }) {
 
   const saveBankStatementRows = useCallback(async (sheet: BankStatementSheet) => {
     const sanitizedSheet = sanitizeBankStatementSheet(sheet);
-    const mergedSheet = appendBankStatementRows(
-      bankStatementRows || createDefaultBankStatementSheet(),
-      sanitizedSheet,
-    ).sheet;
     if (isDevHarnessUser) {
+      const mergedSheet = appendBankStatementRows(
+        bankStatementRows || createDefaultBankStatementSheet(),
+        sanitizedSheet,
+      ).sheet;
       setBankStatementRows(mergedSheet);
       return;
     }
@@ -2635,18 +2636,25 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       throw new Error(message);
     }
     const now = new Date().toISOString();
-    await setDoc(
-      doc(db, `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/bank_statements/default`),
-      withTenantScope(orgId, {
+    const bankStatementRef = doc(db, `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/bank_statements/default`);
+    const mergedSheet = await runTransaction(db, async (transaction) => {
+      const snapshot = await transaction.get(bankStatementRef);
+      const data = snapshot.exists() ? snapshot.data() as { columns?: string[]; rows?: BankStatementRow[]; createdAt?: string } : {};
+      const currentSheet = sanitizeBankStatementSheet({
+        columns: Array.isArray(data.columns) ? data.columns : createDefaultBankStatementSheet().columns,
+        rows: Array.isArray(data.rows) ? data.rows : [],
+      });
+      const nextSheet = appendBankStatementRows(currentSheet, sanitizedSheet).sheet;
+      transaction.set(bankStatementRef, withTenantScope(orgId, {
         projectId: currentProjectId,
-        columns: mergedSheet.columns,
-        rows: mergedSheet.rows,
-        createdAt: (bankStatementRows as (BankStatementSheet & { createdAt?: string }) | null)?.createdAt || now,
+        columns: nextSheet.columns,
+        rows: nextSheet.rows,
+        createdAt: data.createdAt || now,
         updatedAt: now,
         updatedBy: portalUser?.name || authUser?.name || '',
-      }),
-      { merge: true },
-    );
+      }), { merge: true });
+      return nextSheet;
+    });
     setBankStatementRows(mergedSheet);
   }, [authUser?.name, bankStatementRows, currentProjectId, db, isDevHarnessUser, orgId, portalUser?.name]);
 
@@ -2686,44 +2694,47 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     });
     if (mappedRows.length === 0) return { appliedCount: 0 };
 
-    const baseRows = targetSheet?.rows || (targetSheetId === activeExpenseSheetIdRef.current ? expenseSheetRowsRef.current : null);
-    const mergedRows = mergeBankRowsIntoExpenseSheet(baseRows, mappedRows);
     const defaultLedgerId = ledgers.find((ledger) => ledger.projectId === currentProjectId)?.id
       || (currentProjectId ? `l-${currentProjectId}` : 'l-default');
-    const preparedRows = prepareExpenseSheetRowsForSave({
-      rows: mergedRows,
-      projectId: currentProjectId,
-      defaultLedgerId,
-      evidenceRequiredMap,
-      policy: normalizeSettlementSheetPolicy(myProject?.settlementSheetPolicy, myProject?.fundInputMode),
-      basis: myProject?.basis,
-    }).map((row) => ({
-      ...row,
-      cells: Array.isArray(row.cells) ? row.cells.map((cell) => (cell ?? '')) : [],
-      ...(row.reviewHints && row.reviewHints.length > 0 ? { reviewHints: [...row.reviewHints] } : {}),
-      ...(row.reviewRequiredCellIndexes && row.reviewRequiredCellIndexes.length > 0
-        ? { reviewRequiredCellIndexes: [...row.reviewRequiredCellIndexes] }
-        : {}),
-      ...(row.reviewStatus ? { reviewStatus: row.reviewStatus } : {}),
-      ...(row.reviewFingerprint ? { reviewFingerprint: row.reviewFingerprint } : {}),
-      ...(row.reviewConfirmedAt ? { reviewConfirmedAt: row.reviewConfirmedAt } : {}),
-      ...(row.userEditedCells && row.userEditedCells.size > 0
-        ? { userEditedCells: new Set(row.userEditedCells) }
-        : {}),
-    })) as ImportRow[];
+    const prepareMergedRows = (baseRows: ImportRow[] | null | undefined) => {
+      const mergedRows = mergeBankRowsIntoExpenseSheet(baseRows, mappedRows);
+      return prepareExpenseSheetRowsForSave({
+        rows: mergedRows,
+        projectId: currentProjectId,
+        defaultLedgerId,
+        evidenceRequiredMap,
+        policy: normalizeSettlementSheetPolicy(myProject?.settlementSheetPolicy, myProject?.fundInputMode),
+        basis: myProject?.basis,
+      }).map((row) => ({
+        ...row,
+        cells: Array.isArray(row.cells) ? row.cells.map((cell) => (cell ?? '')) : [],
+        ...(row.reviewHints && row.reviewHints.length > 0 ? { reviewHints: [...row.reviewHints] } : {}),
+        ...(row.reviewRequiredCellIndexes && row.reviewRequiredCellIndexes.length > 0
+          ? { reviewRequiredCellIndexes: [...row.reviewRequiredCellIndexes] }
+          : {}),
+        ...(row.reviewStatus ? { reviewStatus: row.reviewStatus } : {}),
+        ...(row.reviewFingerprint ? { reviewFingerprint: row.reviewFingerprint } : {}),
+        ...(row.reviewConfirmedAt ? { reviewConfirmedAt: row.reviewConfirmedAt } : {}),
+        ...(row.userEditedCells && row.userEditedCells.size > 0
+          ? { userEditedCells: new Set(row.userEditedCells) }
+          : {}),
+      })) as ImportRow[];
+    };
     const now = new Date().toISOString();
-    const nextSheets = upsertExpenseSheetTabRows({
-      sheets: expenseSheetsRef.current,
-      sheetId: targetSheetId,
-      sheetName: targetSheetName,
-      order: targetSheet?.order || (targetSheetId === 'default' ? 0 : expenseSheetsRef.current.length + 1),
-      rows: preparedRows,
-      sheetVersion: targetSheet?.sheetVersion,
-      now,
-      createdAt: targetSheet?.createdAt,
-    });
 
     if (isDevHarnessUser) {
+      const baseRows = targetSheet?.rows || (targetSheetId === activeExpenseSheetIdRef.current ? expenseSheetRowsRef.current : null);
+      const preparedRows = prepareMergedRows(baseRows);
+      const nextSheets = upsertExpenseSheetTabRows({
+        sheets: expenseSheetsRef.current,
+        sheetId: targetSheetId,
+        sheetName: targetSheetName,
+        order: targetSheet?.order || (targetSheetId === 'default' ? 0 : expenseSheetsRef.current.length + 1),
+        rows: preparedRows,
+        sheetVersion: targetSheet?.sheetVersion,
+        now,
+        createdAt: targetSheet?.createdAt,
+      });
       expenseSheetsRef.current = nextSheets;
       setExpenseSheets(nextSheets);
       if (targetSheetId === activeExpenseSheetIdRef.current) {
@@ -2736,25 +2747,55 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       toast.error(message);
       throw new Error(message);
     }
-    await setDoc(
-      doc(db, `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/expense_sheets/${targetSheetId}`),
-      buildExpenseSheetPersistenceDoc({
+    const expenseSheetRef = doc(db, `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/expense_sheets/${targetSheetId}`);
+    const transactionResult = await runTransaction(db, async (transaction) => {
+      const snapshot = await transaction.get(expenseSheetRef);
+      const data = snapshot.exists() ? snapshot.data() as {
+        name?: string;
+        order?: number;
+        rows?: unknown;
+        createdAt?: string;
+        sheetVersion?: number;
+      } : {};
+      const latestRows = normalizeExpenseSheetRows(data.rows) || [];
+      const latestName = sanitizeExpenseSheetName(data.name, targetSheetName);
+      const latestOrder = typeof data.order === 'number'
+        ? data.order
+        : targetSheet?.order || (targetSheetId === 'default' ? 0 : expenseSheetsRef.current.length + 1);
+      const preparedRows = prepareMergedRows(latestRows);
+      transaction.set(expenseSheetRef, buildExpenseSheetPersistenceDoc({
         orgId,
         projectId: currentProjectId,
         activeSheetId: targetSheetId,
-        activeSheetName: targetSheetName,
-        order: targetSheet?.order || (targetSheetId === 'default' ? 0 : expenseSheetsRef.current.length + 1),
+        activeSheetName: latestName,
+        order: latestOrder,
         rows: preparedRows,
-        createdAt: targetSheet?.createdAt,
+        createdAt: data.createdAt || targetSheet?.createdAt,
         now,
         updatedBy: portalUser?.name || authUser?.name || '',
-      }),
-      { merge: true },
-    );
+      }), { merge: true });
+      return {
+        rows: preparedRows,
+        sheetName: latestName,
+        order: latestOrder,
+        createdAt: data.createdAt || targetSheet?.createdAt,
+        sheetVersion: data.sheetVersion,
+      };
+    });
+    const nextSheets = upsertExpenseSheetTabRows({
+      sheets: expenseSheetsRef.current,
+      sheetId: targetSheetId,
+      sheetName: transactionResult.sheetName,
+      order: transactionResult.order,
+      rows: transactionResult.rows,
+      sheetVersion: transactionResult.sheetVersion,
+      now,
+      createdAt: transactionResult.createdAt,
+    });
     expenseSheetsRef.current = nextSheets;
     setExpenseSheets(nextSheets);
     if (targetSheetId === activeExpenseSheetIdRef.current) {
-      setExpenseSheetRows(preparedRows);
+      setExpenseSheetRows(transactionResult.rows);
     }
     return { appliedCount: mappedRows.length };
   }, [

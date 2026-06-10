@@ -23,7 +23,9 @@ describe('portal bank statement apply policy', () => {
 
     expect(saveBlock).toContain('appendBankStatementRows');
     expect(saveBlock).toContain('bank_statements/default');
-    expect(saveBlock).toContain('setDoc(');
+    expect(saveBlock).toContain('runTransaction');
+    expect(saveBlock).toContain('transaction.get(bankStatementRef)');
+    expect(saveBlock).toContain('transaction.set(bankStatementRef');
     expect(saveBlock).not.toContain('importBankStatementBatchViaBff');
     expect(saveBlock).not.toContain('buildBankStatementServerImportLines');
     expect(saveBlock).not.toContain('saveExpenseSheetRows(');
@@ -52,6 +54,9 @@ describe('portal bank statement apply policy', () => {
     expect(applyBlock).toContain('mergeBankRowsIntoExpenseSheet');
     expect(applyBlock).toContain('buildExpenseSheetPersistenceDoc');
     expect(applyBlock).toContain('expense_sheets/${targetSheetId}');
+    expect(applyBlock).toContain('runTransaction');
+    expect(applyBlock).toContain('transaction.get(expenseSheetRef)');
+    expect(applyBlock).toContain('normalizeExpenseSheetRows(data.rows)');
     expect(applyBlock).toContain('cellPatchesByRowKey');
     expect(applyBlock).toContain('bank-import-line:${rowKey}');
     expect(applyBlock).not.toContain('importBankStatementBatchViaBff');
@@ -64,6 +69,9 @@ describe('portal bank statement apply policy', () => {
     expect(bankStatementPageSource).toContain('selectedRows');
     expect(bankStatementPageSource).toContain("switchStatusTab('applied')");
     expect(bankStatementPageSource).toContain("refreshBankStatementRows(status)");
+    expect(bankStatementPageSource).toContain('visibleBankRows');
+    expect(bankStatementPageSource).toContain("activeStatusTab === 'applied'");
+    expect(bankStatementPageSource).toContain('appliedBankLineIds.has(rowKey)');
     expect(bankStatementPageSource).toContain("activeStatusTab !== 'staged'");
     expect(bankStatementPageSource).not.toContain('applyBankStatementRowsToExpenseSheet({ columns, rows: selectedRows })');
   });

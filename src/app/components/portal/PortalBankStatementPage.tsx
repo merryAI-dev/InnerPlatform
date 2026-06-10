@@ -307,6 +307,20 @@ export function PortalBankStatementPage() {
     const rowsAcrossSheets = expenseSheets.flatMap((sheet) => sheet.rows || []);
     return collectAppliedBankLineIds(rowsAcrossSheets.length > 0 ? rowsAcrossSheets : expenseSheetRows);
   }, [expenseSheetRows, expenseSheets]);
+  const visibleBankRows = useMemo(
+    () => rows
+      .map((row, index) => ({ row, index, rowKey: row.tempId || `row-${index}` }))
+      .filter(({ rowKey }) => (
+        activeStatusTab === 'applied'
+          ? appliedBankLineIds.has(rowKey)
+          : !appliedBankLineIds.has(rowKey)
+      )),
+    [activeStatusTab, appliedBankLineIds, rows],
+  );
+  const selectedVisibleCount = useMemo(
+    () => visibleBankRows.filter(({ rowKey }) => selectedRowIds.has(rowKey)).length,
+    [selectedRowIds, visibleBankRows],
+  );
   const unappliedSelectedRows = useMemo(
     () => selectedRows.filter((row, index) => {
       const id = bankRowKey(row, index);
@@ -516,8 +530,8 @@ export function PortalBankStatementPage() {
   }, [rows]);
 
   const toggleAllRows = useCallback((checked: boolean) => {
-    setSelectedRowIds(checked ? new Set(rows.map((row, index) => row.tempId || `row-${index}`)) : new Set());
-  }, [rows]);
+    setSelectedRowIds(checked ? new Set(visibleBankRows.map(({ rowKey }) => rowKey)) : new Set());
+  }, [visibleBankRows]);
 
   const switchStatusTab = useCallback(async (status: 'staged' | 'applied') => {
     if (status === activeStatusTab) return;
@@ -1103,7 +1117,7 @@ export function PortalBankStatementPage() {
                 <div className="mt-7 space-y-3 text-[13px]">
                   <div className="flex items-center justify-between">
                     <span className="text-slate-600">{activeStatusTab === 'staged' ? '미반영 거래' : '반영완료 거래'}</span>
-                    <span className="font-bold">{rows.length.toLocaleString('ko-KR')}건</span>
+                    <span className="font-bold">{visibleBankRows.length.toLocaleString('ko-KR')}건</span>
                   </div>
                   <div className="flex items-center justify-between border-t pt-3">
                     <span className="text-slate-600">금액 컬럼</span>
@@ -1120,7 +1134,7 @@ export function PortalBankStatementPage() {
                     <tr>
                       <th className="w-10 border-b border-r px-2 py-2 text-left">
                         <Checkbox
-                          checked={hasUploadedSheet && selectedRows.length === rows.length}
+                          checked={visibleBankRows.length > 0 && selectedVisibleCount === visibleBankRows.length}
                           onCheckedChange={(checked) => toggleAllRows(Boolean(checked))}
                           aria-label="전체 행 선택"
                           disabled={activeStatusTab !== 'staged'}
@@ -1135,14 +1149,14 @@ export function PortalBankStatementPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.map((row, rowIdx) => (
+                    {visibleBankRows.map(({ row, index: rowIdx, rowKey }) => (
                       <tr
-                        key={row.tempId || rowIdx}
-                        className={`border-t ${selectedRowIds.has(row.tempId || `row-${rowIdx}`) ? 'bg-blue-50/70' : 'bg-white'}`}
+                        key={rowKey}
+                        className={`border-t ${selectedRowIds.has(rowKey) ? 'bg-blue-50/70' : 'bg-white'}`}
                       >
                         <td className="border-r px-2 py-1.5">
                           <Checkbox
-                            checked={selectedRowIds.has(row.tempId || `row-${rowIdx}`)}
+                            checked={selectedRowIds.has(rowKey)}
                             onCheckedChange={(checked) => toggleRowSelection(rowIdx, Boolean(checked))}
                             aria-label={`${rowIdx + 1}행 선택`}
                             disabled={activeStatusTab !== 'staged'}
