@@ -71,9 +71,11 @@ describe('PortalLayout shell actions', () => {
   it('keeps portal navigation explicit without onboarding or project-select redirect effects', () => {
     expect(portalLayoutSource).toContain('isPortalStandaloneEntryPath');
     expect(portalLayoutSource).toContain('blockedPortalAccess');
+    expect(portalLayoutSource).toContain('<Navigate');
     expect(portalLayoutSource).toContain("navigate('/portal/project-select')");
-    expect(portalLayoutSource).toContain("navigate('/portal/weekly-expenses')");
-    expect(portalLayoutSource).toContain("navigate('/portal/register-project')");
+    expect(portalLayoutSource).not.toContain('환영합니다!');
+    expect(portalLayoutSource).not.toContain('프로젝트 관리를 시작하려면 아래에서 선택해 주세요');
+    expect(portalLayoutSource).not.toContain('증빙 업로드만 할게요');
     expect(portalLayoutSource).not.toContain("navigate('/', { replace: true })");
     expect(portalLayoutSource).not.toContain('shouldForcePortalOnboarding');
     expect(portalLayoutSource).not.toContain('resolvePortalProjectSelectPath(currentPath)');

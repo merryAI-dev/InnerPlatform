@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Outlet, NavLink, useLocation, useNavigate } from 'react-router';
+import { Navigate, Outlet, NavLink, useLocation, useNavigate } from 'react-router';
 import {
   Calculator,
   LogOut,
@@ -9,9 +9,6 @@ import {
   BarChart3,
   Loader2,
   FileSpreadsheet,
-  Sparkles,
-  ArrowRight,
-  Upload,
   Shield,
   ChevronLeft,
   ChevronRight,
@@ -375,93 +372,11 @@ function PortalContent() {
 
   if (!portalUser && !isAdminSpaceRole(authUser?.role)) {
     return (
-      <div className="min-h-screen bg-slate-50 px-6 py-8 dark:bg-slate-950">
-        <div className="mx-auto w-full max-w-6xl">
-          {/* 환영 헤더 */}
-          <div className="text-center mb-8">
-            <div className="inline-flex items-center justify-center w-14 h-14 rounded-lg bg-[#001e46] shadow-sm mb-4">
-              <Sparkles className="w-7 h-7 text-white" />
-            </div>
-            <h1 className="text-xl font-bold tracking-tight">
-              환영합니다!
-            </h1>
-            <p className="text-sm text-muted-foreground mt-1.5">
-              프로젝트 관리를 시작하려면 아래에서 선택해 주세요
-            </p>
-          </div>
-
-          {/* 선택 카드 */}
-          <div className="grid gap-3">
-            <button
-              onClick={() => navigate('/portal/project-select')}
-              className="group relative flex items-center gap-4 rounded-lg border border-border bg-white p-5 text-left shadow-sm transition-all duration-200 hover:border-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800"
-            >
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-sky-50 text-sky-700 transition-transform group-hover:scale-105 dark:bg-sky-950 dark:text-sky-300">
-                <FolderKanban className="w-5 h-5" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold">기존 프로젝트 선택</p>
-                <p className="text-xs text-muted-foreground mt-0.5">이미 등록된 프로젝트에서 선택하여 시작합니다</p>
-              </div>
-              <ArrowRight className="w-4 h-4 text-muted-foreground/40 group-hover:text-[#001e46] group-hover:translate-x-0.5 transition-all" />
-            </button>
-
-            <button
-              onClick={() => navigate('/portal/weekly-expenses')}
-              className="group relative flex items-center gap-4 p-5 rounded-lg border border-border/80 bg-white text-left shadow-sm transition-all duration-200 hover:border-cyan-300 hover:bg-cyan-50/60 dark:bg-slate-900 dark:hover:bg-cyan-950/20"
-            >
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-cyan-50 text-cyan-700 transition-transform group-hover:scale-105 dark:bg-cyan-950 dark:text-cyan-300">
-                <Upload className="w-5 h-5" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold">증빙 업로드만 할게요</p>
-                <p className="text-xs text-muted-foreground mt-0.5">프로젝트 선택 없이 바로 PDF/영수증을 업로드합니다</p>
-              </div>
-              <ArrowRight className="w-4 h-4 text-muted-foreground/40 transition-all group-hover:translate-x-0.5 group-hover:text-cyan-600" />
-            </button>
-
-            <button
-              onClick={() => navigate('/portal/register-project')}
-              className="group relative flex items-center gap-4 rounded-lg border border-border bg-white p-5 text-left shadow-sm transition-all duration-200 hover:border-slate-300 hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800"
-            >
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-slate-100 text-[#001e46] transition-transform group-hover:scale-105 dark:bg-slate-800 dark:text-slate-200">
-                <Plus className="w-5 h-5" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold">새 프로젝트 등록</p>
-                <p className="text-xs text-muted-foreground mt-0.5">새로운 프로젝트를 제안하고 등록을 시작합니다</p>
-              </div>
-              <ArrowRight className="w-4 h-4 text-muted-foreground/40 group-hover:text-[#001e46] group-hover:translate-x-0.5 transition-all" />
-            </button>
-
-            {isAdminSpaceRole(authUser?.role) && (
-              <button
-                onClick={requestAdminNavigation}
-                className="group relative flex items-center gap-4 p-5 rounded-2xl border border-border/60 bg-white/80 dark:bg-slate-800/60 backdrop-blur-sm hover:border-slate-300 hover:shadow-md hover:shadow-slate-500/5 transition-all duration-200 text-left"
-              >
-                <div className="shrink-0 flex items-center justify-center w-11 h-11 rounded-xl bg-slate-100 dark:bg-slate-900 text-slate-700 dark:text-slate-200 group-hover:scale-105 transition-transform">
-                  <Shield className="w-5 h-5" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold">관리자 공간으로 이동</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">조직 운영, 사용자 관리, 전사 설정 화면으로 이동합니다</p>
-                </div>
-                <ArrowRight className="w-4 h-4 text-muted-foreground/40 group-hover:text-slate-500 group-hover:translate-x-0.5 transition-all" />
-              </button>
-            )}
-          </div>
-
-          {/* 로그아웃 */}
-          <div className="mt-6 text-center">
-            <button
-              onClick={() => { portalLogout(); authLogout(); navigate('/login'); }}
-              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-            >
-              다른 계정으로 로그인
-            </button>
-          </div>
-        </div>
-      </div>
+      <Navigate
+        to="/portal/project-select"
+        replace
+        state={{ from: `${location.pathname}${location.search}${location.hash}` }}
+      />
     );
   }
 
