@@ -106,13 +106,56 @@ describe('portal bank statement apply policy', () => {
     expect(bankStatementPageSource).toContain('resolveEvidenceSuggestion');
   });
 
-  it('pre-fills tax-included withdrawal and deposit drafts only inside the wizard buffer', () => {
+  it('keeps full bank amount by default and exposes VAT split only as an explicit wizard action', () => {
     expect(bankStatementPageSource).toContain('splitVatIncludedDraftAmount');
     expect(bankStatementPageSource).toContain('Math.round(total / 11)');
-    expect(bankStatementPageSource).toContain('expenseAmount: formatNumberDraft(split.supplyAmount)');
-    expect(bankStatementPageSource).toContain('vatIn: formatNumberDraft(split.vatAmount)');
-    expect(bankStatementPageSource).toContain('depositAmount: formatNumberDraft(split.supplyAmount)');
-    expect(bankStatementPageSource).toContain('vatRefund: formatNumberDraft(split.vatAmount)');
+    expect(bankStatementPageSource).toContain('buildVatIncludedDraftSuggestion');
+    expect(bankStatementPageSource).toContain('handleApplyVatSuggestion');
+    expect(bankStatementPageSource).toContain('부가세 추정 적용');
+    expect(bankStatementPageSource).toContain('expenseAmount: formatNumberDraft(signedAmount)');
+    expect(bankStatementPageSource).toContain("vatIn: ''");
+    expect(bankStatementPageSource).toContain('depositAmount: formatNumberDraft(signedAmount)');
+    expect(bankStatementPageSource).toContain("vatRefund: ''");
+  });
+
+  it('treats cashflow line as a strict company policy key in the wizard', () => {
+    expect(bankStatementPageSource).toContain('CASHFLOW_LINE_OPTIONS');
+    expect(bankStatementPageSource).toContain('WIZARD_CASHFLOW_OPTIONS');
+    expect(bankStatementPageSource).toContain("option.value !== 'INPUT_VAT_OUT'");
+    expect(bankStatementPageSource).toContain("field.key === 'cashflowLine'");
+    expect(bankStatementPageSource).toContain('cashflow항목은 회사 기준 Actual PK입니다');
+
+    const cashflowFieldBlock = sourceBetween(
+      bankStatementPageSource,
+      "if (field.key === 'cashflowLine')",
+      "if (field.key === 'budgetCategory')",
+    );
+    expect(cashflowFieldBlock).toContain('<select');
+    expect(cashflowFieldBlock).toContain('WIZARD_CASHFLOW_OPTIONS.map');
+    expect(cashflowFieldBlock).not.toContain('<input');
+  });
+
+  it('does not expose weekly week labels as manual wizard input', () => {
+    const wizardFieldBlock = sourceBetween(
+      bankStatementPageSource,
+      'const WIZARD_FIELDS = [',
+      '] as const;',
+    );
+    expect(wizardFieldBlock).not.toContain('해당 주차');
+    expect(wizardFieldBlock).not.toContain('week');
+    expect(bankStatementPageSource).toContain('해당 주차는 거래일 기준으로 자동 계산됩니다');
+  });
+
+  it('uses a dense full-screen wizard layout with grouped deposit and withdrawal amount fields', () => {
+    expect(bankStatementPageSource).toContain('w-[min(1680px,98vw)]');
+    expect(bankStatementPageSource).toContain('max-h-[94vh]');
+    expect(bankStatementPageSource).toContain('WIZARD_PRIMARY_FIELDS');
+    expect(bankStatementPageSource).toContain('WIZARD_DEPOSIT_FIELDS');
+    expect(bankStatementPageSource).toContain('WIZARD_WITHDRAWAL_FIELDS');
+    expect(bankStatementPageSource).toContain('colSpan={WIZARD_DEPOSIT_FIELDS.length}');
+    expect(bankStatementPageSource).toContain('colSpan={WIZARD_WITHDRAWAL_FIELDS.length}');
+    expect(bankStatementPageSource).toContain('입금');
+    expect(bankStatementPageSource).toContain('출금');
   });
 
   it('keeps user assistance inside temp state with explicit apply and undo controls', () => {

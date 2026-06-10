@@ -2,7 +2,7 @@
 
 ## [2026-06-10] patch-note | portal-weekly-expense, portal-bank-statement | ledger view-only and VAT draft split
 - pages: [portal-weekly-expense](./pages/portal-weekly-expense.md), [portal-bank-statement](./pages/portal-bank-statement.md)
-- summary: 사업비 입력(주간)을 view-only ledger로 고정하고 셀 직접 편집/행 추가/삭제/작성본 업로드/저장 mutation 액션을 위자드 경로로 분리했다. 통장내역 선택 행 반영 위자드는 입출금 총액을 부가세 포함 공식 기준으로 `공급가액 + 매입부가세` 초안 분해해 채우며, 최종 반영은 Java command API 검증으로 유지한다.
+- summary: 사업비 입력(주간)을 view-only ledger로 고정하고 셀 직접 편집/행 추가/삭제/작성본 업로드/저장 mutation 액션을 위자드 경로로 분리했다. 통장내역 선택 행 반영 위자드는 입출금 원액을 유지하고, 부가세 포함 추정값은 명시 적용 버튼으로만 채우며, 최종 반영은 Java command API 검증으로 유지한다. `cashflow항목`은 Actual/회계 연동 기준키라 공용 policy 옵션으로만 선택하게 고정했다.
 
 ## [2026-06-10] patch-note | portal-bank-statement | production temp wizard hardening
 - pages: [portal-bank-statement](./pages/portal-bank-statement.md)

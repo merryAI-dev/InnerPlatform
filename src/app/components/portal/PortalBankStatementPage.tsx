@@ -21,7 +21,7 @@ import {
 import { normalizeKey, parseCsv } from '../../platform/csv-utils';
 import { loadXlsx, warmXlsx } from '../../platform/lazy-heavy-modules';
 import { readTextFile } from '../../platform/text-file-decoder';
-import { SETTLEMENT_COLUMNS, type ImportRow } from '../../platform/settlement-csv';
+import { CASHFLOW_LINE_OPTIONS, SETTLEMENT_COLUMNS, type ImportRow } from '../../platform/settlement-csv';
 import { useFirebase } from '../../lib/firebase-context';
 import { getOrgDocumentPath } from '../../lib/firebase';
 import { normalizeBudgetLabel, buildBudgetLabelKey } from '../../platform/budget-labels';
@@ -53,7 +53,24 @@ const WIZARD_FIELDS = [
   { key: 'settlementNote', label: '비고', column: '비고' },
 ] as const;
 
+const WIZARD_PRIMARY_FIELDS = WIZARD_FIELDS.filter((field) => (
+  field.key === 'budgetCategory'
+  || field.key === 'budgetSubCategory'
+  || field.key === 'budgetSubSubCategory'
+  || field.key === 'cashflowLine'
+  || field.key === 'evidenceRequired'
+  || field.key === 'memo'
+  || field.key === 'settlementNote'
+));
+const WIZARD_DEPOSIT_FIELDS = WIZARD_FIELDS.filter((field) => (
+  field.key === 'depositAmount' || field.key === 'vatRefund'
+));
+const WIZARD_WITHDRAWAL_FIELDS = WIZARD_FIELDS.filter((field) => (
+  field.key === 'expenseAmount' || field.key === 'vatIn'
+));
+const WIZARD_AMOUNT_FIELD_KEYS = ['depositAmount', 'vatRefund', 'expenseAmount', 'vatIn'] as const;
 const WIZARD_FIELD_KEYS = WIZARD_FIELDS.map((field) => field.key);
+const WIZARD_CASHFLOW_OPTIONS = CASHFLOW_LINE_OPTIONS.filter((option) => option.value !== 'INPUT_VAT_OUT');
 const WIZARD_DRAFT_RETENTION_DAYS = 30;
 
 interface WizardDraftVersion {
@@ -169,6 +186,13 @@ function getBankRowCounterparty(columns: string[], row: BankStatementRow): strin
 }
 
 function buildInitialWizardDraft(signedAmount: number | null | undefined): WizardDraft {
+  if (typeof signedAmount !== 'number' || !Number.isFinite(signedAmount)) return {};
+  return signedAmount < 0
+    ? { expenseAmount: formatNumberDraft(signedAmount), vatIn: '' }
+    : { depositAmount: formatNumberDraft(signedAmount), vatRefund: '' };
+}
+
+function buildVatIncludedDraftSuggestion(signedAmount: number | null | undefined): WizardDraft {
   if (typeof signedAmount !== 'number' || !Number.isFinite(signedAmount)) return {};
   const split = splitVatIncludedDraftAmount(signedAmount);
   return signedAmount < 0
@@ -330,6 +354,17 @@ export function PortalBankStatementPage() {
       return summary;
     }, { amount: 0, budget: 0, evidence: 0 });
   }, [wizardDrafts, wizardRows]);
+  const wizardSignedAmountByRowKey = useMemo(() => {
+    const importLines = buildBankStatementServerImportLines({ columns, rows: wizardRows });
+    const result = new Map<string, number>();
+    wizardRows.forEach((row, index) => {
+      const signedAmount = importLines[index]?.signedAmount;
+      if (typeof signedAmount === 'number' && Number.isFinite(signedAmount)) {
+        result.set(bankRowKey(row, index), signedAmount);
+      }
+    });
+    return result;
+  }, [columns, wizardRows]);
 
   useEffect(() => {
     if (dirty) return;
@@ -661,6 +696,19 @@ export function PortalBankStatementPage() {
     });
   }, [pushWizardHistorySnapshot]);
 
+  const handleApplyVatSuggestion = useCallback((rowKey: string, signedAmount: number) => {
+    const suggestion = buildVatIncludedDraftSuggestion(signedAmount);
+    if (!Object.keys(suggestion).length) return;
+    pushWizardHistorySnapshot();
+    setWizardDrafts((current) => ({
+      ...current,
+      [rowKey]: {
+        ...(current[rowKey] || {}),
+        ...suggestion,
+      },
+    }));
+  }, [pushWizardHistorySnapshot]);
+
   const handleBulkApplyWizardDraft = useCallback(() => {
     const selectedKeys = Array.from(wizardSelectedRowKeys);
     if (selectedKeys.length < 2) {
@@ -725,7 +773,27 @@ export function PortalBankStatementPage() {
   }, [budgetHierarchyIndex.subSubCategoriesByPair]);
 
   const renderWizardField = useCallback((rowKey: string, field: typeof WIZARD_FIELDS[number], draft: WizardDraft) => {
-    const baseClass = 'h-9 w-full min-w-[132px] border border-slate-300 bg-white px-2 text-[12px] outline-none focus:border-blue-500';
+    const amountField = (WIZARD_AMOUNT_FIELD_KEYS as readonly string[]).includes(field.key);
+    const baseClass = [
+      'h-8 w-full border border-slate-300 bg-white px-2 text-[11px] outline-none focus:border-blue-500',
+      amountField ? 'min-w-[104px] text-right tabular-nums' : 'min-w-[132px]',
+    ].join(' ');
+    if (field.key === 'cashflowLine') {
+      return (
+        <select
+          className={baseClass}
+          value={draft.cashflowLine || ''}
+          onChange={(event) => updateWizardDraft(rowKey, field.key, event.target.value)}
+          aria-label="cashflow항목은 회사 기준 Actual PK입니다"
+          title="cashflow항목은 회사 기준 Actual PK입니다"
+        >
+          <option value="">선택</option>
+          {WIZARD_CASHFLOW_OPTIONS.map((option) => (
+            <option key={option.value} value={option.label}>{option.label}</option>
+          ))}
+        </select>
+      );
+    }
     if (field.key === 'budgetCategory') {
       return (
         <select
@@ -1113,16 +1181,16 @@ export function PortalBankStatementPage() {
       )}
 
       {wizardRows.length > 0 ? (
-        <div className="fixed inset-0 z-[160] flex items-center justify-center bg-slate-950/45 px-4 py-6">
+        <div className="fixed inset-0 z-[160] flex items-center justify-center bg-slate-950/45 px-3 py-3">
           <div
             data-testid="bank-statement-completion-wizard"
-            className="flex max-h-[86vh] w-[min(1180px,96vw)] flex-col overflow-hidden border border-slate-300 bg-white shadow-2xl"
+            className="flex max-h-[94vh] w-[min(1680px,98vw)] flex-col overflow-hidden border border-slate-300 bg-white shadow-2xl"
           >
-            <div className="flex items-center justify-between gap-4 border-b px-6 py-4">
+            <div className="flex items-center justify-between gap-4 border-b px-4 py-3">
               <div>
-                <h2 className="text-[20px] font-extrabold text-slate-950">비어있는 사업비 항목 작성</h2>
+                <h2 className="text-[17px] font-extrabold text-slate-950">비어있는 사업비 항목 작성</h2>
                 <p className="mt-1 text-[12px] leading-5 text-slate-500">
-                  통장내역에서 선택한 거래를 원장에 쓰기 전, 비목/세목/세세목, 금액, 증빙을 임시 작성합니다.
+                  통장내역에서 선택한 거래를 원장에 쓰기 전, 비목/세목/세세목, cashflow항목, 금액, 증빙을 임시 작성합니다. 해당 주차는 거래일 기준으로 자동 계산됩니다.
                 </p>
               </div>
               <Button variant="ghost" size="sm" onClick={closeWizard} disabled={saving}>
@@ -1130,11 +1198,11 @@ export function PortalBankStatementPage() {
               </Button>
             </div>
 
-            <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[320px_minmax(0,1fr)]">
-              <aside className="border-r bg-slate-50 p-5">
-                <div className="rounded border border-blue-200 bg-white p-4 shadow-sm">
-                  <div className="text-[14px] font-bold text-slate-900">미반영</div>
-                  <div className="mt-7 space-y-3 text-[13px]">
+            <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[260px_minmax(0,1fr)]">
+              <aside className="overflow-auto border-r bg-slate-50 p-3">
+                <div className="rounded border border-blue-200 bg-white p-3 shadow-sm">
+                  <div className="text-[13px] font-bold text-slate-900">미반영</div>
+                  <div className="mt-4 space-y-2 text-[12px]">
                     <div className="flex items-center justify-between">
                       <span className="text-slate-600">선택 거래</span>
                       <span className="font-bold">{selectedRows.length.toLocaleString('ko-KR')}건</span>
@@ -1150,11 +1218,11 @@ export function PortalBankStatementPage() {
                   </div>
                 </div>
 
-                <div className="mt-4 rounded border bg-white">
-                  <div className="border-b bg-slate-100 px-4 py-3 text-[13px] font-bold text-slate-900">
+                <div className="mt-3 rounded border bg-white">
+                  <div className="border-b bg-slate-100 px-3 py-2 text-[12px] font-bold text-slate-900">
                     오류 요약
                   </div>
-                  <div className="space-y-2 px-4 py-4 text-[12px] leading-5 text-slate-700">
+                  <div className="space-y-2 px-3 py-3 text-[12px] leading-5 text-slate-700">
                     <div className="flex items-center justify-between">
                       <span>금액 오류</span>
                       <span className="font-bold">{wizardIssueSummary.amount.toLocaleString('ko-KR')}건</span>
@@ -1170,15 +1238,15 @@ export function PortalBankStatementPage() {
                   </div>
                 </div>
 
-                <div className="mt-4 rounded border bg-white">
-                  <div className="flex items-center justify-between gap-2 border-b bg-slate-100 px-4 py-3">
-                    <div className="text-[13px] font-bold text-slate-900">임시 작성본</div>
+                <div className="mt-3 rounded border bg-white">
+                  <div className="flex items-center justify-between gap-2 border-b bg-slate-100 px-3 py-2">
+                    <div className="text-[12px] font-bold text-slate-900">임시 작성본</div>
                     <Button variant="outline" size="sm" onClick={() => void handleSaveWizardDraft()} disabled={wizardSavingDraft}>
                       {wizardSavingDraft ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                       임시저장
                     </Button>
                   </div>
-                  <div className="space-y-2 px-4 py-4 text-[12px] leading-5 text-slate-600">
+                  <div className="space-y-2 px-3 py-3 text-[11px] leading-5 text-slate-600">
                     <p>원본 통장내역은 수정하지 않습니다.</p>
                     <p>임시저장은 30일 동안 보관됩니다. 30일 이후에는 새 작성본으로 다시 저장해 주세요.</p>
                     {wizardDraftVersions.length > 0 ? (
@@ -1200,11 +1268,12 @@ export function PortalBankStatementPage() {
                   </div>
                 </div>
 
-                <div className="mt-4 rounded border bg-white">
-                  <div className="border-b bg-slate-100 px-4 py-3 text-[13px] font-bold text-slate-900">
+                <div className="mt-3 rounded border bg-white">
+                  <div className="border-b bg-slate-100 px-3 py-2 text-[12px] font-bold text-slate-900">
                     작성 정책
                   </div>
-                  <div className="space-y-2 px-4 py-4 text-[12px] leading-5 text-slate-600">
+                  <div className="space-y-2 px-3 py-3 text-[11px] leading-5 text-slate-600">
+                    <p>cashflow항목은 회사 기준 Actual PK입니다. 목록에 없는 값은 직접 입력하지 않습니다.</p>
                     <p>거래처 제안은 자동완성일 뿐 자동확정하지 않습니다.</p>
                     <p>선택 행 일괄적용은 위자드 임시 입력값에만 적용합니다.</p>
                     <p>확정 시 Java API가 행/셀 검증 후 사업비 입력에 반영합니다.</p>
@@ -1212,9 +1281,9 @@ export function PortalBankStatementPage() {
                 </div>
               </aside>
 
-              <section className="min-w-0 overflow-auto p-5">
-                <div className="min-w-[980px]">
-                  <div className="mb-3 flex items-center justify-between gap-2">
+              <section className="min-w-0 overflow-auto p-3">
+                <div className="min-w-[1360px]">
+                  <div className="mb-2 flex items-center justify-between gap-2">
                     <div className="text-[12px] text-slate-500">Ctrl+Z / Command+Z는 이 위자드 입력만 되돌립니다.</div>
                     <div className="flex items-center gap-2">
                       <Button variant="outline" size="sm" onClick={handleWizardUndo} disabled={wizardHistory.length === 0}>
@@ -1225,10 +1294,10 @@ export function PortalBankStatementPage() {
                       </Button>
                     </div>
                   </div>
-                  <table className="w-full border-collapse text-[12px]">
-                    <thead>
+                  <table className="w-full border-collapse text-[11px]">
+                    <thead className="sticky top-0 z-10">
                       <tr className="bg-slate-100 text-left">
-                        <th className="w-10 border px-2 py-2">
+                        <th rowSpan={2} className="w-9 border px-2 py-1.5">
                           <Checkbox
                             checked={wizardRows.length > 0 && wizardSelectedRowKeys.size === wizardRows.length}
                             onCheckedChange={(checked) => {
@@ -1239,10 +1308,28 @@ export function PortalBankStatementPage() {
                             aria-label="위자드 전체 행 선택"
                           />
                         </th>
-                        <th className="w-12 border px-2 py-2">행</th>
-                        <th className="w-[280px] border px-3 py-2">통장내역 원본</th>
-                        {WIZARD_FIELDS.map((field) => (
-                          <th key={field.key} className="border px-3 py-2">
+                        <th rowSpan={2} className="w-10 border px-2 py-1.5">행</th>
+                        <th rowSpan={2} className="w-[210px] border px-2 py-1.5">통장내역 원본</th>
+                        {WIZARD_PRIMARY_FIELDS.map((field) => (
+                          <th key={field.key} rowSpan={2} className="border px-2 py-1.5">
+                            {field.label}
+                          </th>
+                        ))}
+                        <th colSpan={WIZARD_DEPOSIT_FIELDS.length} className="border bg-emerald-50 px-2 py-1.5 text-center">
+                          입금
+                        </th>
+                        <th colSpan={WIZARD_WITHDRAWAL_FIELDS.length} className="border bg-orange-50 px-2 py-1.5 text-center">
+                          출금
+                        </th>
+                      </tr>
+                      <tr className="bg-slate-100 text-left">
+                        {WIZARD_DEPOSIT_FIELDS.map((field) => (
+                          <th key={field.key} className="w-[110px] border bg-emerald-50 px-2 py-1.5">
+                            {field.label}
+                          </th>
+                        ))}
+                        {WIZARD_WITHDRAWAL_FIELDS.map((field) => (
+                          <th key={field.key} className="w-[110px] border bg-orange-50 px-2 py-1.5">
                             {field.label}
                           </th>
                         ))}
@@ -1258,20 +1345,24 @@ export function PortalBankStatementPage() {
                         const draft = wizardDrafts[rowKey] || {};
                         const counterparty = getBankRowCounterparty(columns, row);
                         const suggestion = sameCounterpartySuggestions.get(normalizeKey(counterparty));
+                        const signedAmount = wizardSignedAmountByRowKey.get(rowKey);
+                        const vatSuggestion = typeof signedAmount === 'number'
+                          ? splitVatIncludedDraftAmount(signedAmount)
+                          : null;
                         return (
                           <tr key={rowKey} className="align-top">
-                            <td className="border bg-slate-50 px-2 py-2 text-center">
+                            <td className="border bg-slate-50 px-2 py-1.5 text-center">
                               <Checkbox
                                 checked={wizardSelectedRowKeys.has(rowKey)}
                                 onCheckedChange={(checked) => toggleWizardRowSelection(rowKey, Boolean(checked))}
                                 aria-label={`${rowIdx + 1}행 위자드 선택`}
                               />
                             </td>
-                            <td className="border bg-slate-50 px-2 py-2 text-center text-[11px] text-slate-500">
+                            <td className="border bg-slate-50 px-2 py-1.5 text-center text-[11px] text-slate-500">
                               {rowIdx + 1}
                             </td>
-                            <td className="border px-3 py-2">
-                              <div className="space-y-1 text-[12px] text-slate-700">
+                            <td className="border px-2 py-1.5">
+                              <div className="max-w-[200px] space-y-1 text-[11px] text-slate-700">
                                 {(previewCells.length > 0 ? previewCells : ['원본 셀 없음']).map((cell, idx) => (
                                   <div key={`${rowKey}-raw-${idx}`} className="truncate">
                                     {cell}
@@ -1286,10 +1377,30 @@ export function PortalBankStatementPage() {
                                     이전 거래처 조합 적용
                                   </button>
                                 ) : null}
+                                {vatSuggestion ? (
+                                  <button
+                                    type="button"
+                                    className="mt-1 block border border-amber-200 bg-amber-50 px-2 py-1 text-left text-[10px] font-semibold text-amber-800 hover:bg-amber-100"
+                                    onClick={() => handleApplyVatSuggestion(rowKey, signedAmount!)}
+                                    title="부가세 포함 거래일 때만 사람이 확인 후 적용합니다."
+                                  >
+                                    부가세 추정 적용 · 공급 {vatSuggestion.supplyAmount.toLocaleString('ko-KR')} / 세액 {vatSuggestion.vatAmount.toLocaleString('ko-KR')}
+                                  </button>
+                                ) : null}
                               </div>
                             </td>
-                            {WIZARD_FIELDS.map((field) => (
-                              <td key={field.key} className="border px-2 py-2">
+                            {WIZARD_PRIMARY_FIELDS.map((field) => (
+                              <td key={field.key} className="border px-1.5 py-1.5">
+                                {renderWizardField(rowKey, field, draft)}
+                              </td>
+                            ))}
+                            {WIZARD_DEPOSIT_FIELDS.map((field) => (
+                              <td key={field.key} className="border bg-emerald-50/20 px-1.5 py-1.5">
+                                {renderWizardField(rowKey, field, draft)}
+                              </td>
+                            ))}
+                            {WIZARD_WITHDRAWAL_FIELDS.map((field) => (
+                              <td key={field.key} className="border bg-orange-50/20 px-1.5 py-1.5">
                                 {renderWizardField(rowKey, field, draft)}
                               </td>
                             ))}
@@ -1302,7 +1413,7 @@ export function PortalBankStatementPage() {
               </section>
             </div>
 
-            <div className="flex items-center justify-end gap-2 border-t bg-slate-50 px-6 py-4">
+            <div className="flex items-center justify-end gap-2 border-t bg-slate-50 px-4 py-3">
               <Button variant="outline" size="sm" onClick={closeWizard} disabled={saving}>
                 취소
               </Button>
