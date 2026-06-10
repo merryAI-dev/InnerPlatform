@@ -27,11 +27,13 @@
 - [x] route shell이 explicit Firestore access mode를 주입하고 store는 pathname self-inference를 하지 않음
 - [x] `portal-store`가 `project catalog`, `current project scope`, `weekly submission scope`를 분리해 자기유발 bootstrap loop를 줄이도록 재구성됨
 - [x] `v2` 예산 구조는 `budget_tree_v2`를 원본으로 두고, `budget_code_book`은 2단 파생본으로 동기화함
+- [x] 통장내역 선택 반영은 Temp 위자드와 Java command API를 거쳐 확정되며 프론트가 원장을 직접 오염시키지 않음
 - [ ] admin summary surface cutover까지 완료됨
 - [ ] 포털의 broad Firestore direct read가 완전히 제거됨
 
 ## Recent Changes
 
+- [2026-06-10] 통장내역 선택 반영을 `Temp 위자드 -> 셀 패치 -> Java command API -> 원장 반영` 구조로 고정했다. 위자드는 원본/원장을 직접 mutate하지 않고, 이미 반영된 거래는 전체 expense sheet tab 기준으로 제외한다.
 - [2026-06-10] 통장내역 저장 경로와 주간 사업비 반영 경로를 분리했다. `bank_statements/default`는 append-only 기준본으로 누적하고, `거래일시(초 단위) + 거래처 + 금액` 중복은 제외하며, 주간 사업비 write는 선택 행 반영 action에서만 수행한다.
 - [2026-06-10] QA 중 반복 write를 줄이기 위해 포털 프로젝트 등록/수정 wizard의 작성 중 자동 임시저장을 끄고, 등록/수정 제출 시점의 명시적 저장 경로만 유지했다.
 - [2026-06-10] 신규 프로젝트 생성 시 `통장내역 기준본` 문서가 항상 `bank_statements/default`에 표준 컬럼과 빈 행 목록으로 생성되도록 정책을 고정했다. 기존 프로젝트에서 해당 문서가 없을 때도 화면은 `null`이 아니라 빈 기준본 상태를 사용한다.
@@ -70,6 +72,7 @@
 - 운영 화면이 raw Firestore query를 직접 조합하는 구조를 줄이고, 읽기 계약을 BFF로 모으는 것이 장기 안정화의 핵심으로 정리됐다.
 - 이번 phase는 provider를 옮기는 수준이 아니라, route shell이 data access policy를 명시적으로 주입하게 만든 첫 구조 변경이다.
 - 포털 홈이 번쩍이거나 Firestore `Listen/channel` 요청이 계속 누적되면, 먼저 `portal-store`가 다시 `projects`와 `scopedProjectIds`를 한 effect에서 함께 다루고 있지 않은지 본다.
+- 통장내역/주간 사업비는 프론트가 batch patch를 만들 수는 있지만 금액/주차/비목/세목 검증과 원장 반영 권위는 Java command API에 둔다.
 
 ## Next Watch Points
 

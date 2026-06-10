@@ -47,6 +47,8 @@ describe('portal bank statement apply policy', () => {
     expect(applyBlock).toContain('importBankStatementBatchViaBff');
     expect(applyBlock).toContain('applyBankStatementItemsViaBff');
     expect(applyBlock).toContain('expectedSheetVersion: targetSheet?.sheetVersion');
+    expect(applyBlock).toContain('cellPatchesByRowKey');
+    expect(applyBlock).toContain('cellPatchesBySourceKey');
     expect(applyBlock).not.toContain('!line.duplicate');
     expect(applyBlock).not.toContain('saveExpenseSheetRows(');
     expect(applyBlock).not.toContain('mergeBankRowsIntoExpenseSheet(');
@@ -57,7 +59,36 @@ describe('portal bank statement apply policy', () => {
     expect(bankStatementPageSource).toContain("switchStatusTab('applied')");
     expect(bankStatementPageSource).toContain("refreshBankStatementRows(status)");
     expect(bankStatementPageSource).toContain("activeStatusTab !== 'staged'");
-    expect(bankStatementPageSource).toContain('applyBankStatementRowsToExpenseSheet({ columns, rows: selectedRows })');
+    expect(bankStatementPageSource).not.toContain('applyBankStatementRowsToExpenseSheet({ columns, rows: selectedRows })');
+  });
+
+  it('opens a completion wizard before applying selected bank rows to weekly expense', () => {
+    expect(bankStatementPageSource).toContain('data-testid="bank-statement-completion-wizard"');
+    expect(bankStatementPageSource).toContain('비어있는 사업비 항목 작성');
+    expect(bankStatementPageSource).toContain('wizardRows');
+    expect(bankStatementPageSource).toContain('appliedBankLineIds');
+    expect(bankStatementPageSource).toContain('unappliedSelectedRows');
+    expect(bankStatementPageSource).toContain('handleSubmitWizard');
+    expect(bankStatementPageSource).toContain('cellPatchesByRowKey');
+    expect(bankStatementPageSource).toContain('applyBankStatementRowsToExpenseSheet({ columns, rows: wizardRows }');
+  });
+
+  it('computes already applied bank lines across every expense sheet tab', () => {
+    expect(bankStatementPageSource).toContain('expenseSheets.flatMap');
+    expect(bankStatementPageSource).toContain('collectAppliedBankLineIds(rowsAcrossSheets.length > 0 ? rowsAcrossSheets : expenseSheetRows)');
+  });
+
+  it('does not save the whole dirty bank baseline before confirming wizard patches', () => {
+    const submitBlock = sourceBetween(
+      bankStatementPageSource,
+      'const handleSubmitWizard = useCallback',
+      'const trustSurface = saving',
+    );
+
+    expect(submitBlock).toContain('buildWizardCellPatchesByRowKey');
+    expect(submitBlock).toContain('applyBankStatementRowsToExpenseSheet({ columns, rows: wizardRows }');
+    expect(submitBlock).not.toContain('saveBankStatementRows({ columns, rows })');
+    expect(submitBlock).not.toContain('setDirty(false)');
   });
 
   it('keeps the bank statement wizard read-only after upload so frontend does not mutate source rows', () => {

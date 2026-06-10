@@ -433,6 +433,16 @@ export interface ExpenseSheetTab {
   updatedAt?: string;
 }
 
+export interface BankStatementApplyCellPatch {
+  columnIndex: number;
+  rawValue: string;
+  userEdited?: boolean;
+}
+
+export interface BankStatementApplyOptions {
+  cellPatchesByRowKey?: Record<string, BankStatementApplyCellPatch[]>;
+}
+
 export function syncExpenseIntakeEvidenceState(params: {
   item: BankImportIntakeItem;
   updates: Partial<BankImportIntakeItem>;
@@ -574,7 +584,7 @@ interface PortalActions {
   deleteExpenseSheet: (sheetId: string) => Promise<boolean>;
   saveExpenseSheetRows: (rows: ImportRow[]) => Promise<ImportRow[]>;
   saveBankStatementRows: (sheet: BankStatementSheet) => Promise<void>;
-  applyBankStatementRowsToExpenseSheet: (sheet: BankStatementSheet) => Promise<{ appliedCount: number }>;
+  applyBankStatementRowsToExpenseSheet: (sheet: BankStatementSheet, options?: BankStatementApplyOptions) => Promise<{ appliedCount: number }>;
   refreshBankStatementRows: (status?: 'staged' | 'applied') => Promise<void>;
   saveBudgetPlanRows: (rows: BudgetPlanRow[]) => Promise<void>;
   saveBudgetCodeBook: (rows: BudgetCodeEntry[], renames?: BudgetCodeRename[]) => Promise<void>;
@@ -2692,7 +2702,10 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     await refreshBankStatementRowsFromServer();
   }, [authUser, currentProjectId, isDevHarnessUser, orgId, refreshBankStatementRowsFromServer]);
 
-  const applyBankStatementRowsToExpenseSheet = useCallback(async (sheet: BankStatementSheet): Promise<{ appliedCount: number }> => {
+  const applyBankStatementRowsToExpenseSheet = useCallback(async (
+    sheet: BankStatementSheet,
+    options?: BankStatementApplyOptions,
+  ): Promise<{ appliedCount: number }> => {
     const sanitizedSheet = sanitizeBankStatementSheet(sheet);
     if (sanitizedSheet.rows.length === 0) return { appliedCount: 0 };
     const targetSheetId = activeExpenseSheetIdRef.current || 'default';
@@ -2705,6 +2718,16 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       throw new Error(message);
     }
     const importLines = buildBankStatementServerImportLines(sanitizedSheet);
+    const cellPatchesByRowKey = options?.cellPatchesByRowKey || {};
+    const cellPatchesBySourceKey = new Map<string, BankStatementApplyCellPatch[]>();
+    importLines.forEach((line, index) => {
+      const row = sanitizedSheet.rows[index];
+      const rowKey = row?.tempId || `row-${index}`;
+      const patches = cellPatchesByRowKey[rowKey] || [];
+      if (patches.length > 0) {
+        cellPatchesBySourceKey.set(line.sourceLineKey, patches);
+      }
+    });
     const importIdempotencyKey = buildBankStatementIdempotencyKey('bank-import', currentProjectId);
     const importResult = await importBankStatementBatchViaBff({
       tenantId: orgId,
@@ -2720,7 +2743,10 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     });
     const stagedLineIds = importResult.lines
       .filter((line) => line.id && String(line.status || '').toLowerCase() === 'staged')
-      .map((line) => String(line.id));
+      .map((line) => ({
+        importLineId: String(line.id),
+        cells: cellPatchesBySourceKey.get(String(line.sourceLineKey || '')) || [],
+      }));
     if (stagedLineIds.length === 0) {
       await refreshBankStatementRowsFromServer();
       return { appliedCount: 0 };
@@ -2738,7 +2764,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         sheetKey: targetSheetId,
         expectedSheetVersion: targetSheet?.sheetVersion,
         sheetName: targetSheetName,
-        items: stagedLineIds.map((importLineId) => ({ importLineId, cells: [] })),
+        items: stagedLineIds,
       },
     });
     const refreshedSheet = await readWeeklyExpenseSheetViaBff({

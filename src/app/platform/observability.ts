@@ -154,19 +154,19 @@ function resolveInternalApiBaseUrl(env: Record<string, unknown> = import.meta.en
   const runtimeHostname = getRuntimeHostname();
   const hostedOrigin = runtimeOrigin && runtimeHostname && !isLoopbackHostname(runtimeHostname);
 
+  if (hostedOrigin) {
+    return runtimeOrigin;
+  }
+
   if (!configured) {
-    return hostedOrigin ? runtimeOrigin : DEFAULT_INTERNAL_API_BASE_URL;
+    return DEFAULT_INTERNAL_API_BASE_URL;
   }
 
   try {
     const parsed = new URL(configured, runtimeOrigin || 'http://localhost');
-    if (hostedOrigin && isLoopbackHostname(parsed.hostname)) {
-      return runtimeOrigin;
-    }
+    if (isLoopbackHostname(parsed.hostname)) return DEFAULT_INTERNAL_API_BASE_URL;
   } catch {
-    if (hostedOrigin && /^https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|::1)/i.test(configured)) {
-      return runtimeOrigin;
-    }
+    if (/^https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|::1)/i.test(configured)) return DEFAULT_INTERNAL_API_BASE_URL;
   }
 
   return configured;

@@ -51,6 +51,7 @@ describe('observability', () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     delete (globalThis as any).fetch;
     delete (globalThis as any).localStorage;
     delete (globalThis as any).window;
@@ -136,5 +137,34 @@ describe('observability', () => {
     expect(body.message).toBe('internal boom');
     expect(body.source).toBe('portal_store');
     expect(body.clientRequestId).toBe('req_123');
+  });
+
+  it('keeps hosted client error telemetry on the current Vercel origin', async () => {
+    vi.stubEnv('VITE_PLATFORM_API_BASE_URL', 'https://innerplatform-jvm-weekly-api-c3pm5gv7ia-du.a.run.app');
+    (globalThis as any).window.location = {
+      pathname: '/portal/weekly-expenses',
+      search: '',
+      hash: '',
+      href: 'https://inner-platform-stage-merryai-devs-projects.vercel.app/portal/weekly-expenses',
+      origin: 'https://inner-platform-stage-merryai-devs-projects.vercel.app',
+      hostname: 'inner-platform-stage-merryai-devs-projects.vercel.app',
+    };
+    const mod = await import('./observability');
+    mod.setObservabilityUserContext({
+      id: 'u-1',
+      tenantId: 'mysc',
+      idToken: 'firebase-id-token',
+    });
+
+    mod.captureException(new Error('stage telemetry'), {
+      tags: {
+        surface: 'portal_store',
+      },
+    });
+    await Promise.resolve();
+
+    const [url] = (globalThis.fetch as any).mock.calls[0];
+    expect(url).toBe('https://inner-platform-stage-merryai-devs-projects.vercel.app/api/v1/client-errors');
+    expect(url).not.toContain('innerplatform-jvm-weekly-api');
   });
 });

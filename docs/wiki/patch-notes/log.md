@@ -171,6 +171,10 @@
 - pages: [portal-weekly-expense](./pages/portal-weekly-expense.md), [portal-bank-statement](./pages/portal-bank-statement.md), [shared-portal-architecture](./pages/shared-portal-architecture.md)
 - summary: 주간 사업비, 통장내역, 프로젝트 등록/수정 화면의 작성 중 자동 저장을 끄고, 사용자가 저장/등록/수정 버튼을 누르는 명시적 write 경로만 유지했다.
 
+## [2026-06-10] patch-note | portal-bank-statement-temp-wizard | 선택 행 Temp 위자드 반영
+- pages: [portal-bank-statement](./pages/portal-bank-statement.md), [portal-weekly-expense](./pages/portal-weekly-expense.md), [shared-portal-architecture](./pages/shared-portal-architecture.md)
+- summary: 통장내역 선택 행 반영을 Temp 위자드에서 보완한 뒤 Java command API로 확정하는 구조로 바꾸고, 주간 사업비 원장과 캐시플로 비교 UI의 역할 경계를 다시 고정했다.
+
 ## [2026-06-10] patch-note | shared-portal-architecture | default bank statement seed
 - pages: [shared-portal-architecture](./pages/shared-portal-architecture.md)
 - summary: 신규 프로젝트 생성 시 `통장내역 기준본`을 `bank_statements/default`에 표준 컬럼과 빈 행 목록으로 항상 생성하고, 기존 프로젝트에서 문서가 없을 때도 화면은 `null` 대신 빈 기준본을 사용하도록 정책을 고정했다.

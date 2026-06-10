@@ -6,7 +6,7 @@ import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Checkbox } from '../ui/checkbox';
-import { usePortalStore } from '../../data/portal-store';
+import { usePortalStore, type BankStatementApplyCellPatch } from '../../data/portal-store';
 import {
   detectBankStatementProfile,
   getBankStatementProfileLabel,
@@ -19,6 +19,7 @@ import {
 import { normalizeKey, parseCsv } from '../../platform/csv-utils';
 import { loadXlsx, warmXlsx } from '../../platform/lazy-heavy-modules';
 import { readTextFile } from '../../platform/text-file-decoder';
+import { SETTLEMENT_COLUMNS, type ImportRow } from '../../platform/settlement-csv';
 
 function getTransactionAmountColumnIndexes(columns: string[]): Set<number> {
   return new Set(
@@ -31,6 +32,54 @@ function getTransactionAmountColumnIndexes(columns: string[]): Set<number> {
   );
 }
 
+type WizardDraft = Record<string, string>;
+
+const WIZARD_FIELDS = [
+  { key: 'budgetCategory', label: '비목', column: '비목' },
+  { key: 'budgetSubCategory', label: '세목', column: '세목' },
+  { key: 'cashflowLine', label: 'cashflow항목', column: 'cashflow항목' },
+  { key: 'expenseAmount', label: '사업비 사용액', column: '사업비 사용액' },
+  { key: 'evidenceRequired', label: '필수증빙자료 리스트', column: '필수증빙자료 리스트' },
+  { key: 'memo', label: '상세 적요', column: '상세 적요' },
+  { key: 'settlementNote', label: '비고', column: '비고' },
+] as const;
+
+function bankRowKey(row: BankStatementRow, index: number): string {
+  return row.tempId || `row-${index}`;
+}
+
+function settlementColumnIndex(header: string): number {
+  return SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === header);
+}
+
+function collectAppliedBankLineIds(rows: ImportRow[] | null | undefined): Set<string> {
+  const ids = new Set<string>();
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    const source = String(row.sourceTxId || '').trim();
+    const match = source.match(/^bank-import-line:(.+)$/);
+    if (match?.[1]) ids.add(match[1]);
+  });
+  return ids;
+}
+
+function buildWizardCellPatchesByRowKey(rows: BankStatementRow[], drafts: Record<string, WizardDraft>): Record<string, BankStatementApplyCellPatch[]> {
+  const result: Record<string, BankStatementApplyCellPatch[]> = {};
+  rows.forEach((row, index) => {
+    const rowKey = bankRowKey(row, index);
+    const draft = drafts[rowKey] || {};
+    const patches = WIZARD_FIELDS
+      .map((field) => {
+        const columnIndex = settlementColumnIndex(field.column);
+        const rawValue = String(draft[field.key] || '').trim();
+        if (columnIndex < 0 || !rawValue) return null;
+        return { columnIndex, rawValue, userEdited: true };
+      })
+      .filter((patch): patch is BankStatementApplyCellPatch => patch !== null);
+    if (patches.length > 0) result[rowKey] = patches;
+  });
+  return result;
+}
+
 export function PortalBankStatementPage() {
   const navigate = useNavigate();
   const {
@@ -38,6 +87,8 @@ export function PortalBankStatementPage() {
     portalUser,
     myProject,
     bankStatementRows,
+    expenseSheets,
+    expenseSheetRows,
     saveBankStatementRows,
     applyBankStatementRowsToExpenseSheet,
     refreshBankStatementRows,
@@ -52,6 +103,8 @@ export function PortalBankStatementPage() {
   const [uploadPreparing, setUploadPreparing] = useState(false);
   const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(() => new Set());
   const [activeStatusTab, setActiveStatusTab] = useState<'staged' | 'applied'>('staged');
+  const [wizardRows, setWizardRows] = useState<BankStatementRow[]>([]);
+  const [wizardDrafts, setWizardDrafts] = useState<Record<string, WizardDraft>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const projectName = myProject?.name || '내 사업';
@@ -64,6 +117,18 @@ export function PortalBankStatementPage() {
     () => rows.filter((row, rowIdx) => selectedRowIds.has(row.tempId || `row-${rowIdx}`)),
     [rows, selectedRowIds],
   );
+  const appliedBankLineIds = useMemo(() => {
+    const rowsAcrossSheets = expenseSheets.flatMap((sheet) => sheet.rows || []);
+    return collectAppliedBankLineIds(rowsAcrossSheets.length > 0 ? rowsAcrossSheets : expenseSheetRows);
+  }, [expenseSheetRows, expenseSheets]);
+  const unappliedSelectedRows = useMemo(
+    () => selectedRows.filter((row, index) => {
+      const id = bankRowKey(row, index);
+      return !appliedBankLineIds.has(id);
+    }),
+    [appliedBankLineIds, selectedRows],
+  );
+  const skippedAppliedCount = selectedRows.length - unappliedSelectedRows.length;
 
   useEffect(() => {
     if (dirty) return;
@@ -228,22 +293,49 @@ export function PortalBankStatementPage() {
       toast.message('사업비 입력에 반영할 통장내역 행을 선택해 주세요.');
       return;
     }
+    if (unappliedSelectedRows.length === 0) {
+      toast.message('선택한 통장내역은 이미 사업비 입력에 반영되었습니다.');
+      return;
+    }
+    const nextDrafts: Record<string, WizardDraft> = {};
+    unappliedSelectedRows.forEach((row, index) => {
+      nextDrafts[bankRowKey(row, index)] = {};
+    });
+    setWizardRows(unappliedSelectedRows);
+    setWizardDrafts(nextDrafts);
+  }, [activeStatusTab, selectedRows, unappliedSelectedRows]);
+
+  const updateWizardDraft = useCallback((rowKey: string, fieldKey: string, value: string) => {
+    setWizardDrafts((current) => ({
+      ...current,
+      [rowKey]: {
+        ...(current[rowKey] || {}),
+        [fieldKey]: value,
+      },
+    }));
+  }, []);
+
+  const closeWizard = useCallback(() => {
+    setWizardRows([]);
+    setWizardDrafts({});
+  }, []);
+
+  const handleSubmitWizard = useCallback(async () => {
+    if (wizardRows.length === 0) return;
     setSaving(true);
     try {
-      if (dirty) {
-        await saveBankStatementRows({ columns, rows });
-        setDirty(false);
-      }
-      const result = await applyBankStatementRowsToExpenseSheet({ columns, rows: selectedRows });
+      const cellPatchesByRowKey = buildWizardCellPatchesByRowKey(wizardRows, wizardDrafts);
+      const result = await applyBankStatementRowsToExpenseSheet({ columns, rows: wizardRows }, { cellPatchesByRowKey });
       toast.success(`선택한 통장내역 ${result.appliedCount}건을 사업비 입력에 반영했습니다.`);
       setSelectedRowIds(new Set());
+      closeWizard();
     } catch (err) {
       console.error('[BankStatement] selected apply failed:', err);
       toast.error('선택한 통장내역 반영에 실패했습니다.');
     } finally {
       setSaving(false);
     }
-  }, [activeStatusTab, applyBankStatementRowsToExpenseSheet, columns, dirty, rows, saveBankStatementRows, selectedRows]);
+  }, [applyBankStatementRowsToExpenseSheet, closeWizard, columns, wizardDrafts, wizardRows]);
 
   const trustSurface = saving
     ? {
@@ -576,6 +668,122 @@ export function PortalBankStatementPage() {
         </Card>
       )}
 
+      {wizardRows.length > 0 ? (
+        <div className="fixed inset-0 z-[160] flex items-center justify-center bg-slate-950/45 px-4 py-6">
+          <div
+            data-testid="bank-statement-completion-wizard"
+            className="flex max-h-[86vh] w-[min(1180px,96vw)] flex-col overflow-hidden border border-slate-300 bg-white shadow-2xl"
+          >
+            <div className="flex items-center justify-between gap-4 border-b px-6 py-4">
+              <div>
+                <h2 className="text-[20px] font-extrabold text-slate-950">비어있는 사업비 항목 작성</h2>
+                <p className="mt-1 text-[12px] leading-5 text-slate-500">
+                  통장내역과 기존 사업비 입력을 대조해 아직 반영되지 않은 행만 보완합니다.
+                </p>
+              </div>
+              <Button variant="ghost" size="sm" onClick={closeWizard} disabled={saving}>
+                닫기
+              </Button>
+            </div>
+
+            <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[320px_minmax(0,1fr)]">
+              <aside className="border-r bg-slate-50 p-5">
+                <div className="rounded border border-blue-200 bg-white p-4 shadow-sm">
+                  <div className="text-[14px] font-bold text-slate-900">미반영</div>
+                  <div className="mt-7 space-y-3 text-[13px]">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-600">선택 거래</span>
+                      <span className="font-bold">{selectedRows.length.toLocaleString('ko-KR')}건</span>
+                    </div>
+                    <div className="flex items-center justify-between border-t pt-3">
+                      <span className="text-slate-600">작성 대상</span>
+                      <span className="font-bold">{wizardRows.length.toLocaleString('ko-KR')}건</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-600">이미 반영되어 제외</span>
+                      <span className="font-bold">{Math.max(skippedAppliedCount, 0).toLocaleString('ko-KR')}건</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-4 rounded border bg-white">
+                  <div className="border-b bg-slate-100 px-4 py-3 text-[13px] font-bold text-slate-900">
+                    Temp 작성본
+                  </div>
+                  <div className="space-y-2 px-4 py-4 text-[12px] leading-5 text-slate-600">
+                    <p>원본 통장내역은 수정하지 않습니다.</p>
+                    <p>이 위자드의 입력값은 확정 전까지 임시 상태이며, 원장에는 바로 쓰지 않습니다.</p>
+                    <p>확정 시 Java API가 행/셀 검증 후 사업비 입력에 반영합니다.</p>
+                  </div>
+                </div>
+              </aside>
+
+              <section className="min-w-0 overflow-auto p-5">
+                <div className="min-w-[980px]">
+                  <table className="w-full border-collapse text-[12px]">
+                    <thead>
+                      <tr className="bg-slate-100 text-left">
+                        <th className="w-12 border px-2 py-2">행</th>
+                        <th className="w-[280px] border px-3 py-2">통장내역 원본</th>
+                        {WIZARD_FIELDS.map((field) => (
+                          <th key={field.key} className="border px-3 py-2">
+                            {field.label}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {wizardRows.map((row, rowIdx) => {
+                        const rowKey = bankRowKey(row, rowIdx);
+                        const previewCells = row.cells
+                          .map((cell) => String(cell || '').trim())
+                          .filter(Boolean)
+                          .slice(0, 5);
+                        return (
+                          <tr key={rowKey} className="align-top">
+                            <td className="border bg-slate-50 px-2 py-2 text-center text-[11px] text-slate-500">
+                              {rowIdx + 1}
+                            </td>
+                            <td className="border px-3 py-2">
+                              <div className="space-y-1 text-[12px] text-slate-700">
+                                {(previewCells.length > 0 ? previewCells : ['원본 셀 없음']).map((cell, idx) => (
+                                  <div key={`${rowKey}-raw-${idx}`} className="truncate">
+                                    {cell}
+                                  </div>
+                                ))}
+                              </div>
+                            </td>
+                            {WIZARD_FIELDS.map((field) => (
+                              <td key={field.key} className="border px-2 py-2">
+                                <input
+                                  className="h-9 w-full min-w-[120px] border border-slate-300 bg-white px-2 text-[12px] outline-none focus:border-blue-500"
+                                  value={wizardDrafts[rowKey]?.[field.key] || ''}
+                                  onChange={(event) => updateWizardDraft(rowKey, field.key, event.target.value)}
+                                  placeholder={field.label}
+                                />
+                              </td>
+                            ))}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t bg-slate-50 px-6 py-4">
+              <Button variant="outline" size="sm" onClick={closeWizard} disabled={saving}>
+                취소
+              </Button>
+              <Button size="sm" onClick={() => void handleSubmitWizard()} disabled={saving || wizardRows.length === 0}>
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                작성 내용 반영
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
