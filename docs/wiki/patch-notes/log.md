@@ -227,6 +227,10 @@
 - pages: [portal-bank-statement](./pages/portal-bank-statement.md)
 - summary: 선택 행 반영 Temp 위자드의 접힌 요약 문구/숫자와 `비고`를 제거하고, 원본 열/헤더 sticky, 분류 셀 범위 복사/붙여넣기, 명시적 부가세 계산, 포털 데이터 refresh 중 route unmount 방지를 추가했다.
 
+## [2026-06-10] patch-note | portal-bank-statement-handoff | 내부 SaaS 통장내역 handoff 단순화
+- pages: [portal-bank-statement](./pages/portal-bank-statement.md), [shared-portal-architecture](./pages/shared-portal-architecture.md)
+- summary: 통장내역 기준본 저장과 선택 행 반영에서 Java `import-batch`/`apply-items` 권한 게이트를 제거하고, 기존 Firestore `bank_statements/default` 및 `expense_sheets/{tab}` 구조를 상속하도록 정리했다. Temp 작성본은 Firestore draft 대신 브라우저 로컬 버전으로 보관해 stage QA가 권한 오류에 막히지 않게 했다.
+
 ## [2026-04-14] patch-note | portal-shell-project-search | 담당 사업 검색 전환 지원
 - pages: [portal-dashboard](./pages/portal-dashboard.md)
 - summary: 헤더의 중복 `사업비 입력` 버튼을 제거하고, 상단 command search가 담당 사업 전체를 검색해 선택 시 해당 사업으로 전환 후 이동하도록 확장했다.

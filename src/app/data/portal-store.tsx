@@ -63,6 +63,8 @@ import {
   appendBankStatementRows,
   buildBankStatementServerImportLines,
   createDefaultBankStatementSheet,
+  mapBankStatementsToImportRows,
+  mergeBankRowsIntoExpenseSheet,
   type BankStatementRow,
   type BankStatementSheet,
 } from '../platform/bank-statement';
@@ -95,15 +97,9 @@ import { useFirebase } from '../lib/firebase-context';
 import { getAuthInstance, getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
 import {
   isPlatformApiEnabled,
-  applyBankStatementItemsViaBff,
-  importBankStatementBatchViaBff,
-  listBankStatementImportLinesViaBff,
-  readWeeklyExpenseSheetViaBff,
-  type BankStatementImportLineResult,
   saveWeeklyExpenseDraftViaBff,
   type UpsertProjectPayload,
   type WeeklyExpenseDraftRowPatch,
-  type WeeklyExpenseSheetResult,
   upsertProjectViaBff,
 } from '../lib/platform-bff-client';
 import { duplicateExpenseSetAsDraft, withExpenseItems } from './portal-store.helpers';
@@ -265,13 +261,6 @@ function buildWeeklyExpenseIdempotencyKey(projectId: string, sheetId: string): s
   return `weekly-expense-save:${projectId}:${sheetId}:${suffix}`;
 }
 
-function buildBankStatementIdempotencyKey(command: string, projectId: string): string {
-  const suffix = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  return `${command}:${projectId}:${suffix}`;
-}
-
 function sanitizeBankStatementSheet(sheet: BankStatementSheet): BankStatementSheet {
   const incomingColumns = Array.isArray(sheet?.columns) ? sheet.columns : [];
   const maxLenFromRows = Array.isArray(sheet?.rows)
@@ -297,25 +286,6 @@ function sanitizeBankStatementSheet(sheet: BankStatementSheet): BankStatementShe
     cells: columns.map((_, colIdx) => normalizeSpace(String(Array.isArray(row?.cells) ? (row.cells[colIdx] ?? '') : ''))),
   }));
   return { columns, rows: rows as BankStatementRow[] };
-}
-
-function weeklyExpenseSheetResultToImportRows(result: WeeklyExpenseSheetResult): ImportRow[] {
-  return [...(result.rows || [])]
-    .sort((left, right) => left.rowIndex - right.rowIndex)
-    .map((serverRow) => {
-      const row = createEmptyImportRow();
-      row.tempId = serverRow.id || row.tempId;
-      row.sourceTxId = serverRow.sourceTxId || undefined;
-      row.entryKind = serverRow.entryKind || undefined;
-      const userEditedCells = new Set<number>();
-      (serverRow.cells || []).forEach((cell) => {
-        if (cell.columnIndex < 0 || cell.columnIndex >= SETTLEMENT_COLUMNS.length) return;
-        row.cells[cell.columnIndex] = String(cell.rawValue ?? '');
-        if (cell.userEdited) userEditedCells.add(cell.columnIndex);
-      });
-      if (userEditedCells.size > 0) row.userEditedCells = userEditedCells;
-      return row;
-    });
 }
 
 function serializeExpenseSheetTabForComparison(tab: ExpenseSheetTab): string {
@@ -649,21 +619,6 @@ function buildDefaultBankStatementPersistenceDoc({
   });
 }
 
-function bankStatementSheetFromImportLines(lines: BankStatementImportLineResult[]): BankStatementSheet {
-  if (!Array.isArray(lines) || lines.length === 0) return createDefaultBankStatementSheet();
-  return lines.reduce<BankStatementSheet>((sheet, line, index) => {
-    const rawCells = Array.isArray(line.rawCells) ? line.rawCells : [];
-    const columns = Array.isArray(line.columns) && line.columns.length > 0
-      ? line.columns
-      : rawCells.map((_, colIdx) => BANK_STATEMENT_COLUMNS[colIdx] || `컬럼${colIdx + 1}`);
-    const row: BankStatementRow = {
-      tempId: line.id || `bank-import-line-${index}`,
-      cells: columns.map((_, colIdx) => normalizeSpace(String(rawCells[colIdx] ?? ''))),
-    };
-    return appendBankStatementRows(sheet, { columns, rows: [row] }).sheet;
-  }, createDefaultBankStatementSheet());
-}
-
 function stripUndefinedDeep<T>(value: T): T {
   if (Array.isArray(value)) {
     return value
@@ -873,20 +828,19 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   }, [activeProjectId, projects]);
   const currentProjectId = activeProjectId;
   const { allowRealtimeListeners: livePortalMode } = useFirestoreAccessPolicy(portalUser?.role || authUser?.role);
+  const weeklyPlatformActor = useMemo(() => {
+    if (!authUser) return null;
+    return {
+      ...authUser,
+      role: normalizePortalRole(authUser.role || portalUser?.role || 'pm'),
+    };
+  }, [authUser, portalUser?.role]);
 
-  const refreshBankStatementRowsFromServer = useCallback(async (status: 'staged' | 'applied' = 'staged') => {
-    if (isDevHarnessUser || !authUser || !currentProjectId) {
-      setBankStatementRows(isDevHarnessUser ? createDefaultBankStatementSheet() : null);
-      return;
+  const refreshBankStatementRowsFromServer = useCallback(async (_status: 'staged' | 'applied' = 'staged') => {
+    if (isDevHarnessUser) {
+      setBankStatementRows((current) => current || createDefaultBankStatementSheet());
     }
-    const result = await listBankStatementImportLinesViaBff({
-      tenantId: orgId,
-      actor: authUser,
-      projectId: currentProjectId,
-      status,
-    });
-    setBankStatementRows(bankStatementSheetFromImportLines(result.lines));
-  }, [authUser, currentProjectId, isDevHarnessUser, orgId]);
+  }, [isDevHarnessUser]);
 
   useEffect(() => {
     if (!firestoreEnabled || !db || !isAuthenticated || !authUser) {
@@ -1761,12 +1715,6 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       ifActive(() => setBudgetTreeV2(null));
     };
 
-    const weeklyPlatformApiEnabled = isPlatformApiEnabled();
-
-    if (weeklyPlatformApiEnabled) {
-      refreshBankStatementRowsFromServer().catch(handleBankStatementError);
-    }
-
     if (livePortalMode) {
       projectScopeUnsubsRef.current.push(onSnapshot(ledgerQuery, (snap) => handleLedgerResult(snap.docs), handleLedgerError));
       projectScopeUnsubsRef.current.push(onSnapshot(expenseQuery, (snap) => handleExpenseResult(snap.docs), handleExpenseError));
@@ -1784,9 +1732,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         ),
       );
       projectScopeUnsubsRef.current.push(onSnapshot(expenseSheetCollection, (snap) => handleExpenseSheetResult(snap.docs), handleExpenseSheetError));
-      if (!weeklyPlatformApiEnabled) {
-        projectScopeUnsubsRef.current.push(onSnapshot(bankStatementRef, handleBankStatementResult, handleBankStatementError));
-      }
+      projectScopeUnsubsRef.current.push(onSnapshot(bankStatementRef, handleBankStatementResult, handleBankStatementError));
       projectScopeUnsubsRef.current.push(onSnapshot(budgetPlanRef, handleBudgetPlanResult, handleBudgetPlanError));
       projectScopeUnsubsRef.current.push(onSnapshot(budgetCodeBookRef, handleBudgetCodeBookResult, handleBudgetCodeBookError));
       projectScopeUnsubsRef.current.push(onSnapshot(budgetTreeV2Ref, handleBudgetTreeV2Result, handleBudgetTreeV2Error));
@@ -1803,9 +1749,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         .then((snap) => handleExpenseIntakeResult(snap.docs))
         .catch(handleExpenseIntakeError);
       getDocs(expenseSheetCollection).then((snap) => handleExpenseSheetResult(snap.docs)).catch(handleExpenseSheetError);
-      if (!weeklyPlatformApiEnabled) {
-        getDoc(bankStatementRef).then(handleBankStatementResult).catch(handleBankStatementError);
-      }
+      getDoc(bankStatementRef).then(handleBankStatementResult).catch(handleBankStatementError);
       getDoc(budgetPlanRef).then(handleBudgetPlanResult).catch(handleBudgetPlanError);
       getDoc(budgetCodeBookRef).then(handleBudgetCodeBookResult).catch(handleBudgetCodeBookError);
       getDoc(budgetTreeV2Ref).then(handleBudgetTreeV2Result).catch(handleBudgetTreeV2Error);
@@ -2176,14 +2120,14 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       });
       return sanitizedRows as ImportRow[];
     }
-    if (!currentProjectId || !authUser) {
+    if (!currentProjectId || !weeklyPlatformActor) {
       const message = '사업비 저장 권한 확인이 필요합니다. 다시 로그인한 뒤 저장해 주세요.';
       toast.error(message);
       throw new Error(message);
     }
     const saveResult = await saveWeeklyExpenseDraftViaBff({
       tenantId: orgId,
-      actor: authUser,
+      actor: weeklyPlatformActor,
       projectId: currentProjectId,
       sheetKey: activeSheetId,
       idempotencyKey: buildWeeklyExpenseIdempotencyKey(currentProjectId, activeSheetId),
@@ -2227,6 +2171,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     authUser?.role,
     authUser?.idToken,
     authUser?.googleAccessToken,
+    weeklyPlatformActor,
     portalUser?.email,
     portalUser?.role,
     myProject?.settlementSheetPolicy,
@@ -2676,31 +2621,34 @@ export function PortalProvider({ children }: { children: ReactNode }) {
 
   const saveBankStatementRows = useCallback(async (sheet: BankStatementSheet) => {
     const sanitizedSheet = sanitizeBankStatementSheet(sheet);
-    const importLines = buildBankStatementServerImportLines(sanitizedSheet);
+    const mergedSheet = appendBankStatementRows(
+      bankStatementRows || createDefaultBankStatementSheet(),
+      sanitizedSheet,
+    ).sheet;
     if (isDevHarnessUser) {
-      setBankStatementRows(sanitizedSheet);
+      setBankStatementRows(mergedSheet);
       return;
     }
-    if (!currentProjectId || !authUser) {
+    if (!currentProjectId || !db) {
       const message = '통장내역 저장 권한 확인이 필요합니다. 다시 로그인한 뒤 저장해 주세요.';
       toast.error(message);
       throw new Error(message);
     }
-    const idempotencyKey = buildBankStatementIdempotencyKey('bank-import', currentProjectId);
-    await importBankStatementBatchViaBff({
-      tenantId: orgId,
-      actor: authUser,
-      projectId: currentProjectId,
-      idempotencyKey,
-      payload: {
-        idempotencyKey,
-        uploadName: 'portal-bank-statement',
-        columns: sanitizedSheet.columns,
-        lines: importLines,
-      },
-    });
-    await refreshBankStatementRowsFromServer();
-  }, [authUser, currentProjectId, isDevHarnessUser, orgId, refreshBankStatementRowsFromServer]);
+    const now = new Date().toISOString();
+    await setDoc(
+      doc(db, `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/bank_statements/default`),
+      withTenantScope(orgId, {
+        projectId: currentProjectId,
+        columns: mergedSheet.columns,
+        rows: mergedSheet.rows,
+        createdAt: (bankStatementRows as (BankStatementSheet & { createdAt?: string }) | null)?.createdAt || now,
+        updatedAt: now,
+        updatedBy: portalUser?.name || authUser?.name || '',
+      }),
+      { merge: true },
+    );
+    setBankStatementRows(mergedSheet);
+  }, [authUser?.name, bankStatementRows, currentProjectId, db, isDevHarnessUser, orgId, portalUser?.name]);
 
   const applyBankStatementRowsToExpenseSheet = useCallback(async (
     sheet: BankStatementSheet,
@@ -2708,90 +2656,120 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   ): Promise<{ appliedCount: number }> => {
     const sanitizedSheet = sanitizeBankStatementSheet(sheet);
     if (sanitizedSheet.rows.length === 0) return { appliedCount: 0 };
+
     const targetSheetId = activeExpenseSheetIdRef.current || 'default';
-    if (isDevHarnessUser) {
-      return { appliedCount: sanitizedSheet.rows.length };
-    }
-    if (!currentProjectId || !authUser) {
-      const message = '통장내역 반영 권한 확인이 필요합니다. 다시 로그인한 뒤 반영해 주세요.';
-      toast.error(message);
-      throw new Error(message);
-    }
-    const importLines = buildBankStatementServerImportLines(sanitizedSheet);
-    const cellPatchesByRowKey = options?.cellPatchesByRowKey || {};
-    const cellPatchesBySourceKey = new Map<string, BankStatementApplyCellPatch[]>();
-    importLines.forEach((line, index) => {
-      const row = sanitizedSheet.rows[index];
-      const rowKey = row?.tempId || `row-${index}`;
-      const patches = cellPatchesByRowKey[rowKey] || [];
-      if (patches.length > 0) {
-        cellPatchesBySourceKey.set(line.sourceLineKey, patches);
-      }
-    });
-    const importIdempotencyKey = buildBankStatementIdempotencyKey('bank-import', currentProjectId);
-    const importResult = await importBankStatementBatchViaBff({
-      tenantId: orgId,
-      actor: authUser,
-      projectId: currentProjectId,
-      idempotencyKey: importIdempotencyKey,
-      payload: {
-        idempotencyKey: importIdempotencyKey,
-        uploadName: 'portal-bank-statement-apply',
-        columns: sanitizedSheet.columns,
-        lines: importLines,
-      },
-    });
-    const stagedLineIds = importResult.lines
-      .filter((line) => line.id && String(line.status || '').toLowerCase() === 'staged')
-      .map((line) => ({
-        importLineId: String(line.id),
-        cells: cellPatchesBySourceKey.get(String(line.sourceLineKey || '')) || [],
-      }));
-    if (stagedLineIds.length === 0) {
-      await refreshBankStatementRowsFromServer();
-      return { appliedCount: 0 };
-    }
     const targetSheet = expenseSheetsRef.current.find((sheetItem) => sheetItem.id === targetSheetId) || null;
     const targetSheetName = sanitizeExpenseSheetName(targetSheet?.name, targetSheetId === 'default' ? '기본 탭' : '새 탭');
-    const applyIdempotencyKey = buildBankStatementIdempotencyKey('bank-apply', currentProjectId);
-    await applyBankStatementItemsViaBff({
-      tenantId: orgId,
-      actor: authUser,
-      projectId: currentProjectId,
-      idempotencyKey: applyIdempotencyKey,
-      payload: {
-        idempotencyKey: applyIdempotencyKey,
-        sheetKey: targetSheetId,
-        expectedSheetVersion: targetSheet?.sheetVersion,
-        sheetName: targetSheetName,
-        items: stagedLineIds,
-      },
+    const importLines = buildBankStatementServerImportLines(sanitizedSheet);
+    const cellPatchesByRowKey = options?.cellPatchesByRowKey || {};
+    const mappedRows = sanitizedSheet.rows.flatMap((sourceRow, index) => {
+      const rowKey = sourceRow?.tempId || `row-${index}`;
+      const mappedRow = mapBankStatementsToImportRows({
+        columns: sanitizedSheet.columns,
+        rows: [sourceRow],
+      })[0];
+      if (!mappedRow) return [];
+      const cells = [...mappedRow.cells];
+      const userEditedCells = new Set(mappedRow.userEditedCells || []);
+      (cellPatchesByRowKey[rowKey] || []).forEach((patch) => {
+        if (patch.columnIndex < 0 || patch.columnIndex >= SETTLEMENT_COLUMNS.length) return;
+        cells[patch.columnIndex] = String(patch.rawValue ?? '');
+        if (patch.userEdited) userEditedCells.add(patch.columnIndex);
+      });
+      return {
+        ...mappedRow,
+        sourceTxId: `bank-import-line:${rowKey}`,
+        tempId: mappedRow.tempId || `bank-${importLines[index]?.sourceLineKey || rowKey}`,
+        cells,
+        ...(userEditedCells.size > 0 ? { userEditedCells } : {}),
+      } as ImportRow;
     });
-    const refreshedSheet = await readWeeklyExpenseSheetViaBff({
-      tenantId: orgId,
-      actor: authUser,
+    if (mappedRows.length === 0) return { appliedCount: 0 };
+
+    const baseRows = targetSheet?.rows || (targetSheetId === activeExpenseSheetIdRef.current ? expenseSheetRowsRef.current : null);
+    const mergedRows = mergeBankRowsIntoExpenseSheet(baseRows, mappedRows);
+    const defaultLedgerId = ledgers.find((ledger) => ledger.projectId === currentProjectId)?.id
+      || (currentProjectId ? `l-${currentProjectId}` : 'l-default');
+    const preparedRows = prepareExpenseSheetRowsForSave({
+      rows: mergedRows,
       projectId: currentProjectId,
-      sheetKey: targetSheetId,
-    });
-    const refreshedRows = weeklyExpenseSheetResultToImportRows(refreshedSheet);
+      defaultLedgerId,
+      evidenceRequiredMap,
+      policy: normalizeSettlementSheetPolicy(myProject?.settlementSheetPolicy, myProject?.fundInputMode),
+      basis: myProject?.basis,
+    }).map((row) => ({
+      ...row,
+      cells: Array.isArray(row.cells) ? row.cells.map((cell) => (cell ?? '')) : [],
+      ...(row.reviewHints && row.reviewHints.length > 0 ? { reviewHints: [...row.reviewHints] } : {}),
+      ...(row.reviewRequiredCellIndexes && row.reviewRequiredCellIndexes.length > 0
+        ? { reviewRequiredCellIndexes: [...row.reviewRequiredCellIndexes] }
+        : {}),
+      ...(row.reviewStatus ? { reviewStatus: row.reviewStatus } : {}),
+      ...(row.reviewFingerprint ? { reviewFingerprint: row.reviewFingerprint } : {}),
+      ...(row.reviewConfirmedAt ? { reviewConfirmedAt: row.reviewConfirmedAt } : {}),
+      ...(row.userEditedCells && row.userEditedCells.size > 0
+        ? { userEditedCells: new Set(row.userEditedCells) }
+        : {}),
+    })) as ImportRow[];
+    const now = new Date().toISOString();
     const nextSheets = upsertExpenseSheetTabRows({
       sheets: expenseSheetsRef.current,
       sheetId: targetSheetId,
       sheetName: targetSheetName,
       order: targetSheet?.order || (targetSheetId === 'default' ? 0 : expenseSheetsRef.current.length + 1),
-      rows: refreshedRows,
-      sheetVersion: refreshedSheet.sheetVersion,
-      now: new Date().toISOString(),
+      rows: preparedRows,
+      sheetVersion: targetSheet?.sheetVersion,
+      now,
       createdAt: targetSheet?.createdAt,
     });
+
+    if (isDevHarnessUser) {
+      expenseSheetsRef.current = nextSheets;
+      setExpenseSheets(nextSheets);
+      if (targetSheetId === activeExpenseSheetIdRef.current) {
+        setExpenseSheetRows(preparedRows);
+      }
+      return { appliedCount: mappedRows.length };
+    }
+    if (!currentProjectId || !db) {
+      const message = '통장내역 반영 권한 확인이 필요합니다. 다시 로그인한 뒤 반영해 주세요.';
+      toast.error(message);
+      throw new Error(message);
+    }
+    await setDoc(
+      doc(db, `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/expense_sheets/${targetSheetId}`),
+      buildExpenseSheetPersistenceDoc({
+        orgId,
+        projectId: currentProjectId,
+        activeSheetId: targetSheetId,
+        activeSheetName: targetSheetName,
+        order: targetSheet?.order || (targetSheetId === 'default' ? 0 : expenseSheetsRef.current.length + 1),
+        rows: preparedRows,
+        createdAt: targetSheet?.createdAt,
+        now,
+        updatedBy: portalUser?.name || authUser?.name || '',
+      }),
+      { merge: true },
+    );
     expenseSheetsRef.current = nextSheets;
     setExpenseSheets(nextSheets);
     if (targetSheetId === activeExpenseSheetIdRef.current) {
-      setExpenseSheetRows(refreshedRows);
+      setExpenseSheetRows(preparedRows);
     }
-    await refreshBankStatementRowsFromServer();
-    return { appliedCount: stagedLineIds.length };
-  }, [authUser, currentProjectId, isDevHarnessUser, orgId, refreshBankStatementRowsFromServer]);
+    return { appliedCount: mappedRows.length };
+  }, [
+    authUser?.name,
+    currentProjectId,
+    db,
+    evidenceRequiredMap,
+    isDevHarnessUser,
+    ledgers,
+    myProject?.basis,
+    myProject?.fundInputMode,
+    myProject?.settlementSheetPolicy,
+    orgId,
+    portalUser?.name,
+  ]);
 
   const upsertExpenseIntakeItems = useCallback(async (items: BankImportIntakeItem[]) => {
     if (!Array.isArray(items) || items.length === 0) return;

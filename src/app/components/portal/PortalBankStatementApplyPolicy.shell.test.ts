@@ -14,26 +14,30 @@ function sourceBetween(source: string, start: string, end: string) {
 }
 
 describe('portal bank statement apply policy', () => {
-  it('keeps bank statement baseline save on the Java command path', () => {
+  it('keeps bank statement baseline save on the inherited Firestore document path', () => {
     const saveBlock = sourceBetween(
       portalStoreSource,
       'const saveBankStatementRows = useCallback',
       'const applyBankStatementRowsToExpenseSheet = useCallback',
     );
 
-    expect(saveBlock).toContain('importBankStatementBatchViaBff');
-    expect(saveBlock).toContain('buildBankStatementServerImportLines');
+    expect(saveBlock).toContain('appendBankStatementRows');
+    expect(saveBlock).toContain('bank_statements/default');
+    expect(saveBlock).toContain('setDoc(');
+    expect(saveBlock).not.toContain('importBankStatementBatchViaBff');
+    expect(saveBlock).not.toContain('buildBankStatementServerImportLines');
     expect(saveBlock).not.toContain('saveExpenseSheetRows(');
     expect(saveBlock).not.toContain('mergeBankRowsIntoExpenseSheet(');
-    expect(saveBlock).not.toContain('setDoc(');
   });
 
-  it('hydrates bank statement baseline from the Java import-line read model when platform API is enabled', () => {
-    expect(portalStoreSource).toContain('listBankStatementImportLinesViaBff');
-    expect(portalStoreSource).toContain('bankStatementSheetFromImportLines');
-    expect(portalStoreSource).toContain("status: 'staged'");
-    expect(portalStoreSource).toContain('const weeklyPlatformApiEnabled = isPlatformApiEnabled();');
-    expect(portalStoreSource).toContain('refreshBankStatementRowsFromServer().catch(handleBankStatementError)');
+  it('hydrates bank statement baseline from Firestore even when the platform API is enabled', () => {
+    expect(portalStoreSource).not.toContain('listBankStatementImportLinesViaBff');
+    expect(portalStoreSource).not.toContain('bankStatementSheetFromImportLines');
+    expect(portalStoreSource).not.toContain('const weeklyPlatformApiEnabled = isPlatformApiEnabled();');
+    expect(portalStoreSource).not.toContain('refreshBankStatementRowsFromServer().catch(handleBankStatementError)');
+    expect(portalStoreSource).toContain('bank_statements/default');
+    expect(portalStoreSource).toContain('onSnapshot(bankStatementRef, handleBankStatementResult, handleBankStatementError)');
+    expect(portalStoreSource).toContain('getDoc(bankStatementRef).then(handleBankStatementResult).catch(handleBankStatementError)');
   });
 
   it('uses an explicit selected-row apply action for weekly expense handoff', () => {
@@ -44,16 +48,18 @@ describe('portal bank statement apply policy', () => {
     );
 
     expect(portalStoreSource).toContain('applyBankStatementRowsToExpenseSheet');
-    expect(applyBlock).toContain('importBankStatementBatchViaBff');
-    expect(applyBlock).toContain('applyBankStatementItemsViaBff');
-    expect(applyBlock).toContain('expectedSheetVersion: targetSheet?.sheetVersion');
+    expect(applyBlock).toContain('mapBankStatementsToImportRows');
+    expect(applyBlock).toContain('mergeBankRowsIntoExpenseSheet');
+    expect(applyBlock).toContain('buildExpenseSheetPersistenceDoc');
+    expect(applyBlock).toContain('expense_sheets/${targetSheetId}');
     expect(applyBlock).toContain('cellPatchesByRowKey');
-    expect(applyBlock).toContain('cellPatchesBySourceKey');
+    expect(applyBlock).toContain('bank-import-line:${rowKey}');
+    expect(applyBlock).not.toContain('importBankStatementBatchViaBff');
+    expect(applyBlock).not.toContain('applyBankStatementItemsViaBff');
+    expect(applyBlock).not.toContain('readWeeklyExpenseSheetViaBff');
     expect(applyBlock).not.toContain('!line.duplicate');
     expect(applyBlock).not.toContain('saveExpenseSheetRows(');
-    expect(applyBlock).not.toContain('mergeBankRowsIntoExpenseSheet(');
     expect(applyBlock).not.toContain('buildBankImportIntakeDoc(');
-    expect(applyBlock).not.toContain('setDoc(');
     expect(bankStatementPageSource).toContain('선택 행 반영');
     expect(bankStatementPageSource).toContain('selectedRows');
     expect(bankStatementPageSource).toContain("switchStatusTab('applied')");
@@ -90,8 +96,13 @@ describe('portal bank statement apply policy', () => {
     expect(bankStatementPageSource).toContain('wizardDraftVersions');
     expect(bankStatementPageSource).toContain('loadWizardDraftVersions');
     expect(bankStatementPageSource).toContain('handleSaveWizardDraft');
+    expect(bankStatementPageSource).toContain('localStorage');
+    expect(bankStatementPageSource).toContain('WIZARD_DRAFT_STORAGE_PREFIX');
     expect(bankStatementPageSource).toContain('작성본 불러오기');
     expect(bankStatementPageSource).toContain('임시저장은 30일 동안 보관됩니다');
+    expect(bankStatementPageSource).not.toContain('weekly_expense_apply_drafts');
+    expect(bankStatementPageSource).not.toContain('getDocs(collection(db');
+    expect(bankStatementPageSource).not.toContain('setDoc(draftRef');
     expect(bankStatementPageSource).not.toContain('작성중초안있음');
   });
 

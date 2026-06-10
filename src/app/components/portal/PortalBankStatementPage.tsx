@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Upload, Loader2, ShieldAlert, FileSpreadsheet } from 'lucide-react';
 import { toast } from 'sonner';
-import { collection, doc, getDocs, setDoc } from 'firebase/firestore';
 import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
 import { Checkbox } from '../ui/checkbox';
@@ -20,8 +19,6 @@ import { loadXlsx, warmXlsx } from '../../platform/lazy-heavy-modules';
 import { readTextFile } from '../../platform/text-file-decoder';
 import { CASHFLOW_LINE_OPTIONS, SETTLEMENT_COLUMNS, type ImportRow } from '../../platform/settlement-csv';
 import { findWeekForDate, getYearMondayWeeks } from '../../platform/cashflow-weeks';
-import { useFirebase } from '../../lib/firebase-context';
-import { getOrgDocumentPath } from '../../lib/firebase';
 import { normalizeBudgetLabel, buildBudgetLabelKey } from '../../platform/budget-labels';
 
 function getTransactionAmountColumnIndexes(columns: string[]): Set<number> {
@@ -70,6 +67,7 @@ const WIZARD_BULK_CLASSIFICATION_FIELD_KEYS = [
 const WIZARD_GRID_FIELD_KEYS = WIZARD_BULK_CLASSIFICATION_FIELD_KEYS;
 const WIZARD_CASHFLOW_OPTIONS = CASHFLOW_LINE_OPTIONS.filter((option) => option.value !== 'INPUT_VAT_OUT');
 const WIZARD_DRAFT_RETENTION_DAYS = 30;
+const WIZARD_DRAFT_STORAGE_PREFIX = 'mysc-bank-statement-apply-drafts';
 
 interface WizardDraftVersion {
   id: string;
@@ -165,8 +163,24 @@ function formatWizardDraftVersionLabel(createdAtIso: string): string {
   return `${pick('year')}년${pick('month')}월${pick('day')}일${pick('hour')}시${pick('minute')}분 작성본 불러오기`;
 }
 
-function wizardDraftCollectionPath(orgId: string, projectId: string): string {
-  return `${getOrgDocumentPath(orgId, 'projects', projectId)}/weekly_expense_apply_drafts`;
+function wizardDraftStorageKey(projectId: string): string {
+  return `${WIZARD_DRAFT_STORAGE_PREFIX}:${projectId || 'no-project'}`;
+}
+
+function readWizardDraftVersions(projectId: string): WizardDraftVersion[] {
+  if (typeof localStorage === 'undefined' || !projectId) return [];
+  try {
+    const raw = localStorage.getItem(wizardDraftStorageKey(projectId));
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeWizardDraftVersions(projectId: string, versions: WizardDraftVersion[]): void {
+  if (typeof localStorage === 'undefined' || !projectId) return;
+  localStorage.setItem(wizardDraftStorageKey(projectId), JSON.stringify(versions));
 }
 
 function getBankRowCounterparty(columns: string[], row: BankStatementRow): string {
@@ -258,7 +272,6 @@ export function PortalBankStatementPage() {
     applyBankStatementRowsToExpenseSheet,
     refreshBankStatementRows,
   } = usePortalStore();
-  const { db, orgId } = useFirebase();
   const [columns, setColumns] = useState<string[]>(bankStatementRows?.columns || []);
   const [rows, setRows] = useState<BankStatementRow[]>(bankStatementRows?.rows || []);
   const [dirty, setDirty] = useState(false);
@@ -523,26 +536,22 @@ export function PortalBankStatementPage() {
   }, [activeStatusTab, dirty, refreshBankStatementRows]);
 
   const loadWizardDraftVersions = useCallback(async (targetRows: BankStatementRow[] = wizardRows) => {
-    if (!db || !orgId || !projectId || targetRows.length === 0) {
+    if (!projectId || targetRows.length === 0) {
       setWizardDraftVersions([]);
       return;
     }
     const batchKey = buildWizardBatchKey(projectId, targetRows);
     const minCreatedAt = Date.now() - WIZARD_DRAFT_RETENTION_DAYS * 24 * 60 * 60 * 1000;
     try {
-      const snapshot = await getDocs(collection(db, wizardDraftCollectionPath(orgId, projectId)));
-      const versions = snapshot.docs
-        .map((draftDoc) => {
-          const data = draftDoc.data() as Partial<WizardDraftVersion>;
-          return {
-            id: draftDoc.id,
-            createdAtIso: String(data.createdAtIso || ''),
-            draftName: String(data.draftName || ''),
-            rows: Array.isArray(data.rows) ? data.rows : [],
-            drafts: data.drafts && typeof data.drafts === 'object' ? data.drafts : {},
-            batchKey: String(data.batchKey || ''),
-          } satisfies WizardDraftVersion;
-        })
+      const versions = readWizardDraftVersions(projectId)
+        .map((data) => ({
+          id: String(data.id || ''),
+          createdAtIso: String(data.createdAtIso || ''),
+          draftName: String(data.draftName || ''),
+          rows: Array.isArray(data.rows) ? data.rows : [],
+          drafts: data.drafts && typeof data.drafts === 'object' ? data.drafts : {},
+          batchKey: String(data.batchKey || ''),
+        } satisfies WizardDraftVersion))
         .filter((version) => {
           const createdAt = new Date(version.createdAtIso).getTime();
           return version.batchKey === batchKey && Number.isFinite(createdAt) && createdAt >= minCreatedAt;
@@ -553,10 +562,10 @@ export function PortalBankStatementPage() {
       console.error('[BankStatement] wizard draft load failed:', err);
       toast.error('임시 작성본을 불러오지 못했습니다.');
     }
-  }, [db, orgId, projectId, wizardRows]);
+  }, [projectId, wizardRows]);
 
   const handleSaveWizardDraft = useCallback(async () => {
-    if (!db || !orgId || !projectId || wizardRows.length === 0) {
+    if (!projectId || wizardRows.length === 0) {
       toast.error('임시저장을 사용할 수 없습니다.');
       return;
     }
@@ -564,17 +573,22 @@ export function PortalBankStatementPage() {
     try {
       const createdAtIso = new Date().toISOString();
       const batchKey = buildWizardBatchKey(projectId, wizardRows);
-      const draftRef = doc(collection(db, wizardDraftCollectionPath(orgId, projectId)));
-      await setDoc(draftRef, {
+      const minCreatedAt = Date.now() - WIZARD_DRAFT_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+      const nextVersion: WizardDraftVersion = {
+        id: `wizard-draft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         createdAtIso,
         draftName: formatWizardDraftVersionLabel(createdAtIso),
         batchKey,
-        projectId,
         rows: wizardRows,
         drafts: wizardDrafts,
-        createdBy: portalUser?.name || portalUser?.email || 'unknown',
-        expiresAtIso: new Date(Date.now() + WIZARD_DRAFT_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString(),
-      });
+      };
+      const versions = [nextVersion, ...readWizardDraftVersions(projectId)]
+        .filter((version) => {
+          const createdAt = new Date(version.createdAtIso).getTime();
+          return Number.isFinite(createdAt) && createdAt >= minCreatedAt;
+        })
+        .slice(0, 30);
+      writeWizardDraftVersions(projectId, versions);
       toast.success('임시 작성본을 저장했습니다.');
       await loadWizardDraftVersions(wizardRows);
     } catch (err) {
@@ -583,7 +597,7 @@ export function PortalBankStatementPage() {
     } finally {
       setWizardSavingDraft(false);
     }
-  }, [db, loadWizardDraftVersions, orgId, portalUser?.email, portalUser?.name, projectId, wizardDrafts, wizardRows]);
+  }, [loadWizardDraftVersions, projectId, wizardDrafts, wizardRows]);
 
   const handleLoadWizardDraft = useCallback((version: WizardDraftVersion) => {
     setWizardRows(version.rows);
@@ -880,17 +894,11 @@ export function PortalBankStatementPage() {
 
   const renderWizardField = useCallback((rowKey: string, field: typeof WIZARD_FIELDS[number], draft: WizardDraft) => {
     const amountField = (WIZARD_AMOUNT_FIELD_KEYS as readonly string[]).includes(field.key);
-    const vatRefundMissing = field.key === 'vatRefund'
-      && String(draft.depositAmount || '').trim() !== ''
-      && String(draft.vatRefund || '').trim() === '';
-    const vatInMissing = field.key === 'vatIn'
-      && String(draft.expenseAmount || '').trim() !== ''
-      && String(draft.vatIn || '').trim() === '';
     const vatField = field.key === 'vatRefund' || field.key === 'vatIn';
     const baseClass = [
       'h-7 w-full border border-slate-300 bg-white px-1.5 text-[11px] outline-none focus:border-blue-500',
       amountField ? 'min-w-[84px] text-right tabular-nums' : 'min-w-[104px]',
-      vatRefundMissing || vatInMissing ? 'border-red-400 bg-red-50 focus:border-red-500' : '',
+      vatField ? 'border-red-400 bg-red-50 placeholder:text-red-400 focus:border-red-500' : '',
     ].join(' ');
     if (field.key === 'cashflowLine') {
       return (
@@ -1293,7 +1301,7 @@ export function PortalBankStatementPage() {
                         <div>cashflow항목은 회사 기준 Actual PK입니다. 목록에 없는 값은 직접 입력하지 않습니다.</div>
                         <div>거래처 제안은 자동완성일 뿐 자동확정하지 않습니다.</div>
                         <div>선택 행 분류 복사는 위자드 임시 입력값에만 적용합니다.</div>
-                        <div>확정 시 Java API가 행/셀 검증 후 사업비 입력에 반영합니다.</div>
+                        <div>확정 시 사업비 입력 원장에 반영하고 계산/검증 흐름은 저장 단계에서 처리합니다.</div>
                       </div>
                     </div>
                   </div>
