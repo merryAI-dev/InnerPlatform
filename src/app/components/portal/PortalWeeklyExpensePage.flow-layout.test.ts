@@ -65,6 +65,25 @@ describe('PortalWeeklyExpensePage flow layout', () => {
     expect(weeklyExpenseSource).not.toContain('data-testid="weekly-expense-cashflow-summary"');
     expect(weeklyExpenseSource).not.toContain('getReadModelForProjectMonth(projectId, cashflowYearMonth)');
     expect(weeklyExpenseSource).not.toContain("ensureProjectCashflowSnapshot(projectId, { force: true })");
+    expect(weeklyExpenseSource).not.toContain('useCashflowWeeks');
+    expect(weeklyExpenseSource).not.toContain('submitWeekAsPm');
+    expect(weeklyExpenseSource).not.toContain('updateVarianceFlag');
+    expect(weeklyExpenseSource).not.toContain('VarianceFlagBanner');
+    expect(weeklyExpenseSource).not.toContain('weeks.filter(');
+  });
+
+  it('keeps weekly expense input free of workflow state transitions owned by cashflow or backend commands', () => {
+    expect(weeklyExpenseSource).not.toContain('onSubmitWeek={');
+    expect(weeklyExpenseSource).not.toContain('onChangeTransactionState={');
+    expect(weeklyExpenseSource).not.toContain("changeTransactionState(txId, 'SUBMITTED')");
+    expect(weeklyExpenseSource).not.toContain('detectParticipationRisk');
+    expect(weeklyExpenseSource).not.toContain('참여율 초과 경고');
+  });
+
+  it('does not retain unreachable migration or integration UI inside the weekly page', () => {
+    expect(weeklyExpenseSource).not.toContain('GoogleSheetMigrationWizard');
+    expect(weeklyExpenseSource).not.toContain('googleSheetImportOpen');
+    expect(weeklyExpenseSource).not.toContain('bffActor');
   });
 
   it('keeps a direct route from weekly expense input to the portal cashflow screen', () => {

@@ -1,7 +1,6 @@
 package dev.merryai.innerplatform.weekly.api;
 
 import dev.merryai.innerplatform.weekly.domain.CashflowLineCatalog;
-import dev.merryai.innerplatform.weekly.service.MemberProfileService;
 import dev.merryai.innerplatform.weekly.service.WeeklyExpenseCommandService;
 import jakarta.validation.Valid;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -34,38 +33,18 @@ import java.util.TreeMap;
 public class WeeklyExpenseController {
     private final WeeklyExpenseCommandService commandService;
     private final WeeklyExpensePersistence persistence;
-    private final MemberProfileService memberProfileService;
 
     public WeeklyExpenseController(
         WeeklyExpenseCommandService commandService,
-        WeeklyExpensePersistence persistence,
-        MemberProfileService memberProfileService
+        WeeklyExpensePersistence persistence
     ) {
         this.commandService = commandService;
         this.persistence = persistence;
-        this.memberProfileService = memberProfileService;
     }
 
     @GetMapping("/health")
     public Map<String, Object> health() {
         return Map.of("ok", true, "service", "jvm-weekly-api", "runtime", "spring-boot");
-    }
-
-    @PostMapping("/identity/member-profile")
-    public MemberProfileResponse syncMemberProfile(
-        @RequestHeader("x-tenant-id") String tenantId,
-        @RequestHeader("x-actor-id") String actorId,
-        @RequestHeader("x-actor-role") String actorRole,
-        @RequestHeader(value = "x-actor-email", required = false) String actorEmail,
-        @RequestBody(required = false) MemberProfileSyncRequest request
-    ) {
-        MemberProfileSyncRequest normalizedRequest = request == null
-            ? new MemberProfileSyncRequest(null, null, null, null, null)
-            : request;
-        return memberProfileService.syncMemberProfile(
-            actorContext(tenantId, actorId, actorRole, actorEmail),
-            normalizedRequest
-        );
     }
 
     @PostMapping("/weekly-expenses/{projectId}/sheets/{sheetKey}/save-draft")

@@ -74,14 +74,17 @@ describe('backend authority policy', () => {
     expect(cloudBuild).not.toContain('roles/run.invoker');
   });
 
-  it('syncs login member profiles through Java Admin SDK instead of frontend Firestore member writes', () => {
+  it('removes Java member profile sync from Firebase login and portal entry', () => {
     const authStore = readText('src/app/data/auth-store.tsx');
     const portalStore = readText('src/app/data/portal-store.tsx');
     const clientSource = readText('src/app/lib/platform-bff-client.ts');
     const controller = readText('server/jvm-weekly-api/src/main/java/dev/merryai/innerplatform/weekly/api/WeeklyExpenseController.java');
-    const firestoreMemberService = readText('server/jvm-weekly-api/src/main/java/dev/merryai/innerplatform/weekly/service/FirestoreMemberProfileService.java');
+    const applicationYml = readText('server/jvm-weekly-api/src/main/resources/application.yml');
 
-    expect(authStore).toContain('syncMemberProfileViaBff');
+    expect(authStore).not.toContain('syncMemberProfileViaBff');
+    expect(authStore).not.toContain("console.error('[Auth] Failed to sync member profile:', err);");
+    expect(authStore).not.toContain('/api/v1/identity/member-profile');
+    expect(authStore).toContain("console.error('[Auth] Failed to establish Firebase auth context:', err);");
     expect(authStore).not.toContain("getOrgDocumentPath(currentUser.tenantId || DEFAULT_ORG_ID, 'members'");
     expect(authStore).not.toContain('getDoc(memberRef)');
     expect(authStore).not.toContain('setDoc(');
@@ -89,11 +92,14 @@ describe('backend authority policy', () => {
     expect(portalStore).toContain("if (allowFrontendProjectAssignment) {\n      await setDoc(doc(db, getOrgDocumentPath(orgId, 'members', authUser.uid))");
     expect(portalStore).toContain("if (isPlatformApiEnabled()) {\n          const nextPortalUser");
     expect(portalStore).not.toContain("...(isPlatformApiEnabled()\n            ? buildWorkspacePreferencePatch");
-    expect(clientSource).toContain('/api/v1/identity/member-profile');
-    expect(clientSource).toContain('identity\\/member-profile');
-    expect(controller).toContain('/identity/member-profile');
-    expect(firestoreMemberService).toContain('SetOptions.merge()');
-    expect(firestoreMemberService).toContain('orgs/" + tenantId + "/members/" + uid');
+    expect(clientSource).not.toContain('/api/v1/identity/member-profile');
+    expect(clientSource).not.toContain('identity\\/member-profile');
+    expect(clientSource).not.toContain('MemberProfileSyncResult');
+    expect(clientSource).not.toContain('syncMemberProfileViaBff');
+    expect(clientSource).toContain('^\\/api\\/v1\\/(?:weekly-expenses(?:\\/|$)|cashflow(?:\\/|$))');
+    expect(controller).not.toContain('/identity/member-profile');
+    expect(applicationYml).not.toContain('member-profile-backend');
+    expect(applicationYml).not.toContain('JVM_WEEKLY_MEMBER_PROFILE_BACKEND');
   });
 
   it('requires trusted Firebase role claims for privileged Java API roles', () => {
@@ -124,6 +130,14 @@ describe('backend authority policy', () => {
     expect(portalWeeklyPage).not.toContain('fetchBudgetSuggestionViaBff');
     expect(portalWeeklyPage).not.toContain('onEnsureTransactionPersisted=');
     expect(portalWeeklyPage).not.toContain('onFetchBudgetSuggestion=');
+    expect(portalWeeklyPage).not.toContain('useCashflowWeeks');
+    expect(portalWeeklyPage).not.toContain('submitWeekAsPm');
+    expect(portalWeeklyPage).not.toContain('updateVarianceFlag');
+    expect(portalWeeklyPage).not.toContain('VarianceFlagBanner');
+    expect(portalWeeklyPage).not.toContain('onSubmitWeek=');
+    expect(portalWeeklyPage).not.toContain('onChangeTransactionState=');
+    expect(portalWeeklyPage).not.toContain('changeTransactionState(');
+    expect(portalWeeklyPage).not.toContain('GoogleSheetMigrationWizard');
     expect(claimsScript).toContain('setCustomUserClaims');
     expect(claimsScript).not.toContain('../server/bff/');
   });

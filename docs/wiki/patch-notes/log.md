@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-06-10] patch-note | shared-portal-architecture | remove optional Java member sync
+- pages: [shared-portal-architecture](./pages/shared-portal-architecture.md)
+- summary: 로그인/포털 진입은 Firebase Auth와 Firestore members 기준으로 고정하고, Java API의 optional member-profile sync 엔드포인트와 서비스 설정을 제거했다. Java 직접 라우팅은 weekly/cashflow API로만 제한하며, identity/project/budget/telemetry가 Java로 새면 정책 테스트에서 실패하도록 했다.
+
 ## [2026-06-10] patch-note | portal-budget, shared-portal-architecture | budget live drift guard
 - pages: [portal-budget](./pages/portal-budget.md), [shared-portal-architecture](./pages/shared-portal-architecture.md)
 - summary: stage Java weekly 변경이 예산 편집 UI/권한/저장 경로로 확산되지 않도록 `PortalBudget` live drift guard와 `portal-store` 예산 저장 경계 테스트를 추가했다. 예산 codebook rename 전파는 live와 같은 예산 Firestore 경로를 유지하고, weekly Java draft save 경로로 새지 않도록 고정했다.

@@ -1,15 +1,12 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import {
-  AlertTriangle,
   ArrowRight,
   BarChart3,
   ExternalLink,
   Loader2,
-  Send,
 } from 'lucide-react';
 import { usePortalStore } from '../../data/portal-store';
-import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { useAuth } from '../../data/auth-store';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
@@ -19,36 +16,18 @@ import {
   normalizeSettlementSheetPolicy,
   normalizeProjectFundInputMode,
   PROJECT_FUND_INPUT_MODE_LABELS,
-  type CashflowWeekSheet,
   type Transaction,
-  type TransactionState,
 } from '../../data/types';
 import { toast } from 'sonner';
-import { useFirebase } from '../../lib/firebase-context';
 import {
   isPlatformApiEnabled,
 } from '../../lib/platform-bff-client';
 import { splitLooseNameList } from '../../platform/name-list';
 import { resolveApiErrorMessage } from '../../platform/api-error-message';
-import { readDevAuthHarnessConfig } from '../../platform/dev-harness';
-import { detectParticipationRisk } from '../../platform/participation-risk-rules';
 import { normalizeBudgetLabel } from '../../platform/budget-labels';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '../ui/alert-dialog';
 import { resolvePortalHappyPath } from '../../platform/portal-happy-path';
 import { resolveWeeklyExpenseSavePolicy } from '../../platform/weekly-expense-save-policy';
 import { usePortalNavigationGuard } from './PortalLayout';
-const GoogleSheetMigrationWizard = lazy(
-  () => import('./GoogleSheetMigrationWizard').then((module) => ({ default: module.GoogleSheetMigrationWizard })),
-);
 const SettlementLedgerPage = lazy(
   () => import('../cashflow/SettlementLedgerPage').then((module) => ({ default: module.SettlementLedgerPage })),
 );
@@ -57,8 +36,7 @@ export function PortalWeeklyExpensePage() {
   const navigate = useNavigate();
   const { registerNavigationHandler } = usePortalNavigationGuard();
   const weeklyExpenseSavePolicy = resolveWeeklyExpenseSavePolicy();
-  const { user: authUser, ensureGoogleWorkspaceAccess } = useAuth();
-  const { orgId } = useFirebase();
+  const { user: authUser } = useAuth();
   const {
     isLoading: portalStoreLoading,
     activeProjectId,
@@ -68,9 +46,7 @@ export function PortalWeeklyExpensePage() {
     transactions,
     addTransaction,
     updateTransaction,
-    changeTransactionState,
     evidenceRequiredMap,
-    sheetSources,
     saveEvidenceRequiredMap,
     expenseSheets,
     activeExpenseSheetId,
@@ -84,24 +60,11 @@ export function PortalWeeklyExpensePage() {
     budgetPlanRows,
     budgetCodeBook,
     budgetTreeV2,
-    saveBankStatementRows,
-    saveBudgetPlanRows,
-    saveBudgetCodeBook,
-    markSheetSourceApplied,
     weeklySubmissionStatuses,
   } = usePortalStore();
-  const { submitWeekAsPm } = useCashflowWeeks();
-  const devHarnessConfig = readDevAuthHarnessConfig(import.meta.env, typeof window !== 'undefined' ? window.location : undefined);
   const weeklyDirectApiMode = isPlatformApiEnabled();
-  const [googleSheetImportOpen, setGoogleSheetImportOpen] = useState(false);
   const [hasUnsavedSettlementChanges, setHasUnsavedSettlementChanges] = useState(false);
   const [isSettlementSaving, setIsSettlementSaving] = useState(false);
-  const [participationRiskWarning, setParticipationRiskWarning] = useState<{
-    yearMonth: string;
-    weekNo: number;
-    txIds: string[];
-    overLimitMembers: { memberName: string; groupLabel: string; totalRate: number }[];
-  } | null>(null);
 
   const projectId = activeProjectId || myProject?.id || '';
   const projectName = myProject?.name || '내 사업';
@@ -231,22 +194,6 @@ export function PortalWeeklyExpensePage() {
     return Array.from(names).filter(Boolean).sort((a, b) => a.localeCompare(b, 'ko'));
   }, [participationEntries, projectId, portalUser?.name, myProject?.managerName, myProject?.settlementSupportName]);
 
-  const bffActor = useMemo(() => ({
-    uid: authUser?.uid || portalUser?.id || 'portal-user',
-    email: authUser?.email || portalUser?.email || '',
-    role: authUser?.role || portalUser?.role || 'pm',
-    idToken: authUser?.idToken,
-    googleAccessToken: authUser?.googleAccessToken,
-  }), [
-    authUser?.uid,
-    authUser?.email,
-    authUser?.role,
-    authUser?.idToken,
-    authUser?.googleAccessToken,
-    portalUser?.id,
-    portalUser?.email,
-    portalUser?.role,
-  ]);
   const handleAddTransaction = useCallback((tx: Transaction) => {
     void addTransaction(tx).catch((error) => {
       toast.error(resolveApiErrorMessage(error, '거래 저장에 실패했습니다.'));
@@ -258,48 +205,6 @@ export function PortalWeeklyExpensePage() {
       toast.error(resolveApiErrorMessage(error, '거래 수정에 실패했습니다.'));
     });
   }, [updateTransaction]);
-
-  const handleSubmitWeek = useCallback(async ({ yearMonth, weekNo, txIds }: {
-    yearMonth: string;
-    weekNo: number;
-    txIds: string[];
-  }) => {
-    const riskCheck = detectParticipationRisk(participationEntries);
-    if (riskCheck.hasOverLimit) {
-      setParticipationRiskWarning({
-        yearMonth,
-        weekNo,
-        txIds,
-        overLimitMembers: riskCheck.overLimitMembers.map((m) => ({
-          memberName: m.memberName,
-          groupLabel: m.groupLabel,
-          totalRate: m.totalRate,
-        })),
-      });
-      return;
-    }
-    let updatedCount = 0;
-    try {
-      await submitWeekAsPm({ projectId, yearMonth, weekNo });
-      for (const txId of txIds) {
-        await changeTransactionState(txId, 'SUBMITTED');
-        updatedCount += 1;
-      }
-      toast.success(`${yearMonth} ${weekNo}주 제출 처리 완료`);
-    } catch (err) {
-      const fallback = updatedCount > 0
-        ? `주간 제출은 저장됐지만 거래 상태 ${updatedCount}/${txIds.length}건만 갱신했습니다.`
-        : '주간 제출 처리에 실패했습니다';
-      toast.error(resolveApiErrorMessage(err, fallback));
-      throw err;
-    }
-  }, [changeTransactionState, participationEntries, projectId, submitWeekAsPm]);
-
-  const handleChangeTransactionState = useCallback((txId: string, newState: TransactionState, reason?: string) => {
-    void changeTransactionState(txId, newState, reason).catch((error) => {
-      toast.error(resolveApiErrorMessage(error, '거래 상태 변경에 실패했습니다.'));
-    });
-  }, [changeTransactionState]);
 
   const requestRouteNavigation = useCallback((path: string, label: string) => {
     if (isSettlementSaving) {
@@ -498,11 +403,6 @@ export function PortalWeeklyExpensePage() {
         </div>
       </div>
 
-      <VarianceFlagBanner
-        projectId={projectId}
-        pmName={portalUser?.name || 'PM'}
-        pmUid={portalUser?.id || ''}
-      />
       <Suspense
         fallback={(
           <div className="rounded-xl border bg-background px-4 py-6">
@@ -532,8 +432,6 @@ export function PortalWeeklyExpensePage() {
           onSaveEvidenceRequiredMap={saveEvidenceRequiredMap}
           sheetRows={expenseSheetRows}
           onSaveSheetRows={saveExpenseSheetRows}
-          onSubmitWeek={handleSubmitWeek}
-          onChangeTransactionState={handleChangeTransactionState}
           currentUserName={portalUser?.name || 'PM'}
           currentUserId={portalUser?.id || 'pm'}
           userRole={ledgerUserRole}
@@ -560,202 +458,6 @@ export function PortalWeeklyExpensePage() {
           </div>
         </div>
       )}
-      {googleSheetImportOpen && (
-        <Suspense fallback={null}>
-            <GoogleSheetMigrationWizard
-              open={googleSheetImportOpen}
-              onOpenChange={setGoogleSheetImportOpen}
-              orgId={orgId}
-              projectId={projectId}
-              projectName={projectName}
-              projectSettlementType={myProject?.settlementType}
-              projectAccountType={myProject?.accountType}
-              activeSheetName={activeSheetName}
-              bffActor={bffActor}
-              expenseSheetRows={expenseSheetRows || []}
-              budgetPlanRows={budgetPlanRows || []}
-              evidenceRequiredMap={evidenceRequiredMap}
-              sheetSources={sheetSources}
-              devHarnessEnabled={devHarnessConfig.enabled}
-              ensureGoogleWorkspaceAccess={ensureGoogleWorkspaceAccess}
-              saveBudgetPlanRows={saveBudgetPlanRows}
-              saveBudgetCodeBook={saveBudgetCodeBook}
-              saveBankStatementRows={saveBankStatementRows}
-              saveEvidenceRequiredMap={saveEvidenceRequiredMap}
-              markSheetSourceApplied={markSheetSourceApplied}
-            />
-        </Suspense>
-      )}
-      {/* 참여율 이상 탐지 경고 모달 */}
-      <AlertDialog open={!!participationRiskWarning} onOpenChange={(open) => { if (!open) setParticipationRiskWarning(null); }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>⚠️ 참여율 초과 경고</AlertDialogTitle>
-            <AlertDialogDescription asChild>
-              <div className="space-y-2 text-sm">
-                <p>아래 인력의 참여율이 100%를 초과합니다. 확인 후 제출하세요.</p>
-                <ul className="space-y-1 mt-2">
-                  {participationRiskWarning?.overLimitMembers.map((m, i) => (
-                    <li key={i} className="flex items-center gap-2 text-rose-700 font-medium">
-                      <span className="inline-block w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />
-                      {m.memberName} — {m.groupLabel} 합산 {m.totalRate}%
-                    </li>
-                  ))}
-                </ul>
-                <p className="text-muted-foreground text-[11px] mt-2">
-                  계속 진행하면 제출이 완료됩니다. 참여율 관리는 인사 설정에서 수정하세요.
-                </p>
-              </div>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setParticipationRiskWarning(null)}>
-              취소
-            </AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-rose-600 hover:bg-rose-700"
-              onClick={async () => {
-                if (!participationRiskWarning) return;
-                const { yearMonth, weekNo, txIds } = participationRiskWarning;
-                setParticipationRiskWarning(null);
-                let updatedCount = 0;
-                try {
-                  await submitWeekAsPm({ projectId, yearMonth, weekNo });
-                  for (const txId of txIds) {
-                    await changeTransactionState(txId, 'SUBMITTED');
-                    updatedCount += 1;
-                  }
-                  toast.success(`${yearMonth} ${weekNo}주 제출 처리 완료`);
-                } catch (err) {
-                  const fallback = updatedCount > 0
-                    ? `주간 제출은 저장됐지만 거래 상태 ${updatedCount}/${txIds.length}건만 갱신했습니다.`
-                    : '주간 제출 처리에 실패했습니다';
-                  toast.error(resolveApiErrorMessage(err, fallback));
-                }
-              }}
-            >
-              이해했습니다, 제출
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-    </div>
-  );
-}
-
-// ── PM 편차 확인 배너 ──
-
-function VarianceFlagBanner({
-  projectId,
-  pmName,
-  pmUid,
-}: {
-  projectId: string;
-  pmName: string;
-  pmUid: string;
-}) {
-  const { weeks } = useCashflowWeeks();
-  const [replyText, setReplyText] = useState('');
-  const [replyingId, setReplyingId] = useState<string | null>(null);
-
-  // Find all OPEN flags for this project
-  const openFlags = useMemo(() => {
-    return weeks.filter(
-      (w) =>
-        w.projectId === projectId &&
-        w.varianceFlag?.status === 'OPEN',
-    );
-  }, [weeks, projectId]);
-
-  const { updateVarianceFlag } = useCashflowWeeks();
-
-  const handleReply = (sheet: CashflowWeekSheet) => {
-    if (!replyText.trim() || !sheet.varianceFlag) return;
-    const now = new Date().toISOString();
-    const nextFlag = {
-      ...sheet.varianceFlag,
-      status: 'REPLIED' as const,
-      pmReply: replyText.trim(),
-      pmRepliedBy: pmName,
-      pmRepliedByUid: pmUid,
-      pmRepliedAt: now,
-    };
-    const nextHistory = [
-      ...(sheet.varianceHistory || []),
-      { id: `vf-${Date.now()}`, action: 'REPLY' as const, actor: pmName, actorUid: pmUid, content: replyText.trim(), timestamp: now },
-    ];
-    updateVarianceFlag({ sheetId: sheet.id, varianceFlag: nextFlag, varianceHistory: nextHistory }).catch(console.error);
-    setReplyText('');
-    setReplyingId(null);
-  };
-
-  if (openFlags.length === 0) return null;
-
-  return (
-    <div className="space-y-2">
-      {openFlags.map((sheet) => {
-        const flag = sheet.varianceFlag!;
-        const weekLabel = `${sheet.yearMonth} ${sheet.weekNo}주`;
-        const isReplying = replyingId === sheet.id;
-
-        return (
-          <div
-            key={sheet.id}
-            className="flex flex-col gap-2 rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/30 px-4 py-3"
-          >
-            <div className="flex items-start gap-2">
-              <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-              <div className="flex-1 min-w-0">
-                <p className="text-[11px] font-bold text-amber-800 dark:text-amber-200">
-                  관리자 확인요청 | {weekLabel}
-                </p>
-                <p className="text-[11px] text-amber-700 dark:text-amber-300 mt-0.5">
-                  "{flag.reason}"
-                </p>
-                <p className="text-[9px] text-amber-600/70 mt-0.5">
-                  {flag.flaggedBy} · {flag.flaggedAt.slice(0, 16).replace('T', ' ')}
-                </p>
-              </div>
-              {!isReplying && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 text-[10px] shrink-0 border-amber-400 text-amber-700 hover:bg-amber-100"
-                  onClick={() => setReplyingId(sheet.id)}
-                >
-                  답변
-                </Button>
-              )}
-            </div>
-            {isReplying && (
-              <div className="flex gap-2 ml-6">
-                <input
-                  type="text"
-                  value={replyText}
-                  onChange={(e) => setReplyText(e.target.value)}
-                  placeholder="사유를 입력하세요..."
-                  className="flex-1 h-8 rounded-md border bg-background px-2.5 text-[11px] outline-none focus:ring-1 focus:ring-ring"
-                  autoFocus
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.nativeEvent.isComposing) handleReply(sheet);
-                    if (e.key === 'Escape') setReplyingId(null);
-                  }}
-                />
-                <Button
-                  size="sm"
-                  className="h-8 text-[11px] gap-1 px-3"
-                  onClick={() => handleReply(sheet)}
-                  disabled={!replyText.trim()}
-                >
-                  <Send className="h-3 w-3" />
-                  전송
-                </Button>
-              </div>
-            )}
-          </div>
-        );
-      })}
     </div>
   );
 }

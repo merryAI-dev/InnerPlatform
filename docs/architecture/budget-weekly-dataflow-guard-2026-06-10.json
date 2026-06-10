@@ -51,6 +51,11 @@
       "role": "Projection/Actual read model and comparison UI"
     },
     {
+      "id": "store.cashflowWeeks",
+      "path": "src/app/data/cashflow-weeks-store.tsx",
+      "role": "Cashflow Projection/Actual read model hydration and weekly status merge"
+    },
+    {
       "id": "firestore.budgetCodeBook",
       "path": "projects/{projectId}/budget_code_book/default",
       "role": "Budget codebook document"
@@ -109,6 +114,11 @@
     },
     {
       "from": "ui.cashflow",
+      "to": "store.cashflowWeeks",
+      "reason": "Cashflow UI may request Projection/Actual read model hydration."
+    },
+    {
+      "from": "store.cashflowWeeks",
       "to": "api.weeklyJava",
       "reason": "Cashflow reads Projection/Actual through the read model channel."
     }
@@ -131,6 +141,12 @@
       "to": "ui.cashflow",
       "enforcedBy": "src/app/components/portal/PortalWeeklyExpensePage.flow-layout.test.ts",
       "reason": "Weekly expense screen can navigate to cashflow but must not render Projection/Actual comparison UI."
+    },
+    {
+      "from": "ui.weeklyExpense",
+      "to": "store.cashflowWeeks",
+      "enforcedBy": "src/app/components/portal/PortalWeeklyExpensePage.flow-layout.test.ts",
+      "reason": "Weekly expense screen must not submit weeks, hydrate cashflow, or update variance flags through the cashflow store."
     }
   ],
   "verification": [

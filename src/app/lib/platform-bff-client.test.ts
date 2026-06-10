@@ -26,6 +26,7 @@ import {
   notifyProjectRequestRegistrationViaBff,
   pasteWeeklyExpenseCellsViaBff,
   patchWeeklyExpenseCellsViaBff,
+  persistMemberWorkspacePreferenceViaBff,
   reviewProjectExecutiveStatusViaBff,
   overrideTransactionEvidenceDriveCategoriesViaBff,
   previewGoogleSheetImportViaBff,
@@ -36,7 +37,6 @@ import {
   createPlatformApiClient,
   restoreProjectViaBff,
   closeWeeklyExpenseWeekViaBff,
-  syncMemberProfileViaBff,
   syncTransactionEvidenceDriveViaBff,
   trashProjectViaBff,
   uploadProjectSheetSourceViaBff,
@@ -99,7 +99,7 @@ describe('platform-bff-client', () => {
     }
   });
 
-  it('routes weekly, cashflow, and identity member sync paths to Java API while preserving legacy BFF routes', async () => {
+  it('routes weekly and cashflow paths to Java API while preserving legacy BFF routes', async () => {
     const calls: Array<{ url: string; authorization: string | null }> = [];
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -111,18 +111,6 @@ describe('platform-bff-client', () => {
         return new Response(JSON.stringify({ projectId: 'p-cashflow', statuses: [] }), {
           status: 200,
           headers: { 'content-type': 'application/json', 'x-request-id': 'req-weekly' },
-        });
-      }
-      if (url.includes('/api/v1/identity/member-profile')) {
-        return new Response(JSON.stringify({
-          uid: 'admin-1',
-          email: 'admin@mysc.co.kr',
-          name: 'Admin',
-          role: 'admin',
-          tenantId: 'mysc',
-        }), {
-          status: 200,
-          headers: { 'content-type': 'application/json', 'x-request-id': 'req-identity' },
         });
       }
       if (url.includes('/api/v1/projects')) {
@@ -161,13 +149,6 @@ describe('platform-bff-client', () => {
       project: { id: 'p001', name: 'Project 1' },
       client,
     });
-    await syncMemberProfileViaBff({
-      tenantId: 'mysc',
-      actor: { uid: 'admin-1', email: 'admin@mysc.co.kr', role: 'admin', idToken: 'token-identity' },
-      profile: { name: 'Admin' },
-      client,
-    });
-
     expect(calls[0]).toEqual({
       url: 'https://java-api.example.run.app/api/v1/weekly-expenses/p-cashflow/statuses',
       authorization: 'Bearer token-weekly',
@@ -176,10 +157,8 @@ describe('platform-bff-client', () => {
       url: 'https://legacy-bff.example.app/api/v1/projects',
       authorization: null,
     });
-    expect(calls[2]).toEqual({
-      url: 'https://java-api.example.run.app/api/v1/identity/member-profile',
-      authorization: 'Bearer token-identity',
-    });
+    expect(calls.some((call) => call.url.includes('/api/v1/identity/member-profile'))).toBe(false);
+    expect(calls).toHaveLength(2);
     vi.unstubAllGlobals();
   });
 
@@ -252,6 +231,46 @@ describe('platform-bff-client', () => {
       body: { id: 'p001', name: 'Project 1' },
     }));
     expect(result.version).toBe(1);
+  });
+
+  it('persists member workspace preference through the legacy member API route', async () => {
+    const client = asMockClient({
+      post: vi.fn(),
+      get: vi.fn(),
+      patch: vi.fn(async () => ({
+        data: {
+          id: 'u001',
+          tenantId: 'mysc',
+          defaultWorkspace: 'portal',
+          lastWorkspace: 'portal',
+          updatedAt: '2026-06-10T00:00:00Z',
+        },
+      })),
+      request: vi.fn(),
+    });
+
+    const result = await persistMemberWorkspacePreferenceViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm', idToken: 'token-member' },
+      memberId: 'u001',
+      defaultWorkspace: 'portal',
+      lastWorkspace: 'portal',
+      client,
+    });
+
+    expect(client.patch).toHaveBeenCalledWith('/api/v1/members/u001/workspace-preference', expect.objectContaining({
+      tenantId: 'mysc',
+      actor: expect.objectContaining({
+        id: 'u001',
+        role: 'pm',
+        idToken: 'token-member',
+      }),
+      body: {
+        defaultWorkspace: 'portal',
+        lastWorkspace: 'portal',
+      },
+    }));
+    expect(result.lastWorkspace).toBe('portal');
   });
 
   it('calls project trash and restore endpoints', async () => {

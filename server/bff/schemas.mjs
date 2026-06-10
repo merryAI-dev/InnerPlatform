@@ -253,6 +253,11 @@ export const memberRoleUpdateSchema = z.object({
 
 export const memberDeepSyncSchema = memberRoleUpdateSchema;
 
+export const memberWorkspacePreferenceSchema = z.object({
+  defaultWorkspace: z.enum(['admin', 'portal']).optional(),
+  lastWorkspace: z.enum(['admin', 'portal']),
+}).strict();
+
 export const cashflowExportSchema = z.object({
   scope: z.enum(['all', 'single']),
   projectId: z.string().trim().optional(),

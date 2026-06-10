@@ -168,35 +168,6 @@ class WeeklyExpenseControllerTest {
     }
 
     @Test
-    void browserDirectFirebaseTokenCanSyncMemberProfileThroughJavaAdminPath() throws Exception {
-        mockMvc.perform(asFirebaseActor(
-                post("/api/v1/identity/member-profile"),
-                "tenant-identity",
-                "firebase-member-1",
-                "admin",
-                "member@mysc.co.kr"
-            )
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("""
-                    {
-                      "name": "Member One",
-                      "avatarUrl": "https://example.com/avatar.png",
-                      "department": "Finance",
-                      "defaultWorkspace": "portal",
-                      "lastWorkspace": "cashflow"
-                    }
-                    """))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.uid").value("firebase-member-1"))
-            .andExpect(jsonPath("$.email").value("member@mysc.co.kr"))
-            .andExpect(jsonPath("$.role").value("admin"))
-            .andExpect(jsonPath("$.tenantId").value("tenant-identity"))
-            .andExpect(jsonPath("$.department").value("Finance"))
-            .andExpect(jsonPath("$.defaultWorkspace").value("portal"))
-            .andExpect(jsonPath("$.lastWorkspace").value("cashflow"));
-    }
-
-    @Test
     void authSessionEndpointIsNotPartOfBrowserDirectBearerFlow() throws Exception {
         String idToken = firebaseTestToken("tenant-session", "firebase-pm-session", "pm", "pm-session@mysc.co.kr");
         mockMvc.perform(post("/api/v1/auth/session")
@@ -294,13 +265,18 @@ class WeeklyExpenseControllerTest {
         String missingClaimsToken = "test-firebase:" + Base64.getUrlEncoder()
             .encodeToString("uid=firebase-admin-claims;email=admin-claims@mysc.co.kr".getBytes(StandardCharsets.UTF_8));
 
-        mockMvc.perform(post("/api/v1/identity/member-profile")
+        mockMvc.perform(post("/api/v1/weekly-expenses/project-missing-role/sheets/default/save-draft")
                 .header("authorization", "Bearer " + missingClaimsToken)
                 .header("x-tenant-id", "tenant-direct")
                 .header("x-actor-id", "firebase-admin-claims")
                 .header("x-actor-role", "admin")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"name\":\"Admin Claims\"}"))
+                .content("""
+                    {
+                      "idempotencyKey": "missing-role-claim-privileged",
+                      "rows": []
+                    }
+                    """))
             .andExpect(status().isForbidden())
             .andExpect(jsonPath("$.code").value("actor_role_claim_required"));
     }

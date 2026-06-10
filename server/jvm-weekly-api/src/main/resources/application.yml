@@ -18,7 +18,6 @@ server:
   port: ${WEEKLY_API_PORT:8088}
 weekly:
   storage-backend: ${JVM_WEEKLY_STORAGE_BACKEND:jpa}
-  member-profile-backend: ${JVM_WEEKLY_MEMBER_PROFILE_BACKEND:${weekly.storage-backend}}
   internal-api-token-enabled: ${JVM_WEEKLY_INTERNAL_API_TOKEN_ENABLED:false}
   internal-api-token: ${JVM_WEEKLY_INTERNAL_API_TOKEN:}
   firebase-project-id: ${JVM_WEEKLY_FIREBASE_PROJECT_ID:${FIREBASE_PROJECT_ID:${GOOGLE_CLOUD_PROJECT:}}}

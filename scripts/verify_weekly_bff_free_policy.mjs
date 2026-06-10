@@ -38,6 +38,7 @@ const productionDeployWorkflow = read('.github/workflows/production-deploy.yml')
 const ciWorkflow = read('.github/workflows/ci.yml');
 const controller = read('server/jvm-weekly-api/src/main/java/dev/merryai/innerplatform/weekly/api/WeeklyExpenseController.java');
 const controllerTest = read('server/jvm-weekly-api/src/test/java/dev/merryai/innerplatform/weekly/api/WeeklyExpenseControllerTest.java');
+const applicationYml = read('server/jvm-weekly-api/src/main/resources/application.yml');
 const portalStore = read('src/app/data/portal-store.tsx');
 const portalWeeklyPage = read('src/app/components/portal/PortalWeeklyExpensePage.tsx');
 const cashflowWeeksStore = read('src/app/data/cashflow-weeks-store.tsx');
@@ -104,9 +105,17 @@ requireNotIncludes(platformClient, 'auth(?:', 'removed Java auth route prefix');
 requireIncludes(platformApiBaseUrl, "host.endsWith('.vercel.app')", 'Vercel Java API base URL rejection');
 requireIncludes(platformApiBaseUrl, 'must bypass Vercel/BFF rewrites', 'same-origin Java API base URL rejection error');
 requireIncludes(platformClient, 'fetchWeeklyExpenseStatusesViaBff', 'Java weekly status read channel');
-requireIncludes(platformClient, '/api/v1/identity/member-profile', 'Java member profile sync route');
-requireIncludes(platformClient, 'identity\\/member-profile', 'member profile sync Java route classifier');
-requireIncludes(authStore, 'syncMemberProfileViaBff', 'login member profile server sync');
+requireIncludes(platformClient, 'weekly-expenses(?:\\/|$)|cashflow(?:\\/|$)', 'Java routing limited to weekly and cashflow');
+requireNotIncludes(platformClient, '/api/v1/identity/member-profile', 'removed Java member profile sync route');
+requireNotIncludes(platformClient, 'identity\\/member-profile', 'removed member profile Java route classifier');
+requireNotIncludes(platformClient, 'MemberProfileSyncResult', 'removed Java member profile DTO');
+requireNotIncludes(platformClient, 'syncMemberProfileViaBff', 'removed login member profile Java sync');
+requireNotIncludes(authStore, 'syncMemberProfileViaBff', 'removed login member profile Java sync');
+requireNotIncludes(authStore, "console.error('[Auth] Failed to sync member profile:', err);", 'removed optional Java member sync fallback log');
+requireIncludes(authStore, "console.error('[Auth] Failed to establish Firebase auth context:', err);", 'Firebase auth context failure is fail-closed');
+requireNotIncludes(controller, '/identity/member-profile', 'removed Java member profile endpoint');
+requireNotIncludes(applicationYml, 'member-profile-backend', 'removed Java member profile backend setting');
+requireNotIncludes(applicationYml, 'JVM_WEEKLY_MEMBER_PROFILE_BACKEND', 'removed Java member profile backend env');
 requireNotIncludes(authStore, "getOrgDocumentPath(currentUser.tenantId || DEFAULT_ORG_ID, 'members'", 'workspace preference frontend members write');
 requireNotIncludes(authStore, 'getDoc(memberRef)', 'login frontend members read');
 requireNotIncludes(authStore, 'setDoc(', 'auth-store frontend Firestore write');
@@ -149,6 +158,16 @@ for (const forbidden of [
   'onFetchBudgetSuggestion=',
   'onProvisionEvidenceDrive=',
   'onUploadEvidenceDrive=',
+  'useCashflowWeeks',
+  'submitWeekAsPm',
+  'updateVarianceFlag',
+  'VarianceFlagBanner',
+  'onSubmitWeek=',
+  'onChangeTransactionState=',
+  'changeTransactionState(',
+  'detectParticipationRisk',
+  'GoogleSheetMigrationWizard',
+  'googleSheetImportOpen',
 ]) {
   requireNotIncludes(portalWeeklyPage, forbidden, 'BFF-only weekly expense page operation');
 }

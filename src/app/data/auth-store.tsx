@@ -45,7 +45,7 @@ import {
   type DevHarnessPreset,
 } from '../platform/dev-harness';
 import { setObservabilityUserContext } from '../platform/observability';
-import { syncMemberProfileViaBff } from '../lib/platform-bff-client';
+import { persistMemberWorkspacePreferenceViaBff } from '../lib/platform-bff-client';
 
 export interface AuthUser {
   uid: string;
@@ -198,12 +198,6 @@ function saveUser(user: AuthUser | null) {
   }
 }
 
-function omitUndefinedFields<T extends object>(input: T): T {
-  return Object.fromEntries(
-    Object.entries(input as Record<string, unknown>).filter(([, value]) => value !== undefined),
-  ) as T;
-}
-
 function getCachedMemberFallback(firebaseUser: FirebaseUser): Partial<MemberDoc> | undefined {
   const saved = loadSavedUser();
   if (!saved || saved.uid !== firebaseUser.uid) return undefined;
@@ -293,50 +287,6 @@ async function establishPlatformApiSession(firebaseUser: FirebaseUser): Promise<
   return { tokenResult, idToken };
 }
 
-async function upsertMemberFromFirebase(
-  firebaseUser: FirebaseUser,
-  tenantId: string,
-  idToken: string,
-  resolvedRole: UserRole,
-  roleFromClaims?: string,
-  department?: string,
-): Promise<MemberDoc | undefined> {
-  const normalizedEmail = normalizeEmail(firebaseUser.email || '');
-  const member = await syncMemberProfileViaBff({
-    tenantId,
-    actor: {
-      uid: firebaseUser.uid,
-      email: normalizedEmail,
-      role: roleFromClaims || 'pm',
-      idToken,
-    },
-    profile: {
-      name: firebaseUser.displayName || '사용자',
-      avatarUrl: firebaseUser.photoURL || undefined,
-      department,
-    },
-  });
-  return omitUndefinedFields<MemberDoc>({
-    uid: member.uid || firebaseUser.uid,
-    name: member.name || firebaseUser.displayName || '사용자',
-    email: normalizeEmail(member.email || normalizedEmail),
-    role: toUserRole(member.role) || resolvedRole,
-    tenantId: member.tenantId || tenantId,
-    department: member.department,
-    status: member.status === 'INACTIVE' || member.status === 'PENDING' ? member.status : 'ACTIVE',
-    projectId: member.projectId,
-    projectIds: member.projectIds,
-    projectNames: member.projectNames,
-    portalProfile: member.portalProfile,
-    avatarUrl: member.avatarUrl || firebaseUser.photoURL || undefined,
-    createdAt: member.createdAt,
-    updatedAt: member.updatedAt,
-    lastLoginAt: member.lastLoginAt,
-    defaultWorkspace: member.defaultWorkspace as WorkspaceId | undefined,
-    lastWorkspace: member.lastWorkspace as WorkspaceId | undefined,
-  });
-}
-
 const _g = globalThis as any;
 if (!_g.__MYSC_AUTH_CTX__) {
   _g.__MYSC_AUTH_CTX__ = createContext<(AuthState & AuthActions) | null>(null);
@@ -416,37 +366,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           directoryRole: resolveRoleFromDirectory(firebaseUser.email || '', ROLE_DIRECTORY),
           bootstrapAdmin: isBootstrapAdminEmail(normalizedEmail),
         });
-        const member = await upsertMemberFromFirebase(
-          firebaseUser,
+        const member: Partial<MemberDoc> = {
+          ...cachedMember,
+          role: resolvedRole,
           tenantId,
-          idToken,
-          resolvedRole,
-          claimsContext.role,
-          claimsContext.department,
-        );
+          department: claimsContext.department || cachedMember?.department,
+        };
         const mapped = mapFirebaseUserToAuthUser(firebaseUser, member, tenantId, idToken);
         mapped.source = 'firebase';
         setUser(mapped);
         saveUser(mapped);
         setIsLoading(false);
       } catch (err) {
-        console.error('[Auth] Failed to sync member profile:', err);
-        if (featureFlags.platformApiEnabled) {
-          setUser(null);
-          saveUser(null);
-          setIsLoading(false);
-          return;
-        }
-        const fallbackTenantId = resolveTenantId({
-          savedTenantId: cachedMember?.tenantId,
-          envTenantId: DEFAULT_ORG_ID,
-          strict: false,
-        });
-        const token = await firebaseUser.getIdTokenResult().catch(() => null);
-        const fallback = mapFirebaseUserToAuthUser(firebaseUser, cachedMember, fallbackTenantId, token?.token);
-        fallback.source = 'firebase';
-        setUser(fallback);
-        saveUser(fallback);
+        console.error('[Auth] Failed to establish Firebase auth context:', err);
+        setUser(null);
+        saveUser(null);
         setIsLoading(false);
       }
     });
@@ -481,10 +415,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       ...(persistDefault ? { defaultWorkspace: workspace } : {}),
       lastWorkspace: workspace,
     };
-    setUser(nextUser);
-    saveUser(nextUser);
-
     if (currentUser.source === 'dev_harness') {
+      setUser(nextUser);
+      saveUser(nextUser);
       persistDevHarnessSession({
         source: 'dev_harness',
         uid: nextUser.uid,
@@ -501,7 +434,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     try {
-      const synced = await syncMemberProfileViaBff({
+      await persistMemberWorkspacePreferenceViaBff({
         tenantId: currentUser.tenantId || DEFAULT_ORG_ID,
         actor: {
           uid: currentUser.uid,
@@ -509,33 +442,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           role: currentUser.role,
           idToken: currentUser.idToken,
         },
-        profile: {
-          name: currentUser.name,
-          avatarUrl: currentUser.avatarUrl,
-          defaultWorkspace: persistDefault ? workspace : currentUser.defaultWorkspace,
-          lastWorkspace: workspace,
-        },
+        memberId: currentUser.uid,
+        ...(persistDefault ? { defaultWorkspace: workspace } : {}),
+        lastWorkspace: workspace,
       });
-      const confirmedUser: AuthUser = {
-        ...nextUser,
-        role: toUserRole(synced.role) || nextUser.role,
-        projectId: synced.projectId || nextUser.projectId,
-        projectIds: normalizeProjectIds([
-          ...(synced.projectIds || []),
-          synced.projectId || nextUser.projectId,
-        ]),
-        defaultWorkspace: (synced.defaultWorkspace as WorkspaceId | undefined) || nextUser.defaultWorkspace,
-        lastWorkspace: (synced.lastWorkspace as WorkspaceId | undefined) || nextUser.lastWorkspace,
-      };
-      setUser(confirmedUser);
-      saveUser(confirmedUser);
-      return true;
     } catch (err) {
-      console.error('[Auth] setWorkspacePreference failed:', err);
-      setUser(currentUser);
-      saveUser(currentUser);
+      console.error('[Auth] Failed to persist workspace preference:', err);
       return false;
     }
+
+    setUser(nextUser);
+    saveUser(nextUser);
+    return true;
   }, [user]);
 
   const loginWithGoogle = useCallback(async (): Promise<{ success: boolean; error?: string }> => {

@@ -1,0 +1,170 @@
+{
+  "name": "backend-authority-connectivity",
+  "date": "2026-06-10",
+  "source": {
+    "understandAnythingGraph": ".understand-anything/knowledge-graph.json",
+    "manualAudit": [
+      "src/app/components/portal/PortalWeeklyExpensePage.tsx",
+      "src/app/components/cashflow/CashflowWeeklyPage.tsx",
+      "src/app/components/cashflow/CashflowMonitorPage.tsx",
+      "src/app/components/cashflow/CashflowExportPage.tsx",
+      "src/app/data/portal-store.tsx",
+      "src/app/data/cashflow-weeks-store.tsx",
+      "src/app/lib/platform-bff-client.ts",
+      "server/jvm-weekly-api/src/main/java/dev/merryai/innerplatform/weekly/api/WeeklyExpenseController.java",
+      "server/jvm-weekly-api/src/main/java/dev/merryai/innerplatform/weekly/service/WeeklyExpenseCommandService.java"
+    ],
+    "note": "The ignored intermediate backend-authority-connectivity file still describes retired Java auth/member fallback paths. This tracked graph is the current policy source for the stage refactor."
+  },
+  "nodes": [
+    {
+      "id": "auth.firebase",
+      "owner": "firebase-auth",
+      "role": "Browser login and portal entry identity source."
+    },
+    {
+      "id": "firestore.members",
+      "owner": "firestore",
+      "role": "Portal member and project-access read model for login and project entry."
+    },
+    {
+      "id": "ui.weeklyExpense",
+      "owner": "react",
+      "path": "src/app/components/portal/PortalWeeklyExpensePage.tsx",
+      "role": "Weekly expense input, save, and navigation surface only."
+    },
+    {
+      "id": "store.portal",
+      "owner": "react-store",
+      "path": "src/app/data/portal-store.tsx",
+      "role": "Firestore-backed portal state and weekly sheet save dispatcher."
+    },
+    {
+      "id": "java.weeklyCommand",
+      "owner": "java-orm-api",
+      "path": "server/jvm-weekly-api/src/main/java/dev/merryai/innerplatform/weekly/service/WeeklyExpenseCommandService.java",
+      "role": "Row/cell validation, persistence command authority, actual calculation, version/idempotency."
+    },
+    {
+      "id": "java.cashflowReadModel",
+      "owner": "java-orm-api",
+      "path": "server/jvm-weekly-api/src/main/java/dev/merryai/innerplatform/weekly/api/WeeklyExpenseController.java",
+      "role": "Projection/Actual read model and audit export snapshot source."
+    },
+    {
+      "id": "ui.cashflow",
+      "owner": "react",
+      "path": "src/app/components/cashflow",
+      "role": "Projection/Actual read, comparison, and audit export UI."
+    },
+    {
+      "id": "ui.budget",
+      "owner": "react-firestore",
+      "path": "src/app/components/portal/PortalBudget.tsx",
+      "role": "Live-compatible budget edit UI and Firestore path."
+    },
+    {
+      "id": "firestore.budget",
+      "owner": "firestore",
+      "path": "projects/{projectId}/budget_code_book/default and projects/{projectId}/budget_summary/default",
+      "role": "Existing live budget documents."
+    },
+    {
+      "id": "telemetry.clientErrors",
+      "owner": "vercel-bff-or-dedicated-errors-api",
+      "path": "src/app/platform/observability.ts",
+      "role": "Common browser error reporting. It must not default to the Java weekly API base URL."
+    }
+  ],
+  "allowedEdges": [
+    {
+      "from": "auth.firebase",
+      "to": "firestore.members",
+      "reason": "Portal entry and project access are resolved from existing Firebase/Firestore membership."
+    },
+    {
+      "from": "ui.weeklyExpense",
+      "to": "store.portal",
+      "reason": "Weekly page may add/update rows and save the active weekly sheet."
+    },
+    {
+      "from": "store.portal",
+      "to": "java.weeklyCommand",
+      "reason": "In platform API mode, weekly sheet save commands are validated and persisted by Java."
+    },
+    {
+      "from": "ui.cashflow",
+      "to": "java.cashflowReadModel",
+      "reason": "Cashflow screens hydrate Projection/Actual and audit export snapshots from Java read models."
+    },
+    {
+      "from": "ui.budget",
+      "to": "firestore.budget",
+      "reason": "Budget screen keeps the live Firestore route and must not be pulled into the Java weekly API migration."
+    }
+  ],
+  "forbiddenEdges": [
+    {
+      "from": "ui.weeklyExpense",
+      "to": "java.cashflowReadModel",
+      "enforcedBy": [
+        "src/app/components/portal/PortalWeeklyExpensePage.flow-layout.test.ts",
+        "src/app/platform/backend-authority-policy.shell.test.ts",
+        "scripts/verify_weekly_bff_free_policy.mjs"
+      ],
+      "reason": "Weekly input cannot hydrate, aggregate, compare, or force-refresh cashflow read models."
+    },
+    {
+      "from": "ui.weeklyExpense",
+      "to": "store.cashflowWeeks",
+      "enforcedBy": [
+        "src/app/components/portal/PortalWeeklyExpensePage.flow-layout.test.ts",
+        "scripts/verify_weekly_bff_free_policy.mjs"
+      ],
+      "reason": "Weekly input cannot submit weeks, update variance flags, or mutate cashflow state."
+    },
+    {
+      "from": "java.weeklyCommand",
+      "to": "firestore.members",
+      "enforcedBy": [
+        "cloudbuild.jvm-weekly-api.yaml",
+        "scripts/deploy_jvm_weekly_api_cloud_run.sh",
+        "server/jvm-weekly-api/runtime-config-files.test.ts"
+      ],
+      "reason": "Stage QA disables Java project-access gate. Live may re-enable it explicitly."
+    },
+    {
+      "from": "auth.firebase",
+      "to": "java.weeklyCommand",
+      "enforcedBy": [
+        "src/app/platform/backend-authority-policy.shell.test.ts",
+        "scripts/verify_weekly_bff_free_policy.mjs",
+        "src/app/lib/platform-bff-client.test.ts"
+      ],
+      "reason": "Firebase login and portal entry must not call Java APIs. Java Bearer is scoped to weekly/cashflow operation calls after portal context exists."
+    },
+    {
+      "from": "telemetry.clientErrors",
+      "to": "java.weeklyCommand",
+      "enforcedBy": [
+        "src/app/platform/observability.test.ts"
+      ],
+      "reason": "Common telemetry is not a Java weekly API responsibility."
+    },
+    {
+      "from": "ui.budget",
+      "to": "java.weeklyCommand",
+      "enforcedBy": [
+        "src/app/components/portal/PortalBudget.live-drift.test.ts"
+      ],
+      "reason": "Budget edit/read/listen path remains live Firestore-compatible."
+    }
+  ],
+  "stagePolicy": {
+    "doNotWriteLiveDbDuringRefactor": true,
+    "stageProjectAccessGate": "disabled-by-default",
+    "liveProjectAccessGate": "explicit-firestore-when-ready",
+    "javaBearerAuth": "weekly-and-cashflow-api-only",
+    "removedBrowserSessionCookiePath": true
+  }
+}

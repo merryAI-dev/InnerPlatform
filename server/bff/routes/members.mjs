@@ -5,7 +5,12 @@ import {
   asyncHandler, createMutatingRoute, assertActorRoleAllowed,
   ROUTE_ROLES, createHttpError, normalizeRole, encryptAuditEmail,
 } from '../bff-utils.mjs';
-import { parseWithSchema, memberDeepSyncSchema, memberRoleUpdateSchema } from '../schemas.mjs';
+import {
+  parseWithSchema,
+  memberDeepSyncSchema,
+  memberRoleUpdateSchema,
+  memberWorkspacePreferenceSchema,
+} from '../schemas.mjs';
 import {
   buildDeepSyncPlan,
   mergeAuthGovernanceDirectory,
@@ -162,6 +167,69 @@ export function mountMemberRoutes(app, {
         previousRole: result.previousRole,
         role: targetRole,
         updatedAt: timestamp,
+      },
+    };
+  }));
+
+  app.patch('/api/v1/members/:memberId/workspace-preference', createMutatingRoute(idempotencyService, async (req) => {
+    const { tenantId, actorId, actorRole, actorEmail, requestId } = req.context;
+    const memberId = String(req.params.memberId || '').trim();
+    if (!memberId) {
+      throw createHttpError(400, 'memberId is required', 'member_id_required');
+    }
+    if (memberId !== actorId && actorRole !== 'admin' && actorRole !== 'tenant_admin') {
+      throw createHttpError(403, 'Cannot update another member workspace preference', 'forbidden');
+    }
+
+    const timestamp = now();
+    const parsed = parseWithSchema(
+      memberWorkspacePreferenceSchema,
+      req.body,
+      'Invalid workspace preference payload',
+    );
+    const memberRef = db.doc(`orgs/${tenantId}/members/${memberId}`);
+    const patch = {
+      tenantId,
+      ...(parsed.defaultWorkspace ? { defaultWorkspace: parsed.defaultWorkspace } : {}),
+      lastWorkspace: parsed.lastWorkspace,
+      updatedAt: timestamp,
+      updatedBy: actorId,
+      workspacePreferenceUpdatedAt: timestamp,
+      workspacePreferenceUpdatedBy: actorId,
+    };
+
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(memberRef);
+      if (!snap.exists) {
+        throw createHttpError(404, `Member not found: ${memberId}`, 'not_found');
+      }
+      tx.set(memberRef, patch, { merge: true });
+    });
+
+    const actorEmailEnc = await encryptAuditEmail(piiProtector, actorEmail);
+    await auditChainService.append({
+      tenantId,
+      entityType: 'member',
+      entityId: memberId,
+      action: 'WORKSPACE_PREFERENCE_UPDATE',
+      actorId,
+      actorRole,
+      actorEmailEnc,
+      requestId,
+      details: `구성원 workspace preference 변경: ${parsed.lastWorkspace}`,
+      metadata: {
+        source: 'bff',
+        defaultWorkspace: parsed.defaultWorkspace || null,
+        lastWorkspace: parsed.lastWorkspace,
+      },
+      timestamp,
+    });
+
+    return {
+      status: 200,
+      body: {
+        id: memberId,
+        ...patch,
       },
     };
   }));
